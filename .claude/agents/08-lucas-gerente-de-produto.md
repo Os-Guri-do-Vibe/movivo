@@ -165,4 +165,4 @@ Lucas atua como **elo central entre estratégia e execução** — recebe os ins
 - Fornece para **Helena (Marketing)** as features e diferenciais do produto para comunicação e GTM.
 - Fornece para o **Customer Success** a documentação de produto e critérios de onboarding.
 
-Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/relatorio-lucas.md`.
+Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/08-relatorio-lucas.md`.

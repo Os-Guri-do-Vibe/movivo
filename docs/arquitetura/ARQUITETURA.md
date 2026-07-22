@@ -1,6 +1,6 @@
 # Arquitetura e Stack — MOVIVO
 
-> Documento operacional derivado do relatório de arquitetura de Rafael Nakamura (`docs/fitness-ia-whatsapp/relatorio-rafael.md`), **corrigido e complementado** pelos relatórios de Alexandre (jurídico), Eduardo (financeiro), Sofia (UX/UI), Sato (segurança) e Victor (IA) — ver §3.1. Este arquivo é a referência rápida e **obrigatória** para qualquer código escrito neste repositório. Em caso de dúvida sobre justificativa/detalhe, os relatórios originais em `docs/fitness-ia-whatsapp/` são a fonte completa (diagramas de fluxo, DDL completo, benchmarks, threat model STRIDE).
+> Documento operacional derivado do relatório de arquitetura de Rafael Nakamura (`docs/fitness-ia-whatsapp/10-relatorio-rafael.md`), **corrigido e complementado** pelos relatórios de Alexandre (jurídico), Eduardo (financeiro), Sofia (UX/UI), Sato (segurança) e Victor (IA) — ver §3.1. Este arquivo é a referência rápida e **obrigatória** para qualquer código escrito neste repositório. Em caso de dúvida sobre justificativa/detalhe, os relatórios originais em `docs/fitness-ia-whatsapp/` são a fonte completa (diagramas de fluxo, DDL completo, benchmarks, threat model STRIDE).
 >
 > **⚠️ Correção crítica pós-Rafael:** o LLM principal definido originalmente (DeepSeek V3.2) foi **removido do projeto**. Ver §3.1 e §5.
 
@@ -76,7 +76,7 @@ Serverless (Vercel/Lambda) foi rejeitado: cold start de 500–2000ms é incompat
 
 **Regra derivada, também inegociável:** `LLMRouter` é o **único ponto do sistema autorizado a chamar um LLM**. Todo prompt passa por um **PII Scrubber** (pseudonimização no boundary) antes de sair do backend — nenhum identificador direto de usuário (nome, telefone, e-mail) chega ao prompt.
 
-Detalhamento completo: `docs/fitness-ia-whatsapp/relatorio-alexandre.md`, `relatorio-sato.md`, `relatorio-eduardo.md`, `relatorio-victor.md`.
+Detalhamento completo: `docs/fitness-ia-whatsapp/06-relatorio-alexandre.md`, `11-relatorio-sato.md`, `07-relatorio-eduardo.md`, `12-relatorio-victor.md`.
 
 ---
 
@@ -240,7 +240,7 @@ Extração futura para microservices, quando necessária (Fase C, 15.000+ usuár
 - **SLOs críticos**: disponibilidade API ≥99,9%/mês · latência AI Coach p95 ≤30s (alerta em 25s) · protocolo inicial ≤2h p95 · check-in disparado na janela seg 08–10h BRT · jobs em DLQ <0,5% · respostas bloqueadas por compliance <5%.
 - **Spans OpenTelemetry obrigatórios** em: pipeline de webhook→fila→job, pipeline de AI Coach (context→intent→RAG→LLM→validação→envio), pipeline de protocolo, pipeline de check-in.
 
-Detalhamento completo (threat model STRIDE, pentest da anamnese, política de rotação de secrets fase a fase): `docs/fitness-ia-whatsapp/relatorio-sato.md`. Este documento define os controles arquiteturais mínimos, não substitui a revisão de segurança dedicada.
+Detalhamento completo (threat model STRIDE, pentest da anamnese, política de rotação de secrets fase a fase): `docs/fitness-ia-whatsapp/11-relatorio-sato.md`. Este documento define os controles arquiteturais mínimos, não substitui a revisão de segurança dedicada.
 
 ---
 
@@ -336,11 +336,11 @@ Todos os relatórios de Fase 2–4 (Alexandre, Eduardo, Sofia, Sato, Victor) já
 
 Todos os relatórios abaixo estão em `docs/fitness-ia-whatsapp/` e são a fonte completa por trás deste documento:
 
-- `relatorio-rafael.md` — arquitetura original: diagramas de fluxo detalhados, DDL completo das tabelas, contratos REST completos, benchmarks.
-- `relatorio-alexandre.md` — societário, LGPD/RIPD, ToS/Política de Privacidade, registro CREF/INPI, o achado que invalidou o DeepSeek.
-- `relatorio-eduardo.md` — pricing final, unit economics, regime tributário, necessidade de capital.
-- `relatorio-sofia.md` — wireframes, fluxo de UX do formulário e do dashboard CREF, persona "MOVI".
-- `relatorio-sato.md` — threat model STRIDE completo, RLS/PgBouncer, CVE do Redis, pentest da anamnese, DevSecOps.
-- `relatorio-victor.md` — ADR-005-R formal, LLMRouter, ContextService, Intent Classifier, RAG, ValidationService, LLMOps.
+- `10-relatorio-rafael.md` — arquitetura original: diagramas de fluxo detalhados, DDL completo das tabelas, contratos REST completos, benchmarks.
+- `06-relatorio-alexandre.md` — societário, LGPD/RIPD, ToS/Política de Privacidade, registro CREF/INPI, o achado que invalidou o DeepSeek.
+- `07-relatorio-eduardo.md` — pricing final, unit economics, regime tributário, necessidade de capital.
+- `09-relatorio-sofia.md` — wireframes, fluxo de UX do formulário e do dashboard CREF, persona "MOVI".
+- `11-relatorio-sato.md` — threat model STRIDE completo, RLS/PgBouncer, CVE do Redis, pentest da anamnese, DevSecOps.
+- `12-relatorio-victor.md` — ADR-005-R formal, LLMRouter, ContextService, Intent Classifier, RAG, ValidationService, LLMOps.
 
-"Próximos Passos por Agente" de Rafael (recomendações específicas para Leonardo, Felipe, Mariana e Henrique) seguem válidas em `relatorio-rafael.md` §17.
+"Próximos Passos por Agente" de Rafael (recomendações específicas para Leonardo, Felipe, Mariana e Henrique) seguem válidas em `10-relatorio-rafael.md` §17.

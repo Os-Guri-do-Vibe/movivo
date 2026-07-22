@@ -208,4 +208,4 @@ Leonardo atua como **executor técnico do backend** — transforma ADRs, PRDs e 
 - Fornece para o **Analista de QA** os ambientes de teste, seeds de dados, documentação de APIs e contratos para testes automatizados.
 - Colabora com **Sofia (UX/UI)** para garantir que os contratos de API suportem os fluxos de experiência projetados.
 
-Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/relatorio-leonardo.md`.
+Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/13-relatorio-leonardo.md`.

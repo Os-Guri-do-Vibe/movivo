@@ -164,4 +164,4 @@ Alexandre atua **transversalmente** em todo o pipeline — seu trabalho começa 
 - Fornece para **Helena** (Marketing) os limites legais de publicidade, dados para segmentação e compliance com CDC e CONAR.
 - Valida os contratos e acordos que o **Executivo Comercial** levará a clientes e parceiros.
 
-Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/relatorio-alexandre.md`.
+Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/06-relatorio-alexandre.md`.

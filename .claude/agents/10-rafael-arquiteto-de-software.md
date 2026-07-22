@@ -175,4 +175,4 @@ Rafael atua como **maior autoridade técnica da organização** — define os fu
 - Fornece para o **DevOps** a arquitetura de infraestrutura, estratégia de deployment e requisitos de observabilidade (SLI/SLO).
 - Fornece para o **Analista de QA** a estratégia de testes arquiteturais (testes de contrato, carga, resiliência e chaos engineering).
 
-Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/relatorio-rafael.md`.
+Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/10-relatorio-rafael.md`.

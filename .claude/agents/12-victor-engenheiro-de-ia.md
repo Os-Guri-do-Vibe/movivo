@@ -168,4 +168,4 @@ Victor atua como **núcleo inteligente da plataforma** — projeta e evolui todo
 - Fornece para o **Analista de QA** o plano de avaliação e testes de IA (hallucination testing, regression testing, benchmarking de qualidade).
 - Fornece para **Helena (Marketing)** as capacidades e diferenciais dos sistemas de IA para comunicação e posicionamento do produto.
 
-Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/relatorio-victor.md`.
+Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/12-relatorio-victor.md`.

@@ -165,4 +165,4 @@ Gabriel Sato atua **transversalmente em toda a fase técnica** — sua atuação
 - Fornece para o **Analista de QA** o plano de testes de segurança (DAST, testes de autenticação, testes de autorização, testes de injeção).
 - Trabalha com **Eduardo (CFO)** para dimensionar o investimento em segurança em relação ao risco e ao impacto financeiro de um eventual incidente.
 
-Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/relatorio-sato.md`.
+Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/11-relatorio-sato.md`.

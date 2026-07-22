@@ -170,4 +170,4 @@ Mariana atua como **guardiã da qualidade em todo o ciclo de desenvolvimento** �
 - Fornece para **Lucas (PM)** os relatórios de qualidade, bugs encontrados e métricas de confiabilidade para retroalimentar o roadmap.
 - Fornece para **Eduardo (CFO)** métricas de custo da qualidade (custo de bugs em produção vs. custo de prevenção) para embasar investimentos em automação.
 
-Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/relatorio-mariana.md`.
+Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/15-relatorio-mariana.md`.

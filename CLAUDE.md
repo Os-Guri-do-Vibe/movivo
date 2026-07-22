@@ -17,7 +17,7 @@ A MOVIVO é um **AI Coach de treino individualizado, entregue via WhatsApp**, qu
 
 - **Categoria criada:** "orientação de treino conversacional" — não é "um app de fitness".
 - **Essência de marca:** *"Ciência que treina com você."*
-- **Nome:** **MOVIVO** (mo-VÍ-vo — "movimento vivo"). Há risco jurídico de colisão fonética com a marca de alto renome VIVO (Telefônica), ainda não verificado formalmente no INPI — ver `relatorio-caio.md`. Nome alternativo de reserva já definido caso necessário: **TRENOVA**.
+- **Nome:** **MOVIVO** (mo-VÍ-vo — "movimento vivo"). Há risco jurídico de colisão fonética com a marca de alto renome VIVO (Telefônica), ainda não verificado formalmente no INPI — ver `03-relatorio-caio.md`. Nome alternativo de reserva já definido caso necessário: **TRENOVA**.
 - **Selo CREF:** assinatura de credibilidade, não é uma submarca.
 
 ### Como funciona (visão de produto)
@@ -34,11 +34,11 @@ Usuário preenche formulário de anamnese + PAR-Q → protocolo de treino é ger
 | Cahuã | Marca, marketing e vendas — rosto público / endossante (arquitetura de marca "Branded House": Cahuã endossa a MOVIVO, **nunca é a marca**) |
 | Treinador do Cahuã | Responsável Técnico CREF — validação jurídico-profissional dos protocolos, também rosto da marca |
 
-> **Societário (recomendação de Alexandre em `relatorio-alexandre.md`):** constituir LTDA com objeto social compatível com atividade CREF (Educação Física como atividade-fim, não só "software house"), Acordo de Sócios com vesting (cliff 12 meses / vesting total 48 meses) e IP de todo o desenvolvimento consolidado na PJ desde o dia 1. Divisão de quotas ainda **não definida** — Alexandre recomenda evitar split igualitário 20%/20%/20%/20%/20% sem mecanismo de desempate societário.
+> **Societário (recomendação de Alexandre em `06-relatorio-alexandre.md`):** constituir LTDA com objeto social compatível com atividade CREF (Educação Física como atividade-fim, não só "software house"), Acordo de Sócios com vesting (cliff 12 meses / vesting total 48 meses) e IP de todo o desenvolvimento consolidado na PJ desde o dia 1. Divisão de quotas ainda **não definida** — Alexandre recomenda evitar split igualitário 20%/20%/20%/20%/20% sem mecanismo de desempate societário.
 
 ### Modelo de negócio
 
-- **B2C por assinatura, plano único por período (validado por Eduardo em `relatorio-eduardo.md`):** Mensal R$39 / Trimestral R$99 / Anual R$349. Rejeitado o tiering "Básico/Pro" cogitado inicialmente por Rafael — retenção via compromisso de período, não via gate de features.
+- **B2C por assinatura, plano único por período (validado por Eduardo em `07-relatorio-eduardo.md`):** Mensal R$39 / Trimestral R$99 / Anual R$349. Rejeitado o tiering "Básico/Pro" cogitado inicialmente por Rafael — retenção via compromisso de período, não via gate de features.
 - Trial de **7 dias sem cartão** (ajustado de 14 para 7 dias por Eduardo/Sofia).
 - Regime tributário recomendado: **Simples Nacional, Anexo III (6%) via Fator R ≥ 28%** — evita o Anexo V, mais caro.
 - Bootstrapável: necessidade de capital estimada em R$20–30 mil (setup jurídico + 6 meses de runway), sem necessidade de aporte externo para o MVP.
@@ -55,7 +55,7 @@ Herdados de Clóvis e Gabriel, valem para **qualquer texto gerado pelo sistema o
 - A IA **nunca** é apresentada como quem decide ou prescreve sozinha — a formulação correta é sempre "profissional CREF, usando IA como ferramenta".
 - A presença/respaldo do profissional CREF deve ser sempre visível ao usuário.
 
-### Escopo do MVP (definido por Lucas em `relatorio-lucas.md`)
+### Escopo do MVP (definido por Lucas em `08-relatorio-lucas.md`)
 
 **Dentro do MVP (P0):** Landing page → formulário de anamnese + PAR-Q conversacional em 3 blocos com salvamento de progresso → confirmação síncrona no WhatsApp → geração e entrega do protocolo inicial → conversa com AI Coach (escopo definido, memória, fallback) → check-in semanal → sequência de conversão do trial (dias 7, 10, 13, 14) → pagamento (Stripe/Asaas) → dashboard mínimo de operações para o profissional CREF → isolamento de contexto por usuário.
 
@@ -63,7 +63,7 @@ Herdados de Clóvis e Gabriel, valem para **qualquer texto gerado pelo sistema o
 
 ### Arquitetura e stack técnica
 
-A arquitetura de referência completa foi definida por Rafael (Distinguished Software Architect) em `docs/fitness-ia-whatsapp/relatorio-rafael.md`. As regras obrigatórias de desenvolvimento, stack e diagramas estão condensadas e operacionalizadas em **[docs/arquitetura/ARQUITETURA.md](docs/arquitetura/ARQUITETURA.md)** — todo agente de engenharia (Sato, Victor, Leonardo, Felipe, Mariana, Henrique) e toda sessão de código neste repositório deve seguir esse documento.
+A arquitetura de referência completa foi definida por Rafael (Distinguished Software Architect) em `docs/fitness-ia-whatsapp/10-relatorio-rafael.md`. As regras obrigatórias de desenvolvimento, stack e diagramas estão condensadas e operacionalizadas em **[docs/arquitetura/ARQUITETURA.md](docs/arquitetura/ARQUITETURA.md)** — todo agente de engenharia (Sato, Victor, Leonardo, Felipe, Mariana, Henrique) e toda sessão de código neste repositório deve seguir esse documento.
 
 ### Correção crítica pós Fase 2–4: troca do LLM principal
 
@@ -73,11 +73,11 @@ O relatório original de Rafael definia **DeepSeek V3.2** como LLM principal (AD
 - **Sato:** DeepSeek teve um vazamento de dados público e documentado (pesquisa Wiz, jan/2025).
 - **Eduardo:** a troca custa apenas ~R$0,95–0,97/usuário/mês a mais — irrelevante para o unit economics.
 
-**Decisão vigente:** **GPT-4.1 (OpenAI) como LLM principal, Claude Sonnet 4.5 (Anthropic) como fallback**, ambos com Zero Data Retention + DPA/SCC. DeepSeek foi removido do projeto por completo. Detalhes técnicos em `docs/arquitetura/ARQUITETURA.md` §3.1 e `docs/fitness-ia-whatsapp/relatorio-victor.md`.
+**Decisão vigente:** **GPT-4.1 (OpenAI) como LLM principal, Claude Sonnet 4.5 (Anthropic) como fallback**, ambos com Zero Data Retention + DPA/SCC. DeepSeek foi removido do projeto por completo. Detalhes técnicos em `docs/arquitetura/ARQUITETURA.md` §3.1 e `docs/fitness-ia-whatsapp/12-relatorio-victor.md`.
 
 ### Pipeline de validação — completo
 
-Todos os relatórios de Fase 1 a 4 existem em `docs/fitness-ia-whatsapp/`: `relatorio-clovis.md`, `relatorio-gabriel.md`, `relatorio-caio.md`, `relatorio-kimura.md`, `relatorio-helena.md`, `relatorio-alexandre.md`, `relatorio-eduardo.md`, `relatorio-lucas.md`, `relatorio-sofia.md`, `relatorio-rafael.md`, `relatorio-sato.md`, `relatorio-victor.md`. Não há mais bloqueador de pipeline para o início da Fase 5 (Desenvolvimento).
+Todos os relatórios de Fase 1 a 4 existem em `docs/fitness-ia-whatsapp/`: `01-relatorio-clovis.md`, `02-relatorio-gabriel.md`, `03-relatorio-caio.md`, `04-relatorio-kimura.md`, `05-relatorio-helena.md`, `06-relatorio-alexandre.md`, `07-relatorio-eduardo.md`, `08-relatorio-lucas.md`, `09-relatorio-sofia.md`, `10-relatorio-rafael.md`, `11-relatorio-sato.md`, `12-relatorio-victor.md`. Não há mais bloqueador de pipeline para o início da Fase 5 (Desenvolvimento).
 
 ---
 
@@ -157,11 +157,11 @@ O pipeline é dividido em **8 fases**. A ordem entre fases é fixa e não pode s
 
 | # | Agente | Arquivo | Relatório | Especialidade |
 |---|---|---|---|---|
-| 1 | **Clóvis** | `01-clovis-estrategista-de-negocio` | `relatorio-clovis.md` | Validação de negócio, TAM/SAM/SOM, ICP, JTBD, MVP |
-| 2 | **Gabriel** | `02-gabriel-estrategista-de-marca` | `relatorio-gabriel.md` | Propósito, missão, visão, posicionamento de marca |
-| 3 | **Caio** | `03-caio-especialista-de-naming` | `relatorio-caio.md` | Naming, domínio, registro de marca, risco fonético |
-| 4 | **Kimura** | `04-kimura-designer-de-marca` | `relatorio-kimura.md` | Logotipo, paleta, tipografia, design system, brand book |
-| 5 | **Helena** | `05-helena-estrategista-de-marketing` | `relatorio-helena.md` | GTM, canais, funil, campanhas, KPIs de marketing |
+| 1 | **Clóvis** | `01-clovis-estrategista-de-negocio` | `01-relatorio-clovis.md` | Validação de negócio, TAM/SAM/SOM, ICP, JTBD, MVP |
+| 2 | **Gabriel** | `02-gabriel-estrategista-de-marca` | `02-relatorio-gabriel.md` | Propósito, missão, visão, posicionamento de marca |
+| 3 | **Caio** | `03-caio-especialista-de-naming` | `03-relatorio-caio.md` | Naming, domínio, registro de marca, risco fonético |
+| 4 | **Kimura** | `04-kimura-designer-de-marca` | `04-relatorio-kimura.md` | Logotipo, paleta, tipografia, design system, brand book |
+| 5 | **Helena** | `05-helena-estrategista-de-marketing` | `05-relatorio-helena.md` | GTM, canais, funil, campanhas, KPIs de marketing |
 
 ---
 
@@ -171,8 +171,8 @@ O pipeline é dividido em **8 fases**. A ordem entre fases é fixa e não pode s
 
 | # | Agente | Arquivo | Relatório | Especialidade |
 |---|---|---|---|---|
-| 6 | **Alexandre** | `06-alexandre-head-juridico` | `relatorio-alexandre.md` | CLO — LGPD, contratos, compliance, societário, CREF, AI Act |
-| 7 | **Eduardo** | `07-eduardo-head-financeiro` | `relatorio-eduardo.md` | CFO — finanças, tributação, unit economics, FinOps, captação |
+| 6 | **Alexandre** | `06-alexandre-head-juridico` | `06-relatorio-alexandre.md` | CLO — LGPD, contratos, compliance, societário, CREF, AI Act |
+| 7 | **Eduardo** | `07-eduardo-head-financeiro` | `07-relatorio-eduardo.md` | CFO — finanças, tributação, unit economics, FinOps, captação |
 
 ---
 
@@ -182,8 +182,8 @@ O pipeline é dividido em **8 fases**. A ordem entre fases é fixa e não pode s
 
 | # | Agente | Arquivo | Relatório | Especialidade |
 |---|---|---|---|---|
-| 8 | **Lucas** | `08-lucas-gerente-de-produto` | `relatorio-lucas.md` | PM/PO — discovery, PRD, roadmap, backlog, métricas, AI spec |
-| 9 | **Sofia** | `09-sofia-designer-ux-ui` | `relatorio-sofia.md` | UX/UI — wireframes, protótipos, design system, AI UX |
+| 8 | **Lucas** | `08-lucas-gerente-de-produto` | `08-relatorio-lucas.md` | PM/PO — discovery, PRD, roadmap, backlog, métricas, AI spec |
+| 9 | **Sofia** | `09-sofia-designer-ux-ui` | `09-relatorio-sofia.md` | UX/UI — wireframes, protótipos, design system, AI UX |
 
 ---
 
@@ -193,9 +193,9 @@ O pipeline é dividido em **8 fases**. A ordem entre fases é fixa e não pode s
 
 | # | Agente | Arquivo | Relatório | Especialidade |
 |---|---|---|---|---|
-| 10 | **Rafael** | `10-rafael-arquiteto-de-software` | `relatorio-rafael.md` | Arquitetura — Clean Arch, DDD, APIs, cloud, ADRs, IA systems |
-| 11 | **Sato** | `11-sato-engenheiro-de-seguranca` | `relatorio-sato.md` | Segurança — AppSec, Zero Trust, DevSecOps, AI Security, LGPD |
-| 12 | **Victor** | `12-victor-engenheiro-de-ia` | `relatorio-victor.md` | IA — LLMs, RAG, agentes, MCP, prompt eng, LLMOps, avaliação |
+| 10 | **Rafael** | `10-rafael-arquiteto-de-software` | `10-relatorio-rafael.md` | Arquitetura — Clean Arch, DDD, APIs, cloud, ADRs, IA systems |
+| 11 | **Sato** | `11-sato-engenheiro-de-seguranca` | `11-relatorio-sato.md` | Segurança — AppSec, Zero Trust, DevSecOps, AI Security, LGPD |
+| 12 | **Victor** | `12-victor-engenheiro-de-ia` | `12-relatorio-victor.md` | IA — LLMs, RAG, agentes, MCP, prompt eng, LLMOps, avaliação |
 
 ---
 
@@ -205,9 +205,9 @@ O pipeline é dividido em **8 fases**. A ordem entre fases é fixa e não pode s
 
 | # | Agente | Arquivo | Relatório | Especialidade |
 |---|---|---|---|---|
-| 13 | **Leonardo** | `13-leonardo-engenheiro-backend` | `relatorio-leonardo.md` | Backend — NestJS, TypeScript, PostgreSQL, Redis, BullMQ, APIs |
-| 14 | **Felipe** | `14-felipe-engenheiro-frontend` | `relatorio-felipe.md` | Frontend — Next.js 15, React 19, Tailwind, shadcn/ui, AI UI |
-| 15 | **Mariana** | `15-mariana-analista-de-qualidade` | `relatorio-mariana.md` | QA — automação, performance, AI evaluation, quality gates |
+| 13 | **Leonardo** | `13-leonardo-engenheiro-backend` | `13-relatorio-leonardo.md` | Backend — NestJS, TypeScript, PostgreSQL, Redis, BullMQ, APIs |
+| 14 | **Felipe** | `14-felipe-engenheiro-frontend` | `14-relatorio-felipe.md` | Frontend — Next.js 15, React 19, Tailwind, shadcn/ui, AI UI |
+| 15 | **Mariana** | `15-mariana-analista-de-qualidade` | `15-relatorio-mariana.md` | QA — automação, performance, AI evaluation, quality gates |
 
 ---
 
@@ -216,7 +216,7 @@ O pipeline é dividido em **8 fases**. A ordem entre fases é fixa e não pode s
 
 | # | Agente | Arquivo | Relatório | Especialidade |
 |---|---|---|---|---|
-| 16 | **Henrique** | `16-henrique-engenheiro-de-plataforma` | `relatorio-henrique.md` | DevOps/SRE — Docker, CI/CD, Kubernetes, cloud, observabilidade |
+| 16 | **Henrique** | `16-henrique-engenheiro-de-plataforma` | `16-relatorio-henrique.md` | DevOps/SRE — Docker, CI/CD, Kubernetes, cloud, observabilidade |
 
 ---
 
@@ -226,8 +226,8 @@ O pipeline é dividido em **8 fases**. A ordem entre fases é fixa e não pode s
 
 | # | Agente | Arquivo | Relatório | Especialidade |
 |---|---|---|---|---|
-| 17 | **Redator** | `17-[nome]-redator-copywriter` *(a criar)* | `relatorio-[nome].md` | Copywriting, UX writing, conteúdo editorial |
-| 18 | **Social Media** | `18-[nome]-gestor-social-media` *(a criar)* | `relatorio-[nome].md` | Gestão de redes, comunidade, engajamento |
+| 17 | **Redator** | `17-[nome]-redator-copywriter` *(a criar)* | `17-relatorio-[nome].md` | Copywriting, UX writing, conteúdo editorial |
+| 18 | **Social Media** | `18-[nome]-gestor-social-media` *(a criar)* | `18-relatorio-[nome].md` | Gestão de redes, comunidade, engajamento |
 
 ---
 
@@ -237,9 +237,9 @@ O pipeline é dividido em **8 fases**. A ordem entre fases é fixa e não pode s
 
 | # | Agente | Arquivo | Relatório | Especialidade |
 |---|---|---|---|---|
-| 19 | **Comercial** | `19-[nome]-executivo-comercial` *(a criar)* | `relatorio-[nome].md` | Vendas, B2B, parcerias, propostas comerciais |
-| 20 | **CS** | `20-[nome]-customer-success` *(a criar)* | `relatorio-[nome].md` | Onboarding, retenção, suporte, NPS |
-| 21 | **Growth** | `21-[nome]-analista-de-growth` *(a criar)* | `relatorio-[nome].md` | Analytics, growth loops, KPIs, experimentação |
+| 19 | **Comercial** | `19-[nome]-executivo-comercial` *(a criar)* | `19-relatorio-[nome].md` | Vendas, B2B, parcerias, propostas comerciais |
+| 20 | **CS** | `20-[nome]-customer-success` *(a criar)* | `20-relatorio-[nome].md` | Onboarding, retenção, suporte, NPS |
+| 21 | **Growth** | `21-[nome]-analista-de-growth` *(a criar)* | `21-relatorio-[nome].md` | Analytics, growth loops, KPIs, experimentação |
 
 ---
 
@@ -264,35 +264,35 @@ Cada agente recebe como contexto de trabalho a **combinação cumulativa** de:
 Exemplo completo para uma ideia com slug `<slug-da-ideia>`:
 
 **Fase 1:**
-- **Clóvis** recebe: input do usuário → define `<slug-da-ideia>` → gera `docs/<slug-da-ideia>/relatorio-clovis.md`.
-- **Gabriel** recebe: input + `relatorio-clovis.md` → gera `relatorio-gabriel.md`.
-- **Caio** recebe: input + relatórios de Clóvis e Gabriel → gera `relatorio-caio.md`.
-- **Kimura** recebe: input + relatórios de Clóvis, Gabriel e Caio → gera `relatorio-kimura.md`.
-- **Helena** recebe: input + relatórios de Clóvis, Gabriel, Caio e Kimura → gera `relatorio-helena.md`.
+- **Clóvis** recebe: input do usuário → define `<slug-da-ideia>` → gera `docs/<slug-da-ideia>/01-relatorio-clovis.md`.
+- **Gabriel** recebe: input + `01-relatorio-clovis.md` → gera `02-relatorio-gabriel.md`.
+- **Caio** recebe: input + relatórios de Clóvis e Gabriel → gera `03-relatorio-caio.md`.
+- **Kimura** recebe: input + relatórios de Clóvis, Gabriel e Caio → gera `04-relatorio-kimura.md`.
+- **Helena** recebe: input + relatórios de Clóvis, Gabriel, Caio e Kimura → gera `05-relatorio-helena.md`.
 
 **Fase 2:**
-- **Alexandre** recebe: input + todos os relatórios da Fase 1 → gera `relatorio-alexandre.md`.
-- **Eduardo** recebe: input + todos os relatórios da Fase 1 → gera `relatorio-eduardo.md`.
+- **Alexandre** recebe: input + todos os relatórios da Fase 1 → gera `06-relatorio-alexandre.md`.
+- **Eduardo** recebe: input + todos os relatórios da Fase 1 → gera `07-relatorio-eduardo.md`.
 *(Alexandre e Eduardo recebem o mesmo contexto e podem ser acionados em paralelo)*
 
 **Fase 3:**
-- **Lucas** recebe: input + relatórios das Fases 1 e 2 → gera `relatorio-lucas.md`.
-- **Sofia** recebe: input + relatórios das Fases 1, 2 e relatório de Lucas → gera `relatorio-sofia.md`.
+- **Lucas** recebe: input + relatórios das Fases 1 e 2 → gera `08-relatorio-lucas.md`.
+- **Sofia** recebe: input + relatórios das Fases 1, 2 e relatório de Lucas → gera `09-relatorio-sofia.md`.
 
 **Fase 4:**
-- **Rafael** recebe: input + relatórios das Fases 1, 2 e 3 → gera `relatorio-rafael.md`.
-- **Sato** recebe: input + relatórios das Fases 1, 2, 3 e relatório de Rafael → gera `relatorio-sato.md`.
-- **Victor** recebe: input + relatórios das Fases 1, 2, 3 e relatório de Rafael → gera `relatorio-victor.md`.
+- **Rafael** recebe: input + relatórios das Fases 1, 2 e 3 → gera `10-relatorio-rafael.md`.
+- **Sato** recebe: input + relatórios das Fases 1, 2, 3 e relatório de Rafael → gera `11-relatorio-sato.md`.
+- **Victor** recebe: input + relatórios das Fases 1, 2, 3 e relatório de Rafael → gera `12-relatorio-victor.md`.
 *(Sato e Victor recebem o mesmo contexto após Rafael e podem ser acionados em paralelo)*
 
 **Fase 5:**
-- **Leonardo** recebe: input + relatórios das Fases 1–4 → gera `relatorio-leonardo.md`.
-- **Felipe** recebe: input + relatórios das Fases 1–4 → gera `relatorio-felipe.md`.
+- **Leonardo** recebe: input + relatórios das Fases 1–4 → gera `13-relatorio-leonardo.md`.
+- **Felipe** recebe: input + relatórios das Fases 1–4 → gera `14-relatorio-felipe.md`.
 *(Leonardo e Felipe podem ser acionados em paralelo)*
-- **Mariana** recebe: input + relatórios das Fases 1–4 e relatórios de Leonardo e Felipe → gera `relatorio-mariana.md`.
+- **Mariana** recebe: input + relatórios das Fases 1–4 e relatórios de Leonardo e Felipe → gera `15-relatorio-mariana.md`.
 
 **Fase 6:**
-- **Henrique** recebe: input + relatórios de todas as fases anteriores → gera `relatorio-henrique.md`.
+- **Henrique** recebe: input + relatórios de todas as fases anteriores → gera `16-relatorio-henrique.md`.
 
 **Fases 7 e 8** seguem o mesmo padrão cumulativo à medida que os agentes forem criados.
 
@@ -307,10 +307,10 @@ Este projeto pode ser usado para validar **múltiplas ideias de negócio distint
 ### Convenção de nomes
 
 ```
-docs/<slug-da-ideia>/relatorio-<identificador-do-agente>.md
+docs/<slug-da-ideia>/<NN>-relatorio-<identificador-do-agente>.md
 ```
 
-Onde `<identificador-do-agente>` é o primeiro nome em minúsculas, sem acentos:
+Onde `<NN>` é o número de dois dígitos do agente no pipeline (mesmo número usado no arquivo do agente em `.claude/agents/`, ex: `06-alexandre-head-juridico`), o que faz os relatórios ordenarem no filesystem na mesma ordem em que foram executados. `<identificador-do-agente>` é o primeiro nome em minúsculas, sem acentos:
 
 | Agente | Identificador |
 |---|---|
@@ -334,22 +334,22 @@ Onde `<identificador-do-agente>` é o primeiro nome em minúsculas, sem acentos:
 Exemplo de estrutura completa para a ideia `fitness-ia-whatsapp`:
 
 ```
-docs/fitness-ia-whatsapp/relatorio-clovis.md
-docs/fitness-ia-whatsapp/relatorio-gabriel.md
-docs/fitness-ia-whatsapp/relatorio-caio.md
-docs/fitness-ia-whatsapp/relatorio-kimura.md
-docs/fitness-ia-whatsapp/relatorio-helena.md
-docs/fitness-ia-whatsapp/relatorio-alexandre.md
-docs/fitness-ia-whatsapp/relatorio-eduardo.md
-docs/fitness-ia-whatsapp/relatorio-lucas.md
-docs/fitness-ia-whatsapp/relatorio-sofia.md
-docs/fitness-ia-whatsapp/relatorio-rafael.md
-docs/fitness-ia-whatsapp/relatorio-sato.md
-docs/fitness-ia-whatsapp/relatorio-victor.md
-docs/fitness-ia-whatsapp/relatorio-leonardo.md
-docs/fitness-ia-whatsapp/relatorio-felipe.md
-docs/fitness-ia-whatsapp/relatorio-mariana.md
-docs/fitness-ia-whatsapp/relatorio-henrique.md
+docs/fitness-ia-whatsapp/01-relatorio-clovis.md
+docs/fitness-ia-whatsapp/02-relatorio-gabriel.md
+docs/fitness-ia-whatsapp/03-relatorio-caio.md
+docs/fitness-ia-whatsapp/04-relatorio-kimura.md
+docs/fitness-ia-whatsapp/05-relatorio-helena.md
+docs/fitness-ia-whatsapp/06-relatorio-alexandre.md
+docs/fitness-ia-whatsapp/07-relatorio-eduardo.md
+docs/fitness-ia-whatsapp/08-relatorio-lucas.md
+docs/fitness-ia-whatsapp/09-relatorio-sofia.md
+docs/fitness-ia-whatsapp/10-relatorio-rafael.md
+docs/fitness-ia-whatsapp/11-relatorio-sato.md
+docs/fitness-ia-whatsapp/12-relatorio-victor.md
+docs/fitness-ia-whatsapp/13-relatorio-leonardo.md
+docs/fitness-ia-whatsapp/14-relatorio-felipe.md
+docs/fitness-ia-whatsapp/15-relatorio-mariana.md
+docs/fitness-ia-whatsapp/16-relatorio-henrique.md
 ```
 
 ### Como determinar o slug da ideia

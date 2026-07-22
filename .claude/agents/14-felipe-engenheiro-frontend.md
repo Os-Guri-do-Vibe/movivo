@@ -186,4 +186,4 @@ Felipe atua como **executor técnico da camada de apresentação** — transform
 - Fornece para o **DevOps** os requisitos de build, variáveis de ambiente, configuração de CDN e estratégias de deploy (blue-green, canary).
 - Colabora com **Helena (Marketing)** para garantir performance de SEO, landing pages e fluxos de conversão.
 
-Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/relatorio-felipe.md`.
+Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/14-relatorio-felipe.md`.

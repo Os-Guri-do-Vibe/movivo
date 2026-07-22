@@ -497,7 +497,7 @@ TOTAL GPT-4.1                       ≈ $0,197/usuário/mês ≈ R$1,08
 - OpenAI — Zero Data Retention / data controls: https://developers.openai.com/api/docs/guides/your-data
 - Anthropic — Zero Data Retention scope: https://privacy.claude.com/en/articles/8956058-i-have-a-zero-data-retention-agreement-with-anthropic-what-products-does-it-apply-to
 
-**Fontes internas do pipeline:** relatorio-rafael.md (arquitetura, ADR-005 original, memória 3 camadas), relatorio-sato.md (boundary LLM, PII scrubber, guardrails, ADR-005 revisão de segurança), relatorio-sofia.md (persona MOVI, aha moment, check-in), relatorio-lucas.md (escopo AI Coach, handoff, North Star), relatorio-alexandre.md e relatorio-eduardo.md (via Sato/Rafael).
+**Fontes internas do pipeline:** 10-relatorio-rafael.md (arquitetura, ADR-005 original, memória 3 camadas), 11-relatorio-sato.md (boundary LLM, PII scrubber, guardrails, ADR-005 revisão de segurança), 09-relatorio-sofia.md (persona MOVI, aha moment, check-in), 08-relatorio-lucas.md (escopo AI Coach, handoff, North Star), 06-relatorio-alexandre.md e 07-relatorio-eduardo.md (via Sato/Rafael).
 
 > **Limitações declaradas:** (1) WebSearch é US-only; pricing verificado em agregadores (jul/2026) — confirmar valores oficiais nos painéis OpenAI/Anthropic antes do go-live, pois mudam com frequência. (2) A estimativa de custo assume 30 interações/mês e cache hit ~60% — calibrar com dados reais do beta. (3) Benchmarks de qualidade (accuracy/faithfulness) são metas iniciais a validar com o golden set real. (4) A escolha de `bge-reranker` self-hosted deve ser validada em latência real por Henrique/Mariana no ambiente da VPS.
 

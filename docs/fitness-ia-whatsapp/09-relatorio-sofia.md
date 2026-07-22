@@ -832,6 +832,6 @@ Componentes-chave (mapeados aos wireframes)
 - Chat UI Design 2026 — UXPin: https://www.uxpin.com/studio/blog/chat-user-interface-design/
 - WCAG 2.2 (referência de conformidade AA) — W3C: https://www.w3.org/TR/WCAG22/
 
-**Fontes internas do pipeline:** relatorio-gabriel.md, relatorio-kimura.md, relatorio-lucas.md, relatorio-alexandre.md, relatorio-eduardo.md, relatorio-rafael.md.
+**Fontes internas do pipeline:** 02-relatorio-gabriel.md, 04-relatorio-kimura.md, 08-relatorio-lucas.md, 06-relatorio-alexandre.md, 07-relatorio-eduardo.md, 10-relatorio-rafael.md.
 
 > **Limitações de pesquisa declaradas:** (1) WebSearch é US-only e retorna majoritariamente agregadores em inglês; os benchmarks de completion rate/WhatsApp buttons são direcionais, a validar com testes na base real do Cahuã. (2) Não há benchmark público de UX de "coaching de treino via WhatsApp com CREF no Brasil" — as decisões apoiam-se em princípios consolidados (Fitts, Hick, Peak-End, WCAG) + análise de produtos análogos. (3) Os wireframes em texto são especificação de baixa/média fidelidade; a validação visual e de interação exige protótipo Figma de alta fidelidade (próxima etapa). (4) Métricas-alvo herdam as metas de Lucas/Helena/Eduardo e são hipóteses a calibrar no beta.

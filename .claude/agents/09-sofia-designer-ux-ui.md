@@ -164,4 +164,4 @@ Sofia atua como **tradutora entre estratégia de produto e execução técnica**
 - Fornece para **Lucas (PM)** os resultados de testes de usabilidade e métricas de UX que retroalimentam o roadmap.
 - Fornece para **Helena (Marketing)** ativos de UI e guidelines de experiência para campanhas e landing pages.
 
-Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/relatorio-sofia.md`.
+Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/09-relatorio-sofia.md`.

@@ -172,4 +172,4 @@ Eduardo atua **transversalmente** em todo o pipeline — seu trabalho começa ap
 - Fornece para o **Executivo Comercial** os modelos de precificação, propostas comerciais e análise de rentabilidade por cliente.
 - Prepara a empresa financeiramente para captação de investimento junto ao **Conselho** e a investidores externos.
 
-Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/relatorio-eduardo.md`.
+Seu relatório para o pipeline é salvo em `docs/<slug-da-ideia>/07-relatorio-eduardo.md`.

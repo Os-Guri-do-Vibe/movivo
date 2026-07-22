@@ -412,6 +412,6 @@ Em **todos** os cenários o MVP é bootstrapável; a captação só entra como *
 - Sentry — free plan (5.000 erros/mês): https://costbench.com/software/developer-tools/sentry/free-plan/
 - Cloudflare — free tier + créditos de startup: https://agentdeals.dev/vendor/cloudflare
 
-**Fontes internas do pipeline (base do modelo):** `relatorio-clovis.md`, `relatorio-helena.md`, `relatorio-lucas.md`, `relatorio-rafael.md`, `relatorio-alexandre.md`.
+**Fontes internas do pipeline (base do modelo):** `01-relatorio-clovis.md`, `05-relatorio-helena.md`, `08-relatorio-lucas.md`, `10-relatorio-rafael.md`, `06-relatorio-alexandre.md`.
 
 > **Limitações de pesquisa declaradas:** (1) A busca de mercado (WebSearch) é US-only e retorna agregadores; alíquotas e faixas do Simples devem ser confirmadas na **Resolução CGSN vigente** e pelo **contador CRC** antes de qualquer decisão. (2) O custo real de WhatsApp depende do **plano do BSP AraraHQ** (mensalidade + markup sobre a tarifa Meta), não verificado diretamente — validar contratualmente. (3) LTV/CAC e conversão são **hipóteses a calibrar** no concierge/beta (mesma limitação de Clóvis/Helena/Lucas); não há benchmark público de "coaching de treino via WhatsApp com CREF no Brasil". (4) O câmbio USD/BRL (R$ 5,45) é premissa; oscilações afetam <5% do custo. (5) Nada aqui substitui contador registrado no CRC nem consultoria tributária formal — obrigatórios para constituição, enquadramento e planejamento de alto impacto.
