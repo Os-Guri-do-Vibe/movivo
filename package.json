@@ -21,7 +21,22 @@
     "test": "turbo run test",
     "clean": "turbo run clean",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "infra:secrets": "bash scripts/gen-local-secrets.sh",
+    "infra:up": "docker compose up -d --wait --wait-timeout 300 && docker compose ps",
+    "infra:down": "docker compose down --remove-orphans",
+    "infra:stop": "docker compose stop",
+    "infra:restart": "docker compose stop && pnpm run infra:up",
+    "infra:ps": "docker compose ps",
+    "infra:logs": "docker compose logs -f --tail=100",
+    "infra:config": "docker compose config",
+    "infra:verify": "bash scripts/verify-infra.sh",
+    "infra:psql": "bash scripts/infra.sh psql",
+    "infra:psql:admin": "bash scripts/infra.sh psql-admin",
+    "infra:pools": "bash scripts/infra.sh pools",
+    "infra:redis": "bash scripts/infra.sh redis-cli",
+    "infra:sentinel": "bash scripts/infra.sh sentinel",
+    "infra:reset": "docker compose down --volumes --remove-orphans && pnpm run infra:up"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

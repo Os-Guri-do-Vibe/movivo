@@ -1,0 +1,358 @@
+# =============================================================================
+# MOVIVO — Ambiente local reprodutível (camada de dados)
+# =============================================================================
+# Dono: Henrique Matsuda (Platform Engineering / SRE) · US-0.2 · Sprint 0
+# Requisitos de origem:
+#   · sprint/sprint-0-fundacao.md — US-0.2, TASK-0.2.1 a 0.2.4
+#   · docs/arquitetura/ARQUITETURA.md §2 (stack), §8 (segurança), §12 (regras)
+#   · docs/fitness-ia-whatsapp/11-relatorio-sato.md §4.3 e §9 (hardening)
+#   · SECURITY.md (US-0.6) — contrato de Docker Secrets e `*_FILE`
+#
+# ─── COMO SUBIR ──────────────────────────────────────────────────────────────
+#   1. bash scripts/gen-local-secrets.sh            (ou o .ps1 no Windows)
+#   2. cp .env.example .env
+#   3. pnpm run infra:up          (equivalente: make up)
+#
+#   O bloco top-level `secrets:` continua morando em `docker-compose.secrets.yml`
+#   (contrato da US-0.6, referenciado por SECURITY.md §2.4) e é puxado pelo
+#   `include:` abaixo — assim `docker compose <qualquer comando>` funciona sem
+#   repetir `-f ... -f ...`, e o inventário de secrets segue com um dono e um
+#   arquivo só. `docker compose -f docker-compose.yml -f docker-compose.secrets.yml`
+#   também continua válido (o merge é idempotente).
+#
+# ─── REGRAS INEGOCIÁVEIS MATERIALIZADAS AQUI ─────────────────────────────────
+#   · Nenhum valor sensível em `environment:` — só caminhos para /run/secrets/*.
+#   · Redis em versão com o patch da CVE-2025-49844 (RediShell). Nunca rebaixar.
+#   · A aplicação fala com o Postgres SOMENTE pela 5433 (PgBouncer).
+#   · `movivo_app` sem BYPASSRLS e sem ownership de tabela.
+#   · Nenhuma porta publicada em 0.0.0.0 — tudo em 127.0.0.1.
+# =============================================================================
+
+name: ${COMPOSE_PROJECT_NAME:-movivo}
+
+# Fonte única e canônica do inventário de Docker Secrets (US-0.6/TASK-0.6.2).
+# Nunca redeclarar um `secrets:` top-level aqui: o arquivo incluído é o contrato.
+include:
+  - docker-compose.secrets.yml
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Âncoras reutilizadas (YAML anchors): mantêm as políticas operacionais
+# idênticas entre serviços e impedem que uma delas seja esquecida em um serviço
+# novo.
+# ─────────────────────────────────────────────────────────────────────────────
+x-common: &common
+  restart: unless-stopped
+  networks: [movivo-net]
+  # Impede que um processo dentro do container ganhe privilégios via binário
+  # setuid — hardening barato e sem efeito colateral nestas imagens.
+  security_opt:
+    - no-new-privileges:true
+  # Logs limitados: sem isto, um loop de erro enche o disco do dev/da VPS.
+  logging:
+    driver: json-file
+    options:
+      max-size: '10m'
+      max-file: '3'
+
+services:
+  # ===========================================================================
+  # TASK-0.2.1 — PostgreSQL 17 + PGVector
+  # ===========================================================================
+  postgres:
+    <<: *common
+    image: ${POSTGRES_IMAGE:-pgvector/pgvector:pg17}
+    container_name: movivo-postgres
+    # `environment` contém APENAS nomes, caminhos e parâmetros não sensíveis.
+    # A senha do superusuário entra por POSTGRES_PASSWORD_FILE (suporte nativo
+    # da imagem oficial) — SECURITY.md §2.4.
+    environment:
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-movivo}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password
+      # Checksums de página: detecta corrupção silenciosa de I/O. Só pode ser
+      # ligado no initdb — depois exige recriar o cluster.
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+      # Consumidos pelo 02-roles.sh (nomes de role, não segredos).
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-movivo_app}
+      POSTGRES_MIGRATOR_USER: ${POSTGRES_MIGRATOR_USER:-movivo_migrator}
+      TZ: ${TZ:-America/Sao_Paulo}
+      # UTC no servidor: toda conversão de fuso é responsabilidade da aplicação.
+      # Guardar timestamp em fuso local é a origem clássica de bug no check-in
+      # semanal (seg 08–10h BRT).
+      PGTZ: UTC
+    secrets:
+      - postgres_superuser_password
+      - postgres_app_password
+      - postgres_migrator_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Somente-leitura: o init nunca deve poder ser reescrito de dentro do
+      # container. Roda UMA vez, no primeiro boot do volume.
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      # 127.0.0.1 explícito: publicar em 0.0.0.0 exporia o banco na LAN (e, numa
+      # VPS, na internet — o Docker escreve regras de iptables ANTES do UFW).
+      #
+      # POR QUE A 5432 É PUBLICADA, se a regra #3 diz "a app nunca fala na 5432":
+      # esta porta existe EXCLUSIVAMENTE para o caminho de MIGRAÇÃO
+      # (drizzle-kit, role `movivo_migrator`, US-0.4) e para o psql de
+      # depuração. drizzle-kit usa DDL + advisory locks de sessão, que NÃO
+      # sobrevivem ao transaction pooling do PgBouncer — por isso migração é a
+      # única exceção, já documentada em .env.example §3 (US-0.6).
+      # O RUNTIME da API (`movivo_app`) usa 5433 e só 5433.
+      - '127.0.0.1:${HOST_POSTGRES_PORT:-5432}:5432'
+    # /dev/shm padrão do Docker é 64MB e estoura em hash join/parallel query.
+    shm_size: 256mb
+    command:
+      - postgres
+      - -c
+      - max_connections=100
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1536MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=128MB
+      # Log de queries lentas: baseline de performance desde o dia 1, barato.
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - log_lock_waits=on
+      - -c
+      - track_io_timing=on
+      # scram-sha-256 explícito: é o default no PG17, mas o PgBouncer depende
+      # dele (auth_type = scram-sha-256) e um downgrade silencioso quebraria a
+      # autenticação de forma difícil de diagnosticar.
+      - -c
+      - password_encryption=scram-sha-256
+    healthcheck:
+      # `pg_isready` só responde OK depois que o entrypoint terminou TODO o
+      # /docker-entrypoint-initdb.d/ e abriu o listener TCP definitivo — logo,
+      # este healthcheck também prova que as extensões e as roles foram criadas.
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -h 127.0.0.1']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      # Generoso: o primeiro boot roda initdb + extensões + roles.
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 2G
+        reservations:
+          memory: 512M
+
+  # ===========================================================================
+  # TASK-0.2.2 — PgBouncer (transaction mode, porta 5433)
+  # ===========================================================================
+  pgbouncer:
+    <<: *common
+    image: ${PGBOUNCER_IMAGE:-edoburu/pgbouncer:v1.24.1-p1}
+    container_name: movivo-pgbouncer
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Nenhuma env de configuração: o entrypoint da imagem só autogera o
+    # pgbouncer.ini quando ele NÃO existe. Como montamos o nosso, a configuração
+    # é 100% a do repositório — revisável em code review, sem surpresa.
+    environment:
+      TZ: ${TZ:-America/Sao_Paulo}
+    secrets:
+      - pgbouncer_userlist
+    volumes:
+      - ./infra/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+    ports:
+      # ESTA é a porta que a aplicação usa. Sempre.
+      - '127.0.0.1:${HOST_PGBOUNCER_PORT:-5433}:5433'
+    healthcheck:
+      # Contra o próprio pooler: prova que o PgBouncer está aceitando conexão.
+      # Não valida credencial de propósito (pg_isready para no auth request) —
+      # um healthcheck que autentica precisaria da senha no comando, e ela
+      # apareceria em `docker inspect`.
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -p 5433 -U movivo_app -d movivo']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          memory: 32M
+
+  # ===========================================================================
+  # TASK-0.2.3 — Redis MASTER (patcheado contra CVE-2025-49844 / RediShell)
+  # ===========================================================================
+  redis-master:
+    <<: *common
+    image: ${REDIS_IMAGE:-redis:8.2.2-alpine}
+    container_name: movivo-redis-master
+    # `$$` escapa a interpolação do Compose: quem deve expandir `$(cat ...)` é o
+    # shell DENTRO do container, no boot, e não o Compose no host.
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        test -s /run/secrets/redis_password || {
+          echo "[movivo/redis] ERRO FATAL: /run/secrets/redis_password ausente ou vazio." >&2
+          echo "[movivo/redis] Rode scripts/gen-local-secrets.(sh|ps1) antes do up." >&2
+          exit 1
+        }
+        umask 077
+        sed "s|@REDIS_PASSWORD@|$$(cat /run/secrets/redis_password)|g" \
+          /etc/movivo/redis-master.conf.tpl > /tmp/redis.conf
+        exec redis-server /tmp/redis.conf
+    secrets:
+      - redis_password
+    volumes:
+      - redis-master-data:/data
+      - ./infra/redis/redis-master.conf.tpl:/etc/movivo/redis-master.conf.tpl:ro
+    ports:
+      # Só loopback, e só para conveniência de `redis-cli` em dev.
+      # Em produção nenhuma porta do Redis é publicada (Sato: bind interno).
+      - '127.0.0.1:${HOST_REDIS_PORT:-6379}:6379'
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'redis-cli --no-auth-warning -a "$$(cat /run/secrets/redis_password)" ping | grep -q PONG',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.35'
+          memory: 768M
+        reservations:
+          memory: 128M
+
+  # ===========================================================================
+  # TASK-0.2.3 — Redis REPLICA
+  # ===========================================================================
+  redis-replica:
+    <<: *common
+    image: ${REDIS_IMAGE:-redis:8.2.2-alpine}
+    container_name: movivo-redis-replica
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        test -s /run/secrets/redis_password || {
+          echo "[movivo/redis] ERRO FATAL: /run/secrets/redis_password ausente ou vazio." >&2
+          exit 1
+        }
+        umask 077
+        sed "s|@REDIS_PASSWORD@|$$(cat /run/secrets/redis_password)|g" \
+          /etc/movivo/redis-replica.conf.tpl > /tmp/redis.conf
+        exec redis-server /tmp/redis.conf
+    secrets:
+      - redis_password
+    volumes:
+      - redis-replica-data:/data
+      - ./infra/redis/redis-replica.conf.tpl:/etc/movivo/redis-replica.conf.tpl:ro
+    ports:
+      # Publicada para que uma API rodando NO HOST consiga alcançar a réplica
+      # caso o Sentinel a promova a master. Sem isso, o `natMap` do ioredis
+      # (ver README) não teria para onde apontar depois de um failover.
+      - '127.0.0.1:${HOST_REDIS_REPLICA_PORT:-6380}:6379'
+    healthcheck:
+      # PING não basta: uma réplica sobe e responde PONG mesmo sem conseguir
+      # falar com o master. `master_link_status:up` é o que realmente prova a
+      # replicação — sem isso o serviço ficaria "healthy" mentindo.
+      test:
+        [
+          'CMD-SHELL',
+          'redis-cli --no-auth-warning -a "$$(cat /run/secrets/redis_password)" info replication | grep -q ''master_link_status:up''',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 768M
+        reservations:
+          memory: 128M
+
+  # ===========================================================================
+  # TASK-0.2.3 — Redis SENTINEL (quorum=2 — ver nota em sentinel.conf.tpl)
+  # ===========================================================================
+  redis-sentinel:
+    <<: *common
+    image: ${REDIS_IMAGE:-redis:8.2.2-alpine}
+    container_name: movivo-redis-sentinel
+    depends_on:
+      redis-master:
+        condition: service_healthy
+      redis-replica:
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        test -s /run/secrets/redis_password || {
+          echo "[movivo/sentinel] ERRO FATAL: /run/secrets/redis_password ausente ou vazio." >&2
+          exit 1
+        }
+        umask 077
+        # O Sentinel REESCREVE seu próprio arquivo de config em runtime (CONFIG
+        # REWRITE após descobrir réplicas / em failover). Por isso o arquivo
+        # efetivo fica em /tmp (gravável) e o template em bind mount read-only.
+        sed "s|@REDIS_PASSWORD@|$$(cat /run/secrets/redis_password)|g" \
+          /etc/movivo/sentinel.conf.tpl > /tmp/sentinel.conf
+        exec redis-sentinel /tmp/sentinel.conf
+    secrets:
+      - redis_password
+    volumes:
+      - ./infra/redis/sentinel.conf.tpl:/etc/movivo/sentinel.conf.tpl:ro
+    ports:
+      - '127.0.0.1:${HOST_SENTINEL_PORT:-26379}:26379'
+    healthcheck:
+      # Prova o que interessa: o Sentinel conhece e está monitorando o master
+      # com o nome que a aplicação usa (REDIS_SENTINEL_MASTER_NAME).
+      test:
+        [
+          'CMD-SHELL',
+          'redis-cli --no-auth-warning -a "$$(cat /run/secrets/redis_password)" -p 26379 sentinel master ${REDIS_SENTINEL_MASTER_NAME:-movivo-master} | grep -qx ''${REDIS_SENTINEL_MASTER_NAME:-movivo-master}''',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.15'
+          memory: 96M
+        reservations:
+          memory: 32M
+
+# ─────────────────────────────────────────────────────────────────────────────
+networks:
+  movivo-net:
+    name: movivo-net
+    driver: bridge
+
+volumes:
+  postgres-data:
+    name: movivo-postgres-data
+  redis-master-data:
+    name: movivo-redis-master-data
+  redis-replica-data:
+    name: movivo-redis-replica-data

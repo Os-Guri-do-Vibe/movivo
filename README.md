@@ -18,6 +18,7 @@ Este repositório é um **monorepo** (pnpm workspaces + Turborepo).
 - [Estrutura do monorepo](#estrutura-do-monorepo)
 - [Setup rápido](#setup-rápido)
 - [Ambiente e segredos](#ambiente-e-segredos)
+- [Ambiente local de dados (Docker Compose)](#ambiente-local-de-dados-docker-compose)
 - [Scripts da raiz](#scripts-da-raiz)
 - [O pacote `@movivo/shared`](#o-pacote-movivoshared)
 - [Padrões de código](#padrões-de-código)
@@ -169,6 +170,118 @@ especificação normativa que o `ConfigModule` implementa está em
   A única exceção é o `drizzle-kit`, que migra na 5432 como `movivo_migrator`.
 - `NEXT_PUBLIC_*` vai para o bundle do browser: **jamais** um segredo ali.
 - Nada sensível em log, erro, span de telemetria ou resposta de `/health`.
+
+---
+
+## Ambiente local de dados (Docker Compose)
+
+> Dono: Henrique (US-0.2). Definido em [`docker-compose.yml`](docker-compose.yml) +
+> [`docker-compose.secrets.yml`](docker-compose.secrets.yml) (puxado por `include:`)
+> e nas configs de [`infra/`](infra). **Pré-requisito: os segredos da seção
+> anterior já gerados** — os containers falham no boot sem eles, de propósito.
+
+### Subir tudo
+
+```bash
+pnpm run infra:up      # sobe e BLOQUEIA até 100% dos serviços ficarem healthy
+pnpm run infra:verify  # roda o checklist completo de sanidade e segurança
+```
+
+Quem tem `make` (Linux/macOS/WSL) pode usar `make up` / `make verify` — os alvos
+do [`Makefile`](Makefile) são equivalentes 1:1. No Windows, use os scripts pnpm.
+
+### Serviços
+
+| Serviço          | Imagem (fixada)                | Porta no host     | Papel                                             |
+| ---------------- | ------------------------------ | ----------------- | ------------------------------------------------- |
+| `postgres`       | `pgvector/pgvector:pg17`       | `127.0.0.1:5432`  | PostgreSQL 17 + `vector`, `uuid-ossp`, `pgcrypto` |
+| `pgbouncer`      | `edoburu/pgbouncer:v1.24.1-p1` | `127.0.0.1:5433`  | Pooler em **transaction mode** — o caminho da app |
+| `redis-master`   | `redis:8.2.2-alpine`           | `127.0.0.1:6379`  | Cache + filas BullMQ, AOF `everysec`              |
+| `redis-replica`  | `redis:8.2.2-alpine`           | `127.0.0.1:6380`  | Réplica de leitura / alvo de failover             |
+| `redis-sentinel` | `redis:8.2.2-alpine`           | `127.0.0.1:26379` | Descoberta do master (`movivo-master`, quorum 2)  |
+
+Todas as portas são publicadas **apenas em `127.0.0.1`**. Publicar em `0.0.0.0`
+numa VPS exporia o serviço na internet mesmo com UFW ativo, porque o Docker
+escreve suas regras de iptables antes das do firewall.
+
+### As duas portas do Postgres — leia antes de conectar
+
+|                     | Runtime da aplicação | Migração / DDL                     |
+| ------------------- | -------------------- | ---------------------------------- |
+| Porta               | **5433** (PgBouncer) | 5432 (Postgres direto)             |
+| Role                | `movivo_app`         | `movivo_migrator`                  |
+| Quem usa            | NestJS, sempre       | `drizzle-kit`, `psql` de depuração |
+| Prepared statements | **proibidos**        | permitidos                         |
+
+A aplicação **nunca** abre conexão na 5432 (regra §12.3). A exceção da migração
+existe porque `drizzle-kit` usa DDL e _advisory locks de sessão_, que não
+sobrevivem ao transaction pooling. Consequências do transaction mode para quem
+escreve código (US-0.3/US-0.4):
+
+- `prepare: false` no driver (`DATABASE_PREPARE=false`).
+- `LISTEN/NOTIFY` proibidos — use Redis Pub/Sub.
+- `SET` de sessão não persiste; use `SET LOCAL` — que é exatamente o que a RLS
+  exige (`SET LOCAL app.current_user_id`, `ARQUITETURA.md` §12.13).
+
+> **Se a porta 5432 já estiver ocupada** na sua máquina (é comum ter um
+> PostgreSQL nativo instalado), altere `HOST_POSTGRES_PORT` no seu `.env` — por
+> exemplo `15432` — e ajuste `MIGRATION_DATABASE_PORT` em `apps/api/.env` para o
+> mesmo valor. Nada mais muda: a 5433 continua sendo o caminho da aplicação.
+
+### Roles do Postgres
+
+Criadas pelo init em [`infra/postgres/init/`](infra/postgres/init):
+
+- **`movivo_migrator`** — dono do schema `public`. Roda as migrações. Nunca usada em runtime.
+- **`movivo_app`** — a única role da API. `NOBYPASSRLS`, sem `CREATE` no schema,
+  nunca dona de tabela. É o que torna a RLS (isolamento entre titulares de dados
+  de saúde) efetiva e não decorativa. `pnpm run infra:verify` falha se isso regredir.
+
+### Redis com Sentinel
+
+A aplicação **não** conecta no master pelo nome: ela pergunta ao Sentinel
+(`REDIS_SENTINEL_HOSTS`, `REDIS_SENTINEL_MASTER_NAME=movivo-master`). O Sentinel
+devolve o endereço anunciado, que é o hostname do serviço (`redis-master:6379`).
+
+- API **dentro** do Compose: funciona direto, o DNS da rede `movivo-net` resolve.
+- API **no host**: `redis-master` não resolve no Windows/macOS. Use o `natMap` do
+  ioredis para mapear os nomes anunciados para as portas publicadas em loopback:
+
+  ```ts
+  new Redis({
+    sentinels: [{ host: '127.0.0.1', port: 26379 }],
+    name: 'movivo-master',
+    natMap: {
+      'redis-master:6379': { host: '127.0.0.1', port: 6379 },
+      'redis-replica:6379': { host: '127.0.0.1', port: 6380 },
+    },
+  });
+  ```
+
+> **Failover não é exercitável localmente**, e isso é proposital: o quorum é 2
+> (idêntico ao de produção, onde sobem 3 Sentinels) e em dev sobe apenas 1. Baixar
+> o quorum para 1 mascararia em produção um erro que só apareceria num incidente.
+> O ambiente local prova descoberta, autenticação e replicação — não o failover.
+
+### Operação do dia a dia
+
+| Comando                     | Equivalente `make` | O que faz                                                         |
+| --------------------------- | ------------------ | ----------------------------------------------------------------- |
+| `pnpm run infra:up`         | `make up`          | Sobe e espera todos ficarem `healthy`                             |
+| `pnpm run infra:down`       | `make down`        | Derruba containers e rede — **volumes preservados**               |
+| `pnpm run infra:ps`         | `make ps`          | Estado e health de cada serviço                                   |
+| `pnpm run infra:logs`       | `make logs`        | Segue os logs                                                     |
+| `pnpm run infra:reset`      | `make reset`       | **DESTRÓI os volumes** e sobe do zero (reexecuta o init do banco) |
+| `pnpm run infra:verify`     | `make verify`      | Checklist de DoD/segurança — 35 checagens, exit 1 se falhar       |
+| `pnpm run infra:psql`       | `make psql`        | `psql` como `movivo_app` **via PgBouncer**                        |
+| `pnpm run infra:psql:admin` | `make psql-admin`  | `psql` como `movivo_migrator` direto na 5432                      |
+| `pnpm run infra:pools`      | `make pools`       | `SHOW POOLS` — confirma o transaction mode                        |
+| `pnpm run infra:redis`      | `make redis-cli`   | `redis-cli` autenticado no master                                 |
+| `pnpm run infra:sentinel`   | `make sentinel`    | Estado do master conforme o Sentinel                              |
+
+`infra:down` **preserva os dados**; use `infra:reset` quando quiser um banco limpo
+ou depois de rotacionar segredos (a senha de uma role já criada não muda sozinha —
+ver [`SECURITY.md` §4.1](SECURITY.md)).
 
 ---
 

@@ -157,6 +157,10 @@ O `ConfigModule` chama `resolveFileSecrets(process.env)` e passa o retorno ao
 ### 2.4 Como o Compose entrega os arquivos (US-0.2)
 
 - Bloco top-level `secrets:` canônico: [`docker-compose.secrets.yml`](docker-compose.secrets.yml).
+  Desde a US-0.2 ele é puxado por `include:` no [`docker-compose.yml`](docker-compose.yml) —
+  qualquer `docker compose <comando>` já enxerga o inventário completo, sem `-f` repetido.
+  A conformidade é verificada por `pnpm run infra:verify`, que falha se o valor de
+  qualquer secret aparecer em `docker compose config` ou em `docker inspect`.
 - **Nota de precisão técnica:** no Compose _standalone_ (nosso caso no MVP) cada
   secret é montado como **bind mount somente leitura** do arquivo em
   `/run/secrets/<nome>`; é no **Swarm/Vault (Fase B)** que ele vira **tmpfs** e nunca
