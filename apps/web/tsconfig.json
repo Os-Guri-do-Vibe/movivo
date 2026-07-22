@@ -6,11 +6,34 @@
     "moduleResolution": "Bundler",
     "jsx": "preserve",
     "allowJs": true,
-    "rootDir": "./src",
-    "outDir": "./dist",
-    "tsBuildInfoFile": "./tsconfig.tsbuildinfo"
+    "types": ["node"],
+
+    /*
+     * O Next.js é quem emite (`next build`). O `tsc` aqui serve exclusivamente para
+     * `typecheck`, então NÃO existe `rootDir`/`outDir`: as rotas do App Router vivem
+     * em `src/app/**` e os tipos gerados pelo Next em `.next/types/**` — nenhum dos
+     * dois caberia num `rootDir: ./src` com emissão.
+     */
+    "noEmit": true,
+    "tsBuildInfoFile": "./tsconfig.tsbuildinfo",
+
+    /* Plugin de linguagem do Next: tipagem de rotas, entrypoints e boundaries RSC. */
+    "plugins": [{ "name": "next" }],
+
+    /*
+     * `paths` NÃO é mesclado com o do `tsconfig.base.json` — ele é substituído por
+     * inteiro. Por isso os aliases de `@movivo/shared` são redeclarados aqui, agora
+     * relativos a `baseUrl: "."` (= `apps/web`), junto do alias `@/*` que o shadcn/ui
+     * assume. O bundler do Next lê este mesmo bloco para montar seus aliases.
+     */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@movivo/shared": ["../../packages/shared/dist/index.d.ts"],
+      "@movivo/shared/*": ["../../packages/shared/dist/*"]
+    }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["node_modules", "dist", ".next"],
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", "dist", ".next", ".turbo"],
   "references": [{ "path": "../../packages/shared" }]
 }

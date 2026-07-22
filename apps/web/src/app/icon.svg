@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="MOVIVO">
+  <!--
+    Símbolo "O Pulso" (Kimura §1/§6) na sua forma reduzida — registro D, brandmark
+    isolado. Disco Petróleo Vivo + traço Verde Pulso: vale, pico, vale, pico MAIS ALTO
+    (a progressão) e terminação num ponto, o "spark de vida". Cantos e caps
+    arredondados; nenhum vértice cortante. Vetorização definitiva depende da liberação
+    do nome no INPI (trava herdada de Caio/Kimura) — este arquivo é o placeholder fiel
+    à lógica construtiva, não a arte-final.
+  -->
+  <rect width="64" height="64" rx="14" fill="#06302A" />
+  <path
+    d="M11 38 L19 30 L26 41 L36 17 L43 27"
+    fill="none"
+    stroke="#25E27E"
+    stroke-width="6"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <circle cx="51" cy="22" r="4.5" fill="#25E27E" />
+</svg>

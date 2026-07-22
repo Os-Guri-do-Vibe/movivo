@@ -22,6 +22,7 @@ Este repositório é um **monorepo** (pnpm workspaces + Turborepo).
 - [Scripts da raiz](#scripts-da-raiz)
 - [Backend (`apps/api`)](#backend-appsapi)
 - [Banco de dados (schema, migrações e seed)](#banco-de-dados-schema-migrações-e-seed)
+- [Frontend (`apps/web`)](#frontend-appsweb)
 - [O pacote `@movivo/shared`](#o-pacote-movivoshared)
 - [Padrões de código](#padrões-de-código)
 - [Regras inegociáveis](#regras-inegociáveis)
@@ -92,9 +93,9 @@ Não criar novos `apps/` ou `packages/` sem ADR formal.
 └─ README.md
 ```
 
-> **Status atual:** `apps/api` já é o **NestJS real** (US-0.3 — ver
-> [Backend (`apps/api`)](#backend-appsapi)). `apps/web` ainda é o stub da US-0.1; o
-> Next.js 15 real entra na **US-0.5**.
+> **Status atual:** `apps/api` é o **NestJS real** (US-0.3 — ver
+> [Backend (`apps/api`)](#backend-appsapi)) e `apps/web` é o **Next.js 15 real**
+> (US-0.5 — ver [Frontend (`apps/web`)](#frontend-appsweb)).
 
 ---
 
@@ -442,6 +443,98 @@ migração, então tabela nova já nasce acessível ao runtime sem passo manual.
 append-only e as políticas RLS propriamente ditas. O terreno está preparado —
 `user_id` é coluna líder dos índices por usuário e as colunas de saúde já estão
 marcadas com `-- LGPD Art. 11` para a cifra `pgcrypto` da sprint de anamnese.
+
+---
+
+## Frontend (`apps/web`)
+
+Next.js 15 (App Router, React 19) com Tailwind CSS v4 + shadcn/ui carregados com os
+tokens do design system **"O Pulso"** (`docs/fitness-ia-whatsapp/04-relatorio-kimura.md`,
+nomes de token conforme `09-relatorio-sofia.md` §15).
+
+```
+apps/web/
+├─ next.config.ts            headers de segurança · outputFileTracingRoot do monorepo
+├─ postcss.config.mjs        Tailwind v4 (não existe tailwind.config.*)
+├─ components.json           registry do shadcn/ui (style new-york, RSC, alias @/*)
+├─ instrumentation-client.ts PostHog — import dinâmico, opt-in por env
+└─ src/
+   ├─ app/
+   │  ├─ layout.tsx          lang="pt-BR" · next/font · metadata/SEO · ThemeProvider
+   │  ├─ page.tsx            home — Server Component, consome @movivo/shared
+   │  ├─ not-found.tsx       404
+   │  ├─ icon.svg            favicon — símbolo "O Pulso"
+   │  └─ globals.css         ►► FONTE DA VERDADE DOS TOKENS ◄◄
+   ├─ components/
+   │  ├─ ui/button.tsx       shadcn/ui
+   │  ├─ theme-provider.tsx  next-themes (client)
+   │  └─ theme-toggle.tsx    alternador claro/escuro (client)
+   └─ lib/
+      ├─ env.ts              config PÚBLICA (NEXT_PUBLIC_*) — nunca segredo
+      └─ utils.ts            cn()
+```
+
+### Rodar localmente
+
+```bash
+cp apps/web/.env.example apps/web/.env.local
+pnpm --filter @movivo/web run dev        # http://localhost:3000
+```
+
+> ⚠️ **Rode `pnpm run build` na raiz pelo menos uma vez antes de usar `pnpm --filter`.**
+> `@movivo/shared` é consumido pelo seu `dist/`; com o pacote não-buildado, qualquer
+> task escopada por `--filter` falha com `TS2307: Cannot find module '@movivo/shared'`.
+> Só o Turborepo, a partir da raiz, garante a ordem via `dependsOn: ["^build"]`.
+
+### Os tokens de Kimura no código
+
+Tailwind v4 é configurado em CSS, não em JS: **todo** o tema vive em
+`src/app/globals.css`, em três camadas — tokens brutos da marca, tokens semânticos por
+tema, e o bloco `@theme inline` que os expõe como utilitários.
+
+| Token de marca (Kimura) | CSS variable      | Utilitário Tailwind |
+| ----------------------- | ----------------- | ------------------- |
+| Petróleo Vivo `#06302A` | `--petroleo-vivo` | `bg-petroleo`       |
+| Verde Pulso `#25E27E`   | `--verde-pulso`   | `bg-verde-pulso`    |
+| Coral Vivo `#FF6A3D`    | `--coral-vivo`    | `bg-coral`          |
+| Névoa `#F4F7F3`         | `--nevoa`         | `bg-nevoa`          |
+| Grafite `#14201C`       | `--grafite`       | `text-grafite`      |
+| Musgo `#5B6B63`         | `--musgo`         | `text-musgo`        |
+
+No dia a dia, porém, **use os tokens semânticos** (`bg-background`, `text-foreground`,
+`bg-primary`, `border-input`, `text-muted-foreground`…): eles já trocam sozinhos entre
+tema claro e escuro. Os tokens de marca ficam para quando a cor é a marca em si.
+
+Tipografia (`next/font`, auto-hospedada — zero requisição a domínio de terceiro):
+**Hanken Grotesk** em `font-sans` e **JetBrains Mono** em `font-mono`. Mono só para
+**dado** (carga, séries, semana, nº do CREF), em dose cirúrgica. A escala de Kimura
+está nos utilitários `text-display`, `text-h1`, `text-h2`, `text-h3`, `text-body` e
+`text-label`.
+
+### Regras de quem escreve frontend aqui
+
+1. **Component é Server Component até prova em contrário.** `'use client'` só quando
+   houver estado, efeito ou handler de evento — e o mais fundo possível na árvore.
+2. **`NEXT_PUBLIC_*` é público.** O valor é inlined no bundle e visível a qualquer um.
+   Segredo de servidor segue o contrato `*_FILE` de [`SECURITY.md`](SECURITY.md) §2 e
+   nunca é lido por `src/lib/env.ts`.
+3. **Regra cromática de Kimura, inegociável:** Verde Pulso e Coral **nunca** são cor de
+   texto pequeno sobre fundo claro (reprovam em AA). Texto sobre claro é Grafite ou
+   Petróleo; o verde fica para preenchimento, ícone grande e realce.
+4. **Toda cor nova entra em `globals.css`**, nas duas camadas (claro e escuro), com a
+   razão de contraste anotada. Nada de hex solto em `className`.
+5. **Acessibilidade é requisito de merge, não polimento:** WCAG 2.2 AA, HTML semântico,
+   nome acessível em todo controle, `prefers-reduced-motion` respeitado (já global).
+6. **Guardrails de linguagem valem para a UI** (regra §12.10): nunca "diagnóstico",
+   "tratamento", "cura" ou "resultado garantido"; a IA nunca aparece decidindo sozinha.
+
+### Analytics (PostHog)
+
+`instrumentation-client.ts` inicializa o SDK **por import dinâmico**: sem
+`NEXT_PUBLIC_POSTHOG_KEY` válida (o placeholder do `.env.example` conta como ausente),
+nada é baixado e a analytics simplesmente não existe — custo zero para o usuário e
+nenhuma quebra. Nesta sprint é só o stub: a taxonomia de eventos de funil é de Lucas §8
+e Sofia §16.2, e será instrumentada junto das telas reais.
 
 ---
 

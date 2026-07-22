@@ -1,0 +1,234 @@
+/* =============================================================================
+ * MOVIVO — Design System "O Pulso" (Kimura, `04-relatorio-kimura.md` §3/§4;
+ * nomes de token conforme Sofia, `09-relatorio-sofia.md` §15).
+ *
+ * Tailwind CSS v4: não existe `tailwind.config.*`. A configuração de tema é este
+ * arquivo. Três camadas, nesta ordem:
+ *
+ *   1. `:root`            tokens BRUTOS da marca — nomes de Sofia, valores de Kimura.
+ *                         Não mudam entre temas: #25E27E é Verde Pulso sempre.
+ *   2. `:root` / `.dark`  tokens SEMÂNTICOS (shadcn/ui) — o que muda por tema.
+ *   3. `@theme inline`    expõe os dois conjuntos como utilitários do Tailwind.
+ *
+ * Regra cromática inegociável de Kimura, respeitada abaixo:
+ *   Verde Pulso e Coral NUNCA são cor de texto pequeno sobre fundo claro — só
+ *   preenchimento, ícone grande ou realce. Texto sobre claro é Grafite ou Petróleo.
+ * ========================================================================== */
+
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* --- 1. Tokens brutos da marca ------------------------------------------ */
+  --petroleo-vivo: #06302a; /* âncora — verde-quase-preto, superfícies escuras   */
+  --verde-pulso: #25e27e; /* assinatura — CTA, progresso, o símbolo Pulso      */
+  --coral-vivo: #ff6a3d; /* calor humano, "puxado", alerta gentil (dose ~10%) */
+  --nevoa: #f4f7f3; /* off-white de viés verde — fundo claro             */
+  --grafite: #14201c; /* texto corrido sobre claro                         */
+  --musgo: #5b6b63; /* texto secundário, legendas, estados desabilitados */
+  --branco: #ffffff;
+
+  /*
+   * Degraus derivados. Não são cores novas: são a Névoa e o Petróleo deslocados
+   * para cobrir superfícies elevadas, bordas e realces que a paleta de 7 cores de
+   * Kimura não nomeia, mas que uma UI precisa ter.
+   */
+  --nevoa-elevada: #e8eee6;
+  --verde-pulso-tenue: #d8f7e6;
+  --musgo-tenue: #d5ded2;
+  --musgo-contraste: #7a8b82;
+  --petroleo-elevado: #0a3e35;
+  --petroleo-superficie: #0e4a3f;
+  --petroleo-borda: #37826f;
+  --nevoa-suave: #a8bdb2;
+
+  /* --- 2. Tokens semânticos (tema claro) ---------------------------------- */
+  --background: var(--nevoa);
+  --foreground: var(--grafite);
+
+  --card: var(--branco);
+  --card-foreground: var(--grafite);
+  --popover: var(--branco);
+  --popover-foreground: var(--grafite);
+
+  /* Par proprietário da marca: preenchimento Verde Pulso, texto Petróleo (8,4:1). */
+  --primary: var(--verde-pulso);
+  --primary-foreground: var(--petroleo-vivo);
+
+  --secondary: var(--nevoa-elevada);
+  --secondary-foreground: var(--petroleo-vivo);
+
+  --muted: var(--nevoa-elevada);
+  --muted-foreground: var(--musgo); /* 4,76:1 sobre --muted */
+
+  --accent: var(--verde-pulso-tenue);
+  --accent-foreground: var(--petroleo-vivo);
+
+  /*
+   * Coral como "destructive" merece nota: em Kimura/Sofia o Coral é calor humano e
+   * alerta GENTIL ("puxado"), não erro catastrófico. Ele preenche o slot `destructive`
+   * do shadcn porque é a única cor de alerta do sistema — com texto Petróleo (5,06:1),
+   * nunca branco (2,84:1, reprova em AA).
+   */
+  --destructive: var(--coral-vivo);
+  --destructive-foreground: var(--petroleo-vivo);
+
+  /*
+   * `border` e `input` divergem de propósito. `border` desenha separação decorativa
+   * (sem exigência de contraste); `input` desenha o limite de um controle de
+   * formulário, que precisa de 3:1 contra o fundo (WCAG 2.2 — 1.4.11 Non-text
+   * Contrast). O Musgo tênue tem 1,33:1 e serve ao primeiro caso, não ao segundo.
+   */
+  --border: var(--musgo-tenue);
+  --input: var(--musgo-contraste); /* 3,33:1 sobre --background */
+
+  /*
+   * Foco: Verde Pulso sobre fundo claro dá 1,59:1 — reprova em 2.4.11/1.4.11. No tema
+   * claro o anel é Petróleo (13,3:1); no escuro volta a ser Verde Pulso (8,4:1).
+   */
+  --ring: var(--petroleo-vivo);
+
+  /* Rampa de dataviz de Kimura: Petróleo → Verde Pulso; Coral reservado a picos. */
+  --chart-1: var(--verde-pulso);
+  --chart-2: #12b269;
+  --chart-3: #0a7d52;
+  --chart-4: var(--petroleo-vivo);
+  --chart-5: var(--coral-vivo);
+
+  /* Cantos suaves — arquétipo Mentor-acessível de Gabriel, nunca vértice cortante. */
+  --radius: 0.75rem;
+}
+
+.dark {
+  /*
+   * O par Petróleo + Verde Pulso é nativamente dark-friendly (Kimura §3): o tema
+   * escuro não é uma inversão mecânica, é a expressão-mãe da marca.
+   */
+  --background: var(--petroleo-vivo);
+  --foreground: var(--nevoa); /* 13,3:1 */
+
+  --card: var(--petroleo-elevado);
+  --card-foreground: var(--nevoa);
+  --popover: var(--petroleo-elevado);
+  --popover-foreground: var(--nevoa);
+
+  --primary: var(--verde-pulso);
+  --primary-foreground: var(--petroleo-vivo);
+
+  --secondary: var(--petroleo-superficie);
+  --secondary-foreground: var(--nevoa);
+
+  --muted: var(--petroleo-superficie);
+  --muted-foreground: var(--nevoa-suave); /* 7,24:1 sobre --background */
+
+  --accent: var(--petroleo-superficie);
+  --accent-foreground: var(--verde-pulso); /* 5,92:1 */
+
+  --destructive: var(--coral-vivo);
+  --destructive-foreground: var(--petroleo-vivo);
+
+  --border: #17564a;
+  --input: var(--petroleo-borda); /* 3,14:1 sobre --background */
+  --ring: var(--verde-pulso); /* 8,4:1 sobre --background */
+
+  --chart-1: var(--verde-pulso);
+  --chart-2: #12b269;
+  --chart-3: #0a7d52;
+  --chart-4: var(--nevoa-suave);
+  --chart-5: var(--coral-vivo);
+}
+
+/* --- 3. Exposição para o Tailwind ----------------------------------------- */
+@theme inline {
+  /* Tokens de marca: `bg-petroleo`, `text-musgo`, `ring-verde-pulso`, ... */
+  --color-petroleo: var(--petroleo-vivo);
+  --color-verde-pulso: var(--verde-pulso);
+  --color-coral: var(--coral-vivo);
+  --color-nevoa: var(--nevoa);
+  --color-grafite: var(--grafite);
+  --color-musgo: var(--musgo);
+
+  /* Tokens semânticos consumidos pelos componentes shadcn/ui. */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /*
+   * Tipografia (Kimura §4): Hanken Grotesk para tudo; mono só em dose cirúrgica
+   * para DADO (carga, séries, semana, nº do CREF). As duas famílias são carregadas
+   * e auto-hospedadas por `next/font` em `src/app/layout.tsx` — zero requisição a
+   * domínio de terceiro em runtime.
+   */
+  --font-sans: var(--font-hanken-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+
+  /* Escala modular de Kimura/Sofia §15, com entrelinha de corpo entre 1,4 e 1,6. */
+  --text-display: 3.5rem;
+  --text-display--line-height: 1.05;
+  --text-display--letter-spacing: -0.02em;
+  --text-h1: 2rem;
+  --text-h1--line-height: 1.15;
+  --text-h1--letter-spacing: -0.015em;
+  --text-h2: 1.5rem;
+  --text-h2--line-height: 1.25;
+  --text-h3: 1.25rem;
+  --text-h3--line-height: 1.3;
+  --text-body: 1rem;
+  --text-body--line-height: 1.55;
+  --text-label: 0.875rem;
+  --text-label--line-height: 1.4;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  /*
+   * WCAG 2.2 — 2.3.3 Animation from Interactions (requisito de Sofia §14). O Pulso
+   * "respira" por padrão; para quem pediu menos movimento ao sistema operacional,
+   * ele fica parado. Vale para toda animação do app, não só para as de hoje.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
