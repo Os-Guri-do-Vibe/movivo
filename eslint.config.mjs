@@ -84,6 +84,17 @@ export default tseslint.config(
       // NestJS depende de decorators e de classes com construtor de injeção vazio.
       '@typescript-eslint/no-extraneous-class': 'off',
       '@typescript-eslint/no-empty-function': ['error', { allow: ['constructors'] }],
+      /*
+       * `consistent-type-imports` é DESLIGADO aqui de propósito, e isso não é
+       * preguiça: a injeção de dependência do NestJS resolve o provider pelo tipo do
+       * parâmetro do construtor, lido em RUNTIME via `emitDecoratorMetadata`. Trocar
+       * `import { Foo }` por `import type { Foo }` apaga o import na emissão, a
+       * metadata vira `Object` e o Nest passa a lançar "Nest can't resolve
+       * dependencies" — um erro de execução que o compilador não pega. O ganho da
+       * regra (imports levemente mais enxutos) não paga esse risco.
+       * Onde o tipo é comprovadamente só tipo, o código usa `import type` à mão.
+       */
+      '@typescript-eslint/consistent-type-imports': 'off',
     },
   },
 

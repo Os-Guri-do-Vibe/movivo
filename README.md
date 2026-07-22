@@ -20,6 +20,7 @@ Este repositório é um **monorepo** (pnpm workspaces + Turborepo).
 - [Ambiente e segredos](#ambiente-e-segredos)
 - [Ambiente local de dados (Docker Compose)](#ambiente-local-de-dados-docker-compose)
 - [Scripts da raiz](#scripts-da-raiz)
+- [Backend (`apps/api`)](#backend-appsapi)
 - [O pacote `@movivo/shared`](#o-pacote-movivoshared)
 - [Padrões de código](#padrões-de-código)
 - [Regras inegociáveis](#regras-inegociáveis)
@@ -90,8 +91,9 @@ Não criar novos `apps/` ou `packages/` sem ADR formal.
 └─ README.md
 ```
 
-> **Status atual (US-0.1):** `apps/api` e `apps/web` são **stubs** mínimos que compilam e
-> provam o tooling. O NestJS real entra na **US-0.3** e o Next.js 15 real na **US-0.5**.
+> **Status atual:** `apps/api` já é o **NestJS real** (US-0.3 — ver
+> [Backend (`apps/api`)](#backend-appsapi)). `apps/web` ainda é o stub da US-0.1; o
+> Next.js 15 real entra na **US-0.5**.
 
 ---
 
@@ -313,6 +315,67 @@ pnpm --filter @movivo/shared run build
 > dentro de `apps/api` lintaria **zero arquivos silenciosamente** — um falso-positivo
 > perigoso no CI. Por isso os workspaces não têm script `lint` próprio: use
 > `pnpm run lint` na raiz ou os atalhos `lint:api` / `lint:web` / `lint:shared`.
+
+---
+
+## Backend (`apps/api`)
+
+Monólito modular NestJS 11. A árvore de módulos espelha o **C4 nível 3** do
+[`ARQUITETURA.md` §4](docs/arquitetura/ARQUITETURA.md).
+
+```
+src/
+├─ main.ts                  prefixo api/v1 · ValidationPipe global · CORS por env
+│                           graceful shutdown · porta 3001
+├─ app.module.ts            raiz — CORE + Health + 9 módulos de domínio
+├─ core/                    BLOCO CORE (infraestrutura compartilhada)
+│  ├─ config/               Zod + contrato *_FILE (SECURITY.md §2) · fail-fast no boot
+│  ├─ database/             Drizzle + postgres.js via PgBouncer 5433 · prepare: false
+│  ├─ redis/                ioredis via Sentinel · RedisKeyBuilder (isolamento por titular)
+│  ├─ logger/               pino JSON · correlation id · redação de PII
+│  ├─ telemetry/            stub (Sprint 6)
+│  └─ event-bus/            stub (CQRS)
+├─ health/                  GET /api/v1/health (@nestjs/terminus)
+└─ modules/                 auth · anamnesis · protocol · whatsapp · ai-coach
+                            subscription · checkin · jobs · admin  (cascas vazias)
+```
+
+### Rodar localmente
+
+```bash
+pnpm run infra:up                      # stack de dados (uma vez)
+cp apps/api/.env.example apps/api/.env # perfil de quem roda a API no host
+pnpm --filter @movivo/api run dev      # http://localhost:3001/api/v1
+```
+
+### `GET /api/v1/health`
+
+Sem autenticação (consumido por healthcheck de container, load balancer e smoke test).
+Retorna **200** quando as duas dependências respondem e **503** quando qualquer uma cai.
+Não expõe segredo nem string de conexão.
+
+```jsonc
+{
+  "status": "ok",
+  "info": {
+    "db": { "status": "up", "port": 5433, "via": "pgbouncer", "preparedStatements": false },
+    "redis": { "status": "up", "via": "sentinel", "masterName": "movivo-master" },
+  },
+}
+```
+
+### Regras de quem escreve backend aqui
+
+1. **Config só pelo `AppConfigService`.** Nunca ler `process.env` direto: os segredos
+   deliberadamente **não** são injetados em `process.env` (SECURITY.md §2.1.8).
+2. **Chave de Redis só pelo `RedisKeyBuilder`.** `forUser(userId, …)` para dado de
+   titular, `global(…)` para o resto. Telefone nunca entra em nome de chave.
+3. **Nunca logar PII.** Use `redactPii`/`redactObject` de `core/logger` para qualquer
+   texto de origem externa. Corpo de request não é logado por padrão — mantenha assim.
+4. **`SET LOCAL`, nunca `SET`.** O PgBouncer em transaction mode recicla a conexão de
+   servidor a cada transação; um `SET` vazaria contexto de um titular para o próximo.
+5. **Módulo de domínio nunca importa módulo de domínio** — evento ou fila. Zero
+   `forwardRef()` no repositório.
 
 ---
 
