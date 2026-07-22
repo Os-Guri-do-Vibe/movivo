@@ -1,0 +1,9 @@
+# Normaliza fim de linha para LF no repositório (o time usa Windows, Linux e CI Ubuntu).
+* text=auto eol=lf
+
+pnpm-lock.yaml linguist-generated=true -diff
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.svg text eol=lf

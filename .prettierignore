@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+coverage/
+pnpm-lock.yaml
+*.tsbuildinfo
+
+# Relatórios do pipeline de agentes, definições de agentes e planejamento —
+# texto editorial, não código. Não devem ser reformatados pelo Prettier.
+.claude/
+docs/
+sprint/
+CLAUDE.md

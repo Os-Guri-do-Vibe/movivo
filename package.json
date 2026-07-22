@@ -1,0 +1,39 @@
+{
+  "name": "movivo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MOVIVO — AI Coach de treino individualizado no WhatsApp. Monorepo (apps/api, apps/web, packages/shared).",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@11.15.1",
+  "engines": {
+    "node": ">=22.22.0 <23",
+    "pnpm": ">=11.15.1"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "eslint . --max-warnings=0",
+    "lint:fix": "eslint . --fix",
+    "lint:api": "eslint apps/api --max-warnings=0",
+    "lint:web": "eslint apps/web --max-warnings=0",
+    "lint:shared": "eslint packages/shared --max-warnings=0",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@next/eslint-plugin-next": "16.2.11",
+    "@types/node": "22.20.1",
+    "eslint": "10.7.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.7.0",
+    "prettier": "3.9.6",
+    "turbo": "2.10.6",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.65.0"
+  }
+}

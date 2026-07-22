@@ -8,9 +8,12 @@ node_modules/
 # Build / cache
 dist/
 build/
+out/
 .next/
 .turbo/
 .cache/
+*.tsbuildinfo
+.eslintcache
 
 # Ambiente e segredos — nunca versionar (ver ARQUITETURA.md §12)
 .env

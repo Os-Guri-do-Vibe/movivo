@@ -1,0 +1,22 @@
+{
+  "name": "@movivo/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Backend MOVIVO — monólito modular NestJS. STUB na US-0.1; NestJS real chega na US-0.3.",
+  "license": "UNLICENSED",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "node --enable-source-maps dist/main.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node -e \"console.log('[api] runner de testes chega na US-0.8 (Mariana)')\"",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true});require('node:fs').rmSync('tsconfig.tsbuildinfo',{force:true})\""
+  },
+  "dependencies": {
+    "@movivo/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "typescript": "5.9.3"
+  }
+}

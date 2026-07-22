@@ -1,0 +1,20 @@
+{
+  "name": "@movivo/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Frontend MOVIVO — Next.js 15 (App Router). STUB na US-0.1; Next.js real chega na US-0.5.",
+  "license": "UNLICENSED",
+  "scripts": {
+    "dev": "node -e \"console.log('[web] dev server chega na US-0.5 (Felipe)')\"",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node -e \"console.log('[web] runner de testes chega na US-0.8 (Mariana)')\"",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true});require('node:fs').rmSync('tsconfig.tsbuildinfo',{force:true})\""
+  },
+  "dependencies": {
+    "@movivo/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}
