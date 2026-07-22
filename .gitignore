@@ -15,10 +15,49 @@ out/
 *.tsbuildinfo
 .eslintcache
 
-# Ambiente e segredos — nunca versionar (ver ARQUITETURA.md §12)
+# ─────────────────────────────────────────────────────────────────────────────
+# Ambiente e segredos — nunca versionar
+# Regra inegociável ARQUITETURA.md §12.7 · Sato 11-relatorio-sato.md §9.3
+# Dono desta seção: Henrique (US-0.6). Não afrouxar sem revisão de segurança.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Qualquer arquivo de ambiente, em qualquer diretório. Só *.example entra no Git.
 .env
 .env.*
+*.env
 !.env.example
+!*.env.example
+!.env.*.example
+
+# Docker Secrets locais (gerados por scripts/gen-local-secrets.*) — NUNCA versionar.
+# Padrão `dir/*` + exceções: o Git não reinclui arquivos dentro de um diretório excluído.
+secrets/*
+!secrets/README.md
+!secrets/.gitkeep
+
+# Material criptográfico: chaves privadas, certificados, keystores.
+*.key
+*.pem
+*.crt
+*.cer
+*.der
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.asc
+*.gpg
+certs/
+certificates/
+
+# Arquivo de autenticação do PgBouncer (usuário + senha em claro)
+userlist.txt
+
+# Credenciais de cloud / CI que jamais devem entrar no repo
+.npmrc.local
+*.kubeconfig
+kubeconfig
+gha-creds-*.json
 
 # Testes / cobertura
 coverage/

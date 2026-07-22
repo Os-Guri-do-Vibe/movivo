@@ -17,6 +17,7 @@ Este repositório é um **monorepo** (pnpm workspaces + Turborepo).
 - [Requisitos](#requisitos)
 - [Estrutura do monorepo](#estrutura-do-monorepo)
 - [Setup rápido](#setup-rápido)
+- [Ambiente e segredos](#ambiente-e-segredos)
 - [Scripts da raiz](#scripts-da-raiz)
 - [O pacote `@movivo/shared`](#o-pacote-movivoshared)
 - [Padrões de código](#padrões-de-código)
@@ -112,6 +113,62 @@ pnpm run test
 pnpm run build
 pnpm run format:check
 ```
+
+---
+
+## Ambiente e segredos
+
+> Política completa: **[`SECURITY.md`](SECURITY.md)**. Dono: Henrique (US-0.6).
+> **Nenhum segredo real entra no Git — nunca.** Só `*.env.example` com placeholders.
+
+### 1. Gere os segredos locais
+
+Valores aleatórios e descartáveis, gravados em `secrets/` (100% ignorado pelo Git):
+
+```bash
+# Linux, macOS ou Git Bash no Windows
+bash scripts/gen-local-secrets.sh
+```
+
+```powershell
+# Windows nativo (equivalente 1:1 do script bash)
+powershell -ExecutionPolicy Bypass -File scripts/gen-local-secrets.ps1
+```
+
+Idempotente: rodar de novo não sobrescreve. Para rotacionar tudo, use `--force`
+(bash) / `-Force` (PowerShell) e depois recrie os volumes do Postgres.
+
+### 2. Copie os arquivos de ambiente
+
+```bash
+cp .env.example .env                        # raiz — perfil do Docker Compose
+cp apps/api/.env.example apps/api/.env      # API rodando no host
+cp apps/web/.env.example apps/web/.env.local
+```
+
+### 3. Como a aplicação lê um segredo — contrato `*_FILE`
+
+Nenhuma senha aparece em `environment:` do Compose (vazaria em `docker inspect`).
+Os valores são montados como **Docker Secrets** em `/run/secrets/*` e a aplicação
+os lê pelo par `<VAR>_FILE`:
+
+| Precedência | Origem                                                                                                                       |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| 1º          | `<VAR>_FILE` — caminho de arquivo. **Vence sempre.** Arquivo ausente/vazio = falha fatal no boot, nunca fallback silencioso. |
+| 2º          | `<VAR>` — env direta.                                                                                                        |
+| 3º          | Ausente → o `ConfigModule` falha rápido no boot (Zod), citando os dois nomes.                                                |
+
+Caminho absoluto vale como está (`/run/secrets/...` no container); caminho relativo
+resolve contra o `cwd` do processo (`../../secrets/...` rodando no host). A
+especificação normativa que o `ConfigModule` implementa está em
+[`SECURITY.md` §2](SECURITY.md#2-contrato-de-consumo-de-secrets-_file--normativo).
+
+### 4. Regras que valem para qualquer variável
+
+- A aplicação conecta no Postgres **sempre na 5433** (PgBouncer). Nunca na 5432.
+  A única exceção é o `drizzle-kit`, que migra na 5432 como `movivo_migrator`.
+- `NEXT_PUBLIC_*` vai para o bundle do browser: **jamais** um segredo ali.
+- Nada sensível em log, erro, span de telemetria ou resposta de `/health`.
 
 ---
 
@@ -217,6 +274,7 @@ leia o documento completo antes de escrever código:
 | Documento                                                            | Conteúdo                                                                                                                    |
 | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | [`docs/arquitetura/ARQUITETURA.md`](docs/arquitetura/ARQUITETURA.md) | Stack obrigatória, ADRs, C4, segurança, roadmap, regras inegociáveis                                                        |
+| [`SECURITY.md`](SECURITY.md)                                         | Política de segredos: contrato `*_FILE`, Docker Secrets, segredos de CI, inventário e cadência de rotação                   |
 | [`sprint/sprint-0-fundacao.md`](sprint/sprint-0-fundacao.md)         | Planejamento operacional da Sprint 0 (Épico 0)                                                                              |
 | `docs/fitness-ia-whatsapp/`                                          | Relatórios completos do pipeline de agentes (negócio, marca, jurídico, financeiro, produto, UX, arquitetura, segurança, IA) |
 
