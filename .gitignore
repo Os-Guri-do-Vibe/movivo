@@ -1,0 +1,31 @@
+.DS_Store
+.claude/settings.local.json
+
+# Dependências
+node_modules/
+.pnpm-store/
+
+# Build / cache
+dist/
+build/
+.next/
+.turbo/
+.cache/
+
+# Ambiente e segredos — nunca versionar (ver ARQUITETURA.md §12)
+.env
+.env.*
+!.env.example
+
+# Testes / cobertura
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor / SO
+.vscode/*
+!.vscode/extensions.json
+Thumbs.db
