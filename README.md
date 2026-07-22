@@ -21,6 +21,7 @@ Este repositório é um **monorepo** (pnpm workspaces + Turborepo).
 - [Ambiente local de dados (Docker Compose)](#ambiente-local-de-dados-docker-compose)
 - [Scripts da raiz](#scripts-da-raiz)
 - [Backend (`apps/api`)](#backend-appsapi)
+- [Banco de dados (schema, migrações e seed)](#banco-de-dados-schema-migrações-e-seed)
 - [O pacote `@movivo/shared`](#o-pacote-movivoshared)
 - [Padrões de código](#padrões-de-código)
 - [Regras inegociáveis](#regras-inegociáveis)
@@ -376,6 +377,71 @@ Não expõe segredo nem string de conexão.
    servidor a cada transação; um `SET` vazaria contexto de um titular para o próximo.
 5. **Módulo de domínio nunca importa módulo de domínio** — evento ou fila. Zero
    `forwardRef()` no repositório.
+
+---
+
+## Banco de dados (schema, migrações e seed)
+
+O schema vive em `apps/api/src/core/database/schema/` (um arquivo por tabela) e as
+migrações versionadas em `apps/api/drizzle/`. As duas coisas precisam estar sempre
+em sincronia: se `db:generate` produzir um arquivo novo, é porque alguém alterou o
+schema sem gerar a migração.
+
+### Comandos
+
+```bash
+pnpm --filter @movivo/api db:generate   # gera migração a partir do schema
+pnpm --filter @movivo/api db:migrate    # aplica migrações + reconcilia grants
+pnpm --filter @movivo/api db:seed       # popula dados sintéticos de dev (idempotente)
+pnpm --filter @movivo/api db:studio     # UI do Drizzle Studio
+```
+
+Ciclo completo do zero (o que o CI e um clone limpo fazem):
+
+```bash
+pnpm run infra:reset                    # destrói volumes e recria o stack
+pnpm --filter @movivo/api db:migrate
+pnpm --filter @movivo/api db:seed
+```
+
+### Por que a migração NÃO passa pelo PgBouncer
+
+O runtime da aplicação fala com o Postgres **exclusivamente pela 5433** (regra
+inegociável §12.3). A migração é a **única exceção** e usa conexão direta
+(`MIGRATION_DATABASE_*`, porta 5432 do container), por duas razões técnicas:
+
+1. o `drizzle-kit` serializa migrações com **advisory locks de sessão** — em
+   transaction pooling, o lock seria adquirido numa conexão de backend e perdido
+   em outra;
+2. DDL com `CREATE TYPE`/`CREATE EXTENSION` não sobrevive ao rebind de sessão do pooler.
+
+Isso não afrouxa a regra §12.3, que trata do caminho da **aplicação**. Há uma trava
+explícita: tanto `drizzle.config.ts` quanto `db:migrate` **abortam** se a porta de
+migração apontar para 5433.
+
+> **Porta 5432 ocupada?** Se você já tem um PostgreSQL nativo na máquina, defina
+> `HOST_POSTGRES_PORT=15432` no `.env` da raiz e o **mesmo valor** em
+> `MIGRATION_DATABASE_PORT` no `apps/api/.env`.
+
+### Modelo de permissões
+
+| Role              | Papel                                   | Pode                                                     |
+| ----------------- | --------------------------------------- | -------------------------------------------------------- |
+| `movivo_migrator` | Dona do schema `public`, roda migrações | DDL, `CREATE` no banco (schema `drizzle` do bookkeeping) |
+| `movivo_app`      | Runtime da aplicação                    | `SELECT/INSERT/UPDATE/DELETE` apenas                     |
+
+`movivo_app` **não é dona de nenhuma tabela** e **não tem `BYPASSRLS`** — as duas
+condições que fazem as políticas `FORCE ROW LEVEL SECURITY` das próximas sprints
+serem inescapáveis. O `db:migrate` **verifica isso a cada execução** e falha se
+alguém tiver afrouxado o modelo. Os grants são reconciliados automaticamente a cada
+migração, então tabela nova já nasce acessível ao runtime sem passo manual.
+
+### O que ficou para sprints futuras (deliberado)
+
+Índices HNSW (RAG), particionamento mensal de `conversations`, triggers de auditoria
+append-only e as políticas RLS propriamente ditas. O terreno está preparado —
+`user_id` é coluna líder dos índices por usuário e as colunas de saúde já estão
+marcadas com `-- LGPD Art. 11` para a cifra `pgcrypto` da sprint de anamnese.
 
 ---
 

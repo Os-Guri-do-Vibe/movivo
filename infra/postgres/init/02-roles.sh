@@ -100,7 +100,12 @@ CREATE ROLE :"app_user"
 -- 2. Privilégios de banco — fecha o default permissivo do PostgreSQL
 -- ---------------------------------------------------------------------------
 REVOKE ALL ON DATABASE :"db_name" FROM PUBLIC;
-GRANT CONNECT, TEMPORARY ON DATABASE :"db_name" TO :"migrator_user";
+-- CREATE no banco: o drizzle-kit mantém sua tabela de controle de migrações num
+-- schema próprio (`drizzle`), separado do `public`. Manter esse bookkeeping fora
+-- do `public` faz com que o schema de domínio contenha exatamente as tabelas de
+-- negócio — o que torna auditável a checagem "as N tabelas esperadas existem".
+-- O privilégio é do migrador, nunca do app.
+GRANT CONNECT, TEMPORARY, CREATE ON DATABASE :"db_name" TO :"migrator_user";
 -- O app NÃO recebe TEMPORARY: não precisa de tabelas temporárias e isso remove
 -- um vetor de consumo de disco por sessão sob transaction pooling.
 GRANT CONNECT ON DATABASE :"db_name" TO :"app_user";

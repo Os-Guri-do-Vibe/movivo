@@ -1,6 +1,12 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+allowBuilds:
+  # esbuild é dependência transitiva de `drizzle-kit` e `tsx` (US-0.4). Seu script de
+  # instalação apenas resolve/valida o binário nativo da plataforma correta; sem ele,
+  # `db:generate`/`db:migrate`/`db:seed` não rodam. Nenhum dos dois é dependência de
+  # runtime da API — ficam confinados a devDependencies de `apps/api`.
+  esbuild: true
 minimumReleaseAgeExclude:
   - '@turbo/darwin-64@2.10.6'
   - '@turbo/darwin-arm64@2.10.6'

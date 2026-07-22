@@ -99,6 +99,24 @@ export default tseslint.config(
   },
 
   {
+    /*
+     * Scripts de linha de comando do banco (`db:migrate`, `db:seed`).
+     *
+     * `no-console` é desligado aqui porque nestes arquivos o stdout **é** a
+     * interface com o operador: quem roda uma migração precisa ver, no terminal,
+     * qual host foi alvo, quais extensões foram garantidas e se o modelo de
+     * permissões passou. Mandá-los para o logger estruturado da aplicação seria
+     * pior — o pino é montado pelo ciclo de vida do Nest, que não existe num
+     * script `tsx` avulso.
+     */
+    name: 'movivo/db-cli-scripts',
+    files: ['apps/api/src/core/database/{migrate,seed}.ts'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
+
+  {
     name: 'movivo/apps-web',
     files: ['apps/web/**/*.{ts,tsx}'],
     plugins: {
