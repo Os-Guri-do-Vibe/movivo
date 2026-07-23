@@ -11,6 +11,9 @@ overrides:
   'picomatch@>=4.0.0 <4.0.4': '>=4.0.4'
   # sharp <0.35.0 — CVEs herdadas do libvips. Origem: next>sharp (US-0.5, apps/web).
   'sharp@<0.35.0': '>=0.35.0'
+  # postcss <=8.5.11 — leitura arbitrária de arquivo via sourceMappingURL em comentário
+  # CSS. Origem: toolchain do Next/Tailwind. Datado: 2026-07-23.
+  'postcss@<=8.5.11': '>=8.5.12'
 allowBuilds:
   # `core-js` entra como dependência transitiva de `posthog-js` (US-0.5). Seu script de
   # postinstall só imprime uma mensagem de financiamento — não produz artefato nenhum.
