@@ -39,6 +39,15 @@ updates:
         update-types:
           - 'minor'
           - 'patch'
+    ignore:
+      # typescript fixado em 5.9.x de propósito: o typescript-eslint (v8) exige
+      # `typescript <6.1.0`. Subir major quebra o lint de todo o monorepo (README §Requisitos).
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
+      # @types/node acompanha o runtime (Node 22). Não subir o major dos tipos além
+      # do runtime — geraria tipos de APIs que não existem em execução.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
 
   # --- GitHub Actions usadas nos workflows (pin/atualização de versões) ------
   - package-ecosystem: 'github-actions'
