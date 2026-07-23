@@ -12,7 +12,10 @@ next-env.d.ts
 
 # Relatórios do pipeline de agentes, definições de agentes e planejamento —
 # texto editorial, não código. Não devem ser reformatados pelo Prettier.
+# `AGENTS.md` e `.codex/` são o equivalente de `CLAUDE.md`/`.claude/` para o Codex.
 .claude/
+.codex/
 docs/
 sprint/
 CLAUDE.md
+AGENTS.md
