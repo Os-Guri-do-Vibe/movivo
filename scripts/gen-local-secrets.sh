@@ -98,7 +98,12 @@ USERLIST="${SECRETS_DIR}/pgbouncer_userlist.txt"
   printf '"%s" "%s"\n' "$APP_USER"      "$(read_secret postgres_app_password)"
   printf '"%s" "%s"\n' "$MIGRATOR_USER" "$(read_secret postgres_migrator_password)"
 } > "$USERLIST"
-chmod 600 "$USERLIST" 2>/dev/null || true
+# 0644 pelo mesmo motivo dos arquivos de senha (ver write_secret): no Docker do
+# Linux o PgBouncer roda como o usuário do container e precisa LER este auth_file
+# bind-montado. Com 0600 de outro dono ele sobe com userlist vazio e toda auth
+# via pooler falha com "SASL authentication failed". O diretório 700 protege a
+# confidencialidade local.
+chmod 644 "$USERLIST" 2>/dev/null || true
 echo "  + pgbouncer_userlist.txt (${APP_USER}, ${MIGRATOR_USER})"
 
 # --- Guarda de segurança ------------------------------------------------------
