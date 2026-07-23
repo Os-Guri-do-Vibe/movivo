@@ -1,0 +1,73 @@
+# =============================================================================
+# MOVIVO — Dependabot  ·  US-0.7 / TASK-0.7.4 · Sprint 0
+# =============================================================================
+# Dono: Henrique Matsuda (Platform/SRE) · Requisito: Sato §12.2 (supply chain).
+#
+# Mantém dependências vulneráveis atualizadas automaticamente (ex.: ioredis,
+# BullMQ, Redis client, Next.js, NestJS, Drizzle). Os PRs abertos por aqui
+# passam pelo MESMO gate de CI (quality + secret-scan + sast + sca) antes de
+# poderem ser mergeados — a atualização não pula a branch protection.
+#
+# HABILITAR: o Dependabot é um serviço do lado do GitHub. Este arquivo só tem
+# efeito depois de comitado em `main` E com o Dependabot ligado no painel do
+# repositório (Settings → Code security). Passo a passo em
+# docs/ci/branch-protection.md §Dependabot.
+# =============================================================================
+
+version: 2
+updates:
+  # --- Ecossistema npm/pnpm (raiz do monorepo; cobre os workspaces) ----------
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 10
+    versioning-strategy: "increase"
+    labels:
+      - "dependencies"
+    commit-message:
+      # Conventional Commits (CLAUDE.md): tipo em inglês, descrição PT-BR.
+      prefix: "chore"
+      prefix-development: "chore"
+      include: "scope"
+    groups:
+      # Agrupa patches/minors de baixo risco num PR só, reduzindo ruído.
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # --- GitHub Actions usadas nos workflows (pin/atualização de versões) ------
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Sao_Paulo"
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+
+  # --- Imagens Docker (docker-compose da US-0.2) -----------------------------
+  # ATENÇÃO: nunca aceitar bump que rebaixe o Redis abaixo do patch da
+  # CVE-2025-49844 (RediShell) — ARQUITETURA §12.14. Revisar manualmente.
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Sao_Paulo"
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "build"
+      include: "scope"

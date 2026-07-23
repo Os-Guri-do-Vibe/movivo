@@ -1,0 +1,265 @@
+# =============================================================================
+# MOVIVO — Pipeline de CI/CD (DevSecOps)  ·  US-0.7 · Sprint 0
+# =============================================================================
+# Dono: Henrique Matsuda (Platform Engineering / SRE)
+# Requisitos de origem:
+#   · sprint/sprint-0-fundacao.md — US-0.7 (TASK-0.7.1 a 0.7.6)
+#   · docs/qualidade/quality-gates.md — contrato de gates de Mariana (US-0.8)
+#   · docs/fitness-ia-whatsapp/11-relatorio-sato.md §12 — DevSecOps obrigatório
+#   · SECURITY.md §3 — política de secrets de CI (menor privilégio, sem token longo)
+#
+# FILOSOFIA (Mariana): a qualidade e a segurança têm que ser INEVITÁVEIS.
+# Cada job abaixo é um status check independente; a branch protection de `main`
+# (scripts/setup-branch-protection.sh) exige TODOS verdes antes de qualquer merge.
+#
+# JOBS (todos rodam em paralelo, sem dependência entre si):
+#   quality      lint → typecheck → build → testes unit + cobertura ≥80% (gate Mariana)
+#   integration  sobe o stack Docker (US-0.2) e roda os testes de integração (test:int)
+#   e2e          Playwright (smoke E2E da home) contra o dev server
+#   secret-scan  gitleaks sobre o histórico completo  (bloqueia se achar secret)
+#   sast         semgrep --config auto (bloqueia em finding HIGH/ERROR)
+#   sca          pnpm audit --audit-level=high (bloqueia CVE HIGH/CRITICAL)
+# =============================================================================
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Menor privilégio por padrão (SECURITY.md §3.2). Nenhum job da Sprint 0 precisa
+# de escopo de escrita; elevar por job apenas quando (e se) um deploy existir.
+permissions:
+  contents: read
+
+# Cancela execuções superadas do mesmo ref para não desperdiçar runner.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Recado do Leonardo: telemetria do Turbo desligada em todo o CI.
+  TURBO_TELEMETRY_DISABLED: "1"
+  # Silencia telemetria/atualização de ferramentas ruidosas no runner.
+  DO_NOT_TRACK: "1"
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # QUALIDADE — lint, typecheck, build e testes unitários com cobertura ≥ 80%.
+  # Os limiares de cobertura já estão CODIFICADOS em vitest.config de cada app
+  # (contrato de Mariana, quality-gates.md §Cobertura): test:cov sai com exit≠0
+  # sozinho abaixo de 80%. Aqui o CI só invoca e respeita o exit code.
+  # ---------------------------------------------------------------------------
+  quality:
+    name: quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node (versão do .nvmrc)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Cache do Turborepo
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Format check
+        run: pnpm run format:check
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Build (api, web, shared)
+        run: pnpm run build
+
+      - name: Testes — packages/shared (pass/fail)
+        run: pnpm --filter @movivo/shared run test
+
+      - name: Testes + cobertura — apps/api (gate ≥ 80%)
+        run: pnpm --filter @movivo/api run test:cov
+
+      - name: Testes + cobertura — apps/web (gate ≥ 80%)
+        run: pnpm --filter @movivo/web run test:cov
+
+  # ---------------------------------------------------------------------------
+  # INTEGRAÇÃO — provisiona o stack de dados da US-0.2 e roda test:int.
+  # O runner ubuntu-latest já tem Docker. Sequência: gerar secrets efêmeros →
+  # subir Postgres/PgBouncer/Redis+Sentinel (--wait) → migrar → seed → testar.
+  # ---------------------------------------------------------------------------
+  integration:
+    name: integration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node (versão do .nvmrc)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages/shared (consumido pela API)
+        run: pnpm --filter @movivo/shared run build
+
+      - name: Gerar Docker Secrets efêmeros do CI
+        run: bash scripts/gen-local-secrets.sh
+
+      - name: Preparar arquivos .env (a partir dos .example versionados)
+        run: |
+          cp .env.example .env
+          cp apps/api/.env.example apps/api/.env
+
+      - name: Subir o stack de dados (US-0.2) e aguardar healthy
+        run: pnpm run infra:up
+
+      - name: Aplicar migração 0000_init (role movivo_migrator)
+        run: pnpm --filter @movivo/api run db:migrate
+
+      - name: Seed sintético idempotente (sem PII real)
+        run: pnpm --filter @movivo/api run db:seed
+
+      - name: Testes de integração — apps/api (Postgres/Redis reais)
+        run: pnpm --filter @movivo/api run test:int
+
+      - name: Diagnóstico do stack em caso de falha
+        if: failure()
+        run: docker compose ps && docker compose logs --tail=120
+
+      - name: Derrubar o stack
+        if: always()
+        run: pnpm run infra:down
+
+  # ---------------------------------------------------------------------------
+  # E2E — smoke Playwright (home carrega, componente do design system aparece).
+  # O webServer do Playwright sobe `pnpm run dev` sozinho (config de Felipe/Mariana).
+  # Com CI=true o Playwright NÃO reaproveita servidor e usa o reporter github.
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node (versão do .nvmrc)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages/shared (consumido pelo web)
+        run: pnpm --filter @movivo/shared run build
+
+      - name: Preparar .env.local do web (valores públicos degradam graciosamente)
+        run: cp apps/web/.env.example apps/web/.env.local
+
+      - name: Instalar navegador do Playwright (chromium + libs de SO)
+        run: pnpm --filter @movivo/web exec playwright install --with-deps chromium
+
+      - name: Smoke E2E — apps/web
+        run: pnpm --filter @movivo/web run test:e2e
+
+      - name: Publicar relatório do Playwright em caso de falha
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # SECRET SCANNING — gitleaks sobre o histórico COMPLETO (fetch-depth: 0).
+  # Sato §12.1/§12.2: nenhum secret pode entrar no repositório. Push protection
+  # do GitHub (server-side) é config de painel/admin — ver docs/ci/branch-protection.md.
+  # ---------------------------------------------------------------------------
+  secret-scan:
+    name: secret-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (histórico completo p/ varrer todos os commits)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITLEAKS_LICENSE só é exigida em repositório de ORGANIZAÇÃO; se este
+          # repo for de org, adicione-a como Actions Secret (ver SECURITY.md §3.3).
+
+  # ---------------------------------------------------------------------------
+  # SAST — semgrep (regras OWASP + TypeScript). Bloqueia em finding HIGH (ERROR).
+  # Roda sem token (`--config auto` é anônimo). SEMGREP_APP_TOKEN é opcional.
+  # ---------------------------------------------------------------------------
+  sast:
+    name: sast
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep:1.90.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: semgrep (falha em HIGH/ERROR)
+        run: semgrep --config auto --severity ERROR --error
+        env:
+          SEMGREP_SEND_METRICS: "off"
+
+  # ---------------------------------------------------------------------------
+  # SCA — análise de dependências. Bloqueia em CVE HIGH/CRITICAL (sem exceção
+  # documentada). Dependabot (.github/dependabot.yml) abre os PRs de bump.
+  # ---------------------------------------------------------------------------
+  sca:
+    name: sca
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node (versão do .nvmrc)
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile
+
+      - name: pnpm audit (bloqueia HIGH/CRITICAL)
+        run: pnpm audit --audit-level=high
