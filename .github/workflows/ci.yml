@@ -6,7 +6,7 @@
 #   · sprint/sprint-0-fundacao.md — US-0.7 (TASK-0.7.1 a 0.7.6)
 #   · docs/qualidade/quality-gates.md — contrato de gates de Mariana (US-0.8)
 #   · docs/fitness-ia-whatsapp/11-relatorio-sato.md §12 — DevSecOps obrigatório
-#   · SECURITY.md §3 — política de secrets de CI (menor privilégio, sem token longo)
+#   · docs/SECURITY.md §3 — política de secrets de CI (menor privilégio, sem token longo)
 #
 # FILOSOFIA (Mariana): a qualidade e a segurança têm que ser INEVITÁVEIS.
 # Cada job abaixo é um status check independente; a branch protection de `main`
@@ -28,7 +28,7 @@ on:
   push:
     branches: [main]
 
-# Menor privilégio por padrão (SECURITY.md §3.2). Nenhum job da Sprint 0 precisa
+# Menor privilégio por padrão (docs/SECURITY.md §3.2). Nenhum job da Sprint 0 precisa
 # de escopo de escrita; elevar por job apenas quando (e se) um deploy existir.
 permissions:
   contents: read

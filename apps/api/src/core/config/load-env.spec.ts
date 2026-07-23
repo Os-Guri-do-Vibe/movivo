@@ -2,7 +2,7 @@
  * Testes de `loadEnv` (US-0.8, Mariana).
  *
  * `loadEnv` é a montagem determinística do ambiente bruto que alimenta o Zod. A ordem
- * de precedência é uma regra de segurança, não conveniência (SECURITY.md §2):
+ * de precedência é uma regra de segurança, não conveniência (docs/SECURITY.md §2):
  *   arquivo `.env`  <  `process.env`  <  resolução de `*_FILE`.
  *
  * Os testes usam um diretório temporário como `cwd` — nunca tocam o `.env` real do

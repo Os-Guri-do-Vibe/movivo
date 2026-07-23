@@ -4,13 +4,13 @@
  * Ordem de composição (menor → maior precedência):
  *   1. `apps/api/.env` (perfil local do dev, nunca versionado)
  *   2. `process.env` (o que o shell/Docker realmente injetou)
- *   3. resolução dos pares `K_FILE` (SECURITY.md §2 — vence tudo)
+ *   3. resolução dos pares `K_FILE` (docs/SECURITY.md §2 — vence tudo)
  *
  * Detalhe deliberado: usamos `dotenv.parse` sobre o arquivo lido, e **não**
  * `dotenv.config()`. `config()` escreve em `process.env`; queremos o oposto —
  * manter a configuração (em especial os segredos) fora do ambiente do processo,
  * longe de processos filhos, dumps de crash e libs que serializam o `env`
- * (SECURITY.md §2.1.8).
+ * (docs/SECURITY.md §2.1.8).
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';

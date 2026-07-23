@@ -11,7 +11,7 @@ Os arquivos deste diretório são as **fontes** dos Docker Secrets declarados em
 [`docker-compose.secrets.yml`](../docker-compose.secrets.yml). O Docker os monta
 dentro dos containers em `/run/secrets/<nome>`, **somente leitura** e fora da imagem
 (bind read-only no Compose standalone; tmpfs no Swarm/Vault da Fase B). A aplicação
-os lê pelo contrato `*_FILE` documentado em [`SECURITY.md`](../SECURITY.md).
+os lê pelo contrato `*_FILE` documentado em [`docs/SECURITY.md`](../docs/SECURITY.md).
 
 Nada aqui é senha "de verdade": são valores aleatórios descartáveis, válidos
 apenas para a sua máquina.

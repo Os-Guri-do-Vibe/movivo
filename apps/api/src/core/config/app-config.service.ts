@@ -106,7 +106,7 @@ export class AppConfigService {
    * Snapshot seguro para log de boot e diagnóstico.
    *
    * Segredos são omitidos **por construção** (a partir de `SECRET_KEYS`), não por
-   * disciplina de quem escreve o código — exigência de `SECURITY.md` §2.1.10. Nunca
+   * disciplina de quem escreve o código — exigência de `docs/SECURITY.md` §2.1.10. Nunca
    * exponha este objeto em `/health`: ele é para log interno de boot.
    */
   redactedSnapshot(): Record<string, unknown> {

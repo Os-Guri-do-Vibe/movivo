@@ -1,5 +1,5 @@
 /**
- * Contrato `*_FILE` de `SECURITY.md` §2 — normativo. Cada teste aqui corresponde a uma
+ * Contrato `*_FILE` de `docs/SECURITY.md` §2 — normativo. Cada teste aqui corresponde a uma
  * regra numerada do documento; se um deles cair, o ambiente local e a migração para
  * Vault (Fase B) quebram junto.
  */

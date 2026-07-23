@@ -5,7 +5,7 @@
  * pelo literal no momento do build e o valor viaja dentro do bundle JavaScript servido
  * ao browser. Nenhum segredo de servidor pode ser lido aqui — nem indiretamente.
  * Segredos de servidor (a partir da Sprint 2: `AUTH_SECRET`) seguem o contrato `*_FILE`
- * descrito em `SECURITY.md` §2 e são lidos exclusivamente em código de servidor.
+ * descrito em `docs/SECURITY.md` §2 e são lidos exclusivamente em código de servidor.
  *
  * A leitura é feita como acesso literal a `process.env.NEXT_PUBLIC_X` de propósito:
  * acesso dinâmico (`process.env[nome]`) não é substituído pelo compilador e chegaria

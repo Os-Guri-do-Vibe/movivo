@@ -35,7 +35,7 @@
 - [ ] Nenhum secret no diff nem no histórico (gitleaks verde). Só `.env.example` versionado.
 - [ ] Zero CVE HIGH/CRITICAL sem exceção **documentada e datada** (SCA verde).
 - [ ] SAST sem finding HIGH.
-- [ ] Segredos consumidos via contrato `*_FILE` (`SECURITY.md` §2) — nada em `environment:`.
+- [ ] Segredos consumidos via contrato `*_FILE` (`docs/SECURITY.md` §2) — nada em `environment:`.
 
 ### Regras inegociáveis tocadas neste PR (marque as que se aplicam)
 

@@ -177,7 +177,7 @@ function describeMissingKey(key: string): string {
 
 /**
  * Traduz o erro do Zod numa mensagem de boot acionável — nomeia cada variável e,
- * para segredos, os **dois** nomes aceitos (SECURITY.md §2.1.3). Nenhum valor é
+ * para segredos, os **dois** nomes aceitos (docs/SECURITY.md §2.1.3). Nenhum valor é
  * impresso: o Zod recebe apenas nomes de chave e nós nunca ecoamos `input`.
  */
 export function formatEnvError(error: z.ZodError<unknown>): string {
@@ -194,6 +194,6 @@ export function formatEnvError(error: z.ZodError<unknown>): string {
     '  1. cp apps/api/.env.example apps/api/.env',
     '  2. pnpm run infra:secrets   (gera os arquivos em secrets/, nunca versionados)',
     '  3. pnpm run infra:up',
-    'Contrato completo dos segredos: SECURITY.md §2.',
+    'Contrato completo dos segredos: docs/SECURITY.md §2.',
   ].join('\n');
 }

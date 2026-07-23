@@ -123,7 +123,7 @@ pnpm run format:check
 
 ## Ambiente e segredos
 
-> Política completa: **[`SECURITY.md`](SECURITY.md)**. Dono: Henrique (US-0.6).
+> Política completa: **[`docs/SECURITY.md`](docs/SECURITY.md)**. Dono: Henrique (US-0.6).
 > **Nenhum segredo real entra no Git — nunca.** Só `*.env.example` com placeholders.
 
 ### 1. Gere os segredos locais
@@ -166,7 +166,7 @@ os lê pelo par `<VAR>_FILE`:
 Caminho absoluto vale como está (`/run/secrets/...` no container); caminho relativo
 resolve contra o `cwd` do processo (`../../secrets/...` rodando no host). A
 especificação normativa que o `ConfigModule` implementa está em
-[`SECURITY.md` §2](SECURITY.md#2-contrato-de-consumo-de-secrets-_file--normativo).
+[`docs/SECURITY.md` §2](docs/SECURITY.md#2-contrato-de-consumo-de-secrets-_file--normativo).
 
 ### 4. Regras que valem para qualquer variável
 
@@ -285,7 +285,7 @@ devolve o endereço anunciado, que é o hostname do serviço (`redis-master:6379
 
 `infra:down` **preserva os dados**; use `infra:reset` quando quiser um banco limpo
 ou depois de rotacionar segredos (a senha de uma role já criada não muda sozinha —
-ver [`SECURITY.md` §4.1](SECURITY.md)).
+ver [`docs/SECURITY.md` §4.1](docs/SECURITY.md)).
 
 ---
 
@@ -331,7 +331,7 @@ src/
 │                           graceful shutdown · porta 3001
 ├─ app.module.ts            raiz — CORE + Health + 9 módulos de domínio
 ├─ core/                    BLOCO CORE (infraestrutura compartilhada)
-│  ├─ config/               Zod + contrato *_FILE (SECURITY.md §2) · fail-fast no boot
+│  ├─ config/               Zod + contrato *_FILE (docs/SECURITY.md §2) · fail-fast no boot
 │  ├─ database/             Drizzle + postgres.js via PgBouncer 5433 · prepare: false
 │  ├─ redis/                ioredis via Sentinel · RedisKeyBuilder (isolamento por titular)
 │  ├─ logger/               pino JSON · correlation id · redação de PII
@@ -369,7 +369,7 @@ Não expõe segredo nem string de conexão.
 ### Regras de quem escreve backend aqui
 
 1. **Config só pelo `AppConfigService`.** Nunca ler `process.env` direto: os segredos
-   deliberadamente **não** são injetados em `process.env` (SECURITY.md §2.1.8).
+   deliberadamente **não** são injetados em `process.env` (docs/SECURITY.md §2.1.8).
 2. **Chave de Redis só pelo `RedisKeyBuilder`.** `forUser(userId, …)` para dado de
    titular, `global(…)` para o resto. Telefone nunca entra em nome de chave.
 3. **Nunca logar PII.** Use `redactPii`/`redactObject` de `core/logger` para qualquer
@@ -516,7 +516,7 @@ está nos utilitários `text-display`, `text-h1`, `text-h2`, `text-h3`, `text-bo
 1. **Component é Server Component até prova em contrário.** `'use client'` só quando
    houver estado, efeito ou handler de evento — e o mais fundo possível na árvore.
 2. **`NEXT_PUBLIC_*` é público.** O valor é inlined no bundle e visível a qualquer um.
-   Segredo de servidor segue o contrato `*_FILE` de [`SECURITY.md`](SECURITY.md) §2 e
+   Segredo de servidor segue o contrato `*_FILE` de [`docs/SECURITY.md`](docs/SECURITY.md) §2 e
    nunca é lido por `src/lib/env.ts`.
 3. **Regra cromática de Kimura, inegociável:** Verde Pulso e Coral **nunca** são cor de
    texto pequeno sobre fundo claro (reprovam em AA). Texto sobre claro é Grafite ou
@@ -609,7 +609,7 @@ leia o documento completo antes de escrever código:
 | Documento                                                            | Conteúdo                                                                                                                    |
 | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | [`docs/arquitetura/ARQUITETURA.md`](docs/arquitetura/ARQUITETURA.md) | Stack obrigatória, ADRs, C4, segurança, roadmap, regras inegociáveis                                                        |
-| [`SECURITY.md`](SECURITY.md)                                         | Política de segredos: contrato `*_FILE`, Docker Secrets, segredos de CI, inventário e cadência de rotação                   |
+| [`docs/SECURITY.md`](docs/SECURITY.md)                               | Política de segredos: contrato `*_FILE`, Docker Secrets, segredos de CI, inventário e cadência de rotação                   |
 | [`sprint/sprint-0-fundacao.md`](sprint/sprint-0-fundacao.md)         | Planejamento operacional da Sprint 0 (Épico 0)                                                                              |
 | `docs/fitness-ia-whatsapp/`                                          | Relatórios completos do pipeline de agentes (negócio, marca, jurídico, financeiro, produto, UX, arquitetura, segurança, IA) |
 

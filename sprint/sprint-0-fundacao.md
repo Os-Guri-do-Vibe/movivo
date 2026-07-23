@@ -361,7 +361,7 @@ Padronizar como o NestJS (US-0.3) lê secrets: preferir arquivo montado (`*_FILE
 
 **TASK-0.6.4 — GitHub Actions Secrets e política de CI (Henrique).**
 Definir no repositório os secrets de CI necessários (mínimos para Sprint 0: nenhum secret de produção; apenas tokens de scanners se aplicável) como **GitHub Actions Secrets**, com escopo mínimo e sem long-lived tokens (preferir OIDC quando deploy existir — deploy não é escopo da Sprint 0). Documentar a política: quais secrets existem, quem rotaciona, cadência (herdar a tabela de rotação de Sato §9 como referência para as próximas sprints).
-**Conclusão:** documento curto no README/`SECURITY.md` lista os secrets de CI e a política; nenhum secret hardcoded em workflow YAML.
+**Conclusão:** documento curto no README/`docs/SECURITY.md` lista os secrets de CI e a política; nenhum secret hardcoded em workflow YAML.
 
 ### Definição de Pronto (US-0.6 "validada")
 

@@ -6,7 +6,7 @@
 #   · sprint/sprint-0-fundacao.md — US-0.2, TASK-0.2.1 a 0.2.4
 #   · docs/arquitetura/ARQUITETURA.md §2 (stack), §8 (segurança), §12 (regras)
 #   · docs/fitness-ia-whatsapp/11-relatorio-sato.md §4.3 e §9 (hardening)
-#   · SECURITY.md (US-0.6) — contrato de Docker Secrets e `*_FILE`
+#   · docs/SECURITY.md (US-0.6) — contrato de Docker Secrets e `*_FILE`
 #
 # ─── COMO SUBIR ──────────────────────────────────────────────────────────────
 #   1. bash scripts/gen-local-secrets.sh            (ou o .ps1 no Windows)
@@ -14,7 +14,7 @@
 #   3. pnpm run infra:up          (equivalente: make up)
 #
 #   O bloco top-level `secrets:` continua morando em `docker-compose.secrets.yml`
-#   (contrato da US-0.6, referenciado por SECURITY.md §2.4) e é puxado pelo
+#   (contrato da US-0.6, referenciado por docs/SECURITY.md §2.4) e é puxado pelo
 #   `include:` abaixo — assim `docker compose <qualquer comando>` funciona sem
 #   repetir `-f ... -f ...`, e o inventário de secrets segue com um dono e um
 #   arquivo só. `docker compose -f docker-compose.yml -f docker-compose.secrets.yml`
@@ -64,7 +64,7 @@ services:
     container_name: movivo-postgres
     # `environment` contém APENAS nomes, caminhos e parâmetros não sensíveis.
     # A senha do superusuário entra por POSTGRES_PASSWORD_FILE (suporte nativo
-    # da imagem oficial) — SECURITY.md §2.4.
+    # da imagem oficial) — docs/SECURITY.md §2.4.
     environment:
       POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-movivo}

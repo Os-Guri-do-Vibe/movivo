@@ -9,7 +9,7 @@
  *  - O SDK do OpenTelemetry precisa ser inicializado **antes** do `NestFactory.create`
  *    (a auto-instrumentação faz monkey-patch de `http`/`pg`/`ioredis` no require).
  *  - Atributo de span **nunca** carrega PII — a mesma regra de `redaction.util.ts`
- *    vale para telemetria (SECURITY.md §1: "segredo/PII em span" é proibição explícita).
+ *    vale para telemetria (docs/SECURITY.md §1: "segredo/PII em span" é proibição explícita).
  *  - O `correlationId` do `LoggerModule` deve virar o `trace_id`, para casar log e trace.
  */
 import { Module } from '@nestjs/common';

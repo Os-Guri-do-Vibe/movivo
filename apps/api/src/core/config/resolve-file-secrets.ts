@@ -1,5 +1,5 @@
 /**
- * Contrato `*_FILE` — implementação normativa de `SECURITY.md` §2 (Henrique, US-0.6).
+ * Contrato `*_FILE` — implementação normativa de `docs/SECURITY.md` §2 (Henrique, US-0.6).
  *
  * Para toda chave sensível `K` existe uma irmã opcional `K_FILE`. Este preload roda
  * **antes** da validação Zod (§2.2) e devolve um objeto de env já resolvido, do qual
@@ -16,7 +16,7 @@
 import { readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 
-/** Chaves sensíveis da Sprint 0 (SECURITY.md §2.2). Novas sprints acrescentam aqui. */
+/** Chaves sensíveis da Sprint 0 (docs/SECURITY.md §2.2). Novas sprints acrescentam aqui. */
 export const SECRET_KEYS = [
   'DATABASE_PASSWORD',
   'MIGRATION_DATABASE_PASSWORD',
@@ -87,7 +87,7 @@ export function resolveFileSecrets(
         key,
         `${fileKey} aponta para "${absolutePath}", que não pôde ser lido. ` +
           `Gere os segredos locais com "pnpm run infra:secrets". ` +
-          `Fallback para ${key} é proibido (SECURITY.md §2.1.4).`,
+          `Fallback para ${key} é proibido (docs/SECURITY.md §2.1.4).`,
         { cause },
       );
     }
@@ -96,14 +96,14 @@ export function resolveFileSecrets(
     if (value.length === 0) {
       throw new FileSecretError(
         key,
-        `${fileKey} aponta para "${absolutePath}", mas o arquivo está vazio (SECURITY.md §2.1.6).`,
+        `${fileKey} aponta para "${absolutePath}", mas o arquivo está vazio (docs/SECURITY.md §2.1.6).`,
       );
     }
 
     if (env[key] !== undefined) {
       warnings.push({
         key,
-        message: `${key} e ${fileKey} estão definidos; ${fileKey} tem precedência (SECURITY.md §2.1.7).`,
+        message: `${key} e ${fileKey} estão definidos; ${fileKey} tem precedência (docs/SECURITY.md §2.1.7).`,
       });
     }
 

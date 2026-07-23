@@ -1,7 +1,7 @@
 # CI/CD e proteção de `main` — Handoff operacional (US-0.7)
 
 **Dono:** Henrique Matsuda (Platform Engineering / SRE) · Sprint 0 · US-0.7
-**Fontes:** `sprint/sprint-0-fundacao.md` US-0.7 · `docs/qualidade/quality-gates.md` (Mariana) · `docs/fitness-ia-whatsapp/11-relatorio-sato.md` §12 · `SECURITY.md` §3
+**Fontes:** `sprint/sprint-0-fundacao.md` US-0.7 · `docs/qualidade/quality-gates.md` (Mariana) · `docs/fitness-ia-whatsapp/11-relatorio-sato.md` §12 · `docs/SECURITY.md` §3
 
 O pipeline (`.github/workflows/ci.yml`) é código e já está no repositório. Este
 documento cobre o que **não** é código — as configurações do lado do GitHub que
@@ -103,7 +103,7 @@ O arquivo `.github/dependabot.yml` já está versionado. Ligue o serviço:
 
 ## Passo 5 — (Opcional) Secrets de CI
 
-**A Sprint 0 não requer nenhum secret de CI** (`SECURITY.md` §3.1). O pipeline
+**A Sprint 0 não requer nenhum secret de CI** (`docs/SECURITY.md` §3.1). O pipeline
 roda inteiro com o `GITHUB_TOKEN` efêmero. Só adicione algo aqui se, no futuro:
 
 - o repositório virar de **organização** e o gitleaks pedir `GITLEAKS_LICENSE`;

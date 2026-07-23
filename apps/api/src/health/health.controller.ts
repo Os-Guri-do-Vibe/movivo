@@ -6,7 +6,7 @@
  * contra os dois — não é um `return 200` decorativo.
  *
  * # Regras
- *  - A resposta **nunca** expõe segredo, senha ou string de conexão (SECURITY.md §1).
+ *  - A resposta **nunca** expõe segredo, senha ou string de conexão (docs/SECURITY.md §1).
  *    Host, porta, usuário e nome do banco são metadados operacionais, não credenciais.
  *  - O endpoint não exige autenticação: é consumido pelo healthcheck do Docker, pelo
  *    load balancer e pelo smoke test de Mariana (US-0.8). Por isso mesmo, o que ele

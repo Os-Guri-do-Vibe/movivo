@@ -7,7 +7,7 @@
  *  - os getters refletem fielmente o config injetado;
  *  - `database.prepare` é **sempre** `false` (PgBouncer transaction mode, ARQUITETURA §12.3);
  *  - `redis.sentinelPassword` cai para a senha do Redis quando ausente;
- *  - `redactedSnapshot()` nunca deixa um segredo escapar (SECURITY.md §2.1.10).
+ *  - `redactedSnapshot()` nunca deixa um segredo escapar (docs/SECURITY.md §2.1.10).
  */
 import { describe, expect, it } from 'vitest';
 
