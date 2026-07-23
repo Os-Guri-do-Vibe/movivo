@@ -1,0 +1,23 @@
+# Configuração do gitleaks para o secret-scan do CI (job `secret-scan`, US-0.7).
+#
+# `useDefault = true` mantém TODAS as regras padrão do gitleaks (AWS, GCP, tokens
+# genéricos, chaves privadas etc.). A allowlist abaixo silencia apenas dois falsos
+# positivos concretos, por regex específica — nunca por caminho amplo, para não
+# criar um ponto cego onde um segredo real passaria despercebido.
+
+title = "MOVIVO — gitleaks"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Falsos positivos verificados (valor sintético de teste e nome de arquivo em comentário)."
+regexTarget = "match"
+regexes = [
+  # apps/api/src/core/config/load-env.spec.ts — senha SINTÉTICA de teste, nunca real.
+  # A convenção de QA (Mariana) proíbe dado real em teste; este valor é fixo e público.
+  '''senha-sintetica-\d+''',
+  # apps/web/src/app/globals.css e afins — o gitleaks confunde o NOME de um relatório
+  # citado em comentário (ex.: "09-relatorio-sofia.md") com uma chave genérica.
+  '''\d{2}-relatorio-[a-z]+\.md''',
+]

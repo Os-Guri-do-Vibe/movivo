@@ -226,7 +226,7 @@ jobs:
           gitleaks version
 
       - name: gitleaks (varre todo o histórico; falha se achar segredo)
-        run: gitleaks git --no-banner --redact --exit-code 1 .
+        run: gitleaks git --config .gitleaks.toml --no-banner --redact --exit-code 1 .
 
   # ---------------------------------------------------------------------------
   # SAST — semgrep (regras OWASP + TypeScript). Bloqueia em finding HIGH (ERROR).
