@@ -40,10 +40,10 @@ concurrency:
 
 env:
   # Recado do Leonardo: telemetria do Turbo desligada em todo o CI.
-  TURBO_TELEMETRY_DISABLED: "1"
+  TURBO_TELEMETRY_DISABLED: '1'
   # Silencia telemetria/atualização de ferramentas ruidosas no runner.
-  DO_NOT_TRACK: "1"
-  NEXT_TELEMETRY_DISABLED: "1"
+  DO_NOT_TRACK: '1'
+  NEXT_TELEMETRY_DISABLED: '1'
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -213,16 +213,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # GITLEAKS_LICENSE só é exigida em repositório de ORGANIZAÇÃO; se este
-          # repo for de org, adicione-a como Actions Secret (ver SECURITY.md §3.3).
+      # Usamos o BINÁRIO do gitleaks (MIT, gratuito), não a `gitleaks-action`:
+      # a action passou a exigir uma GITLEAKS_LICENSE paga em repositórios de
+      # ORGANIZAÇÃO (este é `Os-Guri-do-Vibe/...`). O binário não tem essa trava
+      # e faz exatamente a mesma varredura. `--redact` evita imprimir o segredo
+      # encontrado no log público do CI.
+      - name: Instalar gitleaks
+        run: |
+          VERSION=8.28.0
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: gitleaks (varre todo o histórico; falha se achar segredo)
+        run: gitleaks git --no-banner --redact --exit-code 1 .
 
   # ---------------------------------------------------------------------------
   # SAST — semgrep (regras OWASP + TypeScript). Bloqueia em finding HIGH (ERROR).
-  # Roda sem token (`--config auto` é anônimo). SEMGREP_APP_TOKEN é opcional.
+  # Usa PACKS NOMEADOS (`p/...`), não `--config auto`: o `auto` escolhe regras
+  # telefonando para o registry e por isso EXIGE telemetria ligada — incompatível
+  # com o nosso `SEMGREP_SEND_METRICS: off` (privacidade). Os packs abaixo são
+  # buscados do registry sem enviar métricas do nosso código.
   # ---------------------------------------------------------------------------
   sast:
     name: sast
@@ -234,9 +245,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: semgrep (falha em HIGH/ERROR)
-        run: semgrep --config auto --severity ERROR --error
+        run: semgrep --config p/default --config p/typescript --config p/owasp-top-ten --config p/secrets --severity ERROR --error
         env:
-          SEMGREP_SEND_METRICS: "off"
+          SEMGREP_SEND_METRICS: 'off'
 
   # ---------------------------------------------------------------------------
   # SCA — análise de dependências. Bloqueia em CVE HIGH/CRITICAL (sem exceção

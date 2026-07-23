@@ -61,7 +61,13 @@ write_secret() {
   fi
   # printf sem newline: o consumidor faz trim, mas evitamos o problema na fonte.
   printf '%s' "$value" > "$path"
-  chmod 600 "$path" 2>/dev/null || true
+  # 0644, não 0600: no Docker do Linux (CI) os secrets são bind-mount do arquivo do
+  # host, e o init do Postgres roda como o usuário `postgres` (UID 999). Um arquivo
+  # 0600 de outro dono é ilegível para ele — as roles nasceriam SEM senha e a
+  # migração falharia com "password authentication failed". A confidencialidade na
+  # máquina local é preservada pelo `chmod 700` no diretório `secrets/` abaixo:
+  # outro usuário não consegue entrar na pasta, mesmo os arquivos sendo 0644.
+  chmod 644 "$path" 2>/dev/null || true
   echo "  + ${name} (${#value} bytes)"
 }
 
