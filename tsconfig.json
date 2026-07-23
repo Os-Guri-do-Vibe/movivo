@@ -1,0 +1,18 @@
+{
+  // Solution-style tsconfig do monorepo (NÃO compila nada por si — `files: []`).
+  //
+  // Existe para o EDITOR e para `tsc -b .`. Sem um tsconfig na raiz, o servidor de
+  // linguagem do VS Code não tem um ponto de entrada único para o grafo de project
+  // references e passa a marcar erros espúrios nos tsconfig.json de cada pacote
+  // (ex.: em `compilerOptions`/`composite`/`baseUrl`) — que o compilador de fato NÃO
+  // reporta (`tsc -p` e `tsc -b` saem 0). Este arquivo dá esse ponto de entrada.
+  //
+  // NÃO substitui o `tsconfig.base.json` (que carrega as regras compartilhadas) nem o
+  // `typecheck` real, que roda por pacote via Turborepo. É só o anchor da solução.
+  "files": [],
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./apps/api" },
+    { "path": "./apps/web" }
+  ]
+}
