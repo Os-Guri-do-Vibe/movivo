@@ -7,6 +7,9 @@ coverage/
 pnpm-lock.yaml
 *.tsbuildinfo
 
+# Gerado e reescrito pelo Next.js a cada build — formatá-lo geraria diff eterno.
+next-env.d.ts
+
 # Relatórios do pipeline de agentes, definições de agentes e planejamento —
 # texto editorial, não código. Não devem ser reformatados pelo Prettier.
 .claude/
