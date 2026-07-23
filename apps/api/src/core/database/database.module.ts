@@ -27,6 +27,8 @@ import postgres, { type Sql } from 'postgres';
 import { AppConfigService } from '../config';
 import { DRIZZLE, POSTGRES_CLIENT } from './database.constants';
 import { DatabaseHealthService } from './database-health.service';
+import { HealthCipherService } from './health-cipher.service';
+import { TenantDatabase } from './tenant-database.service';
 
 /** Tipo do client Drizzle exposto por DI. Ganha o genérico do schema na US-0.4. */
 export type DrizzleClient = PostgresJsDatabase<Record<string, never>>;
@@ -67,8 +69,10 @@ export function createPostgresClient(config: AppConfigService): Sql {
       useFactory: (sql: Sql): DrizzleClient => drizzle(sql),
     },
     DatabaseHealthService,
+    TenantDatabase,
+    HealthCipherService,
   ],
-  exports: [DRIZZLE, POSTGRES_CLIENT, DatabaseHealthService],
+  exports: [DRIZZLE, POSTGRES_CLIENT, DatabaseHealthService, TenantDatabase, HealthCipherService],
 })
 export class DatabaseModule implements OnApplicationShutdown {
   constructor(private readonly health: DatabaseHealthService) {}

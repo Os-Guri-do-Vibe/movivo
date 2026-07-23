@@ -19,3 +19,6 @@ export * from './conversations';
 export * from './checkins';
 export * from './subscriptions';
 export * from './ai-jobs';
+
+// Sprint 1 — schema de autenticação (US-1.1 / TASK-1.1.5).
+export * from './auth-sessions';

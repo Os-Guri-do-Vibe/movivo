@@ -22,6 +22,8 @@ export const SECRET_KEYS = [
   'MIGRATION_DATABASE_PASSWORD',
   'REDIS_PASSWORD',
   'REDIS_SENTINEL_PASSWORD',
+  // Sprint 1 — cifra em repouso do dado de saúde (US-1.1 / Sato §7.3).
+  'PGCRYPTO_KEY',
 ] as const;
 
 export type SecretKey = (typeof SECRET_KEYS)[number];

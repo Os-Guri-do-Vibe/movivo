@@ -89,6 +89,14 @@ export class AppConfigService {
     };
   }
 
+  /**
+   * Chave simétrica do `pgcrypto` (US-1.1 / Sato §7.3). Segredo: já é mascarada em
+   * `redactedSnapshot()` (via `SECRET_KEYS`) e nunca deve ser logada por quem a consome.
+   */
+  get pgcryptoKey(): string {
+    return this.config.PGCRYPTO_KEY;
+  }
+
   get redis(): RedisConfig {
     return {
       sentinels: this.config.REDIS_SENTINEL_HOSTS,
