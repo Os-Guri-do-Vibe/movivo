@@ -2,16 +2,23 @@ import path from 'node:path';
 import type { NextConfig } from 'next';
 
 /**
- * Configuração do Next.js 15 (App Router) — `apps/web` (US-0.5 / TASK-0.5.1).
+ * Configuração do Next.js 16 (App Router) — `apps/web` (US-0.5 / TASK-0.5.1).
  *
- * Sobre bundler de desenvolvimento: o `dev` deste app roda em **webpack**, não em
- * Turbopack (ver `package.json`). O Turbopack em dev resolve os *named exports* do
- * pacote de workspace `@movivo/shared` (CJS gerado pelo tsc) como `undefined` —
- * silenciosamente, sem erro: a página sobe e os valores vindos do pacote aparecem
- * vazios. O smoke E2E da US-0.8 (Mariana) pegou isso. Testado: webpack (dev e
- * `next build`) resolve corretamente; nem `transpilePackages` nem um build ESM
- * dual do pacote fizeram o Turbopack resolver. Enquanto o bug do Turbopack existir,
- * dev = webpack. Revisitar quando o Turbopack estabilizar a interop de workspace.
+ * Sobre o bundler: o Next 16 tornou o **Turbopack o padrão** para `next dev` e
+ * `next build`. Este app opta explicitamente por **webpack** em ambos (`--webpack`,
+ * ver `package.json`). Motivo: o Turbopack resolve os *named exports* do pacote de
+ * workspace `@movivo/shared` (CJS gerado pelo `tsc`) como `undefined` —
+ * silenciosamente, sem erro: a página sobe e os valores vindos do pacote (`APP_VERSION`,
+ * `API_VERSION_PREFIX`) aparecem vazios. O smoke E2E da US-0.8 (Mariana) pega isso.
+ *
+ * Reconfirmado empiricamente no Next 16.2.11 (jul/2026): com `next dev --turbopack`,
+ * a home renderiza `Versão (@movivo/shared)` e `Prefixo da API` VAZIOS e `0.1.0` não
+ * aparece; `transpilePackages: ['@movivo/shared']` NÃO corrige (idêntico ao Next 15).
+ * Com webpack (dev e `next build`) a interop resolve e `0.1.0` aparece. Enquanto o
+ * bug de interop CJS↔ESM do Turbopack existir, dev/build = webpack. Revisitar quando
+ * o Turbopack estabilizar a interop de workspace (ou migrar `@movivo/shared` para um
+ * build ESM real — fora do escopo desta atualização, pois o pacote é consumido também
+ * pela API NestJS em CJS).
  */
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -27,17 +34,13 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
 
   /*
-   * O `next build` roda um ESLint próprio, resolvido a partir de `apps/web` e à
-   * procura de `eslint-config-next`. Este monorepo lint a partir da RAIZ, com um flat
-   * config único que já registra `@next/eslint-plugin-next` com os presets
-   * `recommended` + `core-web-vitals` (`eslint.config.mjs`, bloco `movivo/apps-web`).
-   * Manter o passo interno ligado significaria duas execuções de ESLint com
-   * configurações diferentes — e a de dentro, mal configurada, avisando que "o plugin
-   * não foi detectado". O gate real de lint é `pnpm run lint` (raiz), obrigatório no
-   * CI da US-0.7. Instalar `eslint-config-next` só para calar o aviso duplicaria o
-   * preset React/Next já montado à mão.
+   * No Next 15, o `next build` rodava um ESLint próprio (silenciado aqui com
+   * `eslint: { ignoreDuringBuilds: true }`). O Next 16 removeu o `next lint` e a chave
+   * `eslint` da config — o passo interno não existe mais, então o bloco foi removido.
+   * O gate real de lint continua sendo `pnpm run lint` (raiz), com um flat config único
+   * que registra `@next/eslint-plugin-next` (presets `recommended` + `core-web-vitals`),
+   * obrigatório no CI da US-0.7.
    */
-  eslint: { ignoreDuringBuilds: true },
 
   async headers() {
     return [
