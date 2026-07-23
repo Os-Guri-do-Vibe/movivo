@@ -21,6 +21,7 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 
 import { loadEnv } from '../config/load-env';
+import { buildRlsPoliciesSql, RLS_TENANT_TABLES } from './security-policies';
 
 /**
  * Raiz de `apps/api`. Usamos `process.cwd()` — e não `import.meta.url` ou
@@ -70,11 +71,17 @@ const GRANTS_SQL = (role: string) => `
   GRANT USAGE ON SCHEMA public TO ${role};
   GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role};
   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${role};
+  -- EXECUTE nas funções do schema (inclui pgp_sym_encrypt/decrypt do pgcrypto,
+  -- usadas pelo HealthCipherService — US-1.1/TASK-1.1.3). O init já concede em
+  -- dev; reafirmar aqui cobre bancos provisionados fora do init (RDS/staging).
+  GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO ${role};
 
   ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${role};
   ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT USAGE, SELECT ON SEQUENCES TO ${role};
+  ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT EXECUTE ON FUNCTIONS TO ${role};
 
   -- Reafirma o que a role NÃO pode: criar objeto no schema.
   REVOKE CREATE ON SCHEMA public FROM ${role};
@@ -145,6 +152,12 @@ async function main(): Promise<void> {
     await sql.unsafe(GRANTS_SQL(appRole));
     console.log('[db:migrate] Grants aplicados.');
 
+    // Row-Level Security (US-1.1 / Sato §4): ENABLE+FORCE + políticas por tenant.
+    // Idempotente e reaplicada a cada migração — mesma disciplina dos grants.
+    console.log('[db:migrate] Reconciliando políticas RLS (FORCE) das tabelas de titular …');
+    await sql.unsafe(buildRlsPoliciesSql());
+    console.log(`[db:migrate] RLS FORCE ativa em: ${RLS_TENANT_TABLES.join(', ')}.`);
+
     // Prova de que o modelo de permissões continua íntegro após a migração.
     const [check] = await sql<{ bypassrls: boolean; owns: number }[]>`
       SELECT
@@ -163,6 +176,24 @@ async function main(): Promise<void> {
       );
     }
     console.log(`[db:migrate] OK — ${appRole}: BYPASSRLS=false, tabelas próprias=0.`);
+
+    // Prova de que a RLS não é decorativa: toda tabela de titular precisa estar
+    // com relrowsecurity (ENABLE) E relforcerowsecurity (FORCE) — sem FORCE, o
+    // dono da tabela (movivo_migrator) contornaria a RLS silenciosamente (Sato §4.2).
+    const rls = await sql<{ table: string; enabled: boolean; forced: boolean }[]>`
+      SELECT relname AS table, relrowsecurity AS enabled, relforcerowsecurity AS forced
+      FROM pg_class
+      WHERE relname = ANY(${RLS_TENANT_TABLES}) AND relkind = 'r'
+    `;
+    const notForced = rls.filter((r) => !r.enabled || !r.forced).map((r) => r.table);
+    const missing = RLS_TENANT_TABLES.filter((t) => !rls.some((r) => r.table === t));
+    if (notForced.length > 0 || missing.length > 0) {
+      throw new Error(
+        `[db:migrate] VIOLAÇÃO RLS: sem ENABLE+FORCE em [${[...notForced, ...missing].join(', ')}] ` +
+          '(Sato §4.2). O isolamento entre titulares de dado de saúde estaria aberto.',
+      );
+    }
+    console.log(`[db:migrate] OK — RLS ENABLE+FORCE confirmada em ${rls.length} tabela(s).`);
   } finally {
     await sql.end({ timeout: 5 });
   }

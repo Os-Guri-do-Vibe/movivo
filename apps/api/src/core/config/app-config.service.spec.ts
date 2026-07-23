@@ -39,6 +39,7 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     REDIS_TLS_ENABLED: false,
     REDIS_KEY_PREFIX: 'movivo',
     REDIS_PASSWORD: 'super-secret-redis',
+    PGCRYPTO_KEY: 'super-secret-pgcrypto',
     ...overrides,
   } as AppConfig;
 }
@@ -82,6 +83,14 @@ describe('AppConfigService', () => {
       poolMax: 10,
       connectTimeoutSeconds: 10,
     });
+  });
+
+  it('expõe pgcryptoKey e a trata como segredo no snapshot (US-1.1)', () => {
+    const service = new AppConfigService(makeConfig());
+    expect(service.pgcryptoKey).toBe('super-secret-pgcrypto');
+    const snapshot = service.redactedSnapshot();
+    expect(snapshot.PGCRYPTO_KEY).toBe('[REDACTED]');
+    expect(JSON.stringify(snapshot)).not.toContain('super-secret-pgcrypto');
   });
 
   it('redis.sentinelPassword cai para a senha do Redis quando não há senha de Sentinel', () => {

@@ -51,6 +51,21 @@ export const userStatusEnum = pgEnum('user_status', [
   'PAUSED',
 ]);
 
+/**
+ * Papel de autorização (RBAC — Sato §9.2 / US-1.4).
+ *
+ * `USER` é o titular final: no MVP ele **não** se autentica (acessa pelo WhatsApp
+ * e o formulário por token — ADR-006), então nasce sem `password_hash`. `PROFESSIONAL`
+ * (CREF) e `ADMIN` são os únicos que fazem login no dashboard de operações — para
+ * eles `password_hash` (Argon2id) é obrigatório, validado na aplicação (US-1.4).
+ *
+ * O valor também alimenta o GUC `app.current_role` das políticas RLS (Sato §4.3):
+ * é por ele que a policy do profissional/admin difere da do titular. Os contextos
+ * de sistema (`SYSTEM`) e anônimo (`ANONYMOUS`) usados no `TenantDatabase` **não**
+ * são papéis de usuário — vivem só no GUC de sessão, nunca nesta coluna.
+ */
+export const userRoleEnum = pgEnum('user_role', ['USER', 'PROFESSIONAL', 'ADMIN']);
+
 // ---------------------------------------------------------------------------
 // ANAMNESE
 // ---------------------------------------------------------------------------

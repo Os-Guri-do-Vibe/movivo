@@ -6,10 +6,10 @@
  * `current_setting('app.current_user_id')` (Sato §4.2), e é por isso que ele é
  * **coluna líder** dos índices por usuário (Sato §4.5).
  */
-import { boolean, index, pgTable, varchar } from 'drizzle-orm/pg-core';
+import { boolean, index, pgTable, text, varchar } from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn, timestampColumns } from './_shared';
-import { userStatusEnum } from './enums';
+import { userRoleEnum, userStatusEnum } from './enums';
 
 export const users = pgTable(
   'users',
@@ -38,6 +38,25 @@ export const users = pgTable(
     whatsappName: varchar('whatsapp_name', { length: 255 }),
 
     status: userStatusEnum('status').notNull().default('ONBOARDING'),
+
+    /**
+     * Papel de autorização (RBAC — US-1.4 / Sato §9.2). Default `USER`: todo
+     * titular criado pelo funil de anamnese nasce como usuário comum. Só sobe
+     * para `PROFESSIONAL`/`ADMIN` por provisionamento interno (fora do fluxo
+     * público). Consumido pelo guard `@Roles()` e pelo GUC `app.current_role`.
+     */
+    role: userRoleEnum('role').notNull().default('USER'),
+
+    /**
+     * Hash Argon2id da senha — **só existe para `PROFESSIONAL`/`ADMIN`** (o
+     * titular final não faz login no MVP). Nulo para `USER`.
+     *
+     * -- SENSÍVEL: credencial. Nunca é logado (LoggerModule redige), nunca sai
+     * em resposta de API e nunca trafega em claro. O hashing (Argon2id) é feito
+     * na aplicação em US-1.4 — esta coluna guarda apenas o *encoded hash* final,
+     * jamais a senha. `text` porque o encoded do Argon2id não tem tamanho fixo.
+     */
+    passwordHash: text('password_hash'),
 
     trialStartedAt: eventTimestamp('trial_started_at'),
     trialEndsAt: eventTimestamp('trial_ends_at'),

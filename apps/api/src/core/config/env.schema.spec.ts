@@ -17,6 +17,7 @@ const VALID = {
   REDIS_SENTINEL_HOSTS: 'localhost:26379',
   REDIS_SENTINEL_MASTER_NAME: 'movivo-master',
   REDIS_PASSWORD: 'senha-de-teste',
+  PGCRYPTO_KEY: 'chave-pgcrypto-de-teste',
 } as const;
 
 describe('envSchema', () => {
@@ -43,6 +44,15 @@ describe('envSchema', () => {
     const message = formatEnvError(result.error);
     expect(message).toContain('DATABASE_PASSWORD_FILE ou DATABASE_PASSWORD');
     expect(message).toContain('fail-fast');
+  });
+
+  it('exige PGCRYPTO_KEY (cifra do dado de saúde) e cita o par K_FILE (US-1.1)', () => {
+    const { PGCRYPTO_KEY: _omitted, ...withoutKey } = VALID;
+    const result = envSchema.safeParse(withoutKey);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(formatEnvError(result.error)).toContain('PGCRYPTO_KEY_FILE ou PGCRYPTO_KEY');
   });
 
   it('recusa a porta 5432 no runtime — a app só fala com o PgBouncer (§12.3)', () => {

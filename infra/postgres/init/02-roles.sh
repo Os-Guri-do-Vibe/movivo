@@ -70,16 +70,24 @@ psql -v ON_ERROR_STOP=1 \
 -- `movivo_migrator`: dono do schema. Roda drizzle-kit (US-0.4) conectando
 -- DIRETO na 5432 — DDL e advisory locks de migração não sobrevivem ao
 -- transaction pooling do PgBouncer. NUNCA é usada em runtime.
--- NOBYPASSRLS também aqui: como dona das tabelas ela já ignora RLS por
--- definição (a menos que FORCE ROW LEVEL SECURITY esteja ativo), então o
--- atributo não deve somar mais um caminho de escape.
+--
+-- BYPASSRLS (revisão da Sprint 1 / US-1.1): a Sprint 0 criou esta role como
+-- NOBYPASSRLS porque, sem FORCE, o dono da tabela já ignora a RLS. A Sprint 1
+-- ativa FORCE ROW LEVEL SECURITY (Sato §4.2), que sujeita ATÉ O DONO à RLS.
+-- Sem BYPASSRLS, o seed e futuras migrações de dados (que rodam como migrator,
+-- sem contexto de tenant) seriam bloqueados pela policy de INSERT/SELECT.
+-- Conceder BYPASSRLS ao MIGRADOR é seguro e é o caminho de manutenção correto:
+--   · a role NUNCA serve tráfego de runtime (isso é exclusivo de movivo_app);
+--   · movivo_app permanece NOBYPASSRLS, não-dona e sob FORCE — o isolamento
+--     entre titulares de dado de saúde continua inescapável no caminho da app.
+-- É a role de manutenção que bypassa a RLS; a role de aplicação, jamais.
 CREATE ROLE :"migrator_user"
   LOGIN
   PASSWORD :'migrator_pw'
   NOSUPERUSER
   NOCREATEDB
   NOCREATEROLE
-  NOBYPASSRLS
+  BYPASSRLS
   NOREPLICATION
   INHERIT;
 
@@ -165,13 +173,15 @@ echo "[movivo/init] verificando atributos das roles (guarda de regressão da reg
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
   -v app_user="$APP_USER" -v migrator_user="$MIGRATOR_USER" <<'EOSQL'
 SELECT set_config('movivo.app_user', :'app_user', false);
+SELECT set_config('movivo.migrator_user', :'migrator_user', false);
 
 DO $$
 DECLARE
-  v_role    text := current_setting('movivo.app_user');
-  v_bypass  boolean;
-  v_super   boolean;
-  v_ntables integer;
+  v_role      text := current_setting('movivo.app_user');
+  v_migrator  text := current_setting('movivo.migrator_user');
+  v_bypass    boolean;
+  v_super     boolean;
+  v_ntables   integer;
 BEGIN
   SELECT rolbypassrls, rolsuper INTO v_bypass, v_super
     FROM pg_roles WHERE rolname = v_role;
@@ -191,6 +201,17 @@ BEGIN
    WHERE r.rolname = v_role AND c.relkind IN ('r', 'p');
   IF v_ntables > 0 THEN
     RAISE EXCEPTION 'FALHA DE SEGURANCA: a role "%" e dona de % tabela(s).', v_role, v_ntables;
+  END IF;
+
+  -- Sprint 1 (US-1.1): o MIGRADOR precisa de BYPASSRLS para operar sob FORCE RLS
+  -- (seed/migração de dados sem contexto de tenant). Se um dia isso for removido,
+  -- o seed passaria a falhar de forma obscura — melhor travar aqui, no boot.
+  SELECT rolbypassrls INTO v_bypass FROM pg_roles WHERE rolname = v_migrator;
+  IF v_bypass IS NULL THEN
+    RAISE EXCEPTION 'FALHA: a role de migracao "%" nao foi criada.', v_migrator;
+  END IF;
+  IF NOT v_bypass THEN
+    RAISE EXCEPTION 'FALHA: a role de migracao "%" precisa de BYPASSRLS sob FORCE RLS (US-1.1).', v_migrator;
   END IF;
 END $$;
 

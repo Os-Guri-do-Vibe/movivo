@@ -135,6 +135,14 @@ export const envSchema = z
     REDIS_PASSWORD: z.string().min(1),
     REDIS_SENTINEL_PASSWORD: z.string().min(1).optional(),
     REDIS_NAT_MAP: natMap.optional(),
+
+    // -------------------------------------- Cifra de dado de saúde (US-1.1)
+    /**
+     * Chave simétrica do `pgcrypto` para o bloco de saúde (LGPD Art. 11 · Sato §7.3).
+     * Obrigatória e sempre via secret (`PGCRYPTO_KEY_FILE`): a Sprint 1 persiste dado
+     * sensível, então o boot **falha rápido** sem ela — não há default nem fallback.
+     */
+    PGCRYPTO_KEY: z.string().min(1),
   })
   .superRefine((config, ctx) => {
     if (config.DATABASE_PORT === POSTGRES_DIRECT_PORT) {

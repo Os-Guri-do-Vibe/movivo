@@ -23,7 +23,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { loadEnv } from '../src/core/config/load-env';
 
-/** As 9 tabelas-base do schema lógico de Lucas (§9) materializadas na US-0.4. */
+/**
+ * As 9 tabelas-base do schema lógico de Lucas (§9, US-0.4) + `auth_sessions`,
+ * adicionada na US-1.1/TASK-1.1.5 (schema de refresh token para o AUTH).
+ */
 const EXPECTED_TABLES = [
   'users',
   'anamnesis_sessions',
@@ -34,6 +37,7 @@ const EXPECTED_TABLES = [
   'checkins',
   'subscriptions',
   'ai_jobs',
+  'auth_sessions',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;
