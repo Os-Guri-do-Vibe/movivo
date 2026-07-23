@@ -190,7 +190,7 @@ services:
   # ===========================================================================
   redis-master:
     <<: *common
-    image: ${REDIS_IMAGE:-redis:8.2.2-alpine}
+    image: ${REDIS_IMAGE:-redis:8.8.0-alpine}
     container_name: movivo-redis-master
     # `$$` escapa a interpolação do Compose: quem deve expandir `$(cat ...)` é o
     # shell DENTRO do container, no boot, e não o Compose no host.
@@ -240,7 +240,7 @@ services:
   # ===========================================================================
   redis-replica:
     <<: *common
-    image: ${REDIS_IMAGE:-redis:8.2.2-alpine}
+    image: ${REDIS_IMAGE:-redis:8.8.0-alpine}
     container_name: movivo-redis-replica
     depends_on:
       redis-master:
@@ -294,7 +294,7 @@ services:
   # ===========================================================================
   redis-sentinel:
     <<: *common
-    image: ${REDIS_IMAGE:-redis:8.2.2-alpine}
+    image: ${REDIS_IMAGE:-redis:8.8.0-alpine}
     container_name: movivo-redis-sentinel
     depends_on:
       redis-master:
