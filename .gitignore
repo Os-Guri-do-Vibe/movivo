@@ -15,6 +15,10 @@ out/
 *.tsbuildinfo
 .eslintcache
 
+# Gerado pelo `next dev`/`next build` a cada execução. Versioná-lo só produziria
+# diff de ruído — o Next o recria e o sobrescreve sem pedir licença.
+next-env.d.ts
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Ambiente e segredos — nunca versionar
 # Regra inegociável ARQUITETURA.md §12.7 · Sato 11-relatorio-sato.md §9.3
@@ -61,6 +65,13 @@ gha-creds-*.json
 
 # Testes / cobertura
 coverage/
+
+# Playwright — artefatos gerados a cada execução (US-0.8, Mariana)
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+/apps/web/playwright/.cache/
 
 # Logs
 *.log

@@ -20,13 +20,16 @@
   "scripts": {
     "build": "tsc -b tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit --emitDeclarationOnly false",
-    "test": "node -e \"console.log('[shared] runner de testes chega na US-0.8 (Mariana)')\"",
+    "test": "vitest run",
+    "test:cov": "vitest run --coverage",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true});require('node:fs').rmSync('tsconfig.tsbuildinfo',{force:true})\""
   },
   "dependencies": {
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "typescript": "5.9.3"
+    "@vitest/coverage-v8": "4.1.10",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
   }
 }

@@ -4,11 +4,14 @@ import type { NextConfig } from 'next';
 /**
  * Configuração do Next.js 15 (App Router) — `apps/web` (US-0.5 / TASK-0.5.1).
  *
- * Nota deliberada sobre `transpilePackages`: ele **não** é necessário para
- * `@movivo/shared`. O pacote publica JavaScript CJS já compilado + `.d.ts` pelo campo
- * `exports` (`packages/shared/package.json`), e não código-fonte TypeScript. Adicionar
- * `transpilePackages` aqui só faria o bundler reprocessar artefato pronto, sem ganho.
- * (Achado registrado na TASK-0.1.5.)
+ * Sobre bundler de desenvolvimento: o `dev` deste app roda em **webpack**, não em
+ * Turbopack (ver `package.json`). O Turbopack em dev resolve os *named exports* do
+ * pacote de workspace `@movivo/shared` (CJS gerado pelo tsc) como `undefined` —
+ * silenciosamente, sem erro: a página sobe e os valores vindos do pacote aparecem
+ * vazios. O smoke E2E da US-0.8 (Mariana) pegou isso. Testado: webpack (dev e
+ * `next build`) resolve corretamente; nem `transpilePackages` nem um build ESM
+ * dual do pacote fizeram o Turbopack resolver. Enquanto o bug do Turbopack existir,
+ * dev = webpack. Revisitar quando o Turbopack estabilizar a interop de workspace.
  */
 const nextConfig: NextConfig = {
   reactStrictMode: true,
