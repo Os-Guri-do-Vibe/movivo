@@ -64,7 +64,9 @@ describe('AppConfigService', () => {
   it('database.prepare é sempre false — regra do PgBouncer transaction mode', () => {
     // Mesmo que alguém force `true` no config (o Zod já recusa isso), a service
     // não pode propagar prepared statements para o driver.
-    const service = new AppConfigService(makeConfig({ DATABASE_PREPARE: true } as Partial<AppConfig>));
+    const service = new AppConfigService(
+      makeConfig({ DATABASE_PREPARE: true } as Partial<AppConfig>),
+    );
     expect(service.database.prepare).toBe(false);
   });
 

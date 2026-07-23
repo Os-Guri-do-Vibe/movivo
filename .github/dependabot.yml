@@ -17,57 +17,57 @@
 version: 2
 updates:
   # --- Ecossistema npm/pnpm (raiz do monorepo; cobre os workspaces) ----------
-  - package-ecosystem: "npm"
-    directory: "/"
+  - package-ecosystem: 'npm'
+    directory: '/'
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:00"
-      timezone: "America/Sao_Paulo"
+      interval: 'weekly'
+      day: 'monday'
+      time: '06:00'
+      timezone: 'America/Sao_Paulo'
     open-pull-requests-limit: 10
-    versioning-strategy: "increase"
+    versioning-strategy: 'increase'
     labels:
-      - "dependencies"
+      - 'dependencies'
     commit-message:
       # Conventional Commits (CLAUDE.md): tipo em inglês, descrição PT-BR.
-      prefix: "chore"
-      prefix-development: "chore"
-      include: "scope"
+      prefix: 'chore'
+      prefix-development: 'chore'
+      include: 'scope'
     groups:
       # Agrupa patches/minors de baixo risco num PR só, reduzindo ruído.
       minor-and-patch:
         update-types:
-          - "minor"
-          - "patch"
+          - 'minor'
+          - 'patch'
 
   # --- GitHub Actions usadas nos workflows (pin/atualização de versões) ------
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: 'github-actions'
+    directory: '/'
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:00"
-      timezone: "America/Sao_Paulo"
+      interval: 'weekly'
+      day: 'monday'
+      time: '06:00'
+      timezone: 'America/Sao_Paulo'
     labels:
-      - "dependencies"
-      - "ci"
+      - 'dependencies'
+      - 'ci'
     commit-message:
-      prefix: "ci"
-      include: "scope"
+      prefix: 'ci'
+      include: 'scope'
 
   # --- Imagens Docker (docker-compose da US-0.2) -----------------------------
   # ATENÇÃO: nunca aceitar bump que rebaixe o Redis abaixo do patch da
   # CVE-2025-49844 (RediShell) — ARQUITETURA §12.14. Revisar manualmente.
-  - package-ecosystem: "docker-compose"
-    directory: "/"
+  - package-ecosystem: 'docker-compose'
+    directory: '/'
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:00"
-      timezone: "America/Sao_Paulo"
+      interval: 'weekly'
+      day: 'monday'
+      time: '06:00'
+      timezone: 'America/Sao_Paulo'
     labels:
-      - "dependencies"
-      - "docker"
+      - 'dependencies'
+      - 'docker'
     commit-message:
-      prefix: "build"
-      include: "scope"
+      prefix: 'build'
+      include: 'scope'

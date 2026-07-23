@@ -53,8 +53,7 @@ const superUser = 'postgres';
 const superPassword = readFileSync(
   resolve(apiRoot, '..', '..', 'secrets', 'postgres_superuser_password'),
   'utf8',
-)
-  .trimEnd();
+).trimEnd();
 
 const throwawayDb = `movivo_it_${Date.now()}`;
 
