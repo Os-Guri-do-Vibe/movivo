@@ -15,6 +15,13 @@
       "when": 1784848965135,
       "tag": "0001_absent_brood",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784865471319,
+      "tag": "0002_consent_session_scope",
+      "breakpoints": true
     }
   ]
 }
