@@ -34,7 +34,11 @@
  */
 const TENANT_TABLES: ReadonlyArray<{ table: string; column: string; anonymousPhase?: boolean }> = [
   { table: 'users', column: 'id' },
-  { table: 'consents', column: 'user_id' },
+  // `consents` tem fase anônima pelo mesmo motivo da anamnese (US-1.2): o
+  // consentimento de saúde é registrado na tela-ponte, ANTES de o `users` existir
+  // (que só nasce no submit). A âncora nessa fase é `anamnesis_session_id`, e o
+  // acesso é token-scoped no serviço — a policy só não pode bloquear a linha órfã.
+  { table: 'consents', column: 'user_id', anonymousPhase: true },
   { table: 'anamnesis_sessions', column: 'user_id', anonymousPhase: true },
   { table: 'auth_sessions', column: 'user_id' },
 ];

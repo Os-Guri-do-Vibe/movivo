@@ -22,5 +22,19 @@
  */
 import { Module } from '@nestjs/common';
 
-@Module({})
+import { ConsentController } from './consent.controller';
+import { ConsentService } from './consent.service';
+
+/**
+ * US-1.2 preencheu a parte de CONSENT. O `ConsentService` fica aqui — e não num
+ * `ConsentModule` próprio — porque consentimento e anamnese são o mesmo bounded
+ * context (ONBOARDING & ANAMNESIS, `ARQUITETURA.md` §7) e um módulo separado
+ * para dois arquivos seria estrutura sem função. `FormSessionService` e o gate
+ * PAR-Q entram na US-1.3.
+ */
+@Module({
+  controllers: [ConsentController],
+  providers: [ConsentService],
+  exports: [ConsentService],
+})
 export class AnamnesisModule {}
