@@ -20,4 +20,8 @@ regexes = [
   # apps/web/src/app/globals.css e afins — o gitleaks confunde o NOME de um relatório
   # citado em comentário (ex.: "09-relatorio-sofia.md") com uma chave genérica.
   '''\d{2}-relatorio-[a-z]+\.md''',
+  # apps/api/src/core/config/env.schema.spec.ts — PEM SINTÉTICO de teste do JWT
+  # (US-1.4): o corpo é o literal "teste", nunca uma chave real. O par RS256 real
+  # vive só em secrets/ (ignorado pelo Git). O `\n` aqui é o backslash-n do source.
+  '''-----BEGIN (PRIVATE|PUBLIC) KEY-----\\nteste\\n-----END''',
 ]
