@@ -1,27 +1,44 @@
 /**
- * `JobsModule` — **esqueleto vazio registrado** (TASK-0.3.6).
+ * `JobsModule` — fundação BullMQ (US-1.7).
  *
- * Módulo JOBS (BullMQ) do C4 nível 3 (`ARQUITETURA.md` §4). Nesta sprint é só a casca:
- * nenhuma lógica de negócio, nenhum controller, nenhum provider. Existe para que a
- * sprint de implementação (Sprint 3+) encaixe código sem reestruturar o app.
+ * Preenche o esqueleto da Sprint 0 com o SETUP BASE das filas (Rafael §6): `QueueManager`
+ * (registro das 5 filas de negócio + `sanity` + `dead-letter`), `WorkerFactory`
+ * padronizado, DLQ handler genérico e drenagem graciosa no shutdown. Nenhuma lógica de
+ * negócio de fila nasce aqui — só a fundação, provada pelo `SanityWorker`.
  *
- * Conteúdo previsto pelo diagrama de Rafael:
- *  - `QueueManager`
- *  - `WorkerFactory`
- *  - `DLQ Handler`
+ * # Conexão
+ * Reusa a descoberta de master via Sentinel do `RedisModule` (CORE global) — `jobs.config`
+ * deriva as opções de `buildRedisOptions`. Não há segunda descoberta de master.
  *
- * Regras que já valem para quem implementar:
- *  - Filas no Redis já provisionado (master + replica + Sentinel, `appendfsync everysec`). A conexão vem do `RedisModule` do CORE — o BullMQ **não** abre conexão própria fora do contrato.
- *  - Todo job precisa de: política de retry com backoff, limite de tentativas, DLQ e idempotência. Job sem DLQ não entra em produção.
- *  - A drenagem no shutdown depende do `enableShutdownHooks` já ativado em `main.ts` (TASK-0.3.1).
- *  - Payload de job carrega `userId` (UUID), nunca telefone nem dado de saúde em claro.
- *
- * # Fronteira do módulo (regra §12.5 — sem imports circulares)
- * Este módulo pode depender do **CORE** (config, banco, Redis, logger) por DI, já que
- * todos os providers do CORE são globais. Não pode importar outro módulo de domínio:
- * a comunicação entre domínios é por evento (`EventBusModule`) ou por fila (`JobsModule`).
+ * # Drenagem (ADR / §12.6)
+ * O `enableShutdownHooks` (main.ts, Sprint 0) dispara `onApplicationShutdown`: fecham-se
+ * primeiro os WORKERS (drenam o job em voo, param de puxar) e só então as QUEUES. AOF do
+ * Redis (Sprint 0) garante durabilidade em restart.
  */
-import { Module } from '@nestjs/common';
+import { Module, type OnApplicationShutdown } from '@nestjs/common';
 
-@Module({})
-export class JobsModule {}
+import { DEAD_LETTER_HANDLER, LoggingDeadLetterHandler } from './dlq.handler';
+import { QueueManager } from './queue-manager.service';
+import { SanityWorker } from './sanity.worker';
+import { WorkerFactory } from './worker.factory';
+
+@Module({
+  providers: [
+    QueueManager,
+    WorkerFactory,
+    SanityWorker,
+    { provide: DEAD_LETTER_HANDLER, useClass: LoggingDeadLetterHandler },
+  ],
+  exports: [QueueManager, WorkerFactory],
+})
+export class JobsModule implements OnApplicationShutdown {
+  constructor(
+    private readonly workers: WorkerFactory,
+    private readonly queues: QueueManager,
+  ) {}
+
+  async onApplicationShutdown(): Promise<void> {
+    await this.workers.closeAll();
+    await this.queues.closeAll();
+  }
+}
