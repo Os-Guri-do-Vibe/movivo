@@ -33,6 +33,11 @@ Ambiente efêmero de integração: reaproveitamos o **Docker Compose da US-0.2**
 5. **Cobertura mínima ≥ 80%** — por workspace, nas quatro métricas (statements, branches, functions, lines). Detalhe e números reais na seção [Cobertura](#cobertura).
 6. **Segurança verde (US-0.7, requisitos de Sato §12.3)** — secret scanning (gitleaks + push protection), SAST (semgrep `--error` em HIGH), SCA (`pnpm audit --audit-level=high`, CVE HIGH/CRITICAL bloqueia sem exceção documentada). *Implementado por Henrique; listado aqui porque compõe o gate de merge.*
 7. **Review ≥ 1 dev** + branch protection sem force-push (US-0.7).
+8. **Isolamento multi-tenant (ATIVO desde a Sprint 1 — US-1.8/TASK-1.8.2)** — testes de **integração** provam que um titular nunca lê linha/chave de outro, e falham o pipeline se o isolamento regredir. Rodam no job `integration` (já obrigatório), então nenhum PR entra em `main` com o isolamento quebrado. Provas:
+   - **Postgres RLS `FORCE` + `SET LOCAL`**: `runAsUser(A)` não vê linha de B; sem contexto de tenant, `movivo_app` não lê nada (fail-closed) — `apps/api/test/security-foundation.int-spec.ts`.
+   - **`movivo_app` não burla RLS**: asserção de que a role não tem `BYPASSRLS`/`SUPERUSER` e não é dona das tabelas de titular — mesmo arquivo. Falha se alguém conceder BYPASSRLS ou ownership.
+   - **IDOR do token de anamnese**: token A não acessa a sessão B — `apps/api/test/anamnesis.int-spec.ts` + `security-foundation.int-spec.ts`.
+   - **Namespacing do Redis por `user_id`**: valor de A não é legível pelo namespace de B; o SCAN de A nunca traz a chave de B — `apps/api/test/redis-isolation.int-spec.ts`.
 
 ### Testes-semente da fundação (TASK-0.8.3)
 
@@ -80,7 +85,7 @@ Documentados agora para não serem "descobertos" tarde. Cada um herda de um mand
 | Gate | Regra | Vira bloqueante em | Fonte |
 |---|---|---|---|
 | **100% no Motor Determinístico** | Cobertura de teste = **100%** (statements, branches, functions, lines) em todo o módulo do motor de periodização/constraints. Sem exceção. | **Sprint 2** | ARQUITETURA §12.8 · Rafael §17.1 · Sato |
-| **Isolamento multi-tenant** | Teste de integração provando que o usuário B nunca lê linha/chave do usuário A — no Postgres (RLS + `SET LOCAL`) e no Redis (namespace por `user_id`), inclusive sob concorrência (RNF-06, zero vazamento). | **Sprints 1–3** | Sato §4.4/§10.3 · Rafael §17.2 |
+| ~~**Isolamento multi-tenant**~~ | **PROMOVIDO A ATIVO na Sprint 1** (gate ATIVO #8, acima). Postgres (RLS `FORCE` + `SET LOCAL`) e Redis (namespace por `user_id`) com testes bloqueantes no job `integration`. A verificação sob concorrência plena (RNF-06) fica para quando houver carga (Sprint 6). | ✅ Sprint 1 | Sato §4.4/§10.3 · Rafael §17.2 |
 | **Compliance CREF pós-geração** | 100% de cobertura no pipeline de validação de saída (sem "diagnóstico/prescrição/cura/garantido", escopo CREF, constraints PAR-Q); `safety score` como gate bloqueante; suíte de red-team de IA (prompt injection/jailbreak/leak) verde. | **Sprint 3** | Sato §10.2/§10.5 · Rafael §17.3 |
 | **Webhook / DLQ** | Testes de assinatura HMAC + replay (timestamp ±5min + nonce) + idempotência; falha de Redis durante processamento → retry e DLQ corretos; DLQ < 0,5%. | **Sprints 3–4** | ARQUITETURA §12.15 · Sato §12 |
 | **Cron de check-in** | Teste que prova o disparo do check-in na janela seg 08–10h **timezone America/Sao_Paulo** (não UTC). | **Sprint 5** | Rafael §17.7 · ARQUITETURA §8 |
