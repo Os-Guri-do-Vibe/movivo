@@ -6,12 +6,25 @@
  * opaco da sessão — por isso o token vai na URL e o corpo nunca carrega
  * `userId`/`sessionId` (IDOR, Sato §8.1).
  */
-import { Body, Controller, Ip, Param, Post, Headers, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Ip,
+  Param,
+  Post,
+  Headers,
+  Header,
+  HttpCode,
+  HttpStatus,
+  UseGuards,
+} from '@nestjs/common';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { recordConsentsSchema } from '@movivo/shared';
 
 import { ConsentService } from './consent.service';
 
 @Controller('anamnesis/session/:token/consents')
+@UseGuards(ThrottlerGuard)
 export class ConsentController {
   constructor(private readonly consents: ConsentService) {}
 
@@ -23,6 +36,7 @@ export class ConsentController {
    */
   @Post()
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Header('Referrer-Policy', 'no-referrer')
   async record(
     @Param('token') token: string,
     @Body() body: unknown,

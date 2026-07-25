@@ -7,8 +7,8 @@
  */
 import { index, jsonb, pgTable, smallint, varchar } from 'drizzle-orm/pg-core';
 
-import { eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
-import { anamnesisStatusEnum } from './enums';
+import { bytea, eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
+import { anamnesisStatusEnum, parqStateEnum } from './enums';
 import { users } from './users';
 
 export const anamnesisSessions = pgTable(
@@ -43,19 +43,23 @@ export const anamnesisSessions = pgTable(
     /**
      * -- LGPD Art. 11 — DADO SENSÍVEL DE SAÚDE.
      * Histórico de saúde, lesões, condições médicas, medicamentos em uso e as
-     * respostas do PAR-Q. Esta coluna **será cifrada em repouso com `pgcrypto`**
-     * na sprint de anamnese (`ARQUITETURA.md` §8; chave em `PGCRYPTO_KEY_FILE`,
-     * já reservada no `.env.example`). A cifra NÃO é implementada nesta sprint —
-     * a marcação existe para que nenhuma migração futura trate esta coluna como
-     * JSONB comum.
+     * respostas do PAR-Q. **Cifrado em repouso com `pgcrypto`** (US-1.3): o valor
+     * gravado é o `bytea` de `pgp_sym_encrypt` (`HealthCipherService`), nunca o
+     * JSON em claro. Por isso a coluna é `bytea` e não `jsonb` (Sato — achado 3).
      */
-    dataBlock2: jsonb('data_block_2'),
+    dataBlock2: bytea('data_block_2'),
 
     /** Bloco 3 — disponibilidade semanal e equipamentos. Dado pessoal comum. */
     dataBlock3: jsonb('data_block_3'),
 
     /** Pré-qualificação capturada na landing, antes do formulário. */
     primaryGoal: varchar('primary_goal', { length: 30 }),
+
+    /**
+     * Estado do gate PAR-Q, definido no submit (US-1.3). Nulo enquanto
+     * `IN_PROGRESS`. `BLOQUEADO_AGUARDANDO_CLEARANCE` impede geração automática.
+     */
+    parqState: parqStateEnum('parq_state'),
 
     /** Expiração do link de retorno; o prazo de 72h é aplicado pela aplicação. */
     expiresAt: eventTimestamp('expires_at').notNull(),

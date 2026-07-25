@@ -92,13 +92,40 @@ export class TenantDatabase {
   }
 
   /**
-   * Contexto **anônimo** da anamnese (fase `user_id IS NULL`). A RLS só permite
-   * linhas sem titular; a aplicação DEVE filtrar por `token` (TASK-1.1.4).
+   * Contexto **anônimo** SEM escopo de sessão (fase `user_id IS NULL`). Usado só
+   * para o **lookup inicial** `token → sessão` e o INSERT de uma sessão nova, que
+   * ainda não têm um `id` para escopar. A RLS libera a leitura de linha órfã com o
+   * GUC de sessão ausente; a aplicação DEVE filtrar por `token` (TASK-1.1.4). Para
+   * qualquer mutação de uma sessão já conhecida, use {@link runAsTokenScoped}.
    */
   async runAsToken<T>(cb: (tx: TenantTransaction) => Promise<T>): Promise<T> {
     return this.db.transaction(async (tx) => {
       await tx.execute(sql`SELECT set_config('app.current_user_id', ${null}, true)`);
       await tx.execute(sql`SELECT set_config('app.current_role', 'ANONYMOUS', true)`);
+      return cb(tx);
+    });
+  }
+
+  /**
+   * Contexto anônimo **escopado a uma sessão** (Sato — achado 1). Seta o GUC
+   * `app.current_anamnesis_session_id`, e a RLS passa a permitir escrita/leitura de
+   * linha órfã apenas quando a coluna de escopo bate esse id. É defense-in-depth:
+   * mesmo que o serviço esqueça o `WHERE token`, nenhuma linha de outra sessão é
+   * lida ou alterada. Use para todo PATCH de bloco e registro de consentimento.
+   */
+  async runAsTokenScoped<T>(
+    sessionId: string,
+    cb: (tx: TenantTransaction) => Promise<T>,
+  ): Promise<T> {
+    if (!UUID_RE.test(sessionId)) {
+      throw new TypeError('runAsTokenScoped: sessionId inválido — esperado UUID.');
+    }
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.current_user_id', ${null}, true)`);
+      await tx.execute(sql`SELECT set_config('app.current_role', 'ANONYMOUS', true)`);
+      await tx.execute(
+        sql`SELECT set_config('app.current_anamnesis_session_id', ${sessionId}, true)`,
+      );
       return cb(tx);
     });
   }

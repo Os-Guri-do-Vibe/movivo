@@ -104,6 +104,12 @@ const PHONE_PATTERN = /(\+?\d{1,3}[\s.-]?)?\(?\d{2,3}\)?[\s.-]?\d{4,5}[\s.-]?\d{
 const EMAIL_PATTERN = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
 /** CPF com ou sem máscara. */
 const CPF_PATTERN = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g;
+/**
+ * Token da sessão de anamnese no path (`/anamnesis/session/<token>/...`). É
+ * credencial de acesso a dado de saúde (Sato §8.1): nunca pode ir para o log,
+ * mesmo estando no path e não na query string. Mascara só o segmento do token.
+ */
+const ANAMNESIS_TOKEN_PATTERN = /(\/anamnesis\/session\/)[^/?]+/g;
 
 /**
  * Remove PII de uma string livre. Aplicar antes de logar qualquer texto de origem
@@ -111,6 +117,7 @@ const CPF_PATTERN = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g;
  */
 export function redactPii(input: string): string {
   return input
+    .replace(ANAMNESIS_TOKEN_PATTERN, `$1${REDACTED}`)
     .replace(EMAIL_PATTERN, REDACTED)
     .replace(CPF_PATTERN, REDACTED)
     .replace(PHONE_PATTERN, (match) => maskPhone(match));
