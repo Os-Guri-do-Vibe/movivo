@@ -22,7 +22,20 @@
  * viraria uma fonte silenciosa de bug em horário de verão / servidor em UTC.
  */
 import { sql } from 'drizzle-orm';
-import { timestamp, uuid } from 'drizzle-orm/pg-core';
+import { customType, timestamp, uuid } from 'drizzle-orm/pg-core';
+
+/**
+ * Coluna `bytea` (bytes crus). O `drizzle-kit` não expõe um tipo nativo; declaramos
+ * o custom type uma vez aqui. Usada pela cifra `pgcrypto` do dado de saúde
+ * (`anamnesis_sessions.data_block_2`, US-1.1/US-1.3): a saída de `pgp_sym_encrypt`
+ * é `bytea` (Buffer no Node), então a coluna precisa ser `bytea`, nunca `jsonb`
+ * (Sato — achado 3: um `jsonb` guardaria o ciphertext como texto/base64 espúrio).
+ */
+export const bytea = customType<{ data: Buffer; default: false }>({
+  dataType() {
+    return 'bytea';
+  },
+});
 
 /** PK UUID v4 gerada pelo banco. Nunca sequencial: IDs não devem ser enumeráveis. */
 export const primaryKeyColumn = () =>

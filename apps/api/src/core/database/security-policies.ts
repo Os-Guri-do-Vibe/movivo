@@ -18,33 +18,68 @@
  * GUC não foi setado, em vez de erro. NULL em qualquer comparação ⇒ falso ⇒
  * **fail-closed**: sem contexto, nenhuma linha é visível.
  *
- * ## Fase anônima da anamnese (TASK-1.1.4)
+ * ## Fase anônima da anamnese (TASK-1.1.4) + escopo por sessão (Sato — achado 1)
  * Enquanto `anamnesis_sessions.user_id IS NULL`, a linha não tem titular para a RLS
- * comparar. O isolamento dessa fase é dado pelo **token opaco de 122 bits** (CSPRNG)
- * + filtro `WHERE token = $1` na aplicação, que **nunca** aceita `user_id` do cliente
- * (proteção IDOR — Sato §8.1). A policy só **permite** o acesso à fase anônima quando
- * `app.current_role = 'ANONYMOUS'`; ela não substitui o filtro por token. No submit, o
- * `user_id` é vinculado (contexto `SYSTEM`) e a linha passa a ser protegida por RLS
- * como as demais.
+ * comparar. A defesa primária é o **token opaco** (CSPRNG, 256 bits) + `WHERE token`
+ * na aplicação, que nunca aceita `user_id` do cliente (IDOR — Sato §8.1). Mas isso
+ * deixava a única barreira na aplicação: uma policy anônima checando apenas
+ * `user_id IS NULL AND role='ANONYMOUS'` liberava QUALQUER linha órfã. Adicionamos
+ * **defense-in-depth por sessão** com o GUC `app.current_anamnesis_session_id`
+ * (setado por `runAsTokenScoped`):
+ *  - **leitura** anônima: permitida quando o GUC não está setado (o lookup inicial
+ *    `token → sessão`, que ainda não conhece o id — o token é o segredo que protege)
+ *    OU quando a coluna de escopo bate o GUC;
+ *  - **escrita** anônima (UPDATE/INSERT de consentimento): exige o GUC batendo a
+ *    sessão — sem o GUC certo, nenhuma linha órfã de outra sessão é alterada.
+ *
+ * A criação de uma sessão nova (`INSERT` em `anamnesis_sessions`) é a exceção: o `id`
+ * é gerado pelo banco e ainda não existe para comparar — o INSERT anônimo é liberado
+ * pela condição de órfã, pois criar a própria linha nova não vaza outra sessão.
+ * No submit o `user_id` é vinculado (contexto `SYSTEM`) e a linha passa a RLS por titular.
  */
 
 /**
  * Tabelas de Sprint 1 sob RLS e a coluna-âncora do titular em cada uma.
  * `users` ancora pela própria PK (`id`); as demais, por `user_id`.
  */
-const TENANT_TABLES: ReadonlyArray<{ table: string; column: string; anonymousPhase?: boolean }> = [
+interface TenantTable {
+  table: string;
+  /** Coluna-âncora do titular (RLS por `user_id`). `users` ancora pela PK. */
+  column: string;
+  /**
+   * Configuração da fase anônima (anamnese/consent). `scope` é a coluna comparada
+   * ao GUC `app.current_anamnesis_session_id`; `scopeAtInsert` exige o escopo já no
+   * INSERT (consents) — quando o INSERT cria a própria sessão (`id` gerado no banco)
+   * o escopo não é aplicável (anamnesis_sessions), então fica `false`.
+   */
+  anon?: { scope: string; scopeAtInsert: boolean };
+}
+
+const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   { table: 'users', column: 'id' },
   // `consents` tem fase anônima pelo mesmo motivo da anamnese (US-1.2): o
   // consentimento de saúde é registrado na tela-ponte, ANTES de o `users` existir
-  // (que só nasce no submit). A âncora nessa fase é `anamnesis_session_id`, e o
-  // acesso é token-scoped no serviço — a policy só não pode bloquear a linha órfã.
-  { table: 'consents', column: 'user_id', anonymousPhase: true },
-  { table: 'anamnesis_sessions', column: 'user_id', anonymousPhase: true },
+  // (que só nasce no submit). A âncora nessa fase é `anamnesis_session_id`, escopada
+  // ao GUC da sessão — o INSERT do consentimento já nasce preso à sessão do token.
+  {
+    table: 'consents',
+    column: 'user_id',
+    anon: { scope: 'anamnesis_session_id', scopeAtInsert: true },
+  },
+  { table: 'anamnesis_sessions', column: 'user_id', anon: { scope: 'id', scopeAtInsert: false } },
   { table: 'auth_sessions', column: 'user_id' },
 ];
 
-const UID = `current_setting('app.current_user_id', true)`;
-const ROLE = `current_setting('app.current_role', true)`;
+// `nullif(..., '')` é OBRIGATÓRIO, não cosmético: sob PgBouncer transaction mode,
+// um GUC customizado setado via `SET LOCAL` numa transação anterior reverte, no
+// backend reusado, para **string vazia** (`''`) — não para "não-setado". Sem o
+// `nullif`, `<guc> IS NULL` daria falso (`'' IS NULL` = false) e as políticas de
+// fase anônima esconderiam a própria linha recém-criada. `nullif('', '')` = NULL
+// restaura a semântica "ausente ⇒ NULL ⇒ fail-closed".
+const UID = `nullif(current_setting('app.current_user_id', true), '')`;
+const ROLE = `nullif(current_setting('app.current_role', true), '')`;
+/** GUC de escopo da sessão anônima (Sato — achado 1). NULL quando não setado. */
+const SESSION = `nullif(current_setting('app.current_anamnesis_session_id', true), '')`;
 
 /** Nomes de política determinísticos por tabela (permite DROP idempotente). */
 function policyNames(table: string) {
@@ -69,23 +104,38 @@ function policyNames(table: string) {
 export function buildRlsPoliciesSql(): string {
   const statements: string[] = [];
 
-  for (const { table, column, anonymousPhase } of TENANT_TABLES) {
+  for (const { table, column, anon } of TENANT_TABLES) {
     const p = policyNames(table);
     const self = `("${column}"::text = ${UID})`;
     const system = `(${ROLE} = 'SYSTEM')`;
     const admin = `(${ROLE} = 'ADMIN')`;
+    const base = `${self} OR ${system} OR ${admin}`;
 
-    // Visibilidade padrão: o próprio titular, mais os contextos de sistema/admin.
-    let visible = `${self} OR ${system} OR ${admin}`;
-    // Anamnese: acrescenta a fase anônima (linha sem titular + contexto ANONYMOUS).
-    if (anonymousPhase) {
-      visible += ` OR ("${column}" IS NULL AND ${ROLE} = 'ANONYMOUS')`;
+    // Fase anônima escopada por sessão (Sato — achado 1):
+    //  - leitura: GUC ausente (lookup token→sessão) OU coluna de escopo == GUC;
+    //  - escrita: exige o GUC batendo a sessão (nenhuma linha órfã de outra sessão).
+    let anonRead = '';
+    let anonWrite = '';
+    let anonInsert = '';
+    if (anon) {
+      const orphan = `"${column}" IS NULL AND ${ROLE} = 'ANONYMOUS'`;
+      const scoped = `"${anon.scope}"::text = ${SESSION}`;
+      anonRead = ` OR (${orphan} AND (${SESSION} IS NULL OR ${scoped}))`;
+      anonWrite = ` OR (${orphan} AND ${scoped})`;
+      // INSERT: consents nasce preso à sessão (scopeAtInsert); a sessão nova não
+      // tem `id` ainda, então seu INSERT é liberado pela condição de órfã.
+      anonInsert = anon.scopeAtInsert ? ` OR (${orphan} AND ${scoped})` : ` OR (${orphan})`;
     }
+
+    const visibleRead = `${base}${anonRead}`;
+    const visibleWrite = `${base}${anonWrite}`;
 
     // Criação de titular / linha de fase anônima: permitida sem contexto de tenant
     // (onboarding público e operações de sistema) ou dentro do próprio contexto.
     const insertCheck =
-      table === 'users' ? `${UID} IS NULL OR ${self} OR ${system} OR ${admin}` : visible;
+      table === 'users'
+        ? `${UID} IS NULL OR ${self} OR ${system} OR ${admin}`
+        : `${base}${anonInsert}`;
 
     statements.push(
       `ALTER TABLE "${table}" ENABLE ROW LEVEL SECURITY`,
@@ -95,9 +145,9 @@ export function buildRlsPoliciesSql(): string {
       `DROP POLICY IF EXISTS "${p.insert}" ON "${table}"`,
       `DROP POLICY IF EXISTS "${p.update}" ON "${table}"`,
       `DROP POLICY IF EXISTS "${p.delete}" ON "${table}"`,
-      `CREATE POLICY "${p.select}" ON "${table}" FOR SELECT USING (${visible})`,
+      `CREATE POLICY "${p.select}" ON "${table}" FOR SELECT USING (${visibleRead})`,
       `CREATE POLICY "${p.insert}" ON "${table}" FOR INSERT WITH CHECK (${insertCheck})`,
-      `CREATE POLICY "${p.update}" ON "${table}" FOR UPDATE USING (${visible}) WITH CHECK (${visible})`,
+      `CREATE POLICY "${p.update}" ON "${table}" FOR UPDATE USING (${visibleWrite}) WITH CHECK (${visibleWrite})`,
     );
 
     // DELETE: `consents` é append-only (revogação = UPDATE em `revoked_at`), então

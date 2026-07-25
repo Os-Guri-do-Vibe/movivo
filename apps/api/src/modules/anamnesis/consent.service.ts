@@ -16,7 +16,7 @@
  */
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { CONSENT_TEXTS, type ConsentTypeWithText, type RecordConsentInput } from '@movivo/shared';
-import { and, eq, gt, isNull, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull } from 'drizzle-orm';
 
 import { TenantDatabase, type TenantTransaction } from '../../core/database';
 import { anamnesisSessions, consents } from '../../core/database/schema';
@@ -46,8 +46,12 @@ export class ConsentService {
   ): Promise<void> {
     this.assertVersionsAreCurrent(inputs);
 
-    await this.db.runAsToken(async (tx) => {
-      const sessionId = await this.resolveActiveSessionId(tx, token);
+    // Lookup token→sessão SEM escopo (o id ainda não é conhecido); a escrita roda
+    // ESCOPADA à sessão (Sato — achado 1): a RLS só aceita o consentimento preso a
+    // esta sessão, nunca a de outro token.
+    const sessionId = await this.db.runAsToken((tx) => this.resolveActiveSessionId(tx, token));
+
+    await this.db.runAsTokenScoped(sessionId, async (tx) => {
       for (const input of inputs) {
         await this.upsert(tx, { anamnesisSessionId: sessionId, userId: null }, input, origin);
       }
@@ -100,7 +104,7 @@ export class ConsentService {
    * trava real: sem ela, dado de saúde entraria no banco sem base legal.
    */
   async hasValidHealthConsent(sessionId: string): Promise<boolean> {
-    const rows = await this.db.runAsToken((tx) =>
+    const rows = await this.db.runAsTokenScoped(sessionId, (tx) =>
       tx
         .select({ id: consents.id })
         .from(consents)
@@ -155,7 +159,17 @@ export class ConsentService {
 
   /**
    * Idempotência pelo índice único (âncora, finalidade, versão): reaceitar a
-   * mesma versão não duplica a prova, apenas atualiza a decisão e a origem.
+   * mesma versão não duplica a prova.
+   *
+   * **Prova imutável (Sato — achado 2):** no conflito atualizamos APENAS `accepted`
+   * (a decisão atual). `accepted_at`/`ip`/`user_agent` da PRIMEIRA gravação são
+   * preservados — são a circunstância do aceite original e não podem ser
+   * sobrescritos por um reaceite (perderíamos o timestamp da prova de saúde). A
+   * revogação é registrada por `revoked_at` (nunca aqui).
+   *
+   * ponytail: aceite/recusa da mesma versão é UMA linha (unique constraint); um
+   * flip recusa→aceite mantém a origem da 1ª gravação. A trilha por evento
+   * (linha nova por decisão) entra com o audit_logs append-only da Sprint 5.
    */
   private async upsert(
     tx: TenantTransaction,
@@ -176,12 +190,8 @@ export class ConsentService {
       })
       .onConflictDoUpdate({
         target: [consents.anamnesisSessionId, consents.consentType, consents.version],
-        set: {
-          accepted: input.accepted,
-          ipAddress: origin.ip,
-          userAgent: origin.userAgent,
-          acceptedAt: sql`now()`,
-        },
+        // Só a decisão. A prova (accepted_at/ip/user_agent) da 1ª gravação fica.
+        set: { accepted: input.accepted },
       });
   }
 }

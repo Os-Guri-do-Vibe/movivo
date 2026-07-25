@@ -33,15 +33,20 @@ function makeTx(rows: unknown[] = []): TenantTransaction {
 
 function makeDb(rows: unknown[] = []) {
   const run = vi.fn((cb: (tx: TenantTransaction) => Promise<unknown>) => cb(makeTx(rows)));
+  const runScoped = vi.fn((_id: string, cb: (tx: TenantTransaction) => Promise<unknown>) =>
+    cb(makeTx(rows)),
+  );
   return {
     db: {
       runAsToken: run,
+      runAsTokenScoped: runScoped,
       runAsSystem: run,
       runAsUser: vi.fn((_u: string, _r: string, cb: (tx: TenantTransaction) => Promise<unknown>) =>
         cb(makeTx(rows)),
       ),
     } as unknown as TenantDatabase,
     run,
+    runScoped,
   };
 }
 

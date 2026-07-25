@@ -24,18 +24,22 @@ describe('buildRlsPoliciesSql', () => {
     }
   });
 
-  it('as políticas comparam pelo GUC de sessão (fail-closed com current_setting(...,true))', () => {
-    expect(sql).toContain("current_setting('app.current_user_id', true)");
-    expect(sql).toContain("current_setting('app.current_role', true)");
+  it('lê os GUCs sempre via nullif — vazio conta como ausente (fix de pooling)', () => {
+    // Sob PgBouncer, um GUC customizado reverte para '' (não NULL) no backend
+    // reusado; sem nullif, `IS NULL` daria falso e a fase anônima esconderia a
+    // própria linha. As leituras cruas (sem nullif) não podem mais existir.
+    expect(sql).toContain("nullif(current_setting('app.current_user_id', true), '')");
+    expect(sql).toContain("nullif(current_setting('app.current_role', true), '')");
+    expect(sql).not.toMatch(/[^(]current_setting\('app\.current_user_id', true\)(?!, '')/);
   });
 
   it('users ancora pela própria id e permite criação sem contexto (onboarding público)', () => {
     expect(sql).toContain(
-      `CREATE POLICY "users_rls_select" ON "users" FOR SELECT USING (("id"::text = current_setting('app.current_user_id', true))`,
+      `CREATE POLICY "users_rls_select" ON "users" FOR SELECT USING (("id"::text = nullif(current_setting('app.current_user_id', true), ''))`,
     );
     // INSERT liberado quando não há titular no contexto (criação anônima/sistema).
     expect(sql).toMatch(
-      /CREATE POLICY "users_rls_insert" ON "users" FOR INSERT WITH CHECK \(current_setting\('app.current_user_id', true\) IS NULL/,
+      /CREATE POLICY "users_rls_insert" ON "users" FOR INSERT WITH CHECK \(nullif\(current_setting\('app.current_user_id', true\), ''\) IS NULL/,
     );
   });
 
@@ -45,9 +49,11 @@ describe('buildRlsPoliciesSql', () => {
     expect(sql).toContain('CREATE POLICY "auth_sessions_rls_delete"');
   });
 
-  it('anamnesis_sessions libera a fase anônima (user_id NULL + role ANONYMOUS)', () => {
+  it('anamnesis_sessions libera a fase anônima escopada por sessão (Sato — achado 1)', () => {
+    // Órfã (user_id NULL + ANONYMOUS) só visível quando o GUC de sessão está
+    // ausente (lookup por token) OU bate a própria linha — nunca a de outra sessão.
     expect(sql).toContain(
-      `("user_id" IS NULL AND current_setting('app.current_role', true) = 'ANONYMOUS')`,
+      `"user_id" IS NULL AND nullif(current_setting('app.current_role', true), '') = 'ANONYMOUS' AND (nullif(current_setting('app.current_anamnesis_session_id', true), '') IS NULL OR "id"::text = nullif(current_setting('app.current_anamnesis_session_id', true), ''))`,
     );
   });
 });

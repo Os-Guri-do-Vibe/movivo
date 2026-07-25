@@ -18,7 +18,7 @@
  * o tipo do banco é derivado **do pacote compartilhado**, não recopiado. Assim
  * backend, frontend e banco não podem divergir sem quebrar a compilação.
  */
-import { ProtocolStatus, SubscriptionStatus } from '@movivo/shared';
+import { ParqState, ProtocolStatus, SubscriptionStatus } from '@movivo/shared';
 import { pgEnum } from 'drizzle-orm/pg-core';
 
 /**
@@ -81,6 +81,13 @@ export const anamnesisStatusEnum = pgEnum('anamnesis_status', [
   'EXPIRED',
   'PROCESSED',
 ]);
+
+/**
+ * Estado do gate PAR-Q (US-1.3 / Alexandre §2), derivado de `@movivo/shared`.
+ * `BLOQUEADO_AGUARDANDO_CLEARANCE` é a trava real: impede geração automática de
+ * protocolo (Sprint 2). Nulo enquanto a sessão não foi submetida.
+ */
+export const parqStateEnum = pgEnum('parq_state', valuesOf(ParqState));
 
 // ---------------------------------------------------------------------------
 // LGPD / CONSENTIMENTO

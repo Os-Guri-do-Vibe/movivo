@@ -145,16 +145,25 @@ describe('CONSENT — prova de consentimento LGPD (US-1.2)', () => {
     await expect(service.hasValidHealthConsent(sessionA.id)).resolves.toBe(true);
   });
 
-  it('(b) reaceitar a MESMA versão é idempotente (não duplica a prova)', async () => {
+  it('(b) reaceitar a MESMA versão é idempotente e PRESERVA a prova original (Sato #2)', async () => {
+    const before = (await rowsOf(sessionA.id)).find((r) => r.consent_type === 'MARKETING');
+    if (!before) throw new Error('setup: MARKETING deveria existir antes do reaceite');
+    const acceptedAtBefore = before.accepted_at.getTime();
+
     await service.recordForSessionToken(
       sessionA.token,
       [{ type: 'MARKETING', version: CONSENT_TEXTS.MARKETING.version, accepted: true }],
-      ORIGIN,
+      { ip: '203.0.113.99', userAgent: 'outro-agente' },
     );
 
     const rows = await rowsOf(sessionA.id);
     expect(rows).toHaveLength(2); // continua 2, não 3
-    expect(rows.find((r) => r.consent_type === 'MARKETING')?.accepted).toBe(true);
+    const marketing = rows.find((r) => r.consent_type === 'MARKETING');
+    if (!marketing) throw new Error('MARKETING deveria continuar existindo');
+    // A decisão atualiza…
+    expect(marketing.accepted).toBe(true);
+    // …mas a CIRCUNSTÂNCIA da 1ª gravação (timestamp da prova) NÃO é sobrescrita.
+    expect(marketing.accepted_at.getTime()).toBe(acceptedAtBefore);
   });
 
   it('(d) recusa versão divergente da vigente (paridade texto↔versão)', async () => {

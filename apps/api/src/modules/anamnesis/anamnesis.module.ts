@@ -21,20 +21,26 @@
  * a comunicação entre domínios é por evento (`EventBusModule`) ou por fila (`JobsModule`).
  */
 import { Module } from '@nestjs/common';
+import { ThrottlerModule } from '@nestjs/throttler';
 
+import { AnamnesisController } from './anamnesis.controller';
+import { AnamnesisService } from './anamnesis.service';
 import { ConsentController } from './consent.controller';
 import { ConsentService } from './consent.service';
 
 /**
- * US-1.2 preencheu a parte de CONSENT. O `ConsentService` fica aqui — e não num
- * `ConsentModule` próprio — porque consentimento e anamnese são o mesmo bounded
- * context (ONBOARDING & ANAMNESIS, `ARQUITETURA.md` §7) e um módulo separado
- * para dois arquivos seria estrutura sem função. `FormSessionService` e o gate
- * PAR-Q entram na US-1.3.
+ * US-1.2 (CONSENT) e US-1.3 (FormSession + gate PAR-Q) vivem no mesmo bounded
+ * context (ONBOARDING & ANAMNESIS, `ARQUITETURA.md` §7) — um módulo só, sem
+ * imports circulares (consome apenas o CORE por DI).
+ *
+ * `ThrottlerModule` local: rate limit de 60 req/min por IP em todo `/anamnesis/*`
+ * (Rafael §1217). ponytail: storage em memória (single-instance MVP); trocar por
+ * storage Redis quando a API escalar horizontalmente.
  */
 @Module({
-  controllers: [ConsentController],
-  providers: [ConsentService],
-  exports: [ConsentService],
+  imports: [ThrottlerModule.forRoot({ throttlers: [{ ttl: 60_000, limit: 60 }] })],
+  controllers: [ConsentController, AnamnesisController],
+  providers: [ConsentService, AnamnesisService],
+  exports: [ConsentService, AnamnesisService],
 })
 export class AnamnesisModule {}
