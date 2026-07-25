@@ -31,6 +31,10 @@ allowBuilds:
   # `db:generate`/`db:migrate`/`db:seed` não rodam. Nenhum dos dois é dependência de
   # runtime da API — ficam confinados a devDependencies de `apps/api`.
   esbuild: true
+  # `msgpackr-extract` é acelerador nativo opcional do `msgpackr` (serialização de job do
+  # BullMQ, US-1.7). O `msgpackr` funciona em JS puro sem ele; o addon só otimiza. Negado
+  # por menor privilégio (Sato) — nenhum script nativo sem necessidade técnica.
+  msgpackr-extract: false
   # `sharp` é o otimizador de imagem nativo do Next.js 15 (US-0.5) em produção
   # (`next start` / `next/image`). Sem o script de instalação, o binário nativo da
   # plataforma não é resolvido e a otimização de imagem cai para um caminho degradado.
