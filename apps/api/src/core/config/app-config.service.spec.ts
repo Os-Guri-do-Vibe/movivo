@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { AppConfigService } from './app-config.service';
+import { AppConfigService, parseDurationSeconds } from './app-config.service';
 import { type AppConfig } from './env.schema';
 
 function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
@@ -40,6 +40,12 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     REDIS_KEY_PREFIX: 'movivo',
     REDIS_PASSWORD: 'super-secret-redis',
     PGCRYPTO_KEY: 'super-secret-pgcrypto',
+    JWT_ALGORITHM: 'RS256',
+    JWT_KEY_ID: 'movivo-test-kid',
+    JWT_PRIVATE_KEY: 'super-secret-private-key',
+    JWT_PUBLIC_KEY: 'public-key-not-secret',
+    JWT_ACCESS_TTL: '15m',
+    JWT_REFRESH_TTL: '30d',
     ...overrides,
   } as AppConfig;
 }
@@ -91,6 +97,46 @@ describe('AppConfigService', () => {
     const snapshot = service.redactedSnapshot();
     expect(snapshot.PGCRYPTO_KEY).toBe('[REDACTED]');
     expect(JSON.stringify(snapshot)).not.toContain('super-secret-pgcrypto');
+  });
+
+  it('expõe a config de JWT e trata as chaves como segredo no snapshot (US-1.4)', () => {
+    const service = new AppConfigService(makeConfig());
+    const jwt = service.jwt;
+    expect(jwt.algorithm).toBe('RS256');
+    expect(jwt.keyId).toBe('movivo-test-kid');
+    expect(jwt.privateKey).toBe('super-secret-private-key');
+    expect(jwt.previousPublicKey).toBeUndefined();
+    expect(jwt.refreshTtlSeconds).toBe(30 * 86_400);
+
+    const snapshot = service.redactedSnapshot();
+    expect(snapshot.JWT_PRIVATE_KEY).toBe('[REDACTED]');
+    expect(snapshot.JWT_PUBLIC_KEY).toBe('[REDACTED]');
+    expect(JSON.stringify(snapshot)).not.toContain('super-secret-private-key');
+  });
+
+  it('inclui a chave pública N-1 apenas quando kid e chave anteriores existem', () => {
+    const withPrev = new AppConfigService(
+      makeConfig({
+        JWT_PUBLIC_KEY_PREVIOUS: 'old-public',
+        JWT_KEY_ID_PREVIOUS: 'movivo-old-kid',
+      } as Partial<AppConfig>),
+    );
+    expect(withPrev.jwt.previousPublicKey).toEqual({ keyId: 'movivo-old-kid', key: 'old-public' });
+
+    // Só a chave, sem o kid → ignorada (não dá para mapear por kid).
+    const onlyKey = new AppConfigService(
+      makeConfig({ JWT_PUBLIC_KEY_PREVIOUS: 'old-public' } as Partial<AppConfig>),
+    );
+    expect(onlyKey.jwt.previousPublicKey).toBeUndefined();
+  });
+
+  it('parseDurationSeconds converte s/m/h/d e recusa formato inválido', () => {
+    expect(parseDurationSeconds('30s')).toBe(30);
+    expect(parseDurationSeconds('15m')).toBe(900);
+    expect(parseDurationSeconds('2h')).toBe(7200);
+    expect(parseDurationSeconds('30d')).toBe(2_592_000);
+    expect(() => parseDurationSeconds('15minutos')).toThrow();
+    expect(() => parseDurationSeconds('abc')).toThrow();
   });
 
   it('redis.sentinelPassword cai para a senha do Redis quando não há senha de Sentinel', () => {

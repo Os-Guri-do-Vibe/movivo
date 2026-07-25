@@ -10,6 +10,7 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { APP_VERSION } from '@movivo/shared';
+import cookieParser from 'cookie-parser';
 import { Logger as PinoLogger } from 'nestjs-pino';
 
 import { AppModule } from './app.module';
@@ -62,6 +63,10 @@ async function bootstrap(): Promise<void> {
     exposedHeaders: ['x-correlation-id'],
     maxAge: 600,
   });
+
+  // Lê o cookie httpOnly do refresh token (US-1.4). Sem chave de assinatura: o cookie
+  // carrega `<sessionId>.<segredo>`, e o segredo é conferido contra o hash no banco.
+  app.use(cookieParser());
 
   // Confia no proxy reverso (Cloudflare/nginx) para IP real e protocolo — necessário
   // para rate limiting por IP e para URLs absolutas corretas atrás de TLS terminado.

@@ -24,6 +24,34 @@ export interface DatabaseConfig {
   readonly connectTimeoutSeconds: number;
 }
 
+export interface JwtConfig {
+  readonly algorithm: 'RS256';
+  readonly keyId: string;
+  readonly privateKey: string;
+  readonly publicKey: string;
+  /** Chave pública N-1 por `kid`, para aceitar tokens da rotação anterior. */
+  readonly previousPublicKey: { readonly keyId: string; readonly key: string } | undefined;
+  /** TTLs na sintaxe do jsonwebtoken (`'15m'`, `'30d'`). */
+  readonly accessTtl: string;
+  readonly refreshTtl: string;
+  /** TTL do refresh em segundos, derivado de `refreshTtl` (cookie maxAge / expiração). */
+  readonly refreshTtlSeconds: number;
+}
+
+/**
+ * Converte `15m`/`30d`/`3600s` em segundos. Aceita só o subconjunto que usamos
+ * (s/m/h/d) — falhar cedo num formato inesperado é melhor que um `NaN` silencioso
+ * virar cookie sem expiração.
+ */
+export function parseDurationSeconds(value: string): number {
+  const match = /^(\d+)([smhd])$/.exec(value.trim());
+  if (!match) throw new Error(`Duração inválida: "${value}". Use N seguido de s|m|h|d.`);
+  const amount = Number(match[1]);
+  const unit = match[2] as 's' | 'm' | 'h' | 'd';
+  const factor = { s: 1, m: 60, h: 3600, d: 86_400 }[unit];
+  return amount * factor;
+}
+
 export interface RedisConfig {
   readonly sentinels: readonly { readonly host: string; readonly port: number }[];
   readonly masterName: string;
@@ -95,6 +123,24 @@ export class AppConfigService {
    */
   get pgcryptoKey(): string {
     return this.config.PGCRYPTO_KEY;
+  }
+
+  /** Config do JWT RS256 (US-1.4 / Sato §9.1). As chaves são segredos redigidos no snapshot. */
+  get jwt(): JwtConfig {
+    const previous =
+      this.config.JWT_PUBLIC_KEY_PREVIOUS && this.config.JWT_KEY_ID_PREVIOUS
+        ? { keyId: this.config.JWT_KEY_ID_PREVIOUS, key: this.config.JWT_PUBLIC_KEY_PREVIOUS }
+        : undefined;
+    return {
+      algorithm: this.config.JWT_ALGORITHM,
+      keyId: this.config.JWT_KEY_ID,
+      privateKey: this.config.JWT_PRIVATE_KEY,
+      publicKey: this.config.JWT_PUBLIC_KEY,
+      previousPublicKey: previous,
+      accessTtl: this.config.JWT_ACCESS_TTL,
+      refreshTtl: this.config.JWT_REFRESH_TTL,
+      refreshTtlSeconds: parseDurationSeconds(this.config.JWT_REFRESH_TTL),
+    };
   }
 
   get redis(): RedisConfig {

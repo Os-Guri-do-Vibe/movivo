@@ -11,7 +11,8 @@
     postgres_app_password         senha da role movivo_app (runtime, sem BYPASSRLS)
     postgres_migrator_password    senha da role movivo_migrator (migracoes)
     redis_password                requirepass do Redis master/replica/sentinel
-    pgcrypto_key                  chave de criptografia de dados de saude (Sprint 2)
+    pgcrypto_key                  chave de criptografia de dados de saude (Sprint 1)
+    jwt_private_key/jwt_public_key  par RS256 do JWT (Sprint 1 / US-1.4)
     pgbouncer_userlist.txt        auth_file do PgBouncer, derivado das senhas acima
 
   ATENCAO - ESTE ARQUIVO E INTENCIONALMENTE 100% ASCII.
@@ -112,6 +113,24 @@ Write-Secret -Name 'postgres_app_password'       -Value (New-RandomToken 40)
 Write-Secret -Name 'postgres_migrator_password'  -Value (New-RandomToken 40)
 Write-Secret -Name 'redis_password'              -Value (New-RandomToken 48)
 Write-Secret -Name 'pgcrypto_key'                -Value (New-RandomToken 64)
+
+# Par de chaves RS256 do JWT (US-1.4). Gerado via openssl (vem com o Git for
+# Windows). O PowerShell 5.1 nao exporta PKCS#8/SPKI PEM de forma simples, entao
+# dependemos do openssl - mesma ferramenta do gen-local-secrets.sh.
+$jwtPriv = Join-Path $SecretsDir 'jwt_private_key'
+$jwtPub  = Join-Path $SecretsDir 'jwt_public_key'
+if ((Test-Path -LiteralPath $jwtPriv) -and (Test-Path -LiteralPath $jwtPub) -and (-not $Force)) {
+  Write-Output '  = jwt_private_key/jwt_public_key (mantidos, use -Force para rotacionar)'
+} else {
+  $openssl = Get-Command openssl -ErrorAction SilentlyContinue
+  if (-not $openssl) {
+    Write-Output 'ERRO: openssl nao encontrado. Instale o Git for Windows (traz openssl) ou gere o par RS256 manualmente em secrets/jwt_private_key e secrets/jwt_public_key.'
+    exit 1
+  }
+  & openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out $jwtPriv 2>$null
+  & openssl pkey -in $jwtPriv -pubout -out $jwtPub 2>$null
+  Write-Output '  + jwt_private_key + jwt_public_key (RS256, 2048 bits)'
+}
 
 # userlist.txt do PgBouncer.
 # Sempre reescrito a partir dos arquivos de senha vigentes, para nunca ficar

@@ -143,6 +143,26 @@ export const envSchema = z
      * sensível, então o boot **falha rápido** sem ela — não há default nem fallback.
      */
     PGCRYPTO_KEY: z.string().min(1),
+
+    // ------------------------------------------------ JWT / AUTH (US-1.4)
+    /**
+     * Par de chaves RS256 (Sato §9.1 / ADR-006). O algoritmo é fixo em `RS256` —
+     * `HS256`/`alg:none` são recusados aqui e re-validados explicitamente no
+     * passport-jwt. As chaves vêm sempre de secret (`JWT_*_KEY_FILE`); sem elas o
+     * boot falha rápido, como a `PGCRYPTO_KEY`.
+     */
+    JWT_ALGORITHM: z.literal('RS256').default('RS256'),
+    /** `kid` da chave corrente — vai no header do token para rotação sem downtime. */
+    JWT_KEY_ID: z.string().min(1).default('movivo-2026-q3'),
+    JWT_PRIVATE_KEY: z.string().min(1),
+    JWT_PUBLIC_KEY: z.string().min(1),
+    /** Chave pública N-1 (opcional): aceita tokens ainda válidos assinados antes da rotação. */
+    JWT_PUBLIC_KEY_PREVIOUS: z.string().min(1).optional(),
+    JWT_KEY_ID_PREVIOUS: z.string().min(1).optional(),
+    /** TTL do access token (curto — Sato §9.1). Aceita a sintaxe do `ms`/jsonwebtoken. */
+    JWT_ACCESS_TTL: z.string().min(1).default('15m'),
+    /** TTL do refresh token (cookie httpOnly, 30 dias — ADR-006). */
+    JWT_REFRESH_TTL: z.string().min(1).default('30d'),
   })
   .superRefine((config, ctx) => {
     if (config.DATABASE_PORT === POSTGRES_DIRECT_PORT) {
