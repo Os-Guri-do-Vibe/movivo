@@ -1,26 +1,40 @@
 /**
- * `AuthModule` — **esqueleto vazio registrado** (TASK-0.3.6).
+ * `AuthModule` — JWT RS256 + refresh rotation + RBAC (US-1.4).
  *
- * Módulo AUTH do C4 nível 3 (`ARQUITETURA.md` §4). Nesta sprint é só a casca:
- * nenhuma lógica de negócio, nenhum controller, nenhum provider. Existe para que a
- * sprint de implementação (Sprint 1-2) encaixe código sem reestruturar o app.
+ * Consome apenas o CORE por DI (config, banco, Redis, logger — todos `@Global()`), sem
+ * importar outro módulo de domínio (regra §12.5 — sem imports circulares).
  *
- * Conteúdo previsto pelo diagrama de Rafael:
- *  - `AuthGuard`
- *  - `JwtService`
- *  - `UserService`
- *
- * Regras que já valem para quem implementar:
- *  - JWT assinado em **RS256 com `kid`**, nunca HS256 (Sato §9.1). Chaves via `JWT_PRIVATE_KEY_FILE`.
- *  - Refresh token rotativo com detecção de reuso; sessões revogáveis por dispositivo.
- *  - O telefone é o identificador primário do usuário — nunca aparece em log, span ou nome de chave Redis.
- *
- * # Fronteira do módulo (regra §12.5 — sem imports circulares)
- * Este módulo pode depender do **CORE** (config, banco, Redis, logger) por DI, já que
- * todos os providers do CORE são globais. Não pode importar outro módulo de domínio:
- * a comunicação entre domínios é por evento (`EventBusModule`) ou por fila (`JobsModule`).
+ * # Rate limit do login (10/min por IP — brute force, Rafael §1218)
+ * O `ThrottlerModule.forRoot` do `@nestjs/throttler` é **global e last-wins**: registrar
+ * um segundo `forRoot` aqui sobrescreveria a config global (a do `AnamnesisModule`, 60/min)
+ * e vice-versa. Por isso NÃO chamamos `forRoot` — usamos o `ThrottlerModule` global já
+ * existente e sobrescrevemos só a rota de login com `@Throttle({ default: { limit: 10 } })`
+ * (padrão idiomático: um throttler global + override por rota). O `ThrottlerGuard` resolve
+ * storage/options do módulo global. ponytail: storage em memória (single-instance MVP);
+ * trocar por storage Redis quando a API escalar horizontalmente.
  */
 import { Module } from '@nestjs/common';
+import { PassportModule } from '@nestjs/passport';
 
-@Module({})
+import { AuthController } from './auth.controller';
+import { AuthService } from './auth.service';
+import { JwtStrategy } from './jwt.strategy';
+import { PasswordService } from './password.service';
+import { RolesGuard } from './roles.guard';
+import { TokenDenylistService } from './token-denylist.service';
+import { TokenService } from './token.service';
+
+@Module({
+  imports: [PassportModule],
+  controllers: [AuthController],
+  providers: [
+    AuthService,
+    TokenService,
+    TokenDenylistService,
+    PasswordService,
+    JwtStrategy,
+    RolesGuard,
+  ],
+  exports: [AuthService, TokenService, PasswordService],
+})
 export class AuthModule {}

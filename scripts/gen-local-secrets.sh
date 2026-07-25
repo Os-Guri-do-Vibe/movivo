@@ -17,7 +17,8 @@
 #   postgres_app_password         senha da role movivo_app  (runtime, sem BYPASSRLS)
 #   postgres_migrator_password    senha da role movivo_migrator (migrações)
 #   redis_password                requirepass do Redis master/replica/sentinel
-#   pgcrypto_key                  chave de criptografia de dados de saúde (Sprint 2)
+#   pgcrypto_key                  chave de criptografia de dados de saúde (Sprint 1)
+#   jwt_private_key/jwt_public_key  par RS256 do JWT (Sprint 1 / US-1.4)
 #   pgbouncer_userlist.txt        auth_file do PgBouncer, derivado das senhas acima
 #
 # Estes valores são DESCARTÁVEIS e válidos apenas para a sua máquina. Nunca
@@ -73,6 +74,26 @@ write_secret() {
 
 read_secret() { cat "${SECRETS_DIR}/$1"; }
 
+# --- Par de chaves RS256 do JWT (US-1.4 / Sato §9.1) --------------------------
+# Gera secrets/jwt_private_key (PKCS#8) e secrets/jwt_public_key (SPKI). Idempotente:
+# só cria se faltar, a menos que --force. Mesmas permissões 644 dos demais secrets
+# (o container/CI precisa LER — lição da US-0.2/US-0.6).
+write_jwt_keypair() {
+  local priv="${SECRETS_DIR}/jwt_private_key" pub="${SECRETS_DIR}/jwt_public_key"
+  if [ -f "$priv" ] && [ -f "$pub" ] && [ "$FORCE" -eq 0 ]; then
+    echo "  = jwt_private_key/jwt_public_key (mantidos — use --force para rotacionar)"
+    return 0
+  fi
+  if ! command -v openssl >/dev/null 2>&1; then
+    echo "ERRO: openssl é necessário para gerar o par RS256 do JWT (US-1.4)." >&2
+    exit 1
+  fi
+  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$priv" >/dev/null 2>&1
+  openssl pkey -in "$priv" -pubout -out "$pub" >/dev/null 2>&1
+  chmod 644 "$priv" "$pub" 2>/dev/null || true
+  echo "  + jwt_private_key + jwt_public_key (RS256, 2048 bits)"
+}
+
 # --- Execução -----------------------------------------------------------------
 mkdir -p "$SECRETS_DIR"
 chmod 700 "$SECRETS_DIR" 2>/dev/null || true
@@ -85,6 +106,7 @@ write_secret "postgres_app_password"       "$(rand_token 40)"
 write_secret "postgres_migrator_password"  "$(rand_token 40)"
 write_secret "redis_password"              "$(rand_token 48)"
 write_secret "pgcrypto_key"                "$(rand_token 64)"
+write_jwt_keypair
 
 # --- userlist.txt do PgBouncer ------------------------------------------------
 # Sempre reescrito a partir dos arquivos de senha vigentes, para nunca ficar

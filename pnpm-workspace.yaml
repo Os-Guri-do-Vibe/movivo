@@ -21,6 +21,10 @@ allowBuilds:
   # `core-js` entra como dependência transitiva de `posthog-js` (US-0.5). Seu script de
   # postinstall só imprime uma mensagem de financiamento — não produz artefato nenhum.
   # Negado por princípio de menor privilégio (Sato): nenhum script sem necessidade técnica.
+  # `argon2` (US-1.4, hash de senha do PROFESSIONAL/ADMIN) é um addon nativo: seu
+  # script de instalação resolve/compila o binário. Sem ele o `require('argon2')`
+  # falha no boot. Confinado ao runtime da API — é a função de hashing de senha.
+  argon2: true
   core-js: false
   # esbuild é dependência transitiva de `drizzle-kit` e `tsx` (US-0.4). Seu script de
   # instalação apenas resolve/valida o binário nativo da plataforma correta; sem ele,

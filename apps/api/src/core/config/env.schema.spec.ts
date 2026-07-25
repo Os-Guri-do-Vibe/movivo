@@ -18,6 +18,8 @@ const VALID = {
   REDIS_SENTINEL_MASTER_NAME: 'movivo-master',
   REDIS_PASSWORD: 'senha-de-teste',
   PGCRYPTO_KEY: 'chave-pgcrypto-de-teste',
+  JWT_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\nteste\n-----END PRIVATE KEY-----',
+  JWT_PUBLIC_KEY: '-----BEGIN PUBLIC KEY-----\nteste\n-----END PUBLIC KEY-----',
 } as const;
 
 describe('envSchema', () => {

@@ -1,5 +1,5 @@
-export { AppConfigService } from './app-config.service';
-export type { DatabaseConfig, RedisConfig } from './app-config.service';
+export { AppConfigService, parseDurationSeconds } from './app-config.service';
+export type { DatabaseConfig, JwtConfig, RedisConfig } from './app-config.service';
 export {
   buildAppConfig,
   ConfigModule,
