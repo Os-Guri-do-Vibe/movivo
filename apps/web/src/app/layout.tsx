@@ -35,12 +35,8 @@ export const metadata: Metadata = {
     'Orientação de treino conversacional no WhatsApp, com protocolo calculado por motor determinístico e supervisionado por profissional de Educação Física registrado no CREF.',
   applicationName: 'MOVIVO',
   authors: [{ name: 'MOVIVO' }],
-  /*
-   * Esta é a casca técnica da Sprint 0, não a landing. Indexá-la só geraria um
-   * resultado de busca que contradiz o produto. O `noindex` sai na Sprint 1, quando
-   * a landing real de Helena/Sofia nascer.
-   */
-  robots: { index: false, follow: false },
+  /* Landing real da Sprint 1 (US-1.5): indexável — é a porta de entrada do funil. */
+  robots: { index: true, follow: true },
   openGraph: {
     type: 'website',
     locale: 'pt_BR',
