@@ -30,7 +30,7 @@ import {
   type ParqState as ParqStateType,
   type StartAnamnesisInput,
 } from '@movivo/shared';
-import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
+import { PinoLogger } from 'nestjs-pino';
 import { and, eq, lt, sql } from 'drizzle-orm';
 
 import { HealthCipherService, TenantDatabase, type TenantTransaction } from '../../core/database';
@@ -71,11 +71,17 @@ export interface SubmitResult {
 @Injectable()
 export class AnamnesisService {
   constructor(
-    @InjectPinoLogger(AnamnesisService.name) private readonly logger: PinoLogger,
+    private readonly logger: PinoLogger,
     private readonly db: TenantDatabase,
     private readonly cipher: HealthCipherService,
     private readonly consents: ConsentService,
-  ) {}
+  ) {
+    // O `PinoLogger` simples é o provider GLOBAL do LoggerModule (Sprint 0). Setar o
+    // contexto aqui evita o `@InjectPinoLogger(nome)`, cujo token nomeado
+    // (`PinoLogger:AnamnesisService`) o nestjs-pino não expõe fora do módulo que o
+    // registra — o que fazia o AppModule inteiro falhar no boot.
+    this.logger.setContext(AnamnesisService.name);
+  }
 
   /** `POST /anamnesis/start`: cria sessão anônima com token CSPRNG e TTL de 72h. */
   async start(input: StartAnamnesisInput): Promise<StartResult> {
@@ -242,7 +248,13 @@ export class AnamnesisService {
 
   private assertActive(id: string, status: string, expiresAt: Date): void {
     if (this.isExpired(status, expiresAt)) {
-      void this.expire(id);
+      // Expira em background (best-effort): a resposta ao cliente é o 410, não
+      // dependemos do carimbo EXPIRED. O `.catch` é obrigatório — sem ele, uma
+      // falha do update vira unhandled rejection (e, sob teardown de teste, derruba
+      // o worker do vitest). Se falhar, o próximo acesso reavalia e tenta de novo.
+      this.expire(id).catch((err: unknown) => {
+        this.logger.warn({ err, anamnesisSessionId: id }, 'expire best-effort falhou');
+      });
       throw new GoneException('Sessão de anamnese expirada. Recomece o formulário.');
     }
     if (status !== 'IN_PROGRESS') {

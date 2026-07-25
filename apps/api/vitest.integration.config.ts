@@ -21,6 +21,13 @@ export default defineConfig({
     include: ['test/**/*.int-spec.ts', 'src/**/*.int-spec.ts'],
     // Integração é sequencial: comparte o mesmo Postgres/Redis; paralelizar convida a corrida.
     fileParallelism: false,
+    // Um ÚNICO fork para toda a suíte de integração. Sem isto, cada arquivo roda
+    // num fork próprio; um cliente `postgres` ou timer que demora a drenar mantém o
+    // fork vivo, e o vitest o mata com "Worker exited unexpectedly" ao trocar de
+    // arquivo — falha espúria que não é do teste. Um fork persistente elimina essa
+    // troca (cada arquivo ainda fecha suas conexões no `afterAll`).
+    pool: 'forks',
+    poolOptions: { forks: { singleFork: true } },
     testTimeout: 30_000,
     hookTimeout: 60_000,
   },

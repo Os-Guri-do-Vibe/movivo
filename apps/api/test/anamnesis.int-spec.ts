@@ -64,7 +64,11 @@ const cipher = new HealthCipherService(db, {
     readFileSync(resolve(apiRoot, '..', '..', 'secrets', 'pgcrypto_key'), 'utf8').trimEnd(),
 } as never);
 const consents = new ConsentService(tenant);
-const logger = { info: () => undefined } as never;
+const logger = {
+  info: () => undefined,
+  warn: () => undefined,
+  setContext: () => undefined,
+} as never;
 const service = new AnamnesisService(logger, tenant, cipher, consents);
 
 const adminClient = postgres({

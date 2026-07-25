@@ -89,7 +89,7 @@ function makeService(state: TxState = {}) {
     linkSessionToUser: vi.fn(() => Promise.resolve()),
   } as unknown as ConsentService;
 
-  const logger = { info: vi.fn() } as never;
+  const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() } as never;
   return { svc: new AnamnesisService(logger, db, cipher, consents), cipher, consents };
 }
 

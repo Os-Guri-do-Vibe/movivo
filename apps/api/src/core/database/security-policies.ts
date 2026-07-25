@@ -70,10 +70,16 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   { table: 'auth_sessions', column: 'user_id' },
 ];
 
-const UID = `current_setting('app.current_user_id', true)`;
-const ROLE = `current_setting('app.current_role', true)`;
+// `nullif(..., '')` é OBRIGATÓRIO, não cosmético: sob PgBouncer transaction mode,
+// um GUC customizado setado via `SET LOCAL` numa transação anterior reverte, no
+// backend reusado, para **string vazia** (`''`) — não para "não-setado". Sem o
+// `nullif`, `<guc> IS NULL` daria falso (`'' IS NULL` = false) e as políticas de
+// fase anônima esconderiam a própria linha recém-criada. `nullif('', '')` = NULL
+// restaura a semântica "ausente ⇒ NULL ⇒ fail-closed".
+const UID = `nullif(current_setting('app.current_user_id', true), '')`;
+const ROLE = `nullif(current_setting('app.current_role', true), '')`;
 /** GUC de escopo da sessão anônima (Sato — achado 1). NULL quando não setado. */
-const SESSION = `current_setting('app.current_anamnesis_session_id', true)`;
+const SESSION = `nullif(current_setting('app.current_anamnesis_session_id', true), '')`;
 
 /** Nomes de política determinísticos por tabela (permite DROP idempotente). */
 function policyNames(table: string) {
