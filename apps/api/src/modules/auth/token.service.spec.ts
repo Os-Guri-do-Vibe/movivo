@@ -39,6 +39,8 @@ describe('TokenService.signAccessToken', () => {
     expect(payload.jti).toBe('jti-1');
     expect(issued.jti).toBe('jti-1');
     expect(issued.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
+    // TTL do access é exatamente 15min (Sato §9.1 / DoD US-1.8) — não só "no futuro".
+    expect((payload.exp ?? 0) - (payload.iat ?? 0)).toBe(900);
   });
 
   it('o token é verificável com a chave pública e RS256', () => {

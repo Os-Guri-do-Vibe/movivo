@@ -146,6 +146,29 @@ describe('RLS FORCE + SET LOCAL — isolamento entre titulares', () => {
   });
 });
 
+describe('movivo_app não pode burlar a RLS (TASK-1.8.2b — atributos da role)', () => {
+  // Estes asserts FALHAM o pipeline se alguém conceder BYPASSRLS a movivo_app ou
+  // torná-la dona das tabelas — as duas formas de anular a RLS FORCE sem tocar em
+  // política nenhuma. São a prova de que o isolamento não depende só das policies.
+  it('a role de aplicação não tem BYPASSRLS nem SUPERUSER', async () => {
+    const rows = (await db.execute(
+      sql`SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname = 'movivo_app'`,
+    )) as unknown as Array<{ rolbypassrls: boolean; rolsuper: boolean }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].rolbypassrls).toBe(false);
+    expect(rows[0].rolsuper).toBe(false);
+  });
+
+  it('movivo_app não é dona de nenhuma tabela de titular (dono ignora FORCE)', async () => {
+    const owners = (await db.execute(
+      sql`SELECT tablename, tableowner FROM pg_tables
+          WHERE tablename IN ('users','consents','anamnesis_sessions','auth_sessions')`,
+    )) as unknown as Array<{ tablename: string; tableowner: string }>;
+    expect(owners.length).toBeGreaterThanOrEqual(4);
+    expect(owners.every((r) => r.tableowner !== 'movivo_app')).toBe(true);
+  });
+});
+
 describe('Anamnese anônima — token-scoped e IDOR (TASK-1.1.4 / Sato §8.1)', () => {
   const tokenA = `tkA_${RUN}_${'a'.repeat(40)}`.slice(0, 64);
   const tokenB = `tkB_${RUN}_${'b'.repeat(40)}`.slice(0, 64);
