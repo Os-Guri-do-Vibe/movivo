@@ -163,6 +163,28 @@ export const envSchema = z
     JWT_ACCESS_TTL: z.string().min(1).default('15m'),
     /** TTL do refresh token (cookie httpOnly, 30 dias — ADR-006). */
     JWT_REFRESH_TTL: z.string().min(1).default('30d'),
+
+    // -------------------------------------------------------- LLM (US-2.2)
+    /**
+     * Chaves de API dos provedores (ADR-005-R). **Opcionais** (diferente de JWT/pgcrypto):
+     * sem elas o app boota, o `LLMRouter` loga um aviso, e só uma chamada REAL sem chave
+     * lança erro claro. Assim CI e o `int-spec` que cria o AppModule ficam verdes sem chave.
+     */
+    OPENAI_API_KEY: z.string().min(1).optional(),
+    ANTHROPIC_API_KEY: z.string().min(1).optional(),
+    /** LLM principal → fallback (ADR-005-R). DeepSeek é proibido em qualquer caminho. */
+    LLM_PRIMARY_MODEL: z.string().min(1).default('gpt-4.1'),
+    LLM_FALLBACK_MODEL: z.string().min(1).default('claude-sonnet-4-5'),
+    /** Teto de tokens por chamada (o router faz clamp do `maxTokens` do request). */
+    LLM_MAX_TOKENS: z.coerce.number().int().min(1).max(32_000).default(4096),
+    /** Timeout hard por tentativa de provedor (Victor §1.2). */
+    LLM_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(8000),
+    /** Teto anti-abuso: chamadas por usuário/dia (LLM10 — Sato §9.4). */
+    LLM_USER_DAILY_MESSAGE_LIMIT: z.coerce.number().int().min(1).default(50),
+    /** Baseline do budget alert de custo por usuário/dia em BRL (LLM10). */
+    LLM_DAILY_COST_ALERT_BRL: z.coerce.number().positive().default(0.5),
+    /** Câmbio USD→BRL para o cálculo de custo por chamada (Victor §8). */
+    LLM_USD_BRL_RATE: z.coerce.number().positive().default(5.5),
   })
   .superRefine((config, ctx) => {
     if (config.DATABASE_PORT === POSTGRES_DIRECT_PORT) {

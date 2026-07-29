@@ -68,6 +68,9 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   },
   { table: 'anamnesis_sessions', column: 'user_id', anon: { scope: 'id', scopeAtInsert: false } },
   { table: 'auth_sessions', column: 'user_id' },
+  // Sprint 2 (US-2.2): a trilha de invocações de LLM carrega snapshot pseudonimizado
+  // de dado de saúde — entra sob a mesma FORCE RLS das tabelas de titular.
+  { table: 'ai_jobs', column: 'user_id' },
 ];
 
 // `nullif(..., '')` é OBRIGATÓRIO, não cosmético: sob PgBouncer transaction mode,

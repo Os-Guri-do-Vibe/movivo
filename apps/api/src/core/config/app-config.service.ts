@@ -52,6 +52,19 @@ export function parseDurationSeconds(value: string): number {
   return amount * factor;
 }
 
+export interface LlmConfig {
+  readonly primaryModel: string;
+  readonly fallbackModel: string;
+  readonly maxTokens: number;
+  readonly timeoutMs: number;
+  readonly userDailyMessageLimit: number;
+  readonly dailyCostAlertBrl: number;
+  readonly usdBrlRate: number;
+  /** Chaves opcionais: `undefined` em dev/CI sem segredo. Segredos redigidos no snapshot. */
+  readonly openaiApiKey: string | undefined;
+  readonly anthropicApiKey: string | undefined;
+}
+
 export interface RedisConfig {
   readonly sentinels: readonly { readonly host: string; readonly port: number }[];
   readonly masterName: string;
@@ -140,6 +153,21 @@ export class AppConfigService {
       accessTtl: this.config.JWT_ACCESS_TTL,
       refreshTtl: this.config.JWT_REFRESH_TTL,
       refreshTtlSeconds: parseDurationSeconds(this.config.JWT_REFRESH_TTL),
+    };
+  }
+
+  /** Config da camada de IA (US-2.2 / ADR-005-R). Chaves são segredos redigidos no snapshot. */
+  get llm(): LlmConfig {
+    return {
+      primaryModel: this.config.LLM_PRIMARY_MODEL,
+      fallbackModel: this.config.LLM_FALLBACK_MODEL,
+      maxTokens: this.config.LLM_MAX_TOKENS,
+      timeoutMs: this.config.LLM_TIMEOUT_MS,
+      userDailyMessageLimit: this.config.LLM_USER_DAILY_MESSAGE_LIMIT,
+      dailyCostAlertBrl: this.config.LLM_DAILY_COST_ALERT_BRL,
+      usdBrlRate: this.config.LLM_USD_BRL_RATE,
+      openaiApiKey: this.config.OPENAI_API_KEY,
+      anthropicApiKey: this.config.ANTHROPIC_API_KEY,
     };
   }
 

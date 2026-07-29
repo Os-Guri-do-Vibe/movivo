@@ -16,8 +16,22 @@
  * dado sensível), e duplicá-lo aqui multiplicaria a superfície de exposição de
  * dado de saúde sem ganho de auditoria — o `conversationId` já liga as duas
  * pontas.
+ *
+ * ## `input_snapshot` (US-2.2 · Victor §6.1) — a exceção controlada
+ * O router grava um snapshot do que foi enviado ao LLM, mas **sempre** já
+ * pseudonimizado pelo PII Scrubber (nenhum identificador direto em claro). É o que
+ * dá auditabilidade CREF sem reintroduzir PII de saúde na trilha.
  */
-import { index, integer, pgTable, text, uuid, varchar } from 'drizzle-orm/pg-core';
+import {
+  index,
+  integer,
+  numeric,
+  pgTable,
+  smallint,
+  text,
+  uuid,
+  varchar,
+} from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
 import { aiJobStatusEnum, aiJobTypeEnum } from './enums';
@@ -59,6 +73,32 @@ export const aiJobs = pgTable(
 
     /** Alimenta o SLO de latência p95 ≤ 30s do AI Coach (§8). */
     latencyMs: integer('latency_ms'),
+
+    // --- Colunas de LLMOps (US-2.2 / TASK-2.2.3 · Victor §6.1) -----------------
+
+    /** Provedor efetivo: `OPENAI_GPT41` | `ANTHROPIC_SONNET45`. Nunca DeepSeek (§12.11). */
+    provider: varchar('provider', { length: 30 }),
+
+    /** Classe de dado roteada. Fail-safe do router: `HEALTH` por padrão (Victor §1.1). */
+    dataClass: varchar('data_class', { length: 12 }),
+
+    /** Tokens de input servidos do prompt cache (alavanca de custo — Victor §1.3). */
+    tokensCached: integer('tokens_cached'),
+
+    /** 1 = primário serviu; 2 = fallback. Revela o failover na trilha de auditoria. */
+    attempt: smallint('attempt'),
+
+    /** Rótulo de intenção/telemetria (livre). */
+    intent: varchar('intent', { length: 30 }),
+
+    /** Custo calculado da chamada em BRL (FinOps — Eduardo/Victor §8). */
+    costBrl: numeric('cost_brl', { precision: 10, scale: 5 }),
+
+    /** Ação do ValidationService (US-2.3): PASS | FLAG | BLOCK. Nulo até a US-2.3. */
+    validationAction: varchar('validation_action', { length: 20 }),
+
+    /** Snapshot pseudonimizado do input (PII Scrubber). Nunca PII em claro. */
+    inputSnapshot: text('input_snapshot'),
 
     /**
      * Tentativas já consumidas. Cruzado com `status = 'DLQ'`, é o que distingue
