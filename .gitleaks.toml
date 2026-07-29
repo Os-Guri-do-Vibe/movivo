@@ -24,4 +24,8 @@ regexes = [
   # (US-1.4): o corpo é o literal "teste", nunca uma chave real. O par RS256 real
   # vive só em secrets/ (ignorado pelo Git). O `\n` aqui é o backslash-n do source.
   '''-----BEGIN (PRIVATE|PUBLIC) KEY-----\\nteste\\n-----END''',
+  # apps/api/src/modules/ai-coach/llm/* (US-2.2) — "default=HEALTH" é o fail-safe da
+  # classe de dado do LLMRouter citado em comentários/docs, não um par chave=segredo.
+  # O generic-api-key do gitleaks casa o padrão key=value; é um termo de domínio fixo.
+  '''default=HEALTH''',
 ]

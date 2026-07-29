@@ -1,27 +1,66 @@
 /**
- * `AiCoachModule` — **esqueleto vazio registrado** (TASK-0.3.6).
+ * `AiCoachModule` — camada de IA compartilhada (US-2.2).
  *
- * Módulo AI COACH do C4 nível 3 (`ARQUITETURA.md` §4). Nesta sprint é só a casca:
- * nenhuma lógica de negócio, nenhum controller, nenhum provider. Existe para que a
- * sprint de implementação (Sprint 4) encaixe código sem reestruturar o app.
+ * Preenche a fundação LGPD-safe de acesso ao LLM que a geração de treino (US-2.1) e o
+ * Coach (Sprint 3) vão consumir: `LLMRouter` (cascata GPT-4.1→Claude, breaker, teto de
+ * tokens, logging), `PIIScrubber` (porta do router), `LlmAbuseGuard` (LLM10) e a
+ * persistência de `ai_jobs` sob RLS.
  *
- * Conteúdo previsto pelo diagrama de Rafael:
- *  - `ContextService`
- *  - `LLMRouter`
- *  - `RAGService`
- *  - `ValidatorService`
+ * Regras que valem aqui (ADR-005-R / §12.11-12.12):
+ *  - LLM principal **GPT-4.1**, fallback **Claude Sonnet 4.5**, ambos ZDR. **DeepSeek proibido**.
+ *  - O `LLMRouter` é o único ponto autorizado a falar com um provedor; o SDK/HTTP de
+ *    provedor fica confinado a `llm/providers.ts` (teste estrutural garante).
+ *  - Isolamento por titular: `ai_jobs` sob FORCE RLS; counter Redis namespaced por `user_id`.
  *
- * Regras que já valem para quem implementar:
- *  - LLM principal **GPT-4.1 (OpenAI)**, fallback **Claude Sonnet 4.5 (Anthropic)**, ambos com Zero Data Retention + DPA/SCC. **DeepSeek é proibido em qualquer fluxo** (ADR-005-R / §12.11).
- *  - Isolamento de contexto por titular é obrigatório: o contexto de conversa é montado sempre com `RedisKeyBuilder.forUser(userId, ...)`. Vazamento aqui é vazamento de dado de saúde.
- *  - Toda resposta passa pelo `ValidatorService` (compliance CREF + guardrails de linguagem) antes de sair. Resposta fora do escopo seguro ⇒ handoff para o profissional CREF.
- *
- * # Fronteira do módulo (regra §12.5 — sem imports circulares)
- * Este módulo pode depender do **CORE** (config, banco, Redis, logger) por DI, já que
- * todos os providers do CORE são globais. Não pode importar outro módulo de domínio:
- * a comunicação entre domínios é por evento (`EventBusModule`) ou por fila (`JobsModule`).
+ * Depende só do CORE (config, banco, Redis, logger) por DI global — não importa outro
+ * módulo de domínio (§12.5).
  */
 import { Module } from '@nestjs/common';
 
-@Module({})
+import { AppConfigService } from '../../core/config';
+import { AiJobRepository } from './llm/ai-job.repository';
+import { LlmAbuseGuard } from './llm/llm-abuse-guard.service';
+import { LlmRouter } from './llm/llm-router.service';
+import {
+  AnthropicProvider,
+  LLM_FALLBACK_PROVIDER,
+  LLM_PRIMARY_PROVIDER,
+  LLM_PROVIDER_CASCADE,
+  OpenAiProvider,
+} from './llm/providers';
+import type { LLMProvider } from './llm/llm.types';
+
+@Module({
+  providers: [
+    {
+      provide: LLM_PRIMARY_PROVIDER,
+      inject: [AppConfigService],
+      useFactory: (config: AppConfigService): LLMProvider =>
+        new OpenAiProvider('OPENAI_GPT41', config.llm.primaryModel, config.llm.openaiApiKey),
+    },
+    {
+      provide: LLM_FALLBACK_PROVIDER,
+      inject: [AppConfigService],
+      useFactory: (config: AppConfigService): LLMProvider =>
+        new AnthropicProvider(
+          'ANTHROPIC_SONNET45',
+          config.llm.fallbackModel,
+          config.llm.anthropicApiKey,
+        ),
+    },
+    {
+      provide: LLM_PROVIDER_CASCADE,
+      inject: [LLM_PRIMARY_PROVIDER, LLM_FALLBACK_PROVIDER],
+      useFactory: (primary: LLMProvider, fallback: LLMProvider): LLMProvider[] => [
+        primary,
+        fallback,
+      ],
+    },
+    AiJobRepository,
+    LlmAbuseGuard,
+    LlmRouter,
+  ],
+  // Exporta o que a geração (US-2.1) e o Worker (US-2.4) consomem.
+  exports: [LlmRouter, AiJobRepository],
+})
 export class AiCoachModule {}

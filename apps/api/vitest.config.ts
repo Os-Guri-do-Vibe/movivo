@@ -46,6 +46,10 @@ export default defineConfig({
         'src/core/database/seed.ts',
         'src/core/database/database-health.service.ts',
         'src/core/redis/redis-health.service.ts',
+        // I/O de banco sob RLS (US-2.2): mapeamento Drizzle sem ramo, provado pelo
+        // teste de integração (llm.int-spec) contra um Postgres real — mesma categoria
+        // dos *-health.service.ts acima.
+        'src/modules/ai-coach/llm/ai-job.repository.ts',
         'src/health/**',
         'src/**/*.spec.ts',
         'src/**/*.int-spec.ts',

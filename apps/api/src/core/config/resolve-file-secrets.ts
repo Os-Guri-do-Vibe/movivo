@@ -30,6 +30,10 @@ export const SECRET_KEYS = [
   'JWT_PRIVATE_KEY',
   'JWT_PUBLIC_KEY',
   'JWT_PUBLIC_KEY_PREVIOUS',
+  // Sprint 2 — chaves de API de LLM (US-2.2 / ADR-005-R). OPCIONAIS no boot: o app
+  // sobe sem elas (dev/CI); só uma chamada REAL sem chave lança erro claro.
+  'OPENAI_API_KEY',
+  'ANTHROPIC_API_KEY',
 ] as const;
 
 export type SecretKey = (typeof SECRET_KEYS)[number];

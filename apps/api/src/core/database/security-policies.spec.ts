@@ -13,8 +13,14 @@ import { buildRlsPoliciesSql, RLS_TENANT_TABLES } from './security-policies';
 describe('buildRlsPoliciesSql', () => {
   const sql = buildRlsPoliciesSql();
 
-  it('cobre exatamente as tabelas de titular de Sprint 1', () => {
-    expect(RLS_TENANT_TABLES).toEqual(['users', 'consents', 'anamnesis_sessions', 'auth_sessions']);
+  it('cobre exatamente as tabelas de titular (Sprint 1 + ai_jobs da US-2.2)', () => {
+    expect(RLS_TENANT_TABLES).toEqual([
+      'users',
+      'consents',
+      'anamnesis_sessions',
+      'auth_sessions',
+      'ai_jobs',
+    ]);
   });
 
   it('ativa ENABLE e FORCE ROW LEVEL SECURITY em toda tabela', () => {
