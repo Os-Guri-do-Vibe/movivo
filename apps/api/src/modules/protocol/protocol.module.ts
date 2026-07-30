@@ -1,27 +1,28 @@
 /**
- * `ProtocolModule` — **esqueleto vazio registrado** (TASK-0.3.6).
+ * `ProtocolModule` — geração de protocolo de treino por IA (US-2.1).
  *
- * Módulo PROTOCOL do C4 nível 3 (`ARQUITETURA.md` §4). Nesta sprint é só a casca:
- * nenhuma lógica de negócio, nenhum controller, nenhum provider. Existe para que a
- * sprint de implementação (Sprint 2-3) encaixe código sem reestruturar o app.
+ * Decisão do fundador (2026-07, revisão do plano da Sprint 2): o protocolo é **planejado
+ * pela IA** (não por um motor determinístico), com autonomia para individualizar, mas
+ * dentro de trilhos — a metodologia do RT CREF e a base de referência (vocabulário
+ * fechado). A **garantia** de segurança migrou para o `ValidationService` (US-2.3, veta o
+ * treino inteiro) + AI eval (US-2.7); não mora mais em "o motor decide".
  *
- * Conteúdo previsto pelo diagrama de Rafael:
- *  - `MotorDeterministico`
- *  - `ProtocolGenerator`
- *  - `VersioningService`
- *  - `SignatureService`
+ * Consome o `AiCoachModule` (US-2.2) pelo `LlmRouter`. A persistência (`protocols`), o
+ * roteamento ao painel CREF e a auto-aprovação são do Worker (US-2.4); aqui vive só a
+ * geração — produzir um `ProtocolStructure` tipado e individualizado.
  *
- * Regras que já valem para quem implementar:
- *  - Regra inegociável: o protocolo é gerado pelo **Motor Determinístico**, com o LLM apenas redigindo/adaptando o texto. Nunca LLM puro decidindo carga, volume ou progressão.
- *  - Cobertura de testes exigida no Motor Determinístico: **100%** (Rafael §17 / Sato) — vira gate bloqueante quando o código nascer (Mariana, US-0.8).
- *  - Toda versão de protocolo é imutável e assinada pelo profissional CREF; o histórico é auditável.
- *
- * # Fronteira do módulo (regra §12.5 — sem imports circulares)
- * Este módulo pode depender do **CORE** (config, banco, Redis, logger) por DI, já que
- * todos os providers do CORE são globais. Não pode importar outro módulo de domínio:
- * a comunicação entre domínios é por evento (`EventBusModule`) ou por fila (`JobsModule`).
+ * # Fronteira do módulo (regra §12.5)
+ * Depende do CORE (config, banco, Redis, logger) por DI global e do `AiCoachModule`
+ * (camada de IA compartilhada). Não importa outro módulo de domínio.
  */
 import { Module } from '@nestjs/common';
 
-@Module({})
+import { AiCoachModule } from '../ai-coach/ai-coach.module';
+import { ProtocolGeneratorService } from './protocol-generator.service';
+
+@Module({
+  imports: [AiCoachModule],
+  providers: [ProtocolGeneratorService],
+  exports: [ProtocolGeneratorService],
+})
 export class ProtocolModule {}
