@@ -13,7 +13,9 @@
  */
 import { z } from 'zod';
 
+import { ProtocolApprovalStatus, ProtocolStatus } from '../enums';
 import { primaryGoalSchema } from './anamnesis.schema';
+import { uuidSchema } from './common.schema';
 
 /**
  * Fase de periodização (Rafael §5.2 `TrainingPhase`). A IA escolhe a fase inicial
@@ -74,3 +76,21 @@ export const protocolStructureSchema = z.object({
   generalNotes: z.string().trim().max(1000).optional(),
 });
 export type ProtocolStructure = z.infer<typeof protocolStructureSchema>;
+
+/**
+ * DTO de LEITURA read-only por token (US-2.6). É o que o endpoint público
+ * `GET /protocols/by-token/:token` devolve e o que a página `/protocolo/[token]`
+ * renderiza. Nunca inclui `userId`/PII: o token (UUID do protocolo) é o único
+ * segredo, e a projeção do repositório não seleciona a coluna de titular (IDOR-safe).
+ */
+export const protocolReadSchema = z.object({
+  content: protocolStructureSchema,
+  status: z.enum(ProtocolStatus),
+  approvalStatus: z.enum(ProtocolApprovalStatus),
+  professionalId: uuidSchema.nullable(),
+  signatureHash: z.string().trim().min(1).nullable(),
+  signedAt: z.iso.datetime().nullable(),
+  totalWeeks: z.number().int().min(1).max(52),
+  currentWeek: z.number().int().min(1).max(52),
+});
+export type ProtocolRead = z.infer<typeof protocolReadSchema>;

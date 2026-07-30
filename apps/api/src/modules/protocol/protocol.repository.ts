@@ -11,7 +11,12 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import type { ProtocolApprovalStatus, ProtocolStatus, ProtocolStructure } from '@movivo/shared';
+import type {
+  ProtocolApprovalStatus,
+  ProtocolRead,
+  ProtocolStatus,
+  ProtocolStructure,
+} from '@movivo/shared';
 
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { protocols, protocolVersions } from '../../core/database/schema';
@@ -67,6 +72,45 @@ export class ProtocolRepository {
         .limit(1),
     );
     return rows.length > 0;
+  }
+
+  /**
+   * Leitura read-only por token da página pública (US-2.6). O `token` É o `protocolId`
+   * (UUID v4 não-enumerável) — o próprio segredo; o cliente **nunca** manda `user_id`
+   * (IDOR-safe, herdado da US-1.1). Roda sob `runAsSystem` (a página não tem titular
+   * autenticado, ADR-006) e só expõe protocolo `ACTIVE` (que só nasce `AUTO_APPROVED` e
+   * assinado — Worker US-2.4); qualquer outro estado ou id inexistente → `null` (o
+   * controller vira 404 sem vazar dado). A projeção **omite `user_id`** de propósito.
+   */
+  async findByToken(protocolId: string): Promise<ProtocolRead | null> {
+    const rows = await this.db.runAsSystem((tx) =>
+      tx
+        .select({
+          content: protocols.content,
+          status: protocols.status,
+          approvalStatus: protocols.approvalStatus,
+          professionalId: protocols.professionalId,
+          signatureHash: protocols.signatureHash,
+          signedAt: protocols.signedAt,
+          totalWeeks: protocols.totalWeeks,
+          currentWeek: protocols.currentWeek,
+        })
+        .from(protocols)
+        .where(and(eq(protocols.id, protocolId), eq(protocols.status, 'ACTIVE')))
+        .limit(1),
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      content: row.content as ProtocolStructure,
+      status: row.status,
+      approvalStatus: row.approvalStatus,
+      professionalId: row.professionalId,
+      signatureHash: row.signatureHash,
+      signedAt: row.signedAt ? new Date(row.signedAt).toISOString() : null,
+      totalWeeks: row.totalWeeks,
+      currentWeek: row.currentWeek,
+    };
   }
 
   /** Persiste `protocols` v1 + `protocol_versions`. Corrida (23505) → `alreadyExisted`. */

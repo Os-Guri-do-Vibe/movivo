@@ -19,6 +19,7 @@ import { Module } from '@nestjs/common';
 
 import { AiCoachModule } from '../ai-coach/ai-coach.module';
 import { JobsModule } from '../jobs/jobs.module';
+import { ProtocolController } from './protocol.controller';
 import { ProtocolGenerationWorker } from './protocol-generation.worker';
 import { ProtocolGeneratorService } from './protocol-generator.service';
 import { ProtocolRepository } from './protocol.repository';
@@ -31,6 +32,7 @@ import { ValidationService } from './validation/validation.service';
  */
 @Module({
   imports: [AiCoachModule, JobsModule],
+  controllers: [ProtocolController],
   providers: [
     ProtocolGeneratorService,
     ValidationService,
