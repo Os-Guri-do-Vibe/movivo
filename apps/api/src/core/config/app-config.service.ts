@@ -71,6 +71,8 @@ export interface WhatsappConfig {
   readonly araraBaseUrl: string;
   /** Base do deep-link da página read-only do protocolo (US-2.6). */
   readonly publicSiteUrl: string;
+  /** `undefined` sem segredo → inbound descartado fail-closed (US-3.1). Segredo redigido. */
+  readonly webhookSecret: string | undefined;
 }
 
 export interface RedisConfig {
@@ -185,6 +187,7 @@ export class AppConfigService {
       araraApiKey: this.config.ARARAHQ_API_KEY,
       araraBaseUrl: this.config.ARARAHQ_BASE_URL,
       publicSiteUrl: this.config.PUBLIC_SITE_URL,
+      webhookSecret: this.config.ARARAHQ_WEBHOOK_SECRET,
     };
   }
 

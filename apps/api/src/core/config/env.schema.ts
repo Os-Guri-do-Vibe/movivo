@@ -194,6 +194,14 @@ export const envSchema = z
      */
     ARARAHQ_API_KEY: z.string().min(1).optional(),
     ARARAHQ_BASE_URL: z.string().url().default('https://api.ararahq.com'),
+    /**
+     * Segredo do webhook de ENTRADA da AraraHQ (US-3.1 / Sato §6). **Opcional** no boot
+     * (como `ARARAHQ_API_KEY`): sem ele o app sobe, mas todo inbound é descartado
+     * fail-closed (não há como verificar o HMAC). O formato real de assinatura da AraraHQ
+     * é desconhecido (conta não assinada) — o placeholder de verificação está isolado em
+     * `whatsapp/webhook-signature.ts`, pronto para o formato real plugar. Via secret.
+     */
+    ARARAHQ_WEBHOOK_SECRET: z.string().min(1).optional(),
     /** Base pública para o deep-link da página read-only do protocolo (US-2.6). */
     PUBLIC_SITE_URL: z.string().url().default('http://localhost:3000'),
   })
