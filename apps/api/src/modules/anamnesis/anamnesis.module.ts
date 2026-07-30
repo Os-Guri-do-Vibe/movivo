@@ -23,6 +23,7 @@
 import { Module } from '@nestjs/common';
 import { ThrottlerModule } from '@nestjs/throttler';
 
+import { JobsModule } from '../jobs/jobs.module';
 import { AnamnesisController } from './anamnesis.controller';
 import { AnamnesisService } from './anamnesis.service';
 import { ConsentController } from './consent.controller';
@@ -38,7 +39,11 @@ import { ConsentService } from './consent.service';
  * storage Redis quando a API escalar horizontalmente.
  */
 @Module({
-  imports: [ThrottlerModule.forRoot({ throttlers: [{ ttl: 60_000, limit: 60 }] })],
+  imports: [
+    ThrottlerModule.forRoot({ throttlers: [{ ttl: 60_000, limit: 60 }] }),
+    // Fila `protocol-generation` (US-2.4): o submit é o gatilho do pipeline de protocolo.
+    JobsModule,
+  ],
   controllers: [ConsentController, AnamnesisController],
   providers: [ConsentService, AnamnesisService],
   exports: [ConsentService, AnamnesisService],

@@ -18,13 +18,25 @@
 import { Module } from '@nestjs/common';
 
 import { AiCoachModule } from '../ai-coach/ai-coach.module';
+import { JobsModule } from '../jobs/jobs.module';
+import { ProtocolGenerationWorker } from './protocol-generation.worker';
 import { ProtocolGeneratorService } from './protocol-generator.service';
+import { ProtocolRepository } from './protocol.repository';
 import { ValidationService } from './validation/validation.service';
 
+/**
+ * Importa `JobsModule` (fila `protocol-generation`/`whatsapp-outbound`) — a comunicação
+ * entre domínios é por fila (regra §12.5); e `AiCoachModule` (LLMRouter). O Worker (US-2.4)
+ * orquestra gera-e-valida→persiste→auto-aprova→entrega.
+ */
 @Module({
-  imports: [AiCoachModule],
-  providers: [ProtocolGeneratorService, ValidationService],
-  // O Worker (US-2.4) consome o gerador + o validador para o pipeline gera-e-valida.
+  imports: [AiCoachModule, JobsModule],
+  providers: [
+    ProtocolGeneratorService,
+    ValidationService,
+    ProtocolRepository,
+    ProtocolGenerationWorker,
+  ],
   exports: [ProtocolGeneratorService, ValidationService],
 })
 export class ProtocolModule {}

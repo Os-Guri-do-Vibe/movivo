@@ -6,6 +6,7 @@
  * e não serializa bem em contratos de API. O par objeto+type dá o mesmo ergonômico
  * com zero custo e integra direto com `z.enum()`.
  */
+export * from './approval-status';
 export * from './parq-state';
 export * from './protocol-status';
 export * from './subscription-status';

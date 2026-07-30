@@ -18,7 +18,12 @@
  * o tipo do banco é derivado **do pacote compartilhado**, não recopiado. Assim
  * backend, frontend e banco não podem divergir sem quebrar a compilação.
  */
-import { ParqState, ProtocolStatus, SubscriptionStatus } from '@movivo/shared';
+import {
+  ParqState,
+  ProtocolApprovalStatus,
+  ProtocolStatus,
+  SubscriptionStatus,
+} from '@movivo/shared';
 import { pgEnum } from 'drizzle-orm/pg-core';
 
 /**
@@ -121,6 +126,16 @@ export const consentTypeEnum = pgEnum('consent_type', [
  * pacote compartilhado e o `db:generate` propaga o `ALTER TYPE` sozinho.
  */
 export const protocolStatusEnum = pgEnum('protocol_status', valuesOf(ProtocolStatus));
+
+/**
+ * Estado de aprovação/roteamento ao painel do RT CREF (US-2.4), derivado de
+ * `@movivo/shared`. Distinto de `protocol_status` (ciclo de vida do treino): este é o
+ * eixo de supervisão. Sem risco → `AUTO_APPROVED`; validador barrou → `PENDING_REVIEW`.
+ */
+export const protocolApprovalStatusEnum = pgEnum(
+  'protocol_approval_status',
+  valuesOf(ProtocolApprovalStatus),
+);
 
 // ---------------------------------------------------------------------------
 // CONVERSA (WhatsApp)
