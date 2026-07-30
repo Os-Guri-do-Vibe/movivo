@@ -37,6 +37,9 @@ export const SECRET_KEYS = [
   // Sprint 2 — chave da AraraHQ (WhatsApp outbound, US-2.5). OPCIONAL no boot: sem ela
   // o envio real vira no-op logado; só há webhook de entrada na Sprint 3.
   'ARARAHQ_API_KEY',
+  // Sprint 3 — segredo do webhook de ENTRADA da AraraHQ (US-3.1). OPCIONAL no boot: o
+  // app sobe sem ele (dev/CI); ausente em runtime, o inbound é descartado fail-closed.
+  'ARARAHQ_WEBHOOK_SECRET',
 ] as const;
 
 export type SecretKey = (typeof SECRET_KEYS)[number];

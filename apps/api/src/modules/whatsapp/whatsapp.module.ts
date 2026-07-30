@@ -22,11 +22,15 @@
  * a comunicação entre domínios é por evento (`EventBusModule`) ou por fila (`JobsModule`).
  */
 import { Module } from '@nestjs/common';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { PinoLogger } from 'nestjs-pino';
 
 import { AppConfigService } from '../../core/config';
 import { JobsModule } from '../jobs/jobs.module';
 import { AraraHttpTransport, WHATSAPP_TRANSPORT } from './arara-transport';
+import { UserJobLock } from './user-job-lock';
+import { WebhookController } from './webhook.controller';
+import { WhatsappInboundService } from './whatsapp-inbound.service';
 import { WhatsappOutboundWorker } from './whatsapp-outbound.worker';
 
 /**
@@ -38,7 +42,13 @@ import { WhatsappOutboundWorker } from './whatsapp-outbound.worker';
  * resto (config, banco, Redis, logger) vem do CORE global por DI.
  */
 @Module({
-  imports: [JobsModule],
+  imports: [
+    JobsModule,
+    // Rate limit do path do webhook (US-3.1.3). ponytail: storage em memória (MVP
+    // single-instance); trocar por storage Redis ao escalar horizontalmente — igual anamnese.
+    ThrottlerModule.forRoot({ throttlers: [{ ttl: 60_000, limit: 120 }] }),
+  ],
+  controllers: [WebhookController],
   providers: [
     {
       provide: WHATSAPP_TRANSPORT,
@@ -47,6 +57,10 @@ import { WhatsappOutboundWorker } from './whatsapp-outbound.worker';
         new AraraHttpTransport(config.whatsapp.araraBaseUrl, config.whatsapp.araraApiKey, logger),
     },
     WhatsappOutboundWorker,
+    WhatsappInboundService,
+    // UserJobLock: provido aqui, consumido pelo AIResponseWorker (US-3.5).
+    UserJobLock,
   ],
+  exports: [UserJobLock],
 })
 export class WhatsappModule {}

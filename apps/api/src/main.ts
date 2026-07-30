@@ -30,6 +30,9 @@ async function bootstrap(): Promise<void> {
     // O logger do Nest fica em buffer até o pino assumir, para que nenhuma linha de
     // boot escape do formato JSON estruturado.
     bufferLogs: true,
+    // Preserva o corpo BRUTO em `req.rawBody` para o HMAC do webhook AraraHQ (US-3.1):
+    // assinar o JSON re-serializado quebra a assinatura. Só o WebhookController o consome.
+    rawBody: true,
   });
 
   app.useLogger(app.get(PinoLogger));
