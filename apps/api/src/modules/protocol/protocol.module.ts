@@ -19,10 +19,12 @@ import { Module } from '@nestjs/common';
 
 import { AiCoachModule } from '../ai-coach/ai-coach.module';
 import { ProtocolGeneratorService } from './protocol-generator.service';
+import { ValidationService } from './validation/validation.service';
 
 @Module({
   imports: [AiCoachModule],
-  providers: [ProtocolGeneratorService],
-  exports: [ProtocolGeneratorService],
+  providers: [ProtocolGeneratorService, ValidationService],
+  // O Worker (US-2.4) consome o gerador + o validador para o pipeline gera-e-valida.
+  exports: [ProtocolGeneratorService, ValidationService],
 })
 export class ProtocolModule {}
