@@ -53,6 +53,9 @@ export default defineConfig({
         'src/health/**',
         'src/**/*.spec.ts',
         'src/**/*.int-spec.ts',
+        // Fixtures de teste (dados/golden set): consumidas só por specs, não são lógica de
+        // produção — mesma categoria dos *.spec.ts. Ex.: golden-set.fixture.ts (US-2.7).
+        'src/**/*.fixture.ts',
       ],
       // Contrato entregue a Henrique (US-0.7 / TASK-0.7.6) para wiring no CI.
       // Limiar da Sprint 0: ver docs/qualidade/quality-gates.md §"Cobertura".
