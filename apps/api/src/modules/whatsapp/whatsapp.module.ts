@@ -22,6 +22,31 @@
  * a comunicação entre domínios é por evento (`EventBusModule`) ou por fila (`JobsModule`).
  */
 import { Module } from '@nestjs/common';
+import { PinoLogger } from 'nestjs-pino';
 
-@Module({})
+import { AppConfigService } from '../../core/config';
+import { JobsModule } from '../jobs/jobs.module';
+import { AraraHttpTransport, WHATSAPP_TRANSPORT } from './arara-transport';
+import { WhatsappOutboundWorker } from './whatsapp-outbound.worker';
+
+/**
+ * `WhatsappModule` (US-2.5) — outbound WhatsApp via AraraHQ.
+ *
+ * Preenche o esqueleto: transporte AraraHQ (HTTP confinado, credencial opcional) +
+ * `WhatsappOutboundWorker` sobre a fila `whatsapp-outbound` (US-1.7). Sem webhook de
+ * ENTRADA (Sprint 3). Importa `JobsModule` (fila é a via entre domínios — §12.5); o
+ * resto (config, banco, Redis, logger) vem do CORE global por DI.
+ */
+@Module({
+  imports: [JobsModule],
+  providers: [
+    {
+      provide: WHATSAPP_TRANSPORT,
+      inject: [AppConfigService, PinoLogger],
+      useFactory: (config: AppConfigService, logger: PinoLogger) =>
+        new AraraHttpTransport(config.whatsapp.araraBaseUrl, config.whatsapp.araraApiKey, logger),
+    },
+    WhatsappOutboundWorker,
+  ],
+})
 export class WhatsappModule {}

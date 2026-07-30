@@ -206,6 +206,15 @@ export class AnamnesisService {
       correlationId: row.id,
     });
 
+    // US-2.5 — confirmação imediata no WhatsApp. Variante de cuidado quando o PAR-Q trava
+    // (não promete plano automático). jobId idempotente; telefone é lido sob RLS no worker.
+    await this.queues.enqueue(
+      QUEUE.whatsappOutbound,
+      'confirmation',
+      { userId, type: gate.requiresProfessionalReview ? 'CONFIRMATION_CARE' : 'CONFIRMATION' },
+      { jobId: `confirmation_${userId}` },
+    );
+
     // `form_submitted` — evento de funil. Sem PII: só o id da sessão (UUID) e o estado.
     // ponytail: emissão via log estruturado; o SDK server do PostHog não existe no
     // backend nesta sprint (o funil de UI é instrumentado por Felipe — US-1.6).
