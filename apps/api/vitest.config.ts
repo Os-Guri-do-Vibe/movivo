@@ -61,6 +61,15 @@ export default defineConfig({
         branches: 80,
         functions: 80,
         lines: 80,
+        // Gate migrado do motor determinístico (US-2.3): o ValidationService é a pedra
+        // angular de segurança — 100% de linha/branch, bloqueante. Um PR que reduza a
+        // cobertura deste módulo reprova o CI.
+        'src/modules/protocol/validation/**': {
+          statements: 100,
+          branches: 100,
+          functions: 100,
+          lines: 100,
+        },
       },
     },
   },
