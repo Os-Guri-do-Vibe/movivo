@@ -35,6 +35,8 @@ import { and, eq, lt, sql } from 'drizzle-orm';
 
 import { HealthCipherService, TenantDatabase, type TenantTransaction } from '../../core/database';
 import { anamnesisSessions, users } from '../../core/database/schema';
+import { QUEUE } from '../jobs/jobs.config';
+import { QueueManager } from '../jobs/queue-manager.service';
 import { ConsentService } from './consent.service';
 import { evaluateParq } from './parq';
 
@@ -75,6 +77,7 @@ export class AnamnesisService {
     private readonly db: TenantDatabase,
     private readonly cipher: HealthCipherService,
     private readonly consents: ConsentService,
+    private readonly queues: QueueManager,
   ) {
     // O `PinoLogger` simples é o provider GLOBAL do LoggerModule (Sprint 0). Setar o
     // contexto aqui evita o `@InjectPinoLogger(nome)`, cujo token nomeado
@@ -192,6 +195,16 @@ export class AnamnesisService {
 
     // Migra os consentimentos da fase anônima para o titular (preserva a prova).
     await this.consents.linkSessionToUser(row.id, userId);
+
+    // US-2.4 — gatilho do pipeline de protocolo. Enfileira SEMPRE (202/rápido): o gate
+    // PAR-Q é aplicado no Worker (sessão de risco não gera — trava de negócio). Payload
+    // só com UUIDs — o dado de saúde é carregado sob RLS pelo Worker, nunca no job.
+    await this.queues.enqueue(QUEUE.protocolGeneration, 'generate-protocol', {
+      userId,
+      anamnesisSessionId: row.id,
+      submittedAt: new Date().toISOString(),
+      correlationId: row.id,
+    });
 
     // `form_submitted` — evento de funil. Sem PII: só o id da sessão (UUID) e o estado.
     // ponytail: emissão via log estruturado; o SDK server do PostHog não existe no

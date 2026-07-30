@@ -13,13 +13,15 @@ import { buildRlsPoliciesSql, RLS_TENANT_TABLES } from './security-policies';
 describe('buildRlsPoliciesSql', () => {
   const sql = buildRlsPoliciesSql();
 
-  it('cobre exatamente as tabelas de titular (Sprint 1 + ai_jobs da US-2.2)', () => {
+  it('cobre exatamente as tabelas de titular (Sprint 1 + ai_jobs/protocols da US-2.x)', () => {
     expect(RLS_TENANT_TABLES).toEqual([
       'users',
       'consents',
       'anamnesis_sessions',
       'auth_sessions',
       'ai_jobs',
+      'protocols',
+      'protocol_versions',
     ]);
   });
 

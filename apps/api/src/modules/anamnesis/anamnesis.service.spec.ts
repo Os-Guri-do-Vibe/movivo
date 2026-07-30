@@ -10,6 +10,7 @@ import { PARQ_QUESTION_IDS, PARQ_VERSION, ParqState } from '@movivo/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import { type HealthCipherService, type TenantDatabase } from '../../core/database';
+import { type QueueManager } from '../jobs/queue-manager.service';
 import { AnamnesisService } from './anamnesis.service';
 import { type ConsentService } from './consent.service';
 
@@ -90,7 +91,8 @@ function makeService(state: TxState = {}) {
   } as unknown as ConsentService;
 
   const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() } as never;
-  return { svc: new AnamnesisService(logger, db, cipher, consents), cipher, consents };
+  const queues = { enqueue: vi.fn(() => Promise.resolve('job-1')) } as unknown as QueueManager;
+  return { svc: new AnamnesisService(logger, db, cipher, consents, queues), cipher, consents };
 }
 
 /** Linha de sessão IN_PROGRESS com os blocos preenchidos (ajustável por override). */

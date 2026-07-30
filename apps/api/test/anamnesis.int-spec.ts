@@ -69,7 +69,9 @@ const logger = {
   warn: () => undefined,
   setContext: () => undefined,
 } as never;
-const service = new AnamnesisService(logger, tenant, cipher, consents);
+// Fake da fila: este teste exercita a anamnese, não o pipeline de protocolo (US-2.4).
+const queues = { enqueue: async () => 'job' } as never;
+const service = new AnamnesisService(logger, tenant, cipher, consents, queues);
 
 const adminClient = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',

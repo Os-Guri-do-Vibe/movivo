@@ -71,6 +71,11 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   // Sprint 2 (US-2.2): a trilha de invocações de LLM carrega snapshot pseudonimizado
   // de dado de saúde — entra sob a mesma FORCE RLS das tabelas de titular.
   { table: 'ai_jobs', column: 'user_id' },
+  // Sprint 2 (US-2.4): o protocolo é dado de saúde derivado (personalizado a partir de
+  // condição/limitação física) — sob a mesma FORCE RLS por titular. `protocol_versions`
+  // tem `user_id` denormalizado justamente para ancorar a RLS sem JOIN (Sato §4.5).
+  { table: 'protocols', column: 'user_id' },
+  { table: 'protocol_versions', column: 'user_id' },
 ];
 
 // `nullif(..., '')` é OBRIGATÓRIO, não cosmético: sob PgBouncer transaction mode,

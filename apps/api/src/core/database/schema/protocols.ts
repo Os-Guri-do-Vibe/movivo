@@ -20,7 +20,7 @@ import {
 } from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
-import { protocolStatusEnum } from './enums';
+import { protocolApprovalStatusEnum, protocolStatusEnum } from './enums';
 import { users } from './users';
 
 export const protocols = pgTable(
@@ -37,6 +37,15 @@ export const protocols = pgTable(
     version: smallint('version').notNull().default(1),
 
     status: protocolStatusEnum('status').notNull().default('DRAFT'),
+
+    /**
+     * Eixo de supervisão (US-2.4). Todo protocolo nasce roteado ao painel do RT CREF:
+     * sem risco mapeado (validador limpo) → `AUTO_APPROVED` + assinado; validador
+     * bloqueou/flagou → `PENDING_REVIEW` (não entrega, aguarda o painel — Sprint 5).
+     */
+    approvalStatus: protocolApprovalStatusEnum('approval_status')
+      .notNull()
+      .default('PENDING_REVIEW'),
 
     /**
      * Profissional CREF responsável. **Sem FK nesta sprint**: a tabela
@@ -96,6 +105,19 @@ export const protocols = pgTable(
      * (ADR-005-R / regra §12.11).
      */
     generatedBy: varchar('generated_by', { length: 50 }),
+
+    /**
+     * Versão do modelo que redigiu (`gpt-4.1`, `claude-sonnet-4-5`) — o modelo efetivo,
+     * distinto de `generated_by` (o provedor/origem). Rastreabilidade da geração (US-2.4).
+     */
+    modelVersion: varchar('model_version', { length: 50 }),
+
+    /**
+     * Versão do pipeline de geração (metodologia + base de referência), ex.:
+     * `methodology-2026-07+catalog-2026-07`. Permite reconstituir sob qual metodologia/base
+     * o treino foi planejado — insumo da supervisão CREF (US-2.4).
+     */
+    promptVersion: varchar('prompt_version', { length: 80 }),
 
     ...timestampColumns,
   },
