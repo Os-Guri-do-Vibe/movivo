@@ -65,6 +65,14 @@ export interface LlmConfig {
   readonly anthropicApiKey: string | undefined;
 }
 
+export interface WhatsappConfig {
+  /** `undefined` em dev/CI sem segredo → envio real vira no-op logado. Segredo redigido. */
+  readonly araraApiKey: string | undefined;
+  readonly araraBaseUrl: string;
+  /** Base do deep-link da página read-only do protocolo (US-2.6). */
+  readonly publicSiteUrl: string;
+}
+
 export interface RedisConfig {
   readonly sentinels: readonly { readonly host: string; readonly port: number }[];
   readonly masterName: string;
@@ -168,6 +176,15 @@ export class AppConfigService {
       usdBrlRate: this.config.LLM_USD_BRL_RATE,
       openaiApiKey: this.config.OPENAI_API_KEY,
       anthropicApiKey: this.config.ANTHROPIC_API_KEY,
+    };
+  }
+
+  /** Config do WhatsApp outbound (US-2.5). `araraApiKey` é segredo redigido no snapshot. */
+  get whatsapp(): WhatsappConfig {
+    return {
+      araraApiKey: this.config.ARARAHQ_API_KEY,
+      araraBaseUrl: this.config.ARARAHQ_BASE_URL,
+      publicSiteUrl: this.config.PUBLIC_SITE_URL,
     };
   }
 

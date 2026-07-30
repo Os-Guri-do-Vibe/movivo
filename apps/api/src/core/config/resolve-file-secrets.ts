@@ -34,6 +34,9 @@ export const SECRET_KEYS = [
   // sobe sem elas (dev/CI); só uma chamada REAL sem chave lança erro claro.
   'OPENAI_API_KEY',
   'ANTHROPIC_API_KEY',
+  // Sprint 2 — chave da AraraHQ (WhatsApp outbound, US-2.5). OPCIONAL no boot: sem ela
+  // o envio real vira no-op logado; só há webhook de entrada na Sprint 3.
+  'ARARAHQ_API_KEY',
 ] as const;
 
 export type SecretKey = (typeof SECRET_KEYS)[number];

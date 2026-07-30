@@ -185,6 +185,17 @@ export const envSchema = z
     LLM_DAILY_COST_ALERT_BRL: z.coerce.number().positive().default(0.5),
     /** Câmbio USD→BRL para o cálculo de custo por chamada (Victor §8). */
     LLM_USD_BRL_RATE: z.coerce.number().positive().default(5.5),
+
+    // ------------------------------------------ WhatsApp / AraraHQ (US-2.5)
+    /**
+     * Credencial da AraraHQ (WhatsApp outbound). **Opcional** (como as chaves de LLM):
+     * sem ela o app boota e o envio real vira no-op logado — os testes injetam um fake
+     * transport. Webhook de ENTRADA é Sprint 3.
+     */
+    ARARAHQ_API_KEY: z.string().min(1).optional(),
+    ARARAHQ_BASE_URL: z.string().url().default('https://api.ararahq.com'),
+    /** Base pública para o deep-link da página read-only do protocolo (US-2.6). */
+    PUBLIC_SITE_URL: z.string().url().default('http://localhost:3000'),
   })
   .superRefine((config, ctx) => {
     if (config.DATABASE_PORT === POSTGRES_DIRECT_PORT) {
