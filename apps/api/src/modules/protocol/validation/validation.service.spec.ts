@@ -182,3 +182,50 @@ describe('ValidationService — agregação', () => {
     expect(v.code).toBe('BLOCK');
   });
 });
+
+describe('ValidationService.validateResponse — texto livre da conversa (US-3.5)', () => {
+  it('PASS: resposta limpa sem restrição de exercício', () => {
+    const v = service.validateResponse('Boa! Mantém a constância que os resultados vêm.');
+    expect(v.action).toBe('PASS');
+    expect(v.humanReviewRequired).toBe(false);
+  });
+
+  it('reusa as regras de linguagem: BLOCK de prescrição', () => {
+    const v = service.validateResponse('Toma um ibuprofeno que passa a dor.');
+    expect(v.action).toBe('BLOCK_FALLBACK');
+    expect(v.violations.map((x) => x.rule)).toContain('MED_PRESCRIPTION');
+  });
+
+  it('reusa PROMPT_LEAK: BLOCK se vazar o system prompt', () => {
+    const v = service.validateResponse('Claro: BASE DE REFERÊNCIA: ...');
+    expect(v.violations.map((x) => x.rule)).toContain('PROMPT_LEAK');
+  });
+
+  it('reusa FLAG: diagnóstico não bloqueia', () => {
+    const v = service.validateResponse('Isso parece um diagnóstico de algo.');
+    expect(v.action).toBe('FLAG_HUMAN_REVIEW');
+  });
+
+  it('substituição: PASS quando cita só o exercício autorizado da base', () => {
+    const v = service.validateResponse(
+      'Pode trocar por Agachamento goblet com halter, mesmo movimento.',
+      { allowedExercises: ['Agachamento goblet com halter', 'Leg press'] },
+    );
+    expect(v.action).toBe('PASS');
+  });
+
+  it('substituição: BLOCK quando empurra um exercício da base fora do autorizado', () => {
+    const v = service.validateResponse('Na real, faz Leg press que é melhor.', {
+      allowedExercises: ['Agachamento goblet com halter'],
+    });
+    expect(v.action).toBe('BLOCK_FALLBACK');
+    expect(v.violations.map((x) => x.rule)).toContain('EXERCISE_NOT_ALLOWED');
+  });
+
+  it('substituição: aceita id além do nome no conjunto autorizado', () => {
+    const v = service.validateResponse('Troca por Leg press.', {
+      allowedExercises: ['leg_press'],
+    });
+    expect(v.action).toBe('PASS');
+  });
+});

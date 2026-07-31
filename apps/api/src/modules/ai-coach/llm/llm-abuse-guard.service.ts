@@ -39,6 +39,16 @@ export class LlmAbuseGuard {
     return new Date().toISOString().slice(0, 10); // '2026-07-29' — passa no SEGMENT_PATTERN
   }
 
+  /**
+   * Peek SEM incrementar: o usuário já bateu o teto diário? (US-3.5, teto operacional).
+   * Lê o mesmo counter do `check()`. Usado pelo `AIResponseWorker` para responder o limite
+   * gentil ANTES de qualquer custo (embedding/contexto/LLM). `>=` porque o 51º já estourou.
+   */
+  async isOverDailyLimit(userId: string): Promise<boolean> {
+    const count = await this.redis.get(this.keys.forUser(userId, 'llm-usage', this.day()));
+    return Number(count ?? 0) >= this.config.llm.userDailyMessageLimit;
+  }
+
   /** Incrementa o counter do dia e barra acima do teto. Chamar antes de cada chamada real. */
   async check(userId: string): Promise<void> {
     const key = this.keys.forUser(userId, 'llm-usage', this.day());

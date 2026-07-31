@@ -55,6 +55,9 @@ export default defineConfig({
         'src/modules/ai-coach/context/context.repository.ts',
         // Idem (US-3.4): kNN em `intent_examples`, provado por integração (intent.int-spec).
         'src/modules/ai-coach/intent/intent.repository.ts',
+        // Idem (US-3.5): I/O de banco sob RLS da conversa, provado por integração
+        // (coach-response.int-spec) contra Postgres real.
+        'src/modules/coach/conversation.repository.ts',
         'src/health/**',
         'src/**/*.spec.ts',
         'src/**/*.int-spec.ts',

@@ -83,6 +83,6 @@ import type { LLMProvider } from './llm/llm.types';
     IntentClassifier,
   ],
   // Exporta o que a geração (US-2.1), o Worker (US-2.4) e o AIResponseWorker (US-3.5) consomem.
-  exports: [LlmRouter, AiJobRepository, ContextService, IntentClassifier],
+  exports: [LlmRouter, AiJobRepository, ContextService, IntentClassifier, LlmAbuseGuard],
 })
 export class AiCoachModule {}

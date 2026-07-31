@@ -85,13 +85,18 @@ function makeWorker(deps: Deps = {}) {
   } as unknown as Redis;
   const keys = new RedisKeyBuilder('movivo');
   const send = vi.fn((_m: OutboundMessage) => Promise.resolve());
-  const transport = { send, hasCredentials: () => true } as unknown as WhatsappTransport;
+  const sendTyping = vi.fn((_to: string) => Promise.resolve());
+  const transport = {
+    send,
+    sendTyping,
+    hasCredentials: () => true,
+  } as unknown as WhatsappTransport;
   const config = {
     whatsapp: { publicSiteUrl: 'https://movivo.test', araraBaseUrl: '', araraApiKey: undefined },
   } as unknown as AppConfigService;
   const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() } as never;
   const worker = new WhatsappOutboundWorker(workers, db, redis, keys, transport, config, logger);
-  return { worker, send, redis };
+  return { worker, send, sendTyping, redis };
 }
 
 function job(data: Partial<WhatsappOutboundJob>): Job<WhatsappOutboundJob> {
@@ -111,6 +116,23 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
     const { worker, send } = makeWorker();
     await worker.process(job({ type: 'CONFIRMATION_CARE' }));
     expect(send.mock.calls[0]?.[0]?.text).toMatch(/revisar/i);
+  });
+
+  it('COACH_MESSAGE: envia o texto dinâmico em bolhas (US-3.5)', async () => {
+    const { worker, send } = makeWorker();
+    const res = await worker.process(
+      job({ type: 'COACH_MESSAGE', text: 'Oi!\n---\nComo foi o treino?', dedupeId: 'c1' }),
+    );
+    expect(res.status).toBe('SENT');
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('TYPING: dispara o indicador de digitação, sem marcador nem texto (US-3.5)', async () => {
+    const { worker, send, sendTyping } = makeWorker();
+    const res = await worker.process(job({ type: 'TYPING' }));
+    expect(res.status).toBe('TYPING');
+    expect(sendTyping).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('entrega AUTO_APPROVED/ACTIVE: envia 3 bolhas com link e emite protocol_sent', async () => {
