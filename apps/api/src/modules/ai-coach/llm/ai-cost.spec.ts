@@ -49,4 +49,16 @@ describe('custo de IA por usuário/mês dentro do teto', () => {
     const total = seeded.reduce((a, b) => a + b, 0);
     expect(total).toBeLessThanOrEqual(CEILING_BRL);
   });
+
+  it('conversa da Sprint 3: teto anti-abuso de 50 msg/dia não estoura o orçamento diário', () => {
+    // Anti-abuso: 50 msg/dia por usuário (Sato §9.4). Um dia no teto ainda cabe num budget diário
+    // folgado (o teto mensal ~R$1,08 pressupõe uso típico ~1-2 msg/dia, não 50 todo dia).
+    const perTurn = costBrl(
+      'gpt-4.1',
+      { tokensInput: 300, tokensCached: 1500, tokensOutput: 200 },
+      USD_BRL,
+    );
+    const dailyAtCap = perTurn * 50;
+    expect(dailyAtCap).toBeLessThanOrEqual(1.0); // budget diário de abuso (alerta bem antes disso)
+  });
 });
