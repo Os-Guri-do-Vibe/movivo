@@ -191,6 +191,21 @@ export class AppConfigService {
     };
   }
 
+  /** Config do RAG (US-3.3). Thresholds/top-K do retrieval + rerank. */
+  get rag(): {
+    readonly minCosine: number;
+    readonly rerankMinScore: number;
+    readonly topK: number;
+    readonly candidates: number;
+  } {
+    return {
+      minCosine: this.config.RAG_MIN_COSINE,
+      rerankMinScore: this.config.RAG_RERANK_MIN_SCORE,
+      topK: this.config.RAG_TOP_K,
+      candidates: this.config.RAG_CANDIDATES,
+    };
+  }
+
   get redis(): RedisConfig {
     return {
       sentinels: this.config.REDIS_SENTINEL_HOSTS,
