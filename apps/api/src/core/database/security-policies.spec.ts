@@ -23,6 +23,7 @@ describe('buildRlsPoliciesSql', () => {
       'protocols',
       'protocol_versions',
       'coaching_sessions',
+      'handoff_alerts',
     ]);
   });
 

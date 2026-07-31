@@ -23,6 +23,7 @@ import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.u
 import { QUEUE } from '../jobs/jobs.config';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { WHATSAPP_TRANSPORT, type WhatsappTransport } from './arara-transport';
+import { FEEDBACK_BUTTONS } from './feedback';
 import {
   BUBBLE_SEPARATOR,
   confirmationCareMessage,
@@ -49,6 +50,8 @@ export interface WhatsappOutboundJob {
   text?: string;
   /** COACH_MESSAGE: chave de idempotência única por resposta (evita colidir no marcador). */
   dedupeId?: string;
+  /** COACH_MESSAGE: anexar botões de feedback 👍/👎 à última bolha (US-3.6). */
+  feedback?: boolean;
 }
 
 /** TTL do marcador de idempotência — só precisa cobrir a janela de retry; 7d é folgado. */
@@ -105,9 +108,13 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     const text = await this.buildText(job.data);
     if (!text) return { status: 'SKIPPED' };
 
-    // `\n---\n` → uma mensagem por bolha (Sofia §11).
-    for (const bubble of text.split(BUBBLE_SEPARATOR)) {
-      if (bubble.trim()) await this.transport.send({ to: phone, text: bubble });
+    // `\n---\n` → uma mensagem por bolha (Sofia §11). Os botões de feedback (US-3.6) vão
+    // só na ÚLTIMA bolha, quando o job pede (resposta real do Coach — não limite/segurança).
+    const bubbles = text.split(BUBBLE_SEPARATOR).filter((b) => b.trim());
+    for (const [i, bubble] of bubbles.entries()) {
+      const isLast = i === bubbles.length - 1;
+      const buttons = isLast && job.data.feedback ? FEEDBACK_BUTTONS : undefined;
+      await this.transport.send({ to: phone, text: bubble, buttons });
     }
 
     await this.redis.set(markerKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);

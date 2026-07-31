@@ -28,6 +28,7 @@ interface Deps {
   lockToken?: string | null;
   batchItems?: string[];
   constraints?: unknown;
+  safetyHandoff?: boolean;
 }
 
 function makeWorker(deps: Deps = {}) {
@@ -52,7 +53,7 @@ function makeWorker(deps: Deps = {}) {
       intent: deps.intent ?? 'MOTIVACAO',
       confidence: 1,
       stage: 'KNN',
-      safetyHandoff: false,
+      safetyHandoff: deps.safetyHandoff ?? false,
     }),
   );
   const classifier = { classify } as unknown as IntentClassifier;
@@ -83,8 +84,10 @@ function makeWorker(deps: Deps = {}) {
   const validation = new ValidationService();
 
   const persistTurn = vi.fn(() => Promise.resolve());
+  const persistHandoff = vi.fn(() => Promise.resolve());
   const repo = {
     persistTurn,
+    persistHandoff,
     loadScrubUser: vi.fn(() => Promise.resolve({})),
     loadConstraints: vi.fn(() =>
       Promise.resolve(
@@ -115,7 +118,7 @@ function makeWorker(deps: Deps = {}) {
     redis,
     logger,
   );
-  return { worker, enqueue, complete, lock, persistTurn, workers, workerListeners };
+  return { worker, enqueue, complete, lock, persistTurn, persistHandoff, workers, workerListeners };
 }
 
 function job(): Job<AiResponseJob> {
@@ -152,6 +155,19 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     await worker.process(job());
     expect(complete).not.toHaveBeenCalled();
     expect(sentText(enqueue)).toBe(FORA_DE_ESCOPO_RESPONSE);
+  });
+
+  it('handoff de segurança (dor grave): persiste SAFETY e NÃO chama o LLM (US-3.6)', async () => {
+    const { worker, complete, persistHandoff } = makeWorker({ safetyHandoff: true });
+    await worker.process(job());
+    expect(complete).not.toHaveBeenCalled();
+    expect(persistHandoff).toHaveBeenCalledWith('u1', 'SAFETY', expect.any(String));
+  });
+
+  it('fora de escopo também registra alerta assíncrono ao painel (ALERT) (US-3.6)', async () => {
+    const { worker, persistHandoff } = makeWorker({ intent: 'FORA_DE_ESCOPO' });
+    await worker.process(job());
+    expect(persistHandoff).toHaveBeenCalledWith('u1', 'ALERT', expect.any(String));
   });
 
   it('substituição: verbaliza o substituto da base (prompt injeta o aprovado)', async () => {

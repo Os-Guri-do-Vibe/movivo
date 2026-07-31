@@ -9,7 +9,7 @@
 import { Injectable } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 
-import { conversations, protocols, users } from '../../core/database/schema';
+import { conversations, handoffAlerts, protocols, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import type { ScrubUser } from '../ai-coach/llm/llm.types';
 import type { SubstitutionConstraints } from '../protocol/exercise-substitution';
@@ -59,6 +59,13 @@ export class ConversationRepository {
       equipment: c.equipment ?? [],
       injuryTags: c.injuryTags ?? [],
     };
+  }
+
+  /** Persiste um alerta de handoff consultável sob RLS (US-3.6). Consumido no painel (Sprint 5). */
+  async persistHandoff(userId: string, level: 'ALERT' | 'SAFETY', reason: string): Promise<void> {
+    await this.db.runAsUser(userId, 'USER', async (tx) => {
+      await tx.insert(handoffAlerts).values({ userId, level, reason });
+    });
   }
 
   async persistTurn(input: PersistTurnInput): Promise<void> {

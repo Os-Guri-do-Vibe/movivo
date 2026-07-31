@@ -24,12 +24,13 @@ import { PinoLogger } from 'nestjs-pino';
 import { z } from 'zod';
 
 import { AppConfigService } from '../../core/config';
-import { users } from '../../core/database/schema';
+import { conversations, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
+import { parseFeedback } from './feedback';
 import { verifyWebhookSignature } from './webhook-signature';
 
 /** Janela de debounce (Rafael §6): 3-5s. Concatena a rajada do usuário num só job. */
@@ -48,6 +49,8 @@ const inboundPayloadSchema = z
     messageId: z.string().min(1).max(200),
     from: z.string().min(8).max(20), // telefone E.164 do remetente
     text: z.string().min(1).max(4096),
+    /** Toque num quick-reply (ex.: feedback 👍/👎, US-3.6). ausente numa mensagem normal. */
+    buttonId: z.string().max(100).optional(),
   })
   .passthrough();
 
@@ -132,6 +135,17 @@ export class WhatsappInboundService {
       return;
     }
 
+    // US-3.6 — toque num botão de feedback (👍/👎): registra o voto e NÃO enfileira resposta
+    // (não é pergunta). Escopado ao titular; não altera treino.
+    const feedback = parseFeedback(parsed.data.buttonId);
+    if (feedback) {
+      await this.registerFeedback(userId, feedback, input.correlationId);
+      return;
+    }
+
+    // US-3.6 — engajamento: 2ª mensagem (real) do usuário no mesmo dia (meta ≥40%, Épico 4).
+    await this.trackSecondMessageSameDay(userId, input.correlationId);
+
     // Debounce: empilha no buffer e enfileira UM job por janela (coalesce via SET NX).
     const batchKey = this.keys.forUser(userId, 'ai-response', 'batch');
     await this.redis.rpush(batchKey, JSON.stringify({ text, ts: startedAt, messageId }));
@@ -178,6 +192,44 @@ export class WhatsappInboundService {
       { event: 'webhook_rejected', reason, correlationId },
       'inbound descartado (200, sem processar)',
     );
+  }
+
+  /**
+   * Registra o voto de feedback (US-3.6): evento `ai_response_feedback` + persistência mínima
+   * como linha SYSTEM em `conversations` (reusa a tabela; não cria estado de treino). Sob RLS.
+   * ponytail: tabela dedicada de feedback se a análise de CSAT exigir agregação própria.
+   */
+  private async registerFeedback(
+    userId: string,
+    vote: 'UP' | 'DOWN',
+    correlationId: string,
+  ): Promise<void> {
+    await this.db.runAsUser(userId, 'USER', async (tx) => {
+      await tx.insert(conversations).values({
+        userId,
+        direction: 'INBOUND',
+        messageType: 'SYSTEM',
+        content: `feedback:${vote}`,
+      });
+    });
+    this.logger.info(
+      { event: 'ai_response_feedback', userId, vote, correlationId },
+      'feedback (thumbs) registrado',
+    );
+  }
+
+  /** Conta as mensagens reais do dia; ao chegar na 2ª, emite o evento de engajamento. */
+  private async trackSecondMessageSameDay(userId: string, correlationId: string): Promise<void> {
+    const day = new Date().toISOString().slice(0, 10);
+    const key = this.keys.forUser(userId, 'msg-count', day);
+    const count = await this.redis.incr(key);
+    if (count === 1) await this.redis.expire(key, 2 * 24 * 3600);
+    if (count === 2) {
+      this.logger.info(
+        { event: 'whatsapp_user_second_message_same_day', userId, correlationId },
+        'engajamento: 2ª mensagem do usuário no mesmo dia',
+      );
+    }
   }
 
   /** Telefone → `userId` num contexto SYSTEM (inbound não autenticado). `null` = desconhecido. */

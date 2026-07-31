@@ -34,6 +34,7 @@ import { UserJobLock } from '../whatsapp/user-job-lock';
 import {
   DAILY_LIMIT_MESSAGE,
   DLQ_FALLBACK_MESSAGE,
+  SAFETY_HANDOFF_MESSAGE,
   STANDARD_BLOCK_RESPONSE,
   SUBSTITUTION_FALLBACK_MESSAGE,
 } from './coach-messages';
@@ -106,6 +107,20 @@ export class AIResponseWorker implements OnModuleInit {
 
       const scrubUser = await this.repo.loadScrubUser(userId);
       const intent = await this.classifier.classify({ userId, user: scrubUser, message });
+
+      // TASK-3.6.1 (b) — Handoff de SEGURANÇA (red flag do guardrail US-3.4): não gera resposta
+      // de IA; orienta atendimento presencial imediato + alerta prioritário. Sem promessa de SLA.
+      if (intent.safetyHandoff) {
+        await this.repo.persistHandoff(userId, 'SAFETY', 'RED_FLAG');
+        this.logger.info(
+          { userId, event: 'handoff_safety', reason: 'RED_FLAG' },
+          'handoff de segurança clínica — atendimento presencial orientado',
+        );
+        await this.deliver(userId, correlationId, SAFETY_HANDOFF_MESSAGE, null, false, enqueuedAt);
+        await this.context.recordTurn(userId, 'assistant', SAFETY_HANDOFF_MESSAGE);
+        return { status: 'SAFETY_HANDOFF' };
+      }
+
       const draft = await this.buildResponse(userId, intent.intent, message, scrubUser);
 
       if (draft.blocked) {
@@ -122,9 +137,20 @@ export class AIResponseWorker implements OnModuleInit {
         draft.validationPassed,
         enqueuedAt,
         draft.latencyMs,
+        true, // resposta real → pede feedback (thumbs)
       );
       await this.context.recordTurn(userId, 'assistant', draft.text);
       await this.context.summarizeIfNeeded(userId);
+
+      // TASK-3.6.1 (a) — Alerta ASSÍNCRONO consultável (não handoff): revisão sem prazo.
+      const reason = handoffReason(intent.intent, draft);
+      if (reason) {
+        await this.repo.persistHandoff(userId, 'ALERT', reason);
+        this.logger.info(
+          { userId, event: 'handoff_alert', reason },
+          'alerta assíncrono ao painel CREF',
+        );
+      }
       return { status: draft.blocked ? 'BLOCKED' : 'SENT' };
     } finally {
       await this.lock.release(userId, token);
@@ -237,6 +263,7 @@ export class AIResponseWorker implements OnModuleInit {
     validationPassed: boolean,
     enqueuedAt: number,
     latencyMs: number | null = null,
+    requestFeedback = false,
   ): Promise<void> {
     await this.repo.persistTurn({
       userId,
@@ -251,6 +278,8 @@ export class AIResponseWorker implements OnModuleInit {
       type: 'COACH_MESSAGE',
       text,
       dedupeId: correlationId,
+      // Thumbs (US-3.6): só respostas reais pedem feedback (não limite/segurança/DLQ).
+      feedback: requestFeedback,
     };
     await this.queues.enqueue(QUEUE.whatsappOutbound, 'coach-message', job, {
       jobId: `coach-message_${correlationId}`,
@@ -306,4 +335,16 @@ export class AIResponseWorker implements OnModuleInit {
 /** Resposta enviável sem bloqueio (PASS). */
 function draftPass(text: string, modelUsed: string | null, latencyMs: number): ResponseDraft {
   return { text, modelUsed, latencyMs, validationPassed: true, humanReview: false, blocked: false };
+}
+
+/**
+ * Motivo do alerta ASSÍNCRONO ao painel (US-3.6 (a)), ou `null` se nada a alertar.
+ * Pedido explícito de humano e fora-de-escopo pesam mais que a sinalização do validador.
+ */
+function handoffReason(intent: Intent, draft: ResponseDraft): string | null {
+  if (intent === 'PEDIDO_HANDOFF') return 'PEDIDO_HANDOFF';
+  if (intent === 'FORA_DE_ESCOPO') return 'FORA_DE_ESCOPO';
+  if (draft.blocked) return 'VALIDATOR_BLOCK';
+  if (draft.humanReview) return 'VALIDATOR_FLAG';
+  return null;
 }

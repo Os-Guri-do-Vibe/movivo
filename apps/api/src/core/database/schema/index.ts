@@ -23,6 +23,9 @@ export * from './ai-jobs';
 // Sprint 1 — schema de autenticação (US-1.1 / TASK-1.1.5).
 export * from './auth-sessions';
 
+// Sprint 3 — handoff/alertas ao painel CREF (US-3.6).
+export * from './handoff-alerts';
+
 // Sprint 3 — memória de longo prazo da conversa (US-3.2).
 export * from './coaching-sessions';
 

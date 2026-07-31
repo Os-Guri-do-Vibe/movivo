@@ -36,6 +36,11 @@ function fakeRedis(): { redis: Redis; rpush: ReturnType<typeof vi.fn> } {
     async expire() {
       return 1;
     },
+    async incr(key: string) {
+      const n = Number(kv.get(key) ?? '0') + 1;
+      kv.set(key, String(n));
+      return n;
+    },
   } as unknown as Redis;
   return { redis, rpush };
 }
