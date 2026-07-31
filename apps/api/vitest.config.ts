@@ -53,6 +53,8 @@ export default defineConfig({
         // Mesma categoria (US-3.2): I/O de banco sob RLS da episodic memory, provado pela
         // integração (context.int-spec) contra Postgres real.
         'src/modules/ai-coach/context/context.repository.ts',
+        // Idem (US-3.4): kNN em `intent_examples`, provado por integração (intent.int-spec).
+        'src/modules/ai-coach/intent/intent.repository.ts',
         'src/health/**',
         'src/**/*.spec.ts',
         'src/**/*.int-spec.ts',

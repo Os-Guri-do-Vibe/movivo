@@ -117,6 +117,11 @@ const KNOWLEDGE_BASE_SQL = (role: string) => `
     ON knowledge_base USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
   REVOKE INSERT, UPDATE, DELETE ON knowledge_base FROM ${role};
+
+  CREATE INDEX IF NOT EXISTS idx_intent_examples_embedding
+    ON intent_examples USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
+  REVOKE INSERT, UPDATE, DELETE ON intent_examples FROM ${role};
 `;
 
 async function ensureExtensions(sql: postgres.Sql): Promise<void> {

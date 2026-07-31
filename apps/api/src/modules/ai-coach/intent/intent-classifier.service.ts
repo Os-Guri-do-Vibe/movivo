@@ -1,0 +1,85 @@
+/**
+ * IntentClassifier (US-3.4) — roteia a mensagem à intenção certa a custo/latência mínimos.
+ *
+ * Três etapas: (0) guardrail clínico regex ANTES de qualquer custo de IA; (1) embedding-kNN
+ * contra `intent_examples` quando a confiança é alta; (2) fallback GPT-4.1-nano só nos casos
+ * ambíguos. A saída (`IntentResult`) diz ao `AIResponseWorker` (US-3.5) qual prompt usar e se
+ * dispara handoff de segurança clínica.
+ */
+import { Inject, Injectable } from '@nestjs/common';
+import { PinoLogger } from 'nestjs-pino';
+
+import { LlmRouter } from '../llm/llm-router.service';
+import type { ScrubUser } from '../llm/llm.types';
+import { EMBEDDING_PORT, type EmbeddingPort } from '../rag/embedding.port';
+import { clinicalGuardrail } from './clinical-guardrail';
+import { IntentRepository } from './intent.repository';
+import { type Intent, type IntentResult, INTENTS, isIntent } from './intent.types';
+import { wrapUserMessage } from '../../protocol/validation/prompt-injection';
+
+export interface ClassifyInput {
+  userId: string;
+  user: ScrubUser;
+  message: string;
+}
+
+/** ponytail: knob de confiança do kNN — calibrar quando o embedding real (não-fake) entrar. */
+const KNN_MIN_CONFIDENCE = 0.6;
+
+@Injectable()
+export class IntentClassifier {
+  constructor(
+    @Inject(EMBEDDING_PORT) private readonly embedding: EmbeddingPort,
+    private readonly repo: IntentRepository,
+    private readonly llm: LlmRouter,
+    private readonly logger: PinoLogger,
+  ) {
+    this.logger.setContext(IntentClassifier.name);
+  }
+
+  async classify(input: ClassifyInput): Promise<IntentResult> {
+    // Etapa 0 — guardrail clínico ANTES de pagar embedding/LLM.
+    const guard = clinicalGuardrail(input.message);
+    if (guard) {
+      return {
+        intent: 'FORA_DE_ESCOPO',
+        confidence: 1,
+        stage: 'GUARDRAIL',
+        safetyHandoff: guard === 'SAFETY',
+      };
+    }
+
+    // Etapa 1 — embedding-kNN.
+    const vec = await this.embedding.embed(input.message);
+    const knn = await this.repo.classifyByKnn(vec);
+    if (knn && knn.confidence >= KNN_MIN_CONFIDENCE && isIntent(knn.intent)) {
+      return { intent: knn.intent, confidence: knn.confidence, stage: 'KNN', safetyHandoff: false };
+    }
+
+    // Etapa 2 — fallback nano (só os ambíguos).
+    const intent = await this.fallback(input);
+    return { intent, confidence: 0.5, stage: 'FALLBACK', safetyHandoff: false };
+  }
+
+  private async fallback(input: ClassifyInput): Promise<Intent> {
+    const result = await this.llm.complete({
+      purpose: 'AI_RESPONSE',
+      userId: input.userId,
+      user: input.user,
+      dataClass: 'HEALTH',
+      system:
+        'Classifique a mensagem do usuário em UMA destas intenções e responda só com o rótulo, ' +
+        `sem mais nada: ${INTENTS.join(', ')}.`,
+      messages: [{ role: 'user', content: wrapUserMessage(input.message) }],
+      maxTokens: 20,
+      intent: 'intent_classification',
+    });
+    return parseIntent(result.text);
+  }
+}
+
+/** Extrai um rótulo conhecido da saída do nano; desconhecido → `FORA_DE_ESCOPO` (fail-safe). */
+export function parseIntent(text: string): Intent {
+  const upper = text.toUpperCase();
+  return INTENTS.find((i) => upper.includes(i)) ?? 'FORA_DE_ESCOPO';
+}
