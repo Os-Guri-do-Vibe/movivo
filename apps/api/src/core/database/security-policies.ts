@@ -76,6 +76,8 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   // tem `user_id` denormalizado justamente para ancorar a RLS sem JOIN (Sato §4.5).
   { table: 'protocols', column: 'user_id' },
   { table: 'protocol_versions', column: 'user_id' },
+  // Sprint 3 (US-3.2): resumo de longo prazo da conversa de saúde — mesma FORCE RLS por titular.
+  { table: 'coaching_sessions', column: 'user_id' },
 ];
 
 // `nullif(..., '')` é OBRIGATÓRIO, não cosmético: sob PgBouncer transaction mode,

@@ -38,6 +38,8 @@ const EXPECTED_TABLES = [
   'subscriptions',
   'ai_jobs',
   'auth_sessions',
+  // Sprint 3 (US-3.2): memória de longo prazo da conversa.
+  'coaching_sessions',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;

@@ -18,6 +18,10 @@
 import { Module } from '@nestjs/common';
 
 import { AppConfigService } from '../../core/config';
+import { ContextRepository } from './context/context.repository';
+import { ContextService } from './context/context.service';
+import { NoopSemanticMemory, SEMANTIC_MEMORY } from './context/semantic-memory.port';
+import { WorkingMemory } from './context/working-memory.service';
 import { AiJobRepository } from './llm/ai-job.repository';
 import { LlmAbuseGuard } from './llm/llm-abuse-guard.service';
 import { LlmRouter } from './llm/llm-router.service';
@@ -59,8 +63,13 @@ import type { LLMProvider } from './llm/llm.types';
     AiJobRepository,
     LlmAbuseGuard,
     LlmRouter,
+    // Sprint 3 — memória da conversa (US-3.2). `SEMANTIC_MEMORY` é no-op até a US-3.3 plugar o RAG.
+    WorkingMemory,
+    ContextRepository,
+    { provide: SEMANTIC_MEMORY, useClass: NoopSemanticMemory },
+    ContextService,
   ],
-  // Exporta o que a geração (US-2.1) e o Worker (US-2.4) consomem.
-  exports: [LlmRouter, AiJobRepository],
+  // Exporta o que a geração (US-2.1), o Worker (US-2.4) e o AIResponseWorker (US-3.5) consomem.
+  exports: [LlmRouter, AiJobRepository, ContextService],
 })
 export class AiCoachModule {}

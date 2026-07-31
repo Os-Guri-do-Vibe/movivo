@@ -50,6 +50,9 @@ export default defineConfig({
         // teste de integração (llm.int-spec) contra um Postgres real — mesma categoria
         // dos *-health.service.ts acima.
         'src/modules/ai-coach/llm/ai-job.repository.ts',
+        // Mesma categoria (US-3.2): I/O de banco sob RLS da episodic memory, provado pela
+        // integração (context.int-spec) contra Postgres real.
+        'src/modules/ai-coach/context/context.repository.ts',
         'src/health/**',
         'src/**/*.spec.ts',
         'src/**/*.int-spec.ts',

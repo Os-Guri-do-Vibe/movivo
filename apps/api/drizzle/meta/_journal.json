@@ -43,6 +43,13 @@
       "when": 1785381619369,
       "tag": "0005_certain_domino",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785460677010,
+      "tag": "0006_optimal_clint_barton",
+      "breakpoints": true
     }
   ]
 }

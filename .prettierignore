@@ -7,6 +7,10 @@ coverage/
 pnpm-lock.yaml
 *.tsbuildinfo
 
+# Migrações e metadados gerados pelo drizzle-kit — reformatá-los brigaria com o gerador
+# (o snapshot/journal é reescrito a cada `db:generate`). Não são código editável à mão.
+apps/api/drizzle/
+
 # Gerado e reescrito pelo Next.js a cada build — formatá-lo geraria diff eterno.
 next-env.d.ts
 

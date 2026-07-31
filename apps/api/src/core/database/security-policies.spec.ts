@@ -22,6 +22,7 @@ describe('buildRlsPoliciesSql', () => {
       'ai_jobs',
       'protocols',
       'protocol_versions',
+      'coaching_sessions',
     ]);
   });
 
