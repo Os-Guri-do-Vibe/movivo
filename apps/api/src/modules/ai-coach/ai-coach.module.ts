@@ -22,6 +22,8 @@ import { ContextRepository } from './context/context.repository';
 import { ContextService } from './context/context.service';
 import { SEMANTIC_MEMORY } from './context/semantic-memory.port';
 import { WorkingMemory } from './context/working-memory.service';
+import { IntentClassifier } from './intent/intent-classifier.service';
+import { IntentRepository } from './intent/intent.repository';
 import { EMBEDDING_PORT, FakeEmbedding } from './rag/embedding.port';
 import { RagService } from './rag/rag.service';
 import { FakeReranker, RERANKER_PORT } from './rag/reranker.port';
@@ -76,8 +78,11 @@ import type { LLMProvider } from './llm/llm.types';
     // US-3.3 substitui o no-op da US-3.2: a camada semantic agora é o RAG real (PGVector).
     { provide: SEMANTIC_MEMORY, useClass: RagService },
     ContextService,
+    // US-3.4 — classificação de intenção (guardrail clínico + kNN + fallback nano).
+    IntentRepository,
+    IntentClassifier,
   ],
   // Exporta o que a geração (US-2.1), o Worker (US-2.4) e o AIResponseWorker (US-3.5) consomem.
-  exports: [LlmRouter, AiJobRepository, ContextService],
+  exports: [LlmRouter, AiJobRepository, ContextService, IntentClassifier],
 })
 export class AiCoachModule {}

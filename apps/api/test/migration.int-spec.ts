@@ -42,6 +42,8 @@ const EXPECTED_TABLES = [
   'coaching_sessions',
   // Sprint 3 (US-3.3): corpus curado do RAG (global, read-only).
   'knowledge_base',
+  // Sprint 3 (US-3.4): exemplos rotulados do kNN de intenção (global, read-only).
+  'intent_examples',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;
