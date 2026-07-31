@@ -10,10 +10,18 @@
  */
 import { PinoLogger } from 'nestjs-pino';
 
+/** Botão de resposta rápida (quick reply) — ex.: feedback 👍/👎 (US-3.6). */
+export interface QuickReplyButton {
+  id: string;
+  title: string;
+}
+
 export interface OutboundMessage {
   /** Telefone E.164 do destinatário. */
   to: string;
   text: string;
+  /** Quick-reply buttons anexados à mensagem (opcional). No fake/dev é só metadado. */
+  buttons?: readonly QuickReplyButton[];
 }
 
 export interface WhatsappTransport {
@@ -53,7 +61,13 @@ export class AraraHttpTransport implements WhatsappTransport {
     const res = await fetch(`${this.baseUrl}/v1/messages`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
-      body: JSON.stringify({ to: message.to, type: 'text', text: { body: message.text } }),
+      body: JSON.stringify({
+        to: message.to,
+        type: 'text',
+        text: { body: message.text },
+        // ponytail: shape de quick-reply do provedor a confirmar quando a conta existir.
+        ...(message.buttons?.length ? { buttons: message.buttons } : {}),
+      }),
     });
     if (!res.ok) {
       throw new Error(`AraraHQ respondeu ${res.status} ao enviar mensagem`);

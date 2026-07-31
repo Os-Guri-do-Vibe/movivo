@@ -44,6 +44,8 @@ const EXPECTED_TABLES = [
   'knowledge_base',
   // Sprint 3 (US-3.4): exemplos rotulados do kNN de intenção (global, read-only).
   'intent_examples',
+  // Sprint 3 (US-3.6): alertas/handoff ao painel CREF (dado de titular).
+  'handoff_alerts',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;

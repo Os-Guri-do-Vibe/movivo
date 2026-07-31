@@ -197,3 +197,18 @@ export const aiJobStatusEnum = pgEnum('ai_job_status', [
   'FAILED',
   'DLQ',
 ]);
+
+// ---------------------------------------------------------------------------
+// HANDOFF CREF (US-3.6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Nível do alerta ao painel do profissional CREF (decisão do fundador, 2026-07-30):
+ * `ALERT` = revisão assíncrona (pedido de handoff / FLAG do validador / fora de escopo),
+ * SEM promessa de retorno humano; `SAFETY` = red flag clínica (dor grave) — prioritário,
+ * o usuário é orientado a procurar atendimento presencial. A tela é Sprint 5.
+ */
+export const handoffLevelEnum = pgEnum('handoff_level', ['ALERT', 'SAFETY']);
+
+/** Ciclo do alerta: nasce `OPEN`; o profissional resolve no painel (Sprint 5). */
+export const handoffStatusEnum = pgEnum('handoff_status', ['OPEN', 'RESOLVED']);

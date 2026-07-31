@@ -22,3 +22,14 @@ export const SUBSTITUTION_FALLBACK_MESSAGE =
 /** Falha persistente do worker (DLQ): tranquiliza sem prometer prazo (guardrails). */
 export const DLQ_FALLBACK_MESSAGE =
   'Recebi sua mensagem! Estou organizando aqui e já te respondo. 🙌';
+
+/**
+ * Handoff de segurança clínica (US-3.6, nível SAFETY — red flag de dor grave). A ação é
+ * BUSCAR ATENDIMENTO PRESENCIAL agora, não esperar o profissional responder. Sem
+ * diagnóstico, sem alarme, com o respaldo CREF visível. NUNCA promete retorno humano.
+ */
+export const SAFETY_HANDOFF_MESSAGE =
+  'Pelo que você descreveu, o mais seguro agora é interromper o treino e procurar uma ' +
+  'avaliação médica presencial o quanto antes — melhor não esperar. Cuidar disso vem ' +
+  'primeiro. Vou registrar aqui para o profissional de Educação Física responsável ' +
+  'acompanhar. 💙';
