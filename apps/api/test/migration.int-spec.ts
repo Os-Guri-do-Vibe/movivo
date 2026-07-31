@@ -40,6 +40,8 @@ const EXPECTED_TABLES = [
   'auth_sessions',
   // Sprint 3 (US-3.2): memória de longo prazo da conversa.
   'coaching_sessions',
+  // Sprint 3 (US-3.3): corpus curado do RAG (global, read-only).
+  'knowledge_base',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;

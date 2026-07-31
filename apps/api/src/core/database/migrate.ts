@@ -105,6 +105,20 @@ const GRANTS_SQL = (role: string) => `
  */
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;
 
+/**
+ * Reconciliação do corpus RAG (US-3.3). Idempotente:
+ *  - índice HNSW `vector_cosine_ops` (`m=16/ef_construction=64`) para a busca densa;
+ *  - `knowledge_base` read-only para o runtime: REVOKE de INSERT/UPDATE/DELETE de `movivo_app`
+ *    (o grant genérico dá DML a toda tabela; aqui tiramos a escrita — só a role de indexação
+ *    escreve). Corpus curado e global, sem RLS por titular (não é PII).
+ */
+const KNOWLEDGE_BASE_SQL = (role: string) => `
+  CREATE INDEX IF NOT EXISTS idx_knowledge_base_embedding
+    ON knowledge_base USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
+  REVOKE INSERT, UPDATE, DELETE ON knowledge_base FROM ${role};
+`;
+
 async function ensureExtensions(sql: postgres.Sql): Promise<void> {
   const present = await sql<{ extname: string }[]>`SELECT extname FROM pg_extension`;
   const have = new Set(present.map((row) => row.extname));
@@ -151,6 +165,13 @@ async function main(): Promise<void> {
     console.log(`[db:migrate] Reconciliando grants mínimos de ${appRole} …`);
     await sql.unsafe(GRANTS_SQL(appRole));
     console.log('[db:migrate] Grants aplicados.');
+
+    // Corpus do RAG (US-3.3): índice HNSW (drizzle-kit não expressa operator class de
+    // pgvector) + corpus SOMENTE-LEITURA para o runtime — o `movivo_app` perde a escrita
+    // que o grant genérico deu (Sato §10.4: anti-envenenamento do corpus).
+    console.log('[db:migrate] Reconciliando corpus RAG (HNSW + read-only) …');
+    await sql.unsafe(KNOWLEDGE_BASE_SQL(appRole));
+    console.log('[db:migrate] Corpus RAG OK.');
 
     // Row-Level Security (US-1.1 / Sato §4): ENABLE+FORCE + políticas por tenant.
     // Idempotente e reaplicada a cada migração — mesma disciplina dos grants.

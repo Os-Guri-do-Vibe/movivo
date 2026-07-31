@@ -25,3 +25,6 @@ export * from './auth-sessions';
 
 // Sprint 3 — memória de longo prazo da conversa (US-3.2).
 export * from './coaching-sessions';
+
+// Sprint 3 — corpus curado do RAG (US-3.3). Global, read-only, fora da RLS por titular.
+export * from './knowledge-base';

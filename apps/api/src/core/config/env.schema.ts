@@ -204,6 +204,20 @@ export const envSchema = z
     ARARAHQ_WEBHOOK_SECRET: z.string().min(1).optional(),
     /** Base pública para o deep-link da página read-only do protocolo (US-2.6). */
     PUBLIC_SITE_URL: z.string().url().default('http://localhost:3000'),
+
+    // -------------------------------------------------------- RAG (US-3.3)
+    /**
+     * Threshold de cosseno do retrieval denso (Victor §4.2). Default 0.75 é a calibração do
+     * `text-embedding-3-small` real; o embedding fake de dev tem outra distribuição, então
+     * o teste ajusta este valor (a nota de calibração fica com a impl real).
+     */
+    RAG_MIN_COSINE: z.coerce.number().min(0).max(1).default(0.75),
+    /** Score mínimo pós-rerank (Victor §4.3). */
+    RAG_RERANK_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.5),
+    /** Trechos retornados após rerank. */
+    RAG_TOP_K: z.coerce.number().int().min(1).max(10).default(3),
+    /** Candidatos da busca densa antes do rerank (retrieve 20 → rerank → top-K). */
+    RAG_CANDIDATES: z.coerce.number().int().min(1).max(100).default(20),
   })
   .superRefine((config, ctx) => {
     if (config.DATABASE_PORT === POSTGRES_DIRECT_PORT) {
