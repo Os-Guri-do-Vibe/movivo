@@ -32,13 +32,23 @@ import {
 } from './message-templates';
 
 export type WhatsappJobType =
-  'CONFIRMATION' | 'CONFIRMATION_CARE' | 'PROTOCOL_DELIVERY' | 'PROTOCOL_WAITING';
+  | 'CONFIRMATION'
+  | 'CONFIRMATION_CARE'
+  | 'PROTOCOL_DELIVERY'
+  | 'PROTOCOL_WAITING'
+  // US-3.5 — conversa do Coach: texto dinâmico + indicador de digitação.
+  | 'COACH_MESSAGE'
+  | 'TYPING';
 
 export interface WhatsappOutboundJob {
   userId: string;
   type: WhatsappJobType;
   protocolId?: string;
   protocolVersion?: number;
+  /** COACH_MESSAGE: texto já pronto (pode ter `\n---\n` para bolhas). */
+  text?: string;
+  /** COACH_MESSAGE: chave de idempotência única por resposta (evita colidir no marcador). */
+  dedupeId?: string;
 }
 
 /** TTL do marcador de idempotência — só precisa cobrir a janela de retry; 7d é folgado. */
@@ -63,8 +73,26 @@ export class WhatsappOutboundWorker implements OnModuleInit {
   }
 
   async process(job: Job<WhatsappOutboundJob>): Promise<{ status: string }> {
-    const { userId, type, protocolVersion } = job.data;
-    const markerKey = this.keys.forUser(userId, 'wa-sent', type, String(protocolVersion ?? 'na'));
+    const { userId, type, protocolVersion, dedupeId } = job.data;
+
+    const phone = await this.resolvePhone(userId);
+    if (!phone) {
+      this.logger.warn({ userId }, 'usuário sem telefone — nada a enviar');
+      return { status: 'NO_PHONE' };
+    }
+
+    // "digitando…" é best-effort e sem idempotência (presença, não mensagem).
+    if (type === 'TYPING') {
+      await this.transport.sendTyping?.(phone);
+      return { status: 'TYPING' };
+    }
+
+    const markerKey = this.keys.forUser(
+      userId,
+      'wa-sent',
+      type,
+      String(protocolVersion ?? dedupeId ?? 'na'),
+    );
 
     // Idempotência: envio já concluído não reenvia (retry/duplicata). check→envia→marca —
     // uma falha no meio deixa o marker ausente, então o retry reenvia (at-least-once).
@@ -72,12 +100,6 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     if ((await this.redis.exists(markerKey)) === 1) {
       this.logger.info({ userId, type }, 'mensagem já enviada — job idempotente, nada a fazer');
       return { status: 'ALREADY_SENT' };
-    }
-
-    const phone = await this.resolvePhone(userId);
-    if (!phone) {
-      this.logger.warn({ userId }, 'usuário sem telefone — nada a enviar');
-      return { status: 'NO_PHONE' };
     }
 
     const text = await this.buildText(job.data);
@@ -117,6 +139,10 @@ export class WhatsappOutboundWorker implements OnModuleInit {
         return waitingMessage();
       case 'PROTOCOL_DELIVERY':
         return this.buildDelivery(data);
+      case 'COACH_MESSAGE':
+        return data.text ?? null;
+      case 'TYPING':
+        return null; // tratado antes (presença)
     }
   }
 

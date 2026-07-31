@@ -18,6 +18,8 @@ export interface OutboundMessage {
 
 export interface WhatsappTransport {
   send(message: OutboundMessage): Promise<void>;
+  /** Indicador "digitando…" (US-3.5, mascara latência). Opcional: fakes/legados sem ele. */
+  sendTyping?(to: string): Promise<void>;
   hasCredentials(): boolean;
 }
 
@@ -55,6 +57,20 @@ export class AraraHttpTransport implements WhatsappTransport {
     });
     if (!res.ok) {
       throw new Error(`AraraHQ respondeu ${res.status} ao enviar mensagem`);
+    }
+  }
+
+  async sendTyping(to: string): Promise<void> {
+    if (!this.apiKey) return; // no-op sem credencial (dev/CI)
+    // ponytail: presence/typing é best-effort — nunca deixa a resposta falhar por causa dele.
+    try {
+      await fetch(`${this.baseUrl}/v1/presence`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
+        body: JSON.stringify({ to, presence: 'typing' }),
+      });
+    } catch {
+      this.logger.info({ to }, 'indicador de digitação falhou (ignorado)');
     }
   }
 }

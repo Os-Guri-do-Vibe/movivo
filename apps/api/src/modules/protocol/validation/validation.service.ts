@@ -14,7 +14,7 @@
 import { Injectable } from '@nestjs/common';
 import type { ProtocolStructure } from '@movivo/shared';
 
-import { type ContraindicationTag, EXERCISE_BY_ID } from '../exercise-catalog';
+import { type ContraindicationTag, EXERCISE_BY_ID, EXERCISE_CATALOG } from '../exercise-catalog';
 import type { UserConstraints } from '../user-constraints';
 import { containsPromptLeak } from './prompt-injection';
 import {
@@ -50,6 +50,15 @@ export interface ValidateProtocolInput {
   parqFlags?: ContraindicationTag[];
 }
 
+export interface ValidateResponseOptions {
+  /**
+   * SUBSTITUICAO_EXERCICIO (US-3.5): nomes/ids de exercícios que a RESPOSTA pode citar (o
+   * original + o substituto aprovado da base). Qualquer OUTRO exercício do catálogo citado
+   * → BLOCK (a IA saiu do trilho). `undefined` = intenção sem restrição de exercício.
+   */
+  allowedExercises?: readonly string[];
+}
+
 @Injectable()
 export class ValidationService {
   /** Veredito determinístico sobre o protocolo inteiro. Nunca lança — sempre devolve. */
@@ -65,6 +74,40 @@ export class ValidationService {
     this.checkLanguage(collectText(input.structure), violations);
 
     return aggregate(violations);
+  }
+
+  /**
+   * Veta uma RESPOSTA conversacional em TEXTO livre (US-3.5). REUSA as regras de
+   * linguagem/compliance/leak da validação de protocolo (não reimplementa) e, para
+   * substituição de exercício, confirma que a resposta só cita exercícios autorizados da base.
+   * Nunca lança — sempre devolve um veredito.
+   */
+  validateResponse(text: string, opts: ValidateResponseOptions = {}): ValidationVerdict {
+    const violations: ValidationViolation[] = [];
+    this.checkLanguage(text, violations);
+    this.checkAllowedExercises(text, opts.allowedExercises, violations);
+    return aggregate(violations);
+  }
+
+  /** Substituição: a resposta não pode empurrar um exercício da base fora do autorizado. */
+  private checkAllowedExercises(
+    text: string,
+    allowed: readonly string[] | undefined,
+    out: ValidationViolation[],
+  ): void {
+    if (!allowed) return; // só a substituição restringe o vocabulário de exercícios
+    const lower = text.toLowerCase();
+    const allowedSet = new Set(allowed.map((a) => a.toLowerCase()));
+    for (const ex of EXERCISE_CATALOG) {
+      if (allowedSet.has(ex.name.toLowerCase()) || allowedSet.has(ex.id)) continue;
+      if (lower.includes(ex.name.toLowerCase())) {
+        out.push({
+          rule: 'EXERCISE_NOT_ALLOWED',
+          detail: `resposta cita exercício não autorizado: ${ex.id}`,
+          action: 'BLOCK',
+        });
+      }
+    }
   }
 
   private checkStructure(

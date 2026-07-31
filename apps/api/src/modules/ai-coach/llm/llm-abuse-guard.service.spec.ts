@@ -15,6 +15,7 @@ function make() {
     incr: vi.fn(),
     expire: vi.fn().mockResolvedValue(1),
     incrbyfloat: vi.fn(),
+    get: vi.fn(),
   };
   const keys = new RedisKeyBuilder('movivo');
   const config = {
@@ -47,6 +48,27 @@ describe('LlmAbuseGuard.check', () => {
     const { guard, redis } = make();
     redis.incr.mockResolvedValue(4); // limite = 3
     await expect(guard.check(USER_ID)).rejects.toBeInstanceOf(LLMAbuseError);
+  });
+});
+
+describe('LlmAbuseGuard.isOverDailyLimit (US-3.5 — peek sem incrementar)', () => {
+  it('false abaixo do teto; não incrementa', async () => {
+    const { guard, redis } = make();
+    redis.get.mockResolvedValue('2'); // limite = 3
+    expect(await guard.isOverDailyLimit(USER_ID)).toBe(false);
+    expect(redis.incr).not.toHaveBeenCalled();
+  });
+
+  it('true no teto (o 51º já estourou)', async () => {
+    const { guard, redis } = make();
+    redis.get.mockResolvedValue('3');
+    expect(await guard.isOverDailyLimit(USER_ID)).toBe(true);
+  });
+
+  it('counter ausente conta como zero', async () => {
+    const { guard, redis } = make();
+    redis.get.mockResolvedValue(null);
+    expect(await guard.isOverDailyLimit(USER_ID)).toBe(false);
   });
 });
 
