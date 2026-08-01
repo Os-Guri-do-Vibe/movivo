@@ -62,7 +62,7 @@ Ao final da Sprint 4, um trialist engajado recebe, na janela do dia 7 ao 14, uma
 
 ### Resultado esperado do épico
 
-- **`SubscriptionModule` + `PaymentGatewayService`** (confinado, mockado em dev): modela os planos **Mensal R$39 (3900c) / Trimestral R$99 (9900c)** — MVP — e o ciclo de vida (`TRIALING`→`ACTIVE`→`PAST_DUE`→`CANCELED`); SDK do gateway isolado; troca de provedor por config.
+- **`SubscriptionModule` + `PaymentGatewayService`** (confinado, mockado em dev): modela os **quatro planos do MVP** — **Mensal R$39 (3900c) / Trimestral R$99 (9900c) / Semestral (preço a definir) / Anual R$349 (34900c)** — e o ciclo de vida (`TRIALING`→`ACTIVE`→`PAST_DUE`→`CANCELED`); SDK do gateway isolado, **abstraindo Stripe E Asaas** por config.
 - **Checkout hospedado + webhooks de pagamento**: link de assinatura pré-preenchido (plano pré-selecionado); webhook com `constructEvent`/HMAC + tolerância + idempotência por `event_id`/`externalSubscriptionId`; ativação idempotente; sincronização de estado (pagamento aprovado/falho/reembolso/cancelamento no gateway).
 - **`ConversionSequenceWorker`** sobre `conversion-sequence`: dias 7 (check-in de progresso + 1ª menção ao plano), 10 (resultados + urgência suave), 13 (link direto + garantia), 14 (última chamada + oferta de downgrade); idempotente; para quem já converteu; ancorado no tempo.
 - **Downgrade + win-back**: no dia 14, se não converteu no plano cheio, oferta do plano mais barato (Mensal); 3 dias pós-trial, mensagem de win-back perguntando o motivo (insumo de `cancel_reason`/objeção).
@@ -78,8 +78,8 @@ A fronteira da Sprint 4 é **"converter e cobrar com segurança"**. Ficam **expl
 
 - **Check-in Semanal e Retenção (Épico 6 → Sprint 5):** `CheckinWeeklyWorker` + cron/`repeat`, o formato de 3 quick replies (semáforo de cansaço/treinos/pedido de ajuste, Sofia §11.5), o **ajuste de protocolo** reusando geração+validação da Sprint 2, o loop visível ("ajustei seu treino…") e o reengajamento de inativos. Motivo: retenção opera sobre **usuários pagantes**, que só passam a existir **depois** desta sprint. É o passo imediatamente seguinte, com a fundação de conversão já pronta.
 - **Dashboard CREF / Operações (Épico 7 → Sprint 5/6):** a UI do painel do profissional, a fila de `PENDING_REVIEW`/`handoff_alerts`/`BLOCKED_PENDING_CLEARANCE`, a edição manual do protocolo, a assinatura per-usuário, a liberação das sessões bloqueadas por PAR-Q, o dashboard de funil/SLA e a notificação Socket.io. Motivo: é um épico operacional independente da monetização; **recomendo fortemente que seja Sprint 5 junto com o Check-in** (ver Handoff), pois a dívida de supervisão CREF já tem duas sprints de profundidade.
-- **Planos anuais no MVP:** o schema `subscriptions` suporta Anual (R$349/34900c) e Eduardo o validou, mas o **MVP oferece Mensal + Trimestral** (Lucas, MVP §"planos anuais → Fase 2"): validar a retenção mensal/trimestral **antes** de vender compromisso anual. O Anual fica **dark-launched** (código pronto, não ofertado na UI) até a retenção de 30/90 dias justificar. **(Ver pergunta em aberto ao fundador.)**
-- **PIX recorrente automático (Fase 2):** o BC regulamentou recorrência PIX em 2026, mas fica para o roadmap Q2 (Lucas). No MVP, cartão via gateway hospedado (+ PIX/boleto avulso se o gateway oferecer nativamente no checkout, sem lógica de recorrência própria).
+- **Planos no MVP (decisão do fundador 2026-08-01):** **quatro planos ofertados** — Mensal R$39 (3900c) / Trimestral R$99 (9900c) / **Semestral (preço a definir por Eduardo)** / Anual R$349 (34900c). O Anual **não** é mais dark-launched; todos aparecem na UI. ponytail: no dev o Semestral usa um preço placeholder até Eduardo fechar o valor.
+- **Meios de pagamento no MVP (decisão do fundador 2026-08-01):** **PIX + Cartão recorrente**, sem boleto. Cartão = renovação automática recorrente via gateway hospedado; PIX = pagamento avulso por período (renovação manual). **PIX recorrente automático** segue Fase 2 (BC regulamentou em 2026, mas fora do MVP).
 - **Cupons/promoções/referral pago, cobrança por uso, upsell entre tiers:** o modelo é **plano único por período, sem tiering de features** (Eduardo) — não há upsell de features a construir. Cupom é Fase 2.
 
 ### Mapa de dependências entre User Stories
@@ -107,7 +107,7 @@ US-4.7 (QA + segurança de pagamento · Mariana+Sato+Eduardo+Alexandre) ── v
 
 ### Jornada
 
-Aqui vive a decisão de produto **"plano único por período, sem tiering de features"** (Eduardo): a retenção vem do **compromisso de período**, não de gate de funcionalidade — então não há upsell de features a modelar, apenas **planos por duração**. Leonardo implementa o `SubscriptionModule` sobre a tabela `subscriptions` existente (preços em **centavos inteiros**, `externalSubscriptionId` como chave de idempotência já indexada) e o **`PaymentGatewayService`** — um serviço confinado, no mesmo espírito do `LLMRouter`: **o único ponto do sistema autorizado a falar com o gateway de pagamento**, com uma interface estável (`createCheckoutSession`, `parseWebhookEvent`, `cancelSubscription`, `getSubscription`) que abstrai Stripe **ou** Asaas por trás de config. **Em dev, roda um adaptador mockado** que implementa a mesma interface e emite eventos de webhook simulados — consistente com a realidade do projeto (gateway real é bloqueador de lançamento, não de dev). A peça central é a **máquina de estados da assinatura** (`TRIALING`→`ACTIVE`→`PAST_DUE`→`CANCELED`, + `PAUSED` para o offboarding-pausa da US-4.5), cujas transições são **disparadas por eventos do gateway** (US-4.2), nunca pelo app arbitrariamente. Eduardo valida os planos (Mensal 3900c / Trimestral 9900c; Anual 34900c dark-launched) e que as transições preservam o unit economics; Alexandre valida o contrato de assinatura e a base legal.
+Aqui vive a decisão de produto **"plano único por período, sem tiering de features"** (Eduardo): a retenção vem do **compromisso de período**, não de gate de funcionalidade — então não há upsell de features a modelar, apenas **planos por duração**. Leonardo implementa o `SubscriptionModule` sobre a tabela `subscriptions` existente (preços em **centavos inteiros**, `externalSubscriptionId` como chave de idempotência já indexada) e o **`PaymentGatewayService`** — um serviço confinado, no mesmo espírito do `LLMRouter`: **o único ponto do sistema autorizado a falar com o gateway de pagamento**, com uma interface estável (`createCheckoutSession`, `parseWebhookEvent`, `cancelSubscription`, `getSubscription`) que abstrai Stripe **ou** Asaas por trás de config. **Em dev, roda um adaptador mockado** que implementa a mesma interface e emite eventos de webhook simulados — consistente com a realidade do projeto (gateway real é bloqueador de lançamento, não de dev). A peça central é a **máquina de estados da assinatura** (`TRIALING`→`ACTIVE`→`PAST_DUE`→`CANCELED`, + `PAUSED` para o offboarding-pausa da US-4.5), cujas transições são **disparadas por eventos do gateway** (US-4.2), nunca pelo app arbitrariamente. Eduardo valida os planos (Mensal 3900c / Trimestral 9900c / Semestral a-definir / Anual 34900c — os quatro no MVP) e que as transições preservam o unit economics; Alexandre valida o contrato de assinatura e a base legal.
 
 ### Objetivo
 
@@ -120,7 +120,7 @@ Um usuário em trial tem uma `subscriptions` `TRIALING` com `trialEndsAt`; um ch
 ### Tasks
 
 **TASK-4.1.1 — Modelo de planos e máquina de estados da assinatura (Leonardo + Eduardo).**
-Modelar os planos (Mensal 3900c / Trimestral 9900c; Anual 34900c **dark-launched**, não ofertado na UI) e a máquina de estados `TRIALING`→`ACTIVE`→`PAST_DUE`→`CANCELED` (+ `PAUSED`, US-4.5) sobre `subscriptions`. Transições **só** por evento válido (do gateway ou ação self-service autorizada); toda transição sob RLS/`SET LOCAL`. Aritmética de preço em centavos inteiros. Eduardo valida preços/estados/impacto em unit economics.
+Modelar os planos (Mensal 3900c / Trimestral 9900c / Semestral a-definir / Anual 34900c — **os quatro ofertados no MVP**) e a máquina de estados `TRIALING`→`ACTIVE`→`PAST_DUE`→`CANCELED` (+ `PAUSED`, US-4.5) sobre `subscriptions`. Transições **só** por evento válido (do gateway ou ação self-service autorizada); toda transição sob RLS/`SET LOCAL`. Aritmética de preço em centavos inteiros. Eduardo valida preços/estados/impacto em unit economics.
 **Conclusão:** planos e transições implementados e testados; transição inválida rejeitada; tudo em centavos; Eduardo aprova por escrito.
 
 **TASK-4.1.2 — PaymentGatewayService confinado + adaptador mock de dev (Leonardo + Sato ref.).**
@@ -161,7 +161,7 @@ Um link de checkout abre a sessão hospedada com o plano certo; um pagamento con
 ### Tasks
 
 **TASK-4.2.1 — Sessão de checkout hospedada com plano pré-selecionado (Leonardo).**
-Implementar `createCheckoutSession(userId, plan)` via `PaymentGatewayService` (US-4.1): cria a sessão no gateway com o **plano pré-selecionado**, `externalSubscriptionId` vinculado, URLs de sucesso/cancelamento, e registra o aceite de termos (US-4.1.3). Devolve o **link** (não renderiza cartão — checkout hospedado). Aceita PIX/boleto se o gateway oferecer nativamente no checkout (sem recorrência própria). Idempotência: reabrir checkout do mesmo usuário/plano não duplica assinatura.
+Implementar `createCheckoutSession(userId, plan)` via `PaymentGatewayService` (US-4.1): cria a sessão no gateway com o **plano pré-selecionado**, `externalSubscriptionId` vinculado, URLs de sucesso/cancelamento, e registra o aceite de termos (US-4.1.3). Devolve o **link** (não renderiza cartão — checkout hospedado). Meios do MVP: **PIX + cartão recorrente** (sem boleto) — cartão auto-renova; PIX é avulso por período (renovação manual). Idempotência: reabrir checkout do mesmo usuário/plano não duplica assinatura.
 **Conclusão:** link de checkout abre a sessão hospedada com plano certo; nenhum dado de cartão no backend; reabertura idempotente.
 
 **TASK-4.2.2 — WebhookController de pagamento: assinatura + anti-replay + idempotência (Leonardo + Sato).**
@@ -169,7 +169,7 @@ Implementar `POST /webhook/payment` reusando o padrão da US-3.1: **rawBody** pr
 **Conclusão:** webhook forjado rejeitado; replay não ativa 2x nem cria 2ª assinatura; cada evento mapeia à transição correta; acesso liberado só após evento válido; eventos de segurança logados.
 
 **TASK-4.2.3 — Gate de acesso derivado da assinatura + observabilidade (Leonardo + Henrique).**
-Implementar o gate de acesso derivado do estado da assinatura (não do app): `TRIALING` dentro da janela → acesso; trial expirado sem conversão → acesso restrito (recebe conversão, não bloqueio abrupto); `ACTIVE`→pleno; `PAST_DUE`→graça configurável antes de restringir. Instrumentar eventos (`subscription_created`, `subscription_cancelled`, `payment_failed`) no PostHog e métricas de pagamento (aprovados/falhos/replays) no Grafana (Henrique); alerta de pico de webhooks inválidos (P2 — tentativa de fraude).
+Implementar o gate de acesso derivado do estado da assinatura (não do app): `TRIALING` dentro da janela → acesso; trial expirado sem conversão → acesso restrito (recebe conversão, não bloqueio abrupto); `ACTIVE`→pleno; **`PAST_DUE`→ dunning conversacional (decisão do fundador): a MOVI envia o link de assinatura no WhatsApp (via outbound) e o acesso segue liberado durante a janela de graça configurável; só após a graça sem regularização o acesso é restrito.** Instrumentar eventos (`subscription_created`, `subscription_cancelled`, `payment_failed`) no PostHog e métricas de pagamento (aprovados/falhos/replays) no Grafana (Henrique); alerta de pico de webhooks inválidos (P2 — tentativa de fraude).
 **Conclusão:** acesso reflete o estado da assinatura; trial expirado não bloqueia abruptamente; eventos/métricas instrumentados; alerta de webhook inválido ativo.
 
 ### Definição de Pronto (US-4.2 "validada")
@@ -296,7 +296,7 @@ Antes de confirmar o cancelamento, oferecer **pausar** (estado `PAUSED`, US-4.1)
 
 ### Jornada
 
-O checkout acontece **hospedado pelo gateway** (PCI), mas o usuário precisa de uma **página de seleção/confirmação de plano** que o leva até lá, e de um **portal de gestão** (plano atual, próxima cobrança, cancelar/pausar). Felipe constrói ambos sobre o design system "O Pulso", mobile-first, acessível (WCAG 2.2 AA), acessível por token (mesmo padrão não-autenticado do MVP, ADR-006). A página de planos mostra **Mensal + Trimestral** (Anual dark-launched não aparece), com o **plano pré-selecionado** recomendado, a **garantia de cancelamento a qualquer momento sempre visível**, o respaldo CREF, e um CTA que redireciona ao checkout hospedado (US-4.2) — **nenhum campo de cartão na nossa UI**. O portal de gestão consome o estado da assinatura (US-4.1) e expõe cancelar/pausar (US-4.5). Toda a copy nos guardrails (nunca "resultado garantido").
+O checkout acontece **hospedado pelo gateway** (PCI), mas o usuário precisa de uma **página de seleção/confirmação de plano** que o leva até lá, e de um **portal de gestão** (plano atual, próxima cobrança, cancelar/pausar). Felipe constrói ambos sobre o design system "O Pulso", mobile-first, acessível (WCAG 2.2 AA), acessível por token (mesmo padrão não-autenticado do MVP, ADR-006). A página de planos mostra **os quatro planos (Mensal / Trimestral / Semestral / Anual)**, com o **plano pré-selecionado** recomendado, a **garantia de cancelamento a qualquer momento sempre visível**, o respaldo CREF, e um CTA que redireciona ao checkout hospedado (US-4.2) — **nenhum campo de cartão na nossa UI**. O portal de gestão consome o estado da assinatura (US-4.1) e expõe cancelar/pausar (US-4.5). Toda a copy nos guardrails (nunca "resultado garantido").
 
 ### Objetivo
 
@@ -304,12 +304,12 @@ Uma página de seleção/confirmação de plano (mobile-first, acessível, guard
 
 ### Resultado esperado
 
-A página mostra Mensal + Trimestral com plano recomendado e garantia visível; o CTA leva ao checkout hospedado; o portal mostra plano/próxima cobrança e permite cancelar/pausar; token inválido não expõe dado; `pnpm --filter web build` verde; axe sem violação crítica.
+A página mostra os quatro planos (Mensal/Trimestral/Semestral/Anual) com plano recomendado e garantia visível; o CTA leva ao checkout hospedado; o portal mostra plano/próxima cobrança e permite cancelar/pausar; token inválido não expõe dado; `pnpm --filter web build` verde; axe sem violação crítica.
 
 ### Tasks
 
 **TASK-4.6.1 — Página de seleção/confirmação de plano (Felipe + Sofia ref.).**
-Página mobile-first sobre "O Pulso" com Mensal + Trimestral (Anual oculto), plano pré-selecionado recomendado, **garantia de cancelamento visível**, respaldo CREF, copy nos guardrails; CTA redireciona ao checkout hospedado (US-4.2, `createCheckoutSession`). Sem campo de cartão. DTO Zod compartilhado dos planos em `@movivo/shared`.
+Página mobile-first sobre "O Pulso" com os quatro planos (Mensal/Trimestral/Semestral/Anual), plano pré-selecionado recomendado, **garantia de cancelamento visível**, respaldo CREF, copy nos guardrails; CTA redireciona ao checkout hospedado (US-4.2, `createCheckoutSession`). Sem campo de cartão. DTO Zod compartilhado dos planos em `@movivo/shared`.
 **Conclusão:** página renderiza os planos do MVP com garantia visível; CTA abre o checkout hospedado; sem dado de cartão na UI; contrato Zod compartilhado.
 
 **TASK-4.6.2 — Portal de gestão + cancelar/pausar (Felipe + Leonardo).**
@@ -402,7 +402,12 @@ A Sprint 4 é **entregue** quando as 7 User Stories estiverem "validadas" confor
 
 ### Pré-requisitos / bloqueadores a resolver no início da sprint
 
-- **[Decisão de produto — fundador/Eduardo] Escolha do gateway (Stripe vs. Asaas) para o MVP** e confirmação dos planos ofertados (Mensal + Trimestral no MVP; Anual dark-launched?). O código abstrai ambos, mas o adaptador real e a copy precisam saber qual sai primeiro. **Não bloqueia dev** (mock), bloqueia o lançamento.
+- **[RESOLVIDO — decisões do fundador, 2026-08-01]:**
+  1. **Gateway:** deixar **mapeado para integrar com os DOIS** (Stripe **e** Asaas) — a `PaymentGatewayService` abstrai ambos por trás da mesma interface; nenhum é "escolhido como único", os dois adaptadores são previstos (reais como bloqueador de lançamento; mock no dev).
+  2. **Planos no MVP:** **quatro** — **Mensal, Trimestral, Semestral e Anual** (Anual **não** é mais dark-launched; todos aparecem na UI). Preços: Mensal R$39 (3900c) / Trimestral R$99 (9900c) / **Semestral (preço a definir por Eduardo — placeholder no dev)** / Anual R$349 (34900c).
+  3. **PAST_DUE (pagamento falhou):** **antes de restringir o acesso**, a MOVI **envia o link de assinatura no WhatsApp** ao cliente (dunning conversacional via outbound). Só após a janela de graça sem regularização é que o acesso é restrito.
+  4. **Meios de pagamento no MVP:** **PIX + Cartão recorrente** (sem boleto). Cartão = renovação automática recorrente; PIX = pagamento avulso por período (renovação manual — PIX recorrente automático segue Fase 2).
+  5. **Sprint 5:** confirmada como **Check-in Semanal (Épico 6) + Dashboard CREF (Épico 7) juntos**, conforme recomendação do Lucas.
 - **[Segredos — Henrique/Alexandre] Conta do gateway + chaves + webhook secret + DPA/LGPD do processador de pagamento.** Chaves via Docker/GitHub Secrets, nunca `environment:`. Em dev roda com mock/chaves de teste; **conta real + DPA são bloqueadores de lançamento, não de dev** (consistente com a memória do projeto).
 - **[Conteúdo — Helena/Sofia/Alexandre] Templates aprovados da sequência (7/10/13/14), win-back, downgrade e cancelamento/pausa**, dentro dos guardrails, com garantia de cancelamento e respaldo CREF — precisam existir aprovados antes do lançamento.
 - **[Jurídico — Alexandre] Contrato/Termos de assinatura + política de reembolso + arrependimento CDC (7 dias)** refletidos no checkout e no fluxo. Não bloqueia dev; bloqueia o lançamento cobrando de usuário real.
