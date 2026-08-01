@@ -21,7 +21,7 @@ import { type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { eq } from 'drizzle-orm';
 import postgres from 'postgres';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { AppModule } from '../src/app.module';
 import { loadEnv } from '../src/core/config/load-env';
@@ -33,6 +33,7 @@ import {
   type PaymentGateway,
 } from '../src/modules/subscription/payment/payment-gateway.types';
 import { InvalidTransitionError } from '../src/modules/subscription/subscription-model';
+import { SubscriptionController } from '../src/modules/subscription/subscription.controller';
 import { SubscriptionService } from '../src/modules/subscription/subscription.service';
 
 const { env } = loadEnv();
@@ -41,6 +42,7 @@ const RUN = Date.now().toString().slice(-8);
 
 let app: INestApplication;
 let svc: SubscriptionService;
+let controller: SubscriptionController;
 let db: TenantDatabase;
 let gateway: PaymentGateway;
 
@@ -74,6 +76,7 @@ beforeAll(async () => {
   app = await NestFactory.create(AppModule, { logger: false });
   await app.init();
   svc = app.get(SubscriptionService);
+  controller = app.get(SubscriptionController);
   db = app.get(TenantDatabase);
   gateway = app.get(PAYMENT_GATEWAY);
 }, 60_000);
@@ -177,5 +180,57 @@ describe('SubscriptionModule — gateway MOCK e ciclo de vida (US-4.1)', () => {
     );
     expect(seenByB).toHaveLength(0);
     expect(await svc.getForUser(userB)).toBeNull();
+  });
+});
+
+describe('Ações self-service: cancelar / pausar / retomar (US-4.5)', () => {
+  /** Ativa uma assinatura (checkout confirmado) para o titular. */
+  async function activate(userId: string): Promise<void> {
+    await svc.startTrial(userId);
+    await svc.applyGatewayEvent({
+      type: 'CHECKOUT_CONFIRMED',
+      userId,
+      externalSubscriptionId: `ext_${userId}`,
+      plan: 'MONTHLY',
+      priceCents: 3900,
+    });
+  }
+
+  it('cancelar sincroniza com o gateway e grava o motivo', async () => {
+    const userId = await createUser();
+    await activate(userId);
+    const cancelSpy = vi.spyOn(gateway, 'cancelSubscription');
+    const res = await controller.cancel(userId, { reason: 'sem tempo agora' });
+    expect(res.status).toBe('CANCELED');
+    expect(cancelSpy).toHaveBeenCalledWith(`ext_${userId}`);
+    const [row] = await adminClient<Array<{ status: string; cancel_reason: string }>>`
+      SELECT status, cancel_reason FROM subscriptions WHERE user_id = ${userId}`;
+    expect(row.status).toBe('CANCELED');
+    expect(row.cancel_reason).toBe('sem tempo agora');
+  });
+
+  it('pausar suspende e mantém o histórico; resume retoma PAUSED→ACTIVE', async () => {
+    const userId = await createUser();
+    await activate(userId);
+    expect((await controller.pause(userId)).status).toBe('PAUSED');
+    expect((await svc.getForUser(userId))?.status).toBe('PAUSED');
+    // histórico preservado: a linha continua lá, só muda o estado.
+    expect((await controller.resume(userId)).status).toBe('ACTIVE');
+    expect((await svc.getForUser(userId))?.status).toBe('ACTIVE');
+  });
+
+  it('token não-UUID ou sem assinatura → 404 (não vaza)', async () => {
+    await expect(controller.cancel('nao-e-uuid', {})).rejects.toThrow();
+    await expect(controller.cancel('11111111-1111-4111-8111-111111111111', {})).rejects.toThrow();
+  });
+
+  it('IDOR: cancelar com o token de A não afeta a assinatura de B', async () => {
+    const userA = await createUser();
+    const userB = await createUser();
+    await activate(userA);
+    await activate(userB);
+    await controller.cancel(userA, { reason: 'teste' });
+    expect((await svc.getForUser(userA))?.status).toBe('CANCELED');
+    expect((await svc.getForUser(userB))?.status).toBe('ACTIVE'); // B intacto
   });
 });

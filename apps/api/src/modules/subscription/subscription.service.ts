@@ -184,6 +184,7 @@ export class SubscriptionService {
       canceledAt: new Date(),
       cancelReason: reason ?? null,
     });
+    this.logger.info({ event: 'subscription_cancelled', userId }, 'subscription_cancelled');
     return { status: 'CANCELED' };
   }
 
@@ -195,7 +196,20 @@ export class SubscriptionService {
       throw new InvalidTransitionError(current.status, 'PAUSED');
     }
     await this.repo.patch(userId, current.id, { status: 'PAUSED' });
+    this.logger.info({ event: 'subscription_paused', userId }, 'subscription_paused');
     return { status: 'PAUSED' };
+  }
+
+  /** Retomada self-service (US-4.5): PAUSED→ACTIVE (transição já válida em `canTransition`). */
+  async resume(userId: string): Promise<{ status: string }> {
+    const current = await this.repo.findByUserId(userId);
+    if (!current) return { status: 'NO_SUBSCRIPTION' };
+    if (!canTransition(current.status, 'ACTIVE')) {
+      throw new InvalidTransitionError(current.status, 'ACTIVE');
+    }
+    await this.repo.patch(userId, current.id, { status: 'ACTIVE' });
+    this.logger.info({ event: 'subscription_resumed', userId }, 'subscription_resumed');
+    return { status: 'ACTIVE' };
   }
 
   /** Campos a gravar por evento. CHECKOUT_CONFIRMED atacha plano/preço/período/provedor. */
