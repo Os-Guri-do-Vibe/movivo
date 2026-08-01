@@ -58,6 +58,9 @@ export default defineConfig({
         // Idem (US-3.5): I/O de banco sob RLS da conversa, provado por integração
         // (coach-response.int-spec) contra Postgres real.
         'src/modules/coach/conversation.repository.ts',
+        // Idem (US-4.1): I/O de banco sob RLS da assinatura, provado por integração
+        // (subscription.int-spec) contra Postgres real.
+        'src/modules/subscription/subscription.repository.ts',
         'src/health/**',
         'src/**/*.spec.ts',
         'src/**/*.int-spec.ts',

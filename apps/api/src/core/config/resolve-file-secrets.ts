@@ -40,6 +40,12 @@ export const SECRET_KEYS = [
   // Sprint 3 — segredo do webhook de ENTRADA da AraraHQ (US-3.1). OPCIONAL no boot: o
   // app sobe sem ele (dev/CI); ausente em runtime, o inbound é descartado fail-closed.
   'ARARAHQ_WEBHOOK_SECRET',
+  // Sprint 4 — gateways de pagamento (US-4.1). OPCIONAIS no boot: sem elas o app sobe com o
+  // adaptador MOCK (dev/CI); conta/chave real é bloqueador de lançamento, não de dev.
+  'STRIPE_SECRET_KEY',
+  'STRIPE_WEBHOOK_SECRET',
+  'ASAAS_API_KEY',
+  'ASAAS_WEBHOOK_SECRET',
 ] as const;
 
 export type SecretKey = (typeof SECRET_KEYS)[number];

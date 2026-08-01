@@ -52,6 +52,13 @@ export const subscriptions = pgTable(
     /** Motivo declarado do cancelamento — insumo direto de retenção/churn. */
     cancelReason: text('cancel_reason'),
 
+    /**
+     * Aceite dos Termos de Assinatura no checkout (US-4.1.3 / CDC / Alexandre): versão do
+     * contrato aceita + quando. Registro contratual; nulo até o checkout capturar o aceite.
+     */
+    termsVersion: varchar('terms_version', { length: 30 }),
+    termsAcceptedAt: eventTimestamp('terms_accepted_at'),
+
     ...timestampColumns,
   },
   (table) => [

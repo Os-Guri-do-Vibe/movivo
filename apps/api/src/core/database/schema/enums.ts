@@ -166,7 +166,14 @@ export const messageTypeEnum = pgEnum('message_type', [
  * período, não de gate de feature) e consolidado no `CLAUDE.md`. Modelar
  * `BASICO`/`PRO` no banco reintroduziria uma decisão de negócio já revertida.
  */
-export const subscriptionPlanEnum = pgEnum('subscription_plan', ['MONTHLY', 'QUARTERLY', 'ANNUAL']);
+// `SEMIANNUAL` acrescentado no fim (decisão do fundador 2026-08-01: 4 planos no MVP) —
+// append evita reordenar os valores existentes, gerando um `ALTER TYPE ADD VALUE` limpo.
+export const subscriptionPlanEnum = pgEnum('subscription_plan', [
+  'MONTHLY',
+  'QUARTERLY',
+  'ANNUAL',
+  'SEMIANNUAL',
+]);
 
 /** Estados da assinatura, derivados de `@movivo/shared`. */
 export const subscriptionStatusEnum = pgEnum('subscription_status', valuesOf(SubscriptionStatus));

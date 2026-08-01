@@ -80,6 +80,8 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   { table: 'coaching_sessions', column: 'user_id' },
   // Sprint 3 (US-3.6): alerta/handoff ao painel CREF — dado de titular, isolado por RLS FORCE.
   { table: 'handoff_alerts', column: 'user_id' },
+  // Sprint 4 (US-4.1): assinatura/dado financeiro do titular — sob a mesma FORCE RLS.
+  { table: 'subscriptions', column: 'user_id' },
 ];
 
 // `nullif(..., '')` é OBRIGATÓRIO, não cosmético: sob PgBouncer transaction mode,
