@@ -17,7 +17,7 @@ export function dunningMessage(checkoutUrl: string): string {
  * ⚠️ Copy a aprovar (Helena/Sofia/Alexandre). Persona MOVI, dentro dos guardrails: garantia de
  * cancelamento visível, respaldo CREF, **nunca** "resultado garantido"/diagnóstico/tratamento.
  */
-export type ConversionTouchpoint = 'day7' | 'day10' | 'day13' | 'day14';
+export type ConversionTouchpoint = 'day7' | 'day10' | 'day13' | 'day14' | 'winback';
 
 export function conversionMessage(touchpoint: ConversionTouchpoint, checkoutUrl: string): string {
   switch (touchpoint) {
@@ -40,11 +40,23 @@ export function conversionMessage(touchpoint: ConversionTouchpoint, checkoutUrl:
         '\nVocê tem 7 dias de garantia e pode cancelar quando quiser, sem burocracia.'
       );
     case 'day14':
+      // US-4.4 — downgrade: no último dia, oferece o plano mais barato (Mensal R$39) como
+      // último recurso antes de perder o usuário. Mesmo produto, período mais curto/barato.
       return (
-        'Último dia do seu período de experiência! 🙌 Se quiser continuar evoluindo com seu ' +
-        'plano e a MOVI, é só garantir sua assinatura: ' +
+        'Último dia do seu período de experiência! 🙌 Se o valor pesou, o plano Mensal sai por ' +
+        'R$39 — o jeito mais leve de continuar com seu plano e a MOVI: ' +
         checkoutUrl +
-        '\nCancelamento fácil, quando você quiser.'
+        '\nSem fidelidade: você cancela quando quiser.'
+      );
+    case 'winback':
+      // US-4.4 — win-back 3 dias pós-trial, SEM julgamento (Peak-End/Sofia): pergunta o motivo
+      // e deixa a porta aberta com o plano mais barato. Sem dark pattern, saída digna.
+      return (
+        'Vi que seu período de experiência terminou e você decidiu não seguir agora — tudo bem, ' +
+        'sem pressão! 🙏 Só pra eu melhorar: o que faltou pra fazer sentido? (preço, tempo, ' +
+        'resultado...) Se quiser voltar, o plano Mensal é R$39 e você entra quando quiser: ' +
+        checkoutUrl +
+        '\nDe qualquer forma, obrigada por treinar com a gente. 💛'
       );
   }
 }

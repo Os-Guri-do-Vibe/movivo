@@ -174,6 +174,20 @@ describe('SubscriptionService.createCheckout / getAccess (US-4.2)', () => {
   });
 });
 
+describe('SubscriptionService.recordWinbackReason (US-4.4)', () => {
+  it('grava o motivo declarado em cancelReason', async () => {
+    const { svc, patch } = make(row({ status: 'TRIALING' }));
+    const res = await svc.recordWinbackReason(USER, 'achei caro');
+    expect(res.status).toBe('RECORDED');
+    expect(patch).toHaveBeenCalledWith(USER, 's1', { cancelReason: 'achei caro' });
+  });
+
+  it('sem assinatura → NO_SUBSCRIPTION', async () => {
+    const { svc } = make(null);
+    expect((await svc.recordWinbackReason(USER, 'x')).status).toBe('NO_SUBSCRIPTION');
+  });
+});
+
 describe('SubscriptionService.cancel/pause (US-4.1)', () => {
   it('cancela e sincroniza com o gateway quando há externalSubscriptionId', async () => {
     const { svc, patch, cancelSubscription } = make(

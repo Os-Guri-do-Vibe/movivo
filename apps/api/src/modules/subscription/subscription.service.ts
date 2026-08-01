@@ -156,6 +156,19 @@ export class SubscriptionService {
     return { status: target };
   }
 
+  /**
+   * Registra o motivo declarado no win-back (US-4.4) em `cancelReason` — insumo de retenção.
+   * Não muda o estado da assinatura (é só a objeção). ponytail: a captura da resposta livre do
+   * usuário no WhatsApp (rotear o inbound → aqui) é o seam; aqui fica a persistência do motivo.
+   */
+  async recordWinbackReason(userId: string, reason: string): Promise<{ status: string }> {
+    const sub = await this.repo.findByUserId(userId);
+    if (!sub) return { status: 'NO_SUBSCRIPTION' };
+    await this.repo.patch(userId, sub.id, { cancelReason: reason });
+    this.logger.info({ event: 'winback_responded', userId }, 'winback_responded');
+    return { status: 'RECORDED' };
+  }
+
   /** Cancelamento self-service (US-4.5 usa o fluxo completo; aqui a transição + sync do gateway). */
   async cancel(userId: string, reason?: string): Promise<{ status: string }> {
     const current = await this.repo.findByUserId(userId);
