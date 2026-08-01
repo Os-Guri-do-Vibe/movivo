@@ -215,6 +215,16 @@ export class AnamnesisService {
       { jobId: `confirmation_${userId}` },
     );
 
+    // US-4.3 — inicia o trial (7 dias) e agenda a sequência de conversão (dias 7/10/13/14).
+    // Via fila (sem acoplar a anamnese ao domínio de assinatura — §12.5); o worker cria o
+    // trial e agenda os touchpoints. jobId idempotente por titular.
+    await this.queues.enqueue(
+      QUEUE.conversionSequence,
+      'trial-start',
+      { userId },
+      { jobId: `trial-start_${userId}` },
+    );
+
     // `form_submitted` — evento de funil. Sem PII: só o id da sessão (UUID) e o estado.
     // ponytail: emissão via log estruturado; o SDK server do PostHog não existe no
     // backend nesta sprint (o funil de UI é instrumentado por Felipe — US-1.6).
