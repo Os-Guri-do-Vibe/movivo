@@ -30,6 +30,12 @@ export const PLAN_CATALOG: Record<SubscriptionPlan, PlanSpec> = {
 export const TRIAL_DAYS = 7;
 
 /**
+ * Versão vigente dos Termos de Assinatura (US-4.1.3 / CDC). ponytail: rascunho — Alexandre
+ * ratifica o texto/versão no lançamento; muda o valor quando o contrato for aprovado.
+ */
+export const SUBSCRIPTION_TERMS_VERSION = 'sub-terms-2026-08-v1'; // ≤30 (coluna varchar(30))
+
+/**
  * Transições permitidas da máquina de estados. Um estado ausente do array de destino é
  * uma transição inválida (rejeitada). `CANCELED` é terminal; `EXPIRED` permite win-back.
  */
@@ -46,6 +52,45 @@ const ALLOWED_TRANSITIONS: Record<SubscriptionStatus, readonly SubscriptionStatu
 export function canTransition(from: SubscriptionStatus, to: SubscriptionStatus): boolean {
   if (from === to) return true;
   return ALLOWED_TRANSITIONS[from].includes(to);
+}
+
+/** Nível de acesso derivado da assinatura (US-4.2.3) — a fonte é o estado, não o app. */
+export type AccessLevel = 'FULL' | 'RESTRICTED';
+
+/** Campos da assinatura que decidem o acesso (subset — puro, sem I/O). */
+export interface AccessInput {
+  status: SubscriptionStatus;
+  trialEndsAt: Date | null;
+  /** Marca da última transição — âncora da janela de graça do PAST_DUE. */
+  updatedAt: Date;
+}
+
+/**
+ * Deriva o acesso do estado da assinatura (US-4.2.3): TRIALING dentro da janela e ACTIVE →
+ * FULL; PAST_DUE dentro da graça → FULL (dunning, não bloqueio abrupto); trial expirado,
+ * PAUSED, CANCELED, EXPIRED, ou PAST_DUE após a graça → RESTRICTED. `null` = sem assinatura.
+ * ponytail: usa `updatedAt` como âncora da graça do PAST_DUE; coluna dedicada se as
+ * transições ficarem ruidosas.
+ */
+export function resolveAccess(
+  sub: AccessInput | null,
+  graceDays: number,
+  now: Date = new Date(),
+): AccessLevel {
+  if (!sub) return 'RESTRICTED';
+  const nowMs = now.getTime();
+  switch (sub.status) {
+    case 'ACTIVE':
+      return 'FULL';
+    case 'TRIALING':
+      return sub.trialEndsAt && sub.trialEndsAt.getTime() > nowMs ? 'FULL' : 'RESTRICTED';
+    case 'PAST_DUE':
+      return nowMs - sub.updatedAt.getTime() <= graceDays * 24 * 60 * 60 * 1000
+        ? 'FULL'
+        : 'RESTRICTED';
+    default:
+      return 'RESTRICTED'; // PAUSED / CANCELED / EXPIRED
+  }
 }
 
 /** Erro de transição inválida da máquina de estados. */

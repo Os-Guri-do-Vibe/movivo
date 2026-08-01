@@ -11,13 +11,19 @@ import { Module } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 
 import { AppConfigService } from '../../core/config';
+import { JobsModule } from '../jobs/jobs.module';
 import { MockGateway } from './payment/mock-gateway';
 import { type PaymentGateway, PAYMENT_GATEWAY } from './payment/payment-gateway.types';
 import { AsaasGateway, StripeGateway } from './payment/real-gateways';
+import { PaymentWebhookController } from './payment-webhook.controller';
+import { PaymentWebhookService } from './payment-webhook.service';
 import { SubscriptionRepository } from './subscription.repository';
 import { SubscriptionService } from './subscription.service';
 
 @Module({
+  // JobsModule: enfileira o dunning (PAST_DUE) em `whatsapp-outbound` — via fila, sem ciclo (§12.5).
+  imports: [JobsModule],
+  controllers: [PaymentWebhookController],
   providers: [
     {
       provide: PAYMENT_GATEWAY,
@@ -36,6 +42,7 @@ import { SubscriptionService } from './subscription.service';
     },
     SubscriptionRepository,
     SubscriptionService,
+    PaymentWebhookService,
   ],
   exports: [SubscriptionService, PAYMENT_GATEWAY],
 })

@@ -231,6 +231,11 @@ export const envSchema = z
     STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
     ASAAS_API_KEY: z.string().min(1).optional(),
     ASAAS_WEBHOOK_SECRET: z.string().min(1).optional(),
+    /**
+     * Janela de graça (dias) do `PAST_DUE` antes de restringir o acesso (US-4.2.3, decisão do
+     * fundador: dunning conversacional no WhatsApp durante a graça, só depois restringe).
+     */
+    SUBSCRIPTION_PAST_DUE_GRACE_DAYS: z.coerce.number().int().min(0).max(30).default(3),
   })
   .superRefine((config, ctx) => {
     if (config.DATABASE_PORT === POSTGRES_DIRECT_PORT) {

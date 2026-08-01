@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import type { AppConfigService } from '../../core/config';
 import type { SubscriptionRow } from '../../core/database/schema';
 import type { PaymentGateway } from './payment/payment-gateway.types';
 import type { GatewayEvent } from './payment/payment-gateway.types';
@@ -41,9 +42,26 @@ function make(current: SubscriptionRow | null, gatewayName: PaymentGateway['name
     patch,
   } as unknown as SubscriptionRepository;
   const cancelSubscription = vi.fn(() => Promise.resolve());
-  const gateway = { name: gatewayName, cancelSubscription } as unknown as PaymentGateway;
+  const createCheckoutSession = vi.fn(() =>
+    Promise.resolve({ checkoutUrl: 'https://mock/co', externalSessionId: 'cs_1' }),
+  );
+  const gateway = {
+    name: gatewayName,
+    cancelSubscription,
+    createCheckoutSession,
+  } as unknown as PaymentGateway;
+  const config = {
+    whatsapp: { publicSiteUrl: 'https://movivo.test' },
+    payment: { pastDueGraceDays: 3 },
+  } as unknown as AppConfigService;
   const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() } as never;
-  return { svc: new SubscriptionService(repo, gateway, logger), patch, insert, cancelSubscription };
+  return {
+    svc: new SubscriptionService(repo, gateway, config, logger),
+    patch,
+    insert,
+    cancelSubscription,
+    createCheckoutSession,
+  };
 }
 
 function evt(over: Partial<GatewayEvent> = {}): GatewayEvent {
@@ -122,6 +140,37 @@ describe('SubscriptionService.applyGatewayEvent (US-4.1)', () => {
   it('evento sem assinatura → NO_SUBSCRIPTION', async () => {
     const { svc } = make(null);
     expect((await svc.applyGatewayEvent(evt())).status).toBe('NO_SUBSCRIPTION');
+  });
+});
+
+describe('SubscriptionService.createCheckout / getAccess (US-4.2)', () => {
+  it('cria checkout hospedado com plano/preço/URLs e registra o aceite de termos', async () => {
+    const { svc, patch, createCheckoutSession } = make(row({ status: 'TRIALING' }));
+    const cs = await svc.createCheckout(USER, 'ANNUAL', 'CARD', 'terms-v1');
+    expect(cs.checkoutUrl).toBe('https://mock/co');
+    expect(createCheckoutSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plan: 'ANNUAL',
+        priceCents: 34900,
+        method: 'CARD',
+        termsVersion: 'terms-v1',
+      }),
+    );
+    expect(patch).toHaveBeenCalledWith(
+      USER,
+      's1',
+      expect.objectContaining({ plan: 'ANNUAL', termsVersion: 'terms-v1' }),
+    );
+  });
+
+  it('getAccess deriva o acesso do estado (ACTIVE → FULL)', async () => {
+    const { svc } = make(row({ status: 'ACTIVE' }));
+    expect(await svc.getAccess(USER)).toBe('FULL');
+  });
+
+  it('getAccess sem assinatura → RESTRICTED', async () => {
+    const { svc } = make(null);
+    expect(await svc.getAccess(USER)).toBe('RESTRICTED');
   });
 });
 

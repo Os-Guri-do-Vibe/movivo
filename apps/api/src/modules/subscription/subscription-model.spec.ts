@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { canTransition, PLAN_CATALOG, TRIAL_DAYS } from './subscription-model';
+import { canTransition, PLAN_CATALOG, resolveAccess, TRIAL_DAYS } from './subscription-model';
 
 describe('subscription-model — catálogo de planos (US-4.1)', () => {
   it('tem os 4 planos do MVP em centavos inteiros', () => {
@@ -37,5 +37,50 @@ describe('subscription-model — máquina de estados (US-4.1)', () => {
   it('trata a mesma origem/destino como no-op permitido (idempotência)', () => {
     expect(canTransition('ACTIVE', 'ACTIVE')).toBe(true);
     expect(canTransition('CANCELED', 'CANCELED')).toBe(true);
+  });
+});
+
+describe('subscription-model — gate de acesso derivado do estado (US-4.2.3)', () => {
+  const now = new Date('2026-08-01T12:00:00Z');
+  const GRACE = 3;
+  const inFuture = new Date(now.getTime() + 24 * 3600 * 1000);
+  const inPast = new Date(now.getTime() - 24 * 3600 * 1000);
+
+  it('sem assinatura → RESTRICTED', () => {
+    expect(resolveAccess(null, GRACE, now)).toBe('RESTRICTED');
+  });
+
+  it('ACTIVE → FULL', () => {
+    expect(resolveAccess({ status: 'ACTIVE', trialEndsAt: null, updatedAt: now }, GRACE, now)).toBe(
+      'FULL',
+    );
+  });
+
+  it('TRIALING na janela → FULL; expirado → RESTRICTED (não bloqueia abrupto, mas restringe)', () => {
+    expect(
+      resolveAccess({ status: 'TRIALING', trialEndsAt: inFuture, updatedAt: now }, GRACE, now),
+    ).toBe('FULL');
+    expect(
+      resolveAccess({ status: 'TRIALING', trialEndsAt: inPast, updatedAt: now }, GRACE, now),
+    ).toBe('RESTRICTED');
+  });
+
+  it('PAST_DUE dentro da graça → FULL; após a graça → RESTRICTED', () => {
+    const enteredNow = { status: 'PAST_DUE' as const, trialEndsAt: null, updatedAt: now };
+    const enteredOld = {
+      status: 'PAST_DUE' as const,
+      trialEndsAt: null,
+      updatedAt: new Date(now.getTime() - (GRACE + 1) * 24 * 3600 * 1000),
+    };
+    expect(resolveAccess(enteredNow, GRACE, now)).toBe('FULL');
+    expect(resolveAccess(enteredOld, GRACE, now)).toBe('RESTRICTED');
+  });
+
+  it('PAUSED / CANCELED / EXPIRED → RESTRICTED', () => {
+    for (const status of ['PAUSED', 'CANCELED', 'EXPIRED'] as const) {
+      expect(resolveAccess({ status, trialEndsAt: null, updatedAt: now }, GRACE, now)).toBe(
+        'RESTRICTED',
+      );
+    }
   });
 });
