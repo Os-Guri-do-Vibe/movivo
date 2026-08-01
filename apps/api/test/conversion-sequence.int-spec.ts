@@ -10,7 +10,7 @@ import 'reflect-metadata';
 import { type INestApplication } from '@nestjs/common';
 import { type Job } from 'bullmq';
 import { NestFactory } from '@nestjs/core';
-import { inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { AppModule } from '../src/app.module';
@@ -86,5 +86,68 @@ describe('ConversionSequenceWorker (US-4.3)', () => {
     });
     const res = await worker.process(jobOf('touchpoint', { userId, key: 'day13' }));
     expect(res.status).toBe('SKIP_ACTIVE');
+  });
+});
+
+describe('Downgrade + win-back (US-4.4)', () => {
+  /** Força o fim do trial no passado (sob contexto de sistema). */
+  async function expireTrial(userId: string): Promise<void> {
+    await db.runAsSystem(async (tx) => {
+      await tx
+        .update(subscriptions)
+        .set({ trialEndsAt: new Date(Date.now() - 24 * 3600 * 1000) })
+        .where(eq(subscriptions.userId, userId));
+      return undefined;
+    });
+  }
+
+  it('dia 14 (downgrade) dispara em trial e para se já convertido', async () => {
+    const userId = await createUser();
+    await subs.startTrial(userId, 'ANNUAL');
+    expect((await worker.process(jobOf('touchpoint', { userId, key: 'day14' }))).status).toBe(
+      'SENT',
+    );
+  });
+
+  it('win-back: trial vencido → envia uma vez (idempotente); registra o motivo', async () => {
+    const userId = await createUser();
+    await subs.startTrial(userId);
+    await expireTrial(userId);
+
+    expect((await worker.process(jobOf('touchpoint', { userId, key: 'winback' }))).status).toBe(
+      'SENT',
+    );
+    // Idempotência: mesmo touchpoint não reenvia.
+    expect((await worker.process(jobOf('touchpoint', { userId, key: 'winback' }))).status).toBe(
+      'ALREADY_SENT',
+    );
+
+    // Motivo declarado registrado em cancelReason (insumo de retenção).
+    await subs.recordWinbackReason(userId, 'achei o preço alto');
+    expect((await subs.getForUser(userId))?.cancelReason).toBe('achei o preço alto');
+  });
+
+  it('win-back não dispara se o trial ainda está vigente', async () => {
+    const userId = await createUser();
+    await subs.startTrial(userId); // trialEndsAt no futuro
+    expect((await worker.process(jobOf('touchpoint', { userId, key: 'winback' }))).status).toBe(
+      'TRIAL_NOT_ENDED',
+    );
+  });
+
+  it('win-back não vai para quem converteu (ACTIVE)', async () => {
+    const userId = await createUser();
+    await subs.startTrial(userId);
+    await expireTrial(userId);
+    await subs.applyGatewayEvent({
+      type: 'CHECKOUT_CONFIRMED',
+      userId,
+      externalSubscriptionId: `ext_wb_${userId}`,
+      plan: 'MONTHLY',
+      priceCents: 3900,
+    });
+    expect((await worker.process(jobOf('touchpoint', { userId, key: 'winback' }))).status).toBe(
+      'SKIP_ACTIVE',
+    );
   });
 });

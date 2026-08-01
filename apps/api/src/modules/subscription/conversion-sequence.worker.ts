@@ -20,17 +20,23 @@ import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { type ConversionTouchpoint, conversionMessage } from './subscription-messages';
+import { TRIAL_DAYS } from './subscription-model';
 import { SubscriptionService } from './subscription.service';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** Plano de downgrade (US-4.4) — o mais barato, oferecido no dia 14 e no win-back. */
+const CHEAPEST_PLAN = 'MONTHLY';
+
 /** Offsets ancorados no início do trial. ponytail: com trial de 7 dias, 10/13/14 são últimos
- *  empurrões pós-expiração; reconciliar as âncoras se o comprimento do trial mudar. */
+ *  empurrões pós-expiração; reconciliar as âncoras se o comprimento do trial mudar. O `winback`
+ *  (US-4.4) fica em `trialEnds + 3` = início + TRIAL_DAYS + 3. */
 const TOUCHPOINTS: readonly { key: ConversionTouchpoint; dayOffset: number }[] = [
   { key: 'day7', dayOffset: 7 },
   { key: 'day10', dayOffset: 10 },
   { key: 'day13', dayOffset: 13 },
   { key: 'day14', dayOffset: 14 },
+  { key: 'winback', dayOffset: TRIAL_DAYS + 3 },
 ];
 
 /** TTL do guard de idempotência do touchpoint — folgado além da janela da sequência. */
@@ -84,7 +90,7 @@ export class ConversionSequenceWorker implements OnModuleInit {
     return { status: 'SCHEDULED' };
   }
 
-  /** Envia um touchpoint se o titular ainda está no trial; para para convertidos/saídos. */
+  /** Roteia o touchpoint (nurture dias 7-14 ou win-back pós-trial). Idempotente por chave. */
   private async handleTouchpoint({ userId, key }: TouchpointJob): Promise<{ status: string }> {
     // Idempotência: um touchpoint dispara uma única vez por usuário.
     const guard = this.keys.forUser(userId, 'conv-sent', key);
@@ -95,6 +101,8 @@ export class ConversionSequenceWorker implements OnModuleInit {
     const sub = await this.subs.getForUser(userId);
     if (!sub) return { status: 'NO_SUBSCRIPTION' };
 
+    if (key === 'winback') return this.sendWinback(userId, sub);
+
     // Para de nutrir quem já converteu (ACTIVE) ou saiu (CANCELED/PAUSED).
     if (sub.status === 'ACTIVE' || sub.status === 'CANCELED' || sub.status === 'PAUSED') {
       this.logger.info(
@@ -104,7 +112,43 @@ export class ConversionSequenceWorker implements OnModuleInit {
       return { status: `SKIP_${sub.status}` };
     }
 
-    const link = `${this.config.whatsapp.publicSiteUrl}/assinar?plano=${sub.plan}`;
+    // US-4.4 — dia 14 é a oferta de DOWNGRADE: link no plano mais barato (Mensal).
+    const isDowngrade = key === 'day14';
+    const plan = isDowngrade ? CHEAPEST_PLAN : sub.plan;
+    await this.sendMessage(userId, key, plan);
+    this.logger.info(
+      { event: 'conversion_message_sent', userId, touchpoint: key },
+      'conversion_message_sent',
+    );
+    if (isDowngrade) {
+      this.logger.info({ event: 'downgrade_offered', userId }, 'downgrade_offered');
+    }
+    return { status: 'SENT' };
+  }
+
+  /** Win-back (US-4.4): 3 dias pós-trial, só p/ quem nunca converteu e cujo trial já acabou. */
+  private async sendWinback(
+    userId: string,
+    sub: Awaited<ReturnType<SubscriptionService['getForUser']>>,
+  ): Promise<{ status: string }> {
+    if (!sub || (sub.status !== 'TRIALING' && sub.status !== 'EXPIRED')) {
+      return { status: `SKIP_${sub?.status ?? 'NONE'}` }; // converteu/pausou/cancelou → sem win-back
+    }
+    if (!sub.trialEndsAt || sub.trialEndsAt.getTime() > Date.now()) {
+      return { status: 'TRIAL_NOT_ENDED' };
+    }
+    await this.sendMessage(userId, 'winback', CHEAPEST_PLAN);
+    this.logger.info({ event: 'winback_sent', userId }, 'winback_sent');
+    return { status: 'SENT' };
+  }
+
+  /** Enfileira a mensagem no outbound com o link do plano pré-preenchido. */
+  private async sendMessage(
+    userId: string,
+    key: ConversionTouchpoint,
+    plan: string,
+  ): Promise<void> {
+    const link = `${this.config.whatsapp.publicSiteUrl}/assinar?plano=${plan}`;
     await this.queues.enqueue(
       QUEUE.whatsappOutbound,
       'coach-message',
@@ -116,10 +160,5 @@ export class ConversionSequenceWorker implements OnModuleInit {
       },
       { jobId: `conv-msg_${userId}_${key}` },
     );
-    this.logger.info(
-      { event: 'conversion_message_sent', userId, touchpoint: key },
-      'conversion_message_sent',
-    );
-    return { status: 'SENT' };
   }
 }
