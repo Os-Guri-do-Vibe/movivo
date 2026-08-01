@@ -8,6 +8,7 @@
  * Fronteira §12.5: depende só do CORE (config/banco/logger) por DI global — sem outro domínio.
  */
 import { Module } from '@nestjs/common';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { PinoLogger } from 'nestjs-pino';
 
 import { AppConfigService } from '../../core/config';
@@ -18,13 +19,18 @@ import { AsaasGateway, StripeGateway } from './payment/real-gateways';
 import { ConversionSequenceWorker } from './conversion-sequence.worker';
 import { PaymentWebhookController } from './payment-webhook.controller';
 import { PaymentWebhookService } from './payment-webhook.service';
+import { SubscriptionController } from './subscription.controller';
 import { SubscriptionRepository } from './subscription.repository';
 import { SubscriptionService } from './subscription.service';
 
 @Module({
-  // JobsModule: enfileira o dunning (PAST_DUE) em `whatsapp-outbound` — via fila, sem ciclo (§12.5).
-  imports: [JobsModule],
-  controllers: [PaymentWebhookController],
+  imports: [
+    // JobsModule: enfileira o dunning (PAST_DUE) em `whatsapp-outbound` — via fila, sem ciclo (§12.5).
+    JobsModule,
+    // Rate limit das ações self-service (US-4.5). ponytail: storage em memória (MVP single-instance).
+    ThrottlerModule.forRoot({ throttlers: [{ ttl: 60_000, limit: 60 }] }),
+  ],
+  controllers: [PaymentWebhookController, SubscriptionController],
   providers: [
     {
       provide: PAYMENT_GATEWAY,

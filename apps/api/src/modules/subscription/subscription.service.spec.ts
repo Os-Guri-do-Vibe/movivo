@@ -213,3 +213,21 @@ describe('SubscriptionService.cancel/pause (US-4.1)', () => {
     await expect(svc.pause(USER)).rejects.toBeInstanceOf(InvalidTransitionError);
   });
 });
+
+describe('SubscriptionService.resume (US-4.5)', () => {
+  it('retoma PAUSED → ACTIVE', async () => {
+    const { svc, patch } = make(row({ status: 'PAUSED' }));
+    expect((await svc.resume(USER)).status).toBe('ACTIVE');
+    expect(patch).toHaveBeenCalledWith(USER, 's1', { status: 'ACTIVE' });
+  });
+
+  it('retomar de CANCELED (terminal) é rejeitado', async () => {
+    const { svc } = make(row({ status: 'CANCELED' }));
+    await expect(svc.resume(USER)).rejects.toBeInstanceOf(InvalidTransitionError);
+  });
+
+  it('sem assinatura → NO_SUBSCRIPTION', async () => {
+    const { svc } = make(null);
+    expect((await svc.resume(USER)).status).toBe('NO_SUBSCRIPTION');
+  });
+});
