@@ -19,6 +19,8 @@ export const SubscriptionStatus = {
   CANCELED: 'CANCELED',
   /** Trial ou período pago terminou sem renovação. */
   EXPIRED: 'EXPIRED',
+  /** Pausada pelo usuário (offboarding-pausa, US-4.5): mantém histórico, suspende cobrança. */
+  PAUSED: 'PAUSED',
 } as const;
 
 export type SubscriptionStatus = (typeof SubscriptionStatus)[keyof typeof SubscriptionStatus];

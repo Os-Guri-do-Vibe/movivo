@@ -1,28 +1,42 @@
 /**
- * `SubscriptionModule` — **esqueleto vazio registrado** (TASK-0.3.6).
+ * `SubscriptionModule` (US-4.1) — planos por período, máquina de estados e o gateway confinado.
  *
- * Módulo SUBSCRIPTION do C4 nível 3 (`ARQUITETURA.md` §4). Nesta sprint é só a casca:
- * nenhuma lógica de negócio, nenhum controller, nenhum provider. Existe para que a
- * sprint de implementação (Sprint 5) encaixe código sem reestruturar o app.
+ * O `PAYMENT_GATEWAY` é escolhido por config: `STRIPE`/`ASAAS` só quando a chave existe, senão
+ * cai no `MockGateway` (dev/CI bootam sem credencial — igual ao LLM). O SDK/HTTP do gateway fica
+ * confinado a `payment/` (teste estrutural). Fila `conversion-sequence` e webhooks são US-4.2/4.3.
  *
- * Conteúdo previsto pelo diagrama de Rafael:
- *  - `TrialService`
- *  - `ConversionSequence`
- *  - `StripeService`
- *  - `AsaasService`
- *  - `WebhookHandlers`
- *
- * Regras que já valem para quem implementar:
- *  - Plano único por período (Eduardo, `07-relatorio-eduardo.md`): Mensal R$39 / Trimestral R$99 / Anual R$349. Trial de **7 dias sem cartão**.
- *  - Webhooks de pagamento são **idempotentes** por `event_id` e verificados por assinatura. Reprocessar não pode cobrar duas vezes.
- *  - Dado de cartão nunca toca a nossa infraestrutura — tokenização no provedor.
- *
- * # Fronteira do módulo (regra §12.5 — sem imports circulares)
- * Este módulo pode depender do **CORE** (config, banco, Redis, logger) por DI, já que
- * todos os providers do CORE são globais. Não pode importar outro módulo de domínio:
- * a comunicação entre domínios é por evento (`EventBusModule`) ou por fila (`JobsModule`).
+ * Fronteira §12.5: depende só do CORE (config/banco/logger) por DI global — sem outro domínio.
  */
 import { Module } from '@nestjs/common';
+import { PinoLogger } from 'nestjs-pino';
 
-@Module({})
+import { AppConfigService } from '../../core/config';
+import { MockGateway } from './payment/mock-gateway';
+import { type PaymentGateway, PAYMENT_GATEWAY } from './payment/payment-gateway.types';
+import { AsaasGateway, StripeGateway } from './payment/real-gateways';
+import { SubscriptionRepository } from './subscription.repository';
+import { SubscriptionService } from './subscription.service';
+
+@Module({
+  providers: [
+    {
+      provide: PAYMENT_GATEWAY,
+      inject: [AppConfigService, PinoLogger],
+      useFactory: (config: AppConfigService, logger: PinoLogger): PaymentGateway => {
+        const p = config.payment;
+        if (p.provider === 'STRIPE' && p.stripeSecretKey) {
+          return new StripeGateway(p.stripeSecretKey, p.stripeWebhookSecret);
+        }
+        if (p.provider === 'ASAAS' && p.asaasApiKey) {
+          return new AsaasGateway(p.asaasApiKey, p.asaasWebhookSecret);
+        }
+        // Default/fallback: MOCK (sem credencial real). Boot nunca quebra por falta de chave.
+        return new MockGateway(logger);
+      },
+    },
+    SubscriptionRepository,
+    SubscriptionService,
+  ],
+  exports: [SubscriptionService, PAYMENT_GATEWAY],
+})
 export class SubscriptionModule {}

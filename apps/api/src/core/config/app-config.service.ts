@@ -75,6 +75,16 @@ export interface WhatsappConfig {
   readonly webhookSecret: string | undefined;
 }
 
+export interface PaymentConfig {
+  /** Gateway ativo. `MOCK` em dev/CI; real só com chave (senão o factory cai no MOCK). */
+  readonly provider: 'MOCK' | 'STRIPE' | 'ASAAS';
+  /** Segredos redigidos no snapshot; `undefined` sem credencial → adaptador MOCK. */
+  readonly stripeSecretKey: string | undefined;
+  readonly stripeWebhookSecret: string | undefined;
+  readonly asaasApiKey: string | undefined;
+  readonly asaasWebhookSecret: string | undefined;
+}
+
 export interface RedisConfig {
   readonly sentinels: readonly { readonly host: string; readonly port: number }[];
   readonly masterName: string;
@@ -203,6 +213,17 @@ export class AppConfigService {
       rerankMinScore: this.config.RAG_RERANK_MIN_SCORE,
       topK: this.config.RAG_TOP_K,
       candidates: this.config.RAG_CANDIDATES,
+    };
+  }
+
+  /** Config de pagamento (US-4.1). Chaves são segredos redigidos no snapshot. */
+  get payment(): PaymentConfig {
+    return {
+      provider: this.config.PAYMENT_PROVIDER,
+      stripeSecretKey: this.config.STRIPE_SECRET_KEY,
+      stripeWebhookSecret: this.config.STRIPE_WEBHOOK_SECRET,
+      asaasApiKey: this.config.ASAAS_API_KEY,
+      asaasWebhookSecret: this.config.ASAAS_WEBHOOK_SECRET,
     };
   }
 

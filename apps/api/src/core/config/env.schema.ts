@@ -218,6 +218,19 @@ export const envSchema = z
     RAG_TOP_K: z.coerce.number().int().min(1).max(10).default(3),
     /** Candidatos da busca densa antes do rerank (retrieve 20 → rerank → top-K). */
     RAG_CANDIDATES: z.coerce.number().int().min(1).max(100).default(20),
+
+    // -------------------------------------------- Pagamento (US-4.1)
+    /**
+     * Gateway ativo. `MOCK` (default) roda em dev/CI sem conta real; `STRIPE`/`ASAAS` usam o
+     * adaptador real SE a chave existir, senão o factory cai no MOCK com aviso (como o LLM).
+     * Trocar de provedor é config, não refactor — o SDK/HTTP fica confinado ao gateway.
+     */
+    PAYMENT_PROVIDER: z.enum(['MOCK', 'STRIPE', 'ASAAS']).default('MOCK'),
+    /** Chaves dos gateways — **opcionais** no boot (via `*_FILE`/Secret). Sem elas → MOCK. */
+    STRIPE_SECRET_KEY: z.string().min(1).optional(),
+    STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
+    ASAAS_API_KEY: z.string().min(1).optional(),
+    ASAAS_WEBHOOK_SECRET: z.string().min(1).optional(),
   })
   .superRefine((config, ctx) => {
     if (config.DATABASE_PORT === POSTGRES_DIRECT_PORT) {
