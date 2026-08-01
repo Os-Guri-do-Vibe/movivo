@@ -7,7 +7,7 @@
  * máquina de estados sem um provedor real. `parseWebhookEvent` aceita um corpo JSON já no
  * formato normalizado (sem assinatura — dev).
  */
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { PinoLogger } from 'nestjs-pino';
 
 import {
@@ -18,6 +18,21 @@ import {
   type GatewaySubscription,
   type PaymentGateway,
 } from './payment-gateway.types';
+
+/**
+ * Segredo de webhook do MOCK — **dev-only** (o mock nunca roda em produção; lá é STRIPE/ASAAS
+ * com o secret real). Permite ao teste gerar assinatura válida via `sign()` e exercitar
+ * forjado/replay. ponytail: fixo de propósito; não é credencial de produção.
+ */
+export const MOCK_WEBHOOK_SECRET = 'mock-webhook-secret-dev';
+const TOLERANCE_SECONDS = 300;
+
+/** HMAC-SHA256 hex sobre `${timestamp}.${rawBody}` (estilo Asaas — o mock imita o real). */
+function mockSignature(timestamp: string, rawBody: Buffer): string {
+  return createHmac('sha256', MOCK_WEBHOOK_SECRET)
+    .update(Buffer.concat([Buffer.from(`${timestamp}.`, 'utf8'), rawBody]))
+    .digest('hex');
+}
 
 export class MockGateway implements PaymentGateway {
   readonly name = 'MOCK' as const;
@@ -44,13 +59,39 @@ export class MockGateway implements PaymentGateway {
     });
   }
 
-  /** Dev: o corpo já é o `GatewayEvent` normalizado em JSON; sem verificação de assinatura. */
-  parseWebhookEvent(rawBody: Buffer): GatewayEvent | null {
+  /**
+   * Verifica a assinatura HMAC (+ janela de 300s) e parseia o corpo bruto no `GatewayEvent`
+   * normalizado. Assinatura ausente/errada/expirada → `null` (o webhook responde 200 e ignora).
+   * O corpo é o mesmo formato que `emit()` produz, serializado em JSON.
+   */
+  parseWebhookEvent(
+    rawBody: Buffer,
+    signature: string | undefined,
+    timestamp: string | undefined,
+  ): GatewayEvent | null {
+    if (!signature || !timestamp) return null;
+    const ts = Number(timestamp);
+    if (!Number.isFinite(ts) || Math.abs(Math.floor(Date.now() / 1000) - ts) > TOLERANCE_SECONDS) {
+      return null;
+    }
+    const expected = Buffer.from(mockSignature(timestamp, rawBody), 'hex');
+    let provided: Buffer;
+    try {
+      provided = Buffer.from(signature, 'hex');
+    } catch {
+      return null;
+    }
+    if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) return null;
     try {
       return JSON.parse(rawBody.toString('utf8')) as GatewayEvent;
     } catch {
       return null;
     }
+  }
+
+  /** Helper de teste/dev: assina um corpo bruto no formato que `parseWebhookEvent` espera. */
+  sign(rawBody: Buffer, timestamp: string): string {
+    return mockSignature(timestamp, rawBody);
   }
 
   cancelSubscription(externalSubscriptionId: string): Promise<void> {

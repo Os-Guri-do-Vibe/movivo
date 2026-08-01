@@ -83,6 +83,8 @@ export interface PaymentConfig {
   readonly stripeWebhookSecret: string | undefined;
   readonly asaasApiKey: string | undefined;
   readonly asaasWebhookSecret: string | undefined;
+  /** Dias de graça do `PAST_DUE` antes de restringir o acesso (US-4.2.3). */
+  readonly pastDueGraceDays: number;
 }
 
 export interface RedisConfig {
@@ -224,6 +226,7 @@ export class AppConfigService {
       stripeWebhookSecret: this.config.STRIPE_WEBHOOK_SECRET,
       asaasApiKey: this.config.ASAAS_API_KEY,
       asaasWebhookSecret: this.config.ASAAS_WEBHOOK_SECRET,
+      pastDueGraceDays: this.config.SUBSCRIPTION_PAST_DUE_GRACE_DAYS,
     };
   }
 

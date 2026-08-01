@@ -44,7 +44,11 @@ abstract class RealGatewayBase implements PaymentGateway {
     );
   }
 
-  parseWebhookEvent(_rawBody: Buffer, _signature: string | undefined): GatewayEvent | null {
+  parseWebhookEvent(
+    _rawBody: Buffer,
+    _signature: string | undefined,
+    _timestamp: string | undefined,
+  ): GatewayEvent | null {
     throw new PaymentGatewayError(`${this.name}.parseWebhookEvent: ${NOT_WIRED}`);
   }
 

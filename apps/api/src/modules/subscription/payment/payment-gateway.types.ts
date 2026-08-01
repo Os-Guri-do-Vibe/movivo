@@ -20,6 +20,9 @@ export interface CreateCheckoutInput {
   method: PaymentMethod;
   /** Versão dos Termos aceita no checkout (registro contratual — US-4.1.3). */
   termsVersion: string;
+  /** Retorno do checkout hospedado (US-4.6). */
+  successUrl: string;
+  cancelUrl: string;
 }
 
 export interface CheckoutSession {
@@ -56,8 +59,16 @@ export interface PaymentGateway {
   /** `false` quando a chave não foi provisionada — o factory cai no MOCK. */
   hasCredentials(): boolean;
   createCheckoutSession(input: CreateCheckoutInput): Promise<CheckoutSession>;
-  /** Verifica assinatura + parseia o webhook em `GatewayEvent`; `null` se inválido/desconhecido. */
-  parseWebhookEvent(rawBody: Buffer, signature: string | undefined): GatewayEvent | null;
+  /**
+   * Verifica assinatura (Stripe `constructEvent` / Asaas HMAC+`timingSafeEqual`) + parseia o
+   * webhook em `GatewayEvent`. `null` se assinatura inválida/replay/evento desconhecido — o
+   * controller responde 200 e não processa (não vaza QUAL camada falhou).
+   */
+  parseWebhookEvent(
+    rawBody: Buffer,
+    signature: string | undefined,
+    timestamp: string | undefined,
+  ): GatewayEvent | null;
   cancelSubscription(externalSubscriptionId: string): Promise<void>;
   getSubscription(externalSubscriptionId: string): Promise<GatewaySubscription | null>;
 }

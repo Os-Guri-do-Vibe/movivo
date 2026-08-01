@@ -10,19 +10,24 @@ import { Inject, Injectable } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 import type { SubscriptionStatus } from '@movivo/shared';
 
+import { AppConfigService } from '../../core/config';
 import type { SubscriptionRow } from '../../core/database/schema';
 import {
+  type AccessLevel,
   canTransition,
   InvalidTransitionError,
   PLAN_CATALOG,
+  resolveAccess,
   type SubscriptionPlan,
   TRIAL_DAYS,
 } from './subscription-model';
 import {
+  type CheckoutSession,
   type GatewayEvent,
   type GatewayEventType,
   PAYMENT_GATEWAY,
   type PaymentGateway,
+  type PaymentMethod,
 } from './payment/payment-gateway.types';
 import { SubscriptionRepository } from './subscription.repository';
 
@@ -46,9 +51,49 @@ export class SubscriptionService {
   constructor(
     private readonly repo: SubscriptionRepository,
     @Inject(PAYMENT_GATEWAY) private readonly gateway: PaymentGateway,
+    private readonly config: AppConfigService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(SubscriptionService.name);
+  }
+
+  /**
+   * Cria a sessão de checkout HOSPEDADA (US-4.2.1) com o plano pré-selecionado e devolve o link.
+   * Nenhum dado de cartão toca o backend (PCI). Idempotente: reusa a assinatura do titular (uma
+   * por usuário) e registra o aceite de termos; o `externalSubscriptionId` é fixado no webhook.
+   */
+  async createCheckout(
+    userId: string,
+    plan: SubscriptionPlan,
+    method: PaymentMethod,
+    termsVersion: string,
+  ): Promise<CheckoutSession> {
+    const sub = (await this.repo.findByUserId(userId)) ?? (await this.startTrial(userId, plan));
+    const priceCents = PLAN_CATALOG[plan].priceCents;
+    const site = this.config.whatsapp.publicSiteUrl;
+    const session = await this.gateway.createCheckoutSession({
+      userId,
+      plan,
+      priceCents,
+      method,
+      termsVersion,
+      successUrl: `${site}/checkout/sucesso`,
+      cancelUrl: `${site}/checkout/cancelado`,
+    });
+    // Registra intenção de plano + aceite de termos (idempotente — só patch, não duplica linha).
+    await this.repo.patch(userId, sub.id, {
+      plan,
+      priceCents,
+      termsVersion,
+      termsAcceptedAt: new Date(),
+    });
+    return session;
+  }
+
+  /** Acesso derivado do estado da assinatura (US-4.2.3) — não do app. */
+  async getAccess(userId: string): Promise<AccessLevel> {
+    const sub = await this.repo.findByUserId(userId);
+    return resolveAccess(sub, this.config.payment.pastDueGraceDays);
   }
 
   /** Cria a assinatura em TRIALING (7 dias sem cartão). Idempotente por titular. */
