@@ -148,7 +148,8 @@ export class ConversionSequenceWorker implements OnModuleInit {
     key: ConversionTouchpoint,
     plan: string,
   ): Promise<void> {
-    const link = `${this.config.whatsapp.publicSiteUrl}/assinar?plano=${plan}`;
+    // Token no path (= userId) para a página `/assinar/[token]` saber o titular (US-4.6, IDOR-safe).
+    const link = `${this.config.whatsapp.publicSiteUrl}/assinar/${userId}?plano=${plan}`;
     await this.queues.enqueue(
       QUEUE.whatsappOutbound,
       'coach-message',

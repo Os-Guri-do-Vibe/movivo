@@ -19,6 +19,7 @@ import { resolve } from 'node:path';
 
 import { type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { SUBSCRIPTION_PLAN_IDS } from '@movivo/shared';
 import { eq } from 'drizzle-orm';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -232,5 +233,32 @@ describe('Ações self-service: cancelar / pausar / retomar (US-4.5)', () => {
     await controller.cancel(userA, { reason: 'teste' });
     expect((await svc.getForUser(userA))?.status).toBe('CANCELED');
     expect((await svc.getForUser(userB))?.status).toBe('ACTIVE'); // B intacto
+  });
+});
+
+describe('Endpoints US-4.6: checkout e portal (view)', () => {
+  it('checkout devolve só a checkoutUrl hospedada (nenhum dado de cartão)', async () => {
+    const userId = await createUser();
+    await svc.startTrial(userId);
+    const res = await controller.checkout(userId, { plan: 'QUARTERLY', method: 'PIX' });
+    expect(res.checkoutUrl).toMatch(/^https?:\/\//);
+    expect(Object.keys(res)).toEqual(['checkoutUrl']);
+  });
+
+  it('view devolve plano/status/acesso/próxima-cobrança sem PII nem id de gateway', async () => {
+    const userId = await createUser();
+    await svc.startTrial(userId);
+    const view = await controller.view(userId);
+    expect(view.status).toBe('TRIALING');
+    expect(view.access).toBe('FULL'); // trial dentro da janela
+    expect(SUBSCRIPTION_PLAN_IDS).toContain(view.plan);
+    expect(JSON.stringify(view)).not.toContain(userId);
+    expect(Object.keys(view).sort()).toEqual(['access', 'currentPeriodEnd', 'plan', 'status']);
+  });
+
+  it('view: token não-UUID → 404; titular sem assinatura → 404 (não vaza)', async () => {
+    const userB = await createUser(); // existe, mas sem assinatura
+    await expect(controller.view('nao-e-uuid')).rejects.toThrow();
+    await expect(controller.view(userB)).rejects.toThrow();
   });
 });
