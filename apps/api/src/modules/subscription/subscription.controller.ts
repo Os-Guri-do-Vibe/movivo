@@ -13,6 +13,7 @@
 import {
   Body,
   Controller,
+  Get,
   Header,
   NotFoundException,
   Param,
@@ -20,14 +21,45 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
-import { uuidSchema } from '@movivo/shared';
+import { createCheckoutSchema, uuidSchema, type SubscriptionView } from '@movivo/shared';
 
+import { SUBSCRIPTION_TERMS_VERSION } from './subscription-model';
 import { SubscriptionService } from './subscription.service';
 
 @Controller('subscription')
 @UseGuards(ThrottlerGuard)
 export class SubscriptionController {
   constructor(private readonly subs: SubscriptionService) {}
+
+  /** Estado do portal de gestão (US-4.6) — sem PII/dado de cartão. Sem assinatura → 404. */
+  @Get(':token')
+  @Header('Referrer-Policy', 'no-referrer')
+  async view(@Param('token') token: string): Promise<SubscriptionView> {
+    const view = await this.subs.getView(this.userId(token));
+    if (!view) throw new NotFoundException();
+    return view;
+  }
+
+  /**
+   * Cria a sessão de checkout HOSPEDADA (US-4.2/4.6) e devolve só a `checkoutUrl` para o
+   * frontend redirecionar. Nenhum dado de cartão toca o backend (PCI). Body validado por Zod.
+   */
+  @Post(':token/checkout')
+  @Header('Referrer-Policy', 'no-referrer')
+  async checkout(
+    @Param('token') token: string,
+    @Body() body: unknown,
+  ): Promise<{ checkoutUrl: string }> {
+    const userId = this.userId(token);
+    const { plan, method } = createCheckoutSchema.parse(body);
+    const session = await this.subs.createCheckout(
+      userId,
+      plan,
+      method,
+      SUBSCRIPTION_TERMS_VERSION,
+    );
+    return { checkoutUrl: session.checkoutUrl };
+  }
 
   @Post(':token/cancel')
   @Header('Referrer-Policy', 'no-referrer')

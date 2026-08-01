@@ -8,7 +8,7 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
-import type { SubscriptionStatus } from '@movivo/shared';
+import type { SubscriptionStatus, SubscriptionView } from '@movivo/shared';
 
 import { AppConfigService } from '../../core/config';
 import type { SubscriptionRow } from '../../core/database/schema';
@@ -112,6 +112,21 @@ export class SubscriptionService {
   /** Lê a assinatura vigente do titular (consumido por US-4.2/4.6). */
   getForUser(userId: string): Promise<SubscriptionRow | null> {
     return this.repo.findByUserId(userId);
+  }
+
+  /**
+   * Estado do portal (US-4.6) — plano, status, acesso e próxima cobrança. Sem PII/id do
+   * gateway/dado de cartão. `null` quando o titular não tem assinatura (controller → 404).
+   */
+  async getView(userId: string): Promise<SubscriptionView | null> {
+    const sub = await this.repo.findByUserId(userId);
+    if (!sub) return null;
+    return {
+      plan: sub.plan,
+      status: sub.status,
+      access: resolveAccess(sub, this.config.payment.pastDueGraceDays),
+      currentPeriodEnd: sub.currentPeriodEnd ? sub.currentPeriodEnd.toISOString() : null,
+    };
   }
 
   /**

@@ -4,10 +4,14 @@
  * transições só são disparadas por evento válido do gateway ou ação self-service autorizada
  * (o `SubscriptionService` aplica; este arquivo só decide se a transição é legítima).
  */
-import { type SubscriptionStatus } from '@movivo/shared';
+import {
+  SUBSCRIPTION_PLANS,
+  type SubscriptionPlanId,
+  type SubscriptionStatus,
+} from '@movivo/shared';
 
-/** Planos ofertados no MVP (decisão do fundador 2026-08-01) — os quatro na UI. */
-export type SubscriptionPlan = 'MONTHLY' | 'QUARTERLY' | 'SEMIANNUAL' | 'ANNUAL';
+/** Planos ofertados no MVP (decisão do fundador 2026-08-01) — fonte única em `@movivo/shared`. */
+export type SubscriptionPlan = SubscriptionPlanId;
 
 export interface PlanSpec {
   /** Preço em centavos inteiros — nunca float para dinheiro. */
@@ -17,15 +21,13 @@ export interface PlanSpec {
 }
 
 /**
- * Catálogo de planos. Preços validados por Eduardo (unit economics).
- * ponytail: SEMIANNUAL usa preço placeholder (18900c) até Eduardo fechar o valor — trocar aqui.
+ * Catálogo de planos derivado de `SUBSCRIPTION_PLANS` (shared) — mesma fonte que a UI de
+ * `/assinar`, para o preço do checkout nunca divergir do preço exibido. Preços validados
+ * por Eduardo (unit economics).
  */
-export const PLAN_CATALOG: Record<SubscriptionPlan, PlanSpec> = {
-  MONTHLY: { priceCents: 3900, periodDays: 30 },
-  QUARTERLY: { priceCents: 9900, periodDays: 90 },
-  SEMIANNUAL: { priceCents: 18900, periodDays: 180 },
-  ANNUAL: { priceCents: 34900, periodDays: 365 },
-};
+export const PLAN_CATALOG: Record<SubscriptionPlan, PlanSpec> = Object.fromEntries(
+  SUBSCRIPTION_PLANS.map((p) => [p.id, { priceCents: p.priceCents, periodDays: p.periodDays }]),
+) as Record<SubscriptionPlan, PlanSpec>;
 
 export const TRIAL_DAYS = 7;
 

@@ -64,14 +64,14 @@ describe('ConversionSequenceWorker — nurture / downgrade', () => {
     const { worker, enqueue } = make({ status: 'TRIALING' });
     const res = await worker.process(job('touchpoint', { userId: U, key: 'day13' }));
     expect(res.status).toBe('SENT');
-    expect(sentText({ mock: enqueue.mock })).toContain('/assinar?plano=ANNUAL');
+    expect(sentText({ mock: enqueue.mock })).toContain(`/assinar/${U}?plano=ANNUAL`);
   });
 
   it('dia 14 é downgrade: link no plano Mensal + evento downgrade_offered', async () => {
     const { worker, enqueue, logger } = make({ status: 'TRIALING' });
     const res = await worker.process(job('touchpoint', { userId: U, key: 'day14' }));
     expect(res.status).toBe('SENT');
-    expect(sentText({ mock: enqueue.mock })).toContain('/assinar?plano=MONTHLY');
+    expect(sentText({ mock: enqueue.mock })).toContain(`/assinar/${U}?plano=MONTHLY`);
     expect(logger.info).toHaveBeenCalledWith(
       expect.objectContaining({ event: 'downgrade_offered' }),
       expect.anything(),
@@ -101,7 +101,7 @@ describe('ConversionSequenceWorker — win-back (US-4.4)', () => {
     });
     const res = await worker.process(job('touchpoint', { userId: U, key: 'winback' }));
     expect(res.status).toBe('SENT');
-    expect(sentText({ mock: enqueue.mock })).toContain('/assinar?plano=MONTHLY');
+    expect(sentText({ mock: enqueue.mock })).toContain(`/assinar/${U}?plano=MONTHLY`);
     expect(logger.info).toHaveBeenCalledWith(
       expect.objectContaining({ event: 'winback_sent' }),
       expect.anything(),
