@@ -19,8 +19,9 @@ overrides:
   # Faixa ampliada de <=5.0.7 p/ <5.0.9 (advisory revisado). Datado: 2026-08-03.
   'brace-expansion@>=4.0.0 <5.0.9': '>=5.0.9'
   # undici <7.29.0 — cross-user info disclosure + crash em parse. Origem: vitest>jsdom>undici
-  # (devDependency de test). Escopado à linha 7.x vulnerável. Datado: 2026-08-03.
-  'undici@>=7.0.0 <7.29.0': '>=7.29.0'
+  # (devDependency de test). Teto <8 de propósito: jsdom@29 declara undici ^7.25.0; sem o
+  # teto o override sobe p/ 8.x e o jsdom perde a dependência (MODULE_NOT_FOUND). Datado: 2026-08-03.
+  'undici@>=7.0.0 <7.29.0': '>=7.29.0 <8'
   # fast-uri <3.1.5 — host confusion via backslash. Origem: @nestjs/cli>...>ajv>fast-uri
   # (devDependency). Mesmo major (3.x) — correção segura. Datado: 2026-08-03.
   'fast-uri@>=3.0.0 <3.1.5': '>=3.1.5'
