@@ -14,9 +14,17 @@ overrides:
   # postcss <=8.5.11 — leitura arbitrária de arquivo via sourceMappingURL em comentário
   # CSS. Origem: toolchain do Next/Tailwind. Datado: 2026-07-23.
   'postcss@<=8.5.11': '>=8.5.12'
-  # brace-expansion <=5.0.7 — DoS por expansão sem limite (OOM). Transitiva ubíqua
-  # (glob/minimatch). API estável — forçar a linha corrigida é seguro. Datado: 2026-07-25.
-  'brace-expansion@<=5.0.7': '>=5.0.8'
+  # brace-expansion <5.0.9 — DoS por expansão sem limite (OOM). Transitiva ubíqua
+  # (glob/minimatch/eslint). API estável — forçar a linha corrigida é seguro.
+  # Faixa ampliada de <=5.0.7 p/ <5.0.9 (advisory revisado). Datado: 2026-08-03.
+  'brace-expansion@>=4.0.0 <5.0.9': '>=5.0.9'
+  # undici <7.29.0 — cross-user info disclosure + crash em parse. Origem: vitest>jsdom>undici
+  # (devDependency de test). Teto <8 de propósito: jsdom@29 declara undici ^7.25.0; sem o
+  # teto o override sobe p/ 8.x e o jsdom perde a dependência (MODULE_NOT_FOUND). Datado: 2026-08-03.
+  'undici@>=7.0.0 <7.29.0': '>=7.29.0 <8'
+  # fast-uri <3.1.5 — host confusion via backslash. Origem: @nestjs/cli>...>ajv>fast-uri
+  # (devDependency). Mesmo major (3.x) — correção segura. Datado: 2026-08-03.
+  'fast-uri@>=3.0.0 <3.1.5': '>=3.1.5'
 allowBuilds:
   # `core-js` entra como dependência transitiva de `posthog-js` (US-0.5). Seu script de
   # postinstall só imprime uma mensagem de financiamento — não produz artefato nenhum.
