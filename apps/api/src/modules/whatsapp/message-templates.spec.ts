@@ -54,6 +54,11 @@ describe('templates de WhatsApp (US-2.5)', () => {
     expect(confirmationCareMessage()).not.toMatch(/2 horas|em até 2h/i);
   });
 
+  it('confirma sincronamente sem prometer prazo operacional', () => {
+    expect(confirmationMessage()).toMatch(/Recebemos seus dados/i);
+    expect(confirmationMessage()).not.toMatch(/2 horas|em até 2h|prazo/i);
+  });
+
   it('entrega quebra em bolhas, destaca o 1º treino e inclui o link', () => {
     const msg = formatProtocolDelivery(content, 'https://x/protocolo/abc');
     const bubbles = msg.split(BUBBLE_SEPARATOR);

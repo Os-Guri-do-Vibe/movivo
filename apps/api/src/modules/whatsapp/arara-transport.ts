@@ -53,7 +53,7 @@ export class AraraHttpTransport implements WhatsappTransport {
     if (!this.apiKey) {
       // Sem credencial: no-op logado (nunca lança) — o job completa em dev/CI. NÃO loga
       // o texto (contém dado de saúde derivado); só o destino redigido pelo LoggerModule.
-      this.logger.info({ to: message.to }, 'envio de WhatsApp simulado (sem credencial AraraHQ)');
+      this.logger.info('envio de WhatsApp simulado (sem credencial AraraHQ)');
       return;
     }
     // ponytail: shape mínimo do endpoint AraraHQ — confirmar contra a doc quando a conta
@@ -84,6 +84,7 @@ export class AraraHttpTransport implements WhatsappTransport {
         body: JSON.stringify({ to, presence: 'typing' }),
       });
     } catch {
+      to = '[redacted]';
       this.logger.info({ to }, 'indicador de digitação falhou (ignorado)');
     }
   }

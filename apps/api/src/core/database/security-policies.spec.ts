@@ -25,6 +25,11 @@ describe('buildRlsPoliciesSql', () => {
       'coaching_sessions',
       'handoff_alerts',
       'subscriptions',
+      'conversations',
+      'checkins',
+      'reengagement_nudges',
+      'audit_logs',
+      'professional_assignments',
     ]);
   });
 
@@ -58,6 +63,24 @@ describe('buildRlsPoliciesSql', () => {
     expect(sql).not.toContain('CREATE POLICY "consents_rls_delete"');
     // as demais tabelas têm DELETE (sistema/admin).
     expect(sql).toContain('CREATE POLICY "auth_sessions_rls_delete"');
+    const consentSelect = sql
+      .split(';')
+      .find((statement) => statement.includes('CREATE POLICY "consents_rls_select"'));
+    expect(consentSelect).not.toContain("= 'PROFESSIONAL'");
+    expect(consentSelect).toContain("= 'SYSTEM'");
+    expect(consentSelect).toContain("= 'ADMIN'");
+  });
+
+  it('retira titulares sem consentimento vigente de todo acesso profissional operacional', () => {
+    const usersSelect = sql
+      .split(';')
+      .find((statement) => statement.includes('CREATE POLICY "users_rls_select"'));
+    expect(usersSelect).toContain('public.has_active_health_consent("users"."id")');
+    const protocolsUpdate = sql
+      .split(';')
+      .find((statement) => statement.includes('CREATE POLICY "protocols_rls_update"'));
+    expect(protocolsUpdate).toContain('public.has_active_health_consent("protocols"."user_id")');
+    expect(protocolsUpdate).toContain('pa.active = true AND pa.revoked_at IS NULL');
   });
 
   it('anamnesis_sessions libera a fase anônima escopada por sessão (Sato — achado 1)', () => {

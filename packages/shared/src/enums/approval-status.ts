@@ -15,6 +15,8 @@ export const ProtocolApprovalStatus = {
   AUTO_APPROVED: 'AUTO_APPROVED',
   /** Validador bloqueou/flagou → aguarda revisão humana no painel CREF (Sprint 5). */
   PENDING_REVIEW: 'PENDING_REVIEW',
+  /** Conteudo revisado e assinado por profissional CREF autenticado. */
+  HUMAN_APPROVED: 'HUMAN_APPROVED',
   /** PAR-Q de risco: sessão travada aguardando liberação profissional (Sprint 5). */
   BLOCKED_PENDING_CLEARANCE: 'BLOCKED_PENDING_CLEARANCE',
 } as const;

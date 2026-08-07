@@ -48,12 +48,12 @@ export const protocols = pgTable(
       .default('PENDING_REVIEW'),
 
     /**
-     * Profissional CREF responsável. **Sem FK nesta sprint**: a tabela
-     * `professionals` (e `professional_assignments`, exigida pela policy de RLS
-     * do profissional — Sato §4.3) nasce na sprint do dashboard CREF. A FK entra
-     * junto com ela; deixar a coluna agora evita reescrever queries depois.
+     * Profissional CREF responsável. A FK impede assinaturas órfãs; a atribuição
+     * ativa e o `cref_active` são validados transacionalmente antes da persistência.
      */
-    professionalId: uuid('professional_id'),
+    professionalId: uuid('professional_id').references(() => users.id, {
+      onDelete: 'restrict',
+    }),
 
     signedAt: eventTimestamp('signed_at'),
 

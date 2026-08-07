@@ -11,6 +11,7 @@ import { and, eq } from 'drizzle-orm';
 
 import { conversations, handoffAlerts, protocols, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
+import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import type { ScrubUser } from '../ai-coach/llm/llm.types';
 import type { SubstitutionConstraints } from '../protocol/exercise-substitution';
 
@@ -25,7 +26,10 @@ export interface PersistTurnInput {
 
 @Injectable()
 export class ConversationRepository {
-  constructor(private readonly db: TenantDatabase) {}
+  constructor(
+    private readonly db: TenantDatabase,
+    private readonly queueEvents: DashboardQueueEventsService,
+  ) {}
 
   async loadScrubUser(userId: string): Promise<ScrubUser> {
     const [user] = await this.db.runAsUser(userId, 'USER', (tx) =>
@@ -66,6 +70,7 @@ export class ConversationRepository {
     await this.db.runAsUser(userId, 'USER', async (tx) => {
       await tx.insert(handoffAlerts).values({ userId, level, reason });
     });
+    this.queueEvents.emit('handoff');
   }
 
   async persistTurn(input: PersistTurnInput): Promise<void> {

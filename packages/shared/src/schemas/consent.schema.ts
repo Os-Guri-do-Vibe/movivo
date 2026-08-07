@@ -18,7 +18,7 @@ import { z } from 'zod';
 
 /** Identificadores de versão imutáveis (o que vai para `consents.version`). */
 export const CONSENT_VERSIONS = {
-  HEALTH_DATA: 'consent-health-2026-07-v1',
+  HEALTH_DATA: 'consent-health-2026-08-v2',
   MARKETING: 'consent-marketing-2026-07-v1',
   TERMS_OF_SERVICE: 'terms-2026-07-v1',
 } as const;
@@ -34,6 +34,23 @@ export type ConsentTypeWithText = keyof typeof CONSENT_VERSIONS;
  */
 export const RT_CREF_PLACEHOLDER = 'CREF nº ____';
 
+/** Artefato imutável da v1; preserva exatamente o texto histórico aceito. */
+export const HEALTH_DATA_CONSENT_V1 = {
+  version: 'consent-health-2026-07-v1',
+  title: 'Agora vamos falar da sua saúde',
+  body: [
+    'Para montar um treino seguro e adaptado a você, precisamos de algumas informações de saúde: histórico de lesões, respostas a um questionário de prontidão para atividade física (PAR-Q) e medicações de uso contínuo, se houver.',
+    '**Para que usamos:** exclusivamente para elaborar e adaptar o seu protocolo de treino individualizado.',
+    `**Quem acessa:** você e o profissional de Educação Física responsável, registrado no ${RT_CREF_PLACEHOLDER}, que usa inteligência artificial apenas como ferramenta de apoio — **a decisão e a supervisão são sempre do profissional**.`,
+    '**Como protegemos:** seus dados de saúde são criptografados e isolados; ninguém fora da equipe responsável tem acesso.',
+    '**Por quanto tempo:** mantemos seus dados de saúde enquanto você for cliente e, após o encerramento, pelo prazo necessário para cumprir obrigações legais e para defesa em eventual reclamação (até 5 anos). Depois disso, eles são anonimizados ou eliminados.',
+    '**Você no controle:** pode revogar esta autorização quando quiser, sem custo, pelo WhatsApp da MOVIVO ou pelo e-mail do nosso Encarregado de Dados (informado na Política de Privacidade). A revogação interrompe novos tratamentos daqui pra frente.',
+  ],
+  label:
+    'Autorizo a MOVIVO a tratar os meus dados de saúde para a finalidade de elaborar e adaptar o meu treino, conforme descrito acima e na Política de Privacidade.',
+  required: true,
+} as const;
+
 /** Corpo + label de cada consentimento, na versão correspondente acima. */
 export const CONSENT_TEXTS = {
   HEALTH_DATA: {
@@ -45,7 +62,7 @@ export const CONSENT_TEXTS = {
       `**Quem acessa:** você e o profissional de Educação Física responsável, registrado no ${RT_CREF_PLACEHOLDER}, que usa inteligência artificial apenas como ferramenta de apoio — **a decisão e a supervisão são sempre do profissional**.`,
       '**Como protegemos:** seus dados de saúde são criptografados e isolados; ninguém fora da equipe responsável tem acesso.',
       '**Por quanto tempo:** mantemos seus dados de saúde enquanto você for cliente e, após o encerramento, pelo prazo necessário para cumprir obrigações legais e para defesa em eventual reclamação (até 5 anos). Depois disso, eles são anonimizados ou eliminados.',
-      '**Você no controle:** pode revogar esta autorização quando quiser, sem custo, pelo WhatsApp da MOVIVO ou pelo e-mail do nosso Encarregado de Dados (informado na Política de Privacidade). A revogação interrompe novos tratamentos daqui pra frente.',
+      '**Você no controle:** pode revogar esta autorização quando quiser, sem custo. No WhatsApp da MOVIVO, envie exatamente “REVOGAR CONSENTIMENTO DE SAÚDE”; ou contate o e-mail do nosso Encarregado de Dados (informado na Política de Privacidade). A revogação interrompe novos tratamentos daqui pra frente.',
     ],
     label:
       'Autorizo a MOVIVO a tratar os meus dados de saúde para a finalidade de elaborar e adaptar o meu treino, conforme descrito acima e na Política de Privacidade.',

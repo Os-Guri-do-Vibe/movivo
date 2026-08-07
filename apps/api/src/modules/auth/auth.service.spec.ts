@@ -11,7 +11,16 @@ import { AuthService } from './auth.service';
 /** Chain builder thenable que imita o query builder do Drizzle e resolve para `result`. */
 function q<T>(result: T) {
   const b: Record<string, unknown> = {};
-  for (const m of ['from', 'where', 'limit', 'values', 'set', 'returning', 'onConflictDoUpdate']) {
+  for (const m of [
+    'from',
+    'where',
+    'for',
+    'limit',
+    'values',
+    'set',
+    'returning',
+    'onConflictDoUpdate',
+  ]) {
     b[m] = () => b;
   }
   b.then = (resolve: (v: T) => unknown, reject: (e: unknown) => unknown) =>
@@ -32,6 +41,8 @@ let service: AuthService;
 
 const config = { jwt: { refreshTtlSeconds: 2_592_000, accessTtl: '15m' }, isProduction: false };
 const logger = { setContext: vi.fn(), info: vi.fn(), warn: vi.fn() };
+const SESSION_ID = '11111111-1111-4111-8111-111111111111';
+const GOOD_SECRET = 'a'.repeat(64);
 
 beforeEach(() => {
   tx = { select: vi.fn(), insert: vi.fn(), update: vi.fn() };
@@ -96,9 +107,9 @@ describe('login', () => {
 
 describe('refresh — rotation', () => {
   const session = {
-    id: 'sess-1',
+    id: SESSION_ID,
     userId: 'u1',
-    refreshTokenHash: 'hash:goodsecret',
+    refreshTokenHash: `hash:${GOOD_SECRET}`,
     jti: 'old-jti',
     familyId: 'fam-1',
     expiresAt: new Date(Date.now() + 100_000),
@@ -112,7 +123,7 @@ describe('refresh — rotation', () => {
     tx.update.mockReturnValueOnce(q(undefined)); // revoga a linha atual
     tx.insert.mockReturnValueOnce(q([{ id: 'sess-2' }])); // nova sessão
 
-    const result = await service.refresh('sess-1.goodsecret');
+    const result = await service.refresh(`${SESSION_ID}.${GOOD_SECRET}`);
 
     expect(result.refreshCookie).toBe('sess-2.newsecret');
     expect(result.accessToken).toBe('access:u1');
@@ -127,26 +138,37 @@ describe('refresh — rotation', () => {
 
   it('recusa quando a sessão não existe', async () => {
     tx.select.mockReturnValueOnce(q([]));
-    await expect(service.refresh('sess-x.secret')).rejects.toThrow(UnauthorizedException);
+    await expect(service.refresh(`${SESSION_ID}.${GOOD_SECRET}`)).rejects.toThrow(
+      UnauthorizedException,
+    );
   });
 
   it('recusa quando o segredo não bate o hash', async () => {
     tx.select.mockReturnValueOnce(q([{ ...session, refreshTokenHash: 'hash:outro' }]));
-    await expect(service.refresh('sess-1.goodsecret')).rejects.toThrow(UnauthorizedException);
+    await expect(service.refresh(`${SESSION_ID}.${GOOD_SECRET}`)).rejects.toThrow(
+      UnauthorizedException,
+    );
   });
 
   it('recusa refresh expirado', async () => {
     tx.select.mockReturnValueOnce(q([{ ...session, expiresAt: new Date(Date.now() - 1) }]));
-    await expect(service.refresh('sess-1.goodsecret')).rejects.toThrow(UnauthorizedException);
+    await expect(service.refresh(`${SESSION_ID}.${GOOD_SECRET}`)).rejects.toThrow(
+      UnauthorizedException,
+    );
+  });
+
+  it('recusa cookie com UUID ou segredo fora do contrato antes de consultar o banco', async () => {
+    await expect(service.refresh('sess-1.secret')).rejects.toThrow(UnauthorizedException);
+    expect(db.runAsSystem).not.toHaveBeenCalled();
   });
 });
 
 describe('refresh — detecção de reuse', () => {
   it('reapresentar um refresh já revogado invalida a família inteira', async () => {
     const revoked = {
-      id: 'sess-1',
+      id: SESSION_ID,
       userId: 'u1',
-      refreshTokenHash: 'hash:goodsecret',
+      refreshTokenHash: `hash:${GOOD_SECRET}`,
       jti: 'old-jti',
       familyId: 'fam-1',
       expiresAt: new Date(Date.now() + 100_000),
@@ -155,7 +177,7 @@ describe('refresh — detecção de reuse', () => {
     tx.select.mockReturnValueOnce(q([revoked]));
     tx.update.mockReturnValueOnce(q([{ jti: 'j1' }, { jti: 'j2' }])); // família revogada (returning)
 
-    await expect(service.refresh('sess-1.goodsecret')).rejects.toThrow(/reutilizado/i);
+    await expect(service.refresh(`${SESSION_ID}.${GOOD_SECRET}`)).rejects.toThrow(/reutilizado/i);
     expect(denylist.revoke).toHaveBeenCalledWith('j1', expect.any(Number));
     expect(denylist.revoke).toHaveBeenCalledWith('j2', expect.any(Number));
     expect(logger.warn).toHaveBeenCalled();

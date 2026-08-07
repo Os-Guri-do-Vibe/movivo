@@ -11,9 +11,9 @@ overrides:
   'picomatch@>=4.0.0 <4.0.4': '>=4.0.4'
   # sharp <0.35.0 — CVEs herdadas do libvips. Origem: next>sharp (US-0.5, apps/web).
   'sharp@<0.35.0': '>=0.35.0'
-  # postcss <=8.5.11 — leitura arbitrária de arquivo via sourceMappingURL em comentário
-  # CSS. Origem: toolchain do Next/Tailwind. Datado: 2026-07-23.
-  'postcss@<=8.5.11': '>=8.5.12'
+  # postcss <=8.5.22 — leitura arbitrária de .map quando `from` não é definido
+  # (GHSA-fxqj-rqcc-2cmp). Origem: toolchain do Next/Tailwind/Vite. Datado: 2026-08-03.
+  'postcss@<=8.5.22': '>=8.5.23'
   # brace-expansion <5.0.9 — DoS por expansão sem limite (OOM). Transitiva ubíqua
   # (glob/minimatch/eslint). API estável — forçar a linha corrigida é seguro.
   # Faixa ampliada de <=5.0.7 p/ <5.0.9 (advisory revisado). Datado: 2026-08-03.

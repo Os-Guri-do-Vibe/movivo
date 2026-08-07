@@ -139,10 +139,10 @@ FASE 6 — INFRAESTRUTURA                     ← começa após Fase 5 completa
   16 · Henrique
 
 FASE 7 — CONTEÚDO E COMUNICAÇÃO             ← começa após Fase 6 completa
-  17 · Redator  ║  18 · Social Media         (paralelo entre si) [a criar]
+  17 · Redator  ║  18 · Social Media         (paralelo entre si)
 
 FASE 8 — RECEITA E CRESCIMENTO              ← começa após Fase 7 completa
-  19 · Comercial  ║  20 · CS  →  21 · Growth                    [a criar]
+  19 · Comercial  ║  20 · CS  →  21 · Growth
 ```
 
 ---
@@ -226,8 +226,8 @@ O pipeline é dividido em **8 fases**. A ordem entre fases é fixa e não pode s
 
 | # | Agente | Arquivo | Relatório | Especialidade |
 |---|---|---|---|---|
-| 17 | **Redator** | `17-[nome]-redator-copywriter` *(a criar)* | `17-relatorio-[nome].md` | Copywriting, UX writing, conteúdo editorial |
-| 18 | **Social Media** | `18-[nome]-gestor-social-media` *(a criar)* | `18-relatorio-[nome].md` | Gestão de redes, comunidade, engajamento |
+| 17 | **Redator** | `17-bruno-redator-copywriter` | `17-relatorio-bruno.md` | Copywriting, UX writing, conteúdo editorial |
+| 18 | **Social Media** | `18-camila-gestora-social-media` | `18-relatorio-camila.md` | Gestão de redes, comunidade, engajamento |
 
 ---
 
@@ -237,9 +237,9 @@ O pipeline é dividido em **8 fases**. A ordem entre fases é fixa e não pode s
 
 | # | Agente | Arquivo | Relatório | Especialidade |
 |---|---|---|---|---|
-| 19 | **Comercial** | `19-[nome]-executivo-comercial` *(a criar)* | `19-relatorio-[nome].md` | Vendas, B2B, parcerias, propostas comerciais |
-| 20 | **CS** | `20-[nome]-customer-success` *(a criar)* | `20-relatorio-[nome].md` | Onboarding, retenção, suporte, NPS |
-| 21 | **Growth** | `21-[nome]-analista-de-growth` *(a criar)* | `21-relatorio-[nome].md` | Analytics, growth loops, KPIs, experimentação |
+| 19 | **Comercial** | `19-diego-executivo-comercial` | `19-relatorio-diego.md` | Vendas, B2B, parcerias, propostas comerciais |
+| 20 | **CS** | `20-renata-customer-success` | `20-relatorio-renata.md` | Onboarding, retenção, suporte, NPS |
+| 21 | **Growth** | `21-igor-analista-de-growth` | `21-relatorio-igor.md` | Analytics, growth loops, KPIs, experimentação |
 
 ---
 
@@ -430,11 +430,11 @@ Agentes podem adaptar a estrutura à sua especialidade, mas devem manter o vered
 | 5 | 14 | Felipe | `14-felipe-engenheiro-frontend` | Frontend (Next.js 15, React 19, Tailwind, shadcn/ui), AI UI | Backend, arquitetura, IA pura, DevOps |
 | 5 | 15 | Mariana | `15-mariana-analista-de-qualidade` | QA, automação, performance testing, AI evaluation, quality gates | Código de aplicação, arquitetura, DevOps |
 | 6 | 16 | Henrique | `16-henrique-engenheiro-de-plataforma` | Docker, CI/CD, Kubernetes, cloud, observabilidade, SRE, FinOps | Código de aplicação, UX, estratégia de negócio |
-| 7 | 17 | Redator | `17-[nome]-redator-copywriter` *(a criar)* | Copywriting, UX writing, conteúdo editorial | *(a definir)* |
-| 7 | 18 | Social Media | `18-[nome]-gestor-social-media` *(a criar)* | Gestão de redes, comunidade, engajamento | *(a definir)* |
-| 8 | 19 | Comercial | `19-[nome]-executivo-comercial` *(a criar)* | Vendas, B2B, parcerias, propostas | *(a definir)* |
-| 8 | 20 | CS | `20-[nome]-customer-success` *(a criar)* | Onboarding, retenção, suporte, NPS | *(a definir)* |
-| 8 | 21 | Growth | `21-[nome]-analista-de-growth` *(a criar)* | Analytics, growth loops, KPIs, experimentação | *(a definir)* |
+| 7 | 17 | Redator | `17-bruno-redator-copywriter` | Copywriting, UX writing, conteúdo editorial | Identidade visual, redes sociais, funil pago, posicionamento, naming |
+| 7 | 18 | Social Media | `18-camila-gestora-social-media` | Gestão de redes, comunidade, engajamento | Copywriting isolado, funil pago/CAC, identidade visual, posicionamento |
+| 8 | 19 | Comercial | `19-diego-executivo-comercial` | Vendas, B2B, parcerias, propostas | Aquisição B2C self-service, suporte pós-venda, pricing do plano B2C |
+| 8 | 20 | CS | `20-renata-customer-success` | Onboarding, retenção, suporte, NPS | Aquisição de novos usuários, vendas B2B, desenvolvimento de produto |
+| 8 | 21 | Growth | `21-igor-analista-de-growth` | Analytics, growth loops, KPIs, experimentação | Execução de campanhas, gestão de redes sociais, vendas, suporte |
 
 ---
 

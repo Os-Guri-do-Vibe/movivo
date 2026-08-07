@@ -11,12 +11,12 @@ import type { ProtocolStructure } from '@movivo/shared';
 /** Separador de bolhas — o worker envia cada trecho como uma mensagem distinta. */
 export const BUBBLE_SEPARATOR = '\n---\n';
 
-/** Confirmação imediata no submit (PAR-Q liberado). Reforça SLA de 2h e respaldo CREF. */
+/** Confirmação imediata no submit (PAR-Q liberado), sem prometer prazo operacional. */
 export function confirmationMessage(): string {
   return (
-    'Recebemos seus dados! 🙌 Seu plano de treino chega aqui no WhatsApp em até 2 horas — ' +
-    'montado com inteligência artificial e com o respaldo de um profissional de Educação ' +
-    'Física registrado no CREF. Já já te chamo por aqui.'
+    'Recebemos seus dados! 🙌 Seu plano de treino será preparado com inteligência artificial ' +
+    'como ferramenta e revisado por um profissional de Educação Física registrado no CREF. ' +
+    'Avisamos por aqui quando ele estiver pronto.'
   );
 }
 

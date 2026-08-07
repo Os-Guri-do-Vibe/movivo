@@ -16,7 +16,7 @@
  */
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { CONSENT_TEXTS, type ConsentTypeWithText, type RecordConsentInput } from '@movivo/shared';
-import { and, eq, gt, isNull } from 'drizzle-orm';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 
 import { TenantDatabase, type TenantTransaction } from '../../core/database';
 import { anamnesisSessions, consents } from '../../core/database/schema';
@@ -89,10 +89,9 @@ export class ConsentService {
    */
   async linkSessionToUser(sessionId: string, userId: string): Promise<void> {
     await this.db.runAsSystem(async (tx) => {
-      await tx
-        .update(consents)
-        .set({ userId })
-        .where(and(eq(consents.anamnesisSessionId, sessionId), isNull(consents.userId)));
+      await tx.execute(
+        sql`SELECT public.link_session_consents_to_user(${sessionId}::uuid, ${userId}::uuid)`,
+      );
     });
   }
 
@@ -126,16 +125,13 @@ export class ConsentService {
   /** Revogação (LGPD art. 8º, §5º): carimba `revoked_at`, jamais apaga a linha. */
   async revoke(userId: string, type: ConsentTypeWithText): Promise<void> {
     await this.db.runAsUser(userId, 'USER', async (tx) => {
-      await tx
-        .update(consents)
-        .set({ revokedAt: new Date() })
-        .where(
-          and(
-            eq(consents.userId, userId),
-            eq(consents.consentType, type),
-            isNull(consents.revokedAt),
-          ),
-        );
+      if (type === 'HEALTH_DATA') {
+        await tx.execute(sql`SELECT public.revoke_health_data_consent(${userId}::uuid)`);
+        return;
+      }
+      await tx.execute(
+        sql`SELECT public.revoke_non_health_consent(${userId}::uuid, ${type}::consent_type)`,
+      );
     });
   }
 
@@ -161,15 +157,13 @@ export class ConsentService {
    * Idempotência pelo índice único (âncora, finalidade, versão): reaceitar a
    * mesma versão não duplica a prova.
    *
-   * **Prova imutável (Sato — achado 2):** no conflito atualizamos APENAS `accepted`
-   * (a decisão atual). `accepted_at`/`ip`/`user_agent` da PRIMEIRA gravação são
-   * preservados — são a circunstância do aceite original e não podem ser
-   * sobrescritos por um reaceite (perderíamos o timestamp da prova de saúde). A
-   * revogação é registrada por `revoked_at` (nunca aqui).
+   * No conflito, a função estreita de banco atualiza a decisão e também a origem
+   * temporal/técnica correspondente. Assim, uma recusa seguida de aceite prova o
+   * momento e a origem do aceite real, e não os da recusa anterior.
    *
    * ponytail: aceite/recusa da mesma versão é UMA linha (unique constraint); um
-   * flip recusa→aceite mantém a origem da 1ª gravação. A trilha por evento
-   * (linha nova por decisão) entra com o audit_logs append-only da Sprint 5.
+   * flip recusa→aceite continua em uma linha na fase anônima; após o vínculo, a
+   * revogação é registrada também no audit_logs append-only da Sprint 5.
    */
   private async upsert(
     tx: TenantTransaction,
@@ -177,21 +171,18 @@ export class ConsentService {
     input: RecordConsentInput,
     origin: ConsentOrigin,
   ): Promise<void> {
-    await tx
-      .insert(consents)
-      .values({
-        ...subject,
-        consentType: input.type,
-        version: input.version,
-        accepted: input.accepted,
-        ipAddress: origin.ip,
-        userAgent: origin.userAgent,
-        acceptedAt: new Date(),
-      })
-      .onConflictDoUpdate({
-        target: [consents.anamnesisSessionId, consents.consentType, consents.version],
-        // Só a decisão. A prova (accepted_at/ip/user_agent) da 1ª gravação fica.
-        set: { accepted: input.accepted },
-      });
+    if (!subject.anamnesisSessionId || subject.userId) {
+      throw new Error('Registro inicial de consentimento exige sessao anonima.');
+    }
+    await tx.execute(sql`
+      SELECT public.record_session_consent(
+        ${subject.anamnesisSessionId}::uuid,
+        ${input.type}::consent_type,
+        ${input.version}::varchar,
+        ${input.accepted}::boolean,
+        ${origin.ip}::inet,
+        ${origin.userAgent}::text
+      )
+    `);
   }
 }

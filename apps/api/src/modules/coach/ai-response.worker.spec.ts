@@ -2,6 +2,7 @@ import type { Job } from 'bullmq';
 import type { Redis } from 'ioredis';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { HealthConsentService } from '../../core/database/health-consent.service';
 import type { ContextService } from '../ai-coach/context/context.service';
 import type { IntentClassifier } from '../ai-coach/intent/intent-classifier.service';
 import type { Intent } from '../ai-coach/intent/intent.types';
@@ -29,6 +30,7 @@ interface Deps {
   batchItems?: string[];
   constraints?: unknown;
   safetyHandoff?: boolean;
+  consentActive?: boolean;
 }
 
 function makeWorker(deps: Deps = {}) {
@@ -115,10 +117,23 @@ function makeWorker(deps: Deps = {}) {
     abuse,
     validation,
     repo,
+    {
+      hasActiveForUser: vi.fn(async () => deps.consentActive ?? true),
+    } as unknown as HealthConsentService,
     redis,
     logger,
   );
-  return { worker, enqueue, complete, lock, persistTurn, persistHandoff, workers, workerListeners };
+  return {
+    worker,
+    enqueue,
+    complete,
+    lock,
+    persistTurn,
+    persistHandoff,
+    workers,
+    workerListeners,
+    redis,
+  };
 }
 
 function job(): Job<AiResponseJob> {
@@ -141,6 +156,14 @@ function sentText(enqueue: EnqueueCalls): string | undefined {
 afterEach(() => vi.restoreAllMocks());
 
 describe('AIResponseWorker.process (US-3.5)', () => {
+  it('descarta o batch sem persistir ou chamar LLM apos revogacao', async () => {
+    const { worker, redis, persistTurn, complete } = makeWorker({ consentActive: false });
+    await expect(worker.process(job())).resolves.toEqual({ status: 'CONSENT_REVOKED' });
+    expect(redis.del).toHaveBeenCalledWith('bk');
+    expect(persistTurn).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
+  });
+
   it('motivação: intent→contexto→LLM→validação PASS→envia + "digitando…"', async () => {
     const { worker, enqueue, complete } = makeWorker({ intent: 'MOTIVACAO' });
     const res = await worker.process(job());

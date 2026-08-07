@@ -114,8 +114,11 @@ async function rowsOf(sessionId: string) {
       revoked_at: Date | null;
       user_id: string | null;
       accepted_at: Date;
+      ip_address: string | null;
+      user_agent: string | null;
     }>
-  >`SELECT consent_type, version, accepted, revoked_at, user_id, accepted_at
+  >`SELECT consent_type, version, accepted, revoked_at, user_id, accepted_at,
+        ip_address::text, user_agent
       FROM consents WHERE anamnesis_session_id = ${sessionId} ORDER BY consent_type`;
 }
 
@@ -145,7 +148,7 @@ describe('CONSENT — prova de consentimento LGPD (US-1.2)', () => {
     await expect(service.hasValidHealthConsent(sessionA.id)).resolves.toBe(true);
   });
 
-  it('(b) reaceitar a MESMA versão é idempotente e PRESERVA a prova original (Sato #2)', async () => {
+  it('(b) recusa seguida de aceite atualiza a prova para as circunstancias do aceite', async () => {
     const before = (await rowsOf(sessionA.id)).find((r) => r.consent_type === 'MARKETING');
     if (!before) throw new Error('setup: MARKETING deveria existir antes do reaceite');
     const acceptedAtBefore = before.accepted_at.getTime();
@@ -160,10 +163,11 @@ describe('CONSENT — prova de consentimento LGPD (US-1.2)', () => {
     expect(rows).toHaveLength(2); // continua 2, não 3
     const marketing = rows.find((r) => r.consent_type === 'MARKETING');
     if (!marketing) throw new Error('MARKETING deveria continuar existindo');
-    // A decisão atualiza…
+    // A decisao e as circunstancias passam a representar o aceite atual.
     expect(marketing.accepted).toBe(true);
-    // …mas a CIRCUNSTÂNCIA da 1ª gravação (timestamp da prova) NÃO é sobrescrita.
-    expect(marketing.accepted_at.getTime()).toBe(acceptedAtBefore);
+    expect(marketing.accepted_at.getTime()).toBeGreaterThanOrEqual(acceptedAtBefore);
+    expect(marketing.ip_address).toBe('203.0.113.99');
+    expect(marketing.user_agent).toBe('outro-agente');
   });
 
   it('(d) recusa versão divergente da vigente (paridade texto↔versão)', async () => {
@@ -199,14 +203,11 @@ describe('CONSENT — prova de consentimento LGPD (US-1.2)', () => {
   });
 
   it('(f) `movivo_app` NÃO consegue apagar consentimento (append-only)', async () => {
-    const deleted = await tenant.runAsToken(async (tx) => {
-      const res = (await tx.execute(
-        sql`DELETE FROM consents WHERE anamnesis_session_id = ${sessionA.id} RETURNING id`,
-      )) as unknown as Array<{ id: string }>;
-      return res.length;
-    });
-
-    expect(deleted).toBe(0);
+    await expect(
+      tenant.runAsToken((tx) =>
+        tx.execute(sql`DELETE FROM consents WHERE anamnesis_session_id = ${sessionA.id}`),
+      ),
+    ).rejects.toThrow();
     expect(await rowsOf(sessionA.id)).toHaveLength(2); // a prova sobreviveu
   });
 

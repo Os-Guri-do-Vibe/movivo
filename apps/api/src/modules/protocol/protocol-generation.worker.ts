@@ -17,15 +17,17 @@ import { PinoLogger } from 'nestjs-pino';
 import { anamnesisBlock2Schema, anamnesisBlock3Schema, type PrimaryGoal } from '@movivo/shared';
 
 import { HealthCipherService } from '../../core/database/health-cipher.service';
+import { HealthConsentService } from '../../core/database/health-consent.service';
 import { anamnesisSessions, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
+import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { isFinalFailure } from '../jobs/dlq.handler';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { ProtocolGeneratorService } from './protocol-generator.service';
 import { planProtocol } from './protocol-planner';
-import { METHODOLOGY_SIGNER_ID, ProtocolRepository } from './protocol.repository';
+import { ProtocolRepository } from './protocol.repository';
 import { mapInjuriesToTags, type UserConstraints } from './user-constraints';
 import { buildFallbackProtocol, FALLBACK_TEMPLATE_VERSION } from './validation/fallback-template';
 import { ValidationService } from './validation/validation.service';
@@ -48,10 +50,12 @@ export class ProtocolGenerationWorker implements OnModuleInit {
     private readonly workers: WorkerFactory,
     private readonly queues: QueueManager,
     private readonly db: TenantDatabase,
+    private readonly healthConsent: HealthConsentService,
     private readonly cipher: HealthCipherService,
     private readonly generator: ProtocolGeneratorService,
     private readonly validation: ValidationService,
     private readonly repository: ProtocolRepository,
+    private readonly queueEvents: DashboardQueueEventsService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(ProtocolGenerationWorker.name);
@@ -81,6 +85,14 @@ export class ProtocolGenerationWorker implements OnModuleInit {
   async process(job: Job<ProtocolGenerationJob>): Promise<{ status: string }> {
     const { userId, anamnesisSessionId } = job.data;
 
+    if (!(await this.healthConsent.hasActiveForUser(userId))) {
+      this.logger.info(
+        { event: 'protocol_generation_discarded_no_consent', userId },
+        'geracao encerrada apos revogacao de consentimento',
+      );
+      return { status: 'CONSENT_REVOKED' };
+    }
+
     const loaded = await this.load(userId, anamnesisSessionId);
     if (!loaded) {
       this.logger.warn({ userId }, 'usuário/anamnese não encontrados — encerrando job');
@@ -89,6 +101,7 @@ export class ProtocolGenerationWorker implements OnModuleInit {
 
     // TASK-2.4.2 — gate PAR-Q é TRAVA, não flag: sessão de risco não gera nada.
     if (loaded.requiresProfessionalReview) {
+      this.queueEvents.emit('parq');
       this.logger.info(
         { userId, event: 'protocol_generation_blocked_parq' },
         'sessão com PAR-Q de risco — aguardando liberação profissional (Sprint 5)',
@@ -140,7 +153,7 @@ export class ProtocolGenerationWorker implements OnModuleInit {
         loaded.submittedAt,
       );
       this.logger.info(
-        { userId, protocolId: persisted.protocolId, professionalId: METHODOLOGY_SIGNER_ID },
+        { userId, protocolId: persisted.protocolId, professionalId: persisted.professionalId },
         'protocolo AUTO_APPROVED/ACTIVE assinado (metodologia RT) — entrega enfileirada',
       );
       return { status: 'AUTO_APPROVED' };
@@ -150,6 +163,7 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       { userId, protocolId: persisted.protocolId, validationAction: plan.validationAction },
       'protocolo PENDING_REVIEW — não entrega, aguarda painel CREF (Sprint 5)',
     );
+    this.queueEvents.emit('protocol');
     return { status: 'PENDING_REVIEW' };
   }
 
@@ -248,7 +262,7 @@ export class ProtocolGenerationWorker implements OnModuleInit {
     try {
       const goal = await this.goalForFallback(userId, anamnesisSessionId);
       const content = buildFallbackProtocol(goal);
-      await this.repository.persist({
+      const persisted = await this.repository.persist({
         userId,
         content,
         constraints: { goal, fallback: true },
@@ -262,6 +276,7 @@ export class ProtocolGenerationWorker implements OnModuleInit {
         promptVersion: FALLBACK_TEMPLATE_VERSION,
         signed: false,
       });
+      if (!persisted.alreadyExisted) this.queueEvents.emit('protocol');
     } catch (persistErr) {
       this.logger.error(
         { userId, err: persistErr },

@@ -26,10 +26,22 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: {
-    command: 'pnpm run dev',
-    url: baseURL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  webServer: [
+    {
+      command: 'node e2e/mock-dashboard-api.mjs',
+      url: 'http://127.0.0.1:3101/api/v1/health',
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+    },
+    {
+      command: 'pnpm run serve:e2e',
+      url: baseURL,
+      env: {
+        MOVIVO_API_URL: 'http://127.0.0.1:3101/api/v1',
+        NEXT_PUBLIC_API_URL: 'http://127.0.0.1:3101/api/v1',
+      },
+      reuseExistingServer: !process.env.CI,
+      timeout: 180_000,
+    },
+  ],
 });

@@ -21,7 +21,12 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 
 import { loadEnv } from '../config/load-env';
-import { buildRlsPoliciesSql, RLS_TENANT_TABLES } from './security-policies';
+import {
+  buildAuditIntegritySql,
+  buildProfessionalAccessSql,
+  buildRlsPoliciesSql,
+  RLS_TENANT_TABLES,
+} from './security-policies';
 
 /**
  * Raiz de `apps/api`. Usamos `process.cwd()` — e não `import.meta.url` ou
@@ -178,11 +183,20 @@ async function main(): Promise<void> {
     await sql.unsafe(KNOWLEDGE_BASE_SQL(appRole));
     console.log('[db:migrate] Corpus RAG OK.');
 
+    // As policies profissionais chamam funcoes SECURITY DEFINER estreitas; elas
+    // precisam existir antes da primeira criacao das policies.
+    await sql.unsafe(buildProfessionalAccessSql(appRole));
+    console.log('[db:migrate] Vinculos, consentimento e liberacao PAR-Q reconciliados.');
+
     // Row-Level Security (US-1.1 / Sato §4): ENABLE+FORCE + políticas por tenant.
     // Idempotente e reaplicada a cada migração — mesma disciplina dos grants.
     console.log('[db:migrate] Reconciliando políticas RLS (FORCE) das tabelas de titular …');
     await sql.unsafe(buildRlsPoliciesSql());
     console.log(`[db:migrate] RLS FORCE ativa em: ${RLS_TENANT_TABLES.join(', ')}.`);
+
+    // Sprint 5: hash chain serializada + bloqueio de UPDATE/DELETE/TRUNCATE no banco.
+    await sql.unsafe(buildAuditIntegritySql(appRole));
+    console.log('[db:migrate] audit_logs append-only e hash chain reconciliados.');
 
     // Prova de que o modelo de permissões continua íntegro após a migração.
     const [check] = await sql<{ bypassrls: boolean; owns: number }[]>`

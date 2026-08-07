@@ -46,6 +46,8 @@ export const SECRET_KEYS = [
   'STRIPE_WEBHOOK_SECRET',
   'ASAAS_API_KEY',
   'ASAAS_WEBHOOK_SECRET',
+  // Sprint 5 - credencial exclusivamente local para o seed do painel CREF.
+  'DEV_PROFESSIONAL_PASSWORD',
 ] as const;
 
 export type SecretKey = (typeof SECRET_KEYS)[number];

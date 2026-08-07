@@ -24,8 +24,12 @@ import { PinoLogger } from 'nestjs-pino';
 import { z } from 'zod';
 
 import { AppConfigService } from '../../core/config';
+import { HealthConsentService } from '../../core/database/health-consent.service';
 import { conversations, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
+import { CHECKIN_INBOUND_EVENT, type CheckinInboundEvent } from '../../core/event-bus/events';
+import { DomainEventBus } from '../../core/event-bus/event-bus.service';
+import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QUEUE } from '../jobs/jobs.config';
@@ -39,6 +43,9 @@ const DEBOUNCE_MS = 3_000;
 const BATCH_TTL_SECONDS = 120;
 /** TTL do nonce anti-replay (Sato §6). */
 const NONCE_TTL_SECONDS = 600;
+const INBOUND_ROUTE_TTL_SECONDS = 60;
+
+export const HEALTH_CONSENT_REVOCATION_PHRASE = 'REVOGAR CONSENTIMENTO DE SAUDE';
 
 /**
  * ⚠️ PAYLOAD PLACEHOLDER (mock — conta AraraHQ não assinada). O shape real é desconhecido;
@@ -83,6 +90,9 @@ export class WhatsappInboundService {
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
     private readonly db: TenantDatabase,
     private readonly queues: QueueManager,
+    private readonly healthConsent: HealthConsentService,
+    private readonly events: DomainEventBus,
+    private readonly queueEvents: DashboardQueueEventsService,
     private readonly config: AppConfigService,
     private readonly logger: PinoLogger,
   ) {
@@ -135,6 +145,52 @@ export class WhatsappInboundService {
       return;
     }
 
+    const consentCommandId = this.hash(messageId);
+
+    if (this.isHealthConsentRevocation(text)) {
+      await this.healthConsent.revokeForUser(userId);
+      this.queueEvents.emit('consent');
+      await this.queues.enqueue(
+        QUEUE.whatsappOutbound,
+        'health-consent-revoked',
+        {
+          userId,
+          type: 'CONSENT_STATUS',
+          dedupeId: `health-consent-revoked-${consentCommandId}`,
+          text: 'Seu consentimento para uso de dados de saude foi revogado. A MOVIVO cessou novos processamentos de dados de saude neste canal. O historico ja registrado sera mantido somente pelos prazos legais e para exercicio regular de direitos.',
+        },
+        { jobId: `health-consent-revoked-${consentCommandId}` },
+      );
+      this.logger.info(
+        { event: 'health_consent_revoked_whatsapp', userId, correlationId: input.correlationId },
+        'consentimento de dados de saude revogado pelo titular',
+      );
+      return;
+    }
+
+    if (!(await this.healthConsent.hasActiveForUser(userId))) {
+      await this.queues.enqueue(
+        QUEUE.whatsappOutbound,
+        'health-consent-inactive',
+        {
+          userId,
+          type: 'CONSENT_STATUS',
+          dedupeId: `health-consent-inactive-${consentCommandId}`,
+          text: 'Seu consentimento para uso de dados de saude nao esta ativo. Esta mensagem nao foi processada. Para exercer seus direitos ou solicitar orientacao, contate o Encarregado de Dados indicado na Politica de Privacidade.',
+        },
+        { jobId: `health-consent-inactive-${consentCommandId}` },
+      );
+      this.logger.info(
+        {
+          event: 'health_processing_refused_no_consent',
+          userId,
+          correlationId: input.correlationId,
+        },
+        'inbound recusado por ausencia de consentimento vigente',
+      );
+      return;
+    }
+
     // US-3.6 — toque num botão de feedback (👍/👎): registra o voto e NÃO enfileira resposta
     // (não é pergunta). Escopado ao titular; não altera treino.
     const feedback = parseFeedback(parsed.data.buttonId);
@@ -142,6 +198,27 @@ export class WhatsappInboundService {
       await this.registerFeedback(userId, feedback, input.correlationId);
       return;
     }
+
+    const routeKey = this.keys.forUser(userId, 'inbound-route', this.hash(messageId));
+    await this.redis.set(
+      routeKey,
+      JSON.stringify({ text, buttonId: parsed.data.buttonId }),
+      'EX',
+      INBOUND_ROUTE_TTL_SECONDS,
+    );
+    const handled =
+      (await this.events.request<CheckinInboundEvent, boolean>(CHECKIN_INBOUND_EVENT, {
+        userId,
+        routeKey,
+      })) ?? false;
+    if (handled) {
+      this.logger.info(
+        { event: 'checkin_inbound_handled', userId, correlationId: input.correlationId },
+        'resposta de check-in tratada sem LLM',
+      );
+      return;
+    }
+    await this.redis.del(routeKey);
 
     // US-3.6 — engajamento: 2ª mensagem (real) do usuário no mesmo dia (meta ≥40%, Épico 4).
     await this.trackSecondMessageSameDay(userId, input.correlationId);
@@ -243,5 +320,16 @@ export class WhatsappInboundService {
   /** Hash do messageId → segmento de chave Redis válido, independente do formato AraraHQ. */
   private hash(value: string): string {
     return createHash('sha256').update(value).digest('hex');
+  }
+
+  private isHealthConsentRevocation(text: string): boolean {
+    const normalized = text
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .replace(/[.!]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .toUpperCase();
+    return normalized === HEALTH_CONSENT_REVOCATION_PHRASE;
   }
 }

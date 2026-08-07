@@ -29,6 +29,19 @@ Object.defineProperty(window, 'matchMedia', {
   }),
 });
 
+/* jsdom ainda não implementa o ciclo do elemento nativo <dialog>. */
+if (typeof HTMLDialogElement.prototype.showModal !== 'function') {
+  HTMLDialogElement.prototype.showModal = function showModal() {
+    this.setAttribute('open', '');
+  };
+}
+if (typeof HTMLDialogElement.prototype.close !== 'function') {
+  HTMLDialogElement.prototype.close = function close() {
+    this.removeAttribute('open');
+    this.dispatchEvent(new Event('close'));
+  };
+}
+
 afterEach(() => {
   cleanup();
 });

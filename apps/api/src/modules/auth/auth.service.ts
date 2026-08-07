@@ -80,31 +80,94 @@ export class AuthService {
     const parsed = this.parseRefreshCookie(cookieValue);
     if (!parsed) throw new UnauthorizedException('Refresh token ausente ou malformado.');
 
-    const session = await this.db.runAsSystem(async (tx) => {
-      const [row] = await tx
+    const rotation = await this.db.runAsSystem(async (tx) => {
+      // O lock torna consumo+substituição uma única operação. Sem ele, dois refreshes
+      // concorrentes poderiam validar a mesma linha viva e emitir dois descendentes.
+      const [session] = await tx
         .select()
         .from(authSessions)
         .where(eq(authSessions.id, parsed.sessionId))
+        .for('update')
         .limit(1);
-      return row;
+
+      // Não existe, ou o segredo não bate o hash (comparação em tempo constante).
+      if (
+        !session ||
+        !this.tokens.safeEqualHash(
+          session.refreshTokenHash,
+          this.tokens.hashRefreshSecret(parsed.secret),
+        )
+      ) {
+        throw new UnauthorizedException('Refresh token inválido.');
+      }
+
+      // REUSE: com a linha travada, invalida inclusive qualquer descendente que uma
+      // rotação concorrente tenha criado antes de liberar o lock.
+      if (session.revokedAt !== null) {
+        const rows = await tx
+          .update(authSessions)
+          .set({ revokedAt: new Date() })
+          .where(and(eq(authSessions.familyId, session.familyId), isNull(authSessions.revokedAt)))
+          .returning({ jti: authSessions.jti });
+        return {
+          kind: 'REUSE' as const,
+          userId: session.userId,
+          familyId: session.familyId,
+          jtis: rows.map((row) => row.jti),
+        };
+      }
+
+      if (session.expiresAt.getTime() <= Date.now()) {
+        throw new UnauthorizedException('Refresh token expirado.');
+      }
+
+      const [user] = await tx
+        .select({ role: users.role })
+        .from(users)
+        .where(eq(users.id, session.userId))
+        .limit(1);
+      if (!user) throw new UnauthorizedException('Usuário da sessão não encontrado.');
+
+      const jti = randomUUID();
+      const secret = this.tokens.generateRefreshSecret();
+      const refreshTokenHash = this.tokens.hashRefreshSecret(secret);
+      const expiresAt = new Date(Date.now() + this.config.jwt.refreshTtlSeconds * 1000);
+
+      await tx
+        .update(authSessions)
+        .set({ revokedAt: new Date() })
+        .where(eq(authSessions.id, session.id));
+      const [created] = await tx
+        .insert(authSessions)
+        .values({
+          userId: session.userId,
+          refreshTokenHash,
+          jti,
+          familyId: session.familyId,
+          expiresAt,
+        })
+        .returning({ id: authSessions.id });
+      if (!created) throw new Error('Falha ao criar a sessão de autenticação.');
+
+      return {
+        kind: 'ROTATED' as const,
+        userId: session.userId,
+        role: user.role,
+        oldJti: session.jti,
+        newJti: jti,
+        refreshCookie: `${created.id}.${secret}`,
+      };
     });
 
-    // Não existe, ou o segredo não bate o hash (comparação em tempo constante).
-    if (
-      !session ||
-      !this.tokens.safeEqualHash(
-        session.refreshTokenHash,
-        this.tokens.hashRefreshSecret(parsed.secret),
-      )
-    ) {
-      throw new UnauthorizedException('Refresh token inválido.');
-    }
-
-    // REUSE: refresh já rotacionado/revogado reapresentado ⇒ roubo presumido.
-    if (session.revokedAt !== null) {
-      await this.invalidateFamily(session.familyId);
+    const denyUntil = this.accessDenyUntil();
+    if (rotation.kind === 'REUSE') {
+      await Promise.all(rotation.jtis.map((jti) => this.denylist.revoke(jti, denyUntil)));
       this.logger.warn(
-        { event: 'auth_refresh_reuse', userId: session.userId, familyId: session.familyId },
+        {
+          event: 'auth_refresh_reuse',
+          userId: rotation.userId,
+          familyId: rotation.familyId,
+        },
         'refresh reuse — família invalidada',
       );
       throw new UnauthorizedException(
@@ -112,27 +175,13 @@ export class AuthService {
       );
     }
 
-    if (session.expiresAt.getTime() <= Date.now()) {
-      throw new UnauthorizedException('Refresh token expirado.');
-    }
-
-    const [role] = await this.db.runAsSystem(async (tx) => {
-      // Rotation: revoga a linha atual e denylista seu jti (mata o access ainda vivo).
-      await tx
-        .update(authSessions)
-        .set({ revokedAt: new Date() })
-        .where(eq(authSessions.id, session.id));
-      return tx
-        .select({ role: users.role })
-        .from(users)
-        .where(eq(users.id, session.userId))
-        .limit(1);
-    });
-    if (!role) throw new UnauthorizedException('Usuário da sessão não encontrado.');
-
-    await this.denylist.revoke(session.jti, this.accessDenyUntil());
-    const result = await this.issueSession(session.userId, role.role, session.familyId);
-    return { ...result, user: { id: session.userId, role: role.role } };
+    await this.denylist.revoke(rotation.oldJti, denyUntil);
+    const access = this.tokens.signAccessToken(rotation.userId, rotation.role, rotation.newJti);
+    return {
+      accessToken: access.token,
+      refreshCookie: rotation.refreshCookie,
+      user: { id: rotation.userId, role: rotation.role },
+    };
   }
 
   /** Logout: denylista o `jti` do access e revoga a sessão correspondente. */
@@ -173,20 +222,6 @@ export class AuthService {
     return { accessToken: access.token, refreshCookie: `${sessionId}.${secret}` };
   }
 
-  /** Revoga todas as linhas vivas da família e denylista seus `jti` (reuse detectado). */
-  private async invalidateFamily(familyId: string): Promise<void> {
-    const jtis = await this.db.runAsSystem(async (tx) => {
-      const rows = (await tx
-        .update(authSessions)
-        .set({ revokedAt: new Date() })
-        .where(and(eq(authSessions.familyId, familyId), isNull(authSessions.revokedAt)))
-        .returning({ jti: authSessions.jti })) as Array<{ jti: string }>;
-      return rows.map((r) => r.jti);
-    });
-    const until = this.accessDenyUntil();
-    await Promise.all(jtis.map((jti) => this.denylist.revoke(jti, until)));
-  }
-
   /** Epoch (s) até quando um `jti` fica na denylist: cobre a janela máxima do access. */
   private accessDenyUntil(): number {
     return Math.floor(Date.now() / 1000) + parseDurationSeconds(this.config.jwt.accessTtl);
@@ -201,7 +236,13 @@ export class AuthService {
     if (dot <= 0) return null;
     const sessionId = value.slice(0, dot);
     const secret = value.slice(dot + 1);
-    if (!sessionId || !secret) return null;
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        sessionId,
+      ) ||
+      !/^[0-9a-f]{64}$/i.test(secret)
+    )
+      return null;
     return { sessionId, secret };
   }
 }

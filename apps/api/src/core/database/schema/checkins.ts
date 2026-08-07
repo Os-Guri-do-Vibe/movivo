@@ -6,9 +6,10 @@
  * (titular, protocolo, semana) é o que torna esse disparo **idempotente**: um
  * failover do scheduler não gera dois check-ins da mesma semana.
  */
-import { index, jsonb, pgTable, smallint, unique, uuid } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { check, index, jsonb, pgTable, smallint, unique, uuid } from 'drizzle-orm/pg-core';
 
-import { eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
+import { bytea, eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
 import { protocols } from './protocols';
 import { users } from './users';
 
@@ -39,7 +40,11 @@ export const checkins = pgTable(
      * **dor/desconforto**. A pergunta de dor é dado de saúde direto. Mesmo
      * escopo de cifra em repouso da anamnese; não cifrada nesta sprint.
      */
+    /** @deprecated Coluna pre-Sprint 5; constraint exige NULL para impedir plaintext. */
     responses: jsonb('responses'),
+    responsesCipher: bytea('responses_cipher'),
+    currentQuestion: smallint('current_question').notNull().default(1),
+    completedAt: eventTimestamp('completed_at'),
 
     /** Ajustes aplicados pelo Motor Determinístico a partir das respostas. */
     adjustments: jsonb('adjustments'),
@@ -60,6 +65,7 @@ export const checkins = pgTable(
     index('idx_checkins_user_week').on(table.userId, table.weekNumber),
     // Fila do scheduler: check-ins enviados e ainda sem resposta.
     index('idx_checkins_sent_at').on(table.sentAt),
+    check('ck_checkins_no_plaintext_responses', sql`${table.responses} IS NULL`),
   ],
 );
 

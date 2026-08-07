@@ -22,6 +22,10 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { loadEnv } from '../src/core/config/load-env';
+import {
+  buildAuditIntegritySql,
+  buildProfessionalAccessSql,
+} from '../src/core/database/security-policies';
 
 /**
  * As 9 tabelas-base do schema lógico de Lucas (§9, US-0.4) + `auth_sessions`,
@@ -46,6 +50,10 @@ const EXPECTED_TABLES = [
   'intent_examples',
   // Sprint 3 (US-3.6): alertas/handoff ao painel CREF (dado de titular).
   'handoff_alerts',
+  // Sprint 5: escopo profissional explicito, auditoria e reengajamento duravel.
+  'professional_assignments',
+  'audit_logs',
+  'reengagement_nudges',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;
@@ -140,6 +148,188 @@ describe('migração 0000_init num Postgres limpo', () => {
       // Nenhuma tabela-base a mais no schema de domínio (o bookkeeping do drizzle
       // vive no schema `drizzle`, não em `public`).
       expect(present).toHaveLength(EXPECTED_TABLES.length);
+    } finally {
+      await client.end({ timeout: 5 });
+    }
+  });
+
+  it('migra assinaturas legadas para CREF atribuido ou falha fechado antes da FK', async () => {
+    const client = connect(throwawayDb, migratorUser, migratorPassword);
+    const mappedHolder = '10000000-0000-4000-8000-000000000001';
+    const blockedHolder = '10000000-0000-4000-8000-000000000002';
+    const invalidRoleHolder = '10000000-0000-4000-8000-000000000003';
+    const inactiveCrefHolder = '10000000-0000-4000-8000-000000000004';
+    const professional = '20000000-0000-4000-8000-000000000001';
+    const invalidSigner = '30000000-0000-4000-8000-000000000001';
+    const inactiveSigner = '30000000-0000-4000-8000-000000000002';
+    const orphanSigner = '40000000-0000-4000-8000-000000000001';
+    try {
+      await client.unsafe(
+        'ALTER TABLE "protocols" DROP CONSTRAINT "protocols_professional_id_users_id_fk"',
+      );
+      await client`
+        INSERT INTO users (id, phone_number, role, cref_number, cref_region, cref_active)
+        VALUES
+          (${mappedHolder}::uuid, '+5555100000001', 'USER', NULL, NULL, false),
+          (${blockedHolder}::uuid, '+5555100000002', 'USER', NULL, NULL, false),
+          (${invalidRoleHolder}::uuid, '+5555100000003', 'USER', NULL, NULL, false),
+          (${inactiveCrefHolder}::uuid, '+5555100000004', 'USER', NULL, NULL, false),
+          (${professional}::uuid, '+5555200000001', 'PROFESSIONAL', '123456', 'SP', true),
+          (${invalidSigner}::uuid, '+5555300000001', 'USER', NULL, NULL, false),
+          (${inactiveSigner}::uuid, '+5555300000002', 'PROFESSIONAL', '999999', 'SP', false)
+      `;
+      await client`
+        INSERT INTO professional_assignments (professional_id, user_id)
+        VALUES (${professional}::uuid, ${mappedHolder}::uuid),
+               (${professional}::uuid, ${invalidRoleHolder}::uuid)
+      `;
+      await client`
+        INSERT INTO protocols (
+          id, user_id, status, approval_status, professional_id, signed_at,
+          signature_hash, content, constraints, human_review_required
+        ) VALUES
+          ('50000000-0000-4000-8000-000000000001', ${mappedHolder}::uuid,
+           'ACTIVE', 'AUTO_APPROVED', ${orphanSigner}::uuid, now(), repeat('a', 64), '{}', '{}', false),
+          ('50000000-0000-4000-8000-000000000002', ${blockedHolder}::uuid,
+           'ACTIVE', 'AUTO_APPROVED', ${orphanSigner}::uuid, now(), repeat('b', 64), '{}', '{}', false),
+          ('50000000-0000-4000-8000-000000000003', ${invalidRoleHolder}::uuid,
+           'ACTIVE', 'AUTO_APPROVED', ${invalidSigner}::uuid, now(), repeat('c', 64), '{}', '{}', false),
+          ('50000000-0000-4000-8000-000000000004', ${inactiveCrefHolder}::uuid,
+           'ACTIVE', 'AUTO_APPROVED', ${inactiveSigner}::uuid, now(), repeat('d', 64), '{}', '{}', false)
+      `;
+
+      const migration = readFileSync(resolve(apiRoot, 'drizzle', '0015_calm_sage.sql'), 'utf8');
+      await client.unsafe(migration);
+
+      const rows = await client<
+        {
+          id: string;
+          professionalId: string | null;
+          status: string;
+          approvalStatus: string;
+          signedAt: Date | null;
+          signatureHash: string | null;
+          humanReviewRequired: boolean;
+        }[]
+      >`
+        SELECT id, professional_id AS "professionalId", status,
+          approval_status AS "approvalStatus", signed_at AS "signedAt",
+          signature_hash AS "signatureHash", human_review_required AS "humanReviewRequired"
+        FROM protocols WHERE id::text LIKE '50000000-%' ORDER BY id
+      `;
+
+      expect(rows[0]).toMatchObject({ professionalId: professional, status: 'ACTIVE' });
+      expect(rows[1]).toMatchObject({
+        professionalId: null,
+        status: 'PENDING_SIGNATURE',
+        approvalStatus: 'PENDING_REVIEW',
+        signedAt: null,
+        signatureHash: null,
+        humanReviewRequired: true,
+      });
+      expect(rows[2]).toMatchObject({ professionalId: professional, status: 'ACTIVE' });
+      expect(rows[3]).toMatchObject({
+        professionalId: null,
+        status: 'PENDING_SIGNATURE',
+        approvalStatus: 'PENDING_REVIEW',
+        humanReviewRequired: true,
+      });
+      await client`DELETE FROM protocols WHERE id::text LIKE '50000000-%'`;
+      await client`DELETE FROM professional_assignments WHERE professional_id = ${professional}::uuid`;
+      await client`
+        DELETE FROM users WHERE id IN (
+          ${mappedHolder}::uuid, ${blockedHolder}::uuid, ${invalidRoleHolder}::uuid,
+          ${inactiveCrefHolder}::uuid, ${professional}::uuid, ${invalidSigner}::uuid,
+          ${inactiveSigner}::uuid
+        )
+      `;
+    } finally {
+      await client.end({ timeout: 5 });
+    }
+  });
+
+  it('preserva ciclos revogado e reaceito e reativa o vinculo CREF explicitamente', async () => {
+    const client = connect(throwawayDb, migratorUser, migratorPassword);
+    const holder = '70000000-0000-4000-8000-000000000001';
+    const professional = '70000000-0000-4000-8000-000000000002';
+    const session = '60000000-0000-4000-8000-000000000001';
+    try {
+      await client.unsafe(buildAuditIntegritySql(migratorUser));
+      await client.unsafe(buildProfessionalAccessSql(migratorUser));
+      await client`
+        INSERT INTO users (id, phone_number, role, cref_number, cref_region, cref_active)
+        VALUES
+          (${holder}::uuid, '+5555700000001', 'USER', NULL, NULL, false),
+          (${professional}::uuid, '+5555700000002', 'PROFESSIONAL', '700001', 'SP', true)
+      `;
+      await client`
+        INSERT INTO professional_assignments (professional_id, user_id)
+        VALUES (${professional}::uuid, ${holder}::uuid)
+      `;
+      await client`
+        INSERT INTO consents (user_id, consent_type, version, cycle, accepted)
+        VALUES (${holder}::uuid, 'HEALTH_DATA', 'consent-health-2026-08-v2', 1, true)
+      `;
+
+      await client.begin(async (tx) => {
+        await tx`SELECT set_config('app.current_role', 'USER', true)`;
+        await tx`SELECT set_config('app.current_user_id', ${holder}, true)`;
+        await tx`SELECT public.revoke_health_data_consent(${holder}::uuid)`;
+      });
+
+      const [revokedAssignment] = await client<{ active: boolean; revokedAt: Date | null }[]>`
+        SELECT active, revoked_at AS "revokedAt" FROM professional_assignments
+        WHERE professional_id = ${professional}::uuid AND user_id = ${holder}::uuid
+      `;
+      expect(revokedAssignment).toMatchObject({ active: false });
+      expect(revokedAssignment?.revokedAt).toBeInstanceOf(Date);
+
+      await client`
+        INSERT INTO anamnesis_sessions (id, token, status, expires_at)
+        VALUES (${session}::uuid, 'consent-cycle-test', 'IN_PROGRESS', now() + interval '1 hour')
+      `;
+      await client.begin(async (tx) => {
+        await tx`SELECT set_config('app.current_role', 'ANONYMOUS', true)`;
+        await tx`SELECT set_config('app.current_anamnesis_session_id', ${session}, true)`;
+        await tx`SELECT public.record_session_consent(
+          ${session}::uuid, 'HEALTH_DATA'::consent_type,
+          'consent-health-2026-08-v2', true, '203.0.113.10'::inet, 'migration-int-spec'
+        )`;
+      });
+      await client.begin(async (tx) => {
+        await tx`SELECT set_config('app.current_role', 'SYSTEM', true)`;
+        await tx`SELECT public.link_session_consents_to_user(${session}::uuid, ${holder}::uuid)`;
+        await tx`SELECT public.assign_unique_active_professional(${holder}::uuid)`;
+      });
+
+      const consentCycles = await client<
+        { cycle: number; revokedAt: Date | null; accepted: boolean }[]
+      >`
+        SELECT cycle, revoked_at AS "revokedAt", accepted FROM consents
+        WHERE user_id = ${holder}::uuid AND consent_type = 'HEALTH_DATA'
+          AND version = 'consent-health-2026-08-v2'
+        ORDER BY cycle
+      `;
+      expect(consentCycles).toHaveLength(2);
+      expect(consentCycles[0]).toMatchObject({ cycle: 1, accepted: true });
+      expect(consentCycles[0]?.revokedAt).toBeInstanceOf(Date);
+      expect(consentCycles[1]).toMatchObject({ cycle: 2, accepted: true, revokedAt: null });
+
+      const [reactivatedAssignment] = await client<{ active: boolean; revokedAt: Date | null }[]>`
+        SELECT active, revoked_at AS "revokedAt" FROM professional_assignments
+        WHERE professional_id = ${professional}::uuid AND user_id = ${holder}::uuid
+      `;
+      expect(reactivatedAssignment).toEqual({ active: true, revokedAt: null });
+
+      const [audit] = await client<{ action: string; changes: Record<string, unknown> }[]>`
+        SELECT action, changes FROM audit_logs
+        WHERE user_id = ${holder}::uuid AND action = 'HEALTH_CONSENT_REVOKED'
+        ORDER BY created_at DESC LIMIT 1
+      `;
+      expect(audit).toMatchObject({
+        action: 'HEALTH_CONSENT_REVOKED',
+        changes: { consentType: 'HEALTH_DATA', revoked: true },
+      });
     } finally {
       await client.end({ timeout: 5 });
     }

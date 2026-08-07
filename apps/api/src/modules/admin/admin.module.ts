@@ -23,5 +23,16 @@
  */
 import { Module } from '@nestjs/common';
 
-@Module({})
+import { AuthModule } from '../auth/auth.module';
+import { JobsModule } from '../jobs/jobs.module';
+import { ProtocolModule } from '../protocol/protocol.module';
+import { AuditService } from './audit.service';
+import { DashboardController } from './dashboard.controller';
+import { DashboardService } from './dashboard.service';
+
+@Module({
+  imports: [AuthModule, JobsModule, ProtocolModule],
+  controllers: [DashboardController],
+  providers: [AuditService, DashboardService],
+})
 export class AdminModule {}
