@@ -1,0 +1,796 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import { and, desc, eq, isNotNull, or, sql } from 'drizzle-orm';
+import { PinoLogger } from 'nestjs-pino';
+import { protocolStructureSchema } from '@movivo/shared';
+import { z } from 'zod';
+
+import { HealthCipherService } from '../../core/database/health-cipher.service';
+import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
+import {
+  anamnesisSessions,
+  checkins,
+  conversations,
+  handoffAlerts,
+  protocols,
+  protocolVersions,
+  subscriptions,
+  users,
+} from '../../core/database/schema';
+import {
+  TenantDatabase,
+  type TenantTransaction,
+} from '../../core/database/tenant-database.service';
+import { scrubPII } from '../ai-coach/llm/pii-scrubber';
+import type { AuthenticatedUser } from '../auth/jwt.strategy';
+import { QUEUE } from '../jobs/jobs.config';
+import { QueueManager } from '../jobs/queue-manager.service';
+import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
+import { signatureHash } from '../protocol/protocol.repository';
+import type { UserConstraints } from '../protocol/user-constraints';
+import { ValidationService } from '../protocol/validation/validation.service';
+import type { ProtocolGenerationJob } from '../protocol/protocol-generation.worker';
+import { AuditService } from './audit.service';
+
+const uuidSchema = z.uuid();
+const kindSchema = z.enum(['PROTOCOL', 'HANDOFF', 'PARQ', 'CHECKIN']);
+const editSchema = z.object({
+  content: protocolStructureSchema,
+  reason: z.string().trim().min(5).max(500),
+});
+const signSchema = z.object({ confirmation: z.literal(true) });
+const releaseSchema = z.object({
+  decision: z.literal('RELEASED'),
+  notes: z.string().trim().min(5).max(1000),
+  confirmation: z.literal(true),
+});
+const resolveSchema = z.object({
+  resolution: z.string().trim().min(3).max(80),
+  notes: z.string().trim().min(3).max(1000),
+  confirmation: z.literal(true),
+});
+
+export interface QueueItem {
+  id: string;
+  kind: 'PROTOCOL' | 'HANDOFF' | 'PARQ' | 'CHECKIN';
+  severity: 'SAFETY' | 'ALERT' | 'ROUTINE';
+  createdAt: string;
+  ageMinutes: number;
+  title: string;
+  summary: string;
+  status: string;
+}
+
+@Injectable()
+export class DashboardService {
+  constructor(
+    private readonly db: TenantDatabase,
+    private readonly validation: ValidationService,
+    private readonly cipher: HealthCipherService,
+    private readonly audit: AuditService,
+    private readonly queues: QueueManager,
+    private readonly queueEvents: DashboardQueueEventsService,
+    private readonly logger: PinoLogger,
+  ) {
+    this.logger.setContext(DashboardService.name);
+  }
+
+  async queue(actor: AuthenticatedUser) {
+    const items = await this.scoped(actor, async (tx) => {
+      const [pendingProtocols, alerts, blockedParq] = await Promise.all([
+        tx
+          .select({ id: protocols.id, createdAt: protocols.createdAt, status: protocols.status })
+          .from(protocols)
+          .where(
+            or(
+              eq(protocols.approvalStatus, 'PENDING_REVIEW'),
+              eq(protocols.status, 'PENDING_SIGNATURE'),
+            ),
+          ),
+        tx
+          .select({
+            id: handoffAlerts.id,
+            createdAt: handoffAlerts.createdAt,
+            level: handoffAlerts.level,
+            reason: handoffAlerts.reason,
+            sourceType: handoffAlerts.sourceType,
+          })
+          .from(handoffAlerts)
+          .where(eq(handoffAlerts.status, 'OPEN')),
+        tx
+          .select({ id: anamnesisSessions.id, createdAt: anamnesisSessions.createdAt })
+          .from(anamnesisSessions)
+          .where(eq(anamnesisSessions.parqState, 'BLOQUEADO_AGUARDANDO_CLEARANCE')),
+      ]);
+
+      const out: QueueItem[] = pendingProtocols.map((row) =>
+        this.item(
+          row.id,
+          'PROTOCOL',
+          'ROUTINE',
+          row.createdAt,
+          'Protocolo para revisao',
+          row.status,
+        ),
+      );
+      for (const row of alerts) {
+        const kind = row.sourceType === 'CHECKIN' ? 'CHECKIN' : 'HANDOFF';
+        out.push(
+          this.item(
+            row.id,
+            kind,
+            row.level,
+            row.createdAt,
+            kind === 'CHECKIN' ? 'Check-in requer atencao' : 'Conversa requer atencao',
+            row.reason,
+          ),
+        );
+      }
+      out.push(
+        ...blockedParq.map((row) =>
+          this.item(
+            row.id,
+            'PARQ',
+            'SAFETY',
+            row.createdAt,
+            'PAR-Q aguarda decisao humana',
+            'BLOCKED',
+          ),
+        ),
+      );
+      return out.sort(
+        (a, b) => this.priority(a) - this.priority(b) || a.createdAt.localeCompare(b.createdAt),
+      );
+    });
+
+    const counts = { SAFETY: 0, ALERT: 0, ROUTINE: 0, total: items.length };
+    for (const item of items) counts[item.severity] += 1;
+    return { items, counts };
+  }
+
+  events(actor: AuthenticatedUser) {
+    this.assertProfessional(actor);
+    return this.queueEvents.stream();
+  }
+
+  async detail(actor: AuthenticatedUser, rawKind: string, rawId: string): Promise<unknown> {
+    const kind = this.parse(kindSchema, rawKind);
+    const id = this.parse(uuidSchema, rawId);
+    if (kind === 'PROTOCOL') return this.protocolDetail(actor, id);
+    if (kind === 'PARQ') return this.parqDetail(actor, id);
+    if (kind === 'CHECKIN') return this.checkinDetail(actor, id);
+    return this.handoffDetail(actor, id);
+  }
+
+  async editProtocol(actor: AuthenticatedUser, rawId: string, rawBody: unknown) {
+    const id = this.parse(uuidSchema, rawId);
+    const body = this.parse(editSchema, rawBody);
+    const edited = await this.scoped(actor, async (tx) => {
+      const row = await this.requireProtocol(tx, id, true);
+      const verdict = this.validation.validate({
+        structure: body.content,
+        constraints: row.constraints as Pick<UserConstraints, 'goal' | 'injuryTags'>,
+        parqFlags: row.parQFlags as UserConstraints['injuryTags'],
+      });
+      if (verdict.action !== 'PASS') {
+        throw new BadRequestException({
+          code: 'PROTOCOL_NOT_SAFE_TO_EDIT',
+          violations: verdict.violations,
+        });
+      }
+      const beforeHash = this.hashJson(row.content);
+      const afterHash = signatureHash(body.content);
+      await tx
+        .update(protocols)
+        .set({
+          content: body.content,
+          status: 'PENDING_SIGNATURE',
+          approvalStatus: 'PENDING_REVIEW',
+          professionalId: null,
+          signedAt: null,
+          signatureHash: null,
+          humanReviewRequired: true,
+        })
+        .where(eq(protocols.id, id));
+      await this.audit.append(tx, {
+        actorId: actor.userId,
+        userId: row.userId,
+        action: 'PROTOCOL_EDITED',
+        entityType: 'protocol',
+        entityId: id,
+        changes: {
+          reasonHash: this.hashJson(body.reason),
+          beforeHash,
+          afterHash,
+          validation: verdict.code,
+        },
+      });
+      return {
+        id,
+        status: 'PENDING_SIGNATURE',
+        validation: verdict.code,
+        violations: verdict.violations,
+      };
+    });
+    this.queueEvents.emit('protocol');
+    return edited;
+  }
+
+  async signProtocol(actor: AuthenticatedUser, rawId: string, rawBody: unknown) {
+    const id = this.parse(uuidSchema, rawId);
+    this.parse(signSchema, rawBody);
+    const signed = await this.scoped(actor, async (tx) => {
+      const row = await this.requireProtocol(tx, id, true);
+      if (row.status === 'ACTIVE' && row.signedAt && row.signatureHash && row.professionalId) {
+        return {
+          userId: row.userId,
+          version: row.version,
+          signatureHash: row.signatureHash,
+          signedAt: row.signedAt.toISOString(),
+          alreadySigned: true,
+        };
+      }
+      if (row.status !== 'PENDING_SIGNATURE' || row.approvalStatus !== 'PENDING_REVIEW') {
+        throw new BadRequestException('Protocolo nao esta aguardando assinatura.');
+      }
+      const [professional] = await tx
+        .select({
+          crefActive: users.crefActive,
+          crefNumber: users.crefNumber,
+          crefRegion: users.crefRegion,
+        })
+        .from(users)
+        .where(eq(users.id, actor.userId))
+        .limit(1);
+      if (!professional?.crefActive || !professional.crefNumber || !professional.crefRegion) {
+        throw new BadRequestException(
+          'Credencial CREF ativa e verificada e obrigatoria para assinar.',
+        );
+      }
+      const content = protocolStructureSchema.parse(row.content);
+      const verdict = this.validation.validate({
+        structure: content,
+        constraints: row.constraints as Pick<UserConstraints, 'goal' | 'injuryTags'>,
+        parqFlags: row.parQFlags as UserConstraints['injuryTags'],
+      });
+      if (verdict.action !== 'PASS') {
+        throw new BadRequestException({
+          code: 'PROTOCOL_NOT_SAFE_TO_SIGN',
+          violations: verdict.violations,
+        });
+      }
+      const now = new Date();
+      const nextVersion = row.version + 1;
+      const hash = signatureHash(content);
+      await tx
+        .update(protocols)
+        .set({
+          version: nextVersion,
+          status: 'ACTIVE',
+          approvalStatus: 'HUMAN_APPROVED',
+          professionalId: actor.userId,
+          signedAt: now,
+          signatureHash: hash,
+          humanReviewRequired: false,
+        })
+        .where(eq(protocols.id, id));
+      await tx.insert(protocolVersions).values({
+        protocolId: id,
+        userId: row.userId,
+        version: nextVersion,
+        status: 'ACTIVE',
+        content,
+        changeReason: 'revisao e assinatura humana CREF',
+        generatedBy: row.generatedBy,
+        signatureHash: hash,
+        signedAt: now,
+      });
+      await this.audit.append(tx, {
+        actorId: actor.userId,
+        userId: row.userId,
+        action: 'PROTOCOL_SIGNED',
+        entityType: 'protocol',
+        entityId: id,
+        changes: { version: nextVersion, signatureHash: hash, signedAt: now.toISOString() },
+      });
+      return {
+        userId: row.userId,
+        version: nextVersion,
+        signatureHash: hash,
+        signedAt: now.toISOString(),
+        alreadySigned: false,
+      };
+    });
+
+    const outbound: WhatsappOutboundJob = {
+      userId: signed.userId,
+      type: 'PROTOCOL_DELIVERY',
+      protocolId: id,
+      protocolVersion: signed.version,
+      dedupeId: `signed-${id}-${signed.version}`,
+    };
+    if (!signed.alreadySigned) {
+      await this.queues.enqueue(QUEUE.whatsappOutbound, 'signed-protocol-delivery', outbound, {
+        jobId: `signed-protocol-${id}-${signed.version}`,
+      });
+      this.queueEvents.emit('protocol');
+    }
+    return {
+      id,
+      version: signed.version,
+      signatureHash: signed.signatureHash,
+      signedAt: signed.signedAt,
+      alreadySigned: signed.alreadySigned,
+    };
+  }
+
+  async releaseParq(actor: AuthenticatedUser, rawId: string, rawBody: unknown) {
+    const id = this.parse(uuidSchema, rawId);
+    const body = this.parse(releaseSchema, rawBody);
+    const released = await this.scoped(actor, async (tx) => {
+      const [row] = await tx
+        .select({
+          userId: anamnesisSessions.userId,
+          state: anamnesisSessions.parqState,
+          submittedAt: anamnesisSessions.submittedAt,
+        })
+        .from(anamnesisSessions)
+        .where(eq(anamnesisSessions.id, id))
+        .for('update')
+        .limit(1);
+      if (!row?.userId) throw new NotFoundException('PAR-Q nao encontrado.');
+      if (row.state === 'LIBERADO' || row.state === 'LIBERADO_COM_RESSALVA_RT') {
+        return {
+          userId: row.userId,
+          state: row.state,
+          submittedAt: row.submittedAt,
+          alreadyReleased: true,
+        };
+      }
+      if (row.state !== 'BLOQUEADO_AGUARDANDO_CLEARANCE') {
+        throw new BadRequestException('PAR-Q nao esta aguardando liberacao.');
+      }
+      const state = 'LIBERADO' as const;
+      await tx.execute(sql`SELECT release_parq_clearance(${id}::uuid, ${state}::parq_state)`);
+      await this.audit.append(tx, {
+        actorId: actor.userId,
+        userId: row.userId,
+        action: 'PARQ_RELEASED_BY_HUMAN',
+        entityType: 'anamnesis_session',
+        entityId: id,
+        changes: { decision: body.decision, notesHash: this.hashJson(body.notes) },
+      });
+      return { userId: row.userId, state, submittedAt: row.submittedAt, alreadyReleased: false };
+    });
+    if (!released.alreadyReleased) {
+      const job: ProtocolGenerationJob = {
+        userId: released.userId,
+        anamnesisSessionId: id,
+        submittedAt: released.submittedAt?.toISOString(),
+      };
+      await this.queues.enqueue(QUEUE.protocolGeneration, 'protocol-after-parq-release', job, {
+        jobId: `parq-release-${id}`,
+      });
+      this.queueEvents.emit('parq');
+    }
+    return { id, state: released.state, alreadyReleased: released.alreadyReleased };
+  }
+
+  async resolveHandoff(actor: AuthenticatedUser, rawId: string, rawBody: unknown) {
+    const id = this.parse(uuidSchema, rawId);
+    const body = this.parse(resolveSchema, rawBody);
+    const resolved = await this.scoped(actor, async (tx) => {
+      const [row] = await tx
+        .select({ userId: handoffAlerts.userId, status: handoffAlerts.status })
+        .from(handoffAlerts)
+        .where(eq(handoffAlerts.id, id))
+        .for('update')
+        .limit(1);
+      if (!row) throw new NotFoundException('Handoff nao encontrado.');
+      if (row.status === 'RESOLVED') return { id, status: 'RESOLVED' as const, changed: false };
+      await tx.update(handoffAlerts).set({ status: 'RESOLVED' }).where(eq(handoffAlerts.id, id));
+      await this.audit.append(tx, {
+        actorId: actor.userId,
+        userId: row.userId,
+        action: 'HANDOFF_RESOLVED',
+        entityType: 'handoff_alert',
+        entityId: id,
+        changes: {
+          resolutionHash: this.hashJson(body.resolution),
+          notesHash: this.hashJson(body.notes),
+        },
+      });
+      return { id, status: 'RESOLVED' as const, changed: true };
+    });
+    if (resolved.changed) this.queueEvents.emit('handoff');
+    return { id: resolved.id, status: resolved.status };
+  }
+
+  async operations(actor: AuthenticatedUser) {
+    return this.scoped(actor, async (tx) => {
+      const [funnel] = await tx
+        .select({
+          formStarted: sql<number>`count(distinct ${anamnesisSessions.id})::int`,
+          protocolSent: sql<number>`count(distinct ${protocols.id}) filter (where ${protocols.status} = 'ACTIVE')::int`,
+          converted: sql<number>`count(distinct ${subscriptions.id}) filter (where ${subscriptions.status} = 'ACTIVE')::int`,
+        })
+        .from(anamnesisSessions)
+        .leftJoin(protocols, eq(protocols.userId, anamnesisSessions.userId))
+        .leftJoin(subscriptions, eq(subscriptions.userId, anamnesisSessions.userId));
+      const [coachSla] = await tx
+        .select({
+          coachP95Ms: sql<
+            number | null
+          >`percentile_cont(0.95) within group (order by ${conversations.latencyMs})`,
+        })
+        .from(conversations)
+        .where(isNotNull(conversations.latencyMs));
+      const [protocolSla] = await tx
+        .select({
+          protocolAverageMinutes: sql<
+            number | null
+          >`avg(extract(epoch from (${protocols.signedAt} - ${anamnesisSessions.submittedAt})) / 60)`,
+        })
+        .from(anamnesisSessions)
+        .innerJoin(protocols, eq(protocols.userId, anamnesisSessions.userId))
+        .where(and(isNotNull(anamnesisSessions.submittedAt), isNotNull(protocols.signedAt)));
+      const replayRows = await tx
+        .select({
+          id: conversations.id,
+          userId: conversations.userId,
+          direction: conversations.direction,
+          content: conversations.content,
+          createdAt: conversations.createdAt,
+          name: users.name,
+          phoneNumber: users.phoneNumber,
+          email: users.email,
+        })
+        .from(conversations)
+        .innerJoin(users, eq(users.id, conversations.userId))
+        .orderBy(desc(conversations.createdAt))
+        .limit(100);
+      const completedCheckins = await tx
+        .select({ userId: checkins.userId, responsesCipher: checkins.responsesCipher })
+        .from(checkins)
+        .where(and(eq(checkins.currentQuestion, 4), isNotNull(checkins.responsesCipher)));
+      const accessedUsers = new Set([
+        ...replayRows.map((row) => row.userId),
+        ...completedCheckins.map((row) => row.userId),
+      ]);
+      for (const userId of accessedUsers) {
+        await this.auditRead(tx, actor, userId, 'operations_dashboard', userId);
+      }
+      const firstWorkout = await this.countUsersWithWorkout(completedCheckins);
+      const replays = this.groupReplays(replayRows);
+      const protocolDeliveryMinutes = this.nullableNumber(protocolSla?.protocolAverageMinutes);
+      const coachP95Seconds = this.nullableNumber(coachSla?.coachP95Ms, 1_000);
+      // ponytail: polling e logs estruturados cobrem o MVP; SSE/PostHog entram na Fase 6
+      // quando existir infraestrutura compartilhada para conexoes e ingestao resiliente.
+      return {
+        funnel: { ...funnel, firstWorkout },
+        sla: {
+          protocolDeliveryMinutes,
+          coachP95Seconds,
+          protocolBreached: protocolDeliveryMinutes !== null && protocolDeliveryMinutes > 120,
+          coachBreached: coachP95Seconds !== null && coachP95Seconds > 30,
+        },
+        replays,
+      };
+    });
+  }
+
+  private async protocolDetail(actor: AuthenticatedUser, id: string) {
+    return this.scoped(actor, async (tx) => {
+      const row = await this.requireProtocol(tx, id);
+      await this.auditRead(tx, actor, row.userId, 'protocol', id);
+      const item = this.item(
+        id,
+        'PROTOCOL',
+        'ROUTINE',
+        row.createdAt,
+        'Protocolo para revisao',
+        row.status,
+      );
+      return {
+        item,
+        context: {
+          version: row.version,
+          humanReviewRequired: row.humanReviewRequired,
+        },
+        protocol: {
+          id,
+          version: row.version,
+          status: row.status,
+          approvalStatus: row.approvalStatus,
+          content: row.content,
+          signedAt: row.signedAt?.toISOString() ?? null,
+          signatureHash: row.signatureHash,
+        },
+      };
+    });
+  }
+
+  private async parqDetail(actor: AuthenticatedUser, id: string) {
+    const row = await this.scoped(actor, async (tx) => {
+      const [found] = await tx
+        .select({
+          userId: anamnesisSessions.userId,
+          data: anamnesisSessions.dataBlock2,
+          state: anamnesisSessions.parqState,
+          createdAt: anamnesisSessions.createdAt,
+        })
+        .from(anamnesisSessions)
+        .where(eq(anamnesisSessions.id, id))
+        .limit(1);
+      if (!found?.userId) throw new NotFoundException('PAR-Q nao encontrado.');
+      await this.auditRead(tx, actor, found.userId, 'anamnesis_session', id);
+      return found;
+    });
+    const health = row.data
+      ? (JSON.parse(await this.cipher.decryptHealth(row.data)) as {
+          parq?: { answers?: Array<{ questionId?: string; answer?: boolean }> };
+        })
+      : null;
+    const flags = (health?.parq?.answers ?? [])
+      .filter((answer) => answer.answer === true && answer.questionId)
+      .map((answer) => answer.questionId as string);
+    return {
+      item: this.item(
+        id,
+        'PARQ',
+        'SAFETY',
+        row.createdAt,
+        'PAR-Q aguarda decisao humana',
+        row.state ?? 'BLOCKED',
+      ),
+      context: { positiveAnswers: flags.length },
+      parq: { flags, state: row.state ?? 'BLOQUEADO_AGUARDANDO_CLEARANCE' },
+    };
+  }
+
+  private async checkinDetail(actor: AuthenticatedUser, alertId: string) {
+    const row = await this.scoped(actor, async (tx) => {
+      const [alert] = await tx
+        .select({
+          userId: handoffAlerts.userId,
+          checkinId: handoffAlerts.sourceId,
+          level: handoffAlerts.level,
+          reason: handoffAlerts.reason,
+          status: handoffAlerts.status,
+          createdAt: handoffAlerts.createdAt,
+        })
+        .from(handoffAlerts)
+        .where(and(eq(handoffAlerts.id, alertId), eq(handoffAlerts.sourceType, 'CHECKIN')))
+        .limit(1);
+      if (!alert?.checkinId) throw new NotFoundException('Check-in nao encontrado.');
+      const [checkin] = await tx
+        .select({
+          responsesCipher: checkins.responsesCipher,
+          weekNumber: checkins.weekNumber,
+          completedAt: checkins.completedAt,
+        })
+        .from(checkins)
+        .where(eq(checkins.id, alert.checkinId))
+        .limit(1);
+      if (!checkin) throw new NotFoundException('Check-in nao encontrado.');
+      await this.auditRead(tx, actor, alert.userId, 'checkin', alert.checkinId);
+      return { ...alert, ...checkin };
+    });
+    const responses = row.responsesCipher
+      ? (JSON.parse(await this.cipher.decryptHealth(row.responsesCipher)) as Record<
+          string,
+          unknown
+        >)
+      : {};
+    return {
+      item: this.item(
+        alertId,
+        'CHECKIN',
+        row.level,
+        row.createdAt,
+        'Check-in requer atencao',
+        row.status,
+      ),
+      context: {
+        weekNumber: row.weekNumber,
+        completedAt: row.completedAt?.toISOString() ?? null,
+        responses: JSON.stringify(responses),
+      },
+      handoff: { reason: row.reason, level: row.level, status: row.status },
+    };
+  }
+
+  private async handoffDetail(actor: AuthenticatedUser, id: string) {
+    return this.scoped(actor, async (tx) => {
+      const [alert] = await tx
+        .select({
+          userId: handoffAlerts.userId,
+          level: handoffAlerts.level,
+          reason: handoffAlerts.reason,
+          conversationId: handoffAlerts.conversationId,
+          status: handoffAlerts.status,
+          createdAt: handoffAlerts.createdAt,
+        })
+        .from(handoffAlerts)
+        .where(eq(handoffAlerts.id, id))
+        .limit(1);
+      if (!alert) throw new NotFoundException('Handoff nao encontrado.');
+      const [owner] = await tx
+        .select({ name: users.name, phoneNumber: users.phoneNumber, email: users.email })
+        .from(users)
+        .where(eq(users.id, alert.userId))
+        .limit(1);
+      const context = await tx
+        .select({
+          id: conversations.id,
+          direction: conversations.direction,
+          content: conversations.content,
+          createdAt: conversations.createdAt,
+        })
+        .from(conversations)
+        .where(eq(conversations.userId, alert.userId))
+        .orderBy(desc(conversations.createdAt))
+        .limit(12);
+      await this.auditRead(tx, actor, alert.userId, 'handoff_alert', id);
+      const replayRows = context.reverse().map((message) => ({
+        ...message,
+        userId: alert.userId,
+        name: owner?.name ?? null,
+        phoneNumber: owner?.phoneNumber ?? '',
+        email: owner?.email ?? null,
+      }));
+      return {
+        item: this.item(
+          id,
+          'HANDOFF',
+          alert.level,
+          alert.createdAt,
+          'Conversa requer atencao',
+          alert.status,
+        ),
+        context: { reason: alert.reason, messages: context.length },
+        handoff: { reason: alert.reason, level: alert.level, status: alert.status },
+        replay: this.groupReplays(replayRows)[0],
+      };
+    });
+  }
+
+  private async requireProtocol(tx: TenantTransaction, id: string, forUpdate = false) {
+    const query = tx.select().from(protocols).where(eq(protocols.id, id));
+    const [row] = forUpdate ? await query.for('update').limit(1) : await query.limit(1);
+    if (!row) throw new NotFoundException('Protocolo nao encontrado.');
+    return row;
+  }
+
+  private async auditRead(
+    tx: TenantTransaction,
+    actor: AuthenticatedUser,
+    userId: string,
+    entityType: string,
+    entityId: string,
+  ) {
+    await this.audit.append(tx, {
+      actorId: actor.userId,
+      userId,
+      action: 'HEALTH_DATA_VIEWED',
+      entityType,
+      entityId,
+      changes: { purpose: 'professional_supervision' },
+    });
+  }
+
+  private scoped<T>(
+    actor: AuthenticatedUser,
+    callback: (tx: TenantTransaction) => Promise<T>,
+  ): Promise<T> {
+    this.assertProfessional(actor);
+    return this.db.runAsUser(actor.userId, actor.role, callback);
+  }
+
+  private assertProfessional(actor: AuthenticatedUser): void {
+    if (actor.role !== 'PROFESSIONAL') {
+      throw new ForbiddenException('Acesso exclusivo ao profissional CREF atribuido.');
+    }
+  }
+
+  private parse<T>(schema: z.ZodType<T>, input: unknown): T {
+    const result = schema.safeParse(input);
+    if (!result.success)
+      throw new BadRequestException({ code: 'INVALID_INPUT', issues: result.error.issues });
+    return result.data;
+  }
+
+  private item(
+    id: string,
+    kind: QueueItem['kind'],
+    severity: QueueItem['severity'],
+    createdAt: Date,
+    title: string,
+    status: string,
+  ): QueueItem {
+    return {
+      id,
+      kind,
+      severity,
+      createdAt: createdAt.toISOString(),
+      ageMinutes: Math.max(0, Math.floor((Date.now() - createdAt.getTime()) / 60_000)),
+      title,
+      summary: status,
+      status,
+    };
+  }
+
+  private priority(item: QueueItem): number {
+    return item.severity === 'SAFETY' ? 0 : item.severity === 'ALERT' ? 1 : 2;
+  }
+
+  private hashJson(value: unknown): string {
+    return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  }
+
+  private async countUsersWithWorkout(
+    rows: Array<{ userId: string; responsesCipher: Buffer | null }>,
+  ): Promise<number> {
+    const usersWithWorkout = new Set<string>();
+    for (const row of rows) {
+      if (!row.responsesCipher) continue;
+      const response = JSON.parse(await this.cipher.decryptHealth(row.responsesCipher)) as {
+        workouts?: string;
+      };
+      if (response.workouts && response.workouts !== 'NENHUM') usersWithWorkout.add(row.userId);
+    }
+    return usersWithWorkout.size;
+  }
+
+  private nullableNumber(value: unknown, divisor = 1): number | null {
+    if (value === null || value === undefined) return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed / divisor : null;
+  }
+
+  private groupReplays(
+    rows: Array<{
+      id: string;
+      userId: string;
+      direction: 'INBOUND' | 'OUTBOUND';
+      content: string;
+      createdAt: Date;
+      name: string | null;
+      phoneNumber: string;
+      email: string | null;
+    }>,
+  ) {
+    const groups = new Map<
+      string,
+      {
+        conversationId: string;
+        startedAt: string;
+        messages: Array<{
+          role: 'USER' | 'ASSISTANT';
+          content: string;
+          createdAt: string;
+        }>;
+      }
+    >();
+    for (const row of [...rows].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())) {
+      const conversationId = createHash('sha256').update(row.userId).digest('hex').slice(0, 16);
+      const current = groups.get(conversationId) ?? {
+        conversationId,
+        startedAt: row.createdAt.toISOString(),
+        messages: [],
+      };
+      current.messages.push({
+        role: row.direction === 'INBOUND' ? 'USER' : 'ASSISTANT',
+        content: scrubPII(row.content, row),
+        createdAt: row.createdAt.toISOString(),
+      });
+      groups.set(conversationId, current);
+    }
+    return [...groups.values()];
+  }
+}

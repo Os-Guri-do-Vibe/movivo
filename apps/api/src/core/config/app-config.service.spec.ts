@@ -46,6 +46,7 @@ function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     JWT_PUBLIC_KEY: 'public-key-not-secret',
     JWT_ACCESS_TTL: '15m',
     JWT_REFRESH_TTL: '30d',
+    DEV_PROFESSIONAL_PASSWORD: 'super-secret-dev-professional',
     ...overrides,
   } as AppConfig;
 }
@@ -156,11 +157,13 @@ describe('AppConfigService', () => {
     // Segredos mascarados.
     expect(snapshot.DATABASE_PASSWORD).toBe('[REDACTED]');
     expect(snapshot.REDIS_PASSWORD).toBe('[REDACTED]');
+    expect(snapshot.DEV_PROFESSIONAL_PASSWORD).toBe('[REDACTED]');
     // Metadados operacionais preservados.
     expect(snapshot.DATABASE_HOST).toBe('localhost');
     expect(snapshot.API_PORT).toBe(3001);
     // Nenhum valor de segredo em claro sobrou no snapshot serializado.
     expect(JSON.stringify(snapshot)).not.toContain('super-secret-app');
     expect(JSON.stringify(snapshot)).not.toContain('super-secret-redis');
+    expect(JSON.stringify(snapshot)).not.toContain('super-secret-dev-professional');
   });
 });

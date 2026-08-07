@@ -126,6 +126,7 @@ afterAll(async () => {
        DELETE FROM anamnesis_sessions WHERE token LIKE '%${RUN}%'
          OR user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM subscriptions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
+       DELETE FROM professional_assignments WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM users WHERE phone_number LIKE '+5541${RUN}%';`,
     );
   } finally {

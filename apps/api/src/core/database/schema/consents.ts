@@ -24,6 +24,7 @@ import {
   index,
   inet,
   pgTable,
+  smallint,
   text,
   unique,
   uuid,
@@ -72,6 +73,9 @@ export const consents = pgTable(
      */
     version: varchar('version', { length: 40 }).notNull(),
 
+    /** Ciclo imutável de aceite; reconsentir cria nova prova após uma revogação. */
+    cycle: smallint('cycle').notNull().default(1),
+
     /** `false` é um registro legítimo: recusa explícita também precisa de prova. */
     accepted: boolean('accepted').notNull(),
 
@@ -95,7 +99,12 @@ export const consents = pgTable(
   (table) => [
     // Um registro por (titular, finalidade, versão do texto): reaceitar a MESMA
     // versão é idempotente; um texto novo gera versão nova e linha nova.
-    unique('uq_consents_user_type_version').on(table.userId, table.consentType, table.version),
+    unique('uq_consents_user_type_version_cycle').on(
+      table.userId,
+      table.consentType,
+      table.version,
+      table.cycle,
+    ),
     // Mesma idempotência na fase anônima. Índices UNIQUE separados porque, no
     // Postgres, NULL não colide com NULL — sem este, a sessão anônima aceitaria
     // duplicatas do mesmo consentimento.

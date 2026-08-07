@@ -54,6 +54,14 @@
 - O placeholder `CREF nº ____` **deve ser substituído pelo número real do RT antes do go-live** (não pode ir a produção com o traço). Sugestão: injetar via config (`RT_CREF_NUMBER`) mas **congelar no texto da versão** no momento da publicação — se o número mudar, é nova versão.
 - Linguagem clara, sem juridiquês, sem termo proibido (nada de "diagnóstico"/"tratamento"/"cura"/"resultado garantido"); presença do CREF visível; IA como ferramenta do profissional. Guardrails OK.
 
+#### 1.1.1 Versão vigente — `consent-health-2026-08-v2`
+
+A v1 acima permanece imutável como artefato histórico. A v2 altera somente a instrução de revogação para tornar o canal do WhatsApp executável e inequívoco:
+
+> - **Você no controle:** pode revogar esta autorização quando quiser, sem custo. No WhatsApp da MOVIVO, envie exatamente “REVOGAR CONSENTIMENTO DE SAÚDE”; ou contate o e-mail do nosso Encarregado de Dados (informado na Política de Privacidade). A revogação interrompe novos tratamentos daqui pra frente.
+
+O backend normaliza acentos e caixa, mas exige correspondência integral com a frase. A revogação carimba `revoked_at`, interrompe novos processamentos e preserva o histórico necessário para obrigações legais e exercício regular de direitos.
+
 ---
 
 ### 1.2 MARKETING — Consentimento separado e opcional para comunicações
@@ -94,7 +102,7 @@
 
 | `type` | `version` (imutável) | Default | Bloqueia avanço? | Onde |
 |---|---|---|---|---|
-| `HEALTH_DATA` | `consent-health-2026-07-v1` | desmarcado | **Sim** — trava o Bloco 2 | tela-ponte antes do Bloco 2 |
+| `HEALTH_DATA` | `consent-health-2026-08-v2` | desmarcado | **Sim** — trava o Bloco 2 | tela-ponte antes do Bloco 2 |
 | `MARKETING` | `consent-marketing-2026-07-v1` | desmarcado | Não | tela-ponte (checkbox separado) |
 | `TERMS_OF_SERVICE` | `terms-2026-07-v1` | desmarcado | **Sim** — trava saída do Bloco 0 | Bloco 0 (identificação) |
 

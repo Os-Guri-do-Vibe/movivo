@@ -58,6 +58,11 @@ export const users = pgTable(
      */
     passwordHash: text('password_hash'),
 
+    /** Credencial profissional verificada no provisionamento interno. */
+    crefNumber: varchar('cref_number', { length: 30 }),
+    crefRegion: varchar('cref_region', { length: 2 }),
+    crefActive: boolean('cref_active').notNull().default(false),
+
     trialStartedAt: eventTimestamp('trial_started_at'),
     trialEndsAt: eventTimestamp('trial_ends_at'),
 

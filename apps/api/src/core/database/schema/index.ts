@@ -34,3 +34,8 @@ export * from './knowledge-base';
 
 // Sprint 3 — exemplos rotulados do IntentClassifier (US-3.4). Global, read-only.
 export * from './intent-examples';
+
+// Sprint 5 - escopo profissional, check-in duravel e auditoria imutavel.
+export * from './professional-assignments';
+export * from './audit-logs';
+export * from './reengagement-nudges';

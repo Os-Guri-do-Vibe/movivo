@@ -16,13 +16,18 @@ import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 
 import { AppConfigService } from '../../core/config';
+import { HealthConsentService } from '../../core/database/health-consent.service';
 import { protocols, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QUEUE } from '../jobs/jobs.config';
 import { WorkerFactory } from '../jobs/worker.factory';
-import { WHATSAPP_TRANSPORT, type WhatsappTransport } from './arara-transport';
+import {
+  type QuickReplyButton,
+  WHATSAPP_TRANSPORT,
+  type WhatsappTransport,
+} from './arara-transport';
 import { FEEDBACK_BUTTONS } from './feedback';
 import {
   BUBBLE_SEPARATOR,
@@ -39,6 +44,9 @@ export type WhatsappJobType =
   | 'PROTOCOL_WAITING'
   // US-3.5 — conversa do Coach: texto dinâmico + indicador de digitação.
   | 'COACH_MESSAGE'
+  | 'CHECKIN_MESSAGE'
+  | 'REENGAGEMENT'
+  | 'CONSENT_STATUS'
   | 'TYPING';
 
 export interface WhatsappOutboundJob {
@@ -52,10 +60,20 @@ export interface WhatsappOutboundJob {
   dedupeId?: string;
   /** COACH_MESSAGE: anexar botões de feedback 👍/👎 à última bolha (US-3.6). */
   feedback?: boolean;
+  /** Mensagens de fluxo deterministico (check-in/nudge), sem chamada a LLM. */
+  buttons?: readonly QuickReplyButton[];
 }
 
 /** TTL do marcador de idempotência — só precisa cobrir a janela de retry; 7d é folgado. */
 const SENT_MARKER_TTL_SECONDS = 7 * 24 * 3600;
+const HEALTH_JOB_TYPES: ReadonlySet<WhatsappJobType> = new Set([
+  'CONFIRMATION_CARE',
+  'PROTOCOL_DELIVERY',
+  'PROTOCOL_WAITING',
+  'COACH_MESSAGE',
+  'CHECKIN_MESSAGE',
+  'REENGAGEMENT',
+]);
 
 @Injectable()
 export class WhatsappOutboundWorker implements OnModuleInit {
@@ -65,6 +83,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
     @Inject(WHATSAPP_TRANSPORT) private readonly transport: WhatsappTransport,
+    private readonly healthConsent: HealthConsentService,
     private readonly config: AppConfigService,
     private readonly logger: PinoLogger,
   ) {
@@ -77,6 +96,14 @@ export class WhatsappOutboundWorker implements OnModuleInit {
 
   async process(job: Job<WhatsappOutboundJob>): Promise<{ status: string }> {
     const { userId, type, protocolVersion, dedupeId } = job.data;
+
+    if (HEALTH_JOB_TYPES.has(type) && !(await this.healthConsent.hasActiveForUser(userId))) {
+      this.logger.info(
+        { event: 'whatsapp_outbound_discarded_no_consent', userId, type },
+        'outbound de saude descartado apos revogacao',
+      );
+      return { status: 'CONSENT_REVOKED' };
+    }
 
     const phone = await this.resolvePhone(userId);
     if (!phone) {
@@ -113,7 +140,9 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     const bubbles = text.split(BUBBLE_SEPARATOR).filter((b) => b.trim());
     for (const [i, bubble] of bubbles.entries()) {
       const isLast = i === bubbles.length - 1;
-      const buttons = isLast && job.data.feedback ? FEEDBACK_BUTTONS : undefined;
+      const buttons = isLast
+        ? (job.data.buttons ?? (job.data.feedback ? FEEDBACK_BUTTONS : undefined))
+        : undefined;
       await this.transport.send({ to: phone, text: bubble, buttons });
     }
 
@@ -147,6 +176,9 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       case 'PROTOCOL_DELIVERY':
         return this.buildDelivery(data);
       case 'COACH_MESSAGE':
+      case 'CHECKIN_MESSAGE':
+      case 'REENGAGEMENT':
+      case 'CONSENT_STATUS':
         return data.text ?? null;
       case 'TYPING':
         return null; // tratado antes (presença)
@@ -161,15 +193,31 @@ export class WhatsappOutboundWorker implements OnModuleInit {
           content: protocols.content,
           status: protocols.status,
           approvalStatus: protocols.approvalStatus,
+          signedAt: protocols.signedAt,
+          signatureHash: protocols.signatureHash,
+          professionalId: protocols.professionalId,
         })
         .from(protocols)
-        .where(and(eq(protocols.userId, data.userId), eq(protocols.version, 1)))
+        .where(
+          and(
+            eq(protocols.userId, data.userId),
+            data.protocolId ? eq(protocols.id, data.protocolId) : undefined,
+            data.protocolVersion ? eq(protocols.version, data.protocolVersion) : undefined,
+          ),
+        )
         .limit(1);
       return row;
     });
 
     // Só entrega o protocolo auto-aprovado e ativo (guardrail: nada não-validado sai).
-    if (!proto || proto.status !== 'ACTIVE' || proto.approvalStatus !== 'AUTO_APPROVED') {
+    if (
+      !proto ||
+      proto.status !== 'ACTIVE' ||
+      !['AUTO_APPROVED', 'HUMAN_APPROVED'].includes(proto.approvalStatus) ||
+      !proto.signedAt ||
+      !proto.signatureHash ||
+      !proto.professionalId
+    ) {
       this.logger.warn(
         { userId: data.userId, status: proto?.status },
         'entrega ignorada — protocolo não está AUTO_APPROVED/ACTIVE',

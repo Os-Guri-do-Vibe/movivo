@@ -45,6 +45,7 @@ import type {
   GenerateProtocolResult,
 } from '../src/modules/protocol/protocol-generator.service';
 import { ProtocolGeneratorService } from '../src/modules/protocol/protocol-generator.service';
+import { seedHealthEligibility } from './health-fixtures';
 
 const { env } = loadEnv();
 const apiRoot = process.cwd();
@@ -187,6 +188,9 @@ async function seedUser(injuries: string[]) {
     if (!s) throw new Error('seed: sessão não criada');
     return s.id;
   });
+  // Titular semeado direto no banco (sem submit): recria o vínculo CREF + consentimento
+  // de saúde que o fluxo real teria criado, senão a mensagem de espera é descartada.
+  await seedHealthEligibility(adminClient, userId);
   return { userId, sessionId };
 }
 
@@ -235,6 +239,7 @@ afterAll(async () => {
          OR anamnesis_session_id IN (SELECT id FROM anamnesis_sessions WHERE token LIKE '%${RUN}%');
        DELETE FROM anamnesis_sessions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM subscriptions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
+       DELETE FROM professional_assignments WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM users WHERE phone_number LIKE '+5541${RUN}%';`,
     );
   } finally {

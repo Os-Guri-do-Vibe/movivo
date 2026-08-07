@@ -4,6 +4,7 @@ import type { Redis } from 'ioredis';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AppConfigService } from '../../core/config';
+import type { HealthConsentService } from '../../core/database/health-consent.service';
 import { users } from '../../core/database/schema';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
 import { RedisKeyBuilder } from '../../core/redis/redis-key.util';
@@ -40,8 +41,15 @@ function structure(): ProtocolStructure {
 
 interface Deps {
   phone?: string | null;
-  proto?: { status: string; approvalStatus: string } | null;
+  proto?: {
+    status: string;
+    approvalStatus: string;
+    signedAt?: Date;
+    signatureHash?: string;
+    professionalId?: string;
+  } | null;
   markerExists?: boolean;
+  consentActive?: boolean;
 }
 
 /** tx falso: distingue users/protocols pela tabela passada em `.from()`. */
@@ -49,7 +57,15 @@ function makeTx(deps: Deps) {
   let table: unknown;
   const proto =
     deps.proto === undefined
-      ? { id: 'p1', content: structure(), status: 'ACTIVE', approvalStatus: 'AUTO_APPROVED' }
+      ? {
+          id: 'p1',
+          content: structure(),
+          status: 'ACTIVE',
+          approvalStatus: 'AUTO_APPROVED',
+          signedAt: new Date(),
+          signatureHash: 'a'.repeat(64),
+          professionalId: '00000000-0000-4000-8000-000000000001',
+        }
       : deps.proto;
   const chain = {
     select: () => chain,
@@ -95,7 +111,18 @@ function makeWorker(deps: Deps = {}) {
     whatsapp: { publicSiteUrl: 'https://movivo.test', araraBaseUrl: '', araraApiKey: undefined },
   } as unknown as AppConfigService;
   const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() } as never;
-  const worker = new WhatsappOutboundWorker(workers, db, redis, keys, transport, config, logger);
+  const worker = new WhatsappOutboundWorker(
+    workers,
+    db,
+    redis,
+    keys,
+    transport,
+    {
+      hasActiveForUser: vi.fn(async () => deps.consentActive ?? true),
+    } as unknown as HealthConsentService,
+    config,
+    logger,
+  );
   return { worker, send, sendTyping, redis };
 }
 
@@ -104,6 +131,22 @@ function job(data: Partial<WhatsappOutboundJob>): Job<WhatsappOutboundJob> {
 }
 
 describe('WhatsappOutboundWorker.process (US-2.5)', () => {
+  it('descarta outbound de saude enfileirado antes da revogacao', async () => {
+    const { worker, send } = makeWorker({ consentActive: false });
+    await expect(
+      worker.process(job({ type: 'CHECKIN_MESSAGE', text: 'check-in' })),
+    ).resolves.toEqual({ status: 'CONSENT_REVOKED' });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('permite confirmacao de revogacao mesmo sem consentimento ativo', async () => {
+    const { worker, send } = makeWorker({ consentActive: false });
+    await expect(
+      worker.process(job({ type: 'CONSENT_STATUS', text: 'consentimento revogado' })),
+    ).resolves.toEqual({ status: 'SENT' });
+    expect(send).toHaveBeenCalledOnce();
+  });
+
   it('confirmação: envia uma bolha e marca como enviado', async () => {
     const { worker, send, redis } = makeWorker();
     const res = await worker.process(job({ type: 'CONFIRMATION' }));

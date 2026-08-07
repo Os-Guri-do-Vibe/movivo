@@ -17,7 +17,7 @@ import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
-import type { WhatsappOutboundJob } from '../whatsapp/whatsapp-outbound.worker';
+import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { PAYMENT_GATEWAY, type PaymentGateway } from './payment/payment-gateway.types';
 import { InvalidTransitionError, SUBSCRIPTION_TERMS_VERSION } from './subscription-model';
 import { dunningMessage } from './subscription-messages';

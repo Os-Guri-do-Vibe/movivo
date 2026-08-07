@@ -26,6 +26,7 @@ function makeTx(rows: unknown[] = []): TenantTransaction {
     chain[m] = vi.fn(() => chain);
   }
   chain.onConflictDoUpdate = vi.fn(() => Promise.resolve(rows));
+  chain.execute = vi.fn(() => Promise.resolve(rows));
   // `where` encerra os UPDATEs; um thenable resolve tanto encadeado quanto awaited.
   chain.then = (resolve: (v: unknown) => unknown) => resolve(rows);
   return chain as unknown as TenantTransaction;

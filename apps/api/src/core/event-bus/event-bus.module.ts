@@ -11,7 +11,14 @@
  *  - Payload de evento não carrega PII: transporta `userId` (UUID) e o suficiente para
  *    o consumidor buscar o dado, com a autorização dele.
  */
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 
-@Module({})
+import { DomainEventBus } from './event-bus.service';
+import { DashboardQueueEventsService } from './dashboard-queue-events.service';
+
+@Global()
+@Module({
+  providers: [DomainEventBus, DashboardQueueEventsService],
+  exports: [DomainEventBus, DashboardQueueEventsService],
+})
 export class EventBusModule {}

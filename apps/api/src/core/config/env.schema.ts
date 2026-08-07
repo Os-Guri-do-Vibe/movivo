@@ -236,6 +236,9 @@ export const envSchema = z
      * fundador: dunning conversacional no WhatsApp durante a graça, só depois restringe).
      */
     SUBSCRIPTION_PAST_DUE_GRACE_DAYS: z.coerce.number().int().min(0).max(30).default(3),
+
+    /** Somente seed local; carregada exclusivamente por DEV_PROFESSIONAL_PASSWORD_FILE. */
+    DEV_PROFESSIONAL_PASSWORD: z.string().min(12).optional(),
   })
   .superRefine((config, ctx) => {
     if (config.DATABASE_PORT === POSTGRES_DIRECT_PORT) {

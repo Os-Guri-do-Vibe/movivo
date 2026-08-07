@@ -15,16 +15,21 @@
  */
 import 'reflect-metadata';
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { type INestApplication } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { like } from 'drizzle-orm';
 import { Redis } from 'ioredis';
+import postgres from 'postgres';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { AppModule } from '../src/app.module';
 import { AppConfigService } from '../src/core/config';
+import { loadEnv } from '../src/core/config/load-env';
 import { users } from '../src/core/database/schema';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { REDIS_CLIENT } from '../src/core/redis/redis.constants';
@@ -37,9 +42,29 @@ import {
   signWebhookBody,
 } from '../src/modules/whatsapp/webhook-signature';
 import { type AiResponseJob } from '../src/modules/whatsapp/whatsapp-inbound.service';
+import { seedHealthEligibility } from './health-fixtures';
 
 const SECRET = 'int-webhook-secret';
 const RUN = Date.now().toString().slice(-8);
+const { env } = loadEnv();
+const apiRoot = process.cwd();
+
+// Superusuário: seed/limpeza de `consents` e `professional_assignments` (o runtime não
+// tem INSERT em consents; o gate de entrada exige consentimento de saúde ativo — US-3.1/Sprint 5).
+const adminClient = postgres({
+  host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
+  port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 15432),
+  user: 'postgres',
+  password: readFileSync(
+    resolve(apiRoot, '..', '..', 'secrets', 'postgres_superuser_password'),
+    'utf8',
+  ).trimEnd(),
+  database: env.DATABASE_NAME ?? 'movivo',
+  ssl: false,
+  max: 1,
+  idle_timeout: 5,
+  onnotice: () => undefined,
+});
 
 let app: INestApplication;
 let prefix: string;
@@ -60,6 +85,8 @@ async function seedUser(): Promise<{ userId: string; phoneNumber: string }> {
     if (!u) throw new Error('seed: usuário não criado');
     return u.id;
   });
+  // O gate de entrada só enfileira resposta para titular com consentimento de saúde ativo.
+  await seedHealthEligibility(adminClient, userId);
   return { userId, phoneNumber };
 }
 
@@ -105,10 +132,15 @@ beforeAll(async () => {
 afterAll(async () => {
   try {
     await queues?.get(QUEUE.aiResponse).obliterate({ force: true });
-    // Usuários semeados por este arquivo (prefixo de telefone único por run).
+    // Usuários semeados por este arquivo (prefixo de telefone único por run). As tabelas
+    // com FK para users (consents/professional_assignments) são limpas antes via superusuário.
+    await adminClient.unsafe(
+      `DELETE FROM consents WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
+       DELETE FROM professional_assignments WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');`,
+    );
     await db.runAsSystem((tx) => tx.delete(users).where(like(users.phoneNumber, `+5541${RUN}%`)));
   } finally {
-    await app?.close();
+    await Promise.all([app?.close(), adminClient.end({ timeout: 5 })]);
   }
 }, 60_000);
 

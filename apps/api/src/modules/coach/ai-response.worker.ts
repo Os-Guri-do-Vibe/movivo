@@ -15,6 +15,7 @@ import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
+import { HealthConsentService } from '../../core/database/health-consent.service';
 import { ContextService } from '../ai-coach/context/context.service';
 import { IntentClassifier } from '../ai-coach/intent/intent-classifier.service';
 import type { Intent } from '../ai-coach/intent/intent.types';
@@ -29,7 +30,7 @@ import { WorkerFactory } from '../jobs/worker.factory';
 import { findExerciseByMention, findSafeSubstitute } from '../protocol/exercise-substitution';
 import { ValidationService } from '../protocol/validation/validation.service';
 import type { AiResponseJob } from '../whatsapp/whatsapp-inbound.service';
-import type { WhatsappOutboundJob } from '../whatsapp/whatsapp-outbound.worker';
+import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { UserJobLock } from '../whatsapp/user-job-lock';
 import {
   DAILY_LIMIT_MESSAGE,
@@ -64,6 +65,7 @@ export class AIResponseWorker implements OnModuleInit {
     private readonly abuse: LlmAbuseGuard,
     private readonly validation: ValidationService,
     private readonly repo: ConversationRepository,
+    private readonly healthConsent: HealthConsentService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly logger: PinoLogger,
   ) {
@@ -83,6 +85,15 @@ export class AIResponseWorker implements OnModuleInit {
 
   async process(job: Job<AiResponseJob>): Promise<{ status: string }> {
     const { userId, batchKey, correlationId, enqueuedAt } = job.data;
+
+    if (!(await this.healthConsent.hasActiveForUser(userId))) {
+      await this.drainBatch(batchKey);
+      this.logger.info(
+        { event: 'ai_response_discarded_no_consent', userId },
+        'batch descartado sem tratamento apos revogacao',
+      );
+      return { status: 'CONSENT_REVOKED' };
+    }
 
     const message = await this.drainBatch(batchKey);
     if (!message) return { status: 'EMPTY' };

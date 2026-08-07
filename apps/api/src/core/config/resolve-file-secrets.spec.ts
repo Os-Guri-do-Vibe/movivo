@@ -40,6 +40,13 @@ describe('resolveFileSecrets', () => {
     expect(env.REDIS_PASSWORD).toBe('da-env');
   });
 
+  it('resolve a senha do profissional dev por *_FILE e remove o caminho', () => {
+    const path = secretFile('dev-professional', 'senha-local-forte');
+    const { env } = resolveFileSecrets({ DEV_PROFESSIONAL_PASSWORD_FILE: path });
+    expect(env.DEV_PROFESSIONAL_PASSWORD).toBe('senha-local-forte');
+    expect(env).not.toHaveProperty('DEV_PROFESSIONAL_PASSWORD_FILE');
+  });
+
   it('§2.1.2 — o par K_FILE é removido antes de chegar ao Zod', () => {
     const path = secretFile('b', 'valor');
     const { env } = resolveFileSecrets({ REDIS_PASSWORD_FILE: path }, ['REDIS_PASSWORD']);

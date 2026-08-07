@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { users } from '../../core/database/schema';
 import type { HealthCipherService } from '../../core/database/health-cipher.service';
+import type { HealthConsentService } from '../../core/database/health-consent.service';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
+import type { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import type { QueueManager } from '../jobs/queue-manager.service';
 import type { WorkerFactory } from '../jobs/worker.factory';
 import { ProtocolGenerationWorker, type ProtocolGenerationJob } from './protocol-generation.worker';
@@ -108,6 +110,7 @@ interface Deps {
   exists?: boolean;
   action?: ValidationVerdict['action'];
   alreadyExisted?: boolean;
+  consentActive?: boolean;
 }
 
 function makeWorker(deps: Deps = {}) {
@@ -156,10 +159,14 @@ function makeWorker(deps: Deps = {}) {
     workers,
     queues,
     db,
+    {
+      hasActiveForUser: vi.fn(async () => deps.consentActive ?? true),
+    } as unknown as HealthConsentService,
     cipher,
     generator,
     validation,
     repository,
+    { emit: vi.fn() } as unknown as DashboardQueueEventsService,
     logger,
   );
   return { worker, repository, queues, enqueue, generator, workers, workerListeners };
@@ -177,6 +184,13 @@ function job(over: Partial<ProtocolGenerationJob> = {}): Job<ProtocolGenerationJ
 afterEach(() => vi.restoreAllMocks());
 
 describe('ProtocolGenerationWorker.process (US-2.4)', () => {
+  it('encerra job enfileirado antes da revogacao sem ler saude ou gerar', async () => {
+    const { worker, generator, repository } = makeWorker({ consentActive: false });
+    await expect(worker.process(job())).resolves.toEqual({ status: 'CONSENT_REVOKED' });
+    expect(generator.generate).not.toHaveBeenCalled();
+    expect(repository.persist).not.toHaveBeenCalled();
+  });
+
   it('caminho limpo → persiste AUTO_APPROVED assinado e enfileira a entrega', async () => {
     const { worker, repository, enqueue } = makeWorker({ action: 'PASS' });
     const res = await worker.process(job());

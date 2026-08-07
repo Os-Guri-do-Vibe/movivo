@@ -12,7 +12,10 @@ import { PinoLogger } from 'nestjs-pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppConfigService } from '../../core/config';
+import { HealthConsentService } from '../../core/database/health-consent.service';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
+import { DomainEventBus } from '../../core/event-bus/event-bus.service';
+import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { signWebhookBody } from './webhook-signature';
@@ -41,11 +44,24 @@ function fakeRedis(): { redis: Redis; rpush: ReturnType<typeof vi.fn> } {
       kv.set(key, String(n));
       return n;
     },
+    async get(key: string) {
+      return kv.get(key) ?? null;
+    },
+    async del(key: string) {
+      return kv.delete(key) ? 1 : 0;
+    },
   } as unknown as Redis;
   return { redis, rpush };
 }
 
-function makeService(opts: { secret?: string; userRows?: Array<{ id: string }> } = {}) {
+function makeService(
+  opts: {
+    secret?: string;
+    userRows?: Array<{ id: string }>;
+    consentActive?: boolean;
+    checkinHandled?: boolean;
+  } = {},
+) {
   const { redis, rpush } = fakeRedis();
   const enqueue = vi.fn(async () => 'job-1');
   const queues = { enqueue } as unknown as QueueManager;
@@ -58,15 +74,27 @@ function makeService(opts: { secret?: string; userRows?: Array<{ id: string }> }
     },
   } as unknown as AppConfigService;
   const logger = { setContext: vi.fn(), info: vi.fn(), warn: vi.fn() } as unknown as PinoLogger;
+  const hasActiveForUser = vi.fn(async () => opts.consentActive ?? true);
+  const revokeForUser = vi.fn(async () => true);
+  const healthConsent = {
+    hasActiveForUser,
+    revokeForUser,
+  } as unknown as HealthConsentService;
+  const events = {
+    request: vi.fn(async () => opts.checkinHandled ?? false),
+  } as unknown as DomainEventBus;
   const service = new WhatsappInboundService(
     redis,
     new RedisKeyBuilder('movivo'),
     db,
     queues,
+    healthConsent,
+    events,
+    { emit: vi.fn() } as unknown as DashboardQueueEventsService,
     config,
     logger,
   );
-  return { service, enqueue, rpush };
+  return { service, enqueue, rpush, hasActiveForUser, revokeForUser, events };
 }
 
 function signed(payload: object, secret = SECRET) {
@@ -147,5 +175,51 @@ describe('WhatsappInboundService.ingest', () => {
     }
     expect(rpush).toHaveBeenCalledTimes(3);
     expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('revoga HEALTH_DATA somente com a frase explicita e confirma cessacao', async () => {
+    const created = makeService();
+    const s = signed(payload({ text: 'Revogar consentimento de saude.' }));
+    await created.service.ingest({ ...s, correlationId: 'revoke' });
+    expect(created.revokeForUser).toHaveBeenCalledWith(USER_ID);
+    expect(created.hasActiveForUser).not.toHaveBeenCalled();
+    expect(created.enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'health-consent-revoked',
+      expect.objectContaining({ type: 'CONSENT_STATUS' }),
+      expect.any(Object),
+    );
+    expect(created.rpush).not.toHaveBeenCalled();
+  });
+
+  it('nao revoga por frase aproximada', async () => {
+    const created = makeService();
+    const s = signed(payload({ text: 'quero revogar depois' }));
+    await created.service.ingest({ ...s, correlationId: 'near-revoke' });
+    expect(created.revokeForUser).not.toHaveBeenCalled();
+    expect(created.rpush).toHaveBeenCalledOnce();
+  });
+
+  it('recusa qualquer novo tratamento quando HEALTH_DATA nao esta ativo', async () => {
+    const created = makeService({ consentActive: false });
+    const s = signed(payload({ text: 'quero falar do treino' }));
+    await created.service.ingest({ ...s, correlationId: 'no-consent' });
+    expect(created.enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'health-consent-inactive',
+      expect.objectContaining({ type: 'CONSENT_STATUS' }),
+      expect.any(Object),
+    );
+    expect(created.rpush).not.toHaveBeenCalled();
+    expect(created.events.request).not.toHaveBeenCalled();
+  });
+
+  it('roteia check-in pelo barramento sem importar o dominio e nao chama o Coach', async () => {
+    const created = makeService({ checkinHandled: true });
+    const s = signed(payload({ text: 'dor no quadril' }));
+    await created.service.ingest({ ...s, correlationId: 'checkin' });
+    expect(created.events.request).toHaveBeenCalledOnce();
+    expect(created.rpush).not.toHaveBeenCalled();
+    expect(created.enqueue).not.toHaveBeenCalled();
   });
 });

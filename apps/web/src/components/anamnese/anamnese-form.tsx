@@ -397,8 +397,8 @@ export function AnamneseForm({ goal }: { goal: string | null }) {
         />
         <h1 className="text-h2 font-semibold">Prontinho! 🎉</h1>
         <p className="max-w-prose text-body text-muted-foreground">
-          O profissional de Educação Física responsável, registrado no CREF, está preparando seu
-          treino. Ele chega no seu WhatsApp em até 2 horas.
+          O profissional de Educação Física responsável, registrado no CREF, revisará seu treino.
+          Após essa etapa, o protocolo será enviado ao seu WhatsApp.
         </p>
         <div className="rounded-lg border border-border bg-card p-4">
           <p className="text-body font-medium">📲 Salve o número da MOVIVO agora</p>

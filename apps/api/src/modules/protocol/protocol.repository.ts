@@ -10,7 +10,7 @@
  */
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type {
   ProtocolApprovalStatus,
   ProtocolRead,
@@ -26,7 +26,6 @@ import type { ContraindicationTag } from './exercise-catalog';
  * Id da assinatura da metodologia do RT CREF. ponytail: constante fixa — a tabela
  * `professionals` e a FK nascem na Sprint 5 (dashboard CREF). Trocar por lookup real lá.
  */
-export const METHODOLOGY_SIGNER_ID = '00000000-0000-4000-8000-000000000001';
 
 /** SHA-256 do conteúdo — prova, meses depois, que o entregue é o que foi assinado. */
 export function signatureHash(content: ProtocolStructure): string {
@@ -52,6 +51,7 @@ export interface PersistProtocolInput {
 export interface PersistedProtocol {
   protocolId: string;
   version: number;
+  professionalId: string | null;
   /** `true` quando outra execução já havia persistido (corrida — idempotência). */
   alreadyExisted: boolean;
 }
@@ -117,10 +117,12 @@ export class ProtocolRepository {
   async persist(input: PersistProtocolInput): Promise<PersistedProtocol> {
     const signedAt = input.signed ? new Date() : null;
     const hash = input.signed ? signatureHash(input.content) : null;
-    const professionalId = input.signed ? METHODOLOGY_SIGNER_ID : null;
 
     try {
       return await this.db.runAsUser(input.userId, 'USER', async (tx) => {
+        const professionalId = input.signed
+          ? await this.assignedActiveProfessional(tx, input.userId)
+          : null;
         const [proto] = await tx
           .insert(protocols)
           .values({
@@ -156,13 +158,18 @@ export class ProtocolRepository {
           signedAt,
         });
 
-        return { protocolId: proto.id, version: PROTOCOL_VERSION, alreadyExisted: false };
+        return {
+          protocolId: proto.id,
+          version: PROTOCOL_VERSION,
+          professionalId,
+          alreadyExisted: false,
+        };
       });
     } catch (error) {
       if (isUniqueViolation(error)) {
         const [existing] = await this.db.runAsUser(input.userId, 'USER', (tx) =>
           tx
-            .select({ id: protocols.id })
+            .select({ id: protocols.id, professionalId: protocols.professionalId })
             .from(protocols)
             .where(and(eq(protocols.userId, input.userId), eq(protocols.version, PROTOCOL_VERSION)))
             .limit(1),
@@ -170,11 +177,25 @@ export class ProtocolRepository {
         return {
           protocolId: existing?.id ?? 'unknown',
           version: PROTOCOL_VERSION,
+          professionalId: existing?.professionalId ?? null,
           alreadyExisted: true,
         };
       }
       throw error;
     }
+  }
+
+  /** Lookup estreito: a funcao exige o contexto do titular e CREF atribuido ativo. */
+  private async assignedActiveProfessional(
+    tx: Parameters<Parameters<TenantDatabase['runAsUser']>[2]>[0],
+    userId: string,
+  ): Promise<string> {
+    const rows = (await tx.execute(
+      sql`SELECT public.assigned_active_professional(${userId}::uuid) AS professional_id`,
+    )) as unknown as Array<{ professional_id: string }>;
+    const professionalId = rows[0]?.professional_id;
+    if (!professionalId) throw new Error('Nenhum profissional CREF ativo atribuido ao titular.');
+    return professionalId;
   }
 }
 

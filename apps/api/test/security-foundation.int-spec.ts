@@ -75,6 +75,7 @@ const adminClient = postgres({
 
 let userA = '';
 let userB = '';
+let professionalId = '';
 
 beforeAll(async () => {
   // Criação de usuários no contexto de SISTEMA (bootstrap sem titular — TASK-1.1.4).
@@ -91,25 +92,38 @@ beforeAll(async () => {
     return rows[0].id;
   });
 
-  // Cada titular grava um consentimento no PRÓPRIO contexto (RLS por user_id).
-  await tenant.runAsUser(userA, 'USER', async (tx) => {
-    await tx.execute(
-      sql`INSERT INTO consents (user_id, consent_type, version, accepted) VALUES (${userA}, 'HEALTH_DATA', '2026-07-v1', true)`,
-    );
-  });
-  await tenant.runAsUser(userB, 'USER', async (tx) => {
-    await tx.execute(
-      sql`INSERT INTO consents (user_id, consent_type, version, accepted) VALUES (${userB}, 'HEALTH_DATA', '2026-07-v1', true)`,
-    );
-  });
+  // Fixture pelo superusuario: o runtime nao possui INSERT direto em consents;
+  // producao grava apenas pela funcao estreita record_session_consent.
+  await adminClient`
+    INSERT INTO consents (user_id, consent_type, version, accepted)
+    VALUES
+      (${userA}::uuid, 'HEALTH_DATA', 'consent-health-2026-08-v2', true),
+      (${userB}::uuid, 'HEALTH_DATA', 'consent-health-2026-08-v2', true)
+  `;
+  const [professional] = await adminClient<{ id: string }[]>`
+    INSERT INTO users (phone_number, name, role, cref_number, cref_region, cref_active)
+    VALUES (${phone(3)}, 'CREF (teste Sprint 5)', 'PROFESSIONAL', '900001', 'SP', true)
+    RETURNING id
+  `;
+  professionalId = professional.id;
+  await adminClient`
+    INSERT INTO professional_assignments (professional_id, user_id)
+    VALUES (${professionalId}::uuid, ${userA}::uuid)
+  `;
 }, 60_000);
 
 afterAll(async () => {
   try {
     // Superusuário bypassa RLS (inclusive o append-only por RLS de consents) só p/ limpar.
     await adminClient.unsafe(
-      `DELETE FROM consents WHERE user_id IN ('${userA}','${userB}');
-       DELETE FROM users WHERE id IN ('${userA}','${userB}');`,
+      `DELETE FROM professional_assignments
+         WHERE professional_id = '${professionalId}' OR user_id IN ('${userA}','${userB}');
+       DELETE FROM consents WHERE user_id IN ('${userA}','${userB}');
+       -- \`audit_logs\` é append-only por trigger (imutável até para o superusuário). O titular
+       -- que ficou com trilha de revogação é preservado — apagá-lo destruiria a prova.
+       DELETE FROM users WHERE id IN ('${userA}','${userB}','${professionalId}')
+         AND id NOT IN (SELECT user_id FROM audit_logs WHERE user_id IS NOT NULL
+                        UNION SELECT actor_id FROM audit_logs WHERE actor_id IS NOT NULL);`,
     );
   } finally {
     await adminClient.end({ timeout: 5 });
@@ -118,6 +132,42 @@ afterAll(async () => {
 });
 
 describe('RLS FORCE + SET LOCAL — isolamento entre titulares', () => {
+  it('revogacao oculta o titular do PROFESSIONAL sem recursao e preserva contexto segregado', async () => {
+    const rollback = new Error('rollback esperado');
+    await expect(
+      appClient.begin(async (tx) => {
+        await tx`SELECT set_config('app.current_role', 'USER', true)`;
+        await tx`SELECT set_config('app.current_user_id', ${userA}, true)`;
+        await tx`SELECT public.revoke_health_data_consent(${userA}::uuid)`;
+
+        await tx`SELECT set_config('app.current_role', 'PROFESSIONAL', true)`;
+        await tx`SELECT set_config('app.current_user_id', ${professionalId}, true)`;
+        const professionalUsers = await tx`SELECT id FROM users WHERE id = ${userA}::uuid`;
+        const professionalConsents = await tx`
+          SELECT id FROM consents WHERE user_id = ${userA}::uuid
+        `;
+        expect(professionalUsers).toHaveLength(0);
+        expect(professionalConsents).toHaveLength(0);
+
+        await tx`SELECT set_config('app.current_role', 'SYSTEM', true)`;
+        await tx`SELECT set_config('app.current_user_id', '', true)`;
+        const preserved = await tx`
+          SELECT id FROM consents WHERE user_id = ${userA}::uuid AND revoked_at IS NOT NULL
+        `;
+        expect(preserved.length).toBeGreaterThan(0);
+
+        await tx`SELECT set_config('app.current_role', 'ADMIN', true)`;
+        const adminVisible = await tx`SELECT id FROM users WHERE id = ${userA}::uuid`;
+        expect(adminVisible).toHaveLength(1);
+        const [adminProtocols] = await tx<{ count: number }[]>`
+          SELECT count(*)::int AS count FROM protocols
+        `;
+        expect(adminProtocols?.count).toBeGreaterThanOrEqual(0);
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
+  });
+
   it('runAsUser(A) vê o consentimento de A e NÃO vê o de B', async () => {
     const rows = await tenant.runAsUser(userA, 'USER', async (tx) => {
       return (await tx.execute(sql`SELECT user_id FROM consents`)) as unknown as Array<{

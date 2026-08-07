@@ -40,6 +40,7 @@ import {
   type OutboundMessage,
   type WhatsappTransport,
 } from '../src/modules/whatsapp/arara-transport';
+import { PROFESSIONAL_ID, seedHealthEligibility } from './health-fixtures';
 
 const { env } = loadEnv();
 const apiRoot = process.cwd();
@@ -146,11 +147,17 @@ async function seedActiveProtocol() {
     if (!u) throw new Error('seed: usuário não criado');
     return u.id;
   });
+  // Vínculo CREF + consentimento de saúde (o gate de entrega exige consentimento ativo).
+  await seedHealthEligibility(adminClient, userId);
   await db.runAsUser(userId, 'USER', (tx) =>
     tx.insert(protocols).values({
       userId,
       status: 'ACTIVE',
       approvalStatus: 'AUTO_APPROVED',
+      // Entrega só sai de protocolo ASSINADO (professionalId + signedAt + signatureHash).
+      professionalId: PROFESSIONAL_ID,
+      signedAt: new Date(),
+      signatureHash: 'a'.repeat(64),
       content: structure(),
       constraints: {},
     }),
@@ -192,6 +199,7 @@ afterAll(async () => {
          OR anamnesis_session_id IN (SELECT id FROM anamnesis_sessions WHERE token LIKE '%${RUN}%');
        DELETE FROM anamnesis_sessions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM subscriptions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
+       DELETE FROM professional_assignments WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM users WHERE phone_number LIKE '+5541${RUN}%';`,
     );
   } finally {
@@ -203,7 +211,7 @@ describe('outbound WhatsApp — confirmação no submit (US-2.5)', () => {
   it('boota sem credencial AraraHQ e envia a confirmação (PAR-Q liberado)', async () => {
     const { phone: to } = await submitAnamnesis();
     const msg = await waitFor(() =>
-      sent.find((m) => m.to === to && /em até 2 horas/i.test(m.text)),
+      sent.find((m) => m.to === to && /será preparado/i.test(m.text)),
     );
     expect(msg.text).toMatch(/CREF/);
   }, 30_000);
@@ -211,7 +219,7 @@ describe('outbound WhatsApp — confirmação no submit (US-2.5)', () => {
   it('PAR-Q de risco recebe a variante de cuidado (sem prometer plano)', async () => {
     const { phone: to } = await submitAnamnesis(['Q2']);
     const msg = await waitFor(() => sent.find((m) => m.to === to && /revisar/i.test(m.text)));
-    expect(msg.text).not.toMatch(/em até 2 horas/i);
+    expect(msg.text).not.toMatch(/será preparado/i); // variante de cuidado não promete o plano
   }, 30_000);
 });
 

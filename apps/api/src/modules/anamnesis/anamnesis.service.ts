@@ -181,6 +181,9 @@ export class AnamnesisService {
 
     const userId = await this.db.runAsSystem(async (tx) => {
       const created = await this.createUser(tx, block1, gate.requiresProfessionalReview);
+      // Conta unica do MVP, mas com vinculo explicito. A funcao falha se nao houver
+      // exatamente um RT CREF ativo, evitando titular orfao ou acesso profissional global.
+      await tx.execute(sql`SELECT assign_unique_active_professional(${created}::uuid)`);
       await tx
         .update(anamnesisSessions)
         .set({

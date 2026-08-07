@@ -47,17 +47,16 @@ const nextConfig: NextConfig = {
       {
         source: '/:path*',
         headers: [
-          /*
-           * Baseline de cabeçalhos de segurança. A CSP com nonce por request é
-           * escopo do threat model de Sato aplicado às telas reais (Sprint 1+):
-           * uma CSP estrita escrita agora, sem superfície para proteger, nasceria
-           * frouxa (`unsafe-inline`/`unsafe-eval`) e viraria falso conforto.
-           */
+          /* A CSP estrita com nonce por request é aplicada em `proxy.ts`. */
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'X-DNS-Prefetch-Control', value: 'off' },
-          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+          },
+          { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
         ],
       },
     ];

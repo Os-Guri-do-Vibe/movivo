@@ -42,6 +42,7 @@ import {
   DLQ_FALLBACK_MESSAGE,
   STANDARD_BLOCK_RESPONSE,
 } from '../src/modules/coach/coach-messages';
+import { seedHealthEligibility } from './health-fixtures';
 
 const { env } = loadEnv();
 const apiRoot = process.cwd();
@@ -166,6 +167,8 @@ async function seedUser(): Promise<{ userId: string; to: string }> {
       constraints: { level: 'INICIANTE', location: 'HOME', equipment: [], injuryTags: [] },
     }),
   );
+  // Sem vínculo + consentimento de saúde, o worker de resposta descarta o batch.
+  await seedHealthEligibility(adminClient, userId);
   return { userId, to };
 }
 
@@ -222,6 +225,8 @@ afterAll(async () => {
        DELETE FROM protocol_versions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM protocols WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM ai_jobs WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
+       DELETE FROM consents WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
+       DELETE FROM professional_assignments WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM users WHERE phone_number LIKE '+5541${RUN}%';`,
     );
   } finally {

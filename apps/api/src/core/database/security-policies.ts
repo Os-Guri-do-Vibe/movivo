@@ -1,3 +1,5 @@
+import { CONSENT_TEXTS } from '@movivo/shared';
+
 /**
  * Políticas de Row-Level Security (US-1.1 / TASK-1.1.2 / TASK-1.1.4 — Sato §4).
  *
@@ -53,10 +55,12 @@ interface TenantTable {
    * o escopo não é aplicável (anamnesis_sessions), então fica `false`.
    */
   anon?: { scope: string; scopeAtInsert: boolean };
+  /** Acesso somente quando existe vinculo profissional ativo com o titular. */
+  professional?: 'read' | 'write';
 }
 
 const TENANT_TABLES: ReadonlyArray<TenantTable> = [
-  { table: 'users', column: 'id' },
+  { table: 'users', column: 'id', professional: 'read' },
   // `consents` tem fase anônima pelo mesmo motivo da anamnese (US-1.2): o
   // consentimento de saúde é registrado na tela-ponte, ANTES de o `users` existir
   // (que só nasce no submit). A âncora nessa fase é `anamnesis_session_id`, escopada
@@ -66,22 +70,31 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
     column: 'user_id',
     anon: { scope: 'anamnesis_session_id', scopeAtInsert: true },
   },
-  { table: 'anamnesis_sessions', column: 'user_id', anon: { scope: 'id', scopeAtInsert: false } },
+  {
+    table: 'anamnesis_sessions',
+    column: 'user_id',
+    anon: { scope: 'id', scopeAtInsert: false },
+    professional: 'read',
+  },
   { table: 'auth_sessions', column: 'user_id' },
   // Sprint 2 (US-2.2): a trilha de invocações de LLM carrega snapshot pseudonimizado
   // de dado de saúde — entra sob a mesma FORCE RLS das tabelas de titular.
-  { table: 'ai_jobs', column: 'user_id' },
+  { table: 'ai_jobs', column: 'user_id', professional: 'read' },
   // Sprint 2 (US-2.4): o protocolo é dado de saúde derivado (personalizado a partir de
   // condição/limitação física) — sob a mesma FORCE RLS por titular. `protocol_versions`
   // tem `user_id` denormalizado justamente para ancorar a RLS sem JOIN (Sato §4.5).
-  { table: 'protocols', column: 'user_id' },
-  { table: 'protocol_versions', column: 'user_id' },
+  { table: 'protocols', column: 'user_id', professional: 'write' },
+  { table: 'protocol_versions', column: 'user_id', professional: 'write' },
   // Sprint 3 (US-3.2): resumo de longo prazo da conversa de saúde — mesma FORCE RLS por titular.
-  { table: 'coaching_sessions', column: 'user_id' },
+  { table: 'coaching_sessions', column: 'user_id', professional: 'read' },
   // Sprint 3 (US-3.6): alerta/handoff ao painel CREF — dado de titular, isolado por RLS FORCE.
-  { table: 'handoff_alerts', column: 'user_id' },
+  { table: 'handoff_alerts', column: 'user_id', professional: 'write' },
   // Sprint 4 (US-4.1): assinatura/dado financeiro do titular — sob a mesma FORCE RLS.
-  { table: 'subscriptions', column: 'user_id' },
+  { table: 'subscriptions', column: 'user_id', professional: 'read' },
+  { table: 'conversations', column: 'user_id', professional: 'read' },
+  { table: 'checkins', column: 'user_id', professional: 'read' },
+  { table: 'reengagement_nudges', column: 'user_id', professional: 'read' },
+  { table: 'audit_logs', column: 'user_id', professional: 'write' },
 ];
 
 // `nullif(..., '')` é OBRIGATÓRIO, não cosmético: sob PgBouncer transaction mode,
@@ -94,6 +107,9 @@ const UID = `nullif(current_setting('app.current_user_id', true), '')`;
 const ROLE = `nullif(current_setting('app.current_role', true), '')`;
 /** GUC de escopo da sessão anônima (Sato — achado 1). NULL quando não setado. */
 const SESSION = `nullif(current_setting('app.current_anamnesis_session_id', true), '')`;
+const HEALTH_CONSENT_VERSION = CONSENT_TEXTS.HEALTH_DATA.version.replaceAll("'", "''");
+const MARKETING_CONSENT_VERSION = CONSENT_TEXTS.MARKETING.version.replaceAll("'", "''");
+const TERMS_CONSENT_VERSION = CONSENT_TEXTS.TERMS_OF_SERVICE.version.replaceAll("'", "''");
 
 /** Nomes de política determinísticos por tabela (permite DROP idempotente). */
 function policyNames(table: string) {
@@ -118,12 +134,18 @@ function policyNames(table: string) {
 export function buildRlsPoliciesSql(): string {
   const statements: string[] = [];
 
-  for (const { table, column, anon } of TENANT_TABLES) {
+  for (const { table, column, anon, professional } of TENANT_TABLES) {
     const p = policyNames(table);
     const self = `("${column}"::text = ${UID})`;
     const system = `(${ROLE} = 'SYSTEM')`;
     const admin = `(${ROLE} = 'ADMIN')`;
     const base = `${self} OR ${system} OR ${admin}`;
+    const linkedProfessional = `(${ROLE} = 'PROFESSIONAL' AND EXISTS (
+      SELECT 1 FROM public.professional_assignments pa
+      WHERE pa.professional_id::text = ${UID}
+        AND pa.user_id = "${table}"."${column}"
+        AND pa.active = true AND pa.revoked_at IS NULL
+    ) AND public.has_active_health_consent("${table}"."${column}"))`;
 
     // Fase anônima escopada por sessão (Sato — achado 1):
     //  - leitura: GUC ausente (lookup token→sessão) OU coluna de escopo == GUC;
@@ -141,15 +163,15 @@ export function buildRlsPoliciesSql(): string {
       anonInsert = anon.scopeAtInsert ? ` OR (${orphan} AND ${scoped})` : ` OR (${orphan})`;
     }
 
-    const visibleRead = `${base}${anonRead}`;
-    const visibleWrite = `${base}${anonWrite}`;
+    const visibleRead = `${base}${professional ? ` OR ${linkedProfessional}` : ''}${anonRead}`;
+    const visibleWrite = `${base}${professional === 'write' ? ` OR ${linkedProfessional}` : ''}${anonWrite}`;
 
     // Criação de titular / linha de fase anônima: permitida sem contexto de tenant
     // (onboarding público e operações de sistema) ou dentro do próprio contexto.
     const insertCheck =
       table === 'users'
         ? `${UID} IS NULL OR ${self} OR ${system} OR ${admin}`
-        : `${base}${anonInsert}`;
+        : `${base}${professional === 'write' ? ` OR ${linkedProfessional}` : ''}${anonInsert}`;
 
     statements.push(
       `ALTER TABLE "${table}" ENABLE ROW LEVEL SECURITY`,
@@ -175,10 +197,329 @@ export function buildRlsPoliciesSql(): string {
     }
   }
 
+  // O vinculo em si nao herda a policy por titular: o profissional enxerga apenas
+  // suas atribuicoes; somente SYSTEM/ADMIN cria, revoga ou remove uma atribuicao.
+  const assignment = policyNames('professional_assignments');
+  statements.push(
+    'ALTER TABLE "professional_assignments" ENABLE ROW LEVEL SECURITY',
+    'ALTER TABLE "professional_assignments" FORCE ROW LEVEL SECURITY',
+    `DROP POLICY IF EXISTS "${assignment.select}" ON "professional_assignments"`,
+    `DROP POLICY IF EXISTS "${assignment.insert}" ON "professional_assignments"`,
+    `DROP POLICY IF EXISTS "${assignment.update}" ON "professional_assignments"`,
+    `DROP POLICY IF EXISTS "${assignment.delete}" ON "professional_assignments"`,
+    `CREATE POLICY "${assignment.select}" ON "professional_assignments" FOR SELECT USING (professional_id::text = ${UID} OR ${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
+    `CREATE POLICY "${assignment.insert}" ON "professional_assignments" FOR INSERT WITH CHECK (${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
+    `CREATE POLICY "${assignment.update}" ON "professional_assignments" FOR UPDATE USING (${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN') WITH CHECK (${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
+    `CREATE POLICY "${assignment.delete}" ON "professional_assignments" FOR DELETE USING (${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
+    // Mesmo com acesso a audit_logs, o ator nao pode forjar a identidade de auditoria.
+    `DROP POLICY IF EXISTS "audit_logs_rls_insert" ON "audit_logs"`,
+    `CREATE POLICY "audit_logs_rls_insert" ON "audit_logs" FOR INSERT WITH CHECK ((actor_id::text = ${UID} AND ${ROLE} = 'PROFESSIONAL' AND EXISTS (SELECT 1 FROM public.professional_assignments pa WHERE pa.professional_id::text = ${UID} AND pa.user_id = audit_logs.user_id AND pa.active = true AND pa.revoked_at IS NULL) AND public.has_active_health_consent(audit_logs.user_id)) OR ${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
+  );
+
   // `;` como separador — executado por `sql.unsafe` (simple query, multi-statement),
   // o mesmo caminho já usado pelos grants em `migrate.ts`.
   return statements.map((s) => `${s};`).join('\n');
 }
 
 /** Tabelas cobertas — reutilizado pelo teste de integração de isolamento (US-1.8). */
-export const RLS_TENANT_TABLES = TENANT_TABLES.map((t) => t.table);
+export const RLS_TENANT_TABLES = [...TENANT_TABLES.map((t) => t.table), 'professional_assignments'];
+
+/** Integridade criptografica e imutabilidade da trilha, impostas no banco. */
+export function buildAuditIntegritySql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.audit_logs_chain_before_insert()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    DECLARE prior char(64);
+    BEGIN
+      PERFORM pg_advisory_xact_lock(hashtext('movivo.audit_logs.hash_chain'));
+      SELECT row_hash INTO prior FROM public.audit_logs ORDER BY id DESC LIMIT 1;
+      NEW.previous_hash := prior;
+      NEW.row_hash := encode(public.digest(concat_ws('|', coalesce(prior, ''), NEW.actor_id::text,
+        NEW.user_id::text, NEW.action, NEW.entity_type, NEW.entity_id::text,
+        NEW.changes::text, NEW.created_at::text), 'sha256'), 'hex');
+      RETURN NEW;
+    END $$;
+
+    CREATE OR REPLACE FUNCTION public.audit_logs_reject_mutation()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    BEGIN
+      RAISE EXCEPTION 'audit_logs is append-only' USING ERRCODE = '55000';
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.audit_logs_chain_before_insert() FROM PUBLIC;
+    REVOKE ALL ON FUNCTION public.audit_logs_reject_mutation() FROM PUBLIC;
+
+    DROP TRIGGER IF EXISTS trg_audit_logs_chain ON public.audit_logs;
+    CREATE TRIGGER trg_audit_logs_chain BEFORE INSERT ON public.audit_logs
+      FOR EACH ROW EXECUTE FUNCTION public.audit_logs_chain_before_insert();
+    DROP TRIGGER IF EXISTS trg_audit_logs_immutable ON public.audit_logs;
+    CREATE TRIGGER trg_audit_logs_immutable BEFORE UPDATE OR DELETE ON public.audit_logs
+      FOR EACH ROW EXECUTE FUNCTION public.audit_logs_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_audit_logs_no_truncate ON public.audit_logs;
+    CREATE TRIGGER trg_audit_logs_no_truncate BEFORE TRUNCATE ON public.audit_logs
+      FOR EACH STATEMENT EXECUTE FUNCTION public.audit_logs_reject_mutation();
+
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.audit_logs FROM ${appRole};
+    GRANT SELECT, INSERT ON public.audit_logs TO ${appRole};
+  `;
+}
+
+/** Mutacoes profissionais estreitas, sem conceder UPDATE amplo em users/anamnese. */
+export function buildProfessionalAccessSql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.has_active_health_consent(target_user uuid)
+    RETURNS boolean LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    DECLARE actor uuid; actor_role text;
+    BEGIN
+      actor_role := nullif(current_setting('app.current_role', true), '');
+      actor := nullif(current_setting('app.current_user_id', true), '')::uuid;
+      IF NOT (
+        actor_role = 'SYSTEM'
+        OR (actor_role = 'USER' AND actor IS NOT DISTINCT FROM target_user)
+        OR (actor_role = 'PROFESSIONAL' AND EXISTS (
+          SELECT 1 FROM public.professional_assignments pa
+          WHERE pa.professional_id = actor AND pa.user_id = target_user
+            AND pa.active = true AND pa.revoked_at IS NULL
+        ))
+      ) THEN
+        RETURN false;
+      END IF;
+      RETURN EXISTS (
+        SELECT 1 FROM public.consents consent
+        WHERE consent.user_id = target_user
+          AND consent.consent_type = 'HEALTH_DATA'
+          AND consent.version = '${HEALTH_CONSENT_VERSION}'
+          AND consent.accepted = true AND consent.revoked_at IS NULL
+      );
+    END $$;
+
+    CREATE OR REPLACE FUNCTION public.revoke_health_data_consent(target_user uuid)
+    RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    DECLARE actor uuid; actor_role text; affected integer;
+    BEGIN
+      actor_role := nullif(current_setting('app.current_role', true), '');
+      actor := nullif(current_setting('app.current_user_id', true), '')::uuid;
+      IF actor_role <> 'USER' OR actor IS DISTINCT FROM target_user THEN
+        RAISE EXCEPTION 'holder context required' USING ERRCODE = '42501';
+      END IF;
+      UPDATE public.consents SET revoked_at = now(), updated_at = now()
+      WHERE user_id = target_user AND consent_type = 'HEALTH_DATA'
+        AND accepted = true AND revoked_at IS NULL;
+      GET DIAGNOSTICS affected = ROW_COUNT;
+      UPDATE public.professional_assignments
+      SET active = false, revoked_at = now(), updated_at = now()
+      WHERE user_id = target_user AND active = true AND revoked_at IS NULL;
+      IF affected > 0 THEN
+        INSERT INTO public.audit_logs (
+          actor_id, user_id, action, entity_type, entity_id, changes
+        ) VALUES (
+          actor, target_user, 'HEALTH_CONSENT_REVOKED', 'consent', target_user,
+          jsonb_build_object(
+            'consentType', 'HEALTH_DATA',
+            'version', '${HEALTH_CONSENT_VERSION}',
+            'revoked', true
+          )
+        );
+      END IF;
+      RETURN affected > 0;
+    END $$;
+
+    CREATE OR REPLACE FUNCTION public.revoke_non_health_consent(
+      target_user uuid, target_type public.consent_type
+    ) RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    DECLARE actor uuid; actor_role text; affected integer;
+    BEGIN
+      actor_role := nullif(current_setting('app.current_role', true), '');
+      actor := nullif(current_setting('app.current_user_id', true), '')::uuid;
+      IF actor_role <> 'USER' OR actor IS DISTINCT FROM target_user THEN
+        RAISE EXCEPTION 'holder context required' USING ERRCODE = '42501';
+      END IF;
+      IF target_type = 'HEALTH_DATA'::public.consent_type THEN
+        RAISE EXCEPTION 'health consent requires dedicated revocation' USING ERRCODE = '22023';
+      END IF;
+      UPDATE public.consents SET revoked_at = now(), updated_at = now()
+      WHERE user_id = target_user AND consent_type = target_type
+        AND accepted = true AND revoked_at IS NULL;
+      GET DIAGNOSTICS affected = ROW_COUNT;
+      IF affected > 0 THEN
+        INSERT INTO public.audit_logs (
+          actor_id, user_id, action, entity_type, entity_id, changes
+        ) VALUES (
+          actor, target_user, 'CONSENT_REVOKED', 'consent', target_user,
+          jsonb_build_object('consentType', target_type::text, 'revoked', true)
+        );
+      END IF;
+      RETURN affected > 0;
+    END $$;
+
+    CREATE OR REPLACE FUNCTION public.link_session_consents_to_user(
+      target_session uuid, target_user uuid
+    ) RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    DECLARE actor_role text; affected integer;
+    BEGIN
+      actor_role := nullif(current_setting('app.current_role', true), '');
+      IF actor_role <> 'SYSTEM' THEN
+        RAISE EXCEPTION 'system context required' USING ERRCODE = '42501';
+      END IF;
+      PERFORM pg_advisory_xact_lock(hashtext('movivo.consent-cycle:' || target_user::text));
+      UPDATE public.consents AS candidate
+      SET user_id = target_user,
+          cycle = (
+            SELECT coalesce(max(existing.cycle), 0) + 1
+            FROM public.consents AS existing
+            WHERE existing.user_id = target_user
+              AND existing.consent_type = candidate.consent_type
+              AND existing.version = candidate.version
+          ),
+          updated_at = now()
+      WHERE candidate.anamnesis_session_id = target_session AND candidate.user_id IS NULL;
+      GET DIAGNOSTICS affected = ROW_COUNT;
+      RETURN affected;
+    END $$;
+
+    CREATE OR REPLACE FUNCTION public.record_session_consent(
+      target_session uuid,
+      target_type public.consent_type,
+      target_version varchar,
+      target_accepted boolean,
+      source_ip inet,
+      source_agent text
+    ) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    DECLARE actor_role text; scoped_session uuid; expected_version text;
+    BEGIN
+      actor_role := nullif(current_setting('app.current_role', true), '');
+      scoped_session := nullif(current_setting('app.current_anamnesis_session_id', true), '')::uuid;
+      IF actor_role <> 'ANONYMOUS' OR scoped_session IS DISTINCT FROM target_session THEN
+        RAISE EXCEPTION 'anonymous session scope required' USING ERRCODE = '42501';
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM public.anamnesis_sessions session
+        WHERE session.id = target_session AND session.status = 'IN_PROGRESS'
+          AND session.expires_at > now()
+      ) THEN
+        RAISE EXCEPTION 'active anamnesis session required' USING ERRCODE = '42501';
+      END IF;
+      expected_version := CASE target_type
+        WHEN 'HEALTH_DATA'::public.consent_type THEN '${HEALTH_CONSENT_VERSION}'
+        WHEN 'MARKETING'::public.consent_type THEN '${MARKETING_CONSENT_VERSION}'
+        WHEN 'TERMS_OF_SERVICE'::public.consent_type THEN '${TERMS_CONSENT_VERSION}'
+      END;
+      IF target_version IS DISTINCT FROM expected_version THEN
+        RAISE EXCEPTION 'current consent version required' USING ERRCODE = '22023';
+      END IF;
+      INSERT INTO public.consents (
+        user_id, anamnesis_session_id, consent_type, version, accepted,
+        ip_address, user_agent, accepted_at
+      ) VALUES (
+        NULL, target_session, target_type, target_version, target_accepted,
+        source_ip, source_agent, now()
+      )
+      ON CONFLICT (anamnesis_session_id, consent_type, version) DO UPDATE
+      SET accepted = EXCLUDED.accepted,
+          accepted_at = now(),
+          ip_address = EXCLUDED.ip_address,
+          user_agent = EXCLUDED.user_agent,
+          revoked_at = NULL,
+          updated_at = now();
+    END $$;
+
+    CREATE OR REPLACE FUNCTION public.assign_unique_active_professional(target_user uuid)
+    RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    DECLARE professional uuid; professionals_count integer;
+    BEGIN
+      IF nullif(current_setting('app.current_role', true), '') NOT IN ('SYSTEM', 'ADMIN') THEN
+        RAISE EXCEPTION 'assignment requires system context' USING ERRCODE = '42501';
+      END IF;
+      SELECT (array_agg(id ORDER BY id))[1], count(*)::int INTO professional, professionals_count
+      FROM public.users WHERE role = 'PROFESSIONAL' AND cref_active = true;
+      IF professionals_count <> 1 THEN
+        RAISE EXCEPTION 'expected exactly one active CREF professional, found %', professionals_count
+          USING ERRCODE = '55000';
+      END IF;
+      INSERT INTO public.professional_assignments (professional_id, user_id)
+      VALUES (professional, target_user)
+      ON CONFLICT (professional_id, user_id) DO UPDATE
+      SET active = true, revoked_at = NULL, assigned_at = now(), updated_at = now();
+    END $$;
+
+    CREATE OR REPLACE FUNCTION public.release_parq_clearance(target_session uuid, new_state public.parq_state)
+    RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    DECLARE target_user uuid; actor uuid; actor_role text;
+    BEGIN
+      actor_role := nullif(current_setting('app.current_role', true), '');
+      actor := nullif(current_setting('app.current_user_id', true), '')::uuid;
+      IF actor_role <> 'PROFESSIONAL' OR actor IS NULL THEN
+        RAISE EXCEPTION 'active CREF professional role required' USING ERRCODE = '42501';
+      END IF;
+      IF new_state <> 'LIBERADO'::public.parq_state THEN
+        RAISE EXCEPTION 'invalid PAR-Q release state' USING ERRCODE = '22023';
+      END IF;
+      SELECT user_id INTO target_user FROM public.anamnesis_sessions
+      WHERE id = target_session AND parq_state = 'BLOQUEADO_AGUARDANDO_CLEARANCE';
+      IF target_user IS NULL THEN
+        RAISE EXCEPTION 'PAR-Q session not awaiting clearance' USING ERRCODE = 'P0002';
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM public.professional_assignments pa
+        INNER JOIN public.users professional ON professional.id = pa.professional_id
+        WHERE pa.professional_id = actor AND pa.user_id = target_user
+          AND pa.active = true AND pa.revoked_at IS NULL
+          AND professional.role = 'PROFESSIONAL'
+          AND professional.cref_active = true
+      ) THEN
+        RAISE EXCEPTION 'active CREF professional is not assigned to holder' USING ERRCODE = '42501';
+      END IF;
+      IF NOT public.has_active_health_consent(target_user) THEN
+        RAISE EXCEPTION 'active health consent required' USING ERRCODE = '42501';
+      END IF;
+      UPDATE public.anamnesis_sessions SET parq_state = new_state, updated_at = now()
+      WHERE id = target_session;
+      UPDATE public.users SET requires_professional_review = false, updated_at = now()
+      WHERE id = target_user;
+      RETURN target_user;
+    END $$;
+
+    CREATE OR REPLACE FUNCTION public.assigned_active_professional(target_user uuid)
+    RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    DECLARE actor uuid; actor_role text; assigned_professional uuid;
+    BEGIN
+      actor_role := nullif(current_setting('app.current_role', true), '');
+      actor := nullif(current_setting('app.current_user_id', true), '')::uuid;
+      IF actor_role <> 'USER' OR actor IS DISTINCT FROM target_user THEN
+        RAISE EXCEPTION 'holder context required' USING ERRCODE = '42501';
+      END IF;
+      SELECT pa.professional_id INTO assigned_professional
+      FROM public.professional_assignments pa
+      INNER JOIN public.users professional ON professional.id = pa.professional_id
+      WHERE pa.user_id = target_user
+        AND pa.active = true AND pa.revoked_at IS NULL
+        AND professional.role = 'PROFESSIONAL'
+        AND professional.cref_active = true;
+      IF assigned_professional IS NULL THEN
+        RAISE EXCEPTION 'no active assigned CREF professional' USING ERRCODE = '55000';
+      END IF;
+      IF NOT public.has_active_health_consent(target_user) THEN
+        RAISE EXCEPTION 'active health consent required' USING ERRCODE = '42501';
+      END IF;
+      RETURN assigned_professional;
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.has_active_health_consent(uuid) FROM PUBLIC;
+    REVOKE ALL ON FUNCTION public.revoke_health_data_consent(uuid) FROM PUBLIC;
+    REVOKE ALL ON FUNCTION public.revoke_non_health_consent(uuid, public.consent_type) FROM PUBLIC;
+    REVOKE ALL ON FUNCTION public.link_session_consents_to_user(uuid, uuid) FROM PUBLIC;
+    REVOKE ALL ON FUNCTION public.record_session_consent(uuid, public.consent_type, varchar, boolean, inet, text) FROM PUBLIC;
+    REVOKE ALL ON FUNCTION public.assign_unique_active_professional(uuid) FROM PUBLIC;
+    REVOKE ALL ON FUNCTION public.release_parq_clearance(uuid, public.parq_state) FROM PUBLIC;
+    REVOKE ALL ON FUNCTION public.assigned_active_professional(uuid) FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION public.has_active_health_consent(uuid) TO ${appRole};
+    GRANT EXECUTE ON FUNCTION public.revoke_health_data_consent(uuid) TO ${appRole};
+    GRANT EXECUTE ON FUNCTION public.revoke_non_health_consent(uuid, public.consent_type) TO ${appRole};
+    GRANT EXECUTE ON FUNCTION public.link_session_consents_to_user(uuid, uuid) TO ${appRole};
+    GRANT EXECUTE ON FUNCTION public.record_session_consent(uuid, public.consent_type, varchar, boolean, inet, text) TO ${appRole};
+    GRANT EXECUTE ON FUNCTION public.assign_unique_active_professional(uuid) TO ${appRole};
+    GRANT EXECUTE ON FUNCTION public.release_parq_clearance(uuid, public.parq_state) TO ${appRole};
+    GRANT EXECUTE ON FUNCTION public.assigned_active_professional(uuid) TO ${appRole};
+    REVOKE INSERT, UPDATE, DELETE ON public.consents FROM ${appRole};
+  `;
+}

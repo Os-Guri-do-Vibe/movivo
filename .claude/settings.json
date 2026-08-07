@@ -9,7 +9,7 @@
       "Grep(*)",
       "WebFetch(*)",
       "WebSearch(*)",
-      "mcp__*(*)"
+      "mcp__*"
     ]
   },
   "extraKnownMarketplaces": {

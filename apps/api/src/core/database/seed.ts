@@ -21,10 +21,12 @@
  * `db:migrate`, não o caminho de runtime da aplicação.
  */
 import { drizzle } from 'drizzle-orm/postgres-js';
+import { eq } from 'drizzle-orm';
+import argon2 from 'argon2';
 import postgres from 'postgres';
 
 import { loadEnv } from '../config/load-env';
-import { users } from './schema';
+import { professionalAssignments, users } from './schema';
 
 const { env } = loadEnv();
 
@@ -98,9 +100,45 @@ async function main(): Promise<void> {
       .returning({ id: users.id });
 
     const rows = await client<{ total: number }[]>`
-      SELECT count(*)::int AS total FROM users
+      SELECT count(*)::int AS total FROM users WHERE role = 'USER'
     `;
     const total = rows[0]?.total ?? 0;
+
+    const devPassword = env.DEV_PROFESSIONAL_PASSWORD;
+    if (devPassword) {
+      const passwordHash = await argon2.hash(devPassword, { type: argon2.argon2id });
+      await db
+        .insert(users)
+        .values({
+          phoneNumber: '+5555000000099',
+          name: 'Profissional CREF Dev (sintetico)',
+          email: 'cref-dev@example.invalid',
+          status: 'ACTIVE',
+          role: 'PROFESSIONAL',
+          passwordHash,
+          crefNumber: '000000-G',
+          crefRegion: 'ZZ',
+          crefActive: true,
+        })
+        .onConflictDoNothing({ target: users.phoneNumber });
+      const [professional] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.phoneNumber, '+5555000000099'))
+        .limit(1);
+      const titulars = await db.select({ id: users.id }).from(users).where(eq(users.role, 'USER'));
+      if (professional) {
+        await db
+          .insert(professionalAssignments)
+          .values(
+            titulars.map((titular) => ({ professionalId: professional.id, userId: titular.id })),
+          )
+          .onConflictDoNothing();
+      }
+      console.log('[db:seed] Conta CREF sintetica provisionada com vinculos explicitos.');
+    } else {
+      console.warn('[db:seed] DEV_PROFESSIONAL_PASSWORD_FILE ausente; conta CREF dev ignorada.');
+    }
 
     console.log(
       `[db:seed] ${inserted.length} usuário(s) inserido(s) nesta execução; ` +

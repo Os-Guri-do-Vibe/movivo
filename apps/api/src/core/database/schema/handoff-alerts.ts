@@ -7,7 +7,7 @@
  *
  * É dado de titular (não global como `knowledge_base`/`intent_examples`): RLS por `user_id`.
  */
-import { index, pgTable, uuid, varchar } from 'drizzle-orm/pg-core';
+import { index, pgTable, uniqueIndex, uuid, varchar } from 'drizzle-orm/pg-core';
 
 import { primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
 import { handoffLevelEnum, handoffStatusEnum } from './enums';
@@ -33,12 +33,17 @@ export const handoffAlerts = pgTable(
     /** Conversa que originou o alerta (contexto para o profissional). Sem FK: escrita assíncrona. */
     conversationId: uuid('conversation_id'),
 
+    /** Origem duravel para idempotencia de alertas de check-in. */
+    sourceType: varchar('source_type', { length: 30 }),
+    sourceId: uuid('source_id'),
+
     ...timestampColumns,
   },
   (table) => [
     // Fila do painel CREF (Sprint 5): pendentes por nível/tempo. `user_id` líder p/ RLS.
     index('idx_handoff_alerts_user').on(table.userId, table.createdAt),
     index('idx_handoff_alerts_queue').on(table.status, table.level, table.createdAt),
+    uniqueIndex('uq_handoff_alerts_source').on(table.sourceType, table.sourceId),
   ],
 );
 
