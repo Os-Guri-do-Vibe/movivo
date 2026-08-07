@@ -22,6 +22,7 @@ import { loadEnv } from '../src/core/config/load-env';
 import { type DrizzleClient } from '../src/core/database/database.module';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { ProtocolRepository } from '../src/modules/protocol/protocol.repository';
+import { seedHealthEligibility } from './health-fixtures';
 
 const { env } = loadEnv();
 const apiRoot = process.cwd();
@@ -86,6 +87,8 @@ async function createUser(): Promise<string> {
   const phone = `+5542${RUN}${(seq += 1)}`;
   const [row] = await adminClient<Array<{ id: string }>>`
     INSERT INTO users (phone_number) VALUES (${phone}) RETURNING id`;
+  // persist() assina o protocolo via assigned_active_professional → exige vínculo + consentimento.
+  await seedHealthEligibility(adminClient, row.id);
   return row.id;
 }
 
@@ -112,6 +115,8 @@ afterAll(async () => {
     await adminClient.unsafe(
       `DELETE FROM protocol_versions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5542${RUN}%');
        DELETE FROM protocols WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5542${RUN}%');
+       DELETE FROM consents WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5542${RUN}%');
+       DELETE FROM professional_assignments WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5542${RUN}%');
        DELETE FROM users WHERE phone_number LIKE '+5542${RUN}%';`,
     );
   } finally {

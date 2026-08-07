@@ -119,7 +119,11 @@ afterAll(async () => {
       `DELETE FROM professional_assignments
          WHERE professional_id = '${professionalId}' OR user_id IN ('${userA}','${userB}');
        DELETE FROM consents WHERE user_id IN ('${userA}','${userB}');
-       DELETE FROM users WHERE id IN ('${userA}','${userB}','${professionalId}');`,
+       -- \`audit_logs\` é append-only por trigger (imutável até para o superusuário). O titular
+       -- que ficou com trilha de revogação é preservado — apagá-lo destruiria a prova.
+       DELETE FROM users WHERE id IN ('${userA}','${userB}','${professionalId}')
+         AND id NOT IN (SELECT user_id FROM audit_logs WHERE user_id IS NOT NULL
+                        UNION SELECT actor_id FROM audit_logs WHERE actor_id IS NOT NULL);`,
     );
   } finally {
     await adminClient.end({ timeout: 5 });

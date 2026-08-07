@@ -39,6 +39,7 @@ import {
   type OutboundMessage,
   type WhatsappTransport,
 } from '../src/modules/whatsapp/arara-transport';
+import { seedHealthEligibility } from './health-fixtures';
 
 const { env } = loadEnv();
 const apiRoot = process.cwd();
@@ -86,6 +87,8 @@ async function createUser(): Promise<{ userId: string; to: string }> {
     if (!u) throw new Error('seed user');
     return u.id;
   });
+  // O dunning do PAST_DUE é um COACH_MESSAGE (health-gated) — precisa de consentimento ativo.
+  await seedHealthEligibility(adminClient, userId);
   return { userId, to };
 }
 
@@ -139,6 +142,8 @@ afterAll(async () => {
   try {
     await adminClient.unsafe(
       `DELETE FROM subscriptions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
+       DELETE FROM consents WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
+       DELETE FROM professional_assignments WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM users WHERE phone_number LIKE '+5541${RUN}%';`,
     );
   } finally {

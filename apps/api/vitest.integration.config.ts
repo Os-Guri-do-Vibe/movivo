@@ -19,6 +19,9 @@ export default defineConfig({
     globals: false,
     environment: 'node',
     include: ['test/**/*.int-spec.ts', 'src/**/*.int-spec.ts'],
+    // Garante o profissional CREF singleton (o `db:seed` não roda na integração) — sem ele
+    // toda submissão de anamnese falha em `assign_unique_active_professional`.
+    globalSetup: ['test/global-setup.int.ts'],
     // Integração é sequencial: comparte o mesmo Postgres/Redis; paralelizar convida a corrida.
     fileParallelism: false,
     // Um ÚNICO fork para toda a suíte de integração. Sem isto, cada arquivo roda

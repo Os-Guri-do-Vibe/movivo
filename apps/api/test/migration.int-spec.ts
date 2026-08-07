@@ -65,6 +65,10 @@ const host = env.MIGRATION_DATABASE_HOST ?? env.DATABASE_HOST ?? 'localhost';
 const port = Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 15432);
 const migratorUser = env.MIGRATION_DATABASE_USER ?? 'movivo_migrator';
 const migratorPassword = env.MIGRATION_DATABASE_PASSWORD;
+// Role de runtime (NÃO-dona). Os builders REVOGAM INSERT/UPDATE em consents/audit_logs do
+// appRole; passar o migrador (dono das funções SECURITY DEFINER) revogaria dele mesmo e
+// quebraria as próprias funções. Em produção o appRole é `movivo_app` — espelhamos isso.
+const appRole = env.DATABASE_USER ?? 'movivo_app';
 
 // O superusuário instala extensões não-trusted e cria/derruba o banco descartável.
 // Senha lida direto do Docker Secret (fora do schema de env da aplicação). Strip de BOM
@@ -254,8 +258,8 @@ describe('migração 0000_init num Postgres limpo', () => {
     const professional = '70000000-0000-4000-8000-000000000002';
     const session = '60000000-0000-4000-8000-000000000001';
     try {
-      await client.unsafe(buildAuditIntegritySql(migratorUser));
-      await client.unsafe(buildProfessionalAccessSql(migratorUser));
+      await client.unsafe(buildAuditIntegritySql(appRole));
+      await client.unsafe(buildProfessionalAccessSql(appRole));
       await client`
         INSERT INTO users (id, phone_number, role, cref_number, cref_region, cref_active)
         VALUES

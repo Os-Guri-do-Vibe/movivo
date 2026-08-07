@@ -96,8 +96,14 @@ afterAll(async () => {
       `DELETE FROM consents WHERE anamnesis_session_id IN
          (SELECT id FROM anamnesis_sessions WHERE token LIKE 'tok-${RUN}-%')
          OR user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5555${RUN}%');
+       DELETE FROM professional_assignments WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5555${RUN}%');
        DELETE FROM anamnesis_sessions WHERE token LIKE 'tok-${RUN}-%';
-       DELETE FROM users WHERE phone_number LIKE '+5555${RUN}%';`,
+       -- \`audit_logs\` é append-only por trigger (imutável até para o superusuário): a revogação
+       -- deste teste deixa trilha permanente. O titular auditado não pode ser apagado (LGPD:
+       -- exclusão é anonimização, não DELETE) — por isso ele é preservado no teardown.
+       DELETE FROM users WHERE phone_number LIKE '+5555${RUN}%'
+         AND id NOT IN (SELECT user_id FROM audit_logs WHERE user_id IS NOT NULL
+                        UNION SELECT actor_id FROM audit_logs WHERE actor_id IS NOT NULL);`,
     );
   } finally {
     await Promise.all([appClient.end({ timeout: 5 }), adminClient.end({ timeout: 5 })]);
@@ -166,7 +172,7 @@ describe('CONSENT — prova de consentimento LGPD (US-1.2)', () => {
     // A decisao e as circunstancias passam a representar o aceite atual.
     expect(marketing.accepted).toBe(true);
     expect(marketing.accepted_at.getTime()).toBeGreaterThanOrEqual(acceptedAtBefore);
-    expect(marketing.ip_address).toBe('203.0.113.99');
+    expect(marketing.ip_address).toBe('203.0.113.99/32'); // coluna inet carimba o prefixo /32
     expect(marketing.user_agent).toBe('outro-agente');
   });
 
