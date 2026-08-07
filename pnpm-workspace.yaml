@@ -25,6 +25,10 @@ overrides:
   # fast-uri <3.1.5 — host confusion via backslash. Origem: @nestjs/cli>...>ajv>fast-uri
   # (devDependency). Mesmo major (3.x) — correção segura. Datado: 2026-08-03.
   'fast-uri@>=3.0.0 <3.1.5': '>=3.1.5'
+  # js-yaml <4.3.1 — quadratic CPU consumption em !!omap (CVE-2026-59870). Origem:
+  # @nestjs/cli>fork-ts-checker-webpack-plugin>cosmiconfig>js-yaml (devDependency).
+  # Mesmo major (4.x) — correção segura. Datado: 2026-08-07.
+  'js-yaml@>=4.0.0 <4.3.1': '>=4.3.1'
 allowBuilds:
   # `core-js` entra como dependência transitiva de `posthog-js` (US-0.5). Seu script de
   # postinstall só imprime uma mensagem de financiamento — não produz artefato nenhum.
