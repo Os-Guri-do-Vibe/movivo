@@ -1,24 +1,33 @@
 /**
- * Smoke E2E da anamnese (US-1.6). O webServer do Playwright sobe só o front; a API
- * (3001) não está no ar, então interceptamos `POST /anamnesis/start` para provar que
- * a rota monta e chega ao bloco 1. O fluxo completo contra a API real é US-1.8.
+ * Smoke E2E do onboarding v2 (Sprint 6) contra `mock-dashboard-api.mjs` (porta 3101),
+ * o mesmo mock server real usado pelo dashboard — necessário aqui porque a página
+ * `/anamnese/[token]` busca a sessão no SERVIDOR (RSC), e `page.route()` só intercepta
+ * chamadas do browser. O fluxo completo contra a API real é validado por `test:int`.
  */
 import { expect, test } from '@playwright/test';
 
-test('a anamnese carrega o bloco 1 de identificação', async ({ page }) => {
-  await page.route('**/anamnesis/start', (route) =>
-    route.fulfill({
-      status: 201,
-      contentType: 'application/json',
-      body: JSON.stringify({ token: 'e2e-token', expiresAt: '2099-01-01', lastBlock: 1 }),
-    }),
-  );
+test('cadastro (etapa 1): preenche, verifica o WhatsApp e avança para a anamnese', async ({ page }) => {
+  await page.goto('/anamnese');
+  await expect(page).toHaveURL(/\/anamnese\/e2e-onboarding-token$/);
+  await expect(page.getByRole('heading', { name: 'Cadastro pessoal' })).toBeVisible();
 
-  await page.goto('/anamnese?goal=perder_peso');
+  await page.getByLabel('Qual é o seu nome completo?').fill('Maria Teste');
+  await page.getByLabel('Qual é a sua data de nascimento?').fill('1990-01-01');
+  await page.getByText('Feminino').click();
+  await page.getByLabel('Qual é o seu WhatsApp?').fill('11999998888');
 
-  await expect(page.getByLabel('Seu nome')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Continuar' })).toBeVisible();
-  // Guardrail: o respaldo do profissional CREF aparece na tela-ponte de consentimento.
-  await page.getByLabel('Seu nome').fill('Maria Teste');
-  await page.getByLabel(/WhatsApp/).fill('+5511999998888');
+  // OTP: aparece assim que o telefone tem 11 dígitos; auto-verifica no 6º dígito.
+  await expect(page.getByText(/Confirme seu WhatsApp/)).toBeVisible();
+  await page.getByLabel('Código de verificação de 6 dígitos').fill('123456');
+  await expect(page.getByText('✓ WhatsApp confirmado')).toBeVisible();
+
+  await page.getByLabel(/Li e aceito os Termos/).check();
+  await page.getByLabel(/dados de saúde/).check();
+  await page.getByLabel(/inteligência artificial/).check();
+
+  await page.getByRole('button', { name: 'CONTINUAR' }).click();
+  await expect(page.getByRole('heading', { name: 'Conte um pouco sobre você' })).toBeVisible();
+
+  // Respaldo CREF sempre visível, mesmo neste ponto do funil (guardrail).
+  await expect(page.locator('body')).not.toContainText(/diagnóstico|tratamento|cura/i);
 });

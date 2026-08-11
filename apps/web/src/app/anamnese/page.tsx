@@ -1,31 +1,47 @@
-import type { Metadata } from 'next';
+'use client';
+
+import * as React from 'react';
+import { useRouter } from 'next/navigation';
+
+import { startAnamnesis } from '@/lib/anamnesis-api';
 
 /**
- * Rota `/anamnese` — **placeholder da Sprint 6**.
- *
- * A anamnese v1 (wizard de 3 blocos, `PATCH .../block/{n}`, cliente `anamnesis-api.ts`)
- * foi **removida** junto com os schemas que a sustentavam: a substituição é destrutiva
- * por decisão do fundador (D1 da `sprint/sprint-6-onboarding-em-etapas.md`), e deixar a
- * tela antiga viva depois de o contrato mudar seria um caminho alternativo até o gerador
- * sem passar pelos gates novos (18+, posse do número, consentimentos v2) — exatamente o
- * risco que a TASK-6.12.4 existe para eliminar.
- *
- * O wizard de 3 etapas é a US-6.10/US-6.11 (Felipe), sobre os contratos já publicados
- * pelo backend: `GET /anamnesis/session/{token}`, `PATCH .../step/{n}`,
- * `POST .../phone/send-code`, `POST .../phone/verify` e `POST .../submit`.
+ * Bootstrap do onboarding (US-6.10): cria a sessão e redireciona para o link
+ * resumível `/anamnese/[token]` — mesmo padrão de rota dinâmica por token opaco de
+ * `/protocolo/[token]`, `/assinar/[token]` e `/conta/[token]` (ADR-006).
  */
-export const metadata: Metadata = {
-  title: 'Sua anamnese · MOVIVO',
-  robots: { index: false },
-};
+export default function AnamneseBootstrapPage() {
+  const router = useRouter();
+  const [error, setError] = React.useState(false);
 
-export default function AnamnesePage() {
+  React.useEffect(() => {
+    let cancelled = false;
+    void startAnamnesis()
+      .then(({ token }) => {
+        if (!cancelled) router.replace(`/anamnese/${token}`);
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 p-6">
-      <h1 className="text-2xl font-semibold">Estamos preparando esta etapa</h1>
-      <p className="text-muted-foreground">
-        O novo cadastro da MOVIVO está sendo finalizado. Volte em instantes.
-      </p>
+    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col items-center justify-center gap-4 px-6 text-center">
+      {error ? (
+        <>
+          <h1 className="text-h2 font-semibold">Não conseguimos começar agora</h1>
+          <p className="text-body text-muted-foreground">
+            Tente novamente em instantes, ou fale com a gente pelo WhatsApp da MOVIVO.
+          </p>
+        </>
+      ) : (
+        <p className="text-body text-muted-foreground" role="status">
+          Preparando seu cadastro…
+        </p>
+      )}
     </main>
   );
 }

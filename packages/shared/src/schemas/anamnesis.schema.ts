@@ -280,6 +280,22 @@ export const PARQ_VERSION = 'parq-2026-07-v1';
 export const PARQ_QUESTION_IDS = ['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9'] as const;
 export type ParqQuestionId = (typeof PARQ_QUESTION_IDS)[number];
 
+/**
+ * Texto exibido de cada pergunta (verbatim, `docs/juridico/consentimento-e-parq.md` §2.1).
+ * A UI nunca hardcoda a pergunta — mesma regra dos rótulos de enum acima.
+ */
+export const PARQ_QUESTION_TEXT: Readonly<Record<ParqQuestionId, string>> = {
+  Q1: 'O seu médico já disse que você tem algum problema no coração ou pressão alta?',
+  Q2: 'Você sente dor no peito quando faz atividade física?',
+  Q3: 'No último mês, você sentiu dor no peito mesmo sem estar se exercitando?',
+  Q4: 'Você já perdeu o equilíbrio por tontura ou já desmaiou?',
+  Q5: 'Você toma algum medicamento contínuo para pressão ou para o coração?',
+  Q6: 'Você tem algum problema em osso, articulação ou coluna que pode piorar com atividade física?',
+  Q7: 'Você está grávida ou teve bebê nas últimas semanas?',
+  Q8: 'Você passou por alguma cirurgia nos últimos 6 meses?',
+  Q9: 'Você sabe de algum outro motivo pelo qual não deveria praticar atividade física?',
+};
+
 /** Uma resposta do PAR-Q. `answer=true` é o "Sim" (resposta de risco). */
 export const parqAnswerSchema = z.object({
   questionId: z.enum(PARQ_QUESTION_IDS),

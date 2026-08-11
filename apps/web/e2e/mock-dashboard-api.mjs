@@ -9,6 +9,7 @@ const CHECKIN_ID = '44444444-4444-4444-8444-444444444444';
 const createdAt = '2026-08-03T12:00:00.000Z';
 const resolvedIds = new Set();
 const eventStreams = new Set();
+const anamnesisSessions = new Map();
 let realtimeVisible = false;
 
 const protocolContent = {
@@ -99,8 +100,13 @@ const replay = {
   ],
 };
 
+// CORS permissivo: o onboarding v2 chama esta API direto do browser (cross-origin
+// localhost:3000 → 127.0.0.1:3101), diferente do dashboard, que passa por BFF same-origin.
+// Só existe neste mock de teste — a API real tem sua própria política de CORS.
+const CORS_HEADERS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': '*', 'Access-Control-Allow-Headers': '*' };
+
 function json(response, status, body, headers = {}) {
-  response.writeHead(status, { 'Content-Type': 'application/json', ...headers });
+  response.writeHead(status, { 'Content-Type': 'application/json', ...CORS_HEADERS, ...headers });
   response.end(JSON.stringify(body));
 }
 
@@ -123,6 +129,10 @@ async function readBody(request) {
 
 createServer(async (request, response) => {
   const url = new URL(request.url ?? '/', `http://127.0.0.1:${PORT}`);
+  if (request.method === 'OPTIONS') {
+    response.writeHead(204, CORS_HEADERS);
+    return response.end();
+  }
   if (url.pathname === '/api/v1/health') return json(response, 200, { status: 'ok' });
   if (request.method === 'POST' && url.pathname === '/__reset') {
     resolvedIds.clear();
@@ -134,6 +144,69 @@ createServer(async (request, response) => {
     const event = 'event: queue.updated\ndata: {"invalidate":true}\n\n';
     for (const stream of eventStreams) stream.write(event);
     return json(response, 200, { status: 'emitted' });
+  }
+
+  // --- Onboarding v2 (Sprint 6) — sessão em memória, um smoke por processo ---
+  if (request.method === 'POST' && url.pathname === '/api/v1/anamnesis/start') {
+    const token = 'e2e-onboarding-token';
+    anamnesisSessions.set(token, { currentStep: 1, phoneVerified: false, code: null });
+    return json(response, 201, {
+      token,
+      expiresAt: '2099-01-01T00:00:00.000Z',
+      currentStep: 1,
+    });
+  }
+  const sessionMatch = /^\/api\/v1\/anamnesis\/session\/([^/]+)(\/.*)?$/.exec(url.pathname);
+  if (sessionMatch) {
+    const [, token, rest] = sessionMatch;
+    const session = anamnesisSessions.get(token);
+    if (!session) return json(response, 404, { message: 'sessão não encontrada' });
+
+    if (!rest && request.method === 'GET') {
+      return json(response, 200, {
+        status: 'IN_PROGRESS',
+        currentStep: session.currentStep,
+        phoneVerified: session.phoneVerified,
+        primaryGoal: null,
+        consents: [
+          { type: 'TERMS_OF_SERVICE', version: 'terms-e2e-v1', title: null, body: [], label: 'Li e aceito os Termos de Uso.', required: true },
+          { type: 'HEALTH_DATA', version: 'health-e2e-v1', title: 'Saúde', body: [], label: 'Autorizo o tratamento dos meus dados de saúde.', required: true },
+          { type: 'AI_DISCLOSURE', version: 'ai-e2e-v1', title: 'IA', body: [], label: 'Estou ciente de que a MOVIVO usa inteligência artificial.', required: true },
+          { type: 'MARKETING', version: 'marketing-e2e-v1', title: null, body: [], label: 'Quero receber novidades.', required: false },
+        ],
+        step1: null,
+        step2: null,
+        healthCompleted: false,
+        parqCompleted: false,
+        outcome: null,
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      });
+    }
+    if (rest === '/phone/send-code' && request.method === 'POST') {
+      session.code = '123456';
+      return json(response, 200, {
+        sent: true,
+        resendAvailableAt: '2099-01-01T00:00:00.000Z',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      });
+    }
+    if (rest === '/phone/verify' && request.method === 'POST') {
+      const body = await readBody(request);
+      if (body.code !== session.code) return json(response, 400, { message: 'código incorreto' });
+      session.phoneVerified = true;
+      return json(response, 200, { phoneVerified: true });
+    }
+    if (rest === '/consents' && request.method === 'POST') {
+      return json(response, 200, {});
+    }
+    const stepMatch = /^\/step\/([123])$/.exec(rest ?? '');
+    if (stepMatch && request.method === 'PATCH') {
+      session.currentStep = Number(stepMatch[1]) + 1;
+      return json(response, 200, { currentStep: session.currentStep });
+    }
+    if (rest === '/submit' && request.method === 'POST') {
+      return json(response, 200, { status: 'SUBMITTED', outcome: 'READY' });
+    }
   }
 
   if (request.method === 'POST' && url.pathname === '/api/v1/auth/login') {
