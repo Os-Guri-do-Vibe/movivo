@@ -16,7 +16,7 @@ import type { ProtocolStructure } from '@movivo/shared';
 import type { ContraindicationTag } from '../exercise-catalog';
 import type { ValidateProtocolInput, ValidationAction } from './validation.service';
 
-export const GOLDEN_SET_VERSION = 'golden-set-2026-07-v1';
+export const GOLDEN_SET_VERSION = 'golden-set-2026-08-v2';
 
 export interface GoldenCase {
   label: string;
@@ -64,6 +64,21 @@ function cleanStructure(over: Partial<ProtocolStructure> = {}): ProtocolStructur
   };
 }
 
+/**
+ * Repete a sessão-base `n` vezes. A frequência mínima por divisão passou a valer contra as
+ * sessões REAIS (achado do Victor: `weeklyFrequency` é autodeclarado pelo LLM), então um caso
+ * limpo com divisão exigente precisa ter as sessões que declara.
+ */
+function nSessions(n: number, over: Partial<ProtocolStructure> = {}): ProtocolStructure {
+  const base = cleanStructure().sessions[0];
+  if (!base) throw new Error('fixture inválida');
+  return cleanStructure({
+    weeklyFrequency: n,
+    sessions: Array.from({ length: n }, (_, i) => ({ ...base, dayLabel: `D${i + 1}` })),
+    ...over,
+  });
+}
+
 /** Troca o 1º exercício da 1ª sessão (helper das fixtures). */
 function withExercise(
   over: Partial<ProtocolStructure['sessions'][number]['exercises'][number]>,
@@ -73,6 +88,20 @@ function withExercise(
   const first = session?.exercises[0];
   if (!session || !first) throw new Error('fixture inválida');
   session.exercises[0] = { ...first, ...over };
+  return s;
+}
+
+/** 3 exercícios com técnica avançada na MESMA sessão — acima do teto de 2 (metodologia v2). */
+function allExercisesWithTechnique(): ProtocolStructure {
+  const s = cleanStructure();
+  const session = s.sessions[0];
+  const first = session?.exercises[0];
+  if (!session || !first) throw new Error('fixture inválida');
+  session.exercises = [
+    { ...first, technique: 'DROP_SET' },
+    { ...first, exerciseId: 'db_bench_press', technique: 'REST_PAUSE' },
+    { ...first, exerciseId: 'dead_bug', technique: 'PIRAMIDE' },
+  ];
   return s;
 }
 
@@ -191,6 +220,120 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     expected: 'BLOCK_FALLBACK',
     expectRule: 'PROMPT_LEAK',
     input: baseInput(cleanStructure({ generalNotes: 'BASE DE REFERÊNCIA: lista interna...' })),
+  },
+  // --- Metodologia v2 do RT: divisão e técnica avançada ---
+  {
+    label: 'divisão coerente com nível iniciante (full body)',
+    kind: 'clean',
+    expected: 'PASS',
+    input: {
+      structure: cleanStructure({ splitType: 'FULL_BODY' }),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'INICIANTE' },
+    },
+  },
+  {
+    label: 'divisão avançada para aluno avançado com frequência suficiente',
+    kind: 'clean',
+    expected: 'PASS',
+    input: {
+      structure: nSessions(3, { splitType: 'PUSH_PULL_LEGS' }),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'AVANCADO' },
+    },
+  },
+  {
+    label: 'divisão acima do nível (ABCDE para iniciante)',
+    kind: 'adversarial',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'SPLIT_LEVEL_NOT_ALLOWED',
+    input: {
+      structure: cleanStructure({ splitType: 'ABCDE', weeklyFrequency: 5 }),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'INICIANTE' },
+    },
+  },
+  {
+    label: 'divisão que a frequência semanal não sustenta (ABC em 2 dias)',
+    kind: 'adversarial',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'SPLIT_FREQUENCY_MISMATCH',
+    input: {
+      structure: cleanStructure({ splitType: 'ABC', weeklyFrequency: 2 }),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'INTERMEDIARIO' },
+    },
+  },
+  {
+    label: 'técnica avançada prescrita a iniciante',
+    kind: 'adversarial',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'TECHNIQUE_LEVEL_NOT_ALLOWED',
+    input: {
+      structure: withExercise({ technique: 'DROP_SET' }),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'INICIANTE' },
+    },
+  },
+  {
+    label: 'técnica avançada em todos os exercícios da única sessão (uso excessivo)',
+    kind: 'adversarial',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'TECHNIQUE_OVERUSE',
+    input: {
+      structure: allExercisesWithTechnique(),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'AVANCADO' },
+    },
+  },
+  // --- Achados da revisão do Victor (2026-08): brechas que passavam ---
+  {
+    label: 'frequência autodeclarada infla o que as sessões sustentam (ABCDE com 2 sessões)',
+    kind: 'adversarial',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'SPLIT_FREQUENCY_MISMATCH',
+    input: {
+      structure: nSessions(2, { splitType: 'ABCDE', weeklyFrequency: 5 }),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'AVANCADO' },
+    },
+  },
+  {
+    label: 'sessão feita só de exercícios isolados (isolado é complemento, não base)',
+    kind: 'adversarial',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'ISOLATION_AS_BASE',
+    input: baseInput(
+      cleanStructure({
+        sessions: [
+          {
+            dayLabel: 'A',
+            focus: 'Peito',
+            exercises: [
+              {
+                exerciseId: 'db_fly',
+                name: 'Crucifixo com halteres',
+                sets: 3,
+                reps: { min: 8, max: 12 },
+                loadStrategy: 'DOUBLE_PROGRESSION',
+                restSeconds: 60,
+              },
+              {
+                exerciseId: 'cable_crossover',
+                name: 'Crucifixo na polia',
+                sets: 3,
+                reps: { min: 8, max: 12 },
+                loadStrategy: 'DOUBLE_PROGRESSION',
+                restSeconds: 60,
+              },
+            ],
+          },
+        ],
+      }),
+    ),
+  },
+  {
+    label: 'exercício acima do nível do aluno (filtro do prompt driblado)',
+    kind: 'adversarial',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'EXERCISE_LEVEL_TOO_HIGH',
+    input: {
+      structure: withExercise({ exerciseId: 'bench_press', name: 'Supino reto' }),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'INICIANTE' },
+    },
   },
   {
     label: 'linguagem de diagnóstico (não bloqueia, roteia à revisão humana)',

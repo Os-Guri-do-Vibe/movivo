@@ -59,7 +59,11 @@ export class ConversationRepository {
     const c = row.constraints as Partial<SubstitutionConstraints>;
     return {
       level: c.level ?? 'INICIANTE',
-      location: c.location ?? 'BOTH',
+      // Protocolo anterior ao catálogo v3 não tem local dos 4 novos valores. `FULL_GYM` é
+      // o default MENOS permissivo em termos de equipamento presumido? Não: é o mais amplo.
+      // Aqui o default seguro é `HOME` — sugerir um substituto de máquina para quem treina
+      // em casa é pior do que sugerir um de peso do corpo para quem está na academia.
+      location: c.location ?? 'HOME',
       equipment: c.equipment ?? [],
       injuryTags: c.injuryTags ?? [],
     };

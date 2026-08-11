@@ -1,149 +1,135 @@
 /**
- * Cliente HTTP da anamnese (US-1.6) — consome os contratos REST do backend
- * (`AnamnesisController`/`ConsentController`, US-1.2/US-1.3). O servidor é a fonte da
- * verdade das regras (PAR-Q, consentimento, cifra); aqui só se fala o contrato.
+ * Cliente HTTP do onboarding v2 (Sprint 6) — consome o `AnamnesisController`.
  *
- * O token da sessão é credencial de dado de saúde: vai no PATH (nunca query string,
- * Sato §8.1) e é persistido no cliente só para permitir a retomada de 72h.
- * ponytail: persistência em localStorage — legível por XSS; um cookie httpOnly seria
- * mais forte, mas depende do backend emitir o cookie (fora do escopo desta US). A CSP
- * e o output-encoding do produto são a mitigação de XSS em vigor.
+ * O token é o identificador opaco da sessão (72h), sempre no PATH (nunca query
+ * string, ADR-006/Sato §8.1) — mesmo padrão de `subscription-api.ts`.
  */
-import {
-  type PrimaryGoal,
-  type RecordConsentInput,
-  type AnamnesisBlock1,
-  type AnamnesisBlock2,
-  type AnamnesisBlock3,
-  type ParqState,
-} from '@movivo/shared';
+import type { OnboardingOutcome } from '@movivo/shared';
 
 import { publicEnv } from './env';
 
 const BASE = publicEnv.apiUrl;
-const TOKEN_KEY = 'movivo:anamnese-token';
 
-/** Objetivo da landing (`perder_peso`…) → enum do contrato. Ausente/desconhecido = undefined. */
-const GOAL_MAP: Record<string, PrimaryGoal> = {
-  perder_peso: 'LOSE_WEIGHT',
-  ganhar_massa: 'GAIN_MUSCLE',
-  condicionamento: 'CONDITIONING',
-};
-
-export function mapGoal(goal: string | null | undefined): PrimaryGoal | undefined {
-  return goal ? GOAL_MAP[goal] : undefined;
+export interface ConsentItemView {
+  type: 'TERMS_OF_SERVICE' | 'HEALTH_DATA' | 'AI_DISCLOSURE' | 'MARKETING';
+  version: string;
+  title: string | null;
+  body: readonly string[];
+  label: string;
+  required: boolean;
 }
 
-/** Erro de API com o status para a UI decidir (retry de rede vs. sessão expirada etc.). */
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
-
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(`${BASE}${path}`, {
-      ...init,
-      headers: { 'Content-Type': 'application/json', ...init?.headers },
-    });
-  } catch {
-    // Falha de rede (offline/DNS/timeout): status 0 → a UI oferece "tentar de novo"
-    // sem perder o dado já digitado no bloco (o progresso salvo protege o resto).
-    throw new ApiError(0, 'Não conseguimos falar com o servidor. Verifique sua conexão.');
-  }
-  if (res.status === 204) return undefined as T;
-  const body: unknown = await res.json().catch(() => null);
-  if (!res.ok) {
-    const message =
-      (body as { message?: string | string[] })?.message?.toString() ??
-      'Algo não saiu como esperado. Tente novamente.';
-    throw new ApiError(res.status, message);
-  }
-  return body as T;
+export interface SessionView {
+  status: string;
+  currentStep: number;
+  phoneVerified: boolean;
+  primaryGoal: string | null;
+  consents: ConsentItemView[];
+  step1: Record<string, unknown> | null;
+  step2: Record<string, unknown> | null;
+  healthCompleted: boolean;
+  parqCompleted: boolean;
+  outcome: OnboardingOutcome | null;
+  expiresAt: string;
 }
 
 export interface StartResult {
   token: string;
   expiresAt: string;
-  lastBlock: number;
+  currentStep: number;
 }
 
-export interface SessionView {
-  status: string;
-  lastBlock: number;
-  primaryGoal: string | null;
-  parqState: ParqState | null;
-  block1: AnamnesisBlock1 | null;
-  block2Completed: boolean;
-  block3: AnamnesisBlock3 | null;
+export interface SendCodeResult {
+  sent: boolean;
+  resendAvailableAt: string;
   expiresAt: string;
 }
 
 export interface SubmitResult {
   status: 'SUBMITTED';
-  parqState: ParqState;
-  requiresProfessionalReview: boolean;
+  outcome: OnboardingOutcome;
 }
 
-export function getStoredToken(): string | null {
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
+class AnamnesisApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly issues: string[],
+  ) {
+    super(`request_failed_${status}`);
   }
 }
 
-export function storeToken(token: string): void {
-  try {
-    localStorage.setItem(TOKEN_KEY, token);
-  } catch {
-    /* localStorage indisponível (modo privado antigo): a sessão vive só nesta aba. */
-  }
-}
-
-export function clearToken(): void {
-  try {
-    localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    /* nada a limpar. */
-  }
-}
-
-export function startAnamnesis(goal: string | null | undefined): Promise<StartResult> {
-  return request<StartResult>('/anamnesis/start', {
-    method: 'POST',
-    body: JSON.stringify({ primaryGoal: mapGoal(goal) }),
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...init?.headers },
   });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { message?: string | string[] } | null;
+    const issues = body?.message ? [body.message].flat() : [];
+    throw new AnamnesisApiError(res.status, issues);
+  }
+  return (await res.json().catch(() => ({}))) as T;
+}
+
+function post<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, {
+    method: 'POST',
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+function patch<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+export { AnamnesisApiError };
+
+export function startAnamnesis(primaryGoal?: string): Promise<StartResult> {
+  return post<StartResult>('/anamnesis/start', primaryGoal ? { primaryGoal } : {});
 }
 
 export function getSession(token: string): Promise<SessionView> {
-  return request<SessionView>(`/anamnesis/session/${token}`);
+  return request<SessionView>(`/anamnesis/session/${token}`, { cache: 'no-store' });
 }
 
-export function patchBlock(
+export function patchStep(
   token: string,
-  n: 1 | 2 | 3,
-  data: AnamnesisBlock1 | AnamnesisBlock2 | AnamnesisBlock3,
-): Promise<{ lastBlock: number }> {
-  return request(`/anamnesis/session/${token}/block/${n}`, {
-    method: 'PATCH',
-    body: JSON.stringify(data),
-  });
+  step: 1 | 2 | 3,
+  data: unknown,
+): Promise<{ currentStep: number }> {
+  return patch(`/anamnesis/session/${token}/step/${step}`, data);
 }
 
-export function recordConsents(token: string, consents: RecordConsentInput[]): Promise<void> {
-  return request<void>(`/anamnesis/session/${token}/consents`, {
-    method: 'POST',
-    body: JSON.stringify({ consents }),
-  });
+export function sendPhoneCode(token: string, phoneNumber: string): Promise<SendCodeResult> {
+  return post<SendCodeResult>(`/anamnesis/session/${token}/phone/send-code`, { phoneNumber });
+}
+
+export function verifyPhoneCode(token: string, code: string): Promise<{ phoneVerified: true }> {
+  return post<{ phoneVerified: true }>(`/anamnesis/session/${token}/phone/verify`, { code });
+}
+
+export function recordConsents(
+  token: string,
+  consents: { type: string; version: string; accepted: boolean }[],
+): Promise<void> {
+  return post(`/anamnesis/session/${token}/consents`, { consents });
 }
 
 export function submitAnamnesis(token: string): Promise<SubmitResult> {
-  return request<SubmitResult>(`/anamnesis/session/${token}/submit`, { method: 'POST' });
+  return post<SubmitResult>(`/anamnesis/session/${token}/submit`);
+}
+
+/** Máscara `(xx) xxxxx-xxxx` sobre dígitos livres (celular BR, 11 dígitos). */
+export function maskPhoneBR(digits: string): string {
+  const d = digits.replace(/\D/g, '').slice(0, 11);
+  if (d.length <= 2) return d;
+  if (d.length <= 7) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
+
+/** `(xx) xxxxx-xxxx` → E.164 (`+55xxxxxxxxxxx`). */
+export function toE164BR(masked: string): string {
+  const d = masked.replace(/\D/g, '');
+  return `+55${d}`;
 }

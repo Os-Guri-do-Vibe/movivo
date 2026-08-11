@@ -138,6 +138,197 @@ describe('ValidationService — bloqueios estruturais', () => {
   });
 });
 
+describe('ValidationService — metodologia v2 (divisão e técnica avançada)', () => {
+  /** Duas sessões, para exercitar a regra "nem toda sessão pode ter técnica". */
+  function twoSessions(over: Partial<ProtocolExercise>[] = []): ProtocolStructure {
+    const base = validStructure().sessions[0];
+    if (!base) throw new Error('fixture inválida');
+    const exercise = base.exercises[0];
+    if (!exercise) throw new Error('fixture inválida');
+    return validStructure({
+      sessions: [
+        { ...base, dayLabel: 'A', exercises: over.map((o) => ({ ...exercise, ...o })) },
+        { ...base, dayLabel: 'B', exercises: [{ ...exercise }] },
+      ],
+    });
+  }
+
+  /** `n` cópias da sessão limpa — a frequência mínima vale contra as sessões REAIS. */
+  function nSessions(n: number, over: Partial<ProtocolStructure> = {}): ProtocolStructure {
+    const base = validStructure().sessions[0];
+    if (!base) throw new Error('fixture inválida');
+    return validStructure({
+      weeklyFrequency: n,
+      sessions: Array.from({ length: n }, (_, i) => ({ ...base, dayLabel: `D${i + 1}` })),
+      ...over,
+    });
+  }
+
+  it('PASS com divisão permitida ao nível e frequência suficiente', () => {
+    const v = service.validate(input({ structure: nSessions(2, { splitType: 'UPPER_LOWER' }) }));
+    expect(v.action).toBe('PASS');
+  });
+
+  it('BLOCK divisão acima do nível (ABCDE para INICIANTE)', () => {
+    const v = service.validate(
+      input({ structure: validStructure({ splitType: 'ABCDE', weeklyFrequency: 5 }) }),
+    );
+    expect(v.violations.map((x) => x.rule)).toContain('SPLIT_LEVEL_NOT_ALLOWED');
+    expect(v.action).toBe('BLOCK_FALLBACK');
+  });
+
+  it('nível ausente é tratado como INICIANTE (fail-safe)', () => {
+    const v = service.validate({
+      structure: validStructure({ splitType: 'ABC', weeklyFrequency: 3 }),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [] },
+    });
+    expect(v.violations.map((x) => x.rule)).toContain('SPLIT_LEVEL_NOT_ALLOWED');
+  });
+
+  it('permite divisão avançada quando o nível é AVANCADO', () => {
+    const v = service.validate({
+      structure: nSessions(5, { splitType: 'ABCDE' }),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'AVANCADO' },
+    });
+    expect(v.action).toBe('PASS');
+  });
+
+  // Achado do Victor: `weeklyFrequency` é campo autodeclarado pelo LLM.
+  it('BLOCK frequência declarada acima das sessões que existem de fato', () => {
+    const v = service.validate({
+      structure: nSessions(2, { splitType: 'ABCDE', weeklyFrequency: 5 }),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'AVANCADO' },
+    });
+    expect(v.violations.map((x) => x.rule)).toContain('SPLIT_FREQUENCY_MISMATCH');
+    expect(v.action).toBe('BLOCK_FALLBACK');
+  });
+
+  it('BLOCK divisão que a frequência não sustenta', () => {
+    const v = service.validate({
+      structure: validStructure({ splitType: 'ABCD', weeklyFrequency: 2 }),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'INTERMEDIARIO' },
+    });
+    expect(v.violations.map((x) => x.rule)).toContain('SPLIT_FREQUENCY_MISMATCH');
+  });
+
+  it('BLOCK técnica avançada em protocolo de INICIANTE', () => {
+    const v = service.validate(input({ structure: withExercise({ technique: 'DROP_SET' }) }));
+    expect(v.violations.map((x) => x.rule)).toContain('TECHNIQUE_LEVEL_NOT_ALLOWED');
+    expect(v.action).toBe('BLOCK_FALLBACK');
+  });
+
+  it('PASS técnica pontual para INTERMEDIARIO (1 exercício, 1 de 2 sessões)', () => {
+    const v = service.validate({
+      structure: twoSessions([{ technique: 'REST_PAUSE' }, {}]),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'INTERMEDIARIO' },
+    });
+    expect(v.action).toBe('PASS');
+  });
+
+  it('BLOCK excesso de técnica na mesma sessão (> 2 exercícios)', () => {
+    const v = service.validate({
+      structure: twoSessions([
+        { technique: 'DROP_SET' },
+        { technique: 'REST_PAUSE' },
+        { technique: 'PIRAMIDE' },
+      ]),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'AVANCADO' },
+    });
+    expect(v.violations.map((x) => x.rule)).toContain('TECHNIQUE_OVERUSE');
+  });
+
+  it('BLOCK técnica em todas as sessões da semana', () => {
+    const base = validStructure();
+    const session = base.sessions[0];
+    const exercise = session?.exercises[0];
+    if (!session || !exercise) throw new Error('fixture inválida');
+    const withTechnique = {
+      ...session,
+      exercises: [{ ...exercise, technique: 'ISOMETRIA' as const }],
+    };
+    const v = service.validate({
+      structure: validStructure({
+        sessions: [
+          { ...withTechnique, dayLabel: 'A' },
+          { ...withTechnique, dayLabel: 'B' },
+        ],
+      }),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'AVANCADO' },
+    });
+    expect(v.violations.map((x) => x.rule)).toContain('TECHNIQUE_OVERUSE');
+  });
+
+  it('BLOCK técnica avançada com flag de PAR-Q (alerta clínico > objetivo)', () => {
+    const v = service.validate({
+      structure: twoSessions([{ technique: 'DROP_SET' }, {}]),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'AVANCADO' },
+      parqFlags: ['CARDIAC'],
+    });
+    expect(v.violations.map((x) => x.rule)).toContain('PARQ_VIOLATION');
+  });
+
+  // Achado do Victor: RT item 2 ("isolado é complemento, nunca base") não era vetado.
+  /** Sessão com `isolation` isolados + `compound` multiarticulares. */
+  function isolationSession(isolation: number, compound: number): ProtocolStructure {
+    const base = validStructure().sessions[0];
+    const exercise = base?.exercises[0];
+    if (!base || !exercise) throw new Error('fixture inválida');
+    const iso = ['db_fly', 'cable_crossover', 'db_curl'];
+    return validStructure({
+      sessions: [
+        {
+          ...base,
+          exercises: [
+            ...Array.from({ length: isolation }, (_, i) => ({
+              ...exercise,
+              exerciseId: iso[i] ?? 'db_fly',
+            })),
+            ...Array.from({ length: compound }, () => ({ ...exercise })),
+          ],
+        },
+      ],
+    });
+  }
+
+  it('BLOCK sessão feita só de exercícios isolados', () => {
+    const v = service.validate(input({ structure: isolationSession(2, 0) }));
+    expect(v.violations.map((x) => x.rule)).toContain('ISOLATION_AS_BASE');
+    expect(v.action).toBe('BLOCK_FALLBACK');
+  });
+
+  it('PASS isolado como complemento (minoria da sessão)', () => {
+    const v = service.validate(input({ structure: isolationSession(1, 2) }));
+    expect(v.violations.map((x) => x.rule)).not.toContain('ISOLATION_AS_BASE');
+    expect(v.action).toBe('PASS');
+  });
+
+  it('PASS empate entre isolados e multiarticulares (complemento, ainda não é base)', () => {
+    const v = service.validate(input({ structure: isolationSession(1, 1) }));
+    expect(v.violations.map((x) => x.rule)).not.toContain('ISOLATION_AS_BASE');
+  });
+});
+
+// Achado do Victor: o filtro por nível do gerador só existia no PROMPT.
+describe('ValidationService — nível do exercício', () => {
+  it('BLOCK exercício cujo minLevel é acima do nível do usuário', () => {
+    const v = service.validate({
+      structure: withExercise({ exerciseId: 'bench_press', name: 'Supino reto' }),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'INICIANTE' },
+    });
+    expect(v.violations.map((x) => x.rule)).toContain('EXERCISE_LEVEL_TOO_HIGH');
+    expect(v.action).toBe('BLOCK_FALLBACK');
+  });
+
+  it('PASS o mesmo exercício quando o usuário é INTERMEDIARIO', () => {
+    const v = service.validate({
+      structure: withExercise({ exerciseId: 'bench_press', name: 'Supino reto' }),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'INTERMEDIARIO' },
+    });
+    expect(v.violations.map((x) => x.rule)).not.toContain('EXERCISE_LEVEL_TOO_HIGH');
+    expect(v.action).toBe('PASS');
+  });
+});
+
 describe('ValidationService — compliance de linguagem', () => {
   it('BLOCK prescrição de medicamento', () => {
     const v = service.validate(

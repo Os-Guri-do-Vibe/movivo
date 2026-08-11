@@ -5,7 +5,7 @@
  * lesões, medicação em uso e as respostas do PAR-Q. Tudo ali é **dado pessoal
  * sensível** na acepção do Art. 11 da LGPD.
  */
-import { index, jsonb, pgTable, smallint, varchar } from 'drizzle-orm/pg-core';
+import { index, integer, jsonb, pgTable, smallint, varchar } from 'drizzle-orm/pg-core';
 
 import { bytea, eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
 import { anamnesisStatusEnum, parqStateEnum } from './enums';
@@ -34,23 +34,59 @@ export const anamnesisSessions = pgTable(
 
     status: anamnesisStatusEnum('status').notNull().default('IN_PROGRESS'),
 
-    /** Último bloco concluído (1, 2 ou 3) — habilita o salvamento de progresso. */
-    lastBlock: smallint('last_block').notNull().default(1),
+    /**
+     * Última ETAPA concluída do wizard v2 (1=cadastro, 2=anamnese, 3=PAR-Q) — habilita
+     * o salvamento de progresso e a tela de retomada (Sofia §1.4c).
+     *
+     * A coluna continua se chamando `last_block` de propósito: renomeá-la só trocaria o
+     * rótulo de uma coluna cujo significado a aplicação já define, ao custo de um
+     * `ALTER ... RENAME` e de um passo interativo no `drizzle-kit generate`. O nome do
+     * conceito vive no código; a coluna é detalhe de armazenamento.
+     */
+    lastStep: smallint('last_block').notNull().default(1),
 
-    /** Bloco 1 — dados básicos e objetivo. Dado pessoal comum. */
+    /** Etapa 1 — cadastro pessoal (nome, nascimento, sexo, telefone). Dado pessoal comum. */
     dataBlock1: jsonb('data_block_1'),
 
     /**
      * -- LGPD Art. 11 — DADO SENSÍVEL DE SAÚDE.
-     * Histórico de saúde, lesões, condições médicas, medicamentos em uso e as
-     * respostas do PAR-Q. **Cifrado em repouso com `pgcrypto`** (US-1.3): o valor
-     * gravado é o `bytea` de `pgp_sym_encrypt` (`HealthCipherService`), nunca o
-     * JSON em claro. Por isso a coluna é `bytea` e não `jsonb` (Sato — achado 3).
+     * Na v2 concentra: **seção 4** (dor localizada, intensidade, tendência, diagnóstico
+     * informado, acompanhamento, recomendação de evitação), o **PAR-Q inteiro** e
+     * **todo campo de texto livre** da anamnese (recomendação vinculante de Alexandre
+     * §5.7 — é mais barato cifrar tudo que é livre do que auditar o que o usuário
+     * digitou). **Cifrado em repouso com `pgcrypto`**: o valor gravado é o `bytea` de
+     * `pgp_sym_encrypt` (`HealthCipherService`), nunca o JSON em claro.
      */
     dataBlock2: bytea('data_block_2'),
 
-    /** Bloco 3 — disponibilidade semanal e equipamentos. Dado pessoal comum. */
+    /** Etapa 2, seções 1/2/3/5 — objetivos, histórico, rotina e preferências (comum). */
     dataBlock3: jsonb('data_block_3'),
+
+    // --- Verificação de posse do WhatsApp (US-6.5) --------------------------
+    /**
+     * Telefone informado na Etapa 1, em E.164. Duplica o que está em `data_block_1`
+     * de propósito: é a chave do rate limit por número (evitar usar o AraraHQ como
+     * canal de abuso) e do reenvio idempotente, e um predicado indexável não pode
+     * viver dentro de um jsonb.
+     */
+    phoneE164: varchar('phone_e164', { length: 20 }),
+
+    /** Carimbo da verificação. NULL = número não provado; bloqueia o avanço da Etapa 1. */
+    phoneVerifiedAt: eventTimestamp('phone_verified_at'),
+
+    /**
+     * SHA-256 de `<sessionId>:<código>`. **Nunca o código em claro** — nem aqui, nem em
+     * log. O id da sessão faz o papel de sal: dois códigos iguais em sessões diferentes
+     * produzem hashes diferentes, o que impede correlacionar sessões por igualdade.
+     */
+    phoneCodeHash: varchar('phone_code_hash', { length: 64 }),
+    phoneCodeExpiresAt: eventTimestamp('phone_code_expires_at'),
+    /** Tentativas de verificação do código VIGENTE. Zera a cada novo código. */
+    phoneCodeAttempts: integer('phone_code_attempts').notNull().default(0),
+    /** Último envio — base do cooldown de 60s e do reenvio idempotente. */
+    phoneCodeSentAt: eventTimestamp('phone_code_sent_at'),
+    /** Envios nesta sessão (teto absoluto por sessão). */
+    phoneCodeSendCount: integer('phone_code_send_count').notNull().default(0),
 
     /** Pré-qualificação capturada na landing, antes do formulário. */
     primaryGoal: varchar('primary_goal', { length: 30 }),
@@ -75,6 +111,9 @@ export const anamnesisSessions = pgTable(
     index('idx_anamnesis_sessions_status').on(table.status),
     // Expurgo de sessões expiradas (minimização de dado sensível) sem seq scan.
     index('idx_anamnesis_sessions_expires_at').on(table.expiresAt),
+    // Rate limit de envio de código POR NÚMERO (US-6.5): sem este índice, o teto por
+    // número viraria seq scan na tabela mais quente do onboarding.
+    index('idx_anamnesis_sessions_phone_code').on(table.phoneE164, table.phoneCodeSentAt),
   ],
 );
 

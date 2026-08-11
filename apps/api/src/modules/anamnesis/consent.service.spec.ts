@@ -106,6 +106,21 @@ describe('ConsentService', () => {
     expect(db.runAsUser).toHaveBeenCalledWith(USER, 'USER', expect.any(Function));
   });
 
+  it('RECUSA a revogação de AI_DISCLOSURE — é ciência, não autorização (Alexandre §5.4)', async () => {
+    const { db } = makeDb();
+    const svc = new ConsentService(db);
+
+    // Esconder o botão na UI não é controle: o serviço tem de recusar a operação.
+    await expect(svc.revoke(USER, 'AI_DISCLOSURE')).rejects.toThrow(/não é revogável/i);
+    expect(db.runAsUser).not.toHaveBeenCalled();
+  });
+
+  it('RECUSA a revogação dos Termos (equivale a cancelar a assinatura)', async () => {
+    const { db } = makeDb();
+    const svc = new ConsentService(db);
+    await expect(svc.revoke(USER, 'TERMS_OF_SERVICE')).rejects.toThrow(/não é revogável/i);
+  });
+
   it('linkSessionToUser roda como SYSTEM (a linha ainda não tem titular)', async () => {
     const { db, run } = makeDb();
     const svc = new ConsentService(db);

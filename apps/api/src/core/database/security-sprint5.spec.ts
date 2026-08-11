@@ -60,7 +60,7 @@ describe('controles de banco da Sprint 5', () => {
     const sql = buildProfessionalAccessSql('movivo_app');
     expect(sql).toContain('FUNCTION public.revoke_health_data_consent(target_user uuid)');
     expect(sql).toContain("actor_role <> 'USER' OR actor IS DISTINCT FROM target_user");
-    expect(sql).toContain("consent.version = 'consent-health-2026-08-v2'");
+    expect(sql).toContain("consent.version = 'consent-health-2026-08-v3'");
     expect(sql).toContain('UPDATE public.professional_assignments');
     expect(sql).toContain('SET active = false, revoked_at = now(), updated_at = now()');
     expect(sql).toContain("'HEALTH_CONSENT_REVOKED'");

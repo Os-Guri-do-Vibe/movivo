@@ -11,6 +11,7 @@ import {
   EXERCISE_CATALOG,
   type ExerciseLevel,
   type ExerciseLocation,
+  servesLocation,
 } from './exercise-catalog';
 
 const LEVEL_ORDER: Record<ExerciseLevel, number> = {
@@ -27,10 +28,6 @@ export interface SubstitutionConstraints {
   injuryTags: readonly ContraindicationTag[];
 }
 
-function locationMatches(ex: ExerciseLocation, user: ExerciseLocation): boolean {
-  return ex === 'BOTH' || user === 'BOTH' || ex === user;
-}
-
 /** O usuário tem TODO o equipamento que o exercício exige? (`[]` = peso do corpo, sempre ok.) */
 function equipmentAvailable(ex: CatalogExercise, owned: readonly string[]): boolean {
   return ex.equipment.every((e) => owned.includes(e));
@@ -40,7 +37,7 @@ function equipmentAvailable(ex: CatalogExercise, owned: readonly string[]): bool
 function isViable(ex: CatalogExercise, c: SubstitutionConstraints): boolean {
   return (
     LEVEL_ORDER[ex.minLevel] <= LEVEL_ORDER[c.level] &&
-    locationMatches(ex.location, c.location) &&
+    servesLocation(ex, c.location) &&
     equipmentAvailable(ex, c.equipment) &&
     !ex.contraindicatedFor.some((t) => c.injuryTags.includes(t))
   );

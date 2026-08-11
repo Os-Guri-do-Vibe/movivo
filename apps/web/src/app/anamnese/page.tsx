@@ -1,24 +1,47 @@
-import type { Metadata } from 'next';
+'use client';
 
-import { AnamneseForm } from '@/components/anamnese/anamnese-form';
+import * as React from 'react';
+import { useRouter } from 'next/navigation';
+
+import { startAnamnesis } from '@/lib/anamnesis-api';
 
 /**
- * Rota `/anamnese` (US-1.6) — casca RSC. Toda a interatividade (fluxo de 3 blocos,
- * consentimento, PAR-Q, confirmação) vive no client component `AnamneseForm`.
- *
- * O `?goal=` vem da landing (US-1.5) como valor inicial/telemetria; ausente não quebra.
- * `searchParams` é assíncrono no App Router do Next 16.
+ * Bootstrap do onboarding (US-6.10): cria a sessão e redireciona para o link
+ * resumível `/anamnese/[token]` — mesmo padrão de rota dinâmica por token opaco de
+ * `/protocolo/[token]`, `/assinar/[token]` e `/conta/[token]` (ADR-006).
  */
-export const metadata: Metadata = {
-  title: 'Sua anamnese · MOVIVO',
-  robots: { index: false },
-};
+export default function AnamneseBootstrapPage() {
+  const router = useRouter();
+  const [error, setError] = React.useState(false);
 
-export default async function AnamnesePage({
-  searchParams,
-}: {
-  searchParams: Promise<{ goal?: string }>;
-}) {
-  const { goal } = await searchParams;
-  return <AnamneseForm goal={goal ?? null} />;
+  React.useEffect(() => {
+    let cancelled = false;
+    void startAnamnesis()
+      .then(({ token }) => {
+        if (!cancelled) router.replace(`/anamnese/${token}`);
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  return (
+    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col items-center justify-center gap-4 px-6 text-center">
+      {error ? (
+        <>
+          <h1 className="text-h2 font-semibold">Não conseguimos começar agora</h1>
+          <p className="text-body text-muted-foreground">
+            Tente novamente em instantes, ou fale com a gente pelo WhatsApp da MOVIVO.
+          </p>
+        </>
+      ) : (
+        <p className="text-body text-muted-foreground" role="status">
+          Preparando seu cadastro…
+        </p>
+      )}
+    </main>
+  );
 }

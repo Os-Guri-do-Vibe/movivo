@@ -62,6 +62,59 @@ describe('IntentClassifier — kNN (Etapa 1) e fallback (Etapa 2)', () => {
   });
 });
 
+// Achado BLOQUEANTE do Victor: antes disso, handoff de segurança só existia via regex.
+describe('IntentClassifier — EMERGENCIA_CLINICA fora do guardrail regex', () => {
+  it('kNN classifica red flag que a regex não pega → safetyHandoff', async () => {
+    const { svc } = make({ knn: { intent: 'EMERGENCIA_CLINICA', confidence: 0.85 } });
+    const r = await svc.classify({ ...input, message: 'meu braço esquerdo tá formigando' });
+    expect(r).toMatchObject({
+      intent: 'EMERGENCIA_CLINICA',
+      stage: 'KNN',
+      safetyHandoff: true,
+    });
+  });
+
+  it('fallback nano classifica red flag ambíguo → safetyHandoff', async () => {
+    const { svc } = make({ knn: null, nano: 'EMERGENCIA_CLINICA' });
+    const r = await svc.classify({ ...input, message: 'senti a vista escurecer no agachamento' });
+    expect(r).toMatchObject({
+      intent: 'EMERGENCIA_CLINICA',
+      stage: 'FALLBACK',
+      safetyHandoff: true,
+    });
+  });
+
+  it('intenção normal não dispara handoff de segurança', async () => {
+    const { svc } = make({ knn: { intent: 'MOTIVACAO', confidence: 0.9 } });
+    const r = await svc.classify({ ...input, message: 'tô sem vontade hoje' });
+    expect(r.safetyHandoff).toBe(false);
+  });
+
+  it('o rótulo é oferecido ao nano na lista de intenções', async () => {
+    const { svc, complete } = make({ knn: null, nano: 'MOTIVACAO' });
+    await svc.classify({ ...input, message: 'qualquer coisa' });
+    expect(complete.mock.calls[0]?.[0]?.system).toContain('EMERGENCIA_CLINICA');
+  });
+});
+
+describe('IntentClassifier — default-deny (nenhum caminho vira prompt sem guardrail)', () => {
+  it('rótulo desconhecido do kNN não é aceito — cai no fallback', async () => {
+    const { svc, complete } = make({
+      knn: { intent: 'CONVERSA_LIVRE', confidence: 0.99 },
+      nano: 'MOTIVACAO',
+    });
+    const r = await svc.classify({ ...input, message: 'assunto qualquer' });
+    expect(r.intent).not.toBe('CONVERSA_LIVRE');
+    expect(complete).toHaveBeenCalledOnce();
+  });
+
+  it('fallback com saída vazia/ambígua → FORA_DE_ESCOPO', async () => {
+    const { svc } = make({ knn: null, nano: '' });
+    const r = await svc.classify({ ...input, message: 'hmmm' });
+    expect(r.intent).toBe('FORA_DE_ESCOPO');
+  });
+});
+
 describe('parseIntent', () => {
   it('extrai o rótulo conhecido da saída do nano', () => {
     expect(parseIntent('a intenção é SUBSTITUICAO_EXERCICIO')).toBe('SUBSTITUICAO_EXERCICIO');

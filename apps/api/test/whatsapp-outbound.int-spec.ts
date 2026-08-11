@@ -20,8 +20,11 @@ import { type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import {
   CONSENT_TEXTS,
+  PARQ_DECLARATIONS,
+  PARQ_DECLARATIONS_VERSION,
   PARQ_QUESTION_IDS,
   PARQ_VERSION,
+  REQUIRED_CONSENT_TYPES,
   type ProtocolStructure,
 } from '@movivo/shared';
 import postgres from 'postgres';
@@ -105,30 +108,70 @@ function structure(): ProtocolStructure {
   };
 }
 
-function block2(riskIds: string[] = []) {
+function parq(riskIds: string[] = []) {
   return {
-    parq: {
-      version: PARQ_VERSION,
-      answers: PARQ_QUESTION_IDS.map((questionId) => ({
-        questionId,
-        answer: riskIds.includes(questionId),
-        ...(questionId === 'Q9' && riskIds.includes('Q9') ? { detail: 'motivo' } : {}),
-      })),
-    },
-    injuries: [] as string[],
+    version: PARQ_VERSION,
+    answers: PARQ_QUESTION_IDS.map((questionId) => ({
+      questionId,
+      answer: riskIds.includes(questionId),
+      ...(questionId === 'Q9' && riskIds.includes('Q9') ? { detail: 'motivo' } : {}),
+    })),
+  };
+}
+
+/** Secoes 1/2/3/5 da anamnese v2 (jsonb em claro). */
+function structured(over: Record<string, unknown> = {}) {
+  return {
+    primaryGoal: 'GAIN_MUSCLE',
+    emphasis: [],
+    hasImportantEvent: false,
+    trainingStatus: 'REGULAR',
+    experience: 'BEGINNER',
+    pastActivities: [],
+    consistencyBarriers: [],
+    daysPerWeek: 3,
+    preferredDays: [],
+    sessionDuration: 'M45_TO_60',
+    location: 'HOME',
+    preferredPeriod: 'MORNING',
+    practicesOtherSport: false,
+    hasAvoidedExercise: false,
+    ...over,
   };
 }
 
 async function submitAnamnesis(riskIds: string[] = []) {
   const { token } = await anamnesis.start({ primaryGoal: 'GAIN_MUSCLE' });
-  await anamnesis.patchBlock(token, 1, { name: 'Fulano WA', phoneNumber: phone() });
+  const phoneNumber = phone();
   await consents.recordForSessionToken(
     token,
-    [{ type: 'HEALTH_DATA', version: CONSENT_TEXTS.HEALTH_DATA.version, accepted: true }],
+    REQUIRED_CONSENT_TYPES.map((type) => ({
+      type,
+      version: CONSENT_TEXTS[type].version,
+      accepted: true,
+    })),
     ORIGIN,
   );
-  await anamnesis.patchBlock(token, 2, block2(riskIds));
-  await anamnesis.patchBlock(token, 3, { daysPerWeek: 3, location: 'HOME' });
+  // Este teste é do OUTBOUND, não do OTP: a posse do número é carimbada direto (o
+  // fluxo do código tem cobertura própria em anamnesis.int-spec.ts).
+  await adminClient`
+    UPDATE anamnesis_sessions SET phone_e164 = ${phoneNumber}, phone_verified_at = now()
+      WHERE token = ${token}`;
+  await anamnesis.patchStep(token, 1, {
+    name: 'Fulano WA',
+    birthDate: '1996-04-02',
+    biologicalSex: 'MALE',
+    phoneNumber,
+  });
+  await anamnesis.patchStep(token, 2, {
+    anamnesis: { structured: structured(), freeText: {} },
+    pain: { hasPain: false, points: [] },
+  });
+  await anamnesis.patchStep(token, 3, {
+    parq: parq(riskIds),
+    declarationsVersion: PARQ_DECLARATIONS_VERSION,
+    declarations: PARQ_DECLARATIONS.map((d) => d.id),
+  });
   await anamnesis.submit(token);
   const [row] = await adminClient<Array<{ user_id: string; phone: string }>>`
     SELECT s.user_id, u.phone_number AS phone

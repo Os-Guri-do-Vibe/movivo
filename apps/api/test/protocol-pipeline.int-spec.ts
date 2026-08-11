@@ -23,8 +23,11 @@ import { type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import {
   CONSENT_TEXTS,
+  PARQ_DECLARATIONS,
+  PARQ_DECLARATIONS_VERSION,
   PARQ_QUESTION_IDS,
   PARQ_VERSION,
+  REQUIRED_CONSENT_TYPES,
   type ProtocolStructure,
 } from '@movivo/shared';
 import { eq } from 'drizzle-orm';
@@ -121,8 +124,28 @@ const adminClient = postgres({
 let seq = 0;
 const phone = () => `+5541${RUN}${(seq += 1)}`;
 
-function block2(injuries: string[], riskIds: string[] = []) {
+/** Bloco cifrado da anamnese v2: secao 4 + textos livres + PAR-Q + declaracoes. */
+function healthBlock(painRegions: string[], riskIds: string[] = [], trigger?: string) {
   return {
+    pain:
+      painRegions.length > 0 || trigger
+        ? {
+            hasPain: true,
+            trend: 'STABLE',
+            // "forcar-dlq" (fake do gerador, linha ~87) precisa de free-text: o schema v2 não
+            // aceita mais injuries livres, então o trigger é o único campo que ecoa verbatim
+            // em `injuriesRaw` (via `painToConstraints`).
+            points:
+              painRegions.length > 0
+                ? painRegions.map((region) => ({ region, intensity: 6 }))
+                : [{ region: 'KNEE', intensity: 1 }],
+            ...(trigger ? { trigger } : {}),
+            hasProfessionalExplanation: false,
+            underMedicalFollowUp: false,
+            hasAvoidanceRecommendation: false,
+          }
+        : { hasPain: false, points: [] },
+    freeText: {},
     parq: {
       version: PARQ_VERSION,
       answers: PARQ_QUESTION_IDS.map((questionId) => ({
@@ -131,28 +154,78 @@ function block2(injuries: string[], riskIds: string[] = []) {
         ...(questionId === 'Q9' && riskIds.includes('Q9') ? { detail: 'motivo' } : {}),
       })),
     },
-    injuries,
+    declarations: {
+      version: PARQ_DECLARATIONS_VERSION,
+      accepted: PARQ_DECLARATIONS.map((d) => d.id),
+      acceptedAt: new Date().toISOString(),
+    },
+  };
+}
+
+/** Secoes 1/2/3/5 da anamnese v2 (jsonb em claro). */
+function structured(over: Record<string, unknown> = {}) {
+  return {
+    primaryGoal: 'GAIN_MUSCLE',
+    emphasis: [],
+    hasImportantEvent: false,
+    trainingStatus: 'REGULAR',
+    experience: 'BEGINNER',
+    pastActivities: [],
+    consistencyBarriers: [],
+    daysPerWeek: 3,
+    preferredDays: [],
+    sessionDuration: 'M45_TO_60',
+    location: 'HOME',
+    preferredPeriod: 'MORNING',
+    practicesOtherSport: false,
+    hasAvoidedExercise: false,
+    ...over,
   };
 }
 
 /** Roda a anamnese completa pelo serviço real e submete (o submit enfileira o job). */
-async function submitAnamnesis(injuries: string[], riskIds: string[] = []) {
+async function submitAnamnesis(painRegions: string[], riskIds: string[] = []) {
   const { token } = await anamnesis.start({ primaryGoal: 'GAIN_MUSCLE' });
-  await anamnesis.patchBlock(token, 1, {
-    name: 'Fulano Pipeline',
-    phoneNumber: phone(),
-    email: `p${RUN}${seq}@example.com`,
-  });
+  const phoneNumber = phone();
   await consents.recordForSessionToken(
     token,
-    [{ type: 'HEALTH_DATA', version: CONSENT_TEXTS.HEALTH_DATA.version, accepted: true }],
+    REQUIRED_CONSENT_TYPES.map((type) => ({
+      type,
+      version: CONSENT_TEXTS[type].version,
+      accepted: true,
+    })),
     ORIGIN,
   );
-  await anamnesis.patchBlock(token, 2, block2(injuries, riskIds));
-  await anamnesis.patchBlock(token, 3, {
-    daysPerWeek: 3,
-    location: 'HOME',
-    equipment: ['halteres'],
+  // Este teste e do PIPELINE DE PROTOCOLO, nao do OTP: a posse do numero e carimbada
+  // direto (o fluxo do codigo tem cobertura propria em anamnesis.int-spec.ts).
+  await adminClient`
+    UPDATE anamnesis_sessions SET phone_e164 = ${phoneNumber}, phone_verified_at = now()
+      WHERE token = ${token}`;
+  await anamnesis.patchStep(token, 1, {
+    name: 'Fulano Pipeline',
+    birthDate: '1996-04-02',
+    biologicalSex: 'MALE',
+    phoneNumber,
+    email: `p${RUN}${seq}@example.com`,
+  });
+  await anamnesis.patchStep(token, 2, {
+    anamnesis: { structured: structured(), freeText: {} },
+    pain:
+      painRegions.length > 0
+        ? {
+            hasPain: true,
+            trend: 'STABLE',
+            points: painRegions.map((region) => ({ region, intensity: 6 })),
+            hasProfessionalExplanation: false,
+            underMedicalFollowUp: false,
+            hasAvoidanceRecommendation: false,
+          }
+        : { hasPain: false, points: [] },
+  });
+  await anamnesis.patchStep(token, 3, {
+    parq: healthBlock([], riskIds).parq,
+    declarationsVersion: PARQ_DECLARATIONS_VERSION,
+    declarations: PARQ_DECLARATIONS.map((d) => d.id),
   });
   await anamnesis.submit(token);
   const [row] = await adminClient<Array<{ user_id: string; id: string }>>`
@@ -161,7 +234,7 @@ async function submitAnamnesis(injuries: string[], riskIds: string[] = []) {
 }
 
 /** Cria usuário + sessão SUBMITTED direto no banco (sem auto-enqueue) — para DLQ/idempotência. */
-async function seedUser(injuries: string[]) {
+async function seedUser(painRegions: string[], trigger?: string) {
   const userId = await db.runAsSystem(async (tx) => {
     const [u] = await tx
       .insert(users)
@@ -177,12 +250,18 @@ async function seedUser(injuries: string[]) {
         userId,
         token: randomBytes(32).toString('hex'),
         status: 'SUBMITTED',
-        primaryGoal: 'GAIN_MUSCLE',
         submittedAt: new Date(),
         expiresAt: new Date(Date.now() + 72 * 3600 * 1000),
-        dataBlock1: { name: 'Seed', phoneNumber: '+550', email: null },
-        dataBlock2: await cipher.encryptHealth(JSON.stringify(block2(injuries))),
-        dataBlock3: { daysPerWeek: 3, location: 'HOME', equipment: ['halteres'] },
+        dataBlock1: {
+          name: 'Seed',
+          birthDate: '1996-04-02',
+          biologicalSex: 'MALE',
+          phoneNumber: '+550',
+        },
+        dataBlock2: await cipher.encryptHealth(
+          JSON.stringify(healthBlock(painRegions, [], trigger)),
+        ),
+        dataBlock3: structured(),
       })
       .returning({ id: anamnesisSessions.id });
     if (!s) throw new Error('seed: sessão não criada');
@@ -282,7 +361,7 @@ describe('pipeline de protocolo — caminho feliz (US-2.4)', () => {
 
 describe('pipeline de protocolo — bloqueado pelo validador (US-2.4)', () => {
   it('lesão contraindica o exercício gerado → template → PENDING_REVIEW, sem entrega', async () => {
-    const { userId } = await submitAnamnesis(['joelho']); // KNEE contraindica goblet_squat
+    const { userId } = await submitAnamnesis(['KNEE']); // KNEE contraindica goblet_squat
 
     const proto = await waitFor(async () => (await readProtocol(userId))[0]);
     expect(proto.approvalStatus).toBe('PENDING_REVIEW');
@@ -308,7 +387,7 @@ describe('pipeline de protocolo — gate PAR-Q (US-2.4)', () => {
 
 describe('pipeline de protocolo — DLQ e fallback (US-2.4)', () => {
   it('falha terminal → mensagem de espera + template pendente de revisão', async () => {
-    const { userId, sessionId } = await seedUser(['forcar-dlq']);
+    const { userId, sessionId } = await seedUser([], 'forcar-dlq');
     await queues.enqueue(
       QUEUE.protocolGeneration,
       'generate-protocol',

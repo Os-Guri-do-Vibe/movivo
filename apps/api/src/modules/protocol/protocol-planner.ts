@@ -60,9 +60,11 @@ export async function planProtocol(
   validation: ValidationService,
   command: GenerateProtocolCommand,
 ): Promise<PlanResult> {
-  const constraints: Pick<UserConstraints, 'goal' | 'injuryTags'> = {
+  const constraints: Pick<UserConstraints, 'goal' | 'injuryTags' | 'level'> = {
     goal: command.constraints.goal,
     injuryTags: command.constraints.injuryTags,
+    // v2: o validador precisa do nível para vetar divisão/técnica acima dele (US-2.3).
+    level: command.constraints.level,
   };
 
   const gen1 = await generator.generate(command);

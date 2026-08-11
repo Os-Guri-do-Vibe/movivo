@@ -50,7 +50,7 @@ describe('findSafeSubstitute (US-3.5)', () => {
     // Academia exigida, mas restringindo a casa sem equipamento e lesão que barra o resto.
     const sub = findSafeSubstitute(legPress, {
       level: 'INICIANTE',
-      location: 'GYM',
+      location: 'FULL_GYM',
       equipment: [],
       injuryTags: ['KNEE', 'HIP', 'LOWER_BACK'],
     });

@@ -34,6 +34,7 @@ import {
   confirmationCareMessage,
   confirmationMessage,
   formatProtocolDelivery,
+  phoneVerificationMessage,
   waitingMessage,
 } from './message-templates';
 
@@ -47,10 +48,13 @@ export type WhatsappJobType =
   | 'CHECKIN_MESSAGE'
   | 'REENGAGEMENT'
   | 'CONSENT_STATUS'
+  // US-6.5 — código de verificação de posse do número, ANTES de existir `users`.
+  | 'PHONE_VERIFICATION'
   | 'TYPING';
 
 export interface WhatsappOutboundJob {
-  userId: string;
+  /** `null` só em `PHONE_VERIFICATION`: nessa fase o titular ainda não existe. */
+  userId: string | null;
   type: WhatsappJobType;
   protocolId?: string;
   protocolVersion?: number;
@@ -62,6 +66,9 @@ export interface WhatsappOutboundJob {
   feedback?: boolean;
   /** Mensagens de fluxo deterministico (check-in/nudge), sem chamada a LLM. */
   buttons?: readonly QuickReplyButton[];
+  /** `PHONE_VERIFICATION`: destino e código de 6 dígitos. */
+  phoneNumber?: string;
+  code?: string;
 }
 
 /** TTL do marcador de idempotência — só precisa cobrir a janela de retry; 7d é folgado. */
@@ -96,6 +103,25 @@ export class WhatsappOutboundWorker implements OnModuleInit {
 
   async process(job: Job<WhatsappOutboundJob>): Promise<{ status: string }> {
     const { userId, type, protocolVersion, dedupeId } = job.data;
+
+    // US-6.5 — o código de verificação é o único envio que acontece ANTES de existir
+    // titular: não há `users` para checar consentimento, resolver telefone sob RLS nem
+    // montar chave de idempotência por usuário. A idempotência dele é o `jobId` de
+    // negócio (sessão + nº do envio), aplicado por quem enfileira.
+    if (type === 'PHONE_VERIFICATION') {
+      const { phoneNumber, code } = job.data;
+      if (!phoneNumber || !code) {
+        this.logger.warn({ type }, 'PHONE_VERIFICATION sem destino ou código — descartado');
+        return { status: 'INVALID' };
+      }
+      await this.transport.send({ to: phoneNumber, text: phoneVerificationMessage(code) });
+      return { status: 'SENT' };
+    }
+
+    if (!userId) {
+      this.logger.warn({ type }, 'job de outbound sem titular — descartado');
+      return { status: 'INVALID' };
+    }
 
     if (HEALTH_JOB_TYPES.has(type) && !(await this.healthConsent.hasActiveForUser(userId))) {
       this.logger.info(
@@ -180,13 +206,16 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       case 'REENGAGEMENT':
       case 'CONSENT_STATUS':
         return data.text ?? null;
+      case 'PHONE_VERIFICATION':
       case 'TYPING':
-        return null; // tratado antes (presença)
+        return null; // tratados antes (código de verificação e presença)
     }
   }
 
   private async buildDelivery(data: WhatsappOutboundJob): Promise<string | null> {
-    const proto = await this.db.runAsUser(data.userId, 'USER', async (tx) => {
+    const userId = data.userId;
+    if (!userId) return null;
+    const proto = await this.db.runAsUser(userId, 'USER', async (tx) => {
       const [row] = await tx
         .select({
           id: protocols.id,
@@ -200,7 +229,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
         .from(protocols)
         .where(
           and(
-            eq(protocols.userId, data.userId),
+            eq(protocols.userId, userId),
             data.protocolId ? eq(protocols.id, data.protocolId) : undefined,
             data.protocolVersion ? eq(protocols.version, data.protocolVersion) : undefined,
           ),

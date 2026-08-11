@@ -12,11 +12,16 @@ export type WhatsappJobType =
   | 'CHECKIN_MESSAGE'
   | 'REENGAGEMENT'
   | 'CONSENT_STATUS'
+  | 'PHONE_VERIFICATION'
   | 'TYPING';
 
 /** Contrato de fila compartilhado: produtores nao importam o dominio WhatsApp. */
 export interface WhatsappOutboundJob {
-  userId: string;
+  /**
+   * Ausente APENAS em `PHONE_VERIFICATION` (US-6.5): o código é enviado na Etapa 1 do
+   * onboarding, quando ainda não existe `users` para o worker resolver o telefone sob RLS.
+   */
+  userId: string | null;
   type: WhatsappJobType;
   protocolId?: string;
   protocolVersion?: number;
@@ -24,4 +29,7 @@ export interface WhatsappOutboundJob {
   dedupeId?: string;
   feedback?: boolean;
   buttons?: readonly WhatsappQuickReplyButton[];
+  /** `PHONE_VERIFICATION`: destino e código. Só neste tipo o telefone viaja no payload. */
+  phoneNumber?: string;
+  code?: string;
 }

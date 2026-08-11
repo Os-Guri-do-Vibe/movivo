@@ -272,7 +272,7 @@ describe('migração 0000_init num Postgres limpo', () => {
       `;
       await client`
         INSERT INTO consents (user_id, consent_type, version, cycle, accepted)
-        VALUES (${holder}::uuid, 'HEALTH_DATA', 'consent-health-2026-08-v2', 1, true)
+        VALUES (${holder}::uuid, 'HEALTH_DATA', 'consent-health-2026-08-v3', 1, true)
       `;
 
       await client.begin(async (tx) => {
@@ -297,7 +297,7 @@ describe('migração 0000_init num Postgres limpo', () => {
         await tx`SELECT set_config('app.current_anamnesis_session_id', ${session}, true)`;
         await tx`SELECT public.record_session_consent(
           ${session}::uuid, 'HEALTH_DATA'::consent_type,
-          'consent-health-2026-08-v2', true, '203.0.113.10'::inet, 'migration-int-spec'
+          'consent-health-2026-08-v3', true, '203.0.113.10'::inet, 'migration-int-spec'
         )`;
       });
       await client.begin(async (tx) => {
@@ -311,7 +311,7 @@ describe('migração 0000_init num Postgres limpo', () => {
       >`
         SELECT cycle, revoked_at AS "revokedAt", accepted FROM consents
         WHERE user_id = ${holder}::uuid AND consent_type = 'HEALTH_DATA'
-          AND version = 'consent-health-2026-08-v2'
+          AND version = 'consent-health-2026-08-v3'
         ORDER BY cycle
       `;
       expect(consentCycles).toHaveLength(2);

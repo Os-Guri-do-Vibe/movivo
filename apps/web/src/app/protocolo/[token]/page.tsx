@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import {
   protocolReadSchema,
   type LoadStrategy,
-  type PrimaryGoal,
+  type GenerationGoal,
   type ProtocolExercise,
   type ProtocolRead,
   type ProtocolSession,
@@ -35,10 +35,17 @@ const PHASE_LABEL: Record<TrainingPhase, string> = {
   DELOAD: 'Recuperação (deload)',
 };
 
-const GOAL_LABEL: Record<PrimaryGoal, string> = {
-  LOSE_WEIGHT: 'Perder peso',
-  GAIN_MUSCLE: 'Ganhar massa',
-  CONDITIONING: 'Condicionamento',
+// Rótulos dos objetivos de GERAÇÃO (o "Outro" da anamnese nunca chega ao protocolo —
+// é traduzido por `toGenerationGoal` antes de o gerador ver).
+const GOAL_LABEL: Record<GenerationGoal, string> = {
+  GAIN_MUSCLE: 'Ganhar massa muscular',
+  GAIN_STRENGTH: 'Ganhar força',
+  LOSE_FAT: 'Reduzir gordura corporal',
+  CONDITIONING: 'Melhorar o condicionamento físico',
+  HEALTH_ENERGY: 'Saúde e disposição',
+  BUILD_ROUTINE: 'Criar uma rotina de treino',
+  RETURN_TO_TRAINING: 'Voltar a treinar',
+  SPORT_EVENT: 'Preparação para esporte ou evento',
 };
 
 const LOAD_LABEL: Record<LoadStrategy, string> = {

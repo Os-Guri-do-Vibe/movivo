@@ -14,7 +14,7 @@
 import { z } from 'zod';
 
 import { ProtocolApprovalStatus, ProtocolStatus } from '../enums';
-import { primaryGoalSchema } from './anamnesis.schema';
+import { generationGoalSchema } from './anamnesis.schema';
 import { uuidSchema } from './common.schema';
 
 /**
@@ -30,6 +30,46 @@ export type TrainingPhase = z.infer<typeof trainingPhaseSchema>;
  */
 export const loadStrategySchema = z.enum(['BODYWEIGHT', 'FIXED_LOAD', 'DOUBLE_PROGRESSION', 'RPE']);
 export type LoadStrategy = z.infer<typeof loadStrategySchema>;
+
+/**
+ * Divisão de treino (metodologia do RT CREF, item 1). O RT **não usa divisão fixa**: escolhe
+ * conforme objetivo, nível, condicionamento, disponibilidade semanal, histórico de lesão e
+ * recuperação. `FOCO_MUSCULAR` = "um ou dois grupos musculares por dia".
+ *
+ * Opcional no schema: protocolos gerados antes da v2 da metodologia (e o template de fallback)
+ * não têm o campo, e ausência não é insegura — o que é inseguro é uma divisão INCOERENTE com o
+ * nível, e isso o `ValidationService` (US-2.3) veta quando o campo está presente.
+ */
+export const workoutSplitSchema = z.enum([
+  'FULL_BODY',
+  'CIRCUITO',
+  'UPPER_LOWER',
+  'ABC',
+  'ABCD',
+  'ABCDE',
+  'PUSH_PULL_LEGS',
+  'FOCO_MUSCULAR',
+]);
+export type WorkoutSplit = z.infer<typeof workoutSplitSchema>;
+
+/**
+ * Técnica avançada por exercício (metodologia do RT CREF, item 4). O RT foi explícito:
+ * são "principalmente para intermediários e avançados" e "não precisam aparecer em todos os
+ * exercícios ou em todos os treinos". Opcional/ausente = série tradicional (o padrão).
+ */
+export const advancedTechniqueSchema = z.enum([
+  'DROP_SET',
+  'REST_PAUSE',
+  'CLUSTER_SET',
+  'BI_SET',
+  'TRI_SET',
+  'SUPERSET',
+  'ISOMETRIA',
+  'REPETICOES_CONTROLADAS',
+  'PIRAMIDE',
+  'DESCANSO_ATIVO',
+]);
+export type AdvancedTechnique = z.infer<typeof advancedTechniqueSchema>;
 
 /** Faixa de repetições (Rafael §5.2 `RepsRange`). `min <= max` validado no superRefine. */
 export const repsRangeSchema = z
@@ -51,6 +91,8 @@ export const protocolExerciseSchema = z.object({
   reps: repsRangeSchema,
   loadStrategy: loadStrategySchema,
   restSeconds: z.number().int().min(0).max(600),
+  /** Técnica avançada aplicada nesta prescrição. Ausente = série tradicional. */
+  technique: advancedTechniqueSchema.optional(),
   notes: z.string().trim().max(400).optional(),
 });
 export type ProtocolExercise = z.infer<typeof protocolExerciseSchema>;
@@ -69,8 +111,10 @@ export type ProtocolSession = z.infer<typeof protocolSessionSchema>;
  */
 export const protocolStructureSchema = z.object({
   promptVersion: z.string().trim().min(1).max(80),
-  goal: primaryGoalSchema,
+  goal: generationGoalSchema,
   phase: trainingPhaseSchema,
+  /** Divisão escolhida para este perfil. Ausente em protocolos anteriores à metodologia v2. */
+  splitType: workoutSplitSchema.optional(),
   weeklyFrequency: z.number().int().min(1).max(7),
   sessions: z.array(protocolSessionSchema).min(1).max(7),
   generalNotes: z.string().trim().max(1000).optional(),

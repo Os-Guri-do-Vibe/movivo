@@ -110,6 +110,11 @@ export const consentTypeEnum = pgEnum('consent_type', [
   'HEALTH_DATA',
   'MARKETING',
   'TERMS_OF_SERVICE',
+  // Sprint 6 (Alexandre §5.4/§5.8): ciência do uso de IA com supervisão CREF. NÃO é
+  // consentimento (é dever de informação, art. 6º VI), mas usa o mesmo mecanismo de
+  // prova — versão + IP/UA + carimbo. **Não é revogável**: ver `ConsentService.revoke`.
+  // `WHATSAPP_OPERATIONAL_NOTICE` NÃO entra aqui: é aviso, não aceite (§5.2).
+  'AI_DISCLOSURE',
 ]);
 
 // ---------------------------------------------------------------------------

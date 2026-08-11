@@ -29,6 +29,18 @@ export function confirmationCareMessage(): string {
   );
 }
 
+/**
+ * Código de verificação de posse do número (US-6.5). Copy nos guardrails: enquadra a
+ * fricção como proteção do que o usuário quer (o treino), e avisa para não repassar o
+ * código — a defesa mais barata contra engenharia social.
+ */
+export function phoneVerificationMessage(code: string): string {
+  return (
+    `Seu código da MOVIVO é ${code}. Ele confirma que este WhatsApp é seu e vale por 10 minutos. ` +
+    'Nunca compartilhe este código com ninguém — a MOVIVO jamais vai pedir ele de volta.'
+  );
+}
+
 /** Mensagem de espera do fallback de DLQ (US-2.4 enfileira `protocol-waiting`). */
 export function waitingMessage(): string {
   return (
