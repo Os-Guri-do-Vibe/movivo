@@ -143,6 +143,12 @@ export class PhoneVerificationService {
     const code = generateCode();
     const expiresAt = new Date(now.getTime() + PHONE_CODE_TTL_MS);
 
+    // ponytail: só para teste manual local — nunca loga em produção. O código nunca
+    // vai para log fora deste guard (revisão de segurança do Sato, US-6.5).
+    if (process.env.NODE_ENV !== 'production') {
+      this.logger.info({ code, phoneNumber }, '[DEV] código OTP gerado para teste manual');
+    }
+
     // CAS otimista sobre a linha que embasou a decisão acima (número + contador).
     // Sem isso, N pedidos simultâneos leem `sendCount` iguais e todos escrevem —
     // o teto por sessão viraria decorativo sob concorrência (Sato — revisão US-6.5).
