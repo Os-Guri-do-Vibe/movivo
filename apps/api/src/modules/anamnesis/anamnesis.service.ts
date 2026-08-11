@@ -175,7 +175,11 @@ export class AnamnesisService {
    * Substitui o `PATCH .../block/{n}` da v1, que saiu do produto (D1). O escopo é
    * sempre o token: nenhum `user_id` do cliente é aceito em ponto algum.
    */
-  async patchStep(token: string, step: StepNumber, data: unknown): Promise<{ currentStep: number }> {
+  async patchStep(
+    token: string,
+    step: StepNumber,
+    data: unknown,
+  ): Promise<{ currentStep: number }> {
     const row = await this.requireActiveSession(token);
 
     switch (step) {
@@ -217,15 +221,11 @@ export class AnamnesisService {
 
     const missing = await this.missingRequiredConsents(row.id);
     if (missing.length > 0) {
-      throw new ForbiddenException(
-        `Consentimentos obrigatórios pendentes: ${missing.join(', ')}.`,
-      );
+      throw new ForbiddenException(`Consentimentos obrigatórios pendentes: ${missing.join(', ')}.`);
     }
 
     if (!row.phoneVerifiedAt || row.phoneE164 !== step1.phoneNumber) {
-      throw new ForbiddenException(
-        'Confirme o código enviado no WhatsApp antes de continuar.',
-      );
+      throw new ForbiddenException('Confirme o código enviado no WhatsApp antes de continuar.');
     }
 
     await this.writeJsonb(row.id, 'data_block_1', step1);

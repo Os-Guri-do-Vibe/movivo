@@ -150,8 +150,7 @@ export class ConsentService {
     return rows
       .filter((row) => {
         const text = CONSENT_TEXTS[row.type as ConsentTypeWithText] as
-          | { version: string }
-          | undefined;
+          { version: string } | undefined;
         return text?.version === row.version;
       })
       .map((row) => row.type as ConsentTypeWithText);

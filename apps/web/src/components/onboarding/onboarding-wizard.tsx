@@ -4,12 +4,7 @@ import * as React from 'react';
 
 import { PARQ_DECLARATIONS_VERSION, PARQ_VERSION, type BiologicalSex } from '@movivo/shared';
 
-import {
-  patchStep,
-  recordConsents,
-  submitAnamnesis,
-  type SessionView,
-} from '@/lib/anamnesis-api';
+import { patchStep, recordConsents, submitAnamnesis, type SessionView } from '@/lib/anamnesis-api';
 import { ProgressBar } from './progress-bar';
 import { Step1Registration, type Step1Data } from './step1-registration';
 import { Step2Anamnesis, EMPTY_STEP2, type Step2State } from './step2-anamnesis';
@@ -28,13 +23,7 @@ function step1FromServer(raw: unknown): Partial<Step1Data> {
   };
 }
 
-export function OnboardingWizard({
-  token,
-  initial,
-}: {
-  token: string;
-  initial: SessionView;
-}) {
+export function OnboardingWizard({ token, initial }: { token: string; initial: SessionView }) {
   const [session, setSession] = React.useState(initial);
   const [step, setStep] = React.useState<1 | 2 | 3>(
     (initial.currentStep >= 1 && initial.currentStep <= 3 ? initial.currentStep : 1) as 1 | 2 | 3,

@@ -195,7 +195,13 @@ describe('seção 4 — dores', () => {
       ],
     });
     expect(parsed.success).toBe(true);
-    expect(painAssessmentSchema.safeParse({ hasPain: true, trend: 'STABLE', points: [{ region: 'KNEE', intensity: 11 }] }).success).toBe(false);
+    expect(
+      painAssessmentSchema.safeParse({
+        hasPain: true,
+        trend: 'STABLE',
+        points: [{ region: 'KNEE', intensity: 11 }],
+      }).success,
+    ).toBe(false);
   });
 
   it('não coleta região de dor quando o usuário respondeu "não tenho dor"', () => {
@@ -228,9 +234,9 @@ describe('etapa 3 — PAR-Q reusado + 3 declarações', () => {
       declarationsVersion: PARQ_DECLARATIONS_VERSION,
     };
     expect(onboardingStep3Schema.safeParse({ ...base, declarations: [] }).success).toBe(false);
-    expect(
-      onboardingStep3Schema.safeParse({ ...base, declarations: ['TRUTHFUL'] }).success,
-    ).toBe(false);
+    expect(onboardingStep3Schema.safeParse({ ...base, declarations: ['TRUTHFUL'] }).success).toBe(
+      false,
+    );
     expect(
       onboardingStep3Schema.safeParse({
         ...base,

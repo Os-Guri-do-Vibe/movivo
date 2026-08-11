@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { EXERCISE_BY_ID, EXERCISE_CATALOG, isKnownExercise, servesLocation } from './exercise-catalog';
+import {
+  EXERCISE_BY_ID,
+  EXERCISE_CATALOG,
+  isKnownExercise,
+  servesLocation,
+} from './exercise-catalog';
 
 describe('exercise-catalog (base de referência)', () => {
   it('não tem ids duplicados', () => {

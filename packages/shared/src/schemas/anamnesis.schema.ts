@@ -610,8 +610,7 @@ export const PARQ_DECLARATIONS_VERSION = 'parq-declaracoes-2026-08-v1';
 export const PARQ_DECLARATIONS: readonly { id: string; label: string }[] = [
   {
     id: 'TRUTHFUL',
-    label:
-      'Declaro que as informações que forneci são verdadeiras e estão atualizadas nesta data.',
+    label: 'Declaro que as informações que forneci são verdadeiras e estão atualizadas nesta data.',
   },
   {
     id: 'WILL_REPORT_CHANGES',

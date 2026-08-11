@@ -72,7 +72,10 @@ describe('protocolStructureSchema', () => {
     expect(
       protocolStructureSchema.safeParse({ ...validStructure, splitType: 'ABCDEF' }).success,
     ).toBe(false);
-    const badTechnique = { ...validStructure, sessions: [sessionWith({ technique: 'SUPER_SERIE' })] };
+    const badTechnique = {
+      ...validStructure,
+      sessions: [sessionWith({ technique: 'SUPER_SERIE' })],
+    };
     expect(protocolStructureSchema.safeParse(badTechnique).success).toBe(false);
   });
 });

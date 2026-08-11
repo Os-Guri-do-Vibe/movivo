@@ -67,8 +67,8 @@ export function Step1Registration({
         <p className="font-mono text-label text-muted-foreground">Etapa 1 de 3</p>
         <h1 className="text-h1 font-bold">Cadastro pessoal</h1>
         <p className="mt-2 text-body text-muted-foreground">
-          Precisamos de algumas informações para criar seu perfil e enviar seu treino
-          personalizado pelo WhatsApp.
+          Precisamos de algumas informações para criar seu perfil e enviar seu treino personalizado
+          pelo WhatsApp.
         </p>
       </div>
 

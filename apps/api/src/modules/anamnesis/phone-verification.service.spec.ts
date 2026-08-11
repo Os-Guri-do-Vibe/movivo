@@ -208,10 +208,7 @@ describe('verificação do código', () => {
   it('recusa código expirado com mensagem própria (o usuário precisa pedir outro)', async () => {
     const { svc } = makeService();
     await expect(
-      svc.verify(
-        valid('123456', { phoneCodeExpiresAt: new Date(Date.now() - 1000) }),
-        '123456',
-      ),
+      svc.verify(valid('123456', { phoneCodeExpiresAt: new Date(Date.now() - 1000) }), '123456'),
     ).rejects.toThrow(/expirou/i);
   });
 

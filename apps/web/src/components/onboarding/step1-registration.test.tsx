@@ -14,8 +14,22 @@ import { Step1Registration, type Step1Data } from './step1-registration';
 import type { ConsentItemView } from '@/lib/anamnesis-api';
 
 const CONSENTS: ConsentItemView[] = [
-  { type: 'TERMS_OF_SERVICE', version: 'v1', title: null, body: [], label: 'Aceito os termos.', required: true },
-  { type: 'MARKETING', version: 'v1', title: null, body: [], label: 'Quero novidades.', required: false },
+  {
+    type: 'TERMS_OF_SERVICE',
+    version: 'v1',
+    title: null,
+    body: [],
+    label: 'Aceito os termos.',
+    required: true,
+  },
+  {
+    type: 'MARKETING',
+    version: 'v1',
+    title: null,
+    body: [],
+    label: 'Quero novidades.',
+    required: false,
+  },
 ];
 
 const VALID_DATA: Step1Data = {

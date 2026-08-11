@@ -103,7 +103,11 @@ const replay = {
 // CORS permissivo: o onboarding v2 chama esta API direto do browser (cross-origin
 // localhost:3000 → 127.0.0.1:3101), diferente do dashboard, que passa por BFF same-origin.
 // Só existe neste mock de teste — a API real tem sua própria política de CORS.
-const CORS_HEADERS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': '*', 'Access-Control-Allow-Headers': '*' };
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': '*',
+  'Access-Control-Allow-Headers': '*',
+};
 
 function json(response, status, body, headers = {}) {
   response.writeHead(status, { 'Content-Type': 'application/json', ...CORS_HEADERS, ...headers });
@@ -174,10 +178,38 @@ createServer(async (request, response) => {
         phoneVerified: session.phoneVerified,
         primaryGoal: null,
         consents: [
-          { type: 'TERMS_OF_SERVICE', version: 'terms-e2e-v1', title: null, body: [], label: 'Li e aceito os Termos de Uso.', required: true },
-          { type: 'HEALTH_DATA', version: 'health-e2e-v1', title: 'Saúde', body: [], label: 'Autorizo o tratamento dos meus dados de saúde.', required: true },
-          { type: 'AI_DISCLOSURE', version: 'ai-e2e-v1', title: 'IA', body: [], label: 'Estou ciente de que a MOVIVO usa inteligência artificial.', required: true },
-          { type: 'MARKETING', version: 'marketing-e2e-v1', title: null, body: [], label: 'Quero receber novidades.', required: false },
+          {
+            type: 'TERMS_OF_SERVICE',
+            version: 'terms-e2e-v1',
+            title: null,
+            body: [],
+            label: 'Li e aceito os Termos de Uso.',
+            required: true,
+          },
+          {
+            type: 'HEALTH_DATA',
+            version: 'health-e2e-v1',
+            title: 'Saúde',
+            body: [],
+            label: 'Autorizo o tratamento dos meus dados de saúde.',
+            required: true,
+          },
+          {
+            type: 'AI_DISCLOSURE',
+            version: 'ai-e2e-v1',
+            title: 'IA',
+            body: [],
+            label: 'Estou ciente de que a MOVIVO usa inteligência artificial.',
+            required: true,
+          },
+          {
+            type: 'MARKETING',
+            version: 'marketing-e2e-v1',
+            title: null,
+            body: [],
+            label: 'Quero receber novidades.',
+            required: false,
+          },
         ],
         step1: null,
         step2: null,
@@ -210,7 +242,8 @@ createServer(async (request, response) => {
       // O gate PAR-Q é do SERVIDOR: o mock guarda as respostas e decide o `outcome` no
       // submit, como a API real. Sem isso o E2E não conseguiria provar que a variante da
       // tela de sucesso segue o servidor, e não um cálculo do cliente (TASK-6.12.1).
-      if (stepMatch[1] === '3') session.parqBlocked = (body.parq?.answers ?? []).some((a) => a.answer === true);
+      if (stepMatch[1] === '3')
+        session.parqBlocked = (body.parq?.answers ?? []).some((a) => a.answer === true);
       session.currentStep = Number(stepMatch[1]) + 1;
       return json(response, 200, { currentStep: session.currentStep });
     }

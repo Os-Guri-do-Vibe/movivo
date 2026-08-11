@@ -146,9 +146,9 @@ export const CONSENT_TEXTS = {
 } as const;
 
 /** Tipos obrigatórios para o `CONTINUAR` da Etapa 1 (§5.8). */
-export const REQUIRED_CONSENT_TYPES = (
-  Object.keys(CONSENT_TEXTS) as ConsentTypeWithText[]
-).filter((type) => CONSENT_TEXTS[type].required);
+export const REQUIRED_CONSENT_TYPES = (Object.keys(CONSENT_TEXTS) as ConsentTypeWithText[]).filter(
+  (type) => CONSENT_TEXTS[type].required,
+);
 
 /**
  * Payload de registro de consentimento.

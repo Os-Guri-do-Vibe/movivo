@@ -77,7 +77,11 @@ describe('IntentClassifier — EMERGENCIA_CLINICA fora do guardrail regex', () =
   it('fallback nano classifica red flag ambíguo → safetyHandoff', async () => {
     const { svc } = make({ knn: null, nano: 'EMERGENCIA_CLINICA' });
     const r = await svc.classify({ ...input, message: 'senti a vista escurecer no agachamento' });
-    expect(r).toMatchObject({ intent: 'EMERGENCIA_CLINICA', stage: 'FALLBACK', safetyHandoff: true });
+    expect(r).toMatchObject({
+      intent: 'EMERGENCIA_CLINICA',
+      stage: 'FALLBACK',
+      safetyHandoff: true,
+    });
   });
 
   it('intenção normal não dispara handoff de segurança', async () => {

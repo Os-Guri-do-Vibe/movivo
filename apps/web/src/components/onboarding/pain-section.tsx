@@ -100,7 +100,10 @@ export function PainSection({
           />
 
           {data.points.map((point) => (
-            <div key={point.region} className="flex flex-col gap-2 rounded-lg border border-input p-4">
+            <div
+              key={point.region}
+              className="flex flex-col gap-2 rounded-lg border border-input p-4"
+            >
               <FieldLabel htmlFor={`intensity-${point.region}`}>
                 Intensidade do desconforto em {PAIN_REGION_LABELS[point.region]}
               </FieldLabel>
@@ -131,8 +134,14 @@ export function PainSection({
           />
 
           <div className="flex flex-col gap-2">
-            <FieldLabel htmlFor="trigger">Quais movimentos ou situações provocam o desconforto?</FieldLabel>
-            <TextArea id="trigger" value={data.trigger} onChange={(trigger) => onChange({ ...data, trigger })} />
+            <FieldLabel htmlFor="trigger">
+              Quais movimentos ou situações provocam o desconforto?
+            </FieldLabel>
+            <TextArea
+              id="trigger"
+              value={data.trigger}
+              onChange={(trigger) => onChange({ ...data, trigger })}
+            />
           </div>
 
           <YesNo
@@ -170,7 +179,9 @@ export function PainSection({
           />
           {data.hasAvoidanceRecommendation && (
             <div className="flex flex-col gap-2">
-              <FieldLabel htmlFor="avoid">Quais movimentos ou exercícios devem ser evitados?</FieldLabel>
+              <FieldLabel htmlFor="avoid">
+                Quais movimentos ou exercícios devem ser evitados?
+              </FieldLabel>
               <TextArea
                 id="avoid"
                 value={data.avoidanceRecommendation}

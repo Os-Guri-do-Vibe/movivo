@@ -84,7 +84,9 @@ export function PhoneOtp({
     if (digits.length === CODE_LENGTH) void verify(digits);
   }
 
-  const resendSecondsLeft = resendAvailableAt ? Math.max(0, Math.ceil((resendAvailableAt - now) / 1000)) : 0;
+  const resendSecondsLeft = resendAvailableAt
+    ? Math.max(0, Math.ceil((resendAvailableAt - now) / 1000))
+    : 0;
   const canResend = sent && resendSecondsLeft === 0;
 
   return (

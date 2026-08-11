@@ -73,7 +73,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function post<T>(path: string, body?: unknown): Promise<T> {
-  return request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
+  return request<T>(path, {
+    method: 'POST',
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
 }
 
 function patch<T>(path: string, body: unknown): Promise<T> {

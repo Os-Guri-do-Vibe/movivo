@@ -94,7 +94,10 @@ describe('Step2Anamnesis', () => {
   it('desmarcar uma atividade/barreira já selecionada remove do array', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    renderStep2({ ...COMPLETE, pastActivities: ['CYCLING'], consistencyBarriers: ['COST'] }, onChange);
+    renderStep2(
+      { ...COMPLETE, pastActivities: ['CYCLING'], consistencyBarriers: ['COST'] },
+      onChange,
+    );
     await user.click(screen.getByText('Ciclismo'));
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ pastActivities: [] }));
     await user.click(screen.getByRole('button', { name: 'Nunca tentei manter uma rotina' }));

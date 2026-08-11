@@ -145,7 +145,10 @@ const BARRIER_ITEMS: { value: ConsistencyBarrier; label: string }[] = [
   { value: 'OTHER', label: 'Outro' },
 ];
 
-const DAYS_ITEMS = [1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: String(n), label: `${n} dia${n > 1 ? 's' : ''}` }));
+const DAYS_ITEMS = [1, 2, 3, 4, 5, 6, 7].map((n) => ({
+  value: String(n),
+  label: `${n} dia${n > 1 ? 's' : ''}`,
+}));
 
 const WEEKDAY_ITEMS: { value: Weekday; label: string }[] = [
   { value: 'MON', label: 'Segunda' },
@@ -165,10 +168,12 @@ const DURATION_ITEMS: { value: SessionDuration; label: string }[] = [
   { value: 'GT_90', label: 'Mais de 60 minutos' },
 ];
 
-const LOCATION_ITEMS = (Object.keys(TRAINING_LOCATION_LABELS) as TrainingLocation[]).map((value) => ({
-  value,
-  label: TRAINING_LOCATION_LABELS[value],
-}));
+const LOCATION_ITEMS = (Object.keys(TRAINING_LOCATION_LABELS) as TrainingLocation[]).map(
+  (value) => ({
+    value,
+    label: TRAINING_LOCATION_LABELS[value],
+  }),
+);
 
 const PERIOD_ITEMS: { value: PreferredPeriod; label: string }[] = [
   { value: 'MORNING', label: 'Manhã' },
@@ -201,7 +206,9 @@ export function Step2Anamnesis({
     const exists = withoutFullBody.includes(region);
     set(
       'emphasis',
-      exists ? withoutFullBody.filter((r) => r !== region) : [...withoutFullBody, region].slice(0, 2),
+      exists
+        ? withoutFullBody.filter((r) => r !== region)
+        : [...withoutFullBody, region].slice(0, 2),
     );
   }
 
@@ -377,7 +384,9 @@ export function Step2Anamnesis({
           <TextInput
             id="barrierOther"
             value={data.consistencyBarrierOther}
-            onChange={(consistencyBarrierOther) => set('consistencyBarrierOther', consistencyBarrierOther)}
+            onChange={(consistencyBarrierOther) =>
+              set('consistencyBarrierOther', consistencyBarrierOther)
+            }
             placeholder="Qual dificuldade?"
           />
         )}
@@ -430,7 +439,9 @@ export function Step2Anamnesis({
         />
         {data.practicesOtherSport && (
           <div className="flex flex-col gap-2">
-            <FieldLabel htmlFor="otherSport">Qual atividade você pratica e em quantos dias por semana?</FieldLabel>
+            <FieldLabel htmlFor="otherSport">
+              Qual atividade você pratica e em quantos dias por semana?
+            </FieldLabel>
             <TextInput
               id="otherSport"
               value={data.otherSportName}

@@ -21,7 +21,11 @@ describe('PainSection', () => {
   it('mostra a escala por região quando já há um ponto selecionado', () => {
     render(
       <PainSection
-        data={{ ...EMPTY_PAIN, hasPain: true, points: [{ region: 'KNEE', intensity: 5, regionOther: '' }] }}
+        data={{
+          ...EMPTY_PAIN,
+          hasPain: true,
+          points: [{ region: 'KNEE', intensity: 5, regionOther: '' }],
+        }}
         onChange={vi.fn()}
       />,
     );
@@ -67,7 +71,11 @@ describe('PainSection', () => {
     const onChange = vi.fn();
     render(
       <PainSection
-        data={{ ...EMPTY_PAIN, hasPain: true, points: [{ region: 'KNEE', intensity: 5, regionOther: '' }] }}
+        data={{
+          ...EMPTY_PAIN,
+          hasPain: true,
+          points: [{ region: 'KNEE', intensity: 5, regionOther: '' }],
+        }}
         onChange={onChange}
       />,
     );
@@ -83,7 +91,11 @@ describe('PainSection', () => {
     const onChange = vi.fn();
     render(
       <PainSection
-        data={{ ...EMPTY_PAIN, hasPain: true, points: [{ region: 'KNEE', intensity: 5, regionOther: '' }] }}
+        data={{
+          ...EMPTY_PAIN,
+          hasPain: true,
+          points: [{ region: 'KNEE', intensity: 5, regionOther: '' }],
+        }}
         onChange={onChange}
       />,
     );
@@ -102,7 +114,11 @@ describe('PainSection', () => {
     const onChange = vi.fn();
     render(
       <PainSection
-        data={{ ...EMPTY_PAIN, hasPain: true, points: [{ region: 'KNEE', intensity: 5, regionOther: '' }] }}
+        data={{
+          ...EMPTY_PAIN,
+          hasPain: true,
+          points: [{ region: 'KNEE', intensity: 5, regionOther: '' }],
+        }}
         onChange={onChange}
       />,
     );
@@ -116,7 +132,11 @@ describe('PainSection', () => {
     const onChange = vi.fn();
     render(
       <PainSection
-        data={{ ...EMPTY_PAIN, hasPain: true, points: [{ region: 'KNEE', intensity: 5, regionOther: '' }] }}
+        data={{
+          ...EMPTY_PAIN,
+          hasPain: true,
+          points: [{ region: 'KNEE', intensity: 5, regionOther: '' }],
+        }}
         onChange={onChange}
       />,
     );

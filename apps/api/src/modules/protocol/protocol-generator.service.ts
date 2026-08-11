@@ -175,8 +175,7 @@ export class ProtocolGeneratorService {
   private catalogContext(constraints: UserConstraints): string {
     const maxLevel = LEVEL_ORDER[constraints.level];
     return EXERCISE_CATALOG.filter(
-      (e) =>
-        servesLocation(e, constraints.location) && LEVEL_ORDER[e.minLevel] <= maxLevel,
+      (e) => servesLocation(e, constraints.location) && LEVEL_ORDER[e.minLevel] <= maxLevel,
     )
       .map(
         (e) =>

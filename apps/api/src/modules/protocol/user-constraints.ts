@@ -102,7 +102,9 @@ export function mapInjuriesToTags(injuries: readonly string[]): Contraindication
  * enum, então derivar a contraindicação por keyword aqui seria perder informação que o
  * formulário entrega estruturada. `OTHER` cai na heurística de texto livre.
  */
-const TAG_BY_PAIN_REGION: Partial<Record<PainAssessment['points'][number]['region'], ContraindicationTag>> = {
+const TAG_BY_PAIN_REGION: Partial<
+  Record<PainAssessment['points'][number]['region'], ContraindicationTag>
+> = {
   NECK: 'NECK',
   SHOULDER: 'SHOULDER',
   ELBOW: 'ELBOW',
@@ -127,7 +129,10 @@ export function painToConstraints(pain: PainAssessment | null | undefined): {
   for (const point of pain.points) {
     const tag = TAG_BY_PAIN_REGION[point.region];
     if (tag) tags.add(tag);
-    const label = point.region === 'OTHER' ? (point.regionOther ?? 'outra região') : PAIN_REGION_LABELS[point.region];
+    const label =
+      point.region === 'OTHER'
+        ? (point.regionOther ?? 'outra região')
+        : PAIN_REGION_LABELS[point.region];
     raw.push(`Dor em ${label} (intensidade ${point.intensity}/10)`);
   }
   // "Outra região" e a recomendação profissional de evitação são texto livre: passam

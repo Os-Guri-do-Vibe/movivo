@@ -245,7 +245,9 @@ export class PhoneVerificationService {
         { event: 'otp_failed', anamnesisSessionId: session.id, reason: 'MISMATCH' },
         'otp_failed',
       );
-      throw new BadRequestException('Esse código não confere. Confira os 6 dígitos e tenta de novo.');
+      throw new BadRequestException(
+        'Esse código não confere. Confira os 6 dígitos e tenta de novo.',
+      );
     }
 
     await this.db.runAsTokenScoped(session.id, async (tx) => {

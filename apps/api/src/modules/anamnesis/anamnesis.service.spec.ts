@@ -223,9 +223,9 @@ describe('AnamnesisService — sessão e retomada', () => {
 describe('Etapa 1 — gate 18+, consentimentos e posse do número', () => {
   it('barra menor de 18 NO SERVIDOR com a mensagem exata do fundador', async () => {
     const { svc } = makeService({ select: [sessionRow()] });
-    await expect(
-      svc.patchStep('t', 1, { ...STEP1, birthDate: '2015-01-01' }),
-    ).rejects.toThrow(UNDER_AGE_MESSAGE);
+    await expect(svc.patchStep('t', 1, { ...STEP1, birthDate: '2015-01-01' })).rejects.toThrow(
+      UNDER_AGE_MESSAGE,
+    );
   });
 
   it('aceita quem faz 18 anos exatamente hoje', async () => {
@@ -290,7 +290,8 @@ describe('Etapa 2 — seção 4 cifrada e gated por consentimento de saúde', ()
       pain: { hasPain: true, trend: 'STABLE', points: [{ region: 'KNEE', intensity: 6 }] },
     });
     expect(cipher.encryptHealth).toHaveBeenCalled();
-    const encrypted = (cipher.encryptHealth as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+    const encrypted = (cipher.encryptHealth as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[0] as string;
     expect(encrypted).toContain('KNEE');
     expect(encrypted).toContain('burpee');
     expect(res.currentStep).toBe(3);
@@ -325,7 +326,8 @@ describe('Etapa 3 — PAR-Q e declarações', () => {
   it('cifra o PAR-Q e as declarações', async () => {
     const { svc, cipher } = makeService({ select: [sessionRow()] });
     await svc.patchStep('t', 3, STEP3);
-    const encrypted = (cipher.encryptHealth as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+    const encrypted = (cipher.encryptHealth as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[0] as string;
     expect(encrypted).toContain(PARQ_VERSION);
     expect(encrypted).toContain('MAY_REQUIRE_REVIEW');
   });

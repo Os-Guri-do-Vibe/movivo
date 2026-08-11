@@ -10,13 +10,7 @@ import { cn } from '@/lib/utils';
  * em vez de introduzir uma lib de formulário nova (nenhuma existe no projeto).
  */
 
-export function FieldLabel({
-  htmlFor,
-  children,
-}: {
-  htmlFor?: string;
-  children: React.ReactNode;
-}) {
+export function FieldLabel({ htmlFor, children }: { htmlFor?: string; children: React.ReactNode }) {
   return (
     <label htmlFor={htmlFor} className="text-label font-semibold">
       {children}

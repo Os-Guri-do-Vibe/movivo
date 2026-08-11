@@ -50,9 +50,7 @@ describe('consentimento versionado (Alexandre §5 — onboarding v2)', () => {
     expect(WHATSAPP_OPERATIONAL_NOTICE.version).toBe('aviso-whatsapp-operacional-2026-08-v1');
     expect(Object.keys(CONSENT_TEXTS)).not.toContain('WHATSAPP_OPERATIONAL_NOTICE');
     const parsed = recordConsentsSchema.safeParse({
-      consents: [
-        { type: 'WHATSAPP_OPERATIONAL_NOTICE', version: 'x', accepted: true },
-      ],
+      consents: [{ type: 'WHATSAPP_OPERATIONAL_NOTICE', version: 'x', accepted: true }],
     });
     expect(parsed.success).toBe(false);
   });

@@ -136,7 +136,9 @@ function healthBlock(painRegions: string[], riskIds: string[] = [], trigger?: st
             // aceita mais injuries livres, então o trigger é o único campo que ecoa verbatim
             // em `injuriesRaw` (via `painToConstraints`).
             points:
-              painRegions.length > 0 ? painRegions.map((region) => ({ region, intensity: 6 })) : [{ region: 'KNEE', intensity: 1 }],
+              painRegions.length > 0
+                ? painRegions.map((region) => ({ region, intensity: 6 }))
+                : [{ region: 'KNEE', intensity: 1 }],
             ...(trigger ? { trigger } : {}),
             hasProfessionalExplanation: false,
             underMedicalFollowUp: false,
@@ -256,7 +258,9 @@ async function seedUser(painRegions: string[], trigger?: string) {
           biologicalSex: 'MALE',
           phoneNumber: '+550',
         },
-        dataBlock2: await cipher.encryptHealth(JSON.stringify(healthBlock(painRegions, [], trigger))),
+        dataBlock2: await cipher.encryptHealth(
+          JSON.stringify(healthBlock(painRegions, [], trigger)),
+        ),
         dataBlock3: structured(),
       })
       .returning({ id: anamnesisSessions.id });

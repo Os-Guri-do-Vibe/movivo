@@ -10,7 +10,13 @@ const LABELS = ['Você', 'Sua rotina de treino', 'Saúde'] as const;
 export function ProgressBar({ currentStep }: { currentStep: 1 | 2 | 3 }) {
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex gap-2" role="progressbar" aria-valuemin={1} aria-valuemax={3} aria-valuenow={currentStep}>
+      <div
+        className="flex gap-2"
+        role="progressbar"
+        aria-valuemin={1}
+        aria-valuemax={3}
+        aria-valuenow={currentStep}
+      >
         {LABELS.map((_, i) => {
           const step = (i + 1) as 1 | 2 | 3;
           const state = step < currentStep ? 'done' : step === currentStep ? 'current' : 'upcoming';

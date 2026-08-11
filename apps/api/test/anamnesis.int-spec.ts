@@ -283,9 +283,9 @@ describe('ONBOARDING v2 — fluxo feliz (US-6.3..6.8)', () => {
     const data = step1();
     await acceptRequired(token);
     await verifyPhone(token, data.phoneNumber);
-    await expect(
-      service.patchStep(token, 1, { ...data, birthDate: '2015-06-01' }),
-    ).rejects.toThrow(/maiores de 18 anos/i);
+    await expect(service.patchStep(token, 1, { ...data, birthDate: '2015-06-01' })).rejects.toThrow(
+      /maiores de 18 anos/i,
+    );
 
     const [row] = await adminClient<Array<{ data_block_1: unknown }>>`
       SELECT data_block_1 FROM anamnesis_sessions WHERE token = ${token}`;
