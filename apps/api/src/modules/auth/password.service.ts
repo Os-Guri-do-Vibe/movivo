@@ -19,7 +19,7 @@ const DUMMY_HASH =
 
 @Injectable()
 export class PasswordService {
-  private readonly options: argon2.Options = { type: argon2.argon2id };
+  private readonly options: argon2.HashOptions = { type: argon2.argon2id };
 
   hash(plain: string): Promise<string> {
     return argon2.hash(plain, this.options);

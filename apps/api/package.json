@@ -28,7 +28,7 @@
     "@nestjs/platform-express": "11.1.28",
     "@nestjs/terminus": "11.1.1",
     "@nestjs/throttler": "^6.5.0",
-    "argon2": "^0.44.0",
+    "argon2": "^0.45.1",
     "bullmq": "5.81.2",
     "class-transformer": "0.5.1",
     "class-validator": "0.14.2",
