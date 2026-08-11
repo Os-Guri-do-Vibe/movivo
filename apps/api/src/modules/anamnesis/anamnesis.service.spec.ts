@@ -381,6 +381,20 @@ describe('Submit — gate PAR-Q e outcome', () => {
     await expect(svc.submit('t')).rejects.toThrow(/já existe um cadastro/i);
   });
 
+  it('traduz unique_violation em 409 mesmo com o código só em `.cause` (drizzle-orm 0.45)', async () => {
+    const { svc } = makeService({
+      select: [sessionRow()],
+      // Forma real do DrizzleQueryError: o `code` do PostgresError vem em `.cause`,
+      // não em `error.code` — é exatamente o formato que passava direto como 500.
+      insertError: Object.assign(new Error('Failed query'), {
+        cause: Object.assign(new Error('duplicate key value violates unique constraint'), {
+          code: '23505',
+        }),
+      }),
+    });
+    await expect(svc.submit('t')).rejects.toThrow(/já existe um cadastro/i);
+  });
+
   it('purgeExpiredSessions retorna a contagem de sessões expurgadas', async () => {
     const { svc } = makeService({ update: [{ id: 'a' }, { id: 'b' }] });
     await expect(svc.purgeExpiredSessions()).resolves.toBe(2);
