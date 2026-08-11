@@ -136,6 +136,37 @@ describe('OnboardingWizard', () => {
     expect(await screen.findByText(/Tudo pronto/)).toBeInTheDocument();
   });
 
+  /**
+   * TASK-6.12.1 — a variante da tela de sucesso segue o STATUS REAL do servidor. Aqui o
+   * usuário responde "Não" em todo o PAR-Q e mesmo assim o servidor devolve
+   * PENDING_REVIEW: se alguém trocar o `outcome` do servidor por um cálculo do cliente
+   * sobre as respostas, este teste reprova — nenhum outro reprovaria.
+   */
+  it('renderiza a V2 quando o servidor diz PENDING_REVIEW, mesmo com PAR-Q todo "Não"', async () => {
+    const user = userEvent.setup();
+    submitAnamnesis.mockResolvedValue({ status: 'SUBMITTED', outcome: 'PENDING_REVIEW' });
+    render(
+      <OnboardingWizard
+        token="tok"
+        initial={{ ...SESSION, currentStep: 3, step1: { name: 'Fulano de Tal' } }}
+      />,
+    );
+
+    for (const noButton of screen.getAllByText('Não')) {
+      await user.click(noButton);
+    }
+    for (const declaration of screen.getAllByRole('checkbox')) {
+      await user.click(declaration);
+    }
+    await user.click(screen.getByRole('button', { name: 'FINALIZAR AVALIAÇÃO' }));
+
+    await waitFor(() => expect(submitAnamnesis).toHaveBeenCalledWith('tok'));
+    expect(await screen.findByText(/Recebemos suas informações/)).toBeInTheDocument();
+    expect(screen.queryByText(/Tudo pronto/)).not.toBeInTheDocument();
+    // O cliente nunca expõe o motivo do bloqueio (Sofia §9.3).
+    expect(document.body.textContent).not.toMatch(/Q[1-9]\b|BLOQUEADO/);
+  });
+
   it('erro ao salvar a etapa 1 mostra alerta e não avança', async () => {
     const user = userEvent.setup();
     recordConsents.mockRejectedValue(new Error('boom'));

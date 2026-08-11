@@ -35,14 +35,20 @@ function session(over: Partial<VerifiableSession> = {}): VerifiableSession {
   };
 }
 
-/** Captura o que foi escrito na sessão, para provar que o código nunca vai em claro. */
-function makeService(numberSends = 0) {
+/**
+ * Captura o que foi escrito na sessão, para provar que o código nunca vai em claro.
+ *
+ * `updatedRows = 0` simula a linha que NÃO casou o `WHERE` do UPDATE atômico — é como
+ * o banco reporta "outro pedido concorrente chegou antes" / "o teto já estourou".
+ */
+function makeService(numberSends = 0, updatedRows = 1) {
   const writes: Record<string, unknown>[] = [];
+  const rows = Array.from({ length: updatedRows }, () => ({ id: SESSION_ID }));
   const tx = {
     update: () => ({
       set: (values: Record<string, unknown>) => {
         writes.push(values);
-        return { where: () => Promise.resolve([]) };
+        return { where: () => ({ returning: () => Promise.resolve(rows) }) };
       },
     }),
     select: () => {
@@ -127,6 +133,24 @@ describe('envio do código', () => {
     await expect(svc.sendCode(session(), PHONE)).rejects.toThrow(/muitas tentativas/i);
   });
 
+  it('não envia quando perde a corrida do CAS (dois pedidos simultâneos)', async () => {
+    const { svc, queues } = makeService(0, 0);
+    const result = await svc.sendCode(session(), PHONE);
+    expect(result.sent).toBe(false);
+    expect(queues.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('não deixa o código do OTP residir no Redis depois do job', async () => {
+    const { svc, queues } = makeService();
+    await svc.sendCode(session(), PHONE);
+    const opts = (queues.enqueue as ReturnType<typeof vi.fn>).mock.calls[0]?.[3] as {
+      removeOnComplete: boolean;
+      removeOnFail: boolean;
+    };
+    expect(opts.removeOnComplete).toBe(true);
+    expect(opts.removeOnFail).toBe(true);
+  });
+
   it('trocar de número derruba a verificação anterior', async () => {
     const { svc, writes } = makeService();
     await svc.sendCode(
@@ -151,23 +175,27 @@ describe('verificação do código', () => {
   it('marca como verificado e limpa o código no acerto', async () => {
     const { svc, writes } = makeService();
     await svc.verify(valid('123456'), '123456');
-    const written = writes[0] as { phoneVerifiedAt: Date; phoneCodeHash: null };
+    // writes[0] é o débito atômico da tentativa; writes[1] é a marcação do sucesso.
+    const written = writes[1] as { phoneVerifiedAt: Date; phoneCodeHash: null };
     expect(written.phoneVerifiedAt).toBeInstanceOf(Date);
     expect(written.phoneCodeHash).toBeNull();
   });
 
-  it('recusa código errado e conta a tentativa', async () => {
+  it('recusa código errado e debita a tentativa ANTES de conferir', async () => {
     const { svc, writes } = makeService();
     await expect(svc.verify(valid('123456'), '000000')).rejects.toThrow(/não confere/i);
-    expect((writes[0] as { phoneCodeAttempts: number }).phoneCodeAttempts).toBe(1);
+    // O débito é expressão SQL (`attempts + 1`), não um número lido na aplicação:
+    // é o que impede N pedidos simultâneos de gastarem a mesma tentativa.
+    const written = writes[0] as Record<string, unknown>;
+    expect(typeof written.phoneCodeAttempts).toBe('object');
+    // A invalidação ao estourar o teto vai no mesmo UPDATE (CASE WHEN), sem round-trip.
+    expect(typeof written.phoneCodeHash).toBe('object');
+    expect(typeof written.phoneCodeExpiresAt).toBe('object');
   });
 
-  it('invalida o código ao esgotar as tentativas (o teto não é contornável por reenvio)', async () => {
-    const { svc, writes } = makeService();
-    await expect(
-      svc.verify(valid('123456', { phoneCodeAttempts: PHONE_CODE_MAX_ATTEMPTS - 1 }), '000000'),
-    ).rejects.toThrow(/não confere/i);
-    expect((writes[0] as { phoneCodeHash: null }).phoneCodeHash).toBeNull();
+  it('recusa quando o débito não casa linha nenhuma (teto estourado em corrida)', async () => {
+    const { svc } = makeService(0, 0);
+    await expect(svc.verify(valid('123456'), '123456')).rejects.toThrow(/muitas tentativas/i);
   });
 
   it('bloqueia a força bruta depois do teto de tentativas', async () => {

@@ -17,7 +17,10 @@
  *    não melhora conclusão e só amplia a janela de ataque.
  *  - **Teto de tentativas: 5 por código.** Com 5 tentativas em 10^6, a chance de acerto
  *    cego é 1 em 200 mil por código. Estourado o teto, o código é **invalidado** (não só
- *    recusado) — senão o atacante somaria tentativas de códigos sucessivos.
+ *    recusado) — senão o atacante somaria tentativas de códigos sucessivos. O débito da
+ *    tentativa e o do contador de envios são **atômicos no banco** (`consumeAttempt` e
+ *    CAS no `sendCode`): ler-decidir-escrever deixaria os dois tetos cair sob
+ *    concorrência, que é justamente como se ataca um OTP.
  *  - **Cooldown de reenvio: 60s** (o contador que Sofia especificou) e **teto de 5 envios
  *    por sessão**. Reenvio dentro do cooldown é **idempotente**: não dispara mensagem
  *    nova, não invalida o código vigente e não é erro — a UI já está mostrando o contador.
@@ -30,8 +33,8 @@
  *    logo em seguida. Nunca vai para log (o `LoggerModule` redige, e nada aqui loga o valor).
  */
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
-import { createHash, randomInt } from 'node:crypto';
-import { and, eq, gte, sql } from 'drizzle-orm';
+import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
+import { and, eq, gte, isNull, lt, sql } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 
 import { PHONE_CODE_LENGTH } from '@movivo/shared';
@@ -71,6 +74,17 @@ export interface VerifiableSession {
 /** SHA-256 de `<sessionId>:<código>`. O id da sessão é o sal. */
 export function hashPhoneCode(sessionId: string, code: string): string {
   return createHash('sha256').update(`${sessionId}:${code}`).digest('hex');
+}
+
+/**
+ * Comparação de digests em tempo constante (Sato — revisão da US-6.5).
+ * `!==` sai no primeiro byte diferente; o hash alvo é derivado do código, então um
+ * oráculo de tempo sobre ele permitiria recuperá-lo e quebrar os 10^6 offline.
+ */
+function digestsMatch(a: string, b: string): boolean {
+  const left = Buffer.from(a, 'hex');
+  const right = Buffer.from(b, 'hex');
+  return left.length === right.length && timingSafeEqual(left, right);
 }
 
 /** Código numérico de 6 dígitos por CSPRNG, com zeros à esquerda preservados. */
@@ -129,8 +143,11 @@ export class PhoneVerificationService {
     const code = generateCode();
     const expiresAt = new Date(now.getTime() + PHONE_CODE_TTL_MS);
 
-    await this.db.runAsTokenScoped(session.id, async (tx) => {
-      await tx
+    // CAS otimista sobre a linha que embasou a decisão acima (número + contador).
+    // Sem isso, N pedidos simultâneos leem `sendCount` iguais e todos escrevem —
+    // o teto por sessão viraria decorativo sob concorrência (Sato — revisão US-6.5).
+    const applied = await this.db.runAsTokenScoped(session.id, async (tx) => {
+      const rows = (await tx
         .update(anamnesisSessions)
         .set({
           phoneE164: phoneNumber,
@@ -142,8 +159,28 @@ export class PhoneVerificationService {
           phoneCodeSentAt: now,
           phoneCodeSendCount: sendCount + 1,
         })
-        .where(eq(anamnesisSessions.id, session.id));
+        .where(
+          and(
+            eq(anamnesisSessions.id, session.id),
+            eq(anamnesisSessions.phoneCodeSendCount, session.phoneCodeSendCount),
+            session.phoneE164 === null
+              ? isNull(anamnesisSessions.phoneE164)
+              : eq(anamnesisSessions.phoneE164, session.phoneE164),
+          ),
+        )
+        .returning({ id: anamnesisSessions.id })) as Array<{ id: string }>;
+      return rows.length > 0;
     });
+
+    // Perdeu a corrida: outro pedido concorrente já mandou um código válido. Responde
+    // como cooldown (nada novo enviado) em vez de gastar mais uma mensagem.
+    if (!applied) {
+      return {
+        sent: false,
+        resendAvailableAt: new Date(now.getTime() + PHONE_CODE_RESEND_COOLDOWN_MS),
+        expiresAt,
+      };
+    }
 
     // O job carrega o telefone e o código porque, nesta fase, **não existe `users`**
     // para o worker resolver sob RLS — o número é justamente o dado sendo provado.
@@ -152,7 +189,14 @@ export class PhoneVerificationService {
       QUEUE.whatsappOutbound,
       'phone-verification',
       { type: 'PHONE_VERIFICATION', phoneNumber, code, userId: null },
-      { jobId: `phone-verification_${session.id}_${sendCount + 1}` },
+      {
+        jobId: `phone-verification_${session.id}_${sendCount + 1}`,
+        // Este é o único job cujo payload carrega segredo em claro. Os defaults da fila
+        // guardam o job concluído por 1h e o falhado por 7 dias no Redis — inaceitável
+        // para código + telefone. Some do keyspace assim que termina (Sato — US-6.5).
+        removeOnComplete: true,
+        removeOnFail: true,
+      },
     );
 
     // Métrica sem PII e sem o código (Henrique — TASK-6.5.2).
@@ -186,20 +230,17 @@ export class PhoneVerificationService {
       );
     }
 
-    if (hashPhoneCode(session.id, code) !== session.phoneCodeHash) {
-      const attempts = session.phoneCodeAttempts + 1;
-      const exhausted = attempts >= PHONE_CODE_MAX_ATTEMPTS;
-      await this.db.runAsTokenScoped(session.id, async (tx) => {
-        await tx
-          .update(anamnesisSessions)
-          .set({
-            phoneCodeAttempts: attempts,
-            // Teto estourado invalida o código: senão o atacante somaria tentativas
-            // ao longo de códigos sucessivos, e o teto por código não valeria nada.
-            ...(exhausted ? { phoneCodeHash: null, phoneCodeExpiresAt: null } : {}),
-          })
-          .where(eq(anamnesisSessions.id, session.id));
-      });
+    // A tentativa é DEBITADA ANTES de conferir o código, e no próprio banco. O teto de
+    // 5 é o que segura os 10^6: se o débito fosse `attempts = <lido> + 1`, N pedidos
+    // simultâneos leriam o mesmo valor e o teto cairia para "o que o rate limit por IP
+    // deixar passar" (Sato — revisão US-6.5). Zero linhas = teto já estourado.
+    if (!(await this.consumeAttempt(session.id))) {
+      throw new ForbiddenException(
+        'Muitas tentativas seguidas. Por segurança, espere alguns minutos antes de tentar de novo.',
+      );
+    }
+
+    if (!digestsMatch(hashPhoneCode(session.id, code), session.phoneCodeHash)) {
       this.logger.info(
         { event: 'otp_failed', anamnesisSessionId: session.id, reason: 'MISMATCH' },
         'otp_failed',
@@ -219,6 +260,34 @@ export class PhoneVerificationService {
         .where(eq(anamnesisSessions.id, session.id));
     });
     this.logger.info({ event: 'otp_verified', anamnesisSessionId: session.id }, 'otp_verified');
+  }
+
+  /**
+   * Debita uma tentativa atomicamente. `false` quando o teto já estava estourado.
+   *
+   * Ao atingir o teto o código é **invalidado** (não só recusado) — senão o atacante
+   * somaria tentativas ao longo de códigos sucessivos, e o teto por código não valeria
+   * nada. O `CASE` faz isso no mesmo UPDATE, sem segundo round-trip.
+   */
+  private async consumeAttempt(sessionId: string): Promise<boolean> {
+    const exhausted = sql`${anamnesisSessions.phoneCodeAttempts} + 1 >= ${PHONE_CODE_MAX_ATTEMPTS}`;
+    return this.db.runAsTokenScoped(sessionId, async (tx) => {
+      const rows = (await tx
+        .update(anamnesisSessions)
+        .set({
+          phoneCodeAttempts: sql`${anamnesisSessions.phoneCodeAttempts} + 1`,
+          phoneCodeHash: sql`CASE WHEN ${exhausted} THEN NULL ELSE ${anamnesisSessions.phoneCodeHash} END`,
+          phoneCodeExpiresAt: sql`CASE WHEN ${exhausted} THEN NULL ELSE ${anamnesisSessions.phoneCodeExpiresAt} END`,
+        })
+        .where(
+          and(
+            eq(anamnesisSessions.id, sessionId),
+            lt(anamnesisSessions.phoneCodeAttempts, PHONE_CODE_MAX_ATTEMPTS),
+          ),
+        )
+        .returning({ id: anamnesisSessions.id })) as Array<{ id: string }>;
+      return rows.length > 0;
+    });
   }
 
   /**

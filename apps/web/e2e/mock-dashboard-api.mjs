@@ -149,7 +149,12 @@ createServer(async (request, response) => {
   // --- Onboarding v2 (Sprint 6) — sessão em memória, um smoke por processo ---
   if (request.method === 'POST' && url.pathname === '/api/v1/anamnesis/start') {
     const token = 'e2e-onboarding-token';
-    anamnesisSessions.set(token, { currentStep: 1, phoneVerified: false, code: null });
+    anamnesisSessions.set(token, {
+      currentStep: 1,
+      phoneVerified: false,
+      code: null,
+      parqBlocked: false,
+    });
     return json(response, 201, {
       token,
       expiresAt: '2099-01-01T00:00:00.000Z',
@@ -201,11 +206,19 @@ createServer(async (request, response) => {
     }
     const stepMatch = /^\/step\/([123])$/.exec(rest ?? '');
     if (stepMatch && request.method === 'PATCH') {
+      const body = await readBody(request);
+      // O gate PAR-Q é do SERVIDOR: o mock guarda as respostas e decide o `outcome` no
+      // submit, como a API real. Sem isso o E2E não conseguiria provar que a variante da
+      // tela de sucesso segue o servidor, e não um cálculo do cliente (TASK-6.12.1).
+      if (stepMatch[1] === '3') session.parqBlocked = (body.parq?.answers ?? []).some((a) => a.answer === true);
       session.currentStep = Number(stepMatch[1]) + 1;
       return json(response, 200, { currentStep: session.currentStep });
     }
     if (rest === '/submit' && request.method === 'POST') {
-      return json(response, 200, { status: 'SUBMITTED', outcome: 'READY' });
+      return json(response, 200, {
+        status: 'SUBMITTED',
+        outcome: session.parqBlocked ? 'PENDING_REVIEW' : 'READY',
+      });
     }
   }
 
