@@ -1,47 +1,92 @@
 /**
- * Unitários do `AnamnesisService` (US-1.3).
+ * Unitários do `AnamnesisService` — onboarding v2 (Sprint 6).
  *
- * Complementam `test/anamnesis.int-spec.ts` (que prova o comportamento contra o
- * banco real: RLS por sessão, cifra, migração). Aqui ficam as ramificações de
- * regra que não dependem de I/O — sobretudo as **travas**: token inexistente,
- * expiração, bloco 2 sem consentimento, blocos incompletos e o gate PAR-Q.
+ * Complementam `test/anamnesis.int-spec.ts` (que prova o comportamento contra o banco
+ * real: RLS por sessão, cifra, migração). Aqui ficam as **travas** que não dependem de
+ * I/O e que a US-6.12 declara bloqueantes: gate 18+ no servidor, consentimentos
+ * obrigatórios, posse do número, consentimento de saúde reavaliado na coleta, gate
+ * PAR-Q e a ausência de vazamento de dado clínico na resposta.
  */
-import { PARQ_QUESTION_IDS, PARQ_VERSION, ParqState } from '@movivo/shared';
+import {
+  PARQ_DECLARATIONS,
+  PARQ_DECLARATIONS_VERSION,
+  PARQ_QUESTION_IDS,
+  PARQ_VERSION,
+  UNDER_AGE_MESSAGE,
+} from '@movivo/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import { type HealthCipherService, type TenantDatabase } from '../../core/database';
 import { type QueueManager } from '../jobs/queue-manager.service';
 import { AnamnesisService } from './anamnesis.service';
 import { type ConsentService } from './consent.service';
+import { type PhoneVerificationService } from './phone-verification.service';
 
 const HOUR = 3600_000;
 const future = () => new Date(Date.now() + 72 * HOUR);
 const past = () => new Date(Date.now() - HOUR);
+const PHONE = '+5511999998888';
 
-/** Bloco 2 com 9 respostas PAR-Q; `risky` marca uma como "Sim" (dispara bloqueio). */
-function block2(risky: boolean) {
+function parq(risky = false) {
   return {
-    parq: {
-      version: PARQ_VERSION,
-      answers: PARQ_QUESTION_IDS.map((questionId, i) => ({
-        questionId,
-        answer: risky && i === 0,
-      })),
-    },
+    version: PARQ_VERSION,
+    answers: PARQ_QUESTION_IDS.map((questionId, i) => ({
+      questionId,
+      answer: risky && i === 0,
+    })),
   };
 }
-const BLOCK1 = { name: 'Fulano de Teste', phoneNumber: '+5511999998888' };
 
-/**
- * `tx` falso configurável por terminal: `select→…→limit` devolve `state.select`;
- * `insert→values→returning` devolve `state.insert`; `update→set→where[.returning]`
- * devolve `state.update`; `execute` devolve []. Cobre os 4 estilos de query do serviço.
- */
+const STEP1 = {
+  name: 'Fulano de Teste',
+  birthDate: '1996-04-02',
+  biologicalSex: 'MALE' as const,
+  phoneNumber: PHONE,
+};
+
+const STRUCTURED = {
+  primaryGoal: 'GAIN_STRENGTH' as const,
+  emphasis: ['BACK' as const],
+  hasImportantEvent: false,
+  trainingStatus: 'REGULAR' as const,
+  experience: 'INTERMEDIATE' as const,
+  pastActivities: [],
+  consistencyBarriers: [],
+  daysPerWeek: 4,
+  preferredDays: [],
+  sessionDuration: 'M45_TO_60' as const,
+  location: 'CONDO_GYM' as const,
+  preferredPeriod: 'MORNING' as const,
+  practicesOtherSport: false,
+  hasAvoidedExercise: false,
+};
+
+const STEP2 = {
+  anamnesis: { structured: STRUCTURED, freeText: {} },
+  pain: { hasPain: false, points: [] },
+};
+
+const STEP3 = {
+  parq: parq(),
+  declarationsVersion: PARQ_DECLARATIONS_VERSION,
+  declarations: PARQ_DECLARATIONS.map((d) => d.id),
+};
+
+const HEALTH_BLOCK = (risky = false) => ({
+  pain: { hasPain: false, points: [] },
+  freeText: {},
+  parq: parq(risky),
+  declarations: {
+    version: PARQ_DECLARATIONS_VERSION,
+    accepted: PARQ_DECLARATIONS.map((d) => d.id),
+    acceptedAt: new Date().toISOString(),
+  },
+});
+
 interface TxState {
   select?: unknown[];
   insert?: unknown[];
   update?: unknown[];
-  /** Faz o INSERT rejeitar — usado para simular unique_violation (23505). */
   insertError?: unknown;
 }
 
@@ -82,42 +127,63 @@ function makeService(state: TxState = {}) {
 
   const cipher = {
     encryptHealth: vi.fn(() => Promise.resolve(Buffer.from('cipher'))),
-    decryptHealth: vi.fn(() => Promise.resolve(JSON.stringify(block2(false)))),
+    decryptHealth: vi.fn(() => Promise.resolve(JSON.stringify(HEALTH_BLOCK(false)))),
   } as unknown as HealthCipherService;
 
   const consents = {
     hasValidHealthConsent: vi.fn(() => Promise.resolve(true)),
+    acceptedTypesForSession: vi.fn(() =>
+      Promise.resolve(['TERMS_OF_SERVICE', 'HEALTH_DATA', 'AI_DISCLOSURE']),
+    ),
     linkSessionToUser: vi.fn(() => Promise.resolve()),
   } as unknown as ConsentService;
 
+  const phone = {
+    sendCode: vi.fn(() => Promise.resolve({ sent: true })),
+    verify: vi.fn(() => Promise.resolve()),
+  } as unknown as PhoneVerificationService;
+
   const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() } as never;
   const queues = { enqueue: vi.fn(() => Promise.resolve('job-1')) } as unknown as QueueManager;
-  return { svc: new AnamnesisService(logger, db, cipher, consents, queues), cipher, consents };
+  return {
+    svc: new AnamnesisService(logger, db, cipher, consents, queues, phone),
+    cipher,
+    consents,
+    phone,
+    queues,
+  };
 }
 
-/** Linha de sessão IN_PROGRESS com os blocos preenchidos (ajustável por override). */
+/** Linha de sessão IN_PROGRESS com número já verificado (ajustável por override). */
 function sessionRow(over: Record<string, unknown> = {}) {
   return {
     id: 'sess-1',
     token: 't'.repeat(64),
     status: 'IN_PROGRESS',
-    lastBlock: 1,
+    lastStep: 1,
     primaryGoal: null,
     parqState: null,
-    dataBlock1: BLOCK1,
+    dataBlock1: STEP1,
     dataBlock2: Buffer.from('cipher'),
-    dataBlock3: { daysPerWeek: 3 },
+    dataBlock3: STRUCTURED,
+    phoneE164: PHONE,
+    phoneVerifiedAt: new Date(),
+    phoneCodeHash: null,
+    phoneCodeExpiresAt: null,
+    phoneCodeAttempts: 0,
+    phoneCodeSentAt: null,
+    phoneCodeSendCount: 0,
     expiresAt: future(),
     ...over,
   };
 }
 
-describe('AnamnesisService', () => {
+describe('AnamnesisService — sessão e retomada', () => {
   it('start gera token CSPRNG de 64 hex e TTL de 72h', async () => {
     const { svc } = makeService();
     const res = await svc.start({});
     expect(res.token).toMatch(/^[0-9a-f]{64}$/);
-    expect(res.lastBlock).toBe(1);
+    expect(res.currentStep).toBe(1);
     expect(res.expiresAt.getTime()).toBeGreaterThan(Date.now());
   });
 
@@ -126,82 +192,186 @@ describe('AnamnesisService', () => {
     await expect(svc.getByToken('nope')).rejects.toThrow(/não encontrada/i);
   });
 
-  it('getByToken de sessão ativa retoma no last_block sem expor o bloco 2', async () => {
-    const { svc } = makeService({ select: [sessionRow({ lastBlock: 2, parqState: null })] });
+  it('retoma na etapa certa, entrega os consentimentos e NÃO expõe o bloco de saúde', async () => {
+    const { svc } = makeService({ select: [sessionRow({ lastStep: 2 })] });
     const view = await svc.getByToken('t');
     expect(view.status).toBe('IN_PROGRESS');
-    expect(view.lastBlock).toBe(2);
-    expect(view.block2Completed).toBe(true); // preenchido, mas o conteúdo não vaza
+    expect(view.currentStep).toBe(2);
+    expect(view.phoneVerified).toBe(true);
+    expect(view.healthCompleted).toBe(true);
+    // Nenhuma resposta de saúde na projeção — só o fato de a etapa ter sido preenchida.
+    // (o texto do consentimento cita "PAR-Q", então a asserção mira o CONTEÚDO: respostas.)
+    expect(JSON.stringify(view)).not.toMatch(/questionId|answers|hasPain/);
+    // Consentimentos vêm do backend, com texto e versão (Sofia §2.3) e nunca marcados.
+    expect(view.consents.map((c) => c.type)).toEqual([
+      'TERMS_OF_SERVICE',
+      'HEALTH_DATA',
+      'AI_DISCLOSURE',
+      'MARKETING',
+    ]);
+    expect(view.consents.every((c) => c.version.length > 0)).toBe(true);
   });
 
-  it('patchBlock(1) salva bloco não-sensível como jsonb (sem cifra)', async () => {
-    const { svc, cipher } = makeService({ select: [sessionRow()] });
-    const res = await svc.patchBlock('t', 1, { name: 'Fulano', phoneNumber: '+5511999998888' });
-    expect(cipher.encryptHealth).not.toHaveBeenCalled();
-    expect(res.lastBlock).toBe(1);
-  });
-
-  it('getByToken expira em voo e não devolve o bloco 2', async () => {
-    const { svc } = makeService({
-      select: [sessionRow({ status: 'IN_PROGRESS', expiresAt: past() })],
-    });
+  it('expira em voo e descarta o bloco de saúde da resposta', async () => {
+    const { svc } = makeService({ select: [sessionRow({ expiresAt: past() })] });
     const view = await svc.getByToken('t');
     expect(view.status).toBe('EXPIRED');
-    expect(view.block2Completed).toBe(false);
+    expect(view.healthCompleted).toBe(false);
+  });
+});
+
+describe('Etapa 1 — gate 18+, consentimentos e posse do número', () => {
+  it('barra menor de 18 NO SERVIDOR com a mensagem exata do fundador', async () => {
+    const { svc } = makeService({ select: [sessionRow()] });
+    await expect(
+      svc.patchStep('t', 1, { ...STEP1, birthDate: '2015-01-01' }),
+    ).rejects.toThrow(UNDER_AGE_MESSAGE);
   });
 
-  it('patchBlock(2) SEM consentimento de saúde é bloqueado (BLOQUEADOR 3)', async () => {
+  it('aceita quem faz 18 anos exatamente hoje', async () => {
+    const { svc } = makeService({ select: [sessionRow()] });
+    const today = new Date();
+    const birthDate = `${today.getUTCFullYear() - 18}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`;
+    await expect(svc.patchStep('t', 1, { ...STEP1, birthDate })).resolves.toEqual({
+      currentStep: 2,
+    });
+  });
+
+  it('recusa a etapa 1 sem os consentimentos obrigatórios', async () => {
+    const { svc, consents } = makeService({ select: [sessionRow()] });
+    (consents.acceptedTypesForSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      'TERMS_OF_SERVICE',
+    ]);
+    await expect(svc.patchStep('t', 1, STEP1)).rejects.toThrow(/obrigatórios pendentes/i);
+  });
+
+  it('recusa a etapa 1 sem o número verificado', async () => {
+    const { svc } = makeService({ select: [sessionRow({ phoneVerifiedAt: null })] });
+    await expect(svc.patchStep('t', 1, STEP1)).rejects.toThrow(/código enviado no WhatsApp/i);
+  });
+
+  it('recusa quando o número enviado difere do número verificado', async () => {
+    const { svc } = makeService({ select: [sessionRow({ phoneE164: '+5511900000000' })] });
+    await expect(svc.patchStep('t', 1, STEP1)).rejects.toThrow(/código enviado no WhatsApp/i);
+  });
+
+  it('persiste a etapa 1 sem cifrar (dado pessoal comum)', async () => {
+    const { svc, cipher } = makeService({ select: [sessionRow()] });
+    await svc.patchStep('t', 1, STEP1);
+    expect(cipher.encryptHealth).not.toHaveBeenCalled();
+  });
+
+  it('lança 410 em sessão expirada', async () => {
+    const { svc } = makeService({ select: [sessionRow({ expiresAt: past() })] });
+    await expect(svc.patchStep('t', 1, STEP1)).rejects.toThrow(/expirada/i);
+  });
+});
+
+describe('Etapa 2 — seção 4 cifrada e gated por consentimento de saúde', () => {
+  it('recusa a coleta sem consentimento de saúde vigente', async () => {
     const { svc, consents } = makeService({ select: [sessionRow()] });
     (consents.hasValidHealthConsent as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false);
-    await expect(svc.patchBlock('t', 2, block2(false))).rejects.toThrow(/consentimento de saúde/i);
+    await expect(svc.patchStep('t', 2, STEP2)).rejects.toThrow(/consentimento de saúde/i);
   });
 
-  it('patchBlock(2) COM consentimento cifra o dado de saúde', async () => {
+  it('reavalia o consentimento NA COLETA, mesmo com a etapa 1 concluída', async () => {
+    const { svc, consents } = makeService({ select: [sessionRow({ lastStep: 3 })] });
+    (consents.hasValidHealthConsent as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false);
+    await expect(svc.patchStep('t', 2, STEP2)).rejects.toThrow(/consentimento de saúde/i);
+  });
+
+  it('cifra a seção 4 e o texto livre; as seções comuns vão em claro', async () => {
     const { svc, cipher } = makeService({ select: [sessionRow()] });
-    const res = await svc.patchBlock('t', 2, block2(false));
-    expect(cipher.encryptHealth).toHaveBeenCalledOnce();
-    expect(res.lastBlock).toBe(2);
+    const res = await svc.patchStep('t', 2, {
+      anamnesis: {
+        structured: { ...STRUCTURED, hasAvoidedExercise: true },
+        freeText: { avoidedExercise: 'burpee' },
+      },
+      pain: { hasPain: true, trend: 'STABLE', points: [{ region: 'KNEE', intensity: 6 }] },
+    });
+    expect(cipher.encryptHealth).toHaveBeenCalled();
+    const encrypted = (cipher.encryptHealth as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+    expect(encrypted).toContain('KNEE');
+    expect(encrypted).toContain('burpee');
+    expect(res.currentStep).toBe(3);
   });
 
-  it('patchBlock lança 410 em sessão expirada', async () => {
-    const { svc } = makeService({ select: [sessionRow({ expiresAt: past() })] });
+  it('recusa payload que viola a regra de exclusividade de "corpo todo"', async () => {
+    const { svc } = makeService({ select: [sessionRow()] });
     await expect(
-      svc.patchBlock('t', 1, { name: 'x', phoneNumber: '+5511999998888' }),
-    ).rejects.toThrow(/expirada/i);
+      svc.patchStep('t', 2, {
+        ...STEP2,
+        anamnesis: {
+          structured: { ...STRUCTURED, emphasis: ['FULL_BODY', 'CHEST'] },
+          freeText: {},
+        },
+      }),
+    ).rejects.toThrow();
+  });
+});
+
+describe('Etapa 3 — PAR-Q e declarações', () => {
+  it('recusa o fechamento sem as 3 declarações', async () => {
+    const { svc } = makeService({ select: [sessionRow()] });
+    await expect(svc.patchStep('t', 3, { ...STEP3, declarations: ['TRUTHFUL'] })).rejects.toThrow();
   });
 
-  it('submit exige os 3 blocos preenchidos', async () => {
+  it('recusa o PAR-Q sem consentimento de saúde', async () => {
+    const { svc, consents } = makeService({ select: [sessionRow()] });
+    (consents.hasValidHealthConsent as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false);
+    await expect(svc.patchStep('t', 3, STEP3)).rejects.toThrow(/consentimento de saúde/i);
+  });
+
+  it('cifra o PAR-Q e as declarações', async () => {
+    const { svc, cipher } = makeService({ select: [sessionRow()] });
+    await svc.patchStep('t', 3, STEP3);
+    const encrypted = (cipher.encryptHealth as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as string;
+    expect(encrypted).toContain(PARQ_VERSION);
+    expect(encrypted).toContain('MAY_REQUIRE_REVIEW');
+  });
+});
+
+describe('Submit — gate PAR-Q e outcome', () => {
+  it('exige as três etapas preenchidas', async () => {
     const { svc } = makeService({ select: [sessionRow({ dataBlock3: null })] });
-    await expect(svc.submit('t')).rejects.toThrow(/complete os três blocos/i);
+    await expect(svc.submit('t')).rejects.toThrow(/complete as três etapas/i);
   });
 
-  it('submit sem risco no PAR-Q libera e não exige revisão profissional', async () => {
+  it('PAR-Q limpo devolve READY e nada além disso', async () => {
     const { svc, consents } = makeService({ select: [sessionRow()], insert: [{ id: 'user-1' }] });
     const res = await svc.submit('t');
-    expect(res.status).toBe('SUBMITTED');
-    expect(res.parqState).toBe(ParqState.LIBERADO);
-    expect(res.requiresProfessionalReview).toBe(false);
-    // Consentimentos da fase anônima migram para o titular criado.
+    expect(res).toEqual({ status: 'SUBMITTED', outcome: 'READY' });
     expect(consents.linkSessionToUser).toHaveBeenCalledWith('sess-1', 'user-1');
   });
 
-  it('submit com risco no PAR-Q BLOQUEIA e marca revisão profissional', async () => {
+  it('PAR-Q com "Sim" devolve PENDING_REVIEW e NUNCA o motivo', async () => {
     const { svc, cipher } = makeService({ select: [sessionRow()], insert: [{ id: 'user-2' }] });
-    (cipher.decryptHealth as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      JSON.stringify(block2(true)),
+    (cipher.decryptHealth as ReturnType<typeof vi.fn>).mockResolvedValue(
+      JSON.stringify(HEALTH_BLOCK(true)),
     );
     const res = await svc.submit('t');
-    expect(res.parqState).toBe(ParqState.BLOQUEADO_AGUARDANDO_CLEARANCE);
-    expect(res.requiresProfessionalReview).toBe(true);
+    expect(res.outcome).toBe('PENDING_REVIEW');
+    // Nada de resposta do PAR-Q, id de pergunta ou estado clínico volta ao cliente.
+    expect(JSON.stringify(res)).not.toMatch(/Q[1-9]|BLOQUEADO|parq/i);
   });
 
-  it('submit lança 409 quando a sessão já foi enviada', async () => {
+  it('recusa o submit sem o número verificado', async () => {
+    const { svc } = makeService({ select: [sessionRow({ phoneVerifiedAt: null })] });
+    await expect(svc.submit('t')).rejects.toThrow(/código enviado no WhatsApp/i);
+  });
+
+  it('recusa o submit se o consentimento de saúde foi revogado no meio do funil', async () => {
+    const { svc, consents } = makeService({ select: [sessionRow()] });
+    (consents.hasValidHealthConsent as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false);
+    await expect(svc.submit('t')).rejects.toThrow(/consentimento de saúde/i);
+  });
+
+  it('lança 409 quando a sessão já foi enviada', async () => {
     const { svc } = makeService({ select: [sessionRow({ status: 'SUBMITTED' })] });
     await expect(svc.submit('t')).rejects.toThrow(/já foi enviada/i);
   });
 
-  it('submit traduz unique_violation (telefone/e-mail já cadastrado) em 409', async () => {
-    // O INSERT do usuário estoura a unique constraint do telefone (código 23505).
+  it('traduz unique_violation (telefone/e-mail já cadastrado) em 409', async () => {
     const { svc } = makeService({
       select: [sessionRow()],
       insertError: Object.assign(new Error('dup'), { code: '23505' }),
@@ -209,7 +379,7 @@ describe('AnamnesisService', () => {
     await expect(svc.submit('t')).rejects.toThrow(/já existe um cadastro/i);
   });
 
-  it('purgeExpiredSessions retorna a contagem de sessões expuradas', async () => {
+  it('purgeExpiredSessions retorna a contagem de sessões expurgadas', async () => {
     const { svc } = makeService({ update: [{ id: 'a' }, { id: 'b' }] });
     await expect(svc.purgeExpiredSessions()).resolves.toBe(2);
   });

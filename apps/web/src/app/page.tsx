@@ -1,11 +1,11 @@
-import { GoalCta } from '@/components/goal-cta';
+import { StartCta } from '@/components/start-cta';
 import { ThemeToggle } from '@/components/theme-toggle';
 
 /**
  * Landing page (US-1.5) — Server Component (RSC).
  *
- * Renderizada no servidor; o único client component da árvore é `GoalCta` (chips de
- * pré-qualifying + CTA + analytics), exatamente onde a interatividade começa. Segue o
+ * Renderizada no servidor; o único client component da árvore é `StartCta` (CTA +
+ * analytics), exatamente onde a interatividade começa. Segue o
  * wireframe de Sofia §9.1 e os guardrails de linguagem (CLAUDE.md): nenhuma promessa
  * de resultado, sem termos proibidos, respaldo CREF sempre visível e a IA nunca
  * apresentada como quem decide sozinha.
@@ -51,7 +51,7 @@ export default function HomePage() {
               no CREF por trás.
             </p>
 
-            <GoalCta />
+            <StartCta />
           </section>
 
           <section aria-labelledby="titulo-como-funciona" className="flex flex-col gap-4">

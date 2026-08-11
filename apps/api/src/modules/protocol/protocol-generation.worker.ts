@@ -14,7 +14,13 @@ import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { type Job } from 'bullmq';
 import { eq } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
-import { anamnesisBlock2Schema, anamnesisBlock3Schema, type PrimaryGoal } from '@movivo/shared';
+import {
+  anamnesisStructuredSchema,
+  SESSION_DURATION_MINUTES,
+  toGenerationGoal,
+  type AnamnesisStructured,
+  type GenerationGoal,
+} from '@movivo/shared';
 
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
@@ -28,7 +34,14 @@ import { WorkerFactory } from '../jobs/worker.factory';
 import { ProtocolGeneratorService } from './protocol-generator.service';
 import { planProtocol } from './protocol-planner';
 import { ProtocolRepository } from './protocol.repository';
-import { mapInjuriesToTags, type UserConstraints } from './user-constraints';
+import { healthBlockSchema, type HealthBlock } from '../anamnesis/health-block';
+import {
+  emphasisToMuscleGroups,
+  levelFromExperience,
+  mapInjuriesToTags,
+  painToConstraints,
+  type UserConstraints,
+} from './user-constraints';
 import { buildFallbackProtocol, FALLBACK_TEMPLATE_VERSION } from './validation/fallback-template';
 import { ValidationService } from './validation/validation.service';
 
@@ -180,36 +193,58 @@ export class ProtocolGenerationWorker implements OnModuleInit {
         .limit(1);
       if (!session || !session.dataBlock2 || !session.dataBlock3) return null;
 
-      const block2 = anamnesisBlock2Schema.parse(
+      const health = healthBlockSchema.parse(
         JSON.parse(await this.cipher.decryptHealth(session.dataBlock2)),
       );
-      const block3 = anamnesisBlock3Schema.parse(session.dataBlock3);
+      const structured = anamnesisStructuredSchema.parse(session.dataBlock3);
 
       return {
         requiresProfessionalReview: user.requiresProfessionalReview,
         name: user.name,
         phoneNumber: user.phoneNumber,
         email: user.email,
-        primaryGoal: session.primaryGoal,
         submittedAt: session.submittedAt,
-        injuries: block2.injuries ?? [],
-        block3,
+        structured,
+        health,
       };
     });
   }
 
+  /**
+   * Anamnese v2 → constraints do gerador (US-6.9).
+   *
+   * É aqui que a Sprint 6 paga o que prometeu: `level` deixa de ser `INICIANTE`
+   * hardcoded e passa a vir da experiência declarada; ênfase e preferências passam a
+   * existir; a dor localizada vira contraindicação estruturada, não texto solto.
+   *
+   * **Precedência inegociável:** `avoid` é PREFERÊNCIA e só remove exercício; nada nele
+   * reabilita algo que `injuryTags` (segurança) tirou. O veto final continua sendo do
+   * `ValidationService`, que não lê `avoid`.
+   */
   private toConstraints(ctx: LoadedContext): UserConstraints {
+    const { structured, health } = ctx;
+    const pain = painToConstraints(health.pain);
+    // Texto livre que é restrição de fato: orientação profissional de evitar movimento.
+    // O "exercício que não gosto" NÃO entra aqui — vai para `avoid`, que é preferência.
+    const injuriesRaw = pain.raw;
+
     return {
-      // ponytail: a landing captura o objetivo; sem ele, `CONDITIONING` é o default seguro.
-      goal: (ctx.primaryGoal as PrimaryGoal | null) ?? 'CONDITIONING',
-      // ponytail: nível default `INICIANTE` — a anamnese v1 não captura nível (ver user-constraints.ts).
-      level: 'INICIANTE',
-      daysPerWeek: ctx.block3.daysPerWeek,
-      sessionMinutes: ctx.block3.sessionMinutes,
-      location: ctx.block3.location ?? 'BOTH',
-      equipment: ctx.block3.equipment ?? [],
-      injuryTags: mapInjuriesToTags(ctx.injuries),
-      injuriesRaw: ctx.injuries,
+      // "Outro" nunca chega ao gerador: `toGenerationGoal` o traduz para o objetivo
+      // genérico seguro; o texto bruto do usuário fica na anamnese, para o painel CREF.
+      goal: toGenerationGoal(structured.primaryGoal),
+      // Fim do default hardcoded (D6 / TASK-6.9.2).
+      level: levelFromExperience(structured.experience),
+      daysPerWeek: structured.daysPerWeek,
+      sessionMinutes: SESSION_DURATION_MINUTES[structured.sessionDuration],
+      location: structured.location,
+      // A anamnese v2 não pergunta equipamento item a item — o LOCAL já determina o que
+      // existe, e o catálogo filtra por local. Perguntar de novo seria pedir ao usuário
+      // uma informação que ele frequentemente não sabe responder.
+      equipment: [],
+      emphasis: emphasisToMuscleGroups(structured.emphasis),
+      avoid: health.freeText?.avoidedExercise ? [health.freeText.avoidedExercise] : [],
+      injuryTags: [...new Set([...pain.tags, ...mapInjuriesToTags(injuriesRaw)])],
+      injuriesRaw,
     };
   }
 
@@ -285,16 +320,17 @@ export class ProtocolGenerationWorker implements OnModuleInit {
     }
   }
 
-  private async goalForFallback(userId: string, sessionId: string): Promise<PrimaryGoal> {
+  private async goalForFallback(userId: string, sessionId: string): Promise<GenerationGoal> {
     try {
       const [session] = await this.db.runAsUser(userId, 'USER', (tx) =>
         tx
-          .select({ primaryGoal: anamnesisSessions.primaryGoal })
+          .select({ dataBlock3: anamnesisSessions.dataBlock3 })
           .from(anamnesisSessions)
           .where(eq(anamnesisSessions.id, sessionId))
           .limit(1),
       );
-      return (session?.primaryGoal as PrimaryGoal | null) ?? 'CONDITIONING';
+      const parsed = anamnesisStructuredSchema.safeParse(session?.dataBlock3);
+      return parsed.success ? toGenerationGoal(parsed.data.primaryGoal) : 'CONDITIONING';
     } catch {
       return 'CONDITIONING';
     }
@@ -306,13 +342,9 @@ interface LoadedContext {
   name: string | null;
   phoneNumber: string;
   email: string | null;
-  primaryGoal: string | null;
   submittedAt: Date | null;
-  injuries: string[];
-  block3: {
-    daysPerWeek: number;
-    sessionMinutes?: number;
-    location?: 'HOME' | 'GYM' | 'BOTH';
-    equipment?: string[];
-  };
+  /** Etapa 2, seções 1/2/3/5 (jsonb em claro). */
+  structured: AnamnesisStructured;
+  /** Bloco cifrado: seção 4, textos livres, PAR-Q e declarações. */
+  health: HealthBlock;
 }

@@ -3,7 +3,7 @@
  *
  * Num browser real, prova que a landing sobe e renderiza o essencial do funil:
  *  - o hero com a proposta de valor;
- *  - o CTA principal para a anamnese (client component `GoalCta`);
+ *  - o CTA principal para a anamnese (client component `StartCta`);
  *  - o respaldo CREF sempre visível (guardrail inegociável de linguagem);
  *  - o alternador de tema fica interativo após hidratar (recado de Felipe: nasce
  *    desabilitado e só assume rótulo/ação depois de montado).
@@ -15,8 +15,12 @@ test('a landing carrega com hero, CTA e respaldo CREF', async ({ page }) => {
 
   await expect(page.getByRole('heading', { level: 1, name: /Treino de verdade/ })).toBeVisible();
 
-  // CTA principal do funil (client component GoalCta): leva à anamnese.
-  await expect(page.getByRole('link', { name: 'Começar agora' })).toBeVisible();
+  // CTA principal do funil (client component StartCta): leva à anamnese, sem coletar
+  // nada de anamnese na landing (o objetivo é perguntado no bloco 1 do formulário).
+  const cta = page.getByRole('link', { name: 'Começar agora' });
+  await expect(cta).toBeVisible();
+  await expect(cta).toHaveAttribute('href', '/anamnese');
+  await expect(page.getByText('Qual é o seu foco agora?')).toHaveCount(0);
 
   // Guardrail de linguagem: o respaldo do profissional CREF é sempre visível.
   await expect(page.getByText(/registrado no CREF/i).first()).toBeVisible();

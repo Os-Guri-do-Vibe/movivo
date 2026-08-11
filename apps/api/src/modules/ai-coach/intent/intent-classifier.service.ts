@@ -53,12 +53,17 @@ export class IntentClassifier {
     const vec = await this.embedding.embed(input.message);
     const knn = await this.repo.classifyByKnn(vec);
     if (knn && knn.confidence >= KNN_MIN_CONFIDENCE && isIntent(knn.intent)) {
-      return { intent: knn.intent, confidence: knn.confidence, stage: 'KNN', safetyHandoff: false };
+      return {
+        intent: knn.intent,
+        confidence: knn.confidence,
+        stage: 'KNN',
+        safetyHandoff: isEmergency(knn.intent),
+      };
     }
 
     // Etapa 2 — fallback nano (só os ambíguos).
     const intent = await this.fallback(input);
-    return { intent, confidence: 0.5, stage: 'FALLBACK', safetyHandoff: false };
+    return { intent, confidence: 0.5, stage: 'FALLBACK', safetyHandoff: isEmergency(intent) };
   }
 
   private async fallback(input: ClassifyInput): Promise<Intent> {
@@ -69,13 +74,21 @@ export class IntentClassifier {
       dataClass: 'HEALTH',
       system:
         'Classifique a mensagem do usuário em UMA destas intenções e responda só com o rótulo, ' +
-        `sem mais nada: ${INTENTS.join(', ')}.`,
+        `sem mais nada: ${INTENTS.join(', ')}. ` +
+        'Use EMERGENCIA_CLINICA sempre que houver qualquer sinal de risco à saúde ou à vida ' +
+        '(dor anormal, sintoma cardíaco/neurológico, desmaio, automutilação) — na dúvida entre ' +
+        'EMERGENCIA_CLINICA e outra intenção, escolha EMERGENCIA_CLINICA.',
       messages: [{ role: 'user', content: wrapUserMessage(input.message) }],
       maxTokens: 20,
       intent: 'intent_classification',
     });
     return parseIntent(result.text);
   }
+}
+
+/** Único ponto que decide handoff de segurança fora do guardrail regex (Etapa 0). */
+function isEmergency(intent: Intent): boolean {
+  return intent === 'EMERGENCIA_CLINICA';
 }
 
 /** Extrai um rótulo conhecido da saída do nano; desconhecido → `FORA_DE_ESCOPO` (fail-safe). */

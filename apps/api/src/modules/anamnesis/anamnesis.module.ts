@@ -28,6 +28,7 @@ import { AnamnesisController } from './anamnesis.controller';
 import { AnamnesisService } from './anamnesis.service';
 import { ConsentController } from './consent.controller';
 import { ConsentService } from './consent.service';
+import { PhoneVerificationService } from './phone-verification.service';
 
 /**
  * US-1.2 (CONSENT) e US-1.3 (FormSession + gate PAR-Q) vivem no mesmo bounded
@@ -45,7 +46,7 @@ import { ConsentService } from './consent.service';
     JobsModule,
   ],
   controllers: [ConsentController, AnamnesisController],
-  providers: [ConsentService, AnamnesisService],
+  providers: [ConsentService, AnamnesisService, PhoneVerificationService],
   exports: [ConsentService, AnamnesisService],
 })
 export class AnamnesisModule {}

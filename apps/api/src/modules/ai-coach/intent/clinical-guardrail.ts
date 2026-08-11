@@ -26,12 +26,37 @@ const SAFETY_PATTERNS: RegExp[] = [
   /\bme\s+matar\b|\bsuic[ií]d|\bautomutila/i,
 ];
 
-/** Fora do escopo do coach (não é emergência) → recusa honesta. */
+/**
+ * Fora do escopo do coach (não é emergência) → recusa honesta.
+ *
+ * v2 (2026-08): o perímetro do coach é treino/evolução/performance segura. As categorias
+ * abaixo cobrem os desvios mais baratos de pegar por regex antes de gastar embedding/LLM; o
+ * resto cai no kNN (`intent-examples.seed.ts`) e no fail-safe do classificador (rótulo
+ * desconhecido → FORA_DE_ESCOPO). ponytail: regex de palavra-chave, não NLU — falso-negativo
+ * aqui não é falha de segurança, só custo de um LLM a mais com o mesmo guardrail no prompt.
+ */
 const SCOPE_PATTERNS: RegExp[] = [
+  // --- medicamento / suplemento / nutrição (v1) ---
   /\brem[eé]dio\b|\bmedicamento\b|\banti-?inflamat[oó]rio\b/i,
   /\b(dipirona|ibuprofeno|tramadol|rivotril|clonazepam|morfina|omeprazol)\b/i,
   /\bsuplement|\bcreatina\b|\bwhey\b|\btermog[eê]nico\b|\bemagrecedor\b/i,
-  /\bdieta\b|\bo\s+que\s+(devo|posso)\s+comer\b|\bcard[aá]pio\b/i,
+  /\bdieta\b|\bo\s+que\s+(devo|posso)\s+comer\b|\bcard[aá]pio\b|\bcaloria|\bmacronutriente|\bjejum\s+intermitente\b/i,
+  // --- outras áreas de saúde não relacionadas a treino ---
+  /\b(dermatologi|espinha|acne|queda\s+de\s+cabelo|celulite|bot[oó]x|preenchiment|lipoaspira|cirurgia\s+pl[áa]stica)/i,
+  /\b(anticoncepcion|gravidez|menstrua|fertilidade|dst\b|infec[çc][ãa]o)/i,
+  /\b(terapia|psic[oó]log|psiquiatr|antidepressiv|ansiedade\s+generalizada)/i,
+  // --- vida pessoal / relacionamento ---
+  /\b(namorad[oa]|ex\s+namorad|casamento|term(inei|inar)\s+com|relacionament[oa]\s+(amoroso|t[óo]xico)|conselho\s+amoroso)/i,
+  // --- finanças, política, religião, notícias ---
+  /\b(investir|investiment|a[çc][õo]es\s+da\s+bolsa|bitcoin|cripto|empr[ée]stimo|d[íi]vida|imposto\s+de\s+renda)\b/i,
+  /\b(elei[çc][ãa]o|eleitoral|presidente|deputad|partido\s+pol[íi]tico|votar\s+em)\b/i,
+  /\b(religi[ãa]o|deus\s+existe|igreja|hor[óo]scopo|signo)\b/i,
+  // --- pedidos genéricos de IA / tentativa de sair do papel de coach de treino ---
+  // objeto explícito: "resuma meu progresso" é treino e NÃO pode cair aqui.
+  /\b(escrev[ae]|redij[ae]|traduz[ae]?|resum[ae])\s+(um|uma|esse|este|essa)?\s*(texto|e-?mail|artigo|reda[çc][ãa]o|post|legenda|mensagem\s+para)\b/i,
+  /\b(c[óo]digo|programa[çc][ãa]o|javascript|python|planilha|curr[íi]culo|reda[çc][ãa]o\s+do\s+enem)\b/i,
+  /\b(finja|faz\s+de\s+conta|finge)\s+que\s+voc[êe]\b|\besque[çc]a\s+que\s+voc[êe]\s+[ée]\b/i,
+  /\bvoc[êe]\s+[ée]\s+(um|uma)\s+(m[ée]dic|nutricionist|advogad|terapeuta)/i,
 ];
 
 /** `SAFETY` | `SCOPE` | `null` (segue para classificação normal). SAFETY tem prioridade. */

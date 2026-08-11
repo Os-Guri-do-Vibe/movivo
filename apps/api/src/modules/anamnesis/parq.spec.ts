@@ -4,13 +4,13 @@
  * A regra é: "Sim" em QUALQUER Q1..Q9 bloqueia. São 9 gatilhos. Estes testes são a
  * prova de que a trava não vira flag por regressão.
  */
-import { PARQ_QUESTION_IDS, PARQ_VERSION, ParqState, type AnamnesisBlock2 } from '@movivo/shared';
+import { PARQ_QUESTION_IDS, PARQ_VERSION, ParqState, type Parq } from '@movivo/shared';
 import { describe, expect, it } from 'vitest';
 
 import { evaluateParq } from './parq';
 
-/** Bloco 2 com todas as respostas "Não", exceto os ids passados como "Sim". */
-function block2(...yes: string[]): AnamnesisBlock2 {
+/** Bloco de saúde com todas as respostas "Não", exceto os ids passados como "Sim". */
+function block2(...yes: string[]): { parq: Parq } {
   return {
     parq: {
       version: PARQ_VERSION,

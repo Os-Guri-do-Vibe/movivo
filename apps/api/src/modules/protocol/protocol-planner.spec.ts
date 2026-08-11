@@ -12,8 +12,10 @@ const constraints: UserConstraints = {
   goal: 'GAIN_MUSCLE',
   level: 'INICIANTE',
   daysPerWeek: 3,
-  location: 'BOTH',
+  location: 'FULL_GYM',
   equipment: [],
+  emphasis: [],
+  avoid: [],
   injuryTags: [],
   injuriesRaw: [],
 };

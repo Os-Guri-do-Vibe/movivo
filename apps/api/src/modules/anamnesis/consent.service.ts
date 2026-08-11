@@ -15,7 +15,12 @@
  *     RLS da US-1.1 já não concede DELETE em `consents` a ninguém).
  */
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { CONSENT_TEXTS, type ConsentTypeWithText, type RecordConsentInput } from '@movivo/shared';
+import {
+  CONSENT_TEXTS,
+  isRevocableConsent,
+  type ConsentTypeWithText,
+  type RecordConsentInput,
+} from '@movivo/shared';
 import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 
 import { TenantDatabase, type TenantTransaction } from '../../core/database';
@@ -122,8 +127,50 @@ export class ConsentService {
     return rows.length > 0;
   }
 
-  /** Revogação (LGPD art. 8º, §5º): carimba `revoked_at`, jamais apaga a linha. */
+  /**
+   * Consentimentos aceitos e não revogados nesta sessão anônima, na versão vigente.
+   *
+   * É o que a Etapa 1 usa para decidir se o `CONTINUAR` passa (US-6.4). Compara a
+   * versão porque um aceite de texto antigo não prova consentimento ao texto novo.
+   */
+  async acceptedTypesForSession(sessionId: string): Promise<ConsentTypeWithText[]> {
+    const rows = await this.db.runAsTokenScoped(sessionId, (tx) =>
+      tx
+        .select({ type: consents.consentType, version: consents.version })
+        .from(consents)
+        .where(
+          and(
+            eq(consents.anamnesisSessionId, sessionId),
+            eq(consents.accepted, true),
+            isNull(consents.revokedAt),
+          ),
+        ),
+    );
+
+    return rows
+      .filter((row) => {
+        const text = CONSENT_TEXTS[row.type as ConsentTypeWithText] as
+          | { version: string }
+          | undefined;
+        return text?.version === row.version;
+      })
+      .map((row) => row.type as ConsentTypeWithText);
+  }
+
+  /**
+   * Revogação (LGPD art. 8º, §5º): carimba `revoked_at`, jamais apaga a linha.
+   *
+   * `AI_DISCLOSURE` e `TERMS_OF_SERVICE` **não são revogáveis** (Alexandre §5.4/§5.8):
+   * o primeiro é ciência (uma ciência não se desfaz), o segundo equivale a cancelar a
+   * assinatura. A regra é do serviço, não da UI — esconder o botão não é controle. O
+   * banco recusa de novo, em `revoke_non_health_consent` (defesa em profundidade).
+   */
   async revoke(userId: string, type: ConsentTypeWithText): Promise<void> {
+    if (!isRevocableConsent(type)) {
+      throw new BadRequestException(
+        `${type} não é revogável: é registro de ciência/contrato, não autorização.`,
+      );
+    }
     await this.db.runAsUser(userId, 'USER', async (tx) => {
       if (type === 'HEALTH_DATA') {
         await tx.execute(sql`SELECT public.revoke_health_data_consent(${userId}::uuid)`);

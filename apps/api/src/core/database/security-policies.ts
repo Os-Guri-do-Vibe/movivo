@@ -110,6 +110,8 @@ const SESSION = `nullif(current_setting('app.current_anamnesis_session_id', true
 const HEALTH_CONSENT_VERSION = CONSENT_TEXTS.HEALTH_DATA.version.replaceAll("'", "''");
 const MARKETING_CONSENT_VERSION = CONSENT_TEXTS.MARKETING.version.replaceAll("'", "''");
 const TERMS_CONSENT_VERSION = CONSENT_TEXTS.TERMS_OF_SERVICE.version.replaceAll("'", "''");
+/** Sprint 6 (Alexandre §5.4): ciência do uso de IA — mesmo mecanismo de prova, não revogável. */
+const AI_DISCLOSURE_VERSION = CONSENT_TEXTS.AI_DISCLOSURE.version.replaceAll("'", "''");
 
 /** Nomes de política determinísticos por tabela (permite DROP idempotente). */
 function policyNames(table: string) {
@@ -337,6 +339,11 @@ export function buildProfessionalAccessSql(appRole: string): string {
       IF target_type = 'HEALTH_DATA'::public.consent_type THEN
         RAISE EXCEPTION 'health consent requires dedicated revocation' USING ERRCODE = '22023';
       END IF;
+      -- Alexandre §5.8, regra nova 1: AI_DISCLOSURE e' ciencia, nao autorizacao. Uma
+      -- ciencia nao se desfaz. A recusa vive tambem no banco, e nao so no servico.
+      IF target_type = 'AI_DISCLOSURE'::public.consent_type THEN
+        RAISE EXCEPTION 'ai disclosure is not revocable' USING ERRCODE = '22023';
+      END IF;
       UPDATE public.consents SET revoked_at = now(), updated_at = now()
       WHERE user_id = target_user AND consent_type = target_type
         AND accepted = true AND revoked_at IS NULL;
@@ -403,6 +410,7 @@ export function buildProfessionalAccessSql(appRole: string): string {
         WHEN 'HEALTH_DATA'::public.consent_type THEN '${HEALTH_CONSENT_VERSION}'
         WHEN 'MARKETING'::public.consent_type THEN '${MARKETING_CONSENT_VERSION}'
         WHEN 'TERMS_OF_SERVICE'::public.consent_type THEN '${TERMS_CONSENT_VERSION}'
+        WHEN 'AI_DISCLOSURE'::public.consent_type THEN '${AI_DISCLOSURE_VERSION}'
       END;
       IF target_version IS DISTINCT FROM expected_version THEN
         RAISE EXCEPTION 'current consent version required' USING ERRCODE = '22023';

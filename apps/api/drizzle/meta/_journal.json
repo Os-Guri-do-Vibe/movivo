@@ -120,6 +120,13 @@
       "when": 1785808385915,
       "tag": "0016_small_ego",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1786415539763,
+      "tag": "0017_onboarding_v2",
+      "breakpoints": true
     }
   ]
 }

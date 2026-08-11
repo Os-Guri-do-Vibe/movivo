@@ -52,13 +52,22 @@ const genResult: GenerateProtocolResult = {
   unknownExerciseIds: [],
 };
 
-function block2Json(injuries: string[] = ['joelho']) {
+/** Bloco cifrado da anamnese v2: seção 4 (dor), textos livres, PAR-Q e declarações. */
+function block2Json(painRegion: 'KNEE' | 'SHOULDER' | null = 'KNEE') {
   return JSON.stringify({
+    pain: painRegion
+      ? { hasPain: true, trend: 'STABLE', points: [{ region: painRegion, intensity: 5 }] }
+      : { hasPain: false, points: [] },
+    freeText: {},
     parq: {
       version: PARQ_VERSION,
       answers: PARQ_QUESTION_IDS.map((questionId) => ({ questionId, answer: false })),
     },
-    injuries,
+    declarations: {
+      version: 'parq-declaracoes-2026-08-v1',
+      accepted: ['TRUTHFUL', 'WILL_REPORT_CHANGES', 'MAY_REQUIRE_REVIEW'],
+      acceptedAt: '2026-08-10T12:00:00.000Z',
+    },
   });
 }
 
@@ -76,10 +85,24 @@ function userRow(over: Record<string, unknown> = {}) {
 function sessionRow(over: Record<string, unknown> = {}) {
   return {
     id: 's1',
-    primaryGoal: 'GAIN_MUSCLE',
     submittedAt: new Date(Date.now() - 60_000),
     dataBlock2: Buffer.from('cipher'),
-    dataBlock3: { daysPerWeek: 3, location: 'HOME', equipment: ['halteres'] },
+    dataBlock3: {
+      primaryGoal: 'GAIN_MUSCLE',
+      emphasis: [],
+      hasImportantEvent: false,
+      trainingStatus: 'REGULAR',
+      experience: 'INTERMEDIATE',
+      pastActivities: [],
+      consistencyBarriers: [],
+      daysPerWeek: 3,
+      preferredDays: [],
+      sessionDuration: 'M45_TO_60',
+      location: 'HOME',
+      preferredPeriod: 'MORNING',
+      practicesOtherSport: false,
+      hasAvoidedExercise: false,
+    },
     ...over,
   };
 }

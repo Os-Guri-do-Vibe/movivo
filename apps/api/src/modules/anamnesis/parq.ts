@@ -7,7 +7,7 @@
  *
  * Sem IA (regra §12.4/§12.5). Sem linguagem de diagnóstico no retorno — só o estado.
  */
-import { ParqState, type AnamnesisBlock2, type ParqQuestionId } from '@movivo/shared';
+import { ParqState, type Parq, type ParqQuestionId } from '@movivo/shared';
 
 export interface ParqEvaluation {
   parqState: ParqState;
@@ -17,12 +17,12 @@ export interface ParqEvaluation {
 }
 
 /**
- * Avalia o PAR-Q do bloco 2. Qualquer resposta `answer === true` ("Sim") bloqueia.
+ * Avalia o PAR-Q do bloco cifrado. Qualquer resposta `answer === true` ("Sim") bloqueia.
  * `BLOQUEADO_AGUARDANDO_CLEARANCE` é uma TRAVA: impede geração automática de
  * protocolo (nem na Sprint 2). O desbloqueio é ato humano do RT.
  */
-export function evaluateParq(block2: AnamnesisBlock2): ParqEvaluation {
-  const triggeredQuestions = block2.parq.answers
+export function evaluateParq(block: { parq: Parq }): ParqEvaluation {
+  const triggeredQuestions = block.parq.answers
     .filter((a) => a.answer === true)
     .map((a) => a.questionId);
 

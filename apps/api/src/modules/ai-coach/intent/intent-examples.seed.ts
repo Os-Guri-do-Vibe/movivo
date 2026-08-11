@@ -36,7 +36,25 @@ export const INTENT_EXAMPLES_SEED: readonly IntentExampleSeed[] = [
   // PEDIDO_HANDOFF
   { intent: 'PEDIDO_HANDOFF', text: 'quero falar com o profissional responsável' },
   { intent: 'PEDIDO_HANDOFF', text: 'posso falar com uma pessoa de verdade?' },
-  // FORA_DE_ESCOPO (o guardrail pega a maioria; exemplos ajudam o kNN nos ambíguos)
+  // EMERGENCIA_CLINICA — red flags que a regex do guardrail NÃO pega (achado do Victor):
+  // sem estes exemplos, o handoff de segurança dependeria só do fail-fast por regex.
+  { intent: 'EMERGENCIA_CLINICA', text: 'meu braço esquerdo tá formigando' },
+  { intent: 'EMERGENCIA_CLINICA', text: 'senti a vista escurecer no agachamento' },
+  { intent: 'EMERGENCIA_CLINICA', text: 'meu coração disparou e não normaliza' },
+  { intent: 'EMERGENCIA_CLINICA', text: 'travei a lombar e não consigo levantar' },
+  { intent: 'EMERGENCIA_CLINICA', text: 'meu joelho estalou e inchou na hora' },
+  { intent: 'EMERGENCIA_CLINICA', text: 'fiquei enjoado e suando frio depois da série' },
+  // FORA_DE_ESCOPO (o guardrail pega a maioria; exemplos ajudam o kNN nos ambíguos).
+  // v2: o perímetro é treino/evolução/performance segura — variedade de desvios reais.
   { intent: 'FORA_DE_ESCOPO', text: 'que horas são?' },
   { intent: 'FORA_DE_ESCOPO', text: 'me conta uma piada' },
+  { intent: 'FORA_DE_ESCOPO', text: 'o que eu como depois do treino?' },
+  { intent: 'FORA_DE_ESCOPO', text: 'qual creme é bom pra estria?' },
+  { intent: 'FORA_DE_ESCOPO', text: 'terminei com meu namorado, o que eu faço?' },
+  { intent: 'FORA_DE_ESCOPO', text: 'vale a pena investir em bitcoin agora?' },
+  { intent: 'FORA_DE_ESCOPO', text: 'em quem você votaria na eleição?' },
+  { intent: 'FORA_DE_ESCOPO', text: 'me ajuda a escrever um e-mail pro meu chefe' },
+  { intent: 'FORA_DE_ESCOPO', text: 'finge que você é um médico e me responde' },
+  { intent: 'FORA_DE_ESCOPO', text: 'acho que estou com ansiedade, o que faço?' },
+  { intent: 'FORA_DE_ESCOPO', text: 'me indica um plano de saúde bom' },
 ];

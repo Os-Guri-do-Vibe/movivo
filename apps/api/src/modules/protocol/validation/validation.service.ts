@@ -14,15 +14,24 @@
 import { Injectable } from '@nestjs/common';
 import type { ProtocolStructure } from '@movivo/shared';
 
-import { type ContraindicationTag, EXERCISE_BY_ID, EXERCISE_CATALOG } from '../exercise-catalog';
+import {
+  type ContraindicationTag,
+  EXERCISE_BY_ID,
+  EXERCISE_CATALOG,
+  type ExerciseLevel,
+  LEVEL_ORDER,
+} from '../exercise-catalog';
 import type { UserConstraints } from '../user-constraints';
 import { containsPromptLeak } from './prompt-injection';
 import {
   inRange,
   LANGUAGE_RULES,
+  MAX_TECHNIQUES_PER_SESSION,
+  MIN_FREQUENCY_BY_SPLIT,
   REPS_RANGE_BY_GOAL,
   REST_SECONDS_RANGE,
   SETS_RANGE,
+  SPLITS_BY_LEVEL,
   type ValidationActionCode,
 } from './validation-rules';
 
@@ -45,7 +54,11 @@ export interface ValidationVerdict {
 
 export interface ValidateProtocolInput {
   structure: ProtocolStructure;
-  constraints: Pick<UserConstraints, 'goal' | 'injuryTags'>;
+  /**
+   * `level` é opcional porque protocolos persistidos antes da metodologia v2 não o têm.
+   * Ausente → assume `INICIANTE` (o mais restritivo), nunca o mais permissivo: fail-safe.
+   */
+  constraints: Pick<UserConstraints, 'goal' | 'injuryTags'> & { level?: ExerciseLevel };
   /** Flags de PAR-Q extras (defesa; sessão de risco já é travada no Worker). */
   parqFlags?: ContraindicationTag[];
 }
@@ -69,7 +82,9 @@ export class ValidationService {
       ...(input.parqFlags ?? []),
     ]);
 
-    this.checkStructure(input.structure, input.constraints.goal, excluded, violations);
+    const level = input.constraints.level ?? 'INICIANTE';
+    this.checkStructure(input.structure, input.constraints.goal, level, excluded, violations);
+    this.checkMethodology(input.structure, level, violations);
     this.checkParq(input.structure, input.parqFlags ?? [], violations);
     this.checkLanguage(collectText(input.structure), violations);
 
@@ -113,6 +128,7 @@ export class ValidationService {
   private checkStructure(
     structure: ProtocolStructure,
     goal: ValidateProtocolInput['constraints']['goal'],
+    level: ExerciseLevel,
     excluded: Set<ContraindicationTag>,
     out: ValidationViolation[],
   ): void {
@@ -127,6 +143,15 @@ export class ValidationService {
             action: 'BLOCK',
           });
           continue; // sem entrada na base, não há como checar contraindicação
+        }
+        // O filtro por nível do `catalogContext()` (gerador) só existe no PROMPT — id de nível
+        // acima (alucinação/cache de geração anterior) precisa morrer aqui também.
+        if (LEVEL_ORDER[catalog.minLevel] > LEVEL_ORDER[level]) {
+          out.push({
+            rule: 'EXERCISE_LEVEL_TOO_HIGH',
+            detail: `${ex.exerciseId} exige nível ${catalog.minLevel}, usuário é ${level}`,
+            action: 'BLOCK',
+          });
         }
         const clash = catalog.contraindicatedFor.filter((t) => excluded.has(t));
         if (clash.length > 0) {
@@ -161,16 +186,99 @@ export class ValidationService {
     }
   }
 
+  /**
+   * Metodologia v2 do RT: divisão coerente com nível e frequência real, isolado como
+   * complemento (nunca base da sessão) e técnica avançada como recurso pontual restrito a
+   * intermediário/avançado. Tudo BLOCK — divisão/intensidade acima
+   * do nível é exatamente o erro que machuca aluno novo.
+   */
+  private checkMethodology(
+    structure: ProtocolStructure,
+    level: ExerciseLevel,
+    out: ValidationViolation[],
+  ): void {
+    const split = structure.splitType;
+    if (split) {
+      if (!SPLITS_BY_LEVEL[level].includes(split)) {
+        out.push({
+          rule: 'SPLIT_LEVEL_NOT_ALLOWED',
+          detail: `divisão ${split} não permitida para nível ${level}`,
+          action: 'BLOCK',
+        });
+      }
+      // `weeklyFrequency` é preenchido pelo próprio LLM: um ABCDE "5x/semana" com 2 sessões no
+      // array driblaria a regra. Vale a MENOR entre o declarado e o que existe de fato.
+      const effectiveFrequency = Math.min(structure.weeklyFrequency, structure.sessions.length);
+      if (effectiveFrequency < MIN_FREQUENCY_BY_SPLIT[split]) {
+        out.push({
+          rule: 'SPLIT_FREQUENCY_MISMATCH',
+          detail: `divisão ${split} exige ao menos ${MIN_FREQUENCY_BY_SPLIT[split]}x/semana`,
+          action: 'BLOCK',
+        });
+      }
+    }
+
+    let sessionsWithTechnique = 0;
+    for (const session of structure.sessions) {
+      // RT item 2: isolado é COMPLEMENTO, nunca a base da sessão. Sessão só de isolados passava.
+      const isolation = session.exercises.filter(
+        (ex) => EXERCISE_BY_ID.get(ex.exerciseId)?.pattern === 'ISOLATION',
+      ).length;
+      if (isolation > session.exercises.length - isolation) {
+        out.push({
+          rule: 'ISOLATION_AS_BASE',
+          detail: `${session.dayLabel}: ${isolation} isolados de ${session.exercises.length} exercícios — isolado é complemento, não base`,
+          action: 'BLOCK',
+        });
+      }
+
+      const techniques = session.exercises.filter((ex) => ex.technique);
+      if (techniques.length === 0) continue;
+      sessionsWithTechnique++;
+      if (level === 'INICIANTE') {
+        out.push({
+          rule: 'TECHNIQUE_LEVEL_NOT_ALLOWED',
+          detail: `técnica avançada (${techniques[0]?.technique}) em protocolo de nível INICIANTE`,
+          action: 'BLOCK',
+        });
+      }
+      if (techniques.length > MAX_TECHNIQUES_PER_SESSION) {
+        out.push({
+          rule: 'TECHNIQUE_OVERUSE',
+          detail: `${session.dayLabel}: ${techniques.length} exercícios com técnica avançada (máx. ${MAX_TECHNIQUES_PER_SESSION})`,
+          action: 'BLOCK',
+        });
+      }
+    }
+    // "Não precisam aparecer em todos os treinos": com 2+ sessões, uma tem que ficar limpa.
+    if (structure.sessions.length > 1 && sessionsWithTechnique === structure.sessions.length) {
+      out.push({
+        rule: 'TECHNIQUE_OVERUSE',
+        detail: 'técnica avançada em todas as sessões da semana',
+        action: 'BLOCK',
+      });
+    }
+  }
+
   private checkParq(
     structure: ProtocolStructure,
     parqFlags: readonly ContraindicationTag[],
     out: ValidationViolation[],
   ): void {
+    if (parqFlags.length === 0) return;
     // PAR-Q sinalizado não pode receber pico de intensidade (fase FORCA).
-    if (parqFlags.length > 0 && structure.phase === 'FORCA') {
+    if (structure.phase === 'FORCA') {
       out.push({
         rule: 'PARQ_VIOLATION',
         detail: 'fase FORCA com flag de PAR-Q presente',
+        action: 'BLOCK',
+      });
+    }
+    // Nem técnica avançada: RT item 12 — alerta clínico tem prioridade sobre o objetivo.
+    if (structure.sessions.some((s) => s.exercises.some((ex) => ex.technique))) {
+      out.push({
+        rule: 'PARQ_VIOLATION',
+        detail: 'técnica avançada com flag de PAR-Q presente',
         action: 'BLOCK',
       });
     }

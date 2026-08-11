@@ -3,12 +3,13 @@
  * guardrails e que passa no próprio ValidationService (sem lesões) — um fallback seguro.
  */
 import { describe, expect, it } from 'vitest';
-import { type PrimaryGoal, protocolStructureSchema } from '@movivo/shared';
+import { generationGoalSchema, type GenerationGoal, protocolStructureSchema } from '@movivo/shared';
 
 import { buildFallbackProtocol } from './fallback-template';
 import { ValidationService } from './validation.service';
 
-const GOALS: PrimaryGoal[] = ['GAIN_MUSCLE', 'LOSE_WEIGHT', 'CONDITIONING'];
+// Os 8 objetivos de geração, não uma amostra: o fallback precisa ser válido para TODOS.
+const GOALS: GenerationGoal[] = [...generationGoalSchema.options];
 const service = new ValidationService();
 
 describe('buildFallbackProtocol', () => {

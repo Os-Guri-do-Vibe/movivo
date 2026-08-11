@@ -55,8 +55,10 @@ const constraints: UserConstraints = {
   goal: 'GAIN_MUSCLE',
   level: 'INICIANTE',
   daysPerWeek: 3,
-  location: 'BOTH',
+  location: 'FULL_GYM',
   equipment: ['halteres'],
+  emphasis: [],
+  avoid: [],
   injuryTags: ['KNEE'],
   injuriesRaw: ['dor no joelho'],
 };
@@ -98,6 +100,21 @@ describe('ProtocolGeneratorService', () => {
     expect(req.system).toContain('goblet_squat'); // vocabulário da base
     expect(req.messages[0]?.content).toContain('GAIN_MUSCLE'); // constraints
     expect(req.messages[0]?.content).toContain('KNEE'); // restrição a evitar
+  });
+
+  it('ensina a divisão de treino e a técnica avançada da metodologia v2', async () => {
+    const { service, calls } = makeService([validProtocolJson()]);
+    await service.generate(command);
+    const req = calls[0];
+    if (!req) throw new Error('esperava uma chamada ao LLM');
+    expect(req.system).toContain('splitType'); // schema com divisão
+    expect(req.system).toContain('PUSH_PULL_LEGS');
+    expect(req.system).toContain('technique'); // schema com técnica avançada
+    expect(req.system).toContain('grupos:'); // grupos musculares no catálogo do prompt
+    // O nível do usuário limita as divisões oferecidas (INICIANTE não recebe ABC/ABCDE).
+    const userMessage = req.messages[0]?.content ?? '';
+    expect(userMessage).toContain('Divisões permitidas para este nível: FULL_BODY');
+    expect(userMessage).not.toContain('ABCDE');
   });
 
   it('tolera JSON dentro de cercas de código (```json)', async () => {

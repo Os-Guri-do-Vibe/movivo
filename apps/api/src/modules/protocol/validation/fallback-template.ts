@@ -9,7 +9,7 @@
  *
  * Texto sem termos proibidos (nada de diagnóstico/tratamento/cura/garantia). Schema-válido.
  */
-import type { PrimaryGoal, ProtocolStructure } from '@movivo/shared';
+import type { GenerationGoal, ProtocolStructure } from '@movivo/shared';
 
 export const FALLBACK_TEMPLATE_VERSION = 'fallback-template-2026-07-draft-v1';
 
@@ -22,7 +22,7 @@ const CREF_RESPALDO =
  * Monta um `ProtocolStructure` de fallback válido para o objetivo do usuário. Usa exercícios
  * de baixo risco e faixas conservadoras que passam nas faixas plausíveis do validador.
  */
-export function buildFallbackProtocol(goal: PrimaryGoal): ProtocolStructure {
+export function buildFallbackProtocol(goal: GenerationGoal): ProtocolStructure {
   return {
     promptVersion: FALLBACK_TEMPLATE_VERSION,
     goal,
@@ -37,7 +37,8 @@ export function buildFallbackProtocol(goal: PrimaryGoal): ProtocolStructure {
             exerciseId: 'dead_bug',
             name: 'Dead bug',
             sets: 2,
-            reps: { min: 8, max: 12 },
+            // Faixa que cabe nos 8 objetivos de geração (a mais estreita é GAIN_STRENGTH, 3-10).
+            reps: { min: 8, max: 10 },
             loadStrategy: 'BODYWEIGHT',
             restSeconds: 60,
             notes: 'Movimento controlado, mantendo a lombar apoiada.',
@@ -47,7 +48,8 @@ export function buildFallbackProtocol(goal: PrimaryGoal): ProtocolStructure {
             name: 'Caminhada acelerada',
             sets: 1,
             // Faixa conservadora que passa nas faixas plausíveis de todos os objetivos.
-            reps: { min: 8, max: 12 },
+            // Faixa que cabe nos 8 objetivos de geração (a mais estreita é GAIN_STRENGTH, 3-10).
+            reps: { min: 8, max: 10 },
             loadStrategy: 'BODYWEIGHT',
             restSeconds: 60,
             notes: 'Ritmo confortável em que ainda consegue conversar.',
