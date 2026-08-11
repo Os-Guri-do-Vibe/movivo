@@ -4,7 +4,14 @@ import * as React from 'react';
 
 import { PARQ_DECLARATIONS_VERSION, PARQ_VERSION, type BiologicalSex } from '@movivo/shared';
 
-import { patchStep, recordConsents, submitAnamnesis, type SessionView } from '@/lib/anamnesis-api';
+import {
+  parsePhoneE164,
+  patchStep,
+  recordConsents,
+  submitAnamnesis,
+  toE164,
+  type SessionView,
+} from '@/lib/anamnesis-api';
 import { ProgressBar } from './progress-bar';
 import { Step1Registration, type Step1Data } from './step1-registration';
 import { Step2Anamnesis, EMPTY_STEP2, type Step2State } from './step2-anamnesis';
@@ -15,10 +22,13 @@ import { SuccessScreen } from './success-screen';
 function step1FromServer(raw: unknown): Partial<Step1Data> {
   if (!raw || typeof raw !== 'object') return {};
   const r = raw as Record<string, unknown>;
+  const parsedPhone = typeof r.phoneNumber === 'string' ? parsePhoneE164(r.phoneNumber) : null;
   return {
     name: typeof r.name === 'string' ? r.name : undefined,
     birthDate: typeof r.birthDate === 'string' ? r.birthDate : undefined,
     biologicalSex: (r.biologicalSex as BiologicalSex | undefined) ?? undefined,
+    phoneCountryIso: parsedPhone?.countryIso,
+    phoneMasked: parsedPhone?.phoneMasked,
     email: typeof r.email === 'string' ? r.email : undefined,
   };
 }
@@ -30,13 +40,18 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
   );
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [step2Section, setStep2Section] = React.useState(0);
+  const [step3Screen, setStep3Screen] = React.useState(-1);
+  const [completedStep1Here, setCompletedStep1Here] = React.useState(false);
+  const [completedStep2Here, setCompletedStep2Here] = React.useState(false);
 
   const s1 = step1FromServer(initial.step1);
   const [step1, setStep1] = React.useState<Step1Data>({
     name: s1.name ?? '',
     birthDate: s1.birthDate ?? '',
     biologicalSex: s1.biologicalSex ?? null,
-    phoneMasked: '',
+    phoneCountryIso: s1.phoneCountryIso ?? 'BR',
+    phoneMasked: s1.phoneMasked ?? '',
     email: s1.email ?? '',
   });
   const [acceptedConsents, setAcceptedConsents] = React.useState<Set<string>>(new Set());
@@ -60,9 +75,10 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
         name: step1.name.trim(),
         birthDate: step1.birthDate,
         biologicalSex: step1.biologicalSex,
-        phoneNumber: `+55${step1.phoneMasked.replace(/\D/g, '')}`,
+        phoneNumber: toE164(step1.phoneCountryIso, step1.phoneMasked),
         email: step1.email.trim() || undefined,
       });
+      setCompletedStep1Here(true);
       setStep(2);
     } catch {
       setError('Não conseguimos salvar suas informações. Confira os campos e tente de novo.');
@@ -92,8 +108,7 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
             sessionDuration: step2.sessionDuration,
             location: step2.location,
             preferredPeriod: step2.preferredPeriod,
-            practicesOtherSport: step2.practicesOtherSport,
-            otherSportDaysPerWeek: step2.otherSportDaysPerWeek ?? undefined,
+            practicesOtherSport: false,
             hasAvoidedExercise: step2.hasAvoidedExercise,
           },
           freeText: {
@@ -101,7 +116,6 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
             importantEventDescription: step2.importantEventDescription || undefined,
             pastActivityOther: step2.pastActivityOther || undefined,
             consistencyBarrierOther: step2.consistencyBarrierOther || undefined,
-            otherSportName: step2.otherSportName || undefined,
             avoidedExercise: step2.avoidedExercise || undefined,
           },
         },
@@ -123,6 +137,7 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
             }
           : { hasPain: false, points: [] },
       });
+      setCompletedStep2Here(true);
       setStep(3);
     } catch {
       setError('Não conseguimos salvar suas respostas. Confira os campos e tente de novo.');
@@ -161,15 +176,24 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
   }
 
   return (
-    <div className="flex flex-col gap-8">
-      <ProgressBar currentStep={step} />
-      <p className="text-label text-muted-foreground" role="status">
-        Suas respostas foram salvas — você pode voltar a este link quando quiser, até{' '}
-        {new Date(session.expiresAt).toLocaleDateString('pt-BR')}.
-      </p>
+    <div className="flex flex-col gap-6">
+      <ProgressBar
+        currentStep={step}
+        step2Section={step2Section}
+        step3Context={
+          step3Screen < 0
+            ? 'Introdução'
+            : step3Screen < 9
+              ? `Pergunta ${step3Screen + 1} de 9`
+              : 'Confirmações finais'
+        }
+      />
 
       {error && (
-        <p role="alert" className="rounded-lg bg-destructive/10 p-3 text-label text-destructive">
+        <p
+          role="alert"
+          className="rounded-xl border border-destructive bg-destructive/10 p-3 text-label text-petroleo"
+        >
           {error}
         </p>
       )}
@@ -177,7 +201,17 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
       {step === 1 && (
         <Step1Registration
           data={step1}
-          onChange={setStep1}
+          onChange={(next) => {
+            const previousPhone = toE164(step1.phoneCountryIso, step1.phoneMasked);
+            const nextPhone = toE164(next.phoneCountryIso, next.phoneMasked);
+            setStep1(next);
+            if (
+              (step1.phoneCountryIso !== next.phoneCountryIso || previousPhone !== nextPhone) &&
+              session.phoneVerified
+            ) {
+              setSession((previous) => ({ ...previous, phoneVerified: false }));
+            }
+          }}
           consents={session.consents}
           acceptedConsents={acceptedConsents}
           onToggleConsent={(type, checked) =>
@@ -201,6 +235,9 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
           data={step2}
           onChange={setStep2}
           onContinue={() => void handleStep2Continue()}
+          onBack={completedStep1Here ? () => setStep(1) : undefined}
+          initialSection={step2Section}
+          onSectionChange={setStep2Section}
           saving={saving}
         />
       )}
@@ -219,6 +256,16 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
             })
           }
           onSubmit={() => void handleSubmit()}
+          onBack={
+            completedStep2Here
+              ? () => {
+                  setStep2Section(4);
+                  setStep(2);
+                }
+              : undefined
+          }
+          initialScreen={step3Screen}
+          onScreenChange={setStep3Screen}
           submitting={saving}
         />
       )}

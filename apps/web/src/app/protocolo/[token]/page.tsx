@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
 
 import {
+  PRIMARY_GOAL_LABELS,
   protocolReadSchema,
   type LoadStrategy,
-  type GenerationGoal,
   type ProtocolExercise,
   type ProtocolRead,
   type ProtocolSession,
@@ -33,19 +33,6 @@ const PHASE_LABEL: Record<TrainingPhase, string> = {
   HIPERTROFIA: 'Hipertrofia',
   FORCA: 'Força',
   DELOAD: 'Recuperação (deload)',
-};
-
-// Rótulos dos objetivos de GERAÇÃO (o "Outro" da anamnese nunca chega ao protocolo —
-// é traduzido por `toGenerationGoal` antes de o gerador ver).
-const GOAL_LABEL: Record<GenerationGoal, string> = {
-  GAIN_MUSCLE: 'Ganhar massa muscular',
-  GAIN_STRENGTH: 'Ganhar força',
-  LOSE_FAT: 'Reduzir gordura corporal',
-  CONDITIONING: 'Melhorar o condicionamento físico',
-  HEALTH_ENERGY: 'Saúde e disposição',
-  BUILD_ROUTINE: 'Criar uma rotina de treino',
-  RETURN_TO_TRAINING: 'Voltar a treinar',
-  SPORT_EVENT: 'Preparação para esporte ou evento',
 };
 
 const LOAD_LABEL: Record<LoadStrategy, string> = {
@@ -124,7 +111,7 @@ export default async function ProtocoloPage({ params }: { params: Promise<{ toke
       <main id="conteudo" className="flex flex-1 flex-col gap-10">
         <section className="flex flex-col gap-4">
           <p className="font-mono text-label tracking-wide text-muted-foreground">seu protocolo</p>
-          <h1 className="text-h1 font-bold">{GOAL_LABEL[content.goal] ?? content.goal}</h1>
+          <h1 className="text-h1 font-bold">{PRIMARY_GOAL_LABELS[content.goal] ?? content.goal}</h1>
           <dl className="flex flex-wrap gap-x-8 gap-y-3">
             <div>
               <dt className="text-label text-muted-foreground">Fase atual</dt>

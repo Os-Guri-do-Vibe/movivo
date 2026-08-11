@@ -5,6 +5,18 @@
  * string, ADR-006/Sato §8.1) — mesmo padrão de `subscription-api.ts`.
  */
 import type { OnboardingOutcome } from '@movivo/shared';
+import {
+  AsYouType,
+  getCountries,
+  getCountryCallingCode,
+  getExampleNumber,
+  isPossiblePhoneNumber,
+  isValidPhoneNumber,
+  parsePhoneNumberFromString,
+  validatePhoneNumberLength,
+  type CountryCode,
+} from 'libphonenumber-js';
+import mobilePhoneExamples from 'libphonenumber-js/mobile/examples';
 
 import { publicEnv } from './env';
 
@@ -120,16 +132,82 @@ export function submitAnamnesis(token: string): Promise<SubmitResult> {
   return post<SubmitResult>(`/anamnesis/session/${token}/submit`);
 }
 
-/** Máscara `(xx) xxxxx-xxxx` sobre dígitos livres (celular BR, 11 dígitos). */
-export function maskPhoneBR(digits: string): string {
-  const d = digits.replace(/\D/g, '').slice(0, 11);
-  if (d.length <= 2) return d;
-  if (d.length <= 7) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
-  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+export type PhoneCountryIso = CountryCode;
+
+export interface SupportedPhoneCountry {
+  readonly iso: PhoneCountryIso;
+  readonly name: string;
+  readonly callingCode: string;
+  readonly placeholder: string;
 }
 
-/** `(xx) xxxxx-xxxx` → E.164 (`+55xxxxxxxxxxx`). */
-export function toE164BR(masked: string): string {
-  const d = masked.replace(/\D/g, '');
-  return `+55${d}`;
+const countryNames =
+  typeof Intl.DisplayNames === 'function'
+    ? new Intl.DisplayNames(['pt-BR'], { type: 'region', fallback: 'code' })
+    : null;
+const countryNameCollator = new Intl.Collator('pt-BR', { sensitivity: 'base' });
+
+function buildPhoneCountry(iso: PhoneCountryIso): SupportedPhoneCountry {
+  const example = getExampleNumber(iso, mobilePhoneExamples);
+  return {
+    iso,
+    name: countryNames?.of(iso) ?? iso,
+    callingCode: `+${getCountryCallingCode(iso)}`,
+    placeholder: example?.formatNational() ?? '',
+  };
+}
+
+const DEFAULT_PHONE_COUNTRY = buildPhoneCountry('BR');
+
+/** Brasil primeiro; demais países e territórios em ordem alfabética pt-BR. */
+export const SUPPORTED_PHONE_COUNTRIES: readonly SupportedPhoneCountry[] = [
+  DEFAULT_PHONE_COUNTRY,
+  ...getCountries()
+    .filter((iso) => iso !== 'BR')
+    .map(buildPhoneCountry)
+    .sort((left, right) => countryNameCollator.compare(left.name, right.name)),
+];
+const PHONE_COUNTRIES_BY_ISO = new Map(
+  SUPPORTED_PHONE_COUNTRIES.map((country) => [country.iso, country]),
+);
+
+export function getPhoneCountry(iso: PhoneCountryIso): SupportedPhoneCountry {
+  return PHONE_COUNTRIES_BY_ISO.get(iso) ?? DEFAULT_PHONE_COUNTRY;
+}
+
+/** Formata progressivamente os dígitos nacionais conforme os metadados do país. */
+export function maskNationalPhone(iso: PhoneCountryIso, raw: string): string {
+  const e164Limit = 15 - getCountryCallingCode(iso).length;
+  let digits = raw.replace(/\D/g, '').slice(0, e164Limit);
+
+  while (digits && validatePhoneNumberLength(digits, iso) === 'TOO_LONG') {
+    digits = digits.slice(0, -1);
+  }
+
+  return new AsYouType(iso).input(digits);
+}
+
+export function isPhoneComplete(iso: PhoneCountryIso, masked: string): boolean {
+  const digits = masked.replace(/\D/g, '');
+  return digits.length > 0 && isPossiblePhoneNumber(digits, iso) && isValidPhoneNumber(digits, iso);
+}
+
+/** DDI selecionado + dígitos nacionais → E.164. */
+export function toE164(iso: PhoneCountryIso, masked: string): string {
+  const digits = masked.replace(/\D/g, '');
+  return (
+    parsePhoneNumberFromString(digits, iso)?.number ??
+    `${getPhoneCountry(iso).callingCode}${digits}`
+  );
+}
+
+/** Reidrata o seletor e a máscara a partir do E.164 persistido. */
+export function parsePhoneE164(
+  phoneNumber: string,
+): { countryIso: PhoneCountryIso; phoneMasked: string } | null {
+  if (!/^\+[1-9]\d{1,14}$/.test(phoneNumber) || !isPossiblePhoneNumber(phoneNumber)) return null;
+
+  const parsed = parsePhoneNumberFromString(phoneNumber, { extract: false });
+  if (!parsed?.country) return null;
+  return { countryIso: parsed.country, phoneMasked: parsed.formatNational() };
 }

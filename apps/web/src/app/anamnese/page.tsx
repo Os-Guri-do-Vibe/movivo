@@ -29,7 +29,7 @@ export default function AnamneseBootstrapPage() {
   }, [router]);
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col items-center justify-center gap-4 px-6 text-center">
+    <main className="onboarding-light mx-auto flex min-h-dvh w-full max-w-none flex-col items-center justify-center gap-4 bg-white px-6 text-center text-foreground">
       {error ? (
         <>
           <h1 className="text-h2 font-semibold">Não conseguimos começar agora</h1>

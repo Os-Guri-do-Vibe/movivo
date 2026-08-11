@@ -18,6 +18,7 @@
   ],
   "sideEffects": false,
   "scripts": {
+    "dev": "tsc -b tsconfig.json --watch --preserveWatchOutput",
     "build": "tsc -b tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit --emitDeclarationOnly false",
     "test": "vitest run",

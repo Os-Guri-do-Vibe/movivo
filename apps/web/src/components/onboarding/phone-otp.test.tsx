@@ -46,6 +46,48 @@ describe('PhoneOtp', () => {
     await waitFor(() => expect(onVerified).toHaveBeenCalled());
   });
 
+  it('permite colar o código, filtra a pontuação e mantém um único input real', async () => {
+    const user = userEvent.setup();
+    verifyPhoneCode.mockResolvedValue({ phoneVerified: true });
+    render(<PhoneOtp token="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
+    await waitFor(() => expect(sendPhoneCode).toHaveBeenCalled());
+
+    const input = screen.getByLabelText(/código de verificação/i);
+    expect(input).toHaveAttribute('autocomplete', 'one-time-code');
+    expect(screen.getAllByRole('textbox')).toHaveLength(1);
+    await user.click(input);
+    expect(screen.getByTestId('otp-caret')).toHaveTextContent('|');
+    expect(screen.getByTestId('otp-caret')).toHaveClass('animate-[pulse_1s_steps(2,end)_infinite]');
+    await user.paste('12 34-56');
+
+    await waitFor(() => expect(verifyPhoneCode).toHaveBeenCalledWith('tok', '123456'));
+  });
+
+  it('permite selecionar qualquer quadrado e move o cursor visual para ele', async () => {
+    const user = userEvent.setup();
+    render(<PhoneOtp token="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
+    await waitFor(() => expect(sendPhoneCode).toHaveBeenCalled());
+
+    await user.click(screen.getByTestId('otp-slot-4'));
+
+    expect(screen.getByTestId('otp-slot-4')).toHaveClass('ring-2');
+    expect(screen.getByTestId('otp-slot-4')).toContainElement(screen.getByTestId('otp-caret'));
+    expect(screen.getByLabelText(/código de verificação/i)).toHaveFocus();
+  });
+
+  it('substitui um dígito ao selecionar seu quadrado', async () => {
+    const user = userEvent.setup();
+    render(<PhoneOtp token="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
+    await waitFor(() => expect(sendPhoneCode).toHaveBeenCalled());
+    const input = screen.getByLabelText(/código de verificação/i);
+
+    await user.type(input, '123');
+    await user.click(screen.getByTestId('otp-slot-1'));
+    await user.keyboard('9');
+
+    expect(input).toHaveValue('193');
+  });
+
   it('código incorreto mostra erro e limpa o campo', async () => {
     const user = userEvent.setup();
     verifyPhoneCode.mockRejectedValue(new AnamnesisApiError(400, []));

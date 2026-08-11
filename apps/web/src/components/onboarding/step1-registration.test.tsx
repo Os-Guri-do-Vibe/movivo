@@ -3,10 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('./phone-otp', () => ({
-  PhoneOtp: ({ onVerified }: { onVerified: () => void }) => (
-    <button type="button" onClick={onVerified}>
-      simular verificação
-    </button>
+  PhoneOtp: ({ phoneNumber, onVerified }: { phoneNumber: string; onVerified: () => void }) => (
+    <div>
+      <span data-testid="otp-phone">{phoneNumber}</span>
+      <button type="button" onClick={onVerified}>
+        simular verificação
+      </button>
+    </div>
   ),
 }));
 
@@ -36,6 +39,7 @@ const VALID_DATA: Step1Data = {
   name: 'Fulano de Tal',
   birthDate: '1990-01-01',
   biologicalSex: 'MALE',
+  phoneCountryIso: 'BR',
   phoneMasked: '(11) 99999-9999',
   email: '',
 };
@@ -59,6 +63,14 @@ function renderStep1(overrides: Partial<Parameters<typeof Step1Registration>[0]>
 }
 
 describe('Step1Registration', () => {
+  it('usa a mesma tipografia e o mesmo espaçamento das demais perguntas no legend', () => {
+    renderStep1();
+    const legend = screen.getByText('Qual é o seu sexo biológico?');
+    expect(legend.tagName).toBe('LEGEND');
+    expect(legend).toHaveClass('text-body', 'font-semibold', 'text-foreground');
+    expect(legend.nextElementSibling).toHaveClass('mt-2');
+  });
+
   it('mostra a mensagem exata de bloqueio para menores de 18', () => {
     renderStep1({ data: { ...VALID_DATA, birthDate: '2015-01-01' } });
     expect(
@@ -66,15 +78,15 @@ describe('Step1Registration', () => {
     ).toBeInTheDocument();
   });
 
-  it('CONTINUAR fica desabilitado com consentimento obrigatório pendente', () => {
+  it('Continuar fica desabilitado com consentimento obrigatório pendente', () => {
     renderStep1({ acceptedConsents: new Set() });
-    expect(screen.getByRole('button', { name: 'CONTINUAR' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled();
   });
 
-  it('CONTINUAR habilita quando tudo está completo e chama onContinue', async () => {
+  it('Continuar habilita quando tudo está completo e chama onContinue', async () => {
     const user = userEvent.setup();
     const props = renderStep1();
-    const button = screen.getByRole('button', { name: 'CONTINUAR' });
+    const button = screen.getByRole('button', { name: 'Continuar' });
     expect(button).toBeEnabled();
     await user.click(button);
     expect(props.onContinue).toHaveBeenCalled();
@@ -82,12 +94,35 @@ describe('Step1Registration', () => {
 
   it('sem verificação de telefone, CONTINUAR fica desabilitado', () => {
     renderStep1({ phoneVerified: false });
-    expect(screen.getByRole('button', { name: 'CONTINUAR' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled();
+  });
+
+  it('envia ao OTP o E.164 do país selecionado', () => {
+    renderStep1({
+      phoneVerified: false,
+      data: { ...VALID_DATA, phoneCountryIso: 'PT', phoneMasked: '912 345 678' },
+    });
+    expect(screen.getByTestId('otp-phone')).toHaveTextContent('+351912345678');
+  });
+
+  it('troca país e número mascarado de forma atômica', async () => {
+    const user = userEvent.setup();
+    const props = renderStep1();
+    await user.click(screen.getByRole('button', { name: /Brasil, \+55/i }));
+    await user.click(screen.getByRole('option', { name: /Portugal, DDI \+351/i }));
+    expect(props.onChange).toHaveBeenCalledWith({
+      ...VALID_DATA,
+      phoneCountryIso: 'PT',
+      phoneMasked: '119999999',
+    });
   });
 
   it('exibe o aviso operacional do WhatsApp (não é checkbox)', () => {
     renderStep1();
-    expect(screen.getByText('Como a MOVIVO fala com você')).toBeInTheDocument();
+    const title = screen.getByText('Como a MOVIVO fala com você');
+    expect(title).toBeInTheDocument();
+    expect(title.parentElement).toHaveClass('border-coral', 'bg-coral/10');
+    expect(title.parentElement).not.toHaveClass('border-border', 'bg-secondary');
     expect(screen.queryByLabelText(/mensagens operacionais/i)).not.toBeInTheDocument();
   });
 });

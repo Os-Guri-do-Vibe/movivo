@@ -19,7 +19,17 @@ import {
   type Weekday,
 } from '@movivo/shared';
 
-import { ChoiceGroup, FieldLabel, TextArea, TextInput, YesNo } from './fields';
+import {
+  ChoiceGroup,
+  Combobox,
+  FieldLabel,
+  QuestionField,
+  QuestionStack,
+  TextArea,
+  TextInput,
+  YesNo,
+} from './fields';
+import { DatePicker } from './date-picker';
 import { EMPTY_PAIN, PainSection, type PainData } from './pain-section';
 
 export interface Step2State {
@@ -29,7 +39,6 @@ export interface Step2State {
   hasImportantEvent: boolean;
   importantEventDate: string;
   importantEventDescription: string;
-
   trainingStatus: TrainingStatus | null;
   stoppedFor: StoppedFor | null;
   experience: TrainingExperience | null;
@@ -37,19 +46,13 @@ export interface Step2State {
   pastActivityOther: string;
   consistencyBarriers: ConsistencyBarrier[];
   consistencyBarrierOther: string;
-
   daysPerWeek: number | null;
   preferredDays: Weekday[];
   sessionDuration: SessionDuration | null;
   location: TrainingLocation | null;
   preferredPeriod: PreferredPeriod | null;
-  practicesOtherSport: boolean;
-  otherSportDaysPerWeek: number | null;
-  otherSportName: string;
-
   hasAvoidedExercise: boolean;
   avoidedExercise: string;
-
   pain: PainData;
 }
 
@@ -72,31 +75,53 @@ export const EMPTY_STEP2: Step2State = {
   sessionDuration: null,
   location: null,
   preferredPeriod: null,
-  practicesOtherSport: false,
-  otherSportDaysPerWeek: null,
-  otherSportName: '',
   hasAvoidedExercise: false,
   avoidedExercise: '',
   pain: EMPTY_PAIN,
 };
 
-const GOAL_ITEMS = (Object.keys(PRIMARY_GOAL_LABELS) as PrimaryGoal[]).map((value) => ({
+const GOAL_OPTION_VALUES = [
+  'GAIN_MUSCLE',
+  'GAIN_STRENGTH',
+  'LOSE_FAT',
+  'CONDITIONING',
+  'HEALTH_ENERGY',
+  'SPORT_EVENT',
+  'OTHER',
+] as const satisfies readonly PrimaryGoal[];
+const GOAL_ITEMS = GOAL_OPTION_VALUES.map((value) => ({
   value,
   label: PRIMARY_GOAL_LABELS[value],
 }));
-
-const EMPHASIS_ITEMS = (Object.keys(EMPHASIS_REGION_LABELS) as EmphasisRegion[]).map((value) => ({
-  value,
-  label: EMPHASIS_REGION_LABELS[value],
-}));
-
+type VisibleEmphasisRegion = Exclude<EmphasisRegion, 'FULL_BODY' | 'TRICEPS'>;
+const EMPHASIS_OPTION_VALUES = [
+  'CHEST',
+  'BACK',
+  'SHOULDERS',
+  'BICEPS',
+  'ABS_CORE',
+  'QUADS',
+  'HAMSTRINGS',
+  'GLUTES',
+  'CALVES',
+] as const satisfies readonly VisibleEmphasisRegion[];
+const EMPHASIS_ICON_URLS: Readonly<Record<VisibleEmphasisRegion, string>> = {
+  CHEST: 'https://img.icons8.com/color/100/chest.png',
+  BACK: 'https://img.icons8.com/color/100/back-muscles.png',
+  SHOULDERS: 'https://img.icons8.com/color/100/shoulders.png',
+  BICEPS: 'https://img.icons8.com/color/100/muscle-flexing.png',
+  ABS_CORE: 'https://img.icons8.com/color/100/torso.png',
+  QUADS: 'https://img.icons8.com/color/100/quadriceps.png',
+  HAMSTRINGS: 'https://img.icons8.com/color/100/hamstrings.png',
+  GLUTES: 'https://img.icons8.com/color/100/glutes.png',
+  CALVES: 'https://img.icons8.com/color/100/calves.png',
+};
 const STATUS_ITEMS: { value: TrainingStatus; label: string }[] = [
   { value: 'NEVER', label: 'Nunca treinei' },
   { value: 'STOPPED', label: 'Estou parado' },
   { value: 'OCCASIONAL', label: 'Treino ocasionalmente' },
   { value: 'REGULAR', label: 'Treino regularmente' },
 ];
-
 const STOPPED_FOR_ITEMS: { value: StoppedFor; label: string }[] = [
   { value: 'LT_3_MONTHS', label: 'Menos de 1 mês' },
   { value: 'M3_TO_6', label: 'Entre 1 e 3 meses' },
@@ -104,21 +129,19 @@ const STOPPED_FOR_ITEMS: { value: StoppedFor; label: string }[] = [
   { value: 'Y1_TO_2', label: 'Entre 7 e 12 meses' },
   { value: 'GT_2_YEARS', label: 'Mais de 1 ano' },
 ];
-
-/** Copy literal do fundador — descrições dos 3 níveis (não parafrasear). */
 const EXPERIENCE_ITEMS: { value: TrainingExperience; label: string }[] = [
-  { value: 'BEGINNER', label: 'Iniciante — nunca treinei ou ainda preciso de bastante orientação' },
+  { value: 'BEGINNER', label: 'Iniciante: nunca treinei ou ainda preciso de bastante orientação' },
   {
     value: 'INTERMEDIATE',
-    label: 'Intermediário — conheço os principais exercícios e já treinei com regularidade',
+    label: 'Intermediário: conheço os principais exercícios e já treinei com regularidade',
   },
   {
     value: 'ADVANCED',
-    label: 'Avançado — treino consistentemente e tenho experiência com controle de cargas',
+    label: 'Avançado: treino consistentemente e tenho experiência com controle de cargas',
   },
 ];
-
 const ACTIVITY_ITEMS: { value: PastActivity; label: string }[] = [
+  { value: 'NONE', label: 'Nenhuma' },
   { value: 'WEIGHT_TRAINING', label: 'Musculação' },
   { value: 'WALK_RUN', label: 'Corrida' },
   { value: 'CYCLING', label: 'Ciclismo' },
@@ -128,10 +151,11 @@ const ACTIVITY_ITEMS: { value: PastActivity; label: string }[] = [
   { value: 'DANCE', label: 'Dança' },
   { value: 'YOGA_PILATES', label: 'Pilates' },
   { value: 'SWIMMING', label: 'Natação' },
-  { value: 'NONE', label: 'Nenhuma' },
   { value: 'OTHER', label: 'Outra' },
 ];
-
+const ACTIVITY_VALUES_EXCEPT_NONE = ACTIVITY_ITEMS.filter((item) => item.value !== 'NONE').map(
+  (item) => item.value,
+);
 const BARRIER_ITEMS: { value: ConsistencyBarrier; label: string }[] = [
   { value: 'LACK_OF_TIME', label: 'Falta de tempo' },
   { value: 'LACK_OF_MOTIVATION', label: 'Falta de motivação' },
@@ -144,12 +168,10 @@ const BARRIER_ITEMS: { value: ConsistencyBarrier; label: string }[] = [
   { value: 'COST', label: 'Nunca tentei manter uma rotina' },
   { value: 'OTHER', label: 'Outro' },
 ];
-
 const DAYS_ITEMS = [1, 2, 3, 4, 5, 6, 7].map((n) => ({
   value: String(n),
   label: `${n} dia${n > 1 ? 's' : ''}`,
 }));
-
 const WEEKDAY_ITEMS: { value: Weekday; label: string }[] = [
   { value: 'MON', label: 'Segunda' },
   { value: 'TUE', label: 'Terça' },
@@ -159,7 +181,6 @@ const WEEKDAY_ITEMS: { value: Weekday; label: string }[] = [
   { value: 'SAT', label: 'Sábado' },
   { value: 'SUN', label: 'Domingo' },
 ];
-
 const DURATION_ITEMS: { value: SessionDuration; label: string }[] = [
   { value: 'LT_30', label: 'Até 20 minutos' },
   { value: 'M30_TO_45', label: 'Aproximadamente 30 minutos' },
@@ -167,14 +188,12 @@ const DURATION_ITEMS: { value: SessionDuration; label: string }[] = [
   { value: 'M60_TO_90', label: 'Aproximadamente 60 minutos' },
   { value: 'GT_90', label: 'Mais de 60 minutos' },
 ];
-
 const LOCATION_ITEMS = (Object.keys(TRAINING_LOCATION_LABELS) as TrainingLocation[]).map(
   (value) => ({
     value,
     label: TRAINING_LOCATION_LABELS[value],
   }),
 );
-
 const PERIOD_ITEMS: { value: PreferredPeriod; label: string }[] = [
   { value: 'MORNING', label: 'Manhã' },
   { value: 'AFTERNOON', label: 'Tarde' },
@@ -182,66 +201,181 @@ const PERIOD_ITEMS: { value: PreferredPeriod; label: string }[] = [
   { value: 'VARIES', label: 'Varia conforme o dia' },
 ];
 
+function MuscleRegionIcon({ region }: { region: VisibleEmphasisRegion }) {
+  const iconUrl = EMPHASIS_ICON_URLS[region];
+
+  return (
+    <span
+      aria-hidden="true"
+      data-icons8-icon={region}
+      className="size-10 shrink-0 bg-contain bg-center bg-no-repeat sm:size-16"
+      style={{
+        backgroundImage: `url(${iconUrl})`,
+      }}
+    />
+  );
+}
+
+function normalizeVisibleEmphasis(regions: readonly EmphasisRegion[]): VisibleEmphasisRegion[] {
+  const normalized: VisibleEmphasisRegion[] = [];
+
+  for (const region of regions) {
+    if (region === 'FULL_BODY') continue;
+    const visibleRegion: VisibleEmphasisRegion = region === 'TRICEPS' ? 'BICEPS' : region;
+    if (!normalized.includes(visibleRegion)) normalized.push(visibleRegion);
+  }
+
+  return normalized.slice(0, 2);
+}
+
+function EmphasisRegionGrid({
+  selected,
+  onToggle,
+}: {
+  selected: readonly VisibleEmphasisRegion[];
+  onToggle: (region: VisibleEmphasisRegion) => void;
+}) {
+  const isAtLimit = selected.length >= 2;
+
+  return (
+    <fieldset className="min-w-0">
+      <legend className="text-body font-semibold text-foreground">
+        Em quais regiões você gostaria de dar mais ênfase? (opcional)
+      </legend>
+      <p className="mt-2 text-label text-muted-foreground" aria-live="polite">
+        Escolhidas: <span className="font-mono text-foreground">{selected.length} de 2</span>
+        {isAtLimit && <span> · Limite de 2 regiões atingido.</span>}
+      </p>
+      <div className="mt-2 grid w-full grid-cols-3 gap-3">
+        {EMPHASIS_OPTION_VALUES.map((region) => {
+          const isSelected = selected.includes(region);
+          const isDisabled = !isSelected && isAtLimit;
+
+          return (
+            <button
+              key={region}
+              type="button"
+              aria-pressed={isSelected}
+              aria-disabled={isDisabled || undefined}
+              onClick={() => !isDisabled && onToggle(region)}
+              className={`relative flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-2xl border p-2 text-center outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-white sm:gap-2 sm:p-3 ${
+                isSelected
+                  ? 'border-petroleo bg-accent text-petroleo ring-1 ring-inset ring-petroleo'
+                  : 'border-input bg-white text-foreground hover:border-petroleo hover:bg-secondary'
+              } ${isDisabled ? 'opacity-50' : ''}`}
+            >
+              {isSelected && (
+                <span
+                  aria-hidden="true"
+                  className="absolute right-1.5 top-1.5 flex size-5 items-center justify-center rounded-full border border-petroleo bg-primary text-[0.6875rem] font-bold text-primary-foreground sm:right-2 sm:top-2 sm:size-6 sm:text-label"
+                >
+                  ✓
+                </span>
+              )}
+              <MuscleRegionIcon region={region} />
+              <span className="text-center text-xs font-semibold leading-4 sm:text-label">
+                {EMPHASIS_REGION_LABELS[region]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
 export function Step2Anamnesis({
   data,
   onChange,
   onContinue,
+  onBack,
+  initialSection = 0,
+  onSectionChange,
   saving,
 }: {
   data: Step2State;
   onChange: (data: Step2State) => void;
   onContinue: () => void;
+  onBack?: () => void;
+  initialSection?: number;
+  onSectionChange?: (section: number) => void;
   saving: boolean;
 }) {
+  const [section, setSection] = React.useState(Math.min(4, Math.max(0, initialSection)));
+  const [firstEventDate] = React.useState(() => {
+    const tomorrow = new Date();
+    tomorrow.setHours(0, 0, 0, 0);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return tomorrow;
+  });
+  const titleRef = React.useRef<HTMLHeadingElement>(null);
+
+  React.useEffect(() => {
+    titleRef.current?.focus();
+  }, [section]);
+
   function set<K extends keyof Step2State>(key: K, value: Step2State[K]) {
     onChange({ ...data, [key]: value });
   }
 
-  function toggleEmphasis(region: EmphasisRegion) {
-    if (region === 'FULL_BODY') {
-      set('emphasis', data.emphasis.includes('FULL_BODY') ? [] : ['FULL_BODY']);
-      return;
-    }
-    const withoutFullBody = data.emphasis.filter((r) => r !== 'FULL_BODY');
-    const exists = withoutFullBody.includes(region);
+  function navigate(next: number) {
+    const bounded = Math.min(4, Math.max(0, next));
+    setSection(bounded);
+    onSectionChange?.(bounded);
+  }
+
+  function toggleEmphasis(region: VisibleEmphasisRegion) {
+    const current = normalizeVisibleEmphasis(data.emphasis);
     set(
       'emphasis',
-      exists
-        ? withoutFullBody.filter((r) => r !== region)
-        : [...withoutFullBody, region].slice(0, 2),
+      current.includes(region)
+        ? current.filter((item) => item !== region)
+        : [...current, region].slice(0, 2),
     );
   }
 
   function toggleActivity(value: PastActivity) {
+    const values = data.pastActivities;
+    if (value === 'NONE') {
+      set('pastActivities', values.includes('NONE') ? [] : ['NONE']);
+      return;
+    }
+    if (values.includes('NONE')) return;
     set(
       'pastActivities',
-      data.pastActivities.includes(value)
-        ? data.pastActivities.filter((v) => v !== value)
-        : [...data.pastActivities, value],
+      values.includes(value) ? values.filter((item) => item !== value) : [...values, value],
     );
   }
 
-  function toggleBarrier(value: ConsistencyBarrier) {
+  function toggleArray<K extends 'consistencyBarriers' | 'preferredDays'>(
+    key: K,
+    value: Step2State[K][number],
+  ) {
+    const values = data[key] as Step2State[K][number][];
     set(
-      'consistencyBarriers',
-      data.consistencyBarriers.includes(value)
-        ? data.consistencyBarriers.filter((v) => v !== value)
-        : [...data.consistencyBarriers, value],
+      key,
+      (values.includes(value)
+        ? values.filter((item) => item !== value)
+        : [...values, value]) as Step2State[K],
     );
   }
 
-  function toggleDay(value: Weekday) {
-    set(
-      'preferredDays',
-      data.preferredDays.includes(value)
-        ? data.preferredDays.filter((v) => v !== value)
-        : [...data.preferredDays, value],
-    );
-  }
+  const importantEventDate = new Date(`${data.importantEventDate}T00:00:00`);
+  const importantEventComplete =
+    !data.hasImportantEvent ||
+    (!Number.isNaN(importantEventDate.getTime()) && importantEventDate >= firstEventDate);
+  const painComplete =
+    !data.pain.hasPain ||
+    (data.pain.points.length > 0 &&
+      data.pain.trend !== null &&
+      data.pain.points.every(
+        (point) => point.region !== 'OTHER' || point.regionOther.trim().length > 0,
+      ));
 
-  const canContinue =
+  const canSubmitStep =
     data.primaryGoal !== null &&
     (data.primaryGoal !== 'OTHER' || data.primaryGoalOther.trim().length > 0) &&
+    importantEventComplete &&
     data.trainingStatus !== null &&
     (data.trainingStatus !== 'STOPPED' || data.stoppedFor !== null) &&
     data.experience !== null &&
@@ -249,243 +383,280 @@ export function Step2Anamnesis({
     data.sessionDuration !== null &&
     data.location !== null &&
     data.preferredPeriod !== null &&
-    (!data.pain.hasPain || (data.pain.points.length > 0 && data.pain.trend !== null)) &&
-    !saving;
+    painComplete;
+
+  const sectionComplete = [
+    data.primaryGoal !== null &&
+      (data.primaryGoal !== 'OTHER' || data.primaryGoalOther.trim().length > 0) &&
+      importantEventComplete,
+    data.trainingStatus !== null &&
+      (data.trainingStatus !== 'STOPPED' || data.stoppedFor !== null) &&
+      data.experience !== null,
+    data.daysPerWeek !== null &&
+      data.sessionDuration !== null &&
+      data.location !== null &&
+      data.preferredPeriod !== null,
+    painComplete,
+    canSubmitStep,
+  ][section];
+
+  const visibleEmphasis = normalizeVisibleEmphasis(data.emphasis);
+
+  const sectionHeader = (title: string, description: string) => (
+    <div>
+      <h1
+        ref={titleRef}
+        id="step2-title"
+        tabIndex={-1}
+        className="text-h1 font-bold text-petroleo outline-none"
+      >
+        {title}
+      </h1>
+      <p className="mt-2 text-body text-muted-foreground">{description}</p>
+    </div>
+  );
 
   return (
-    <div className="flex flex-col gap-10">
-      <div>
-        <p className="font-mono text-label text-muted-foreground">Etapa 2 de 3</p>
-        <h1 className="text-h1 font-bold">Conte um pouco sobre você</h1>
-        <p className="mt-2 text-body text-muted-foreground">
-          Suas respostas ajudarão a MOVIVO a adaptar o treino aos seus objetivos, experiência e
-          rotina.
-        </p>
-      </div>
-
-      <section className="flex flex-col gap-6">
-        <h2 className="text-h2 font-semibold">Seção 1 — Seus objetivos</h2>
-
-        <ChoiceGroup<PrimaryGoal>
-          legend="Qual é o seu principal objetivo?"
-          items={GOAL_ITEMS}
-          selected={data.primaryGoal ? [data.primaryGoal] : []}
-          onToggle={(primaryGoal) => set('primaryGoal', primaryGoal)}
-          columns
-        />
-        {data.primaryGoal === 'OTHER' && (
-          <div className="flex flex-col gap-2">
-            <FieldLabel htmlFor="goalOther">Conte para nós qual é o seu objetivo</FieldLabel>
-            <TextArea
-              id="goalOther"
-              value={data.primaryGoalOther}
-              onChange={(primaryGoalOther) => set('primaryGoalOther', primaryGoalOther)}
-            />
-          </div>
-        )}
-
-        <ChoiceGroup<EmphasisRegion>
-          legend="Em quais regiões você gostaria de dar mais ênfase? (até 2)"
-          items={EMPHASIS_ITEMS}
-          selected={data.emphasis}
-          onToggle={toggleEmphasis}
-          multi
-          disabledValues={
-            data.emphasis.length >= 2 || data.emphasis.includes('FULL_BODY')
-              ? (Object.keys(EMPHASIS_REGION_LABELS) as EmphasisRegion[])
-              : []
-          }
-          columns
-        />
-
-        <YesNo
-          legend="Existe alguma data ou evento importante relacionado ao seu objetivo?"
-          value={data.hasImportantEvent}
-          onChange={(hasImportantEvent) => set('hasImportantEvent', hasImportantEvent)}
-        />
-        {data.hasImportantEvent && (
-          <>
-            <div className="flex flex-col gap-2">
-              <FieldLabel htmlFor="eventDate">Qual é a data?</FieldLabel>
-              <TextInput
-                id="eventDate"
-                type="date"
-                value={data.importantEventDate}
-                onChange={(importantEventDate) => set('importantEventDate', importantEventDate)}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <FieldLabel htmlFor="eventDescription">
-                Qual é o evento ou resultado esperado?
+    <QuestionStack className="pb-4">
+      {section === 0 && (
+        <section className="flex flex-col gap-6" aria-labelledby="step2-title">
+          {sectionHeader('Seus objetivos', 'Pra onde estamos indo.')}
+          <ChoiceGroup<PrimaryGoal>
+            legend="Qual é o seu principal objetivo?"
+            items={GOAL_ITEMS}
+            selected={data.primaryGoal ? [data.primaryGoal] : []}
+            onToggle={(primaryGoal) => set('primaryGoal', primaryGoal)}
+            stack
+            indicatorSide="left"
+          />
+          {data.primaryGoal === 'OTHER' && (
+            <QuestionField className="border-l-2 border-primary pl-4" aria-live="polite">
+              <FieldLabel htmlFor="goalOther">
+                Conta em poucas palavras qual é seu objetivo.
               </FieldLabel>
               <TextArea
-                id="eventDescription"
-                value={data.importantEventDescription}
-                onChange={(importantEventDescription) =>
-                  set('importantEventDescription', importantEventDescription)
-                }
+                id="goalOther"
+                value={data.primaryGoalOther}
+                maxLength={120}
+                onChange={(value) => set('primaryGoalOther', value)}
+              />
+            </QuestionField>
+          )}
+          <EmphasisRegionGrid
+            selected={visibleEmphasis}
+            onToggle={(region) => toggleEmphasis(region)}
+          />
+          <QuestionStack>
+            <YesNo
+              legend="Existe alguma data ou evento importante relacionado ao seu objetivo?"
+              value={data.hasImportantEvent}
+              onChange={(value) => set('hasImportantEvent', value)}
+            />
+            {data.hasImportantEvent && (
+              <QuestionStack className="border-l-2 border-primary pl-4" aria-live="polite">
+                <QuestionField>
+                  <FieldLabel htmlFor="eventDate">Qual é a data?</FieldLabel>
+                  <DatePicker
+                    id="eventDate"
+                    value={data.importantEventDate}
+                    onChange={(value) => set('importantEventDate', value)}
+                    minDate={firstEventDate}
+                    maxDate={null}
+                  />
+                </QuestionField>
+                <QuestionField>
+                  <FieldLabel htmlFor="eventDescription">
+                    Qual é o evento ou resultado esperado?
+                  </FieldLabel>
+                  <TextArea
+                    id="eventDescription"
+                    value={data.importantEventDescription}
+                    onChange={(value) => set('importantEventDescription', value)}
+                    maxLength={300}
+                  />
+                </QuestionField>
+              </QuestionStack>
+            )}
+          </QuestionStack>
+        </section>
+      )}
+
+      {section === 1 && (
+        <section className="flex flex-col gap-6" aria-labelledby="step2-title">
+          {sectionHeader('Seu histórico', 'De onde você está partindo.')}
+          <ChoiceGroup<TrainingStatus>
+            legend="Você treina atualmente?"
+            items={STATUS_ITEMS}
+            selected={data.trainingStatus ? [data.trainingStatus] : []}
+            onToggle={(value) => set('trainingStatus', value)}
+            stack
+            indicatorSide="left"
+          />
+          {data.trainingStatus === 'STOPPED' && (
+            <div className="border-l-2 border-primary pl-4" aria-live="polite">
+              <ChoiceGroup<StoppedFor>
+                legend="Há quanto tempo você não treina?"
+                items={STOPPED_FOR_ITEMS}
+                selected={data.stoppedFor ? [data.stoppedFor] : []}
+                onToggle={(value) => set('stoppedFor', value)}
+                stack
+                indicatorSide="left"
               />
             </div>
-          </>
-        )}
-      </section>
-
-      <section className="flex flex-col gap-6">
-        <h2 className="text-h2 font-semibold">Seção 2 — Seu histórico</h2>
-
-        <ChoiceGroup<TrainingStatus>
-          legend="Você treina atualmente?"
-          items={STATUS_ITEMS}
-          selected={data.trainingStatus ? [data.trainingStatus] : []}
-          onToggle={(trainingStatus) => set('trainingStatus', trainingStatus)}
-        />
-        {data.trainingStatus === 'STOPPED' && (
-          <ChoiceGroup<StoppedFor>
-            legend="Há quanto tempo você não treina?"
-            items={STOPPED_FOR_ITEMS}
-            selected={data.stoppedFor ? [data.stoppedFor] : []}
-            onToggle={(stoppedFor) => set('stoppedFor', stoppedFor)}
+          )}
+          <Combobox<TrainingExperience>
+            id="trainingExperience"
+            legend="Qual é a sua experiência com musculação?"
+            items={EXPERIENCE_ITEMS}
+            value={data.experience}
+            onChange={(value) => set('experience', value)}
+            placeholder="Selecione sua experiência"
           />
-        )}
-
-        <ChoiceGroup<TrainingExperience>
-          legend="Qual é a sua experiência com musculação?"
-          items={EXPERIENCE_ITEMS}
-          selected={data.experience ? [data.experience] : []}
-          onToggle={(experience) => set('experience', experience)}
-        />
-
-        <ChoiceGroup<PastActivity>
-          legend="Quais atividades você pratica ou já praticou?"
-          items={ACTIVITY_ITEMS}
-          selected={data.pastActivities}
-          onToggle={toggleActivity}
-          multi
-          columns
-        />
-        {data.pastActivities.includes('OTHER') && (
-          <TextInput
-            id="activityOther"
-            value={data.pastActivityOther}
-            onChange={(pastActivityOther) => set('pastActivityOther', pastActivityOther)}
-            placeholder="Qual atividade?"
-          />
-        )}
-
-        <ChoiceGroup<ConsistencyBarrier>
-          legend="O que mais dificultou sua consistência nos treinos anteriormente?"
-          items={BARRIER_ITEMS}
-          selected={data.consistencyBarriers}
-          onToggle={toggleBarrier}
-          multi
-          columns
-        />
-        {data.consistencyBarriers.includes('OTHER') && (
-          <TextInput
-            id="barrierOther"
-            value={data.consistencyBarrierOther}
-            onChange={(consistencyBarrierOther) =>
-              set('consistencyBarrierOther', consistencyBarrierOther)
+          <ChoiceGroup<PastActivity>
+            legend="Quais atividades você pratica ou já praticou?"
+            items={ACTIVITY_ITEMS}
+            selected={data.pastActivities}
+            onToggle={toggleActivity}
+            multi
+            disabledValues={
+              data.pastActivities.includes('NONE') ? ACTIVITY_VALUES_EXCEPT_NONE : undefined
             }
-            placeholder="Qual dificuldade?"
+            stack
+            indicatorSide="left"
           />
-        )}
-      </section>
+          {data.pastActivities.includes('OTHER') && (
+            <QuestionField className="border-l-2 border-primary pl-4" aria-live="polite">
+              <FieldLabel htmlFor="activityOther">Qual atividade?</FieldLabel>
+              <TextInput
+                id="activityOther"
+                value={data.pastActivityOther}
+                onChange={(value) => set('pastActivityOther', value)}
+                maxLength={120}
+              />
+            </QuestionField>
+          )}
+          <ChoiceGroup<ConsistencyBarrier>
+            legend="O que mais dificultou sua consistência nos treinos anteriormente?"
+            items={BARRIER_ITEMS}
+            selected={data.consistencyBarriers}
+            onToggle={(value) => toggleArray('consistencyBarriers', value)}
+            multi
+            stack
+            indicatorSide="left"
+          />
+          {data.consistencyBarriers.includes('OTHER') && (
+            <QuestionField className="border-l-2 border-primary pl-4" aria-live="polite">
+              <FieldLabel htmlFor="barrierOther">Qual dificuldade?</FieldLabel>
+              <TextInput
+                id="barrierOther"
+                value={data.consistencyBarrierOther}
+                onChange={(value) => set('consistencyBarrierOther', value)}
+                maxLength={120}
+              />
+            </QuestionField>
+          )}
+        </section>
+      )}
 
-      <section className="flex flex-col gap-6">
-        <h2 className="text-h2 font-semibold">Seção 3 — Sua rotina</h2>
+      {section === 2 && (
+        <section className="flex flex-col gap-6" aria-labelledby="step2-title">
+          {sectionHeader('Sua rotina', 'O que cabe na sua semana de verdade.')}
+          <Combobox
+            id="daysPerWeek"
+            legend="Quantos dias por semana você consegue treinar?"
+            items={DAYS_ITEMS}
+            value={data.daysPerWeek ? String(data.daysPerWeek) : null}
+            onChange={(value) => set('daysPerWeek', Number(value))}
+            placeholder="Selecione a quantidade de dias"
+          />
+          <ChoiceGroup<Weekday>
+            legend="Quais dias da semana você consegue treinar?"
+            items={WEEKDAY_ITEMS}
+            selected={data.preferredDays}
+            onToggle={(value) => toggleArray('preferredDays', value)}
+            multi
+            stack
+            indicatorSide="left"
+          />
+          <ChoiceGroup<SessionDuration>
+            legend="Quanto tempo você tem disponível por treino?"
+            items={DURATION_ITEMS}
+            selected={data.sessionDuration ? [data.sessionDuration] : []}
+            onToggle={(value) => set('sessionDuration', value)}
+            stack
+            indicatorSide="left"
+          />
+          <ChoiceGroup<TrainingLocation>
+            legend="Onde você pretende treinar?"
+            items={LOCATION_ITEMS}
+            selected={data.location ? [data.location] : []}
+            onToggle={(value) => set('location', value)}
+            indicatorSide="left"
+          />
+          <ChoiceGroup<PreferredPeriod>
+            legend="Em qual período você prefere treinar?"
+            items={PERIOD_ITEMS}
+            selected={data.preferredPeriod ? [data.preferredPeriod] : []}
+            onToggle={(value) => set('preferredPeriod', value)}
+            indicatorSide="left"
+          />
+        </section>
+      )}
 
-        <ChoiceGroup
-          legend="Quantos dias por semana você consegue treinar?"
-          items={DAYS_ITEMS}
-          selected={data.daysPerWeek ? [String(data.daysPerWeek)] : []}
-          onToggle={(v) => set('daysPerWeek', Number(v))}
-        />
+      {section === 3 && (
+        <section className="flex flex-col gap-6" aria-labelledby="step2-title">
+          {sectionHeader('Dores e limitações', 'Isso é o que mantém seu treino seguro.')}
+          <PainSection data={data.pain} onChange={(pain) => set('pain', pain)} />
+        </section>
+      )}
 
-        <ChoiceGroup<Weekday>
-          legend="Quais dias da semana você consegue treinar?"
-          items={WEEKDAY_ITEMS}
-          selected={data.preferredDays}
-          onToggle={toggleDay}
-          multi
-          columns
-        />
-
-        <ChoiceGroup<SessionDuration>
-          legend="Quanto tempo você tem disponível por treino?"
-          items={DURATION_ITEMS}
-          selected={data.sessionDuration ? [data.sessionDuration] : []}
-          onToggle={(sessionDuration) => set('sessionDuration', sessionDuration)}
-        />
-
-        <ChoiceGroup<TrainingLocation>
-          legend="Onde você pretende treinar?"
-          items={LOCATION_ITEMS}
-          selected={data.location ? [data.location] : []}
-          onToggle={(location) => set('location', location)}
-        />
-
-        <ChoiceGroup<PreferredPeriod>
-          legend="Em qual período você prefere treinar?"
-          items={PERIOD_ITEMS}
-          selected={data.preferredPeriod ? [data.preferredPeriod] : []}
-          onToggle={(preferredPeriod) => set('preferredPeriod', preferredPeriod)}
-        />
-
-        <YesNo
-          legend="Você pratica atualmente outro esporte ou atividade física?"
-          value={data.practicesOtherSport}
-          onChange={(practicesOtherSport) => set('practicesOtherSport', practicesOtherSport)}
-        />
-        {data.practicesOtherSport && (
-          <div className="flex flex-col gap-2">
-            <FieldLabel htmlFor="otherSport">
-              Qual atividade você pratica e em quantos dias por semana?
-            </FieldLabel>
-            <TextInput
-              id="otherSport"
-              value={data.otherSportName}
-              onChange={(otherSportName) => set('otherSportName', otherSportName)}
-              placeholder="Atividade"
+      {section === 4 && (
+        <section className="flex flex-col gap-6" aria-labelledby="step2-title">
+          {sectionHeader('Suas preferências', 'O que você prefere não fazer.')}
+          <QuestionStack>
+            <YesNo
+              legend="Existe algum exercício que você não gosta ou não deseja realizar?"
+              value={data.hasAvoidedExercise}
+              onChange={(value) => set('hasAvoidedExercise', value)}
+              indicatorSide="left"
             />
-            <ChoiceGroup
-              items={[1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: String(n), label: String(n) }))}
-              selected={data.otherSportDaysPerWeek ? [String(data.otherSportDaysPerWeek)] : []}
-              onToggle={(v) => set('otherSportDaysPerWeek', Number(v))}
-            />
-          </div>
+            {data.hasAvoidedExercise && (
+              <QuestionField className="border-l-2 border-primary pl-4" aria-live="polite">
+                <FieldLabel htmlFor="avoidedExercise">
+                  Qual exercício você prefere evitar?
+                </FieldLabel>
+                <TextArea
+                  id="avoidedExercise"
+                  value={data.avoidedExercise}
+                  onChange={(value) => set('avoidedExercise', value)}
+                  maxLength={300}
+                />
+              </QuestionField>
+            )}
+          </QuestionStack>
+        </section>
+      )}
+
+      <div className="sticky bottom-0 z-10 -mx-5 mt-1 flex flex-col-reverse gap-3 border-t border-border bg-white/95 px-5 py-4 backdrop-blur-sm sm:static sm:mx-0 sm:flex-row sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-none">
+        {(section > 0 || onBack) && (
+          <button
+            type="button"
+            onClick={() => (section > 0 ? navigate(section - 1) : onBack?.())}
+            disabled={saving}
+            className="h-[52px] flex-1 rounded-xl border border-input bg-white px-6 text-body font-semibold text-petroleo transition-colors hover:bg-secondary disabled:opacity-50"
+          >
+            Voltar
+          </button>
         )}
-      </section>
-
-      <PainSection data={data.pain} onChange={(pain) => set('pain', pain)} />
-
-      <section className="flex flex-col gap-6">
-        <h2 className="text-h2 font-semibold">Seção 5 — Suas preferências</h2>
-        <YesNo
-          legend="Existe algum exercício que você não gosta ou não deseja realizar?"
-          value={data.hasAvoidedExercise}
-          onChange={(hasAvoidedExercise) => set('hasAvoidedExercise', hasAvoidedExercise)}
-        />
-        {data.hasAvoidedExercise && (
-          <div className="flex flex-col gap-2">
-            <FieldLabel htmlFor="avoidedExercise">Qual exercício você prefere evitar?</FieldLabel>
-            <TextArea
-              id="avoidedExercise"
-              value={data.avoidedExercise}
-              onChange={(avoidedExercise) => set('avoidedExercise', avoidedExercise)}
-            />
-          </div>
-        )}
-      </section>
-
-      <button
-        type="button"
-        disabled={!canContinue}
-        onClick={onContinue}
-        className="h-11 rounded-lg bg-primary px-6 text-body font-semibold text-primary-foreground shadow-xs transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-      >
-        {saving ? 'Salvando…' : 'CONTINUAR'}
-      </button>
-    </div>
+        <button
+          type="button"
+          disabled={!sectionComplete || saving}
+          onClick={() => (section < 4 ? navigate(section + 1) : onContinue())}
+          className="h-[52px] flex-1 rounded-xl bg-primary px-6 text-body font-semibold text-primary-foreground transition-colors hover:bg-primary/85 disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground"
+        >
+          {saving ? 'Salvando…' : section === 4 ? 'Continuar para saúde' : 'Continuar'}
+        </button>
+      </div>
+    </QuestionStack>
   );
 }

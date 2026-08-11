@@ -23,7 +23,7 @@ describe('consentimento versionado (Alexandre §5 — onboarding v2)', () => {
 
   it('publica as versões da Sprint 6 dos demais tipos', () => {
     expect(CONSENT_TEXTS.TERMS_OF_SERVICE.version).toBe('terms-2026-08-v2');
-    expect(CONSENT_TEXTS.MARKETING.version).toBe('consent-marketing-2026-08-v2');
+    expect(CONSENT_TEXTS.MARKETING.version).toBe('consent-marketing-2026-08-v3');
     expect(CONSENT_TEXTS.AI_DISCLOSURE.version).toBe('ai-disclosure-2026-08-v1');
   });
 
@@ -37,6 +37,22 @@ describe('consentimento versionado (Alexandre §5 — onboarding v2)', () => {
     expect(isRevocableConsent('TERMS_OF_SERVICE')).toBe(false);
   });
 
+  it('mantém os textos vigentes visíveis sem travessões e preserva os guardrails', () => {
+    const visibleCopy = [
+      WHATSAPP_OPERATIONAL_NOTICE.title,
+      ...WHATSAPP_OPERATIONAL_NOTICE.body,
+      ...Object.values(CONSENT_TEXTS).map(({ label }) => label),
+    ].join(' ');
+
+    expect(visibleCopy).not.toMatch(/[—–]/u);
+    expect(CONSENT_TEXTS.HEALTH_DATA.body.join(' ')).toContain(
+      'a decisão e a supervisão são sempre do profissional',
+    );
+    expect(CONSENT_TEXTS.AI_DISCLOSURE.body.join(' ')).toContain(
+      'ela nunca decide sozinha e nunca substitui o profissional',
+    );
+  });
+
   it('tem 3 obrigatórios e marketing opcional', () => {
     expect([...REQUIRED_CONSENT_TYPES].sort()).toEqual([
       'AI_DISCLOSURE',
@@ -47,7 +63,7 @@ describe('consentimento versionado (Alexandre §5 — onboarding v2)', () => {
   });
 
   it('mantém o aviso de WhatsApp fora do enum de consentimento', () => {
-    expect(WHATSAPP_OPERATIONAL_NOTICE.version).toBe('aviso-whatsapp-operacional-2026-08-v1');
+    expect(WHATSAPP_OPERATIONAL_NOTICE.version).toBe('aviso-whatsapp-operacional-2026-08-v2');
     expect(Object.keys(CONSENT_TEXTS)).not.toContain('WHATSAPP_OPERATIONAL_NOTICE');
     const parsed = recordConsentsSchema.safeParse({
       consents: [{ type: 'WHATSAPP_OPERATIONAL_NOTICE', version: 'x', accepted: true }],
