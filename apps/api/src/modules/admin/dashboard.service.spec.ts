@@ -487,7 +487,10 @@ describe('DashboardService leituras operacionais', () => {
   });
 
   it('retorna detalhes de protocolo e registra leitura sensivel', async () => {
-    const { service, append } = makeSequencedService([[pendingProtocol], [{ name: 'Maria Teste' }]]);
+    const { service, append } = makeSequencedService([
+      [pendingProtocol],
+      [{ name: 'Maria Teste' }],
+    ]);
     await expect(service.detail(actor, 'PROTOCOL', RESOURCE_ID)).resolves.toMatchObject({
       item: { kind: 'PROTOCOL', title: 'Protocolo para Revisão: Maria Teste' },
       protocol: { id: RESOURCE_ID, approvalStatus: 'PENDING_REVIEW' },
