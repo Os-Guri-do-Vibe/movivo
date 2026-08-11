@@ -66,6 +66,11 @@ export interface QueueItem {
   status: string;
 }
 
+/** Titulo do item de fila de protocolo, com o nome completo do titular. */
+function protocolTitle(name: string | null | undefined) {
+  return name ? `Protocolo para Revisão: ${name}` : 'Protocolo para Revisão';
+}
+
 @Injectable()
 export class DashboardService {
   constructor(
@@ -84,8 +89,15 @@ export class DashboardService {
     const items = await this.scoped(actor, async (tx) => {
       const [pendingProtocols, alerts, blockedParq] = await Promise.all([
         tx
-          .select({ id: protocols.id, createdAt: protocols.createdAt, status: protocols.status })
+          .select({
+            id: protocols.id,
+            createdAt: protocols.createdAt,
+            status: protocols.status,
+            userId: protocols.userId,
+            name: users.name,
+          })
           .from(protocols)
+          .innerJoin(users, eq(users.id, protocols.userId))
           .where(
             or(
               eq(protocols.approvalStatus, 'PENDING_REVIEW'),
@@ -114,7 +126,7 @@ export class DashboardService {
           'PROTOCOL',
           'ROUTINE',
           row.createdAt,
-          'Protocolo para revisao',
+          protocolTitle(row.name),
           row.status,
         ),
       );
@@ -487,13 +499,18 @@ export class DashboardService {
   private async protocolDetail(actor: AuthenticatedUser, id: string) {
     return this.scoped(actor, async (tx) => {
       const row = await this.requireProtocol(tx, id);
+      const [owner] = await tx
+        .select({ name: users.name })
+        .from(users)
+        .where(eq(users.id, row.userId))
+        .limit(1);
       await this.auditRead(tx, actor, row.userId, 'protocol', id);
       const item = this.item(
         id,
         'PROTOCOL',
         'ROUTINE',
         row.createdAt,
-        'Protocolo para revisao',
+        protocolTitle(owner?.name),
         row.status,
       );
       return {
