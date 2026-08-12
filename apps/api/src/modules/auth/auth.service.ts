@@ -50,7 +50,7 @@ export class AuthService {
     this.logger.setContext(AuthService.name);
   }
 
-  /** Autentica um profissional/admin por e-mail + senha (Argon2id) e emite o par de tokens. */
+  /** Autentica uma conta interna por e-mail + senha (Argon2id) e emite o par de tokens. */
   async login(input: LoginInput): Promise<LoginResult> {
     const user = await this.db.runAsSystem(async (tx) => {
       const [row] = await tx

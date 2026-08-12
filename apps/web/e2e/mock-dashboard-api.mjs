@@ -12,6 +12,32 @@ const eventStreams = new Set();
 const anamnesisSessions = new Map();
 let realtimeVisible = false;
 
+const controlCenterMeta = {
+  generatedAt: '2026-08-11T15:00:00.000Z',
+  timezone: 'America/Sao_Paulo',
+  dataQuality: [],
+};
+
+function metric(value, unit, definition, status = 'AVAILABLE') {
+  return { value, unit, status, definition };
+}
+
+const capabilitiesByRole = {
+  ADMIN: [
+    'control_center.overview.read',
+    'control_center.marketing.read',
+    'control_center.students.read',
+    'control_center.system.read',
+    'control_center.finance.read',
+    'control_center.support.read',
+    'control_center.compliance.read',
+    'control_center.audit.read',
+    'control_center.admin.destructive.request',
+  ],
+  PROFESSIONAL: ['control_center.students.read'],
+  USER: [],
+};
+
 const protocolContent = {
   promptVersion: 'methodology-2026-07',
   goal: 'GAIN_MUSCLE',
@@ -291,7 +317,11 @@ createServer(async (request, response) => {
   if (url.pathname === '/api/v1/auth/me') {
     const role = authenticatedRole(request);
     return role
-      ? json(response, 200, { userId: 'professional-1', role })
+      ? json(response, 200, {
+          userId: '11111111-1111-4111-8111-111111111111',
+          role,
+          capabilities: capabilitiesByRole[role] ?? [],
+        })
       : json(response, 401, { message: 'Unauthorized' });
   }
   if (request.method === 'POST' && url.pathname === '/api/v1/auth/logout') {
@@ -299,6 +329,36 @@ createServer(async (request, response) => {
   }
 
   if (!authenticated(request)) return json(response, 401, { message: 'Unauthorized' });
+  if (request.method === 'GET' && url.pathname === '/api/v1/control-center/overview') {
+    return json(response, 200, {
+      data: {
+        activeSubscriptions: metric(12, 'COUNT', 'Assinaturas ativas.'),
+        trials: metric(3, 'COUNT', 'Trials ativos.'),
+        contractedMrr: metric(468, 'BRL', 'MRR contratado.'),
+        northStar: metric(null, 'COUNT', 'Histórico granular ainda indisponível.', 'UNAVAILABLE'),
+        criticalAlerts: metric(2, 'COUNT', 'Alertas críticos abertos.'),
+      },
+      meta: controlCenterMeta,
+    });
+  }
+  if (request.method === 'GET' && url.pathname === '/api/v1/control-center/students') {
+    return json(response, 200, {
+      data: {
+        students: [
+          {
+            id: '66666666-6666-4666-8666-666666666666',
+            name: 'Pessoa Teste',
+            email: 'pessoa@movivo.test',
+            phoneNumber: '+5511999999999',
+            status: 'ACTIVE',
+            subscriptionStatus: 'TRIAL',
+            protocolStatus: 'PENDING_REVIEW',
+          },
+        ],
+      },
+      meta: controlCenterMeta,
+    });
+  }
   if (request.method === 'GET' && url.pathname === '/api/v1/professional/dashboard/queue/events') {
     response.writeHead(200, {
       'Cache-Control': 'private, no-store, no-transform',

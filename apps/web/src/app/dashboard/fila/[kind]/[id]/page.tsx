@@ -3,6 +3,8 @@ import { notFound } from 'next/navigation';
 import { QueueDetail } from '@/components/dashboard/queue-detail';
 import type { QueueKind } from '@/lib/dashboard-types';
 
+import { requireDashboardCapability } from '../../../_lib/session';
+
 const KINDS: Record<string, QueueKind> = {
   protocol: 'PROTOCOL',
   handoff: 'HANDOFF',
@@ -15,6 +17,7 @@ export default async function QueueDetailPage({
 }: {
   params: Promise<{ kind: string; id: string }>;
 }) {
+  await requireDashboardCapability('control_center.students.read', '/dashboard/educacao-fisica');
   const { kind, id } = await params;
   const queueKind = KINDS[kind];
   if (!queueKind) notFound();

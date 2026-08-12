@@ -25,7 +25,7 @@ describe('LoginForm', () => {
       .mockResolvedValue({ ok: true, json: async () => ({ user: { role: 'PROFESSIONAL' } }) });
     vi.stubGlobal('fetch', fetchMock);
     render(<LoginForm />);
-    await userEvent.type(screen.getByLabelText(/e-mail profissional/i), 'prof@movivo.test');
+    await userEvent.type(screen.getByLabelText(/e-mail corporativo/i), 'prof@movivo.test');
     await userEvent.type(screen.getByLabelText('Senha'), 'segura');
     await userEvent.click(screen.getByRole('button', { name: /entrar com segurança/i }));
     await waitFor(() => expect(replace).toHaveBeenCalledWith('/dashboard'));
@@ -44,9 +44,11 @@ describe('LoginForm', () => {
         json: async () => ({ message: 'E-mail ou senha incorretos.' }),
       }),
     );
-    render(<LoginForm initialError="Esta conta não tem permissão para acessar a área CREF." />);
+    render(
+      <LoginForm initialError="Esta conta não tem permissão para acessar o Control Center." />,
+    );
     expect(screen.getByRole('alert')).toHaveTextContent('não tem permissão');
-    await userEvent.type(screen.getByLabelText(/e-mail profissional/i), 'x@y.com');
+    await userEvent.type(screen.getByLabelText(/e-mail corporativo/i), 'x@y.com');
     await userEvent.type(screen.getByLabelText('Senha'), 'x');
     await userEvent.click(screen.getByRole('button', { name: /entrar com segurança/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent('E-mail ou senha incorretos');

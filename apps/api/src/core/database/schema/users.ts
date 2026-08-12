@@ -42,14 +42,14 @@ export const users = pgTable(
     /**
      * Papel de autorização (RBAC — US-1.4 / Sato §9.2). Default `USER`: todo
      * titular criado pelo funil de anamnese nasce como usuário comum. Só sobe
-     * para `PROFESSIONAL`/`ADMIN` por provisionamento interno (fora do fluxo
-     * público). Consumido pelo guard `@Roles()` e pelo GUC `app.current_role`.
+     * para um papel interno por provisionamento administrativo (fora do fluxo
+     * público). Consumido pelos guards e pelo GUC `app.current_role`.
      */
     role: userRoleEnum('role').notNull().default('USER'),
 
     /**
-     * Hash Argon2id da senha — **só existe para `PROFESSIONAL`/`ADMIN`** (o
-     * titular final não faz login no MVP). Nulo para `USER`.
+     * Hash Argon2id da senha — existe somente para contas internas provisionadas
+     * (o titular final não faz login no MVP). Nulo para `USER`.
      *
      * -- SENSÍVEL: credencial. Nunca é logado (LoggerModule redige), nunca sai
      * em resposta de API e nunca trafega em claro. O hashing (Argon2id) é feito

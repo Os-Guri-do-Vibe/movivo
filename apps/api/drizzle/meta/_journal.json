@@ -127,6 +127,13 @@
       "when": 1786415539763,
       "tag": "0017_onboarding_v2",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1786495481877,
+      "tag": "0018_daffy_sue_storm",
+      "breakpoints": true
     }
   ]
 }

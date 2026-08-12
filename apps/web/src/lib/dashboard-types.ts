@@ -1,6 +1,6 @@
 import type { ProtocolStructure } from '@movivo/shared';
 
-export type DashboardRole = 'PROFESSIONAL';
+export type { DashboardCapability, DashboardRole } from './control-center-access';
 export type QueueKind = 'PROTOCOL' | 'HANDOFF' | 'PARQ' | 'CHECKIN';
 export type QueueSeverity = 'SAFETY' | 'ALERT' | 'ROUTINE';
 
