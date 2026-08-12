@@ -115,9 +115,9 @@ describe('JwtStrategy.validate', () => {
         jti: 'j1',
       }),
     ).rejects.toThrow(/Papel da sessão/);
-    await expect(
-      strategy.validate({ sub: 'nao-uuid', role: 'ADMIN', jti: 'j2' }),
-    ).rejects.toThrow(/malformado/);
+    await expect(strategy.validate({ sub: 'nao-uuid', role: 'ADMIN', jti: 'j2' })).rejects.toThrow(
+      /malformado/,
+    );
   });
 
   it('registra a chave N-1 quando configurada (rotação)', () => {

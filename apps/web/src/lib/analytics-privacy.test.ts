@@ -28,12 +28,8 @@ describe('dashboard analytics privacy', () => {
         'https://movivo.com/anamnese/tkA_segredo_que_identifica_a_sessao?utm_source=campanha',
       ),
     ).toBe('https://movivo.com/anamnese/:token');
-    expect(sanitizeAnalyticsUrl('/protocolo/token-de-acesso#treino')).toBe(
-      '/protocolo/:token',
-    );
-    expect(sanitizeAnalyticsUrl('/conta/11111111-1111-4111-8111-111111111111')).toBe(
-      '/conta/:id',
-    );
+    expect(sanitizeAnalyticsUrl('/protocolo/token-de-acesso#treino')).toBe('/protocolo/:token');
+    expect(sanitizeAnalyticsUrl('/conta/11111111-1111-4111-8111-111111111111')).toBe('/conta/:id');
   });
 
   it('sanitiza propriedades de navegação sem tocar nas demais', () => {

@@ -35,8 +35,8 @@ function serviceWithSystemResults(...results: unknown[][]) {
   const tx = { select };
   const db = {
     runAsSystem: vi.fn((callback: (value: unknown) => Promise<unknown>) => callback(tx)),
-    runAsUser: vi.fn(
-      (_id: string, _role: string, callback: (value: unknown) => Promise<unknown>) => callback(tx),
+    runAsUser: vi.fn((_id: string, _role: string, callback: (value: unknown) => Promise<unknown>) =>
+      callback(tx),
     ),
   } as unknown as TenantDatabase;
   const audit = { append: vi.fn().mockResolvedValue(undefined) };
@@ -96,9 +96,18 @@ describe('ControlCenterService projections', () => {
     const response = await service.marketing();
 
     expect(response.data.funnel.formStarted).toMatchObject({ value: 12, status: 'AVAILABLE' });
-    expect(response.data.funnel.formSubmitted).toMatchObject({ value: null, status: 'UNAVAILABLE' });
-    expect(response.data.funnel.protocolActive).toMatchObject({ value: null, status: 'UNAVAILABLE' });
-    expect(response.data.funnel.subscriptionActive).toMatchObject({ value: 0, status: 'AVAILABLE' });
+    expect(response.data.funnel.formSubmitted).toMatchObject({
+      value: null,
+      status: 'UNAVAILABLE',
+    });
+    expect(response.data.funnel.protocolActive).toMatchObject({
+      value: null,
+      status: 'UNAVAILABLE',
+    });
+    expect(response.data.funnel.subscriptionActive).toMatchObject({
+      value: 0,
+      status: 'AVAILABLE',
+    });
   });
 
   it('não devolve valor de segmento fora do vocabulário fechado', async () => {
