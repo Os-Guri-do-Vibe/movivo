@@ -293,7 +293,9 @@ export function ChoiceGroup<T extends string>({
         {help && <FieldHelp>{help}</FieldHelp>}
         <div
           className={cn(
-            'grid grid-cols-2 gap-3',
+            // `auto-rows-fr`: no mobile os rótulos quebram em 2 linhas e cada linha do grid
+            // ganhava uma altura diferente. Iguala todas as linhas à mais alta do grupo.
+            'grid auto-rows-fr grid-cols-2 gap-3',
             columns && 'sm:grid-cols-3',
             stack && 'grid-cols-1',
           )}

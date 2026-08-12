@@ -121,7 +121,7 @@ export function PhoneOtp({
   const canResend = sent && resendSecondsLeft === 0;
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-input p-4">
+    <div className="flex flex-col gap-4 rounded-xl border border-input p-4">
       <div>
         <p className="text-body font-semibold">Confirme seu WhatsApp</p>
         <p className="text-label text-muted-foreground">
@@ -173,7 +173,7 @@ export function PhoneOtp({
                   selectSlot(i);
                 }}
                 className={cn(
-                  'relative flex h-12 min-w-0 cursor-text items-center justify-center rounded-lg border bg-white text-h3 font-semibold',
+                  'relative flex h-[52px] min-w-0 cursor-text items-center justify-center rounded-xl border bg-white text-h3 font-semibold',
                   code[i] ? 'border-primary' : 'border-input',
                   active && 'border-petroleo ring-2 ring-petroleo/20',
                 )}

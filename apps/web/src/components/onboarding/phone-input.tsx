@@ -212,7 +212,7 @@ export function PhoneInput({
                 onClick={() => selectCountry(option.iso)}
                 onKeyDown={(event) => handleOptionKeyDown(event, index, option.iso)}
                 className={cn(
-                  'flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-label text-petroleo outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring',
+                  'flex min-h-[52px] w-full items-center gap-3 rounded-xl px-3 text-left text-label text-petroleo outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring',
                   option.iso === countryIso && 'bg-verde-pulso hover:bg-verde-pulso',
                 )}
               >

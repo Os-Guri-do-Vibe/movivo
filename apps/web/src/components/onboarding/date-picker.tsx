@@ -172,7 +172,7 @@ function CalendarSelect({
               onClick={() => selectOption(option)}
               onKeyDown={(event) => handleOptionKeyDown(event, option, index)}
               className={cn(
-                'flex min-h-10 w-full items-center rounded-xl px-3 text-left text-label font-semibold text-petroleo outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-35',
+                'flex min-h-[52px] w-full items-center rounded-xl px-3 text-left text-label font-semibold text-petroleo outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-35',
                 option.value === value && 'bg-verde-pulso hover:bg-verde-pulso',
               )}
             >

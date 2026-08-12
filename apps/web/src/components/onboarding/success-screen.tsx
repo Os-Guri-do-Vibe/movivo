@@ -71,7 +71,7 @@ export function SuccessScreen({ outcome, name }: { outcome: OnboardingOutcome; n
         href={WHATSAPP_URL}
         target="_blank"
         rel="noreferrer"
-        className="flex h-11 items-center justify-center rounded-lg bg-primary px-6 text-body font-semibold text-primary-foreground shadow-xs transition-colors hover:bg-primary/90"
+        className="flex h-[52px] items-center justify-center rounded-xl bg-primary px-6 text-body font-semibold text-primary-foreground shadow-xs transition-colors hover:bg-primary/90"
       >
         ABRIR WHATSAPP
       </a>
