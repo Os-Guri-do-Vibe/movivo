@@ -23,7 +23,7 @@
  * - **`AI_DISCLOSURE` (novo)** — ciência do uso de IA com supervisão CREF. Não é
  *   autorização: é dever de informação. **Bloqueante e NÃO revogável** — o serviço
  *   recusa `revoke(userId, 'AI_DISCLOSURE')`, não apenas esconde o botão.
- * - `MARKETING` → `consent-marketing-2026-08-v2` (passa a cobrir e-mail além do WhatsApp).
+ * - `MARKETING` → `consent-marketing-2026-08-v3` (mesmo escopo da v2, com linguagem mais direta).
  * - **`WHATSAPP_OPERATIONAL_NOTICE` NÃO é consentimento** e **não entra no enum**:
  *   é aviso exibido na Etapa 1, sem checkbox e sem linha em `consents` (§5.2).
  */
@@ -32,7 +32,7 @@ import { z } from 'zod';
 /** Identificadores de versão imutáveis (o que vai para `consents.version`). */
 export const CONSENT_VERSIONS = {
   HEALTH_DATA: 'consent-health-2026-08-v3',
-  MARKETING: 'consent-marketing-2026-08-v2',
+  MARKETING: 'consent-marketing-2026-08-v3',
   TERMS_OF_SERVICE: 'terms-2026-08-v2',
   AI_DISCLOSURE: 'ai-disclosure-2026-08-v1',
 } as const;
@@ -82,11 +82,11 @@ export const HEALTH_DATA_CONSENT_V1 = {
  */
 export const WHATSAPP_OPERATIONAL_NOTICE = {
   id: 'WHATSAPP_OPERATIONAL_NOTICE',
-  version: 'aviso-whatsapp-operacional-2026-08-v1',
+  version: 'aviso-whatsapp-operacional-2026-08-v2',
   title: 'Como a MOVIVO fala com você',
   body: [
-    'Seu treino, os check-ins e a conversa com o Coach acontecem no WhatsApp — é assim que a MOVIVO funciona. Ao continuar, você passa a receber neste número as mensagens necessárias para o serviço funcionar: seu protocolo de treino, respostas do Coach, check-ins, avisos de segurança, recados do profissional de Educação Física responsável e informações da sua assinatura.',
-    'Isso não é propaganda e não tem como ser desligado separadamente — sem essas mensagens não existe treino. Novidades e ofertas são outra coisa, e ficam por sua conta na última opção abaixo.',
+    'Seu treino, os check-ins e a conversa com o Coach acontecem no WhatsApp. É assim que a MOVIVO funciona. Ao continuar, você passa a receber neste número as mensagens necessárias para o serviço funcionar: seu protocolo de treino, respostas do Coach, check-ins, avisos de segurança, recados do profissional de Educação Física responsável e informações da sua assinatura.',
+    'Essas mensagens não são propaganda e não podem ser desligadas separadamente, porque são necessárias para o serviço funcionar. Novidades e ofertas são diferentes. Na última opção abaixo, você decide se quer recebê-las.',
   ],
 } as const;
 
@@ -139,7 +139,7 @@ export const CONSENT_TEXTS = {
     title: null,
     body: [],
     label:
-      'Quero receber novidades, conteúdos e condições especiais da MOVIVO pelo WhatsApp e por e-mail. (opcional — você pode cancelar quando quiser)',
+      'Quero receber novidades, conteúdos e condições especiais da MOVIVO pelo WhatsApp e por e-mail. Isso é opcional, e posso cancelar quando quiser.',
     /** Opcional: jamais condiciona o avanço do formulário (art. 9º, §3º). */
     required: false,
   },

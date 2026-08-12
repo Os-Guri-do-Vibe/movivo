@@ -42,6 +42,8 @@ describe('anamnese v2 → UserConstraints (US-6.9)', () => {
 
   it('ênfase vira grupo muscular do catálogo; "corpo todo" não prioriza nada', () => {
     expect(emphasisToMuscleGroups(['BACK', 'GLUTES'])).toEqual(['costas', 'glúteo']);
+    expect(emphasisToMuscleGroups(['BICEPS'])).toEqual(['bíceps', 'tríceps']);
+    expect(emphasisToMuscleGroups(['TRICEPS'])).toEqual(['tríceps']);
     expect(emphasisToMuscleGroups(['FULL_BODY'])).toEqual([]);
     expect(emphasisToMuscleGroups([])).toEqual([]);
   });

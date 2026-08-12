@@ -270,14 +270,24 @@ Daí decorre, para as 4+1 caixas da spec:
 
 ---
 
-### 5.2 Aviso WhatsApp operacional — `aviso-whatsapp-operacional-2026-08-v1`
+### 5.2 Aviso WhatsApp operacional
+
+#### Versão vigente — `aviso-whatsapp-operacional-2026-08-v2`
 
 - **Base legal:** art. 7º, V (execução de contrato). **Não é consentimento.**
 - **Checkbox:** **NÃO EXISTE.** É texto exibido na Etapa 1, com destaque visual, imediatamente acima ou abaixo do bloco de checkboxes.
 - **Bloqueante:** não aplicável (não há aceite a dar). O aceite contratual correspondente é o de `TERMS_OF_SERVICE`.
-- **Registro:** não gera linha em `consents`. A prova de exibição é a paridade versão↔tela: o identificador `aviso-whatsapp-operacional-2026-08-v1` fica no artefato versionado do repositório junto dos demais textos da Etapa 1, e o registro de `TERMS_OF_SERVICE` na mesma tela carimba o momento.
+- **Registro:** não gera linha em `consents`. A prova de exibição é a paridade versão↔tela: o identificador `aviso-whatsapp-operacional-2026-08-v2` fica no artefato versionado do repositório junto dos demais textos da Etapa 1, e o registro de `TERMS_OF_SERVICE` na mesma tela carimba o momento.
 
 **Texto exibido (verbatim):**
+
+> **Como a MOVIVO fala com você**
+>
+> Seu treino, os check-ins e a conversa com o Coach acontecem no WhatsApp. É assim que a MOVIVO funciona. Ao continuar, você passa a receber neste número as mensagens necessárias para o serviço funcionar: seu protocolo de treino, respostas do Coach, check-ins, avisos de segurança, recados do profissional de Educação Física responsável e informações da sua assinatura.
+>
+> Essas mensagens não são propaganda e não podem ser desligadas separadamente, porque são necessárias para o serviço funcionar. Novidades e ofertas são diferentes. Na última opção abaixo, você decide se quer recebê-las.
+
+#### Histórico imutável — `aviso-whatsapp-operacional-2026-08-v1`
 
 > **Como a MOVIVO fala com você**
 >
@@ -340,14 +350,20 @@ Daí decorre, para as 4+1 caixas da spec:
 
 ---
 
-### 5.5 MARKETING — `consent-marketing-2026-08-v2`
+### 5.5 MARKETING
+
+#### Versão vigente — `consent-marketing-2026-08-v3`
 
 - **Base legal:** art. 7º, I (consentimento).
 - **Bloqueante:** **NÃO.** Nunca condiciona o avanço, o cadastro, o preço ou qualquer funcionalidade (art. 9º, §3º — vedação de condicionar o fornecimento a consentimento para finalidade não necessária).
-- **Por que v2:** o onboarding v2 coleta e-mail, e a comunicação passa a poder ocorrer por WhatsApp **e** e-mail; a v1 mencionava apenas o WhatsApp. Escopo novo ⇒ versão nova.
+- **Por que v3:** mantém o mesmo escopo da v2, mas apresenta a escolha opcional em linguagem direta e sem travessão. Texto novo ⇒ versão nova.
 - **Revogável de forma independente**, sem afetar nenhum outro registro.
 
 **Rótulo da checkbox (verbatim):**
+
+> ☐ Quero receber novidades, conteúdos e condições especiais da MOVIVO pelo WhatsApp e por e-mail. Isso é opcional, e posso cancelar quando quiser.
+
+#### Histórico imutável — `consent-marketing-2026-08-v2`
 
 > ☐ Quero receber novidades, conteúdos e condições especiais da MOVIVO pelo WhatsApp e por e-mail. (opcional — você pode cancelar quando quiser)
 
@@ -385,10 +401,10 @@ Avaliação campo a campo dos coletados sem uso na geração de treino no MVP:
 | # na tela | `type` | `version` | Base legal | Checkbox? | Default | Bloqueante | Revogável | Onde/o que trava |
 |---|---|---|---|---|---|---|---|---|
 | 1 | `TERMS_OF_SERVICE` | `terms-2026-08-v2` | Art. 7º, V (execução de contrato) | Sim | desmarcado | **Sim** | Não (equivale a cancelar) | `CONTINUAR` da Etapa 1 |
-| — | *(aviso)* `WHATSAPP_OPERATIONAL_NOTICE` | `aviso-whatsapp-operacional-2026-08-v1` | Art. 7º, V (execução de contrato) | **Não** | — | n/a | n/a | Só exibição; **não grava em `consents`** |
+| — | *(aviso)* `WHATSAPP_OPERATIONAL_NOTICE` | `aviso-whatsapp-operacional-2026-08-v2` | Art. 7º, V (execução de contrato) | **Não** | — | n/a | n/a | Só exibição; **não grava em `consents`** |
 | 2 | `HEALTH_DATA` | `consent-health-2026-08-v3` | **Art. 11, I** (consentimento específico e destacado) | Sim | desmarcado | **Sim** | **Sim** | `CONTINUAR` da Etapa 1 **e** coleta da seção 4 + Etapa 3 (PAR-Q), ambos no servidor |
 | 3 | `AI_DISCLOSURE` | `ai-disclosure-2026-08-v1` | Dever de informação/transparência (art. 6º, VI e art. 9º LGPD; art. 6º, III CDC) — **não é consentimento** | Sim ("Estou ciente") | desmarcado | **Sim** | **Não** | `CONTINUAR` da Etapa 1 |
-| 4 | `MARKETING` | `consent-marketing-2026-08-v2` | Art. 7º, I (consentimento) | Sim | desmarcado | **Não** | **Sim** | Nada |
+| 4 | `MARKETING` | `consent-marketing-2026-08-v3` | Art. 7º, I (consentimento) | Sim | desmarcado | **Não** | **Sim** | Nada |
 
 **Regras que continuam valendo integralmente (seção 1):** opt-in ativo (nada pré-marcado), independência total entre os registros, paridade byte-a-byte texto exibido ↔ texto versionado, append-only com `revoked_at`, `ip`/`user_agent` derivados no servidor e nunca em log, versões antigas jamais editadas.
 

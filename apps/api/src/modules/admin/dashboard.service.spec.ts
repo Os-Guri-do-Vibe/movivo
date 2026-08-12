@@ -382,7 +382,7 @@ describe('DashboardService leituras operacionais', () => {
   it('unifica e prioriza fila SAFETY, ALERT e rotina', async () => {
     const now = new Date('2026-08-03T12:00:00.000Z');
     const { service } = makeSequencedService([
-      [{ id: RESOURCE_ID, createdAt: now, status: 'PENDING_SIGNATURE' }],
+      [{ id: RESOURCE_ID, createdAt: now, status: 'PENDING_SIGNATURE', name: 'Maria Teste' }],
       [
         {
           id: '44444444-4444-4444-8444-444444444444',
@@ -397,6 +397,7 @@ describe('DashboardService leituras operacionais', () => {
     const result = await service.queue(actor);
     expect(result.counts).toEqual({ SAFETY: 1, ALERT: 1, ROUTINE: 1, total: 3 });
     expect(result.items.map((item) => item.kind)).toEqual(['PARQ', 'CHECKIN', 'PROTOCOL']);
+    expect(result.items.at(-1)?.title).toBe('Protocolo para Revisão: Maria Teste');
   });
 
   it('calcula funil/SLA, primeiro treino e replays anonimizados', async () => {
@@ -486,9 +487,12 @@ describe('DashboardService leituras operacionais', () => {
   });
 
   it('retorna detalhes de protocolo e registra leitura sensivel', async () => {
-    const { service, append } = makeSequencedService([[pendingProtocol]]);
+    const { service, append } = makeSequencedService([
+      [pendingProtocol],
+      [{ name: 'Maria Teste' }],
+    ]);
     await expect(service.detail(actor, 'PROTOCOL', RESOURCE_ID)).resolves.toMatchObject({
-      item: { kind: 'PROTOCOL' },
+      item: { kind: 'PROTOCOL', title: 'Protocolo para Revisão: Maria Teste' },
       protocol: { id: RESOURCE_ID, approvalStatus: 'PENDING_REVIEW' },
     });
     expect(append).toHaveBeenCalledWith(

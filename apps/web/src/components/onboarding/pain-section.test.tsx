@@ -1,3 +1,5 @@
+import * as React from 'react';
+
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -33,7 +35,57 @@ describe('PainSection', () => {
     expect(slider).toHaveAttribute('aria-valuetext', '5 de 10');
   });
 
-  it('diagnóstico "Sim" revela o campo de texto', () => {
+  it('mostra o campo de Outra antes da escala e usa o texto informado no título', async () => {
+    const user = userEvent.setup();
+
+    function ControlledPainSection() {
+      const [data, setData] = React.useState({
+        ...EMPTY_PAIN,
+        hasPain: true,
+      });
+      return <PainSection data={data} onChange={setData} />;
+    }
+
+    render(<ControlledPainSection />);
+    expect(screen.queryByLabelText('Qual é a outra região?')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Outra' }));
+    const otherRegion = screen.getByLabelText('Qual é a outra região?');
+    const initialSlider = screen.getByLabelText('Intensidade do desconforto em Outra');
+
+    expect(
+      otherRegion.compareDocumentPosition(initialSlider) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    await user.type(otherRegion, 'Cotovelo esquerdo');
+    expect(
+      screen.getByLabelText('Intensidade do desconforto em Cotovelo esquerdo'),
+    ).toBeInTheDocument();
+  });
+
+  it('posiciona os indicadores de seleção à esquerda na Parte 4', () => {
+    render(
+      <PainSection
+        data={{
+          ...EMPTY_PAIN,
+          hasPain: true,
+          points: [{ region: 'KNEE', intensity: 5, regionOther: '' }],
+        }}
+        onChange={vi.fn()}
+      />,
+    );
+
+    const painAnswer = screen.getAllByRole('radio', { name: 'Sim' })[0];
+    const region = screen.getByRole('button', { name: 'Joelho' });
+    const trend = screen.getByRole('radio', { name: 'Estável' });
+
+    for (const option of [painAnswer, region, trend]) {
+      expect(option).toHaveClass('justify-start');
+      expect(option?.firstElementChild).toHaveClass('rounded-full');
+    }
+  });
+
+  it('explicação profissional revela o campo sem usar o termo proibido', () => {
     render(
       <PainSection
         data={{
@@ -46,7 +98,12 @@ describe('PainSection', () => {
         onChange={vi.fn()}
       />,
     );
-    expect(screen.getByLabelText('Qual é o diagnóstico?')).toBeInTheDocument();
+    expect(
+      screen.getByLabelText(
+        'O que ele te disse? Com suas palavras, tudo bem não lembrar o nome exato.',
+      ),
+    ).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/diagnóstico/i);
   });
 
   it('recomendação de evitar "Sim" revela o campo de texto', () => {

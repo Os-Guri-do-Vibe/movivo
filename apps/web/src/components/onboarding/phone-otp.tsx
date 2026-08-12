@@ -32,7 +32,13 @@ export function PhoneOtp({
   const [resendAvailableAt, setResendAvailableAt] = React.useState<number | null>(null);
   const [resendCount, setResendCount] = React.useState(0);
   const [now, setNow] = React.useState(() => Date.now());
+  const [focused, setFocused] = React.useState(false);
+  const [activeSlot, setActiveSlot] = React.useState(0);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const instructionsId = React.useId();
+  // Evita o duplo envio do React Strict Mode (dev invoca efeitos 2x de propósito) e
+  // qualquer remontagem acidental reenviando para o mesmo número sem ação do usuário.
+  const autoSentForRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -47,6 +53,7 @@ export function PhoneOtp({
       setResendAvailableAt(new Date(res.resendAvailableAt).getTime());
       setResendCount((c) => c + 1);
       setCode('');
+      setActiveSlot(0);
       inputRef.current?.focus();
     } catch {
       setError('Não conseguimos enviar o código agora. Tente de novo em instantes.');
@@ -54,6 +61,8 @@ export function PhoneOtp({
   }, [token, phoneNumber]);
 
   React.useEffect(() => {
+    if (autoSentForRef.current === phoneNumber) return;
+    autoSentForRef.current = phoneNumber;
     void sendCode();
     // Só no primeiro número informado — reenvio é ação explícita do usuário.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -73,15 +82,37 @@ export function PhoneOtp({
         setError('Código incorreto. Confira e tente de novo.');
       }
       setCode('');
+      setActiveSlot(0);
     } finally {
       setVerifying(false);
     }
   }
 
-  function handleCodeChange(raw: string) {
-    const digits = raw.replace(/\D/g, '').slice(0, CODE_LENGTH);
+  function handleCodeChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const digits = event.target.value.replace(/\D/g, '').slice(0, CODE_LENGTH);
+    const caretPosition = Math.min(event.target.selectionStart ?? digits.length, CODE_LENGTH);
     setCode(digits);
+    setActiveSlot(Math.min(caretPosition, CODE_LENGTH - 1));
     if (digits.length === CODE_LENGTH) void verify(digits);
+  }
+
+  function handlePaste(event: React.ClipboardEvent<HTMLInputElement>) {
+    event.preventDefault();
+    const digits = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, CODE_LENGTH);
+    setCode(digits);
+    setActiveSlot(Math.min(digits.length, CODE_LENGTH - 1));
+    if (digits.length === CODE_LENGTH) void verify(digits);
+  }
+
+  function selectSlot(index: number) {
+    const input = inputRef.current;
+    if (!input || verifying) return;
+
+    input.focus();
+    const selectionStart = Math.min(index, code.length);
+    const selectionEnd = index < code.length ? selectionStart + 1 : selectionStart;
+    input.setSelectionRange(selectionStart, selectionEnd);
+    setActiveSlot(index);
   }
 
   const resendSecondsLeft = resendAvailableAt
@@ -90,7 +121,7 @@ export function PhoneOtp({
   const canResend = sent && resendSecondsLeft === 0;
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-input p-4">
+    <div className="flex flex-col gap-4 rounded-xl border border-input p-4">
       <div>
         <p className="text-body font-semibold">Confirme seu WhatsApp</p>
         <p className="text-label text-muted-foreground">
@@ -99,31 +130,69 @@ export function PhoneOtp({
         </p>
       </div>
 
-      <div className="relative">
+      <p id={instructionsId} className="text-label text-muted-foreground">
+        Digite ou cole o código recebido.
+      </p>
+
+      <div className="relative mx-auto w-full max-w-sm">
         <input
           ref={inputRef}
           type="text"
           inputMode="numeric"
           autoComplete="one-time-code"
           aria-label="Código de verificação de 6 dígitos"
+          aria-describedby={instructionsId}
           value={code}
-          onChange={(e) => handleCodeChange(e.target.value)}
+          onChange={handleCodeChange}
+          onPaste={handlePaste}
+          onFocus={(event) => {
+            setFocused(true);
+            setActiveSlot(
+              Math.min(event.currentTarget.selectionStart ?? code.length, CODE_LENGTH - 1),
+            );
+          }}
+          onSelect={(event) =>
+            setActiveSlot(
+              Math.min(event.currentTarget.selectionStart ?? code.length, CODE_LENGTH - 1),
+            )
+          }
+          onBlur={() => setFocused(false)}
           disabled={verifying}
           maxLength={CODE_LENGTH}
-          className="absolute inset-0 h-full w-full opacity-0"
+          className="sr-only"
         />
-        <div className="pointer-events-none flex gap-2" aria-hidden="true">
-          {Array.from({ length: CODE_LENGTH }, (_, i) => (
-            <div
-              key={i}
-              className={cn(
-                'flex h-12 w-10 items-center justify-center rounded-lg border text-h3 font-semibold',
-                code[i] ? 'border-primary' : 'border-input',
-              )}
-            >
-              {code[i] ?? ''}
-            </div>
-          ))}
+        <div className="mx-auto grid w-full grid-cols-6 gap-2" aria-hidden="true">
+          {Array.from({ length: CODE_LENGTH }, (_, i) => {
+            const active = focused && !verifying && i === activeSlot;
+            return (
+              <div
+                key={i}
+                data-testid={`otp-slot-${i}`}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  selectSlot(i);
+                }}
+                className={cn(
+                  'relative flex h-[52px] min-w-0 cursor-text items-center justify-center rounded-xl border bg-white text-h3 font-semibold',
+                  code[i] ? 'border-primary' : 'border-input',
+                  active && 'border-petroleo ring-2 ring-petroleo/20',
+                )}
+              >
+                {code[i] ?? ''}
+                {active && (
+                  <span
+                    data-testid="otp-caret"
+                    className={cn(
+                      'absolute top-1/2 -translate-y-1/2 animate-[pulse_1s_steps(2,end)_infinite] font-normal text-petroleo motion-reduce:animate-none',
+                      code[i] ? 'left-[calc(50%+0.4rem)]' : 'left-1/2 -translate-x-1/2',
+                    )}
+                  >
+                    |
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 

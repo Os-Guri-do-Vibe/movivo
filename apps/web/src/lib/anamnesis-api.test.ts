@@ -3,11 +3,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AnamnesisApiError,
   getSession,
-  maskPhoneBR,
+  isPhoneComplete,
+  maskNationalPhone,
+  parsePhoneE164,
   sendPhoneCode,
   startAnamnesis,
   submitAnamnesis,
-  toE164BR,
+  SUPPORTED_PHONE_COUNTRIES,
+  toE164,
   verifyPhoneCode,
 } from './anamnesis-api';
 
@@ -23,21 +26,65 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('maskPhoneBR', () => {
-  it('aplica a máscara (xx) xxxxx-xxxx progressivamente', () => {
-    expect(maskPhoneBR('11')).toBe('11');
-    expect(maskPhoneBR('11999')).toBe('(11) 999');
-    expect(maskPhoneBR('11999999999')).toBe('(11) 99999-9999');
+describe('telefone internacional', () => {
+  it('oferece todos os países e territórios sem metadados de bandeira', () => {
+    expect(SUPPORTED_PHONE_COUNTRIES.length).toBeGreaterThan(200);
+    expect(SUPPORTED_PHONE_COUNTRIES[0]).toMatchObject({
+      iso: 'BR',
+      name: 'Brasil',
+      callingCode: '+55',
+    });
+    expect(SUPPORTED_PHONE_COUNTRIES.every((country) => !('flag' in country))).toBe(true);
+
+    for (const expected of [
+      { iso: 'US', callingCode: '+1' },
+      { iso: 'PT', callingCode: '+351' },
+      { iso: 'JP', callingCode: '+81' },
+      { iso: 'NG', callingCode: '+234' },
+    ]) {
+      expect(SUPPORTED_PHONE_COUNTRIES).toContainEqual(expect.objectContaining(expected));
+    }
   });
 
-  it('ignora dígitos além do 11º', () => {
-    expect(maskPhoneBR('119999999999999')).toBe('(11) 99999-9999');
+  it('aplica a máscara do país progressivamente', () => {
+    expect(maskNationalPhone('BR', '11')).toBe('(11)');
+    expect(maskNationalPhone('BR', '11999')).toBe('(11) 999');
+    expect(maskNationalPhone('BR', '11999999999')).toBe('(11) 99999-9999');
+    expect(maskNationalPhone('PT', '912345678')).toBe('912 345 678');
+    expect(maskNationalPhone('US', '2025550123')).toBe('(202) 555-0123');
+    expect(maskNationalPhone('JP', '09012345678')).toBe('090-1234-5678');
+    expect(maskNationalPhone('NG', '08021234567')).toBe('0802 123 4567');
   });
-});
 
-describe('toE164BR', () => {
-  it('converte a máscara para E.164 com +55', () => {
-    expect(toE164BR('(11) 99999-9999')).toBe('+5511999999999');
+  it('usa os exemplos móveis reais como placeholder e validação de comprimento', () => {
+    for (const country of SUPPORTED_PHONE_COUNTRIES) {
+      expect(country.placeholder).not.toBe('');
+      expect(isPhoneComplete(country.iso, country.placeholder)).toBe(true);
+    }
+    expect(isPhoneComplete('BR', '(11) 9999-999')).toBe(false);
+  });
+
+  it('combina DDI e número nacional em E.164', () => {
+    expect(toE164('BR', '(11) 99999-9999')).toBe('+5511999999999');
+    expect(toE164('PT', '912 345 678')).toBe('+351912345678');
+    expect(toE164('JP', '090-1234-5678')).toBe('+819012345678');
+    expect(toE164('NG', '0802 123 4567')).toBe('+2348021234567');
+  });
+
+  it('reidrata país e máscara do E.164 persistido', () => {
+    expect(parsePhoneE164('+351912345678')).toEqual({
+      countryIso: 'PT',
+      phoneMasked: '912 345 678',
+    });
+    expect(parsePhoneE164('+819012345678')).toEqual({
+      countryIso: 'JP',
+      phoneMasked: '090-1234-5678',
+    });
+    expect(parsePhoneE164('+12423591234')).toEqual({
+      countryIso: 'BS',
+      phoneMasked: '(242) 359-1234',
+    });
+    expect(parsePhoneE164('+999123')).toBeNull();
   });
 });
 

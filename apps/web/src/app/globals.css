@@ -140,6 +140,34 @@
   --chart-5: var(--coral-vivo);
 }
 
+/*
+ * O onboarding é deliberadamente uma experiência só clara. O escopo redefine os
+ * tokens semânticos no próprio shell para continuar branco mesmo quando `.dark`
+ * estiver no elemento `<html>` por uma preferência salva em outra rota.
+ */
+.onboarding-light {
+  color-scheme: light;
+  --background: var(--branco);
+  --foreground: var(--grafite);
+  --card: var(--branco);
+  --card-foreground: var(--grafite);
+  --popover: var(--branco);
+  --popover-foreground: var(--grafite);
+  --primary: var(--verde-pulso);
+  --primary-foreground: var(--petroleo-vivo);
+  --secondary: var(--nevoa);
+  --secondary-foreground: var(--petroleo-vivo);
+  --muted: var(--nevoa);
+  --muted-foreground: var(--musgo);
+  --accent: var(--verde-pulso-tenue);
+  --accent-foreground: var(--petroleo-vivo);
+  --destructive: var(--coral-vivo);
+  --destructive-foreground: var(--petroleo-vivo);
+  --border: var(--musgo-tenue);
+  --input: var(--musgo-contraste);
+  --ring: var(--petroleo-vivo);
+}
+
 /* --- 3. Exposição para o Tailwind ----------------------------------------- */
 @theme inline {
   /* Tokens de marca: `bg-petroleo`, `text-musgo`, `ring-verde-pulso`, ... */

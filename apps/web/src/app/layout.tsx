@@ -28,7 +28,7 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL(publicEnv.siteUrl),
   title: {
-    default: 'MOVIVO — Ciência que treina com você',
+    default: 'MOVIVO: Ciência que treina com você',
     template: '%s · MOVIVO',
   },
   description:
@@ -41,7 +41,7 @@ export const metadata: Metadata = {
     type: 'website',
     locale: 'pt_BR',
     siteName: 'MOVIVO',
-    title: 'MOVIVO — Ciência que treina com você',
+    title: 'MOVIVO: Ciência que treina com você',
     description:
       'Orientação de treino conversacional no WhatsApp, com supervisão de profissional de Educação Física registrado no CREF.',
   },

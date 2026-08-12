@@ -74,7 +74,7 @@ const items = [
     severity: 'ROUTINE',
     createdAt,
     ageMinutes: 10,
-    title: 'Protocolo aguardando revisão',
+    title: 'Protocolo para Revisão: Maria Teste',
     summary: 'Hipertrofia · 3x por semana',
     status: 'PENDING_REVIEW',
   },

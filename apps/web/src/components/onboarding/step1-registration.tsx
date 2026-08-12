@@ -10,14 +10,31 @@ import {
   type BiologicalSex,
 } from '@movivo/shared';
 
-import { maskPhoneBR, toE164BR, type ConsentItemView } from '@/lib/anamnesis-api';
-import { Checkbox, ChoiceGroup, FieldError, FieldLabel, TextInput } from './fields';
+import {
+  isPhoneComplete,
+  toE164,
+  type ConsentItemView,
+  type PhoneCountryIso,
+} from '@/lib/anamnesis-api';
+import {
+  Checkbox,
+  ChoiceGroup,
+  FieldError,
+  FieldHelp,
+  FieldLabel,
+  QuestionField,
+  QuestionStack,
+  TextInput,
+} from './fields';
+import { DatePicker } from './date-picker';
+import { PhoneInput } from './phone-input';
 import { PhoneOtp } from './phone-otp';
 
 export interface Step1Data {
   name: string;
   birthDate: string;
   biologicalSex: BiologicalSex | null;
+  phoneCountryIso: PhoneCountryIso;
   phoneMasked: string;
   email: string;
 }
@@ -47,8 +64,8 @@ export function Step1Registration({
 }) {
   const age = data.birthDate ? ageInYears(data.birthDate) : null;
   const underAge = age !== null && age < MIN_AGE_YEARS;
-  const phoneDigits = data.phoneMasked.replace(/\D/g, '');
-  const phoneComplete = phoneDigits.length === 11;
+  const phoneComplete = isPhoneComplete(data.phoneCountryIso, data.phoneMasked);
+  const phoneE164 = toE164(data.phoneCountryIso, data.phoneMasked);
   const requiredConsents = consents.filter((c) => c.required);
   const allRequiredAccepted = requiredConsents.every((c) => acceptedConsents.has(c.type));
 
@@ -62,17 +79,16 @@ export function Step1Registration({
     !saving;
 
   return (
-    <div className="flex flex-col gap-8">
+    <QuestionStack className="pb-4">
       <div>
-        <p className="font-mono text-label text-muted-foreground">Etapa 1 de 3</p>
-        <h1 className="text-h1 font-bold">Cadastro pessoal</h1>
+        <h1 className="text-h1 font-bold text-petroleo">Vamos começar por você</h1>
         <p className="mt-2 text-body text-muted-foreground">
-          Precisamos de algumas informações para criar seu perfil e enviar seu treino personalizado
-          pelo WhatsApp.
+          É rápido. Estas informações ajudam o profissional responsável a preparar um treino que
+          faça sentido para a sua rotina.
         </p>
       </div>
 
-      <div className="flex flex-col gap-2">
+      <QuestionField>
         <FieldLabel htmlFor="name">Qual é o seu nome completo?</FieldLabel>
         <TextInput
           id="name"
@@ -80,19 +96,19 @@ export function Step1Registration({
           onChange={(name) => onChange({ ...data, name })}
           autoComplete="name"
         />
-      </div>
+      </QuestionField>
 
-      <div className="flex flex-col gap-2">
+      <QuestionField>
         <FieldLabel htmlFor="birthDate">Qual é a sua data de nascimento?</FieldLabel>
-        <TextInput
+        <DatePicker
           id="birthDate"
-          type="date"
           value={data.birthDate}
           onChange={(birthDate) => onChange({ ...data, birthDate })}
           error={underAge}
+          autoComplete="bday"
         />
         <FieldError message={underAge ? UNDER_AGE_MESSAGE : undefined} />
-      </div>
+      </QuestionField>
 
       <ChoiceGroup<BiologicalSex>
         legend="Qual é o seu sexo biológico?"
@@ -102,35 +118,30 @@ export function Step1Registration({
         ]}
         selected={data.biologicalSex ? [data.biologicalSex] : []}
         onToggle={(biologicalSex) => onChange({ ...data, biologicalSex })}
+        indicatorSide="left"
       />
 
-      <div className="flex flex-col gap-2">
+      <QuestionField>
         <FieldLabel htmlFor="phone">Qual é o seu WhatsApp?</FieldLabel>
-        <p className="text-label text-muted-foreground">
-          Enviaremos seu treino e faremos seu acompanhamento por este número.
-        </p>
-        <TextInput
+        <FieldHelp>Enviaremos seu treino e faremos seu acompanhamento por este número.</FieldHelp>
+        <PhoneInput
           id="phone"
-          type="tel"
-          inputMode="numeric"
-          placeholder="(11) 99999-9999"
-          autoComplete="tel-national"
+          countryIso={data.phoneCountryIso}
           value={data.phoneMasked}
-          onChange={(raw) => onChange({ ...data, phoneMasked: maskPhoneBR(raw) })}
+          onChange={(phoneMasked) => onChange({ ...data, phoneMasked })}
+          onCountryChange={(phoneCountryIso, phoneMasked) =>
+            onChange({ ...data, phoneCountryIso, phoneMasked })
+          }
         />
         {phoneComplete && !phoneVerified && (
-          <PhoneOtp
-            token={token}
-            phoneNumber={toE164BR(data.phoneMasked)}
-            onVerified={onPhoneVerified}
-          />
+          <PhoneOtp token={token} phoneNumber={phoneE164} onVerified={onPhoneVerified} />
         )}
         {phoneVerified && (
-          <p className="text-label font-semibold text-primary">✓ WhatsApp confirmado</p>
+          <p className="text-label font-semibold text-petroleo">✓ WhatsApp confirmado</p>
         )}
-      </div>
+      </QuestionField>
 
-      <div className="flex flex-col gap-2">
+      <QuestionField>
         <FieldLabel htmlFor="email">Qual é o seu e-mail? (opcional)</FieldLabel>
         <TextInput
           id="email"
@@ -139,9 +150,9 @@ export function Step1Registration({
           value={data.email}
           onChange={(email) => onChange({ ...data, email })}
         />
-      </div>
+      </QuestionField>
 
-      <div className="flex flex-col gap-3 rounded-lg border border-input p-4">
+      <div className="flex flex-col gap-3 rounded-xl border border-coral bg-coral/10 p-4">
         <p className="text-body font-semibold">{WHATSAPP_OPERATIONAL_NOTICE.title}</p>
         {WHATSAPP_OPERATIONAL_NOTICE.body.map((paragraph) => (
           <p key={paragraph.slice(0, 24)} className="text-label text-muted-foreground">
@@ -164,15 +175,17 @@ export function Step1Registration({
         ))}
       </div>
 
-      <button
-        type="button"
-        disabled={!canContinue}
-        onClick={onContinue}
-        className="h-11 rounded-lg bg-primary px-6 text-body font-semibold text-primary-foreground shadow-xs transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-      >
-        {saving ? 'Salvando…' : 'CONTINUAR'}
-      </button>
-    </div>
+      <div className="sticky bottom-0 z-10 -mx-5 mt-1 border-t border-border bg-white/95 px-5 py-4 backdrop-blur-sm sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-none">
+        <button
+          type="button"
+          disabled={!canContinue}
+          onClick={onContinue}
+          className="h-[52px] w-full rounded-xl bg-primary px-6 text-body font-semibold text-primary-foreground transition-colors hover:bg-primary/85 disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground"
+        >
+          {saving ? 'Salvando…' : 'Continuar'}
+        </button>
+      </div>
+    </QuestionStack>
   );
 }
 

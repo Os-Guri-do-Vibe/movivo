@@ -10,6 +10,8 @@ import {
   ageInYears,
   anamnesisV2Schema,
   consistencyBarrierSchema,
+  EMPHASIS_MUSCLE_GROUPS,
+  EMPHASIS_REGION_LABELS,
   emphasisRegionSchema,
   onboardingStep1Schema,
   onboardingStep3Schema,
@@ -20,6 +22,7 @@ import {
   PARQ_DECLARATIONS_VERSION,
   PARQ_VERSION,
   pastActivitySchema,
+  PRIMARY_GOAL_LABELS,
   primaryGoalSchema,
   sessionDurationSchema,
   stoppedForSchema,
@@ -52,10 +55,28 @@ describe('vocabulário da anamnese v2 (spec do fundador)', () => {
     expect(primaryGoalSchema.options).toContain('OTHER');
   });
 
+  it('publica os nomes atuais dos objetivos sem alterar os valores internos', () => {
+    expect(PRIMARY_GOAL_LABELS).toMatchObject({
+      GAIN_MUSCLE: 'Hipertrofia',
+      GAIN_STRENGTH: 'Força',
+      LOSE_FAT: 'Emagrecimento',
+      CONDITIONING: 'Condicionamento físico',
+      HEALTH_ENERGY: 'Saúde e bem estar',
+      SPORT_EVENT: 'Competir em fisiculturismo',
+      OTHER: 'Outro',
+    });
+  });
+
   it('tem 11 ênfases, 11 atividades (10 + outra), 10 barreiras (9 + outro)', () => {
     expect(emphasisRegionSchema.options).toHaveLength(11);
     expect(pastActivitySchema.options).toHaveLength(11);
     expect(consistencyBarrierSchema.options).toHaveLength(10);
+  });
+
+  it('publica Braço como opção canônica e prioriza bíceps e tríceps', () => {
+    expect(EMPHASIS_REGION_LABELS.BICEPS).toBe('Braço');
+    expect(EMPHASIS_MUSCLE_GROUPS.BICEPS).toEqual(['bíceps', 'tríceps']);
+    expect(EMPHASIS_MUSCLE_GROUPS.TRICEPS).toEqual(['tríceps']);
   });
 
   it('tem 5 faixas de tempo, 5 faixas de "parado", 4 locais e 10 regiões de dor', () => {
@@ -131,6 +152,21 @@ describe('regras condicionais da etapa 2', () => {
     expect(
       anamnesisV2Schema.safeParse({
         structured: { ...structured, emphasis: ['CHEST', 'BACK'] },
+        freeText: {},
+      }).success,
+    ).toBe(true);
+  });
+
+  it('recusa "Nenhuma" combinada com outra atividade', () => {
+    expect(
+      anamnesisV2Schema.safeParse({
+        structured: { ...structured, pastActivities: ['NONE', 'WEIGHT_TRAINING'] },
+        freeText: {},
+      }).success,
+    ).toBe(false);
+    expect(
+      anamnesisV2Schema.safeParse({
+        structured: { ...structured, pastActivities: ['NONE'] },
         freeText: {},
       }).success,
     ).toBe(true);

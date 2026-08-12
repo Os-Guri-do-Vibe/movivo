@@ -54,14 +54,14 @@ export type PrimaryGoal = z.infer<typeof primaryGoalSchema>;
 
 /** Rótulos exibidos (a UI não inventa texto de opção — Sofia §0.4). */
 export const PRIMARY_GOAL_LABELS: Readonly<Record<PrimaryGoal, string>> = {
-  GAIN_MUSCLE: 'Ganhar massa muscular',
-  GAIN_STRENGTH: 'Ganhar força',
-  LOSE_FAT: 'Reduzir gordura corporal',
-  CONDITIONING: 'Melhorar o condicionamento físico',
-  HEALTH_ENERGY: 'Melhorar minha saúde e disposição',
+  GAIN_MUSCLE: 'Hipertrofia',
+  GAIN_STRENGTH: 'Força',
+  LOSE_FAT: 'Emagrecimento',
+  CONDITIONING: 'Condicionamento físico',
+  HEALTH_ENERGY: 'Saúde e bem estar',
   BUILD_ROUTINE: 'Criar uma rotina de treino',
   RETURN_TO_TRAINING: 'Voltar a treinar',
-  SPORT_EVENT: 'Preparar-me para um esporte ou evento',
+  SPORT_EVENT: 'Competir em fisiculturismo',
   OTHER: 'Outro',
 };
 
@@ -104,7 +104,7 @@ export const EMPHASIS_REGION_LABELS: Readonly<Record<EmphasisRegion, string>> = 
   CHEST: 'Peitoral',
   BACK: 'Costas',
   SHOULDERS: 'Ombros',
-  BICEPS: 'Bíceps',
+  BICEPS: 'Braço',
   TRICEPS: 'Tríceps',
   ABS_CORE: 'Abdômen e core',
   QUADS: 'Quadríceps',
@@ -119,7 +119,8 @@ export const EMPHASIS_MUSCLE_GROUPS: Readonly<Record<EmphasisRegion, readonly st
   CHEST: ['peito'],
   BACK: ['costas'],
   SHOULDERS: ['ombro'],
-  BICEPS: ['bíceps'],
+  // `BICEPS` é o valor canônico do card “Braço”; `TRICEPS` permanece para dados históricos.
+  BICEPS: ['bíceps', 'tríceps'],
   TRICEPS: ['tríceps'],
   ABS_CORE: ['core'],
   QUADS: ['quadríceps'],
@@ -432,6 +433,13 @@ export const anamnesisStructuredSchema = z
     if (new Set(val.emphasis).size !== val.emphasis.length) {
       ctx.addIssue({ code: 'custom', path: ['emphasis'], message: 'Região de ênfase repetida.' });
     }
+    if (val.pastActivities.includes('NONE') && val.pastActivities.length > 1) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['pastActivities'],
+        message: '“Nenhuma” não pode ser combinada com outra atividade.',
+      });
+    }
     // Revelar é tornar obrigatório (Sofia §3.3.6) — o servidor é a autoridade.
     if (val.trainingStatus === 'STOPPED' && !val.stoppedFor) {
       ctx.addIssue({
@@ -541,10 +549,10 @@ export const painAssessmentSchema = z
     /** O que provoca a dor. */
     trigger: z.string().trim().max(FREE_TEXT_LONG).optional(),
     hasProfessionalExplanation: z.boolean().default(false),
-    professionalExplanation: z.string().trim().max(200).optional(),
+    professionalExplanation: z.string().trim().max(500).optional(),
     underMedicalFollowUp: z.boolean().default(false),
     hasAvoidanceRecommendation: z.boolean().default(false),
-    avoidanceRecommendation: z.string().trim().max(200).optional(),
+    avoidanceRecommendation: z.string().trim().max(500).optional(),
   })
   .superRefine((val, ctx) => {
     if (!val.hasPain) {

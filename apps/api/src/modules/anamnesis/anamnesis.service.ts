@@ -493,13 +493,10 @@ export class AnamnesisService {
       if (!created) throw new Error('Falha ao criar usuário no submit da anamnese.');
       return created.id;
     } catch (error) {
-      // 23505 = unique_violation (telefone/e-mail já cadastrado).
-      if (
-        typeof error === 'object' &&
-        error !== null &&
-        'code' in error &&
-        error.code === '23505'
-      ) {
+      // 23505 = unique_violation (telefone/e-mail já cadastrado). O drizzle-orm 0.45
+      // envolve o erro do driver em `DrizzleQueryError`, com o `PostgresError` original
+      // (que carrega o `.code`) em `.cause` — não mais em `error.code` diretamente.
+      if (isUniqueViolation(error)) {
         throw new ConflictException('Já existe um cadastro com este telefone ou e-mail.');
       }
       throw error;
@@ -531,3 +528,14 @@ export class AnamnesisService {
 }
 
 type SessionRow = typeof anamnesisSessions.$inferSelect;
+
+/**
+ * `true` para violação de unicidade do Postgres (23505), em qualquer profundidade de
+ * `.cause` — o `drizzle-orm` 0.45 embrulha o erro do driver em `DrizzleQueryError`, então
+ * o `code` do `PostgresError` original pode estar em `error.cause.code`, não em `error.code`.
+ */
+function isUniqueViolation(error: unknown, depth = 0): boolean {
+  if (depth > 5 || typeof error !== 'object' || error === null) return false;
+  if ('code' in error && error.code === '23505') return true;
+  return 'cause' in error ? isUniqueViolation(error.cause, depth + 1) : false;
+}

@@ -134,6 +134,6 @@ describe('QueueDetail', () => {
     render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
     expect(await screen.findByRole('alert')).toHaveTextContent('Caso indisponível');
     await userEvent.click(screen.getByRole('button', { name: /tentar novamente/i }));
-    expect(await screen.findByText('Protocolo aguardando revisão')).toBeVisible();
+    expect(await screen.findByText('Protocolo para Revisão: Maria Teste')).toBeVisible();
   });
 });

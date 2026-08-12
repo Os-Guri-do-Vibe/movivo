@@ -142,8 +142,9 @@ export default async function ContaPage({ params }: { params: Promise<{ token: s
           🛡
         </span>
         <p className="font-mono text-label text-muted-foreground">
-          Responsabilidade técnica de profissional de Educação Física registrado no CREF. A IA é
-          ferramenta de apoio — a orientação é sempre supervisionada por um profissional.
+          A MOVIVO conta com a responsabilidade técnica de um profissional de Educação Física
+          registrado no CREF. A IA é uma ferramenta de apoio. A orientação é sempre supervisionada
+          por esse profissional.
         </p>
       </footer>
     </Shell>

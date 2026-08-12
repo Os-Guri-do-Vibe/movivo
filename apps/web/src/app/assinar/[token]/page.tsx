@@ -57,7 +57,7 @@ export default async function AssinarPage({
 
         <p className="rounded-lg bg-card p-4 text-body text-card-foreground">
           <strong className="font-semibold">Cancele a qualquer momento.</strong> Sem multa e sem
-          ligação — o cancelamento é feito por você, em poucos toques, na sua conta.
+          ligação. Você faz o cancelamento em poucos toques, na sua conta.
         </p>
       </main>
 
@@ -66,8 +66,9 @@ export default async function AssinarPage({
           🛡
         </span>
         <p className="font-mono text-label text-muted-foreground">
-          Responsabilidade técnica de profissional de Educação Física registrado no CREF. A IA é
-          ferramenta de apoio — a orientação é sempre supervisionada por um profissional.
+          A MOVIVO conta com a responsabilidade técnica de um profissional de Educação Física
+          registrado no CREF. A IA é uma ferramenta de apoio. A orientação é sempre supervisionada
+          por esse profissional.
         </p>
       </footer>
     </div>

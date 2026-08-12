@@ -44,7 +44,7 @@ export const protocolItem: QueueItem = {
   severity: 'ROUTINE',
   createdAt: '2026-08-03T12:00:00.000Z',
   ageMinutes: 10,
-  title: 'Protocolo aguardando revisão',
+  title: 'Protocolo para Revisão: Maria Teste',
   summary: 'Hipertrofia · 3x por semana',
   status: 'PENDING_REVIEW',
 };

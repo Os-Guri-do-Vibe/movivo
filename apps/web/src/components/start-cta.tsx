@@ -32,7 +32,7 @@ export function StartCta() {
       </Button>
 
       <p className="text-label text-muted-foreground">
-        grátis por 7 dias · sem cartão · cancele quando quiser
+        7 dias grátis, sem cartão e com cancelamento a qualquer momento.
       </p>
     </div>
   );
