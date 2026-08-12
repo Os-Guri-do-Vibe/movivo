@@ -2,11 +2,13 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type * as ControlCenterApi from '@/lib/control-center-api';
+
 import { complianceResponse } from '../../../test/control-center-fixtures';
 
 const { getComplianceSummary } = vi.hoisted(() => ({ getComplianceSummary: vi.fn() }));
 vi.mock('@/lib/control-center-api', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/control-center-api')>()),
+  ...(await importOriginal<typeof ControlCenterApi>()),
   getComplianceSummary,
 }));
 
@@ -14,7 +16,8 @@ import { ControlCenterApiError } from '@/lib/control-center-api';
 
 import { ComplianceDashboard } from './compliance-dashboard';
 
-const event = complianceResponse.data.recentAuditEvents[0]!;
+const [event] = complianceResponse.data.recentAuditEvents;
+if (!event) throw new Error('fixture sem eventos de auditoria');
 
 beforeEach(() => getComplianceSummary.mockReset());
 
@@ -31,7 +34,9 @@ describe('ComplianceDashboard', () => {
   it('exibe a trilha de auditoria com identificadores encurtados, nunca o UUID inteiro', async () => {
     getComplianceSummary.mockResolvedValue(complianceResponse);
     render(<ComplianceDashboard />);
-    const row = within(await screen.findByRole('table')).getAllByRole('row')[1]!;
+    const rows = within(await screen.findByRole('table')).getAllByRole('row');
+    const row = rows[1];
+    if (!row) throw new Error('tabela sem linha de dados');
     expect(within(row).getByText('11/08/2026, 11:30')).toBeVisible();
     expect(within(row).getByText('HEALTH_DATA_READ')).toBeVisible();
     expect(within(row).getByText(`#${event.actorId.slice(0, 8)}`)).toBeVisible();

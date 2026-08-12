@@ -210,7 +210,9 @@ describe('useControlCenterResource', () => {
     const load = vi.fn((signal?: AbortSignal) => new Promise<string>(() => void signal));
     const { unmount } = render(<Probe load={load} />);
     await waitFor(() => expect(load).toHaveBeenCalled());
-    const signal = load.mock.calls[0]![0];
+    const call = load.mock.calls[0];
+    if (!call) throw new Error('load não foi chamado');
+    const signal = call[0];
     expect(signal?.aborted).toBe(false);
     unmount();
     expect(signal?.aborted).toBe(true);

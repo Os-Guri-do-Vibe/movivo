@@ -2,11 +2,13 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type * as ControlCenterApi from '@/lib/control-center-api';
+
 import { studentsResponse } from '../../../test/control-center-fixtures';
 
 const { getStudents } = vi.hoisted(() => ({ getStudents: vi.fn() }));
 vi.mock('@/lib/control-center-api', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/control-center-api')>()),
+  ...(await importOriginal<typeof ControlCenterApi>()),
   getStudents,
 }));
 
@@ -18,6 +20,8 @@ beforeEach(() => getStudents.mockReset());
 
 describe('StudentsDashboard', () => {
   it('lista os alunos do escopo e rotula ausência de dado em vez de deixar vazio', async () => {
+    const [firstStudent] = studentsResponse.data.students;
+    if (!firstStudent) throw new Error('fixture sem alunos');
     getStudents.mockResolvedValue(studentsResponse);
     render(<StudentsDashboard />);
     expect(await screen.findByRole('heading', { name: 'Ana Souza' })).toBeVisible();
@@ -26,7 +30,7 @@ describe('StudentsDashboard', () => {
     expect(screen.getByText('+5511999990002')).toBeVisible();
     expect(screen.getAllByRole('link', { name: 'Abrir visão 360' })[0]).toHaveAttribute(
       'href',
-      `/dashboard/alunos/${studentsResponse.data.students[0]!.id}`,
+      `/dashboard/alunos/${firstStudent.id}`,
     );
   });
 

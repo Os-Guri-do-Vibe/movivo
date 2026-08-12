@@ -2,11 +2,13 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type * as ControlCenterApi from '@/lib/control-center-api';
+
 import { marketingResponse } from '../../../test/control-center-fixtures';
 
 const { getMarketing } = vi.hoisted(() => ({ getMarketing: vi.fn() }));
 vi.mock('@/lib/control-center-api', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/control-center-api')>()),
+  ...(await importOriginal<typeof ControlCenterApi>()),
   getMarketing,
 }));
 

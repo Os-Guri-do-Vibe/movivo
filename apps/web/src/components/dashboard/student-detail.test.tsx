@@ -2,11 +2,13 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type * as ControlCenterApi from '@/lib/control-center-api';
+
 import { studentDetailResponse } from '../../../test/control-center-fixtures';
 
 const { getStudent } = vi.hoisted(() => ({ getStudent: vi.fn() }));
 vi.mock('@/lib/control-center-api', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/control-center-api')>()),
+  ...(await importOriginal<typeof ControlCenterApi>()),
   getStudent,
 }));
 
@@ -82,14 +84,13 @@ describe('StudentDetail', () => {
   });
 
   it('mostra "Não assinado" quando o protocolo ainda não tem assinatura CREF', async () => {
+    const { currentProtocol } = studentDetailResponse.data.student;
+    if (!currentProtocol) throw new Error('fixture sem protocolo vigente');
     getStudent.mockResolvedValue({
       data: {
         student: {
           ...studentDetailResponse.data.student,
-          currentProtocol: {
-            ...studentDetailResponse.data.student.currentProtocol!,
-            signedAt: null,
-          },
+          currentProtocol: { ...currentProtocol, signedAt: null },
         },
       },
       meta: studentDetailResponse.meta,
