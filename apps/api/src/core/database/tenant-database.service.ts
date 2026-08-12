@@ -31,15 +31,16 @@
  *    na aplicação, que **nunca** aceita `user_id` do cliente (IDOR — Sato §8.1).
  */
 import { Inject, Injectable } from '@nestjs/common';
+import { ControlCenterRole, type ControlCenterRole as ControlCenterRoleType } from '@movivo/shared';
 import { sql } from 'drizzle-orm';
 
 import { DRIZZLE } from './database.constants';
 import { type DrizzleClient } from './database.module';
 
 /** Papéis de usuário aceitos em `runAsUser` (os que a coluna `users.role` guarda). */
-export type TenantRole = 'USER' | 'PROFESSIONAL' | 'ADMIN';
+export type TenantRole = ControlCenterRoleType;
 
-const ALLOWED_ROLES: ReadonlySet<string> = new Set<TenantRole>(['USER', 'PROFESSIONAL', 'ADMIN']);
+const ALLOWED_ROLES: ReadonlySet<string> = new Set(Object.values(ControlCenterRole));
 
 /** Tipo do handle transacional que o callback recebe (o `tx` do Drizzle). */
 export type TenantTransaction = Parameters<Parameters<DrizzleClient['transaction']>[0]>[0];

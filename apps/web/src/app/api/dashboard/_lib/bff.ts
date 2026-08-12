@@ -3,6 +3,13 @@ import 'server-only';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 
+import {
+  defaultCapabilitiesForRole,
+  isDashboardCapability,
+  isDashboardRole,
+  type DashboardCapability,
+  type DashboardRole,
+} from '@/lib/control-center-access';
 import { publicEnv } from '@/lib/env';
 
 export const BFF_ACCESS_COOKIE = 'movivo_bff_access';
@@ -17,16 +24,15 @@ export const DASHBOARD_PRIVATE_HEADERS = {
   Pragma: 'no-cache',
 } as const;
 
-type DashboardRole = 'PROFESSIONAL';
-
 export interface DashboardSession {
   id: string;
   role: DashboardRole;
+  capabilities: DashboardCapability[];
 }
 
 interface AuthPayload {
   accessToken: string;
-  user: { id: string; role: string };
+  user: { id: string; role: string; capabilities?: string[] };
 }
 
 export class BffError extends Error {
@@ -54,7 +60,13 @@ function parseAuthPayload(value: unknown): AuthPayload {
   }
   return {
     accessToken: value.accessToken,
-    user: { id: value.user.id, role: value.user.role },
+    user: {
+      id: value.user.id,
+      role: value.user.role,
+      capabilities: Array.isArray(value.user.capabilities)
+        ? value.user.capabilities.filter((entry): entry is string => typeof entry === 'string')
+        : undefined,
+    },
   };
 }
 
@@ -95,10 +107,17 @@ export async function clearSession(): Promise<void> {
 }
 
 function toDashboardSession(payload: AuthPayload): DashboardSession {
-  if (payload.user.role !== 'PROFESSIONAL') {
-    throw new BffError(403, 'Acesso permitido somente a profissionais autorizados.');
+  if (!isDashboardRole(payload.user.role)) {
+    throw new BffError(403, 'Esta conta não tem acesso ao Control Center.');
   }
-  return { id: payload.user.id, role: 'PROFESSIONAL' };
+  const capabilities = payload.user.capabilities?.filter(isDashboardCapability);
+  return {
+    id: payload.user.id,
+    role: payload.user.role,
+    capabilities: [
+      ...(capabilities?.length ? capabilities : defaultCapabilitiesForRole(payload.user.role)),
+    ],
+  };
 }
 
 export async function loginBackend(body: unknown): Promise<DashboardSession> {
@@ -170,20 +189,29 @@ async function requestWithAccess(
 }
 
 /** Faz chamada autenticada e executa uma única rotação quando o access expira. */
-interface ProfessionalAccess {
+interface DashboardAccess {
   accessToken: string;
   session: DashboardSession;
 }
 
-function parseProfessionalSession(value: unknown): DashboardSession {
-  if (!isRecord(value) || typeof value.userId !== 'string' || value.role !== 'PROFESSIONAL') {
-    throw new BffError(403, 'Acesso permitido somente a profissionais autorizados.');
+function parseDashboardSession(value: unknown): DashboardSession {
+  if (!isRecord(value) || typeof value.userId !== 'string' || !isDashboardRole(value.role)) {
+    throw new BffError(403, 'Esta conta não tem acesso ao Control Center.');
   }
-  return { id: value.userId, role: 'PROFESSIONAL' };
+  const capabilities = Array.isArray(value.capabilities)
+    ? value.capabilities.filter(isDashboardCapability)
+    : [];
+  return {
+    id: value.userId,
+    role: value.role,
+    capabilities: [
+      ...(capabilities.length ? capabilities : defaultCapabilitiesForRole(value.role)),
+    ],
+  };
 }
 
-/** Valida no servidor que o cookie opaco pertence a um profissional antes de acessar dados de saúde. */
-async function requireProfessionalAccess(): Promise<ProfessionalAccess> {
+/** Valida no servidor que o cookie opaco pertence a um papel interno do Control Center. */
+async function requireDashboardAccess(): Promise<DashboardAccess> {
   const store = await cookies();
   let accessToken = store.get(BFF_ACCESS_COOKIE)?.value;
 
@@ -201,33 +229,60 @@ async function requireProfessionalAccess(): Promise<ProfessionalAccess> {
   }
 
   try {
-    return { accessToken, session: parseProfessionalSession(await parseJson(response)) };
+    return { accessToken, session: parseDashboardSession(await parseJson(response)) };
   } catch (error) {
     await clearSession();
     throw error;
   }
 }
 
-/** Faz chamada autenticada após RBAC profissional e executa uma única rotação do access. */
+/**
+ * Um 403 isolado é esperado no Control Center multi-setor (link direto para um setor
+ * sem capability) e NÃO derruba a sessão. Vários 403 em sequência curta, porém,
+ * parecem sondagem/enumeração de rotas — aí a sessão é encerrada.
+ *
+ * Limiar: 5 negativas em 60s. Um humano clicando errado não passa disso; um script
+ * varrendo os 9 setores passa na primeira volta.
+ *
+ * ponytail: contador em memória do processo — some em cold start e não é compartilhado
+ * entre instâncias serverless. É mitigação best-effort; a autorização real é do backend.
+ * Se precisar de garantia entre instâncias, mover o contador para o Redis já usado pela API.
+ */
+const FORBIDDEN_LIMIT = 5;
+const FORBIDDEN_WINDOW_MS = 60_000;
+const forbiddenHits = new Map<string, number[]>();
+
+async function registerForbidden(sessionId: string): Promise<void> {
+  const now = Date.now();
+  const hits = (forbiddenHits.get(sessionId) ?? []).filter((at) => now - at < FORBIDDEN_WINDOW_MS);
+  hits.push(now);
+  if (hits.length >= FORBIDDEN_LIMIT) {
+    forbiddenHits.delete(sessionId);
+    await clearSession();
+    return;
+  }
+  forbiddenHits.set(sessionId, hits);
+  if (forbiddenHits.size > 1000) forbiddenHits.clear();
+}
+
+/** Faz chamada autenticada após validar a sessão interna e executa uma rotação do access. */
 export async function authenticatedBackendFetch(
   path: string,
   init: RequestInit = {},
 ): Promise<Response> {
-  const { accessToken } = await requireProfessionalAccess();
+  const { accessToken, session } = await requireDashboardAccess();
   let response = await requestWithAccess(path, init, accessToken);
-  if (response.status !== 401) {
-    if (response.status === 403) await clearSession();
-    return response;
-  }
+  if (response.status === 403) await registerForbidden(session.id);
+  if (response.status !== 401) return response;
 
   const refreshed = await refreshBackend();
   response = await requestWithAccess(path, init, refreshed.accessToken);
-  if (response.status === 401 || response.status === 403) await clearSession();
+  if (response.status === 401) await clearSession();
   return response;
 }
 
 export async function readBackendSession(): Promise<DashboardSession> {
-  return (await requireProfessionalAccess()).session;
+  return (await requireDashboardAccess()).session;
 }
 
 export async function logoutBackend(): Promise<void> {

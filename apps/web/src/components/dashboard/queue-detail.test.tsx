@@ -105,7 +105,7 @@ describe('QueueDetail', () => {
         'Registro profissional.',
       ),
     );
-    expect(navigation.replace).toHaveBeenCalledWith('/dashboard');
+    expect(navigation.replace).toHaveBeenCalledWith('/dashboard/educacao-fisica');
   });
 
   it('resolve sinalização de CHECKIN SAFETY pelo endpoint de handoff e atualiza a fila', async () => {
@@ -124,7 +124,7 @@ describe('QueueDetail', () => {
         'Revisão profissional registrada.',
       ),
     );
-    expect(navigation.replace).toHaveBeenCalledWith('/dashboard');
+    expect(navigation.replace).toHaveBeenCalledWith('/dashboard/educacao-fisica');
   });
 
   it('oferece recuperação quando o detalhe falha', async () => {

@@ -4,8 +4,15 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 import { BFF_ACCESS_COOKIE, BFF_REFRESH_COOKIE } from '@/app/api/dashboard/_lib/bff';
+import {
+  defaultCapabilitiesForRole,
+  hasAllCapabilities,
+  isDashboardCapability,
+  isDashboardRole,
+  type DashboardCapability,
+  type DashboardRole,
+} from '@/lib/control-center-access';
 import { publicEnv } from '@/lib/env';
-import type { DashboardRole } from '@/lib/dashboard-types';
 
 const API_BASE = (process.env.MOVIVO_API_URL?.trim() || publicEnv.apiUrl).replace(/\/$/, '');
 
@@ -20,7 +27,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * expira, redirecionamos ao Route Handler de sessão, que faz a rotação e volta ao
  * dashboard. O identificador retornado por `/auth/me` não é serializado ao cliente.
  */
-export async function requireDashboardRole(nextPath = '/dashboard'): Promise<DashboardRole> {
+export interface ServerDashboardSession {
+  role: DashboardRole;
+  capabilities: DashboardCapability[];
+}
+
+export async function requireDashboardRole(
+  nextPath = '/dashboard',
+): Promise<ServerDashboardSession> {
   const store = await cookies();
   const access = store.get(BFF_ACCESS_COOKIE)?.value;
   const refresh = store.get(BFF_REFRESH_COOKIE)?.value;
@@ -40,8 +54,31 @@ export async function requireDashboardRole(nextPath = '/dashboard'): Promise<Das
   if (!response.ok) redirect('/entrar');
 
   const value = (await response.json().catch(() => null)) as unknown;
-  if (!isRecord(value) || value.role !== 'PROFESSIONAL') {
+  if (!isRecord(value) || !isDashboardRole(value.role)) {
     redirect('/entrar?erro=sem-permissao');
   }
-  return 'PROFESSIONAL';
+  const capabilities = Array.isArray(value.capabilities)
+    ? value.capabilities.filter(isDashboardCapability)
+    : [];
+  return {
+    role: value.role,
+    capabilities: [
+      ...(capabilities.length ? capabilities : defaultCapabilitiesForRole(value.role)),
+    ],
+  };
+}
+
+export async function requireDashboardCapability(
+  required: DashboardCapability | readonly DashboardCapability[],
+  nextPath: string,
+): Promise<ServerDashboardSession> {
+  const session = await requireDashboardRole(nextPath);
+  // AND: mesma semântica de `roleHasCapabilities` no backend — todas as capacidades
+  // declaradas pela rota são exigidas. Um OR aqui renderizaria páginas que o backend
+  // responderia com 403.
+  const expected = Array.isArray(required) ? required : [required];
+  if (!hasAllCapabilities(session.capabilities, ...expected)) {
+    redirect('/dashboard?erro=sem-permissao');
+  }
+  return session;
 }

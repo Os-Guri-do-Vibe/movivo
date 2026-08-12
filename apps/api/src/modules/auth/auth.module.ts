@@ -18,12 +18,14 @@ import { PassportModule } from '@nestjs/passport';
 
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { CapabilitiesGuard } from './capabilities.guard';
 import { JwtStrategy } from './jwt.strategy';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { PasswordService } from './password.service';
 import { RolesGuard } from './roles.guard';
 import { TokenDenylistService } from './token-denylist.service';
 import { TokenService } from './token.service';
+import { UserRoleCacheService } from './user-role-cache.service';
 
 @Module({
   imports: [PassportModule],
@@ -33,10 +35,20 @@ import { TokenService } from './token.service';
     TokenService,
     TokenDenylistService,
     PasswordService,
+    UserRoleCacheService,
     JwtStrategy,
     JwtAuthGuard,
     RolesGuard,
+    CapabilitiesGuard,
   ],
-  exports: [AuthService, TokenService, PasswordService, JwtAuthGuard, RolesGuard],
+  exports: [
+    AuthService,
+    TokenService,
+    PasswordService,
+    UserRoleCacheService,
+    JwtAuthGuard,
+    RolesGuard,
+    CapabilitiesGuard,
+  ],
 })
 export class AuthModule {}

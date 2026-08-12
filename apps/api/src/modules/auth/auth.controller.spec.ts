@@ -84,6 +84,7 @@ describe('endpoints de sanidade', () => {
     expect(controller.me({ userId: 'u1', role: 'USER', jti: 'j1' })).toEqual({
       userId: 'u1',
       role: 'USER',
+      capabilities: [],
     });
   });
 

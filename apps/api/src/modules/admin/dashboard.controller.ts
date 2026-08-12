@@ -12,11 +12,13 @@ export class DashboardController {
   constructor(private readonly dashboard: DashboardService) {}
 
   @Get('queue')
+  @Roles('PROFESSIONAL', 'ADMIN')
   queue(@CurrentUser() actor: AuthenticatedUser) {
     return this.dashboard.queue(actor);
   }
 
   @Sse('queue/events')
+  @Roles('PROFESSIONAL', 'ADMIN')
   @Header('Cache-Control', 'private, no-store, no-transform')
   @Header('X-Accel-Buffering', 'no')
   events(@CurrentUser() actor: AuthenticatedUser) {
@@ -24,6 +26,7 @@ export class DashboardController {
   }
 
   @Get('queue/:kind/:id')
+  @Roles('PROFESSIONAL', 'ADMIN')
   detail(
     @CurrentUser() actor: AuthenticatedUser,
     @Param('kind') kind: string,
@@ -69,6 +72,7 @@ export class DashboardController {
   }
 
   @Get('operations')
+  @Roles('PROFESSIONAL', 'ADMIN')
   operations(@CurrentUser() actor: AuthenticatedUser) {
     return this.dashboard.operations(actor);
   }

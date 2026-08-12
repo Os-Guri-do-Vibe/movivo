@@ -213,7 +213,7 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
     captureDashboardEvent(kind === 'CHECKIN' ? 'cref_checkin_resolved' : 'cref_handoff_resolved', {
       kind,
     });
-    router.replace('/dashboard');
+    router.replace('/dashboard/educacao-fisica');
   }
 
   if (!detail && !error) {
@@ -240,7 +240,7 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
   return (
     <article>
       <Link
-        href="/dashboard"
+        href="/dashboard/educacao-fisica"
         className="inline-flex min-h-11 items-center gap-2 text-label font-medium underline underline-offset-4 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
       >
         <ArrowLeft aria-hidden="true" className="size-4" /> Voltar à fila

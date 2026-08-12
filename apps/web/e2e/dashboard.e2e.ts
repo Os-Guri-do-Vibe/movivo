@@ -9,10 +9,16 @@ test.beforeEach(async ({ request }) => {
 
 async function login(page: Page) {
   await page.goto('/entrar');
-  await page.getByLabel('E-mail profissional').fill('profissional@movivo.test');
+  await page.getByLabel('E-mail corporativo').fill('profissional@movivo.test');
   await page.getByLabel('Senha').fill('senha-segura');
   await page.getByRole('button', { name: 'Entrar com segurança' }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page).toHaveURL(/\/dashboard\/alunos$/);
+  await expect(page.getByRole('heading', { name: 'Alunos' })).toBeVisible();
+}
+
+async function openQueue(page: Page) {
+  await page.getByRole('link', { name: 'Educação Física' }).first().click();
+  await expect(page).toHaveURL(/\/dashboard\/educacao-fisica$/);
   await expect(page.getByRole('heading', { name: 'Fila de supervisão' })).toBeVisible();
 }
 
@@ -42,6 +48,7 @@ test('protege a rota e cria sessão somente em cookies httpOnly', async ({
 
 test('invalida e recarrega a fila ao receber queue.updated por SSE', async ({ page, request }) => {
   await login(page);
+  await openQueue(page);
   const cases = page
     .getByRole('list', { name: 'Itens pendentes por prioridade' })
     .getByRole('listitem');
@@ -55,22 +62,23 @@ test('invalida e recarrega a fila ao receber queue.updated por SSE', async ({ pa
   await expect(page.getByText('Novo protocolo recebido em tempo real')).toBeVisible();
 });
 
-test('recusa ADMIN antes de criar sessão da área profissional', async ({ context, page }) => {
+test('aceita ADMIN e mostra o overview executivo', async ({ context, page }) => {
   await page.goto('/entrar');
-  await page.getByLabel('E-mail profissional').fill('admin@movivo.test');
+  await page.getByLabel('E-mail corporativo').fill('admin@movivo.test');
   await page.getByLabel('Senha').fill('senha-segura');
   await page.getByRole('button', { name: 'Entrar com segurança' }).click();
-  await expect(page.locator('#login-error')).toContainText('somente a profissionais autorizados');
-  await expect(page).toHaveURL(/\/entrar$/);
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole('heading', { name: 'Visão geral' })).toBeVisible();
   expect(
     (await context.cookies()).filter((cookie) => cookie.name.startsWith('movivo_bff_')),
-  ).toEqual([]);
+  ).toHaveLength(2);
 });
 
 test('prioriza segurança e resolve CHECKIN pelo handoff com confirmação explícita', async ({
   page,
 }) => {
   await login(page);
+  await openQueue(page);
   const cases = page
     .getByRole('list', { name: 'Itens pendentes por prioridade' })
     .getByRole('listitem');
@@ -88,12 +96,13 @@ test('prioriza segurança e resolve CHECKIN pelo handoff com confirmação expl�
   await page.getByRole('button', { name: 'Resolver sinalização' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.getByRole('button', { name: 'Confirmar resolução' }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page).toHaveURL(/\/dashboard\/educacao-fisica$/);
   await expect(cases).toHaveCount(3);
 });
 
 test('PAR-Q começa sem decisão e libera apenas após seleção consciente', async ({ page }) => {
   await login(page);
+  await openQueue(page);
   const parq = page.getByRole('listitem').filter({ hasText: 'PAR-Q aguardando liberação' });
   await parq.getByRole('link').click();
   const release = page.getByRole('button', { name: 'Registrar liberação' });
@@ -108,7 +117,8 @@ test('PAR-Q começa sem decisão e libera apenas após seleção consciente', as
 
 test('exibe ausência de amostra sem transformar dado desconhecido em zero', async ({ page }) => {
   await login(page);
-  await page.getByRole('link', { name: 'Operações' }).click();
+  await openQueue(page);
+  await page.getByRole('link', { name: 'Ver operações CREF' }).click();
   await expect(page).toHaveURL(/\/dashboard\/operacoes$/);
   await expect(page.getByText('Sem amostra suficiente')).toBeVisible();
   await expect(

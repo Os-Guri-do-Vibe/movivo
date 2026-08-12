@@ -5,8 +5,8 @@ import Link from 'next/link';
 import { LoginForm } from '@/components/dashboard/login-form';
 
 export const metadata: Metadata = {
-  title: 'Entrar na área CREF',
-  description: 'Acesso restrito à supervisão profissional da MOVIVO.',
+  title: 'Entrar no MOVIVO Control Center',
+  description: 'Acesso restrito à operação interna da MOVIVO.',
   robots: { index: false, follow: false, nocache: true },
 };
 
@@ -18,7 +18,7 @@ export default async function LoginPage({
   const { erro } = await searchParams;
   const initialError =
     erro === 'sem-permissao'
-      ? 'Esta conta não tem permissão para acessar a área CREF.'
+      ? 'Esta conta não tem permissão para acessar o Control Center.'
       : erro === 'sessao-expirada'
         ? 'Sua sessão expirou. Entre novamente.'
         : '';
@@ -38,18 +38,17 @@ export default async function LoginPage({
           <div>
             <p className="font-mono text-label text-muted-foreground">movivo · área restrita</p>
             <h1 id="login-title" className="text-h2 font-bold">
-              Supervisão CREF
+              Control Center
             </h1>
           </div>
         </div>
         <p className="mb-6 text-body text-muted-foreground">
-          Acesso exclusivo ao profissional de Educação Física responsável e à administração
-          autorizada.
+          Plataforma interna para operação, supervisão profissional e monitoramento da MOVIVO.
         </p>
         <LoginForm initialError={initialError} />
         <p className="mt-6 border-t border-border pt-5 text-xs leading-relaxed text-muted-foreground">
-          Sessão protegida com cookies inacessíveis ao JavaScript, rotação e controle de papel. A IA
-          é ferramenta; decisões de liberação e mudanças são humanas.
+          Sessão protegida com cookies inacessíveis ao JavaScript, rotação e acesso por
+          responsabilidade. A IA é ferramenta; decisões de liberação e mudanças são humanas.
         </p>
         <Link
           href="/"

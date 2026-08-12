@@ -372,11 +372,31 @@ describe('DashboardService invariantes de mutacao', () => {
 });
 
 describe('DashboardService leituras operacionais', () => {
-  it('recusa ADMIN em toda a superficie de saude do MVP', async () => {
+  it('libera leituras globais ao ADMIN, mas mantém atos profissionais CREF-only', async () => {
     const { service } = makeSequencedService([]);
-    await expect(service.queue(admin)).rejects.toThrow('Acesso exclusivo');
-    await expect(service.operations(admin)).rejects.toThrow('Acesso exclusivo');
-    expect(() => service.events(admin)).toThrow('Acesso exclusivo');
+    await expect(service.queue(admin)).resolves.toMatchObject({ items: [] });
+    await expect(service.operations(admin)).resolves.toMatchObject({ replays: [] });
+    expect(() => service.events(admin)).not.toThrow();
+    await expect(
+      service.editProtocol(admin, RESOURCE_ID, { content, reason: 'revisão administrativa' }),
+    ).rejects.toThrow('Acesso exclusivo ao profissional CREF');
+    await expect(service.signProtocol(admin, RESOURCE_ID, { confirmation: true })).rejects.toThrow(
+      'Acesso exclusivo ao profissional CREF',
+    );
+    await expect(
+      service.releaseParq(admin, RESOURCE_ID, {
+        decision: 'RELEASED',
+        notes: 'decisão técnica registrada',
+        confirmation: true,
+      }),
+    ).rejects.toThrow('Acesso exclusivo ao profissional CREF');
+    await expect(
+      service.resolveHandoff(admin, RESOURCE_ID, {
+        resolution: 'ENCAMINHADO',
+        notes: 'decisão técnica registrada',
+        confirmation: true,
+      }),
+    ).rejects.toThrow('Acesso exclusivo ao profissional CREF');
   });
 
   it('unifica e prioriza fila SAFETY, ALERT e rotina', async () => {

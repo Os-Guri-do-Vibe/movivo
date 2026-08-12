@@ -32,6 +32,7 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser, Roles } from './roles.decorator';
 import { RolesGuard } from './roles.guard';
 import type { AuthenticatedUser } from './jwt.strategy';
+import { capabilitiesForRole } from './capabilities';
 
 /** Nome do cookie do refresh. Escopo de path restrito a `/auth` — não vaza em outras rotas. */
 const REFRESH_COOKIE = 'movivo_refresh';
@@ -75,7 +76,11 @@ export class AuthController {
   @Get('me')
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: AuthenticatedUser) {
-    return { userId: user.userId, role: user.role };
+    return {
+      userId: user.userId,
+      role: user.role,
+      capabilities: capabilitiesForRole(user.role),
+    };
   }
 
   @Get('admin/ping')

@@ -57,10 +57,17 @@ interface TenantTable {
   anon?: { scope: string; scopeAtInsert: boolean };
   /** Acesso somente quando existe vinculo profissional ativo com o titular. */
   professional?: 'read' | 'write';
+  /**
+   * Leitura operacional do papel `SUPPORT` (Control Center — aba de suporte), restrita
+   * a linhas cujo titular tem `users.role = 'USER'`. Nunca é concedida a tabela com dado
+   * de saúde (anamnese, PAR-Q, protocolo, check-in, conversa): apenas cadastro (`users`)
+   * e status de assinatura (`subscriptions`). Somente SELECT — nunca INSERT/UPDATE/DELETE.
+   */
+  support?: true;
 }
 
 const TENANT_TABLES: ReadonlyArray<TenantTable> = [
-  { table: 'users', column: 'id', professional: 'read' },
+  { table: 'users', column: 'id', professional: 'read', support: true },
   // `consents` tem fase anônima pelo mesmo motivo da anamnese (US-1.2): o
   // consentimento de saúde é registrado na tela-ponte, ANTES de o `users` existir
   // (que só nasce no submit). A âncora nessa fase é `anamnesis_session_id`, escopada
@@ -90,7 +97,7 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   // Sprint 3 (US-3.6): alerta/handoff ao painel CREF — dado de titular, isolado por RLS FORCE.
   { table: 'handoff_alerts', column: 'user_id', professional: 'write' },
   // Sprint 4 (US-4.1): assinatura/dado financeiro do titular — sob a mesma FORCE RLS.
-  { table: 'subscriptions', column: 'user_id', professional: 'read' },
+  { table: 'subscriptions', column: 'user_id', professional: 'read', support: true },
   { table: 'conversations', column: 'user_id', professional: 'read' },
   { table: 'checkins', column: 'user_id', professional: 'read' },
   { table: 'reengagement_nudges', column: 'user_id', professional: 'read' },
@@ -136,7 +143,7 @@ function policyNames(table: string) {
 export function buildRlsPoliciesSql(): string {
   const statements: string[] = [];
 
-  for (const { table, column, anon, professional } of TENANT_TABLES) {
+  for (const { table, column, anon, professional, support } of TENANT_TABLES) {
     const p = policyNames(table);
     const self = `("${column}"::text = ${UID})`;
     const system = `(${ROLE} = 'SYSTEM')`;
@@ -165,7 +172,21 @@ export function buildRlsPoliciesSql(): string {
       anonInsert = anon.scopeAtInsert ? ` OR (${orphan} AND ${scoped})` : ` OR (${orphan})`;
     }
 
-    const visibleRead = `${base}${professional ? ` OR ${linkedProfessional}` : ''}${anonRead}`;
+    // Leitura do papel `SUPPORT`, só para linhas de titular final (`users.role = 'USER'`).
+    // Em `users` a checagem compara a própria coluna: um EXISTS sobre `users` dentro da
+    // policy de `users` reentraria na mesma policy ("infinite recursion detected in policy").
+    // Nas demais tabelas o titular é resolvido por EXISTS — que também passa pela policy de
+    // `users`, logo continua fail-closed se o SUPPORT perder o acesso ao cadastro.
+    const supportRead = support
+      ? table === 'users'
+        ? ` OR (${ROLE} = 'SUPPORT' AND "users"."role" = 'USER')`
+        : ` OR (${ROLE} = 'SUPPORT' AND EXISTS (
+            SELECT 1 FROM public.users su
+            WHERE su.id = "${table}"."${column}" AND su.role = 'USER'
+          ))`
+      : '';
+
+    const visibleRead = `${base}${professional ? ` OR ${linkedProfessional}` : ''}${supportRead}${anonRead}`;
     const visibleWrite = `${base}${professional === 'write' ? ` OR ${linkedProfessional}` : ''}${anonWrite}`;
 
     // Criação de titular / linha de fase anônima: permitida sem contexto de tenant
@@ -214,8 +235,12 @@ export function buildRlsPoliciesSql(): string {
     `CREATE POLICY "${assignment.update}" ON "professional_assignments" FOR UPDATE USING (${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN') WITH CHECK (${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
     `CREATE POLICY "${assignment.delete}" ON "professional_assignments" FOR DELETE USING (${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
     // Mesmo com acesso a audit_logs, o ator nao pode forjar a identidade de auditoria.
+    // O terceiro disjunto cobre o evento de acesso EM MASSA (listagens do Control Center):
+    // nao existe um titular unico a apontar, entao o ator registra o evento SOBRE SI MESMO
+    // (`actor_id = user_id = contexto atual`). Continua impossivel forjar outro ator ou
+    // atribuir o evento a outro titular.
     `DROP POLICY IF EXISTS "audit_logs_rls_insert" ON "audit_logs"`,
-    `CREATE POLICY "audit_logs_rls_insert" ON "audit_logs" FOR INSERT WITH CHECK ((actor_id::text = ${UID} AND ${ROLE} = 'PROFESSIONAL' AND EXISTS (SELECT 1 FROM public.professional_assignments pa WHERE pa.professional_id::text = ${UID} AND pa.user_id = audit_logs.user_id AND pa.active = true AND pa.revoked_at IS NULL) AND public.has_active_health_consent(audit_logs.user_id)) OR ${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
+    `CREATE POLICY "audit_logs_rls_insert" ON "audit_logs" FOR INSERT WITH CHECK ((actor_id::text = ${UID} AND ${ROLE} = 'PROFESSIONAL' AND EXISTS (SELECT 1 FROM public.professional_assignments pa WHERE pa.professional_id::text = ${UID} AND pa.user_id = audit_logs.user_id AND pa.active = true AND pa.revoked_at IS NULL) AND public.has_active_health_consent(audit_logs.user_id)) OR (actor_id::text = ${UID} AND user_id::text = ${UID}) OR ${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
   );
 
   // `;` como separador — executado por `sql.unsafe` (simple query, multi-statement),

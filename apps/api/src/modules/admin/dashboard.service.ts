@@ -86,7 +86,7 @@ export class DashboardService {
   }
 
   async queue(actor: AuthenticatedUser) {
-    const items = await this.scoped(actor, async (tx) => {
+    const items = await this.scopedRead(actor, async (tx) => {
       const [pendingProtocols, alerts, blockedParq] = await Promise.all([
         tx
           .select({
@@ -166,7 +166,7 @@ export class DashboardService {
   }
 
   events(actor: AuthenticatedUser) {
-    this.assertProfessional(actor);
+    this.assertStaffRead(actor);
     return this.queueEvents.stream();
   }
 
@@ -424,7 +424,7 @@ export class DashboardService {
   }
 
   async operations(actor: AuthenticatedUser) {
-    return this.scoped(actor, async (tx) => {
+    return this.scopedRead(actor, async (tx) => {
       const [funnel] = await tx
         .select({
           formStarted: sql<number>`count(distinct ${anamnesisSessions.id})::int`,
@@ -497,7 +497,7 @@ export class DashboardService {
   }
 
   private async protocolDetail(actor: AuthenticatedUser, id: string) {
-    return this.scoped(actor, async (tx) => {
+    return this.scopedRead(actor, async (tx) => {
       const row = await this.requireProtocol(tx, id);
       const [owner] = await tx
         .select({ name: users.name })
@@ -533,7 +533,7 @@ export class DashboardService {
   }
 
   private async parqDetail(actor: AuthenticatedUser, id: string) {
-    const row = await this.scoped(actor, async (tx) => {
+    const row = await this.scopedRead(actor, async (tx) => {
       const [found] = await tx
         .select({
           userId: anamnesisSessions.userId,
@@ -571,7 +571,7 @@ export class DashboardService {
   }
 
   private async checkinDetail(actor: AuthenticatedUser, alertId: string) {
-    const row = await this.scoped(actor, async (tx) => {
+    const row = await this.scopedRead(actor, async (tx) => {
       const [alert] = await tx
         .select({
           userId: handoffAlerts.userId,
@@ -623,7 +623,7 @@ export class DashboardService {
   }
 
   private async handoffDetail(actor: AuthenticatedUser, id: string) {
-    return this.scoped(actor, async (tx) => {
+    return this.scopedRead(actor, async (tx) => {
       const [alert] = await tx
         .select({
           userId: handoffAlerts.userId,
@@ -697,7 +697,9 @@ export class DashboardService {
       action: 'HEALTH_DATA_VIEWED',
       entityType,
       entityId,
-      changes: { purpose: 'professional_supervision' },
+      changes: {
+        purpose: actor.role === 'ADMIN' ? 'administrative_monitoring' : 'professional_supervision',
+      },
     });
   }
 
@@ -707,6 +709,20 @@ export class DashboardService {
   ): Promise<T> {
     this.assertProfessional(actor);
     return this.db.runAsUser(actor.userId, actor.role, callback);
+  }
+
+  private scopedRead<T>(
+    actor: AuthenticatedUser,
+    callback: (tx: TenantTransaction) => Promise<T>,
+  ): Promise<T> {
+    this.assertStaffRead(actor);
+    return this.db.runAsUser(actor.userId, actor.role, callback);
+  }
+
+  private assertStaffRead(actor: AuthenticatedUser): void {
+    if (actor.role !== 'PROFESSIONAL' && actor.role !== 'ADMIN') {
+      throw new ForbiddenException('Acesso exclusivo ao CREF atribuído ou administrador.');
+    }
   }
 
   private assertProfessional(actor: AuthenticatedUser): void {

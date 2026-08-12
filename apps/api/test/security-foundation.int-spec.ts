@@ -14,6 +14,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { CONSENT_TEXTS } from '@movivo/shared';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
@@ -97,8 +98,8 @@ beforeAll(async () => {
   await adminClient`
     INSERT INTO consents (user_id, consent_type, version, accepted)
     VALUES
-      (${userA}::uuid, 'HEALTH_DATA', 'consent-health-2026-08-v2', true),
-      (${userB}::uuid, 'HEALTH_DATA', 'consent-health-2026-08-v2', true)
+      (${userA}::uuid, 'HEALTH_DATA', ${CONSENT_TEXTS.HEALTH_DATA.version}, true),
+      (${userB}::uuid, 'HEALTH_DATA', ${CONSENT_TEXTS.HEALTH_DATA.version}, true)
   `;
   const [professional] = await adminClient<{ id: string }[]>`
     INSERT INTO users (phone_number, name, role, cref_number, cref_region, cref_active)
@@ -132,6 +133,15 @@ afterAll(async () => {
 });
 
 describe('RLS FORCE + SET LOCAL — isolamento entre titulares', () => {
+  it('PROFESSIONAL enxerga somente o titular atribuído com consentimento ativo', async () => {
+    const rows = await tenant.runAsUser(professionalId, 'PROFESSIONAL', async (tx) => {
+      return (await tx.execute(
+        sql`SELECT id FROM users WHERE id IN (${userA}, ${userB}) ORDER BY id`,
+      )) as unknown as Array<{ id: string }>;
+    });
+    expect(rows.map((row) => row.id)).toEqual([userA]);
+  });
+
   it('revogacao oculta o titular do PROFESSIONAL sem recursao e preserva contexto segregado', async () => {
     const rollback = new Error('rollback esperado');
     await expect(
@@ -163,6 +173,51 @@ describe('RLS FORCE + SET LOCAL — isolamento entre titulares', () => {
           SELECT count(*)::int AS count FROM protocols
         `;
         expect(adminProtocols?.count).toBeGreaterThanOrEqual(0);
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
+  });
+
+  it('SUPPORT lê cadastro de titular final, mas nenhum dado de saúde', async () => {
+    const rollback = new Error('rollback esperado');
+    await expect(
+      appClient.begin(async (tx) => {
+        // Um agente de suporte é um `users` com role SUPPORT — criado aqui e desfeito
+        // no rollback, sem sujar o banco compartilhado da suíte.
+        await tx`SELECT set_config('app.current_role', 'SYSTEM', true)`;
+        await tx`SELECT set_config('app.current_user_id', '', true)`;
+        const [agent] = await tx<{ id: string }[]>`
+          INSERT INTO users (phone_number, name, role)
+          VALUES (${phone(4)}, 'Suporte (teste A2)', 'SUPPORT') RETURNING id
+        `;
+
+        await tx`SELECT set_config('app.current_role', 'SUPPORT', true)`;
+        await tx`SELECT set_config('app.current_user_id', ${agent.id}, true)`;
+
+        // Vê o titular final (users.role = 'USER')…
+        const visible = await tx`SELECT id FROM users WHERE id IN (${userA}, ${userB})`;
+        expect(visible).toHaveLength(2);
+        // …e NÃO vê o profissional CREF (papel de staff, não é titular final).
+        const staff = await tx`SELECT id FROM users WHERE id = ${professionalId}::uuid`;
+        expect(staff).toHaveLength(0);
+        // Nenhum dado de saúde: sem policy para SUPPORT nessas tabelas, fail-closed.
+        expect(await tx`SELECT id FROM anamnesis_sessions`).toHaveLength(0);
+        expect(await tx`SELECT id FROM protocols`).toHaveLength(0);
+        expect(await tx`SELECT id FROM consents`).toHaveLength(0);
+
+        // A3: consegue registrar a própria trilha de acesso em massa…
+        await tx`
+          INSERT INTO audit_logs (actor_id, user_id, action, entity_type, entity_id, changes, row_hash)
+          VALUES (${agent.id}::uuid, ${agent.id}::uuid, 'SUPPORT_CUSTOMER_LIST_VIEWED',
+                  'support_customer_list', ${agent.id}::uuid, '{"recordCount":2}'::jsonb, repeat('0', 64))
+        `;
+        // …mas não consegue forjar um evento atribuído a outro titular.
+        await expect(
+          tx`
+            INSERT INTO audit_logs (actor_id, user_id, action, entity_type, entity_id, changes, row_hash)
+            VALUES (${agent.id}::uuid, ${userA}::uuid, 'FORJADO', 'x', ${userA}::uuid, '{}'::jsonb, repeat('0', 64))
+          `,
+        ).rejects.toThrow();
         throw rollback;
       }),
     ).rejects.toBe(rollback);

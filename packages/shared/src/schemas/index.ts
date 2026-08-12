@@ -7,5 +7,6 @@ export * from './anamnesis.schema';
 export * from './auth.schema';
 export * from './common.schema';
 export * from './consent.schema';
+export * from './control-center.schema';
 export * from './protocol.schema';
 export * from './subscription.schema';

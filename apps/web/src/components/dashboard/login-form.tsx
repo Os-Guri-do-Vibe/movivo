@@ -30,10 +30,10 @@ export function LoginForm({ initialError = '' }: { initialError?: string }) {
           typeof value.message === 'string' ? value.message : 'Não foi possível entrar agora.',
         );
       }
-      captureDashboardEvent('cref_login_succeeded');
+      captureDashboardEvent('dashboard_login_succeeded');
       router.replace('/dashboard');
     } catch (caught) {
-      captureDashboardEvent('cref_login_failed');
+      captureDashboardEvent('dashboard_login_failed');
       setError(caught instanceof Error ? caught.message : 'Não foi possível entrar agora.');
     } finally {
       setPending(false);
@@ -44,7 +44,7 @@ export function LoginForm({ initialError = '' }: { initialError?: string }) {
     <form onSubmit={submit} aria-busy={pending} className="flex flex-col gap-5">
       <div className="flex flex-col gap-2">
         <label htmlFor="email" className="text-label font-semibold">
-          E-mail profissional
+          E-mail corporativo
         </label>
         <input
           id="email"

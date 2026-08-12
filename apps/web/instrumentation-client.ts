@@ -21,6 +21,7 @@
  * evento. A decisão sobre consentimento de cookies/replay é da Sprint 1, com a
  * landing real.
  */
+import { sanitizeAnalyticsProperties } from '@/lib/analytics-privacy';
 import { publicEnv } from '@/lib/env';
 
 const key = publicEnv.posthog.key;
@@ -49,6 +50,10 @@ if (key === undefined) {
       /* Session replay entra junto do fluxo de consentimento (Sprint 1) — não antes. */
       disable_session_recording: true,
       autocapture: false,
+      before_send: (event) =>
+        event
+          ? { ...event, properties: sanitizeAnalyticsProperties(event.properties ?? {}) }
+          : event,
       /* O SDK nunca deve derrubar a página; erro de rede é ruído de analytics, não falha. */
       on_request_error: () => undefined,
     });

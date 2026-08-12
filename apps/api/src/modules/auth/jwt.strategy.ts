@@ -21,8 +21,9 @@ import {
 } from 'passport-jwt';
 
 import { AppConfigService } from '../../core/config';
-import type { TenantRole } from '../../core/database';
+import { type TenantRole } from '../../core/database';
 import { TokenDenylistService } from './token-denylist.service';
+import { UserRoleCacheService } from './user-role-cache.service';
 
 export interface AuthenticatedUser {
   userId: string;
@@ -37,6 +38,7 @@ interface JwtPayload {
 }
 
 export const JWT_STRATEGY = 'jwt';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Seleciona a chave pública pelo `kid` do header do token, para o `secretOrKeyProvider`
@@ -65,6 +67,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, JWT_STRATEGY) {
   constructor(
     config: AppConfigService,
     @Inject(TokenDenylistService) private readonly denylist: TokenDenylistService,
+    private readonly roleCache: UserRoleCacheService,
   ) {
     const jwtConfig = config.jwt;
     const keys = new Map<string, string>([[jwtConfig.keyId, jwtConfig.publicKey]]);
@@ -85,8 +88,20 @@ export class JwtStrategy extends PassportStrategy(Strategy, JWT_STRATEGY) {
 
   /** Passa só depois de assinatura+expiração válidas. Aqui aplicamos a denylist. */
   async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
+    if (!UUID_RE.test(payload?.sub ?? '') || !payload?.role || !payload?.jti) {
+      throw new UnauthorizedException('Token de acesso malformado.');
+    }
     if (await this.denylist.isRevoked(payload.jti)) {
       throw new UnauthorizedException('Sessão revogada.');
+    }
+
+    // O papel do JWT é apenas uma alegação assinada. Revalidá-lo contra o papel persistido
+    // revoga privilégios removidos sem aguardar o access de 15 min expirar. O lookup passa
+    // por um cache de 60s no Redis (`UserRoleCacheService`): a revogação continua valendo
+    // em no máximo ~1 minuto — muito abaixo dos 15 min do token — sem uma query por request.
+    const persistedRole = await this.roleCache.get(payload.sub);
+    if (persistedRole !== payload.role) {
+      throw new UnauthorizedException('Papel da sessão não corresponde à conta atual.');
     }
     return { userId: payload.sub, role: payload.role, jti: payload.jti };
   }

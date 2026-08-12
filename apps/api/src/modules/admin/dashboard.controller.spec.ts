@@ -12,12 +12,22 @@ const professional: AuthenticatedUser = {
 };
 
 describe('DashboardController SSE', () => {
-  it('herda RBAC PROFESSIONAL e delega somente o ator autenticado ao service', () => {
+  it('mantém mutações CREF-only e libera a leitura da fila para ADMIN', () => {
     const stream = { subscribe: vi.fn() };
     const events = vi.fn(() => stream);
     const controller = new DashboardController({ events } as unknown as DashboardService);
 
     expect(Reflect.getMetadata(ROLES_KEY, DashboardController)).toEqual(['PROFESSIONAL']);
+    expect(Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.events)).toEqual([
+      'PROFESSIONAL',
+      'ADMIN',
+    ]);
+    expect(
+      Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.signProtocol),
+    ).toBeUndefined();
+    expect(
+      Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.releaseParq),
+    ).toBeUndefined();
     expect(controller.events(professional)).toBe(stream);
     expect(events).toHaveBeenCalledWith(professional);
   });
