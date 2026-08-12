@@ -1,10 +1,48 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  complianceResponse,
+  financeResponse,
+  marketingResponse,
+  overviewResponse,
+  studentDetailResponse,
+  studentsResponse,
+  supportResponse,
+  systemResponse,
+} from '../../test/control-center-fixtures';
+
+import {
+  ControlCenterApiError,
+  getComplianceSummary,
+  getFinanceSummary,
+  getMarketing,
+  getOverview,
+  getStudent,
+  getStudents,
+  getSupportSummary,
+  getSystemSummary,
+  parseControlCenterCompliance,
   parseControlCenterFinance,
   parseControlCenterMarketing,
+  parseControlCenterOverview,
+  parseControlCenterStudent,
+  parseControlCenterStudents,
   parseControlCenterSupport,
+  parseControlCenterSystem,
 } from './control-center-api';
+
+const fetchMock = vi.fn();
+
+function jsonResponse(body: unknown, status = 200) {
+  return { ok: status >= 200 && status < 300, status, json: async () => body };
+}
+
+beforeEach(() => {
+  fetchMock.mockReset();
+  vi.stubGlobal('fetch', fetchMock);
+});
+
+afterEach(() => vi.unstubAllGlobals());
 
 const metric = {
   value: 1,
@@ -18,7 +56,89 @@ const meta = {
   dataQuality: [],
 };
 
+describe('transporte do Control Center', () => {
+  it.each([
+    ['overview', getOverview, overviewResponse],
+    ['marketing', getMarketing, marketingResponse],
+    ['students', getStudents, studentsResponse],
+    ['system', getSystemSummary, systemResponse],
+    ['finance', getFinanceSummary, financeResponse],
+    ['support', getSupportSummary, supportResponse],
+    ['compliance', getComplianceSummary, complianceResponse],
+  ])('%s consulta o próprio setor e devolve o dado validado', async (path, load, payload) => {
+    fetchMock.mockResolvedValue(jsonResponse(payload));
+    await expect(load()).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/dashboard/control/${path}`,
+      expect.objectContaining({ credentials: 'same-origin' }),
+    );
+  });
+
+  it('escapa o id do aluno na rota de detalhe e repassa o AbortSignal', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(studentDetailResponse));
+    const controller = new AbortController();
+    await expect(getStudent('a b/c', controller.signal)).resolves.toEqual(studentDetailResponse);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/dashboard/control/students/a%20b%2Fc',
+      expect.objectContaining({ signal: controller.signal }),
+    );
+  });
+
+  it('traduz 403 em erro de acesso sem vazar detalhe do servidor', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({}, 403));
+    const error = await getOverview().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ControlCenterApiError);
+    expect(error).toMatchObject({ status: 403, message: 'Seu papel não pode acessar este setor.' });
+  });
+
+  it('prefere a mensagem enviada pelo servidor quando ela existe', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ message: 'Setor em manutenção.' }, 503));
+    await expect(getSystemSummary()).rejects.toMatchObject({
+      status: 503,
+      message: 'Setor em manutenção.',
+    });
+  });
+
+  it('usa mensagem genérica quando o corpo do erro não é JSON legível', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => {
+        throw new Error('corpo vazio');
+      },
+    });
+    await expect(getMarketing()).rejects.toMatchObject({
+      status: 500,
+      message: 'Não foi possível carregar este setor.',
+    });
+  });
+
+  it('resposta 200 fora do contrato vira 502 em vez de renderizar dado inválido', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ data: { activeSubscriptions: 42 }, meta }));
+    await expect(getOverview()).rejects.toMatchObject({
+      status: 502,
+      message: 'O setor devolveu dados fora do contrato esperado.',
+    });
+  });
+
+  it('propaga o AbortError da rede sem convertê-lo em erro de contrato', async () => {
+    const abort = new DOMException('Aborted', 'AbortError');
+    fetchMock.mockRejectedValue(abort);
+    await expect(getStudents()).rejects.toBe(abort);
+  });
+});
+
 describe('projeções do Control Center', () => {
+  it.each([
+    ['visão geral', parseControlCenterOverview, overviewResponse],
+    ['sistema', parseControlCenterSystem, systemResponse],
+    ['alunos', parseControlCenterStudents, studentsResponse],
+    ['detalhe do aluno', parseControlCenterStudent, studentDetailResponse],
+    ['compliance', parseControlCenterCompliance, complianceResponse],
+  ])('%s aceita a projeção completa do contrato', (_name, parse, payload) => {
+    expect(parse(payload)).toEqual(payload);
+  });
+
   it('financeiro descarta campos de saúde injetados fora do contrato', () => {
     const parsed = parseControlCenterFinance({
       data: {
@@ -49,6 +169,18 @@ describe('projeções do Control Center', () => {
           segments: [{ dimension: 'PRIMARY_GOAL', value: 'Objetivo', count: 9 }],
           suppressedSegments: 2,
           minimumSegmentSize: 10,
+        },
+        meta,
+      }),
+    ).toThrow();
+  });
+
+  it('recusa métrica sem status de disponibilidade — nulo precisa ser declarado', () => {
+    expect(() =>
+      parseControlCenterOverview({
+        data: {
+          ...overviewResponse.data,
+          northStar: { value: null, unit: 'COUNT', definition: 'Sem status.' },
         },
         meta,
       }),
