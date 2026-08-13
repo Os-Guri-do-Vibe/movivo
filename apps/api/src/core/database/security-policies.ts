@@ -291,6 +291,39 @@ export function buildAuditIntegritySql(appRole: string): string {
   `;
 }
 
+/**
+ * `agent_config` append-only, imposto no banco (US-7.6 / TASK-7.6.2).
+ *
+ * Mesma defesa em profundidade de `audit_logs`, pelo mesmo motivo elevado ao quadrado: uma
+ * configuracao alterada em silencio muda o que a IA diz para TODOS os alunos ao mesmo tempo.
+ * Duas barreiras independentes:
+ *  1. trigger que levanta excecao em UPDATE/DELETE/TRUNCATE (vale ate para quem tem grant);
+ *  2. REVOKE do privilegio na role de runtime (vale ate se a trigger for derrubada).
+ * A tabela nao entra na RLS por titular: e configuracao global, nao dado de aluno. O controle
+ * de quem publica e por capability na API (`AI_CONFIG_WRITE`).
+ */
+export function buildAgentConfigImmutabilitySql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.agent_config_reject_mutation()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    BEGIN
+      RAISE EXCEPTION 'agent_config is append-only' USING ERRCODE = '55000';
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.agent_config_reject_mutation() FROM PUBLIC;
+
+    DROP TRIGGER IF EXISTS trg_agent_config_immutable ON public.agent_config;
+    CREATE TRIGGER trg_agent_config_immutable BEFORE UPDATE OR DELETE ON public.agent_config
+      FOR EACH ROW EXECUTE FUNCTION public.agent_config_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_agent_config_no_truncate ON public.agent_config;
+    CREATE TRIGGER trg_agent_config_no_truncate BEFORE TRUNCATE ON public.agent_config
+      FOR EACH STATEMENT EXECUTE FUNCTION public.agent_config_reject_mutation();
+
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.agent_config FROM ${appRole};
+    GRANT SELECT, INSERT ON public.agent_config TO ${appRole};
+  `;
+}
+
 /** Mutacoes profissionais estreitas, sem conceder UPDATE amplo em users/anamnese. */
 export function buildProfessionalAccessSql(appRole: string): string {
   return `

@@ -11,6 +11,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 
+import { PromptResolverService } from '../intent/prompt-resolver.service';
 import { ContextRepository } from './context.repository';
 import { type RagDoc, SEMANTIC_MEMORY, type SemanticMemoryPort } from './semantic-memory.port';
 import { WorkingMemory } from './working-memory.service';
@@ -44,6 +45,9 @@ export class ContextService {
     private readonly working: WorkingMemory,
     @Inject(SEMANTIC_MEMORY) private readonly semantic: SemanticMemoryPort,
     private readonly llm: LlmRouter,
+    // US-7.6: a transcrição rotula os turnos da agente com o nome publicado no painel —
+    // um nome literal aqui apareceria dentro do próprio prompt e divergiria do resto.
+    private readonly prompts: PromptResolverService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(ContextService.name);
@@ -52,10 +56,11 @@ export class ContextService {
   async build(userId: string, intent: string, message: string): Promise<CoachContext> {
     const sessionDate = currentSessionDate();
 
-    const [episodic, recent, ragDocs] = await Promise.all([
+    const [episodic, recent, ragDocs, agentName] = await Promise.all([
       this.repo.loadEpisodic(userId, sessionDate),
       this.working.recent(userId, sessionDate),
       intent === 'DUVIDA_TECNICA' ? this.semantic.retrieve(message) : Promise.resolve([]),
+      this.prompts.agentName(),
     ]);
 
     const { scrubUser } = episodic;
@@ -70,7 +75,7 @@ export class ContextService {
       .join('\n');
 
     const suffix = [
-      ...recent.map((t) => `${t.role === 'user' ? 'Aluno' : 'MOVI'}: ${t.content}`),
+      ...recent.map((t) => `${t.role === 'user' ? 'Aluno' : agentName}: ${t.content}`),
       `Aluno: ${message}`,
     ].join('\n');
 
@@ -100,8 +105,9 @@ export class ContextService {
 
     const recent = await this.working.recent(userId, sessionDate);
     const scrubUser = await this.repo.loadScrubUser(userId);
+    const agentName = await this.prompts.agentName();
     const transcript = recent
-      .map((t) => `${t.role === 'user' ? 'Aluno' : 'MOVI'}: ${t.content}`)
+      .map((t) => `${t.role === 'user' ? 'Aluno' : agentName}: ${t.content}`)
       .join('\n');
 
     const result = await this.llm.complete({

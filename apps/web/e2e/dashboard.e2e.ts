@@ -12,12 +12,13 @@ async function login(page: Page) {
   await page.getByLabel('E-mail corporativo').fill('profissional@movivo.test');
   await page.getByLabel('Senha').fill('senha-segura');
   await page.getByRole('button', { name: 'Entrar com segurança' }).click();
-  await expect(page).toHaveURL(/\/dashboard\/alunos$/);
-  await expect(page.getByRole('heading', { name: 'Alunos' })).toBeVisible();
+  // Rota padrão por papel (US-7.1): PROFESSIONAL cai na Fila do Profissional.
+  await expect(page).toHaveURL(/\/dashboard\/educacao-fisica$/);
+  await expect(page.getByRole('heading', { name: 'Fila de supervisão' })).toBeVisible();
 }
 
 async function openQueue(page: Page) {
-  await page.getByRole('link', { name: 'Educação Física' }).first().click();
+  await page.getByRole('link', { name: 'Fila do Profissional' }).first().click();
   await expect(page).toHaveURL(/\/dashboard\/educacao-fisica$/);
   await expect(page.getByRole('heading', { name: 'Fila de supervisão' })).toBeVisible();
 }
@@ -118,13 +119,50 @@ test('PAR-Q começa sem decisão e libera apenas após seleção consciente', as
 test('exibe ausência de amostra sem transformar dado desconhecido em zero', async ({ page }) => {
   await login(page);
   await openQueue(page);
-  await page.getByRole('link', { name: 'Ver operações CREF' }).click();
+  await page.getByRole('link', { name: 'Filas & Jobs', exact: true }).first().click();
   await expect(page).toHaveURL(/\/dashboard\/operacoes$/);
   await expect(page.getByText('Sem amostra suficiente')).toBeVisible();
   await expect(
     page.getByLabel('Primeiro treino reportado: métrica ainda indisponível'),
   ).toBeVisible();
   await expect(page.getByText('[PESSOA] relatou dificuldade.')).toBeVisible();
+});
+
+/**
+ * TASK-7.9.4 — o fluxo de integração completo num teste só: login → rota padrão do papel
+ * → pilar → drill-down no item. É o caminho que o fundador percorre para responder "esse
+ * aluno vai cancelar?"; quebrar qualquer elo dele quebra o produto, não só uma tela.
+ */
+test('login → rota padrão do papel → pilar Alunos → ficha do aluno', async ({ page }) => {
+  // `login()` já assere a rota padrão do PROFESSIONAL (/dashboard/educacao-fisica).
+  await login(page);
+
+  await page.getByRole('link', { name: 'Base de alunos', exact: true }).first().click();
+  await expect(page).toHaveURL(/\/dashboard\/alunos$/);
+  await expect(page.getByRole('heading', { name: 'Base de alunos' })).toBeVisible();
+
+  // `> li` e não `getByRole('listitem')`: a lista de sinais de risco dentro do card
+  // também é uma `<ul>`, e o papel casaria com os `li` aninhados.
+  const students = page.getByRole('list', { name: 'Alunos autorizados' }).locator('> li');
+  await expect(students).toHaveCount(1);
+  await expect(students.first()).toContainText('Pessoa Teste');
+  // O risco de cancelamento vem nomeado — número sozinho não gera ação (US-7.4).
+  await expect(students.first()).toContainText('Sem mensagem recebida há 14 dias');
+
+  await students.first().getByRole('link', { name: 'Abrir ficha do aluno' }).click();
+  await expect(page).toHaveURL(/\/dashboard\/alunos\/[0-9a-f-]+$/);
+  await expect(page.getByRole('heading', { name: 'Pessoa Teste' })).toBeVisible();
+  // Timeline única com as 6 origens (US-7.4, TASK-7.4.1).
+  for (const label of [
+    'Anamnese concluída',
+    'Protocolo v1 gerado',
+    'Trial iniciado',
+    'Check-in da semana 2',
+    '12 mensagens trocadas no dia',
+    'Atendimento humano resolvido',
+  ]) {
+    await expect(page.getByText(label)).toBeVisible();
+  }
 });
 
 test('envia CSP com nonce e bloqueia enquadramento do dashboard', async ({ page }) => {

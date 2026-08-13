@@ -140,6 +140,22 @@ async function main(): Promise<void> {
       console.warn('[db:seed] DEV_PROFESSIONAL_PASSWORD_FILE ausente; conta CREF dev ignorada.');
     }
 
+    if (devPassword) {
+      const adminPasswordHash = await argon2.hash(devPassword, { type: argon2.argon2id });
+      await db
+        .insert(users)
+        .values({
+          phoneNumber: '+5555000000098',
+          name: 'Fundador Admin Dev (sintetico)',
+          email: 'admin-dev@example.invalid',
+          status: 'ACTIVE',
+          role: 'ADMIN',
+          passwordHash: adminPasswordHash,
+        })
+        .onConflictDoNothing({ target: users.phoneNumber });
+      console.log('[db:seed] Conta ADMIN sintetica provisionada.');
+    }
+
     console.log(
       `[db:seed] ${inserted.length} usuário(s) inserido(s) nesta execução; ` +
         `${total} no total (idempotente: reexecutar não duplica).`,

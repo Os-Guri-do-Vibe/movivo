@@ -23,6 +23,29 @@ export const ControlCenterCapability = {
   COMPLIANCE_READ: 'control_center.compliance.read',
   AUDIT_READ: 'control_center.audit.read',
   ADMIN_DESTRUCTIVE_REQUEST: 'control_center.admin.destructive.request',
+
+  /**
+   * Dado de saúde do aluno (anamnese, PAR-Q, relato de dor, respostas de check-in
+   * decifradas). Separada de `STUDENTS_READ` de propósito: ver *que* o aluno existe e
+   * qual a situação comercial dele não é a mesma autorização de ver o dado de saúde
+   * dele — que é dado sensível (LGPD, Art. 11). Suporte lê a base de alunos; suporte
+   * não lê saúde. Sempre exigida em conjunto com `STUDENTS_READ` (semântica AND).
+   */
+  STUDENTS_HEALTH_READ: 'control_center.students.health.read',
+
+  FINANCE_WRITE: 'control_center.finance.write',
+  MARKETING_WRITE: 'control_center.marketing.write',
+  SYSTEM_OPERATE: 'control_center.system.operate',
+  /** Ver o pilar IA, incluindo as regras invioláveis L0 (somente leitura) — US-7.6/7.7. */
+  AI_CONFIG_READ: 'control_center.ai.config.read',
+  /** Publicar configuração L2 (persona/tom/nome) e fazer rollback — US-7.6/7.7. */
+  AI_CONFIG_WRITE: 'control_center.ai.config.write',
+
+  // Reservadas: registradas agora para que o RBAC nasça completo, sem uso ativo em
+  // nenhuma rota até as Sprints 8/10/11.
+  AI_KNOWLEDGE_WRITE: 'control_center.ai.knowledge.write',
+  AI_KNOWLEDGE_APPROVE: 'control_center.ai.knowledge.approve',
+  AI_METHODOLOGY_APPROVE: 'control_center.ai.methodology.approve',
 } as const;
 
 export type ControlCenterCapability =

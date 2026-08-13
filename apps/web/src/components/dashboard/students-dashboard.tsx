@@ -1,6 +1,7 @@
 'use client';
 
-import { Search, UserRound } from 'lucide-react';
+import type { ChurnRisk } from '@movivo/shared';
+import { AlertTriangle, Search, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useMemo, useState } from 'react';
 
@@ -22,7 +23,41 @@ function visibleValue(value: string | null): string {
   return value?.trim() || 'Não informado';
 }
 
-export function StudentsDashboard() {
+/**
+ * Risco **comercial** de cancelamento com os sinais nomeados (US-7.4, TASK-7.4.5).
+ * Um número sozinho não gera ação; os sinais que dispararam, sim. Não é leitura sobre
+ * a saúde da pessoa.
+ */
+export function ChurnRiskSignals({ risk }: { risk: ChurnRisk }) {
+  if (risk.score === 0) {
+    return (
+      <p className="mt-4 text-xs text-muted-foreground">
+        Sem sinal de risco de cancelamento no momento.
+      </p>
+    );
+  }
+  return (
+    <div className="mt-4">
+      <p className="text-label font-semibold">Risco de cancelamento: {risk.score} de 3 sinais</p>
+      <ul className="mt-2 space-y-1">
+        {risk.signals.map((signal) => (
+          <li key={signal.code} className="flex items-start gap-2 text-xs text-muted-foreground">
+            <AlertTriangle aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+            {signal.label}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * Base de alunos — tela única (US-7.1, TASK-7.1.4) ordenada por risco de cancelamento
+ * (US-7.4, TASK-7.4.5). O antigo "Suporte" é esta mesma tela sob `SUPPORT_READ`/
+ * `STUDENTS_READ`: sem campo de saúde. O backend já não envia dado de saúde nesta
+ * projeção nem na ficha de quem não tem a capacidade; `canReadHealth` só ajusta a copy.
+ */
+export function StudentsDashboard({ canReadHealth = false }: { canReadHealth?: boolean }) {
   const load = useCallback((signal?: AbortSignal) => getStudents(signal), []);
   const { data, error, forbidden, loading, refresh } = useControlCenterResource(load);
   const [query, setQuery] = useState('');
@@ -50,8 +85,12 @@ export function StudentsDashboard() {
   return (
     <div>
       <SectorHeader
-        title="Alunos"
-        description="Cadastro e situação operacional das pessoas dentro do seu escopo de acesso."
+        title="Base de alunos"
+        description={
+          canReadHealth
+            ? 'Cadastro, situação operacional e ficha completa, ordenados por risco de cancelamento.'
+            : 'Cadastro e situação operacional, ordenados por risco de cancelamento. Dados de saúde não fazem parte deste acesso.'
+        }
         meta={data.meta}
         refreshing={loading}
         onRefresh={() => void refresh()}
@@ -116,11 +155,12 @@ export function StudentsDashboard() {
                   <dd className="mt-1 font-semibold">{visibleValue(student.subscriptionStatus)}</dd>
                 </div>
               </dl>
+              <ChurnRiskSignals risk={student.churnRisk} />
               <Link
                 href={`/dashboard/alunos/${student.id}`}
                 className="mt-4 inline-flex min-h-11 items-center text-label font-semibold underline underline-offset-4 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
               >
-                Abrir visão 360
+                Abrir ficha do aluno
               </Link>
             </li>
           ))}

@@ -22,6 +22,7 @@ import postgres from 'postgres';
 
 import { loadEnv } from '../config/load-env';
 import {
+  buildAgentConfigImmutabilitySql,
   buildAuditIntegritySql,
   buildProfessionalAccessSql,
   buildRlsPoliciesSql,
@@ -197,6 +198,10 @@ async function main(): Promise<void> {
     // Sprint 5: hash chain serializada + bloqueio de UPDATE/DELETE/TRUNCATE no banco.
     await sql.unsafe(buildAuditIntegritySql(appRole));
     console.log('[db:migrate] audit_logs append-only e hash chain reconciliados.');
+
+    // Sprint 7 (US-7.6): agent_config append-only — trigger + REVOKE, mesma dupla barreira.
+    await sql.unsafe(buildAgentConfigImmutabilitySql(appRole));
+    console.log('[db:migrate] agent_config append-only reconciliado.');
 
     // Prova de que o modelo de permissões continua íntegro após a migração.
     const [check] = await sql<{ bypassrls: boolean; owns: number }[]>`

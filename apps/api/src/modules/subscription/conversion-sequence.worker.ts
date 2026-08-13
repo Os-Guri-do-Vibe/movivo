@@ -13,6 +13,7 @@ import { type Job } from 'bullmq';
 import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 
+import { AgentPersonaService } from '../../core/agent-config/agent-persona.service';
 import { AppConfigService } from '../../core/config';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.util';
@@ -58,6 +59,7 @@ export class ConversionSequenceWorker implements OnModuleInit {
     private readonly queues: QueueManager,
     private readonly subs: SubscriptionService,
     private readonly config: AppConfigService,
+    private readonly agentPersona: AgentPersonaService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
     private readonly logger: PinoLogger,
@@ -156,7 +158,7 @@ export class ConversionSequenceWorker implements OnModuleInit {
       {
         userId,
         type: 'COACH_MESSAGE',
-        text: conversionMessage(key, link),
+        text: conversionMessage(key, link, await this.agentPersona.agentName()),
         dedupeId: `conv_${key}`,
       },
       { jobId: `conv-msg_${userId}_${key}` },

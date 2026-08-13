@@ -15,6 +15,7 @@ import { and, eq } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 
+import { AgentPersonaService } from '../../core/agent-config/agent-persona.service';
 import { AppConfigService } from '../../core/config';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { protocols, users } from '../../core/database/schema';
@@ -92,6 +93,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     @Inject(WHATSAPP_TRANSPORT) private readonly transport: WhatsappTransport,
     private readonly healthConsent: HealthConsentService,
     private readonly config: AppConfigService,
+    private readonly agentPersona: AgentPersonaService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(WhatsappOutboundWorker.name);
@@ -257,6 +259,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     return formatProtocolDelivery(
       proto.content as Parameters<typeof formatProtocolDelivery>[0],
       link,
+      await this.agentPersona.agentName(),
     );
   }
 

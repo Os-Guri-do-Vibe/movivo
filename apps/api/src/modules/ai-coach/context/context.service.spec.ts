@@ -36,8 +36,16 @@ function make(overrides?: {
 
   const complete = vi.fn().mockResolvedValue({ text: 'resumo curto' });
   const llm = { complete };
+  const prompts = { agentName: vi.fn(async () => 'MOVI') };
   const logger = { setContext: vi.fn(), info: vi.fn(), warn: vi.fn() };
-  const svc = new ContextService(repo, working, semantic, llm as never, logger as never);
+  const svc = new ContextService(
+    repo,
+    working,
+    semantic,
+    llm as never,
+    prompts as never,
+    logger as never,
+  );
   return { svc, loadEpisodic, upsertSummary, append, retrieve, complete };
 }
 

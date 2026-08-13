@@ -109,7 +109,7 @@ describe('4.7.4 — unit economics sobre o PLAN_CATALOG (determinístico)', () =
 describe('4.7.4 — copy dentro dos guardrails (Sofia §13, sem termos proibidos)', () => {
   const url = 'https://mock.checkout/x';
   const touchpoints: ConversionTouchpoint[] = ['day7', 'day10', 'day13', 'day14', 'winback'];
-  const texts = [...touchpoints.map((t) => conversionMessage(t, url)), dunningMessage(url)];
+  const texts = [...touchpoints.map((t) => conversionMessage(t, url, 'MOVI')), dunningMessage(url)];
 
   it.each(texts.map((t, i) => [i, t] as const))(
     'copy #%i não dispara regra de linguagem',

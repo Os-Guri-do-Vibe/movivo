@@ -3,8 +3,10 @@ import {
   Controller,
   Get,
   Param,
+  ParseIntPipe,
   ParseUUIDPipe,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ControlCenterCapability as Capability } from '@movivo/shared';
@@ -23,8 +25,8 @@ export class ControlCenterController {
 
   @Get('overview')
   @RequireCapabilities(Capability.OVERVIEW_READ)
-  overview() {
-    return this.controlCenter.overview();
+  overview(@CurrentUser() actor: AuthenticatedUser) {
+    return this.controlCenter.overview(actor);
   }
 
   @Get('marketing')
@@ -39,13 +41,23 @@ export class ControlCenterController {
     return this.controlCenter.students(actor);
   }
 
+  /**
+   * Ficha unificada do aluno (US-7.4). `STUDENTS_READ` abre a ficha; a **seção de
+   * saúde** (PAR-Q, relato de dor, evolução declarada, conteúdo de conversa) só entra
+   * no payload para quem também tem `STUDENTS_HEALTH_READ` — o corte é no serviço, não
+   * na UI. Suporte abre a mesma ficha e recebe `health: null`.
+   *
+   * `days` recorta a timeline por período (1..365).
+   */
   @Get('students/:id')
   @RequireCapabilities(Capability.STUDENTS_READ)
   student(
     @CurrentUser() actor: AuthenticatedUser,
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Query('days', new ParseIntPipe({ optional: true })) days?: number,
   ) {
-    return this.controlCenter.student(actor, id);
+    const period = days && days > 0 ? Math.min(days, 365) : undefined;
+    return this.controlCenter.student(actor, id, period);
   }
 
   @Get('system')
@@ -58,12 +70,6 @@ export class ControlCenterController {
   @RequireCapabilities(Capability.FINANCE_READ)
   finance() {
     return this.controlCenter.finance();
-  }
-
-  @Get('support')
-  @RequireCapabilities(Capability.SUPPORT_READ)
-  support(@CurrentUser() actor: AuthenticatedUser) {
-    return this.controlCenter.support(actor);
   }
 
   @Get('compliance')

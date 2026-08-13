@@ -21,6 +21,7 @@ import { loadEnv } from '../src/core/config/load-env';
 import { DRIZZLE } from '../src/core/database/database.constants';
 import type { DrizzleClient } from '../src/core/database/database.module';
 import { knowledgeBase } from '../src/core/database/schema/knowledge-base';
+import { REDIS_CLIENT, REDIS_KEY_BUILDER } from '../src/core/redis';
 import { SEMANTIC_MEMORY } from '../src/modules/ai-coach/context/semantic-memory.port';
 import { FakeEmbedding } from '../src/modules/ai-coach/rag/embedding.port';
 import { FakeReranker } from '../src/modules/ai-coach/rag/reranker.port';
@@ -47,7 +48,7 @@ const migratorDb = drizzle(migratorSql) as unknown as DrizzleClient;
 const configStub = {
   rag: { minCosine: 0.3, rerankMinScore: 0, topK: 3, candidates: 20 },
 } as never;
-const loggerStub = { setContext: () => undefined } as never;
+const loggerStub = { setContext: () => undefined, warn: () => undefined } as never;
 
 let app: INestApplication;
 let rag: RagService;
@@ -57,7 +58,15 @@ beforeAll(async () => {
   await app.init();
   const appDb = app.get<DrizzleClient>(DRIZZLE);
   // RagService lendo via movivo_app (SELECT), com threshold de dev.
-  rag = new RagService(appDb, new FakeEmbedding(), new FakeReranker(), configStub, loggerStub);
+  rag = new RagService(
+    appDb,
+    new FakeEmbedding(),
+    new FakeReranker(),
+    configStub,
+    loggerStub,
+    app.get(REDIS_CLIENT),
+    app.get(REDIS_KEY_BUILDER),
+  );
 
   await migratorDb.delete(knowledgeBase); // base limpa
   await indexCorpus(migratorDb, SEED_CORPUS, new FakeEmbedding());

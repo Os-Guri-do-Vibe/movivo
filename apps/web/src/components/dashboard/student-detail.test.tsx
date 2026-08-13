@@ -45,12 +45,14 @@ describe('StudentDetail', () => {
   });
 
   it('destaca a exigência de revisão CREF quando o aluno está bloqueado', async () => {
+    const { health } = studentDetailResponse.data.student;
+    if (!health) throw new Error('fixture sem dado de saúde');
     getStudent.mockResolvedValue({
       data: {
         student: {
           ...studentDetailResponse.data.student,
           requiresProfessionalReview: true,
-          parqState: 'BLOCKED',
+          health: { ...health, parqState: 'BLOCKED' },
         },
       },
       meta: studentDetailResponse.meta,
@@ -70,7 +72,7 @@ describe('StudentDetail', () => {
           subscriptionStatus: null,
           protocolStatus: null,
           anamnesisStatus: null,
-          parqState: null,
+          health: null,
           routine: null,
           currentProtocol: null,
         },
@@ -97,6 +99,89 @@ describe('StudentDetail', () => {
     });
     render(<StudentDetail id={studentId} />);
     expect(await screen.findByText('Não assinado')).toBeVisible();
+  });
+
+  it('mescla as 6 origens numa timeline única em ordem cronológica decrescente', async () => {
+    getStudent.mockResolvedValue(studentDetailResponse);
+    render(<StudentDetail id={studentId} />);
+    expect(await screen.findByRole('heading', { name: 'Linha do tempo do aluno' })).toBeVisible();
+    const heading = screen.getByRole('heading', { name: 'Linha do tempo do aluno' });
+    if (!heading.parentElement) throw new Error('heading sem parentElement');
+    const items = heading.parentElement.querySelectorAll('ol > li');
+    const rendered = [...items].map((item) => item.textContent ?? '');
+    expect(rendered).toHaveLength(studentDetailResponse.data.student.timeline.length);
+    for (const kind of [
+      'Anamnese',
+      'Protocolo',
+      'Check-in',
+      'Conversa',
+      'Assinatura',
+      'Atendimento humano',
+    ]) {
+      expect(rendered.some((entry) => entry.includes(kind))).toBe(true);
+    }
+    const times = [...items].map((item) => {
+      const time = item.querySelector('time');
+      if (!time) throw new Error('item da timeline sem <time>');
+      return time.dateTime;
+    });
+    expect(times).toEqual([...times].sort().reverse());
+  });
+
+  it('rotula a adesão como declarada e nomeia a dependência do treino verificado', async () => {
+    getStudent.mockResolvedValue(studentDetailResponse);
+    render(<StudentDetail id={studentId} />);
+    expect(await screen.findByRole('heading', { name: 'Adesão declarada' })).toBeVisible();
+    expect(screen.getByText(/Declarado via check-in/)).toHaveTextContent('workout_completions');
+    expect(screen.getByText('75.0%')).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Evolução declarada por semana' })).toBeVisible();
+  });
+
+  it('mostra o sinal de qualidade da IA com a ocorrência já anonimizada', async () => {
+    getStudent.mockResolvedValue(studentDetailResponse);
+    render(<StudentDetail id={studentId} />);
+    expect(
+      await screen.findByRole('heading', { name: 'Qualidade das respostas da IA' }),
+    ).toBeVisible();
+    expect(screen.getByText(/Resposta bloqueada para \[nome\]/)).toBeVisible();
+  });
+
+  it('sem a capacidade de saúde, a ficha existe e a seção de saúde não vem do servidor', async () => {
+    const { health, ...student } = studentDetailResponse.data.student;
+    expect(health).not.toBeNull();
+    getStudent.mockResolvedValue({
+      data: {
+        student: { ...student, health: null, aiQuality: { ...student.aiQuality, occurrences: [] } },
+      },
+      meta: studentDetailResponse.meta,
+    });
+    render(<StudentDetail id={studentId} />);
+    expect(await screen.findByRole('heading', { name: 'Ana Souza' })).toBeVisible();
+    expect(screen.getByText(/Seu acesso não inclui informações de saúde/)).toBeVisible();
+    expect(screen.queryByText('PAR-Q')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Relatos de desconforto' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Evolução declarada por semana' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('nomeia o risco de cancelamento em termos comerciais, com os sinais que dispararam', async () => {
+    getStudent.mockResolvedValue(studentDetailResponse);
+    render(<StudentDetail id={studentId} />);
+    expect(await screen.findByRole('heading', { name: 'Risco de cancelamento' })).toBeVisible();
+    expect(screen.getByText('Check-in enviado há 4 dias e ainda sem resposta')).toBeVisible();
+  });
+
+  /** Guardrail de linguagem (Sofia §13, inegociável): checagem literal na copy da tela. */
+  it('não usa termo clínico nem promessa de resultado em nenhum ponto da tela', async () => {
+    getStudent.mockResolvedValue(studentDetailResponse);
+    const { container } = render(<StudentDetail id={studentId} />);
+    await screen.findByRole('heading', { name: 'Ana Souza' });
+    expect(container.textContent).not.toMatch(
+      /diagn[óo]stic|tratamento|quadro cl[íi]nic|resultado garantido/i,
+    );
   });
 
   it('em 403 não oferece nova tentativa', async () => {

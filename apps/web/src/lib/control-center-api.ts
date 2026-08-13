@@ -1,11 +1,18 @@
 import {
+  agentConfigHistoryResponseSchema,
+  agentPersonaResponseSchema,
+  inviolableRulesResponseSchema,
+  type AgentConfigHistoryResponse,
+  type AgentPersonaResponse,
+  type InviolableRulesResponse,
+  type PublishAgentConfigInput,
+  type RollbackAgentConfigInput,
   controlCenterComplianceResponseSchema,
   controlCenterFinanceResponseSchema,
   controlCenterMarketingResponseSchema,
   controlCenterOverviewResponseSchema,
   controlCenterStudentDetailResponseSchema,
   controlCenterStudentsResponseSchema,
-  controlCenterSupportResponseSchema,
   controlCenterSystemResponseSchema,
   type ControlCenterComplianceResponse,
   type ControlCenterFinanceResponse,
@@ -13,7 +20,6 @@ import {
   type ControlCenterOverviewResponse,
   type ControlCenterStudentDetailResponse,
   type ControlCenterStudentsResponse,
-  type ControlCenterSupportResponse,
   type ControlCenterSystemResponse,
 } from '@movivo/shared';
 
@@ -69,8 +75,6 @@ export const parseControlCenterSystem = (value: unknown) =>
   controlCenterSystemResponseSchema.parse(value);
 export const parseControlCenterFinance = (value: unknown) =>
   controlCenterFinanceResponseSchema.parse(value);
-export const parseControlCenterSupport = (value: unknown) =>
-  controlCenterSupportResponseSchema.parse(value);
 export const parseControlCenterCompliance = (value: unknown) =>
   controlCenterComplianceResponseSchema.parse(value);
 
@@ -105,12 +109,61 @@ export function getFinanceSummary(signal?: AbortSignal): Promise<ControlCenterFi
   return request('finance', controlCenterFinanceResponseSchema, signal);
 }
 
-export function getSupportSummary(signal?: AbortSignal): Promise<ControlCenterSupportResponse> {
-  return request('support', controlCenterSupportResponseSchema, signal);
-}
-
 export function getComplianceSummary(
   signal?: AbortSignal,
 ): Promise<ControlCenterComplianceResponse> {
   return request('compliance', controlCenterComplianceResponseSchema, signal);
+}
+
+/* --------------------------------- Pilar IA (US-7.7) --------------------------------- */
+
+export function getAgentPersona(signal?: AbortSignal): Promise<AgentPersonaResponse> {
+  return request('ai/persona', agentPersonaResponseSchema, signal);
+}
+
+export function getAgentConfigHistory(signal?: AbortSignal): Promise<AgentConfigHistoryResponse> {
+  return request('ai/persona/history', agentConfigHistoryResponseSchema, signal);
+}
+
+export function getInviolableRules(signal?: AbortSignal): Promise<InviolableRulesResponse> {
+  return request('ai/inviolable-rules', inviolableRulesResponseSchema, signal);
+}
+
+/**
+ * Mutações do pilar IA. O servidor é a autoridade: a validação client-side existe para dar
+ * erro cedo, e a capability `AI_CONFIG_WRITE` é exigida no endpoint — esconder o botão na UI
+ * nunca foi o controle de acesso.
+ */
+async function mutate<T>(path: string, body: unknown, schema: Parser<T>): Promise<T> {
+  const response = await fetch(`/api/dashboard/control/${path}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const value = (await response.json().catch(() => null)) as unknown;
+  if (!response.ok) {
+    const message =
+      isRecord(value) && typeof value.message === 'string'
+        ? value.message
+        : response.status === 403
+          ? 'Seu papel pode ver a configuração, mas não publicar.'
+          : 'Não foi possível concluir a publicação.';
+    throw new ControlCenterApiError(response.status, message);
+  }
+  try {
+    return schema.parse(value);
+  } catch {
+    throw new ControlCenterApiError(502, 'A publicação devolveu dados fora do contrato esperado.');
+  }
+}
+
+export function publishAgentPersona(input: PublishAgentConfigInput): Promise<AgentPersonaResponse> {
+  return mutate('ai/persona', input, agentPersonaResponseSchema);
+}
+
+export function rollbackAgentPersona(
+  input: RollbackAgentConfigInput,
+): Promise<AgentPersonaResponse> {
+  return mutate('ai/persona/rollback', input, agentPersonaResponseSchema);
 }

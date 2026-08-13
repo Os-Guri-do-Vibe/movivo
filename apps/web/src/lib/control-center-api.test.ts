@@ -7,7 +7,6 @@ import {
   overviewResponse,
   studentDetailResponse,
   studentsResponse,
-  supportResponse,
   systemResponse,
 } from '../../test/control-center-fixtures';
 
@@ -19,7 +18,6 @@ import {
   getOverview,
   getStudent,
   getStudents,
-  getSupportSummary,
   getSystemSummary,
   parseControlCenterCompliance,
   parseControlCenterFinance,
@@ -27,7 +25,6 @@ import {
   parseControlCenterOverview,
   parseControlCenterStudent,
   parseControlCenterStudents,
-  parseControlCenterSupport,
   parseControlCenterSystem,
 } from './control-center-api';
 
@@ -63,7 +60,6 @@ describe('transporte do Control Center', () => {
     ['students', getStudents, studentsResponse],
     ['system', getSystemSummary, systemResponse],
     ['finance', getFinanceSummary, financeResponse],
-    ['support', getSupportSummary, supportResponse],
     ['compliance', getComplianceSummary, complianceResponse],
   ])('%s consulta o próprio setor e devolve o dado validado', async (path, load, payload) => {
     fetchMock.mockResolvedValue(jsonResponse(payload));
@@ -142,12 +138,7 @@ describe('projeções do Control Center', () => {
   it('financeiro descarta campos de saúde injetados fora do contrato', () => {
     const parsed = parseControlCenterFinance({
       data: {
-        activeSubscriptions: metric,
-        contractedMrr: { ...metric, unit: 'BRL' },
-        aiCost: { ...metric, unit: 'BRL' },
-        whatsappCost: { ...metric, unit: 'BRL' },
-        infrastructureCost: { ...metric, unit: 'BRL' },
-        receivedRevenue: { ...metric, unit: 'BRL' },
+        ...financeResponse.data,
         healthConditions: ['não pode aparecer'],
       },
       meta,
@@ -176,21 +167,31 @@ describe('projeções do Control Center', () => {
   });
 
   it('recusa métrica sem status de disponibilidade — nulo precisa ser declarado', () => {
+    const [firstPillar, ...restPillars] = overviewResponse.data.pillars;
+    expect(firstPillar).toBeDefined();
     expect(() =>
       parseControlCenterOverview({
         data: {
-          ...overviewResponse.data,
-          northStar: { value: null, unit: 'COUNT', definition: 'Sem status.' },
+          pillars: [
+            {
+              ...firstPillar,
+              headline: {
+                ...firstPillar?.headline,
+                metric: { value: null, unit: 'COUNT', definition: 'Sem status.' },
+              },
+            },
+            ...restPillars,
+          ],
         },
         meta,
       }),
     ).toThrow();
   });
 
-  it('suporte descarta conteúdo de saúde e treino fora da projeção', () => {
-    const parsed = parseControlCenterSupport({
+  it('lista de alunos descarta conteúdo de saúde fora da projeção', () => {
+    const parsed = parseControlCenterStudents({
       data: {
-        customers: [
+        students: [
           {
             id: '11111111-1111-4111-8111-111111111111',
             name: 'Pessoa',
@@ -198,12 +199,15 @@ describe('projeções do Control Center', () => {
             phoneNumber: '+5511999999999',
             status: 'ACTIVE',
             subscriptionStatus: 'ACTIVE',
+            protocolStatus: null,
+            churnRisk: { score: 0, signals: [] },
             parqState: 'BLOQUEADO',
           },
         ],
+        aiBlockedRate: { value: 0, unit: 'PERCENT', status: 'AVAILABLE', definition: 'Zero.' },
       },
       meta,
     });
-    expect(parsed.data.customers[0]).not.toHaveProperty('parqState');
+    expect(parsed.data.students[0]).not.toHaveProperty('parqState');
   });
 });

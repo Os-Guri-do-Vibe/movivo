@@ -3,6 +3,7 @@
  *
  * Convenção de nomes: `<recurso>.schema.ts`, export `<nome>Schema` + type inferido.
  */
+export * from './agent-config.schema';
 export * from './anamnesis.schema';
 export * from './auth.schema';
 export * from './common.schema';

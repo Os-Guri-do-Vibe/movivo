@@ -23,6 +23,7 @@ import { ContextService } from './context/context.service';
 import { SEMANTIC_MEMORY } from './context/semantic-memory.port';
 import { WorkingMemory } from './context/working-memory.service';
 import { IntentClassifier } from './intent/intent-classifier.service';
+import { PromptResolverService } from './intent/prompt-resolver.service';
 import { IntentRepository } from './intent/intent.repository';
 import { EMBEDDING_PORT, FakeEmbedding } from './rag/embedding.port';
 import { RagService } from './rag/rag.service';
@@ -81,8 +82,18 @@ import type { LLMProvider } from './llm/llm.types';
     // US-3.4 — classificação de intenção (guardrail clínico + kNN + fallback nano).
     IntentRepository,
     IntentClassifier,
+    // US-7.6 — combina a persona vigente (AgentPersonaService, CORE global) com os
+    // templates de intenção. A resolução/cache/fail-safe da persona mora no CORE (§12.5).
+    PromptResolverService,
   ],
   // Exporta o que a geração (US-2.1), o Worker (US-2.4) e o AIResponseWorker (US-3.5) consomem.
-  exports: [LlmRouter, AiJobRepository, ContextService, IntentClassifier, LlmAbuseGuard],
+  exports: [
+    LlmRouter,
+    AiJobRepository,
+    ContextService,
+    IntentClassifier,
+    LlmAbuseGuard,
+    PromptResolverService,
+  ],
 })
 export class AiCoachModule {}

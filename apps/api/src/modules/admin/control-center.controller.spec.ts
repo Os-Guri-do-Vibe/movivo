@@ -21,7 +21,6 @@ describe('ControlCenterController', () => {
     ['student', [Capability.STUDENTS_READ]],
     ['system', [Capability.SYSTEM_READ]],
     ['finance', [Capability.FINANCE_READ]],
-    ['support', [Capability.SUPPORT_READ]],
     ['compliance', [Capability.COMPLIANCE_READ, Capability.AUDIT_READ]],
     ['denyUnsafeAnonymization', [Capability.ADMIN_DESTRUCTIVE_REQUEST]],
   ] as const)('declara capability em %s', (method, expected) => {
@@ -38,6 +37,21 @@ describe('ControlCenterController', () => {
     const controller = new ControlCenterController({ students } as unknown as ControlCenterService);
     await controller.students(professional);
     expect(students).toHaveBeenCalledWith(professional);
+  });
+
+  /**
+   * US-7.4: a ficha passou a abrir com `students.read` — o corte de dado de saúde é no
+   * serviço, que decide o que embarca no payload. Nenhuma das duas rotas exige
+   * `students.health.read` na porta.
+   */
+  it('não usa a capability de saúde como porta da lista nem da ficha (US-7.4)', () => {
+    const read = (method: 'students' | 'student') =>
+      Reflect.getMetadata(
+        CAPABILITIES_KEY,
+        ControlCenterController.prototype[method] as (...args: never[]) => unknown,
+      ) as string[];
+    expect(read('students')).not.toContain(Capability.STUDENTS_HEALTH_READ);
+    expect(read('student')).toEqual([Capability.STUDENTS_READ]);
   });
 
   it('mantém anonimização bloqueada até existir step-up', () => {

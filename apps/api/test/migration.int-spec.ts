@@ -54,6 +54,8 @@ const EXPECTED_TABLES = [
   'professional_assignments',
   'audit_logs',
   'reengagement_nudges',
+  // Sprint 7 (US-7.6): persona do agente, append-only.
+  'agent_config',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;

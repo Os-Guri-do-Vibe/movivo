@@ -1,6 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import {
+  ADMIN_INHERITANCE_DENYLIST,
   ControlCenterCapability as Capability,
   type ControlCenterCapability,
   type ControlCenterRole,
@@ -40,11 +41,37 @@ describe('capabilities deny-by-default', () => {
     allowed: readonly ControlCenterCapability[];
   }> = [
     { role: 'USER', allowed: [] },
-    { role: 'PROFESSIONAL', allowed: [Capability.STUDENTS_READ] },
-    { role: 'MARKETING', allowed: [Capability.MARKETING_READ] },
-    { role: 'FINANCE', allowed: [Capability.FINANCE_READ] },
-    { role: 'SUPPORT', allowed: [Capability.SUPPORT_READ] },
-    { role: 'ENGINEERING', allowed: [Capability.SYSTEM_READ] },
+    {
+      role: 'PROFESSIONAL',
+      allowed: [
+        Capability.STUDENTS_READ,
+        Capability.STUDENTS_HEALTH_READ,
+        Capability.AI_CONFIG_READ,
+        Capability.AI_KNOWLEDGE_APPROVE,
+        Capability.AI_METHODOLOGY_APPROVE,
+      ],
+    },
+    {
+      role: 'MARKETING',
+      allowed: [Capability.MARKETING_READ, Capability.MARKETING_WRITE],
+    },
+    {
+      role: 'FINANCE',
+      allowed: [Capability.FINANCE_READ, Capability.FINANCE_WRITE],
+    },
+    {
+      role: 'SUPPORT',
+      allowed: [Capability.SUPPORT_READ, Capability.STUDENTS_READ],
+    },
+    {
+      role: 'ENGINEERING',
+      allowed: [
+        Capability.SYSTEM_READ,
+        Capability.SYSTEM_OPERATE,
+        Capability.AI_CONFIG_READ,
+        Capability.AI_CONFIG_WRITE,
+      ],
+    },
     {
       role: 'DPO',
       allowed: [Capability.COMPLIANCE_READ, Capability.AUDIT_READ],
@@ -62,10 +89,25 @@ describe('capabilities deny-by-default', () => {
     });
   }
 
-  it('ADMIN recebe todas as capacidades explícitas', () => {
-    expect(capabilitiesForRole('ADMIN')).toEqual(Object.values(Capability));
+  it('ADMIN recebe todas as capacidades explícitas, exceto a denylist de aprovação clínica', () => {
+    const expected = Object.values(Capability).filter(
+      (capability) => !ADMIN_INHERITANCE_DENYLIST.includes(capability),
+    );
+    expect(capabilitiesForRole('ADMIN')).toEqual(expected);
     for (const capability of Object.values(Capability)) {
-      expect(guard([capability]).canActivate(context('ADMIN'))).toBe(true);
+      const check = () => guard([capability]).canActivate(context('ADMIN'));
+      if (ADMIN_INHERITANCE_DENYLIST.includes(capability)) {
+        expect(check).toThrow(ForbiddenException);
+      } else {
+        expect(check()).toBe(true);
+      }
+    }
+  });
+
+  it('ADMIN não herda as capacidades da denylist (aprovação clínica é exclusiva do RT CREF)', () => {
+    const admin = capabilitiesForRole('ADMIN');
+    for (const capability of ADMIN_INHERITANCE_DENYLIST) {
+      expect(admin).not.toContain(capability);
     }
   });
 });

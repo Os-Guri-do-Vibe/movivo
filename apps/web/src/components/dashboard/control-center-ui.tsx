@@ -95,7 +95,7 @@ function statusLabel(status: DataAvailability): string {
   return 'Disponível';
 }
 
-function formatMetric(metric: ControlCenterMetric): string {
+export function formatMetric(metric: ControlCenterMetric): string {
   if (metric.status === 'UNAVAILABLE' || metric.value === null) return '—';
   if (metric.unit === 'BRL') {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(
@@ -136,7 +136,7 @@ export function MetricCard({ label, metric }: { label: string; metric: ControlCe
         </span>
       </div>
       <p
-        className="mt-3 font-mono text-h2 font-bold"
+        className="mt-3 font-mono text-h1 font-bold text-foreground"
         aria-label={`${label}: ${formatMetric(metric)}`}
       >
         {formatMetric(metric)}
@@ -148,11 +148,17 @@ export function MetricCard({ label, metric }: { label: string; metric: ControlCe
 
 export function MetricGrid({
   metrics,
+  className = 'sm:grid-cols-2 xl:grid-cols-3',
+  label = 'Indicadores',
 }: {
   metrics: Array<{ label: string; metric: ControlCenterMetric }>;
+  /** Colunas do grid. O padrão serve a setores com 6-8 métricas. */
+  className?: string;
+  /** Nome acessível da faixa — obrigatório distinguir quando há mais de uma na página. */
+  label?: string;
 }) {
   return (
-    <section aria-label="Indicadores" className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <section aria-label={label} className={cn('mt-6 grid gap-4', className)}>
       {metrics.map(({ label, metric }) => (
         <MetricCard key={label} label={label} metric={metric} />
       ))}
