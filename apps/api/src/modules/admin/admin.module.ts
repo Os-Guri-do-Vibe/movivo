@@ -33,10 +33,12 @@ import { ControlCenterController } from './control-center.controller';
 import { ControlCenterService } from './control-center.service';
 import { DashboardController } from './dashboard.controller';
 import { DashboardService } from './dashboard.service';
+import { FinanceController } from './finance.controller';
+import { FinanceService } from './finance.service';
 
 @Module({
   imports: [AuthModule, JobsModule, ProtocolModule],
-  controllers: [DashboardController, ControlCenterController, AiConfigController],
-  providers: [AuditService, DashboardService, ControlCenterService, AiConfigService],
+  controllers: [DashboardController, ControlCenterController, AiConfigController, FinanceController],
+  providers: [AuditService, DashboardService, ControlCenterService, AiConfigService, FinanceService],
 })
 export class AdminModule {}
