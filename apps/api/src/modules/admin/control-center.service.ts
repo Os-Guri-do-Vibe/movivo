@@ -1,6 +1,10 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   anamnesisStructuredSchema,
+  attributionLabel,
+  canonicalChannel,
+  UNMAPPED_CHANNEL,
+  type AcquisitionChannel,
   preferredPeriodSchema,
   primaryGoalSchema,
   trainingLocationSchema,
@@ -17,7 +21,7 @@ import {
   type ControlCenterTimelineEvent,
   type ControlCenterComplianceResponse,
 } from '@movivo/shared';
-import { and, count, desc, eq, gte, isNotNull, sql, type SQLWrapper } from 'drizzle-orm';
+import { and, count, desc, eq, gte, isNotNull, isNull, sql, type SQLWrapper } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
 import { z } from 'zod';
 
@@ -523,8 +527,50 @@ export class ControlCenterService {
         }
       }
 
+      // --- Aquisição por canal (US-8.2, TASK-8.2.3). Grava-se o bruto; a taxonomia
+      // canônica é aplicada AQUI, na leitura. Fonte pronta para a US-8.6.
+      const attributionRows = await tx
+        .select({
+          source: anamnesisSessions.utmSource,
+          medium: anamnesisSessions.utmMedium,
+          total: count(),
+        })
+        .from(anamnesisSessions)
+        .where(isNotNull(anamnesisSessions.firstTouchAt))
+        .groupBy(anamnesisSessions.utmSource, anamnesisSessions.utmMedium);
+
+      const [notCaptured] = await tx
+        .select({ total: count() })
+        .from(anamnesisSessions)
+        .where(isNull(anamnesisSessions.firstTouchAt));
+
+      const byChannel = new Map<string, AcquisitionChannel>();
+      for (const row of attributionRows) {
+        const canonical = canonicalChannel(row.source, row.medium);
+        // Não mapeado nunca é fundido com outro: a chave carrega o bruto, para que o
+        // erro de marcação de campanha continue visível item a item.
+        const key = canonical.mapped ? canonical.channel : `${UNMAPPED_CHANNEL}:${canonical.raw}`;
+        const current = byChannel.get(key);
+        byChannel.set(key, {
+          channel: canonical.channel,
+          mapped: canonical.mapped,
+          raw: canonical.mapped ? canonical.channel : canonical.raw,
+          count: (current?.count ?? 0) + row.total,
+        });
+      }
+      const allChannels = [...byChannel.values()].sort((a, b) => b.count - a.count);
+      const acquisitionChannels = allChannels.filter(
+        (channel) => channel.count >= MINIMUM_SEGMENT_SIZE,
+      );
+      const suppressedChannels = allChannels.length - acquisitionChannels.length;
+      const attributed = allChannels.reduce((sum, channel) => sum + channel.count, 0);
+
       return {
         anamnesisFunnel,
+        acquisitionChannels,
+        suppressedChannels,
+        attributionNotCaptured: notCaptured?.total ?? 0,
+        attributed,
         signupSeasonality: this.fillHeatmap(seasonalityRows),
         funnel: {
           formStarted: this.marketingMetric(
@@ -544,9 +590,9 @@ export class ControlCenterService {
             'Titulares distintos com assinatura ativa.',
           ),
         },
-        acquisition: this.unavailable(
-          'COUNT',
-          'Atribuição de campanha/UTM ainda não é persistida no banco transacional.',
+        acquisition: this.marketingMetric(
+          attributed,
+          'Cadastros com origem de primeiro toque registrada (inclui `desconhecida` explícita).',
         ),
         segments,
         suppressedSegments,
@@ -556,7 +602,8 @@ export class ControlCenterService {
     return this.envelope(result, [
       'Somente dimensões estruturadas não sensíveis são agregadas.',
       'Métricas entre 1 e 9 e dimensões com qualquer célula menor que 10 são omitidas.',
-      'Aquisição está indisponível até a persistência de UTM/campanha.',
+      'Aquisição cobre apenas cadastros iniciados a partir da US-8.2; os anteriores aparecem como origem não capturada, nunca como orgânico.',
+      'Canais com menos de 10 cadastros são omitidos; valores fora da taxonomia aparecem como `nao_mapeado` com o valor bruto ao lado.',
       'O funil da anamnese cobre apenas sessões com desfecho definido (enviadas ou com link já expirado); sessões ainda abertas não contam como abandono.',
       `Sazonalidade de cadastro cobre os últimos ${INSIGHT_WINDOW_DAYS} dias em ${TIMEZONE}, sobre a criação da sessão de anamnese.`,
       'Faixa etária é derivada da data de nascimento da etapa 1 e só sai do banco já generalizada em faixas.',
@@ -840,6 +887,12 @@ export class ControlCenterService {
           createdAt: anamnesisSessions.createdAt,
           submittedAt: anamnesisSessions.submittedAt,
           status: anamnesisSessions.status,
+          utmSource: anamnesisSessions.utmSource,
+          utmMedium: anamnesisSessions.utmMedium,
+          utmCampaign: anamnesisSessions.utmCampaign,
+          utmContent: anamnesisSessions.utmContent,
+          referrerHost: anamnesisSessions.referrerHost,
+          firstTouchAt: anamnesisSessions.firstTouchAt,
         })
         .from(anamnesisSessions)
         .where(eq(anamnesisSessions.userId, studentId))
@@ -950,9 +1003,31 @@ export class ControlCenterService {
       painReport ? [{ at: point.at, week: point.week, text: painReport }] : [],
     );
 
+    // Origem do primeiro toque: a sessão mais antiga é a que traz o cadastro (US-8.2).
+    const firstSession = raw.anamnesisRows.at(-1) ?? null;
+    const acquisition =
+      firstSession?.firstTouchAt != null
+        ? {
+            ...canonicalChannel(firstSession.utmSource, firstSession.utmMedium),
+            campaign: firstSession.utmCampaign,
+            content: firstSession.utmContent,
+            referrerHost: firstSession.referrerHost,
+            capturedAt: firstSession.firstTouchAt.toISOString(),
+          }
+        : null;
+    const acquisitionText = attributionLabel(acquisition);
+
     const events: Array<ControlCenterTimelineEvent | null> = [];
     for (const item of raw.anamnesisRows) {
-      events.push(this.event(item.createdAt, 'ANAMNESIS', 'Formulário de anamnese iniciado', null));
+      events.push(
+        this.event(
+          item.createdAt,
+          'ANAMNESIS',
+          'Formulário de anamnese iniciado',
+          // Marco de cadastro carrega a origem — inclusive a ausência dela.
+          item === firstSession ? `Origem: ${acquisitionText}` : null,
+        ),
+      );
       if (item.submittedAt) {
         events.push(
           this.event(item.submittedAt, 'ANAMNESIS', 'Formulário de anamnese enviado', item.status),
@@ -1087,6 +1162,7 @@ export class ControlCenterService {
       currentProtocol: raw.protocol
         ? { ...raw.protocol, signedAt: raw.protocol.signedAt?.toISOString() ?? null }
         : null,
+      acquisition,
       routine: this.projectRoutine(row.routine),
       workoutHistory: {
         status: 'UNAVAILABLE' as const,

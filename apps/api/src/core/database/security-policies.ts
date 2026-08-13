@@ -102,6 +102,10 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   { table: 'checkins', column: 'user_id', professional: 'read' },
   { table: 'reengagement_nudges', column: 'user_id', professional: 'read' },
   { table: 'audit_logs', column: 'user_id', professional: 'write' },
+  // Sprint 8 (US-8.1): treino concluído do titular. Não há caminho HTTP de aluno para
+  // esta tabela (não existe UI de aluno) — a RLS existe para que o painel do
+  // profissional e os jobs de sistema sejam a única porta, e ela seja escopada.
+  { table: 'workout_completions', column: 'user_id', professional: 'read' },
 ];
 
 // `nullif(..., '')` é OBRIGATÓRIO, não cosmético: sob PgBouncer transaction mode,

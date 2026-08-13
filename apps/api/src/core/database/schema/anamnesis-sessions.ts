@@ -88,6 +88,29 @@ export const anamnesisSessions = pgTable(
     /** Envios nesta sessão (teto absoluto por sessão). */
     phoneCodeSendCount: integer('phone_code_send_count').notNull().default(0),
 
+    // --- Atribuição de primeiro toque (US-8.2) --------------------------------
+    /**
+     * Origem do primeiro toque, **gravada em bruto** (já saneada: charset em allowlist,
+     * minúsculas, 120 chars). A normalização para canal canônico acontece na leitura.
+     * Nunca é `null` em sessão criada a partir da US-8.2: ausência de UTM grava
+     * `'desconhecida'` explicitamente. `NULL` significa **cadastro anterior à Sprint 8**.
+     */
+    utmSource: varchar('utm_source', { length: 120 }),
+    utmMedium: varchar('utm_medium', { length: 120 }),
+    utmCampaign: varchar('utm_campaign', { length: 120 }),
+    utmContent: varchar('utm_content', { length: 120 }),
+    /**
+     * **Somente o host** do referrer. A URL completa carrega termo de busca e
+     * identificador de terceiro — PII que o produto não pediu (Sato, US-8.2).
+     */
+    referrerHost: varchar('referrer_host', { length: 253 }),
+    /**
+     * Carimbo do primeiro toque. É o **guarda da escrita única**: o UPDATE de
+     * atribuição só roda com `first_touch_at IS NULL`, então reabrir o funil por um
+     * link orgânico não sobrescreve a origem original.
+     */
+    firstTouchAt: eventTimestamp('first_touch_at'),
+
     /** Pré-qualificação capturada na landing, antes do formulário. */
     primaryGoal: varchar('primary_goal', { length: 30 }),
 

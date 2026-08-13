@@ -220,6 +220,26 @@ export const aiJobStatusEnum = pgEnum('ai_job_status', [
 ]);
 
 // ---------------------------------------------------------------------------
+// TREINO CONCLUÍDO (US-8.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Canal por onde o treino concluído chegou (US-8.1, regra 2: `source` sempre gravado).
+ * Sem isso, em três meses ninguém saberia se a North Star subiu porque o aluno treinou
+ * mais ou porque o canal de captura melhorou.
+ *
+ * **A ordem de declaração é a ordem de precedência do dedupe** — enum nativo compara
+ * pelo ordinal, então `'WHATSAPP_QUICK_REPLY' < 'CHECKIN' < 'CONVERSATION'` no operador
+ * `<` do Postgres, e o upsert de `workout_completions` resolve a colisão com um simples
+ * `where source > excluded.source`. Não reordenar sem reler `workout-completions.ts`.
+ */
+export const workoutCompletionSourceEnum = pgEnum('workout_completion_source', [
+  'WHATSAPP_QUICK_REPLY',
+  'CHECKIN',
+  'CONVERSATION',
+]);
+
+// ---------------------------------------------------------------------------
 // HANDOFF CREF (US-3.6)
 // ---------------------------------------------------------------------------
 

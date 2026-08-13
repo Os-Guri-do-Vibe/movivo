@@ -29,6 +29,9 @@ import { randomBytes } from 'node:crypto';
 
 import {
   ageInYears,
+  attributionInputSchema,
+  normalizeAttribution,
+  type AttributionInput,
   anamnesisStructuredSchema,
   CONSENT_TEXTS,
   MIN_AGE_YEARS,
@@ -45,7 +48,7 @@ import {
   type StartAnamnesisInput,
 } from '@movivo/shared';
 import { PinoLogger } from 'nestjs-pino';
-import { and, eq, lt, sql } from 'drizzle-orm';
+import { and, eq, isNull, lt, sql } from 'drizzle-orm';
 
 import { HealthCipherService, TenantDatabase, type TenantTransaction } from '../../core/database';
 import { anamnesisSessions, users } from '../../core/database/schema';
@@ -129,15 +132,47 @@ export class AnamnesisService {
     const token = randomBytes(32).toString('hex'); // 256 bits, exatamente 64 chars
     const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
 
-    await this.db.runAsToken(async (tx) => {
-      await tx.insert(anamnesisSessions).values({
-        token,
-        primaryGoal: input.primaryGoal ?? null,
-        expiresAt,
-      });
+    const sessionId = await this.db.runAsToken(async (tx) => {
+      const [created] = await tx
+        .insert(anamnesisSessions)
+        .values({
+          token,
+          primaryGoal: input.primaryGoal ?? null,
+          expiresAt,
+        })
+        .returning({ id: anamnesisSessions.id });
+      if (!created) throw new Error('Falha ao criar sessão de anamnese.');
+      return created.id;
     });
 
+    await this.recordFirstTouch(sessionId, input.attribution);
+
     return { token, expiresAt, currentStep: 1 };
+  }
+
+  /**
+   * Grava a atribuição de primeiro toque (US-8.2). **Escrita única**: o `WHERE
+   * first_touch_at IS NULL` é a garantia — uma segunda chamada, com qualquer origem,
+   * não sobrescreve a primeira. Nunca lança: atribuição é dado de marketing e não
+   * pode derrubar um cadastro (parâmetro inválido já foi descartado no saneamento).
+   */
+  async recordFirstTouch(sessionId: string, input: AttributionInput | undefined): Promise<void> {
+    const attribution = normalizeAttribution(attributionInputSchema.parse(input ?? {}));
+    try {
+      await this.db.runAsTokenScoped(sessionId, async (tx) => {
+        await tx
+          .update(anamnesisSessions)
+          .set({ ...attribution, firstTouchAt: new Date() })
+          .where(
+            and(
+              eq(anamnesisSessions.id, sessionId),
+              isNull(anamnesisSessions.firstTouchAt), // escrita única
+            ),
+          );
+      });
+    } catch (err: unknown) {
+      this.logger.warn({ err, anamnesisSessionId: sessionId }, 'first touch não registrado');
+    }
   }
 
   /** `GET /anamnesis/session/{token}`: alimenta a retomada e os consentimentos da UI. */

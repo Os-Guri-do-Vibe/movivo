@@ -339,6 +339,12 @@ export const marketingResponse: ControlCenterMarketingResponse = {
       },
     },
     acquisition: metric({ value: 24, unit: 'PERCENT', status: 'PROXY' }),
+    acquisitionChannels: [
+      { channel: 'instagram', mapped: true, raw: 'instagram / meta_ads', count: 34 },
+      { channel: 'organico', mapped: true, raw: 'organico / organico', count: 21 },
+    ],
+    suppressedChannels: 1,
+    attributionNotCaptured: 6,
     segments: [
       { dimension: 'PRIMARY_GOAL', value: 'Hipertrofia', count: 34 },
       { dimension: 'TRAINING_LOCATION', value: 'Casa', count: 21 },
@@ -398,6 +404,15 @@ export const studentDetailResponse: ControlCenterStudentDetailResponse = {
       protocolStatus: 'ACTIVE',
       requiresProfessionalReview: false,
       anamnesisStatus: 'COMPLETED',
+      acquisition: {
+        channel: 'instagram',
+        mapped: true,
+        raw: 'instagram / meta_ads',
+        campaign: 'lancamento-agosto',
+        content: null,
+        referrerHost: 'instagram.com',
+        capturedAt: '2026-07-30T14:00:00.000Z',
+      },
       churnRisk: {
         score: 1,
         signals: [

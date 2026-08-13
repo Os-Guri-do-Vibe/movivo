@@ -150,6 +150,23 @@ export const anamnesisFunnelSchema = z.object({
   }),
 });
 
+/**
+ * Canal de aquisição agregado (US-8.2, TASK-8.2.3). Fonte pronta para a tela de
+ * Aquisição & Canais da US-8.6.
+ *
+ * `mapped: false` é o valor que chegou por UTM e **não** está na taxonomia canônica —
+ * ele aparece rotulado como `nao_mapeado` com o bruto ao lado, nunca dissolvido num
+ * balde "outros" que esconderia erro de marcação de campanha.
+ */
+export const acquisitionChannelSchema = z.object({
+  channel: z.string().min(1),
+  mapped: z.boolean(),
+  /** `utm_source / utm_medium` como veio do link. */
+  raw: z.string().min(1),
+  count: kAnonymousCount,
+});
+export type AcquisitionChannel = z.infer<typeof acquisitionChannelSchema>;
+
 export const controlCenterMarketingResponseSchema = z.object({
   data: z.object({
     funnel: z.object({
@@ -160,6 +177,12 @@ export const controlCenterMarketingResponseSchema = z.object({
     }),
     anamnesisFunnel: anamnesisFunnelSchema,
     acquisition: controlCenterMetricSchema,
+    /** Cadastros por canal de origem, sob k-anonimato (n >= 10). Consumido pela US-8.6. */
+    acquisitionChannels: z.array(acquisitionChannelSchema),
+    /** Canais omitidos por caírem entre 1 e 9 cadastros. */
+    suppressedChannels: z.number().int().nonnegative(),
+    /** Sessões anteriores à US-8.2, sem origem capturada. Nunca inferidas como orgânicas. */
+    attributionNotCaptured: z.number().int().nonnegative(),
     segments: z.array(marketingSegmentSchema),
     /** Cadastros iniciados por dia da semana × hora, grade 7x24 completa. */
     signupSeasonality: z.array(controlCenterHeatmapCellSchema),
@@ -245,6 +268,21 @@ export const controlCenterStudentDetailResponseSchema = z.object({
           currentWeek: z.number().int().positive(),
           totalWeeks: z.number().int().positive(),
           signedAt: z.iso.datetime().nullable(),
+        })
+        .nullable(),
+      /**
+       * Origem do primeiro toque (US-8.2). `null` para cadastro anterior à Sprint 8 —
+       * a UI rotula como "não capturada", nunca como orgânico (seria inferência falsa).
+       */
+      acquisition: z
+        .object({
+          channel: z.string().min(1),
+          mapped: z.boolean(),
+          raw: z.string().min(1),
+          campaign: nullableText,
+          content: nullableText,
+          referrerHost: nullableText,
+          capturedAt: z.iso.datetime(),
         })
         .nullable(),
       routine: z

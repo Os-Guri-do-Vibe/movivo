@@ -4,6 +4,7 @@ import * as React from 'react';
 import { useRouter } from 'next/navigation';
 
 import { startAnamnesis } from '@/lib/anamnesis-api';
+import { captureFirstTouch } from '@/lib/first-touch';
 
 /**
  * Bootstrap do onboarding (US-6.10): cria a sessão e redireciona para o link
@@ -15,6 +16,8 @@ export default function AnamneseBootstrapPage() {
   const [error, setError] = React.useState(false);
 
   React.useEffect(() => {
+    // Cobre quem chega direto em `/anamnese?utm_source=...` sem passar pela landing.
+    captureFirstTouch();
     let cancelled = false;
     void startAnamnesis()
       .then(({ token }) => {

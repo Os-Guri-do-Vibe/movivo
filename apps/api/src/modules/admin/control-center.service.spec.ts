@@ -313,6 +313,8 @@ describe('ControlCenterService projections', () => {
       [{ value: 'HOME', total: 8 }],
       [{ value: 'MORNING', total: 11 }],
       [{ value: '25-34', total: 14 }],
+      [],
+      [{ total: 0 }],
     );
 
     const response = await service.marketing();
@@ -322,7 +324,7 @@ describe('ControlCenterService projections', () => {
       { dimension: 'AGE_BAND', value: '25-34', count: 14 },
     ]);
     expect(response.data.suppressedSegments).toBe(3);
-    expect(response.data.acquisition).toMatchObject({ value: null, status: 'UNAVAILABLE' });
+    expect(response.data.acquisition).toMatchObject({ value: 0, status: 'AVAILABLE' });
     expect(JSON.stringify(response)).not.toMatch(/phone|email|parq|pain|health/i);
   });
 
@@ -338,6 +340,8 @@ describe('ControlCenterService projections', () => {
       [],
       [],
       [],
+      [],
+      [{ total: 0 }],
     );
 
     const response = await service.marketing();
@@ -369,6 +373,8 @@ describe('ControlCenterService projections', () => {
       [],
       [],
       [],
+      [],
+      [{ total: 0 }],
     );
 
     const response = await service.marketing();
@@ -390,6 +396,8 @@ describe('ControlCenterService projections', () => {
       [],
       [],
       [],
+      [],
+      [{ total: 0 }],
     );
 
     const response = await service.marketing();
@@ -427,6 +435,8 @@ describe('ControlCenterService projections', () => {
       [{ value: 'HOME', total: 1 }],
       [{ value: 'MORNING', total: 9 }],
       [{ value: '25-34', total: 2 }],
+      [],
+      [{ total: 0 }],
     );
 
     const response = await service.marketing();
@@ -456,6 +466,8 @@ describe('ControlCenterService projections', () => {
       [],
       [],
       [],
+      [],
+      [{ total: 0 }],
     );
 
     const payload = JSON.stringify(await service.marketing());
@@ -475,6 +487,8 @@ describe('ControlCenterService projections', () => {
       [],
       [],
       [],
+      [],
+      [{ total: 0 }],
     );
 
     const response = await service.marketing();
