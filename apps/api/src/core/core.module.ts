@@ -10,6 +10,7 @@
  */
 import { Module } from '@nestjs/common';
 
+import { AgentConfigModule } from './agent-config/agent-config.module';
 import { ConfigModule } from './config';
 import { DatabaseModule } from './database';
 import { EventBusModule } from './event-bus/event-bus.module';
@@ -25,6 +26,7 @@ import { TelemetryModule } from './telemetry/telemetry.module';
     RedisModule,
     TelemetryModule,
     EventBusModule,
+    AgentConfigModule,
   ],
   exports: [
     ConfigModule,
@@ -33,6 +35,7 @@ import { TelemetryModule } from './telemetry/telemetry.module';
     RedisModule,
     TelemetryModule,
     EventBusModule,
+    AgentConfigModule,
   ],
 })
 export class CoreModule {}

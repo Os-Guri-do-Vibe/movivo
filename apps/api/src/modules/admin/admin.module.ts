@@ -26,6 +26,8 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { ProtocolModule } from '../protocol/protocol.module';
+import { AiConfigController } from './ai-config.controller';
+import { AiConfigService } from './ai-config.service';
 import { AuditService } from './audit.service';
 import { ControlCenterController } from './control-center.controller';
 import { ControlCenterService } from './control-center.service';
@@ -34,7 +36,7 @@ import { DashboardService } from './dashboard.service';
 
 @Module({
   imports: [AuthModule, JobsModule, ProtocolModule],
-  controllers: [DashboardController, ControlCenterController],
-  providers: [AuditService, DashboardService, ControlCenterService],
+  controllers: [DashboardController, ControlCenterController, AiConfigController],
+  providers: [AuditService, DashboardService, ControlCenterService, AiConfigService],
 })
 export class AdminModule {}

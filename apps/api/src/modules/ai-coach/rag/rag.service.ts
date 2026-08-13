@@ -9,11 +9,14 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
+import type { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 
 import { AppConfigService } from '../../../core/config';
 import { DRIZZLE } from '../../../core/database/database.constants';
 import type { DrizzleClient } from '../../../core/database/database.module';
+import { REDIS_CLIENT, REDIS_KEY_BUILDER, type RedisKeyBuilder } from '../../../core/redis';
+import { RAG_USAGE_TTL_SECONDS, ragUsageDay, ragUsageKeys } from './rag-usage.keys';
 import type { RagDoc, SemanticMemoryPort } from '../context/semantic-memory.port';
 import { EMBEDDING_PORT, type EmbeddingPort } from './embedding.port';
 import { RERANKER_PORT, type RerankCandidate, type RerankerPort } from './reranker.port';
@@ -33,11 +36,35 @@ export class RagService implements SemanticMemoryPort {
     @Inject(RERANKER_PORT) private readonly reranker: RerankerPort,
     private readonly config: AppConfigService,
     private readonly logger: PinoLogger,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
   ) {
     this.logger.setContext(RagService.name);
   }
 
   async retrieve(query: string): Promise<RagDoc[]> {
+    const docs = await this.search(query);
+    await this.countUsage(docs.length > 0);
+    return docs;
+  }
+
+  /**
+   * Telemetria de uso (TASK-7.5.3). Nunca derruba a resposta do coach: falha de
+   * Redis vira log, e o painel prefere "indisponível" a um número inventado.
+   */
+  private async countUsage(useful: boolean): Promise<void> {
+    try {
+      const keys = ragUsageKeys(this.keys, ragUsageDay());
+      const pipeline = this.redis.pipeline();
+      pipeline.incr(keys.queries).expire(keys.queries, RAG_USAGE_TTL_SECONDS);
+      if (useful) pipeline.incr(keys.useful).expire(keys.useful, RAG_USAGE_TTL_SECONDS);
+      await pipeline.exec();
+    } catch (error) {
+      this.logger.warn({ err: error }, 'falha ao contabilizar uso do RAG');
+    }
+  }
+
+  private async search(query: string): Promise<RagDoc[]> {
     const { minCosine, rerankMinScore, topK, candidates } = this.config.rag;
     const vec = await this.embedding.embed(query);
     const literal = `[${vec.join(',')}]`;

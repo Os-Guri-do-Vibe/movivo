@@ -39,3 +39,6 @@ export * from './intent-examples';
 export * from './professional-assignments';
 export * from './audit-logs';
 export * from './reengagement-nudges';
+
+// Sprint 7 - configuracao publicada da agente de IA (US-7.6). Global, append-only.
+export * from './agent-config';
