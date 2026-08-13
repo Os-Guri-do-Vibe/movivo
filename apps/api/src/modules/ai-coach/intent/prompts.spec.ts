@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { BASE_GUARDRAIL, FORA_DE_ESCOPO_RESPONSE, resolvePrompt } from './prompts';
+import { BASE_GUARDRAIL, buildForaDeEscopoResponse, resolvePrompt } from './prompts';
 
 const FORBIDDEN = ['diagnóstico', 'tratamento', 'cura', 'garantido'];
+const FORA_DE_ESCOPO_RESPONSE = buildForaDeEscopoResponse('MOVI');
 
 describe('resolvePrompt', () => {
   it('herda o bloco base de guardrails', () => {
