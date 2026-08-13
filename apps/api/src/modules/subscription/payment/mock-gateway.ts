@@ -114,6 +114,9 @@ export class MockGateway implements PaymentGateway {
       externalSubscriptionId?: string;
       plan?: GatewayEvent['plan'];
       priceCents?: number;
+      amountCents?: number;
+      feeCents?: number;
+      occurredAt?: string;
     },
   ): GatewayEvent {
     return {
@@ -123,6 +126,9 @@ export class MockGateway implements PaymentGateway {
       userId: params.userId,
       plan: params.plan,
       priceCents: params.priceCents,
+      amountCents: params.amountCents,
+      feeCents: params.feeCents,
+      occurredAt: params.occurredAt,
     };
   }
 }

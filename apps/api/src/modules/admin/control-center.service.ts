@@ -43,6 +43,7 @@ import {
   expenses,
   handoffAlerts,
   knowledgeBase,
+  payments,
   protocols,
   protocolVersions,
   subscriptions,
@@ -1962,6 +1963,58 @@ export class ControlCenterService {
         .groupBy(sql`1`, expenses.category)
         .orderBy(sql`1`);
 
+      // ---- Liquidação recebida (US-8.5) ----
+      // Estorno/chargeback é linha NEGATIVA em `payments`, então `sum` já devolve o
+      // líquido do mês sem nenhum CASE — a mesma propriedade que `expenses` tem.
+      const paymentRows = await tx
+        .select({
+          month: sql<string>`to_char(${payments.occurredAt} at time zone ${TIMEZONE}, 'YYYY-MM')`,
+          grossCents: sql<string>`coalesce(sum(${payments.amountCents}), 0)`,
+          netCents: sql<string>`coalesce(sum(${payments.netAmountCents}), 0)`,
+          settlements: sql<number>`count(*) filter (where ${payments.status} = 'SETTLED')::int`,
+          failures: sql<number>`count(*) filter (where ${payments.status} = 'FAILED')::int`,
+        })
+        .from(payments)
+        .where(
+          sql`${payments.occurredAt} >= date_trunc('month', now() - interval '11 months')`,
+        )
+        .groupBy(sql`1`)
+        .orderBy(sql`1`);
+
+      // Prazo de liquidação: dias entre o início do período contratado e a entrada do
+      // dinheiro. Só sobre liquidação VINCULADA — a órfã não tem período de referência.
+      const [settlementLag] = await tx
+        .select({
+          days: sql<
+            string | null
+          >`avg(extract(epoch from (${payments.occurredAt} - ${subscriptions.currentPeriodStart})) / 86400.0)`,
+        })
+        .from(payments)
+        .innerJoin(subscriptions, eq(payments.subscriptionId, subscriptions.id))
+        .where(
+          and(
+            eq(payments.status, 'SETTLED'),
+            isNotNull(subscriptions.currentPeriodStart),
+            sql`${payments.occurredAt} >= now() - ${this.days(RENEWAL_HORIZON_DAYS)}`,
+          ),
+        );
+
+      // Fila de exceção: liquidação autenticada sem assinatura correspondente. Nunca é
+      // descartada — fica aqui até alguém conciliar à mão. Sem PII: não tem titular.
+      const paymentExceptionRows = await tx
+        .select({
+          paymentId: payments.id,
+          gateway: payments.gateway,
+          status: payments.status,
+          amountCents: payments.amountCents,
+          occurredAt: payments.occurredAt,
+          receivedAt: payments.receivedAt,
+        })
+        .from(payments)
+        .where(isNull(payments.subscriptionId))
+        .orderBy(desc(payments.receivedAt))
+        .limit(100);
+
       const currentMonth = new Intl.DateTimeFormat('en-CA', {
         timeZone: TIMEZONE,
         year: 'numeric',
@@ -2011,9 +2064,48 @@ export class ControlCenterService {
       )
         .map(([month, amountBrl]) => ({ month, amountBrl }))
         .sort((a, b) => a.month.localeCompare(b.month));
-      const monthExpense = costByMonth.find((item) => item.month === currentMonth)?.amountBrl ?? 0;
       const hasExpenses = expenseRows.length > 0;
       const contractedMrrBrl = this.number(row?.contractedMrr);
+
+      // ---- Receita recebida × contratada (US-8.5) ----
+      // As duas séries nascem de fontes distintas e são devolvidas em campos distintos.
+      // Nada aqui as combina, e é essa separação que torna a soma indevida impossível na
+      // tela (regra 3 da sprint): a diferença entre elas É a informação.
+      const receivedRevenueByMonth = paymentRows.map((item) => ({
+        month: item.month,
+        grossBrl: brl(item.grossCents),
+        netBrl: brl(item.netCents),
+        settlements: Number(item.settlements),
+      }));
+      const monthPayments = paymentRows.find((item) => item.month === currentMonth);
+      const hasPayments = paymentRows.length > 0;
+      const receivedGrossBrl = brl(monthPayments?.grossCents ?? 0);
+      const receivedNetBrl = brl(monthPayments?.netCents ?? 0);
+      /** Taxa do gateway = bruto − líquido. Não há terceira coluna que possa divergir. */
+      const gatewayFeeBrl = receivedGrossBrl - receivedNetBrl;
+      const attempts = Number(monthPayments?.settlements ?? 0) + Number(monthPayments?.failures ?? 0);
+
+      // Taxa do gateway entra em Custos como despesa real da categoria que já existe. Não
+      // é lançada em `expenses` (ninguém digita taxa de cartão): vem de `payments`, que é
+      // a fonte primária. Somar as duas fontes na mesma categoria não duplica nada.
+      const gatewayFeeByMonth = paymentRows
+        .map((item) => ({ month: item.month, amountBrl: brl(item.grossCents) - brl(item.netCents) }))
+        .filter((item) => item.amountBrl !== 0);
+      if (gatewayFeeByMonth.length > 0) {
+        const totalFee = gatewayFeeByMonth.reduce((sum, item) => sum + item.amountBrl, 0);
+        const existing = costByCategory.find((item) => item.category === 'GATEWAY_PAGAMENTO');
+        if (existing) existing.amountBrl += totalFee;
+        else costByCategory.push({ category: 'GATEWAY_PAGAMENTO', amountBrl: totalFee });
+        costByCategory.sort((a, b) => b.amountBrl - a.amountBrl);
+        for (const fee of gatewayFeeByMonth) {
+          const month = costByMonth.find((item) => item.month === fee.month);
+          if (month) month.amountBrl += fee.amountBrl;
+          else costByMonth.push({ month: fee.month, amountBrl: fee.amountBrl });
+        }
+        costByMonth.sort((a, b) => a.month.localeCompare(b.month));
+      }
+
+      const monthExpense = costByMonth.find((item) => item.month === currentMonth)?.amountBrl ?? 0;
 
       return {
         activeSubscriptions: this.metric(
@@ -2076,31 +2168,50 @@ export class ControlCenterService {
                 'AVAILABLE',
                 'Despesa do mês corrente dividida pelas assinaturas ativas — o custo por usuário ativo/mês do unit economics.',
               ),
-        receivedRevenue: this.unavailable(
-          'BRL',
-          'Subscriptions registra preço contratado, não liquidação financeira do gateway; depende da tabela `payments`, prevista para a Sprint 8.',
-        ),
         /**
-         * Lucro do período = receita − despesa do mês corrente.
-         *
-         * **Regime provisório.** O regime decidido é CAIXA (sobre receita recebida), mas
-         * `payments` só chega na US-8.5 — até lá a receita é o `contractedMrr`, e a
-         * métrica é marcada `PROXY` com o regime `CONTRATADO_PROXY` na tela. Nunca
-         * chamamos de caixa um número que não é.
-         * // TODO(US-8.5): trocar `contractedMrrBrl` por receita recebida (`payments`)
-         * // e o `profitBasis` para `CAIXA`.
+         * Receita **recebida** do mês, do que liquidou no gateway. Grandeza distinta de
+         * `contractedMrr` — as duas convivem na tela e nunca são somadas.
          */
-        profit: hasExpenses
+        receivedRevenue: hasPayments
           ? this.metric(
-              contractedMrrBrl - monthExpense,
+              receivedGrossBrl,
               'BRL',
-              'PROXY',
-              'Lucro do mês corrente = MRR contratado − despesa lançada no mês. Regime provisório: receita CONTRATADA (proxy), não recebida — a receita de caixa depende de `payments` (US-8.5).',
+              'AVAILABLE',
+              'Bruto efetivamente liquidado no gateway no mês corrente, por data de liquidação (`occurred_at`), já líquido de estornos e chargebacks (que entram como linha negativa). Não é receita contratada.',
             )
           : this.unavailable(
               'BRL',
-              'Nenhuma despesa lançada ainda: `expenses` existe, mas exibir lucro sem custo seria inventar.',
+              'Nenhuma liquidação registrada ainda — `payments` existe, mas está vazia (nenhum webhook de pagamento chegou).',
             ),
+        /**
+         * Lucro do período = receita recebida − despesa do mês corrente.
+         *
+         * **Regime CAIXA** desde a US-8.5: a receita agora vem de `payments` (liquidação
+         * real), não mais do `contractedMrr` como proxy. Sem nenhuma liquidação registrada
+         * o regime cai de volta para `CONTRATADO_PROXY` e a métrica volta a ser `PROXY` —
+         * a tela jamais chama de caixa um número que não é.
+         *
+         * Usa o BRUTO recebido, não o líquido: a taxa do gateway já está somada em
+         * `monthExpense` (via `costByMonth`), então subtrair o líquido a contaria duas vezes.
+         */
+        profit: !hasExpenses
+          ? this.unavailable(
+              'BRL',
+              'Nenhuma despesa lançada ainda: `expenses` existe, mas exibir lucro sem custo seria inventar.',
+            )
+          : hasPayments
+            ? this.metric(
+                receivedGrossBrl - monthExpense,
+                'BRL',
+                'AVAILABLE',
+                'Lucro do mês corrente em regime de CAIXA = receita recebida (liquidação do gateway) − despesa do mês, incluindo a taxa do gateway como custo.',
+              )
+            : this.metric(
+                contractedMrrBrl - monthExpense,
+                'BRL',
+                'PROXY',
+                'Lucro do mês corrente = MRR contratado − despesa lançada no mês. Regime provisório: receita CONTRATADA (proxy), não recebida — nenhuma liquidação foi registrada em `payments` ainda.',
+              ),
         partnerDistribution: this.unavailable(
           'BRL',
           'Distribuição por sócio depende de `partners` e do resultado apurado; prevista para a Sprint 8.',
@@ -2143,8 +2254,66 @@ export class ControlCenterService {
         aiCostByModel,
         costByCategory,
         costByMonth,
+
+        // ---- Liquidação recebida (US-8.5) ----
+        receivedRevenueByMonth,
+        delinquencyRate:
+          attempts === 0
+            ? this.unavailable(
+                'PERCENT',
+                'Nenhuma cobrança tentada no mês corrente — sem denominador não há taxa de inadimplência (zero seria lido como "ninguém deixou de pagar").',
+              )
+            : this.metric(
+                (Number(monthPayments?.failures ?? 0) / attempts) * 100,
+                'PERCENT',
+                'AVAILABLE',
+                'Cobranças que falharam sobre o total de tentativas (falhas + liquidações) do mês corrente, por data do evento no gateway.',
+              ),
+        averageSettlementDays:
+          settlementLag?.days == null
+            ? this.unavailable(
+                'COUNT',
+                'Nenhuma liquidação vinculada a uma assinatura com período iniciado no horizonte — não há de onde medir o prazo.',
+              )
+            : this.metric(
+                this.number(settlementLag.days),
+                'COUNT',
+                'AVAILABLE',
+                `Média, em dias, entre o início do período contratado e a liquidação no gateway, sobre as cobranças liquidadas dos últimos ${RENEWAL_HORIZON_DAYS} dias.`,
+              ),
+        gatewayFee: hasPayments
+          ? this.metric(
+              gatewayFeeBrl,
+              'BRL',
+              'AVAILABLE',
+              'Taxa retida pelo gateway no mês corrente = bruto liquidado − líquido creditado. Aparece também em Custos, na categoria GATEWAY_PAGAMENTO.',
+            )
+          : this.unavailable('BRL', 'Nenhuma liquidação registrada ainda.'),
+        // Taxa exatamente zero quase sempre significa "o provedor não informou a taxa", e
+        // não "não houve taxa". Marcar indisponível é mais honesto que exibir 0%.
+        gatewayFeePercent:
+          !hasPayments || receivedGrossBrl === 0 || gatewayFeeBrl === 0
+            ? this.unavailable(
+                'PERCENT',
+                'O gateway não informou taxa nas liquidações do mês (bruto igual ao líquido) — exibir 0% seria afirmar que não há taxa.',
+              )
+            : this.metric(
+                (gatewayFeeBrl / receivedGrossBrl) * 100,
+                'PERCENT',
+                'AVAILABLE',
+                'Taxa efetiva do gateway no mês = taxa retida ÷ bruto liquidado.',
+              ),
+        paymentExceptions: paymentExceptionRows.map((item) => ({
+          paymentId: item.paymentId,
+          gateway: item.gateway,
+          status: item.status,
+          amountBrl: item.amountCents / 100,
+          occurredAt: (item.occurredAt ?? new Date()).toISOString(),
+          receivedAt: (item.receivedAt ?? new Date()).toISOString(),
+        })),
+
         /** Regime declarado na tela. Ver o comentário de `profit`. */
-        profitBasis: ProfitBasis.CONTRATADO_PROXY,
+        profitBasis: hasPayments ? ProfitBasis.CAIXA : ProfitBasis.CONTRATADO_PROXY,
       };
     });
     return this.envelope(data, [
@@ -2152,7 +2321,11 @@ export class ControlCenterService {
       `Calendário de renovação cobre ${RENEWAL_HORIZON_DAYS} dias de receita contratada a vencer — não é projeção de vendas novas.`,
       'MRR = preço do plano ÷ meses do plano; ARR = MRR × 12. Receita contratada, não caixa recebido.',
       'Custo de IA usa o preço de `model_pricing` vigente na data de cada job (não o preço de hoje) e câmbio fixo.',
-      'Lucro exibido é PROVISÓRIO: regime de receita CONTRATADA (proxy). O regime decidido é caixa e passa a valer quando `payments` existir (US-8.5).',
+      'Receita CONTRATADA e receita RECEBIDA são grandezas distintas e nunca devem ser somadas: a diferença entre elas é inadimplência, falha de cartão e prazo de liquidação.',
+      'Lucro sai em regime de CAIXA assim que existe liquidação em `payments`; sem nenhuma, volta a exibir o proxy de receita contratada com o regime declarado. O campo `profitBasis` diz qual dos dois está valendo.',
+      'A taxa do gateway vem de `payments` (bruto − líquido) e entra em Custos na categoria GATEWAY_PAGAMENTO; o lucro usa o bruto recebido para não descontar a taxa duas vezes.',
+      'Liquidação sem assinatura correspondente não é descartada: fica em `paymentExceptions` até ser conciliada à mão.',
+      'Estorno e chargeback são linha nova de sinal contrário em `payments` — a linha da cobrança original nunca é alterada, e por isso as somas já saem líquidas.',
       'Custo por categoria/mês cobre 12 meses por competência (`occurred_on`), líquido de estornos — correção de lançamento é estorno + relançamento, nunca edição.',
       'Projeção de resultado continua fora de escopo (Sprint 11): esta tela mostra resultado realizado, nunca projetado.',
       'Receita recebida, CAC e distribuição por sócio seguem marcadas como indisponíveis com a dependência nomeada — nunca como zero.',

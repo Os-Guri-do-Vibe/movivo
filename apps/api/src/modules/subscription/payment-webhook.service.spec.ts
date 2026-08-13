@@ -29,7 +29,7 @@ interface Deps {
 
 function make(deps: Deps = {}) {
   const parseWebhookEvent = vi.fn(() => (deps.parsed === undefined ? event() : deps.parsed));
-  const gateway = { parseWebhookEvent } as unknown as PaymentGateway;
+  const gateway = { name: 'MOCK', parseWebhookEvent } as unknown as PaymentGateway;
 
   const applyGatewayEvent = deps.applyThrows
     ? vi.fn(() => Promise.reject(deps.applyThrows))
@@ -51,12 +51,20 @@ function make(deps: Deps = {}) {
   const keys = new RedisKeyBuilder('movivo');
   const enqueue = vi.fn(() => Promise.resolve('job'));
   const queues = { enqueue } as unknown as QueueManager;
-  const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() } as never;
+  const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() };
 
   return {
-    svc: new PaymentWebhookService(gateway, subscriptions, redis, keys, queues, logger),
+    svc: new PaymentWebhookService(
+      gateway,
+      subscriptions,
+      redis,
+      keys,
+      queues,
+      logger as never,
+    ),
     applyGatewayEvent,
     enqueue,
+    logger,
     set,
   };
 }
@@ -64,16 +72,28 @@ function make(deps: Deps = {}) {
 const input = { rawBody: RAW, signature: 'sig', timestamp: '123', correlationId: 'c1' };
 
 describe('PaymentWebhookService.ingest (US-4.2)', () => {
-  it('assinatura inválida (parse → null) → não processa', async () => {
-    const { svc, applyGatewayEvent } = make({ parsed: null });
-    await svc.ingest(input);
+  it('assinatura inválida (parse → null) → rejeita, não processa e não enfileira nada', async () => {
+    const { svc, applyGatewayEvent, enqueue } = make({ parsed: null });
+    await expect(svc.ingest(input)).resolves.toBe('REJECTED');
     expect(applyGatewayEvent).not.toHaveBeenCalled();
+    // US-8.5: nada é persistido nem enfileirado antes da assinatura passar.
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
-  it('corpo ausente → não processa', async () => {
-    const { svc, applyGatewayEvent } = make();
-    await svc.ingest({ ...input, rawBody: undefined });
+  it('corpo ausente → rejeita e não processa', async () => {
+    const { svc, applyGatewayEvent, enqueue } = make();
+    await expect(svc.ingest({ ...input, rawBody: undefined })).resolves.toBe('REJECTED');
     expect(applyGatewayEvent).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('rejeição é REGISTRADA no log — tentativa de forja não é descartada em silêncio', async () => {
+    const { svc, logger } = make({ parsed: null });
+    await svc.ingest(input);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'webhook_rejected', reason: 'bad_signature' }),
+      expect.any(String),
+    );
   });
 
   it('checkout válido → aplica a transição (ativação)', async () => {
@@ -103,6 +123,49 @@ describe('PaymentWebhookService.ingest (US-4.2)', () => {
 
   it('transição inválida é engolida (responde 200, não relança)', async () => {
     const { svc } = make({ applyThrows: new InvalidTransitionError('CANCELED', 'ACTIVE') });
-    await expect(svc.ingest(input)).resolves.toBeUndefined();
+    await expect(svc.ingest(input)).resolves.toBe('ACCEPTED');
+  });
+});
+
+describe('PaymentWebhookService — conciliação da liquidação (US-8.5)', () => {
+  it('evento válido enfileira a conciliação com o payload bruto e jobId determinístico', async () => {
+    const { svc, enqueue } = make();
+    await expect(svc.ingest(input)).resolves.toBe('ACCEPTED');
+    expect(enqueue).toHaveBeenCalledWith(
+      'payment-reconciliation',
+      'reconcile',
+      expect.objectContaining({
+        gateway: 'MOCK',
+        event: expect.objectContaining({ eventId: 'evt_1' }),
+        rawPayload: { x: 1 },
+      }),
+      // Sem `:` — o BullMQ recusa custom id com dois-pontos (regressão pega no int-spec).
+      expect.objectContaining({ jobId: expect.stringMatching(/^MOCK_[0-9a-f]{64}$/) }),
+    );
+  });
+
+  /**
+   * O dedup em Redis protege a MÁQUINA DE ESTADOS, não a receita. A idempotência de
+   * `payments` é a UNIQUE do banco — por isso a reentrega precisa continuar chegando à
+   * fila, senão uma queda entre o `SET NX` e a gravação perderia a liquidação para sempre.
+   */
+  it('reentrega (dedup do Redis) ainda enfileira a conciliação, mas não reaplica a transição', async () => {
+    const { svc, enqueue, applyGatewayEvent } = make({ fresh: false });
+    await svc.ingest(input);
+    expect(enqueue).toHaveBeenCalledWith(
+      'payment-reconciliation',
+      'reconcile',
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(applyGatewayEvent).not.toHaveBeenCalled();
+  });
+
+  it('o payload bruto NUNCA vai para o log de aplicação', async () => {
+    const { svc, logger } = make();
+    await svc.ingest({ ...input, rawBody: Buffer.from('{"card":"4111111111111111"}') });
+    const logged = JSON.stringify([...logger.info.mock.calls, ...logger.warn.mock.calls]);
+    expect(logged).not.toContain('4111111111111111');
+    expect(logged).not.toContain('card');
   });
 });

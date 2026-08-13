@@ -25,6 +25,7 @@ export const QUEUE = {
   checkinWeekly: 'checkin-weekly',
   workoutDaily: 'workout-daily',
   conversionSequence: 'conversion-sequence',
+  paymentReconciliation: 'payment-reconciliation',
   sanity: 'sanity',
   deadLetter: 'dead-letter',
 } as const;
@@ -71,6 +72,16 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
   // sem urgência de latência, retry curto — o envio real acontece em `whatsappOutbound`.
   [QUEUE.workoutDaily]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
   [QUEUE.conversionSequence]: { attempts: 1, backoffMs: [], concurrency: 5 },
+  // Conciliação de liquidação (US-8.5). Retenta bastante e por bastante tempo: é fato
+  // financeiro que já foi autenticado no webhook — perdê-lo por um blip do banco seria
+  // perder receita da apuração. A idempotência é a UNIQUE de `payments`, então retry
+  // repetido nunca duplica linha, o que torna seguro insistir.
+  [QUEUE.paymentReconciliation]: {
+    attempts: 5,
+    backoffMs: [2_000, 10_000, 60_000, 300_000, 900_000],
+    concurrency: 5,
+    lockMs: 30_000,
+  },
   [QUEUE.sanity]: { attempts: 3, backoffMs: [50, 100, 200], concurrency: 2 },
   // DLQ é destino final: não retenta, não é reprocessada automaticamente.
   [QUEUE.deadLetter]: { attempts: 1, backoffMs: [], concurrency: 1 },

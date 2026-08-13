@@ -31,6 +31,8 @@ describe('buildRlsPoliciesSql', () => {
       'audit_logs',
       'workout_completions',
       'user_status_transitions',
+      // US-8.5 — liquidacao recebida do gateway, dado financeiro do titular.
+      'payments',
       'professional_assignments',
     ]);
   });

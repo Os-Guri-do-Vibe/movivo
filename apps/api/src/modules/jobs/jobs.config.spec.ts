@@ -22,6 +22,8 @@ describe('jobs.config', () => {
         'ai-response',
         'checkin-weekly',
         'conversion-sequence',
+        // US-8.5 — conciliacao da liquidacao do gateway.
+        'payment-reconciliation',
         'dead-letter',
         'protocol-generation',
         'sanity',

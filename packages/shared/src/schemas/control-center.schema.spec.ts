@@ -76,6 +76,14 @@ describe('contratos do Control Center', () => {
           },
         ],
         aiBlockedRate: { value: 0, unit: 'PERCENT', status: 'AVAILABLE', definition: 'x' },
+        northStar: {
+          averageCompletions: { value: 0, unit: 'COUNT', status: 'AVAILABLE', definition: 'x' },
+          target: 8,
+          reportingRate: { value: 0, unit: 'PERCENT', status: 'AVAILABLE', definition: 'x' },
+          cohortSize: 0,
+          bySource: [],
+        },
+        declaredAdherenceRate: { value: 0, unit: 'PERCENT', status: 'AVAILABLE', definition: 'x' },
       },
       meta,
     });

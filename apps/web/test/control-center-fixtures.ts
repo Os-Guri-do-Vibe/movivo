@@ -322,6 +322,26 @@ export const financeResponse: ControlCenterFinanceResponse = {
       { month: '2026-07', amountBrl: 150 },
       { month: '2026-08', amountBrl: 180 },
     ],
+    // US-8.5 — receita RECEBIDA. Série separada da contratada (`renewalCalendar`) de
+    // propósito: são grandezas diferentes e a tela nunca as soma.
+    receivedRevenueByMonth: [
+      { month: '2026-07', grossBrl: 1400, netBrl: 1344, settlements: 36 },
+      { month: '2026-08', grossBrl: 1500, netBrl: 1440, settlements: 39 },
+    ],
+    delinquencyRate: metric({ value: 7.1, unit: 'PERCENT' }),
+    averageSettlementDays: metric({ value: 2.3, unit: 'COUNT' }),
+    gatewayFee: metric({ value: 60, unit: 'BRL' }),
+    gatewayFeePercent: metric({ value: 4, unit: 'PERCENT' }),
+    paymentExceptions: [
+      {
+        paymentId: '77777777-7777-4777-8777-777777777777',
+        gateway: 'STRIPE',
+        status: 'SETTLED',
+        amountBrl: 39,
+        occurredAt: '2026-08-10T12:00:00.000Z',
+        receivedAt: '2026-08-10T12:00:05.000Z',
+      },
+    ],
     profitBasis: 'CONTRATADO_PROXY',
   },
   meta: { ...controlCenterMeta, dataQuality: [...controlCenterMeta.dataQuality] },

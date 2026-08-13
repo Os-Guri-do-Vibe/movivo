@@ -567,6 +567,42 @@ export const controlCenterCostByMonthSchema = z.object({
   amountBrl: z.number(),
 });
 
+/**
+ * Receita **recebida** por mês (US-8.5), do que efetivamente liquidou no gateway.
+ *
+ * Série separada de `renewalCalendar` (receita **contratada**) de propósito: são grandezas
+ * diferentes — a diferença entre elas é inadimplência, falha de cartão e prazo de
+ * liquidação. Somar as duas produziria um número que não existe (regra 3 da Sprint 8), e a
+ * separação em dois contratos distintos é o que torna a soma indevida impossível na tela.
+ */
+export const controlCenterReceivedByMonthSchema = z.object({
+  month: z.string().regex(/^\d{4}-\d{2}$/),
+  /** Bruto liquidado, já líquido de estornos (estorno é linha negativa). */
+  grossBrl: z.number(),
+  /** Bruto menos a taxa do gateway — o que de fato entrou na conta. */
+  netBrl: z.number(),
+  /** Quantidade de eventos liquidados no mês. */
+  settlements: z.number().int().nonnegative(),
+});
+export type ControlCenterReceivedByMonth = z.infer<typeof controlCenterReceivedByMonthSchema>;
+
+/**
+ * Fila de exceção da conciliação (US-8.5 / TASK-8.5.3): liquidação **autenticada** cuja
+ * assinatura não foi encontrada. Existe para que esse evento nunca seja descartado em
+ * silêncio — ele fica gravado em `payments` com titular nulo e aparece aqui.
+ *
+ * Sem PII do titular por construção: se houvesse titular, não seria exceção.
+ */
+export const controlCenterPaymentExceptionSchema = z.object({
+  paymentId: z.uuid(),
+  gateway: z.string(),
+  status: z.string(),
+  amountBrl: z.number(),
+  occurredAt: z.string(),
+  receivedAt: z.string(),
+});
+export type ControlCenterPaymentException = z.infer<typeof controlCenterPaymentExceptionSchema>;
+
 export const controlCenterFinanceResponseSchema = z.object({
   data: z.object({
     activeSubscriptions: controlCenterMetricSchema,
@@ -595,6 +631,26 @@ export const controlCenterFinanceResponseSchema = z.object({
     expensePerActiveUser: controlCenterMetricSchema,
     costByCategory: z.array(controlCenterCostByCategorySchema),
     costByMonth: z.array(controlCenterCostByMonthSchema),
+
+    // ---- Liquidação recebida (US-8.5) ----
+    /**
+     * Receita **recebida** por mês. Vive ao lado de `renewalCalendar` (contratada) e
+     * **nunca** é somada com ela — ver `controlCenterReceivedByMonthSchema`.
+     */
+    receivedRevenueByMonth: z.array(controlCenterReceivedByMonthSchema),
+    /**
+     * Inadimplência do período: cobranças que falharam sobre o total de tentativas
+     * (falhas + liquidações) no mês corrente.
+     */
+    delinquencyRate: controlCenterMetricSchema,
+    /** Prazo médio, em dias, entre o início do período contratado e a liquidação. */
+    averageSettlementDays: controlCenterMetricSchema,
+    /** Taxa retida pelo gateway no mês, em R$. É custo real e entra em `costByCategory`. */
+    gatewayFee: controlCenterMetricSchema,
+    /** A mesma taxa como % do bruto liquidado. `UNAVAILABLE` se o provedor não informa taxa. */
+    gatewayFeePercent: controlCenterMetricSchema,
+    /** Liquidações sem assinatura correspondente — nunca descartadas, sempre visíveis. */
+    paymentExceptions: z.array(controlCenterPaymentExceptionSchema),
     /**
      * Regime de apuração do `profit` exibido. `CONTRATADO_PROXY` enquanto `payments`
      * (US-8.5) não existir — a tela precisa declarar isso, nunca chamar de caixa o que

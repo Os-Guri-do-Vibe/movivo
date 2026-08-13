@@ -52,3 +52,6 @@ export * from './user-status-transitions';
 // Sprint 8 - despesa auditavel e preco de modelo por vigencia (US-8.4).
 export * from './expenses';
 export * from './model-pricing';
+
+// Sprint 8 - liquidacao recebida do gateway (US-8.5). Append-only, idempotente pelo banco.
+export * from './payments';

@@ -15,6 +15,7 @@ import { Logger as PinoLogger } from 'nestjs-pino';
 
 import { AppModule } from './app.module';
 import { AppConfigService, getAppConfig, InvalidConfigurationError } from './core/config';
+import { PAYMENT_WEBHOOK_BODY_LIMIT } from './modules/subscription/payment-webhook.controller';
 
 async function bootstrap(): Promise<void> {
   /*
@@ -36,6 +37,14 @@ async function bootstrap(): Promise<void> {
   });
 
   app.useLogger(app.get(PinoLogger));
+
+  /*
+   * Teto explícito do corpo JSON (US-8.5). O valor é o mesmo que o express já aplicava por
+   * default — o ganho aqui não é apertar, é **parar de depender de um default implícito**:
+   * `POST /webhook/payment` é público e verifica HMAC sobre o corpo bruto, então um
+   * corpo sem teto vira amplificador de CPU. Payload de gateway tem poucos KB; o resto é abuso.
+   */
+  app.useBodyParser('json', { limit: PAYMENT_WEBHOOK_BODY_LIMIT });
   const config = app.get(AppConfigService);
 
   // Versionamento de API na URL — regra §12.10. Todo endpoint vive sob /api/v1.

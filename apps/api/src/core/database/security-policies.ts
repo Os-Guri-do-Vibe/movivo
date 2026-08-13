@@ -109,6 +109,11 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   // Sprint 8 (US-8.3): sequência de marcos do ciclo de vida do titular. Append-only
   // (ver `buildStatusTransitionsImmutabilitySql`) e sob a mesma FORCE RLS por titular.
   { table: 'user_status_transitions', column: 'user_id', professional: 'read' },
+  // Sprint 8 (US-8.5): liquidação recebida do gateway. Dado financeiro do titular, como
+  // `subscriptions`. Linha órfã (conciliação sem assinatura) tem `user_id` nulo e por isso
+  // não casa com nenhuma política de titular — fica visível só a SYSTEM/ADMIN, que é
+  // exatamente quem trata a fila de exceção. Append-only (`buildPaymentsImmutabilitySql`).
+  { table: 'payments', column: 'user_id', professional: 'read' },
 ];
 
 // `nullif(..., '')` é OBRIGATÓRIO, não cosmético: sob PgBouncer transaction mode,
@@ -666,5 +671,43 @@ export function buildExpensesImmutabilitySql(appRole: string): string {
 
     REVOKE UPDATE, DELETE, TRUNCATE ON public.expenses FROM ${appRole};
     GRANT SELECT, INSERT ON public.expenses TO ${appRole};
+  `;
+}
+
+/**
+ * `payments` append-only, imposto no banco (US-8.5 / TASK-8.5.1).
+ *
+ * Quarta aplicacao do mesmo molde (`audit_logs`, `agent_config`, `user_status_transitions`,
+ * `expenses`) e a mais sensivel: `payments` e escrita a partir de um evento **externo**.
+ * Um valor de liquidacao alterado depois muda a receita apurada de um periodo fechado e,
+ * pela US-8.7, muda a base de distribuicao de lucro entre os socios.
+ *  1. trigger que levanta excecao em UPDATE/DELETE/TRUNCATE (vale ate para quem tem grant);
+ *  2. REVOKE do privilegio na role de runtime (vale ate se a trigger for derrubada).
+ *
+ * Estorno e chargeback sao **linha nova de sinal contrario**, nunca alteracao da original —
+ * por isso a imutabilidade nao atrapalha a correcao: ela e o que a torna auditavel.
+ *
+ * A regra vale tambem para a conciliacao: o vinculo com a assinatura e resolvido ANTES do
+ * insert (no worker), nunca por um UPDATE posterior. Ver `payments.ts`.
+ */
+export function buildPaymentsImmutabilitySql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.payments_reject_mutation()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    BEGIN
+      RAISE EXCEPTION 'payments is append-only: estorno e linha nova, nunca alteracao' USING ERRCODE = '55000';
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.payments_reject_mutation() FROM PUBLIC;
+
+    DROP TRIGGER IF EXISTS trg_payments_immutable ON public.payments;
+    CREATE TRIGGER trg_payments_immutable BEFORE UPDATE OR DELETE ON public.payments
+      FOR EACH ROW EXECUTE FUNCTION public.payments_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_payments_no_truncate ON public.payments;
+    CREATE TRIGGER trg_payments_no_truncate BEFORE TRUNCATE ON public.payments
+      FOR EACH STATEMENT EXECUTE FUNCTION public.payments_reject_mutation();
+
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.payments FROM ${appRole};
+    GRANT SELECT, INSERT ON public.payments TO ${appRole};
   `;
 }

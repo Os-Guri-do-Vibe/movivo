@@ -522,8 +522,15 @@ describe('ControlCenterService projections', () => {
     expect(response.data.anamnesisFunnel.exitPoint.status).toBe('UNAVAILABLE');
   });
 
-  /** Ordem dos `select` em `finance()`: billing, planos, calendário, risco, churn, IA. */
-  function financeResults(): unknown[][] {
+  /**
+   * Ordem dos `select` em `finance()`: billing, planos, calendário, risco, churn, despesas,
+   * e — desde a US-8.5 — liquidação por mês, prazo médio e fila de exceção.
+   */
+  function financeResults(
+    payments: unknown[] = [],
+    settlementLag: unknown[] = [],
+    exceptions: unknown[] = [],
+  ): unknown[][] {
     return [
       [{ active: 7, contractedMrr: '273.00' }],
       [
@@ -542,6 +549,10 @@ describe('ControlCenterService projections', () => {
       [{ reason: 'PRECO', total: 5, last90Days: 3 }],
       // US-8.4: despesas por mês/categoria (centavos inteiros; estorno já somado).
       [],
+      // US-8.5: liquidação recebida por mês, prazo médio e fila de exceção.
+      payments,
+      settlementLag,
+      exceptions,
     ];
   }
 
@@ -671,9 +682,87 @@ describe('ControlCenterService projections', () => {
     expect(response.data.expensePerActiveUser.value).toBe(180 / 7);
     // Lucro = MRR contratado R$273 − despesa R$180 = R$93, tolerância 0.
     expect(response.data.profit.value).toBe(93);
-    // Regime declarado: proxy contratado enquanto `payments` (US-8.5) não existir.
+    // Regime declarado: proxy contratado enquanto NÃO houver liquidação em `payments`.
     expect(response.data.profit.status).toBe('PROXY');
     expect(response.data.profitBasis).toBe('CONTRATADO_PROXY');
+  });
+
+  it('com liquidação registrada o lucro passa a regime de CAIXA e a taxa do gateway vira custo (US-8.5)', async () => {
+    const month = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+    }).format(new Date());
+    const results = financeResults(
+      // R$200 brutos liquidados, R$190 creditados → R$10 de taxa do gateway.
+      [{ month, grossCents: '20000', netCents: '19000', settlements: 4, failures: 1 }],
+      [{ days: '2.5' }],
+      [],
+    );
+    results[5] = [{ month, category: 'INFRA', amountCents: '12000' }];
+    withExecute(aiCostRows());
+    const { service } = serviceWithSystemResults(...results);
+
+    const response = await service.finance();
+
+    // As duas séries convivem, nomeadas e separadas — e nunca são somadas.
+    expect(response.data.contractedMrr.value).toBe(273);
+    expect(response.data.receivedRevenue.value).toBe(200);
+    expect(response.data.receivedRevenueByMonth).toEqual([
+      { month, grossBrl: 200, netBrl: 190, settlements: 4 },
+    ]);
+
+    // Taxa do gateway = bruto − líquido, exibida e também somada em Custos.
+    expect(response.data.gatewayFee.value).toBe(10);
+    expect(response.data.gatewayFeePercent.value).toBe(5);
+    expect(response.data.costByCategory).toContainEqual({
+      category: 'GATEWAY_PAGAMENTO',
+      amountBrl: 10,
+    });
+
+    // Cálculo manual: recebido R$200 − (despesa R$120 + taxa R$10) = R$70, tolerância 0.
+    expect(response.data.profit.value).toBe(70);
+    expect(response.data.profit.status).toBe('AVAILABLE');
+    expect(response.data.profitBasis).toBe('CAIXA');
+
+    // 1 falha em 5 tentativas = 20% de inadimplência no período.
+    expect(response.data.delinquencyRate.value).toBe(20);
+    expect(response.data.averageSettlementDays.value).toBe(2.5);
+  });
+
+  it('liquidação órfã aparece na fila de exceção — nunca é descartada (US-8.5)', async () => {
+    const occurredAt = new Date('2026-08-01T12:00:00.000Z');
+    const results = financeResults(
+      [],
+      [],
+      [
+        {
+          paymentId: '66666666-6666-4666-8666-666666666666',
+          gateway: 'STRIPE',
+          status: 'SETTLED',
+          amountCents: 3900,
+          occurredAt,
+          receivedAt: occurredAt,
+        },
+      ],
+    );
+    withExecute(aiCostRows());
+    const { service } = serviceWithSystemResults(...results);
+
+    const response = await service.finance();
+
+    expect(response.data.paymentExceptions).toEqual([
+      {
+        paymentId: '66666666-6666-4666-8666-666666666666',
+        gateway: 'STRIPE',
+        status: 'SETTLED',
+        amountBrl: 39,
+        occurredAt: occurredAt.toISOString(),
+        receivedAt: occurredAt.toISOString(),
+      },
+    ]);
+    // Sem titular por construção: se houvesse, não seria exceção.
+    expect(JSON.stringify(response.data.paymentExceptions)).not.toMatch(/userId|email|phone/);
   });
 
   it('lista de alunos (recorte de suporte) não carrega nenhum campo de saúde', async () => {
