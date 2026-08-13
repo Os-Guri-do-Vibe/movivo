@@ -39,7 +39,7 @@ const allTexts = [
   confirmationMessage(),
   confirmationCareMessage(),
   waitingMessage(),
-  formatProtocolDelivery(content, 'https://x/protocolo/abc'),
+  formatProtocolDelivery(content, 'https://x/protocolo/abc', 'MOVI'),
 ];
 
 describe('templates de WhatsApp (US-2.5)', () => {
@@ -60,7 +60,7 @@ describe('templates de WhatsApp (US-2.5)', () => {
   });
 
   it('entrega quebra em bolhas, destaca o 1º treino e inclui o link', () => {
-    const msg = formatProtocolDelivery(content, 'https://x/protocolo/abc');
+    const msg = formatProtocolDelivery(content, 'https://x/protocolo/abc', 'MOVI');
     const bubbles = msg.split(BUBBLE_SEPARATOR);
     expect(bubbles.length).toBe(3);
     expect(bubbles[0]).toMatch(/intelig[êe]ncia artificial/i); // transparência de IA

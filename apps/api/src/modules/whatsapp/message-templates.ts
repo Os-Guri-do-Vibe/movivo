@@ -59,10 +59,14 @@ function exerciseLine(ex: ProtocolStructure['sessions'][number]['exercises'][num
  * Entrega do protocolo em bolhas: (1) transparência de IA + respaldo CREF; (2) primeiro
  * treino da semana em destaque (aha moment); (3) link para o plano completo (US-2.6).
  */
-export function formatProtocolDelivery(content: ProtocolStructure, link: string): string {
+export function formatProtocolDelivery(
+  content: ProtocolStructure,
+  link: string,
+  agentName: string,
+): string {
   const first = content.sessions[0];
   const intro =
-    'Oi! Aqui é a MOVI 💪 Seu plano de treino está pronto — ele foi montado com inteligência ' +
+    `Oi! Aqui é a ${agentName} 💪 Seu plano de treino está pronto — ele foi montado com inteligência ` +
     'artificial dentro da metodologia de um profissional de Educação Física registrado no CREF.';
 
   const firstWorkout = first

@@ -19,7 +19,11 @@ export function dunningMessage(checkoutUrl: string): string {
  */
 export type ConversionTouchpoint = 'day7' | 'day10' | 'day13' | 'day14' | 'winback';
 
-export function conversionMessage(touchpoint: ConversionTouchpoint, checkoutUrl: string): string {
+export function conversionMessage(
+  touchpoint: ConversionTouchpoint,
+  checkoutUrl: string,
+  agentName: string,
+): string {
   switch (touchpoint) {
     case 'day7':
       return (
@@ -44,7 +48,7 @@ export function conversionMessage(touchpoint: ConversionTouchpoint, checkoutUrl:
       // último recurso antes de perder o usuário. Mesmo produto, período mais curto/barato.
       return (
         'Último dia do seu período de experiência! 🙌 Se o valor pesou, o plano Mensal sai por ' +
-        'R$39 — o jeito mais leve de continuar com seu plano e a MOVI: ' +
+        `R$39 — o jeito mais leve de continuar com seu plano e a ${agentName}: ` +
         checkoutUrl +
         '\nSem fidelidade: você cancela quando quiser.'
       );

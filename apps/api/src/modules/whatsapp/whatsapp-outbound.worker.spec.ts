@@ -121,6 +121,7 @@ function makeWorker(deps: Deps = {}) {
       hasActiveForUser: vi.fn(async () => deps.consentActive ?? true),
     } as unknown as HealthConsentService,
     config,
+    { agentName: vi.fn(async () => 'MOVI') } as never,
     logger,
   );
   return { worker, send, sendTyping, redis };

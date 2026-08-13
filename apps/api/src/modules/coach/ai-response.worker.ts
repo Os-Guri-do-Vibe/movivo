@@ -19,7 +19,7 @@ import { HealthConsentService } from '../../core/database/health-consent.service
 import { ContextService } from '../ai-coach/context/context.service';
 import { IntentClassifier } from '../ai-coach/intent/intent-classifier.service';
 import type { Intent } from '../ai-coach/intent/intent.types';
-import { FORA_DE_ESCOPO_RESPONSE, resolvePrompt } from '../ai-coach/intent/prompts';
+import { PromptResolverService } from '../ai-coach/intent/prompt-resolver.service';
 import { LlmAbuseGuard } from '../ai-coach/llm/llm-abuse-guard.service';
 import { LlmRouter } from '../ai-coach/llm/llm-router.service';
 import type { ScrubUser } from '../ai-coach/llm/llm.types';
@@ -60,6 +60,7 @@ export class AIResponseWorker implements OnModuleInit {
     private readonly queues: QueueManager,
     private readonly lock: UserJobLock,
     private readonly classifier: IntentClassifier,
+    private readonly prompts: PromptResolverService,
     private readonly context: ContextService,
     private readonly llm: LlmRouter,
     private readonly abuse: LlmAbuseGuard,
@@ -176,8 +177,9 @@ export class AIResponseWorker implements OnModuleInit {
     scrubUser: ScrubUser,
   ): Promise<ResponseDraft> {
     if (intent === 'FORA_DE_ESCOPO') {
-      // Recusa honesta pré-aprovada — sem LLM generativo (US-3.4).
-      return draftPass(FORA_DE_ESCOPO_RESPONSE, null, 0);
+      // Recusa honesta pré-aprovada — sem LLM generativo (US-3.4). O nome da agente vem
+      // da configuração publicada (US-7.6), nunca de literal no código.
+      return draftPass(await this.prompts.foraDeEscopoResponse(), null, 0);
     }
     if (intent === 'SUBSTITUICAO_EXERCICIO') {
       return this.buildSubstitution(userId, intent, message, scrubUser);
@@ -223,7 +225,7 @@ export class AIResponseWorker implements OnModuleInit {
       ? 'TRECHOS DE REFERÊNCIA (baseie a resposta técnica só nisto):\n' +
         ctx.ragDocs.map((d) => d.snippet).join('\n---\n')
       : '';
-    const system = [resolvePrompt(intent), ctx.cacheablePrefix, rag, opts?.extraSystem]
+    const system = [await this.prompts.resolvePrompt(intent), ctx.cacheablePrefix, rag, opts?.extraSystem]
       .filter(Boolean)
       .join('\n\n');
 

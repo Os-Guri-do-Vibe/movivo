@@ -20,7 +20,8 @@ import {
   SUBSTITUTION_FALLBACK_MESSAGE,
 } from './coach-messages';
 import type { ConversationRepository } from './conversation.repository';
-import { FORA_DE_ESCOPO_RESPONSE } from '../ai-coach/intent/prompts';
+import { buildForaDeEscopoResponse, resolvePrompt } from '../ai-coach/intent/prompts';
+import type { PromptResolverService } from '../ai-coach/intent/prompt-resolver.service';
 
 interface Deps {
   intent?: Intent;
@@ -59,6 +60,12 @@ function makeWorker(deps: Deps = {}) {
     }),
   );
   const classifier = { classify } as unknown as IntentClassifier;
+
+  const prompts = {
+    resolvePrompt: vi.fn(async (intent: Intent) => resolvePrompt(intent)),
+    agentName: vi.fn(async () => 'MOVI'),
+    foraDeEscopoResponse: vi.fn(async () => buildForaDeEscopoResponse('MOVI')),
+  } as unknown as PromptResolverService;
 
   const context = {
     build: vi.fn(() =>
@@ -112,6 +119,7 @@ function makeWorker(deps: Deps = {}) {
     queues,
     lock,
     classifier,
+    prompts,
     context,
     llm,
     abuse,
@@ -177,7 +185,7 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     const { worker, complete, enqueue } = makeWorker({ intent: 'FORA_DE_ESCOPO' });
     await worker.process(job());
     expect(complete).not.toHaveBeenCalled();
-    expect(sentText(enqueue)).toBe(FORA_DE_ESCOPO_RESPONSE);
+    expect(sentText(enqueue)).toBe(buildForaDeEscopoResponse('MOVI'));
   });
 
   it('handoff de segurança (dor grave): persiste SAFETY e NÃO chama o LLM (US-3.6)', async () => {

@@ -22,6 +22,7 @@ function make(opts?: { setResult?: 'OK' | null; status?: string; trialEndsAt?: D
   );
   const subs = { startTrial, getForUser } as unknown as SubscriptionService;
   const config = { whatsapp: { publicSiteUrl: 'https://movivo.test' } } as never;
+  const agentPersona = { agentName: vi.fn(async () => 'MOVI') } as never;
   const setResult = opts && 'setResult' in opts ? opts.setResult : 'OK';
   const redis = { set: vi.fn(() => Promise.resolve(setResult)) } as never;
   const logger = { setContext: vi.fn(), info: vi.fn(), warn: vi.fn() };
@@ -30,6 +31,7 @@ function make(opts?: { setResult?: 'OK' | null; status?: string; trialEndsAt?: D
     queues,
     subs,
     config,
+    agentPersona,
     redis,
     new RedisKeyBuilder('movivo') as never,
     logger as never,
