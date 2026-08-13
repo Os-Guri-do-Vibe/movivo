@@ -41,7 +41,8 @@ describe('MarketingDashboard', () => {
     expect(screen.getByText('Local de treino')).toBeVisible();
     expect(screen.getByText(/menos de 10 pessoas são ocultados/)).toBeVisible();
     expect(screen.getByText('3 segmentos suprimidos')).toBeVisible();
-    expect(screen.getByLabelText('Aquisição por campanha: 24%')).toBeVisible();
+    expect(screen.getByText('Faixa etária')).toBeVisible();
+    expect(screen.getByRole('heading', { name: '25-34' })).toBeVisible();
   });
 
   it('mostra o vazio de público quando nenhum grupo é publicável', async () => {
@@ -52,6 +53,57 @@ describe('MarketingDashboard', () => {
     render(<MarketingDashboard />);
     expect(await screen.findByRole('heading', { name: 'Sem segmentos publicáveis' })).toBeVisible();
     expect(screen.getByText('8 segmentos suprimidos')).toBeVisible();
+  });
+
+  it('destaca a etapa de maior abandono e nomeia o ponto de parada', async () => {
+    getMarketing.mockResolvedValue(marketingResponse);
+    render(<MarketingDashboard />);
+    expect(await screen.findByRole('heading', { name: 'Onde o cadastro se perde' })).toBeVisible();
+    expect(screen.getByText('Maior queda do funil')).toBeVisible();
+    expect(screen.getByText('38,7%')).toBeVisible();
+    expect(screen.getByText(/Código de verificação do WhatsApp \(74 sessões\)/)).toBeVisible();
+  });
+
+  it('suprime o funil inteiro quando o backend não publica etapas', async () => {
+    getMarketing.mockResolvedValue({
+      ...marketingResponse,
+      data: {
+        ...marketingResponse.data,
+        anamnesisFunnel: {
+          settledSessions: 0,
+          steps: [],
+          worstStep: null,
+          exitPoint: {
+            status: 'UNAVAILABLE' as const,
+            step: null,
+            checkpoint: null,
+            count: null,
+            reason: 'Amostra insuficiente: alguma etapa ficaria com menos de 10 sessões.',
+          },
+        },
+      },
+    });
+    render(<MarketingDashboard />);
+    expect(
+      await screen.findByRole('heading', { name: 'Funil suprimido por privacidade' }),
+    ).toBeVisible();
+    expect(screen.queryByText('Maior queda do funil')).not.toBeInTheDocument();
+  });
+
+  it('declara a dependência de UTM em vez de exibir CAC por canal', async () => {
+    getMarketing.mockResolvedValue(marketingResponse);
+    render(<MarketingDashboard />);
+    expect(await screen.findByRole('heading', { name: 'Aquisição & Canais' })).toBeVisible();
+    expect(screen.getByText(/previstas para a Sprint 8/)).toBeVisible();
+    expect(screen.getByText('CAC por canal')).toBeVisible();
+  });
+
+  it('renderiza a sazonalidade de cadastro, não de mensagens', async () => {
+    getMarketing.mockResolvedValue(marketingResponse);
+    render(<MarketingDashboard />);
+    expect(
+      await screen.findByRole('heading', { name: 'Cadastros iniciados por dia e hora' }),
+    ).toBeVisible();
   });
 
   it('em 403 não oferece nova tentativa', async () => {

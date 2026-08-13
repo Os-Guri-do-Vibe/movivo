@@ -64,7 +64,6 @@ const LANDING_BY_CAPABILITY: ReadonlyArray<[DashboardCapability, string]> = [
   [Capability.STUDENTS_READ, '/dashboard/alunos'],
   [Capability.SYSTEM_READ, '/dashboard/sistema'],
   [Capability.FINANCE_READ, '/dashboard/financeiro'],
-  [Capability.SUPPORT_READ, '/dashboard/suporte'],
   [Capability.COMPLIANCE_READ, '/dashboard/compliance'],
   [Capability.AUDIT_READ, '/dashboard/compliance'],
 ];
@@ -73,4 +72,32 @@ export function defaultDashboardPath(capabilities: readonly DashboardCapability[
   return (
     LANDING_BY_CAPABILITY.find(([capability]) => capabilities.includes(capability))?.[1] ?? null
   );
+}
+
+/**
+ * Rota padrão por papel após o login (US-7.1, TASK-7.1.5): cada pessoa cai no que ela
+ * abre todo dia, não a três cliques dali. A capability continua mandando — um papel
+ * que, por qualquer motivo, não tiver a capability do destino cai no fallback por
+ * capability e, em último caso, na Visão Geral.
+ */
+const LANDING_BY_ROLE: Partial<
+  Record<DashboardRole, { path: string; requires: readonly DashboardCapability[] }>
+> = {
+  PROFESSIONAL: {
+    path: '/dashboard/educacao-fisica',
+    requires: [Capability.STUDENTS_READ, Capability.STUDENTS_HEALTH_READ],
+  },
+  FINANCE: { path: '/dashboard/financeiro', requires: [Capability.FINANCE_READ] },
+  MARKETING: { path: '/dashboard/analytics', requires: [Capability.MARKETING_READ] },
+  ENGINEERING: { path: '/dashboard/sistema', requires: [Capability.SYSTEM_READ] },
+  ADMIN: { path: '/dashboard', requires: [Capability.OVERVIEW_READ] },
+};
+
+export function landingPathForRole(
+  role: DashboardRole,
+  capabilities: readonly DashboardCapability[],
+): string {
+  const mapped = LANDING_BY_ROLE[role];
+  if (mapped && hasAllCapabilities(capabilities, ...mapped.requires)) return mapped.path;
+  return defaultDashboardPath(capabilities) ?? '/dashboard';
 }

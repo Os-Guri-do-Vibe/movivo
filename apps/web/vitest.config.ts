@@ -45,7 +45,13 @@ export default defineConfig({
       provider: 'istanbul',
       reporter: ['text', 'text-summary', 'lcov'],
       include: ['src/components/**/*.{ts,tsx}', 'src/lib/**/*.{ts,tsx}'],
-      exclude: ['src/**/*.test.{ts,tsx}', 'src/**/*.d.ts'],
+      exclude: [
+        'src/**/*.test.{ts,tsx}',
+        'src/**/*.d.ts',
+        // Código vendorizado do shadcn/ui (gerado pelo CLI, não editado aqui): é
+        // dependência, não unidade nossa. Medir cobertura dele mede a lib, não o produto.
+        'src/components/ui/chart.tsx',
+      ],
       // Casca de fundação: só há 3 unidades com lógica testável (Button, ThemeToggle, cn).
       // Limiar honesto da Sprint 0 documentado em docs/qualidade/quality-gates.md §"Cobertura".
       thresholds: {

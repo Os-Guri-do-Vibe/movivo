@@ -1,15 +1,34 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('next/navigation', () => ({ usePathname: () => '/dashboard/analytics' }));
 vi.mock('./logout-button', () => ({ LogoutButton: () => <button>Sair</button> }));
 
-import { DashboardShell, navigationFor } from './dashboard-shell';
+import { DashboardShell, navigationFor, navigationGroupsFor } from './dashboard-shell';
+
+const ADMIN_CAPABILITIES = [
+  'control_center.overview.read',
+  'control_center.students.read',
+  'control_center.students.health.read',
+  'control_center.finance.read',
+  'control_center.marketing.read',
+  'control_center.ai.config.read',
+  'control_center.system.read',
+  'control_center.compliance.read',
+  'control_center.audit.read',
+  'control_center.admin.destructive.request',
+] as const;
 
 describe('DashboardShell', () => {
   it('mostra somente os setores autorizados para marketing', () => {
     const items = navigationFor(['control_center.marketing.read']);
-    expect(items.map((item) => item.label)).toEqual(['Analytics']);
+    expect(items.map((item) => item.label)).toEqual([
+      'Aquisição & Canais',
+      'Funil de conversão',
+      'Perfil de clientes',
+      'Campanhas & Experimentos',
+    ]);
   });
 
   it('não renderiza links proibidos para financeiro', () => {
@@ -18,31 +37,93 @@ describe('DashboardShell', () => {
         <p>Conteúdo</p>
       </DashboardShell>,
     );
-    expect(screen.getAllByRole('link', { name: 'Financeiro' })).not.toHaveLength(0);
-    expect(screen.queryByRole('link', { name: 'Alunos' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Analytics' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'Receita & Assinaturas' })).not.toHaveLength(0);
+    expect(screen.queryByRole('link', { name: 'Base de alunos' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Funil de conversão' })).not.toBeInTheDocument();
+    // Ausência, não desabilitação (TASK-7.9.1): dentro do menu o rótulo não existe
+    // em elemento nenhum — nem link, nem botão inerte, nem texto cinza.
+    for (const nav of screen.getAllByRole('navigation')) {
+      expect(within(nav).queryByText('Base de alunos')).not.toBeInTheDocument();
+      expect(within(nav).queryByText('Funil de conversão')).not.toBeInTheDocument();
+      expect(nav.querySelectorAll('[aria-disabled="true"], :disabled')).toHaveLength(0);
+    }
   });
-
-  const ADMIN_CAPABILITIES = [
-    'control_center.overview.read',
-    'control_center.marketing.read',
-    'control_center.students.read',
-    'control_center.system.read',
-    'control_center.finance.read',
-    'control_center.support.read',
-    'control_center.compliance.read',
-    'control_center.audit.read',
-    'control_center.admin.destructive.request',
-  ] as const;
 
   it('admin recebe todos os setores quando possui todas as capabilities necessárias', () => {
-    expect(navigationFor(ADMIN_CAPABILITIES)).toHaveLength(9);
+    expect(navigationFor(ADMIN_CAPABILITIES)).toHaveLength(21);
   });
 
-  it('esconde Compliance quando falta uma das capabilities exigidas (AND, como no backend)', () => {
+  it('esconde Compliance & Privacidade quando falta uma das capabilities exigidas (AND, como no backend)', () => {
     const items = navigationFor(
       ADMIN_CAPABILITIES.filter((capability) => capability !== 'control_center.audit.read'),
     );
-    expect(items.map((item) => item.label)).not.toContain('Compliance');
+    expect(items.map((item) => item.label)).not.toContain('Compliance & Privacidade');
+  });
+
+  it('agrupa o menu e omite grupos cujos itens foram todos filtrados pelo RBAC', () => {
+    const admin = navigationGroupsFor(ADMIN_CAPABILITIES);
+    expect(admin.map((group) => group.label)).toEqual([
+      null,
+      'Alunos',
+      'Financeiro',
+      'Marketing',
+      'IA',
+      'Sistema',
+    ]);
+
+    const marketing = navigationGroupsFor(['control_center.marketing.read']);
+    expect(marketing).toHaveLength(1);
+    expect(marketing[0]?.label).toBe('Marketing');
+    expect(marketing[0]?.items.map((item) => item.label)).toEqual([
+      'Aquisição & Canais',
+      'Funil de conversão',
+      'Perfil de clientes',
+      'Campanhas & Experimentos',
+    ]);
+  });
+
+  it('marca o setor atual com aria-current e mostra o título no cabeçalho', () => {
+    render(
+      <DashboardShell role="MARKETING" capabilities={['control_center.marketing.read']}>
+        <p>Conteúdo</p>
+      </DashboardShell>,
+    );
+    for (const link of screen.getAllByRole('link', { name: 'Funil de conversão' })) {
+      expect(link).toHaveAttribute('aria-current', 'page');
+    }
+    expect(screen.getByRole('banner')).toHaveTextContent('Funil de conversão');
+  });
+
+  it('abre o menu mobile, fecha com Esc e fecha ao clicar no overlay', async () => {
+    render(
+      <DashboardShell role="MARKETING" capabilities={['control_center.marketing.read']}>
+        <p>Conteúdo</p>
+      </DashboardShell>,
+    );
+    const open = screen.getByRole('button', { name: 'Abrir menu' });
+
+    await userEvent.click(open);
+    const drawer = screen.getByRole('dialog', { name: 'Setores do Control Center' });
+    expect(within(drawer).getByRole('link', { name: 'Funil de conversão' })).toBeVisible();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(open).toHaveFocus();
+
+    await userEvent.click(open);
+    await userEvent.click(screen.getAllByRole('button', { name: 'Fechar menu' })[0]!);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('recolhe e expande a barra lateral guardando a preferência', async () => {
+    render(
+      <DashboardShell role="MARKETING" capabilities={['control_center.marketing.read']}>
+        <p>Conteúdo</p>
+      </DashboardShell>,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Recolher menu lateral' }));
+    expect(window.localStorage.getItem('movivo.sidebar.collapsed')).toBe('1');
+    await userEvent.click(screen.getByRole('button', { name: 'Expandir menu lateral' }));
+    expect(window.localStorage.getItem('movivo.sidebar.collapsed')).toBe('0');
   });
 });

@@ -22,19 +22,89 @@ function metric(value, unit, definition, status = 'AVAILABLE') {
   return { value, unit, status, definition };
 }
 
+const STUDENT_ID = '66666666-6666-4666-8666-666666666666';
+
+/** Fixture da Base de alunos e da ficha (US-7.4) — mesmo aluno nas duas telas. */
+const studentSummary = {
+  id: STUDENT_ID,
+  name: 'Pessoa Teste',
+  email: 'pessoa@movivo.test',
+  phoneNumber: '+5511999999999',
+  status: 'ACTIVE',
+  subscriptionStatus: 'TRIAL',
+  protocolStatus: 'PENDING_REVIEW',
+  churnRisk: {
+    score: 1,
+    signals: [{ code: 'SEM_MENSAGEM', label: 'Sem mensagem recebida há 14 dias' }],
+  },
+};
+
+const studentDetail = {
+  ...studentSummary,
+  requiresProfessionalReview: false,
+  anamnesisStatus: 'COMPLETED',
+  currentProtocol: {
+    id: PROTOCOL_ID,
+    version: 1,
+    currentWeek: 2,
+    totalWeeks: 8,
+    signedAt: '2026-08-05T12:00:00.000Z',
+  },
+  routine: {
+    primaryGoal: 'SAUDE',
+    trainingStatus: 'RETOMANDO',
+    experience: 'INICIANTE',
+    daysPerWeek: 3,
+    preferredDays: ['SEG', 'QUA', 'SEX'],
+    sessionDuration: '45_60',
+    location: 'ACADEMIA',
+    preferredPeriod: 'MANHA',
+  },
+  workoutHistory: { status: 'UNAVAILABLE', reason: 'Depende de workout_completions (Sprint 8).' },
+  // As 6 origens da timeline, do evento mais recente para o mais antigo.
+  timeline: [
+    { at: '2026-08-10T12:00:00.000Z', kind: 'HANDOFF', title: 'Atendimento humano resolvido', detail: null },
+    { at: '2026-08-09T12:00:00.000Z', kind: 'CONVERSATION', title: '12 mensagens trocadas no dia', detail: null },
+    { at: '2026-08-08T12:00:00.000Z', kind: 'CHECKIN', title: 'Check-in da semana 2', detail: null },
+    { at: '2026-08-05T12:00:00.000Z', kind: 'SUBSCRIPTION', title: 'Trial iniciado', detail: null },
+    { at: '2026-08-04T12:00:00.000Z', kind: 'PROTOCOL', title: 'Protocolo v1 gerado', detail: null },
+    { at: '2026-08-03T12:00:00.000Z', kind: 'ANAMNESIS', title: 'Anamnese concluída', detail: null },
+  ],
+  adherence: {
+    checkinsSent: 2,
+    checkinsResponded: 1,
+    responseRate: metric(50, 'PERCENT', 'Adesão declarada via check-in.'),
+  },
+  aiQuality: {
+    blockedRate: metric(0, 'PERCENT', 'Respostas bloqueadas neste aluno.'),
+    blocked: 0,
+    validated: 12,
+    occurrences: [],
+  },
+  health: { parqState: 'CLEARED', painReports: [], evolution: [] },
+};
+
 const capabilitiesByRole = {
   ADMIN: [
     'control_center.overview.read',
     'control_center.marketing.read',
+    'control_center.marketing.write',
     'control_center.students.read',
+    'control_center.students.health.read',
     'control_center.system.read',
+    'control_center.system.operate',
     'control_center.finance.read',
+    'control_center.finance.write',
     'control_center.support.read',
     'control_center.compliance.read',
     'control_center.audit.read',
+    'control_center.ai.config.read',
+    'control_center.ai.config.write',
     'control_center.admin.destructive.request',
   ],
-  PROFESSIONAL: ['control_center.students.read'],
+  // US-7.1: o RT CREF cai na Fila do Profissional (`landingPathForRole`), que exige
+  // students.read + students.health.read — as duas precisam estar aqui.
+  PROFESSIONAL: ['control_center.students.read', 'control_center.students.health.read'],
   USER: [],
 };
 
@@ -332,11 +402,29 @@ createServer(async (request, response) => {
   if (request.method === 'GET' && url.pathname === '/api/v1/control-center/overview') {
     return json(response, 200, {
       data: {
-        activeSubscriptions: metric(12, 'COUNT', 'Assinaturas ativas.'),
-        trials: metric(3, 'COUNT', 'Trials ativos.'),
-        contractedMrr: metric(468, 'BRL', 'MRR contratado.'),
-        northStar: metric(null, 'COUNT', 'Histórico granular ainda indisponível.', 'UNAVAILABLE'),
-        criticalAlerts: metric(2, 'COUNT', 'Alertas críticos abertos.'),
+        pillars: [
+          {
+            pillar: 'STUDENTS',
+            label: 'Alunos',
+            state: 'OK',
+            href: '/dashboard/alunos',
+            headline: {
+              label: 'Alunos cadastrados',
+              metric: metric(12, 'COUNT', 'Alunos cadastrados.'),
+            },
+            details: [],
+            reason: null,
+          },
+          {
+            pillar: 'FINANCE',
+            label: 'Financeiro',
+            state: 'OK',
+            href: '/dashboard/financeiro',
+            headline: { label: 'MRR contratado', metric: metric(468, 'BRL', 'MRR contratado.') },
+            details: [],
+            reason: null,
+          },
+        ],
       },
       meta: controlCenterMeta,
     });
@@ -344,20 +432,17 @@ createServer(async (request, response) => {
   if (request.method === 'GET' && url.pathname === '/api/v1/control-center/students') {
     return json(response, 200, {
       data: {
-        students: [
-          {
-            id: '66666666-6666-4666-8666-666666666666',
-            name: 'Pessoa Teste',
-            email: 'pessoa@movivo.test',
-            phoneNumber: '+5511999999999',
-            status: 'ACTIVE',
-            subscriptionStatus: 'TRIAL',
-            protocolStatus: 'PENDING_REVIEW',
-          },
-        ],
+        students: [studentSummary],
+        aiBlockedRate: metric(0, 'PERCENT', 'Respostas bloqueadas na base.'),
       },
       meta: controlCenterMeta,
     });
+  }
+  if (
+    request.method === 'GET' &&
+    url.pathname === `/api/v1/control-center/students/${STUDENT_ID}`
+  ) {
+    return json(response, 200, { data: { student: studentDetail }, meta: controlCenterMeta });
   }
   if (request.method === 'GET' && url.pathname === '/api/v1/professional/dashboard/queue/events') {
     response.writeHead(200, {

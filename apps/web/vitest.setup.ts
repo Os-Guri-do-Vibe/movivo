@@ -42,6 +42,23 @@ if (typeof HTMLDialogElement.prototype.close !== 'function') {
   };
 }
 
+/*
+ * O `ResponsiveContainer` do Recharts (usado pelo `ChartContainer` do shadcn) observa
+ * o próprio tamanho; o jsdom não implementa `ResizeObserver`. O stub inerte basta:
+ * sem redimensionamento no teste, o container fica no `initialDimension` do shadcn.
+ */
+globalThis.ResizeObserver ??= class {
+  constructor(private readonly callback: ResizeObserverCallback) {}
+  observe(target: Element) {
+    this.callback(
+      [{ target, contentRect: { width: 600, height: 190 } } as ResizeObserverEntry],
+      this as unknown as ResizeObserver,
+    );
+  }
+  unobserve() {}
+  disconnect() {}
+};
+
 afterEach(() => {
   cleanup();
 });

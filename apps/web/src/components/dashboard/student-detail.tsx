@@ -12,9 +12,27 @@ import {
   SectorHeader,
   useControlCenterResource,
 } from './control-center-ui';
+import { ChurnRiskSignals } from './students-dashboard';
+
+/** Rótulo obrigatório da US-7.4 (TASK-7.4.3): adesão é declaração, não execução. */
+const DECLARED_LABEL =
+  'Declarado via check-in: mede a resposta do aluno ao check-in, não a execução do treino. Treino concluído verificado depende de workout_completions (Sprint 8).';
+
+const TIMELINE_LABELS: Record<string, string> = {
+  ANAMNESIS: 'Anamnese',
+  PROTOCOL: 'Protocolo',
+  CHECKIN: 'Check-in',
+  CONVERSATION: 'Conversa',
+  SUBSCRIPTION: 'Assinatura',
+  HANDOFF: 'Atendimento humano',
+};
 
 function text(value: string | null): string {
   return value?.trim() || 'Não informado';
+}
+
+function percent(value: number | null): string {
+  return value === null ? 'Sem amostra' : `${value.toFixed(1)}%`;
 }
 
 function date(value: string | null): string {
@@ -109,14 +127,22 @@ export function StudentDetail({ id }: { id: string }) {
           <h2 id="student-health-flow" className="text-h2 font-bold">
             Formulários e segurança
           </h2>
-          <p className="mt-2 text-label text-muted-foreground">
-            O painel mostra o estado dos formulários; o conteúdo sensível permanece restrito ao
-            fluxo técnico auditado.
-          </p>
+          {student.health ? (
+            <p className="mt-2 text-label text-muted-foreground">
+              Informações de saúde decifradas para este acesso e registradas na trilha de auditoria.
+            </p>
+          ) : (
+            <p className="mt-2 text-label text-muted-foreground">
+              Seu acesso não inclui informações de saúde: o servidor não envia PAR-Q, relato de dor
+              nem evolução declarada nesta ficha.
+            </p>
+          )}
           <DetailList
             items={[
               ['Anamnese', text(student.anamnesisStatus)],
-              ['PAR-Q', text(student.parqState)],
+              ...(student.health
+                ? ([['PAR-Q', text(student.health.parqState)]] as Array<[string, string]>)
+                : []),
               ['Revisão CREF', student.requiresProfessionalReview ? 'Necessária' : 'Sem pendência'],
             ]}
           />
@@ -170,6 +196,143 @@ export function StudentDetail({ id }: { id: string }) {
           )}
         </section>
       </div>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-2">
+        <section
+          className="rounded-xl border border-border bg-card p-5"
+          aria-labelledby="student-adherence"
+        >
+          <h2 id="student-adherence" className="text-h2 font-bold">
+            Adesão declarada
+          </h2>
+          <p className="mt-2 text-label text-muted-foreground">{DECLARED_LABEL}</p>
+          <DetailList
+            items={[
+              ['Check-ins enviados', student.adherence.checkinsSent],
+              ['Check-ins respondidos', student.adherence.checkinsResponded],
+              ['Taxa de resposta', percent(student.adherence.responseRate.value)],
+            ]}
+          />
+          {student.health && student.health.evolution.length > 0 ? (
+            <>
+              <h3 className="mt-5 text-h3 font-semibold">Evolução declarada por semana</h3>
+              <ul className="mt-3 space-y-2">
+                {student.health.evolution.map((point) => (
+                  <li key={point.week} className="rounded-lg bg-secondary p-3 text-label">
+                    <span className="font-semibold">Semana {point.week}</span>{' '}
+                    <span className="text-muted-foreground">
+                      esforço percebido {text(point.fatigue)} · treinos declarados{' '}
+                      {text(point.workouts)} · ajuste {text(point.adjustment)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          {student.health && student.health.painReports.length > 0 ? (
+            <>
+              <h3 className="mt-5 text-h3 font-semibold">Relatos de desconforto</h3>
+              <ul className="mt-3 space-y-2">
+                {student.health.painReports.map((report) => (
+                  <li key={report.at} className="rounded-lg bg-secondary p-3 text-label">
+                    <span className="font-semibold">Semana {report.week}</span>{' '}
+                    <span className="text-muted-foreground">{report.text}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </section>
+
+        <section
+          className="rounded-xl border border-border bg-card p-5"
+          aria-labelledby="student-ai-quality"
+        >
+          <h2 id="student-ai-quality" className="text-h2 font-bold">
+            Qualidade das respostas da IA
+          </h2>
+          <p className="mt-2 text-label text-muted-foreground">
+            {student.aiQuality.blockedRate.definition}
+          </p>
+          <DetailList
+            items={[
+              ['Respostas bloqueadas', student.aiQuality.blocked],
+              ['Respostas validadas', student.aiQuality.validated],
+              ['Taxa de bloqueio', percent(student.aiQuality.blockedRate.value)],
+            ]}
+          />
+          {student.aiQuality.occurrences.length > 0 ? (
+            <>
+              <h3 className="mt-5 text-h3 font-semibold">Ocorrências anonimizadas</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Identificadores diretos foram removidos no backend antes da exibição.
+              </p>
+              <ul className="mt-3 space-y-2">
+                {student.aiQuality.occurrences.map((occurrence) => (
+                  <li key={occurrence.at} className="rounded-lg bg-secondary p-3 text-label">
+                    <time dateTime={occurrence.at} className="font-mono text-xs">
+                      {date(occurrence.at)}
+                    </time>
+                    <p className="mt-1 whitespace-pre-wrap">{occurrence.content}</p>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </section>
+      </div>
+
+      <section
+        className="mt-5 rounded-xl border border-border bg-card p-5"
+        aria-labelledby="student-risk"
+      >
+        <h2 id="student-risk" className="text-h2 font-bold">
+          Risco de cancelamento
+        </h2>
+        <p className="mt-2 text-label text-muted-foreground">
+          Leitura comercial de retenção, somando sinais nomeados. Não descreve a condição física da
+          pessoa.
+        </p>
+        <ChurnRiskSignals risk={student.churnRisk} />
+      </section>
+
+      <section
+        className="mt-5 rounded-xl border border-border bg-card p-5"
+        aria-labelledby="student-timeline"
+      >
+        <h2 id="student-timeline" className="text-h2 font-bold">
+          Linha do tempo do aluno
+        </h2>
+        <p className="mt-2 text-label text-muted-foreground">
+          Anamnese, protocolo e versões, check-ins, conversas, assinatura e atendimentos humanos num
+          único fluxo, do mais recente para o mais antigo.
+        </p>
+        {student.timeline.length === 0 ? (
+          <p className="mt-4 text-label text-muted-foreground">
+            Nenhum evento registrado neste período.
+          </p>
+        ) : (
+          <ol className="mt-4 space-y-3">
+            {student.timeline.map((event, index) => (
+              <li
+                key={`${event.at}-${index}`}
+                className="rounded-lg border border-border bg-secondary p-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-label font-semibold">{event.title}</span>
+                  <span className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
+                    {TIMELINE_LABELS[event.kind]}
+                    <time dateTime={event.at}>{date(event.at)}</time>
+                  </span>
+                </div>
+                {event.detail ? (
+                  <p className="mt-1 text-label text-muted-foreground">{event.detail}</p>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
 
       <section
         className="mt-5 rounded-xl border border-dashed border-border bg-card p-5"
