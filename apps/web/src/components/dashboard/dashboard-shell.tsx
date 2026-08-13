@@ -262,9 +262,11 @@ function isCurrent(pathname: string, href: string): boolean {
 
 function activeItemFor(pathname: string): DashboardNavigationItem | undefined {
   // O item mais específico vence: /dashboard/operacoes antes de /dashboard.
-  return NAVIGATION.filter((item) => item.href)
-    .sort((a, b) => b.href!.length - a.href!.length)
-    .find((item) => isCurrent(pathname, item.href!));
+  return NAVIGATION.filter(
+    (item): item is DashboardNavigationItem & { href: string } => item.href !== undefined,
+  )
+    .sort((a, b) => b.href.length - a.href.length)
+    .find((item) => isCurrent(pathname, item.href));
 }
 
 function DashboardNavigation({

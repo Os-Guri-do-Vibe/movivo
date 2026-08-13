@@ -45,12 +45,14 @@ describe('StudentDetail', () => {
   });
 
   it('destaca a exigência de revisão CREF quando o aluno está bloqueado', async () => {
+    const { health } = studentDetailResponse.data.student;
+    if (!health) throw new Error('fixture sem dado de saúde');
     getStudent.mockResolvedValue({
       data: {
         student: {
           ...studentDetailResponse.data.student,
           requiresProfessionalReview: true,
-          health: { ...studentDetailResponse.data.student.health!, parqState: 'BLOCKED' },
+          health: { ...health, parqState: 'BLOCKED' },
         },
       },
       meta: studentDetailResponse.meta,
@@ -103,9 +105,9 @@ describe('StudentDetail', () => {
     getStudent.mockResolvedValue(studentDetailResponse);
     render(<StudentDetail id={studentId} />);
     expect(await screen.findByRole('heading', { name: 'Linha do tempo do aluno' })).toBeVisible();
-    const items = screen
-      .getByRole('heading', { name: 'Linha do tempo do aluno' })
-      .parentElement!.querySelectorAll('ol > li');
+    const heading = screen.getByRole('heading', { name: 'Linha do tempo do aluno' });
+    if (!heading.parentElement) throw new Error('heading sem parentElement');
+    const items = heading.parentElement.querySelectorAll('ol > li');
     const rendered = [...items].map((item) => item.textContent ?? '');
     expect(rendered).toHaveLength(studentDetailResponse.data.student.timeline.length);
     for (const kind of [
@@ -118,7 +120,11 @@ describe('StudentDetail', () => {
     ]) {
       expect(rendered.some((entry) => entry.includes(kind))).toBe(true);
     }
-    const times = [...items].map((item) => item.querySelector('time')!.dateTime);
+    const times = [...items].map((item) => {
+      const time = item.querySelector('time');
+      if (!time) throw new Error('item da timeline sem <time>');
+      return time.dateTime;
+    });
     expect(times).toEqual([...times].sort().reverse());
   });
 

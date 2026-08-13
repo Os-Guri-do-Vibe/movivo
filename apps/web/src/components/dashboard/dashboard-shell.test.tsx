@@ -111,7 +111,8 @@ describe('DashboardShell', () => {
     expect(open).toHaveFocus();
 
     await userEvent.click(open);
-    await userEvent.click(screen.getAllByRole('button', { name: 'Fechar menu' })[0]!);
+    const [closeButton] = screen.getAllByRole('button', { name: 'Fechar menu' });
+    await userEvent.click(closeButton as HTMLElement);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
