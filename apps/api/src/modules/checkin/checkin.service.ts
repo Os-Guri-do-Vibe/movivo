@@ -16,6 +16,7 @@ import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
+import { WorkoutCompletionService } from '../workout/workout-completion.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 
 const responseStateSchema = z.object({
@@ -44,6 +45,7 @@ export class CheckinService {
     private readonly healthConsent: HealthConsentService,
     private readonly queues: QueueManager,
     private readonly queueEvents: DashboardQueueEventsService,
+    private readonly workoutCompletions: WorkoutCompletionService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(CheckinService.name);
@@ -242,6 +244,12 @@ export class CheckinService {
   }
 
   private async complete(userId: string, checkinId: string, state: ResponseState): Promise<void> {
+    // US-8.1 / TASK-8.1.4 — fallback de captura de treino. Nenhuma pergunta nova foi
+    // acrescentada ao check-in: a resposta `workouts` que ele JA coleta vira contagem
+    // em `workout_completions`. O que o quick reply diario ja registrou permanece —
+    // `WHATSAPP_QUICK_REPLY` tem precedencia sobre `CHECKIN` no dedupe.
+    await this.workoutCompletions.recordFromCheckin(userId, state.workouts);
+
     const recurringLow = await this.hasPreviousLowAdherence(userId, checkinId, state.workouts);
     if (state.adjustment !== 'MANTER' || recurringLow || state.fatigue === 'PESADO') {
       await this.createAlert(

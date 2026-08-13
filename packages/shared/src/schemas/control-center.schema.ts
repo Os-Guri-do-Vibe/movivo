@@ -224,11 +224,44 @@ export const controlCenterStudentSummarySchema = z.object({
   churnRisk: churnRiskSchema,
 });
 
+/**
+ * North Star do produto (US-8.1 / TASK-8.1.5): treinos concluídos por usuário pago nos
+ * primeiros 30 dias, meta ≥8 (`08-relatorio-lucas.md`).
+ *
+ * `reportingRate` **não é decoração**: se metade da coorte nunca respondeu o quick
+ * reply, `averageCompletions` é um piso, não uma medida — e a tela precisa dizer isso.
+ * `bySource` existe para que, meses depois, dê para distinguir "o aluno treinou mais"
+ * de "o canal de captura melhorou".
+ */
+export const controlCenterNorthStarSchema = z.object({
+  /** Média de treinos registrados na janela de 30 dias da coorte paga. Meta ≥ `target`. */
+  averageCompletions: controlCenterMetricSchema,
+  target: z.number().int().positive(),
+  /** % da coorte com ao menos 1 treino registrado no período. */
+  reportingRate: controlCenterMetricSchema,
+  cohortSize: z.number().int().nonnegative(),
+  bySource: z.array(
+    z.object({
+      source: z.enum(['WHATSAPP_QUICK_REPLY', 'CHECKIN', 'CONVERSATION']),
+      completions: z.number().int().nonnegative(),
+    }),
+  ),
+});
+export type ControlCenterNorthStar = z.infer<typeof controlCenterNorthStarSchema>;
+
 export const controlCenterStudentsResponseSchema = z.object({
   data: z.object({
     students: z.array(controlCenterStudentSummarySchema),
     /** Respostas bloqueadas pela validação de compliance, no agregado da base. */
     aiBlockedRate: controlCenterMetricSchema,
+    /** Adesão **verificada** (US-8.1). Coexiste com a declarada, não a substitui. */
+    northStar: controlCenterNorthStarSchema,
+    /**
+     * Adesão **declarada** da Sprint 7: % de check-ins enviados que foram respondidos.
+     * Proxy de engajamento, não de treino executado — mantida nomeada ao lado da North
+     * Star porque a divergência entre as duas é informação.
+     */
+    declaredAdherenceRate: controlCenterMetricSchema,
   }),
   meta: controlCenterMetaSchema,
 });

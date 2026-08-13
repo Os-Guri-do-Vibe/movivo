@@ -148,6 +148,13 @@
       "when": 1786644682057,
       "tag": "0020_utm_attribution",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1786652790231,
+      "tag": "0021_nifty_electro",
+      "breakpoints": true
     }
   ]
 }

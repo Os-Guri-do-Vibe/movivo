@@ -42,3 +42,6 @@ export * from './reengagement-nudges';
 
 // Sprint 7 - configuracao publicada da agente de IA (US-7.6). Global, append-only.
 export * from './agent-config';
+
+// Sprint 8 - treino concluido verificado, base da North Star (US-8.1).
+export * from './workout-completions';

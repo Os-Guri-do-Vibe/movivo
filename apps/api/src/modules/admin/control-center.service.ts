@@ -13,6 +13,7 @@ import {
   type ControlCenterFinanceResponse,
   type ControlCenterMarketingResponse,
   type ControlCenterMetric,
+  type ControlCenterNorthStar,
   type ControlCenterOverviewResponse,
   type ControlCenterPillarSummary,
   type ControlCenterStudentDetailResponse,
@@ -41,6 +42,7 @@ import {
   protocolVersions,
   subscriptions,
   users,
+  workoutCompletions,
 } from '../../core/database/schema';
 import {
   TenantDatabase,
@@ -61,6 +63,9 @@ import { assessChurnRisk, CHURN_RISK_THRESHOLDS } from './churn-risk';
 
 const TIMEZONE = 'America/Sao_Paulo' as const;
 const MINIMUM_SEGMENT_SIZE = 10;
+/** North Star do produto (US-8.1): treinos concluidos nos primeiros 30 dias pagos, meta >=8. */
+const NORTH_STAR_WINDOW_DAYS = 30;
+const NORTH_STAR_TARGET = 8;
 /** Horizonte do calendário de renovação (US-7.2). */
 const RENEWAL_HORIZON_DAYS = 90;
 /** Recorte de receita em risco dentro do calendário. */
@@ -253,6 +258,20 @@ export class ControlCenterService {
         metric: this.metric(total, 'COUNT', 'AVAILABLE', 'Alunos visíveis no escopo do papel.'),
       },
       details: [
+        // US-8.1 — North Star em número real. As três linhas vêm juntas de propósito:
+        // a média sozinha, sem taxa de reporte, é lida como medida quando é piso.
+        {
+          label: `Treinos nos primeiros ${NORTH_STAR_WINDOW_DAYS} dias pagos (meta ≥${NORTH_STAR_TARGET})`,
+          metric: students.data.northStar.averageCompletions,
+        },
+        {
+          label: 'Taxa de reporte de treino',
+          metric: students.data.northStar.reportingRate,
+        },
+        {
+          label: 'Adesão declarada (resposta a check-in)',
+          metric: students.data.declaredAdherenceRate,
+        },
         {
           label: 'Em risco de cancelamento',
           metric: this.metric(
@@ -793,6 +812,8 @@ export class ControlCenterService {
       await this.auditListAccess(tx, actor, 'STUDENTS_LIST_VIEWED', 'student_list', found.length);
       return { rows: found, ai: quality };
     });
+    const northStar = await this.northStar();
+    const declaredAdherenceRate = await this.declaredAdherenceRate();
     const students = rows
       .map(({ lastInboundAt, unansweredCheckinSentAt, renewalAt, ...student }) => ({
         ...student,
@@ -804,12 +825,132 @@ export class ControlCenterService {
       }))
       .sort((a, b) => b.churnRisk.score - a.churnRisk.score);
     return this.envelope(
-      { students, aiBlockedRate: this.blockedRate(ai?.blocked ?? 0, ai?.validated ?? 0) },
+      {
+        students,
+        aiBlockedRate: this.blockedRate(ai?.blocked ?? 0, ai?.validated ?? 0),
+        northStar,
+        declaredAdherenceRate,
+      },
       [
         'Risco de cancelamento é comercial: soma de três sinais nomeados (silêncio no canal, check-in sem resposta, renovação próxima), não um score preditivo.',
         `Limiares vigentes: ${CHURN_RISK_THRESHOLDS.silentDays} dias sem mensagem, ${CHURN_RISK_THRESHOLDS.unansweredCheckinDays} dias de check-in sem resposta, ${CHURN_RISK_THRESHOLDS.renewalWindowDays} dias até a renovação.`,
+        `North Star (treino verificado): média de treinos registrados nos primeiros ${NORTH_STAR_WINDOW_DAYS} dias de assinatura paga, meta ≥${NORTH_STAR_TARGET}. Coorte de ${northStar.cohortSize} aluno(s).`,
+        'Adesão verificada e adesão declarada coexistem: a primeira conta treino registrado, a segunda conta resposta a check-in. A divergência entre elas é informação, não erro.',
+        `Taxa de reporte de ${northStar.reportingRate.value ?? 0}%: abaixo de 100%, a North Star é um piso, não uma medida — quem nunca respondeu entra na média como zero.`,
       ],
     );
+  }
+
+  /**
+   * North Star (US-8.1 / TASK-8.1.5): média de `workout_completions` na janela de 30
+   * dias a partir do início da assinatura **paga**, contra a meta ≥8.
+   *
+   * `paid_start` é o `current_period_start` mais antigo de status pago — trial não conta
+   * (a métrica é sobre usuário pago, `08-relatorio-lucas.md`).
+   *
+   * ponytail: a coorte inclui quem começou a pagar há menos de 30 dias, e essa pessoa
+   * entra com a contagem parcial da janela ainda aberta — o efeito é puxar a média para
+   * baixo, na direção conservadora, coerente com "contagem inflada é pior que ausente".
+   * Se um dia a leitura por safra mensal for necessária, agrupar por
+   * `date_trunc('month', paid_start)` aqui e nada mais no arquivo muda.
+   */
+  private async northStar(): Promise<ControlCenterNorthStar> {
+    const [row] = await this.db.runAsSystem((tx) =>
+      tx.execute<{
+        cohort_size: number;
+        total_completions: number;
+        reporting: number;
+        quick_reply: number;
+        checkin: number;
+        conversation: number;
+      }>(sql`
+        with cohort as (
+          select user_id, min(current_period_start) as paid_start
+          from ${subscriptions}
+          where current_period_start is not null
+            and status in ('ACTIVE', 'PAST_DUE', 'CANCELED', 'EXPIRED')
+          group by user_id
+        ),
+        window as (
+          select
+            cohort.user_id,
+            count(w.id)::int as total,
+            count(w.id) filter (where w.source = 'WHATSAPP_QUICK_REPLY')::int as quick_reply,
+            count(w.id) filter (where w.source = 'CHECKIN')::int as checkin,
+            count(w.id) filter (where w.source = 'CONVERSATION')::int as conversation
+          from cohort
+          left join ${workoutCompletions} w
+            on w.user_id = cohort.user_id
+           and w.completed_at >= cohort.paid_start::date
+           and w.completed_at < (cohort.paid_start + make_interval(days => ${NORTH_STAR_WINDOW_DAYS}))::date
+          group by cohort.user_id
+        )
+        select
+          count(*)::int as cohort_size,
+          coalesce(sum(total), 0)::int as total_completions,
+          count(*) filter (where total > 0)::int as reporting,
+          coalesce(sum(quick_reply), 0)::int as quick_reply,
+          coalesce(sum(checkin), 0)::int as checkin,
+          coalesce(sum(conversation), 0)::int as conversation
+        from window
+      `),
+    );
+    const cohortSize = this.number(row?.cohort_size);
+    const definition = `Média de treinos registrados nos primeiros ${NORTH_STAR_WINDOW_DAYS} dias de assinatura paga (meta ≥${NORTH_STAR_TARGET}). Treino verificado, não declarado.`;
+    const reportingDefinition = `Percentual da coorte paga com ao menos 1 treino registrado na janela. Abaixo de 100%, a North Star é um piso.`;
+    if (cohortSize === 0) {
+      return {
+        averageCompletions: this.unavailable(
+          'COUNT',
+          `${definition} Sem nenhum aluno pago na base ainda.`,
+        ),
+        target: NORTH_STAR_TARGET,
+        reportingRate: this.unavailable('PERCENT', reportingDefinition),
+        cohortSize: 0,
+        bySource: [],
+      };
+    }
+    const average = this.number(row?.total_completions) / cohortSize;
+    const reporting = (this.number(row?.reporting) / cohortSize) * 100;
+    return {
+      averageCompletions: this.metric(
+        Math.round(average * 100) / 100,
+        'COUNT',
+        'AVAILABLE',
+        definition,
+      ),
+      target: NORTH_STAR_TARGET,
+      reportingRate: this.metric(
+        Math.round(reporting * 10) / 10,
+        'PERCENT',
+        'AVAILABLE',
+        reportingDefinition,
+      ),
+      cohortSize,
+      bySource: [
+        { source: 'WHATSAPP_QUICK_REPLY' as const, completions: this.number(row?.quick_reply) },
+        { source: 'CHECKIN' as const, completions: this.number(row?.checkin) },
+        { source: 'CONVERSATION' as const, completions: this.number(row?.conversation) },
+      ],
+    };
+  }
+
+  /** Adesão **declarada** da Sprint 7: check-ins respondidos / enviados. Proxy, não treino. */
+  private async declaredAdherenceRate(): Promise<ControlCenterMetric> {
+    const [row] = await this.db.runAsSystem((tx) =>
+      tx
+        .select({
+          sent: sql<number>`count(*) filter (where ${checkins.sentAt} is not null)::int`,
+          responded: sql<number>`count(*) filter (where ${checkins.respondedAt} is not null)::int`,
+        })
+        .from(checkins),
+    );
+    const sent = this.number(row?.sent);
+    const definition =
+      'Adesão declarada: percentual de check-ins enviados que foram respondidos. Mede engajamento com a pergunta, não treino executado.';
+    if (sent === 0) return this.unavailable('PERCENT', `${definition} Nenhum check-in enviado.`);
+    const rate = (this.number(row?.responded) / sent) * 100;
+    return this.metric(Math.round(rate * 10) / 10, 'PERCENT', 'AVAILABLE', definition);
   }
 
   /**

@@ -388,6 +388,18 @@ export const studentsResponse: ControlCenterStudentsResponse = {
       },
     ],
     aiBlockedRate: metric({ value: 3.2, unit: 'PERCENT' }),
+    northStar: {
+      averageCompletions: metric({ value: 6.4, unit: 'COUNT' }),
+      target: 8,
+      reportingRate: metric({ value: 72.5, unit: 'PERCENT' }),
+      cohortSize: 40,
+      bySource: [
+        { source: 'WHATSAPP_QUICK_REPLY', completions: 210 },
+        { source: 'CHECKIN', completions: 46 },
+        { source: 'CONVERSATION', completions: 0 },
+      ],
+    },
+    declaredAdherenceRate: metric({ value: 81.3, unit: 'PERCENT' }),
   },
   meta: { ...controlCenterMeta, dataQuality: [] },
 };

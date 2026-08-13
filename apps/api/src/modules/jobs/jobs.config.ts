@@ -23,6 +23,7 @@ export const QUEUE = {
   aiResponse: 'ai-response',
   whatsappOutbound: 'whatsapp-outbound',
   checkinWeekly: 'checkin-weekly',
+  workoutDaily: 'workout-daily',
   conversionSequence: 'conversion-sequence',
   sanity: 'sanity',
   deadLetter: 'dead-letter',
@@ -66,6 +67,9 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
     rateLimit: { max: 80, durationMs: 1_000 },
   },
   [QUEUE.checkinWeekly]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
+  // Quick reply diário de treino (US-8.1). Mesmo perfil do check-in: um scan por dia,
+  // sem urgência de latência, retry curto — o envio real acontece em `whatsappOutbound`.
+  [QUEUE.workoutDaily]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
   [QUEUE.conversionSequence]: { attempts: 1, backoffMs: [], concurrency: 5 },
   [QUEUE.sanity]: { attempts: 3, backoffMs: [50, 100, 200], concurrency: 2 },
   // DLQ é destino final: não retenta, não é reprocessada automaticamente.

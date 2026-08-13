@@ -38,7 +38,10 @@ const ACTOR = { userId: '22222222-2222-4222-8222-222222222222', jti: 'j1' } as c
 function build(...results: unknown[][]) {
   const select = vi.fn();
   for (const rows of results) select.mockImplementationOnce(() => query(rows));
-  const tx = { select };
+  // US-8.1: North Star/adesão declarada rodam DEPOIS dos selects enumerados; um
+  // fallback vazio evita reenumerar todas as queries em cada teste desta suíte.
+  select.mockImplementation(() => query([]));
+  const tx = { select, execute: vi.fn(async () => []) };
   const db = {
     runAsSystem: vi.fn((cb: (value: unknown) => Promise<unknown>) => cb(tx)),
     runAsUser: vi.fn((_id: string, _role: string, cb: (value: unknown) => Promise<unknown>) =>

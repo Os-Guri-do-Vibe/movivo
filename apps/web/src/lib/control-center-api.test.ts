@@ -205,6 +205,19 @@ describe('projeções do Control Center', () => {
           },
         ],
         aiBlockedRate: { value: 0, unit: 'PERCENT', status: 'AVAILABLE', definition: 'Zero.' },
+        northStar: {
+          averageCompletions: { value: 0, unit: 'COUNT', status: 'AVAILABLE', definition: 'Zero.' },
+          target: 8,
+          reportingRate: { value: 0, unit: 'PERCENT', status: 'AVAILABLE', definition: 'Zero.' },
+          cohortSize: 0,
+          bySource: [],
+        },
+        declaredAdherenceRate: {
+          value: 0,
+          unit: 'PERCENT',
+          status: 'AVAILABLE',
+          definition: 'Zero.',
+        },
       },
       meta,
     });

@@ -45,7 +45,10 @@ const ACTOR = {
 function serviceWithSystemResults(...results: unknown[][]) {
   const select = vi.fn();
   for (const rows of results) select.mockImplementationOnce(() => query(rows));
-  const tx = { select };
+  // US-8.1: North Star/adesão declarada rodam DEPOIS dos selects enumerados; um
+  // fallback vazio evita reenumerar todas as queries em cada teste desta suíte.
+  select.mockImplementation(() => query([]));
+  const tx = { select, execute: vi.fn(async () => []) };
   const db = {
     runAsSystem: vi.fn((callback: (value: unknown) => Promise<unknown>) => callback(tx)),
     runAsUser: vi.fn((_id: string, _role: string, callback: (value: unknown) => Promise<unknown>) =>
@@ -112,6 +115,14 @@ function studentsFixture(churnScores: number[]): ControlCenterStudentsResponse {
         churnRisk: { score, signals: [] },
       })) as unknown as ControlCenterStudentsResponse['data']['students'],
       aiBlockedRate: metric(0, { unit: 'PERCENT' }),
+      northStar: {
+        averageCompletions: metric(0, { unit: 'COUNT' }),
+        target: 8,
+        reportingRate: metric(0, { unit: 'PERCENT' }),
+        cohortSize: 0,
+        bySource: [],
+      },
+      declaredAdherenceRate: metric(0, { unit: 'PERCENT' }),
     },
     meta: META,
   };
@@ -606,9 +617,14 @@ describe('ControlCenterService projections', () => {
     expect(response.data.students).toEqual([{ ...student, churnRisk: { score: 0, signals: [] } }]);
     // US-7.1: o filtro é no servidor. Quem tem só `students.read` recebe um payload sem
     // anamnese, PAR-Q, dor ou check-in — não é a UI que esconde.
-    expect(JSON.stringify(response.data)).not.toMatch(/parq|anamnes|checkin|conversation|pain/i);
-    // A2: nada de `runAsSystem` — a listagem passa pela RLS no contexto do ator.
-    expect(db.runAsSystem).not.toHaveBeenCalled();
+    // Asserção sobre a projeção do aluno, não sobre o envelope: desde a US-8.1 as
+    // definições das métricas agregadas mencionam "check-in" em texto legível.
+    expect(JSON.stringify(response.data.students)).not.toMatch(
+      /parq|anamnes|checkin|conversation|pain/i,
+    );
+    // A2: a LISTAGEM passa pela RLS no contexto do ator. `runAsSystem` só aparece nos
+    // agregados da base (North Star e adesão declarada), que não são projeção de aluno.
+    expect(db.runAsUser).toHaveBeenCalled();
     expect(db.runAsUser).toHaveBeenCalledWith(ACTOR.userId, 'SUPPORT', expect.any(Function));
   });
 
