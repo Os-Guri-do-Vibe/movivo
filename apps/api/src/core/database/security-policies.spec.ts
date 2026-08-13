@@ -30,6 +30,7 @@ describe('buildRlsPoliciesSql', () => {
       'reengagement_nudges',
       'audit_logs',
       'workout_completions',
+      'user_status_transitions',
       'professional_assignments',
     ]);
   });

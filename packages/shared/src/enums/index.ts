@@ -12,3 +12,4 @@ export * from './control-center';
 export * from './parq-state';
 export * from './protocol-status';
 export * from './subscription-status';
+export * from './expense';

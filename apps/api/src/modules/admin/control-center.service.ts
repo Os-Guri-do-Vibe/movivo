@@ -9,10 +9,14 @@ import {
   primaryGoalSchema,
   trainingLocationSchema,
   ControlCenterCapability as Capability,
+  ProfitBasis,
+  type ExpenseCategory,
   type ControlCenterEvolutionPoint,
+  type ControlCenterEntryCohort,
   type ControlCenterFinanceResponse,
   type ControlCenterMarketingResponse,
   type ControlCenterMetric,
+  type ControlCenterTrialConversion,
   type ControlCenterNorthStar,
   type ControlCenterOverviewResponse,
   type ControlCenterPillarSummary,
@@ -36,12 +40,14 @@ import {
   checkins,
   consents,
   conversations,
+  expenses,
   handoffAlerts,
   knowledgeBase,
   protocols,
   protocolVersions,
   subscriptions,
   users,
+  userStatusTransitions,
   workoutCompletions,
 } from '../../core/database/schema';
 import {
@@ -91,31 +97,30 @@ const PLAN_MONTHS: Record<string, number> = {
 };
 
 /**
- * Preço de LLM por 1k tokens, em USD (ADR-005-R: GPT-4.1 principal, Claude Sonnet 4.5
- * fallback). Constante versionada em código de propósito: a tabela `model_pricing`
- * editável chega na Sprint 8 junto com `expenses`, porque as duas resolvem o mesmo
- * problema (custo) e devem ser desenhadas juntas. **Este é o único ponto do código com
- * preço de modelo** — trocar aqui troca em todo o painel.
- *
- * ponytail: constante em código, virar tabela `model_pricing` na Sprint 8.
- * // TODO: confirmar preço vigente e câmbio com Eduardo/Henrique.
+ * Câmbio USD→BRL. Continua constante em código: `model_pricing` guarda preço em moeda
+ * do provedor (USD), não taxa de câmbio — cotação diária é problema de outra sprint.
+ * // TODO: confirmar câmbio com Eduardo/Henrique.
  */
 const USD_TO_BRL = 5.4;
-const AI_PRICE_USD_PER_1K_TOKENS: Record<string, { input: number; output: number }> = {
-  'gpt-4.1': { input: 0.002, output: 0.008 },
-  'gpt-4.1-mini': { input: 0.0004, output: 0.0016 },
-  'claude-sonnet-4-5': { input: 0.003, output: 0.015 },
-};
 
-/** Casa o modelo persistido (`gpt-4.1-2025-04-14`) com a chave da tabela de preço. */
-function aiPriceFor(model: string) {
-  const normalized = model.toLowerCase();
-  const key = Object.keys(AI_PRICE_USD_PER_1K_TOKENS)
-    .filter((candidate) => normalized.startsWith(candidate))
-    // Prefixo mais longo primeiro: `gpt-4.1-mini` não pode cair no preço de `gpt-4.1`.
-    .sort((a, b) => b.length - a.length)[0];
-  return key ? AI_PRICE_USD_PER_1K_TOKENS[key] : null;
-}
+/**
+ * Preço de LLM — **origem trocada na US-8.4 / TASK-8.4.3**: era a constante versionada em
+ * código da TASK-7.2.3, agora vem da tabela `model_pricing`, versionada por vigência.
+ *
+ * O casamento por prefixo (`gpt-4.1` casa `gpt-4.1-2025-04-14`, e `gpt-4.1-mini` ganha de
+ * `gpt-4.1` por ser o prefixo mais longo) era feito em TS e agora é o `order by length`
+ * do LATERAL. A vigência é comparada com a **data do job**, não com hoje: mudar o preço
+ * hoje não altera o custo apurado de mês passado.
+ */
+const AI_PRICE_LATERAL = sql`left join lateral (
+  select mp.input_price_per_1k_cents as input_cents, mp.output_price_per_1k_cents as output_cents
+  from model_pricing mp
+  where lower(coalesce(${aiJobs.modelUsed}, '')) like mp.model || '%'
+    and mp.valid_from <= (${aiJobs.createdAt} at time zone ${TIMEZONE})::date
+    and (mp.valid_to is null or mp.valid_to > (${aiJobs.createdAt} at time zone ${TIMEZONE})::date)
+  order by length(mp.model) desc, mp.valid_from desc
+  limit 1
+) price on true`;
 /** Janela das séries e do mapa de calor da Visão Geral. */
 const INSIGHT_WINDOW_DAYS = 30;
 const DAY_FORMATTER = new Intl.DateTimeFormat('en-CA', {
@@ -479,6 +484,7 @@ export class ControlCenterService {
         .leftJoin(subscriptions, eq(subscriptions.userId, anamnesisSessions.userId));
 
       const anamnesisFunnel = await this.anamnesisFunnel(tx);
+      const trialConversion = await this.trialConversion(tx);
 
       const seasonalityRows = await tx
         .select({
@@ -613,6 +619,7 @@ export class ControlCenterService {
           attributed,
           'Cadastros com origem de primeiro toque registrada (inclui `desconhecida` explícita).',
         ),
+        trialConversion,
         segments,
         suppressedSegments,
         minimumSegmentSize: MINIMUM_SEGMENT_SIZE as 10,
@@ -626,6 +633,8 @@ export class ControlCenterService {
       'O funil da anamnese cobre apenas sessões com desfecho definido (enviadas ou com link já expirado); sessões ainda abertas não contam como abandono.',
       `Sazonalidade de cadastro cobre os últimos ${INSIGHT_WINDOW_DAYS} dias em ${TIMEZONE}, sobre a criação da sessão de anamnese.`,
       'Faixa etária é derivada da data de nascimento da etapa 1 e só sai do banco já generalizada em faixas.',
+      'Conversão trial→ativo lê `user_status_transitions`; "convertido" é hoje o proxy `TRIALING→ACTIVE` (pagamento autorizado), a ser trocado por primeiro pagamento liquidado quando `payments` existir.',
+      `Funil de conversão suprimido por inteiro quando há menos de ${MINIMUM_SEGMENT_SIZE} entradas em trial.`,
     ]);
   }
 
@@ -1914,42 +1923,97 @@ export class ControlCenterService {
         .groupBy(sql`1`)
         .orderBy(sql`2 desc`);
 
-      const aiRows = await tx
+      // Custo de IA por modelo com preço vigente **na data de cada job** (ver
+      // `AI_PRICE_LATERAL`). Sai do query builder porque LATERAL não é expresso por ele;
+      // o custo é somado linha a linha, então dois preços no mesmo mês somam certo.
+      const aiRows = (await tx.execute(sql`
+        select
+          coalesce(${aiJobs.modelUsed}, 'DESCONHECIDO') as model,
+          count(*)::int as jobs,
+          coalesce(sum(${aiJobs.tokensInput}), 0)::int as tokens_input,
+          coalesce(sum(${aiJobs.tokensOutput}), 0)::int as tokens_output,
+          count(price.input_cents)::int as priced_jobs,
+          coalesce(sum(
+            (coalesce(${aiJobs.tokensInput}, 0) / 1000.0) * price.input_cents / 100.0
+            + (coalesce(${aiJobs.tokensOutput}, 0) / 1000.0) * price.output_cents / 100.0
+          ), 0)::float8 as cost_usd
+        from ${aiJobs}
+        ${AI_PRICE_LATERAL}
+        where ${aiJobs.createdAt} >= now() - ${this.days(AI_COST_WINDOW_DAYS)}
+        group by 1
+      `)) as unknown as Array<{
+        model: string;
+        jobs: number;
+        tokens_input: number;
+        tokens_output: number;
+        priced_jobs: number;
+        cost_usd: number;
+      }>;
+
+      // Despesas lançadas (US-8.4). Estorno é linha negativa: `sum` já devolve o líquido.
+      const expenseRows = await tx
         .select({
-          model: sql<string>`coalesce(${aiJobs.modelUsed}, 'DESCONHECIDO')`,
-          jobs: sql<number>`count(*)::int`,
-          tokensInput: sql<number>`coalesce(sum(${aiJobs.tokensInput}), 0)::int`,
-          tokensOutput: sql<number>`coalesce(sum(${aiJobs.tokensOutput}), 0)::int`,
+          month: sql<string>`to_char(${expenses.occurredOn}, 'YYYY-MM')`,
+          category: expenses.category,
+          amountCents: sql<string>`sum(${expenses.amountCents})`,
         })
-        .from(aiJobs)
-        .where(sql`${aiJobs.createdAt} >= now() - ${this.days(AI_COST_WINDOW_DAYS)}`)
-        .groupBy(sql`1`);
+        .from(expenses)
+        .where(sql`${expenses.occurredOn} >= date_trunc('month', now() - interval '11 months')`)
+        .groupBy(sql`1`, expenses.category)
+        .orderBy(sql`1`);
+
+      const currentMonth = new Intl.DateTimeFormat('en-CA', {
+        timeZone: TIMEZONE,
+        year: 'numeric',
+        month: '2-digit',
+      }).format(new Date());
 
       const active = row?.active ?? 0;
-      const aiCostByModel = aiRows.map((model) => {
-        const price = aiPriceFor(model.model);
-        return {
-          ...model,
-          costBrl: price
-            ? ((model.tokensInput / 1000) * price.input +
-                (model.tokensOutput / 1000) * price.output) *
-              USD_TO_BRL
-            : null,
-        };
-      });
+      const aiCostByModel = aiRows.map((model) => ({
+        model: model.model,
+        jobs: Number(model.jobs),
+        tokensInput: Number(model.tokens_input),
+        tokensOutput: Number(model.tokens_output),
+        // Sem nenhum job precificado o custo é `null` (indisponível), nunca zero.
+        costBrl: Number(model.priced_jobs) > 0 ? Number(model.cost_usd) * USD_TO_BRL : null,
+      }));
       const unpricedModels = aiCostByModel.filter((model) => model.costBrl === null);
       const pricedCost = aiCostByModel.reduce((sum, model) => sum + (model.costBrl ?? 0), 0);
       const aiCostUnavailable =
         aiCostByModel.length > 0 && unpricedModels.length === aiCostByModel.length;
-      const aiCostDefinition = `Custo calculado dos últimos ${AI_COST_WINDOW_DAYS} dias: tokens de ai_jobs × preço por 1k tokens versionado em código (ADR-005-R), convertido a R$ pelo câmbio fixo de ${USD_TO_BRL}.`;
+      const aiCostDefinition = `Custo calculado dos últimos ${AI_COST_WINDOW_DAYS} dias: tokens de ai_jobs × preço por 1k tokens vigente na data de cada job (tabela \`model_pricing\`), convertido a R$ pelo câmbio fixo de ${USD_TO_BRL}.`;
       const aiCost = aiCostUnavailable
         ? this.unavailable(
             'BRL',
-            `Nenhum modelo com job no período está na tabela de preço versionada (${unpricedModels.map((model) => model.model).join(', ')}).`,
+            `Nenhum modelo com job no período tem preço vigente em \`model_pricing\` (${unpricedModels.map((model) => model.model).join(', ')}).`,
           )
         : this.metric(pricedCost, 'BRL', 'PROXY', aiCostDefinition);
 
+      const entryCohorts = await this.entryCohorts(tx);
+
       const atRiskTotal = atRiskRows.reduce((sum, item) => sum + this.number(item.amountBrl), 0);
+
+      // ---- Despesa, custo por categoria/mês e resultado (US-8.4) ----
+      const brl = (cents: string | number | null) => this.number(cents) / 100;
+      const costByCategory = Object.entries(
+        expenseRows.reduce<Record<string, number>>((acc, item) => {
+          acc[item.category] = (acc[item.category] ?? 0) + brl(item.amountCents);
+          return acc;
+        }, {}),
+      )
+        .map(([category, amountBrl]) => ({ category: category as ExpenseCategory, amountBrl }))
+        .sort((a, b) => b.amountBrl - a.amountBrl);
+      const costByMonth = Object.entries(
+        expenseRows.reduce<Record<string, number>>((acc, item) => {
+          acc[item.month] = (acc[item.month] ?? 0) + brl(item.amountCents);
+          return acc;
+        }, {}),
+      )
+        .map(([month, amountBrl]) => ({ month, amountBrl }))
+        .sort((a, b) => a.month.localeCompare(b.month));
+      const monthExpense = costByMonth.find((item) => item.month === currentMonth)?.amountBrl ?? 0;
+      const hasExpenses = expenseRows.length > 0;
+      const contractedMrrBrl = this.number(row?.contractedMrr);
 
       return {
         activeSubscriptions: this.metric(
@@ -1981,18 +2045,62 @@ export class ControlCenterService {
           'BRL',
           'O provedor de WhatsApp ainda não persiste custo por mensagem.',
         ),
-        infrastructureCost: this.unavailable(
-          'BRL',
-          'Faturas de infraestrutura ainda não são ingeridas; depende da ingestão de custo de infra prevista para a Sprint 8.',
-        ),
+        infrastructureCost: hasExpenses
+          ? this.metric(
+              costByCategory.find((item) => item.category === 'INFRA')?.amountBrl ?? 0,
+              'BRL',
+              'AVAILABLE',
+              'Soma das despesas lançadas na categoria INFRA nos últimos 12 meses (líquido de estornos).',
+            )
+          : this.unavailable(
+              'BRL',
+              'Nenhuma despesa lançada ainda — `expenses` existe, mas está vazia.',
+            ),
+        totalExpense: hasExpenses
+          ? this.metric(
+              monthExpense,
+              'BRL',
+              'AVAILABLE',
+              'Despesa do mês corrente por competência (`occurred_on`), líquida de estornos.',
+            )
+          : this.unavailable('BRL', 'Nenhuma despesa lançada ainda.'),
+        expensePerActiveUser:
+          !hasExpenses || active === 0
+            ? this.unavailable(
+                'BRL',
+                'Sem despesa lançada (ou sem assinatura ativa como denominador) não há custo por usuário.',
+              )
+            : this.metric(
+                monthExpense / active,
+                'BRL',
+                'AVAILABLE',
+                'Despesa do mês corrente dividida pelas assinaturas ativas — o custo por usuário ativo/mês do unit economics.',
+              ),
         receivedRevenue: this.unavailable(
           'BRL',
           'Subscriptions registra preço contratado, não liquidação financeira do gateway; depende da tabela `payments`, prevista para a Sprint 8.',
         ),
-        profit: this.unavailable(
-          'BRL',
-          'Não existe lucro a exibir: a plataforma não registra nenhuma despesa; depende da tabela `expenses`, prevista para a Sprint 8.',
-        ),
+        /**
+         * Lucro do período = receita − despesa do mês corrente.
+         *
+         * **Regime provisório.** O regime decidido é CAIXA (sobre receita recebida), mas
+         * `payments` só chega na US-8.5 — até lá a receita é o `contractedMrr`, e a
+         * métrica é marcada `PROXY` com o regime `CONTRATADO_PROXY` na tela. Nunca
+         * chamamos de caixa um número que não é.
+         * // TODO(US-8.5): trocar `contractedMrrBrl` por receita recebida (`payments`)
+         * // e o `profitBasis` para `CAIXA`.
+         */
+        profit: hasExpenses
+          ? this.metric(
+              contractedMrrBrl - monthExpense,
+              'BRL',
+              'PROXY',
+              'Lucro do mês corrente = MRR contratado − despesa lançada no mês. Regime provisório: receita CONTRATADA (proxy), não recebida — a receita de caixa depende de `payments` (US-8.5).',
+            )
+          : this.unavailable(
+              'BRL',
+              'Nenhuma despesa lançada ainda: `expenses` existe, mas exibir lucro sem custo seria inventar.',
+            ),
         partnerDistribution: this.unavailable(
           'BRL',
           'Distribuição por sócio depende de `partners` e do resultado apurado; prevista para a Sprint 8.',
@@ -2007,6 +2115,8 @@ export class ControlCenterService {
           'PROXY',
           `Preço contratado das assinaturas ativas que vencem em ${AT_RISK_WINDOW_DAYS} dias sem nenhuma mensagem recebida do titular há ${RISK_SILENCE_DAYS} dias.`,
         ),
+        entryCohorts: entryCohorts.cohorts,
+        suppressedCohorts: entryCohorts.suppressed,
         renewalCalendar: renewalRows.map((slice) => ({
           month: slice.month,
           plan: slice.plan,
@@ -2031,14 +2141,23 @@ export class ControlCenterService {
           };
         }),
         aiCostByModel,
+        costByCategory,
+        costByMonth,
+        /** Regime declarado na tela. Ver o comentário de `profit`. */
+        profitBasis: ProfitBasis.CONTRATADO_PROXY,
       };
     });
     return this.envelope(data, [
       'Nenhum identificador de titular é retornado; a lista de risco usa o id da assinatura.',
       `Calendário de renovação cobre ${RENEWAL_HORIZON_DAYS} dias de receita contratada a vencer — não é projeção de vendas novas.`,
       'MRR = preço do plano ÷ meses do plano; ARR = MRR × 12. Receita contratada, não caixa recebido.',
-      'Custo de IA usa preço por modelo versionado em código e câmbio fixo; a tabela editável chega na Sprint 8.',
-      'Lucro, receita recebida, custo de infra, CAC e distribuição por sócio estão marcados como indisponíveis com a dependência nomeada — nunca como zero.',
+      'Custo de IA usa o preço de `model_pricing` vigente na data de cada job (não o preço de hoje) e câmbio fixo.',
+      'Lucro exibido é PROVISÓRIO: regime de receita CONTRATADA (proxy). O regime decidido é caixa e passa a valer quando `payments` existir (US-8.5).',
+      'Custo por categoria/mês cobre 12 meses por competência (`occurred_on`), líquido de estornos — correção de lançamento é estorno + relançamento, nunca edição.',
+      'Projeção de resultado continua fora de escopo (Sprint 11): esta tela mostra resultado realizado, nunca projetado.',
+      'Receita recebida, CAC e distribuição por sócio seguem marcadas como indisponíveis com a dependência nomeada — nunca como zero.',
+      'Coorte mensal de entrada: mês da primeira entrada em trial; "retido" = assinatura hoje ACTIVE. Coortes com menos de 10 entradas são omitidas.',
+      'Coorte marcada como reconstruída vem do backfill de `subscriptions` (actor BACKFILL), não de evento observado — comparar com coorte observada exige essa ressalva.',
     ]);
   }
 
@@ -2206,6 +2325,133 @@ export class ControlCenterService {
       }
     }
     return cells;
+  }
+
+  /**
+   * CTE compartilhada pelo funil e pelas coortes (US-8.3): primeira entrada em trial e
+   * primeira conversão por titular, mais a marca de reconstrução. `min()` porque o marco pode
+   * repetir ao longo da vida do titular (renovação, nova assinatura) e a coorte é de **entrada**.
+   */
+  private readonly lifecycleCte = sql`
+    with entry as (
+      select user_id,
+             min(occurred_at) as started,
+             bool_or(actor = 'BACKFILL') as reconstructed
+      from ${userStatusTransitions}
+      where to_status = 'TRIAL_STARTED'
+      group by user_id
+    ),
+    conv as (
+      select user_id, min(occurred_at) as converted_at
+      from ${userStatusTransitions}
+      where to_status = 'CONVERTED'
+      group by user_id
+    )
+  `;
+
+  /**
+   * Funil trial→ativo (US-8.3/TASK-8.3.4). `percentile_cont` ignora nulo, então o tempo
+   * mediano é calculado só sobre quem converteu — a mediana de "dias até converter" não tem
+   * definição para quem não converteu, e preenchê-la com zero ou com a janela aberta mentiria.
+   *
+   * k-anonimato: abaixo de `MINIMUM_SEGMENT_SIZE` entradas a coorte inteira fica indisponível.
+   * Publicar 3 entradas e 1 conversão em uma base pequena é reidentificação direta.
+   */
+  private async trialConversion(tx: TenantTransaction): Promise<ControlCenterTrialConversion> {
+    const [row] = await tx.execute<{
+      trials: number;
+      converted: number;
+      median_days: string | null;
+      reconstructed: number;
+    }>(sql`
+      ${this.lifecycleCte}
+      select
+        count(*)::int as trials,
+        count(conv.user_id)::int as converted,
+        percentile_cont(0.5) within group (
+          order by extract(epoch from (conv.converted_at - entry.started)) / 86400.0
+        ) as median_days,
+        count(*) filter (where entry.reconstructed)::int as reconstructed
+      from entry
+      -- Conversão anterior à entrada não é conversão desta coorte (dado reconstruído com
+      -- datas fora de ordem existe): sem o predicado a mediana sairia negativa.
+      left join conv on conv.user_id = entry.user_id and conv.converted_at >= entry.started
+    `);
+
+    const trials = row?.trials ?? 0;
+    const converted = row?.converted ?? 0;
+    if (trials < MINIMUM_SEGMENT_SIZE) {
+      return {
+        status: 'UNAVAILABLE',
+        trialsStarted: null,
+        converted: null,
+        conversionRatePercent: null,
+        medianDaysToConversion: null,
+        reconstructedEntries: 0,
+        reason: `Menos de ${MINIMUM_SEGMENT_SIZE} entradas em trial registradas: publicar a taxa permitiria reidentificação.`,
+      };
+    }
+    return {
+      status: 'AVAILABLE',
+      trialsStarted: trials,
+      converted,
+      conversionRatePercent: Math.round((converted / trials) * 1000) / 10,
+      medianDaysToConversion:
+        row?.median_days === null || row?.median_days === undefined
+          ? null
+          : Math.round(this.number(row.median_days) * 10) / 10,
+      reconstructedEntries: row?.reconstructed ?? 0,
+      reason: null,
+    };
+  }
+
+  /**
+   * Retenção por coorte mensal de entrada (US-8.3/TASK-8.3.4). "Retido" = assinatura hoje em
+   * `ACTIVE` — a definição comercial de Eduardo, não uma leitura de engajamento.
+   *
+   * ponytail: o join com `subscriptions` assume uma assinatura por titular, que é o que o
+   * `SubscriptionService.startTrial` garante hoje (idempotente por titular). Se um dia existir
+   * mais de uma, trocar por `distinct on (user_id) ... order by created_at desc`.
+   */
+  private async entryCohorts(tx: TenantTransaction): Promise<{
+    cohorts: ControlCenterEntryCohort[];
+    suppressed: number;
+  }> {
+    const rows = await tx.execute<{
+      month: string;
+      cohort_size: number;
+      converted: number;
+      retained: number;
+      reconstructed: boolean;
+    }>(sql`
+      ${this.lifecycleCte}
+      select
+        to_char(entry.started at time zone ${TIMEZONE}, 'YYYY-MM') as month,
+        count(*)::int as cohort_size,
+        count(conv.user_id)::int as converted,
+        count(*) filter (where s.status = 'ACTIVE')::int as retained,
+        bool_or(entry.reconstructed) as reconstructed
+      from entry
+      left join conv on conv.user_id = entry.user_id and conv.converted_at >= entry.started
+      left join ${subscriptions} s on s.user_id = entry.user_id
+      group by 1
+      order by 1
+    `);
+
+    const all = [...rows];
+    const publishable = all.filter((row) => row.cohort_size >= MINIMUM_SEGMENT_SIZE);
+    return {
+      suppressed: all.length - publishable.length,
+      cohorts: publishable.map((row) => ({
+        month: row.month,
+        cohortSize: row.cohort_size,
+        converted: row.converted,
+        conversionRatePercent: Math.round((row.converted / row.cohort_size) * 1000) / 10,
+        retained: row.retained,
+        retentionPercent: Math.round((row.retained / row.cohort_size) * 1000) / 10,
+        reconstructed: row.reconstructed,
+      })),
+    };
   }
 
   private metric(

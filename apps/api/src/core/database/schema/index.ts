@@ -45,3 +45,10 @@ export * from './agent-config';
 
 // Sprint 8 - treino concluido verificado, base da North Star (US-8.1).
 export * from './workout-completions';
+
+// Sprint 8 - sequencia de mudancas de estado do aluno, append-only (US-8.3).
+export * from './user-status-transitions';
+
+// Sprint 8 - despesa auditavel e preco de modelo por vigencia (US-8.4).
+export * from './expenses';
+export * from './model-pricing';

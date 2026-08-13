@@ -1,6 +1,12 @@
 import { z } from 'zod';
 
 import { ControlCenterCapability, ControlCenterRole } from '../enums/control-center';
+import { ProfitBasis } from '../enums/expense';
+import { expenseCategorySchema } from './expense.schema';
+
+export const profitBasisSchema = z.enum(
+  Object.values(ProfitBasis) as [ProfitBasis, ...ProfitBasis[]],
+);
 
 const roleValues = Object.values(ControlCenterRole) as [ControlCenterRole, ...ControlCenterRole[]];
 const capabilityValues = Object.values(ControlCenterCapability) as [
@@ -167,6 +173,31 @@ export const acquisitionChannelSchema = z.object({
 });
 export type AcquisitionChannel = z.infer<typeof acquisitionChannelSchema>;
 
+/**
+ * Funil trial→ativo (US-8.3, TASK-8.3.4), lido de `user_status_transitions`.
+ *
+ * `UNAVAILABLE` com `reason` preenchido quando a amostra é pequena demais para publicar —
+ * nunca zero, que seria lido como "ninguém converteu".
+ *
+ * ATENÇÃO à definição de "convertido": até a tabela `payments` existir (US-8.5), o marco
+ * `CONVERTED` é gravado no proxy `TRIALING→ACTIVE` (pagamento **autorizado**). A definição
+ * fechada por Eduardo é primeiro pagamento **liquidado** — a diferença (reembolso e falha de
+ * liquidação pós-autorização) infla a taxa para cima. A UI deve expor isso no tooltip.
+ */
+export const controlCenterTrialConversionSchema = z.object({
+  status: dataAvailabilitySchema,
+  trialsStarted: kAnonymousCount.nullable(),
+  converted: kAnonymousCount.nullable(),
+  /** 0–100, uma casa decimal. */
+  conversionRatePercent: z.number().min(0).max(100).nullable(),
+  /** Mediana de dias entre a entrada em trial e a conversão, só sobre quem converteu. */
+  medianDaysToConversion: z.number().nonnegative().nullable(),
+  /** Quantas entradas do denominador vieram do backfill (`actor = 'BACKFILL'`). */
+  reconstructedEntries: z.number().int().nonnegative(),
+  reason: z.string().nullable(),
+});
+export type ControlCenterTrialConversion = z.infer<typeof controlCenterTrialConversionSchema>;
+
 export const controlCenterMarketingResponseSchema = z.object({
   data: z.object({
     funnel: z.object({
@@ -183,6 +214,8 @@ export const controlCenterMarketingResponseSchema = z.object({
     suppressedChannels: z.number().int().nonnegative(),
     /** Sessões anteriores à US-8.2, sem origem capturada. Nunca inferidas como orgânicas. */
     attributionNotCaptured: z.number().int().nonnegative(),
+    /** Funil trial→ativo e tempo mediano até a conversão (US-8.3). */
+    trialConversion: controlCenterTrialConversionSchema,
     segments: z.array(marketingSegmentSchema),
     /** Cadastros iniciados por dia da semana × hora, grade 7x24 completa. */
     signupSeasonality: z.array(controlCenterHeatmapCellSchema),
@@ -500,6 +533,40 @@ export const controlCenterAiModelCostSchema = z.object({
   costBrl: z.number().nonnegative().nullable(),
 });
 
+/**
+ * Retenção por coorte mensal de entrada (US-8.3, TASK-8.3.4). Coortes com menos de 10
+ * entradas nunca aparecem — a supressão é contada em `suppressedCohorts`.
+ */
+export const controlCenterEntryCohortSchema = z.object({
+  /** Mês civil da primeira entrada em trial, `YYYY-MM` no fuso do painel. */
+  month: z.string().regex(/^\d{4}-\d{2}$/),
+  cohortSize: kAnonymousCount,
+  converted: z.number().int().nonnegative(),
+  conversionRatePercent: z.number().min(0).max(100),
+  /** Titulares da coorte com assinatura hoje `ACTIVE`. */
+  retained: z.number().int().nonnegative(),
+  retentionPercent: z.number().min(0).max(100),
+  /**
+   * `true` quando alguma entrada da coorte veio do backfill (`actor = 'BACKFILL'`), ou seja,
+   * foi **reconstruída** a partir das datas de `subscriptions` e não observada. A UI precisa
+   * distinguir visualmente — uma coorte reconstruída não é comparável com uma observada sem ressalva.
+   */
+  reconstructed: z.boolean(),
+});
+export type ControlCenterEntryCohort = z.infer<typeof controlCenterEntryCohortSchema>;
+
+/** Custo agregado por categoria de despesa (US-8.4). Pode ser negativo se houver mais estorno que lançamento no recorte. */
+export const controlCenterCostByCategorySchema = z.object({
+  category: expenseCategorySchema,
+  amountBrl: z.number(),
+});
+
+/** Custo agregado por mês de competência (`YYYY-MM`). */
+export const controlCenterCostByMonthSchema = z.object({
+  month: z.string().regex(/^\d{4}-\d{2}$/),
+  amountBrl: z.number(),
+});
+
 export const controlCenterFinanceResponseSchema = z.object({
   data: z.object({
     activeSubscriptions: controlCenterMetricSchema,
@@ -513,11 +580,27 @@ export const controlCenterFinanceResponseSchema = z.object({
     partnerDistribution: controlCenterMetricSchema,
     customerAcquisitionCost: controlCenterMetricSchema,
     revenueAtRisk30d: controlCenterMetricSchema,
+    /** Coorte mensal de entrada com conversão e retenção (US-8.3). */
+    entryCohorts: z.array(controlCenterEntryCohortSchema),
+    /** Coortes omitidas por terem menos de 10 entradas. */
+    suppressedCohorts: z.number().int().nonnegative(),
     renewalCalendar: z.array(controlCenterRenewalSliceSchema),
     subscriptionsAtRisk: z.array(controlCenterRenewalRiskSchema),
     churnByReason: z.array(controlCenterChurnReasonSchema),
     mrrByPlan: z.array(controlCenterPlanRevenueSchema),
     aiCostByModel: z.array(controlCenterAiModelCostSchema),
+    /** Despesa do mês corrente, líquida de estornos (US-8.4). */
+    totalExpense: controlCenterMetricSchema,
+    /** Custo por usuário ativo/mês — o número do unit economics de Eduardo. */
+    expensePerActiveUser: controlCenterMetricSchema,
+    costByCategory: z.array(controlCenterCostByCategorySchema),
+    costByMonth: z.array(controlCenterCostByMonthSchema),
+    /**
+     * Regime de apuração do `profit` exibido. `CONTRATADO_PROXY` enquanto `payments`
+     * (US-8.5) não existir — a tela precisa declarar isso, nunca chamar de caixa o que
+     * não é. A **projeção** de resultado segue fora de escopo (Sprint 11).
+     */
+    profitBasis: profitBasisSchema,
   }),
   meta: controlCenterMetaSchema,
 });

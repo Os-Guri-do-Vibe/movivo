@@ -24,8 +24,10 @@ import { loadEnv } from '../config/load-env';
 import {
   buildAgentConfigImmutabilitySql,
   buildAuditIntegritySql,
+  buildExpensesImmutabilitySql,
   buildProfessionalAccessSql,
   buildRlsPoliciesSql,
+  buildStatusTransitionsImmutabilitySql,
   RLS_TENANT_TABLES,
 } from './security-policies';
 
@@ -202,6 +204,14 @@ async function main(): Promise<void> {
     // Sprint 7 (US-7.6): agent_config append-only — trigger + REVOKE, mesma dupla barreira.
     await sql.unsafe(buildAgentConfigImmutabilitySql(appRole));
     console.log('[db:migrate] agent_config append-only reconciliado.');
+
+    // Sprint 8 (US-8.3): user_status_transitions append-only — mesmo molde.
+    await sql.unsafe(buildStatusTransitionsImmutabilitySql(appRole));
+    console.log('[db:migrate] user_status_transitions append-only reconciliado.');
+
+    // Sprint 8 (US-8.4): expenses append-only — correção é estorno, nunca edição.
+    await sql.unsafe(buildExpensesImmutabilitySql(appRole));
+    console.log('[db:migrate] expenses append-only reconciliado.');
 
     // Prova de que o modelo de permissões continua íntegro após a migração.
     const [check] = await sql<{ bypassrls: boolean; owns: number }[]>`

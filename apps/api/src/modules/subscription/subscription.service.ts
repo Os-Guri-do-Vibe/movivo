@@ -163,7 +163,12 @@ export class SubscriptionService {
       throw new InvalidTransitionError(current.status, target);
     }
 
-    await this.repo.patch(event.userId, current.id, this.patchFor(event, target));
+    await this.repo.patch(
+      event.userId,
+      current.id,
+      this.patchFor(event, target),
+      { actor: 'SYSTEM', reason: event.type },
+    );
     this.logger.info(
       { userId: event.userId, from: current.status, to: target, event: event.type },
       'transição de assinatura aplicada',
@@ -194,11 +199,13 @@ export class SubscriptionService {
     if (current.externalSubscriptionId) {
       await this.gateway.cancelSubscription(current.externalSubscriptionId);
     }
-    await this.repo.patch(userId, current.id, {
-      status: 'CANCELED',
-      canceledAt: new Date(),
-      cancelReason: reason ?? null,
-    });
+    await this.repo.patch(
+      userId,
+      current.id,
+      { status: 'CANCELED', canceledAt: new Date(), cancelReason: reason ?? null },
+      // Self-service: quem originou a transição é o próprio titular (US-8.3).
+      { actor: 'USER', reason: reason ?? null },
+    );
     this.logger.info({ event: 'subscription_cancelled', userId }, 'subscription_cancelled');
     return { status: 'CANCELED' };
   }
@@ -210,7 +217,7 @@ export class SubscriptionService {
     if (!canTransition(current.status, 'PAUSED')) {
       throw new InvalidTransitionError(current.status, 'PAUSED');
     }
-    await this.repo.patch(userId, current.id, { status: 'PAUSED' });
+    await this.repo.patch(userId, current.id, { status: 'PAUSED' }, { actor: 'USER' });
     this.logger.info({ event: 'subscription_paused', userId }, 'subscription_paused');
     return { status: 'PAUSED' };
   }
@@ -222,7 +229,7 @@ export class SubscriptionService {
     if (!canTransition(current.status, 'ACTIVE')) {
       throw new InvalidTransitionError(current.status, 'ACTIVE');
     }
-    await this.repo.patch(userId, current.id, { status: 'ACTIVE' });
+    await this.repo.patch(userId, current.id, { status: 'ACTIVE' }, { actor: 'USER' });
     this.logger.info({ event: 'subscription_resumed', userId }, 'subscription_resumed');
     return { status: 'ACTIVE' };
   }

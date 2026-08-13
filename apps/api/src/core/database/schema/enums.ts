@@ -253,3 +253,37 @@ export const handoffLevelEnum = pgEnum('handoff_level', ['ALERT', 'SAFETY']);
 
 /** Ciclo do alerta: nasce `OPEN`; o profissional resolve no painel (Sprint 5). */
 export const handoffStatusEnum = pgEnum('handoff_status', ['OPEN', 'RESOLVED']);
+
+// ---------------------------------------------------------------------------
+// CICLO DE VIDA DO ALUNO (US-8.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Marcos do ciclo de vida gravados em `user_status_transitions` (US-8.3).
+ *
+ * Não é um espelho de `subscription_status`: é a **sequência de eventos** que o
+ * funil e a coorte precisam ler. `ACTIVE` sozinho não distingue "converteu do
+ * trial", "voltou da pausa" e "renovou" — três números diferentes na planilha do
+ * CFO. A derivação de (status anterior → status novo) para o marco vive em
+ * `subscription-lifecycle.ts`, em um ponto só.
+ */
+export const userLifecycleStatusEnum = pgEnum('user_lifecycle_status', [
+  'TRIAL_STARTED',
+  'CONVERTED',
+  'RENEWED',
+  'PAUSED',
+  'RESUMED',
+  'CANCELED',
+]);
+
+/**
+ * Quem originou a transição. `BACKFILL` marca dado **reconstruído** a partir das
+ * datas de `subscriptions`, nunca observado — uma coorte montada sobre reconstrução
+ * tem que se declarar como tal (US-8.3, TASK-8.3.3).
+ */
+export const statusTransitionActorEnum = pgEnum('status_transition_actor', [
+  'SYSTEM',
+  'USER',
+  'PROFESSIONAL',
+  'BACKFILL',
+]);

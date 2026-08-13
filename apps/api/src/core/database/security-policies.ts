@@ -106,6 +106,9 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   // esta tabela (não existe UI de aluno) — a RLS existe para que o painel do
   // profissional e os jobs de sistema sejam a única porta, e ela seja escopada.
   { table: 'workout_completions', column: 'user_id', professional: 'read' },
+  // Sprint 8 (US-8.3): sequência de marcos do ciclo de vida do titular. Append-only
+  // (ver `buildStatusTransitionsImmutabilitySql`) e sob a mesma FORCE RLS por titular.
+  { table: 'user_status_transitions', column: 'user_id', professional: 'read' },
 ];
 
 // `nullif(..., '')` é OBRIGATÓRIO, não cosmético: sob PgBouncer transaction mode,
@@ -325,6 +328,40 @@ export function buildAgentConfigImmutabilitySql(appRole: string): string {
 
     REVOKE UPDATE, DELETE, TRUNCATE ON public.agent_config FROM ${appRole};
     GRANT SELECT, INSERT ON public.agent_config TO ${appRole};
+  `;
+}
+
+/**
+ * `user_status_transitions` append-only, imposto no banco (US-8.3 / TASK-8.3.1).
+ *
+ * Molde idêntico ao de `agent_config` (Sprint 7), pelo mesmo motivo: uma transição editada
+ * depois do fato reescreve a coorte e a taxa de conversão retroativamente, sem deixar rastro
+ * — o painel do fundador e a planilha do CFO passariam a divergir em silêncio. Duas barreiras:
+ *  1. trigger que levanta exceção em UPDATE/DELETE/TRUNCATE (vale até para quem tem grant);
+ *  2. REVOKE do privilégio na role de runtime (vale até se a trigger for derrubada).
+ * Diferente de `agent_config`, esta tabela **também** entra na RLS por titular (é dado de aluno).
+ */
+export function buildStatusTransitionsImmutabilitySql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.user_status_transitions_reject_mutation()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    BEGIN
+      RAISE EXCEPTION 'user_status_transitions is append-only' USING ERRCODE = '55000';
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.user_status_transitions_reject_mutation() FROM PUBLIC;
+
+    DROP TRIGGER IF EXISTS trg_user_status_transitions_immutable ON public.user_status_transitions;
+    CREATE TRIGGER trg_user_status_transitions_immutable
+      BEFORE UPDATE OR DELETE ON public.user_status_transitions
+      FOR EACH ROW EXECUTE FUNCTION public.user_status_transitions_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_user_status_transitions_no_truncate ON public.user_status_transitions;
+    CREATE TRIGGER trg_user_status_transitions_no_truncate
+      BEFORE TRUNCATE ON public.user_status_transitions
+      FOR EACH STATEMENT EXECUTE FUNCTION public.user_status_transitions_reject_mutation();
+
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.user_status_transitions FROM ${appRole};
+    GRANT SELECT, INSERT ON public.user_status_transitions TO ${appRole};
   `;
 }
 
@@ -591,5 +628,43 @@ export function buildProfessionalAccessSql(appRole: string): string {
     GRANT EXECUTE ON FUNCTION public.release_parq_clearance(uuid, public.parq_state) TO ${appRole};
     GRANT EXECUTE ON FUNCTION public.assigned_active_professional(uuid) TO ${appRole};
     REVOKE INSERT, UPDATE, DELETE ON public.consents FROM ${appRole};
+  `;
+}
+
+/**
+ * `expenses` append-only, imposto no banco (US-8.4 / TASK-8.4.2).
+ *
+ * Mesma dupla barreira de `audit_logs` e `agent_config`, pelo motivo do livro-caixa:
+ * **correcao e estorno, nunca edicao**. Um valor de despesa alterado em silencio muda o
+ * lucro apurado de um periodo ja fechado sem deixar rastro conferivel contra o extrato.
+ *  1. trigger que levanta excecao em UPDATE/DELETE/TRUNCATE (vale ate para quem tem grant);
+ *  2. REVOKE do privilegio na role de runtime (vale ate se a trigger for derrubada).
+ *
+ * Fora da RLS por titular: e dado da empresa, nao de aluno. Quem escreve e definido por
+ * capability na API (`FINANCE_WRITE`), e toda escrita passa por `AuditService.append`.
+ *
+ * `model_pricing` NAO entra aqui de proposito: fechar vigencia e literalmente
+ * `UPDATE valid_to`. La a garantia de historico imutavel vem da vigencia por data, nao
+ * da imutabilidade da linha.
+ */
+export function buildExpensesImmutabilitySql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.expenses_reject_mutation()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    BEGIN
+      RAISE EXCEPTION 'expenses is append-only: corrija por estorno, nunca por edicao' USING ERRCODE = '55000';
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.expenses_reject_mutation() FROM PUBLIC;
+
+    DROP TRIGGER IF EXISTS trg_expenses_immutable ON public.expenses;
+    CREATE TRIGGER trg_expenses_immutable BEFORE UPDATE OR DELETE ON public.expenses
+      FOR EACH ROW EXECUTE FUNCTION public.expenses_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_expenses_no_truncate ON public.expenses;
+    CREATE TRIGGER trg_expenses_no_truncate BEFORE TRUNCATE ON public.expenses
+      FOR EACH STATEMENT EXECUTE FUNCTION public.expenses_reject_mutation();
+
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.expenses FROM ${appRole};
+    GRANT SELECT, INSERT ON public.expenses TO ${appRole};
   `;
 }

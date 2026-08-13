@@ -252,6 +252,27 @@ export const financeResponse: ControlCenterFinanceResponse = {
     partnerDistribution: unavailableMetric,
     customerAcquisitionCost: unavailableMetric,
     revenueAtRisk30d: metric({ value: 297, unit: 'BRL', status: 'PROXY' }),
+    entryCohorts: [
+      {
+        month: '2026-06',
+        cohortSize: 40,
+        converted: 12,
+        conversionRatePercent: 30,
+        retained: 10,
+        retentionPercent: 25,
+        reconstructed: true,
+      },
+      {
+        month: '2026-07',
+        cohortSize: 60,
+        converted: 21,
+        conversionRatePercent: 35,
+        retained: 19,
+        retentionPercent: 31.7,
+        reconstructed: false,
+      },
+    ],
+    suppressedCohorts: 1,
     renewalCalendar: [
       { month: '2026-08', plan: 'MONTHLY', subscriptions: 12, amountBrl: 468 },
       { month: '2026-09', plan: 'QUARTERLY', subscriptions: 3, amountBrl: 297 },
@@ -289,6 +310,19 @@ export const financeResponse: ControlCenterFinanceResponse = {
         costBrl: 2.02,
       },
     ],
+    // US-8.4 — despesa lançada, custo por categoria/mês e resultado do período.
+    totalExpense: metric({ value: 180, unit: 'BRL' }),
+    expensePerActiveUser: metric({ value: 4.29, unit: 'BRL' }),
+    costByCategory: [
+      { category: 'INFRA', amountBrl: 120 },
+      { category: 'IA_LLM', amountBrl: 30 },
+      { category: 'MARKETING', amountBrl: 30 },
+    ],
+    costByMonth: [
+      { month: '2026-07', amountBrl: 150 },
+      { month: '2026-08', amountBrl: 180 },
+    ],
+    profitBasis: 'CONTRATADO_PROXY',
   },
   meta: { ...controlCenterMeta, dataQuality: [...controlCenterMeta.dataQuality] },
 };
@@ -300,6 +334,15 @@ export const marketingResponse: ControlCenterMarketingResponse = {
       formSubmitted: metric({ value: 188 }),
       protocolActive: metric({ value: 96 }),
       subscriptionActive: unavailableMetric,
+    },
+    trialConversion: {
+      status: 'AVAILABLE',
+      trialsStarted: 100,
+      converted: 33,
+      conversionRatePercent: 33,
+      medianDaysToConversion: 5.5,
+      reconstructedEntries: 40,
+      reason: null,
     },
     anamnesisFunnel: {
       settledSessions: 310,

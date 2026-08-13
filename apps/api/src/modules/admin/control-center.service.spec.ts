@@ -42,13 +42,26 @@ const ACTOR = {
   jti: 'j1',
 } as const;
 
+/**
+ * Fila de retornos de `tx.execute` (SQL cru). Desde a US-8.4 o custo de IA por modelo sai
+ * do query builder (precisa de LATERAL contra `model_pricing`), então a fixture do
+ * financeiro precisa alimentar `execute`, não `select`. Consumida em ordem por
+ * `serviceWithSystemResults`; `withExecute` a preenche antes de instanciar o serviço.
+ */
+let nextExecuteRows: unknown[][] = [];
+function withExecute(...rows: unknown[][]) {
+  nextExecuteRows = rows;
+}
+
 function serviceWithSystemResults(...results: unknown[][]) {
   const select = vi.fn();
   for (const rows of results) select.mockImplementationOnce(() => query(rows));
   // US-8.1: North Star/adesão declarada rodam DEPOIS dos selects enumerados; um
   // fallback vazio evita reenumerar todas as queries em cada teste desta suíte.
   select.mockImplementation(() => query([]));
-  const tx = { select, execute: vi.fn(async () => []) };
+  const executeQueue = [...nextExecuteRows];
+  nextExecuteRows = [];
+  const tx = { select, execute: vi.fn(async () => executeQueue.shift() ?? []) };
   const db = {
     runAsSystem: vi.fn((callback: (value: unknown) => Promise<unknown>) => callback(tx)),
     runAsUser: vi.fn((_id: string, _role: string, callback: (value: unknown) => Promise<unknown>) =>
@@ -510,7 +523,7 @@ describe('ControlCenterService projections', () => {
   });
 
   /** Ordem dos `select` em `finance()`: billing, planos, calendário, risco, churn, IA. */
-  function financeResults() {
+  function financeResults(): unknown[][] {
     return [
       [{ active: 7, contractedMrr: '273.00' }],
       [
@@ -527,14 +540,39 @@ describe('ControlCenterService projections', () => {
         },
       ],
       [{ reason: 'PRECO', total: 5, last90Days: 3 }],
-      [
-        { model: 'gpt-4.1-2025-04-14', jobs: 10, tokensInput: 1_000_000, tokensOutput: 100_000 },
-        { model: 'modelo-sem-preco', jobs: 2, tokensInput: 500, tokensOutput: 100 },
-      ],
+      // US-8.4: despesas por mês/categoria (centavos inteiros; estorno já somado).
+      [],
+    ];
+  }
+
+  /**
+   * Linhas de `tx.execute` do custo de IA. Vêm já precificadas pelo SQL (LATERAL contra
+   * `model_pricing` com a vigência da data do job) — o custo em USD é o que a query
+   * devolve; a suíte confere a conversão para BRL e o tratamento de modelo sem preço.
+   */
+  function aiCostRows() {
+    return [
+      {
+        model: 'gpt-4.1-2025-04-14',
+        jobs: 10,
+        tokens_input: 1_000_000,
+        tokens_output: 100_000,
+        priced_jobs: 10,
+        cost_usd: 2.8,
+      },
+      {
+        model: 'modelo-sem-preco',
+        jobs: 2,
+        tokens_input: 500,
+        tokens_output: 100,
+        priced_jobs: 0,
+        cost_usd: 0,
+      },
     ];
   }
 
   it('financeiro retorna apenas agregados reais e marca fontes ausentes', async () => {
+    withExecute(aiCostRows());
     const { service } = serviceWithSystemResults(...financeResults());
 
     const response = await service.finance();
@@ -548,6 +586,7 @@ describe('ControlCenterService projections', () => {
   });
 
   it('calendário, risco, churn por motivo e MRR/ARR por plano conferem com o cálculo manual', async () => {
+    withExecute(aiCostRows());
     const { service } = serviceWithSystemResults(...financeResults());
 
     const response = await service.finance();
@@ -569,6 +608,7 @@ describe('ControlCenterService projections', () => {
   });
 
   it('converte tokens em reais pela tabela de preço e não inventa custo de modelo desconhecido', async () => {
+    withExecute(aiCostRows());
     const { service } = serviceWithSystemResults(...financeResults());
 
     const response = await service.finance();
@@ -588,15 +628,52 @@ describe('ControlCenterService projections', () => {
   });
 
   it('marca o custo de IA como indisponível quando nenhum modelo tem preço cadastrado', async () => {
-    const results = financeResults();
-    results[5] = [{ model: 'modelo-sem-preco', jobs: 2, tokensInput: 500, tokensOutput: 100 }];
-    const { service } = serviceWithSystemResults(...results);
+    withExecute([aiCostRows()[1]]);
+    const { service } = serviceWithSystemResults(...financeResults());
 
     const response = await service.finance();
 
     expect(response.data.aiCost.status).toBe('UNAVAILABLE');
     expect(response.data.aiCost.value).toBeNull();
     expect(response.data.aiCostPerActiveUser.status).toBe('UNAVAILABLE');
+  });
+
+  it('custo por categoria/mês e lucro conferem com o cálculo manual e declaram o regime', async () => {
+    const results = financeResults();
+    // Mês corrente na fixture; `expensePerActiveUser`/`profit` usam só este mês.
+    const month = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+    }).format(new Date());
+    results[5] = [
+      { month, category: 'INFRA', amountCents: '12000' },
+      { month, category: 'IA_LLM', amountCents: '3000' },
+      // Estorno de R$20 sobre a linha de marketing de R$50 → líquido R$30.
+      { month, category: 'MARKETING', amountCents: '3000' },
+      { month: '2026-01', category: 'INFRA', amountCents: '9900' },
+    ];
+    withExecute(aiCostRows());
+    const { service } = serviceWithSystemResults(...results);
+
+    const response = await service.finance();
+
+    // Cálculo manual, fora do código de produção: R$120 + R$30 + R$30 = R$180 no mês.
+    expect(response.data.totalExpense.value).toBe(180);
+    expect(response.data.costByCategory).toEqual([
+      { category: 'INFRA', amountBrl: 219 },
+      { category: 'IA_LLM', amountBrl: 30 },
+      { category: 'MARKETING', amountBrl: 30 },
+    ]);
+    expect(response.data.costByMonth.at(-1)).toEqual({ month, amountBrl: 180 });
+    expect(response.data.infrastructureCost.value).toBe(219);
+    // R$180 ÷ 7 assinaturas ativas.
+    expect(response.data.expensePerActiveUser.value).toBe(180 / 7);
+    // Lucro = MRR contratado R$273 − despesa R$180 = R$93, tolerância 0.
+    expect(response.data.profit.value).toBe(93);
+    // Regime declarado: proxy contratado enquanto `payments` (US-8.5) não existir.
+    expect(response.data.profit.status).toBe('PROXY');
+    expect(response.data.profitBasis).toBe('CONTRATADO_PROXY');
   });
 
   it('lista de alunos (recorte de suporte) não carrega nenhum campo de saúde', async () => {

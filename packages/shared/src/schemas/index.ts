@@ -11,3 +11,4 @@ export * from './consent.schema';
 export * from './control-center.schema';
 export * from './protocol.schema';
 export * from './subscription.schema';
+export * from './expense.schema';
