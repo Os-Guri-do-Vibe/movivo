@@ -63,12 +63,37 @@ const studentDetail = {
   workoutHistory: { status: 'UNAVAILABLE', reason: 'Depende de workout_completions (Sprint 8).' },
   // As 6 origens da timeline, do evento mais recente para o mais antigo.
   timeline: [
-    { at: '2026-08-10T12:00:00.000Z', kind: 'HANDOFF', title: 'Atendimento humano resolvido', detail: null },
-    { at: '2026-08-09T12:00:00.000Z', kind: 'CONVERSATION', title: '12 mensagens trocadas no dia', detail: null },
-    { at: '2026-08-08T12:00:00.000Z', kind: 'CHECKIN', title: 'Check-in da semana 2', detail: null },
+    {
+      at: '2026-08-10T12:00:00.000Z',
+      kind: 'HANDOFF',
+      title: 'Atendimento humano resolvido',
+      detail: null,
+    },
+    {
+      at: '2026-08-09T12:00:00.000Z',
+      kind: 'CONVERSATION',
+      title: '12 mensagens trocadas no dia',
+      detail: null,
+    },
+    {
+      at: '2026-08-08T12:00:00.000Z',
+      kind: 'CHECKIN',
+      title: 'Check-in da semana 2',
+      detail: null,
+    },
     { at: '2026-08-05T12:00:00.000Z', kind: 'SUBSCRIPTION', title: 'Trial iniciado', detail: null },
-    { at: '2026-08-04T12:00:00.000Z', kind: 'PROTOCOL', title: 'Protocolo v1 gerado', detail: null },
-    { at: '2026-08-03T12:00:00.000Z', kind: 'ANAMNESIS', title: 'Anamnese concluída', detail: null },
+    {
+      at: '2026-08-04T12:00:00.000Z',
+      kind: 'PROTOCOL',
+      title: 'Protocolo v1 gerado',
+      detail: null,
+    },
+    {
+      at: '2026-08-03T12:00:00.000Z',
+      kind: 'ANAMNESIS',
+      title: 'Anamnese concluída',
+      detail: null,
+    },
   ],
   adherence: {
     checkinsSent: 2,

@@ -225,7 +225,12 @@ export class AIResponseWorker implements OnModuleInit {
       ? 'TRECHOS DE REFERÊNCIA (baseie a resposta técnica só nisto):\n' +
         ctx.ragDocs.map((d) => d.snippet).join('\n---\n')
       : '';
-    const system = [await this.prompts.resolvePrompt(intent), ctx.cacheablePrefix, rag, opts?.extraSystem]
+    const system = [
+      await this.prompts.resolvePrompt(intent),
+      ctx.cacheablePrefix,
+      rag,
+      opts?.extraSystem,
+    ]
       .filter(Boolean)
       .join('\n\n');
 
