@@ -35,22 +35,119 @@ export const controlCenterSessionSchema = z.object({
 });
 export type ControlCenterSession = z.infer<typeof controlCenterSessionSchema>;
 
+/** Ponto de uma série diária já preenchida com zeros nos dias sem evento. */
+export const controlCenterTimeSeriesPointSchema = z.object({
+  /** Dia civil em `America/Sao_Paulo`, formato `YYYY-MM-DD`. */
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  value: z.number().int().nonnegative(),
+});
+export type ControlCenterTimeSeriesPoint = z.infer<typeof controlCenterTimeSeriesPointSchema>;
+
+/**
+ * Contagem publicável sob k-anonimato: ou é zero (não identifica ninguém) ou é
+ * grande o bastante. Qualquer célula entre 1 e 9 é erro de contrato, não de tela —
+ * é aqui que a supressão deixa de depender da boa vontade do frontend.
+ */
+const kAnonymousCount = z
+  .number()
+  .int()
+  .nonnegative()
+  .refine((value) => value === 0 || value >= 10, 'Célula entre 1 e 9 viola o k-anonimato.');
+
+/** Célula do mapa de calor: grade completa 7x24 em `America/Sao_Paulo`. */
+export const controlCenterHeatmapCellSchema = z.object({
+  /** 0 = domingo … 6 = sábado (mesma convenção de `EXTRACT(dow)` do PostgreSQL). */
+  dayOfWeek: z.number().int().min(0).max(6),
+  hour: z.number().int().min(0).max(23),
+  /** Dia×hora de cadastro é quase-identificador: célula entre 1 e 9 nunca é publicada. */
+  value: kAnonymousCount,
+});
+export type ControlCenterHeatmapCell = z.infer<typeof controlCenterHeatmapCellSchema>;
+
+/** Pilar de decisão do menu (US-7.1). A Visão Geral resume um por linha (US-7.8). */
+export const controlCenterPillarSchema = z.enum([
+  'STUDENTS',
+  'FINANCE',
+  'MARKETING',
+  'AI',
+  'SYSTEM',
+]);
+export type ControlCenterPillar = z.infer<typeof controlCenterPillarSchema>;
+
+/** Semáforo da linha-resumo. Sem quarto estado: "sem amostra" é `OK` com `reason` nulo. */
+export const controlCenterPillarStateSchema = z.enum(['OK', 'ATTENTION', 'CRITICAL']);
+export type ControlCenterPillarState = z.infer<typeof controlCenterPillarStateSchema>;
+
+export const controlCenterLabeledMetricSchema = z.object({
+  label: z.string().min(1),
+  metric: controlCenterMetricSchema,
+});
+
+/**
+ * Linha-resumo de um pilar (US-7.8). **Nenhum número nasce aqui**: todos vêm de uma
+ * métrica que já existe no pilar de destino, e `href` é a rota onde se age sobre ela.
+ */
+export const controlCenterPillarSummarySchema = z.object({
+  pillar: controlCenterPillarSchema,
+  label: z.string().min(1),
+  state: controlCenterPillarStateSchema,
+  /** Rota existente do menu — o clique tem que cair onde a ação acontece. */
+  href: z.string().startsWith('/dashboard'),
+  /** O número-âncora do pilar naquele momento. */
+  headline: controlCenterLabeledMetricSchema,
+  details: z.array(controlCenterLabeledMetricSchema),
+  /** Por que a linha não está `OK`. `null` quando está. */
+  reason: z.string().nullable(),
+});
+export type ControlCenterPillarSummary = z.infer<typeof controlCenterPillarSummarySchema>;
+
+/**
+ * Visão Geral (US-7.8): só as linhas dos pilares que o ator pode ver. Um pilar sem
+ * capability **não é calculado no servidor** — não chega ao payload para ser escondido
+ * na UI depois.
+ */
 export const controlCenterOverviewResponseSchema = z.object({
-  data: z.object({
-    activeSubscriptions: controlCenterMetricSchema,
-    trials: controlCenterMetricSchema,
-    contractedMrr: controlCenterMetricSchema,
-    northStar: controlCenterMetricSchema,
-    criticalAlerts: controlCenterMetricSchema,
-  }),
+  data: z.object({ pillars: z.array(controlCenterPillarSummarySchema) }),
   meta: controlCenterMetaSchema,
 });
 export type ControlCenterOverviewResponse = z.infer<typeof controlCenterOverviewResponseSchema>;
 
 export const marketingSegmentSchema = z.object({
-  dimension: z.enum(['PRIMARY_GOAL', 'TRAINING_LOCATION', 'PREFERRED_PERIOD']),
+  dimension: z.enum(['PRIMARY_GOAL', 'TRAINING_LOCATION', 'PREFERRED_PERIOD', 'AGE_BAND']),
   value: z.string(),
   count: z.number().int().nonnegative().min(10),
+});
+
+/** Etapa do wizard de onboarding (1=cadastro, 2=anamnese, 3=PAR-Q). */
+export const anamnesisFunnelStepSchema = z.object({
+  step: z.number().int().min(1).max(3),
+  label: z.string().min(1),
+  /** Sessões encerradas que chegaram a esta etapa. */
+  reached: kAnonymousCount,
+  /** Quantas concluíram a etapa e avançaram. */
+  completed: kAnonymousCount,
+  /** `reached - completed`. */
+  abandoned: kAnonymousCount,
+  /** Fração de 0 a 1; `null` quando não houve ninguém na etapa. */
+  abandonRate: z.number().min(0).max(1).nullable(),
+});
+export type AnamnesisFunnelStep = z.infer<typeof anamnesisFunnelStepSchema>;
+
+export const anamnesisFunnelSchema = z.object({
+  /** Sessões com desfecho definido (enviadas ou com link já expirado). */
+  settledSessions: kAnonymousCount,
+  /** Vazio quando alguma célula cairia entre 1 e 9: a dimensão inteira é suprimida. */
+  steps: z.array(anamnesisFunnelStepSchema),
+  /** Etapa com maior taxa de abandono, ou `null` sem amostra publicável. */
+  worstStep: z.number().int().min(1).max(3).nullable(),
+  /** Ponto de parada mais frequente dentro da etapa de maior queda. */
+  exitPoint: z.object({
+    status: dataAvailabilitySchema,
+    step: z.number().int().min(1).max(3).nullable(),
+    checkpoint: z.string().nullable(),
+    count: kAnonymousCount.nullable(),
+    reason: z.string().min(1),
+  }),
 });
 
 export const controlCenterMarketingResponseSchema = z.object({
@@ -61,8 +158,11 @@ export const controlCenterMarketingResponseSchema = z.object({
       protocolActive: controlCenterMetricSchema,
       subscriptionActive: controlCenterMetricSchema,
     }),
+    anamnesisFunnel: anamnesisFunnelSchema,
     acquisition: controlCenterMetricSchema,
     segments: z.array(marketingSegmentSchema),
+    /** Cadastros iniciados por dia da semana × hora, grade 7x24 completa. */
+    signupSeasonality: z.array(controlCenterHeatmapCellSchema),
     suppressedSegments: z.number().int().nonnegative(),
     minimumSegmentSize: z.literal(10),
   }),
@@ -72,6 +172,24 @@ export type ControlCenterMarketingResponse = z.infer<typeof controlCenterMarketi
 
 const nullableText = z.string().nullable();
 
+/**
+ * Sinal de risco **comercial** de cancelamento. Nunca é leitura sobre a saúde da
+ * pessoa — a nomenclatura é estritamente comercial (US-7.4, TASK-7.4.5).
+ */
+export const churnRiskSignalSchema = z.object({
+  code: z.enum(['SEM_MENSAGEM', 'CHECKIN_SEM_RESPOSTA', 'RENOVACAO_PROXIMA']),
+  /** Texto já pronto para leitura, com o número que disparou o sinal. */
+  label: z.string().min(1),
+});
+export type ChurnRiskSignal = z.infer<typeof churnRiskSignalSchema>;
+
+export const churnRiskSchema = z.object({
+  /** Quantidade de sinais disparados (0..3). Não é probabilidade nem score treinado. */
+  score: z.number().int().min(0).max(3),
+  signals: z.array(churnRiskSignalSchema),
+});
+export type ChurnRisk = z.infer<typeof churnRiskSchema>;
+
 export const controlCenterStudentSummarySchema = z.object({
   id: z.uuid(),
   name: nullableText,
@@ -80,20 +198,46 @@ export const controlCenterStudentSummarySchema = z.object({
   status: z.string(),
   subscriptionStatus: nullableText,
   protocolStatus: nullableText,
+  churnRisk: churnRiskSchema,
 });
 
 export const controlCenterStudentsResponseSchema = z.object({
-  data: z.object({ students: z.array(controlCenterStudentSummarySchema) }),
+  data: z.object({
+    students: z.array(controlCenterStudentSummarySchema),
+    /** Respostas bloqueadas pela validação de compliance, no agregado da base. */
+    aiBlockedRate: controlCenterMetricSchema,
+  }),
   meta: controlCenterMetaSchema,
 });
 export type ControlCenterStudentsResponse = z.infer<typeof controlCenterStudentsResponseSchema>;
+
+/** Item da timeline única do aluno (US-7.4, TASK-7.4.1). */
+export const controlCenterTimelineEventSchema = z.object({
+  at: z.iso.datetime(),
+  kind: z.enum(['ANAMNESIS', 'PROTOCOL', 'CHECKIN', 'CONVERSATION', 'SUBSCRIPTION', 'HANDOFF']),
+  title: z.string().min(1),
+  detail: nullableText,
+});
+export type ControlCenterTimelineEvent = z.infer<typeof controlCenterTimelineEventSchema>;
+
+/** Ponto da evolução **declarada** pelo aluno no check-in. Dado de saúde. */
+export const controlCenterEvolutionPointSchema = z.object({
+  week: z.number().int().positive(),
+  at: z.iso.datetime(),
+  /** Percepção de esforço declarada (proxy de RPE). */
+  fatigue: nullableText,
+  /** Treinos declarados na semana — declaração, não execução verificada. */
+  workouts: nullableText,
+  /** Pedido de ajuste de carga declarado. */
+  adjustment: nullableText,
+});
+export type ControlCenterEvolutionPoint = z.infer<typeof controlCenterEvolutionPointSchema>;
 
 export const controlCenterStudentDetailResponseSchema = z.object({
   data: z.object({
     student: controlCenterStudentSummarySchema.extend({
       requiresProfessionalReview: z.boolean(),
       anamnesisStatus: nullableText,
-      parqState: nullableText,
       currentProtocol: z
         .object({
           id: z.uuid(),
@@ -119,6 +263,39 @@ export const controlCenterStudentDetailResponseSchema = z.object({
         status: z.literal('UNAVAILABLE'),
         reason: z.string(),
       }),
+
+      /** Timeline única, do evento mais recente para o mais antigo. */
+      timeline: z.array(controlCenterTimelineEventSchema),
+
+      /** Adesão **declarada**: responder ao check-in, não treino verificado. */
+      adherence: z.object({
+        checkinsSent: z.number().int().nonnegative(),
+        checkinsResponded: z.number().int().nonnegative(),
+        responseRate: controlCenterMetricSchema,
+      }),
+
+      /** Respostas bloqueadas pela validação de compliance neste aluno. */
+      aiQuality: z.object({
+        blockedRate: controlCenterMetricSchema,
+        blocked: z.number().int().nonnegative(),
+        validated: z.number().int().nonnegative(),
+        /** Ocorrências anonimizadas pelo PII Scrubber. Vazio sem `STUDENTS_HEALTH_READ`. */
+        occurrences: z.array(z.object({ at: z.iso.datetime(), content: z.string() })),
+      }),
+
+      /**
+       * Seção de saúde (LGPD Art. 11). **`null` — e nenhum campo dela no payload —**
+       * para quem não tem `control_center.students.health.read`.
+       */
+      health: z
+        .object({
+          parqState: nullableText,
+          painReports: z.array(
+            z.object({ at: z.iso.datetime(), week: z.number().int(), text: z.string() }),
+          ),
+          evolution: z.array(controlCenterEvolutionPointSchema),
+        })
+        .nullable(),
     }),
   }),
   meta: controlCenterMetaSchema,
@@ -127,6 +304,56 @@ export type ControlCenterStudentDetailResponse = z.infer<
   typeof controlCenterStudentDetailResponseSchema
 >;
 
+/** p50/p95/p99 de uma distribuição de latência (`percentile_cont` no Postgres). */
+export const controlCenterPercentilesSchema = z.object({
+  samples: z.number().int().nonnegative(),
+  p50: controlCenterMetricSchema,
+  p95: controlCenterMetricSchema,
+  p99: controlCenterMetricSchema,
+});
+export type ControlCenterPercentiles = z.infer<typeof controlCenterPercentilesSchema>;
+
+/** Recorte de latência de IA por modelo efetivo e tipo de job — leitura de engenharia. */
+export const controlCenterAiLatencySliceSchema = z.object({
+  model: z.string(),
+  jobType: z.string(),
+  samples: z.number().int().nonnegative(),
+  p50: z.number().finite().nullable(),
+  p95: z.number().finite().nullable(),
+  p99: z.number().finite().nullable(),
+});
+export type ControlCenterAiLatencySlice = z.infer<typeof controlCenterAiLatencySliceSchema>;
+
+export const controlCenterSloStatusSchema = z.enum(['GREEN', 'YELLOW', 'RED', 'UNKNOWN']);
+export type ControlCenterSloStatus = z.infer<typeof controlCenterSloStatusSchema>;
+
+/**
+ * Um SLO do board didático. `title`/`objective`/`explanation` são escritos em
+ * linguagem de negócio de propósito: o leitor desta tela pode não ser engenheiro.
+ * `errorBudgetConsumedPercent` acima de 100 significa meta estourada no período.
+ */
+export const controlCenterSloSchema = z.object({
+  key: z.string().min(1),
+  title: z.string().min(1),
+  objective: z.string().min(1),
+  explanation: z.string().min(1),
+  targetPercent: z.number().finite(),
+  currentPercent: z.number().finite().nullable(),
+  samples: z.number().int().nonnegative(),
+  errorBudgetConsumedPercent: z.number().finite().nullable(),
+  status: controlCenterSloStatusSchema,
+});
+export type ControlCenterSlo = z.infer<typeof controlCenterSloSchema>;
+
+/** Indicador que ainda não existe, com a dependência e a sprint que o destrava. */
+export const controlCenterPendingCapabilitySchema = z.object({
+  title: z.string().min(1),
+  reason: z.string().min(1),
+  dependency: z.string().min(1),
+  plannedFor: z.string().min(1),
+});
+export type ControlCenterPendingCapability = z.infer<typeof controlCenterPendingCapabilitySchema>;
+
 export const controlCenterSystemResponseSchema = z.object({
   data: z.object({
     databaseLatency: controlCenterMetricSchema,
@@ -134,43 +361,96 @@ export const controlCenterSystemResponseSchema = z.object({
     aiJobs: controlCenterMetricSchema,
     aiFailures: controlCenterMetricSchema,
     aiDlq: controlCenterMetricSchema,
-    aiAverageLatency: controlCenterMetricSchema,
-    whatsappDeliveryCost: controlCenterMetricSchema,
-    infrastructureCost: controlCenterMetricSchema,
+    /** Tempo de modelo: só a chamada de LLM, medida em `ai_jobs.latency_ms`. */
+    aiLatency: controlCenterPercentilesSchema,
+    aiLatencyByModel: z.array(controlCenterAiLatencySliceSchema),
+    aiLatencyP95Daily: z.array(controlCenterTimeSeriesPointSchema),
+    /** Tempo sentido pelo aluno no WhatsApp: `conversations.latency_ms`. */
+    whatsappLatency: controlCenterPercentilesSchema,
+    whatsappLatencyP95Daily: z.array(controlCenterTimeSeriesPointSchema),
+    ragQueries: controlCenterMetricSchema,
+    ragUsefulRetrievalRate: controlCenterMetricSchema,
+    ragCorpusChunks: controlCenterMetricSchema,
+    /** Entre 3 e 5 semáforos — o board só é legível enquanto for curto. */
+    slos: z.array(controlCenterSloSchema).min(3).max(5),
+    pendingCapabilities: z.array(controlCenterPendingCapabilitySchema),
   }),
   meta: controlCenterMetaSchema,
 });
 export type ControlCenterSystemResponse = z.infer<typeof controlCenterSystemResponseSchema>;
+
+/** Mês civil `YYYY-MM` em `America/Sao_Paulo`. */
+const monthKey = z.string().regex(/^\d{4}-\d{2}$/);
+
+/** Uma linha do calendário de renovação: quanto vence, de qual plano, em qual mês. */
+export const controlCenterRenewalSliceSchema = z.object({
+  month: monthKey,
+  plan: z.string(),
+  subscriptions: z.number().int().nonnegative(),
+  /** Soma do preço contratado das assinaturas que vencem no mês, em reais. */
+  amountBrl: z.number().nonnegative(),
+});
+
+/**
+ * Assinatura que vence em 30 dias com sinal de risco. Sem PII do titular — o
+ * pilar Financeiro não devolve identidade; a ação de retenção parte do id.
+ */
+export const controlCenterRenewalRiskSchema = z.object({
+  subscriptionId: z.uuid(),
+  plan: z.string(),
+  currentPeriodEnd: z.iso.datetime(),
+  amountBrl: z.number().nonnegative(),
+  /** Texto do sinal que motivou o alerta (ex.: silêncio de N dias). */
+  riskSignal: z.string().min(1),
+});
+
+export const controlCenterChurnReasonSchema = z.object({
+  /** `cancel_reason` declarado; `NAO_INFORMADO` quando a coluna é nula. */
+  reason: z.string(),
+  total: z.number().int().nonnegative(),
+  last90Days: z.number().int().nonnegative(),
+});
+
+export const controlCenterPlanRevenueSchema = z.object({
+  plan: z.string(),
+  activeSubscriptions: z.number().int().nonnegative(),
+  /** Preço contratado normalizado para um mês. */
+  mrrBrl: z.number().nonnegative(),
+  /** `mrrBrl * 12`. */
+  arrBrl: z.number().nonnegative(),
+});
+
+export const controlCenterAiModelCostSchema = z.object({
+  model: z.string(),
+  jobs: z.number().int().nonnegative(),
+  tokensInput: z.number().int().nonnegative(),
+  tokensOutput: z.number().int().nonnegative(),
+  /** Nulo quando o modelo não está na tabela de preço versionada em código. */
+  costBrl: z.number().nonnegative().nullable(),
+});
 
 export const controlCenterFinanceResponseSchema = z.object({
   data: z.object({
     activeSubscriptions: controlCenterMetricSchema,
     contractedMrr: controlCenterMetricSchema,
     aiCost: controlCenterMetricSchema,
+    aiCostPerActiveUser: controlCenterMetricSchema,
     whatsappCost: controlCenterMetricSchema,
     infrastructureCost: controlCenterMetricSchema,
     receivedRevenue: controlCenterMetricSchema,
+    profit: controlCenterMetricSchema,
+    partnerDistribution: controlCenterMetricSchema,
+    customerAcquisitionCost: controlCenterMetricSchema,
+    revenueAtRisk30d: controlCenterMetricSchema,
+    renewalCalendar: z.array(controlCenterRenewalSliceSchema),
+    subscriptionsAtRisk: z.array(controlCenterRenewalRiskSchema),
+    churnByReason: z.array(controlCenterChurnReasonSchema),
+    mrrByPlan: z.array(controlCenterPlanRevenueSchema),
+    aiCostByModel: z.array(controlCenterAiModelCostSchema),
   }),
   meta: controlCenterMetaSchema,
 });
 export type ControlCenterFinanceResponse = z.infer<typeof controlCenterFinanceResponseSchema>;
-
-export const controlCenterSupportResponseSchema = z.object({
-  data: z.object({
-    customers: z.array(
-      controlCenterStudentSummarySchema.pick({
-        id: true,
-        name: true,
-        email: true,
-        phoneNumber: true,
-        status: true,
-        subscriptionStatus: true,
-      }),
-    ),
-  }),
-  meta: controlCenterMetaSchema,
-});
-export type ControlCenterSupportResponse = z.infer<typeof controlCenterSupportResponseSchema>;
 
 export const controlCenterAuditEventSchema = z.object({
   id: z.number().int().nonnegative(),

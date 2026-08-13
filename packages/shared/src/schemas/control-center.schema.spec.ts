@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  anamnesisFunnelStepSchema,
   controlCenterMarketingResponseSchema,
   controlCenterSessionSchema,
-  controlCenterSupportResponseSchema,
+  controlCenterStudentsResponseSchema,
 } from './control-center.schema';
 
 const meta = {
@@ -44,10 +45,24 @@ describe('contratos do Control Center', () => {
     ).toBe(false);
   });
 
-  it('remove campos de saúde estranhos da projeção de suporte', () => {
-    const parsed = controlCenterSupportResponseSchema.parse({
+  it('recusa célula do funil da anamnese entre 1 e 9, e aceita zero', () => {
+    const step = (abandoned: number) => ({
+      step: 3,
+      label: 'Etapa 3 — PAR-Q',
+      reached: 40,
+      completed: 40 - abandoned,
+      abandoned,
+      abandonRate: abandoned / 40,
+    });
+    expect(anamnesisFunnelStepSchema.safeParse(step(5)).success).toBe(false);
+    expect(anamnesisFunnelStepSchema.safeParse(step(0)).success).toBe(true);
+    expect(anamnesisFunnelStepSchema.safeParse(step(10)).success).toBe(true);
+  });
+
+  it('remove campos de saúde estranhos da lista de alunos', () => {
+    const parsed = controlCenterStudentsResponseSchema.parse({
       data: {
-        customers: [
+        students: [
           {
             id: '11111111-1111-4111-8111-111111111111',
             name: 'Pessoa',
@@ -55,12 +70,15 @@ describe('contratos do Control Center', () => {
             phoneNumber: '+5511999999999',
             status: 'ACTIVE',
             subscriptionStatus: null,
+            protocolStatus: null,
+            churnRisk: { score: 0, signals: [] },
             parqState: 'BLOCKED',
           },
         ],
+        aiBlockedRate: { value: 0, unit: 'PERCENT', status: 'AVAILABLE', definition: 'x' },
       },
       meta,
     });
-    expect(parsed.data.customers[0]).not.toHaveProperty('parqState');
+    expect(parsed.data.students[0]).not.toHaveProperty('parqState');
   });
 });
