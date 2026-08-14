@@ -45,9 +45,7 @@ describe('DashboardShell', () => {
     expect(screen.queryByRole('link', { name: 'Base de alunos' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Aquisição & Canais' })).not.toBeInTheDocument();
     // US-8.7: cap table é exclusivo do ADMIN — FINANCE não alcança nem o item.
-    expect(
-      screen.queryByRole('link', { name: 'Sócios & Distribuição' }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Sócios & Distribuição' })).not.toBeInTheDocument();
     // Ausência, não desabilitação (TASK-7.9.1): dentro do menu o rótulo não existe
     // em elemento nenhum — nem link, nem botão inerte, nem texto cinza.
     for (const nav of screen.getAllByRole('navigation')) {

@@ -335,17 +335,17 @@ export const financeResponse: ControlCenterFinanceResponse = {
           { scenario: 'OPTIMISTIC', revenueFactor: 1.1, costFactor: 0.95 },
         ] as const
       ).map((scenario) => ({
-          ...scenario,
-          months: ['2026-09', '2026-10', '2026-11'].map((month) => ({
-            month,
-            projectedRevenueBrl: 1400,
-            projectedCostBrl: 150,
-            projectedResultBrl: 1250,
-          })),
-          totalRevenueBrl: 4200,
-          totalCostBrl: 450,
-          totalResultBrl: 3750,
+        ...scenario,
+        months: ['2026-09', '2026-10', '2026-11'].map((month) => ({
+          month,
+          projectedRevenueBrl: 1400,
+          projectedCostBrl: 150,
+          projectedResultBrl: 1250,
         })),
+        totalRevenueBrl: 4200,
+        totalCostBrl: 450,
+        totalResultBrl: 3750,
+      })),
     },
     delinquencyRate: metric({ value: 7.1, unit: 'PERCENT' }),
     averageSettlementDays: metric({ value: 2.3, unit: 'COUNT' }),

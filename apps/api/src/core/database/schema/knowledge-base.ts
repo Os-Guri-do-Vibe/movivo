@@ -14,7 +14,16 @@
  * O índice HNSW (`m=16/ef_construction=64`, `vector_cosine_ops`) é criado no `migrate.ts`
  * (o drizzle-kit não expressa operator class de pgvector) — mesmo padrão de extensões/RLS.
  */
-import { customType, index, integer, pgTable, text, unique, uuid, varchar } from 'drizzle-orm/pg-core';
+import {
+  customType,
+  index,
+  integer,
+  pgTable,
+  text,
+  unique,
+  uuid,
+  varchar,
+} from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn, timestampColumns } from './_shared';
 import { knowledgeDocuments } from './knowledge-documents';
@@ -42,7 +51,9 @@ export const knowledgeBase = pgTable(
   'knowledge_base',
   {
     id: primaryKeyColumn(),
-    documentId: uuid('document_id').references(() => knowledgeDocuments.id, { onDelete: 'restrict' }),
+    documentId: uuid('document_id').references(() => knowledgeDocuments.id, {
+      onDelete: 'restrict',
+    }),
     chunkIndex: integer('chunk_index'),
     /** Trecho (chunk) de ~400-512 tokens indexado. */
     chunkText: text('chunk_text').notNull(),

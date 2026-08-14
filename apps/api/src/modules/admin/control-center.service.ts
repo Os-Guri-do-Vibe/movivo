@@ -335,8 +335,7 @@ export class ControlCenterService {
     const profit = finance.data.profit;
     const profitAttention =
       profit.value !== null && profit.value < OVERVIEW_ATTENTION_THRESHOLDS.financeMinProfitBrl;
-    const attention =
-      atRisk > OVERVIEW_ATTENTION_THRESHOLDS.financeAtRiskBrl || profitAttention;
+    const attention = atRisk > OVERVIEW_ATTENTION_THRESHOLDS.financeAtRiskBrl || profitAttention;
 
     return {
       pillar: 'FINANCE',
@@ -776,10 +775,8 @@ export class ControlCenterService {
       const investment = new Map(
         spendRows.map((row) => [`${row.channel}|${row.campaign}`, this.number(row.cents)]),
       );
-      const mediaInvestmentBrl = spendRows.reduce(
-        (sum, row) => sum + this.number(row.cents),
-        0,
-      ) / 100;
+      const mediaInvestmentBrl =
+        spendRows.reduce((sum, row) => sum + this.number(row.cents), 0) / 100;
       const [observed] = await tx
         .select({
           months: sql<number>`count(distinct to_char(${payments.occurredAt} at time zone ${TIMEZONE}, 'YYYY-MM'))::int`,
@@ -2152,9 +2149,7 @@ export class ControlCenterService {
           failures: sql<number>`count(*) filter (where ${payments.status} = 'FAILED')::int`,
         })
         .from(payments)
-        .where(
-          sql`${payments.occurredAt} >= date_trunc('month', now() - interval '11 months')`,
-        )
+        .where(sql`${payments.occurredAt} >= date_trunc('month', now() - interval '11 months')`)
         .groupBy(sql`1`)
         .orderBy(sql`1`);
 
@@ -2260,13 +2255,17 @@ export class ControlCenterService {
       const receivedNetBrl = brl(monthPayments?.netCents ?? 0);
       /** Taxa do gateway = bruto − líquido. Não há terceira coluna que possa divergir. */
       const gatewayFeeBrl = receivedGrossBrl - receivedNetBrl;
-      const attempts = Number(monthPayments?.settlements ?? 0) + Number(monthPayments?.failures ?? 0);
+      const attempts =
+        Number(monthPayments?.settlements ?? 0) + Number(monthPayments?.failures ?? 0);
 
       // Taxa do gateway entra em Custos como despesa real da categoria que já existe. Não
       // é lançada em `expenses` (ninguém digita taxa de cartão): vem de `payments`, que é
       // a fonte primária. Somar as duas fontes na mesma categoria não duplica nada.
       const gatewayFeeByMonth = paymentRows
-        .map((item) => ({ month: item.month, amountBrl: brl(item.grossCents) - brl(item.netCents) }))
+        .map((item) => ({
+          month: item.month,
+          amountBrl: brl(item.grossCents) - brl(item.netCents),
+        }))
         .filter((item) => item.amountBrl !== 0);
       if (gatewayFeeByMonth.length > 0) {
         const totalFee = gatewayFeeByMonth.reduce((sum, item) => sum + item.amountBrl, 0);
@@ -2884,7 +2883,8 @@ export class ControlCenterService {
       .from(adSpend)
       .groupBy(adSpend.channel);
     const spendByChannel = new Map(spendRows.map((row) => [row.channel, this.number(row.cents)]));
-    const mediaInvestmentBrl = spendRows.reduce((sum, row) => sum + this.number(row.cents), 0) / 100;
+    const mediaInvestmentBrl =
+      spendRows.reduce((sum, row) => sum + this.number(row.cents), 0) / 100;
 
     // Meses distintos com liquidação — divisor do ARPU mensal usado no payback.
     const [observed] = await tx
@@ -2952,37 +2952,76 @@ export class ControlCenterService {
       !invested || investmentBrl === null
         ? this.unavailable('BRL', noInvestment)
         : input.converted === 0
-          ? this.unavailable('BRL', `Investimento registrado, mas nenhum convertido em ${input.label} dentro da janela de ${ATTRIBUTION_WINDOW_DAYS} dias.`)
-          : this.metric(investmentBrl / input.converted, 'BRL', 'AVAILABLE', `Investimento em mídia ÷ convertidos de ${input.label}.`);
+          ? this.unavailable(
+              'BRL',
+              `Investimento registrado, mas nenhum convertido em ${input.label} dentro da janela de ${ATTRIBUTION_WINDOW_DAYS} dias.`,
+            )
+          : this.metric(
+              investmentBrl / input.converted,
+              'BRL',
+              'AVAILABLE',
+              `Investimento em mídia ÷ convertidos de ${input.label}.`,
+            );
     const receivedRevenue = input.hasPayments
-      ? this.metric(receivedBrl, 'BRL', 'AVAILABLE', `Receita efetivamente liquidada atribuída a ${input.label}, líquida de estornos e chargebacks.`)
+      ? this.metric(
+          receivedBrl,
+          'BRL',
+          'AVAILABLE',
+          `Receita efetivamente liquidada atribuída a ${input.label}, líquida de estornos e chargebacks.`,
+        )
       : this.unavailable('BRL', 'Nenhuma liquidação registrada em `payments` ainda.');
     const roas =
       !invested || investmentBrl === null
         ? this.unavailable('RATIO', noInvestment)
         : !input.hasPayments
           ? this.unavailable('RATIO', 'Sem liquidação registrada não existe retorno a dividir.')
-          : this.metric(receivedBrl / investmentBrl, 'RATIO', 'AVAILABLE', `Receita recebida atribuída a ${input.label} ÷ investimento em mídia.`);
+          : this.metric(
+              receivedBrl / investmentBrl,
+              'RATIO',
+              'AVAILABLE',
+              `Receita recebida atribuída a ${input.label} ÷ investimento em mídia.`,
+            );
     const ltvStatus = input.matureCohorts >= 3 ? 'AVAILABLE' : 'PROXY';
     const ltvBase = `LTV de ${input.label} sustentado por ${input.matureCohorts} coorte(s) com ao menos ${MATURE_COHORT_MONTHS} meses.`;
     const ltv =
       !input.hasPayments || input.converted === 0
-        ? this.unavailable('BRL', `Sem convertidos com liquidação em ${input.label} não há base para LTV.`)
+        ? this.unavailable(
+            'BRL',
+            `Sem convertidos com liquidação em ${input.label} não há base para LTV.`,
+          )
         : this.metric(receivedBrl / input.converted, 'BRL', ltvStatus, ltvBase);
     const ltvToCac =
       ltv.value === null || cac.value === null || cac.value === 0
         ? this.unavailable('RATIO', invested ? 'Falta LTV ou CAC para a razão.' : noInvestment)
-        : this.metric(ltv.value / cac.value, 'RATIO', ltvStatus, `LTV ÷ CAC de ${input.label}, meta ≥ ${LTV_TO_CAC_TARGET}.`);
+        : this.metric(
+            ltv.value / cac.value,
+            'RATIO',
+            ltvStatus,
+            `LTV ÷ CAC de ${input.label}, meta ≥ ${LTV_TO_CAC_TARGET}.`,
+          );
     const monthlyArpu = ltv.value === null ? null : ltv.value / input.observedMonths;
     const paybackMonths =
       cac.value === null || monthlyArpu === null || monthlyArpu <= 0
-        ? this.unavailable('MONTHS', invested ? 'Sem CAC ou receita mensal por convertido não há prazo de retorno.' : noInvestment)
-        : this.metric(cac.value / monthlyArpu, 'MONTHS', ltvStatus, `CAC ÷ receita média mensal por convertido, meta ≤ ${PAYBACK_TARGET_MONTHS} meses.`);
+        ? this.unavailable(
+            'MONTHS',
+            invested
+              ? 'Sem CAC ou receita mensal por convertido não há prazo de retorno.'
+              : noInvestment,
+          )
+        : this.metric(
+            cac.value / monthlyArpu,
+            'MONTHS',
+            ltvStatus,
+            `CAC ÷ receita média mensal por convertido, meta ≤ ${PAYBACK_TARGET_MONTHS} meses.`,
+          );
     let signal: ChannelSignal = 'UNKNOWN';
     if (ltvToCac.value !== null && paybackMonths.value !== null) {
-      signal = ltvToCac.value >= LTV_TO_CAC_TARGET && paybackMonths.value <= PAYBACK_TARGET_MONTHS
-        ? 'GREEN'
-        : ltvToCac.value >= 1 ? 'ATTENTION' : 'CRITICAL';
+      signal =
+        ltvToCac.value >= LTV_TO_CAC_TARGET && paybackMonths.value <= PAYBACK_TARGET_MONTHS
+          ? 'GREEN'
+          : ltvToCac.value >= 1
+            ? 'ATTENTION'
+            : 'CRITICAL';
     }
     return {
       converted: input.converted,

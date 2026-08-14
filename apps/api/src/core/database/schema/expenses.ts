@@ -25,7 +25,17 @@
  * é o modelo; as filhas apontam para ela por `recurring_parent_id`, e o índice único
  * `(recurring_parent_id, occurred_on)` faz o job ser idempotente por construção.
  */
-import { boolean, date, index, integer, pgEnum, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  date,
+  index,
+  integer,
+  pgEnum,
+  pgTable,
+  text,
+  unique,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 import { ExpenseCategory, ExpenseRecurrencePeriod } from '@movivo/shared';
 

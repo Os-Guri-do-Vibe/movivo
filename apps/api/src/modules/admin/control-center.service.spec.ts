@@ -642,7 +642,13 @@ describe('ControlCenterService projections', () => {
       [{ trials: 60, converted: 15, median_days: '5', reconstructed: 0 }],
       [],
       [
-        { source: 'instagram', medium: 'cpc', students: 40, converted: 10, received_cents: '400000' },
+        {
+          source: 'instagram',
+          medium: 'cpc',
+          students: 40,
+          converted: 10,
+          received_cents: '400000',
+        },
         { source: 'organico', medium: null, students: 20, converted: 5, received_cents: '100000' },
       ],
     );

@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto';
 
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   MAX_KNOWLEDGE_DOCUMENT_BYTES,
   reviewKnowledgeDocumentSchema,
@@ -25,7 +30,8 @@ const APPROVED_ORIGINAL_DAYS = 365;
 // para object storage privado com URL assinada, mantendo metadados/revisoes no banco.
 const ALLOWED_EXTENSIONS = new Set(['.txt', '.md']);
 const MARKUP_OR_SCRIPT = /<\/?(?:script|iframe|object|embed|html|body)\b|javascript:/i;
-const PERSONAL_DATA = /\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b|\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|\b(?:\+?55\s*)?\(?\d{2}\)?\s*9?\d{4}[-\s]?\d{4}\b/;
+const PERSONAL_DATA =
+  /\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b|\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|\b(?:\+?55\s*)?\(?\d{2}\)?\s*9?\d{4}[-\s]?\d{4}\b/;
 
 export function scanKnowledgeContent(content: string): void {
   // ponytail: allowlist apenas de texto torna a varredura deterministica; se PDF/DOCX entrar
@@ -141,28 +147,37 @@ export class KnowledgeAdminService {
 
   async upload(actor: AuthenticatedUser, body: unknown): Promise<KnowledgeDocumentsResponse> {
     const parsed = uploadKnowledgeDocumentSchema.safeParse(body);
-    if (!parsed.success) throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
+    if (!parsed.success)
+      throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
     const input = parsed.data;
-    const extension = input.originalFilename.slice(input.originalFilename.lastIndexOf('.')).toLowerCase();
+    const extension = input.originalFilename
+      .slice(input.originalFilename.lastIndexOf('.'))
+      .toLowerCase();
     const payload = Buffer.from(input.content, 'utf8');
-    if (!ALLOWED_EXTENSIONS.has(extension)) throw new BadRequestException('Envie somente arquivo .txt ou .md.');
-    if (payload.byteLength > MAX_KNOWLEDGE_DOCUMENT_BYTES) throw new BadRequestException('O arquivo excede 512 KiB.');
+    if (!ALLOWED_EXTENSIONS.has(extension))
+      throw new BadRequestException('Envie somente arquivo .txt ou .md.');
+    if (payload.byteLength > MAX_KNOWLEDGE_DOCUMENT_BYTES)
+      throw new BadRequestException('O arquivo excede 512 KiB.');
     scanKnowledgeContent(input.content);
     const sha256 = createHash('sha256').update(payload).digest('hex');
 
     try {
       await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
-        const [document] = await tx.insert(knowledgeDocuments).values({
-          title: input.title,
-          topic: input.topic,
-          sourceUrl: input.sourceUrl ?? null,
-          originalFilename: input.originalFilename,
-          mimeType: input.mimeType,
-          sizeBytes: payload.byteLength,
-          sha256,
-          uploadedBy: actor.userId,
-        }).returning({ id: knowledgeDocuments.id });
-        if (!document) throw new BadRequestException('Nao foi possivel colocar o arquivo em quarentena.');
+        const [document] = await tx
+          .insert(knowledgeDocuments)
+          .values({
+            title: input.title,
+            topic: input.topic,
+            sourceUrl: input.sourceUrl ?? null,
+            originalFilename: input.originalFilename,
+            mimeType: input.mimeType,
+            sizeBytes: payload.byteLength,
+            sha256,
+            uploadedBy: actor.userId,
+          })
+          .returning({ id: knowledgeDocuments.id });
+        if (!document)
+          throw new BadRequestException('Nao foi possivel colocar o arquivo em quarentena.');
         await tx.execute(sql`
           INSERT INTO knowledge_document_blobs (document_id, payload, retained_until)
           VALUES (${document.id}::uuid, ${payload}, now() + interval '30 days')
@@ -208,42 +223,59 @@ export class KnowledgeAdminService {
 
   async review(actor: AuthenticatedUser, body: unknown): Promise<KnowledgeDocumentsResponse> {
     const parsed = reviewKnowledgeDocumentSchema.safeParse(body);
-    if (!parsed.success) throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
+    if (!parsed.success)
+      throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
     const input = parsed.data;
     await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`knowledge:${input.documentId}`}, 0))`);
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtextextended(${`knowledge:${input.documentId}`}, 0))`,
+      );
       const docs = (await tx.execute(sql`
         SELECT document.title, document.topic, document.source_url, blob.payload
         FROM knowledge_documents document
         LEFT JOIN knowledge_document_blobs blob ON blob.document_id = document.id
         WHERE document.id = ${input.documentId}::uuid
-      `)) as unknown as Array<{ title: string; topic: string; source_url: string | null; payload: Buffer | null }>;
+      `)) as unknown as Array<{
+        title: string;
+        topic: string;
+        source_url: string | null;
+        payload: Buffer | null;
+      }>;
       const document = docs[0];
       if (!document) throw new NotFoundException('Documento inexistente.');
       const reviewed = (await tx.execute(sql`
         SELECT 1 FROM knowledge_document_reviews WHERE document_id = ${input.documentId}::uuid LIMIT 1
       `)) as unknown as unknown[];
       if (reviewed.length) throw new ConflictException('Este documento ja foi revisado.');
-      if (!document.payload) throw new BadRequestException('O original nao esta mais disponivel para revisao.');
+      if (!document.payload)
+        throw new BadRequestException('O original nao esta mais disponivel para revisao.');
 
       let chunks: Awaited<ReturnType<typeof prepareCorpus>> = [];
       if (input.decision === 'APPROVED') {
         const content = document.payload.toString('utf8');
         scanKnowledgeContent(content);
-        chunks = await prepareCorpus([{
-          title: document.title,
-          topic: document.topic,
-          content,
-          sourceUrl: document.source_url ?? undefined,
-          reliability: 5,
-        }], this.embedding);
+        chunks = await prepareCorpus(
+          [
+            {
+              title: document.title,
+              topic: document.topic,
+              content,
+              sourceUrl: document.source_url ?? undefined,
+              reliability: 5,
+            },
+          ],
+          this.embedding,
+        );
       }
-      const [review] = await tx.insert(knowledgeDocumentReviews).values({
-        documentId: input.documentId,
-        decision: input.decision,
-        note: input.note,
-        reviewerId: actor.userId,
-      }).returning({ id: knowledgeDocumentReviews.id });
+      const [review] = await tx
+        .insert(knowledgeDocumentReviews)
+        .values({
+          documentId: input.documentId,
+          decision: input.decision,
+          note: input.note,
+          reviewerId: actor.userId,
+        })
+        .returning({ id: knowledgeDocumentReviews.id });
       if (!review) throw new BadRequestException('Nao foi possivel registrar a revisao.');
       if (input.decision === 'APPROVED') {
         const [published] = (await tx.execute(sql`
@@ -268,7 +300,11 @@ export class KnowledgeAdminService {
   private envelope<T>(data: T): KnowledgeDocumentsResponse {
     return {
       data,
-      meta: { generatedAt: new Date().toISOString(), timezone: 'America/Sao_Paulo', dataQuality: [] },
+      meta: {
+        generatedAt: new Date().toISOString(),
+        timezone: 'America/Sao_Paulo',
+        dataQuality: [],
+      },
     } as KnowledgeDocumentsResponse;
   }
 }

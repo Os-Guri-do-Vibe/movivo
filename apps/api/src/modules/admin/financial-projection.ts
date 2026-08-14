@@ -54,11 +54,9 @@ export function buildFinancialProjection(
     };
   }
   const baseRevenue =
-    basisMonths.reduce((sum, month) => sum + (revenues.get(month) ?? 0), 0) /
-    basisMonths.length;
+    basisMonths.reduce((sum, month) => sum + (revenues.get(month) ?? 0), 0) / basisMonths.length;
   const baseCost =
-    basisMonths.reduce((sum, month) => sum + (costs.get(month) ?? 0), 0) /
-    basisMonths.length;
+    basisMonths.reduce((sum, month) => sum + (costs.get(month) ?? 0), 0) / basisMonths.length;
   const horizon = nextMonths(currentMonth);
   const scenarios = SCENARIOS.map((scenario) => {
     const months = horizon.map((month) => {

@@ -35,7 +35,6 @@ const SIGNAL_LABELS = {
 /** Rótulo do investimento. Canal sem gasto NUNCA exibe R$ 0,00 (TASK-8.6.2). */
 const NO_INVESTMENT_LABEL = 'sem investimento direto';
 
-
 export function MarketingDashboard() {
   const load = useCallback((signal?: AbortSignal) => getMarketing(signal), []);
   const state = useControlCenterResource(load);
@@ -167,7 +166,9 @@ export function MarketingDashboard() {
         <p className="mt-2 text-xs text-muted-foreground">
           Investimento em mídia lançado: {brl.format(data.mediaInvestmentBrl)} · LTV sustentado por{' '}
           {data.matureCohorts} coorte(s) de entrada madura(s)
-          {data.matureCohorts < 3 ? ' — estimativa de baixa confiança, é hipótese, não medida.' : '.'}{' '}
+          {data.matureCohorts < 3
+            ? ' — estimativa de baixa confiança, é hipótese, não medida.'
+            : '.'}{' '}
           Origem não capturada: {data.attributionNotCaptured.toLocaleString('pt-BR')} cadastros
           anteriores à captura de origem — nunca contados como orgânicos.
         </p>
@@ -183,7 +184,10 @@ export function MarketingDashboard() {
                   <div className="flex items-start justify-between gap-3">
                     <h3 className="text-h3 font-semibold">{channel.channel}</h3>
                     <span
-                      className={cn('rounded-full px-2 py-1 text-xs font-semibold', signal.className)}
+                      className={cn(
+                        'rounded-full px-2 py-1 text-xs font-semibold',
+                        signal.className,
+                      )}
                     >
                       {signal.label}
                     </span>

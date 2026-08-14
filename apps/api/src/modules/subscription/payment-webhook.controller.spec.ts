@@ -10,10 +10,7 @@ import { UnauthorizedException } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { describe, expect, it, vi } from 'vitest';
 
-import {
-  PAYMENT_WEBHOOK_BODY_LIMIT,
-  PaymentWebhookController,
-} from './payment-webhook.controller';
+import { PAYMENT_WEBHOOK_BODY_LIMIT, PaymentWebhookController } from './payment-webhook.controller';
 import type { PaymentWebhookService } from './payment-webhook.service';
 import type { WebhookVerdict } from './payment-webhook.service';
 

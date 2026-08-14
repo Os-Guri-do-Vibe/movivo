@@ -25,12 +25,7 @@ import { userStatusTransitions } from '../../core/database/schema';
 import type { TenantTransaction } from '../../core/database/tenant-database.service';
 
 export type LifecycleMarker =
-  | 'TRIAL_STARTED'
-  | 'CONVERTED'
-  | 'RENEWED'
-  | 'PAUSED'
-  | 'RESUMED'
-  | 'CANCELED';
+  'TRIAL_STARTED' | 'CONVERTED' | 'RENEWED' | 'PAUSED' | 'RESUMED' | 'CANCELED';
 
 export type TransitionActor = 'SYSTEM' | 'USER' | 'PROFESSIONAL' | 'BACKFILL';
 

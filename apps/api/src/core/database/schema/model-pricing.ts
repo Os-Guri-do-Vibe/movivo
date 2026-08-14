@@ -33,7 +33,10 @@ export const modelPricing = pgTable(
     model: text('model').notNull(),
 
     /** Centavos (decimais) por 1k tokens de entrada. Ver cabeçalho. */
-    inputPricePer1kCents: numeric('input_price_per_1k_cents', { precision: 14, scale: 6 }).notNull(),
+    inputPricePer1kCents: numeric('input_price_per_1k_cents', {
+      precision: 14,
+      scale: 6,
+    }).notNull(),
     outputPricePer1kCents: numeric('output_price_per_1k_cents', {
       precision: 14,
       scale: 6,

@@ -148,9 +148,7 @@ describe('SummaryDashboard', () => {
     expect(await screen.findByLabelText('Lucro: —')).toBeVisible();
     expect(screen.getByLabelText('CAC: —')).toBeVisible();
     expect(screen.getByLabelText('Distribuição por sócio: —')).toBeVisible();
-    expect(
-      screen.getByText(/Nenhuma despesa lançada ainda/),
-    ).toBeVisible();
+    expect(screen.getByText(/Nenhuma despesa lançada ainda/)).toBeVisible();
   });
 
   it('em 403 mostra o aviso de acesso sem oferecer nova tentativa', async () => {

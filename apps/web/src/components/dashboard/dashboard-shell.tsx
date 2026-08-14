@@ -323,63 +323,63 @@ function DashboardNavigation({
             {isOpen ? (
               <ul className={cn('grid gap-1.5', groupLabel && !collapsed && 'mt-1')}>
                 {group.items.map(({ href, label, icon: Icon, soon }) => {
-              if (!href) {
-                // Roadmap: item presente, sem link e sem controle desabilitado.
-                return (
-                  <li key={label}>
-                    <div
-                      className={cn(
-                        'flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-label text-[var(--nevoa-suave)]/70',
-                        collapsed && 'justify-center px-0',
-                      )}
-                    >
-                      <Icon aria-hidden="true" className="size-5 shrink-0" />
-                      <span className={collapsed ? 'sr-only' : undefined}>{label}</span>
-                      <span
+                  if (!href) {
+                    // Roadmap: item presente, sem link e sem controle desabilitado.
+                    return (
+                      <li key={label}>
+                        <div
+                          className={cn(
+                            'flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-label text-[var(--nevoa-suave)]/70',
+                            collapsed && 'justify-center px-0',
+                          )}
+                        >
+                          <Icon aria-hidden="true" className="size-5 shrink-0" />
+                          <span className={collapsed ? 'sr-only' : undefined}>{label}</span>
+                          <span
+                            className={cn(
+                              'ml-auto rounded-full border border-[var(--petroleo-borda)] px-2 py-0.5 text-[0.625rem] font-semibold whitespace-nowrap',
+                              collapsed && 'sr-only',
+                            )}
+                          >
+                            Em breve · {soon}
+                          </span>
+                        </div>
+                      </li>
+                    );
+                  }
+                  const current = isCurrent(pathname, href);
+                  return (
+                    <li key={href}>
+                      <Link
+                        href={href}
+                        aria-current={current ? 'page' : undefined}
+                        aria-label={label}
+                        onClick={onNavigate}
                         className={cn(
-                          'ml-auto rounded-full border border-[var(--petroleo-borda)] px-2 py-0.5 text-[0.625rem] font-semibold whitespace-nowrap',
-                          collapsed && 'sr-only',
+                          'flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-label font-medium transition-colors focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none',
+                          collapsed && 'justify-center px-0',
+                          current
+                            ? 'bg-[var(--petroleo-superficie)] font-semibold text-verde-pulso'
+                            : 'text-[var(--nevoa-suave)] hover:bg-[var(--petroleo-superficie)] hover:text-nevoa',
                         )}
                       >
-                        Em breve · {soon}
-                      </span>
-                    </div>
-                  </li>
-                );
-              }
-              const current = isCurrent(pathname, href);
-              return (
-                <li key={href}>
-                  <Link
-                    href={href}
-                    aria-current={current ? 'page' : undefined}
-                    aria-label={label}
-                    onClick={onNavigate}
-                    className={cn(
-                      'flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-label font-medium transition-colors focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none',
-                      collapsed && 'justify-center px-0',
-                      current
-                        ? 'bg-[var(--petroleo-superficie)] font-semibold text-verde-pulso'
-                        : 'text-[var(--nevoa-suave)] hover:bg-[var(--petroleo-superficie)] hover:text-nevoa',
-                    )}
-                  >
-                    <Icon aria-hidden="true" className="size-5 shrink-0" />
-                    <span className={collapsed ? 'sr-only' : undefined}>{label}</span>
-                    {soon && !collapsed ? (
-                      // Tela existe, mas só explica o que virá — o roadmap continua visível.
-                      <span className="ml-auto rounded-full border border-[var(--petroleo-borda)] px-2 py-0.5 text-[0.625rem] font-semibold whitespace-nowrap">
-                        Em breve · {soon}
-                      </span>
-                    ) : current && !collapsed ? (
-                      <span
-                        aria-hidden="true"
-                        className="ml-auto size-1.5 rounded-full bg-verde-pulso"
-                      />
-                    ) : null}
-                  </Link>
-                </li>
-              );
-            })}
+                        <Icon aria-hidden="true" className="size-5 shrink-0" />
+                        <span className={collapsed ? 'sr-only' : undefined}>{label}</span>
+                        {soon && !collapsed ? (
+                          // Tela existe, mas só explica o que virá — o roadmap continua visível.
+                          <span className="ml-auto rounded-full border border-[var(--petroleo-borda)] px-2 py-0.5 text-[0.625rem] font-semibold whitespace-nowrap">
+                            Em breve · {soon}
+                          </span>
+                        ) : current && !collapsed ? (
+                          <span
+                            aria-hidden="true"
+                            className="ml-auto size-1.5 rounded-full bg-verde-pulso"
+                          />
+                        ) : null}
+                      </Link>
+                    </li>
+                  );
+                })}
               </ul>
             ) : null}
           </div>

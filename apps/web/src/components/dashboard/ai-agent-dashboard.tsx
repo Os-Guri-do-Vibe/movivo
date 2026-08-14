@@ -42,9 +42,8 @@ export function AiAgentDashboard({
       <div>
         <h1 className="text-h1 font-bold text-foreground">Agente</h1>
         <p className="mt-1 max-w-3xl text-label text-muted-foreground">
-          Persona, regras invioláveis, base de conhecimento e FAQ da IA, num único lugar. Cada
-          etapa publica e audita a própria configuração — trocar de etapa não muda o que fica
-          gravado.
+          Persona, regras invioláveis, base de conhecimento e FAQ da IA, num único lugar. Cada etapa
+          publica e audita a própria configuração — trocar de etapa não muda o que fica gravado.
         </p>
       </div>
 

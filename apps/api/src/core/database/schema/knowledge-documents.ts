@@ -52,7 +52,9 @@ export const knowledgeDocumentReviews = pgTable(
       .references(() => users.id, { onDelete: 'restrict' }),
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },
-  (table) => [index('idx_knowledge_document_reviews_document').on(table.documentId, table.createdAt)],
+  (table) => [
+    index('idx_knowledge_document_reviews_document').on(table.documentId, table.createdAt),
+  ],
 );
 
 export type KnowledgeDocumentRow = typeof knowledgeDocuments.$inferSelect;

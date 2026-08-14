@@ -88,7 +88,9 @@ describe('documentos RAG no banco', () => {
   it('recusa publicacao antes da revisao profissional', async () => {
     await expect(
       tenant.runAsUser(professionalId, 'PROFESSIONAL', (tx) =>
-        tx.execute(sql`SELECT public.publish_knowledge_document(${documentId}::uuid, ${chunks}::jsonb)`),
+        tx.execute(
+          sql`SELECT public.publish_knowledge_document(${documentId}::uuid, ${chunks}::jsonb)`,
+        ),
       ),
     ).rejects.toMatchObject({ cause: { code: '42501' } });
   });
@@ -118,9 +120,21 @@ describe('documentos RAG no banco', () => {
   });
 
   it.each([
-    ['documento', () => appClient`UPDATE knowledge_documents SET title = 'alterado' WHERE id = ${documentId}::uuid`],
-    ['revisao', () => appClient`DELETE FROM knowledge_document_reviews WHERE document_id = ${documentId}::uuid`],
-    ['payload', () => appClient`UPDATE knowledge_document_blobs SET payload = 'x'::bytea WHERE document_id = ${documentId}::uuid`],
+    [
+      'documento',
+      () =>
+        appClient`UPDATE knowledge_documents SET title = 'alterado' WHERE id = ${documentId}::uuid`,
+    ],
+    [
+      'revisao',
+      () =>
+        appClient`DELETE FROM knowledge_document_reviews WHERE document_id = ${documentId}::uuid`,
+    ],
+    [
+      'payload',
+      () =>
+        appClient`UPDATE knowledge_document_blobs SET payload = 'x'::bytea WHERE document_id = ${documentId}::uuid`,
+    ],
   ])('%s e imutavel para runtime com 42501', async (_label, mutation) => {
     await expect(mutation()).rejects.toMatchObject({ code: '42501' });
   });

@@ -67,7 +67,9 @@ describe('ContextService.build', () => {
 
   it('só chama o RAG em DUVIDA_TECNICA', async () => {
     const rag = make({
-      ragDocs: [{ chunkId: 'c1', documentId: 'd1', title: 't', snippet: 'descanse 90s', score: 0.9 }],
+      ragDocs: [
+        { chunkId: 'c1', documentId: 'd1', title: 't', snippet: 'descanse 90s', score: 0.9 },
+      ],
     });
     const ctx = await rag.svc.build('u1', 'DUVIDA_TECNICA', 'quanto descanso?');
     expect(rag.retrieve).toHaveBeenCalledOnce();

@@ -24,7 +24,17 @@
  * CASE no SQL de escrita. Ver `WorkoutCompletionService.record`.
  */
 import { sql } from 'drizzle-orm';
-import { check, date, index, jsonb, pgTable, smallint, unique, uuid, varchar } from 'drizzle-orm/pg-core';
+import {
+  check,
+  date,
+  index,
+  jsonb,
+  pgTable,
+  smallint,
+  unique,
+  uuid,
+  varchar,
+} from 'drizzle-orm/pg-core';
 
 import { primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
 import { workoutCompletionSourceEnum } from './enums';

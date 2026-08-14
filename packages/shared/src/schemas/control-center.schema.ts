@@ -244,9 +244,7 @@ export const controlCenterCampaignsResponseSchema = z.object({
   }),
   meta: controlCenterMetaSchema,
 });
-export type ControlCenterCampaignsResponse = z.infer<
-  typeof controlCenterCampaignsResponseSchema
->;
+export type ControlCenterCampaignsResponse = z.infer<typeof controlCenterCampaignsResponseSchema>;
 
 /** Linha do extrato de investimento em mídia (US-8.6). Estorno aparece como linha própria. */
 export const adSpendEntrySchema = z.object({

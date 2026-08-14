@@ -6,7 +6,10 @@ export const MAX_KNOWLEDGE_DOCUMENT_BYTES = 512 * 1024;
 
 export const uploadKnowledgeDocumentSchema = z.object({
   title: z.string().trim().min(3).max(200),
-  topic: z.string().trim().regex(/^[A-Za-zÀ-ú0-9 _-]{2,60}$/),
+  topic: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-zÀ-ú0-9 _-]{2,60}$/),
   sourceUrl: z.url().max(500).optional(),
   originalFilename: z.string().trim().min(1).max(255),
   mimeType: z.enum(['text/plain', 'text/markdown']),

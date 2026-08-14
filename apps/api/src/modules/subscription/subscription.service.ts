@@ -163,12 +163,10 @@ export class SubscriptionService {
       throw new InvalidTransitionError(current.status, target);
     }
 
-    await this.repo.patch(
-      event.userId,
-      current.id,
-      this.patchFor(event, target),
-      { actor: 'SYSTEM', reason: event.type },
-    );
+    await this.repo.patch(event.userId, current.id, this.patchFor(event, target), {
+      actor: 'SYSTEM',
+      reason: event.type,
+    });
     this.logger.info(
       { userId: event.userId, from: current.status, to: target, event: event.type },
       'transição de assinatura aplicada',

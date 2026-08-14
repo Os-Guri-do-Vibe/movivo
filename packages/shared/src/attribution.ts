@@ -130,10 +130,7 @@ const CHANNEL_MAP: Record<string, string> = {
  * É a lista que o lançamento de `ad_spend` aceita (US-8.6): quem lança escolhe da
  * taxonomia, então em `ad_spend` não existe "bruto não mapeado" a preservar.
  */
-export const CANONICAL_CHANNELS = [...new Set(Object.values(CHANNEL_MAP))] as [
-  string,
-  ...string[],
-];
+export const CANONICAL_CHANNELS = [...new Set(Object.values(CHANNEL_MAP))] as [string, ...string[]];
 
 export interface CanonicalChannel {
   /** Valor canônico, `desconhecida`, ou `nao_mapeado`. */

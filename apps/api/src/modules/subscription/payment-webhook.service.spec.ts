@@ -54,14 +54,7 @@ function make(deps: Deps = {}) {
   const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() };
 
   return {
-    svc: new PaymentWebhookService(
-      gateway,
-      subscriptions,
-      redis,
-      keys,
-      queues,
-      logger as never,
-    ),
+    svc: new PaymentWebhookService(gateway, subscriptions, redis, keys, queues, logger as never),
     applyGatewayEvent,
     enqueue,
     logger,

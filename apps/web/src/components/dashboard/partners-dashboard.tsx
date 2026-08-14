@@ -4,7 +4,12 @@ import { AlertTriangle } from 'lucide-react';
 
 import { getPartnerDistribution } from '@/lib/control-center-api';
 
-import { DataQuality, ResourceState, SectorHeader, useControlCenterResource } from './control-center-ui';
+import {
+  DataQuality,
+  ResourceState,
+  SectorHeader,
+  useControlCenterResource,
+} from './control-center-ui';
 
 const brl = (cents: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cents / 100);
@@ -42,7 +47,10 @@ export function PartnersDashboard() {
         onRefresh={() => void refresh()}
       />
 
-      <section aria-label="Lucro do período" className="mt-6 rounded-xl border border-border bg-card p-5">
+      <section
+        aria-label="Lucro do período"
+        className="mt-6 rounded-xl border border-border bg-card p-5"
+      >
         <h2 className="text-label font-semibold">Lucro apurado · {data.data.period}</h2>
         <p className="mt-3 font-mono text-h1 font-bold">
           {data.data.profitAvailable ? brl(data.data.profitCents) : '—'}

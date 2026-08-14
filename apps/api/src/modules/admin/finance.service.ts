@@ -13,7 +13,12 @@
  * o lançamento não existe. É o mecanismo append-only com hash chain da Sprint 1; não há
  * trilha paralela.
  */
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   createExpenseSchema,
   createModelPricingSchema,
@@ -43,7 +48,9 @@ function isoDay(date: Date): string {
 function addMonths(day: string, months: number): string {
   const [year, month, date] = day.split('-').map(Number) as [number, number, number];
   const target = new Date(Date.UTC(year, month - 1 + months, 1));
-  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  const lastDay = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0),
+  ).getUTCDate();
   target.setUTCDate(Math.min(date, lastDay));
   return isoDay(target);
 }
@@ -116,7 +123,11 @@ export class FinanceService {
   async reverseExpense(actor: AuthenticatedUser, expenseId: string, body: unknown) {
     const input = this.parse(reverseExpenseSchema, body);
     const row = await this.db.runAsSystem(async (tx) => {
-      const [original] = await tx.select().from(expenses).where(eq(expenses.id, expenseId)).limit(1);
+      const [original] = await tx
+        .select()
+        .from(expenses)
+        .where(eq(expenses.id, expenseId))
+        .limit(1);
       if (!original) throw new NotFoundException('Despesa inexistente.');
       if (original.reversesExpenseId) {
         throw new ConflictException('Uma linha de estorno não pode ser estornada.');

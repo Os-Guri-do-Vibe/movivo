@@ -555,8 +555,8 @@ function FinanceSections({ data }: { data: ControlCenterFinanceResponse['data'] 
       >
         <h2 className="text-h2 font-bold">Custos</h2>
         <p className="mt-1 text-label text-muted-foreground">
-          Despesa lançada (`expenses`) e investimento em mídia (`ad_spend`), líquidos de
-          estorno. Categoria com mais estorno que lançamento no recorte aparece negativa.
+          Despesa lançada (`expenses`) e investimento em mídia (`ad_spend`), líquidos de estorno.
+          Categoria com mais estorno que lançamento no recorte aparece negativa.
         </p>
         <div className="mt-4 grid gap-6 lg:grid-cols-2">
           <div>
@@ -597,8 +597,8 @@ function FinanceSections({ data }: { data: ControlCenterFinanceResponse['data'] 
       >
         <h2 className="text-h2 font-bold">Coortes & Retenção</h2>
         <p className="mt-1 text-label text-muted-foreground">
-          Conversão e retenção por mês civil de entrada em trial. Coortes com menos de 10
-          entradas são omitidas ({data.suppressedCohorts} suprimida
+          Conversão e retenção por mês civil de entrada em trial. Coortes com menos de 10 entradas
+          são omitidas ({data.suppressedCohorts} suprimida
           {data.suppressedCohorts === 1 ? '' : 's'}).
         </p>
         {data.entryCohorts.length ? (

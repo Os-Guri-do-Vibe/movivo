@@ -346,7 +346,14 @@ describe('ControlCenterService.students — North Star (US-8.1 / TASK-8.9.4)', (
 
   it('coorte paga vazia deixa a North Star indisponível, nunca zero', async () => {
     withExecute([
-      { cohort_size: 0, total_completions: 0, reporting: 0, quick_reply: 0, checkin: 0, conversation: 0 },
+      {
+        cohort_size: 0,
+        total_completions: 0,
+        reporting: 0,
+        quick_reply: 0,
+        checkin: 0,
+        conversation: 0,
+      },
     ]);
     const { service } = build([], [{ blocked: 0, validated: 0 }]);
 

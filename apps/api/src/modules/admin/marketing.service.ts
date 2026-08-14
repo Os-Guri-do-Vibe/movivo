@@ -10,7 +10,12 @@
  * Toda escrita chama `AuditService.append` **na mesma transação** — auditoria que falha
  * derruba o lançamento junto.
  */
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { createAdSpendSchema, reverseAdSpendSchema } from '@movivo/shared';
 import { desc, eq } from 'drizzle-orm';
 import type { z } from 'zod';
