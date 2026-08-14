@@ -101,7 +101,7 @@ export const overviewResponse: ControlCenterOverviewResponse = {
         pillar: 'AI',
         label: 'IA',
         state: 'OK',
-        href: '/dashboard/ia/persona',
+        href: '/dashboard/ia/agente',
         headline: { label: 'Conversas (30 dias)', metric: metric({ value: 340 }) },
         details: [
           {

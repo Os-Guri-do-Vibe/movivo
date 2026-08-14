@@ -452,7 +452,7 @@ export class ControlCenterService {
       pillar: 'AI',
       label: 'IA',
       state: attention ? 'ATTENTION' : 'OK',
-      href: '/dashboard/ia/persona',
+      href: '/dashboard/ia/agente',
       headline: {
         label: `Conversas (${INSIGHT_WINDOW_DAYS} dias)`,
         metric: this.metric(

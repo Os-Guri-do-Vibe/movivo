@@ -2,7 +2,6 @@
 
 import {
   Activity,
-  BookOpenText,
   Calculator,
   ChevronDown,
   CircleGauge,
@@ -13,7 +12,6 @@ import {
   LockKeyhole,
   Megaphone,
   Menu,
-  MessageCircleQuestion,
   PanelLeftClose,
   PanelLeftOpen,
   Repeat,
@@ -169,28 +167,12 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
     label: 'IA',
     items: [
       {
-        href: '/dashboard/ia/persona',
-        label: 'Persona & Tom de voz',
+        // Persona, Regras invioláveis, Conhecimento (RAG) e FAQ viraram etapas de um
+        // único painel — cada etapa continua publicando e auditando sua própria
+        // configuração, só a navegação foi unificada.
+        href: '/dashboard/ia/agente',
+        label: 'Agente',
         icon: Sparkles,
-        capabilities: ['control_center.ai.config.read'],
-      },
-      {
-        href: '/dashboard/ia/regras',
-        label: 'Regras invioláveis',
-        icon: LockKeyhole,
-        capabilities: ['control_center.ai.config.read'],
-      },
-      {
-        // Tem link: a tela existe e explica o escopo, a dependência e a sprint (US-7.7).
-        href: '/dashboard/ia/conhecimento',
-        label: 'Conhecimento (RAG)',
-        icon: BookOpenText,
-        capabilities: ['control_center.ai.config.read'],
-      },
-      {
-        href: '/dashboard/ia/faq',
-        label: 'FAQ',
-        icon: MessageCircleQuestion,
         capabilities: ['control_center.ai.config.read'],
       },
     ],

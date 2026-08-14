@@ -59,7 +59,7 @@ describe('DashboardShell', () => {
   });
 
   it('admin recebe todos os setores quando possui todas as capabilities necessárias', () => {
-    expect(navigationFor(ADMIN_CAPABILITIES)).toHaveLength(20);
+    expect(navigationFor(ADMIN_CAPABILITIES)).toHaveLength(17);
   });
 
   it('esconde Compliance & Privacidade quando falta uma das capabilities exigidas (AND, como no backend)', () => {
