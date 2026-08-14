@@ -47,7 +47,7 @@ import {
 import { detectInjection } from '../protocol/validation/prompt-injection';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { AuditService } from './audit.service';
-import { simulatePersonaConfig } from './config-simulator';
+import { simulateFaqConfig, simulatePersonaConfig } from './config-simulator';
 
 const TIMEZONE = 'America/Sao_Paulo' as const;
 /** Teto do painel de histórico. Mais antigo que isso é caso de auditoria, não de UI. */
@@ -143,7 +143,11 @@ export class AiConfigService {
 
   simulate(body: unknown): ConfigSimulationResponse {
     const input = this.parse(simulateAgentConfigSchema, body);
-    return this.envelope(simulatePersonaConfig(input.candidate));
+    return this.envelope(
+      input.kind === 'PERSONA'
+        ? simulatePersonaConfig(input.candidate)
+        : simulateFaqConfig(input.candidate),
+    );
   }
 
   async rollback(actor: AuthenticatedUser, body: unknown): Promise<AgentPersonaResponse> {

@@ -12,5 +12,6 @@ export * from './control-center.schema';
 export * from './protocol.schema';
 export * from './subscription.schema';
 export * from './expense.schema';
+export * from './faq.schema';
 export * from './ad-spend.schema';
 export * from './partners.schema';

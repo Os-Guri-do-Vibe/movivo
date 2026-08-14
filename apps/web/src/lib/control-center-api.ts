@@ -2,13 +2,18 @@ import {
   agentConfigHistoryResponseSchema,
   agentPersonaResponseSchema,
   configSimulationResponseSchema,
+  faqEntriesResponseSchema,
   inviolableRulesResponseSchema,
   type AgentConfigHistoryResponse,
   type AgentPersonaResponse,
   type ConfigSimulationResponse,
+  type FaqEntriesResponse,
   type InviolableRulesResponse,
   type PublishAgentConfigInput,
+  type PublishFaqEntryInput,
   type RollbackAgentConfigInput,
+  type RollbackFaqEntryInput,
+  type RetireFaqEntryInput,
   type SimulateAgentConfigInput,
   controlCenterComplianceResponseSchema,
   controlCenterFinanceResponseSchema,
@@ -177,6 +182,22 @@ export function simulateAgentConfig(
   input: SimulateAgentConfigInput,
 ): Promise<ConfigSimulationResponse> {
   return mutate('ai/simulate', input, configSimulationResponseSchema);
+}
+
+export function getFaqEntries(signal?: AbortSignal): Promise<FaqEntriesResponse> {
+  return request('ai/faq', faqEntriesResponseSchema, signal);
+}
+
+export function publishFaqEntry(input: PublishFaqEntryInput): Promise<FaqEntriesResponse> {
+  return mutate('ai/faq', input, faqEntriesResponseSchema);
+}
+
+export function rollbackFaqEntry(input: RollbackFaqEntryInput): Promise<FaqEntriesResponse> {
+  return mutate('ai/faq/rollback', input, faqEntriesResponseSchema);
+}
+
+export function retireFaqEntry(input: RetireFaqEntryInput): Promise<FaqEntriesResponse> {
+  return mutate('ai/faq/retire', input, faqEntriesResponseSchema);
 }
 
 /* ------------------------- Sócios & Distribuição (US-8.7) ------------------------- */

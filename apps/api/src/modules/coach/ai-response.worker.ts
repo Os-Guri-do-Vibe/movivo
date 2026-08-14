@@ -15,8 +15,10 @@ import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
+import { FaqService } from '../../core/agent-config/faq.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { ContextService } from '../ai-coach/context/context.service';
+import { clinicalGuardrail } from '../ai-coach/intent/clinical-guardrail';
 import { IntentClassifier } from '../ai-coach/intent/intent-classifier.service';
 import type { Intent } from '../ai-coach/intent/intent.types';
 import { PromptResolverService } from '../ai-coach/intent/prompt-resolver.service';
@@ -61,6 +63,7 @@ export class AIResponseWorker implements OnModuleInit {
     private readonly lock: UserJobLock,
     private readonly classifier: IntentClassifier,
     private readonly prompts: PromptResolverService,
+    private readonly faq: FaqService,
     private readonly context: ContextService,
     private readonly llm: LlmRouter,
     private readonly abuse: LlmAbuseGuard,
@@ -115,6 +118,53 @@ export class AIResponseWorker implements OnModuleInit {
       if (await this.abuse.isOverDailyLimit(userId)) {
         await this.deliver(userId, correlationId, DAILY_LIMIT_MESSAGE, null, false, enqueuedAt);
         return { status: 'LIMIT' };
+      }
+
+      // O guardrail sempre vence o FAQ. Só mensagens dentro do perímetro seguro chegam ao
+      // match exato; assim uma resposta estática nunca mascara um alerta prioritário.
+      const guardrail = clinicalGuardrail(message);
+      if (guardrail === 'SAFETY') {
+        await this.repo.persistHandoff(userId, 'SAFETY', 'RED_FLAG');
+        this.logger.info(
+          { userId, event: 'handoff_safety', reason: 'RED_FLAG' },
+          'handoff de segurança clínica — atendimento presencial orientado',
+        );
+        await this.deliver(userId, correlationId, SAFETY_HANDOFF_MESSAGE, null, false, enqueuedAt);
+        await this.context.recordTurn(userId, 'assistant', SAFETY_HANDOFF_MESSAGE);
+        return { status: 'SAFETY_HANDOFF' };
+      }
+      if (guardrail === 'SCOPE') {
+        const response = await this.prompts.foraDeEscopoResponse();
+        await this.deliver(userId, correlationId, response, null, true, enqueuedAt, 0, true);
+        await this.context.recordTurn(userId, 'assistant', response);
+        await this.context.summarizeIfNeeded(userId);
+        await this.repo.persistHandoff(userId, 'ALERT', 'FORA_DE_ESCOPO');
+        return { status: 'SENT' };
+      }
+
+      const faq = await this.faq.match(message);
+      if (faq) {
+        const verdict = this.validation.validateResponse(faq.answer);
+        const blocked = verdict.action !== 'PASS';
+        const response = blocked ? STANDARD_BLOCK_RESPONSE : faq.answer;
+        await this.deliver(
+          userId,
+          correlationId,
+          response,
+          `FAQ_DETERMINISTIC:v${faq.version}`,
+          !blocked,
+          enqueuedAt,
+          0,
+          true,
+        );
+        await this.context.recordTurn(userId, 'assistant', response);
+        await this.context.summarizeIfNeeded(userId);
+        if (blocked) await this.repo.persistHandoff(userId, 'ALERT', 'VALIDATOR_BLOCK');
+        this.logger.info(
+          { event: 'faq_answer_sent', faqId: faq.id, faqVersion: faq.version },
+          'resposta determinística do FAQ enviada',
+        );
+        return { status: blocked ? 'BLOCKED' : 'FAQ' };
       }
 
       const scrubUser = await this.repo.loadScrubUser(userId);

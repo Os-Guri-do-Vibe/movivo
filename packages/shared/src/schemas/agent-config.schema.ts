@@ -19,6 +19,7 @@ import {
   PromptLayer,
 } from '../enums/agent-config';
 import { controlCenterMetaSchema } from './control-center.schema';
+import { faqCandidateSchema } from './faq.schema';
 
 /** Letras (com acento), espaço, 2-20 chars. Sem pontuação, dígito ou símbolo. */
 export const AGENT_NAME_PATTERN = /^[A-Za-zÀ-ú ]{2,20}$/;
@@ -135,10 +136,10 @@ export type InviolableRulesResponse = z.infer<typeof inviolableRulesResponseSche
  * Simulador síncrono de configuração (Sprint 9).
  * ------------------------------------------------------------------------- */
 
-export const simulateAgentConfigSchema = z.object({
-  kind: z.literal('PERSONA'),
-  candidate: agentPersonaSchema,
-});
+export const simulateAgentConfigSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('PERSONA'), candidate: agentPersonaSchema }),
+  z.object({ kind: z.literal('FAQ'), candidate: faqCandidateSchema }),
+]);
 export type SimulateAgentConfigInput = z.infer<typeof simulateAgentConfigSchema>;
 
 export const configSimulationCheckSchema = z.object({
@@ -152,7 +153,7 @@ export type ConfigSimulationCheck = z.infer<typeof configSimulationCheckSchema>;
 
 export const configSimulationResponseSchema = z.object({
   data: z.object({
-    kind: z.literal('PERSONA'),
+    kind: z.enum(['PERSONA', 'FAQ']),
     passed: z.boolean(),
     candidateHash: z.string().regex(/^[a-f0-9]{64}$/),
     checks: z.array(configSimulationCheckSchema).length(4),

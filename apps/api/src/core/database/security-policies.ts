@@ -336,6 +336,29 @@ export function buildAgentConfigImmutabilitySql(appRole: string): string {
   `;
 }
 
+/** FAQ é configuração global e append-only; correção/rollback sempre cria nova versão. */
+export function buildFaqEntriesImmutabilitySql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.faq_entries_reject_mutation()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    BEGIN
+      RAISE EXCEPTION 'faq_entries is append-only' USING ERRCODE = '55000';
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.faq_entries_reject_mutation() FROM PUBLIC;
+
+    DROP TRIGGER IF EXISTS trg_faq_entries_immutable ON public.faq_entries;
+    CREATE TRIGGER trg_faq_entries_immutable BEFORE UPDATE OR DELETE ON public.faq_entries
+      FOR EACH ROW EXECUTE FUNCTION public.faq_entries_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_faq_entries_no_truncate ON public.faq_entries;
+    CREATE TRIGGER trg_faq_entries_no_truncate BEFORE TRUNCATE ON public.faq_entries
+      FOR EACH STATEMENT EXECUTE FUNCTION public.faq_entries_reject_mutation();
+
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.faq_entries FROM ${appRole};
+    GRANT SELECT, INSERT ON public.faq_entries TO ${appRole};
+  `;
+}
+
 /**
  * `user_status_transitions` append-only, imposto no banco (US-8.3 / TASK-8.3.1).
  *

@@ -6,7 +6,13 @@
  */
 import { createHash } from 'node:crypto';
 
-import { agentPersonaSchema, type AgentPersona, type ConfigSimulationCheck } from '@movivo/shared';
+import {
+  agentPersonaSchema,
+  faqCandidateSchema,
+  type AgentPersona,
+  type ConfigSimulationCheck,
+  type FaqCandidate,
+} from '@movivo/shared';
 
 import { clinicalGuardrail } from '../ai-coach/intent/clinical-guardrail';
 import { INTENTS } from '../ai-coach/intent/intent.types';
@@ -18,6 +24,7 @@ import {
 import { GUARDRAIL_CASES, RESPONSE_CASES } from '../coach/conversation-golden-set.fixture';
 import { ValidationService } from '../protocol/validation/validation.service';
 import { detectInjection } from '../protocol/validation/prompt-injection';
+import { normalizeFaqQuestion } from '../../core/agent-config/faq.service';
 
 const validation = new ValidationService();
 
@@ -80,6 +87,42 @@ export function simulatePersonaConfig(candidate: AgentPersona) {
 
   return {
     kind: 'PERSONA' as const,
+    passed: checks.every((check) => check.passed),
+    candidateHash: createHash('sha256').update(JSON.stringify(candidate)).digest('hex'),
+    checks,
+  };
+}
+
+export function simulateFaqConfig(candidate: FaqCandidate) {
+  const parsed = faqCandidateSchema.safeParse(candidate);
+  const schemaFailures = parsed.success ? [] : ['A pergunta ou resposta está fora do contrato.'];
+  if (
+    parsed.success &&
+    (detectInjection(parsed.data.canonicalQuestion) || detectInjection(parsed.data.answer))
+  ) {
+    schemaFailures.push('Pergunta ou resposta contém padrão de instrução para a IA.');
+  }
+
+  const inputFailures = GUARDRAIL_CASES.flatMap((testCase) =>
+    clinicalGuardrail(testCase.message) === testCase.expected ? [] : [testCase.label],
+  );
+  const verdict = validation.validateResponse(candidate.answer);
+  const outputFailures = verdict.action === 'PASS' ? [] : verdict.violations.map((v) => v.rule);
+  const normalized = normalizeFaqQuestion(candidate.canonicalQuestion);
+  const matchFailures =
+    normalized.length >= 5 &&
+    normalizeFaqQuestion(`  ${candidate.canonicalQuestion}  `) === normalized
+      ? []
+      : ['A pergunta canônica não produz uma chave determinística estável.'];
+
+  const checks: ConfigSimulationCheck[] = [
+    result('SCHEMA', 'Contrato e proteção contra instruções', 1, schemaFailures),
+    result('GOLDEN_INPUT', 'Guardrail clínico antes do FAQ', GUARDRAIL_CASES.length, inputFailures),
+    result('GOLDEN_OUTPUT', 'Linguagem da resposta estática', 1, outputFailures),
+    result('PROMPT_INTEGRITY', 'Match exato normalizado', 1, matchFailures),
+  ];
+  return {
+    kind: 'FAQ' as const,
     passed: checks.every((check) => check.passed),
     candidateHash: createHash('sha256').update(JSON.stringify(candidate)).digest('hex'),
     checks,

@@ -183,6 +183,13 @@
       "when": 1786657200000,
       "tag": "0025_partners",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1786660200000,
+      "tag": "0026_faq_entries",
+      "breakpoints": true
     }
   ]
 }

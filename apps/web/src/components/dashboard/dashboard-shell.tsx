@@ -196,9 +196,6 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         label: 'FAQ',
         icon: MessageCircleQuestion,
         capabilities: ['control_center.ai.config.read'],
-        // Reapontado na US-8.8: publicação de texto que vai ao aluno passa a valer junto
-        // com o simulador (Sprint 9), que é o que valida a configuração antes de publicar.
-        soon: 'Sprint 9',
       },
     ],
   },

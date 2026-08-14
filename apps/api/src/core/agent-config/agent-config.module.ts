@@ -7,10 +7,11 @@ import { Global, Module } from '@nestjs/common';
 
 import { AgentConfigRepository } from './agent-config.repository';
 import { AgentPersonaService } from './agent-persona.service';
+import { FaqService } from './faq.service';
 
 @Global()
 @Module({
-  providers: [AgentConfigRepository, AgentPersonaService],
-  exports: [AgentConfigRepository, AgentPersonaService],
+  providers: [AgentConfigRepository, AgentPersonaService, FaqService],
+  exports: [AgentConfigRepository, AgentPersonaService, FaqService],
 })
 export class AgentConfigModule {}

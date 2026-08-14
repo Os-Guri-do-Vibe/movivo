@@ -8,7 +8,11 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { buildRlsPoliciesSql, RLS_TENANT_TABLES } from './security-policies';
+import {
+  buildFaqEntriesImmutabilitySql,
+  buildRlsPoliciesSql,
+  RLS_TENANT_TABLES,
+} from './security-policies';
 
 describe('buildRlsPoliciesSql', () => {
   const sql = buildRlsPoliciesSql();
@@ -93,5 +97,17 @@ describe('buildRlsPoliciesSql', () => {
     expect(sql).toContain(
       `"user_id" IS NULL AND nullif(current_setting('app.current_role', true), '') = 'ANONYMOUS' AND (nullif(current_setting('app.current_anamnesis_session_id', true), '') IS NULL OR "id"::text = nullif(current_setting('app.current_anamnesis_session_id', true), ''))`,
     );
+  });
+});
+
+describe('buildFaqEntriesImmutabilitySql', () => {
+  const sql = buildFaqEntriesImmutabilitySql('movivo_app');
+
+  it('combina trigger 55000 com revogação das mutações destrutivas', () => {
+    expect(sql).toContain("RAISE EXCEPTION 'faq_entries is append-only' USING ERRCODE = '55000'");
+    expect(sql).toContain('BEFORE UPDATE OR DELETE ON public.faq_entries');
+    expect(sql).toContain('BEFORE TRUNCATE ON public.faq_entries');
+    expect(sql).toContain('REVOKE UPDATE, DELETE, TRUNCATE ON public.faq_entries FROM movivo_app');
+    expect(sql).toContain('GRANT SELECT, INSERT ON public.faq_entries TO movivo_app');
   });
 });

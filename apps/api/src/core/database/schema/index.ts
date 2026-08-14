@@ -61,3 +61,6 @@ export * from './ad-spend';
 
 // Sprint 8 - cap table versionado por vigencia (US-8.7). Soma vigente travada em 10.000 bps.
 export * from './partners';
+
+// Sprint 9 - FAQ determinístico global, versionado e append-only.
+export * from './faq-entries';

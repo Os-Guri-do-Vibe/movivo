@@ -26,6 +26,7 @@ import {
   buildAuditIntegritySql,
   buildAdSpendImmutabilitySql,
   buildExpensesImmutabilitySql,
+  buildFaqEntriesImmutabilitySql,
   buildPaymentsImmutabilitySql,
   buildProfessionalAccessSql,
   buildRlsPoliciesSql,
@@ -206,6 +207,10 @@ async function main(): Promise<void> {
     // Sprint 7 (US-7.6): agent_config append-only — trigger + REVOKE, mesma dupla barreira.
     await sql.unsafe(buildAgentConfigImmutabilitySql(appRole));
     console.log('[db:migrate] agent_config append-only reconciliado.');
+
+    // Sprint 9: FAQ global append-only — rollback/remoção lógica também são novas versões.
+    await sql.unsafe(buildFaqEntriesImmutabilitySql(appRole));
+    console.log('[db:migrate] faq_entries append-only reconciliado.');
 
     // Sprint 8 (US-8.3): user_status_transitions append-only — mesmo molde.
     await sql.unsafe(buildStatusTransitionsImmutabilitySql(appRole));
