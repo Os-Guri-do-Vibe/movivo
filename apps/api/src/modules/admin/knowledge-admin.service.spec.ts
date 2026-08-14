@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  ConflictException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 
 import { FakeEmbedding } from '../../core/knowledge/embedding.port';
@@ -80,11 +76,13 @@ function listRow(overrides: Record<string, unknown> = {}) {
  * `executes` é consumido em ordem pelas chamadas a `tx.execute`; o último item repete,
  * porque `list()` roda no fim de toda mutação e sempre pede purga + listagem.
  */
-function knowledgeWith(options: {
-  executes?: unknown[][];
-  insertError?: unknown;
-  documents?: unknown[];
-} = {}) {
+function knowledgeWith(
+  options: {
+    executes?: unknown[][];
+    insertError?: unknown;
+    documents?: unknown[];
+  } = {},
+) {
   const { executes = [], insertError, documents = [listRow()] } = options;
   const inserted: unknown[] = [];
   const execute = vi.fn();
@@ -106,8 +104,8 @@ function knowledgeWith(options: {
     }),
   };
   const db = {
-    runAsUser: vi.fn(
-      (_userId: string, _role: string, cb: (value: unknown) => Promise<unknown>) => cb(tx),
+    runAsUser: vi.fn((_userId: string, _role: string, cb: (value: unknown) => Promise<unknown>) =>
+      cb(tx),
     ),
   } as unknown as TenantDatabase;
   const audit = { append: vi.fn().mockResolvedValue(undefined) };
@@ -296,32 +294,32 @@ describe('KnowledgeAdminService.review', () => {
       executes: [[], [DOC_ROW], [], [{ count: 0 }]],
     });
 
-    await expect(
-      service.review(ACTOR, { ...REVIEW, decision: 'APPROVED' }),
-    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.review(ACTOR, { ...REVIEW, decision: 'APPROVED' })).rejects.toBeInstanceOf(
+      ConflictException,
+    );
   });
 
   it('recusa revisar duas vezes o mesmo documento', async () => {
     const { service } = knowledgeWith({ executes: [[], [DOC_ROW], [{ '?column?': 1 }]] });
-    await expect(
-      service.review(ACTOR, { ...REVIEW, decision: 'APPROVED' }),
-    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.review(ACTOR, { ...REVIEW, decision: 'APPROVED' })).rejects.toBeInstanceOf(
+      ConflictException,
+    );
   });
 
   it('404 quando o documento não existe', async () => {
     const { service } = knowledgeWith({ executes: [[], []] });
-    await expect(
-      service.review(ACTOR, { ...REVIEW, decision: 'APPROVED' }),
-    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.review(ACTOR, { ...REVIEW, decision: 'APPROVED' })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('não revisa documento cujo original já expirou', async () => {
     const { service } = knowledgeWith({
       executes: [[], [{ ...DOC_ROW, payload: null }], []],
     });
-    await expect(
-      service.review(ACTOR, { ...REVIEW, decision: 'APPROVED' }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.review(ACTOR, { ...REVIEW, decision: 'APPROVED' })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 
   it('recusa corpo de revisão fora do contrato', async () => {

@@ -85,7 +85,9 @@ describe('AraraHttpTransport (US-2.5)', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('rede caiu'));
     const scoped = { info, warn: vi.fn(), setContext: vi.fn() } as never;
 
-    await new AraraHttpTransport('https://api.ararahq.com', 'k', scoped).sendTyping('+5541999999999');
+    await new AraraHttpTransport('https://api.ararahq.com', 'k', scoped).sendTyping(
+      '+5541999999999',
+    );
 
     expect(info).toHaveBeenCalledWith({ to: '[redacted]' }, expect.any(String));
     fetchSpy.mockRestore();

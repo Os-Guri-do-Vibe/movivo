@@ -49,8 +49,7 @@ function guardrailWith(selects: unknown[][] = []) {
       where: () => chain,
       orderBy: () => chain,
       limit: () => Promise.resolve(rows),
-      then: (onfulfilled: (value: unknown[]) => unknown) =>
-        Promise.resolve(rows).then(onfulfilled),
+      then: (onfulfilled: (value: unknown[]) => unknown) => Promise.resolve(rows).then(onfulfilled),
     };
     return chain;
   };

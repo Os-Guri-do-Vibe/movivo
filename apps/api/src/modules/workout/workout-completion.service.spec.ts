@@ -133,9 +133,7 @@ describe('WorkoutCompletionService.activeProtocol', () => {
 describe('WorkoutCompletionService.recordFromQuickReply', () => {
   it('não grava nada quando o aluno não tem protocolo vigente', async () => {
     const { service, inserted } = makeService({ protocolRows: [] });
-    await expect(
-      service.recordFromQuickReply(USER_ID, '2026-08-10', 'A'),
-    ).resolves.toBe(false);
+    await expect(service.recordFromQuickReply(USER_ID, '2026-08-10', 'A')).resolves.toBe(false);
     expect(inserted).toHaveLength(0);
   });
 

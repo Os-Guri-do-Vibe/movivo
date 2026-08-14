@@ -1,7 +1,13 @@
 import type { ProtocolStructure } from '@movivo/shared';
 import { describe, expect, it } from 'vitest';
 
-import { dayKey, plannedDaysBefore, sessionKeyFor, trainingWeekdays, weekday } from './workout-schedule';
+import {
+  dayKey,
+  plannedDaysBefore,
+  sessionKeyFor,
+  trainingWeekdays,
+  weekday,
+} from './workout-schedule';
 
 function structure(weeklyFrequency: number, labels: string[]): ProtocolStructure {
   return {
@@ -91,8 +97,8 @@ describe('plannedDaysBefore', () => {
   });
 
   it('janela sem nenhum dia de treino devolve lista vazia', () => {
-    expect(
-      plannedDaysBefore(new Date('2026-08-10T15:00:00.000Z'), 1, structure(1, ['A'])),
-    ).toEqual([]);
+    expect(plannedDaysBefore(new Date('2026-08-10T15:00:00.000Z'), 1, structure(1, ['A']))).toEqual(
+      [],
+    );
   });
 });

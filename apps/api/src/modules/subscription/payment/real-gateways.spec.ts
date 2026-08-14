@@ -65,9 +65,9 @@ describe.each([
 
 describe('endereço do provedor', () => {
   it('o endpoint real aparece na falha de checkout — e só o do provedor construído', () => {
-    expect(() =>
-      new StripeGateway('sk', undefined).createCheckoutSession({} as never),
-    ).toThrow(/api\.stripe\.com/);
+    expect(() => new StripeGateway('sk', undefined).createCheckoutSession({} as never)).toThrow(
+      /api\.stripe\.com/,
+    );
     expect(() => new AsaasGateway('aact', undefined).createCheckoutSession({} as never)).toThrow(
       /api\.asaas\.com/,
     );

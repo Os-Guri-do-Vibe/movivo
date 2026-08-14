@@ -41,11 +41,13 @@ function listRow(overrides: Record<string, unknown> = {}) {
  * `selects` são consumidos em ordem pelas chamadas a `tx.select`; `executes` idem para
  * `tx.execute` (locks devolvem vazio, a busca de colisão devolve o que for enfileirado).
  */
-function faqWith(options: {
-  selects?: unknown[][];
-  executes?: unknown[][];
-  inserted?: unknown[];
-} = {}) {
+function faqWith(
+  options: {
+    selects?: unknown[][];
+    executes?: unknown[][];
+    inserted?: unknown[];
+  } = {},
+) {
   const { selects = [], executes = [] } = options;
   const inserted: unknown[] = [];
   const chainFor = (rows: unknown[]) => {
@@ -55,8 +57,7 @@ function faqWith(options: {
       where: () => chain,
       orderBy: () => chain,
       limit: () => Promise.resolve(rows),
-      then: (onfulfilled: (value: unknown[]) => unknown) =>
-        Promise.resolve(rows).then(onfulfilled),
+      then: (onfulfilled: (value: unknown[]) => unknown) => Promise.resolve(rows).then(onfulfilled),
     };
     return chain;
   };
@@ -172,7 +173,11 @@ describe('FaqAdminService.publish', () => {
 describe('FaqAdminService.rollback', () => {
   it('reescreve a versão alvo como uma versão NOVA, sem mutar o histórico', async () => {
     const { service, audit, inserted } = faqWith({
-      selects: [[{ canonicalQuestion: VALID.canonicalQuestion, answer: VALID.answer }], [{ max: 7 }], []],
+      selects: [
+        [{ canonicalQuestion: VALID.canonicalQuestion, answer: VALID.answer }],
+        [{ max: 7 }],
+        [],
+      ],
     });
 
     await service.rollback(ACTOR, {
