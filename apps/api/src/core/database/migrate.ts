@@ -28,6 +28,7 @@ import {
   buildAdSpendImmutabilitySql,
   buildExpensesImmutabilitySql,
   buildFaqEntriesImmutabilitySql,
+  buildKnowledgeDocumentsSecuritySql,
   buildPaymentsImmutabilitySql,
   buildProfessionalAccessSql,
   buildRlsPoliciesSql,
@@ -215,6 +216,9 @@ async function main(): Promise<void> {
 
     await sql.unsafe(buildAiGuardrailRulesImmutabilitySql(appRole));
     console.log('[db:migrate] ai_guardrail_rules append-only reconciliado.');
+
+    await sql.unsafe(buildKnowledgeDocumentsSecuritySql(appRole));
+    console.log('[db:migrate] documentos RAG e gate CREF reconciliados.');
 
     // Sprint 8 (US-8.3): user_status_transitions append-only — mesmo molde.
     await sql.unsafe(buildStatusTransitionsImmutabilitySql(appRole));

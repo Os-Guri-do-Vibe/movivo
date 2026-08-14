@@ -31,6 +31,7 @@ export * from './coaching-sessions';
 
 // Sprint 3 — corpus curado do RAG (US-3.3). Global, read-only, fora da RLS por titular.
 export * from './knowledge-base';
+export * from './knowledge-documents';
 
 // Sprint 3 — exemplos rotulados do IntentClassifier (US-3.4). Global, read-only.
 export * from './intent-examples';

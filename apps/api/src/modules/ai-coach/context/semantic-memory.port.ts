@@ -8,6 +8,8 @@
 import { Injectable } from '@nestjs/common';
 
 export interface RagDoc {
+  chunkId: string;
+  documentId: string | null;
   title: string;
   snippet: string;
   sourceUrl?: string;

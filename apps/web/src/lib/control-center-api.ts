@@ -14,6 +14,12 @@ import {
   type FaqEntriesResponse,
   type InviolableRulesResponse,
   type L1GuardrailsResponse,
+  knowledgeDocumentsResponseSchema,
+  knowledgeDocumentContentResponseSchema,
+  type KnowledgeDocumentContentResponse,
+  type KnowledgeDocumentsResponse,
+  type ReviewKnowledgeDocumentInput,
+  type UploadKnowledgeDocumentInput,
   type PublishAgentConfigInput,
   type PublishFaqEntryInput,
   type PublishL1GuardrailInput,
@@ -238,6 +244,33 @@ export function rollbackL1Guardrail(
 
 export function retireL1Guardrail(input: RetireL1GuardrailInput): Promise<L1GuardrailsResponse> {
   return mutate('ai/guardrails/retire', input, l1GuardrailsResponseSchema);
+}
+
+export function getKnowledgeDocuments(signal?: AbortSignal): Promise<KnowledgeDocumentsResponse> {
+  return request('ai/knowledge', knowledgeDocumentsResponseSchema, signal);
+}
+
+export function getKnowledgeDocumentContent(
+  id: string,
+  signal?: AbortSignal,
+): Promise<KnowledgeDocumentContentResponse> {
+  return request(
+    `ai/knowledge/${encodeURIComponent(id)}/content`,
+    knowledgeDocumentContentResponseSchema,
+    signal,
+  );
+}
+
+export function uploadKnowledgeDocument(
+  input: UploadKnowledgeDocumentInput,
+): Promise<KnowledgeDocumentsResponse> {
+  return mutate('ai/knowledge/upload', input, knowledgeDocumentsResponseSchema);
+}
+
+export function reviewKnowledgeDocument(
+  input: ReviewKnowledgeDocumentInput,
+): Promise<KnowledgeDocumentsResponse> {
+  return mutate('ai/knowledge/review', input, knowledgeDocumentsResponseSchema);
 }
 
 /* ------------------------- Sócios & Distribuição (US-8.7) ------------------------- */

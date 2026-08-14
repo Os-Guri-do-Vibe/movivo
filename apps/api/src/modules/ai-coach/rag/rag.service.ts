@@ -22,6 +22,8 @@ import { EMBEDDING_PORT, type EmbeddingPort } from './embedding.port';
 import { RERANKER_PORT, type RerankCandidate, type RerankerPort } from './reranker.port';
 
 interface DenseRow {
+  id: string;
+  document_id: string | null;
   chunk_text: string;
   title: string;
   source_url: string | null;
@@ -71,7 +73,8 @@ export class RagService implements SemanticMemoryPort {
 
     // Busca densa HNSW: cosseno = 1 - distância. `::vector` casta o literal parametrizado.
     const rows = (await this.db.execute(sql`
-      SELECT chunk_text, title, source_url, 1 - (embedding <=> ${literal}::vector) AS score
+      SELECT id, document_id, chunk_text, title, source_url,
+        1 - (embedding <=> ${literal}::vector) AS score
       FROM knowledge_base
       WHERE 1 - (embedding <=> ${literal}::vector) > ${minCosine}
       ORDER BY embedding <=> ${literal}::vector
@@ -82,6 +85,8 @@ export class RagService implements SemanticMemoryPort {
     if (rows.length === 0) return [];
 
     const cands: RerankCandidate[] = rows.map((r) => ({
+      chunkId: r.id,
+      documentId: r.document_id,
       chunkText: r.chunk_text,
       title: r.title,
       sourceUrl: r.source_url,
@@ -92,6 +97,8 @@ export class RagService implements SemanticMemoryPort {
     return reranked
       .filter((r) => r.score >= rerankMinScore)
       .map((r) => ({
+        chunkId: r.chunkId,
+        documentId: r.documentId,
         title: r.title,
         snippet: r.chunkText,
         sourceUrl: r.sourceUrl ?? undefined,

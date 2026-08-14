@@ -17,3 +17,4 @@ export * from './guardrail.schema';
 export * from './audit-search.schema';
 export * from './ad-spend.schema';
 export * from './partners.schema';
+export * from './knowledge.schema';

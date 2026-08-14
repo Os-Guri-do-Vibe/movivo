@@ -8,7 +8,14 @@ import { FakeReranker, type RerankCandidate } from './reranker.port';
 const reranker = new FakeReranker();
 
 function cand(chunkText: string): RerankCandidate {
-  return { chunkText, title: chunkText.slice(0, 10), sourceUrl: null, denseScore: 0.9 };
+  return {
+    chunkId: '00000000-0000-0000-0000-000000000001',
+    documentId: null,
+    chunkText,
+    title: chunkText.slice(0, 10),
+    sourceUrl: null,
+    denseScore: 0.9,
+  };
 }
 
 describe('FakeReranker', () => {

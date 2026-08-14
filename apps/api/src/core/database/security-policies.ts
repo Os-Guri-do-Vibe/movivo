@@ -791,3 +791,79 @@ export function buildAdSpendImmutabilitySql(appRole: string): string {
     GRANT SELECT, INSERT ON public.ad_spend TO ${appRole};
   `;
 }
+
+/** Metadados/revisoes RAG sao historico; publicacao exige revisao CREF no banco. */
+export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.knowledge_history_reject_mutation()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    BEGIN
+      RAISE EXCEPTION 'knowledge history is append-only' USING ERRCODE = '55000';
+    END $$;
+    REVOKE ALL ON FUNCTION public.knowledge_history_reject_mutation() FROM PUBLIC;
+
+    DROP TRIGGER IF EXISTS trg_knowledge_documents_immutable ON public.knowledge_documents;
+    CREATE TRIGGER trg_knowledge_documents_immutable BEFORE UPDATE OR DELETE ON public.knowledge_documents
+      FOR EACH ROW EXECUTE FUNCTION public.knowledge_history_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_knowledge_documents_no_truncate ON public.knowledge_documents;
+    CREATE TRIGGER trg_knowledge_documents_no_truncate BEFORE TRUNCATE ON public.knowledge_documents
+      FOR EACH STATEMENT EXECUTE FUNCTION public.knowledge_history_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_knowledge_reviews_immutable ON public.knowledge_document_reviews;
+    CREATE TRIGGER trg_knowledge_reviews_immutable BEFORE UPDATE OR DELETE ON public.knowledge_document_reviews
+      FOR EACH ROW EXECUTE FUNCTION public.knowledge_history_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_knowledge_reviews_no_truncate ON public.knowledge_document_reviews;
+    CREATE TRIGGER trg_knowledge_reviews_no_truncate BEFORE TRUNCATE ON public.knowledge_document_reviews
+      FOR EACH STATEMENT EXECUTE FUNCTION public.knowledge_history_reject_mutation();
+
+    CREATE OR REPLACE FUNCTION public.publish_knowledge_document(target_document uuid, prepared_chunks jsonb)
+    RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    DECLARE actor uuid; affected integer;
+    BEGIN
+      actor := nullif(current_setting('app.current_user_id', true), '')::uuid;
+      IF nullif(current_setting('app.current_role', true), '') <> 'PROFESSIONAL' OR actor IS NULL THEN
+        RAISE EXCEPTION 'active CREF professional role required' USING ERRCODE = '42501';
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM public.users professional
+        WHERE professional.id = actor AND professional.role = 'PROFESSIONAL'
+          AND professional.cref_active = true
+      ) THEN
+        RAISE EXCEPTION 'active CREF professional required' USING ERRCODE = '42501';
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM public.knowledge_document_reviews review
+        WHERE review.document_id = target_document
+          AND review.decision = 'APPROVED'::public.knowledge_review_decision
+          AND review.reviewer_id = actor
+          AND review.id = (
+            SELECT latest.id FROM public.knowledge_document_reviews latest
+            WHERE latest.document_id = target_document
+            ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1
+          )
+      ) THEN
+        RAISE EXCEPTION 'approved CREF review required' USING ERRCODE = '42501';
+      END IF;
+      INSERT INTO public.knowledge_base (
+        document_id, chunk_index, chunk_text, embedding, topic, title, source_url,
+        reliability, published_at, created_at, updated_at
+      )
+      SELECT target_document, (item->>'chunkIndex')::integer, item->>'chunkText',
+        (item->>'embedding')::vector, item->>'topic', item->>'title',
+        nullif(item->>'sourceUrl', ''), (item->>'reliability')::integer, now(), now(), now()
+      FROM jsonb_array_elements(prepared_chunks) item
+      ON CONFLICT (document_id, chunk_index) DO NOTHING;
+      GET DIAGNOSTICS affected = ROW_COUNT;
+      UPDATE public.knowledge_document_blobs
+        SET retained_until = now() + interval '365 days'
+        WHERE document_id = target_document;
+      RETURN affected;
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.publish_knowledge_document(uuid, jsonb) FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION public.publish_knowledge_document(uuid, jsonb) TO ${appRole};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_documents FROM ${appRole};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_document_reviews FROM ${appRole};
+    GRANT SELECT, INSERT ON public.knowledge_documents TO ${appRole};
+    GRANT SELECT, INSERT ON public.knowledge_document_reviews TO ${appRole};
+  `;
+}

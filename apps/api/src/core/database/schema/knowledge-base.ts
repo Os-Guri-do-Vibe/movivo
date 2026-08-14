@@ -14,9 +14,10 @@
  * O índice HNSW (`m=16/ef_construction=64`, `vector_cosine_ops`) é criado no `migrate.ts`
  * (o drizzle-kit não expressa operator class de pgvector) — mesmo padrão de extensões/RLS.
  */
-import { customType, index, integer, pgTable, text, varchar } from 'drizzle-orm/pg-core';
+import { customType, index, integer, pgTable, text, unique, uuid, varchar } from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn, timestampColumns } from './_shared';
+import { knowledgeDocuments } from './knowledge-documents';
 
 /** Dimensão do `text-embedding-3-small` (OpenAI) — e do embedding fake de dev. */
 export const EMBEDDING_DIMENSIONS = 1536;
@@ -41,6 +42,8 @@ export const knowledgeBase = pgTable(
   'knowledge_base',
   {
     id: primaryKeyColumn(),
+    documentId: uuid('document_id').references(() => knowledgeDocuments.id, { onDelete: 'restrict' }),
+    chunkIndex: integer('chunk_index'),
     /** Trecho (chunk) de ~400-512 tokens indexado. */
     chunkText: text('chunk_text').notNull(),
     embedding: embeddingVector('embedding').notNull(),
@@ -56,6 +59,7 @@ export const knowledgeBase = pgTable(
   (table) => [
     // Filtro por tópico no retrieval. O índice HNSW do `embedding` é criado no migrate.ts.
     index('idx_knowledge_base_topic').on(table.topic),
+    unique('uq_knowledge_base_document_chunk').on(table.documentId, table.chunkIndex),
   ],
 );
 

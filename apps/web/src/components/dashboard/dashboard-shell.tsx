@@ -189,7 +189,6 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         label: 'Conhecimento (RAG)',
         icon: BookOpenText,
         capabilities: ['control_center.ai.config.read'],
-        soon: 'Sprint 10',
       },
       {
         href: '/dashboard/ia/faq',

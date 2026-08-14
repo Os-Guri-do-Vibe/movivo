@@ -49,18 +49,28 @@ describe('RagService.retrieve', () => {
   it('mapeia trechos e filtra pelo score mínimo do rerank', async () => {
     const { rag, incr } = make([
       {
+        id: '00000000-0000-0000-0000-000000000001',
+        document_id: '00000000-0000-0000-0000-000000000010',
         chunk_text: 'descanso entre séries para hipertrofia',
         title: 'Descanso',
         source_url: 'http://x',
         score: 0.9,
       },
-      { chunk_text: 'bicicleta ergométrica cardio', title: 'Cardio', source_url: null, score: 0.8 },
+      {
+        id: '00000000-0000-0000-0000-000000000002',
+        document_id: null,
+        chunk_text: 'bicicleta ergométrica cardio',
+        title: 'Cardio',
+        source_url: null,
+        score: 0.8,
+      },
     ]);
     const docs = await rag.retrieve('descanso entre séries');
     expect(docs.length).toBe(1); // o cardio é filtrado pelo rerank (< 0.5)
     expect(docs[0]?.title).toBe('Descanso');
     expect(docs[0]?.snippet).toContain('descanso');
     expect(docs[0]?.sourceUrl).toBe('http://x');
+    expect(docs[0]?.documentId).toBe('00000000-0000-0000-0000-000000000010');
     expect(docs[0]?.score).toBeGreaterThanOrEqual(0.5);
     // Consulta + recuperação útil.
     expect(incr).toHaveBeenCalledTimes(2);

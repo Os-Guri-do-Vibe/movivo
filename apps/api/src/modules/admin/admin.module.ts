@@ -43,6 +43,8 @@ import { MarketingController } from './marketing.controller';
 import { MarketingService } from './marketing.service';
 import { L1GuardrailAdminController } from './l1-guardrail-admin.controller';
 import { L1GuardrailAdminService } from './l1-guardrail-admin.service';
+import { KnowledgeAdminController } from './knowledge-admin.controller';
+import { KnowledgeAdminService } from './knowledge-admin.service';
 import { PartnersController } from './partners.controller';
 import { PartnersService } from './partners.service';
 
@@ -58,6 +60,7 @@ import { PartnersService } from './partners.service';
     FaqAdminController,
     L1GuardrailAdminController,
     AuditQueryController,
+    KnowledgeAdminController,
   ],
   providers: [
     AuditService,
@@ -70,6 +73,7 @@ import { PartnersService } from './partners.service';
     FaqAdminService,
     L1GuardrailAdminService,
     AuditQueryService,
+    KnowledgeAdminService,
   ],
 })
 export class AdminModule {}

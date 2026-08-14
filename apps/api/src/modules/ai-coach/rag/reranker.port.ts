@@ -6,6 +6,8 @@
 import { Injectable } from '@nestjs/common';
 
 export interface RerankCandidate {
+  chunkId: string;
+  documentId: string | null;
   chunkText: string;
   title: string;
   sourceUrl: string | null;

@@ -52,6 +52,12 @@ interface ResponseDraft {
   validationPassed: boolean;
   humanReview: boolean;
   blocked: boolean;
+  ragSources?: Array<{
+    chunkId: string;
+    documentId: string | null;
+    title: string;
+    sourceUrl?: string;
+  }>;
 }
 
 const MAX_MESSAGE_CHARS = 4000;
@@ -210,7 +216,8 @@ export class AIResponseWorker implements OnModuleInit {
         draft.validationPassed,
         enqueuedAt,
         draft.latencyMs,
-        true, // resposta real → pede feedback (thumbs)
+        true,
+        draft.ragSources,
       );
       await this.context.recordTurn(userId, 'assistant', draft.text);
       await this.context.summarizeIfNeeded(userId);
@@ -291,7 +298,12 @@ export class AIResponseWorker implements OnModuleInit {
     const ctx = await this.context.build(userId, intent, message);
     const rag = ctx.ragDocs.length
       ? 'TRECHOS DE REFERÊNCIA (baseie a resposta técnica só nisto):\n' +
-        ctx.ragDocs.map((d) => d.snippet).join('\n---\n')
+        ctx.ragDocs
+          .map(
+            (document) =>
+              `[Fonte: ${document.title}${document.sourceUrl ? ` | ${document.sourceUrl}` : ''}]\n${document.snippet}`,
+          )
+          .join('\n---\n')
       : '';
     const system = [
       await this.prompts.resolvePrompt(intent),
@@ -336,6 +348,12 @@ export class AIResponseWorker implements OnModuleInit {
       validationPassed: true,
       humanReview: verdict.humanReviewRequired,
       blocked: false,
+      ragSources: ctx.ragDocs.map((document) => ({
+        chunkId: document.chunkId,
+        documentId: document.documentId,
+        title: document.title,
+        ...(document.sourceUrl ? { sourceUrl: document.sourceUrl } : {}),
+      })),
     };
   }
 
@@ -350,6 +368,7 @@ export class AIResponseWorker implements OnModuleInit {
     enqueuedAt: number,
     latencyMs: number | null = null,
     requestFeedback = false,
+    ragSources?: ResponseDraft['ragSources'],
   ): Promise<void> {
     await this.repo.persistTurn({
       userId,
@@ -358,6 +377,7 @@ export class AIResponseWorker implements OnModuleInit {
       validationPassed,
       modelUsed,
       latencyMs,
+      ragSources,
     });
     const job: WhatsappOutboundJob = {
       userId,
