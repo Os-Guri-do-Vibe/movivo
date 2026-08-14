@@ -64,3 +64,4 @@ export * from './partners';
 
 // Sprint 9 - FAQ determinístico global, versionado e append-only.
 export * from './faq-entries';
+export * from './ai-guardrail-rules';

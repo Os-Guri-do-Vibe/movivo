@@ -17,8 +17,9 @@ import { useCallback } from 'react';
 import { getInviolableRules } from '@/lib/control-center-api';
 
 import { ResourceState, SectorHeader, useControlCenterResource } from './control-center-ui';
+import { AiGuardrailsPanel } from './ai-guardrails';
 
-export function AiRulesDashboard() {
+export function AiRulesDashboard({ canWrite = false }: { canWrite?: boolean }) {
   const load = useCallback((signal?: AbortSignal) => getInviolableRules(signal), []);
   const { data, error, forbidden, loading, refresh } = useControlCenterResource(load);
 
@@ -60,6 +61,7 @@ export function AiRulesDashboard() {
           </li>
         ))}
       </ul>
+      <AiGuardrailsPanel canWrite={canWrite} />
     </div>
   );
 }

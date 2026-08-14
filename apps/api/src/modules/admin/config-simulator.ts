@@ -9,9 +9,11 @@ import { createHash } from 'node:crypto';
 import {
   agentPersonaSchema,
   faqCandidateSchema,
+  l1GuardrailCandidateSchema,
   type AgentPersona,
   type ConfigSimulationCheck,
   type FaqCandidate,
+  type L1GuardrailCandidate,
 } from '@movivo/shared';
 
 import { clinicalGuardrail } from '../ai-coach/intent/clinical-guardrail';
@@ -123,6 +125,53 @@ export function simulateFaqConfig(candidate: FaqCandidate) {
   ];
   return {
     kind: 'FAQ' as const,
+    passed: checks.every((check) => check.passed),
+    candidateHash: createHash('sha256').update(JSON.stringify(candidate)).digest('hex'),
+    checks,
+  };
+}
+
+export function simulateL1GuardrailConfig(candidate: L1GuardrailCandidate) {
+  const parsed = l1GuardrailCandidateSchema.safeParse(candidate);
+  const schemaFailures = parsed.success ? [] : ['O guardrail está fora do contrato fechado.'];
+  if (
+    parsed.success &&
+    [parsed.data.label, ...parsed.data.phrases].some((value) => detectInjection(value))
+  ) {
+    schemaFailures.push('O guardrail contém padrão de instrução para a IA.');
+  }
+
+  const inputFailures = GUARDRAIL_CASES.flatMap((testCase) =>
+    clinicalGuardrail(testCase.message) === testCase.expected ? [] : [testCase.label],
+  );
+  const outputFailures = RESPONSE_CASES.flatMap((testCase) => {
+    const verdict = validation.validateResponse(
+      testCase.text,
+      testCase.allowedExercises ? { allowedExercises: testCase.allowedExercises } : {},
+    );
+    return verdict.action === testCase.expected ? [] : [testCase.label];
+  });
+  const actionFailures =
+    parsed.success && parsed.data.action === 'FLAG' ? [] : ['Ação diferente de FLAG.'];
+
+  const checks: ConfigSimulationCheck[] = [
+    result('SCHEMA', 'Contrato fechado e proteção contra instruções', 1, schemaFailures),
+    result(
+      'GOLDEN_INPUT',
+      'Guardrail L0 mantém precedência',
+      GUARDRAIL_CASES.length,
+      inputFailures,
+    ),
+    result(
+      'GOLDEN_OUTPUT',
+      'Golden set de linguagem permanece válido',
+      RESPONSE_CASES.length,
+      outputFailures,
+    ),
+    result('PROMPT_INTEGRITY', 'Ação limitada a sinalização', 1, actionFailures),
+  ];
+  return {
+    kind: 'GUARDRAIL' as const,
     passed: checks.every((check) => check.passed),
     candidateHash: createHash('sha256').update(JSON.stringify(candidate)).digest('hex'),
     checks,

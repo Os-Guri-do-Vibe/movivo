@@ -20,6 +20,7 @@ import {
 } from '../enums/agent-config';
 import { controlCenterMetaSchema } from './control-center.schema';
 import { faqCandidateSchema } from './faq.schema';
+import { l1GuardrailCandidateSchema } from './guardrail.schema';
 
 /** Letras (com acento), espaço, 2-20 chars. Sem pontuação, dígito ou símbolo. */
 export const AGENT_NAME_PATTERN = /^[A-Za-zÀ-ú ]{2,20}$/;
@@ -139,6 +140,7 @@ export type InviolableRulesResponse = z.infer<typeof inviolableRulesResponseSche
 export const simulateAgentConfigSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('PERSONA'), candidate: agentPersonaSchema }),
   z.object({ kind: z.literal('FAQ'), candidate: faqCandidateSchema }),
+  z.object({ kind: z.literal('GUARDRAIL'), candidate: l1GuardrailCandidateSchema }),
 ]);
 export type SimulateAgentConfigInput = z.infer<typeof simulateAgentConfigSchema>;
 
@@ -153,7 +155,7 @@ export type ConfigSimulationCheck = z.infer<typeof configSimulationCheckSchema>;
 
 export const configSimulationResponseSchema = z.object({
   data: z.object({
-    kind: z.enum(['PERSONA', 'FAQ']),
+    kind: z.enum(['PERSONA', 'FAQ', 'GUARDRAIL']),
     passed: z.boolean(),
     candidateHash: z.string().regex(/^[a-f0-9]{64}$/),
     checks: z.array(configSimulationCheckSchema).length(4),

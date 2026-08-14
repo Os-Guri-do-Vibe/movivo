@@ -16,6 +16,7 @@ import { PinoLogger } from 'nestjs-pino';
 
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { FaqService } from '../../core/agent-config/faq.service';
+import { L1GuardrailService } from '../../core/agent-config/l1-guardrail.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { ContextService } from '../ai-coach/context/context.service';
 import { clinicalGuardrail } from '../ai-coach/intent/clinical-guardrail';
@@ -64,6 +65,7 @@ export class AIResponseWorker implements OnModuleInit {
     private readonly classifier: IntentClassifier,
     private readonly prompts: PromptResolverService,
     private readonly faq: FaqService,
+    private readonly l1Guardrails: L1GuardrailService,
     private readonly context: ContextService,
     private readonly llm: LlmRouter,
     private readonly abuse: LlmAbuseGuard,
@@ -147,6 +149,7 @@ export class AIResponseWorker implements OnModuleInit {
         const verdict = this.validation.validateResponse(faq.answer);
         const blocked = verdict.action !== 'PASS';
         const response = blocked ? STANDARD_BLOCK_RESPONSE : faq.answer;
+        const l1Flags = blocked ? [] : await this.l1Guardrails.evaluate(message, response);
         await this.deliver(
           userId,
           correlationId,
@@ -160,6 +163,13 @@ export class AIResponseWorker implements OnModuleInit {
         await this.context.recordTurn(userId, 'assistant', response);
         await this.context.summarizeIfNeeded(userId);
         if (blocked) await this.repo.persistHandoff(userId, 'ALERT', 'VALIDATOR_BLOCK');
+        if (l1Flags.length > 0) {
+          await this.repo.persistHandoff(userId, 'ALERT', 'L1_GUARDRAIL_FLAG');
+          this.logger.info(
+            { event: 'l1_guardrail_flag', ruleKeys: l1Flags.map((flag) => flag.ruleKey) },
+            'guardrail L1 sinalizou resposta de FAQ para revisão',
+          );
+        }
         this.logger.info(
           { event: 'faq_answer_sent', faqId: faq.id, faqVersion: faq.version },
           'resposta determinística do FAQ enviada',
@@ -184,6 +194,7 @@ export class AIResponseWorker implements OnModuleInit {
       }
 
       const draft = await this.buildResponse(userId, intent.intent, message, scrubUser);
+      const l1Flags = draft.blocked ? [] : await this.l1Guardrails.evaluate(message, draft.text);
 
       if (draft.blocked) {
         this.logger.info(
@@ -211,6 +222,13 @@ export class AIResponseWorker implements OnModuleInit {
         this.logger.info(
           { userId, event: 'handoff_alert', reason },
           'alerta assíncrono ao painel CREF',
+        );
+      }
+      if (l1Flags.length > 0) {
+        await this.repo.persistHandoff(userId, 'ALERT', 'L1_GUARDRAIL_FLAG');
+        this.logger.info(
+          { event: 'l1_guardrail_flag', ruleKeys: l1Flags.map((flag) => flag.ruleKey) },
+          'guardrail L1 sinalizou resposta para revisão',
         );
       }
       return { status: draft.blocked ? 'BLOCKED' : 'SENT' };

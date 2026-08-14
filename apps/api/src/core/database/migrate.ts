@@ -23,6 +23,7 @@ import postgres from 'postgres';
 import { loadEnv } from '../config/load-env';
 import {
   buildAgentConfigImmutabilitySql,
+  buildAiGuardrailRulesImmutabilitySql,
   buildAuditIntegritySql,
   buildAdSpendImmutabilitySql,
   buildExpensesImmutabilitySql,
@@ -211,6 +212,9 @@ async function main(): Promise<void> {
     // Sprint 9: FAQ global append-only — rollback/remoção lógica também são novas versões.
     await sql.unsafe(buildFaqEntriesImmutabilitySql(appRole));
     console.log('[db:migrate] faq_entries append-only reconciliado.');
+
+    await sql.unsafe(buildAiGuardrailRulesImmutabilitySql(appRole));
+    console.log('[db:migrate] ai_guardrail_rules append-only reconciliado.');
 
     // Sprint 8 (US-8.3): user_status_transitions append-only — mesmo molde.
     await sql.unsafe(buildStatusTransitionsImmutabilitySql(appRole));

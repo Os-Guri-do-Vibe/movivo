@@ -4,16 +4,21 @@ import {
   configSimulationResponseSchema,
   faqEntriesResponseSchema,
   inviolableRulesResponseSchema,
+  l1GuardrailsResponseSchema,
   type AgentConfigHistoryResponse,
   type AgentPersonaResponse,
   type ConfigSimulationResponse,
   type FaqEntriesResponse,
   type InviolableRulesResponse,
+  type L1GuardrailsResponse,
   type PublishAgentConfigInput,
   type PublishFaqEntryInput,
+  type PublishL1GuardrailInput,
   type RollbackAgentConfigInput,
   type RollbackFaqEntryInput,
   type RetireFaqEntryInput,
+  type RetireL1GuardrailInput,
+  type RollbackL1GuardrailInput,
   type SimulateAgentConfigInput,
   controlCenterComplianceResponseSchema,
   controlCenterFinanceResponseSchema,
@@ -198,6 +203,24 @@ export function rollbackFaqEntry(input: RollbackFaqEntryInput): Promise<FaqEntri
 
 export function retireFaqEntry(input: RetireFaqEntryInput): Promise<FaqEntriesResponse> {
   return mutate('ai/faq/retire', input, faqEntriesResponseSchema);
+}
+
+export function getL1Guardrails(signal?: AbortSignal): Promise<L1GuardrailsResponse> {
+  return request('ai/guardrails', l1GuardrailsResponseSchema, signal);
+}
+
+export function publishL1Guardrail(input: PublishL1GuardrailInput): Promise<L1GuardrailsResponse> {
+  return mutate('ai/guardrails', input, l1GuardrailsResponseSchema);
+}
+
+export function rollbackL1Guardrail(
+  input: RollbackL1GuardrailInput,
+): Promise<L1GuardrailsResponse> {
+  return mutate('ai/guardrails/rollback', input, l1GuardrailsResponseSchema);
+}
+
+export function retireL1Guardrail(input: RetireL1GuardrailInput): Promise<L1GuardrailsResponse> {
+  return mutate('ai/guardrails/retire', input, l1GuardrailsResponseSchema);
 }
 
 /* ------------------------- Sócios & Distribuição (US-8.7) ------------------------- */

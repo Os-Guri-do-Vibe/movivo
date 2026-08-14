@@ -359,6 +359,29 @@ export function buildFaqEntriesImmutabilitySql(appRole: string): string {
   `;
 }
 
+/** Guardrails L1 são globais e append-only; a action no banco admite somente FLAG. */
+export function buildAiGuardrailRulesImmutabilitySql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.ai_guardrail_rules_reject_mutation()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    BEGIN
+      RAISE EXCEPTION 'ai_guardrail_rules is append-only' USING ERRCODE = '55000';
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.ai_guardrail_rules_reject_mutation() FROM PUBLIC;
+
+    DROP TRIGGER IF EXISTS trg_ai_guardrail_rules_immutable ON public.ai_guardrail_rules;
+    CREATE TRIGGER trg_ai_guardrail_rules_immutable BEFORE UPDATE OR DELETE ON public.ai_guardrail_rules
+      FOR EACH ROW EXECUTE FUNCTION public.ai_guardrail_rules_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_ai_guardrail_rules_no_truncate ON public.ai_guardrail_rules;
+    CREATE TRIGGER trg_ai_guardrail_rules_no_truncate BEFORE TRUNCATE ON public.ai_guardrail_rules
+      FOR EACH STATEMENT EXECUTE FUNCTION public.ai_guardrail_rules_reject_mutation();
+
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.ai_guardrail_rules FROM ${appRole};
+    GRANT SELECT, INSERT ON public.ai_guardrail_rules TO ${appRole};
+  `;
+}
+
 /**
  * `user_status_transitions` append-only, imposto no banco (US-8.3 / TASK-8.3.1).
  *

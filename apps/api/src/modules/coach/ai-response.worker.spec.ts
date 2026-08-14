@@ -4,6 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { HealthConsentService } from '../../core/database/health-consent.service';
 import type { FaqService, PublishedFaqMatch } from '../../core/agent-config/faq.service';
+import type {
+  L1GuardrailFlag,
+  L1GuardrailService,
+} from '../../core/agent-config/l1-guardrail.service';
 import type { ContextService } from '../ai-coach/context/context.service';
 import type { IntentClassifier } from '../ai-coach/intent/intent-classifier.service';
 import type { Intent } from '../ai-coach/intent/intent.types';
@@ -34,6 +38,7 @@ interface Deps {
   safetyHandoff?: boolean;
   consentActive?: boolean;
   faqMatch?: PublishedFaqMatch | null;
+  l1Flags?: L1GuardrailFlag[];
 }
 
 function makeWorker(deps: Deps = {}) {
@@ -71,6 +76,8 @@ function makeWorker(deps: Deps = {}) {
 
   const faqMatch = vi.fn(async () => deps.faqMatch ?? null);
   const faq = { match: faqMatch } as unknown as FaqService;
+  const evaluateL1 = vi.fn(async () => deps.l1Flags ?? []);
+  const l1Guardrails = { evaluate: evaluateL1 } as unknown as L1GuardrailService;
 
   const context = {
     build: vi.fn(() =>
@@ -126,6 +133,7 @@ function makeWorker(deps: Deps = {}) {
     classifier,
     prompts,
     faq,
+    l1Guardrails,
     context,
     llm,
     abuse,
@@ -149,6 +157,7 @@ function makeWorker(deps: Deps = {}) {
     redis,
     classify,
     faqMatch,
+    evaluateL1,
   };
 }
 
@@ -207,6 +216,19 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     expect(classify).not.toHaveBeenCalled();
     expect(complete).not.toHaveBeenCalled();
     expect(sentText(enqueue)).toBe(answer);
+  });
+
+  it('guardrail L1 apenas sinaliza para revisão sem bloquear a resposta', async () => {
+    const answer = 'O plano chega pelo WhatsApp com acompanhamento do profissional CREF.';
+    const { worker, enqueue, persistHandoff, evaluateL1 } = makeWorker({
+      faqMatch: { id: 'faq-1', faqKey: 'delivery', version: 1, answer },
+      l1Flags: [{ ruleKey: 'rule-1', label: 'Revisar menção', version: 2 }],
+    });
+
+    await expect(worker.process(job())).resolves.toEqual({ status: 'FAQ' });
+    expect(evaluateL1).toHaveBeenCalledWith('oi', answer);
+    expect(sentText(enqueue)).toBe(answer);
+    expect(persistHandoff).toHaveBeenCalledWith('u1', 'ALERT', 'L1_GUARDRAIL_FLAG');
   });
 
   it('guardrail de segurança roda antes do FAQ', async () => {

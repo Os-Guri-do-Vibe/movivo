@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildFaqEntriesImmutabilitySql,
+  buildAiGuardrailRulesImmutabilitySql,
   buildRlsPoliciesSql,
   RLS_TENANT_TABLES,
 } from './security-policies';
@@ -109,5 +110,19 @@ describe('buildFaqEntriesImmutabilitySql', () => {
     expect(sql).toContain('BEFORE TRUNCATE ON public.faq_entries');
     expect(sql).toContain('REVOKE UPDATE, DELETE, TRUNCATE ON public.faq_entries FROM movivo_app');
     expect(sql).toContain('GRANT SELECT, INSERT ON public.faq_entries TO movivo_app');
+  });
+});
+
+describe('buildAiGuardrailRulesImmutabilitySql', () => {
+  const sql = buildAiGuardrailRulesImmutabilitySql('movivo_app');
+
+  it('combina trigger 55000 e revogação da role de runtime', () => {
+    expect(sql).toContain(
+      "RAISE EXCEPTION 'ai_guardrail_rules is append-only' USING ERRCODE = '55000'",
+    );
+    expect(sql).toContain('BEFORE UPDATE OR DELETE ON public.ai_guardrail_rules');
+    expect(sql).toContain(
+      'REVOKE UPDATE, DELETE, TRUNCATE ON public.ai_guardrail_rules FROM movivo_app',
+    );
   });
 });

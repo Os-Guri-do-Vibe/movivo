@@ -1,7 +1,11 @@
 import { DEFAULT_AGENT_PERSONA } from '@movivo/shared';
 import { describe, expect, it } from 'vitest';
 
-import { simulateFaqConfig, simulatePersonaConfig } from './config-simulator';
+import {
+  simulateFaqConfig,
+  simulateL1GuardrailConfig,
+  simulatePersonaConfig,
+} from './config-simulator';
 
 describe('simulatePersonaConfig', () => {
   it('aprova a persona válida nas quatro etapas do gate', () => {
@@ -21,6 +25,21 @@ describe('simulatePersonaConfig', () => {
 
     expect(result.passed).toBe(false);
     expect(result.checks[0]).toMatchObject({ id: 'SCHEMA', passed: false });
+  });
+});
+
+describe('simulateL1GuardrailConfig', () => {
+  it('aprova somente sinalização FLAG nas quatro etapas', () => {
+    const result = simulateL1GuardrailConfig({
+      label: 'Revisar pedido de carga',
+      scope: 'BOTH',
+      phrases: ['dobrar a carga'],
+      action: 'FLAG',
+    });
+
+    expect(result.kind).toBe('GUARDRAIL');
+    expect(result.passed).toBe(true);
+    expect(result.checks).toHaveLength(4);
   });
 });
 
