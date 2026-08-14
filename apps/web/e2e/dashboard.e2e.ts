@@ -119,6 +119,8 @@ test('PAR-Q começa sem decisão e libera apenas após seleção consciente', as
 test('exibe ausência de amostra sem transformar dado desconhecido em zero', async ({ page }) => {
   await login(page);
   await openQueue(page);
+  // A categoria "Sistema" começa recolhida (a rota atual é de Alunos) — abre antes de clicar.
+  await page.getByRole('button', { name: 'Sistema' }).first().click();
   await page.getByRole('link', { name: 'Filas & Jobs', exact: true }).first().click();
   await expect(page).toHaveURL(/\/dashboard\/operacoes$/);
   await expect(page.getByText('Sem amostra suficiente')).toBeVisible();
