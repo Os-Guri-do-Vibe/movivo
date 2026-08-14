@@ -37,6 +37,8 @@ import {
   controlCenterStudentsResponseSchema,
   controlCenterSystemResponseSchema,
   type ControlCenterComplianceResponse,
+  controlCenterCampaignsResponseSchema,
+  type ControlCenterCampaignsResponse,
   type ControlCenterFinanceResponse,
   type ControlCenterMarketingResponse,
   type ControlCenterOverviewResponse,
@@ -108,6 +110,10 @@ export function getOverview(signal?: AbortSignal): Promise<ControlCenterOverview
 
 export function getMarketing(signal?: AbortSignal): Promise<ControlCenterMarketingResponse> {
   return request('marketing', controlCenterMarketingResponseSchema, signal);
+}
+
+export function getCampaigns(signal?: AbortSignal): Promise<ControlCenterCampaignsResponse> {
+  return request('campaigns', controlCenterCampaignsResponseSchema, signal);
 }
 
 export function getStudents(signal?: AbortSignal): Promise<ControlCenterStudentsResponse> {

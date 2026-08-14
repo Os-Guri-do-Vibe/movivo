@@ -224,6 +224,30 @@ export const channelEconomicsSchema = z.object({
 });
 export type ChannelEconomics = z.infer<typeof channelEconomicsSchema>;
 
+/** Economia por `utm_campaign`, sempre dentro do canal e sob o mesmo k-anonimato. */
+export const campaignEconomicsSchema = channelEconomicsSchema
+  .omit({ channel: true, mapped: true })
+  .extend({
+    campaign: z.string().min(1),
+    channel: z.string().min(1),
+  });
+export type CampaignEconomics = z.infer<typeof campaignEconomicsSchema>;
+
+export const controlCenterCampaignsResponseSchema = z.object({
+  data: z.object({
+    campaigns: z.array(campaignEconomicsSchema),
+    suppressedCampaigns: z.number().int().nonnegative(),
+    minimumSegmentSize: z.literal(10),
+    attributionWindowDays: z.number().int().positive(),
+    matureCohorts: z.number().int().nonnegative(),
+    mediaInvestmentBrl: z.number(),
+  }),
+  meta: controlCenterMetaSchema,
+});
+export type ControlCenterCampaignsResponse = z.infer<
+  typeof controlCenterCampaignsResponseSchema
+>;
+
 /** Linha do extrato de investimento em mídia (US-8.6). Estorno aparece como linha própria. */
 export const adSpendEntrySchema = z.object({
   id: z.uuid(),

@@ -5,7 +5,10 @@ import type {
   ControlCenterStudentsResponse,
   ControlCenterSystemResponse,
 } from '@movivo/shared';
-import { controlCenterMarketingResponseSchema } from '@movivo/shared';
+import {
+  controlCenterCampaignsResponseSchema,
+  controlCenterMarketingResponseSchema,
+} from '@movivo/shared';
 import { getTableName, isTable } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -368,6 +371,65 @@ describe('ControlCenterService projections', () => {
       ],
     ];
   }
+
+  it('calcula campanha por utm_campaign e suprime n menor que 10 sem tolerancia numerica', async () => {
+    withExecute(
+      [
+        {
+          month: '2026-01',
+          cohort_size: 20,
+          converted: 8,
+          retained: 7,
+          reconstructed: false,
+        },
+      ],
+      [
+        {
+          source: 'instagram',
+          medium: 'cpc',
+          campaign: 'lancamento_agosto',
+          students: 12,
+          converted: 3,
+          received_cents: '240000',
+        },
+        {
+          source: 'instagram',
+          medium: 'cpc',
+          campaign: 'teste_pequeno',
+          students: 9,
+          converted: 2,
+          received_cents: '90000',
+        },
+      ],
+    );
+    const { service } = serviceWithSystemResults(
+      [
+        { channel: 'meta_ads', campaign: 'lancamento_agosto', cents: '120000' },
+        { channel: 'meta_ads', campaign: 'teste_pequeno', cents: '9000' },
+      ],
+      [{ months: 2 }],
+    );
+
+    const response = await service.campaigns();
+    expect(response.data.suppressedCampaigns).toBe(1);
+    expect(response.data.mediaInvestmentBrl).toBe(1290);
+    expect(response.data.campaigns).toHaveLength(1);
+    expect(response.data.campaigns[0]).toMatchObject({
+      campaign: 'lancamento_agosto',
+      channel: 'meta_ads',
+      students: 12,
+      converted: 3,
+      investmentBrl: 1200,
+      cac: { value: 400 },
+      receivedRevenue: { value: 2400 },
+      roas: { value: 2 },
+      ltv: { value: 800 },
+      ltvToCac: { value: 2 },
+      paybackMonths: { value: 1 },
+      signal: 'ATTENTION',
+    });
+    expect(controlCenterCampaignsResponseSchema.safeParse(response).success).toBe(true);
+  });
 
   it('suprime segmentos de marketing com menos de 10 registros', async () => {
     const { service } = serviceWithSystemResults(

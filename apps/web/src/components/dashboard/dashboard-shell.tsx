@@ -159,12 +159,10 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         capabilities: ['control_center.marketing.read'],
       },
       {
+        href: '/dashboard/campanhas',
         label: 'Campanhas & Experimentos',
         icon: Sparkles,
         capabilities: ['control_center.marketing.read'],
-        // US-8.8: a Sprint 8 entregou investimento por canal (`ad_spend`), não gestão de
-        // campanha nem experimentação — que continuam sem sprint atribuída.
-        soon: 'sprint a definir',
       },
     ],
   },
