@@ -34,6 +34,17 @@ export const ControlCenterCapability = {
   STUDENTS_HEALTH_READ: 'control_center.students.health.read',
 
   FINANCE_WRITE: 'control_center.finance.write',
+
+  /**
+   * Cap table e distribuição por sócio (US-8.7). **Fora de `FINANCE_*` de propósito**:
+   * quem opera o livro-caixa não precisa ver quanto cabe a cada sócio. Concedidas só a
+   * `ADMIN` (ver `CAPABILITIES_BY_ROLE`) — e não entram na `ADMIN_INHERITANCE_DENYLIST`,
+   * que existe para separar administração de sistema da aprovação de conteúdo
+   * metodológico pelo RT CREF; quadro societário não é esse tipo de conteúdo.
+   */
+  PARTNERS_READ: 'control_center.partners.read',
+  PARTNERS_WRITE: 'control_center.partners.write',
+
   MARKETING_WRITE: 'control_center.marketing.write',
   SYSTEM_OPERATE: 'control_center.system.operate',
   /** Ver o pilar IA, incluindo as regras invioláveis L0 (somente leitura) — US-7.6/7.7. */

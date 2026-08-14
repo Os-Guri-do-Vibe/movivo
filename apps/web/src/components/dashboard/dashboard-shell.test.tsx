@@ -12,6 +12,7 @@ const ADMIN_CAPABILITIES = [
   'control_center.students.read',
   'control_center.students.health.read',
   'control_center.finance.read',
+  'control_center.partners.read',
   'control_center.marketing.read',
   'control_center.ai.config.read',
   'control_center.system.read',
@@ -40,11 +41,16 @@ describe('DashboardShell', () => {
     expect(screen.getAllByRole('link', { name: 'Receita & Assinaturas' })).not.toHaveLength(0);
     expect(screen.queryByRole('link', { name: 'Base de alunos' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Funil de conversão' })).not.toBeInTheDocument();
+    // US-8.7: cap table é exclusivo do ADMIN — FINANCE não alcança nem o item.
+    expect(
+      screen.queryByRole('link', { name: 'Sócios & Distribuição' }),
+    ).not.toBeInTheDocument();
     // Ausência, não desabilitação (TASK-7.9.1): dentro do menu o rótulo não existe
     // em elemento nenhum — nem link, nem botão inerte, nem texto cinza.
     for (const nav of screen.getAllByRole('navigation')) {
       expect(within(nav).queryByText('Base de alunos')).not.toBeInTheDocument();
       expect(within(nav).queryByText('Funil de conversão')).not.toBeInTheDocument();
+      expect(within(nav).queryByText('Sócios & Distribuição')).not.toBeInTheDocument();
       expect(nav.querySelectorAll('[aria-disabled="true"], :disabled')).toHaveLength(0);
     }
   });

@@ -55,6 +55,9 @@ export const CAPABILITIES_BY_ROLE: Readonly<Record<Role, readonly Capability[]>>
     ControlCenterCapability.MARKETING_READ,
     ControlCenterCapability.MARKETING_WRITE,
   ],
+  // `PARTNERS_READ`/`PARTNERS_WRITE` (US-8.7) ficam **fora** daqui de propósito: cap table
+  // e distribuição por sócio são de sócio, não do setor financeiro. Só o `ADMIN` os
+  // recebe — via `ADMIN_CAPABILITIES` (tudo menos a denylist clínica), sem entrada aqui.
   [ControlCenterRole.FINANCE]: [
     ControlCenterCapability.FINANCE_READ,
     ControlCenterCapability.FINANCE_WRITE,

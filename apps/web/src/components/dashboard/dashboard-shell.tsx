@@ -124,10 +124,12 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         soon: 'Sprint 8',
       },
       {
+        // Cap table e distribuição não são do setor financeiro: exigem
+        // `partners.read`, exclusiva do ADMIN. Quem é FINANCE não vê o item.
+        href: '/dashboard/socios',
         label: 'Sócios & Distribuição',
         icon: Handshake,
-        capabilities: ['control_center.finance.read'],
-        soon: 'Sprint 8',
+        capabilities: ['control_center.partners.read'],
       },
     ],
   },
