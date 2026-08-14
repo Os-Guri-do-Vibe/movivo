@@ -711,3 +711,37 @@ export function buildPaymentsImmutabilitySql(appRole: string): string {
     GRANT SELECT, INSERT ON public.payments TO ${appRole};
   `;
 }
+
+/**
+ * `ad_spend` append-only, imposto no banco (US-8.6 / TASK-8.6.1).
+ *
+ * Quinta aplicacao do mesmo molde, pelo motivo de `expenses`: investimento em midia e o
+ * NUMERADOR do CAC. Alterar um valor em silencio muda o CAC e o ROAS de um periodo ja
+ * lido, e a decisao de escalar ou cortar um anuncio foi tomada sobre o numero antigo.
+ * Correcao e estorno (linha negativa com `reverses_ad_spend_id`) + relancamento.
+ *
+ * Fora da RLS por titular: dado de negocio, nao de titular — igual a `expenses` e
+ * `model_pricing`. Quem escreve e definido por capability na API (`MARKETING_WRITE`), e
+ * toda escrita passa por `AuditService.append` na mesma transacao.
+ */
+export function buildAdSpendImmutabilitySql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.ad_spend_reject_mutation()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    BEGIN
+      RAISE EXCEPTION 'ad_spend is append-only: corrija por estorno, nunca por edicao' USING ERRCODE = '55000';
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.ad_spend_reject_mutation() FROM PUBLIC;
+
+    DROP TRIGGER IF EXISTS trg_ad_spend_immutable ON public.ad_spend;
+    CREATE TRIGGER trg_ad_spend_immutable BEFORE UPDATE OR DELETE ON public.ad_spend
+      FOR EACH ROW EXECUTE FUNCTION public.ad_spend_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_ad_spend_no_truncate ON public.ad_spend;
+    CREATE TRIGGER trg_ad_spend_no_truncate BEFORE TRUNCATE ON public.ad_spend
+      FOR EACH STATEMENT EXECUTE FUNCTION public.ad_spend_reject_mutation();
+
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.ad_spend FROM ${appRole};
+    GRANT SELECT, INSERT ON public.ad_spend TO ${appRole};
+  `;
+}

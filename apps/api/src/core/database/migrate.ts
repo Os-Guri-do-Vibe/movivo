@@ -24,6 +24,7 @@ import { loadEnv } from '../config/load-env';
 import {
   buildAgentConfigImmutabilitySql,
   buildAuditIntegritySql,
+  buildAdSpendImmutabilitySql,
   buildExpensesImmutabilitySql,
   buildPaymentsImmutabilitySql,
   buildProfessionalAccessSql,
@@ -217,6 +218,10 @@ async function main(): Promise<void> {
     // Sprint 8 (US-8.5): payments append-only — estorno é linha nova, nunca alteração.
     await sql.unsafe(buildPaymentsImmutabilitySql(appRole));
     console.log('[db:migrate] payments append-only reconciliado.');
+
+    // Sprint 8 (US-8.6): ad_spend append-only — correção é estorno + relançamento.
+    await sql.unsafe(buildAdSpendImmutabilitySql(appRole));
+    console.log('[db:migrate] ad_spend append-only reconciliado.');
 
     // Prova de que o modelo de permissões continua íntegro após a migração.
     const [check] = await sql<{ bypassrls: boolean; owns: number }[]>`

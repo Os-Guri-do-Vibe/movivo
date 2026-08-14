@@ -35,10 +35,29 @@ import { DashboardController } from './dashboard.controller';
 import { DashboardService } from './dashboard.service';
 import { FinanceController } from './finance.controller';
 import { FinanceService } from './finance.service';
+import { MarketingController } from './marketing.controller';
+import { MarketingService } from './marketing.service';
+import { PartnersController } from './partners.controller';
+import { PartnersService } from './partners.service';
 
 @Module({
   imports: [AuthModule, JobsModule, ProtocolModule],
-  controllers: [DashboardController, ControlCenterController, AiConfigController, FinanceController],
-  providers: [AuditService, DashboardService, ControlCenterService, AiConfigService, FinanceService],
+  controllers: [
+    DashboardController,
+    ControlCenterController,
+    AiConfigController,
+    FinanceController,
+    MarketingController,
+    PartnersController,
+  ],
+  providers: [
+    AuditService,
+    DashboardService,
+    ControlCenterService,
+    AiConfigService,
+    FinanceService,
+    MarketingService,
+    PartnersService,
+  ],
 })
 export class AdminModule {}

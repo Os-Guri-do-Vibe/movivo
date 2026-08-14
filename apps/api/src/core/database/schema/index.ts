@@ -55,3 +55,9 @@ export * from './model-pricing';
 
 // Sprint 8 - liquidacao recebida do gateway (US-8.5). Append-only, idempotente pelo banco.
 export * from './payments';
+
+// Sprint 8 - investimento em midia por canal/campanha (US-8.6). Global, append-only.
+export * from './ad-spend';
+
+// Sprint 8 - cap table versionado por vigencia (US-8.7). Soma vigente travada em 10.000 bps.
+export * from './partners';

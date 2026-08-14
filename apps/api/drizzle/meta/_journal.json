@@ -169,6 +169,20 @@
       "when": 1786655335320,
       "tag": "0023_payments",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1786656862217,
+      "tag": "0024_ad_spend",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1786657200000,
+      "tag": "0025_partners",
+      "breakpoints": true
     }
   ]
 }

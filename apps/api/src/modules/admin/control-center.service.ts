@@ -4,7 +4,13 @@ import {
   attributionLabel,
   canonicalChannel,
   UNMAPPED_CHANNEL,
+  ATTRIBUTION_WINDOW_DAYS,
+  MATURE_COHORT_MONTHS,
+  LTV_TO_CAC_TARGET,
+  PAYBACK_TARGET_MONTHS,
   type AcquisitionChannel,
+  type ChannelEconomics,
+  type ChannelSignal,
   preferredPeriodSchema,
   primaryGoalSchema,
   trainingLocationSchema,
@@ -34,6 +40,7 @@ import { AgentConfigRepository } from '../../core/agent-config/agent-config.repo
 import { DatabaseHealthService } from '../../core/database';
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import {
+  adSpend,
   aiJobs,
   anamnesisSessions,
   auditLogs,
@@ -591,9 +598,23 @@ export class ControlCenterService {
       const suppressedChannels = allChannels.length - acquisitionChannels.length;
       const attributed = allChannels.reduce((sum, channel) => sum + channel.count, 0);
 
+      // --- CAC / ROAS / LTV-CAC por origem (US-8.6). Coorte é madura quando entrou há pelo
+      // menos `MATURE_COHORT_MONTHS` meses: mês corrente não sustenta estimativa de LTV.
+      const cohorts = await this.entryCohorts(tx);
+      const matureBefore = new Date();
+      matureBefore.setUTCMonth(matureBefore.getUTCMonth() - MATURE_COHORT_MONTHS);
+      const matureCohorts = cohorts.cohorts.filter(
+        (cohort) => cohort.month <= matureBefore.toISOString().slice(0, 7),
+      ).length;
+      const economics = await this.channelEconomics(tx, acquisitionChannels, matureCohorts);
+
       return {
         anamnesisFunnel,
         acquisitionChannels,
+        channelEconomics: economics.economics,
+        mediaInvestmentBrl: economics.mediaInvestmentBrl,
+        attributionWindowDays: ATTRIBUTION_WINDOW_DAYS,
+        matureCohorts,
         suppressedChannels,
         attributionNotCaptured: notCaptured?.total ?? 0,
         attributed,
@@ -636,6 +657,11 @@ export class ControlCenterService {
       'Faixa etária é derivada da data de nascimento da etapa 1 e só sai do banco já generalizada em faixas.',
       'Conversão trial→ativo lê `user_status_transitions`; "convertido" é hoje o proxy `TRIALING→ACTIVE` (pagamento autorizado), a ser trocado por primeiro pagamento liquidado quando `payments` existir.',
       `Funil de conversão suprimido por inteiro quando há menos de ${MINIMUM_SEGMENT_SIZE} entradas em trial.`,
+      `CAC por canal usa janela de atribuição declarada: convertidos em até ${ATTRIBUTION_WINDOW_DAYS} dias após o cadastro, atribuídos ao canal de primeiro toque — nunca por mês-calendário de gasto.`,
+      'Canal sem investimento registrado em `ad_spend` aparece como "sem investimento direto"; CAC e ROAS ficam indisponíveis, nunca R$ 0,00.',
+      'ROAS usa receita RECEBIDA (`payments`), nunca receita contratada.',
+      `LTV é receita recebida acumulada por convertido e só é publicado como disponível com ao menos 3 coortes de entrada maduras (${MATURE_COHORT_MONTHS}+ meses); abaixo disso é estimativa de baixa confiança.`,
+      'Investimento em mídia é `ad_spend`; a categoria MARKETING de `expenses` cobre marketing que não é mídia direta por canal — as duas nunca descrevem o mesmo real.',
     ]);
   }
 
@@ -2625,6 +2651,241 @@ export class ControlCenterService {
         reconstructed: row.reconstructed,
       })),
     };
+  }
+
+  /**
+   * CAC, ROAS e LTV/CAC por canal de origem (US-8.6 / TASK-8.6.2 e 8.6.3).
+   *
+   * ## Janela de atribuição, não mês-calendário
+   * Quem viu o anúncio em maio pode converter em junho. Dividir gasto de maio por conversão
+   * de maio é a armadilha (a) da US: aqui o denominador é a **coorte de origem** — o titular
+   * conta no canal de onde veio, e só se converteu em até `ATTRIBUTION_WINDOW_DAYS` dias do
+   * cadastro. A janela vai na resposta (`attributionWindowDays`), nunca fica implícita.
+   *
+   * ## Canal sem investimento não vale zero
+   * Orgânico e indicação não têm gasto. `investmentBrl: null` + `NO_DIRECT_INVESTMENT`, e
+   * as métricas derivadas ficam `UNAVAILABLE` — `CAC R$ 0,00` seria um número bonito e falso,
+   * e a divisão por zero produziria infinito.
+   *
+   * ## ROAS sobre receita RECEBIDA
+   * Numerador vem de `payments` (US-8.5), o que liquidou de fato, nunca de
+   * `subscriptions.price_cents`. ROAS sobre dinheiro que não entrou faz escalar anúncio ruim.
+   *
+   * ## k-anonimato
+   * Só entram os canais já publicáveis (`students >= MINIMUM_SEGMENT_SIZE`), e a agregação é
+   * por canal — não existe caminho daqui até o titular.
+   *
+   * ponytail: o escopo é acumulado (vida toda), não recorte de período. Numerador e
+   * denominador são a MESMA base, então a razão é honesta; filtro por período entra quando a
+   * tela ganhar seletor de datas.
+   */
+  private async channelEconomics(
+    tx: TenantTransaction,
+    publishable: AcquisitionChannel[],
+    matureCohorts: number,
+  ): Promise<{ economics: ChannelEconomics[]; mediaInvestmentBrl: number }> {
+    const originRows = await tx.execute<{
+      source: string | null;
+      medium: string | null;
+      students: number;
+      converted: number;
+      received_cents: string;
+    }>(sql`
+      with origin as (
+        select distinct on (a.user_id)
+               a.user_id, a.utm_source as source, a.utm_medium as medium,
+               a.created_at as signed_up_at
+        from ${anamnesisSessions} a
+        where a.user_id is not null and a.first_touch_at is not null
+        order by a.user_id, a.created_at
+      ),
+      conv as (
+        select user_id, min(occurred_at) as converted_at
+        from ${userStatusTransitions}
+        where to_status = 'CONVERTED'
+        group by user_id
+      )
+      select o.source, o.medium,
+             count(*)::int as students,
+             count(*) filter (
+               where c.converted_at is not null
+                 and c.converted_at <= o.signed_up_at + ${ATTRIBUTION_WINDOW_DAYS} * interval '1 day'
+             )::int as converted,
+             coalesce(sum(pay.cents), 0)::text as received_cents
+      from origin o
+      left join conv c on c.user_id = o.user_id
+      -- Estorno e chargeback já são linha negativa em \`payments\`: somar a coluna devolve o
+      -- líquido recebido sem nenhum CASE. Só \`FAILED\` fica de fora (nunca entrou dinheiro).
+      left join lateral (
+        select coalesce(sum(p.amount_cents), 0) as cents
+        from ${payments} p
+        where p.user_id = o.user_id and p.status <> 'FAILED'
+      ) pay on true
+      group by 1, 2
+    `);
+
+    const spendRows = await tx
+      .select({
+        channel: adSpend.channel,
+        cents: sql<string>`coalesce(sum(${adSpend.amountCents}), 0)::text`,
+      })
+      .from(adSpend)
+      .groupBy(adSpend.channel);
+    const spendByChannel = new Map(spendRows.map((row) => [row.channel, this.number(row.cents)]));
+    const mediaInvestmentBrl = spendRows.reduce((sum, row) => sum + this.number(row.cents), 0) / 100;
+
+    // Meses distintos com liquidação — divisor do ARPU mensal usado no payback.
+    const [observed] = await tx
+      .select({
+        months: sql<number>`count(distinct to_char(${payments.occurredAt} at time zone ${TIMEZONE}, 'YYYY-MM'))::int`,
+      })
+      .from(payments)
+      .where(sql`${payments.status} <> 'FAILED'`);
+    const observedMonths = Math.max(1, observed?.months ?? 0);
+    const hasPayments = (observed?.months ?? 0) > 0;
+
+    // Mesma chave de `marketing()`: não mapeado nunca é fundido com outro canal.
+    const byKey = new Map<string, { students: number; converted: number; receivedCents: number }>();
+    for (const row of originRows) {
+      const canonical = canonicalChannel(row.source, row.medium);
+      const key = canonical.mapped ? canonical.channel : `${UNMAPPED_CHANNEL}:${canonical.raw}`;
+      const current = byKey.get(key) ?? { students: 0, converted: 0, receivedCents: 0 };
+      byKey.set(key, {
+        students: current.students + row.students,
+        converted: current.converted + row.converted,
+        receivedCents: current.receivedCents + this.number(row.received_cents),
+      });
+    }
+
+    const economics = publishable.map((channel): ChannelEconomics => {
+      const key = channel.mapped ? channel.channel : `${UNMAPPED_CHANNEL}:${channel.raw}`;
+      const totals = byKey.get(key) ?? { students: 0, converted: 0, receivedCents: 0 };
+      // Só canal canônico recebe investimento: `nao_mapeado` é erro de marcação, e lançar
+      // gasto contra ele esconderia justamente o erro que a US-8.2 quis deixar visível.
+      const investmentCents = channel.mapped ? (spendByChannel.get(channel.channel) ?? 0) : 0;
+      const invested = investmentCents > 0;
+      const investmentBrl = invested ? investmentCents / 100 : null;
+      const receivedBrl = totals.receivedCents / 100;
+      const window = `Convertidos em até ${ATTRIBUTION_WINDOW_DAYS} dias após o cadastro, atribuídos ao canal de primeiro toque.`;
+      const noInvestment = `Sem investimento direto registrado em \`ad_spend\` para este canal — não há numerador. Exibir R$ 0,00 seria falso.`;
+
+      const cac =
+        !invested || investmentBrl === null
+          ? this.unavailable('BRL', noInvestment)
+          : totals.converted === 0
+            ? this.unavailable(
+                'BRL',
+                `Investimento registrado, mas nenhum convertido neste canal dentro da janela (${ATTRIBUTION_WINDOW_DAYS} dias): sem denominador não há CAC.`,
+              )
+            : this.metric(
+                investmentBrl / totals.converted,
+                'BRL',
+                'AVAILABLE',
+                `Investimento em mídia do canal ÷ alunos convertidos originados nele. ${window}`,
+              );
+
+      const receivedRevenue = hasPayments
+        ? this.metric(
+            receivedBrl,
+            'BRL',
+            'AVAILABLE',
+            'Receita efetivamente liquidada no gateway pelos titulares originados neste canal, líquida de estornos e chargebacks. Não é receita contratada.',
+          )
+        : this.unavailable(
+            'BRL',
+            'Nenhuma liquidação registrada em `payments` ainda — sem receita recebida não há ROAS.',
+          );
+
+      const roas =
+        !invested || investmentBrl === null
+          ? this.unavailable('RATIO', noInvestment)
+          : !hasPayments
+            ? this.unavailable('RATIO', 'Sem liquidação registrada não existe retorno a dividir.')
+            : this.metric(
+                receivedBrl / investmentBrl,
+                'RATIO',
+                'AVAILABLE',
+                'Receita RECEBIDA atribuída ao canal ÷ investimento em mídia do canal. Nunca receita contratada.',
+              );
+
+      // LTV é receita recebida acumulada por convertido. Com poucas coortes maduras isso é
+      // hipótese, não medida — e o status diz isso em vez de a tela fingir precisão.
+      const ltvBase = `LTV = receita recebida acumulada do canal ÷ convertidos do canal. Sustentado por ${matureCohorts} coorte(s) de entrada com ao menos ${MATURE_COHORT_MONTHS} meses de maturidade.`;
+      const ltvStatus = matureCohorts >= 3 ? 'AVAILABLE' : 'PROXY';
+      const ltv =
+        !hasPayments || totals.converted === 0
+          ? this.unavailable(
+              'BRL',
+              'Sem convertidos com liquidação neste canal não há base para estimar LTV.',
+            )
+          : this.metric(
+              receivedBrl / totals.converted,
+              'BRL',
+              ltvStatus,
+              matureCohorts >= 3
+                ? ltvBase
+                : `${ltvBase} Baixa confiança: menos de 3 coortes maduras — é hipótese, não medida.`,
+            );
+
+      const ltvToCac =
+        ltv.value === null || cac.value === null || cac.value === 0
+          ? this.unavailable(
+              'RATIO',
+              invested
+                ? 'Falta LTV ou CAC para a razão — o número não é calculável, e zero seria mentira.'
+                : noInvestment,
+            )
+          : this.metric(
+              ltv.value / cac.value,
+              'RATIO',
+              ltvStatus,
+              `LTV ÷ CAC do canal, contra a meta ≥ ${LTV_TO_CAC_TARGET} de Eduardo. ${ltvBase}`,
+            );
+
+      const monthlyArpu = ltv.value === null ? null : ltv.value / observedMonths;
+      const paybackMonths =
+        cac.value === null || monthlyArpu === null || monthlyArpu <= 0
+          ? this.unavailable(
+              'MONTHS',
+              invested
+                ? 'Sem CAC ou sem receita mensal por convertido não há prazo de retorno.'
+                : noInvestment,
+            )
+          : this.metric(
+              cac.value / monthlyArpu,
+              'MONTHS',
+              ltvStatus,
+              `CAC ÷ receita recebida média por convertido por mês (${observedMonths} mês(es) de liquidação observados), contra a meta ≤ ${PAYBACK_TARGET_MONTHS} meses de Eduardo.`,
+            );
+
+      let signal: ChannelSignal = 'UNKNOWN';
+      if (ltvToCac.value !== null && paybackMonths.value !== null) {
+        signal =
+          ltvToCac.value >= LTV_TO_CAC_TARGET && paybackMonths.value <= PAYBACK_TARGET_MONTHS
+            ? 'GREEN'
+            : ltvToCac.value >= 1
+              ? 'ATTENTION'
+              : 'CRITICAL';
+      }
+
+      return {
+        channel: channel.channel,
+        mapped: channel.mapped,
+        students: channel.count,
+        converted: totals.converted,
+        investmentBrl,
+        investmentStatus: invested ? 'INVESTED' : 'NO_DIRECT_INVESTMENT',
+        cac,
+        receivedRevenue,
+        roas,
+        ltv,
+        ltvToCac,
+        paybackMonths,
+        signal,
+      };
+    });
+
+    return { economics, mediaInvestmentBrl };
   }
 
   private metric(

@@ -22,7 +22,7 @@ export type DataAvailability = z.infer<typeof dataAvailabilitySchema>;
 
 export const controlCenterMetricSchema = z.object({
   value: z.number().finite().nullable(),
-  unit: z.enum(['COUNT', 'PERCENT', 'BRL', 'MILLISECONDS', 'MINUTES']),
+  unit: z.enum(['COUNT', 'PERCENT', 'BRL', 'MILLISECONDS', 'MINUTES', 'RATIO', 'MONTHS']),
   status: dataAvailabilitySchema,
   definition: z.string().min(1),
 });
@@ -174,6 +174,69 @@ export const acquisitionChannelSchema = z.object({
 export type AcquisitionChannel = z.infer<typeof acquisitionChannelSchema>;
 
 /**
+ * Janela de atribuição declarada (US-8.6 / TASK-8.6.2). Quem viu o anúncio em maio pode
+ * converter em junho: CAC de mês-calendário sobre conversão do mesmo mês está errado. A
+ * atribuição é por **coorte de origem**, e a janela vai na resposta — nunca fica implícita.
+ */
+export const ATTRIBUTION_WINDOW_DAYS = 60;
+
+/** Meses para uma coorte de entrada ser considerada madura o bastante para sustentar LTV. */
+export const MATURE_COHORT_MONTHS = 3;
+
+/** Metas de Eduardo (`07-relatorio-eduardo.md`). */
+export const LTV_TO_CAC_TARGET = 3;
+export const PAYBACK_TARGET_MONTHS = 3;
+
+/**
+ * Semáforo de origem contra as metas. `UNKNOWN` quando falta numerador ou denominador —
+ * um canal sem investimento não é verde nem vermelho, é uma pergunta sem dado.
+ */
+export const channelSignalSchema = z.enum(['GREEN', 'ATTENTION', 'CRITICAL', 'UNKNOWN']);
+export type ChannelSignal = z.infer<typeof channelSignalSchema>;
+
+/**
+ * Economia por canal de origem (US-8.6): CAC, ROAS e LTV/CAC.
+ *
+ * Três regras que o contrato impõe:
+ *  - `investmentBrl` é **nulo** quando não houve investimento no canal, e o rótulo é
+ *    "sem investimento direto". `R$ 0,00` seria um número bonito e falso, e um CAC
+ *    dividido por zero é infinito disfarçado.
+ *  - ROAS usa receita **recebida** (`payments`, US-8.5), nunca contratada — ROAS sobre
+ *    dinheiro que não entrou é o que faz escalar um anúncio ruim.
+ *  - só entram canais com `students >= 10`; não há drill-down até o aluno.
+ */
+export const channelEconomicsSchema = z.object({
+  channel: z.string().min(1),
+  mapped: z.boolean(),
+  students: kAnonymousCount,
+  /** Convertidos dentro da janela de atribuição declarada em `attributionWindowDays`. */
+  converted: z.number().int().nonnegative(),
+  /** Nulo = sem investimento direto no canal. Nunca zero. */
+  investmentBrl: z.number().nonnegative().nullable(),
+  investmentStatus: z.enum(['INVESTED', 'NO_DIRECT_INVESTMENT']),
+  cac: controlCenterMetricSchema,
+  receivedRevenue: controlCenterMetricSchema,
+  roas: controlCenterMetricSchema,
+  ltv: controlCenterMetricSchema,
+  ltvToCac: controlCenterMetricSchema,
+  paybackMonths: controlCenterMetricSchema,
+  signal: channelSignalSchema,
+});
+export type ChannelEconomics = z.infer<typeof channelEconomicsSchema>;
+
+/** Linha do extrato de investimento em mídia (US-8.6). Estorno aparece como linha própria. */
+export const adSpendEntrySchema = z.object({
+  id: z.uuid(),
+  channel: z.string().min(1),
+  campaign: z.string().min(1),
+  spentOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  amountCents: z.number().int(),
+  reversesAdSpendId: z.uuid().nullable(),
+  createdAt: z.iso.datetime(),
+});
+export type AdSpendEntry = z.infer<typeof adSpendEntrySchema>;
+
+/**
  * Funil trial→ativo (US-8.3, TASK-8.3.4), lido de `user_status_transitions`.
  *
  * `UNAVAILABLE` com `reason` preenchido quando a amostra é pequena demais para publicar —
@@ -212,6 +275,14 @@ export const controlCenterMarketingResponseSchema = z.object({
     acquisitionChannels: z.array(acquisitionChannelSchema),
     /** Canais omitidos por caírem entre 1 e 9 cadastros. */
     suppressedChannels: z.number().int().nonnegative(),
+    /** CAC, ROAS e LTV/CAC por canal (US-8.6). Só canais publicáveis sob k-anonimato. */
+    channelEconomics: z.array(channelEconomicsSchema),
+    /** Janela de atribuição usada no numerador de conversão. Sempre visível na tela. */
+    attributionWindowDays: z.number().int().positive(),
+    /** Coortes de entrada com pelo menos `MATURE_COHORT_MONTHS` de maturidade. */
+    matureCohorts: z.number().int().nonnegative(),
+    /** Investimento total em mídia registrado em `ad_spend`, líquido de estornos. */
+    mediaInvestmentBrl: z.number(),
     /** Sessões anteriores à US-8.2, sem origem capturada. Nunca inferidas como orgânicas. */
     attributionNotCaptured: z.number().int().nonnegative(),
     /** Funil trial→ativo e tempo mediano até a conversão (US-8.3). */

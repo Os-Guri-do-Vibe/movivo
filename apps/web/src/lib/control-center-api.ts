@@ -21,6 +21,8 @@ import {
   type ControlCenterStudentDetailResponse,
   type ControlCenterStudentsResponse,
   type ControlCenterSystemResponse,
+  partnerDistributionResponseSchema,
+  type PartnerDistributionResponse,
 } from '@movivo/shared';
 
 interface Parser<T> {
@@ -166,4 +168,12 @@ export function rollbackAgentPersona(
   input: RollbackAgentConfigInput,
 ): Promise<AgentPersonaResponse> {
   return mutate('ai/persona/rollback', input, agentPersonaResponseSchema);
+}
+
+/* ------------------------- Sócios & Distribuição (US-8.7) ------------------------- */
+
+export function getPartnerDistribution(
+  signal?: AbortSignal,
+): Promise<PartnerDistributionResponse> {
+  return request('partners', partnerDistributionResponseSchema, signal);
 }

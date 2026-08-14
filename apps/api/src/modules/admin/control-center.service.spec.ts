@@ -523,6 +523,75 @@ describe('ControlCenterService projections', () => {
   });
 
   /**
+   * US-8.6 — CAC, ROAS e LTV/CAC por canal. Confere contra o cálculo manual (tolerância 0)
+   * e prova a regra que a DoD mede: canal sem investimento **nunca** exibe R$ 0,00.
+   *
+   * `execute` em ordem: conversão de trial, coortes de entrada, origem por titular.
+   */
+  it('calcula CAC/ROAS/LTV-CAC por canal e nunca publica CAC zero em canal sem investimento', async () => {
+    withExecute(
+      [{ trials: 60, converted: 15, median_days: '5', reconstructed: 0 }],
+      [],
+      [
+        { source: 'instagram', medium: 'cpc', students: 40, converted: 10, received_cents: '400000' },
+        { source: 'organico', medium: null, students: 20, converted: 5, received_cents: '100000' },
+      ],
+    );
+    const { service } = serviceWithSystemResults(
+      ...marketingHead({
+        formStarted: 60,
+        formSubmitted: 50,
+        protocolActive: 40,
+        subscriptionActive: 30,
+      }),
+      [],
+      [],
+      [],
+      [],
+      // Aquisição por canal (US-8.2) e origem não capturada.
+      [
+        { source: 'instagram', medium: 'cpc', total: 40 },
+        { source: 'organico', medium: null, total: 20 },
+      ],
+      [{ total: 0 }],
+      // `ad_spend` agregado por canal: só mídia paga tem investimento.
+      [{ channel: 'meta_ads', cents: '200000' }],
+      // Meses distintos com liquidação — divisor do ARPU mensal do payback.
+      [{ months: 2 }],
+    );
+
+    const response = await service.marketing();
+    const economics = response.data.channelEconomics;
+    const paid = economics.find((channel) => channel.channel === 'meta_ads');
+    const organic = economics.find((channel) => channel.channel === 'organico');
+
+    expect(response.data.attributionWindowDays).toBe(60);
+    expect(response.data.mediaInvestmentBrl).toBe(2000);
+
+    // R$2.000 ÷ 10 convertidos = R$200 de CAC; R$4.000 recebidos ÷ R$2.000 = ROAS 2.
+    expect(paid?.investmentBrl).toBe(2000);
+    expect(paid?.cac.value).toBe(200);
+    expect(paid?.roas.value).toBe(2);
+    expect(paid?.receivedRevenue.value).toBe(4000);
+    // LTV = R$4.000 ÷ 10; sem coorte madura a estimativa NÃO pode sair como disponível.
+    expect(paid?.ltv.value).toBe(400);
+    expect(paid?.ltv.status).toBe('PROXY');
+    expect(paid?.ltvToCac.value).toBe(2);
+    // Payback = CAC ÷ (LTV ÷ 2 meses observados) = 200 ÷ 200 = 1 mês.
+    expect(paid?.paybackMonths.value).toBe(1);
+    expect(paid?.signal).toBe('ATTENTION');
+
+    // Canal orgânico: rótulo, nunca zero — dividir por zero produz um número bonito e falso.
+    expect(organic?.investmentBrl).toBeNull();
+    expect(organic?.investmentStatus).toBe('NO_DIRECT_INVESTMENT');
+    expect(organic?.cac).toMatchObject({ value: null, status: 'UNAVAILABLE' });
+    expect(organic?.roas).toMatchObject({ value: null, status: 'UNAVAILABLE' });
+    expect(organic?.signal).toBe('UNKNOWN');
+
+    expect(controlCenterMarketingResponseSchema.safeParse(response).success).toBe(true);
+  });
+
+  /**
    * Ordem dos `select` em `finance()`: billing, planos, calendário, risco, churn, despesas,
    * e — desde a US-8.5 — liquidação por mês, prazo médio e fila de exceção.
    */

@@ -90,12 +90,19 @@ describe('MarketingDashboard', () => {
     expect(screen.queryByText('Maior queda do funil')).not.toBeInTheDocument();
   });
 
-  it('declara a dependência de UTM em vez de exibir CAC por canal', async () => {
+  it('exibe CAC/ROAS por canal e nunca R$ 0,00 em canal sem investimento (US-8.6)', async () => {
     getMarketing.mockResolvedValue(marketingResponse);
     render(<MarketingDashboard />);
     expect(await screen.findByRole('heading', { name: 'Aquisição & Canais' })).toBeVisible();
-    expect(screen.getByText(/previstas para a Sprint 8/)).toBeVisible();
-    expect(screen.getByText('CAC por canal')).toBeVisible();
+    // Janela de atribuição declarada na tela, nunca implícita.
+    expect(screen.getByText(/convertidos em até 60 dias após o cadastro/i)).toBeVisible();
+    // Canal com investimento: CAC em reais.
+    expect(screen.getByText('R$ 100,00')).toBeVisible();
+    // Canal orgânico: rótulo textual, jamais um valor monetário zerado.
+    expect(screen.getByText('sem investimento direto')).toBeVisible();
+    expect(screen.queryByText('R$ 0,00')).not.toBeInTheDocument();
+    // Maturidade do LTV declarada quando há menos de 3 coortes maduras.
+    expect(screen.getByText(/baixa confiança/i)).toBeVisible();
   });
 
   it('renderiza a sazonalidade de cadastro, não de mensagens', async () => {
