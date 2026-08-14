@@ -441,8 +441,8 @@ function SidebarBody({
     <>
       <div
         className={cn(
-          'flex h-16 shrink-0 items-center gap-3 border-b border-[var(--petroleo-borda)]/40 p-4',
-          collapsed && 'justify-center px-0',
+          'flex h-16 shrink-0 items-center justify-center gap-3 border-b border-[var(--petroleo-borda)]/40 p-4',
+          collapsed && 'px-0',
         )}
       >
         {collapsed ? (
