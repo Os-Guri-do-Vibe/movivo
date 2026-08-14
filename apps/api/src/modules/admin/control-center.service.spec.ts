@@ -6,6 +6,7 @@ import type {
   ControlCenterSystemResponse,
 } from '@movivo/shared';
 import { controlCenterMarketingResponseSchema } from '@movivo/shared';
+import { getTableName, isTable } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AgentConfigRepository } from '../../core/agent-config/agent-config.repository';
@@ -19,9 +20,18 @@ import { RedisKeyBuilder } from '../../core/redis';
 import type { AuditService } from './audit.service';
 import { ControlCenterService } from './control-center.service';
 
+/**
+ * Tabelas alcançadas por `.from(...)` desde o último `serviceWithSystemResults`. Existe
+ * para a regra anti-dupla-contagem da TASK-8.9.4: `finance()` não pode ler `ad_spend`.
+ */
+const touchedTables: string[] = [];
+
 function query(rows: unknown[]) {
   const chain = {
-    from: () => chain,
+    from: (table?: unknown) => {
+      if (isTable(table)) touchedTables.push(getTableName(table));
+      return chain;
+    },
     leftJoin: () => chain,
     innerJoin: () => chain,
     where: () => chain,
@@ -61,6 +71,7 @@ function serviceWithSystemResults(...results: unknown[][]) {
   select.mockImplementation(() => query([]));
   const executeQueue = [...nextExecuteRows];
   nextExecuteRows = [];
+  touchedTables.length = 0;
   const tx = { select, execute: vi.fn(async () => executeQueue.shift() ?? []) };
   const db = {
     runAsSystem: vi.fn((callback: (value: unknown) => Promise<unknown>) => callback(tx)),
@@ -790,6 +801,24 @@ describe('ControlCenterService projections', () => {
     // Regime declarado: proxy contratado enquanto NÃO houver liquidação em `payments`.
     expect(response.data.profit.status).toBe('PROXY');
     expect(response.data.profitBasis).toBe('CONTRATADO_PROXY');
+  });
+
+  /**
+   * TASK-8.9.4 — dupla contagem de gasto de mídia = 0. `ad_spend` é a fonte de verdade do
+   * investimento por canal e a categoria `MARKETING` de `expenses` cobre marketing que não
+   * é mídia direta; as duas nunca descrevem o mesmo real. A regra é uma frase de docstring
+   * até virar teste: se alguém somar `ad_spend` ao custo do Financeiro, cada real de mídia
+   * passa a entrar duas vezes no lucro — número plausível e errado, a pior classe de bug
+   * desta sprint.
+   */
+  it('finance() não lê `ad_spend`: gasto de mídia entra uma única vez, pelo Marketing (US-8.6)', async () => {
+    withExecute(aiCostRows());
+    const { service } = serviceWithSystemResults(...financeResults());
+
+    await service.finance();
+
+    expect(touchedTables).toContain('expenses');
+    expect(touchedTables).not.toContain('ad_spend');
   });
 
   it('com liquidação registrada o lucro passa a regime de CAIXA e a taxa do gateway vira custo (US-8.5)', async () => {

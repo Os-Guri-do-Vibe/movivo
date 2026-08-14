@@ -56,6 +56,16 @@ const EXPECTED_TABLES = [
   'reengagement_nudges',
   // Sprint 7 (US-7.6): persona do agente, append-only.
   'agent_config',
+  // Sprint 8: treino concluido (US-8.1), historico de estado (US-8.3), despesa e
+  // preco de modelo versionado (US-8.4), pagamento liquidado (US-8.5), investimento
+  // por canal (US-8.6) e cap table (US-8.7).
+  'workout_completions',
+  'user_status_transitions',
+  'expenses',
+  'model_pricing',
+  'payments',
+  'ad_spend',
+  'partners',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;

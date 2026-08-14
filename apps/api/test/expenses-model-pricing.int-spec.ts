@@ -91,12 +91,14 @@ afterAll(async () => {
 
 describe('expenses append-only (US-8.4)', () => {
   it('a role de runtime não consegue alterar nem apagar uma despesa', async () => {
+    // drizzle-orm 0.45 embrulha o erro do driver em `DrizzleQueryError`; o SQLSTATE
+    // do Postgres vive em `.cause.code`, não no topo do erro lançado.
     await expect(
       app.execute(sql`UPDATE public.expenses SET amount_cents = 1 WHERE id = ${expenseId}::uuid`),
-    ).rejects.toMatchObject({ code: '42501' });
+    ).rejects.toMatchObject({ cause: { code: '42501' } });
     await expect(
       app.execute(sql`DELETE FROM public.expenses WHERE id = ${expenseId}::uuid`),
-    ).rejects.toMatchObject({ code: '42501' });
+    ).rejects.toMatchObject({ cause: { code: '42501' } });
   });
 
   it('o trigger barra a alteração mesmo para quem ainda tem o privilégio', async () => {

@@ -70,6 +70,20 @@ describe('REDACT_PATHS (redação estrutural do pino)', () => {
     }
   });
 
+  // TASK-8.9.1 (Sato): o payload bruto do gateway trafega no `data` do job de conciliação
+  // e o `DeadLetterRecord` copia `job.data` inteiro. Redigir pelo nome do campo fecha o
+  // vazamento para qualquer handler de DLQ futuro que serialize o record.
+  it('redige o payload bruto do gateway de pagamento, na raiz e dentro de `data`', () => {
+    for (const path of ['rawPayload', 'data.rawPayload', 'raw_payload']) {
+      expect(REDACT_PATHS).toContain(path);
+    }
+    const record = redactObject({
+      queue: 'payment-reconciliation',
+      data: { rawPayload: { card: '4111111111111111' } },
+    });
+    expect(JSON.stringify(record)).not.toContain('4111111111111111');
+  });
+
   it('não contém caminhos duplicados', () => {
     expect(new Set(REDACT_PATHS).size).toBe(REDACT_PATHS.length);
   });
