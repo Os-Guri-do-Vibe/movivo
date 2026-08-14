@@ -4,7 +4,7 @@
  * Não basta checar que as 9 tabelas existem no banco de dev (que já foi migrado ao vivo):
  * isso não provaria que `0000_init` aplica-se do zero. Este teste cria um banco
  * **descartável** dentro do Postgres do Compose, aplica a migração versionada nele com a
- * role `movivo_migrator` e só então conta as 9 tabelas-base. Ao final, derruba o banco.
+ * role `movivo_migrator` e só então confere todas as tabelas de domínio. Ao final, derruba o banco.
  *
  * Extensões (`vector`, `uuid-ossp`, `pgcrypto`) são criadas pelo superusuário — `pgvector`
  * não é uma extensão "trusted", então `movivo_migrator` não poderia criá-la sozinha; no
@@ -66,6 +66,12 @@ const EXPECTED_TABLES = [
   'payments',
   'ad_spend',
   'partners',
+  // Sprint 9: configuracao segura da IA e pipeline de curadoria do RAG.
+  'faq_entries',
+  'ai_guardrail_rules',
+  'knowledge_documents',
+  'knowledge_document_blobs',
+  'knowledge_document_reviews',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;
@@ -144,8 +150,8 @@ afterAll(async () => {
   }
 });
 
-describe('migração 0000_init num Postgres limpo', () => {
-  it('aplica a migração versionada como movivo_migrator e cria exatamente as 9 tabelas-base', async () => {
+describe('migração versionada num Postgres limpo', () => {
+  it('aplica todas as migrações como movivo_migrator e cria exatamente as tabelas esperadas', async () => {
     const client = connect(throwawayDb, migratorUser, migratorPassword);
     try {
       await migrate(drizzle(client), { migrationsFolder: resolve(apiRoot, 'drizzle') });
