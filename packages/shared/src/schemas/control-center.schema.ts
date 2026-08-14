@@ -681,6 +681,44 @@ export const controlCenterReceivedByMonthSchema = z.object({
 });
 export type ControlCenterReceivedByMonth = z.infer<typeof controlCenterReceivedByMonthSchema>;
 
+export const financialProjectionMonthSchema = z.object({
+  month: z.string().regex(/^\d{4}-\d{2}$/),
+  projectedRevenueBrl: z.number(),
+  projectedCostBrl: z.number(),
+  projectedResultBrl: z.number(),
+});
+
+export const financialProjectionScenarioSchema = z.object({
+  scenario: z.enum(['CONSERVATIVE', 'BASE', 'OPTIMISTIC']),
+  revenueFactor: z.number().positive(),
+  costFactor: z.number().positive(),
+  months: z.array(financialProjectionMonthSchema).length(3),
+  totalRevenueBrl: z.number(),
+  totalCostBrl: z.number(),
+  totalResultBrl: z.number(),
+});
+
+export const financialProjectionSchema = z
+  .object({
+    status: z.enum(['AVAILABLE', 'UNAVAILABLE']),
+    basisMonths: z.array(z.string().regex(/^\d{4}-\d{2}$/)).max(3),
+    horizonMonths: z.literal(3),
+    method: z.string(),
+    reason: z.string().nullable(),
+    scenarios: z.array(financialProjectionScenarioSchema).max(3),
+  })
+  .superRefine((projection, context) => {
+    const expected = projection.status === 'AVAILABLE' ? 3 : 0;
+    if (projection.scenarios.length !== expected) {
+      context.addIssue({
+        code: 'custom',
+        path: ['scenarios'],
+        message: `projecao ${projection.status} exige ${expected} cenarios`,
+      });
+    }
+  });
+export type FinancialProjection = z.infer<typeof financialProjectionSchema>;
+
 /**
  * Fila de exceção da conciliação (US-8.5 / TASK-8.5.3): liquidação **autenticada** cuja
  * assinatura não foi encontrada. Existe para que esse evento nunca seja descartado em
@@ -733,6 +771,8 @@ export const controlCenterFinanceResponseSchema = z.object({
      * **nunca** é somada com ela — ver `controlCenterReceivedByMonthSchema`.
      */
     receivedRevenueByMonth: z.array(controlCenterReceivedByMonthSchema),
+    /** Cenarios separados do realizado, baseados apenas em meses fechados. */
+    projection: financialProjectionSchema,
     /**
      * Inadimplência do período: cobranças que falharam sobre o total de tentativas
      * (falhas + liquidações) no mês corrente.

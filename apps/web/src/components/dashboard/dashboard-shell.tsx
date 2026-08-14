@@ -121,12 +121,10 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         capabilities: ['control_center.finance.read'],
       },
       {
+        href: '/dashboard/projecao',
         label: 'Resultado & Projeção',
         icon: Calculator,
         capabilities: ['control_center.finance.read'],
-        // US-8.8: o resultado realizado (lucro do período) virou número na US-8.4/8.5 e
-        // já sai em Receita & Assinaturas; o que falta aqui é só a projeção com cenários.
-        soon: 'Sprint 11 · projeção com cenários',
       },
       {
         // Cap table e distribuição não são do setor financeiro: exigem

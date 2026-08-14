@@ -76,6 +76,7 @@ import { roleHasCapabilities } from '../auth/capabilities';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { AuditService } from './audit.service';
 import { assessChurnRisk, CHURN_RISK_THRESHOLDS } from './churn-risk';
+import { buildFinancialProjection } from './financial-projection';
 
 const TIMEZONE = 'America/Sao_Paulo' as const;
 const MINIMUM_SEGMENT_SIZE = 10;
@@ -2433,6 +2434,7 @@ export class ControlCenterService {
 
         // ---- Liquidação recebida (US-8.5) ----
         receivedRevenueByMonth,
+        projection: buildFinancialProjection(costByMonth, receivedRevenueByMonth, currentMonth),
         delinquencyRate:
           attempts === 0
             ? this.unavailable(

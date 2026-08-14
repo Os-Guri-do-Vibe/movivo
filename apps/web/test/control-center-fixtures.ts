@@ -322,6 +322,31 @@ export const financeResponse: ControlCenterFinanceResponse = {
       { month: '2026-07', grossBrl: 1400, netBrl: 1344, settlements: 36 },
       { month: '2026-08', grossBrl: 1500, netBrl: 1440, settlements: 39 },
     ],
+    projection: {
+      status: 'AVAILABLE',
+      basisMonths: ['2026-07'],
+      horizonMonths: 3,
+      method: 'Media mensal de meses fechados.',
+      reason: null,
+      scenarios: (
+        [
+          { scenario: 'CONSERVATIVE', revenueFactor: 0.9, costFactor: 1.1 },
+          { scenario: 'BASE', revenueFactor: 1, costFactor: 1 },
+          { scenario: 'OPTIMISTIC', revenueFactor: 1.1, costFactor: 0.95 },
+        ] as const
+      ).map((scenario) => ({
+          ...scenario,
+          months: ['2026-09', '2026-10', '2026-11'].map((month) => ({
+            month,
+            projectedRevenueBrl: 1400,
+            projectedCostBrl: 150,
+            projectedResultBrl: 1250,
+          })),
+          totalRevenueBrl: 4200,
+          totalCostBrl: 450,
+          totalResultBrl: 3750,
+        })),
+    },
     delinquencyRate: metric({ value: 7.1, unit: 'PERCENT' }),
     averageSettlementDays: metric({ value: 2.3, unit: 'COUNT' }),
     gatewayFee: metric({ value: 60, unit: 'BRL' }),
