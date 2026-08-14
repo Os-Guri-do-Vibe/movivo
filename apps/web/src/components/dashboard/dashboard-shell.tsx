@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  Bot,
   Calculator,
   ChevronDown,
   CircleGauge,
@@ -172,7 +173,7 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         // configuração, só a navegação foi unificada.
         href: '/dashboard/ia/agente',
         label: 'Agente',
-        icon: Sparkles,
+        icon: Bot,
         capabilities: ['control_center.ai.config.read'],
       },
     ],
