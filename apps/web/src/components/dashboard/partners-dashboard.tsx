@@ -47,6 +47,15 @@ export function PartnersDashboard() {
         onRefresh={() => void refresh()}
       />
 
+      {/* Uma atualização que falha depois do primeiro carregamento não pode ser silenciosa:
+          o valor na tela passa a ser antigo, e num setor financeiro isso engana. Mesmo
+          banner dos demais setores do Control Center. */}
+      {error ? (
+        <p role="alert" className="mt-4 rounded-lg border border-coral bg-card p-3 text-label">
+          {error}
+        </p>
+      ) : null}
+
       <section
         aria-label="Lucro do período"
         className="mt-6 rounded-xl border border-border bg-card p-5"

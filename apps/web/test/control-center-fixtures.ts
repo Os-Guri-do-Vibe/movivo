@@ -15,7 +15,10 @@ import type {
   ControlCenterStudentDetailResponse,
   ControlCenterStudentsResponse,
   ControlCenterSystemResponse,
+  KnowledgeDocumentsResponse,
+  PartnerDistributionResponse,
 } from '@movivo/shared';
+import { PARTNER_DISTRIBUTION_CAVEATS } from '@movivo/shared';
 
 export const controlCenterMeta: ControlCenterOverviewResponse['meta'] = {
   generatedAt: '2026-08-11T15:00:00.000Z',
@@ -678,6 +681,76 @@ export const complianceResponse: ControlCenterComplianceResponse = {
         createdAt: '2026-08-11T14:30:00.000Z',
       },
     ],
+  },
+  meta: { ...controlCenterMeta, dataQuality: [...controlCenterMeta.dataQuality] },
+};
+
+/**
+ * Cap table fechado (10.000 bps) com lucro apurado. As ressalvas vêm da constante do
+ * contrato, não de texto solto: é assim que a rota real responde.
+ */
+export const partnerDistributionResponse: PartnerDistributionResponse = {
+  data: {
+    period: '2026-08',
+    profitCents: 500_000,
+    profitAvailable: true,
+    profitDefinition: 'Receita reconhecida menos despesas lançadas no período.',
+    partners: [
+      {
+        id: '33333333-3333-4333-8333-333333333333',
+        name: 'Rodrigo',
+        shareBasisPoints: 6000,
+        validFrom: '2026-01-01',
+        validTo: null,
+        notes: null,
+        amountCents: 300_000,
+      },
+      {
+        id: '44444444-4444-4444-8444-444444444444',
+        name: 'Pedro',
+        shareBasisPoints: 4000,
+        validFrom: '2026-01-01',
+        validTo: null,
+        notes: null,
+        amountCents: 200_000,
+      },
+    ],
+    totalBasisPoints: 10_000,
+    caveats: [...PARTNER_DISTRIBUTION_CAVEATS],
+  },
+  meta: { ...controlCenterMeta, dataQuality: [...controlCenterMeta.dataQuality] },
+};
+
+/** Um documento em quarentena, ainda não indexado — o estado padrão do corpus. */
+export const knowledgeDocumentsResponse: KnowledgeDocumentsResponse = {
+  data: {
+    documents: [
+      {
+        id: '55555555-5555-4555-8555-555555555555',
+        title: 'Guia de descanso entre séries',
+        topic: 'descanso',
+        sourceUrl: null,
+        originalFilename: 'guia.md',
+        mimeType: 'text/markdown',
+        sizeBytes: 120,
+        sha256: 'a'.repeat(64),
+        status: 'PENDING',
+        uploadedBy: 'Rodrigo',
+        reviewer: null,
+        reviewNote: null,
+        createdAt: '2026-08-11T15:00:00.000Z',
+        reviewedAt: null,
+        retainedUntil: '2026-09-10T15:00:00.000Z',
+        blobAvailable: true,
+        chunkCount: 0,
+      },
+    ],
+    policy: {
+      allowedTypes: ['text/plain', 'text/markdown'],
+      maxBytes: 524_288,
+      quarantineDays: 30,
+      approvedOriginalDays: 365,
+    },
   },
   meta: { ...controlCenterMeta, dataQuality: [...controlCenterMeta.dataQuality] },
 };
