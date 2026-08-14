@@ -242,7 +242,7 @@ export function MarketingDashboard() {
         <p className="mt-4 text-xs text-muted-foreground">{data.acquisition.definition}</p>
       </section>
 
-      <section aria-labelledby="audience-title" className="mt-8">
+      <section id="publico-agregado" aria-labelledby="audience-title" className="mt-8">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 id="audience-title" className="text-h2 font-bold">

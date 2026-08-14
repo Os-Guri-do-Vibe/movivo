@@ -94,10 +94,12 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         capabilities: ['control_center.students.read', 'control_center.students.health.read'],
       },
       {
+        // US-8.3 entregou entryCohorts/trialConversion; a tabela vive dentro de
+        // Financeiro (mesmo dado de coorte de receita), não numa tela própria.
+        href: '/dashboard/financeiro#coortes',
         label: 'Coortes & Retenção',
         icon: Repeat,
-        capabilities: ['control_center.students.read'],
-        soon: 'Sprint 7 · US-7.4',
+        capabilities: ['control_center.finance.read'],
       },
     ],
   },
@@ -111,10 +113,12 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         capabilities: ['control_center.finance.read'],
       },
       {
+        // US-8.4 entregou costByCategory/costByMonth; a seção vive dentro da
+        // mesma tela de Financeiro, não numa rota própria.
+        href: '/dashboard/financeiro#custos',
         label: 'Custos',
         icon: Coins,
         capabilities: ['control_center.finance.read'],
-        soon: 'Sprint 7 · US-7.2',
       },
       {
         label: 'Resultado & Projeção',
@@ -147,10 +151,12 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         capabilities: ['control_center.marketing.read'],
       },
       {
+        // "Público agregado" (segments por objetivo/local/período/faixa etária) já
+        // existe desde a Sprint 7 na mesma tela de Aquisição & Canais.
+        href: '/dashboard/analytics#publico-agregado',
         label: 'Perfil de clientes',
         icon: Target,
         capabilities: ['control_center.marketing.read'],
-        soon: 'Sprint 7 · US-7.3',
       },
       {
         label: 'Campanhas & Experimentos',
