@@ -11,12 +11,14 @@ const {
   getInviolableRules,
   publishAgentPersona,
   rollbackAgentPersona,
+  simulateAgentConfig,
 } = vi.hoisted(() => ({
   getAgentPersona: vi.fn(),
   getAgentConfigHistory: vi.fn(),
   getInviolableRules: vi.fn(),
   publishAgentPersona: vi.fn(),
   rollbackAgentPersona: vi.fn(),
+  simulateAgentConfig: vi.fn(),
 }));
 vi.mock('@/lib/control-center-api', async (importOriginal) => ({
   ...(await importOriginal<typeof ControlCenterApi>()),
@@ -25,6 +27,7 @@ vi.mock('@/lib/control-center-api', async (importOriginal) => ({
   getInviolableRules,
   publishAgentPersona,
   rollbackAgentPersona,
+  simulateAgentConfig,
 }));
 
 import { AiPersonaDashboard } from './ai-persona';
@@ -100,6 +103,20 @@ beforeEach(() => {
     data: { persona: DEFAULT_AGENT_PERSONA, version: 4 },
     meta,
   });
+  simulateAgentConfig.mockReset().mockResolvedValue({
+    data: {
+      kind: 'PERSONA',
+      passed: true,
+      candidateHash: 'a'.repeat(64),
+      checks: [
+        { id: 'SCHEMA', title: 'Contrato fechado', passed: true, cases: 1, failures: [] },
+        { id: 'GOLDEN_INPUT', title: 'Golden de entrada', passed: true, cases: 14, failures: [] },
+        { id: 'GOLDEN_OUTPUT', title: 'Golden de saída', passed: true, cases: 8, failures: [] },
+        { id: 'PROMPT_INTEGRITY', title: 'Integridade L0', passed: true, cases: 9, failures: [] },
+      ],
+    },
+    meta,
+  });
 });
 
 describe('AiPersonaDashboard', () => {
@@ -127,7 +144,9 @@ describe('AiPersonaDashboard', () => {
     const review = screen.getByRole('button', { name: 'Revisar e publicar' });
     expect(review).toBeDisabled();
     await user.type(screen.getByLabelText('Motivo da mudança'), 'novo nome da agente');
-    expect(screen.getByRole('button', { name: 'Revisar e publicar' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Revisar e publicar' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Executar as 4 etapas' }));
+    expect(await screen.findByRole('button', { name: 'Revisar e publicar' })).toBeEnabled();
   });
 
   it('mostra o diff campo a campo antes de confirmar e publica com a nota', async () => {
@@ -137,6 +156,7 @@ describe('AiPersonaDashboard', () => {
     await user.clear(name);
     await user.type(name, 'NOVA');
     await user.type(screen.getByLabelText('Motivo da mudança'), 'novo nome da agente');
+    await user.click(screen.getByRole('button', { name: 'Executar as 4 etapas' }));
     await user.click(screen.getByRole('button', { name: 'Revisar e publicar' }));
 
     expect(screen.getByText('O que muda nesta publicação')).toBeVisible();
@@ -181,6 +201,7 @@ describe('AiPersonaDashboard', () => {
     await user.clear(name);
     await user.type(name, 'NOVA');
     await user.type(screen.getByLabelText('Motivo da mudança'), 'novo nome da agente');
+    await user.click(screen.getByRole('button', { name: 'Executar as 4 etapas' }));
     await user.click(screen.getByRole('button', { name: 'Revisar e publicar' }));
     await user.click(screen.getByRole('button', { name: 'Confirmar publicação' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Sem permissão.');

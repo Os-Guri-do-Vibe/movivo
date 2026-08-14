@@ -1,12 +1,15 @@
 import {
   agentConfigHistoryResponseSchema,
   agentPersonaResponseSchema,
+  configSimulationResponseSchema,
   inviolableRulesResponseSchema,
   type AgentConfigHistoryResponse,
   type AgentPersonaResponse,
+  type ConfigSimulationResponse,
   type InviolableRulesResponse,
   type PublishAgentConfigInput,
   type RollbackAgentConfigInput,
+  type SimulateAgentConfigInput,
   controlCenterComplianceResponseSchema,
   controlCenterFinanceResponseSchema,
   controlCenterMarketingResponseSchema,
@@ -170,10 +173,14 @@ export function rollbackAgentPersona(
   return mutate('ai/persona/rollback', input, agentPersonaResponseSchema);
 }
 
+export function simulateAgentConfig(
+  input: SimulateAgentConfigInput,
+): Promise<ConfigSimulationResponse> {
+  return mutate('ai/simulate', input, configSimulationResponseSchema);
+}
+
 /* ------------------------- Sócios & Distribuição (US-8.7) ------------------------- */
 
-export function getPartnerDistribution(
-  signal?: AbortSignal,
-): Promise<PartnerDistributionResponse> {
+export function getPartnerDistribution(signal?: AbortSignal): Promise<PartnerDistributionResponse> {
   return request('partners', partnerDistributionResponseSchema, signal);
 }

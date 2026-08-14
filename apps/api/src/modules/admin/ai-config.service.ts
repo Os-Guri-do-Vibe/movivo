@@ -23,7 +23,9 @@ import {
   type AgentConfigHistoryResponse,
   type AgentPersona,
   type AgentPersonaResponse,
+  type ConfigSimulationResponse,
   type InviolableRulesResponse,
+  simulateAgentConfigSchema,
 } from '@movivo/shared';
 import { desc, eq, sql } from 'drizzle-orm';
 import { Redis } from 'ioredis';
@@ -45,6 +47,7 @@ import {
 import { detectInjection } from '../protocol/validation/prompt-injection';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { AuditService } from './audit.service';
+import { simulatePersonaConfig } from './config-simulator';
 
 const TIMEZONE = 'America/Sao_Paulo' as const;
 /** Teto do painel de histórico. Mais antigo que isso é caso de auditoria, não de UI. */
@@ -138,6 +141,11 @@ export class AiConfigService {
     return this.insertVersion(actor, input.payload, input.changeNote, 'ai_config.publish');
   }
 
+  simulate(body: unknown): ConfigSimulationResponse {
+    const input = this.parse(simulateAgentConfigSchema, body);
+    return this.envelope(simulatePersonaConfig(input.candidate));
+  }
+
   async rollback(actor: AuthenticatedUser, body: unknown): Promise<AgentPersonaResponse> {
     const input = this.parse(rollbackAgentConfigSchema, body);
     const [row] = await this.db.runAsSystem((tx) =>
@@ -165,6 +173,14 @@ export class AiConfigService {
     changeNote: string,
     action: string,
   ): Promise<AgentPersonaResponse> {
+    const simulation = simulatePersonaConfig(payload);
+    if (!simulation.passed) {
+      throw new BadRequestException({
+        code: 'CONFIG_SIMULATION_FAILED',
+        message: 'A configuração candidata não passou no simulador e não pode ser publicada.',
+        checks: simulation.checks,
+      });
+    }
     if (detectInjection(payload.agentSelfIntro) || detectInjection(payload.agentName)) {
       throw new BadRequestException({
         code: 'INJECTION_DETECTED',

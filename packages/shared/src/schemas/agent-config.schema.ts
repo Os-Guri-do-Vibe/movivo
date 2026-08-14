@@ -130,3 +130,33 @@ export const inviolableRulesResponseSchema = z.object({
   meta: controlCenterMetaSchema,
 });
 export type InviolableRulesResponse = z.infer<typeof inviolableRulesResponseSchema>;
+
+/* ------------------------------------------------------------------------- *
+ * Simulador síncrono de configuração (Sprint 9).
+ * ------------------------------------------------------------------------- */
+
+export const simulateAgentConfigSchema = z.object({
+  kind: z.literal('PERSONA'),
+  candidate: agentPersonaSchema,
+});
+export type SimulateAgentConfigInput = z.infer<typeof simulateAgentConfigSchema>;
+
+export const configSimulationCheckSchema = z.object({
+  id: z.enum(['SCHEMA', 'GOLDEN_INPUT', 'GOLDEN_OUTPUT', 'PROMPT_INTEGRITY']),
+  title: z.string(),
+  passed: z.boolean(),
+  cases: z.int().nonnegative(),
+  failures: z.array(z.string()),
+});
+export type ConfigSimulationCheck = z.infer<typeof configSimulationCheckSchema>;
+
+export const configSimulationResponseSchema = z.object({
+  data: z.object({
+    kind: z.literal('PERSONA'),
+    passed: z.boolean(),
+    candidateHash: z.string().regex(/^[a-f0-9]{64}$/),
+    checks: z.array(configSimulationCheckSchema).length(4),
+  }),
+  meta: controlCenterMetaSchema,
+});
+export type ConfigSimulationResponse = z.infer<typeof configSimulationResponseSchema>;
