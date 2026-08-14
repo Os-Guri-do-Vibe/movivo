@@ -15,6 +15,7 @@ import { ConfigModule } from './config';
 import { DatabaseModule } from './database';
 import { EventBusModule } from './event-bus/event-bus.module';
 import { LoggerModule } from './logger';
+import { KnowledgeModule } from './knowledge/knowledge.module';
 import { RedisModule } from './redis';
 import { TelemetryModule } from './telemetry/telemetry.module';
 
@@ -27,6 +28,7 @@ import { TelemetryModule } from './telemetry/telemetry.module';
     TelemetryModule,
     EventBusModule,
     AgentConfigModule,
+    KnowledgeModule,
   ],
   exports: [
     ConfigModule,
@@ -36,6 +38,7 @@ import { TelemetryModule } from './telemetry/telemetry.module';
     TelemetryModule,
     EventBusModule,
     AgentConfigModule,
+    KnowledgeModule,
   ],
 })
 export class CoreModule {}

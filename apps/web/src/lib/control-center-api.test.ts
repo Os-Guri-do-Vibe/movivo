@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   complianceResponse,
+  knowledgeDocumentsResponse,
+  partnerDistributionResponse,
   financeResponse,
   marketingResponse,
   overviewResponse,
@@ -12,8 +14,14 @@ import {
 
 import {
   ControlCenterApiError,
+  getAuditEvents,
   getComplianceSummary,
   getFinanceSummary,
+  getKnowledgeDocumentContent,
+  getKnowledgeDocuments,
+  getPartnerDistribution,
+  reviewKnowledgeDocument,
+  uploadKnowledgeDocument,
   getMarketing,
   getOverview,
   getStudent,
@@ -205,9 +213,127 @@ describe('projeções do Control Center', () => {
           },
         ],
         aiBlockedRate: { value: 0, unit: 'PERCENT', status: 'AVAILABLE', definition: 'Zero.' },
+        northStar: {
+          averageCompletions: { value: 0, unit: 'COUNT', status: 'AVAILABLE', definition: 'Zero.' },
+          target: 8,
+          reportingRate: { value: 0, unit: 'PERCENT', status: 'AVAILABLE', definition: 'Zero.' },
+          cohortSize: 0,
+          bySource: [],
+        },
+        declaredAdherenceRate: {
+          value: 0,
+          unit: 'PERCENT',
+          status: 'AVAILABLE',
+          definition: 'Zero.',
+        },
       },
       meta,
     });
     expect(parsed.data.students[0]).not.toHaveProperty('parqState');
+  });
+});
+
+describe('mutações do pilar IA', () => {
+  const uploadInput = {
+    title: 'Guia de descanso entre séries',
+    topic: 'descanso',
+    originalFilename: 'guia.md',
+    mimeType: 'text/markdown' as const,
+    content: 'a'.repeat(120),
+  };
+
+  it('envia o documento como JSON no POST e devolve o corpus validado', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(knowledgeDocumentsResponse));
+    await expect(uploadKnowledgeDocument(uploadInput)).resolves.toEqual(knowledgeDocumentsResponse);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/dashboard/control/ai/knowledge/upload',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'same-origin',
+        body: JSON.stringify(uploadInput),
+      }),
+    );
+  });
+
+  it('403 na publicação fala de publicar, não de acessar o setor', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({}, 403));
+    await expect(
+      reviewKnowledgeDocument({
+        documentId: '11111111-1111-4111-8111-111111111111',
+        decision: 'APPROVED',
+        note: 'Revisado pelo profissional CREF',
+      }),
+    ).rejects.toMatchObject({
+      status: 403,
+      message: 'Seu papel pode ver a configuração, mas não publicar.',
+    });
+  });
+
+  it('erro sem corpo legível na publicação usa a mensagem genérica de publicação', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => {
+        throw new Error('corpo vazio');
+      },
+    });
+    await expect(uploadKnowledgeDocument(uploadInput)).rejects.toMatchObject({
+      status: 500,
+      message: 'Não foi possível concluir a publicação.',
+    });
+  });
+
+  it('200 fora do contrato na publicação vira 502 em vez de dado inválido na tela', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ data: { documents: 'muitos' } }));
+    await expect(uploadKnowledgeDocument(uploadInput)).rejects.toMatchObject({
+      status: 502,
+      message: 'A publicação devolveu dados fora do contrato esperado.',
+    });
+  });
+});
+
+describe('rotas com parâmetro', () => {
+  it('monta a busca de auditoria só com os filtros preenchidos', async () => {
+    const auditResponse = {
+      data: {
+        events: [],
+        actors: [],
+        actions: [],
+        pagination: { page: 2, pageSize: 20, total: 0, totalPages: 0 },
+      },
+      meta,
+    };
+    fetchMock.mockResolvedValue(jsonResponse(auditResponse));
+    await expect(
+      getAuditEvents({ action: 'HEALTH_DATA_READ', page: 2, pageSize: 20 }),
+    ).resolves.toEqual(auditResponse);
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe('/api/dashboard/control/audit?action=HEALTH_DATA_READ&page=2&pageSize=20');
+    expect(url).not.toContain('actorId');
+  });
+
+  it('escapa o id do documento na rota de conteúdo em quarentena', async () => {
+    const contentResponse = {
+      data: { id: '11111111-1111-4111-8111-111111111111', content: 'texto original' },
+      meta,
+    };
+    fetchMock.mockResolvedValue(jsonResponse(contentResponse));
+    await expect(getKnowledgeDocumentContent('a b/c')).resolves.toEqual(contentResponse);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/dashboard/control/ai/knowledge/a%20b%2Fc/content',
+      expect.objectContaining({ credentials: 'same-origin' }),
+    );
+  });
+
+  it.each([
+    ['ai/knowledge', getKnowledgeDocuments, knowledgeDocumentsResponse],
+    ['partners', getPartnerDistribution, partnerDistributionResponse],
+  ])('%s consulta o próprio setor e devolve o dado validado', async (path, load, payload) => {
+    fetchMock.mockResolvedValue(jsonResponse(payload));
+    await expect(load()).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/dashboard/control/${path}`,
+      expect.objectContaining({ credentials: 'same-origin' }),
+    );
   });
 });

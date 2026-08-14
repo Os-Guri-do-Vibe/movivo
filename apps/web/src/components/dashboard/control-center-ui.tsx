@@ -108,6 +108,12 @@ export function formatMetric(metric: ControlCenterMetric): string {
   if (metric.unit === 'MILLISECONDS') {
     return `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 }).format(metric.value)} ms`;
   }
+  if (metric.unit === 'RATIO') {
+    return `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 }).format(metric.value)}×`;
+  }
+  if (metric.unit === 'MONTHS') {
+    return `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(metric.value)} meses`;
+  }
   if (metric.unit === 'MINUTES') {
     return `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(metric.value)} min`;
   }

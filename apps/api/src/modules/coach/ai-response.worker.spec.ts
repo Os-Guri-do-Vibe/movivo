@@ -3,6 +3,11 @@ import type { Redis } from 'ioredis';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { HealthConsentService } from '../../core/database/health-consent.service';
+import type { FaqService, PublishedFaqMatch } from '../../core/agent-config/faq.service';
+import type {
+  L1GuardrailFlag,
+  L1GuardrailService,
+} from '../../core/agent-config/l1-guardrail.service';
 import type { ContextService } from '../ai-coach/context/context.service';
 import type { IntentClassifier } from '../ai-coach/intent/intent-classifier.service';
 import type { Intent } from '../ai-coach/intent/intent.types';
@@ -32,6 +37,8 @@ interface Deps {
   constraints?: unknown;
   safetyHandoff?: boolean;
   consentActive?: boolean;
+  faqMatch?: PublishedFaqMatch | null;
+  l1Flags?: L1GuardrailFlag[];
 }
 
 function makeWorker(deps: Deps = {}) {
@@ -66,6 +73,11 @@ function makeWorker(deps: Deps = {}) {
     agentName: vi.fn(async () => 'MOVI'),
     foraDeEscopoResponse: vi.fn(async () => buildForaDeEscopoResponse('MOVI')),
   } as unknown as PromptResolverService;
+
+  const faqMatch = vi.fn(async () => deps.faqMatch ?? null);
+  const faq = { match: faqMatch } as unknown as FaqService;
+  const evaluateL1 = vi.fn(async () => deps.l1Flags ?? []);
+  const l1Guardrails = { evaluate: evaluateL1 } as unknown as L1GuardrailService;
 
   const context = {
     build: vi.fn(() =>
@@ -120,6 +132,8 @@ function makeWorker(deps: Deps = {}) {
     lock,
     classifier,
     prompts,
+    faq,
+    l1Guardrails,
     context,
     llm,
     abuse,
@@ -141,6 +155,9 @@ function makeWorker(deps: Deps = {}) {
     workers,
     workerListeners,
     redis,
+    classify,
+    faqMatch,
+    evaluateL1,
   };
 }
 
@@ -186,6 +203,48 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     await worker.process(job());
     expect(complete).not.toHaveBeenCalled();
     expect(sentText(enqueue)).toBe(buildForaDeEscopoResponse('MOVI'));
+  });
+
+  it('FAQ exato responde sem classificador nem LLM', async () => {
+    const answer = 'O plano é acompanhado por profissional CREF e entregue no WhatsApp.';
+    const { worker, complete, classify, faqMatch, enqueue } = makeWorker({
+      batchItems: [JSON.stringify({ text: 'Como recebo meu plano?' })],
+      faqMatch: { id: 'faq-1', faqKey: 'delivery', version: 3, answer },
+    });
+    await expect(worker.process(job())).resolves.toEqual({ status: 'FAQ' });
+    expect(faqMatch).toHaveBeenCalledWith('Como recebo meu plano?');
+    expect(classify).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
+    expect(sentText(enqueue)).toBe(answer);
+  });
+
+  it('guardrail L1 apenas sinaliza para revisão sem bloquear a resposta', async () => {
+    const answer = 'O plano chega pelo WhatsApp com acompanhamento do profissional CREF.';
+    const { worker, enqueue, persistHandoff, evaluateL1 } = makeWorker({
+      faqMatch: { id: 'faq-1', faqKey: 'delivery', version: 1, answer },
+      l1Flags: [{ ruleKey: 'rule-1', label: 'Revisar menção', version: 2 }],
+    });
+
+    await expect(worker.process(job())).resolves.toEqual({ status: 'FAQ' });
+    expect(evaluateL1).toHaveBeenCalledWith('oi', answer);
+    expect(sentText(enqueue)).toBe(answer);
+    expect(persistHandoff).toHaveBeenCalledWith('u1', 'ALERT', 'L1_GUARDRAIL_FLAG');
+  });
+
+  it('guardrail de segurança roda antes do FAQ', async () => {
+    const { worker, faqMatch, classify, persistHandoff } = makeWorker({
+      batchItems: [JSON.stringify({ text: 'estou com dor no peito agora' })],
+      faqMatch: {
+        id: 'faq-1',
+        faqKey: 'unsafe',
+        version: 1,
+        answer: 'Resposta que não pode ser usada.',
+      },
+    });
+    await expect(worker.process(job())).resolves.toEqual({ status: 'SAFETY_HANDOFF' });
+    expect(faqMatch).not.toHaveBeenCalled();
+    expect(classify).not.toHaveBeenCalled();
+    expect(persistHandoff).toHaveBeenCalledWith('u1', 'SAFETY', 'RED_FLAG');
   });
 
   it('handoff de segurança (dor grave): persiste SAFETY e NÃO chama o LLM (US-3.6)', async () => {

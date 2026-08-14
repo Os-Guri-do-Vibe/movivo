@@ -1,12 +1,34 @@
 import {
   agentConfigHistoryResponseSchema,
+  auditSearchResponseSchema,
   agentPersonaResponseSchema,
+  configSimulationResponseSchema,
+  faqEntriesResponseSchema,
   inviolableRulesResponseSchema,
+  l1GuardrailsResponseSchema,
   type AgentConfigHistoryResponse,
+  type AuditSearchQuery,
+  type AuditSearchResponse,
   type AgentPersonaResponse,
+  type ConfigSimulationResponse,
+  type FaqEntriesResponse,
   type InviolableRulesResponse,
+  type L1GuardrailsResponse,
+  knowledgeDocumentsResponseSchema,
+  knowledgeDocumentContentResponseSchema,
+  type KnowledgeDocumentContentResponse,
+  type KnowledgeDocumentsResponse,
+  type ReviewKnowledgeDocumentInput,
+  type UploadKnowledgeDocumentInput,
   type PublishAgentConfigInput,
+  type PublishFaqEntryInput,
+  type PublishL1GuardrailInput,
   type RollbackAgentConfigInput,
+  type RollbackFaqEntryInput,
+  type RetireFaqEntryInput,
+  type RetireL1GuardrailInput,
+  type RollbackL1GuardrailInput,
+  type SimulateAgentConfigInput,
   controlCenterComplianceResponseSchema,
   controlCenterFinanceResponseSchema,
   controlCenterMarketingResponseSchema,
@@ -15,12 +37,16 @@ import {
   controlCenterStudentsResponseSchema,
   controlCenterSystemResponseSchema,
   type ControlCenterComplianceResponse,
+  controlCenterCampaignsResponseSchema,
+  type ControlCenterCampaignsResponse,
   type ControlCenterFinanceResponse,
   type ControlCenterMarketingResponse,
   type ControlCenterOverviewResponse,
   type ControlCenterStudentDetailResponse,
   type ControlCenterStudentsResponse,
   type ControlCenterSystemResponse,
+  partnerDistributionResponseSchema,
+  type PartnerDistributionResponse,
 } from '@movivo/shared';
 
 interface Parser<T> {
@@ -86,6 +112,10 @@ export function getMarketing(signal?: AbortSignal): Promise<ControlCenterMarketi
   return request('marketing', controlCenterMarketingResponseSchema, signal);
 }
 
+export function getCampaigns(signal?: AbortSignal): Promise<ControlCenterCampaignsResponse> {
+  return request('campaigns', controlCenterCampaignsResponseSchema, signal);
+}
+
 export function getStudents(signal?: AbortSignal): Promise<ControlCenterStudentsResponse> {
   return request('students', controlCenterStudentsResponseSchema, signal);
 }
@@ -113,6 +143,20 @@ export function getComplianceSummary(
   signal?: AbortSignal,
 ): Promise<ControlCenterComplianceResponse> {
   return request('compliance', controlCenterComplianceResponseSchema, signal);
+}
+
+export function getAuditEvents(
+  query: AuditSearchQuery,
+  signal?: AbortSignal,
+): Promise<AuditSearchResponse> {
+  const params = new URLSearchParams();
+  if (query.actorId) params.set('actorId', query.actorId);
+  if (query.action) params.set('action', query.action);
+  if (query.from) params.set('from', query.from);
+  if (query.to) params.set('to', query.to);
+  params.set('page', String(query.page));
+  params.set('pageSize', String(query.pageSize));
+  return request(`audit?${params.toString()}`, auditSearchResponseSchema, signal);
 }
 
 /* --------------------------------- Pilar IA (US-7.7) --------------------------------- */
@@ -166,4 +210,77 @@ export function rollbackAgentPersona(
   input: RollbackAgentConfigInput,
 ): Promise<AgentPersonaResponse> {
   return mutate('ai/persona/rollback', input, agentPersonaResponseSchema);
+}
+
+export function simulateAgentConfig(
+  input: SimulateAgentConfigInput,
+): Promise<ConfigSimulationResponse> {
+  return mutate('ai/simulate', input, configSimulationResponseSchema);
+}
+
+export function getFaqEntries(signal?: AbortSignal): Promise<FaqEntriesResponse> {
+  return request('ai/faq', faqEntriesResponseSchema, signal);
+}
+
+export function publishFaqEntry(input: PublishFaqEntryInput): Promise<FaqEntriesResponse> {
+  return mutate('ai/faq', input, faqEntriesResponseSchema);
+}
+
+export function rollbackFaqEntry(input: RollbackFaqEntryInput): Promise<FaqEntriesResponse> {
+  return mutate('ai/faq/rollback', input, faqEntriesResponseSchema);
+}
+
+export function retireFaqEntry(input: RetireFaqEntryInput): Promise<FaqEntriesResponse> {
+  return mutate('ai/faq/retire', input, faqEntriesResponseSchema);
+}
+
+export function getL1Guardrails(signal?: AbortSignal): Promise<L1GuardrailsResponse> {
+  return request('ai/guardrails', l1GuardrailsResponseSchema, signal);
+}
+
+export function publishL1Guardrail(input: PublishL1GuardrailInput): Promise<L1GuardrailsResponse> {
+  return mutate('ai/guardrails', input, l1GuardrailsResponseSchema);
+}
+
+export function rollbackL1Guardrail(
+  input: RollbackL1GuardrailInput,
+): Promise<L1GuardrailsResponse> {
+  return mutate('ai/guardrails/rollback', input, l1GuardrailsResponseSchema);
+}
+
+export function retireL1Guardrail(input: RetireL1GuardrailInput): Promise<L1GuardrailsResponse> {
+  return mutate('ai/guardrails/retire', input, l1GuardrailsResponseSchema);
+}
+
+export function getKnowledgeDocuments(signal?: AbortSignal): Promise<KnowledgeDocumentsResponse> {
+  return request('ai/knowledge', knowledgeDocumentsResponseSchema, signal);
+}
+
+export function getKnowledgeDocumentContent(
+  id: string,
+  signal?: AbortSignal,
+): Promise<KnowledgeDocumentContentResponse> {
+  return request(
+    `ai/knowledge/${encodeURIComponent(id)}/content`,
+    knowledgeDocumentContentResponseSchema,
+    signal,
+  );
+}
+
+export function uploadKnowledgeDocument(
+  input: UploadKnowledgeDocumentInput,
+): Promise<KnowledgeDocumentsResponse> {
+  return mutate('ai/knowledge/upload', input, knowledgeDocumentsResponseSchema);
+}
+
+export function reviewKnowledgeDocument(
+  input: ReviewKnowledgeDocumentInput,
+): Promise<KnowledgeDocumentsResponse> {
+  return mutate('ai/knowledge/review', input, knowledgeDocumentsResponseSchema);
+}
+
+/* ------------------------- Sócios & Distribuição (US-8.7) ------------------------- */
+
+export function getPartnerDistribution(signal?: AbortSignal): Promise<PartnerDistributionResponse> {
+  return request('partners', partnerDistributionResponseSchema, signal);
 }

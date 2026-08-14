@@ -30,6 +30,7 @@ describe('AiConfigController', () => {
     ['persona', [Capability.AI_CONFIG_READ]],
     ['history', [Capability.AI_CONFIG_READ]],
     ['inviolableRules', [Capability.AI_CONFIG_READ]],
+    ['simulate', [Capability.AI_CONFIG_READ, Capability.AI_CONFIG_WRITE]],
     ['publish', [Capability.AI_CONFIG_READ, Capability.AI_CONFIG_WRITE]],
     ['rollback', [Capability.AI_CONFIG_READ, Capability.AI_CONFIG_WRITE]],
   ] as const)('declara capability em %s', (method, expected) => {
@@ -46,6 +47,7 @@ describe('AiConfigController', () => {
     for (const handler of [
       AiConfigController.prototype.publish,
       AiConfigController.prototype.rollback,
+      AiConfigController.prototype.simulate,
     ]) {
       expect(() => guard.canActivate(contextFor(reader, handler))).toThrow(ForbiddenException);
     }

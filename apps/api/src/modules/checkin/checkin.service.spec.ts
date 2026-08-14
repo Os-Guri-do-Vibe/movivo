@@ -6,6 +6,7 @@ import { HealthConsentService } from '../../core/database/health-consent.service
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { QueueManager } from '../jobs/queue-manager.service';
+import { WorkoutCompletionService } from '../workout/workout-completion.service';
 import { CheckinService } from './checkin.service';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
@@ -55,6 +56,9 @@ function makeService(
       consent,
       queues,
       { emit: vi.fn() } as unknown as DashboardQueueEventsService,
+      {
+        recordFromCheckin: vi.fn(async () => 0),
+      } as unknown as WorkoutCompletionService,
       logger,
     ),
     enqueue,
@@ -116,6 +120,9 @@ function makeInteractiveService(
       } as unknown as HealthConsentService,
       queues,
       { emit: vi.fn() } as unknown as DashboardQueueEventsService,
+      {
+        recordFromCheckin: vi.fn(async () => 0),
+      } as unknown as WorkoutCompletionService,
       logger,
     ),
     enqueue,

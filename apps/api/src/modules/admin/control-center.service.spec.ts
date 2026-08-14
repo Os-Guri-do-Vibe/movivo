@@ -5,7 +5,11 @@ import type {
   ControlCenterStudentsResponse,
   ControlCenterSystemResponse,
 } from '@movivo/shared';
-import { controlCenterMarketingResponseSchema } from '@movivo/shared';
+import {
+  controlCenterCampaignsResponseSchema,
+  controlCenterMarketingResponseSchema,
+} from '@movivo/shared';
+import { getTableName, isTable } from 'drizzle-orm';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AgentConfigRepository } from '../../core/agent-config/agent-config.repository';
@@ -19,9 +23,18 @@ import { RedisKeyBuilder } from '../../core/redis';
 import type { AuditService } from './audit.service';
 import { ControlCenterService } from './control-center.service';
 
+/**
+ * Tabelas alcançadas por `.from(...)` desde o último `serviceWithSystemResults`. Existe
+ * para a regra anti-dupla-contagem da TASK-8.9.4: `finance()` não pode ler `ad_spend`.
+ */
+const touchedTables: string[] = [];
+
 function query(rows: unknown[]) {
   const chain = {
-    from: () => chain,
+    from: (table?: unknown) => {
+      if (isTable(table)) touchedTables.push(getTableName(table));
+      return chain;
+    },
     leftJoin: () => chain,
     innerJoin: () => chain,
     where: () => chain,
@@ -42,10 +55,27 @@ const ACTOR = {
   jti: 'j1',
 } as const;
 
+/**
+ * Fila de retornos de `tx.execute` (SQL cru). Desde a US-8.4 o custo de IA por modelo sai
+ * do query builder (precisa de LATERAL contra `model_pricing`), então a fixture do
+ * financeiro precisa alimentar `execute`, não `select`. Consumida em ordem por
+ * `serviceWithSystemResults`; `withExecute` a preenche antes de instanciar o serviço.
+ */
+let nextExecuteRows: unknown[][] = [];
+function withExecute(...rows: unknown[][]) {
+  nextExecuteRows = rows;
+}
+
 function serviceWithSystemResults(...results: unknown[][]) {
   const select = vi.fn();
   for (const rows of results) select.mockImplementationOnce(() => query(rows));
-  const tx = { select };
+  // US-8.1: North Star/adesão declarada rodam DEPOIS dos selects enumerados; um
+  // fallback vazio evita reenumerar todas as queries em cada teste desta suíte.
+  select.mockImplementation(() => query([]));
+  const executeQueue = [...nextExecuteRows];
+  nextExecuteRows = [];
+  touchedTables.length = 0;
+  const tx = { select, execute: vi.fn(async () => executeQueue.shift() ?? []) };
   const db = {
     runAsSystem: vi.fn((callback: (value: unknown) => Promise<unknown>) => callback(tx)),
     runAsUser: vi.fn((_id: string, _role: string, callback: (value: unknown) => Promise<unknown>) =>
@@ -112,15 +142,28 @@ function studentsFixture(churnScores: number[]): ControlCenterStudentsResponse {
         churnRisk: { score, signals: [] },
       })) as unknown as ControlCenterStudentsResponse['data']['students'],
       aiBlockedRate: metric(0, { unit: 'PERCENT' }),
+      northStar: {
+        averageCompletions: metric(0, { unit: 'COUNT' }),
+        target: 8,
+        reportingRate: metric(0, { unit: 'PERCENT' }),
+        cohortSize: 0,
+        bySource: [],
+      },
+      declaredAdherenceRate: metric(0, { unit: 'PERCENT' }),
     },
     meta: META,
   };
 }
 
-function financeFixture(revenueAtRisk30d: number, last90Days = [0]): ControlCenterFinanceResponse {
+function financeFixture(
+  revenueAtRisk30d: number,
+  last90Days = [0],
+  profitBrl: number | null = 120,
+): ControlCenterFinanceResponse {
   return {
     data: {
       contractedMrr: metric(500, { unit: 'BRL' }),
+      profit: metric(profitBrl, { unit: 'BRL' }),
       revenueAtRisk30d: metric(revenueAtRisk30d, { unit: 'BRL' }),
       churnByReason: last90Days.map((n, i) => ({ reason: `motivo_${i}`, total: n, last90Days: n })),
     } as unknown as ControlCenterFinanceResponse['data'],
@@ -131,6 +174,7 @@ function financeFixture(revenueAtRisk30d: number, last90Days = [0]): ControlCent
 function marketingFixture(
   formStarted: number,
   formSubmitted: number,
+  channelCacBrl: number | null = 40,
 ): ControlCenterMarketingResponse {
   return {
     data: {
@@ -138,6 +182,10 @@ function marketingFixture(
         formStarted: metric(formStarted),
         formSubmitted: metric(formSubmitted),
       },
+      channelEconomics: [
+        { channel: 'organico', students: 12, cac: metric(null, { unit: 'BRL' }) },
+        { channel: 'meta_ads', students: 30, cac: metric(channelCacBrl, { unit: 'BRL' }) },
+      ],
     } as unknown as ControlCenterMarketingResponse['data'],
     meta: META,
   };
@@ -242,6 +290,32 @@ describe('ControlCenterService overview (US-7.8)', () => {
     expect(response.data.pillars[0]).toMatchObject({ pillar: 'MARKETING', state: 'ATTENTION' });
   });
 
+  it('Financeiro fica ATTENTION com lucro negativo, mesmo sem receita em risco (US-8.8)', async () => {
+    const { service } = serviceWithSystemResults();
+    stubPillar(service, 'finance', financeFixture(0, [0], -10));
+
+    const response = await service.overview({ ...ACTOR, role: 'FINANCE' });
+
+    expect(response.data.pillars[0]).toMatchObject({ pillar: 'FINANCE', state: 'ATTENTION' });
+    expect(response.data.pillars[0]?.details.map((d) => d.label)).toContain('Lucro do período');
+    expect(response.data.pillars[0]?.reason).toMatch(/Lucro do período negativo/);
+  });
+
+  it('Marketing ancora no CAC do canal principal e alerta acima do teto (US-8.8)', async () => {
+    const { service } = serviceWithSystemResults();
+    stubPillar(service, 'marketing', marketingFixture(100, 90, 200));
+
+    const response = await service.overview({ ...ACTOR, role: 'MARKETING' });
+
+    const marketing = response.data.pillars[0];
+    // O canal principal é o de mais cadastros (meta_ads), não o primeiro da lista.
+    expect(marketing?.details.at(-1)).toMatchObject({
+      label: 'CAC do canal principal (meta_ads)',
+      metric: { value: 200 },
+    });
+    expect(marketing).toMatchObject({ state: 'ATTENTION' });
+  });
+
   it('IA fica ATTENTION quando a taxa de resposta bloqueada passa do limiar', async () => {
     const { service } = serviceWithSystemResults([{ total: 100, blocked: 6, validated: 100 }]);
     stubPillar(service, 'system', systemFixture([SLO_OK]));
@@ -298,6 +372,65 @@ describe('ControlCenterService projections', () => {
     ];
   }
 
+  it('calcula campanha por utm_campaign e suprime n menor que 10 sem tolerancia numerica', async () => {
+    withExecute(
+      [
+        {
+          month: '2026-01',
+          cohort_size: 20,
+          converted: 8,
+          retained: 7,
+          reconstructed: false,
+        },
+      ],
+      [
+        {
+          source: 'instagram',
+          medium: 'cpc',
+          campaign: 'lancamento_agosto',
+          students: 12,
+          converted: 3,
+          received_cents: '240000',
+        },
+        {
+          source: 'instagram',
+          medium: 'cpc',
+          campaign: 'teste_pequeno',
+          students: 9,
+          converted: 2,
+          received_cents: '90000',
+        },
+      ],
+    );
+    const { service } = serviceWithSystemResults(
+      [
+        { channel: 'meta_ads', campaign: 'lancamento_agosto', cents: '120000' },
+        { channel: 'meta_ads', campaign: 'teste_pequeno', cents: '9000' },
+      ],
+      [{ months: 2 }],
+    );
+
+    const response = await service.campaigns();
+    expect(response.data.suppressedCampaigns).toBe(1);
+    expect(response.data.mediaInvestmentBrl).toBe(1290);
+    expect(response.data.campaigns).toHaveLength(1);
+    expect(response.data.campaigns[0]).toMatchObject({
+      campaign: 'lancamento_agosto',
+      channel: 'meta_ads',
+      students: 12,
+      converted: 3,
+      investmentBrl: 1200,
+      cac: { value: 400 },
+      receivedRevenue: { value: 2400 },
+      roas: { value: 2 },
+      ltv: { value: 800 },
+      ltvToCac: { value: 2 },
+      paybackMonths: { value: 1 },
+      signal: 'ATTENTION',
+    });
+    expect(controlCenterCampaignsResponseSchema.safeParse(response).success).toBe(true);
+  });
+
   it('suprime segmentos de marketing com menos de 10 registros', async () => {
     const { service } = serviceWithSystemResults(
       ...marketingHead({
@@ -313,6 +446,8 @@ describe('ControlCenterService projections', () => {
       [{ value: 'HOME', total: 8 }],
       [{ value: 'MORNING', total: 11 }],
       [{ value: '25-34', total: 14 }],
+      [],
+      [{ total: 0 }],
     );
 
     const response = await service.marketing();
@@ -322,7 +457,7 @@ describe('ControlCenterService projections', () => {
       { dimension: 'AGE_BAND', value: '25-34', count: 14 },
     ]);
     expect(response.data.suppressedSegments).toBe(3);
-    expect(response.data.acquisition).toMatchObject({ value: null, status: 'UNAVAILABLE' });
+    expect(response.data.acquisition).toMatchObject({ value: 0, status: 'AVAILABLE' });
     expect(JSON.stringify(response)).not.toMatch(/phone|email|parq|pain|health/i);
   });
 
@@ -338,6 +473,8 @@ describe('ControlCenterService projections', () => {
       [],
       [],
       [],
+      [],
+      [{ total: 0 }],
     );
 
     const response = await service.marketing();
@@ -369,6 +506,8 @@ describe('ControlCenterService projections', () => {
       [],
       [],
       [],
+      [],
+      [{ total: 0 }],
     );
 
     const response = await service.marketing();
@@ -390,6 +529,8 @@ describe('ControlCenterService projections', () => {
       [],
       [],
       [],
+      [],
+      [{ total: 0 }],
     );
 
     const response = await service.marketing();
@@ -427,6 +568,8 @@ describe('ControlCenterService projections', () => {
       [{ value: 'HOME', total: 1 }],
       [{ value: 'MORNING', total: 9 }],
       [{ value: '25-34', total: 2 }],
+      [],
+      [{ total: 0 }],
     );
 
     const response = await service.marketing();
@@ -456,6 +599,8 @@ describe('ControlCenterService projections', () => {
       [],
       [],
       [],
+      [],
+      [{ total: 0 }],
     );
 
     const payload = JSON.stringify(await service.marketing());
@@ -475,6 +620,8 @@ describe('ControlCenterService projections', () => {
       [],
       [],
       [],
+      [],
+      [{ total: 0 }],
     );
 
     const response = await service.marketing();
@@ -484,8 +631,90 @@ describe('ControlCenterService projections', () => {
     expect(response.data.anamnesisFunnel.exitPoint.status).toBe('UNAVAILABLE');
   });
 
-  /** Ordem dos `select` em `finance()`: billing, planos, calendário, risco, churn, IA. */
-  function financeResults() {
+  /**
+   * US-8.6 — CAC, ROAS e LTV/CAC por canal. Confere contra o cálculo manual (tolerância 0)
+   * e prova a regra que a DoD mede: canal sem investimento **nunca** exibe R$ 0,00.
+   *
+   * `execute` em ordem: conversão de trial, coortes de entrada, origem por titular.
+   */
+  it('calcula CAC/ROAS/LTV-CAC por canal e nunca publica CAC zero em canal sem investimento', async () => {
+    withExecute(
+      [{ trials: 60, converted: 15, median_days: '5', reconstructed: 0 }],
+      [],
+      [
+        {
+          source: 'instagram',
+          medium: 'cpc',
+          students: 40,
+          converted: 10,
+          received_cents: '400000',
+        },
+        { source: 'organico', medium: null, students: 20, converted: 5, received_cents: '100000' },
+      ],
+    );
+    const { service } = serviceWithSystemResults(
+      ...marketingHead({
+        formStarted: 60,
+        formSubmitted: 50,
+        protocolActive: 40,
+        subscriptionActive: 30,
+      }),
+      [],
+      [],
+      [],
+      [],
+      // Aquisição por canal (US-8.2) e origem não capturada.
+      [
+        { source: 'instagram', medium: 'cpc', total: 40 },
+        { source: 'organico', medium: null, total: 20 },
+      ],
+      [{ total: 0 }],
+      // `ad_spend` agregado por canal: só mídia paga tem investimento.
+      [{ channel: 'meta_ads', cents: '200000' }],
+      // Meses distintos com liquidação — divisor do ARPU mensal do payback.
+      [{ months: 2 }],
+    );
+
+    const response = await service.marketing();
+    const economics = response.data.channelEconomics;
+    const paid = economics.find((channel) => channel.channel === 'meta_ads');
+    const organic = economics.find((channel) => channel.channel === 'organico');
+
+    expect(response.data.attributionWindowDays).toBe(60);
+    expect(response.data.mediaInvestmentBrl).toBe(2000);
+
+    // R$2.000 ÷ 10 convertidos = R$200 de CAC; R$4.000 recebidos ÷ R$2.000 = ROAS 2.
+    expect(paid?.investmentBrl).toBe(2000);
+    expect(paid?.cac.value).toBe(200);
+    expect(paid?.roas.value).toBe(2);
+    expect(paid?.receivedRevenue.value).toBe(4000);
+    // LTV = R$4.000 ÷ 10; sem coorte madura a estimativa NÃO pode sair como disponível.
+    expect(paid?.ltv.value).toBe(400);
+    expect(paid?.ltv.status).toBe('PROXY');
+    expect(paid?.ltvToCac.value).toBe(2);
+    // Payback = CAC ÷ (LTV ÷ 2 meses observados) = 200 ÷ 200 = 1 mês.
+    expect(paid?.paybackMonths.value).toBe(1);
+    expect(paid?.signal).toBe('ATTENTION');
+
+    // Canal orgânico: rótulo, nunca zero — dividir por zero produz um número bonito e falso.
+    expect(organic?.investmentBrl).toBeNull();
+    expect(organic?.investmentStatus).toBe('NO_DIRECT_INVESTMENT');
+    expect(organic?.cac).toMatchObject({ value: null, status: 'UNAVAILABLE' });
+    expect(organic?.roas).toMatchObject({ value: null, status: 'UNAVAILABLE' });
+    expect(organic?.signal).toBe('UNKNOWN');
+
+    expect(controlCenterMarketingResponseSchema.safeParse(response).success).toBe(true);
+  });
+
+  /**
+   * Ordem dos `select` em `finance()`: billing, planos, calendário, risco, churn, despesas,
+   * e — desde a US-8.5 — liquidação por mês, prazo médio e fila de exceção.
+   */
+  function financeResults(
+    payments: unknown[] = [],
+    settlementLag: unknown[] = [],
+    exceptions: unknown[] = [],
+  ): unknown[][] {
     return [
       [{ active: 7, contractedMrr: '273.00' }],
       [
@@ -502,14 +731,43 @@ describe('ControlCenterService projections', () => {
         },
       ],
       [{ reason: 'PRECO', total: 5, last90Days: 3 }],
-      [
-        { model: 'gpt-4.1-2025-04-14', jobs: 10, tokensInput: 1_000_000, tokensOutput: 100_000 },
-        { model: 'modelo-sem-preco', jobs: 2, tokensInput: 500, tokensOutput: 100 },
-      ],
+      // US-8.4: despesas por mês/categoria (centavos inteiros; estorno já somado).
+      [],
+      // US-8.5: liquidação recebida por mês, prazo médio e fila de exceção.
+      payments,
+      settlementLag,
+      exceptions,
+    ];
+  }
+
+  /**
+   * Linhas de `tx.execute` do custo de IA. Vêm já precificadas pelo SQL (LATERAL contra
+   * `model_pricing` com a vigência da data do job) — o custo em USD é o que a query
+   * devolve; a suíte confere a conversão para BRL e o tratamento de modelo sem preço.
+   */
+  function aiCostRows() {
+    return [
+      {
+        model: 'gpt-4.1-2025-04-14',
+        jobs: 10,
+        tokens_input: 1_000_000,
+        tokens_output: 100_000,
+        priced_jobs: 10,
+        cost_usd: 2.8,
+      },
+      {
+        model: 'modelo-sem-preco',
+        jobs: 2,
+        tokens_input: 500,
+        tokens_output: 100,
+        priced_jobs: 0,
+        cost_usd: 0,
+      },
     ];
   }
 
   it('financeiro retorna apenas agregados reais e marca fontes ausentes', async () => {
+    withExecute(aiCostRows());
     const { service } = serviceWithSystemResults(...financeResults());
 
     const response = await service.finance();
@@ -523,6 +781,7 @@ describe('ControlCenterService projections', () => {
   });
 
   it('calendário, risco, churn por motivo e MRR/ARR por plano conferem com o cálculo manual', async () => {
+    withExecute(aiCostRows());
     const { service } = serviceWithSystemResults(...financeResults());
 
     const response = await service.finance();
@@ -544,6 +803,7 @@ describe('ControlCenterService projections', () => {
   });
 
   it('converte tokens em reais pela tabela de preço e não inventa custo de modelo desconhecido', async () => {
+    withExecute(aiCostRows());
     const { service } = serviceWithSystemResults(...financeResults());
 
     const response = await service.finance();
@@ -563,15 +823,148 @@ describe('ControlCenterService projections', () => {
   });
 
   it('marca o custo de IA como indisponível quando nenhum modelo tem preço cadastrado', async () => {
-    const results = financeResults();
-    results[5] = [{ model: 'modelo-sem-preco', jobs: 2, tokensInput: 500, tokensOutput: 100 }];
-    const { service } = serviceWithSystemResults(...results);
+    withExecute([aiCostRows()[1]]);
+    const { service } = serviceWithSystemResults(...financeResults());
 
     const response = await service.finance();
 
     expect(response.data.aiCost.status).toBe('UNAVAILABLE');
     expect(response.data.aiCost.value).toBeNull();
     expect(response.data.aiCostPerActiveUser.status).toBe('UNAVAILABLE');
+  });
+
+  it('custo por categoria/mês e lucro conferem com o cálculo manual e declaram o regime', async () => {
+    const results = financeResults();
+    // Mês corrente na fixture; `expensePerActiveUser`/`profit` usam só este mês.
+    const month = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+    }).format(new Date());
+    results[5] = [
+      { month, category: 'INFRA', amountCents: '12000' },
+      { month, category: 'IA_LLM', amountCents: '3000' },
+      // Estorno de R$20 sobre a linha de marketing de R$50 → líquido R$30.
+      { month, category: 'MARKETING', amountCents: '3000' },
+      { month: '2026-01', category: 'INFRA', amountCents: '9900' },
+    ];
+    withExecute(aiCostRows());
+    const { service } = serviceWithSystemResults(...results);
+
+    const response = await service.finance();
+
+    // Cálculo manual, fora do código de produção: R$120 + R$30 + R$30 = R$180 no mês.
+    expect(response.data.totalExpense.value).toBe(180);
+    expect(response.data.costByCategory).toEqual([
+      { category: 'INFRA', amountBrl: 219 },
+      { category: 'IA_LLM', amountBrl: 30 },
+      { category: 'MARKETING', amountBrl: 30 },
+    ]);
+    expect(response.data.costByMonth.at(-1)).toEqual({ month, amountBrl: 180 });
+    expect(response.data.infrastructureCost.value).toBe(219);
+    // R$180 ÷ 7 assinaturas ativas.
+    expect(response.data.expensePerActiveUser.value).toBe(180 / 7);
+    // Lucro = MRR contratado R$273 − despesa R$180 = R$93, tolerância 0.
+    expect(response.data.profit.value).toBe(93);
+    // Regime declarado: proxy contratado enquanto NÃO houver liquidação em `payments`.
+    expect(response.data.profit.status).toBe('PROXY');
+    expect(response.data.profitBasis).toBe('CONTRATADO_PROXY');
+  });
+
+  /**
+   * TASK-8.9.4 — dupla contagem de gasto de mídia = 0. `ad_spend` é a fonte de verdade do
+   * investimento por canal e a categoria `MARKETING` de `expenses` cobre marketing que não
+   * é mídia direta; as duas nunca descrevem o mesmo real. A regra é uma frase de docstring
+   * até virar teste: se alguém somar `ad_spend` ao custo do Financeiro, cada real de mídia
+   * passa a entrar duas vezes no lucro — número plausível e errado, a pior classe de bug
+   * desta sprint.
+   */
+  it('finance() não lê `ad_spend`: gasto de mídia entra uma única vez, pelo Marketing (US-8.6)', async () => {
+    withExecute(aiCostRows());
+    const { service } = serviceWithSystemResults(...financeResults());
+
+    await service.finance();
+
+    expect(touchedTables).toContain('expenses');
+    expect(touchedTables).not.toContain('ad_spend');
+  });
+
+  it('com liquidação registrada o lucro passa a regime de CAIXA e a taxa do gateway vira custo (US-8.5)', async () => {
+    const month = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+    }).format(new Date());
+    const results = financeResults(
+      // R$200 brutos liquidados, R$190 creditados → R$10 de taxa do gateway.
+      [{ month, grossCents: '20000', netCents: '19000', settlements: 4, failures: 1 }],
+      [{ days: '2.5' }],
+      [],
+    );
+    results[5] = [{ month, category: 'INFRA', amountCents: '12000' }];
+    withExecute(aiCostRows());
+    const { service } = serviceWithSystemResults(...results);
+
+    const response = await service.finance();
+
+    // As duas séries convivem, nomeadas e separadas — e nunca são somadas.
+    expect(response.data.contractedMrr.value).toBe(273);
+    expect(response.data.receivedRevenue.value).toBe(200);
+    expect(response.data.receivedRevenueByMonth).toEqual([
+      { month, grossBrl: 200, netBrl: 190, settlements: 4 },
+    ]);
+
+    // Taxa do gateway = bruto − líquido, exibida e também somada em Custos.
+    expect(response.data.gatewayFee.value).toBe(10);
+    expect(response.data.gatewayFeePercent.value).toBe(5);
+    expect(response.data.costByCategory).toContainEqual({
+      category: 'GATEWAY_PAGAMENTO',
+      amountBrl: 10,
+    });
+
+    // Cálculo manual: recebido R$200 − (despesa R$120 + taxa R$10) = R$70, tolerância 0.
+    expect(response.data.profit.value).toBe(70);
+    expect(response.data.profit.status).toBe('AVAILABLE');
+    expect(response.data.profitBasis).toBe('CAIXA');
+
+    // 1 falha em 5 tentativas = 20% de inadimplência no período.
+    expect(response.data.delinquencyRate.value).toBe(20);
+    expect(response.data.averageSettlementDays.value).toBe(2.5);
+  });
+
+  it('liquidação órfã aparece na fila de exceção — nunca é descartada (US-8.5)', async () => {
+    const occurredAt = new Date('2026-08-01T12:00:00.000Z');
+    const results = financeResults(
+      [],
+      [],
+      [
+        {
+          paymentId: '66666666-6666-4666-8666-666666666666',
+          gateway: 'STRIPE',
+          status: 'SETTLED',
+          amountCents: 3900,
+          occurredAt,
+          receivedAt: occurredAt,
+        },
+      ],
+    );
+    withExecute(aiCostRows());
+    const { service } = serviceWithSystemResults(...results);
+
+    const response = await service.finance();
+
+    expect(response.data.paymentExceptions).toEqual([
+      {
+        paymentId: '66666666-6666-4666-8666-666666666666',
+        gateway: 'STRIPE',
+        status: 'SETTLED',
+        amountBrl: 39,
+        occurredAt: occurredAt.toISOString(),
+        receivedAt: occurredAt.toISOString(),
+      },
+    ]);
+    // Sem titular por construção: se houvesse, não seria exceção.
+    expect(JSON.stringify(response.data.paymentExceptions)).not.toMatch(/userId|email|phone/);
   });
 
   it('lista de alunos (recorte de suporte) não carrega nenhum campo de saúde', async () => {
@@ -592,9 +985,14 @@ describe('ControlCenterService projections', () => {
     expect(response.data.students).toEqual([{ ...student, churnRisk: { score: 0, signals: [] } }]);
     // US-7.1: o filtro é no servidor. Quem tem só `students.read` recebe um payload sem
     // anamnese, PAR-Q, dor ou check-in — não é a UI que esconde.
-    expect(JSON.stringify(response.data)).not.toMatch(/parq|anamnes|checkin|conversation|pain/i);
-    // A2: nada de `runAsSystem` — a listagem passa pela RLS no contexto do ator.
-    expect(db.runAsSystem).not.toHaveBeenCalled();
+    // Asserção sobre a projeção do aluno, não sobre o envelope: desde a US-8.1 as
+    // definições das métricas agregadas mencionam "check-in" em texto legível.
+    expect(JSON.stringify(response.data.students)).not.toMatch(
+      /parq|anamnes|checkin|conversation|pain/i,
+    );
+    // A2: a LISTAGEM passa pela RLS no contexto do ator. `runAsSystem` só aparece nos
+    // agregados da base (North Star e adesão declarada), que não são projeção de aluno.
+    expect(db.runAsUser).toHaveBeenCalled();
     expect(db.runAsUser).toHaveBeenCalledWith(ACTOR.userId, 'SUPPORT', expect.any(Function));
   });
 
@@ -699,12 +1097,14 @@ describe('ControlCenterService projections', () => {
 
     const response = await service.system();
 
-    expect(response.data.pendingCapabilities).toHaveLength(3);
+    // US-8.8: custo de infra/WhatsApp saiu da lista (virou número na US-8.4) e o
+    // histórico de incidentes foi reapontado para a Sprint 9.
+    expect(response.data.pendingCapabilities).toHaveLength(2);
     expect(response.data.pendingCapabilities.map((item) => item.plannedFor)).toEqual([
-      'Sprint 8',
-      'Sprint 8',
+      'Sprint 9',
       'Fase 6 — Infraestrutura',
     ]);
+    expect(JSON.stringify(response.data.pendingCapabilities)).not.toMatch(/Sprint 8/);
     // TASK-7.5.1: nenhum indicador desta tela é atribuído a OpenTelemetry.
     expect(response.meta.dataQuality.join(' ')).not.toMatch(/latência de IA é um proxy/i);
   });

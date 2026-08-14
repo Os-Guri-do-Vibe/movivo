@@ -27,7 +27,11 @@ import { AppConfigService } from '../../core/config';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { conversations, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
-import { CHECKIN_INBOUND_EVENT, type CheckinInboundEvent } from '../../core/event-bus/events';
+import {
+  CHECKIN_INBOUND_EVENT,
+  WORKOUT_INBOUND_EVENT,
+  type CheckinInboundEvent,
+} from '../../core/event-bus/events';
 import { DomainEventBus } from '../../core/event-bus/event-bus.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
@@ -206,11 +210,19 @@ export class WhatsappInboundService {
       'EX',
       INBOUND_ROUTE_TTL_SECONDS,
     );
+    // Cadeia determinística: treino (US-8.1) antes do check-in. Cada elo devolve
+    // `false` sem consumir a rota quando o botão não é dele.
     const handled =
-      (await this.events.request<CheckinInboundEvent, boolean>(CHECKIN_INBOUND_EVENT, {
+      ((await this.events.request<CheckinInboundEvent, boolean>(WORKOUT_INBOUND_EVENT, {
         userId,
         routeKey,
-      })) ?? false;
+      })) ??
+        false) ||
+      ((await this.events.request<CheckinInboundEvent, boolean>(CHECKIN_INBOUND_EVENT, {
+        userId,
+        routeKey,
+      })) ??
+        false);
     if (handled) {
       this.logger.info(
         { event: 'checkin_inbound_handled', userId, correlationId: input.correlationId },

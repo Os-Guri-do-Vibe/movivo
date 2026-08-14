@@ -28,6 +28,7 @@ import { AiCoachModule } from './modules/ai-coach/ai-coach.module';
 import { AnamnesisModule } from './modules/anamnesis/anamnesis.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CheckinModule } from './modules/checkin/checkin.module';
+import { WorkoutModule } from './modules/workout/workout.module';
 import { CoachModule } from './modules/coach/coach.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { ProtocolModule } from './modules/protocol/protocol.module';
@@ -49,6 +50,7 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
     CoachModule,
     SubscriptionModule,
     CheckinModule,
+    WorkoutModule,
     JobsModule,
     AdminModule,
   ],

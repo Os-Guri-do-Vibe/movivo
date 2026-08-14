@@ -16,7 +16,7 @@ import { ChurnRiskSignals } from './students-dashboard';
 
 /** Rótulo obrigatório da US-7.4 (TASK-7.4.3): adesão é declaração, não execução. */
 const DECLARED_LABEL =
-  'Declarado via check-in: mede a resposta do aluno ao check-in, não a execução do treino. Treino concluído verificado depende de workout_completions (Sprint 8).';
+  'Declarado via check-in: mede a resposta do aluno ao check-in, não a execução do treino. Treino concluído verificado é medido à parte, na North Star (workout_completions).';
 
 const TIMELINE_LABELS: Record<string, string> = {
   ANAMNESIS: 'Anamnese',

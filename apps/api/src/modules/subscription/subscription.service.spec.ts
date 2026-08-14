@@ -115,6 +115,8 @@ describe('SubscriptionService.applyGatewayEvent (US-4.1)', () => {
         priceCents: 9900,
         externalSubscriptionId: 'sub_1',
       }),
+      // US-8.3: o repositório emite a transição de ciclo de vida; o ator vem daqui.
+      { actor: 'SYSTEM', reason: 'CHECKOUT_CONFIRMED' },
     );
   });
 
@@ -199,13 +201,14 @@ describe('SubscriptionService.cancel/pause (US-4.1)', () => {
       USER,
       's1',
       expect.objectContaining({ status: 'CANCELED', cancelReason: 'muito caro' }),
+      { actor: 'USER', reason: 'muito caro' },
     );
   });
 
   it('pausa ACTIVE → PAUSED', async () => {
     const { svc, patch } = make(row({ status: 'ACTIVE' }));
     expect((await svc.pause(USER)).status).toBe('PAUSED');
-    expect(patch).toHaveBeenCalledWith(USER, 's1', { status: 'PAUSED' });
+    expect(patch).toHaveBeenCalledWith(USER, 's1', { status: 'PAUSED' }, { actor: 'USER' });
   });
 
   it('pausa inválida (TRIALING → PAUSED) é rejeitada', async () => {
@@ -218,7 +221,7 @@ describe('SubscriptionService.resume (US-4.5)', () => {
   it('retoma PAUSED → ACTIVE', async () => {
     const { svc, patch } = make(row({ status: 'PAUSED' }));
     expect((await svc.resume(USER)).status).toBe('ACTIVE');
-    expect(patch).toHaveBeenCalledWith(USER, 's1', { status: 'ACTIVE' });
+    expect(patch).toHaveBeenCalledWith(USER, 's1', { status: 'ACTIVE' }, { actor: 'USER' });
   });
 
   it('retomar de CANCELED (terminal) é rejeitado', async () => {

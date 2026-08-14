@@ -22,6 +22,12 @@ export interface PersistTurnInput {
   validationPassed?: boolean;
   modelUsed?: string | null;
   latencyMs?: number | null;
+  ragSources?: Array<{
+    chunkId: string;
+    documentId: string | null;
+    title: string;
+    sourceUrl?: string;
+  }>;
 }
 
 @Injectable()
@@ -86,6 +92,7 @@ export class ConversationRepository {
         validationPassed: input.validationPassed ?? null,
         modelUsed: input.modelUsed ?? null,
         latencyMs: input.latencyMs ?? null,
+        ragSources: input.ragSources?.length ? input.ragSources : null,
       });
     });
   }

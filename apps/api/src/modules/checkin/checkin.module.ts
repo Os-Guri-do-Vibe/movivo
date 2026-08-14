@@ -22,12 +22,13 @@
 import { Module } from '@nestjs/common';
 
 import { JobsModule } from '../jobs/jobs.module';
+import { WorkoutModule } from '../workout/workout.module';
 import { CheckinScheduler } from './checkin.scheduler';
 import { CheckinInboundHandler } from './checkin-inbound.handler';
 import { CheckinService } from './checkin.service';
 
 @Module({
-  imports: [JobsModule],
+  imports: [JobsModule, WorkoutModule],
   providers: [CheckinService, CheckinScheduler, CheckinInboundHandler],
 })
 export class CheckinModule {}

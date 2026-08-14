@@ -46,6 +46,18 @@ export interface GatewayEvent {
   userId: string;
   plan?: SubscriptionPlan;
   priceCents?: number;
+
+  // ---- Liquidação (US-8.5). Opcionais: nem todo evento move dinheiro. ----
+  /**
+   * Valor **efetivamente movimentado** em centavos, com sinal. Positivo em cobrança
+   * liquidada, **negativo** em estorno/chargeback — é o sinal que faz `sum(amount_cents)`
+   * devolver o líquido sem nenhum CASE. Ausente ⇒ o worker cai em `priceCents`.
+   */
+  amountCents?: number;
+  /** Taxa retida pelo provedor, em centavos positivos. Ausente ⇒ taxa desconhecida (≠ zero). */
+  feeCents?: number;
+  /** Instante da liquidação NO GATEWAY (ISO 8601), não a chegada do webhook. */
+  occurredAt?: string;
 }
 
 export interface GatewaySubscription {

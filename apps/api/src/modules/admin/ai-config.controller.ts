@@ -38,6 +38,12 @@ export class AiConfigController {
     return this.aiConfig.inviolableRules();
   }
 
+  @Post('simulate')
+  @RequireCapabilities(Capability.AI_CONFIG_READ, Capability.AI_CONFIG_WRITE)
+  simulate(@Body() body: unknown) {
+    return this.aiConfig.simulate(body);
+  }
+
   @Post('persona')
   @RequireCapabilities(Capability.AI_CONFIG_READ, Capability.AI_CONFIG_WRITE)
   publish(@CurrentUser() actor: AuthenticatedUser, @Body() body: unknown) {

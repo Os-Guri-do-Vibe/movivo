@@ -29,14 +29,51 @@ import { ProtocolModule } from '../protocol/protocol.module';
 import { AiConfigController } from './ai-config.controller';
 import { AiConfigService } from './ai-config.service';
 import { AuditService } from './audit.service';
+import { AuditQueryController } from './audit-query.controller';
+import { AuditQueryService } from './audit-query.service';
 import { ControlCenterController } from './control-center.controller';
 import { ControlCenterService } from './control-center.service';
 import { DashboardController } from './dashboard.controller';
 import { DashboardService } from './dashboard.service';
+import { FinanceController } from './finance.controller';
+import { FinanceService } from './finance.service';
+import { FaqAdminController } from './faq-admin.controller';
+import { FaqAdminService } from './faq-admin.service';
+import { MarketingController } from './marketing.controller';
+import { MarketingService } from './marketing.service';
+import { L1GuardrailAdminController } from './l1-guardrail-admin.controller';
+import { L1GuardrailAdminService } from './l1-guardrail-admin.service';
+import { KnowledgeAdminController } from './knowledge-admin.controller';
+import { KnowledgeAdminService } from './knowledge-admin.service';
+import { PartnersController } from './partners.controller';
+import { PartnersService } from './partners.service';
 
 @Module({
   imports: [AuthModule, JobsModule, ProtocolModule],
-  controllers: [DashboardController, ControlCenterController, AiConfigController],
-  providers: [AuditService, DashboardService, ControlCenterService, AiConfigService],
+  controllers: [
+    DashboardController,
+    ControlCenterController,
+    AiConfigController,
+    FinanceController,
+    MarketingController,
+    PartnersController,
+    FaqAdminController,
+    L1GuardrailAdminController,
+    AuditQueryController,
+    KnowledgeAdminController,
+  ],
+  providers: [
+    AuditService,
+    DashboardService,
+    ControlCenterService,
+    AiConfigService,
+    FinanceService,
+    MarketingService,
+    PartnersService,
+    FaqAdminService,
+    L1GuardrailAdminService,
+    AuditQueryService,
+    KnowledgeAdminService,
+  ],
 })
 export class AdminModule {}

@@ -9,6 +9,7 @@ import { ActivityHeatmap } from './overview-charts';
 import {
   DataQuality,
   EmptyState,
+  formatMetric,
   ResourceState,
   SectorHeader,
   useControlCenterResource,
@@ -22,18 +23,17 @@ const DIMENSION_LABELS = {
 } as const;
 
 const percent = new Intl.NumberFormat('pt-BR', { style: 'percent', maximumFractionDigits: 1 });
+const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
-/**
- * Métricas que só existem com origem de tráfego. O cartão nomeia a dependência em vez
- * de renderizar zero: sem UTM não há CAC por canal, e inventar o número seria pior que
- * não ter (TASK-7.3.4).
- */
-const ATTRIBUTION_METRICS = [
-  'Origem do cadastro (canal e campanha)',
-  'CAC por canal',
-  'ROAS por campanha',
-  'Conversão por campanha e criativo',
-];
+const SIGNAL_LABELS = {
+  GREEN: { label: 'Dentro da meta', className: 'bg-accent text-accent-foreground' },
+  ATTENTION: { label: 'Atenção', className: 'bg-secondary text-secondary-foreground' },
+  CRITICAL: { label: 'Fora da meta', className: 'bg-destructive/10 text-destructive' },
+  UNKNOWN: { label: 'Sem base', className: 'border border-border text-muted-foreground' },
+} as const;
+
+/** Rótulo do investimento. Canal sem gasto NUNCA exibe R$ 0,00 (TASK-8.6.2). */
+const NO_INVESTMENT_LABEL = 'sem investimento direto';
 
 export function MarketingDashboard() {
   const load = useCallback((signal?: AbortSignal) => getMarketing(signal), []);
@@ -146,28 +146,107 @@ export function MarketingDashboard() {
         )}
       </section>
 
-      <section
-        aria-labelledby="attribution-title"
-        className="mt-6 rounded-xl border border-dashed border-border bg-card p-5 sm:p-6"
-      >
-        <h2 id="attribution-title" className="text-h2 font-bold">
-          Aquisição &amp; Canais
-        </h2>
-        <p className="mt-1 text-label text-muted-foreground">
-          Indisponível — depende da captura de UTM em <code>anamnesis_sessions</code> e da tabela de
-          investimento em mídia, previstas para a Sprint 8. Nenhum número é estimado aqui.
+      <section aria-labelledby="attribution-title" className="mt-8">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 id="attribution-title" className="text-h2 font-bold">
+              Aquisição &amp; Canais
+            </h2>
+            <p className="mt-1 text-label text-muted-foreground">
+              CAC, ROAS e LTV/CAC por origem. Janela de atribuição: convertidos em até{' '}
+              {data.attributionWindowDays} dias após o cadastro, atribuídos ao canal de primeiro
+              toque. ROAS usa receita <strong>recebida</strong>, nunca contratada.
+            </p>
+          </div>
+          <p className="rounded-full bg-secondary px-3 py-1 text-xs text-muted-foreground">
+            {data.suppressedChannels.toLocaleString('pt-BR')} canais suprimidos (n&lt;
+            {data.minimumSegmentSize})
+          </p>
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Investimento em mídia lançado: {brl.format(data.mediaInvestmentBrl)} · LTV sustentado por{' '}
+          {data.matureCohorts} coorte(s) de entrada madura(s)
+          {data.matureCohorts < 3
+            ? ' — estimativa de baixa confiança, é hipótese, não medida.'
+            : '.'}{' '}
+          Origem não capturada: {data.attributionNotCaptured.toLocaleString('pt-BR')} cadastros
+          anteriores à captura de origem — nunca contados como orgânicos.
         </p>
-        <ul className="mt-4 grid gap-2 text-label text-muted-foreground sm:grid-cols-2">
-          {ATTRIBUTION_METRICS.map((item) => (
-            <li key={item} className="rounded-lg bg-secondary px-3 py-2">
-              {item}
-            </li>
-          ))}
-        </ul>
+        {data.channelEconomics.length ? (
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {data.channelEconomics.map((channel) => {
+              const signal = SIGNAL_LABELS[channel.signal];
+              return (
+                <article
+                  key={channel.channel}
+                  className="rounded-xl border border-border bg-card p-5"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <h3 className="text-h3 font-semibold">{channel.channel}</h3>
+                    <span
+                      className={cn(
+                        'rounded-full px-2 py-1 text-xs font-semibold',
+                        signal.className,
+                      )}
+                    >
+                      {signal.label}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {channel.students.toLocaleString('pt-BR')} cadastros ·{' '}
+                    {channel.converted.toLocaleString('pt-BR')} convertidos na janela
+                  </p>
+                  <dl className="mt-4 grid grid-cols-2 gap-3 text-label">
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Investimento</dt>
+                      <dd className="font-mono font-semibold">
+                        {channel.investmentBrl === null
+                          ? NO_INVESTMENT_LABEL
+                          : brl.format(channel.investmentBrl)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">CAC</dt>
+                      <dd className="font-mono font-semibold">{formatMetric(channel.cac)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Receita recebida</dt>
+                      <dd className="font-mono font-semibold">
+                        {formatMetric(channel.receivedRevenue)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">ROAS</dt>
+                      <dd className="font-mono font-semibold">{formatMetric(channel.roas)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">LTV/CAC (meta ≥ 3)</dt>
+                      <dd className="font-mono font-semibold">{formatMetric(channel.ltvToCac)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Payback (meta ≤ 3 meses)</dt>
+                      <dd className="font-mono font-semibold">
+                        {formatMetric(channel.paybackMonths)}
+                      </dd>
+                    </div>
+                  </dl>
+                  <p className="mt-3 text-xs text-muted-foreground">{channel.ltv.definition}</p>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="mt-4">
+            <EmptyState
+              title="Sem canais publicáveis"
+              description={`Nenhum canal alcançou ${data.minimumSegmentSize} cadastros — publicar abaixo disso permitiria reidentificação.`}
+            />
+          </div>
+        )}
         <p className="mt-4 text-xs text-muted-foreground">{data.acquisition.definition}</p>
       </section>
 
-      <section aria-labelledby="audience-title" className="mt-8">
+      <section id="publico-agregado" aria-labelledby="audience-title" className="mt-8">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 id="audience-title" className="text-h2 font-bold">

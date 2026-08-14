@@ -102,6 +102,18 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   { table: 'checkins', column: 'user_id', professional: 'read' },
   { table: 'reengagement_nudges', column: 'user_id', professional: 'read' },
   { table: 'audit_logs', column: 'user_id', professional: 'write' },
+  // Sprint 8 (US-8.1): treino concluído do titular. Não há caminho HTTP de aluno para
+  // esta tabela (não existe UI de aluno) — a RLS existe para que o painel do
+  // profissional e os jobs de sistema sejam a única porta, e ela seja escopada.
+  { table: 'workout_completions', column: 'user_id', professional: 'read' },
+  // Sprint 8 (US-8.3): sequência de marcos do ciclo de vida do titular. Append-only
+  // (ver `buildStatusTransitionsImmutabilitySql`) e sob a mesma FORCE RLS por titular.
+  { table: 'user_status_transitions', column: 'user_id', professional: 'read' },
+  // Sprint 8 (US-8.5): liquidação recebida do gateway. Dado financeiro do titular, como
+  // `subscriptions`. Linha órfã (conciliação sem assinatura) tem `user_id` nulo e por isso
+  // não casa com nenhuma política de titular — fica visível só a SYSTEM/ADMIN, que é
+  // exatamente quem trata a fila de exceção. Append-only (`buildPaymentsImmutabilitySql`).
+  { table: 'payments', column: 'user_id', professional: 'read' },
 ];
 
 // `nullif(..., '')` é OBRIGATÓRIO, não cosmético: sob PgBouncer transaction mode,
@@ -321,6 +333,86 @@ export function buildAgentConfigImmutabilitySql(appRole: string): string {
 
     REVOKE UPDATE, DELETE, TRUNCATE ON public.agent_config FROM ${appRole};
     GRANT SELECT, INSERT ON public.agent_config TO ${appRole};
+  `;
+}
+
+/** FAQ é configuração global e append-only; correção/rollback sempre cria nova versão. */
+export function buildFaqEntriesImmutabilitySql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.faq_entries_reject_mutation()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    BEGIN
+      RAISE EXCEPTION 'faq_entries is append-only' USING ERRCODE = '55000';
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.faq_entries_reject_mutation() FROM PUBLIC;
+
+    DROP TRIGGER IF EXISTS trg_faq_entries_immutable ON public.faq_entries;
+    CREATE TRIGGER trg_faq_entries_immutable BEFORE UPDATE OR DELETE ON public.faq_entries
+      FOR EACH ROW EXECUTE FUNCTION public.faq_entries_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_faq_entries_no_truncate ON public.faq_entries;
+    CREATE TRIGGER trg_faq_entries_no_truncate BEFORE TRUNCATE ON public.faq_entries
+      FOR EACH STATEMENT EXECUTE FUNCTION public.faq_entries_reject_mutation();
+
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.faq_entries FROM ${appRole};
+    GRANT SELECT, INSERT ON public.faq_entries TO ${appRole};
+  `;
+}
+
+/** Guardrails L1 são globais e append-only; a action no banco admite somente FLAG. */
+export function buildAiGuardrailRulesImmutabilitySql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.ai_guardrail_rules_reject_mutation()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    BEGIN
+      RAISE EXCEPTION 'ai_guardrail_rules is append-only' USING ERRCODE = '55000';
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.ai_guardrail_rules_reject_mutation() FROM PUBLIC;
+
+    DROP TRIGGER IF EXISTS trg_ai_guardrail_rules_immutable ON public.ai_guardrail_rules;
+    CREATE TRIGGER trg_ai_guardrail_rules_immutable BEFORE UPDATE OR DELETE ON public.ai_guardrail_rules
+      FOR EACH ROW EXECUTE FUNCTION public.ai_guardrail_rules_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_ai_guardrail_rules_no_truncate ON public.ai_guardrail_rules;
+    CREATE TRIGGER trg_ai_guardrail_rules_no_truncate BEFORE TRUNCATE ON public.ai_guardrail_rules
+      FOR EACH STATEMENT EXECUTE FUNCTION public.ai_guardrail_rules_reject_mutation();
+
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.ai_guardrail_rules FROM ${appRole};
+    GRANT SELECT, INSERT ON public.ai_guardrail_rules TO ${appRole};
+  `;
+}
+
+/**
+ * `user_status_transitions` append-only, imposto no banco (US-8.3 / TASK-8.3.1).
+ *
+ * Molde idêntico ao de `agent_config` (Sprint 7), pelo mesmo motivo: uma transição editada
+ * depois do fato reescreve a coorte e a taxa de conversão retroativamente, sem deixar rastro
+ * — o painel do fundador e a planilha do CFO passariam a divergir em silêncio. Duas barreiras:
+ *  1. trigger que levanta exceção em UPDATE/DELETE/TRUNCATE (vale até para quem tem grant);
+ *  2. REVOKE do privilégio na role de runtime (vale até se a trigger for derrubada).
+ * Diferente de `agent_config`, esta tabela **também** entra na RLS por titular (é dado de aluno).
+ */
+export function buildStatusTransitionsImmutabilitySql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.user_status_transitions_reject_mutation()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    BEGIN
+      RAISE EXCEPTION 'user_status_transitions is append-only' USING ERRCODE = '55000';
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.user_status_transitions_reject_mutation() FROM PUBLIC;
+
+    DROP TRIGGER IF EXISTS trg_user_status_transitions_immutable ON public.user_status_transitions;
+    CREATE TRIGGER trg_user_status_transitions_immutable
+      BEFORE UPDATE OR DELETE ON public.user_status_transitions
+      FOR EACH ROW EXECUTE FUNCTION public.user_status_transitions_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_user_status_transitions_no_truncate ON public.user_status_transitions;
+    CREATE TRIGGER trg_user_status_transitions_no_truncate
+      BEFORE TRUNCATE ON public.user_status_transitions
+      FOR EACH STATEMENT EXECUTE FUNCTION public.user_status_transitions_reject_mutation();
+
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.user_status_transitions FROM ${appRole};
+    GRANT SELECT, INSERT ON public.user_status_transitions TO ${appRole};
   `;
 }
 
@@ -587,5 +679,207 @@ export function buildProfessionalAccessSql(appRole: string): string {
     GRANT EXECUTE ON FUNCTION public.release_parq_clearance(uuid, public.parq_state) TO ${appRole};
     GRANT EXECUTE ON FUNCTION public.assigned_active_professional(uuid) TO ${appRole};
     REVOKE INSERT, UPDATE, DELETE ON public.consents FROM ${appRole};
+  `;
+}
+
+/**
+ * `expenses` append-only, imposto no banco (US-8.4 / TASK-8.4.2).
+ *
+ * Mesma dupla barreira de `audit_logs` e `agent_config`, pelo motivo do livro-caixa:
+ * **correcao e estorno, nunca edicao**. Um valor de despesa alterado em silencio muda o
+ * lucro apurado de um periodo ja fechado sem deixar rastro conferivel contra o extrato.
+ *  1. trigger que levanta excecao em UPDATE/DELETE/TRUNCATE (vale ate para quem tem grant);
+ *  2. REVOKE do privilegio na role de runtime (vale ate se a trigger for derrubada).
+ *
+ * Fora da RLS por titular: e dado da empresa, nao de aluno. Quem escreve e definido por
+ * capability na API (`FINANCE_WRITE`), e toda escrita passa por `AuditService.append`.
+ *
+ * `model_pricing` NAO entra aqui de proposito: fechar vigencia e literalmente
+ * `UPDATE valid_to`. La a garantia de historico imutavel vem da vigencia por data, nao
+ * da imutabilidade da linha.
+ */
+export function buildExpensesImmutabilitySql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.expenses_reject_mutation()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    BEGIN
+      RAISE EXCEPTION 'expenses is append-only: corrija por estorno, nunca por edicao' USING ERRCODE = '55000';
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.expenses_reject_mutation() FROM PUBLIC;
+
+    DROP TRIGGER IF EXISTS trg_expenses_immutable ON public.expenses;
+    CREATE TRIGGER trg_expenses_immutable BEFORE UPDATE OR DELETE ON public.expenses
+      FOR EACH ROW EXECUTE FUNCTION public.expenses_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_expenses_no_truncate ON public.expenses;
+    CREATE TRIGGER trg_expenses_no_truncate BEFORE TRUNCATE ON public.expenses
+      FOR EACH STATEMENT EXECUTE FUNCTION public.expenses_reject_mutation();
+
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.expenses FROM ${appRole};
+    GRANT SELECT, INSERT ON public.expenses TO ${appRole};
+  `;
+}
+
+/**
+ * `payments` append-only, imposto no banco (US-8.5 / TASK-8.5.1).
+ *
+ * Quarta aplicacao do mesmo molde (`audit_logs`, `agent_config`, `user_status_transitions`,
+ * `expenses`) e a mais sensivel: `payments` e escrita a partir de um evento **externo**.
+ * Um valor de liquidacao alterado depois muda a receita apurada de um periodo fechado e,
+ * pela US-8.7, muda a base de distribuicao de lucro entre os socios.
+ *  1. trigger que levanta excecao em UPDATE/DELETE/TRUNCATE (vale ate para quem tem grant);
+ *  2. REVOKE do privilegio na role de runtime (vale ate se a trigger for derrubada).
+ *
+ * Estorno e chargeback sao **linha nova de sinal contrario**, nunca alteracao da original —
+ * por isso a imutabilidade nao atrapalha a correcao: ela e o que a torna auditavel.
+ *
+ * A regra vale tambem para a conciliacao: o vinculo com a assinatura e resolvido ANTES do
+ * insert (no worker), nunca por um UPDATE posterior. Ver `payments.ts`.
+ */
+export function buildPaymentsImmutabilitySql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.payments_reject_mutation()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    BEGIN
+      RAISE EXCEPTION 'payments is append-only: estorno e linha nova, nunca alteracao' USING ERRCODE = '55000';
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.payments_reject_mutation() FROM PUBLIC;
+
+    DROP TRIGGER IF EXISTS trg_payments_immutable ON public.payments;
+    CREATE TRIGGER trg_payments_immutable BEFORE UPDATE OR DELETE ON public.payments
+      FOR EACH ROW EXECUTE FUNCTION public.payments_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_payments_no_truncate ON public.payments;
+    CREATE TRIGGER trg_payments_no_truncate BEFORE TRUNCATE ON public.payments
+      FOR EACH STATEMENT EXECUTE FUNCTION public.payments_reject_mutation();
+
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.payments FROM ${appRole};
+    GRANT SELECT, INSERT ON public.payments TO ${appRole};
+  `;
+}
+
+/**
+ * `ad_spend` append-only, imposto no banco (US-8.6 / TASK-8.6.1).
+ *
+ * Quinta aplicacao do mesmo molde, pelo motivo de `expenses`: investimento em midia e o
+ * NUMERADOR do CAC. Alterar um valor em silencio muda o CAC e o ROAS de um periodo ja
+ * lido, e a decisao de escalar ou cortar um anuncio foi tomada sobre o numero antigo.
+ * Correcao e estorno (linha negativa com `reverses_ad_spend_id`) + relancamento.
+ *
+ * Fora da RLS por titular: dado de negocio, nao de titular — igual a `expenses` e
+ * `model_pricing`. Quem escreve e definido por capability na API (`MARKETING_WRITE`), e
+ * toda escrita passa por `AuditService.append` na mesma transacao.
+ */
+export function buildAdSpendImmutabilitySql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.ad_spend_reject_mutation()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    BEGIN
+      RAISE EXCEPTION 'ad_spend is append-only: corrija por estorno, nunca por edicao' USING ERRCODE = '55000';
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.ad_spend_reject_mutation() FROM PUBLIC;
+
+    DROP TRIGGER IF EXISTS trg_ad_spend_immutable ON public.ad_spend;
+    CREATE TRIGGER trg_ad_spend_immutable BEFORE UPDATE OR DELETE ON public.ad_spend
+      FOR EACH ROW EXECUTE FUNCTION public.ad_spend_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_ad_spend_no_truncate ON public.ad_spend;
+    CREATE TRIGGER trg_ad_spend_no_truncate BEFORE TRUNCATE ON public.ad_spend
+      FOR EACH STATEMENT EXECUTE FUNCTION public.ad_spend_reject_mutation();
+
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.ad_spend FROM ${appRole};
+    GRANT SELECT, INSERT ON public.ad_spend TO ${appRole};
+  `;
+}
+
+/** Metadados/revisoes RAG sao historico; publicacao exige revisao CREF no banco. */
+export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.knowledge_history_reject_mutation()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    BEGIN
+      RAISE EXCEPTION 'knowledge history is append-only' USING ERRCODE = '55000';
+    END $$;
+    REVOKE ALL ON FUNCTION public.knowledge_history_reject_mutation() FROM PUBLIC;
+
+    DROP TRIGGER IF EXISTS trg_knowledge_documents_immutable ON public.knowledge_documents;
+    CREATE TRIGGER trg_knowledge_documents_immutable BEFORE UPDATE OR DELETE ON public.knowledge_documents
+      FOR EACH ROW EXECUTE FUNCTION public.knowledge_history_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_knowledge_documents_no_truncate ON public.knowledge_documents;
+    CREATE TRIGGER trg_knowledge_documents_no_truncate BEFORE TRUNCATE ON public.knowledge_documents
+      FOR EACH STATEMENT EXECUTE FUNCTION public.knowledge_history_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_knowledge_reviews_immutable ON public.knowledge_document_reviews;
+    CREATE TRIGGER trg_knowledge_reviews_immutable BEFORE UPDATE OR DELETE ON public.knowledge_document_reviews
+      FOR EACH ROW EXECUTE FUNCTION public.knowledge_history_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_knowledge_reviews_no_truncate ON public.knowledge_document_reviews;
+    CREATE TRIGGER trg_knowledge_reviews_no_truncate BEFORE TRUNCATE ON public.knowledge_document_reviews
+      FOR EACH STATEMENT EXECUTE FUNCTION public.knowledge_history_reject_mutation();
+
+    CREATE OR REPLACE FUNCTION public.publish_knowledge_document(target_document uuid, prepared_chunks jsonb)
+    RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    DECLARE actor uuid; affected integer;
+    BEGIN
+      actor := nullif(current_setting('app.current_user_id', true), '')::uuid;
+      IF nullif(current_setting('app.current_role', true), '') <> 'PROFESSIONAL' OR actor IS NULL THEN
+        RAISE EXCEPTION 'active CREF professional role required' USING ERRCODE = '42501';
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM public.users professional
+        WHERE professional.id = actor AND professional.role = 'PROFESSIONAL'
+          AND professional.cref_active = true
+      ) THEN
+        RAISE EXCEPTION 'active CREF professional required' USING ERRCODE = '42501';
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM public.knowledge_document_reviews review
+        WHERE review.document_id = target_document
+          AND review.decision = 'APPROVED'::public.knowledge_review_decision
+          AND review.reviewer_id = actor
+          AND review.id = (
+            SELECT latest.id FROM public.knowledge_document_reviews latest
+            WHERE latest.document_id = target_document
+            ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1
+          )
+      ) THEN
+        RAISE EXCEPTION 'approved CREF review required' USING ERRCODE = '42501';
+      END IF;
+      INSERT INTO public.knowledge_base (
+        document_id, chunk_index, chunk_text, embedding, topic, title, source_url,
+        reliability, published_at, created_at, updated_at
+      )
+      SELECT target_document, (item->>'chunkIndex')::integer, item->>'chunkText',
+        (item->>'embedding')::vector, item->>'topic', item->>'title',
+        nullif(item->>'sourceUrl', ''), (item->>'reliability')::integer, now(), now(), now()
+      FROM jsonb_array_elements(prepared_chunks) item
+      ON CONFLICT (document_id, chunk_index) DO NOTHING;
+      GET DIAGNOSTICS affected = ROW_COUNT;
+      UPDATE public.knowledge_document_blobs
+        SET retained_until = now() + interval '365 days'
+        WHERE document_id = target_document;
+      RETURN affected;
+    END $$;
+
+    CREATE OR REPLACE FUNCTION public.purge_expired_knowledge_blobs()
+    RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    DECLARE affected integer;
+    BEGIN
+      IF nullif(current_setting('app.current_role', true), '') NOT IN ('ADMIN', 'PROFESSIONAL', 'ENGINEERING', 'SYSTEM') THEN
+        RAISE EXCEPTION 'control center role required' USING ERRCODE = '42501';
+      END IF;
+      DELETE FROM public.knowledge_document_blobs WHERE retained_until <= now();
+      GET DIAGNOSTICS affected = ROW_COUNT;
+      RETURN affected;
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.publish_knowledge_document(uuid, jsonb) FROM PUBLIC;
+    REVOKE ALL ON FUNCTION public.purge_expired_knowledge_blobs() FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION public.publish_knowledge_document(uuid, jsonb) TO ${appRole};
+    GRANT EXECUTE ON FUNCTION public.purge_expired_knowledge_blobs() TO ${appRole};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_documents FROM ${appRole};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_document_reviews FROM ${appRole};
+    GRANT SELECT, INSERT ON public.knowledge_documents TO ${appRole};
+    GRANT SELECT, INSERT ON public.knowledge_document_reviews TO ${appRole};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_document_blobs FROM ${appRole};
+    GRANT SELECT, INSERT ON public.knowledge_document_blobs TO ${appRole};
   `;
 }

@@ -65,6 +65,14 @@ const PII_FIELDS = [
   'apiKey',
   'secret',
   'signature',
+  // Payload bruto do gateway de pagamento (US-8.5). Vive na coluna jsonb de `payments`,
+  // sob RLS, e em nenhum outro lugar — mas trafega no `data` do job de conciliação, que o
+  // `DeadLetterRecord` copia inteiro. Um handler de DLQ que serialize `record.data`
+  // (Sentry, na sprint que substituir o `LoggingDeadLetterHandler`) vazaria dado de
+  // cobrança sem tocar em nenhuma linha de código do webhook. Redigir pelo NOME do campo
+  // fecha isso por construção, para todo log presente e futuro.
+  'rawPayload',
+  'raw_payload',
 ] as const;
 
 const PII_CONTAINERS = ['', '*.', 'req.body.', 'res.body.', 'body.', 'payload.', 'user.', 'data.'];

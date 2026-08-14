@@ -3,10 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type * as ControlCenterApi from '@/lib/control-center-api';
 
-const { getInviolableRules } = vi.hoisted(() => ({ getInviolableRules: vi.fn() }));
+const { getInviolableRules, getL1Guardrails } = vi.hoisted(() => ({
+  getInviolableRules: vi.fn(),
+  getL1Guardrails: vi.fn(),
+}));
 vi.mock('@/lib/control-center-api', async (importOriginal) => ({
   ...(await importOriginal<typeof ControlCenterApi>()),
   getInviolableRules,
+  getL1Guardrails,
 }));
 
 import { AiRulesDashboard } from './ai-rules';
@@ -47,7 +51,10 @@ const response = {
   },
 };
 
-beforeEach(() => getInviolableRules.mockReset().mockResolvedValue(response));
+beforeEach(() => {
+  getInviolableRules.mockReset().mockResolvedValue(response);
+  getL1Guardrails.mockReset().mockResolvedValue({ data: { versions: [] }, meta: response.meta });
+});
 
 describe('AiRulesDashboard', () => {
   it('lista os blocos L0 com cadeado, conteúdo e justificativa de negócio', async () => {

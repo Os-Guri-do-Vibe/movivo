@@ -25,7 +25,6 @@ import { WorkingMemory } from './context/working-memory.service';
 import { IntentClassifier } from './intent/intent-classifier.service';
 import { PromptResolverService } from './intent/prompt-resolver.service';
 import { IntentRepository } from './intent/intent.repository';
-import { EMBEDDING_PORT, FakeEmbedding } from './rag/embedding.port';
 import { RagService } from './rag/rag.service';
 import { FakeReranker, RERANKER_PORT } from './rag/reranker.port';
 import { AiJobRepository } from './llm/ai-job.repository';
@@ -74,7 +73,6 @@ import type { LLMProvider } from './llm/llm.types';
     ContextRepository,
     // Portas de embedding/rerank: fakes determinísticos no dev/CI; impl real (OpenAI /
     // bge-reranker) pluga atrás delas quando houver chave/infra.
-    { provide: EMBEDDING_PORT, useClass: FakeEmbedding },
     { provide: RERANKER_PORT, useClass: FakeReranker },
     // US-3.3 substitui o no-op da US-3.2: a camada semantic agora é o RAG real (PGVector).
     { provide: SEMANTIC_MEMORY, useClass: RagService },

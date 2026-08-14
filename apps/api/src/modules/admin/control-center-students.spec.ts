@@ -35,10 +35,25 @@ function query(rows: unknown[]) {
 const STUDENT_ID = '11111111-1111-4111-8111-111111111111';
 const ACTOR = { userId: '22222222-2222-4222-8222-222222222222', jti: 'j1' } as const;
 
+/**
+ * Fila de retornos de `tx.execute` (SQL cru). A North Star (US-8.1) sai de um `execute`,
+ * não do query builder; por padrão a fila é vazia e a métrica fica indisponível, que é o
+ * que a maioria dos testes desta suíte espera.
+ */
+let nextExecuteRows: unknown[][] = [];
+function withExecute(...rows: unknown[][]) {
+  nextExecuteRows = rows;
+}
+
 function build(...results: unknown[][]) {
   const select = vi.fn();
   for (const rows of results) select.mockImplementationOnce(() => query(rows));
-  const tx = { select };
+  // US-8.1: North Star/adesão declarada rodam DEPOIS dos selects enumerados; um
+  // fallback vazio evita reenumerar todas as queries em cada teste desta suíte.
+  select.mockImplementation(() => query([]));
+  const executeQueue = [...nextExecuteRows];
+  nextExecuteRows = [];
+  const tx = { select, execute: vi.fn(async () => executeQueue.shift() ?? []) };
   const db = {
     runAsSystem: vi.fn((cb: (value: unknown) => Promise<unknown>) => cb(tx)),
     runAsUser: vi.fn((_id: string, _role: string, cb: (value: unknown) => Promise<unknown>) =>
@@ -289,5 +304,63 @@ describe('assessChurnRisk', () => {
       now.getTime(),
     );
     expect(risk.signals).toEqual([]);
+  });
+});
+
+/**
+ * TASK-8.9.4 — conferência numérica da North Star com tolerância 0. A US-8.1 provou o
+ * caminho da coorte vazia ("indisponível, nunca zero"); o que faltava era a aritmética
+ * com coorte povoada, que é o número que o fundador vai ler.
+ */
+describe('ControlCenterService.students — North Star (US-8.1 / TASK-8.9.4)', () => {
+  it('média e taxa de reporte conferem com o cálculo manual, sem tolerância', async () => {
+    withExecute([
+      {
+        cohort_size: 4,
+        total_completions: 26,
+        reporting: 3,
+        quick_reply: 14,
+        checkin: 9,
+        conversation: 3,
+      },
+    ]);
+    const { service } = build([], [{ blocked: 0, validated: 0 }]);
+
+    const { data } = await service.students({ ...ACTOR, role: 'PROFESSIONAL' });
+
+    // Cálculo manual, fora do código de produção: 26 ÷ 4 = 6,5 treinos.
+    expect(data.northStar.averageCompletions.value).toBe(6.5);
+    expect(data.northStar.averageCompletions.status).toBe('AVAILABLE');
+    // 3 de 4 alunos com ao menos 1 treino = 75,0%.
+    expect(data.northStar.reportingRate.value).toBe(75);
+    expect(data.northStar.cohortSize).toBe(4);
+    expect(data.northStar.target).toBe(8);
+    // As três fontes somam o total: nenhum treino é contado duas vezes nem some.
+    expect(data.northStar.bySource).toEqual([
+      { source: 'WHATSAPP_QUICK_REPLY', completions: 14 },
+      { source: 'CHECKIN', completions: 9 },
+      { source: 'CONVERSATION', completions: 3 },
+    ]);
+    expect(data.northStar.bySource.reduce((sum, row) => sum + row.completions, 0)).toBe(26);
+  });
+
+  it('coorte paga vazia deixa a North Star indisponível, nunca zero', async () => {
+    withExecute([
+      {
+        cohort_size: 0,
+        total_completions: 0,
+        reporting: 0,
+        quick_reply: 0,
+        checkin: 0,
+        conversation: 0,
+      },
+    ]);
+    const { service } = build([], [{ blocked: 0, validated: 0 }]);
+
+    const { data } = await service.students({ ...ACTOR, role: 'PROFESSIONAL' });
+
+    expect(data.northStar.averageCompletions).toMatchObject({ value: null, status: 'UNAVAILABLE' });
+    expect(data.northStar.reportingRate).toMatchObject({ value: null, status: 'UNAVAILABLE' });
+    expect(data.northStar.cohortSize).toBe(0);
   });
 });

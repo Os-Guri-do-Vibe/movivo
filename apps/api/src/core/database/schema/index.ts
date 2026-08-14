@@ -31,6 +31,7 @@ export * from './coaching-sessions';
 
 // Sprint 3 — corpus curado do RAG (US-3.3). Global, read-only, fora da RLS por titular.
 export * from './knowledge-base';
+export * from './knowledge-documents';
 
 // Sprint 3 — exemplos rotulados do IntentClassifier (US-3.4). Global, read-only.
 export * from './intent-examples';
@@ -42,3 +43,26 @@ export * from './reengagement-nudges';
 
 // Sprint 7 - configuracao publicada da agente de IA (US-7.6). Global, append-only.
 export * from './agent-config';
+
+// Sprint 8 - treino concluido verificado, base da North Star (US-8.1).
+export * from './workout-completions';
+
+// Sprint 8 - sequencia de mudancas de estado do aluno, append-only (US-8.3).
+export * from './user-status-transitions';
+
+// Sprint 8 - despesa auditavel e preco de modelo por vigencia (US-8.4).
+export * from './expenses';
+export * from './model-pricing';
+
+// Sprint 8 - liquidacao recebida do gateway (US-8.5). Append-only, idempotente pelo banco.
+export * from './payments';
+
+// Sprint 8 - investimento em midia por canal/campanha (US-8.6). Global, append-only.
+export * from './ad-spend';
+
+// Sprint 8 - cap table versionado por vigencia (US-8.7). Soma vigente travada em 10.000 bps.
+export * from './partners';
+
+// Sprint 9 - FAQ determinístico global, versionado e append-only.
+export * from './faq-entries';
+export * from './ai-guardrail-rules';

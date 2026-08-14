@@ -2,25 +2,24 @@
 
 import {
   Activity,
-  BarChart3,
-  BookOpenText,
+  Bot,
   Calculator,
+  ChevronDown,
   CircleGauge,
   ClipboardCheck,
   Coins,
+  FlaskConical,
   Handshake,
   Landmark,
   LockKeyhole,
   Megaphone,
   Menu,
-  MessageCircleQuestion,
   PanelLeftClose,
   PanelLeftOpen,
   Repeat,
   ScrollText,
   ServerCog,
   Settings,
-  Sparkles,
   Target,
   UsersRound,
   X,
@@ -95,10 +94,12 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         capabilities: ['control_center.students.read', 'control_center.students.health.read'],
       },
       {
+        // US-8.3 entregou entryCohorts/trialConversion; a tabela vive dentro de
+        // Financeiro (mesmo dado de coorte de receita), não numa tela própria.
+        href: '/dashboard/financeiro#coortes',
         label: 'Coortes & Retenção',
         icon: Repeat,
-        capabilities: ['control_center.students.read'],
-        soon: 'Sprint 7 · US-7.4',
+        capabilities: ['control_center.finance.read'],
       },
     ],
   },
@@ -112,22 +113,26 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         capabilities: ['control_center.finance.read'],
       },
       {
+        // US-8.4 entregou costByCategory/costByMonth; a seção vive dentro da
+        // mesma tela de Financeiro, não numa rota própria.
+        href: '/dashboard/financeiro#custos',
         label: 'Custos',
         icon: Coins,
         capabilities: ['control_center.finance.read'],
-        soon: 'Sprint 7 · US-7.2',
       },
       {
+        href: '/dashboard/projecao',
         label: 'Resultado & Projeção',
         icon: Calculator,
         capabilities: ['control_center.finance.read'],
-        soon: 'Sprint 8',
       },
       {
+        // Cap table e distribuição não são do setor financeiro: exigem
+        // `partners.read`, exclusiva do ADMIN. Quem é FINANCE não vê o item.
+        href: '/dashboard/socios',
         label: 'Sócios & Distribuição',
         icon: Handshake,
-        capabilities: ['control_center.finance.read'],
-        soon: 'Sprint 8',
+        capabilities: ['control_center.partners.read'],
       },
     ],
   },
@@ -135,28 +140,27 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
     label: 'Marketing',
     items: [
       {
+        // US-8.8: aquisição por canal, CAC, ROAS e LTV/CAC viraram número na US-8.6 e
+        // saem na mesma tela do funil de conversão — os dois itens viraram um só, com
+        // link, no lugar de um item de roadmap ao lado de outro já entregue.
+        href: '/dashboard/analytics',
         label: 'Aquisição & Canais',
         icon: Megaphone,
         capabilities: ['control_center.marketing.read'],
-        soon: 'Sprint 8',
       },
       {
-        href: '/dashboard/analytics',
-        label: 'Funil de conversão',
-        icon: BarChart3,
-        capabilities: ['control_center.marketing.read'],
-      },
-      {
+        // "Público agregado" (segments por objetivo/local/período/faixa etária) já
+        // existe desde a Sprint 7 na mesma tela de Aquisição & Canais.
+        href: '/dashboard/analytics#publico-agregado',
         label: 'Perfil de clientes',
         icon: Target,
         capabilities: ['control_center.marketing.read'],
-        soon: 'Sprint 7 · US-7.3',
       },
       {
+        href: '/dashboard/campanhas',
         label: 'Campanhas & Experimentos',
-        icon: Sparkles,
+        icon: FlaskConical,
         capabilities: ['control_center.marketing.read'],
-        soon: 'Sprint 8',
       },
     ],
   },
@@ -164,31 +168,13 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
     label: 'IA',
     items: [
       {
-        href: '/dashboard/ia/persona',
-        label: 'Persona & Tom de voz',
-        icon: Sparkles,
+        // Persona, Regras invioláveis, Conhecimento (RAG) e FAQ viraram etapas de um
+        // único painel — cada etapa continua publicando e auditando sua própria
+        // configuração, só a navegação foi unificada.
+        href: '/dashboard/ia/agente',
+        label: 'Agente',
+        icon: Bot,
         capabilities: ['control_center.ai.config.read'],
-      },
-      {
-        href: '/dashboard/ia/regras',
-        label: 'Regras invioláveis',
-        icon: LockKeyhole,
-        capabilities: ['control_center.ai.config.read'],
-      },
-      {
-        // Tem link: a tela existe e explica o escopo, a dependência e a sprint (US-7.7).
-        href: '/dashboard/ia/conhecimento',
-        label: 'Conhecimento (RAG)',
-        icon: BookOpenText,
-        capabilities: ['control_center.ai.config.read'],
-        soon: 'Sprint 10',
-      },
-      {
-        href: '/dashboard/ia/faq',
-        label: 'FAQ',
-        icon: MessageCircleQuestion,
-        capabilities: ['control_center.ai.config.read'],
-        soon: 'Sprint 8',
       },
     ],
   },
@@ -216,12 +202,10 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         capabilities: ['control_center.compliance.read', 'control_center.audit.read'],
       },
       {
-        // A trilha de auditoria já é exibida dentro de Compliance & Privacidade; a tela
-        // dedicada (busca por ator/período) chega na Sprint 8.
+        href: '/dashboard/sistema/auditoria',
         label: 'Auditoria',
         icon: ScrollText,
         capabilities: ['control_center.audit.read'],
-        soon: 'Sprint 8',
       },
       {
         href: '/dashboard/administracao',
@@ -269,6 +253,14 @@ function activeItemFor(pathname: string): DashboardNavigationItem | undefined {
     .find((item) => isCurrent(pathname, item.href));
 }
 
+/** Rótulo do pilar (grupo com nome) que contém a rota atual, para abrir a categoria certa. */
+function activeGroupFor(pathname: string): string | null {
+  const active = activeItemFor(pathname);
+  if (!active) return null;
+  const pillar = PILLARS.find((p) => p.items.some((item) => item.label === active.label));
+  return pillar?.label ?? null;
+}
+
 function DashboardNavigation({
   capabilities,
   collapsed,
@@ -279,95 +271,123 @@ function DashboardNavigation({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
+  const activeGroup = activeGroupFor(pathname);
+  // Só a categoria da rota atual começa aberta — evita que a barra precise de
+  // scroll com os 5 pilares + Visão geral abertos ao mesmo tempo.
+  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(
+    () => new Set(activeGroup ? [activeGroup] : []),
+  );
+  useEffect(() => {
+    if (activeGroup) setOpenGroups((prev) => new Set(prev).add(activeGroup));
+  }, [activeGroup]);
+  const toggleGroup = useCallback((label: string) => {
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  }, []);
+
   return (
     <div className="grid gap-1">
-      {navigationGroupsFor(capabilities).map((group, index) => (
-        <div key={group.label ?? 'principal'}>
-          {group.label ? (
-            collapsed ? (
-              <hr
-                aria-hidden="true"
-                className="mx-2 my-3 border-t border-[var(--petroleo-borda)]/40"
-              />
-            ) : (
-              <p
-                className={cn(
-                  'mb-2 px-3 text-[0.6875rem] font-semibold tracking-[0.14em] uppercase text-[var(--nevoa-suave)]',
-                  index > 0 && 'mt-6',
-                )}
-              >
-                {group.label}
-              </p>
-            )
-          ) : null}
-          <ul className="grid gap-1.5">
-            {group.items.map(({ href, label, icon: Icon, soon }) => {
-              if (!href) {
-                // Roadmap: item presente, sem link e sem controle desabilitado.
-                return (
-                  <li key={label}>
-                    <div
-                      className={cn(
-                        'flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-label text-[var(--nevoa-suave)]/70',
-                        collapsed && 'justify-center px-0',
-                      )}
-                    >
-                      <Icon aria-hidden="true" className="size-5 shrink-0" />
-                      <span className={collapsed ? 'sr-only' : undefined}>{label}</span>
-                      <span
+      {navigationGroupsFor(capabilities).map((group, index) => {
+        const groupLabel = group.label;
+        const isOpen = !groupLabel || collapsed || openGroups.has(groupLabel);
+        return (
+          <div key={groupLabel ?? 'principal'}>
+            {groupLabel ? (
+              collapsed ? (
+                <hr
+                  aria-hidden="true"
+                  className="mx-2 my-3 border-t border-[var(--petroleo-borda)]/40"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(groupLabel)}
+                  aria-expanded={isOpen}
+                  className={cn(
+                    'flex w-full items-center justify-between rounded-md px-3 py-1.5 text-[0.6875rem] font-semibold tracking-[0.14em] uppercase text-[var(--nevoa-suave)] transition-colors hover:text-nevoa focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none',
+                    index > 0 && 'mt-4',
+                  )}
+                >
+                  {groupLabel}
+                  <ChevronDown
+                    aria-hidden="true"
+                    className={cn('size-3.5 shrink-0 transition-transform', isOpen && 'rotate-180')}
+                  />
+                </button>
+              )
+            ) : null}
+            {isOpen ? (
+              <ul className={cn('grid gap-1.5', groupLabel && !collapsed && 'mt-1')}>
+                {group.items.map(({ href, label, icon: Icon, soon }) => {
+                  if (!href) {
+                    // Roadmap: item presente, sem link e sem controle desabilitado.
+                    return (
+                      <li key={label}>
+                        <div
+                          className={cn(
+                            'flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-label text-[var(--nevoa-suave)]/70',
+                            collapsed && 'justify-center px-0',
+                          )}
+                        >
+                          <Icon aria-hidden="true" className="size-5 shrink-0" />
+                          <span className={collapsed ? 'sr-only' : undefined}>{label}</span>
+                          <span
+                            className={cn(
+                              'ml-auto rounded-full border border-[var(--petroleo-borda)] px-2 py-0.5 text-[0.625rem] font-semibold whitespace-nowrap',
+                              collapsed && 'sr-only',
+                            )}
+                          >
+                            Em breve · {soon}
+                          </span>
+                        </div>
+                      </li>
+                    );
+                  }
+                  const current = isCurrent(pathname, href);
+                  return (
+                    <li key={href}>
+                      <Link
+                        href={href}
+                        aria-current={current ? 'page' : undefined}
+                        aria-label={label}
+                        onClick={onNavigate}
                         className={cn(
-                          'ml-auto rounded-full border border-[var(--petroleo-borda)] px-2 py-0.5 text-[0.625rem] font-semibold whitespace-nowrap',
-                          collapsed && 'sr-only',
+                          'flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-label font-medium transition-colors focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none',
+                          collapsed && 'justify-center px-0',
+                          current
+                            ? 'bg-[var(--petroleo-superficie)] font-semibold text-verde-pulso'
+                            : 'text-[var(--nevoa-suave)] hover:bg-[var(--petroleo-superficie)] hover:text-nevoa',
                         )}
                       >
-                        Em breve · {soon}
-                      </span>
-                    </div>
-                  </li>
-                );
-              }
-              const current = isCurrent(pathname, href);
-              return (
-                <li key={href}>
-                  <Link
-                    href={href}
-                    aria-current={current ? 'page' : undefined}
-                    aria-label={label}
-                    onClick={onNavigate}
-                    className={cn(
-                      'flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-label font-medium transition-colors focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none',
-                      collapsed && 'justify-center px-0',
-                      current
-                        ? 'bg-[var(--petroleo-superficie)] font-semibold text-verde-pulso'
-                        : 'text-[var(--nevoa-suave)] hover:bg-[var(--petroleo-superficie)] hover:text-nevoa',
-                    )}
-                  >
-                    <Icon aria-hidden="true" className="size-5 shrink-0" />
-                    <span className={collapsed ? 'sr-only' : undefined}>{label}</span>
-                    {soon && !collapsed ? (
-                      // Tela existe, mas só explica o que virá — o roadmap continua visível.
-                      <span className="ml-auto rounded-full border border-[var(--petroleo-borda)] px-2 py-0.5 text-[0.625rem] font-semibold whitespace-nowrap">
-                        Em breve · {soon}
-                      </span>
-                    ) : current && !collapsed ? (
-                      <span
-                        aria-hidden="true"
-                        className="ml-auto size-1.5 rounded-full bg-verde-pulso"
-                      />
-                    ) : null}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ))}
+                        <Icon aria-hidden="true" className="size-5 shrink-0" />
+                        <span className={collapsed ? 'sr-only' : undefined}>{label}</span>
+                        {soon && !collapsed ? (
+                          // Tela existe, mas só explica o que virá — o roadmap continua visível.
+                          <span className="ml-auto rounded-full border border-[var(--petroleo-borda)] px-2 py-0.5 text-[0.625rem] font-semibold whitespace-nowrap">
+                            Em breve · {soon}
+                          </span>
+                        ) : current && !collapsed ? (
+                          <span
+                            aria-hidden="true"
+                            className="ml-auto size-1.5 rounded-full bg-verde-pulso"
+                          />
+                        ) : null}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
-
-const CREF_NOTICE =
-  'Protocolos supervisionados por profissional de Educação Física registrado no CREF. A IA é ferramenta de apoio — a decisão técnica é do profissional.';
 
 const ACCESS_NOTICE =
   'Cada setor mostra somente os dados necessários para este papel. Ações e leituras sensíveis são auditadas pelo servidor.';
@@ -404,8 +424,8 @@ function SidebarBody({
     <>
       <div
         className={cn(
-          'flex h-16 shrink-0 items-center gap-3 border-b border-[var(--petroleo-borda)]/40 p-4',
-          collapsed && 'justify-center px-0',
+          'flex h-16 shrink-0 items-center justify-center gap-3 border-b border-[var(--petroleo-borda)]/40 p-4',
+          collapsed && 'px-0',
         )}
       >
         {collapsed ? (
@@ -448,11 +468,6 @@ function SidebarBody({
             {collapsed ? null : 'Recolher'}
           </button>
         ) : null}
-        {collapsed ? null : (
-          <p className="mt-3 px-3 text-xs leading-relaxed text-[var(--nevoa-suave)]">
-            {CREF_NOTICE}
-          </p>
-        )}
       </div>
     </>
   );

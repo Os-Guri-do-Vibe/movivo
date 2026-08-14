@@ -61,6 +61,8 @@ const studentDetail = {
     preferredPeriod: 'MANHA',
   },
   workoutHistory: { status: 'UNAVAILABLE', reason: 'Depende de workout_completions (Sprint 8).' },
+  // US-8.2: cadastro anterior à captura de UTM — origem não capturada, nunca inferida.
+  acquisition: null,
   // As 6 origens da timeline, do evento mais recente para o mais antigo.
   timeline: [
     {
@@ -459,6 +461,29 @@ createServer(async (request, response) => {
       data: {
         students: [studentSummary],
         aiBlockedRate: metric(0, 'PERCENT', 'Respostas bloqueadas na base.'),
+        northStar: {
+          averageCompletions: metric(
+            null,
+            'COUNT',
+            'Treinos concluídos nos primeiros 30 dias.',
+            'UNAVAILABLE',
+          ),
+          target: 8,
+          reportingRate: metric(
+            null,
+            'PERCENT',
+            'Alunos com ao menos 1 registro no período.',
+            'UNAVAILABLE',
+          ),
+          cohortSize: 0,
+          bySource: [],
+        },
+        declaredAdherenceRate: metric(
+          null,
+          'PERCENT',
+          'Adesão declarada via check-in.',
+          'UNAVAILABLE',
+        ),
       },
       meta: controlCenterMeta,
     });

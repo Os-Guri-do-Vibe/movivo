@@ -1,9 +1,11 @@
 'use client';
 
+import * as React from 'react';
 import Link from 'next/link';
 
 import { Button } from '@/components/ui/button';
 import { isAnalyticsEnabled } from '@/lib/env';
+import { captureFirstTouch } from '@/lib/first-touch';
 
 /**
  * CTA único da landing (US-1.5, Sofia §9.1).
@@ -16,6 +18,13 @@ import { isAnalyticsEnabled } from '@/lib/env';
  * captura é pulada — analytics nunca bloqueia a navegação.
  */
 export function StartCta() {
+  // Primeiro toque (US-8.2): a query string chega AQUI, na landing, e some na
+  // navegação para `/anamnese`. Capturar na montagem é o que faz a origem
+  // sobreviver até a criação da sessão no servidor.
+  React.useEffect(() => {
+    captureFirstTouch();
+  }, []);
+
   function handleStart() {
     if (!isAnalyticsEnabled) return;
     void import('posthog-js').then(({ default: posthog }) => {

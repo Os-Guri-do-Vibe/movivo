@@ -15,8 +15,11 @@ import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
+import { FaqService } from '../../core/agent-config/faq.service';
+import { L1GuardrailService } from '../../core/agent-config/l1-guardrail.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { ContextService } from '../ai-coach/context/context.service';
+import { clinicalGuardrail } from '../ai-coach/intent/clinical-guardrail';
 import { IntentClassifier } from '../ai-coach/intent/intent-classifier.service';
 import type { Intent } from '../ai-coach/intent/intent.types';
 import { PromptResolverService } from '../ai-coach/intent/prompt-resolver.service';
@@ -49,6 +52,12 @@ interface ResponseDraft {
   validationPassed: boolean;
   humanReview: boolean;
   blocked: boolean;
+  ragSources?: Array<{
+    chunkId: string;
+    documentId: string | null;
+    title: string;
+    sourceUrl?: string;
+  }>;
 }
 
 const MAX_MESSAGE_CHARS = 4000;
@@ -61,6 +70,8 @@ export class AIResponseWorker implements OnModuleInit {
     private readonly lock: UserJobLock,
     private readonly classifier: IntentClassifier,
     private readonly prompts: PromptResolverService,
+    private readonly faq: FaqService,
+    private readonly l1Guardrails: L1GuardrailService,
     private readonly context: ContextService,
     private readonly llm: LlmRouter,
     private readonly abuse: LlmAbuseGuard,
@@ -117,6 +128,61 @@ export class AIResponseWorker implements OnModuleInit {
         return { status: 'LIMIT' };
       }
 
+      // O guardrail sempre vence o FAQ. Só mensagens dentro do perímetro seguro chegam ao
+      // match exato; assim uma resposta estática nunca mascara um alerta prioritário.
+      const guardrail = clinicalGuardrail(message);
+      if (guardrail === 'SAFETY') {
+        await this.repo.persistHandoff(userId, 'SAFETY', 'RED_FLAG');
+        this.logger.info(
+          { userId, event: 'handoff_safety', reason: 'RED_FLAG' },
+          'handoff de segurança clínica — atendimento presencial orientado',
+        );
+        await this.deliver(userId, correlationId, SAFETY_HANDOFF_MESSAGE, null, false, enqueuedAt);
+        await this.context.recordTurn(userId, 'assistant', SAFETY_HANDOFF_MESSAGE);
+        return { status: 'SAFETY_HANDOFF' };
+      }
+      if (guardrail === 'SCOPE') {
+        const response = await this.prompts.foraDeEscopoResponse();
+        await this.deliver(userId, correlationId, response, null, true, enqueuedAt, 0, true);
+        await this.context.recordTurn(userId, 'assistant', response);
+        await this.context.summarizeIfNeeded(userId);
+        await this.repo.persistHandoff(userId, 'ALERT', 'FORA_DE_ESCOPO');
+        return { status: 'SENT' };
+      }
+
+      const faq = await this.faq.match(message);
+      if (faq) {
+        const verdict = this.validation.validateResponse(faq.answer);
+        const blocked = verdict.action !== 'PASS';
+        const response = blocked ? STANDARD_BLOCK_RESPONSE : faq.answer;
+        const l1Flags = blocked ? [] : await this.l1Guardrails.evaluate(message, response);
+        await this.deliver(
+          userId,
+          correlationId,
+          response,
+          `FAQ_DETERMINISTIC:v${faq.version}`,
+          !blocked,
+          enqueuedAt,
+          0,
+          true,
+        );
+        await this.context.recordTurn(userId, 'assistant', response);
+        await this.context.summarizeIfNeeded(userId);
+        if (blocked) await this.repo.persistHandoff(userId, 'ALERT', 'VALIDATOR_BLOCK');
+        if (l1Flags.length > 0) {
+          await this.repo.persistHandoff(userId, 'ALERT', 'L1_GUARDRAIL_FLAG');
+          this.logger.info(
+            { event: 'l1_guardrail_flag', ruleKeys: l1Flags.map((flag) => flag.ruleKey) },
+            'guardrail L1 sinalizou resposta de FAQ para revisão',
+          );
+        }
+        this.logger.info(
+          { event: 'faq_answer_sent', faqId: faq.id, faqVersion: faq.version },
+          'resposta determinística do FAQ enviada',
+        );
+        return { status: blocked ? 'BLOCKED' : 'FAQ' };
+      }
+
       const scrubUser = await this.repo.loadScrubUser(userId);
       const intent = await this.classifier.classify({ userId, user: scrubUser, message });
 
@@ -134,6 +200,7 @@ export class AIResponseWorker implements OnModuleInit {
       }
 
       const draft = await this.buildResponse(userId, intent.intent, message, scrubUser);
+      const l1Flags = draft.blocked ? [] : await this.l1Guardrails.evaluate(message, draft.text);
 
       if (draft.blocked) {
         this.logger.info(
@@ -149,7 +216,8 @@ export class AIResponseWorker implements OnModuleInit {
         draft.validationPassed,
         enqueuedAt,
         draft.latencyMs,
-        true, // resposta real → pede feedback (thumbs)
+        true,
+        draft.ragSources,
       );
       await this.context.recordTurn(userId, 'assistant', draft.text);
       await this.context.summarizeIfNeeded(userId);
@@ -161,6 +229,13 @@ export class AIResponseWorker implements OnModuleInit {
         this.logger.info(
           { userId, event: 'handoff_alert', reason },
           'alerta assíncrono ao painel CREF',
+        );
+      }
+      if (l1Flags.length > 0) {
+        await this.repo.persistHandoff(userId, 'ALERT', 'L1_GUARDRAIL_FLAG');
+        this.logger.info(
+          { event: 'l1_guardrail_flag', ruleKeys: l1Flags.map((flag) => flag.ruleKey) },
+          'guardrail L1 sinalizou resposta para revisão',
         );
       }
       return { status: draft.blocked ? 'BLOCKED' : 'SENT' };
@@ -223,7 +298,12 @@ export class AIResponseWorker implements OnModuleInit {
     const ctx = await this.context.build(userId, intent, message);
     const rag = ctx.ragDocs.length
       ? 'TRECHOS DE REFERÊNCIA (baseie a resposta técnica só nisto):\n' +
-        ctx.ragDocs.map((d) => d.snippet).join('\n---\n')
+        ctx.ragDocs
+          .map(
+            (document) =>
+              `[Fonte: ${document.title}${document.sourceUrl ? ` | ${document.sourceUrl}` : ''}]\n${document.snippet}`,
+          )
+          .join('\n---\n')
       : '';
     const system = [
       await this.prompts.resolvePrompt(intent),
@@ -268,6 +348,12 @@ export class AIResponseWorker implements OnModuleInit {
       validationPassed: true,
       humanReview: verdict.humanReviewRequired,
       blocked: false,
+      ragSources: ctx.ragDocs.map((document) => ({
+        chunkId: document.chunkId,
+        documentId: document.documentId,
+        title: document.title,
+        ...(document.sourceUrl ? { sourceUrl: document.sourceUrl } : {}),
+      })),
     };
   }
 
@@ -282,6 +368,7 @@ export class AIResponseWorker implements OnModuleInit {
     enqueuedAt: number,
     latencyMs: number | null = null,
     requestFeedback = false,
+    ragSources?: ResponseDraft['ragSources'],
   ): Promise<void> {
     await this.repo.persistTurn({
       userId,
@@ -290,6 +377,7 @@ export class AIResponseWorker implements OnModuleInit {
       validationPassed,
       modelUsed,
       latencyMs,
+      ragSources,
     });
     const job: WhatsappOutboundJob = {
       userId,

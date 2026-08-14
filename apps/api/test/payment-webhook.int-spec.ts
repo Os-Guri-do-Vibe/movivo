@@ -141,7 +141,18 @@ beforeAll(async () => {
 afterAll(async () => {
   try {
     await adminClient.unsafe(
-      `DELETE FROM subscriptions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
+      // `payments` primeiro: a FK para `subscriptions` é RESTRICT de propósito (liquidação
+      // é registro fiscal e não some junto com a assinatura), e a tabela é append-only —
+      // limpar exige desligar o trigger, como no `payments-immutability.int-spec.ts`.
+      `ALTER TABLE payments DISABLE TRIGGER trg_payments_immutable;
+       DELETE FROM payments WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%')
+          OR subscription_id IN (SELECT s.id FROM subscriptions s JOIN users u ON u.id = s.user_id
+                                 WHERE u.phone_number LIKE '+5541${RUN}%');
+       ALTER TABLE payments ENABLE TRIGGER trg_payments_immutable;
+       ALTER TABLE user_status_transitions DISABLE TRIGGER trg_user_status_transitions_immutable;
+       DELETE FROM user_status_transitions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
+       ALTER TABLE user_status_transitions ENABLE TRIGGER trg_user_status_transitions_immutable;
+       DELETE FROM subscriptions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM consents WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM professional_assignments WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM users WHERE phone_number LIKE '+5541${RUN}%';`,

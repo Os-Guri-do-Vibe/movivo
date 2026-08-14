@@ -7,17 +7,41 @@
  */
 import 'reflect-metadata';
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { type INestApplication } from '@nestjs/common';
 import { type Job } from 'bullmq';
 import { NestFactory } from '@nestjs/core';
 import { eq, inArray } from 'drizzle-orm';
+import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { AppModule } from '../src/app.module';
+import { loadEnv } from '../src/core/config/load-env';
 import { subscriptions, users } from '../src/core/database/schema';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { ConversionSequenceWorker } from '../src/modules/subscription/conversion-sequence.worker';
 import { SubscriptionService } from '../src/modules/subscription/subscription.service';
+
+const { env } = loadEnv();
+const apiRoot = process.cwd();
+// Superuser só para limpar `user_status_transitions` (append-only): movivo_app não
+// tem UPDATE/DELETE/ALTER TABLE nela por desenho (US-8.3).
+const adminClient = postgres({
+  host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
+  port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 15432),
+  user: 'postgres',
+  password: readFileSync(
+    resolve(apiRoot, '..', '..', 'secrets', 'postgres_superuser_password'),
+    'utf8',
+  ).trimEnd(),
+  database: env.DATABASE_NAME ?? 'movivo',
+  ssl: false,
+  max: 1,
+  idle_timeout: 5,
+  onnotice: () => undefined,
+});
 
 let app: INestApplication;
 let db: TenantDatabase;
@@ -48,13 +72,20 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (db && createdUserIds.length > 0) {
+    await adminClient.unsafe(
+      'ALTER TABLE user_status_transitions DISABLE TRIGGER trg_user_status_transitions_immutable',
+    );
+    await adminClient`DELETE FROM user_status_transitions WHERE user_id = ANY(${createdUserIds}::uuid[])`;
+    await adminClient.unsafe(
+      'ALTER TABLE user_status_transitions ENABLE TRIGGER trg_user_status_transitions_immutable',
+    );
     await db.runAsSystem(async (tx) => {
       await tx.delete(subscriptions).where(inArray(subscriptions.userId, createdUserIds));
       await tx.delete(users).where(inArray(users.id, createdUserIds));
       return undefined;
     });
   }
-  await app?.close();
+  await Promise.all([app?.close(), adminClient.end({ timeout: 5 })]);
 });
 
 describe('ConversionSequenceWorker (US-4.3)', () => {

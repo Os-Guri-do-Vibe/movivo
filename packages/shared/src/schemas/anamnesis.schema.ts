@@ -25,6 +25,8 @@
  */
 import { z } from 'zod';
 
+import { attributionInputSchema } from '../attribution';
+
 // ---------------------------------------------------------------------------
 // Vocabulário fechado — as opções são as do RT CREF, sem redução (decisão do
 // fundador 2026-08-10, item 3: "não adianta MVP, sem informações realmente
@@ -676,6 +678,12 @@ export type VerifyPhoneCodeInput = z.infer<typeof verifyPhoneCodeSchema>;
 
 export const startAnamnesisSchema = z.object({
   primaryGoal: primaryGoalSchema.optional(),
+  /**
+   * Atribuição de primeiro toque (US-8.2). Entrada não confiável vinda da query
+   * string: o schema nunca falha (`.catch({})` interno) e o saneamento acontece no
+   * servidor — um parâmetro malformado jamais impede a criação da sessão.
+   */
+  attribution: attributionInputSchema.optional(),
 });
 export type StartAnamnesisInput = z.infer<typeof startAnamnesisSchema>;
 

@@ -19,6 +19,7 @@ import {
 import mobilePhoneExamples from 'libphonenumber-js/mobile/examples';
 
 import { publicEnv } from './env';
+import { getFirstTouch } from './first-touch';
 
 const BASE = publicEnv.apiUrl;
 
@@ -98,7 +99,12 @@ function patch<T>(path: string, body: unknown): Promise<T> {
 export { AnamnesisApiError };
 
 export function startAnamnesis(primaryGoal?: string): Promise<StartResult> {
-  return post<StartResult>('/anamnesis/start', primaryGoal ? { primaryGoal } : {});
+  // A atribuição de primeiro toque (US-8.2) viaja aqui: é a única chamada em que a
+  // sessão nasce, e é no servidor que ela é saneada e gravada em escrita única.
+  return post<StartResult>('/anamnesis/start', {
+    ...(primaryGoal ? { primaryGoal } : {}),
+    attribution: getFirstTouch() ?? {},
+  });
 }
 
 export function getSession(token: string): Promise<SessionView> {

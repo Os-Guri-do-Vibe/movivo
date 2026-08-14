@@ -15,7 +15,10 @@ import type {
   ControlCenterStudentDetailResponse,
   ControlCenterStudentsResponse,
   ControlCenterSystemResponse,
+  KnowledgeDocumentsResponse,
+  PartnerDistributionResponse,
 } from '@movivo/shared';
+import { PARTNER_DISTRIBUTION_CAVEATS } from '@movivo/shared';
 
 export const controlCenterMeta: ControlCenterOverviewResponse['meta'] = {
   generatedAt: '2026-08-11T15:00:00.000Z',
@@ -101,7 +104,7 @@ export const overviewResponse: ControlCenterOverviewResponse = {
         pillar: 'AI',
         label: 'IA',
         state: 'OK',
-        href: '/dashboard/ia/persona',
+        href: '/dashboard/ia/agente',
         headline: { label: 'Conversas (30 dias)', metric: metric({ value: 340 }) },
         details: [
           {
@@ -212,16 +215,10 @@ export const systemResponse: ControlCenterSystemResponse = {
     ],
     pendingCapabilities: [
       {
-        title: 'Custo de infraestrutura e de WhatsApp',
-        reason: 'Nenhuma fatura é ingerida hoje.',
-        dependency: 'Tabela de despesas (`expenses`)',
-        plannedFor: 'Sprint 8',
-      },
-      {
         title: 'Histórico de incidentes e disponibilidade real (uptime)',
         reason: 'Não existe registro do que ficou fora do ar.',
         dependency: 'Registro de incidentes e probe externo',
-        plannedFor: 'Sprint 8',
+        plannedFor: 'Sprint 9',
       },
       {
         title: 'Rastro ponta-a-ponta de uma requisição (tracing distribuído)',
@@ -247,11 +244,32 @@ export const financeResponse: ControlCenterFinanceResponse = {
       value: null,
       unit: 'BRL',
       status: 'UNAVAILABLE',
-      definition: 'Depende da tabela `expenses`, prevista para a Sprint 8.',
+      definition: 'Nenhuma despesa lançada ainda: exibir lucro sem custo seria inventar.',
     }),
     partnerDistribution: unavailableMetric,
     customerAcquisitionCost: unavailableMetric,
     revenueAtRisk30d: metric({ value: 297, unit: 'BRL', status: 'PROXY' }),
+    entryCohorts: [
+      {
+        month: '2026-06',
+        cohortSize: 40,
+        converted: 12,
+        conversionRatePercent: 30,
+        retained: 10,
+        retentionPercent: 25,
+        reconstructed: true,
+      },
+      {
+        month: '2026-07',
+        cohortSize: 60,
+        converted: 21,
+        conversionRatePercent: 35,
+        retained: 19,
+        retentionPercent: 31.7,
+        reconstructed: false,
+      },
+    ],
+    suppressedCohorts: 1,
     renewalCalendar: [
       { month: '2026-08', plan: 'MONTHLY', subscriptions: 12, amountBrl: 468 },
       { month: '2026-09', plan: 'QUARTERLY', subscriptions: 3, amountBrl: 297 },
@@ -289,6 +307,64 @@ export const financeResponse: ControlCenterFinanceResponse = {
         costBrl: 2.02,
       },
     ],
+    // US-8.4 — despesa lançada, custo por categoria/mês e resultado do período.
+    totalExpense: metric({ value: 180, unit: 'BRL' }),
+    expensePerActiveUser: metric({ value: 4.29, unit: 'BRL' }),
+    costByCategory: [
+      { category: 'INFRA', amountBrl: 120 },
+      { category: 'IA_LLM', amountBrl: 30 },
+      { category: 'MARKETING', amountBrl: 30 },
+    ],
+    costByMonth: [
+      { month: '2026-07', amountBrl: 150 },
+      { month: '2026-08', amountBrl: 180 },
+    ],
+    // US-8.5 — receita RECEBIDA. Série separada da contratada (`renewalCalendar`) de
+    // propósito: são grandezas diferentes e a tela nunca as soma.
+    receivedRevenueByMonth: [
+      { month: '2026-07', grossBrl: 1400, netBrl: 1344, settlements: 36 },
+      { month: '2026-08', grossBrl: 1500, netBrl: 1440, settlements: 39 },
+    ],
+    projection: {
+      status: 'AVAILABLE',
+      basisMonths: ['2026-07'],
+      horizonMonths: 3,
+      method: 'Media mensal de meses fechados.',
+      reason: null,
+      scenarios: (
+        [
+          { scenario: 'CONSERVATIVE', revenueFactor: 0.9, costFactor: 1.1 },
+          { scenario: 'BASE', revenueFactor: 1, costFactor: 1 },
+          { scenario: 'OPTIMISTIC', revenueFactor: 1.1, costFactor: 0.95 },
+        ] as const
+      ).map((scenario) => ({
+        ...scenario,
+        months: ['2026-09', '2026-10', '2026-11'].map((month) => ({
+          month,
+          projectedRevenueBrl: 1400,
+          projectedCostBrl: 150,
+          projectedResultBrl: 1250,
+        })),
+        totalRevenueBrl: 4200,
+        totalCostBrl: 450,
+        totalResultBrl: 3750,
+      })),
+    },
+    delinquencyRate: metric({ value: 7.1, unit: 'PERCENT' }),
+    averageSettlementDays: metric({ value: 2.3, unit: 'COUNT' }),
+    gatewayFee: metric({ value: 60, unit: 'BRL' }),
+    gatewayFeePercent: metric({ value: 4, unit: 'PERCENT' }),
+    paymentExceptions: [
+      {
+        paymentId: '77777777-7777-4777-8777-777777777777',
+        gateway: 'STRIPE',
+        status: 'SETTLED',
+        amountBrl: 39,
+        occurredAt: '2026-08-10T12:00:00.000Z',
+        receivedAt: '2026-08-10T12:00:05.000Z',
+      },
+    ],
+    profitBasis: 'CONTRATADO_PROXY',
   },
   meta: { ...controlCenterMeta, dataQuality: [...controlCenterMeta.dataQuality] },
 };
@@ -300,6 +376,15 @@ export const marketingResponse: ControlCenterMarketingResponse = {
       formSubmitted: metric({ value: 188 }),
       protocolActive: metric({ value: 96 }),
       subscriptionActive: unavailableMetric,
+    },
+    trialConversion: {
+      status: 'AVAILABLE',
+      trialsStarted: 100,
+      converted: 33,
+      conversionRatePercent: 33,
+      medianDaysToConversion: 5.5,
+      reconstructedEntries: 40,
+      reason: null,
     },
     anamnesisFunnel: {
       settledSessions: 310,
@@ -339,6 +424,47 @@ export const marketingResponse: ControlCenterMarketingResponse = {
       },
     },
     acquisition: metric({ value: 24, unit: 'PERCENT', status: 'PROXY' }),
+    acquisitionChannels: [
+      { channel: 'instagram', mapped: true, raw: 'instagram / meta_ads', count: 34 },
+      { channel: 'organico', mapped: true, raw: 'organico / organico', count: 21 },
+    ],
+    suppressedChannels: 1,
+    channelEconomics: [
+      {
+        channel: 'instagram',
+        mapped: true,
+        students: 34,
+        converted: 12,
+        investmentBrl: 1200,
+        investmentStatus: 'INVESTED',
+        cac: metric({ value: 100, unit: 'BRL' }),
+        receivedRevenue: metric({ value: 4200, unit: 'BRL' }),
+        roas: metric({ value: 3.5, unit: 'RATIO' }),
+        ltv: metric({ value: 350, unit: 'BRL', status: 'PROXY' }),
+        ltvToCac: metric({ value: 3.5, unit: 'RATIO', status: 'PROXY' }),
+        paybackMonths: metric({ value: 2, unit: 'MONTHS', status: 'PROXY' }),
+        signal: 'GREEN',
+      },
+      {
+        channel: 'organico',
+        mapped: true,
+        students: 21,
+        converted: 7,
+        investmentBrl: null,
+        investmentStatus: 'NO_DIRECT_INVESTMENT',
+        cac: unavailableMetric,
+        receivedRevenue: metric({ value: 900, unit: 'BRL' }),
+        roas: unavailableMetric,
+        ltv: metric({ value: 128.57, unit: 'BRL', status: 'PROXY' }),
+        ltvToCac: unavailableMetric,
+        paybackMonths: unavailableMetric,
+        signal: 'UNKNOWN',
+      },
+    ],
+    attributionWindowDays: 60,
+    matureCohorts: 2,
+    mediaInvestmentBrl: 1200,
+    attributionNotCaptured: 6,
     segments: [
       { dimension: 'PRIMARY_GOAL', value: 'Hipertrofia', count: 34 },
       { dimension: 'TRAINING_LOCATION', value: 'Casa', count: 21 },
@@ -382,6 +508,18 @@ export const studentsResponse: ControlCenterStudentsResponse = {
       },
     ],
     aiBlockedRate: metric({ value: 3.2, unit: 'PERCENT' }),
+    northStar: {
+      averageCompletions: metric({ value: 6.4, unit: 'COUNT' }),
+      target: 8,
+      reportingRate: metric({ value: 72.5, unit: 'PERCENT' }),
+      cohortSize: 40,
+      bySource: [
+        { source: 'WHATSAPP_QUICK_REPLY', completions: 210 },
+        { source: 'CHECKIN', completions: 46 },
+        { source: 'CONVERSATION', completions: 0 },
+      ],
+    },
+    declaredAdherenceRate: metric({ value: 81.3, unit: 'PERCENT' }),
   },
   meta: { ...controlCenterMeta, dataQuality: [] },
 };
@@ -398,6 +536,15 @@ export const studentDetailResponse: ControlCenterStudentDetailResponse = {
       protocolStatus: 'ACTIVE',
       requiresProfessionalReview: false,
       anamnesisStatus: 'COMPLETED',
+      acquisition: {
+        channel: 'instagram',
+        mapped: true,
+        raw: 'instagram / meta_ads',
+        campaign: 'lancamento-agosto',
+        content: null,
+        referrerHost: 'instagram.com',
+        capturedAt: '2026-07-30T14:00:00.000Z',
+      },
       churnRisk: {
         score: 1,
         signals: [
@@ -534,6 +681,76 @@ export const complianceResponse: ControlCenterComplianceResponse = {
         createdAt: '2026-08-11T14:30:00.000Z',
       },
     ],
+  },
+  meta: { ...controlCenterMeta, dataQuality: [...controlCenterMeta.dataQuality] },
+};
+
+/**
+ * Cap table fechado (10.000 bps) com lucro apurado. As ressalvas vêm da constante do
+ * contrato, não de texto solto: é assim que a rota real responde.
+ */
+export const partnerDistributionResponse: PartnerDistributionResponse = {
+  data: {
+    period: '2026-08',
+    profitCents: 500_000,
+    profitAvailable: true,
+    profitDefinition: 'Receita reconhecida menos despesas lançadas no período.',
+    partners: [
+      {
+        id: '33333333-3333-4333-8333-333333333333',
+        name: 'Rodrigo',
+        shareBasisPoints: 6000,
+        validFrom: '2026-01-01',
+        validTo: null,
+        notes: null,
+        amountCents: 300_000,
+      },
+      {
+        id: '44444444-4444-4444-8444-444444444444',
+        name: 'Pedro',
+        shareBasisPoints: 4000,
+        validFrom: '2026-01-01',
+        validTo: null,
+        notes: null,
+        amountCents: 200_000,
+      },
+    ],
+    totalBasisPoints: 10_000,
+    caveats: [...PARTNER_DISTRIBUTION_CAVEATS],
+  },
+  meta: { ...controlCenterMeta, dataQuality: [...controlCenterMeta.dataQuality] },
+};
+
+/** Um documento em quarentena, ainda não indexado — o estado padrão do corpus. */
+export const knowledgeDocumentsResponse: KnowledgeDocumentsResponse = {
+  data: {
+    documents: [
+      {
+        id: '55555555-5555-4555-8555-555555555555',
+        title: 'Guia de descanso entre séries',
+        topic: 'descanso',
+        sourceUrl: null,
+        originalFilename: 'guia.md',
+        mimeType: 'text/markdown',
+        sizeBytes: 120,
+        sha256: 'a'.repeat(64),
+        status: 'PENDING',
+        uploadedBy: 'Rodrigo',
+        reviewer: null,
+        reviewNote: null,
+        createdAt: '2026-08-11T15:00:00.000Z',
+        reviewedAt: null,
+        retainedUntil: '2026-09-10T15:00:00.000Z',
+        blobAvailable: true,
+        chunkCount: 0,
+      },
+    ],
+    policy: {
+      allowedTypes: ['text/plain', 'text/markdown'],
+      maxBytes: 524_288,
+      quarantineDays: 30,
+      approvedOriginalDays: 365,
+    },
   },
   meta: { ...controlCenterMeta, dataQuality: [...controlCenterMeta.dataQuality] },
 };

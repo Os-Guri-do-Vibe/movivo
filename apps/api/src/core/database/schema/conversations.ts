@@ -13,7 +13,7 @@
  *  - **Índice HNSW / coluna de embedding**: pertence à tabela `knowledge_base`
  *    (corpus do RAG), que é da sprint de RAG.
  */
-import { boolean, index, integer, pgTable, text, uuid, varchar } from 'drizzle-orm/pg-core';
+import { boolean, index, integer, jsonb, pgTable, text, uuid, varchar } from 'drizzle-orm/pg-core';
 
 import { primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
 import { messageDirectionEnum, messageTypeEnum } from './enums';
@@ -72,6 +72,16 @@ export const conversations = pgTable(
      * "respostas bloqueadas por compliance < 5%".
      */
     validationPassed: boolean('validation_passed'),
+
+    /** Snapshot das fontes RAG usadas na resposta, rastreavel ate chunk/documento. */
+    ragSources: jsonb('rag_sources').$type<
+      Array<{
+        chunkId: string;
+        documentId: string | null;
+        title: string;
+        sourceUrl?: string;
+      }>
+    >(),
 
     ...timestampColumns,
   },

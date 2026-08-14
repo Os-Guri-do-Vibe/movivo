@@ -22,9 +22,19 @@ import {
   buildPersonaBlock,
   type AgentConfigVersion,
   type AgentPersona,
+  type ConfigSimulationResponse,
   type PromptBlockView,
 } from '@movivo/shared';
-import { History, Lock, RotateCcw, Send } from 'lucide-react';
+import {
+  CheckCircle2,
+  Circle,
+  History,
+  Lock,
+  RotateCcw,
+  Send,
+  ShieldCheck,
+  XCircle,
+} from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -34,6 +44,7 @@ import {
   getInviolableRules,
   publishAgentPersona,
   rollbackAgentPersona,
+  simulateAgentConfig,
   ControlCenterApiError,
 } from '@/lib/control-center-api';
 
@@ -124,6 +135,8 @@ export function AiPersonaDashboard({ canWrite = false }: { canWrite?: boolean })
   const [publishing, setPublishing] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [writeError, setWriteError] = useState('');
+  const [simulating, setSimulating] = useState(false);
+  const [simulation, setSimulation] = useState<ConfigSimulationResponse['data'] | null>(null);
 
   const current = data?.persona ?? null;
   const form = draft ?? current;
@@ -134,6 +147,7 @@ export function AiPersonaDashboard({ canWrite = false }: { canWrite?: boolean })
     setFeedback('');
     setWriteError('');
     setReviewing(false);
+    setSimulation(null);
     setDraft({ ...form, ...patch });
   };
 
@@ -191,6 +205,25 @@ export function AiPersonaDashboard({ canWrite = false }: { canWrite?: boolean })
     [refresh],
   );
 
+  const runSimulation = useCallback(async () => {
+    if (!validation?.success) return;
+    setSimulating(true);
+    setWriteError('');
+    setSimulation(null);
+    try {
+      const response = await simulateAgentConfig({ kind: 'PERSONA', candidate: validation.data });
+      setSimulation(response.data);
+    } catch (caught) {
+      setWriteError(
+        caught instanceof ControlCenterApiError
+          ? caught.message
+          : 'Não foi possível executar o simulador.',
+      );
+    } finally {
+      setSimulating(false);
+    }
+  }, [validation]);
+
   if (!data || !form) {
     return (
       <ResourceState
@@ -203,7 +236,11 @@ export function AiPersonaDashboard({ canWrite = false }: { canWrite?: boolean })
   }
 
   const canPublish =
-    canWrite && validation?.success === true && changedFields.length > 0 && changeNote.length >= 5;
+    canWrite &&
+    validation?.success === true &&
+    changedFields.length > 0 &&
+    changeNote.length >= 5 &&
+    simulation?.passed === true;
 
   return (
     <div>
@@ -417,6 +454,68 @@ export function AiPersonaDashboard({ canWrite = false }: { canWrite?: boolean })
       {canWrite ? (
         <section
           className="mt-6 rounded-xl border border-border bg-card p-5"
+          aria-labelledby="simulation-title"
+        >
+          <h2 id="simulation-title" className="flex items-center gap-2 text-h2 font-bold">
+            <ShieldCheck aria-hidden="true" className="size-5" /> Simulador obrigatório
+          </h2>
+          <p className="mt-2 text-label text-muted-foreground">
+            A configuração candidata precisa passar pelas quatro etapas abaixo. O servidor repete
+            este gate no momento da publicação.
+          </p>
+          <ol className="mt-4 grid gap-3 sm:grid-cols-2">
+            {(
+              simulation?.checks ?? [
+                { id: 'SCHEMA', title: 'Contrato fechado e proteção contra instruções' },
+                { id: 'GOLDEN_INPUT', title: 'Golden set de entrada e roteamento seguro' },
+                { id: 'GOLDEN_OUTPUT', title: 'Golden set de linguagem e resposta' },
+                { id: 'PROMPT_INTEGRITY', title: 'Integridade dos blocos invioláveis' },
+              ]
+            ).map((check, index) => {
+              const passed = 'passed' in check ? check.passed : null;
+              const Icon = passed === true ? CheckCircle2 : passed === false ? XCircle : Circle;
+              return (
+                <li key={check.id} className="rounded-lg border border-border p-4">
+                  <p className="flex items-center gap-2 text-label font-semibold">
+                    <Icon
+                      aria-hidden="true"
+                      className={
+                        passed === true
+                          ? 'size-4 text-verde-pulso'
+                          : passed === false
+                            ? 'size-4 text-coral'
+                            : 'size-4 text-muted-foreground'
+                      }
+                    />
+                    Etapa {index + 1} · {check.title}
+                  </p>
+                  {'cases' in check ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {check.cases} casos ·{' '}
+                      {check.failures.length === 0
+                        ? 'aprovado'
+                        : `${check.failures.length} falha(s)`}
+                    </p>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ol>
+          <Button
+            className="mt-4"
+            variant="outline"
+            disabled={simulating || validation?.success !== true || changedFields.length === 0}
+            onClick={() => void runSimulation()}
+          >
+            <ShieldCheck aria-hidden="true" />
+            {simulating ? 'Executando…' : 'Executar as 4 etapas'}
+          </Button>
+        </section>
+      ) : null}
+
+      {canWrite ? (
+        <section
+          className="mt-6 rounded-xl border border-border bg-card p-5"
           aria-labelledby="publish-title"
         >
           <h2 id="publish-title" className="text-h2 font-bold">
@@ -444,6 +543,12 @@ export function AiPersonaDashboard({ canWrite = false }: { canWrite?: boolean })
           {changedFields.length === 0 ? (
             <p className="mt-3 text-label text-muted-foreground">
               Nenhuma alteração pendente em relação à versão vigente.
+            </p>
+          ) : null}
+
+          {changedFields.length > 0 && !simulation?.passed ? (
+            <p className="mt-3 text-label text-muted-foreground">
+              Execute o simulador acima para liberar a publicação.
             </p>
           ) : null}
 

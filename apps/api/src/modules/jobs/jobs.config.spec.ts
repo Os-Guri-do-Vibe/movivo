@@ -16,16 +16,20 @@ vi.mock('../../core/redis', () => ({
 const config = { redis: { keyPrefix: 'movivo' } } as never;
 
 describe('jobs.config', () => {
-  it('registra as 5 filas de negócio de §6 mais sanity e dead-letter', () => {
+  it('registra as filas de negócio de §6 mais sanity e dead-letter', () => {
     expect(Object.keys(QUEUE_REGISTRY).sort()).toEqual(
       [
         'ai-response',
         'checkin-weekly',
         'conversion-sequence',
+        // US-8.5 — conciliacao da liquidacao do gateway.
+        'payment-reconciliation',
         'dead-letter',
         'protocol-generation',
         'sanity',
         'whatsapp-outbound',
+        // US-8.1 — quick reply diário de treino.
+        'workout-daily',
       ].sort(),
     );
   });

@@ -35,6 +35,12 @@ export class ControlCenterController {
     return this.controlCenter.marketing();
   }
 
+  @Get('campaigns')
+  @RequireCapabilities(Capability.MARKETING_READ)
+  campaigns() {
+    return this.controlCenter.campaigns();
+  }
+
   @Get('students')
   @RequireCapabilities(Capability.STUDENTS_READ)
   students(@CurrentUser() actor: AuthenticatedUser) {

@@ -17,6 +17,7 @@ import { MockGateway } from './payment/mock-gateway';
 import { type PaymentGateway, PAYMENT_GATEWAY } from './payment/payment-gateway.types';
 import { AsaasGateway, StripeGateway } from './payment/real-gateways';
 import { ConversionSequenceWorker } from './conversion-sequence.worker';
+import { PaymentReconciliationWorker } from './payment-reconciliation.worker';
 import { PaymentWebhookController } from './payment-webhook.controller';
 import { PaymentWebhookService } from './payment-webhook.service';
 import { SubscriptionController } from './subscription.controller';
@@ -51,6 +52,8 @@ import { SubscriptionService } from './subscription.service';
     SubscriptionService,
     PaymentWebhookService,
     ConversionSequenceWorker,
+    // US-8.5: grava a receita recebida a partir do evento já autenticado no webhook.
+    PaymentReconciliationWorker,
   ],
   exports: [SubscriptionService, PAYMENT_GATEWAY],
 })

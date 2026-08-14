@@ -11,7 +11,13 @@ function make(overrides?: {
   episodic?: Partial<EpisodicMemory>;
   recent?: { role: 'user' | 'assistant'; content: string; ts: number }[];
   count?: number;
-  ragDocs?: { title: string; snippet: string; score: number }[];
+  ragDocs?: {
+    chunkId: string;
+    documentId: string | null;
+    title: string;
+    snippet: string;
+    score: number;
+  }[];
 }) {
   const episodic: EpisodicMemory = {
     scrubUser,
@@ -60,12 +66,18 @@ describe('ContextService.build', () => {
   });
 
   it('só chama o RAG em DUVIDA_TECNICA', async () => {
-    const rag = make({ ragDocs: [{ title: 't', snippet: 'descanse 90s', score: 0.9 }] });
+    const rag = make({
+      ragDocs: [
+        { chunkId: 'c1', documentId: 'd1', title: 't', snippet: 'descanse 90s', score: 0.9 },
+      ],
+    });
     const ctx = await rag.svc.build('u1', 'DUVIDA_TECNICA', 'quanto descanso?');
     expect(rag.retrieve).toHaveBeenCalledOnce();
     expect(ctx.ragDocs).toHaveLength(1);
 
-    const nonRag = make({ ragDocs: [{ title: 't', snippet: 'x', score: 0.9 }] });
+    const nonRag = make({
+      ragDocs: [{ chunkId: 'c1', documentId: null, title: 't', snippet: 'x', score: 0.9 }],
+    });
     await nonRag.svc.build('u1', 'MOTIVACAO', 'oi');
     expect(nonRag.retrieve).not.toHaveBeenCalled();
   });

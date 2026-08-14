@@ -404,6 +404,21 @@ const PLAN_LABEL: Record<string, string> = {
 
 const planLabel = (plan: string) => PLAN_LABEL[plan] ?? plan;
 
+const EXPENSE_CATEGORY_LABEL: Record<string, string> = {
+  INFRA: 'Infraestrutura',
+  IA_LLM: 'IA (LLM)',
+  WHATSAPP: 'WhatsApp',
+  GATEWAY_PAGAMENTO: 'Gateway de pagamento',
+  MARKETING: 'Marketing',
+  JURIDICO_CONTABIL: 'Jurídico/contábil',
+  FERRAMENTAS: 'Ferramentas',
+  PESSOAS: 'Pessoas',
+  IMPOSTOS: 'Impostos',
+  OUTROS: 'Outros',
+};
+
+const categoryLabel = (category: string) => EXPENSE_CATEGORY_LABEL[category] ?? category;
+
 const brl = (value: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 
@@ -531,6 +546,93 @@ function FinanceSections({ data }: { data: ControlCenterFinanceResponse['data'] 
             ))}
           </tbody>
         </table>
+      </section>
+
+      <section
+        id="custos"
+        aria-label="Custos por categoria e por mês"
+        className="mt-6 rounded-xl border border-border bg-card p-5"
+      >
+        <h2 className="text-h2 font-bold">Custos</h2>
+        <p className="mt-1 text-label text-muted-foreground">
+          Despesa lançada (`expenses`) e investimento em mídia (`ad_spend`), líquidos de estorno.
+          Categoria com mais estorno que lançamento no recorte aparece negativa.
+        </p>
+        <div className="mt-4 grid gap-6 lg:grid-cols-2">
+          <div>
+            <h3 className="text-label font-semibold">Por categoria</h3>
+            <ul className="mt-3 grid gap-2">
+              {data.costByCategory.map((row) => (
+                <li
+                  key={row.category}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-border p-3"
+                >
+                  <span className="text-label">{categoryLabel(row.category)}</span>
+                  <span className="font-mono font-bold">{brl(row.amountBrl)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <h3 className="text-label font-semibold">Por mês</h3>
+            <ul className="mt-3 grid gap-2">
+              {data.costByMonth.map((row) => (
+                <li
+                  key={row.month}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-border p-3"
+                >
+                  <span className="text-label">{monthLabel(row.month)}</span>
+                  <span className="font-mono font-bold">{brl(row.amountBrl)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="coortes"
+        aria-label="Coortes de entrada em trial"
+        className="mt-6 overflow-x-auto rounded-xl border border-border bg-card p-5"
+      >
+        <h2 className="text-h2 font-bold">Coortes & Retenção</h2>
+        <p className="mt-1 text-label text-muted-foreground">
+          Conversão e retenção por mês civil de entrada em trial. Coortes com menos de 10 entradas
+          são omitidas ({data.suppressedCohorts} suprimida
+          {data.suppressedCohorts === 1 ? '' : 's'}).
+        </p>
+        {data.entryCohorts.length ? (
+          <table className="mt-4 w-full text-label">
+            <thead className="text-xs text-muted-foreground">
+              <tr>
+                <th className="p-3 text-left font-semibold">Coorte</th>
+                <th className="p-3 text-right font-semibold">Entradas</th>
+                <th className="p-3 text-right font-semibold">Convertidos</th>
+                <th className="p-3 text-right font-semibold">Conversão</th>
+                <th className="p-3 text-right font-semibold">Retidos hoje</th>
+                <th className="p-3 text-right font-semibold">Retenção</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.entryCohorts.map((cohort) => (
+                <tr key={cohort.month} className="border-t border-border">
+                  <td className="p-3 font-mono">{monthLabel(cohort.month)}</td>
+                  <td className="p-3 text-right font-mono">{cohort.cohortSize}</td>
+                  <td className="p-3 text-right font-mono">{cohort.converted}</td>
+                  <td className="p-3 text-right font-mono">
+                    {percent(cohort.conversionRatePercent)}%
+                  </td>
+                  <td className="p-3 text-right font-mono">{cohort.retained}</td>
+                  <td className="p-3 text-right font-mono">{percent(cohort.retentionPercent)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="mt-4 text-label text-muted-foreground">
+            Nenhuma coorte com entradas suficientes para exibir ainda.
+          </p>
+        )}
       </section>
     </>
   );

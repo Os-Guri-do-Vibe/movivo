@@ -100,7 +100,7 @@ function makeTx(state: TxState) {
         returning: () => Promise.reject(state.insertError),
         then: () => Promise.reject(state.insertError),
       }
-    : thenable(state.insert ?? []);
+    : thenable(state.insert ?? [{ id: 'sess-1' }]);
   const selectChain = {
     from: () => selectChain,
     where: () => selectChain,

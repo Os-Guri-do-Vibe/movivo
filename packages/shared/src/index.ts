@@ -21,6 +21,8 @@ export * from './enums';
 export * from './schemas';
 export * from './types';
 
+export * from './attribution';
+
 export * from './prompts/persona-block';
 
 export * from './rbac/capabilities-by-role';

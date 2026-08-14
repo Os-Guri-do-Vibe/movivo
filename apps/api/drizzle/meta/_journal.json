@@ -141,6 +141,69 @@
       "when": 1786591014933,
       "tag": "0019_silky_scream",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1786644682057,
+      "tag": "0020_utm_attribution",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1786652790231,
+      "tag": "0021_nifty_electro",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1786654104479,
+      "tag": "0022_expenses_model_pricing",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1786655335320,
+      "tag": "0023_payments",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1786656862217,
+      "tag": "0024_ad_spend",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1786657200000,
+      "tag": "0025_partners",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1786660200000,
+      "tag": "0026_faq_entries",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1786662000000,
+      "tag": "0027_ai_guardrail_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1786665600000,
+      "tag": "0028_knowledge_review",
+      "breakpoints": true
     }
   ]
 }

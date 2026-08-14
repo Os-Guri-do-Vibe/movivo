@@ -1,14 +1,31 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   anamnesisStructuredSchema,
+  attributionLabel,
+  canonicalChannel,
+  UNMAPPED_CHANNEL,
+  ATTRIBUTION_WINDOW_DAYS,
+  MATURE_COHORT_MONTHS,
+  LTV_TO_CAC_TARGET,
+  PAYBACK_TARGET_MONTHS,
+  type AcquisitionChannel,
+  type ChannelEconomics,
+  type CampaignEconomics,
+  type ControlCenterCampaignsResponse,
+  type ChannelSignal,
   preferredPeriodSchema,
   primaryGoalSchema,
   trainingLocationSchema,
   ControlCenterCapability as Capability,
+  ProfitBasis,
+  type ExpenseCategory,
   type ControlCenterEvolutionPoint,
+  type ControlCenterEntryCohort,
   type ControlCenterFinanceResponse,
   type ControlCenterMarketingResponse,
   type ControlCenterMetric,
+  type ControlCenterTrialConversion,
+  type ControlCenterNorthStar,
   type ControlCenterOverviewResponse,
   type ControlCenterPillarSummary,
   type ControlCenterStudentDetailResponse,
@@ -17,7 +34,7 @@ import {
   type ControlCenterTimelineEvent,
   type ControlCenterComplianceResponse,
 } from '@movivo/shared';
-import { and, count, desc, eq, gte, isNotNull, sql, type SQLWrapper } from 'drizzle-orm';
+import { and, count, desc, eq, gte, isNotNull, isNull, sql, type SQLWrapper } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
 import { z } from 'zod';
 
@@ -25,18 +42,23 @@ import { AgentConfigRepository } from '../../core/agent-config/agent-config.repo
 import { DatabaseHealthService } from '../../core/database';
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import {
+  adSpend,
   aiJobs,
   anamnesisSessions,
   auditLogs,
   checkins,
   consents,
   conversations,
+  expenses,
   handoffAlerts,
   knowledgeBase,
+  payments,
   protocols,
   protocolVersions,
   subscriptions,
   users,
+  userStatusTransitions,
+  workoutCompletions,
 } from '../../core/database/schema';
 import {
   TenantDatabase,
@@ -54,9 +76,13 @@ import { roleHasCapabilities } from '../auth/capabilities';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { AuditService } from './audit.service';
 import { assessChurnRisk, CHURN_RISK_THRESHOLDS } from './churn-risk';
+import { buildFinancialProjection } from './financial-projection';
 
 const TIMEZONE = 'America/Sao_Paulo' as const;
 const MINIMUM_SEGMENT_SIZE = 10;
+/** North Star do produto (US-8.1): treinos concluidos nos primeiros 30 dias pagos, meta >=8. */
+const NORTH_STAR_WINDOW_DAYS = 30;
+const NORTH_STAR_TARGET = 8;
 /** Horizonte do calendário de renovação (US-7.2). */
 const RENEWAL_HORIZON_DAYS = 90;
 /** Recorte de receita em risco dentro do calendário. */
@@ -82,31 +108,30 @@ const PLAN_MONTHS: Record<string, number> = {
 };
 
 /**
- * Preço de LLM por 1k tokens, em USD (ADR-005-R: GPT-4.1 principal, Claude Sonnet 4.5
- * fallback). Constante versionada em código de propósito: a tabela `model_pricing`
- * editável chega na Sprint 8 junto com `expenses`, porque as duas resolvem o mesmo
- * problema (custo) e devem ser desenhadas juntas. **Este é o único ponto do código com
- * preço de modelo** — trocar aqui troca em todo o painel.
- *
- * ponytail: constante em código, virar tabela `model_pricing` na Sprint 8.
- * // TODO: confirmar preço vigente e câmbio com Eduardo/Henrique.
+ * Câmbio USD→BRL. Continua constante em código: `model_pricing` guarda preço em moeda
+ * do provedor (USD), não taxa de câmbio — cotação diária é problema de outra sprint.
+ * // TODO: confirmar câmbio com Eduardo/Henrique.
  */
 const USD_TO_BRL = 5.4;
-const AI_PRICE_USD_PER_1K_TOKENS: Record<string, { input: number; output: number }> = {
-  'gpt-4.1': { input: 0.002, output: 0.008 },
-  'gpt-4.1-mini': { input: 0.0004, output: 0.0016 },
-  'claude-sonnet-4-5': { input: 0.003, output: 0.015 },
-};
 
-/** Casa o modelo persistido (`gpt-4.1-2025-04-14`) com a chave da tabela de preço. */
-function aiPriceFor(model: string) {
-  const normalized = model.toLowerCase();
-  const key = Object.keys(AI_PRICE_USD_PER_1K_TOKENS)
-    .filter((candidate) => normalized.startsWith(candidate))
-    // Prefixo mais longo primeiro: `gpt-4.1-mini` não pode cair no preço de `gpt-4.1`.
-    .sort((a, b) => b.length - a.length)[0];
-  return key ? AI_PRICE_USD_PER_1K_TOKENS[key] : null;
-}
+/**
+ * Preço de LLM — **origem trocada na US-8.4 / TASK-8.4.3**: era a constante versionada em
+ * código da TASK-7.2.3, agora vem da tabela `model_pricing`, versionada por vigência.
+ *
+ * O casamento por prefixo (`gpt-4.1` casa `gpt-4.1-2025-04-14`, e `gpt-4.1-mini` ganha de
+ * `gpt-4.1` por ser o prefixo mais longo) era feito em TS e agora é o `order by length`
+ * do LATERAL. A vigência é comparada com a **data do job**, não com hoje: mudar o preço
+ * hoje não altera o custo apurado de mês passado.
+ */
+const AI_PRICE_LATERAL = sql`left join lateral (
+  select mp.input_price_per_1k_cents as input_cents, mp.output_price_per_1k_cents as output_cents
+  from model_pricing mp
+  where lower(coalesce(${aiJobs.modelUsed}, '')) like mp.model || '%'
+    and mp.valid_from <= (${aiJobs.createdAt} at time zone ${TIMEZONE})::date
+    and (mp.valid_to is null or mp.valid_to > (${aiJobs.createdAt} at time zone ${TIMEZONE})::date)
+  order by length(mp.model) desc, mp.valid_from desc
+  limit 1
+) price on true`;
 /** Janela das séries e do mapa de calor da Visão Geral. */
 const INSIGHT_WINDOW_DAYS = 30;
 const DAY_FORMATTER = new Intl.DateTimeFormat('en-CA', {
@@ -132,15 +157,26 @@ const OVERVIEW_ATTENTION_THRESHOLDS = {
   marketingMinCompletionPercent: 40,
   /** Taxa de resposta bloqueada pela IA acima disto indica prompt/modelo falhando. */
   aiMaxBlockedPercent: 5,
+  /**
+   * US-8.8 — limiares das linhas novas. **Default a ser confirmado pelo fundador**,
+   * mesmo tratamento dos limiares acima (a tela é dele):
+   *  - lucro do período negativo é atenção. Zero não é: mês sem despesa lançada cai em
+   *    `UNAVAILABLE` antes de chegar aqui.
+   *  - CAC do canal principal acima disto quebra a meta LTV/CAC ≥ 3 de Eduardo para o
+   *    plano mensal de R$ 39 (39 × 3 = 117). Vira atenção.
+   */
+  financeMinProfitBrl: 0,
+  marketingMaxChannelCacBrl: 117,
 } as const;
 
 /**
  * Rótulo obrigatório da adesão (US-7.4, TASK-7.4.3): o que existe hoje é o aluno
  * **declarando** no check-in, não o treino concluído verificado — que depende de
- * `workout_completions` (Sprint 8) e continua marcado como indisponível, nunca zero.
+ * `workout_completions` — que passou a existir na US-8.1 e sai na North Star, em campo
+ * próprio. O rótulo continua porque as duas grandezas seguem diferentes (US-8.8).
  */
 const DECLARED_ADHERENCE_NOTICE =
-  'Adesão declarada via check-in: mede resposta ao check-in, não execução. Treino concluído verificado depende de workout_completions (Sprint 8).';
+  'Adesão declarada via check-in: mede resposta ao check-in, não execução. Treino concluído verificado é medido à parte, na North Star (`workout_completions`).';
 
 /** Forma persistida das respostas de check-in (`checkins.responses_cipher`). */
 const checkinDeclaredSchema = z.object({
@@ -249,6 +285,20 @@ export class ControlCenterService {
         metric: this.metric(total, 'COUNT', 'AVAILABLE', 'Alunos visíveis no escopo do papel.'),
       },
       details: [
+        // US-8.1 — North Star em número real. As três linhas vêm juntas de propósito:
+        // a média sozinha, sem taxa de reporte, é lida como medida quando é piso.
+        {
+          label: `Treinos nos primeiros ${NORTH_STAR_WINDOW_DAYS} dias pagos (meta ≥${NORTH_STAR_TARGET})`,
+          metric: students.data.northStar.averageCompletions,
+        },
+        {
+          label: 'Taxa de reporte de treino',
+          metric: students.data.northStar.reportingRate,
+        },
+        {
+          label: 'Adesão declarada (resposta a check-in)',
+          metric: students.data.declaredAdherenceRate,
+        },
         {
           label: 'Em risco de cancelamento',
           metric: this.metric(
@@ -280,7 +330,12 @@ export class ControlCenterService {
     const finance = await this.finance();
     const atRisk = finance.data.revenueAtRisk30d.value ?? 0;
     const churn90 = finance.data.churnByReason.reduce((sum, row) => sum + row.last90Days, 0);
-    const attention = atRisk > OVERVIEW_ATTENTION_THRESHOLDS.financeAtRiskBrl;
+    // US-8.8: lucro do período entra na linha-resumo. Lucro indisponível (sem despesa
+    // lançada) não é atenção — é ausência de dado, e a métrica já diz isso na tela.
+    const profit = finance.data.profit;
+    const profitAttention =
+      profit.value !== null && profit.value < OVERVIEW_ATTENTION_THRESHOLDS.financeMinProfitBrl;
+    const attention = atRisk > OVERVIEW_ATTENTION_THRESHOLDS.financeAtRiskBrl || profitAttention;
 
     return {
       pillar: 'FINANCE',
@@ -290,6 +345,7 @@ export class ControlCenterService {
       headline: { label: 'MRR contratado', metric: finance.data.contractedMrr },
       details: [
         { label: 'Receita em risco (30 dias)', metric: finance.data.revenueAtRisk30d },
+        { label: 'Lucro do período', metric: profit },
         {
           label: 'Cancelamentos (90 dias)',
           metric: this.metric(
@@ -300,9 +356,11 @@ export class ControlCenterService {
           ),
         },
       ],
-      reason: attention
-        ? `Receita em risco nos próximos 30 dias acima de R$ ${OVERVIEW_ATTENTION_THRESHOLDS.financeAtRiskBrl}.`
-        : null,
+      reason: profitAttention
+        ? 'Lucro do período negativo: a despesa lançada superou a receita.'
+        : attention
+          ? `Receita em risco nos próximos 30 dias acima de R$ ${OVERVIEW_ATTENTION_THRESHOLDS.financeAtRiskBrl}.`
+          : null,
     };
   }
 
@@ -311,9 +369,21 @@ export class ControlCenterService {
     const started = marketing.data.funnel.formStarted.value ?? 0;
     const submitted = marketing.data.funnel.formSubmitted.value ?? 0;
     const completionRate = started > 0 ? (submitted / started) * 100 : null;
+    // US-8.8: "canal principal" = o canal publicável com mais cadastros; se ele não tem
+    // investimento em mídia, o CAC dele já vem UNAVAILABLE com o motivo (US-8.6) e a linha
+    // exibe isso em vez de escolher outro canal só para ter número.
+    const mainChannel = marketing.data.channelEconomics.reduce<ChannelEconomics | null>(
+      (best, row) => (best === null || row.students > best.students ? row : best),
+      null,
+    );
+    const cacAttention =
+      mainChannel !== null &&
+      mainChannel.cac.value !== null &&
+      mainChannel.cac.value > OVERVIEW_ATTENTION_THRESHOLDS.marketingMaxChannelCacBrl;
     const attention =
-      completionRate !== null &&
-      completionRate < OVERVIEW_ATTENTION_THRESHOLDS.marketingMinCompletionPercent;
+      cacAttention ||
+      (completionRate !== null &&
+        completionRate < OVERVIEW_ATTENTION_THRESHOLDS.marketingMinCompletionPercent);
 
     return {
       pillar: 'MARKETING',
@@ -337,10 +407,25 @@ export class ControlCenterService {
                   'Formulários enviados sobre formulários iniciados.',
                 ),
         },
+        {
+          label:
+            mainChannel === null
+              ? 'CAC do canal principal'
+              : `CAC do canal principal (${mainChannel.channel})`,
+          metric:
+            mainChannel === null
+              ? this.unavailable(
+                  'BRL',
+                  'Nenhum canal de origem atingiu o mínimo de cadastros para ser publicado.',
+                )
+              : mainChannel.cac,
+        },
       ],
-      reason: attention
-        ? `Taxa de conclusão da anamnese abaixo de ${OVERVIEW_ATTENTION_THRESHOLDS.marketingMinCompletionPercent}%.`
-        : null,
+      reason: cacAttention
+        ? `CAC do canal principal acima de R$ ${OVERVIEW_ATTENTION_THRESHOLDS.marketingMaxChannelCacBrl}, o teto que a meta LTV/CAC ≥ ${LTV_TO_CAC_TARGET} admite.`
+        : attention
+          ? `Taxa de conclusão da anamnese abaixo de ${OVERVIEW_ATTENTION_THRESHOLDS.marketingMinCompletionPercent}%.`
+          : null,
     };
   }
 
@@ -366,7 +451,7 @@ export class ControlCenterService {
       pillar: 'AI',
       label: 'IA',
       state: attention ? 'ATTENTION' : 'OK',
-      href: '/dashboard/ia/persona',
+      href: '/dashboard/ia/agente',
       headline: {
         label: `Conversas (${INSIGHT_WINDOW_DAYS} dias)`,
         metric: this.metric(
@@ -456,6 +541,7 @@ export class ControlCenterService {
         .leftJoin(subscriptions, eq(subscriptions.userId, anamnesisSessions.userId));
 
       const anamnesisFunnel = await this.anamnesisFunnel(tx);
+      const trialConversion = await this.trialConversion(tx);
 
       const seasonalityRows = await tx
         .select({
@@ -523,8 +609,64 @@ export class ControlCenterService {
         }
       }
 
+      // --- Aquisição por canal (US-8.2, TASK-8.2.3). Grava-se o bruto; a taxonomia
+      // canônica é aplicada AQUI, na leitura. Fonte pronta para a US-8.6.
+      const attributionRows = await tx
+        .select({
+          source: anamnesisSessions.utmSource,
+          medium: anamnesisSessions.utmMedium,
+          total: count(),
+        })
+        .from(anamnesisSessions)
+        .where(isNotNull(anamnesisSessions.firstTouchAt))
+        .groupBy(anamnesisSessions.utmSource, anamnesisSessions.utmMedium);
+
+      const [notCaptured] = await tx
+        .select({ total: count() })
+        .from(anamnesisSessions)
+        .where(isNull(anamnesisSessions.firstTouchAt));
+
+      const byChannel = new Map<string, AcquisitionChannel>();
+      for (const row of attributionRows) {
+        const canonical = canonicalChannel(row.source, row.medium);
+        // Não mapeado nunca é fundido com outro: a chave carrega o bruto, para que o
+        // erro de marcação de campanha continue visível item a item.
+        const key = canonical.mapped ? canonical.channel : `${UNMAPPED_CHANNEL}:${canonical.raw}`;
+        const current = byChannel.get(key);
+        byChannel.set(key, {
+          channel: canonical.channel,
+          mapped: canonical.mapped,
+          raw: canonical.mapped ? canonical.channel : canonical.raw,
+          count: (current?.count ?? 0) + row.total,
+        });
+      }
+      const allChannels = [...byChannel.values()].sort((a, b) => b.count - a.count);
+      const acquisitionChannels = allChannels.filter(
+        (channel) => channel.count >= MINIMUM_SEGMENT_SIZE,
+      );
+      const suppressedChannels = allChannels.length - acquisitionChannels.length;
+      const attributed = allChannels.reduce((sum, channel) => sum + channel.count, 0);
+
+      // --- CAC / ROAS / LTV-CAC por origem (US-8.6). Coorte é madura quando entrou há pelo
+      // menos `MATURE_COHORT_MONTHS` meses: mês corrente não sustenta estimativa de LTV.
+      const cohorts = await this.entryCohorts(tx);
+      const matureBefore = new Date();
+      matureBefore.setUTCMonth(matureBefore.getUTCMonth() - MATURE_COHORT_MONTHS);
+      const matureCohorts = cohorts.cohorts.filter(
+        (cohort) => cohort.month <= matureBefore.toISOString().slice(0, 7),
+      ).length;
+      const economics = await this.channelEconomics(tx, acquisitionChannels, matureCohorts);
+
       return {
         anamnesisFunnel,
+        acquisitionChannels,
+        channelEconomics: economics.economics,
+        mediaInvestmentBrl: economics.mediaInvestmentBrl,
+        attributionWindowDays: ATTRIBUTION_WINDOW_DAYS,
+        matureCohorts,
+        suppressedChannels,
+        attributionNotCaptured: notCaptured?.total ?? 0,
+        attributed,
         signupSeasonality: this.fillHeatmap(seasonalityRows),
         funnel: {
           formStarted: this.marketingMetric(
@@ -544,10 +686,11 @@ export class ControlCenterService {
             'Titulares distintos com assinatura ativa.',
           ),
         },
-        acquisition: this.unavailable(
-          'COUNT',
-          'Atribuição de campanha/UTM ainda não é persistida no banco transacional.',
+        acquisition: this.marketingMetric(
+          attributed,
+          'Cadastros com origem de primeiro toque registrada (inclui `desconhecida` explícita).',
         ),
+        trialConversion,
         segments,
         suppressedSegments,
         minimumSegmentSize: MINIMUM_SEGMENT_SIZE as 10,
@@ -556,11 +699,122 @@ export class ControlCenterService {
     return this.envelope(result, [
       'Somente dimensões estruturadas não sensíveis são agregadas.',
       'Métricas entre 1 e 9 e dimensões com qualquer célula menor que 10 são omitidas.',
-      'Aquisição está indisponível até a persistência de UTM/campanha.',
+      'Aquisição cobre apenas cadastros iniciados a partir da US-8.2; os anteriores aparecem como origem não capturada, nunca como orgânico.',
+      'Canais com menos de 10 cadastros são omitidos; valores fora da taxonomia aparecem como `nao_mapeado` com o valor bruto ao lado.',
       'O funil da anamnese cobre apenas sessões com desfecho definido (enviadas ou com link já expirado); sessões ainda abertas não contam como abandono.',
       `Sazonalidade de cadastro cobre os últimos ${INSIGHT_WINDOW_DAYS} dias em ${TIMEZONE}, sobre a criação da sessão de anamnese.`,
       'Faixa etária é derivada da data de nascimento da etapa 1 e só sai do banco já generalizada em faixas.',
+      'Conversão trial→ativo lê `user_status_transitions`; "convertido" é hoje o proxy `TRIALING→ACTIVE` (pagamento autorizado), a ser trocado por primeiro pagamento liquidado quando `payments` existir.',
+      `Funil de conversão suprimido por inteiro quando há menos de ${MINIMUM_SEGMENT_SIZE} entradas em trial.`,
+      `CAC por canal usa janela de atribuição declarada: convertidos em até ${ATTRIBUTION_WINDOW_DAYS} dias após o cadastro, atribuídos ao canal de primeiro toque — nunca por mês-calendário de gasto.`,
+      'Canal sem investimento registrado em `ad_spend` aparece como "sem investimento direto"; CAC e ROAS ficam indisponíveis, nunca R$ 0,00.',
+      'ROAS usa receita RECEBIDA (`payments`), nunca receita contratada.',
+      `LTV é receita recebida acumulada por convertido e só é publicado como disponível com ao menos 3 coortes de entrada maduras (${MATURE_COHORT_MONTHS}+ meses); abaixo disso é estimativa de baixa confiança.`,
+      'Investimento em mídia é `ad_spend`; a categoria MARKETING de `expenses` cobre marketing que não é mídia direta por canal — as duas nunca descrevem o mesmo real.',
     ]);
+  }
+
+  /** Economia por `utm_campaign`, com o mesmo recorte e k-anonimato da visao por canal. */
+  async campaigns(): Promise<ControlCenterCampaignsResponse> {
+    return this.db.runAsSystem(async (tx) => {
+      const cohorts = await this.entryCohorts(tx);
+      const matureBefore = new Date();
+      matureBefore.setUTCMonth(matureBefore.getUTCMonth() - MATURE_COHORT_MONTHS);
+      const matureCohorts = cohorts.cohorts.filter(
+        (cohort) => cohort.month <= matureBefore.toISOString().slice(0, 7),
+      ).length;
+
+      const originRows = await tx.execute<{
+        source: string | null;
+        medium: string | null;
+        campaign: string;
+        students: number;
+        converted: number;
+        received_cents: string;
+      }>(sql`
+        with origin as (
+          select distinct on (a.user_id)
+                 a.user_id, a.utm_source as source, a.utm_medium as medium,
+                 a.utm_campaign as campaign, a.created_at as signed_up_at
+          from ${anamnesisSessions} a
+          where a.user_id is not null and a.first_touch_at is not null
+            and a.utm_campaign is not null
+          order by a.user_id, a.created_at
+        ),
+        conv as (
+          select user_id, min(occurred_at) as converted_at
+          from ${userStatusTransitions}
+          where to_status = 'CONVERTED'
+          group by user_id
+        )
+        select o.source, o.medium, o.campaign,
+               count(*)::int as students,
+               count(*) filter (
+                 where c.converted_at is not null
+                   and c.converted_at <= o.signed_up_at + ${ATTRIBUTION_WINDOW_DAYS} * interval '1 day'
+               )::int as converted,
+               coalesce(sum(pay.cents), 0)::text as received_cents
+        from origin o
+        left join conv c on c.user_id = o.user_id
+        left join lateral (
+          select coalesce(sum(p.amount_cents), 0) as cents
+          from ${payments} p
+          where p.user_id = o.user_id and p.status <> 'FAILED'
+        ) pay on true
+        group by 1, 2, 3
+      `);
+
+      const spendRows = await tx
+        .select({
+          channel: adSpend.channel,
+          campaign: sql<string>`lower(trim(${adSpend.campaign}))`,
+          cents: sql<string>`coalesce(sum(${adSpend.amountCents}), 0)::text`,
+        })
+        .from(adSpend)
+        .groupBy(adSpend.channel, sql`lower(trim(${adSpend.campaign}))`);
+      const investment = new Map(
+        spendRows.map((row) => [`${row.channel}|${row.campaign}`, this.number(row.cents)]),
+      );
+      const mediaInvestmentBrl =
+        spendRows.reduce((sum, row) => sum + this.number(row.cents), 0) / 100;
+      const [observed] = await tx
+        .select({
+          months: sql<number>`count(distinct to_char(${payments.occurredAt} at time zone ${TIMEZONE}, 'YYYY-MM'))::int`,
+        })
+        .from(payments)
+        .where(sql`${payments.status} <> 'FAILED'`);
+      const observedMonths = Math.max(1, observed?.months ?? 0);
+      const hasPayments = (observed?.months ?? 0) > 0;
+
+      const all = originRows.map((row) => {
+        const channel = canonicalChannel(row.source, row.medium).channel;
+        return { ...row, channel };
+      });
+      const publishable = all.filter((row) => row.students >= MINIMUM_SEGMENT_SIZE);
+      const campaigns: CampaignEconomics[] = publishable.map((row) => ({
+        campaign: row.campaign,
+        channel: row.channel,
+        students: row.students,
+        ...this.economicMetrics({
+          label: `campanha ${row.campaign}`,
+          converted: row.converted,
+          receivedCents: this.number(row.received_cents),
+          investmentCents: investment.get(`${row.channel}|${row.campaign}`) ?? 0,
+          hasPayments,
+          matureCohorts,
+          observedMonths,
+        }),
+      }));
+
+      return this.envelope({
+        campaigns,
+        suppressedCampaigns: all.length - publishable.length,
+        minimumSegmentSize: MINIMUM_SEGMENT_SIZE as 10,
+        attributionWindowDays: ATTRIBUTION_WINDOW_DAYS,
+        matureCohorts,
+        mediaInvestmentBrl,
+      });
+    });
   }
 
   /**
@@ -663,7 +917,7 @@ export class ControlCenterService {
         checkpoint: null,
         count: null,
         reason:
-          'As etapas 2 e 3 só gravam o bloco quando concluídas (e o bloco de saúde é cifrado), então o campo exato de parada exige telemetria de formulário — dependência da Sprint 8.',
+          'As etapas 2 e 3 só gravam o bloco quando concluídas (e o bloco de saúde é cifrado), então o campo exato de parada exige telemetria de formulário por campo — que não entrou no escopo da Sprint 8 e ainda não tem sprint definida.',
       };
     }
     const [row] = await tx
@@ -746,6 +1000,8 @@ export class ControlCenterService {
       await this.auditListAccess(tx, actor, 'STUDENTS_LIST_VIEWED', 'student_list', found.length);
       return { rows: found, ai: quality };
     });
+    const northStar = await this.northStar();
+    const declaredAdherenceRate = await this.declaredAdherenceRate();
     const students = rows
       .map(({ lastInboundAt, unansweredCheckinSentAt, renewalAt, ...student }) => ({
         ...student,
@@ -757,12 +1013,132 @@ export class ControlCenterService {
       }))
       .sort((a, b) => b.churnRisk.score - a.churnRisk.score);
     return this.envelope(
-      { students, aiBlockedRate: this.blockedRate(ai?.blocked ?? 0, ai?.validated ?? 0) },
+      {
+        students,
+        aiBlockedRate: this.blockedRate(ai?.blocked ?? 0, ai?.validated ?? 0),
+        northStar,
+        declaredAdherenceRate,
+      },
       [
         'Risco de cancelamento é comercial: soma de três sinais nomeados (silêncio no canal, check-in sem resposta, renovação próxima), não um score preditivo.',
         `Limiares vigentes: ${CHURN_RISK_THRESHOLDS.silentDays} dias sem mensagem, ${CHURN_RISK_THRESHOLDS.unansweredCheckinDays} dias de check-in sem resposta, ${CHURN_RISK_THRESHOLDS.renewalWindowDays} dias até a renovação.`,
+        `North Star (treino verificado): média de treinos registrados nos primeiros ${NORTH_STAR_WINDOW_DAYS} dias de assinatura paga, meta ≥${NORTH_STAR_TARGET}. Coorte de ${northStar.cohortSize} aluno(s).`,
+        'Adesão verificada e adesão declarada coexistem: a primeira conta treino registrado, a segunda conta resposta a check-in. A divergência entre elas é informação, não erro.',
+        `Taxa de reporte de ${northStar.reportingRate.value ?? 0}%: abaixo de 100%, a North Star é um piso, não uma medida — quem nunca respondeu entra na média como zero.`,
       ],
     );
+  }
+
+  /**
+   * North Star (US-8.1 / TASK-8.1.5): média de `workout_completions` na janela de 30
+   * dias a partir do início da assinatura **paga**, contra a meta ≥8.
+   *
+   * `paid_start` é o `current_period_start` mais antigo de status pago — trial não conta
+   * (a métrica é sobre usuário pago, `08-relatorio-lucas.md`).
+   *
+   * ponytail: a coorte inclui quem começou a pagar há menos de 30 dias, e essa pessoa
+   * entra com a contagem parcial da janela ainda aberta — o efeito é puxar a média para
+   * baixo, na direção conservadora, coerente com "contagem inflada é pior que ausente".
+   * Se um dia a leitura por safra mensal for necessária, agrupar por
+   * `date_trunc('month', paid_start)` aqui e nada mais no arquivo muda.
+   */
+  private async northStar(): Promise<ControlCenterNorthStar> {
+    const [row] = await this.db.runAsSystem((tx) =>
+      tx.execute<{
+        cohort_size: number;
+        total_completions: number;
+        reporting: number;
+        quick_reply: number;
+        checkin: number;
+        conversation: number;
+      }>(sql`
+        with cohort as (
+          select user_id, min(current_period_start) as paid_start
+          from ${subscriptions}
+          where current_period_start is not null
+            and status in ('ACTIVE', 'PAST_DUE', 'CANCELED', 'EXPIRED')
+          group by user_id
+        ),
+        window as (
+          select
+            cohort.user_id,
+            count(w.id)::int as total,
+            count(w.id) filter (where w.source = 'WHATSAPP_QUICK_REPLY')::int as quick_reply,
+            count(w.id) filter (where w.source = 'CHECKIN')::int as checkin,
+            count(w.id) filter (where w.source = 'CONVERSATION')::int as conversation
+          from cohort
+          left join ${workoutCompletions} w
+            on w.user_id = cohort.user_id
+           and w.completed_at >= cohort.paid_start::date
+           and w.completed_at < (cohort.paid_start + make_interval(days => ${NORTH_STAR_WINDOW_DAYS}))::date
+          group by cohort.user_id
+        )
+        select
+          count(*)::int as cohort_size,
+          coalesce(sum(total), 0)::int as total_completions,
+          count(*) filter (where total > 0)::int as reporting,
+          coalesce(sum(quick_reply), 0)::int as quick_reply,
+          coalesce(sum(checkin), 0)::int as checkin,
+          coalesce(sum(conversation), 0)::int as conversation
+        from window
+      `),
+    );
+    const cohortSize = this.number(row?.cohort_size);
+    const definition = `Média de treinos registrados nos primeiros ${NORTH_STAR_WINDOW_DAYS} dias de assinatura paga (meta ≥${NORTH_STAR_TARGET}). Treino verificado, não declarado.`;
+    const reportingDefinition = `Percentual da coorte paga com ao menos 1 treino registrado na janela. Abaixo de 100%, a North Star é um piso.`;
+    if (cohortSize === 0) {
+      return {
+        averageCompletions: this.unavailable(
+          'COUNT',
+          `${definition} Sem nenhum aluno pago na base ainda.`,
+        ),
+        target: NORTH_STAR_TARGET,
+        reportingRate: this.unavailable('PERCENT', reportingDefinition),
+        cohortSize: 0,
+        bySource: [],
+      };
+    }
+    const average = this.number(row?.total_completions) / cohortSize;
+    const reporting = (this.number(row?.reporting) / cohortSize) * 100;
+    return {
+      averageCompletions: this.metric(
+        Math.round(average * 100) / 100,
+        'COUNT',
+        'AVAILABLE',
+        definition,
+      ),
+      target: NORTH_STAR_TARGET,
+      reportingRate: this.metric(
+        Math.round(reporting * 10) / 10,
+        'PERCENT',
+        'AVAILABLE',
+        reportingDefinition,
+      ),
+      cohortSize,
+      bySource: [
+        { source: 'WHATSAPP_QUICK_REPLY' as const, completions: this.number(row?.quick_reply) },
+        { source: 'CHECKIN' as const, completions: this.number(row?.checkin) },
+        { source: 'CONVERSATION' as const, completions: this.number(row?.conversation) },
+      ],
+    };
+  }
+
+  /** Adesão **declarada** da Sprint 7: check-ins respondidos / enviados. Proxy, não treino. */
+  private async declaredAdherenceRate(): Promise<ControlCenterMetric> {
+    const [row] = await this.db.runAsSystem((tx) =>
+      tx
+        .select({
+          sent: sql<number>`count(*) filter (where ${checkins.sentAt} is not null)::int`,
+          responded: sql<number>`count(*) filter (where ${checkins.respondedAt} is not null)::int`,
+        })
+        .from(checkins),
+    );
+    const sent = this.number(row?.sent);
+    const definition =
+      'Adesão declarada: percentual de check-ins enviados que foram respondidos. Mede engajamento com a pergunta, não treino executado.';
+    if (sent === 0) return this.unavailable('PERCENT', `${definition} Nenhum check-in enviado.`);
+    const rate = (this.number(row?.responded) / sent) * 100;
+    return this.metric(Math.round(rate * 10) / 10, 'PERCENT', 'AVAILABLE', definition);
   }
 
   /**
@@ -840,6 +1216,12 @@ export class ControlCenterService {
           createdAt: anamnesisSessions.createdAt,
           submittedAt: anamnesisSessions.submittedAt,
           status: anamnesisSessions.status,
+          utmSource: anamnesisSessions.utmSource,
+          utmMedium: anamnesisSessions.utmMedium,
+          utmCampaign: anamnesisSessions.utmCampaign,
+          utmContent: anamnesisSessions.utmContent,
+          referrerHost: anamnesisSessions.referrerHost,
+          firstTouchAt: anamnesisSessions.firstTouchAt,
         })
         .from(anamnesisSessions)
         .where(eq(anamnesisSessions.userId, studentId))
@@ -950,9 +1332,31 @@ export class ControlCenterService {
       painReport ? [{ at: point.at, week: point.week, text: painReport }] : [],
     );
 
+    // Origem do primeiro toque: a sessão mais antiga é a que traz o cadastro (US-8.2).
+    const firstSession = raw.anamnesisRows.at(-1) ?? null;
+    const acquisition =
+      firstSession?.firstTouchAt != null
+        ? {
+            ...canonicalChannel(firstSession.utmSource, firstSession.utmMedium),
+            campaign: firstSession.utmCampaign,
+            content: firstSession.utmContent,
+            referrerHost: firstSession.referrerHost,
+            capturedAt: firstSession.firstTouchAt.toISOString(),
+          }
+        : null;
+    const acquisitionText = attributionLabel(acquisition);
+
     const events: Array<ControlCenterTimelineEvent | null> = [];
     for (const item of raw.anamnesisRows) {
-      events.push(this.event(item.createdAt, 'ANAMNESIS', 'Formulário de anamnese iniciado', null));
+      events.push(
+        this.event(
+          item.createdAt,
+          'ANAMNESIS',
+          'Formulário de anamnese iniciado',
+          // Marco de cadastro carrega a origem — inclusive a ausência dela.
+          item === firstSession ? `Origem: ${acquisitionText}` : null,
+        ),
+      );
       if (item.submittedAt) {
         events.push(
           this.event(item.submittedAt, 'ANAMNESIS', 'Formulário de anamnese enviado', item.status),
@@ -1087,6 +1491,7 @@ export class ControlCenterService {
       currentProtocol: raw.protocol
         ? { ...raw.protocol, signedAt: raw.protocol.signedAt?.toISOString() ?? null }
         : null,
+      acquisition,
       routine: this.projectRoutine(row.routine),
       workoutHistory: {
         status: 'UNAVAILABLE' as const,
@@ -1447,19 +1852,15 @@ export class ControlCenterService {
           }),
         ],
         pendingCapabilities: [
-          {
-            title: 'Custo de infraestrutura e de WhatsApp',
-            reason:
-              'Nenhuma fatura de servidor ou de mensagem é ingerida hoje; qualquer número seria inventado.',
-            dependency: 'Tabela de despesas (`expenses`) e ingestão de faturas',
-            plannedFor: 'Sprint 8',
-          },
+          // US-8.8: "Custo de infraestrutura e de WhatsApp" saiu daqui — virou número na
+          // US-8.4 (`expenses`) e é exibido no pilar Financeiro.
           {
             title: 'Histórico de incidentes e disponibilidade real (uptime)',
             reason:
               'A plataforma mede a si mesma no instante da consulta; não existe registro do que ficou fora do ar antes.',
             dependency: 'Registro de incidentes e probe externo contínuo',
-            plannedFor: 'Sprint 8',
+            // Reapontado na US-8.8: o lote de Sistema inteiro foi movido para a Sprint 9.
+            plannedFor: 'Sprint 9',
           },
           {
             title: 'Rastro ponta-a-ponta de uma requisição (tracing distribuído)',
@@ -1697,42 +2098,190 @@ export class ControlCenterService {
         .groupBy(sql`1`)
         .orderBy(sql`2 desc`);
 
-      const aiRows = await tx
+      // Custo de IA por modelo com preço vigente **na data de cada job** (ver
+      // `AI_PRICE_LATERAL`). Sai do query builder porque LATERAL não é expresso por ele;
+      // o custo é somado linha a linha, então dois preços no mesmo mês somam certo.
+      const aiRows = (await tx.execute(sql`
+        select
+          coalesce(${aiJobs.modelUsed}, 'DESCONHECIDO') as model,
+          count(*)::int as jobs,
+          coalesce(sum(${aiJobs.tokensInput}), 0)::int as tokens_input,
+          coalesce(sum(${aiJobs.tokensOutput}), 0)::int as tokens_output,
+          count(price.input_cents)::int as priced_jobs,
+          coalesce(sum(
+            (coalesce(${aiJobs.tokensInput}, 0) / 1000.0) * price.input_cents / 100.0
+            + (coalesce(${aiJobs.tokensOutput}, 0) / 1000.0) * price.output_cents / 100.0
+          ), 0)::float8 as cost_usd
+        from ${aiJobs}
+        ${AI_PRICE_LATERAL}
+        where ${aiJobs.createdAt} >= now() - ${this.days(AI_COST_WINDOW_DAYS)}
+        group by 1
+      `)) as unknown as Array<{
+        model: string;
+        jobs: number;
+        tokens_input: number;
+        tokens_output: number;
+        priced_jobs: number;
+        cost_usd: number;
+      }>;
+
+      // Despesas lançadas (US-8.4). Estorno é linha negativa: `sum` já devolve o líquido.
+      const expenseRows = await tx
         .select({
-          model: sql<string>`coalesce(${aiJobs.modelUsed}, 'DESCONHECIDO')`,
-          jobs: sql<number>`count(*)::int`,
-          tokensInput: sql<number>`coalesce(sum(${aiJobs.tokensInput}), 0)::int`,
-          tokensOutput: sql<number>`coalesce(sum(${aiJobs.tokensOutput}), 0)::int`,
+          month: sql<string>`to_char(${expenses.occurredOn}, 'YYYY-MM')`,
+          category: expenses.category,
+          amountCents: sql<string>`sum(${expenses.amountCents})`,
         })
-        .from(aiJobs)
-        .where(sql`${aiJobs.createdAt} >= now() - ${this.days(AI_COST_WINDOW_DAYS)}`)
-        .groupBy(sql`1`);
+        .from(expenses)
+        .where(sql`${expenses.occurredOn} >= date_trunc('month', now() - interval '11 months')`)
+        .groupBy(sql`1`, expenses.category)
+        .orderBy(sql`1`);
+
+      // ---- Liquidação recebida (US-8.5) ----
+      // Estorno/chargeback é linha NEGATIVA em `payments`, então `sum` já devolve o
+      // líquido do mês sem nenhum CASE — a mesma propriedade que `expenses` tem.
+      const paymentRows = await tx
+        .select({
+          month: sql<string>`to_char(${payments.occurredAt} at time zone ${TIMEZONE}, 'YYYY-MM')`,
+          grossCents: sql<string>`coalesce(sum(${payments.amountCents}), 0)`,
+          netCents: sql<string>`coalesce(sum(${payments.netAmountCents}), 0)`,
+          settlements: sql<number>`count(*) filter (where ${payments.status} = 'SETTLED')::int`,
+          failures: sql<number>`count(*) filter (where ${payments.status} = 'FAILED')::int`,
+        })
+        .from(payments)
+        .where(sql`${payments.occurredAt} >= date_trunc('month', now() - interval '11 months')`)
+        .groupBy(sql`1`)
+        .orderBy(sql`1`);
+
+      // Prazo de liquidação: dias entre o início do período contratado e a entrada do
+      // dinheiro. Só sobre liquidação VINCULADA — a órfã não tem período de referência.
+      const [settlementLag] = await tx
+        .select({
+          days: sql<
+            string | null
+          >`avg(extract(epoch from (${payments.occurredAt} - ${subscriptions.currentPeriodStart})) / 86400.0)`,
+        })
+        .from(payments)
+        .innerJoin(subscriptions, eq(payments.subscriptionId, subscriptions.id))
+        .where(
+          and(
+            eq(payments.status, 'SETTLED'),
+            isNotNull(subscriptions.currentPeriodStart),
+            sql`${payments.occurredAt} >= now() - ${this.days(RENEWAL_HORIZON_DAYS)}`,
+          ),
+        );
+
+      // Fila de exceção: liquidação autenticada sem assinatura correspondente. Nunca é
+      // descartada — fica aqui até alguém conciliar à mão. Sem PII: não tem titular.
+      const paymentExceptionRows = await tx
+        .select({
+          paymentId: payments.id,
+          gateway: payments.gateway,
+          status: payments.status,
+          amountCents: payments.amountCents,
+          occurredAt: payments.occurredAt,
+          receivedAt: payments.receivedAt,
+        })
+        .from(payments)
+        .where(isNull(payments.subscriptionId))
+        .orderBy(desc(payments.receivedAt))
+        .limit(100);
+
+      const currentMonth = new Intl.DateTimeFormat('en-CA', {
+        timeZone: TIMEZONE,
+        year: 'numeric',
+        month: '2-digit',
+      }).format(new Date());
 
       const active = row?.active ?? 0;
-      const aiCostByModel = aiRows.map((model) => {
-        const price = aiPriceFor(model.model);
-        return {
-          ...model,
-          costBrl: price
-            ? ((model.tokensInput / 1000) * price.input +
-                (model.tokensOutput / 1000) * price.output) *
-              USD_TO_BRL
-            : null,
-        };
-      });
+      const aiCostByModel = aiRows.map((model) => ({
+        model: model.model,
+        jobs: Number(model.jobs),
+        tokensInput: Number(model.tokens_input),
+        tokensOutput: Number(model.tokens_output),
+        // Sem nenhum job precificado o custo é `null` (indisponível), nunca zero.
+        costBrl: Number(model.priced_jobs) > 0 ? Number(model.cost_usd) * USD_TO_BRL : null,
+      }));
       const unpricedModels = aiCostByModel.filter((model) => model.costBrl === null);
       const pricedCost = aiCostByModel.reduce((sum, model) => sum + (model.costBrl ?? 0), 0);
       const aiCostUnavailable =
         aiCostByModel.length > 0 && unpricedModels.length === aiCostByModel.length;
-      const aiCostDefinition = `Custo calculado dos últimos ${AI_COST_WINDOW_DAYS} dias: tokens de ai_jobs × preço por 1k tokens versionado em código (ADR-005-R), convertido a R$ pelo câmbio fixo de ${USD_TO_BRL}.`;
+      const aiCostDefinition = `Custo calculado dos últimos ${AI_COST_WINDOW_DAYS} dias: tokens de ai_jobs × preço por 1k tokens vigente na data de cada job (tabela \`model_pricing\`), convertido a R$ pelo câmbio fixo de ${USD_TO_BRL}.`;
       const aiCost = aiCostUnavailable
         ? this.unavailable(
             'BRL',
-            `Nenhum modelo com job no período está na tabela de preço versionada (${unpricedModels.map((model) => model.model).join(', ')}).`,
+            `Nenhum modelo com job no período tem preço vigente em \`model_pricing\` (${unpricedModels.map((model) => model.model).join(', ')}).`,
           )
         : this.metric(pricedCost, 'BRL', 'PROXY', aiCostDefinition);
 
+      const entryCohorts = await this.entryCohorts(tx);
+
       const atRiskTotal = atRiskRows.reduce((sum, item) => sum + this.number(item.amountBrl), 0);
+
+      // ---- Despesa, custo por categoria/mês e resultado (US-8.4) ----
+      const brl = (cents: string | number | null) => this.number(cents) / 100;
+      const costByCategory = Object.entries(
+        expenseRows.reduce<Record<string, number>>((acc, item) => {
+          acc[item.category] = (acc[item.category] ?? 0) + brl(item.amountCents);
+          return acc;
+        }, {}),
+      )
+        .map(([category, amountBrl]) => ({ category: category as ExpenseCategory, amountBrl }))
+        .sort((a, b) => b.amountBrl - a.amountBrl);
+      const costByMonth = Object.entries(
+        expenseRows.reduce<Record<string, number>>((acc, item) => {
+          acc[item.month] = (acc[item.month] ?? 0) + brl(item.amountCents);
+          return acc;
+        }, {}),
+      )
+        .map(([month, amountBrl]) => ({ month, amountBrl }))
+        .sort((a, b) => a.month.localeCompare(b.month));
+      const hasExpenses = expenseRows.length > 0;
+      const contractedMrrBrl = this.number(row?.contractedMrr);
+
+      // ---- Receita recebida × contratada (US-8.5) ----
+      // As duas séries nascem de fontes distintas e são devolvidas em campos distintos.
+      // Nada aqui as combina, e é essa separação que torna a soma indevida impossível na
+      // tela (regra 3 da sprint): a diferença entre elas É a informação.
+      const receivedRevenueByMonth = paymentRows.map((item) => ({
+        month: item.month,
+        grossBrl: brl(item.grossCents),
+        netBrl: brl(item.netCents),
+        settlements: Number(item.settlements),
+      }));
+      const monthPayments = paymentRows.find((item) => item.month === currentMonth);
+      const hasPayments = paymentRows.length > 0;
+      const receivedGrossBrl = brl(monthPayments?.grossCents ?? 0);
+      const receivedNetBrl = brl(monthPayments?.netCents ?? 0);
+      /** Taxa do gateway = bruto − líquido. Não há terceira coluna que possa divergir. */
+      const gatewayFeeBrl = receivedGrossBrl - receivedNetBrl;
+      const attempts =
+        Number(monthPayments?.settlements ?? 0) + Number(monthPayments?.failures ?? 0);
+
+      // Taxa do gateway entra em Custos como despesa real da categoria que já existe. Não
+      // é lançada em `expenses` (ninguém digita taxa de cartão): vem de `payments`, que é
+      // a fonte primária. Somar as duas fontes na mesma categoria não duplica nada.
+      const gatewayFeeByMonth = paymentRows
+        .map((item) => ({
+          month: item.month,
+          amountBrl: brl(item.grossCents) - brl(item.netCents),
+        }))
+        .filter((item) => item.amountBrl !== 0);
+      if (gatewayFeeByMonth.length > 0) {
+        const totalFee = gatewayFeeByMonth.reduce((sum, item) => sum + item.amountBrl, 0);
+        const existing = costByCategory.find((item) => item.category === 'GATEWAY_PAGAMENTO');
+        if (existing) existing.amountBrl += totalFee;
+        else costByCategory.push({ category: 'GATEWAY_PAGAMENTO', amountBrl: totalFee });
+        costByCategory.sort((a, b) => b.amountBrl - a.amountBrl);
+        for (const fee of gatewayFeeByMonth) {
+          const month = costByMonth.find((item) => item.month === fee.month);
+          if (month) month.amountBrl += fee.amountBrl;
+          else costByMonth.push({ month: fee.month, amountBrl: fee.amountBrl });
+        }
+        costByMonth.sort((a, b) => a.month.localeCompare(b.month));
+      }
+
+      const monthExpense = costByMonth.find((item) => item.month === currentMonth)?.amountBrl ?? 0;
 
       return {
         activeSubscriptions: this.metric(
@@ -1764,25 +2313,88 @@ export class ControlCenterService {
           'BRL',
           'O provedor de WhatsApp ainda não persiste custo por mensagem.',
         ),
-        infrastructureCost: this.unavailable(
-          'BRL',
-          'Faturas de infraestrutura ainda não são ingeridas; depende da ingestão de custo de infra prevista para a Sprint 8.',
-        ),
-        receivedRevenue: this.unavailable(
-          'BRL',
-          'Subscriptions registra preço contratado, não liquidação financeira do gateway; depende da tabela `payments`, prevista para a Sprint 8.',
-        ),
-        profit: this.unavailable(
-          'BRL',
-          'Não existe lucro a exibir: a plataforma não registra nenhuma despesa; depende da tabela `expenses`, prevista para a Sprint 8.',
-        ),
+        infrastructureCost: hasExpenses
+          ? this.metric(
+              costByCategory.find((item) => item.category === 'INFRA')?.amountBrl ?? 0,
+              'BRL',
+              'AVAILABLE',
+              'Soma das despesas lançadas na categoria INFRA nos últimos 12 meses (líquido de estornos).',
+            )
+          : this.unavailable(
+              'BRL',
+              'Nenhuma despesa lançada ainda — `expenses` existe, mas está vazia.',
+            ),
+        totalExpense: hasExpenses
+          ? this.metric(
+              monthExpense,
+              'BRL',
+              'AVAILABLE',
+              'Despesa do mês corrente por competência (`occurred_on`), líquida de estornos.',
+            )
+          : this.unavailable('BRL', 'Nenhuma despesa lançada ainda.'),
+        expensePerActiveUser:
+          !hasExpenses || active === 0
+            ? this.unavailable(
+                'BRL',
+                'Sem despesa lançada (ou sem assinatura ativa como denominador) não há custo por usuário.',
+              )
+            : this.metric(
+                monthExpense / active,
+                'BRL',
+                'AVAILABLE',
+                'Despesa do mês corrente dividida pelas assinaturas ativas — o custo por usuário ativo/mês do unit economics.',
+              ),
+        /**
+         * Receita **recebida** do mês, do que liquidou no gateway. Grandeza distinta de
+         * `contractedMrr` — as duas convivem na tela e nunca são somadas.
+         */
+        receivedRevenue: hasPayments
+          ? this.metric(
+              receivedGrossBrl,
+              'BRL',
+              'AVAILABLE',
+              'Bruto efetivamente liquidado no gateway no mês corrente, por data de liquidação (`occurred_at`), já líquido de estornos e chargebacks (que entram como linha negativa). Não é receita contratada.',
+            )
+          : this.unavailable(
+              'BRL',
+              'Nenhuma liquidação registrada ainda — `payments` existe, mas está vazia (nenhum webhook de pagamento chegou).',
+            ),
+        /**
+         * Lucro do período = receita recebida − despesa do mês corrente.
+         *
+         * **Regime CAIXA** desde a US-8.5: a receita agora vem de `payments` (liquidação
+         * real), não mais do `contractedMrr` como proxy. Sem nenhuma liquidação registrada
+         * o regime cai de volta para `CONTRATADO_PROXY` e a métrica volta a ser `PROXY` —
+         * a tela jamais chama de caixa um número que não é.
+         *
+         * Usa o BRUTO recebido, não o líquido: a taxa do gateway já está somada em
+         * `monthExpense` (via `costByMonth`), então subtrair o líquido a contaria duas vezes.
+         */
+        profit: !hasExpenses
+          ? this.unavailable(
+              'BRL',
+              'Nenhuma despesa lançada ainda: `expenses` existe, mas exibir lucro sem custo seria inventar.',
+            )
+          : hasPayments
+            ? this.metric(
+                receivedGrossBrl - monthExpense,
+                'BRL',
+                'AVAILABLE',
+                'Lucro do mês corrente em regime de CAIXA = receita recebida (liquidação do gateway) − despesa do mês, incluindo a taxa do gateway como custo.',
+              )
+            : this.metric(
+                contractedMrrBrl - monthExpense,
+                'BRL',
+                'PROXY',
+                'Lucro do mês corrente = MRR contratado − despesa lançada no mês. Regime provisório: receita CONTRATADA (proxy), não recebida — nenhuma liquidação foi registrada em `payments` ainda.',
+              ),
         partnerDistribution: this.unavailable(
           'BRL',
-          'Distribuição por sócio depende de `partners` e do resultado apurado; prevista para a Sprint 8.',
+          'Distribuição por sócio passou a existir na US-8.7 e é exibida em Sócios & Distribuição, sob `control_center.partners.read` (somente ADMIN) — fora do alcance do papel financeiro por decisão de governança, não por falta de dado.',
         ),
         customerAcquisitionCost: this.unavailable(
           'BRL',
-          'CAC depende de investimento em mídia (`ad_spend`) e de atribuição de campanha, ambos previstos para a Sprint 8.',
+          'CAC passou a existir na US-8.6 e é publicado por canal em Marketing → Aquisição & Canais, com a janela de atribuição declarada. Não há CAC consolidado aqui porque o investimento é registrado por canal.',
         ),
         revenueAtRisk30d: this.metric(
           atRiskTotal,
@@ -1790,6 +2402,8 @@ export class ControlCenterService {
           'PROXY',
           `Preço contratado das assinaturas ativas que vencem em ${AT_RISK_WINDOW_DAYS} dias sem nenhuma mensagem recebida do titular há ${RISK_SILENCE_DAYS} dias.`,
         ),
+        entryCohorts: entryCohorts.cohorts,
+        suppressedCohorts: entryCohorts.suppressed,
         renewalCalendar: renewalRows.map((slice) => ({
           month: slice.month,
           plan: slice.plan,
@@ -1814,14 +2428,86 @@ export class ControlCenterService {
           };
         }),
         aiCostByModel,
+        costByCategory,
+        costByMonth,
+
+        // ---- Liquidação recebida (US-8.5) ----
+        receivedRevenueByMonth,
+        projection: buildFinancialProjection(costByMonth, receivedRevenueByMonth, currentMonth),
+        delinquencyRate:
+          attempts === 0
+            ? this.unavailable(
+                'PERCENT',
+                'Nenhuma cobrança tentada no mês corrente — sem denominador não há taxa de inadimplência (zero seria lido como "ninguém deixou de pagar").',
+              )
+            : this.metric(
+                (Number(monthPayments?.failures ?? 0) / attempts) * 100,
+                'PERCENT',
+                'AVAILABLE',
+                'Cobranças que falharam sobre o total de tentativas (falhas + liquidações) do mês corrente, por data do evento no gateway.',
+              ),
+        averageSettlementDays:
+          settlementLag?.days == null
+            ? this.unavailable(
+                'COUNT',
+                'Nenhuma liquidação vinculada a uma assinatura com período iniciado no horizonte — não há de onde medir o prazo.',
+              )
+            : this.metric(
+                this.number(settlementLag.days),
+                'COUNT',
+                'AVAILABLE',
+                `Média, em dias, entre o início do período contratado e a liquidação no gateway, sobre as cobranças liquidadas dos últimos ${RENEWAL_HORIZON_DAYS} dias.`,
+              ),
+        gatewayFee: hasPayments
+          ? this.metric(
+              gatewayFeeBrl,
+              'BRL',
+              'AVAILABLE',
+              'Taxa retida pelo gateway no mês corrente = bruto liquidado − líquido creditado. Aparece também em Custos, na categoria GATEWAY_PAGAMENTO.',
+            )
+          : this.unavailable('BRL', 'Nenhuma liquidação registrada ainda.'),
+        // Taxa exatamente zero quase sempre significa "o provedor não informou a taxa", e
+        // não "não houve taxa". Marcar indisponível é mais honesto que exibir 0%.
+        gatewayFeePercent:
+          !hasPayments || receivedGrossBrl === 0 || gatewayFeeBrl === 0
+            ? this.unavailable(
+                'PERCENT',
+                'O gateway não informou taxa nas liquidações do mês (bruto igual ao líquido) — exibir 0% seria afirmar que não há taxa.',
+              )
+            : this.metric(
+                (gatewayFeeBrl / receivedGrossBrl) * 100,
+                'PERCENT',
+                'AVAILABLE',
+                'Taxa efetiva do gateway no mês = taxa retida ÷ bruto liquidado.',
+              ),
+        paymentExceptions: paymentExceptionRows.map((item) => ({
+          paymentId: item.paymentId,
+          gateway: item.gateway,
+          status: item.status,
+          amountBrl: item.amountCents / 100,
+          occurredAt: (item.occurredAt ?? new Date()).toISOString(),
+          receivedAt: (item.receivedAt ?? new Date()).toISOString(),
+        })),
+
+        /** Regime declarado na tela. Ver o comentário de `profit`. */
+        profitBasis: hasPayments ? ProfitBasis.CAIXA : ProfitBasis.CONTRATADO_PROXY,
       };
     });
     return this.envelope(data, [
       'Nenhum identificador de titular é retornado; a lista de risco usa o id da assinatura.',
       `Calendário de renovação cobre ${RENEWAL_HORIZON_DAYS} dias de receita contratada a vencer — não é projeção de vendas novas.`,
       'MRR = preço do plano ÷ meses do plano; ARR = MRR × 12. Receita contratada, não caixa recebido.',
-      'Custo de IA usa preço por modelo versionado em código e câmbio fixo; a tabela editável chega na Sprint 8.',
-      'Lucro, receita recebida, custo de infra, CAC e distribuição por sócio estão marcados como indisponíveis com a dependência nomeada — nunca como zero.',
+      'Custo de IA usa o preço de `model_pricing` vigente na data de cada job (não o preço de hoje) e câmbio fixo.',
+      'Receita CONTRATADA e receita RECEBIDA são grandezas distintas e nunca devem ser somadas: a diferença entre elas é inadimplência, falha de cartão e prazo de liquidação.',
+      'Lucro sai em regime de CAIXA assim que existe liquidação em `payments`; sem nenhuma, volta a exibir o proxy de receita contratada com o regime declarado. O campo `profitBasis` diz qual dos dois está valendo.',
+      'A taxa do gateway vem de `payments` (bruto − líquido) e entra em Custos na categoria GATEWAY_PAGAMENTO; o lucro usa o bruto recebido para não descontar a taxa duas vezes.',
+      'Liquidação sem assinatura correspondente não é descartada: fica em `paymentExceptions` até ser conciliada à mão.',
+      'Estorno e chargeback são linha nova de sinal contrário em `payments` — a linha da cobrança original nunca é alterada, e por isso as somas já saem líquidas.',
+      'Custo por categoria/mês cobre 12 meses por competência (`occurred_on`), líquido de estornos — correção de lançamento é estorno + relançamento, nunca edição.',
+      'Projeção de resultado continua fora de escopo (Sprint 11): esta tela mostra resultado realizado, nunca projetado.',
+      'CAC e distribuição por sócio existem, mas fora desta tela: CAC é por canal em Marketing (US-8.6) e a distribuição fica em Sócios & Distribuição, sob capability restrita ao ADMIN (US-8.7).',
+      'Coorte mensal de entrada: mês da primeira entrada em trial; "retido" = assinatura hoje ACTIVE. Coortes com menos de 10 entradas são omitidas.',
+      'Coorte marcada como reconstruída vem do backfill de `subscriptions` (actor BACKFILL), não de evento observado — comparar com coorte observada exige essa ressalva.',
     ]);
   }
 
@@ -1989,6 +2675,366 @@ export class ControlCenterService {
       }
     }
     return cells;
+  }
+
+  /**
+   * CTE compartilhada pelo funil e pelas coortes (US-8.3): primeira entrada em trial e
+   * primeira conversão por titular, mais a marca de reconstrução. `min()` porque o marco pode
+   * repetir ao longo da vida do titular (renovação, nova assinatura) e a coorte é de **entrada**.
+   */
+  private readonly lifecycleCte = sql`
+    with entry as (
+      select user_id,
+             min(occurred_at) as started,
+             bool_or(actor = 'BACKFILL') as reconstructed
+      from ${userStatusTransitions}
+      where to_status = 'TRIAL_STARTED'
+      group by user_id
+    ),
+    conv as (
+      select user_id, min(occurred_at) as converted_at
+      from ${userStatusTransitions}
+      where to_status = 'CONVERTED'
+      group by user_id
+    )
+  `;
+
+  /**
+   * Funil trial→ativo (US-8.3/TASK-8.3.4). `percentile_cont` ignora nulo, então o tempo
+   * mediano é calculado só sobre quem converteu — a mediana de "dias até converter" não tem
+   * definição para quem não converteu, e preenchê-la com zero ou com a janela aberta mentiria.
+   *
+   * k-anonimato: abaixo de `MINIMUM_SEGMENT_SIZE` entradas a coorte inteira fica indisponível.
+   * Publicar 3 entradas e 1 conversão em uma base pequena é reidentificação direta.
+   */
+  private async trialConversion(tx: TenantTransaction): Promise<ControlCenterTrialConversion> {
+    const [row] = await tx.execute<{
+      trials: number;
+      converted: number;
+      median_days: string | null;
+      reconstructed: number;
+    }>(sql`
+      ${this.lifecycleCte}
+      select
+        count(*)::int as trials,
+        count(conv.user_id)::int as converted,
+        percentile_cont(0.5) within group (
+          order by extract(epoch from (conv.converted_at - entry.started)) / 86400.0
+        ) as median_days,
+        count(*) filter (where entry.reconstructed)::int as reconstructed
+      from entry
+      -- Conversão anterior à entrada não é conversão desta coorte (dado reconstruído com
+      -- datas fora de ordem existe): sem o predicado a mediana sairia negativa.
+      left join conv on conv.user_id = entry.user_id and conv.converted_at >= entry.started
+    `);
+
+    const trials = row?.trials ?? 0;
+    const converted = row?.converted ?? 0;
+    if (trials < MINIMUM_SEGMENT_SIZE) {
+      return {
+        status: 'UNAVAILABLE',
+        trialsStarted: null,
+        converted: null,
+        conversionRatePercent: null,
+        medianDaysToConversion: null,
+        reconstructedEntries: 0,
+        reason: `Menos de ${MINIMUM_SEGMENT_SIZE} entradas em trial registradas: publicar a taxa permitiria reidentificação.`,
+      };
+    }
+    return {
+      status: 'AVAILABLE',
+      trialsStarted: trials,
+      converted,
+      conversionRatePercent: Math.round((converted / trials) * 1000) / 10,
+      medianDaysToConversion:
+        row?.median_days === null || row?.median_days === undefined
+          ? null
+          : Math.round(this.number(row.median_days) * 10) / 10,
+      reconstructedEntries: row?.reconstructed ?? 0,
+      reason: null,
+    };
+  }
+
+  /**
+   * Retenção por coorte mensal de entrada (US-8.3/TASK-8.3.4). "Retido" = assinatura hoje em
+   * `ACTIVE` — a definição comercial de Eduardo, não uma leitura de engajamento.
+   *
+   * ponytail: o join com `subscriptions` assume uma assinatura por titular, que é o que o
+   * `SubscriptionService.startTrial` garante hoje (idempotente por titular). Se um dia existir
+   * mais de uma, trocar por `distinct on (user_id) ... order by created_at desc`.
+   */
+  private async entryCohorts(tx: TenantTransaction): Promise<{
+    cohorts: ControlCenterEntryCohort[];
+    suppressed: number;
+  }> {
+    const rows = await tx.execute<{
+      month: string;
+      cohort_size: number;
+      converted: number;
+      retained: number;
+      reconstructed: boolean;
+    }>(sql`
+      ${this.lifecycleCte}
+      select
+        to_char(entry.started at time zone ${TIMEZONE}, 'YYYY-MM') as month,
+        count(*)::int as cohort_size,
+        count(conv.user_id)::int as converted,
+        count(*) filter (where s.status = 'ACTIVE')::int as retained,
+        bool_or(entry.reconstructed) as reconstructed
+      from entry
+      left join conv on conv.user_id = entry.user_id and conv.converted_at >= entry.started
+      left join ${subscriptions} s on s.user_id = entry.user_id
+      group by 1
+      order by 1
+    `);
+
+    const all = [...rows];
+    const publishable = all.filter((row) => row.cohort_size >= MINIMUM_SEGMENT_SIZE);
+    return {
+      suppressed: all.length - publishable.length,
+      cohorts: publishable.map((row) => ({
+        month: row.month,
+        cohortSize: row.cohort_size,
+        converted: row.converted,
+        conversionRatePercent: Math.round((row.converted / row.cohort_size) * 1000) / 10,
+        retained: row.retained,
+        retentionPercent: Math.round((row.retained / row.cohort_size) * 1000) / 10,
+        reconstructed: row.reconstructed,
+      })),
+    };
+  }
+
+  /**
+   * CAC, ROAS e LTV/CAC por canal de origem (US-8.6 / TASK-8.6.2 e 8.6.3).
+   *
+   * ## Janela de atribuição, não mês-calendário
+   * Quem viu o anúncio em maio pode converter em junho. Dividir gasto de maio por conversão
+   * de maio é a armadilha (a) da US: aqui o denominador é a **coorte de origem** — o titular
+   * conta no canal de onde veio, e só se converteu em até `ATTRIBUTION_WINDOW_DAYS` dias do
+   * cadastro. A janela vai na resposta (`attributionWindowDays`), nunca fica implícita.
+   *
+   * ## Canal sem investimento não vale zero
+   * Orgânico e indicação não têm gasto. `investmentBrl: null` + `NO_DIRECT_INVESTMENT`, e
+   * as métricas derivadas ficam `UNAVAILABLE` — `CAC R$ 0,00` seria um número bonito e falso,
+   * e a divisão por zero produziria infinito.
+   *
+   * ## ROAS sobre receita RECEBIDA
+   * Numerador vem de `payments` (US-8.5), o que liquidou de fato, nunca de
+   * `subscriptions.price_cents`. ROAS sobre dinheiro que não entrou faz escalar anúncio ruim.
+   *
+   * ## k-anonimato
+   * Só entram os canais já publicáveis (`students >= MINIMUM_SEGMENT_SIZE`), e a agregação é
+   * por canal — não existe caminho daqui até o titular.
+   *
+   * ponytail: o escopo é acumulado (vida toda), não recorte de período. Numerador e
+   * denominador são a MESMA base, então a razão é honesta; filtro por período entra quando a
+   * tela ganhar seletor de datas.
+   */
+  private async channelEconomics(
+    tx: TenantTransaction,
+    publishable: AcquisitionChannel[],
+    matureCohorts: number,
+  ): Promise<{ economics: ChannelEconomics[]; mediaInvestmentBrl: number }> {
+    const originRows = await tx.execute<{
+      source: string | null;
+      medium: string | null;
+      students: number;
+      converted: number;
+      received_cents: string;
+    }>(sql`
+      with origin as (
+        select distinct on (a.user_id)
+               a.user_id, a.utm_source as source, a.utm_medium as medium,
+               a.created_at as signed_up_at
+        from ${anamnesisSessions} a
+        where a.user_id is not null and a.first_touch_at is not null
+        order by a.user_id, a.created_at
+      ),
+      conv as (
+        select user_id, min(occurred_at) as converted_at
+        from ${userStatusTransitions}
+        where to_status = 'CONVERTED'
+        group by user_id
+      )
+      select o.source, o.medium,
+             count(*)::int as students,
+             count(*) filter (
+               where c.converted_at is not null
+                 and c.converted_at <= o.signed_up_at + ${ATTRIBUTION_WINDOW_DAYS} * interval '1 day'
+             )::int as converted,
+             coalesce(sum(pay.cents), 0)::text as received_cents
+      from origin o
+      left join conv c on c.user_id = o.user_id
+      -- Estorno e chargeback já são linha negativa em \`payments\`: somar a coluna devolve o
+      -- líquido recebido sem nenhum CASE. Só \`FAILED\` fica de fora (nunca entrou dinheiro).
+      left join lateral (
+        select coalesce(sum(p.amount_cents), 0) as cents
+        from ${payments} p
+        where p.user_id = o.user_id and p.status <> 'FAILED'
+      ) pay on true
+      group by 1, 2
+    `);
+
+    const spendRows = await tx
+      .select({
+        channel: adSpend.channel,
+        cents: sql<string>`coalesce(sum(${adSpend.amountCents}), 0)::text`,
+      })
+      .from(adSpend)
+      .groupBy(adSpend.channel);
+    const spendByChannel = new Map(spendRows.map((row) => [row.channel, this.number(row.cents)]));
+    const mediaInvestmentBrl =
+      spendRows.reduce((sum, row) => sum + this.number(row.cents), 0) / 100;
+
+    // Meses distintos com liquidação — divisor do ARPU mensal usado no payback.
+    const [observed] = await tx
+      .select({
+        months: sql<number>`count(distinct to_char(${payments.occurredAt} at time zone ${TIMEZONE}, 'YYYY-MM'))::int`,
+      })
+      .from(payments)
+      .where(sql`${payments.status} <> 'FAILED'`);
+    const observedMonths = Math.max(1, observed?.months ?? 0);
+    const hasPayments = (observed?.months ?? 0) > 0;
+
+    // Mesma chave de `marketing()`: não mapeado nunca é fundido com outro canal.
+    const byKey = new Map<string, { students: number; converted: number; receivedCents: number }>();
+    for (const row of originRows) {
+      const canonical = canonicalChannel(row.source, row.medium);
+      const key = canonical.mapped ? canonical.channel : `${UNMAPPED_CHANNEL}:${canonical.raw}`;
+      const current = byKey.get(key) ?? { students: 0, converted: 0, receivedCents: 0 };
+      byKey.set(key, {
+        students: current.students + row.students,
+        converted: current.converted + row.converted,
+        receivedCents: current.receivedCents + this.number(row.received_cents),
+      });
+    }
+
+    const economics = publishable.map((channel): ChannelEconomics => {
+      const key = channel.mapped ? channel.channel : `${UNMAPPED_CHANNEL}:${channel.raw}`;
+      const totals = byKey.get(key) ?? { students: 0, converted: 0, receivedCents: 0 };
+      // Só canal canônico recebe investimento: `nao_mapeado` é erro de marcação, e lançar
+      // gasto contra ele esconderia justamente o erro que a US-8.2 quis deixar visível.
+      const investmentCents = channel.mapped ? (spendByChannel.get(channel.channel) ?? 0) : 0;
+      return {
+        channel: channel.channel,
+        mapped: channel.mapped,
+        students: channel.count,
+        ...this.economicMetrics({
+          label: 'canal',
+          converted: totals.converted,
+          receivedCents: totals.receivedCents,
+          investmentCents,
+          hasPayments,
+          matureCohorts,
+          observedMonths,
+        }),
+      };
+    });
+
+    return { economics, mediaInvestmentBrl };
+  }
+
+  /** Formula unica para canal e campanha; evita divergencia silenciosa entre paineis. */
+  private economicMetrics(input: {
+    label: string;
+    converted: number;
+    receivedCents: number;
+    investmentCents: number;
+    hasPayments: boolean;
+    matureCohorts: number;
+    observedMonths: number;
+  }): Omit<ChannelEconomics, 'channel' | 'mapped' | 'students'> {
+    const invested = input.investmentCents > 0;
+    const investmentBrl = invested ? input.investmentCents / 100 : null;
+    const receivedBrl = input.receivedCents / 100;
+    const noInvestment = `Sem investimento direto registrado em \`ad_spend\` para ${input.label} — não há numerador.`;
+    const cac =
+      !invested || investmentBrl === null
+        ? this.unavailable('BRL', noInvestment)
+        : input.converted === 0
+          ? this.unavailable(
+              'BRL',
+              `Investimento registrado, mas nenhum convertido em ${input.label} dentro da janela de ${ATTRIBUTION_WINDOW_DAYS} dias.`,
+            )
+          : this.metric(
+              investmentBrl / input.converted,
+              'BRL',
+              'AVAILABLE',
+              `Investimento em mídia ÷ convertidos de ${input.label}.`,
+            );
+    const receivedRevenue = input.hasPayments
+      ? this.metric(
+          receivedBrl,
+          'BRL',
+          'AVAILABLE',
+          `Receita efetivamente liquidada atribuída a ${input.label}, líquida de estornos e chargebacks.`,
+        )
+      : this.unavailable('BRL', 'Nenhuma liquidação registrada em `payments` ainda.');
+    const roas =
+      !invested || investmentBrl === null
+        ? this.unavailable('RATIO', noInvestment)
+        : !input.hasPayments
+          ? this.unavailable('RATIO', 'Sem liquidação registrada não existe retorno a dividir.')
+          : this.metric(
+              receivedBrl / investmentBrl,
+              'RATIO',
+              'AVAILABLE',
+              `Receita recebida atribuída a ${input.label} ÷ investimento em mídia.`,
+            );
+    const ltvStatus = input.matureCohorts >= 3 ? 'AVAILABLE' : 'PROXY';
+    const ltvBase = `LTV de ${input.label} sustentado por ${input.matureCohorts} coorte(s) com ao menos ${MATURE_COHORT_MONTHS} meses.`;
+    const ltv =
+      !input.hasPayments || input.converted === 0
+        ? this.unavailable(
+            'BRL',
+            `Sem convertidos com liquidação em ${input.label} não há base para LTV.`,
+          )
+        : this.metric(receivedBrl / input.converted, 'BRL', ltvStatus, ltvBase);
+    const ltvToCac =
+      ltv.value === null || cac.value === null || cac.value === 0
+        ? this.unavailable('RATIO', invested ? 'Falta LTV ou CAC para a razão.' : noInvestment)
+        : this.metric(
+            ltv.value / cac.value,
+            'RATIO',
+            ltvStatus,
+            `LTV ÷ CAC de ${input.label}, meta ≥ ${LTV_TO_CAC_TARGET}.`,
+          );
+    const monthlyArpu = ltv.value === null ? null : ltv.value / input.observedMonths;
+    const paybackMonths =
+      cac.value === null || monthlyArpu === null || monthlyArpu <= 0
+        ? this.unavailable(
+            'MONTHS',
+            invested
+              ? 'Sem CAC ou receita mensal por convertido não há prazo de retorno.'
+              : noInvestment,
+          )
+        : this.metric(
+            cac.value / monthlyArpu,
+            'MONTHS',
+            ltvStatus,
+            `CAC ÷ receita média mensal por convertido, meta ≤ ${PAYBACK_TARGET_MONTHS} meses.`,
+          );
+    let signal: ChannelSignal = 'UNKNOWN';
+    if (ltvToCac.value !== null && paybackMonths.value !== null) {
+      signal =
+        ltvToCac.value >= LTV_TO_CAC_TARGET && paybackMonths.value <= PAYBACK_TARGET_MONTHS
+          ? 'GREEN'
+          : ltvToCac.value >= 1
+            ? 'ATTENTION'
+            : 'CRITICAL';
+    }
+    return {
+      converted: input.converted,
+      investmentBrl,
+      investmentStatus: invested ? 'INVESTED' : 'NO_DIRECT_INVESTMENT',
+      cac,
+      receivedRevenue,
+      roas,
+      ltv,
+      ltvToCac,
+      paybackMonths,
+      signal,
+    };
   }
 
   private metric(

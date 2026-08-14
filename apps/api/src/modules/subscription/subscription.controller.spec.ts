@@ -75,3 +75,57 @@ describe('SubscriptionController — checkout (US-4.6)', () => {
     expect(svc.createCheckout).not.toHaveBeenCalled();
   });
 });
+
+describe('SubscriptionController — cancelar / pausar / retomar (US-4.5)', () => {
+  it.each([
+    ['cancel', 'CANCELED'],
+    ['pause', 'PAUSED'],
+    ['resume', 'ACTIVE'],
+  ] as const)('%s devolve o novo status da assinatura', async (action, status) => {
+    const { controller, svc } = make({ [action]: vi.fn(() => Promise.resolve({ status })) });
+    await expect(controller[action](VALID, {})).resolves.toEqual({ status });
+    expect(svc[action]).toHaveBeenCalled();
+  });
+
+  it.each(['cancel', 'pause', 'resume'] as const)(
+    '%s com token não-UUID → 404 sem tocar o serviço',
+    async (action) => {
+      const { controller, svc } = make({ [action]: vi.fn() });
+      await expect(controller[action]('nope', {})).rejects.toBeInstanceOf(NotFoundException);
+      expect(svc[action]).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['cancel', 'pause', 'resume'] as const)(
+    '%s sem assinatura → 404 uniforme (não vaza existência)',
+    async (action) => {
+      const { controller } = make({
+        [action]: vi.fn(() => Promise.resolve({ status: 'NO_SUBSCRIPTION' })),
+      });
+      await expect(controller[action](VALID, {})).rejects.toBeInstanceOf(NotFoundException);
+    },
+  );
+
+  it('motivo do cancelamento é aparado e limitado a 500 caracteres', async () => {
+    const cancel = vi.fn(() => Promise.resolve({ status: 'CANCELED' }));
+    const { controller } = make({ cancel });
+
+    await controller.cancel(VALID, { reason: `  ${'x'.repeat(600)}  ` });
+
+    expect(cancel).toHaveBeenCalledWith(VALID, 'x'.repeat(500));
+  });
+
+  it.each([
+    ['corpo ausente', null],
+    ['sem motivo', {}],
+    ['motivo em branco', { reason: '   ' }],
+    ['motivo de outro tipo', { reason: 42 }],
+  ])('cancelamento com %s não inventa motivo', async (_label, body) => {
+    const cancel = vi.fn(() => Promise.resolve({ status: 'CANCELED' }));
+    const { controller } = make({ cancel });
+
+    await controller.cancel(VALID, body);
+
+    expect(cancel).toHaveBeenCalledWith(VALID, undefined);
+  });
+});

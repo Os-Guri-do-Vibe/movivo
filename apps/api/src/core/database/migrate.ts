@@ -23,9 +23,16 @@ import postgres from 'postgres';
 import { loadEnv } from '../config/load-env';
 import {
   buildAgentConfigImmutabilitySql,
+  buildAiGuardrailRulesImmutabilitySql,
   buildAuditIntegritySql,
+  buildAdSpendImmutabilitySql,
+  buildExpensesImmutabilitySql,
+  buildFaqEntriesImmutabilitySql,
+  buildKnowledgeDocumentsSecuritySql,
+  buildPaymentsImmutabilitySql,
   buildProfessionalAccessSql,
   buildRlsPoliciesSql,
+  buildStatusTransitionsImmutabilitySql,
   RLS_TENANT_TABLES,
 } from './security-policies';
 
@@ -202,6 +209,32 @@ async function main(): Promise<void> {
     // Sprint 7 (US-7.6): agent_config append-only — trigger + REVOKE, mesma dupla barreira.
     await sql.unsafe(buildAgentConfigImmutabilitySql(appRole));
     console.log('[db:migrate] agent_config append-only reconciliado.');
+
+    // Sprint 9: FAQ global append-only — rollback/remoção lógica também são novas versões.
+    await sql.unsafe(buildFaqEntriesImmutabilitySql(appRole));
+    console.log('[db:migrate] faq_entries append-only reconciliado.');
+
+    await sql.unsafe(buildAiGuardrailRulesImmutabilitySql(appRole));
+    console.log('[db:migrate] ai_guardrail_rules append-only reconciliado.');
+
+    await sql.unsafe(buildKnowledgeDocumentsSecuritySql(appRole));
+    console.log('[db:migrate] documentos RAG e gate CREF reconciliados.');
+
+    // Sprint 8 (US-8.3): user_status_transitions append-only — mesmo molde.
+    await sql.unsafe(buildStatusTransitionsImmutabilitySql(appRole));
+    console.log('[db:migrate] user_status_transitions append-only reconciliado.');
+
+    // Sprint 8 (US-8.4): expenses append-only — correção é estorno, nunca edição.
+    await sql.unsafe(buildExpensesImmutabilitySql(appRole));
+    console.log('[db:migrate] expenses append-only reconciliado.');
+
+    // Sprint 8 (US-8.5): payments append-only — estorno é linha nova, nunca alteração.
+    await sql.unsafe(buildPaymentsImmutabilitySql(appRole));
+    console.log('[db:migrate] payments append-only reconciliado.');
+
+    // Sprint 8 (US-8.6): ad_spend append-only — correção é estorno + relançamento.
+    await sql.unsafe(buildAdSpendImmutabilitySql(appRole));
+    console.log('[db:migrate] ad_spend append-only reconciliado.');
 
     // Prova de que o modelo de permissões continua íntegro após a migração.
     const [check] = await sql<{ bypassrls: boolean; owns: number }[]>`
