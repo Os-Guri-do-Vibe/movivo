@@ -4,6 +4,7 @@ import {
   Activity,
   BookOpenText,
   Calculator,
+  ChevronDown,
   CircleGauge,
   ClipboardCheck,
   Coins,
@@ -269,6 +270,14 @@ function activeItemFor(pathname: string): DashboardNavigationItem | undefined {
     .find((item) => isCurrent(pathname, item.href));
 }
 
+/** Rótulo do pilar (grupo com nome) que contém a rota atual, para abrir a categoria certa. */
+function activeGroupFor(pathname: string): string | null {
+  const active = activeItemFor(pathname);
+  if (!active) return null;
+  const pillar = PILLARS.find((p) => p.items.some((item) => item.label === active.label));
+  return pillar?.label ?? null;
+}
+
 function DashboardNavigation({
   capabilities,
   collapsed,
@@ -279,29 +288,58 @@ function DashboardNavigation({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
+  const activeGroup = activeGroupFor(pathname);
+  // Só a categoria da rota atual começa aberta — evita que a barra precise de
+  // scroll com os 5 pilares + Visão geral abertos ao mesmo tempo.
+  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(
+    () => new Set(activeGroup ? [activeGroup] : []),
+  );
+  useEffect(() => {
+    if (activeGroup) setOpenGroups((prev) => new Set(prev).add(activeGroup));
+  }, [activeGroup]);
+  const toggleGroup = useCallback((label: string) => {
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  }, []);
+
   return (
     <div className="grid gap-1">
-      {navigationGroupsFor(capabilities).map((group, index) => (
-        <div key={group.label ?? 'principal'}>
-          {group.label ? (
-            collapsed ? (
-              <hr
-                aria-hidden="true"
-                className="mx-2 my-3 border-t border-[var(--petroleo-borda)]/40"
-              />
-            ) : (
-              <p
-                className={cn(
-                  'mb-2 px-3 text-[0.6875rem] font-semibold tracking-[0.14em] uppercase text-[var(--nevoa-suave)]',
-                  index > 0 && 'mt-6',
-                )}
-              >
-                {group.label}
-              </p>
-            )
-          ) : null}
-          <ul className="grid gap-1.5">
-            {group.items.map(({ href, label, icon: Icon, soon }) => {
+      {navigationGroupsFor(capabilities).map((group, index) => {
+        const groupLabel = group.label;
+        const isOpen = !groupLabel || collapsed || openGroups.has(groupLabel);
+        return (
+          <div key={groupLabel ?? 'principal'}>
+            {groupLabel ? (
+              collapsed ? (
+                <hr
+                  aria-hidden="true"
+                  className="mx-2 my-3 border-t border-[var(--petroleo-borda)]/40"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(groupLabel)}
+                  aria-expanded={isOpen}
+                  className={cn(
+                    'flex w-full items-center justify-between rounded-md px-3 py-1.5 text-[0.6875rem] font-semibold tracking-[0.14em] uppercase text-[var(--nevoa-suave)] transition-colors hover:text-nevoa focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none',
+                    index > 0 && 'mt-4',
+                  )}
+                >
+                  {groupLabel}
+                  <ChevronDown
+                    aria-hidden="true"
+                    className={cn('size-3.5 shrink-0 transition-transform', isOpen && 'rotate-180')}
+                  />
+                </button>
+              )
+            ) : null}
+            {isOpen ? (
+              <ul className={cn('grid gap-1.5', groupLabel && !collapsed && 'mt-1')}>
+                {group.items.map(({ href, label, icon: Icon, soon }) => {
               if (!href) {
                 // Roadmap: item presente, sem link e sem controle desabilitado.
                 return (
@@ -359,9 +397,11 @@ function DashboardNavigation({
                 </li>
               );
             })}
-          </ul>
-        </div>
-      ))}
+              </ul>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }

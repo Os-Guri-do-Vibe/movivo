@@ -31,12 +31,16 @@ describe('DashboardShell', () => {
     ]);
   });
 
-  it('não renderiza links proibidos para financeiro', () => {
+  it('não renderiza links proibidos para financeiro', async () => {
     render(
       <DashboardShell role="FINANCE" capabilities={['control_center.finance.read']}>
         <p>Conteúdo</p>
       </DashboardShell>,
     );
+    // Categoria começa recolhida (a rota atual do mock é de Marketing, não Financeiro).
+    for (const toggle of screen.getAllByRole('button', { name: 'Financeiro' })) {
+      await userEvent.click(toggle);
+    }
     expect(screen.getAllByRole('link', { name: 'Receita & Assinaturas' })).not.toHaveLength(0);
     expect(screen.queryByRole('link', { name: 'Base de alunos' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Aquisição & Canais' })).not.toBeInTheDocument();
