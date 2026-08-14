@@ -406,9 +406,6 @@ function DashboardNavigation({
   );
 }
 
-const CREF_NOTICE =
-  'Protocolos supervisionados por profissional de Educação Física registrado no CREF. A IA é ferramenta de apoio — a decisão técnica é do profissional.';
-
 const ACCESS_NOTICE =
   'Cada setor mostra somente os dados necessários para este papel. Ações e leituras sensíveis são auditadas pelo servidor.';
 
@@ -488,11 +485,6 @@ function SidebarBody({
             {collapsed ? null : 'Recolher'}
           </button>
         ) : null}
-        {collapsed ? null : (
-          <p className="mt-3 px-3 text-xs leading-relaxed text-[var(--nevoa-suave)]">
-            {CREF_NOTICE}
-          </p>
-        )}
       </div>
     </>
   );
