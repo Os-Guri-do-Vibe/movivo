@@ -29,6 +29,8 @@ import { ProtocolModule } from '../protocol/protocol.module';
 import { AiConfigController } from './ai-config.controller';
 import { AiConfigService } from './ai-config.service';
 import { AuditService } from './audit.service';
+import { AuditQueryController } from './audit-query.controller';
+import { AuditQueryService } from './audit-query.service';
 import { ControlCenterController } from './control-center.controller';
 import { ControlCenterService } from './control-center.service';
 import { DashboardController } from './dashboard.controller';
@@ -55,6 +57,7 @@ import { PartnersService } from './partners.service';
     PartnersController,
     FaqAdminController,
     L1GuardrailAdminController,
+    AuditQueryController,
   ],
   providers: [
     AuditService,
@@ -66,6 +69,7 @@ import { PartnersService } from './partners.service';
     PartnersService,
     FaqAdminService,
     L1GuardrailAdminService,
+    AuditQueryService,
   ],
 })
 export class AdminModule {}

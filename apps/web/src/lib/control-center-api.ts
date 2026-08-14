@@ -1,11 +1,14 @@
 import {
   agentConfigHistoryResponseSchema,
+  auditSearchResponseSchema,
   agentPersonaResponseSchema,
   configSimulationResponseSchema,
   faqEntriesResponseSchema,
   inviolableRulesResponseSchema,
   l1GuardrailsResponseSchema,
   type AgentConfigHistoryResponse,
+  type AuditSearchQuery,
+  type AuditSearchResponse,
   type AgentPersonaResponse,
   type ConfigSimulationResponse,
   type FaqEntriesResponse,
@@ -128,6 +131,20 @@ export function getComplianceSummary(
   signal?: AbortSignal,
 ): Promise<ControlCenterComplianceResponse> {
   return request('compliance', controlCenterComplianceResponseSchema, signal);
+}
+
+export function getAuditEvents(
+  query: AuditSearchQuery,
+  signal?: AbortSignal,
+): Promise<AuditSearchResponse> {
+  const params = new URLSearchParams();
+  if (query.actorId) params.set('actorId', query.actorId);
+  if (query.action) params.set('action', query.action);
+  if (query.from) params.set('from', query.from);
+  if (query.to) params.set('to', query.to);
+  params.set('page', String(query.page));
+  params.set('pageSize', String(query.pageSize));
+  return request(`audit?${params.toString()}`, auditSearchResponseSchema, signal);
 }
 
 /* --------------------------------- Pilar IA (US-7.7) --------------------------------- */

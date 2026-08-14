@@ -223,13 +223,10 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         capabilities: ['control_center.compliance.read', 'control_center.audit.read'],
       },
       {
-        // A trilha de auditoria já é exibida dentro de Compliance & Privacidade; a tela
-        // dedicada (busca por ator/período) foi movida para a Sprint 9 na US-8.8, junto
-        // com o restante do lote de Sistema.
+        href: '/dashboard/sistema/auditoria',
         label: 'Auditoria',
         icon: ScrollText,
         capabilities: ['control_center.audit.read'],
-        soon: 'Sprint 9',
       },
       {
         href: '/dashboard/administracao',
