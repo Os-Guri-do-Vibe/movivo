@@ -859,11 +859,27 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
       RETURN affected;
     END $$;
 
+    CREATE OR REPLACE FUNCTION public.purge_expired_knowledge_blobs()
+    RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    DECLARE affected integer;
+    BEGIN
+      IF nullif(current_setting('app.current_role', true), '') NOT IN ('ADMIN', 'PROFESSIONAL', 'ENGINEERING', 'SYSTEM') THEN
+        RAISE EXCEPTION 'control center role required' USING ERRCODE = '42501';
+      END IF;
+      DELETE FROM public.knowledge_document_blobs WHERE retained_until <= now();
+      GET DIAGNOSTICS affected = ROW_COUNT;
+      RETURN affected;
+    END $$;
+
     REVOKE ALL ON FUNCTION public.publish_knowledge_document(uuid, jsonb) FROM PUBLIC;
+    REVOKE ALL ON FUNCTION public.purge_expired_knowledge_blobs() FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.publish_knowledge_document(uuid, jsonb) TO ${appRole};
+    GRANT EXECUTE ON FUNCTION public.purge_expired_knowledge_blobs() TO ${appRole};
     REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_documents FROM ${appRole};
     REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_document_reviews FROM ${appRole};
     GRANT SELECT, INSERT ON public.knowledge_documents TO ${appRole};
     GRANT SELECT, INSERT ON public.knowledge_document_reviews TO ${appRole};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_document_blobs FROM ${appRole};
+    GRANT SELECT, INSERT ON public.knowledge_document_blobs TO ${appRole};
   `;
 }

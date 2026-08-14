@@ -26,7 +26,10 @@ function nextMonths(currentMonth: string): [string, string, string] {
   }) as [string, string, string];
 }
 
-/** Modelo explicavel: media de ate tres meses fechados, sem misturar realizado e projetado. */
+/**
+ * ponytail: media de tres meses e o modelo explicavel que o volume atual sustenta; quando
+ * houver ao menos 12 meses, evoluir por decisao do CFO para sazonalidade/tendencia versionada.
+ */
 export function buildFinancialProjection(
   costByMonth: readonly CostMonth[],
   revenueByMonth: readonly RevenueMonth[],

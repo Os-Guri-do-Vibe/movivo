@@ -21,11 +21,15 @@ import { Inject } from '@nestjs/common';
 
 const QUARANTINE_DAYS = 30;
 const APPROVED_ORIGINAL_DAYS = 365;
+// ponytail: blob no Postgres e suficiente com teto de 512 KiB; acima desse volume, migrar
+// para object storage privado com URL assinada, mantendo metadados/revisoes no banco.
 const ALLOWED_EXTENSIONS = new Set(['.txt', '.md']);
 const MARKUP_OR_SCRIPT = /<\/?(?:script|iframe|object|embed|html|body)\b|javascript:/i;
 const PERSONAL_DATA = /\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b|\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b|\b(?:\+?55\s*)?\(?\d{2}\)?\s*9?\d{4}[-\s]?\d{4}\b/;
 
 export function scanKnowledgeContent(content: string): void {
+  // ponytail: allowlist apenas de texto torna a varredura deterministica; se PDF/DOCX entrar
+  // no escopo, extrair em sandbox e adicionar antimalware antes de aceitar o arquivo.
   const hasForbiddenControl = [...content].some((character) => {
     const code = character.charCodeAt(0);
     return code <= 31 && code !== 9 && code !== 10 && code !== 13;
@@ -71,7 +75,9 @@ export class KnowledgeAdminService {
 
   async list(actor: AuthenticatedUser): Promise<KnowledgeDocumentsResponse> {
     const rows = await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
-      await tx.execute(sql`DELETE FROM knowledge_document_blobs WHERE retained_until <= now()`);
+      // ponytail: expurgo oportunista evita scheduler para o volume inicial; ao crescer,
+      // chamar a mesma funcao estreita por job diario monitorado.
+      await tx.execute(sql`SELECT public.purge_expired_knowledge_blobs()`);
       const result = (await tx.execute(sql`
         SELECT document.id, document.title, document.topic, document.source_url,
           document.original_filename, document.mime_type, document.size_bytes, document.sha256,
