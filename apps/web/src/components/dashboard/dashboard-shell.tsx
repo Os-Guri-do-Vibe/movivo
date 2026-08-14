@@ -442,7 +442,7 @@ function SidebarBody({
       <div
         className={cn(
           'flex h-16 shrink-0 items-center justify-center gap-3 border-b border-[var(--petroleo-borda)]/40 p-4',
-          collapsed && 'px-0',
+          collapsed ? 'px-0' : 'h-28',
         )}
       >
         {collapsed ? (
@@ -451,10 +451,10 @@ function SidebarBody({
           <Image
             src="/brand/movivo-logo-horizontal.svg"
             alt="MOVIVO"
-            width={176}
-            height={46}
+            width={352}
+            height={92}
             unoptimized
-            className="h-auto w-36"
+            className="h-auto w-72"
           />
         )}
       </div>
@@ -642,7 +642,7 @@ export function DashboardShell({
       <aside
         className={cn(
           'hidden border-r border-[var(--petroleo-borda)]/40 bg-petroleo text-nevoa transition-[width] duration-200 md:fixed md:inset-y-0 md:left-0 md:z-30 md:flex md:h-dvh md:flex-col',
-          collapsed ? 'md:w-18' : 'md:w-68',
+          collapsed ? 'md:w-18' : 'md:w-80',
         )}
       >
         <SidebarBody capabilities={capabilities} collapsed={collapsed} onToggleCollapse={toggle} />
@@ -651,7 +651,7 @@ export function DashboardShell({
       <div
         className={cn(
           'flex min-w-0 flex-col transition-[margin] duration-200',
-          collapsed ? 'md:ml-18' : 'md:ml-68',
+          collapsed ? 'md:ml-18' : 'md:ml-80',
         )}
       >
         <header className="sticky top-14 z-20 flex h-16 items-center justify-between gap-3 border-b border-border bg-background/80 px-4 backdrop-blur md:top-0 lg:px-8">
