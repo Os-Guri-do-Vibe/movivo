@@ -141,10 +141,15 @@ function studentsFixture(churnScores: number[]): ControlCenterStudentsResponse {
   };
 }
 
-function financeFixture(revenueAtRisk30d: number, last90Days = [0]): ControlCenterFinanceResponse {
+function financeFixture(
+  revenueAtRisk30d: number,
+  last90Days = [0],
+  profitBrl: number | null = 120,
+): ControlCenterFinanceResponse {
   return {
     data: {
       contractedMrr: metric(500, { unit: 'BRL' }),
+      profit: metric(profitBrl, { unit: 'BRL' }),
       revenueAtRisk30d: metric(revenueAtRisk30d, { unit: 'BRL' }),
       churnByReason: last90Days.map((n, i) => ({ reason: `motivo_${i}`, total: n, last90Days: n })),
     } as unknown as ControlCenterFinanceResponse['data'],
@@ -155,6 +160,7 @@ function financeFixture(revenueAtRisk30d: number, last90Days = [0]): ControlCent
 function marketingFixture(
   formStarted: number,
   formSubmitted: number,
+  channelCacBrl: number | null = 40,
 ): ControlCenterMarketingResponse {
   return {
     data: {
@@ -162,6 +168,10 @@ function marketingFixture(
         formStarted: metric(formStarted),
         formSubmitted: metric(formSubmitted),
       },
+      channelEconomics: [
+        { channel: 'organico', students: 12, cac: metric(null, { unit: 'BRL' }) },
+        { channel: 'meta_ads', students: 30, cac: metric(channelCacBrl, { unit: 'BRL' }) },
+      ],
     } as unknown as ControlCenterMarketingResponse['data'],
     meta: META,
   };
@@ -264,6 +274,32 @@ describe('ControlCenterService overview (US-7.8)', () => {
     const response = await service.overview({ ...ACTOR, role: 'MARKETING' });
 
     expect(response.data.pillars[0]).toMatchObject({ pillar: 'MARKETING', state: 'ATTENTION' });
+  });
+
+  it('Financeiro fica ATTENTION com lucro negativo, mesmo sem receita em risco (US-8.8)', async () => {
+    const { service } = serviceWithSystemResults();
+    stubPillar(service, 'finance', financeFixture(0, [0], -10));
+
+    const response = await service.overview({ ...ACTOR, role: 'FINANCE' });
+
+    expect(response.data.pillars[0]).toMatchObject({ pillar: 'FINANCE', state: 'ATTENTION' });
+    expect(response.data.pillars[0]?.details.map((d) => d.label)).toContain('Lucro do período');
+    expect(response.data.pillars[0]?.reason).toMatch(/Lucro do período negativo/);
+  });
+
+  it('Marketing ancora no CAC do canal principal e alerta acima do teto (US-8.8)', async () => {
+    const { service } = serviceWithSystemResults();
+    stubPillar(service, 'marketing', marketingFixture(100, 90, 200));
+
+    const response = await service.overview({ ...ACTOR, role: 'MARKETING' });
+
+    const marketing = response.data.pillars[0];
+    // O canal principal é o de mais cadastros (meta_ads), não o primeiro da lista.
+    expect(marketing?.details.at(-1)).toMatchObject({
+      label: 'CAC do canal principal (meta_ads)',
+      metric: { value: 200 },
+    });
+    expect(marketing).toMatchObject({ state: 'ATTENTION' });
   });
 
   it('IA fica ATTENTION quando a taxa de resposta bloqueada passa do limiar', async () => {
@@ -964,12 +1000,14 @@ describe('ControlCenterService projections', () => {
 
     const response = await service.system();
 
-    expect(response.data.pendingCapabilities).toHaveLength(3);
+    // US-8.8: custo de infra/WhatsApp saiu da lista (virou número na US-8.4) e o
+    // histórico de incidentes foi reapontado para a Sprint 9.
+    expect(response.data.pendingCapabilities).toHaveLength(2);
     expect(response.data.pendingCapabilities.map((item) => item.plannedFor)).toEqual([
-      'Sprint 8',
-      'Sprint 8',
+      'Sprint 9',
       'Fase 6 — Infraestrutura',
     ]);
+    expect(JSON.stringify(response.data.pendingCapabilities)).not.toMatch(/Sprint 8/);
     // TASK-7.5.1: nenhum indicador desta tela é atribuído a OpenTelemetry.
     expect(response.meta.dataQuality.join(' ')).not.toMatch(/latência de IA é um proxy/i);
   });

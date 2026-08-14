@@ -26,7 +26,6 @@ describe('DashboardShell', () => {
     const items = navigationFor(['control_center.marketing.read']);
     expect(items.map((item) => item.label)).toEqual([
       'Aquisição & Canais',
-      'Funil de conversão',
       'Perfil de clientes',
       'Campanhas & Experimentos',
     ]);
@@ -40,7 +39,7 @@ describe('DashboardShell', () => {
     );
     expect(screen.getAllByRole('link', { name: 'Receita & Assinaturas' })).not.toHaveLength(0);
     expect(screen.queryByRole('link', { name: 'Base de alunos' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Funil de conversão' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Aquisição & Canais' })).not.toBeInTheDocument();
     // US-8.7: cap table é exclusivo do ADMIN — FINANCE não alcança nem o item.
     expect(
       screen.queryByRole('link', { name: 'Sócios & Distribuição' }),
@@ -49,14 +48,14 @@ describe('DashboardShell', () => {
     // em elemento nenhum — nem link, nem botão inerte, nem texto cinza.
     for (const nav of screen.getAllByRole('navigation')) {
       expect(within(nav).queryByText('Base de alunos')).not.toBeInTheDocument();
-      expect(within(nav).queryByText('Funil de conversão')).not.toBeInTheDocument();
+      expect(within(nav).queryByText('Aquisição & Canais')).not.toBeInTheDocument();
       expect(within(nav).queryByText('Sócios & Distribuição')).not.toBeInTheDocument();
       expect(nav.querySelectorAll('[aria-disabled="true"], :disabled')).toHaveLength(0);
     }
   });
 
   it('admin recebe todos os setores quando possui todas as capabilities necessárias', () => {
-    expect(navigationFor(ADMIN_CAPABILITIES)).toHaveLength(21);
+    expect(navigationFor(ADMIN_CAPABILITIES)).toHaveLength(20);
   });
 
   it('esconde Compliance & Privacidade quando falta uma das capabilities exigidas (AND, como no backend)', () => {
@@ -82,7 +81,6 @@ describe('DashboardShell', () => {
     expect(marketing[0]?.label).toBe('Marketing');
     expect(marketing[0]?.items.map((item) => item.label)).toEqual([
       'Aquisição & Canais',
-      'Funil de conversão',
       'Perfil de clientes',
       'Campanhas & Experimentos',
     ]);
@@ -94,10 +92,10 @@ describe('DashboardShell', () => {
         <p>Conteúdo</p>
       </DashboardShell>,
     );
-    for (const link of screen.getAllByRole('link', { name: 'Funil de conversão' })) {
+    for (const link of screen.getAllByRole('link', { name: 'Aquisição & Canais' })) {
       expect(link).toHaveAttribute('aria-current', 'page');
     }
-    expect(screen.getByRole('banner')).toHaveTextContent('Funil de conversão');
+    expect(screen.getByRole('banner')).toHaveTextContent('Aquisição & Canais');
   });
 
   it('abre o menu mobile, fecha com Esc e fecha ao clicar no overlay', async () => {
@@ -110,7 +108,7 @@ describe('DashboardShell', () => {
 
     await userEvent.click(open);
     const drawer = screen.getByRole('dialog', { name: 'Setores do Control Center' });
-    expect(within(drawer).getByRole('link', { name: 'Funil de conversão' })).toBeVisible();
+    expect(within(drawer).getByRole('link', { name: 'Aquisição & Canais' })).toBeVisible();
 
     await userEvent.keyboard('{Escape}');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

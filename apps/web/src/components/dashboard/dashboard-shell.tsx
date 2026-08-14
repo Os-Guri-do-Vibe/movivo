@@ -2,7 +2,6 @@
 
 import {
   Activity,
-  BarChart3,
   BookOpenText,
   Calculator,
   CircleGauge,
@@ -121,7 +120,9 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         label: 'Resultado & Projeção',
         icon: Calculator,
         capabilities: ['control_center.finance.read'],
-        soon: 'Sprint 8',
+        // US-8.8: o resultado realizado (lucro do período) virou número na US-8.4/8.5 e
+        // já sai em Receita & Assinaturas; o que falta aqui é só a projeção com cenários.
+        soon: 'Sprint 11 · projeção com cenários',
       },
       {
         // Cap table e distribuição não são do setor financeiro: exigem
@@ -137,15 +138,12 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
     label: 'Marketing',
     items: [
       {
+        // US-8.8: aquisição por canal, CAC, ROAS e LTV/CAC viraram número na US-8.6 e
+        // saem na mesma tela do funil de conversão — os dois itens viraram um só, com
+        // link, no lugar de um item de roadmap ao lado de outro já entregue.
+        href: '/dashboard/analytics',
         label: 'Aquisição & Canais',
         icon: Megaphone,
-        capabilities: ['control_center.marketing.read'],
-        soon: 'Sprint 8',
-      },
-      {
-        href: '/dashboard/analytics',
-        label: 'Funil de conversão',
-        icon: BarChart3,
         capabilities: ['control_center.marketing.read'],
       },
       {
@@ -158,7 +156,9 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         label: 'Campanhas & Experimentos',
         icon: Sparkles,
         capabilities: ['control_center.marketing.read'],
-        soon: 'Sprint 8',
+        // US-8.8: a Sprint 8 entregou investimento por canal (`ad_spend`), não gestão de
+        // campanha nem experimentação — que continuam sem sprint atribuída.
+        soon: 'sprint a definir',
       },
     ],
   },
@@ -190,7 +190,9 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         label: 'FAQ',
         icon: MessageCircleQuestion,
         capabilities: ['control_center.ai.config.read'],
-        soon: 'Sprint 8',
+        // Reapontado na US-8.8: publicação de texto que vai ao aluno passa a valer junto
+        // com o simulador (Sprint 9), que é o que valida a configuração antes de publicar.
+        soon: 'Sprint 9',
       },
     ],
   },
@@ -219,11 +221,12 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
       },
       {
         // A trilha de auditoria já é exibida dentro de Compliance & Privacidade; a tela
-        // dedicada (busca por ator/período) chega na Sprint 8.
+        // dedicada (busca por ator/período) foi movida para a Sprint 9 na US-8.8, junto
+        // com o restante do lote de Sistema.
         label: 'Auditoria',
         icon: ScrollText,
         capabilities: ['control_center.audit.read'],
-        soon: 'Sprint 8',
+        soon: 'Sprint 9',
       },
       {
         href: '/dashboard/administracao',

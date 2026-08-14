@@ -154,15 +154,26 @@ const OVERVIEW_ATTENTION_THRESHOLDS = {
   marketingMinCompletionPercent: 40,
   /** Taxa de resposta bloqueada pela IA acima disto indica prompt/modelo falhando. */
   aiMaxBlockedPercent: 5,
+  /**
+   * US-8.8 — limiares das linhas novas. **Default a ser confirmado pelo fundador**,
+   * mesmo tratamento dos limiares acima (a tela é dele):
+   *  - lucro do período negativo é atenção. Zero não é: mês sem despesa lançada cai em
+   *    `UNAVAILABLE` antes de chegar aqui.
+   *  - CAC do canal principal acima disto quebra a meta LTV/CAC ≥ 3 de Eduardo para o
+   *    plano mensal de R$ 39 (39 × 3 = 117). Vira atenção.
+   */
+  financeMinProfitBrl: 0,
+  marketingMaxChannelCacBrl: 117,
 } as const;
 
 /**
  * Rótulo obrigatório da adesão (US-7.4, TASK-7.4.3): o que existe hoje é o aluno
  * **declarando** no check-in, não o treino concluído verificado — que depende de
- * `workout_completions` (Sprint 8) e continua marcado como indisponível, nunca zero.
+ * `workout_completions` — que passou a existir na US-8.1 e sai na North Star, em campo
+ * próprio. O rótulo continua porque as duas grandezas seguem diferentes (US-8.8).
  */
 const DECLARED_ADHERENCE_NOTICE =
-  'Adesão declarada via check-in: mede resposta ao check-in, não execução. Treino concluído verificado depende de workout_completions (Sprint 8).';
+  'Adesão declarada via check-in: mede resposta ao check-in, não execução. Treino concluído verificado é medido à parte, na North Star (`workout_completions`).';
 
 /** Forma persistida das respostas de check-in (`checkins.responses_cipher`). */
 const checkinDeclaredSchema = z.object({
@@ -316,7 +327,13 @@ export class ControlCenterService {
     const finance = await this.finance();
     const atRisk = finance.data.revenueAtRisk30d.value ?? 0;
     const churn90 = finance.data.churnByReason.reduce((sum, row) => sum + row.last90Days, 0);
-    const attention = atRisk > OVERVIEW_ATTENTION_THRESHOLDS.financeAtRiskBrl;
+    // US-8.8: lucro do período entra na linha-resumo. Lucro indisponível (sem despesa
+    // lançada) não é atenção — é ausência de dado, e a métrica já diz isso na tela.
+    const profit = finance.data.profit;
+    const profitAttention =
+      profit.value !== null && profit.value < OVERVIEW_ATTENTION_THRESHOLDS.financeMinProfitBrl;
+    const attention =
+      atRisk > OVERVIEW_ATTENTION_THRESHOLDS.financeAtRiskBrl || profitAttention;
 
     return {
       pillar: 'FINANCE',
@@ -326,6 +343,7 @@ export class ControlCenterService {
       headline: { label: 'MRR contratado', metric: finance.data.contractedMrr },
       details: [
         { label: 'Receita em risco (30 dias)', metric: finance.data.revenueAtRisk30d },
+        { label: 'Lucro do período', metric: profit },
         {
           label: 'Cancelamentos (90 dias)',
           metric: this.metric(
@@ -336,9 +354,11 @@ export class ControlCenterService {
           ),
         },
       ],
-      reason: attention
-        ? `Receita em risco nos próximos 30 dias acima de R$ ${OVERVIEW_ATTENTION_THRESHOLDS.financeAtRiskBrl}.`
-        : null,
+      reason: profitAttention
+        ? 'Lucro do período negativo: a despesa lançada superou a receita.'
+        : attention
+          ? `Receita em risco nos próximos 30 dias acima de R$ ${OVERVIEW_ATTENTION_THRESHOLDS.financeAtRiskBrl}.`
+          : null,
     };
   }
 
@@ -347,9 +367,21 @@ export class ControlCenterService {
     const started = marketing.data.funnel.formStarted.value ?? 0;
     const submitted = marketing.data.funnel.formSubmitted.value ?? 0;
     const completionRate = started > 0 ? (submitted / started) * 100 : null;
+    // US-8.8: "canal principal" = o canal publicável com mais cadastros; se ele não tem
+    // investimento em mídia, o CAC dele já vem UNAVAILABLE com o motivo (US-8.6) e a linha
+    // exibe isso em vez de escolher outro canal só para ter número.
+    const mainChannel = marketing.data.channelEconomics.reduce<ChannelEconomics | null>(
+      (best, row) => (best === null || row.students > best.students ? row : best),
+      null,
+    );
+    const cacAttention =
+      mainChannel !== null &&
+      mainChannel.cac.value !== null &&
+      mainChannel.cac.value > OVERVIEW_ATTENTION_THRESHOLDS.marketingMaxChannelCacBrl;
     const attention =
-      completionRate !== null &&
-      completionRate < OVERVIEW_ATTENTION_THRESHOLDS.marketingMinCompletionPercent;
+      cacAttention ||
+      (completionRate !== null &&
+        completionRate < OVERVIEW_ATTENTION_THRESHOLDS.marketingMinCompletionPercent);
 
     return {
       pillar: 'MARKETING',
@@ -373,10 +405,25 @@ export class ControlCenterService {
                   'Formulários enviados sobre formulários iniciados.',
                 ),
         },
+        {
+          label:
+            mainChannel === null
+              ? 'CAC do canal principal'
+              : `CAC do canal principal (${mainChannel.channel})`,
+          metric:
+            mainChannel === null
+              ? this.unavailable(
+                  'BRL',
+                  'Nenhum canal de origem atingiu o mínimo de cadastros para ser publicado.',
+                )
+              : mainChannel.cac,
+        },
       ],
-      reason: attention
-        ? `Taxa de conclusão da anamnese abaixo de ${OVERVIEW_ATTENTION_THRESHOLDS.marketingMinCompletionPercent}%.`
-        : null,
+      reason: cacAttention
+        ? `CAC do canal principal acima de R$ ${OVERVIEW_ATTENTION_THRESHOLDS.marketingMaxChannelCacBrl}, o teto que a meta LTV/CAC ≥ ${LTV_TO_CAC_TARGET} admite.`
+        : attention
+          ? `Taxa de conclusão da anamnese abaixo de ${OVERVIEW_ATTENTION_THRESHOLDS.marketingMinCompletionPercent}%.`
+          : null,
     };
   }
 
@@ -765,7 +812,7 @@ export class ControlCenterService {
         checkpoint: null,
         count: null,
         reason:
-          'As etapas 2 e 3 só gravam o bloco quando concluídas (e o bloco de saúde é cifrado), então o campo exato de parada exige telemetria de formulário — dependência da Sprint 8.',
+          'As etapas 2 e 3 só gravam o bloco quando concluídas (e o bloco de saúde é cifrado), então o campo exato de parada exige telemetria de formulário por campo — que não entrou no escopo da Sprint 8 e ainda não tem sprint definida.',
       };
     }
     const [row] = await tx
@@ -1700,19 +1747,15 @@ export class ControlCenterService {
           }),
         ],
         pendingCapabilities: [
-          {
-            title: 'Custo de infraestrutura e de WhatsApp',
-            reason:
-              'Nenhuma fatura de servidor ou de mensagem é ingerida hoje; qualquer número seria inventado.',
-            dependency: 'Tabela de despesas (`expenses`) e ingestão de faturas',
-            plannedFor: 'Sprint 8',
-          },
+          // US-8.8: "Custo de infraestrutura e de WhatsApp" saiu daqui — virou número na
+          // US-8.4 (`expenses`) e é exibido no pilar Financeiro.
           {
             title: 'Histórico de incidentes e disponibilidade real (uptime)',
             reason:
               'A plataforma mede a si mesma no instante da consulta; não existe registro do que ficou fora do ar antes.',
             dependency: 'Registro de incidentes e probe externo contínuo',
-            plannedFor: 'Sprint 8',
+            // Reapontado na US-8.8: o lote de Sistema inteiro foi movido para a Sprint 9.
+            plannedFor: 'Sprint 9',
           },
           {
             title: 'Rastro ponta-a-ponta de uma requisição (tracing distribuído)',
@@ -2240,11 +2283,11 @@ export class ControlCenterService {
               ),
         partnerDistribution: this.unavailable(
           'BRL',
-          'Distribuição por sócio depende de `partners` e do resultado apurado; prevista para a Sprint 8.',
+          'Distribuição por sócio passou a existir na US-8.7 e é exibida em Sócios & Distribuição, sob `control_center.partners.read` (somente ADMIN) — fora do alcance do papel financeiro por decisão de governança, não por falta de dado.',
         ),
         customerAcquisitionCost: this.unavailable(
           'BRL',
-          'CAC depende de investimento em mídia (`ad_spend`) e de atribuição de campanha, ambos previstos para a Sprint 8.',
+          'CAC passou a existir na US-8.6 e é publicado por canal em Marketing → Aquisição & Canais, com a janela de atribuição declarada. Não há CAC consolidado aqui porque o investimento é registrado por canal.',
         ),
         revenueAtRisk30d: this.metric(
           atRiskTotal,
@@ -2354,7 +2397,7 @@ export class ControlCenterService {
       'Estorno e chargeback são linha nova de sinal contrário em `payments` — a linha da cobrança original nunca é alterada, e por isso as somas já saem líquidas.',
       'Custo por categoria/mês cobre 12 meses por competência (`occurred_on`), líquido de estornos — correção de lançamento é estorno + relançamento, nunca edição.',
       'Projeção de resultado continua fora de escopo (Sprint 11): esta tela mostra resultado realizado, nunca projetado.',
-      'Receita recebida, CAC e distribuição por sócio seguem marcadas como indisponíveis com a dependência nomeada — nunca como zero.',
+      'CAC e distribuição por sócio existem, mas fora desta tela: CAC é por canal em Marketing (US-8.6) e a distribuição fica em Sócios & Distribuição, sob capability restrita ao ADMIN (US-8.7).',
       'Coorte mensal de entrada: mês da primeira entrada em trial; "retido" = assinatura hoje ACTIVE. Coortes com menos de 10 entradas são omitidas.',
       'Coorte marcada como reconstruída vem do backfill de `subscriptions` (actor BACKFILL), não de evento observado — comparar com coorte observada exige essa ressalva.',
     ]);

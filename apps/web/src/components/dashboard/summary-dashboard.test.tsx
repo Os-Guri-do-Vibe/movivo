@@ -113,7 +113,7 @@ describe('SummaryDashboard', () => {
     expect(await screen.findByLabelText('Consultas em 30 dias: 340')).toBeVisible();
     expect(screen.getByLabelText('Consultas que acharam material: 62,5%')).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Ainda não medimos' })).toBeVisible();
-    expect(screen.getAllByText('Sprint 8')).toHaveLength(2);
+    expect(screen.getByText('Sprint 9')).toBeVisible();
     expect(screen.getByText('Fase 6 — Infraestrutura')).toBeVisible();
   });
 
@@ -149,7 +149,7 @@ describe('SummaryDashboard', () => {
     expect(screen.getByLabelText('CAC: —')).toBeVisible();
     expect(screen.getByLabelText('Distribuição por sócio: —')).toBeVisible();
     expect(
-      screen.getByText(/Depende da tabela `expenses`, prevista para a Sprint 8\./),
+      screen.getByText(/Nenhuma despesa lançada ainda/),
     ).toBeVisible();
   });
 

@@ -212,16 +212,10 @@ export const systemResponse: ControlCenterSystemResponse = {
     ],
     pendingCapabilities: [
       {
-        title: 'Custo de infraestrutura e de WhatsApp',
-        reason: 'Nenhuma fatura é ingerida hoje.',
-        dependency: 'Tabela de despesas (`expenses`)',
-        plannedFor: 'Sprint 8',
-      },
-      {
         title: 'Histórico de incidentes e disponibilidade real (uptime)',
         reason: 'Não existe registro do que ficou fora do ar.',
         dependency: 'Registro de incidentes e probe externo',
-        plannedFor: 'Sprint 8',
+        plannedFor: 'Sprint 9',
       },
       {
         title: 'Rastro ponta-a-ponta de uma requisição (tracing distribuído)',
@@ -247,7 +241,7 @@ export const financeResponse: ControlCenterFinanceResponse = {
       value: null,
       unit: 'BRL',
       status: 'UNAVAILABLE',
-      definition: 'Depende da tabela `expenses`, prevista para a Sprint 8.',
+      definition: 'Nenhuma despesa lançada ainda: exibir lucro sem custo seria inventar.',
     }),
     partnerDistribution: unavailableMetric,
     customerAcquisitionCost: unavailableMetric,
