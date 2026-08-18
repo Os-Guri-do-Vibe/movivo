@@ -2,6 +2,7 @@ import { protocolStructureSchema } from '@movivo/shared';
 
 import type {
   ActionResult,
+  AnamnesisAnswers,
   AnonymizedReplay,
   OperationsResponse,
   QueueDetail,
@@ -62,21 +63,24 @@ export function parseQueueItem(value: unknown): QueueItem {
     title,
     summary: string(value.summary),
     status: string(value.status, 'PENDENTE'),
+    autoReleaseAt: typeof value.autoReleaseAt === 'string' ? value.autoReleaseAt : null,
   };
 }
 
 export function parseQueueResponse(value: unknown): QueueResponse {
-  if (!isRecord(value) || !Array.isArray(value.items)) {
+  if (!isRecord(value) || !Array.isArray(value.mandatory) || !Array.isArray(value.optional)) {
     throw new DashboardApiError(502, 'Resposta da fila inválida.');
   }
-  const counts = isRecord(value.counts)
-    ? Object.fromEntries(
-        Object.entries(value.counts).flatMap(([key, count]) =>
-          typeof count === 'number' && Number.isFinite(count) ? [[key, count]] : [],
-        ),
-      )
-    : {};
-  return { items: value.items.map(parseQueueItem), counts };
+  const counts = isRecord(value.counts) ? value.counts : {};
+  return {
+    mandatory: value.mandatory.map(parseQueueItem),
+    optional: value.optional.map(parseQueueItem),
+    counts: {
+      mandatory: finiteNumber(counts.mandatory),
+      optional: finiteNumber(counts.optional),
+      total: finiteNumber(counts.total),
+    },
+  };
 }
 
 function parseReplayMessage(value: unknown): ReplayMessage {
@@ -220,6 +224,58 @@ export async function getQueueDetail(
   return parseQueueDetail(
     await request(`/queue/${kind.toLowerCase()}/${encodeURIComponent(id)}`, { signal }),
   );
+}
+
+/**
+ * Validação leve (checa formato, não cada enum individualmente) — condizente com o
+ * resto do arquivo: campos exibidos read-only pro CREF, não reeditados/reenviados
+ * (diferente de `protocol.content`, que passa por `protocolStructureSchema` porque
+ * volta a ser gravado).
+ */
+export function parseAnamnesisAnswers(value: unknown): AnamnesisAnswers {
+  if (!isRecord(value) || !isRecord(value.personal) || !isRecord(value.routine)) {
+    throw new DashboardApiError(502, 'Respostas da anamnese em formato inválido.');
+  }
+  return {
+    userId: string(value.userId),
+    submittedAt: typeof value.submittedAt === 'string' ? value.submittedAt : null,
+    personal: value.personal as AnamnesisAnswers['personal'],
+    routine: value.routine as AnamnesisAnswers['routine'],
+    health: isRecord(value.health) ? (value.health as AnamnesisAnswers['health']) : {},
+  };
+}
+
+export async function getProtocolAnamnesisAnswers(
+  protocolId: string,
+  signal?: AbortSignal,
+): Promise<AnamnesisAnswers> {
+  return parseAnamnesisAnswers(
+    await request(`/queue/protocol/${encodeURIComponent(protocolId)}/anamnesis`, { signal }),
+  );
+}
+
+/**
+ * Mesmas respostas, mas partindo direto de uma sessão PAR-Q (o olho da caixa "Revisão
+ * Humana Obrigatória" — item ainda não virou protocolo, então não há `protocolId`).
+ */
+export async function getParqAnamnesisAnswers(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<AnamnesisAnswers> {
+  return parseAnamnesisAnswers(
+    await request(`/queue/parq/${encodeURIComponent(sessionId)}/anamnesis`, { signal }),
+  );
+}
+
+/** O olho da fila chama uma das duas acima conforme o `kind` do item — sem `if` espalhado. */
+export async function getAnamnesisAnswers(
+  kind: 'PROTOCOL' | 'PARQ',
+  id: string,
+  signal?: AbortSignal,
+): Promise<AnamnesisAnswers> {
+  return kind === 'PROTOCOL'
+    ? getProtocolAnamnesisAnswers(id, signal)
+    : getParqAnamnesisAnswers(id, signal);
 }
 
 export async function getOperations(signal?: AbortSignal): Promise<OperationsResponse> {

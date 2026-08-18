@@ -71,6 +71,39 @@ describe('QueueDetail', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('auditoria registrada');
   });
 
+  // Achado 2026-08-18 (decisão do fundador): título da sessão vira
+  // `DIA DA SEMANA | NOME DO TREINO | FASE` em vez de `dayLabel · focus` cru.
+  it('título da sessão: dia da semana real | nome do treino | fase', async () => {
+    const baseProtocol = protocolDetail.protocol;
+    const baseSession = baseProtocol?.content.sessions[0];
+    if (!baseProtocol || !baseSession) throw new Error('fixture inválida');
+    api.getQueueDetail.mockResolvedValue({
+      ...protocolDetail,
+      protocol: {
+        ...baseProtocol,
+        content: {
+          ...baseProtocol.content,
+          phase: 'HIPERTROFIA',
+          sessions: [{ ...baseSession, weekday: 'TUE' }],
+        },
+      },
+    });
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    expect(
+      await screen.findByText('Terça | Membros inferiores | Hipertrofia'),
+    ).toBeVisible();
+  });
+
+  it('sem weekday (protocolo antigo): cai pro dayLabel cru, sem quebrar', async () => {
+    const session = protocolDetail.protocol?.content.sessions[0]; // fixture não tem weekday
+    if (!session) throw new Error('fixture inválida');
+    api.getQueueDetail.mockResolvedValue(protocolDetail);
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    expect(
+      await screen.findByText(`${session.dayLabel} | ${session.focus} | Hipertrofia`),
+    ).toBeVisible();
+  });
+
   it('libera PAR-Q somente após a decisão humana confirmada', async () => {
     api.getQueueDetail.mockResolvedValue(parqDetail);
     render(<QueueDetail kind="PARQ" id={PARQ_ID} />);

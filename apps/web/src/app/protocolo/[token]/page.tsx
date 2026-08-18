@@ -57,9 +57,12 @@ async function fetchProtocol(token: string): Promise<ProtocolRead | null> {
   return parsed.success ? parsed.data : null;
 }
 
-function reps(exercise: ProtocolExercise): string {
+/** "8–12 reps" para exercício tradicional, "40s por série" para isométrico/cardio (achado 2026-08-18). */
+function amountLabel(exercise: ProtocolExercise): string {
+  if (exercise.durationSeconds !== undefined) return `${exercise.durationSeconds}s por série`;
+  if (!exercise.reps) return '';
   const { min, max } = exercise.reps;
-  return min === max ? `${min}` : `${min}–${max}`;
+  return min === max ? `${min} reps` : `${min}–${max} reps`;
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -154,8 +157,8 @@ export default async function ProtocoloPage({ params }: { params: Promise<{ toke
                     <li key={j} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
                       <p className="text-body font-medium text-card-foreground">{exercise.name}</p>
                       <p className="font-mono text-label text-muted-foreground">
-                        {exercise.sets} séries · {reps(exercise)} reps · {exercise.restSeconds}s de
-                        descanso · {LOAD_LABEL[exercise.loadStrategy] ?? exercise.loadStrategy}
+                        {exercise.sets} séries · {amountLabel(exercise)} · {exercise.restSeconds}s
+                        de descanso · {LOAD_LABEL[exercise.loadStrategy] ?? exercise.loadStrategy}
                       </p>
                       {exercise.notes ? (
                         <p className="text-label text-muted-foreground">{exercise.notes}</p>

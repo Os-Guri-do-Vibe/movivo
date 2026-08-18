@@ -47,6 +47,20 @@ export const protocolItem: QueueItem = {
   title: 'Protocolo para Revisão: Maria Teste',
   summary: 'Hipertrofia · 3x por semana',
   status: 'PENDING_REVIEW',
+  autoReleaseAt: null,
+};
+
+/** Protocolo "Disponível para Revisão" — libera sozinho se o CREF não agir a tempo. */
+export const optionalProtocolItem: QueueItem = {
+  id: '66666666-6666-4666-8666-666666666666',
+  kind: 'PROTOCOL',
+  severity: 'ROUTINE',
+  createdAt: '2026-08-03T11:30:00.000Z',
+  ageMinutes: 40,
+  title: 'Protocolo para Revisão: Bruno Teste',
+  summary: 'Condicionamento · 4x por semana',
+  status: 'PENDING_REVIEW',
+  autoReleaseAt: '2026-08-03T12:30:00.000Z',
 };
 
 export const handoffItem: QueueItem = {
@@ -58,6 +72,7 @@ export const handoffItem: QueueItem = {
   title: 'Relato exige atenção profissional',
   summary: 'Conteúdo já anonimizado.',
   status: 'OPEN',
+  autoReleaseAt: null,
 };
 
 export const parqItem: QueueItem = {
@@ -69,6 +84,7 @@ export const parqItem: QueueItem = {
   title: 'PAR-Q aguardando liberação',
   summary: 'Um cuidado a mais antes de começar.',
   status: 'BLOCKED_PENDING_CLEARANCE',
+  autoReleaseAt: null,
 };
 
 export const checkinItem: QueueItem = {
@@ -80,11 +96,15 @@ export const checkinItem: QueueItem = {
   title: 'Check-in exige revisão profissional',
   summary: 'Sinalização de segurança registrada no check-in.',
   status: 'OPEN',
+  autoReleaseAt: null,
 };
 
+// `mandatory` é só PAR-Q bloqueado; `optional` é todo protocolo — só quem carrega
+// `autoReleaseAt` (optionalProtocolItem) de fato libera sozinho.
 export const queueResponse: QueueResponse = {
-  counts: { total: 3, safety: 1 },
-  items: [protocolItem, handoffItem, parqItem],
+  mandatory: [parqItem],
+  optional: [optionalProtocolItem, protocolItem],
+  counts: { mandatory: 1, optional: 2, total: 3 },
 };
 
 export const anonymizedReplay: AnonymizedReplay = {

@@ -255,36 +255,64 @@ export function ProtocolEditor({
                         }
                       />
                     </label>
-                    <label className="flex flex-col gap-1.5 text-xs font-semibold">
-                      Repetições mín.
-                      <input
-                        className={fieldClass}
-                        type="number"
-                        min={1}
-                        max={100}
-                        value={numberInputValue(exercise.reps.min)}
-                        onChange={(event) =>
-                          updateExercise(sessionIndex, exerciseIndex, {
-                            reps: { ...exercise.reps, min: event.target.valueAsNumber },
-                          })
-                        }
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1.5 text-xs font-semibold">
-                      Repetições máx.
-                      <input
-                        className={fieldClass}
-                        type="number"
-                        min={1}
-                        max={100}
-                        value={numberInputValue(exercise.reps.max)}
-                        onChange={(event) =>
-                          updateExercise(sessionIndex, exerciseIndex, {
-                            reps: { ...exercise.reps, max: event.target.valueAsNumber },
-                          })
-                        }
-                      />
-                    </label>
+                    {exercise.durationSeconds !== undefined ? (
+                      // Isométrico/cardio contínuo (prancha, caminhada, bike, tiros — achado
+                      // 2026-08-18): prescrito por tempo, "reps" não existe pra esse exercício.
+                      <label className="flex flex-col gap-1.5 text-xs font-semibold">
+                        Duração (s)
+                        <input
+                          className={fieldClass}
+                          type="number"
+                          min={5}
+                          max={2400}
+                          value={numberInputValue(exercise.durationSeconds)}
+                          onChange={(event) =>
+                            updateExercise(sessionIndex, exerciseIndex, {
+                              durationSeconds: event.target.valueAsNumber,
+                            })
+                          }
+                        />
+                      </label>
+                    ) : (
+                      <>
+                        <label className="flex flex-col gap-1.5 text-xs font-semibold">
+                          Repetições mín.
+                          <input
+                            className={fieldClass}
+                            type="number"
+                            min={1}
+                            max={100}
+                            value={numberInputValue(exercise.reps?.min ?? 1)}
+                            onChange={(event) =>
+                              updateExercise(sessionIndex, exerciseIndex, {
+                                reps: {
+                                  min: event.target.valueAsNumber,
+                                  max: exercise.reps?.max ?? event.target.valueAsNumber,
+                                },
+                              })
+                            }
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1.5 text-xs font-semibold">
+                          Repetições máx.
+                          <input
+                            className={fieldClass}
+                            type="number"
+                            min={1}
+                            max={100}
+                            value={numberInputValue(exercise.reps?.max ?? 1)}
+                            onChange={(event) =>
+                              updateExercise(sessionIndex, exerciseIndex, {
+                                reps: {
+                                  min: exercise.reps?.min ?? event.target.valueAsNumber,
+                                  max: event.target.valueAsNumber,
+                                },
+                              })
+                            }
+                          />
+                        </label>
+                      </>
+                    )}
                     <label className="flex flex-col gap-1.5 text-xs font-semibold md:col-span-2">
                       Estratégia de carga
                       <select
