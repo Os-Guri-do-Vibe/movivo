@@ -120,6 +120,15 @@ describe('ValidationService — bloqueios estruturais', () => {
     expect(v.violations.map((x) => x.rule)).toContain('REPS_OUT_OF_RANGE');
   });
 
+  // Achado 2026-08-18: exercício de medida REPS sem o campo `reps` nem `durationSeconds`
+  // (schema permite estruturalmente, já que os dois são opcionais) — mensagem cobre o
+  // ramo "ausente" em vez de assumir que `reps` sempre existe.
+  it('BLOCK repetições ausentes num exercício de medida REPS', () => {
+    const v = service.validate(input({ structure: withExercise({ reps: undefined }) }));
+    const violation = v.violations.find((x) => x.rule === 'REPS_OUT_OF_RANGE');
+    expect(violation?.detail).toContain('ausente reps');
+  });
+
   it('BLOCK descanso fora de faixa', () => {
     const v = service.validate(input({ structure: withExercise({ restSeconds: 500 }) }));
     expect(v.violations.map((x) => x.rule)).toContain('REST_OUT_OF_RANGE');

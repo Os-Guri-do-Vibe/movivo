@@ -205,6 +205,8 @@ async function submitAnamnesis(painRegions: string[], riskIds: string[] = []) {
     name: 'Fulano Pipeline',
     birthDate: '1996-04-02',
     biologicalSex: 'MALE',
+    heightCm: 178,
+    weightKg: 80,
     phoneNumber,
     email: `p${RUN}${seq}@example.com`,
   });
@@ -330,26 +332,36 @@ afterAll(async () => {
 }, 60_000);
 
 describe('pipeline de protocolo — caminho feliz (US-2.4)', () => {
-  it('submit → AUTO_APPROVED/ACTIVE assinado (RT) sob RLS + entrega enfileirada', async () => {
+  it('submit → PENDING_REVIEW/OPTIONAL sob RLS + auto-liberação de 1h agendada', async () => {
     const { userId, sessionId } = await submitAnamnesis([]); // sem lesão → validador limpo
 
+    // Decisão do fundador (2026-08-18): PASS limpo NÃO entrega mais sozinho na hora —
+    // entra na fila como PENDING_REVIEW/OPTIONAL igual a qualquer outro protocolo. O único
+    // motivo pra travar sem prazo (MANDATORY) é PAR-Q, já filtrado antes de chegar aqui.
     const proto = await waitFor(async () => (await readProtocol(userId))[0]);
-    expect(proto.approvalStatus).toBe('AUTO_APPROVED');
-    expect(proto.status).toBe('ACTIVE');
-    expect(proto.humanReviewRequired).toBe(false);
-    expect(proto.signatureHash).toHaveLength(64);
-    expect(proto.professionalId).toBe('00000000-0000-4000-8000-000000000001');
+    expect(proto.approvalStatus).toBe('PENDING_REVIEW');
+    expect(proto.status).toBe('PENDING_SIGNATURE');
+    expect(proto.humanReviewRequired).toBe(true);
+    expect(proto.reviewUrgency).toBe('OPTIONAL');
+    expect(proto.signatureHash).toBeNull();
     expect(proto.generatedBy).toBe('OPENAI_GPT41');
     expect(proto.modelVersion).toBe('gpt-4.1');
     expect(proto.promptVersion).toBe('methodology-int+catalog-int');
 
-    // Entrega enfileirada (o worker real é a US-2.5) — idempotente por jobId de negócio.
-    const delivery = await waitFor(
-      async () =>
-        (await queues.get(QUEUE.whatsappOutbound).getJob(`protocol-delivery_${userId}_1`)) ??
-        undefined,
-    );
-    expect((delivery.data as { protocolId: string }).protocolId).toBe(proto.id);
+    // Ninguém entrega sozinho na hora: a entrega só existe após o RT assinar ou a janela
+    // de cortesia de 1h (`ProtocolAutoReleaseWorker`) liberar.
+    const delivery = await queues
+      .get(QUEUE.whatsappOutbound)
+      .getJob(`protocol-delivery_${userId}_1`);
+    expect(delivery).toBeUndefined();
+
+    // A auto-liberação de 1h foi agendada (delay real, não aguardado aqui — é coberta
+    // isoladamente pelo spec do `ProtocolAutoReleaseWorker`).
+    const autoRelease = await queues
+      .get(QUEUE.protocolAutoRelease)
+      .getJob(`auto-release-${proto.id}`);
+    expect(autoRelease).toBeDefined();
+    expect(autoRelease?.opts.delay).toBe(60 * 60 * 1000);
 
     // Idempotência: reprocessar o mesmo job não cria um segundo protocolo.
     await queues.enqueue(QUEUE.protocolGeneration, 'generate-protocol', {

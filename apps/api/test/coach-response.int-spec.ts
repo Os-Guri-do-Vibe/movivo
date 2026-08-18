@@ -36,7 +36,7 @@ import {
   WHATSAPP_TRANSPORT,
   type OutboundMessage,
   type WhatsappTransport,
-} from '../src/modules/whatsapp/arara-transport';
+} from '../src/modules/whatsapp/whatsapp-transport';
 import {
   DAILY_LIMIT_MESSAGE,
   DLQ_FALLBACK_MESSAGE,
@@ -56,6 +56,9 @@ const fakeTransport: WhatsappTransport = {
   },
   async sendTyping() {
     /* no-op */
+  },
+  async sendTemplate() {
+    // Não exercido por este spec (resposta do Coach usa `send`, não template de OTP).
   },
 };
 

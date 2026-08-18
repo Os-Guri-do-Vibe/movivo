@@ -115,6 +115,8 @@ function step1(): OnboardingStep1 {
     name: 'Fulano de Teste',
     birthDate: '1996-04-02',
     biologicalSex: 'MALE',
+    heightCm: 178,
+    weightKg: 80,
     phoneNumber: phone(),
     email: `t${RUN}${seq}@example.com`,
   };

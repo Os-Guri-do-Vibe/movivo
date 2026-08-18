@@ -42,7 +42,7 @@ import {
   WHATSAPP_TRANSPORT,
   type OutboundMessage,
   type WhatsappTransport,
-} from '../src/modules/whatsapp/arara-transport';
+} from '../src/modules/whatsapp/whatsapp-transport';
 import { PROFESSIONAL_ID, seedHealthEligibility } from './health-fixtures';
 
 const { env } = loadEnv();
@@ -56,6 +56,9 @@ const fakeTransport: WhatsappTransport = {
   hasCredentials: () => true,
   async send(message) {
     sent.push(message);
+  },
+  async sendTemplate() {
+    // Não exercido por este spec (fluxo de confirmação/entrega, sem template de OTP).
   },
 };
 
@@ -161,6 +164,8 @@ async function submitAnamnesis(riskIds: string[] = []) {
     name: 'Fulano WA',
     birthDate: '1996-04-02',
     biologicalSex: 'MALE',
+    heightCm: 178,
+    weightKg: 80,
     phoneNumber,
   });
   await anamnesis.patchStep(token, 2, {
@@ -257,15 +262,17 @@ describe('outbound WhatsApp — confirmação no submit (US-2.5)', () => {
   it('boota sem credencial AraraHQ e envia a confirmação (PAR-Q liberado)', async () => {
     const { phone: to } = await submitAnamnesis();
     const msg = await waitFor(() =>
-      sent.find((m) => m.to === to && /será preparado/i.test(m.text)),
+      sent.find((m) => m.to === to && /está sendo preparado/i.test(m.text)),
     );
-    expect(msg.text).toMatch(/CREF/);
+    // Exceção deliberada ao guardrail de menção ao CREF nesta mensagem específica
+    // (`message-templates.ts`, achado 2026-08-18, a pedido do fundador).
+    expect(msg.text).not.toMatch(/CREF/);
   }, 30_000);
 
   it('PAR-Q de risco recebe a variante de cuidado (sem prometer plano)', async () => {
     const { phone: to } = await submitAnamnesis(['Q2']);
     const msg = await waitFor(() => sent.find((m) => m.to === to && /revisar/i.test(m.text)));
-    expect(msg.text).not.toMatch(/será preparado/i); // variante de cuidado não promete o plano
+    expect(msg.text).not.toMatch(/está sendo preparado/i); // variante de cuidado não promete o plano
   }, 30_000);
 });
 
