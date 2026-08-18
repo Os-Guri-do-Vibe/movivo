@@ -40,6 +40,10 @@ export const SECRET_KEYS = [
   // Sprint 3 — segredo do webhook de ENTRADA da AraraHQ (US-3.1). OPCIONAL no boot: o
   // app sobe sem ele (dev/CI); ausente em runtime, o inbound é descartado fail-closed.
   'ARARAHQ_WEBHOOK_SECRET',
+  // Painel "Sistema → Integração" — chave da EvolutionAPI (ferramenta de teste de
+  // WhatsApp, não é canal de produção). OPCIONAL no boot: sem ela o painel mostra
+  // "não configurado".
+  'EVOLUTION_API_KEY',
   // Sprint 4 — gateways de pagamento (US-4.1). OPCIONAIS no boot: sem elas o app sobe com o
   // adaptador MOCK (dev/CI); conta/chave real é bloqueador de lançamento, não de dev.
   'STRIPE_SECRET_KEY',

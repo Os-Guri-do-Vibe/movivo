@@ -9,7 +9,7 @@ import { users } from '../../core/database/schema';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
 import { RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import type { WorkerFactory } from '../jobs/worker.factory';
-import type { OutboundMessage, WhatsappTransport } from './arara-transport';
+import type { OutboundMessage, WhatsappTransport } from './whatsapp-transport';
 import { WhatsappOutboundWorker, type WhatsappOutboundJob } from './whatsapp-outbound.worker';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
@@ -102,8 +102,12 @@ function makeWorker(deps: Deps = {}) {
   const keys = new RedisKeyBuilder('movivo');
   const send = vi.fn((_m: OutboundMessage) => Promise.resolve());
   const sendTyping = vi.fn((_to: string) => Promise.resolve());
+  const sendTemplate = vi.fn(
+    (_to: string, _templateName: string, _variables?: readonly string[]) => Promise.resolve(),
+  );
   const transport = {
     send,
+    sendTemplate,
     sendTyping,
     hasCredentials: () => true,
   } as unknown as WhatsappTransport;
@@ -124,7 +128,7 @@ function makeWorker(deps: Deps = {}) {
     { agentName: vi.fn(async () => 'MOVI') } as never,
     logger,
   );
-  return { worker, send, sendTyping, redis };
+  return { worker, send, sendTemplate, sendTyping, redis };
 }
 
 function job(data: Partial<WhatsappOutboundJob>): Job<WhatsappOutboundJob> {
@@ -132,6 +136,23 @@ function job(data: Partial<WhatsappOutboundJob>): Job<WhatsappOutboundJob> {
 }
 
 describe('WhatsappOutboundWorker.process (US-2.5)', () => {
+  it('PHONE_VERIFICATION: usa Template (fora da janela de 24h), não texto livre', async () => {
+    const { worker, send, sendTemplate } = makeWorker();
+    const res = await worker.process(
+      job({ userId: null, type: 'PHONE_VERIFICATION', phoneNumber: '+5541999999999', code: '123456' }),
+    );
+    expect(res.status).toBe('SENT');
+    expect(sendTemplate).toHaveBeenCalledWith('+5541999999999', 'verificacao_numero', ['123456']);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('PHONE_VERIFICATION sem telefone ou código: descarta sem enviar', async () => {
+    const { worker, sendTemplate } = makeWorker();
+    const res = await worker.process(job({ userId: null, type: 'PHONE_VERIFICATION' }));
+    expect(res.status).toBe('INVALID');
+    expect(sendTemplate).not.toHaveBeenCalled();
+  });
+
   it('descarta outbound de saude enfileirado antes da revogacao', async () => {
     const { worker, send } = makeWorker({ consentActive: false });
     await expect(
@@ -209,6 +230,23 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
     const { worker, send } = makeWorker({ phone: null });
     const res = await worker.process(job({ type: 'PROTOCOL_WAITING' }));
     expect(res.status).toBe('NO_PHONE');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('espera (30min de atraso): sem protocolo aprovado ainda, envia a mensagem', async () => {
+    const { worker, send } = makeWorker({ proto: null });
+    const res = await worker.process(job({ type: 'PROTOCOL_WAITING' }));
+    expect(res.status).toBe('SENT');
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('espera (30min de atraso): profissional já aprovou nesse meio tempo → não reenvia nada', async () => {
+    // Default de `makeTx` já é um protocolo ACTIVE/AUTO_APPROVED — reconfirmado na hora
+    // do envio (não só no enqueue), então a mensagem de "ainda estou preparando" não sai
+    // depois que a entrega real já resolveu.
+    const { worker, send } = makeWorker({});
+    const res = await worker.process(job({ type: 'PROTOCOL_WAITING' }));
+    expect(res.status).toBe('SKIPPED');
     expect(send).not.toHaveBeenCalled();
   });
 });

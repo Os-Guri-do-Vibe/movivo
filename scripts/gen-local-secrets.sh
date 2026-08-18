@@ -106,6 +106,8 @@ write_secret "postgres_app_password"       "$(rand_token 40)"
 write_secret "postgres_migrator_password"  "$(rand_token 40)"
 write_secret "redis_password"              "$(rand_token 48)"
 write_secret "pgcrypto_key"                "$(rand_token 64)"
+write_secret "evolution_postgres_password" "$(rand_token 40)"
+write_secret "evolution_api_key"           "$(rand_token 40)"
 write_jwt_keypair
 
 # --- userlist.txt do PgBouncer ------------------------------------------------

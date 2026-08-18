@@ -1,12 +1,22 @@
 /**
  * Verificação de assinatura do webhook de ENTRADA da AraraHQ (US-3.1 / Sato §6).
  *
- * # ⚠️ FORMATO PLACEHOLDER (mock — decisão do fundador 2026-07-30)
- * A conta AraraHQ **não foi assinada**: o formato real de assinatura/headers do webhook
- * é desconhecido. Este arquivo é o **único ponto** onde esse formato está codificado —
- * headers, ordem do preimage do HMAC e codificação da assinatura. Quando a conta existir,
- * ajuste as constantes `SIGNATURE_HEADER`/`TIMESTAMP_HEADER` e `buildPreimage()` para o
- * contrato real; o resto do módulo (controller, dedup, debounce, enqueue) não muda.
+ * # ⚠️ PREIMAGE AINDA NÃO CONFIRMADO (atualizado 2026-08-16, conta AraraHQ criada)
+ * Os nomes de header abaixo (`x-arara-signature`, `x-arara-timestamp`) vêm da doc pública
+ * (`docs.ararahq.com/webhooks`) — confiança média (lida via scraping, não verificada contra
+ * uma entrega real). O `@ararahq/sdk` oficial **não implementa verificação de assinatura**
+ * (`WebhookUtils` só tem type-guards de payload), então não há código-fonte deles pra
+ * conferir o HMAC. A doc consultada diz "HMAC-SHA256 sobre o corpo bruto apenas, sem
+ * timestamp no preimage" — DIFERENTE do que este arquivo assume (`buildPreimage` inclui o
+ * timestamp). Mantido `${timestamp}.${rawBody}` por ora porque é fail-closed dos dois jeitos
+ * de estar errado (assinatura nunca bate → sempre rejeita, nunca aceita forjada) — mas
+ * **precisa ser confirmado contra uma entrega real** antes de ir a produção: configure o
+ * webhook no dashboard da AraraHQ (`sdk.organizations.updateWebhook`), dispare um evento de
+ * teste, logue o corpo bruto recebido (temporariamente, nunca em produção) e ajuste
+ * `buildPreimage()` se o preimage real for só o corpo. Também sem confirmação: o inbound de
+ * `message.received` não tem `messageId` no payload (`InboundMessageData` do SDK não tem esse
+ * campo) — o nonce anti-replay provavelmente deve vir do header `x-arara-webhook-id`, não do
+ * corpo. Ver `whatsapp-inbound.service.ts` (ainda não ajustado a esse achado).
  *
  * # As três camadas de Sato §6 (todas obrigatórias)
  *  1. HMAC-SHA256 sobre o **corpo bruto** (nunca sobre o JSON re-serializado) + `timingSafeEqual`.
@@ -18,10 +28,10 @@
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-/** Header (placeholder) com o HMAC-SHA256 hex do corpo. */
-export const SIGNATURE_HEADER = 'x-ararahq-signature';
-/** Header (placeholder) com o timestamp Unix (segundos) que entra no HMAC. */
-export const TIMESTAMP_HEADER = 'x-ararahq-timestamp';
+/** Header com o HMAC-SHA256 hex do corpo (nome confirmado via doc pública, ver nota acima). */
+export const SIGNATURE_HEADER = 'x-arara-signature';
+/** Header com o timestamp Unix (segundos) — inclusão no preimage do HMAC ainda não confirmada. */
+export const TIMESTAMP_HEADER = 'x-arara-timestamp';
 /** Janela anti-replay de timestamp (Sato §6): ±5 min. */
 export const TIMESTAMP_TOLERANCE_SECONDS = 300;
 

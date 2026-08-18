@@ -343,6 +343,110 @@ services:
         reservations:
           memory: 32M
 
+  # ===========================================================================
+  # EvolutionAPI — ferramenta INTERNA de teste do fluxo de WhatsApp (painel
+  # "Sistema → Integração"), enquanto a criação de templates da AraraHQ está
+  # bloqueada. Conecta via protocolo não-oficial (QR Code/Baileys) — NUNCA é o
+  # canal de produção dos usuários finais, que continua 100% AraraHQ. Isolada em
+  # Postgres próprio: o `movivo` (RLS forçada, roles restritas — ver
+  # infra/postgres/init/02-roles.sh) não é o lugar de um schema de terceiro.
+  # ===========================================================================
+  evolution-postgres:
+    <<: *common
+    image: ${EVOLUTION_POSTGRES_IMAGE:-postgres:17-alpine}
+    container_name: movivo-evolution-postgres
+    environment:
+      POSTGRES_USER: ${EVOLUTION_POSTGRES_USER:-evolution}
+      POSTGRES_DB: ${EVOLUTION_POSTGRES_DB:-evolution}
+      POSTGRES_PASSWORD_FILE: /run/secrets/evolution_postgres_password
+      TZ: ${TZ:-America/Sao_Paulo}
+    secrets:
+      - evolution_postgres_password
+    volumes:
+      - evolution-postgres-data:/var/lib/postgresql/data
+    ports:
+      - '127.0.0.1:${HOST_EVOLUTION_POSTGRES_PORT:-5434}:5432'
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -h 127.0.0.1',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  evolution-api:
+    <<: *common
+    # v2.1.1 tinha um bug documentado (GitHub issue #2430 do evolution-api): o QR nunca
+    # nascia porque o handler de reconexão disparava antes da primeira geração de QR,
+    # criando loop infinito ("Conectando" pra sempre, /instance/connect sempre {count:0}).
+    # Corrigido na v2.3.7 — fixado (não `latest`) pra não herdar quebras futuras sem querer.
+    image: ${EVOLUTION_API_IMAGE:-evoapicloud/evolution-api:v2.3.7}
+    container_name: movivo-evolution-api
+    depends_on:
+      evolution-postgres:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: '8080'
+      SERVER_URL: http://localhost:${HOST_EVOLUTION_PORT:-8081}
+      DATABASE_ENABLED: 'true'
+      DATABASE_PROVIDER: postgresql
+      DATABASE_SAVE_DATA_INSTANCE: 'true'
+      # Cache em memória (não Redis): evita ter que interpolar a senha do Redis
+      # compartilhado dentro de uma connection string — o contrato `*_FILE` deste
+      # projeto injeta segredo como arquivo, não como parte de uma URL montada.
+      # Cache local é suficiente para uma ferramenta de teste de um usuário só.
+      CACHE_REDIS_ENABLED: 'false'
+      CACHE_LOCAL_ENABLED: 'true'
+      TZ: ${TZ:-America/Sao_Paulo}
+    secrets:
+      - evolution_api_key
+      - evolution_postgres_password
+    # A imagem não lê `*_FILE` nativamente (convenção só das imagens oficiais
+    # Postgres/Redis) — o wrapper injeta os segredos como env var no boot, sem
+    # nunca passar por `environment:` (docker inspect), e preserva o ENTRYPOINT
+    # real da imagem (verificado via `docker inspect`) no `exec` final.
+    entrypoint: []
+    command:
+      - bash
+      - -c
+      - |
+        set -eu
+        test -s /run/secrets/evolution_api_key || {
+          echo "[movivo/evolution-api] ERRO FATAL: /run/secrets/evolution_api_key ausente." >&2
+          echo "[movivo/evolution-api] Rode scripts/gen-local-secrets.(sh|ps1) antes do up." >&2
+          exit 1
+        }
+        export AUTHENTICATION_API_KEY="$$(cat /run/secrets/evolution_api_key)"
+        export DATABASE_CONNECTION_URI="postgresql://${EVOLUTION_POSTGRES_USER:-evolution}:$$(cat /run/secrets/evolution_postgres_password)@evolution-postgres:5432/${EVOLUTION_POSTGRES_DB:-evolution}"
+        exec bash -c ". ./Docker/scripts/deploy_database.sh && npm run start:prod"
+    volumes:
+      - evolution-instances:/evolution/instances
+    ports:
+      - '127.0.0.1:${HOST_EVOLUTION_PORT:-8081}:8080'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: 768M
+        reservations:
+          memory: 128M
+
 # ─────────────────────────────────────────────────────────────────────────────
 networks:
   movivo-net:
@@ -356,3 +460,7 @@ volumes:
     name: movivo-redis-master-data
   redis-replica-data:
     name: movivo-redis-replica-data
+  evolution-postgres-data:
+    name: movivo-evolution-postgres-data
+  evolution-instances:
+    name: movivo-evolution-instances
