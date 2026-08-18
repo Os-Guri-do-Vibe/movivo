@@ -177,8 +177,17 @@ export const envSchema = z
     LLM_FALLBACK_MODEL: z.string().min(1).default('claude-sonnet-4-5'),
     /** Teto de tokens por chamada (o router faz clamp do `maxTokens` do request). */
     LLM_MAX_TOKENS: z.coerce.number().int().min(1).max(32_000).default(4096),
-    /** Timeout hard por tentativa de provedor (Victor §1.2). */
+    /** Timeout hard por tentativa de provedor (Victor §1.2). Vale para chat/check-in
+     * (latência importa numa conversa de WhatsApp em tempo real). */
     LLM_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(8000),
+    /**
+     * Timeout hard só para `PROTOCOL_GENERATION` (achado 2026-08-18: 8s é curto demais
+     * pra uma geração real de protocolo estruturado completo — toda tentativa contra o
+     * GPT-4.1 real estourava, esgotava os 3 retries e caía no fallback de segurança
+     * sempre, mascarado como "validação bloqueou"). É um job de fila em background, sem
+     * pressão de UX em tempo real — pode esperar bem mais que o chat.
+     */
+    LLM_PROTOCOL_TIMEOUT_MS: z.coerce.number().int().min(500).max(120_000).default(45_000),
     /** Teto anti-abuso: chamadas por usuário/dia (LLM10 — Sato §9.4). */
     LLM_USER_DAILY_MESSAGE_LIMIT: z.coerce.number().int().min(1).default(50),
     /** Baseline do budget alert de custo por usuário/dia em BRL (LLM10). */
@@ -204,6 +213,22 @@ export const envSchema = z
     ARARAHQ_WEBHOOK_SECRET: z.string().min(1).optional(),
     /** Base pública para o deep-link da página read-only do protocolo (US-2.6). */
     PUBLIC_SITE_URL: z.string().url().default('http://localhost:3000'),
+
+    // ------------------------------------------ EvolutionAPI (painel "Sistema →
+    // Integração" — conexão via QR Code/Baileys, protocolo não-oficial). Chave
+    // **opcional**: sem ela o painel mostra "não configurado" e a criação de
+    // instância falha com erro claro.
+    EVOLUTION_API_URL: z.string().url().default('http://localhost:8081'),
+    EVOLUTION_API_KEY: z.string().min(1).optional(),
+    /**
+     * Qual transporte processa o envio real do `whatsapp-outbound` worker. Default
+     * `ARARA` (BSP oficial, produção) — nunca muda sozinho. `EVOLUTION` é só pra testar
+     * o fluxo completo no número de teste (separado do chip oficial) enquanto a
+     * criação de Template está bloqueada na AraraHQ; ativa também o atraso "humano" de
+     * 15-20s anti-ban só nesse transporte (`whatsapp/evolution-transport.ts`). Mesmo
+     * padrão de troca de provedor por env já usado em `PAYMENT_PROVIDER`.
+     */
+    WHATSAPP_TRANSPORT_PROVIDER: z.enum(['ARARA', 'EVOLUTION']).default('ARARA'),
 
     // -------------------------------------------------------- RAG (US-3.3)
     /**

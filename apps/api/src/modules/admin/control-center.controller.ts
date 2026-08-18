@@ -1,4 +1,5 @@
 import {
+  Body,
   ConflictException,
   Controller,
   Get,
@@ -76,6 +77,25 @@ export class ControlCenterController {
   @RequireCapabilities(Capability.FINANCE_READ)
   finance() {
     return this.controlCenter.finance();
+  }
+
+  /**
+   * Painel "Sistema → Integração" — ferramenta INTERNA de teste do fluxo de WhatsApp
+   * via EvolutionAPI (QR Code), usada enquanto a criação de templates da AraraHQ está
+   * bloqueada. Nunca é o canal de produção dos usuários finais. Reusa `SYSTEM_READ`/
+   * `SYSTEM_OPERATE` — não é uma capacidade própria (é literalmente uma operação de
+   * sistema, o mesmo pilar de "Saúde & Disponibilidade").
+   */
+  @Get('integration')
+  @RequireCapabilities(Capability.SYSTEM_READ)
+  integration() {
+    return this.controlCenter.integration();
+  }
+
+  @Post('integration/whatsapp/instance')
+  @RequireCapabilities(Capability.SYSTEM_OPERATE)
+  createWhatsappInstance(@Body() body: unknown) {
+    return this.controlCenter.createWhatsappInstance(body);
   }
 
   @Get('compliance')

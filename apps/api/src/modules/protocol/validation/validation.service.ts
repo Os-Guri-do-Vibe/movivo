@@ -12,7 +12,7 @@
  * O `code` alimenta `ai_jobs.validation_action` (PASS|FLAG|BLOCK).
  */
 import { Injectable } from '@nestjs/common';
-import type { ProtocolStructure } from '@movivo/shared';
+import type { ProtocolStructure, Weekday } from '@movivo/shared';
 
 import {
   type ContraindicationTag,
@@ -24,6 +24,7 @@ import {
 import type { UserConstraints } from '../user-constraints';
 import { containsPromptLeak } from './prompt-injection';
 import {
+  DURATION_SECONDS_RANGE,
   inRange,
   LANGUAGE_RULES,
   MAX_TECHNIQUES_PER_SESSION,
@@ -58,7 +59,12 @@ export interface ValidateProtocolInput {
    * `level` é opcional porque protocolos persistidos antes da metodologia v2 não o têm.
    * Ausente → assume `INICIANTE` (o mais restritivo), nunca o mais permissivo: fail-safe.
    */
-  constraints: Pick<UserConstraints, 'goal' | 'injuryTags'> & { level?: ExerciseLevel };
+  constraints: Pick<UserConstraints, 'goal' | 'injuryTags'> & {
+    level?: ExerciseLevel;
+    /** Achado 2026-08-18: ausente → não valida sessão-por-dia (protocolo antigo/edição
+     *  sem essa constraint persistida). Presente → BLOCK se não bater 1:1 com as sessões. */
+    preferredDays?: Weekday[];
+  };
   /** Flags de PAR-Q extras (defesa; sessão de risco já é travada no Worker). */
   parqFlags?: ContraindicationTag[];
 }
@@ -84,7 +90,7 @@ export class ValidationService {
 
     const level = input.constraints.level ?? 'INICIANTE';
     this.checkStructure(input.structure, input.constraints.goal, level, excluded, violations);
-    this.checkMethodology(input.structure, level, violations);
+    this.checkMethodology(input.structure, level, input.constraints.preferredDays, violations);
     this.checkParq(input.structure, input.parqFlags ?? [], violations);
     this.checkLanguage(collectText(input.structure), violations);
 
@@ -168,14 +174,31 @@ export class ValidationService {
             action: 'BLOCK',
           });
         }
-        if (!inRange(ex.reps.min, repsRange) || !inRange(ex.reps.max, repsRange)) {
+        // `measurement` (achado 2026-08-18): isométrico (prancha) e cardio contínuo/intervalado
+        // (caminhada, bike, tiros) são prescritos por TEMPO, não por reps — cada um checa a
+        // faixa do campo que de fato faz sentido pra ele, em vez de forçar reps em tudo.
+        if (catalog.measurement === 'DURATION') {
+          const durationRange = catalog.durationSecondsRange ?? DURATION_SECONDS_RANGE;
+          if (ex.durationSeconds === undefined || !inRange(ex.durationSeconds, durationRange)) {
+            out.push({
+              rule: 'DURATION_OUT_OF_RANGE',
+              detail: `${ex.exerciseId}: ${ex.durationSeconds ?? 'ausente'}s`,
+              action: 'BLOCK',
+            });
+          }
+        } else if (
+          ex.reps === undefined ||
+          !inRange(ex.reps.min, repsRange) ||
+          !inRange(ex.reps.max, repsRange)
+        ) {
           out.push({
             rule: 'REPS_OUT_OF_RANGE',
-            detail: `${ex.exerciseId}: ${ex.reps.min}-${ex.reps.max} reps`,
+            detail: `${ex.exerciseId}: ${ex.reps ? `${ex.reps.min}-${ex.reps.max}` : 'ausente'} reps`,
             action: 'BLOCK',
           });
         }
-        if (!inRange(ex.restSeconds, REST_SECONDS_RANGE)) {
+        const restFloor = catalog.minRestSeconds ?? REST_SECONDS_RANGE.min;
+        if (!inRange(ex.restSeconds, { min: restFloor, max: REST_SECONDS_RANGE.max })) {
           out.push({
             rule: 'REST_OUT_OF_RANGE',
             detail: `${ex.exerciseId}: ${ex.restSeconds}s`,
@@ -195,8 +218,35 @@ export class ValidationService {
   private checkMethodology(
     structure: ProtocolStructure,
     level: ExerciseLevel,
+    preferredDays: Weekday[] | undefined,
     out: ValidationViolation[],
   ): void {
+    // Achado 2026-08-18: uma sessão por dia real declarado, nem mais nem menos — sem
+    // isso a IA podia entregar 1 sessão genérica pra um aluno de 4x/semana. Só valida
+    // quando a constraint existe (protocolo antigo/edição sem ela: fail-open).
+    if (preferredDays && preferredDays.length > 0) {
+      if (structure.sessions.length !== preferredDays.length) {
+        out.push({
+          rule: 'SESSION_COUNT_MISMATCH',
+          detail: `${structure.sessions.length} sessões geradas, ${preferredDays.length} dias declarados (${preferredDays.join(',')})`,
+          action: 'BLOCK',
+        });
+      }
+      const declared = new Set(preferredDays);
+      const generated = new Set(
+        structure.sessions.map((s) => s.weekday).filter((w): w is Weekday => w !== undefined),
+      );
+      const sameSet =
+        generated.size === declared.size && [...declared].every((d) => generated.has(d));
+      if (!sameSet) {
+        out.push({
+          rule: 'WEEKDAY_MISMATCH',
+          detail: `dias gerados (${[...generated].join(',') || 'nenhum'}) não batem com os declarados (${preferredDays.join(',')})`,
+          action: 'BLOCK',
+        });
+      }
+    }
+
     const split = structure.splitType;
     if (split) {
       if (!SPLITS_BY_LEVEL[level].includes(split)) {

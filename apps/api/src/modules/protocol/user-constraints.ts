@@ -16,6 +16,7 @@ import type {
   PainAssessment,
   TrainingExperience,
   TrainingLocation,
+  Weekday,
 } from '@movivo/shared';
 import { EMPHASIS_MUSCLE_GROUPS, PAIN_REGION_LABELS } from '@movivo/shared';
 
@@ -27,6 +28,9 @@ export interface UserConstraints {
   /** Nível REAL, vindo da experiência com musculação declarada na anamnese v2. */
   level: ExerciseLevel;
   daysPerWeek: number;
+  /** Dias reais da semana declarados na anamnese (achado 2026-08-18) — uma sessão do
+   *  protocolo por dia aqui, nunca menos/mais (ver `ValidationService`). */
+  preferredDays: Weekday[];
   sessionMinutes?: number;
   location: TrainingLocation;
   /** Equipamentos que o usuário informou ter (texto livre normalizado pelo prompt). */

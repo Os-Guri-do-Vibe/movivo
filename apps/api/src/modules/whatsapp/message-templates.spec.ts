@@ -43,10 +43,15 @@ const allTexts = [
 ];
 
 describe('templates de WhatsApp (US-2.5)', () => {
-  it('nenhuma copy contém termo proibido e todas citam o CREF onde exigido', () => {
+  it('nenhuma copy contém termo proibido', () => {
     for (const text of allTexts) expect(text).not.toMatch(FORBIDDEN);
-    expect(confirmationMessage()).toMatch(/CREF/);
+  });
+
+  // `confirmationMessage` é uma exceção deliberada ao guardrail geral de citar o CREF
+  // (ver comentário na função, `message-templates.ts`) — não entra nesta checagem.
+  it('variante de cuidado e entrega do protocolo citam o CREF', () => {
     expect(confirmationCareMessage()).toMatch(/CREF/);
+    expect(formatProtocolDelivery(content, 'https://x/protocolo/abc', 'MOVI')).toMatch(/CREF/);
   });
 
   it('variante de cuidado não promete plano automático', () => {

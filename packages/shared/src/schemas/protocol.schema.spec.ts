@@ -53,6 +53,30 @@ describe('protocolStructureSchema', () => {
     ).toBe(false);
   });
 
+  // Achado 2026-08-18: exercício isométrico/cardio contínuo (prancha, caminhada) é prescrito
+  // por tempo, não por reps — sem essa exclusividade, o schema aceitava (e a IA era forçada a
+  // inventar) um "reps" pra prancha, que o ValidationService rejeitava com razão.
+  it('aceita exercício de duração no lugar de reps', () => {
+    const structure = {
+      ...validStructure,
+      sessions: [sessionWith({ reps: undefined, durationSeconds: 40 })],
+    };
+    expect(protocolStructureSchema.safeParse(structure).success).toBe(true);
+  });
+
+  it('rejeita exercício sem reps nem durationSeconds', () => {
+    const structure = { ...validStructure, sessions: [sessionWith({ reps: undefined })] };
+    expect(protocolStructureSchema.safeParse(structure).success).toBe(false);
+  });
+
+  it('rejeita exercício com reps E durationSeconds ao mesmo tempo', () => {
+    const structure = {
+      ...validStructure,
+      sessions: [sessionWith({ durationSeconds: 40 })],
+    };
+    expect(protocolStructureSchema.safeParse(structure).success).toBe(false);
+  });
+
   it('aceita splitType e technique da metodologia v2', () => {
     const withSplit = {
       ...validStructure,

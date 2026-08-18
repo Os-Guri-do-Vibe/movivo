@@ -14,6 +14,7 @@ import type { Redis } from 'ioredis';
 import type { AuditService } from './audit.service';
 import { assessChurnRisk, CHURN_RISK_THRESHOLDS } from './churn-risk';
 import { ControlCenterService } from './control-center.service';
+import type { EvolutionTransport } from '../whatsapp/evolution-transport';
 
 function query(rows: unknown[]) {
   const chain = {
@@ -78,6 +79,7 @@ function build(...results: unknown[][]) {
     { mget: vi.fn().mockResolvedValue([]) } as unknown as Redis,
     new RedisKeyBuilder('movivo'),
     { activePayload: vi.fn().mockResolvedValue(null) } as unknown as AgentConfigRepository,
+    { hasCredentials: () => false } as unknown as EvolutionTransport,
   );
   return { service, db, audit, decryptHealth };
 }

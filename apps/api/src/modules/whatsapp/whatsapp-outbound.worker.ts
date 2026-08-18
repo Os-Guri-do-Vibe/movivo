@@ -11,7 +11,7 @@
  */
 import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 import { type Job } from 'bullmq';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 
@@ -24,20 +24,20 @@ import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QUEUE } from '../jobs/jobs.config';
 import { WorkerFactory } from '../jobs/worker.factory';
-import {
-  type QuickReplyButton,
-  WHATSAPP_TRANSPORT,
-  type WhatsappTransport,
-} from './arara-transport';
 import { FEEDBACK_BUTTONS } from './feedback';
 import {
   BUBBLE_SEPARATOR,
   confirmationCareMessage,
   confirmationMessage,
   formatProtocolDelivery,
-  phoneVerificationMessage,
+  PHONE_VERIFICATION_TEMPLATE,
   waitingMessage,
 } from './message-templates';
+import {
+  type QuickReplyButton,
+  WHATSAPP_TRANSPORT,
+  type WhatsappTransport,
+} from './whatsapp-transport';
 
 export type WhatsappJobType =
   | 'CONFIRMATION'
@@ -119,7 +119,8 @@ export class WhatsappOutboundWorker implements OnModuleInit {
         this.logger.warn({ type }, 'PHONE_VERIFICATION sem destino ou código — descartado');
         return { status: 'INVALID' };
       }
-      await this.transport.send({ to: phoneNumber, text: phoneVerificationMessage(code) });
+      // Texto livre é rejeitado (fora da janela de 24h) — precisa ser Template aprovado.
+      await this.transport.sendTemplate(phoneNumber, PHONE_VERIFICATION_TEMPLATE, [code]);
       return { status: 'SENT' };
     }
 
@@ -203,7 +204,11 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       case 'CONFIRMATION_CARE':
         return confirmationCareMessage();
       case 'PROTOCOL_WAITING':
-        return waitingMessage();
+        // Enfileirado com 30min de atraso (protocol-generation.worker.ts) — nesse meio
+        // tempo o profissional CREF pode ter aprovado e a entrega real já ter saído.
+        // Reconfirma aqui, na hora do envio, pra não mandar "ainda estou preparando"
+        // depois que o protocolo de verdade já chegou.
+        return (await this.hasApprovedActiveProtocol(data.userId)) ? null : waitingMessage();
       case 'PROTOCOL_DELIVERY':
         return this.buildDelivery(data);
       case 'COACH_MESSAGE':
@@ -265,6 +270,26 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       link,
       await this.agentPersona.agentName(),
     );
+  }
+
+  /** Usado só pra decidir se a mensagem de espera (PROTOCOL_WAITING) ainda faz sentido. */
+  private async hasApprovedActiveProtocol(userId: string | null): Promise<boolean> {
+    if (!userId) return false;
+    const proto = await this.db.runAsUser(userId, 'USER', async (tx) => {
+      const [row] = await tx
+        .select({ id: protocols.id })
+        .from(protocols)
+        .where(
+          and(
+            eq(protocols.userId, userId),
+            eq(protocols.status, 'ACTIVE'),
+            inArray(protocols.approvalStatus, ['AUTO_APPROVED', 'HUMAN_APPROVED']),
+          ),
+        )
+        .limit(1);
+      return row;
+    });
+    return Boolean(proto);
   }
 
   private async resolvePhone(userId: string): Promise<string | null> {

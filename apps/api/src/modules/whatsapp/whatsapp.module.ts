@@ -27,16 +27,26 @@ import { PinoLogger } from 'nestjs-pino';
 
 import { AppConfigService } from '../../core/config';
 import { JobsModule } from '../jobs/jobs.module';
-import { AraraHttpTransport, WHATSAPP_TRANSPORT } from './arara-transport';
+import { AraraHttpTransport } from './arara-transport';
+import { EVOLUTION_TRANSPORT, EvolutionHttpTransport } from './evolution-transport';
 import { UserJobLock } from './user-job-lock';
 import { WebhookController } from './webhook.controller';
 import { WhatsappInboundService } from './whatsapp-inbound.service';
 import { WhatsappOutboundWorker } from './whatsapp-outbound.worker';
+import { type WhatsappTransport, WHATSAPP_TRANSPORT } from './whatsapp-transport';
 
 /**
- * `WhatsappModule` (US-2.5) — outbound WhatsApp via AraraHQ.
+ * `WhatsappModule` (US-2.5) — outbound WhatsApp via AraraHQ (produção) ou EvolutionAPI
+ * (teste do número separado, QR Code/Baileys — `WHATSAPP_TRANSPORT_PROVIDER=EVOLUTION`).
  *
- * Preenche o esqueleto: transporte AraraHQ (HTTP confinado, credencial opcional) +
+ * `EVOLUTION_TRANSPORT` é provido **sempre**, independente do provedor ativo: o painel
+ * admin "Sistema → Integração" precisa dele pra criar/conectar a instância mesmo quando
+ * o transporte real ainda é a AraraHQ. `WHATSAPP_TRANSPORT` reaproveita essa MESMA
+ * instância (não cria um segundo cliente HTTP — quebraria o confinamento) quando o
+ * provedor ativo é `EVOLUTION`; do contrário constrói o `AraraHttpTransport` de sempre.
+ * Default de `WHATSAPP_TRANSPORT_PROVIDER` é `ARARA` — trocar é decisão explícita de
+ * `.env` local, nunca automática.
+ *
  * `WhatsappOutboundWorker` sobre a fila `whatsapp-outbound` (US-1.7). Sem webhook de
  * ENTRADA (Sprint 3). Importa `JobsModule` (fila é a via entre domínios — §12.5); o
  * resto (config, banco, Redis, logger) vem do CORE global por DI.
@@ -51,16 +61,32 @@ import { WhatsappOutboundWorker } from './whatsapp-outbound.worker';
   controllers: [WebhookController],
   providers: [
     {
-      provide: WHATSAPP_TRANSPORT,
+      provide: EVOLUTION_TRANSPORT,
       inject: [AppConfigService, PinoLogger],
       useFactory: (config: AppConfigService, logger: PinoLogger) =>
-        new AraraHttpTransport(config.whatsapp.araraBaseUrl, config.whatsapp.araraApiKey, logger),
+        new EvolutionHttpTransport(config.evolution.baseUrl, config.evolution.apiKey, logger),
+    },
+    {
+      provide: WHATSAPP_TRANSPORT,
+      inject: [AppConfigService, PinoLogger, EVOLUTION_TRANSPORT],
+      useFactory: (
+        config: AppConfigService,
+        logger: PinoLogger,
+        evolution: EvolutionHttpTransport,
+      ): WhatsappTransport =>
+        config.whatsapp.transportProvider === 'EVOLUTION'
+          ? evolution
+          : new AraraHttpTransport(
+              config.whatsapp.araraBaseUrl,
+              config.whatsapp.araraApiKey,
+              logger,
+            ),
     },
     WhatsappOutboundWorker,
     WhatsappInboundService,
     // UserJobLock: provido aqui, consumido pelo AIResponseWorker (US-3.5).
     UserJobLock,
   ],
-  exports: [UserJobLock],
+  exports: [UserJobLock, EVOLUTION_TRANSPORT],
 })
 export class WhatsappModule {}

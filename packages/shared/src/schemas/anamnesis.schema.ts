@@ -6,8 +6,8 @@
  *
  * Estrutura (D1 da `sprint/sprint-6-onboarding-em-etapas.md`):
  *  - **Etapa 1** (`onboardingStep1Schema`) — cadastro pessoal: nome, nascimento (18+),
- *    sexo biológico, telefone E.164 verificado por código, e-mail opcional. Dado
- *    pessoal comum → `data_block_1` (jsonb).
+ *    sexo biológico, altura/peso, telefone E.164 verificado por código, e-mail
+ *    opcional. Dado pessoal comum → `data_block_1` (jsonb).
  *  - **Etapa 2** — anamnese em 5 seções. As seções 1/2/3/5 (`anamnesisV2Schema`) são
  *    dado comum → `data_block_3` (jsonb); a **seção 4** (`painAssessmentSchema`) é
  *    **dado de saúde (LGPD Art. 11)** → `data_block_2` (bytea cifrado).
@@ -231,6 +231,15 @@ export type Weekday = z.infer<typeof weekdaySchema>;
 export const biologicalSexSchema = z.enum(['MALE', 'FEMALE']);
 export type BiologicalSex = z.infer<typeof biologicalSexSchema>;
 
+/**
+ * Altura/peso — parâmetros técnicos de prescrição (carga, progressão), mesma
+ * classificação do sexo biológico (Alexandre §5.7: não é dado sensível de saúde).
+ */
+export const MIN_HEIGHT_CM = 100;
+export const MAX_HEIGHT_CM = 250;
+export const MIN_WEIGHT_KG = 30;
+export const MAX_WEIGHT_KG = 300;
+
 /** 10 regiões de dor da seção 4 (Sofia §6.3) — articulares/segmentares. */
 export const painRegionSchema = z.enum([
   'NECK',
@@ -362,6 +371,8 @@ export const onboardingStep1Schema = z.object({
   name: z.string().trim().min(2).max(120),
   birthDate: isoDateSchema,
   biologicalSex: biologicalSexSchema,
+  heightCm: z.number().int().min(MIN_HEIGHT_CM).max(MAX_HEIGHT_CM),
+  weightKg: z.number().min(MIN_WEIGHT_KG).max(MAX_WEIGHT_KG),
   phoneNumber: phoneE164Schema,
   email: z.email().max(255).optional(),
 });

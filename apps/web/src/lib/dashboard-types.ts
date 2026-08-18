@@ -13,11 +13,19 @@ export interface QueueItem {
   title: string;
   summary: string;
   status: string;
+  /** Só protocolos "Revisão Humana Opcional" — quando a liberação automática ocorre. */
+  autoReleaseAt: string | null;
 }
 
+/**
+ * Fila do profissional — só protocolo + PAR-Q (US: duas categorias de revisão).
+ * `mandatory` nunca libera sozinho; `optional` libera sozinho após `autoReleaseAt` se
+ * o CREF não agir. Cada array já vem ordenado por idade (mais antigo primeiro).
+ */
 export interface QueueResponse {
-  items: QueueItem[];
-  counts: Record<string, number>;
+  mandatory: QueueItem[];
+  optional: QueueItem[];
+  counts: { mandatory: number; optional: number; total: number };
 }
 
 export interface ReplayMessage {
@@ -50,6 +58,66 @@ export interface QueueDetail {
   replay?: AnonymizedReplay;
   parq?: { flags: string[]; state: string };
   handoff?: { reason: string; level: string; status: string };
+}
+
+/** Todas as respostas que o titular preencheu no formulário de anamnese (US: olho). */
+export interface AnamnesisAnswers {
+  userId: string;
+  submittedAt: string | null;
+  personal: {
+    name: string;
+    birthDate: string;
+    biologicalSex: string;
+    heightCm: number;
+    weightKg: number;
+    phoneNumber: string;
+    email?: string;
+  };
+  routine: {
+    primaryGoal: string;
+    emphasis: string[];
+    hasImportantEvent: boolean;
+    importantEventDate?: string;
+    trainingStatus: string;
+    stoppedFor?: string;
+    experience: string;
+    pastActivities: string[];
+    consistencyBarriers: string[];
+    daysPerWeek: number;
+    preferredDays: string[];
+    sessionDuration: string;
+    location: string;
+    preferredPeriod: string;
+    practicesOtherSport: boolean;
+    otherSportDaysPerWeek?: number;
+    hasAvoidedExercise: boolean;
+  };
+  health: {
+    pain?: {
+      hasPain: boolean;
+      points: { region: string; intensity: number; regionOther?: string }[];
+      trend?: string;
+      trigger?: string;
+      hasProfessionalExplanation: boolean;
+      professionalExplanation?: string;
+      underMedicalFollowUp: boolean;
+      hasAvoidanceRecommendation: boolean;
+      avoidanceRecommendation?: string;
+    };
+    freeText?: {
+      primaryGoalOther?: string;
+      importantEventDescription?: string;
+      pastActivityOther?: string;
+      consistencyBarrierOther?: string;
+      otherSportName?: string;
+      avoidedExercise?: string;
+    };
+    parq?: {
+      version: string;
+      answers: { questionId: string; answer: boolean; detail?: string }[];
+    };
+    declarations?: { version: string; accepted: string[]; acceptedAt: string };
+  };
 }
 
 export interface OperationsResponse {

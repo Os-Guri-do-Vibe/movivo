@@ -76,6 +76,7 @@ const persistInput = {
   approvalStatus: 'AUTO_APPROVED' as const,
   status: 'ACTIVE' as const,
   humanReviewRequired: false,
+  reviewUrgency: null,
   totalWeeks: 12,
   generatedBy: 'AI_WITH_RULES',
   modelVersion: 'gpt-4.1',
@@ -114,9 +115,95 @@ describe('ProtocolRepository assinatura automatica', () => {
         status: 'PENDING_SIGNATURE',
         approvalStatus: 'PENDING_REVIEW',
         humanReviewRequired: true,
+        reviewUrgency: 'OPTIONAL' as const,
       }),
     ).resolves.toMatchObject({ professionalId: null });
     expect(execute).not.toHaveBeenCalled();
     expect(protocolValues).toHaveBeenCalledWith(expect.objectContaining({ professionalId: null }));
+  });
+});
+
+function repositoryForAutoRelease(
+  row: {
+    content: ProtocolStructure;
+    version: number;
+    approvalStatus: string;
+    reviewUrgency: string | null;
+  } | null,
+  professionalId = 'cref-1',
+) {
+  const execute = vi.fn(async () => [{ professional_id: professionalId }]);
+  const updateSet = vi.fn(() => ({ where: updateWhere }));
+  const updateWhere = vi.fn(async () => []);
+  const tx = {
+    select: () => ({
+      from: () => ({
+        where: () => ({ for: () => ({ limit: async () => (row ? [row] : []) }) }),
+      }),
+    }),
+    update: () => ({ set: updateSet }),
+    execute,
+  } as never;
+  const db = {
+    runAsUser: vi.fn((_userId, _role, callback: (value: unknown) => Promise<unknown>) =>
+      callback(tx),
+    ),
+  } as unknown as TenantDatabase;
+  return { repository: new ProtocolRepository(db), updateSet, updateWhere, execute };
+}
+
+describe('ProtocolRepository.autoRelease (fila do profissional — "Disponível para Revisão")', () => {
+  it('libera protocolo PENDING_REVIEW/OPTIONAL: assina metodologia e ativa', async () => {
+    const { repository, updateSet, execute } = repositoryForAutoRelease({
+      content,
+      version: 1,
+      approvalStatus: 'PENDING_REVIEW',
+      reviewUrgency: 'OPTIONAL',
+    });
+    await expect(repository.autoRelease('u1', 'p1')).resolves.toEqual({
+      released: true,
+      version: 1,
+    });
+    expect(execute).toHaveBeenCalledOnce();
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ACTIVE',
+        approvalStatus: 'AUTO_APPROVED',
+        professionalId: 'cref-1',
+        humanReviewRequired: false,
+      }),
+    );
+  });
+
+  it('não libera protocolo MANDATORY (nunca sai sozinho)', async () => {
+    const { repository, updateSet, execute } = repositoryForAutoRelease({
+      content,
+      version: 1,
+      approvalStatus: 'PENDING_REVIEW',
+      reviewUrgency: 'MANDATORY',
+    });
+    await expect(repository.autoRelease('u1', 'p1')).resolves.toMatchObject({ released: false });
+    expect(updateSet).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('não libera se o CREF já assinou (approvalStatus mudou) — idempotente', async () => {
+    const { repository, updateSet } = repositoryForAutoRelease({
+      content,
+      version: 2,
+      approvalStatus: 'HUMAN_APPROVED',
+      reviewUrgency: 'OPTIONAL',
+    });
+    await expect(repository.autoRelease('u1', 'p1')).resolves.toMatchObject({ released: false });
+    expect(updateSet).not.toHaveBeenCalled();
+  });
+
+  it('protocolo inexistente → released: false, sem tocar o banco', async () => {
+    const { repository, updateSet } = repositoryForAutoRelease(null);
+    await expect(repository.autoRelease('u1', 'p1')).resolves.toEqual({
+      released: false,
+      version: 0,
+    });
+    expect(updateSet).not.toHaveBeenCalled();
   });
 });

@@ -109,6 +109,13 @@ function baseInput(structure: ProtocolStructure): ValidateProtocolInput {
   return { structure, constraints: { goal: 'GAIN_MUSCLE', injuryTags: [] } };
 }
 
+/** Exercícios da sessão base — reusado pelos casos de "sessão por dia declarado". */
+function cleanExercises(): ProtocolStructure['sessions'][number]['exercises'] {
+  const exercises = cleanStructure().sessions[0]?.exercises;
+  if (!exercises) throw new Error('fixture inválida');
+  return exercises;
+}
+
 export const GOLDEN_SET: readonly GoldenCase[] = [
   // --- LIMPOS: a IA planejou dentro dos trilhos → PASS ---
   {
@@ -188,6 +195,65 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     expected: 'BLOCK_FALLBACK',
     expectRule: 'REST_OUT_OF_RANGE',
     input: baseInput(withExercise({ restSeconds: 500 })),
+  },
+  // --- Exercício de medida DURATION (achado 2026-08-18): isométrico/cardio, não sets×reps ---
+  {
+    label: 'protocolo limpo com exercício isométrico (prancha, por tempo)',
+    kind: 'clean',
+    expected: 'PASS',
+    input: baseInput(
+      withExercise({
+        exerciseId: 'plank',
+        name: 'Prancha isométrica',
+        reps: undefined,
+        durationSeconds: 40,
+      }),
+    ),
+  },
+  {
+    label: 'protocolo limpo com cardio contínuo (caminhada, descanso zero é correto)',
+    kind: 'clean',
+    expected: 'PASS',
+    input: baseInput(
+      withExercise({
+        exerciseId: 'brisk_walk',
+        name: 'Caminhada acelerada',
+        sets: 1,
+        reps: undefined,
+        durationSeconds: 900,
+        restSeconds: 0,
+      }),
+    ),
+  },
+  {
+    // Regressão real 2026-08-18: `wall_sit` (pattern ISOLATION, não CORE/CARDIO) escapou da
+    // primeira varredura por medida — a IA gerou "wall_sit: 30-45 reps" e caiu em BLOCK de novo.
+    label:
+      'protocolo limpo com isometria na parede (wall_sit, pattern ISOLATION mas medida DURATION)',
+    kind: 'clean',
+    expected: 'PASS',
+    input: baseInput(
+      withExercise({
+        exerciseId: 'wall_sit',
+        name: 'Isometria na parede',
+        reps: undefined,
+        durationSeconds: 45,
+      }),
+    ),
+  },
+  {
+    label: 'exercício de duração fora da faixa plausível (prancha "segurando" 10 minutos)',
+    kind: 'adversarial',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'DURATION_OUT_OF_RANGE',
+    input: baseInput(
+      withExercise({
+        exerciseId: 'plank',
+        name: 'Prancha isométrica',
+        reps: undefined,
+        durationSeconds: 600,
+      }),
+    ),
   },
   {
     label: 'termo proibido: prescrição de medicamento',
@@ -341,5 +407,42 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     expected: 'FLAG_HUMAN_REVIEW',
     expectRule: 'DIAGNOSIS',
     input: baseInput(cleanStructure({ generalNotes: 'Isso parece uma tendinite no ombro.' })),
+  },
+  // --- Sessão por dia declarado (achado 2026-08-18): a IA planejou 1 sessão por dia real
+  // que o aluno marcou na anamnese — nada a ver com PAR-Q ou segurança de exercício.
+  {
+    label: 'protocolo limpo com uma sessão por dia declarado (TER/QUA/QUI)',
+    kind: 'clean',
+    expected: 'PASS',
+    input: {
+      structure: cleanStructure({
+        weeklyFrequency: 3,
+        sessions: (['TUE', 'WED', 'THU'] as const).map((weekday, i) => ({
+          dayLabel: `D${i + 1}`,
+          weekday,
+          focus: 'Corpo inteiro',
+          exercises: cleanExercises(),
+        })),
+      }),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], preferredDays: ['TUE', 'WED', 'THU'] },
+    },
+  },
+  {
+    label: 'IA gerou menos sessões do que dias declarados (mesmo treino pra frequência maior)',
+    kind: 'adversarial',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'SESSION_COUNT_MISMATCH',
+    input: {
+      structure: cleanStructure({
+        sessions: [
+          { dayLabel: 'D1', weekday: 'MON', focus: 'Corpo inteiro', exercises: cleanExercises() },
+        ],
+      }),
+      constraints: {
+        goal: 'GAIN_MUSCLE',
+        injuryTags: [],
+        preferredDays: ['MON', 'WED', 'FRI'],
+      },
+    },
   },
 ];

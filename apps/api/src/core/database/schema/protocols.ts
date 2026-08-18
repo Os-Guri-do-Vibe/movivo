@@ -20,7 +20,7 @@ import {
 } from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
-import { protocolApprovalStatusEnum, protocolStatusEnum } from './enums';
+import { protocolApprovalStatusEnum, protocolStatusEnum, reviewUrgencyEnum } from './enums';
 import { users } from './users';
 
 export const protocols = pgTable(
@@ -97,6 +97,15 @@ export const protocols = pgTable(
      * resposta de LLM pode zerar esta flag.
      */
     humanReviewRequired: boolean('human_review_required').notNull().default(false),
+
+    /**
+     * Só relevante enquanto `approval_status = PENDING_REVIEW` (fila do profissional).
+     * `MANDATORY` (origem `BLOCK_FALLBACK`) nunca libera sozinho. `OPTIONAL` (origem
+     * `FLAG_HUMAN_REVIEW`) libera sozinho após 1h se o CREF não agir
+     * (`ProtocolAutoReleaseWorker`). `NULL` para protocolos que nunca passaram por
+     * `PENDING_REVIEW` (`AUTO_APPROVED` de origem).
+     */
+    reviewUrgency: reviewUrgencyEnum('review_urgency'),
 
     /**
      * Modelo que redigiu a versão (`gpt-4.1`, `claude-sonnet-4-5`). Exigido para

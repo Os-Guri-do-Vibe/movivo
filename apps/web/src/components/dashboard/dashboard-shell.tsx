@@ -3,6 +3,7 @@
 import {
   Activity,
   Bot,
+  Cable,
   Calculator,
   ChevronDown,
   CircleGauge,
@@ -70,7 +71,7 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
     items: [
       {
         href: '/dashboard',
-        label: 'Visão geral',
+        label: 'Visão Geral',
         icon: CircleGauge,
         capabilities: ['control_center.overview.read'],
       },
@@ -81,7 +82,7 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
     items: [
       {
         href: '/dashboard/alunos',
-        label: 'Base de alunos',
+        label: 'Base de Alunos',
         icon: UsersRound,
         capabilities: ['control_center.students.read'],
       },
@@ -152,7 +153,7 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         // "Público agregado" (segments por objetivo/local/período/faixa etária) já
         // existe desde a Sprint 7 na mesma tela de Aquisição & Canais.
         href: '/dashboard/analytics#publico-agregado',
-        label: 'Perfil de clientes',
+        label: 'Perfil de Clientes',
         icon: Target,
         capabilities: ['control_center.marketing.read'],
       },
@@ -206,6 +207,16 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         label: 'Auditoria',
         icon: ScrollText,
         capabilities: ['control_center.audit.read'],
+      },
+      {
+        // Ferramenta INTERNA de teste do fluxo de WhatsApp via EvolutionAPI (QR Code) —
+        // não é o canal de produção dos usuários finais. Reusa `system.read` (mesma
+        // capability da "Saúde & Disponibilidade", ao lado): é literalmente uma operação
+        // de sistema, não uma capacidade própria.
+        href: '/dashboard/sistema/integracao',
+        label: 'Integração',
+        icon: Cable,
+        capabilities: ['control_center.system.read'],
       },
       {
         href: '/dashboard/administracao',
@@ -273,7 +284,7 @@ function DashboardNavigation({
   const pathname = usePathname();
   const activeGroup = activeGroupFor(pathname);
   // Só a categoria da rota atual começa aberta — evita que a barra precise de
-  // scroll com os 5 pilares + Visão geral abertos ao mesmo tempo.
+  // scroll com os 5 pilares + Visão Geral abertos ao mesmo tempo.
   const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(
     () => new Set(activeGroup ? [activeGroup] : []),
   );
@@ -441,7 +452,10 @@ function SidebarBody({
           />
         )}
       </div>
-      <nav aria-label="Setores do Control Center" className="flex-1 overflow-y-auto px-3 pt-3 pb-4">
+      <nav
+        aria-label="Setores do Control Center"
+        className="sidebar-scrollbar flex-1 overflow-y-auto px-3 pt-3 pb-4"
+      >
         <DashboardNavigation
           capabilities={capabilities}
           collapsed={collapsed}

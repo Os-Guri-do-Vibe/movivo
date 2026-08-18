@@ -120,6 +120,15 @@ describe('ValidationService — bloqueios estruturais', () => {
     expect(v.violations.map((x) => x.rule)).toContain('REPS_OUT_OF_RANGE');
   });
 
+  // Achado 2026-08-18: exercício de medida REPS sem o campo `reps` nem `durationSeconds`
+  // (schema permite estruturalmente, já que os dois são opcionais) — mensagem cobre o
+  // ramo "ausente" em vez de assumir que `reps` sempre existe.
+  it('BLOCK repetições ausentes num exercício de medida REPS', () => {
+    const v = service.validate(input({ structure: withExercise({ reps: undefined }) }));
+    const violation = v.violations.find((x) => x.rule === 'REPS_OUT_OF_RANGE');
+    expect(violation?.detail).toContain('ausente reps');
+  });
+
   it('BLOCK descanso fora de faixa', () => {
     const v = service.validate(input({ structure: withExercise({ restSeconds: 500 }) }));
     expect(v.violations.map((x) => x.rule)).toContain('REST_OUT_OF_RANGE');
@@ -307,6 +316,78 @@ describe('ValidationService — metodologia v2 (divisão e técnica avançada)',
     expect(v.violations.map((x) => x.rule)).not.toContain('ISOLATION_AS_BASE');
   });
 });
+
+// Achado 2026-08-18 (decisão do fundador): 1 sessão por dia REAL declarado na anamnese —
+// antes disso a IA podia entregar 1 sessão genérica pra um aluno de qualquer frequência.
+describe('ValidationService — sessão por dia declarado', () => {
+  /** `n` sessões, cada uma com o `weekday` correspondente (por posição). */
+  function sessionsForDays(days: readonly ('MON' | 'TUE' | 'WED' | 'THU' | 'FRI')[]) {
+    const base = validStructure().sessions[0];
+    if (!base) throw new Error('fixture inválida');
+    return validStructure({
+      weeklyFrequency: days.length,
+      sessions: days.map((weekday, i) => ({ ...base, dayLabel: `D${i + 1}`, weekday })),
+    });
+  }
+
+  it('PASS quando as sessões batem 1:1 com os dias declarados (ordem não importa)', () => {
+    const v = service.validate({
+      structure: sessionsForDays(['MON', 'WED', 'FRI']),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], preferredDays: ['FRI', 'MON', 'WED'] },
+    });
+    expect(v.action).toBe('PASS');
+  });
+
+  it('BLOCK menos sessões do que dias declarados', () => {
+    const v = service.validate({
+      structure: sessionsForDays(['MON']),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], preferredDays: ['MON', 'WED', 'FRI'] },
+    });
+    expect(v.violations.map((x) => x.rule)).toContain('SESSION_COUNT_MISMATCH');
+    expect(v.action).toBe('BLOCK_FALLBACK');
+  });
+
+  it('BLOCK sessões com dias diferentes dos declarados (mesma contagem, dia errado)', () => {
+    const v = service.validate({
+      structure: sessionsForDays(['MON', 'TUE', 'WED']),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], preferredDays: ['MON', 'WED', 'FRI'] },
+    });
+    expect(v.violations.map((x) => x.rule)).toContain('WEEKDAY_MISMATCH');
+    expect(v.action).toBe('BLOCK_FALLBACK');
+  });
+
+  it('BLOCK sessão sem weekday nenhum quando dias foram declarados', () => {
+    const v = service.validate({
+      structure: nSessionsNoWeekday(3),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], preferredDays: ['MON', 'WED', 'FRI'] },
+    });
+    expect(v.violations.map((x) => x.rule)).toContain('WEEKDAY_MISMATCH');
+  });
+
+  it('não valida sessão-por-dia quando preferredDays está ausente (fail-open, protocolo antigo)', () => {
+    // `validStructure()` tem só 1 sessão, sem weekday — passaria fora dessa regra também.
+    const v = service.validate(input());
+    expect(v.violations.map((x) => x.rule)).not.toContain('SESSION_COUNT_MISMATCH');
+    expect(v.violations.map((x) => x.rule)).not.toContain('WEEKDAY_MISMATCH');
+  });
+
+  it('não valida sessão-por-dia quando preferredDays vem vazio', () => {
+    const v = service.validate({
+      structure: validStructure(),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], preferredDays: [] },
+    });
+    expect(v.violations.map((x) => x.rule)).not.toContain('SESSION_COUNT_MISMATCH');
+  });
+});
+
+function nSessionsNoWeekday(n: number): ProtocolStructure {
+  const base = validStructure().sessions[0];
+  if (!base) throw new Error('fixture inválida');
+  return validStructure({
+    weeklyFrequency: n,
+    sessions: Array.from({ length: n }, (_, i) => ({ ...base, dayLabel: `D${i + 1}` })),
+  });
+}
 
 // Achado do Victor: o filtro por nível do gerador só existia no PROMPT.
 describe('ValidationService — nível do exercício', () => {

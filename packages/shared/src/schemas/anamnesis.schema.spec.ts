@@ -106,6 +106,8 @@ describe('gate 18+ (regra de negócio, validada no servidor)', () => {
       name: 'Bruno',
       birthDate: '1996-04-02',
       biologicalSex: 'MALE',
+      heightCm: 178,
+      weightKg: 75,
       phoneNumber: '+5511988887777',
     });
     expect(parsed.success).toBe(true);
@@ -116,9 +118,26 @@ describe('gate 18+ (regra de negócio, validada no servidor)', () => {
       name: 'Bruno',
       birthDate: '02/04/1996',
       biologicalSex: 'MALE',
+      heightCm: 178,
+      weightKg: 75,
       phoneNumber: '+5511988887777',
     });
     expect(parsed.success).toBe(false);
+  });
+
+  it('recusa altura/peso fora da faixa plausível', () => {
+    const base = {
+      name: 'Bruno',
+      birthDate: '1996-04-02',
+      biologicalSex: 'MALE' as const,
+      phoneNumber: '+5511988887777',
+    };
+    expect(onboardingStep1Schema.safeParse({ ...base, heightCm: 60, weightKg: 75 }).success).toBe(
+      false,
+    );
+    expect(onboardingStep1Schema.safeParse({ ...base, heightCm: 178, weightKg: 10 }).success).toBe(
+      false,
+    );
   });
 });
 

@@ -57,6 +57,8 @@ export interface LlmConfig {
   readonly fallbackModel: string;
   readonly maxTokens: number;
   readonly timeoutMs: number;
+  /** Timeout só de `PROTOCOL_GENERATION` — job em fila, tolera bem mais que o chat. */
+  readonly protocolTimeoutMs: number;
   readonly userDailyMessageLimit: number;
   readonly dailyCostAlertBrl: number;
   readonly usdBrlRate: number;
@@ -73,6 +75,14 @@ export interface WhatsappConfig {
   readonly publicSiteUrl: string;
   /** `undefined` sem segredo → inbound descartado fail-closed (US-3.1). Segredo redigido. */
   readonly webhookSecret: string | undefined;
+  /** Transporte ativo do `whatsapp-outbound` worker. Default `ARARA` — ver env.schema.ts. */
+  readonly transportProvider: 'ARARA' | 'EVOLUTION';
+}
+
+export interface EvolutionConfig {
+  readonly baseUrl: string;
+  /** `undefined` em dev/CI sem segredo → painel mostra "não configurado". Segredo redigido. */
+  readonly apiKey: string | undefined;
 }
 
 export interface PaymentConfig {
@@ -185,6 +195,7 @@ export class AppConfigService {
       fallbackModel: this.config.LLM_FALLBACK_MODEL,
       maxTokens: this.config.LLM_MAX_TOKENS,
       timeoutMs: this.config.LLM_TIMEOUT_MS,
+      protocolTimeoutMs: this.config.LLM_PROTOCOL_TIMEOUT_MS,
       userDailyMessageLimit: this.config.LLM_USER_DAILY_MESSAGE_LIMIT,
       dailyCostAlertBrl: this.config.LLM_DAILY_COST_ALERT_BRL,
       usdBrlRate: this.config.LLM_USD_BRL_RATE,
@@ -200,6 +211,18 @@ export class AppConfigService {
       araraBaseUrl: this.config.ARARAHQ_BASE_URL,
       publicSiteUrl: this.config.PUBLIC_SITE_URL,
       webhookSecret: this.config.ARARAHQ_WEBHOOK_SECRET,
+      transportProvider: this.config.WHATSAPP_TRANSPORT_PROVIDER,
+    };
+  }
+
+  /**
+   * Config da EvolutionAPI (painel "Sistema → Integração" — ferramenta INTERNA de
+   * teste de WhatsApp, não é o canal de produção). `apiKey` é segredo redigido.
+   */
+  get evolution(): EvolutionConfig {
+    return {
+      baseUrl: this.config.EVOLUTION_API_URL,
+      apiKey: this.config.EVOLUTION_API_KEY,
     };
   }
 

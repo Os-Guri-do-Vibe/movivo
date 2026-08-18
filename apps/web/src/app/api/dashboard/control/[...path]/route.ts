@@ -15,7 +15,12 @@ const SAFE_SEGMENT = /^[a-z0-9-]+$/i;
  * A autorização real continua no backend (capability por rota); esta lista só evita
  * que o BFF vire um caminho universal de POST para qualquer rota do Control Center.
  */
-const MUTATION_PATHS = new Set(['ai/persona', 'ai/persona/rollback']);
+const MUTATION_PATHS = new Set([
+  'ai/persona',
+  'ai/persona/rollback',
+  // Painel "Sistema → Integração" (EvolutionAPI, ferramenta INTERNA de teste).
+  'integration/whatsapp/instance',
+]);
 
 export async function GET(
   request: NextRequest,

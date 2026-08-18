@@ -45,6 +45,8 @@ async function fillStep1(page: Page) {
   await page.getByLabel('Qual é o seu nome completo?').fill('Maria Teste');
   await page.getByLabel('Qual é a sua data de nascimento?').fill('01/01/1990');
   await page.getByText('Feminino').click();
+  await page.getByLabel(/Qual é a sua altura/).fill('165');
+  await page.getByLabel(/Qual é o seu peso/).fill('60');
   await page.getByLabel('Qual é o seu WhatsApp?').fill('11999998888');
 
   // OTP: aparece assim que o telefone tem 11 dígitos; colar também auto-verifica no 6º dígito.

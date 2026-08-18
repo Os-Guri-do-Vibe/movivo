@@ -4,7 +4,7 @@
  * Um único lugar define o `id` do botão (enviado no outbound) e o parse do toque recebido
  * no webhook (US-3.1), para os dois lados nunca divergirem. No fake/dev o botão é só metadado.
  */
-import type { QuickReplyButton } from './arara-transport';
+import type { QuickReplyButton } from './whatsapp-transport';
 
 export const FEEDBACK_UP_ID = 'fb_up';
 export const FEEDBACK_DOWN_ID = 'fb_down';

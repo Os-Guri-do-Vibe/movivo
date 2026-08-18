@@ -3,8 +3,9 @@
  *
  * submit (US-1.3) enfileira → aqui: carrega usuário+anamnese sob RLS, decifra o bloco de
  * saúde, aplica o **gate PAR-Q** (trava: sessão de risco NÃO gera), gera+valida (planner),
- * persiste `protocols`/`protocol_versions` com `approval_status` e origem, auto-aprova/assina
- * a metodologia do RT no caminho limpo e **enfileira a entrega** (worker real é a US-2.5).
+ * persiste `protocols`/`protocol_versions` como `PENDING_REVIEW`/`OPTIONAL` e agenda a
+ * janela de cortesia de 1h (`ProtocolAutoReleaseWorker` entrega se o CREF não agir antes —
+ * decisão do fundador, 2026-08-18: nenhum protocolo entrega sozinho na hora, PASS incluso).
  *
  * Concorrência/lock/retries/backoff vêm do `WorkerFactory` (US-1.7). Falha terminal (após os
  * retries) → fallback: mensagem de espera enfileirada + template pendente de revisão (task
@@ -20,6 +21,7 @@ import {
   toGenerationGoal,
   type AnamnesisStructured,
   type GenerationGoal,
+  type Weekday,
 } from '@movivo/shared';
 
 import { HealthCipherService } from '../../core/database/health-cipher.service';
@@ -56,6 +58,17 @@ export interface ProtocolGenerationJob {
 
 /** ponytail: horizonte fixo do protocolo no MVP; o check-in (Sprint 5) reperiodiza. */
 const DEFAULT_TOTAL_WEEKS = 12;
+
+/** Atraso da mensagem de espera (fallback de DLQ) — dá tempo do CREF aprovar primeiro. */
+const PROTOCOL_WAITING_DELAY_MS = 30 * 60 * 1000;
+
+/**
+ * Janela de cortesia da fila "Disponível para Revisão" (fila do profissional). Exportada
+ * (não só local) porque o `DashboardService.queue()` precisa do mesmo valor para exibir
+ * `autoReleaseAt` — uma só fonte de verdade evita o contador da UI dessincronizar do
+ * `delay` real do job.
+ */
+export const PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS = 60 * 60 * 1000;
 
 @Injectable()
 export class ProtocolGenerationWorker implements OnModuleInit {
@@ -138,19 +151,40 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       constraints,
     });
 
+    // Achado 2026-08-18: sem isso, um protocolo que cai no fallback (MANDATORY, sem
+    // auto-liberação) não deixava rastro nenhum de POR QUE — nem em log. `detail` das
+    // violações é estrutural (ex.: id de exercício, nível, split) — nunca eco de texto
+    // livre/saúde do titular, seguro de logar em claro.
+    if (plan.violations.length > 0) {
+      this.logger.warn(
+        {
+          userId,
+          usedFallbackTemplate: plan.usedFallbackTemplate,
+          validationAction: plan.validationAction,
+          violations: plan.violations,
+        },
+        'geração de protocolo não passou limpa na validação',
+      );
+    }
+
+    // Decisão do fundador (2026-08-18): todo protocolo gerado entra na fila como
+    // PENDING_REVIEW/OPTIONAL — nunca entrega sozinho na hora, PASS incluso. O único
+    // motivo pra travar sem prazo (MANDATORY) é PAR-Q, já filtrado pelo gate acima. Ver
+    // `protocol-planner.ts` para o raciocínio completo.
     const persisted = await this.repository.persist({
       userId,
       content: plan.content,
       constraints,
       parqFlags: constraints.injuryTags,
-      approvalStatus: plan.approvalStatus,
-      status: plan.autoApproved ? 'ACTIVE' : 'PENDING_SIGNATURE',
-      humanReviewRequired: plan.humanReviewRequired,
+      approvalStatus: 'PENDING_REVIEW',
+      status: 'PENDING_SIGNATURE',
+      humanReviewRequired: true,
+      reviewUrgency: 'OPTIONAL',
       totalWeeks: DEFAULT_TOTAL_WEEKS,
       generatedBy: plan.generatedBy,
       modelVersion: plan.modelVersion,
       promptVersion: plan.promptVersion,
-      signed: plan.autoApproved,
+      signed: false,
     });
 
     if (persisted.alreadyExisted) {
@@ -158,23 +192,19 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       return { status: 'ALREADY_EXISTS' };
     }
 
-    if (plan.autoApproved) {
-      await this.enqueueDelivery(
-        userId,
-        persisted.protocolId,
-        persisted.version,
-        loaded.submittedAt,
-      );
-      this.logger.info(
-        { userId, protocolId: persisted.protocolId, professionalId: persisted.professionalId },
-        'protocolo AUTO_APPROVED/ACTIVE assinado (metodologia RT) — entrega enfileirada',
-      );
-      return { status: 'AUTO_APPROVED' };
-    }
+    await this.queues.enqueue(
+      QUEUE.protocolAutoRelease,
+      'auto-release',
+      { userId, protocolId: persisted.protocolId },
+      {
+        delay: PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS,
+        jobId: `auto-release-${persisted.protocolId}`,
+      },
+    );
 
     this.logger.info(
       { userId, protocolId: persisted.protocolId, validationAction: plan.validationAction },
-      'protocolo PENDING_REVIEW — não entrega, aguarda painel CREF (Sprint 5)',
+      'protocolo PENDING_REVIEW — aguarda painel CREF ou auto-liberação em 1h',
     );
     this.queueEvents.emit('protocol');
     return { status: 'PENDING_REVIEW' };
@@ -235,6 +265,7 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       // Fim do default hardcoded (D6 / TASK-6.9.2).
       level: levelFromExperience(structured.experience),
       daysPerWeek: structured.daysPerWeek,
+      preferredDays: structured.preferredDays,
       sessionMinutes: SESSION_DURATION_MINUTES[structured.sessionDuration],
       location: structured.location,
       // A anamnese v2 não pergunta equipamento item a item — o LOCAL já determina o que
@@ -248,33 +279,6 @@ export class ProtocolGenerationWorker implements OnModuleInit {
     };
   }
 
-  // --- entrega + SLA --------------------------------------------------------
-
-  private async enqueueDelivery(
-    userId: string,
-    protocolId: string,
-    version: number,
-    submittedAt: Date | null,
-  ): Promise<void> {
-    // Idempotência do enqueue: jobId de negócio evita duplicar a entrega em reprocesso.
-    // BullMQ proíbe `:` em jobId (é o separador de chave do Redis) — usamos `_`.
-    await this.queues.enqueue(
-      QUEUE.whatsappOutbound,
-      'protocol-delivery',
-      { userId, protocolId, protocolVersion: version, type: 'PROTOCOL_DELIVERY' },
-      { jobId: `protocol-delivery_${userId}_${version}` },
-    );
-
-    // TASK-2.4.4 — SLA submit→entrega. ponytail: log estruturado (sem SDK server do
-    // PostHog nesta sprint, mesmo padrão de `form_submitted`); a US-2.5 emite o
-    // `protocol_sent` final no envio real. Aqui medimos o tempo até enfileirar a entrega.
-    const slaMs = submittedAt ? Date.now() - submittedAt.getTime() : null;
-    this.logger.info(
-      { event: 'protocol_sent', userId, protocolId, slaMs },
-      'protocol_sent (SLA submit→entrega enfileirada)',
-    );
-  }
-
   /** TASK-2.4.4 — fallback de DLQ: mensagem de espera + template pendente de revisão. */
   private async handleTerminalFailure(job: Job<ProtocolGenerationJob>, err: Error): Promise<void> {
     const { userId, anamnesisSessionId } = job.data;
@@ -284,34 +288,56 @@ export class ProtocolGenerationWorker implements OnModuleInit {
     );
 
     // Mensagem de espera ao usuário (copy nos guardrails — nada de diagnóstico/garantia).
+    // Atraso de 30min: o fallback conservador já foi persistido como PENDING_REVIEW logo
+    // abaixo, e o profissional CREF pode aprovar antes disso — nesse caso a entrega real
+    // (PROTOCOL_DELIVERY) já resolve tudo, e um "ainda estou preparando" chegando depois
+    // seria só ruído. O worker de outbound reconfirma o status na hora do envio (não só
+    // no enqueue), então mesmo com o atraso o guard continua valendo.
     await this.queues.enqueue(
       QUEUE.whatsappOutbound,
       'protocol-waiting',
       { userId, type: 'PROTOCOL_WAITING' },
-      { jobId: `protocol-waiting_${userId}` },
+      { jobId: `protocol-waiting_${userId}`, delay: PROTOCOL_WAITING_DELAY_MS },
     );
 
     // Task manual consultável: template conservador pré-aprovado, PENDING_REVIEW +
     // human_review_required — aparece na fila de revisão do painel (Sprint 5). Se já
     // existir protocolo (corrida), o UNIQUE(user_id, version) devolve `alreadyExisted`.
+    //
+    // `OPTIONAL`, não `MANDATORY` (achado 2026-08-18, mesma decisão do planner): quem
+    // chega no DLQ já passou pelo gate de PAR-Q lá em `process()` — esgotar os retries é
+    // indisponibilidade de infraestrutura (LLM fora do ar), não risco clínico. Por isso
+    // agenda a MESMA janela de cortesia de 1h que `process()` agenda no caminho normal.
     try {
-      const goal = await this.goalForFallback(userId, anamnesisSessionId);
-      const content = buildFallbackProtocol(goal);
+      const { goal, preferredDays } = await this.constraintsForFallback(userId, anamnesisSessionId);
+      const content = buildFallbackProtocol(goal, preferredDays);
       const persisted = await this.repository.persist({
         userId,
         content,
-        constraints: { goal, fallback: true },
+        constraints: { goal, preferredDays, fallback: true },
         parqFlags: [],
         approvalStatus: 'PENDING_REVIEW',
         status: 'PENDING_SIGNATURE',
         humanReviewRequired: true,
+        reviewUrgency: 'OPTIONAL',
         totalWeeks: DEFAULT_TOTAL_WEEKS,
         generatedBy: 'FALLBACK_TEMPLATE',
         modelVersion: null,
         promptVersion: FALLBACK_TEMPLATE_VERSION,
         signed: false,
       });
-      if (!persisted.alreadyExisted) this.queueEvents.emit('protocol');
+      if (!persisted.alreadyExisted) {
+        this.queueEvents.emit('protocol');
+        await this.queues.enqueue(
+          QUEUE.protocolAutoRelease,
+          'auto-release',
+          { userId, protocolId: persisted.protocolId },
+          {
+            delay: PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS,
+            jobId: `auto-release-${persisted.protocolId}`,
+          },
+        );
+      }
     } catch (persistErr) {
       this.logger.error(
         { userId, err: persistErr },
@@ -320,7 +346,10 @@ export class ProtocolGenerationWorker implements OnModuleInit {
     }
   }
 
-  private async goalForFallback(userId: string, sessionId: string): Promise<GenerationGoal> {
+  private async constraintsForFallback(
+    userId: string,
+    sessionId: string,
+  ): Promise<{ goal: GenerationGoal; preferredDays: Weekday[] }> {
     try {
       const [session] = await this.db.runAsUser(userId, 'USER', (tx) =>
         tx
@@ -330,9 +359,14 @@ export class ProtocolGenerationWorker implements OnModuleInit {
           .limit(1),
       );
       const parsed = anamnesisStructuredSchema.safeParse(session?.dataBlock3);
-      return parsed.success ? toGenerationGoal(parsed.data.primaryGoal) : 'CONDITIONING';
+      return parsed.success
+        ? {
+            goal: toGenerationGoal(parsed.data.primaryGoal),
+            preferredDays: parsed.data.preferredDays,
+          }
+        : { goal: 'CONDITIONING', preferredDays: [] };
     } catch {
-      return 'CONDITIONING';
+      return { goal: 'CONDITIONING', preferredDays: [] };
     }
   }
 }

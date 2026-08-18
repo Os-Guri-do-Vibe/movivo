@@ -1,85 +1,178 @@
 'use client';
 
-import { AlertTriangle, CheckCircle2, Clock3, RefreshCw, ShieldAlert } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  ClipboardCheck,
+  Eye,
+  Pencil,
+  RefreshCw,
+  ShieldAlert,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { Button } from '@/components/ui/button';
+import { AnamnesisAnswersModal } from '@/components/dashboard/protocol-anamnesis-answers';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { captureDashboardEvent, getQueue } from '@/lib/dashboard-api';
-import type { QueueItem, QueueResponse, QueueSeverity } from '@/lib/dashboard-types';
+import type { QueueItem, QueueResponse } from '@/lib/dashboard-types';
 import { cn } from '@/lib/utils';
 
-const PRIORITY: Record<QueueSeverity, number> = { SAFETY: 0, ALERT: 1, ROUTINE: 2 };
 const FALLBACK_INTERVAL_MS = 30_000;
 const LABELS = {
   SAFETY: { label: 'Segurança · ação prioritária', icon: ShieldAlert },
   ALERT: { label: 'Atenção', icon: AlertTriangle },
-  ROUTINE: { label: 'Revisão de rotina', icon: Clock3 },
+  ROUTINE: { label: 'Revisão de rotina', icon: ClipboardCheck },
 } as const;
 
+/** Cada categoria da fila do profissional ordena só por idade — mais antigo primeiro. */
 export function sortQueue(items: QueueItem[]): QueueItem[] {
-  return [...items].sort(
-    (a, b) => PRIORITY[a.severity] - PRIORITY[b.severity] || b.ageMinutes - a.ageMinutes,
-  );
+  return [...items].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
-function formatAge(minutes: number): string {
-  if (minutes < 1) return 'agora';
-  if (minutes < 60) return `há ${Math.floor(minutes)} min`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `há ${hours} h`;
-  return `há ${Math.floor(hours / 24)} d`;
+/**
+ * `PENDING_SIGNATURE` é o status de praticamente todo item desta fila (é o motivo
+ * dele estar aqui) — exibi-lo é ruído, não informação. Outros valores (ex.: o
+ * `BLOCKED` do PAR-Q) continuam aparecendo normalmente.
+ *
+ * Exportada (achado 2026-08-18): `DashboardService.item()` no backend sempre grava
+ * `summary = status` — `queue-detail.tsx` reusa o mesmo filtro pro cabeçalho da tela de
+ * revisão, que renderizava `item.summary` cru e mostrava "PENDING_SIGNATURE" como se
+ * fosse uma descrição do protocolo.
+ */
+export function meaningfulText(value: string): string {
+  return value === 'PENDING_SIGNATURE' ? '' : value;
+}
+
+function iconLinkClass(): string {
+  return cn(buttonVariants({ variant: 'ghost', size: 'icon' }));
+}
+
+/**
+ * Protocolo gerado pela IA e ainda não assinado dispara sozinho 1h após criado
+ * (`PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS`, `protocol-generation.worker.ts`) — aprovado
+ * e enviado ao WhatsApp automaticamente se o CREF não agir antes. Só existe pra
+ * protocolos `OPTIONAL` (é o único caso com job de auto-liberação agendado).
+ */
+function formatAutoRelease(autoReleaseAt: string): string {
+  const minutesLeft = Math.round((new Date(autoReleaseAt).getTime() - Date.now()) / 60_000);
+  if (minutesLeft <= 0) return 'Disparando automaticamente para o WhatsApp…';
+  const when = minutesLeft < 60 ? `${minutesLeft} min` : `${Math.round(minutesLeft / 60)} h`;
+  return `Dispara automaticamente pro WhatsApp em ${when} se ninguém agir antes`;
 }
 
 function QueueCard({ item }: { item: QueueItem }) {
   const { label, icon: Icon } = LABELS[item.severity];
+  const detailHref = `/dashboard/fila/${item.kind.toLowerCase()}/${encodeURIComponent(item.id)}`;
+  const status = meaningfulText(item.status);
+  const summary = meaningfulText(item.summary);
+  const [anamnesisOpen, setAnamnesisOpen] = useState(false);
+  // Olho aparece nas duas caixas da fila (achado 2026-08-18) — só não existe pra
+  // handoff/check-in, que nem aparecem nesta tela (ver docstring de `queue()` no backend).
+  const showEye = item.kind === 'PROTOCOL' || item.kind === 'PARQ';
+
+  function track(view?: 'anamnesis') {
+    captureDashboardEvent('cref_queue_item_opened', {
+      kind: item.kind,
+      severity: item.severity,
+      ...(view ? { view } : {}),
+    });
+  }
+
   return (
-    <li>
-      <Link
-        href={`/dashboard/fila/${item.kind.toLowerCase()}/${encodeURIComponent(item.id)}`}
-        onClick={() =>
-          captureDashboardEvent('cref_queue_item_opened', {
-            kind: item.kind,
-            severity: item.severity,
-          })
-        }
-        className={cn(
-          'group block rounded-xl border bg-card p-4 text-card-foreground shadow-sm transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring sm:p-5',
-          item.severity === 'SAFETY' ? 'border-coral border-l-4' : 'border-border',
-        )}
-      >
-        <div className="flex flex-wrap items-start justify-between gap-3">
+    <li
+      className={cn(
+        'rounded-xl border bg-card p-3 text-card-foreground shadow-sm sm:p-4',
+        item.severity === 'SAFETY' ? 'border-coral border-l-4' : 'border-border',
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span
+            aria-hidden="true"
+            className={cn(
+              'flex size-10 shrink-0 items-center justify-center rounded-full',
+              item.severity === 'SAFETY'
+                ? 'bg-destructive text-destructive-foreground'
+                : item.severity === 'ALERT'
+                  ? 'bg-secondary text-secondary-foreground'
+                  : 'bg-accent text-accent-foreground',
+            )}
+          >
+            <Icon aria-hidden="true" className="size-5" />
+          </span>
           <div className="min-w-0">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span
-                className={cn(
-                  'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold',
-                  item.severity === 'SAFETY'
-                    ? 'bg-destructive text-destructive-foreground'
-                    : item.severity === 'ALERT'
-                      ? 'bg-secondary text-secondary-foreground'
-                      : 'bg-accent text-accent-foreground',
-                )}
-              >
-                <Icon aria-hidden="true" className="size-4" />
-                {label}
-              </span>
-              <span className="font-mono text-xs text-muted-foreground">
-                {formatAge(item.ageMinutes)}
-              </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-h3 font-semibold">{item.title}</h3>
+              {item.severity !== 'ROUTINE' ? (
+                <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-semibold text-secondary-foreground">
+                  {label}
+                </span>
+              ) : null}
             </div>
-            <h2 className="text-h3 font-semibold group-hover:underline group-hover:underline-offset-4">
-              {item.title}
-            </h2>
-            {item.summary ? (
-              <p className="mt-1 max-w-3xl text-body text-muted-foreground">{item.summary}</p>
+            {summary ? (
+              <p className="mt-1 max-w-3xl text-body text-muted-foreground">{summary}</p>
             ) : null}
           </div>
-          <span className="rounded-md border border-border px-2 py-1 font-mono text-xs text-muted-foreground">
-            {item.status}
-          </span>
         </div>
-      </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          {status ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 font-mono text-xs text-muted-foreground">
+              <span aria-hidden="true" className="size-1.5 rounded-full bg-verde-pulso" />
+              {status}
+            </span>
+          ) : null}
+          {showEye ? (
+            <button
+              type="button"
+              onClick={() => {
+                track('anamnesis');
+                setAnamnesisOpen(true);
+              }}
+              className={iconLinkClass()}
+              aria-label="Ver respostas da anamnese"
+              title="Ver respostas da anamnese"
+            >
+              <Eye aria-hidden="true" />
+            </button>
+          ) : null}
+          <Link
+            href={detailHref}
+            onClick={() => track()}
+            className={iconLinkClass()}
+            aria-label={item.kind === 'PROTOCOL' ? 'Abrir protocolo' : 'Abrir caso'}
+            title={item.kind === 'PROTOCOL' ? 'Abrir protocolo' : 'Abrir caso'}
+          >
+            <Pencil aria-hidden="true" />
+          </Link>
+          {item.autoReleaseAt ? (
+            <span className="group relative inline-flex">
+              <button
+                type="button"
+                className={cn(iconLinkClass(), 'cursor-default hover:bg-transparent')}
+                aria-label={formatAutoRelease(item.autoReleaseAt)}
+              >
+                <Clock aria-hidden="true" />
+              </button>
+              <span
+                role="tooltip"
+                className="pointer-events-none absolute bottom-full right-0 z-10 mb-2 w-max max-w-64 rounded-lg bg-popover px-3 py-1.5 text-xs text-popover-foreground opacity-0 shadow-md ring-1 ring-border transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+              >
+                {formatAutoRelease(item.autoReleaseAt)}
+              </span>
+            </span>
+          ) : null}
+        </div>
+      </div>
+      {showEye ? (
+        <AnamnesisAnswersModal
+          kind={item.kind === 'PROTOCOL' ? 'PROTOCOL' : 'PARQ'}
+          id={item.id}
+          open={anamnesisOpen}
+          onOpenChange={setAnamnesisOpen}
+        />
+      ) : null}
     </li>
   );
 }
@@ -99,7 +192,8 @@ export function QueueBoard() {
     setError('');
     try {
       const next = await getQueue(signal);
-      const newItems = next.items.filter((item) => !knownIds.current.has(item.id));
+      const allItems = [...next.mandatory, ...next.optional];
+      const newItems = allItems.filter((item) => !knownIds.current.has(item.id));
       if (knownIds.current.size > 0 && newItems.length > 0) {
         const safety = newItems.filter((item) => item.severity === 'SAFETY').length;
         setAnnouncement(
@@ -108,7 +202,7 @@ export function QueueBoard() {
             : `${newItems.length} novo(s) item(ns) na fila.`,
         );
       }
-      knownIds.current = new Set(next.items.map((item) => item.id));
+      knownIds.current = new Set(allItems.map((item) => item.id));
       setData(next);
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === 'AbortError') return;
@@ -162,7 +256,9 @@ export function QueueBoard() {
     };
   }, [load]);
 
-  const items = data ? sortQueue(data.items) : [];
+  const mandatory = data ? sortQueue(data.mandatory) : [];
+  const optional = data ? sortQueue(data.optional) : [];
+  const total = mandatory.length + optional.length;
 
   if (!data && !error) {
     return (
@@ -194,14 +290,7 @@ export function QueueBoard() {
             <h1 id="queue-title" className="text-h1 font-bold">
               Fila de supervisão
             </h1>
-            <span className="rounded-full bg-petroleo px-2.5 py-1 font-mono text-xs text-nevoa">
-              {items.length}
-            </span>
           </div>
-          <p className="mt-2 max-w-3xl text-body text-muted-foreground">
-            Casos de segurança aparecem primeiro. Revise o contexto antes de editar, assinar ou
-            liberar.
-          </p>
         </div>
         <Button type="button" variant="outline" onClick={() => void load()} disabled={refreshing}>
           <RefreshCw aria-hidden="true" className={refreshing ? 'animate-spin' : undefined} />
@@ -209,12 +298,9 @@ export function QueueBoard() {
         </Button>
       </div>
 
-      <p
-        className="mb-4 flex items-center gap-2 text-xs text-muted-foreground"
-        role="status"
-        aria-live="polite"
-      >
-        <CheckCircle2 aria-hidden="true" className="size-4" />
+      {/* Status de conexão em tempo real: só para leitor de tela — a pedido do usuário,
+          não aparece mais como texto visível no painel. */}
+      <p className="sr-only" role="status" aria-live="polite">
         {liveStatus === 'CONNECTED'
           ? 'Atualização em tempo real ativa.'
           : liveStatus === 'CONNECTING'
@@ -233,16 +319,37 @@ export function QueueBoard() {
         </p>
       ) : null}
 
-      {items.length === 0 ? (
+      {total === 0 ? (
         <div className="rounded-xl border border-dashed border-input bg-card px-6 py-12 text-center">
           <CheckCircle2 aria-hidden="true" className="mx-auto size-10 text-muted-foreground" />
           <h2 className="mt-4 text-h3 font-semibold">Fila em dia</h2>
           <p className="mt-2 text-body text-muted-foreground">
-            Não há revisões, handoffs ou liberações PAR-Q pendentes agora.
+            Não há protocolos nem liberações PAR-Q pendentes agora.
           </p>
         </div>
       ) : (
-        <ol className="space-y-3" aria-label="Itens pendentes por prioridade">
+        <div className="space-y-8">
+          <QueueSection id="mandatory" title="Revisão Humana Obrigatória" items={mandatory} />
+          <QueueSection id="optional" title="Revisão Humana Opcional" items={optional} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function QueueSection({ id, title, items }: { id: string; title: string; items: QueueItem[] }) {
+  const headingId = `queue-section-${id}`;
+  return (
+    <section aria-labelledby={headingId} className="rounded-xl border border-border p-4 sm:p-6">
+      <h2 id={headingId} className="mb-3 text-h2 font-bold">
+        {title}
+      </h2>
+      {items.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-input bg-card px-4 py-6 text-center text-body text-muted-foreground">
+          Nada aqui agora.
+        </p>
+      ) : (
+        <ol className="space-y-3" aria-label={title}>
           {items.map((item) => (
             <QueueCard key={`${item.kind}:${item.id}`} item={item} />
           ))}

@@ -35,15 +35,23 @@ describe('parsers do contrato do dashboard', () => {
 
   it('recusa tipos, prioridades, protocolos e operações fora do contrato', () => {
     expect(() => parseQueueResponse(null)).toThrow(/fila inválida/i);
-    expect(() => parseQueueResponse({ items: [null] })).toThrow(/item da fila inválido/i);
-    expect(() => parseQueueResponse({ items: [{ ...queueResponse.items[0], id: '' }] })).toThrow(
-      /incompleto/i,
+    expect(() => parseQueueResponse({ mandatory: [null], optional: [] })).toThrow(
+      /item da fila inválido/i,
     );
     expect(() =>
-      parseQueueResponse({ items: [{ ...queueResponse.items[0], kind: 'UNKNOWN' }] }),
+      parseQueueResponse({ mandatory: [{ ...queueResponse.mandatory[0], id: '' }], optional: [] }),
+    ).toThrow(/incompleto/i);
+    expect(() =>
+      parseQueueResponse({
+        mandatory: [{ ...queueResponse.mandatory[0], kind: 'UNKNOWN' }],
+        optional: [],
+      }),
     ).toThrow(DashboardApiError);
     expect(() =>
-      parseQueueResponse({ items: [{ ...queueResponse.items[0], severity: 'RED' }] }),
+      parseQueueResponse({
+        mandatory: [{ ...queueResponse.mandatory[0], severity: 'RED' }],
+        optional: [],
+      }),
     ).toThrow(/prioridade/i);
     expect(() =>
       parseQueueDetail({
@@ -83,12 +91,13 @@ describe('parsers do contrato do dashboard', () => {
 
     expect(
       parseQueueResponse({
-        counts: { total: 3, ignored: '3', infinity: Number.POSITIVE_INFINITY },
-        items: [{ ...queueResponse.items[0], ageMinutes: -2, summary: null, status: null }],
+        counts: { mandatory: 1, optional: 0, total: 3, ignored: '3' },
+        mandatory: [{ ...queueResponse.mandatory[0], ageMinutes: -2, summary: null, status: null }],
+        optional: [],
       }),
     ).toMatchObject({
-      counts: { total: 3 },
-      items: [{ ageMinutes: 0, summary: '', status: 'PENDENTE' }],
+      counts: { mandatory: 1, optional: 0, total: 3 },
+      mandatory: [{ ageMinutes: 0, summary: '', status: 'PENDENTE' }],
     });
   });
 

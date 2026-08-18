@@ -4,7 +4,11 @@ import * as React from 'react';
 
 import {
   ageInYears,
+  MAX_HEIGHT_CM,
+  MAX_WEIGHT_KG,
   MIN_AGE_YEARS,
+  MIN_HEIGHT_CM,
+  MIN_WEIGHT_KG,
   UNDER_AGE_MESSAGE,
   WHATSAPP_OPERATIONAL_NOTICE,
   type BiologicalSex,
@@ -34,9 +38,31 @@ export interface Step1Data {
   name: string;
   birthDate: string;
   biologicalSex: BiologicalSex | null;
+  heightCm: string;
+  weightKg: string;
   phoneCountryIso: PhoneCountryIso;
   phoneMasked: string;
   email: string;
+}
+
+function isHeightValid(heightCm: string): boolean {
+  const value = Number(heightCm);
+  return (
+    heightCm.trim().length > 0 &&
+    Number.isFinite(value) &&
+    value >= MIN_HEIGHT_CM &&
+    value <= MAX_HEIGHT_CM
+  );
+}
+
+function isWeightValid(weightKg: string): boolean {
+  const value = Number(weightKg.replace(',', '.'));
+  return (
+    weightKg.trim().length > 0 &&
+    Number.isFinite(value) &&
+    value >= MIN_WEIGHT_KG &&
+    value <= MAX_WEIGHT_KG
+  );
 }
 
 export function Step1Registration({
@@ -74,6 +100,8 @@ export function Step1Registration({
     data.birthDate.length === 10 &&
     !underAge &&
     data.biologicalSex !== null &&
+    isHeightValid(data.heightCm) &&
+    isWeightValid(data.weightKg) &&
     phoneVerified &&
     allRequiredAccepted &&
     !saving;
@@ -120,6 +148,34 @@ export function Step1Registration({
         onToggle={(biologicalSex) => onChange({ ...data, biologicalSex })}
         indicatorSide="left"
       />
+
+      <div className="grid grid-cols-2 gap-3">
+        <QuestionField>
+          <FieldLabel htmlFor="heightCm">Qual é a sua altura? (cm)</FieldLabel>
+          <TextInput
+            id="heightCm"
+            value={data.heightCm}
+            onChange={(heightCm) => onChange({ ...data, heightCm })}
+            type="text"
+            inputMode="numeric"
+            placeholder="Ex: 170"
+            maxLength={3}
+          />
+        </QuestionField>
+
+        <QuestionField>
+          <FieldLabel htmlFor="weightKg">Qual é o seu peso? (kg)</FieldLabel>
+          <TextInput
+            id="weightKg"
+            value={data.weightKg}
+            onChange={(weightKg) => onChange({ ...data, weightKg })}
+            type="text"
+            inputMode="decimal"
+            placeholder="Ex: 70"
+            maxLength={6}
+          />
+        </QuestionField>
+      </div>
 
       <QuestionField>
         <FieldLabel htmlFor="phone">Qual é o seu WhatsApp?</FieldLabel>

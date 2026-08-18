@@ -3,7 +3,7 @@ import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type * as AnamnesisApi from '@/lib/anamnesis-api';
-import type { SessionView } from '@/lib/anamnesis-api';
+import { AnamnesisApiError, type SessionView } from '@/lib/anamnesis-api';
 
 const patchStep = vi.fn();
 const recordConsents = vi.fn();
@@ -88,6 +88,8 @@ async function completeStep1(user: UserEvent) {
   await user.click(screen.getByRole('option', { name: 'Janeiro' }));
   await user.click(screen.getByRole('button', { name: '1 de Janeiro de 1990' }));
   await user.click(screen.getByRole('radio', { name: 'Masculino' }));
+  await user.type(screen.getByLabelText(/qual é a sua altura/i), '178');
+  await user.type(screen.getByLabelText(/qual é o seu peso/i), '75');
   await user.type(screen.getByLabelText(/whatsapp/i), '11999999999');
   await user.click(screen.getByText('simular verificação'));
   for (const label of ['Aceito.', 'Autorizo.', 'Estou ciente.']) {
@@ -160,6 +162,8 @@ describe('OnboardingWizard', () => {
     await user.click(screen.getByRole('option', { name: 'Janeiro' }));
     await user.click(screen.getByRole('button', { name: '1 de Janeiro de 1990' }));
     await user.click(screen.getByRole('radio', { name: 'Masculino' }));
+    await user.type(screen.getByLabelText(/qual é a sua altura/i), '178');
+    await user.type(screen.getByLabelText(/qual é o seu peso/i), '75');
     await user.click(screen.getByRole('button', { name: /Brasil, \+55/i }));
     await user.click(screen.getByRole('option', { name: /Portugal, DDI \+351/i }));
     await user.type(screen.getByLabelText(/whatsapp/i), '912345678');
@@ -271,6 +275,37 @@ describe('OnboardingWizard', () => {
     await completeStep3(user);
     expect(await screen.findByText(/Recebemos suas informações/)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/Q[1-9]\b|BLOQUEADO/);
+  });
+
+  it('409 no submit (telefone/e-mail já cadastrado) mostra o motivo real, não "tente de novo"', async () => {
+    const user = userEvent.setup();
+    submitAnamnesis.mockRejectedValue(
+      new AnamnesisApiError(409, ['Já existe um cadastro com este telefone ou e-mail.']),
+    );
+    render(
+      <OnboardingWizard
+        token="tok"
+        initial={{ ...SESSION, currentStep: 3, step1: { name: 'Fulano de Tal' } }}
+      />,
+    );
+    await completeStep3(user);
+    expect(
+      await screen.findByText('Já existe um cadastro com este telefone ou e-mail.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Tente de novo em instantes/)).not.toBeInTheDocument();
+  });
+
+  it('410 no submit (sessão expirada) orienta a recarregar, não a tentar de novo', async () => {
+    const user = userEvent.setup();
+    submitAnamnesis.mockRejectedValue(new AnamnesisApiError(410, []));
+    render(
+      <OnboardingWizard
+        token="tok"
+        initial={{ ...SESSION, currentStep: 3, step1: { name: 'Fulano de Tal' } }}
+      />,
+    );
+    await completeStep3(user);
+    expect(await screen.findByText(/sessão expirou/i)).toBeInTheDocument();
   });
 
   it('erro ao salvar mantém os dados na etapa 1', async () => {

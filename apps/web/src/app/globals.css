@@ -260,3 +260,28 @@
     }
   }
 }
+
+@layer utilities {
+  /*
+   * Scroll da sidebar (US: categorias expandidas podem passar da altura da tela).
+   * Fininha e na cor de marca — nunca a barra padrão do SO. `scrollbar-width`/
+   * `scrollbar-color` cobrem Firefox; `::-webkit-scrollbar-*` cobre Chrome/Safari/Edge.
+   */
+  .sidebar-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: var(--verde-pulso) transparent;
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .sidebar-scrollbar::-webkit-scrollbar-thumb {
+    background-color: var(--verde-pulso);
+    border-radius: 9999px;
+  }
+}

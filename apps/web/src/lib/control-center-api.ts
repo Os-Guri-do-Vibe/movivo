@@ -47,6 +47,9 @@ import {
   type ControlCenterSystemResponse,
   partnerDistributionResponseSchema,
   type PartnerDistributionResponse,
+  controlCenterIntegrationResponseSchema,
+  type ControlCenterIntegrationResponse,
+  type CreateWhatsappInstanceInput,
 } from '@movivo/shared';
 
 interface Parser<T> {
@@ -283,4 +286,16 @@ export function reviewKnowledgeDocument(
 
 export function getPartnerDistribution(signal?: AbortSignal): Promise<PartnerDistributionResponse> {
   return request('partners', partnerDistributionResponseSchema, signal);
+}
+
+/* --------- Sistema → Integração (EvolutionAPI, ferramenta INTERNA de teste) -------- */
+
+export function getIntegration(signal?: AbortSignal): Promise<ControlCenterIntegrationResponse> {
+  return request('integration', controlCenterIntegrationResponseSchema, signal);
+}
+
+export function createWhatsappInstance(
+  input: CreateWhatsappInstanceInput,
+): Promise<ControlCenterIntegrationResponse> {
+  return mutate('integration/whatsapp/instance', input, controlCenterIntegrationResponseSchema);
 }

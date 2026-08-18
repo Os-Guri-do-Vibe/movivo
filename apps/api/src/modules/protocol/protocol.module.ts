@@ -20,6 +20,7 @@ import { Module } from '@nestjs/common';
 import { AiCoachModule } from '../ai-coach/ai-coach.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { ProtocolController } from './protocol.controller';
+import { ProtocolAutoReleaseWorker } from './protocol-auto-release.worker';
 import { ProtocolGenerationWorker } from './protocol-generation.worker';
 import { ProtocolGeneratorService } from './protocol-generator.service';
 import { ProtocolRepository } from './protocol.repository';
@@ -38,6 +39,7 @@ import { ValidationService } from './validation/validation.service';
     ValidationService,
     ProtocolRepository,
     ProtocolGenerationWorker,
+    ProtocolAutoReleaseWorker,
   ],
   exports: [ProtocolGeneratorService, ValidationService],
 })

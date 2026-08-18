@@ -87,6 +87,7 @@ function makeSequencedService(
   decrypted: string[] = [],
 ) {
   const updateWhere = vi.fn(async () => []);
+  const updateSet = vi.fn(() => ({ where: updateWhere }));
   const insertValues = vi.fn(async () => []);
   const execute = vi.fn(async () => []);
   const forUpdate = vi.fn();
@@ -106,7 +107,7 @@ function makeSequencedService(
         Promise.resolve(result).then(resolve, reject);
       return chain;
     }),
-    update: vi.fn(() => ({ set: () => ({ where: updateWhere }) })),
+    update: vi.fn(() => ({ set: updateSet })),
     insert: vi.fn(() => ({ values: insertValues })),
     execute,
   } as never;
@@ -140,6 +141,7 @@ function makeSequencedService(
     service,
     append,
     enqueue,
+    updateSet,
     updateWhere,
     insertValues,
     execute,
@@ -163,6 +165,7 @@ const pendingProtocol = {
   signatureHash: null,
   professionalId: null,
   humanReviewRequired: true,
+  reviewUrgency: 'OPTIONAL' as const,
   generatedBy: 'AI_WITH_RULES',
 };
 
@@ -224,11 +227,16 @@ describe('DashboardService invariantes de mutacao', () => {
   });
 
   it('edita protocolo seguro, invalida assinatura anterior e audita hashes', async () => {
-    const { service, updateWhere, append, forUpdate } = makeSequencedService([[pendingProtocol]]);
+    const { service, updateSet, updateWhere, append, forUpdate } = makeSequencedService([
+      [pendingProtocol],
+    ]);
     await expect(
       service.editProtocol(actor, RESOURCE_ID, { content, reason: 'ajuste revisado pelo RT' }),
     ).resolves.toMatchObject({ status: 'PENDING_SIGNATURE', validation: 'PASS' });
     expect(updateWhere).toHaveBeenCalledOnce();
+    // Conteúdo editado por humano nunca sai sozinho: mesmo que o protocolo fosse
+    // `OPTIONAL` (fixture `pendingProtocol`), a edição força `MANDATORY`.
+    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ reviewUrgency: 'MANDATORY' }));
     expect(forUpdate).toHaveBeenCalledWith('update');
     expect(append).toHaveBeenCalledWith(
       expect.anything(),
@@ -374,7 +382,7 @@ describe('DashboardService invariantes de mutacao', () => {
 describe('DashboardService leituras operacionais', () => {
   it('libera leituras globais ao ADMIN, mas mantém atos profissionais CREF-only', async () => {
     const { service } = makeSequencedService([]);
-    await expect(service.queue(admin)).resolves.toMatchObject({ items: [] });
+    await expect(service.queue(admin)).resolves.toMatchObject({ mandatory: [], optional: [] });
     await expect(service.operations(admin)).resolves.toMatchObject({ replays: [] });
     expect(() => service.events(admin)).not.toThrow();
     await expect(
@@ -399,25 +407,44 @@ describe('DashboardService leituras operacionais', () => {
     ).rejects.toThrow('Acesso exclusivo ao profissional CREF');
   });
 
-  it('unifica e prioriza fila SAFETY, ALERT e rotina', async () => {
-    const now = new Date('2026-08-03T12:00:00.000Z');
+  it('mandatory é PAR-Q bloqueado + protocolo MANDATORY; optional é só protocolo OPTIONAL (com prazo)', async () => {
+    const oldest = new Date('2026-08-01T12:00:00.000Z');
+    const middle = new Date('2026-08-02T12:00:00.000Z');
+    const newest = new Date('2026-08-03T12:00:00.000Z');
     const { service } = makeSequencedService([
-      [{ id: RESOURCE_ID, createdAt: now, status: 'PENDING_SIGNATURE', name: 'Maria Teste' }],
       [
         {
+          id: RESOURCE_ID,
+          createdAt: newest,
+          status: 'PENDING_SIGNATURE',
+          name: 'Maria Teste',
+          reviewUrgency: 'MANDATORY',
+        },
+        {
           id: '44444444-4444-4444-8444-444444444444',
-          createdAt: now,
-          level: 'ALERT',
-          reason: 'CHECKIN_REVISAO',
-          sourceType: 'CHECKIN',
+          createdAt: middle,
+          status: 'PENDING_SIGNATURE',
+          name: 'Bruno Teste',
+          reviewUrgency: 'OPTIONAL',
         },
       ],
-      [{ id: '55555555-5555-4555-8555-555555555555', createdAt: now }],
+      [{ id: '55555555-5555-4555-8555-555555555555', createdAt: oldest }],
     ]);
     const result = await service.queue(actor);
-    expect(result.counts).toEqual({ SAFETY: 1, ALERT: 1, ROUTINE: 1, total: 3 });
-    expect(result.items.map((item) => item.kind)).toEqual(['PARQ', 'CHECKIN', 'PROTOCOL']);
-    expect(result.items.at(-1)?.title).toBe('Protocolo para Revisão: Maria Teste');
+    expect(result.counts).toEqual({ mandatory: 2, optional: 1, total: 3 });
+    // mandatory: PAR-Q bloqueado (mais antigo) + o protocolo MANDATORY (mais novo) —
+    // mesma categoria "exige ação humana, nunca sai sozinho", ordenado por idade.
+    expect(result.mandatory.map((item) => ({ kind: item.kind, title: item.title }))).toEqual([
+      { kind: 'PARQ', title: 'PAR-Q aguarda decisao humana' },
+      { kind: 'PROTOCOL', title: 'Protocolo para Revisão: Maria Teste' },
+    ]);
+    expect(result.mandatory.every((item) => item.autoReleaseAt === null)).toBe(true);
+    expect(result.mandatory[1]?.severity).toBe('ALERT');
+    // optional: só o protocolo OPTIONAL, e ele sempre carrega prazo.
+    expect(result.optional.map((item) => item.title)).toEqual([
+      'Protocolo para Revisão: Bruno Teste',
+    ]);
+    expect(result.optional[0]?.autoReleaseAt).toBe('2026-08-02T13:00:00.000Z');
   });
 
   it('calcula funil/SLA, primeiro treino e replays anonimizados', async () => {
@@ -518,6 +545,185 @@ describe('DashboardService leituras operacionais', () => {
     expect(append).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ action: 'HEALTH_DATA_VIEWED' }),
+    );
+  });
+
+  it('anamnesisAnswers: devolve os 3 blocos e registra leitura sensivel', async () => {
+    const validPersonal = {
+      name: 'Maria Teste',
+      birthDate: '1990-01-01',
+      biologicalSex: 'FEMALE',
+      heightCm: 165,
+      weightKg: 60,
+      phoneNumber: '+5511999999999',
+    };
+    const validRoutine = {
+      primaryGoal: 'GAIN_MUSCLE',
+      trainingStatus: 'NEVER',
+      experience: 'BEGINNER',
+      daysPerWeek: 3,
+      sessionDuration: 'M45_TO_60',
+      location: 'HOME',
+      preferredPeriod: 'MORNING',
+    };
+    const { service, append, decryptHealth } = makeSequencedService(
+      [
+        [pendingProtocol],
+        [
+          {
+            id: 'session-1',
+            dataBlock1: validPersonal,
+            dataBlock2: Buffer.from('cipher'),
+            dataBlock3: validRoutine,
+            submittedAt: new Date('2026-08-01T13:00:00.000Z'),
+          },
+        ],
+      ],
+      'PASS',
+      [
+        JSON.stringify({
+          parq: {
+            version: 'parq-2026-07-v1',
+            answers: ['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9'].map((questionId) => ({
+              questionId,
+              answer: false,
+            })),
+          },
+        }),
+      ],
+    );
+
+    const result = await service.anamnesisAnswers(actor, RESOURCE_ID);
+
+    expect(result.userId).toBe(USER_ID);
+    expect(result.personal).toMatchObject({ name: 'Maria Teste' });
+    expect(result.routine).toMatchObject({ primaryGoal: 'GAIN_MUSCLE' });
+    expect(result.health).toMatchObject({ parq: { version: 'parq-2026-07-v1' } });
+    expect(result.health.parq?.answers).toHaveLength(9);
+    expect(decryptHealth).toHaveBeenCalledWith(Buffer.from('cipher'));
+    expect(append).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: 'HEALTH_DATA_VIEWED', userId: USER_ID }),
+    );
+  });
+
+  it('anamnesisAnswers: sem bloco de saude cifrado, health vazio sem chamar decryptHealth', async () => {
+    const { service, decryptHealth } = makeSequencedService([
+      [pendingProtocol],
+      [
+        {
+          id: 'session-1',
+          dataBlock1: {
+            name: 'Maria Teste',
+            birthDate: '1990-01-01',
+            biologicalSex: 'FEMALE',
+            heightCm: 165,
+            weightKg: 60,
+            phoneNumber: '+5511999999999',
+          },
+          dataBlock2: null,
+          dataBlock3: {
+            primaryGoal: 'GAIN_MUSCLE',
+            trainingStatus: 'NEVER',
+            experience: 'BEGINNER',
+            daysPerWeek: 3,
+            sessionDuration: 'M45_TO_60',
+            location: 'HOME',
+            preferredPeriod: 'MORNING',
+          },
+          submittedAt: new Date('2026-08-01T13:00:00.000Z'),
+        },
+      ],
+    ]);
+    const result = await service.anamnesisAnswers(actor, RESOURCE_ID);
+    expect(result.health).toEqual({});
+    expect(decryptHealth).not.toHaveBeenCalled();
+  });
+
+  it('anamnesisAnswers: protocolo inexistente lanca 404, sem consultar anamnese', async () => {
+    const { service } = makeSequencedService([[]]);
+    await expect(service.anamnesisAnswers(actor, RESOURCE_ID)).rejects.toThrow(
+      'Protocolo nao encontrado.',
+    );
+  });
+
+  it('anamnesisAnswers: protocolo existe mas sem sessao de anamnese submetida lanca 404', async () => {
+    const { service } = makeSequencedService([[pendingProtocol], []]);
+    await expect(service.anamnesisAnswers(actor, RESOURCE_ID)).rejects.toThrow(
+      'Anamnese do titular nao encontrada.',
+    );
+  });
+
+  // Segundo ponto de entrada pro mesmo parser (achado 2026-08-18: olho aparece nas duas
+  // caixas da fila) — aqui a sessao vem direto pelo id, sem passar por um protocolo.
+  it('parqAnamnesisAnswers: devolve os 3 blocos e registra leitura sensivel', async () => {
+    const validPersonal = {
+      name: 'Joao Teste',
+      birthDate: '1992-02-02',
+      biologicalSex: 'MALE',
+      heightCm: 180,
+      weightKg: 80,
+      phoneNumber: '+5511888888888',
+    };
+    const validRoutine = {
+      primaryGoal: 'LOSE_FAT',
+      trainingStatus: 'NEVER',
+      experience: 'BEGINNER',
+      daysPerWeek: 3,
+      sessionDuration: 'M45_TO_60',
+      location: 'HOME',
+      preferredPeriod: 'MORNING',
+    };
+    const { service, append, decryptHealth } = makeSequencedService(
+      [
+        [
+          {
+            id: RESOURCE_ID,
+            userId: USER_ID,
+            dataBlock1: validPersonal,
+            dataBlock2: Buffer.from('cipher'),
+            dataBlock3: validRoutine,
+            submittedAt: new Date('2026-08-01T13:00:00.000Z'),
+          },
+        ],
+      ],
+      'PASS',
+      [
+        JSON.stringify({
+          parq: {
+            version: 'parq-2026-07-v1',
+            answers: ['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9'].map((questionId) => ({
+              questionId,
+              answer: questionId === 'Q7',
+              ...(questionId === 'Q7' ? { detail: 'Dor no ombro' } : {}),
+            })),
+          },
+        }),
+      ],
+    );
+
+    const result = await service.parqAnamnesisAnswers(actor, RESOURCE_ID);
+
+    expect(result.userId).toBe(USER_ID);
+    expect(result.personal).toMatchObject({ name: 'Joao Teste' });
+    expect(result.routine).toMatchObject({ primaryGoal: 'LOSE_FAT' });
+    expect(result.health.parq?.answers).toHaveLength(9);
+    expect(result.health.parq?.answers).toContainEqual({
+      questionId: 'Q7',
+      answer: true,
+      detail: 'Dor no ombro',
+    });
+    expect(decryptHealth).toHaveBeenCalledWith(Buffer.from('cipher'));
+    expect(append).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: 'HEALTH_DATA_VIEWED', userId: USER_ID }),
+    );
+  });
+
+  it('parqAnamnesisAnswers: sessao inexistente lanca 404', async () => {
+    const { service } = makeSequencedService([[]]);
+    await expect(service.parqAnamnesisAnswers(actor, RESOURCE_ID)).rejects.toThrow(
+      'Anamnese nao encontrada.',
     );
   });
 

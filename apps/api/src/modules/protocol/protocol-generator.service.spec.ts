@@ -51,10 +51,36 @@ function validProtocolJson(exerciseId = 'goblet_squat'): string {
   });
 }
 
+/** 3 sessões (bate com `constraints.preferredDays` = MON/WED/FRI) — `weekday` opcional. */
+function threeSessionsJson(weekdays: (string | undefined)[]): string {
+  return JSON.stringify({
+    promptVersion: PROMPT_VERSION,
+    goal: 'GAIN_MUSCLE',
+    phase: 'ADAPTACAO',
+    weeklyFrequency: 3,
+    sessions: weekdays.map((weekday, i) => ({
+      dayLabel: `Dia ${i + 1}`,
+      ...(weekday ? { weekday } : {}),
+      focus: 'Corpo inteiro',
+      exercises: [
+        {
+          exerciseId: 'goblet_squat',
+          name: 'Agachamento goblet',
+          sets: 3,
+          reps: { min: 8, max: 12 },
+          loadStrategy: 'DOUBLE_PROGRESSION',
+          restSeconds: 90,
+        },
+      ],
+    })),
+  });
+}
+
 const constraints: UserConstraints = {
   goal: 'GAIN_MUSCLE',
   level: 'INICIANTE',
   daysPerWeek: 3,
+  preferredDays: ['MON', 'WED', 'FRI'],
   location: 'FULL_GYM',
   equipment: ['halteres'],
   emphasis: [],
@@ -74,7 +100,7 @@ function makeService(responses: string[]) {
   } as unknown as LlmRouter;
   const logger = { setContext: vi.fn(), warn: vi.fn(), info: vi.fn() };
   const service = new ProtocolGeneratorService(llm, logger as never);
-  return { service, calls };
+  return { service, calls, logger };
 }
 
 const command = { userId: 'u-1', user: { name: 'João' }, constraints };
@@ -117,6 +143,28 @@ describe('ProtocolGeneratorService', () => {
     expect(userMessage).not.toContain('ABCDE');
   });
 
+  // Achado 2026-08-18: sem os dias REAIS declarados, a IA gerava sessões genéricas sem
+  // vínculo com a rotina do aluno (podendo entregar menos sessões do que dias declarados).
+  it('exige uma sessão por dia real declarado, com o campo weekday no schema', async () => {
+    const { service, calls } = makeService([validProtocolJson()]);
+    await service.generate(command);
+    const req = calls[0];
+    if (!req) throw new Error('esperava uma chamada ao LLM');
+    expect(req.system).toContain('"weekday"'); // schema com o campo novo
+    const userMessage = req.messages[0]?.content ?? '';
+    expect(userMessage).toContain('MON, WED, FRI');
+    expect(userMessage).toContain('EXATAMENTE uma sessão por dia');
+  });
+
+  it('sem preferredDays, não força a instrução de dias reais no prompt', async () => {
+    const { service, calls } = makeService([validProtocolJson()]);
+    await service.generate({ ...command, constraints: { ...constraints, preferredDays: [] } });
+    const req = calls[0];
+    if (!req) throw new Error('esperava uma chamada ao LLM');
+    const userMessage = req.messages[0]?.content ?? '';
+    expect(userMessage).not.toContain('Dias da semana em que o aluno vai treinar');
+  });
+
   it('tolera JSON dentro de cercas de código (```json)', async () => {
     const fenced = '```json\n' + validProtocolJson() + '\n```';
     const { service } = makeService([fenced]);
@@ -142,6 +190,54 @@ describe('ProtocolGeneratorService', () => {
     const { service } = makeService([validProtocolJson('exercicio_fantasma')]);
     const result = await service.generate(command);
     expect(result.unknownExerciseIds).toContain('exercicio_fantasma');
+  });
+
+  // Achado 2026-08-18 (evidência real de testes ponta a ponta): o GPT-4.1 devolvia
+  // "weekday" ausente em TODAS as sessões mesmo com instrução enfática no prompt —
+  // reforço determinístico por posição em vez de continuar apostando em texto de prompt.
+  describe('backfill de "weekday" ausente (achado 2026-08-18)', () => {
+    it('todas as sessões sem weekday + contagem bate com preferredDays → preenche por posição', async () => {
+      const { service, logger } = makeService([
+        threeSessionsJson([undefined, undefined, undefined]),
+      ]);
+      const result = await service.generate(command);
+      expect(result.structure.sessions.map((s) => s.weekday)).toEqual(['MON', 'WED', 'FRI']);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ preferredDays: ['MON', 'WED', 'FRI'] }),
+        expect.stringContaining('preenchendo por posição'),
+      );
+    });
+
+    it('sessão com weekday parcialmente presente → NÃO mexe (deixa o validador decidir)', async () => {
+      const { service } = makeService([threeSessionsJson(['MON', undefined, 'FRI'])]);
+      const result = await service.generate(command);
+      expect(result.structure.sessions.map((s) => s.weekday)).toEqual(['MON', undefined, 'FRI']);
+    });
+
+    it('todas as sessões já com weekday certo → não mexe, não loga', async () => {
+      const { service, logger } = makeService([threeSessionsJson(['MON', 'WED', 'FRI'])]);
+      const result = await service.generate(command);
+      expect(result.structure.sessions.map((s) => s.weekday)).toEqual(['MON', 'WED', 'FRI']);
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.stringContaining('preenchendo por posição'),
+      );
+    });
+
+    it('contagem de sessões diferente de preferredDays → NÃO preenche (deixa SESSION_COUNT_MISMATCH pegar)', async () => {
+      const { service } = makeService([validProtocolJson()]); // 1 sessão só, preferredDays tem 3
+      const result = await service.generate(command);
+      expect(result.structure.sessions.map((s) => s.weekday)).toEqual([undefined]);
+    });
+
+    it('preferredDays vazio → NÃO preenche', async () => {
+      const { service } = makeService([threeSessionsJson([undefined, undefined, undefined])]);
+      const result = await service.generate({
+        ...command,
+        constraints: { ...constraints, preferredDays: [] },
+      });
+      expect(result.structure.sessions.every((s) => s.weekday === undefined)).toBe(true);
+    });
   });
 });
 

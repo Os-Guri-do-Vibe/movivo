@@ -116,20 +116,20 @@ const EMPHASIS_ICON_URLS: Readonly<Record<VisibleEmphasisRegion, string>> = {
   GLUTES: 'https://img.icons8.com/color/100/glutes.png',
   CALVES: 'https://img.icons8.com/color/100/calves.png',
 };
-const STATUS_ITEMS: { value: TrainingStatus; label: string }[] = [
+export const STATUS_ITEMS: { value: TrainingStatus; label: string }[] = [
   { value: 'NEVER', label: 'Nunca treinei' },
   { value: 'STOPPED', label: 'Estou parado' },
   { value: 'OCCASIONAL', label: 'Treino ocasionalmente' },
   { value: 'REGULAR', label: 'Treino regularmente' },
 ];
-const STOPPED_FOR_ITEMS: { value: StoppedFor; label: string }[] = [
+export const STOPPED_FOR_ITEMS: { value: StoppedFor; label: string }[] = [
   { value: 'LT_3_MONTHS', label: 'Menos de 1 mês' },
   { value: 'M3_TO_6', label: 'Entre 1 e 3 meses' },
   { value: 'M6_TO_12', label: 'Entre 4 e 6 meses' },
   { value: 'Y1_TO_2', label: 'Entre 7 e 12 meses' },
   { value: 'GT_2_YEARS', label: 'Mais de 1 ano' },
 ];
-const EXPERIENCE_ITEMS: { value: TrainingExperience; label: string }[] = [
+export const EXPERIENCE_ITEMS: { value: TrainingExperience; label: string }[] = [
   { value: 'BEGINNER', label: 'Iniciante: nunca treinei ou ainda preciso de bastante orientação' },
   {
     value: 'INTERMEDIATE',
@@ -140,7 +140,7 @@ const EXPERIENCE_ITEMS: { value: TrainingExperience; label: string }[] = [
     label: 'Avançado: treino consistentemente e tenho experiência com controle de cargas',
   },
 ];
-const ACTIVITY_ITEMS: { value: PastActivity; label: string }[] = [
+export const ACTIVITY_ITEMS: { value: PastActivity; label: string }[] = [
   { value: 'NONE', label: 'Nenhuma' },
   { value: 'WEIGHT_TRAINING', label: 'Musculação' },
   { value: 'WALK_RUN', label: 'Corrida' },
@@ -156,7 +156,7 @@ const ACTIVITY_ITEMS: { value: PastActivity; label: string }[] = [
 const ACTIVITY_VALUES_EXCEPT_NONE = ACTIVITY_ITEMS.filter((item) => item.value !== 'NONE').map(
   (item) => item.value,
 );
-const BARRIER_ITEMS: { value: ConsistencyBarrier; label: string }[] = [
+export const BARRIER_ITEMS: { value: ConsistencyBarrier; label: string }[] = [
   { value: 'LACK_OF_TIME', label: 'Falta de tempo' },
   { value: 'LACK_OF_MOTIVATION', label: 'Falta de motivação' },
   { value: 'DONT_KNOW_WHAT_TO_DO', label: 'Não saber o que fazer' },
@@ -172,7 +172,7 @@ const DAYS_ITEMS = [1, 2, 3, 4, 5, 6, 7].map((n) => ({
   value: String(n),
   label: `${n} dia${n > 1 ? 's' : ''}`,
 }));
-const WEEKDAY_ITEMS: { value: Weekday; label: string }[] = [
+export const WEEKDAY_ITEMS: { value: Weekday; label: string }[] = [
   { value: 'MON', label: 'Segunda' },
   { value: 'TUE', label: 'Terça' },
   { value: 'WED', label: 'Quarta' },
@@ -181,7 +181,7 @@ const WEEKDAY_ITEMS: { value: Weekday; label: string }[] = [
   { value: 'SAT', label: 'Sábado' },
   { value: 'SUN', label: 'Domingo' },
 ];
-const DURATION_ITEMS: { value: SessionDuration; label: string }[] = [
+export const DURATION_ITEMS: { value: SessionDuration; label: string }[] = [
   { value: 'LT_30', label: 'Até 20 minutos' },
   { value: 'M30_TO_45', label: 'Aproximadamente 30 minutos' },
   { value: 'M45_TO_60', label: 'Aproximadamente 45 minutos' },
@@ -194,7 +194,7 @@ const LOCATION_ITEMS = (Object.keys(TRAINING_LOCATION_LABELS) as TrainingLocatio
     label: TRAINING_LOCATION_LABELS[value],
   }),
 );
-const PERIOD_ITEMS: { value: PreferredPeriod; label: string }[] = [
+export const PERIOD_ITEMS: { value: PreferredPeriod; label: string }[] = [
   { value: 'MORNING', label: 'Manhã' },
   { value: 'AFTERNOON', label: 'Tarde' },
   { value: 'NIGHT', label: 'Noite' },

@@ -5,6 +5,7 @@ import * as React from 'react';
 import { PARQ_DECLARATIONS_VERSION, PARQ_VERSION, type BiologicalSex } from '@movivo/shared';
 
 import {
+  AnamnesisApiError,
   parsePhoneE164,
   patchStep,
   recordConsents,
@@ -27,6 +28,8 @@ function step1FromServer(raw: unknown): Partial<Step1Data> {
     name: typeof r.name === 'string' ? r.name : undefined,
     birthDate: typeof r.birthDate === 'string' ? r.birthDate : undefined,
     biologicalSex: (r.biologicalSex as BiologicalSex | undefined) ?? undefined,
+    heightCm: typeof r.heightCm === 'number' ? String(r.heightCm) : undefined,
+    weightKg: typeof r.weightKg === 'number' ? String(r.weightKg) : undefined,
     phoneCountryIso: parsedPhone?.countryIso,
     phoneMasked: parsedPhone?.phoneMasked,
     email: typeof r.email === 'string' ? r.email : undefined,
@@ -50,6 +53,8 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
     name: s1.name ?? '',
     birthDate: s1.birthDate ?? '',
     biologicalSex: s1.biologicalSex ?? null,
+    heightCm: s1.heightCm ?? '',
+    weightKg: s1.weightKg ?? '',
     phoneCountryIso: s1.phoneCountryIso ?? 'BR',
     phoneMasked: s1.phoneMasked ?? '',
     email: s1.email ?? '',
@@ -75,6 +80,8 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
         name: step1.name.trim(),
         birthDate: step1.birthDate,
         biologicalSex: step1.biologicalSex,
+        heightCm: Number(step1.heightCm),
+        weightKg: Number(step1.weightKg.replace(',', '.')),
         phoneNumber: toE164(step1.phoneCountryIso, step1.phoneMasked),
         email: step1.email.trim() || undefined,
       });
@@ -164,8 +171,20 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
       });
       const result = await submitAnamnesis(token);
       setOutcome(result.outcome);
-    } catch {
-      setError('Não conseguimos enviar sua avaliação. Tente de novo em instantes.');
+    } catch (err) {
+      if (err instanceof AnamnesisApiError && err.status === 409) {
+        // Telefone/e-mail já cadastrado (conta anterior) — "tente de novo" seria
+        // conselho errado aqui: reenviar com os mesmos dados falha sempre do mesmo
+        // jeito. O backend já manda o motivo certo em `issues`.
+        setError(
+          err.issues[0] ??
+            'Este telefone ou e-mail já está cadastrado. Fale com a gente se precisar de ajuda.',
+        );
+      } else if (err instanceof AnamnesisApiError && err.status === 410) {
+        setError('Sua sessão expirou. Recarregue a página para recomeçar o formulário.');
+      } else {
+        setError('Não conseguimos enviar sua avaliação. Tente de novo em instantes.');
+      }
     } finally {
       setSaving(false);
     }

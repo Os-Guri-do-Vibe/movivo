@@ -18,14 +18,18 @@
  *
  * # Fronteira do módulo (regra §12.5 — sem imports circulares)
  * Este módulo pode depender do **CORE** (config, banco, Redis, logger) por DI, já que
- * todos os providers do CORE são globais. Não pode importar outro módulo de domínio:
- * a comunicação entre domínios é por evento (`EventBusModule`) ou por fila (`JobsModule`).
+ * todos os providers do CORE são globais. Exceção deliberada já em uso (`ProtocolModule`,
+ * pra assinatura/edição de protocolo pelo profissional CREF): o ADMIN é um módulo de
+ * operação/gestão que legitimamente aciona ações de outros domínios, então importa
+ * `WhatsappModule` também — só pra reusar `EVOLUTION_TRANSPORT` (painel "Sistema →
+ * Integração"), sem duplicar o cliente HTTP confinado da EvolutionAPI.
  */
 import { Module } from '@nestjs/common';
 
 import { AuthModule } from '../auth/auth.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { ProtocolModule } from '../protocol/protocol.module';
+import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { AiConfigController } from './ai-config.controller';
 import { AiConfigService } from './ai-config.service';
 import { AuditService } from './audit.service';
@@ -49,7 +53,7 @@ import { PartnersController } from './partners.controller';
 import { PartnersService } from './partners.service';
 
 @Module({
-  imports: [AuthModule, JobsModule, ProtocolModule],
+  imports: [AuthModule, JobsModule, ProtocolModule, WhatsappModule],
   controllers: [
     DashboardController,
     ControlCenterController,

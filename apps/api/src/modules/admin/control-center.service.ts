@@ -1,6 +1,8 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   anamnesisStructuredSchema,
+  createWhatsappInstanceSchema,
+  type ControlCenterIntegrationResponse,
   attributionLabel,
   canonicalChannel,
   UNMAPPED_CHANNEL,
@@ -74,6 +76,7 @@ import { ragUsageDay, ragUsageKeys } from '../ai-coach/rag/rag-usage.keys';
 import { scrubPII } from '../ai-coach/llm/pii-scrubber';
 import { roleHasCapabilities } from '../auth/capabilities';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
+import { EVOLUTION_TRANSPORT, type EvolutionTransport } from '../whatsapp/evolution-transport';
 import { AuditService } from './audit.service';
 import { assessChurnRisk, CHURN_RISK_THRESHOLDS } from './churn-risk';
 import { buildFinancialProjection } from './financial-projection';
@@ -199,6 +202,7 @@ export class ControlCenterService {
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly redisKeys: RedisKeyBuilder,
     private readonly agentConfig: AgentConfigRepository,
+    @Inject(EVOLUTION_TRANSPORT) private readonly evolution: EvolutionTransport,
   ) {}
 
   /**
@@ -1879,6 +1883,58 @@ export class ControlCenterService {
         'Orçamento de erro acima de 100% significa meta estourada no período: é sinal de parar de entregar novidade e consertar.',
       ],
     );
+  }
+
+  /**
+   * Painel "Sistema → Integração" — ferramenta INTERNA de teste do fluxo de WhatsApp
+   * via EvolutionAPI. Sem tabela própria: a EvolutionAPI é a única fonte de verdade de
+   * qual instância existe (`currentInstanceName` via `/instance/fetchInstances`) e do
+   * estado real de conexão (`connectionState`, vocabulário confirmado open/connecting/
+   * close). O backend é um proxy fino.
+   */
+  async integration(): Promise<ControlCenterIntegrationResponse> {
+    if (!this.evolution.hasCredentials()) {
+      return this.envelope({
+        whatsapp: {
+          configured: false,
+          instanceName: null,
+          status: 'NOT_CONFIGURED' as const,
+          qrCodeBase64: null,
+        },
+      });
+    }
+    const instanceName = await this.evolution.currentInstanceName().catch(() => null);
+    const status = instanceName
+      ? await this.evolution.connectionState(instanceName).catch(() => 'DISCONNECTED' as const)
+      : ('NOT_CONFIGURED' as const);
+    // Enquanto aguarda o scan, busca o QR ATUAL a cada consulta (inclusive no polling
+    // do painel) — sem isso o QR só existia na resposta de `createInstance()` e
+    // qualquer refresh o perdia pra sempre, deixando o painel preso em "Conectando…"
+    // sem nada pra escanear (bug real, corrigido 2026-08-18). Só em `CONNECTING`: em
+    // `DISCONNECTED` chamar o mesmo endpoint reiniciaria a conexão a cada poll.
+    const qrCodeBase64 =
+      status === 'CONNECTING' && instanceName
+        ? await this.evolution.fetchQrCode(instanceName).catch(() => null)
+        : null;
+    return this.envelope({
+      whatsapp: { configured: true, instanceName, status, qrCodeBase64 },
+    });
+  }
+
+  async createWhatsappInstance(rawBody: unknown): Promise<ControlCenterIntegrationResponse> {
+    const parsed = createWhatsappInstanceSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
+    }
+    const result = await this.evolution.createInstance(parsed.data.instanceName);
+    return this.envelope({
+      whatsapp: {
+        configured: true,
+        instanceName: parsed.data.instanceName,
+        status: result.status,
+        qrCodeBase64: result.qrCodeBase64,
+      },
+    });
   }
 
   /** `percentile_cont` ignora nulos por definição — o filtro fica na cláusula WHERE. */

@@ -507,15 +507,19 @@ createServer(async (request, response) => {
     return;
   }
   if (request.method === 'GET' && url.pathname === '/api/v1/professional/dashboard/queue') {
+    // Espelha `DashboardService.queue()` (achado 2026-08-18): a Fila de supervisão só
+    // lista protocolo + PAR-Q bloqueado — handoff/check-in ficam fora desta tela.
     const openItems = [...items, ...(realtimeVisible ? [realtimeItem] : [])].filter(
-      (item) => !resolvedIds.has(item.id),
+      (item) => !resolvedIds.has(item.id) && (item.kind === 'PROTOCOL' || item.kind === 'PARQ'),
     );
+    const mandatory = openItems.filter((item) => item.kind === 'PARQ');
+    const optional = openItems.filter((item) => item.kind === 'PROTOCOL');
     return json(response, 200, {
-      items: openItems,
+      mandatory,
+      optional,
       counts: {
-        SAFETY: openItems.filter((item) => item.severity === 'SAFETY').length,
-        ALERT: openItems.filter((item) => item.severity === 'ALERT').length,
-        ROUTINE: openItems.filter((item) => item.severity === 'ROUTINE').length,
+        mandatory: mandatory.length,
+        optional: optional.length,
         total: openItems.length,
       },
     });

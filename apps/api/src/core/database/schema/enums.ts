@@ -21,6 +21,7 @@
 import {
   ParqState,
   ProtocolApprovalStatus,
+  ProtocolReviewUrgency,
   ProtocolStatus,
   SubscriptionStatus,
 } from '@movivo/shared';
@@ -150,6 +151,13 @@ export const protocolApprovalStatusEnum = pgEnum(
   'protocol_approval_status',
   valuesOf(ProtocolApprovalStatus),
 );
+
+/**
+ * Urgência de revisão humana enquanto `approval_status = PENDING_REVIEW` (fila do
+ * profissional), derivado de `@movivo/shared`. `MANDATORY` nunca libera sozinho;
+ * `OPTIONAL` libera sozinho após a janela de cortesia (`ProtocolAutoReleaseWorker`).
+ */
+export const reviewUrgencyEnum = pgEnum('review_urgency', valuesOf(ProtocolReviewUrgency));
 
 // ---------------------------------------------------------------------------
 // CONVERSA (WhatsApp)

@@ -12,7 +12,7 @@
  */
 import { Injectable } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
-import { type ProtocolStructure, protocolStructureSchema } from '@movivo/shared';
+import { type ProtocolStructure, protocolStructureSchema, type Weekday } from '@movivo/shared';
 
 import { LlmRouter } from '../ai-coach/llm/llm-router.service';
 import type { ScrubUser } from '../ai-coach/llm/llm.types';
@@ -26,7 +26,11 @@ import {
 import { METHODOLOGY_GUIDELINES, METHODOLOGY_VERSION } from './methodology';
 import type { UserConstraints } from './user-constraints';
 import { wrapUserMessage } from './validation/prompt-injection';
-import { PRIORITY_PATTERNS_BY_GOAL, SPLITS_BY_LEVEL } from './validation/validation-rules';
+import {
+  PRIORITY_PATTERNS_BY_GOAL,
+  REPS_RANGE_BY_GOAL,
+  SPLITS_BY_LEVEL,
+} from './validation/validation-rules';
 
 /** Versão do pipeline de geração (metodologia + base). Registrada no protocolo (rastreabilidade). */
 export const PROMPT_VERSION = `${METHODOLOGY_VERSION}+${CATALOG_VERSION}`;
@@ -107,7 +111,8 @@ export class ProtocolGeneratorService {
 
       const parsed = this.tryParse(result.text);
       if (parsed) {
-        const unknownExerciseIds = this.findUnknownExercises(parsed);
+        const structure = this.backfillWeekdays(parsed, constraints.preferredDays, userId);
+        const unknownExerciseIds = this.findUnknownExercises(structure);
         if (unknownExerciseIds.length > 0) {
           this.logger.warn(
             { userId, unknownExerciseIds },
@@ -115,7 +120,7 @@ export class ProtocolGeneratorService {
           );
         }
         return {
-          structure: parsed,
+          structure,
           provider: result.provider,
           model: result.model,
           attempt: result.attempt,
@@ -146,6 +151,44 @@ export class ProtocolGeneratorService {
     }
     const result = protocolStructureSchema.safeParse(raw);
     return result.success ? result.data : null;
+  }
+
+  /**
+   * Achado 2026-08-18 (evidência real, não hipótese): mesmo com instrução explícita e
+   * enfática no prompt/schema hint, o GPT-4.1 repetidamente devolve TODAS as sessões
+   * sem o campo "weekday" — nunca parcialmente errado, sempre totalmente ausente. Em
+   * compensação, é confiável em manter a CONTAGEM certa e sessões distintas entre si
+   * (o que de fato exige julgamento). `weekday` não exige julgamento nenhum — é
+   * puramente posicional a partir do que já sabemos (`preferredDays`), então reforça
+   * aqui em vez de continuar apostando em variações de texto do prompt.
+   *
+   * Só preenche quando TODAS as sessões vieram sem `weekday` E a contagem bate com os
+   * dias declarados — parcialmente presente ou contagem errada continua caindo no
+   * `ValidationService` (`SESSION_COUNT_MISMATCH`/`WEEKDAY_MISMATCH`) normalmente, sem
+   * este atalho mascarar um erro real de distribuição.
+   */
+  private backfillWeekdays(
+    structure: ProtocolStructure,
+    preferredDays: readonly Weekday[],
+    userId: string,
+  ): ProtocolStructure {
+    if (preferredDays.length === 0 || structure.sessions.length !== preferredDays.length) {
+      return structure;
+    }
+    if (structure.sessions.some((s) => s.weekday !== undefined)) {
+      return structure;
+    }
+    this.logger.warn(
+      { userId, preferredDays },
+      'IA omitiu "weekday" em todas as sessões — preenchendo por posição a partir dos dias declarados',
+    );
+    return {
+      ...structure,
+      sessions: structure.sessions.map((session, i) => ({
+        ...session,
+        weekday: preferredDays[i],
+      })),
+    };
   }
 
   /** Ids no protocolo que não existem na base de referência (rede de segurança da US-2.3). */
@@ -180,20 +223,44 @@ export class ProtocolGeneratorService {
       .map(
         (e) =>
           // grupos musculares: a divisão v2 (ABC/PPL/FOCO_MUSCULAR) escolhe por grupo, não só padrão.
+          // medida: DURATION (achado 2026-08-18) avisa que ESTE exercício usa "durationSeconds"
+          // no JSON de saída, não "reps" — sem isso a IA inventava reps pra prancha/caminhada.
           `- ${e.id} | ${e.name} | ${e.pattern} | grupos: ${e.muscleGroups.join(',')} | equip: ${
             e.equipment.length ? e.equipment.join(',') : 'nenhum'
-          } | evitar se: ${e.contraindicatedFor.join(',') || 'nada'}`,
+          } | evitar se: ${e.contraindicatedFor.join(',') || 'nada'} | medida: ${
+            e.measurement ?? 'REPS'
+          }`,
       )
       .join('\n');
   }
 
   private buildUserMessage(constraints: UserConstraints): string {
+    const repsRange = REPS_RANGE_BY_GOAL[constraints.goal];
     const lines = [
       `Objetivo: ${constraints.goal}`,
       `Nível: ${constraints.level}`,
       `Divisões permitidas para este nível: ${SPLITS_BY_LEVEL[constraints.level].join(', ')}`,
       `Dias por semana: ${constraints.daysPerWeek}`,
+      // Achado 2026-08-18: sem os dias REAIS, a IA gerava sessões genéricas ("Dia A") sem
+      // vínculo com a rotina do aluno — inclusive menos sessões do que dias declarados,
+      // como se o mesmo treino servisse pra qualquer frequência. Campo "weekday" numa
+      // frase curta e isolada própria (não emendado com outras instruções) — achado
+      // 2026-08-18 na prática: a IA seguiu contagem/distinção de sessão mas OMITIU
+      // "weekday" quando a instrução vinha junto de outras num parágrafo só.
+      ...(constraints.preferredDays.length
+        ? [
+            `Dias da semana em que o aluno vai treinar (nesta ordem): ${constraints.preferredDays.join(', ')}.`,
+            `Gere EXATAMENTE uma sessão por dia desta lista — nunca menos, nunca mais.`,
+            `OBRIGATÓRIO em CADA sessão, sem exceção: o campo "weekday" preenchido com o dia real correspondente (um dos códigos acima, ex.: "weekday": "TUE"). Nunca omita este campo.`,
+            `Sessões do mesmo splitType NÃO podem ser idênticas entre si: distribua grupo muscular, volume e intensidade conforme a divisão escolhida e a metodologia acima.`,
+          ]
+        : []),
       `Local de treino: ${constraints.location}`,
+      // Achado 2026-08-18: sem este número EXATO, a IA usava faixas genéricas de bom senso
+      // (ex.: "10-20 reps" pra flexão, "12-20" pra agachamento) que são plausíveis em qualquer
+      // livro de musculação, mas estouravam a faixa mais estreita que ESTE objetivo permite —
+      // o validador (com razão) bloqueava tudo, sempre por 1-5 reps de diferença.
+      `Faixa de repetições OBRIGATÓRIA para "${constraints.goal}": min ${repsRange.min}, max ${repsRange.max} — TODO exercício de reps (não os de duração) precisa caber dentro dela, sem exceção.`,
       `Padrões de movimento prioritários para este objetivo: ${PRIORITY_PATTERNS_BY_GOAL[
         constraints.goal
       ].join(', ')}`,
@@ -247,15 +314,17 @@ const SCHEMA_HINT = `{
   "sessions": [
     {
       "dayLabel": string,
+      "weekday": "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN" — CAMPO OBRIGATÓRIO, NUNCA omita: o dia real declarado pelo aluno, ver "Dias da semana" acima,
       "focus": string,
       "exercises": [
         {
           "exerciseId": string (id da base),
           "name": string,
           "sets": number (1-12),
-          "reps": { "min": number, "max": number },
+          "reps": { "min": number, "max": number } (exercício "medida: REPS" — NUNCA junto com durationSeconds),
+          "durationSeconds": number (exercício "medida: DURATION" — prancha/caminhada/bike/tiros; NUNCA junto com reps),
           "loadStrategy": "BODYWEIGHT" | "FIXED_LOAD" | "DOUBLE_PROGRESSION" | "RPE",
-          "restSeconds": number,
+          "restSeconds": number (cardio contínuo de 1 série só, ex.: caminhada/bike, pode ser 0 — é a resposta certa, não erro),
           "technique": "DROP_SET" | "REST_PAUSE" | "CLUSTER_SET" | "BI_SET" | "TRI_SET" | "SUPERSET" | "ISOMETRIA" | "REPETICOES_CONTROLADAS" | "PIRAMIDE" | "DESCANSO_ATIVO" (opcional; NUNCA para INICIANTE),
           "notes": string (opcional)
         }

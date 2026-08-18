@@ -32,14 +32,27 @@ describe('AraraHttpTransport (US-2.5)', () => {
     expect(url).toBe('https://api.ararahq.com/v1/messages');
     expect((init?.headers as Record<string, string>).authorization).toBe('Bearer k');
     expect(JSON.parse(String(init?.body))).toEqual({
-      to: '+5541999999999',
+      receiver: 'whatsapp:+5541999999999',
       type: 'text',
-      text: { body: 'oi' },
+      body: 'oi',
     });
     fetchSpy.mockRestore();
   });
 
-  it('anexa os quick replies só quando existem', async () => {
+  it('prefixa "whatsapp:" só se ainda não vier prefixado', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('{}', { status: 200 }));
+    const t = new AraraHttpTransport('https://api.ararahq.com', 'k', logger);
+
+    await t.send({ to: 'whatsapp:+5541999999999', text: 'oi' });
+
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body));
+    expect(body.receiver).toBe('whatsapp:+5541999999999');
+    fetchSpy.mockRestore();
+  });
+
+  it('não envia "buttons" no corpo — o contrato real de /v1/messages não tem esse campo', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(new Response('{}', { status: 200 }));
@@ -47,11 +60,38 @@ describe('AraraHttpTransport (US-2.5)', () => {
     const buttons = [{ id: 'workout:DONE:2026-08-10:A', title: 'Treinei' }];
 
     await t.send({ to: '+5541999999999', text: 'oi', buttons });
-    await t.send({ to: '+5541999999999', text: 'oi', buttons: [] });
 
-    const bodies = fetchSpy.mock.calls.map((call) => JSON.parse(String(call[1]?.body)));
-    expect(bodies[0]).toMatchObject({ buttons });
-    expect(bodies[1]).not.toHaveProperty('buttons');
+    const body = JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body));
+    expect(body).not.toHaveProperty('buttons');
+    fetchSpy.mockRestore();
+  });
+
+  it('sendTemplate: usa templateName + variables, sem "type: text"', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('{}', { status: 202 }));
+    const t = new AraraHttpTransport('https://api.ararahq.com', 'k', logger);
+
+    await t.sendTemplate('+5541999999999', 'verificacao_numero', ['123456']);
+
+    const [url, init] = fetchSpy.mock.calls[0] ?? [];
+    expect(url).toBe('https://api.ararahq.com/v1/messages');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      receiver: 'whatsapp:+5541999999999',
+      templateName: 'verificacao_numero',
+      variables: ['123456'],
+    });
+    fetchSpy.mockRestore();
+  });
+
+  it('sendTemplate sem credencial: no-op logado, não faz fetch', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const t = new AraraHttpTransport('https://api.ararahq.com', undefined, logger);
+
+    await expect(
+      t.sendTemplate('+5541999999999', 'verificacao_numero', ['123456']),
+    ).resolves.toBeUndefined();
+    expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
 

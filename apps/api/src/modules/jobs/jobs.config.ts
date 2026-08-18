@@ -20,6 +20,7 @@ import { buildRedisOptions } from '../../core/redis';
 
 export const QUEUE = {
   protocolGeneration: 'protocol-generation',
+  protocolAutoRelease: 'protocol-auto-release',
   aiResponse: 'ai-response',
   whatsappOutbound: 'whatsapp-outbound',
   checkinWeekly: 'checkin-weekly',
@@ -52,6 +53,13 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
     backoffMs: [2_000, 8_000, 32_000],
     concurrency: 5,
     lockMs: 120_000,
+  },
+  // Liberação automática após a janela de cortesia de 1h (fila do profissional,
+  // categoria "Disponível para Revisão"). Baixo volume, sem urgência de latência.
+  [QUEUE.protocolAutoRelease]: {
+    attempts: 3,
+    backoffMs: [5_000, 15_000, 45_000],
+    concurrency: 3,
   },
   [QUEUE.aiResponse]: {
     attempts: 2,
