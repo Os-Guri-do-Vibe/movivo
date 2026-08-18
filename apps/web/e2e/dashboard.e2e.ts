@@ -50,16 +50,19 @@ test('protege a rota e cria sessão somente em cookies httpOnly', async ({
 test('invalida e recarrega a fila ao receber queue.updated por SSE', async ({ page, request }) => {
   await login(page);
   await openQueue(page);
-  const cases = page
-    .getByRole('list', { name: 'Itens pendentes por prioridade' })
-    .getByRole('listitem');
-  await expect(cases).toHaveCount(4);
+  // Fila de supervisão (achado 2026-08-18): só protocolo (Opcional) + PAR-Q bloqueado
+  // (Obrigatória) — handoff/check-in ficam fora desta tela.
+  const mandatory = page.getByRole('list', { name: 'Revisão Humana Obrigatória' });
+  const optional = page.getByRole('list', { name: 'Revisão Humana Opcional' });
+  await expect(mandatory.getByRole('listitem')).toHaveCount(1);
+  await expect(optional.getByRole('listitem')).toHaveCount(1);
   await expect(page.getByRole('status')).toContainText('Atualização em tempo real ativa');
 
   const emitted = await request.post('http://127.0.0.1:3101/__emit');
   expect(emitted.ok()).toBe(true);
 
-  await expect(cases).toHaveCount(5);
+  await expect(mandatory.getByRole('listitem')).toHaveCount(1);
+  await expect(optional.getByRole('listitem')).toHaveCount(2);
   await expect(page.getByText('Novo protocolo recebido em tempo real')).toBeVisible();
 });
 
@@ -73,32 +76,6 @@ test('aceita ADMIN e mostra o overview executivo', async ({ context, page }) => 
   expect(
     (await context.cookies()).filter((cookie) => cookie.name.startsWith('movivo_bff_')),
   ).toHaveLength(2);
-});
-
-test('prioriza segurança e resolve CHECKIN pelo handoff com confirmação explícita', async ({
-  page,
-}) => {
-  await login(page);
-  await openQueue(page);
-  const cases = page
-    .getByRole('list', { name: 'Itens pendentes por prioridade' })
-    .getByRole('listitem');
-  await expect(cases).toHaveCount(4);
-  await expect(cases.first()).toContainText('Segurança');
-  await expect(cases.first()).toContainText('Check-in exige revisão profissional');
-
-  await cases.first().getByRole('link').click();
-  await expect(page).toHaveURL(/\/dashboard\/fila\/checkin\//);
-  await expect(
-    page.getByRole('heading', { name: /check-in exige revisão profissional/i }),
-  ).toBeVisible();
-  await expect(page.getByText('SEGURANÇA · PRIORIDADE')).toBeVisible();
-  await page.getByLabel('Observações').fill('Revisão registrada pela equipe responsável.');
-  await page.getByRole('button', { name: 'Resolver sinalização' }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
-  await page.getByRole('button', { name: 'Confirmar resolução' }).click();
-  await expect(page).toHaveURL(/\/dashboard\/educacao-fisica$/);
-  await expect(cases).toHaveCount(3);
 });
 
 test('PAR-Q começa sem decisão e libera apenas após seleção consciente', async ({ page }) => {
@@ -139,9 +116,9 @@ test('login → rota padrão do papel → pilar Alunos → ficha do aluno', asyn
   // `login()` já assere a rota padrão do PROFESSIONAL (/dashboard/educacao-fisica).
   await login(page);
 
-  await page.getByRole('link', { name: 'Base de alunos', exact: true }).first().click();
+  await page.getByRole('link', { name: 'Base de Alunos', exact: true }).first().click();
   await expect(page).toHaveURL(/\/dashboard\/alunos$/);
-  await expect(page.getByRole('heading', { name: 'Base de alunos' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Base de Alunos' })).toBeVisible();
 
   // `> li` e não `getByRole('listitem')`: a lista de sinais de risco dentro do card
   // também é uma `<ul>`, e o papel casaria com os `li` aninhados.
