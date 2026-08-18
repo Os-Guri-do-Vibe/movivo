@@ -39,6 +39,8 @@ const VALID_DATA: Step1Data = {
   name: 'Fulano de Tal',
   birthDate: '1990-01-01',
   biologicalSex: 'MALE',
+  heightCm: '178',
+  weightKg: '75',
   phoneCountryIso: 'BR',
   phoneMasked: '(11) 99999-9999',
   email: '',
@@ -69,6 +71,19 @@ describe('Step1Registration', () => {
     expect(legend.tagName).toBe('LEGEND');
     expect(legend).toHaveClass('text-body', 'font-semibold', 'text-foreground');
     expect(legend.nextElementSibling).toHaveClass('mt-2');
+  });
+
+  it('altura e peso usam os mesmos componentes de campo (label + TextInput)', () => {
+    renderStep1();
+    const height = screen.getByLabelText(/qual é a sua altura/i);
+    const weight = screen.getByLabelText(/qual é o seu peso/i);
+    expect(height).toHaveClass('h-[52px]', 'rounded-xl', 'border', 'border-input');
+    expect(weight).toHaveClass('h-[52px]', 'rounded-xl', 'border', 'border-input');
+  });
+
+  it('Continuar fica desabilitado com altura ou peso fora da faixa plausível', () => {
+    renderStep1({ data: { ...VALID_DATA, heightCm: '60' } });
+    expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled();
   });
 
   it('mostra a mensagem exata de bloqueio para menores de 18', () => {

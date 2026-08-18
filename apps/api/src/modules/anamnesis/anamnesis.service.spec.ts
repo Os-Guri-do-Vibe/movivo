@@ -41,6 +41,8 @@ const STEP1 = {
   name: 'Fulano de Teste',
   birthDate: '1996-04-02',
   biologicalSex: 'MALE' as const,
+  heightCm: 178,
+  weightKg: 75,
   phoneNumber: PHONE,
 };
 

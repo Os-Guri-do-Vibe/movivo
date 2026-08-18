@@ -64,6 +64,16 @@ describe('telefone internacional', () => {
     expect(isPhoneComplete('BR', '(11) 9999-999')).toBe(false);
   });
 
+  it('BR: celular faltando o último dígito não é "completo" mesmo batendo o formato de um fixo válido (bug real)', () => {
+    // 10 dígitos nacionais (DDD + 8) é, por coincidência, o mesmo comprimento de um
+    // fixo brasileiro válido — sem restringir por tipo, isValidPhoneNumber aceitava
+    // isso como "completo" um dígito antes do celular real terminar de ser digitado,
+    // fazendo o campo do código de verificação aparecer cedo e o envio ir pro número
+    // truncado errado.
+    expect(isPhoneComplete('BR', '(11) 98765-432')).toBe(false);
+    expect(isPhoneComplete('BR', '(11) 98765-4321')).toBe(true);
+  });
+
   it('combina DDI e número nacional em E.164', () => {
     expect(toE164('BR', '(11) 99999-9999')).toBe('+5511999999999');
     expect(toE164('PT', '912 345 678')).toBe('+351912345678');

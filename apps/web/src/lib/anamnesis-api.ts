@@ -193,9 +193,32 @@ export function maskNationalPhone(iso: PhoneCountryIso, raw: string): string {
   return new AsYouType(iso).input(digits);
 }
 
+/**
+ * Comprimento nacional (só dígitos) de um celular de exemplo por país — cache simples,
+ * a mesma tabela estática de `mobilePhoneExamples` não muda em runtime.
+ */
+const MOBILE_DIGIT_LENGTH = new Map<PhoneCountryIso, number>();
+function mobileDigitLength(iso: PhoneCountryIso): number | undefined {
+  if (!MOBILE_DIGIT_LENGTH.has(iso)) {
+    const example = getExampleNumber(iso, mobilePhoneExamples);
+    MOBILE_DIGIT_LENGTH.set(iso, example?.nationalNumber.length ?? -1);
+  }
+  const length = MOBILE_DIGIT_LENGTH.get(iso);
+  return length === -1 ? undefined : length;
+}
+
 export function isPhoneComplete(iso: PhoneCountryIso, masked: string): boolean {
   const digits = masked.replace(/\D/g, '');
-  return digits.length > 0 && isPossiblePhoneNumber(digits, iso) && isValidPhoneNumber(digits, iso);
+  if (digits.length === 0) return false;
+  // `isValidPhoneNumber` sozinho aceita QUALQUER tipo de número do país (fixo ou
+  // móvel) — no Brasil um fixo válido tem o mesmo comprimento de um celular faltando
+  // o último dígito, então validar só isso marca "completo" um dígito cedo demais
+  // (bug real: campo do código de verificação aparecia antes do usuário terminar de
+  // digitar, e o SMS/WhatsApp saía pro número truncado errado). Exige bater o
+  // comprimento exato de um celular de exemplo do país antes de aceitar como válido.
+  const expected = mobileDigitLength(iso);
+  if (expected !== undefined && digits.length < expected) return false;
+  return isPossiblePhoneNumber(digits, iso) && isValidPhoneNumber(digits, iso);
 }
 
 /** DDI selecionado + dígitos nacionais → E.164. */
