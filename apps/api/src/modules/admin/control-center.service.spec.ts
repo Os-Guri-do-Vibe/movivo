@@ -22,6 +22,7 @@ import type { HealthCipherService } from '../../core/database/health-cipher.serv
 import { RedisKeyBuilder } from '../../core/redis';
 import type { AuditService } from './audit.service';
 import { ControlCenterService } from './control-center.service';
+import type { EvolutionTransport } from '../whatsapp/evolution-transport';
 
 /**
  * Tabelas alcançadas por `.from(...)` desde o último `serviceWithSystemResults`. Existe
@@ -92,6 +93,7 @@ function serviceWithSystemResults(...results: unknown[][]) {
     { mget: vi.fn().mockResolvedValue([]) } as unknown as Redis,
     new RedisKeyBuilder('movivo'),
     { activePayload: vi.fn().mockResolvedValue(null) } as unknown as AgentConfigRepository,
+    { hasCredentials: () => false } as unknown as EvolutionTransport,
   );
   return { service, db, audit };
 }

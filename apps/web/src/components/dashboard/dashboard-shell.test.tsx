@@ -26,7 +26,7 @@ describe('DashboardShell', () => {
     const items = navigationFor(['control_center.marketing.read']);
     expect(items.map((item) => item.label)).toEqual([
       'Aquisição & Canais',
-      'Perfil de clientes',
+      'Perfil de Clientes',
       'Campanhas & Experimentos',
     ]);
   });
@@ -42,14 +42,14 @@ describe('DashboardShell', () => {
       await userEvent.click(toggle);
     }
     expect(screen.getAllByRole('link', { name: 'Receita & Assinaturas' })).not.toHaveLength(0);
-    expect(screen.queryByRole('link', { name: 'Base de alunos' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Base de Alunos' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Aquisição & Canais' })).not.toBeInTheDocument();
     // US-8.7: cap table é exclusivo do ADMIN — FINANCE não alcança nem o item.
     expect(screen.queryByRole('link', { name: 'Sócios & Distribuição' })).not.toBeInTheDocument();
     // Ausência, não desabilitação (TASK-7.9.1): dentro do menu o rótulo não existe
     // em elemento nenhum — nem link, nem botão inerte, nem texto cinza.
     for (const nav of screen.getAllByRole('navigation')) {
-      expect(within(nav).queryByText('Base de alunos')).not.toBeInTheDocument();
+      expect(within(nav).queryByText('Base de Alunos')).not.toBeInTheDocument();
       expect(within(nav).queryByText('Aquisição & Canais')).not.toBeInTheDocument();
       expect(within(nav).queryByText('Sócios & Distribuição')).not.toBeInTheDocument();
       expect(nav.querySelectorAll('[aria-disabled="true"], :disabled')).toHaveLength(0);
@@ -57,7 +57,7 @@ describe('DashboardShell', () => {
   });
 
   it('admin recebe todos os setores quando possui todas as capabilities necessárias', () => {
-    expect(navigationFor(ADMIN_CAPABILITIES)).toHaveLength(17);
+    expect(navigationFor(ADMIN_CAPABILITIES)).toHaveLength(18);
   });
 
   it('esconde Compliance & Privacidade quando falta uma das capabilities exigidas (AND, como no backend)', () => {
@@ -83,7 +83,7 @@ describe('DashboardShell', () => {
     expect(marketing[0]?.label).toBe('Marketing');
     expect(marketing[0]?.items.map((item) => item.label)).toEqual([
       'Aquisição & Canais',
-      'Perfil de clientes',
+      'Perfil de Clientes',
       'Campanhas & Experimentos',
     ]);
   });

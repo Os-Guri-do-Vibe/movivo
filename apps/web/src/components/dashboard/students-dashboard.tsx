@@ -85,7 +85,7 @@ export function StudentsDashboard({ canReadHealth = false }: { canReadHealth?: b
   return (
     <div>
       <SectorHeader
-        title="Base de alunos"
+        title="Base de Alunos"
         description={
           canReadHealth
             ? 'Cadastro, situação operacional e ficha completa, ordenados por risco de cancelamento.'

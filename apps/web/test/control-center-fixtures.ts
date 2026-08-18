@@ -9,6 +9,7 @@
 import type {
   ControlCenterComplianceResponse,
   ControlCenterFinanceResponse,
+  ControlCenterIntegrationResponse,
   ControlCenterMarketingResponse,
   ControlCenterMetric,
   ControlCenterOverviewResponse,
@@ -753,4 +754,28 @@ export const knowledgeDocumentsResponse: KnowledgeDocumentsResponse = {
     },
   },
   meta: { ...controlCenterMeta, dataQuality: [...controlCenterMeta.dataQuality] },
+};
+
+export const integrationNotConfiguredResponse: ControlCenterIntegrationResponse = {
+  data: { whatsapp: { configured: false, instanceName: null, status: 'NOT_CONFIGURED', qrCodeBase64: null } },
+  meta: { ...controlCenterMeta, dataQuality: [] },
+};
+
+export const integrationConnectingResponse: ControlCenterIntegrationResponse = {
+  data: {
+    whatsapp: {
+      configured: true,
+      instanceName: 'minha-empresa',
+      status: 'CONNECTING',
+      qrCodeBase64: 'data:image/png;base64,abc',
+    },
+  },
+  meta: { ...controlCenterMeta, dataQuality: [] },
+};
+
+export const integrationConnectedResponse: ControlCenterIntegrationResponse = {
+  data: {
+    whatsapp: { configured: true, instanceName: 'minha-empresa', status: 'CONNECTED', qrCodeBase64: null },
+  },
+  meta: { ...controlCenterMeta, dataQuality: [] },
 };

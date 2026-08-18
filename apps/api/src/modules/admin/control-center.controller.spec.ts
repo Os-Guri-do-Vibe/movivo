@@ -21,6 +21,8 @@ describe('ControlCenterController', () => {
     ['student', [Capability.STUDENTS_READ]],
     ['system', [Capability.SYSTEM_READ]],
     ['finance', [Capability.FINANCE_READ]],
+    ['integration', [Capability.SYSTEM_READ]],
+    ['createWhatsappInstance', [Capability.SYSTEM_OPERATE]],
     ['compliance', [Capability.COMPLIANCE_READ, Capability.AUDIT_READ]],
     ['denyUnsafeAnonymization', [Capability.ADMIN_DESTRUCTIVE_REQUEST]],
   ] as const)('declara capability em %s', (method, expected) => {
@@ -52,6 +54,15 @@ describe('ControlCenterController', () => {
       ) as string[];
     expect(read('students')).not.toContain(Capability.STUDENTS_HEALTH_READ);
     expect(read('student')).toEqual([Capability.STUDENTS_READ]);
+  });
+
+  it('repassa o corpo de createWhatsappInstance para o serviço', async () => {
+    const createWhatsappInstance = vi.fn().mockResolvedValue({ configured: true });
+    const controller = new ControlCenterController({
+      createWhatsappInstance,
+    } as unknown as ControlCenterService);
+    await controller.createWhatsappInstance({ instanceName: 'minha-empresa' });
+    expect(createWhatsappInstance).toHaveBeenCalledWith({ instanceName: 'minha-empresa' });
   });
 
   it('mantém anonimização bloqueada até existir step-up', () => {

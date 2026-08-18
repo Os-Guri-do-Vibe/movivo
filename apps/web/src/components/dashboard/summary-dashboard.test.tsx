@@ -36,7 +36,7 @@ describe('SummaryDashboard', () => {
   it('na visão geral mostra uma linha-resumo por pilar, sem métrica própria da tela', async () => {
     getOverview.mockResolvedValue(overviewResponse);
     render(<SummaryDashboard resource="overview" />);
-    expect(await screen.findByRole('heading', { name: 'Visão geral' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: 'Visão Geral' })).toBeVisible();
     const rows = screen.getByRole('list', { name: 'Resumo por pilar' });
     expect(within(rows).getByRole('link', { name: /^Alunos/ })).toBeVisible();
     expect(within(rows).getByLabelText('Alunos cadastrados: 25')).toBeVisible();

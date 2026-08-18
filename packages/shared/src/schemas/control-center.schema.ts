@@ -576,6 +576,43 @@ export const controlCenterSystemResponseSchema = z.object({
 });
 export type ControlCenterSystemResponse = z.infer<typeof controlCenterSystemResponseSchema>;
 
+/**
+ * Painel "Sistema → Integração" — ferramenta INTERNA de teste do fluxo de WhatsApp via
+ * EvolutionAPI (QR Code/Baileys), usada enquanto a criação de templates da AraraHQ
+ * está bloqueada. Nunca é o canal de produção dos usuários finais (esse é 100%
+ * AraraHQ). Reusa `SYSTEM_READ`/`SYSTEM_OPERATE` — não é uma capacidade própria.
+ */
+export const evolutionConnectionStateSchema = z.enum([
+  'NOT_CONFIGURED',
+  'CONNECTING',
+  'CONNECTED',
+  'DISCONNECTED',
+]);
+export type EvolutionConnectionState = z.infer<typeof evolutionConnectionStateSchema>;
+
+export const controlCenterIntegrationResponseSchema = z.object({
+  data: z.object({
+    whatsapp: z.object({
+      configured: z.boolean(),
+      instanceName: z.string().nullable(),
+      status: evolutionConnectionStateSchema,
+      qrCodeBase64: z.string().nullable(),
+    }),
+  }),
+  meta: controlCenterMetaSchema,
+});
+export type ControlCenterIntegrationResponse = z.infer<typeof controlCenterIntegrationResponseSchema>;
+
+export const createWhatsappInstanceSchema = z.object({
+  instanceName: z
+    .string()
+    .trim()
+    .min(3)
+    .max(50)
+    .regex(/^[a-z0-9-]+$/, 'Use apenas letras minúsculas, números e hífens.'),
+});
+export type CreateWhatsappInstanceInput = z.infer<typeof createWhatsappInstanceSchema>;
+
 /** Mês civil `YYYY-MM` em `America/Sao_Paulo`. */
 const monthKey = z.string().regex(/^\d{4}-\d{2}$/);
 

@@ -32,7 +32,7 @@ type SummaryResponse =
 
 const COPY: Record<Resource, { title: string; description: string }> = {
   overview: {
-    title: 'Visão geral',
+    title: 'Visão Geral',
     description:
       'Resumo operacional: indicadores do dia, receita, movimento dos últimos 30 dias e concentração de atendimento. Métricas aproximadas ou sem fonte aparecem identificadas.',
   },
