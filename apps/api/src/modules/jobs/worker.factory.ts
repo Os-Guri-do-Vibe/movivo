@@ -7,7 +7,7 @@
  * futuras só fornecem o processor (a lógica de negócio) — nunca reconfiguram isto.
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { type Job, type Processor, Worker } from 'bullmq';
+import { type ConnectionOptions, type Job, type Processor, Worker } from 'bullmq';
 import { PinoLogger } from 'nestjs-pino';
 
 import { AppConfigService } from '../../core/config';
@@ -42,7 +42,10 @@ export class WorkerFactory {
   create<T = unknown>(name: QueueName, processor: Processor<T>): Worker<T> {
     const spec = QUEUE_REGISTRY[name];
     const worker = new Worker<T>(name, processor, {
-      connection: buildBullConnection(this.config),
+      // Cast: `RedisOptions` do ioredis não tem a assinatura de índice que o `RedisOptions`
+      // PRÓPRIO do bullmq 6.x exige — mesma opção de conexão em runtime, só divergência de
+      // declaração de tipos entre os dois pacotes (achado 2026-08-18, migração do bullmq 6.x).
+      connection: buildBullConnection(this.config) as ConnectionOptions,
       prefix: bullPrefix(this.config),
       concurrency: spec.concurrency,
       ...(spec.lockMs ? { lockDuration: spec.lockMs } : {}),

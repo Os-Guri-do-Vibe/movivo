@@ -7,7 +7,7 @@
  * só as definições (produtores). O enqueue aplica os defaults centrais de `jobs.config`.
  */
 import { Injectable, type OnModuleInit } from '@nestjs/common';
-import { type JobsOptions, Queue } from 'bullmq';
+import { type ConnectionOptions, type JobsOptions, Queue } from 'bullmq';
 import { PinoLogger } from 'nestjs-pino';
 
 import { AppConfigService } from '../../core/config';
@@ -32,7 +32,10 @@ export class QueueManager implements OnModuleInit {
   }
 
   onModuleInit(): void {
-    const connection = buildBullConnection(this.config);
+    // Cast: `RedisOptions` do ioredis não tem a assinatura de índice que o `RedisOptions`
+    // PRÓPRIO do bullmq 6.x exige — mesma opção de conexão em runtime, só divergência de
+    // declaração de tipos entre os dois pacotes (achado 2026-08-18, migração do bullmq 6.x).
+    const connection = buildBullConnection(this.config) as ConnectionOptions;
     const prefix = bullPrefix(this.config);
     for (const name of Object.keys(QUEUE_REGISTRY) as QueueName[]) {
       this.queues.set(name, new Queue(name, { connection, prefix }));
