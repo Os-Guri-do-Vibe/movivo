@@ -57,9 +57,12 @@ describe('EvolutionHttpTransport (painel "Sistema → Integração")', () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ response: { message: ['This name "x" is already in use.'] } }), {
-          status: 403,
-        }),
+        new Response(
+          JSON.stringify({ response: { message: ['This name "x" is already in use.'] } }),
+          {
+            status: 403,
+          },
+        ),
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ count: 2, base64: 'data:image/png;base64,pendente' }), {
@@ -70,8 +73,13 @@ describe('EvolutionHttpTransport (painel "Sistema → Integração")', () => {
 
     const result = await t.createInstance('minha-empresa');
 
-    expect(result).toEqual({ status: 'CONNECTING', qrCodeBase64: 'data:image/png;base64,pendente' });
-    expect(fetchSpy.mock.calls[1]?.[0]).toBe('http://localhost:8081/instance/connect/minha-empresa');
+    expect(result).toEqual({
+      status: 'CONNECTING',
+      qrCodeBase64: 'data:image/png;base64,pendente',
+    });
+    expect(fetchSpy.mock.calls[1]?.[0]).toBe(
+      'http://localhost:8081/instance/connect/minha-empresa',
+    );
     fetchSpy.mockRestore();
   });
 
@@ -93,16 +101,20 @@ describe('EvolutionHttpTransport (painel "Sistema → Integração")', () => {
     ] as const) {
       const fetchSpy = vi
         .spyOn(globalThis, 'fetch')
-        .mockResolvedValue(new Response(JSON.stringify({ instance: { state: raw } }), { status: 200 }));
+        .mockResolvedValue(
+          new Response(JSON.stringify({ instance: { state: raw } }), { status: 200 }),
+        );
       await expect(t.connectionState('minha-empresa')).resolves.toBe(expected);
       fetchSpy.mockRestore();
     }
   });
 
   it('currentInstanceName: lê o nome da primeira instância existente', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify([{ name: 'minha-empresa' }]), { status: 200 }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify([{ name: 'minha-empresa' }]), { status: 200 }),
+      );
     const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger);
     await expect(t.currentInstanceName()).resolves.toBe('minha-empresa');
     expect(fetchSpy.mock.calls[0]?.[0]).toBe('http://localhost:8081/instance/fetchInstances');
@@ -110,7 +122,9 @@ describe('EvolutionHttpTransport (painel "Sistema → Integração")', () => {
   });
 
   it('currentInstanceName: null quando não há nenhuma instância', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('[]', { status: 200 }));
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('[]', { status: 200 }));
     const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger);
     await expect(t.currentInstanceName()).resolves.toBeNull();
     fetchSpy.mockRestore();
@@ -126,14 +140,16 @@ describe('EvolutionHttpTransport (painel "Sistema → Integração")', () => {
   });
 
   it('fetchQrCode: GET /instance/connect/{name}, lê o base64 direto (corpo achatado)', async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response(JSON.stringify({ count: 1, base64: 'data:image/png;base64,abc' }), {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ count: 1, base64: 'data:image/png;base64,abc' }), {
         status: 200,
-      }));
+      }),
+    );
     const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger);
     await expect(t.fetchQrCode('minha-empresa')).resolves.toBe('data:image/png;base64,abc');
-    expect(fetchSpy.mock.calls[0]?.[0]).toBe('http://localhost:8081/instance/connect/minha-empresa');
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+      'http://localhost:8081/instance/connect/minha-empresa',
+    );
     fetchSpy.mockRestore();
   });
 
@@ -233,7 +249,9 @@ describe('EvolutionHttpTransport (WhatsappTransport — WHATSAPP_TRANSPORT_PROVI
   it('sendTemplate: template desconhecido é descartado, sem fetch algum', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger);
-    await expect(t.sendTemplate('+5541999999999', 'outro_template', ['x'])).resolves.toBeUndefined();
+    await expect(
+      t.sendTemplate('+5541999999999', 'outro_template', ['x']),
+    ).resolves.toBeUndefined();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

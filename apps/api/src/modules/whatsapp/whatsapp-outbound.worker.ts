@@ -33,7 +33,11 @@ import {
   PHONE_VERIFICATION_TEMPLATE,
   waitingMessage,
 } from './message-templates';
-import { type QuickReplyButton, WHATSAPP_TRANSPORT, type WhatsappTransport } from './whatsapp-transport';
+import {
+  type QuickReplyButton,
+  WHATSAPP_TRANSPORT,
+  type WhatsappTransport,
+} from './whatsapp-transport';
 
 export type WhatsappJobType =
   | 'CONFIRMATION'

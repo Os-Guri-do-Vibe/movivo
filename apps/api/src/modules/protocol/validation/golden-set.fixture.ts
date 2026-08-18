@@ -228,7 +228,8 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
   {
     // Regressão real 2026-08-18: `wall_sit` (pattern ISOLATION, não CORE/CARDIO) escapou da
     // primeira varredura por medida — a IA gerou "wall_sit: 30-45 reps" e caiu em BLOCK de novo.
-    label: 'protocolo limpo com isometria na parede (wall_sit, pattern ISOLATION mas medida DURATION)',
+    label:
+      'protocolo limpo com isometria na parede (wall_sit, pattern ISOLATION mas medida DURATION)',
     kind: 'clean',
     expected: 'PASS',
     input: baseInput(
@@ -433,7 +434,9 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     expectRule: 'SESSION_COUNT_MISMATCH',
     input: {
       structure: cleanStructure({
-        sessions: [{ dayLabel: 'D1', weekday: 'MON', focus: 'Corpo inteiro', exercises: cleanExercises() }],
+        sessions: [
+          { dayLabel: 'D1', weekday: 'MON', focus: 'Corpo inteiro', exercises: cleanExercises() },
+        ],
       }),
       constraints: {
         goal: 'GAIN_MUSCLE',

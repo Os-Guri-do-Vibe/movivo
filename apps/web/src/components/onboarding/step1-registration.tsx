@@ -47,12 +47,22 @@ export interface Step1Data {
 
 function isHeightValid(heightCm: string): boolean {
   const value = Number(heightCm);
-  return heightCm.trim().length > 0 && Number.isFinite(value) && value >= MIN_HEIGHT_CM && value <= MAX_HEIGHT_CM;
+  return (
+    heightCm.trim().length > 0 &&
+    Number.isFinite(value) &&
+    value >= MIN_HEIGHT_CM &&
+    value <= MAX_HEIGHT_CM
+  );
 }
 
 function isWeightValid(weightKg: string): boolean {
   const value = Number(weightKg.replace(',', '.'));
-  return weightKg.trim().length > 0 && Number.isFinite(value) && value >= MIN_WEIGHT_KG && value <= MAX_WEIGHT_KG;
+  return (
+    weightKg.trim().length > 0 &&
+    Number.isFinite(value) &&
+    value >= MIN_WEIGHT_KG &&
+    value <= MAX_WEIGHT_KG
+  );
 }
 
 export function Step1Registration({

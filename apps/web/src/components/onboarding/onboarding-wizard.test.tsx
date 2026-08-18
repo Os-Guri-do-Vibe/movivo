@@ -289,7 +289,9 @@ describe('OnboardingWizard', () => {
       />,
     );
     await completeStep3(user);
-    expect(await screen.findByText('Já existe um cadastro com este telefone ou e-mail.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Já existe um cadastro com este telefone ou e-mail.'),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/Tente de novo em instantes/)).not.toBeInTheDocument();
   });
 

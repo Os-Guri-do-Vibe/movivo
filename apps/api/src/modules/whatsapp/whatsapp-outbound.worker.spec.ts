@@ -102,8 +102,8 @@ function makeWorker(deps: Deps = {}) {
   const keys = new RedisKeyBuilder('movivo');
   const send = vi.fn((_m: OutboundMessage) => Promise.resolve());
   const sendTyping = vi.fn((_to: string) => Promise.resolve());
-  const sendTemplate = vi.fn(
-    (_to: string, _templateName: string, _variables?: readonly string[]) => Promise.resolve(),
+  const sendTemplate = vi.fn((_to: string, _templateName: string, _variables?: readonly string[]) =>
+    Promise.resolve(),
   );
   const transport = {
     send,
@@ -139,7 +139,12 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
   it('PHONE_VERIFICATION: usa Template (fora da janela de 24h), não texto livre', async () => {
     const { worker, send, sendTemplate } = makeWorker();
     const res = await worker.process(
-      job({ userId: null, type: 'PHONE_VERIFICATION', phoneNumber: '+5541999999999', code: '123456' }),
+      job({
+        userId: null,
+        type: 'PHONE_VERIFICATION',
+        phoneNumber: '+5541999999999',
+        code: '123456',
+      }),
     );
     expect(res.status).toBe('SENT');
     expect(sendTemplate).toHaveBeenCalledWith('+5541999999999', 'verificacao_numero', ['123456']);

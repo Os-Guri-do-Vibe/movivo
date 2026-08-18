@@ -309,10 +309,7 @@ export class ProtocolGenerationWorker implements OnModuleInit {
     // indisponibilidade de infraestrutura (LLM fora do ar), não risco clínico. Por isso
     // agenda a MESMA janela de cortesia de 1h que `process()` agenda no caminho normal.
     try {
-      const { goal, preferredDays } = await this.constraintsForFallback(
-        userId,
-        anamnesisSessionId,
-      );
+      const { goal, preferredDays } = await this.constraintsForFallback(userId, anamnesisSessionId);
       const content = buildFallbackProtocol(goal, preferredDays);
       const persisted = await this.repository.persist({
         userId,
@@ -363,7 +360,10 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       );
       const parsed = anamnesisStructuredSchema.safeParse(session?.dataBlock3);
       return parsed.success
-        ? { goal: toGenerationGoal(parsed.data.primaryGoal), preferredDays: parsed.data.preferredDays }
+        ? {
+            goal: toGenerationGoal(parsed.data.primaryGoal),
+            preferredDays: parsed.data.preferredDays,
+          }
         : { goal: 'CONDITIONING', preferredDays: [] };
     } catch {
       return { goal: 'CONDITIONING', preferredDays: [] };

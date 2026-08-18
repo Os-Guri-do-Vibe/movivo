@@ -57,7 +57,9 @@ function sessionTitle(
   session: { dayLabel: string; weekday?: string; focus: string },
   phase: string,
 ): string {
-  const day = session.weekday ? (WEEKDAY_LABELS[session.weekday] ?? session.weekday) : session.dayLabel;
+  const day = session.weekday
+    ? (WEEKDAY_LABELS[session.weekday] ?? session.weekday)
+    : session.dayLabel;
   const phaseLabel = PHASE_LABELS[phase] ?? phase;
   return `${day} | ${session.focus} | ${phaseLabel}`;
 }

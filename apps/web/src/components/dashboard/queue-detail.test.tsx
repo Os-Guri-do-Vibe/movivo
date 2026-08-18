@@ -89,9 +89,7 @@ describe('QueueDetail', () => {
       },
     });
     render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
-    expect(
-      await screen.findByText('Terça | Membros inferiores | Hipertrofia'),
-    ).toBeVisible();
+    expect(await screen.findByText('Terça | Membros inferiores | Hipertrofia')).toBeVisible();
   });
 
   it('sem weekday (protocolo antigo): cai pro dayLabel cru, sem quebrar', async () => {

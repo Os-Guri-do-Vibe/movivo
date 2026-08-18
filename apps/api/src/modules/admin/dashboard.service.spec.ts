@@ -441,7 +441,9 @@ describe('DashboardService leituras operacionais', () => {
     expect(result.mandatory.every((item) => item.autoReleaseAt === null)).toBe(true);
     expect(result.mandatory[1]?.severity).toBe('ALERT');
     // optional: só o protocolo OPTIONAL, e ele sempre carrega prazo.
-    expect(result.optional.map((item) => item.title)).toEqual(['Protocolo para Revisão: Bruno Teste']);
+    expect(result.optional.map((item) => item.title)).toEqual([
+      'Protocolo para Revisão: Bruno Teste',
+    ]);
     expect(result.optional[0]?.autoReleaseAt).toBe('2026-08-02T13:00:00.000Z');
   });
 

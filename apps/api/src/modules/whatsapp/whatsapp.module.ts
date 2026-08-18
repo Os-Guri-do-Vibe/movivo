@@ -76,7 +76,11 @@ import { type WhatsappTransport, WHATSAPP_TRANSPORT } from './whatsapp-transport
       ): WhatsappTransport =>
         config.whatsapp.transportProvider === 'EVOLUTION'
           ? evolution
-          : new AraraHttpTransport(config.whatsapp.araraBaseUrl, config.whatsapp.araraApiKey, logger),
+          : new AraraHttpTransport(
+              config.whatsapp.araraBaseUrl,
+              config.whatsapp.araraApiKey,
+              logger,
+            ),
     },
     WhatsappOutboundWorker,
     WhatsappInboundService,

@@ -174,7 +174,10 @@ export function AnamnesisAnswersContent({ answers }: { answers: AnamnesisAnswers
                 : '—'
             }
           />
-          <Field label="Duração da sessão" value={labelFrom(DURATION_ITEMS, routine.sessionDuration)} />
+          <Field
+            label="Duração da sessão"
+            value={labelFrom(DURATION_ITEMS, routine.sessionDuration)}
+          />
           <Field
             label="Local"
             value={
@@ -182,7 +185,10 @@ export function AnamnesisAnswersContent({ answers }: { answers: AnamnesisAnswers
               routine.location
             }
           />
-          <Field label="Período preferido" value={labelFrom(PERIOD_ITEMS, routine.preferredPeriod)} />
+          <Field
+            label="Período preferido"
+            value={labelFrom(PERIOD_ITEMS, routine.preferredPeriod)}
+          />
           <Field
             label="Pratica outro esporte"
             value={
@@ -241,7 +247,10 @@ export function AnamnesisAnswersContent({ answers }: { answers: AnamnesisAnswers
               value={health.pain.underMedicalFollowUp ? 'Sim' : 'Não'}
             />
             {health.pain.hasProfessionalExplanation && health.pain.professionalExplanation ? (
-              <Field label="Explicação de profissional" value={health.pain.professionalExplanation} />
+              <Field
+                label="Explicação de profissional"
+                value={health.pain.professionalExplanation}
+              />
             ) : null}
             {health.pain.hasAvoidanceRecommendation && health.pain.avoidanceRecommendation ? (
               <Field label="Recomendação de evitação" value={health.pain.avoidanceRecommendation} />
@@ -281,7 +290,9 @@ function useAnamnesisAnswers(kind: 'PROTOCOL' | 'PARQ', id: string, enabled = tr
         setAnswers(await getAnamnesisAnswers(kind, id, signal));
       } catch (caught) {
         if (caught instanceof DOMException && caught.name === 'AbortError') return;
-        setError(caught instanceof Error ? caught.message : 'Não foi possível carregar a anamnese.');
+        setError(
+          caught instanceof Error ? caught.message : 'Não foi possível carregar a anamnese.',
+        );
       }
     },
     [kind, id],

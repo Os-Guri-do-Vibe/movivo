@@ -184,7 +184,9 @@ describe('QueueBoard', () => {
   it('esconde o badge de status quando é PENDING_SIGNATURE (ruído, é o status de quase todo item aqui)', async () => {
     getQueue.mockResolvedValue({
       ...queueResponse,
-      optional: [{ ...optionalProtocolItem, status: 'PENDING_SIGNATURE', summary: 'PENDING_SIGNATURE' }],
+      optional: [
+        { ...optionalProtocolItem, status: 'PENDING_SIGNATURE', summary: 'PENDING_SIGNATURE' },
+      ],
     });
     render(<QueueBoard />);
     const card = (await screen.findByText(optionalProtocolItem.title)).closest('li');

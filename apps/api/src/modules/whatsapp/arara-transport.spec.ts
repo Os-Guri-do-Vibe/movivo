@@ -88,7 +88,9 @@ describe('AraraHttpTransport (US-2.5)', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const t = new AraraHttpTransport('https://api.ararahq.com', undefined, logger);
 
-    await expect(t.sendTemplate('+5541999999999', 'verificacao_numero', ['123456'])).resolves.toBeUndefined();
+    await expect(
+      t.sendTemplate('+5541999999999', 'verificacao_numero', ['123456']),
+    ).resolves.toBeUndefined();
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });

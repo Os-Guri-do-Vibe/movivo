@@ -70,9 +70,15 @@ describe('ProtocolAnamnesisAnswers', () => {
   it('mostra estado de carregamento e depois os blocos de resposta', async () => {
     api.getAnamnesisAnswers.mockResolvedValue(answers);
     render(<ProtocolAnamnesisAnswers protocolId={PROTOCOL_ID} />);
-    expect(screen.getByRole('status', { name: 'Carregando respostas da anamnese' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('status', { name: 'Carregando respostas da anamnese' }),
+    ).toBeInTheDocument();
     expect(await screen.findByText('Rodrigo de Barros')).toBeVisible();
-    expect(api.getAnamnesisAnswers).toHaveBeenCalledWith('PROTOCOL', PROTOCOL_ID, expect.anything());
+    expect(api.getAnamnesisAnswers).toHaveBeenCalledWith(
+      'PROTOCOL',
+      PROTOCOL_ID,
+      expect.anything(),
+    );
   });
 
   it('mostra cadastro pessoal e objetivos com rótulos legíveis', async () => {

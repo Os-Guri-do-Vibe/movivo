@@ -757,7 +757,14 @@ export const knowledgeDocumentsResponse: KnowledgeDocumentsResponse = {
 };
 
 export const integrationNotConfiguredResponse: ControlCenterIntegrationResponse = {
-  data: { whatsapp: { configured: false, instanceName: null, status: 'NOT_CONFIGURED', qrCodeBase64: null } },
+  data: {
+    whatsapp: {
+      configured: false,
+      instanceName: null,
+      status: 'NOT_CONFIGURED',
+      qrCodeBase64: null,
+    },
+  },
   meta: { ...controlCenterMeta, dataQuality: [] },
 };
 
@@ -775,7 +782,12 @@ export const integrationConnectingResponse: ControlCenterIntegrationResponse = {
 
 export const integrationConnectedResponse: ControlCenterIntegrationResponse = {
   data: {
-    whatsapp: { configured: true, instanceName: 'minha-empresa', status: 'CONNECTED', qrCodeBase64: null },
+    whatsapp: {
+      configured: true,
+      instanceName: 'minha-empresa',
+      status: 'CONNECTED',
+      qrCodeBase64: null,
+    },
   },
   meta: { ...controlCenterMeta, dataQuality: [] },
 };

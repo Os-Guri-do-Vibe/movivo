@@ -601,7 +601,9 @@ export const controlCenterIntegrationResponseSchema = z.object({
   }),
   meta: controlCenterMetaSchema,
 });
-export type ControlCenterIntegrationResponse = z.infer<typeof controlCenterIntegrationResponseSchema>;
+export type ControlCenterIntegrationResponse = z.infer<
+  typeof controlCenterIntegrationResponseSchema
+>;
 
 export const createWhatsappInstanceSchema = z.object({
   instanceName: z

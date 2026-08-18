@@ -71,7 +71,8 @@ import { PinoLogger } from 'nestjs-pino';
 import { PHONE_VERIFICATION_TEMPLATE, phoneVerificationMessage } from './message-templates';
 import type { OutboundMessage, WhatsappTransport } from './whatsapp-transport';
 
-export type EvolutionConnectionState = 'NOT_CONFIGURED' | 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED';
+export type EvolutionConnectionState =
+  'NOT_CONFIGURED' | 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED';
 
 export interface CreateInstanceResult {
   status: EvolutionConnectionState;
@@ -190,9 +191,12 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
   }
 
   async connectionState(instanceName: string): Promise<EvolutionConnectionState> {
-    const res = await this.request(`/instance/connectionState/${encodeURIComponent(instanceName)}`, {
-      method: 'GET',
-    });
+    const res = await this.request(
+      `/instance/connectionState/${encodeURIComponent(instanceName)}`,
+      {
+        method: 'GET',
+      },
+    );
     const body = (await res.json()) as { instance?: { state?: string } };
     return toConnectionState(body.instance?.state);
   }
@@ -236,7 +240,11 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
     await this.sendText(instanceName, message.to, message.text);
   }
 
-  async sendTemplate(to: string, templateName: string, variables?: readonly string[]): Promise<void> {
+  async sendTemplate(
+    to: string,
+    templateName: string,
+    variables?: readonly string[],
+  ): Promise<void> {
     const text = renderTemplate(templateName, variables);
     if (text === null) {
       this.logger.warn({ templateName }, 'template sem equivalente na EvolutionAPI — descartado');
@@ -260,7 +268,8 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
   /** Atraso anti-ban de 15–20s com "digitando…" — ver nota de topo do arquivo. */
   private async humanizeBeforeSend(to: string, instanceName: string): Promise<void> {
     const delayMs =
-      HUMAN_DELAY_MIN_MS + Math.floor(Math.random() * (HUMAN_DELAY_MAX_MS - HUMAN_DELAY_MIN_MS + 1));
+      HUMAN_DELAY_MIN_MS +
+      Math.floor(Math.random() * (HUMAN_DELAY_MAX_MS - HUMAN_DELAY_MIN_MS + 1));
     await this.sendPresence(instanceName, to, 'composing', delayMs);
   }
 
@@ -285,7 +294,9 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
 
   private async request(path: string, init: RequestInit): Promise<Response> {
     if (!this.apiKey) {
-      throw new Error('EVOLUTION_API_KEY ausente — configure o secret antes de usar o painel de Integração.');
+      throw new Error(
+        'EVOLUTION_API_KEY ausente — configure o secret antes de usar o painel de Integração.',
+      );
     }
     const res = await fetch(`${this.baseUrl}${path}`, {
       ...init,

@@ -306,7 +306,9 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
   });
 
   it('validador bloqueou: loga o motivo real (achado 2026-08-18 — antes não deixava rastro)', async () => {
-    const violations = [{ rule: 'STRUCTURE', detail: 'exercício fora da base: bogus_id', action: 'BLOCK' as const }];
+    const violations = [
+      { rule: 'STRUCTURE', detail: 'exercício fora da base: bogus_id', action: 'BLOCK' as const },
+    ];
     const { worker, logger } = makeWorker({ action: 'BLOCK_FALLBACK', violations });
     await worker.process(job());
     expect(logger.warn).toHaveBeenCalledWith(

@@ -38,9 +38,10 @@ describe('DashboardController SSE', () => {
       anamnesisAnswers,
     } as unknown as DashboardService);
 
-    expect(
-      Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.anamnesisAnswers),
-    ).toEqual(['PROFESSIONAL', 'ADMIN']);
+    expect(Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.anamnesisAnswers)).toEqual([
+      'PROFESSIONAL',
+      'ADMIN',
+    ]);
     await expect(controller.anamnesisAnswers(professional, 'proto-1')).resolves.toEqual({
       userId: 'u1',
     });

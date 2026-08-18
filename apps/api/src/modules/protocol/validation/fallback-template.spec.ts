@@ -43,18 +43,21 @@ describe('buildFallbackProtocol', () => {
     [['MON', 'WED', 'FRI']],
     [['MON', 'TUE', 'WED', 'THU', 'FRI']],
   ];
-  it.each(preferredDaysCases)('uma sessão por dia declarado, com o weekday certo: %j', (preferredDays) => {
-    const structure = buildFallbackProtocol('GAIN_MUSCLE', preferredDays);
-    expect(structure.sessions).toHaveLength(preferredDays.length);
-    expect(structure.weeklyFrequency).toBe(preferredDays.length);
-    expect(structure.sessions.map((s) => s.weekday)).toEqual(preferredDays);
+  it.each(preferredDaysCases)(
+    'uma sessão por dia declarado, com o weekday certo: %j',
+    (preferredDays) => {
+      const structure = buildFallbackProtocol('GAIN_MUSCLE', preferredDays);
+      expect(structure.sessions).toHaveLength(preferredDays.length);
+      expect(structure.weeklyFrequency).toBe(preferredDays.length);
+      expect(structure.sessions.map((s) => s.weekday)).toEqual(preferredDays);
 
-    const verdict = service.validate({
-      structure,
-      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], preferredDays },
-    });
-    expect(verdict.action).toBe('PASS');
-  });
+      const verdict = service.validate({
+        structure,
+        constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], preferredDays },
+      });
+      expect(verdict.action).toBe('PASS');
+    },
+  );
 
   it('alterna entre dois templates (A/B) em vez de repetir a mesma sessão em todo dia', () => {
     const structure = buildFallbackProtocol('GAIN_MUSCLE', ['MON', 'WED', 'FRI']);

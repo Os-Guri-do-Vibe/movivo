@@ -57,9 +57,9 @@ export function IntegrationDashboard() {
   // não precisa esperar o próximo GET. Vale até o próximo `refresh()` (poll) trazer
   // dado novo do backend — aí o dado real assume, sem risco de mostrar um estado
   // desatualizado (`data` só muda de referência quando um `refresh()` de fato resolve).
-  const [override, setOverride] = useState<ControlCenterIntegrationResponse['data']['whatsapp'] | null>(
-    null,
-  );
+  const [override, setOverride] = useState<
+    ControlCenterIntegrationResponse['data']['whatsapp'] | null
+  >(null);
   useEffect(() => {
     if (data) setOverride(null);
   }, [data]);
@@ -99,7 +99,12 @@ export function IntegrationDashboard() {
         refreshing={loading}
         onRefresh={() => void refresh()}
       />
-      <ResourceState loading={loading} error={error} forbidden={forbidden} onRetry={() => void refresh()} />
+      <ResourceState
+        loading={loading}
+        error={error}
+        forbidden={forbidden}
+        onRetry={() => void refresh()}
+      />
 
       {!loading && !error && whatsapp ? (
         <div className="mt-6 max-w-2xl rounded-xl border border-border bg-card p-5">
@@ -143,7 +148,10 @@ export function IntegrationDashboard() {
                   disabled={creating}
                   onChange={(event) => setInstanceNameInput(event.target.value)}
                 />
-                <Button onClick={() => void handleCreate()} disabled={creating || !instanceNameInput.trim()}>
+                <Button
+                  onClick={() => void handleCreate()}
+                  disabled={creating || !instanceNameInput.trim()}
+                >
                   {creating ? 'Criando…' : 'Criar Instância'}
                 </Button>
               </div>
