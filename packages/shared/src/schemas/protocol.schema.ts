@@ -14,7 +14,7 @@
 import { z } from 'zod';
 
 import { ProtocolApprovalStatus, ProtocolStatus } from '../enums';
-import { generationGoalSchema } from './anamnesis.schema';
+import { generationGoalSchema, weekdaySchema } from './anamnesis.schema';
 import { uuidSchema } from './common.schema';
 
 /**
@@ -83,23 +83,46 @@ export type RepsRange = z.infer<typeof repsRangeSchema>;
 /**
  * Um exercício prescrito na sessão. `exerciseId` referencia a base de referência
  * (o validador US-2.3 rejeita id fora do catálogo — aqui é só string tipada).
+ *
+ * `reps` XOR `durationSeconds` (achado 2026-08-18): nem todo exercício da base é
+ * sets×reps. Isométrico (prancha) e cardio contínuo/intervalado (caminhada, bike,
+ * tiros) são prescritos por TEMPO — antes deste campo existir, o schema forçava a
+ * IA a inventar um "reps" pra prancha e o `ValidationService` rejeitava (com razão)
+ * o resultado, empurrando o protocolo pra revisão humana sempre que a IA escolhia
+ * um exercício desse tipo. `CatalogExercise.measurement` (exercise-catalog.ts) diz
+ * qual dos dois campos o exercício usa.
  */
-export const protocolExerciseSchema = z.object({
-  exerciseId: z.string().trim().min(1).max(80),
-  name: z.string().trim().min(1).max(120),
-  sets: z.number().int().min(1).max(12),
-  reps: repsRangeSchema,
-  loadStrategy: loadStrategySchema,
-  restSeconds: z.number().int().min(0).max(600),
-  /** Técnica avançada aplicada nesta prescrição. Ausente = série tradicional. */
-  technique: advancedTechniqueSchema.optional(),
-  notes: z.string().trim().max(400).optional(),
-});
+export const protocolExerciseSchema = z
+  .object({
+    exerciseId: z.string().trim().min(1).max(80),
+    name: z.string().trim().min(1).max(120),
+    sets: z.number().int().min(1).max(12),
+    reps: repsRangeSchema.optional(),
+    /** Segundos por série/intervalo. Só para exercício de medida DURATION. */
+    durationSeconds: z.number().int().min(5).max(2400).optional(),
+    loadStrategy: loadStrategySchema,
+    restSeconds: z.number().int().min(0).max(600),
+    /** Técnica avançada aplicada nesta prescrição. Ausente = série tradicional. */
+    technique: advancedTechniqueSchema.optional(),
+    notes: z.string().trim().max(400).optional(),
+  })
+  .refine((ex) => (ex.reps !== undefined) !== (ex.durationSeconds !== undefined), {
+    message: 'Exercício deve ter "reps" OU "durationSeconds", nunca os dois nem nenhum.',
+  });
 export type ProtocolExercise = z.infer<typeof protocolExerciseSchema>;
 
-/** Uma sessão de treino (um "dia"). `focus` = grupo/tema (ex.: "Membros inferiores"). */
+/**
+ * Uma sessão de treino (um "dia"). `focus` = grupo/tema (ex.: "Membros inferiores").
+ *
+ * `weekday` (achado 2026-08-18, decisão do fundador): o dia real da semana em que o
+ * aluno treina (`MON`..`SUN`, mesmo enum de `preferredDays` na anamnese) — antes disso a
+ * IA gerava sessões genéricas sem vínculo com a rotina declarada, podendo entregar 1
+ * sessão só pra um aluno de 4x/semana. `.optional()` porque protocolos persistidos antes
+ * deste campo existir não o têm — nunca quebra o parse de conteúdo antigo.
+ */
 export const protocolSessionSchema = z.object({
   dayLabel: z.string().trim().min(1).max(60),
+  weekday: weekdaySchema.optional(),
   focus: z.string().trim().min(1).max(120),
   exercises: z.array(protocolExerciseSchema).min(1).max(15),
 });

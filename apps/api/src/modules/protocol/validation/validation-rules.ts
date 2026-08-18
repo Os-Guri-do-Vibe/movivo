@@ -26,6 +26,14 @@ export const SETS_RANGE: NumericRange = { min: 1, max: 6 };
 export const REST_SECONDS_RANGE: NumericRange = { min: 15, max: 240 };
 
 /**
+ * Faixa padrão de segundos por série/intervalo para exercício de medida `DURATION`
+ * (achado 2026-08-18, `CatalogExercise.measurement`). É o default de HOLD ISOMÉTRICO (prancha);
+ * cardio contínuo/intervalado tem faixa própria em `durationSecondsRange` no próprio catálogo,
+ * porque a escala de tempo (minutos, não segundos) é outra.
+ */
+export const DURATION_SECONDS_RANGE: NumericRange = { min: 15, max: 120 };
+
+/**
  * Faixa de repetições plausível por objetivo (a validar pelo RT CREF).
  *
  * v3 (Sprint 6): passou de 3 para os **8 objetivos de geração** da anamnese v2. Cada faixa é

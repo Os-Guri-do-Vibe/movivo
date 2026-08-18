@@ -5,9 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { and, desc, eq, isNotNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, sql } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
-import { protocolStructureSchema } from '@movivo/shared';
+import {
+  anamnesisStructuredSchema,
+  onboardingStep1Schema,
+  protocolStructureSchema,
+} from '@movivo/shared';
 import { z } from 'zod';
 
 import { HealthCipherService } from '../../core/database/health-cipher.service';
@@ -27,6 +31,7 @@ import {
   type TenantTransaction,
 } from '../../core/database/tenant-database.service';
 import { scrubPII } from '../ai-coach/llm/pii-scrubber';
+import { healthBlockSchema, type HealthBlock } from '../anamnesis/health-block';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
@@ -34,7 +39,10 @@ import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { signatureHash } from '../protocol/protocol.repository';
 import type { UserConstraints } from '../protocol/user-constraints';
 import { ValidationService } from '../protocol/validation/validation.service';
-import type { ProtocolGenerationJob } from '../protocol/protocol-generation.worker';
+import {
+  PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS,
+  type ProtocolGenerationJob,
+} from '../protocol/protocol-generation.worker';
 import { AuditService } from './audit.service';
 
 const uuidSchema = z.uuid();
@@ -64,6 +72,8 @@ export interface QueueItem {
   title: string;
   summary: string;
   status: string;
+  /** Só protocolos `OPTIONAL` na categoria "Disponível para Revisão" (fila do CREF). */
+  autoReleaseAt: string | null;
 }
 
 /** Titulo do item de fila de protocolo, com o nome completo do titular. */
@@ -85,66 +95,68 @@ export class DashboardService {
     this.logger.setContext(DashboardService.name);
   }
 
+  /**
+   * Fila do profissional — só protocolo + PAR-Q (handoff/check-in ficam fora desta
+   * tela; `resolveHandoff`/`handoffDetail`/`checkinDetail` continuam existindo pra uso
+   * futuro, só não aparecem aqui). Duas categorias, cada uma ordenada só por idade
+   * (mais antigo primeiro):
+   *
+   * - `mandatory` — PAR-Q bloqueado (decisão do fundador, 2026-08-18: PAR-Q é o ÚNICO
+   *   motivo de negócio pra exigir revisão sem prazo) E protocolo `reviewUrgency:
+   *   MANDATORY` (só existe hoje via `editProtocol` — um CREF editou manualmente e
+   *   precisa de sign-off fresco; nunca mais vem de `BLOCK_FALLBACK`/DLQ da geração —
+   *   ver `protocol-planner.ts`). Nenhum dos dois tem job de auto-liberação agendado;
+   *   nenhum sai sozinho, sempre exige ação humana.
+   * - `optional` — protocolo `reviewUrgency: OPTIONAL`: **todo** protocolo que sai da
+   *   geração cai aqui — PASS limpo, validador sinalizando (`FLAG_HUMAN_REVIEW`) e o
+   *   fallback pro template conservador do RT (`BLOCK_FALLBACK`/DLQ) por igual (decisão
+   *   do fundador, 2026-08-18: nem PASS entrega sozinho na hora — ver
+   *   `protocol-planner.ts`). Todos têm `ProtocolAutoReleaseWorker` agendado, por isso é
+   *   o único grupo onde `autoReleaseAt` sempre existe.
+   */
   async queue(actor: AuthenticatedUser) {
-    const items = await this.scopedRead(actor, async (tx) => {
-      const [pendingProtocols, alerts, blockedParq] = await Promise.all([
+    const { mandatory, optional } = await this.scopedRead(actor, async (tx) => {
+      const [pendingProtocols, blockedParq] = await Promise.all([
         tx
           .select({
             id: protocols.id,
             createdAt: protocols.createdAt,
             status: protocols.status,
-            userId: protocols.userId,
             name: users.name,
+            reviewUrgency: protocols.reviewUrgency,
           })
           .from(protocols)
           .innerJoin(users, eq(users.id, protocols.userId))
-          .where(
-            or(
-              eq(protocols.approvalStatus, 'PENDING_REVIEW'),
-              eq(protocols.status, 'PENDING_SIGNATURE'),
-            ),
-          ),
-        tx
-          .select({
-            id: handoffAlerts.id,
-            createdAt: handoffAlerts.createdAt,
-            level: handoffAlerts.level,
-            reason: handoffAlerts.reason,
-            sourceType: handoffAlerts.sourceType,
-          })
-          .from(handoffAlerts)
-          .where(eq(handoffAlerts.status, 'OPEN')),
+          .where(eq(protocols.approvalStatus, 'PENDING_REVIEW')),
         tx
           .select({ id: anamnesisSessions.id, createdAt: anamnesisSessions.createdAt })
           .from(anamnesisSessions)
           .where(eq(anamnesisSessions.parqState, 'BLOQUEADO_AGUARDANDO_CLEARANCE')),
       ]);
 
-      const out: QueueItem[] = pendingProtocols.map((row) =>
-        this.item(
-          row.id,
-          'PROTOCOL',
-          'ROUTINE',
-          row.createdAt,
-          protocolTitle(row.name),
-          row.status,
-        ),
-      );
-      for (const row of alerts) {
-        const kind = row.sourceType === 'CHECKIN' ? 'CHECKIN' : 'HANDOFF';
-        out.push(
+      const mandatory: QueueItem[] = [];
+      const optional: QueueItem[] = [];
+      for (const row of pendingProtocols) {
+        const isOptional = row.reviewUrgency === 'OPTIONAL';
+        // `MANDATORY` só chega aqui via `editProtocol` (CREF editou manualmente) — nunca
+        // mais via fallback de geração (achado 2026-08-18: PAR-Q é o único motivo de
+        // negócio pra exigir revisão sem prazo, e quem gera já passou pelo gate de PAR-Q).
+        (isOptional ? optional : mandatory).push(
           this.item(
             row.id,
-            kind,
-            row.level,
+            'PROTOCOL',
+            isOptional ? 'ROUTINE' : 'ALERT',
             row.createdAt,
-            kind === 'CHECKIN' ? 'Check-in requer atencao' : 'Conversa requer atencao',
-            row.reason,
+            protocolTitle(row.name),
+            row.status,
+            isOptional
+              ? new Date(row.createdAt.getTime() + PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS).toISOString()
+              : null,
           ),
         );
       }
-      out.push(
-        ...blockedParq.map((row) =>
+      for (const row of blockedParq) {
+        mandatory.push(
           this.item(
             row.id,
             'PARQ',
@@ -152,17 +164,24 @@ export class DashboardService {
             row.createdAt,
             'PAR-Q aguarda decisao humana',
             'BLOCKED',
+            null,
           ),
-        ),
-      );
-      return out.sort(
-        (a, b) => this.priority(a) - this.priority(b) || a.createdAt.localeCompare(b.createdAt),
-      );
+        );
+      }
+
+      const byAge = (a: QueueItem, b: QueueItem) => a.createdAt.localeCompare(b.createdAt);
+      return { mandatory: mandatory.sort(byAge), optional: optional.sort(byAge) };
     });
 
-    const counts = { SAFETY: 0, ALERT: 0, ROUTINE: 0, total: items.length };
-    for (const item of items) counts[item.severity] += 1;
-    return { items, counts };
+    return {
+      mandatory,
+      optional,
+      counts: {
+        mandatory: mandatory.length,
+        optional: optional.length,
+        total: mandatory.length + optional.length,
+      },
+    };
   }
 
   events(actor: AuthenticatedUser) {
@@ -179,6 +198,16 @@ export class DashboardService {
     return this.handoffDetail(actor, id);
   }
 
+  async anamnesisAnswers(actor: AuthenticatedUser, rawId: string) {
+    const id = this.parse(uuidSchema, rawId);
+    return this.protocolAnamnesisAnswers(actor, id);
+  }
+
+  async parqAnamnesisAnswers(actor: AuthenticatedUser, rawId: string) {
+    const id = this.parse(uuidSchema, rawId);
+    return this.loadParqAnamnesisAnswers(actor, id);
+  }
+
   async editProtocol(actor: AuthenticatedUser, rawId: string, rawBody: unknown) {
     const id = this.parse(uuidSchema, rawId);
     const body = this.parse(editSchema, rawBody);
@@ -186,7 +215,10 @@ export class DashboardService {
       const row = await this.requireProtocol(tx, id, true);
       const verdict = this.validation.validate({
         structure: body.content,
-        constraints: row.constraints as Pick<UserConstraints, 'goal' | 'injuryTags'>,
+        constraints: row.constraints as Pick<
+          UserConstraints,
+          'goal' | 'injuryTags' | 'preferredDays'
+        >,
         parqFlags: row.parQFlags as UserConstraints['injuryTags'],
       });
       if (verdict.action !== 'PASS') {
@@ -207,6 +239,9 @@ export class DashboardService {
           signedAt: null,
           signatureHash: null,
           humanReviewRequired: true,
+          // Conteúdo editado por humano nunca sai sozinho — se já era `OPTIONAL`, o job de
+          // auto-liberação (se ainda não disparou) vira no-op ao reconferir o estado.
+          reviewUrgency: 'MANDATORY',
         })
         .where(eq(protocols.id, id));
       await this.audit.append(tx, {
@@ -267,7 +302,10 @@ export class DashboardService {
       const content = protocolStructureSchema.parse(row.content);
       const verdict = this.validation.validate({
         structure: content,
-        constraints: row.constraints as Pick<UserConstraints, 'goal' | 'injuryTags'>,
+        constraints: row.constraints as Pick<
+          UserConstraints,
+          'goal' | 'injuryTags' | 'preferredDays'
+        >,
         parqFlags: row.parQFlags as UserConstraints['injuryTags'],
       });
       if (verdict.action !== 'PASS') {
@@ -512,6 +550,9 @@ export class DashboardService {
         row.createdAt,
         protocolTitle(owner?.name),
         row.status,
+        row.reviewUrgency === 'OPTIONAL'
+          ? new Date(row.createdAt.getTime() + PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS).toISOString()
+          : null,
       );
       return {
         item,
@@ -564,9 +605,96 @@ export class DashboardService {
         row.createdAt,
         'PAR-Q aguarda decisao humana',
         row.state ?? 'BLOCKED',
+        null,
       ),
       context: { positiveAnswers: flags.length },
       parq: { flags, state: row.state ?? 'BLOQUEADO_AGUARDANDO_CLEARANCE' },
+    };
+  }
+
+  /**
+   * Todas as respostas que o titular preencheu no formulário de anamnese — cadastro
+   * pessoal, objetivos/rotina e o bloco de saúde (PAR-Q completo, dor, texto livre,
+   * declarações). Não existe em lugar nenhum do app hoje: a "ficha do aluno" (US-7.4)
+   * só projeta 8 de ~15 campos de `data_block_3` e nunca expõe `data_block_1` nem o
+   * PAR-Q completo — aqui é o bloco inteiro, sem projeção parcial.
+   *
+   * Dois pontos de entrada (achado 2026-08-18: olho aparece nas duas caixas da fila),
+   * convergindo no mesmo parser — `protocolAnamnesisAnswers` parte de um protocolo e
+   * deriva a sessão mais recente do titular; `parqAnamnesisAnswers` já recebe a sessão
+   * diretamente (é o próprio item da fila "Obrigatória").
+   */
+  private async protocolAnamnesisAnswers(actor: AuthenticatedUser, protocolId: string) {
+    const { userId, session } = await this.scopedRead(actor, async (tx) => {
+      const protocol = await this.requireProtocol(tx, protocolId);
+      const [found] = await tx
+        .select({
+          id: anamnesisSessions.id,
+          dataBlock1: anamnesisSessions.dataBlock1,
+          dataBlock2: anamnesisSessions.dataBlock2,
+          dataBlock3: anamnesisSessions.dataBlock3,
+          submittedAt: anamnesisSessions.submittedAt,
+        })
+        .from(anamnesisSessions)
+        .where(
+          and(
+            eq(anamnesisSessions.userId, protocol.userId),
+            eq(anamnesisSessions.status, 'SUBMITTED'),
+          ),
+        )
+        .orderBy(desc(anamnesisSessions.submittedAt))
+        .limit(1);
+      if (!found) throw new NotFoundException('Anamnese do titular nao encontrada.');
+      await this.auditRead(tx, actor, protocol.userId, 'anamnesis_session', found.id);
+      return { userId: protocol.userId, session: found };
+    });
+
+    return this.parseAnamnesisAnswers(userId, session);
+  }
+
+  private async loadParqAnamnesisAnswers(actor: AuthenticatedUser, sessionId: string) {
+    const { userId, session } = await this.scopedRead(actor, async (tx) => {
+      const [found] = await tx
+        .select({
+          id: anamnesisSessions.id,
+          userId: anamnesisSessions.userId,
+          dataBlock1: anamnesisSessions.dataBlock1,
+          dataBlock2: anamnesisSessions.dataBlock2,
+          dataBlock3: anamnesisSessions.dataBlock3,
+          submittedAt: anamnesisSessions.submittedAt,
+        })
+        .from(anamnesisSessions)
+        .where(eq(anamnesisSessions.id, sessionId))
+        .limit(1);
+      if (!found?.userId) throw new NotFoundException('Anamnese nao encontrada.');
+      await this.auditRead(tx, actor, found.userId, 'anamnesis_session', found.id);
+      return { userId: found.userId, session: found };
+    });
+
+    return this.parseAnamnesisAnswers(userId, session);
+  }
+
+  private async parseAnamnesisAnswers(
+    userId: string,
+    session: {
+      dataBlock1: unknown;
+      dataBlock2: Buffer | null;
+      dataBlock3: unknown;
+      submittedAt: Date | null;
+    },
+  ) {
+    const personal = onboardingStep1Schema.parse(session.dataBlock1);
+    const routine = anamnesisStructuredSchema.parse(session.dataBlock3);
+    const health: HealthBlock = session.dataBlock2
+      ? healthBlockSchema.parse(JSON.parse(await this.cipher.decryptHealth(session.dataBlock2)))
+      : {};
+
+    return {
+      userId,
+      submittedAt: session.submittedAt?.toISOString() ?? null,
+      personal,
+      routine,
+      health,
     };
   }
 
@@ -612,6 +740,7 @@ export class DashboardService {
         row.createdAt,
         'Check-in requer atencao',
         row.status,
+        null,
       ),
       context: {
         weekNumber: row.weekNumber,
@@ -669,6 +798,7 @@ export class DashboardService {
           alert.createdAt,
           'Conversa requer atencao',
           alert.status,
+          null,
         ),
         context: { reason: alert.reason, messages: context.length },
         handoff: { reason: alert.reason, level: alert.level, status: alert.status },
@@ -745,6 +875,7 @@ export class DashboardService {
     createdAt: Date,
     title: string,
     status: string,
+    autoReleaseAt: string | null,
   ): QueueItem {
     return {
       id,
@@ -755,11 +886,8 @@ export class DashboardService {
       title,
       summary: status,
       status,
+      autoReleaseAt,
     };
-  }
-
-  private priority(item: QueueItem): number {
-    return item.severity === 'SAFETY' ? 0 : item.severity === 'ALERT' ? 1 : 2;
   }
 
   private hashJson(value: unknown): string {

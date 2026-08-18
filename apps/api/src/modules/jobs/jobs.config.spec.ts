@@ -26,6 +26,9 @@ describe('jobs.config', () => {
         'payment-reconciliation',
         'dead-letter',
         'protocol-generation',
+        // Fila do profissional, categoria "Disponível para Revisão" — liberação automática
+        // após a janela de cortesia de 1h.
+        'protocol-auto-release',
         'sanity',
         'whatsapp-outbound',
         // US-8.1 — quick reply diário de treino.

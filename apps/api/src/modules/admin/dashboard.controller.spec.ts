@@ -32,6 +32,36 @@ describe('DashboardController SSE', () => {
     expect(events).toHaveBeenCalledWith(professional);
   });
 
+  it('rota de respostas da anamnese: PROFESSIONAL/ADMIN, delega pro service', async () => {
+    const anamnesisAnswers = vi.fn(async () => ({ userId: 'u1' }));
+    const controller = new DashboardController({
+      anamnesisAnswers,
+    } as unknown as DashboardService);
+
+    expect(
+      Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.anamnesisAnswers),
+    ).toEqual(['PROFESSIONAL', 'ADMIN']);
+    await expect(controller.anamnesisAnswers(professional, 'proto-1')).resolves.toEqual({
+      userId: 'u1',
+    });
+    expect(anamnesisAnswers).toHaveBeenCalledWith(professional, 'proto-1');
+  });
+
+  it('rota de respostas da anamnese via PAR-Q: PROFESSIONAL/ADMIN, delega pro service', async () => {
+    const parqAnamnesisAnswers = vi.fn(async () => ({ userId: 'u1' }));
+    const controller = new DashboardController({
+      parqAnamnesisAnswers,
+    } as unknown as DashboardService);
+
+    expect(
+      Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.parqAnamnesisAnswers),
+    ).toEqual(['PROFESSIONAL', 'ADMIN']);
+    await expect(controller.parqAnamnesisAnswers(professional, 'session-1')).resolves.toEqual({
+      userId: 'u1',
+    });
+    expect(parqAnamnesisAnswers).toHaveBeenCalledWith(professional, 'session-1');
+  });
+
   it('declara headers anti-cache e anti-buffering no endpoint', () => {
     const headers = Reflect.getMetadata(
       '__headers__',

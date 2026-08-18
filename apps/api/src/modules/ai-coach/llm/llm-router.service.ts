@@ -24,6 +24,7 @@ import {
   type DataClass,
   type LLMProvider,
   LLMProviderError,
+  type LLMPurpose,
   type LLMRequest,
   type LLMResult,
   LLMUnavailableError,
@@ -118,13 +119,17 @@ export class LlmRouter {
       const attempt = i + 1;
       const startedAt = Date.now();
       try {
-        const result = await this.callWithRetry(provider, {
-          system,
-          messages,
-          maxTokens,
-          temperature,
-          cache: request.cache ?? true,
-        });
+        const result = await this.callWithRetry(
+          provider,
+          {
+            system,
+            messages,
+            maxTokens,
+            temperature,
+            cache: request.cache ?? true,
+          },
+          request.purpose,
+        );
         breaker.recordSuccess();
 
         const latencyMs = Date.now() - startedAt;
@@ -183,22 +188,39 @@ export class LlmRouter {
   private async callWithRetry(
     provider: LLMProvider,
     req: Parameters<LLMProvider['complete']>[0],
+    purpose: LLMPurpose,
   ): ReturnType<LLMProvider['complete']> {
     try {
-      return await this.callOnce(provider, req);
+      return await this.callOnce(provider, req, purpose);
     } catch (error) {
       if (!isTransient(error)) throw error;
       await new Promise((r) => setTimeout(r, 200));
-      return this.callOnce(provider, req);
+      return this.callOnce(provider, req, purpose);
     }
+  }
+
+  /**
+   * `PROTOCOL_GENERATION` roda em job de fila, sem pressão de UX em tempo real — usa o
+   * timeout generoso dedicado. Achado 2026-08-18: com o timeout único de 8s (calibrado
+   * pro chat), toda chamada real ao GPT-4.1 pra gerar um protocolo completo estourava,
+   * esgotava os 3 retries e caía sempre no fallback de segurança — mascarado como se
+   * fosse a validação de conteúdo rejeitando a saída da IA, quando na verdade a IA nunca
+   * chegava a responder a tempo. `AI_RESPONSE`/`CHECKIN_ADJUSTMENT` continuam no timeout
+   * curto — ali, sim, latência é uma conversa de WhatsApp acontecendo ao vivo.
+   */
+  private timeoutMsFor(purpose: LLMPurpose): number {
+    return purpose === 'PROTOCOL_GENERATION'
+      ? this.config.llm.protocolTimeoutMs
+      : this.config.llm.timeoutMs;
   }
 
   private async callOnce(
     provider: LLMProvider,
     req: Parameters<LLMProvider['complete']>[0],
+    purpose: LLMPurpose,
   ): ReturnType<LLMProvider['complete']> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.config.llm.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), this.timeoutMsFor(purpose));
     try {
       return await provider.complete(req, controller.signal);
     } finally {

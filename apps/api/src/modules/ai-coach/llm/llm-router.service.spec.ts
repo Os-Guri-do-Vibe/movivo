@@ -55,6 +55,7 @@ function make(providers: LLMProvider[]) {
     llm: {
       maxTokens: 4096,
       timeoutMs: 8000,
+      protocolTimeoutMs: 45_000,
       usdBrlRate: 5.5,
       userDailyMessageLimit: 50,
       dailyCostAlertBrl: 0.5,
@@ -130,8 +131,8 @@ describe('LlmRouter.complete', () => {
     expect(primary.complete).toHaveBeenCalledTimes(1); // sem retry em 429
   });
 
-  it('timeout hard dispara failover', async () => {
-    const primary = new FakeProvider(
+  function timeoutProvider(): FakeProvider {
+    return new FakeProvider(
       'OPENAI_GPT41',
       'gpt-4.1',
       (_req, signal) =>
@@ -141,16 +142,38 @@ describe('LlmRouter.complete', () => {
           );
         }),
     );
+  }
+
+  it('timeout hard dispara failover', async () => {
+    const primary = timeoutProvider();
     const fallback = new FakeProvider(
       'ANTHROPIC_SONNET45',
       'claude-sonnet-4-5',
       ok('claude-sonnet-4-5'),
     );
     const { router, config } = make([primary, fallback]);
-    (config.llm as { timeoutMs: number }).timeoutMs = 50; // encurta o timeout p/ o teste
+    // `request()` default é PROTOCOL_GENERATION — usa `protocolTimeoutMs`, não `timeoutMs`.
+    (config.llm as { protocolTimeoutMs: number }).protocolTimeoutMs = 50;
 
     const result = await router.complete(request());
     expect(result.attempt).toBe(2);
+  });
+
+  it('PROTOCOL_GENERATION usa o timeout dedicado (job em fila); AI_RESPONSE usa o do chat (achado 2026-08-18)', async () => {
+    const primary = timeoutProvider();
+    const fallback = new FakeProvider(
+      'ANTHROPIC_SONNET45',
+      'claude-sonnet-4-5',
+      ok('claude-sonnet-4-5'),
+    );
+    const { router, config } = make([primary, fallback]);
+    (config.llm as { timeoutMs: number; protocolTimeoutMs: number }).timeoutMs = 50;
+    (config.llm as { protocolTimeoutMs: number }).protocolTimeoutMs = 24 * 60 * 60 * 1000; // 1 dia — nunca estoura no teste
+
+    // AI_RESPONSE: usa o timeout curto do chat (50ms) — estoura e cai pro fallback.
+    const chatResult = await router.complete(request({ purpose: 'AI_RESPONSE' }));
+    expect(chatResult.attempt).toBe(2);
+    expect(chatResult.provider).toBe('ANTHROPIC_SONNET45');
   });
 
   it('1 retry no mesmo provedor para erro de rede transitório', async () => {

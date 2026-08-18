@@ -122,9 +122,12 @@ function makeTx(user: unknown, session: unknown) {
   return chain;
 }
 
-function verdict(action: ValidationVerdict['action']): ValidationVerdict {
+function verdict(
+  action: ValidationVerdict['action'],
+  violations: ValidationVerdict['violations'] = [],
+): ValidationVerdict {
   const code = action === 'PASS' ? 'PASS' : action === 'BLOCK_FALLBACK' ? 'BLOCK' : 'FLAG';
-  return { action, code, humanReviewRequired: action !== 'PASS', violations: [] };
+  return { action, code, humanReviewRequired: action !== 'PASS', violations };
 }
 
 interface Deps {
@@ -132,6 +135,7 @@ interface Deps {
   session?: unknown;
   exists?: boolean;
   action?: ValidationVerdict['action'];
+  violations?: ValidationVerdict['violations'];
   alreadyExisted?: boolean;
   consentActive?: boolean;
 }
@@ -160,7 +164,7 @@ function makeWorker(deps: Deps = {}) {
   } as unknown as ProtocolGeneratorService;
 
   const validation = {
-    validate: vi.fn(() => verdict(deps.action ?? 'PASS')),
+    validate: vi.fn(() => verdict(deps.action ?? 'PASS', deps.violations)),
   } as unknown as ValidationService;
 
   const repository = {
@@ -177,7 +181,7 @@ function makeWorker(deps: Deps = {}) {
   const enqueue = vi.fn(() => Promise.resolve('job'));
   const queues = { enqueue } as unknown as QueueManager;
 
-  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), setContext: vi.fn() } as never;
+  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), setContext: vi.fn() };
   const worker = new ProtocolGenerationWorker(
     workers,
     queues,
@@ -190,9 +194,9 @@ function makeWorker(deps: Deps = {}) {
     validation,
     repository,
     { emit: vi.fn() } as unknown as DashboardQueueEventsService,
-    logger,
+    logger as never,
   );
-  return { worker, repository, queues, enqueue, generator, workers, workerListeners };
+  return { worker, repository, queues, enqueue, generator, workers, workerListeners, logger };
 }
 
 function job(over: Partial<ProtocolGenerationJob> = {}): Job<ProtocolGenerationJob> {
@@ -214,18 +218,36 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
     expect(repository.persist).not.toHaveBeenCalled();
   });
 
-  it('caminho limpo → persiste AUTO_APPROVED assinado e enfileira a entrega', async () => {
-    const { worker, repository, enqueue } = makeWorker({ action: 'PASS' });
+  it('caminho limpo (PASS) → também entra em PENDING_REVIEW/OPTIONAL, sem entrega imediata', async () => {
+    // Decisão do fundador (2026-08-18): nem PASS entrega sozinho na hora — todo protocolo
+    // passa pela Fila do Profissional com janela de cortesia de 1h, PAR-Q à parte.
+    const { worker, repository, enqueue, generator } = makeWorker({
+      action: 'PASS',
+      session: sessionRow({
+        dataBlock3: { ...sessionRow().dataBlock3, preferredDays: ['MON', 'WED', 'FRI'] },
+      }),
+    });
     const res = await worker.process(job());
-    expect(res.status).toBe('AUTO_APPROVED');
+    expect(res.status).toBe('PENDING_REVIEW');
+    // `toConstraints()` repassa os dias reais da anamnese pro gerador (achado 2026-08-18).
+    expect(generator.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        constraints: expect.objectContaining({ preferredDays: ['MON', 'WED', 'FRI'] }),
+      }),
+    );
     expect(repository.persist).toHaveBeenCalledWith(
-      expect.objectContaining({ signed: true, approvalStatus: 'AUTO_APPROVED', status: 'ACTIVE' }),
+      expect.objectContaining({
+        signed: false,
+        approvalStatus: 'PENDING_REVIEW',
+        status: 'PENDING_SIGNATURE',
+        reviewUrgency: 'OPTIONAL',
+      }),
     );
     expect(enqueue).toHaveBeenCalledWith(
-      'whatsapp-outbound',
-      'protocol-delivery',
-      expect.objectContaining({ userId: 'u1', protocolId: 'p1' }),
-      expect.objectContaining({ jobId: 'protocol-delivery_u1_1' }),
+      'protocol-auto-release',
+      'auto-release',
+      { userId: 'u1', protocolId: 'p1' },
+      { delay: 60 * 60 * 1000, jobId: 'auto-release-p1' },
     );
   });
 
@@ -247,14 +269,61 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
     expect(repository.persist).not.toHaveBeenCalled();
   });
 
-  it('validador bloqueou (template) → PENDING_REVIEW, sem entrega', async () => {
+  it('validador bloqueou (template) → PENDING_REVIEW, sem entrega, mas agenda auto-liberação em 1h', async () => {
     const { worker, enqueue, repository } = makeWorker({ action: 'BLOCK_FALLBACK' });
     const res = await worker.process(job());
     expect(res.status).toBe('PENDING_REVIEW');
     expect(repository.persist).toHaveBeenCalledWith(
-      expect.objectContaining({ signed: false, humanReviewRequired: true }),
+      expect.objectContaining({
+        signed: false,
+        humanReviewRequired: true,
+        // OPTIONAL, não MANDATORY (decisão do fundador, 2026-08-18): PAR-Q é o único
+        // motivo pra travar sem prazo, e quem chega aqui já passou por esse gate.
+        reviewUrgency: 'OPTIONAL',
+      }),
     );
-    expect(enqueue).not.toHaveBeenCalled();
+    expect(enqueue).toHaveBeenCalledWith(
+      'protocol-auto-release',
+      'auto-release',
+      { userId: 'u1', protocolId: 'p1' },
+      { delay: 60 * 60 * 1000, jobId: 'auto-release-p1' },
+    );
+  });
+
+  it('validador flagou (revisão opcional) → PENDING_REVIEW + agenda auto-liberação em 1h', async () => {
+    const { worker, enqueue, repository } = makeWorker({ action: 'FLAG_HUMAN_REVIEW' });
+    const res = await worker.process(job());
+    expect(res.status).toBe('PENDING_REVIEW');
+    expect(repository.persist).toHaveBeenCalledWith(
+      expect.objectContaining({ signed: false, reviewUrgency: 'OPTIONAL' }),
+    );
+    expect(enqueue).toHaveBeenCalledWith(
+      'protocol-auto-release',
+      'auto-release',
+      { userId: 'u1', protocolId: 'p1' },
+      { delay: 60 * 60 * 1000, jobId: 'auto-release-p1' },
+    );
+  });
+
+  it('validador bloqueou: loga o motivo real (achado 2026-08-18 — antes não deixava rastro)', async () => {
+    const violations = [{ rule: 'STRUCTURE', detail: 'exercício fora da base: bogus_id', action: 'BLOCK' as const }];
+    const { worker, logger } = makeWorker({ action: 'BLOCK_FALLBACK', violations });
+    await worker.process(job());
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'u1',
+        usedFallbackTemplate: true,
+        // v1 e v2 usam o mesmo mock — as violações aparecem em dobro (uma por tentativa).
+        violations: [...violations, ...violations],
+      }),
+      'geração de protocolo não passou limpa na validação',
+    );
+  });
+
+  it('validador não bloqueou: não loga nada sobre violação', async () => {
+    const { worker, logger } = makeWorker({ action: 'PASS' });
+    await worker.process(job());
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 
   it('corrida de persistência (alreadyExisted) → não entrega', async () => {
@@ -286,11 +355,49 @@ describe('ProtocolGenerationWorker.onModuleInit + DLQ fallback (US-2.4)', () => 
       'whatsapp-outbound',
       'protocol-waiting',
       expect.objectContaining({ userId: 'u1' }),
-      expect.objectContaining({ jobId: 'protocol-waiting_u1' }),
+      expect.objectContaining({ jobId: 'protocol-waiting_u1', delay: 30 * 60 * 1000 }),
     );
     expect(repository.persist).toHaveBeenCalledWith(
-      expect.objectContaining({ humanReviewRequired: true, generatedBy: 'FALLBACK_TEMPLATE' }),
+      expect.objectContaining({
+        humanReviewRequired: true,
+        generatedBy: 'FALLBACK_TEMPLATE',
+        // OPTIONAL, não MANDATORY (decisão do fundador, 2026-08-18): DLQ é indisponibilidade
+        // de infra (LLM fora do ar), não risco clínico — PAR-Q já filtrou antes de chegar
+        // aqui, então a mesma janela de cortesia de 1h se aplica.
+        reviewUrgency: 'OPTIONAL',
+      }),
     );
+    // Mesma janela de cortesia de 1h que o caminho normal agenda — antes do achado
+    // 2026-08-18 o DLQ nunca agendava auto-liberação nenhuma (era sempre MANDATORY).
+    expect(enqueue).toHaveBeenCalledWith(
+      'protocol-auto-release',
+      'auto-release',
+      expect.objectContaining({ userId: 'u1' }),
+      expect.objectContaining({ delay: 60 * 60 * 1000 }),
+    );
+  });
+
+  // Achado 2026-08-18: o fallback de DLQ agora reflete os dias REAIS declarados na
+  // anamnese, não 1 sessão genérica — prova que `preferredDays` chega até o template.
+  it('fallback de DLQ gera uma sessão por dia real declarado (não mais 1 sessão genérica)', async () => {
+    const { worker, workerListeners, repository } = makeWorker({
+      session: sessionRow({
+        dataBlock3: { ...sessionRow().dataBlock3, preferredDays: ['TUE', 'WED', 'THU'] },
+      }),
+    });
+    worker.onModuleInit();
+    const terminal = { ...job(), attemptsMade: 3 } as Job<ProtocolGenerationJob>;
+    workerListeners[0]?.(terminal, new Error('LLM down'));
+    await vi.waitFor(() => expect(repository.persist).toHaveBeenCalled());
+
+    const call = (repository.persist as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+    expect(call.content.sessions).toHaveLength(3);
+    expect(call.content.sessions.map((s: { weekday?: string }) => s.weekday)).toEqual([
+      'TUE',
+      'WED',
+      'THU',
+    ]);
+    expect(call.constraints.preferredDays).toEqual(['TUE', 'WED', 'THU']);
   });
 
   it('não aciona fallback quando a falha não é terminal', async () => {

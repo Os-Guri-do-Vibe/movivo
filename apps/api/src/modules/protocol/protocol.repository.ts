@@ -14,6 +14,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import type {
   ProtocolApprovalStatus,
   ProtocolRead,
+  ProtocolReviewUrgency,
   ProtocolStatus,
   ProtocolStructure,
 } from '@movivo/shared';
@@ -40,6 +41,7 @@ export interface PersistProtocolInput {
   approvalStatus: ProtocolApprovalStatus;
   status: ProtocolStatus;
   humanReviewRequired: boolean;
+  reviewUrgency: ProtocolReviewUrgency | null;
   totalWeeks: number;
   generatedBy: string;
   modelVersion: string | null;
@@ -139,6 +141,7 @@ export class ProtocolRepository {
             constraints: input.constraints,
             parQFlags: input.parqFlags,
             humanReviewRequired: input.humanReviewRequired,
+            reviewUrgency: input.reviewUrgency,
             generatedBy: input.generatedBy,
             modelVersion: input.modelVersion,
             promptVersion: input.promptVersion,
@@ -183,6 +186,48 @@ export class ProtocolRepository {
       }
       throw error;
     }
+  }
+
+  /**
+   * Libera sozinho um protocolo `PENDING_REVIEW`/`OPTIONAL` cuja janela de cortesia de 1h
+   * expirou sem ação do CREF (`ProtocolAutoReleaseWorker`). Idempotente e seguro
+   * reexecutar: se o CREF já assinou (`signProtocol`) ou editou (`editProtocol` já força
+   * `MANDATORY`), o estado não bate mais e é `released: false` sem tocar a linha — não há
+   * "cancelar o job", o próprio estado decide na hora de rodar.
+   */
+  async autoRelease(
+    userId: string,
+    protocolId: string,
+  ): Promise<{ released: boolean; version: number }> {
+    return this.db.runAsUser(userId, 'USER', async (tx) => {
+      const [row] = await tx
+        .select({
+          content: protocols.content,
+          version: protocols.version,
+          approvalStatus: protocols.approvalStatus,
+          reviewUrgency: protocols.reviewUrgency,
+        })
+        .from(protocols)
+        .where(eq(protocols.id, protocolId))
+        .for('update')
+        .limit(1);
+      if (!row || row.approvalStatus !== 'PENDING_REVIEW' || row.reviewUrgency !== 'OPTIONAL') {
+        return { released: false, version: row?.version ?? 0 };
+      }
+      const professionalId = await this.assignedActiveProfessional(tx, userId);
+      await tx
+        .update(protocols)
+        .set({
+          status: 'ACTIVE',
+          approvalStatus: 'AUTO_APPROVED',
+          professionalId,
+          signedAt: new Date(),
+          signatureHash: signatureHash(row.content as ProtocolStructure),
+          humanReviewRequired: false,
+        })
+        .where(eq(protocols.id, protocolId));
+      return { released: true, version: row.version };
+    });
   }
 
   /** Lookup estreito: a funcao exige o contexto do titular e CREF atribuido ativo. */

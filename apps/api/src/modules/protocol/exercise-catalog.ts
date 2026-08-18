@@ -46,6 +46,16 @@ export type MovementPattern =
 export type ExerciseLocation = TrainingLocation;
 export type ExerciseLevel = 'INICIANTE' | 'INTERMEDIARIO' | 'AVANCADO';
 
+/**
+ * Como o exercício é prescrito (achado 2026-08-18). `REPS` (padrão, quando ausente) = sets×reps
+ * tradicional. `DURATION` = por tempo — isométrico (prancha) ou cardio contínuo/intervalado
+ * (caminhada, bike, tiros), onde "reps" não tem sentido físico nenhum. Sem essa distinção, a IA
+ * era forçada a inventar um número de reps pra prancha e o `ValidationService` bloqueava (com
+ * razão) o resultado, mandando o protocolo pra revisão humana toda vez que esses exercícios
+ * eram escolhidos.
+ */
+export type ExerciseMeasurement = 'REPS' | 'DURATION';
+
 export interface CatalogExercise {
   id: string;
   name: string;
@@ -60,6 +70,21 @@ export interface CatalogExercise {
   contraindicatedFor: ContraindicationTag[];
   /** Substitutos no MESMO padrão de movimento (ids do catálogo). */
   substitutes: string[];
+  /** Ausente = `REPS` (maioria do catálogo, sets×reps tradicional). */
+  measurement?: ExerciseMeasurement;
+  /**
+   * Só relevante com `measurement: 'DURATION'`: faixa plausível de segundos por série/intervalo.
+   * Ausente = faixa padrão de isometria (`DURATION_SECONDS_RANGE`, validation-rules.ts) — curta
+   * (segurar prancha). Cardio contínuo (caminhada/bike, 1 série só) e intervalo (tiros) têm faixa
+   * própria porque a escala de tempo é completamente diferente de um hold isométrico.
+   */
+  durationSecondsRange?: { min: number; max: number };
+  /**
+   * Só relevante com `measurement: 'DURATION'`: piso de descanso entre séries/intervalos.
+   * Ausente = piso padrão (`REST_SECONDS_RANGE.min`, 15s). Cardio contínuo é UMA série só —
+   * "descanso zero" não é erro, é a única resposta correta.
+   */
+  minRestSeconds?: number;
 }
 
 /** Ordem de nível — filtro do prompt (gerador) e veto do validador usam o MESMO critério. */
@@ -295,6 +320,7 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     minLevel: 'INICIANTE',
     contraindicatedFor: ['LOWER_BACK', 'SHOULDER'],
     substitutes: ['dead_bug'],
+    measurement: 'DURATION', // hold isométrico — sem faixa própria, usa o default de isometria
   },
   {
     id: 'dead_bug',
@@ -318,6 +344,10 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     minLevel: 'INICIANTE',
     contraindicatedFor: ['CARDIAC', 'ANKLE'],
     substitutes: ['stationary_bike'],
+    // Cardio contínuo: 1 série, sem intervalo — 5 a 40min, descanso 0 é a resposta certa.
+    measurement: 'DURATION',
+    durationSecondsRange: { min: 300, max: 2400 },
+    minRestSeconds: 0,
   },
   {
     id: 'stationary_bike',
@@ -329,6 +359,9 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     minLevel: 'INICIANTE',
     contraindicatedFor: ['CARDIAC'],
     substitutes: ['brisk_walk'],
+    measurement: 'DURATION',
+    durationSecondsRange: { min: 300, max: 2400 },
+    minRestSeconds: 0,
   },
 
   // === v2 — cobertura por grupo muscular (divisões ABC / PPL / FOCO_MUSCULAR) ===
@@ -498,6 +531,10 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     minLevel: 'INICIANTE',
     contraindicatedFor: ['KNEE'],
     substitutes: ['leg_extension'],
+    // Hold isométrico, igual prancha — achado 2026-08-18. `pattern: 'ISOLATION'` é sobre
+    // isolado-vs-composto pra metodologia, não diz nada sobre medida: por isso a 1ª varredura
+    // (que só olhou pattern CORE/CARDIO) deixou passar este.
+    measurement: 'DURATION',
   },
   {
     id: 'leg_curl',
@@ -589,6 +626,10 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     minLevel: 'INTERMEDIARIO',
     contraindicatedFor: ['CARDIAC', 'ANKLE', 'KNEE'],
     substitutes: ['brisk_walk'],
+    // Intervalado: cada "série" é um tiro curto — ao contrário do cardio contínuo, o descanso
+    // ENTRE tiros é real recuperação, não zero (usa o piso padrão de descanso).
+    measurement: 'DURATION',
+    durationSecondsRange: { min: 10, max: 60 },
   },
 ] as const;
 

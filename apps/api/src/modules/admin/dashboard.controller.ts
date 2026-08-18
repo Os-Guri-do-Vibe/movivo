@@ -35,6 +35,18 @@ export class DashboardController {
     return this.dashboard.detail(actor, kind, id);
   }
 
+  @Get('queue/protocol/:id/anamnesis')
+  @Roles('PROFESSIONAL', 'ADMIN')
+  anamnesisAnswers(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.dashboard.anamnesisAnswers(actor, id);
+  }
+
+  @Get('queue/parq/:id/anamnesis')
+  @Roles('PROFESSIONAL', 'ADMIN')
+  parqAnamnesisAnswers(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.dashboard.parqAnamnesisAnswers(actor, id);
+  }
+
   @Patch('protocols/:id')
   editProtocol(
     @CurrentUser() actor: AuthenticatedUser,
