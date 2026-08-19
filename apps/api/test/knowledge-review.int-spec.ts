@@ -68,6 +68,15 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
+  // Achado 2026-08-18: sem isto, o "Revisor RAG" fica com `cref_active = true` pra
+  // sempre — `assign_unique_active_professional` (chamado no submit real da anamnese)
+  // exige EXATAMENTE um profissional ativo e passa a falhar com 500 pra qualquer
+  // submissão feita depois desta suíte rodar contra um Postgres persistente (o de dev,
+  // não o efêmero do CI). Os documentos/reviews continuam intactos — são histórico
+  // imutável por design, não resíduo de teste.
+  await tenant.runAsSystem((tx) =>
+    tx.execute(sql`UPDATE users SET cref_active = false WHERE id = ${professionalId}::uuid`),
+  );
   await appClient.end({ timeout: 5 });
   await migratorClient.end({ timeout: 5 });
 });
