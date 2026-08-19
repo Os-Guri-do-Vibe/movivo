@@ -34,7 +34,10 @@ import {
 import { getAnamnesisAnswers } from '@/lib/dashboard-api';
 import type { AnamnesisAnswers } from '@/lib/dashboard-types';
 
-const BIOLOGICAL_SEX_LABELS: Record<string, string> = { MALE: 'Masculino', FEMALE: 'Feminino' };
+export const BIOLOGICAL_SEX_LABELS: Record<string, string> = {
+  MALE: 'Masculino',
+  FEMALE: 'Feminino',
+};
 const DECLARATION_LABELS: Record<string, string> = Object.fromEntries(
   PARQ_DECLARATIONS.map((d) => [d.id, d.label]),
 );
@@ -54,7 +57,7 @@ function formatDate(value: string | null | undefined): string {
 
 /** `isoDateSchema` (yyyy-mm-dd) → dd/mm/aaaa. Split de string, não `Date` — evita o
  *  fuso deslocar o dia (`new Date('2001-07-18')` é meia-noite UTC = dia anterior no Brasil). */
-function formatBirthDate(value: string): string {
+export function formatBirthDate(value: string): string {
   const [year, month, day] = value.split('-');
   return year && month && day ? `${day}/${month}/${year}` : value;
 }

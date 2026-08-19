@@ -48,6 +48,8 @@ export interface ProtocolDetail {
   content: ProtocolStructure;
   signedAt: string | null;
   signatureHash: string | null;
+  totalWeeks: number;
+  createdAt: string;
   validation?: { valid: boolean; issues: string[] };
 }
 

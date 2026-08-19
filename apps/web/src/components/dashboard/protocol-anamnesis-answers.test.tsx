@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AnamnesisAnswers } from '@/lib/dashboard-types';
+import { anamnesisAnswers as answers } from '../../../test/dashboard-fixtures';
 
 const api = vi.hoisted(() => ({ getAnamnesisAnswers: vi.fn() }));
 vi.mock('@/lib/dashboard-api', () => api);
@@ -10,57 +10,6 @@ vi.mock('@/lib/dashboard-api', () => api);
 import { ProtocolAnamnesisAnswers } from './protocol-anamnesis-answers';
 
 const PROTOCOL_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-
-const answers: AnamnesisAnswers = {
-  userId: 'user-1',
-  submittedAt: '2026-08-01T13:00:00.000Z',
-  personal: {
-    name: 'Rodrigo de Barros',
-    birthDate: '1990-01-01',
-    biologicalSex: 'MALE',
-    heightCm: 178,
-    weightKg: 80,
-    phoneNumber: '+5511999999999',
-    email: 'rodrigo@example.invalid',
-  },
-  routine: {
-    primaryGoal: 'GAIN_MUSCLE',
-    emphasis: ['CHEST', 'BACK'],
-    hasImportantEvent: false,
-    trainingStatus: 'NEVER',
-    experience: 'BEGINNER',
-    pastActivities: ['NONE'],
-    consistencyBarriers: ['LACK_OF_TIME'],
-    daysPerWeek: 3,
-    preferredDays: ['MON', 'WED', 'FRI'],
-    sessionDuration: 'M45_TO_60',
-    location: 'HOME',
-    preferredPeriod: 'MORNING',
-    practicesOtherSport: false,
-    hasAvoidedExercise: false,
-  },
-  health: {
-    parq: {
-      version: 'parq-2026-07-v1',
-      answers: ['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9'].map((questionId) => ({
-        questionId,
-        answer: false,
-      })),
-    },
-    pain: {
-      hasPain: true,
-      points: [{ region: 'KNEE', intensity: 4 }],
-      hasProfessionalExplanation: false,
-      underMedicalFollowUp: false,
-      hasAvoidanceRecommendation: false,
-    },
-    declarations: {
-      version: 'v1',
-      accepted: ['TRUTHFUL', 'WILL_REPORT_CHANGES'],
-      acceptedAt: '2026-08-01T12:59:00.000Z',
-    },
-  },
-};
 
 beforeEach(() => {
   api.getAnamnesisAnswers.mockReset();
