@@ -1,7 +1,7 @@
 'use client';
 
 import { protocolStructureSchema, type ProtocolStructure } from '@movivo/shared';
-import { CheckCircle2, Pencil, Save, X } from 'lucide-react';
+import { Save, X } from 'lucide-react';
 import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -28,24 +28,24 @@ function validationMessages(error: unknown): string[] {
 export function ProtocolEditor({
   protocolId,
   content,
+  onCancel,
   onSaved,
 }: {
   protocolId: string;
   content: ProtocolStructure;
+  onCancel: () => void;
   onSaved: () => Promise<void>;
 }) {
-  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<ProtocolStructure>(() => structuredClone(content));
   const [reason, setReason] = useState('');
   const [issues, setIssues] = useState<string[]>([]);
-  const [success, setSuccess] = useState('');
   const [pending, setPending] = useState(false);
 
   function reset() {
     setDraft(structuredClone(content));
     setReason('');
     setIssues([]);
-    setEditing(false);
+    onCancel();
   }
 
   function updateSession(index: number, patch: Partial<ProtocolStructure['sessions'][number]>) {
@@ -79,7 +79,6 @@ export function ProtocolEditor({
 
   async function save() {
     setIssues([]);
-    setSuccess('');
     const parsed = protocolStructureSchema.safeParse(draft);
     if (!parsed.success) {
       setIssues(parsed.error.issues.map((issue) => issue.message).slice(0, 6));
@@ -94,8 +93,6 @@ export function ProtocolEditor({
     try {
       await saveProtocol(protocolId, parsed.data, reason.trim());
       captureDashboardEvent('cref_protocol_edited');
-      setSuccess('Edição validada no servidor e registrada para revisão.');
-      setEditing(false);
       await onSaved();
     } catch (error) {
       setIssues(validationMessages(error));
@@ -104,28 +101,10 @@ export function ProtocolEditor({
     }
   }
 
-  if (!editing) {
-    return (
-      <div className="mt-5">
-        {success ? (
-          <p
-            role="status"
-            className="mb-3 flex items-center gap-2 rounded-lg bg-accent p-3 text-label text-accent-foreground"
-          >
-            <CheckCircle2 aria-hidden="true" /> {success}
-          </p>
-        ) : null}
-        <Button type="button" variant="outline" size="lg" onClick={() => setEditing(true)}>
-          <Pencil aria-hidden="true" /> Editar antes de assinar
-        </Button>
-      </div>
-    );
-  }
-
   return (
     <section
       aria-labelledby="editor-title"
-      className="mt-6 rounded-xl border border-border bg-background p-4 sm:p-6"
+      className="rounded-xl border border-border bg-card p-4 sm:p-6"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
