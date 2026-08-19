@@ -20,8 +20,14 @@ beforeEach(() => {
 
 describe('ProtocolEditor', () => {
   it('exige motivo auditável antes de chamar o ValidationService do servidor', async () => {
-    render(<ProtocolEditor protocolId={PROTOCOL_ID} content={protocolContent} onSaved={vi.fn()} />);
-    await userEvent.click(screen.getByRole('button', { name: /editar antes de assinar/i }));
+    render(
+      <ProtocolEditor
+        protocolId={PROTOCOL_ID}
+        content={protocolContent}
+        onCancel={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
     await userEvent.click(screen.getByRole('button', { name: /validar e salvar edição/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent('auditoria');
     expect(saveProtocol).not.toHaveBeenCalled();
@@ -30,8 +36,14 @@ describe('ProtocolEditor', () => {
   it('envia o contrato estruturado e confirma a validação autoritativa', async () => {
     saveProtocol.mockResolvedValue({ status: 'PENDING_REVIEW' });
     const onSaved = vi.fn().mockResolvedValue(undefined);
-    render(<ProtocolEditor protocolId={PROTOCOL_ID} content={protocolContent} onSaved={onSaved} />);
-    await userEvent.click(screen.getByRole('button', { name: /editar antes de assinar/i }));
+    render(
+      <ProtocolEditor
+        protocolId={PROTOCOL_ID}
+        content={protocolContent}
+        onCancel={vi.fn()}
+        onSaved={onSaved}
+      />,
+    );
     await userEvent.clear(screen.getByLabelText(/motivo da edição/i));
     await userEvent.type(
       screen.getByLabelText(/motivo da edição/i),
@@ -45,17 +57,23 @@ describe('ProtocolEditor', () => {
         'Ajuste de volume após revisão profissional',
       ),
     );
-    expect(await screen.findByRole('status')).toHaveTextContent('validada no servidor');
-    expect(onSaved).toHaveBeenCalled();
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
   });
 
   it('permite cancelar sem persistir mudanças', async () => {
-    render(<ProtocolEditor protocolId={PROTOCOL_ID} content={protocolContent} onSaved={vi.fn()} />);
-    await userEvent.click(screen.getByRole('button', { name: /editar antes de assinar/i }));
+    const onCancel = vi.fn();
+    render(
+      <ProtocolEditor
+        protocolId={PROTOCOL_ID}
+        content={protocolContent}
+        onCancel={onCancel}
+        onSaved={vi.fn()}
+      />,
+    );
     await userEvent.clear(screen.getByLabelText('Foco'));
     await userEvent.type(screen.getByLabelText('Foco'), 'Outro foco');
     await userEvent.click(screen.getByRole('button', { name: 'Cancelar edição' }));
-    expect(screen.queryByRole('heading', { name: /editor do protocolo/i })).not.toBeInTheDocument();
+    expect(onCancel).toHaveBeenCalled();
     expect(saveProtocol).not.toHaveBeenCalled();
   });
 
@@ -65,10 +83,10 @@ describe('ProtocolEditor', () => {
       <ProtocolEditor
         protocolId={PROTOCOL_ID}
         content={protocolContent}
+        onCancel={vi.fn()}
         onSaved={vi.fn().mockResolvedValue(undefined)}
       />,
     );
-    await userEvent.click(screen.getByRole('button', { name: /editar antes de assinar/i }));
 
     await userEvent.selectOptions(screen.getByLabelText('Fase'), 'FORCA');
     await userEvent.clear(screen.getByLabelText(/frequência semanal/i));
@@ -118,8 +136,14 @@ describe('ProtocolEditor', () => {
   });
 
   it('bloqueia contrato local inválido sem enviar ao servidor', async () => {
-    render(<ProtocolEditor protocolId={PROTOCOL_ID} content={protocolContent} onSaved={vi.fn()} />);
-    await userEvent.click(screen.getByRole('button', { name: /editar antes de assinar/i }));
+    render(
+      <ProtocolEditor
+        protocolId={PROTOCOL_ID}
+        content={protocolContent}
+        onCancel={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
     await userEvent.clear(screen.getByLabelText(/frequência semanal/i));
     await userEvent.type(screen.getByLabelText(/frequência semanal/i), '9');
     await userEvent.type(screen.getByLabelText(/motivo da edição/i), 'Revisão profissional');
@@ -131,8 +155,14 @@ describe('ProtocolEditor', () => {
 
   it('exibe falha segura devolvida pelo servidor e libera nova tentativa', async () => {
     saveProtocol.mockRejectedValue(new Error('Falha transitória segura.'));
-    render(<ProtocolEditor protocolId={PROTOCOL_ID} content={protocolContent} onSaved={vi.fn()} />);
-    await userEvent.click(screen.getByRole('button', { name: /editar antes de assinar/i }));
+    render(
+      <ProtocolEditor
+        protocolId={PROTOCOL_ID}
+        content={protocolContent}
+        onCancel={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
     await userEvent.type(screen.getByLabelText(/motivo da edição/i), 'Revisão profissional');
     await userEvent.click(screen.getByRole('button', { name: /validar e salvar edição/i }));
 

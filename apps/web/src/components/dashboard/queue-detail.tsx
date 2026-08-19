@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, CheckCircle2, RefreshCw, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Pencil, RefreshCw, ShieldAlert } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
@@ -78,7 +78,7 @@ function humanizeKey(key: string): string {
   return known[key] ?? key.replace(/([a-z])([A-Z])/g, '$1 $2');
 }
 
-function ProtocolSummary({ protocol }: { protocol: ProtocolDetail }) {
+function ProtocolSummary({ protocol, onEdit }: { protocol: ProtocolDetail; onEdit: () => void }) {
   return (
     <section
       aria-labelledby="protocol-title"
@@ -93,6 +93,16 @@ function ProtocolSummary({ protocol }: { protocol: ProtocolDetail }) {
             {protocol.content.phase} · {protocol.content.weeklyFrequency}x por semana
           </p>
         </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={onEdit}
+          aria-label="Editar Protocolo"
+          title="Editar Protocolo"
+        >
+          <Pencil aria-hidden="true" className="size-4" />
+        </Button>
       </div>
 
       <div className="mt-5 space-y-4">
@@ -215,6 +225,7 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
   const [parqNotes, setParqNotes] = useState('');
   const [resolution, setResolution] = useState('Contato realizado e orientação registrada.');
   const [resolutionNotes, setResolutionNotes] = useState('');
+  const [editingProtocol, setEditingProtocol] = useState(false);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -320,14 +331,20 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
 
       <div className="mt-5 space-y-5">
         {detail.protocol ? (
-          <>
-            <ProtocolSummary protocol={detail.protocol} />
+          editingProtocol ? (
             <ProtocolEditor
               protocolId={detail.protocol.id}
               content={detail.protocol.content}
-              onSaved={() => load()}
+              onCancel={() => setEditingProtocol(false)}
+              onSaved={async () => {
+                setEditingProtocol(false);
+                setSuccess('Edição validada no servidor e registrada para revisão.');
+                await load();
+              }}
             />
-          </>
+          ) : (
+            <ProtocolSummary protocol={detail.protocol} onEdit={() => setEditingProtocol(true)} />
+          )
         ) : null}
         {detail.replay ? <ConversationReplay replay={detail.replay} /> : null}
 
