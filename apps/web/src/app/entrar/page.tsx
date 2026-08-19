@@ -1,6 +1,5 @@
-import { ShieldCheck } from 'lucide-react';
 import type { Metadata } from 'next';
-import Link from 'next/link';
+import Image from 'next/image';
 
 import { LoginForm } from '@/components/dashboard/login-form';
 
@@ -26,36 +25,28 @@ export default async function LoginPage({
     <main className="grid min-h-dvh place-items-center px-4 py-10">
       <section
         aria-labelledby="login-title"
-        className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-sm sm:p-8"
+        className="w-full max-w-md overflow-hidden rounded-xl border border-border bg-card shadow-sm"
       >
-        <div className="mb-6 flex items-center gap-3">
-          <span
-            aria-hidden="true"
-            className="flex size-12 items-center justify-center rounded-full bg-petroleo text-verde-pulso"
-          >
-            <ShieldCheck />
-          </span>
-          <div>
-            <p className="font-mono text-label text-muted-foreground">movivo · área restrita</p>
-            <h1 id="login-title" className="text-h2 font-bold">
-              Control Center
-            </h1>
-          </div>
+        <h1 id="login-title" className="sr-only">
+          Entrar no MOVIVO Control Center
+        </h1>
+        {/* O SVG do logo é lettering branco sobre fundo transparente (uso pensado pra fundo
+            escuro, mesmo padrão do header em `/anamnese/[token]`) — precisa da faixa petróleo
+            por trás pra não ficar invisível sobre o card branco. */}
+        <div className="flex flex-col items-center justify-center gap-2 bg-petroleo px-6 py-8">
+          <Image
+            src="/brand/movivo-logo-horizontal.svg"
+            alt="MOVIVO"
+            width={176}
+            height={46}
+            unoptimized
+            className="h-auto w-44"
+          />
+          <p className="font-mono text-label text-verde-pulso">Plataforma Interna</p>
         </div>
-        <p className="mb-6 text-body text-muted-foreground">
-          Plataforma interna para operação, supervisão profissional e monitoramento da MOVIVO.
-        </p>
-        <LoginForm initialError={initialError} />
-        <p className="mt-6 border-t border-border pt-5 text-xs leading-relaxed text-muted-foreground">
-          Sessão protegida com cookies inacessíveis ao JavaScript, rotação e acesso por
-          responsabilidade. A IA é ferramenta; decisões de liberação e mudanças são humanas.
-        </p>
-        <Link
-          href="/"
-          className="mt-5 inline-flex min-h-11 items-center text-label font-medium underline underline-offset-4 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
-        >
-          Voltar para o site
-        </Link>
+        <div className="p-6 sm:p-8">
+          <LoginForm initialError={initialError} />
+        </div>
       </section>
     </main>
   );

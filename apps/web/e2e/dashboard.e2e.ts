@@ -11,7 +11,7 @@ async function login(page: Page) {
   await page.goto('/entrar');
   await page.getByLabel('E-mail corporativo').fill('profissional@movivo.test');
   await page.getByLabel('Senha').fill('senha-segura');
-  await page.getByRole('button', { name: 'Entrar com segurança' }).click();
+  await page.getByRole('button', { name: 'Acessar' }).click();
   // Rota padrão por papel (US-7.1): PROFESSIONAL cai na Fila do Profissional.
   await expect(page).toHaveURL(/\/dashboard\/educacao-fisica$/);
   await expect(page.getByRole('heading', { name: 'Fila de supervisão' })).toBeVisible();
@@ -70,7 +70,7 @@ test('aceita ADMIN e mostra o overview executivo', async ({ context, page }) => 
   await page.goto('/entrar');
   await page.getByLabel('E-mail corporativo').fill('admin@movivo.test');
   await page.getByLabel('Senha').fill('senha-segura');
-  await page.getByRole('button', { name: 'Entrar com segurança' }).click();
+  await page.getByRole('button', { name: 'Acessar' }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.getByRole('heading', { name: 'Visão geral' })).toBeVisible();
   expect(
