@@ -181,6 +181,48 @@ describe('QueueBoard', () => {
     expect(screen.getByText('Bruno Teste')).toBeVisible();
   });
 
+  it('modal de "Ver respostas": erro ao carregar mostra alerta com botão de tentar de novo', async () => {
+    const user = userEvent.setup();
+    getQueue.mockResolvedValue(queueResponse);
+    getAnamnesisAnswers.mockRejectedValueOnce(new Error('Falha ao buscar anamnese.'));
+    render(<QueueBoard />);
+    const card = (await screen.findByText(optionalProtocolItem.title)).closest('li');
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /Ver respostas/i }));
+
+    const dialog = await screen.findByRole('dialog', { name: /Respostas da anamnese/i });
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('Falha ao buscar anamnese.');
+
+    getAnamnesisAnswers.mockResolvedValueOnce({
+      userId: 'u1',
+      submittedAt: '2026-08-18T12:00:00.000Z',
+      personal: {
+        name: 'Bruno Teste',
+        birthDate: '1990-01-01',
+        biologicalSex: 'MALE',
+        heightCm: 180,
+        weightKg: 80,
+        phoneNumber: '+5511999999999',
+      },
+      routine: {
+        primaryGoal: 'CONDITIONING',
+        trainingStatus: 'NEVER',
+        experience: 'BEGINNER',
+        daysPerWeek: 4,
+        sessionDuration: 'M45_TO_60',
+        location: 'HOME',
+        preferredPeriod: 'MORNING',
+        emphasis: [],
+        pastActivities: [],
+        consistencyBarriers: [],
+        preferredDays: [],
+        practicesOtherSport: false,
+      },
+      health: {},
+    });
+    await user.click(within(dialog).getByRole('button', { name: /Tentar novamente/i }));
+    expect(await within(dialog).findByText('Bruno Teste')).toBeVisible();
+  });
+
   it('esconde o badge de status quando é PENDING_SIGNATURE (ruído, é o status de quase todo item aqui)', async () => {
     getQueue.mockResolvedValue({
       ...queueResponse,
