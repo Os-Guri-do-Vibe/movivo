@@ -27,7 +27,7 @@ describe('LoginForm', () => {
     render(<LoginForm />);
     await userEvent.type(screen.getByLabelText(/e-mail corporativo/i), 'prof@movivo.test');
     await userEvent.type(screen.getByLabelText('Senha'), 'segura');
-    await userEvent.click(screen.getByRole('button', { name: /entrar com segurança/i }));
+    await userEvent.click(screen.getByRole('button', { name: /acessar/i }));
     await waitFor(() => expect(replace).toHaveBeenCalledWith('/dashboard'));
     const body = JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string);
     expect(body).toEqual({ email: 'prof@movivo.test', password: 'segura' });
@@ -50,7 +50,7 @@ describe('LoginForm', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('não tem permissão');
     await userEvent.type(screen.getByLabelText(/e-mail corporativo/i), 'x@y.com');
     await userEvent.type(screen.getByLabelText('Senha'), 'x');
-    await userEvent.click(screen.getByRole('button', { name: /entrar com segurança/i }));
+    await userEvent.click(screen.getByRole('button', { name: /acessar/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent('E-mail ou senha incorretos');
   });
 });

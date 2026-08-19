@@ -33,7 +33,7 @@ export default async function LoginPage({
         {/* O SVG do logo é lettering branco sobre fundo transparente (uso pensado pra fundo
             escuro, mesmo padrão do header em `/anamnese/[token]`) — precisa da faixa petróleo
             por trás pra não ficar invisível sobre o card branco. */}
-        <div className="flex items-center justify-center bg-petroleo px-6 py-8">
+        <div className="flex flex-col items-center justify-center gap-2 bg-petroleo px-6 py-8">
           <Image
             src="/brand/movivo-logo-horizontal.svg"
             alt="MOVIVO"
@@ -42,6 +42,7 @@ export default async function LoginPage({
             unoptimized
             className="h-auto w-44"
           />
+          <p className="font-mono text-label text-verde-pulso">Plataforma Interna</p>
         </div>
         <div className="p-6 sm:p-8">
           <LoginForm initialError={initialError} />

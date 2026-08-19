@@ -87,7 +87,7 @@ export function LoginForm({ initialError = '' }: { initialError?: string }) {
 
       <Button type="submit" size="lg" disabled={pending} className="w-full">
         <LockKeyhole aria-hidden="true" />
-        {pending ? 'Verificando…' : 'Entrar com segurança'}
+        {pending ? 'Verificando…' : 'Acessar'}
       </Button>
     </form>
   );
