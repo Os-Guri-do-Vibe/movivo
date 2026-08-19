@@ -326,6 +326,7 @@ const SCHEMA_HINT = `{
           "loadStrategy": "BODYWEIGHT" | "FIXED_LOAD" | "DOUBLE_PROGRESSION" | "RPE",
           "restSeconds": number (cardio contínuo de 1 série só, ex.: caminhada/bike, pode ser 0 — é a resposta certa, não erro),
           "technique": "DROP_SET" | "REST_PAUSE" | "CLUSTER_SET" | "BI_SET" | "TRI_SET" | "SUPERSET" | "ISOMETRIA" | "REPETICOES_CONTROLADAS" | "PIRAMIDE" | "DESCANSO_ATIVO" (opcional; NUNCA para INICIANTE),
+          "rir": number (0-5, opcional) — Repetições em Reserva: quantas repetições ainda dariam pra fazer ao fim da série (0 = falha concêntrica). INICIANTE/ADAPTACAO: prefira 2-4 (mais margem, foco na execução). INTERMEDIARIO/AVANCADO em FORCA: pode chegar a 0-2 nas séries finais. Nunca abaixo de 1 pra quem treina há menos de 6 meses,
           "notes": string (opcional)
         }
       ]

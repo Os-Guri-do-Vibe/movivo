@@ -167,6 +167,7 @@ const pendingProtocol = {
   humanReviewRequired: true,
   reviewUrgency: 'OPTIONAL' as const,
   generatedBy: 'AI_WITH_RULES',
+  totalWeeks: 12,
 };
 
 describe('DashboardService invariantes de mutacao', () => {
@@ -540,7 +541,12 @@ describe('DashboardService leituras operacionais', () => {
     ]);
     await expect(service.detail(actor, 'PROTOCOL', RESOURCE_ID)).resolves.toMatchObject({
       item: { kind: 'PROTOCOL', title: 'Protocolo para Revisão: Maria Teste' },
-      protocol: { id: RESOURCE_ID, approvalStatus: 'PENDING_REVIEW' },
+      protocol: {
+        id: RESOURCE_ID,
+        approvalStatus: 'PENDING_REVIEW',
+        totalWeeks: 12,
+        createdAt: '2026-08-01T12:00:00.000Z',
+      },
     });
     expect(append).toHaveBeenCalledWith(
       expect.anything(),

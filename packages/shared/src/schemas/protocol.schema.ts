@@ -104,6 +104,19 @@ export const protocolExerciseSchema = z
     restSeconds: z.number().int().min(0).max(600),
     /** Técnica avançada aplicada nesta prescrição. Ausente = série tradicional. */
     technique: advancedTechniqueSchema.optional(),
+    /**
+     * Repetições em Reserva (achado 2026-08-19, a pedido do fundador): quantas
+     * repetições o aluno ainda teria "no tanque" ao fim da série (0 = falha
+     * concêntrica). A IA prescreve; opcional porque protocolos anteriores a este
+     * campo e o template de fallback (não gerado por IA) não o têm.
+     */
+    rir: z.number().int().min(0).max(5).optional(),
+    /**
+     * Link de vídeo de execução (achado 2026-08-19): não existe catálogo de vídeos
+     * curados nem geração automática — sempre ausente até o RT colar um link na
+     * edição do protocolo. Nunca preenchido pela IA (evita alucinar URL quebrada).
+     */
+    videoUrl: z.url().max(500).optional(),
     notes: z.string().trim().max(400).optional(),
   })
   .refine((ex) => (ex.reps !== undefined) !== (ex.durationSeconds !== undefined), {

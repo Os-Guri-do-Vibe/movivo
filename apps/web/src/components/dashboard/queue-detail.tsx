@@ -1,6 +1,12 @@
 'use client';
 
-import { ArrowLeft, CheckCircle2, Pencil, RefreshCw, ShieldAlert } from 'lucide-react';
+import {
+  PARQ_QUESTION_TEXT,
+  PRIMARY_GOAL_LABELS,
+  protocolStructureSchema,
+  type ProtocolStructure,
+} from '@movivo/shared';
+import { ArrowLeft, CheckCircle2, Pencil, RefreshCw, Save, ShieldAlert, X } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
@@ -8,12 +14,16 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   captureDashboardEvent,
+  DashboardApiError,
+  getAnamnesisAnswers,
   getQueueDetail,
   releaseParq,
   resolveHandoff,
+  saveProtocol,
   signProtocol,
 } from '@/lib/dashboard-api';
 import type {
+  AnamnesisAnswers,
   ProtocolDetail,
   QueueDetail as QueueDetailType,
   QueueKind,
@@ -22,7 +32,7 @@ import type {
 import { ConfirmAction } from './confirm-action';
 import { ConversationReplay } from './conversation-replay';
 import { WEEKDAY_ITEMS } from '../onboarding/step2-anamnesis';
-import { ProtocolEditor } from './protocol-editor';
+import { BIOLOGICAL_SEX_LABELS } from './protocol-anamnesis-answers';
 import { meaningfulText } from './queue-board';
 
 const fieldClass =
@@ -64,6 +74,21 @@ function sessionTitle(
   return `${day} | ${session.focus} | ${phaseLabel}`;
 }
 
+function numberInputValue(value: number): number | '' {
+  return Number.isNaN(value) ? '' : value;
+}
+
+function validationMessages(error: unknown): string[] {
+  if (error instanceof DashboardApiError && Array.isArray(error.details)) {
+    return error.details.map((entry) => String(entry)).slice(0, 6);
+  }
+  if (error instanceof DashboardApiError && typeof error.details === 'object' && error.details) {
+    const issues = (error.details as { issues?: unknown }).issues;
+    if (Array.isArray(issues)) return issues.map((entry) => String(entry)).slice(0, 6);
+  }
+  return [error instanceof Error ? error.message : 'Não foi possível salvar o protocolo.'];
+}
+
 function humanizeKey(key: string): string {
   const known: Record<string, string> = {
     goal: 'Objetivo',
@@ -78,35 +103,195 @@ function humanizeKey(key: string): string {
   return known[key] ?? key.replace(/([a-z])([A-Z])/g, '$1 $2');
 }
 
-function ProtocolSummary({ protocol, onEdit }: { protocol: ProtocolDetail; onEdit: () => void }) {
+/**
+ * Card "Protocolo · versão N" — o ícone de lápis no topo edita DENTRO deste mesmo
+ * componente (achado 2026-08-19, a pedido do fundador): nada de trocar pra um formulário
+ * separado com outro layout. Em modo de edição, a MESMA tabela vira campos editáveis.
+ */
+function ProtocolSummary({
+  protocol,
+  onSaved,
+}: {
+  protocol: ProtocolDetail;
+  onSaved: () => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<ProtocolStructure>(() => structuredClone(protocol.content));
+  const [reason, setReason] = useState('');
+  const [issues, setIssues] = useState<string[]>([]);
+  const [pending, setPending] = useState(false);
+
+  function startEdit() {
+    setDraft(structuredClone(protocol.content));
+    setReason('');
+    setIssues([]);
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setIssues([]);
+  }
+
+  function updateSession(index: number, patch: Partial<ProtocolStructure['sessions'][number]>) {
+    setDraft((current) => ({
+      ...current,
+      sessions: current.sessions.map((session, position) =>
+        position === index ? { ...session, ...patch } : session,
+      ),
+    }));
+  }
+
+  function updateExercise(
+    sessionIndex: number,
+    exerciseIndex: number,
+    patch: Partial<ProtocolStructure['sessions'][number]['exercises'][number]>,
+  ) {
+    setDraft((current) => ({
+      ...current,
+      sessions: current.sessions.map((session, position) =>
+        position === sessionIndex
+          ? {
+              ...session,
+              exercises: session.exercises.map((exercise, exPosition) =>
+                exPosition === exerciseIndex ? { ...exercise, ...patch } : exercise,
+              ),
+            }
+          : session,
+      ),
+    }));
+  }
+
+  async function save() {
+    setIssues([]);
+    const parsed = protocolStructureSchema.safeParse(draft);
+    if (!parsed.success) {
+      setIssues(parsed.error.issues.map((issue) => issue.message).slice(0, 6));
+      return;
+    }
+    if (reason.trim().length < 5) {
+      setIssues(['Informe por que o protocolo foi editado para compor a auditoria.']);
+      return;
+    }
+
+    setPending(true);
+    try {
+      await saveProtocol(protocol.id, parsed.data, reason.trim());
+      captureDashboardEvent('cref_protocol_edited');
+      setEditing(false);
+      await onSaved();
+    } catch (error) {
+      setIssues(validationMessages(error));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const content = editing ? draft : protocol.content;
+
   return (
     <section
       aria-labelledby="protocol-title"
       className="rounded-xl border border-border bg-card p-4 sm:p-6"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="flex-1">
           <h2 id="protocol-title" className="text-h2 font-bold">
             Protocolo · versão {protocol.version}
           </h2>
-          <p className="mt-1 text-label text-muted-foreground">
-            {protocol.content.phase} · {protocol.content.weeklyFrequency}x por semana
-          </p>
+          {editing ? (
+            <div className="mt-2 flex flex-wrap gap-3">
+              <label className="flex flex-col gap-1 text-xs font-semibold">
+                Fase
+                <select
+                  className={fieldClass}
+                  value={draft.phase}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      phase: event.target.value as ProtocolStructure['phase'],
+                    }))
+                  }
+                >
+                  <option value="ADAPTACAO">Adaptação</option>
+                  <option value="HIPERTROFIA">Hipertrofia</option>
+                  <option value="FORCA">Força</option>
+                  <option value="DELOAD">Deload</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold">
+                Frequência semanal
+                <input
+                  className={fieldClass}
+                  type="number"
+                  min={1}
+                  max={7}
+                  value={numberInputValue(draft.weeklyFrequency)}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      weeklyFrequency: event.target.valueAsNumber,
+                    }))
+                  }
+                />
+              </label>
+            </div>
+          ) : (
+            <p className="mt-1 text-label text-muted-foreground">
+              {PHASE_LABELS[protocol.content.phase] ?? protocol.content.phase} ·{' '}
+              {protocol.content.weeklyFrequency}x por semana · duração:{' '}
+              {protocol.totalWeeks === 1 ? '1 semana' : `${protocol.totalWeeks} semanas`}
+            </p>
+          )}
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={onEdit}
-          aria-label="Editar Protocolo"
-          title="Editar Protocolo"
-        >
-          <Pencil aria-hidden="true" className="size-4" />
-        </Button>
+        {editing ? (
+          <div className="flex gap-2">
+            <Button type="button" size="sm" onClick={() => void save()} disabled={pending}>
+              <Save aria-hidden="true" className="size-4" /> {pending ? 'Validando…' : 'Salvar'}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={cancelEdit}
+              disabled={pending}
+              aria-label="Cancelar edição"
+              title="Cancelar edição"
+            >
+              <X aria-hidden="true" className="size-4" />
+            </Button>
+          </div>
+        ) : (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={startEdit}
+            aria-label="Editar Protocolo"
+            title="Editar Protocolo"
+          >
+            <Pencil aria-hidden="true" className="size-4" />
+          </Button>
+        )}
       </div>
 
+      {issues.length > 0 ? (
+        <div
+          id="protocol-editor-issues"
+          role="alert"
+          className="mt-4 rounded-lg bg-destructive p-4 text-destructive-foreground"
+        >
+          <p className="text-label font-semibold">A edição precisa de revisão:</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-label">
+            {issues.map((issue) => (
+              <li key={issue}>{issue}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       <div className="mt-5 space-y-4">
-        {protocol.content.sessions.map((session, index) => (
+        {content.sessions.map((session, index) => (
           <details
             // `dayLabel` sozinho não é único (fallback alterna "Treino A"/"Treino B" —
             // achado 2026-08-18); índice garante a chave mesmo com rótulos repetidos.
@@ -115,7 +300,28 @@ function ProtocolSummary({ protocol, onEdit }: { protocol: ProtocolDetail; onEdi
             open
           >
             <summary className="cursor-pointer text-h3 font-semibold focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring">
-              {sessionTitle(session, protocol.content.phase)}
+              {editing ? (
+                <span className="ml-2 inline-flex flex-wrap gap-2 align-middle">
+                  <input
+                    className={`${fieldClass} inline-block w-auto`}
+                    value={session.dayLabel}
+                    maxLength={60}
+                    aria-label={`Identificação do dia — sessão ${index + 1}`}
+                    onClick={(event) => event.preventDefault()}
+                    onChange={(event) => updateSession(index, { dayLabel: event.target.value })}
+                  />
+                  <input
+                    className={`${fieldClass} inline-block w-auto`}
+                    value={session.focus}
+                    maxLength={120}
+                    aria-label={`Foco — sessão ${index + 1}`}
+                    onClick={(event) => event.preventDefault()}
+                    onChange={(event) => updateSession(index, { focus: event.target.value })}
+                  />
+                </span>
+              ) : (
+                sessionTitle(session, content.phase)
+              )}
             </summary>
             <div className="mt-4 overflow-x-auto">
               <table className="w-full min-w-[38rem] border-collapse text-left text-label">
@@ -134,40 +340,260 @@ function ProtocolSummary({ protocol, onEdit }: { protocol: ProtocolDetail; onEdi
                       Descanso
                     </th>
                     <th scope="col" className="p-2 font-semibold">
+                      Repetições em Reserva (RIR)
+                    </th>
+                    <th scope="col" className="p-2 font-semibold">
                       Estratégia
+                    </th>
+                    <th scope="col" className="p-2 font-semibold">
+                      Vídeo de execução
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {session.exercises.map((exercise) => (
-                    <tr key={exercise.exerciseId} className="border-b border-border last:border-0">
-                      <td className="p-2">
-                        <span className="font-semibold">{exercise.name}</span>
-                        {exercise.notes ? (
-                          <span className="mt-1 block text-xs text-muted-foreground">
-                            {exercise.notes}
-                          </span>
-                        ) : null}
-                      </td>
-                      <td className="p-2 font-mono">{exercise.sets}</td>
-                      <td className="p-2 font-mono">
-                        {exercise.durationSeconds !== undefined
-                          ? `${exercise.durationSeconds}s`
-                          : exercise.reps
-                            ? `${exercise.reps.min}–${exercise.reps.max}`
-                            : ''}
-                      </td>
-                      <td className="p-2 font-mono">{exercise.restSeconds}s</td>
-                      <td className="p-2 text-xs">{exercise.loadStrategy}</td>
-                    </tr>
-                  ))}
+                  {session.exercises.map((exercise, exerciseIndex) =>
+                    editing ? (
+                      <tr
+                        key={exercise.exerciseId}
+                        className="border-b border-border last:border-0"
+                      >
+                        <td className="p-2 align-top">
+                          <input
+                            className={fieldClass}
+                            value={exercise.name}
+                            maxLength={120}
+                            aria-label="Nome"
+                            onChange={(event) =>
+                              updateExercise(index, exerciseIndex, { name: event.target.value })
+                            }
+                          />
+                          <textarea
+                            className={`${fieldClass} mt-1.5 min-h-16 py-1.5 text-xs`}
+                            value={exercise.notes ?? ''}
+                            maxLength={400}
+                            placeholder="Observação"
+                            aria-label="Observação"
+                            onChange={(event) =>
+                              updateExercise(index, exerciseIndex, {
+                                notes: event.target.value || undefined,
+                              })
+                            }
+                          />
+                        </td>
+                        <td className="p-2 align-top">
+                          <input
+                            className={`${fieldClass} w-20`}
+                            type="number"
+                            min={1}
+                            max={12}
+                            value={numberInputValue(exercise.sets)}
+                            aria-label="Séries"
+                            onChange={(event) =>
+                              updateExercise(index, exerciseIndex, {
+                                sets: event.target.valueAsNumber,
+                              })
+                            }
+                          />
+                        </td>
+                        <td className="p-2 align-top">
+                          {exercise.durationSeconds !== undefined ? (
+                            // Isométrico/cardio contínuo (prancha, caminhada, bike, tiros —
+                            // achado 2026-08-18): prescrito por tempo, "reps" não existe.
+                            <input
+                              className={`${fieldClass} w-24`}
+                              type="number"
+                              min={5}
+                              max={2400}
+                              value={numberInputValue(exercise.durationSeconds)}
+                              aria-label="Duração (s)"
+                              onChange={(event) =>
+                                updateExercise(index, exerciseIndex, {
+                                  durationSeconds: event.target.valueAsNumber,
+                                })
+                              }
+                            />
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <input
+                                className={`${fieldClass} w-16`}
+                                type="number"
+                                min={1}
+                                max={100}
+                                value={numberInputValue(exercise.reps?.min ?? 1)}
+                                aria-label="Repetições mín."
+                                onChange={(event) =>
+                                  updateExercise(index, exerciseIndex, {
+                                    reps: {
+                                      min: event.target.valueAsNumber,
+                                      max: exercise.reps?.max ?? event.target.valueAsNumber,
+                                    },
+                                  })
+                                }
+                              />
+                              <span aria-hidden="true">–</span>
+                              <input
+                                className={`${fieldClass} w-16`}
+                                type="number"
+                                min={1}
+                                max={100}
+                                value={numberInputValue(exercise.reps?.max ?? 1)}
+                                aria-label="Repetições máx."
+                                onChange={(event) =>
+                                  updateExercise(index, exerciseIndex, {
+                                    reps: {
+                                      min: exercise.reps?.min ?? event.target.valueAsNumber,
+                                      max: event.target.valueAsNumber,
+                                    },
+                                  })
+                                }
+                              />
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-2 align-top">
+                          <input
+                            className={`${fieldClass} w-20`}
+                            type="number"
+                            min={0}
+                            max={600}
+                            value={numberInputValue(exercise.restSeconds)}
+                            aria-label="Descanso (s)"
+                            onChange={(event) =>
+                              updateExercise(index, exerciseIndex, {
+                                restSeconds: event.target.valueAsNumber,
+                              })
+                            }
+                          />
+                        </td>
+                        <td className="p-2 align-top">
+                          <input
+                            className={`${fieldClass} w-16`}
+                            type="number"
+                            min={0}
+                            max={5}
+                            value={exercise.rir ?? ''}
+                            aria-label="Repetições em Reserva (RIR)"
+                            onChange={(event) =>
+                              updateExercise(index, exerciseIndex, {
+                                rir: Number.isNaN(event.target.valueAsNumber)
+                                  ? undefined
+                                  : event.target.valueAsNumber,
+                              })
+                            }
+                          />
+                        </td>
+                        <td className="p-2 align-top">
+                          <select
+                            className={fieldClass}
+                            value={exercise.loadStrategy}
+                            aria-label="Estratégia de carga"
+                            onChange={(event) =>
+                              updateExercise(index, exerciseIndex, {
+                                loadStrategy: event.target.value as typeof exercise.loadStrategy,
+                              })
+                            }
+                          >
+                            <option value="BODYWEIGHT">Peso corporal</option>
+                            <option value="FIXED_LOAD">Carga fixa</option>
+                            <option value="DOUBLE_PROGRESSION">Progressão dupla</option>
+                            <option value="RPE">Percepção de esforço (RPE)</option>
+                          </select>
+                        </td>
+                        <td className="p-2 align-top">
+                          <input
+                            className={`${fieldClass} w-40`}
+                            type="url"
+                            value={exercise.videoUrl ?? ''}
+                            maxLength={500}
+                            placeholder="https://…"
+                            aria-label="Link de vídeo de execução"
+                            onChange={(event) =>
+                              updateExercise(index, exerciseIndex, {
+                                videoUrl: event.target.value || undefined,
+                              })
+                            }
+                          />
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr
+                        key={exercise.exerciseId}
+                        className="border-b border-border last:border-0"
+                      >
+                        <td className="p-2">
+                          <span className="font-semibold">{exercise.name}</span>
+                          {exercise.notes ? (
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              {exercise.notes}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="p-2 font-mono">{exercise.sets}</td>
+                        <td className="p-2 font-mono">
+                          {exercise.durationSeconds !== undefined
+                            ? `${exercise.durationSeconds}s`
+                            : exercise.reps
+                              ? `${exercise.reps.min}–${exercise.reps.max}`
+                              : ''}
+                        </td>
+                        <td className="p-2 font-mono">{exercise.restSeconds}s</td>
+                        <td className="p-2 font-mono">{exercise.rir ?? '—'}</td>
+                        <td className="p-2 text-xs">{exercise.loadStrategy}</td>
+                        <td className="p-2 text-xs">
+                          {exercise.videoUrl ? (
+                            <a
+                              href={exercise.videoUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-medium underline underline-offset-4 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
+                            >
+                              Assistir
+                            </a>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                      </tr>
+                    ),
+                  )}
                 </tbody>
               </table>
             </div>
           </details>
         ))}
       </div>
-      {protocol.content.generalNotes ? (
+      {editing ? (
+        <>
+          <label className="mt-5 flex flex-col gap-2 text-label font-semibold">
+            Observações gerais
+            <textarea
+              className={`${fieldClass} min-h-28 py-2`}
+              value={draft.generalNotes ?? ''}
+              maxLength={1000}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  generalNotes: event.target.value || undefined,
+                }))
+              }
+            />
+          </label>
+          <label className="mt-5 flex flex-col gap-2 text-label font-semibold">
+            Motivo da edição{' '}
+            <span className="text-xs font-normal text-muted-foreground">
+              Obrigatório para auditoria
+            </span>
+            <textarea
+              className={`${fieldClass} min-h-24 py-2`}
+              value={reason}
+              maxLength={500}
+              required
+              onChange={(event) => setReason(event.target.value)}
+              aria-describedby={issues.length > 0 ? 'protocol-editor-issues' : undefined}
+            />
+          </label>
+        </>
+      ) : protocol.content.generalNotes ? (
         <div className="mt-5 rounded-lg bg-secondary p-4">
           <h3 className="text-label font-semibold">Observações do protocolo</h3>
           <p className="mt-1 whitespace-pre-wrap text-label text-secondary-foreground">
@@ -183,6 +609,148 @@ function ProtocolSummary({ protocol, onEdit }: { protocol: ProtocolDetail; onEdi
         </p>
       ) : null}
     </section>
+  );
+}
+
+/** `isoDateSchema` (yyyy-mm-dd) → idade em anos completos, sem depender de `Date` (fuso
+ *  deslocaria o dia — mesmo cuidado de `formatBirthDate` em `protocol-anamnesis-answers`). */
+function calculateAge(birthDate: string): number | null {
+  const [year, month, day] = birthDate.split('-').map(Number);
+  if (!year || !month || !day) return null;
+  const today = new Date();
+  let age = today.getFullYear() - year;
+  const hadBirthdayThisYear =
+    today.getMonth() + 1 > month || (today.getMonth() + 1 === month && today.getDate() >= day);
+  if (!hadBirthdayThisYear) age -= 1;
+  return age;
+}
+
+function formatShortDate(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? '—'
+    : new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short' }).format(date);
+}
+
+/**
+ * Card "Protocolo para Revisão" (achado 2026-08-19, a pedido do fundador): substitui o
+ * header genérico (título + resumo) só pra PROTOCOLO, cruzando o protocolo com a
+ * anamnese do titular pra dar ao RT o perfil completo do aluno de uma vez, sem precisar
+ * abrir o modal de respostas. PARQ/CHECKIN/HANDOFF continuam com o header genérico —
+ * "severity" nunca é SAFETY pra item de protocolo, então não há badge de segurança aqui.
+ */
+function ProtocolStudentHeader({
+  protocolId,
+  protocol,
+}: {
+  protocolId: string;
+  protocol: ProtocolDetail;
+}) {
+  const [answers, setAnswers] = useState<AnamnesisAnswers | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const controller = new AbortController();
+    getAnamnesisAnswers('PROTOCOL', protocolId, controller.signal)
+      .then(setAnswers)
+      .catch((caught: unknown) => {
+        if (caught instanceof DOMException && caught.name === 'AbortError') return;
+        setError(
+          caught instanceof Error ? caught.message : 'Não foi possível carregar a anamnese.',
+        );
+      });
+    return () => controller.abort();
+  }, [protocolId]);
+
+  const endDate = new Date(
+    new Date(protocol.createdAt).getTime() + protocol.totalWeeks * 7 * 24 * 60 * 60 * 1000,
+  ).toISOString();
+
+  const riskFactors =
+    answers?.health.parq?.answers
+      .filter((answer) => answer.answer)
+      .map(
+        (answer) =>
+          PARQ_QUESTION_TEXT[answer.questionId as keyof typeof PARQ_QUESTION_TEXT] ??
+          answer.questionId,
+      ) ?? [];
+
+  return (
+    <header className="mt-5 rounded-xl border border-border bg-card p-4 sm:p-6">
+      <h1 className="text-h1 font-bold">Protocolo para Revisão</h1>
+      {!answers && !error ? (
+        <div
+          role="status"
+          aria-label="Carregando dados do aluno"
+          className="mt-4 h-32 animate-pulse rounded-lg bg-secondary"
+        />
+      ) : null}
+      {error ? (
+        <p role="alert" className="mt-3 text-label text-destructive">
+          {error}
+        </p>
+      ) : null}
+      {answers ? (
+        <div className="mt-4 space-y-2 text-label">
+          <div className="grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
+            <div className="space-y-2">
+              <p>
+                <span className="font-semibold">Nome do Aluno:</span> {answers.personal.name}
+              </p>
+              <p>
+                <span className="font-semibold">Idade:</span>{' '}
+                {calculateAge(answers.personal.birthDate) ?? '—'} anos
+              </p>
+              <p>
+                <span className="font-semibold">Objetivo:</span>{' '}
+                {PRIMARY_GOAL_LABELS[
+                  answers.routine.primaryGoal as keyof typeof PRIMARY_GOAL_LABELS
+                ] ?? answers.routine.primaryGoal}
+              </p>
+              <p>
+                <span className="font-semibold">Fatores de Risco:</span>{' '}
+                {riskFactors.length
+                  ? riskFactors.join('; ')
+                  : 'Nenhum fator de risco identificado.'}
+              </p>
+              <p>
+                <span className="font-semibold">Mesociclo:</span>{' '}
+                {PHASE_LABELS[protocol.content.phase] ?? protocol.content.phase}
+              </p>
+            </div>
+            <div className="space-y-2">
+              <p>
+                <span className="font-semibold">Peso:</span> {answers.personal.weightKg}kg
+              </p>
+              <p>
+                <span className="font-semibold">Altura:</span> {answers.personal.heightCm} cm
+              </p>
+              <p>
+                <span className="font-semibold">Sexo:</span>{' '}
+                {BIOLOGICAL_SEX_LABELS[answers.personal.biologicalSex] ??
+                  answers.personal.biologicalSex}
+              </p>
+              <p>
+                <span className="font-semibold">Frequência:</span> {answers.routine.daysPerWeek}x
+                por semana
+                {answers.routine.preferredDays.length
+                  ? ` | ${answers.routine.preferredDays.map((day) => WEEKDAY_LABELS[day] ?? day).join(', ')}`
+                  : ''}
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
+            <p>
+              <span className="font-semibold">Início do protocolo:</span>{' '}
+              {formatShortDate(protocol.createdAt)}
+            </p>
+            <p>
+              <span className="font-semibold">Fim do protocolo:</span> {formatShortDate(endDate)}
+            </p>
+          </div>
+        </div>
+      ) : null}
+    </header>
   );
 }
 
@@ -225,7 +793,6 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
   const [parqNotes, setParqNotes] = useState('');
   const [resolution, setResolution] = useState('Contato realizado e orientação registrada.');
   const [resolutionNotes, setResolutionNotes] = useState('');
-  const [editingProtocol, setEditingProtocol] = useState(false);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -291,24 +858,28 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
         <ArrowLeft aria-hidden="true" className="size-4" /> Voltar à fila
       </Link>
 
-      <header className="mt-5 rounded-xl border border-border bg-card p-4 sm:p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            {detail.item.severity === 'SAFETY' ? (
-              <p className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
-                <ShieldAlert aria-hidden="true" className="size-4 text-coral" />
-                SEGURANÇA · PRIORIDADE
-              </p>
-            ) : null}
-            <h1 className="mt-2 text-h1 font-bold">{detail.item.title}</h1>
-            {meaningfulText(detail.item.summary) ? (
-              <p className="mt-2 max-w-3xl text-body text-muted-foreground">
-                {meaningfulText(detail.item.summary)}
-              </p>
-            ) : null}
+      {kind === 'PROTOCOL' && detail.protocol ? (
+        <ProtocolStudentHeader protocolId={detail.protocol.id} protocol={detail.protocol} />
+      ) : (
+        <header className="mt-5 rounded-xl border border-border bg-card p-4 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              {detail.item.severity === 'SAFETY' ? (
+                <p className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
+                  <ShieldAlert aria-hidden="true" className="size-4 text-coral" />
+                  SEGURANÇA · PRIORIDADE
+                </p>
+              ) : null}
+              <h1 className="mt-2 text-h1 font-bold">{detail.item.title}</h1>
+              {meaningfulText(detail.item.summary) ? (
+                <p className="mt-2 max-w-3xl text-body text-muted-foreground">
+                  {meaningfulText(detail.item.summary)}
+                </p>
+              ) : null}
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
+      )}
 
       <div aria-live="polite" aria-atomic="true">
         {success ? (
@@ -331,24 +902,19 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
 
       <div className="mt-5 space-y-5">
         {detail.protocol ? (
-          editingProtocol ? (
-            <ProtocolEditor
-              protocolId={detail.protocol.id}
-              content={detail.protocol.content}
-              onCancel={() => setEditingProtocol(false)}
-              onSaved={async () => {
-                setEditingProtocol(false);
-                setSuccess('Edição validada no servidor e registrada para revisão.');
-                await load();
-              }}
-            />
-          ) : (
-            <ProtocolSummary protocol={detail.protocol} onEdit={() => setEditingProtocol(true)} />
-          )
+          <ProtocolSummary
+            protocol={detail.protocol}
+            onSaved={async () => {
+              setSuccess('Edição validada no servidor e registrada para revisão.');
+              await load();
+            }}
+          />
         ) : null}
         {detail.replay ? <ConversationReplay replay={detail.replay} /> : null}
 
-        <Context detail={detail} />
+        {/* Achado 2026-08-19: pra protocolo, "Contexto autorizado" só repetia a versão
+            (já no título) e um `humanReviewRequired` sempre `true` — sem valor pro RT. */}
+        {kind !== 'PROTOCOL' ? <Context detail={detail} /> : null}
 
         {kind === 'PROTOCOL' && detail.protocol && !detail.protocol.signatureHash ? (
           <section

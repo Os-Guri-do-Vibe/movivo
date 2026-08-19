@@ -141,6 +141,11 @@ export function parseQueueDetail(value: unknown): QueueDetail {
       signedAt: typeof value.protocol.signedAt === 'string' ? value.protocol.signedAt : null,
       signatureHash:
         typeof value.protocol.signatureHash === 'string' ? value.protocol.signatureHash : null,
+      totalWeeks: finiteNumber(value.protocol.totalWeeks, 12),
+      createdAt:
+        typeof value.protocol.createdAt === 'string'
+          ? value.protocol.createdAt
+          : new Date().toISOString(),
       ...(validation ? { validation } : {}),
     };
   }

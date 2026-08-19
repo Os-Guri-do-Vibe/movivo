@@ -1,6 +1,7 @@
 import type { ProtocolStructure } from '@movivo/shared';
 
 import type {
+  AnamnesisAnswers,
   AnonymizedReplay,
   OperationsResponse,
   QueueDetail,
@@ -12,6 +13,57 @@ export const PROTOCOL_ID = '11111111-1111-4111-8111-111111111111';
 export const HANDOFF_ID = '22222222-2222-4222-8222-222222222222';
 export const PARQ_ID = '33333333-3333-4333-8333-333333333333';
 export const CHECKIN_ID = '44444444-4444-4444-8444-444444444444';
+
+export const anamnesisAnswers: AnamnesisAnswers = {
+  userId: 'user-1',
+  submittedAt: '2026-08-01T13:00:00.000Z',
+  personal: {
+    name: 'Rodrigo de Barros',
+    birthDate: '1990-01-01',
+    biologicalSex: 'MALE',
+    heightCm: 178,
+    weightKg: 80,
+    phoneNumber: '+5511999999999',
+    email: 'rodrigo@example.invalid',
+  },
+  routine: {
+    primaryGoal: 'GAIN_MUSCLE',
+    emphasis: ['CHEST', 'BACK'],
+    hasImportantEvent: false,
+    trainingStatus: 'NEVER',
+    experience: 'BEGINNER',
+    pastActivities: ['NONE'],
+    consistencyBarriers: ['LACK_OF_TIME'],
+    daysPerWeek: 3,
+    preferredDays: ['MON', 'WED', 'FRI'],
+    sessionDuration: 'M45_TO_60',
+    location: 'HOME',
+    preferredPeriod: 'MORNING',
+    practicesOtherSport: false,
+    hasAvoidedExercise: false,
+  },
+  health: {
+    parq: {
+      version: 'parq-2026-07-v1',
+      answers: ['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9'].map((questionId) => ({
+        questionId,
+        answer: false,
+      })),
+    },
+    pain: {
+      hasPain: true,
+      points: [{ region: 'KNEE', intensity: 4 }],
+      hasProfessionalExplanation: false,
+      underMedicalFollowUp: false,
+      hasAvoidanceRecommendation: false,
+    },
+    declarations: {
+      version: 'v1',
+      accepted: ['TRUTHFUL', 'WILL_REPORT_CHANGES'],
+      acceptedAt: '2026-08-01T12:59:00.000Z',
+    },
+  },
+};
 
 export const protocolContent: ProtocolStructure = {
   promptVersion: 'methodology-2026-07',
@@ -30,6 +82,8 @@ export const protocolContent: ProtocolStructure = {
           reps: { min: 8, max: 10 },
           loadStrategy: 'DOUBLE_PROGRESSION',
           restSeconds: 90,
+          rir: 2,
+          videoUrl: 'https://example.com/goblet-squat',
           notes: 'Movimento controlado.',
         },
       ],
@@ -126,7 +180,9 @@ export const anonymizedReplay: AnonymizedReplay = {
 
 export const protocolDetail: QueueDetail = {
   item: protocolItem,
-  context: { goal: 'Hipertrofia', level: 'Intermediário', location: 'Academia' },
+  // Achado 2026-08-19: protocolo não manda mais "Contexto autorizado" (version/
+  // humanReviewRequired não ajudavam o RT) — `QueueDetail` nem renderiza a seção.
+  context: {},
   protocol: {
     id: PROTOCOL_ID,
     version: 1,
@@ -135,6 +191,8 @@ export const protocolDetail: QueueDetail = {
     content: protocolContent,
     signedAt: null,
     signatureHash: null,
+    totalWeeks: 8,
+    createdAt: '2026-08-03T12:00:00.000Z',
   },
   replay: anonymizedReplay,
 };

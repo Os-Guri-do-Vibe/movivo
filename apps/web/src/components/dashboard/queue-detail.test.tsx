@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  anamnesisAnswers,
   CHECKIN_ID,
   checkinItem,
   HANDOFF_ID,
@@ -18,6 +19,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => navigation }));
 
 const api = vi.hoisted(() => ({
   getQueueDetail: vi.fn(),
+  getAnamnesisAnswers: vi.fn(),
   signProtocol: vi.fn(),
   releaseParq: vi.fn(),
   resolveHandoff: vi.fn(),
@@ -56,6 +58,7 @@ beforeEach(() => {
   api.signProtocol.mockResolvedValue({ status: 'SIGNED' });
   api.releaseParq.mockResolvedValue({ status: 'RELEASED' });
   api.resolveHandoff.mockResolvedValue({ status: 'RESOLVED' });
+  api.getAnamnesisAnswers.mockResolvedValue(anamnesisAnswers);
 });
 
 describe('QueueDetail', () => {
@@ -69,6 +72,76 @@ describe('QueueDetail', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Confirmar e assinar' }));
     await waitFor(() => expect(api.signProtocol).toHaveBeenCalledWith(PROTOCOL_ID));
     expect(await screen.findByRole('status')).toHaveTextContent('auditoria registrada');
+  });
+
+  // Achado 2026-08-19 (a pedido do fundador): "Contexto autorizado" só repetia a versão
+  // (já no título) e um booleano sempre `true` — sem valor pro RT nesta tela.
+  it('não mostra "Contexto autorizado" pra protocolo', async () => {
+    api.getQueueDetail.mockResolvedValue(protocolDetail);
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await screen.findByRole('heading', { name: /Protocolo · versão 1/i });
+    expect(screen.queryByText('Contexto autorizado')).not.toBeInTheDocument();
+  });
+
+  it('mostra "Contexto autorizado" pras outras telas (ex.: PAR-Q)', async () => {
+    api.getQueueDetail.mockResolvedValue(parqDetail);
+    render(<QueueDetail kind="PARQ" id={PARQ_ID} />);
+    expect(await screen.findByText('Contexto autorizado')).toBeVisible();
+  });
+
+  // Achado 2026-08-19 (a pedido do fundador): editar acontece DENTRO do próprio card
+  // "Protocolo · versão N" — o mesmo componente vira formulário, sem trocar de layout.
+  it('edita o protocolo dentro do próprio card e salva com o motivo de auditoria', async () => {
+    api.getQueueDetail.mockResolvedValue(protocolDetail);
+    api.saveProtocol.mockResolvedValue({ status: 'PENDING_REVIEW' });
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    expect(await screen.findByRole('heading', { name: /Protocolo · versão 1/i })).toBeVisible();
+    expect(screen.getByText('Agachamento goblet')).toBeVisible();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Editar Protocolo' }));
+    const nameInput = screen.getByLabelText('Nome');
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, 'Supino reto');
+    await userEvent.type(screen.getByLabelText(/motivo da edição/i), 'Ajuste de exercício');
+    await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
+
+    await waitFor(() =>
+      expect(api.saveProtocol).toHaveBeenCalledWith(
+        PROTOCOL_ID,
+        expect.objectContaining({
+          sessions: [
+            expect.objectContaining({
+              exercises: [expect.objectContaining({ name: 'Supino reto' })],
+            }),
+          ],
+        }),
+        'Ajuste de exercício',
+      ),
+    );
+    expect(await screen.findByRole('status')).toHaveTextContent('Edição validada no servidor');
+    // Volta pro card de leitura, ainda dentro do mesmo componente.
+    expect(screen.getByRole('button', { name: 'Editar Protocolo' })).toBeVisible();
+  });
+
+  it('cancela a edição do protocolo sem persistir mudanças', async () => {
+    api.getQueueDetail.mockResolvedValue(protocolDetail);
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
+    const nameInput = screen.getByLabelText('Nome');
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, 'Outro nome');
+    await userEvent.click(screen.getByRole('button', { name: 'Cancelar edição' }));
+    expect(screen.getByText('Agachamento goblet')).toBeVisible();
+    expect(api.saveProtocol).not.toHaveBeenCalled();
+  });
+
+  it('exige motivo auditável antes de salvar a edição do protocolo', async () => {
+    api.getQueueDetail.mockResolvedValue(protocolDetail);
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
+    await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('auditoria');
+    expect(api.saveProtocol).not.toHaveBeenCalled();
   });
 
   // Achado 2026-08-18 (decisão do fundador): título da sessão vira
@@ -165,6 +238,24 @@ describe('QueueDetail', () => {
     render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
     expect(await screen.findByRole('alert')).toHaveTextContent('Caso indisponível');
     await userEvent.click(screen.getByRole('button', { name: /tentar novamente/i }));
-    expect(await screen.findByText('Protocolo para Revisão: Maria Teste')).toBeVisible();
+    expect(await screen.findByRole('heading', { name: 'Protocolo para Revisão' })).toBeVisible();
+  });
+
+  // Achado 2026-08-19 (a pedido do fundador): card do topo vira o perfil estruturado do
+  // aluno, cruzando o protocolo (fase/duração) com a anamnese (idade/peso/altura/PAR-Q).
+  it('mostra o card "Protocolo para Revisão" com o perfil do aluno', async () => {
+    api.getQueueDetail.mockResolvedValue(protocolDetail);
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    expect(await screen.findByRole('heading', { name: 'Protocolo para Revisão' })).toBeVisible();
+    expect(await screen.findByText('Rodrigo de Barros')).toBeVisible();
+    expect(screen.getByText(/36 anos/)).toBeVisible();
+    expect(screen.getByText(/80kg/)).toBeVisible();
+    expect(screen.getByText(/178 cm/)).toBeVisible();
+    expect(screen.getByText(/Masculino/)).toBeVisible();
+    expect(screen.getByText(/3x por semana \| Segunda, Quarta, Sexta/)).toBeVisible();
+    expect(screen.getByText('Nenhum fator de risco identificado.')).toBeVisible();
+    // Objetivo (GAIN_MUSCLE) e Mesociclo (fase HIPERTROFIA) coincidem no rótulo nesta
+    // fixture — as duas linhas do card aparecem, cada uma com seu "Hipertrofia".
+    expect(screen.getAllByText('Hipertrofia')).toHaveLength(2);
   });
 });

@@ -556,10 +556,11 @@ export class DashboardService {
       );
       return {
         item,
-        context: {
-          version: row.version,
-          humanReviewRequired: row.humanReviewRequired,
-        },
+        // Achado 2026-08-19 (a pedido do fundador): `version` já aparece no título
+        // "Protocolo · versão N" e `humanReviewRequired` é sempre `true` pra qualquer
+        // item nesta fila — nenhum dos dois ajudava o RT. Card "Contexto autorizado"
+        // some pra protocolo (`QueueDetail`), continua útil pras outras 3 telas.
+        context: {},
         protocol: {
           id,
           version: row.version,
@@ -568,6 +569,11 @@ export class DashboardService {
           content: row.content,
           signedAt: row.signedAt?.toISOString() ?? null,
           signatureHash: row.signatureHash,
+          totalWeeks: row.totalWeeks,
+          // Achado 2026-08-19: data de início/fim do card de revisão são calculadas no
+          // cliente a partir daqui (criação + duração) — não existe coluna própria pra
+          // "início real do protocolo", que hoje é a própria criação do registro.
+          createdAt: row.createdAt.toISOString(),
         },
       };
     });
