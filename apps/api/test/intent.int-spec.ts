@@ -11,6 +11,7 @@ import 'reflect-metadata';
 
 import { type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -20,6 +21,8 @@ import { loadEnv } from '../src/core/config/load-env';
 import { DRIZZLE } from '../src/core/database/database.constants';
 import type { DrizzleClient } from '../src/core/database/database.module';
 import { intentExamples } from '../src/core/database/schema/intent-examples';
+import { users } from '../src/core/database/schema/users';
+import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { IntentClassifier } from '../src/modules/ai-coach/intent/intent-classifier.service';
 import { INTENT_EXAMPLES_SEED } from '../src/modules/ai-coach/intent/intent-examples.seed';
 import { indexIntentExamples } from '../src/modules/ai-coach/intent/intent-indexer';
@@ -55,10 +58,32 @@ beforeAll(async () => {
 
   await migratorDb.delete(intentExamples);
   await indexIntentExamples(migratorDb, INTENT_EXAMPLES_SEED, new FakeEmbedding());
+
+  // `ai_jobs.user_id` tem FK para `users` (Sprint 8/US-8.3): o kNN aproximado (HNSW) do
+  // pgvector não garante 100% de acerto em corpus pequeno, então o caminho FALLBACK — que
+  // grava `ai_jobs` — precisa de um titular real, mesmo quando o teste espera resolver via
+  // KNN puro.
+  const tenant = new TenantDatabase(appDb);
+  await tenant.runAsSystem((tx) =>
+    tx
+      .insert(users)
+      .values({
+        id: USER.userId,
+        phoneNumber: '+5511900000001',
+        name: 'Usuário de teste (intent.int-spec)',
+        role: 'USER',
+      })
+      .onConflictDoNothing(),
+  );
 });
 
 afterAll(async () => {
   await migratorDb.delete(intentExamples);
+  const tenant = new TenantDatabase(appDb);
+  await tenant.runAsSystem(async (tx) => {
+    await tx.execute(sql`DELETE FROM ai_jobs WHERE user_id = ${USER.userId}::uuid`);
+    await tx.execute(sql`DELETE FROM users WHERE id = ${USER.userId}::uuid`);
+  });
   await migratorSql.end({ timeout: 5 });
   await app?.close();
 });
