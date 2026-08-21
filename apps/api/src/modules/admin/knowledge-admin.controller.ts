@@ -36,4 +36,16 @@ export class KnowledgeAdminController {
   content(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
     return this.knowledge.content(actor, id);
   }
+
+  @Post(':id/retry')
+  @RequireCapabilities(Capability.AI_CONFIG_READ, Capability.AI_KNOWLEDGE_WRITE)
+  retry(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.knowledge.retry(actor, id);
+  }
+
+  @Post(':id/archive')
+  @RequireCapabilities(Capability.AI_CONFIG_READ, Capability.AI_KNOWLEDGE_APPROVE)
+  archive(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() body: unknown) {
+    return this.knowledge.archive(actor, id, body);
+  }
 }

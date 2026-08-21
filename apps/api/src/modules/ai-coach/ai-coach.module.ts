@@ -26,7 +26,7 @@ import { IntentClassifier } from './intent/intent-classifier.service';
 import { PromptResolverService } from './intent/prompt-resolver.service';
 import { IntentRepository } from './intent/intent.repository';
 import { RagService } from './rag/rag.service';
-import { FakeReranker, RERANKER_PORT } from './rag/reranker.port';
+import { DenseScoreReranker, RERANKER_PORT } from './rag/reranker.port';
 import { AiJobRepository } from './llm/ai-job.repository';
 import { LlmAbuseGuard } from './llm/llm-abuse-guard.service';
 import { LlmRouter } from './llm/llm-router.service';
@@ -71,9 +71,9 @@ import type { LLMProvider } from './llm/llm.types';
     // Sprint 3 — memória da conversa (US-3.2) + RAG (US-3.3).
     WorkingMemory,
     ContextRepository,
-    // Portas de embedding/rerank: fakes determinísticos no dev/CI; impl real (OpenAI /
-    // bge-reranker) pluga atrás delas quando houver chave/infra.
-    { provide: RERANKER_PORT, useClass: FakeReranker },
+    // O runtime preserva o score semântico real do pgvector; o fake lexical só é instanciado
+    // diretamente por testes. O cross-encoder self-hosted pode substituir esta porta depois.
+    { provide: RERANKER_PORT, useClass: DenseScoreReranker },
     // US-3.3 substitui o no-op da US-3.2: a camada semantic agora é o RAG real (PGVector).
     { provide: SEMANTIC_MEMORY, useClass: RagService },
     ContextService,
@@ -92,6 +92,7 @@ import type { LLMProvider } from './llm/llm.types';
     IntentClassifier,
     LlmAbuseGuard,
     PromptResolverService,
+    SEMANTIC_MEMORY,
   ],
 })
 export class AiCoachModule {}

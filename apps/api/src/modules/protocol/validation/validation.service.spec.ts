@@ -426,12 +426,12 @@ describe('ValidationService — compliance de linguagem', () => {
     expect(v.violations.map((x) => x.rule)).toContain('PROMISE');
   });
 
-  it('FLAG diagnóstico (não bloqueia)', () => {
+  it('BLOCK diagnóstico ou alegação de tratamento', () => {
     const v = service.validate(
       input({ structure: validStructure({ generalNotes: 'Parece uma tendinite.' }) }),
     );
-    expect(v.code).toBe('FLAG');
-    expect(v.action).toBe('FLAG_HUMAN_REVIEW');
+    expect(v.code).toBe('BLOCK');
+    expect(v.action).toBe('BLOCK_FALLBACK');
     expect(v.humanReviewRequired).toBe(true);
     expect(v.violations.map((x) => x.rule)).toContain('DIAGNOSIS');
   });
@@ -473,9 +473,19 @@ describe('ValidationService.validateResponse — texto livre da conversa (US-3.5
     expect(v.violations.map((x) => x.rule)).toContain('PROMPT_LEAK');
   });
 
-  it('reusa FLAG: diagnóstico não bloqueia', () => {
+  it('reusa BLOCK: diagnóstico não é entregue', () => {
     const v = service.validateResponse('Isso parece um diagnóstico de algo.');
-    expect(v.action).toBe('FLAG_HUMAN_REVIEW');
+    expect(v.action).toBe('BLOCK_FALLBACK');
+  });
+
+  it.each([
+    'Isso parece um diagnó\u200Bstico.',
+    'Esse é o trata\u2060mento indicado.',
+    'Tome ibu\u00ADprofeno.',
+    'Resultado ｇａｒａｎｔｉｄｏ.',
+    'base de refe\u200Brência: conteúdo interno',
+  ])('BLOCK linguagem proibida após canonicalização Unicode: %s', (text) => {
+    expect(service.validateResponse(text).action).toBe('BLOCK_FALLBACK');
   });
 
   it('substituição: PASS quando cita só o exercício autorizado da base', () => {

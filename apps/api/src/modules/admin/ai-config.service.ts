@@ -16,7 +16,7 @@
  */
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
-  agentPersonaSchema,
+  agentPersonaStoredSchema,
   buildPersonaBlock,
   publishAgentConfigSchema,
   rollbackAgentConfigSchema,
@@ -51,6 +51,7 @@ import {
   simulateFaqConfig,
   simulateL1GuardrailConfig,
   simulatePersonaConfig,
+  simulateForbiddenTopicConfig,
 } from './config-simulator';
 
 const TIMEZONE = 'America/Sao_Paulo' as const;
@@ -106,7 +107,7 @@ export class AiConfigService {
     // Vigente é a maior versão PUBLISHED — a lista já vem ordenada por versão desc.
     const currentVersion = rows.find((row) => row.status === 'PUBLISHED')?.version ?? null;
     const versions = rows.flatMap((row) => {
-      const parsed = agentPersonaSchema.safeParse(row.payload);
+      const parsed = agentPersonaStoredSchema.safeParse(row.payload);
       // Linha com payload fora do contrato não é exibida como opção de rollback:
       // reverter para um payload que não valida cairia direto no default de código.
       if (!parsed.success) return [];
@@ -152,7 +153,9 @@ export class AiConfigService {
         ? simulatePersonaConfig(input.candidate)
         : input.kind === 'FAQ'
           ? simulateFaqConfig(input.candidate)
-          : simulateL1GuardrailConfig(input.candidate),
+          : input.kind === 'GUARDRAIL'
+            ? simulateL1GuardrailConfig(input.candidate)
+            : simulateForbiddenTopicConfig(input.candidate),
     );
   }
 
@@ -166,7 +169,7 @@ export class AiConfigService {
         .limit(1),
     );
     if (!row) throw new NotFoundException('Versão inexistente.');
-    const payload = agentPersonaSchema.safeParse(row.payload);
+    const payload = agentPersonaStoredSchema.safeParse(row.payload);
     if (!payload.success) {
       throw new BadRequestException('A versão alvo tem payload fora do contrato atual.');
     }
@@ -191,7 +194,11 @@ export class AiConfigService {
         checks: simulation.checks,
       });
     }
-    if (detectInjection(payload.agentSelfIntro) || detectInjection(payload.agentName)) {
+    if (
+      detectInjection(payload.agentSelfIntro) ||
+      detectInjection(payload.agentName) ||
+      detectInjection(payload.humanHandoffMessage)
+    ) {
       throw new BadRequestException({
         code: 'INJECTION_DETECTED',
         message: 'A apresentação contém um padrão de instrução para a IA e não pode ser salva.',

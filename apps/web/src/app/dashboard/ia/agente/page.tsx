@@ -12,13 +12,9 @@ export default async function AiAgentPage() {
   return (
     <AiAgentDashboard
       canWriteConfig={hasAllCapabilities(session.capabilities, 'control_center.ai.config.write')}
-      canUploadKnowledge={hasAllCapabilities(
+      canApproveGuardrails={hasAllCapabilities(
         session.capabilities,
-        'control_center.ai.knowledge.write',
-      )}
-      canApproveKnowledge={hasAllCapabilities(
-        session.capabilities,
-        'control_center.ai.knowledge.approve',
+        'control_center.ai.guardrail.approve',
       )}
     />
   );

@@ -8,11 +8,16 @@ import { createHash } from 'node:crypto';
 
 import {
   agentPersonaSchema,
+  buildHumanHandoffMessage,
+  buildForbiddenTopicsBlock,
   faqCandidateSchema,
+  forbiddenTopicCandidateSchema,
+  FORBIDDEN_TOPIC_TERM_DENYLIST,
   l1GuardrailCandidateSchema,
   type AgentPersona,
   type ConfigSimulationCheck,
   type FaqCandidate,
+  type ForbiddenTopicCandidate,
   type L1GuardrailCandidate,
 } from '@movivo/shared';
 
@@ -27,6 +32,7 @@ import { GUARDRAIL_CASES, RESPONSE_CASES } from '../coach/conversation-golden-se
 import { ValidationService } from '../protocol/validation/validation.service';
 import { detectInjection } from '../protocol/validation/prompt-injection';
 import { normalizeFaqQuestion } from '../../core/agent-config/faq.service';
+import { matchesTerm, normalizeForMatch } from '../../core/agent-config/text-normalize';
 
 const validation = new ValidationService();
 
@@ -41,7 +47,9 @@ function result(
 
 export function simulatePersonaConfig(candidate: AgentPersona) {
   const schemaFailures = agentPersonaSchema.safeParse(candidate).success
-    ? detectInjection(candidate.agentName) || detectInjection(candidate.agentSelfIntro)
+    ? [candidate.agentName, candidate.agentSelfIntro, candidate.humanHandoffMessage].some((value) =>
+        detectInjection(value),
+      )
       ? ['A persona contém padrão de instrução para a IA.']
       : []
     : ['A persona não atende ao contrato fechado de configuração.'];
@@ -57,6 +65,12 @@ export function simulatePersonaConfig(candidate: AgentPersona) {
     );
     return verdict.action === testCase.expected ? [] : [testCase.label];
   });
+  const handoffVerdict = validation.validateResponse(buildHumanHandoffMessage(candidate));
+  if (handoffVerdict.action !== 'PASS') {
+    outputFailures.push(
+      ...handoffVerdict.violations.map((violation) => `Passagem: ${violation.rule}`),
+    );
+  }
 
   const promptFailures = INTENTS.flatMap((intent) => {
     const prompt = resolvePrompt(intent, candidate);
@@ -76,7 +90,7 @@ export function simulatePersonaConfig(candidate: AgentPersona) {
     result(
       'GOLDEN_OUTPUT',
       'Golden set de linguagem e resposta',
-      RESPONSE_CASES.length,
+      RESPONSE_CASES.length + 1,
       outputFailures,
     ),
     result(
@@ -172,6 +186,74 @@ export function simulateL1GuardrailConfig(candidate: L1GuardrailCandidate) {
   ];
   return {
     kind: 'GUARDRAIL' as const,
+    passed: checks.every((check) => check.passed),
+    candidateHash: createHash('sha256').update(JSON.stringify(candidate)).digest('hex'),
+    checks,
+  };
+}
+
+/** Gate específico para temas que bloqueiam a conversa antes de FAQ/classificação/LLM. */
+export function simulateForbiddenTopicConfig(candidate: ForbiddenTopicCandidate) {
+  const parsed = forbiddenTopicCandidateSchema.safeParse(candidate);
+  const schemaFailures = parsed.success ? [] : ['O tema proibido está fora do contrato fechado.'];
+  if (
+    parsed.success &&
+    [parsed.data.label, ...parsed.data.phrases].some((value) => detectInjection(value))
+  ) {
+    schemaFailures.push('O tema proibido contém padrão de instrução para a IA.');
+  }
+
+  const inputFailures = parsed.success
+    ? GUARDRAIL_CASES.flatMap((testCase) => {
+        const normalized = normalizeForMatch(testCase.message);
+        return parsed.data.phrases.some((phrase) => matchesTerm(normalized, phrase))
+          ? [`Bloqueio excessivo: ${testCase.label}`]
+          : [];
+      })
+    : [];
+  if (
+    parsed.success &&
+    parsed.data.phrases.some((phrase) =>
+      FORBIDDEN_TOPIC_TERM_DENYLIST.some((term) => matchesTerm(normalizeForMatch(phrase), term)),
+    )
+  ) {
+    inputFailures.push('Um termo essencial do domínio MOVIVO não pode ser bloqueado.');
+  }
+
+  const outputFailures = RESPONSE_CASES.flatMap((testCase) => {
+    const verdict = validation.validateResponse(
+      testCase.text,
+      testCase.allowedExercises ? { allowedExercises: testCase.allowedExercises } : {},
+    );
+    return verdict.action === testCase.expected ? [] : [testCase.label];
+  });
+
+  const prompt = parsed.success ? buildForbiddenTopicsBlock([parsed.data.label]) : '';
+  const promptFailures =
+    parsed.success &&
+    prompt.length > 0 &&
+    parsed.data.phrases.every((phrase) => !prompt.includes(phrase))
+      ? []
+      : ['O prompt deve receber somente o rótulo, nunca os termos-gatilho.'];
+
+  const checks: ConfigSimulationCheck[] = [
+    result('SCHEMA', 'Contrato fechado e proteção contra instruções', 1, schemaFailures),
+    result(
+      'GOLDEN_INPUT',
+      'Bloqueio sem atingir conversas legítimas',
+      GUARDRAIL_CASES.length,
+      inputFailures,
+    ),
+    result(
+      'GOLDEN_OUTPUT',
+      'Golden set de linguagem permanece válido',
+      RESPONSE_CASES.length,
+      outputFailures,
+    ),
+    result('PROMPT_INTEGRITY', 'Somente o rótulo alcança o prompt', 1, promptFailures),
+  ];
+  return {
+    kind: 'FORBIDDEN_TOPIC' as const,
     passed: checks.every((check) => check.passed),
     candidateHash: createHash('sha256').update(JSON.stringify(candidate)).digest('hex'),
     checks,

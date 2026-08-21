@@ -7,10 +7,13 @@ import {
 } from './security-policies';
 
 describe('controles de banco da Sprint 5', () => {
-  it('profissional le users/anamnese vinculados, mas nao recebe UPDATE amplo', () => {
+  // Achado 2026-08-19 (decisão do fundador): a fila de revisão é do CARGO, não da
+  // pessoa — qualquer CREF ativo lê/edita titular com consentimento de saúde ativo,
+  // sem depender de `professional_assignments` (que continua existindo só pra
+  // atribuição nominal, ex.: `protocols.professionalId`).
+  it('qualquer profissional le users/anamnese com consentimento ativo, mas nao recebe UPDATE amplo', () => {
     const sql = buildRlsPoliciesSql();
-    expect(sql).toContain('FROM public.professional_assignments pa');
-    expect(sql).toContain('public.has_active_health_consent');
+    expect(sql).toContain("= 'PROFESSIONAL' AND public.has_active_health_consent");
     const usersUpdate = sql
       .split(';')
       .find((statement) => statement.includes('CREATE POLICY "users_rls_update"'));
@@ -19,6 +22,20 @@ describe('controles de banco da Sprint 5', () => {
       .find((statement) => statement.includes('CREATE POLICY "anamnesis_sessions_rls_update"'));
     expect(usersUpdate).not.toContain('professional_assignments');
     expect(anamnesisUpdate).not.toContain('professional_assignments');
+    // Leitura/escrita de titular não passa mais por EXISTS em professional_assignments.
+    const usersSelect = sql
+      .split(';')
+      .find((statement) => statement.includes('CREATE POLICY "users_rls_select"'));
+    expect(usersSelect).not.toContain('professional_assignments');
+    // has_active_health_consent tem seu PRÓPRIO gate de ator (chamado de dentro da
+    // policy) — sem soltar o EXISTS aqui também, ele travaria de volta o acesso que
+    // a policy acima acabou de liberar pra qualquer profissional.
+    const consentFn = buildProfessionalAccessSql('movivo_app')
+      .split('CREATE OR REPLACE FUNCTION')
+      .find((chunk) => chunk.includes('public.has_active_health_consent'));
+    expect(consentFn).toBeDefined();
+    expect(consentFn).not.toContain('professional_assignments');
+    expect(consentFn).toContain("actor_role = 'PROFESSIONAL'");
   });
 
   it('audit_logs recebe hash chain serializada e bloqueia UPDATE/DELETE/TRUNCATE', () => {
@@ -30,7 +47,11 @@ describe('controles de banco da Sprint 5', () => {
     expect(sql).toContain('REVOKE UPDATE, DELETE, TRUNCATE ON public.audit_logs FROM movivo_app');
   });
 
-  it('bootstrap e liberacao PAR-Q verificam papel e vinculo explicito', () => {
+  // Achado 2026-08-19: liberar PAR-Q não exige mais professional_assignments
+  // específico pro titular — qualquer CREF ativo pode liberar (mesma decisão do
+  // fundador do teste de RLS acima). `assign_unique_active_professional` (bootstrap)
+  // não muda: continua gravando a atribuição nominal.
+  it('bootstrap grava vinculo nominal; liberacao PAR-Q so verifica CREF ativo', () => {
     const sql = buildProfessionalAccessSql('movivo_app');
     expect(sql).toContain('expected exactly one active CREF professional');
     expect(sql).toContain('professional_assignments');
@@ -41,6 +62,12 @@ describe('controles de banco da Sprint 5', () => {
     expect(sql).toContain("actor_role <> 'PROFESSIONAL'");
     expect(sql).toContain("professional.role = 'PROFESSIONAL'");
     expect(sql).toContain('professional.cref_active = true');
+    const releaseFn = sql
+      .split('CREATE OR REPLACE FUNCTION')
+      .find((chunk) => chunk.includes('public.release_parq_clearance'));
+    expect(releaseFn).toBeDefined();
+    expect(releaseFn).not.toContain('professional_assignments');
+    expect(releaseFn).toContain('active CREF professional required');
     expect(sql).not.toContain("actor_role NOT IN ('PROFESSIONAL', 'ADMIN')");
     expect(sql).toContain("new_state <> 'LIBERADO'::public.parq_state");
     expect(sql).toContain('GRANT EXECUTE ON FUNCTION public.release_parq_clearance');

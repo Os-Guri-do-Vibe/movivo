@@ -1,35 +1,23 @@
-/**
- * Testes do painel Agente (navegação por etapa).
- *
- * As quatro telas já têm testes próprios; aqui o que importa é o comportamento que só
- * existe neste componente: uma etapa por vez, `aria-selected` acompanhando a seleção e —
- * o ponto de segurança — as capabilities chegando à etapa certa, sem que trocar de aba
- * altere o que cada tela autoriza. Por isso os filhos são substituídos por marcadores que
- * imprimem as props recebidas.
- */
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type * as React from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const { goToStep } = vi.hoisted(() => ({ goToStep: vi.fn() }));
+
+vi.mock('./agent-persona-context', () => ({
+  AgentPersonaProvider: ({ children }: { children: React.ReactNode }) => children,
+  useAgentPersona: () => ({ goToStep }),
+}));
+vi.mock('./agent-summary-card', () => ({
+  AgentSummaryCard: ({ onOpenPersona }: { onOpenPersona: (step: string) => void }) => (
+    <button type="button" onClick={() => onOpenPersona('fala')}>
+      Editar jeito de falar
+    </button>
+  ),
+}));
 vi.mock('./ai-persona', () => ({
-  AiPersonaDashboard: ({ canWrite }: { canWrite: boolean }) => (
-    <p>{`persona canWrite=${String(canWrite)}`}</p>
-  ),
-}));
-vi.mock('./ai-rules', () => ({
-  AiRulesDashboard: ({ canWrite }: { canWrite: boolean }) => (
-    <p>{`regras canWrite=${String(canWrite)}`}</p>
-  ),
-}));
-vi.mock('./ai-knowledge', () => ({
-  AiKnowledgeDashboard: ({
-    canUpload,
-    canApprove,
-  }: {
-    canUpload: boolean;
-    canApprove: boolean;
-  }) => <p>{`conhecimento canUpload=${String(canUpload)} canApprove=${String(canApprove)}`}</p>,
+  AiPersonaDashboard: () => <p>configuração do agente</p>,
 }));
 vi.mock('./ai-faq', () => ({
   AiFaqDashboard: ({ canWrite }: { canWrite: boolean }) => (
@@ -40,53 +28,75 @@ vi.mock('./ai-faq', () => ({
 import { AiAgentDashboard } from './ai-agent-dashboard';
 
 const renderAgent = (props: Partial<React.ComponentProps<typeof AiAgentDashboard>> = {}) =>
-  render(
-    <AiAgentDashboard
-      canWriteConfig={false}
-      canUploadKnowledge={false}
-      canApproveKnowledge={false}
-      {...props}
-    />,
-  );
+  render(<AiAgentDashboard canWriteConfig={false} canApproveGuardrails={false} {...props} />);
 
 describe('AiAgentDashboard', () => {
-  it('abre na persona e mantém só uma etapa visível por vez', () => {
+  beforeEach(() => {
+    window.location.hash = '';
+    goToStep.mockReset();
+  });
+
+  it('mantém um único h1 e abre na configuração', () => {
     renderAgent();
-    expect(screen.getByRole('tab', { name: 'Persona & Tom de voz' })).toHaveAttribute(
+    expect(screen.getByRole('heading', { name: 'Agente', level: 1 })).toBeVisible();
+    expect(screen.getByRole('tab', { name: 'Configuração' })).toHaveAttribute(
       'aria-selected',
       'true',
     );
-    expect(screen.getByText(/^persona/)).toBeVisible();
-    expect(screen.queryByText(/^regras/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/^conhecimento/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/^faq/)).not.toBeInTheDocument();
+    expect(screen.getByText('configuração do agente')).toBeVisible();
+    expect(screen.getByText(/^faq canWrite/)).not.toBeVisible();
   });
 
-  it('troca de etapa pelo clique e move a seleção acessível junto', async () => {
+  it('abre FAQ, preserva a capability e atualiza o deep-link', async () => {
     const user = userEvent.setup();
-    renderAgent();
+    renderAgent({ canWriteConfig: true });
 
-    await user.click(screen.getByRole('tab', { name: 'Regras invioláveis' }));
-    expect(screen.getByText(/^regras/)).toBeVisible();
-    expect(screen.getByRole('tab', { name: 'Persona & Tom de voz' })).toHaveAttribute(
-      'aria-selected',
-      'false',
-    );
-    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'agent-tab-regras');
-
-    await user.click(screen.getByRole('tab', { name: 'FAQ' }));
-    expect(screen.getByText(/^faq/)).toBeVisible();
-    expect(screen.queryByText(/^regras/)).not.toBeInTheDocument();
-  });
-
-  it('entrega a cada etapa apenas a capability que lhe pertence', async () => {
-    const user = userEvent.setup();
-    renderAgent({ canWriteConfig: true, canApproveKnowledge: true });
-
-    expect(screen.getByText('persona canWrite=true')).toBeVisible();
-    await user.click(screen.getByRole('tab', { name: 'Conhecimento (RAG)' }));
-    expect(screen.getByText('conhecimento canUpload=false canApprove=true')).toBeVisible();
     await user.click(screen.getByRole('tab', { name: 'FAQ' }));
     expect(screen.getByText('faq canWrite=true')).toBeVisible();
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'agent-tab-faq');
+    expect(window.location.hash).toBe('#faq');
+  });
+
+  it('abre o deep-link de FAQ e ignora hashes antigos ou desconhecidos', () => {
+    window.location.hash = '#faq';
+    const { unmount } = renderAgent();
+    expect(screen.getByRole('tab', { name: 'FAQ' })).toHaveAttribute('aria-selected', 'true');
+    unmount();
+
+    window.location.hash = '#conhecimento';
+    renderAgent();
+    expect(screen.getByRole('tab', { name: 'Configuração' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('permite navegar pelas abas com setas, Home e End', () => {
+    renderAgent();
+    const configuration = screen.getByRole('tab', { name: 'Configuração' });
+    const faq = screen.getByRole('tab', { name: 'FAQ' });
+
+    configuration.focus();
+    fireEvent.keyDown(configuration, { key: 'ArrowRight' });
+    expect(faq).toHaveFocus();
+    expect(faq).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.keyDown(faq, { key: 'Home' });
+    expect(configuration).toHaveFocus();
+    fireEvent.keyDown(configuration, { key: 'End' });
+    expect(faq).toHaveFocus();
+  });
+
+  it('atalho do cartão abre a configuração na etapa pedida', async () => {
+    const user = userEvent.setup();
+    window.location.hash = '#faq';
+    renderAgent();
+
+    await user.click(screen.getByRole('button', { name: 'Editar jeito de falar' }));
+    expect(goToStep).toHaveBeenCalledWith('fala');
+    expect(screen.getByRole('tab', { name: 'Configuração' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
   });
 });

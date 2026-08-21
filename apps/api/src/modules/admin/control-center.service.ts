@@ -977,7 +977,14 @@ export class ControlCenterService {
           phoneNumber: users.phoneNumber,
           status: users.status,
           subscriptionStatus: this.latestSubscriptionStatus(),
+          subscriptionPlan: this.latestSubscriptionPlan(),
           protocolStatus: this.latestProtocolStatus(),
+          // "Data de inscrição" = quando a MATRÍCULA foi concluída — a primeira anamnese
+          // enviada, não a última (uma re-anamnese não deve mudar quando o aluno entrou).
+          enrolledAt: sql<Date | null>`(
+            select min(a.submitted_at) from ${anamnesisSessions} a
+            where a.user_id = ${users.id} and a.submitted_at is not null
+          )`,
           lastInboundAt: sql<Date | null>`(
             select max(c.created_at) from ${conversations} c
             where c.user_id = ${users.id} and c.direction = 'INBOUND'
@@ -1007,8 +1014,9 @@ export class ControlCenterService {
     const northStar = await this.northStar();
     const declaredAdherenceRate = await this.declaredAdherenceRate();
     const students = rows
-      .map(({ lastInboundAt, unansweredCheckinSentAt, renewalAt, ...student }) => ({
+      .map(({ lastInboundAt, unansweredCheckinSentAt, renewalAt, enrolledAt, ...student }) => ({
         ...student,
+        enrolledAt: enrolledAt?.toISOString() ?? null,
         churnRisk: assessChurnRisk({
           lastInboundAt: this.date(lastInboundAt),
           unansweredCheckinSentAt: this.date(unansweredCheckinSentAt),
@@ -1063,7 +1071,7 @@ export class ControlCenterService {
             and status in ('ACTIVE', 'PAST_DUE', 'CANCELED', 'EXPIRED')
           group by user_id
         ),
-        window as (
+        cohort_window as (
           select
             cohort.user_id,
             count(w.id)::int as total,
@@ -1084,7 +1092,7 @@ export class ControlCenterService {
           coalesce(sum(quick_reply), 0)::int as quick_reply,
           coalesce(sum(checkin), 0)::int as checkin,
           coalesce(sum(conversation), 0)::int as conversation
-        from window
+        from cohort_window
       `),
     );
     const cohortSize = this.number(row?.cohort_size);
@@ -1170,6 +1178,7 @@ export class ControlCenterService {
           status: users.status,
           requiresProfessionalReview: users.requiresProfessionalReview,
           subscriptionStatus: this.latestSubscriptionStatus(),
+          subscriptionPlan: this.latestSubscriptionPlan(),
           protocolStatus: this.latestProtocolStatus(),
           anamnesisStatus: sql<string | null>`(
             select a.status::text from ${anamnesisSessions} a
@@ -1484,6 +1493,9 @@ export class ControlCenterService {
       phoneNumber: row.phoneNumber,
       status: row.status,
       subscriptionStatus: row.subscriptionStatus,
+      subscriptionPlan: row.subscriptionPlan,
+      // Mesma semântica de `students()`: a matrícula é a PRIMEIRA anamnese enviada.
+      enrolledAt: firstSession?.submittedAt?.toISOString() ?? null,
       protocolStatus: row.protocolStatus,
       requiresProfessionalReview: row.requiresProfessionalReview,
       anamnesisStatus: row.anamnesisStatus,
@@ -2654,6 +2666,13 @@ export class ControlCenterService {
   private latestSubscriptionStatus() {
     return sql<string | null>`(
       select s.status::text from ${subscriptions} s
+      where s.user_id = ${users.id} order by s.created_at desc limit 1
+    )`;
+  }
+
+  private latestSubscriptionPlan() {
+    return sql<string | null>`(
+      select s.plan::text from ${subscriptions} s
       where s.user_id = ${users.id} order by s.created_at desc limit 1
     )`;
   }

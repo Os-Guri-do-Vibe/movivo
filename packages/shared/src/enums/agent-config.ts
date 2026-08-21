@@ -28,6 +28,16 @@ export const AgentToneDescriptor = {
 } as const;
 export type AgentToneDescriptor = (typeof AgentToneDescriptor)[keyof typeof AgentToneDescriptor];
 
+/** Como a agente age durante a conversa — distinto de como ela soa (tom de voz). */
+export const AgentPersonaTrait = {
+  ACOLHE_ANTES_DE_ORIENTAR: 'ACOLHE_ANTES_DE_ORIENTAR',
+  EXPLICA_O_PORQUE: 'EXPLICA_O_PORQUE',
+  UMA_PERGUNTA_POR_VEZ: 'UMA_PERGUNTA_POR_VEZ',
+  FOCA_NO_PROXIMO_PASSO: 'FOCA_NO_PROXIMO_PASSO',
+  CELEBRA_PROGRESSO: 'CELEBRA_PROGRESSO',
+} as const;
+export type AgentPersonaTrait = (typeof AgentPersonaTrait)[keyof typeof AgentPersonaTrait];
+
 export const AgentEmojiPolicy = {
   NENHUM: 'NENHUM',
   RARO: 'RARO',
@@ -35,12 +45,42 @@ export const AgentEmojiPolicy = {
 } as const;
 export type AgentEmojiPolicy = (typeof AgentEmojiPolicy)[keyof typeof AgentEmojiPolicy];
 
-/** Como a agente trata o aluno. `TU` existe para regionalização (Sul/Nordeste). */
-export const AgentTreatment = {
-  VOCE: 'VOCE',
-  TU: 'TU',
+/**
+ * Tamanho do bloco de resposta no WhatsApp.
+ *
+ * Substitui `maxResponseChars` (removido): aquele campo era só uma frase no prompt, sem
+ * nenhum ponto de código que a aplicasse — teto declarado, nunca imposto. Aqui o valor
+ * escolhido vira (a) instrução de prompt e (b) **teto determinístico pós-LLM**, aplicado
+ * na saída do worker antes da entrega. Token de saída custa ~4x o de entrada: um teto que
+ * ninguém aplica é custo aberto.
+ */
+export const AgentBlockSize = {
+  CURTO: 'CURTO',
+  MEDIO: 'MEDIO',
+  LIVRE: 'LIVRE',
 } as const;
-export type AgentTreatment = (typeof AgentTreatment)[keyof typeof AgentTreatment];
+export type AgentBlockSize = (typeof AgentBlockSize)[keyof typeof AgentBlockSize];
+
+/**
+ * Quanto destaque a agente pode usar. `UMA_PALAVRA` é o default: no WhatsApp o negrito é
+ * `*assim*` (asterisco simples) — pedir "negrito" sem fixar a sintaxe faz o modelo emitir
+ * `**assim**`, que aparece literal na tela do aluno.
+ */
+export const AgentBoldPolicy = {
+  NENHUM: 'NENHUM',
+  UMA_PALAVRA: 'UMA_PALAVRA',
+  MODERADO: 'MODERADO',
+} as const;
+export type AgentBoldPolicy = (typeof AgentBoldPolicy)[keyof typeof AgentBoldPolicy];
+
+/** Ciclo de vida de um tema proibido (`ai_forbidden_topics`). Tabela append-only. */
+export const ForbiddenTopicStatus = {
+  DRAFT: 'DRAFT',
+  PENDING_APPROVAL: 'PENDING_APPROVAL',
+  APPROVED: 'APPROVED',
+  RETIRED: 'RETIRED',
+} as const;
+export type ForbiddenTopicStatus = (typeof ForbiddenTopicStatus)[keyof typeof ForbiddenTopicStatus];
 
 /** Camada de configuração (Victor §modelo de 3 camadas) — dirige o cadeado na UI. */
 export const PromptLayer = {

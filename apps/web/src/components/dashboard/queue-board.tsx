@@ -6,6 +6,7 @@ import {
   Clock,
   ClipboardCheck,
   Eye,
+  type LucideIcon,
   Pencil,
   RefreshCw,
   ShieldAlert,
@@ -19,12 +20,53 @@ import { captureDashboardEvent, getQueue } from '@/lib/dashboard-api';
 import type { QueueItem, QueueResponse } from '@/lib/dashboard-types';
 import { cn } from '@/lib/utils';
 
+import {
+  CONTROL_H,
+  FieldDivider,
+  ICON_BUTTON,
+  StatusBadge,
+  type StatusTone,
+} from './control-center-table';
+import { SectorHeader } from './control-center-ui';
+
 const FALLBACK_INTERVAL_MS = 30_000;
-const LABELS = {
-  SAFETY: { label: 'Segurança · ação prioritária', icon: ShieldAlert },
-  ALERT: { label: 'Atenção', icon: AlertTriangle },
-  ROUTINE: { label: 'Revisão de rotina', icon: ClipboardCheck },
-} as const;
+
+/**
+ * Rótulo de severidade. `detail` é só o COMPLEMENTO da frase, nunca a frase inteira
+ * duplicada: o pill renderiza `label` (curto, cabe ao lado do título em 1280px) e
+ * compõe a forma longa — `title` no hover, `sr-only` no leitor de tela — a partir do
+ * par. Só `SAFETY` tem complemento; `ALERT` e `ROUTINE` já são rótulos completos.
+ *
+ * Anotação explícita, e não `satisfies` como no resto do arquivo: `satisfies` só
+ * VALIDA o literal, preservando o tipo inferido de cada entrada — e aí
+ * `LABELS[item.severity].detail` não compila, porque as entradas sem `detail` não
+ * têm a propriedade nem como opcional. A anotação é o que dá `detail?: string` às
+ * três chaves de uma vez, mantendo a exaustividade do `Record` sobre a severidade.
+ */
+const LABELS: Record<QueueItem['severity'], { label: string; detail?: string; icon: LucideIcon }> =
+  {
+    SAFETY: { label: 'Segurança', detail: 'ação prioritária', icon: ShieldAlert },
+    ALERT: { label: 'Atenção', icon: AlertTriangle },
+    ROUTINE: { label: 'Revisão de rotina', icon: ClipboardCheck },
+  };
+
+/**
+ * Severidade → tom do selo compartilhado (`control-center-table`). Só `ALERT` chega a
+ * renderizar hoje: `ROUTINE` é a severidade de todo protocolo (não diferencia nada) e
+ * `SAFETY` já é sinalizado pela faixa coral + ícone preenchido + título. As três
+ * entradas ficam pra que a exaustividade do `Record` seja checada pelo compilador.
+ */
+const SEVERITY_TONE = {
+  SAFETY: 'attention',
+  ALERT: 'neutral',
+  ROUTINE: 'quiet',
+} satisfies Record<QueueItem['severity'], StatusTone>;
+
+/**
+ * Status do item → tom do selo. Só `BLOCKED` (PAR-Q travado) é alerta real; qualquer
+ * outro valor que chegue aqui é estado neutro da fila, e cai no contorno discreto.
+ */
+const STATUS_TONE: Record<string, StatusTone> = { BLOCKED: 'attention' };
 
 /** Cada categoria da fila do profissional ordena só por idade — mais antigo primeiro. */
 export function sortQueue(items: QueueItem[]): QueueItem[] {
@@ -32,21 +74,21 @@ export function sortQueue(items: QueueItem[]): QueueItem[] {
 }
 
 /**
- * `PENDING_SIGNATURE` é o status de praticamente todo item desta fila (é o motivo
- * dele estar aqui) — exibi-lo é ruído, não informação. Outros valores (ex.: o
- * `BLOCKED` do PAR-Q) continuam aparecendo normalmente.
+ * `PENDING_SIGNATURE` é o status de praticamente todo protocolo desta fila (é o
+ * motivo dele estar aqui) — exibi-lo é ruído, não informação.
  *
- * Exportada (achado 2026-08-18): `DashboardService.item()` no backend sempre grava
- * `summary = status` — `queue-detail.tsx` reusa o mesmo filtro pro cabeçalho da tela de
- * revisão, que renderizava `item.summary` cru e mostrava "PENDING_SIGNATURE" como se
- * fosse uma descrição do protocolo.
+ * Exportada (achado 2026-08-18): `DashboardService.item()` no backend grava
+ * `summary = status` para PROTOCOL/CHECKIN/HANDOFF — `queue-detail.tsx` reusa o mesmo
+ * filtro pro cabeçalho da tela de revisão. PAR-Q é exceção desde 2026-08-20: ganhou um
+ * resumo humano próprio no backend (não é mais cópia de `status`), então o filtro aqui
+ * nunca chega a agir sobre ele — só existe pros outros três tipos.
  */
 export function meaningfulText(value: string): string {
   return value === 'PENDING_SIGNATURE' ? '' : value;
 }
 
 function iconLinkClass(): string {
-  return cn(buttonVariants({ variant: 'ghost', size: 'icon' }));
+  return cn(buttonVariants({ variant: 'ghost', size: 'icon' }), ICON_BUTTON);
 }
 
 /**
@@ -62,8 +104,8 @@ function formatAutoRelease(autoReleaseAt: string): string {
   return `Dispara automaticamente pro WhatsApp em ${when} se ninguém agir antes`;
 }
 
-function QueueCard({ item }: { item: QueueItem }) {
-  const { label, icon: Icon } = LABELS[item.severity];
+function QueueCard({ item, section }: { item: QueueItem; section: 'mandatory' | 'optional' }) {
+  const { label, detail, icon: Icon } = LABELS[item.severity];
   const detailHref = `/dashboard/fila/${item.kind.toLowerCase()}/${encodeURIComponent(item.id)}`;
   const status = meaningfulText(item.status);
   const summary = meaningfulText(item.summary);
@@ -82,9 +124,19 @@ function QueueCard({ item }: { item: QueueItem }) {
 
   return (
     <li
+      /*
+       * A faixa de acento é SEMPRE `border-l-4` — inclusive no card sem acento, onde
+       * ela fica na cor da borda normal. Antes só os acentuados engrossavam a borda, e
+       * como `border-coral border-l-4` tinge os quatro lados, o conteúdo do card
+       * acentuado nascia 3px deslocado em relação ao dos vizinhos.
+       */
       className={cn(
-        'rounded-xl border bg-card p-3 text-card-foreground shadow-sm sm:p-4',
-        item.severity === 'SAFETY' ? 'border-coral border-l-4' : 'border-border',
+        'rounded-xl border border-l-4 border-border bg-card p-4 text-card-foreground',
+        item.severity === 'SAFETY'
+          ? 'border-l-coral'
+          : section === 'optional'
+            ? 'border-l-verde-pulso'
+            : null,
       )}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -92,36 +144,63 @@ function QueueCard({ item }: { item: QueueItem }) {
           <span
             aria-hidden="true"
             className={cn(
-              'flex size-10 shrink-0 items-center justify-center rounded-full',
+              'flex size-9 shrink-0 items-center justify-center rounded-full',
               item.severity === 'SAFETY'
                 ? 'bg-destructive text-destructive-foreground'
                 : item.severity === 'ALERT'
                   ? 'bg-secondary text-secondary-foreground'
-                  : 'bg-accent text-accent-foreground',
+                  : section === 'optional'
+                    ? // Mesma lógica da faixa lateral (`border-l-verde-pulso`): a seção
+                      // "Revisão Humana Opcional" é identificada por `section`, não por
+                      // severidade. `text-petroleo` é o par de contraste da marca sobre
+                      // verde-pulso (= `--primary` / `--primary-foreground` em
+                      // `globals.css`) — branco aqui não passaria no 3:1 de WCAG 1.4.11.
+                      'bg-verde-pulso text-petroleo'
+                    : // Fora da seção opcional o item de rotina segue com contorno, não
+                      // preenchimento: não há nada a sinalizar.
+                      'border border-border text-muted-foreground',
             )}
           >
             <Icon aria-hidden="true" className="size-5" />
           </span>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-h3 font-semibold">{item.title}</h3>
-              {item.severity !== 'ROUTINE' ? (
-                <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-semibold text-secondary-foreground">
+              <h3 className="text-body font-semibold">{item.title}</h3>
+              {item.severity !== 'ROUTINE' && item.severity !== 'SAFETY' ? (
+                /*
+                 * Pill curto + frase completa nos dois canais de leitura: `title` para
+                 * mouse, `sr-only` para leitor de tela. O `·` é separador VISUAL e fica
+                 * fora do texto falado — a vírgula entra no lugar dele para dar a pausa
+                 * prosódica certa. O `sr-only` é `position:absolute`, então não
+                 * interfere na altura de 24px do pill.
+                 *
+                 * `SAFETY` está fora desde 2026-08-20: o card de PAR-Q bloqueado já diz
+                 * "PAR-Q para Revisão: <aluno>" no título e carrega a faixa
+                 * `border-l-coral` + o ícone `ShieldAlert` em `bg-destructive`. O pill
+                 * "Segurança" era o quarto sinal redundante da mesma coisa. `LABELS` e
+                 * `SEVERITY_TONE` mantêm as entradas de SAFETY — o par label/detail
+                 * segue existindo, só não é mais renderizado aqui.
+                 */
+                <StatusBadge
+                  tone={SEVERITY_TONE[item.severity]}
+                  variant="solid"
+                  title={detail ? `${label} · ${detail}` : undefined}
+                >
                   {label}
-                </span>
+                  {detail ? <span className="sr-only">, {detail}</span> : null}
+                </StatusBadge>
               ) : null}
             </div>
             {summary ? (
-              <p className="mt-1 max-w-3xl text-body text-muted-foreground">{summary}</p>
+              <p className="mt-1.5 max-w-3xl text-label text-muted-foreground">{summary}</p>
             ) : null}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {status ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 font-mono text-xs text-muted-foreground">
-              <span aria-hidden="true" className="size-1.5 rounded-full bg-verde-pulso" />
+          {status && section !== 'mandatory' ? (
+            <StatusBadge tone={STATUS_TONE[status] ?? 'quiet'} variant="solid">
               {status}
-            </span>
+            </StatusBadge>
           ) : null}
           {showEye ? (
             <button
@@ -147,21 +226,29 @@ function QueueCard({ item }: { item: QueueItem }) {
             <Pencil aria-hidden="true" />
           </Link>
           {item.autoReleaseAt ? (
-            <span className="group relative inline-flex">
-              <button
-                type="button"
-                className={cn(iconLinkClass(), 'cursor-default hover:bg-transparent')}
-                aria-label={formatAutoRelease(item.autoReleaseAt)}
-              >
-                <Clock aria-hidden="true" />
-              </button>
-              <span
-                role="tooltip"
-                className="pointer-events-none absolute bottom-full right-0 z-10 mb-2 w-max max-w-64 rounded-lg bg-popover px-3 py-1.5 text-xs text-popover-foreground opacity-0 shadow-md ring-1 ring-border transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
-              >
-                {formatAutoRelease(item.autoReleaseAt)}
+            <>
+              {/* O relógio não é uma terceira ação: é informação. A hairline separa ele
+                  do par olho/lápis, e o cinza o demove do peso de um botão de ação. */}
+              <FieldDivider />
+              <span className="group relative inline-flex">
+                <button
+                  type="button"
+                  className={cn(
+                    iconLinkClass(),
+                    'cursor-default text-muted-foreground hover:bg-transparent',
+                  )}
+                  aria-label={formatAutoRelease(item.autoReleaseAt)}
+                >
+                  <Clock aria-hidden="true" />
+                </button>
+                <span
+                  role="tooltip"
+                  className="pointer-events-none absolute right-0 bottom-full z-10 mb-2 w-max max-w-64 rounded-md border border-border bg-popover px-3 py-1.5 text-xs text-popover-foreground opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+                >
+                  {formatAutoRelease(item.autoReleaseAt)}
+                </span>
               </span>
-            </span>
+            </>
           ) : null}
         </div>
       </div>
@@ -263,8 +350,11 @@ export function QueueBoard() {
   if (!data && !error) {
     return (
       <div role="status" aria-label="Carregando fila" className="space-y-3">
+        {/* A barra do topo reserva o lugar do título da seção — sem ela o conteúdo
+            real chega e empurra a lista pra baixo. */}
+        <div className="h-6 w-52 animate-pulse rounded-md bg-muted" />
         {[0, 1, 2].map((key) => (
-          <div key={key} className="h-32 animate-pulse rounded-xl border border-border bg-card" />
+          <div key={key} className="h-24 animate-pulse rounded-xl bg-muted" />
         ))}
       </div>
     );
@@ -273,9 +363,15 @@ export function QueueBoard() {
   if (!data && error) {
     return (
       <section role="alert" className="rounded-xl border border-coral bg-card p-6">
-        <h2 className="text-h3 font-semibold">A fila não carregou</h2>
+        <AlertTriangle aria-hidden="true" className="size-6" />
+        <h2 className="mt-3 text-h2 font-bold">A fila não carregou</h2>
         <p className="mt-2 text-body text-muted-foreground">{error}</p>
-        <Button className="mt-4" type="button" onClick={() => void load(true)}>
+        <Button
+          className={cn('mt-4', CONTROL_H)}
+          variant="outline"
+          type="button"
+          onClick={() => void load(true)}
+        >
           <RefreshCw aria-hidden="true" /> Tentar novamente
         </Button>
       </section>
@@ -283,19 +379,14 @@ export function QueueBoard() {
   }
 
   return (
-    <section aria-labelledby="queue-title">
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 id="queue-title" className="text-h1 font-bold">
-              Fila de supervisão
-            </h1>
-          </div>
-        </div>
-        <Button type="button" variant="outline" onClick={() => void load()} disabled={refreshing}>
-          <RefreshCw aria-hidden="true" className={refreshing ? 'animate-spin' : undefined} />
-          {refreshing ? 'Atualizando…' : 'Atualizar fila'}
-        </Button>
+    <section aria-label="Fila de supervisão">
+      <div className="mb-6">
+        <SectorHeader
+          title="Fila de supervisão"
+          refreshLabel="Atualizar fila"
+          refreshing={refreshing}
+          onRefresh={() => void load()}
+        />
       </div>
 
       {/* Status de conexão em tempo real: só para leitor de tela — a pedido do usuário,
@@ -311,24 +402,21 @@ export function QueueBoard() {
         {announcement}
       </div>
       {error ? (
-        <p
-          role="alert"
-          className="mb-4 rounded-lg bg-destructive p-3 text-label text-destructive-foreground"
-        >
+        <p role="alert" className="mb-4 rounded-lg border border-coral bg-card p-3 text-label">
           A última atualização falhou: {error}
         </p>
       ) : null}
 
       {total === 0 ? (
-        <div className="rounded-xl border border-dashed border-input bg-card px-6 py-12 text-center">
+        <div className="rounded-xl border border-dashed border-border bg-card p-8 text-center">
           <CheckCircle2 aria-hidden="true" className="mx-auto size-10 text-muted-foreground" />
           <h2 className="mt-4 text-h3 font-semibold">Fila em dia</h2>
-          <p className="mt-2 text-body text-muted-foreground">
+          <p className="mt-2 text-label text-muted-foreground">
             Não há protocolos nem liberações PAR-Q pendentes agora.
           </p>
         </div>
       ) : (
-        <div className="space-y-8">
+        <div className="space-y-10">
           <QueueSection id="mandatory" title="Revisão Humana Obrigatória" items={mandatory} />
           <QueueSection id="optional" title="Revisão Humana Opcional" items={optional} />
         </div>
@@ -337,21 +425,39 @@ export function QueueBoard() {
   );
 }
 
-function QueueSection({ id, title, items }: { id: string; title: string; items: QueueItem[] }) {
+function QueueSection({
+  id,
+  title,
+  items,
+}: {
+  id: 'mandatory' | 'optional';
+  title: string;
+  items: QueueItem[];
+}) {
   const headingId = `queue-section-${id}`;
   return (
-    <section aria-labelledby={headingId} className="rounded-xl border border-border p-4 sm:p-6">
-      <h2 id={headingId} className="mb-3 text-h2 font-bold">
-        {title}
-      </h2>
+    /*
+     * Sem caixa: a seção é um agrupamento TIPOGRÁFICO (título + espaço), não um
+     * cartão. A caixa daqui embrulhava cards que já são caixas — caixa dentro de
+     * caixa. A estrutura de acessibilidade (`aria-labelledby` + `h2`) é a mesma.
+     */
+    <section aria-labelledby={headingId}>
+      <div className="mb-3 flex items-center gap-2">
+        <h2 id={headingId} className="text-h3 font-semibold">
+          {title}
+        </h2>
+        <span className="inline-flex h-6 items-center rounded-full border border-border px-2 font-mono text-xs text-muted-foreground tabular-nums">
+          {items.length}
+        </span>
+      </div>
       {items.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-input bg-card px-4 py-6 text-center text-body text-muted-foreground">
+        <p className="rounded-xl border border-dashed border-border bg-card px-4 py-8 text-center text-label text-muted-foreground">
           Nada aqui agora.
         </p>
       ) : (
         <ol className="space-y-3" aria-label={title}>
           {items.map((item) => (
-            <QueueCard key={`${item.kind}:${item.id}`} item={item} />
+            <QueueCard key={`${item.kind}:${item.id}`} item={item} section={id} />
           ))}
         </ol>
       )}

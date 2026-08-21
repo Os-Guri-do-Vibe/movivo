@@ -274,6 +274,44 @@ describe('LlmRouter.complete', () => {
     expect(seen?.messages[0]?.content).not.toContain('+5511999998888');
   });
 
+  it('audita somente hashes e contagens, sem duplicar prompt ou dado de saúde', async () => {
+    const primary = new FakeProvider('OPENAI_GPT41', 'gpt-4.1', ok('gpt-4.1'));
+    const { router, aiJobs } = make([primary]);
+    await router.complete(
+      request({
+        system: 'regra operacional secreta',
+        messages: [{ role: 'user', content: 'dor persistente no joelho' }],
+      }),
+    );
+
+    const snapshot = String(
+      (aiJobs.record as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.inputSnapshot,
+    );
+    expect(snapshot).not.toContain('regra operacional secreta');
+    expect(snapshot).not.toContain('dor persistente');
+    expect(JSON.parse(snapshot)).toMatchObject({
+      version: 2,
+      systemSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      messagesSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      messageCount: 1,
+    });
+  });
+
+  it('persiste somente código de erro, sem detalhes retornados pelo provedor', async () => {
+    const provider = new FakeProvider('OPENAI_GPT41', 'gpt-4.1', () =>
+      Promise.reject(
+        new LLMProviderError('CLIENT', 'OPENAI_GPT41', 'conteúdo sensível devolvido no erro'),
+      ),
+    );
+    const { router, aiJobs } = make([provider]);
+
+    await expect(router.complete(request())).rejects.toBeInstanceOf(LLMProviderError);
+    expect(aiJobs.record).toHaveBeenCalledWith(
+      USER_ID,
+      expect.objectContaining({ errorMessage: 'LLM_PROVIDER_CLIENT' }),
+    );
+  });
+
   it('abre o breaker após 5 falhas e pula o primário na 6ª chamada', async () => {
     const primary = new FakeProvider('OPENAI_GPT41', 'gpt-4.1', () =>
       Promise.reject(new LLMProviderError('SERVER', 'OPENAI_GPT41', '500')),

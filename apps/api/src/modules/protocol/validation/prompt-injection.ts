@@ -13,6 +13,7 @@
  * A GARANTIA de que a instrução embutida não vira comando é estrutural (delimitador +
  * neutralização), não confiança no LLM.
  */
+import { canonicalizeSecurityText } from '../../../core/agent-config/text-normalize';
 import { INJECTION_PATTERNS, SYSTEM_PROMPT_SENTINELS } from './validation-rules';
 
 const OPEN = '<mensagem_usuario>';
@@ -20,7 +21,8 @@ const CLOSE = '</mensagem_usuario>';
 
 /** `true` se o texto contém um padrão de injeção conhecido. */
 export function detectInjection(text: string): boolean {
-  return INJECTION_PATTERNS.some((re) => re.test(text));
+  const canonical = canonicalizeSecurityText(text);
+  return INJECTION_PATTERNS.some((re) => re.test(canonical));
 }
 
 /**
@@ -29,7 +31,7 @@ export function detectInjection(text: string): boolean {
  * marcador visível — nunca apaga em silêncio, para o comportamento não mudar às escondidas).
  */
 export function neutralizeUserInput(text: string): string {
-  let out = text.replace(/<\/?mensagem_usuario>/gi, '[removido]');
+  let out = canonicalizeSecurityText(text).replace(/<\/?mensagem_usuario>/gi, '[removido]');
   for (const re of INJECTION_PATTERNS) {
     // INJECTION_PATTERNS são `i` (sem `g`); adicionamos `g` para trocar todas as ocorrências.
     const global = new RegExp(re.source, `${re.flags}g`);
@@ -45,5 +47,8 @@ export function wrapUserMessage(text: string): string {
 
 /** `true` se a SAÍDA contém uma sentinela do system prompt (vazamento). */
 export function containsPromptLeak(text: string): boolean {
-  return SYSTEM_PROMPT_SENTINELS.some((s) => text.includes(s));
+  const canonical = canonicalizeSecurityText(text).toLocaleLowerCase('pt-BR');
+  return SYSTEM_PROMPT_SENTINELS.some((sentinel) =>
+    canonical.includes(canonicalizeSecurityText(sentinel).toLocaleLowerCase('pt-BR')),
+  );
 }

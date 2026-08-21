@@ -8,11 +8,20 @@ import { Global, Module } from '@nestjs/common';
 import { AgentConfigRepository } from './agent-config.repository';
 import { AgentPersonaService } from './agent-persona.service';
 import { FaqService } from './faq.service';
+import { ForbiddenTopicsService } from './forbidden-topics.service';
 import { L1GuardrailService } from './l1-guardrail.service';
+
+const PROVIDERS = [
+  AgentConfigRepository,
+  AgentPersonaService,
+  FaqService,
+  ForbiddenTopicsService,
+  L1GuardrailService,
+];
 
 @Global()
 @Module({
-  providers: [AgentConfigRepository, AgentPersonaService, FaqService, L1GuardrailService],
-  exports: [AgentConfigRepository, AgentPersonaService, FaqService, L1GuardrailService],
+  providers: PROVIDERS,
+  exports: PROVIDERS,
 })
 export class AgentConfigModule {}

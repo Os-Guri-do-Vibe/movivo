@@ -68,6 +68,41 @@ case "${1:-help}" in
       'redis-cli --no-auth-warning -a "$(cat /run/secrets/redis_password)" -p 26379 sentinel master movivo-master'
     ;;
 
+  # Contadores operacionais sem payload, título de documento ou PII. Os nomes das
+  # chaves seguem o prefixo central do BullMQ; este comando é diagnóstico local,
+  # não substitui as métricas/alertas definidos no runbook de produção.
+  knowledge-status)
+    key_prefix="${REDIS_KEY_PREFIX:-}"
+    if [ -z "$key_prefix" ] && [ -f .env ]; then
+      key_prefix="$(awk -F= '$1 == "REDIS_KEY_PREFIX" { value=$2 } END { print value }' .env)"
+    fi
+    key_prefix="${key_prefix:-movivo}:bull"
+    exec docker compose exec -T -e MOVIVO_KB_QUEUE_KEY="$key_prefix:knowledge-processing" \
+      -e MOVIVO_DLQ_KEY="$key_prefix:dead-letter" redis-master sh -c '
+        set -eu
+        redis() {
+          redis-cli --no-auth-warning -a "$(cat /run/secrets/redis_password)" --raw "$@"
+        }
+        count_key() {
+          kind="$(redis TYPE "$1")"
+          case "$kind" in
+            list) redis LLEN "$1" ;;
+            zset) redis ZCARD "$1" ;;
+            set) redis SCARD "$1" ;;
+            none) printf "0\n" ;;
+            *) printf "n/a\n" ;;
+          esac
+        }
+        printf "queue\tstate\tcount\n"
+        for state in wait active delayed failed paused; do
+          printf "knowledge-processing\t%s\t%s\n" "$state" "$(count_key "$MOVIVO_KB_QUEUE_KEY:$state")"
+        done
+        for state in wait active delayed failed; do
+          printf "dead-letter\t%s\t%s\n" "$state" "$(count_key "$MOVIVO_DLQ_KEY:$state")"
+        done
+      '
+    ;;
+
   *)
     cat <<'EOF'
 MOVIVO — scripts/infra.sh
@@ -78,6 +113,7 @@ MOVIVO — scripts/infra.sh
   stats        SHOW STATS no console admin do PgBouncer
   redis-cli    redis-cli autenticado no master
   sentinel     estado do master conforme o Sentinel
+  knowledge-status  contadores (sem payload) da ingestão e DLQ
 
 Ciclo de vida do stack: pnpm run infra:up | infra:down | infra:reset | infra:verify
 EOF

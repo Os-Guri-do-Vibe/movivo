@@ -429,18 +429,40 @@ describe('DashboardService leituras operacionais', () => {
           reviewUrgency: 'OPTIONAL',
         },
       ],
-      [{ id: '55555555-5555-4555-8555-555555555555', createdAt: oldest }],
+      [
+        {
+          id: '55555555-5555-4555-8555-555555555555',
+          createdAt: oldest,
+          name: 'Carla Teste',
+        },
+      ],
     ]);
     const result = await service.queue(actor);
     expect(result.counts).toEqual({ mandatory: 2, optional: 1, total: 3 });
     // mandatory: PAR-Q bloqueado (mais antigo) + o protocolo MANDATORY (mais novo) —
     // mesma categoria "exige ação humana, nunca sai sozinho", ordenado por idade.
+    // Achado 2026-08-20: título do PAR-Q ganhou o nome do titular, mesmo padrão de
+    // `protocolTitle` — mas sem a palavra "Protocolo", que ainda não existe nesse
+    // estado (é o gate que impede o protocolo de ser gerado).
     expect(result.mandatory.map((item) => ({ kind: item.kind, title: item.title }))).toEqual([
-      { kind: 'PARQ', title: 'PAR-Q aguarda decisao humana' },
+      { kind: 'PARQ', title: 'PAR-Q para Revisão: Carla Teste' },
       { kind: 'PROTOCOL', title: 'Protocolo para Revisão: Maria Teste' },
     ]);
     expect(result.mandatory.every((item) => item.autoReleaseAt === null)).toBe(true);
     expect(result.mandatory[1]?.severity).toBe('ALERT');
+    // Achado 2026-08-20: `item()` copiava `status` em `summary`, então o enum cru
+    // "BLOCKED" vazava como legenda visível do card de PAR-Q. `status` segue sendo o
+    // enum (o tom do badge no front depende dele); só `summary` virou texto humano.
+    expect(result.mandatory[0]).toMatchObject({
+      status: 'BLOCKED',
+      summary: 'Aguardando liberacao do profissional CREF responsavel.',
+    });
+    // PROTOCOL/CHECKIN/HANDOFF continuam com `summary === status` (fora do escopo da
+    // correção) — o front já filtra esse ruído via `meaningfulText`.
+    expect(result.mandatory[1]).toMatchObject({
+      status: 'PENDING_SIGNATURE',
+      summary: 'PENDING_SIGNATURE',
+    });
     // optional: só o protocolo OPTIONAL, e ele sempre carrega prazo.
     expect(result.optional.map((item) => item.title)).toEqual([
       'Protocolo para Revisão: Bruno Teste',
@@ -759,6 +781,12 @@ describe('DashboardService leituras operacionais', () => {
       ],
     );
     await expect(service.detail(actor, 'PARQ', RESOURCE_ID)).resolves.toMatchObject({
+      // Mesmo resumo humano da fila; `status` cai no fallback 'BLOCKED' porque `state`
+      // veio null nesta fixture (achado 2026-08-20 — ver teste da fila).
+      item: {
+        status: 'BLOCKED',
+        summary: 'Aguardando liberacao do profissional CREF responsavel.',
+      },
       context: { positiveAnswers: 1 },
       parq: { flags: ['q1'], state: 'BLOQUEADO_AGUARDANDO_CLEARANCE' },
     });

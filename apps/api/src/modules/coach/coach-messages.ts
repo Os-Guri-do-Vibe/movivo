@@ -14,6 +14,16 @@ export const STANDARD_BLOCK_RESPONSE =
   'Essa é uma questão importante e prefiro não arriscar uma resposta imprecisa. Vou registrar ' +
   'para o profissional de Educação Física responsável te orientar com segurança. 💙';
 
+/** Tema configurado como proibido: recusa determinística, sem revelar gatilhos internos. */
+export const FORBIDDEN_TOPIC_RESPONSE =
+  'Esse assunto não é tratado por aqui. Posso continuar te ajudando com seu treino, execução ' +
+  'dos exercícios e acompanhamento dentro da orientação do profissional responsável.';
+
+/** Dúvida técnica sem fonte suficiente: abstém e encaminha, sem completar lacuna no LLM. */
+export const TECHNICAL_NO_EVIDENCE_MESSAGE =
+  'Não encontrei uma referência suficiente na Base de Conhecimento para responder isso com ' +
+  'segurança. Vou registrar a dúvida para o profissional de Educação Física responsável.';
+
 /** Substituição pedida sem substituto seguro na base: honestidade + revisão humana. */
 export const SUBSTITUTION_FALLBACK_MESSAGE =
   'Quero te sugerir uma troca segura para esse exercício, mas prefiro confirmar com o ' +

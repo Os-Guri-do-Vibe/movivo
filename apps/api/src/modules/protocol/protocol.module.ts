@@ -23,6 +23,7 @@ import { ProtocolController } from './protocol.controller';
 import { ProtocolAutoReleaseWorker } from './protocol-auto-release.worker';
 import { ProtocolGenerationWorker } from './protocol-generation.worker';
 import { ProtocolGeneratorService } from './protocol-generator.service';
+import { MethodologyProvider } from './methodology-provider.service';
 import { ProtocolRepository } from './protocol.repository';
 import { ValidationService } from './validation/validation.service';
 
@@ -36,11 +37,12 @@ import { ValidationService } from './validation/validation.service';
   controllers: [ProtocolController],
   providers: [
     ProtocolGeneratorService,
+    MethodologyProvider,
     ValidationService,
     ProtocolRepository,
     ProtocolGenerationWorker,
     ProtocolAutoReleaseWorker,
   ],
-  exports: [ProtocolGeneratorService, ValidationService],
+  exports: [ProtocolGeneratorService, ValidationService, MethodologyProvider],
 })
 export class ProtocolModule {}

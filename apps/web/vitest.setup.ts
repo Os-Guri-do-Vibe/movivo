@@ -59,6 +59,17 @@ globalThis.ResizeObserver ??= class {
   disconnect() {}
 };
 
+/*
+ * Lacunas do jsdom que o Radix Select (`FilterSelect` do Control Center) exige para
+ * montar: o gatilho captura o ponteiro ao abrir e o menu rola até o item marcado.
+ * Nenhuma delas tem efeito observável em teste — sem layout real não há rolagem nem
+ * captura de ponteiro —, então o stub inerte basta.
+ */
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.setPointerCapture ??= () => {};
+Element.prototype.releasePointerCapture ??= () => {};
+Element.prototype.scrollIntoView ??= () => {};
+
 afterEach(() => {
   cleanup();
 });

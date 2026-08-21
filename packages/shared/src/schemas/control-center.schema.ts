@@ -346,9 +346,14 @@ export const controlCenterStudentSummarySchema = z.object({
   phoneNumber: z.string(),
   status: z.string(),
   subscriptionStatus: nullableText,
+  /** Plano por período (`07-relatorio-eduardo.md`) — `null` durante o trial ou sem assinatura. */
+  subscriptionPlan: nullableText,
   protocolStatus: nullableText,
+  /** Data que finalizou a matrícula: quando a primeira anamnese foi enviada. */
+  enrolledAt: z.iso.datetime().nullable(),
   churnRisk: churnRiskSchema,
 });
+export type ControlCenterStudentSummary = z.infer<typeof controlCenterStudentSummarySchema>;
 
 /**
  * North Star do produto (US-8.1 / TASK-8.1.5): treinos concluídos por usuário pago nos

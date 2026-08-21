@@ -26,6 +26,26 @@ export interface RerankerPort {
 
 export const RERANKER_PORT = Symbol('MOVIVO_RERANKER_PORT');
 
+/**
+ * Runtime seguro enquanto o cross-encoder self-hosted não está disponível: preserva a
+ * relevância semântica real calculada pelo pgvector, sem substituir o score por heurística
+ * lexical. O threshold continua centralizado na configuração do RAG.
+ */
+@Injectable()
+export class DenseScoreReranker implements RerankerPort {
+  rerank(_query: string, candidates: RerankCandidate[], topK: number): Promise<RerankResult[]> {
+    return Promise.resolve(
+      candidates
+        .map((candidate) => ({
+          ...candidate,
+          score: Math.max(0, Math.min(1, candidate.denseScore)),
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, topK),
+    );
+  }
+}
+
 function terms(text: string): Set<string> {
   return new Set(
     text

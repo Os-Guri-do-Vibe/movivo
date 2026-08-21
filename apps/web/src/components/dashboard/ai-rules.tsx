@@ -19,7 +19,13 @@ import { getInviolableRules } from '@/lib/control-center-api';
 import { ResourceState, SectorHeader, useControlCenterResource } from './control-center-ui';
 import { AiGuardrailsPanel } from './ai-guardrails';
 
-export function AiRulesDashboard({ canWrite = false }: { canWrite?: boolean }) {
+export function AiRulesDashboard({
+  canWrite = false,
+  showHeader = true,
+}: {
+  canWrite?: boolean;
+  showHeader?: boolean;
+}) {
   const load = useCallback((signal?: AbortSignal) => getInviolableRules(signal), []);
   const { data, error, forbidden, loading, refresh } = useControlCenterResource(load);
 
@@ -35,24 +41,35 @@ export function AiRulesDashboard({ canWrite = false }: { canWrite?: boolean }) {
   }
 
   const locked = data.data.blocks.filter((block) => !block.editable);
+  const LockedRuleHeading = showHeader ? 'h2' : 'h3';
 
   return (
     <div>
-      <SectorHeader
-        title="Regras invioláveis"
-        description="O que a agente nunca faz, e por quê. Estas regras estão travadas em código e não são editáveis por nenhum painel."
-        meta={data.meta}
-        refreshing={loading}
-        onRefresh={() => void refresh()}
-      />
+      {showHeader ? (
+        <SectorHeader
+          title="Regras invioláveis"
+          description="O que a agente nunca faz, e por quê. Estas regras estão travadas em código e não são editáveis por nenhum painel."
+          meta={data.meta}
+          refreshing={loading}
+          onRefresh={() => void refresh()}
+        />
+      ) : (
+        <div>
+          <h2 className="text-h2 font-bold">Regras de segurança</h2>
+          <p className="mt-2 max-w-3xl text-label text-muted-foreground">
+            As barreiras L0 são travadas em código. Guardrails L1 apenas sinalizam conversas para
+            revisão humana e nunca reduzem a proteção superior.
+          </p>
+        </div>
+      )}
 
       <ul className="mt-6 grid gap-4">
         {locked.map((block) => (
           <li key={block.id} className="rounded-xl border border-border bg-card p-5">
-            <h2 className="flex items-center gap-2 text-h2 font-bold">
+            <LockedRuleHeading className="flex items-center gap-2 text-h2 font-bold">
               <Lock aria-label="Travado em código" className="size-5 shrink-0" />
               {block.title}
-            </h2>
+            </LockedRuleHeading>
             <p className="mt-2 text-label text-muted-foreground">{block.rationale}</p>
             <h3 className="mt-4 text-label font-semibold">Texto exato que a IA recebe</h3>
             <pre className="mt-2 overflow-auto rounded-lg bg-secondary p-4 font-mono text-xs whitespace-pre-wrap">

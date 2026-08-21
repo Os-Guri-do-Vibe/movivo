@@ -46,6 +46,9 @@ export interface PersistProtocolInput {
   generatedBy: string;
   modelVersion: string | null;
   promptVersion: string;
+  knowledgeSources?: unknown;
+  methodologyVersionId?: string | null;
+  methodologySha256?: string | null;
   /** `AUTO_APPROVED` assina em nível de metodologia (RT); demais nascem sem assinatura. */
   signed: boolean;
 }
@@ -145,6 +148,9 @@ export class ProtocolRepository {
             generatedBy: input.generatedBy,
             modelVersion: input.modelVersion,
             promptVersion: input.promptVersion,
+            knowledgeSources: input.knowledgeSources ?? [],
+            methodologyVersionId: input.methodologyVersionId ?? null,
+            methodologySha256: input.methodologySha256 ?? null,
           })
           .returning({ id: protocols.id });
         if (!proto) throw new Error('persist: INSERT de protocols não retornou id.');
@@ -157,6 +163,9 @@ export class ProtocolRepository {
           content: input.content,
           changeReason: 'geração inicial (US-2.4)',
           generatedBy: input.generatedBy,
+          knowledgeSources: input.knowledgeSources ?? [],
+          methodologyVersionId: input.methodologyVersionId ?? null,
+          methodologySha256: input.methodologySha256 ?? null,
           signatureHash: hash,
           signedAt,
         });

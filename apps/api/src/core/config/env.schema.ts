@@ -244,6 +244,19 @@ export const envSchema = z
     /** Candidatos da busca densa antes do rerank (retrieve 20 → rerank → top-K). */
     RAG_CANDIDATES: z.coerce.number().int().min(1).max(100).default(20),
 
+    // -------------------------- Base de conhecimento (formatos complexos fail-closed)
+    KNOWLEDGE_COMPLEX_FORMATS_ENABLED: envBoolean.default(false),
+    KNOWLEDGE_ALLOWED_MIME_TYPES: csv('KNOWLEDGE_ALLOWED_MIME_TYPES').default([
+      'text/plain',
+      'text/markdown',
+    ]),
+    KNOWLEDGE_UPLOAD_MAX_BYTES: z.coerce
+      .number()
+      .int()
+      .min(1_024)
+      .max(10 * 1024 * 1024)
+      .default(512 * 1024),
+
     // -------------------------------------------- Pagamento (US-4.1)
     /**
      * Gateway ativo. `MOCK` (default) roda em dev/CI sem conta real; `STRIPE`/`ASAAS` usam o
@@ -292,6 +305,34 @@ export const envSchema = z
         code: 'custom',
         path: ['API_CORS_ORIGINS'],
         message: 'CORS com "*" é proibido. Liste as origens explicitamente (Sato §9).',
+      });
+    }
+
+    // Gate operacional: parsers isolados/AV/CDR ainda não existem. Nenhuma flag pode
+    // transformar essa ausência em suporte inseguro a PDF/DOCX/XLSX/imagem.
+    if (config.KNOWLEDGE_COMPLEX_FORMATS_ENABLED) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['KNOWLEDGE_COMPLEX_FORMATS_ENABLED'],
+        message: 'deve permanecer false até existir parser isolado + AV/CDR homologado',
+      });
+    }
+    const safeKnowledgeMimes = new Set(['text/plain', 'text/markdown']);
+    const unsupportedKnowledgeMimes = config.KNOWLEDGE_ALLOWED_MIME_TYPES.filter(
+      (mime) => !safeKnowledgeMimes.has(mime),
+    );
+    if (unsupportedKnowledgeMimes.length > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['KNOWLEDGE_ALLOWED_MIME_TYPES'],
+        message: `formatos sem parser seguro: ${unsupportedKnowledgeMimes.join(', ')}`,
+      });
+    }
+    if (config.KNOWLEDGE_UPLOAD_MAX_BYTES > 512 * 1024) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['KNOWLEDGE_UPLOAD_MAX_BYTES'],
+        message: 'não pode exceder 524288 enquanto blobs permanecem no Postgres',
       });
     }
   });

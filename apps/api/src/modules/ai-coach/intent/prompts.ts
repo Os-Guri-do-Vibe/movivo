@@ -22,12 +22,15 @@
  * lista que a UI do painel (US-7.7) exibe, com cadeado no que é L0.
  */
 import {
+  buildForbiddenTopicsBlock,
+  buildFormattingBlock,
   buildPersonaBlock,
   type AgentPersona,
   DEFAULT_AGENT_PERSONA,
   PromptLayer,
 } from '@movivo/shared';
 
+import { UNTRUSTED_CONTEXT_POLICY } from '../context/untrusted-context';
 import type { Intent } from './intent.types';
 
 export const PROMPT_VERSION = 'coach-prompts-2026-08-v3';
@@ -41,7 +44,7 @@ export { DEFAULT_AGENT_PERSONA };
  * `@movivo/shared` para que o preview do painel (US-7.7) use exatamente o mesmo template
  * do prompt real. Reexportado aqui porque este continua sendo o módulo do prompt.
  */
-export { buildPersonaBlock };
+export { buildForbiddenTopicsBlock, buildFormattingBlock, buildPersonaBlock };
 
 /**
  * **L0 — perímetro de escopo.** Constante em código nesta fase (Sprint 7). É o bloco que
@@ -89,11 +92,37 @@ export const PROMPT_BLOCKS = [
     title: 'Identidade e jeito de falar',
     editable: true,
     rationale:
-      'Define o nome da agente, como ela se apresenta, o tom de voz, o uso de emoji, o ' +
-      'tratamento ("você"/"tu") e o tamanho máximo da resposta. É editável pelo painel porque ' +
-      'muda apenas a forma da conversa, nunca o conteúdo técnico nem o que ela pode fazer — e ' +
-      'porque cada opção é escolhida de uma lista fechada, o que impede que um texto solto ' +
-      'vire instrução para a IA.',
+      'Define o nome da agente, como ela se apresenta, o tom de voz e o uso de emoji. É ' +
+      'editável pelo painel porque muda apenas a forma da conversa, nunca o conteúdo técnico ' +
+      'nem o que ela pode fazer — e porque cada opção é escolhida de uma lista fechada, o que ' +
+      'impede que um texto solto vire instrução para a IA. O que ela diz ao passar o caso para ' +
+      'o profissional também é configurável, mas a menção ao CREF é fixa em código e sempre ' +
+      'acompanha a mensagem.',
+  },
+  {
+    id: 'FORMATTING',
+    layer: PromptLayer.L2,
+    title: 'Formato da mensagem no WhatsApp',
+    editable: true,
+    rationale:
+      'Define o tamanho do bloco de resposta, se a agente pode usar listas e quanto destaque ' +
+      'ela pode dar. É editável porque muda só a apresentação, e vale a pena mexer: mensagem ' +
+      'curta é mais lida no WhatsApp e custa menos. Diferente do antigo "tamanho máximo da ' +
+      'resposta", que era só um pedido no texto do prompt, este limite é aplicado de verdade ' +
+      'na resposta antes do envio — se a IA escrever demais, o excesso é cortado.',
+  },
+  {
+    id: 'FORBIDDEN_TOPICS',
+    layer: PromptLayer.L2,
+    title: 'Temas que a agente não discute',
+    editable: true,
+    rationale:
+      'Lista os assuntos que a agente se recusa a tratar, somados ao perímetro travado ' +
+      'abaixo. Só os rótulos aparecem aqui: as palavras que disparam o bloqueio ficam no ' +
+      'servidor e nunca são mostradas à IA nem ao aluno — se fossem, o aluno aprenderia ' +
+      'exatamente o que evitar para furar o bloqueio. O bloqueio em si não depende da IA ' +
+      'obedecer a este texto: ele acontece antes, no código, comparando a mensagem com os ' +
+      'termos cadastrados. Cadastrar ou retirar um tema exige aprovação do profissional CREF.',
   },
   {
     id: 'SCOPE_PERIMETER',
@@ -122,13 +151,50 @@ export const PROMPT_BLOCKS = [
   },
 ] as const;
 
-/** Bloco base montado a partir de uma persona. Ordem: quem é → até onde vai → o que nunca faz. */
-export function buildBaseGuardrail(persona: AgentPersona = DEFAULT_AGENT_PERSONA): string {
-  return [buildPersonaBlock(persona), SCOPE_PERIMETER_BLOCK, INVIOLABLE_RULES_BLOCK].join('\n\n');
+/**
+ * Opções de resolução do prompt que dependem de estado publicado fora da persona.
+ *
+ * Ambas entram por parâmetro (e não por injeção) porque `prompts.ts` é uma função pura — é o
+ * que permite ao simulador e aos testes determinísticos montarem o prompt exato sem subir o
+ * Nest, e o que mantém o preview do painel idêntico ao prompt real.
+ */
+export interface PromptResolutionOptions {
+  /** SÓ os rótulos dos temas proibidos. Termos-gatilho nunca entram aqui. */
+  forbiddenTopicLabels?: readonly string[];
+}
+
+/**
+ * Região ESTÁVEL do prompt (a que o cache de prefixo aproveita).
+ *
+ * Ordem: quem é → como escreve → o que não discute → até onde vai → o que nunca faz → dado
+ * não confiável. A política de dado não confiável fica aqui, e não concatenada depois da
+ * instrução de intenção como antes: é constante L0 e não deveria fragmentar o prefixo
+ * cacheável — a mesma constante em posições diferentes por intenção invalida o cache à toa.
+ */
+export function buildBaseGuardrail(
+  persona: AgentPersona = DEFAULT_AGENT_PERSONA,
+  options: PromptResolutionOptions = {},
+): string {
+  return [
+    buildPersonaBlock(persona),
+    buildFormattingBlock(persona.formatting),
+    buildForbiddenTopicsBlock(options.forbiddenTopicLabels ?? []),
+    SCOPE_PERIMETER_BLOCK,
+    INVIOLABLE_RULES_BLOCK,
+    UNTRUSTED_CONTEXT_POLICY,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 /** Guardrail base do **default de código** — o que vale quando não há config publicada. */
 export const BASE_GUARDRAIL = buildBaseGuardrail();
+
+/** Intenções que explicam decisões do protocolo — as únicas que recebem a metodologia. */
+export const METHODOLOGY_AWARE_INTENTS: readonly Intent[] = [
+  'DUVIDA_TECNICA',
+  'SUBSTITUICAO_EXERCICIO',
+];
 
 const PER_INTENT: Record<Intent, string> = {
   DUVIDA_TECNICA:
@@ -143,6 +209,12 @@ const PER_INTENT: Record<Intent, string> = {
     'protocolo acontece no check-in semanal (não altere o treino agora).',
   RELATO_TREINO: 'Celebre a conclusão do treino (momento de vitória) e reforce o próximo passo.',
   SAUDACAO: 'Cumprimente de volta, breve e caloroso, e pergunte como pode ajudar hoje.',
+  // O caminho normal NÃO chega aqui desde a Sprint 10: `PEDIDO_HANDOFF` virou entrega
+  // determinística (`buildHumanHandoffMessage`), no mesmo padrão de `FORA_DE_ESCOPO`. Além de
+  // eliminar a superfície de injeção por completo (o texto nunca é lido como instrução por
+  // modelo nenhum — é copy, não prompt), tira do modelo a chance de inventar um prazo de
+  // resposta que o produto não tem. Fica como defesa em profundidade, no mesmo espírito de
+  // `EMERGENCIA_CLINICA`, para o caso raro de alguém rotear direto.
   PEDIDO_HANDOFF:
     'Confirme que vai registrar o pedido para o profissional responsável revisar. Seja honesta: ' +
     'a revisão é assíncrona, sem prazo de resposta imediato.',
@@ -170,8 +242,12 @@ export function intentInstruction(intent: Intent): string {
 export function resolvePrompt(
   intent: Intent,
   persona: AgentPersona = DEFAULT_AGENT_PERSONA,
+  options: PromptResolutionOptions = {},
 ): string {
-  return `${buildBaseGuardrail(persona)}\n\n${PER_INTENT[intent]}`.trim();
+  return [buildBaseGuardrail(persona, options), PER_INTENT[intent]]
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
 }
 
 /** Resposta pré-aprovada para fora de escopo — recusa honesta, sem LLM (guardrails). */

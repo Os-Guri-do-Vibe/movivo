@@ -49,6 +49,11 @@ describe('clinicalGuardrail', () => {
     expect(clinicalGuardrail('tô com dor no peito e tomei um remédio')).toBe('SAFETY');
   });
 
+  it('remove caracteres invisíveis antes de avaliar segurança', () => {
+    expect(clinicalGuardrail('estou com dor no pe\u200Bito agora')).toBe('SAFETY');
+    expect(clinicalGuardrail('posso tomar ibu\u2060profeno?')).toBe('SCOPE');
+  });
+
   it('retorna null em mensagem comum de treino', () => {
     expect(clinicalGuardrail('como faço o agachamento?')).toBeNull();
     expect(clinicalGuardrail('tô sem vontade hoje')).toBeNull();

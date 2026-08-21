@@ -108,6 +108,12 @@ export interface RedisConfig {
   readonly natMap: Readonly<Record<string, { host: string; port: number }>> | undefined;
 }
 
+export interface KnowledgeConfig {
+  readonly complexFormatsEnabled: boolean;
+  readonly allowedMimeTypes: readonly string[];
+  readonly uploadMaxBytes: number;
+}
+
 @Injectable()
 export class AppConfigService {
   constructor(private readonly config: AppConfig) {}
@@ -238,6 +244,14 @@ export class AppConfigService {
       rerankMinScore: this.config.RAG_RERANK_MIN_SCORE,
       topK: this.config.RAG_TOP_K,
       candidates: this.config.RAG_CANDIDATES,
+    };
+  }
+
+  get knowledge(): KnowledgeConfig {
+    return {
+      complexFormatsEnabled: this.config.KNOWLEDGE_COMPLEX_FORMATS_ENABLED,
+      allowedMimeTypes: this.config.KNOWLEDGE_ALLOWED_MIME_TYPES,
+      uploadMaxBytes: this.config.KNOWLEDGE_UPLOAD_MAX_BYTES,
     };
   }
 

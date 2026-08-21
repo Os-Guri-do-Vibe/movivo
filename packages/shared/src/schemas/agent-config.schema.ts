@@ -12,46 +12,140 @@
 import { z } from 'zod';
 
 import {
+  AgentBlockSize,
+  AgentBoldPolicy,
   AgentConfigStatus,
   AgentEmojiPolicy,
+  AgentPersonaTrait,
   AgentToneDescriptor,
-  AgentTreatment,
   PromptLayer,
 } from '../enums/agent-config';
 import { controlCenterMetaSchema } from './control-center.schema';
 import { faqCandidateSchema } from './faq.schema';
+import { forbiddenTopicCandidateSchema } from './forbidden-topic.schema';
 import { l1GuardrailCandidateSchema } from './guardrail.schema';
 
 /** Letras (com acento), espaço, 2-20 chars. Sem pontuação, dígito ou símbolo. */
 export const AGENT_NAME_PATTERN = /^[A-Za-zÀ-ú ]{2,20}$/;
 
 /**
- * Apresentação: letras, dígitos, espaço e pontuação de frase (`, . - ' ( ) !`), 10-200 chars.
+ * Apresentação: texto Unicode, espaços tipográficos, pontuação de frase e emojis,
+ * 10-200 caracteres. `trim()` remove whitespace invisível nas bordas trazido pelo clipboard.
  *
  * Sato (revisão TASK-7.9.5): este é o único texto livre que entra no system prompt
  * (`buildPersonaBlock`), e `detectInjection` é uma **denylist** de 4 regexes — insuficiente
- * sozinha. O charset é a barreira de allowlist: sem quebra de linha, `:`, `#`, `*`, `[`, `<`
- * ou `{`, não há como forjar um cabeçalho/bloco novo dentro do prompt. As duas checagens
- * são complementares e ambas continuam valendo.
+ * sozinha. O charset segue como allowlist: emojis e pontuação natural são aceitos, mas quebra
+ * de linha, `:`, `#`, `*`, `[`, `<` e `{` continuam proibidos para impedir a criação de um
+ * cabeçalho/bloco novo dentro do prompt. As duas checagens permanecem complementares.
  */
-export const AGENT_SELF_INTRO_PATTERN = /^[A-Za-zÀ-ú0-9 ,.\-'()!]{10,200}$/;
+export const AGENT_SELF_INTRO_PATTERN =
+  /^[\p{L}\p{M}\p{N}\p{Zs},.;\-'"’“”()!?…\p{Extended_Pictographic}\p{Emoji_Modifier}\uFE0F\u200D]{10,200}$/u;
 
+/**
+ * Mensagem entregue quando o aluno pede para falar com uma pessoa (`PEDIDO_HANDOFF`).
+ *
+ * Charset deliberadamente mais estreito que o de `agentSelfIntro`: sem `\n`, `:`, `#`, `*`,
+ * `_`, `~`, backtick, colchete, chave, `<`, `>`, `|`, `\`, `/`, `@`, `+`, `=`, `"` e `;`.
+ * Sem `:` não se escreve URL; sem `*`/`_`/`~`/backtick não se injeta markup do WhatsApp;
+ * sem `\n`/`:`/`#` não se forja cabeçalho de bloco de prompt. Emoji fica fora da v1 — quem
+ * decide emoji é `emojiPolicy`, que já existe.
+ */
+export const AGENT_HANDOFF_MESSAGE_PATTERN = /^[A-Za-zÀ-ú0-9 ,.\-'()!?]{40,320}$/;
+
+/**
+ * Regras de formatação da mensagem no WhatsApp (**L2, editável direto pelo painel**).
+ *
+ * Três controles de espaço fechado; o mapeamento para números (parágrafos, linhas, itens)
+ * mora em `prompts/persona-block.ts` e não é exposto ao painel. Não existe `allowTables`:
+ * nenhum caminho de código renderiza tabela no WhatsApp, então o toggle seria configuração
+ * morta — e configuração morta é o tipo de coisa que alguém acredita estar valendo.
+ */
+export const agentFormattingSchema = z.object({
+  blockSize: z.enum(Object.values(AgentBlockSize) as [AgentBlockSize, ...AgentBlockSize[]]),
+  allowLists: z.boolean(),
+  boldPolicy: z.enum(Object.values(AgentBoldPolicy) as [AgentBoldPolicy, ...AgentBoldPolicy[]]),
+});
+export type AgentFormatting = z.infer<typeof agentFormattingSchema>;
+
+export const DEFAULT_AGENT_FORMATTING: AgentFormatting = {
+  blockSize: 'MEDIO',
+  allowLists: true,
+  boldPolicy: 'UMA_PALAVRA',
+};
+
+export const DEFAULT_AGENT_PERSONA_TRAITS: AgentPersonaTrait[] = [
+  'ACOLHE_ANTES_DE_ORIENTAR',
+  'FOCA_NO_PROXIMO_PASSO',
+];
+
+/**
+ * Default compilado da mensagem de handoff. Passa por `AGENT_HANDOFF_MESSAGE_PATTERN`, pelo
+ * validador de resposta e pela regra anti-promessa-de-prazo — os mesmos gates que o painel
+ * aplica a um valor publicado (`config-simulator.ts`).
+ */
+export const DEFAULT_HUMAN_HANDOFF_MESSAGE =
+  'Entendi. Vou registrar seu pedido para uma pessoa da equipe olhar com calma. ' +
+  'Essa revisão é assíncrona, então não consigo prometer um retorno na mesma hora.';
+
+/**
+ * **Contrato do escritor (estrito).** Usado no formulário do painel, em
+ * `publishAgentConfigSchema` e no simulador. Campos novos são obrigatórios aqui: quem
+ * publica declara o valor, não herda um default invisível.
+ */
 export const agentPersonaSchema = z.object({
   agentName: z.string().regex(AGENT_NAME_PATTERN, 'nome inválido (2-20 letras)'),
   agentSelfIntro: z
     .string()
-    .regex(AGENT_SELF_INTRO_PATTERN, 'apresentação inválida (10-200 caracteres, sem símbolos)'),
+    .trim()
+    .regex(
+      AGENT_SELF_INTRO_PATTERN,
+      'apresentação inválida (10-200 caracteres; use texto, pontuação e emojis)',
+    ),
   toneDescriptors: z
     .array(
       z.enum(Object.values(AgentToneDescriptor) as [AgentToneDescriptor, ...AgentToneDescriptor[]]),
     )
     .min(1)
     .max(4),
+  personaTraits: z
+    .array(z.enum(Object.values(AgentPersonaTrait) as [AgentPersonaTrait, ...AgentPersonaTrait[]]))
+    .min(1)
+    .max(3),
   emojiPolicy: z.enum(Object.values(AgentEmojiPolicy) as [AgentEmojiPolicy, ...AgentEmojiPolicy[]]),
-  maxResponseChars: z.int().min(200).max(1200),
-  treatment: z.enum(Object.values(AgentTreatment) as [AgentTreatment, ...AgentTreatment[]]),
+  formatting: agentFormattingSchema,
+  humanHandoffMessage: z
+    .string()
+    .regex(AGENT_HANDOFF_MESSAGE_PATTERN, 'mensagem inválida (40-320 caracteres, sem símbolos)'),
 });
 export type AgentPersona = z.infer<typeof agentPersonaSchema>;
+
+/**
+ * **Contrato do leitor (tolerante).** Mesmo shape de saída, mas com default de código para
+ * os campos introduzidos depois. Usado em toda LEITURA de payload histórico:
+ * `AgentPersonaService.fromRedis()/fromDatabase()`, `AiConfigService.history()` e o
+ * `safeParse` de `rollback()`.
+ *
+ * ## Por que ele precisa existir (bug real, achado por Rafael e Sato de forma independente)
+ * `z.object` já descarta chave desconhecida, então uma linha antiga com `treatment`/
+ * `maxResponseChars` continuaria validando. O problema é o inverso: adicionar campo NOVO
+ * **obrigatório** faz toda linha histórica falhar o `safeParse` — e `AiConfigService.history()`
+ * descarta com `flatMap` o que não valida. Sem este schema, o deploy que introduz `formatting`
+ * apagaria silenciosamente todo o histórico de rollback do painel. Corrigir isso é
+ * pré-requisito de qualquer campo novo no payload de persona, não um extra.
+ */
+export const agentPersonaStoredSchema = agentPersonaSchema.extend({
+  personaTraits: z
+    .array(z.enum(Object.values(AgentPersonaTrait) as [AgentPersonaTrait, ...AgentPersonaTrait[]]))
+    .min(1)
+    .max(3)
+    .default(DEFAULT_AGENT_PERSONA_TRAITS),
+  formatting: agentFormattingSchema.default(DEFAULT_AGENT_FORMATTING),
+  humanHandoffMessage: z
+    .string()
+    .regex(AGENT_HANDOFF_MESSAGE_PATTERN)
+    .default(DEFAULT_HUMAN_HANDOFF_MESSAGE),
+});
+export type AgentPersonaStored = z.infer<typeof agentPersonaStoredSchema>;
 
 /**
  * Persona padrão — o default de código. Usado pelo serviço de resolução (CORE, DI global)
@@ -64,9 +158,10 @@ export const DEFAULT_AGENT_PERSONA: AgentPersona = {
     'a coach digital da MOVIVO, supervisionada por um profissional de Educação Física ' +
     'registrado no CREF',
   toneDescriptors: ['caloroso', 'direto', 'sem_hype'],
+  personaTraits: DEFAULT_AGENT_PERSONA_TRAITS,
   emojiPolicy: 'MODERADO',
-  maxResponseChars: 800,
-  treatment: 'VOCE',
+  formatting: DEFAULT_AGENT_FORMATTING,
+  humanHandoffMessage: DEFAULT_HUMAN_HANDOFF_MESSAGE,
 };
 
 /** `changeNote` é obrigatório também no contrato: publicar sem motivo não é auditável. */
@@ -96,7 +191,8 @@ export const agentConfigVersionSchema = z.object({
   createdBy: z.string().nullable(),
   /** `true` na maior versão publicada — a que está valendo agora. */
   current: z.boolean(),
-  payload: agentPersonaSchema,
+  /** Tolerante de propósito: versão histórica não tem os campos criados depois dela. */
+  payload: agentPersonaStoredSchema,
 });
 export type AgentConfigVersion = z.infer<typeof agentConfigVersionSchema>;
 
@@ -141,6 +237,7 @@ export const simulateAgentConfigSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('PERSONA'), candidate: agentPersonaSchema }),
   z.object({ kind: z.literal('FAQ'), candidate: faqCandidateSchema }),
   z.object({ kind: z.literal('GUARDRAIL'), candidate: l1GuardrailCandidateSchema }),
+  z.object({ kind: z.literal('FORBIDDEN_TOPIC'), candidate: forbiddenTopicCandidateSchema }),
 ]);
 export type SimulateAgentConfigInput = z.infer<typeof simulateAgentConfigSchema>;
 
@@ -155,7 +252,7 @@ export type ConfigSimulationCheck = z.infer<typeof configSimulationCheckSchema>;
 
 export const configSimulationResponseSchema = z.object({
   data: z.object({
-    kind: z.enum(['PERSONA', 'FAQ', 'GUARDRAIL']),
+    kind: z.enum(['PERSONA', 'FAQ', 'GUARDRAIL', 'FORBIDDEN_TOPIC']),
     passed: z.boolean(),
     candidateHash: z.string().regex(/^[a-f0-9]{64}$/),
     checks: z.array(configSimulationCheckSchema).length(4),

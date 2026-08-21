@@ -23,6 +23,7 @@ import postgres from 'postgres';
 import { loadEnv } from '../config/load-env';
 import {
   buildAgentConfigImmutabilitySql,
+  buildAiForbiddenTopicsImmutabilitySql,
   buildAiGuardrailRulesImmutabilitySql,
   buildAuditIntegritySql,
   buildAdSpendImmutabilitySql,
@@ -129,6 +130,8 @@ const KNOWLEDGE_BASE_SQL = (role: string) => `
   CREATE INDEX IF NOT EXISTS idx_knowledge_base_embedding
     ON knowledge_base USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
+  CREATE INDEX IF NOT EXISTS idx_knowledge_base_fts_pt
+    ON knowledge_base USING gin (to_tsvector('portuguese', chunk_text));
   REVOKE INSERT, UPDATE, DELETE ON knowledge_base FROM ${role};
 
   CREATE INDEX IF NOT EXISTS idx_intent_examples_embedding
@@ -216,6 +219,11 @@ async function main(): Promise<void> {
 
     await sql.unsafe(buildAiGuardrailRulesImmutabilitySql(appRole));
     console.log('[db:migrate] ai_guardrail_rules append-only reconciliado.');
+
+    // Sprint 10: temas proibidos append-only — aqui o match BLOQUEIA, então a imutabilidade
+    // também é o que preserva a prova de qual RT CREF aprovou o quê.
+    await sql.unsafe(buildAiForbiddenTopicsImmutabilitySql(appRole));
+    console.log('[db:migrate] ai_forbidden_topics append-only reconciliado.');
 
     await sql.unsafe(buildKnowledgeDocumentsSecuritySql(appRole));
     console.log('[db:migrate] documentos RAG e gate CREF reconciliados.');

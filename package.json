@@ -36,6 +36,9 @@
     "infra:pools": "bash scripts/infra.sh pools",
     "infra:redis": "bash scripts/infra.sh redis-cli",
     "infra:sentinel": "bash scripts/infra.sh sentinel",
+    "infra:knowledge:status": "bash scripts/infra.sh knowledge-status",
+    "infra:knowledge:verify": "bash scripts/verify-knowledge-infra.sh config",
+    "infra:knowledge:verify:runtime": "bash scripts/verify-knowledge-infra.sh runtime",
     "infra:reset": "docker compose down --volumes --remove-orphans && pnpm run infra:up"
   },
   "devDependencies": {

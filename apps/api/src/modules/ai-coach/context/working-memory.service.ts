@@ -19,6 +19,20 @@ export interface ConversationTurn {
 
 const WINDOW = 15;
 const TTL_SECONDS = 24 * 3600;
+const MAX_TURN_CHARS = 4000;
+
+function isConversationTurn(value: unknown): value is ConversationTurn {
+  if (!value || typeof value !== 'object') return false;
+  const turn = value as Partial<ConversationTurn>;
+  return (
+    (turn.role === 'user' || turn.role === 'assistant') &&
+    typeof turn.content === 'string' &&
+    turn.content.length > 0 &&
+    turn.content.length <= MAX_TURN_CHARS &&
+    Number.isSafeInteger(turn.ts) &&
+    (turn.ts ?? 0) > 0
+  );
+}
 
 @Injectable()
 export class WorkingMemory {
@@ -31,14 +45,21 @@ export class WorkingMemory {
     return this.keys.forUser(userId, 'session', sessionDate);
   }
 
+  private summaryCounterKey(userId: string, sessionDate: string): string {
+    return this.keys.forUser(userId, 'session', sessionDate, 'turns-since-summary');
+  }
+
   /** Acrescenta um turno, mantém só a janela recente e renova o TTL. */
   async append(userId: string, sessionDate: string, turn: ConversationTurn): Promise<void> {
     const key = this.key(userId, sessionDate);
+    const counter = this.summaryCounterKey(userId, sessionDate);
     await this.redis
       .multi()
       .rpush(key, JSON.stringify(turn))
       .ltrim(key, -WINDOW, -1)
       .expire(key, TTL_SECONDS)
+      .incr(counter)
+      .expire(counter, TTL_SECONDS)
       .exec();
   }
 
@@ -48,7 +69,8 @@ export class WorkingMemory {
     const turns: ConversationTurn[] = [];
     for (const item of raw) {
       try {
-        turns.push(JSON.parse(item) as ConversationTurn);
+        const parsed: unknown = JSON.parse(item);
+        if (isConversationTurn(parsed)) turns.push(parsed);
       } catch {
         // turno corrompido — ignora em vez de derrubar a montagem do contexto.
       }
@@ -56,8 +78,15 @@ export class WorkingMemory {
     return turns;
   }
 
-  /** Nº de turnos na sessão — gatilho do resumo de sessão longa. */
+  /** Nº de turnos desde o último resumo — gatilho incremental da condensação. */
   count(userId: string, sessionDate: string): Promise<number> {
-    return this.redis.llen(this.key(userId, sessionDate));
+    return this.redis
+      .get(this.summaryCounterKey(userId, sessionDate))
+      .then((value) => Number(value ?? 0));
+  }
+
+  /** Reinicia apenas o gatilho; a janela recente continua disponível para continuidade. */
+  async markSummarized(userId: string, sessionDate: string): Promise<void> {
+    await this.redis.set(this.summaryCounterKey(userId, sessionDate), '0', 'EX', TTL_SECONDS);
   }
 }

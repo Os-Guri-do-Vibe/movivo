@@ -33,6 +33,9 @@ export interface PlanResult {
   generatedBy: string;
   modelVersion: string | null;
   promptVersion: string;
+  knowledgeSources: NonNullable<GenerateProtocolResult['knowledgeSources']>;
+  methodologyVersionId: string | null;
+  methodologySha256: string | null;
   validationAction: string;
   usedFallbackTemplate: boolean;
   /**
@@ -53,6 +56,9 @@ function fromGeneration(
     generatedBy: gen.provider,
     modelVersion: gen.model,
     promptVersion: gen.promptVersion,
+    knowledgeSources: gen.knowledgeSources ?? [],
+    methodologyVersionId: gen.methodologyVersionId ?? null,
+    methodologySha256: gen.methodologySha256 ?? null,
     validationAction,
     usedFallbackTemplate: false,
     violations,
@@ -97,6 +103,9 @@ export async function planProtocol(
     generatedBy: 'FALLBACK_TEMPLATE',
     modelVersion: null,
     promptVersion: FALLBACK_TEMPLATE_VERSION,
+    knowledgeSources: [],
+    methodologyVersionId: null,
+    methodologySha256: null,
     validationAction: 'BLOCK',
     usedFallbackTemplate: true,
     // As duas tentativas violaram — a 2ª (`v2`) é a que efetivamente decidiu o

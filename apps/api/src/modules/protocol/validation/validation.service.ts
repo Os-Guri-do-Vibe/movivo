@@ -14,6 +14,7 @@
 import { Injectable } from '@nestjs/common';
 import type { ProtocolStructure, Weekday } from '@movivo/shared';
 
+import { canonicalizeSecurityText } from '../../../core/agent-config/text-normalize';
 import {
   type ContraindicationTag,
   EXERCISE_BY_ID,
@@ -117,11 +118,14 @@ export class ValidationService {
     out: ValidationViolation[],
   ): void {
     if (!allowed) return; // só a substituição restringe o vocabulário de exercícios
-    const lower = text.toLowerCase();
-    const allowedSet = new Set(allowed.map((a) => a.toLowerCase()));
+    const lower = canonicalizeSecurityText(text).toLocaleLowerCase('pt-BR');
+    const allowedSet = new Set(
+      allowed.map((a) => canonicalizeSecurityText(a).toLocaleLowerCase('pt-BR')),
+    );
     for (const ex of EXERCISE_CATALOG) {
-      if (allowedSet.has(ex.name.toLowerCase()) || allowedSet.has(ex.id)) continue;
-      if (lower.includes(ex.name.toLowerCase())) {
+      const exerciseName = canonicalizeSecurityText(ex.name).toLocaleLowerCase('pt-BR');
+      if (allowedSet.has(exerciseName) || allowedSet.has(ex.id)) continue;
+      if (lower.includes(exerciseName)) {
         out.push({
           rule: 'EXERCISE_NOT_ALLOWED',
           detail: `resposta cita exercício não autorizado: ${ex.id}`,
@@ -335,8 +339,9 @@ export class ValidationService {
   }
 
   private checkLanguage(text: string, out: ValidationViolation[]): void {
+    const canonical = canonicalizeSecurityText(text);
     for (const rule of LANGUAGE_RULES) {
-      if (rule.pattern.test(text)) {
+      if (rule.pattern.test(canonical)) {
         out.push({
           rule: rule.id,
           detail: 'termo/expressão proibida na saída',
@@ -344,7 +349,7 @@ export class ValidationService {
         });
       }
     }
-    if (containsPromptLeak(text)) {
+    if (containsPromptLeak(canonical)) {
       out.push({
         rule: 'PROMPT_LEAK',
         detail: 'saída contém trecho do system prompt',

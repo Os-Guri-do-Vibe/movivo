@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { FakeReranker, type RerankCandidate } from './reranker.port';
+import { DenseScoreReranker, FakeReranker, type RerankCandidate } from './reranker.port';
 
 const reranker = new FakeReranker();
 
@@ -42,5 +42,17 @@ describe('FakeReranker', () => {
 
   it('lista vazia → []', async () => {
     expect(await reranker.rerank('x', [], 3)).toEqual([]);
+  });
+});
+
+describe('DenseScoreReranker', () => {
+  it('preserva o score semântico real e ordena pelo pgvector', async () => {
+    const dense = new DenseScoreReranker();
+    const weak = { ...cand('match lexical exato'), chunkId: 'weak', denseScore: 0.2 };
+    const strong = { ...cand('sem termos em comum'), chunkId: 'strong', denseScore: 0.91 };
+
+    await expect(dense.rerank('match lexical exato', [weak, strong], 1)).resolves.toEqual([
+      expect.objectContaining({ chunkId: 'strong', score: 0.91 }),
+    ]);
   });
 });

@@ -14,6 +14,7 @@ export * from './subscription.schema';
 export * from './expense.schema';
 export * from './faq.schema';
 export * from './guardrail.schema';
+export * from './forbidden-topic.schema';
 export * from './audit-search.schema';
 export * from './ad-spend.schema';
 export * from './partners.schema';

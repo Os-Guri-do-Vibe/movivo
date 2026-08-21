@@ -103,7 +103,7 @@ describe('AiFaqDashboard', () => {
     );
     await user.type(screen.getByLabelText('Motivo da mudança'), 'Nova dúvida recorrente');
     expect(screen.getByRole('button', { name: 'Publicar' })).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: 'Executar as 4 etapas' }));
+    await user.click(screen.getByRole('button', { name: 'Executar 4 verificações' }));
     expect(await screen.findByRole('button', { name: 'Publicar' })).toBeEnabled();
     await user.click(screen.getByRole('button', { name: 'Publicar' }));
     await waitFor(() =>
@@ -120,6 +120,7 @@ describe('AiFaqDashboard', () => {
     const user = userEvent.setup();
     render(<AiFaqDashboard canWrite />);
     await user.click(await screen.findByRole('button', { name: 'Republicar' }));
+    await user.click(screen.getByRole('button', { name: 'Confirmar republicação' }));
     await waitFor(() =>
       expect(rollbackFaqEntry).toHaveBeenCalledWith({
         faqKey: '22222222-2222-4222-8222-222222222222',

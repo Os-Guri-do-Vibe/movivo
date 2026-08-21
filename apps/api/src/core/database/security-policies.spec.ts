@@ -9,11 +9,23 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildAiForbiddenTopicsImmutabilitySql,
   buildFaqEntriesImmutabilitySql,
   buildAiGuardrailRulesImmutabilitySql,
   buildRlsPoliciesSql,
   RLS_TENANT_TABLES,
 } from './security-policies';
+
+describe('buildAiForbiddenTopicsImmutabilitySql', () => {
+  const sql = buildAiForbiddenTopicsImmutabilitySql('movivo_app');
+
+  it('impede UPDATE, DELETE e TRUNCATE na trilha de temas proibidos', () => {
+    expect(sql).toContain('BEFORE UPDATE OR DELETE ON public.ai_forbidden_topics');
+    expect(sql).toContain('BEFORE TRUNCATE ON public.ai_forbidden_topics');
+    expect(sql).toContain('REVOKE UPDATE, DELETE, TRUNCATE ON public.ai_forbidden_topics');
+    expect(sql).toContain('GRANT SELECT, INSERT ON public.ai_forbidden_topics');
+  });
+});
 
 describe('buildRlsPoliciesSql', () => {
   const sql = buildRlsPoliciesSql();
@@ -89,7 +101,22 @@ describe('buildRlsPoliciesSql', () => {
       .split(';')
       .find((statement) => statement.includes('CREATE POLICY "protocols_rls_update"'));
     expect(protocolsUpdate).toContain('public.has_active_health_consent("protocols"."user_id")');
-    expect(protocolsUpdate).toContain('pa.active = true AND pa.revoked_at IS NULL');
+  });
+
+  // Achado 2026-08-19 (decisão do fundador): a fila de revisão é do CARGO, não da
+  // pessoa — qualquer profissional CREF ativo acessa todo titular com consentimento
+  // de saúde vigente, sem depender de `professional_assignments` (que permanece só
+  // como atribuição nominal, ex.: `protocols.professionalId`).
+  it('acesso profissional não depende mais de professional_assignments específico', () => {
+    const protocolsSelect = sql
+      .split(';')
+      .find((statement) => statement.includes('CREATE POLICY "protocols_rls_select"'));
+    const protocolsUpdate = sql
+      .split(';')
+      .find((statement) => statement.includes('CREATE POLICY "protocols_rls_update"'));
+    expect(protocolsSelect).toContain("= 'PROFESSIONAL' AND public.has_active_health_consent");
+    expect(protocolsSelect).not.toContain('professional_assignments');
+    expect(protocolsUpdate).not.toContain('professional_assignments');
   });
 
   it('anamnesis_sessions libera a fase anônima escopada por sessão (Sato — achado 1)', () => {
@@ -98,6 +125,20 @@ describe('buildRlsPoliciesSql', () => {
     expect(sql).toContain(
       `"user_id" IS NULL AND nullif(current_setting('app.current_role', true), '') = 'ANONYMOUS' AND (nullif(current_setting('app.current_anamnesis_session_id', true), '') IS NULL OR "id"::text = nullif(current_setting('app.current_anamnesis_session_id', true), ''))`,
     );
+  });
+
+  it('admin só grava auditoria em nome do próprio ator autenticado', () => {
+    // A policy generica do loop de TenantTable cria um "audit_logs_rls_insert"
+    // permissivo primeiro; o DROP + CREATE explicito mais abaixo (linha 266-267 de
+    // security-policies.ts) o substitui em runtime. `findLast` pega a versao que
+    // efetivamente vale apos a execucao sequencial do `sql.unsafe`.
+    const policy = sql
+      .split(';')
+      .findLast((statement) => statement.includes('CREATE POLICY "audit_logs_rls_insert"'));
+    expect(policy).toContain(
+      "actor_id::text = nullif(current_setting('app.current_user_id', true), '') AND nullif(current_setting('app.current_role', true), '') = 'ADMIN'",
+    );
+    expect(policy).not.toMatch(/OR nullif\(current_setting\('app\.current_role'.*\) = 'ADMIN'\)$/);
   });
 });
 

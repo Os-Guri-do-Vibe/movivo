@@ -24,6 +24,7 @@ describe('jobs.config', () => {
         'conversion-sequence',
         // US-8.5 — conciliacao da liquidacao do gateway.
         'payment-reconciliation',
+        'knowledge-processing',
         'dead-letter',
         'protocol-generation',
         // Fila do profissional, categoria "Disponível para Revisão" — liberação automática

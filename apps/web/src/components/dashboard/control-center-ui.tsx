@@ -8,6 +8,9 @@ import { Button } from '@/components/ui/button';
 import { ControlCenterApiError } from '@/lib/control-center-api';
 import { cn } from '@/lib/utils';
 
+import { CONTROL_H, StatusBadge } from './control-center-table';
+import type { StatusTone } from './control-center-table';
+
 export interface ControlCenterMeta {
   generatedAt: string;
   timezone: 'America/Sao_Paulo';
@@ -53,18 +56,32 @@ export function SectorHeader({
   meta,
   refreshing,
   onRefresh,
+  refreshLabel = 'Atualizar',
+  headingLevel = 'h1',
 }: {
   title: string;
-  description: string;
+  /**
+   * Subtítulo do setor. Opcional: a Fila de supervisão é um painel de trabalho, não
+   * um setor analítico — o título sozinho já diz o que a tela é, e uma linha de
+   * descrição ali só empurraria a fila pra baixo.
+   */
+  description?: string;
   meta?: ControlCenterMeta;
   refreshing?: boolean;
   onRefresh?: () => void;
+  /** Texto do botão em repouso. O estado de carregamento é sempre "Atualizando…". */
+  refreshLabel?: string;
+  /** Use h2 quando o setor estiver embutido numa página que já possui h1. */
+  headingLevel?: 'h1' | 'h2';
 }) {
+  const Heading = headingLevel;
   return (
     <header className="flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 className="text-h1 font-bold">{title}</h1>
-        <p className="mt-2 max-w-3xl text-body text-muted-foreground">{description}</p>
+        <Heading className="text-h1 font-bold">{title}</Heading>
+        {description ? (
+          <p className="mt-2 max-w-3xl text-body text-muted-foreground">{description}</p>
+        ) : null}
         {meta ? (
           <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
             <Clock3 aria-hidden="true" className="size-3.5" />
@@ -80,9 +97,15 @@ export function SectorHeader({
         ) : null}
       </div>
       {onRefresh ? (
-        <Button variant="outline" onClick={onRefresh} disabled={refreshing}>
+        /*
+         * `CONTROL_H` (a pedido do fundador, 2026-08-19): o `size` padrão do Button
+         * nasce `h-11` fixo e ficava mais ALTO que "Limpar filtro"/"Buscar" da faixa de
+         * filtros logo abaixo, que já usam 44/40px. `cn` (tailwind-merge) mantém a
+         * altura passada por último e preserva padding/gap do tamanho padrão.
+         */
+        <Button variant="outline" className={CONTROL_H} onClick={onRefresh} disabled={refreshing}>
           <RefreshCw aria-hidden="true" className={refreshing ? 'animate-spin' : undefined} />
-          {refreshing ? 'Atualizando…' : 'Atualizar'}
+          {refreshing ? 'Atualizando…' : refreshLabel}
         </Button>
       ) : null}
     </header>
@@ -94,6 +117,17 @@ function statusLabel(status: DataAvailability): string {
   if (status === 'UNAVAILABLE') return 'Indisponível';
   return 'Disponível';
 }
+
+/**
+ * Disponibilidade do dado → tom do selo compartilhado (`control-center-table`).
+ * `UNAVAILABLE` é `quiet` (contorno), não `attention`: falta de amostra não é
+ * alerta — o Coral fica reservado a risco real na operação.
+ */
+const AVAILABILITY_TONE: Record<DataAvailability, StatusTone> = {
+  AVAILABLE: 'positive',
+  PROXY: 'neutral',
+  UNAVAILABLE: 'quiet',
+};
 
 export function formatMetric(metric: ControlCenterMetric): string {
   if (metric.status === 'UNAVAILABLE' || metric.value === null) return '—';
@@ -130,16 +164,9 @@ export function MetricCard({ label, metric }: { label: string; metric: ControlCe
     >
       <div className="flex items-start justify-between gap-3">
         <h2 className="text-label font-semibold">{label}</h2>
-        <span
-          className={cn(
-            'rounded-full px-2 py-1 text-xs font-semibold',
-            metric.status === 'AVAILABLE' && 'bg-accent text-accent-foreground',
-            metric.status === 'PROXY' && 'bg-secondary text-secondary-foreground',
-            metric.status === 'UNAVAILABLE' && 'border border-border text-muted-foreground',
-          )}
-        >
+        <StatusBadge tone={AVAILABILITY_TONE[metric.status]} variant="solid">
           {statusLabel(metric.status)}
-        </span>
+        </StatusBadge>
       </div>
       <p
         className="mt-3 font-mono text-h1 font-bold text-foreground"

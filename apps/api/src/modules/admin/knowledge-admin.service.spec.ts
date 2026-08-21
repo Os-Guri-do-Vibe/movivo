@@ -1,9 +1,10 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 
-import { FakeEmbedding } from '../../core/knowledge/embedding.port';
+import type { AppConfigService } from '../../core/config';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
+import type { QueueManager } from '../jobs/queue-manager.service';
 import type { AuditService } from './audit.service';
 import { KnowledgeAdminService, scanKnowledgeContent } from './knowledge-admin.service';
 
@@ -26,7 +27,11 @@ describe('scanKnowledgeContent', () => {
   });
 
   it('nao confunde quebra de linha e tabulacao com byte de controle', () => {
-    expect(() => scanKnowledgeContent('Serie A\tSerie B\r\nDescanso 90s')).not.toThrow();
+    expect(() =>
+      scanKnowledgeContent(
+        'Serie A\tSerie B\r\nDescanso 90s entre series, conforme o protocolo assinado pelo profissional CREF.',
+      ),
+    ).not.toThrow();
   });
 });
 
@@ -44,6 +49,7 @@ const CONTENT =
 const UPLOAD = {
   title: 'Progressao dupla',
   topic: 'metodologia',
+  category: 'METHODOLOGY' as const,
   originalFilename: 'progressao.md',
   mimeType: 'text/markdown' as const,
   content: CONTENT,
@@ -54,14 +60,22 @@ function listRow(overrides: Record<string, unknown> = {}) {
     id: DOCUMENT_ID,
     title: UPLOAD.title,
     topic: UPLOAD.topic,
+    category: UPLOAD.category,
+    logical_key: 'progressao-dupla',
+    version: 1,
     source_url: null,
+    author: null,
+    license: null,
     original_filename: UPLOAD.originalFilename,
     mime_type: UPLOAD.mimeType,
     size_bytes: 128,
     sha256: 'a'.repeat(64),
     created_at: new Date('2026-08-13T12:00:00.000Z'),
     uploaded_by_name: 'Mariana',
-    decision: null,
+    status: 'QUARANTINED',
+    stage: 'QUEUE',
+    error_code: null,
+    status_updated_at: new Date('2026-08-13T12:00:00.000Z'),
     review_note: null,
     reviewer_name: null,
     reviewed_at: null,
@@ -73,8 +87,11 @@ function listRow(overrides: Record<string, unknown> = {}) {
 }
 
 /**
- * `executes` é consumido em ordem pelas chamadas a `tx.execute`; o último item repete,
- * porque `list()` roda no fim de toda mutação e sempre pede purga + listagem.
+ * `executes` é consumido em ordem pelas chamadas a `tx.execute` dentro de uma única
+ * invocação de serviço; o item que sobrar repete via `mockImplementation` (fallback
+ * `documents`). Métodos que mutam terminam chamando `this.list(actor)`, que abre um
+ * novo `runAsUser` reaproveitando o mesmo `tx` mockado e soma mais uma chamada de
+ * `execute` (a query de listagem) ao final da sequência.
  */
 function knowledgeWith(
   options: {
@@ -109,23 +126,35 @@ function knowledgeWith(
     ),
   } as unknown as TenantDatabase;
   const audit = { append: vi.fn().mockResolvedValue(undefined) };
+  const queues = { enqueue: vi.fn().mockResolvedValue('job-1') };
+  const config = {
+    knowledge: {
+      complexFormatsEnabled: false,
+      allowedMimeTypes: ['text/plain', 'text/markdown'],
+      uploadMaxBytes: 512 * 1024,
+    },
+  };
   const service = new KnowledgeAdminService(
     db,
-    new FakeEmbedding(),
+    queues as unknown as QueueManager,
+    config as unknown as AppConfigService,
     audit as unknown as AuditService,
   );
-  return { service, audit, inserted, execute, db };
+  return { service, audit, inserted, execute, db, queues };
 }
 
 describe('KnowledgeAdminService.list', () => {
-  it('mapeia o documento sem revisão como PENDING e serializa as datas', async () => {
-    const { service, audit } = knowledgeWith({ executes: [[], [listRow()]] });
+  it('mapeia o documento recém-enviado como QUARANTINED e serializa as datas', async () => {
+    const { service, audit } = knowledgeWith({ executes: [[listRow()]] });
 
     const response = await service.list(ACTOR);
 
     expect(response.data.documents[0]).toMatchObject({
       id: DOCUMENT_ID,
-      status: 'PENDING',
+      category: 'METHODOLOGY',
+      status: 'QUARANTINED',
+      stage: 'QUEUE',
+      canRetry: false,
       uploadedBy: 'Mariana',
       reviewedAt: null,
       retainedUntil: null,
@@ -140,13 +169,14 @@ describe('KnowledgeAdminService.list', () => {
     );
   });
 
-  it('documento já revisado expõe a decisão, o revisor e a retenção', async () => {
+  it('documento já revisado expõe o revisor, a retenção e permite retry se FAILED', async () => {
     const { service } = knowledgeWith({
       executes: [
-        [],
         [
           listRow({
-            decision: 'APPROVED',
+            status: 'FAILED',
+            stage: 'INDEXING',
+            error_code: 'EMBEDDING_TIMEOUT',
             review_note: 'ok',
             reviewer_name: 'RT CREF',
             reviewed_at: new Date('2026-08-14T09:00:00.000Z'),
@@ -158,7 +188,9 @@ describe('KnowledgeAdminService.list', () => {
     });
 
     expect((await service.list(ACTOR)).data.documents[0]).toMatchObject({
-      status: 'APPROVED',
+      status: 'FAILED',
+      errorCode: 'EMBEDDING_TIMEOUT',
+      canRetry: true,
       reviewer: 'RT CREF',
       reviewedAt: '2026-08-14T09:00:00.000Z',
       retainedUntil: '2027-08-14T09:00:00.000Z',
@@ -169,7 +201,10 @@ describe('KnowledgeAdminService.list', () => {
 
 describe('KnowledgeAdminService.upload', () => {
   it('coloca em quarentena com sha256 e tamanho em bytes calculados do conteúdo', async () => {
-    const { service, inserted, audit } = knowledgeWith();
+    const { service, inserted, audit } = knowledgeWith({
+      // lock, max(version), insert do blob, appendKnowledgeEvent, list() final.
+      executes: [[], [{ version: 0 }], [], [], [listRow()]],
+    });
 
     await service.upload(ACTOR, UPLOAD);
 
@@ -186,10 +221,13 @@ describe('KnowledgeAdminService.upload', () => {
     );
   });
 
+  // A varredura de conteúdo (PII, injeção, binário) roda no worker assíncrono
+  // (`KnowledgeProcessingWorker.ingest` chama `scanKnowledgeContent`, coberto acima
+  // em `describe('scanKnowledgeContent', ...)`) — `upload()` só valida o envelope:
+  // contrato do body, extensão/MIME e tamanho do original em quarentena.
   it.each([
     ['corpo fora do contrato', { ...UPLOAD, topic: '' }],
     ['extensão não permitida', { ...UPLOAD, originalFilename: 'protocolo.pdf' }],
-    ['conteúdo com dado pessoal', { ...UPLOAD, content: `${CONTENT} contato: a@b.com` }],
   ])('recusa %s sem gravar nada', async (_label, body) => {
     const { service, inserted } = knowledgeWith();
     await expect(service.upload(ACTOR, body)).rejects.toBeInstanceOf(BadRequestException);
@@ -238,22 +276,24 @@ describe('KnowledgeAdminService.content', () => {
 });
 
 const REVIEW = { documentId: DOCUMENT_ID, note: 'metodologia conferida' };
-const DOC_ROW = {
-  title: UPLOAD.title,
-  topic: UPLOAD.topic,
-  source_url: null,
-  payload: Buffer.from(CONTENT, 'utf8'),
-};
+const CREF_OK = [{ ok: 1 }];
+const READY_STATE = [{ status: 'READY_FOR_REVIEW', stage: 'REVIEW', error_code: null }];
+const EXTRACTION_OK = [{ ok: 1 }];
 
 describe('KnowledgeAdminService.review', () => {
-  it('aprovação indexa os trechos e publica exatamente o que preparou', async () => {
-    const { service, inserted, audit } = knowledgeWith({
+  // Sequência de `tx.execute` dentro de `review()`: lock, assertActiveCref,
+  // currentKnowledgeState, checagem de extração canônica, appendKnowledgeEvent —
+  // a publicação de fato (embeddings + `publish_knowledge_document`) roda depois,
+  // de forma assíncrona, no `KnowledgeProcessingWorker.index()`.
+  it('aprovação registra o parecer e enfileira a indexação', async () => {
+    const { service, inserted, audit, queues } = knowledgeWith({
       executes: [
-        [], // advisory lock
-        [DOC_ROW], // documento + blob
-        [], // nenhuma revisão anterior
-        [{ count: 1 }], // publish_knowledge_document
-        [], // purga da listagem final
+        [],
+        CREF_OK,
+        READY_STATE,
+        EXTRACTION_OK,
+        [],
+        [listRow({ status: 'INDEXING', stage: 'INDEXING' })],
       ],
     });
 
@@ -264,61 +304,65 @@ describe('KnowledgeAdminService.review', () => {
       decision: 'APPROVED',
       reviewerId: ACTOR.userId,
     });
+    expect(queues.enqueue).toHaveBeenCalledWith('knowledge-processing', 'index', {
+      documentId: DOCUMENT_ID,
+    });
     expect(audit.append).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({
-        action: 'knowledge.approve',
-        changes: expect.objectContaining({ chunks: 1 }),
-      }),
+      expect.objectContaining({ action: 'knowledge.approve' }),
     );
   });
 
-  it('rejeição registra a revisão sem indexar trecho nenhum', async () => {
-    const { service, audit } = knowledgeWith({
-      executes: [[], [DOC_ROW], [], []],
+  it('rejeição registra o parecer sem enfileirar indexação', async () => {
+    const { service, audit, queues } = knowledgeWith({
+      executes: [
+        [],
+        CREF_OK,
+        READY_STATE,
+        EXTRACTION_OK,
+        [],
+        [listRow({ status: 'REJECTED', stage: 'REVIEW' })],
+      ],
     });
 
     await service.review(ACTOR, { ...REVIEW, decision: 'REJECTED' });
 
+    expect(queues.enqueue).not.toHaveBeenCalled();
     expect(audit.append).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({
-        action: 'knowledge.reject',
-        changes: expect.objectContaining({ chunks: 0 }),
-      }),
+      expect.objectContaining({ action: 'knowledge.reject' }),
     );
   });
 
-  it('falha fechado se a publicação não gravou todos os trechos preparados', async () => {
-    const { service } = knowledgeWith({
-      executes: [[], [DOC_ROW], [], [{ count: 0 }]],
-    });
-
+  it('recusa revisar sem profissional CREF ativo', async () => {
+    const { service } = knowledgeWith({ executes: [[], []] });
     await expect(service.review(ACTOR, { ...REVIEW, decision: 'APPROVED' })).rejects.toBeInstanceOf(
       ConflictException,
     );
   });
 
-  it('recusa revisar duas vezes o mesmo documento', async () => {
-    const { service } = knowledgeWith({ executes: [[], [DOC_ROW], [{ '?column?': 1 }]] });
+  it('recusa revisar documento que já saiu de READY_FOR_REVIEW (duas revisões)', async () => {
+    const { service } = knowledgeWith({
+      executes: [[], CREF_OK, [{ status: 'APPROVED', stage: 'INDEXING', error_code: null }]],
+    });
     await expect(service.review(ACTOR, { ...REVIEW, decision: 'APPROVED' })).rejects.toBeInstanceOf(
       ConflictException,
     );
   });
 
   it('404 quando o documento não existe', async () => {
-    const { service } = knowledgeWith({ executes: [[], []] });
+    const { service } = knowledgeWith({ executes: [[], CREF_OK, []] });
     await expect(service.review(ACTOR, { ...REVIEW, decision: 'APPROVED' })).rejects.toBeInstanceOf(
       NotFoundException,
     );
   });
 
-  it('não revisa documento cujo original já expirou', async () => {
+  it('recusa revisar sem extração canônica disponível', async () => {
     const { service } = knowledgeWith({
-      executes: [[], [{ ...DOC_ROW, payload: null }], []],
+      executes: [[], CREF_OK, READY_STATE, []],
     });
     await expect(service.review(ACTOR, { ...REVIEW, decision: 'APPROVED' })).rejects.toBeInstanceOf(
-      BadRequestException,
+      ConflictException,
     );
   });
 

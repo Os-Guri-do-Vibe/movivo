@@ -184,6 +184,9 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       generatedBy: plan.generatedBy,
       modelVersion: plan.modelVersion,
       promptVersion: plan.promptVersion,
+      knowledgeSources: plan.knowledgeSources,
+      methodologyVersionId: plan.methodologyVersionId,
+      methodologySha256: plan.methodologySha256,
       signed: false,
     });
 

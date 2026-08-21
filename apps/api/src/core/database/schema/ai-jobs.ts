@@ -17,10 +17,9 @@
  * dado de saúde sem ganho de auditoria — o `conversationId` já liga as duas
  * pontas.
  *
- * ## `input_snapshot` (US-2.2 · Victor §6.1) — a exceção controlada
- * O router grava um snapshot do que foi enviado ao LLM, mas **sempre** já
- * pseudonimizado pelo PII Scrubber (nenhum identificador direto em claro). É o que
- * dá auditabilidade CREF sem reintroduzir PII de saúde na trilha.
+ * ## `input_snapshot` (US-2.2 · Victor §6.1)
+ * O router grava somente hashes SHA-256 e contagens do input enviado. O conteúdo segue
+ * exclusivamente em `conversations`; nem prompt, RAG nem fatos de saúde são duplicados aqui.
  */
 import {
   index,
@@ -97,7 +96,7 @@ export const aiJobs = pgTable(
     /** Ação do ValidationService (US-2.3): PASS | FLAG | BLOCK. Nulo até a US-2.3. */
     validationAction: varchar('validation_action', { length: 20 }),
 
-    /** Snapshot pseudonimizado do input (PII Scrubber). Nunca PII em claro. */
+    /** Snapshot minimizado (hashes e contagens). Nunca texto do prompt ou PII em claro. */
     inputSnapshot: text('input_snapshot'),
 
     /**

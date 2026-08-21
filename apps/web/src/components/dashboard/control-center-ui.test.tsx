@@ -101,6 +101,17 @@ describe('SectorHeader', () => {
     );
     expect(screen.getByRole('button', { name: /Atualizando/ })).toBeDisabled();
   });
+
+  /*
+   * Achado 2026-08-19 (a pedido do fundador): "Atualizar" ficava mais alto que
+   * "Limpar filtro"/"Buscar" da faixa de filtros logo abaixo — o tamanho padrão do
+   * Button é `h-11` fixo, e os controles da faixa usam `CONTROL_H` (44px em toque,
+   * 40px em ponteiro fino). Agora os três compartilham a mesma constante.
+   */
+  it('usa a altura de controle da faixa de filtros no botão "Atualizar"', () => {
+    render(<SectorHeader title="Financeiro" description="Receita." onRefresh={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Atualizar' })).toHaveClass('h-11', 'lg:h-10');
+  });
 });
 
 describe('ResourceState', () => {

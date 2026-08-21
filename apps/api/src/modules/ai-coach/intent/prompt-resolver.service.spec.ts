@@ -43,8 +43,7 @@ const PERSONAS: AgentPersona[] = [
     agentName: 'Nina',
     toneDescriptors: ['formal', 'tecnico'],
     emojiPolicy: 'NENHUM',
-    treatment: 'TU',
-    maxResponseChars: 400,
+    personaTraits: ['EXPLICA_O_PORQUE', 'UMA_PERGUNTA_POR_VEZ'],
   },
 ];
 
@@ -52,10 +51,13 @@ const PERSONAS: AgentPersona[] = [
 const FORBIDDEN = [/\bdiagn[óo]stico\b/i, /\btratamento\b/i, /\bcura\b/i, /resultado\s+garantid/i];
 
 function resolver(persona: AgentPersona): PromptResolverService {
-  return new PromptResolverService({
-    persona: async () => persona,
-    agentName: async () => persona.agentName,
-  } as unknown as AgentPersonaService);
+  return new PromptResolverService(
+    {
+      persona: async () => persona,
+      agentName: async () => persona.agentName,
+    } as unknown as AgentPersonaService,
+    { activeLabels: async () => [] } as never,
+  );
 }
 
 /** Textos que o aluno de fato lê, para uma persona qualquer. */

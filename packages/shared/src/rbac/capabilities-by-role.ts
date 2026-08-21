@@ -23,6 +23,7 @@ import {
 export const ADMIN_INHERITANCE_DENYLIST: readonly Capability[] = [
   ControlCenterCapability.AI_KNOWLEDGE_APPROVE,
   ControlCenterCapability.AI_METHODOLOGY_APPROVE,
+  ControlCenterCapability.AI_GUARDRAIL_APPROVE,
 ];
 
 const ALL_CAPABILITIES: readonly Capability[] = Object.values(ControlCenterCapability);
@@ -50,6 +51,7 @@ export const CAPABILITIES_BY_ROLE: Readonly<Record<Role, readonly Capability[]>>
     // Exclusivas do RT CREF — ver ADMIN_INHERITANCE_DENYLIST.
     ControlCenterCapability.AI_KNOWLEDGE_APPROVE,
     ControlCenterCapability.AI_METHODOLOGY_APPROVE,
+    ControlCenterCapability.AI_GUARDRAIL_APPROVE,
   ],
   [ControlCenterRole.MARKETING]: [
     ControlCenterCapability.MARKETING_READ,

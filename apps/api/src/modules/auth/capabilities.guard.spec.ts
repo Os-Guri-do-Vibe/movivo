@@ -49,6 +49,7 @@ describe('capabilities deny-by-default', () => {
         Capability.AI_CONFIG_READ,
         Capability.AI_KNOWLEDGE_APPROVE,
         Capability.AI_METHODOLOGY_APPROVE,
+        Capability.AI_GUARDRAIL_APPROVE,
       ],
     },
     {

@@ -23,6 +23,7 @@ import { eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from
 import { protocolStatusEnum } from './enums';
 import { protocols } from './protocols';
 import { users } from './users';
+import { methodologyVersions } from './methodology-versions';
 
 export const protocolVersions = pgTable(
   'protocol_versions',
@@ -65,6 +66,13 @@ export const protocolVersions = pgTable(
 
     /** Modelo que redigiu esta versão. Nunca `deepseek-*` (§12.11). */
     generatedBy: varchar('generated_by', { length: 50 }),
+
+    /** Proveniência do RAG usada nesta versão; nunca inclui o texto sensível do aluno. */
+    knowledgeSources: jsonb('knowledge_sources'),
+    methodologyVersionId: uuid('methodology_version_id').references(() => methodologyVersions.id, {
+      onDelete: 'restrict',
+    }),
+    methodologySha256: varchar('methodology_sha256', { length: 64 }),
 
     /** Hash SHA-256 do `content` no instante da assinatura desta versão. */
     signatureHash: varchar('signature_hash', { length: 64 }),

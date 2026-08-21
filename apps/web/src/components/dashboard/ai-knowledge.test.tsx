@@ -88,14 +88,13 @@ describe('AiKnowledgeDashboard', () => {
 
   it('separa envio e aprovacao por capability', async () => {
     const { unmount } = render(<AiKnowledgeDashboard canUpload />);
-    expect(await screen.findByText('Enviar para quarentena')).toBeVisible();
-    expect(screen.queryByText('Fila de revisao CREF')).toBeNull();
+    expect(await screen.findByText('Enviar documento')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Aprovar' })).toBeNull();
     unmount();
 
     render(<AiKnowledgeDashboard canApprove />);
-    expect(await screen.findByText('Fila de revisao CREF')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Aprovar e indexar' })).toBeVisible();
-    expect(screen.queryByText('Enviar para quarentena')).toBeNull();
+    expect(await screen.findByRole('button', { name: 'Aprovar' })).toBeVisible();
+    expect(screen.queryByText('Enviar documento')).toBeNull();
   });
 
   it('em 403 explica o bloqueio sem oferecer nova tentativa', async () => {
@@ -112,18 +111,25 @@ describe('AiKnowledgeDashboard', () => {
   it('só libera o envio quando o rascunho está completo', async () => {
     const user = userEvent.setup();
     render(<AiKnowledgeDashboard canUpload />);
-    const enviar = await screen.findByRole('button', { name: 'Enviar arquivo' });
+    const enviar = await screen.findByRole('button', { name: 'Enviar para processamento' });
     expect(enviar).toBeDisabled();
 
-    await user.type(screen.getByLabelText(/Titulo/), 'Guia de descanso');
-    await user.type(screen.getByLabelText(/Topico/), 'descanso');
+    await user.type(screen.getByLabelText(/Título/), 'Guia de descanso');
+    await user.type(screen.getByLabelText(/Tópico/), 'descanso');
     expect(enviar).toBeDisabled();
 
     await user.upload(
       screen.getByLabelText(/Arquivo/),
-      new File(['conteudo do guia'], 'guia.md', { type: 'text/markdown' }),
+      new File(
+        ['conteúdo técnico seguro para orientar descanso entre séries e recuperação'],
+        'guia.md',
+        {
+          type: 'text/markdown',
+        },
+      ),
     );
     await waitFor(() => expect(enviar).toBeEnabled());
+    expect(enviar.closest('form')).toBeValid();
 
     await user.click(enviar);
     await waitFor(() =>
@@ -131,13 +137,13 @@ describe('AiKnowledgeDashboard', () => {
         expect.objectContaining({ originalFilename: 'guia.md', mimeType: 'text/markdown' }),
       ),
     );
-    expect(await screen.findByRole('status')).toHaveTextContent('quarentena');
+    expect(await screen.findByRole('status')).toHaveTextContent('processamento seguro');
   });
 
   it('revisor abre o original em quarentena e consegue fechá-lo', async () => {
     const user = userEvent.setup();
     render(<AiKnowledgeDashboard canApprove />);
-    await user.click(await screen.findByRole('button', { name: 'Ver conteudo' }));
+    await user.click(await screen.findByRole('button', { name: 'Visualizar conteúdo' }));
     expect(await screen.findByText('texto original em quarentena')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Fechar' }));
     expect(screen.queryByText('texto original em quarentena')).not.toBeInTheDocument();
@@ -146,13 +152,15 @@ describe('AiKnowledgeDashboard', () => {
   it('recusa registrada mantém o histórico e confirma na tela', async () => {
     const user = userEvent.setup();
     render(<AiKnowledgeDashboard canApprove />);
-    await user.click(await screen.findByRole('button', { name: 'Recusar' }));
+    await user.click(await screen.findByRole('button', { name: 'Rejeitar' }));
+    await user.type(screen.getByLabelText('Nota obrigatória'), 'Fonte incompatível com o escopo.');
+    await user.click(screen.getByRole('button', { name: 'Confirmar decisão' }));
     await waitFor(() =>
       expect(reviewKnowledgeDocument).toHaveBeenCalledWith(
         expect.objectContaining({ decision: 'REJECTED' }),
       ),
     );
-    expect(await screen.findByRole('status')).toHaveTextContent('historico foi preservado');
+    expect(await screen.findByRole('status')).toHaveTextContent('histórico foi preservado');
   });
 
   it('falha de aprovação vira alerta com a mensagem do servidor', async () => {
@@ -161,7 +169,9 @@ describe('AiKnowledgeDashboard', () => {
       new ControlCenterApiError(409, 'Documento já revisado por outra pessoa.'),
     );
     render(<AiKnowledgeDashboard canApprove />);
-    await user.click(await screen.findByRole('button', { name: 'Aprovar e indexar' }));
+    await user.click(await screen.findByRole('button', { name: 'Aprovar' }));
+    await user.type(screen.getByLabelText('Nota obrigatória'), 'Revisado pelo profissional CREF.');
+    await user.click(screen.getByRole('button', { name: 'Confirmar decisão' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Documento já revisado por outra pessoa.',
     );

@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { LlmRouter } from '../ai-coach/llm/llm-router.service';
 import type { LLMRequest, LLMResult } from '../ai-coach/llm/llm.types';
+import type { SemanticMemoryPort } from '../ai-coach/context/semantic-memory.port';
+import { METHODOLOGY_GUIDELINES, METHODOLOGY_VERSION } from './methodology';
+import type { MethodologyProvider } from './methodology-provider.service';
 import {
   extractJsonObject,
   ProtocolGenerationError,
@@ -99,8 +102,22 @@ function makeService(responses: string[]) {
     }),
   } as unknown as LlmRouter;
   const logger = { setContext: vi.fn(), warn: vi.fn(), info: vi.fn() };
-  const service = new ProtocolGeneratorService(llm, logger as never);
+  const methodology = {
+    current: vi.fn().mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      version: 1,
+      versionLabel: METHODOLOGY_VERSION,
+      content: METHODOLOGY_GUIDELINES,
+      contentSha256: 'a'.repeat(64),
+    }),
+  } as unknown as MethodologyProvider;
+  const semantic = { retrieve: vi.fn().mockResolvedValue([]) } as unknown as SemanticMemoryPort;
+  const service = new ProtocolGeneratorService(llm, logger as never, methodology, semantic);
   return { service, calls, logger };
+}
+
+function constraintsMessage(req: LLMRequest): string {
+  return req.messages.find((message) => message.content.includes('GAIN_MUSCLE'))?.content ?? '';
 }
 
 const command = { userId: 'u-1', user: { name: 'João' }, constraints };
@@ -122,10 +139,11 @@ describe('ProtocolGeneratorService', () => {
     if (!req) throw new Error('esperava uma chamada ao LLM');
     expect(req.purpose).toBe('PROTOCOL_GENERATION');
     expect(req.temperature).toBe(0.4);
-    expect(req.system).toContain('metodologia'); // diretrizes CREF
+    expect(req.system).not.toContain(METHODOLOGY_GUIDELINES);
+    expect(req.messages[0]?.content).toContain('METODOLOGIA_PUBLICADA');
     expect(req.system).toContain('goblet_squat'); // vocabulário da base
-    expect(req.messages[0]?.content).toContain('GAIN_MUSCLE'); // constraints
-    expect(req.messages[0]?.content).toContain('KNEE'); // restrição a evitar
+    expect(constraintsMessage(req)).toContain('GAIN_MUSCLE');
+    expect(constraintsMessage(req)).toContain('KNEE');
   });
 
   it('ensina a divisão de treino e a técnica avançada da metodologia v2', async () => {
@@ -138,7 +156,7 @@ describe('ProtocolGeneratorService', () => {
     expect(req.system).toContain('technique'); // schema com técnica avançada
     expect(req.system).toContain('grupos:'); // grupos musculares no catálogo do prompt
     // O nível do usuário limita as divisões oferecidas (INICIANTE não recebe ABC/ABCDE).
-    const userMessage = req.messages[0]?.content ?? '';
+    const userMessage = constraintsMessage(req);
     expect(userMessage).toContain('Divisões permitidas para este nível: FULL_BODY');
     expect(userMessage).not.toContain('ABCDE');
   });
@@ -151,7 +169,7 @@ describe('ProtocolGeneratorService', () => {
     const req = calls[0];
     if (!req) throw new Error('esperava uma chamada ao LLM');
     expect(req.system).toContain('"weekday"'); // schema com o campo novo
-    const userMessage = req.messages[0]?.content ?? '';
+    const userMessage = constraintsMessage(req);
     expect(userMessage).toContain('MON, WED, FRI');
     expect(userMessage).toContain('EXATAMENTE uma sessão por dia');
   });
@@ -161,7 +179,7 @@ describe('ProtocolGeneratorService', () => {
     await service.generate({ ...command, constraints: { ...constraints, preferredDays: [] } });
     const req = calls[0];
     if (!req) throw new Error('esperava uma chamada ao LLM');
-    const userMessage = req.messages[0]?.content ?? '';
+    const userMessage = constraintsMessage(req);
     expect(userMessage).not.toContain('Dias da semana em que o aluno vai treinar');
   });
 

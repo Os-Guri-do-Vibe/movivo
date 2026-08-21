@@ -402,9 +402,9 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     },
   },
   {
-    label: 'linguagem de diagnóstico (não bloqueia, roteia à revisão humana)',
+    label: 'linguagem de diagnóstico é bloqueada deterministicamente',
     kind: 'adversarial',
-    expected: 'FLAG_HUMAN_REVIEW',
+    expected: 'BLOCK_FALLBACK',
     expectRule: 'DIAGNOSIS',
     input: baseInput(cleanStructure({ generalNotes: 'Isso parece uma tendinite no ombro.' })),
   },
