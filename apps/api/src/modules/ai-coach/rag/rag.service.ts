@@ -76,7 +76,9 @@ export class RagService implements SemanticMemoryPort {
 
     // Hybrid search: dense HNSW + FTS português combinados por Reciprocal Rank Fusion.
     // Documento governado só é elegível quando seu ÚLTIMO evento é PUBLISHED; ARCHIVED
-    // funciona como kill switch imediato sem apagar a trilha nem os vetores.
+    // funciona como kill switch imediato sem apagar a trilha nem os vetores. Chunk sem
+    // `document_id` é corpus-semente legado (`corpus-seed.ts`, fora do pipeline de
+    // governança) e continua elegível — nunca passou a ter uma trilha de eventos.
     const rows = (await this.db.execute(sql`
       WITH eligible AS (
         SELECT chunk.id, chunk.document_id, chunk.chunk_text, chunk.title, chunk.source_url,
@@ -90,8 +92,8 @@ export class RagService implements SemanticMemoryPort {
           WHERE event.document_id = chunk.document_id
           ORDER BY event.sequence DESC, event.created_at DESC, event.id DESC LIMIT 1
         ) latest ON true
-        WHERE chunk.document_id IS NOT NULL
-          AND latest.status = 'PUBLISHED'::knowledge_document_status
+        WHERE chunk.document_id IS NULL
+          OR latest.status = 'PUBLISHED'::knowledge_document_status
       ), dense AS (
         SELECT id, 1 - (embedding <=> ${literal}::vector) AS cosine,
           row_number() OVER (ORDER BY embedding <=> ${literal}::vector) AS rank
