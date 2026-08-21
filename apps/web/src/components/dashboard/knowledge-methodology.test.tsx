@@ -203,6 +203,21 @@ describe('KnowledgeMethodologyPanel', () => {
     );
   });
 
+  it('compara a versão vigente com outra e destaca as linhas alteradas', async () => {
+    const user = userEvent.setup();
+    render(<KnowledgeMethodologyPanel />);
+    const compareButtons = await screen.findAllByRole('button', { name: 'Comparar' });
+    // versions[1] é a v2 (DRAFT), com uma linha extra ("Rascunho.") em relação à v1 vigente.
+    const compareV2 = compareButtons[1];
+    expect(compareV2).toBeDefined();
+    await user.click(compareV2 as HTMLElement);
+
+    expect(
+      await screen.findByRole('heading', { name: 'Comparação com a versão vigente' }),
+    ).toBeVisible();
+    expect(screen.getByText('1 linha(s) alterada(s)')).toBeVisible();
+  });
+
   it('rollback de versão arquivada cria proposta apenas para quem pode editar', async () => {
     const user = userEvent.setup();
     render(<KnowledgeMethodologyPanel canEdit />);

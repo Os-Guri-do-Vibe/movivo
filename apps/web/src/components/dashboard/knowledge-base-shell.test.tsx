@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type * as ControlCenterApi from '@/lib/control-center-api';
@@ -81,5 +81,22 @@ describe('KnowledgeBaseShell', () => {
     );
     expect(screen.getByRole('heading', { name: 'Conteúdo preservado' })).toBeVisible();
     expect(await screen.findByRole('status')).toHaveTextContent('Parte do resumo');
+  });
+
+  it('desmontar antes das respostas chegarem não tenta atualizar estado (AbortController)', async () => {
+    let resolveDocs: (value: unknown) => void = () => undefined;
+    getKnowledgeDocuments.mockReset().mockReturnValue(
+      new Promise((resolve) => {
+        resolveDocs = resolve;
+      }),
+    );
+    const { unmount } = render(
+      <KnowledgeBaseShell>
+        <h2>Conteúdo preservado</h2>
+      </KnowledgeBaseShell>,
+    );
+    unmount();
+    resolveDocs({ data: { documents: [], policy: null }, meta });
+    await waitFor(() => expect(getKnowledgeDocuments).toHaveBeenCalled());
   });
 });

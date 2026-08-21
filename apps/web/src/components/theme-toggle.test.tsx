@@ -12,7 +12,7 @@
  */
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ThemeProvider } from '@/components/theme-provider';
 import { ThemeToggle } from '@/components/theme-toggle';
@@ -47,5 +47,31 @@ describe('ThemeToggle', () => {
       expect(screen.getByRole('button')).toHaveAccessibleName('Ativar tema claro'),
     );
     expect(screen.getByRole('button')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  describe('sistema em tema escuro', () => {
+    const originalMatchMedia = window.matchMedia;
+
+    afterEach(() => {
+      window.matchMedia = originalMatchMedia;
+    });
+
+    it('resolve para escuro na montagem e mostra o rótulo de ativar o tema claro', async () => {
+      window.matchMedia = ((query: string) => ({
+        matches: query.includes('dark'),
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })) as typeof window.matchMedia;
+
+      renderToggle();
+      const button = await screen.findByRole('button', { name: 'Ativar tema claro' });
+      await waitFor(() => expect(button).toBeEnabled());
+      expect(button).toHaveAttribute('aria-pressed', 'true');
+    });
   });
 });

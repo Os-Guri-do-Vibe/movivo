@@ -11,15 +11,20 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const capture = vi.fn();
+const { capture, analytics } = vi.hoisted(() => ({ capture: vi.fn(), analytics: { on: true } }));
 
-vi.mock('@/lib/env', () => ({ isAnalyticsEnabled: true }));
+vi.mock('@/lib/env', () => ({
+  get isAnalyticsEnabled() {
+    return analytics.on;
+  },
+}));
 vi.mock('posthog-js', () => ({ default: { capture } }));
 
 import { StartCta } from './start-cta';
 
 beforeEach(() => {
   capture.mockClear();
+  analytics.on = true;
 });
 
 describe('StartCta', () => {
@@ -38,5 +43,13 @@ describe('StartCta', () => {
     await user.click(screen.getByRole('link', { name: 'Começar agora' }));
 
     await waitFor(() => expect(capture).toHaveBeenCalledWith('form_started'));
+  });
+
+  it('sem analytics habilitado, o clique nunca chama o PostHog', async () => {
+    analytics.on = false;
+    const user = userEvent.setup();
+    render(<StartCta />);
+    await user.click(screen.getByRole('link', { name: 'Começar agora' }));
+    expect(capture).not.toHaveBeenCalled();
   });
 });

@@ -115,6 +115,52 @@ describe('KnowledgeHistoryPanel', () => {
     expect(screen.queryByRole('listitem')).not.toBeInTheDocument();
   });
 
+  it('sem campos opcionais, cai nos textos e datas de fallback', async () => {
+    getKnowledgeDocuments.mockResolvedValue({
+      ...knowledgeResponse,
+      data: {
+        ...knowledgeResponse.data,
+        documents: [
+          {
+            ...knowledgeResponse.data.documents[0],
+            uploadedBy: null,
+            reviewer: null,
+            reviewNote: null,
+            reviewedAt: null,
+            statusUpdatedAt: null,
+          },
+        ],
+      },
+    });
+    getMethodology.mockResolvedValue({
+      ...methodologyResponse,
+      data: {
+        ...methodologyResponse.data,
+        versions: [
+          {
+            ...methodologyResponse.data.versions[0],
+            createdBy: null,
+            reviewedBy: null,
+            changeNote: null,
+            reviewedAt: null,
+            publishedAt: null,
+            statusChangedAt: null,
+          },
+        ],
+      },
+    });
+
+    render(<KnowledgeHistoryPanel />);
+
+    const items = await screen.findAllByRole('listitem');
+    expect(items).toHaveLength(2);
+    // "Responsável não informado" fica ao lado do ID técnico no mesmo <p> — texto quebrado
+    // entre nós, por isso a contagem via textContent em vez de getAllByText.
+    expect(document.body.textContent?.match(/Responsável não informado/g)).toHaveLength(2);
+    expect(screen.getByText('Sem nota registrada')).toBeInTheDocument();
+    expect(screen.getByText('Arquivo descanso.md')).toBeInTheDocument();
+  });
+
   it('só mostra o link de auditoria completa quando o ator pode ler auditoria', async () => {
     getKnowledgeDocuments.mockResolvedValue(knowledgeResponse);
     getMethodology.mockResolvedValue(methodologyResponse);

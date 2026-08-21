@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ControlCenterApiError } from '@/lib/control-center-api';
 import type * as ControlCenterApi from '@/lib/control-center-api';
 
 const api = vi.hoisted(() => ({
@@ -227,6 +228,68 @@ describe('AiPersonaDashboard', () => {
       }),
     );
     expect(await screen.findByRole('status')).toHaveTextContent('60 segundos');
+  });
+
+  it('nome inválido: "Executar teste" não chama o simulador', async () => {
+    const user = userEvent.setup();
+    renderPersona();
+    const name = await screen.findByLabelText('Nome da agente');
+    await user.clear(name);
+    await user.type(name, 'X');
+    await user.click(screen.getByRole('button', { name: 'Revisar e publicar' }));
+    await user.click(screen.getByRole('button', { name: 'Executar teste' }));
+    expect(api.simulateAgentConfig).not.toHaveBeenCalled();
+  });
+
+  it('erro conhecido da API ao publicar mostra a mensagem específica do servidor', async () => {
+    const user = userEvent.setup();
+    api.publishAgentPersona.mockRejectedValueOnce(
+      new ControlCenterApiError(422, 'motivo da alteração inválido'),
+    );
+    renderPersona();
+    const name = await screen.findByLabelText('Nome da agente');
+    await user.clear(name);
+    await user.type(name, 'NOVA');
+    await user.click(screen.getByRole('button', { name: 'Revisar e publicar' }));
+    await user.type(screen.getByLabelText('Motivo da alteração'), 'novo nome da agente');
+    await user.click(screen.getByRole('button', { name: 'Executar teste' }));
+    await screen.findByText('Integridade L0');
+    await user.click(screen.getByRole('button', { name: 'Publicar configuração' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('motivo da alteração inválido');
+  });
+
+  it('erro inesperado ao publicar mostra a mensagem genérica', async () => {
+    const user = userEvent.setup();
+    api.publishAgentPersona.mockRejectedValueOnce(new Error('conexão perdida'));
+    renderPersona();
+    const name = await screen.findByLabelText('Nome da agente');
+    await user.clear(name);
+    await user.type(name, 'NOVA');
+    await user.click(screen.getByRole('button', { name: 'Revisar e publicar' }));
+    await user.type(screen.getByLabelText('Motivo da alteração'), 'novo nome da agente');
+    await user.click(screen.getByRole('button', { name: 'Executar teste' }));
+    await screen.findByText('Integridade L0');
+    await user.click(screen.getByRole('button', { name: 'Publicar configuração' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Não foi possível concluir a publicação.',
+    );
+  });
+
+  it('erro ao executar o simulador mostra a mensagem de falha', async () => {
+    const user = userEvent.setup();
+    api.simulateAgentConfig.mockRejectedValueOnce(
+      new ControlCenterApiError(503, 'simulador fora do ar'),
+    );
+    renderPersona();
+    const name = await screen.findByLabelText('Nome da agente');
+    await user.clear(name);
+    await user.type(name, 'NOVA');
+    await user.click(screen.getByRole('button', { name: 'Revisar e publicar' }));
+    await user.click(screen.getByRole('button', { name: 'Executar teste' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('simulador fora do ar');
   });
 
   it('restaura uma versão antiga como nova versão auditável', async () => {
