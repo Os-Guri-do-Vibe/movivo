@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ProtocolExercise, ProtocolStructure } from '@movivo/shared';
 
-import { ValidationService, type ValidateProtocolInput } from './validation.service';
+import { aggregate, ValidationService, type ValidateProtocolInput } from './validation.service';
 
 const service = new ValidationService();
 
@@ -509,5 +509,38 @@ describe('ValidationService.validateResponse — texto livre da conversa (US-3.5
       allowedExercises: ['leg_press'],
     });
     expect(v.action).toBe('PASS');
+  });
+});
+
+describe('aggregate — derivação do veredito final', () => {
+  // Nenhuma regra do catálogo atual produz FLAG isolado (a última, DIAGNOSIS, virou BLOCK),
+  // mas FLAG_HUMAN_REVIEW segue um veredito real consumido fora deste serviço
+  // (protocol-planner.ts, protocol-auto-release.worker.ts) — testado direto na função pura.
+  it('FLAG isolado (sem BLOCK) vira FLAG_HUMAN_REVIEW', () => {
+    const v = aggregate([{ rule: 'HYPOTHETICAL_FLAG', detail: 'exemplo', action: 'FLAG' }]);
+    expect(v).toEqual({
+      action: 'FLAG_HUMAN_REVIEW',
+      code: 'FLAG',
+      humanReviewRequired: true,
+      violations: [{ rule: 'HYPOTHETICAL_FLAG', detail: 'exemplo', action: 'FLAG' }],
+    });
+  });
+
+  it('BLOCK tem prioridade sobre FLAG quando ambos estão presentes', () => {
+    const v = aggregate([
+      { rule: 'HYPOTHETICAL_FLAG', detail: 'exemplo', action: 'FLAG' },
+      { rule: 'SOME_BLOCK', detail: 'exemplo', action: 'BLOCK' },
+    ]);
+    expect(v.action).toBe('BLOCK_FALLBACK');
+    expect(v.code).toBe('BLOCK');
+  });
+
+  it('sem violações vira PASS', () => {
+    expect(aggregate([])).toEqual({
+      action: 'PASS',
+      code: 'PASS',
+      humanReviewRequired: false,
+      violations: [],
+    });
   });
 });

@@ -369,8 +369,13 @@ function collectText(structure: ProtocolStructure): string {
   return parts.join('\n');
 }
 
-/** Deriva a ação final: qualquer BLOCK → fallback; senão qualquer FLAG → revisão; senão PASS. */
-function aggregate(violations: ValidationViolation[]): ValidationVerdict {
+/**
+ * Deriva a ação final: qualquer BLOCK → fallback; senão qualquer FLAG → revisão; senão PASS.
+ * Exportada para teste direto: nenhuma regra atual do catálogo produz FLAG isolado (a última,
+ * `DIAGNOSIS`, virou BLOCK — ver changelog do serviço), mas o ramo FLAG_HUMAN_REVIEW continua
+ * um veredito real consumido por `protocol-planner.ts`/`protocol-auto-release.worker.ts`.
+ */
+export function aggregate(violations: ValidationViolation[]): ValidationVerdict {
   if (violations.some((v) => v.action === 'BLOCK')) {
     return { action: 'BLOCK_FALLBACK', code: 'BLOCK', humanReviewRequired: true, violations };
   }
