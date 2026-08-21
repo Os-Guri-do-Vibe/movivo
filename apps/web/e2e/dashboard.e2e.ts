@@ -120,17 +120,18 @@ test('login → rota padrão do papel → pilar Alunos → ficha do aluno', asyn
   await expect(page).toHaveURL(/\/dashboard\/alunos$/);
   await expect(page.getByRole('heading', { name: 'Base de Alunos' })).toBeVisible();
 
-  // `> li` e não `getByRole('listitem')`: a lista de sinais de risco dentro do card
-  // também é uma `<ul>`, e o papel casaria com os `li` aninhados.
-  const students = page.getByRole('list', { name: 'Alunos autorizados' }).locator('> li');
-  await expect(students).toHaveCount(1);
-  await expect(students.first()).toContainText('Pessoa Teste');
-  // O risco de cancelamento vem nomeado — número sozinho não gera ação (US-7.4).
-  await expect(students.first()).toContainText('Sem mensagem recebida há 14 dias');
+  // Base de Alunos virou tabela (achado 2026-08-19, a pedido do fundador): a
+  // ordenação/filtro por coluna substituiu a lista de cards.
+  const table = page.getByRole('region', { name: 'Tabela da base de alunos' });
+  await expect(table.getByRole('row')).toHaveCount(2); // cabeçalho + 1 aluno
+  await expect(table.getByRole('link', { name: 'Pessoa Teste' })).toBeVisible();
 
-  await students.first().getByRole('link', { name: 'Abrir ficha do aluno' }).click();
+  await table.getByRole('link', { name: 'Pessoa Teste' }).click();
   await expect(page).toHaveURL(/\/dashboard\/alunos\/[0-9a-f-]+$/);
   await expect(page.getByRole('heading', { name: 'Pessoa Teste' })).toBeVisible();
+  // O risco de cancelamento vem nomeado — número sozinho não gera ação (US-7.4).
+  // Na tabela não cabe o motivo do risco; ele mora na ficha do aluno.
+  await expect(page.getByText('Sem mensagem recebida há 14 dias')).toBeVisible();
   // Timeline única com as 6 origens (US-7.4, TASK-7.4.1).
   for (const label of [
     'Anamnese concluída',

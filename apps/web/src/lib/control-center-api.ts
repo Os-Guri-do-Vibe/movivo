@@ -4,7 +4,11 @@ import {
   agentPersonaResponseSchema,
   configSimulationResponseSchema,
   faqEntriesResponseSchema,
+  forbiddenTopicsResponseSchema,
   inviolableRulesResponseSchema,
+  type CreateForbiddenTopicInput,
+  type ForbiddenTopicActionInput,
+  type ForbiddenTopicsResponse,
   l1GuardrailsResponseSchema,
   type AgentConfigHistoryResponse,
   type AuditSearchQuery,
@@ -56,6 +60,83 @@ interface Parser<T> {
   parse(value: unknown): T;
 }
 
+export type KnowledgeDocumentStatus =
+  | 'QUARANTINED'
+  | 'QUEUED'
+  | 'PROCESSING'
+  | 'READY_FOR_REVIEW'
+  | 'APPROVED'
+  | 'INDEXING'
+  | 'PUBLISHED'
+  | 'REJECTED'
+  | 'FAILED'
+  | 'ARCHIVED'
+  | 'PENDING';
+
+export interface KnowledgeDocumentView {
+  id: string;
+  title: string;
+  topic: string;
+  sourceUrl: string | null;
+  originalFilename: string;
+  mimeType: string;
+  sizeBytes: number;
+  sha256: string;
+  status: KnowledgeDocumentStatus;
+  uploadedBy: string | null;
+  reviewer: string | null;
+  reviewNote: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
+  retainedUntil: string | null;
+  blobAvailable: boolean;
+  chunkCount: number;
+  category?: string | null;
+  logicalKey?: string | null;
+  version?: number | string | null;
+  author?: string | null;
+  license?: string | null;
+  stage?: string | null;
+  errorCode?: string | null;
+  canRetry?: boolean;
+  processingStage?: string | null;
+  processingError?: string | null;
+  statusUpdatedAt?: string | null;
+}
+
+export interface KnowledgeDocumentsViewResponse extends Omit<KnowledgeDocumentsResponse, 'data'> {
+  data: Omit<KnowledgeDocumentsResponse['data'], 'documents'> & {
+    documents: KnowledgeDocumentView[];
+  };
+}
+
+export type MethodologyStatus =
+  'DRAFT' | 'IN_REVIEW' | 'APPROVED' | 'PUBLISHED' | 'REJECTED' | 'ARCHIVED';
+
+export interface MethodologyVersionView {
+  id: string;
+  version: number | string;
+  status: MethodologyStatus;
+  content: string;
+  summary: string | null;
+  sha256: string | null;
+  changeNote: string | null;
+  createdBy: string | null;
+  reviewedBy: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
+  publishedAt: string | null;
+  statusChangedAt: string | null;
+  current: boolean;
+}
+
+export interface MethodologyResponse {
+  data: {
+    versions: MethodologyVersionView[];
+  };
+  meta: KnowledgeDocumentsResponse['meta'];
+}
+
 export class ControlCenterApiError extends Error {
   constructor(
     readonly status: number,
@@ -68,6 +149,137 @@ export class ControlCenterApiError extends Error {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
+
+const KNOWLEDGE_STATUSES = new Set<KnowledgeDocumentStatus>([
+  'QUARANTINED',
+  'QUEUED',
+  'PROCESSING',
+  'READY_FOR_REVIEW',
+  'APPROVED',
+  'INDEXING',
+  'PUBLISHED',
+  'REJECTED',
+  'FAILED',
+  'ARCHIVED',
+  'PENDING',
+]);
+const METHODOLOGY_STATUSES = new Set<MethodologyStatus>([
+  'DRAFT',
+  'IN_REVIEW',
+  'APPROVED',
+  'PUBLISHED',
+  'REJECTED',
+  'ARCHIVED',
+]);
+
+function optionalString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+/** Aceita o contrato legado e a evolução assíncrona sem afrouxar campos essenciais. */
+const knowledgeDocumentsViewResponseSchema: Parser<KnowledgeDocumentsViewResponse> = {
+  parse(value) {
+    const strict = knowledgeDocumentsResponseSchema.safeParse(value);
+    if (strict.success) {
+      const documents = strict.data.data.documents.map((entry) => ({
+        ...entry,
+        processingStage: optionalString(entry.stage),
+        processingError: optionalString(entry.errorCode),
+      })) as unknown as KnowledgeDocumentView[];
+      return {
+        ...strict.data,
+        data: { ...strict.data.data, documents },
+      } as unknown as KnowledgeDocumentsViewResponse;
+    }
+    if (!isRecord(value) || !isRecord(value.data) || !Array.isArray(value.data.documents)) {
+      throw new Error('Resposta de documentos inválida.');
+    }
+    const documents = value.data.documents.map((entry) => {
+      if (
+        !isRecord(entry) ||
+        typeof entry.status !== 'string' ||
+        !KNOWLEDGE_STATUSES.has(entry.status as KnowledgeDocumentStatus)
+      ) {
+        throw new Error('Documento inválido.');
+      }
+      const requiredStrings = [
+        'id',
+        'title',
+        'topic',
+        'originalFilename',
+        'mimeType',
+        'sha256',
+        'createdAt',
+      ] as const;
+      if (requiredStrings.some((key) => typeof entry[key] !== 'string')) {
+        throw new Error('Documento incompleto.');
+      }
+      return {
+        ...entry,
+        processingStage: optionalString(entry.processingStage ?? entry.stage),
+        processingError: optionalString(entry.processingError ?? entry.errorCode),
+      } as unknown as KnowledgeDocumentView;
+    });
+    const base = value as unknown as KnowledgeDocumentsViewResponse;
+    return { ...base, data: { ...base.data, documents } };
+  },
+};
+
+const methodologyResponseSchema: Parser<MethodologyResponse> = {
+  parse(value) {
+    if (
+      !isRecord(value) ||
+      !isRecord(value.data) ||
+      !Array.isArray(value.data.versions) ||
+      !isRecord(value.meta)
+    ) {
+      throw new Error('Resposta de metodologia inválida.');
+    }
+    const currentId = optionalString(value.data.currentVersionId);
+    const versions = value.data.versions.map((entry) => {
+      if (
+        !isRecord(entry) ||
+        typeof entry.id !== 'string' ||
+        (typeof (entry.version ?? entry.versionLabel) !== 'number' &&
+          typeof (entry.version ?? entry.versionLabel) !== 'string') ||
+        typeof entry.status !== 'string' ||
+        !METHODOLOGY_STATUSES.has(entry.status as MethodologyStatus) ||
+        typeof entry.content !== 'string' ||
+        typeof (entry.createdAt ?? entry.statusChangedAt) !== 'string'
+      ) {
+        throw new Error('Versão de metodologia inválida.');
+      }
+      const status = entry.status as MethodologyStatus;
+      const statusChangedAt = optionalString(entry.statusChangedAt);
+      return {
+        id: entry.id,
+        version: (entry.version ?? entry.versionLabel) as number | string,
+        status,
+        content: entry.content,
+        summary: optionalString(entry.summary),
+        sha256: optionalString(entry.sha256 ?? entry.contentHash ?? entry.contentSha256),
+        changeNote: optionalString(entry.changeNote),
+        createdBy: optionalString(entry.createdBy ?? entry.createdByName),
+        reviewedBy: optionalString(entry.reviewedBy ?? entry.reviewedByName ?? entry.lastActor),
+        createdAt: (entry.createdAt ?? entry.statusChangedAt) as string,
+        reviewedAt:
+          optionalString(entry.reviewedAt) ??
+          (status === 'APPROVED' || status === 'REJECTED' ? statusChangedAt : null),
+        publishedAt:
+          optionalString(entry.publishedAt) ?? (status === 'PUBLISHED' ? statusChangedAt : null),
+        statusChangedAt,
+        current:
+          entry.current === true ||
+          entry.isCurrent === true ||
+          (currentId !== null && entry.id === currentId),
+      };
+    });
+    return {
+      data: { versions },
+      meta: value.meta as unknown as MethodologyResponse['meta'],
+    };
+  },
+};
 
 async function request<T>(path: string, schema: Parser<T>, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`/api/dashboard/control/${path}`, {
@@ -255,8 +467,47 @@ export function retireL1Guardrail(input: RetireL1GuardrailInput): Promise<L1Guar
   return mutate('ai/guardrails/retire', input, l1GuardrailsResponseSchema);
 }
 
-export function getKnowledgeDocuments(signal?: AbortSignal): Promise<KnowledgeDocumentsResponse> {
-  return request('ai/knowledge', knowledgeDocumentsResponseSchema, signal);
+/* ------------------------- Temas proibidos (maker-checker) ------------------------- */
+
+/**
+ * Temas proibidos são entidade própria, **não** um campo da persona: o contrato
+ * (`forbidden-topic.schema.ts`) separa `label` — que vai ao prompt — de `phrases`, que
+ * nunca sai do comparador determinístico do servidor. Por isso a publicação também é
+ * separada: propor exige `AI_CONFIG_WRITE`; aprovar exige `AI_GUARDRAIL_APPROVE`, e o
+ * banco recusa aprovador igual ao proponente.
+ */
+export function getForbiddenTopics(signal?: AbortSignal): Promise<ForbiddenTopicsResponse> {
+  return request('ai/forbidden-topics', forbiddenTopicsResponseSchema, signal);
+}
+
+export function proposeForbiddenTopic(
+  input: CreateForbiddenTopicInput,
+): Promise<ForbiddenTopicsResponse> {
+  return mutate('ai/forbidden-topics', input, forbiddenTopicsResponseSchema);
+}
+
+export function submitForbiddenTopic(
+  input: ForbiddenTopicActionInput,
+): Promise<ForbiddenTopicsResponse> {
+  return mutate('ai/forbidden-topics/submit', input, forbiddenTopicsResponseSchema);
+}
+
+export function approveForbiddenTopic(
+  input: ForbiddenTopicActionInput,
+): Promise<ForbiddenTopicsResponse> {
+  return mutate('ai/forbidden-topics/approve', input, forbiddenTopicsResponseSchema);
+}
+
+export function retireForbiddenTopic(
+  input: ForbiddenTopicActionInput,
+): Promise<ForbiddenTopicsResponse> {
+  return mutate('ai/forbidden-topics/retire', input, forbiddenTopicsResponseSchema);
+}
+
+export function getKnowledgeDocuments(
+  signal?: AbortSignal,
+): Promise<KnowledgeDocumentsViewResponse> {
+  return request('ai/knowledge', knowledgeDocumentsViewResponseSchema, signal);
 }
 
 export function getKnowledgeDocumentContent(
@@ -272,14 +523,80 @@ export function getKnowledgeDocumentContent(
 
 export function uploadKnowledgeDocument(
   input: UploadKnowledgeDocumentInput,
-): Promise<KnowledgeDocumentsResponse> {
-  return mutate('ai/knowledge/upload', input, knowledgeDocumentsResponseSchema);
+): Promise<KnowledgeDocumentsViewResponse> {
+  return mutate('ai/knowledge/upload', input, knowledgeDocumentsViewResponseSchema);
 }
 
 export function reviewKnowledgeDocument(
   input: ReviewKnowledgeDocumentInput,
-): Promise<KnowledgeDocumentsResponse> {
-  return mutate('ai/knowledge/review', input, knowledgeDocumentsResponseSchema);
+): Promise<KnowledgeDocumentsViewResponse> {
+  return mutate('ai/knowledge/review', input, knowledgeDocumentsViewResponseSchema);
+}
+
+export function retryKnowledgeDocument(id: string): Promise<KnowledgeDocumentsViewResponse> {
+  return mutate(
+    `ai/knowledge/${encodeURIComponent(id)}/retry`,
+    {},
+    knowledgeDocumentsViewResponseSchema,
+  );
+}
+
+export function archiveKnowledgeDocument(
+  id: string,
+  note: string,
+): Promise<KnowledgeDocumentsViewResponse> {
+  return mutate(
+    `ai/knowledge/${encodeURIComponent(id)}/archive`,
+    { note },
+    knowledgeDocumentsViewResponseSchema,
+  );
+}
+
+export function getMethodology(signal?: AbortSignal): Promise<MethodologyResponse> {
+  return request('ai/methodology', methodologyResponseSchema, signal);
+}
+
+export function createMethodologyVersion(input: {
+  content: string;
+  summary?: string;
+  changeNote: string;
+}): Promise<MethodologyResponse> {
+  return mutate('ai/methodology', input, methodologyResponseSchema);
+}
+
+export function submitMethodologyVersion(id: string, note: string): Promise<MethodologyResponse> {
+  return mutate(
+    `ai/methodology/${encodeURIComponent(id)}/submit`,
+    { note },
+    methodologyResponseSchema,
+  );
+}
+
+export function reviewMethodologyVersion(
+  id: string,
+  input: { decision: 'APPROVED' | 'REJECTED'; note: string },
+): Promise<MethodologyResponse> {
+  return mutate(
+    `ai/methodology/${encodeURIComponent(id)}/review`,
+    input,
+    methodologyResponseSchema,
+  );
+}
+
+export function publishMethodologyVersion(id: string, note: string): Promise<MethodologyResponse> {
+  return mutate(
+    `ai/methodology/${encodeURIComponent(id)}/publish`,
+    { note },
+    methodologyResponseSchema,
+  );
+}
+
+export function rollbackMethodologyVersion(id: string, note: string): Promise<MethodologyResponse> {
+  return mutate(
+    `ai/methodology/${encodeURIComponent(id)}/rollback`,
+    { note },
+    methodologyResponseSchema,
+  );
 }
 
 /* ------------------------- Sócios & Distribuição (US-8.7) ------------------------- */

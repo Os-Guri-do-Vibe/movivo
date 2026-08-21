@@ -9,7 +9,7 @@
 import { index, pgTable, text, varchar } from 'drizzle-orm/pg-core';
 
 import { primaryKeyColumn, timestampColumns } from './_shared';
-import { embeddingVector } from './knowledge-base';
+import { embeddingVector } from './vector';
 
 export const intentExamples = pgTable(
   'intent_examples',

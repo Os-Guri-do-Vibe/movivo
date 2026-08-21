@@ -13,9 +13,14 @@ import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 import { type Job } from 'bullmq';
 import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
+import { buildHumanHandoffMessage, DEFAULT_AGENT_PERSONA } from '@movivo/shared';
 
-import { REDIS_CLIENT } from '../../core/redis/redis.constants';
+import { REDIS_CLIENT, REDIS_KEY_BUILDER, type RedisKeyBuilder } from '../../core/redis';
 import { FaqService } from '../../core/agent-config/faq.service';
+import {
+  ForbiddenTopicsService,
+  ForbiddenTopicsUnavailableError,
+} from '../../core/agent-config/forbidden-topics.service';
 import { L1GuardrailService } from '../../core/agent-config/l1-guardrail.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { ContextService } from '../ai-coach/context/context.service';
@@ -38,11 +43,17 @@ import { UserJobLock } from '../whatsapp/user-job-lock';
 import {
   DAILY_LIMIT_MESSAGE,
   DLQ_FALLBACK_MESSAGE,
+  FORBIDDEN_TOPIC_RESPONSE,
   SAFETY_HANDOFF_MESSAGE,
   STANDARD_BLOCK_RESPONSE,
   SUBSTITUTION_FALLBACK_MESSAGE,
+  TECHNICAL_NO_EVIDENCE_MESSAGE,
 } from './coach-messages';
 import { ConversationRepository } from './conversation.repository';
+import { applyResponseFormatting } from './response-formatter';
+import { untrustedDataEnvelope } from '../ai-coach/context/untrusted-context';
+import { METHODOLOGY_AWARE_INTENTS } from '../ai-coach/intent/prompts';
+import { MethodologyProvider } from '../protocol/methodology-provider.service';
 
 /** Resultado interno da montagem da resposta, antes de enviar/persistir. */
 interface ResponseDraft {
@@ -57,6 +68,9 @@ interface ResponseDraft {
     documentId: string | null;
     title: string;
     sourceUrl?: string;
+    documentVersion?: number;
+    documentSha256?: string;
+    publicationEventId?: string;
   }>;
 }
 
@@ -71,14 +85,17 @@ export class AIResponseWorker implements OnModuleInit {
     private readonly classifier: IntentClassifier,
     private readonly prompts: PromptResolverService,
     private readonly faq: FaqService,
+    private readonly forbiddenTopics: ForbiddenTopicsService,
     private readonly l1Guardrails: L1GuardrailService,
     private readonly context: ContextService,
     private readonly llm: LlmRouter,
     private readonly abuse: LlmAbuseGuard,
     private readonly validation: ValidationService,
+    private readonly methodology: MethodologyProvider,
     private readonly repo: ConversationRepository,
     private readonly healthConsent: HealthConsentService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(AIResponseWorker.name);
@@ -96,37 +113,40 @@ export class AIResponseWorker implements OnModuleInit {
   }
 
   async process(job: Job<AiResponseJob>): Promise<{ status: string }> {
-    const { userId, batchKey, correlationId, enqueuedAt } = job.data;
-
-    if (!(await this.healthConsent.hasActiveForUser(userId))) {
-      await this.drainBatch(batchKey);
-      this.logger.info(
-        { event: 'ai_response_discarded_no_consent', userId },
-        'batch descartado sem tratamento apos revogacao',
+    const { userId, batchKey: suppliedBatchKey, correlationId, enqueuedAt } = job.data;
+    const batchKey = this.keys.forUser(userId, 'ai-response', 'batch');
+    if (suppliedBatchKey !== batchKey) {
+      this.logger.warn(
+        { event: 'ai_response_batch_key_rejected', userId },
+        'batchKey do job não corresponde ao namespace do titular',
       );
-      return { status: 'CONSENT_REVOKED' };
     }
 
-    const message = await this.drainBatch(batchKey);
-    if (!message) return { status: 'EMPTY' };
+    const consentActive = await this.healthConsent.hasActiveForUser(userId);
 
-    // Lock por usuário: se outro job está em curso, ele já drena o mesmo batchKey.
+    // O lock vem antes do drain: um job concorrente nunca consome o lote do outro.
     const token = await this.lock.acquire(userId);
     if (!token) {
-      this.logger.info({ userId }, 'lock ocupado — job em curso drena o batch, nada a fazer');
+      this.logger.info({ userId }, 'lock ocupado — lote preservado para o job em curso');
       return { status: 'LOCKED' };
     }
 
     try {
+      if (!consentActive) {
+        await this.drainBatch(batchKey);
+        this.logger.info(
+          { event: 'ai_response_discarded_no_consent', userId },
+          'batch descartado sem tratamento apos revogacao',
+        );
+        return { status: 'CONSENT_REVOKED' };
+      }
+
+      const message = await this.drainBatch(batchKey);
+      if (!message) return { status: 'EMPTY' };
+
       await this.repo.persistTurn({ userId, direction: 'INBOUND', content: message });
       await this.context.recordTurn(userId, 'user', message);
       await this.enqueueTyping(userId);
-
-      // Teto operacional: acima de 50 msg/dia, aviso gentil SEM custo de LLM (Sato §9.4).
-      if (await this.abuse.isOverDailyLimit(userId)) {
-        await this.deliver(userId, correlationId, DAILY_LIMIT_MESSAGE, null, false, enqueuedAt);
-        return { status: 'LIMIT' };
-      }
 
       // O guardrail sempre vence o FAQ. Só mensagens dentro do perímetro seguro chegam ao
       // match exato; assim uma resposta estática nunca mascara um alerta prioritário.
@@ -141,6 +161,55 @@ export class AIResponseWorker implements OnModuleInit {
         await this.context.recordTurn(userId, 'assistant', SAFETY_HANDOFF_MESSAGE);
         return { status: 'SAFETY_HANDOFF' };
       }
+
+      // Emergência sempre vence o teto operacional: limite de uso nunca mascara risco.
+      if (await this.abuse.isOverDailyLimit(userId)) {
+        await this.deliver(userId, correlationId, DAILY_LIMIT_MESSAGE, null, false, enqueuedAt);
+        return { status: 'LIMIT' };
+      }
+
+      // L0 sempre vence; depois dele, bloqueios aprovados vencem FAQ/classificação/LLM.
+      try {
+        const topic = await this.forbiddenTopics.evaluate(message);
+        if (topic) {
+          await this.deliver(
+            userId,
+            correlationId,
+            FORBIDDEN_TOPIC_RESPONSE,
+            null,
+            true,
+            enqueuedAt,
+            0,
+            false,
+          );
+          await this.context.recordTurn(userId, 'assistant', FORBIDDEN_TOPIC_RESPONSE);
+          this.logger.info(
+            {
+              event: 'forbidden_topic_blocked',
+              topicKey: topic.topicKey,
+              topicVersion: topic.version,
+            },
+            'tema proibido bloqueado antes do FAQ e do LLM',
+          );
+          return { status: 'FORBIDDEN_TOPIC' };
+        }
+      } catch (error) {
+        if (!(error instanceof ForbiddenTopicsUnavailableError)) throw error;
+        await this.repo.persistHandoff(userId, 'ALERT', 'AGENT_CONFIG_UNAVAILABLE');
+        await this.deliver(
+          userId,
+          correlationId,
+          STANDARD_BLOCK_RESPONSE,
+          null,
+          false,
+          enqueuedAt,
+          0,
+          false,
+        );
+        await this.context.recordTurn(userId, 'assistant', STANDARD_BLOCK_RESPONSE);
+        return { status: 'CONFIG_UNAVAILABLE' };
+      }
+
       if (guardrail === 'SCOPE') {
         const response = await this.prompts.foraDeEscopoResponse();
         await this.deliver(userId, correlationId, response, null, true, enqueuedAt, 0, true);
@@ -150,7 +219,13 @@ export class AIResponseWorker implements OnModuleInit {
         return { status: 'SENT' };
       }
 
-      const faq = await this.faq.match(message);
+      const faq = await this.faq.match(message).catch(() => {
+        this.logger.warn(
+          { event: 'faq_runtime_degraded' },
+          'FAQ indisponível; fluxo seguro segue para classificação',
+        );
+        return null;
+      });
       if (faq) {
         const verdict = this.validation.validateResponse(faq.answer);
         const blocked = verdict.action !== 'PASS';
@@ -197,6 +272,29 @@ export class AIResponseWorker implements OnModuleInit {
         await this.deliver(userId, correlationId, SAFETY_HANDOFF_MESSAGE, null, false, enqueuedAt);
         await this.context.recordTurn(userId, 'assistant', SAFETY_HANDOFF_MESSAGE);
         return { status: 'SAFETY_HANDOFF' };
+      }
+
+      if (intent.intent === 'PEDIDO_HANDOFF') {
+        const configured = await this.prompts.humanHandoffMessage();
+        const handoffVerdict = this.validation.validateResponse(configured);
+        const response =
+          handoffVerdict.action === 'PASS'
+            ? configured
+            : buildHumanHandoffMessage(DEFAULT_AGENT_PERSONA);
+        if (handoffVerdict.action !== 'PASS') {
+          this.logger.warn(
+            {
+              event: 'handoff_copy_blocked',
+              rules: handoffVerdict.violations.map((violation) => violation.rule),
+            },
+            'copy configurada de passagem bloqueada; default seguro aplicado',
+          );
+        }
+        await this.repo.persistHandoff(userId, 'ALERT', 'PEDIDO_HANDOFF');
+        await this.deliver(userId, correlationId, response, null, true, enqueuedAt, 0, false);
+        await this.context.recordTurn(userId, 'assistant', response);
+        await this.context.summarizeIfNeeded(userId);
+        return { status: 'HANDOFF' };
       }
 
       const draft = await this.buildResponse(userId, intent.intent, message, scrubUser);
@@ -296,23 +394,65 @@ export class AIResponseWorker implements OnModuleInit {
     opts: { extraSystem?: string; allowedExercises?: string[] } | undefined,
   ): Promise<ResponseDraft> {
     const ctx = await this.context.build(userId, intent, message);
-    const rag = ctx.ragDocs.length
-      ? 'TRECHOS DE REFERÊNCIA (baseie a resposta técnica só nisto):\n' +
-        ctx.ragDocs
-          .map(
-            (document) =>
-              `[Fonte: ${document.title}${document.sourceUrl ? ` | ${document.sourceUrl}` : ''}]\n${document.snippet}`,
-          )
-          .join('\n---\n')
-      : '';
-    const system = [
-      await this.prompts.resolvePrompt(intent),
-      ctx.cacheablePrefix,
-      rag,
-      opts?.extraSystem,
-    ]
-      .filter(Boolean)
-      .join('\n\n');
+    const runtime = await this.prompts.resolveRuntime(intent);
+    const system = [runtime.system, opts?.extraSystem].filter(Boolean).join('\n\n');
+
+    const methodology = METHODOLOGY_AWARE_INTENTS.includes(intent)
+      ? await this.methodology.current().catch((error: unknown) => {
+          this.logger.warn(
+            { event: 'methodology_context_unavailable', err: String(error) },
+            'coach segue sem resumo metodológico',
+          );
+          return null;
+        })
+      : null;
+
+    if (intent === 'DUVIDA_TECNICA' && ctx.ragDocs.length === 0) {
+      return {
+        ...draftPass(TECHNICAL_NO_EVIDENCE_MESSAGE, null, 0),
+        humanReview: true,
+      };
+    }
+
+    const messages = [
+      {
+        role: 'user' as const,
+        content: untrustedDataEnvelope('ESTADO_E_MEMORIA', ctx.cacheablePrefix),
+      },
+      ...(ctx.ragDocs.length
+        ? [
+            {
+              role: 'user' as const,
+              content: untrustedDataEnvelope(
+                'BASE_DE_CONHECIMENTO',
+                ctx.ragDocs.map((document) => ({
+                  chunkId: document.chunkId,
+                  documentId: document.documentId,
+                  title: document.title,
+                  sourceUrl: document.sourceUrl ?? null,
+                  snippet: document.snippet,
+                })),
+              ),
+            },
+          ]
+        : []),
+      ...(methodology?.summary
+        ? [
+            {
+              role: 'user' as const,
+              content: untrustedDataEnvelope('METODOLOGIA_MOVIVO_APROVADA', {
+                version: methodology.versionLabel,
+                sha256: methodology.contentSha256,
+                summary: methodology.summary,
+              }),
+            },
+          ]
+        : []),
+      {
+        role: 'user' as const,
+        content: untrustedDataEnvelope('HISTORICO_RECENTE_E_MENSAGEM', ctx.volatileSuffix),
+      },
+    ];
 
     const startedAt = Date.now();
     const result = await this.llm.complete({
@@ -321,14 +461,28 @@ export class AIResponseWorker implements OnModuleInit {
       user: scrubUser,
       dataClass: 'HEALTH',
       system,
-      messages: [{ role: 'user', content: ctx.volatileSuffix }],
-      maxTokens: 500,
+      messages,
+      maxTokens: { CURTO: 96, MEDIO: 192, LIVRE: 384 }[runtime.formatting.blockSize],
       cache: true,
       intent: `coach_${intent}`,
     });
     const latencyMs = Date.now() - startedAt;
 
-    const verdict = this.validation.validateResponse(result.text, {
+    const rawVerdict = this.validation.validateResponse(result.text, {
+      allowedExercises: opts?.allowedExercises,
+    });
+    if (rawVerdict.action === 'BLOCK_FALLBACK') {
+      return {
+        text: STANDARD_BLOCK_RESPONSE,
+        modelUsed: result.model,
+        latencyMs,
+        validationPassed: false,
+        humanReview: true,
+        blocked: true,
+      };
+    }
+    const formatted = applyResponseFormatting(result.text, runtime.formatting);
+    const verdict = this.validation.validateResponse(formatted, {
       allowedExercises: opts?.allowedExercises,
     });
     if (verdict.action === 'BLOCK_FALLBACK') {
@@ -342,17 +496,20 @@ export class AIResponseWorker implements OnModuleInit {
       };
     }
     return {
-      text: result.text,
+      text: formatted,
       modelUsed: result.model,
       latencyMs,
       validationPassed: true,
-      humanReview: verdict.humanReviewRequired,
+      humanReview: rawVerdict.humanReviewRequired || verdict.humanReviewRequired,
       blocked: false,
       ragSources: ctx.ragDocs.map((document) => ({
         chunkId: document.chunkId,
         documentId: document.documentId,
         title: document.title,
         ...(document.sourceUrl ? { sourceUrl: document.sourceUrl } : {}),
+        ...(document.documentVersion ? { documentVersion: document.documentVersion } : {}),
+        ...(document.documentSha256 ? { documentSha256: document.documentSha256 } : {}),
+        ...(document.publicationEventId ? { publicationEventId: document.publicationEventId } : {}),
       })),
     };
   }
@@ -402,10 +559,10 @@ export class AIResponseWorker implements OnModuleInit {
     await this.queues.enqueue(QUEUE.whatsappOutbound, 'coach-typing', job);
   }
 
-  /** Drena o buffer LIST do batch (concatena a rajada) e o apaga. */
+  /** Drena e apaga o buffer numa única transação Redis (concatena a rajada). */
   private async drainBatch(batchKey: string): Promise<string> {
-    const items = await this.redis.lrange(batchKey, 0, -1);
-    await this.redis.del(batchKey);
+    const result = await this.redis.multi().lrange(batchKey, 0, -1).del(batchKey).exec();
+    const items = (result?.[0]?.[1] ?? []) as string[];
     return items
       .map((raw) => {
         try {

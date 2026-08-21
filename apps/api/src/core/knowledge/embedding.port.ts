@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-import { EMBEDDING_DIMENSIONS } from '../database/schema/knowledge-base';
+import { EMBEDDING_DIMENSIONS } from '../database/schema/vector';
 
 export interface EmbeddingPort {
   embed(text: string): Promise<number[]>;

@@ -37,4 +37,19 @@ describe('ConfirmAction', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('A API recusou');
     expect(screen.getByRole('dialog')).toHaveAttribute('open');
   });
+
+  it('mostra a mensagem genérica quando a falha não é uma instância de Error', async () => {
+    render(
+      <ConfirmAction
+        triggerLabel="Resolver"
+        title="Confirmar?"
+        description="Descrição"
+        confirmLabel="Confirmar resolução"
+        onConfirm={vi.fn().mockRejectedValue('falha crua, sem Error')}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Resolver' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar resolução' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Não foi possível concluir a ação.');
+  });
 });

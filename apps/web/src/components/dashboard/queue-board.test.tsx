@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  handoffItem,
   optionalProtocolItem,
   parqItem,
   protocolItem,
@@ -46,6 +47,17 @@ class MockEventSource {
   }
 }
 
+/**
+ * Círculo do ícone do card — o `<span aria-hidden>` que embrulha o ícone lucide. É
+ * decorativo por definição, então não tem papel nem nome acessível pra consultar: só
+ * dá pra alcançar pelo DOM. Primeiro `span` do card, sempre.
+ */
+function iconCircle(card: HTMLElement): HTMLElement {
+  const circle = card.querySelector<HTMLElement>('span[aria-hidden="true"].rounded-full');
+  if (!circle) throw new Error('círculo do ícone não encontrado no card');
+  return circle;
+}
+
 beforeEach(() => {
   getQueue.mockReset();
   getAnamnesisAnswers.mockReset();
@@ -75,21 +87,25 @@ describe('QueueBoard', () => {
     expect(within(optionalSection).getByText(optionalProtocolItem.title)).toBeVisible();
   });
 
-  it('os dois containeres têm a mesma estilização de borda sólida, sem contador no título', async () => {
+  it('as duas seções são agrupamento tipográfico, não cartão, e mostram a contagem ao lado do título', async () => {
     getQueue.mockResolvedValue(queueResponse);
     render(<QueueBoard />);
     const mandatorySection = await screen.findByRole('region', {
       name: 'Revisão Humana Obrigatória',
     });
     const optionalSection = screen.getByRole('region', { name: 'Revisão Humana Opcional' });
+    // Spec de Sofia: a seção deixou de ser caixa (era caixa dentro de caixa com os
+    // cards) — vira só título + espaço, idêntico entre as duas seções.
     expect(mandatorySection.className).toBe(optionalSection.className);
-    expect(mandatorySection.className).toContain('border-border');
+    expect(mandatorySection.className).not.toContain('border');
     const mandatoryHeading = screen.getByRole('heading', { name: 'Revisão Humana Obrigatória' });
     const optionalHeading = screen.getByRole('heading', { name: 'Revisão Humana Opcional' });
-    // Antes o contador vinha logo depois do título, dentro do mesmo agrupamento — sem
-    // ele, o próximo irmão do título já é a lista/estado vazio da seção.
-    expect(mandatoryHeading.nextElementSibling?.tagName).not.toBe('SPAN');
-    expect(optionalHeading.nextElementSibling?.tagName).not.toBe('SPAN');
+    expect(mandatoryHeading.nextElementSibling).toHaveTextContent(
+      String(queueResponse.mandatory.length),
+    );
+    expect(optionalHeading.nextElementSibling).toHaveTextContent(
+      String(queueResponse.optional.length),
+    );
   });
 
   it('esconde o badge de severidade "Revisão de rotina" (é o de todo protocolo, não diferencia nada)', async () => {
@@ -97,8 +113,62 @@ describe('QueueBoard', () => {
     render(<QueueBoard />);
     await screen.findByText(optionalProtocolItem.title);
     expect(screen.queryByText('Revisão de rotina')).not.toBeInTheDocument();
-    // PAR-Q é severidade ALERT — o badge continua aparecendo, porque ali diferencia.
+    // `ALERT` é a única severidade que ainda renderiza pill (`parqItem` na fixture é o
+    // representante ALERT; PAR-Q bloqueado de verdade chega como SAFETY do backend).
     expect(screen.getByText('Atenção')).toBeVisible();
+  });
+
+  it('SAFETY não renderiza o pill "Segurança" — a severidade já vem da faixa, do ícone e do título', async () => {
+    getQueue.mockResolvedValue({ ...queueResponse, mandatory: [handoffItem] });
+    render(<QueueBoard />);
+    const card = (await screen.findByText(handoffItem.title)).closest('li') as HTMLElement;
+
+    expect(within(card).queryByText('Segurança')).not.toBeInTheDocument();
+    expect(within(card).queryByTitle('Segurança · ação prioritária')).not.toBeInTheDocument();
+    // O que continua carregando o sinal de segurança: faixa coral no card e ícone
+    // preenchido de destructive (nenhum dos dois some junto com o pill).
+    expect(card.className).toContain('border-l-coral');
+    expect(iconCircle(card).className).toContain('bg-destructive');
+  });
+
+  it('círculo do ícone: fundo verde na seção "Revisão Humana Opcional", contorno fora dela', async () => {
+    // A cor vem de `section`, não da severidade. O card ROUTINE em `mandatory` é
+    // hipotético — hoje todo protocolo `reviewUrgency: OPTIONAL` é ROUTINE e todo
+    // ROUTINE cai em `optional` — e está aqui só pra travar essa distinção.
+    const mandatoryRoutine = { ...protocolItem, id: '77777777-7777-4777-8777-777777777777' };
+    getQueue.mockResolvedValue({
+      ...queueResponse,
+      mandatory: [mandatoryRoutine],
+      optional: [optionalProtocolItem],
+    });
+    render(<QueueBoard />);
+
+    const optionalSection = await screen.findByRole('region', { name: 'Revisão Humana Opcional' });
+    const optionalCard = within(optionalSection)
+      .getByText(optionalProtocolItem.title)
+      .closest('li') as HTMLElement;
+    const optionalCircle = iconCircle(optionalCard);
+    expect(optionalCircle.className).toContain('bg-verde-pulso');
+    // Par de contraste da marca sobre verde-pulso (= `--primary-foreground`). Branco
+    // aqui não alcançaria o 3:1 de WCAG 1.4.11 sobre #25E27E.
+    expect(optionalCircle.className).toContain('text-petroleo');
+    expect(optionalCircle.className).not.toContain('border');
+
+    const mandatorySection = screen.getByRole('region', { name: 'Revisão Humana Obrigatória' });
+    const mandatoryCircle = iconCircle(
+      within(mandatorySection).getByText(mandatoryRoutine.title).closest('li') as HTMLElement,
+    );
+    expect(mandatoryCircle.className).toContain('border border-border');
+    expect(mandatoryCircle.className).not.toContain('bg-verde-pulso');
+  });
+
+  it('badge ALERT continua sem title e sem complemento oculto — o rótulo já é completo', async () => {
+    getQueue.mockResolvedValue(queueResponse);
+    render(<QueueBoard />);
+    const card = (await screen.findByText(parqItem.title)).closest('li');
+    const badge = within(card as HTMLElement).getByText('Atenção');
+    expect(badge).not.toHaveAttribute('title');
+    expect(badge.textContent).toBe('Atenção');
   });
 
   it('botão de relógio: só aparece com prazo de auto-liberação, com o tooltip certo', async () => {

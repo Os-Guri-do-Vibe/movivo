@@ -99,6 +99,7 @@ function studentResults() {
         status: 'ACTIVE',
         requiresProfessionalReview: false,
         subscriptionStatus: 'TRIALING',
+        subscriptionPlan: 'MONTHLY',
         protocolStatus: 'ACTIVE',
         anamnesisStatus: 'COMPLETED',
         parqState: 'CLEARED',

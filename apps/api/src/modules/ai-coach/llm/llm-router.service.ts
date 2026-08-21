@@ -14,6 +14,7 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
+import { createHash } from 'node:crypto';
 
 import { AppConfigService } from '../../../core/config';
 import { AiJobRepository } from './ai-job.repository';
@@ -62,6 +63,27 @@ function isTransient(error: unknown): boolean {
   return error instanceof LLMProviderError && error.kind === 'TRANSIENT';
 }
 
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+/** Metadados suficientes para correlação sem duplicar prompt, RAG ou fatos de saúde. */
+function auditSnapshot(system: string, messages: readonly ChatTurn[]): string {
+  return JSON.stringify({
+    version: 2,
+    systemSha256: sha256(system),
+    messagesSha256: sha256(JSON.stringify(messages)),
+    systemChars: system.length,
+    messageCount: messages.length,
+    messageChars: messages.reduce((total, message) => total + message.content.length, 0),
+  });
+}
+
+function safeErrorCode(error: unknown): string {
+  if (error instanceof LLMProviderError) return `LLM_PROVIDER_${error.kind}`;
+  return error instanceof Error ? error.name : 'UNKNOWN_ERROR';
+}
+
 @Injectable()
 export class LlmRouter {
   private readonly breakers = new Map<ProviderName, CircuitBreaker>();
@@ -100,7 +122,7 @@ export class LlmRouter {
       role: m.role,
       content: scrubPII(m.content, request.user),
     }));
-    const snapshot = JSON.stringify({ system, messages }).slice(0, 4000);
+    const snapshot = auditSnapshot(system, messages);
 
     // 2. Anti-abuso (LLM10) — pode lançar LLMAbuseError.
     await this.abuse.check(request.userId);
@@ -251,7 +273,7 @@ export class LlmRouter {
       costBrl: 0,
       validationAction: null,
       inputSnapshot: snapshot,
-      errorMessage: error instanceof Error ? error.message : String(error),
+      errorMessage: safeErrorCode(error),
     });
   }
 }

@@ -1,8 +1,8 @@
 /**
  * Persistência de `ai_jobs` sob RLS (US-2.2 / TASK-2.2.3 · Victor §6.1).
  *
- * Toda invocação de LLM grava uma linha completa e **pseudonimizada** (o `input_snapshot`
- * é a saída do PII Scrubber, nunca PII em claro). `ai_jobs` está sob `FORCE ROW LEVEL
+ * Toda invocação de LLM grava uma linha completa e minimizada (o `input_snapshot`
+ * contém somente hashes e contagens, nunca o texto do prompt). `ai_jobs` está sob `FORCE ROW LEVEL
  * SECURITY` (security-policies), então escreve/lê sempre via `TenantDatabase`, nunca conexão
  * crua — o mesmo padrão das tabelas de titular da Sprint 1.
  */
@@ -26,7 +26,7 @@ export interface AiJobLog {
   intent: string | null;
   costBrl: number;
   validationAction: string | null;
-  /** Snapshot já pseudonimizado do que foi enviado. Nunca PII em claro. */
+  /** Snapshot de hashes/contagens do que foi enviado. Nunca texto ou PII em claro. */
   inputSnapshot: string;
   errorMessage: string | null;
 }

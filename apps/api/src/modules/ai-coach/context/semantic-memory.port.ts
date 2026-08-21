@@ -14,6 +14,9 @@ export interface RagDoc {
   snippet: string;
   sourceUrl?: string;
   score: number;
+  documentVersion?: number;
+  documentSha256?: string;
+  publicationEventId?: string;
 }
 
 export interface SemanticMemoryPort {

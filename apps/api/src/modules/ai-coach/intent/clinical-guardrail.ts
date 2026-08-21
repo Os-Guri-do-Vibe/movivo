@@ -11,6 +11,8 @@
  * ponytail: heurística de regex, sem NER — teto reconhecido; a rede de segurança final é o
  * `ValidationService` (US-2.3) sobre a saída. Termos a validar pelo RT CREF/Alexandre.
  */
+import { canonicalizeSecurityText } from '../../../core/agent-config/text-normalize';
+
 export type GuardrailLevel = 'SAFETY' | 'SCOPE';
 
 /** Emergência clínica / risco à vida → handoff de segurança. */
@@ -61,7 +63,8 @@ const SCOPE_PATTERNS: RegExp[] = [
 
 /** `SAFETY` | `SCOPE` | `null` (segue para classificação normal). SAFETY tem prioridade. */
 export function clinicalGuardrail(message: string): GuardrailLevel | null {
-  if (SAFETY_PATTERNS.some((re) => re.test(message))) return 'SAFETY';
-  if (SCOPE_PATTERNS.some((re) => re.test(message))) return 'SCOPE';
+  const canonical = canonicalizeSecurityText(message);
+  if (SAFETY_PATTERNS.some((re) => re.test(canonical))) return 'SAFETY';
+  if (SCOPE_PATTERNS.some((re) => re.test(canonical))) return 'SCOPE';
   return null;
 }

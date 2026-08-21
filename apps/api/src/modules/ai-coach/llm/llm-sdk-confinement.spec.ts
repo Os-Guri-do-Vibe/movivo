@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const SRC = join(process.cwd(), 'src');
-const ALLOWED = join('llm', 'providers.ts'); // único arquivo autorizado
+const ALLOWED = [join('llm', 'providers.ts'), join('core', 'knowledge', 'openai-embedding.ts')];
 const PROVIDER_MARKERS = [
   /api\.openai\.com/,
   /api\.anthropic\.com/,
@@ -33,7 +33,7 @@ describe('confinamento do provedor de LLM', () => {
   it('nenhum arquivo fora de llm/providers.ts referencia um provedor de LLM', () => {
     const offenders: string[] = [];
     for (const file of walk(SRC)) {
-      if (file.endsWith(ALLOWED)) continue;
+      if (ALLOWED.some((allowed) => file.endsWith(allowed))) continue;
       const content = readFileSync(file, 'utf8');
       if (PROVIDER_MARKERS.some((re) => re.test(content))) offenders.push(file);
     }

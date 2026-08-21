@@ -133,13 +133,17 @@ afterAll(async () => {
 });
 
 describe('RLS FORCE + SET LOCAL — isolamento entre titulares', () => {
-  it('PROFESSIONAL enxerga somente o titular atribuído com consentimento ativo', async () => {
+  // Achado 2026-08-19 (decisão do fundador): a fila de revisão é do CARGO, não da
+  // pessoa — qualquer CREF ativo vê qualquer titular com consentimento de saúde
+  // vigente, sem depender de `professional_assignments`. `userB` NÃO está atribuído
+  // a `professionalId` (só `userA` está, no setup acima) e mesmo assim aparece.
+  it('PROFESSIONAL enxerga qualquer titular com consentimento ativo, atribuído ou não', async () => {
     const rows = await tenant.runAsUser(professionalId, 'PROFESSIONAL', async (tx) => {
       return (await tx.execute(
         sql`SELECT id FROM users WHERE id IN (${userA}, ${userB}) ORDER BY id`,
       )) as unknown as Array<{ id: string }>;
     });
-    expect(rows.map((row) => row.id)).toEqual([userA]);
+    expect(rows.map((row) => row.id).sort()).toEqual([userA, userB].sort());
   });
 
   it('revogacao oculta o titular do PROFESSIONAL sem recursao e preserva contexto segregado', async () => {

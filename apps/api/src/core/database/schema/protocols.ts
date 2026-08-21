@@ -22,6 +22,7 @@ import {
 import { eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
 import { protocolApprovalStatusEnum, protocolStatusEnum, reviewUrgencyEnum } from './enums';
 import { users } from './users';
+import { methodologyVersions } from './methodology-versions';
 
 export const protocols = pgTable(
   'protocols',
@@ -127,6 +128,14 @@ export const protocols = pgTable(
      * o treino foi planejado — insumo da supervisão CREF (US-2.4).
      */
     promptVersion: varchar('prompt_version', { length: 80 }),
+
+    /** Snapshot mínimo das fontes publicadas recuperadas para esta geração. */
+    knowledgeSources: jsonb('knowledge_sources'),
+
+    methodologyVersionId: uuid('methodology_version_id').references(() => methodologyVersions.id, {
+      onDelete: 'restrict',
+    }),
+    methodologySha256: varchar('methodology_sha256', { length: 64 }),
 
     ...timestampColumns,
   },

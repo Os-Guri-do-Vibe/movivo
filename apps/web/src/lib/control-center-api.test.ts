@@ -207,7 +207,9 @@ describe('projeções do Control Center', () => {
             phoneNumber: '+5511999999999',
             status: 'ACTIVE',
             subscriptionStatus: 'ACTIVE',
+            subscriptionPlan: 'MONTHLY',
             protocolStatus: null,
+            enrolledAt: '2026-08-01T09:00:00.000Z',
             churnRisk: { score: 0, signals: [] },
             parqState: 'BLOQUEADO',
           },
@@ -233,10 +235,24 @@ describe('projeções do Control Center', () => {
   });
 });
 
+/** `getKnowledgeDocuments`/`uploadKnowledgeDocument` normalizam stage/errorCode em processingStage/processingError. */
+const knowledgeDocumentsViewResponse = {
+  ...knowledgeDocumentsResponse,
+  data: {
+    ...knowledgeDocumentsResponse.data,
+    documents: knowledgeDocumentsResponse.data.documents.map((document) => ({
+      ...document,
+      processingStage: document.stage,
+      processingError: document.errorCode,
+    })),
+  },
+};
+
 describe('mutações do pilar IA', () => {
   const uploadInput = {
     title: 'Guia de descanso entre séries',
     topic: 'descanso',
+    category: 'OTHER' as const,
     originalFilename: 'guia.md',
     mimeType: 'text/markdown' as const,
     content: 'a'.repeat(120),
@@ -244,7 +260,9 @@ describe('mutações do pilar IA', () => {
 
   it('envia o documento como JSON no POST e devolve o corpus validado', async () => {
     fetchMock.mockResolvedValue(jsonResponse(knowledgeDocumentsResponse));
-    await expect(uploadKnowledgeDocument(uploadInput)).resolves.toEqual(knowledgeDocumentsResponse);
+    await expect(uploadKnowledgeDocument(uploadInput)).resolves.toEqual(
+      knowledgeDocumentsViewResponse,
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/dashboard/control/ai/knowledge/upload',
       expect.objectContaining({
@@ -326,14 +344,22 @@ describe('rotas com parâmetro', () => {
   });
 
   it.each([
-    ['ai/knowledge', getKnowledgeDocuments, knowledgeDocumentsResponse],
-    ['partners', getPartnerDistribution, partnerDistributionResponse],
-  ])('%s consulta o próprio setor e devolve o dado validado', async (path, load, payload) => {
-    fetchMock.mockResolvedValue(jsonResponse(payload));
-    await expect(load()).resolves.toEqual(payload);
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/dashboard/control/${path}`,
-      expect.objectContaining({ credentials: 'same-origin' }),
-    );
-  });
+    [
+      'ai/knowledge',
+      getKnowledgeDocuments,
+      knowledgeDocumentsResponse,
+      knowledgeDocumentsViewResponse,
+    ],
+    ['partners', getPartnerDistribution, partnerDistributionResponse, partnerDistributionResponse],
+  ])(
+    '%s consulta o próprio setor e devolve o dado validado',
+    async (path, load, payload, expected) => {
+      fetchMock.mockResolvedValue(jsonResponse(payload));
+      await expect(load()).resolves.toEqual(expected);
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/dashboard/control/${path}`,
+        expect.objectContaining({ credentials: 'same-origin' }),
+      );
+    },
+  );
 });

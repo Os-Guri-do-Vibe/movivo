@@ -140,9 +140,9 @@ export const RESPONSE_CASES: readonly ResponseCase[] = [
     expectRule: 'PROMPT_LEAK',
   },
   {
-    label: 'linguagem de diagnóstico é sinalizada',
+    label: 'linguagem de diagnóstico é bloqueada',
     text: 'Isso parece uma tendinite no seu ombro.',
-    expected: 'FLAG_HUMAN_REVIEW',
+    expected: 'BLOCK_FALLBACK',
     expectRule: 'DIAGNOSIS',
   },
   // Substituição: só pode citar o alvo + o substituto autorizado da base.

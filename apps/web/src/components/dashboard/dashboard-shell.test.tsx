@@ -69,12 +69,14 @@ describe('DashboardShell', () => {
 
   it('agrupa o menu e omite grupos cujos itens foram todos filtrados pelo RBAC', () => {
     const admin = navigationGroupsFor(ADMIN_CAPABILITIES);
+    // Ordem das categorias (a pedido do fundador, 2026-08-20): Visão Geral (null) →
+    // Alunos → IA → Marketing → Financeiro → Sistema.
     expect(admin.map((group) => group.label)).toEqual([
       null,
       'Alunos',
-      'Financeiro',
-      'Marketing',
       'IA',
+      'Marketing',
+      'Financeiro',
       'Sistema',
     ]);
 

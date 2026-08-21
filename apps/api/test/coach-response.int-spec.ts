@@ -42,7 +42,31 @@ import {
   DLQ_FALLBACK_MESSAGE,
   STANDARD_BLOCK_RESPONSE,
 } from '../src/modules/coach/coach-messages';
+import { FakeEmbedding } from '../src/modules/ai-coach/rag/embedding.port';
 import { seedHealthEligibility } from './health-fixtures';
+
+/**
+ * DUVIDA_TECNICA sem trecho do RAG cai em `TECHNICAL_NO_EVIDENCE_MESSAGE` sem chamar o LLM
+ * (achado 2026-08-21, guard-rail novo do worker). As duas mensagens deste spec que o
+ * classificador fake roteia para DUVIDA_TECNICA precisam de um chunk com sobreposição de
+ * termos alta o bastante para passar do `RAG_MIN_COSINE` real (embedding fake = bag-of-words).
+ */
+const RAG_SEED_CHUNKS = [
+  {
+    title: 'Dor no ombro',
+    topic: 'seguranca',
+    // Conteúdo enxuto de propósito: o embedding fake é bag-of-words (`embedding.port.ts`),
+    // então poucas palavras extras já diluem o cosseno abaixo do `RAG_MIN_COSINE` real.
+    content: 'Posso tomar algo para a dor no ombro?',
+  },
+  {
+    title: 'Termo de teste DLQ',
+    topic: 'seguranca',
+    // Conteúdo enxuto de propósito: o embedding fake é bag-of-words (`embedding.port.ts`),
+    // então poucas palavras extras já diluem o cosseno abaixo do `RAG_MIN_COSINE` real.
+    content: 'Forcedlq por favor.',
+  },
+] as const;
 
 const { env } = loadEnv();
 const apiRoot = process.cwd();
@@ -218,12 +242,24 @@ beforeAll(async () => {
   db = app.get(TenantDatabase);
   redis = app.get(REDIS_CLIENT);
   keys = app.get(REDIS_KEY_BUILDER);
+
+  // `knowledge_base` é somente-leitura para `movivo_app` (Sato §10.4) — grava como superuser,
+  // igual à indexação real (role privilegiada, offline).
+  const embedding = new FakeEmbedding();
+  for (const chunk of RAG_SEED_CHUNKS) {
+    const vector = await embedding.embed(chunk.content);
+    await adminClient`
+      INSERT INTO knowledge_base (chunk_text, embedding, topic, title, reliability)
+      VALUES (${chunk.content}, ${`[${vector.join(',')}]`}::vector, ${chunk.topic}, ${chunk.title}, 3)
+    `;
+  }
 }, 60_000);
 
 afterAll(async () => {
   try {
     await adminClient.unsafe(
-      `DELETE FROM conversations WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
+      `DELETE FROM knowledge_base WHERE title IN (${RAG_SEED_CHUNKS.map((c) => `'${c.title}'`).join(', ')});
+       DELETE FROM conversations WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM handoff_alerts WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM protocol_versions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM protocols WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');

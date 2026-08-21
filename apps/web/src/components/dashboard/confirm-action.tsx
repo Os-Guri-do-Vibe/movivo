@@ -1,7 +1,7 @@
 'use client';
 
 import { AlertTriangle, X } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 
@@ -13,6 +13,8 @@ export function ConfirmAction({
   onConfirm,
   destructive = false,
   disabled = false,
+  triggerVariant,
+  triggerSize = 'lg',
 }: {
   triggerLabel: string;
   title: string;
@@ -21,8 +23,18 @@ export function ConfirmAction({
   onConfirm: () => Promise<void>;
   destructive?: boolean;
   disabled?: boolean;
+  /**
+   * Variante do GATILHO, quando ela precisa divergir da variante do botão de confirmação.
+   * "Descartar alterações" no cartão do agente é um exemplo: a ação é destrutiva (e o
+   * botão dentro do diálogo é vermelho), mas o gatilho divide a linha com a ação primária
+   * da página — dois botões sólidos ali competiriam pelo mesmo olhar.
+   */
+  triggerVariant?: 'default' | 'outline' | 'destructive' | 'ghost';
+  triggerSize?: 'default' | 'sm' | 'lg';
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
 
@@ -43,8 +55,8 @@ export function ConfirmAction({
     <>
       <Button
         type="button"
-        size="lg"
-        variant={destructive ? 'destructive' : 'default'}
+        size={triggerSize}
+        variant={triggerVariant ?? (destructive ? 'destructive' : 'default')}
         disabled={disabled}
         onClick={() => dialogRef.current?.showModal()}
       >
@@ -52,8 +64,8 @@ export function ConfirmAction({
       </Button>
       <dialog
         ref={dialogRef}
-        aria-labelledby="confirm-action-title"
-        aria-describedby="confirm-action-description"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
         className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-xl border border-border bg-card p-0 text-card-foreground shadow-xl backdrop:bg-petroleo/70"
         onClose={() => setError('')}
       >
@@ -71,10 +83,10 @@ export function ConfirmAction({
               </Button>
             </form>
           </div>
-          <h2 id="confirm-action-title" className="mt-4 text-h2 font-bold">
+          <h2 id={titleId} className="mt-4 text-h2 font-bold">
             {title}
           </h2>
-          <p id="confirm-action-description" className="mt-2 text-body text-muted-foreground">
+          <p id={descriptionId} className="mt-2 text-body text-muted-foreground">
             {description}
           </p>
           {error ? (

@@ -1,17 +1,7 @@
 /**
- * `AdminModule` — **esqueleto vazio registrado** (TASK-0.3.6).
+ * `AdminModule` — módulo ADMIN / CREF do C4 nível 3 (`ARQUITETURA.md` §4).
  *
- * Módulo ADMIN / CREF do C4 nível 3 (`ARQUITETURA.md` §4). Nesta sprint é só a casca:
- * nenhuma lógica de negócio, nenhum controller, nenhum provider. Existe para que a
- * sprint de implementação (Sprint 3) encaixe código sem reestruturar o app.
- *
- * Conteúdo previsto pelo diagrama de Rafael:
- *  - `DashboardService`
- *  - `AuditService`
- *  - `FlagService`
- *  - `ReportService`
- *
- * Regras que já valem para quem implementar:
+ * Regras que valem para quem mexer aqui:
  *  - Dashboard de operações do profissional CREF: fila de exceções, assinatura de protocolos, flags de risco.
  *  - Acesso restrito por RBAC e **toda** ação é registrada em `audit_logs` append-only (Alexandre/Sato) — inclusive leitura de dado de saúde de um titular.
  *  - Acesso administrativo a dado de saúde é o cenário de maior risco de IDOR do produto: autorização por titular, sempre, nunca só por papel.
@@ -43,12 +33,17 @@ import { FinanceController } from './finance.controller';
 import { FinanceService } from './finance.service';
 import { FaqAdminController } from './faq-admin.controller';
 import { FaqAdminService } from './faq-admin.service';
+import { ForbiddenTopicAdminController } from './forbidden-topic-admin.controller';
+import { ForbiddenTopicAdminService } from './forbidden-topic-admin.service';
 import { MarketingController } from './marketing.controller';
 import { MarketingService } from './marketing.service';
 import { L1GuardrailAdminController } from './l1-guardrail-admin.controller';
 import { L1GuardrailAdminService } from './l1-guardrail-admin.service';
 import { KnowledgeAdminController } from './knowledge-admin.controller';
 import { KnowledgeAdminService } from './knowledge-admin.service';
+import { KnowledgeProcessingWorker } from './knowledge-processing.worker';
+import { MethodologyAdminController } from './methodology-admin.controller';
+import { MethodologyAdminService } from './methodology-admin.service';
 import { PartnersController } from './partners.controller';
 import { PartnersService } from './partners.service';
 
@@ -62,9 +57,11 @@ import { PartnersService } from './partners.service';
     MarketingController,
     PartnersController,
     FaqAdminController,
+    ForbiddenTopicAdminController,
     L1GuardrailAdminController,
     AuditQueryController,
     KnowledgeAdminController,
+    MethodologyAdminController,
   ],
   providers: [
     AuditService,
@@ -75,9 +72,12 @@ import { PartnersService } from './partners.service';
     MarketingService,
     PartnersService,
     FaqAdminService,
+    ForbiddenTopicAdminService,
     L1GuardrailAdminService,
     AuditQueryService,
     KnowledgeAdminService,
+    KnowledgeProcessingWorker,
+    MethodologyAdminService,
   ],
 })
 export class AdminModule {}

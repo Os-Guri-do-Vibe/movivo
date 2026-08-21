@@ -158,8 +158,15 @@ export const LANGUAGE_RULES: readonly LanguageRule[] = [
   },
   {
     id: 'DIAGNOSIS',
-    pattern: /diagn[óo]stic|tendinite|artrose|h[ée]rnia de disco|voc[êe] (est[áa]|tem) com/i,
-    action: 'FLAG',
+    pattern:
+      /diagn[óo]stic|tratament|\bcura\b|\bcurar\b|tendinite|artrose|h[ée]rnia de disco|voc[êe] (est[áa]|tem) com/i,
+    action: 'BLOCK',
+  },
+  {
+    id: 'HANDOFF_SLA_PROMISE',
+    pattern:
+      /\b(?:garanto|prometo|responderei|responderemos|retornarei|retornaremos|entrarei|entraremos|vou|vamos|iremos)\b.{0,60}\b(?:em|dentro de|at[ée]|imediatamente|agora|na mesma hora)\b/i,
+    action: 'BLOCK',
   },
 ];
 

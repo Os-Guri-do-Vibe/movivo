@@ -21,7 +21,10 @@
  * `ai-coach/intent/prompt-resolver.service.ts`, que consome este serviço por `.persona()`.
  */
 import { Inject, Injectable, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
-import { agentPersonaSchema, DEFAULT_AGENT_PERSONA, type AgentPersona } from '@movivo/shared';
+// Leitura usa o schema TOLERANTE: uma linha publicada antes de um campo novo existir não
+// pode virar fallback silencioso para o default de código só por ser antiga (ver o cabeçalho
+// de `agentPersonaStoredSchema`). O schema estrito continua valendo na gravação.
+import { agentPersonaStoredSchema, DEFAULT_AGENT_PERSONA, type AgentPersona } from '@movivo/shared';
 import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 
@@ -118,7 +121,7 @@ export class AgentPersonaService implements OnModuleInit, OnModuleDestroy {
     try {
       const raw = await this.redis.get(this.cacheKey);
       if (!raw) return null;
-      const parsed = agentPersonaSchema.safeParse(JSON.parse(raw));
+      const parsed = agentPersonaStoredSchema.safeParse(JSON.parse(raw));
       if (!parsed.success) {
         this.logger.warn(
           { event: 'agent_config_invalid_payload', source: 'redis' },
@@ -137,7 +140,7 @@ export class AgentPersonaService implements OnModuleInit, OnModuleDestroy {
     try {
       const row = await this.repo.activePayload();
       if (!row) return null;
-      const parsed = agentPersonaSchema.safeParse(row.payload);
+      const parsed = agentPersonaStoredSchema.safeParse(row.payload);
       if (!parsed.success) {
         this.fallbackReason = 'INVALID_PAYLOAD';
         return null;

@@ -1,9 +1,14 @@
 import type { Job } from 'bullmq';
 import type { Redis } from 'ioredis';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { buildHumanHandoffMessage, DEFAULT_AGENT_PERSONA } from '@movivo/shared';
 
 import type { HealthConsentService } from '../../core/database/health-consent.service';
 import type { FaqService, PublishedFaqMatch } from '../../core/agent-config/faq.service';
+import {
+  ForbiddenTopicsUnavailableError,
+  type ForbiddenTopicHit,
+} from '../../core/agent-config/forbidden-topics.service';
 import type {
   L1GuardrailFlag,
   L1GuardrailService,
@@ -21,8 +26,11 @@ import type { AiResponseJob } from '../whatsapp/whatsapp-inbound.service';
 import { AIResponseWorker } from './ai-response.worker';
 import {
   DAILY_LIMIT_MESSAGE,
+  FORBIDDEN_TOPIC_RESPONSE,
+  SAFETY_HANDOFF_MESSAGE,
   STANDARD_BLOCK_RESPONSE,
   SUBSTITUTION_FALLBACK_MESSAGE,
+  TECHNICAL_NO_EVIDENCE_MESSAGE,
 } from './coach-messages';
 import type { ConversationRepository } from './conversation.repository';
 import { buildForaDeEscopoResponse, resolvePrompt } from '../ai-coach/intent/prompts';
@@ -38,7 +46,19 @@ interface Deps {
   safetyHandoff?: boolean;
   consentActive?: boolean;
   faqMatch?: PublishedFaqMatch | null;
+  faqUnavailable?: boolean;
+  forbiddenHit?: ForbiddenTopicHit | null;
+  forbiddenUnavailable?: boolean;
   l1Flags?: L1GuardrailFlag[];
+  methodologySummary?: string | null;
+  handoffMessage?: string;
+  ragDocs?: Array<{
+    chunkId: string;
+    documentId: string | null;
+    title: string;
+    snippet: string;
+    score: number;
+  }>;
 }
 
 function makeWorker(deps: Deps = {}) {
@@ -70,12 +90,27 @@ function makeWorker(deps: Deps = {}) {
 
   const prompts = {
     resolvePrompt: vi.fn(async (intent: Intent) => resolvePrompt(intent)),
+    resolveRuntime: vi.fn(async (intent: Intent) => ({
+      system: resolvePrompt(intent),
+      formatting: { blockSize: 'MEDIO', allowLists: true, boldPolicy: 'UMA_PALAVRA' },
+    })),
     agentName: vi.fn(async () => 'MOVI'),
     foraDeEscopoResponse: vi.fn(async () => buildForaDeEscopoResponse('MOVI')),
+    humanHandoffMessage: vi.fn(
+      async () => deps.handoffMessage ?? 'Vou registrar para o profissional CREF.',
+    ),
   } as unknown as PromptResolverService;
 
-  const faqMatch = vi.fn(async () => deps.faqMatch ?? null);
+  const faqMatch = vi.fn(async () => {
+    if (deps.faqUnavailable) throw new Error('faq offline');
+    return deps.faqMatch ?? null;
+  });
   const faq = { match: faqMatch } as unknown as FaqService;
+  const evaluateForbidden = vi.fn(async () => {
+    if (deps.forbiddenUnavailable) throw new ForbiddenTopicsUnavailableError();
+    return deps.forbiddenHit ?? null;
+  });
+  const forbiddenTopics = { evaluate: evaluateForbidden };
   const evaluateL1 = vi.fn(async () => deps.l1Flags ?? []);
   const l1Guardrails = { evaluate: evaluateL1 } as unknown as L1GuardrailService;
 
@@ -84,7 +119,7 @@ function makeWorker(deps: Deps = {}) {
       Promise.resolve({
         cacheablePrefix: 'ESTADO',
         volatileSuffix: 'Aluno: oi',
-        ragDocs: [],
+        ragDocs: deps.ragDocs ?? [],
         sessionDate: '2026-07-31',
         scrubUser: {},
       }),
@@ -93,7 +128,7 @@ function makeWorker(deps: Deps = {}) {
     summarizeIfNeeded: vi.fn(() => Promise.resolve()),
   } as unknown as ContextService;
 
-  const complete = vi.fn((_req: { system: string }) =>
+  const complete = vi.fn((_req: { system: string; messages?: unknown[] }) =>
     Promise.resolve({ text: deps.llmText ?? 'Boa, continua firme!', model: 'gpt-4.1' }),
   );
   const llm = { complete } as unknown as LlmRouter;
@@ -101,6 +136,7 @@ function makeWorker(deps: Deps = {}) {
   const abuse = {
     isOverDailyLimit: vi.fn(() => Promise.resolve(deps.overLimit ?? false)),
   } as unknown as LlmAbuseGuard;
+  const isOverDailyLimit = abuse.isOverDailyLimit as ReturnType<typeof vi.fn>;
 
   const validation = new ValidationService();
 
@@ -120,10 +156,29 @@ function makeWorker(deps: Deps = {}) {
   } as unknown as ConversationRepository;
 
   const items = deps.batchItems ?? [JSON.stringify({ text: 'oi' })];
+  const batchLrange = vi.fn();
+  const batchDel = vi.fn();
+  const batchExec = vi.fn(() =>
+    Promise.resolve([
+      [null, items],
+      [null, 1],
+    ]),
+  );
+  const batchTransaction = {
+    lrange: (key: string, start: number, end: number) => {
+      batchLrange(key, start, end);
+      return batchTransaction;
+    },
+    del: (key: string) => {
+      batchDel(key);
+      return batchTransaction;
+    },
+    exec: batchExec,
+  };
   const redis = {
-    lrange: vi.fn(() => Promise.resolve(items)),
-    del: vi.fn(() => Promise.resolve(1)),
+    multi: vi.fn(() => batchTransaction),
   } as unknown as Redis;
+  const keys = { forUser: vi.fn(() => 'bk') };
 
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), setContext: vi.fn() } as never;
   const worker = new AIResponseWorker(
@@ -133,16 +188,28 @@ function makeWorker(deps: Deps = {}) {
     classifier,
     prompts,
     faq,
+    forbiddenTopics as never,
     l1Guardrails,
     context,
     llm,
     abuse,
     validation,
+    {
+      current: vi.fn(async () => ({
+        id: 'methodology-id',
+        version: 1,
+        versionLabel: 'methodology-v1',
+        content: 'conteúdo',
+        summary: deps.methodologySummary ?? null,
+        contentSha256: 'a'.repeat(64),
+      })),
+    } as never,
     repo,
     {
       hasActiveForUser: vi.fn(async () => deps.consentActive ?? true),
     } as unknown as HealthConsentService,
     redis,
+    keys as never,
     logger,
   );
   return {
@@ -157,7 +224,11 @@ function makeWorker(deps: Deps = {}) {
     redis,
     classify,
     faqMatch,
+    evaluateForbidden,
     evaluateL1,
+    isOverDailyLimit,
+    batchLrange,
+    batchDel,
   };
 }
 
@@ -182,9 +253,9 @@ afterEach(() => vi.restoreAllMocks());
 
 describe('AIResponseWorker.process (US-3.5)', () => {
   it('descarta o batch sem persistir ou chamar LLM apos revogacao', async () => {
-    const { worker, redis, persistTurn, complete } = makeWorker({ consentActive: false });
+    const { worker, batchDel, persistTurn, complete } = makeWorker({ consentActive: false });
     await expect(worker.process(job())).resolves.toEqual({ status: 'CONSENT_REVOKED' });
-    expect(redis.del).toHaveBeenCalledWith('bk');
+    expect(batchDel).toHaveBeenCalledWith('bk');
     expect(persistTurn).not.toHaveBeenCalled();
     expect(complete).not.toHaveBeenCalled();
   });
@@ -196,6 +267,20 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     expect(complete).toHaveBeenCalledTimes(1);
     expect(enqueue.mock.calls.some((c) => c[1] === 'coach-typing')).toBe(true);
     expect(sentText(enqueue)).toBe('Boa, continua firme!');
+  });
+
+  it('ignora batchKey adulterada e drena apenas a chave derivada do titular', async () => {
+    const { worker, batchLrange } = makeWorker();
+    const original = job();
+    const forged = {
+      ...original,
+      data: { ...original.data, batchKey: 'movivo:u:outro:ai-response:batch' },
+    } as Job<AiResponseJob>;
+
+    await worker.process(forged);
+
+    expect(batchLrange).toHaveBeenCalledWith('bk', 0, -1);
+    expect(batchLrange).not.toHaveBeenCalledWith(forged.data.batchKey, 0, -1);
   });
 
   it('fora de escopo: recusa honesta SEM chamar o LLM', async () => {
@@ -216,6 +301,14 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     expect(classify).not.toHaveBeenCalled();
     expect(complete).not.toHaveBeenCalled();
     expect(sentText(enqueue)).toBe(answer);
+  });
+
+  it('falha do FAQ degrada para classificação sem derrubar a conversa', async () => {
+    const { worker, classify, complete } = makeWorker({ faqUnavailable: true });
+
+    await expect(worker.process(job())).resolves.toEqual({ status: 'SENT' });
+    expect(classify).toHaveBeenCalledOnce();
+    expect(complete).toHaveBeenCalledOnce();
   });
 
   it('guardrail L1 apenas sinaliza para revisão sem bloquear a resposta', async () => {
@@ -247,6 +340,45 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     expect(persistHandoff).toHaveBeenCalledWith('u1', 'SAFETY', 'RED_FLAG');
   });
 
+  it('emergência vence o limite diário e não consulta configuração dinâmica', async () => {
+    const { worker, enqueue, isOverDailyLimit, evaluateForbidden } = makeWorker({
+      overLimit: true,
+      batchItems: [JSON.stringify({ text: 'estou com dor no peito agora' })],
+    });
+
+    await expect(worker.process(job())).resolves.toEqual({ status: 'SAFETY_HANDOFF' });
+    expect(sentText(enqueue)).toBe(SAFETY_HANDOFF_MESSAGE);
+    expect(isOverDailyLimit).not.toHaveBeenCalled();
+    expect(evaluateForbidden).not.toHaveBeenCalled();
+  });
+
+  it('tema proibido aprovado vence FAQ, classificador e LLM', async () => {
+    const { worker, enqueue, faqMatch, classify, complete } = makeWorker({
+      batchItems: [JSON.stringify({ text: 'quero comparar preços do concorrente' })],
+      forbiddenHit: { topicKey: 'concorrentes', label: 'Concorrentes', version: 3 },
+      faqMatch: { id: 'faq-1', faqKey: 'unsafe', version: 1, answer: 'não usar' },
+    });
+
+    await expect(worker.process(job())).resolves.toEqual({ status: 'FORBIDDEN_TOPIC' });
+    expect(sentText(enqueue)).toBe(FORBIDDEN_TOPIC_RESPONSE);
+    expect(faqMatch).not.toHaveBeenCalled();
+    expect(classify).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it('cold start sem configuração fecha a geração e registra handoff operacional', async () => {
+    const { worker, enqueue, faqMatch, classify, complete, persistHandoff } = makeWorker({
+      forbiddenUnavailable: true,
+    });
+
+    await expect(worker.process(job())).resolves.toEqual({ status: 'CONFIG_UNAVAILABLE' });
+    expect(sentText(enqueue)).toBe(STANDARD_BLOCK_RESPONSE);
+    expect(persistHandoff).toHaveBeenCalledWith('u1', 'ALERT', 'AGENT_CONFIG_UNAVAILABLE');
+    expect(faqMatch).not.toHaveBeenCalled();
+    expect(classify).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
+  });
+
   it('handoff de segurança (dor grave): persiste SAFETY e NÃO chama o LLM (US-3.6)', async () => {
     const { worker, complete, persistHandoff } = makeWorker({ safetyHandoff: true });
     await worker.process(job());
@@ -258,6 +390,25 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     const { worker, persistHandoff } = makeWorker({ intent: 'FORA_DE_ESCOPO' });
     await worker.process(job());
     expect(persistHandoff).toHaveBeenCalledWith('u1', 'ALERT', expect.any(String));
+  });
+
+  it('pedido de handoff usa copy determinística e não chama LLM', async () => {
+    const { worker, enqueue, complete, persistHandoff } = makeWorker({ intent: 'PEDIDO_HANDOFF' });
+    await expect(worker.process(job())).resolves.toEqual({ status: 'HANDOFF' });
+    expect(sentText(enqueue)).toContain('profissional CREF');
+    expect(persistHandoff).toHaveBeenCalledWith('u1', 'ALERT', 'PEDIDO_HANDOFF');
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it('pedido de handoff troca copy insegura pelo default compilado', async () => {
+    const { worker, enqueue, complete } = makeWorker({
+      intent: 'PEDIDO_HANDOFF',
+      handoffMessage: 'Prometo responder imediatamente com seu diagnóstico e tratamento.',
+    });
+
+    await expect(worker.process(job())).resolves.toEqual({ status: 'HANDOFF' });
+    expect(sentText(enqueue)).toBe(buildHumanHandoffMessage(DEFAULT_AGENT_PERSONA));
+    expect(complete).not.toHaveBeenCalled();
   });
 
   it('substituição: verbaliza o substituto da base (prompt injeta o aprovado)', async () => {
@@ -285,11 +436,32 @@ describe('AIResponseWorker.process (US-3.5)', () => {
 
   it('BLOCK do validador → resposta-padrão + status BLOCKED', async () => {
     const { worker, enqueue } = makeWorker({
-      intent: 'DUVIDA_TECNICA',
+      intent: 'MOTIVACAO',
       llmText: 'Toma um ibuprofeno que resolve.',
     });
     const res = await worker.process(job());
     expect(res.status).toBe('BLOCKED');
+    expect(sentText(enqueue)).toBe(STANDARD_BLOCK_RESPONSE);
+  });
+
+  it('dúvida técnica sem evidência se abstém antes do LLM', async () => {
+    const { worker, enqueue, complete, persistHandoff } = makeWorker({
+      intent: 'DUVIDA_TECNICA',
+      methodologySummary: 'Método aprovado, mas sem resposta específica para esta dúvida.',
+      ragDocs: [],
+    });
+    await expect(worker.process(job())).resolves.toEqual({ status: 'SENT' });
+    expect(sentText(enqueue)).toBe(TECHNICAL_NO_EVIDENCE_MESSAGE);
+    expect(complete).not.toHaveBeenCalled();
+    expect(persistHandoff).toHaveBeenCalledWith('u1', 'ALERT', 'VALIDATOR_FLAG');
+  });
+
+  it('valida a saída bruta antes de truncar parágrafos', async () => {
+    const { worker, enqueue } = makeWorker({
+      intent: 'MOTIVACAO',
+      llmText: 'Continue firme.\n\nRespire e faça o próximo passo.\n\nTome ibuprofeno.',
+    });
+    await expect(worker.process(job())).resolves.toEqual({ status: 'BLOCKED' });
     expect(sentText(enqueue)).toBe(STANDARD_BLOCK_RESPONSE);
   });
 
@@ -308,11 +480,12 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     expect(complete).not.toHaveBeenCalled();
   });
 
-  it('batch vazio → EMPTY, libera nada', async () => {
+  it('batch vazio → EMPTY após adquirir e liberar o lock', async () => {
     const { worker, lock } = makeWorker({ batchItems: [] });
     const res = await worker.process(job());
     expect(res.status).toBe('EMPTY');
-    expect(lock.acquire).not.toHaveBeenCalled();
+    expect(lock.acquire).toHaveBeenCalledWith('u1');
+    expect(lock.release).toHaveBeenCalledWith('u1', 'tok');
   });
 });
 

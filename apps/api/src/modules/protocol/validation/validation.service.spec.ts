@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ProtocolExercise, ProtocolStructure } from '@movivo/shared';
 
-import { ValidationService, type ValidateProtocolInput } from './validation.service';
+import { aggregate, ValidationService, type ValidateProtocolInput } from './validation.service';
 
 const service = new ValidationService();
 
@@ -426,12 +426,12 @@ describe('ValidationService — compliance de linguagem', () => {
     expect(v.violations.map((x) => x.rule)).toContain('PROMISE');
   });
 
-  it('FLAG diagnóstico (não bloqueia)', () => {
+  it('BLOCK diagnóstico ou alegação de tratamento', () => {
     const v = service.validate(
       input({ structure: validStructure({ generalNotes: 'Parece uma tendinite.' }) }),
     );
-    expect(v.code).toBe('FLAG');
-    expect(v.action).toBe('FLAG_HUMAN_REVIEW');
+    expect(v.code).toBe('BLOCK');
+    expect(v.action).toBe('BLOCK_FALLBACK');
     expect(v.humanReviewRequired).toBe(true);
     expect(v.violations.map((x) => x.rule)).toContain('DIAGNOSIS');
   });
@@ -473,9 +473,19 @@ describe('ValidationService.validateResponse — texto livre da conversa (US-3.5
     expect(v.violations.map((x) => x.rule)).toContain('PROMPT_LEAK');
   });
 
-  it('reusa FLAG: diagnóstico não bloqueia', () => {
+  it('reusa BLOCK: diagnóstico não é entregue', () => {
     const v = service.validateResponse('Isso parece um diagnóstico de algo.');
-    expect(v.action).toBe('FLAG_HUMAN_REVIEW');
+    expect(v.action).toBe('BLOCK_FALLBACK');
+  });
+
+  it.each([
+    'Isso parece um diagnó\u200Bstico.',
+    'Esse é o trata\u2060mento indicado.',
+    'Tome ibu\u00ADprofeno.',
+    'Resultado ｇａｒａｎｔｉｄｏ.',
+    'base de refe\u200Brência: conteúdo interno',
+  ])('BLOCK linguagem proibida após canonicalização Unicode: %s', (text) => {
+    expect(service.validateResponse(text).action).toBe('BLOCK_FALLBACK');
   });
 
   it('substituição: PASS quando cita só o exercício autorizado da base', () => {
@@ -499,5 +509,38 @@ describe('ValidationService.validateResponse — texto livre da conversa (US-3.5
       allowedExercises: ['leg_press'],
     });
     expect(v.action).toBe('PASS');
+  });
+});
+
+describe('aggregate — derivação do veredito final', () => {
+  // Nenhuma regra do catálogo atual produz FLAG isolado (a última, DIAGNOSIS, virou BLOCK),
+  // mas FLAG_HUMAN_REVIEW segue um veredito real consumido fora deste serviço
+  // (protocol-planner.ts, protocol-auto-release.worker.ts) — testado direto na função pura.
+  it('FLAG isolado (sem BLOCK) vira FLAG_HUMAN_REVIEW', () => {
+    const v = aggregate([{ rule: 'HYPOTHETICAL_FLAG', detail: 'exemplo', action: 'FLAG' }]);
+    expect(v).toEqual({
+      action: 'FLAG_HUMAN_REVIEW',
+      code: 'FLAG',
+      humanReviewRequired: true,
+      violations: [{ rule: 'HYPOTHETICAL_FLAG', detail: 'exemplo', action: 'FLAG' }],
+    });
+  });
+
+  it('BLOCK tem prioridade sobre FLAG quando ambos estão presentes', () => {
+    const v = aggregate([
+      { rule: 'HYPOTHETICAL_FLAG', detail: 'exemplo', action: 'FLAG' },
+      { rule: 'SOME_BLOCK', detail: 'exemplo', action: 'BLOCK' },
+    ]);
+    expect(v.action).toBe('BLOCK_FALLBACK');
+    expect(v.code).toBe('BLOCK');
+  });
+
+  it('sem violações vira PASS', () => {
+    expect(aggregate([])).toEqual({
+      action: 'PASS',
+      code: 'PASS',
+      humanReviewRequired: false,
+      violations: [],
+    });
   });
 });

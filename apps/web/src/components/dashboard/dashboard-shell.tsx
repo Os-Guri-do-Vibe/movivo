@@ -3,6 +3,7 @@
 import {
   Activity,
   Bot,
+  Brain,
   Cable,
   Calculator,
   ChevronDown,
@@ -17,7 +18,6 @@ import {
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
-  Repeat,
   ScrollText,
   ServerCog,
   Settings,
@@ -94,46 +94,25 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         icon: ClipboardCheck,
         capabilities: ['control_center.students.read', 'control_center.students.health.read'],
       },
-      {
-        // US-8.3 entregou entryCohorts/trialConversion; a tabela vive dentro de
-        // Financeiro (mesmo dado de coorte de receita), não numa tela própria.
-        href: '/dashboard/financeiro#coortes',
-        label: 'Coortes & Retenção',
-        icon: Repeat,
-        capabilities: ['control_center.finance.read'],
-      },
     ],
   },
   {
-    label: 'Financeiro',
+    label: 'IA',
     items: [
       {
-        href: '/dashboard/financeiro',
-        label: 'Receita & Assinaturas',
-        icon: Landmark,
-        capabilities: ['control_center.finance.read'],
+        href: '/dashboard/ia/base-conhecimento',
+        label: 'Base de Conhecimento',
+        icon: Brain,
+        capabilities: ['control_center.ai.config.read'],
       },
       {
-        // US-8.4 entregou costByCategory/costByMonth; a seção vive dentro da
-        // mesma tela de Financeiro, não numa rota própria.
-        href: '/dashboard/financeiro#custos',
-        label: 'Custos',
-        icon: Coins,
-        capabilities: ['control_center.finance.read'],
-      },
-      {
-        href: '/dashboard/projecao',
-        label: 'Resultado & Projeção',
-        icon: Calculator,
-        capabilities: ['control_center.finance.read'],
-      },
-      {
-        // Cap table e distribuição não são do setor financeiro: exigem
-        // `partners.read`, exclusiva do ADMIN. Quem é FINANCE não vê o item.
-        href: '/dashboard/socios',
-        label: 'Sócios & Distribuição',
-        icon: Handshake,
-        capabilities: ['control_center.partners.read'],
+        // Persona, Regras invioláveis, Conhecimento (RAG) e FAQ viraram etapas de um
+        // único painel — cada etapa continua publicando e auditando sua própria
+        // configuração, só a navegação foi unificada.
+        href: '/dashboard/ia/agente',
+        label: 'Agente',
+        icon: Bot,
+        capabilities: ['control_center.ai.config.read'],
       },
     ],
   },
@@ -166,16 +145,38 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
     ],
   },
   {
-    label: 'IA',
+    label: 'Financeiro',
     items: [
       {
-        // Persona, Regras invioláveis, Conhecimento (RAG) e FAQ viraram etapas de um
-        // único painel — cada etapa continua publicando e auditando sua própria
-        // configuração, só a navegação foi unificada.
-        href: '/dashboard/ia/agente',
-        label: 'Agente',
-        icon: Bot,
-        capabilities: ['control_center.ai.config.read'],
+        // Achado 2026-08-19, a pedido do fundador: "Coortes & Retenção" (US-8.3,
+        // entryCohorts/trialConversion) deixou de ser um item de nav à parte — já
+        // renderiza nesta mesma tela (`#coortes`), então virou navegação duplicada.
+        href: '/dashboard/financeiro',
+        label: 'Receita & Assinaturas',
+        icon: Landmark,
+        capabilities: ['control_center.finance.read'],
+      },
+      {
+        // US-8.4 entregou costByCategory/costByMonth; a seção vive dentro da
+        // mesma tela de Financeiro, não numa rota própria.
+        href: '/dashboard/financeiro#custos',
+        label: 'Custos',
+        icon: Coins,
+        capabilities: ['control_center.finance.read'],
+      },
+      {
+        href: '/dashboard/projecao',
+        label: 'Resultado & Projeção',
+        icon: Calculator,
+        capabilities: ['control_center.finance.read'],
+      },
+      {
+        // Cap table e distribuição não são do setor financeiro: exigem
+        // `partners.read`, exclusiva do ADMIN. Quem é FINANCE não vê o item.
+        href: '/dashboard/socios',
+        label: 'Sócios & Distribuição',
+        icon: Handshake,
+        capabilities: ['control_center.partners.read'],
       },
     ],
   },

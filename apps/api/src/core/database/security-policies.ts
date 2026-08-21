@@ -55,7 +55,15 @@ interface TenantTable {
    * o escopo não é aplicável (anamnesis_sessions), então fica `false`.
    */
   anon?: { scope: string; scopeAtInsert: boolean };
-  /** Acesso somente quando existe vinculo profissional ativo com o titular. */
+  /**
+   * Acesso a QUALQUER profissional CREF ativo, com consentimento de saúde do titular
+   * ativo — não mais restrito a `professional_assignments` (decisão do fundador,
+   * 2026-08-19): a fila de revisão é do cargo, não da pessoa. Hoje só existe um RT
+   * (Leonardo), mas o modelo já precisa suportar vários CREFs revisando/editando a
+   * mesma fila quando a MOVIVO contratar mais profissionais. `professional_assignments`
+   * continua existindo (ex.: atribuição nominal em `protocols.professionalId`), só
+   * deixou de ser o portão de RLS.
+   */
   professional?: 'read' | 'write';
   /**
    * Leitura operacional do papel `SUPPORT` (Control Center — aba de suporte), restrita
@@ -161,12 +169,12 @@ export function buildRlsPoliciesSql(): string {
     const system = `(${ROLE} = 'SYSTEM')`;
     const admin = `(${ROLE} = 'ADMIN')`;
     const base = `${self} OR ${system} OR ${admin}`;
-    const linkedProfessional = `(${ROLE} = 'PROFESSIONAL' AND EXISTS (
-      SELECT 1 FROM public.professional_assignments pa
-      WHERE pa.professional_id::text = ${UID}
-        AND pa.user_id = "${table}"."${column}"
-        AND pa.active = true AND pa.revoked_at IS NULL
-    ) AND public.has_active_health_consent("${table}"."${column}"))`;
+    // Decisão do fundador (2026-08-19): a fila de revisão é do CARGO (qualquer CREF
+    // ativo), não da PESSOA — antes disso, um profissional só via titulares com
+    // `professional_assignments` ativo apontando pra ele, o que escondia protocolo/
+    // PAR-Q/etc. de outro CREF sem essa atribuição específica. Sem EXISTS sobre
+    // `professional_assignments`: só checa role + consentimento de saúde do titular.
+    const linkedProfessional = `(${ROLE} = 'PROFESSIONAL' AND public.has_active_health_consent("${table}"."${column}"))`;
 
     // Fase anônima escopada por sessão (Sato — achado 1):
     //  - leitura: GUC ausente (lookup token→sessão) OU coluna de escopo == GUC;
@@ -250,9 +258,13 @@ export function buildRlsPoliciesSql(): string {
     // O terceiro disjunto cobre o evento de acesso EM MASSA (listagens do Control Center):
     // nao existe um titular unico a apontar, entao o ator registra o evento SOBRE SI MESMO
     // (`actor_id = user_id = contexto atual`). Continua impossivel forjar outro ator ou
-    // atribuir o evento a outro titular.
+    // atribuir o evento a outro titular. Primeiro disjunto acompanha a mesma decisão do
+    // fundador (2026-08-19) do `linkedProfessional` acima: sem o EXISTS de
+    // `professional_assignments` — senão um CREF sem atribuição específica conseguiria
+    // editar/assinar o protocolo (RLS de `protocols` já liberado) mas a gravação da
+    // própria trilha de auditoria dessa ação falharia.
     `DROP POLICY IF EXISTS "audit_logs_rls_insert" ON "audit_logs"`,
-    `CREATE POLICY "audit_logs_rls_insert" ON "audit_logs" FOR INSERT WITH CHECK ((actor_id::text = ${UID} AND ${ROLE} = 'PROFESSIONAL' AND EXISTS (SELECT 1 FROM public.professional_assignments pa WHERE pa.professional_id::text = ${UID} AND pa.user_id = audit_logs.user_id AND pa.active = true AND pa.revoked_at IS NULL) AND public.has_active_health_consent(audit_logs.user_id)) OR (actor_id::text = ${UID} AND user_id::text = ${UID}) OR ${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
+    `CREATE POLICY "audit_logs_rls_insert" ON "audit_logs" FOR INSERT WITH CHECK ((actor_id::text = ${UID} AND ${ROLE} = 'PROFESSIONAL' AND public.has_active_health_consent(audit_logs.user_id)) OR (actor_id::text = ${UID} AND user_id::text = ${UID}) OR ${ROLE} = 'SYSTEM' OR (actor_id::text = ${UID} AND ${ROLE} = 'ADMIN'))`,
   );
 
   // `;` como separador — executado por `sql.unsafe` (simple query, multi-statement),
@@ -383,6 +395,41 @@ export function buildAiGuardrailRulesImmutabilitySql(appRole: string): string {
 }
 
 /**
+ * `ai_forbidden_topics` append-only, imposto no banco (Sprint 10).
+ *
+ * Mesmo molde de `ai_guardrail_rules`, com um motivo a mais para as duas barreiras: aqui o
+ * match **bloqueia** a resposta ao aluno, em vez de só sinalizá-la. Uma linha editada depois
+ * do fato mudaria retroativamente o que a agente se recusou a responder, sem deixar rastro —
+ * e o histórico de aprovação do RT CREF (`approved_by`) deixaria de provar o que aprovou.
+ *
+ * `REVOKE UPDATE` também é o que impede a role de runtime de contornar o `CHECK` de
+ * maker-checker reescrevendo `approved_by` numa linha já gravada.
+ */
+export function buildAiForbiddenTopicsImmutabilitySql(appRole: string): string {
+  return `
+    CREATE OR REPLACE FUNCTION public.ai_forbidden_topics_reject_mutation()
+    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    BEGIN
+      RAISE EXCEPTION 'ai_forbidden_topics is append-only' USING ERRCODE = '55000';
+    END $$;
+
+    REVOKE ALL ON FUNCTION public.ai_forbidden_topics_reject_mutation() FROM PUBLIC;
+
+    DROP TRIGGER IF EXISTS trg_ai_forbidden_topics_immutable ON public.ai_forbidden_topics;
+    CREATE TRIGGER trg_ai_forbidden_topics_immutable
+      BEFORE UPDATE OR DELETE ON public.ai_forbidden_topics
+      FOR EACH ROW EXECUTE FUNCTION public.ai_forbidden_topics_reject_mutation();
+    DROP TRIGGER IF EXISTS trg_ai_forbidden_topics_no_truncate ON public.ai_forbidden_topics;
+    CREATE TRIGGER trg_ai_forbidden_topics_no_truncate
+      BEFORE TRUNCATE ON public.ai_forbidden_topics
+      FOR EACH STATEMENT EXECUTE FUNCTION public.ai_forbidden_topics_reject_mutation();
+
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.ai_forbidden_topics FROM ${appRole};
+    GRANT SELECT, INSERT ON public.ai_forbidden_topics TO ${appRole};
+  `;
+}
+
+/**
  * `user_status_transitions` append-only, imposto no banco (US-8.3 / TASK-8.3.1).
  *
  * Molde idêntico ao de `agent_config` (Sprint 7), pelo mesmo motivo: uma transição editada
@@ -425,14 +472,15 @@ export function buildProfessionalAccessSql(appRole: string): string {
     BEGIN
       actor_role := nullif(current_setting('app.current_role', true), '');
       actor := nullif(current_setting('app.current_user_id', true), '')::uuid;
+      -- Decisão do fundador (2026-08-19): qualquer CREF ativo consulta consentimento
+      -- de qualquer titular — mesma mudança do linkedProfessional em
+      -- buildRlsPoliciesSql acima, senão essa checagem (chamada de dentro da própria
+      -- policy) travaria de novo o acesso que acabou de ser liberado ali.
       IF NOT (
         actor_role = 'SYSTEM'
+        OR actor_role = 'ADMIN'
         OR (actor_role = 'USER' AND actor IS NOT DISTINCT FROM target_user)
-        OR (actor_role = 'PROFESSIONAL' AND EXISTS (
-          SELECT 1 FROM public.professional_assignments pa
-          WHERE pa.professional_id = actor AND pa.user_id = target_user
-            AND pa.active = true AND pa.revoked_at IS NULL
-        ))
+        OR actor_role = 'PROFESSIONAL'
       ) THEN
         RETURN false;
       END IF;
@@ -617,15 +665,18 @@ export function buildProfessionalAccessSql(appRole: string): string {
       IF target_user IS NULL THEN
         RAISE EXCEPTION 'PAR-Q session not awaiting clearance' USING ERRCODE = 'P0002';
       END IF;
+      -- Decisão do fundador (2026-08-19): liberar PAR-Q é ação do CARGO (qualquer CREF
+      -- ativo), não exige mais vínculo nominal específico pro titular — mesma mudança
+      -- do linkedProfessional em buildRlsPoliciesSql acima, senão a RLS já liberada em
+      -- anamnesis_sessions/protocols pra qualquer CREF ficaria travada aqui por essa
+      -- checagem mais estrita.
       IF NOT EXISTS (
-        SELECT 1 FROM public.professional_assignments pa
-        INNER JOIN public.users professional ON professional.id = pa.professional_id
-        WHERE pa.professional_id = actor AND pa.user_id = target_user
-          AND pa.active = true AND pa.revoked_at IS NULL
+        SELECT 1 FROM public.users professional
+        WHERE professional.id = actor
           AND professional.role = 'PROFESSIONAL'
           AND professional.cref_active = true
       ) THEN
-        RAISE EXCEPTION 'active CREF professional is not assigned to holder' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'active CREF professional required' USING ERRCODE = '42501';
       END IF;
       IF NOT public.has_active_health_consent(target_user) THEN
         RAISE EXCEPTION 'active health consent required' USING ERRCODE = '42501';
@@ -794,6 +845,27 @@ export function buildAdSpendImmutabilitySql(appRole: string): string {
 
 /** Metadados/revisoes RAG sao historico; publicacao exige revisao CREF no banco. */
 export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
+  const histories = [
+    'knowledge_documents',
+    'knowledge_document_reviews',
+    'knowledge_document_events',
+    'knowledge_document_extractions',
+    'knowledge_staged_chunks',
+    'knowledge_chunk_embeddings',
+    'methodology_versions',
+    'methodology_events',
+  ];
+  const immutableTriggers = histories
+    .map(
+      (table) => `
+        DROP TRIGGER IF EXISTS trg_${table}_immutable ON public.${table};
+        CREATE TRIGGER trg_${table}_immutable BEFORE UPDATE OR DELETE ON public.${table}
+          FOR EACH ROW EXECUTE FUNCTION public.knowledge_history_reject_mutation();
+        DROP TRIGGER IF EXISTS trg_${table}_no_truncate ON public.${table};
+        CREATE TRIGGER trg_${table}_no_truncate BEFORE TRUNCATE ON public.${table}
+          FOR EACH STATEMENT EXECUTE FUNCTION public.knowledge_history_reject_mutation();`,
+    )
+    .join('\n');
   return `
     CREATE OR REPLACE FUNCTION public.knowledge_history_reject_mutation()
     RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
@@ -802,39 +874,31 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
     END $$;
     REVOKE ALL ON FUNCTION public.knowledge_history_reject_mutation() FROM PUBLIC;
 
-    DROP TRIGGER IF EXISTS trg_knowledge_documents_immutable ON public.knowledge_documents;
-    CREATE TRIGGER trg_knowledge_documents_immutable BEFORE UPDATE OR DELETE ON public.knowledge_documents
-      FOR EACH ROW EXECUTE FUNCTION public.knowledge_history_reject_mutation();
-    DROP TRIGGER IF EXISTS trg_knowledge_documents_no_truncate ON public.knowledge_documents;
-    CREATE TRIGGER trg_knowledge_documents_no_truncate BEFORE TRUNCATE ON public.knowledge_documents
-      FOR EACH STATEMENT EXECUTE FUNCTION public.knowledge_history_reject_mutation();
-    DROP TRIGGER IF EXISTS trg_knowledge_reviews_immutable ON public.knowledge_document_reviews;
-    CREATE TRIGGER trg_knowledge_reviews_immutable BEFORE UPDATE OR DELETE ON public.knowledge_document_reviews
-      FOR EACH ROW EXECUTE FUNCTION public.knowledge_history_reject_mutation();
-    DROP TRIGGER IF EXISTS trg_knowledge_reviews_no_truncate ON public.knowledge_document_reviews;
-    CREATE TRIGGER trg_knowledge_reviews_no_truncate BEFORE TRUNCATE ON public.knowledge_document_reviews
-      FOR EACH STATEMENT EXECUTE FUNCTION public.knowledge_history_reject_mutation();
+    ${immutableTriggers}
 
-    CREATE OR REPLACE FUNCTION public.publish_knowledge_document(target_document uuid, prepared_chunks jsonb)
+    DROP FUNCTION IF EXISTS public.publish_knowledge_document(uuid, jsonb);
+    CREATE OR REPLACE FUNCTION public.publish_knowledge_document(target_document uuid)
     RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
-    DECLARE actor uuid; affected integer;
+    DECLARE actor uuid; caller_role text; affected integer; staged_count integer;
     BEGIN
       actor := nullif(current_setting('app.current_user_id', true), '')::uuid;
-      IF nullif(current_setting('app.current_role', true), '') <> 'PROFESSIONAL' OR actor IS NULL THEN
-        RAISE EXCEPTION 'active CREF professional role required' USING ERRCODE = '42501';
+      caller_role := nullif(current_setting('app.current_role', true), '');
+      IF caller_role NOT IN ('SYSTEM', 'PROFESSIONAL') THEN
+        RAISE EXCEPTION 'knowledge publisher role denied' USING ERRCODE = '42501';
       END IF;
-      IF NOT EXISTS (
+      IF caller_role = 'PROFESSIONAL' AND (actor IS NULL OR NOT EXISTS (
         SELECT 1 FROM public.users professional
         WHERE professional.id = actor AND professional.role = 'PROFESSIONAL'
           AND professional.cref_active = true
-      ) THEN
+      )) THEN
         RAISE EXCEPTION 'active CREF professional required' USING ERRCODE = '42501';
       END IF;
       IF NOT EXISTS (
         SELECT 1 FROM public.knowledge_document_reviews review
+        JOIN public.users reviewer ON reviewer.id = review.reviewer_id
         WHERE review.document_id = target_document
           AND review.decision = 'APPROVED'::public.knowledge_review_decision
-          AND review.reviewer_id = actor
+          AND reviewer.role = 'PROFESSIONAL' AND reviewer.cref_active = true
           AND review.id = (
             SELECT latest.id FROM public.knowledge_document_reviews latest
             WHERE latest.document_id = target_document
@@ -843,16 +907,57 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
       ) THEN
         RAISE EXCEPTION 'approved CREF review required' USING ERRCODE = '42501';
       END IF;
+      IF (
+        SELECT event.status FROM public.knowledge_document_events event
+        WHERE event.document_id = target_document
+        ORDER BY event.sequence DESC, event.created_at DESC, event.id DESC LIMIT 1
+      ) <> 'INDEXING'::public.knowledge_document_status THEN
+        RAISE EXCEPTION 'document is not in indexing state' USING ERRCODE = '55000';
+      END IF;
+      SELECT count(*)::integer INTO staged_count
+      FROM public.knowledge_staged_chunks staged WHERE staged.document_id = target_document;
+      IF staged_count = 0 OR NOT EXISTS (
+        SELECT 1 FROM public.knowledge_document_extractions extraction
+        JOIN public.knowledge_documents document ON document.id = extraction.document_id
+        WHERE extraction.document_id = target_document
+          AND extraction.content_sha256 = document.sha256
+          AND encode(digest(convert_to(extraction.content, 'UTF8'), 'sha256'), 'hex') = extraction.content_sha256
+      ) OR EXISTS (
+        SELECT 1 FROM public.knowledge_staged_chunks staged
+        LEFT JOIN public.knowledge_chunk_embeddings staged_embedding
+          ON staged_embedding.staged_chunk_id = staged.id
+          AND staged_embedding.chunk_sha256 = staged.chunk_sha256
+        WHERE staged.document_id = target_document
+          AND (
+            staged_embedding.staged_chunk_id IS NULL
+            OR staged.extraction_sha256 <> (
+              SELECT extraction.content_sha256 FROM public.knowledge_document_extractions extraction
+              WHERE extraction.document_id = target_document
+            )
+            OR encode(digest(convert_to(staged.chunk_text, 'UTF8'), 'sha256'), 'hex') <> staged.chunk_sha256
+          )
+      ) THEN
+        RAISE EXCEPTION 'staging provenance verification failed' USING ERRCODE = '55000';
+      END IF;
       INSERT INTO public.knowledge_base (
         document_id, chunk_index, chunk_text, embedding, topic, title, source_url,
         reliability, published_at, created_at, updated_at
       )
-      SELECT target_document, (item->>'chunkIndex')::integer, item->>'chunkText',
-        (item->>'embedding')::vector, item->>'topic', item->>'title',
-        nullif(item->>'sourceUrl', ''), (item->>'reliability')::integer, now(), now(), now()
-      FROM jsonb_array_elements(prepared_chunks) item
+      SELECT target_document, staged.chunk_index, staged.chunk_text,
+        staged_embedding.embedding, document.topic, document.title,
+        document.source_url, 5, now(), now(), now()
+      FROM public.knowledge_staged_chunks staged
+      JOIN public.knowledge_chunk_embeddings staged_embedding
+        ON staged_embedding.staged_chunk_id = staged.id
+        AND staged_embedding.chunk_sha256 = staged.chunk_sha256
+      JOIN public.knowledge_documents document ON document.id = staged.document_id
+      WHERE staged.document_id = target_document
       ON CONFLICT (document_id, chunk_index) DO NOTHING;
-      GET DIAGNOSTICS affected = ROW_COUNT;
+      SELECT count(*)::integer INTO affected
+      FROM public.knowledge_base WHERE document_id = target_document;
+      IF affected <> staged_count THEN
+        RAISE EXCEPTION 'published chunk count mismatch' USING ERRCODE = '55000';
+      END IF;
       UPDATE public.knowledge_document_blobs
         SET retained_until = now() + interval '365 days'
         WHERE document_id = target_document;
@@ -871,9 +976,9 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
       RETURN affected;
     END $$;
 
-    REVOKE ALL ON FUNCTION public.publish_knowledge_document(uuid, jsonb) FROM PUBLIC;
+    REVOKE ALL ON FUNCTION public.publish_knowledge_document(uuid) FROM PUBLIC;
     REVOKE ALL ON FUNCTION public.purge_expired_knowledge_blobs() FROM PUBLIC;
-    GRANT EXECUTE ON FUNCTION public.publish_knowledge_document(uuid, jsonb) TO ${appRole};
+    GRANT EXECUTE ON FUNCTION public.publish_knowledge_document(uuid) TO ${appRole};
     GRANT EXECUTE ON FUNCTION public.purge_expired_knowledge_blobs() TO ${appRole};
     REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_documents FROM ${appRole};
     REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_document_reviews FROM ${appRole};
@@ -881,5 +986,13 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
     GRANT SELECT, INSERT ON public.knowledge_document_reviews TO ${appRole};
     REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_document_blobs FROM ${appRole};
     GRANT SELECT, INSERT ON public.knowledge_document_blobs TO ${appRole};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_document_events,
+      public.knowledge_document_extractions, public.knowledge_staged_chunks,
+      public.knowledge_chunk_embeddings, public.methodology_versions,
+      public.methodology_events FROM ${appRole};
+    GRANT SELECT, INSERT ON public.knowledge_document_events,
+      public.knowledge_document_extractions, public.knowledge_staged_chunks,
+      public.knowledge_chunk_embeddings, public.methodology_versions,
+      public.methodology_events TO ${appRole};
   `;
 }

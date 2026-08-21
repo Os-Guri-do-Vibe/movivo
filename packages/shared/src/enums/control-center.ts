@@ -57,6 +57,17 @@ export const ControlCenterCapability = {
   AI_KNOWLEDGE_WRITE: 'control_center.ai.knowledge.write',
   AI_KNOWLEDGE_APPROVE: 'control_center.ai.knowledge.approve',
   AI_METHODOLOGY_APPROVE: 'control_center.ai.methodology.approve',
+
+  /**
+   * Aprovar/retirar **tema proibido** e alterar a **mensagem de handoff humano**.
+   *
+   * As duas coisas são a mesma classe de decisão: o que a agente se recusa a discutir e o
+   * que o aluno lê quando o sistema desiste de responder. Concedida só ao `PROFESSIONAL`
+   * com CREF ativo — entra na `ADMIN_INHERITANCE_DENYLIST` pelo mesmo motivo que
+   * `AI_METHODOLOGY_APPROVE`: um admin de sistema que aprovasse sozinho tornaria a
+   * supervisão CREF nominal.
+   */
+  AI_GUARDRAIL_APPROVE: 'control_center.ai.guardrail.approve',
 } as const;
 
 export type ControlCenterCapability =

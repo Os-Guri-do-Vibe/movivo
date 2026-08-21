@@ -5,6 +5,7 @@ import { desc } from 'drizzle-orm';
 import { DRIZZLE } from '../database/database.constants';
 import type { DrizzleClient } from '../database/database.module';
 import { aiGuardrailRules } from '../database/schema';
+import { matchesTerm, normalizeForMatch } from './text-normalize';
 
 export interface L1GuardrailFlag {
   ruleKey: string;
@@ -15,15 +16,6 @@ export interface L1GuardrailFlag {
 interface ActiveRule extends L1GuardrailFlag {
   scope: 'INPUT' | 'OUTPUT' | 'BOTH';
   phrases: string[];
-}
-
-function normalize(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '')
-    .toLocaleLowerCase('pt-BR')
-    .replace(/\s+/gu, ' ')
-    .trim();
 }
 
 @Injectable()
@@ -38,8 +30,12 @@ export class L1GuardrailService {
 
   async evaluate(input: string, output: string): Promise<L1GuardrailFlag[]> {
     const rules = await this.activeRules();
-    const normalizedInput = normalize(input);
-    const normalizedOutput = normalize(output);
+    // Normalização compartilhada com o comparador de temas proibidos (`text-normalize.ts`):
+    // NFKC + remoção de invisíveis + limite de palavra. Mais estreita que a versão anterior
+    // (substring crua), que casava "dor" dentro de "dormi" — falso positivo que a fila de
+    // revisão do CREF pagava em ruído.
+    const normalizedInput = normalizeForMatch(input);
+    const normalizedOutput = normalizeForMatch(output);
     return rules.flatMap((rule) => {
       const sources =
         rule.scope === 'INPUT'
@@ -47,9 +43,7 @@ export class L1GuardrailService {
           : rule.scope === 'OUTPUT'
             ? [normalizedOutput]
             : [normalizedInput, normalizedOutput];
-      return rule.phrases.some((phrase) =>
-        sources.some((source) => source.includes(normalize(phrase))),
-      )
+      return rule.phrases.some((phrase) => sources.some((source) => matchesTerm(source, phrase)))
         ? [{ ruleKey: rule.ruleKey, label: rule.label, version: rule.version }]
         : [];
     });

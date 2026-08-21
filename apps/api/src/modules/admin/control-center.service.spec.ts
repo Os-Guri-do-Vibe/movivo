@@ -970,6 +970,7 @@ describe('ControlCenterService projections', () => {
   });
 
   it('lista de alunos (recorte de suporte) não carrega nenhum campo de saúde', async () => {
+    const enrolledAt = new Date('2026-07-01T12:00:00.000Z');
     const student = {
       id: '11111111-1111-4111-8111-111111111111',
       name: 'Pessoa',
@@ -977,14 +978,18 @@ describe('ControlCenterService projections', () => {
       phoneNumber: '+5511999999999',
       status: 'ACTIVE',
       subscriptionStatus: 'ACTIVE',
+      subscriptionPlan: 'MONTHLY',
       protocolStatus: 'ACTIVE',
+      enrolledAt,
     };
     const { service, db } = serviceWithSystemResults([student], [{ blocked: 0, validated: 0 }]);
 
     const response = await service.students({ ...ACTOR, role: 'SUPPORT' });
 
     // US-7.4 acrescenta só o risco comercial de cancelamento à projeção.
-    expect(response.data.students).toEqual([{ ...student, churnRisk: { score: 0, signals: [] } }]);
+    expect(response.data.students).toEqual([
+      { ...student, enrolledAt: enrolledAt.toISOString(), churnRisk: { score: 0, signals: [] } },
+    ]);
     // US-7.1: o filtro é no servidor. Quem tem só `students.read` recebe um payload sem
     // anamnese, PAR-Q, dor ou check-in — não é a UI que esconde.
     // Asserção sobre a projeção do aluno, não sobre o envelope: desde a US-8.1 as

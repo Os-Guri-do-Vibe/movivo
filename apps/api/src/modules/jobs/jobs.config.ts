@@ -27,6 +27,7 @@ export const QUEUE = {
   workoutDaily: 'workout-daily',
   conversionSequence: 'conversion-sequence',
   paymentReconciliation: 'payment-reconciliation',
+  knowledgeProcessing: 'knowledge-processing',
   sanity: 'sanity',
   deadLetter: 'dead-letter',
 } as const;
@@ -89,6 +90,13 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
     backoffMs: [2_000, 10_000, 60_000, 300_000, 900_000],
     concurrency: 5,
     lockMs: 30_000,
+  },
+  // Parsing/indexação de documentos: idempotente, fora da requisição e com retry.
+  [QUEUE.knowledgeProcessing]: {
+    attempts: 4,
+    backoffMs: [2_000, 10_000, 30_000, 120_000],
+    concurrency: 2,
+    lockMs: 120_000,
   },
   [QUEUE.sanity]: { attempts: 3, backoffMs: [50, 100, 200], concurrency: 2 },
   // DLQ é destino final: não retenta, não é reprocessada automaticamente.

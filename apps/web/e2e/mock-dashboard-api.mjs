@@ -31,8 +31,10 @@ const studentSummary = {
   email: 'pessoa@movivo.test',
   phoneNumber: '+5511999999999',
   status: 'ACTIVE',
-  subscriptionStatus: 'TRIAL',
+  subscriptionStatus: 'TRIALING',
+  subscriptionPlan: null,
   protocolStatus: 'PENDING_REVIEW',
+  enrolledAt: '2026-08-01T12:00:00.000Z',
   churnRisk: {
     score: 1,
     signals: [{ code: 'SEM_MENSAGEM', label: 'Sem mensagem recebida há 14 dias' }],

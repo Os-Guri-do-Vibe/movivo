@@ -81,6 +81,22 @@ function protocolTitle(name: string | null | undefined) {
   return name ? `Protocolo para Revisão: ${name}` : 'Protocolo para Revisão';
 }
 
+/**
+ * Titulo do item de fila de PAR-Q bloqueado, com o nome completo do titular — mesmo
+ * padrão de `protocolTitle`. Não usa a palavra "Protocolo": PAR-Q bloqueado é
+ * justamente o gate que impede um protocolo de existir ainda (achado 2026-08-20, a
+ * pedido do fundador).
+ */
+function parqTitle(name: string | null | undefined) {
+  return name ? `PAR-Q para Revisão: ${name}` : 'PAR-Q para Revisão';
+}
+
+/**
+ * Resumo humano do item de PAR-Q bloqueado — o `status` cru (`BLOCKED`) vazava como
+ * legenda visível do card na fila "Revisão Humana Obrigatória" (achado 2026-08-20).
+ */
+const PARQ_BLOCKED_SUMMARY = 'Aguardando liberacao do profissional CREF responsavel.';
+
 @Injectable()
 export class DashboardService {
   constructor(
@@ -129,8 +145,13 @@ export class DashboardService {
           .innerJoin(users, eq(users.id, protocols.userId))
           .where(eq(protocols.approvalStatus, 'PENDING_REVIEW')),
         tx
-          .select({ id: anamnesisSessions.id, createdAt: anamnesisSessions.createdAt })
+          .select({
+            id: anamnesisSessions.id,
+            createdAt: anamnesisSessions.createdAt,
+            name: users.name,
+          })
           .from(anamnesisSessions)
+          .innerJoin(users, eq(users.id, anamnesisSessions.userId))
           .where(eq(anamnesisSessions.parqState, 'BLOQUEADO_AGUARDANDO_CLEARANCE')),
       ]);
 
@@ -149,6 +170,7 @@ export class DashboardService {
             row.createdAt,
             protocolTitle(row.name),
             row.status,
+            row.status,
             isOptional
               ? new Date(row.createdAt.getTime() + PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS).toISOString()
               : null,
@@ -162,7 +184,8 @@ export class DashboardService {
             'PARQ',
             'SAFETY',
             row.createdAt,
-            'PAR-Q aguarda decisao humana',
+            parqTitle(row.name),
+            PARQ_BLOCKED_SUMMARY,
             'BLOCKED',
             null,
           ),
@@ -550,6 +573,7 @@ export class DashboardService {
         row.createdAt,
         protocolTitle(owner?.name),
         row.status,
+        row.status,
         row.reviewUrgency === 'OPTIONAL'
           ? new Date(row.createdAt.getTime() + PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS).toISOString()
           : null,
@@ -587,8 +611,10 @@ export class DashboardService {
           data: anamnesisSessions.dataBlock2,
           state: anamnesisSessions.parqState,
           createdAt: anamnesisSessions.createdAt,
+          name: users.name,
         })
         .from(anamnesisSessions)
+        .innerJoin(users, eq(users.id, anamnesisSessions.userId))
         .where(eq(anamnesisSessions.id, id))
         .limit(1);
       if (!found?.userId) throw new NotFoundException('PAR-Q nao encontrado.');
@@ -609,7 +635,8 @@ export class DashboardService {
         'PARQ',
         'SAFETY',
         row.createdAt,
-        'PAR-Q aguarda decisao humana',
+        parqTitle(row.name),
+        PARQ_BLOCKED_SUMMARY,
         row.state ?? 'BLOCKED',
         null,
       ),
@@ -746,6 +773,7 @@ export class DashboardService {
         row.createdAt,
         'Check-in requer atencao',
         row.status,
+        row.status,
         null,
       ),
       context: {
@@ -803,6 +831,7 @@ export class DashboardService {
           alert.level,
           alert.createdAt,
           'Conversa requer atencao',
+          alert.status,
           alert.status,
           null,
         ),
@@ -874,12 +903,18 @@ export class DashboardService {
     return result.data;
   }
 
+  /**
+   * Builder compartilhado de todo item de fila. `summary` é parâmetro explícito desde
+   * 2026-08-20: antes era sempre uma cópia literal de `status`, o que vazava o enum cru
+   * `BLOCKED` como legenda visível do card de PAR-Q na seção "Revisão Humana Obrigatória".
+   */
   private item(
     id: string,
     kind: QueueItem['kind'],
     severity: QueueItem['severity'],
     createdAt: Date,
     title: string,
+    summary: string,
     status: string,
     autoReleaseAt: string | null,
   ): QueueItem {
@@ -890,7 +925,7 @@ export class DashboardService {
       createdAt: createdAt.toISOString(),
       ageMinutes: Math.max(0, Math.floor((Date.now() - createdAt.getTime()) / 60_000)),
       title,
-      summary: status,
+      summary,
       status,
       autoReleaseAt,
     };

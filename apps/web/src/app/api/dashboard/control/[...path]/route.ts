@@ -7,20 +7,29 @@ import {
   errorResponse,
   forwardBackendJson,
 } from '../../_lib/bff';
+import { isAllowedControlMutationPath } from '../../_lib/control-mutation-path';
 
 const SAFE_SEGMENT = /^[a-z0-9-]+$/i;
+const MAX_MUTATION_BODY_BYTES = 2 * 1024 * 1024;
 
-/**
- * Allowlist de mutações: o proxy de leitura é genérico, o de escrita não pode ser.
- * A autorização real continua no backend (capability por rota); esta lista só evita
- * que o BFF vire um caminho universal de POST para qualquer rota do Control Center.
- */
-const MUTATION_PATHS = new Set([
-  'ai/persona',
-  'ai/persona/rollback',
-  // Painel "Sistema → Integração" (EvolutionAPI, ferramenta INTERNA de teste).
-  'integration/whatsapp/instance',
-]);
+async function readBoundedJson(request: NextRequest): Promise<unknown> {
+  const advertised = Number(request.headers.get('content-length'));
+  if (Number.isFinite(advertised) && advertised > MAX_MUTATION_BODY_BYTES) {
+    throw new BffError(413, 'Corpo excede o limite permitido.');
+  }
+  const raw = await request.text();
+  if (!raw || new TextEncoder().encode(raw).byteLength > MAX_MUTATION_BODY_BYTES) {
+    throw new BffError(
+      raw ? 413 : 400,
+      raw ? 'Corpo excede o limite permitido.' : 'Corpo inválido.',
+    );
+  }
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    throw new BffError(400, 'Corpo inválido.');
+  }
+}
 
 export async function GET(
   request: NextRequest,
@@ -47,9 +56,10 @@ export async function POST(
     assertTrustedMutation(request);
     const { path } = await params;
     const target = path.join('/');
-    if (!MUTATION_PATHS.has(target)) return errorResponse(new BffError(404, 'Rota inexistente.'));
-    const body = await request.json().catch(() => null);
-    if (body === null) return errorResponse(new BffError(400, 'Corpo inválido.'));
+    if (!isAllowedControlMutationPath(target)) {
+      return errorResponse(new BffError(404, 'Rota inexistente.'));
+    }
+    const body = await readBoundedJson(request);
     const response = await authenticatedBackendFetch(`/control-center/${target}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

@@ -32,6 +32,8 @@ export * from './coaching-sessions';
 // Sprint 3 — corpus curado do RAG (US-3.3). Global, read-only, fora da RLS por titular.
 export * from './knowledge-base';
 export * from './knowledge-documents';
+export * from './vector';
+export * from './methodology-versions';
 
 // Sprint 3 — exemplos rotulados do IntentClassifier (US-3.4). Global, read-only.
 export * from './intent-examples';
@@ -66,3 +68,6 @@ export * from './partners';
 // Sprint 9 - FAQ determinístico global, versionado e append-only.
 export * from './faq-entries';
 export * from './ai-guardrail-rules';
+
+// Sprint 10 - temas proibidos da agente. Append-only, maker-checker, ação fixa em BLOCK.
+export * from './ai-forbidden-topics';

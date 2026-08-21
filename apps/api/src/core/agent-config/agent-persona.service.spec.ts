@@ -6,12 +6,11 @@ import { AgentConfigRepository } from './agent-config.repository';
 import { AgentPersonaService } from './agent-persona.service';
 
 const VALID_PERSONA: AgentPersona = {
+  ...DEFAULT_AGENT_PERSONA,
   agentName: 'Nina',
   agentSelfIntro: 'a coach digital da MOVIVO, supervisionada por um profissional CREF',
   toneDescriptors: ['direto'],
   emojiPolicy: 'RARO',
-  maxResponseChars: 600,
-  treatment: 'VOCE',
 };
 
 function make(overrides?: {

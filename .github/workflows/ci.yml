@@ -85,6 +85,9 @@ jobs:
       - name: Format check
         run: pnpm run format:check
 
+      - name: Gate operacional — Base de Conhecimento
+        run: pnpm run infra:knowledge:verify
+
       - name: Typecheck
         run: pnpm run typecheck
 

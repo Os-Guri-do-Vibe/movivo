@@ -80,6 +80,9 @@ export const conversations = pgTable(
         documentId: string | null;
         title: string;
         sourceUrl?: string;
+        documentVersion?: number;
+        documentSha256?: string;
+        publicationEventId?: string;
       }>
     >(),
 

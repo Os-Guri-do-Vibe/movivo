@@ -7,18 +7,8 @@ import {
   type FaqEntriesResponse,
   type FaqEntryVersion,
 } from '@movivo/shared';
-import {
-  CheckCircle2,
-  Circle,
-  History,
-  Lock,
-  Pencil,
-  RotateCcw,
-  Send,
-  Trash2,
-  XCircle,
-} from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { CheckCircle2, Circle, History, Lock, Pencil, Send, XCircle } from 'lucide-react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -30,6 +20,8 @@ import {
   simulateAgentConfig,
 } from '@/lib/control-center-api';
 
+import { FieldError } from './ai-persona-fields';
+import { ConfirmAction } from './confirm-action';
 import { ResourceState, SectorHeader, useControlCenterResource } from './control-center-ui';
 
 const INPUT_CLASS =
@@ -55,8 +47,19 @@ export function AiFaqDashboard({ canWrite = false }: { canWrite?: boolean }) {
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [writeError, setWriteError] = useState('');
+  const questionRef = useRef<HTMLInputElement>(null);
 
   const validation = useMemo(() => faqCandidateSchema.safeParse(draft), [draft]);
+  const fieldErrors = useMemo(() => {
+    const errors = new Map<string, string>();
+    if (!validation.success) {
+      for (const issue of validation.error.issues) {
+        const field = String(issue.path[0] ?? '');
+        if (!errors.has(field)) errors.set(field, issue.message);
+      }
+    }
+    return errors;
+  }, [validation]);
   const versions = data?.data.versions ?? [];
   const current = versions.filter((version) => version.current);
   const active = current.filter((version) => version.status === 'PUBLISHED');
@@ -122,7 +125,11 @@ export function AiFaqDashboard({ canWrite = false }: { canWrite?: boolean }) {
     setChangeNote('');
     setSimulation(null);
     setFeedback('');
-    document.getElementById('faq-editor')?.scrollIntoView({ behavior: 'smooth' });
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    document
+      .getElementById('faq-editor')
+      ?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    window.setTimeout(() => questionRef.current?.focus(), 0);
   };
 
   if (!data) {
@@ -143,7 +150,8 @@ export function AiFaqDashboard({ canWrite = false }: { canWrite?: boolean }) {
     <div>
       <SectorHeader
         title="FAQ"
-        description="Respostas revisadas para dúvidas recorrentes. O match é exato e normalizado, sem geração por modelo, sempre com respaldo do profissional CREF."
+        headingLevel="h2"
+        description="Quando uma pergunta corresponde a uma dúvida cadastrada, a resposta revisada é enviada sem chamar o modelo, sempre com respaldo do profissional CREF."
         meta={data.meta}
         refreshing={loading}
         onRefresh={() => void refresh()}
@@ -193,12 +201,16 @@ export function AiFaqDashboard({ canWrite = false }: { canWrite?: boolean }) {
                       <Pencil aria-hidden="true" />
                       Editar
                     </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
+                    <ConfirmAction
+                      triggerLabel="Retirar"
+                      triggerSize="sm"
+                      destructive
                       disabled={saving}
-                      onClick={() =>
-                        void runMutation(
+                      title={`Retirar “${entry.canonicalQuestion}”?`}
+                      description="A resposta deixa de ser usada imediatamente após a nova versão ser registrada. O histórico permanece disponível."
+                      confirmLabel="Confirmar retirada"
+                      onConfirm={() =>
+                        runMutation(
                           () =>
                             retireFaqEntry({
                               faqKey: entry.faqKey,
@@ -207,10 +219,7 @@ export function AiFaqDashboard({ canWrite = false }: { canWrite?: boolean }) {
                           'Resposta retirada. O histórico foi preservado.',
                         )
                       }
-                    >
-                      <Trash2 aria-hidden="true" />
-                      Retirar
-                    </Button>
+                    />
                   </div>
                 ) : null}
               </li>
@@ -229,30 +238,55 @@ export function AiFaqDashboard({ canWrite = false }: { canWrite?: boolean }) {
             {faqKey ? 'Editar resposta' : 'Nova resposta'}
           </h2>
           <div className="mt-4 grid gap-4">
-            <label className="text-label font-semibold">
+            <label htmlFor="faq-question" className="text-label font-semibold">
               Pergunta canônica
               <input
+                ref={questionRef}
+                id="faq-question"
                 className={INPUT_CLASS}
                 value={draft.canonicalQuestion}
                 maxLength={300}
+                aria-invalid={fieldErrors.has('canonicalQuestion') || undefined}
+                aria-describedby={
+                  fieldErrors.has('canonicalQuestion') ? 'faq-question-error' : undefined
+                }
                 onChange={(event) => update({ canonicalQuestion: event.target.value })}
               />
             </label>
-            <label className="text-label font-semibold">
+            {fieldErrors.get('canonicalQuestion') && draft.canonicalQuestion ? (
+              <FieldError id="faq-question-error">
+                {fieldErrors.get('canonicalQuestion')}
+              </FieldError>
+            ) : null}
+            <label htmlFor="faq-answer" className="text-label font-semibold">
               Resposta revisada
               <textarea
+                id="faq-answer"
                 className={`${INPUT_CLASS} min-h-32`}
                 value={draft.answer}
                 maxLength={1200}
+                aria-invalid={fieldErrors.has('answer') || undefined}
+                aria-describedby={
+                  fieldErrors.has('answer')
+                    ? 'faq-answer-count faq-answer-error'
+                    : 'faq-answer-count'
+                }
                 onChange={(event) => update({ answer: event.target.value })}
               />
-              <span className="mt-1 block text-xs font-normal text-muted-foreground">
+              <span
+                id="faq-answer-count"
+                className="mt-1 block text-xs font-normal text-muted-foreground"
+              >
                 {draft.answer.length}/1200 caracteres
               </span>
             </label>
-            <label className="text-label font-semibold">
+            {fieldErrors.get('answer') && draft.answer ? (
+              <FieldError id="faq-answer-error">{fieldErrors.get('answer')}</FieldError>
+            ) : null}
+            <label htmlFor="faq-change-note" className="text-label font-semibold">
               Motivo da mudança
               <input
+                id="faq-change-note"
                 className={INPUT_CLASS}
                 value={changeNote}
                 maxLength={500}
@@ -291,14 +325,12 @@ export function AiFaqDashboard({ canWrite = false }: { canWrite?: boolean }) {
               disabled={simulating || !validation.success}
               onClick={() => void runSimulation()}
             >
-              {simulating ? 'Executando…' : 'Executar as 4 etapas'}
+              {simulating ? 'Executando…' : 'Executar 4 verificações'}
             </Button>
           </div>
 
           {!validation.success && (draft.canonicalQuestion || draft.answer) ? (
-            <p role="alert" className="mt-3 text-label text-coral">
-              Revise a pergunta e a resposta antes de simular.
-            </p>
+            <FieldError>Revise os campos indicados antes de simular.</FieldError>
           ) : null}
           <div className="mt-4 flex flex-wrap gap-2">
             <Button
@@ -357,12 +389,16 @@ export function AiFaqDashboard({ canWrite = false }: { canWrite?: boolean }) {
                   </p>
                 </div>
                 {canWrite && !entry.current ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
+                  <ConfirmAction
+                    triggerLabel="Republicar"
+                    triggerVariant="outline"
+                    triggerSize="sm"
                     disabled={saving}
-                    onClick={() =>
-                      void runMutation(
+                    title={`Republicar a versão ${entry.version}?`}
+                    description="O conteúdo histórico será copiado para uma nova versão e passará a ser a resposta vigente."
+                    confirmLabel="Confirmar republicação"
+                    onConfirm={() =>
+                      runMutation(
                         () =>
                           rollbackFaqEntry({
                             faqKey: entry.faqKey,
@@ -372,10 +408,7 @@ export function AiFaqDashboard({ canWrite = false }: { canWrite?: boolean }) {
                         `Versão ${entry.version} republicada como nova versão.`,
                       )
                     }
-                  >
-                    <RotateCcw aria-hidden="true" />
-                    Republicar
-                  </Button>
+                  />
                 ) : null}
               </li>
             ))}
