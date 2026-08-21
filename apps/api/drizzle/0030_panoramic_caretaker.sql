@@ -68,9 +68,19 @@ CREATE TABLE "methodology_versions" (
 --> statement-breakpoint
 ALTER TABLE "knowledge_documents" ADD COLUMN "category" "knowledge_document_category" DEFAULT 'OTHER' NOT NULL;--> statement-breakpoint
 ALTER TABLE "knowledge_documents" ADD COLUMN "logical_key" varchar(120);--> statement-breakpoint
-ALTER TABLE "knowledge_documents" DISABLE TRIGGER "trg_knowledge_documents_immutable";--> statement-breakpoint
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_knowledge_documents_immutable') THEN
+    ALTER TABLE "knowledge_documents" DISABLE TRIGGER "trg_knowledge_documents_immutable";
+  END IF;
+END $$;--> statement-breakpoint
 UPDATE "knowledge_documents" SET "logical_key" = 'legacy-' || "id"::text WHERE "logical_key" IS NULL;--> statement-breakpoint
-ALTER TABLE "knowledge_documents" ENABLE TRIGGER "trg_knowledge_documents_immutable";--> statement-breakpoint
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_knowledge_documents_immutable') THEN
+    ALTER TABLE "knowledge_documents" ENABLE TRIGGER "trg_knowledge_documents_immutable";
+  END IF;
+END $$;--> statement-breakpoint
 ALTER TABLE "knowledge_documents" ALTER COLUMN "logical_key" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "knowledge_documents" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
 ALTER TABLE "knowledge_documents" ADD COLUMN "author" varchar(200);--> statement-breakpoint
