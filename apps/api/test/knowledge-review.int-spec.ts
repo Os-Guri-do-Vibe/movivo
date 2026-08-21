@@ -1,5 +1,5 @@
 /** Gate real do RAG: revisao CREF, publicacao estreita e historico imutavel. */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
@@ -41,6 +41,18 @@ const documentId = randomUUID();
 let uploaderId = '';
 let professionalId = '';
 
+/**
+ * `publish_knowledge_document` (Sprint 10) verifica proveniência ponta a ponta — não recebe
+ * mais os chunks prontos por parâmetro: exige extração + staged chunks + embeddings já
+ * gravados, cada hash conferido contra o conteúdo real (nunca um placeholder arbitrário).
+ */
+const DOCUMENT_CONTENT =
+  'Descanso entre séries conforme protocolo: 60 a 90 segundos para hipertrofia.';
+const DOCUMENT_SHA256 = createHash('sha256').update(DOCUMENT_CONTENT, 'utf8').digest('hex');
+const CHUNK_TEXT = 'descanso entre series conforme protocolo';
+const CHUNK_SHA256 = createHash('sha256').update(CHUNK_TEXT, 'utf8').digest('hex');
+const ZERO_EMBEDDING = `[${new Array(1536).fill(0).join(',')}]`;
+
 beforeAll(async () => {
   [uploaderId, professionalId] = await tenant.runAsSystem(async (tx) => {
     const rows = (await tx.execute(sql`
@@ -54,10 +66,10 @@ beforeAll(async () => {
   await tenant.runAsUser(uploaderId, 'ADMIN', async (tx) => {
     await tx.execute(sql`
       INSERT INTO knowledge_documents (
-        id, title, topic, original_filename, mime_type, size_bytes, sha256, uploaded_by
+        id, title, topic, original_filename, mime_type, size_bytes, sha256, uploaded_by, logical_key
       ) VALUES (
         ${documentId}::uuid, 'Fonte RAG integrada', 'descanso', 'fonte.md', 'text/markdown',
-        80, ${documentId.replaceAll('-', '').padEnd(64, '0')}, ${uploaderId}::uuid
+        80, ${DOCUMENT_SHA256}, ${uploaderId}::uuid, 'fonte-rag-integrada'
       )
     `);
     await tx.execute(sql`
@@ -81,37 +93,48 @@ afterAll(async () => {
   await migratorClient.end({ timeout: 5 });
 });
 
-const chunks = JSON.stringify([
-  {
-    chunkText: 'descanso entre series conforme protocolo',
-    embedding: new Array<number>(1536).fill(0),
-    topic: 'descanso',
-    title: 'Fonte RAG integrada',
-    sourceUrl: null,
-    reliability: 5,
-    chunkIndex: 0,
-  },
-]);
-
 describe('documentos RAG no banco', () => {
   it('recusa publicacao antes da revisao profissional', async () => {
     await expect(
       tenant.runAsUser(professionalId, 'PROFESSIONAL', (tx) =>
-        tx.execute(
-          sql`SELECT public.publish_knowledge_document(${documentId}::uuid, ${chunks}::jsonb)`,
-        ),
+        tx.execute(sql`SELECT public.publish_knowledge_document(${documentId}::uuid)`),
       ),
     ).rejects.toMatchObject({ cause: { code: '42501' } });
   });
 
   it('publica exatamente um trecho depois da aprovacao CREF', async () => {
     const published = await tenant.runAsUser(professionalId, 'PROFESSIONAL', async (tx) => {
+      // Proveniência ponta a ponta: extração → staged chunk → embedding, cada hash
+      // conferido contra o conteúdo real (`publish_knowledge_document` recusa placeholder).
+      await tx.execute(sql`
+        INSERT INTO knowledge_document_events (document_id, sequence, status, stage)
+        VALUES (${documentId}::uuid, 1, 'INDEXING', 'STAGING')
+      `);
+      await tx.execute(sql`
+        INSERT INTO knowledge_document_extractions (
+          document_id, content, content_sha256, parser_version, detected_mime_type
+        ) VALUES (
+          ${documentId}::uuid, ${DOCUMENT_CONTENT}, ${DOCUMENT_SHA256}, 'test-v1', 'text/markdown'
+        )
+      `);
+      const [staged] = (await tx.execute(sql`
+        INSERT INTO knowledge_staged_chunks (
+          document_id, chunk_index, chunk_text, chunk_sha256, extraction_sha256
+        ) VALUES (
+          ${documentId}::uuid, 0, ${CHUNK_TEXT}, ${CHUNK_SHA256}, ${DOCUMENT_SHA256}
+        )
+        RETURNING id
+      `)) as unknown as Array<{ id: string }>;
+      await tx.execute(sql`
+        INSERT INTO knowledge_chunk_embeddings (staged_chunk_id, chunk_sha256, embedding, model)
+        VALUES (${staged.id}::uuid, ${CHUNK_SHA256}, ${ZERO_EMBEDDING}::vector, 'test-fake')
+      `);
       await tx.execute(sql`
         INSERT INTO knowledge_document_reviews (document_id, decision, note, reviewer_id)
         VALUES (${documentId}::uuid, 'APPROVED', 'revisao profissional integrada', ${professionalId}::uuid)
       `);
       return tx.execute(sql`
-        SELECT public.publish_knowledge_document(${documentId}::uuid, ${chunks}::jsonb) AS count
+        SELECT public.publish_knowledge_document(${documentId}::uuid) AS count
       `) as unknown as Promise<Array<{ count: number }>>;
     });
     expect(Number(published[0]?.count)).toBe(1);

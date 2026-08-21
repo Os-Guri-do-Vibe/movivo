@@ -72,6 +72,15 @@ const EXPECTED_TABLES = [
   'knowledge_documents',
   'knowledge_document_blobs',
   'knowledge_document_reviews',
+  // Sprint 10: temas proibidos append-only, versionamento de metodologia CREF e o
+  // pipeline completo de ingestao/staging/embeddings da Base de Conhecimento.
+  'ai_forbidden_topics',
+  'knowledge_document_events',
+  'knowledge_document_extractions',
+  'knowledge_staged_chunks',
+  'knowledge_chunk_embeddings',
+  'methodology_versions',
+  'methodology_events',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;
