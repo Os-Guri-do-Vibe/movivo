@@ -995,19 +995,19 @@ export class ControlCenterService {
           // enviada, não a última (uma re-anamnese não deve mudar quando o aluno entrou).
           enrolledAt: sql<Date | null>`(
             select min(a.submitted_at) from ${anamnesisSessions} a
-            where a.user_id = ${users.id} and a.submitted_at is not null
+            where a.user_id = users.id and a.submitted_at is not null
           )`,
           lastInboundAt: sql<Date | null>`(
             select max(c.created_at) from ${conversations} c
-            where c.user_id = ${users.id} and c.direction = 'INBOUND'
+            where c.user_id = users.id and c.direction = 'INBOUND'
           )`,
           unansweredCheckinSentAt: sql<Date | null>`(
             select min(k.sent_at) from ${checkins} k
-            where k.user_id = ${users.id} and k.sent_at is not null and k.responded_at is null
+            where k.user_id = users.id and k.sent_at is not null and k.responded_at is null
           )`,
           renewalAt: sql<Date | null>`(
             select coalesce(s.trial_ends_at, s.current_period_end) from ${subscriptions} s
-            where s.user_id = ${users.id} order by s.created_at desc limit 1
+            where s.user_id = users.id order by s.created_at desc limit 1
           )`,
         })
         .from(users)
@@ -1028,7 +1028,7 @@ export class ControlCenterService {
     const students = rows
       .map(({ lastInboundAt, unansweredCheckinSentAt, renewalAt, enrolledAt, ...student }) => ({
         ...student,
-        enrolledAt: enrolledAt?.toISOString() ?? null,
+        enrolledAt: this.date(enrolledAt)?.toISOString() ?? null,
         churnRisk: assessChurnRisk({
           lastInboundAt: this.date(lastInboundAt),
           unansweredCheckinSentAt: this.date(unansweredCheckinSentAt),
@@ -1194,27 +1194,27 @@ export class ControlCenterService {
           protocolStatus: this.latestProtocolStatus(),
           anamnesisStatus: sql<string | null>`(
             select a.status::text from ${anamnesisSessions} a
-            where a.user_id = ${users.id} order by a.created_at desc limit 1
+            where a.user_id = users.id order by a.created_at desc limit 1
           )`,
           parqState: sql<string | null>`(
             select a.parq_state::text from ${anamnesisSessions} a
-            where a.user_id = ${users.id} order by a.created_at desc limit 1
+            where a.user_id = users.id order by a.created_at desc limit 1
           )`,
           routine: sql<unknown>`(
             select a.data_block_3 from ${anamnesisSessions} a
-            where a.user_id = ${users.id} order by a.created_at desc limit 1
+            where a.user_id = users.id order by a.created_at desc limit 1
           )`,
           lastInboundAt: sql<Date | null>`(
             select max(c.created_at) from ${conversations} c
-            where c.user_id = ${users.id} and c.direction = 'INBOUND'
+            where c.user_id = users.id and c.direction = 'INBOUND'
           )`,
           unansweredCheckinSentAt: sql<Date | null>`(
             select min(k.sent_at) from ${checkins} k
-            where k.user_id = ${users.id} and k.sent_at is not null and k.responded_at is null
+            where k.user_id = users.id and k.sent_at is not null and k.responded_at is null
           )`,
           renewalAt: sql<Date | null>`(
             select coalesce(s.trial_ends_at, s.current_period_end) from ${subscriptions} s
-            where s.user_id = ${users.id} order by s.created_at desc limit 1
+            where s.user_id = users.id order by s.created_at desc limit 1
           )`,
         })
         .from(users)
@@ -2675,24 +2675,34 @@ export class ControlCenterService {
     });
   }
 
+  /**
+   * `${users.id}` (Column) interpolado dentro do template NÃO qualifica com a tabela
+   * (achado 2026-08-25) — vira `"id"` cru no SQL gerado, e como toda tabela tem sua
+   * própria coluna `id`, o Postgres resolve pro escopo mais interno (`s.id`/`p.id`),
+   * nunca pro `users.id` da query externa. Resultado: `s.user_id = s.id` — comparação
+   * sempre falsa, subquery sempre vazia, campo sempre `null` sem erro nenhum (silencioso
+   * o bastante pra passar despercebido em produção). Fix: literal `users.id` como texto
+   * no template, não interpolação de Column — sempre correlaciona com o `FROM users`
+   * externo, que estas três funções assumem existir sem alias em todo call site.
+   */
   private latestSubscriptionStatus() {
     return sql<string | null>`(
       select s.status::text from ${subscriptions} s
-      where s.user_id = ${users.id} order by s.created_at desc limit 1
+      where s.user_id = users.id order by s.created_at desc limit 1
     )`;
   }
 
   private latestSubscriptionPlan() {
     return sql<string | null>`(
       select s.plan::text from ${subscriptions} s
-      where s.user_id = ${users.id} order by s.created_at desc limit 1
+      where s.user_id = users.id order by s.created_at desc limit 1
     )`;
   }
 
   private latestProtocolStatus() {
     return sql<string | null>`(
       select p.status::text from ${protocols} p
-      where p.user_id = ${users.id} order by p.created_at desc limit 1
+      where p.user_id = users.id order by p.created_at desc limit 1
     )`;
   }
 
