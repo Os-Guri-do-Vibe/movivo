@@ -343,6 +343,26 @@ describe('AiAgentDashboard — dois slots de persona', () => {
     expect(visibleNameField()).toHaveValue('MOVITO');
   });
 
+  it('erro genérico (não da API) no publish e no simulador cai na mensagem padrão', async () => {
+    const user = userEvent.setup();
+    await renderReady();
+    await user.clear(visibleNameField());
+    await user.type(visibleNameField(), 'MOVITA');
+    api.simulateAgentConfig.mockRejectedValueOnce(new Error('falha de rede'));
+
+    await goToStep(user, 'Revisar e publicar');
+    await user.click(screen.getByRole('button', { name: 'Executar teste' }));
+    await screen.findByText('Não foi possível executar o simulador.');
+
+    api.publishAgentPersona.mockRejectedValueOnce(new Error('falha de rede'));
+    await user.click(screen.getByRole('button', { name: 'Executar teste' }));
+    await screen.findByText('Integridade L0');
+    await user.type(screen.getByRole('textbox', { name: 'Motivo da alteração' }), 'novo nome');
+    await user.click(screen.getByRole('button', { name: 'Publicar configuração' }));
+
+    await screen.findByText('Não foi possível concluir a publicação.');
+  });
+
   it('rollback envia o slot da aba ativa, não o outro', async () => {
     const user = userEvent.setup();
     await renderReady();
