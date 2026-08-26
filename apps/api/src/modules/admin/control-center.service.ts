@@ -1940,6 +1940,14 @@ export class ControlCenterService {
       status === 'CONNECTING' && instanceName
         ? await this.evolution.fetchQrCode(instanceName).catch(() => null)
         : null;
+    // Reasserção idempotente do webhook de ENTRADA (US-3.1-EVO). Fica aqui porque este é o
+    // único ponto do sistema que já observa a transição para `CONNECTED` — o painel faz
+    // polling deste método a cada 3s. O transporte lembra quais instâncias já registrou,
+    // então isso NÃO vira um POST a cada poll. Best-effort: o painel nunca falha por causa
+    // do webhook (`ensureWebhookConfigured` já engole o erro e loga).
+    if (status === 'CONNECTED' && instanceName) {
+      await this.evolution.ensureWebhookConfigured(instanceName);
+    }
     return this.envelope({
       whatsapp: { configured: true, instanceName, status, qrCodeBase64 },
     });

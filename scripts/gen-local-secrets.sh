@@ -108,6 +108,11 @@ write_secret "redis_password"              "$(rand_token 48)"
 write_secret "pgcrypto_key"                "$(rand_token 64)"
 write_secret "evolution_postgres_password" "$(rand_token 40)"
 write_secret "evolution_api_key"           "$(rand_token 40)"
+# Webhook de ENTRADA da EvolutionAPI (US-3.1-EVO). SEPARADO da chave acima de propósito:
+# o envelope entregue pela EvolutionAPI publica o `apikey` da instância no próprio corpo,
+# então reusá-lo como autenticação de entrada seria autenticar com um valor público.
+# 48 chars alfanuméricos > o mínimo de 43 exigido por EVOLUTION_WEBHOOK_TOKEN no env.schema.
+write_secret "evolution_webhook_token"     "$(rand_token 48)"
 write_jwt_keypair
 
 # --- userlist.txt do PgBouncer ------------------------------------------------
