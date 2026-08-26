@@ -133,8 +133,8 @@ describe('resolveSenderPhone — endereçamento LID', () => {
   });
 
   it('participant vazio ("") é 1:1 legítimo — é o que o Baileys manda de verdade', () => {
-    expect(
-      resolveSenderPhone({ remoteJid: '5511999998888@s.whatsapp.net', participant: '' }),
-    ).toBe('+5511999998888');
+    expect(resolveSenderPhone({ remoteJid: '5511999998888@s.whatsapp.net', participant: '' })).toBe(
+      '+5511999998888',
+    );
   });
 });

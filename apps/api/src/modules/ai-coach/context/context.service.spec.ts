@@ -102,7 +102,9 @@ describe('ContextService.build', () => {
     const { svc, retrieve } = make();
     retrieve.mockRejectedValueOnce(new Error('vector store offline'));
 
-    await expect(svc.build('u1', 'DUVIDA_TECNICA', 'quanto descanso?', 'MOVI')).resolves.toMatchObject({
+    await expect(
+      svc.build('u1', 'DUVIDA_TECNICA', 'quanto descanso?', 'MOVI'),
+    ).resolves.toMatchObject({
       ragDocs: [],
     });
   });

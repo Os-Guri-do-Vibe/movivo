@@ -86,7 +86,10 @@ async function fetchProtocol(token: string): Promise<ProtocolRead | null> {
 }
 
 /** "8–12 reps" para exercício tradicional, "40s por série" para isométrico/cardio (achado 2026-08-18). */
-function amountLabel(entry: { durationSeconds?: number; reps?: { min: number; max: number } }): string {
+function amountLabel(entry: {
+  durationSeconds?: number;
+  reps?: { min: number; max: number };
+}): string {
   if (entry.durationSeconds !== undefined) return `${entry.durationSeconds}s`;
   if (!entry.reps) return '';
   const { min, max } = entry.reps;
@@ -316,7 +319,9 @@ export default async function ProtocoloPage({ params }: { params: Promise<{ toke
                             {exercise.rir ?? '-'}
                           </td>
                           <td className="px-3 py-2 text-card-foreground">
-                            {exercise.technique ? ADVANCED_TECHNIQUE_LABELS[exercise.technique] : '-'}
+                            {exercise.technique
+                              ? ADVANCED_TECHNIQUE_LABELS[exercise.technique]
+                              : '-'}
                           </td>
                           <td className="px-3 py-2">
                             {exercise.videoUrl ? (
@@ -360,7 +365,9 @@ export default async function ProtocoloPage({ params }: { params: Promise<{ toke
           </h2>
           <dl className="flex flex-col gap-2 text-label text-muted-foreground">
             <div className="flex gap-2">
-              <dt className="shrink-0 font-medium text-card-foreground">RIR (Repetições em Reserva):</dt>
+              <dt className="shrink-0 font-medium text-card-foreground">
+                RIR (Repetições em Reserva):
+              </dt>
               <dd>
                 quantas repetições você ainda conseguiria fazer ao terminar a série, sendo RIR 0 até
                 a falha.

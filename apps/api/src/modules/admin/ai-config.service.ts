@@ -302,21 +302,18 @@ export class AiConfigService {
     });
 
     await this.propagate(targetSex, payload);
-    return this.envelope(
-      { targetSex, persona: payload, version, servedFromSex: targetSex },
-      [
-        'A nova persona vale em até 60 segundos, sem deploy.',
-        // Aviso de rollout: até agora este público recebia a persona do outro slot; a partir
-        // desta publicação ele passa a receber esta. Qualitativo de propósito — contar os
-        // titulares afetados custaria uma varredura em `users` para um aviso de UI.
-        ...(wasOrphan
-          ? [
-              'Este é o primeiro texto publicado para este público: os titulares que até agora ' +
-                'recebiam a persona do outro passam a ser atendidos por esta a partir de agora.',
-            ]
-          : []),
-      ],
-    );
+    return this.envelope({ targetSex, persona: payload, version, servedFromSex: targetSex }, [
+      'A nova persona vale em até 60 segundos, sem deploy.',
+      // Aviso de rollout: até agora este público recebia a persona do outro slot; a partir
+      // desta publicação ele passa a receber esta. Qualitativo de propósito — contar os
+      // titulares afetados custaria uma varredura em `users` para um aviso de UI.
+      ...(wasOrphan
+        ? [
+            'Este é o primeiro texto publicado para este público: os titulares que até agora ' +
+              'recebiam a persona do outro passam a ser atendidos por esta a partir de agora.',
+          ]
+        : []),
+    ]);
   }
 
   /**

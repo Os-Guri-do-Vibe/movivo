@@ -1,11 +1,7 @@
 import type { Job } from 'bullmq';
 import type { Redis } from 'ioredis';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  buildHumanHandoffMessage,
-  DEFAULT_AGENT_PERSONA,
-  type AgentPersona,
-} from '@movivo/shared';
+import { buildHumanHandoffMessage, DEFAULT_AGENT_PERSONA, type AgentPersona } from '@movivo/shared';
 
 import type { HealthConsentService } from '../../core/database/health-consent.service';
 import type { FaqService, PublishedFaqMatch } from '../../core/agent-config/faq.service';
@@ -96,7 +92,10 @@ function makeWorker(deps: Deps = {}) {
   );
   const classifier = { classify } as unknown as IntentClassifier;
 
-  const resolvedPersona: AgentPersona = deps.persona ?? { ...DEFAULT_AGENT_PERSONA, agentName: 'MOVI' };
+  const resolvedPersona: AgentPersona = deps.persona ?? {
+    ...DEFAULT_AGENT_PERSONA,
+    agentName: 'MOVI',
+  };
   // Sprint 11: `persona()` é o ÚNICO ponto de resolução e é chamado uma vez por job; as
   // demais variantes recebem a persona já resolvida.
   const personaResolve = vi.fn(async () => resolvedPersona);

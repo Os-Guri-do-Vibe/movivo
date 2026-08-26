@@ -289,7 +289,11 @@ export class ProtocolGenerationWorker implements OnModuleInit {
     const parqAnswers = health.parq?.answers ?? [];
     const evaluation: ParqEvaluation = health.parq
       ? evaluateParq({ parq: health.parq })
-      : { parqState: ParqState.LIBERADO, requiresProfessionalReview: false, triggeredQuestions: [] };
+      : {
+          parqState: ParqState.LIBERADO,
+          requiresProfessionalReview: false,
+          triggeredQuestions: [],
+        };
     const parq = parqToConstraints(evaluation, parqAnswers);
     // O booleano autoritativo é o do titular (`users.requires_professional_review`, escrito
     // no submit e zerado na liberação humana); a avaliação local só deriva as TAGS.

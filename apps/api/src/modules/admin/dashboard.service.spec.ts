@@ -75,7 +75,12 @@ function makeService(row: Record<string, unknown>, verdict: 'PASS' | 'FLAG_HUMAN
   const audit = { append } as unknown as AuditService;
   const enqueue = vi.fn(async () => 'job');
   const queues = { enqueue } as unknown as QueueManager;
-  const logger = { setContext: vi.fn(), warn: vi.fn(), info: vi.fn(), error: vi.fn() } as unknown as PinoLogger;
+  const logger = {
+    setContext: vi.fn(),
+    warn: vi.fn(),
+    info: vi.fn(),
+    error: vi.fn(),
+  } as unknown as PinoLogger;
   const service = new DashboardService(
     db,
     validation,

@@ -183,7 +183,9 @@ describe('ValidationService — teto de PAR-Q (maxPhase)', () => {
 
   it('rir >= 2 e rir ausente não violam (ausente = não prescreve proximidade de falha)', () => {
     expect(
-      service.validate(capped({ structure: withExercise({ rir: 2 }) })).violations.map((x) => x.rule),
+      service
+        .validate(capped({ structure: withExercise({ rir: 2 }) }))
+        .violations.map((x) => x.rule),
     ).not.toContain('PARQ_RIR_TOO_LOW');
     expect(service.validate(capped()).violations.map((x) => x.rule)).not.toContain(
       'PARQ_RIR_TOO_LOW',
@@ -192,7 +194,10 @@ describe('ValidationService — teto de PAR-Q (maxPhase)', () => {
 
   it('sem maxPhase, nem o teto de fase nem o piso de RIR se aplicam', () => {
     const v = service.validate(
-      input({ structure: withExercise({ rir: 0 }), constraints: { goal: 'GAIN_MUSCLE', injuryTags: [] } }),
+      input({
+        structure: withExercise({ rir: 0 }),
+        constraints: { goal: 'GAIN_MUSCLE', injuryTags: [] },
+      }),
     );
     const rules = v.violations.map((x) => x.rule);
     expect(rules).not.toContain('PARQ_RIR_TOO_LOW');

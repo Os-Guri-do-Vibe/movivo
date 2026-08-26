@@ -509,9 +509,7 @@ describe('QueueDetail', () => {
     expect(screen.getByLabelText(/Séries do bloco de aquecimento/i)).toBeInTheDocument();
 
     // Remover volta ao estado sem aquecimento (campo vira `undefined`, não [] vazio).
-    await userEvent.click(
-      screen.getByRole('button', { name: /remover bloco de aquecimento 1/i }),
-    );
+    await userEvent.click(screen.getByRole('button', { name: /remover bloco de aquecimento 1/i }));
     expect(screen.queryByLabelText(/Séries do bloco de aquecimento/i)).not.toBeInTheDocument();
 
     // Adiciona de novo pra seguir com o fluxo real de salvar.
@@ -575,9 +573,7 @@ describe('QueueDetail', () => {
         expect.objectContaining({
           sessions: [
             expect.objectContaining({
-              exercises: [
-                expect.objectContaining({ durationSeconds: 30, reps: undefined }),
-              ],
+              exercises: [expect.objectContaining({ durationSeconds: 30, reps: undefined })],
             }),
           ],
         }),
@@ -710,9 +706,7 @@ describe('QueueDetail', () => {
     });
     const { unmount } = render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
     expect(await screen.findByText(/hash/)).toHaveTextContent('abc123');
-    expect(
-      screen.queryByRole('button', { name: 'Assinar e liberar' }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Assinar e liberar' })).not.toBeInTheDocument();
     unmount();
 
     api.getQueueDetail.mockResolvedValueOnce({

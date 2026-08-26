@@ -547,7 +547,14 @@ describe('assinatura CREF — libera o PAR-Q e deixa trilha auditável (2026-08-
   /** Eventos de auditoria do titular, em ordem, com os campos da cadeia. */
   async function auditTrail(ownerId: string) {
     return adminClient<
-      Array<{ id: string; action: string; entity_type: string; entity_id: string; row_hash: string; previous_hash: string | null }>
+      Array<{
+        id: string;
+        action: string;
+        entity_type: string;
+        entity_id: string;
+        row_hash: string;
+        previous_hash: string | null;
+      }>
     >`SELECT id, action, entity_type, entity_id, row_hash, previous_hash
         FROM audit_logs WHERE user_id = ${ownerId}::uuid ORDER BY id ASC`;
   }
@@ -590,7 +597,9 @@ describe('assinatura CREF — libera o PAR-Q e deixa trilha auditável (2026-08-
     // A cadeia é GLOBAL (o trigger encadeia com a última linha da tabela, não por
     // titular), então a integridade se verifica na tabela inteira: cada linha tem de
     // apontar para o `row_hash` da anterior.
-    const chain = await adminClient<Array<{ id: string; row_hash: string; previous_hash: string | null }>>`
+    const chain = await adminClient<
+      Array<{ id: string; row_hash: string; previous_hash: string | null }>
+    >`
       SELECT id, row_hash, previous_hash FROM audit_logs ORDER BY id ASC`;
     expect(chain.length).toBeGreaterThan(1);
 

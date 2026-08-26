@@ -275,7 +275,10 @@ export function ComboboxField<T extends string>({
           </span>
           <ChevronDown
             aria-hidden="true"
-            className={cn('size-4 shrink-0 text-primary transition-transform', open && 'rotate-180')}
+            className={cn(
+              'size-4 shrink-0 text-primary transition-transform',
+              open && 'rotate-180',
+            )}
           />
         </button>
 

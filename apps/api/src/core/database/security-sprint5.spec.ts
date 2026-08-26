@@ -99,7 +99,9 @@ describe('controles de banco da Sprint 5', () => {
     const fn = releaseFn as string;
 
     // 1. A sessão é DERIVADA do protocolo — nunca recebida do cliente.
-    expect(fn).toContain('SELECT p.user_id, p.anamnesis_session_id INTO target_user, target_session');
+    expect(fn).toContain(
+      'SELECT p.user_id, p.anamnesis_session_id INTO target_user, target_session',
+    );
     // 2. Sessão e protocolo têm que ser do mesmo titular.
     expect(fn).toContain('session does not belong to protocol owner');
     // 3. Ordem: toda `RAISE EXCEPTION` de papel vem ANTES do primeiro `RETURN NULL`,

@@ -91,9 +91,9 @@ describe('ConversionSequenceWorker — nurture / downgrade', () => {
     const { worker, personaSlotFor, agentPersona } = make({ status: 'TRIALING' });
     await worker.process(job('touchpoint', { userId: U, key: 'day14' }));
     expect(personaSlotFor).toHaveBeenCalledWith(U);
-    expect((agentPersona as { agentName: ReturnType<typeof vi.fn> }).agentName).toHaveBeenCalledWith(
-      'FEMALE',
-    );
+    expect(
+      (agentPersona as { agentName: ReturnType<typeof vi.fn> }).agentName,
+    ).toHaveBeenCalledWith('FEMALE');
   });
 
   it('para de nutrir quem já converteu (ACTIVE) — não envia', async () => {

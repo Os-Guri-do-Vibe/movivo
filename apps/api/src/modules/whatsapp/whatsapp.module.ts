@@ -28,10 +28,7 @@ import { AraraHttpTransport } from './arara-transport';
 import { EVOLUTION_TRANSPORT, EvolutionHttpTransport } from './evolution-transport';
 import { AraraInboundEdge } from './inbound/arara-inbound.edge';
 import { EvolutionInboundEdge } from './inbound/evolution-inbound.edge';
-import {
-  WHATSAPP_INBOUND_EDGES,
-  type WhatsappInboundEdges,
-} from './inbound/whatsapp-inbound-edge';
+import { WHATSAPP_INBOUND_EDGES, type WhatsappInboundEdges } from './inbound/whatsapp-inbound-edge';
 import { UserJobLock } from './user-job-lock';
 import { WebhookController } from './webhook.controller';
 import { WhatsappInboundService } from './whatsapp-inbound.service';

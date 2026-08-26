@@ -109,8 +109,25 @@ const INJURY_KEYWORDS: Record<ContraindicationTag, string[]> = {
   ANKLE: ['tornozelo', 'pe', 'pé'],
   NECK: ['pescoco', 'pescoço', 'cervical'],
   CARDIAC: ['coracao', 'coração', 'cardiaco', 'cardíaco', 'pressao', 'pressão', 'hipertens'],
-  BALANCE_FALL_RISK: ['tontura', 'tonteira', 'vertigem', 'desmaio', 'labirintite', 'equilibrio', 'equilíbrio'],
-  PREGNANCY: ['gravid', 'gestant', 'gestacao', 'gestação', 'pos-parto', 'pós-parto', 'posparto', 'puerp'],
+  BALANCE_FALL_RISK: [
+    'tontura',
+    'tonteira',
+    'vertigem',
+    'desmaio',
+    'labirintite',
+    'equilibrio',
+    'equilíbrio',
+  ],
+  PREGNANCY: [
+    'gravid',
+    'gestant',
+    'gestacao',
+    'gestação',
+    'pos-parto',
+    'pós-parto',
+    'posparto',
+    'puerp',
+  ],
 };
 
 export function mapInjuriesToTags(injuries: readonly string[]): ContraindicationTag[] {

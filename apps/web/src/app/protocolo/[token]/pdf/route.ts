@@ -7,10 +7,7 @@ import { publicEnv } from '@/lib/env';
  * domínio já usado pelo link `/protocolo/[token]` enviado no WhatsApp (`whatsapp-outbound.worker.ts`).
  * A API não é publicamente roteável por si só; esta rota só repassa bytes, sem lógica.
  */
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ token: string }> },
-) {
+export async function GET(_request: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const res = await fetch(`${publicEnv.apiUrl}/protocols/by-token/${token}/pdf`, {
     cache: 'no-store',

@@ -220,7 +220,12 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       // ponytail: SLA submit→entrega junta este evento com o `protocol_sent` de enfileiramento
       // da US-2.4 (o job de entrega não carrega submittedAt). Server SDK do PostHog: Sprint futura.
       this.logger.info(
-        { event: 'protocol_sent', userId, protocolId: job.data.protocolId, deliveredAt: Date.now() },
+        {
+          event: 'protocol_sent',
+          userId,
+          protocolId: job.data.protocolId,
+          deliveredAt: Date.now(),
+        },
         'protocol_sent (entrega concluída)',
       );
       return { status: 'SENT' };
@@ -242,7 +247,9 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     const bubbles = text.split(BUBBLE_SEPARATOR).filter((b) => b.trim());
     for (const [i, bubble] of bubbles.entries()) {
       const isLast = i === bubbles.length - 1;
-      const buttons = isLast ? (data.buttons ?? (data.feedback ? FEEDBACK_BUTTONS : undefined)) : undefined;
+      const buttons = isLast
+        ? (data.buttons ?? (data.feedback ? FEEDBACK_BUTTONS : undefined))
+        : undefined;
       await this.transport.send({ to: phone, text: bubble, buttons });
     }
   }
@@ -288,41 +295,41 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       userId,
       'USER',
       async (tx) => {
-      const [row] = await tx
-        .select({
-          id: protocols.id,
-          content: protocols.content,
-          status: protocols.status,
-          approvalStatus: protocols.approvalStatus,
-          signedAt: protocols.signedAt,
-          signatureHash: protocols.signatureHash,
-          professionalId: protocols.professionalId,
-          pdfContent: protocols.pdfContent,
-          totalWeeks: protocols.totalWeeks,
-          mesocycleName: protocols.mesocycleName,
-        })
-        .from(protocols)
-        .where(
-          and(
-            eq(protocols.userId, userId),
-            data.protocolId ? eq(protocols.id, data.protocolId) : undefined,
-            data.protocolVersion ? eq(protocols.version, data.protocolVersion) : undefined,
-          ),
-        )
-        .limit(1);
-      // `biologicalSex` entra na projeção que já existia (Sprint 11): é ele que decide qual
-      // das duas personas publicadas assina a entrega. Nulo é normal e cai no empréstimo
-      // entre slots — nunca derruba a mensagem.
-      const [self] = await tx
-        .select({ name: users.name, biologicalSex: users.biologicalSex })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
-      return {
-        proto: row,
-        studentName: self?.name ?? null,
-        biologicalSex: self?.biologicalSex ?? null,
-      };
+        const [row] = await tx
+          .select({
+            id: protocols.id,
+            content: protocols.content,
+            status: protocols.status,
+            approvalStatus: protocols.approvalStatus,
+            signedAt: protocols.signedAt,
+            signatureHash: protocols.signatureHash,
+            professionalId: protocols.professionalId,
+            pdfContent: protocols.pdfContent,
+            totalWeeks: protocols.totalWeeks,
+            mesocycleName: protocols.mesocycleName,
+          })
+          .from(protocols)
+          .where(
+            and(
+              eq(protocols.userId, userId),
+              data.protocolId ? eq(protocols.id, data.protocolId) : undefined,
+              data.protocolVersion ? eq(protocols.version, data.protocolVersion) : undefined,
+            ),
+          )
+          .limit(1);
+        // `biologicalSex` entra na projeção que já existia (Sprint 11): é ele que decide qual
+        // das duas personas publicadas assina a entrega. Nulo é normal e cai no empréstimo
+        // entre slots — nunca derruba a mensagem.
+        const [self] = await tx
+          .select({ name: users.name, biologicalSex: users.biologicalSex })
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1);
+        return {
+          proto: row,
+          studentName: self?.name ?? null,
+          biologicalSex: self?.biologicalSex ?? null,
+        };
       },
     );
 

@@ -44,7 +44,12 @@ import postgres from 'postgres';
 import { AppConfigService, getAppConfig } from '../core/config';
 import { loadEnv } from '../core/config/load-env';
 import { anamnesisSessions, protocols } from '../core/database/schema';
-import { bullPrefix, buildBullConnection, QUEUE, resolveJobOptions } from '../modules/jobs/jobs.config';
+import {
+  bullPrefix,
+  buildBullConnection,
+  QUEUE,
+  resolveJobOptions,
+} from '../modules/jobs/jobs.config';
 
 const dryRun = process.argv.includes('--dry-run');
 

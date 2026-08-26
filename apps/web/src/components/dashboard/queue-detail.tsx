@@ -145,7 +145,11 @@ function MeasureToggle({
   label: string;
 }) {
   return (
-    <div className="inline-flex shrink-0 rounded-lg border border-input p-0.5" role="radiogroup" aria-label={label}>
+    <div
+      className="inline-flex shrink-0 rounded-lg border border-input p-0.5"
+      role="radiogroup"
+      aria-label={label}
+    >
       {(['reps', 'duration'] as const).map((value) => (
         <button
           key={value}
@@ -344,7 +348,9 @@ function ExerciseEditorCard({
             value={exercise.rir ?? ''}
             aria-label="Repetições em Reserva (RIR)"
             onChange={(value) =>
-              update({ rir: value === '' || Number.isNaN(Number(value)) ? undefined : Number(value) })
+              update({
+                rir: value === '' || Number.isNaN(Number(value)) ? undefined : Number(value),
+              })
             }
           />
         </MiniField>
@@ -530,7 +536,9 @@ function ExerciseEditorCard({
                       className="w-20"
                       min={0}
                       max={600}
-                      value={block.restSeconds !== undefined ? numberInputValue(block.restSeconds) : ''}
+                      value={
+                        block.restSeconds !== undefined ? numberInputValue(block.restSeconds) : ''
+                      }
                       aria-label={`Descanso do bloco de aquecimento ${blockIndex + 1} (s)`}
                       onChange={(value) =>
                         onUpdateWarmupBlock(sessionIndex, exerciseIndex, blockIndex, {
@@ -858,35 +866,35 @@ function ProtocolSummary({
                 </Button>
               </div>
             ) : (
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full min-w-[38rem] border-collapse text-left text-label">
-                <thead>
-                  <tr className="border-b border-border text-muted-foreground">
-                    <th scope="col" className="p-2 font-semibold">
-                      Exercício
-                    </th>
-                    <th scope="col" className="p-2 font-semibold">
-                      Séries
-                    </th>
-                    <th scope="col" className="p-2 font-semibold">
-                      Repetições / Duração
-                    </th>
-                    <th scope="col" className="p-2 font-semibold">
-                      Descanso
-                    </th>
-                    <th scope="col" className="p-2 font-semibold">
-                      Repetições em Reserva (RIR)
-                    </th>
-                    <th scope="col" className="p-2 font-semibold">
-                      Estratégia
-                    </th>
-                    <th scope="col" className="p-2 font-semibold">
-                      Vídeo de execução
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {session.exercises.map((exercise) => (
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full min-w-[38rem] border-collapse text-left text-label">
+                  <thead>
+                    <tr className="border-b border-border text-muted-foreground">
+                      <th scope="col" className="p-2 font-semibold">
+                        Exercício
+                      </th>
+                      <th scope="col" className="p-2 font-semibold">
+                        Séries
+                      </th>
+                      <th scope="col" className="p-2 font-semibold">
+                        Repetições / Duração
+                      </th>
+                      <th scope="col" className="p-2 font-semibold">
+                        Descanso
+                      </th>
+                      <th scope="col" className="p-2 font-semibold">
+                        Repetições em Reserva (RIR)
+                      </th>
+                      <th scope="col" className="p-2 font-semibold">
+                        Estratégia
+                      </th>
+                      <th scope="col" className="p-2 font-semibold">
+                        Vídeo de execução
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {session.exercises.map((exercise) => (
                       <tr
                         key={exercise.exerciseId}
                         className="border-b border-border last:border-0"
@@ -939,10 +947,10 @@ function ProtocolSummary({
                           )}
                         </td>
                       </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </details>
         ))}

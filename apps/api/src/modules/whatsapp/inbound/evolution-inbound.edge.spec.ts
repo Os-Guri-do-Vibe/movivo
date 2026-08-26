@@ -9,10 +9,7 @@ import { PinoLogger } from 'nestjs-pino';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AppConfigService } from '../../../core/config';
-import {
-  EVOLUTION_WEBHOOK_TOKEN_HEADER,
-  EvolutionInboundEdge,
-} from './evolution-inbound.edge';
+import { EVOLUTION_WEBHOOK_TOKEN_HEADER, EvolutionInboundEdge } from './evolution-inbound.edge';
 import type { RawDelivery } from './inbound-message';
 
 const TOKEN = 'a'.repeat(43);
@@ -113,7 +110,9 @@ describe('EvolutionInboundEdge.normalize', () => {
   it('lista (listResponseMessage) também vira buttonId', () => {
     const out = makeEdge().normalize(
       upsert({
-        message: { listResponseMessage: { title: 'Treino A', singleSelectReply: { selectedRowId: 'w_a' } } },
+        message: {
+          listResponseMessage: { title: 'Treino A', singleSelectReply: { selectedRowId: 'w_a' } },
+        },
       }),
     );
     expect(out?.[0]?.buttonId).toBe('w_a');
@@ -138,9 +137,7 @@ describe('EvolutionInboundEdge.normalize', () => {
 
   it('ISOLAMENTO — mensagem de grupo (participant presente) → descarte', () => {
     expect(
-      makeEdge().normalize(
-        upsert({ key: { participant: '5511777776666@s.whatsapp.net' } }),
-      ),
+      makeEdge().normalize(upsert({ key: { participant: '5511777776666@s.whatsapp.net' } })),
     ).toEqual([]);
   });
 

@@ -130,7 +130,9 @@ describe('protocolStructureSchema', () => {
       const structure = {
         ...validStructure,
         sessions: [
-          sessionWith({ warmupBlocks: [{ sets: 1, reps: { min: 10, max: 12 }, durationSeconds: 20 }] }),
+          sessionWith({
+            warmupBlocks: [{ sets: 1, reps: { min: 10, max: 12 }, durationSeconds: 20 }],
+          }),
         ],
       };
       expect(protocolStructureSchema.safeParse(structure).success).toBe(false);

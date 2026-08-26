@@ -52,7 +52,13 @@ import { AuditService } from './audit.service';
  * `content`/`mesocycleName`/etc. também no branch "já assinado" só pra bater o formato.
  */
 type SignProtocolResult =
-  | { userId: string; version: number; signatureHash: string; signedAt: string; alreadySigned: true }
+  | {
+      userId: string;
+      version: number;
+      signatureHash: string;
+      signedAt: string;
+      alreadySigned: true;
+    }
   | {
       userId: string;
       version: number;
@@ -345,7 +351,8 @@ export class DashboardService {
         );
         throw new BadRequestException({
           code: 'PROTOCOL_CONTENT_INVALID',
-          message: 'O conteudo deste protocolo nao passa na validacao atual. Corrija antes de assinar.',
+          message:
+            'O conteudo deste protocolo nao passa na validacao atual. Corrija antes de assinar.',
           issues: parsedContent.error.issues,
         });
       }

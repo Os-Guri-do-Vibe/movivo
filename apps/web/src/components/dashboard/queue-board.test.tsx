@@ -374,9 +374,7 @@ describe('QueueBoard', () => {
     getQueue.mockResolvedValue(queueResponse);
     render(<QueueBoard />);
 
-    const parqCard = (await screen.findByText(parqProtocolItem.title)).closest(
-      'li',
-    ) as HTMLElement;
+    const parqCard = (await screen.findByText(parqProtocolItem.title)).closest('li') as HTMLElement;
     expect(within(parqCard).getByText('Origem: PAR-Q bloqueante')).toBeVisible();
     expect(parqCard.className).toContain('border-l-coral');
     expect(iconCircle(parqCard).className).toContain('bg-destructive');

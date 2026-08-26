@@ -483,10 +483,10 @@ export class ControlCenterService {
             publishedSlots > 0 ? 'AVAILABLE' : 'UNAVAILABLE',
             publishedSlots > 0
               ? `Masculina: ${malePersona ? `versão ${malePersona.version}` : 'não publicada'}. ` +
-                `Feminina: ${femalePersona ? `versão ${femalePersona.version}` : 'não publicada'}. ` +
-                (publishedSlots === 1
-                  ? 'O público sem persona própria recebe a do outro por enquanto.'
-                  : '')
+                  `Feminina: ${femalePersona ? `versão ${femalePersona.version}` : 'não publicada'}. ` +
+                  (publishedSlots === 1
+                    ? 'O público sem persona própria recebe a do outro por enquanto.'
+                    : '')
               : 'Nenhuma configuração publicada; a IA responde com o default de código.',
           ),
         },

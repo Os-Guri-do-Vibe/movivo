@@ -410,7 +410,9 @@ describe('EvolutionHttpTransport — webhook de ENTRADA (US-3.1-EVO)', () => {
   const webhook = { url: 'http://localhost:3001/api/v1/webhook/whatsapp/evolution', token: 'tok' };
 
   it('configureWebhook: registra com menor privilégio e reescreve localhost para o container', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 200 }));
     const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger, webhook);
 
     await t.configureWebhook('minha-empresa', webhook.url, webhook.token);
@@ -433,7 +435,9 @@ describe('EvolutionHttpTransport — webhook de ENTRADA (US-3.1-EVO)', () => {
   });
 
   it('ensureWebhookConfigured: idempotente — só um POST por instância, mesmo com o polling de 3s', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 200 }));
     const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger, webhook);
 
     await t.ensureWebhookConfigured('minha-empresa');
@@ -471,7 +475,9 @@ describe('EvolutionHttpTransport — webhook de ENTRADA (US-3.1-EVO)', () => {
   it('lastKnownInstanceName: null até descobrir, depois alimenta a borda de entrada', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response(JSON.stringify([{ name: 'minha-empresa' }]), { status: 200 }));
+      .mockResolvedValue(
+        new Response(JSON.stringify([{ name: 'minha-empresa' }]), { status: 200 }),
+      );
     const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger);
 
     expect(t.lastKnownInstanceName()).toBeNull();

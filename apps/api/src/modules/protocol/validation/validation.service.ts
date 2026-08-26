@@ -105,12 +105,7 @@ export class ValidationService {
     const level = input.constraints.level ?? 'INICIANTE';
     this.checkStructure(input.structure, input.constraints.goal, level, excluded, violations);
     this.checkMethodology(input.structure, level, input.constraints.preferredDays, violations);
-    this.checkParq(
-      input.structure,
-      input.parqFlags ?? [],
-      input.constraints.maxPhase,
-      violations,
-    );
+    this.checkParq(input.structure, input.parqFlags ?? [], input.constraints.maxPhase, violations);
     this.checkLanguage(collectText(input.structure), violations);
 
     return aggregate(violations);

@@ -106,7 +106,10 @@ function pngDataUri(filename: string): string {
 }
 
 /** "8–12 reps" para exercício tradicional, "40s" para isométrico/cardio. */
-function amountLabel(entry: { durationSeconds?: number; reps?: { min: number; max: number } }): string {
+function amountLabel(entry: {
+  durationSeconds?: number;
+  reps?: { min: number; max: number };
+}): string {
   if (entry.durationSeconds !== undefined) return `${entry.durationSeconds}s`;
   if (!entry.reps) return '';
   const { min, max } = entry.reps;
@@ -150,10 +153,20 @@ function exerciseTableBody(exercises: readonly ProtocolExercise[]): Table {
     // válida, com o nome do exercício mudo (mesmo padrão de "continuação" de linha)
     // e destacados em itálico/cinza pra não competir visualmente com a série válida.
     const warmupRows = (exercise.warmupBlocks ?? []).map((block, i) => [
-      { text: i === 0 ? `${exercise.name} (aquecimento)` : '', fontSize: 8, italics: true, color: COLOR.musgo },
+      {
+        text: i === 0 ? `${exercise.name} (aquecimento)` : '',
+        fontSize: 8,
+        italics: true,
+        color: COLOR.musgo,
+      },
       { text: String(block.sets), font: 'JetBrainsMono', fontSize: 8, color: COLOR.musgo },
       { text: amountLabel(block), font: 'JetBrainsMono', fontSize: 8, color: COLOR.musgo },
-      { text: block.restSeconds !== undefined ? `${block.restSeconds}s` : '-', font: 'JetBrainsMono', fontSize: 8, color: COLOR.musgo },
+      {
+        text: block.restSeconds !== undefined ? `${block.restSeconds}s` : '-',
+        font: 'JetBrainsMono',
+        fontSize: 8,
+        color: COLOR.musgo,
+      },
       { text: '-', font: 'JetBrainsMono', fontSize: 8, color: COLOR.musgo },
       { text: '-', fontSize: 8, color: COLOR.musgo },
       { text: '-', fontSize: 8, color: COLOR.musgo },
@@ -163,9 +176,20 @@ function exerciseTableBody(exercises: readonly ProtocolExercise[]): Table {
       { text: String(exercise.sets), font: 'JetBrainsMono', fontSize: 8.5 },
       { text: amountLabel(exercise), font: 'JetBrainsMono', fontSize: 8.5 },
       { text: `${exercise.restSeconds}s`, font: 'JetBrainsMono', fontSize: 8.5 },
-      { text: exercise.rir !== undefined ? String(exercise.rir) : '-', font: 'JetBrainsMono', fontSize: 8.5 },
-      { text: exercise.technique ? ADVANCED_TECHNIQUE_LABELS[exercise.technique] : '-', fontSize: 8.5 },
-      { text: exercise.videoUrl ? 'Assistir' : '-', fontSize: 8.5, color: exercise.videoUrl ? COLOR.coral : COLOR.grafite },
+      {
+        text: exercise.rir !== undefined ? String(exercise.rir) : '-',
+        font: 'JetBrainsMono',
+        fontSize: 8.5,
+      },
+      {
+        text: exercise.technique ? ADVANCED_TECHNIQUE_LABELS[exercise.technique] : '-',
+        fontSize: 8.5,
+      },
+      {
+        text: exercise.videoUrl ? 'Assistir' : '-',
+        fontSize: 8.5,
+        color: exercise.videoUrl ? COLOR.coral : COLOR.grafite,
+      },
     ];
     return [...warmupRows, workingRow];
   });
@@ -298,7 +322,10 @@ export async function buildProtocolPdf(input: ProtocolPdfInput): Promise<Buffer>
             stack: [
               infoRow('Peso atual', `${input.student.weightKg} kg`),
               infoRow('Altura', `${(input.student.heightCm / 100).toFixed(2).replace('.', ',')} m`),
-              infoRow('Sexo', BIOLOGICAL_SEX_LABELS[input.student.biologicalSex] ?? input.student.biologicalSex),
+              infoRow(
+                'Sexo',
+                BIOLOGICAL_SEX_LABELS[input.student.biologicalSex] ?? input.student.biologicalSex,
+              ),
               infoRow('Frequência', `${content.weeklyFrequency}x por semana`),
               infoRow('Data final do protocolo', formatDate(input.endDate), true),
             ],
@@ -310,7 +337,10 @@ export async function buildProtocolPdf(input: ProtocolPdfInput): Promise<Buffer>
 
       { text: 'Sobre o seu protocolo', style: 'h2', margin: [0, 0, 0, 8] },
       {
-        table: { widths: ['*'], body: [[{ text: explanationFull, fontSize: 9.5, lineHeight: 1.35 }]] },
+        table: {
+          widths: ['*'],
+          body: [[{ text: explanationFull, fontSize: 9.5, lineHeight: 1.35 }]],
+        },
         layout: {
           fillColor: () => COLOR.coralTenue,
           hLineWidth: () => 1,
@@ -342,7 +372,11 @@ export async function buildProtocolPdf(input: ProtocolPdfInput): Promise<Buffer>
           },
           ...techniquesUsed.map((technique) => ({
             text: [
-              { text: `${ADVANCED_TECHNIQUE_LABELS[technique]}: `, bold: true, color: COLOR.grafite },
+              {
+                text: `${ADVANCED_TECHNIQUE_LABELS[technique]}: `,
+                bold: true,
+                color: COLOR.grafite,
+              },
               TECHNIQUE_GLOSSARY[technique],
             ],
             margin: [0, 0, 0, 3] as [number, number, number, number],
@@ -351,7 +385,17 @@ export async function buildProtocolPdf(input: ProtocolPdfInput): Promise<Buffer>
       },
 
       {
-        canvas: [{ type: 'line', x1: 0, y1: 0, x2: PAGE_WIDTH_PT - MARGIN.left - MARGIN.right, y2: 0, lineWidth: 0.5, lineColor: COLOR.musgoTenue }],
+        canvas: [
+          {
+            type: 'line',
+            x1: 0,
+            y1: 0,
+            x2: PAGE_WIDTH_PT - MARGIN.left - MARGIN.right,
+            y2: 0,
+            lineWidth: 0.5,
+            lineColor: COLOR.musgoTenue,
+          },
+        ],
         margin: [0, 24, 0, 12],
       },
       { image: 'symbol', width: 26, alignment: 'center', margin: [0, 0, 0, 6] },

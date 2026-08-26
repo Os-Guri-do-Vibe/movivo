@@ -51,7 +51,9 @@ function buildService(
   selects: unknown[][],
   inserted = { id: 'row-1', version: 2 },
   options: {
-    activePayload?: (targetSex: BiologicalSex) => Promise<{ version: number; payload: unknown } | null>;
+    activePayload?: (
+      targetSex: BiologicalSex,
+    ) => Promise<{ version: number; payload: unknown } | null>;
     resolved?: { persona: AgentPersona; servedFromSex: BiologicalSex | null };
   } = {},
 ) {
@@ -344,9 +346,13 @@ describe('AiConfigService', () => {
   });
 
   it('primeira publicação de um slot órfão avisa que o público migra da persona emprestada', async () => {
-    const { service } = buildService([[{ max: 0 }]], { id: 'row-1', version: 1 }, {
-      activePayload: () => Promise.resolve(null),
-    });
+    const { service } = buildService(
+      [[{ max: 0 }]],
+      { id: 'row-1', version: 1 },
+      {
+        activePayload: () => Promise.resolve(null),
+      },
+    );
 
     const response = await service.publish(ACTOR, {
       targetSex: 'FEMALE',
@@ -370,11 +376,15 @@ describe('AiConfigService', () => {
   });
 
   it('leitura de slot órfão avisa que a persona exibida é emprestada do outro público', async () => {
-    const { service } = buildService([], { id: 'row-1', version: 1 }, {
-      resolved: { persona: PERSONA, servedFromSex: 'MALE' },
-      activePayload: (targetSex: BiologicalSex) =>
-        Promise.resolve(targetSex === 'MALE' ? { version: 7, payload: PERSONA } : null),
-    });
+    const { service } = buildService(
+      [],
+      { id: 'row-1', version: 1 },
+      {
+        resolved: { persona: PERSONA, servedFromSex: 'MALE' },
+        activePayload: (targetSex: BiologicalSex) =>
+          Promise.resolve(targetSex === 'MALE' ? { version: 7, payload: PERSONA } : null),
+      },
+    );
 
     const response = await service.persona('FEMALE');
 

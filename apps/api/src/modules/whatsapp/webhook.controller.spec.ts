@@ -19,10 +19,7 @@ function makeController(
       return { transportProvider };
     },
   } as unknown as AppConfigService;
-  const controller = new WebhookController(
-    { ingest } as unknown as WhatsappInboundService,
-    config,
-  );
+  const controller = new WebhookController({ ingest } as unknown as WhatsappInboundService, config);
   const req = { headers, rawBody } as unknown as RawBodyRequest<Request>;
   return { controller, ingest, req };
 }

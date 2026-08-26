@@ -140,7 +140,8 @@ export class AraraHttpTransport implements WhatsappTransport {
     try {
       await this.postMessage({ receiver: toReceiver(to), media_url: documentUrl, body: caption });
     } catch (error) {
-      const windowClosed = error instanceof AraraApiError && error.code === 'CONVERSATION_WINDOW_CLOSED';
+      const windowClosed =
+        error instanceof AraraApiError && error.code === 'CONVERSATION_WINDOW_CLOSED';
       if (!windowClosed || !fallbackTemplateName) throw error;
       this.logger.info(
         { fallbackTemplateName },
