@@ -20,6 +20,9 @@ import {
   AgentToneDescriptor,
   PromptLayer,
 } from '../enums/agent-config';
+// O slot da persona reusa o MESMO enum do sexo biológico da anamnese. Duplicar o enum aqui
+// deixaria o painel publicar um slot que nenhum titular jamais resolve.
+import { biologicalSexSchema } from './anamnesis.schema';
 import { controlCenterMetaSchema } from './control-center.schema';
 import { faqCandidateSchema } from './faq.schema';
 import { forbiddenTopicCandidateSchema } from './forbidden-topic.schema';
@@ -164,14 +167,29 @@ export const DEFAULT_AGENT_PERSONA: AgentPersona = {
   humanHandoffMessage: DEFAULT_HUMAN_HANDOFF_MESSAGE,
 };
 
+/**
+ * Slot da persona: o público (por sexo biológico informado na Etapa 1) que aquela versão
+ * atende. Duas personas coexistem publicadas; cada titular é atendido pela do seu slot.
+ *
+ * É campo **obrigatório** em toda escrita: sem ele, `version` volta a ser global e um
+ * rollback de `version = 1` não sabe qual das duas personas está revertendo.
+ */
+export const agentConfigTargetSexSchema = biologicalSexSchema;
+
 /** `changeNote` é obrigatório também no contrato: publicar sem motivo não é auditável. */
 export const publishAgentConfigSchema = z.object({
+  targetSex: agentConfigTargetSexSchema,
   payload: agentPersonaSchema,
   changeNote: z.string().min(5).max(500),
 });
 export type PublishAgentConfigInput = z.infer<typeof publishAgentConfigSchema>;
 
 export const rollbackAgentConfigSchema = z.object({
+  /**
+   * O par `(targetSex, targetVersion)` é a chave real da versão alvo — `version` sozinho
+   * é ambíguo desde que a numeração passou a ser POR SLOT (existe `version = 1` nos dois).
+   */
+  targetSex: agentConfigTargetSexSchema,
   targetVersion: z.int().positive(),
   changeNote: z.string().min(5).max(500),
 });
@@ -183,6 +201,13 @@ export type RollbackAgentConfigInput = z.infer<typeof rollbackAgentConfigSchema>
  * ------------------------------------------------------------------------- */
 
 export const agentConfigVersionSchema = z.object({
+  /**
+   * Slot da versão. Hoje toda chamada de histórico já filtra por slot, então o campo é
+   * redundante para o painel atual — vai no payload assim mesmo porque `version` deixou de
+   * ser único globalmente: uma linha de histórico sem o slot não é identificável fora do
+   * contexto da requisição que a trouxe (log, export, lista combinada dos dois slots).
+   */
+  targetSex: agentConfigTargetSexSchema,
   version: z.int().positive(),
   status: z.enum(Object.values(AgentConfigStatus) as [AgentConfigStatus, ...AgentConfigStatus[]]),
   changeNote: z.string(),
@@ -198,9 +223,18 @@ export type AgentConfigVersion = z.infer<typeof agentConfigVersionSchema>;
 
 export const agentPersonaResponseSchema = z.object({
   data: z.object({
+    /** Slot pedido (o público que o painel está editando/visualizando). */
+    targetSex: agentConfigTargetSexSchema,
     persona: agentPersonaSchema,
     /** `null` quando ainda não há configuração publicada (vale o default de código). */
     version: z.int().positive().nullable(),
+    /**
+     * Slot de onde o payload servido veio de fato. Igual a `targetSex` no caso normal; o
+     * OUTRO slot quando este ainda não tem persona própria e está emprestando; `null`
+     * quando nem um nem outro existe e vale o default compilado. Sem este campo o painel
+     * não consegue distinguir "esta é a minha persona" de "estou vendo a do outro público".
+     */
+    servedFromSex: agentConfigTargetSexSchema.nullable(),
   }),
   meta: controlCenterMetaSchema,
 });

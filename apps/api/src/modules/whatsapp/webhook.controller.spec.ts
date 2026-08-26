@@ -2,19 +2,30 @@ import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { AppConfigService } from '../../core/config';
+import { EVOLUTION_WEBHOOK_TOKEN_HEADER } from './inbound/evolution-inbound.edge';
 import { SIGNATURE_HEADER, TIMESTAMP_HEADER } from './webhook-signature';
 import { WebhookController } from './webhook.controller';
 import type { WhatsappInboundService } from './whatsapp-inbound.service';
 
-function makeController(headers: Record<string, unknown>, rawBody?: Buffer) {
+function makeController(
+  headers: Record<string, unknown>,
+  rawBody?: Buffer,
+  transportProvider: 'ARARA' | 'EVOLUTION' = 'ARARA',
+) {
   const ingest = vi.fn(async () => undefined);
-  const controller = new WebhookController({ ingest } as unknown as WhatsappInboundService);
+  const config = {
+    get whatsapp() {
+      return { transportProvider };
+    },
+  } as unknown as AppConfigService;
+  const controller = new WebhookController({ ingest } as unknown as WhatsappInboundService, config);
   const req = { headers, rawBody } as unknown as RawBodyRequest<Request>;
   return { controller, ingest, req };
 }
 
-describe('WebhookController', () => {
-  it('repassa o corpo BRUTO e os cabeçalhos de assinatura ao serviço', async () => {
+describe('WebhookController — rota AraraHQ', () => {
+  it('repassa o corpo BRUTO, os headers e o provedor da ROTA ao serviço', async () => {
     const rawBody = Buffer.from('{"event":"message"}');
     const { controller, ingest, req } = makeController(
       {
@@ -27,9 +38,13 @@ describe('WebhookController', () => {
 
     await expect(controller.whatsapp(req, { event: 'message' })).resolves.toEqual({ ok: true });
     expect(ingest).toHaveBeenCalledWith({
+      provider: 'ARARA',
       rawBody,
-      signature: 'sha256=abc',
-      timestamp: '1760000000',
+      headers: {
+        [SIGNATURE_HEADER]: 'sha256=abc',
+        [TIMESTAMP_HEADER]: '1760000000',
+        'x-correlation-id': 'corr-1',
+      },
       body: { event: 'message' },
       correlationId: 'corr-1',
     });
@@ -45,8 +60,7 @@ describe('WebhookController', () => {
     await controller.whatsapp(req, {});
     expect(ingest).toHaveBeenCalledWith(
       expect.objectContaining({
-        signature: 'sha256=primeiro',
-        timestamp: '1760000000',
+        headers: expect.objectContaining({ [SIGNATURE_HEADER]: 'sha256=primeiro' }),
         correlationId: 'req-9',
       }),
     );
@@ -57,12 +71,63 @@ describe('WebhookController', () => {
 
     await expect(controller.whatsapp(req, undefined)).resolves.toEqual({ ok: true });
     expect(ingest).toHaveBeenCalledWith(
+      expect.objectContaining({ rawBody: undefined, headers: {} }),
+    );
+  });
+
+  it('sem header de correlação, SEMPRE gera um id — nunca string vazia', async () => {
+    // Regressão real (QA 2026-08-24): toda entrega real da EvolutionAPI chega sem header
+    // de correlação. O `''` que saía daqui virava `dedupeId` vazio e, lá na frente,
+    // segmento inválido de chave Redis no marker de idempotência do envio — a resposta da
+    // IA era gerada e nunca entregue. O contrato agora é: correlationId não vazio, sempre.
+    const { controller, ingest, req } = makeController({});
+
+    await controller.whatsapp(req, undefined);
+    const [call] = (ingest as unknown as { mock: { calls: Array<[{ correlationId: string }]> } })
+      .mock.calls;
+    expect(call?.[0].correlationId).toBeTruthy();
+    expect(call?.[0].correlationId.length).toBeGreaterThan(0);
+  });
+});
+
+describe('WebhookController — rota EvolutionAPI', () => {
+  const body = { event: 'messages.upsert', instance: 'movivo-teste', data: {} };
+
+  it('gate DESLIGADO (transporte ARARA): 200 sem chamar o serviço', async () => {
+    const { controller, ingest, req } = makeController(
+      { [EVOLUTION_WEBHOOK_TOKEN_HEADER]: 'token' },
+      Buffer.from('{}'),
+      'ARARA',
+    );
+
+    await expect(controller.whatsappEvolution(req, body)).resolves.toEqual({ ok: true });
+    expect(ingest).not.toHaveBeenCalled();
+  });
+
+  it('gate LIGADO (transporte EVOLUTION): delega com provider EVOLUTION e os headers', async () => {
+    const { controller, ingest, req } = makeController(
+      { [EVOLUTION_WEBHOOK_TOKEN_HEADER]: 'token-secreto', 'x-correlation-id': 'corr-evo' },
+      Buffer.from('{}'),
+      'EVOLUTION',
+    );
+
+    await expect(controller.whatsappEvolution(req, body)).resolves.toEqual({ ok: true });
+    expect(ingest).toHaveBeenCalledWith(
       expect.objectContaining({
-        rawBody: undefined,
-        signature: undefined,
-        timestamp: undefined,
-        correlationId: '',
+        provider: 'EVOLUTION',
+        body,
+        correlationId: 'corr-evo',
+        headers: expect.objectContaining({
+          [EVOLUTION_WEBHOOK_TOKEN_HEADER]: 'token-secreto',
+        }),
       }),
     );
+  });
+
+  it('sem token: ainda responde 200 — quem decide descartar é a borda, não o controller', async () => {
+    const { controller, ingest, req } = makeController({}, undefined, 'EVOLUTION');
+
+    await expect(controller.whatsappEvolution(req, body)).resolves.toEqual({ ok: true });
+    expect(ingest).toHaveBeenCalledOnce();
   });
 });

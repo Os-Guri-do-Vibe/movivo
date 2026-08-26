@@ -37,10 +37,18 @@ function finiteNumber(value: unknown, fallback = 0): number {
 }
 
 function parseQueueKind(value: unknown): QueueKind {
-  if (value === 'PROTOCOL' || value === 'HANDOFF' || value === 'PARQ' || value === 'CHECKIN') {
-    return value;
-  }
+  if (value === 'PROTOCOL' || value === 'HANDOFF' || value === 'CHECKIN') return value;
   throw new DashboardApiError(502, 'A fila devolveu um tipo de item desconhecido.');
+}
+
+/**
+ * `origin` é LEGENDA (por que este item exige revisão), não contrato de renderização:
+ * um valor novo que o backend passe a mandar não pode derrubar a fila inteira, então
+ * cai em `null` — o card continua correto, só sem a legenda. Diferente de
+ * `kind`/`severity`, que decidem rota e cor e por isso continuam estritos.
+ */
+function parseOrigin(value: unknown): QueueItem['origin'] {
+  return value === 'PARQ' || value === 'EDIT' ? value : null;
 }
 
 function parseSeverity(value: unknown): QueueSeverity {
@@ -64,6 +72,7 @@ export function parseQueueItem(value: unknown): QueueItem {
     summary: string(value.summary),
     status: string(value.status, 'PENDENTE'),
     autoReleaseAt: typeof value.autoReleaseAt === 'string' ? value.autoReleaseAt : null,
+    origin: parseOrigin(value.origin),
   };
 }
 
@@ -150,14 +159,6 @@ export function parseQueueDetail(value: unknown): QueueDetail {
     };
   }
   if (value.replay !== undefined) result.replay = parseReplay(value.replay);
-  if (isRecord(value.parq)) {
-    result.parq = {
-      flags: Array.isArray(value.parq.flags)
-        ? value.parq.flags.map((flag) => string(flag)).filter(Boolean)
-        : [],
-      state: string(value.parq.state, item.status),
-    };
-  }
   if (isRecord(value.handoff)) {
     result.handoff = {
       reason: string(value.handoff.reason) || item.summary,
@@ -250,37 +251,22 @@ export function parseAnamnesisAnswers(value: unknown): AnamnesisAnswers {
   };
 }
 
-export async function getProtocolAnamnesisAnswers(
-  protocolId: string,
-  signal?: AbortSignal,
-): Promise<AnamnesisAnswers> {
-  return parseAnamnesisAnswers(
-    await request(`/queue/protocol/${encodeURIComponent(protocolId)}/anamnesis`, { signal }),
-  );
-}
-
 /**
- * Mesmas respostas, mas partindo direto de uma sessão PAR-Q (o olho da caixa "Revisão
- * Humana Obrigatória" — item ainda não virou protocolo, então não há `protocolId`).
+ * Respostas da anamnese do titular (o olho da fila e a página standalone).
+ *
+ * O `kind` sobreviveu à remoção do PAR-Q (2026-08-24) porque o backend expõe o endpoint
+ * POR kind (`/queue/{kind}/{id}/anamnesis`) — só que hoje `protocol` é o único que
+ * existe lá: o antigo `/queue/parq/{sessionId}/anamnesis` (item de fila sem protocolo
+ * ainda) foi removido junto com o `kind: 'PARQ'`.
  */
-export async function getParqAnamnesisAnswers(
-  sessionId: string,
-  signal?: AbortSignal,
-): Promise<AnamnesisAnswers> {
-  return parseAnamnesisAnswers(
-    await request(`/queue/parq/${encodeURIComponent(sessionId)}/anamnesis`, { signal }),
-  );
-}
-
-/** O olho da fila chama uma das duas acima conforme o `kind` do item — sem `if` espalhado. */
 export async function getAnamnesisAnswers(
-  kind: 'PROTOCOL' | 'PARQ',
+  kind: 'PROTOCOL',
   id: string,
   signal?: AbortSignal,
 ): Promise<AnamnesisAnswers> {
-  return kind === 'PROTOCOL'
-    ? getProtocolAnamnesisAnswers(id, signal)
-    : getParqAnamnesisAnswers(id, signal);
+  return parseAnamnesisAnswers(
+    await request(`/queue/${kind.toLowerCase()}/${encodeURIComponent(id)}/anamnesis`, { signal }),
+  );
 }
 
 export async function getOperations(signal?: AbortSignal): Promise<OperationsResponse> {
@@ -298,17 +284,15 @@ export async function saveProtocol(
   })) as ActionResult;
 }
 
+/**
+ * Assinatura do protocolo. Desde 2026-08-24 é também a ÚNICA liberação de PAR-Q: quando
+ * o protocolo vem de uma sessão bloqueada (`QueueItem.origin === 'PARQ'`), o backend
+ * libera o PAR-Q dentro da própria assinatura — não existe mais ação separada.
+ */
 export async function signProtocol(id: string): Promise<ActionResult> {
   return (await request(`/protocols/${encodeURIComponent(id)}/sign`, {
     method: 'POST',
     body: JSON.stringify({ confirmation: true }),
-  })) as ActionResult;
-}
-
-export async function releaseParq(id: string, notes: string): Promise<ActionResult> {
-  return (await request(`/parq/${encodeURIComponent(id)}/release`, {
-    method: 'POST',
-    body: JSON.stringify({ decision: 'RELEASED', notes, confirmation: true }),
   })) as ActionResult;
 }
 

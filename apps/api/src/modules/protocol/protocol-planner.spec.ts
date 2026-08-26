@@ -19,6 +19,9 @@ const constraints: UserConstraints = {
   avoid: [],
   injuryTags: [],
   injuriesRaw: [],
+  requiresProfessionalReview: false,
+  parqTags: [],
+  parqTriggered: [],
 };
 
 function structure(): ProtocolStructure {

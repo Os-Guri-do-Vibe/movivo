@@ -17,6 +17,9 @@ import { ControlCenterService } from './control-center.service';
 import type { EvolutionTransport } from '../whatsapp/evolution-transport';
 
 function build(evolution: Partial<EvolutionTransport>) {
+  // `ensureWebhookConfigured` é reafirmado por `integration()` quando o estado vira
+  // CONNECTED (US-3.1-EVO); default no-op para os testes que não são sobre isso.
+  const withDefaults = { ensureWebhookConfigured: vi.fn(async () => undefined), ...evolution };
   const db = {} as unknown as TenantDatabase;
   const service = new ControlCenterService(
     db,
@@ -27,7 +30,7 @@ function build(evolution: Partial<EvolutionTransport>) {
     {} as unknown as Redis,
     new RedisKeyBuilder('movivo'),
     {} as unknown as AgentConfigRepository,
-    evolution as EvolutionTransport,
+    withDefaults as EvolutionTransport,
   );
   return service;
 }
@@ -108,6 +111,31 @@ describe('ControlCenterService.integration', () => {
     });
     await service.integration();
     expect(fetchQrCode).not.toHaveBeenCalled();
+  });
+
+  it('CONNECTED: reafirma o webhook de ENTRADA (US-3.1-EVO)', async () => {
+    const ensureWebhookConfigured = vi.fn(async () => undefined);
+    const service = build({
+      hasCredentials: () => true,
+      currentInstanceName: vi.fn().mockResolvedValue('minha-empresa'),
+      connectionState: vi.fn().mockResolvedValue('CONNECTED'),
+      ensureWebhookConfigured,
+    });
+    await service.integration();
+    expect(ensureWebhookConfigured).toHaveBeenCalledWith('minha-empresa');
+  });
+
+  it('CONNECTING: NÃO reafirma o webhook (só depois que a conta conecta de fato)', async () => {
+    const ensureWebhookConfigured = vi.fn(async () => undefined);
+    const service = build({
+      hasCredentials: () => true,
+      currentInstanceName: vi.fn().mockResolvedValue('minha-empresa'),
+      connectionState: vi.fn().mockResolvedValue('CONNECTING'),
+      fetchQrCode: vi.fn().mockResolvedValue(null),
+      ensureWebhookConfigured,
+    });
+    await service.integration();
+    expect(ensureWebhookConfigured).not.toHaveBeenCalled();
   });
 
   it('CONNECTING mas fetchQrCode falha: qrCodeBase64 null, nunca lança pro chamador', async () => {

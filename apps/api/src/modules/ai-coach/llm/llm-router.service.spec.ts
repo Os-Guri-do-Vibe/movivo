@@ -61,7 +61,7 @@ function make(providers: LLMProvider[]) {
       dailyCostAlertBrl: 0.5,
     },
   } as unknown as AppConfigService;
-  const logger = { setContext: vi.fn(), warn: vi.fn() } as unknown as PinoLogger;
+  const logger = { setContext: vi.fn(), warn: vi.fn(), info: vi.fn() } as unknown as PinoLogger;
   const router = new LlmRouter(providers, aiJobs, abuse, config, logger);
   return { router, aiJobs, abuse, config };
 }

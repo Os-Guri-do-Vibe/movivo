@@ -16,6 +16,7 @@ import { useCallback } from 'react';
 
 import { getInviolableRules } from '@/lib/control-center-api';
 
+import { DEFAULT_SLOT } from './agent-persona-workspace';
 import { ResourceState, SectorHeader, useControlCenterResource } from './control-center-ui';
 import { AiGuardrailsPanel } from './ai-guardrails';
 
@@ -26,7 +27,13 @@ export function AiRulesDashboard({
   canWrite?: boolean;
   showHeader?: boolean;
 }) {
-  const load = useCallback((signal?: AbortSignal) => getInviolableRules(signal), []);
+  /*
+   * O endpoint é escopado a um slot de persona, mas esta tela renderiza **apenas** os blocos
+   * `editable === false` (L0/L1), que são constantes de código idênticas nos dois slots. Pedir
+   * um slot fixo aqui é correto e evita duas chamadas para o mesmo conteúdo; o bloco L2, que
+   * de fato muda por slot, é filtrado fora logo abaixo.
+   */
+  const load = useCallback((signal?: AbortSignal) => getInviolableRules(DEFAULT_SLOT, signal), []);
   const { data, error, forbidden, loading, refresh } = useControlCenterResource(load);
 
   if (!data) {

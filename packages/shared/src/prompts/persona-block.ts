@@ -9,15 +9,30 @@
  */
 import type { AgentFormatting, AgentPersona } from '../schemas/agent-config.schema';
 
+/**
+ * Rótulo de cada descritor de tom **em forma SUBSTANTIVA**, nunca adjetiva.
+ *
+ * ## Por que substantivo (achado de Victor, 2026-08-25 — mesma classe do bug "Você é a {nome}")
+ * O mapa anterior traduzia os descritores para adjetivos flexionados no feminino
+ * (`calorosa`, `direta`, `bem-humorada`, `técnica`) porque havia uma única persona, feminina.
+ * Com duas personas publicadas ao mesmo tempo (uma por sexo do titular), um agente de nome
+ * masculino recebia "Fale de forma calorosa, direta" e passava a se referir a si mesmo no
+ * feminino por concordância gramatical — o modelo copia o gênero do adjetivo que descreve
+ * o falante.
+ *
+ * Substantivo não flexiona pelo falante: "Seu tom é: acolhimento, objetividade" vale
+ * igualmente para persona masculina e feminina. Nenhum descritor foi criado, removido ou
+ * ressignificado — só mudou a FORMA gramatical do rótulo de cada um.
+ */
 export const TONE_LABEL: Record<AgentPersona['toneDescriptors'][number], string> = {
-  caloroso: 'calorosa',
-  direto: 'direta',
-  'bem-humorado': 'bem-humorada',
-  tecnico: 'técnica',
-  motivacional: 'motivacional',
-  sem_hype: 'sem hype',
-  informal: 'informal',
-  formal: 'formal',
+  caloroso: 'acolhimento',
+  direto: 'objetividade',
+  'bem-humorado': 'humor leve',
+  tecnico: 'precisão técnica',
+  motivacional: 'motivação',
+  sem_hype: 'ausência de hype',
+  informal: 'informalidade',
+  formal: 'formalidade',
 };
 
 export const EMOJI_INSTRUCTION: Record<AgentPersona['emojiPolicy'], string> = {
@@ -83,14 +98,33 @@ export const MAX_BOLD_SPANS: Record<AgentFormatting['boldPolicy'], number> = {
  * (checada contra padrões de injeção antes de gravar), descritores de tom (ENUM, máx. 4) e
  * política de emoji (ENUM).
  */
+/**
+ * Achado de QA 2026-08-25 (`apps/api/src/modules/whatsapp/message-templates.ts`,
+ * `presentPersona`): `agentSelfIntro` é texto livre do painel, sem contrato gramatical —
+ * já foi publicado tanto como fragmento em terceira pessoa ("a coach digital da MOVIVO,
+ * supervisionada por...") quanto como frase completa em primeira pessoa ("Olá, sou o
+ * Leonardo, seu treinador..."). "Você é a {nome}, {intro}" travava artigo em feminino e
+ * virava emenda por vírgula com o segundo caso. "Você é {nome}." como frase própria não
+ * exige concordância de gênero e vale para os dois formatos.
+ */
+function capitalizeFirst(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 export function buildPersonaBlock(persona: AgentPersona): string {
   const tone = persona.toneDescriptors.map((descriptor) => TONE_LABEL[descriptor]).join(', ');
   const behavior = persona.personaTraits
     .map((trait) => PERSONA_TRAIT_INSTRUCTION[trait])
     .join(', ');
   return [
-    `Você é a ${persona.agentName}, ${persona.agentSelfIntro}. Fale de forma ${tone}.`,
-    `Durante a conversa, seja ${behavior}.`,
+    // "Seu tom é: <substantivos>" no lugar de "Fale de forma <adjetivos>": nenhuma das duas
+    // metades da frase pode carregar gênero, porque a mesma função renderiza a persona
+    // masculina e a feminina (ver o cabeçalho de `TONE_LABEL`).
+    `Você é ${persona.agentName}. ${capitalizeFirst(persona.agentSelfIntro)}. Seu tom é: ${tone}.`,
+    // `PERSONA_TRAIT_INSTRUCTION` já são imperativos neutros de gênero ("acolha o contexto
+    // antes de orientar"); o antigo "seja" antes deles era, além de agramatical, o único
+    // ponto da frase que pediria concordância. Sem ele a lista fica correta e neutra.
+    `Durante a conversa, ${behavior}.`,
     EMOJI_INSTRUCTION[persona.emojiPolicy],
   ].join(' ');
 }

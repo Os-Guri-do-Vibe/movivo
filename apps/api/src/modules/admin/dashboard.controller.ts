@@ -41,13 +41,16 @@ export class DashboardController {
     return this.dashboard.anamnesisAnswers(actor, id);
   }
 
-  @Get('queue/parq/:id/anamnesis')
-  @Roles('PROFESSIONAL', 'ADMIN')
-  parqAnamnesisAnswers(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
-    return this.dashboard.parqAnamnesisAnswers(actor, id);
-  }
-
+  /**
+   * `ADMIN` (conta fundador) tem acesso total à fila, inclusive assinatura de protocolo
+   * (achado 2026-08-22, decisão do fundador): a MOVIVO no início só tem um profissional
+   * CREF, também sócio-fundador, e a conta dele já usa o papel de fundador. Por isso todo
+   * `ADMIN` ganha as mesmas ações de `PROFESSIONAL` aqui — a segunda barreira (crédito
+   * CREF ativo) continua existindo só para contas `PROFESSIONAL`, ver `signProtocol` em
+   * `dashboard.service.ts`.
+   */
   @Patch('protocols/:id')
+  @Roles('PROFESSIONAL', 'ADMIN')
   editProtocol(
     @CurrentUser() actor: AuthenticatedUser,
     @Param('id') id: string,
@@ -57,6 +60,7 @@ export class DashboardController {
   }
 
   @Post('protocols/:id/sign')
+  @Roles('PROFESSIONAL', 'ADMIN')
   signProtocol(
     @CurrentUser() actor: AuthenticatedUser,
     @Param('id') id: string,
@@ -65,16 +69,8 @@ export class DashboardController {
     return this.dashboard.signProtocol(actor, id, body);
   }
 
-  @Post('parq/:id/release')
-  releaseParq(
-    @CurrentUser() actor: AuthenticatedUser,
-    @Param('id') id: string,
-    @Body() body: unknown,
-  ) {
-    return this.dashboard.releaseParq(actor, id, body);
-  }
-
   @Post('handoffs/:id/resolve')
+  @Roles('PROFESSIONAL', 'ADMIN')
   resolveHandoff(
     @CurrentUser() actor: AuthenticatedUser,
     @Param('id') id: string,

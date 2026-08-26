@@ -51,6 +51,10 @@ async function giveActiveProtocol(userId: string): Promise<void> {
       totalWeeks: 12,
       content: { goal: 'GAIN_MUSCLE', phase: 'HIPERTROFIA' },
       constraints: { injuryTags: ['SHOULDER'], equipment: ['halteres'] },
+      // NOT NULL sem default desde a migração 0033.
+      mesocycleName: 'Mesociclo 1 — Hipertrofia',
+      startDate: new Date(),
+      endDate: new Date(Date.now() + 12 * 7 * 24 * 60 * 60 * 1000),
     });
   });
 }

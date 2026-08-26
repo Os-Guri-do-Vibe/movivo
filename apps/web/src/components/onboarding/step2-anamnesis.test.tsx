@@ -17,6 +17,13 @@ const COMPLETE: Step2State = {
   preferredPeriod: 'MORNING',
 };
 
+const COMPLETE_PAIN: Step2State['pain'] = {
+  ...EMPTY_STEP2.pain,
+  hasPain: true,
+  points: [{ region: 'LOWER_BACK', intensity: 5, regionOther: '' }],
+  trend: 'STABLE',
+};
+
 function renderStep2({
   data = COMPLETE,
   onChange = vi.fn(),
@@ -180,7 +187,12 @@ describe('Step2Anamnesis', () => {
 
       rerender(
         <Step2Anamnesis
-          data={{ ...COMPLETE, hasImportantEvent: true, importantEventDate: '2026-08-12' }}
+          data={{
+            ...COMPLETE,
+            hasImportantEvent: true,
+            importantEventDate: '2026-08-12',
+            importantEventDescription: 'Corrida de rua',
+          }}
           onChange={vi.fn()}
           onContinue={vi.fn()}
           saving={false}
@@ -453,6 +465,74 @@ describe('Step2Anamnesis', () => {
     });
 
     expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled();
+  });
+
+  it.each([
+    {
+      conditional: 'descrição do evento',
+      initialSection: 0,
+      data: {
+        ...COMPLETE,
+        hasImportantEvent: true,
+        importantEventDate: '2099-01-01',
+        importantEventDescription: '   ',
+      },
+    },
+    {
+      conditional: 'outra atividade',
+      initialSection: 1,
+      data: {
+        ...COMPLETE,
+        pastActivities: ['OTHER'] as Step2State['pastActivities'],
+        pastActivityOther: '   ',
+      },
+    },
+    {
+      conditional: 'outra dificuldade',
+      initialSection: 1,
+      data: {
+        ...COMPLETE,
+        consistencyBarriers: ['OTHER'] as Step2State['consistencyBarriers'],
+        consistencyBarrierOther: '   ',
+      },
+    },
+    {
+      conditional: 'explicação profissional da dor',
+      initialSection: 3,
+      data: {
+        ...COMPLETE,
+        pain: {
+          ...COMPLETE_PAIN,
+          hasProfessionalExplanation: true,
+          professionalExplanation: '   ',
+        },
+      },
+    },
+    {
+      conditional: 'recomendação de movimentos a evitar',
+      initialSection: 3,
+      data: {
+        ...COMPLETE,
+        pain: {
+          ...COMPLETE_PAIN,
+          hasAvoidanceRecommendation: true,
+          avoidanceRecommendation: '   ',
+        },
+      },
+    },
+    {
+      conditional: 'exercício que prefere evitar',
+      initialSection: 4,
+      data: { ...COMPLETE, hasAvoidedExercise: true, avoidedExercise: '   ' },
+    },
+  ])('não avança sem preencher $conditional', ({ data, initialSection }) => {
+    renderStep2({ data, initialSection });
+
+    expect(
+      screen.getByRole('button', {
+        name: initialSection === 4 ? 'Continuar para saúde' : 'Continuar',
+      }),
+    ).toBeDisabled();
   });
 
   it('condicional de preferências continua disponível na tela correspondente', () => {

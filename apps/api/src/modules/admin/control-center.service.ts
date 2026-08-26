@@ -445,7 +445,15 @@ export class ControlCenterService {
         .from(conversations)
         .where(gte(conversations.createdAt, since)),
     );
-    const activePersona = await this.agentConfig.activePayload();
+    // Sprint 11: duas personas publicáveis (uma por público). O card do panorama deixou de
+    // poder dizer "versão vigente" no singular — passa a contar quantos dos dois slots já
+    // têm persona própria, com as versões no detalhe. Zero slots publicados continua sendo
+    // o único caso `UNAVAILABLE` (aí a IA responde com o default de código).
+    const [malePersona, femalePersona] = await Promise.all([
+      this.agentConfig.activePayload('MALE'),
+      this.agentConfig.activePayload('FEMALE'),
+    ]);
+    const publishedSlots = [malePersona, femalePersona].filter(Boolean).length;
     const blockedRate = this.blockedRate(row?.blocked ?? 0, row?.validated ?? 0);
     const attention =
       blockedRate.value !== null &&
@@ -468,13 +476,17 @@ export class ControlCenterService {
       details: [
         { label: 'Taxa de resposta bloqueada pela validação', metric: blockedRate },
         {
-          label: 'Persona vigente',
+          label: 'Personas publicadas',
           metric: this.metric(
-            activePersona?.version ?? 0,
+            publishedSlots,
             'COUNT',
-            activePersona ? 'AVAILABLE' : 'UNAVAILABLE',
-            activePersona
-              ? `Versão ${activePersona.version} publicada.`
+            publishedSlots > 0 ? 'AVAILABLE' : 'UNAVAILABLE',
+            publishedSlots > 0
+              ? `Masculina: ${malePersona ? `versão ${malePersona.version}` : 'não publicada'}. ` +
+                  `Feminina: ${femalePersona ? `versão ${femalePersona.version}` : 'não publicada'}. ` +
+                  (publishedSlots === 1
+                    ? 'O público sem persona própria recebe a do outro por enquanto.'
+                    : '')
               : 'Nenhuma configuração publicada; a IA responde com o default de código.',
           ),
         },
@@ -983,19 +995,19 @@ export class ControlCenterService {
           // enviada, não a última (uma re-anamnese não deve mudar quando o aluno entrou).
           enrolledAt: sql<Date | null>`(
             select min(a.submitted_at) from ${anamnesisSessions} a
-            where a.user_id = ${users.id} and a.submitted_at is not null
+            where a.user_id = users.id and a.submitted_at is not null
           )`,
           lastInboundAt: sql<Date | null>`(
             select max(c.created_at) from ${conversations} c
-            where c.user_id = ${users.id} and c.direction = 'INBOUND'
+            where c.user_id = users.id and c.direction = 'INBOUND'
           )`,
           unansweredCheckinSentAt: sql<Date | null>`(
             select min(k.sent_at) from ${checkins} k
-            where k.user_id = ${users.id} and k.sent_at is not null and k.responded_at is null
+            where k.user_id = users.id and k.sent_at is not null and k.responded_at is null
           )`,
           renewalAt: sql<Date | null>`(
             select coalesce(s.trial_ends_at, s.current_period_end) from ${subscriptions} s
-            where s.user_id = ${users.id} order by s.created_at desc limit 1
+            where s.user_id = users.id order by s.created_at desc limit 1
           )`,
         })
         .from(users)
@@ -1016,7 +1028,7 @@ export class ControlCenterService {
     const students = rows
       .map(({ lastInboundAt, unansweredCheckinSentAt, renewalAt, enrolledAt, ...student }) => ({
         ...student,
-        enrolledAt: enrolledAt?.toISOString() ?? null,
+        enrolledAt: this.date(enrolledAt)?.toISOString() ?? null,
         churnRisk: assessChurnRisk({
           lastInboundAt: this.date(lastInboundAt),
           unansweredCheckinSentAt: this.date(unansweredCheckinSentAt),
@@ -1182,27 +1194,27 @@ export class ControlCenterService {
           protocolStatus: this.latestProtocolStatus(),
           anamnesisStatus: sql<string | null>`(
             select a.status::text from ${anamnesisSessions} a
-            where a.user_id = ${users.id} order by a.created_at desc limit 1
+            where a.user_id = users.id order by a.created_at desc limit 1
           )`,
           parqState: sql<string | null>`(
             select a.parq_state::text from ${anamnesisSessions} a
-            where a.user_id = ${users.id} order by a.created_at desc limit 1
+            where a.user_id = users.id order by a.created_at desc limit 1
           )`,
           routine: sql<unknown>`(
             select a.data_block_3 from ${anamnesisSessions} a
-            where a.user_id = ${users.id} order by a.created_at desc limit 1
+            where a.user_id = users.id order by a.created_at desc limit 1
           )`,
           lastInboundAt: sql<Date | null>`(
             select max(c.created_at) from ${conversations} c
-            where c.user_id = ${users.id} and c.direction = 'INBOUND'
+            where c.user_id = users.id and c.direction = 'INBOUND'
           )`,
           unansweredCheckinSentAt: sql<Date | null>`(
             select min(k.sent_at) from ${checkins} k
-            where k.user_id = ${users.id} and k.sent_at is not null and k.responded_at is null
+            where k.user_id = users.id and k.sent_at is not null and k.responded_at is null
           )`,
           renewalAt: sql<Date | null>`(
             select coalesce(s.trial_ends_at, s.current_period_end) from ${subscriptions} s
-            where s.user_id = ${users.id} order by s.created_at desc limit 1
+            where s.user_id = users.id order by s.created_at desc limit 1
           )`,
         })
         .from(users)
@@ -1928,6 +1940,14 @@ export class ControlCenterService {
       status === 'CONNECTING' && instanceName
         ? await this.evolution.fetchQrCode(instanceName).catch(() => null)
         : null;
+    // Reasserção idempotente do webhook de ENTRADA (US-3.1-EVO). Fica aqui porque este é o
+    // único ponto do sistema que já observa a transição para `CONNECTED` — o painel faz
+    // polling deste método a cada 3s. O transporte lembra quais instâncias já registrou,
+    // então isso NÃO vira um POST a cada poll. Best-effort: o painel nunca falha por causa
+    // do webhook (`ensureWebhookConfigured` já engole o erro e loga).
+    if (status === 'CONNECTED' && instanceName) {
+      await this.evolution.ensureWebhookConfigured(instanceName);
+    }
     return this.envelope({
       whatsapp: { configured: true, instanceName, status, qrCodeBase64 },
     });
@@ -2663,24 +2683,34 @@ export class ControlCenterService {
     });
   }
 
+  /**
+   * `${users.id}` (Column) interpolado dentro do template NÃO qualifica com a tabela
+   * (achado 2026-08-25) — vira `"id"` cru no SQL gerado, e como toda tabela tem sua
+   * própria coluna `id`, o Postgres resolve pro escopo mais interno (`s.id`/`p.id`),
+   * nunca pro `users.id` da query externa. Resultado: `s.user_id = s.id` — comparação
+   * sempre falsa, subquery sempre vazia, campo sempre `null` sem erro nenhum (silencioso
+   * o bastante pra passar despercebido em produção). Fix: literal `users.id` como texto
+   * no template, não interpolação de Column — sempre correlaciona com o `FROM users`
+   * externo, que estas três funções assumem existir sem alias em todo call site.
+   */
   private latestSubscriptionStatus() {
     return sql<string | null>`(
       select s.status::text from ${subscriptions} s
-      where s.user_id = ${users.id} order by s.created_at desc limit 1
+      where s.user_id = users.id order by s.created_at desc limit 1
     )`;
   }
 
   private latestSubscriptionPlan() {
     return sql<string | null>`(
       select s.plan::text from ${subscriptions} s
-      where s.user_id = ${users.id} order by s.created_at desc limit 1
+      where s.user_id = users.id order by s.created_at desc limit 1
     )`;
   }
 
   private latestProtocolStatus() {
     return sql<string | null>`(
       select p.status::text from ${protocols} p
-      where p.user_id = ${users.id} order by p.created_at desc limit 1
+      where p.user_id = users.id order by p.created_at desc limit 1
     )`;
   }
 

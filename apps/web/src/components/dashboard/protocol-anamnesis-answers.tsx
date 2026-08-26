@@ -282,7 +282,7 @@ export function AnamnesisAnswersContent({ answers }: { answers: AnamnesisAnswers
  * `enabled=false` não busca nada — a fila pode ter várias dezenas de cards, cada um com
  * seu próprio modal montado (fechado); sem essa trava, todos disparariam a busca junto.
  */
-function useAnamnesisAnswers(kind: 'PROTOCOL' | 'PARQ', id: string, enabled = true) {
+function useAnamnesisAnswers(kind: 'PROTOCOL', id: string, enabled = true) {
   const [answers, setAnswers] = useState<AnamnesisAnswers | null>(null);
   const [error, setError] = useState('');
 
@@ -359,8 +359,10 @@ export function ProtocolAnamnesisAnswers({ protocolId }: { protocolId: string })
 }
 
 /**
- * Modal aberto pelo olho da fila (achado 2026-08-18: mesma tela, nas duas caixas —
- * "Obrigatória" ainda não tem protocolo, então o `kind` decide qual endpoint chamar).
+ * Modal aberto pelo olho da fila (achado 2026-08-18: mesma tela, nas duas caixas). Desde
+ * 2026-08-24 `kind` só tem um valor: a caixa "Obrigatória" também é protocolo (PAR-Q
+ * bloqueante virou `origin: 'PARQ'`), então o antigo endpoint por sessão PAR-Q sumiu. O
+ * parâmetro segue explícito porque o backend expõe a anamnese por `kind`.
  */
 export function AnamnesisAnswersModal({
   kind,
@@ -368,7 +370,7 @@ export function AnamnesisAnswersModal({
   open,
   onOpenChange,
 }: {
-  kind: 'PROTOCOL' | 'PARQ';
+  kind: 'PROTOCOL';
   id: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;

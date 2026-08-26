@@ -1,9 +1,10 @@
 /**
- * Unit — `WhatsappInboundService` (US-3.1). Prova, com fakes:
+ * Unit — `WhatsappInboundService` (US-3.1 / US-3.1-EVO). Prova, com fakes:
  *   · payload forjado (HMAC inválido) → descartado, sem enfileirar;
  *   · sem segredo (fail-closed) → descartado;
- *   · replay (mesmo messageId) → descartado no nonce;
+ *   · replay (mesmo messageId) → descartado no nonce, com namespace POR PROVEDOR;
  *   · remetente desconhecido → descartado;
+ *   · orçamento por titular estourado → descartado sem chamar IA;
  *   · rajada de 3 mensagens do mesmo usuário → 1 job (debounce coalesce);
  *   · job enfileirado carrega o contrato de US-3.5 (userId, batchKey, enqueuedAt) sem PII.
  */
@@ -11,26 +12,35 @@ import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AppConfigService } from '../../core/config';
+import type { AppConfigService } from '../../core/config';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DomainEventBus } from '../../core/event-bus/event-bus.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QueueManager } from '../jobs/queue-manager.service';
-import { signWebhookBody } from './webhook-signature';
+import { AraraInboundEdge } from './inbound/arara-inbound.edge';
+import type { WhatsappInboundEdge, WhatsappInboundEdges } from './inbound/whatsapp-inbound-edge';
+import { signWebhookBody, SIGNATURE_HEADER, TIMESTAMP_HEADER } from './webhook-signature';
 import { type AiResponseJob, WhatsappInboundService } from './whatsapp-inbound.service';
 
 const SECRET = 'unit-webhook-secret';
 const USER_ID = '33333333-3333-4333-8333-333333333333';
 const PHONE = '+5541999998888';
 
-/** Fake Redis: SET (com/sem NX), RPUSH, EXPIRE em memória. */
-function fakeRedis(): { redis: Redis; rpush: ReturnType<typeof vi.fn> } {
+/** Fake Redis: SET (com/sem NX), RPUSH, EXPIRE, INCR em memória. */
+function fakeRedis(): {
+  redis: Redis;
+  rpush: ReturnType<typeof vi.fn>;
+  keys: string[];
+  seed: (key: string, value: string) => void;
+} {
   const kv = new Map<string, string>();
+  const keys: string[] = [];
   const rpush = vi.fn(async () => 1);
   const redis = {
     async set(key: string, value: string, ...args: unknown[]) {
+      keys.push(key);
       if (args.includes('NX') && kv.has(key)) return null;
       kv.set(key, value);
       return 'OK';
@@ -51,7 +61,7 @@ function fakeRedis(): { redis: Redis; rpush: ReturnType<typeof vi.fn> } {
       return kv.delete(key) ? 1 : 0;
     },
   } as unknown as Redis;
-  return { redis, rpush };
+  return { redis, rpush, keys, seed: (key, value) => kv.set(key, value) };
 }
 
 function makeService(
@@ -60,9 +70,10 @@ function makeService(
     userRows?: Array<{ id: string }>;
     consentActive?: boolean;
     checkinHandled?: boolean;
+    evolutionEdge?: WhatsappInboundEdge;
   } = {},
 ) {
-  const { redis, rpush } = fakeRedis();
+  const { redis, rpush, keys, seed } = fakeRedis();
   const enqueue = vi.fn(async () => 'job-1');
   const queues = { enqueue } as unknown as QueueManager;
   const db = {
@@ -83,28 +94,42 @@ function makeService(
   const events = {
     request: vi.fn(async () => opts.checkinHandled ?? false),
   } as unknown as DomainEventBus;
+  // A borda da EvolutionAPI é exercitada no spec dela; aqui só precisa existir para o
+  // mapa ser completo (e para o teste de namespace de nonce por provedor).
+  const evolutionEdge: WhatsappInboundEdge = opts.evolutionEdge ?? {
+    provider: 'EVOLUTION',
+    verify: () => ({ ok: true }),
+    normalize: (body: unknown) => [body as never],
+  };
+  const edges: WhatsappInboundEdges = {
+    ARARA: new AraraInboundEdge(config),
+    EVOLUTION: evolutionEdge,
+  };
   const service = new WhatsappInboundService(
     redis,
     new RedisKeyBuilder('movivo'),
+    edges,
     db,
     queues,
     healthConsent,
     events,
     { emit: vi.fn() } as unknown as DashboardQueueEventsService,
-    config,
     logger,
   );
-  return { service, enqueue, rpush, hasActiveForUser, revokeForUser, events };
+  return { service, enqueue, rpush, hasActiveForUser, revokeForUser, events, keys, seed, logger };
 }
 
 function signed(payload: object, secret = SECRET) {
   const raw = Buffer.from(JSON.stringify(payload), 'utf8');
   const timestamp = String(Math.floor(Date.now() / 1000));
   return {
+    provider: 'ARARA' as const,
     rawBody: raw,
     body: payload,
-    signature: signWebhookBody(secret, timestamp, raw),
-    timestamp,
+    headers: {
+      [SIGNATURE_HEADER]: signWebhookBody(secret, timestamp, raw),
+      [TIMESTAMP_HEADER]: timestamp,
+    },
   };
 }
 
@@ -143,7 +168,11 @@ describe('WhatsappInboundService.ingest', () => {
 
   it('descarta payload com HMAC inválido (forjado) sem enfileirar', async () => {
     const s = signed(payload());
-    await service.ingest({ ...s, signature: 'deadbeef', correlationId: 'c2' });
+    await service.ingest({
+      ...s,
+      headers: { ...s.headers, [SIGNATURE_HEADER]: 'deadbeef' },
+      correlationId: 'c2',
+    });
     expect(enqueue).not.toHaveBeenCalled();
   });
 
@@ -161,6 +190,25 @@ describe('WhatsappInboundService.ingest', () => {
     expect(enqueue).toHaveBeenCalledTimes(1);
   });
 
+  it('nonce é namespaçado por provedor: mesmo id nos dois canais não se anula', async () => {
+    const created = makeService();
+    const s = signed(payload({ messageId: 'same-id' }));
+    await created.service.ingest({ ...s, correlationId: 'arara' });
+    await created.service.ingest({
+      provider: 'EVOLUTION',
+      rawBody: undefined,
+      headers: {},
+      body: payload({ messageId: 'same-id' }),
+      correlationId: 'evo',
+    });
+    // As duas mensagens chegaram ao buffer: o id colidiu, mas as chaves de nonce vivem em
+    // namespaces distintos (com namespace único, a segunda teria sido descartada como
+    // replay). O job é um só porque a janela de debounce coalesce — comportamento correto.
+    expect(created.rpush).toHaveBeenCalledTimes(2);
+    expect(created.keys.some((k) => k.includes('wa-nonce:arara'))).toBe(true);
+    expect(created.keys.some((k) => k.includes('wa-nonce:evolution'))).toBe(true);
+  });
+
   it('descarta remetente desconhecido (sem usuário)', async () => {
     ({ service, enqueue } = makeService({ userRows: [] }));
     const s = signed(payload());
@@ -175,6 +223,24 @@ describe('WhatsappInboundService.ingest', () => {
     }
     expect(rpush).toHaveBeenCalledTimes(3);
     expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('orçamento por titular estourado: descarta sem enfileirar job de IA', async () => {
+    const created = makeService();
+    // 30 mensagens/5min é o teto; a 31ª é descartada.
+    created.seed(`movivo:u:${USER_ID.toLowerCase()}:inbound-rate`, '30');
+    const s = signed(payload({ messageId: 'over-budget' }));
+    await created.service.ingest({ ...s, correlationId: 'rate' });
+    expect(created.enqueue).not.toHaveBeenCalled();
+    expect(created.rpush).not.toHaveBeenCalled();
+  });
+
+  it('revogação de consentimento passa mesmo com o orçamento estourado (LGPD Art. 18)', async () => {
+    const created = makeService();
+    created.seed(`movivo:u:${USER_ID.toLowerCase()}:inbound-rate`, '99');
+    const s = signed(payload({ messageId: 'revoke-over', text: 'Revogar consentimento de saude' }));
+    await created.service.ingest({ ...s, correlationId: 'rate-revoke' });
+    expect(created.revokeForUser).toHaveBeenCalledWith(USER_ID);
   });
 
   it('revoga HEALTH_DATA somente com a frase explicita e confirma cessacao', async () => {
@@ -221,5 +287,46 @@ describe('WhatsappInboundService.ingest', () => {
     expect(created.events.request).toHaveBeenCalledOnce();
     expect(created.rpush).not.toHaveBeenCalled();
     expect(created.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('borda rejeita (verify falso) → nada é processado', async () => {
+    const created = makeService({
+      evolutionEdge: {
+        provider: 'EVOLUTION',
+        verify: () => ({ ok: false, reason: 'bad_token' }),
+        normalize: () => [],
+      },
+    });
+    await created.service.ingest({
+      provider: 'EVOLUTION',
+      rawBody: undefined,
+      headers: {},
+      body: payload(),
+      correlationId: 'bad-token',
+    });
+    expect(created.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('descarte legítimo da borda ([]) não vira log de rejeição', async () => {
+    const created = makeService({
+      evolutionEdge: {
+        provider: 'EVOLUTION',
+        verify: () => ({ ok: true }),
+        normalize: () => [],
+      },
+    });
+    await created.service.ingest({
+      provider: 'EVOLUTION',
+      rawBody: undefined,
+      headers: {},
+      body: {},
+      correlationId: 'discard',
+    });
+    expect(created.enqueue).not.toHaveBeenCalled();
+    const events = (created.logger.info as unknown as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call) => (call[0] as { event?: string }).event,
+    );
+    expect(events).toContain('webhook_no_message');
+    expect(events).not.toContain('webhook_rejected');
   });
 });

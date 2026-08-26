@@ -60,7 +60,10 @@ export function conversionMessage(
         'sem pressão! 🙏 Só pra eu melhorar: o que faltou pra fazer sentido? (preço, tempo, ' +
         'resultado...) Se quiser voltar, o plano Mensal é R$39 e você entra quando quiser: ' +
         checkoutUrl +
-        '\nDe qualquer forma, obrigada por treinar com a gente. 💛'
+        // "Valeu por treinar" no lugar de "obrigada por treinar" (Sprint 11): a mensagem é
+        // assinada pela persona do titular, que pode ser masculina ou feminina, e o
+        // particípio "obrigada/obrigado" travaria o gênero da agente. Mesmo tom informal.
+        '\nDe qualquer forma, valeu por treinar com a gente. 💛'
       );
   }
 }
