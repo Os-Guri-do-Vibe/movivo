@@ -8,8 +8,10 @@
  * para que a supervisão seja um fato consultável no banco, e não uma promessa
  * de camada de aplicação.
  */
+import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   index,
   jsonb,
   pgTable,
@@ -19,8 +21,9 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 
-import { eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
+import { bytea, eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
 import { protocolApprovalStatusEnum, protocolStatusEnum, reviewUrgencyEnum } from './enums';
+import { anamnesisSessions } from './anamnesis-sessions';
 import { users } from './users';
 import { methodologyVersions } from './methodology-versions';
 
@@ -33,6 +36,22 @@ export const protocols = pgTable(
     userId: userIdColumn()
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
+
+    /**
+     * Sessão de anamnese que originou o protocolo (2026-08-24). É o vínculo que permite à
+     * assinatura CREF liberar o PAR-Q da sessão CERTA — antes da mudança, a liberação era
+     * uma tela própria que recebia o id da sessão direto do cliente.
+     *
+     * **Nullable de propósito**: linhas criadas antes da migração 0035 não têm como ser
+     * ligadas retroativamente sem inferência (o titular pode ter mais de uma sessão), e
+     * inferir vínculo de saúde é exatamente o tipo de chute que não se faz aqui. Quem
+     * consome trata `NULL` como "nada a liberar", nunca como erro.
+     *
+     * `RESTRICT`: a sessão é a prova documental do PAR-Q que justificou o protocolo.
+     */
+    anamnesisSessionId: uuid('anamnesis_session_id').references(() => anamnesisSessions.id, {
+      onDelete: 'restrict',
+    }),
 
     /** Versão vigente. O histórico completo vive em `protocol_versions`. */
     version: smallint('version').notNull().default(1),
@@ -67,6 +86,20 @@ export const protocols = pgTable(
 
     currentWeek: smallint('current_week').notNull().default(1),
     totalWeeks: smallint('total_weeks').notNull().default(12),
+
+    /** Nome do bloco de periodização vigente (ex.: "Mesociclo 1 — Hipertrofia"). Computado no `persist()` a partir de `content.phase`. */
+    mesocycleName: varchar('mesocycle_name', { length: 120 }).notNull(),
+
+    /** Início do mesociclo vigente. `end_date` = `start_date` + `total_weeks` semanas, ambos gravados no `persist()`. */
+    startDate: eventTimestamp('start_date').notNull(),
+    endDate: eventTimestamp('end_date').notNull(),
+
+    /**
+     * PDF do protocolo assinado (`buildProtocolPdf`, `protocol-pdf.service.ts`), gerado em
+     * `DashboardService.signProtocol` e enviado como documento pelo WhatsApp. `NULL` até a
+     * assinatura CREF — protocolo `AUTO_APPROVED` ainda não gera PDF (Sprint futura).
+     */
+    pdfContent: bytea('pdf_content'),
 
     /**
      * -- LGPD Art. 11 — DADO SENSÍVEL DE SAÚDE (derivado).
@@ -145,6 +178,21 @@ export const protocols = pgTable(
     index('idx_protocols_status').on(table.status),
     // Fila de trabalho do dashboard CREF.
     index('idx_protocols_review').on(table.humanReviewRequired, table.createdAt),
+    // Join da fila com `anamnesis_sessions` (severidade do item) e lookup da liberação
+    // de PAR-Q na assinatura.
+    index('idx_protocols_anamnesis_session').on(table.anamnesisSessionId),
+    /**
+     * Defesa em profundidade exigida pela revisão de segurança (2026-08-24): protocolo
+     * `MANDATORY` NUNCA pode terminar `AUTO_APPROVED`. Hoje três camadas já impedem isso
+     * (o worker não agenda auto-liberação para `MANDATORY`, `autoRelease()` reconfere o
+     * estado sob `FOR UPDATE`, e `editProtocol` força `MANDATORY`), mas todas são de
+     * aplicação. Esta é a única que sobrevive a um bug de aplicação, a um script
+     * administrativo e a um `UPDATE` manual em produção.
+     */
+    check(
+      'protocols_mandatory_never_auto_approved',
+      sql`NOT (${table.reviewUrgency} = 'MANDATORY' AND ${table.approvalStatus} = 'AUTO_APPROVED')`,
+    ),
   ],
 );
 

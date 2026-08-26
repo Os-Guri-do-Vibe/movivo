@@ -13,6 +13,7 @@ import {
   type AgentConfigHistoryResponse,
   type AuditSearchQuery,
   type AuditSearchResponse,
+  type BiologicalSex,
   type AgentPersonaResponse,
   type ConfigSimulationResponse,
   type FaqEntriesResponse,
@@ -376,16 +377,43 @@ export function getAuditEvents(
 
 /* --------------------------------- Pilar IA (US-7.7) --------------------------------- */
 
-export function getAgentPersona(signal?: AbortSignal): Promise<AgentPersonaResponse> {
-  return request('ai/persona', agentPersonaResponseSchema, signal);
+/**
+ * Leituras do pilar IA. Todas são escopadas a um slot de persona (`targetSex`): existem duas
+ * personas publicadas ao mesmo tempo, uma por público, cada uma com histórico e numeração de
+ * versão próprios. O slot vai em **query param** porque a API o exige assim — `persona/:sex`
+ * colidiria com a rota `persona/history` no roteador do Nest.
+ */
+function slotQuery(targetSex: BiologicalSex): string {
+  return `?${new URLSearchParams({ targetSex }).toString()}`;
 }
 
-export function getAgentConfigHistory(signal?: AbortSignal): Promise<AgentConfigHistoryResponse> {
-  return request('ai/persona/history', agentConfigHistoryResponseSchema, signal);
+export function getAgentPersona(
+  targetSex: BiologicalSex,
+  signal?: AbortSignal,
+): Promise<AgentPersonaResponse> {
+  return request(`ai/persona${slotQuery(targetSex)}`, agentPersonaResponseSchema, signal);
 }
 
-export function getInviolableRules(signal?: AbortSignal): Promise<InviolableRulesResponse> {
-  return request('ai/inviolable-rules', inviolableRulesResponseSchema, signal);
+export function getAgentConfigHistory(
+  targetSex: BiologicalSex,
+  signal?: AbortSignal,
+): Promise<AgentConfigHistoryResponse> {
+  return request(
+    `ai/persona/history${slotQuery(targetSex)}`,
+    agentConfigHistoryResponseSchema,
+    signal,
+  );
+}
+
+export function getInviolableRules(
+  targetSex: BiologicalSex,
+  signal?: AbortSignal,
+): Promise<InviolableRulesResponse> {
+  return request(
+    `ai/inviolable-rules${slotQuery(targetSex)}`,
+    inviolableRulesResponseSchema,
+    signal,
+  );
 }
 
 /**

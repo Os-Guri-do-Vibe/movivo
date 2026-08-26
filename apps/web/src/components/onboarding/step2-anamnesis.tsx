@@ -228,6 +228,10 @@ function normalizeVisibleEmphasis(regions: readonly EmphasisRegion[]): VisibleEm
   return normalized.slice(0, 2);
 }
 
+function hasText(value: string) {
+  return value.trim().length > 0;
+}
+
 function EmphasisRegionGrid({
   selected,
   onToggle,
@@ -363,39 +367,42 @@ export function Step2Anamnesis({
   const importantEventDate = new Date(`${data.importantEventDate}T00:00:00`);
   const importantEventComplete =
     !data.hasImportantEvent ||
-    (!Number.isNaN(importantEventDate.getTime()) && importantEventDate >= firstEventDate);
+    (!Number.isNaN(importantEventDate.getTime()) &&
+      importantEventDate >= firstEventDate &&
+      hasText(data.importantEventDescription));
+  const objectiveComplete =
+    data.primaryGoal !== null &&
+    (data.primaryGoal !== 'OTHER' || hasText(data.primaryGoalOther)) &&
+    importantEventComplete;
+  const historyComplete =
+    data.trainingStatus !== null &&
+    (data.trainingStatus !== 'STOPPED' || data.stoppedFor !== null) &&
+    data.experience !== null &&
+    (!data.pastActivities.includes('OTHER') || hasText(data.pastActivityOther)) &&
+    (!data.consistencyBarriers.includes('OTHER') || hasText(data.consistencyBarrierOther));
+  const routineComplete =
+    data.daysPerWeek !== null &&
+    data.sessionDuration !== null &&
+    data.location !== null &&
+    data.preferredPeriod !== null;
   const painComplete =
     !data.pain.hasPain ||
     (data.pain.points.length > 0 &&
       data.pain.trend !== null &&
       data.pain.points.every(
         (point) => point.region !== 'OTHER' || point.regionOther.trim().length > 0,
-      ));
+      ) &&
+      (!data.pain.hasProfessionalExplanation || hasText(data.pain.professionalExplanation)) &&
+      (!data.pain.hasAvoidanceRecommendation || hasText(data.pain.avoidanceRecommendation)));
+  const preferencesComplete = !data.hasAvoidedExercise || hasText(data.avoidedExercise);
 
   const canSubmitStep =
-    data.primaryGoal !== null &&
-    (data.primaryGoal !== 'OTHER' || data.primaryGoalOther.trim().length > 0) &&
-    importantEventComplete &&
-    data.trainingStatus !== null &&
-    (data.trainingStatus !== 'STOPPED' || data.stoppedFor !== null) &&
-    data.experience !== null &&
-    data.daysPerWeek !== null &&
-    data.sessionDuration !== null &&
-    data.location !== null &&
-    data.preferredPeriod !== null &&
-    painComplete;
+    objectiveComplete && historyComplete && routineComplete && painComplete && preferencesComplete;
 
   const sectionComplete = [
-    data.primaryGoal !== null &&
-      (data.primaryGoal !== 'OTHER' || data.primaryGoalOther.trim().length > 0) &&
-      importantEventComplete,
-    data.trainingStatus !== null &&
-      (data.trainingStatus !== 'STOPPED' || data.stoppedFor !== null) &&
-      data.experience !== null,
-    data.daysPerWeek !== null &&
-      data.sessionDuration !== null &&
-      data.location !== null &&
-      data.preferredPeriod !== null,
+    objectiveComplete,
+    historyComplete,
+    routineComplete,
     painComplete,
     canSubmitStep,
   ][section];

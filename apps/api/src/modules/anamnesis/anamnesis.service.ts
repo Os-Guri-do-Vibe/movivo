@@ -49,11 +49,13 @@ import {
 } from '@movivo/shared';
 import { PinoLogger } from 'nestjs-pino';
 import { and, eq, isNull, lt, sql } from 'drizzle-orm';
+import type { ZodType } from 'zod';
 
 import { HealthCipherService, TenantDatabase, type TenantTransaction } from '../../core/database';
 import { anamnesisSessions, users } from '../../core/database/schema';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
+import { PROTOCOL_WAITING_DELAY_MS } from '../whatsapp/message-templates';
 import { ConsentService } from './consent.service';
 import { healthBlockSchema, isHealthBlockComplete, type HealthBlock } from './health-block';
 import { evaluateParq } from './parq';
@@ -109,6 +111,15 @@ export interface SubmitResult {
 
 /** Ordem de exibição da Etapa 1 = ordem das chaves de `CONSENT_TEXTS` (Alexandre §5.8). */
 const CONSENT_ORDER = Object.keys(CONSENT_TEXTS) as ConsentTypeWithText[];
+
+/** Payload inválido é erro do cliente, não falha interna da API. */
+function parseStepPayload<T>(schema: ZodType<T>, data: unknown): T {
+  const parsed = schema.safeParse(data);
+  if (!parsed.success) {
+    throw new BadRequestException(parsed.error.issues.map((issue) => issue.message));
+  }
+  return parsed.data;
+}
 
 @Injectable()
 export class AnamnesisService {
@@ -246,7 +257,7 @@ export class AnamnesisService {
    * de olhar consentimento, para não registrar aceite de quem não pode contratar.
    */
   private async saveStep1(row: SessionRow, data: unknown): Promise<void> {
-    const step1 = onboardingStep1Schema.parse(data);
+    const step1 = parseStepPayload(onboardingStep1Schema, data);
 
     if (ageInYears(step1.birthDate) < MIN_AGE_YEARS) {
       // 422 e não 400: a requisição está bem formada; o que não se aceita é a pessoa
@@ -268,7 +279,7 @@ export class AnamnesisService {
 
   /** Etapa 2 — seções 1/2/3/5 em claro; seção 4 + textos livres no bloco cifrado. */
   private async saveStep2(row: SessionRow, data: unknown): Promise<void> {
-    const { anamnesis, pain } = onboardingStep2Schema.parse(data);
+    const { anamnesis, pain } = parseStepPayload(onboardingStep2Schema, data);
     await this.assertHealthConsent(row.id);
 
     await this.writeJsonb(row.id, 'data_block_3', anamnesis.structured);
@@ -277,7 +288,7 @@ export class AnamnesisService {
 
   /** Etapa 3 — PAR-Q reusado sem alteração + as 3 declarações finais. */
   private async saveStep3(row: SessionRow, data: unknown): Promise<void> {
-    const step3 = onboardingStep3Schema.parse(data);
+    const step3 = parseStepPayload(onboardingStep3Schema, data);
     await this.assertHealthConsent(row.id);
 
     await this.mergeHealthBlock(row.id, {
@@ -320,6 +331,12 @@ export class AnamnesisService {
 
     const gate = evaluateParq({ parq: health.parq });
 
+    // Um único instante de submit para TUDO que é contado a partir dele: a coluna
+    // `submitted_at`, o SLA submit→entrega (job de geração) e o atraso da mensagem
+    // "estou analisando". Duas chamadas a `new Date()` no mesmo bloco davam origens
+    // ligeiramente diferentes para o mesmo evento de negócio.
+    const submittedAt = new Date();
+
     const userId = await this.db.runAsSystem(async (tx) => {
       const created = await this.createUser(tx, step1, gate.requiresProfessionalReview);
       // Conta unica do MVP, mas com vinculo explicito. A funcao falha se nao houver
@@ -331,7 +348,7 @@ export class AnamnesisService {
           userId: created,
           status: 'SUBMITTED',
           parqState: gate.parqState,
-          submittedAt: new Date(),
+          submittedAt,
         })
         .where(eq(anamnesisSessions.id, row.id));
       return created;
@@ -346,7 +363,7 @@ export class AnamnesisService {
     await this.queues.enqueue(QUEUE.protocolGeneration, 'generate-protocol', {
       userId,
       anamnesisSessionId: row.id,
-      submittedAt: new Date().toISOString(),
+      submittedAt: submittedAt.toISOString(),
       correlationId: row.id,
     });
 
@@ -357,6 +374,19 @@ export class AnamnesisService {
       'confirmation',
       { userId, type: gate.requiresProfessionalReview ? 'CONFIRMATION_CARE' : 'CONFIRMATION' },
       { jobId: `confirmation_${userId}` },
+    );
+
+    // A agente se apresenta 30min DEPOIS DO FORMULÁRIO — sempre, independente do PAR-Q e
+    // do desfecho da geração (antes isto só existia no fallback de DLQ da geração, com
+    // texto genérico, e era contado da falha, não do submit). O worker de outbound
+    // reconfirma o estado na hora do envio: se a entrega real já saiu nesse meio tempo, a
+    // mensagem é suprimida; se o PAR-Q travou, o texto não promete prazo. `jobId`
+    // idempotente — reenvio do submit não agenda duas.
+    await this.queues.enqueue(
+      QUEUE.whatsappOutbound,
+      'protocol-waiting',
+      { userId, type: 'PROTOCOL_WAITING' },
+      { jobId: `protocol-waiting_${userId}`, delay: PROTOCOL_WAITING_DELAY_MS },
     );
 
     // US-4.3 — inicia o trial (7 dias) e agenda a sequência de conversão (dias 7/10/13/14).
@@ -521,6 +551,12 @@ export class AnamnesisService {
           name: step1.name,
           phoneNumber: step1.phoneNumber,
           email: step1.email ?? null,
+          // Sprint 11: é o que decide QUAL das duas personas publicadas atende este titular
+          // (`AgentPersonaService`). A origem continua sendo a anamnese — a coluna em `users`
+          // é denormalização de leitura, gravada aqui no mesmo INSERT que cria o titular.
+          // Sem isto, todo cadastro novo nasceria `NULL` e o backfill da migração cobriria
+          // apenas quem já existia.
+          biologicalSex: step1.biologicalSex,
           status: 'ONBOARDING',
           requiresProfessionalReview,
         })

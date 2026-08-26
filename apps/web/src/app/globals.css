@@ -168,6 +168,35 @@
   --ring: var(--petroleo-vivo);
 }
 
+/*
+ * A página do protocolo (`/protocolo/[token]`) também é deliberadamente só clara —
+ * mesmo racional do `.onboarding-light` acima, mas com os tokens do tema claro
+ * "normal" do app (fundo Névoa, não Branco puro), já que essa tela usa cartões e
+ * tabelas que dependem do contraste --card vs. --background.
+ */
+.protocolo-light {
+  color-scheme: light;
+  --background: var(--nevoa);
+  --foreground: var(--grafite);
+  --card: var(--branco);
+  --card-foreground: var(--grafite);
+  --popover: var(--branco);
+  --popover-foreground: var(--grafite);
+  --primary: var(--verde-pulso);
+  --primary-foreground: var(--petroleo-vivo);
+  --secondary: var(--nevoa-elevada);
+  --secondary-foreground: var(--petroleo-vivo);
+  --muted: var(--nevoa-elevada);
+  --muted-foreground: var(--musgo);
+  --accent: var(--verde-pulso-tenue);
+  --accent-foreground: var(--petroleo-vivo);
+  --destructive: var(--coral-vivo);
+  --destructive-foreground: var(--petroleo-vivo);
+  --border: var(--musgo-tenue);
+  --input: var(--musgo-contraste);
+  --ring: var(--petroleo-vivo);
+}
+
 /* --- 3. Exposição para o Tailwind ----------------------------------------- */
 @theme inline {
   /* Tokens de marca: `bg-petroleo`, `text-musgo`, `ring-verde-pulso`, ... */

@@ -53,7 +53,10 @@ const genResult: GenerateProtocolResult = {
 };
 
 /** Bloco cifrado da anamnese v2: seção 4 (dor), textos livres, PAR-Q e declarações. */
-function block2Json(painRegion: 'KNEE' | 'SHOULDER' | null = 'KNEE') {
+function block2Json(
+  painRegion: 'KNEE' | 'SHOULDER' | null = 'KNEE',
+  parqYes: Partial<Record<(typeof PARQ_QUESTION_IDS)[number], string | true>> = {},
+) {
   return JSON.stringify({
     pain: painRegion
       ? { hasPain: true, trend: 'STABLE', points: [{ region: painRegion, intensity: 5 }] }
@@ -61,7 +64,11 @@ function block2Json(painRegion: 'KNEE' | 'SHOULDER' | null = 'KNEE') {
     freeText: {},
     parq: {
       version: PARQ_VERSION,
-      answers: PARQ_QUESTION_IDS.map((questionId) => ({ questionId, answer: false })),
+      answers: PARQ_QUESTION_IDS.map((questionId) => ({
+        questionId,
+        answer: parqYes[questionId] !== undefined,
+        ...(typeof parqYes[questionId] === 'string' ? { detail: parqYes[questionId] } : {}),
+      })),
     },
     declarations: {
       version: 'parq-declaracoes-2026-08-v1',
@@ -138,6 +145,8 @@ interface Deps {
   violations?: ValidationVerdict['violations'];
   alreadyExisted?: boolean;
   consentActive?: boolean;
+  /** Respostas "Sim" do PAR-Q; valor string vira o `detail` do follow-up. */
+  parqYes?: Partial<Record<(typeof PARQ_QUESTION_IDS)[number], string | true>>;
 }
 
 function makeWorker(deps: Deps = {}) {
@@ -156,7 +165,7 @@ function makeWorker(deps: Deps = {}) {
   } as unknown as TenantDatabase;
 
   const cipher = {
-    decryptHealth: vi.fn(() => Promise.resolve(block2Json())),
+    decryptHealth: vi.fn(() => Promise.resolve(block2Json('KNEE', deps.parqYes ?? {}))),
   } as unknown as HealthCipherService;
 
   const generator = {
@@ -251,14 +260,105 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
     );
   });
 
-  it('gate PAR-Q é trava: sessão de risco não gera nada', async () => {
-    const { worker, generator, repository } = makeWorker({
+  /**
+   * Decisão do fundador (2026-08-24): o PAR-Q deixou de ser TRAVA. Antes deste bloco, o
+   * caso equivalente esperava `BLOCKED_PENDING_CLEARANCE` sem geração nenhuma; hoje o
+   * protocolo é gerado em modo conservador e para de pé na fila até um humano assinar.
+   */
+  it('PAR-Q bloqueado gera normalmente, mas MANDATORY e SEM auto-liberação agendada', async () => {
+    const { worker, generator, repository, enqueue } = makeWorker({
       user: userRow({ requiresProfessionalReview: true }),
+      parqYes: { Q1: true },
     });
     const res = await worker.process(job());
-    expect(res.status).toBe('BLOCKED_PENDING_CLEARANCE');
-    expect(generator.generate).not.toHaveBeenCalled();
-    expect(repository.persist).not.toHaveBeenCalled();
+    expect(res.status).toBe('PENDING_REVIEW');
+    expect(generator.generate).toHaveBeenCalledOnce();
+    expect(repository.persist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reviewUrgency: 'MANDATORY',
+        approvalStatus: 'PENDING_REVIEW',
+        humanReviewRequired: true,
+        anamnesisSessionId: 's1',
+      }),
+    );
+    // A barreira que importa: MANDATORY nunca agenda `protocol-auto-release`.
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('PAR-Q Q1 (coração) vira tag CARDIAC no gerador e em par_q_flags', async () => {
+    const { worker, generator, repository } = makeWorker({
+      user: userRow({ requiresProfessionalReview: true }),
+      parqYes: { Q1: true },
+    });
+    await worker.process(job());
+    expect(generator.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        constraints: expect.objectContaining({
+          requiresProfessionalReview: true,
+          parqTags: ['CARDIAC'],
+          parqTriggered: ['Q1'],
+          // Mesclada em `injuryTags` (junto da dor no joelho da fixture): é assim que
+          // gerador e validador de fato excluem exercício contraindicado.
+          injuryTags: expect.arrayContaining(['KNEE', 'CARDIAC']),
+        }),
+      }),
+    );
+    // `parqFlags` guarda SÓ o que veio do PAR-Q — não as tags de dor/lesão (achado
+    // 2026-08-24: a coluna recebia `injuryTags`, que é outra coisa).
+    expect(repository.persist).toHaveBeenCalledWith(
+      expect.objectContaining({ parqFlags: ['CARDIAC'] }),
+    );
+  });
+
+  it('PAR-Q Q4 (tontura/desmaio) trava a fase em ADAPTACAO e rebaixa o nível', async () => {
+    const { worker, generator } = makeWorker({
+      user: userRow({ requiresProfessionalReview: true }),
+      parqYes: { Q4: true },
+    });
+    await worker.process(job());
+    expect(generator.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        constraints: expect.objectContaining({
+          parqTags: ['BALANCE_FALL_RISK'],
+          maxPhase: 'ADAPTACAO',
+          // A fixture declara `experience: 'INTERMEDIATE'` → INTERMEDIARIO, rebaixado.
+          level: 'INICIANTE',
+        }),
+      }),
+    );
+  });
+
+  it('PAR-Q Q6 sem tag fixa: o detail do follow-up passa pela heurística de texto', async () => {
+    const { worker, generator } = makeWorker({
+      user: userRow({ requiresProfessionalReview: true }),
+      parqYes: { Q6: 'hérnia de disco na lombar' },
+    });
+    await worker.process(job());
+    expect(generator.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        constraints: expect.objectContaining({ parqTags: ['LOWER_BACK'] }),
+      }),
+    );
+  });
+
+  it('sem PAR-Q positivo: OPTIONAL, nível preservado, sem tag nem teto de fase', async () => {
+    const { worker, generator, repository } = makeWorker({});
+    await worker.process(job());
+    expect(generator.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        constraints: expect.objectContaining({
+          requiresProfessionalReview: false,
+          parqTags: [],
+          parqTriggered: [],
+          level: 'INTERMEDIARIO',
+        }),
+      }),
+    );
+    const call = (generator.generate as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+    expect(call.constraints.maxPhase).toBeUndefined();
+    expect(repository.persist).toHaveBeenCalledWith(
+      expect.objectContaining({ reviewUrgency: 'OPTIONAL', parqFlags: [] }),
+    );
   });
 
   it('idempotência: protocolo já existe → não chama o LLM nem persiste', async () => {
@@ -344,7 +444,7 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
 });
 
 describe('ProtocolGenerationWorker.onModuleInit + DLQ fallback (US-2.4)', () => {
-  it('registra o processor e, na falha terminal, enfileira espera + template pendente', async () => {
+  it('registra o processor e, na falha terminal, persiste o template pendente', async () => {
     const { worker, workers, workerListeners, enqueue, repository } = makeWorker();
     worker.onModuleInit();
     expect(workers.create).toHaveBeenCalledWith('protocol-generation', expect.any(Function));
@@ -353,11 +453,15 @@ describe('ProtocolGenerationWorker.onModuleInit + DLQ fallback (US-2.4)', () => 
     workerListeners[0]?.(terminal, new Error('LLM down'));
     await vi.waitFor(() => expect(repository.persist).toHaveBeenCalled());
 
-    expect(enqueue).toHaveBeenCalledWith(
+    // A apresentação da agente ("estou analisando") NÃO é agendada aqui: ela passou a ser
+    // agendada no submit do formulário, 30min depois dele, sempre. Agendar de novo daqui
+    // duplicaria o job e faria o relógio partir da falha (depois de todos os retries),
+    // não do submit.
+    expect(enqueue).not.toHaveBeenCalledWith(
       'whatsapp-outbound',
       'protocol-waiting',
-      expect.objectContaining({ userId: 'u1' }),
-      expect.objectContaining({ jobId: 'protocol-waiting_u1', delay: 30 * 60 * 1000 }),
+      expect.anything(),
+      expect.anything(),
     );
     expect(repository.persist).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -400,6 +504,38 @@ describe('ProtocolGenerationWorker.onModuleInit + DLQ fallback (US-2.4)', () => 
       'THU',
     ]);
     expect(call.constraints.preferredDays).toEqual(['TUE', 'WED', 'THU']);
+  });
+
+  /**
+   * Achado 2026-08-24: este caminho fixava `reviewUrgency: 'OPTIONAL'` no braço — correto
+   * só enquanto o gate de PAR-Q travava a geração lá em `process()`. Sem o gate, fixar
+   * significaria auto-liberar em 1h o treino de um titular com alerta clínico aberto,
+   * justamente quando o LLM caiu e ninguém olhou o conteúdo.
+   */
+  it('DLQ de titular com PAR-Q bloqueado: MANDATORY, sem auto-liberação', async () => {
+    const { worker, workerListeners, repository, enqueue } = makeWorker({
+      user: userRow({ requiresProfessionalReview: true }),
+      parqYes: { Q1: true },
+    });
+    worker.onModuleInit();
+    const terminal = { ...job(), attemptsMade: 3 } as Job<ProtocolGenerationJob>;
+    workerListeners[0]?.(terminal, new Error('LLM down'));
+    await vi.waitFor(() => expect(repository.persist).toHaveBeenCalled());
+
+    expect(repository.persist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        generatedBy: 'FALLBACK_TEMPLATE',
+        reviewUrgency: 'MANDATORY',
+        parqFlags: ['CARDIAC'],
+        anamnesisSessionId: 's1',
+      }),
+    );
+    expect(enqueue).not.toHaveBeenCalledWith(
+      'protocol-auto-release',
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it('não aciona fallback quando a falha não é terminal', async () => {

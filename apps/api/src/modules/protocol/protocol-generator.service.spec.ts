@@ -90,6 +90,9 @@ const constraints: UserConstraints = {
   avoid: [],
   injuryTags: ['KNEE'],
   injuriesRaw: ['dor no joelho'],
+  requiresProfessionalReview: false,
+  parqTags: [],
+  parqTriggered: [],
 };
 
 function makeService(responses: string[]) {

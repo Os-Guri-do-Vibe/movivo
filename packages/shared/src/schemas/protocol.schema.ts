@@ -24,6 +24,14 @@ import { uuidSchema } from './common.schema';
 export const trainingPhaseSchema = z.enum(['ADAPTACAO', 'HIPERTROFIA', 'FORCA', 'DELOAD']);
 export type TrainingPhase = z.infer<typeof trainingPhaseSchema>;
 
+/** Rótulos exibidos (a UI não inventa texto de fase — mesmo padrão de `PRIMARY_GOAL_LABELS`). */
+export const TRAINING_PHASE_LABELS: Readonly<Record<TrainingPhase, string>> = {
+  ADAPTACAO: 'Adaptação',
+  HIPERTROFIA: 'Hipertrofia',
+  FORCA: 'Força',
+  DELOAD: 'Recuperação (deload)',
+};
+
 /**
  * Estratégia de carga (Rafael §5.2 `WeightStrategy`). `DOUBLE_PROGRESSION` = sobe repetição
  * até o topo da faixa, depois sobe carga (dupla progressão). `RPE` = por percepção de esforço.
@@ -71,6 +79,20 @@ export const advancedTechniqueSchema = z.enum([
 ]);
 export type AdvancedTechnique = z.infer<typeof advancedTechniqueSchema>;
 
+/** Rótulos exibidos da técnica avançada (coluna "Estratégia" da página do protocolo). */
+export const ADVANCED_TECHNIQUE_LABELS: Readonly<Record<AdvancedTechnique, string>> = {
+  DROP_SET: 'Drop-set',
+  REST_PAUSE: 'Rest-pause',
+  CLUSTER_SET: 'Cluster set',
+  BI_SET: 'Bi-set',
+  TRI_SET: 'Tri-set',
+  SUPERSET: 'Superset',
+  ISOMETRIA: 'Isometria',
+  REPETICOES_CONTROLADAS: 'Repetições controladas',
+  PIRAMIDE: 'Pirâmide',
+  DESCANSO_ATIVO: 'Descanso ativo',
+};
+
 /** Faixa de repetições (Rafael §5.2 `RepsRange`). `min <= max` validado no superRefine. */
 export const repsRangeSchema = z
   .object({
@@ -79,6 +101,25 @@ export const repsRangeSchema = z
   })
   .refine((r) => r.min <= r.max, { message: 'repsRange.min não pode ser maior que max.' });
 export type RepsRange = z.infer<typeof repsRangeSchema>;
+
+/**
+ * Bloco de série de AQUECIMENTO/preparação (achado 2026-08-22, decisão do fundador,
+ * item 8), com range de repetições/duração e nº de séries PRÓPRIOS — tipicamente mais
+ * leve e/ou com mais repetições que as séries válidas do exercício (`sets`/`reps`/
+ * `durationSeconds` em `ProtocolExercise`, que continuam representando só as séries
+ * válidas). `reps` XOR `durationSeconds`, mesma regra do exercício.
+ */
+export const warmupSetBlockSchema = z
+  .object({
+    sets: z.number().int().min(1).max(6),
+    reps: repsRangeSchema.optional(),
+    durationSeconds: z.number().int().min(5).max(2400).optional(),
+    restSeconds: z.number().int().min(0).max(600).optional(),
+  })
+  .refine((b) => (b.reps !== undefined) !== (b.durationSeconds !== undefined), {
+    message: 'Bloco de aquecimento deve ter "reps" OU "durationSeconds", nunca os dois nem nenhum.',
+  });
+export type WarmupSetBlock = z.infer<typeof warmupSetBlockSchema>;
 
 /**
  * Um exercício prescrito na sessão. `exerciseId` referencia a base de referência
@@ -96,6 +137,14 @@ export const protocolExerciseSchema = z
   .object({
     exerciseId: z.string().trim().min(1).max(80),
     name: z.string().trim().min(1).max(120),
+    /**
+     * Séries de aquecimento/preparação ANTES das séries válidas abaixo (achado
+     * 2026-08-22, item 8) — range e nº de séries próprios, tipicamente mais leve.
+     * Aditivo de propósito: protocolo sem este campo é 100% válido (não tinha
+     * aquecimento explícito — o RT decide quando faz sentido, não é obrigatório em
+     * todo exercício) e não precisa de migração nenhuma.
+     */
+    warmupBlocks: z.array(warmupSetBlockSchema).max(4).optional(),
     sets: z.number().int().min(1).max(12),
     reps: repsRangeSchema.optional(),
     /** Segundos por série/intervalo. Só para exercício de medida DURATION. */
@@ -172,5 +221,10 @@ export const protocolReadSchema = z.object({
   signedAt: z.iso.datetime().nullable(),
   totalWeeks: z.number().int().min(1).max(52),
   currentWeek: z.number().int().min(1).max(52),
+  /** Nome do bloco de periodização vigente (ex.: "Mesociclo 1 — Hipertrofia"). */
+  mesocycleName: z.string().trim().min(1).max(120),
+  /** Início e fim do mesociclo vigente. `endDate` = `startDate` + `totalWeeks` semanas. */
+  startDate: z.iso.datetime(),
+  endDate: z.iso.datetime(),
 });
 export type ProtocolRead = z.infer<typeof protocolReadSchema>;

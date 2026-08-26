@@ -77,12 +77,19 @@ export interface WhatsappConfig {
   readonly webhookSecret: string | undefined;
   /** Transporte ativo do `whatsapp-outbound` worker. Default `ARARA` — ver env.schema.ts. */
   readonly transportProvider: 'ARARA' | 'EVOLUTION';
+  /** Template com header de documento p/ fallback do PDF fora da janela de 24h. `undefined` até existir/ser aprovado na Meta. */
+  readonly protocolPdfTemplateName: string | undefined;
 }
 
 export interface EvolutionConfig {
   readonly baseUrl: string;
   /** `undefined` em dev/CI sem segredo → painel mostra "não configurado". Segredo redigido. */
   readonly apiKey: string | undefined;
+  /**
+   * Segredo do webhook de ENTRADA (US-3.1-EVO), separado da `apiKey` de propósito.
+   * `undefined` → todo inbound da EvolutionAPI é descartado fail-closed. Segredo redigido.
+   */
+  readonly webhookToken: string | undefined;
 }
 
 export interface PaymentConfig {
@@ -218,6 +225,7 @@ export class AppConfigService {
       publicSiteUrl: this.config.PUBLIC_SITE_URL,
       webhookSecret: this.config.ARARAHQ_WEBHOOK_SECRET,
       transportProvider: this.config.WHATSAPP_TRANSPORT_PROVIDER,
+      protocolPdfTemplateName: this.config.WHATSAPP_PROTOCOL_PDF_TEMPLATE_NAME,
     };
   }
 
@@ -229,7 +237,13 @@ export class AppConfigService {
     return {
       baseUrl: this.config.EVOLUTION_API_URL,
       apiKey: this.config.EVOLUTION_API_KEY,
+      webhookToken: this.config.EVOLUTION_WEBHOOK_TOKEN,
     };
+  }
+
+  /** Base pública da própria API (callback de provedor externo). Nunca é o `apps/web`. */
+  get apiPublicUrl(): string {
+    return this.config.API_PUBLIC_URL;
   }
 
   /** Config do RAG (US-3.3). Thresholds/top-K do retrieval + rerank. */

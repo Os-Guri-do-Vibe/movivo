@@ -23,11 +23,12 @@ import {
   type AgentConfigHistoryResponse,
   type AgentPersona,
   type AgentPersonaResponse,
+  type BiologicalSex,
   type ConfigSimulationResponse,
   type InviolableRulesResponse,
   simulateAgentConfigSchema,
 } from '@movivo/shared';
-import { desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 import type { z } from 'zod';
 
@@ -75,20 +76,40 @@ export class AiConfigService {
     private readonly audit: AuditService,
   ) {}
 
-  async persona(): Promise<AgentPersonaResponse> {
-    const [persona, active] = await Promise.all([
-      this.personaService.persona(),
-      this.repo.activePayload(),
-    ]);
+  /**
+   * Persona vigente **do slot pedido**, com a proveniência explícita: enquanto um público
+   * não tem persona própria, ele é atendido pela do outro (empréstimo), e o painel precisa
+   * dizer isso — senão "ainda não publiquei para este público" fica visualmente idêntico a
+   * "já publiquei".
+   */
+  async persona(targetSex: BiologicalSex): Promise<AgentPersonaResponse> {
+    const resolved = await this.personaService.resolve(targetSex);
+    const active = resolved.servedFromSex
+      ? await this.repo.activePayload(resolved.servedFromSex)
+      : null;
+    const borrowed = resolved.servedFromSex !== null && resolved.servedFromSex !== targetSex;
+
     return this.envelope(
-      { persona, version: active?.version ?? null },
-      active
-        ? []
-        : ['Nenhuma configuração publicada ainda — a IA responde com a persona padrão do código.'],
+      {
+        targetSex,
+        persona: resolved.persona,
+        version: active?.version ?? null,
+        servedFromSex: resolved.servedFromSex,
+      },
+      borrowed
+        ? [
+            'Ainda não há persona publicada para este público — por enquanto ele recebe a ' +
+              'persona do outro. Publicar aqui passa a valer para ele imediatamente.',
+          ]
+        : resolved.servedFromSex
+          ? []
+          : [
+              'Nenhuma configuração publicada ainda — a IA responde com a persona padrão do código.',
+            ],
     );
   }
 
-  async history(): Promise<AgentConfigHistoryResponse> {
+  async history(targetSex: BiologicalSex): Promise<AgentConfigHistoryResponse> {
     const rows = await this.db.runAsSystem((tx) =>
       tx
         .select({
@@ -101,6 +122,9 @@ export class AiConfigService {
         })
         .from(agentConfig)
         .leftJoin(users, eq(users.id, agentConfig.createdBy))
+        // Histórico é por slot: sem este filtro a lista misturaria as duas personas e o
+        // botão de rollback ofereceria versão do público errado.
+        .where(eq(agentConfig.targetSex, targetSex))
         .orderBy(desc(agentConfig.version))
         .limit(HISTORY_LIMIT),
     );
@@ -113,6 +137,7 @@ export class AiConfigService {
       if (!parsed.success) return [];
       return [
         {
+          targetSex,
           version: row.version,
           status: row.status,
           changeNote: row.changeNote,
@@ -126,9 +151,15 @@ export class AiConfigService {
     return this.envelope({ versions });
   }
 
-  /** Blocos do system prompt com camada, justificativa e conteúdo. L0 é somente-leitura. */
-  async inviolableRules(): Promise<InviolableRulesResponse> {
-    const persona = await this.personaService.persona();
+  /**
+   * Blocos do system prompt com camada, justificativa e conteúdo. L0 é somente-leitura.
+   *
+   * Só o bloco L2 (PERSONA) muda por slot — `SCOPE_PERIMETER` e `INVIOLABLE_RULES` são
+   * constantes de código, idênticas para os dois públicos. `targetSex` existe aqui para que
+   * o preview do painel mostre o prompt REAL do público que está sendo editado.
+   */
+  async inviolableRules(targetSex: BiologicalSex): Promise<InviolableRulesResponse> {
+    const persona = await this.personaService.persona(targetSex);
     return this.envelope({
       blocks: PROMPT_BLOCKS.map((block) => ({
         id: block.id,
@@ -143,7 +174,17 @@ export class AiConfigService {
 
   async publish(actor: AuthenticatedUser, body: unknown): Promise<AgentPersonaResponse> {
     const input = this.parse(publishAgentConfigSchema, body);
-    return this.insertVersion(actor, input.payload, input.changeNote, 'ai_config.publish');
+    // Lido ANTES do INSERT: depois dele o slot sempre tem versão publicada, e a informação
+    // "este público estava sendo atendido por empréstimo até agora" some.
+    const wasOrphan = (await this.repo.activePayload(input.targetSex).catch(() => null)) === null;
+    return this.insertVersion(
+      actor,
+      input.targetSex,
+      input.payload,
+      input.changeNote,
+      'ai_config.publish',
+      wasOrphan,
+    );
   }
 
   simulate(body: unknown): ConfigSimulationResponse {
@@ -159,13 +200,27 @@ export class AiConfigService {
     );
   }
 
+  /**
+   * Rollback do slot pedido.
+   *
+   * ⚠️ A busca da versão alvo filtra por **`(target_sex, version)` juntos**, nunca por
+   * `version` sozinho: desde que a numeração é por slot existe `version = 1` nas duas
+   * personas ao mesmo tempo, e um `WHERE version = 1` solto reverteria a persona do público
+   * errado — sem erro, sem log, com a resposta 200 de sucesso. É o modo de falha mais
+   * provável desta mudança inteira.
+   */
   async rollback(actor: AuthenticatedUser, body: unknown): Promise<AgentPersonaResponse> {
     const input = this.parse(rollbackAgentConfigSchema, body);
     const [row] = await this.db.runAsSystem((tx) =>
       tx
         .select({ payload: agentConfig.payload })
         .from(agentConfig)
-        .where(eq(agentConfig.version, input.targetVersion))
+        .where(
+          and(
+            eq(agentConfig.targetSex, input.targetSex),
+            eq(agentConfig.version, input.targetVersion),
+          ),
+        )
         .limit(1),
     );
     if (!row) throw new NotFoundException('Versão inexistente.');
@@ -173,7 +228,14 @@ export class AiConfigService {
     if (!payload.success) {
       throw new BadRequestException('A versão alvo tem payload fora do contrato atual.');
     }
-    return this.insertVersion(actor, payload.data, input.changeNote, 'ai_config.rollback');
+    return this.insertVersion(
+      actor,
+      input.targetSex,
+      payload.data,
+      input.changeNote,
+      'ai_config.rollback',
+      false,
+    );
   }
 
   /**
@@ -182,9 +244,11 @@ export class AiConfigService {
    */
   private async insertVersion(
     actor: AuthenticatedUser,
+    targetSex: BiologicalSex,
     payload: AgentPersona,
     changeNote: string,
     action: string,
+    wasOrphan: boolean,
   ): Promise<AgentPersonaResponse> {
     const simulation = simulatePersonaConfig(payload);
     if (!simulation.passed) {
@@ -206,10 +270,11 @@ export class AiConfigService {
     }
 
     const version = await this.db.runAsSystem(async (tx) => {
-      const previous = await this.nextVersion(tx);
+      const previous = await this.nextVersion(tx, targetSex);
       const [inserted] = await tx
         .insert(agentConfig)
         .values({
+          targetSex,
           version: previous.next,
           status: 'PUBLISHED',
           payload,
@@ -224,40 +289,69 @@ export class AiConfigService {
         action,
         entityType: 'agent_config',
         entityId: inserted.id,
-        changes: { fromVersion: previous.current, toVersion: inserted.version, changeNote },
+        // `targetSex` na trilha: sem ele, dois registros de auditoria de "versão 3" ficam
+        // indistinguíveis entre as duas personas.
+        changes: {
+          targetSex,
+          fromVersion: previous.current,
+          toVersion: inserted.version,
+          changeNote,
+        },
       });
       return inserted.version;
     });
 
-    await this.propagate(payload);
-    return this.envelope({ persona: payload, version }, [
+    await this.propagate(targetSex, payload);
+    return this.envelope({ targetSex, persona: payload, version, servedFromSex: targetSex }, [
       'A nova persona vale em até 60 segundos, sem deploy.',
+      // Aviso de rollout: até agora este público recebia a persona do outro slot; a partir
+      // desta publicação ele passa a receber esta. Qualitativo de propósito — contar os
+      // titulares afetados custaria uma varredura em `users` para um aviso de UI.
+      ...(wasOrphan
+        ? [
+            'Este é o primeiro texto publicado para este público: os titulares que até agora ' +
+              'recebiam a persona do outro passam a ser atendidos por esta a partir de agora.',
+          ]
+        : []),
     ]);
   }
 
   /**
-   * ponytail: `max(version) + 1` sem lock. Duas publicações simultâneas colidem na
-   * constraint UNIQUE de `version` e a segunda falha com erro — comportamento correto
-   * (nada grava errado), só não é bonito. Um `SELECT ... FOR UPDATE` ou uma sequence
-   * resolvem se o painel algum dia tiver concorrência real.
+   * `max(version) + 1` **dentro do slot**: a numeração é por persona, não global — as duas
+   * linhas do tempo avançam independentes e cada painel mostra "v1, v2, v3" do seu público.
+   *
+   * ponytail: sem lock. Duas publicações simultâneas do MESMO slot colidem na constraint
+   * UNIQUE `(target_sex, version)` e a segunda falha com erro — comportamento correto (nada
+   * grava errado), só não é bonito. Publicações simultâneas de slots DIFERENTES não colidem
+   * mais entre si, o que é uma melhora colateral do UNIQUE composto.
    */
-  private async nextVersion(tx: TenantTransaction): Promise<{ current: number; next: number }> {
+  private async nextVersion(
+    tx: TenantTransaction,
+    targetSex: BiologicalSex,
+  ): Promise<{ current: number; next: number }> {
     const [row] = await tx
       .select({ max: sql<number>`coalesce(max(${agentConfig.version}), 0)::int` })
-      .from(agentConfig);
+      .from(agentConfig)
+      .where(eq(agentConfig.targetSex, targetSex));
     const current = Number(row?.max ?? 0);
     return { current, next: current + 1 };
   }
 
   /**
-   * Snapshot no Redis + `PUBLISH` para as demais instâncias, e invalidação local (a
-   * instância que publica não recebe a própria mensagem em todos os cenários). Redis
-   * fora do ar não derruba a publicação: o TTL de 60s do cache propaga assim mesmo.
+   * Snapshot no Redis **do slot publicado** + `PUBLISH` para as demais instâncias, e
+   * invalidação local (a instância que publica não recebe a própria mensagem em todos os
+   * cenários). Redis fora do ar não derruba a publicação: o TTL de 60s do cache propaga
+   * assim mesmo.
+   *
+   * O snapshot é sempre escrito na chave do slot publicado — nunca na do outro, mesmo que o
+   * outro esteja emprestando desta persona agora. Empréstimo é resolução, não estado.
+   * O payload do `PUBLISH` carrega o slot só para log/telemetria: a invalidação continua
+   * sendo total nos dois slots (ver `AgentPersonaService.invalidate`).
    */
-  private async propagate(payload: AgentPersona): Promise<void> {
+  private async propagate(targetSex: BiologicalSex, payload: AgentPersona): Promise<void> {
     try {
-      await this.redis.set(this.personaService.cacheKey, JSON.stringify(payload));
-      await this.redis.publish(this.personaService.channel, '1');
+      await this.redis.set(this.personaService.cacheKeyFor(targetSex), JSON.stringify(payload));
+      await this.redis.publish(this.personaService.channel, JSON.stringify({ slot: targetSex }));
     } catch {
       // silêncio proposital: `AgentPersonaService` já loga a queda quando lê do banco.
     }

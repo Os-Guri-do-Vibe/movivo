@@ -7,6 +7,7 @@
  * obrigatórios, posse do número, consentimento de saúde reavaliado na coleta, gate
  * PAR-Q e a ausência de vazamento de dado clínico na resposta.
  */
+import { BadRequestException } from '@nestjs/common';
 import {
   PARQ_DECLARATIONS,
   PARQ_DECLARATIONS_VERSION,
@@ -18,6 +19,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { type HealthCipherService, type TenantDatabase } from '../../core/database';
 import { type QueueManager } from '../jobs/queue-manager.service';
+import { PROTOCOL_WAITING_DELAY_MS } from '../whatsapp/message-templates';
 import { AnamnesisService } from './anamnesis.service';
 import { type ConsentService } from './consent.service';
 import { type PhoneVerificationService } from './phone-verification.service';
@@ -88,8 +90,12 @@ const HEALTH_BLOCK = (risky = false) => ({
 interface TxState {
   select?: unknown[];
   insert?: unknown[];
+  /** Valores recebidos por cada `insert(...).values(...)` — para afirmar sobre a projeção. */
+  inserts?: Record<string, unknown>[];
   update?: unknown[];
   insertError?: unknown;
+  /** Coletor dos payloads de `.set()` — usado para inspecionar o que o submit persiste. */
+  updates?: Record<string, unknown>[];
 }
 
 function makeTx(state: TxState) {
@@ -110,8 +116,18 @@ function makeTx(state: TxState) {
   };
   return {
     select: () => selectChain,
-    insert: () => ({ values: () => insertThenable }),
-    update: () => ({ set: () => ({ where: () => thenable(state.update ?? []) }) }),
+    insert: () => ({
+      values: (values: Record<string, unknown>) => {
+        state.inserts?.push(values);
+        return insertThenable;
+      },
+    }),
+    update: () => ({
+      set: (values: Record<string, unknown>) => {
+        state.updates?.push(values);
+        return { where: () => thenable(state.update ?? []) };
+      },
+    }),
     execute: () => Promise.resolve([]),
   } as never;
 }
@@ -270,6 +286,28 @@ describe('Etapa 1 — gate 18+, consentimentos e posse do número', () => {
 });
 
 describe('Etapa 2 — seção 4 cifrada e gated por consentimento de saúde', () => {
+  it('devolve 400 com a mensagem do campo condicional inválido', async () => {
+    const { svc } = makeService({ select: [sessionRow()] });
+
+    await expect(
+      svc.patchStep('t', 2, {
+        ...STEP2,
+        pain: {
+          hasPain: true,
+          trend: 'STABLE',
+          points: [{ region: 'KNEE', intensity: 6 }],
+          hasProfessionalExplanation: true,
+        },
+      }),
+    ).rejects.toMatchObject({
+      constructor: BadRequestException,
+      response: expect.objectContaining({
+        statusCode: 400,
+        message: expect.arrayContaining(['Conte o que o profissional te explicou.']),
+      }),
+    });
+  });
+
   it('recusa a coleta sem consentimento de saúde vigente', async () => {
     const { svc, consents } = makeService({ select: [sessionRow()] });
     (consents.hasValidHealthConsent as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false);
@@ -348,6 +386,19 @@ describe('Submit — gate PAR-Q e outcome', () => {
     expect(consents.linkSessionToUser).toHaveBeenCalledWith('sess-1', 'user-1');
   });
 
+  /**
+   * Sprint 11: sem esta gravação, todo titular novo nasceria com `biological_sex` NULL e a
+   * persona por sexo só valeria para quem o backfill da migração alcançou.
+   */
+  it('grava o sexo biológico informado na Etapa 1 no cadastro do titular', async () => {
+    const inserts: Record<string, unknown>[] = [];
+    const { svc } = makeService({ select: [sessionRow()], insert: [{ id: 'user-1' }], inserts });
+
+    await svc.submit('t');
+
+    expect(inserts.some((values) => values.biologicalSex === STEP1.biologicalSex)).toBe(true);
+  });
+
   it('PAR-Q com "Sim" devolve PENDING_REVIEW e NUNCA o motivo', async () => {
     const { svc, cipher } = makeService({ select: [sessionRow()], insert: [{ id: 'user-2' }] });
     (cipher.decryptHealth as ReturnType<typeof vi.fn>).mockResolvedValue(
@@ -357,6 +408,53 @@ describe('Submit — gate PAR-Q e outcome', () => {
     expect(res.outcome).toBe('PENDING_REVIEW');
     // Nada de resposta do PAR-Q, id de pergunta ou estado clínico volta ao cliente.
     expect(JSON.stringify(res)).not.toMatch(/Q[1-9]|BLOQUEADO|parq/i);
+  });
+
+  it('agenda a apresentação da agente 30min DEPOIS DO SUBMIT, com o instante persistido', async () => {
+    const updates: Record<string, unknown>[] = [];
+    const { svc, queues } = makeService({
+      select: [sessionRow()],
+      insert: [{ id: 'user-1' }],
+      updates,
+    });
+    await svc.submit('t');
+
+    const calls = (queues.enqueue as ReturnType<typeof vi.fn>).mock.calls;
+    const waiting = calls.find((c) => c[1] === 'protocol-waiting');
+    expect(waiting?.[2]).toEqual({ userId: 'user-1', type: 'PROTOCOL_WAITING' });
+    expect(waiting?.[3]).toEqual({
+      jobId: 'protocol-waiting_user-1',
+      delay: PROTOCOL_WAITING_DELAY_MS,
+    });
+
+    // O mesmo `new Date()` para a coluna `submitted_at` e para o SLA do job de geração —
+    // um só instante de submit, não dois relógios ligeiramente diferentes.
+    const persisted = updates.find((u) => 'submittedAt' in u)?.submittedAt as Date;
+    expect(persisted).toBeInstanceOf(Date);
+    const generation = calls.find((c) => c[1] === 'generate-protocol')?.[2] as {
+      submittedAt: string;
+    };
+    expect(generation.submittedAt).toBe(persisted.toISOString());
+  });
+
+  it('PAR-Q de risco também agenda a apresentação (a regra é "30min do formulário")', async () => {
+    const { svc, cipher, queues } = makeService({
+      select: [sessionRow()],
+      insert: [{ id: 'user-2' }],
+    });
+    (cipher.decryptHealth as ReturnType<typeof vi.fn>).mockResolvedValue(
+      JSON.stringify(HEALTH_BLOCK(true)),
+    );
+    await svc.submit('t');
+
+    const calls = (queues.enqueue as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.find((c) => c[1] === 'confirmation')?.[2]).toMatchObject({
+      type: 'CONFIRMATION_CARE',
+    });
+    expect(calls.find((c) => c[1] === 'protocol-waiting')?.[3]).toEqual({
+      jobId: 'protocol-waiting_user-2',
+      delay: PROTOCOL_WAITING_DELAY_MS,
+    });
   });
 
   it('recusa o submit sem o número verificado', async () => {

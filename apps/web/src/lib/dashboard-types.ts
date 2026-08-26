@@ -1,7 +1,12 @@
 import type { ProtocolStructure } from '@movivo/shared';
 
 export type { DashboardCapability, DashboardRole } from './control-center-access';
-export type QueueKind = 'PROTOCOL' | 'HANDOFF' | 'PARQ' | 'CHECKIN';
+/**
+ * `PARQ` saiu do enum em 2026-08-24 (espelha `kindSchema` do backend): PAR-Q bloqueante
+ * não é mais um item de fila próprio — o protocolo é sempre gerado e o PAR-Q vive dentro
+ * dele como `QueueItem.origin === 'PARQ'`.
+ */
+export type QueueKind = 'PROTOCOL' | 'HANDOFF' | 'CHECKIN';
 export type QueueSeverity = 'SAFETY' | 'ALERT' | 'ROUTINE';
 
 export interface QueueItem {
@@ -15,10 +20,17 @@ export interface QueueItem {
   status: string;
   /** Só protocolos "Revisão Humana Opcional" — quando a liberação automática ocorre. */
   autoReleaseAt: string | null;
+  /**
+   * POR QUE este protocolo exige revisão humana. `PARQ` = a sessão de origem está
+   * bloqueada aguardando liberação (alerta clínico — assinar o protocolo também libera o
+   * PAR-Q, no backend, dentro da própria assinatura); `EDIT` = um CREF editou o conteúdo
+   * e precisa de sign-off fresco. `null` em itens `optional` e nos que não são protocolo.
+   */
+  origin: 'PARQ' | 'EDIT' | null;
 }
 
 /**
- * Fila do profissional — só protocolo + PAR-Q (US: duas categorias de revisão).
+ * Fila do profissional — só protocolo (US: duas categorias de revisão).
  * `mandatory` nunca libera sozinho; `optional` libera sozinho após `autoReleaseAt` se
  * o CREF não agir. Cada array já vem ordenado por idade (mais antigo primeiro).
  */
@@ -58,7 +70,6 @@ export interface QueueDetail {
   context: Record<string, string | number | boolean | null>;
   protocol?: ProtocolDetail;
   replay?: AnonymizedReplay;
-  parq?: { flags: string[]; state: string };
   handoff?: { reason: string; level: string; status: string };
 }
 

@@ -44,6 +44,7 @@ os volumes do Postgres, porque a senha de uma role já criada não muda sozinha.
 | `pgcrypto_key`                | criptografia de dados de saúde (Sprint 2)                                  | `PGCRYPTO_KEY_FILE`                |
 | `evolution_postgres_password` | Postgres dedicado da EvolutionAPI                                          | — (só o `command` do serviço lê)   |
 | `evolution_api_key`           | `AUTHENTICATION_API_KEY` da EvolutionAPI + `EVOLUTION_API_KEY_FILE` da API | ambos                              |
+| `evolution_webhook_token`     | webhook de ENTRADA da EvolutionAPI (US-3.1-EVO) — só a API                 | `EVOLUTION_WEBHOOK_TOKEN_FILE`     |
 
 ## Regras
 

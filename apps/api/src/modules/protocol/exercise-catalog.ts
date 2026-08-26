@@ -13,12 +13,29 @@
  *     fora do catálogo é rejeitado — a base é a rede de segurança, não o prompt.
  *
  * Versionado: uma mudança na base gera nova `CATALOG_VERSION` (rastreabilidade clínica).
+ *
+ * ⚠️ v4 (2026-08): o mapeamento de `PREGNANCY` neste catálogo é **conservador e
+ * provisório** — marcado por posição corporal (decúbito dorsal/ventral) e impacto, na
+ * dúvida sempre a favor de excluir. Pende validação clínica do RT CREF responsável antes
+ * de qualquer uso com pessoas reais; não é orientação obstétrica.
  */
 import type { TrainingLocation } from '@movivo/shared';
 
 /** Tag de contraindicação — vocabulário fechado que liga lesão/PAR-Q → exclusão de exercício. */
 export type ContraindicationTag =
-  'SHOULDER' | 'ELBOW' | 'WRIST' | 'LOWER_BACK' | 'HIP' | 'KNEE' | 'ANKLE' | 'NECK' | 'CARDIAC';
+  | 'SHOULDER'
+  | 'ELBOW'
+  | 'WRIST'
+  | 'LOWER_BACK'
+  | 'HIP'
+  | 'KNEE'
+  | 'ANKLE'
+  | 'NECK'
+  | 'CARDIAC'
+  /** Tontura/desmaio (PAR-Q Q4): veta unilateral, deslocamento e qualquer risco de queda. */
+  | 'BALANCE_FALL_RISK'
+  /** Gravidez/pós-parto (PAR-Q Q7): veta decúbito dorsal/ventral e alto impacto. */
+  | 'PREGNANCY';
 
 export type MovementPattern =
   | 'HORIZONTAL_PUSH'
@@ -94,7 +111,7 @@ export const LEVEL_ORDER: Record<ExerciseLevel, number> = {
   AVANCADO: 2,
 };
 
-export const CATALOG_VERSION = 'catalog-2026-08-v3';
+export const CATALOG_VERSION = 'catalog-2026-08-v4';
 
 /**
  * Catálogo MVP: cobre os padrões de movimento essenciais para os objetivos do ICP
@@ -124,7 +141,7 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     equipment: [],
     locations: ['FULL_GYM', 'CONDO_GYM', 'HOME', 'OUTDOOR'],
     minLevel: 'INICIANTE',
-    contraindicatedFor: ['WRIST', 'SHOULDER', 'ELBOW'],
+    contraindicatedFor: ['WRIST', 'SHOULDER', 'ELBOW', 'PREGNANCY'],
     substitutes: ['knee_pushup', 'db_bench_press', 'bench_press'],
   },
   {
@@ -135,7 +152,7 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     equipment: [],
     locations: ['FULL_GYM', 'CONDO_GYM', 'HOME', 'OUTDOOR'],
     minLevel: 'INICIANTE',
-    contraindicatedFor: ['WRIST', 'SHOULDER'],
+    contraindicatedFor: ['WRIST', 'SHOULDER', 'PREGNANCY'],
     substitutes: ['pushup', 'db_bench_press'],
   },
   {
@@ -146,7 +163,7 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     equipment: ['halteres', 'banco'],
     locations: ['FULL_GYM', 'CONDO_GYM', 'HOME'],
     minLevel: 'INICIANTE',
-    contraindicatedFor: ['SHOULDER'],
+    contraindicatedFor: ['SHOULDER', 'PREGNANCY'],
     substitutes: ['pushup', 'bench_press'],
   },
   {
@@ -157,7 +174,7 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     equipment: ['barra', 'banco'],
     locations: ['FULL_GYM'],
     minLevel: 'INTERMEDIARIO',
-    contraindicatedFor: ['SHOULDER'],
+    contraindicatedFor: ['SHOULDER', 'PREGNANCY'],
     substitutes: ['db_bench_press', 'pushup'],
   },
   // --- Empurrar vertical ---
@@ -203,7 +220,7 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     equipment: [],
     locations: ['FULL_GYM', 'CONDO_GYM', 'HOME', 'OUTDOOR'],
     minLevel: 'INICIANTE',
-    contraindicatedFor: ['ELBOW', 'SHOULDER'],
+    contraindicatedFor: ['ELBOW', 'SHOULDER', 'PREGNANCY'],
     substitutes: ['db_row'],
   },
   {
@@ -283,7 +300,7 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     equipment: [],
     locations: ['FULL_GYM', 'CONDO_GYM', 'HOME', 'OUTDOOR'],
     minLevel: 'INICIANTE',
-    contraindicatedFor: ['LOWER_BACK'],
+    contraindicatedFor: ['LOWER_BACK', 'PREGNANCY'],
     substitutes: ['db_romanian_deadlift'],
   },
   {
@@ -306,7 +323,7 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     equipment: [],
     locations: ['FULL_GYM', 'CONDO_GYM', 'HOME', 'OUTDOOR'],
     minLevel: 'INICIANTE',
-    contraindicatedFor: ['KNEE', 'HIP', 'ANKLE'],
+    contraindicatedFor: ['KNEE', 'HIP', 'ANKLE', 'BALANCE_FALL_RISK'],
     substitutes: ['bodyweight_squat'],
   },
   // --- Core ---
@@ -318,7 +335,7 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     equipment: [],
     locations: ['FULL_GYM', 'CONDO_GYM', 'HOME', 'OUTDOOR'],
     minLevel: 'INICIANTE',
-    contraindicatedFor: ['LOWER_BACK', 'SHOULDER'],
+    contraindicatedFor: ['LOWER_BACK', 'SHOULDER', 'PREGNANCY'],
     substitutes: ['dead_bug'],
     measurement: 'DURATION', // hold isométrico — sem faixa própria, usa o default de isometria
   },
@@ -330,7 +347,7 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     equipment: [],
     locations: ['FULL_GYM', 'CONDO_GYM', 'HOME', 'OUTDOOR'],
     minLevel: 'INICIANTE',
-    contraindicatedFor: [],
+    contraindicatedFor: ['PREGNANCY'],
     substitutes: ['plank'],
   },
   // --- Cardio / condicionamento ---
@@ -396,7 +413,7 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     equipment: ['banco'],
     locations: ['FULL_GYM', 'CONDO_GYM', 'HOME'],
     minLevel: 'INICIANTE',
-    contraindicatedFor: ['LOWER_BACK', 'HIP'],
+    contraindicatedFor: ['LOWER_BACK', 'HIP', 'PREGNANCY'],
     substitutes: ['glute_bridge', 'db_romanian_deadlift'],
   },
   // --- Isolados (COMPLEMENTO da sessão, nunca a base) ---
@@ -408,7 +425,7 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     equipment: ['halteres', 'banco'],
     locations: ['FULL_GYM', 'CONDO_GYM', 'HOME'],
     minLevel: 'INICIANTE',
-    contraindicatedFor: ['SHOULDER'],
+    contraindicatedFor: ['SHOULDER', 'PREGNANCY'],
     substitutes: ['cable_crossover'],
   },
   {
@@ -430,7 +447,7 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     equipment: ['halteres', 'banco'],
     locations: ['FULL_GYM', 'CONDO_GYM', 'HOME'],
     minLevel: 'INTERMEDIARIO',
-    contraindicatedFor: ['SHOULDER', 'LOWER_BACK'],
+    contraindicatedFor: ['SHOULDER', 'LOWER_BACK', 'PREGNANCY'],
     substitutes: ['band_straight_arm_pulldown'],
   },
   {
@@ -544,7 +561,7 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     equipment: ['máquina'],
     locations: ['FULL_GYM'],
     minLevel: 'INICIANTE',
-    contraindicatedFor: ['KNEE'],
+    contraindicatedFor: ['KNEE', 'PREGNANCY'],
     substitutes: ['band_leg_curl'],
   },
   {
@@ -555,7 +572,7 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     equipment: ['faixa elástica'],
     locations: ['FULL_GYM', 'CONDO_GYM', 'HOME', 'OUTDOOR'],
     minLevel: 'INICIANTE',
-    contraindicatedFor: ['KNEE'],
+    contraindicatedFor: ['KNEE', 'PREGNANCY'],
     substitutes: ['leg_curl'],
   },
   {
@@ -613,7 +630,7 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     equipment: [],
     locations: ['FULL_GYM', 'CONDO_GYM', 'HOME', 'OUTDOOR'],
     minLevel: 'INICIANTE',
-    contraindicatedFor: ['KNEE', 'HIP', 'ANKLE'],
+    contraindicatedFor: ['KNEE', 'HIP', 'ANKLE', 'BALANCE_FALL_RISK'],
     substitutes: ['walking_lunge', 'bodyweight_squat'],
   },
   {
@@ -624,7 +641,7 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     equipment: [],
     locations: ['FULL_GYM', 'OUTDOOR'],
     minLevel: 'INTERMEDIARIO',
-    contraindicatedFor: ['CARDIAC', 'ANKLE', 'KNEE'],
+    contraindicatedFor: ['CARDIAC', 'ANKLE', 'KNEE', 'BALANCE_FALL_RISK', 'PREGNANCY'],
     substitutes: ['brisk_walk'],
     // Intervalado: cada "série" é um tiro curto — ao contrário do cardio contínuo, o descanso
     // ENTRE tiros é real recuperação, não zero (usa o piso padrão de descanso).

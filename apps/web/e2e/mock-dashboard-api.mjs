@@ -4,7 +4,8 @@ import { URL } from 'node:url';
 const PORT = 3101;
 const PROTOCOL_ID = '11111111-1111-4111-8111-111111111111';
 const HANDOFF_ID = '22222222-2222-4222-8222-222222222222';
-const PARQ_ID = '33333333-3333-4333-8333-333333333333';
+/** Protocolo `MANDATORY` gerado a partir de uma sessão com PAR-Q bloqueado. */
+const PARQ_PROTOCOL_ID = '33333333-3333-4333-8333-333333333333';
 const CHECKIN_ID = '44444444-4444-4444-8444-444444444444';
 const createdAt = '2026-08-03T12:00:00.000Z';
 const resolvedIds = new Set();
@@ -172,6 +173,7 @@ const items = [
     title: 'Check-in exige revisão profissional',
     summary: 'Sinalização de segurança registrada no check-in.',
     status: 'OPEN',
+    origin: null,
   },
   {
     id: HANDOFF_ID,
@@ -182,16 +184,21 @@ const items = [
     title: 'Relato exige atenção profissional',
     summary: 'Conteúdo anonimizado para supervisão.',
     status: 'OPEN',
+    origin: null,
   },
   {
-    id: PARQ_ID,
-    kind: 'PARQ',
-    severity: 'ALERT',
+    // PAR-Q bloqueante (2026-08-24): não é mais um item `kind: 'PARQ'` sem protocolo —
+    // é um protocolo normal, `MANDATORY`/`SAFETY`, com `origin: 'PARQ'`. A liberação do
+    // PAR-Q acontece dentro da assinatura, no backend.
+    id: PARQ_PROTOCOL_ID,
+    kind: 'PROTOCOL',
+    severity: 'SAFETY',
     createdAt,
     ageMinutes: 70,
-    title: 'PAR-Q aguardando liberação',
-    summary: 'Um cuidado a mais antes de começar.',
-    status: 'BLOCKED_PENDING_CLEARANCE',
+    title: 'Protocolo para Revisão: Carla Teste',
+    summary: 'PENDING_REVIEW',
+    status: 'PENDING_REVIEW',
+    origin: 'PARQ',
   },
   {
     id: PROTOCOL_ID,
@@ -202,6 +209,7 @@ const items = [
     title: 'Protocolo para Revisão: Maria Teste',
     summary: 'Hipertrofia · 3x por semana',
     status: 'PENDING_REVIEW',
+    origin: null,
   },
 ];
 
@@ -214,6 +222,7 @@ const realtimeItem = {
   title: 'Novo protocolo recebido em tempo real',
   summary: 'Evento sem dados pessoais invalidou a fila.',
   status: 'PENDING_REVIEW',
+  origin: null,
 };
 
 const replay = {
@@ -509,13 +518,14 @@ createServer(async (request, response) => {
     return;
   }
   if (request.method === 'GET' && url.pathname === '/api/v1/professional/dashboard/queue') {
-    // Espelha `DashboardService.queue()` (achado 2026-08-18): a Fila de supervisão só
-    // lista protocolo + PAR-Q bloqueado — handoff/check-in ficam fora desta tela.
+    // Espelha `DashboardService.queue()` (2026-08-24): a Fila de supervisão só lista
+    // PROTOCOLO — handoff/check-in ficam fora desta tela. A categoria vem da urgência de
+    // revisão, hoje representada aqui pela presença de `origin` (PARQ/EDIT = obrigatório).
     const openItems = [...items, ...(realtimeVisible ? [realtimeItem] : [])].filter(
-      (item) => !resolvedIds.has(item.id) && (item.kind === 'PROTOCOL' || item.kind === 'PARQ'),
+      (item) => !resolvedIds.has(item.id) && item.kind === 'PROTOCOL',
     );
-    const mandatory = openItems.filter((item) => item.kind === 'PARQ');
-    const optional = openItems.filter((item) => item.kind === 'PROTOCOL');
+    const mandatory = openItems.filter((item) => item.origin !== null);
+    const optional = openItems.filter((item) => item.origin === null);
     return json(response, 200, {
       mandatory,
       optional,
@@ -539,18 +549,21 @@ createServer(async (request, response) => {
     });
   }
 
+  // `parq` saiu do enum de kinds em 2026-08-24 junto com a tela separada de PAR-Q.
   const detail =
-    /^\/api\/v1\/professional\/dashboard\/queue\/(protocol|handoff|parq|checkin)\/([^/]+)$/i.exec(
+    /^\/api\/v1\/professional\/dashboard\/queue\/(protocol|handoff|checkin)\/([^/]+)$/i.exec(
       url.pathname,
     );
   if (request.method === 'GET' && detail) {
     const kind = detail[1].toUpperCase();
-    const item = items.find((entry) => entry.kind === kind);
+    // Por id, não por kind: há mais de um protocolo na fila (o opcional e o de origem
+    // PAR-Q), e os dois precisam devolver o SEU próprio item.
+    const item = items.find((entry) => entry.id === detail[2] && entry.kind === kind);
     if (!item) return json(response, 404, { message: 'Not found' });
     const body = { item, context: { goal: 'Hipertrofia', level: 'Intermediário' }, replay };
     if (kind === 'PROTOCOL') {
       body.protocol = {
-        id: PROTOCOL_ID,
+        id: item.id,
         version: 1,
         status: 'DRAFT',
         approvalStatus: 'PENDING_REVIEW',
@@ -561,8 +574,6 @@ createServer(async (request, response) => {
     }
     if (kind === 'HANDOFF' || kind === 'CHECKIN')
       body.handoff = { reason: item.summary, level: 'SAFETY', status: 'OPEN' };
-    if (kind === 'PARQ')
-      body.parq = { flags: ['Resposta positiva no questionário'], state: item.status };
     return json(response, 200, body);
   }
 
@@ -582,16 +593,12 @@ createServer(async (request, response) => {
     return json(response, 200, { status: 'RESOLVED' });
   }
 
+  // Assinar é também a liberação do PAR-Q desde 2026-08-24 — a rota
+  // `/parq/{id}/release` foi removida do backend, e daqui junto.
   if (
     request.method === 'POST' &&
-    /\/professional\/dashboard\/(protocols\/[^/]+\/sign|parq\/[^/]+\/release)$/.test(url.pathname)
+    /\/professional\/dashboard\/protocols\/[^/]+\/sign$/.test(url.pathname)
   ) {
-    if (url.pathname.includes('/parq/')) {
-      const body = await readBody(request);
-      if (body.decision !== 'RELEASED' || body.confirmation !== true) {
-        return json(response, 400, { message: 'Invalid PAR-Q decision' });
-      }
-    }
     return json(response, 200, { status: 'ok' });
   }
   if (

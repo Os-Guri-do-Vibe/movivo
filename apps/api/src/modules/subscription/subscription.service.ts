@@ -8,7 +8,7 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
-import type { SubscriptionStatus, SubscriptionView } from '@movivo/shared';
+import type { BiologicalSex, SubscriptionStatus, SubscriptionView } from '@movivo/shared';
 
 import { AppConfigService } from '../../core/config';
 import type { SubscriptionRow } from '../../core/database/schema';
@@ -88,6 +88,14 @@ export class SubscriptionService {
       termsAcceptedAt: new Date(),
     });
     return session;
+  }
+
+  /**
+   * Slot da persona do titular (Sprint 11), para as mensagens da sequência de conversão
+   * saírem assinadas pela persona certa. Repassa a leitura sob RLS do repositório.
+   */
+  async personaSlotFor(userId: string): Promise<BiologicalSex | null> {
+    return this.repo.findBiologicalSex(userId);
   }
 
   /** Acesso derivado do estado da assinatura (US-4.2.3) — não do app. */

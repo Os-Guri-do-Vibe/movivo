@@ -1,29 +1,36 @@
 /**
- * Ingestão do webhook de ENTRADA da AraraHQ (US-3.1 — Leonardo).
+ * Ingestão do webhook de ENTRADA do WhatsApp (US-3.1 / US-3.1-EVO — Leonardo).
  *
  * Primeira superfície inbound do sistema (T-01 do threat model de Sato: spoofing de
  * webhook). O fluxo NUNCA processa IA de forma síncrona — valida, coalesce a rajada e
  * enfileira em `ai-response` para o `AIResponseWorker` (US-3.5). Camadas, em ordem:
  *
- *   1. HMAC sobre corpo bruto + janela ±5min de timestamp (`webhook-signature.ts`).
- *   2. Nonce de uso único (`SET NX` TTL 600s) — pega replay dentro da janela.
+ *   1. **Borda do provedor** (`WhatsappInboundEdge`): autentica (HMAC da AraraHQ ou token
+ *      compartilhado da EvolutionAPI) e normaliza o envelope. É a ÚNICA parte específica
+ *      de provedor de todo o pipeline.
+ *   2. Nonce de uso único (`SET NX`), com namespace por provedor — o `messageId` da
+ *      AraraHQ e o `key.id` do Baileys vêm de espaços distintos e não podem colidir.
  *   3. Resolve o titular pelo telefone (contexto SYSTEM — inbound é não autenticado).
- *   4. Debounce (3-5s): concatena as mensagens picadas do mesmo `user_id` num batch
+ *      Casamento **exato** (`eq(users.phoneNumber, phone)`, UNIQUE), nunca difuso.
+ *   4. Orçamento por titular (30 msg / 5 min): protege o custo de inferência do LLM.
+ *   5. Debounce (3-5s): concatena as mensagens picadas do mesmo `user_id` num batch
  *      (buffer LIST Redis) e enfileira **um** job por janela (coalesce via `SET NX`).
  *
- * Qualquer falha (assinatura inválida, replay, remetente desconhecido, payload inválido)
- * → **descarta em silêncio** (o controller responde 200 para não vazar informação ao
- * atacante) + log de segurança. Nunca loga telefone/texto em claro (só `userId` UUID e o
- * hash do `messageId`).
+ * Qualquer falha (assinatura/token inválido, replay, remetente desconhecido, payload
+ * inválido) → **descarta em silêncio** (o controller responde 200 para não vazar
+ * informação ao atacante) + log de segurança. Nunca loga telefone/texto em claro (só
+ * `userId` UUID e o hash do `messageId`).
+ *
+ * A partir de `resolveUser()` nada aqui sabe qual provedor entregou a mensagem — é essa
+ * indivisibilidade que garante que os dois canais tenham o MESMO gate de consentimento,
+ * o mesmo isolamento por titular e a mesma auditoria.
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
-import { z } from 'zod';
 
-import { AppConfigService } from '../../core/config';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { conversations, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
@@ -39,33 +46,41 @@ import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.u
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { parseFeedback } from './feedback';
-import { verifyWebhookSignature } from './webhook-signature';
+import { type NormalizedInbound, type RawDelivery } from './inbound/inbound-message';
+import {
+  type InboundProvider,
+  WHATSAPP_INBOUND_EDGES,
+  type WhatsappInboundEdges,
+} from './inbound/whatsapp-inbound-edge';
 
 /** Janela de debounce (Rafael §6): 3-5s. Concatena a rajada do usuário num só job. */
 const DEBOUNCE_MS = 3_000;
 /** TTL do buffer de batch: cobre a janela de debounce + o processamento de US-3.5. */
 const BATCH_TTL_SECONDS = 120;
-/** TTL do nonce anti-replay (Sato §6). */
-const NONCE_TTL_SECONDS = 600;
+/**
+ * TTL do nonce anti-replay (Sato §6), por provedor.
+ *
+ * A AraraHQ mantém os 600s de sempre (a janela de timestamp assinado já é ±5min, então o
+ * nonce só precisa cobrir essa janela). O Baileys/EvolutionAPI não tem janela assinada e
+ * **reemite mensagens depois de uma reconexão lenta** — com 600s, um reenvio 20 minutos
+ * depois passaria pelo nonce e a MOVIVO responderia duas vezes à mesma mensagem. 24h cobre
+ * qualquer reconexão plausível.
+ */
+const NONCE_TTL_SECONDS: Readonly<Record<InboundProvider, number>> = {
+  ARARA: 600,
+  EVOLUTION: 86_400,
+};
 const INBOUND_ROUTE_TTL_SECONDS = 60;
 
-export const HEALTH_CONSENT_REVOCATION_PHRASE = 'REVOGAR CONSENTIMENTO DE SAUDE';
-
 /**
- * ⚠️ PAYLOAD PLACEHOLDER (mock — conta AraraHQ não assinada). O shape real é desconhecido;
- * quando existir, ajuste este schema. `passthrough` tolera campos extras do provedor.
+ * Orçamento de mensagens por titular (Sato: "o controle que realmente importa"). Vale para
+ * os DOIS provedores e é aplicado depois de `resolveUser()`, porque o recurso protegido é
+ * o custo de inferência de LLM do usuário — não a borda HTTP (essa tem throttle de rota).
  */
-const inboundPayloadSchema = z
-  .object({
-    messageId: z.string().min(1).max(200),
-    from: z.string().min(8).max(20), // telefone E.164 do remetente
-    text: z.string().min(1).max(4096),
-    /** Toque num quick-reply (ex.: feedback 👍/👎, US-3.6). ausente numa mensagem normal. */
-    buttonId: z.string().max(100).optional(),
-  })
-  .passthrough();
+const USER_RATE_LIMIT = 30;
+const USER_RATE_WINDOW_SECONDS = 300;
 
-export type InboundPayload = z.infer<typeof inboundPayloadSchema>;
+export const HEALTH_CONSENT_REVOCATION_PHRASE = 'REVOGAR CONSENTIMENTO DE SAUDE';
 
 /**
  * Contrato do job enfileirado em `ai-response`, consumido pelo `AIResponseWorker` (US-3.5).
@@ -79,12 +94,12 @@ export interface AiResponseJob {
   readonly enqueuedAt: number;
 }
 
-export interface IngestInput {
-  readonly rawBody: Buffer | undefined;
-  readonly signature: string | undefined;
-  readonly timestamp: string | undefined;
-  readonly body: unknown;
-  readonly correlationId: string;
+/**
+ * Uma entrega crua + de QUAL provedor ela veio. O `provider` não é lido do corpo (seria
+ * controlável por quem entrega): vem da ROTA que recebeu a requisição.
+ */
+export interface IngestInput extends RawDelivery {
+  readonly provider: InboundProvider;
 }
 
 @Injectable()
@@ -92,12 +107,12 @@ export class WhatsappInboundService {
   constructor(
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
+    @Inject(WHATSAPP_INBOUND_EDGES) private readonly edges: WhatsappInboundEdges,
     private readonly db: TenantDatabase,
     private readonly queues: QueueManager,
     private readonly healthConsent: HealthConsentService,
     private readonly events: DomainEventBus,
     private readonly queueEvents: DashboardQueueEventsService,
-    private readonly config: AppConfigService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(WhatsappInboundService.name);
@@ -109,49 +124,96 @@ export class WhatsappInboundService {
    * estruturado (Loki → Grafana; scrape Prometheus é infra de Henrique — US-3.1.3).
    */
   async ingest(input: IngestInput): Promise<void> {
-    const startedAt = Date.now();
     this.logger.info(
-      { event: 'webhook_received', correlationId: input.correlationId },
+      { event: 'webhook_received', provider: input.provider, correlationId: input.correlationId },
       'webhook recebido',
     );
 
-    const verdict = verifyWebhookSignature({
-      secret: this.config.whatsapp.webhookSecret,
-      rawBody: input.rawBody,
-      signature: input.signature,
-      timestamp: input.timestamp,
-    });
-    if (!verdict.ok) {
-      // bad_signature é o P2 de Sato §6.1 (tentativa de forjar) — merece alerta no painel.
-      this.reject(verdict.reason, input.correlationId);
+    const edge = this.edges[input.provider];
+    if (!edge) {
+      this.reject('unknown_provider', input.correlationId, input.provider);
       return;
     }
 
-    const parsed = inboundPayloadSchema.safeParse(input.body);
-    if (!parsed.success) {
-      this.reject('invalid_payload', input.correlationId);
+    const verdict = edge.verify(input);
+    if (!verdict.ok) {
+      // bad_signature/bad_token são o P2 de Sato §6.1 (tentativa de forjar) — alertáveis.
+      this.reject(verdict.reason, input.correlationId, input.provider);
       return;
     }
-    const { messageId, from, text } = parsed.data;
+
+    const messages = edge.normalize(input.body);
+    if (messages === null) {
+      // Corpo autenticado mas fora do contrato do provedor: é rejeição, não descarte.
+      this.reject('invalid_payload', input.correlationId, input.provider);
+      return;
+    }
+    if (messages.length === 0) {
+      // Descarte LEGÍTIMO (eco `fromMe`, grupo, tipo não suportado, backlog antigo…). A
+      // razão específica já foi logada pela borda; aqui não é evento de segurança.
+      this.logger.info(
+        {
+          event: 'webhook_no_message',
+          provider: input.provider,
+          correlationId: input.correlationId,
+        },
+        'entrega sem mensagem processável',
+      );
+      return;
+    }
+
+    for (const message of messages) {
+      await this.process(message, input.provider, input.correlationId);
+    }
+  }
+
+  /**
+   * Pipeline agnóstico de provedor — daqui para baixo nada sabe se a mensagem veio da
+   * AraraHQ ou da EvolutionAPI (o `provider` só entra em namespace de chave e em log).
+   */
+  private async process(
+    message: NormalizedInbound,
+    provider: InboundProvider,
+    correlationId: string,
+  ): Promise<void> {
+    const startedAt = Date.now();
+    const { messageId, from, text } = message;
 
     // Nonce de uso único: `SET NX` — se já existe, é replay dentro da janela. O messageId
-    // é hasheado para virar um segmento de chave válido (independe do formato do provedor).
-    const nonceKey = this.keys.global('wa-nonce', this.hash(messageId));
-    const fresh = await this.redis.set(nonceKey, '1', 'EX', NONCE_TTL_SECONDS, 'NX');
+    // é hasheado para virar um segmento de chave válido (independe do formato do provedor)
+    // e o provedor entra no namespace: `messageId` da AraraHQ e `key.id` do Baileys vêm de
+    // espaços de identificador distintos e não podem se anular por colisão acidental.
+    const nonceKey = this.keys.global('wa-nonce', provider.toLowerCase(), this.hash(messageId));
+    const fresh = await this.redis.set(nonceKey, '1', 'EX', NONCE_TTL_SECONDS[provider], 'NX');
     if (fresh !== 'OK') {
-      this.reject('replay', input.correlationId);
+      this.reject('replay', correlationId, provider);
       return;
     }
 
     const userId = await this.resolveUser(from);
     if (!userId) {
-      this.reject('unknown_sender', input.correlationId);
+      this.reject('unknown_sender', correlationId, provider);
+      return;
+    }
+
+    const isRevocation = this.isHealthConsentRevocation(text);
+    const withinBudget = await this.consumeUserBudget(userId);
+    // O orçamento nunca pode bloquear o exercício de um direito do titular (LGPD Art. 18):
+    // a frase de revogação de consentimento passa mesmo com o orçamento estourado — ela
+    // não gera inferência de LLM, que é justamente o recurso protegido aqui.
+    if (!withinBudget && !isRevocation) {
+      // Não é ataque externo (o remetente é um titular autenticado pelo próprio canal):
+      // log próprio, sem `reject()`, e nenhum job de IA enfileirado.
+      this.logger.warn(
+        { event: 'inbound_user_rate_limited', provider, userId, correlationId },
+        'orçamento de mensagens do titular estourado — inbound descartado sem chamar IA',
+      );
       return;
     }
 
     const consentCommandId = this.hash(messageId);
 
-    if (this.isHealthConsentRevocation(text)) {
+    if (isRevocation) {
       await this.healthConsent.revokeForUser(userId);
       this.queueEvents.emit('consent');
       await this.queues.enqueue(
@@ -166,7 +228,7 @@ export class WhatsappInboundService {
         { jobId: `health-consent-revoked-${consentCommandId}` },
       );
       this.logger.info(
-        { event: 'health_consent_revoked_whatsapp', userId, correlationId: input.correlationId },
+        { event: 'health_consent_revoked_whatsapp', userId, correlationId },
         'consentimento de dados de saude revogado pelo titular',
       );
       return;
@@ -188,7 +250,7 @@ export class WhatsappInboundService {
         {
           event: 'health_processing_refused_no_consent',
           userId,
-          correlationId: input.correlationId,
+          correlationId,
         },
         'inbound recusado por ausencia de consentimento vigente',
       );
@@ -197,16 +259,16 @@ export class WhatsappInboundService {
 
     // US-3.6 — toque num botão de feedback (👍/👎): registra o voto e NÃO enfileira resposta
     // (não é pergunta). Escopado ao titular; não altera treino.
-    const feedback = parseFeedback(parsed.data.buttonId);
+    const feedback = parseFeedback(message.buttonId);
     if (feedback) {
-      await this.registerFeedback(userId, feedback, input.correlationId);
+      await this.registerFeedback(userId, feedback, correlationId);
       return;
     }
 
     const routeKey = this.keys.forUser(userId, 'inbound-route', this.hash(messageId));
     await this.redis.set(
       routeKey,
-      JSON.stringify({ text, buttonId: parsed.data.buttonId }),
+      JSON.stringify({ text, buttonId: message.buttonId }),
       'EX',
       INBOUND_ROUTE_TTL_SECONDS,
     );
@@ -225,7 +287,7 @@ export class WhatsappInboundService {
         false);
     if (handled) {
       this.logger.info(
-        { event: 'checkin_inbound_handled', userId, correlationId: input.correlationId },
+        { event: 'checkin_inbound_handled', userId, correlationId },
         'resposta de check-in tratada sem LLM',
       );
       return;
@@ -233,7 +295,7 @@ export class WhatsappInboundService {
     await this.redis.del(routeKey);
 
     // US-3.6 — engajamento: 2ª mensagem (real) do usuário no mesmo dia (meta ≥40%, Épico 4).
-    await this.trackSecondMessageSameDay(userId, input.correlationId);
+    await this.trackSecondMessageSameDay(userId, correlationId);
 
     // Debounce: empilha no buffer e enfileira UM job por janela (coalesce via SET NX).
     const batchKey = this.keys.forUser(userId, 'ai-response', 'batch');
@@ -252,7 +314,7 @@ export class WhatsappInboundService {
       const job: AiResponseJob = {
         userId,
         batchKey,
-        correlationId: input.correlationId,
+        correlationId,
         enqueuedAt: startedAt,
       };
       await this.queues.enqueue(QUEUE.aiResponse, 'coach-response', job, { delay: DEBOUNCE_MS });
@@ -260,7 +322,7 @@ export class WhatsappInboundService {
         {
           event: 'webhook_enqueued',
           userId,
-          correlationId: input.correlationId,
+          correlationId,
           latencyMs: Date.now() - startedAt,
         },
         'inbound enfileirado em ai-response',
@@ -268,19 +330,34 @@ export class WhatsappInboundService {
     } else {
       // Mensagem chegou com a janela já aberta: coalesce (sem novo job).
       this.logger.info(
-        { event: 'webhook_debounced', userId, correlationId: input.correlationId },
+        { event: 'webhook_debounced', userId, correlationId },
         'inbound agregado à janela de debounce em curso',
       );
     }
   }
 
-  /** Loga a rejeição sem vazar detalhe. `bad_signature` sobe a warn (sinal de forja). */
-  private reject(reason: string, correlationId: string): void {
-    const level = reason === 'bad_signature' ? 'warn' : 'info';
+  /**
+   * Loga a rejeição sem vazar detalhe. `bad_signature`/`bad_token` sobem a warn (sinal de
+   * tentativa de forja, um por provedor).
+   */
+  private reject(reason: string, correlationId: string, provider: InboundProvider): void {
+    const level = reason === 'bad_signature' || reason === 'bad_token' ? 'warn' : 'info';
     this.logger[level](
-      { event: 'webhook_rejected', reason, correlationId },
+      { event: 'webhook_rejected', reason, provider, correlationId },
       'inbound descartado (200, sem processar)',
     );
+  }
+
+  /**
+   * Consome uma unidade do orçamento do titular. `INCR` + `EXPIRE` só no primeiro
+   * incremento da janela (janela deslizante por blocos de 5 min — barato e suficiente:
+   * o objetivo é cortar abuso sustentado, não policiar rajada, que o debounce já coalesce).
+   */
+  private async consumeUserBudget(userId: string): Promise<boolean> {
+    const key = this.keys.forUser(userId, 'inbound-rate');
+    const count = await this.redis.incr(key);
+    if (count === 1) await this.redis.expire(key, USER_RATE_WINDOW_SECONDS);
+    return count <= USER_RATE_LIMIT;
   }
 
   /**

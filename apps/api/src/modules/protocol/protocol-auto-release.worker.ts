@@ -22,6 +22,7 @@ import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queu
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
+import { buildProtocolPdf } from './protocol-pdf.service';
 import { ProtocolRepository } from './protocol.repository';
 
 export interface ProtocolAutoReleaseJob {
@@ -49,14 +50,40 @@ export class ProtocolAutoReleaseWorker implements OnModuleInit {
 
   async process(job: Job<ProtocolAutoReleaseJob>): Promise<{ status: string }> {
     const { userId, protocolId } = job.data;
-    const { released, version } = await this.repository.autoRelease(userId, protocolId);
+    const release = await this.repository.autoRelease(userId, protocolId);
 
-    if (!released) {
+    if (!release.released) {
       this.logger.info(
         { userId, protocolId },
         'auto-liberação pulada — CREF já agiu ou protocolo virou MANDATORY',
       );
       return { status: 'SKIPPED' };
+    }
+    const { version } = release;
+
+    // PDF do protocolo (US-2.6-PDF), igual `DashboardService.signProtocol`: nunca bloqueia
+    // a liberação nem a entrega — se falhar, fica `NULL` e o worker de outbound cai pro
+    // texto+link de sempre. Todo protocolo que vira ACTIVE ganha PDF, não só o assinado
+    // manualmente (decisão do fundador, 2026-08-22).
+    try {
+      const personal = await this.repository.findLatestPersonalInfo(userId);
+      if (!personal) throw new Error('anamnese submetida do titular não encontrada');
+      const pdf = await buildProtocolPdf({
+        content: release.content,
+        mesocycleName: release.mesocycleName,
+        startDate: release.startDate,
+        endDate: release.endDate,
+        totalWeeks: release.totalWeeks,
+        signatureHash: release.signatureHash,
+        signedAt: release.signedAt,
+        student: personal,
+      });
+      await this.repository.setPdfContent(userId, protocolId, pdf);
+    } catch (error) {
+      this.logger.warn(
+        { userId, protocolId, err: error instanceof Error ? error.message : String(error) },
+        'geração do PDF do protocolo falhou — entrega cai para texto+link',
+      );
     }
 
     await this.queues.enqueue(

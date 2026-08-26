@@ -34,7 +34,16 @@ async function createUserWithProtocol(): Promise<{ userId: string; protocolId: s
     if (!user) throw new Error('falha ao criar usuário de teste');
     const [protocol] = await tx
       .insert(protocols)
-      .values({ userId: user.id, content: {}, constraints: {} })
+      // `mesocycle_name`/`start_date`/`end_date` são NOT NULL sem default desde a
+      // migração 0033 — todo writer precisa fornecê-los (o app faz isso em `persist()`).
+      .values({
+        userId: user.id,
+        content: {},
+        constraints: {},
+        mesocycleName: 'Mesociclo 1 — Adaptação',
+        startDate: new Date(),
+        endDate: new Date(Date.now() + 12 * 7 * 24 * 60 * 60 * 1000),
+      })
       .returning({ id: protocols.id });
     if (!protocol) throw new Error('falha ao criar protocolo de teste');
     return { userId: user.id, protocolId: protocol.id };

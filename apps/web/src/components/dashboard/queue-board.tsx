@@ -79,9 +79,9 @@ export function sortQueue(items: QueueItem[]): QueueItem[] {
  *
  * Exportada (achado 2026-08-18): `DashboardService.item()` no backend grava
  * `summary = status` para PROTOCOL/CHECKIN/HANDOFF — `queue-detail.tsx` reusa o mesmo
- * filtro pro cabeçalho da tela de revisão. PAR-Q é exceção desde 2026-08-20: ganhou um
- * resumo humano próprio no backend (não é mais cópia de `status`), então o filtro aqui
- * nunca chega a agir sobre ele — só existe pros outros três tipos.
+ * filtro pro cabeçalho da tela de revisão. Desde 2026-08-24 protocolo é o único kind que
+ * chega nesta fila (PAR-Q bloqueante virou `origin: 'PARQ'` de um protocolo), então na
+ * prática o filtro só age sobre protocolo.
  */
 export function meaningfulText(value: string): string {
   return value === 'PENDING_SIGNATURE' ? '' : value;
@@ -112,7 +112,8 @@ function QueueCard({ item, section }: { item: QueueItem; section: 'mandatory' | 
   const [anamnesisOpen, setAnamnesisOpen] = useState(false);
   // Olho aparece nas duas caixas da fila (achado 2026-08-18) — só não existe pra
   // handoff/check-in, que nem aparecem nesta tela (ver docstring de `queue()` no backend).
-  const showEye = item.kind === 'PROTOCOL' || item.kind === 'PARQ';
+  // Desde 2026-08-24 protocolo é o único kind que chega aqui, PAR-Q bloqueante incluso.
+  const showEye = item.kind === 'PROTOCOL';
 
   function track(view?: 'anamnesis') {
     captureDashboardEvent('cref_queue_item_opened', {
@@ -174,10 +175,11 @@ function QueueCard({ item, section }: { item: QueueItem; section: 'mandatory' | 
                  * prosódica certa. O `sr-only` é `position:absolute`, então não
                  * interfere na altura de 24px do pill.
                  *
-                 * `SAFETY` está fora desde 2026-08-20: o card de PAR-Q bloqueado já diz
-                 * "PAR-Q para Revisão: <aluno>" no título e carrega a faixa
-                 * `border-l-coral` + o ícone `ShieldAlert` em `bg-destructive`. O pill
-                 * "Segurança" era o quarto sinal redundante da mesma coisa. `LABELS` e
+                 * `SAFETY` está fora desde 2026-08-20: o card de PAR-Q bloqueado já
+                 * carrega a faixa `border-l-coral`, o ícone `ShieldAlert` em
+                 * `bg-destructive` e (desde 2026-08-24) a legenda "Origem: PAR-Q
+                 * bloqueante" logo abaixo. O pill "Segurança" era o quarto sinal
+                 * redundante da mesma coisa. `LABELS` e
                  * `SEVERITY_TONE` mantêm as entradas de SAFETY — o par label/detail
                  * segue existindo, só não é mais renderizado aqui.
                  */
@@ -189,6 +191,23 @@ function QueueCard({ item, section }: { item: QueueItem; section: 'mandatory' | 
                   {label}
                   {detail ? <span className="sr-only">, {detail}</span> : null}
                 </StatusBadge>
+              ) : null}
+              {item.origin === 'PARQ' ? (
+                /*
+                 * Único sinal LEGÍVEL de que este protocolo obrigatório veio de um PAR-Q
+                 * bloqueante (2026-08-24). A faixa coral e o ícone `bg-destructive` já
+                 * marcam a severidade, mas os dois são puramente visuais — a faixa é CSS
+                 * e o ícone é `aria-hidden` —, e o título ("Protocolo para Revisão:
+                 * <aluno>") é idêntico ao de um protocolo opcional. Sem esta linha, um
+                 * RT em leitor de tela não teria como distinguir os dois, e nem o RT
+                 * vidente saberia se o card é PAR-Q ou `EDIT` (que só se diferencia pelo
+                 * pill "Atenção"). Texto discreto de propósito: é a legenda do sinal que
+                 * já existe, não um quarto sinal — e a tela de detalhe segue idêntica
+                 * entre obrigatório e opcional, como pedido pelo fundador.
+                 */
+                <span className="text-xs font-medium text-muted-foreground">
+                  Origem: PAR-Q bloqueante
+                </span>
               ) : null}
             </div>
             {summary ? (
@@ -254,7 +273,7 @@ function QueueCard({ item, section }: { item: QueueItem; section: 'mandatory' | 
       </div>
       {showEye ? (
         <AnamnesisAnswersModal
-          kind={item.kind === 'PROTOCOL' ? 'PROTOCOL' : 'PARQ'}
+          kind="PROTOCOL"
           id={item.id}
           open={anamnesisOpen}
           onOpenChange={setAnamnesisOpen}
@@ -412,7 +431,7 @@ export function QueueBoard() {
           <CheckCircle2 aria-hidden="true" className="mx-auto size-10 text-muted-foreground" />
           <h2 className="mt-4 text-h3 font-semibold">Fila em dia</h2>
           <p className="mt-2 text-label text-muted-foreground">
-            Não há protocolos nem liberações PAR-Q pendentes agora.
+            Não há protocolos pendentes de revisão agora.
           </p>
         </div>
       ) : (

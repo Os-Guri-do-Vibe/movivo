@@ -101,6 +101,14 @@ export const envSchema = z
     API_GLOBAL_PREFIX: z.string().min(1).default('api/v1'),
     /** Origens permitidas em CORS. Nunca `*` — regra de Sato §9. */
     API_CORS_ORIGINS: csv('API_CORS_ORIGINS'),
+    /**
+     * Base pública **da própria API** — distinta de `PUBLIC_SITE_URL` (que é o `apps/web`).
+     * Usada para montar a URL que provedores externos chamam de volta; hoje só o webhook
+     * de entrada da EvolutionAPI (`POST /webhook/set/{instance}`). Como a EvolutionAPI roda
+     * em container, `localhost` é reescrito para `host.docker.internal` na hora de registrar
+     * (ver `toContainerReachableUrl` em `whatsapp/evolution-transport.ts`).
+     */
+    API_PUBLIC_URL: z.string().url().default('http://localhost:3001'),
 
     // ------------------------------------------------------------------ logger
     LOG_LEVEL: z
@@ -213,6 +221,13 @@ export const envSchema = z
     ARARAHQ_WEBHOOK_SECRET: z.string().min(1).optional(),
     /** Base pública para o deep-link da página read-only do protocolo (US-2.6). */
     PUBLIC_SITE_URL: z.string().url().default('http://localhost:3000'),
+    /**
+     * Nome do Template aprovado pela Meta com `headerType: 'document'`, usado como
+     * fallback do PDF do protocolo (US-2.6-PDF, `AraraHttpTransport.sendDocument`) quando
+     * a janela de 24h está fechada. **Opcional**: sem ele, entrega de PDF fora da janela
+     * falha (loga e o BullMQ reenvia) até o Template existir e ser aprovado pela Meta.
+     */
+    WHATSAPP_PROTOCOL_PDF_TEMPLATE_NAME: z.string().min(1).optional(),
 
     // ------------------------------------------ EvolutionAPI (painel "Sistema →
     // Integração" — conexão via QR Code/Baileys, protocolo não-oficial). Chave
@@ -220,6 +235,22 @@ export const envSchema = z
     // instância falha com erro claro.
     EVOLUTION_API_URL: z.string().url().default('http://localhost:8081'),
     EVOLUTION_API_KEY: z.string().min(1).optional(),
+    /**
+     * Segredo do webhook de ENTRADA da EvolutionAPI (US-3.1-EVO). É um segredo **novo e
+     * exclusivo**, nunca a `EVOLUTION_API_KEY`: o envelope que a EvolutionAPI entrega
+     * carrega o `apikey` da instância no CORPO de toda entrega (achado de Sato lendo o
+     * container real), então autenticar com ele seria autenticar com um valor que o
+     * próprio payload publica. Vai como header customizado em `POST /webhook/set/{...}`
+     * e volta em toda entrega (`x-movivo-webhook-token`).
+     *
+     * `min(43)` = 32 bytes de entropia em base64url. Gere com `openssl rand -base64 32`
+     * (ou use `scripts/gen-local-secrets.sh`, que cria `secrets/evolution_webhook_token`).
+     *
+     * **Sem `.default()` de propósito**: `undefined` é o que ativa o fail-closed da borda
+     * (`EvolutionInboundEdge.verify` → `no_secret`). Um default silencioso viraria um
+     * segredo conhecido publicamente. Via contrato `*_FILE` (docs/SECURITY.md §2).
+     */
+    EVOLUTION_WEBHOOK_TOKEN: z.string().min(43).optional(),
     /**
      * Qual transporte processa o envio real do `whatsapp-outbound` worker. Default
      * `ARARA` (BSP oficial, produção) — nunca muda sozinho. `EVOLUTION` é só pra testar

@@ -1,0 +1,607 @@
+BLUEPRINT — LANDING PAGE IDEAL DA MOVIVO
+VERSÃO 2 — INSPIRADA NO RITMO EDITORIAL DA ZYLA.FIT
+
+A landing ideal da MOVIVO não deveria parecer “mais um produto fitness com IA”. Ela deve parecer orientação profissional acontecendo na vida real: humana, acessível, responsável e dentro da conversa que o visitante já usa.
+
+Isso é especialmente importante porque concorrentes brasileiros já comunicam WhatsApp, IA e CREF. Logo, o diferencial não pode ser apenas o selo: precisa ser o sistema inteiro de responsabilidade, com método, profissional identificado, limites da tecnologia e encaminhamento humano visíveis. A Strongy, por exemplo, já ocupa parte desse território: https://strongy.com.br/
+
+Referência de ritmo, fotografia e composição consultada em 25/08/2026:
+https://www.zyla.fit/
+
+A Zyla é referência, não molde. A MOVIVO absorve princípios de comunicação e hierarquia sem copiar identidade, textos, imagens, números, componentes ou layouts proprietários.
+
+
+O QUE ABSORVEMOS DA ZYLA
+
+- Fotografia esportiva em ação, com silhueta clara e espaço negativo para a copy.
+- Narrativa organizada pelo momento do visitante: começando, voltando ou buscando evolução.
+- Autor da metodologia apresentado como pessoa real, e não como um selo anônimo.
+- Missão e pertencimento materializados por fotografia coletiva verdadeira.
+- Depoimentos identificados e distribuídos ao longo da narrativa.
+- Uma única ação principal repetida nos momentos naturais da página.
+- Preço, periodicidade, trial e cancelamento apresentados com transparência.
+
+
+O QUE NÃO COPIAMOS DA ZYLA
+
+- Paleta preta, rosa, amarela ou qualquer elemento proprietário da marca.
+- Imagens de corrida, lettering, ilustrações, #TeamZyla ou linguagem app-first.
+- Métricas, avatares, parceiros, credenciais ou depoimentos emprestados.
+- Carrossel contínuo de testemunhos ou repetição excessiva de conteúdo.
+- Promessas de recorde, transformação ou resultado.
+- Três cards de preço quase idênticos com a mesma lista repetida.
+
+
+KIMURA — DIREÇÃO CRIATIVA
+
+Conceito: “O Pulso vira conversa; a conversa vira movimento.”
+
+O Pulso nasce no logotipo, atravessa a narrativa, conecta usuário, contexto, método e profissional, e termina conduzindo ao CTA.
+
+
+LINGUAGEM VISUAL
+
+- 60–70% Névoa/Branco.
+- 20–25% Petróleo Vivo.
+- 7–10% Verde Pulso, exclusivamente para ação, progresso e assinatura.
+- Até 5% Coral Vivo, para calor humano e celebração.
+- Hanken Grotesk em títulos, texto e UI.
+- JetBrains Mono somente para dados, etapas, preços e número CREF.
+- H1 de 44–48px no mobile e 64–72px no desktop.
+- Grid de 12 colunas, largura máxima de 1.240px.
+- Cards com cantos de 12px; fotografias com 20–24px.
+- Base predominantemente clara. Petróleo entra em “ilhas” de produto, método e fechamento.
+- Respiro vertical de 72–96px no mobile e 120–160px no desktop.
+- Ritmo alternado: Névoa → fotografia ampla → ilha Petróleo → Névoa.
+- Sem glassmorphism generalizado, neon, robôs, DNA, circuitos, halteres cromados ou estética gamer.
+
+
+FOTOGRAFIA
+
+Pessoas brasileiras de 18–30 anos, com corpos e níveis de treino reconhecíveis, em apartamento, academia de bairro, condomínio e rotina corrida.
+
+A câmera fica próxima, na altura dos olhos, com luz natural ou flash documental discreto. O celular aparece como parte da vida, não como protagonista.
+
+Inspirada na energia editorial da Zyla, a produção deve privilegiar movimento real: início de uma série, pausa entre exercícios, troca de equipamento, saída de casa e consulta ao WhatsApp. O hero precisa de um fundo relativamente limpo e bastante espaço negativo para o texto. Nada de pose estática olhando para o halter.
+
+Evitaria completamente:
+
+- “Shape impossível” como única representação;
+- antes e depois;
+- close objetificando corpos;
+- “sweat porn” e caretas artificiais;
+- banco de imagem fitness genérico;
+- atmosfera azul-neon de laboratório.
+
+
+BLUEPRINT INTEGRADO: DESIGN + COPY
+
+Todos os placeholders editoriais — nomes, CREF, CREF-PJ, CNPJ, credenciais, métricas e depoimentos — precisam ser substituídos por dados reais, verificados e autorizados antes da publicação.
+
+
+0. HEADER
+
+No desktop: logo horizontal, “Como funciona”, “Método”, “A MOVIVO”, “Entrar” e o CTA. No mobile: símbolo + CTA. “Entrar” é uma ação utilitária, sem competir visualmente com a conversão. O header começa leve e ganha fundo Névoa opaco após a rolagem; eu retiraria o seletor de tema da landing de conversão.
+
+CTA permanente:
+Começar 7 dias grátis
+
+
+1. HERO
+
+Composição editorial 42/58: copy à esquerda e uma fotografia de treino em movimento ocupando quase metade da primeira dobra. A pessoa aparece próxima, em ambiente brasileiro reconhecível, com fundo simples e espaço negativo. No desktop, o Pulso conecta discretamente a assinatura técnica à imagem; no mobile, a foto entra depois do CTA. Nada de telefone 3D flutuante.
+
+O hero precisa entregar, sem rolagem: identificação com o problema, proposta de valor, canal, responsabilidade técnica, CTA e regra do trial. Avatares, contadores ou logos só entram quando forem reais e verificáveis.
+
+Eyebrow:
+ORIENTAÇÃO DE TREINO NO WHATSAPP · COM RESPONSÁVEL TÉCNICO CREF
+
+Headline:
+Seu treino precisa entender sua rotina — não só o seu prompt.
+
+Texto:
+Na MOVIVO, você conta seu objetivo, sua experiência, o tempo e os equipamentos que tem. Com base no método criado por [Nome completo do RT] ([CREF completo]), a tecnologia organiza sua orientação de treino e mantém a conversa no WhatsApp. A IA ajuda a aplicar o método; não decide nem prescreve sozinha.
+
+CTA:
+Começar 7 dias grátis
+
+Microcopy:
+7 dias grátis · sem cartão · o teste termina sem cobrança
+
+Assinatura de confiança:
+Metodologia de [Nome do RT] · Profissional de Educação Física · [CREF]
+
+Variação B para teste, após existir tráfego suficiente:
+Orientação de treino com método profissional. Direto no WhatsApp.
+
+
+2. FAIXA DE CONFIANÇA
+
+Quatro itens compactos, imediatamente abaixo do hero. Ícones lineares próprios, sem logos de terceiros nem aparência de selo oficial:
+
+- Metodologia de [Nome do RT] · [CREF]
+- Orientação e check-ins pelo WhatsApp
+- 7 dias grátis · sem cartão
+- Consentimento específico para dados de saúde
+
+
+3. IDENTIFICAÇÃO COM O ICP
+
+Em vez de três cards pequenos, usar três capítulos fotográficos numerados e alternados. Cada capítulo ocupa a largura da página, combina uma cena real com um bloco de copy e representa um momento do visitante — não uma “persona fictícia”. Essa progressão absorve da Zyla a clareza por estágio, mas usa situações centrais para o ICP da MOVIVO.
+
+Eyebrow:
+QUAL É O SEU MOMENTO?
+
+Headline:
+Começando, voltando ou buscando mais método: seu ponto de partida é o agora.
+
+01 · Vou começar
+
+Você não precisa chegar sabendo montar treino nem entender todos os exercícios. Conte como está hoje, o que tem disponível e quanto tempo consegue dedicar. A orientação começa daí.
+
+Imagem:
+Pessoa iniciando uma sessão simples em academia de bairro ou condomínio. Momento de preparação, sem pose de performance.
+
+02 · Quero voltar
+
+Sua rotina mudou e o treino ficou para trás? A MOVIVO considera o que você consegue fazer agora, sem tentar encaixar sua vida no ritmo que tinha antes.
+
+Imagem:
+Pessoa conciliando mochila, trabalho/estudo e treino. A cena deve comunicar recomeço possível, nunca culpa.
+
+03 · Já treino e quero mais método
+
+Você traz sua experiência e conta como cada sessão foi. Esses feedbacks entram no contexto e podem orientar ajustes previstos pela metodologia profissional.
+
+Imagem:
+Pessoa experiente executando ou registrando uma série, com foco em processo e técnica — não em aparência corporal.
+
+Ponte de prova, somente quando houver material real autorizado:
+
+“[Trecho literal e específico sobre começar, voltar ou evoluir com a MOVIVO.]”
+[Nome e sobrenome] · [cidade/UF] · usuário desde [mês/ano]
+
+CTA:
+Começar 7 dias grátis
+
+Microcopy:
+7 dias grátis · sem cartão · o teste termina sem cobrança
+
+
+4. PRODUTO EM AÇÃO
+
+Grande ilha Petróleo com aparência de produto real. No desktop, uma demonstração legível da conversa ocupa cerca de 55% e um microvídeo de treino ocupa 45%; no mobile, a sequência fica vertical. Usar a interface real do produto quando ela existir, e não um mockup ornamental. Sem scroll-jacking.
+
+Eyebrow:
+O PRODUTO EM AÇÃO
+
+Headline:
+Você traz o contexto. A MOVIVO devolve um próximo passo claro.
+
+Texto:
+A conversa considera as informações que você compartilhou e os feedbacks anteriores para dar continuidade à sua orientação.
+
+Exemplo ilustrativo:
+
+Você: Hoje tenho 35 minutos e a academia está cheia. Só consegui um par de halteres.
+
+MOVIVO: Entendi. Posso te mostrar uma alternativa já prevista no seu protocolo para manter o foco da sessão usando esse tempo e esses equipamentos.
+
+Você: A última série ficou mais difícil do que eu esperava.
+
+MOVIVO: Anotado. Esse feedback entra no seu check-in e pode orientar um ajuste previsto pelo método. Se foi dor, e não apenas esforço, interrompa o exercício e me avise. Esse caso sai do fluxo automático e segue para avaliação profissional.
+
+Microcopy obrigatória:
+Exemplo ilustrativo. As orientações dependem das informações fornecidas e dos critérios definidos pelo responsável técnico. A IA não decide nem prescreve sozinha. Situações fora do escopo automatizado são encaminhadas ao profissional responsável.
+
+CTA:
+Começar 7 dias grátis
+
+Microcopy:
+7 dias grátis · sem cartão · o teste termina sem cobrança
+
+
+5. MÉTODO E RESPONSABILIDADE PROFISSIONAL
+
+Esta seção vem imediatamente depois do produto em ação para responder “quem criou os critérios por trás dessa conversa?”. Usar um retrato documental do RT em ambiente de trabalho ou treino, nunca de jaleco. Composição 40/60, com nome, registro e fatos verificáveis em destaque.
+
+Eyebrow:
+AUTOR DA METODOLOGIA
+
+Headline:
+[Nome do RT] define o método. A tecnologia ajuda a levá-lo até a sua rotina.
+
+Texto:
+[Nome completo do RT] é profissional de Educação Física registrado no [CREF completo] e responsável técnico pela MOVIVO. É quem define os critérios, progressões, alternativas, limites de atuação e situações que exigem avaliação humana.
+
+Credenciais — publicar no máximo quatro e somente após verificação:
+
+- Responsável Técnico: [Nome completo]
+- Registro profissional: [CREF completo]
+- Formação/especialização: [dado verificado]
+- Experiência profissional: [dado verificável, sem inflar números]
+
+Fluxo de responsabilidade:
+
+1. Seu contexto vem primeiro
+
+Objetivo, experiência, rotina, disponibilidade, equipamentos e informações relevantes formam o ponto de partida.
+
+2. Os critérios profissionais limitam as alternativas
+
+O método define progressões, substituições, limites e situações que não devem seguir automaticamente.
+
+3. A IA organiza a conversa
+
+A IA ajuda a aplicar essa estrutura no WhatsApp. Ela não recebe autoridade para decidir nem prescrever sozinha.
+
+4. Exceções seguem para avaliação humana
+
+Quando uma informação ultrapassa o escopo automatizado, o caso é sinalizado ao profissional responsável.
+
+CTA:
+Começar 7 dias grátis
+
+Microcopy:
+7 dias grátis · sem cartão · o teste termina sem cobrança
+
+Assinatura técnica:
+[Nome do RT] · Profissional de Educação Física · [CREF]
+MOVIVO · [CREF-PJ] · [CNPJ]
+
+Não desenhar um “selo oficial CREF” inventado. A assinatura técnica é um elemento próprio da MOVIVO.
+
+
+6. COMO FUNCIONA
+
+Três passos amplos conectados graficamente pelo Pulso. Uma combinação de fotografia, número mono e fragmento da conversa cria progressão sem parecer tutorial de software.
+
+Eyebrow:
+DO PRIMEIRO CONTEXTO AO PRÓXIMO TREINO
+
+Headline:
+Três passos. Nenhum aplicativo novo.
+
+1. Você conta sobre você
+
+Objetivo, experiência, rotina, disponibilidade, equipamentos e informações relevantes para começar com contexto.
+
+2. O método profissional orienta a tecnologia
+
+[Nome do RT], profissional registrado no [CREF], define a metodologia, os critérios e os limites. Um motor de regras organiza essas informações, e a IA atua como ferramenta de conversa e adaptação.
+
+3. A orientação chega no WhatsApp
+
+Você recebe seu protocolo, tira dúvidas e compartilha como foi. Ajustes previstos pelo método podem ser aplicados; exceções seguem para avaliação profissional.
+
+
+7. ADAPTAÇÃO À VIDA REAL
+
+Grid editorial 2×2, combinando fotografia e pequenos labels em mono.
+
+Eyebrow:
+Sua rotina também faz parte do contexto
+
+Headline:
+O treino não acontece no papel. Acontece no seu dia.
+
+Tempo disponível
+
+Informe a janela que você tem naquele dia. A orientação considera esse tempo dentro do protocolo.
+
+Equipamentos e local
+
+Casa, academia ou equipamentos diferentes: as alternativas seguem os critérios definidos pelo método.
+
+Nível e objetivo
+
+A orientação parte da sua experiência declarada e do objetivo informado — não de um modelo igual para todo mundo.
+
+Feedback semanal
+
+Dificuldade, adesão e mudanças na rotina entram no check-in e ajudam a orientar os próximos ajustes permitidos.
+
+
+8. PROVA REAL
+
+Um depoimento principal em grande escala, acompanhado por retrato ou vídeo vertical, seguido por até duas experiências complementares. A pessoa, o contexto e a frase completa importam mais do que uma parede de aspas. Nada de carrossel automático.
+
+Eyebrow:
+EXPERIÊNCIAS REAIS
+
+Headline:
+Quem colocou a MOVIVO na rotina conta como foi.
+
+“[Depoimento literal, específico, verificável e autorizado. Preferir uma experiência sobre clareza, encaixe na rotina, retorno ou continuidade; nunca converter o relato em promessa.]”
+
+[Nome e sobrenome] · [cidade/UF]
+[Começando / voltando / já treinava] · usuário desde [mês/ano]
+
+Se houver métricas:
+
+[Indicador real]
+[Definição] · [período] · [tamanho da base] · [fonte]
+
+Esta seção não deve ser publicada sem prova. Enquanto não houver autorização, manter o espaço fora da página — nunca preencher com texto inventado, citação anônima, número estimado ou comunidade simulada.
+
+
+9. POR QUE É DIFERENTE
+
+Comparação curta, sem atacar concorrentes:
+
+CRITÉRIO: FORMATO
+Planilha: estrutura fixa.
+App self-service: dentro do app.
+Personal tradicional: direto e agendado.
+MOVIVO: conversa no WhatsApp.
+
+CRITÉRIO: PONTO DE PARTIDA
+Planilha: programação prévia.
+App self-service: configuração do produto.
+Personal tradicional: avaliação profissional.
+MOVIVO: seu contexto dentro de um método.
+
+CRITÉRIO: ADAPTAÇÃO
+Planilha: feita por você.
+App self-service: depende dos recursos.
+Personal tradicional: feita pelo profissional.
+MOVIVO: feedback orienta ajustes previstos.
+
+CRITÉRIO: CONTATO
+Planilha: consulta ao material.
+App self-service: navegação no app.
+Personal tradicional: canais combinados.
+MOVIVO: canal usado diariamente.
+
+CRITÉRIO: MELHOR PARA
+Planilha: referência fixa.
+App self-service: quem se autogerencia.
+Personal tradicional: acompanhamento próximo.
+MOVIVO: praticidade, contexto e responsabilidade.
+
+Microcopy:
+Características podem variar entre produtos e profissionais. A comparação descreve os formatos de maneira geral.
+
+
+10. EMPRESA E VALORES
+
+Foto coletiva documental dos fundadores com o RT, em contexto real. Cahuã aparece como sócio e voz da comunidade; o RT ocupa seu papel técnico próprio. Se ainda não existir uma comunidade fotografável, a página apresenta “quem está construindo a MOVIVO” — nunca simula uma multidão de usuários.
+
+Eyebrow:
+NOSSO MOVIMENTO
+
+Headline:
+Orientação de treino com método não deveria ser privilégio.
+
+Texto:
+A MOVIVO nasceu para aproximar orientação profissional de quem não quer depender de uma planilha pronta, de uma resposta solta da IA ou de uma rotina que não cabe no próprio dia.
+
+Usamos Educação Física, tecnologia e conversa para tornar o próximo passo mais claro, acessível e possível — sem atalhos e sem promessas fáceis.
+
+Texto de comunidade, assumidamente prospectivo:
+Queremos construir uma comunidade em que começar, voltar e adaptar faça parte do processo. Diferentes corpos, objetivos e rotinas podem conviver sem ranking de aparência, vergonha de recomeçar ou pressão por uma sequência perfeita.
+
+Ciência antes do hype
+
+Se não tem respaldo, não entra. Preferimos explicar os limites a vender uma promessa fácil.
+
+Responsabilidade visível
+
+Método, nome e registro profissional ficam visíveis. A tecnologia nunca recebe uma autoridade que não tem.
+
+Contexto antes da resposta
+
+Tempo, equipamentos, local, nível e rotina importam. A orientação considera a vida possível, não uma rotina perfeita.
+
+Consistência possível
+
+Valorizamos a volta, o feedback honesto e o próximo passo viável — não uma sequência impecável.
+
+Assinatura:
+Ciência que treina com você.
+
+
+11. OFERTA E TRIAL
+
+Um único Offer Card de alta clareza. A MOVIVO tem um produto com períodos diferentes, não vários tiers. O trial fica no topo; depois, um controle segmentado alterna Mensal, Trimestral e, quando estiver disponível, Anual sem repetir a mesma lista em três cards. Preço total, equivalência mensal, renovação e cancelamento ficam no mesmo campo visual do CTA.
+
+Eyebrow:
+7 DIAS PARA CONHECER. DEPOIS, VOCÊ DECIDE.
+
+Headline:
+O produto é o mesmo. Você escolhe por quanto tempo quer continuar.
+
+Trial:
+7 dias grátis
+R$ 0
+Sem cartão e sem cobrança ao final
+
+Inclui:
+
+- levantamento do seu contexto;
+- protocolo inicial entregue pelo WhatsApp;
+- conversa sobre dúvidas e execução dentro dos limites do método;
+- check-in semanal e registro de feedbacks;
+- ajustes permitidos pela metodologia;
+- metodologia sob responsabilidade de [Nome do RT] · [CREF].
+
+CTA:
+Começar 7 dias grátis
+
+Microcopy:
+7 dias grátis · sem cartão · o teste termina sem cobrança
+
+Depois do trial, exibir somente os períodos realmente disponíveis no checkout:
+
+Mensal
+R$ 39 por mês
+Cobrança de R$ 39 no início de cada período mensal.
+
+Trimestral
+R$ 99 a cada três meses
+Equivale a R$ 33 por mês. Cobrança de R$ 99 no início de cada período trimestral.
+
+Anual — ocultar enquanto estiver fora do MVP
+R$ 349 a cada 12 meses
+Equivale a R$ 29,08 por mês. Cobrança de R$ 349 no início de cada período anual.
+
+Transparência:
+Todos os períodos dão acesso ao mesmo produto. O que muda é a duração e o valor.
+
+O trial não vira assinatura automaticamente. Quando ele terminar, o visitante só continua após escolher um período, revisar preço e renovação e confirmar a contratação. A renovação pode ser cancelada conforme os Termos de Uso; o acesso permanece até o fim do período já pago.
+
+Nota interna:
+Não publicar preço ou período que ainda não esteja implementado no checkout. O plano semestral provisório existente no código não entra nesta landing; o anual permanece oculto enquanto estiver fora do escopo do MVP.
+
+
+12. FAQ
+
+É uma IA que cria meu treino sozinha?
+
+Não. [Nome do RT], profissional registrado no [CREF], define a metodologia, os critérios e os limites. A IA atua como ferramenta para aplicar essa estrutura na conversa.
+
+A MOVIVO é igual a um personal trainer?
+
+Não. A MOVIVO oferece orientação de treino conversacional sob responsabilidade técnica. Ela não substitui acompanhamento presencial e individual quando esse formato for necessário.
+
+Preciso baixar outro aplicativo?
+
+Não. Após o cadastro inicial, sua orientação e as conversas acontecem pelo WhatsApp.
+
+Quem pode usar?
+
+A MOVIVO foi criada para maiores de 18 anos. Suas respostas iniciais ajudam a verificar se o fluxo pode continuar ou se será necessária avaliação profissional e, em alguns casos, liberação médica.
+
+Como os ajustes funcionam?
+
+Você informa dificuldade, disponibilidade e mudanças de rotina. Esses feedbacks podem orientar ajustes previstos pela metodologia. Situações fora desses critérios seguem para avaliação profissional.
+
+O que faço se sentir dor ou mal-estar?
+
+Interrompa o exercício e avise a MOVIVO. O caso não deve continuar no fluxo automático. Em situações intensas ou urgentes, procure atendimento de saúde apropriado.
+
+Como meus dados são usados?
+
+Usamos as informações necessárias para prestar o serviço e cumprir as obrigações descritas na Política de Privacidade. Dados de saúde são sensíveis e exigem consentimento específico. Você pode exercer seus direitos pelos canais indicados nessa política.
+
+O que acontece depois dos sete dias?
+
+Nada é cobrado e o teste não vira assinatura automaticamente, porque ele não exige cartão. Para continuar, você escolhe um período vigente, revisa as condições e conclui o pagamento.
+
+Os períodos oferecem coisas diferentes?
+
+Não. Mensal, trimestral e, quando disponível, anual dão acesso ao mesmo produto. O que muda é a duração e o valor cobrado por período.
+
+
+13. FECHAMENTO
+
+Bloco Petróleo full-bleed sobre fotografia horizontal de pessoas em movimento, com overlay suficiente para leitura e espaço negativo para a copy. O Pulso converge uma única vez para o último CTA.
+
+Eyebrow:
+COMECE PELO QUE É POSSÍVEL HOJE
+
+Headline:
+Uma resposta pronta termina no texto. A MOVIVO continua a conversa no WhatsApp.
+
+Texto:
+Conte como é sua rotina e conheça durante sete dias uma orientação construída dentro de um método profissional.
+
+CTA:
+Começar 7 dias grátis
+
+Microcopy:
+7 dias grátis · sem cartão · o teste termina sem cobrança · para maiores de 18 anos
+
+Rodapé:
+
+MOVIVO · Ciência que treina com você.
+
+Responsável Técnico: [Nome do RT] — Profissional de Educação Física · [CREF]
+MOVIVO · [CREF-PJ] · [CNPJ]
+
+Termos de Uso · Política de Privacidade · Política de Cancelamento · Fale conosco · Entrar
+
+A MOVIVO oferece orientação de treino sob responsabilidade técnica profissional. A IA atua como ferramenta dentro da metodologia e dos limites definidos pelo responsável técnico. O serviço não substitui atendimento médico nem acompanhamento presencial quando necessário.
+
+
+IMAGENS, VÍDEO, 3D E ANIMAÇÕES
+
+Pacote mínimo:
+
+- 1 fotografia hero em 4:5 e 16:9, com ação e espaço negativo;
+- 3 fotografias horizontais para “vou começar”, “quero voltar” e “já treino”;
+- 3–5 fotos complementares de casa, academia de bairro, condomínio e rotina;
+- 1 retrato documental do RT;
+- 1 fotografia real dos fundadores com o RT ou, quando existir, da comunidade;
+- 1 fotografia horizontal de movimento para o fechamento;
+- 3 microclipes de 6–8 segundos;
+- 1 demonstração real do produto de 20–35 segundos;
+- 1 vídeo do RT de 30–45 segundos;
+- até 3 depoimentos verticais reais e autorizados.
+
+Direção de produção inspirada no princípio editorial observado na Zyla:
+
+- sujeito em movimento, recorte forte e fundo legível;
+- espaço negativo planejado para texto;
+- diversidade de corpos, níveis, locais e momentos de rotina;
+- cor da MOVIVO aplicada em styling, objetos ou Pulso, nunca como filtro pesado;
+- energia esportiva sem transformar musculação em imagem de performance extrema.
+
+Nenhum asset da Zyla deve ser copiado, baixado para produção ou recriado de forma confundível.
+
+Vídeos devem ser acionados pelo visitante, com poster, legenda, transcrição e controles. O carregamento fica fora do caminho crítico, conforme as recomendações de performance de vídeo do web.dev:
+https://web.dev/learn/performance/video-performance
+
+O único elemento 3D seria uma Fita Pulso de baixa complexidade — não um telefone. Inicialmente, eu a faria em SVG/2.5D. WebGL só depois, carregado sob demanda no desktop e substituído por imagem estática no mobile.
+
+Motion:
+
+- Pulso se desenha uma vez em 700–1.000ms;
+- bolhas entram com opacidade + 8px em 180–260ms;
+- capítulos do ICP revelam imagem e número em 350–500ms, sem prender a rolagem;
+- seções entram 8–12px em 350–500ms;
+- o vídeo do produto só inicia sem som quando estiver visível e deve oferecer pausa;
+- CTA comprime para 98% por cerca de 120ms;
+- máximo de dois elementos simultaneamente animados;
+- sem marquee, autoplay sonoro, parallax forte, cursor magnético ou scroll-jacking.
+
+Toda a experiência deve permanecer compreensível sem movimento. Isso acompanha a orientação da WCAG 2.2 para animações:
+https://www.w3.org/WAI/WCAG22/Understanding/animation-from-interactions.html
+
+Metas:
+
+- LCP menor ou igual a 2,5s;
+- INP menor ou igual a 200ms;
+- CLS menor ou igual a 0,1.
+
+Referência de Core Web Vitals:
+https://web.dev/articles/vitals
+
+
+SE AINDA ESTIVER EM PRÉ-LANÇAMENTO
+
+Trocar todas as CTAs por:
+
+Entrar na lista de espera
+
+Trocar a microcopy por:
+
+Seja avisado quando as inscrições abrirem. Sem cobrança.
+
+Ocultar trial, planos e afirmações de disponibilidade. A versão comercial só deve ir ao ar com RT/CREF identificados, CNPJ/CREF-PJ aplicáveis, documentos legais e fluxos de consentimento efetivamente prontos.
+
+
+ORDEM RECOMENDADA DE IMPLEMENTAÇÃO
+
+1. Hero.
+2. Faixa de confiança.
+3. Capítulos de identificação com o ICP.
+4. Produto em ação.
+5. Autor da metodologia e responsabilidade técnica.
+6. Como funciona e adaptação à vida real.
+7. Empresa e valores.
+8. Offer Card.
+9. FAQ e fechamento.
+10. Prova real, assim que houver material autorizado.
+
+Vídeo avançado, animações extras e 3D ficam para depois de medir a primeira versão. Se a fotografia, a copy e a demonstração real já comunicarem o produto, o 3D pode ser dispensado definitivamente.

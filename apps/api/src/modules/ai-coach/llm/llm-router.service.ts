@@ -175,6 +175,27 @@ export class LlmRouter {
           errorMessage: null,
         });
 
+        // Telemetria de uso de token com o slot da persona (Sprint 11): o prefixo cacheável
+        // muda com a persona, então hit-rate agregado sem separar os slots soma duas
+        // populações de prompt distintas. `personaSlot` está em `PII_FIELDS` e o pino o
+        // redige — combinado com `userId` ele revelaria o sexo do titular, e o Sato foi
+        // explícito de que redigir a origem e deixar o derivado em claro não fecha nada.
+        // O campo fica no evento assim mesmo: é o ponto de instrumentação, e o corte real
+        // por slot sai de `ai_jobs` ⋈ `users.biological_sex` no banco, sob acesso controlado.
+        this.logger.info(
+          {
+            event: 'llm_token_usage',
+            provider: provider.name,
+            model: result.model,
+            intent: request.intent ?? null,
+            personaSlot: request.personaSlot ?? null,
+            tokensInput: result.usage.tokensInput,
+            tokensCached: result.usage.tokensCached,
+            tokensOutput: result.usage.tokensOutput,
+          },
+          'llm_token_usage',
+        );
+
         return {
           text: result.text,
           provider: provider.name,

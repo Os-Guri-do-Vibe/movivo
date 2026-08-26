@@ -217,16 +217,22 @@ describe('migração versionada num Postgres limpo', () => {
       await client`
         INSERT INTO protocols (
           id, user_id, status, approval_status, professional_id, signed_at,
-          signature_hash, content, constraints, human_review_required
+          signature_hash, content, constraints, human_review_required,
+          -- NOT NULL sem default desde a migração 0033.
+          mesocycle_name, start_date, end_date
         ) VALUES
           ('50000000-0000-4000-8000-000000000001', ${mappedHolder}::uuid,
-           'ACTIVE', 'AUTO_APPROVED', ${orphanSigner}::uuid, now(), repeat('a', 64), '{}', '{}', false),
+           'ACTIVE', 'AUTO_APPROVED', ${orphanSigner}::uuid, now(), repeat('a', 64), '{}', '{}', false,
+           'Mesociclo 1 — Adaptação', now(), now() + interval '12 weeks'),
           ('50000000-0000-4000-8000-000000000002', ${blockedHolder}::uuid,
-           'ACTIVE', 'AUTO_APPROVED', ${orphanSigner}::uuid, now(), repeat('b', 64), '{}', '{}', false),
+           'ACTIVE', 'AUTO_APPROVED', ${orphanSigner}::uuid, now(), repeat('b', 64), '{}', '{}', false,
+           'Mesociclo 1 — Adaptação', now(), now() + interval '12 weeks'),
           ('50000000-0000-4000-8000-000000000003', ${invalidRoleHolder}::uuid,
-           'ACTIVE', 'AUTO_APPROVED', ${invalidSigner}::uuid, now(), repeat('c', 64), '{}', '{}', false),
+           'ACTIVE', 'AUTO_APPROVED', ${invalidSigner}::uuid, now(), repeat('c', 64), '{}', '{}', false,
+           'Mesociclo 1 — Adaptação', now(), now() + interval '12 weeks'),
           ('50000000-0000-4000-8000-000000000004', ${inactiveCrefHolder}::uuid,
-           'ACTIVE', 'AUTO_APPROVED', ${inactiveSigner}::uuid, now(), repeat('d', 64), '{}', '{}', false)
+           'ACTIVE', 'AUTO_APPROVED', ${inactiveSigner}::uuid, now(), repeat('d', 64), '{}', '{}', false,
+           'Mesociclo 1 — Adaptação', now(), now() + interval '12 weeks')
       `;
 
       const migration = readFileSync(resolve(apiRoot, 'drizzle', '0015_calm_sage.sql'), 'utf8');
