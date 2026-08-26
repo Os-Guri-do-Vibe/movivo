@@ -353,13 +353,19 @@ services:
   # ===========================================================================
   evolution-postgres:
     <<: *common
-    image: ${EVOLUTION_POSTGRES_IMAGE:-postgres:17-alpine}
+    image: ${EVOLUTION_POSTGRES_IMAGE:-postgres:18-alpine}
     container_name: movivo-evolution-postgres
     environment:
       POSTGRES_USER: ${EVOLUTION_POSTGRES_USER:-evolution}
       POSTGRES_DB: ${EVOLUTION_POSTGRES_DB:-evolution}
       POSTGRES_PASSWORD_FILE: /run/secrets/evolution_postgres_password
       TZ: ${TZ:-America/Sao_Paulo}
+      # A partir da 18, a imagem oficial passou a esperar os dados num subdiretório
+      # compatível com `pg_ctlcluster` (docker-library/postgres#1259) — montar o volume
+      # direto na raiz `/var/lib/postgresql/data` faz o entrypoint recusar subir, mesmo
+      # em volume novo/vazio. `PGDATA` aponta pra um subcaminho dentro do MESMO volume,
+      # sem mudar o mapeamento de `volumes:` abaixo.
+      PGDATA: /var/lib/postgresql/data/pgdata
     secrets:
       - evolution_postgres_password
     volumes:
