@@ -14,6 +14,7 @@
     pgcrypto_key                  chave de criptografia de dados de saude (Sprint 1)
     evolution_postgres_password   senha do Postgres dedicado da EvolutionAPI
     evolution_api_key             AUTHENTICATION_API_KEY da EvolutionAPI
+    evolution_webhook_token       token do webhook de ENTRADA da EvolutionAPI (US-3.1-EVO)
     jwt_private_key/jwt_public_key  par RS256 do JWT (Sprint 1 / US-1.4)
     pgbouncer_userlist.txt        auth_file do PgBouncer, derivado das senhas acima
 
@@ -117,6 +118,10 @@ Write-Secret -Name 'redis_password'              -Value (New-RandomToken 48)
 Write-Secret -Name 'pgcrypto_key'                -Value (New-RandomToken 64)
 Write-Secret -Name 'evolution_postgres_password' -Value (New-RandomToken 40)
 Write-Secret -Name 'evolution_api_key'           -Value (New-RandomToken 40)
+# SEPARADO da chave acima: o envelope entregue pela EvolutionAPI publica o apikey da
+# instancia no proprio corpo, entao reusa-lo como autenticacao de entrada seria
+# autenticar com um valor publico. 48 chars > o minimo de 43 do env.schema.
+Write-Secret -Name 'evolution_webhook_token'     -Value (New-RandomToken 48)
 
 # Par de chaves RS256 do JWT (US-1.4). Gerado via openssl (vem com o Git for
 # Windows). O PowerShell 5.1 nao exporta PKCS#8/SPKI PEM de forma simples, entao

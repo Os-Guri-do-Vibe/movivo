@@ -19,6 +19,7 @@
  * backend, frontend e banco não podem divergir sem quebrar a compilação.
  */
 import {
+  type BiologicalSex,
   ParqState,
   ProtocolApprovalStatus,
   ProtocolReviewUrgency,
@@ -43,6 +44,27 @@ function valuesOf<T extends Record<string, string>>(source: T): [T[keyof T], ...
 // ---------------------------------------------------------------------------
 // USER
 // ---------------------------------------------------------------------------
+
+/**
+ * Sexo biológico — parâmetro técnico de prescrição (Alexandre §5.7: **não** é dado
+ * sensível de saúde do Art. 11, é dado pessoal comum).
+ *
+ * Até a Sprint 11 o valor vivia só dentro do jsonb da anamnese (`data_block_1`). Virou
+ * coluna própria em duas tabelas porque duas leituras de caminho quente passaram a
+ * depender dele: `users.biological_sex` (qual persona atende o titular) e
+ * `agent_config.target_sex` (qual público aquela persona atende). Ler o jsonb da anamnese
+ * a cada mensagem do WhatsApp para descobrir a persona seria um JOIN + parse por turno.
+ *
+ * O nome dos valores é o do enum compartilhado (`biologicalSexSchema`); o `satisfies`
+ * abaixo quebra a compilação se o pacote compartilhado ganhar um valor novo que o banco
+ * não conheça — que é exatamente o modo de falha que este arquivo existe para evitar.
+ */
+const BIOLOGICAL_SEX = {
+  MALE: 'MALE',
+  FEMALE: 'FEMALE',
+} as const satisfies Record<BiologicalSex, BiologicalSex>;
+
+export const biologicalSexEnum = pgEnum('biological_sex', valuesOf(BIOLOGICAL_SEX));
 
 /**
  * Ciclo de vida do usuário (Rafael §7.1).

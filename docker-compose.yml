@@ -427,6 +427,15 @@ services:
         exec bash -c ". ./Docker/scripts/deploy_database.sh && npm run start:prod"
     volumes:
       - evolution-instances:/evolution/instances
+    # A EvolutionAPI precisa ALCANÇAR O HOST em dois caminhos: baixar o PDF do protocolo
+    # (`media` como URL) e ENTREGAR o webhook de entrada na API (US-3.1-EVO), ambos em
+    # `http://localhost:PORTA` do ponto de vista de quem roda no host. Dentro do container,
+    # `localhost` é o próprio container — por isso o backend reescreve para
+    # `host.docker.internal` (`toContainerReachableUrl`). Esse hostname existe nativamente
+    # no Docker Desktop (macOS/Windows) mas NÃO no Docker Engine do Linux/CI: `host-gateway`
+    # cria o mapeamento lá. No Desktop é redundante e inofensivo.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     ports:
       - '127.0.0.1:${HOST_EVOLUTION_PORT:-8081}:8080'
     healthcheck:

@@ -1,4 +1,4 @@
-import { CREF_HANDOFF_SUFFIX, DEFAULT_AGENT_PERSONA } from '@movivo/shared';
+import { CREF_HANDOFF_SUFFIX, DEFAULT_AGENT_PERSONA, type BiologicalSex } from '@movivo/shared';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -26,6 +26,7 @@ vi.mock('@/lib/control-center-api', async (importOriginal) => ({
 }));
 
 import { AgentPersonaProvider } from './agent-persona-context';
+import { AgentPersonaWorkspaceProvider } from './agent-persona-workspace';
 import { AiPersonaDashboard } from './ai-persona';
 
 const meta = {
@@ -54,6 +55,7 @@ const history = {
   data: {
     versions: [
       {
+        targetSex: 'FEMALE' as const,
         version: 2,
         status: 'PUBLISHED' as const,
         changeNote: 'tom mais direto',
@@ -63,6 +65,7 @@ const history = {
         payload: DEFAULT_AGENT_PERSONA,
       },
       {
+        targetSex: 'FEMALE' as const,
         version: 1,
         status: 'PUBLISHED' as const,
         changeNote: 'configuração inicial',
@@ -85,11 +88,16 @@ const topics = {
   meta,
 };
 
-function renderPersona({ canWrite = true, canApprove = false } = {}) {
+function renderPersona(
+  options: { canWrite?: boolean; canApprove?: boolean; targetSex?: BiologicalSex } = {},
+) {
+  const { canWrite = true, canApprove = false, targetSex = 'FEMALE' } = options;
   return render(
-    <AgentPersonaProvider canWrite={canWrite} canApprove={canApprove}>
-      <AiPersonaDashboard />
-    </AgentPersonaProvider>,
+    <AgentPersonaWorkspaceProvider canWrite={canWrite} canApprove={canApprove}>
+      <AgentPersonaProvider targetSex={targetSex}>
+        <AiPersonaDashboard />
+      </AgentPersonaProvider>
+    </AgentPersonaWorkspaceProvider>,
   );
 }
 
@@ -100,18 +108,33 @@ async function goToStep(name: string) {
 beforeEach(() => {
   for (const mock of Object.values(api)) mock.mockReset();
   api.getAgentPersona.mockResolvedValue({
-    data: { persona: DEFAULT_AGENT_PERSONA, version: 2 },
+    data: {
+      targetSex: 'FEMALE',
+      persona: DEFAULT_AGENT_PERSONA,
+      version: 2,
+      servedFromSex: 'FEMALE',
+    },
     meta,
   });
   api.getAgentConfigHistory.mockResolvedValue(history);
   api.getForbiddenTopics.mockResolvedValue(topics);
   api.getInviolableRules.mockResolvedValue(rules);
   api.publishAgentPersona.mockResolvedValue({
-    data: { persona: DEFAULT_AGENT_PERSONA, version: 3 },
+    data: {
+      targetSex: 'FEMALE',
+      persona: DEFAULT_AGENT_PERSONA,
+      version: 3,
+      servedFromSex: 'FEMALE',
+    },
     meta,
   });
   api.rollbackAgentPersona.mockResolvedValue({
-    data: { persona: DEFAULT_AGENT_PERSONA, version: 4 },
+    data: {
+      targetSex: 'FEMALE',
+      persona: DEFAULT_AGENT_PERSONA,
+      version: 4,
+      servedFromSex: 'FEMALE',
+    },
     meta,
   });
   api.simulateAgentConfig.mockResolvedValue({
@@ -223,6 +246,7 @@ describe('AiPersonaDashboard', () => {
 
     await waitFor(() =>
       expect(api.publishAgentPersona).toHaveBeenCalledWith({
+        targetSex: 'FEMALE',
         payload: { ...DEFAULT_AGENT_PERSONA, agentName: 'NOVA' },
         changeNote: 'novo nome da agente',
       }),
@@ -301,10 +325,76 @@ describe('AiPersonaDashboard', () => {
 
     await waitFor(() =>
       expect(api.rollbackAgentPersona).toHaveBeenCalledWith({
+        targetSex: 'FEMALE',
         targetVersion: 1,
         changeNote: 'Rollback para a versão 1',
       }),
     );
+  });
+
+  /*
+   * "Versão 1" existe nos DOIS slots e não é a mesma persona (`UNIQUE(target_sex, version)`).
+   * Um rollback que esquecesse o slot reverteria o público errado — e nada na tela avisaria.
+   */
+  it('rollback e publicação viajam com o slot do formulário, não com o slot padrão', async () => {
+    const user = userEvent.setup();
+    api.getAgentPersona.mockResolvedValue({
+      data: {
+        targetSex: 'MALE',
+        persona: DEFAULT_AGENT_PERSONA,
+        version: 2,
+        servedFromSex: 'MALE',
+      },
+      meta,
+    });
+    api.getAgentConfigHistory.mockResolvedValue({
+      data: { versions: history.data.versions.map((v) => ({ ...v, targetSex: 'MALE' as const })) },
+      meta,
+    });
+    renderPersona({ targetSex: 'MALE' });
+
+    expect(await screen.findByRole('heading', { name: 'Persona masculina' })).toBeVisible();
+    expect(api.getAgentPersona).toHaveBeenCalledWith('MALE', expect.anything());
+    expect(api.getAgentConfigHistory).toHaveBeenCalledWith('MALE', expect.anything());
+    expect(api.getInviolableRules).toHaveBeenCalledWith('MALE', expect.anything());
+
+    await user.click(screen.getByRole('button', { name: 'Revisar e publicar' }));
+    await user.click(screen.getByRole('button', { name: 'Restaurar' }));
+    await user.click(screen.getByRole('button', { name: 'Confirmar restauração' }));
+
+    await waitFor(() =>
+      expect(api.rollbackAgentPersona).toHaveBeenCalledWith({
+        targetSex: 'MALE',
+        targetVersion: 1,
+        changeNote: 'Rollback para a versão 1',
+      }),
+    );
+  });
+
+  it('avisa quando o público ainda é atendido pela persona do outro slot', async () => {
+    api.getAgentPersona.mockResolvedValue({
+      data: {
+        targetSex: 'MALE',
+        persona: DEFAULT_AGENT_PERSONA,
+        version: null,
+        servedFromSex: 'FEMALE',
+      },
+      meta,
+    });
+    renderPersona({ targetSex: 'MALE' });
+
+    expect(
+      await screen.findByText(/Ainda não há persona publicada para este público/),
+    ).toBeVisible();
+    expect(screen.getByText(/recebe a persona feminina/)).toBeVisible();
+  });
+
+  it('não mostra o aviso de empréstimo quando o slot tem persona própria', async () => {
+    renderPersona();
+    await screen.findByLabelText('Nome da agente');
+    expect(
+      screen.queryByText(/Ainda não há persona publicada para este público/),
+    ).not.toBeInTheDocument();
   });
 
   it('desabilita a edição para acesso somente leitura', async () => {

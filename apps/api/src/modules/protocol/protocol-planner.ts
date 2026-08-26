@@ -19,9 +19,12 @@
 import type { ProtocolStructure } from '@movivo/shared';
 
 import type { GenerateProtocolCommand, GenerateProtocolResult } from './protocol-generator.service';
-import type { UserConstraints } from './user-constraints';
 import { buildFallbackProtocol, FALLBACK_TEMPLATE_VERSION } from './validation/fallback-template';
-import type { ValidationService, ValidationViolation } from './validation/validation.service';
+import type {
+  ValidateProtocolInput,
+  ValidationService,
+  ValidationViolation,
+} from './validation/validation.service';
 
 export interface ProtocolGenerator {
   generate(command: GenerateProtocolCommand): Promise<GenerateProtocolResult>;
@@ -70,7 +73,7 @@ export async function planProtocol(
   validation: ValidationService,
   command: GenerateProtocolCommand,
 ): Promise<PlanResult> {
-  const constraints: Pick<UserConstraints, 'goal' | 'injuryTags' | 'level' | 'preferredDays'> = {
+  const constraints: ValidateProtocolInput['constraints'] = {
     goal: command.constraints.goal,
     injuryTags: command.constraints.injuryTags,
     // v2: o validador precisa do nível para vetar divisão/técnica acima dele (US-2.3).
@@ -79,10 +82,18 @@ export async function planProtocol(
     // gerador recebia, via `command.constraints` inteiro) — a regra de sessão-por-dia
     // nunca disparava de verdade, só nos testes que chamam `validate()` direto.
     preferredDays: command.constraints.preferredDays,
+    // 2026-08-24: teto de fase do PAR-Q. Presente = nada além de `ADAPTACAO` passa, e o
+    // piso de RIR (2) entra junto — os dois vetos vivem no `ValidationService`.
+    ...(command.constraints.maxPhase ? { maxPhase: command.constraints.maxPhase } : {}),
   };
+  // Achado 2026-08-24: `parqFlags` nunca chegava ao validador por aqui (só o painel
+  // passava, ao reeditar/assinar). Enquanto o PAR-Q era trava de geração isso não tinha
+  // consequência — nenhum protocolo gerado tinha flag. Agora tem, e sem isto `checkParq`
+  // seria letra morta no caminho que mais precisa dele.
+  const parqFlags = command.constraints.parqTags;
 
   const gen1 = await generator.generate(command);
-  const v1 = validation.validate({ structure: gen1.structure, constraints });
+  const v1 = validation.validate({ structure: gen1.structure, constraints, parqFlags });
 
   if (v1.action !== 'BLOCK_FALLBACK') {
     // PASS ou FLAG_HUMAN_REVIEW — os dois entram na fila igual (só o `validationAction`
@@ -92,7 +103,7 @@ export async function planProtocol(
 
   // Fallback de modelo (US-2.3.3): regenera e revalida antes de cair no template.
   const gen2 = await generator.generate(command);
-  const v2 = validation.validate({ structure: gen2.structure, constraints });
+  const v2 = validation.validate({ structure: gen2.structure, constraints, parqFlags });
   if (v2.action !== 'BLOCK_FALLBACK') {
     return fromGeneration(gen2, v2.code, v2.violations);
   }

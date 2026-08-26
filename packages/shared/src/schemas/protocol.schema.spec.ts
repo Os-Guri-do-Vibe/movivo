@@ -102,4 +102,71 @@ describe('protocolStructureSchema', () => {
     };
     expect(protocolStructureSchema.safeParse(badTechnique).success).toBe(false);
   });
+
+  // Achado 2026-08-22 (item 8): séries de aquecimento com range próprio, aditivo à série
+  // válida (`sets`/`reps` no topo do exercício, que continuam representando só as válidas).
+  describe('warmupBlocks', () => {
+    it('protocolo sem warmupBlocks continua válido (aditivo, sem migração)', () => {
+      const parsed = protocolStructureSchema.parse(validStructure);
+      expect(parsed.sessions[0]?.exercises[0]?.warmupBlocks).toBeUndefined();
+    });
+
+    it('aceita exercício com blocos de aquecimento por reps e por duração', () => {
+      const structure = {
+        ...validStructure,
+        sessions: [
+          sessionWith({
+            warmupBlocks: [
+              { sets: 1, reps: { min: 15, max: 15 }, restSeconds: 30 },
+              { sets: 1, durationSeconds: 20 },
+            ],
+          }),
+        ],
+      };
+      expect(protocolStructureSchema.safeParse(structure).success).toBe(true);
+    });
+
+    it('rejeita bloco de aquecimento com reps E durationSeconds ao mesmo tempo', () => {
+      const structure = {
+        ...validStructure,
+        sessions: [
+          sessionWith({
+            warmupBlocks: [{ sets: 1, reps: { min: 10, max: 12 }, durationSeconds: 20 }],
+          }),
+        ],
+      };
+      expect(protocolStructureSchema.safeParse(structure).success).toBe(false);
+    });
+
+    it('rejeita bloco de aquecimento sem reps nem durationSeconds', () => {
+      const structure = {
+        ...validStructure,
+        sessions: [sessionWith({ warmupBlocks: [{ sets: 1 }] })],
+      };
+      expect(protocolStructureSchema.safeParse(structure).success).toBe(false);
+    });
+
+    it('rejeita mais de 4 blocos de aquecimento', () => {
+      const structure = {
+        ...validStructure,
+        sessions: [
+          sessionWith({
+            warmupBlocks: Array.from({ length: 5 }, () => ({
+              sets: 1,
+              reps: { min: 10, max: 12 },
+            })),
+          }),
+        ],
+      };
+      expect(protocolStructureSchema.safeParse(structure).success).toBe(false);
+    });
+
+    it('restSeconds do bloco de aquecimento é opcional', () => {
+      const structure = {
+        ...validStructure,
+        sessions: [sessionWith({ warmupBlocks: [{ sets: 1, reps: { min: 10, max: 12 } }] })],
+      };
+      expect(protocolStructureSchema.safeParse(structure).success).toBe(true);
+    });
+  });
 });

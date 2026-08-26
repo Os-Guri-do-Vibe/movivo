@@ -44,6 +44,11 @@ export const SECRET_KEYS = [
   // WhatsApp, não é canal de produção). OPCIONAL no boot: sem ela o painel mostra
   // "não configurado".
   'EVOLUTION_API_KEY',
+  // Webhook de ENTRADA da EvolutionAPI (US-3.1-EVO). Segredo SEPARADO da chave acima: o
+  // envelope entregue pela EvolutionAPI publica o `apikey` da instância no corpo, então a
+  // chave de API não serve como autenticação de entrada. OPCIONAL no boot: sem ele o
+  // inbound da EvolutionAPI é descartado fail-closed.
+  'EVOLUTION_WEBHOOK_TOKEN',
   // Sprint 4 — gateways de pagamento (US-4.1). OPCIONAIS no boot: sem elas o app sobe com o
   // adaptador MOCK (dev/CI); conta/chave real é bloqueador de lançamento, não de dev.
   'STRIPE_SECRET_KEY',

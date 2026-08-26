@@ -3,7 +3,7 @@
  *
  * Dois cenários que os testes existentes não cobriam: (1) renomear a agente no painel tem
  * que aparecer no prompt do coach, nas mensagens estáticas de WhatsApp/assinatura e na
- * recusa de fora-de-escopo — os três caminhos que hoje passam por `agentName()`; (2) por
+ * recusa de fora-de-escopo — os três caminhos que hoje passam pelo nome da persona resolvida; (2) por
  * mais que a persona mude, o texto que chega ao aluno nunca pode conter linguagem clínica
  * vedada, e o prompt nunca pode perder os blocos L0.
  */
@@ -12,12 +12,13 @@ import { describe, expect, it } from 'vitest';
 
 import type { AgentPersonaService } from '../../../core/agent-config/agent-persona.service';
 import { conversionMessage } from '../../subscription/subscription-messages';
-import { formatProtocolDelivery } from '../../whatsapp/message-templates';
+import { analyzingMessage, formatProtocolDelivery } from '../../whatsapp/message-templates';
 import { INTENTS } from './intent.types';
 import { PromptResolverService } from './prompt-resolver.service';
 import { INVIOLABLE_RULES_BLOCK, SCOPE_PERIMETER_BLOCK } from './prompts';
 
 const PROTOCOL = {
+  goal: 'GAIN_MUSCLE',
   sessions: [
     {
       focus: 'Corpo inteiro',
@@ -63,8 +64,20 @@ function resolver(persona: AgentPersona): PromptResolverService {
 /** Textos que o aluno de fato lê, para uma persona qualquer. */
 async function userFacingTexts(persona: AgentPersona): Promise<string[]> {
   return [
-    await resolver(persona).foraDeEscopoResponse(),
-    formatProtocolDelivery(PROTOCOL, 'https://movivo.test/protocolo/abc', persona.agentName),
+    resolver(persona).foraDeEscopoResponseFor(persona),
+    formatProtocolDelivery(
+      PROTOCOL,
+      'https://movivo.test/protocolo/abc',
+      persona,
+      12,
+      'Mesociclo 1 — Adaptação',
+    ),
+    // `analyzingMessage`/`formatProtocolDelivery` reproduzem `agentSelfIntro`, que cita a
+    // marca MOVIVO — o teste de renomeação abaixo usa `\bMOVI\b` (fronteira de palavra),
+    // não substring crua, exatamente para não confundir "MOVI" (nome antigo) com "MOVIVO"
+    // (a marca, que é legítimo continuar aparecendo).
+    analyzingMessage(persona, { mandatory: false }),
+    analyzingMessage(persona, { mandatory: true }),
     ...(['day7', 'day10', 'day13', 'day14', 'winback'] as const).map((key) =>
       conversionMessage(key, 'https://movivo.test/checkout', persona.agentName),
     ),
@@ -75,20 +88,24 @@ describe('renomear a agente propaga (TASK-7.9.3)', () => {
   const persona = { ...DEFAULT_AGENT_PERSONA, agentName: 'ATLAS' };
 
   it('chega ao system prompt do coach', async () => {
-    expect(await resolver(persona).resolvePrompt('DUVIDA_TECNICA')).toContain('ATLAS');
+    expect(await resolver(persona).resolvePromptFor('DUVIDA_TECNICA', persona)).toContain('ATLAS');
   });
 
   it('chega à recusa de fora-de-escopo', async () => {
-    expect(await resolver(persona).foraDeEscopoResponse()).toContain('ATLAS');
+    expect(resolver(persona).foraDeEscopoResponseFor(persona)).toContain('ATLAS');
   });
 
   it('chega às mensagens estáticas de WhatsApp e de assinatura', () => {
-    expect(formatProtocolDelivery(PROTOCOL, 'https://x/p/1', 'ATLAS')).toContain('ATLAS');
+    expect(formatProtocolDelivery(PROTOCOL, 'https://x/p/1', persona, 12, 'Mesociclo 1')).toContain(
+      'ATLAS',
+    );
     expect(conversionMessage('day14', 'https://x/c', 'ATLAS')).toContain('ATLAS');
   });
 
   it('nenhum texto ao aluno carrega o nome antigo depois da troca', async () => {
-    for (const text of await userFacingTexts(persona)) expect(text).not.toContain('MOVI');
+    // Fronteira de palavra: "MOVI" (nome antigo) não pode aparecer, mas "MOVIVO" (a
+    // marca, citada dentro de `agentSelfIntro`) é legítimo e não deve dar falso positivo.
+    for (const text of await userFacingTexts(persona)) expect(text).not.toMatch(/\bMOVI\b/);
   });
 });
 
@@ -103,14 +120,16 @@ describe('golden set de conversa verde (TASK-7.9.3)', () => {
 
   it('o respaldo do profissional CREF continua visível na entrega do protocolo', () => {
     for (const persona of PERSONAS) {
-      expect(formatProtocolDelivery(PROTOCOL, 'https://x/p/1', persona.agentName)).toMatch(/CREF/);
+      expect(formatProtocolDelivery(PROTOCOL, 'https://x/p/1', persona, 12, 'Mesociclo 1')).toMatch(
+        /CREF/,
+      );
     }
   });
 
   it('todo prompt mantém os dois blocos L0, qualquer que seja a persona', async () => {
     for (const persona of PERSONAS) {
       for (const intent of INTENTS) {
-        const prompt = await resolver(persona).resolvePrompt(intent);
+        const prompt = await resolver(persona).resolvePromptFor(intent, persona);
         expect(prompt).toContain(SCOPE_PERIMETER_BLOCK);
         expect(prompt).toContain(INVIOLABLE_RULES_BLOCK);
       }

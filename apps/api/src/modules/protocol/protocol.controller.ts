@@ -10,8 +10,9 @@
  * coluna de titular da projeção. Token não-UUID ou protocolo inexistente/não-ACTIVE →
  * 404 uniforme, sem vazar a existência do dado.
  */
-import { Controller, Get, Header, NotFoundException, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Header, NotFoundException, Param, Res, UseGuards } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
+import type { Response } from 'express';
 import { uuidSchema, type ProtocolRead } from '@movivo/shared';
 
 import { ProtocolRepository } from './protocol.repository';
@@ -28,5 +29,20 @@ export class ProtocolController {
     const protocol = await this.protocols.findByToken(token);
     if (!protocol) throw new NotFoundException();
     return protocol;
+  }
+
+  /**
+   * PDF do protocolo assinado, para o link de documento enviado pelo WhatsApp
+   * (`WhatsappOutboundWorker`). Mesma fronteira IDOR-safe do endpoint acima.
+   */
+  @Get('by-token/:token/pdf')
+  @Header('Referrer-Policy', 'no-referrer')
+  async pdfByToken(@Param('token') token: string, @Res() res: Response): Promise<void> {
+    if (!uuidSchema.safeParse(token).success) throw new NotFoundException();
+    const pdf = await this.protocols.findPdfByToken(token);
+    if (!pdf) throw new NotFoundException();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="protocolo-movivo.pdf"');
+    res.send(pdf);
   }
 }

@@ -11,8 +11,11 @@ import type {
 
 export const PROTOCOL_ID = '11111111-1111-4111-8111-111111111111';
 export const HANDOFF_ID = '22222222-2222-4222-8222-222222222222';
-export const PARQ_ID = '33333333-3333-4333-8333-333333333333';
+/** Protocolo `MANDATORY` cuja sessão de origem está com PAR-Q bloqueado. */
+export const PARQ_PROTOCOL_ID = '33333333-3333-4333-8333-333333333333';
 export const CHECKIN_ID = '44444444-4444-4444-8444-444444444444';
+/** Protocolo `MANDATORY` que um CREF editou à mão e precisa de sign-off fresco. */
+export const EDIT_PROTOCOL_ID = '55555555-5555-4555-8555-555555555555';
 
 export const anamnesisAnswers: AnamnesisAnswers = {
   userId: 'user-1',
@@ -102,6 +105,7 @@ export const protocolItem: QueueItem = {
   summary: 'Hipertrofia · 3x por semana',
   status: 'PENDING_REVIEW',
   autoReleaseAt: null,
+  origin: null,
 };
 
 /** Protocolo "Disponível para Revisão" — libera sozinho se o CREF não agir a tempo. */
@@ -115,6 +119,7 @@ export const optionalProtocolItem: QueueItem = {
   summary: 'Condicionamento · 4x por semana',
   status: 'PENDING_REVIEW',
   autoReleaseAt: '2026-08-03T12:30:00.000Z',
+  origin: null,
 };
 
 export const handoffItem: QueueItem = {
@@ -127,18 +132,40 @@ export const handoffItem: QueueItem = {
   summary: 'Conteúdo já anonimizado.',
   status: 'OPEN',
   autoReleaseAt: null,
+  origin: null,
 };
 
-export const parqItem: QueueItem = {
-  id: PARQ_ID,
-  kind: 'PARQ',
-  severity: 'ALERT',
+/**
+ * PAR-Q bloqueante depois de 2026-08-24: NÃO é mais `kind: 'PARQ'` apontando pra uma
+ * sessão sem protocolo — é um protocolo normal, gerado em modo conservador, marcado
+ * `MANDATORY`/`SAFETY` com `origin: 'PARQ'`. Título idêntico ao de um protocolo
+ * opcional de propósito: o que distingue é a severidade e a legenda de origem.
+ */
+export const parqProtocolItem: QueueItem = {
+  id: PARQ_PROTOCOL_ID,
+  kind: 'PROTOCOL',
+  severity: 'SAFETY',
   createdAt: '2026-08-03T11:00:00.000Z',
   ageMinutes: 70,
-  title: 'PAR-Q aguardando liberação',
-  summary: 'Um cuidado a mais antes de começar.',
-  status: 'BLOCKED_PENDING_CLEARANCE',
+  title: 'Protocolo para Revisão: Carla Teste',
+  summary: 'PENDING_REVIEW',
+  status: 'PENDING_REVIEW',
   autoReleaseAt: null,
+  origin: 'PARQ',
+};
+
+/** A outra origem de `MANDATORY`: edição manual do CREF, sem alerta clínico. */
+export const editProtocolItem: QueueItem = {
+  id: EDIT_PROTOCOL_ID,
+  kind: 'PROTOCOL',
+  severity: 'ALERT',
+  createdAt: '2026-08-03T11:15:00.000Z',
+  ageMinutes: 55,
+  title: 'Protocolo para Revisão: Diego Teste',
+  summary: 'Editado pelo profissional · aguarda assinatura',
+  status: 'PENDING_REVIEW',
+  autoReleaseAt: null,
+  origin: 'EDIT',
 };
 
 export const checkinItem: QueueItem = {
@@ -151,14 +178,16 @@ export const checkinItem: QueueItem = {
   summary: 'Sinalização de segurança registrada no check-in.',
   status: 'OPEN',
   autoReleaseAt: null,
+  origin: null,
 };
 
-// `mandatory` é só PAR-Q bloqueado; `optional` é todo protocolo — só quem carrega
+// Todo item das duas caixas é protocolo. `mandatory` cobre as duas origens (PAR-Q e
+// edição manual) e nunca libera sozinho; `optional` é o resto — só quem carrega
 // `autoReleaseAt` (optionalProtocolItem) de fato libera sozinho.
 export const queueResponse: QueueResponse = {
-  mandatory: [parqItem],
+  mandatory: [parqProtocolItem, editProtocolItem],
   optional: [optionalProtocolItem, protocolItem],
-  counts: { mandatory: 1, optional: 2, total: 3 },
+  counts: { mandatory: 2, optional: 2, total: 4 },
 };
 
 export const anonymizedReplay: AnonymizedReplay = {

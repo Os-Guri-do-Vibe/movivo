@@ -12,22 +12,30 @@ const professional: AuthenticatedUser = {
 };
 
 describe('DashboardController SSE', () => {
-  it('mantém mutações CREF-only e libera a leitura da fila para ADMIN', () => {
+  it('libera leitura da fila e as mutações (assinar/editar/resolver) para PROFESSIONAL/ADMIN', () => {
     const stream = { subscribe: vi.fn() };
     const events = vi.fn(() => stream);
     const controller = new DashboardController({ events } as unknown as DashboardService);
 
+    // A classe herda só `PROFESSIONAL` (linha de base); achado 2026-08-22 — ADMIN
+    // (conta fundador) ganhou as mesmas mutações via `@Roles` explícito por método.
     expect(Reflect.getMetadata(ROLES_KEY, DashboardController)).toEqual(['PROFESSIONAL']);
     expect(Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.events)).toEqual([
       'PROFESSIONAL',
       'ADMIN',
     ]);
-    expect(
-      Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.signProtocol),
-    ).toBeUndefined();
-    expect(
-      Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.releaseParq),
-    ).toBeUndefined();
+    expect(Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.editProtocol)).toEqual([
+      'PROFESSIONAL',
+      'ADMIN',
+    ]);
+    expect(Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.signProtocol)).toEqual([
+      'PROFESSIONAL',
+      'ADMIN',
+    ]);
+    expect(Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.resolveHandoff)).toEqual([
+      'PROFESSIONAL',
+      'ADMIN',
+    ]);
     expect(controller.events(professional)).toBe(stream);
     expect(events).toHaveBeenCalledWith(professional);
   });
@@ -48,19 +56,15 @@ describe('DashboardController SSE', () => {
     expect(anamnesisAnswers).toHaveBeenCalledWith(professional, 'proto-1');
   });
 
-  it('rota de respostas da anamnese via PAR-Q: PROFESSIONAL/ADMIN, delega pro service', async () => {
-    const parqAnamnesisAnswers = vi.fn(async () => ({ userId: 'u1' }));
-    const controller = new DashboardController({
-      parqAnamnesisAnswers,
-    } as unknown as DashboardService);
-
-    expect(
-      Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.parqAnamnesisAnswers),
-    ).toEqual(['PROFESSIONAL', 'ADMIN']);
-    await expect(controller.parqAnamnesisAnswers(professional, 'session-1')).resolves.toEqual({
-      userId: 'u1',
-    });
-    expect(parqAnamnesisAnswers).toHaveBeenCalledWith(professional, 'session-1');
+  /**
+   * 2026-08-24: PAR-Q não tem mais rota própria. `POST /parq/:id/release` e
+   * `GET /queue/parq/:id/anamnesis` foram removidas junto com a tela separada — assinar o
+   * protocolo é o que libera o PAR-Q, e a anamnese é lida pela rota do protocolo.
+   */
+  it('não expõe mais rotas próprias de PAR-Q', () => {
+    const controller = DashboardController.prototype as unknown as Record<string, unknown>;
+    expect(controller.releaseParq).toBeUndefined();
+    expect(controller.parqAnamnesisAnswers).toBeUndefined();
   });
 
   it('declara headers anti-cache e anti-buffering no endpoint', () => {

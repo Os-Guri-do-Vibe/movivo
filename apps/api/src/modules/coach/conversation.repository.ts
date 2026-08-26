@@ -8,6 +8,7 @@
  */
 import { Injectable } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
+import type { BiologicalSex } from '@movivo/shared';
 
 import { conversations, handoffAlerts, protocols, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
@@ -40,18 +41,38 @@ export class ConversationRepository {
     private readonly queueEvents: DashboardQueueEventsService,
   ) {}
 
-  async loadScrubUser(userId: string): Promise<ScrubUser> {
+  /**
+   * Uma leitura de `users` por job, sob RLS, com tudo que o worker precisa do titular: a
+   * PII para o scrubber e o `biologicalSex` que decide QUAL persona o atende (Sprint 11).
+   *
+   * As duas coisas juntas de propósito — eram uma query só antes do slot existir, e continuam
+   * sendo uma query só. `biologicalSex` nulo é normal (titular anterior à coluna, ou que
+   * nunca submeteu anamnese) e nunca derruba a resposta: a resolução da persona trata
+   * `null` como "sem titular em contexto" e cai no empréstimo entre slots.
+   */
+  async loadRuntimeUser(userId: string): Promise<{
+    scrubUser: ScrubUser;
+    biologicalSex: BiologicalSex | null;
+  }> {
     const [user] = await this.db.runAsUser(userId, 'USER', (tx) =>
       tx
-        .select({ name: users.name, phoneNumber: users.phoneNumber, email: users.email })
+        .select({
+          name: users.name,
+          phoneNumber: users.phoneNumber,
+          email: users.email,
+          biologicalSex: users.biologicalSex,
+        })
         .from(users)
         .where(eq(users.id, userId))
         .limit(1),
     );
     return {
-      name: user?.name ?? null,
-      phoneNumber: user?.phoneNumber ?? null,
-      email: user?.email ?? null,
+      scrubUser: {
+        name: user?.name ?? null,
+        phoneNumber: user?.phoneNumber ?? null,
+        email: user?.email ?? null,
+      },
+      biologicalSex: user?.biologicalSex ?? null,
     };
   }
 

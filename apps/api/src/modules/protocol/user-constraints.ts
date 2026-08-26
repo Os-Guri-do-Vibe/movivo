@@ -14,12 +14,15 @@ import type {
   EmphasisRegion,
   GenerationGoal,
   PainAssessment,
+  ParqAnswer,
+  ParqQuestionId,
   TrainingExperience,
   TrainingLocation,
   Weekday,
 } from '@movivo/shared';
 import { EMPHASIS_MUSCLE_GROUPS, PAIN_REGION_LABELS } from '@movivo/shared';
 
+import type { ParqEvaluation } from '../anamnesis/parq';
 import type { ContraindicationTag, ExerciseLevel } from './exercise-catalog';
 
 export interface UserConstraints {
@@ -43,6 +46,18 @@ export interface UserConstraints {
   injuryTags: ContraindicationTag[];
   /** Lesões/dores em texto livre, para contexto do prompt (o scrubber do router pseudonimiza). */
   injuriesRaw: string[];
+  /**
+   * PAR-Q do titular bloqueou (decisão do fundador, 2026-08-24). Deixou de ser TRAVA de
+   * geração e virou **modo conservador + revisão humana obrigatória**: o protocolo é
+   * gerado, nasce `reviewUrgency: MANDATORY` e só sai da fila por assinatura humana.
+   */
+  requiresProfessionalReview: boolean;
+  /** Contraindicações derivadas do PAR-Q (`parqToConstraints`) — separadas de `injuryTags`. */
+  parqTags: ContraindicationTag[];
+  /** Perguntas do PAR-Q que dispararam, para rastreabilidade da geração. */
+  parqTriggered: ParqQuestionId[];
+  /** Teto de fase de periodização. Presente = nada além de `ADAPTACAO` é aceitável. */
+  maxPhase?: 'ADAPTACAO';
 }
 
 /** Experiência declarada → nível do catálogo. É o fim do default hardcoded. */
@@ -54,6 +69,17 @@ const LEVEL_BY_EXPERIENCE: Record<TrainingExperience, ExerciseLevel> = {
 
 export function levelFromExperience(experience: TrainingExperience): ExerciseLevel {
   return LEVEL_BY_EXPERIENCE[experience];
+}
+
+/** Um degrau abaixo, com piso em `INICIANTE`. Usado quando o PAR-Q bloqueia. */
+const DEMOTED_LEVEL: Record<ExerciseLevel, ExerciseLevel> = {
+  AVANCADO: 'INTERMEDIARIO',
+  INTERMEDIARIO: 'INICIANTE',
+  INICIANTE: 'INICIANTE',
+};
+
+export function demoteLevel(level: ExerciseLevel): ExerciseLevel {
+  return DEMOTED_LEVEL[level];
 }
 
 /** Regiões de ênfase → grupos musculares do catálogo. `FULL_BODY` = sem ênfase. */
@@ -83,6 +109,25 @@ const INJURY_KEYWORDS: Record<ContraindicationTag, string[]> = {
   ANKLE: ['tornozelo', 'pe', 'pé'],
   NECK: ['pescoco', 'pescoço', 'cervical'],
   CARDIAC: ['coracao', 'coração', 'cardiaco', 'cardíaco', 'pressao', 'pressão', 'hipertens'],
+  BALANCE_FALL_RISK: [
+    'tontura',
+    'tonteira',
+    'vertigem',
+    'desmaio',
+    'labirintite',
+    'equilibrio',
+    'equilíbrio',
+  ],
+  PREGNANCY: [
+    'gravid',
+    'gestant',
+    'gestacao',
+    'gestação',
+    'pos-parto',
+    'pós-parto',
+    'posparto',
+    'puerp',
+  ],
 };
 
 export function mapInjuriesToTags(injuries: readonly string[]): ContraindicationTag[] {
@@ -97,6 +142,68 @@ export function mapInjuriesToTags(injuries: readonly string[]): Contraindication
     }
   }
   return [...tags];
+}
+
+/**
+ * PAR-Q → contraindicações estruturadas (decisão do fundador, 2026-08-24).
+ *
+ * Enquanto o PAR-Q era TRAVA de geração, um "Sim" só precisava produzir um booleano. Agora
+ * que o protocolo é gerado mesmo com PAR-Q bloqueado, cada gatilho precisa virar restrição
+ * concreta — senão "gerar com cuidado" seria só uma etiqueta, sem efeito nenhum no treino.
+ *
+ * Mapa por pergunta (texto verbatim conferido em `PARQ_QUESTION_TEXT`, não pela ordem):
+ *  - Q1 (problema no coração/pressão alta) → `CARDIAC`
+ *  - Q2 (dor no peito em esforço)          → `CARDIAC`
+ *  - Q3 (dor no peito em repouso)          → `CARDIAC`
+ *  - Q4 (perdeu equilíbrio/desmaiou)       → `BALANCE_FALL_RISK` + teto de fase `ADAPTACAO`
+ *  - Q5 (medicação contínua pressão/coração) → `CARDIAC`
+ *  - Q6 (osso/articulação/coluna)          → sem tag fixa; o `detail` passa pela heurística
+ *  - Q7 (gravidez/pós-parto)               → `PREGNANCY`
+ *  - Q8 (cirurgia < 6 meses)               → `detail` pela heurística
+ *  - Q9 (outro motivo)                     → `detail` pela heurística
+ *
+ * Q6/Q8/Q9 não têm tag fixa de propósito: "problema em articulação" sem dizer QUAL não
+ * identifica região nenhuma, e inventar uma seria pior que deixar o texto livre visível ao
+ * RT. O `detail` (follow-up "Conta um pouco mais?") é o único sinal estruturável ali, e
+ * passa pelo MESMO `mapInjuriesToTags` que já trata o texto livre de dor.
+ */
+const PARQ_FIXED_TAGS: Partial<Record<ParqQuestionId, ContraindicationTag>> = {
+  Q1: 'CARDIAC',
+  Q2: 'CARDIAC',
+  Q3: 'CARDIAC',
+  Q4: 'BALANCE_FALL_RISK',
+  Q5: 'CARDIAC',
+  Q7: 'PREGNANCY',
+};
+
+/** Perguntas cujo `detail` (texto livre) é a única fonte de tag possível. */
+const PARQ_FREE_TEXT_QUESTIONS: readonly ParqQuestionId[] = ['Q6', 'Q8', 'Q9'];
+
+/** Tontura/desmaio é o único gatilho que, sozinho, trava a periodização em `ADAPTACAO`. */
+const PARQ_PHASE_CAP_QUESTIONS: readonly ParqQuestionId[] = ['Q4'];
+
+export function parqToConstraints(
+  evaluation: ParqEvaluation,
+  answers: readonly ParqAnswer[],
+): { tags: ContraindicationTag[]; maxPhase?: 'ADAPTACAO' } {
+  const triggered = new Set<ParqQuestionId>(evaluation.triggeredQuestions);
+  if (triggered.size === 0) return { tags: [] };
+
+  const tags = new Set<ContraindicationTag>();
+  const freeText: string[] = [];
+
+  for (const questionId of triggered) {
+    const fixed = PARQ_FIXED_TAGS[questionId];
+    if (fixed) tags.add(fixed);
+    if (PARQ_FREE_TEXT_QUESTIONS.includes(questionId)) {
+      const detail = answers.find((a) => a.questionId === questionId)?.detail;
+      if (detail) freeText.push(detail);
+    }
+  }
+  for (const tag of mapInjuriesToTags(freeText)) tags.add(tag);
+
+  const capped = PARQ_PHASE_CAP_QUESTIONS.some((q) => triggered.has(q));
+  return { tags: [...tags], ...(capped ? { maxPhase: 'ADAPTACAO' as const } : {}) };
 }
 
 /**

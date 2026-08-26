@@ -5,10 +5,10 @@ import type { QueueKind } from '@/lib/dashboard-types';
 
 import { requireDashboardCapability } from '../../../_lib/session';
 
+/** `parq` saiu em 2026-08-24 — PAR-Q bloqueante é um `protocol` com `origin: 'PARQ'`. */
 const KINDS: Record<string, QueueKind> = {
   protocol: 'PROTOCOL',
   handoff: 'HANDOFF',
-  parq: 'PARQ',
   checkin: 'CHECKIN',
 };
 
