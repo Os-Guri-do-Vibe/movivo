@@ -232,6 +232,20 @@
       "when": 1787278038327,
       "tag": "0032_ai_forbidden_topics",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1787372822682,
+      "tag": "0033_clean_human_cannonball",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1787378351438,
+      "tag": "0034_wise_tyrannus",
+      "breakpoints": true
     }
   ]
 }

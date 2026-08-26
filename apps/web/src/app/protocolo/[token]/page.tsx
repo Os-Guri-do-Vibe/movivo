@@ -1,16 +1,17 @@
 import type { Metadata } from 'next';
+import { Fragment } from 'react';
 
 import {
+  ADVANCED_TECHNIQUE_LABELS,
   PRIMARY_GOAL_LABELS,
   protocolReadSchema,
-  type LoadStrategy,
+  TRAINING_PHASE_LABELS,
+  type AdvancedTechnique,
   type ProtocolExercise,
   type ProtocolRead,
   type ProtocolSession,
-  type TrainingPhase,
 } from '@movivo/shared';
 
-import { ThemeToggle } from '@/components/theme-toggle';
 import { ProtocolViewed } from '@/components/protocolo/protocol-viewed';
 import { publicEnv } from '@/lib/env';
 
@@ -22,24 +23,51 @@ import { publicEnv } from '@/lib/env';
  * Toda a copy respeita os guardrails (CLAUDE.md): sem diagnóstico/tratamento/cura/
  * garantia, a IA nunca aparece como quem decide sozinha, respaldo CREF sempre visível.
  * Token inválido/expirado → estado neutro, sem vazar dado (o backend já devolve 404).
+ *
+ * Layout atual (2026-08-22) é um protótipo de design a ser convertido em PDF — por
+ * isso os dados pessoais do aluno abaixo são MOCK: o endpoint público por token é
+ * IDOR-safe de propósito (nunca leva PII, ver `protocol.controller.ts`), e adicionar
+ * nome/idade/peso/altura/sexo ali é uma decisão de segurança à parte, ainda não tomada.
  */
 export const metadata: Metadata = {
   title: 'Seu protocolo · MOVIVO',
   robots: { index: false },
 };
 
-const PHASE_LABEL: Record<TrainingPhase, string> = {
-  ADAPTACAO: 'Adaptação',
-  HIPERTROFIA: 'Hipertrofia',
-  FORCA: 'Força',
-  DELOAD: 'Recuperação (deload)',
+const MOCK_STUDENT = {
+  name: 'Cahuã Lima',
+  age: '29 anos',
+  weight: '78 kg',
+  height: '1,78 m',
+  sex: 'Masculino',
 };
 
-const LOAD_LABEL: Record<LoadStrategy, string> = {
-  BODYWEIGHT: 'Peso do corpo',
-  FIXED_LOAD: 'Carga fixa',
-  DOUBLE_PROGRESSION: 'Dupla progressão',
-  RPE: 'Percepção de esforço (RPE)',
+/**
+ * Rótulos de dia da semana (mesmos do formulário de anamnese, `step2-anamnesis.tsx`).
+ * Duplicado aqui em vez de importado: aquele módulo é `'use client'` e um export não-
+ * componente dele quebra a coleta de dados desta página, que é Server Component.
+ */
+const WEEKDAY_LABELS: Record<string, string> = {
+  MON: 'Segunda',
+  TUE: 'Terça',
+  WED: 'Quarta',
+  THU: 'Quinta',
+  FRI: 'Sexta',
+  SAT: 'Sábado',
+  SUN: 'Domingo',
+};
+
+const TECHNIQUE_GLOSSARY: Readonly<Record<AdvancedTechnique, string>> = {
+  DROP_SET: 'Ao chegar perto da falha, reduz a carga e continua a série sem descansar.',
+  REST_PAUSE: 'Pausa curta (10–20s) ao chegar perto da falha e continua a série com a mesma carga.',
+  CLUSTER_SET: 'A série é dividida em blocos menores com pausas curtas entre eles.',
+  BI_SET: 'Dois exercícios feitos em sequência, sem descanso entre eles.',
+  TRI_SET: 'Três exercícios feitos em sequência, sem descanso entre eles.',
+  SUPERSET: 'Dois exercícios de grupos musculares diferentes, feitos em sequência.',
+  ISOMETRIA: 'Contração mantida numa posição fixa, sem movimento da articulação.',
+  REPETICOES_CONTROLADAS: 'Execução com tempo controlado na descida e/ou na subida do movimento.',
+  PIRAMIDE: 'A carga sobe (ou desce) a cada série, com as repetições variando na direção oposta.',
+  DESCANSO_ATIVO: 'Movimento leve durante o intervalo, em vez de ficar parado.',
 };
 
 async function fetchProtocol(token: string): Promise<ProtocolRead | null> {
@@ -58,26 +86,44 @@ async function fetchProtocol(token: string): Promise<ProtocolRead | null> {
 }
 
 /** "8–12 reps" para exercício tradicional, "40s por série" para isométrico/cardio (achado 2026-08-18). */
-function amountLabel(exercise: ProtocolExercise): string {
-  if (exercise.durationSeconds !== undefined) return `${exercise.durationSeconds}s por série`;
-  if (!exercise.reps) return '';
-  const { min, max } = exercise.reps;
+function amountLabel(entry: { durationSeconds?: number; reps?: { min: number; max: number } }): string {
+  if (entry.durationSeconds !== undefined) return `${entry.durationSeconds}s`;
+  if (!entry.reps) return '';
+  const { min, max } = entry.reps;
   return min === max ? `${min} reps` : `${min}–${max} reps`;
 }
 
+function sessionTitle(session: ProtocolSession): string {
+  const day = session.weekday ? (WEEKDAY_LABELS[session.weekday] ?? session.weekday) : null;
+  return day ? `${day} · ${session.dayLabel}` : session.dayLabel;
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('pt-BR');
+}
+
 function Shell({ children }: { children: React.ReactNode }) {
+  // `protocolo-light`: página sempre clara, sem seguir o tema do site nem oferecer
+  // troca (decisão do fundador, 2026-08-22) — é o protótipo do que vira PDF depois.
+  // Fundo claro cobre a viewport inteira (não só a coluna), mesmo padrão de `/anamnese`.
   return (
-    <div className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col gap-10 px-6 py-8">
-      <header className="flex items-center justify-between gap-4">
-        <p className="flex items-center gap-2 font-mono text-label tracking-wide text-muted-foreground">
-          <span aria-hidden="true" className="size-2.5 rounded-full bg-primary" />
-          movivo
-        </p>
-        <ThemeToggle />
+    <div className="protocolo-light min-h-dvh w-full bg-background text-foreground">
+      <header className="flex w-full justify-center bg-petroleo px-6 py-6 print:py-4">
+        {/* Faixa de ponta a ponta: o SVG da marca tem o lettering em branco, feito para
+            fundo escuro (Kimura) — a faixa é sempre petroleo, não varia com o tema. */}
+        {/* eslint-disable-next-line @next/next/no-img-element -- SVG estático de marca, sem otimização de imagem necessária. */}
+        <img src="/brand/movivo-logo-horizontal.svg" alt="MOVIVO" className="h-12 w-auto" />
       </header>
-      {children}
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-6 py-8 print:max-w-none print:gap-8 print:px-0">
+        {children}
+      </div>
     </div>
   );
+}
+
+function BrandSymbol({ className }: { className?: string }) {
+  // eslint-disable-next-line @next/next/no-img-element -- SVG estático de marca, sem otimização de imagem necessária.
+  return <img src="/brand/movivo-symbol.svg" alt="" aria-hidden="true" className={className} />;
 }
 
 export default async function ProtocoloPage({ params }: { params: Promise<{ token: string }> }) {
@@ -100,6 +146,13 @@ export default async function ProtocoloPage({ params }: { params: Promise<{ toke
   }
 
   const { content } = protocol;
+  const techniquesUsed = Array.from(
+    new Set(
+      content.sessions.flatMap((session) =>
+        session.exercises.map((exercise) => exercise.technique).filter((t) => t !== undefined),
+      ),
+    ),
+  );
 
   return (
     <Shell>
@@ -112,79 +165,224 @@ export default async function ProtocoloPage({ params }: { params: Promise<{ toke
       </a>
 
       <main id="conteudo" className="flex flex-1 flex-col gap-10">
-        <section className="flex flex-col gap-4">
-          <p className="font-mono text-label tracking-wide text-muted-foreground">seu protocolo</p>
-          <h1 className="text-h1 font-bold">{PRIMARY_GOAL_LABELS[content.goal] ?? content.goal}</h1>
-          <dl className="flex flex-wrap gap-x-8 gap-y-3">
-            <div>
-              <dt className="text-label text-muted-foreground">Fase atual</dt>
-              <dd className="text-body font-medium">
-                {PHASE_LABEL[content.phase] ?? content.phase}
-              </dd>
+        <section aria-labelledby="titulo-aluno" className="flex flex-col gap-3">
+          <h1 id="titulo-aluno" className="text-h2 font-semibold">
+            Informações do aluno
+          </h1>
+          <dl className="grid grid-cols-2 gap-x-8 gap-y-1.5">
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="text-label font-bold text-foreground">Nome:</dt>
+                <dd className="text-label text-foreground">{MOCK_STUDENT.name}</dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="text-label font-bold text-foreground">Idade:</dt>
+                <dd className="text-label text-foreground">{MOCK_STUDENT.age}</dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="text-label font-bold text-foreground">Objetivo:</dt>
+                <dd className="text-label text-foreground">
+                  {PRIMARY_GOAL_LABELS[content.goal] ?? content.goal}
+                </dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="text-label font-bold text-foreground">Mesociclo:</dt>
+                <dd className="text-label text-foreground">
+                  {TRAINING_PHASE_LABELS[content.phase] ?? content.phase}
+                </dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="text-label font-bold text-foreground">Data início do protocolo:</dt>
+                <dd className="font-mono text-label text-foreground">
+                  {formatDate(protocol.startDate)}
+                </dd>
+              </div>
             </div>
-            <div>
-              <dt className="text-label text-muted-foreground">Frequência</dt>
-              <dd className="text-body font-medium">{content.weeklyFrequency}x por semana</dd>
-            </div>
-            <div>
-              <dt className="text-label text-muted-foreground">Duração</dt>
-              <dd className="text-body font-medium">
-                semana {protocol.currentWeek} de {protocol.totalWeeks}
-              </dd>
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="text-label font-bold text-foreground">Peso atual:</dt>
+                <dd className="text-label text-foreground">{MOCK_STUDENT.weight}</dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="text-label font-bold text-foreground">Altura:</dt>
+                <dd className="text-label text-foreground">{MOCK_STUDENT.height}</dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="text-label font-bold text-foreground">Sexo:</dt>
+                <dd className="text-label text-foreground">{MOCK_STUDENT.sex}</dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="text-label font-bold text-foreground">Frequência:</dt>
+                <dd className="text-label text-foreground">
+                  {content.weeklyFrequency}x por semana
+                </dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-3">
+                <dt className="text-label font-bold text-foreground">Data final do protocolo:</dt>
+                <dd className="font-mono text-label text-foreground">
+                  {formatDate(protocol.endDate)}
+                </dd>
+              </div>
             </div>
           </dl>
-          {content.generalNotes ? (
-            <p className="max-w-prose text-body text-muted-foreground">{content.generalNotes}</p>
-          ) : null}
         </section>
 
-        <section aria-labelledby="titulo-treinos" className="flex flex-col gap-4">
-          <h2 id="titulo-treinos" className="text-h2 font-semibold">
-            Seus treinos da semana
+        <section aria-labelledby="titulo-explicacao" className="flex flex-col gap-3">
+          <h2 id="titulo-explicacao" className="text-h2 font-semibold">
+            Sobre o seu protocolo
           </h2>
-          <ol className="flex flex-col gap-4">
-            {content.sessions.map((session: ProtocolSession, i) => (
-              <li
-                key={i}
-                className="flex flex-col gap-3 rounded-lg border border-border bg-card p-5"
-              >
-                <div className="flex flex-col gap-1">
-                  <h3 className="text-h3 font-semibold text-card-foreground">{session.dayLabel}</h3>
-                  <p className="text-label text-muted-foreground">{session.focus}</p>
-                </div>
-                <ul className="flex flex-col divide-y divide-border">
-                  {session.exercises.map((exercise: ProtocolExercise, j) => (
-                    <li key={j} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
-                      <p className="text-body font-medium text-card-foreground">{exercise.name}</p>
-                      <p className="font-mono text-label text-muted-foreground">
-                        {exercise.sets} séries · {amountLabel(exercise)} · {exercise.restSeconds}s
-                        de descanso · {LOAD_LABEL[exercise.loadStrategy] ?? exercise.loadStrategy}
-                      </p>
-                      {exercise.notes ? (
-                        <p className="text-label text-muted-foreground">{exercise.notes}</p>
-                      ) : null}
-                    </li>
-                  ))}
+          {/* Coral (calor humano/alerta gentil, Kimura §3): preenchimento tênue + borda,
+              nunca cor de texto pequeno sobre claro — o texto continua em --foreground. */}
+          <div className="rounded-lg border border-coral/40 bg-coral/10 p-5">
+            <p className="text-body text-foreground">
+              {content.generalNotes ??
+                `Seu protocolo está na fase de ${TRAINING_PHASE_LABELS[content.phase] ?? content.phase}, estruturado para o seu objetivo de ${PRIMARY_GOAL_LABELS[content.goal] ?? content.goal}, com ${content.weeklyFrequency}x de treino por semana ao longo de ${protocol.totalWeeks} semanas. Ele foi planejado com apoio de inteligência artificial e revisado por um profissional de Educação Física registrado no CREF, que acompanha sua evolução.`}{' '}
+              Se sentir dor aguda, tontura ou mal-estar, pare o exercício imediatamente e avise seu
+              profissional responsável antes de continuar.
+            </p>
+          </div>
+        </section>
+
+        <section aria-labelledby="titulo-treinos" className="flex flex-col gap-6">
+          <h2 id="titulo-treinos" className="text-h2 font-semibold">
+            Seus treinos
+          </h2>
+          {/* A tabela tem 7 colunas e não cabe em telas estreitas; abaixo de ~700px o
+              scroll horizontal não tem indicador visível em todo navegador/SO (ex.: macOS
+              esconde a barra até o toque), então avisamos por texto nesse recorte. */}
+          <p className="hidden text-label text-muted-foreground max-[700px]:block">
+            Arraste a tabela para o lado para ver todas as colunas.
+          </p>
+          {content.sessions.map((session: ProtocolSession, i) => (
+            <div key={i} className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1">
+                <h3 className="text-h3 font-semibold text-card-foreground">
+                  {sessionTitle(session)}
+                </h3>
+                <p className="text-label text-muted-foreground">{session.focus}</p>
+              </div>
+              <div className="sidebar-scrollbar overflow-x-auto rounded-lg border border-border">
+                <table className="w-full min-w-[640px] border-collapse text-label">
+                  <thead>
+                    {/* Barra sempre escura (petroleo) com texto branco fixo: dá destaque ao
+                        cabeçalho independente do tema, mesmo tratamento do chip da logo. */}
+                    <tr className="border-b border-white/15 bg-petroleo text-left">
+                      <th className="px-3 py-2 font-bold text-white">Exercício</th>
+                      <th className="px-3 py-2 font-bold text-white">Série</th>
+                      <th className="px-3 py-2 font-bold text-white">Repetição/Duração</th>
+                      <th className="px-3 py-2 font-bold text-white">Descanso</th>
+                      <th className="px-3 py-2 font-bold text-white">RIR</th>
+                      <th className="px-3 py-2 font-bold text-white">Estratégia</th>
+                      <th className="px-3 py-2 font-bold text-white">Vídeo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {session.exercises.map((exercise: ProtocolExercise, j) => (
+                      <Fragment key={j}>
+                        {/* Blocos de aquecimento (opcionais, item 8): uma linha por bloco,
+                            antes da série válida, com o nome do exercício mudo. */}
+                        {(exercise.warmupBlocks ?? []).map((block, k) => (
+                          <tr
+                            key={`warmup-${k}`}
+                            className="border-b border-border/60 text-muted-foreground italic last:border-0"
+                          >
+                            <td className="px-3 py-1.5">
+                              {k === 0 ? `${exercise.name} (aquecimento)` : ''}
+                            </td>
+                            <td className="px-3 py-1.5 font-mono">{block.sets}</td>
+                            <td className="px-3 py-1.5 font-mono">{amountLabel(block)}</td>
+                            <td className="px-3 py-1.5 font-mono">
+                              {block.restSeconds !== undefined ? `${block.restSeconds}s` : '-'}
+                            </td>
+                            <td className="px-3 py-1.5 font-mono">-</td>
+                            <td className="px-3 py-1.5">-</td>
+                            <td className="px-3 py-1.5">-</td>
+                          </tr>
+                        ))}
+                        <tr className="border-b border-border last:border-0 even:bg-muted/40">
+                          <td className="px-3 py-2 font-medium text-card-foreground">
+                            {exercise.name}
+                          </td>
+                          <td className="px-3 py-2 font-mono text-card-foreground">
+                            {exercise.sets}
+                          </td>
+                          <td className="px-3 py-2 font-mono text-card-foreground">
+                            {amountLabel(exercise)}
+                          </td>
+                          <td className="px-3 py-2 font-mono text-card-foreground">
+                            {exercise.restSeconds}s
+                          </td>
+                          <td className="px-3 py-2 font-mono text-card-foreground">
+                            {exercise.rir ?? '-'}
+                          </td>
+                          <td className="px-3 py-2 text-card-foreground">
+                            {exercise.technique ? ADVANCED_TECHNIQUE_LABELS[exercise.technique] : '-'}
+                          </td>
+                          <td className="px-3 py-2">
+                            {exercise.videoUrl ? (
+                              <a
+                                href={exercise.videoUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="font-medium text-primary underline underline-offset-2"
+                              >
+                                Assistir
+                              </a>
+                            ) : (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {session.exercises.some((exercise) => exercise.notes) ? (
+                <ul className="flex flex-col gap-1 text-label text-muted-foreground">
+                  {session.exercises
+                    .filter((exercise) => exercise.notes)
+                    .map((exercise, k) => (
+                      <li key={k}>
+                        <span className="font-medium text-card-foreground">{exercise.name}:</span>{' '}
+                        {exercise.notes}
+                      </li>
+                    ))}
                 </ul>
-              </li>
+              ) : null}
+            </div>
+          ))}
+        </section>
+
+        <section aria-labelledby="titulo-legenda" className="flex flex-col gap-3">
+          <h2 id="titulo-legenda" className="text-h2 font-semibold">
+            Legenda
+          </h2>
+          <dl className="flex flex-col gap-2 text-label text-muted-foreground">
+            <div className="flex gap-2">
+              <dt className="shrink-0 font-medium text-card-foreground">RIR (Repetições em Reserva):</dt>
+              <dd>
+                quantas repetições você ainda conseguiria fazer ao terminar a série, sendo RIR 0 até
+                a falha.
+              </dd>
+            </div>
+            {techniquesUsed.map((technique) => (
+              <div key={technique} className="flex gap-2">
+                <dt className="shrink-0 font-medium text-card-foreground">
+                  {ADVANCED_TECHNIQUE_LABELS[technique]}:
+                </dt>
+                <dd>{TECHNIQUE_GLOSSARY[technique]}</dd>
+              </div>
             ))}
-          </ol>
+          </dl>
         </section>
       </main>
 
-      <footer className="flex flex-col gap-3 border-t border-border pt-6">
-        <div className="flex items-start gap-3">
-          <span aria-hidden="true" className="text-h3 leading-none">
-            🛡
-          </span>
-          <div className="flex flex-col gap-1">
-            <p className="text-body font-medium">Respaldo profissional CREF</p>
-            <p className="max-w-prose font-mono text-label text-muted-foreground">
-              Metodologia revisada e assinada por um profissional de Educação Física registrado no
-              CREF, que usa a IA como ferramenta de apoio.
-            </p>
-          </div>
-        </div>
+      <footer className="flex flex-col items-center gap-2 border-t border-border pt-6 text-center">
+        <BrandSymbol className="h-7 w-auto" />
+        <p className="max-w-prose font-mono text-label text-muted-foreground">
+          Metodologia revisada e assinada por um profissional de Educação Física registrado no CREF
+        </p>
         {protocol.signatureHash ? (
           <p className="font-mono text-label text-muted-foreground">
             assinatura {protocol.signatureHash.slice(0, 12)}

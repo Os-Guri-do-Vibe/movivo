@@ -208,6 +208,10 @@ async function seedActiveProtocol() {
       signatureHash: 'a'.repeat(64),
       content: structure(),
       constraints: {},
+      // NOT NULL sem default desde a migração 0033.
+      mesocycleName: 'Mesociclo 1 — Adaptação',
+      startDate: new Date(),
+      endDate: new Date(Date.now() + 12 * 7 * 24 * 60 * 60 * 1000),
     }),
   );
   return userId;
@@ -291,7 +295,7 @@ describe('outbound WhatsApp — entrega do protocolo e idempotência (US-2.5)', 
     await waitFor(() => sent.find((m) => m.to === to && m.text.includes('/protocolo/')));
 
     const afterFirst = sent.filter((m) => m.to === to).length;
-    expect(afterFirst).toBe(3); // 3 bolhas
+    expect(afterFirst).toBe(4); // 4 bolhas (intro, contexto do plano, 1º treino, link)
 
     // Reprocesso com jobId distinto (bypassa o dedup do BullMQ) — o marcador Redis barra.
     await queues.enqueue(QUEUE.whatsappOutbound, 'protocol-delivery', {
@@ -300,6 +304,6 @@ describe('outbound WhatsApp — entrega do protocolo e idempotência (US-2.5)', 
       type: 'PROTOCOL_DELIVERY',
     });
     await new Promise((r) => setTimeout(r, 3_000));
-    expect(sent.filter((m) => m.to === to).length).toBe(3); // não reenviou
+    expect(sent.filter((m) => m.to === to).length).toBe(4); // não reenviou
   }, 30_000);
 });

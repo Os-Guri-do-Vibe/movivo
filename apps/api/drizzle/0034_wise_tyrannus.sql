@@ -1,0 +1,1 @@
+ALTER TABLE "protocols" ADD COLUMN "pdf_content" "bytea";
