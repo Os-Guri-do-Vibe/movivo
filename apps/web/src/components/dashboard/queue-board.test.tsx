@@ -3,9 +3,10 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  editProtocolItem,
   handoffItem,
   optionalProtocolItem,
-  parqItem,
+  parqProtocolItem,
   protocolItem,
   queueResponse,
 } from '../../../test/dashboard-fixtures';
@@ -113,8 +114,8 @@ describe('QueueBoard', () => {
     render(<QueueBoard />);
     await screen.findByText(optionalProtocolItem.title);
     expect(screen.queryByText('Revisão de rotina')).not.toBeInTheDocument();
-    // `ALERT` é a única severidade que ainda renderiza pill (`parqItem` na fixture é o
-    // representante ALERT; PAR-Q bloqueado de verdade chega como SAFETY do backend).
+    // `ALERT` é a única severidade que ainda renderiza pill — na fila real, o protocolo
+    // `MANDATORY` de origem `EDIT`. O de origem `PARQ` é SAFETY e não renderiza pill.
     expect(screen.getByText('Atenção')).toBeVisible();
   });
 
@@ -165,7 +166,7 @@ describe('QueueBoard', () => {
   it('badge ALERT continua sem title e sem complemento oculto — o rótulo já é completo', async () => {
     getQueue.mockResolvedValue(queueResponse);
     render(<QueueBoard />);
-    const card = (await screen.findByText(parqItem.title)).closest('li');
+    const card = (await screen.findByText(editProtocolItem.title)).closest('li');
     const badge = within(card as HTMLElement).getByText('Atenção');
     expect(badge).not.toHaveAttribute('title');
     expect(badge.textContent).toBe('Atenção');
@@ -305,7 +306,13 @@ describe('QueueBoard', () => {
     expect(within(card as HTMLElement).queryByText('PENDING_SIGNATURE')).not.toBeInTheDocument();
   });
 
-  it('card de PAR-Q também tem "Ver respostas" (achado 2026-08-18: olho nas duas caixas)', async () => {
+  /**
+   * Desde 2026-08-24 o card de PAR-Q bloqueante é um card de PROTOCOLO como qualquer
+   * outro: mesma rota `/dashboard/fila/protocol/{id}`, mesmo olho, mesmo endpoint de
+   * anamnese. O que sobra de específico é só a legenda de origem — a faixa/ícone de
+   * segurança vêm de `severity`, não do kind, e continuam funcionando sem mudança.
+   */
+  it('card de PAR-Q bloqueante é um card de protocolo: abre o protocolo e usa a anamnese de PROTOCOL', async () => {
     const user = userEvent.setup();
     getQueue.mockResolvedValue(queueResponse);
     getAnamnesisAnswers.mockResolvedValue({
@@ -336,12 +343,12 @@ describe('QueueBoard', () => {
       health: {},
     });
     render(<QueueBoard />);
-    const card = (await screen.findByText(parqItem.title)).closest('li');
+    const card = (await screen.findByText(parqProtocolItem.title)).closest('li');
     expect(card).not.toBeNull();
 
     expect(within(card as HTMLElement).getByRole('link', { name: /Abrir/i })).toHaveAttribute(
       'href',
-      `/dashboard/fila/parq/${parqItem.id}`,
+      `/dashboard/fila/protocol/${parqProtocolItem.id}`,
     );
 
     const viewAnswers = within(card as HTMLElement).getByRole('button', {
@@ -349,10 +356,37 @@ describe('QueueBoard', () => {
     });
     await user.click(viewAnswers);
 
-    // PARQ usa a sessão diretamente (ainda não virou protocolo) — endpoint diferente do PROTOCOL.
-    expect(getAnamnesisAnswers).toHaveBeenCalledWith('PARQ', parqItem.id, expect.anything());
+    expect(getAnamnesisAnswers).toHaveBeenCalledWith(
+      'PROTOCOL',
+      parqProtocolItem.id,
+      expect.anything(),
+    );
     expect(await screen.findByRole('dialog', { name: /Respostas da anamnese/i })).toBeVisible();
     expect(screen.getByText('Carla Teste')).toBeVisible();
+  });
+
+  /**
+   * A legenda é o único sinal LEGÍVEL de origem no card: a faixa coral é CSS e o ícone é
+   * `aria-hidden`, e o título de um PAR-Q bloqueante é igual ao de qualquer protocolo.
+   * `EDIT` (a outra origem de `MANDATORY`) não ganha legenda — já tem o pill "Atenção".
+   */
+  it('legenda de origem: só o card de PAR-Q bloqueante a exibe, junto da faixa e do ícone de segurança', async () => {
+    getQueue.mockResolvedValue(queueResponse);
+    render(<QueueBoard />);
+
+    const parqCard = (await screen.findByText(parqProtocolItem.title)).closest(
+      'li',
+    ) as HTMLElement;
+    expect(within(parqCard).getByText('Origem: PAR-Q bloqueante')).toBeVisible();
+    expect(parqCard.className).toContain('border-l-coral');
+    expect(iconCircle(parqCard).className).toContain('bg-destructive');
+
+    const editCard = screen.getByText(editProtocolItem.title).closest('li') as HTMLElement;
+    expect(within(editCard).queryByText(/Origem:/)).not.toBeInTheDocument();
+    expect(editCard.className).not.toContain('border-l-coral');
+
+    const optionalCard = screen.getByText(optionalProtocolItem.title).closest('li') as HTMLElement;
+    expect(within(optionalCard).queryByText(/Origem:/)).not.toBeInTheDocument();
   });
 
   it('sem resumo: não mostra nenhum texto de placeholder, só omite o parágrafo', async () => {

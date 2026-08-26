@@ -11,10 +11,12 @@ import {
   anamnesisStructuredSchema,
   onboardingStep1Schema,
   protocolStructureSchema,
+  type ProtocolStructure,
 } from '@movivo/shared';
 import { z } from 'zod';
 
 import { HealthCipherService } from '../../core/database/health-cipher.service';
+import { HealthConsentService } from '../../core/database/health-consent.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import {
   anamnesisSessions,
@@ -36,27 +38,43 @@ import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
+import { buildProtocolPdf } from '../protocol/protocol-pdf.service';
 import { signatureHash } from '../protocol/protocol.repository';
 import type { UserConstraints } from '../protocol/user-constraints';
 import { ValidationService } from '../protocol/validation/validation.service';
-import {
-  PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS,
-  type ProtocolGenerationJob,
-} from '../protocol/protocol-generation.worker';
+import { PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS } from '../protocol/protocol-generation.worker';
 import { AuditService } from './audit.service';
 
+/**
+ * Union discriminada por `alreadySigned` (não inferida — anotada explícita no `scoped()`
+ * de `signProtocol`). Sem isso, dois `return` com conjuntos de campos diferentes fazem o
+ * TypeScript mesclar as duas formas num tipo só com campos opcionais, exigindo computar
+ * `content`/`mesocycleName`/etc. também no branch "já assinado" só pra bater o formato.
+ */
+type SignProtocolResult =
+  | { userId: string; version: number; signatureHash: string; signedAt: string; alreadySigned: true }
+  | {
+      userId: string;
+      version: number;
+      signatureHash: string;
+      signedAt: string;
+      alreadySigned: false;
+      content: ProtocolStructure;
+      mesocycleName: string;
+      startDate: Date;
+      endDate: Date;
+      totalWeeks: number;
+    };
+
 const uuidSchema = z.uuid();
-const kindSchema = z.enum(['PROTOCOL', 'HANDOFF', 'PARQ', 'CHECKIN']);
+// `PARQ` saiu do enum em 2026-08-24: não existe mais item de fila nem tela de PAR-Q — o
+// PAR-Q bloqueado agora vive DENTRO do item de protocolo (`origin: 'PARQ'`).
+const kindSchema = z.enum(['PROTOCOL', 'HANDOFF', 'CHECKIN']);
 const editSchema = z.object({
   content: protocolStructureSchema,
   reason: z.string().trim().min(5).max(500),
 });
 const signSchema = z.object({ confirmation: z.literal(true) });
-const releaseSchema = z.object({
-  decision: z.literal('RELEASED'),
-  notes: z.string().trim().min(5).max(1000),
-  confirmation: z.literal(true),
-});
 const resolveSchema = z.object({
   resolution: z.string().trim().min(3).max(80),
   notes: z.string().trim().min(3).max(1000),
@@ -65,7 +83,7 @@ const resolveSchema = z.object({
 
 export interface QueueItem {
   id: string;
-  kind: 'PROTOCOL' | 'HANDOFF' | 'PARQ' | 'CHECKIN';
+  kind: 'PROTOCOL' | 'HANDOFF' | 'CHECKIN';
   severity: 'SAFETY' | 'ALERT' | 'ROUTINE';
   createdAt: string;
   ageMinutes: number;
@@ -74,28 +92,19 @@ export interface QueueItem {
   status: string;
   /** Só protocolos `OPTIONAL` na categoria "Disponível para Revisão" (fila do CREF). */
   autoReleaseAt: string | null;
+  /**
+   * POR QUE este protocolo exige revisão humana (2026-08-24). `PARQ` = a sessão de origem
+   * está `BLOQUEADO_AGUARDANDO_CLEARANCE` (alerta clínico — assinar aqui também libera o
+   * PAR-Q); `EDIT` = um CREF editou o conteúdo e precisa de sign-off fresco. `null` para
+   * itens `optional` e para os que não são protocolo — não têm motivo a exibir.
+   */
+  origin: 'PARQ' | 'EDIT' | null;
 }
 
 /** Titulo do item de fila de protocolo, com o nome completo do titular. */
 function protocolTitle(name: string | null | undefined) {
   return name ? `Protocolo para Revisão: ${name}` : 'Protocolo para Revisão';
 }
-
-/**
- * Titulo do item de fila de PAR-Q bloqueado, com o nome completo do titular — mesmo
- * padrão de `protocolTitle`. Não usa a palavra "Protocolo": PAR-Q bloqueado é
- * justamente o gate que impede um protocolo de existir ainda (achado 2026-08-20, a
- * pedido do fundador).
- */
-function parqTitle(name: string | null | undefined) {
-  return name ? `PAR-Q para Revisão: ${name}` : 'PAR-Q para Revisão';
-}
-
-/**
- * Resumo humano do item de PAR-Q bloqueado — o `status` cru (`BLOCKED`) vazava como
- * legenda visível do card na fila "Revisão Humana Obrigatória" (achado 2026-08-20).
- */
-const PARQ_BLOCKED_SUMMARY = 'Aguardando liberacao do profissional CREF responsavel.';
 
 @Injectable()
 export class DashboardService {
@@ -106,67 +115,62 @@ export class DashboardService {
     private readonly audit: AuditService,
     private readonly queues: QueueManager,
     private readonly queueEvents: DashboardQueueEventsService,
+    private readonly healthConsent: HealthConsentService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(DashboardService.name);
   }
 
   /**
-   * Fila do profissional — só protocolo + PAR-Q (handoff/check-in ficam fora desta
-   * tela; `resolveHandoff`/`handoffDetail`/`checkinDetail` continuam existindo pra uso
-   * futuro, só não aparecem aqui). Duas categorias, cada uma ordenada só por idade
-   * (mais antigo primeiro):
+   * Fila do profissional — só protocolo (handoff/check-in ficam fora desta tela;
+   * `resolveHandoff`/`handoffDetail`/`checkinDetail` continuam existindo pra uso futuro,
+   * só não aparecem aqui). Duas categorias, cada uma ordenada só por idade (mais antigo
+   * primeiro):
    *
-   * - `mandatory` — PAR-Q bloqueado (decisão do fundador, 2026-08-18: PAR-Q é o ÚNICO
-   *   motivo de negócio pra exigir revisão sem prazo) E protocolo `reviewUrgency:
-   *   MANDATORY` (só existe hoje via `editProtocol` — um CREF editou manualmente e
-   *   precisa de sign-off fresco; nunca mais vem de `BLOCK_FALLBACK`/DLQ da geração —
-   *   ver `protocol-planner.ts`). Nenhum dos dois tem job de auto-liberação agendado;
-   *   nenhum sai sozinho, sempre exige ação humana.
-   * - `optional` — protocolo `reviewUrgency: OPTIONAL`: **todo** protocolo que sai da
-   *   geração cai aqui — PASS limpo, validador sinalizando (`FLAG_HUMAN_REVIEW`) e o
-   *   fallback pro template conservador do RT (`BLOCK_FALLBACK`/DLQ) por igual (decisão
-   *   do fundador, 2026-08-18: nem PASS entrega sozinho na hora — ver
-   *   `protocol-planner.ts`). Todos têm `ProtocolAutoReleaseWorker` agendado, por isso é
-   *   o único grupo onde `autoReleaseAt` sempre existe.
+   * - `mandatory` — protocolo `reviewUrgency: MANDATORY`, de duas origens:
+   *   · `PARQ` (2026-08-24): a sessão que originou o protocolo está
+   *     `BLOQUEADO_AGUARDANDO_CLEARANCE`. Antes desta data, PAR-Q bloqueado era um item
+   *     `kind: 'PARQ'` SEPARADO, apontando pra uma sessão sem protocolo nenhum, com tela
+   *     e ação próprias. Agora o protocolo existe (gerado em modo conservador) e a
+   *     liberação do PAR-Q acontece dentro da assinatura dele — um item, uma tela, uma
+   *     ação. `severity: SAFETY`, porque é alerta clínico, não só sign-off.
+   *   · `EDIT`: um CREF editou o conteúdo à mão e precisa de sign-off fresco.
+   *     `severity: ALERT`.
+   *   Nenhum tem job de auto-liberação agendado; nenhum sai sozinho.
+   * - `optional` — protocolo `reviewUrgency: OPTIONAL`: **todo** protocolo sem PAR-Q
+   *   bloqueado cai aqui, PASS limpo incluso (decisão do fundador, 2026-08-18: nem PASS
+   *   entrega sozinho na hora — ver `protocol-planner.ts`). Todos têm
+   *   `ProtocolAutoReleaseWorker` agendado, por isso é o único grupo onde `autoReleaseAt`
+   *   sempre existe.
    */
   async queue(actor: AuthenticatedUser) {
     const { mandatory, optional } = await this.scopedRead(actor, async (tx) => {
-      const [pendingProtocols, blockedParq] = await Promise.all([
-        tx
-          .select({
-            id: protocols.id,
-            createdAt: protocols.createdAt,
-            status: protocols.status,
-            name: users.name,
-            reviewUrgency: protocols.reviewUrgency,
-          })
-          .from(protocols)
-          .innerJoin(users, eq(users.id, protocols.userId))
-          .where(eq(protocols.approvalStatus, 'PENDING_REVIEW')),
-        tx
-          .select({
-            id: anamnesisSessions.id,
-            createdAt: anamnesisSessions.createdAt,
-            name: users.name,
-          })
-          .from(anamnesisSessions)
-          .innerJoin(users, eq(users.id, anamnesisSessions.userId))
-          .where(eq(anamnesisSessions.parqState, 'BLOQUEADO_AGUARDANDO_CLEARANCE')),
-      ]);
+      // LEFT JOIN (não INNER): protocolo anterior à migração 0035 não tem
+      // `anamnesis_session_id` e continua aparecendo na fila normalmente, como `EDIT`.
+      const pendingProtocols = await tx
+        .select({
+          id: protocols.id,
+          createdAt: protocols.createdAt,
+          status: protocols.status,
+          name: users.name,
+          reviewUrgency: protocols.reviewUrgency,
+          parqState: anamnesisSessions.parqState,
+        })
+        .from(protocols)
+        .innerJoin(users, eq(users.id, protocols.userId))
+        .leftJoin(anamnesisSessions, eq(anamnesisSessions.id, protocols.anamnesisSessionId))
+        .where(eq(protocols.approvalStatus, 'PENDING_REVIEW'));
 
       const mandatory: QueueItem[] = [];
       const optional: QueueItem[] = [];
       for (const row of pendingProtocols) {
         const isOptional = row.reviewUrgency === 'OPTIONAL';
-        // `MANDATORY` só chega aqui via `editProtocol` (CREF editou manualmente) — nunca
-        // mais via fallback de geração (achado 2026-08-18: PAR-Q é o único motivo de
-        // negócio pra exigir revisão sem prazo, e quem gera já passou pelo gate de PAR-Q).
+        const fromParq = row.parqState === 'BLOQUEADO_AGUARDANDO_CLEARANCE';
         (isOptional ? optional : mandatory).push(
           this.item(
             row.id,
             'PROTOCOL',
-            isOptional ? 'ROUTINE' : 'ALERT',
+            isOptional ? 'ROUTINE' : fromParq ? 'SAFETY' : 'ALERT',
             row.createdAt,
             protocolTitle(row.name),
             row.status,
@@ -174,20 +178,7 @@ export class DashboardService {
             isOptional
               ? new Date(row.createdAt.getTime() + PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS).toISOString()
               : null,
-          ),
-        );
-      }
-      for (const row of blockedParq) {
-        mandatory.push(
-          this.item(
-            row.id,
-            'PARQ',
-            'SAFETY',
-            row.createdAt,
-            parqTitle(row.name),
-            PARQ_BLOCKED_SUMMARY,
-            'BLOCKED',
-            null,
+            isOptional ? null : fromParq ? 'PARQ' : 'EDIT',
           ),
         );
       }
@@ -216,7 +207,6 @@ export class DashboardService {
     const kind = this.parse(kindSchema, rawKind);
     const id = this.parse(uuidSchema, rawId);
     if (kind === 'PROTOCOL') return this.protocolDetail(actor, id);
-    if (kind === 'PARQ') return this.parqDetail(actor, id);
     if (kind === 'CHECKIN') return this.checkinDetail(actor, id);
     return this.handoffDetail(actor, id);
   }
@@ -224,11 +214,6 @@ export class DashboardService {
   async anamnesisAnswers(actor: AuthenticatedUser, rawId: string) {
     const id = this.parse(uuidSchema, rawId);
     return this.protocolAnamnesisAnswers(actor, id);
-  }
-
-  async parqAnamnesisAnswers(actor: AuthenticatedUser, rawId: string) {
-    const id = this.parse(uuidSchema, rawId);
-    return this.loadParqAnamnesisAnswers(actor, id);
   }
 
   async editProtocol(actor: AuthenticatedUser, rawId: string, rawBody: unknown) {
@@ -291,11 +276,30 @@ export class DashboardService {
     return edited;
   }
 
+  /**
+   * Assinatura CREF — desde 2026-08-24 é também o ÚNICO caminho de liberação de PAR-Q.
+   *
+   * A tela e a ação separadas de "liberar PAR-Q" deixaram de existir: o protocolo de um
+   * titular com PAR-Q bloqueado é gerado em modo conservador e cai nesta mesma fila como
+   * `MANDATORY`. Assinar aqui faz as duas coisas de uma vez, na MESMA transação — o RT não
+   * consegue mais liberar o PAR-Q e esquecer de assinar o treino (nem o inverso), e não há
+   * janela entre os dois atos onde o estado fique incoerente.
+   */
   async signProtocol(actor: AuthenticatedUser, rawId: string, rawBody: unknown) {
     const id = this.parse(uuidSchema, rawId);
     this.parse(signSchema, rawBody);
-    const signed = await this.scoped(actor, async (tx) => {
+    const signed = await this.scoped(actor, async (tx): Promise<SignProtocolResult> => {
       const row = await this.requireProtocol(tx, id, true);
+      // Consentimento de saúde revogado → nada de assinar, para QUALQUER protocolo (não só
+      // os de PAR-Q). Assinar é criar um documento novo a partir de dado de saúde e
+      // disparar uma entrega; se o titular retirou a base legal, o ato inteiro perde
+      // fundamento (Alexandre §5). Vem ANTES de qualquer escrita, de propósito.
+      if (!(await this.healthConsent.hasActiveForUser(row.userId))) {
+        throw new BadRequestException({
+          code: 'HEALTH_CONSENT_REVOKED',
+          message: 'Consentimento de dados de saude revogado — assinatura indisponivel.',
+        });
+      }
       if (row.status === 'ACTIVE' && row.signedAt && row.signatureHash && row.professionalId) {
         return {
           userId: row.userId,
@@ -308,21 +312,44 @@ export class DashboardService {
       if (row.status !== 'PENDING_SIGNATURE' || row.approvalStatus !== 'PENDING_REVIEW') {
         throw new BadRequestException('Protocolo nao esta aguardando assinatura.');
       }
-      const [professional] = await tx
-        .select({
-          crefActive: users.crefActive,
-          crefNumber: users.crefNumber,
-          crefRegion: users.crefRegion,
-        })
-        .from(users)
-        .where(eq(users.id, actor.userId))
-        .limit(1);
-      if (!professional?.crefActive || !professional.crefNumber || !professional.crefRegion) {
-        throw new BadRequestException(
-          'Credencial CREF ativa e verificada e obrigatoria para assinar.',
-        );
+      // `ADMIN` (conta fundador) pula a checagem de credencial CREF — decisão do
+      // fundador 2026-08-22: a MOVIVO no início só tem um profissional CREF, também
+      // sócio-fundador, e a conta dele já é `ADMIN`. `PROFESSIONAL` continua exigindo
+      // CREF ativo e verificado; isso NÃO abre exceção pra esse papel.
+      if (actor.role !== 'ADMIN') {
+        const [professional] = await tx
+          .select({
+            crefActive: users.crefActive,
+            crefNumber: users.crefNumber,
+            crefRegion: users.crefRegion,
+          })
+          .from(users)
+          .where(eq(users.id, actor.userId))
+          .limit(1);
+        if (!professional?.crefActive || !professional.crefNumber || !professional.crefRegion) {
+          throw new BadRequestException(
+            'Credencial CREF ativa e verificada e obrigatoria para assinar.',
+          );
+        }
       }
-      const content = protocolStructureSchema.parse(row.content);
+      const parsedContent = protocolStructureSchema.safeParse(row.content);
+      if (!parsedContent.success) {
+        // Achado 2026-08-22: este `.parse()` era direto (sem try/catch) — um `ZodError`
+        // não é `HttpException`, então o filtro padrão do Nest vira um 500 genérico
+        // ("Internal server error") sem pista nenhuma de qual campo do conteúdo salvo
+        // não bate mais com o schema atual. Agora falha com 400 + os `issues` do Zod,
+        // deixando o motivo visível pro RT e pro log.
+        this.logger.error(
+          { id, issues: parsedContent.error.issues },
+          'conteudo do protocolo nao passa na validacao atual do schema — assinatura bloqueada',
+        );
+        throw new BadRequestException({
+          code: 'PROTOCOL_CONTENT_INVALID',
+          message: 'O conteudo deste protocolo nao passa na validacao atual. Corrija antes de assinar.',
+          issues: parsedContent.error.issues,
+        });
+      }
+      const content = parsedContent.data;
       const verdict = this.validation.validate({
         structure: content,
         constraints: row.constraints as Pick<
@@ -363,6 +390,16 @@ export class DashboardService {
         signatureHash: hash,
         signedAt: now,
       });
+      // Liberação do PAR-Q, na MESMA transação da assinatura. A função é `SECURITY
+      // DEFINER` e recebe o PROTOCOLO (não a sessão): ela mesma deriva a sessão, confere
+      // que pertence ao mesmo titular, revalida cargo/CREF/consentimento e devolve `NULL`
+      // quando não há nada a liberar (protocolo sem sessão vinculada, ou PAR-Q já
+      // liberado). Assinatura de protocolo comum, portanto, é no-op silencioso aqui.
+      const releaseRows = (await tx.execute(
+        sql`SELECT public.release_parq_on_signature(${id}::uuid) AS user_id`,
+      )) as unknown as Array<{ user_id: string | null }>;
+      const parqReleasedFor = releaseRows[0]?.user_id ?? null;
+
       await this.audit.append(tx, {
         actorId: actor.userId,
         userId: row.userId,
@@ -371,14 +408,67 @@ export class DashboardService {
         entityId: id,
         changes: { version: nextVersion, signatureHash: hash, signedAt: now.toISOString() },
       });
+      // Evento SEPARADO, não um campo dentro do `PROTOCOL_SIGNED`: liberar PAR-Q é o ato
+      // jurídico-profissional que a `anamnesis_session` precisa carregar no seu próprio
+      // rastro (mesma `action` da tela removida, para que a auditoria histórica continue
+      // consultável por uma string só).
+      if (parqReleasedFor && row.anamnesisSessionId) {
+        await this.audit.append(tx, {
+          actorId: actor.userId,
+          userId: row.userId,
+          action: 'PARQ_RELEASED_BY_HUMAN',
+          entityType: 'anamnesis_session',
+          entityId: row.anamnesisSessionId,
+          changes: {
+            viaProtocolSignature: true,
+            protocolId: id,
+            previousState: 'BLOQUEADO_AGUARDANDO_CLEARANCE',
+            newState: 'LIBERADO_COM_RESSALVA_RT',
+            actorRole: actor.role,
+          },
+        });
+      }
       return {
         userId: row.userId,
         version: nextVersion,
         signatureHash: hash,
         signedAt: now.toISOString(),
         alreadySigned: false,
+        content,
+        mesocycleName: row.mesocycleName,
+        startDate: row.startDate,
+        endDate: row.endDate,
+        totalWeeks: row.totalWeeks,
       };
     });
+
+    // PDF do protocolo (US-2.6-PDF), gerado sob RLS agora que a assinatura confirmou o
+    // conteúdo final. Nunca bloqueia a assinatura em si nem a entrega: se falhar, o PDF
+    // fica `NULL` e o worker de outbound cai automaticamente no texto+link de sempre
+    // (`WhatsappOutboundWorker.buildDelivery`) — "nunca lança, sempre decide" (§12).
+    if (!signed.alreadySigned) {
+      try {
+        const { personal } = await this.protocolAnamnesisAnswers(actor, id);
+        const pdf = await buildProtocolPdf({
+          content: signed.content,
+          mesocycleName: signed.mesocycleName,
+          startDate: signed.startDate,
+          endDate: signed.endDate,
+          totalWeeks: signed.totalWeeks,
+          signatureHash: signed.signatureHash,
+          signedAt: new Date(signed.signedAt),
+          student: personal,
+        });
+        await this.scoped(actor, (tx) =>
+          tx.update(protocols).set({ pdfContent: pdf }).where(eq(protocols.id, id)),
+        );
+      } catch (error) {
+        this.logger.warn(
+          { id, err: error instanceof Error ? error.message : String(error) },
+          'geracao do PDF do protocolo falhou — entrega cai para texto+link',
+        );
+      }
+    }
 
     const outbound: WhatsappOutboundJob = {
       userId: signed.userId,
@@ -400,58 +490,6 @@ export class DashboardService {
       signedAt: signed.signedAt,
       alreadySigned: signed.alreadySigned,
     };
-  }
-
-  async releaseParq(actor: AuthenticatedUser, rawId: string, rawBody: unknown) {
-    const id = this.parse(uuidSchema, rawId);
-    const body = this.parse(releaseSchema, rawBody);
-    const released = await this.scoped(actor, async (tx) => {
-      const [row] = await tx
-        .select({
-          userId: anamnesisSessions.userId,
-          state: anamnesisSessions.parqState,
-          submittedAt: anamnesisSessions.submittedAt,
-        })
-        .from(anamnesisSessions)
-        .where(eq(anamnesisSessions.id, id))
-        .for('update')
-        .limit(1);
-      if (!row?.userId) throw new NotFoundException('PAR-Q nao encontrado.');
-      if (row.state === 'LIBERADO' || row.state === 'LIBERADO_COM_RESSALVA_RT') {
-        return {
-          userId: row.userId,
-          state: row.state,
-          submittedAt: row.submittedAt,
-          alreadyReleased: true,
-        };
-      }
-      if (row.state !== 'BLOQUEADO_AGUARDANDO_CLEARANCE') {
-        throw new BadRequestException('PAR-Q nao esta aguardando liberacao.');
-      }
-      const state = 'LIBERADO' as const;
-      await tx.execute(sql`SELECT release_parq_clearance(${id}::uuid, ${state}::parq_state)`);
-      await this.audit.append(tx, {
-        actorId: actor.userId,
-        userId: row.userId,
-        action: 'PARQ_RELEASED_BY_HUMAN',
-        entityType: 'anamnesis_session',
-        entityId: id,
-        changes: { decision: body.decision, notesHash: this.hashJson(body.notes) },
-      });
-      return { userId: row.userId, state, submittedAt: row.submittedAt, alreadyReleased: false };
-    });
-    if (!released.alreadyReleased) {
-      const job: ProtocolGenerationJob = {
-        userId: released.userId,
-        anamnesisSessionId: id,
-        submittedAt: released.submittedAt?.toISOString(),
-      };
-      await this.queues.enqueue(QUEUE.protocolGeneration, 'protocol-after-parq-release', job, {
-        jobId: `parq-release-${id}`,
-      });
-      this.queueEvents.emit('parq');
-    }
-    return { id, state: released.state, alreadyReleased: released.alreadyReleased };
   }
 
   async resolveHandoff(actor: AuthenticatedUser, rawId: string, rawBody: unknown) {
@@ -603,48 +641,6 @@ export class DashboardService {
     });
   }
 
-  private async parqDetail(actor: AuthenticatedUser, id: string) {
-    const row = await this.scopedRead(actor, async (tx) => {
-      const [found] = await tx
-        .select({
-          userId: anamnesisSessions.userId,
-          data: anamnesisSessions.dataBlock2,
-          state: anamnesisSessions.parqState,
-          createdAt: anamnesisSessions.createdAt,
-          name: users.name,
-        })
-        .from(anamnesisSessions)
-        .innerJoin(users, eq(users.id, anamnesisSessions.userId))
-        .where(eq(anamnesisSessions.id, id))
-        .limit(1);
-      if (!found?.userId) throw new NotFoundException('PAR-Q nao encontrado.');
-      await this.auditRead(tx, actor, found.userId, 'anamnesis_session', id);
-      return found;
-    });
-    const health = row.data
-      ? (JSON.parse(await this.cipher.decryptHealth(row.data)) as {
-          parq?: { answers?: Array<{ questionId?: string; answer?: boolean }> };
-        })
-      : null;
-    const flags = (health?.parq?.answers ?? [])
-      .filter((answer) => answer.answer === true && answer.questionId)
-      .map((answer) => answer.questionId as string);
-    return {
-      item: this.item(
-        id,
-        'PARQ',
-        'SAFETY',
-        row.createdAt,
-        parqTitle(row.name),
-        PARQ_BLOCKED_SUMMARY,
-        row.state ?? 'BLOCKED',
-        null,
-      ),
-      context: { positiveAnswers: flags.length },
-      parq: { flags, state: row.state ?? 'BLOQUEADO_AGUARDANDO_CLEARANCE' },
-    };
-  }
-
   /**
    * Todas as respostas que o titular preencheu no formulário de anamnese — cadastro
    * pessoal, objetivos/rotina e o bloco de saúde (PAR-Q completo, dor, texto livre,
@@ -652,10 +648,10 @@ export class DashboardService {
    * só projeta 8 de ~15 campos de `data_block_3` e nunca expõe `data_block_1` nem o
    * PAR-Q completo — aqui é o bloco inteiro, sem projeção parcial.
    *
-   * Dois pontos de entrada (achado 2026-08-18: olho aparece nas duas caixas da fila),
-   * convergindo no mesmo parser — `protocolAnamnesisAnswers` parte de um protocolo e
-   * deriva a sessão mais recente do titular; `parqAnamnesisAnswers` já recebe a sessão
-   * diretamente (é o próprio item da fila "Obrigatória").
+   * Ponto de entrada único desde 2026-08-24: parte de um protocolo e deriva a sessão
+   * SUBMITTED mais recente do titular. O segundo ponto de entrada, que recebia a sessão
+   * direto (item `kind: 'PARQ'` da fila), morreu junto com a tela separada de PAR-Q — as
+   * duas caixas da fila agora são protocolo, e chegam aqui pelo mesmo caminho.
    */
   private async protocolAnamnesisAnswers(actor: AuthenticatedUser, protocolId: string) {
     const { userId, session } = await this.scopedRead(actor, async (tx) => {
@@ -680,28 +676,6 @@ export class DashboardService {
       if (!found) throw new NotFoundException('Anamnese do titular nao encontrada.');
       await this.auditRead(tx, actor, protocol.userId, 'anamnesis_session', found.id);
       return { userId: protocol.userId, session: found };
-    });
-
-    return this.parseAnamnesisAnswers(userId, session);
-  }
-
-  private async loadParqAnamnesisAnswers(actor: AuthenticatedUser, sessionId: string) {
-    const { userId, session } = await this.scopedRead(actor, async (tx) => {
-      const [found] = await tx
-        .select({
-          id: anamnesisSessions.id,
-          userId: anamnesisSessions.userId,
-          dataBlock1: anamnesisSessions.dataBlock1,
-          dataBlock2: anamnesisSessions.dataBlock2,
-          dataBlock3: anamnesisSessions.dataBlock3,
-          submittedAt: anamnesisSessions.submittedAt,
-        })
-        .from(anamnesisSessions)
-        .where(eq(anamnesisSessions.id, sessionId))
-        .limit(1);
-      if (!found?.userId) throw new NotFoundException('Anamnese nao encontrada.');
-      await this.auditRead(tx, actor, found.userId, 'anamnesis_session', found.id);
-      return { userId: found.userId, session: found };
     });
 
     return this.parseAnamnesisAnswers(userId, session);
@@ -872,7 +846,7 @@ export class DashboardService {
     actor: AuthenticatedUser,
     callback: (tx: TenantTransaction) => Promise<T>,
   ): Promise<T> {
-    this.assertProfessional(actor);
+    this.assertStaffWrite(actor);
     return this.db.runAsUser(actor.userId, actor.role, callback);
   }
 
@@ -890,8 +864,15 @@ export class DashboardService {
     }
   }
 
-  private assertProfessional(actor: AuthenticatedUser): void {
-    if (actor.role !== 'PROFESSIONAL') {
+  /**
+   * Portão das ações que MUTAM protocolo/PAR-Q/handoff (`scoped`). `ADMIN` (conta
+   * fundador) tem acesso total aqui — decisão do fundador 2026-08-22: no início a MOVIVO
+   * só tem um profissional CREF, também sócio-fundador, e a conta dele já é `ADMIN`. A
+   * segunda barreira específica de `signProtocol` (crédito CREF ativo) continua exigindo
+   * `PROFESSIONAL` — `ADMIN` pula só aquela checagem, não esta.
+   */
+  private assertStaffWrite(actor: AuthenticatedUser): void {
+    if (actor.role !== 'PROFESSIONAL' && actor.role !== 'ADMIN') {
       throw new ForbiddenException('Acesso exclusivo ao profissional CREF atribuido.');
     }
   }
@@ -906,7 +887,8 @@ export class DashboardService {
   /**
    * Builder compartilhado de todo item de fila. `summary` é parâmetro explícito desde
    * 2026-08-20: antes era sempre uma cópia literal de `status`, o que vazava o enum cru
-   * `BLOCKED` como legenda visível do card de PAR-Q na seção "Revisão Humana Obrigatória".
+   * como legenda visível do card na seção "Revisão Humana Obrigatória". `origin` entrou em
+   * 2026-08-24 e só é preenchido por protocolo `MANDATORY` — ver `QueueItem.origin`.
    */
   private item(
     id: string,
@@ -917,11 +899,13 @@ export class DashboardService {
     summary: string,
     status: string,
     autoReleaseAt: string | null,
+    origin: QueueItem['origin'] = null,
   ): QueueItem {
     return {
       id,
       kind,
       severity,
+      origin,
       createdAt: createdAt.toISOString(),
       ageMinutes: Math.max(0, Math.floor((Date.now() - createdAt.getTime()) / 60_000)),
       title,

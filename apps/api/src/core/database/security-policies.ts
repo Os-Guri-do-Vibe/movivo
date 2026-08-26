@@ -631,15 +631,24 @@ export function buildProfessionalAccessSql(appRole: string): string {
 
     CREATE OR REPLACE FUNCTION public.assign_unique_active_professional(target_user uuid)
     RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
-    DECLARE professional uuid; professionals_count integer;
+    DECLARE professional uuid;
     BEGIN
       IF nullif(current_setting('app.current_role', true), '') NOT IN ('SYSTEM', 'ADMIN') THEN
         RAISE EXCEPTION 'assignment requires system context' USING ERRCODE = '42501';
       END IF;
-      SELECT (array_agg(id ORDER BY id))[1], count(*)::int INTO professional, professionals_count
-      FROM public.users WHERE role = 'PROFESSIONAL' AND cref_active = true;
-      IF professionals_count <> 1 THEN
-        RAISE EXCEPTION 'expected exactly one active CREF professional, found %', professionals_count
+      -- Decisão do fundador (2026-08-25): no início da MOVIVO todo ADMIN é também
+      -- sócio-fundador com liberdade de aprovar/editar protocolo — mesma regra que já
+      -- valia para signProtocol()/release_parq_on_signature(). Prefere o RT CREF
+      -- explícito quando existe (menor id, estável); cai para o ADMIN mais antigo só
+      -- quando não há nenhum CREF ativo cadastrado ainda.
+      SELECT id INTO professional FROM public.users
+      WHERE role = 'PROFESSIONAL' AND cref_active = true
+      ORDER BY id LIMIT 1;
+      IF professional IS NULL THEN
+        SELECT id INTO professional FROM public.users WHERE role = 'ADMIN' ORDER BY id LIMIT 1;
+      END IF;
+      IF professional IS NULL THEN
+        RAISE EXCEPTION 'no active CREF professional or admin available for assignment'
           USING ERRCODE = '55000';
       END IF;
       INSERT INTO public.professional_assignments (professional_id, user_id)
@@ -648,45 +657,85 @@ export function buildProfessionalAccessSql(appRole: string): string {
       SET active = true, revoked_at = NULL, assigned_at = now(), updated_at = now();
     END $$;
 
-    CREATE OR REPLACE FUNCTION public.release_parq_clearance(target_session uuid, new_state public.parq_state)
+    /*
+     * Liberação de PAR-Q pela ASSINATURA do protocolo (2026-08-24). Substitui
+     * release_parq_clearance(session, state), que a tela própria de PAR-Q chamava.
+     *
+     * A assinatura é por PROTOCOLO, não por sessão, e isso é a correção de segurança
+     * central: com target_session vindo do cliente, um profissional podia passar o id da
+     * sessão de QUALQUER titular (confused deputy) — a função só conferia o cargo dele, não
+     * o vínculo entre o que ele está assinando e o que está liberando. Agora a sessão é
+     * DERIVADA do protocolo, e a função ainda reconfere que sessão e protocolo pertencem
+     * ao mesmo titular.
+     *
+     * Ordem das checagens é deliberada: autorização ANTES de qualquer RETURN NULL. Um
+     * no-op silencioso avaliado cedo (protocolo sem sessão, PAR-Q já liberado) viraria um
+     * oráculo de existência para quem não tem sequer papel para chamar a função.
+     *
+     * ADMIN entra junto de PROFESSIONAL porque DashboardService.signProtocol já o aceita
+     * (decisão do fundador 2026-08-22: o único RT CREF da MOVIVO é sócio-fundador e usa
+     * conta ADMIN). Sem isso, a assinatura de ADMIN estouraria aqui.
+     */
+    CREATE OR REPLACE FUNCTION public.release_parq_on_signature(target_protocol uuid)
     RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
-    DECLARE target_user uuid; actor uuid; actor_role text;
+    DECLARE
+      target_user uuid; target_session uuid; session_owner uuid;
+      current_state public.parq_state; actor uuid; actor_role text;
     BEGIN
       actor_role := nullif(current_setting('app.current_role', true), '');
       actor := nullif(current_setting('app.current_user_id', true), '')::uuid;
-      IF actor_role <> 'PROFESSIONAL' OR actor IS NULL THEN
-        RAISE EXCEPTION 'active CREF professional role required' USING ERRCODE = '42501';
+
+      -- 1) AUTORIZAÇÃO PRIMEIRO — nunca RETURN NULL antes de confirmar quem está chamando.
+      IF actor_role = 'ADMIN' THEN
+        IF NOT EXISTS (SELECT 1 FROM public.users u WHERE u.id = actor AND u.role = 'ADMIN') THEN
+          RAISE EXCEPTION 'admin role required' USING ERRCODE = '42501';
+        END IF;
+      ELSIF actor_role = 'PROFESSIONAL' THEN
+        IF NOT EXISTS (
+          SELECT 1 FROM public.users p
+          WHERE p.id = actor AND p.role = 'PROFESSIONAL' AND p.cref_active = true
+        ) THEN
+          RAISE EXCEPTION 'active CREF professional required' USING ERRCODE = '42501';
+        END IF;
+      ELSE
+        RAISE EXCEPTION 'professional or admin role required' USING ERRCODE = '42501';
       END IF;
-      IF new_state <> 'LIBERADO'::public.parq_state THEN
-        RAISE EXCEPTION 'invalid PAR-Q release state' USING ERRCODE = '22023';
-      END IF;
-      SELECT user_id INTO target_user FROM public.anamnesis_sessions
-      WHERE id = target_session AND parq_state = 'BLOQUEADO_AGUARDANDO_CLEARANCE';
+
+      -- 2) protocolo -> titular -> sessão, confirmando que a sessão é DO MESMO titular.
+      SELECT p.user_id, p.anamnesis_session_id INTO target_user, target_session
+      FROM public.protocols p WHERE p.id = target_protocol;
       IF target_user IS NULL THEN
-        RAISE EXCEPTION 'PAR-Q session not awaiting clearance' USING ERRCODE = 'P0002';
+        RAISE EXCEPTION 'protocol not found' USING ERRCODE = 'P0002';
       END IF;
-      -- Decisão do fundador (2026-08-19): liberar PAR-Q é ação do CARGO (qualquer CREF
-      -- ativo), não exige mais vínculo nominal específico pro titular — mesma mudança
-      -- do linkedProfessional em buildRlsPoliciesSql acima, senão a RLS já liberada em
-      -- anamnesis_sessions/protocols pra qualquer CREF ficaria travada aqui por essa
-      -- checagem mais estrita.
-      IF NOT EXISTS (
-        SELECT 1 FROM public.users professional
-        WHERE professional.id = actor
-          AND professional.role = 'PROFESSIONAL'
-          AND professional.cref_active = true
-      ) THEN
-        RAISE EXCEPTION 'active CREF professional required' USING ERRCODE = '42501';
+      IF target_session IS NULL THEN
+        -- Linha anterior à migração 0035: sem vínculo de sessão, nada a liberar. Não é erro.
+        RETURN NULL;
       END IF;
+      SELECT s.user_id, s.parq_state INTO session_owner, current_state
+      FROM public.anamnesis_sessions s WHERE s.id = target_session;
+      IF session_owner IS DISTINCT FROM target_user THEN
+        RAISE EXCEPTION 'session does not belong to protocol owner' USING ERRCODE = '42501';
+      END IF;
+
       IF NOT public.has_active_health_consent(target_user) THEN
         RAISE EXCEPTION 'active health consent required' USING ERRCODE = '42501';
       END IF;
-      UPDATE public.anamnesis_sessions SET parq_state = new_state, updated_at = now()
+
+      -- 3) SÓ AQUI, com toda a autorização confirmada, o no-op de ESTADO é seguro.
+      IF current_state IS DISTINCT FROM 'BLOQUEADO_AGUARDANDO_CLEARANCE'::public.parq_state THEN
+        -- Assinatura de protocolo comum, ou PAR-Q já liberado antes — nada a fazer.
+        RETURN NULL;
+      END IF;
+
+      UPDATE public.anamnesis_sessions
+      SET parq_state = 'LIBERADO_COM_RESSALVA_RT', updated_at = now()
       WHERE id = target_session;
       UPDATE public.users SET requires_professional_review = false, updated_at = now()
       WHERE id = target_user;
       RETURN target_user;
     END $$;
+
+    DROP FUNCTION IF EXISTS public.release_parq_clearance(uuid, public.parq_state);
 
     CREATE OR REPLACE FUNCTION public.assigned_active_professional(target_user uuid)
     RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
@@ -697,13 +746,18 @@ export function buildProfessionalAccessSql(appRole: string): string {
       IF actor_role <> 'USER' OR actor IS DISTINCT FROM target_user THEN
         RAISE EXCEPTION 'holder context required' USING ERRCODE = '42501';
       END IF;
+      -- ADMIN conta como profissional elegível pelo mesmo motivo de
+      -- assign_unique_active_professional() acima — precisa aceitar de volta quem
+      -- aquela função pode ter atribuído.
       SELECT pa.professional_id INTO assigned_professional
       FROM public.professional_assignments pa
       INNER JOIN public.users professional ON professional.id = pa.professional_id
       WHERE pa.user_id = target_user
         AND pa.active = true AND pa.revoked_at IS NULL
-        AND professional.role = 'PROFESSIONAL'
-        AND professional.cref_active = true;
+        AND (
+          (professional.role = 'PROFESSIONAL' AND professional.cref_active = true)
+          OR professional.role = 'ADMIN'
+        );
       IF assigned_professional IS NULL THEN
         RAISE EXCEPTION 'no active assigned CREF professional' USING ERRCODE = '55000';
       END IF;
@@ -719,7 +773,7 @@ export function buildProfessionalAccessSql(appRole: string): string {
     REVOKE ALL ON FUNCTION public.link_session_consents_to_user(uuid, uuid) FROM PUBLIC;
     REVOKE ALL ON FUNCTION public.record_session_consent(uuid, public.consent_type, varchar, boolean, inet, text) FROM PUBLIC;
     REVOKE ALL ON FUNCTION public.assign_unique_active_professional(uuid) FROM PUBLIC;
-    REVOKE ALL ON FUNCTION public.release_parq_clearance(uuid, public.parq_state) FROM PUBLIC;
+    REVOKE ALL ON FUNCTION public.release_parq_on_signature(uuid) FROM PUBLIC;
     REVOKE ALL ON FUNCTION public.assigned_active_professional(uuid) FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.has_active_health_consent(uuid) TO ${appRole};
     GRANT EXECUTE ON FUNCTION public.revoke_health_data_consent(uuid) TO ${appRole};
@@ -727,7 +781,7 @@ export function buildProfessionalAccessSql(appRole: string): string {
     GRANT EXECUTE ON FUNCTION public.link_session_consents_to_user(uuid, uuid) TO ${appRole};
     GRANT EXECUTE ON FUNCTION public.record_session_consent(uuid, public.consent_type, varchar, boolean, inet, text) TO ${appRole};
     GRANT EXECUTE ON FUNCTION public.assign_unique_active_professional(uuid) TO ${appRole};
-    GRANT EXECUTE ON FUNCTION public.release_parq_clearance(uuid, public.parq_state) TO ${appRole};
+    GRANT EXECUTE ON FUNCTION public.release_parq_on_signature(uuid) TO ${appRole};
     GRANT EXECUTE ON FUNCTION public.assigned_active_professional(uuid) TO ${appRole};
     REVOKE INSERT, UPDATE, DELETE ON public.consents FROM ${appRole};
   `;

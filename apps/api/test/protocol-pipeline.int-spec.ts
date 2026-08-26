@@ -7,7 +7,9 @@
  *                AUTO_APPROVED/ACTIVE assinado (RT) sob RLS → entrega enfileirada;
  *   (validador)  usuário com lesão que contraindica o exercício gerado → BLOCK → template
  *                → PENDING_REVIEW, sem entrega;
- *   (PAR-Q)      sessão de risco (`requires_professional_review`) → NÃO gera protocolo;
+ *   (PAR-Q)      sessão de risco (`requires_professional_review`) → GERA em modo
+ *                conservador como `MANDATORY`, ligada à sessão, sem auto-liberação
+ *                agendada, e as três camadas que impedem a entrega automática;
  *   (idempotência) reprocessar o mesmo job não cria protocolo duplicado;
  *   (DLQ)        geração que falha além dos retries → mensagem de espera + template pendente.
  *
@@ -48,6 +50,8 @@ import type {
   GenerateProtocolResult,
 } from '../src/modules/protocol/protocol-generator.service';
 import { ProtocolGeneratorService } from '../src/modules/protocol/protocol-generator.service';
+import { ProtocolRepository } from '../src/modules/protocol/protocol.repository';
+import { DashboardService } from '../src/modules/admin/dashboard.service';
 import { seedHealthEligibility } from './health-fixtures';
 
 const { env } = loadEnv();
@@ -324,6 +328,14 @@ afterAll(async () => {
        ALTER TABLE user_status_transitions DISABLE TRIGGER trg_user_status_transitions_immutable;
        DELETE FROM user_status_transitions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        ALTER TABLE user_status_transitions ENABLE TRIGGER trg_user_status_transitions_immutable;
+       -- A assinatura CREF (testes de auditoria) grava em audit_logs, que referencia
+       -- users tanto por actor_id quanto por user_id. A tabela é imutável por trigger;
+       -- desligá-lo aqui é o mesmo tratamento já dado a user_status_transitions acima, e
+       -- vale só para as linhas DESTA execução (prefixo de telefone com o RUN).
+       ALTER TABLE audit_logs DISABLE TRIGGER trg_audit_logs_immutable;
+       DELETE FROM audit_logs WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%')
+         OR actor_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
+       ALTER TABLE audit_logs ENABLE TRIGGER trg_audit_logs_immutable;
        DELETE FROM users WHERE phone_number LIKE '+5541${RUN}%';`,
     );
   } finally {
@@ -391,17 +403,223 @@ describe('pipeline de protocolo — bloqueado pelo validador (US-2.4)', () => {
   }, 40_000);
 });
 
-describe('pipeline de protocolo — gate PAR-Q (US-2.4)', () => {
-  it('sessão de risco NÃO gera protocolo', async () => {
-    const { userId } = await submitAnamnesis([], ['Q2']); // dor no peito ao exercitar → risco
+/**
+ * PAR-Q bloqueante (2026-08-24) — substitui o antigo "gate PAR-Q", que afirmava
+ * `readProtocol(userId)).toHaveLength(0)`.
+ *
+ * A decisão do fundador inverteu a regra: PAR-Q deixou de TRAVAR a geração e virou
+ * **modo conservador + revisão humana obrigatória**. O teste antigo continuou verde no
+ * runner unitário (que não toca este arquivo) e vermelho aqui, mas o problema maior é
+ * que, enquanto ele afirmava o comportamento revogado, a garantia NOVA — a mais crítica
+ * do sistema — não tinha cobertura de integração nenhuma.
+ *
+ * A garantia, em três camadas independentes, é o que este bloco prova com I/O real:
+ *   1. aplicação (worker): `MANDATORY` nunca ENFILEIRA job de auto-liberação;
+ *   2. aplicação (repositório): mesmo com o job forçado à mão, `autoRelease()` reconfere
+ *      o estado sob `FOR UPDATE` e recusa;
+ *   3. banco: a CHECK `protocols_mandatory_never_auto_approved` rejeita o `UPDATE` mesmo
+ *      partindo de um superusuário, que é o que sobra quando (1) e (2) falham.
+ */
+describe('pipeline de protocolo — PAR-Q bloqueante (2026-08-24)', () => {
+  let userId: string;
+  let sessionId: string;
+  let protocolId: string;
 
-    await new Promise((r) => setTimeout(r, 4_000));
-    expect(await readProtocol(userId)).toHaveLength(0);
+  beforeAll(async () => {
+    // Q2 = "dor no peito ao se exercitar" → bloqueia o PAR-Q e mapeia para CARDIAC.
+    ({ userId, sessionId } = await submitAnamnesis([], ['Q2']));
+    const proto = await waitFor(async () => (await readProtocol(userId))[0]);
+    protocolId = proto.id;
+  }, 40_000);
+
+  it('GERA o protocolo (não trava mais), como PENDING_REVIEW/MANDATORY e ligado à sessão', async () => {
+    const [proto] = await readProtocol(userId);
+
+    expect(proto.approvalStatus).toBe('PENDING_REVIEW');
+    expect(proto.status).toBe('PENDING_SIGNATURE');
+    expect(proto.humanReviewRequired).toBe(true);
+    // A garantia central: nasce MANDATORY, não OPTIONAL.
+    expect(proto.reviewUrgency).toBe('MANDATORY');
+    expect(proto.signatureHash).toBeNull();
+    // Vínculo com a sessão: é por ele que a assinatura acha o PAR-Q certo pra liberar.
+    expect(proto.anamnesisSessionId).toBe(sessionId);
+  });
+
+  it('aplica o modo conservador: par_q_flags recebe a tag do PAR-Q, não as de lesão', async () => {
+    const [proto] = await readProtocol(userId);
+
+    // Regressão do bug corrigido em 2026-08-24: esta coluna recebia `injuryTags`. O
+    // titular não declarou dor nenhuma, então qualquer coisa aqui só pode vir do PAR-Q.
+    expect(proto.parQFlags).toEqual(['CARDIAC']);
+    const constraints = proto.constraints as {
+      requiresProfessionalReview: boolean;
+      parqTags: string[];
+      parqTriggered: string[];
+      injuryTags: string[];
+    };
+    expect(constraints.requiresProfessionalReview).toBe(true);
+    expect(constraints.parqTriggered).toEqual(['Q2']);
+    // A tag do PAR-Q é mesclada em `injuryTags` de propósito: é o que faz gerador e
+    // validador tratarem "CARDIAC vindo do PAR-Q" com a força de uma lesão de verdade.
+    expect(constraints.injuryTags).toContain('CARDIAC');
+  });
+
+  it('NUNCA agenda job de auto-liberação (camada 1 — o worker nem enfileira)', async () => {
+    const autoRelease = await queues
+      .get(QUEUE.protocolAutoRelease)
+      .getJob(`auto-release-${protocolId}`);
+    expect(autoRelease).toBeUndefined();
+
+    // E nada foi entregue: sem assinatura humana, não existe entrega.
+    const delivery = await queues
+      .get(QUEUE.whatsappOutbound)
+      .getJob(`protocol-delivery_${userId}_1`);
+    expect(delivery).toBeUndefined();
+  });
+
+  it('recusa a liberação mesmo com o job FORÇADO à mão (camada 2 — autoRelease reconfere)', async () => {
+    // Força exatamente a corrida que o worker evita: chama o repositório como se o job
+    // tivesse sido agendado por engano (bug, replay de fila, script administrativo).
+    const repository = app.get(ProtocolRepository);
+    const result = await repository.autoRelease(userId, protocolId);
+
+    expect(result.released).toBe(false);
+
+    // E a linha não foi tocada: continua aguardando assinatura humana.
+    const [proto] = await readProtocol(userId);
+    expect(proto.approvalStatus).toBe('PENDING_REVIEW');
+    expect(proto.status).toBe('PENDING_SIGNATURE');
+    expect(proto.signedAt).toBeNull();
+  });
+
+  it('o banco rejeita um UPDATE que burle a aplicação (camada 3 — CHECK constraint)', async () => {
+    // `adminClient` é superusuário: passa por cima de RLS e de toda regra de aplicação.
+    // Se a CHECK não existisse, este UPDATE passaria e o protocolo de um titular com
+    // alerta clínico ficaria AUTO_APPROVED sem nenhuma assinatura humana.
+    await expect(
+      adminClient`UPDATE protocols SET approval_status = 'AUTO_APPROVED' WHERE id = ${protocolId}::uuid`,
+    ).rejects.toThrow(/protocols_mandatory_never_auto_approved/);
+
+    // A mesma CHECK barra o caminho inverso (virar MANDATORY já estando AUTO_APPROVED).
+    await expect(
+      adminClient`
+        UPDATE protocols SET approval_status = 'AUTO_APPROVED', review_urgency = 'MANDATORY'
+        WHERE id = ${protocolId}::uuid`,
+    ).rejects.toThrow(/protocols_mandatory_never_auto_approved/);
+
+    const [proto] = await readProtocol(userId);
+    expect(proto.approvalStatus).toBe('PENDING_REVIEW');
+  });
+
+  it('mantém o PAR-Q bloqueado enquanto não houver assinatura humana', async () => {
+    const [session] = await adminClient<Array<{ parq_state: string }>>`
+      SELECT parq_state FROM anamnesis_sessions WHERE id = ${sessionId}::uuid`;
+    expect(session.parq_state).toBe('BLOQUEADO_AGUARDANDO_CLEARANCE');
+
+    const [user] = await adminClient<Array<{ requires_professional_review: boolean }>>`
+      SELECT requires_professional_review FROM users WHERE id = ${userId}::uuid`;
+    expect(user.requires_professional_review).toBe(true);
+  });
+});
+
+/**
+ * Assinatura CREF com I/O real (2026-08-24). Até aqui, `signProtocol` só tinha cobertura
+ * UNITÁRIA — com `audit.append` e `tx.execute` mockados. Isso deixava sem prova nenhuma
+ * justamente as partes que só existem no banco:
+ *   - a função `SECURITY DEFINER` `release_parq_on_signature` (autorização, derivação da
+ *     sessão a partir do protocolo, conferência de titular, no-op de estado);
+ *   - a **cadeia de hash** de `audit_logs`, que é produzida por trigger `BEFORE INSERT`,
+ *     não pela aplicação — um mock de `append` nunca poderia atestá-la;
+ *   - a atomicidade dos dois atos (assinar + liberar) na MESMA transação.
+ */
+describe('assinatura CREF — libera o PAR-Q e deixa trilha auditável (2026-08-24)', () => {
+  let dashboard: DashboardService;
+  let admin: { userId: string; role: 'ADMIN'; jti: string };
+
+  beforeAll(async () => {
+    dashboard = app.get(DashboardService);
+    const [row] = await adminClient<Array<{ id: string }>>`
+      INSERT INTO users (phone_number, name, role)
+      VALUES (${phone()}, 'Admin Assinatura', 'ADMIN') RETURNING id`;
+    admin = { userId: row.id, role: 'ADMIN', jti: 'int-sign' };
   }, 30_000);
+
+  /** Eventos de auditoria do titular, em ordem, com os campos da cadeia. */
+  async function auditTrail(ownerId: string) {
+    return adminClient<
+      Array<{ id: string; action: string; entity_type: string; entity_id: string; row_hash: string; previous_hash: string | null }>
+    >`SELECT id, action, entity_type, entity_id, row_hash, previous_hash
+        FROM audit_logs WHERE user_id = ${ownerId}::uuid ORDER BY id ASC`;
+  }
+
+  it('protocolo com PAR-Q bloqueado: assina, libera o PAR-Q e grava DOIS eventos distintos', async () => {
+    const { userId: owner, sessionId: session } = await submitAnamnesis([], ['Q2']);
+    const proto = await waitFor(async () => (await readProtocol(owner))[0]);
+    expect(proto.reviewUrgency).toBe('MANDATORY');
+
+    await dashboard.signProtocol(admin, proto.id, { confirmation: true });
+
+    // (a) o protocolo foi assinado por HUMANO — nunca AUTO_APPROVED.
+    const [signedRow] = await readProtocol(owner);
+    expect(signedRow.status).toBe('ACTIVE');
+    expect(signedRow.approvalStatus).toBe('HUMAN_APPROVED');
+    expect(signedRow.professionalId).toBe(admin.userId);
+    expect(signedRow.signatureHash).not.toBeNull();
+
+    // (b) o PAR-Q foi liberado na MESMA transação, com o estado de ressalva do RT.
+    const [sessionRow] = await adminClient<Array<{ parq_state: string }>>`
+      SELECT parq_state FROM anamnesis_sessions WHERE id = ${session}::uuid`;
+    expect(sessionRow.parq_state).toBe('LIBERADO_COM_RESSALVA_RT');
+    const [userRow] = await adminClient<Array<{ requires_professional_review: boolean }>>`
+      SELECT requires_professional_review FROM users WHERE id = ${owner}::uuid`;
+    expect(userRow.requires_professional_review).toBe(false);
+
+    // (c) DOIS eventos distintos, cada um no seu entityType.
+    const trail = await auditTrail(owner);
+    const signedEvent = trail.filter((e) => e.action === 'PROTOCOL_SIGNED');
+    const releasedEvent = trail.filter((e) => e.action === 'PARQ_RELEASED_BY_HUMAN');
+    expect(signedEvent).toHaveLength(1);
+    expect(releasedEvent).toHaveLength(1);
+    expect(signedEvent[0].entity_type).toBe('protocol');
+    expect(signedEvent[0].entity_id).toBe(proto.id);
+    expect(releasedEvent[0].entity_type).toBe('anamnesis_session');
+    expect(releasedEvent[0].entity_id).toBe(session);
+  }, 60_000);
+
+  it('a cadeia de hash da trilha continua íntegra após os dois eventos', async () => {
+    // A cadeia é GLOBAL (o trigger encadeia com a última linha da tabela, não por
+    // titular), então a integridade se verifica na tabela inteira: cada linha tem de
+    // apontar para o `row_hash` da anterior.
+    const chain = await adminClient<Array<{ id: string; row_hash: string; previous_hash: string | null }>>`
+      SELECT id, row_hash, previous_hash FROM audit_logs ORDER BY id ASC`;
+    expect(chain.length).toBeGreaterThan(1);
+
+    for (let i = 1; i < chain.length; i++) {
+      expect(chain[i].previous_hash).toBe(chain[i - 1].row_hash);
+    }
+    // E nenhum hash ficou com o placeholder que a aplicação envia antes do trigger.
+    for (const row of chain) {
+      expect(row.row_hash).toMatch(/^[0-9a-f]{64}$/);
+    }
+  }, 30_000);
+
+  it('protocolo SEM PAR-Q bloqueado: assina e grava só PROTOCOL_SIGNED', async () => {
+    const { userId: owner } = await submitAnamnesis([]); // PAR-Q limpo → OPTIONAL
+    const proto = await waitFor(async () => (await readProtocol(owner))[0]);
+    expect(proto.reviewUrgency).toBe('OPTIONAL');
+
+    await dashboard.signProtocol(admin, proto.id, { confirmation: true });
+
+    const trail = await auditTrail(owner);
+    const actions = trail.map((e) => e.action);
+    expect(actions).toContain('PROTOCOL_SIGNED');
+    // O no-op de `release_parq_on_signature` não pode virar evento de liberação.
+    expect(actions).not.toContain('PARQ_RELEASED_BY_HUMAN');
+  }, 60_000);
 });
 
 describe('pipeline de protocolo — DLQ e fallback (US-2.4)', () => {
-  it('falha terminal → mensagem de espera + template pendente de revisão', async () => {
+  it('falha terminal → template pendente de revisão, sem reagendar a apresentação da agente', async () => {
     const { userId, sessionId } = await seedUser([], 'forcar-dlq');
     await queues.enqueue(
       QUEUE.protocolGeneration,
@@ -410,18 +628,17 @@ describe('pipeline de protocolo — DLQ e fallback (US-2.4)', () => {
       { attempts: 1 },
     );
 
-    // Fallback: mensagem de espera enfileirada.
-    const waiting = await waitFor(
-      async () =>
-        (await queues.get(QUEUE.whatsappOutbound).getJob(`protocol-waiting_${userId}`)) ??
-        undefined,
-    );
-    expect((waiting.data as { type: string }).type).toBe('PROTOCOL_WAITING');
-
     // Fallback: template pendente de revisão persistido (task manual — painel Sprint 5).
     const proto = await waitFor(async () => (await readProtocol(userId))[0]);
     expect(proto.approvalStatus).toBe('PENDING_REVIEW');
     expect(proto.humanReviewRequired).toBe(true);
     expect(proto.generatedBy).toBe('FALLBACK_TEMPLATE');
+
+    // A mensagem "estou analisando" é agendada no SUBMIT do formulário (30min depois
+    // dele), não aqui: este caminho não enfileira nada de outbound. Este job foi
+    // enfileirado direto na fila de geração, sem passar pelo submit — logo não existe.
+    expect(
+      await queues.get(QUEUE.whatsappOutbound).getJob(`protocol-waiting_${userId}`),
+    ).toBeFalsy();
   }, 40_000);
 });

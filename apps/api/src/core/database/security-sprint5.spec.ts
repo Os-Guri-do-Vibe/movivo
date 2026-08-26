@@ -53,24 +53,63 @@ describe('controles de banco da Sprint 5', () => {
   // não muda: continua gravando a atribuição nominal.
   it('bootstrap grava vinculo nominal; liberacao PAR-Q so verifica CREF ativo', () => {
     const sql = buildProfessionalAccessSql('movivo_app');
-    expect(sql).toContain('expected exactly one active CREF professional');
+    // Achado 2026-08-25 (decisão do fundador): no início todo ADMIN é também
+    // sócio-fundador com liberdade de aprovar/editar protocolo — a atribuição
+    // deixou de exigir EXATAMENTE um CREF ativo (isso quebraria assim que existisse
+    // mais de um ADMIN) e passou a preferir o CREF explícito, caindo pro ADMIN mais
+    // antigo só na ausência de um.
+    expect(sql).toContain('no active CREF professional or admin available for assignment');
     expect(sql).toContain('professional_assignments');
     expect(sql).toContain('ON CONFLICT (professional_id, user_id) DO UPDATE');
     expect(sql).toContain(
       'SET active = true, revoked_at = NULL, assigned_at = now(), updated_at = now()',
     );
-    expect(sql).toContain("actor_role <> 'PROFESSIONAL'");
+    // O assert antigo era `actor_role <> 'PROFESSIONAL'`, forma da função removida. A
+    // nova aceita PROFESSIONAL **ou** ADMIN (conta fundador, decisão de 2026-08-22, a
+    // mesma que `signProtocol` já aplicava) — a checagem de cargo continua existindo,
+    // só deixou de ser uma comparação única.
+    expect(sql).toContain("actor_role = 'PROFESSIONAL'");
     expect(sql).toContain("professional.role = 'PROFESSIONAL'");
     expect(sql).toContain('professional.cref_active = true');
     const releaseFn = sql
       .split('CREATE OR REPLACE FUNCTION')
-      .find((chunk) => chunk.includes('public.release_parq_clearance'));
+      .find((chunk) => chunk.includes('public.release_parq_on_signature'));
     expect(releaseFn).toBeDefined();
     expect(releaseFn).not.toContain('professional_assignments');
     expect(releaseFn).toContain('active CREF professional required');
     expect(sql).not.toContain("actor_role NOT IN ('PROFESSIONAL', 'ADMIN')");
-    expect(sql).toContain("new_state <> 'LIBERADO'::public.parq_state");
-    expect(sql).toContain('GRANT EXECUTE ON FUNCTION public.release_parq_clearance');
+    expect(sql).toContain('GRANT EXECUTE ON FUNCTION public.release_parq_on_signature');
+    // A função por SESSÃO some de vez: era o vetor de confused deputy (o profissional
+    // passava o id da sessão de qualquer titular). Sobreviver a um deploy parcial com
+    // as duas versões no banco seria pior que não ter migrado.
+    expect(sql).toContain('DROP FUNCTION IF EXISTS public.release_parq_clearance');
+    expect(sql).not.toContain('CREATE OR REPLACE FUNCTION public.release_parq_clearance');
+  });
+
+  /**
+   * A liberação de PAR-Q passou a ser por PROTOCOLO (2026-08-24). Estes asserts fixam as
+   * três garantias que a revisão de segurança exigiu, todas frágeis a uma reescrita
+   * descuidada da função.
+   */
+  it('liberacao de PAR-Q por assinatura: autoriza antes de qualquer no-op e amarra sessao ao titular', () => {
+    const releaseFn = buildProfessionalAccessSql('movivo_app')
+      .split('CREATE OR REPLACE FUNCTION')
+      .find((chunk) => chunk.includes('public.release_parq_on_signature'));
+    expect(releaseFn).toBeDefined();
+    const fn = releaseFn as string;
+
+    // 1. A sessão é DERIVADA do protocolo — nunca recebida do cliente.
+    expect(fn).toContain('SELECT p.user_id, p.anamnesis_session_id INTO target_user, target_session');
+    // 2. Sessão e protocolo têm que ser do mesmo titular.
+    expect(fn).toContain('session does not belong to protocol owner');
+    // 3. Ordem: toda `RAISE EXCEPTION` de papel vem ANTES do primeiro `RETURN NULL`,
+    //    senão o no-op silencioso vira oráculo de existência para quem não tem papel.
+    expect(fn.indexOf('professional or admin role required')).toBeLessThan(
+      fn.indexOf('RETURN NULL;'),
+    );
+    expect(fn).toContain('active health consent required');
+    expect(fn).toContain("'LIBERADO_COM_RESSALVA_RT'");
+    expect(fn).toContain('SET search_path = pg_catalog, public, pg_temp');
   });
 
   it('lookup do autoaprovado exige o proprio titular e CREF atribuido ativo', () => {

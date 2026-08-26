@@ -7,7 +7,8 @@ import {
   forwardBackendJson,
 } from '../../../_lib/bff';
 
-const KINDS = new Set(['PROTOCOL', 'HANDOFF', 'PARQ', 'CHECKIN']);
+/** Espelha `kindSchema` do backend — `PARQ` saiu do enum em 2026-08-24. */
+const KINDS = new Set(['PROTOCOL', 'HANDOFF', 'CHECKIN']);
 
 export async function GET(
   _request: Request,

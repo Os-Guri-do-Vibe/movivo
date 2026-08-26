@@ -34,7 +34,7 @@ type FallbackExercise = ProtocolStructure['sessions'][number]['exercises'][numbe
  *  qualquer um dos 8 objetivos de geração (a mais estreita é GAIN_STRENGTH, 3-10 reps). */
 function templateA(): { focus: string; exercises: FallbackExercise[] } {
   return {
-    focus: 'Corpo inteiro — adaptação (core e cardio)',
+    focus: 'Corpo inteiro, adaptação (core e cardio)',
     exercises: [
       {
         exerciseId: 'dead_bug',
@@ -61,7 +61,7 @@ function templateA(): { focus: string; exercises: FallbackExercise[] } {
 /** Template B: empurrar (superior) + quadril (posterior). Mesmas faixas conservadoras. */
 function templateB(): { focus: string; exercises: FallbackExercise[] } {
   return {
-    focus: 'Corpo inteiro — adaptação (superior e quadril)',
+    focus: 'Corpo inteiro, adaptação (superior e quadril)',
     exercises: [
       {
         exerciseId: 'knee_pushup',

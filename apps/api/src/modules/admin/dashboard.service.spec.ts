@@ -3,6 +3,7 @@ import { PinoLogger } from 'nestjs-pino';
 import { describe, expect, it, vi } from 'vitest';
 
 import { HealthCipherService } from '../../core/database/health-cipher.service';
+import { HealthConsentService } from '../../core/database/health-consent.service';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
@@ -14,6 +15,7 @@ import { DashboardService } from './dashboard.service';
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
 const USER_ID = '22222222-2222-4222-8222-222222222222';
 const RESOURCE_ID = '33333333-3333-4333-8333-333333333333';
+const SESSION_ID = '77777777-7777-4777-8777-777777777777';
 const actor: AuthenticatedUser = { userId: ACTOR_ID, role: 'PROFESSIONAL', jti: 'jti' };
 const admin: AuthenticatedUser = { userId: ACTOR_ID, role: 'ADMIN', jti: 'jti' };
 
@@ -39,6 +41,11 @@ const content = {
     },
   ],
 } as const;
+
+/** Consentimento de saúde ativo é pré-condição de QUALQUER assinatura (2026-08-24). */
+function consentService(active = true) {
+  return { hasActiveForUser: vi.fn(async () => active) } as unknown as HealthConsentService;
+}
 
 function makeService(row: Record<string, unknown>, verdict: 'PASS' | 'FLAG_HUMAN_REVIEW' = 'PASS') {
   const chain = {
@@ -68,7 +75,7 @@ function makeService(row: Record<string, unknown>, verdict: 'PASS' | 'FLAG_HUMAN
   const audit = { append } as unknown as AuditService;
   const enqueue = vi.fn(async () => 'job');
   const queues = { enqueue } as unknown as QueueManager;
-  const logger = { setContext: vi.fn() } as unknown as PinoLogger;
+  const logger = { setContext: vi.fn(), warn: vi.fn(), info: vi.fn(), error: vi.fn() } as unknown as PinoLogger;
   const service = new DashboardService(
     db,
     validation,
@@ -76,6 +83,7 @@ function makeService(row: Record<string, unknown>, verdict: 'PASS' | 'FLAG_HUMAN
     audit,
     queues,
     { emit: vi.fn(), stream: vi.fn() } as unknown as DashboardQueueEventsService,
+    consentService(),
     logger,
   );
   return { service, enqueue, append, update, insert, execute };
@@ -85,6 +93,7 @@ function makeSequencedService(
   selections: unknown[][],
   verdict: 'PASS' | 'FLAG_HUMAN_REVIEW' = 'PASS',
   decrypted: string[] = [],
+  consentActive = true,
 ) {
   const updateWhere = vi.fn(async () => []);
   const updateSet = vi.fn(() => ({ where: updateWhere }));
@@ -135,7 +144,8 @@ function makeSequencedService(
     { append } as unknown as AuditService,
     { enqueue } as unknown as QueueManager,
     { emit, stream: vi.fn() } as unknown as DashboardQueueEventsService,
-    { setContext: vi.fn() } as unknown as PinoLogger,
+    consentService(consentActive),
+    { setContext: vi.fn(), warn: vi.fn(), info: vi.fn(), error: vi.fn() } as unknown as PinoLogger,
   );
   return {
     service,
@@ -209,24 +219,6 @@ describe('DashboardService invariantes de mutacao', () => {
     expect(enqueue).not.toHaveBeenCalled();
   });
 
-  it('retry de PAR-Q ja liberado nao repete mutacao, auditoria ou geracao', async () => {
-    const { service, enqueue, execute, append } = makeService({
-      userId: USER_ID,
-      state: 'LIBERADO',
-      submittedAt: new Date('2026-08-01T12:00:00.000Z'),
-    });
-    await expect(
-      service.releaseParq(actor, RESOURCE_ID, {
-        decision: 'RELEASED',
-        notes: 'avaliacao humana registrada',
-        confirmation: true,
-      }),
-    ).resolves.toMatchObject({ state: 'LIBERADO', alreadyReleased: true });
-    expect(execute).not.toHaveBeenCalled();
-    expect(append).not.toHaveBeenCalled();
-    expect(enqueue).not.toHaveBeenCalled();
-  });
-
   it('edita protocolo seguro, invalida assinatura anterior e audita hashes', async () => {
     const { service, updateSet, updateWhere, append, forUpdate } = makeSequencedService([
       [pendingProtocol],
@@ -268,6 +260,37 @@ describe('DashboardService invariantes de mutacao', () => {
     expect(enqueue).toHaveBeenCalledOnce();
   });
 
+  it('ADMIN assina sem credencial CREF (conta fundador, achado 2026-08-22)', async () => {
+    const { service, updateWhere, insertValues, append, enqueue } = makeSequencedService([
+      [pendingProtocol],
+      // Só uma seleção (o `requireProtocol`): ADMIN pula o select de checagem de CREF.
+    ]);
+    await expect(
+      service.signProtocol(admin, RESOURCE_ID, { confirmation: true }),
+    ).resolves.toMatchObject({ id: RESOURCE_ID, version: 2, alreadySigned: false });
+    expect(updateWhere).toHaveBeenCalledOnce();
+    expect(insertValues).toHaveBeenCalledWith(expect.objectContaining({ version: 2 }));
+    expect(append).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: 'PROTOCOL_SIGNED' }),
+    );
+    expect(enqueue).toHaveBeenCalledOnce();
+  });
+
+  it('conteudo salvo que nao passa mais no schema atual falha com 400 explicito, nunca 500 generico', async () => {
+    // Achado 2026-08-22: `protocolStructureSchema.parse(row.content)` era um `.parse()`
+    // direto sem try/catch — um `ZodError` não é `HttpException`, e o filtro padrão do
+    // Nest vira "Internal server error" sem pista nenhuma. `sessions` vazio viola
+    // `.min(1)` do schema atual; simula conteúdo salvo antes de uma regra ficar mais
+    // restrita (ou corrompido) chegando na assinatura.
+    const invalidContentProtocol = { ...pendingProtocol, content: { ...content, sessions: [] } };
+    const { service } = makeSequencedService([[invalidContentProtocol]]);
+    const promise = service.signProtocol(admin, RESOURCE_ID, { confirmation: true });
+    await expect(promise).rejects.toBeInstanceOf(BadRequestException);
+    const error = (await promise.catch((caught: unknown) => caught)) as BadRequestException;
+    expect(error.getResponse()).toMatchObject({ code: 'PROTOCOL_CONTENT_INVALID' });
+  });
+
   it('bloqueia assinatura fora do estado pendente ou sem CREF ativo', async () => {
     const activeWithoutSignature = { ...pendingProtocol, status: 'ACTIVE' };
     const first = makeSequencedService([[activeWithoutSignature]]).service;
@@ -291,51 +314,74 @@ describe('DashboardService invariantes de mutacao', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('libera PAR-Q sem ressalva via funcao restrita e agenda geracao', async () => {
-    const { service, execute, append, enqueue } = makeSequencedService([
-      [
-        {
-          userId: USER_ID,
-          state: 'BLOQUEADO_AGUARDANDO_CLEARANCE',
-          submittedAt: new Date('2026-08-01T12:00:00.000Z'),
-        },
-      ],
-    ]);
+  /**
+   * 2026-08-24: a liberação de PAR-Q não tem mais ação nem tela próprias — acontece
+   * DENTRO da assinatura do protocolo, na mesma transação. `release_parq_on_signature`
+   * devolve o titular quando de fato liberou, e `NULL` quando não havia nada a liberar.
+   */
+  it('assinatura de protocolo com PAR-Q bloqueado libera o PAR-Q e audita o ato separado', async () => {
+    const parqProtocol = {
+      ...pendingProtocol,
+      reviewUrgency: 'MANDATORY' as const,
+      anamnesisSessionId: SESSION_ID,
+    };
+    const { service, append, execute } = makeSequencedService([[parqProtocol]]);
+    (execute as ReturnType<typeof vi.fn>).mockResolvedValue([{ user_id: USER_ID }]);
+
     await expect(
-      service.releaseParq(actor, RESOURCE_ID, {
-        decision: 'RELEASED',
-        notes: 'liberacao registrada pelo RT',
-        confirmation: true,
-      }),
-    ).resolves.toEqual({
-      id: RESOURCE_ID,
-      state: 'LIBERADO',
-      alreadyReleased: false,
-    });
+      service.signProtocol(admin, RESOURCE_ID, { confirmation: true }),
+    ).resolves.toMatchObject({ alreadySigned: false });
+
     expect(execute).toHaveBeenCalledOnce();
-    expect(append).toHaveBeenCalledOnce();
-    expect(enqueue).toHaveBeenCalledOnce();
+    expect(append).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'PARQ_RELEASED_BY_HUMAN',
+        entityType: 'anamnesis_session',
+        entityId: SESSION_ID,
+        changes: expect.objectContaining({
+          viaProtocolSignature: true,
+          protocolId: RESOURCE_ID,
+          previousState: 'BLOQUEADO_AGUARDANDO_CLEARANCE',
+          newState: 'LIBERADO_COM_RESSALVA_RT',
+          actorRole: 'ADMIN',
+        }),
+      }),
+    );
   });
 
-  it('rejeita PAR-Q ausente ou fora do estado bloqueado', async () => {
-    const missing = makeSequencedService([[]]).service;
-    await expect(
-      missing.releaseParq(actor, RESOURCE_ID, {
-        decision: 'RELEASED',
-        notes: 'liberacao registrada',
-        confirmation: true,
-      }),
-    ).rejects.toThrow('PAR-Q nao encontrado.');
-    const invalid = makeSequencedService([
-      [{ userId: USER_ID, state: 'EM_PREENCHIMENTO' }],
-    ]).service;
-    await expect(
-      invalid.releaseParq(actor, RESOURCE_ID, {
-        decision: 'RELEASED',
-        notes: 'liberacao registrada',
-        confirmation: true,
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+  it('assinatura de protocolo comum: chama a funcao, mas nao audita liberacao de PAR-Q', async () => {
+    const { service, append, execute } = makeSequencedService([[pendingProtocol]]);
+    // Sem sessão bloqueada, a função é um no-op e devolve NULL.
+    (execute as ReturnType<typeof vi.fn>).mockResolvedValue([{ user_id: null }]);
+
+    await service.signProtocol(admin, RESOURCE_ID, { confirmation: true });
+
+    expect(execute).toHaveBeenCalledOnce();
+    const actions = append.mock.calls.map((call) => call[1].action);
+    expect(actions).toContain('PROTOCOL_SIGNED');
+    expect(actions).not.toContain('PARQ_RELEASED_BY_HUMAN');
+  });
+
+  /**
+   * Vale para QUALQUER assinatura, não só as de PAR-Q: assinar cria documento novo a
+   * partir de dado de saúde e dispara entrega — sem base legal, o ato inteiro cai.
+   */
+  it('consentimento de saude revogado bloqueia a assinatura antes de qualquer escrita', async () => {
+    const { service, updateWhere, insertValues, append, execute } = makeSequencedService(
+      [[pendingProtocol]],
+      'PASS',
+      [],
+      false,
+    );
+    const promise = service.signProtocol(admin, RESOURCE_ID, { confirmation: true });
+    await expect(promise).rejects.toBeInstanceOf(BadRequestException);
+    const error = (await promise.catch((caught: unknown) => caught)) as BadRequestException;
+    expect(error.getResponse()).toMatchObject({ code: 'HEALTH_CONSENT_REVOKED' });
+    expect(updateWhere).not.toHaveBeenCalled();
+    expect(insertValues).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it('resolve handoff uma vez e trata retry como idempotente', async () => {
@@ -381,26 +427,30 @@ describe('DashboardService invariantes de mutacao', () => {
 });
 
 describe('DashboardService leituras operacionais', () => {
-  it('libera leituras globais ao ADMIN, mas mantém atos profissionais CREF-only', async () => {
+  it('libera leituras globais ao ADMIN (fila, operações, eventos)', async () => {
     const { service } = makeSequencedService([]);
     await expect(service.queue(admin)).resolves.toMatchObject({ mandatory: [], optional: [] });
     await expect(service.operations(admin)).resolves.toMatchObject({ replays: [] });
     expect(() => service.events(admin)).not.toThrow();
+  });
+
+  /**
+   * Achado 2026-08-22, decisão do fundador: ADMIN (conta fundador) ganhou acesso total
+   * às mesmas ações de PROFESSIONAL na fila, incluindo assinar protocolo — a MOVIVO no
+   * início só tem um profissional CREF, também sócio-fundador, com conta ADMIN. Um
+   * papel qualquer fora desses dois continua barrado (não regrediu).
+   */
+  it('papel fora de PROFESSIONAL/ADMIN continua barrado das ações que mutam protocolo/handoff', async () => {
+    const outsider: AuthenticatedUser = { userId: ACTOR_ID, role: 'SUPPORT', jti: 'jti' };
+    const { service } = makeSequencedService([]);
     await expect(
-      service.editProtocol(admin, RESOURCE_ID, { content, reason: 'revisão administrativa' }),
+      service.editProtocol(outsider, RESOURCE_ID, { content, reason: 'tentativa indevida' }),
     ).rejects.toThrow('Acesso exclusivo ao profissional CREF');
-    await expect(service.signProtocol(admin, RESOURCE_ID, { confirmation: true })).rejects.toThrow(
-      'Acesso exclusivo ao profissional CREF',
-    );
     await expect(
-      service.releaseParq(admin, RESOURCE_ID, {
-        decision: 'RELEASED',
-        notes: 'decisão técnica registrada',
-        confirmation: true,
-      }),
+      service.signProtocol(outsider, RESOURCE_ID, { confirmation: true }),
     ).rejects.toThrow('Acesso exclusivo ao profissional CREF');
     await expect(
-      service.resolveHandoff(admin, RESOURCE_ID, {
+      service.resolveHandoff(outsider, RESOURCE_ID, {
         resolution: 'ENCAMINHADO',
         notes: 'decisão técnica registrada',
         confirmation: true,
@@ -408,7 +458,13 @@ describe('DashboardService leituras operacionais', () => {
     ).rejects.toThrow('Acesso exclusivo ao profissional CREF');
   });
 
-  it('mandatory é PAR-Q bloqueado + protocolo MANDATORY; optional é só protocolo OPTIONAL (com prazo)', async () => {
+  /**
+   * 2026-08-24: a fila é 100% protocolo. O item separado `kind: 'PARQ'` (uma sessão sem
+   * protocolo) sumiu; PAR-Q bloqueado agora é um protocolo `MANDATORY` cuja sessão de
+   * origem está `BLOQUEADO_AGUARDANDO_CLEARANCE` — sinalizado por `origin: 'PARQ'` e
+   * `severity: 'SAFETY'`, para o front distinguir de um `MANDATORY` de edição manual.
+   */
+  it('mandatory separa PAR-Q (SAFETY) de edição (ALERT); optional é OPTIONAL com prazo', async () => {
     const oldest = new Date('2026-08-01T12:00:00.000Z');
     const middle = new Date('2026-08-02T12:00:00.000Z');
     const newest = new Date('2026-08-03T12:00:00.000Z');
@@ -420,6 +476,7 @@ describe('DashboardService leituras operacionais', () => {
           status: 'PENDING_SIGNATURE',
           name: 'Maria Teste',
           reviewUrgency: 'MANDATORY',
+          parqState: null,
         },
         {
           id: '44444444-4444-4444-8444-444444444444',
@@ -427,47 +484,70 @@ describe('DashboardService leituras operacionais', () => {
           status: 'PENDING_SIGNATURE',
           name: 'Bruno Teste',
           reviewUrgency: 'OPTIONAL',
+          parqState: 'LIBERADO',
         },
-      ],
-      [
         {
           id: '55555555-5555-4555-8555-555555555555',
           createdAt: oldest,
+          status: 'PENDING_SIGNATURE',
           name: 'Carla Teste',
+          reviewUrgency: 'MANDATORY',
+          parqState: 'BLOQUEADO_AGUARDANDO_CLEARANCE',
         },
       ],
     ]);
     const result = await service.queue(actor);
     expect(result.counts).toEqual({ mandatory: 2, optional: 1, total: 3 });
-    // mandatory: PAR-Q bloqueado (mais antigo) + o protocolo MANDATORY (mais novo) —
-    // mesma categoria "exige ação humana, nunca sai sozinho", ordenado por idade.
-    // Achado 2026-08-20: título do PAR-Q ganhou o nome do titular, mesmo padrão de
-    // `protocolTitle` — mas sem a palavra "Protocolo", que ainda não existe nesse
-    // estado (é o gate que impede o protocolo de ser gerado).
-    expect(result.mandatory.map((item) => ({ kind: item.kind, title: item.title }))).toEqual([
-      { kind: 'PARQ', title: 'PAR-Q para Revisão: Carla Teste' },
-      { kind: 'PROTOCOL', title: 'Protocolo para Revisão: Maria Teste' },
+    // Ambos são PROTOCOL agora, ordenados por idade (mais antigo primeiro).
+    expect(
+      result.mandatory.map((item) => ({
+        kind: item.kind,
+        title: item.title,
+        severity: item.severity,
+        origin: item.origin,
+      })),
+    ).toEqual([
+      {
+        kind: 'PROTOCOL',
+        title: 'Protocolo para Revisão: Carla Teste',
+        severity: 'SAFETY',
+        origin: 'PARQ',
+      },
+      {
+        kind: 'PROTOCOL',
+        title: 'Protocolo para Revisão: Maria Teste',
+        severity: 'ALERT',
+        origin: 'EDIT',
+      },
     ]);
+    // MANDATORY nunca carrega prazo: não existe job de auto-liberação agendado pra ele.
     expect(result.mandatory.every((item) => item.autoReleaseAt === null)).toBe(true);
-    expect(result.mandatory[1]?.severity).toBe('ALERT');
-    // Achado 2026-08-20: `item()` copiava `status` em `summary`, então o enum cru
-    // "BLOCKED" vazava como legenda visível do card de PAR-Q. `status` segue sendo o
-    // enum (o tom do badge no front depende dele); só `summary` virou texto humano.
-    expect(result.mandatory[0]).toMatchObject({
-      status: 'BLOCKED',
-      summary: 'Aguardando liberacao do profissional CREF responsavel.',
-    });
-    // PROTOCOL/CHECKIN/HANDOFF continuam com `summary === status` (fora do escopo da
-    // correção) — o front já filtra esse ruído via `meaningfulText`.
-    expect(result.mandatory[1]).toMatchObject({
-      status: 'PENDING_SIGNATURE',
-      summary: 'PENDING_SIGNATURE',
-    });
-    // optional: só o protocolo OPTIONAL, e ele sempre carrega prazo.
+    // optional: sem `origin` (não há motivo a exibir) e sempre com prazo.
     expect(result.optional.map((item) => item.title)).toEqual([
       'Protocolo para Revisão: Bruno Teste',
     ]);
+    expect(result.optional[0]?.origin).toBeNull();
+    expect(result.optional[0]?.severity).toBe('ROUTINE');
     expect(result.optional[0]?.autoReleaseAt).toBe('2026-08-02T13:00:00.000Z');
+  });
+
+  it('protocolo anterior à migração 0035 (sem sessão vinculada) segue na fila como EDIT', async () => {
+    const { service } = makeSequencedService([
+      [
+        {
+          id: RESOURCE_ID,
+          createdAt: new Date('2026-08-01T12:00:00.000Z'),
+          status: 'PENDING_SIGNATURE',
+          name: 'Legado Teste',
+          reviewUrgency: 'MANDATORY',
+          // LEFT JOIN sem par → `null`, e não uma linha some da fila.
+          parqState: null,
+        },
+      ],
+    ]);
+    const result = await service.queue(actor);
+    expect(result.counts).toMatchObject({ mandatory: 1 });
+    expect(result.mandatory[0]).toMatchObject({ origin: 'EDIT', severity: 'ALERT' });
   });
 
   it('calcula funil/SLA, primeiro treino e replays anonimizados', async () => {
@@ -682,114 +762,12 @@ describe('DashboardService leituras operacionais', () => {
     );
   });
 
-  // Segundo ponto de entrada pro mesmo parser (achado 2026-08-18: olho aparece nas duas
-  // caixas da fila) — aqui a sessao vem direto pelo id, sem passar por um protocolo.
-  it('parqAnamnesisAnswers: devolve os 3 blocos e registra leitura sensivel', async () => {
-    const validPersonal = {
-      name: 'Joao Teste',
-      birthDate: '1992-02-02',
-      biologicalSex: 'MALE',
-      heightCm: 180,
-      weightKg: 80,
-      phoneNumber: '+5511888888888',
-    };
-    const validRoutine = {
-      primaryGoal: 'LOSE_FAT',
-      trainingStatus: 'NEVER',
-      experience: 'BEGINNER',
-      daysPerWeek: 3,
-      sessionDuration: 'M45_TO_60',
-      location: 'HOME',
-      preferredPeriod: 'MORNING',
-    };
-    const { service, append, decryptHealth } = makeSequencedService(
-      [
-        [
-          {
-            id: RESOURCE_ID,
-            userId: USER_ID,
-            dataBlock1: validPersonal,
-            dataBlock2: Buffer.from('cipher'),
-            dataBlock3: validRoutine,
-            submittedAt: new Date('2026-08-01T13:00:00.000Z'),
-          },
-        ],
-      ],
-      'PASS',
-      [
-        JSON.stringify({
-          parq: {
-            version: 'parq-2026-07-v1',
-            answers: ['Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7', 'Q8', 'Q9'].map((questionId) => ({
-              questionId,
-              answer: questionId === 'Q7',
-              ...(questionId === 'Q7' ? { detail: 'Dor no ombro' } : {}),
-            })),
-          },
-        }),
-      ],
+  // `kind: 'PARQ'` deixou de existir (2026-08-24): não há mais tela nem detalhe de PAR-Q.
+  it('kind PARQ deixou de ser aceito na rota de detalhe', async () => {
+    const { service } = makeSequencedService([]);
+    await expect(service.detail(actor, 'PARQ', RESOURCE_ID)).rejects.toBeInstanceOf(
+      BadRequestException,
     );
-
-    const result = await service.parqAnamnesisAnswers(actor, RESOURCE_ID);
-
-    expect(result.userId).toBe(USER_ID);
-    expect(result.personal).toMatchObject({ name: 'Joao Teste' });
-    expect(result.routine).toMatchObject({ primaryGoal: 'LOSE_FAT' });
-    expect(result.health.parq?.answers).toHaveLength(9);
-    expect(result.health.parq?.answers).toContainEqual({
-      questionId: 'Q7',
-      answer: true,
-      detail: 'Dor no ombro',
-    });
-    expect(decryptHealth).toHaveBeenCalledWith(Buffer.from('cipher'));
-    expect(append).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ action: 'HEALTH_DATA_VIEWED', userId: USER_ID }),
-    );
-  });
-
-  it('parqAnamnesisAnswers: sessao inexistente lanca 404', async () => {
-    const { service } = makeSequencedService([[]]);
-    await expect(service.parqAnamnesisAnswers(actor, RESOURCE_ID)).rejects.toThrow(
-      'Anamnese nao encontrada.',
-    );
-  });
-
-  it('decifra apenas flags positivas no detalhe do PAR-Q', async () => {
-    const { service } = makeSequencedService(
-      [
-        [
-          {
-            userId: USER_ID,
-            data: Buffer.from('health'),
-            state: null,
-            createdAt: new Date('2026-08-01T12:00:00.000Z'),
-          },
-        ],
-      ],
-      'PASS',
-      [
-        JSON.stringify({
-          parq: {
-            answers: [
-              { questionId: 'q1', answer: true },
-              { questionId: 'q2', answer: false },
-              { answer: true },
-            ],
-          },
-        }),
-      ],
-    );
-    await expect(service.detail(actor, 'PARQ', RESOURCE_ID)).resolves.toMatchObject({
-      // Mesmo resumo humano da fila; `status` cai no fallback 'BLOCKED' porque `state`
-      // veio null nesta fixture (achado 2026-08-20 — ver teste da fila).
-      item: {
-        status: 'BLOCKED',
-        summary: 'Aguardando liberacao do profissional CREF responsavel.',
-      },
-      context: { positiveAnswers: 1 },
-      parq: { flags: ['q1'], state: 'BLOQUEADO_AGUARDANDO_CLEARANCE' },
-    });
   });
 
   it('entrega detalhe de check-in cifrado e handoff conversacional', async () => {

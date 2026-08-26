@@ -1,11 +1,31 @@
 import { describe, expect, it } from 'vitest';
 
+import type { ParqAnswer, ParqQuestionId } from '@movivo/shared';
+import { PARQ_QUESTION_IDS, PARQ_VERSION, ParqState } from '@movivo/shared';
+
+import { evaluateParq } from '../anamnesis/parq';
 import {
+  demoteLevel,
   emphasisToMuscleGroups,
   levelFromExperience,
   mapInjuriesToTags,
   painToConstraints,
+  parqToConstraints,
 } from './user-constraints';
+
+/** Monta o PAR-Q completo marcando "Sim" só nas perguntas passadas (valor = `detail`). */
+function parqWith(yes: Partial<Record<ParqQuestionId, string | true>>): ParqAnswer[] {
+  return PARQ_QUESTION_IDS.map((questionId) => ({
+    questionId,
+    answer: yes[questionId] !== undefined,
+    ...(typeof yes[questionId] === 'string' ? { detail: yes[questionId] } : {}),
+  }));
+}
+
+function mapParq(yes: Partial<Record<ParqQuestionId, string | true>>) {
+  const answers = parqWith(yes);
+  return parqToConstraints(evaluateParq({ parq: { version: PARQ_VERSION, answers } }), answers);
+}
 
 describe('mapInjuriesToTags', () => {
   it('mapeia lesão em texto livre para a tag correta', () => {
@@ -91,5 +111,74 @@ describe('anamnese v2 → UserConstraints (US-6.9)', () => {
       }),
     ).toEqual({ tags: [], raw: [] });
     expect(painToConstraints(null)).toEqual({ tags: [], raw: [] });
+  });
+});
+
+/**
+ * 2026-08-24: o PAR-Q deixou de ser TRAVA de geração, então cada "Sim" precisou virar
+ * restrição concreta — senão "gerar com cuidado" seria só uma etiqueta sem efeito.
+ * Os IDs foram conferidos contra `PARQ_QUESTION_TEXT`, não contra a ordem da lista.
+ */
+describe('parqToConstraints (PAR-Q → contraindicações)', () => {
+  it('Q1/Q2/Q3/Q5 (coração, dor no peito, medicação) → CARDIAC', () => {
+    for (const id of ['Q1', 'Q2', 'Q3', 'Q5'] as const) {
+      expect(mapParq({ [id]: true }).tags).toEqual(['CARDIAC']);
+    }
+  });
+
+  it('Q1+Q2+Q5 juntas não duplicam a mesma tag', () => {
+    expect(mapParq({ Q1: true, Q2: true, Q5: true }).tags).toEqual(['CARDIAC']);
+  });
+
+  it('Q4 (tontura/desmaio) → BALANCE_FALL_RISK e trava a fase em ADAPTACAO', () => {
+    const { tags, maxPhase } = mapParq({ Q4: true });
+    expect(tags).toEqual(['BALANCE_FALL_RISK']);
+    expect(maxPhase).toBe('ADAPTACAO');
+  });
+
+  it('Q7 (gravidez/pós-parto) → PREGNANCY, sem teto de fase', () => {
+    const { tags, maxPhase } = mapParq({ Q7: true });
+    expect(tags).toEqual(['PREGNANCY']);
+    expect(maxPhase).toBeUndefined();
+  });
+
+  // Q6/Q8/Q9 não têm tag fixa de propósito: "problema em articulação" sem dizer QUAL
+  // não identifica região nenhuma, e inventar uma seria pior que deixar o texto ao RT.
+  it('Q6/Q8/Q9 não têm tag fixa — só o detail vira tag, pela heurística de texto', () => {
+    expect(mapParq({ Q6: true }).tags).toEqual([]);
+    expect(mapParq({ Q6: 'hérnia de disco na lombar' }).tags).toEqual(['LOWER_BACK']);
+    expect(mapParq({ Q8: 'cirurgia no joelho' }).tags).toEqual(['KNEE']);
+    expect(mapParq({ Q9: 'labirintite' }).tags).toEqual(['BALANCE_FALL_RISK']);
+  });
+
+  it('detail sem palavra-chave conhecida não inventa tag (fica visível ao RT)', () => {
+    expect(mapParq({ Q9: 'orientação do meu médico' }).tags).toEqual([]);
+  });
+
+  it('PAR-Q todo "Não" → nenhuma tag, nenhum teto', () => {
+    const result = mapParq({});
+    expect(result).toEqual({ tags: [] });
+  });
+
+  it('combina tag fixa e tag derivada de texto na mesma avaliação', () => {
+    const { tags, maxPhase } = mapParq({ Q4: true, Q6: 'dor no ombro' });
+    expect(tags).toEqual(expect.arrayContaining(['BALANCE_FALL_RISK', 'SHOULDER']));
+    expect(maxPhase).toBe('ADAPTACAO');
+  });
+
+  it('evaluateParq concorda: qualquer "Sim" bloqueia', () => {
+    const answers = parqWith({ Q7: true });
+    const evaluation = evaluateParq({ parq: { version: PARQ_VERSION, answers } });
+    expect(evaluation.requiresProfessionalReview).toBe(true);
+    expect(evaluation.parqState).toBe(ParqState.BLOQUEADO_AGUARDANDO_CLEARANCE);
+    expect(evaluation.triggeredQuestions).toEqual(['Q7']);
+  });
+});
+
+describe('demoteLevel (PAR-Q bloqueado rebaixa um degrau)', () => {
+  it('desce um nível, com piso em INICIANTE', () => {
+    expect(demoteLevel('AVANCADO')).toBe('INTERMEDIARIO');
+    expect(demoteLevel('INTERMEDIARIO')).toBe('INICIANTE');
+    expect(demoteLevel('INICIANTE')).toBe('INICIANTE');
   });
 });
