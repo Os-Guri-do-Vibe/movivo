@@ -125,6 +125,30 @@ beforeAll(async () => {
         agentName: (active.payload as { agentName: string }).agentName,
       }
     : null;
+
+  // Num banco recém-migrado sem uso anterior (CI, ambiente limpo), não há nenhuma
+  // persona pré-existente para o slot MALE herdar — a migração 0036 só teve algo pra
+  // migrar em bancos que já tinham uma persona publicada antes dela rodar (ex.: um
+  // ambiente de desenvolvimento com uso real). O bloco 1 testa o EMPRÉSTIMO do slot
+  // órfão, não a migração em si (isso é `persona-slot.int-spec.ts`), então semeamos a
+  // mesma precondição diretamente quando ela não existe, em vez de o teste depender de
+  // histórico do ambiente.
+  if (!baselineMale) {
+    const seeded = persona('Leonardo', 'o coach digital da MOVIVO que acompanha o seu treino');
+    await migrator`
+      INSERT INTO agent_config (target_sex, version, status, payload, change_note, created_by)
+      VALUES ('MALE', 1, 'PUBLISHED', ${JSON.stringify(seeded)}::jsonb,
+              'QA Mariana — baseline sintético (ambiente sem persona pré-existente)',
+              ${actor.userId}::uuid)
+    `;
+    const seededActive = await repo.activePayload('MALE');
+    baselineMale = seededActive
+      ? {
+          version: seededActive.version,
+          agentName: (seededActive.payload as { agentName: string }).agentName,
+        }
+      : null;
+  }
 }, 60_000);
 
 afterAll(async () => {
@@ -163,7 +187,7 @@ afterAll(async () => {
 }, 60_000);
 
 describe('1. estado inicial — empréstimo do slot órfão', () => {
-  it('a persona pré-existente foi preservada no slot MALE pela migração 0036', async () => {
+  it('existe uma persona publicada no slot MALE antes dos testes (real, migrada, ou semeada num ambiente limpo)', async () => {
     expect(baselineMale).not.toBeNull();
     const rows = await migrator<{ n: number }[]>`
       SELECT count(*)::int AS n FROM agent_config
