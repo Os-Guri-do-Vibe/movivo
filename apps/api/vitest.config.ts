@@ -44,6 +44,13 @@ export default defineConfig({
         'src/core/database/schema/**',
         'src/core/database/migrate.ts',
         'src/core/database/seed.ts',
+        // Mesma categoria do item 4 acima: script CLI de uso único (`--dry-run` via
+        // `process.argv`, `process.exitCode` no topo, conexão de banco/fila própria,
+        // fora do processo da API) — não roda em produção, só uma vez manualmente
+        // após o deploy da Sprint 11. Mockar `postgres`/`Queue`/`drizzle` só para
+        // exercitar os `if` de um script de missão única não prova nada que a leitura
+        // do código já não prove.
+        'src/scripts/reenqueue-blocked-parq.ts',
         'src/core/database/database-health.service.ts',
         'src/core/redis/redis-health.service.ts',
         // I/O de banco sob RLS (US-2.2): mapeamento Drizzle sem ramo, provado pelo
