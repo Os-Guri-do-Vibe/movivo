@@ -445,7 +445,15 @@ export class ControlCenterService {
         .from(conversations)
         .where(gte(conversations.createdAt, since)),
     );
-    const activePersona = await this.agentConfig.activePayload();
+    // Sprint 11: duas personas publicáveis (uma por público). O card do panorama deixou de
+    // poder dizer "versão vigente" no singular — passa a contar quantos dos dois slots já
+    // têm persona própria, com as versões no detalhe. Zero slots publicados continua sendo
+    // o único caso `UNAVAILABLE` (aí a IA responde com o default de código).
+    const [malePersona, femalePersona] = await Promise.all([
+      this.agentConfig.activePayload('MALE'),
+      this.agentConfig.activePayload('FEMALE'),
+    ]);
+    const publishedSlots = [malePersona, femalePersona].filter(Boolean).length;
     const blockedRate = this.blockedRate(row?.blocked ?? 0, row?.validated ?? 0);
     const attention =
       blockedRate.value !== null &&
@@ -468,13 +476,17 @@ export class ControlCenterService {
       details: [
         { label: 'Taxa de resposta bloqueada pela validação', metric: blockedRate },
         {
-          label: 'Persona vigente',
+          label: 'Personas publicadas',
           metric: this.metric(
-            activePersona?.version ?? 0,
+            publishedSlots,
             'COUNT',
-            activePersona ? 'AVAILABLE' : 'UNAVAILABLE',
-            activePersona
-              ? `Versão ${activePersona.version} publicada.`
+            publishedSlots > 0 ? 'AVAILABLE' : 'UNAVAILABLE',
+            publishedSlots > 0
+              ? `Masculina: ${malePersona ? `versão ${malePersona.version}` : 'não publicada'}. ` +
+                `Feminina: ${femalePersona ? `versão ${femalePersona.version}` : 'não publicada'}. ` +
+                (publishedSlots === 1
+                  ? 'O público sem persona própria recebe a do outro por enquanto.'
+                  : '')
               : 'Nenhuma configuração publicada; a IA responde com o default de código.',
           ),
         },
