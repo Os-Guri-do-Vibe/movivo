@@ -253,6 +253,13 @@
       "when": 1787597766236,
       "tag": "0035_gifted_sue_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1787700869336,
+      "tag": "0036_agent_persona_slots",
+      "breakpoints": true
     }
   ]
 }

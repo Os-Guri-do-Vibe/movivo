@@ -1,7 +1,11 @@
 import type { Job } from 'bullmq';
 import type { Redis } from 'ioredis';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildHumanHandoffMessage, DEFAULT_AGENT_PERSONA } from '@movivo/shared';
+import {
+  buildHumanHandoffMessage,
+  DEFAULT_AGENT_PERSONA,
+  type AgentPersona,
+} from '@movivo/shared';
 
 import type { HealthConsentService } from '../../core/database/health-consent.service';
 import type { FaqService, PublishedFaqMatch } from '../../core/agent-config/faq.service';
@@ -52,6 +56,10 @@ interface Deps {
   l1Flags?: L1GuardrailFlag[];
   methodologySummary?: string | null;
   handoffMessage?: string;
+  /** Sprint 11: slot da persona do titular (`null` = titular sem anamnese/coluna). */
+  biologicalSex?: 'MALE' | 'FEMALE' | null;
+  /** Persona que o slot resolve — o worker a resolve UMA vez e propaga. */
+  persona?: AgentPersona;
   ragDocs?: Array<{
     chunkId: string;
     documentId: string | null;
@@ -88,16 +96,22 @@ function makeWorker(deps: Deps = {}) {
   );
   const classifier = { classify } as unknown as IntentClassifier;
 
+  const resolvedPersona: AgentPersona = deps.persona ?? { ...DEFAULT_AGENT_PERSONA, agentName: 'MOVI' };
+  // Sprint 11: `persona()` é o ÚNICO ponto de resolução e é chamado uma vez por job; as
+  // demais variantes recebem a persona já resolvida.
+  const personaResolve = vi.fn(async () => resolvedPersona);
   const prompts = {
-    resolvePrompt: vi.fn(async (intent: Intent) => resolvePrompt(intent)),
-    resolveRuntime: vi.fn(async (intent: Intent) => ({
+    persona: personaResolve,
+    resolvePromptFor: vi.fn(async (intent: Intent) => resolvePrompt(intent)),
+    resolveRuntimeFor: vi.fn(async (intent: Intent) => ({
       system: resolvePrompt(intent),
       formatting: { blockSize: 'MEDIO', allowLists: true, boldPolicy: 'UMA_PALAVRA' },
     })),
-    agentName: vi.fn(async () => 'MOVI'),
-    foraDeEscopoResponse: vi.fn(async () => buildForaDeEscopoResponse('MOVI')),
-    humanHandoffMessage: vi.fn(
-      async () => deps.handoffMessage ?? 'Vou registrar para o profissional CREF.',
+    foraDeEscopoResponseFor: vi.fn((persona: AgentPersona) =>
+      buildForaDeEscopoResponse(persona.agentName),
+    ),
+    humanHandoffMessageFor: vi.fn(
+      () => deps.handoffMessage ?? 'Vou registrar para o profissional CREF.',
     ),
   } as unknown as PromptResolverService;
 
@@ -145,7 +159,12 @@ function makeWorker(deps: Deps = {}) {
   const repo = {
     persistTurn,
     persistHandoff,
-    loadScrubUser: vi.fn(() => Promise.resolve({})),
+    loadRuntimeUser: vi.fn(() =>
+      Promise.resolve({
+        scrubUser: {},
+        biologicalSex: deps.biologicalSex === undefined ? 'MALE' : deps.biologicalSex,
+      }),
+    ),
     loadConstraints: vi.fn(() =>
       Promise.resolve(
         deps.constraints === undefined
@@ -229,6 +248,9 @@ function makeWorker(deps: Deps = {}) {
     isOverDailyLimit,
     batchLrange,
     batchDel,
+    prompts,
+    personaResolve,
+    context,
   };
 }
 
@@ -486,6 +508,70 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     expect(res.status).toBe('EMPTY');
     expect(lock.acquire).toHaveBeenCalledWith('u1');
     expect(lock.release).toHaveBeenCalledWith('u1', 'tok');
+  });
+});
+
+/* ------------------------------------------------------------------------- *
+ * Sprint 11 — persona por slot dentro do job
+ * ------------------------------------------------------------------------- */
+
+/** Shape do turno persistido — o mock de `persistTurn` não carrega tipo de argumento. */
+interface PersistedTurn {
+  direction: string;
+  content: string;
+}
+
+describe('AIResponseWorker — persona por titular (Sprint 11)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('resolve a persona UMA vez por job e propaga o objeto para todos os pontos', async () => {
+    const { worker, personaResolve, prompts, context } = makeWorker({ intent: 'MOTIVACAO' });
+
+    await worker.process(job());
+
+    // Uma resolução por job — é isso que impede que uma publicação no meio do job faça a
+    // mesma resposta sair com duas versões da persona.
+    expect(personaResolve).toHaveBeenCalledTimes(1);
+    expect(personaResolve).toHaveBeenCalledWith('MALE');
+    // E os consumidores recebem a persona/nome já resolvidos, sem resolver de novo.
+    const persona = await personaResolve.mock.results[0]?.value;
+    expect(prompts.resolveRuntimeFor).toHaveBeenCalledWith('MOTIVACAO', persona);
+    expect(context.build).toHaveBeenCalledWith('u1', 'MOTIVACAO', 'oi', 'MOVI');
+    expect(context.summarizeIfNeeded).toHaveBeenCalledWith('u1', 'MOVI');
+  });
+
+  it('titular com `biological_sex` NULL não derruba a mensagem — resolve com null', async () => {
+    const { worker, personaResolve, enqueue } = makeWorker({
+      biologicalSex: null,
+      intent: 'MOTIVACAO',
+    });
+
+    const res = await worker.process(job());
+
+    expect(res.status).toBe('SENT');
+    expect(personaResolve).toHaveBeenCalledWith(null);
+    expect((enqueue as EnqueueCalls).mock.calls.some((c) => c[1] === 'coach-message')).toBe(true);
+  });
+
+  it('a persona resolvida assina a recusa de fora-de-escopo do titular', async () => {
+    const { worker, persistTurn } = makeWorker({
+      intent: 'FORA_DE_ESCOPO',
+      biologicalSex: 'FEMALE',
+      persona: { ...DEFAULT_AGENT_PERSONA, agentName: 'Marina' },
+    });
+
+    await worker.process(job());
+
+    const outbound = (persistTurn.mock.calls as unknown as Array<[PersistedTurn]>)
+      .map(([input]) => input)
+      .find((input) => input.direction === 'OUTBOUND');
+    expect(outbound?.content).toContain('Marina');
+  });
+
+  it('o slot vai para a telemetria de token do LlmRouter', async () => {
+    const { worker, complete } = makeWorker({ intent: 'MOTIVACAO', biologicalSex: 'FEMALE' });
+    await worker.process(job());
+    expect(complete).toHaveBeenCalledWith(expect.objectContaining({ personaSlot: 'FEMALE' }));
   });
 });
 

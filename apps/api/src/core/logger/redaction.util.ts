@@ -46,6 +46,21 @@ const PII_FIELDS = [
   'dataNascimento',
   'address',
   'endereco',
+  // Sexo biológico e TODO derivado dele (Sprint 11 — exigência explícita do Sato ao aprovar
+  // a denormalização em `users`): redigir só a origem e deixar o derivado em claro não fecha
+  // nada. `targetSex`/`personaSlot` são o mesmo valor com outro nome — o slot da persona que
+  // atende o titular —, e num log que já carrega `userId` eles reconstroem o campo redigido.
+  // Consequência aceita: a telemetria de cache por slot do `LlmRouter` sai redigida do log; o
+  // corte por slot sai de `ai_jobs` cruzado com `users` no banco, sob controle de acesso.
+  'biologicalSex',
+  'biological_sex',
+  'targetSex',
+  'target_sex',
+  'personaSlot',
+  'persona_slot',
+  // Mesmo motivo, para o par que o log de empréstimo entre slots emite (achado de QA,
+  // Sprint 11): o slot de ONDE a persona foi emprestada reconstrói o mesmo dado.
+  'borrowedFromSlot',
   // Dados de saúde (LGPD Art. 11) — chegam com a anamnese na Sprint 2.
   'anamnesis',
   'parq',
@@ -63,6 +78,11 @@ const PII_FIELDS = [
   'refreshToken',
   'authorization',
   'apiKey',
+  // `apikey` minúsculo (não é duplicata do `apiKey` acima — a redação do pino é por nome
+  // EXATO): a EvolutionAPI publica a chave da instância no CORPO de toda entrega de webhook
+  // (achado de Sato lendo o container real). Qualquer log estruturado que carregue o
+  // envelope vazaria a chave sem uma linha de código nossa fazer nada de errado.
+  'apikey',
   'secret',
   'signature',
   // Payload bruto do gateway de pagamento (US-8.5). Vive na coluna jsonb de `payments`,

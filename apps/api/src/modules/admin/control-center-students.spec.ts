@@ -81,7 +81,7 @@ function build(...results: unknown[][]) {
     { activePayload: vi.fn().mockResolvedValue(null) } as unknown as AgentConfigRepository,
     { hasCredentials: () => false } as unknown as EvolutionTransport,
   );
-  return { service, db, audit, decryptHealth };
+  return { service, db, audit, decryptHealth, select };
 }
 
 const now = new Date('2026-08-12T12:00:00.000Z');
@@ -216,6 +216,32 @@ describe('ControlCenterService.student — ficha unificada (US-7.4)', () => {
     expect(data.student.timeline.length).toBeGreaterThan(0);
   });
 
+  /**
+   * Sprint 11 — condição sob a qual o Sato aprovou denormalizar `biological_sex` em `users`.
+   *
+   * A RLS de `users` é tudo-ou-nada por linha: a barreira real contra um papel interno ver
+   * um campo que não precisa ver é a **projeção explícita** de cada query. O teste afirma
+   * sobre as projeções de fato pedidas ao banco (chave do objeto E nome da coluna), não
+   * sobre o JSON de saída — assim ele pega também o caso de alguém selecionar a coluna e
+   * "só" não devolvê-la, que já a traria para dentro do processo e dos logs de query.
+   */
+  it('nenhuma projeção do pilar Alunos seleciona `biological_sex`', async () => {
+    const { service, select } = build(...studentResults());
+    await service.student({ ...ACTOR, role: 'SUPPORT' }, STUDENT_ID);
+
+    const projections = select.mock.calls.flatMap((call: unknown[]) =>
+      call[0] && typeof call[0] === 'object' ? [call[0] as Record<string, unknown>] : [],
+    );
+    expect(projections.length).toBeGreaterThan(0);
+    for (const projection of projections) {
+      expect(Object.keys(projection)).not.toContain('biologicalSex');
+      for (const column of Object.values(projection)) {
+        const name = (column as { name?: unknown })?.name;
+        if (typeof name === 'string') expect(name).not.toBe('biological_sex');
+      }
+    }
+  });
+
   it('não usa termo clínico nem promessa de resultado em nenhum texto do payload', async () => {
     const { service } = build(...studentResults());
 
@@ -272,6 +298,18 @@ describe('ControlCenterService.students — risco de cancelamento', () => {
     expect(data.aiBlockedRate.value).toBe(2);
     // Nenhum campo de saúde na lista.
     expect(JSON.stringify(data)).not.toMatch(/parq|anamnes|painReport|fatigue|desconforto/i);
+  });
+
+  /** Mesmo contrato de projeção do `student()` — ver a justificativa lá. */
+  it('a lista de alunos também não seleciona `biological_sex`', async () => {
+    const { service, select } = build([], [{ blocked: 0, validated: 0 }]);
+    await service.students({ ...ACTOR, role: 'SUPPORT' });
+
+    for (const call of select.mock.calls as unknown[][]) {
+      const projection = call[0];
+      if (!projection || typeof projection !== 'object') continue;
+      expect(Object.keys(projection as Record<string, unknown>)).not.toContain('biologicalSex');
+    }
   });
 });
 

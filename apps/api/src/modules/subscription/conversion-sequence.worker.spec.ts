@@ -20,7 +20,10 @@ function make(opts?: { setResult?: 'OK' | null; status?: string; trialEndsAt?: D
       trialEndsAt: opts && 'trialEndsAt' in opts ? opts.trialEndsAt : new Date(Date.now() + 1e9),
     }),
   );
-  const subs = { startTrial, getForUser } as unknown as SubscriptionService;
+  // Sprint 11: a copy de conversão cita o nome da agente, então o worker resolve o slot da
+  // persona do titular antes de montar a mensagem.
+  const personaSlotFor = vi.fn(() => Promise.resolve('FEMALE' as const));
+  const subs = { startTrial, getForUser, personaSlotFor } as unknown as SubscriptionService;
   const config = { whatsapp: { publicSiteUrl: 'https://movivo.test' } } as never;
   const agentPersona = { agentName: vi.fn(async () => 'MOVI') } as never;
   const setResult = opts && 'setResult' in opts ? opts.setResult : 'OK';
@@ -36,7 +39,7 @@ function make(opts?: { setResult?: 'OK' | null; status?: string; trialEndsAt?: D
     new RedisKeyBuilder('movivo') as never,
     logger as never,
   );
-  return { worker, enqueue, startTrial, getForUser, logger };
+  return { worker, enqueue, startTrial, getForUser, personaSlotFor, agentPersona, logger };
 }
 
 const job = (name: string, data: unknown) => ({ name, data }) as unknown as Job<never>;
@@ -77,6 +80,19 @@ describe('ConversionSequenceWorker — nurture / downgrade', () => {
     expect(logger.info).toHaveBeenCalledWith(
       expect.objectContaining({ event: 'downgrade_offered' }),
       expect.anything(),
+    );
+  });
+
+  /**
+   * Sprint 11: a copy cita o nome da agente, e existem duas personas publicadas. A mensagem
+   * tem que sair assinada pela persona do SLOT do titular — nunca por uma persona global.
+   */
+  it('a mensagem sai com o nome da persona do slot do titular', async () => {
+    const { worker, personaSlotFor, agentPersona } = make({ status: 'TRIALING' });
+    await worker.process(job('touchpoint', { userId: U, key: 'day14' }));
+    expect(personaSlotFor).toHaveBeenCalledWith(U);
+    expect((agentPersona as { agentName: ReturnType<typeof vi.fn> }).agentName).toHaveBeenCalledWith(
+      'FEMALE',
     );
   });
 

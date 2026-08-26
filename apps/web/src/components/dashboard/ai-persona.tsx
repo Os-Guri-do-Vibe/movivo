@@ -51,6 +51,12 @@ import {
   type PersonaStepId,
 } from './agent-persona-context';
 import {
+  SLOT_AUDIENCE,
+  SLOT_LABEL,
+  SLOT_LABEL_LOWER,
+  useAgentPersonaWorkspace,
+} from './agent-persona-workspace';
+import {
   FieldError,
   FieldWarning,
   INPUT_CLASS,
@@ -230,8 +236,25 @@ export function AiPersonaDashboard() {
   return (
     <section
       className="rounded-xl border border-border bg-card"
-      aria-label="Configuração do agente"
+      /*
+       * O nome acessível carrega o slot: as duas instâncias do formulário ficam montadas ao
+       * mesmo tempo, e duas regiões chamadas "Configuração do agente" seriam indistinguíveis
+       * para quem navega pela lista de regiões.
+       */
+      aria-label={`Configuração da ${SLOT_LABEL_LOWER[state.targetSex]}`}
     >
+      <header className="border-b border-border p-5">
+        <h2 className="text-h2 font-bold text-foreground">{SLOT_LABEL[state.targetSex]}</h2>
+        <p className="mt-1 text-label text-muted-foreground">{SLOT_AUDIENCE[state.targetSex]}</p>
+        {state.borrowed && state.data?.servedFromSex ? (
+          <FieldWarning>
+            Ainda não há persona publicada para este público — por enquanto ele recebe a{' '}
+            {SLOT_LABEL_LOWER[state.data.servedFromSex]}, que é o que você está vendo aqui. Publicar
+            nesta aba passa a valer só para ele.
+          </FieldWarning>
+        ) : null}
+      </header>
+
       {state.feedback ? (
         <p
           role="status"
@@ -271,7 +294,7 @@ export function AiPersonaDashboard() {
                   type="button"
                   aria-current={active ? 'step' : undefined}
                   aria-describedby={
-                    errors || changed ? `persona-step-${item.id}-status` : undefined
+                    errors || changed ? state.slotId(`step-${item.id}-status`) : undefined
                   }
                   onClick={() => go(item)}
                   className={cn(
@@ -297,7 +320,7 @@ export function AiPersonaDashboard() {
                   {!errors && changed ? <Check aria-hidden="true" className="size-4" /> : null}
                 </button>
                 {errors || changed ? (
-                  <span id={`persona-step-${item.id}-status`} className="sr-only">
+                  <span id={state.slotId(`step-${item.id}-status`)} className="sr-only">
                     {errors ? 'Contém erro' : 'Editada'}
                   </span>
                 ) : null}
@@ -362,50 +385,52 @@ export function AiPersonaDashboard() {
 }
 
 function IdentityStep() {
-  const { form, update, canWrite, fieldErrors } = useAgentPersona();
+  const { form, update, canWrite, fieldErrors, slotId } = useAgentPersona();
   if (!form) return null;
   return (
     <div className="grid gap-5">
       <div>
-        <label htmlFor="agent-name" className="text-label font-semibold">
+        <label htmlFor={slotId('agent-name')} className="text-label font-semibold">
           Nome da agente
         </label>
-        <p id="agent-name-help" className="mt-1 text-xs text-muted-foreground">
+        <p id={slotId('agent-name-help')} className="mt-1 text-xs text-muted-foreground">
           Nome usado para se apresentar e se referir a si mesma.
         </p>
         <input
-          id="agent-name"
+          id={slotId('agent-name')}
           className={INPUT_CLASS}
           value={form.agentName}
           disabled={!canWrite}
           aria-invalid={fieldErrors.has('agentName') || undefined}
-          aria-describedby="agent-name-help agent-name-error"
+          aria-describedby={`${slotId('agent-name-help')} ${slotId('agent-name-error')}`}
           onChange={(event) => update({ agentName: event.target.value })}
         />
         {fieldErrors.get('agentName') ? (
-          <FieldError id="agent-name-error">{fieldErrors.get('agentName')}</FieldError>
+          <FieldError id={slotId('agent-name-error')}>{fieldErrors.get('agentName')}</FieldError>
         ) : null}
       </div>
       <div>
-        <label htmlFor="agent-intro" className="text-label font-semibold">
+        <label htmlFor={slotId('agent-intro')} className="text-label font-semibold">
           Como ela se apresenta
         </label>
-        <p id="agent-intro-help" className="mt-1 text-xs text-muted-foreground">
+        <p id={slotId('agent-intro-help')} className="mt-1 text-xs text-muted-foreground">
           Explique quem ela é e seu papel. A supervisão CREF permanece obrigatória no sistema.
         </p>
         <textarea
-          id="agent-intro"
+          id={slotId('agent-intro')}
           rows={4}
           maxLength={200}
           className={INPUT_CLASS}
           value={form.agentSelfIntro}
           disabled={!canWrite}
           aria-invalid={fieldErrors.has('agentSelfIntro') || undefined}
-          aria-describedby="agent-intro-help agent-intro-error"
+          aria-describedby={`${slotId('agent-intro-help')} ${slotId('agent-intro-error')}`}
           onChange={(event) => update({ agentSelfIntro: event.target.value })}
         />
         {fieldErrors.get('agentSelfIntro') ? (
-          <FieldError id="agent-intro-error">{fieldErrors.get('agentSelfIntro')}</FieldError>
+          <FieldError id={slotId('agent-intro-error')}>
+            {fieldErrors.get('agentSelfIntro')}
+          </FieldError>
         ) : null}
       </div>
       <WhatsappBubble
@@ -417,7 +442,7 @@ function IdentityStep() {
 }
 
 function VoiceStep() {
-  const { form, update, canWrite, fieldErrors } = useAgentPersona();
+  const { form, update, canWrite, fieldErrors, slotId } = useAgentPersona();
   if (!form) return null;
   return (
     <div className="grid gap-6">
@@ -429,11 +454,13 @@ function VoiceStep() {
         label={(value) => TONE_LABEL[value]}
         disabled={!canWrite}
         invalid={fieldErrors.has('toneDescriptors')}
-        errorId="tone-descriptors-error"
+        errorId={slotId('tone-descriptors-error')}
         onChange={(toneDescriptors) => update({ toneDescriptors })}
       />
       {fieldErrors.get('toneDescriptors') ? (
-        <FieldError id="tone-descriptors-error">{fieldErrors.get('toneDescriptors')}</FieldError>
+        <FieldError id={slotId('tone-descriptors-error')}>
+          {fieldErrors.get('toneDescriptors')}
+        </FieldError>
       ) : null}
 
       <ToggleCards
@@ -444,16 +471,19 @@ function VoiceStep() {
         label={(value) => PERSONA_TRAIT_LABEL[value]}
         disabled={!canWrite}
         invalid={fieldErrors.has('personaTraits')}
-        errorId="persona-traits-error"
+        errorId={slotId('persona-traits-error')}
         onChange={(personaTraits) => update({ personaTraits })}
       />
       {fieldErrors.get('personaTraits') ? (
-        <FieldError id="persona-traits-error">{fieldErrors.get('personaTraits')}</FieldError>
+        <FieldError id={slotId('persona-traits-error')}>
+          {fieldErrors.get('personaTraits')}
+        </FieldError>
       ) : null}
 
       <RadioCards
         legend="Uso de emojis"
-        name="emoji-policy"
+        /* O `name` precisa do slot: dois grupos de rádio homônimos viram um só no DOM. */
+        name={slotId('emoji-policy')}
         value={form.emojiPolicy}
         disabled={!canWrite}
         options={Object.values(AgentEmojiPolicy).map((value) => ({
@@ -478,7 +508,7 @@ function VoiceStep() {
         </div>
         <RadioCards
           legend="Tamanho visual dos blocos"
-          name="block-size"
+          name={slotId('block-size')}
           value={form.formatting.blockSize}
           disabled={!canWrite}
           options={Object.values(AgentBlockSize).map((value) => ({
@@ -502,7 +532,7 @@ function VoiceStep() {
         />
         <RadioCards
           legend="Destaques"
-          name="bold-policy"
+          name={slotId('bold-policy')}
           value={form.formatting.boldPolicy}
           disabled={!canWrite}
           options={Object.values(AgentBoldPolicy).map((value) => ({
@@ -528,7 +558,13 @@ function VoiceStep() {
 }
 
 function LimitsStep() {
-  const { data, canWrite, canApprove, refresh } = useAgentPersona();
+  const { data, slotId } = useAgentPersona();
+  /*
+   * Temas proibidos são globais, não do slot: a mesma lista bloqueia os dois públicos, com
+   * um único fluxo de maker-checker. Por isso vêm (e são recarregados) pelo workspace — as
+   * duas abas leem a mesma cópia e nenhuma aprovação fica visível só em uma delas.
+   */
+  const { topics, topicsLoading, refreshTopics, canWrite, canApprove } = useAgentPersonaWorkspace();
   const [label, setLabel] = useState('');
   const [phrases, setPhrases] = useState('');
   const [changeNote, setChangeNote] = useState('');
@@ -538,8 +574,8 @@ function LimitsStep() {
   const [error, setError] = useState('');
 
   const currentTopics = useMemo(
-    () => data?.topics?.versions.filter((topic) => topic.current) ?? [],
-    [data?.topics],
+    () => topics?.versions.filter((topic) => topic.current) ?? [],
+    [topics],
   );
 
   const mutate = useCallback(
@@ -553,7 +589,7 @@ function LimitsStep() {
         setPhrases('');
         setChangeNote('');
         setActionNote('');
-        await refresh();
+        await refreshTopics();
       } catch (caught) {
         setError(
           caught instanceof ControlCenterApiError
@@ -564,7 +600,7 @@ function LimitsStep() {
         setSaving(false);
       }
     },
-    [refresh],
+    [refreshTopics],
   );
 
   const parsedPhrases = phrases
@@ -587,10 +623,10 @@ function LimitsStep() {
 
       <section
         className="rounded-xl border border-border p-4"
-        aria-labelledby="knowledge-source-title"
+        aria-labelledby={slotId('knowledge-source-title')}
       >
         <h3
-          id="knowledge-source-title"
+          id={slotId('knowledge-source-title')}
           className="flex items-center gap-2 text-label font-semibold"
         >
           <Database aria-hidden="true" className="size-4" /> Fonte de conhecimento
@@ -604,8 +640,11 @@ function LimitsStep() {
         </Button>
       </section>
 
-      <section className="rounded-xl border border-border p-4" aria-labelledby="topics-title">
-        <h3 id="topics-title" className="text-label font-semibold">
+      <section
+        className="rounded-xl border border-border p-4"
+        aria-labelledby={slotId('topics-title')}
+      >
+        <h3 id={slotId('topics-title')} className="text-label font-semibold">
           Temas proibidos
         </h3>
         <p className="mt-1 text-xs text-muted-foreground">
@@ -625,11 +664,11 @@ function LimitsStep() {
 
         {(canWrite || canApprove) && currentTopics.length > 0 ? (
           <div className="mt-4">
-            <label htmlFor="topic-action-note" className="text-label font-semibold">
+            <label htmlFor={slotId('topic-action-note')} className="text-label font-semibold">
               Motivo da ação
             </label>
             <input
-              id="topic-action-note"
+              id={slotId('topic-action-note')}
               className={INPUT_CLASS}
               value={actionNote}
               minLength={5}
@@ -640,7 +679,9 @@ function LimitsStep() {
           </div>
         ) : null}
 
-        {data?.topics === null ? (
+        {topics === null && topicsLoading ? (
+          <p className="mt-4 text-label text-muted-foreground">Carregando temas…</p>
+        ) : topics === null ? (
           <FieldWarning>
             Os temas não puderam ser carregados. Atualize a tela antes de fazer alterações.
           </FieldWarning>
@@ -724,22 +765,22 @@ function LimitsStep() {
           <div className="mt-6 grid gap-4 border-t border-border pt-5">
             <h4 className="text-label font-semibold">Propor novo tema</h4>
             <div>
-              <label htmlFor="topic-label" className="text-label font-semibold">
+              <label htmlFor={slotId('topic-label')} className="text-label font-semibold">
                 Nome do tema
               </label>
               <input
-                id="topic-label"
+                id={slotId('topic-label')}
                 className={INPUT_CLASS}
                 value={label}
                 onChange={(event) => setLabel(event.target.value)}
               />
             </div>
             <div>
-              <label htmlFor="topic-phrases" className="text-label font-semibold">
+              <label htmlFor={slotId('topic-phrases')} className="text-label font-semibold">
                 Termos de detecção
               </label>
               <textarea
-                id="topic-phrases"
+                id={slotId('topic-phrases')}
                 rows={3}
                 className={INPUT_CLASS}
                 value={phrases}
@@ -751,11 +792,11 @@ function LimitsStep() {
               </p>
             </div>
             <div>
-              <label htmlFor="topic-change-note" className="text-label font-semibold">
+              <label htmlFor={slotId('topic-change-note')} className="text-label font-semibold">
                 Motivo da proposta
               </label>
               <input
-                id="topic-change-note"
+                id={slotId('topic-change-note')}
                 className={INPUT_CLASS}
                 value={changeNote}
                 onChange={(event) => setChangeNote(event.target.value)}
@@ -786,7 +827,7 @@ function LimitsStep() {
 }
 
 function HandoffStep() {
-  const { form, update, canWrite, fieldErrors } = useAgentPersona();
+  const { form, update, canWrite, fieldErrors, slotId } = useAgentPersona();
   if (!form) return null;
   return (
     <div className="grid gap-5">
@@ -795,26 +836,30 @@ function HandoffStep() {
         description="Pedido explícito de uma pessoa, sinal de segurança, resposta bloqueada ou falta de evidência técnica geram registro para o profissional. Emergências seguem a orientação presencial imediata, sem aguardar retorno."
       />
       <div>
-        <label htmlFor="handoff-message" className="text-label font-semibold">
+        <label htmlFor={slotId('handoff-message')} className="text-label font-semibold">
           Mensagem de passagem
         </label>
-        <p id="handoff-help" className="mt-1 text-xs text-muted-foreground">
+        <p id={slotId('handoff-help')} className="mt-1 text-xs text-muted-foreground">
           Não prometa prazo. A menção ao profissional CREF abaixo é fixa e não pode ser removida.
         </p>
         <textarea
-          id="handoff-message"
+          id={slotId('handoff-message')}
           rows={5}
           className={INPUT_CLASS}
           value={form.humanHandoffMessage}
           disabled={!canWrite}
           aria-invalid={fieldErrors.has('humanHandoffMessage') || undefined}
           aria-describedby={
-            fieldErrors.has('humanHandoffMessage') ? 'handoff-help handoff-error' : 'handoff-help'
+            fieldErrors.has('humanHandoffMessage')
+              ? `${slotId('handoff-help')} ${slotId('handoff-error')}`
+              : slotId('handoff-help')
           }
           onChange={(event) => update({ humanHandoffMessage: event.target.value })}
         />
         {fieldErrors.get('humanHandoffMessage') ? (
-          <FieldError id="handoff-error">{fieldErrors.get('humanHandoffMessage')}</FieldError>
+          <FieldError id={slotId('handoff-error')}>
+            {fieldErrors.get('humanHandoffMessage')}
+          </FieldError>
         ) : null}
       </div>
       <p className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
@@ -843,6 +888,7 @@ function ReviewStep() {
     canPublish,
     canWrite,
     goToStep,
+    slotId,
   } = useAgentPersona();
   if (!data || !current || !form) return null;
 
@@ -923,11 +969,11 @@ function ReviewStep() {
       </section>
 
       <section className="rounded-xl border border-border p-4">
-        <label htmlFor="persona-change-note" className="text-label font-semibold">
+        <label htmlFor={slotId('persona-change-note')} className="text-label font-semibold">
           Motivo da alteração
         </label>
         <input
-          id="persona-change-note"
+          id={slotId('persona-change-note')}
           className={INPUT_CLASS}
           value={changeNote}
           disabled={!canWrite}

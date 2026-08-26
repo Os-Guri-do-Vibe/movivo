@@ -345,6 +345,15 @@ export function buildAgentConfigImmutabilitySql(appRole: string): string {
 
     REVOKE UPDATE, DELETE, TRUNCATE ON public.agent_config FROM ${appRole};
     GRANT SELECT, INSERT ON public.agent_config TO ${appRole};
+
+    -- Sprint 11 — resolução da persona por slot. A leitura de caminho quente é sempre
+    -- "maior version PUBLISHED DESTE target_sex", executada a cada expiração de cache em
+    -- cada instância da API. A ordem das colunas é a da query: igualdade (target_sex,
+    -- status) primeiro, ordenação (version DESC) depois — assim o índice serve o
+    -- ORDER BY ... LIMIT 1 sem sort. Fica aqui, e não no schema Drizzle, pelo mesmo motivo
+    -- do HNSW do RAG: é índice de reconciliação, idempotente a cada migração.
+    CREATE INDEX IF NOT EXISTS idx_agent_config_active
+      ON public.agent_config (target_sex, status, version DESC);
   `;
 }
 
@@ -1050,3 +1059,39 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
       public.methodology_events TO ${appRole};
   `;
 }
+
+/**
+ * Backfill de `users.biological_sex` (Sprint 11 — persona por slot).
+ *
+ * A origem do dado continua sendo a anamnese (`data_block_1.biologicalSex`); a coluna em
+ * `users` é denormalização de leitura, porque a resolução da persona roda a cada mensagem
+ * do WhatsApp. Sem o backfill, todo titular anterior à coluna ficaria `NULL` e cairia no
+ * empréstimo entre slots até refazer a anamnese.
+ *
+ * Roda aqui, e não como migração Drizzle, pelo mesmo motivo dos demais passos de
+ * reconciliação: é **idempotente** (`u.biological_sex IS NULL` no WHERE) e precisa poder
+ * reexecutar sem efeito em bancos já convergidos.
+ *
+ * `DISTINCT ON` fixa a escolha quando o titular tem mais de uma sessão submetida: vale a
+ * mais recente. Sem isso o resultado dependeria do plano de execução.
+ *
+ * `->> 'biologicalSex' IS NOT NULL` no lugar do operador `?` de jsonb: `?` é caractere de
+ * placeholder em vários drivers/poolers e não há ganho em depender dele aqui — a checagem
+ * de valor na lista fechada logo abaixo é mais forte do que "a chave existe".
+ */
+export const USERS_BIOLOGICAL_SEX_BACKFILL_SQL = `
+  UPDATE users u
+  SET biological_sex = latest.value::biological_sex
+  FROM (
+    SELECT DISTINCT ON (s.user_id)
+      s.user_id,
+      s.data_block_1 ->> 'biologicalSex' AS value
+    FROM anamnesis_sessions s
+    WHERE s.user_id IS NOT NULL
+      AND s.status IN ('SUBMITTED', 'PROCESSED')
+      AND s.data_block_1 ->> 'biologicalSex' IN ('MALE', 'FEMALE')
+    ORDER BY s.user_id, s.submitted_at DESC NULLS LAST, s.created_at DESC
+  ) AS latest
+  WHERE latest.user_id = u.id
+    AND u.biological_sex IS NULL;
+`;
