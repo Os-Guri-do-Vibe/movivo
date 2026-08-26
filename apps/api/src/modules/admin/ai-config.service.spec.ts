@@ -394,6 +394,36 @@ describe('AiConfigService', () => {
     expect(response.meta.dataQuality.join(' ')).toContain('Ainda não há persona publicada');
   });
 
+  it('leitura sem NENHUM slot publicado cai no default de código, sem aviso de empréstimo', async () => {
+    const { service } = buildService([], undefined, {
+      resolved: { persona: DEFAULT_AGENT_PERSONA, servedFromSex: null },
+    });
+
+    const response = await service.persona('FEMALE');
+
+    expect(response.data.servedFromSex).toBeNull();
+    expect(response.data.version).toBeNull();
+    expect(response.meta.dataQuality.join(' ')).toContain('Nenhuma configuração publicada ainda');
+  });
+
+  it('histórico sem nenhuma versão PUBLISHED: vigente é null', async () => {
+    const rows = [
+      {
+        version: 1,
+        status: 'DRAFT',
+        payload: PERSONA,
+        changeNote: 'rascunho',
+        createdAt: new Date('2026-08-10T12:00:00.000Z'),
+        createdBy: 'Rodrigo',
+      },
+    ];
+    const { service } = buildService([rows]);
+
+    const history = await service.history('FEMALE');
+
+    expect(history.data.versions[0]).toMatchObject({ current: false });
+  });
+
   it('histórico filtra pelo slot pedido e carimba o slot em cada versão', async () => {
     const rows = [
       {
@@ -413,5 +443,72 @@ describe('AiConfigService', () => {
     expect(historyWhere).toBeDefined();
     expect(renderWhere(historyWhere as SQL).params).toEqual(['FEMALE']);
     expect(history.data.versions[0]).toMatchObject({ targetSex: 'FEMALE', version: 1 });
+  });
+
+  describe('simulate', () => {
+    it('despacha PERSONA para o simulador de persona', () => {
+      const { service } = buildService([]);
+
+      const result = service.simulate({ kind: 'PERSONA', candidate: DEFAULT_AGENT_PERSONA });
+
+      expect(result.data.kind).toBe('PERSONA');
+      expect(result.data.passed).toBe(true);
+    });
+
+    it('despacha FAQ para o simulador de FAQ', () => {
+      const { service } = buildService([]);
+
+      const result = service.simulate({
+        kind: 'FAQ',
+        candidate: {
+          canonicalQuestion: 'Como recebo meu plano?',
+          answer: 'O plano é entregue pelo WhatsApp com acompanhamento do profissional CREF.',
+        },
+      });
+
+      expect(result.data.kind).toBe('FAQ');
+      expect(result.data.passed).toBe(true);
+    });
+
+    it('despacha GUARDRAIL para o simulador de regra L1', () => {
+      const { service } = buildService([]);
+
+      const result = service.simulate({
+        kind: 'GUARDRAIL',
+        candidate: {
+          label: 'Revisar pedido de carga',
+          scope: 'BOTH',
+          phrases: ['dobrar a carga'],
+          action: 'FLAG',
+        },
+      });
+
+      expect(result.data.kind).toBe('GUARDRAIL');
+      expect(result.data.passed).toBe(true);
+    });
+
+    it('despacha FORBIDDEN_TOPIC para o simulador de tema proibido', () => {
+      const { service } = buildService([]);
+
+      const result = service.simulate({
+        kind: 'FORBIDDEN_TOPIC',
+        candidate: {
+          topicKey: 'suplementos-anabolizantes',
+          label: 'Suplementos e Anabolizantes',
+          phrases: ['anabolizante', 'esteroide anabolico'],
+        },
+      });
+
+      expect(result.data.kind).toBe('FORBIDDEN_TOPIC');
+      expect(result.data.passed).toBe(true);
+    });
+
+    it('recusa corpo fora do contrato fechado', () => {
+      const { service } = buildService([]);
+
+      expect(() => service.simulate({ kind: 'PERSONA', candidate: {} })).toThrow(
+        BadRequestException,
+      );
+    });
   });
 });

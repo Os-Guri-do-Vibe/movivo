@@ -485,4 +485,53 @@ describe('EvolutionHttpTransport — webhook de ENTRADA (US-3.1-EVO)', () => {
     expect(t.lastKnownInstanceName()).toBe('minha-empresa');
     fetchSpy.mockRestore();
   });
+
+  describe('onModuleInit (aquecimento do boot)', () => {
+    it('sem EVOLUTION_API_KEY: não consulta nem reafirma nada', async () => {
+      const t = new EvolutionHttpTransport('http://localhost:8081', undefined, logger);
+      const current = vi.spyOn(t, 'currentInstanceName');
+      const ensure = vi.spyOn(t, 'ensureWebhookConfigured');
+
+      await t.onModuleInit();
+
+      expect(current).not.toHaveBeenCalled();
+      expect(ensure).not.toHaveBeenCalled();
+    });
+
+    it('instância já conhecida: não consulta de novo', async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(
+          new Response(JSON.stringify([{ name: 'minha-empresa' }]), { status: 200 }),
+        );
+      const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger);
+      await t.currentInstanceName();
+      fetchSpy.mockRestore();
+      const current = vi.spyOn(t, 'currentInstanceName');
+
+      await t.onModuleInit();
+
+      expect(current).not.toHaveBeenCalled();
+    });
+
+    it('instância desconhecida sem nenhuma criada ainda: não reafirma webhook', async () => {
+      const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger);
+      vi.spyOn(t, 'currentInstanceName').mockResolvedValue(null);
+      const ensure = vi.spyOn(t, 'ensureWebhookConfigured').mockResolvedValue(undefined);
+
+      await t.onModuleInit();
+
+      expect(ensure).not.toHaveBeenCalled();
+    });
+
+    it('instância desconhecida mas existente: reafirma o webhook nela', async () => {
+      const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger);
+      vi.spyOn(t, 'currentInstanceName').mockResolvedValue('minha-empresa');
+      const ensure = vi.spyOn(t, 'ensureWebhookConfigured').mockResolvedValue(undefined);
+
+      await t.onModuleInit();
+
+      expect(ensure).toHaveBeenCalledWith('minha-empresa');
+    });
+  });
 });
