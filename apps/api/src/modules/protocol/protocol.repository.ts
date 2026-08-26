@@ -10,17 +10,20 @@
  */
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { and, eq, sql } from 'drizzle-orm';
-import type {
-  ProtocolApprovalStatus,
-  ProtocolRead,
-  ProtocolReviewUrgency,
-  ProtocolStatus,
-  ProtocolStructure,
+import { and, desc, eq, sql } from 'drizzle-orm';
+import {
+  onboardingStep1Schema,
+  TRAINING_PHASE_LABELS,
+  type OnboardingStep1,
+  type ProtocolApprovalStatus,
+  type ProtocolRead,
+  type ProtocolReviewUrgency,
+  type ProtocolStatus,
+  type ProtocolStructure,
 } from '@movivo/shared';
 
 import { TenantDatabase } from '../../core/database/tenant-database.service';
-import { protocols, protocolVersions } from '../../core/database/schema';
+import { anamnesisSessions, protocols, protocolVersions } from '../../core/database/schema';
 import type { ContraindicationTag } from './exercise-catalog';
 
 /**
@@ -33,6 +36,13 @@ export function signatureHash(content: ProtocolStructure): string {
   return createHash('sha256').update(JSON.stringify(content)).digest('hex');
 }
 
+const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
+
+/** "Mesociclo {version} — {fase}" — nome do bloco de periodização vigente. */
+function mesocycleName(version: number, phase: ProtocolStructure['phase']): string {
+  return `Mesociclo ${version} — ${TRAINING_PHASE_LABELS[phase] ?? phase}`;
+}
+
 export interface PersistProtocolInput {
   userId: string;
   content: ProtocolStructure;
@@ -42,6 +52,13 @@ export interface PersistProtocolInput {
   status: ProtocolStatus;
   humanReviewRequired: boolean;
   reviewUrgency: ProtocolReviewUrgency | null;
+  /**
+   * Sessão de anamnese que originou o protocolo. `null` só para caminhos que não têm uma
+   * (nenhum hoje) — a coluna é nullable pelas linhas anteriores à migração 0035, que não
+   * têm como ser retroativamente ligadas. É por este vínculo que a assinatura do protocolo
+   * consegue liberar o PAR-Q da sessão certa (`release_parq_on_signature`).
+   */
+  anamnesisSessionId: string | null;
   totalWeeks: number;
   generatedBy: string;
   modelVersion: string | null;
@@ -52,6 +69,25 @@ export interface PersistProtocolInput {
   /** `AUTO_APPROVED` assina em nível de metodologia (RT); demais nascem sem assinatura. */
   signed: boolean;
 }
+
+/**
+ * Union discriminada por `released` (mesmo motivo de `SignProtocolResult` em
+ * `dashboard.service.ts`): dois `return` com campos diferentes fariam o TypeScript
+ * mesclar as formas com campos opcionais em vez de discriminar de verdade.
+ */
+export type AutoReleaseResult =
+  | { released: false; version: number }
+  | {
+      released: true;
+      version: number;
+      content: ProtocolStructure;
+      mesocycleName: string;
+      startDate: Date;
+      endDate: Date;
+      totalWeeks: number;
+      signatureHash: string;
+      signedAt: Date;
+    };
 
 export interface PersistedProtocol {
   protocolId: string;
@@ -99,6 +135,9 @@ export class ProtocolRepository {
           signedAt: protocols.signedAt,
           totalWeeks: protocols.totalWeeks,
           currentWeek: protocols.currentWeek,
+          mesocycleName: protocols.mesocycleName,
+          startDate: protocols.startDate,
+          endDate: protocols.endDate,
         })
         .from(protocols)
         .where(and(eq(protocols.id, protocolId), eq(protocols.status, 'ACTIVE')))
@@ -115,13 +154,34 @@ export class ProtocolRepository {
       signedAt: row.signedAt ? new Date(row.signedAt).toISOString() : null,
       totalWeeks: row.totalWeeks,
       currentWeek: row.currentWeek,
+      mesocycleName: row.mesocycleName,
+      startDate: new Date(row.startDate).toISOString(),
+      endDate: new Date(row.endDate).toISOString(),
     };
+  }
+
+  /**
+   * Bytes do PDF assinado, mesma fronteira IDOR-safe de `findByToken` (token = id,
+   * `runAsSystem`, só `ACTIVE`). `null` se o protocolo não existe/não está ativo OU se
+   * ainda não tem PDF gerado (protocolo `AUTO_APPROVED` sem passagem pela assinatura CREF).
+   */
+  async findPdfByToken(protocolId: string): Promise<Buffer | null> {
+    const rows = await this.db.runAsSystem((tx) =>
+      tx
+        .select({ pdfContent: protocols.pdfContent })
+        .from(protocols)
+        .where(and(eq(protocols.id, protocolId), eq(protocols.status, 'ACTIVE')))
+        .limit(1),
+    );
+    return rows[0]?.pdfContent ?? null;
   }
 
   /** Persiste `protocols` v1 + `protocol_versions`. Corrida (23505) → `alreadyExisted`. */
   async persist(input: PersistProtocolInput): Promise<PersistedProtocol> {
     const signedAt = input.signed ? new Date() : null;
     const hash = input.signed ? signatureHash(input.content) : null;
+    const startDate = new Date();
+    const endDate = new Date(startDate.getTime() + input.totalWeeks * MS_PER_WEEK);
 
     try {
       return await this.db.runAsUser(input.userId, 'USER', async (tx) => {
@@ -140,11 +200,15 @@ export class ProtocolRepository {
             signatureHash: hash,
             currentWeek: 1,
             totalWeeks: input.totalWeeks,
+            mesocycleName: mesocycleName(PROTOCOL_VERSION, input.content.phase),
+            startDate,
+            endDate,
             content: input.content,
             constraints: input.constraints,
             parQFlags: input.parqFlags,
             humanReviewRequired: input.humanReviewRequired,
             reviewUrgency: input.reviewUrgency,
+            anamnesisSessionId: input.anamnesisSessionId,
             generatedBy: input.generatedBy,
             modelVersion: input.modelVersion,
             promptVersion: input.promptVersion,
@@ -204,10 +268,7 @@ export class ProtocolRepository {
    * `MANDATORY`), o estado não bate mais e é `released: false` sem tocar a linha — não há
    * "cancelar o job", o próprio estado decide na hora de rodar.
    */
-  async autoRelease(
-    userId: string,
-    protocolId: string,
-  ): Promise<{ released: boolean; version: number }> {
+  async autoRelease(userId: string, protocolId: string): Promise<AutoReleaseResult> {
     return this.db.runAsUser(userId, 'USER', async (tx) => {
       const [row] = await tx
         .select({
@@ -215,6 +276,10 @@ export class ProtocolRepository {
           version: protocols.version,
           approvalStatus: protocols.approvalStatus,
           reviewUrgency: protocols.reviewUrgency,
+          mesocycleName: protocols.mesocycleName,
+          startDate: protocols.startDate,
+          endDate: protocols.endDate,
+          totalWeeks: protocols.totalWeeks,
         })
         .from(protocols)
         .where(eq(protocols.id, protocolId))
@@ -224,19 +289,60 @@ export class ProtocolRepository {
         return { released: false, version: row?.version ?? 0 };
       }
       const professionalId = await this.assignedActiveProfessional(tx, userId);
+      const content = row.content as ProtocolStructure;
+      const signedAt = new Date();
+      const hash = signatureHash(content);
       await tx
         .update(protocols)
         .set({
           status: 'ACTIVE',
           approvalStatus: 'AUTO_APPROVED',
           professionalId,
-          signedAt: new Date(),
-          signatureHash: signatureHash(row.content as ProtocolStructure),
+          signedAt,
+          signatureHash: hash,
           humanReviewRequired: false,
         })
         .where(eq(protocols.id, protocolId));
-      return { released: true, version: row.version };
+      return {
+        released: true,
+        version: row.version,
+        content,
+        mesocycleName: row.mesocycleName,
+        startDate: row.startDate,
+        endDate: row.endDate,
+        totalWeeks: row.totalWeeks,
+        signatureHash: hash,
+        signedAt,
+      };
     });
+  }
+
+  /** PDF gerado depois (fora da transação de liberação) — `signProtocol` grava o mesmo jeito. */
+  async setPdfContent(userId: string, protocolId: string, pdf: Buffer): Promise<void> {
+    await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx.update(protocols).set({ pdfContent: pdf }).where(eq(protocols.id, protocolId)),
+    );
+  }
+
+  /**
+   * Dados pessoais (nome/idade/peso/altura/sexo) da anamnese SUBMITTED mais recente do
+   * titular, pro PDF do protocolo (US-2.6-PDF) quando a entrega sai do caminho de
+   * auto-liberação — mesma lógica de `DashboardService.protocolAnamnesisAnswers`, mas sem
+   * as dependências daquele serviço (RBAC de dashboard, decrypt do bloco de saúde, que o
+   * PDF não usa). `null` se não achar sessão submetida — quem chama decide o fallback.
+   */
+  async findLatestPersonalInfo(userId: string): Promise<OnboardingStep1 | null> {
+    const rows = await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx
+        .select({ dataBlock1: anamnesisSessions.dataBlock1 })
+        .from(anamnesisSessions)
+        .where(and(eq(anamnesisSessions.userId, userId), eq(anamnesisSessions.status, 'SUBMITTED')))
+        .orderBy(desc(anamnesisSessions.submittedAt))
+        .limit(1),
+    );
+    const row = rows[0];
+    if (!row) return null;
+    return onboardingStep1Schema.parse(row.dataBlock1);
   }
 
   /** Lookup estreito: a funcao exige o contexto do titular e CREF atribuido ativo. */

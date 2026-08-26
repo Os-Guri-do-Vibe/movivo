@@ -11,7 +11,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 
-import { PromptResolverService } from '../intent/prompt-resolver.service';
 import { ContextRepository } from './context.repository';
 import { type RagDoc, SEMANTIC_MEMORY, type SemanticMemoryPort } from './semantic-memory.port';
 import { WorkingMemory } from './working-memory.service';
@@ -48,21 +47,32 @@ export class ContextService {
     private readonly working: WorkingMemory,
     @Inject(SEMANTIC_MEMORY) private readonly semantic: SemanticMemoryPort,
     private readonly llm: LlmRouter,
-    // US-7.6: a transcrição rotula os turnos da agente com o nome publicado no painel —
-    // um nome literal aqui apareceria dentro do próprio prompt e divergiria do resto.
-    private readonly prompts: PromptResolverService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(ContextService.name);
   }
 
-  async build(userId: string, intent: string, message: string): Promise<CoachContext> {
+  /**
+   * US-7.6: a transcrição rotula os turnos da agente com o nome publicado no painel — um
+   * nome literal aqui apareceria dentro do próprio prompt e divergiria do resto.
+   *
+   * Sprint 11: `agentName` **entra pronto**, resolvido uma única vez pelo worker no início
+   * do job (antes eram duas resoluções extras por resposta, via `PromptResolverService`).
+   * Com duas personas publicáveis, resolver de novo aqui abriria a janela para uma
+   * publicação no meio do job trocar o nome usado na transcrição sem trocar o do system
+   * prompt — a mesma resposta assinada por dois nomes.
+   */
+  async build(
+    userId: string,
+    intent: string,
+    message: string,
+    agentName: string,
+  ): Promise<CoachContext> {
     const sessionDate = currentSessionDate();
 
-    const [episodic, recent, agentName] = await Promise.all([
+    const [episodic, recent] = await Promise.all([
       this.repo.loadEpisodic(userId, sessionDate),
       this.working.recent(userId, sessionDate),
-      this.prompts.agentName(),
     ]);
 
     const { scrubUser } = episodic;
@@ -118,14 +128,18 @@ export class ContextService {
    * Resumo de sessão longa (versão mínima, US-3.2.3): passou de ~15 turnos → condensa a
    * janela em 2-3 frases e persiste sob RLS. ponytail: roda inline (o worker pode chamar
    * sem await); vira job BullMQ dedicado se a latência incomodar.
+   *
+   * `agentName` vem pronto do worker pelo mesmo motivo de `build()`. Este é o único ponto
+   * em que o nome da agente **fica persistido** (o `summary` do dia, por `sessionDate`) —
+   * uma troca de persona pode deixar o nome antigo no resumo por até um dia. Comportamento
+   * já aceito antes dos slots; a janela de working memory sempre usa o nome vigente.
    */
-  async summarizeIfNeeded(userId: string): Promise<void> {
+  async summarizeIfNeeded(userId: string, agentName: string): Promise<void> {
     const sessionDate = currentSessionDate();
     if ((await this.working.count(userId, sessionDate)) <= SUMMARY_THRESHOLD) return;
 
     const recent = await this.working.recent(userId, sessionDate);
     const scrubUser = await this.repo.loadScrubUser(userId);
-    const agentName = await this.prompts.agentName();
     const episodic = await this.repo.loadEpisodic(userId, sessionDate);
     const transcript = [
       episodic.summary ? `RESUMO ANTERIOR: ${episodic.summary}` : '',

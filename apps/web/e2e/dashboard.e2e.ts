@@ -50,8 +50,8 @@ test('protege a rota e cria sessão somente em cookies httpOnly', async ({
 test('invalida e recarrega a fila ao receber queue.updated por SSE', async ({ page, request }) => {
   await login(page);
   await openQueue(page);
-  // Fila de supervisão (achado 2026-08-18): só protocolo (Opcional) + PAR-Q bloqueado
-  // (Obrigatória) — handoff/check-in ficam fora desta tela.
+  // Fila de supervisão (2026-08-24): só protocolo — o obrigatório é o de origem PAR-Q,
+  // o opcional é o resto. Handoff/check-in ficam fora desta tela.
   const mandatory = page.getByRole('list', { name: 'Revisão Humana Obrigatória' });
   const optional = page.getByRole('list', { name: 'Revisão Humana Opcional' });
   await expect(mandatory.getByRole('listitem')).toHaveCount(1);
@@ -78,19 +78,29 @@ test('aceita ADMIN e mostra o overview executivo', async ({ context, page }) => 
   ).toHaveLength(2);
 });
 
-test('PAR-Q começa sem decisão e libera apenas após seleção consciente', async ({ page }) => {
+/**
+ * 2026-08-24: PAR-Q bloqueante deixou de ter tela e ação próprias. Ele é um protocolo
+ * `MANDATORY` na fila, marcado só pela severidade e pela legenda de origem, e a
+ * liberação acontece dentro do "Assinar e liberar" — o MESMO fluxo do protocolo
+ * opcional. O teste percorre exatamente esse caminho.
+ */
+test('PAR-Q bloqueante é revisado e liberado pelo fluxo normal de assinatura', async ({ page }) => {
   await login(page);
   await openQueue(page);
-  const parq = page.getByRole('listitem').filter({ hasText: 'PAR-Q aguardando liberação' });
-  await parq.getByRole('link').click();
-  const release = page.getByRole('button', { name: 'Registrar liberação' });
-  await page.getByLabel(/registro profissional/i).fill('Revisão profissional concluída.');
-  await expect(release).toBeDisabled();
-  await page.getByLabel('Decisão').selectOption('RELEASED');
-  await expect(release).toBeEnabled();
-  await release.click();
-  await page.getByRole('button', { name: 'Confirmar liberação' }).click();
-  await expect(page.getByRole('status')).toContainText('Liberação PAR-Q registrada');
+  const mandatory = page.getByRole('list', { name: 'Revisão Humana Obrigatória' });
+  const card = mandatory.getByRole('listitem').first();
+  await expect(card).toContainText('Origem: PAR-Q bloqueante');
+
+  await card.getByRole('link', { name: 'Abrir protocolo' }).click();
+  await expect(page).toHaveURL(/\/dashboard\/fila\/protocol\/[0-9a-f-]+$/);
+  // Nenhuma ação de liberação separada sobrou: só a tela padrão de revisão.
+  await expect(page.getByRole('button', { name: 'Registrar liberação' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: /Protocolo · versão 1/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Editar Protocolo' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Assinar e liberar' }).click();
+  await page.getByRole('button', { name: 'Confirmar e assinar' }).click();
+  await expect(page.getByRole('status')).toContainText('auditoria registrada');
 });
 
 test('exibe ausência de amostra sem transformar dado desconhecido em zero', async ({ page }) => {

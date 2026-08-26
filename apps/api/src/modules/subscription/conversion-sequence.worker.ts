@@ -152,13 +152,16 @@ export class ConversionSequenceWorker implements OnModuleInit {
   ): Promise<void> {
     // Token no path (= userId) para a página `/assinar/[token]` saber o titular (US-4.6, IDOR-safe).
     const link = `${this.config.whatsapp.publicSiteUrl}/assinar/${userId}?plano=${plan}`;
+    // Sprint 11: a copy de conversão cita o nome da agente, então precisa da persona do
+    // slot do titular — não da persona global, que não existe mais.
+    const agentName = await this.agentPersona.agentName(await this.subs.personaSlotFor(userId));
     await this.queues.enqueue(
       QUEUE.whatsappOutbound,
       'coach-message',
       {
         userId,
         type: 'COACH_MESSAGE',
-        text: conversionMessage(key, link, await this.agentPersona.agentName()),
+        text: conversionMessage(key, link, agentName),
         dedupeId: `conv_${key}`,
       },
       { jobId: `conv-msg_${userId}_${key}` },

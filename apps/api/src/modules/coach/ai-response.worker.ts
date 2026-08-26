@@ -13,7 +13,12 @@ import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 import { type Job } from 'bullmq';
 import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
-import { buildHumanHandoffMessage, DEFAULT_AGENT_PERSONA } from '@movivo/shared';
+import {
+  buildHumanHandoffMessage,
+  DEFAULT_AGENT_PERSONA,
+  type AgentPersona,
+  type BiologicalSex,
+} from '@movivo/shared';
 
 import { REDIS_CLIENT, REDIS_KEY_BUILDER, type RedisKeyBuilder } from '../../core/redis';
 import { FaqService } from '../../core/agent-config/faq.service';
@@ -75,6 +80,18 @@ interface ResponseDraft {
 }
 
 const MAX_MESSAGE_CHARS = 4000;
+
+/**
+ * Persona resolvida **uma única vez por job** (Sprint 11), com o slot pedido junto.
+ *
+ * O objeto desce inteiro pelas montagens de resposta: `persona` é o que de fato monta prompt
+ * e copy; `slot` existe só para telemetria de cache no `LlmRouter`. Ninguém abaixo daqui
+ * resolve persona de novo — ver o comentário no início de `process()`.
+ */
+interface PersonaContext {
+  persona: AgentPersona;
+  slot: BiologicalSex | null;
+}
 
 @Injectable()
 export class AIResponseWorker implements OnModuleInit {
@@ -144,6 +161,18 @@ export class AIResponseWorker implements OnModuleInit {
       const message = await this.drainBatch(batchKey);
       if (!message) return { status: 'EMPTY' };
 
+      // ⚠️ Persona resolvida UMA vez por job, e propagada como OBJETO daqui para baixo.
+      // Nunca repassar `biologicalSex` para os call sites resolverem de novo: uma publicação
+      // ocorrida no meio deste job invalidaria o cache entre duas resoluções e a MESMA
+      // resposta sairia com duas versões da persona (system prompt de uma, nome na
+      // transcrição da outra). A leitura do titular é a mesma de sempre — uma query só.
+      const { scrubUser, biologicalSex } = await this.repo.loadRuntimeUser(userId);
+      const personaCtx: PersonaContext = {
+        persona: await this.prompts.persona(biologicalSex),
+        slot: biologicalSex,
+      };
+      const { persona } = personaCtx;
+
       await this.repo.persistTurn({ userId, direction: 'INBOUND', content: message });
       await this.context.recordTurn(userId, 'user', message);
       await this.enqueueTyping(userId);
@@ -211,10 +240,10 @@ export class AIResponseWorker implements OnModuleInit {
       }
 
       if (guardrail === 'SCOPE') {
-        const response = await this.prompts.foraDeEscopoResponse();
+        const response = this.prompts.foraDeEscopoResponseFor(persona);
         await this.deliver(userId, correlationId, response, null, true, enqueuedAt, 0, true);
         await this.context.recordTurn(userId, 'assistant', response);
-        await this.context.summarizeIfNeeded(userId);
+        await this.context.summarizeIfNeeded(userId, persona.agentName);
         await this.repo.persistHandoff(userId, 'ALERT', 'FORA_DE_ESCOPO');
         return { status: 'SENT' };
       }
@@ -242,7 +271,7 @@ export class AIResponseWorker implements OnModuleInit {
           true,
         );
         await this.context.recordTurn(userId, 'assistant', response);
-        await this.context.summarizeIfNeeded(userId);
+        await this.context.summarizeIfNeeded(userId, persona.agentName);
         if (blocked) await this.repo.persistHandoff(userId, 'ALERT', 'VALIDATOR_BLOCK');
         if (l1Flags.length > 0) {
           await this.repo.persistHandoff(userId, 'ALERT', 'L1_GUARDRAIL_FLAG');
@@ -258,7 +287,6 @@ export class AIResponseWorker implements OnModuleInit {
         return { status: blocked ? 'BLOCKED' : 'FAQ' };
       }
 
-      const scrubUser = await this.repo.loadScrubUser(userId);
       const intent = await this.classifier.classify({ userId, user: scrubUser, message });
 
       // TASK-3.6.1 (b) — Handoff de SEGURANÇA (red flag do guardrail US-3.4): não gera resposta
@@ -275,7 +303,7 @@ export class AIResponseWorker implements OnModuleInit {
       }
 
       if (intent.intent === 'PEDIDO_HANDOFF') {
-        const configured = await this.prompts.humanHandoffMessage();
+        const configured = this.prompts.humanHandoffMessageFor(persona);
         const handoffVerdict = this.validation.validateResponse(configured);
         const response =
           handoffVerdict.action === 'PASS'
@@ -293,11 +321,11 @@ export class AIResponseWorker implements OnModuleInit {
         await this.repo.persistHandoff(userId, 'ALERT', 'PEDIDO_HANDOFF');
         await this.deliver(userId, correlationId, response, null, true, enqueuedAt, 0, false);
         await this.context.recordTurn(userId, 'assistant', response);
-        await this.context.summarizeIfNeeded(userId);
+        await this.context.summarizeIfNeeded(userId, persona.agentName);
         return { status: 'HANDOFF' };
       }
 
-      const draft = await this.buildResponse(userId, intent.intent, message, scrubUser);
+      const draft = await this.buildResponse(userId, intent.intent, message, scrubUser, personaCtx);
       const l1Flags = draft.blocked ? [] : await this.l1Guardrails.evaluate(message, draft.text);
 
       if (draft.blocked) {
@@ -318,7 +346,7 @@ export class AIResponseWorker implements OnModuleInit {
         draft.ragSources,
       );
       await this.context.recordTurn(userId, 'assistant', draft.text);
-      await this.context.summarizeIfNeeded(userId);
+      await this.context.summarizeIfNeeded(userId, persona.agentName);
 
       // TASK-3.6.1 (a) — Alerta ASSÍNCRONO consultável (não handoff): revisão sem prazo.
       const reason = handoffReason(intent.intent, draft);
@@ -342,22 +370,26 @@ export class AIResponseWorker implements OnModuleInit {
     }
   }
 
-  /** Roteia a intenção para a montagem certa (com ou sem LLM). */
+  /**
+   * Roteia a intenção para a montagem certa (com ou sem LLM). `persona` desce por parâmetro
+   * desde o topo do job — ver o comentário em `process()`.
+   */
   private async buildResponse(
     userId: string,
     intent: Intent,
     message: string,
     scrubUser: ScrubUser,
+    personaCtx: PersonaContext,
   ): Promise<ResponseDraft> {
     if (intent === 'FORA_DE_ESCOPO') {
       // Recusa honesta pré-aprovada — sem LLM generativo (US-3.4). O nome da agente vem
       // da configuração publicada (US-7.6), nunca de literal no código.
-      return draftPass(await this.prompts.foraDeEscopoResponse(), null, 0);
+      return draftPass(this.prompts.foraDeEscopoResponseFor(personaCtx.persona), null, 0);
     }
     if (intent === 'SUBSTITUICAO_EXERCICIO') {
-      return this.buildSubstitution(userId, intent, message, scrubUser);
+      return this.buildSubstitution(userId, intent, message, scrubUser, personaCtx);
     }
-    return this.buildGenerative(userId, intent, message, scrubUser, undefined);
+    return this.buildGenerative(userId, intent, message, scrubUser, personaCtx, undefined);
   }
 
   /** Substituição segura: substituto SEMPRE da base; a IA só verbaliza; o validador confirma. */
@@ -366,6 +398,7 @@ export class AIResponseWorker implements OnModuleInit {
     intent: Intent,
     message: string,
     scrubUser: ScrubUser,
+    personaCtx: PersonaContext,
   ): Promise<ResponseDraft> {
     const constraints = await this.repo.loadConstraints(userId);
     const target = findExerciseByMention(message);
@@ -379,7 +412,7 @@ export class AIResponseWorker implements OnModuleInit {
     const extra =
       `SUBSTITUTO APROVADO DA BASE: no lugar de "${target.name}", oriente "${substitute.name}". ` +
       'Explique só essa troca; NÃO sugira nenhum outro exercício nem invente carga.';
-    return this.buildGenerative(userId, intent, message, scrubUser, {
+    return this.buildGenerative(userId, intent, message, scrubUser, personaCtx, {
       extraSystem: extra,
       allowedExercises: [target.name, substitute.name, target.id, substitute.id],
     });
@@ -391,10 +424,11 @@ export class AIResponseWorker implements OnModuleInit {
     intent: Intent,
     message: string,
     scrubUser: ScrubUser,
+    personaCtx: PersonaContext,
     opts: { extraSystem?: string; allowedExercises?: string[] } | undefined,
   ): Promise<ResponseDraft> {
-    const ctx = await this.context.build(userId, intent, message);
-    const runtime = await this.prompts.resolveRuntime(intent);
+    const ctx = await this.context.build(userId, intent, message, personaCtx.persona.agentName);
+    const runtime = await this.prompts.resolveRuntimeFor(intent, personaCtx.persona);
     const system = [runtime.system, opts?.extraSystem].filter(Boolean).join('\n\n');
 
     const methodology = METHODOLOGY_AWARE_INTENTS.includes(intent)
@@ -465,6 +499,7 @@ export class AIResponseWorker implements OnModuleInit {
       maxTokens: { CURTO: 96, MEDIO: 192, LIVRE: 384 }[runtime.formatting.blockSize],
       cache: true,
       intent: `coach_${intent}`,
+      personaSlot: personaCtx.slot,
     });
     const latencyMs = Date.now() - startedAt;
 

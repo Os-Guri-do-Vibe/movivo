@@ -235,7 +235,7 @@ export function intentInstruction(intent: Intent): string {
 /**
  * System prompt final (base + específico) para a intenção.
  *
- * ⚠️ Em runtime, use `PromptResolverService.resolvePrompt()` — ele aplica a persona
+ * ⚠️ Em runtime, use `PromptResolverService.resolvePromptFor(intent, persona)` — ele aplica a persona
  * publicada no painel. Esta função pura permanece como o **caminho de default de código**
  * (e é o que os testes determinísticos usam).
  */

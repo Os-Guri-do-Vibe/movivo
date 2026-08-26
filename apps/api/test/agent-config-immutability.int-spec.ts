@@ -93,9 +93,9 @@ afterAll(async () => {
 describe('agent_config — append-only imposto no banco (US-7.6/US-7.9)', () => {
   it('INSERT funciona pela role de runtime (a via legítima de publicação)', async () => {
     await appClient`
-      INSERT INTO agent_config (version, status, payload, change_note, created_by)
+      INSERT INTO agent_config (target_sex, version, status, payload, change_note, created_by)
       VALUES (
-        ${TEST_VERSION}, 'DRAFT', ${JSON.stringify({})}::jsonb,
+        'MALE', ${TEST_VERSION}, 'DRAFT', ${JSON.stringify({})}::jsonb,
         'teste de integração US-7.9 — nunca publicado', ${authorId}::uuid
       )
     `;
@@ -143,7 +143,9 @@ describe('agent_config — append-only imposto no banco (US-7.6/US-7.9)', () => 
   });
 
   it('a linha de teste (DRAFT) nunca aparece como persona vigente', async () => {
-    const active = await repo.activePayload();
-    expect(active?.version).not.toBe(TEST_VERSION);
+    for (const slot of ['MALE', 'FEMALE'] as const) {
+      const active = await repo.activePayload(slot);
+      expect(active?.version).not.toBe(TEST_VERSION);
+    }
   });
 });

@@ -5,6 +5,7 @@
  * (ADR-005-R / ARQUITETURA.md §12.12). Estes tipos são o que ele expõe; o SDK/HTTP
  * do provedor fica confinado a `providers.ts`.
  */
+import type { BiologicalSex } from '@movivo/shared';
 
 /** Classe de dado que roteia a chamada. Fail-safe: ausente ⇒ `HEALTH` (Victor §1.1). */
 export type DataClass = 'HEALTH' | 'NON_HEALTH';
@@ -48,6 +49,17 @@ export interface LLMRequest {
   cache?: boolean;
   /** Rótulo livre para telemetria (`ai_jobs.intent`). */
   intent?: string;
+  /**
+   * Slot da persona que montou este prompt (Sprint 11). Serve à telemetria de cache: o
+   * prefixo cacheável muda com a persona, então hit-rate agregado sem separar os dois slots
+   * mistura duas populações de prompt diferentes.
+   *
+   * ⚠️ Combinado com `userId`, o slot revela o sexo biológico do titular — por isso o nome
+   * do campo está em `PII_FIELDS` e o valor sai **redigido** do log estruturado (exigência
+   * do Sato). O corte por slot, quando alguém precisar dele de fato, sai de `ai_jobs`
+   * cruzado com `users.biological_sex` no banco, sob controle de acesso — não do log.
+   */
+  personaSlot?: BiologicalSex | null;
 }
 
 export interface LLMUsage {

@@ -7,17 +7,37 @@
  * Identidade, versão vigente e rascunho pendente valem nas duas seções (Configuração e FAQ).
  * O cartão permanece visível durante a troca, enquanto o `h1` único fica no cabeçalho da página.
  *
+ * ## Duas personas, um cartão (Sprint 11)
+ * Com dois slots publicáveis, "Persona vigente (vN)" no singular passou a ser mentira. O
+ * cartão continua **um só** — o espaço é o mesmo e dois cartões empurrariam as abas para
+ * fora da primeira dobra — mas agora conta as duas histórias: o destaque é a persona da aba
+ * ABERTA (é dela que o `h1`, o avatar e o botão de publicar falam) e uma linha de status
+ * mostra os dois slots lado a lado, incluindo o que ainda não foi publicado.
+ *
+ * Rascunho pendente do slot escondido não vira um segundo botão "Descartar alterações" (dois
+ * botões de mesmo nome acessível na mesma tela): vira um aviso com um atalho que abre aquela
+ * aba, onde o descarte tem contexto.
+ *
  * ## O que este cartão NÃO tem
- * Não há "Duplicar" nem "Novo agente". A MOVIVO opera **um** agente, por decisão de
- * arquitetura e de segurança (um prompt, um perímetro L0, uma trilha de auditoria). Botão
- * que promete capacidade inexistente é dívida de produto, não afordância.
+ * Não há "Duplicar" nem "Novo agente". Os dois slots são fixos e derivam do sexo biológico
+ * informado na anamnese — não são "agentes" que alguém cria à vontade. Botão que promete
+ * capacidade inexistente é dívida de produto, não afordância.
  */
+import type { BiologicalSex } from '@movivo/shared';
 import { Clock3, History, Lock, ShieldCheck } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
 
-import { useAgentPersona, type PersonaStepId } from './agent-persona-context';
+import { type PersonaStepId } from './agent-persona-context';
+import {
+  AGENT_SLOTS,
+  OTHER_SLOT,
+  SLOT_LABEL,
+  SLOT_LABEL_LOWER,
+  useAgentPersonaWorkspace,
+  type AgentSlotSummary,
+} from './agent-persona-workspace';
 import { ConfirmAction } from './confirm-action';
 import { StatusBadge } from './control-center-table';
 
@@ -37,21 +57,42 @@ function Chip({ children }: { children: ReactNode }) {
   );
 }
 
+/** Estado do slot em uma frase. Distingue "publicada", "emprestada" e "nada publicado". */
+function slotStatusLabel(slot: AgentSlotSummary | undefined): string {
+  if (!slot) return '—';
+  if (slot.version !== null) return `v${slot.version} · vigente`;
+  if (slot.borrowed && slot.servedFromSex) {
+    return `usa a ${SLOT_LABEL_LOWER[slot.servedFromSex]}`;
+  }
+  return 'padrão do código';
+}
+
+function pendingLabel(pending: number): string {
+  return pending === 1 ? '1 alteração não publicada' : `${pending} alterações não publicadas`;
+}
+
 export function AgentSummaryCard({
   onOpenPersona,
 }: {
-  /** Leva para a aba Personalidade em uma etapa específica do assistente. */
-  onOpenPersona: (step: PersonaStepId) => void;
+  /**
+   * Leva à seção Configuração numa etapa específica do assistente. `targetSex` troca a aba
+   * de persona antes — usado pelo atalho do rascunho pendente do slot escondido.
+   */
+  onOpenPersona: (step: PersonaStepId, targetSex?: BiologicalSex) => void;
 }) {
-  const { data, current, changedFields, canWrite, discard, loading, error } = useAgentPersona();
+  const { activeSex, activeSlot, slots, canWrite, topics } = useAgentPersonaWorkspace();
 
-  const pending = changedFields.length;
+  const otherSex = OTHER_SLOT[activeSex];
+  const otherSlot = slots[otherSex];
+  const pending = activeSlot?.pending ?? 0;
+  const publishedSlots = AGENT_SLOTS.filter(
+    (slot) => (slots[slot.sex]?.version ?? null) !== null,
+  ).length;
   const pendingTopics =
-    data?.topics?.versions.filter(
+    topics?.versions.filter(
       (topic) => topic.current && (topic.status === 'DRAFT' || topic.status === 'PENDING_APPROVAL'),
     ).length ?? 0;
-  const versionLabel =
-    data === null ? '—' : data.version === null ? 'Padrão do código' : `v${data.version} · vigente`;
+  const loaded = activeSlot !== null && activeSlot.agentName !== null;
 
   return (
     <section
@@ -64,19 +105,19 @@ export function AgentSummaryCard({
             aria-hidden="true"
             className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-petroleo text-h2 font-bold text-verde-pulso"
           >
-            {current?.agentName.trim().charAt(0).toUpperCase() ?? '—'}
+            {activeSlot?.agentName?.trim().charAt(0).toUpperCase() ?? '—'}
           </span>
           <div className="min-w-0">
             <h2 id="agent-card-title" className="text-h2 font-bold text-foreground">
-              {current?.agentName ?? 'Agente'}
+              {activeSlot?.agentName ?? 'Agente'}
             </h2>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <StatusBadge tone={data && current ? 'positive' : 'quiet'} variant="solid">
-                {data && current
+              <StatusBadge tone={loaded ? 'positive' : 'quiet'} variant="solid">
+                {loaded
                   ? 'Ativo'
-                  : loading
+                  : activeSlot?.loading
                     ? 'Carregando'
-                    : error
+                    : activeSlot?.error
                       ? 'Indisponível'
                       : 'Sem configuração'}
               </StatusBadge>
@@ -85,14 +126,22 @@ export function AgentSummaryCard({
                 <ShieldCheck aria-hidden="true" className="size-3.5" />
                 Supervisão CREF
               </Chip>
-              <span className="font-mono text-xs text-muted-foreground">{versionLabel}</span>
+              <span className="font-mono text-xs text-muted-foreground">
+                {SLOT_LABEL[activeSex]} · {slotStatusLabel(activeSlot ?? undefined)}
+              </span>
             </div>
-            {data ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {publishedSlots} de {AGENT_SLOTS.length} personas publicadas —{' '}
+              {AGENT_SLOTS.map(
+                (slot) => `${SLOT_LABEL[slot.sex]}: ${slotStatusLabel(slots[slot.sex])}`,
+              ).join(' · ')}
+            </p>
+            {activeSlot?.generatedAt ? (
               <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Clock3 aria-hidden="true" className="size-3.5" />
                 Atualizado em{' '}
-                <time dateTime={data.meta.generatedAt}>
-                  {updatedAtLabel(data.meta.generatedAt)}
+                <time dateTime={activeSlot.generatedAt}>
+                  {updatedAtLabel(activeSlot.generatedAt)}
                 </time>
               </p>
             ) : null}
@@ -124,26 +173,40 @@ export function AgentSummaryCard({
            */}
           <p className="inline-flex items-center gap-2 text-label font-semibold text-foreground">
             <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-coral" />
-            {pending === 1 ? '1 alteração não publicada' : `${pending} alterações não publicadas`}
+            {pendingLabel(pending)}
           </p>
-          {canWrite ? (
+          {canWrite && activeSlot ? (
             <ConfirmAction
               triggerLabel="Descartar alterações"
               triggerVariant="outline"
               triggerSize="default"
               destructive
               title="Descartar as alterações não publicadas?"
-              description={`Isso apaga as ${pending} alterações que você ainda não publicou. A ${
-                data?.version === null || data === null ? 'configuração padrão' : `v${data.version}`
+              description={`Isso apaga as ${pending} alterações que você ainda não publicou na ${
+                SLOT_LABEL_LOWER[activeSex]
+              }. A ${
+                activeSlot.version === null ? 'configuração padrão' : `v${activeSlot.version}`
               } continua valendo.`}
               confirmLabel="Descartar"
               onConfirm={async () => {
-                discard();
+                activeSlot.discard();
               }}
             />
           ) : null}
         </div>
       ) : null}
+
+      {otherSlot && otherSlot.pending > 0 ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+          <p className="text-label text-foreground">
+            A {SLOT_LABEL_LOWER[otherSex]} também tem {pendingLabel(otherSlot.pending)}.
+          </p>
+          <Button variant="outline" onClick={() => onOpenPersona('revisao', otherSex)}>
+            Abrir {SLOT_LABEL_LOWER[otherSex]}
+          </Button>
+        </div>
+      ) : null}
+
       {pendingTopics > 0 ? (
         <p className="mt-4 border-t border-border pt-4 text-label font-semibold text-foreground">
           {pendingTopics === 1

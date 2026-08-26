@@ -192,6 +192,10 @@ async function seedUser(): Promise<{ userId: string; to: string }> {
         ],
       },
       constraints: { level: 'INICIANTE', location: 'HOME', equipment: [], injuryTags: [] },
+      // NOT NULL sem default desde a migração 0033.
+      mesocycleName: 'Mesociclo 1 — Adaptação',
+      startDate: new Date(),
+      endDate: new Date(Date.now() + 12 * 7 * 24 * 60 * 60 * 1000),
     }),
   );
   // Sem vínculo + consentimento de saúde, o worker de resposta descarta o batch.

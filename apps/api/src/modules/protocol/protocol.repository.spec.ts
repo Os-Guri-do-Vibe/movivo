@@ -68,6 +68,8 @@ function repositoryWithSigner(professionalId: string | undefined) {
   return { repository: new ProtocolRepository(db), execute, protocolValues };
 }
 
+const SESSION_ID = '33333333-3333-4333-8333-333333333333';
+
 const persistInput = {
   userId: '11111111-1111-4111-8111-111111111111',
   content,
@@ -77,6 +79,7 @@ const persistInput = {
   status: 'ACTIVE' as const,
   humanReviewRequired: false,
   reviewUrgency: null,
+  anamnesisSessionId: SESSION_ID,
   totalWeeks: 12,
   generatedBy: 'AI_WITH_RULES',
   modelVersion: 'gpt-4.1',
@@ -95,6 +98,28 @@ describe('ProtocolRepository assinatura automatica', () => {
     expect(execute).toHaveBeenCalledOnce();
     expect(protocolValues).toHaveBeenCalledWith(
       expect.objectContaining({ professionalId, approvalStatus: 'AUTO_APPROVED' }),
+    );
+  });
+
+  // 2026-08-24: é este vínculo que permite à assinatura CREF liberar o PAR-Q da sessão
+  // certa (`release_parq_on_signature` deriva a sessão do protocolo, não do cliente).
+  it('grava a sessão de anamnese que originou o protocolo', async () => {
+    const { repository, protocolValues } = repositoryWithSigner(
+      '22222222-2222-4222-8222-222222222222',
+    );
+    await repository.persist(persistInput);
+    expect(protocolValues).toHaveBeenCalledWith(
+      expect.objectContaining({ anamnesisSessionId: SESSION_ID }),
+    );
+  });
+
+  it('aceita protocolo sem sessão vinculada (linha anterior à migração 0035)', async () => {
+    const { repository, protocolValues } = repositoryWithSigner(
+      '22222222-2222-4222-8222-222222222222',
+    );
+    await repository.persist({ ...persistInput, anamnesisSessionId: null });
+    expect(protocolValues).toHaveBeenCalledWith(
+      expect.objectContaining({ anamnesisSessionId: null }),
     );
   });
 
@@ -129,6 +154,10 @@ function repositoryForAutoRelease(
     version: number;
     approvalStatus: string;
     reviewUrgency: string | null;
+    mesocycleName?: string;
+    startDate?: Date;
+    endDate?: Date;
+    totalWeeks?: number;
   } | null,
   professionalId = 'cref-1',
 ) {
@@ -154,15 +183,28 @@ function repositoryForAutoRelease(
 
 describe('ProtocolRepository.autoRelease (fila do profissional — "Disponível para Revisão")', () => {
   it('libera protocolo PENDING_REVIEW/OPTIONAL: assina metodologia e ativa', async () => {
+    const startDate = new Date('2026-08-22T00:00:00.000Z');
+    const endDate = new Date('2026-11-14T00:00:00.000Z');
     const { repository, updateSet, execute } = repositoryForAutoRelease({
       content,
       version: 1,
       approvalStatus: 'PENDING_REVIEW',
       reviewUrgency: 'OPTIONAL',
+      mesocycleName: 'Mesociclo 1 — Adaptação',
+      startDate,
+      endDate,
+      totalWeeks: 12,
     });
     await expect(repository.autoRelease('u1', 'p1')).resolves.toEqual({
       released: true,
       version: 1,
+      content,
+      mesocycleName: 'Mesociclo 1 — Adaptação',
+      startDate,
+      endDate,
+      totalWeeks: 12,
+      signatureHash: expect.any(String),
+      signedAt: expect.any(Date),
     });
     expect(execute).toHaveBeenCalledOnce();
     expect(updateSet).toHaveBeenCalledWith(

@@ -8,7 +8,6 @@ import {
   parseOperations,
   parseQueueDetail,
   parseQueueResponse,
-  releaseParq,
   resolveHandoff,
   saveProtocol,
   signProtocol,
@@ -47,6 +46,13 @@ describe('parsers do contrato do dashboard', () => {
         optional: [],
       }),
     ).toThrow(DashboardApiError);
+    // `PARQ` saiu do enum em 2026-08-24 e é hoje um kind desconhecido como outro qualquer.
+    expect(() =>
+      parseQueueResponse({
+        mandatory: [{ ...queueResponse.mandatory[0], kind: 'PARQ' }],
+        optional: [],
+      }),
+    ).toThrow(DashboardApiError);
     expect(() =>
       parseQueueResponse({
         mandatory: [{ ...queueResponse.mandatory[0], severity: 'RED' }],
@@ -66,7 +72,7 @@ describe('parsers do contrato do dashboard', () => {
     expect(() => parseQueueDetail({ ...protocolDetail, replay: null })).toThrow(/replay/i);
   });
 
-  it('normaliza contagens, contexto, validação, PAR-Q e handoff opcionais', () => {
+  it('normaliza contagens, contexto, validação e handoff opcionais', () => {
     const detail = parseQueueDetail({
       ...protocolDetail,
       context: { age: 32, active: true, ignored: { nested: true }, absent: null },
@@ -76,13 +82,11 @@ describe('parsers do contrato do dashboard', () => {
         signedAt: 123,
         signatureHash: 123,
       },
-      parq: { flags: ['resposta positiva', null], state: '' },
       handoff: { reason: '', level: '', status: '' },
     });
     expect(detail.context).toEqual({ age: 32, active: true, absent: null });
     expect(detail.protocol?.validation).toEqual({ valid: false, issues: ['volume'] });
     expect(detail.protocol?.signedAt).toBeNull();
-    expect(detail.parq?.flags).toEqual(['resposta positiva']);
     expect(detail.handoff).toEqual({
       reason: protocolDetail.item.summary,
       level: protocolDetail.item.severity,
@@ -99,6 +103,25 @@ describe('parsers do contrato do dashboard', () => {
       counts: { mandatory: 1, optional: 0, total: 3 },
       mandatory: [{ ageMinutes: 0, summary: '', status: 'PENDENTE' }],
     });
+  });
+
+  // `origin` é legenda, não contrato de renderização: valor fora do par PARQ/EDIT (ou
+  // ausente, como num backend antigo) vira `null` sem derrubar a fila inteira.
+  it('preserva a origem do protocolo obrigatório e degrada valor desconhecido para null', () => {
+    const base = queueResponse.mandatory[0];
+    if (!base) throw new Error('fixture sem item obrigatório');
+    expect(parseQueueResponse({ mandatory: [base], optional: [] }).mandatory[0]?.origin).toBe(
+      'PARQ',
+    );
+    expect(
+      parseQueueResponse({ mandatory: [{ ...base, origin: 'EDIT' }], optional: [] }).mandatory[0]
+        ?.origin,
+    ).toBe('EDIT');
+    for (const origin of ['DESCONHECIDA', undefined, null]) {
+      expect(
+        parseQueueResponse({ mandatory: [{ ...base, origin }], optional: [] }).mandatory[0]?.origin,
+      ).toBeNull();
+    }
   });
 
   it('preserva primeiro treino indisponível sem inventar zero', () => {
@@ -148,15 +171,28 @@ describe('cliente BFF same-origin', () => {
     vi.stubGlobal('fetch', fetchMock);
     await saveProtocol('p1', protocolContent, 'Ajuste profissional');
     await signProtocol('p1');
-    await releaseParq('q1', 'Revisado');
     await resolveHandoff('h1', 'Contato realizado', 'Registro');
     for (const call of fetchMock.mock.calls) {
       const init = call[1] as RequestInit;
       expect(String(init.body ?? '')).not.toContain('user_id');
     }
     expect(fetchMock.mock.calls[2]?.[1]?.body).toBe(
-      JSON.stringify({ decision: 'RELEASED', notes: 'Revisado', confirmation: true }),
+      JSON.stringify({
+        resolution: 'Contato realizado',
+        notes: 'Registro',
+        confirmation: true,
+      }),
     );
+  });
+
+  // A liberação do PAR-Q acontece DENTRO da assinatura no backend (2026-08-24) — não há
+  // mais rota `/parq/{id}/release` no BFF, e assinar é a única chamada que o RT dispara.
+  it('assina o protocolo sem nenhuma chamada extra de liberação PAR-Q', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response(200, { status: 'SIGNED' }));
+    vi.stubGlobal('fetch', fetchMock);
+    await signProtocol('p1');
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/dashboard/protocols/p1/sign');
   });
 
   it('propaga mensagem e detalhes seguros de validação', async () => {

@@ -1,7 +1,8 @@
 'use client';
 
 /**
- * Estado compartilhado do painel "Agente" (redesenho 2026-08-20, spec da Sofia).
+ * Estado de UM slot de persona do painel "Agente" (redesenho 2026-08-20, spec da Sofia;
+ * dois slots desde a Sprint 11).
  *
  * ## Por que existe um contexto, e não estado local em `AiPersonaDashboard`
  * O cartão do agente fica acima das seções Configuração/FAQ e precisa do
@@ -9,6 +10,17 @@
  * vigente, como descartar, como saltar para a etapa de publicação. Duplicar esse estado
  * faria o chip do topo divergir do formulário — que é exatamente o tipo de mentira que
  * este painel não pode contar sobre a configuração da IA.
+ *
+ * ## Um provider POR SLOT (`targetSex`)
+ * A MOVIVO publica duas personas simultâneas, uma por público, cada uma com histórico e
+ * numeração de versão próprios (`UNIQUE(target_sex, version)` no banco). Existe, portanto,
+ * uma instância deste provider para cada slot, **montadas ao mesmo tempo** — trocar de aba
+ * apenas esconde uma delas via `hidden`, nunca desmonta, porque um rascunho não publicado
+ * não pode desaparecer por causa de um clique de navegação.
+ *
+ * `AiPersonaDashboard` não recebe o slot por prop: ele lê `useAgentPersona()` e o slot vem
+ * de qual instância está acima dele na árvore. O que é global (temas proibidos, sessão,
+ * aba ativa) mora em `agent-persona-workspace.tsx`.
  *
  * ## O que NÃO mudou
  * O caminho de escrita continua sendo o mesmo de antes: espaço de valores fechado,
@@ -19,8 +31,8 @@ import {
   agentPersonaSchema,
   type AgentConfigVersion,
   type AgentPersona,
+  type BiologicalSex,
   type ConfigSimulationResponse,
-  type ForbiddenTopicsResponse,
   type PromptBlockView,
 } from '@movivo/shared';
 import { Ban, MessagesSquare, ShieldCheck, UserRound, UserRoundCheck } from 'lucide-react';
@@ -38,13 +50,18 @@ import {
   ControlCenterApiError,
   getAgentConfigHistory,
   getAgentPersona,
-  getForbiddenTopics,
   getInviolableRules,
   publishAgentPersona,
   rollbackAgentPersona,
   simulateAgentConfig,
 } from '@/lib/control-center-api';
 
+import {
+  OTHER_SLOT,
+  slotSlug,
+  useAgentPersonaWorkspace,
+  type AgentSlotSummary,
+} from './agent-persona-workspace';
 import { useControlCenterResource, type ControlCenterMeta } from './control-center-ui';
 
 export type PersonaStepId = 'identidade' | 'fala' | 'limites' | 'handoff' | 'revisao';
@@ -156,36 +173,58 @@ export function stepOfField(field: keyof AgentPersona): PersonaStep | undefined 
 }
 
 export interface AiPersonaData {
+  /** Slot pedido — o público que este formulário edita. */
+  targetSex: BiologicalSex;
   persona: AgentPersona;
   version: number | null;
+  /**
+   * Slot de onde o payload servido veio de fato. Diferente de `targetSex` quando este
+   * público ainda não tem persona própria e está sendo atendido pela do outro; `null`
+   * quando nenhum dos dois publicou e vale o default compilado.
+   */
+  servedFromSex: BiologicalSex | null;
   versions: AgentConfigVersion[];
   blocks: PromptBlockView[];
-  /**
-   * `null` quando o endpoint de temas proibidos não respondeu. O painel degrada:
-   * a etapa "Limites" mostra o erro, o resto do assistente continua utilizável.
-   */
-  topics: ForbiddenTopicsResponse['data'] | null;
   meta: ControlCenterMeta;
 }
 
-async function loadAiPersona(signal?: AbortSignal): Promise<AiPersonaData> {
-  const [persona, history, rules, topics] = await Promise.all([
-    getAgentPersona(signal),
-    getAgentConfigHistory(signal),
-    getInviolableRules(signal),
-    getForbiddenTopics(signal).catch(() => null),
+async function loadAiPersona(
+  targetSex: BiologicalSex,
+  signal?: AbortSignal,
+): Promise<AiPersonaData> {
+  const [persona, history, rules] = await Promise.all([
+    getAgentPersona(targetSex, signal),
+    getAgentConfigHistory(targetSex, signal),
+    getInviolableRules(targetSex, signal),
   ]);
   return {
+    targetSex,
     persona: persona.data.persona,
     version: persona.data.version,
+    servedFromSex: persona.data.servedFromSex,
     versions: history.data.versions,
     blocks: rules.data.blocks,
-    topics: topics?.data ?? null,
     meta: persona.meta,
   };
 }
 
 interface AgentPersonaState {
+  /** Slot deste provider. Toda escrita daqui viaja com ele. */
+  targetSex: BiologicalSex;
+  /**
+   * Prefixa um `id`/`name` de formulário com o slot.
+   *
+   * Não é cosmético: os DOIS formulários ficam montados ao mesmo tempo, e id repetido tem
+   * duas consequências reais — `<label for>` do segundo passa a apontar para o campo do
+   * primeiro (o campo perde nome acessível) e dois `<input type="radio">` de mesmo `name`
+   * viram UM grupo, então marcar uma opção numa aba desmarca a da outra no DOM.
+   */
+  slotId: (suffix: string) => string;
+  /**
+   * `true` quando o público deste slot ainda não tem persona própria e recebe a do outro.
+   * O formulário mostra o aviso; o rascunho e a publicação continuam sendo deste slot.
+   */
+  borrowed: boolean;
   canWrite: boolean;
   canApprove: boolean;
   data: AiPersonaData | null;
@@ -230,15 +269,17 @@ export function useAgentPersona(): AgentPersonaState {
 }
 
 export function AgentPersonaProvider({
-  canWrite = false,
-  canApprove = false,
+  targetSex,
   children,
 }: {
-  canWrite?: boolean;
-  canApprove?: boolean;
+  /** Slot deste formulário. Uma instância por público, as duas montadas ao mesmo tempo. */
+  targetSex: BiologicalSex;
   children: ReactNode;
 }) {
-  const { data, error, forbidden, loading, refresh } = useControlCenterResource(loadAiPersona);
+  const { canWrite, canApprove, registerSlot, forgetSlot, refreshSlot } =
+    useAgentPersonaWorkspace();
+  const load = useCallback((signal?: AbortSignal) => loadAiPersona(targetSex, signal), [targetSex]);
+  const { data, error, forbidden, loading, refresh } = useControlCenterResource(load);
   const [draft, setDraft] = useState<AgentPersona | null>(null);
   const [changeNote, setChangeNote] = useState('');
   const [step, setStep] = useState<PersonaStepId>('identidade');
@@ -330,6 +371,13 @@ export function AgentPersonaProvider({
         reset();
         setFeedback(success);
         await refresh();
+        /*
+         * O slot vizinho também recarrega: enquanto ele não tem persona própria, ele exibe
+         * a DESTE slot por empréstimo — publicar aqui muda o que está valendo lá. Sem isso
+         * a outra aba continuaria mostrando o payload antigo como se fosse o vigente. O
+         * rascunho de lá não é tocado: `refresh` só troca `current`.
+         */
+        await refreshSlot(OTHER_SLOT[targetSex]);
       } catch (caught) {
         setWriteError(
           caught instanceof ControlCenterApiError
@@ -340,7 +388,7 @@ export function AgentPersonaProvider({
         setPublishing(false);
       }
     },
-    [refresh, reset],
+    [refresh, refreshSlot, reset, targetSex],
   );
 
   const runSimulation = useCallback(async () => {
@@ -366,23 +414,26 @@ export function AgentPersonaProvider({
   const publish = useCallback(async () => {
     if (!validation?.success) return;
     await runWrite(
-      () => publishAgentPersona({ payload: validation.data, changeNote }),
+      () => publishAgentPersona({ targetSex, payload: validation.data, changeNote }),
       'Publicado. A nova persona passa a valer em até 60 segundos, sem deploy.',
     );
-  }, [changeNote, runWrite, validation]);
+  }, [changeNote, runWrite, targetSex, validation]);
 
   const rollback = useCallback(
     async (version: number) => {
       await runWrite(
         () =>
           rollbackAgentPersona({
+            // O par `(targetSex, targetVersion)` é a chave real: "versão 1" existe nos dois
+            // slots e não se refere à mesma persona.
+            targetSex,
             targetVersion: version,
             changeNote: `Rollback para a versão ${version}`,
           }),
         `Rollback publicado a partir da v${version}. Vale em até 60 segundos.`,
       );
     },
-    [runWrite],
+    [runWrite, targetSex],
   );
 
   const canPublish =
@@ -402,8 +453,48 @@ export function AgentPersonaProvider({
     return () => window.removeEventListener('beforeunload', warnBeforeUnload);
   }, [changedFields.length]);
 
+  const borrowed = data !== null && data.servedFromSex !== null && data.servedFromSex !== targetSex;
+
+  const slotId = useCallback((suffix: string) => `${slotSlug(targetSex)}-${suffix}`, [targetSex]);
+
+  /*
+   * Retrato deste slot para o cartão-resumo, que fica fora das abas e precisa falar dos
+   * dois slots. O objeto é memoizado para que o efeito de registro não dispare a cada
+   * render — o `setState` do workspace reentra aqui como novo render, e uma identidade
+   * instável viraria laço.
+   */
+  const summary = useMemo<AgentSlotSummary>(
+    () => ({
+      targetSex,
+      agentName: data?.persona.agentName ?? null,
+      version: data?.version ?? null,
+      servedFromSex: data?.servedFromSex ?? null,
+      borrowed,
+      pending: changedFields.length,
+      loading,
+      error,
+      generatedAt: data?.meta.generatedAt ?? null,
+      discard,
+      goToStep: setStep,
+      refresh: async () => {
+        await refresh();
+      },
+    }),
+    [targetSex, data, borrowed, changedFields.length, loading, error, discard, refresh],
+  );
+
+  useEffect(() => {
+    registerSlot(summary);
+  }, [registerSlot, summary]);
+
+  // Limpeza só no desmonte (deps estáveis) — não a cada mudança de resumo.
+  useEffect(() => () => forgetSlot(targetSex), [forgetSlot, targetSex]);
+
   const value = useMemo<AgentPersonaState>(
     () => ({
+      targetSex,
+      slotId,
+      borrowed,
       canWrite,
       canApprove,
       data,
@@ -438,6 +529,9 @@ export function AgentPersonaProvider({
       canPublish,
     }),
     [
+      targetSex,
+      slotId,
+      borrowed,
       canWrite,
       canApprove,
       data,

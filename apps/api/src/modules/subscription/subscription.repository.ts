@@ -6,8 +6,11 @@
 import { Injectable } from '@nestjs/common';
 import { desc, eq } from 'drizzle-orm';
 
+import type { BiologicalSex } from '@movivo/shared';
+
 import {
   subscriptions,
+  users,
   type NewSubscriptionRow,
   type SubscriptionRow,
 } from '../../core/database/schema';
@@ -33,6 +36,22 @@ export class SubscriptionRepository {
         .limit(1),
     );
     return row ?? null;
+  }
+
+  /**
+   * Slot da persona do titular (Sprint 11) — qual das duas personas publicadas assina as
+   * mensagens de conversão. `null` quando o titular é anterior à coluna ou nunca submeteu a
+   * anamnese; nesse caso a resolução cai no empréstimo entre slots e a mensagem sai igual.
+   */
+  async findBiologicalSex(userId: string): Promise<BiologicalSex | null> {
+    const [row] = await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx
+        .select({ biologicalSex: users.biologicalSex })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1),
+    );
+    return row?.biologicalSex ?? null;
   }
 
   async insert(values: NewSubscriptionRow): Promise<SubscriptionRow> {

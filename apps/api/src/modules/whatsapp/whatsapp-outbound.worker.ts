@@ -1,8 +1,8 @@
 /**
  * WhatsappOutboundWorker (US-2.5) — processor da fila `whatsapp-outbound`.
  *
- * Consome os jobs que a US-2.4 enfileira (`protocol-delivery`, `protocol-waiting`) e a
- * confirmação imediata do submit (US-2.5.2). Conc.10 / lock 30s / 5 retries / rate limit
+ * Consome os jobs que a US-2.4 enfileira (`protocol-delivery`) e os que o submit agenda
+ * (`confirmation`/`confirmation-care` imediatos e `protocol-waiting` com 30min de atraso). Conc.10 / lock 30s / 5 retries / rate limit
  * 80 msg/s vêm do `WorkerFactory` (US-1.7) — não reconfigura.
  *
  * Regras: payload só com UUIDs (telefone e protocolo são lidos sob RLS aqui, nunca no job);
@@ -11,7 +11,7 @@
  */
 import { Inject, Injectable, type OnModuleInit } from '@nestjs/common';
 import { type Job } from 'bullmq';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 
@@ -26,12 +26,13 @@ import { QUEUE } from '../jobs/jobs.config';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { FEEDBACK_BUTTONS } from './feedback';
 import {
+  analyzingMessage,
   BUBBLE_SEPARATOR,
   confirmationCareMessage,
   confirmationMessage,
   formatProtocolDelivery,
   PHONE_VERIFICATION_TEMPLATE,
-  waitingMessage,
+  protocolDeliveryText,
 } from './message-templates';
 import {
   type QuickReplyButton,
@@ -72,6 +73,22 @@ export interface WhatsappOutboundJob {
   /** `PHONE_VERIFICATION`: destino e código de 6 dígitos. */
   phoneNumber?: string;
   code?: string;
+}
+
+/**
+ * Nome do anexo do PDF como o titular VÊ no WhatsApp (achado 2026-08-25 — "protocolo-movivo.pdf"
+ * genérico demais). Nunca vai na URL pública do documento (essa continua anônima/IDOR-safe —
+ * ver `protocol.controller.ts`); só no campo de nome de arquivo que o transporte manda junto
+ * do envio, que só quem já resolveu o telefone sob RLS consegue montar.
+ */
+function protocolFileName(studentName: string | null): string {
+  const slug = (studentName ?? '')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug ? `protocolo-${slug}-movivo.pdf` : 'protocolo-movivo.pdf';
 }
 
 /** TTL do marcador de idempotência — só precisa cobrir a janela de retry; 7d é folgado. */
@@ -149,11 +166,16 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       return { status: 'TYPING' };
     }
 
+    // `|| 'na'` (e não `??`): um `dedupeId` vazio precisa cair no default igual a um
+    // ausente. Com `??` a string vazia sobrevivia e virava segmento inválido de chave
+    // Redis, derrubando o envio em todas as tentativas (achado de QA 2026-08-24 — a
+    // origem era o correlationId vazio das entregas reais, corrigido no controller;
+    // isto aqui é a rede de proteção para qualquer outra origem de dedupeId vazio).
     const markerKey = this.keys.forUser(
       userId,
       'wa-sent',
       type,
-      String(protocolVersion ?? dedupeId ?? 'na'),
+      String(protocolVersion ?? dedupeId ?? '') || 'na',
     );
 
     // Idempotência: envio já concluído não reenvia (retry/duplicata). check→envia→marca —
@@ -164,23 +186,37 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       return { status: 'ALREADY_SENT' };
     }
 
-    const text = await this.buildText(job.data);
-    if (!text) return { status: 'SKIPPED' };
-
-    // `\n---\n` → uma mensagem por bolha (Sofia §11). Os botões de feedback (US-3.6) vão
-    // só na ÚLTIMA bolha, quando o job pede (resposta real do Coach — não limite/segurança).
-    const bubbles = text.split(BUBBLE_SEPARATOR).filter((b) => b.trim());
-    for (const [i, bubble] of bubbles.entries()) {
-      const isLast = i === bubbles.length - 1;
-      const buttons = isLast
-        ? (job.data.buttons ?? (job.data.feedback ? FEEDBACK_BUTTONS : undefined))
-        : undefined;
-      await this.transport.send({ to: phone, text: bubble, buttons });
-    }
-
-    await this.redis.set(markerKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);
-
+    // PROTOCOL_DELIVERY é tratado à parte: quando há PDF gerado (assinatura CREF), o texto
+    // explicativo vai em bolhas E o plano vai como documento; sem PDF, só o texto+link de
+    // sempre. Os dois caminhos usam o MESMO marker de idempotência acima, então nunca
+    // duplica entre um e outro.
     if (type === 'PROTOCOL_DELIVERY') {
+      const delivery = await this.buildDelivery(job.data);
+      if (!delivery) return { status: 'SKIPPED' };
+      if (delivery.pdfUrl && this.transport.sendDocument) {
+        // O texto explicativo vem ANTES do documento (contexto primeiro, anexo depois) e é
+        // best-effort: se falhar, o PDF — que é a entrega em si — segue de qualquer forma.
+        await this.sendBubbles(delivery.text, phone, job.data).catch((err: unknown) =>
+          this.logger.warn(
+            { err, userId },
+            'texto explicativo da entrega falhou — PDF segue de qualquer forma',
+          ),
+        );
+        await this.transport.sendDocument(
+          phone,
+          delivery.pdfUrl,
+          // Só afirma revisão humana quando ela realmente aconteceu: auto-liberação é
+          // assinatura em nível de metodologia, não leitura caso a caso do protocolo.
+          delivery.humanSigned
+            ? 'Seu plano de treino em PDF. 📄 Revisado e assinado pelo profissional de Educação Física registrado no CREF responsável pela MOVIVO.'
+            : 'Seu plano de treino em PDF. 📄 Montado dentro da metodologia do profissional de Educação Física registrado no CREF responsável pela MOVIVO.',
+          this.config.whatsapp.protocolPdfTemplateName,
+          protocolFileName(delivery.studentName),
+        );
+      } else {
+        await this.sendBubbles(delivery.text, phone, job.data);
+      }
+      await this.redis.set(markerKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);
       // ponytail: SLA submit→entrega junta este evento com o `protocol_sent` de enfileiramento
       // da US-2.4 (o job de entrega não carrega submittedAt). Server SDK do PostHog: Sprint futura.
       this.logger.info(
@@ -192,8 +228,30 @@ export class WhatsappOutboundWorker implements OnModuleInit {
         },
         'protocol_sent (entrega concluída)',
       );
+      return { status: 'SENT' };
     }
+
+    const text = await this.buildText(job.data);
+    if (!text) return { status: 'SKIPPED' };
+    await this.sendBubbles(text, phone, job.data);
+    await this.redis.set(markerKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);
     return { status: 'SENT' };
+  }
+
+  /** `\n---\n` → uma mensagem por bolha (Sofia §11). Botões de feedback só na ÚLTIMA bolha. */
+  private async sendBubbles(
+    text: string,
+    phone: string,
+    data: Pick<WhatsappOutboundJob, 'buttons' | 'feedback'>,
+  ): Promise<void> {
+    const bubbles = text.split(BUBBLE_SEPARATOR).filter((b) => b.trim());
+    for (const [i, bubble] of bubbles.entries()) {
+      const isLast = i === bubbles.length - 1;
+      const buttons = isLast
+        ? (data.buttons ?? (data.feedback ? FEEDBACK_BUTTONS : undefined))
+        : undefined;
+      await this.transport.send({ to: phone, text: bubble, buttons });
+    }
   }
 
   /** Monta o texto por tipo de job. `null` = nada a enviar (ex.: protocolo não aprovado). */
@@ -204,13 +262,9 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       case 'CONFIRMATION_CARE':
         return confirmationCareMessage();
       case 'PROTOCOL_WAITING':
-        // Enfileirado com 30min de atraso (protocol-generation.worker.ts) — nesse meio
-        // tempo o profissional CREF pode ter aprovado e a entrega real já ter saído.
-        // Reconfirma aqui, na hora do envio, pra não mandar "ainda estou preparando"
-        // depois que o protocolo de verdade já chegou.
-        return (await this.hasApprovedActiveProtocol(data.userId)) ? null : waitingMessage();
+        return this.buildWaiting(data.userId);
       case 'PROTOCOL_DELIVERY':
-        return this.buildDelivery(data);
+        return null; // tratado antes em process() (pode virar documento, não só texto)
       case 'COACH_MESSAGE':
       case 'CHECKIN_MESSAGE':
       case 'WORKOUT_QUICK_REPLY':
@@ -223,31 +277,61 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     }
   }
 
-  private async buildDelivery(data: WhatsappOutboundJob): Promise<string | null> {
+  /**
+   * `pdfUrl` só vem preenchido quando o protocolo já tem PDF gerado (assinatura CREF,
+   * `DashboardService.signProtocol` → `buildProtocolPdf`) — `AUTO_APPROVED` ainda não gera
+   * PDF (Sprint futura), então cai no texto+link de sempre (`text`, sempre montado).
+   */
+  private async buildDelivery(data: WhatsappOutboundJob): Promise<{
+    text: string;
+    pdfUrl?: string;
+    studentName: string | null;
+    /** Assinado por um humano de verdade (não a auto-liberação) — decide a legenda do PDF. */
+    humanSigned: boolean;
+  } | null> {
     const userId = data.userId;
     if (!userId) return null;
-    const proto = await this.db.runAsUser(userId, 'USER', async (tx) => {
-      const [row] = await tx
-        .select({
-          id: protocols.id,
-          content: protocols.content,
-          status: protocols.status,
-          approvalStatus: protocols.approvalStatus,
-          signedAt: protocols.signedAt,
-          signatureHash: protocols.signatureHash,
-          professionalId: protocols.professionalId,
-        })
-        .from(protocols)
-        .where(
-          and(
-            eq(protocols.userId, userId),
-            data.protocolId ? eq(protocols.id, data.protocolId) : undefined,
-            data.protocolVersion ? eq(protocols.version, data.protocolVersion) : undefined,
-          ),
-        )
-        .limit(1);
-      return row;
-    });
+    const { proto, studentName, biologicalSex } = await this.db.runAsUser(
+      userId,
+      'USER',
+      async (tx) => {
+        const [row] = await tx
+          .select({
+            id: protocols.id,
+            content: protocols.content,
+            status: protocols.status,
+            approvalStatus: protocols.approvalStatus,
+            signedAt: protocols.signedAt,
+            signatureHash: protocols.signatureHash,
+            professionalId: protocols.professionalId,
+            pdfContent: protocols.pdfContent,
+            totalWeeks: protocols.totalWeeks,
+            mesocycleName: protocols.mesocycleName,
+          })
+          .from(protocols)
+          .where(
+            and(
+              eq(protocols.userId, userId),
+              data.protocolId ? eq(protocols.id, data.protocolId) : undefined,
+              data.protocolVersion ? eq(protocols.version, data.protocolVersion) : undefined,
+            ),
+          )
+          .limit(1);
+        // `biologicalSex` entra na projeção que já existia (Sprint 11): é ele que decide qual
+        // das duas personas publicadas assina a entrega. Nulo é normal e cai no empréstimo
+        // entre slots — nunca derruba a mensagem.
+        const [self] = await tx
+          .select({ name: users.name, biologicalSex: users.biologicalSex })
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1);
+        return {
+          proto: row,
+          studentName: self?.name ?? null,
+          biologicalSex: self?.biologicalSex ?? null,
+        };
+      },
+    );
 
     // Só entrega o protocolo auto-aprovado e ativo (guardrail: nada não-validado sai).
     if (
@@ -265,31 +349,66 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       return null;
     }
     const link = `${this.config.whatsapp.publicSiteUrl}/protocolo/${proto.id}`;
-    return formatProtocolDelivery(
-      proto.content as Parameters<typeof formatProtocolDelivery>[0],
-      link,
-      await this.agentPersona.agentName(),
-    );
+    const content = proto.content as Parameters<typeof formatProtocolDelivery>[0];
+    const persona = await this.agentPersona.persona(biologicalSex);
+    const pdfUrl = proto.pdfContent ? `${link}/pdf` : undefined;
+    // Com PDF, o anexo JÁ é o plano completo — o texto vira só o "porquê" curto (achado
+    // 2026-08-25). Sem PDF (fallback raro), o texto é a entrega inteira: precisa do
+    // primeiro treino e do link, senão o titular não vê o plano em lugar nenhum.
+    const text = pdfUrl
+      ? protocolDeliveryText(content, persona, proto.totalWeeks, proto.mesocycleName)
+      : formatProtocolDelivery(content, link, persona, proto.totalWeeks, proto.mesocycleName);
+    return {
+      text,
+      pdfUrl,
+      studentName,
+      humanSigned: proto.approvalStatus === 'HUMAN_APPROVED' && Boolean(proto.signedAt),
+    };
   }
 
-  /** Usado só pra decidir se a mensagem de espera (PROTOCOL_WAITING) ainda faz sentido. */
-  private async hasApprovedActiveProtocol(userId: string | null): Promise<boolean> {
-    if (!userId) return false;
-    const proto = await this.db.runAsUser(userId, 'USER', async (tx) => {
+  /**
+   * "Estou analisando" (PROTOCOL_WAITING), agendada no SUBMIT com 30min de atraso
+   * (`AnamnesisService.submit`). Nesses 30min o protocolo pode ter sido gerado e entregue —
+   * por auto-liberação ou por assinatura do CREF. Por isso o estado é reconfirmado aqui, na
+   * hora do envio, e não só no enqueue: mandar "já estou analisando" depois que o plano de
+   * verdade chegou seria ruído.
+   *
+   * O mesmo carregamento decide a variante do texto: `reviewUrgency = MANDATORY` (PAR-Q
+   * bloqueado) é o único caso em que o protocolo só sai por assinatura humana — aí a copy
+   * não promete prazo. Sem protocolo ainda (geração em curso/atrasada), trata como o caso
+   * comum: `mandatory: false`.
+   */
+  private async buildWaiting(userId: string | null): Promise<string | null> {
+    if (!userId) return null;
+    const { proto, biologicalSex } = await this.db.runAsUser(userId, 'USER', async (tx) => {
       const [row] = await tx
-        .select({ id: protocols.id })
+        .select({
+          status: protocols.status,
+          approvalStatus: protocols.approvalStatus,
+          reviewUrgency: protocols.reviewUrgency,
+        })
         .from(protocols)
-        .where(
-          and(
-            eq(protocols.userId, userId),
-            eq(protocols.status, 'ACTIVE'),
-            inArray(protocols.approvalStatus, ['AUTO_APPROVED', 'HUMAN_APPROVED']),
-          ),
-        )
+        .where(eq(protocols.userId, userId))
+        .orderBy(desc(protocols.version))
         .limit(1);
-      return row;
+      // Sprint 11: o slot da persona sai da mesma transação sob RLS que já resolvia o estado
+      // do protocolo — sem ida extra ao banco por mensagem.
+      const [self] = await tx
+        .select({ biologicalSex: users.biologicalSex })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+      return { proto: row, biologicalSex: self?.biologicalSex ?? null };
     });
-    return Boolean(proto);
+
+    const alreadyDelivered =
+      proto?.status === 'ACTIVE' &&
+      ['AUTO_APPROVED', 'HUMAN_APPROVED'].includes(proto.approvalStatus);
+    if (alreadyDelivered) return null;
+
+    return analyzingMessage(await this.agentPersona.persona(biologicalSex), {
+      mandatory: proto?.reviewUrgency === 'MANDATORY',
+    });
   }
 
   private async resolvePhone(userId: string): Promise<string | null> {

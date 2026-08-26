@@ -6,10 +6,49 @@
  *
  * `\n---\n` separa bolhas — o outbound envia cada trecho como uma mensagem (Sofia §11).
  */
-import type { ProtocolStructure } from '@movivo/shared';
+import { PRIMARY_GOAL_LABELS, type AgentPersona, type ProtocolStructure } from '@movivo/shared';
 
 /** Separador de bolhas — o worker envia cada trecho como uma mensagem distinta. */
 export const BUBBLE_SEPARATOR = '\n---\n';
+
+/**
+ * Emoji só quando a persona permite — `emojiPolicy: 'NENHUM'` é uma escolha do painel
+ * (US-7.6), não um detalhe de copy. Devolve o glifo já prefixado por espaço, para ser
+ * concatenado logo depois de uma frase encerrada por pontuação (`...pronto.${emoji(...)} `).
+ */
+function emoji(persona: AgentPersona, glyph: string): string {
+  return persona.emojiPolicy === 'NENHUM' ? '' : ` ${glyph}`;
+}
+
+function capitalizeFirst(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * "Sou {nome}. {Apresentação}" — achado de QA 2026-08-25: `agentSelfIntro` é texto livre
+ * do painel (10-200 caracteres, sem contrato gramatical), e a persona publicada em
+ * produção já provou isso na prática ("Olá, sou o Leonardo, seu treinador..." — uma frase
+ * completa em primeira pessoa, bem diferente do fragmento em terceira pessoa do default,
+ * "a coach digital da MOVIVO, supervisionada por..."). A construção antiga (`Aqui é a
+ * ${nome}, ${intro}`) travava o artigo em feminino e virava emenda por vírgula quando o
+ * texto publicado já era uma frase própria — ex.: "Aqui é a Leonardo, Olá, sou o
+ * Leonardo...". "Sou {nome}" não exige artigo (nem concordância de gênero) em português,
+ * e o ponto final (em vez de vírgula) deixa a apresentação valer como frase própria nos
+ * dois casos — fragmento (aí ganha sujeito ao virar frase solta) ou frase completa (aí
+ * fica redundante, mas nunca quebrada).
+ */
+function presentPersona(persona: AgentPersona): string {
+  return `Sou ${persona.agentName}. ${capitalizeFirst(persona.agentSelfIntro)}`;
+}
+
+/**
+ * Atraso da mensagem "estou analisando" — contado do SUBMIT do formulário, não da geração.
+ *
+ * Mora aqui (e não no worker de geração, onde nasceu) porque quem agenda passou a ser o
+ * `AnamnesisService.submit()`: a mensagem existe SEMPRE, 30min depois do formulário, tanto
+ * no caminho de sucesso quanto no de falha da geração. Uma só fonte do número.
+ */
+export const PROTOCOL_WAITING_DELAY_MS = 30 * 60 * 1000;
 
 /**
  * Confirmação imediata no submit (PAR-Q liberado), sem prometer prazo operacional.
@@ -28,10 +67,17 @@ export function confirmationMessage(): string {
   );
 }
 
-/** Variante de cuidado (PAR-Q de risco): sem prometer plano automático, sem alarme. */
+/**
+ * Variante de cuidado (PAR-Q de risco): sem prometer plano automático, sem alarme.
+ *
+ * "Agradecemos a confiança" no lugar de "obrigada pela confiança" (Sprint 11): a copy é
+ * determinística e sai assinada pela persona do titular, que pode ser masculina ou feminina.
+ * Particípio flexionável ("obrigada"/"obrigado") travaria o gênero da agente no texto; a
+ * forma verbal na primeira pessoa do plural não flexiona. Nada além dessa palavra mudou.
+ */
 export function confirmationCareMessage(): string {
   return (
-    'Recebemos suas respostas, obrigada pela confiança! 🙏 Por segurança, um profissional ' +
+    'Recebemos suas respostas, agradecemos a confiança! 🙏 Por segurança, um profissional ' +
     'de Educação Física registrado no CREF vai revisar algumas informações antes de liberar ' +
     'seu plano. Assim que estiver tudo certo, a gente te avisa por aqui.'
   );
@@ -61,11 +107,39 @@ export function phoneVerificationMessage(code: string): string {
   );
 }
 
-/** Mensagem de espera do fallback de DLQ (US-2.4 enfileira `protocol-waiting`). */
-export function waitingMessage(): string {
+/**
+ * "Estou analisando" — 30 min após o submit, sempre (sucesso ou falha da geração). É a
+ * primeira vez que a agente se apresenta ao titular: substitui a antiga `waitingMessage()`,
+ * que era genérica e só existia no caminho de falha (fallback de DLQ).
+ *
+ * Por ser o PRIMEIRO contato da agente (achado de QA 2026-08-25: a transparência de IA
+ * do cabeçalho deste arquivo dizia "1ª mensagem da entrega", mas essa deixou de ser a
+ * primeira desde que esta função passou a existir) — a frase "sou uma inteligência
+ * artificial" precisa estar AQUI, explícita, não só implícita em "montado com IA" como
+ * na entrega. Sem isso, uma persona com nome humano ("Leonardo, seu treinador") deixa o
+ * titular achar que uma pessoa está analisando as respostas dele.
+ *
+ * `mandatory: true` = PAR-Q bloqueado, protocolo só sai por assinatura humana: NÃO
+ * promete prazo. `mandatory: false` = auto-liberação, prazo curto é honesto.
+ */
+export function analyzingMessage(persona: AgentPersona, opts: { mandatory: boolean }): string {
+  const hello =
+    `Oi! ${presentPersona(persona)} Sou uma inteligência artificial que trabalha dentro da ` +
+    'metodologia de um profissional de Educação Física registrado no CREF.';
+
+  if (opts.mandatory) {
+    return (
+      `${hello}${emoji(persona, '🙏')} Já estou analisando as informações que você enviou no ` +
+      'formulário para montar seu plano de treino. Antes de liberar, esse profissional vai ' +
+      'olhar suas respostas com atenção — é assim que a gente trabalha quando quer ter ' +
+      'certeza de que o treino combina com você. Assim que ele der o retorno, te aviso por aqui.'
+    );
+  }
+
   return (
-    'Oi! Estamos finalizando os últimos ajustes do seu plano de treino. Assim que ficar ' +
-    'pronto, te aviso aqui no WhatsApp. 🙌'
+    `${hello}${emoji(persona, '💪')} Já estou analisando as informações que você enviou no ` +
+    'formulário para montar seu plano de treino personalizado. Logo te mando o plano completo ' +
+    'por aqui.'
   );
 }
 
@@ -85,19 +159,76 @@ function exerciseLine(ex: ProtocolStructure['sessions'][number]['exercises'][num
 }
 
 /**
- * Entrega do protocolo em bolhas: (1) transparência de IA + respaldo CREF; (2) primeiro
- * treino da semana em destaque (aha moment); (3) link para o plano completo (US-2.6).
+ * Contexto do plano — entra ANTES do primeiro treino e do CTA. Curto de propósito: dá o
+ * porquê, não repete o que o PDF/link já detalham.
+ */
+/**
+ * Achado de QA 2026-08-25: `mesocycleName` ("Mesociclo N — Hipertrofia") nomeia a ÊNFASE
+ * TÉCNICA do bloco de periodização — um eixo diferente do objetivo pessoal declarado no
+ * formulário (`goal`, ex. "Emagrecimento"). Juxtapor os dois na mesma frase lia como
+ * contradição ("o objetivo é X, mas o plano é Y"). Aqui o objetivo vem PRIMEIRO, como o
+ * que orienta o desenho do plano; o mesociclo vem depois, enquadrado como uma etapa/bloco
+ * de tempo, não como uma segunda resposta a "pra que serve isso".
+ */
+function explanationBlock(
+  goal: ProtocolStructure['goal'],
+  totalWeeks: number,
+  mesocycleName: string,
+): string {
+  return (
+    `Seu objetivo no formulário foi ${PRIMARY_GOAL_LABELS[goal]}, e é em torno disso que todo ` +
+    'o plano foi desenhado — a escolha dos exercícios, o número de séries e as faixas de ' +
+    `repetição. Ele começa pelo ${mesocycleName}, um bloco de ${totalWeeks} semanas: esse é o ` +
+    'tempo que o corpo precisa treinando no mesmo estímulo antes de fazer sentido evoluir pra ' +
+    'próxima etapa. Ao longo das semanas, repare em como você se sentiu em cada treino e se ' +
+    'conseguiu completar as séries com a técnica que queria: é sobre isso que vou te perguntar ' +
+    'no check-in semanal, e é a partir daí que o profissional CREF responsável ajusta o que for ' +
+    'preciso.'
+  );
+}
+
+function deliveryIntro(persona: AgentPersona): string {
+  return (
+    `Oi!${emoji(persona, '💪')} ${presentPersona(persona)} Sou uma inteligência artificial e ` +
+    'seu plano de treino está pronto — montado dentro da metodologia de um profissional de ' +
+    'Educação Física registrado no CREF.'
+  );
+}
+
+/**
+ * Entrega **com PDF** (o caso comum hoje: todo protocolo ativo tem PDF gerado, assinado ou
+ * auto-liberado): (1) transparência de IA + respaldo CREF; (2) contexto do plano (mesociclo,
+ * duração, objetivo, o que observar). Sem prévia de treino nem link — o PDF que vem logo
+ * depois, no mesmo envio, já É o plano completo; repetir o primeiro treino em texto e
+ * oferecer um segundo lugar pra "ver o plano completo" ao lado do anexo real seria
+ * redundante, não didático (achado 2026-08-25, a pedido do fundador: "pequeno texto
+ * explicativo", não o texto inteiro do caminho sem PDF).
+ */
+export function protocolDeliveryText(
+  content: ProtocolStructure,
+  persona: AgentPersona,
+  totalWeeks: number,
+  mesocycleName: string,
+): string {
+  return [deliveryIntro(persona), explanationBlock(content.goal, totalWeeks, mesocycleName)].join(
+    BUBBLE_SEPARATOR,
+  );
+}
+
+/**
+ * Entrega **sem PDF** (fallback raro — protocolo ativo cujo PDF falhou ao gerar): o texto É
+ * a entrega inteira, por isso carrega tudo que o PDF traria em outro caminho — (1)
+ * transparência de IA + respaldo CREF; (2) contexto do plano; (3) primeiro treino da semana
+ * em destaque (aha moment); (4) link para o plano completo (US-2.6).
  */
 export function formatProtocolDelivery(
   content: ProtocolStructure,
   link: string,
-  agentName: string,
+  persona: AgentPersona,
+  totalWeeks: number,
+  mesocycleName: string,
 ): string {
   const first = content.sessions[0];
-  const intro =
-    `Oi! Aqui é a ${agentName} 💪 Seu plano de treino está pronto — ele foi montado com inteligência ` +
-    'artificial dentro da metodologia de um profissional de Educação Física registrado no CREF.';
-
   const firstWorkout = first
     ? [
         `Seu primeiro treino desta semana — ${first.focus}:`,
@@ -107,5 +238,10 @@ export function formatProtocolDelivery(
 
   const cta = `Quer ver o plano completo das próximas semanas? É só abrir: ${link}`;
 
-  return [intro, firstWorkout, cta].join(BUBBLE_SEPARATOR);
+  return [
+    deliveryIntro(persona),
+    explanationBlock(content.goal, totalWeeks, mesocycleName),
+    firstWorkout,
+    cta,
+  ].join(BUBBLE_SEPARATOR);
 }

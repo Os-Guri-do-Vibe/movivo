@@ -1,4 +1,4 @@
-import { ExecutionContext, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ControlCenterCapability as Capability } from '@movivo/shared';
 import { describe, expect, it, vi } from 'vitest';
@@ -60,10 +60,42 @@ describe('AiConfigController', () => {
   it('encaminha o ator autenticado para a auditoria da publicação', async () => {
     const publish = vi.fn().mockResolvedValue({ data: {}, meta: {} });
     const controller = new AiConfigController({ publish } as unknown as AiConfigService);
-    await controller.publish(engineer, { payload: {}, changeNote: 'ajuste de tom' });
-    expect(publish).toHaveBeenCalledWith(engineer, {
+    await controller.publish(engineer, {
+      targetSex: 'MALE',
       payload: {},
       changeNote: 'ajuste de tom',
     });
+    expect(publish).toHaveBeenCalledWith(engineer, {
+      targetSex: 'MALE',
+      payload: {},
+      changeNote: 'ajuste de tom',
+    });
+  });
+
+  /**
+   * Sprint 11: `targetSex` é query param nos GETs (nunca path param — colidiria com a rota
+   * `persona/history` na resolução de rotas do Nest). Sem valor válido, a leitura falha em
+   * 400 em vez de servir silenciosamente o slot errado.
+   */
+  it('GETs exigem targetSex válido na query e repassam o slot ao serviço', async () => {
+    const persona = vi.fn().mockResolvedValue({ data: {}, meta: {} });
+    const history = vi.fn().mockResolvedValue({ data: {}, meta: {} });
+    const inviolableRules = vi.fn().mockResolvedValue({ data: {}, meta: {} });
+    const controller = new AiConfigController({
+      persona,
+      history,
+      inviolableRules,
+    } as unknown as AiConfigService);
+
+    await controller.persona('FEMALE');
+    await controller.history('FEMALE');
+    await controller.inviolableRules('MALE');
+    expect(persona).toHaveBeenCalledWith('FEMALE');
+    expect(history).toHaveBeenCalledWith('FEMALE');
+    expect(inviolableRules).toHaveBeenCalledWith('MALE');
+
+    for (const invalid of [undefined, '', 'OUTRO', 'male']) {
+      expect(() => controller.persona(invalid)).toThrow(BadRequestException);
+    }
   });
 });

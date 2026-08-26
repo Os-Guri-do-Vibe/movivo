@@ -25,6 +25,17 @@
  * mensagem que o número recebe. Por isso usa `sendTemplate()`, não `send()` — precisa de um
  * Template pré-aprovado pela Meta. Qualquer outro fluxo que possa mandar a primeira mensagem
  * pra um número (reengajamento após período de silêncio, por ex.) tem o mesmo problema.
+ *
+ * # Documento (`sendDocument`, US-2.6-PDF) — mesmo contrato confirmado do SDK
+ * `SendMessageRequest` tem `media_url` no MESMO objeto de `body`/`templateName` — não é
+ * endpoint separado (`dist/index.d.ts` do pacote publicado): `{ receiver, templateName?,
+ * templateVariables?, variables?, body?, media_url?, scheduled_at? }`. Documento funciona
+ * como mensagem de sessão comum (dentro da janela de 24h, igual `send()`) OU combinado com
+ * `templateName` (fora da janela — exige Template aprovado pela Meta com
+ * `headerType: 'document'`), mesmo `POST /v1/messages`.
+ * **Não confirmado em produção**: se `media_url` sozinho (sem `templateName`) é aceito fora
+ * da janela — a suposição aqui é que segue a mesma regra de `send()` (texto), por isso o
+ * fallback pra Template quando `CONVERSATION_WINDOW_CLOSED`.
  */
 import { PinoLogger } from 'nestjs-pino';
 
@@ -33,6 +44,35 @@ import type { OutboundMessage, WhatsappTransport } from './whatsapp-transport';
 /** `SendMessageRequest.receiver` exige o prefixo `whatsapp:` (contrato real, US-2.5). */
 function toReceiver(to: string): string {
   return to.startsWith('whatsapp:') ? to : `whatsapp:${to}`;
+}
+
+/** Extrai `error.code` do corpo `{ error: { code, message } }` — `undefined` se não parsear. */
+function parseAraraErrorCode(rawBody: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(rawBody);
+    if (parsed && typeof parsed === 'object' && 'error' in parsed) {
+      const errorField = (parsed as { error?: unknown }).error;
+      if (errorField && typeof errorField === 'object' && 'code' in errorField) {
+        const code = (errorField as { code?: unknown }).code;
+        if (typeof code === 'string') return code;
+      }
+    }
+  } catch {
+    // corpo não é JSON — sem code pra extrair.
+  }
+  return undefined;
+}
+
+/** Erro tipado da AraraHQ com o `code` da resposta (`{ error: { code, message } }`). */
+class AraraApiError extends Error {
+  constructor(
+    message: string,
+    readonly code: string | undefined,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'AraraApiError';
+  }
 }
 
 export class AraraHttpTransport implements WhatsappTransport {
@@ -83,6 +123,38 @@ export class AraraHttpTransport implements WhatsappTransport {
     });
   }
 
+  // `fileName` (WhatsappTransport) não entra na assinatura: `SendMessageRequest` não tem
+  // esse campo no contrato confirmado do SDK (ver nota de topo do arquivo) — a AraraHQ
+  // decide o nome do anexo sozinha a partir de `media_url`. TS aceita a implementação com
+  // menos parâmetros que a interface (parâmetro extra e opcional do lado do chamador).
+  async sendDocument(
+    to: string,
+    documentUrl: string,
+    caption: string,
+    fallbackTemplateName?: string,
+  ): Promise<void> {
+    if (!this.apiKey) {
+      this.logger.info('envio de WhatsApp simulado (sem credencial AraraHQ)');
+      return;
+    }
+    try {
+      await this.postMessage({ receiver: toReceiver(to), media_url: documentUrl, body: caption });
+    } catch (error) {
+      const windowClosed =
+        error instanceof AraraApiError && error.code === 'CONVERSATION_WINDOW_CLOSED';
+      if (!windowClosed || !fallbackTemplateName) throw error;
+      this.logger.info(
+        { fallbackTemplateName },
+        'janela de 24h fechada — reenviando documento via Template aprovado',
+      );
+      await this.postMessage({
+        receiver: toReceiver(to),
+        templateName: fallbackTemplateName,
+        media_url: documentUrl,
+      });
+    }
+  }
+
   private async postMessage(body: Record<string, unknown>): Promise<void> {
     // Um 4xx/5xx lança e o BullMQ retenta.
     const res = await fetch(`${this.baseUrl}/v1/messages`, {
@@ -94,8 +166,11 @@ export class AraraHttpTransport implements WhatsappTransport {
       // Corpo do erro da AraraHQ ({ error: { code, message } }) ajuda a diagnosticar 4xx
       // (ex.: fora da janela de 24h, template obrigatório) — nunca ficou só no status antes.
       const detail = await res.text().catch(() => '');
-      throw new Error(
+      const code = parseAraraErrorCode(detail);
+      throw new AraraApiError(
         `AraraHQ respondeu ${res.status} ao enviar mensagem${detail ? `: ${detail.slice(0, 500)}` : ''}`,
+        code,
+        res.status,
       );
     }
   }
