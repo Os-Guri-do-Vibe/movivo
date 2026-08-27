@@ -174,15 +174,24 @@ export const envSchema = z
 
     // -------------------------------------------------------- LLM (US-2.2)
     /**
-     * Chaves de API dos provedores (ADR-005-R). **Opcionais** (diferente de JWT/pgcrypto):
+     * Chaves de API dos provedores (ADR-005-R2). **Opcionais** (diferente de JWT/pgcrypto):
      * sem elas o app boota, o `LLMRouter` loga um aviso, e só uma chamada REAL sem chave
      * lança erro claro. Assim CI e o `int-spec` que cria o AppModule ficam verdes sem chave.
      */
+    DEEPSEEK_API_KEY: z.string().min(1).optional(),
     OPENAI_API_KEY: z.string().min(1).optional(),
     ANTHROPIC_API_KEY: z.string().min(1).optional(),
-    /** LLM principal → fallback (ADR-005-R). DeepSeek é proibido em qualquer caminho. */
-    LLM_PRIMARY_MODEL: z.string().min(1).default('gpt-4.1'),
-    LLM_FALLBACK_MODEL: z.string().min(1).default('claude-sonnet-4-5'),
+    /** Cascata de qualidade: DeepSeek competitivo → provedores independentes de fallback. */
+    LLM_PRIMARY_MODEL: z.string().min(1).default('deepseek-v4-pro'),
+    LLM_FALLBACK_MODEL: z.string().min(1).default('gpt-4.1'),
+    LLM_SECONDARY_FALLBACK_MODEL: z.string().min(1).default('claude-sonnet-4-5'),
+    /**
+     * Atestado operacional, neutro por fornecedor. `true` significa que Jurídico/Segurança
+     * verificaram DPA, transferência internacional, retenção/no-training e suboperadores.
+     */
+    LLM_DEEPSEEK_HEALTH_DATA_APPROVED: envBoolean.default(false),
+    LLM_OPENAI_HEALTH_DATA_APPROVED: envBoolean.default(false),
+    LLM_ANTHROPIC_HEALTH_DATA_APPROVED: envBoolean.default(false),
     /** Teto de tokens por chamada (o router faz clamp do `maxTokens` do request). */
     LLM_MAX_TOKENS: z.coerce.number().int().min(1).max(32_000).default(4096),
     /** Timeout hard por tentativa de provedor (Victor §1.2). Vale para chat/check-in
@@ -276,6 +285,7 @@ export const envSchema = z
     RAG_CANDIDATES: z.coerce.number().int().min(1).max(100).default(20),
 
     // -------------------------- Base de conhecimento (formatos complexos fail-closed)
+    KNOWLEDGE_OPENAI_EMBEDDING_HEALTH_DATA_APPROVED: envBoolean.default(false),
     KNOWLEDGE_COMPLEX_FORMATS_ENABLED: envBoolean.default(false),
     KNOWLEDGE_ALLOWED_MIME_TYPES: csv('KNOWLEDGE_ALLOWED_MIME_TYPES').default([
       'text/plain',

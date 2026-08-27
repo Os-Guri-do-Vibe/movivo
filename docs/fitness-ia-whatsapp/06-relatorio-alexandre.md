@@ -1,5 +1,9 @@
 # Relatório — Dr. Alexandre (CLO / Head Jurídico Corporativo)
 
+> **Nota de vigência (2026-08-27):** conclusões categóricas deste relatório sobre um provedor
+> específico foram substituídas pela **ADR-005-R2**. A diligência LGPD permanece obrigatória e
+> simétrica para DeepSeek, OpenAI e Anthropic; a aprovação é por conta/endpoint e não por marca.
+
 **Data:** 2026-08-07 (versão consolidada — substitui a versão de 2026-07-22)
 **Ideia analisada:** MOVIVO — AI Coach de treino individualizado via WhatsApp, com supervisão de profissional de Educação Física (CREF). Modelo B2C, assinatura por período (Mensal R$39 / Trimestral R$99 / Anual R$349), trial de 7 dias sem cartão.
 **Pasta do projeto:** `docs/fitness-ia-whatsapp/`

@@ -2,12 +2,12 @@
  * `AiCoachModule` — camada de IA compartilhada (US-2.2).
  *
  * Preenche a fundação LGPD-safe de acesso ao LLM que a geração de treino (US-2.1) e o
- * Coach (Sprint 3) vão consumir: `LLMRouter` (cascata GPT-4.1→Claude, breaker, teto de
+ * Coach (Sprint 3) vão consumir: `LLMRouter` (cascata DeepSeek→GPT-4.1→Claude, breaker, teto de
  * tokens, logging), `PIIScrubber` (porta do router), `LlmAbuseGuard` (LLM10) e a
  * persistência de `ai_jobs` sob RLS.
  *
- * Regras que valem aqui (ADR-005-R / §12.11-12.12):
- *  - LLM principal **GPT-4.1**, fallback **Claude Sonnet 4.5**, ambos ZDR. **DeepSeek proibido**.
+ * Regras que valem aqui (ADR-005-R2 / §12.11-12.12):
+ *  - DeepSeek V4 Pro é candidato principal; nenhum provedor recebe HEALTH sem aprovação explícita.
  *  - O `LLMRouter` é o único ponto autorizado a falar com um provedor; o SDK/HTTP de
  *    provedor fica confinado a `llm/providers.ts` (teste estrutural garante).
  *  - Isolamento por titular: `ai_jobs` sob FORCE RLS; counter Redis namespaced por `user_id`.
@@ -26,15 +26,18 @@ import { IntentClassifier } from './intent/intent-classifier.service';
 import { PromptResolverService } from './intent/prompt-resolver.service';
 import { IntentRepository } from './intent/intent.repository';
 import { RagService } from './rag/rag.service';
-import { DenseScoreReranker, RERANKER_PORT } from './rag/reranker.port';
+import { HybridReranker, RERANKER_PORT } from './rag/reranker.port';
+import { EvidenceGroundingService } from './rag/evidence-grounding.service';
 import { AiJobRepository } from './llm/ai-job.repository';
 import { LlmAbuseGuard } from './llm/llm-abuse-guard.service';
 import { LlmRouter } from './llm/llm-router.service';
 import {
   AnthropicProvider,
+  DeepSeekProvider,
   LLM_FALLBACK_PROVIDER,
   LLM_PRIMARY_PROVIDER,
   LLM_PROVIDER_CASCADE,
+  LLM_SECONDARY_FALLBACK_PROVIDER,
   OpenAiProvider,
 } from './llm/providers';
 import type { LLMProvider } from './llm/llm.types';
@@ -45,25 +48,42 @@ import type { LLMProvider } from './llm/llm.types';
       provide: LLM_PRIMARY_PROVIDER,
       inject: [AppConfigService],
       useFactory: (config: AppConfigService): LLMProvider =>
-        new OpenAiProvider('OPENAI_GPT41', config.llm.primaryModel, config.llm.openaiApiKey),
+        new DeepSeekProvider(
+          config.llm.primaryModel,
+          config.llm.deepseekApiKey,
+          config.llm.deepseekHealthDataApproved,
+        ),
     },
     {
       provide: LLM_FALLBACK_PROVIDER,
       inject: [AppConfigService],
       useFactory: (config: AppConfigService): LLMProvider =>
+        new OpenAiProvider(
+          'OPENAI_GPT41',
+          config.llm.fallbackModel,
+          config.llm.openaiApiKey,
+          config.llm.openaiHealthDataApproved,
+        ),
+    },
+    {
+      provide: LLM_SECONDARY_FALLBACK_PROVIDER,
+      inject: [AppConfigService],
+      useFactory: (config: AppConfigService): LLMProvider =>
         new AnthropicProvider(
           'ANTHROPIC_SONNET45',
-          config.llm.fallbackModel,
+          config.llm.secondaryFallbackModel,
           config.llm.anthropicApiKey,
+          config.llm.anthropicHealthDataApproved,
         ),
     },
     {
       provide: LLM_PROVIDER_CASCADE,
-      inject: [LLM_PRIMARY_PROVIDER, LLM_FALLBACK_PROVIDER],
-      useFactory: (primary: LLMProvider, fallback: LLMProvider): LLMProvider[] => [
-        primary,
-        fallback,
-      ],
+      inject: [LLM_PRIMARY_PROVIDER, LLM_FALLBACK_PROVIDER, LLM_SECONDARY_FALLBACK_PROVIDER],
+      useFactory: (
+        primary: LLMProvider,
+        fallback: LLMProvider,
+        secondaryFallback: LLMProvider,
+      ): LLMProvider[] => [primary, fallback, secondaryFallback],
     },
     AiJobRepository,
     LlmAbuseGuard,
@@ -73,10 +93,11 @@ import type { LLMProvider } from './llm/llm.types';
     ContextRepository,
     // O runtime preserva o score semântico real do pgvector; o fake lexical só é instanciado
     // diretamente por testes. O cross-encoder self-hosted pode substituir esta porta depois.
-    { provide: RERANKER_PORT, useClass: DenseScoreReranker },
+    { provide: RERANKER_PORT, useClass: HybridReranker },
     // US-3.3 substitui o no-op da US-3.2: a camada semantic agora é o RAG real (PGVector).
     { provide: SEMANTIC_MEMORY, useClass: RagService },
     ContextService,
+    EvidenceGroundingService,
     // US-3.4 — classificação de intenção (guardrail clínico + kNN + fallback nano).
     IntentRepository,
     IntentClassifier,
@@ -93,6 +114,7 @@ import type { LLMProvider } from './llm/llm.types';
     LlmAbuseGuard,
     PromptResolverService,
     SEMANTIC_MEMORY,
+    EvidenceGroundingService,
   ],
 })
 export class AiCoachModule {}

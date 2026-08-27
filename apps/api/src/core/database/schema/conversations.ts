@@ -60,7 +60,7 @@ export const conversations = pgTable(
      */
     aiJobId: uuid('ai_job_id'),
 
-    /** Modelo usado. Nunca `deepseek-*` (ADR-005-R / §12.11). */
+    /** Modelo usado, após o gate neutro da ADR-005-R2. */
     modelUsed: varchar('model_used', { length: 50 }),
 
     /** Latência de geração; alimenta o SLO de p95 ≤ 30s do AI Coach (§8). */
@@ -83,6 +83,9 @@ export const conversations = pgTable(
         documentVersion?: number;
         documentSha256?: string;
         publicationEventId?: string;
+        evidenceId?: string;
+        claimIds?: string[];
+        verifierModel?: string;
       }>
     >(),
 

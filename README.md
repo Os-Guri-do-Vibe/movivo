@@ -595,7 +595,7 @@ leia o documento completo antes de escrever código:
 4. **Redis nunca sobe sem o patch da CVE-2025-49844 (RediShell).**
 5. **A IA nunca decide o protocolo** — sempre o Motor Determinístico (100% de cobertura de teste).
 6. **`LLMRouter` é o único ponto autorizado a chamar um LLM**, e todo prompt passa pelo PII Scrubber.
-7. **Nunca usar DeepSeek** em nenhum fluxo (ADR-005-R). LLM principal: GPT-4.1; fallback: Claude Sonnet 4.5.
+7. **Nunca enviar `HEALTH` a provedor não aprovado** (ADR-005-R2). Cascata candidata: DeepSeek V4 Pro → GPT-4.1 → Claude Sonnet 4.5, com gate explícito por endpoint.
 8. **Stateless** — nenhum estado em memória local do container.
 9. **Toda API é versionada** (`api/v1`), com dual-support de 90 dias em breaking changes.
 10. **Guardrails de linguagem:** nunca escrever "diagnóstico", "tratamento", "cura" ou

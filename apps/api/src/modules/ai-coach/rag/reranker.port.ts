@@ -13,6 +13,10 @@ export interface RerankCandidate {
   sourceUrl: string | null;
   /** Score do retrieval denso (cosseno), já calculado. */
   denseScore: number;
+  /** Score da fusão RRF denso+lexical, normalizado. */
+  fusionScore?: number;
+  reliability?: number;
+  category?: string;
 }
 
 export interface RerankResult extends RerankCandidate {
@@ -47,12 +51,76 @@ export class DenseScoreReranker implements RerankerPort {
 }
 
 function terms(text: string): Set<string> {
+  const stopwords = new Set([
+    'a',
+    'as',
+    'o',
+    'os',
+    'de',
+    'da',
+    'das',
+    'do',
+    'dos',
+    'e',
+    'em',
+    'no',
+    'na',
+    'nos',
+    'nas',
+    'para',
+    'por',
+    'com',
+    'um',
+    'uma',
+    'que',
+    'qual',
+    'quanto',
+    'como',
+    'meu',
+    'minha',
+  ]);
   return new Set(
     text
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/gu, '')
       .toLowerCase()
-      .split(/[^a-z0-9à-ÿ]+/)
-      .filter((t) => t.length > 1),
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length > 1 && !stopwords.has(t)),
   );
+}
+
+const AUTHORITY_WEIGHT: Readonly<Record<string, number>> = {
+  SAFETY: 1,
+  METHODOLOGY: 0.95,
+  SCIENTIFIC_EVIDENCE: 0.85,
+  EXERCISE_LIBRARY: 0.75,
+  OTHER: 0.55,
+};
+
+/**
+ * Reranker local de produção: preserva semântica, mas não descarta os sinais lexical,
+ * governança e fusão. É determinístico e pode ser substituído pelo cross-encoder na mesma porta.
+ */
+@Injectable()
+export class HybridReranker implements RerankerPort {
+  rerank(query: string, candidates: RerankCandidate[], topK: number): Promise<RerankResult[]> {
+    const queryTerms = terms(query);
+    const scored = candidates.map((candidate) => {
+      const bodyTerms = terms(`${candidate.title} ${candidate.chunkText}`);
+      const overlap = [...queryTerms].filter((term) => bodyTerms.has(term)).length;
+      const coverage = overlap / Math.max(1, queryTerms.size);
+      const authority = AUTHORITY_WEIGHT[candidate.category ?? 'OTHER'] ?? 0.5;
+      const reliability = Math.max(0, Math.min(1, (candidate.reliability ?? 3) / 5));
+      const score =
+        Math.max(0, Math.min(1, candidate.denseScore)) * 0.35 +
+        Math.max(0, Math.min(1, candidate.fusionScore ?? candidate.denseScore)) * 0.25 +
+        coverage * 0.25 +
+        authority * reliability * 0.15;
+      return { ...candidate, score: Math.max(0, Math.min(1, score)) };
+    });
+    scored.sort((a, b) => b.score - a.score || a.chunkId.localeCompare(b.chunkId));
+    return Promise.resolve(scored.slice(0, topK));
+  }
 }
 
 /**

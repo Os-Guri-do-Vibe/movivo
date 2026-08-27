@@ -54,6 +54,7 @@ describe('ContextService.build', () => {
   it('monta prefixo (estado) + sufixo (janela + mensagem atual)', async () => {
     const { svc } = make({ recent: [{ role: 'assistant', content: 'Bora treinar!', ts: 1 }] });
     const ctx = await svc.build('u1', 'MOTIVACAO', 'to sem vontade', 'MOVI');
+    expect(ctx.authoritativeState).toContain('HIPERTROFIA');
     expect(ctx.cacheablePrefix).toContain('ESTADO ATUAL DO ALUNO');
     expect(ctx.cacheablePrefix).toContain('HIPERTROFIA');
     expect(ctx.volatileSuffix).toContain('MOVI: Bora treinar!');
@@ -113,6 +114,7 @@ describe('ContextService.build', () => {
     const { svc } = make({ episodic: { summary: 'Aluno relatou dor no ombro semana passada.' } });
     const ctx = await svc.build('u1', 'MOTIVACAO', 'oi', 'MOVI');
     expect(ctx.cacheablePrefix).toContain('RESUMO DA CONVERSA');
+    expect(ctx.authoritativeState).not.toContain('dor no ombro');
   });
 
   it('não duplica a mensagem atual que o worker já gravou na janela', async () => {

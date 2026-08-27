@@ -34,7 +34,7 @@ Hierarquia: **Épico → User Stories (US-2.x) → Tasks (TASK-2.x.y)**.
 
 1. **A IA planeja o treino sob trilhos; o inseguro é vetado por código determinístico** — a IA monta o protocolo completo (exercícios, carga, volume, periodização) **respeitando a metodologia do RT CREF e a base de referência**, e o **`ValidationService` determinístico tem poder de veto sobre o treino inteiro** (não só o texto): rejeita carga fora de faixa, exercício contraindicado por lesão/PAR-Q, exercício inexistente na base ou termo proibido → fallback de modelo → template pré-aprovado. Nenhuma saída não-validada é persistida ou enviada. A supervisão CREF é preservada: **o RT assina a metodologia, o painel aprova o protocolo** (§12.4/§12.5, Sato §10.1, Victor).
 2. **O `ValidationService` exige 100% de cobertura de teste** antes de merge (migrado do antigo gate do Motor, §12.8) — vira **gate bloqueante** nesta sprint, pois é onde a segurança do produto passa a morar. TypeScript puro/determinístico, sem chamada externa, versionado semver. A qualidade da geração por IA é coberta pelo **AI eval** (US-2.7), não por cobertura de linha.
-3. **GPT-4.1 (OpenAI) principal → Claude Sonnet 4.5 (Anthropic) fallback**, ambos com **Zero Data Retention + DPA/SCC + no-training** (ADR-005-R). **DeepSeek é proibido** em qualquer caminho. SDK de OpenAI/Anthropic **só** dentro do `LLMRouter` — nenhum outro módulo importa SDK de provedor.
+3. **DeepSeek V4 Pro → GPT-4.1 → Claude Sonnet 4.5**, todos sujeitos ao mesmo gate executável de DPA, transferência, retenção/no-training e segurança (ADR-005-R2). HTTP de provedor fica confinado ao `LLMRouter`.
 4. **PII Scrubber inescapável antes de toda chamada LLM** (Sato §5.2, Victor §5.1): nenhum identificador direto (nome, telefone, e-mail, CPF, nascimento, terceiros) vai ao LLM; o snapshot logado (`ai_jobs.input_snapshot`) é sempre pseudonimizado. Roteamento por **classe de dado** com fail-safe `default = HEALTH`.
 5. **ValidationService pós-geração bloqueante sobre o treino inteiro** (Victor §5.2, Rafael §3.4): valida o protocolo gerado pela IA em duas camadas — **estrutura** (carga/volume em faixa plausível, exercício existente na base, sem exercício contraindicado por lesão/PAR-Q) e **linguagem** (sem diagnóstico/prescrição/promessa, consistência com PAR-Q, anti-leak de system prompt/dado de outro usuário). Falha → fallback de modelo → template pré-aprovado + `human_review_required=true`; nunca persiste/envia saída não-validada.
 6. **Guardrails de linguagem** em toda copy, prompt e texto gerado: nunca "diagnóstico", "tratamento", "cura", "resultado garantido"; a IA/o produto nunca decide sozinho — sempre "profissional CREF, usando IA como ferramenta"; presença do CREF sempre visível (Sofia §13, Gabriel/Clóvis).
@@ -167,7 +167,7 @@ Implementar `scrubPII(text, user)` (Victor §5.1): remove/substitui nome (a part
 **Conclusão:** scrubber remove todos os identificadores das fontes listadas; teste com payloads de PII prova pseudonimização; `input_snapshot` nunca tem PII em claro; Sato valida a lista de fontes.
 
 **TASK-2.2.2 — LLMRouter com cascata, circuit breaker e teto de tokens (Victor).**
-Implementar o `LLMRouter` (Victor §1.1-1.2): interface `LLMRequest`/`LLMResult`; cascata **GPT-4.1→Claude Sonnet 4.5** (ambos ZDR, chaves via `*_FILE`); circuit breaker por provedor (CLOSED→OPEN→HALF_OPEN, 5 falhas/30s → OPEN 30s); **failover <2s** em 5xx/429/timeout de first-token >2s; `max_tokens` teto por `purpose` (500 no Coach/texto); timeout hard de 8s no primário; retry único só para erro transitório de rede. `dataClass` com fail-safe `default = HEALTH`; **DeepSeek ausente do código**. SDK de provedor **confinado** a este arquivo.
+Implementar o `LLMRouter`: interface `LLMRequest`/`LLMResult`; cascata **DeepSeek V4 Pro→GPT-4.1→Claude Sonnet 4.5**; gate neutro por `dataClass`; circuit breaker por provedor; teto por `purpose`; timeout; retry único de rede. `dataClass` tem fail-safe `HEALTH`; HTTP de provedor fica confinado a este arquivo.
 **Conclusão:** cascata e failover <2s testados (mock de 5xx/429/timeout); teto de tokens aplicado; `default=HEALTH` quando `dataClass` omitido; teste estrutural prova que nenhum outro módulo importa SDK OpenAI/Anthropic.
 
 **TASK-2.2.3 — Prompt caching e logging em `ai_jobs` (Victor + Leonardo).**
@@ -181,7 +181,7 @@ Implementar o teto anti-abuso de Sato §9.4: **counter Redis por usuário/dia** 
 ### Definição de Pronto (US-2.2 "validada")
 
 - [ ] Tasks 2.2.1–2.2.4 concluídas.
-- [ ] PII Scrubber inescapável; cascata GPT-4.1→Claude ZDR com failover <2s e teto de tokens; logging completo e pseudonimizado em `ai_jobs`; anti-abuso ativo; SDK de provedor confinado ao router; DeepSeek ausente.
+- [ ] PII Scrubber inescapável; cascata DeepSeek V4 Pro→GPT-4.1→Claude com gate de `HEALTH`, failover, teto de tokens, logging pseudonimizado, anti-abuso e HTTP confinado ao router.
 - [ ] **Validada por:** code review + **revisão de segurança de IA de Sato** (boundary, ZDR, §5/§9.4/§10) + testes de failover/scrubber/isolamento verdes (US-2.7).
 
 ---
@@ -431,7 +431,7 @@ Medir o **custo de IA por usuário** (`sum(cost_brl)` de `ai_jobs`) e confirmar 
 A Sprint 2 é **entregue** quando as 7 User Stories estiverem "validadas" conforme seus DoDs, o que na prática significa:
 
 1. A **geração por IA guiada** produz protocolos individualizados a partir da anamnese, **sob a metodologia do RT CREF e restrita à base de referência**, com origem (modelo/prompt) registrada; a fidelidade à base/metodologia é comprovada por AI eval.
-2. O **LLMRouter** opera com GPT-4.1→Claude Sonnet 4.5 (ZDR), failover <2s, teto de tokens e caching; o **PII Scrubber** é inescapável; `ai_jobs` loga tudo pseudonimizado; DeepSeek está ausente.
+2. O **LLMRouter** opera com DeepSeek V4 Pro→GPT-4.1→Claude Sonnet 4.5, gate neutro para `HEALTH`, failover, teto de tokens e caching; o **PII Scrubber** é inescapável; `ai_jobs` loga tudo pseudonimizado.
 3. O **ValidationService** — pedra angular de segurança, **100% de cobertura bloqueante** — veta o **treino inteiro** (exercício inexistente/contraindicado, carga fora de faixa, diagnóstico/prescrição/promessa/violação-PAR-Q/leak) com fallback modelo→template; o scrubber de prompt injection está implementado (não mais baseline).
 4. O **ProtocolGenerationWorker** roda submit→geração-IA→validação→roteamento/auto-aprovação→persistência assinada (metodologia RT CREF)→entrega, sob RLS, idempotente, com DLQ; todo protocolo nasce com `approval_status` (sem risco → `AUTO_APPROVED`); **sessão com PAR-Q de risco não gera protocolo**; edição manual pelo profissional fica para a Sprint 5.
 5. O usuário recebe **confirmação imediata + protocolo formatado** no WhatsApp (persona MOVI, primeiro treino destacado), dentro do **SLA ≤2h para 95%**.

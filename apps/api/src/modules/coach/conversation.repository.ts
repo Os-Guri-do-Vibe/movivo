@@ -31,6 +31,9 @@ export interface PersistTurnInput {
     documentVersion?: number;
     documentSha256?: string;
     publicationEventId?: string;
+    evidenceId?: string;
+    claimIds?: string[];
+    verifierModel?: string;
   }>;
 }
 

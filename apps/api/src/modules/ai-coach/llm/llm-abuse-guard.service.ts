@@ -9,6 +9,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
+import { createHash } from 'node:crypto';
 
 import { AppConfigService } from '../../../core/config';
 import { REDIS_CLIENT } from '../../../core/redis/redis.constants';
@@ -49,12 +50,27 @@ export class LlmAbuseGuard {
     return Number(count ?? 0) >= this.config.llm.userDailyMessageLimit;
   }
 
-  /** Incrementa o counter do dia e barra acima do teto. Chamar antes de cada chamada real. */
-  async check(userId: string): Promise<void> {
-    const key = this.keys.forUser(userId, 'llm-usage', this.day());
-    const count = await this.redis.incr(key);
-    if (count === 1) await this.redis.expire(key, TWO_DAYS_SECONDS);
+  /**
+   * Incrementa o counter por operação do usuário. Chamadas internas de grounding compartilham
+   * `operationId`, então avaliar suficiência, gerar e verificar continua valendo uma mensagem.
+   */
+  async check(userId: string, operationId?: string): Promise<void> {
+    const usageKey = this.keys.forUser(userId, 'llm-usage', this.day());
     const limit = this.config.llm.userDailyMessageLimit;
+    if (operationId) {
+      const operationHash = createHash('sha256').update(operationId).digest('hex').slice(0, 24);
+      const marker = this.keys.forUser(userId, 'llm-operation', this.day(), operationHash);
+      const firstCall = await this.redis.set(marker, '1', 'EX', TWO_DAYS_SECONDS, 'NX');
+      if (firstCall === null) {
+        const existingCount = Number((await this.redis.get(usageKey)) ?? 0);
+        if (existingCount > limit) {
+          throw new LLMAbuseError(`teto diário de LLM excedido (${existingCount}/${limit})`);
+        }
+        return;
+      }
+    }
+    const count = await this.redis.incr(usageKey);
+    if (count === 1) await this.redis.expire(usageKey, TWO_DAYS_SECONDS);
     if (count > limit) {
       throw new LLMAbuseError(`teto diário de LLM excedido (${count}/${limit})`);
     }

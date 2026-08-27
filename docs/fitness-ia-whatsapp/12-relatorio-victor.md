@@ -1,5 +1,10 @@
 # Relatório — Victor Tanaka (Distinguished AI Engineer / Principal ML Engineer)
 
+> **Nota de vigência (2026-08-27):** a seleção de provedor deste relatório é histórica e foi
+> substituída pela **ADR-005-R2**. Vale agora o gate neutro e executável por endpoint, com
+> DeepSeek V4 Pro como candidato principal e GPT-4.1/Claude como fallbacks. A arquitetura de
+> segurança, memória e RAG continua como insumo; divergências são resolvidas pela ADR mais nova.
+
 **Data:** 2026-07-22
 **Ideia analisada:** MOVIVO — AI Coach de treino individualizado via WhatsApp, com supervisão de profissional de Educação Física (CREF)
 **Pasta do projeto:** docs/fitness-ia-whatsapp/

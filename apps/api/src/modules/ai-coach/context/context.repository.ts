@@ -6,10 +6,16 @@
  * integração contra Postgres real — por isso fica fora da cobertura unitária (vitest.config).
  */
 import { Injectable } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq, isNotNull } from 'drizzle-orm';
 import type { ProtocolStructure } from '@movivo/shared';
 
-import { coachingSessions, protocols, users } from '../../../core/database/schema';
+import {
+  checkins,
+  coachingSessions,
+  protocols,
+  users,
+  workoutCompletions,
+} from '../../../core/database/schema';
 import { TenantDatabase } from '../../../core/database/tenant-database.service';
 import type { ScrubUser } from '../llm/llm.types';
 
@@ -52,6 +58,31 @@ export class ContextRepository {
         )
         .limit(1);
 
+      // Memória factual mínima: eventos imutáveis e campos estruturados. O ciphertext das
+      // respostas do check-in não é aberto aqui; princípio de minimização de dado sensível.
+      const recentWorkouts = await tx
+        .select({
+          completedAt: workoutCompletions.completedAt,
+          sessionKey: workoutCompletions.sessionKey,
+          weekNumber: workoutCompletions.weekNumber,
+          perceivedEffort: workoutCompletions.perceivedEffort,
+        })
+        .from(workoutCompletions)
+        .where(eq(workoutCompletions.userId, userId))
+        .orderBy(desc(workoutCompletions.completedAt))
+        .limit(5);
+
+      const recentCheckins = await tx
+        .select({
+          weekNumber: checkins.weekNumber,
+          completedAt: checkins.completedAt,
+          adjustments: checkins.adjustments,
+        })
+        .from(checkins)
+        .where(and(eq(checkins.userId, userId), isNotNull(checkins.completedAt)))
+        .orderBy(desc(checkins.completedAt))
+        .limit(3);
+
       // `constraints` lido como shape solto de propósito: ai-coach não importa o tipo do
       // domínio de protocolo (fronteira §12.5).
       const c = (proto?.constraints ?? {}) as { injuryTags?: string[]; equipment?: string[] };
@@ -66,8 +97,18 @@ export class ContextRepository {
             totalSemanas: proto.totalWeeks,
             restricoes: c.injuryTags ?? [],
             equipamentos: c.equipment ?? [],
+            eventosRecentes: {
+              treinosConcluidos: recentWorkouts,
+              checkins: recentCheckins,
+            },
           }
-        : { temProtocoloAtivo: false };
+        : {
+            temProtocoloAtivo: false,
+            eventosRecentes: {
+              treinosConcluidos: recentWorkouts,
+              checkins: recentCheckins,
+            },
+          };
 
       return {
         scrubUser: {

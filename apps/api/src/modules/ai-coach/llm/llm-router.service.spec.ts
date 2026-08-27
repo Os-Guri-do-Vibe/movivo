@@ -33,11 +33,15 @@ class FakeProvider implements LLMProvider {
     readonly model: string,
     impl: (req: ProviderCompleteRequest, signal: AbortSignal) => Promise<ProviderResult>,
     private readonly creds = true,
+    private readonly healthApproved = true,
   ) {
     this.complete = vi.fn(impl);
   }
   hasCredentials(): boolean {
     return this.creds;
+  }
+  canProcess(dataClass: 'HEALTH' | 'NON_HEALTH'): boolean {
+    return dataClass === 'NON_HEALTH' || this.healthApproved;
   }
 }
 
@@ -90,7 +94,7 @@ describe('LlmRouter.complete', () => {
     expect(result.dataClass).toBe('HEALTH');
     expect(result.costBrl).toBeGreaterThan(0);
     expect(fallback.complete).not.toHaveBeenCalled();
-    expect(abuse.check).toHaveBeenCalledWith(USER_ID);
+    expect(abuse.check).toHaveBeenCalledWith(USER_ID, undefined);
     expect(abuse.recordCost).toHaveBeenCalled();
     expect(aiJobs.record).toHaveBeenCalledWith(
       USER_ID,
@@ -244,6 +248,24 @@ describe('LlmRouter.complete', () => {
     expect((await router.complete(request({ dataClass: 'NON_HEALTH' }))).dataClass).toBe(
       'NON_HEALTH',
     );
+  });
+
+  it('não chama provedor sem aprovação HEALTH e segue para o próximo aprovado', async () => {
+    const blocked = new FakeProvider(
+      'DEEPSEEK_V4_PRO',
+      'deepseek-v4-pro',
+      ok('deepseek-v4-pro'),
+      true,
+      false,
+    );
+    const approved = new FakeProvider('OPENAI_GPT41', 'gpt-4.1', ok('gpt-4.1'));
+    const { router } = make([blocked, approved]);
+
+    const result = await router.complete(request());
+
+    expect(blocked.complete).not.toHaveBeenCalled();
+    expect(result.provider).toBe('OPENAI_GPT41');
+    expect(result.attempt).toBe(2);
   });
 
   it('aplica o teto de tokens (clamp no config) no request do provedor', async () => {

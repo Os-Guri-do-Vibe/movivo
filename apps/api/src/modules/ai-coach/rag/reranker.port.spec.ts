@@ -3,7 +3,12 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { DenseScoreReranker, FakeReranker, type RerankCandidate } from './reranker.port';
+import {
+  DenseScoreReranker,
+  FakeReranker,
+  HybridReranker,
+  type RerankCandidate,
+} from './reranker.port';
 
 const reranker = new FakeReranker();
 
@@ -54,5 +59,44 @@ describe('DenseScoreReranker', () => {
     await expect(dense.rerank('match lexical exato', [weak, strong], 1)).resolves.toEqual([
       expect.objectContaining({ chunkId: 'strong', score: 0.91 }),
     ]);
+  });
+});
+
+describe('HybridReranker', () => {
+  it('combina semântica, termos e autoridade em vez de ignorar sinais híbridos', async () => {
+    const hybrid = new HybridReranker();
+    const generic = { ...cand('texto genérico'), chunkId: 'generic', denseScore: 0.81 };
+    const governed = {
+      ...cand('descanso entre séries hipertrofia'),
+      chunkId: 'governed',
+      denseScore: 0.78,
+      fusionScore: 1,
+      reliability: 5,
+      category: 'METHODOLOGY',
+    };
+    const [first] = await hybrid.rerank('descanso entre séries', [generic, governed], 2);
+    expect(first?.chunkId).toBe('governed');
+  });
+
+  it('preserva correspondência lexical exata quando o embedding não recupera o trecho', async () => {
+    const [result] = await new HybridReranker().rerank(
+      'descanso hipertrofia',
+      [
+        {
+          chunkId: 'lexical-only',
+          documentId: 'd1',
+          chunkText: 'Descanso para hipertrofia conforme a metodologia.',
+          title: 'Método',
+          sourceUrl: null,
+          denseScore: 0,
+          fusionScore: 0.51,
+          reliability: 5,
+          category: 'METHODOLOGY',
+        },
+      ],
+      1,
+    );
+
+    expect(result?.score).toBeGreaterThan(0.5);
   });
 });

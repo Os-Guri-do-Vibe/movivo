@@ -4,13 +4,13 @@
  * Fluxo de `complete(request)`:
  *   1. scrubPII sobre system + messages (PII Scrubber inescapável — a porta do router);
  *   2. teto anti-abuso (LLM10) incrementa o counter do dia;
- *   3. cascata GPT-4.1 → Claude Sonnet 4.5, pulando provedor com breaker OPEN;
+ *   3. cascata DeepSeek V4 Pro → GPT-4.1 → Claude Sonnet 4.5, pulando provedor bloqueado;
  *   4. por provedor: timeout hard (8s), 1 retry só p/ erro de rede transitório, failover
  *      direto em 429/5xx/timeout/sem-chave; erro 4xx (CLIENT) aborta sem failover;
  *   5. grava um `ai_jobs` completo e pseudonimizado com custo BRL.
  *
  * `dataClass` tem fail-safe `default = HEALTH` (é otimização de custo, nunca autorização
- * para provedor de menor garantia). DeepSeek está ausente. SDK/HTTP confinado a providers.ts.
+ * para provedor de menor garantia). O gate de HEALTH é neutro por provedor e fail-closed.
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
@@ -34,7 +34,7 @@ import {
 import { LLM_PROVIDER_CASCADE } from './providers';
 import { scrubPII } from './pii-scrubber';
 
-/** Preço por 1M tokens (USD). Fonte: Victor §8 (jul/2026). Fallback = rates do GPT-4.1. */
+/** Preço por 1M tokens (USD), snapshot das páginas oficiais em 2026-08-27. */
 interface Pricing {
   input: number;
   cached: number;
@@ -42,6 +42,7 @@ interface Pricing {
 }
 const DEFAULT_PRICING: Pricing = { input: 2.0, cached: 0.5, output: 8.0 };
 const PRICING: Record<string, Pricing> = {
+  'deepseek-v4-pro': { input: 0.435, cached: 0.003625, output: 0.87 },
   'gpt-4.1': DEFAULT_PRICING,
   'claude-sonnet-4-5': { input: 3.0, cached: 0.3, output: 15.0 },
 };
@@ -125,13 +126,20 @@ export class LlmRouter {
     const snapshot = auditSnapshot(system, messages);
 
     // 2. Anti-abuso (LLM10) — pode lançar LLMAbuseError.
-    await this.abuse.check(request.userId);
+    await this.abuse.check(request.userId, request.operationId);
 
     const maxTokens = Math.min(request.maxTokens ?? cfg.maxTokens, cfg.maxTokens);
     const temperature = request.temperature ?? 0.4;
     let lastError: unknown;
 
     for (const [i, provider] of this.cascade.entries()) {
+      if (!provider.canProcess(dataClass)) {
+        this.logger.warn(
+          { provider: provider.name, dataClass, event: 'llm_provider_data_class_blocked' },
+          'provedor não aprovado para a classe de dado; pulando antes do envio',
+        );
+        continue;
+      }
       const breaker = this.breakerFor(provider.name);
       if (!breaker.allow()) {
         this.logger.warn({ provider: provider.name }, 'breaker OPEN — pulando provedor');
@@ -149,6 +157,7 @@ export class LlmRouter {
             maxTokens,
             temperature,
             cache: request.cache ?? true,
+            json: request.json ?? false,
           },
           request.purpose,
         );

@@ -37,6 +37,19 @@ describe('IntentClassifier — guardrail (Etapa 0)', () => {
 });
 
 describe('IntentClassifier — kNN (Etapa 1) e fallback (Etapa 2)', () => {
+  it('remove PII antes de enviar a mensagem ao embedding', async () => {
+    const { svc, embedding } = make({ knn: { intent: 'DUVIDA_TECNICA', confidence: 0.9 } });
+    await svc.classify({
+      ...input,
+      user: { name: 'João Silva', phoneNumber: '+5511999998888', email: 'joao@ex.com' },
+      message: 'João Silva joao@ex.com +5511999998888 quer saber sobre agachamento',
+    });
+    const embedded = String(vi.mocked(embedding.embed).mock.calls[0]?.[0]);
+    expect(embedded).not.toContain('João Silva');
+    expect(embedded).not.toContain('joao@ex.com');
+    expect(embedded).not.toContain('+5511999998888');
+  });
+
   it('kNN com confiança alta resolve sem chamar o LLM', async () => {
     const { svc, complete } = make({ knn: { intent: 'DUVIDA_TECNICA', confidence: 0.9 } });
     const r = await svc.classify({ ...input, message: 'como faço agachamento?' });

@@ -18,6 +18,7 @@ import type { IntentClassifier } from '../ai-coach/intent/intent-classifier.serv
 import type { Intent } from '../ai-coach/intent/intent.types';
 import type { LlmAbuseGuard } from '../ai-coach/llm/llm-abuse-guard.service';
 import type { LlmRouter } from '../ai-coach/llm/llm-router.service';
+import type { EvidenceGroundingService } from '../ai-coach/rag/evidence-grounding.service';
 import type { QueueManager } from '../jobs/queue-manager.service';
 import type { WorkerFactory } from '../jobs/worker.factory';
 import { ValidationService } from '../protocol/validation/validation.service';
@@ -130,6 +131,7 @@ function makeWorker(deps: Deps = {}) {
   const context = {
     build: vi.fn(() =>
       Promise.resolve({
+        authoritativeState: '{"temProtocoloAtivo":true}',
         cacheablePrefix: 'ESTADO',
         volatileSuffix: 'Aluno: oi',
         ragDocs: deps.ragDocs ?? [],
@@ -145,6 +147,17 @@ function makeWorker(deps: Deps = {}) {
     Promise.resolve({ text: deps.llmText ?? 'Boa, continua firme!', model: 'gpt-4.1' }),
   );
   const llm = { complete } as unknown as LlmRouter;
+  const grounding = {
+    answer: vi.fn(async () => ({
+      status: 'VERIFIED' as const,
+      text: `${deps.llmText ?? 'Resposta sustentada.'} [E1: Fonte aprovada]`,
+      model: 'deepseek-v4-pro',
+      verifierModel: 'deepseek-v4-pro',
+      latencyMs: 10,
+      humanReview: false,
+      sources: [],
+    })),
+  } as unknown as EvidenceGroundingService;
 
   const abuse = {
     isOverDailyLimit: vi.fn(() => Promise.resolve(deps.overLimit ?? false)),
@@ -209,6 +222,7 @@ function makeWorker(deps: Deps = {}) {
     forbiddenTopics as never,
     l1Guardrails,
     context,
+    grounding,
     llm,
     abuse,
     validation,
@@ -250,6 +264,7 @@ function makeWorker(deps: Deps = {}) {
     prompts,
     personaResolve,
     context,
+    grounding,
   };
 }
 
@@ -475,6 +490,32 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     expect(sentText(enqueue)).toBe(TECHNICAL_NO_EVIDENCE_MESSAGE);
     expect(complete).not.toHaveBeenCalled();
     expect(persistHandoff).toHaveBeenCalledWith('u1', 'ALERT', 'VALIDATOR_FLAG');
+  });
+
+  it('dúvida técnica com evidência usa grounding, não o caminho generativo livre', async () => {
+    const { worker, enqueue, grounding, complete } = makeWorker({
+      intent: 'DUVIDA_TECNICA',
+      ragDocs: [
+        {
+          chunkId: 'c1',
+          documentId: 'd1',
+          title: 'Metodologia aprovada',
+          snippet: 'O descanso recomendado está definido na metodologia.',
+          score: 0.9,
+        },
+      ],
+    });
+
+    await expect(worker.process(job())).resolves.toEqual({ status: 'SENT' });
+    expect(grounding.answer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operationId: 'c1',
+        authoritativeState: '{"temProtocoloAtivo":true}',
+        documents: [expect.objectContaining({ chunkId: 'c1' })],
+      }),
+    );
+    expect(complete).not.toHaveBeenCalled();
+    expect(sentText(enqueue)).toContain('[E1: Fonte aprovada]');
   });
 
   it('valida a saída bruta antes de truncar parágrafos', async () => {
