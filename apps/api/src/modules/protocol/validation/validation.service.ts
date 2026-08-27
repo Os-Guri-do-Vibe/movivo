@@ -98,7 +98,12 @@ export class ValidationService {
   validate(input: ValidateProtocolInput): ValidationVerdict {
     const violations: ValidationViolation[] = [];
     const excluded = new Set<ContraindicationTag>([
-      ...input.constraints.injuryTags,
+      // `?? []`: protocolos do caminho de fallback (`ProtocolGenerationWorker.
+      // handleTerminalFailure`) persistem `constraints` sem `injuryTags` — só têm
+      // goal/preferredDays/parqTags. `input.parqFlags` já cobre a parte de segurança
+      // do PAR-Q nesse caso; sem este fallback, assinar um protocolo de fallback
+      // quebrava com "injuryTags is not iterable" (achado 2026-08-26).
+      ...(input.constraints.injuryTags ?? []),
       ...(input.parqFlags ?? []),
     ]);
 
