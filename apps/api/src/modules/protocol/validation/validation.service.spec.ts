@@ -78,6 +78,22 @@ describe('ValidationService — caminho limpo', () => {
     const v = service.validate(input({ structure: validStructure({ generalNotes: undefined }) }));
     expect(v.action).toBe('PASS');
   });
+
+  /**
+   * Regressão (achado 2026-08-26): protocolos do caminho de fallback
+   * (`ProtocolGenerationWorker.handleTerminalFailure`) persistem `constraints` sem
+   * `injuryTags` — só goal/preferredDays/parqTags. Assinar um desses protocolos
+   * quebrava com `TypeError: injuryTags is not iterable` porque o spread de
+   * `constraints.injuryTags` não tolerava `undefined`.
+   */
+  it('não lança quando constraints.injuryTags está ausente (protocolo de fallback)', () => {
+    const v = service.validate(
+      input({
+        constraints: { goal: 'GAIN_MUSCLE' } as ValidateProtocolInput['constraints'],
+      }),
+    );
+    expect(v.action).toBe('PASS');
+  });
 });
 
 describe('ValidationService — bloqueios estruturais', () => {
