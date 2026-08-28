@@ -95,7 +95,10 @@ const constraints: UserConstraints = {
   parqTriggered: [],
 };
 
-function makeService(responses: string[]) {
+function makeService(
+  responses: string[],
+  retrieve: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue([]),
+) {
   const calls: LLMRequest[] = [];
   const queue = [...responses];
   const llm = {
@@ -114,9 +117,19 @@ function makeService(responses: string[]) {
       contentSha256: 'a'.repeat(64),
     }),
   } as unknown as MethodologyProvider;
-  const semantic = { retrieve: vi.fn().mockResolvedValue([]) } as unknown as SemanticMemoryPort;
+  const semantic = { retrieve } as unknown as SemanticMemoryPort;
   const service = new ProtocolGeneratorService(llm, logger as never, methodology, semantic);
-  return { service, calls, logger };
+  return { service, calls, logger, retrieve };
+}
+
+function ragDoc(chunkId: string, documentId: string, snippet = chunkId) {
+  return {
+    chunkId,
+    documentId,
+    title: `Artigo ${documentId}`,
+    snippet,
+    score: 0.9,
+  };
 }
 
 function constraintsMessage(req: LLMRequest): string {
@@ -147,6 +160,65 @@ describe('ProtocolGeneratorService', () => {
     expect(req.system).toContain('goblet_squat'); // vocabulário da base
     expect(constraintsMessage(req)).toContain('GAIN_MUSCLE');
     expect(constraintsMessage(req)).toContain('KNEE');
+  });
+
+  it('busca evidência por facetas, combina mais de 3 trechos e remove duplicatas', async () => {
+    const shared = ragDoc('chunk-shared', 'doc-shared');
+    const retrieve = vi
+      .fn()
+      .mockResolvedValueOnce([ragDoc('chunk-goal-1', 'doc-1'), shared])
+      .mockResolvedValueOnce([ragDoc('chunk-dose-1', 'doc-2'), shared])
+      .mockResolvedValueOnce([ragDoc('chunk-place-1', 'doc-3')])
+      .mockResolvedValueOnce([ragDoc('chunk-limit-1', 'doc-4')]);
+    const { service, calls } = makeService([validProtocolJson()], retrieve);
+
+    const result = await service.generate(command);
+
+    expect(retrieve).toHaveBeenCalledTimes(4);
+    expect(retrieve.mock.calls.every((call) => call[1]?.topK === 10)).toBe(true);
+    expect(retrieve.mock.calls[0]?.[0]).toContain('hipertrofia');
+    expect(retrieve.mock.calls[0]?.[0]).toContain('definição muscular');
+    expect(result.knowledgeSources).toHaveLength(5);
+    expect(
+      result.knowledgeSources?.filter((source) => source.chunkId === 'chunk-shared'),
+    ).toHaveLength(1);
+    const evidenceMessage = calls[0]?.messages.find((message) =>
+      message.content.includes('EVIDENCIAS_SELETIVAS'),
+    );
+    expect(evidenceMessage?.content).toContain('chunk-goal-1');
+    expect(evidenceMessage?.content).toContain('chunk-limit-1');
+  });
+
+  it('preserva facetas disponíveis quando uma busca do RAG falha', async () => {
+    const retrieve = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('embedding indisponível'))
+      .mockResolvedValueOnce([ragDoc('chunk-dose', 'doc-dose')])
+      .mockResolvedValue([]);
+    const { service, logger } = makeService([validProtocolJson()], retrieve);
+
+    const result = await service.generate(command);
+
+    expect(result.knowledgeSources?.map((source) => source.chunkId)).toEqual(['chunk-dose']);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'u-1' }),
+      expect.stringContaining('faceta do RAG indisponível'),
+    );
+  });
+
+  it('expande emagrecimento para definição, composição corporal e hipertrofia na busca', async () => {
+    const retrieve = vi.fn().mockResolvedValue([]);
+    const { service } = makeService([validProtocolJson()], retrieve);
+
+    await service.generate({
+      ...command,
+      constraints: { ...constraints, goal: 'LOSE_FAT', injuryTags: [] },
+    });
+
+    const goalQuery = String(retrieve.mock.calls[0]?.[0]);
+    expect(goalQuery).toContain('emagrecimento');
+    expect(goalQuery).toContain('definição muscular');
+    expect(goalQuery).toContain('hipertrofia');
   });
 
   it('ensina a divisão de treino e a técnica avançada da metodologia v2', async () => {

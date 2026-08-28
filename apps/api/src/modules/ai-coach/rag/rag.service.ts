@@ -15,7 +15,11 @@ import { DRIZZLE } from '../../../core/database/database.constants';
 import type { DrizzleClient } from '../../../core/database/database.module';
 import { REDIS_CLIENT, REDIS_KEY_BUILDER, type RedisKeyBuilder } from '../../../core/redis';
 import { RAG_USAGE_TTL_SECONDS, ragUsageDay, ragUsageKeys } from './rag-usage.keys';
-import type { RagDoc, SemanticMemoryPort } from '../context/semantic-memory.port';
+import type {
+  RagDoc,
+  SemanticMemoryPort,
+  SemanticRetrievalOptions,
+} from '../context/semantic-memory.port';
 import { EMBEDDING_PORT, type EmbeddingPort } from './embedding.port';
 import { RERANKER_PORT, type RerankCandidate, type RerankerPort } from './reranker.port';
 import { buildRetrievalPlan } from './retrieval-plan';
@@ -54,13 +58,13 @@ export class RagService implements SemanticMemoryPort {
     this.logger.setContext(RagService.name);
   }
 
-  async retrieve(query: string): Promise<RagDoc[]> {
+  async retrieve(query: string, options?: SemanticRetrievalOptions): Promise<RagDoc[]> {
     const plan = buildRetrievalPlan(query);
     const batches = await Promise.all(
       plan.queries.map((plannedQuery) => this.search(plannedQuery)),
     );
     const merged = this.mergeRows(batches);
-    const docs = await this.rerank(query, merged, plan.mode);
+    const docs = await this.rerank(query, merged, plan.mode, options?.topK);
     await this.countUsage(docs.length > 0);
     this.logger.info(
       {
@@ -99,9 +103,11 @@ export class RagService implements SemanticMemoryPort {
     query: string,
     rows: readonly MergedRow[],
     retrievalMode: RagDoc['retrievalMode'],
+    requestedTopK?: number,
   ): Promise<RagDoc[]> {
     if (rows.length === 0) return [];
-    const { rerankMinScore, topK, candidates } = this.config.rag;
+    const { rerankMinScore, topK: defaultTopK, candidates } = this.config.rag;
+    const topK = Math.max(1, Math.min(requestedTopK ?? defaultTopK, candidates));
     const cands: RerankCandidate[] = rows.map((row) => ({
       chunkId: row.id,
       documentId: row.document_id,

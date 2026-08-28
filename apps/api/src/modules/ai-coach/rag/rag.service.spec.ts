@@ -75,4 +75,19 @@ describe('RagService.retrieve', () => {
     // Consulta + recuperação útil.
     expect(incr).toHaveBeenCalledTimes(2);
   });
+
+  it('aceita topK maior para fluxos que precisam cobrir múltiplas fontes', async () => {
+    const rows = ['um', 'dois', 'três', 'quatro', 'cinco'].map((suffix, index) => ({
+      id: `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
+      document_id: `10000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
+      chunk_text: `treino ${suffix}`,
+      title: `Fonte ${suffix}`,
+      source_url: null,
+      score: 0.9,
+    }));
+    const { rag } = make(rows);
+
+    expect(await rag.retrieve('treino')).toHaveLength(3);
+    expect(await rag.retrieve('treino', { topK: 5 })).toHaveLength(5);
+  });
 });
