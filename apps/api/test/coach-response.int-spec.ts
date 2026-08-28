@@ -144,7 +144,9 @@ const fakeLlm = {
       );
     }
     if (req.intent === 'grounding_claim_verification') {
-      return fakeResult('{"verdicts":[{"claimId":"C1","verdict":"SUPPORTED","evidenceIds":["E1"]}]}');
+      return fakeResult(
+        '{"verdicts":[{"claimId":"C1","verdict":"SUPPORTED","evidenceIds":["E1"]}]}',
+      );
     }
 
     const answer = text.includes('trocar')
