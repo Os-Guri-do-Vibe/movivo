@@ -1,7 +1,6 @@
 import { ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import {
-  ADMIN_INHERITANCE_DENYLIST,
   ControlCenterCapability as Capability,
   type ControlCenterCapability,
   type ControlCenterRole,
@@ -90,25 +89,11 @@ describe('capabilities deny-by-default', () => {
     });
   }
 
-  it('ADMIN recebe todas as capacidades explícitas, exceto a denylist de aprovação clínica', () => {
-    const expected = Object.values(Capability).filter(
-      (capability) => !ADMIN_INHERITANCE_DENYLIST.includes(capability),
-    );
+  it('ADMIN recebe todas as capacidades explícitas', () => {
+    const expected = Object.values(Capability);
     expect(capabilitiesForRole('ADMIN')).toEqual(expected);
     for (const capability of Object.values(Capability)) {
-      const check = () => guard([capability]).canActivate(context('ADMIN'));
-      if (ADMIN_INHERITANCE_DENYLIST.includes(capability)) {
-        expect(check).toThrow(ForbiddenException);
-      } else {
-        expect(check()).toBe(true);
-      }
-    }
-  });
-
-  it('ADMIN não herda as capacidades da denylist (aprovação clínica é exclusiva do RT CREF)', () => {
-    const admin = capabilitiesForRole('ADMIN');
-    for (const capability of ADMIN_INHERITANCE_DENYLIST) {
-      expect(admin).not.toContain(capability);
+      expect(guard([capability]).canActivate(context('ADMIN'))).toBe(true);
     }
   });
 });

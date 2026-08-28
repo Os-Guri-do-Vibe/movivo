@@ -561,7 +561,7 @@ function LimitsStep() {
   const { data, slotId } = useAgentPersona();
   /*
    * Temas proibidos são globais, não do slot: a mesma lista bloqueia os dois públicos, com
-   * um único fluxo de maker-checker. Por isso vêm (e são recarregados) pelo workspace — as
+   * um único fluxo auditável de publicação. Por isso vêm (e são recarregados) pelo workspace — as
    * duas abas leem a mesma cópia e nenhuma aprovação fica visível só em uma delas.
    */
   const { topics, topicsLoading, refreshTopics, canWrite, canApprove } = useAgentPersonaWorkspace();

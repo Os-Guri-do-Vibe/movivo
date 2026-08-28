@@ -328,7 +328,7 @@ export class KnowledgeAdminService {
     const input = parsed.data;
     await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
       await lockKnowledgeDocument(tx, input.documentId);
-      await this.assertActiveCref(tx, actor.userId);
+      await this.assertRegulatedActionActor(tx, actor);
       const state = await currentKnowledgeState(tx, input.documentId);
       if (!state) throw new NotFoundException('Documento inexistente.');
       if (state.status !== 'READY_FOR_REVIEW') {
@@ -428,7 +428,7 @@ export class KnowledgeAdminService {
     const input = parsed.data;
     await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
       await lockKnowledgeDocument(tx, input.documentId);
-      await this.assertActiveCref(tx, actor.userId);
+      await this.assertRegulatedActionActor(tx, actor);
       const state = await currentKnowledgeState(tx, input.documentId);
       if (!state) throw new NotFoundException('Documento inexistente.');
       if (state.status !== 'PUBLISHED') {
@@ -453,10 +453,14 @@ export class KnowledgeAdminService {
     return this.list(actor);
   }
 
-  private async assertActiveCref(tx: TenantTransaction, actorId: string): Promise<void> {
+  private async assertRegulatedActionActor(
+    tx: TenantTransaction,
+    actor: AuthenticatedUser,
+  ): Promise<void> {
+    if (actor.role === 'ADMIN') return;
     const rows = (await tx.execute(sql`
       SELECT 1 FROM users
-      WHERE id = ${actorId}::uuid AND role = 'PROFESSIONAL' AND cref_active = true
+      WHERE id = ${actor.userId}::uuid AND role = 'PROFESSIONAL' AND cref_active = true
     `)) as unknown as unknown[];
     if (!rows.length) throw new ConflictException('A ação exige profissional CREF ativo.');
   }

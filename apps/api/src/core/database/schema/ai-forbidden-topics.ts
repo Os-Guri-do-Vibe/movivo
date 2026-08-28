@@ -12,12 +12,12 @@
  * "permitir" ou "desativar". Uma linha publicada não pode desligar um bloqueio, porque não
  * existe valor que signifique isso.
  *
- * ## Append-only + maker-checker no banco
+ * ## Append-only + autoria e aprovação auditáveis
  * Cada transição (rascunho → em aprovação → aprovado → retirado) é uma linha nova com
  * `version` incremental — mesmo molde de `ai_guardrail_rules`. `created_by` guarda o **autor
  * da proposta** e é carregado adiante em cada transição; `approved_by` guarda quem aprovou
- * ou retirou. O `CHECK (approved_by IS NULL OR approved_by <> created_by)` faz o
- * maker-checker ser uma propriedade do dado, não disciplina de serviço.
+ * ou retirou. O serviço exige maker-checker para `PROFESSIONAL`; `ADMIN` pode executar
+ * todas as transições, inclusive sobre proposta própria, mantendo os dois atores auditados.
  *
  * ## Sem RLS por titular
  * Configuração global do produto, não dado de aluno — mesmo raciocínio de `agent_config`.
@@ -68,7 +68,7 @@ export const aiForbiddenTopics = pgTable(
     createdBy: uuid('created_by')
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
-    /** Checker: RT CREF que aprovou ou retirou. Sempre diferente do maker. */
+    /** Ator que aprovou ou retirou; pode coincidir com o maker quando for ADMIN. */
     approvedBy: uuid('approved_by').references(() => users.id, { onDelete: 'restrict' }),
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },
@@ -77,11 +77,6 @@ export const aiForbiddenTopics = pgTable(
     index('idx_ai_forbidden_topics_key').on(table.topicKey, table.version),
     // A ação é BLOCK e só. Repetido aqui porque o Zod protege a API, não o banco.
     check('ck_ai_forbidden_topics_action_block', sql`${table.action} = 'BLOCK'`),
-    // Maker-checker como propriedade do dado: quem propôs não aprova nem retira.
-    check(
-      'ck_ai_forbidden_topics_maker_checker',
-      sql`${table.approvedBy} IS NULL OR ${table.approvedBy} <> ${table.createdBy}`,
-    ),
   ],
 );
 

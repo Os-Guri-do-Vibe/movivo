@@ -145,13 +145,13 @@ export class MethodologyAdminService {
     const input = parsed.data;
     await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
       await this.lockVersion(tx, input.versionId);
-      await this.assertActiveCref(tx, actor.userId);
+      await this.assertRegulatedActionActor(tx, actor);
       const current = await this.loadCurrent(tx, input.versionId);
       if (!current) throw new NotFoundException('Versão de metodologia inexistente.');
       if (current.status !== 'IN_REVIEW') {
         throw new ConflictException('Somente versão em revisão pode receber parecer.');
       }
-      if (current.created_by === actor.userId) {
+      if (actor.role !== 'ADMIN' && current.created_by === actor.userId) {
         throw new ConflictException('Maker-checker: o autor não pode aprovar a própria versão.');
       }
       await this.appendEvent(tx, input.versionId, decision, actor.userId, input.note);
@@ -174,13 +174,13 @@ export class MethodologyAdminService {
     const input = parsed.data;
     await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('movivo.methodology.workflow'))`);
-      await this.assertActiveCref(tx, actor.userId);
+      await this.assertRegulatedActionActor(tx, actor);
       const current = await this.loadCurrent(tx, input.versionId);
       if (!current) throw new NotFoundException('Versão de metodologia inexistente.');
       if (current.status !== 'APPROVED') {
         throw new ConflictException('Somente versão aprovada pode ser publicada.');
       }
-      if (current.created_by === actor.userId) {
+      if (actor.role !== 'ADMIN' && current.created_by === actor.userId) {
         throw new ConflictException('Maker-checker: o autor não pode publicar a própria versão.');
       }
       const published = (await tx.execute(sql`
@@ -307,10 +307,14 @@ export class MethodologyAdminService {
     );
   }
 
-  private async assertActiveCref(tx: TenantTransaction, actorId: string): Promise<void> {
+  private async assertRegulatedActionActor(
+    tx: TenantTransaction,
+    actor: AuthenticatedUser,
+  ): Promise<void> {
+    if (actor.role === 'ADMIN') return;
     const rows = (await tx.execute(sql`
       SELECT 1 FROM users
-      WHERE id = ${actorId}::uuid AND role = 'PROFESSIONAL' AND cref_active = true
+      WHERE id = ${actor.userId}::uuid AND role = 'PROFESSIONAL' AND cref_active = true
     `)) as unknown as unknown[];
     if (!rows.length) throw new ConflictException('A ação exige Responsável Técnico CREF ativo.');
   }

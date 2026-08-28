@@ -13,6 +13,8 @@ const ACTOR = {
   jti: 'j1',
 } as const as AuthenticatedUser;
 
+const CREF_ACTOR = { ...ACTOR, role: 'PROFESSIONAL' } as const as AuthenticatedUser;
+
 const OTHER_CREF = '44444444-4444-4444-8444-444444444444';
 const VERSION_ID = '33333333-3333-4333-8333-333333333333';
 const CREF_OK = [{ ok: 1 }];
@@ -182,11 +184,10 @@ describe('MethodologyAdminService.submit', () => {
 describe('MethodologyAdminService.review', () => {
   const REVIEW = { versionId: VERSION_ID, note: 'Parecer técnico registrado' };
 
-  it('aprova quando o revisor é diferente do autor', async () => {
+  it('ADMIN aprova sem depender de cadastro CREF', async () => {
     const { service, audit } = methodologyWith({
       executes: [
         [], // lockVersion
-        CREF_OK, // assertActiveCref
         [{ created_by: OTHER_CREF, status: 'IN_REVIEW' }], // loadCurrent
         [], // appendEvent(APPROVED)
         [versionRow({ status: 'APPROVED' })], // list()
@@ -201,15 +202,9 @@ describe('MethodologyAdminService.review', () => {
     );
   });
 
-  it('rejeita quando o revisor é diferente do autor', async () => {
+  it('ADMIN rejeita sem depender de cadastro CREF', async () => {
     const { service, audit } = methodologyWith({
-      executes: [
-        [],
-        CREF_OK,
-        [{ created_by: OTHER_CREF, status: 'IN_REVIEW' }],
-        [],
-        [versionRow()],
-      ],
+      executes: [[], [{ created_by: OTHER_CREF, status: 'IN_REVIEW' }], [], [versionRow()]],
     });
 
     await service.review(ACTOR, REVIEW, 'REJECTED');
@@ -220,25 +215,41 @@ describe('MethodologyAdminService.review', () => {
     );
   });
 
-  it('maker-checker: o autor não pode aprovar a própria versão', async () => {
-    const { service } = methodologyWith({
-      executes: [[], CREF_OK, [{ created_by: ACTOR.userId, status: 'IN_REVIEW' }]],
+  it('ADMIN pode aprovar a própria versão', async () => {
+    const { service, audit } = methodologyWith({
+      executes: [
+        [],
+        [{ created_by: ACTOR.userId, status: 'IN_REVIEW' }],
+        [],
+        [versionRow({ status: 'APPROVED' })],
+      ],
     });
-    await expect(service.review(ACTOR, REVIEW, 'APPROVED')).rejects.toBeInstanceOf(
+    await expect(service.review(ACTOR, REVIEW, 'APPROVED')).resolves.toBeDefined();
+    expect(audit.append).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: 'methodology.approve' }),
+    );
+  });
+
+  it('maker-checker continua valendo para PROFESSIONAL', async () => {
+    const { service } = methodologyWith({
+      executes: [[], CREF_OK, [{ created_by: CREF_ACTOR.userId, status: 'IN_REVIEW' }]],
+    });
+    await expect(service.review(CREF_ACTOR, REVIEW, 'APPROVED')).rejects.toBeInstanceOf(
       ConflictException,
     );
   });
 
   it('recusa revisar sem profissional CREF ativo', async () => {
     const { service } = methodologyWith({ executes: [[], []] });
-    await expect(service.review(ACTOR, REVIEW, 'APPROVED')).rejects.toBeInstanceOf(
+    await expect(service.review(CREF_ACTOR, REVIEW, 'APPROVED')).rejects.toBeInstanceOf(
       ConflictException,
     );
   });
 
   it('recusa revisar versão que não está IN_REVIEW', async () => {
     const { service } = methodologyWith({
-      executes: [[], CREF_OK, [{ created_by: OTHER_CREF, status: 'DRAFT' }]],
+      executes: [[], [{ created_by: OTHER_CREF, status: 'DRAFT' }]],
     });
     await expect(service.review(ACTOR, REVIEW, 'APPROVED')).rejects.toBeInstanceOf(
       ConflictException,
@@ -246,7 +257,7 @@ describe('MethodologyAdminService.review', () => {
   });
 
   it('404 quando a versão não existe', async () => {
-    const { service } = methodologyWith({ executes: [[], CREF_OK, []] });
+    const { service } = methodologyWith({ executes: [[], []] });
     await expect(service.review(ACTOR, REVIEW, 'APPROVED')).rejects.toBeInstanceOf(
       NotFoundException,
     );
@@ -260,7 +271,6 @@ describe('MethodologyAdminService.publish', () => {
     const { service, audit, provider } = methodologyWith({
       executes: [
         [], // advisory lock
-        CREF_OK, // assertActiveCref
         [{ created_by: OTHER_CREF, status: 'APPROVED' }], // loadCurrent
         [{ id: '55555555-5555-4555-8555-555555555555' }], // versão publicada anterior a arquivar
         [], // appendEvent(ARCHIVED) da anterior
@@ -287,7 +297,6 @@ describe('MethodologyAdminService.publish', () => {
     const { service, provider } = methodologyWith({
       executes: [
         [],
-        CREF_OK,
         [{ created_by: OTHER_CREF, status: 'APPROVED' }],
         [], // nenhuma versão publicada anteriormente
         [], // appendEvent(PUBLISHED)
@@ -299,24 +308,38 @@ describe('MethodologyAdminService.publish', () => {
     expect(provider.invalidate).toHaveBeenCalledOnce();
   });
 
-  it('maker-checker: o autor não pode publicar a própria versão', async () => {
+  it('ADMIN pode publicar a própria versão', async () => {
     const { service, provider } = methodologyWith({
-      executes: [[], CREF_OK, [{ created_by: ACTOR.userId, status: 'APPROVED' }]],
+      executes: [
+        [],
+        [{ created_by: ACTOR.userId, status: 'APPROVED' }],
+        [],
+        [],
+        [versionRow({ status: 'PUBLISHED' })],
+      ],
     });
-    await expect(service.publish(ACTOR, PUBLISH)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.publish(ACTOR, PUBLISH)).resolves.toBeDefined();
+    expect(provider.invalidate).toHaveBeenCalledOnce();
+  });
+
+  it('maker-checker continua valendo para PROFESSIONAL', async () => {
+    const { service, provider } = methodologyWith({
+      executes: [[], CREF_OK, [{ created_by: CREF_ACTOR.userId, status: 'APPROVED' }]],
+    });
+    await expect(service.publish(CREF_ACTOR, PUBLISH)).rejects.toBeInstanceOf(ConflictException);
     expect(provider.invalidate).not.toHaveBeenCalled();
   });
 
   it('recusa publicar versão que não está APPROVED', async () => {
     const { service } = methodologyWith({
-      executes: [[], CREF_OK, [{ created_by: OTHER_CREF, status: 'IN_REVIEW' }]],
+      executes: [[], [{ created_by: OTHER_CREF, status: 'IN_REVIEW' }]],
     });
-    await expect(service.publish(ACTOR, PUBLISH)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.publish(CREF_ACTOR, PUBLISH)).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('recusa publicar sem profissional CREF ativo', async () => {
     const { service } = methodologyWith({ executes: [[], []] });
-    await expect(service.publish(ACTOR, PUBLISH)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.publish(CREF_ACTOR, PUBLISH)).rejects.toBeInstanceOf(ConflictException);
   });
 });
 

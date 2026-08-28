@@ -495,14 +495,14 @@ export function retireL1Guardrail(input: RetireL1GuardrailInput): Promise<L1Guar
   return mutate('ai/guardrails/retire', input, l1GuardrailsResponseSchema);
 }
 
-/* ------------------------- Temas proibidos (maker-checker) ------------------------- */
+/* ------------------------- Temas proibidos (workflow auditável) ------------------------- */
 
 /**
  * Temas proibidos são entidade própria, **não** um campo da persona: o contrato
  * (`forbidden-topic.schema.ts`) separa `label` — que vai ao prompt — de `phrases`, que
  * nunca sai do comparador determinístico do servidor. Por isso a publicação também é
- * separada: propor exige `AI_CONFIG_WRITE`; aprovar exige `AI_GUARDRAIL_APPROVE`, e o
- * banco recusa aprovador igual ao proponente.
+ * separada: propor exige `AI_CONFIG_WRITE` e aprovar exige `AI_GUARDRAIL_APPROVE`.
+ * `PROFESSIONAL` segue maker-checker; `ADMIN` pode executar todas as transições.
  */
 export function getForbiddenTopics(signal?: AbortSignal): Promise<ForbiddenTopicsResponse> {
   return request('ai/forbidden-topics', forbiddenTopicsResponseSchema, signal);

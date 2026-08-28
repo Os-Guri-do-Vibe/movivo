@@ -113,9 +113,9 @@ export class ForbiddenTopicAdminService {
     const input = this.parse(forbiddenTopicActionSchema, body);
     await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
       await this.lock(tx, input.topicKey);
-      await this.assertActiveCref(tx, actor.userId);
+      await this.assertRegulatedActionActor(tx, actor);
       const current = await this.requireCurrent(tx, input.topicKey, 'PENDING_APPROVAL');
-      if (current.createdBy === actor.userId) {
+      if (actor.role !== 'ADMIN' && current.createdBy === actor.userId) {
         throw new ConflictException('Maker-checker: o autor não pode aprovar o próprio tema.');
       }
       await this.assertCapacity(tx, input.topicKey, current.phrases.length);
@@ -132,9 +132,9 @@ export class ForbiddenTopicAdminService {
     const input = this.parse(forbiddenTopicActionSchema, body);
     await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
       await this.lock(tx, input.topicKey);
-      await this.assertActiveCref(tx, actor.userId);
+      await this.assertRegulatedActionActor(tx, actor);
       const current = await this.requireCurrent(tx, input.topicKey, 'APPROVED');
-      if (current.createdBy === actor.userId) {
+      if (actor.role !== 'ADMIN' && current.createdBy === actor.userId) {
         throw new ConflictException('Maker-checker: o autor não pode retirar o próprio tema.');
       }
       await this.insert(tx, actor, input.topicKey, current, input.note, 'RETIRED', actor.userId, {
@@ -241,10 +241,14 @@ export class ForbiddenTopicAdminService {
     );
   }
 
-  private async assertActiveCref(tx: TenantTransaction, actorId: string): Promise<void> {
+  private async assertRegulatedActionActor(
+    tx: TenantTransaction,
+    actor: AuthenticatedUser,
+  ): Promise<void> {
+    if (actor.role === 'ADMIN') return;
     const rows = (await tx.execute(sql`
       SELECT id FROM users
-      WHERE id = ${actorId}::uuid AND role = 'PROFESSIONAL' AND cref_active = true
+      WHERE id = ${actor.userId}::uuid AND role = 'PROFESSIONAL' AND cref_active = true
       LIMIT 1
     `)) as unknown as Array<{ id: string }>;
     if (!rows.length) throw new ConflictException('A ação exige Responsável Técnico CREF ativo.');

@@ -1,6 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import {
-  ADMIN_INHERITANCE_DENYLIST,
   CAPABILITIES_BY_ROLE,
   ControlCenterCapability as Capability,
   partnerDistributionResponseSchema,
@@ -170,9 +169,7 @@ describe('RBAC do cap table', () => {
         granted.includes(Capability.PARTNERS_READ) || granted.includes(Capability.PARTNERS_WRITE);
       expect(has).toBe(role === 'ADMIN');
     }
-    // Cap table não é conteúdo clínico: o ADMIN herda normalmente.
-    expect(ADMIN_INHERITANCE_DENYLIST).not.toContain(Capability.PARTNERS_READ);
-    expect(ADMIN_INHERITANCE_DENYLIST).not.toContain(Capability.PARTNERS_WRITE);
+    expect(CAPABILITIES_BY_ROLE.ADMIN).toEqual(Object.values(Capability));
   });
 
   it('FINANCE recebe 403 nas duas rotas', () => {

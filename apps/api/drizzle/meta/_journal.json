@@ -260,6 +260,13 @@
       "when": 1787700869336,
       "tag": "0036_agent_persona_slots",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1787945291175,
+      "tag": "0037_peaceful_rockslide",
+      "breakpoints": true
     }
   ]
 }
