@@ -264,7 +264,7 @@ async function main(): Promise<void> {
     console.log('[db:migrate] ai_forbidden_topics append-only reconciliado.');
 
     await sql.unsafe(buildKnowledgeDocumentsSecuritySql(appRole));
-    console.log('[db:migrate] documentos RAG e gate CREF reconciliados.');
+    console.log('[db:migrate] documentos RAG e gate de aprovação reconciliados.');
 
     // Sprint 8 (US-8.3): user_status_transitions append-only — mesmo molde.
     await sql.unsafe(buildStatusTransitionsImmutabilitySql(appRole));

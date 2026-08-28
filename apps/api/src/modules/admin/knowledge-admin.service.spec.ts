@@ -41,6 +41,8 @@ const ACTOR = {
   jti: 'j1',
 } as const as AuthenticatedUser;
 
+const CREF_ACTOR = { ...ACTOR, role: 'PROFESSIONAL' } as const as AuthenticatedUser;
+
 const DOCUMENT_ID = '33333333-3333-4333-8333-333333333333';
 
 const CONTENT =
@@ -276,12 +278,11 @@ describe('KnowledgeAdminService.content', () => {
 });
 
 const REVIEW = { documentId: DOCUMENT_ID, note: 'metodologia conferida' };
-const CREF_OK = [{ ok: 1 }];
 const READY_STATE = [{ status: 'READY_FOR_REVIEW', stage: 'REVIEW', error_code: null }];
 const EXTRACTION_OK = [{ ok: 1 }];
 
 describe('KnowledgeAdminService.review', () => {
-  // Sequência de `tx.execute` dentro de `review()`: lock, assertActiveCref,
+  // Sequência de `tx.execute` para ADMIN: lock,
   // currentKnowledgeState, checagem de extração canônica, appendKnowledgeEvent —
   // a publicação de fato (embeddings + `publish_knowledge_document`) roda depois,
   // de forma assíncrona, no `KnowledgeProcessingWorker.index()`.
@@ -289,7 +290,6 @@ describe('KnowledgeAdminService.review', () => {
     const { service, inserted, audit, queues } = knowledgeWith({
       executes: [
         [],
-        CREF_OK,
         READY_STATE,
         EXTRACTION_OK,
         [],
@@ -317,7 +317,6 @@ describe('KnowledgeAdminService.review', () => {
     const { service, audit, queues } = knowledgeWith({
       executes: [
         [],
-        CREF_OK,
         READY_STATE,
         EXTRACTION_OK,
         [],
@@ -336,14 +335,14 @@ describe('KnowledgeAdminService.review', () => {
 
   it('recusa revisar sem profissional CREF ativo', async () => {
     const { service } = knowledgeWith({ executes: [[], []] });
-    await expect(service.review(ACTOR, { ...REVIEW, decision: 'APPROVED' })).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    await expect(
+      service.review(CREF_ACTOR, { ...REVIEW, decision: 'APPROVED' }),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('recusa revisar documento que já saiu de READY_FOR_REVIEW (duas revisões)', async () => {
     const { service } = knowledgeWith({
-      executes: [[], CREF_OK, [{ status: 'APPROVED', stage: 'INDEXING', error_code: null }]],
+      executes: [[], [{ status: 'APPROVED', stage: 'INDEXING', error_code: null }]],
     });
     await expect(service.review(ACTOR, { ...REVIEW, decision: 'APPROVED' })).rejects.toBeInstanceOf(
       ConflictException,
@@ -351,7 +350,7 @@ describe('KnowledgeAdminService.review', () => {
   });
 
   it('404 quando o documento não existe', async () => {
-    const { service } = knowledgeWith({ executes: [[], CREF_OK, []] });
+    const { service } = knowledgeWith({ executes: [[], []] });
     await expect(service.review(ACTOR, { ...REVIEW, decision: 'APPROVED' })).rejects.toBeInstanceOf(
       NotFoundException,
     );
@@ -359,7 +358,7 @@ describe('KnowledgeAdminService.review', () => {
 
   it('recusa revisar sem extração canônica disponível', async () => {
     const { service } = knowledgeWith({
-      executes: [[], CREF_OK, READY_STATE, []],
+      executes: [[], READY_STATE, []],
     });
     await expect(service.review(ACTOR, { ...REVIEW, decision: 'APPROVED' })).rejects.toBeInstanceOf(
       ConflictException,

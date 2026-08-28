@@ -69,5 +69,5 @@ export * from './partners';
 export * from './faq-entries';
 export * from './ai-guardrail-rules';
 
-// Sprint 10 - temas proibidos da agente. Append-only, maker-checker, ação fixa em BLOCK.
+// Sprint 10 - temas proibidos da agente. Append-only, workflow auditável, ação fixa em BLOCK.
 export * from './ai-forbidden-topics';

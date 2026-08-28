@@ -1,4 +1,4 @@
-/** Metodologia clínica versionada e seu workflow maker-checker, ambos append-only. */
+/** Metodologia clínica versionada e seu workflow auditável, ambos append-only. */
 import { index, integer, pgEnum, pgTable, text, unique, uuid, varchar } from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn } from './_shared';

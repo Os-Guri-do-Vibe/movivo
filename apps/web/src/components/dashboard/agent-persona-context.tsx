@@ -76,7 +76,7 @@ export interface PersonaStep {
 
 /**
  * As cinco etapas. "Limites" não tem campo de persona de propósito: temas proibidos são
- * uma entidade própria, com maker-checker e publicação separada (contrato do Leonardo,
+ * uma entidade própria, com workflow e publicação separados (contrato do Leonardo,
  * `forbidden-topic.schema.ts`) — o trilho não pode marcá-los como "alteração pendente
  * desta publicação" porque eles não viajam no payload da persona.
  */

@@ -19,6 +19,8 @@ const ACTOR = {
   jti: 'j1',
 } as const as AuthenticatedUser;
 
+const CREF_ACTOR = { ...ACTOR, role: 'PROFESSIONAL' } as const as AuthenticatedUser;
+
 const OTHER_MAKER = '44444444-4444-4444-8444-444444444444';
 const TOPIC_KEY = 'suplementos-anabolizantes';
 const NEW_ROW_ID = '33333333-3333-4333-8333-333333333333';
@@ -228,13 +230,12 @@ describe('ForbiddenTopicAdminService.submit', () => {
 
 describe('ForbiddenTopicAdminService.approve', () => {
   const APPROVE = { topicKey: TOPIC_KEY, note: 'Parecer técnico favorável' };
-  const CREF_OK = [{ id: ACTOR.userId }];
+  const CREF_OK = [{ id: CREF_ACTOR.userId }];
 
-  it('aprova quando o revisor CREF é diferente do autor', async () => {
+  it('ADMIN aprova sem depender de cadastro CREF', async () => {
     const { service, audit, runtime } = forbiddenTopicsWith({
       executeQueue: [
         [], // lock
-        CREF_OK, // assertActiveCref
         [{ active_count: 0, phrase_count: 0 }], // assertCapacity
       ],
       selectQueue: [
@@ -253,22 +254,30 @@ describe('ForbiddenTopicAdminService.approve', () => {
     );
   });
 
-  it('maker-checker: o autor não pode aprovar o próprio tema', async () => {
+  it('ADMIN pode aprovar o próprio tema', async () => {
     const { service } = forbiddenTopicsWith({
-      executeQueue: [[], [{ id: ACTOR.userId }]],
-      selectQueue: [[currentRow({ status: 'PENDING_APPROVAL', createdBy: ACTOR.userId })]],
+      executeQueue: [[], [{ active_count: 0, phrase_count: 0 }]],
+      selectQueue: [[currentRow({ status: 'PENDING_APPROVAL', createdBy: ACTOR.userId })], [], []],
     });
-    await expect(service.approve(ACTOR, APPROVE)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.approve(ACTOR, APPROVE)).resolves.toBeDefined();
+  });
+
+  it('maker-checker continua valendo para PROFESSIONAL', async () => {
+    const { service } = forbiddenTopicsWith({
+      executeQueue: [[], CREF_OK],
+      selectQueue: [[currentRow({ status: 'PENDING_APPROVAL', createdBy: CREF_ACTOR.userId })]],
+    });
+    await expect(service.approve(CREF_ACTOR, APPROVE)).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('recusa aprovar sem profissional CREF ativo', async () => {
     const { service } = forbiddenTopicsWith({ executeQueue: [[], []] });
-    await expect(service.approve(ACTOR, APPROVE)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.approve(CREF_ACTOR, APPROVE)).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('recusa aprovar quando o tema não está PENDING_APPROVAL', async () => {
     const { service } = forbiddenTopicsWith({
-      executeQueue: [[], CREF_OK],
+      executeQueue: [[]],
       selectQueue: [[currentRow({ status: 'DRAFT' })]],
     });
     await expect(service.approve(ACTOR, APPROVE)).rejects.toBeInstanceOf(ConflictException);
@@ -276,7 +285,7 @@ describe('ForbiddenTopicAdminService.approve', () => {
 
   it('recusa aprovar ao estourar o teto de temas ativos', async () => {
     const { service } = forbiddenTopicsWith({
-      executeQueue: [[], CREF_OK, [{ active_count: 12, phrase_count: 0 }]],
+      executeQueue: [[], [{ active_count: 12, phrase_count: 0 }]],
       selectQueue: [[currentRow({ status: 'PENDING_APPROVAL', createdBy: OTHER_MAKER })]],
     });
     await expect(service.approve(ACTOR, APPROVE)).rejects.toBeInstanceOf(ConflictException);
@@ -284,7 +293,7 @@ describe('ForbiddenTopicAdminService.approve', () => {
 
   it('recusa aprovar ao estourar o teto total de termos', async () => {
     const { service } = forbiddenTopicsWith({
-      executeQueue: [[], CREF_OK, [{ active_count: 0, phrase_count: 299 }]],
+      executeQueue: [[], [{ active_count: 0, phrase_count: 299 }]],
       selectQueue: [[currentRow({ status: 'PENDING_APPROVAL', createdBy: OTHER_MAKER })]],
     });
     await expect(service.approve(ACTOR, APPROVE)).rejects.toBeInstanceOf(ConflictException);
@@ -293,11 +302,11 @@ describe('ForbiddenTopicAdminService.approve', () => {
 
 describe('ForbiddenTopicAdminService.retire', () => {
   const RETIRE = { topicKey: TOPIC_KEY, note: 'Tema não é mais necessário' };
-  const CREF_OK = [{ id: ACTOR.userId }];
+  const CREF_OK = [{ id: CREF_ACTOR.userId }];
 
-  it('retira quando o revisor CREF é diferente do autor', async () => {
+  it('ADMIN retira sem depender de cadastro CREF', async () => {
     const { service, audit, runtime } = forbiddenTopicsWith({
-      executeQueue: [[], CREF_OK],
+      executeQueue: [[]],
       selectQueue: [[currentRow({ status: 'APPROVED', createdBy: OTHER_MAKER })], [], []],
     });
 
@@ -310,17 +319,17 @@ describe('ForbiddenTopicAdminService.retire', () => {
     );
   });
 
-  it('maker-checker: o autor não pode retirar o próprio tema', async () => {
+  it('maker-checker continua valendo para PROFESSIONAL ao retirar', async () => {
     const { service } = forbiddenTopicsWith({
       executeQueue: [[], CREF_OK],
-      selectQueue: [[currentRow({ status: 'APPROVED', createdBy: ACTOR.userId })]],
+      selectQueue: [[currentRow({ status: 'APPROVED', createdBy: CREF_ACTOR.userId })]],
     });
-    await expect(service.retire(ACTOR, RETIRE)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.retire(CREF_ACTOR, RETIRE)).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('recusa retirar tema que não está APPROVED', async () => {
     const { service } = forbiddenTopicsWith({
-      executeQueue: [[], CREF_OK],
+      executeQueue: [[]],
       selectQueue: [[currentRow({ status: 'DRAFT' })]],
     });
     await expect(service.retire(ACTOR, RETIRE)).rejects.toBeInstanceOf(ConflictException);
@@ -328,7 +337,7 @@ describe('ForbiddenTopicAdminService.retire', () => {
 
   it('propaga falha de escrita quando o insert não retorna linha', async () => {
     const { service } = forbiddenTopicsWith({
-      executeQueue: [[], CREF_OK],
+      executeQueue: [[]],
       selectQueue: [[currentRow({ status: 'APPROVED', createdBy: OTHER_MAKER })], []],
       insertResult: null,
     });

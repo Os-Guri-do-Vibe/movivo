@@ -38,9 +38,7 @@ export const ControlCenterCapability = {
   /**
    * Cap table e distribuição por sócio (US-8.7). **Fora de `FINANCE_*` de propósito**:
    * quem opera o livro-caixa não precisa ver quanto cabe a cada sócio. Concedidas só a
-   * `ADMIN` (ver `CAPABILITIES_BY_ROLE`) — e não entram na `ADMIN_INHERITANCE_DENYLIST`,
-   * que existe para separar administração de sistema da aprovação de conteúdo
-   * metodológico pelo RT CREF; quadro societário não é esse tipo de conteúdo.
+   * `ADMIN` (ver `CAPABILITIES_BY_ROLE`).
    */
   PARTNERS_READ: 'control_center.partners.read',
   PARTNERS_WRITE: 'control_center.partners.write',
@@ -62,10 +60,8 @@ export const ControlCenterCapability = {
    * Aprovar/retirar **tema proibido** e alterar a **mensagem de handoff humano**.
    *
    * As duas coisas são a mesma classe de decisão: o que a agente se recusa a discutir e o
-   * que o aluno lê quando o sistema desiste de responder. Concedida só ao `PROFESSIONAL`
-   * com CREF ativo — entra na `ADMIN_INHERITANCE_DENYLIST` pelo mesmo motivo que
-   * `AI_METHODOLOGY_APPROVE`: um admin de sistema que aprovasse sozinho tornaria a
-   * supervisão CREF nominal.
+   * que o aluno lê quando o sistema desiste de responder. Concedida ao `PROFESSIONAL`
+   * com CREF ativo e ao `ADMIN`, que recebe todas as capacidades do Control Center.
    */
   AI_GUARDRAIL_APPROVE: 'control_center.ai.guardrail.approve',
 } as const;

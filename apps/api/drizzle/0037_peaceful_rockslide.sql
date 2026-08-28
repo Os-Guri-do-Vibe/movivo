@@ -1,0 +1,1 @@
+ALTER TABLE "ai_forbidden_topics" DROP CONSTRAINT "ck_ai_forbidden_topics_maker_checker";

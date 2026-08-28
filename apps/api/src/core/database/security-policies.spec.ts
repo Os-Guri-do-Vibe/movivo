@@ -12,6 +12,7 @@ import {
   buildAiForbiddenTopicsImmutabilitySql,
   buildFaqEntriesImmutabilitySql,
   buildAiGuardrailRulesImmutabilitySql,
+  buildKnowledgeDocumentsSecuritySql,
   buildRlsPoliciesSql,
   RLS_TENANT_TABLES,
 } from './security-policies';
@@ -24,6 +25,15 @@ describe('buildAiForbiddenTopicsImmutabilitySql', () => {
     expect(sql).toContain('BEFORE TRUNCATE ON public.ai_forbidden_topics');
     expect(sql).toContain('REVOKE UPDATE, DELETE, TRUNCATE ON public.ai_forbidden_topics');
     expect(sql).toContain('GRANT SELECT, INSERT ON public.ai_forbidden_topics');
+  });
+});
+
+describe('buildKnowledgeDocumentsSecuritySql', () => {
+  const sql = buildKnowledgeDocumentsSecuritySql('movivo_app');
+
+  it('aceita revisão aprovada por ADMIN ou profissional CREF ativo', () => {
+    expect(sql).toContain("reviewer.role = 'ADMIN'");
+    expect(sql).toContain("reviewer.role = 'PROFESSIONAL' AND reviewer.cref_active = true");
   });
 });
 

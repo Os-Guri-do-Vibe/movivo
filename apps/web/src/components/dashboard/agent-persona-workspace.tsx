@@ -10,8 +10,8 @@
  * mesmo tempo (ver `ai-agent-dashboard.tsx`).
  *
  * O que **não** se duplica fica aqui:
- *  - **Temas proibidos** (`getForbiddenTopics`): são entidade própria, com maker-checker e
- *    publicação separada, e valem para os dois públicos. Buscá-los uma vez por slot seria
+ *  - **Temas proibidos** (`getForbiddenTopics`): são entidade própria, com workflow auditável
+ *    e publicação separada, e valem para os dois públicos. Buscá-los uma vez por slot seria
  *    duas chamadas para a mesma lista — e duas cópias divergindo depois de uma aprovação.
  *  - **Capabilities** (`canWrite` / `canApprove`): vêm da sessão, não do slot.
  *  - **Slot ativo** (`activeSex`), espelhado em `?agente=` para o deep-link sobreviver a um

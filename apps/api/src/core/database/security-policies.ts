@@ -412,7 +412,7 @@ export function buildAiGuardrailRulesImmutabilitySql(appRole: string): string {
  * e o histórico de aprovação do RT CREF (`approved_by`) deixaria de provar o que aprovou.
  *
  * `REVOKE UPDATE` também é o que impede a role de runtime de contornar o `CHECK` de
- * maker-checker reescrevendo `approved_by` numa linha já gravada.
+ * trilha de aprovação reescrevendo `approved_by` numa linha já gravada.
  */
 export function buildAiForbiddenTopicsImmutabilitySql(appRole: string): string {
   return `
@@ -906,7 +906,7 @@ export function buildAdSpendImmutabilitySql(appRole: string): string {
   `;
 }
 
-/** Metadados/revisoes RAG sao historico; publicacao exige revisao CREF no banco. */
+/** Metadados/revisoes RAG sao historico; publicacao exige revisao profissional ou ADMIN. */
 export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
   const histories = [
     'knowledge_documents',
@@ -961,14 +961,17 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
         JOIN public.users reviewer ON reviewer.id = review.reviewer_id
         WHERE review.document_id = target_document
           AND review.decision = 'APPROVED'::public.knowledge_review_decision
-          AND reviewer.role = 'PROFESSIONAL' AND reviewer.cref_active = true
+          AND (
+            (reviewer.role = 'PROFESSIONAL' AND reviewer.cref_active = true)
+            OR reviewer.role = 'ADMIN'
+          )
           AND review.id = (
             SELECT latest.id FROM public.knowledge_document_reviews latest
             WHERE latest.document_id = target_document
             ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1
           )
       ) THEN
-        RAISE EXCEPTION 'approved CREF review required' USING ERRCODE = '42501';
+        RAISE EXCEPTION 'approved professional or admin review required' USING ERRCODE = '42501';
       END IF;
       IF (
         SELECT event.status FROM public.knowledge_document_events event
