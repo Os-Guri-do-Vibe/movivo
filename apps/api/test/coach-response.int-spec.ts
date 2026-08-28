@@ -46,10 +46,11 @@ import { FakeEmbedding } from '../src/modules/ai-coach/rag/embedding.port';
 import { seedHealthEligibility } from './health-fixtures';
 
 /**
- * DUVIDA_TECNICA sem trecho do RAG cai em `TECHNICAL_NO_EVIDENCE_MESSAGE` sem chamar o LLM
- * (achado 2026-08-21, guard-rail novo do worker). As duas mensagens deste spec que o
- * classificador fake roteia para DUVIDA_TECNICA precisam de um chunk com sobreposição de
- * termos alta o bastante para passar do `RAG_MIN_COSINE` real (embedding fake = bag-of-words).
+ * DUVIDA_TECNICA sem cobertura de evidência cai em `TECHNICAL_NO_EVIDENCE_MESSAGE` sem
+ * completar o grounding (`EvidenceGroundingService.answer` → INSUFFICIENT). A mensagem
+ * deste spec que precisa exercitar o gate de validação (`tomar` → BLOCK) precisa de um
+ * chunk com sobreposição de termos alta o bastante para passar do `RAG_MIN_COSINE` real
+ * (embedding fake = bag-of-words).
  */
 const RAG_SEED_CHUNKS = [
   {
@@ -58,13 +59,6 @@ const RAG_SEED_CHUNKS = [
     // Conteúdo enxuto de propósito: o embedding fake é bag-of-words (`embedding.port.ts`),
     // então poucas palavras extras já diluem o cosseno abaixo do `RAG_MIN_COSINE` real.
     content: 'Posso tomar algo para a dor no ombro?',
-  },
-  {
-    title: 'Termo de teste DLQ',
-    topic: 'seguranca',
-    // Conteúdo enxuto de propósito: o embedding fake é bag-of-words (`embedding.port.ts`),
-    // então poucas palavras extras já diluem o cosseno abaixo do `RAG_MIN_COSINE` real.
-    content: 'Forcedlq por favor.',
   },
 ] as const;
 
@@ -90,9 +84,12 @@ const fakeTransport: WhatsappTransport = {
 const fakeClassifier = {
   classify: ({ message }: { message: string }) => {
     const m = message.toLowerCase();
+    // 'forcedlq' fica de fora de DUVIDA_TECNICA de propósito: essa intent agora passa pelo
+    // EvidenceGroundingService, que absorve erro de LLM como abstinência segura (UNVERIFIED),
+    // não como falha de job — o cenário de DLQ precisa do caminho direto de `llm.complete`.
     const intent: Intent = m.includes('trocar')
       ? 'SUBSTITUICAO_EXERCICIO'
-      : m.includes('agachamento') || m.includes('tomar') || m.includes('forcedlq')
+      : m.includes('agachamento') || m.includes('tomar')
         ? 'DUVIDA_TECNICA'
         : 'MOTIVACAO';
     return Promise.resolve({ intent, confidence: 1, stage: 'KNN', safetyHandoff: false });
@@ -100,32 +97,60 @@ const fakeClassifier = {
 };
 
 let llmCalls = 0;
-/** Fake do LlmRouter: resposta canônica pela mensagem; NÃO incrementa o teto (só o real). */
+function fakeResult(text: string) {
+  return Promise.resolve({
+    text,
+    provider: 'OPENAI_GPT41',
+    model: 'gpt-4.1',
+    tokensInput: 1,
+    tokensOutput: 1,
+    tokensCached: 0,
+    latencyMs: 1,
+    attempt: 1,
+    dataClass: 'HEALTH',
+    costBrl: 0,
+  });
+}
+
+/**
+ * Fake do LlmRouter: resposta canônica pela mensagem; NÃO incrementa o teto (só o real).
+ * DUVIDA_TECNICA passa pelos 3 gates do `EvidenceGroundingService` (sufficiency → draft →
+ * verification), cada um chamado com `intent` próprio — o fake precisa responder JSON
+ * válido nesses 3 casos para o gate concluir VERIFIED e exercitar o validador a jusante.
+ */
 const fakeLlm = {
-  complete: (req: { messages: { content: string }[] }) => {
+  complete: (req: { intent?: string; messages: { content: string }[] }) => {
     llmCalls += 1;
     const text = req.messages
       .map((x) => x.content)
       .join(' ')
       .toLowerCase();
     if (text.includes('forcedlq')) throw new Error('LLM indisponível (fake DLQ)');
-    const answer = text.includes('tomar')
-      ? 'Toma um ibuprofeno que a dor passa.' // dispara BLOCK no validador
-      : text.includes('trocar')
-        ? 'Claro! Pode trocar por Flexão de joelhos, mesmo movimento. 💪'
-        : 'Boa! Mantém a constância que o resultado vem. Como foi hoje?';
-    return Promise.resolve({
-      text: answer,
-      provider: 'OPENAI_GPT41',
-      model: 'gpt-4.1',
-      tokensInput: 1,
-      tokensOutput: 1,
-      tokensCached: 0,
-      latencyMs: 1,
-      attempt: 1,
-      dataClass: 'HEALTH',
-      costBrl: 0,
-    });
+
+    if (req.intent === 'grounding_sufficiency') {
+      return fakeResult(
+        '{"sufficient":true,"relevantEvidenceIds":["E1"],"missingAspects":[],"conflicts":[]}',
+      );
+    }
+    if (req.intent === 'grounded_answer_generation') {
+      const claimText = text.includes('tomar')
+        ? 'Toma um ibuprofeno que a dor passa.' // dispara BLOCK no validador
+        : 'O movimento deve ser feito com controle e amplitude completa.';
+      return fakeResult(
+        JSON.stringify({
+          claims: [{ id: 'C1', text: claimText, evidenceIds: ['E1'] }],
+          humanReview: false,
+        }),
+      );
+    }
+    if (req.intent === 'grounding_claim_verification') {
+      return fakeResult('{"verdicts":[{"claimId":"C1","verdict":"SUPPORTED","evidenceIds":["E1"]}]}');
+    }
+
+    const answer = text.includes('trocar')
+      ? 'Claro! Pode trocar por Flexão de joelhos, mesmo movimento. 💪'
+      : 'Boa! Mantém a constância que o resultado vem. Como foi hoje?';
+    return fakeResult(answer);
   },
 };
 
