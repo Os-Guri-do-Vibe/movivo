@@ -24,9 +24,14 @@ export interface RagDoc {
   publicationEventId?: string;
 }
 
+export interface SemanticRetrievalOptions {
+  /** Quantidade final desejada; a implementação ainda aplica thresholds e diversidade. */
+  topK?: number;
+}
+
 export interface SemanticMemoryPort {
-  /** Trechos relevantes à `query` (só chamado em `DUVIDA_TECNICA`). `[]` = sem cobertura. */
-  retrieve(query: string): Promise<RagDoc[]>;
+  /** Trechos relevantes à `query`; `[]` significa que o corpus publicado não deu cobertura. */
+  retrieve(query: string, options?: SemanticRetrievalOptions): Promise<RagDoc[]>;
 }
 
 export const SEMANTIC_MEMORY = Symbol('MOVIVO_SEMANTIC_MEMORY');
