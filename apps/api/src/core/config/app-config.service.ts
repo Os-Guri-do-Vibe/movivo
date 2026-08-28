@@ -55,6 +55,7 @@ export function parseDurationSeconds(value: string): number {
 export interface LlmConfig {
   readonly primaryModel: string;
   readonly fallbackModel: string;
+  readonly secondaryFallbackModel: string;
   readonly maxTokens: number;
   readonly timeoutMs: number;
   /** Timeout só de `PROTOCOL_GENERATION` — job em fila, tolera bem mais que o chat. */
@@ -63,8 +64,12 @@ export interface LlmConfig {
   readonly dailyCostAlertBrl: number;
   readonly usdBrlRate: number;
   /** Chaves opcionais: `undefined` em dev/CI sem segredo. Segredos redigidos no snapshot. */
+  readonly deepseekApiKey: string | undefined;
   readonly openaiApiKey: string | undefined;
   readonly anthropicApiKey: string | undefined;
+  readonly deepseekHealthDataApproved: boolean;
+  readonly openaiHealthDataApproved: boolean;
+  readonly anthropicHealthDataApproved: boolean;
 }
 
 export interface WhatsappConfig {
@@ -116,6 +121,7 @@ export interface RedisConfig {
 }
 
 export interface KnowledgeConfig {
+  readonly openaiEmbeddingHealthDataApproved: boolean;
   readonly complexFormatsEnabled: boolean;
   readonly allowedMimeTypes: readonly string[];
   readonly uploadMaxBytes: number;
@@ -201,19 +207,24 @@ export class AppConfigService {
     };
   }
 
-  /** Config da camada de IA (US-2.2 / ADR-005-R). Chaves são segredos redigidos no snapshot. */
+  /** Config da camada de IA (US-2.2 / ADR-005-R2). Chaves são segredos redigidos no snapshot. */
   get llm(): LlmConfig {
     return {
       primaryModel: this.config.LLM_PRIMARY_MODEL,
       fallbackModel: this.config.LLM_FALLBACK_MODEL,
+      secondaryFallbackModel: this.config.LLM_SECONDARY_FALLBACK_MODEL,
       maxTokens: this.config.LLM_MAX_TOKENS,
       timeoutMs: this.config.LLM_TIMEOUT_MS,
       protocolTimeoutMs: this.config.LLM_PROTOCOL_TIMEOUT_MS,
       userDailyMessageLimit: this.config.LLM_USER_DAILY_MESSAGE_LIMIT,
       dailyCostAlertBrl: this.config.LLM_DAILY_COST_ALERT_BRL,
       usdBrlRate: this.config.LLM_USD_BRL_RATE,
+      deepseekApiKey: this.config.DEEPSEEK_API_KEY,
       openaiApiKey: this.config.OPENAI_API_KEY,
       anthropicApiKey: this.config.ANTHROPIC_API_KEY,
+      deepseekHealthDataApproved: this.config.LLM_DEEPSEEK_HEALTH_DATA_APPROVED,
+      openaiHealthDataApproved: this.config.LLM_OPENAI_HEALTH_DATA_APPROVED,
+      anthropicHealthDataApproved: this.config.LLM_ANTHROPIC_HEALTH_DATA_APPROVED,
     };
   }
 
@@ -263,6 +274,8 @@ export class AppConfigService {
 
   get knowledge(): KnowledgeConfig {
     return {
+      openaiEmbeddingHealthDataApproved:
+        this.config.KNOWLEDGE_OPENAI_EMBEDDING_HEALTH_DATA_APPROVED,
       complexFormatsEnabled: this.config.KNOWLEDGE_COMPLEX_FORMATS_ENABLED,
       allowedMimeTypes: this.config.KNOWLEDGE_ALLOWED_MIME_TYPES,
       uploadMaxBytes: this.config.KNOWLEDGE_UPLOAD_MAX_BYTES,

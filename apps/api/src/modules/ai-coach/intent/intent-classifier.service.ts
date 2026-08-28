@@ -11,6 +11,7 @@ import { PinoLogger } from 'nestjs-pino';
 
 import { LlmRouter } from '../llm/llm-router.service';
 import type { ScrubUser } from '../llm/llm.types';
+import { scrubPII } from '../llm/pii-scrubber';
 import { EMBEDDING_PORT, type EmbeddingPort } from '../rag/embedding.port';
 import { clinicalGuardrail } from './clinical-guardrail';
 import { IntentRepository } from './intent.repository';
@@ -50,7 +51,7 @@ export class IntentClassifier {
     }
 
     // Etapa 1 — embedding-kNN.
-    const vec = await this.embedding.embed(input.message);
+    const vec = await this.embedding.embed(scrubPII(input.message, input.user));
     const knn = await this.repo.classifyByKnn(vec);
     if (knn && knn.confidence >= KNN_MIN_CONFIDENCE && isIntent(knn.intent)) {
       return {

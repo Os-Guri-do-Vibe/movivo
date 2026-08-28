@@ -48,7 +48,11 @@ const migratorDb = drizzle(migratorSql) as unknown as DrizzleClient;
 const configStub = {
   rag: { minCosine: 0.3, rerankMinScore: 0, topK: 3, candidates: 20 },
 } as never;
-const loggerStub = { setContext: () => undefined, warn: () => undefined } as never;
+const loggerStub = {
+  setContext: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+} as never;
 
 let app: INestApplication;
 let rag: RagService;

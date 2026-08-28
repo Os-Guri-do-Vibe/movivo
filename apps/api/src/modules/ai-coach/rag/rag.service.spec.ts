@@ -19,7 +19,7 @@ function make(rows: unknown[]) {
   const config = {
     rag: { minCosine: 0.75, rerankMinScore: 0.5, topK: 3, candidates: 20 },
   } as unknown as AppConfigService;
-  const logger = { setContext: vi.fn(), warn: vi.fn() } as unknown as PinoLogger;
+  const logger = { setContext: vi.fn(), warn: vi.fn(), info: vi.fn() } as unknown as PinoLogger;
   const exec = vi.fn().mockResolvedValue([]);
   const incr = vi.fn();
   const pipeline = { incr, expire: vi.fn(), exec };

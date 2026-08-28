@@ -14,6 +14,11 @@ export interface RagDoc {
   snippet: string;
   sourceUrl?: string;
   score: number;
+  /** Metadados de governança usados pela hierarquia de autoridade e pelo verificador. */
+  category?: 'METHODOLOGY' | 'SCIENTIFIC_EVIDENCE' | 'EXERCISE_LIBRARY' | 'SAFETY' | 'OTHER';
+  reliability?: number;
+  topic?: string;
+  retrievalMode?: 'SINGLE_HOP' | 'MULTI_HOP';
   documentVersion?: number;
   documentSha256?: string;
   publicationEventId?: string;

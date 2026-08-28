@@ -65,15 +65,17 @@ Herdados de Clóvis e Gabriel, valem para **qualquer texto gerado pelo sistema o
 
 A arquitetura de referência completa foi definida por Rafael (Distinguished Software Architect) em `docs/fitness-ia-whatsapp/10-relatorio-rafael.md`. As regras obrigatórias de desenvolvimento, stack e diagramas estão condensadas e operacionalizadas em **[docs/arquitetura/ARQUITETURA.md](docs/arquitetura/ARQUITETURA.md)** — todo agente de engenharia (Sato, Victor, Leonardo, Felipe, Mariana, Henrique) e toda sessão de código neste repositório deve seguir esse documento.
 
-### Correção crítica pós Fase 2–4: troca do LLM principal
+### Revisão vigente do LLM principal — ADR-005-R2
 
-O relatório original de Rafael definia **DeepSeek V3.2** como LLM principal (ADR-005). Essa decisão foi **formalmente revertida (ADR-005-R)** após três achados independentes:
+A proibição categórica do DeepSeek foi substituída por um **gate neutro por fornecedor**. Histórico
+de incidente e jurisdição entram na diligência, mas não produzem banimento automático; OpenAI,
+Anthropic e DeepSeek precisam comprovar os mesmos controles para processar dados de saúde.
 
-- **Alexandre:** DeepSeek opera com servidores na China, sem salvaguarda contratual válida para dados de saúde sob LGPD.
-- **Sato:** DeepSeek teve um vazamento de dados público e documentado (pesquisa Wiz, jan/2025).
-- **Eduardo:** a troca custa apenas ~R$0,95–0,97/usuário/mês a mais — irrelevante para o unit economics.
-
-**Decisão vigente:** **GPT-4.1 (OpenAI) como LLM principal, Claude Sonnet 4.5 (Anthropic) como fallback**, ambos com Zero Data Retention + DPA/SCC. DeepSeek foi removido do projeto por completo. Detalhes técnicos em `docs/arquitetura/ARQUITETURA.md` §3.1 e `docs/fitness-ia-whatsapp/12-relatorio-victor.md`.
+**Decisão vigente:** **DeepSeek V4 Pro como candidato principal**, GPT-4.1 como primeiro fallback e
+Claude Sonnet 4.5 como segundo fallback. Nenhum endpoint recebe `HEALTH` até aprovação explícita
+de DPA, transferência internacional, retenção/no-training, suboperadores e segurança. O gate é
+executável no `LLMRouter` e fecha antes do envio. Detalhes em `docs/arquitetura/ARQUITETURA.md`
+§3.1 e `docs/arquitetura/decisoes/adr-005-r2-selecao-neutra-de-provedor-llm.md`.
 
 ### Pipeline de validação — completo
 

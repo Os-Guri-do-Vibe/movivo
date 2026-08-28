@@ -29,6 +29,7 @@ import {
 import { L1GuardrailService } from '../../core/agent-config/l1-guardrail.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { ContextService } from '../ai-coach/context/context.service';
+import { EvidenceGroundingService } from '../ai-coach/rag/evidence-grounding.service';
 import { clinicalGuardrail } from '../ai-coach/intent/clinical-guardrail';
 import { IntentClassifier } from '../ai-coach/intent/intent-classifier.service';
 import type { Intent } from '../ai-coach/intent/intent.types';
@@ -76,6 +77,9 @@ interface ResponseDraft {
     documentVersion?: number;
     documentSha256?: string;
     publicationEventId?: string;
+    evidenceId?: string;
+    claimIds?: string[];
+    verifierModel?: string;
   }>;
 }
 
@@ -105,6 +109,7 @@ export class AIResponseWorker implements OnModuleInit {
     private readonly forbiddenTopics: ForbiddenTopicsService,
     private readonly l1Guardrails: L1GuardrailService,
     private readonly context: ContextService,
+    private readonly grounding: EvidenceGroundingService,
     private readonly llm: LlmRouter,
     private readonly abuse: LlmAbuseGuard,
     private readonly validation: ValidationService,
@@ -325,7 +330,14 @@ export class AIResponseWorker implements OnModuleInit {
         return { status: 'HANDOFF' };
       }
 
-      const draft = await this.buildResponse(userId, intent.intent, message, scrubUser, personaCtx);
+      const draft = await this.buildResponse(
+        userId,
+        intent.intent,
+        message,
+        scrubUser,
+        personaCtx,
+        correlationId,
+      );
       const l1Flags = draft.blocked ? [] : await this.l1Guardrails.evaluate(message, draft.text);
 
       if (draft.blocked) {
@@ -380,6 +392,7 @@ export class AIResponseWorker implements OnModuleInit {
     message: string,
     scrubUser: ScrubUser,
     personaCtx: PersonaContext,
+    operationId: string,
   ): Promise<ResponseDraft> {
     if (intent === 'FORA_DE_ESCOPO') {
       // Recusa honesta pré-aprovada — sem LLM generativo (US-3.4). O nome da agente vem
@@ -387,9 +400,17 @@ export class AIResponseWorker implements OnModuleInit {
       return draftPass(this.prompts.foraDeEscopoResponseFor(personaCtx.persona), null, 0);
     }
     if (intent === 'SUBSTITUICAO_EXERCICIO') {
-      return this.buildSubstitution(userId, intent, message, scrubUser, personaCtx);
+      return this.buildSubstitution(userId, intent, message, scrubUser, personaCtx, operationId);
     }
-    return this.buildGenerative(userId, intent, message, scrubUser, personaCtx, undefined);
+    return this.buildGenerative(
+      userId,
+      intent,
+      message,
+      scrubUser,
+      personaCtx,
+      operationId,
+      undefined,
+    );
   }
 
   /** Substituição segura: substituto SEMPRE da base; a IA só verbaliza; o validador confirma. */
@@ -399,6 +420,7 @@ export class AIResponseWorker implements OnModuleInit {
     message: string,
     scrubUser: ScrubUser,
     personaCtx: PersonaContext,
+    operationId: string,
   ): Promise<ResponseDraft> {
     const constraints = await this.repo.loadConstraints(userId);
     const target = findExerciseByMention(message);
@@ -412,7 +434,7 @@ export class AIResponseWorker implements OnModuleInit {
     const extra =
       `SUBSTITUTO APROVADO DA BASE: no lugar de "${target.name}", oriente "${substitute.name}". ` +
       'Explique só essa troca; NÃO sugira nenhum outro exercício nem invente carga.';
-    return this.buildGenerative(userId, intent, message, scrubUser, personaCtx, {
+    return this.buildGenerative(userId, intent, message, scrubUser, personaCtx, operationId, {
       extraSystem: extra,
       allowedExercises: [target.name, substitute.name, target.id, substitute.id],
     });
@@ -425,6 +447,7 @@ export class AIResponseWorker implements OnModuleInit {
     message: string,
     scrubUser: ScrubUser,
     personaCtx: PersonaContext,
+    operationId: string,
     opts: { extraSystem?: string; allowedExercises?: string[] } | undefined,
   ): Promise<ResponseDraft> {
     const ctx = await this.context.build(userId, intent, message, personaCtx.persona.agentName);
@@ -453,23 +476,6 @@ export class AIResponseWorker implements OnModuleInit {
         role: 'user' as const,
         content: untrustedDataEnvelope('ESTADO_E_MEMORIA', ctx.cacheablePrefix),
       },
-      ...(ctx.ragDocs.length
-        ? [
-            {
-              role: 'user' as const,
-              content: untrustedDataEnvelope(
-                'BASE_DE_CONHECIMENTO',
-                ctx.ragDocs.map((document) => ({
-                  chunkId: document.chunkId,
-                  documentId: document.documentId,
-                  title: document.title,
-                  sourceUrl: document.sourceUrl ?? null,
-                  snippet: document.snippet,
-                })),
-              ),
-            },
-          ]
-        : []),
       ...(methodology?.summary
         ? [
             {
@@ -488,6 +494,50 @@ export class AIResponseWorker implements OnModuleInit {
       },
     ];
 
+    if (intent === 'DUVIDA_TECNICA') {
+      const grounded = await this.grounding.answer({
+        userId,
+        operationId,
+        user: scrubUser,
+        question: message,
+        authoritativeState: ctx.authoritativeState,
+        system,
+        contextMessages: messages,
+        documents: ctx.ragDocs,
+        maxClaims: { CURTO: 1, MEDIO: 2, LIVRE: 3 }[runtime.formatting.blockSize],
+        personaSlot: personaCtx.slot,
+      });
+      if (grounded.status !== 'VERIFIED') {
+        return {
+          ...draftPass(TECHNICAL_NO_EVIDENCE_MESSAGE, null, grounded.latencyMs),
+          humanReview: true,
+        };
+      }
+      const groundedVerdict = this.validation.validateResponse(grounded.text);
+      if (groundedVerdict.action === 'BLOCK_FALLBACK') {
+        return {
+          text: STANDARD_BLOCK_RESPONSE,
+          modelUsed: grounded.model,
+          latencyMs: grounded.latencyMs,
+          validationPassed: false,
+          humanReview: true,
+          blocked: true,
+        };
+      }
+      return {
+        text: grounded.text,
+        modelUsed: grounded.model,
+        latencyMs: grounded.latencyMs,
+        validationPassed: true,
+        humanReview: grounded.humanReview || groundedVerdict.humanReviewRequired,
+        blocked: false,
+        ragSources: grounded.sources.map((source) => ({
+          ...source,
+          verifierModel: grounded.verifierModel,
+        })),
+      };
+    }
+
     const startedAt = Date.now();
     const result = await this.llm.complete({
       purpose: 'AI_RESPONSE',
@@ -500,6 +550,7 @@ export class AIResponseWorker implements OnModuleInit {
       cache: true,
       intent: `coach_${intent}`,
       personaSlot: personaCtx.slot,
+      operationId,
     });
     const latencyMs = Date.now() - startedAt;
 

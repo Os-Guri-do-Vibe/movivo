@@ -64,7 +64,7 @@ export const protocolVersions = pgTable(
     /** Motivo da nova versão (ex.: ajuste pós check-in da semana 3). */
     changeReason: text('change_reason'),
 
-    /** Modelo que redigiu esta versão. Nunca `deepseek-*` (§12.11). */
+    /** Modelo que redigiu esta versão, após o gate neutro da ADR-005-R2. */
     generatedBy: varchar('generated_by', { length: 50 }),
 
     /** Proveniência do RAG usada nesta versão; nunca inclui o texto sensível do aluno. */

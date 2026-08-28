@@ -16,6 +16,7 @@ function make() {
     expire: vi.fn().mockResolvedValue(1),
     incrbyfloat: vi.fn(),
     get: vi.fn(),
+    set: vi.fn(),
   };
   const keys = new RedisKeyBuilder('movivo');
   const config = {
@@ -48,6 +49,26 @@ describe('LlmAbuseGuard.check', () => {
     const { guard, redis } = make();
     redis.incr.mockResolvedValue(4); // limite = 3
     await expect(guard.check(USER_ID)).rejects.toBeInstanceOf(LLMAbuseError);
+  });
+
+  it('conta apenas uma vez as etapas internas da mesma operação', async () => {
+    const { guard, redis } = make();
+    redis.set.mockResolvedValueOnce('OK').mockResolvedValueOnce(null);
+    redis.incr.mockResolvedValue(1);
+
+    await guard.check(USER_ID, 'mensagem-1');
+    await guard.check(USER_ID, 'mensagem-1');
+
+    expect(redis.incr).toHaveBeenCalledOnce();
+  });
+
+  it('não deixa retry da mesma operação furar um teto que já foi excedido', async () => {
+    const { guard, redis } = make();
+    redis.set.mockResolvedValue(null);
+    redis.get.mockResolvedValue('4');
+
+    await expect(guard.check(USER_ID, 'mensagem-bloqueada')).rejects.toBeInstanceOf(LLMAbuseError);
+    expect(redis.incr).not.toHaveBeenCalled();
   });
 });
 

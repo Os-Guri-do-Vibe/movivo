@@ -1,5 +1,9 @@
 # Relatório — Gabriel Sato (Distinguished Security Engineer / Principal Security Architect)
 
+> **Nota de vigência (2026-08-27):** o banimento por fornecedor descrito abaixo foi substituído
+> pela **ADR-005-R2**. O incidente continua no registro de risco, mas DeepSeek, OpenAI e Anthropic
+> passam pelo mesmo gate contratual, de retenção e transferência, aplicado no runtime antes do envio.
+
 **Data:** 2026-07-22
 **Ideia analisada:** MOVIVO — AI Coach de treino no WhatsApp com supervisão CREF
 **Pasta do projeto:** docs/fitness-ia-whatsapp/

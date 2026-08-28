@@ -60,9 +60,8 @@ export const aiJobs = pgTable(
 
     /**
      * Modelo efetivamente usado — **o que respondeu**, não o que foi pedido.
-     * Quando o circuit breaker cai do principal para o fallback (ADR-005-R:
-     * GPT-4.1 → Claude Sonnet 4.5), é este campo que revela o failover.
-     * Nunca `deepseek-*`: o DeepSeek foi removido do projeto (§12.11).
+     * Quando o circuit breaker cai do principal para os fallbacks (ADR-005-R2:
+     * DeepSeek V4 Pro → GPT-4.1 → Claude Sonnet 4.5), este campo revela o failover.
      */
     modelUsed: varchar('model_used', { length: 50 }),
 
@@ -75,7 +74,7 @@ export const aiJobs = pgTable(
 
     // --- Colunas de LLMOps (US-2.2 / TASK-2.2.3 · Victor §6.1) -----------------
 
-    /** Provedor efetivo: `OPENAI_GPT41` | `ANTHROPIC_SONNET45`. Nunca DeepSeek (§12.11). */
+    /** Provedor efetivo, após o gate de classe de dado da ADR-005-R2. */
     provider: varchar('provider', { length: 30 }),
 
     /** Classe de dado roteada. Fail-safe do router: `HEALTH` por padrão (Victor §1.1). */

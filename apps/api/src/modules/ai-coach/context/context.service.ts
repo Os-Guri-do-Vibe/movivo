@@ -21,6 +21,8 @@ import { containsPromptLeak, detectInjection } from '../../protocol/validation/p
 import { untrustedDataEnvelope } from './untrusted-context';
 
 export interface CoachContext {
+  /** Estado estruturado autoritativo, sem resumo conversacional, para checagem de conflitos. */
+  authoritativeState: string;
   /** Bloco estável (estado episodic + resumo) — no topo do prompt, cacheável. */
   cacheablePrefix: string;
   /** Bloco volátil (janela recente + mensagem atual) — muda a cada turno. */
@@ -90,9 +92,10 @@ export class ContextService {
       }
     }
 
+    const authoritativeState = scrub(JSON.stringify(episodic.state));
     const prefix = [
       'ESTADO ATUAL DO ALUNO (não repita ao usuário; use para personalizar):',
-      JSON.stringify(episodic.state),
+      authoritativeState,
       episodic.summary ? `RESUMO DA CONVERSA ATÉ AQUI: ${episodic.summary}` : '',
     ]
       .filter(Boolean)
@@ -110,6 +113,7 @@ export class ContextService {
     ].join('\n');
 
     return {
+      authoritativeState,
       cacheablePrefix: scrub(prefix),
       volatileSuffix: scrub(suffix),
       // O snippet do RAG também passa pelo scrubber (defesa em profundidade).

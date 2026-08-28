@@ -2,7 +2,7 @@
  * Contratos da camada de IA (US-2.2 / Victor §1.1).
  *
  * O `LLMRouter` é o **único** ponto autorizado a falar com um provedor de LLM
- * (ADR-005-R / ARQUITETURA.md §12.12). Estes tipos são o que ele expõe; o SDK/HTTP
+ * (ADR-005-R2 / ARQUITETURA.md §12.12). Estes tipos são o que ele expõe; o SDK/HTTP
  * do provedor fica confinado a `providers.ts`.
  */
 import type { BiologicalSex } from '@movivo/shared';
@@ -10,8 +10,8 @@ import type { BiologicalSex } from '@movivo/shared';
 /** Classe de dado que roteia a chamada. Fail-safe: ausente ⇒ `HEALTH` (Victor §1.1). */
 export type DataClass = 'HEALTH' | 'NON_HEALTH';
 
-/** Provedores permitidos. DeepSeek está **ausente** por decisão (ADR-005-R). */
-export type ProviderName = 'OPENAI_GPT41' | 'ANTHROPIC_SONNET45';
+/** Provedores permitidos; todos passam pelo mesmo gate de classe de dado. */
+export type ProviderName = 'DEEPSEEK_V4_PRO' | 'OPENAI_GPT41' | 'ANTHROPIC_SONNET45';
 
 /** Finalidade da chamada — alimenta `ai_jobs.job_type` e o teto de tokens por propósito. */
 export type LLMPurpose = 'PROTOCOL_GENERATION' | 'AI_RESPONSE' | 'CHECKIN_ADJUSTMENT';
@@ -45,6 +45,8 @@ export interface LLMRequest {
   /** Teto por chamada; o router faz clamp no teto global de config. */
   maxTokens?: number;
   temperature?: number;
+  /** Solicita JSON nativo quando o endpoint oferece esse recurso; a saída ainda é validada. */
+  json?: boolean;
   /** Marca o prefixo como cacheável (Anthropic `cache_control`; OpenAI é automático). */
   cache?: boolean;
   /** Rótulo livre para telemetria (`ai_jobs.intent`). */
@@ -60,6 +62,8 @@ export interface LLMRequest {
    * cruzado com `users.biological_sex` no banco, sob controle de acesso — não do log.
    */
   personaSlot?: BiologicalSex | null;
+  /** Agrupa chamadas internas de uma mesma mensagem para o teto anti-abuso. */
+  operationId?: string;
 }
 
 export interface LLMUsage {
@@ -76,6 +80,7 @@ export interface ProviderCompleteRequest {
   maxTokens: number;
   temperature: number;
   cache: boolean;
+  json: boolean;
 }
 
 export interface ProviderResult {
@@ -91,6 +96,8 @@ export interface ProviderResult {
 export interface LLMProvider {
   readonly name: ProviderName;
   readonly model: string;
+  /** Aprovação contratual/operacional explícita para a classe de dado. */
+  canProcess(dataClass: DataClass): boolean;
   /** `false` quando a chave não foi provisionada (dev/CI sem segredo). */
   hasCredentials(): boolean;
   complete(req: ProviderCompleteRequest, signal: AbortSignal): Promise<ProviderResult>;

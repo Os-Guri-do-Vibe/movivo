@@ -142,10 +142,8 @@ export const protocols = pgTable(
     reviewUrgency: reviewUrgencyEnum('review_urgency'),
 
     /**
-     * Modelo que redigiu a versão (`gpt-4.1`, `claude-sonnet-4-5`). Exigido para
-     * auditoria e versionamento das respostas de IA. **Nunca `deepseek-*`**:
-     * DeepSeek foi removido do projeto por decisão jurídica e de segurança
-     * (ADR-005-R / regra §12.11).
+     * Provedor que redigiu a versão. Exigido para auditoria e sujeito ao gate neutro
+     * de classe de dado da ADR-005-R2.
      */
     generatedBy: varchar('generated_by', { length: 50 }),
 

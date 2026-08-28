@@ -4,7 +4,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { AnthropicProvider, OpenAiProvider } from './providers';
+import { AnthropicProvider, DeepSeekProvider, OpenAiProvider } from './providers';
 import { LLMProviderError, type ProviderCompleteRequest } from './llm.types';
 
 const REQ: ProviderCompleteRequest = {
@@ -13,6 +13,7 @@ const REQ: ProviderCompleteRequest = {
   maxTokens: 100,
   temperature: 0.4,
   cache: true,
+  json: false,
 };
 
 function signal(): AbortSignal {
@@ -24,6 +25,91 @@ function mockFetch(impl: () => Promise<Partial<Response>>): void {
 }
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe('gate neutro de dados', () => {
+  it('bloqueia HEALTH sem atestado e permite NON_HEALTH para qualquer provedor', () => {
+    const providers = [
+      new DeepSeekProvider('deepseek-v4-pro', 'sk-test'),
+      new OpenAiProvider('OPENAI_GPT41', 'gpt-4.1', 'sk-test'),
+      new AnthropicProvider('ANTHROPIC_SONNET45', 'claude-sonnet-4-5', 'sk-test'),
+    ];
+    for (const provider of providers) {
+      expect(provider.canProcess('HEALTH')).toBe(false);
+      expect(provider.canProcess('NON_HEALTH')).toBe(true);
+    }
+  });
+});
+
+describe('DeepSeekProvider', () => {
+  it('usa V4 Pro com raciocínio alto e normaliza cache', async () => {
+    mockFetch(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            choices: [{ message: { content: 'resposta' } }],
+            usage: {
+              prompt_tokens: 100,
+              prompt_cache_hit_tokens: 70,
+              prompt_cache_miss_tokens: 30,
+              completion_tokens: 20,
+            },
+          }),
+      }),
+    );
+    const p = new DeepSeekProvider('deepseek-v4-pro', 'sk-test', true);
+
+    await expect(p.complete({ ...REQ, json: true }, signal())).resolves.toMatchObject({
+      text: 'resposta',
+      usage: { tokensInput: 30, tokensCached: 70, tokensOutput: 20 },
+    });
+    const body = JSON.parse(String((fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.body));
+    expect(body).toMatchObject({
+      model: 'deepseek-v4-pro',
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'high',
+      response_format: { type: 'json_object' },
+    });
+  });
+
+  it('lança NO_CREDENTIALS sem chave e não chama fetch', async () => {
+    const p = new DeepSeekProvider('deepseek-v4-pro', undefined);
+    expect(p.hasCredentials()).toBe(false);
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    await expect(p.complete(REQ, signal())).rejects.toMatchObject({ kind: 'NO_CREDENTIALS' });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('classifica 500 como SERVER e não envia response_format sem json', async () => {
+    mockFetch(() =>
+      Promise.resolve({
+        ok: false,
+        status: 500,
+        text: () => Promise.resolve('x'),
+      } as Partial<Response>),
+    );
+    const p = new DeepSeekProvider('deepseek-v4-pro', 'sk-test');
+    await expect(p.complete({ ...REQ, json: false }, signal())).rejects.toMatchObject({
+      kind: 'SERVER',
+    });
+    const body = JSON.parse(String((fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.body));
+    expect(body.response_format).toBeUndefined();
+  });
+
+  it('usa fallback de tokens quando o usage não traz cache/prompt/conteúdo', async () => {
+    mockFetch(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({}),
+      } as Partial<Response>),
+    );
+    const p = new DeepSeekProvider('deepseek-v4-pro', 'sk-test');
+    const r = await p.complete({ ...REQ, json: false }, signal());
+    expect(r.text).toBe('');
+    expect(r.usage).toEqual({ tokensInput: 0, tokensCached: 0, tokensOutput: 0 });
+  });
+});
 
 describe('OpenAiProvider', () => {
   it('lança NO_CREDENTIALS sem chave e não chama fetch', async () => {
@@ -80,6 +166,21 @@ describe('OpenAiProvider', () => {
     mockFetch(() => Promise.reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
     await expect(p.complete(REQ, signal())).rejects.toMatchObject({ kind: 'TIMEOUT' });
   });
+
+  it('envia response_format quando json=true e usa fallback sem usage/conteúdo', async () => {
+    mockFetch(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({}),
+      } as Partial<Response>),
+    );
+    const p = new OpenAiProvider('OPENAI_GPT41', 'gpt-4.1', 'sk-test');
+    const r = await p.complete({ ...REQ, json: true }, signal());
+    expect(r.text).toBe('');
+    expect(r.usage).toEqual({ tokensInput: 0, tokensCached: 0, tokensOutput: 0 });
+    const body = JSON.parse(String((fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.body));
+    expect(body.response_format).toEqual({ type: 'json_object' });
+  });
 });
 
 describe('AnthropicProvider', () => {
@@ -115,5 +216,23 @@ describe('AnthropicProvider', () => {
     );
     const p = new AnthropicProvider('ANTHROPIC_SONNET45', 'claude-sonnet-4-5', 'sk-ant');
     await expect(p.complete(REQ, signal())).rejects.toMatchObject({ kind: 'SERVER' });
+  });
+
+  it('omite cache_control quando cache=false e usa fallback sem usage/blocos não-texto', async () => {
+    mockFetch(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            content: [{ type: 'image' }, { type: 'text' }],
+          }),
+      } as Partial<Response>),
+    );
+    const p = new AnthropicProvider('ANTHROPIC_SONNET45', 'claude-sonnet-4-5', 'sk-ant');
+    const r = await p.complete({ ...REQ, cache: false }, signal());
+    expect(r.text).toBe('');
+    expect(r.usage).toEqual({ tokensInput: 0, tokensCached: 0, tokensOutput: 0 });
+    const body = JSON.parse(String((fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.body));
+    expect(body.system[0].cache_control).toBeUndefined();
   });
 });

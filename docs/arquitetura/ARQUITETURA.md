@@ -2,7 +2,8 @@
 
 > Documento operacional derivado do relatório de arquitetura de Rafael Nakamura (`docs/fitness-ia-whatsapp/10-relatorio-rafael.md`), **corrigido e complementado** pelos relatórios de Alexandre (jurídico), Eduardo (financeiro), Sofia (UX/UI), Sato (segurança) e Victor (IA) — ver §3.1. Este arquivo é a referência rápida e **obrigatória** para qualquer código escrito neste repositório. Em caso de dúvida sobre justificativa/detalhe, os relatórios originais em `docs/fitness-ia-whatsapp/` são a fonte completa (diagramas de fluxo, DDL completo, benchmarks, threat model STRIDE).
 >
-> **⚠️ Correção crítica pós-Rafael:** o LLM principal definido originalmente (DeepSeek V3.2) foi **removido do projeto**. Ver §3.1 e §5.
+> **Revisão vigente:** a seleção de LLM é neutra por fornecedor e condicionada a qualidade,
+> contrato e proteção de dados. DeepSeek V4 Pro é o candidato principal. Ver ADR-005-R2 em §3.1.
 
 **Princípio guia:** *"Simplicidade agora é velocidade no futuro. Cada abstração prematura é uma dívida técnica que pagamos com juros compostos."*
 
@@ -32,9 +33,8 @@ Serverless (Vercel/Lambda) foi rejeitado: cold start de 500–2000ms é incompat
 | Auth dashboard | **Auth.js v5** | Integrado ao Next.js 15, só para o dashboard CREF |
 | Auth backend | **JWT** (`@nestjs/passport` + `passport-jwt`) | Access token 15min + refresh token httpOnly cookie 30 dias, com rotation (ADR-006) |
 | Real-time | **Socket.io** + adapter Redis | Uso seletivo: só notificações do dashboard CREF |
-| LLM principal | **OpenAI GPT-4.1** | Endpoint com Zero Data Retention + DPA/SCC + no-training (obrigatório — dado de saúde) |
-| LLM fallback | **Anthropic Claude Sonnet 4.5** | Também ZDR + DPA/SCC. Failover por circuit breaker <2s (first-token timeout/5xx/429) |
-| ~~LLM~~ | ~~DeepSeek V3.2~~ | **Removido do projeto por completo** (não só do caminho de saúde) — ver ADR-005-R em §3.1 |
+| LLM principal candidato | **DeepSeek V4 Pro** | Só processa dado de saúde após o mesmo gate contratual/técnico aplicado aos demais provedores |
+| LLM fallback | **OpenAI GPT-4.1 → Anthropic Claude Sonnet 4.5** | Diversidade de provedor; cada endpoint exige aprovação explícita para `HEALTH` |
 | Embeddings RAG | **text-embedding-3-small** (OpenAI) | 1536 dimensões |
 | Vector search | **PGVector HNSW** | `m=16`, `ef_construction=64` |
 | WhatsApp | **AraraHQ** (WhatsApp Business API) | Rate limit: 80 msg/s (Meta), 100K msg/dia (verificado) |
@@ -59,24 +59,26 @@ Serverless (Vercel/Lambda) foi rejeitado: cold start de 500–2000ms é incompat
 | **002** | ORM: **Drizzle** | Prisma (overhead de runtime, N+1 fácil), TypeORM (decorators frágeis), Kysely (verboso) |
 | **003** | **PgBouncer** transaction pooling desde o MVP | Sem pooling (limite de ~100 conexões na VPS) |
 | **004** | Redis standalone + AOF + réplica + **Sentinel** em produção | Redis Cluster (só necessário >10GB), Valkey (reservado Fase 2+) |
-| **005** | LLM routing: **DeepSeek V3.2 → GPT-4.1 → Claude Sonnet 4.5**, cascata por disponibilidade, circuit breaker <2s | Um único provedor fixo |
+| **005-R2** | LLM routing: **DeepSeek V4 Pro → GPT-4.1 → Claude Sonnet 4.5**, com gate neutro por classe de dado | Banimento por marca/país; aprovação implícita por marca |
 | **006** | Auth: **JWT access (15min) + refresh httpOnly (30 dias) com rotation** | Sessão server-side pura, OAuth-only |
 | **007** | Frontend↔Backend: **REST para CRUD + WebSocket seletivo** (só notificações real-time do dashboard CREF) | gRPC, GraphQL (complexidade desnecessária no estágio atual) |
 
-### 3.1 ADR-005-R — Revisão obrigatória: LLM principal (SUPERSEDED)
+### 3.1 ADR-005-R2 — Seleção neutra e condicionada de LLM
 
-**A ADR-005 original (DeepSeek V3.2 como principal) está formalmente superada.** Motivo — três achados independentes e convergentes na Fase 2/4 do pipeline:
+**A ADR-005-R está formalmente superada.** Incidente de segurança e jurisdição são insumos de
+risco, não motivos isolados para banimento. OpenAI, Anthropic e DeepSeek passam pelo mesmo gate.
 
-- **Alexandre (jurídico):** DeepSeek opera com servidores na China, sem adequação/SCC vigente para o Brasil sob a Resolução ANPD 19/2024 — inadequado para dados de saúde (LGPD Art. 11) sem salvaguardas contratuais que não existem hoje.
-- **Sato (segurança):** DeepSeek teve um vazamento de dados público e documentado em jan/2025 (pesquisa Wiz — base exposta com +1M linhas de chat, chaves e segredos). Não é um risco hipotético.
-- **Eduardo (financeiro):** trocar o LLM principal custa ~R$0,95–0,97/usuário/mês a mais — irrelevante para o unit economics (~2,8% do ARPU).
-- **Victor (IA):** formalizou a correção e decidiu remover o DeepSeek **por completo do MVP**, inclusive de fluxos não relacionados a saúde — manter dois "mundos" de provedor por classe de dado adiciona risco de vazamento por bug que supera a economia marginal.
+**Decisão vigente:** **DeepSeek V4 Pro** é o candidato principal por qualidade/custo, com
+**GPT-4.1 → Claude Sonnet 4.5** como fallbacks. Nenhum deles recebe `HEALTH` até existir atestado
+operacional explícito para a conta e endpoint: DPA, mecanismo de transferência internacional,
+retenção/no-training, suboperadores, exclusão e resposta a incidentes. As flags são `false` por
+padrão e o bloqueio ocorre no `LLMRouter` antes do envio.
 
-**Nova decisão (ADR-005-R):** **GPT-4.1 (OpenAI) como LLM principal → Claude Sonnet 4.5 (Anthropic) como fallback**, ambos com Zero Data Retention + DPA com SCCs + no-training. Circuit breaker <2s. Custo revisado: **~R$1,08/usuário/mês** (vs. ~R$0,11 estimado originalmente com DeepSeek).
+China não é proibição automática sob a LGPD; a transferência precisa das garantias da Resolução
+ANPD 19/2024. Da mesma forma, ZDR de OpenAI/Anthropic não é presumido sem contratação e ativação.
 
-**Regra derivada, também inegociável:** `LLMRouter` é o **único ponto do sistema autorizado a chamar um LLM**. Todo prompt passa por um **PII Scrubber** (pseudonimização no boundary) antes de sair do backend — nenhum identificador direto de usuário (nome, telefone, e-mail) chega ao prompt.
-
-Detalhamento completo: `docs/fitness-ia-whatsapp/06-relatorio-alexandre.md`, `11-relatorio-sato.md`, `07-relatorio-eduardo.md`, `12-relatorio-victor.md`.
+O `LLMRouter` continua sendo o único boundary de LLM, com PII Scrubber inescapável. Detalhamento:
+`docs/arquitetura/decisoes/adr-005-r2-selecao-neutra-de-provedor-llm.md`.
 
 ---
 
@@ -182,8 +184,8 @@ Detalhamento completo: `docs/fitness-ia-whatsapp/06-relatorio-alexandre.md`, `11
 **A IA nunca decide o protocolo sozinha.** Arquitetura híbrida obrigatória:
 
 - **Motor Determinístico** (TypeScript puro, sem dependências externas, versionado semver, **100% de cobertura de teste exigida**): calcula estado/regras CREF-safe — volume, periodização, fases (`ADAPTACAO`→`HIPERTROFIA`→`FORCA`→`DELOAD`), constraints (PAR-Q, lesões).
-- **LLM (GPT-4.1 → Claude Sonnet 4.5, ver ADR-005-R)**: só gera linguagem natural a partir do estado calculado pelo motor, sempre através do `LLMRouter`. Nunca decide o protocolo.
-- **PII Scrubber**: pseudonimização obrigatória no boundary de saída — nenhum identificador direto do usuário chega ao prompt do LLM (regra derivada da ADR-005-R).
+- **LLM (DeepSeek V4 Pro → GPT-4.1 → Claude Sonnet 4.5, ver ADR-005-R2)**: só gera linguagem natural a partir do estado calculado pelo motor, sempre através do `LLMRouter`. Nunca decide o protocolo.
+- **PII Scrubber**: pseudonimização obrigatória no boundary de saída — nenhum identificador direto do usuário chega ao prompt do LLM (preservado pela ADR-005-R2).
 - **Intent Classifier**: taxonomia `DUVIDA_TECNICA · SUBSTITUICAO_EXERCICIO · MOTIVACAO · CHECKIN_ANTECIPADO · FORA_DE_ESCOPO`, via embedding-kNN (OpenAI) com fallback em GPT-4.1-nano e guardrail regex clínico; prompt de sistema versionado por intenção.
 - **Validação pós-geração (compliance CREF)**: checklist regex+regras bloqueia diagnóstico médico, prescrição medicamentosa, violação de constraints PAR-Q, extrapolação de escopo CREF. Falha → `human_review_required=true` + resposta-padrão pré-aprovada + notificação ao dashboard. Safety score é **gate bloqueante** no framework de avaliação de Victor, não apenas métrica de acompanhamento.
 - **Guardrails anti-prompt-injection/jailbreak**: obrigatórios no prompt de sistema do AI Coach — usuários podem tentar manipular o Motor Determinístico via linguagem natural; o LLM nunca deve aceitar instruções do usuário que alterem constraints de PAR-Q ou volume de treino.
@@ -295,8 +297,8 @@ Todos os relatórios de Fase 2–4 (Alexandre, Eduardo, Sofia, Sato, Victor) já
 
 | Risco | Mitigação |
 |---|---|
-| Instabilidade do GPT-4.1 | Cascata de fallback para Claude Sonnet 4.5, circuit breaker <2s (ADR-005-R) |
-| Vazamento de dados de saúde via provedor de LLM inadequado | DeepSeek removido do projeto; só provedores com ZDR+DPA/SCC (ADR-005-R) |
+| Instabilidade do provedor principal | Cascata DeepSeek V4 Pro → GPT-4.1 → Claude Sonnet 4.5, com circuit breaker |
+| Vazamento de dados de saúde via provedor inadequado | Gate executável e neutro por provedor; `HEALTH` bloqueado até atestado contratual/técnico (ADR-005-R2) |
 | Redis como ponto único de falha | AOF + réplica + Sentinel |
 | Exploração de vulnerabilidade crítica do Redis (CVE-2025-49844) | Patch obrigatório antes de deploy + bind interno + TLS/mTLS |
 | Vazamento entre tenants via PgBouncer transaction mode + RLS mal configurada | `SET LOCAL` de tenant por transação + `FORCE ROW LEVEL SECURITY` + role sem `BYPASSRLS` |
@@ -324,7 +326,7 @@ Todos os relatórios de Fase 2–4 (Alexandre, Eduardo, Sofia, Sato, Victor) já
 8. Motor Determinístico exige 100% de cobertura de teste antes de merge.
 9. Toda tabela com dado de saúde/pessoal segue LGPD Art. 11: criptografia em repouso, RLS forçada, audit log append-only garantido por permissão de banco.
 10. Toda mudança de API segue o esquema de versionamento (`v1`, dual-support 90 dias em breaking changes).
-11. **Nunca usar DeepSeek em nenhum fluxo do projeto** — removido por decisão jurídica e de segurança (ADR-005-R). LLM principal é GPT-4.1, fallback é Claude Sonnet 4.5, ambos com ZDR+DPA/SCC.
+11. **Nunca enviar `HEALTH` a provedor não aprovado** — DeepSeek, OpenAI e Anthropic seguem o mesmo gate executável da ADR-005-R2; marca, chave configurada ou país não concedem aprovação implícita.
 12. `LLMRouter` é o único ponto do sistema autorizado a chamar um provedor de LLM; todo prompt passa pelo PII Scrubber antes de sair do backend.
 13. RLS no Postgres exige `SET LOCAL app.current_user_id` por transação e `FORCE ROW LEVEL SECURITY` — nunca confiar em RLS "por padrão" sob PgBouncer transaction mode.
 14. Redis nunca sobe em produção sem o patch para CVE-2025-49844 (RediShell) aplicado.
@@ -337,10 +339,11 @@ Todos os relatórios de Fase 2–4 (Alexandre, Eduardo, Sofia, Sato, Victor) já
 Todos os relatórios abaixo estão em `docs/fitness-ia-whatsapp/` e são a fonte completa por trás deste documento:
 
 - `10-relatorio-rafael.md` — arquitetura original: diagramas de fluxo detalhados, DDL completo das tabelas, contratos REST completos, benchmarks.
-- `06-relatorio-alexandre.md` — societário, LGPD/RIPD, ToS/Política de Privacidade, registro CREF/INPI, o achado que invalidou o DeepSeek.
+- `06-relatorio-alexandre.md` — análise histórica de LGPD/RIPD e do DeepSeek; a conclusão categórica foi substituída pela ADR-005-R2.
 - `07-relatorio-eduardo.md` — pricing final, unit economics, regime tributário, necessidade de capital.
 - `09-relatorio-sofia.md` — wireframes, fluxo de UX do formulário e do dashboard CREF, persona "MOVI".
 - `11-relatorio-sato.md` — threat model STRIDE completo, RLS/PgBouncer, CVE do Redis, pentest da anamnese, DevSecOps.
-- `12-relatorio-victor.md` — ADR-005-R formal, LLMRouter, ContextService, Intent Classifier, RAG, ValidationService, LLMOps.
+- `12-relatorio-victor.md` — arquitetura histórica de IA; a seleção ADR-005-R foi substituída pela ADR-005-R2.
+- `RAG-E-GROUNDING.md` — implementação vigente de recuperação, memória, grounding e avaliação.
 
 "Próximos Passos por Agente" de Rafael (recomendações específicas para Leonardo, Felipe, Mariana e Henrique) seguem válidas em `10-relatorio-rafael.md` §17.
