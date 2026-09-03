@@ -65,6 +65,7 @@ function fakeStructure(goal: ProtocolStructure['goal']): ProtocolStructure {
     promptVersion: 'methodology-int+catalog-int',
     goal,
     phase: 'ADAPTACAO',
+    phaseDurationWeeks: 3,
     weeklyFrequency: 3,
     sessions: [
       {
