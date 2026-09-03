@@ -54,5 +54,5 @@ export function proxy(request: NextRequest) {
 export const config = {
   // Nonces exigem renderização dinâmica. A superfície CREF é dinâmica;
   // a landing permanece estática e não recebe uma política incompatível com seu HTML.
-  matcher: ['/entrar', '/dashboard/:path*'],
+  matcher: ['/entrar', '/dashboard/:path*', '/treino/:path*', '/api/workout/:path*'],
 };
