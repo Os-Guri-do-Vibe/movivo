@@ -55,3 +55,25 @@ export function parseWorkoutButton(buttonId: string | undefined): WorkoutButton 
   if (!completedAt || !sessionKey) return null;
   return { done: action === 'DONE', completedAt, sessionKey };
 }
+
+export function dailyWorkoutMessage(firstName: string, link: string): string {
+  return `Bom dia, ${firstName}! Seu treino de hoje esta pronto: ${link}\n\nO planejamento segue a metodologia do profissional CREF da MOVIVO. Se quiser receber em outro horario, e so me dizer por aqui.`;
+}
+
+export function durationInsightMessage(observed: number, expected: number): string {
+  return `Percebemos que seus ultimos treinos duraram em media ${observed} min, acima dos ${expected} min informados. Quer que o profissional CREF avalie um ajuste ou esse tempo esta tranquilo?`;
+}
+
+export function durationInsightButtons(insightId: string): readonly WhatsappQuickReplyButton[] {
+  return [
+    { id: `workout-insight:${insightId}:ADJUST`, title: 'Quero ajustar' },
+    { id: `workout-insight:${insightId}:OK`, title: 'Esta tranquilo' },
+  ];
+}
+
+const INSIGHT_PATTERN = /^workout-insight:([0-9a-f-]{36}):(ADJUST|OK)$/i;
+
+export function parseDurationInsightButton(buttonId: string | undefined) {
+  const match = buttonId ? INSIGHT_PATTERN.exec(buttonId) : null;
+  return match?.[1] ? { id: match[1], adjust: match[2] === 'ADJUST' } : null;
+}

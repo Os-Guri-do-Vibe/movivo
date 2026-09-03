@@ -1,0 +1,2 @@
+ALTER TABLE "workout_set_entries" ADD COLUMN "skipped" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "workout_set_entries" ADD CONSTRAINT "ck_workout_set_entries_outcome" CHECK (not ("workout_set_entries"."completed" and "workout_set_entries"."skipped"));

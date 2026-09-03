@@ -59,11 +59,29 @@ export function trainingWeekdays(weeklyFrequency: number): readonly number[] {
  * A sessão gira pela posição do dia dentro da semana, então frequência 3 com sessões
  * A/B/C dá segunda=A, quarta=B, sexta=C.
  */
-export function sessionKeyFor(at: Date, structure: ProtocolStructure): string | null {
+const PROTOCOL_WEEKDAY: Readonly<Record<number, string>> = {
+  0: 'SUN',
+  1: 'MON',
+  2: 'TUE',
+  3: 'WED',
+  4: 'THU',
+  5: 'FRI',
+  6: 'SAT',
+};
+
+export function sessionFor(at: Date, structure: ProtocolStructure) {
+  const explicit = structure.sessions.find(
+    (session) => session.weekday === PROTOCOL_WEEKDAY[weekday(at)],
+  );
+  if (explicit) return explicit;
   const days = trainingWeekdays(structure.weeklyFrequency);
   const position = days.indexOf(weekday(at));
   if (position < 0 || structure.sessions.length === 0) return null;
-  return structure.sessions[position % structure.sessions.length]?.dayLabel ?? null;
+  return structure.sessions[position % structure.sessions.length] ?? null;
+}
+
+export function sessionKeyFor(at: Date, structure: ProtocolStructure): string | null {
+  return sessionFor(at, structure)?.dayLabel ?? null;
 }
 
 export interface PlannedDay {

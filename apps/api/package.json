@@ -17,6 +17,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/core/database/migrate.ts",
     "db:seed": "tsx src/core/database/seed.ts",
+    "db:seed:workout": "tsx src/core/database/seed-workout-demo.ts",
     "db:backfill-transitions": "tsx src/core/database/backfill-status-transitions.ts",
     "db:studio": "drizzle-kit studio",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true});require('node:fs').rmSync('tsconfig.tsbuildinfo',{force:true})\""

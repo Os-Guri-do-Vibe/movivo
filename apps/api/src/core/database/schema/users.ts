@@ -6,7 +6,8 @@
  * `current_setting('app.current_user_id')` (Sato §4.2), e é por isso que ele é
  * **coluna líder** dos índices por usuário (Sato §4.5).
  */
-import { boolean, index, pgTable, text, varchar } from 'drizzle-orm/pg-core';
+import { boolean, check, index, pgTable, text, varchar } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 import { eventTimestamp, primaryKeyColumn, timestampColumns } from './_shared';
 import { biologicalSexEnum, userRoleEnum, userStatusEnum } from './enums';
@@ -43,6 +44,11 @@ export const users = pgTable(
 
     /** Nome do perfil no WhatsApp, retornado pela AraraHQ. Dado pessoal comum. */
     whatsappName: varchar('whatsapp_name', { length: 255 }),
+
+    /** Preferências do diário de treino. 05:00 é o default do produto, sempre no fuso do titular. */
+    timezone: varchar('timezone', { length: 64 }).notNull().default('America/Sao_Paulo'),
+    workoutReminderTime: varchar('workout_reminder_time', { length: 5 }).notNull().default('05:00'),
+    workoutReminderEnabled: boolean('workout_reminder_enabled').notNull().default(true),
 
     /**
      * Sexo biológico informado pelo titular na Etapa 1 da anamnese — denormalizado aqui
@@ -127,6 +133,10 @@ export const users = pgTable(
     index('idx_users_status').on(table.status),
     // Sequência de conversão do trial (dias 7/10/13/14 — Lucas §MVP).
     index('idx_users_trial_ends_at').on(table.trialEndsAt),
+    check(
+      'ck_users_workout_reminder_time',
+      sql`${table.workoutReminderTime} ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'`,
+    ),
   ],
 );
 

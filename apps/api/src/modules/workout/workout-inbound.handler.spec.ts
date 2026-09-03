@@ -7,6 +7,7 @@ import type { QueueManager } from '../jobs/queue-manager.service';
 import { WORKOUT_DONE_ACK, WORKOUT_SKIPPED_ACK } from './workout-messages';
 import { WorkoutInboundHandler } from './workout-inbound.handler';
 import type { WorkoutCompletionService } from './workout-completion.service';
+import type { WorkoutJournalService } from './workout-journal.service';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -25,10 +26,12 @@ function makeHandler(route: unknown) {
   } as unknown as Redis;
   const recordFromQuickReply = vi.fn(async () => true);
   const enqueue = vi.fn(async () => 'job');
+  const respondToInsight = vi.fn(async () => true);
   const handler = new WorkoutInboundHandler(
     events,
     redis,
     { recordFromQuickReply } as unknown as WorkoutCompletionService,
+    { respondToInsight } as unknown as WorkoutJournalService,
     { enqueue } as unknown as QueueManager,
   );
   handler.onModuleInit();

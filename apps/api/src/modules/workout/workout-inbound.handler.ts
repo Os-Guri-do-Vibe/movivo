@@ -20,8 +20,14 @@ import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
-import { WORKOUT_DONE_ACK, WORKOUT_SKIPPED_ACK, parseWorkoutButton } from './workout-messages';
+import {
+  WORKOUT_DONE_ACK,
+  WORKOUT_SKIPPED_ACK,
+  parseDurationInsightButton,
+  parseWorkoutButton,
+} from './workout-messages';
 import { WorkoutCompletionService } from './workout-completion.service';
+import { WorkoutJournalService } from './workout-journal.service';
 
 const routeSchema = z.object({
   text: z.string().max(4096),
@@ -36,6 +42,7 @@ export class WorkoutInboundHandler implements OnModuleInit, OnModuleDestroy {
     private readonly events: DomainEventBus,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly completions: WorkoutCompletionService,
+    private readonly journal: WorkoutJournalService,
     private readonly queues: QueueManager,
   ) {}
 
@@ -46,6 +53,25 @@ export class WorkoutInboundHandler implements OnModuleInit, OnModuleDestroy {
         const raw = await this.redis.get(routeKey);
         if (!raw) return false;
         const route = routeSchema.parse(JSON.parse(raw));
+        const insight = parseDurationInsightButton(route.buttonId);
+        if (insight) {
+          await this.redis.del(routeKey);
+          await this.journal.respondToInsight(userId, insight.id, insight.adjust);
+          await this.queues.enqueue(
+            QUEUE.whatsappOutbound,
+            'workout-insight-ack',
+            {
+              userId,
+              type: 'WORKOUT_INSIGHT',
+              dedupeId: `workout-insight-ack-${insight.id}`,
+              text: insight.adjust
+                ? 'Pedido enviado ao profissional CREF da MOVIVO para avaliacao.'
+                : 'Perfeito, vamos manter como esta e continuar acompanhando.',
+            } satisfies WhatsappOutboundJob,
+            { jobId: `wa-workout-insight-ack-${insight.id}` },
+          );
+          return true;
+        }
         const button = parseWorkoutButton(route.buttonId);
         if (!button) return false; // não é nosso: deixa a routeKey para o próximo handler
         await this.redis.del(routeKey);

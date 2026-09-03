@@ -76,7 +76,7 @@ export class WorkoutCompletionService {
     weekNumber: number,
     sessionKey: string,
     completedAt: string,
-    source: 'WHATSAPP_QUICK_REPLY' | 'CHECKIN' | 'CONVERSATION',
+    source: 'WEB_JOURNAL' | 'WHATSAPP_QUICK_REPLY' | 'CHECKIN' | 'CONVERSATION',
     extra?: { exercisesDone?: unknown; perceivedEffort?: number },
   ): Promise<boolean> {
     const values = {

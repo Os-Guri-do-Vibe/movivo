@@ -13,13 +13,23 @@
 import { Module } from '@nestjs/common';
 
 import { JobsModule } from '../jobs/jobs.module';
+import { WorkoutAccessService } from './workout-access.service';
 import { WorkoutCompletionService } from './workout-completion.service';
+import { WorkoutController } from './workout.controller';
 import { WorkoutInboundHandler } from './workout-inbound.handler';
+import { WorkoutJournalService } from './workout-journal.service';
 import { WorkoutScheduler } from './workout.scheduler';
 
 @Module({
   imports: [JobsModule],
-  providers: [WorkoutCompletionService, WorkoutScheduler, WorkoutInboundHandler],
-  exports: [WorkoutCompletionService],
+  controllers: [WorkoutController],
+  providers: [
+    WorkoutAccessService,
+    WorkoutCompletionService,
+    WorkoutJournalService,
+    WorkoutScheduler,
+    WorkoutInboundHandler,
+  ],
+  exports: [WorkoutCompletionService, WorkoutJournalService],
 })
 export class WorkoutModule {}

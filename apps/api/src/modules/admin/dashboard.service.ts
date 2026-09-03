@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { and, desc, eq, isNotNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, or, sql } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 import {
   anamnesisStructuredSchema,
@@ -28,6 +28,8 @@ import {
   protocolVersions,
   subscriptions,
   users,
+  workoutInsights,
+  workoutSessions,
 } from '../../core/database/schema';
 import {
   TenantDatabase,
@@ -163,100 +165,139 @@ export class DashboardService {
    *   sempre existe.
    */
   async queue(actor: AuthenticatedUser) {
-    const { mandatory, optional, substitutionMandatory, substitutionOptional } =
-      await this.scopedRead(actor, async (tx) => {
-        // LEFT JOIN (não INNER): protocolo anterior à migração 0035 não tem
-        // `anamnesis_session_id` e continua aparecendo na fila normalmente, como `EDIT`.
-        const pendingProtocols = await tx
-          .select({
-            id: protocols.id,
-            createdAt: protocols.createdAt,
-            status: protocols.status,
-            name: users.name,
-            reviewUrgency: protocols.reviewUrgency,
-            parqState: anamnesisSessions.parqState,
-          })
-          .from(protocols)
-          .innerJoin(users, eq(users.id, protocols.userId))
-          .leftJoin(anamnesisSessions, eq(anamnesisSessions.id, protocols.anamnesisSessionId))
-          .where(eq(protocols.approvalStatus, 'PENDING_REVIEW'));
+    const {
+      protocolMandatory,
+      optional,
+      substitutionMandatory,
+      substitutionOptional,
+      workoutHandoffs,
+    } = await this.scopedRead(actor, async (tx) => {
+      // LEFT JOIN (não INNER): protocolo anterior à migração 0035 não tem
+      // `anamnesis_session_id` e continua aparecendo na fila normalmente, como `EDIT`.
+      const pendingProtocols = await tx
+        .select({
+          id: protocols.id,
+          createdAt: protocols.createdAt,
+          status: protocols.status,
+          name: users.name,
+          reviewUrgency: protocols.reviewUrgency,
+          parqState: anamnesisSessions.parqState,
+        })
+        .from(protocols)
+        .innerJoin(users, eq(users.id, protocols.userId))
+        .leftJoin(anamnesisSessions, eq(anamnesisSessions.id, protocols.anamnesisSessionId))
+        .where(eq(protocols.approvalStatus, 'PENDING_REVIEW'));
 
-        const mandatory: QueueItem[] = [];
-        const optional: QueueItem[] = [];
-        for (const row of pendingProtocols) {
-          const isOptional = row.reviewUrgency === 'OPTIONAL';
-          const fromParq = row.parqState === 'BLOQUEADO_AGUARDANDO_CLEARANCE';
-          (isOptional ? optional : mandatory).push(
-            this.item(
-              row.id,
-              'PROTOCOL',
-              isOptional ? 'ROUTINE' : fromParq ? 'SAFETY' : 'ALERT',
-              row.createdAt,
-              protocolTitle(row.name),
-              row.status,
-              row.status,
-              isOptional
-                ? new Date(
-                    row.createdAt.getTime() + PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS,
-                  ).toISOString()
-                : null,
-              isOptional ? null : fromParq ? 'PARQ' : 'EDIT',
+      const mandatory: QueueItem[] = [];
+      const optional: QueueItem[] = [];
+      for (const row of pendingProtocols) {
+        const isOptional = row.reviewUrgency === 'OPTIONAL';
+        const fromParq = row.parqState === 'BLOQUEADO_AGUARDANDO_CLEARANCE';
+        (isOptional ? optional : mandatory).push(
+          this.item(
+            row.id,
+            'PROTOCOL',
+            isOptional ? 'ROUTINE' : fromParq ? 'SAFETY' : 'ALERT',
+            row.createdAt,
+            protocolTitle(row.name),
+            row.status,
+            row.status,
+            isOptional
+              ? new Date(row.createdAt.getTime() + PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS).toISOString()
+              : null,
+            isOptional ? null : fromParq ? 'PARQ' : 'EDIT',
+          ),
+        );
+      }
+
+      // Propostas de substituição de exercício via IA, ainda pendentes de decisão. Desde
+      // 2026-09-03 (a pedido do fundador) têm a MESMA divisão obrigatória/opcional do
+      // protocolo: `substitutionMandatory` quando a sessão de origem do protocolo ATIVO do
+      // titular está `BLOQUEADO_AGUARDANDO_CLEARANCE` (mesmo LEFT JOIN de `pendingProtocols`
+      // acima) — essas nunca têm `autoReleaseAt` (o job nem chega a ser agendado, ver
+      // `AiResponseWorker.applyAndPersistSubstitution`). As demais continuam em
+      // `substitutionOptional`, auto-liberando em 30min como sempre.
+      const pendingSubstitutions = await tx
+        .select({
+          id: protocolSubstitutionRequests.id,
+          createdAt: protocolSubstitutionRequests.createdAt,
+          status: protocolSubstitutionRequests.status,
+          name: users.name,
+          parqState: anamnesisSessions.parqState,
+        })
+        .from(protocolSubstitutionRequests)
+        .innerJoin(users, eq(users.id, protocolSubstitutionRequests.userId))
+        .leftJoin(protocols, eq(protocols.id, protocolSubstitutionRequests.protocolId))
+        .leftJoin(anamnesisSessions, eq(anamnesisSessions.id, protocols.anamnesisSessionId))
+        .where(eq(protocolSubstitutionRequests.status, 'PENDING'));
+
+      const substitutionMandatory: QueueItem[] = [];
+      const substitutionOptional: QueueItem[] = [];
+      for (const row of pendingSubstitutions) {
+        const fromParq = row.parqState === 'BLOQUEADO_AGUARDANDO_CLEARANCE';
+        (fromParq ? substitutionMandatory : substitutionOptional).push(
+          this.item(
+            row.id,
+            'SUBSTITUTION',
+            fromParq ? 'SAFETY' : 'ROUTINE',
+            row.createdAt,
+            substitutionTitle(row.name),
+            row.status,
+            row.status,
+            fromParq
+              ? null
+              : new Date(row.createdAt.getTime() + AI_SUBSTITUTION_REVIEW_WINDOW_MS).toISOString(),
+            'AI_SUBSTITUTION',
+          ),
+        );
+      }
+
+      const pendingWorkoutHandoffs = await tx
+        .select({
+          id: handoffAlerts.id,
+          createdAt: handoffAlerts.createdAt,
+          status: handoffAlerts.status,
+          level: handoffAlerts.level,
+          reason: handoffAlerts.reason,
+          name: users.name,
+        })
+        .from(handoffAlerts)
+        .innerJoin(users, eq(users.id, handoffAlerts.userId))
+        .where(
+          and(
+            eq(handoffAlerts.status, 'OPEN'),
+            or(
+              eq(handoffAlerts.sourceType, 'WORKOUT'),
+              eq(handoffAlerts.sourceType, 'WORKOUT_INSIGHT'),
             ),
-          );
-        }
+          ),
+        );
+      const workoutHandoffs = pendingWorkoutHandoffs.map((row) =>
+        this.item(
+          row.id,
+          'HANDOFF',
+          row.level,
+          row.createdAt,
+          row.name ? `Acompanhamento de treino: ${row.name}` : 'Acompanhamento de treino',
+          row.reason,
+          row.status,
+          null,
+        ),
+      );
 
-        // Propostas de substituição de exercício via IA, ainda pendentes de decisão. Desde
-        // 2026-09-03 (a pedido do fundador) têm a MESMA divisão obrigatória/opcional do
-        // protocolo: `substitutionMandatory` quando a sessão de origem do protocolo ATIVO do
-        // titular está `BLOQUEADO_AGUARDANDO_CLEARANCE` (mesmo LEFT JOIN de `pendingProtocols`
-        // acima) — essas nunca têm `autoReleaseAt` (o job nem chega a ser agendado, ver
-        // `AiResponseWorker.applyAndPersistSubstitution`). As demais continuam em
-        // `substitutionOptional`, auto-liberando em 30min como sempre.
-        const pendingSubstitutions = await tx
-          .select({
-            id: protocolSubstitutionRequests.id,
-            createdAt: protocolSubstitutionRequests.createdAt,
-            status: protocolSubstitutionRequests.status,
-            name: users.name,
-            parqState: anamnesisSessions.parqState,
-          })
-          .from(protocolSubstitutionRequests)
-          .innerJoin(users, eq(users.id, protocolSubstitutionRequests.userId))
-          .leftJoin(protocols, eq(protocols.id, protocolSubstitutionRequests.protocolId))
-          .leftJoin(anamnesisSessions, eq(anamnesisSessions.id, protocols.anamnesisSessionId))
-          .where(eq(protocolSubstitutionRequests.status, 'PENDING'));
+      const byAge = (a: QueueItem, b: QueueItem) => a.createdAt.localeCompare(b.createdAt);
+      return {
+        protocolMandatory: mandatory.sort(byAge),
+        optional: optional.sort(byAge),
+        substitutionMandatory: substitutionMandatory.sort(byAge),
+        substitutionOptional: substitutionOptional.sort(byAge),
+        workoutHandoffs: workoutHandoffs.sort(byAge),
+      };
+    });
 
-        const substitutionMandatory: QueueItem[] = [];
-        const substitutionOptional: QueueItem[] = [];
-        for (const row of pendingSubstitutions) {
-          const fromParq = row.parqState === 'BLOQUEADO_AGUARDANDO_CLEARANCE';
-          (fromParq ? substitutionMandatory : substitutionOptional).push(
-            this.item(
-              row.id,
-              'SUBSTITUTION',
-              fromParq ? 'SAFETY' : 'ROUTINE',
-              row.createdAt,
-              substitutionTitle(row.name),
-              row.status,
-              row.status,
-              fromParq
-                ? null
-                : new Date(
-                    row.createdAt.getTime() + AI_SUBSTITUTION_REVIEW_WINDOW_MS,
-                  ).toISOString(),
-              'AI_SUBSTITUTION',
-            ),
-          );
-        }
-
-        const byAge = (a: QueueItem, b: QueueItem) => a.createdAt.localeCompare(b.createdAt);
-        return {
-          mandatory: mandatory.sort(byAge),
-          optional: optional.sort(byAge),
-          substitutionMandatory: substitutionMandatory.sort(byAge),
-          substitutionOptional: substitutionOptional.sort(byAge),
-        };
-      });
+    const mandatory = [...workoutHandoffs, ...protocolMandatory].sort((a, b) =>
+      a.createdAt.localeCompare(b.createdAt),
+    );
 
     return {
       mandatory,
@@ -993,13 +1034,15 @@ export class DashboardService {
   }
 
   private async handoffDetail(actor: AuthenticatedUser, id: string) {
-    return this.scopedRead(actor, async (tx) => {
+    const detail = await this.scopedRead(actor, async (tx) => {
       const [alert] = await tx
         .select({
           userId: handoffAlerts.userId,
           level: handoffAlerts.level,
           reason: handoffAlerts.reason,
           conversationId: handoffAlerts.conversationId,
+          sourceType: handoffAlerts.sourceType,
+          sourceId: handoffAlerts.sourceId,
           status: handoffAlerts.status,
           createdAt: handoffAlerts.createdAt,
         })
@@ -1031,6 +1074,32 @@ export class DashboardService {
         phoneNumber: owner?.phoneNumber ?? '',
         email: owner?.email ?? null,
       }));
+      const [workout] =
+        alert.sourceType === 'WORKOUT' && alert.sourceId
+          ? await tx
+              .select({
+                sessionKey: workoutSessions.sessionKey,
+                scheduledDate: workoutSessions.scheduledDate,
+                durationSeconds: workoutSessions.durationSeconds,
+                perceivedEffort: workoutSessions.perceivedEffort,
+                painExerciseId: workoutSessions.painExerciseId,
+                feedbackCipher: workoutSessions.feedbackCipher,
+              })
+              .from(workoutSessions)
+              .where(eq(workoutSessions.id, alert.sourceId))
+              .limit(1)
+          : [];
+      const [insight] =
+        alert.sourceType === 'WORKOUT_INSIGHT' && alert.sourceId
+          ? await tx
+              .select({
+                observedMinutes: workoutInsights.observedValue,
+                expectedMinutes: workoutInsights.expectedValue,
+              })
+              .from(workoutInsights)
+              .where(eq(workoutInsights.id, alert.sourceId))
+              .limit(1)
+          : [];
       return {
         item: this.item(
           id,
@@ -1042,11 +1111,32 @@ export class DashboardService {
           alert.status,
           null,
         ),
-        context: { reason: alert.reason, messages: context.length },
+        context: {
+          reason: alert.reason,
+          messages: context.length,
+          ...(workout
+            ? {
+                sessionKey: workout.sessionKey,
+                scheduledDate: workout.scheduledDate,
+                durationSeconds: workout.durationSeconds,
+                perceivedEffort: workout.perceivedEffort,
+                painExerciseId: workout.painExerciseId,
+              }
+            : {}),
+          ...(insight ?? {}),
+        },
         handoff: { reason: alert.reason, level: alert.level, status: alert.status },
         replay: this.groupReplays(replayRows)[0],
+        feedbackCipher: workout?.feedbackCipher ?? null,
       };
     });
+    const { feedbackCipher, ...safeDetail } = detail;
+    if (!feedbackCipher) return safeDetail;
+    const feedback = JSON.parse(await this.cipher.decryptHealth(feedbackCipher)) as Record<
+      string,
+      unknown
+    >;
+    return { ...safeDetail, context: { ...safeDetail.context, feedback } };
   }
 
   private async requireProtocol(tx: TenantTransaction, id: string, forUpdate = false) {
