@@ -83,6 +83,7 @@ describe('AI safety — o validador veta saída insegura (defesa final)', () => 
       promptVersion: 'safety-v1',
       goal: 'GAIN_MUSCLE',
       phase: 'ADAPTACAO',
+      phaseDurationWeeks: 3,
       weeklyFrequency: 2,
       sessions: [
         {

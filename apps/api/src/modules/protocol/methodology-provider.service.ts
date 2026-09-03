@@ -11,7 +11,6 @@ export interface PublishedMethodology {
   version: number;
   versionLabel: string;
   content: string;
-  summary: string | null;
   contentSha256: string;
 }
 
@@ -33,7 +32,7 @@ export class MethodologyProvider {
     const value = await this.db.runAsSystem(async (tx) => {
       const rows = (await tx.execute(sql`
         SELECT version.id, version.version, version.version_label, version.content,
-          version.content_sha256, version.summary
+          version.content_sha256
         FROM methodology_versions version
         JOIN LATERAL (
           SELECT event.status
@@ -50,7 +49,6 @@ export class MethodologyProvider {
         version_label: string;
         content: string;
         content_sha256: string;
-        summary: string | null;
       }>;
       const row = rows[0];
       if (!row) throw new Error('Nenhuma metodologia CREF publicada.');
@@ -59,7 +57,6 @@ export class MethodologyProvider {
         version: Number(row.version),
         versionLabel: row.version_label,
         content: row.content,
-        summary: row.summary,
         contentSha256: row.content_sha256,
       };
     });

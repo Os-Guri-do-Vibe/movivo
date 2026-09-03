@@ -29,15 +29,12 @@ export interface SubscriptionPlanOption {
   recommended: boolean;
 }
 
-/**
- * Catálogo do MVP. Preços validados por Eduardo (unit economics).
- * ponytail: SEMIANNUAL usa preço placeholder (18900c) até Eduardo fechar o valor — trocar aqui.
- */
+/** Catálogo do MVP. Valores definidos pelo fundador em 2026-09-01. */
 export const SUBSCRIPTION_PLANS: readonly SubscriptionPlanOption[] = [
-  { id: 'MONTHLY', label: 'Mensal', priceCents: 3900, periodDays: 30, recommended: false },
-  { id: 'QUARTERLY', label: 'Trimestral', priceCents: 9900, periodDays: 90, recommended: true },
-  { id: 'SEMIANNUAL', label: 'Semestral', priceCents: 18900, periodDays: 180, recommended: false },
-  { id: 'ANNUAL', label: 'Anual', priceCents: 34900, periodDays: 365, recommended: false },
+  { id: 'MONTHLY', label: 'Mensal', priceCents: 7990, periodDays: 30, recommended: false },
+  { id: 'QUARTERLY', label: 'Trimestral', priceCents: 20282, periodDays: 90, recommended: false },
+  { id: 'SEMIANNUAL', label: 'Semestral', priceCents: 38721, periodDays: 180, recommended: true },
+  { id: 'ANNUAL', label: 'Anual', priceCents: 71500, periodDays: 365, recommended: false },
 ];
 
 /** Body do checkout (`POST /subscription/:token/checkout`). Sem dado de cartão (PCI). */

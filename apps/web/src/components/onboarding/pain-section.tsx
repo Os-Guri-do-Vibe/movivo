@@ -49,7 +49,7 @@ const REGION_ITEMS = (Object.keys(PAIN_REGION_LABELS) as PainRegion[]).map((valu
   label: PAIN_REGION_LABELS[value],
 }));
 
-const TREND_ITEMS: { value: PainTrend; label: string }[] = [
+export const TREND_ITEMS: { value: PainTrend; label: string }[] = [
   { value: 'IMPROVING', label: 'Melhorando' },
   { value: 'STABLE', label: 'Estável' },
   { value: 'WORSENING', label: 'Piorando' },

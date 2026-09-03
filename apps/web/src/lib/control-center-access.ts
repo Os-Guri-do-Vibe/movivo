@@ -21,7 +21,7 @@ export type DashboardCapability = ControlCenterCapability;
 export const DASHBOARD_CAPABILITIES = Object.values(Capability);
 
 export const ROLE_LABELS: Record<DashboardRole, string> = {
-  ADMIN: 'Admin · Fundador',
+  ADMIN: 'Fundador',
   PROFESSIONAL: 'Profissional CREF',
   MARKETING: 'Marketing',
   FINANCE: 'Financeiro',

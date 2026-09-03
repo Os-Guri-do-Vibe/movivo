@@ -2,19 +2,23 @@
  * Persistência da conversa do Coach sob RLS (US-3.5).
  *
  * Grava cada turno em `conversations` (INBOUND do aluno, OUTBOUND de MOVI) no contexto do
- * titular. Também lê o que o worker precisa sob RLS: `ScrubUser` (para o PII Scrubber) e as
- * `constraints` do protocolo ativo (para a substituição segura). Sem ramo de negócio — I/O
- * puro, coberto pelo teste de integração (fora da cobertura unitária, como os outros repos).
+ * titular. Também lê o `ScrubUser` que o worker precisa sob RLS (para o PII Scrubber). Sem
+ * ramo de negócio — I/O puro, coberto pelo teste de integração (fora da cobertura unitária,
+ * como os outros repos).
+ *
+ * Achado 2026-09-02: `loadConstraints` (só as `constraints` do protocolo ativo) saiu daqui —
+ * o fluxo de substituição agora precisa do protocolo INTEIRO (`content` estruturado, não só
+ * `constraints`), e passou a usar `ProtocolSubstitutionRepository.loadActiveProtocol`
+ * diretamente, que já lê a mesma linha com tudo junto.
  */
 import { Injectable } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type { BiologicalSex } from '@movivo/shared';
 
-import { conversations, handoffAlerts, protocols, users } from '../../core/database/schema';
+import { conversations, handoffAlerts, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import type { ScrubUser } from '../ai-coach/llm/llm.types';
-import type { SubstitutionConstraints } from '../protocol/exercise-substitution';
 
 export interface PersistTurnInput {
   userId: string;
@@ -76,29 +80,6 @@ export class ConversationRepository {
         email: user?.email ?? null,
       },
       biologicalSex: user?.biologicalSex ?? null,
-    };
-  }
-
-  /** Constraints do protocolo ativo (para a substituição). `null` = sem protocolo ativo. */
-  async loadConstraints(userId: string): Promise<SubstitutionConstraints | null> {
-    const [row] = await this.db.runAsUser(userId, 'USER', (tx) =>
-      tx
-        .select({ constraints: protocols.constraints })
-        .from(protocols)
-        .where(and(eq(protocols.userId, userId), eq(protocols.status, 'ACTIVE')))
-        .limit(1),
-    );
-    if (!row?.constraints) return null;
-    const c = row.constraints as Partial<SubstitutionConstraints>;
-    return {
-      level: c.level ?? 'INICIANTE',
-      // Protocolo anterior ao catálogo v3 não tem local dos 4 novos valores. `FULL_GYM` é
-      // o default MENOS permissivo em termos de equipamento presumido? Não: é o mais amplo.
-      // Aqui o default seguro é `HOME` — sugerir um substituto de máquina para quem treina
-      // em casa é pior do que sugerir um de peso do corpo para quem está na academia.
-      location: c.location ?? 'HOME',
-      equipment: c.equipment ?? [],
-      injuryTags: c.injuryTags ?? [],
     };
   }
 

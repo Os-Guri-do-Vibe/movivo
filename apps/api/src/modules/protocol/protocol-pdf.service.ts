@@ -20,6 +20,7 @@ import type { Content, Table, TDocumentDefinitions } from 'pdfmake/interfaces';
 import {
   ADVANCED_TECHNIQUE_LABELS,
   ageInYears,
+  LOAD_STRATEGY_LABELS,
   PRIMARY_GOAL_LABELS,
   TRAINING_PHASE_LABELS,
   type AdvancedTechnique,
@@ -145,6 +146,7 @@ function exerciseTableBody(exercises: readonly ProtocolExercise[]): Table {
     { text: 'Repetição/Duração', style: 'tableHeader' },
     { text: 'Descanso', style: 'tableHeader' },
     { text: 'RIR', style: 'tableHeader' },
+    { text: 'Técnica', style: 'tableHeader' },
     { text: 'Estratégia', style: 'tableHeader' },
     { text: 'Vídeo', style: 'tableHeader' },
   ];
@@ -170,6 +172,7 @@ function exerciseTableBody(exercises: readonly ProtocolExercise[]): Table {
       { text: '-', font: 'JetBrainsMono', fontSize: 8, color: COLOR.musgo },
       { text: '-', fontSize: 8, color: COLOR.musgo },
       { text: '-', fontSize: 8, color: COLOR.musgo },
+      { text: '-', fontSize: 8, color: COLOR.musgo },
     ]);
     const workingRow = [
       { text: exercise.name, fontSize: 9, bold: true, color: COLOR.grafite },
@@ -185,6 +188,7 @@ function exerciseTableBody(exercises: readonly ProtocolExercise[]): Table {
         text: exercise.technique ? ADVANCED_TECHNIQUE_LABELS[exercise.technique] : '-',
         fontSize: 8.5,
       },
+      { text: LOAD_STRATEGY_LABELS[exercise.loadStrategy], fontSize: 8.5 },
       {
         text: exercise.videoUrl ? 'Assistir' : '-',
         fontSize: 8.5,
@@ -195,7 +199,7 @@ function exerciseTableBody(exercises: readonly ProtocolExercise[]): Table {
   });
   return {
     headerRows: 1,
-    widths: ['*', 26, 78, 44, 20, 56, 38],
+    widths: ['*', 24, 68, 38, 18, 52, 58, 34],
     body: [header, ...rows],
   };
 }

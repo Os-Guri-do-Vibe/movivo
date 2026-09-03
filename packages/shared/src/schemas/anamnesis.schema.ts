@@ -308,6 +308,24 @@ export const PARQ_QUESTION_TEXT: Readonly<Record<ParqQuestionId, string>> = {
   Q9: 'Você sabe de algum outro motivo pelo qual não deveria praticar atividade física?',
 };
 
+/**
+ * Rótulo compacto de cada pergunta, pra resumir os fatores de risco marcados "Sim" numa
+ * lista curta (ex.: painel do RT) em vez da pergunta inteira. Complementa
+ * `PARQ_QUESTION_TEXT` — não o substitui: a pergunta verbatim continua sendo exibida
+ * onde o RT revisa resposta por resposta (`docs/juridico/consentimento-e-parq.md` §2.1).
+ */
+export const PARQ_RISK_FACTOR_LABEL: Readonly<Record<ParqQuestionId, string>> = {
+  Q1: 'coração/pressão alta',
+  Q2: 'dor no peito ao exercitar',
+  Q3: 'dor no peito em repouso',
+  Q4: 'tontura/desmaio',
+  Q5: 'medicamento contínuo (pressão/coração)',
+  Q6: 'osso/articulação/coluna',
+  Q7: 'gravidez/pós-parto recente',
+  Q8: 'cirurgia recente',
+  Q9: 'outro motivo médico',
+};
+
 /** Uma resposta do PAR-Q. `answer=true` é o "Sim" (resposta de risco). */
 export const parqAnswerSchema = z.object({
   questionId: z.enum(PARQ_QUESTION_IDS),

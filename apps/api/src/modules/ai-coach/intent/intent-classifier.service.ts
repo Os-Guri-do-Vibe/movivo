@@ -50,16 +50,32 @@ export class IntentClassifier {
       };
     }
 
-    // Etapa 1 — embedding-kNN.
-    const vec = await this.embedding.embed(scrubPII(input.message, input.user));
-    const knn = await this.repo.classifyByKnn(vec);
-    if (knn && knn.confidence >= KNN_MIN_CONFIDENCE && isIntent(knn.intent)) {
-      return {
-        intent: knn.intent,
-        confidence: knn.confidence,
-        stage: 'KNN',
-        safetyHandoff: isEmergency(knn.intent),
-      };
+    // Etapa 1 — embedding-kNN. Best-effort: achado 2026-09-02 (reproduzido ao vivo) — o
+    // provedor de embedding (OpenAI) devolvendo 429 aqui derrubava a chamada inteira sem
+    // try/catch, matando `AIResponseWorker.process()` DEPOIS de já ter drenado o lote da
+    // mensagem do aluno. A retry do BullMQ então achava o lote vazio e "terminava com
+    // sucesso" (`status: 'EMPTY'`) sem nunca responder — o aluno via "digitando…" e
+    // silêncio permanente, e o handler de DLQ nunca disparava (BullMQ não via isto como
+    // falha). Mesmo padrão de resiliência já usado em `ProtocolGeneratorService.
+    // retrieveEvidence` para o RAG: uma faceta indisponível não pode derrubar o pipeline
+    // inteiro — aqui, degrada pra Etapa 2 (fallback nano), o mesmo caminho já usado quando
+    // o kNN tem baixa confiança.
+    try {
+      const vec = await this.embedding.embed(scrubPII(input.message, input.user));
+      const knn = await this.repo.classifyByKnn(vec);
+      if (knn && knn.confidence >= KNN_MIN_CONFIDENCE && isIntent(knn.intent)) {
+        return {
+          intent: knn.intent,
+          confidence: knn.confidence,
+          stage: 'KNN',
+          safetyHandoff: isEmergency(knn.intent),
+        };
+      }
+    } catch (error) {
+      this.logger.warn(
+        { userId: input.userId, err: error },
+        'embedding-kNN indisponível na classificação de intenção — usando fallback nano',
+      );
     }
 
     // Etapa 2 — fallback nano (só os ambíguos).

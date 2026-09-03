@@ -10,6 +10,7 @@ const content: ProtocolStructure = {
   promptVersion: 'v1',
   goal: 'GAIN_MUSCLE',
   phase: 'ADAPTACAO',
+  phaseDurationWeeks: 3,
   weeklyFrequency: 3,
   sessions: [
     {

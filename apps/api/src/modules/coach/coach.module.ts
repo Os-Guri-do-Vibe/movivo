@@ -14,9 +14,16 @@ import { ProtocolModule } from '../protocol/protocol.module';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { AIResponseWorker } from './ai-response.worker';
 import { ConversationRepository } from './conversation.repository';
+import { SubstitutionResolutionService } from './substitution-resolution.service';
+import { SubstitutionTargetService } from './substitution-target.service';
 
 @Module({
   imports: [ProtocolModule, AiCoachModule, JobsModule, WhatsappModule],
-  providers: [AIResponseWorker, ConversationRepository],
+  providers: [
+    AIResponseWorker,
+    ConversationRepository,
+    SubstitutionTargetService,
+    SubstitutionResolutionService,
+  ],
 })
 export class CoachModule {}

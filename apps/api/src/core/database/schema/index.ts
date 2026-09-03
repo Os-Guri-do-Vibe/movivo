@@ -71,3 +71,9 @@ export * from './ai-guardrail-rules';
 
 // Sprint 10 - temas proibidos da agente. Append-only, workflow auditável, ação fixa em BLOCK.
 export * from './ai-forbidden-topics';
+
+// Achado 2026-09-02 - base de exercícios parametrizada (era array const em código).
+export * from './exercise-catalog-entries';
+
+// Achado 2026-09-02 - proposta de substituição de exercício via IA, em staging.
+export * from './protocol-substitution-requests';

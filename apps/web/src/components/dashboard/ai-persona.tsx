@@ -435,7 +435,7 @@ function IdentityStep() {
       </div>
       <WhatsappBubble
         agentName={form.agentName || 'Agente'}
-        text={`Oi! Eu sou a ${form.agentName || 'agente'}, ${form.agentSelfIntro || 'sua coach da MOVIVO'}.`}
+        text={form.agentSelfIntro || 'sua coach da MOVIVO'}
       />
     </div>
   );

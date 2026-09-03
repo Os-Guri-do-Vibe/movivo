@@ -4,9 +4,12 @@ export type { DashboardCapability, DashboardRole } from './control-center-access
 /**
  * `PARQ` saiu do enum em 2026-08-24 (espelha `kindSchema` do backend): PAR-Q bloqueante
  * não é mais um item de fila próprio — o protocolo é sempre gerado e o PAR-Q vive dentro
- * dele como `QueueItem.origin === 'PARQ'`.
+ * dele como `QueueItem.origin === 'PARQ'`. `SUBSTITUTION` entrou em 2026-09-02: proposta
+ * de substituição de exercício via IA. Desde 2026-09-03 tem a mesma divisão
+ * obrigatória/opcional do protocolo (ver `QueueResponse` abaixo), em vez de cair sempre
+ * em "Revisão Humana Opcional".
  */
-export type QueueKind = 'PROTOCOL' | 'HANDOFF' | 'CHECKIN';
+export type QueueKind = 'PROTOCOL' | 'HANDOFF' | 'CHECKIN' | 'SUBSTITUTION';
 export type QueueSeverity = 'SAFETY' | 'ALERT' | 'ROUTINE';
 
 export interface QueueItem {
@@ -18,26 +21,37 @@ export interface QueueItem {
   title: string;
   summary: string;
   status: string;
-  /** Só protocolos "Revisão Humana Opcional" — quando a liberação automática ocorre. */
+  /** Só itens "Revisão Humana Opcional" — quando a liberação automática ocorre. */
   autoReleaseAt: string | null;
   /**
-   * POR QUE este protocolo exige revisão humana. `PARQ` = a sessão de origem está
-   * bloqueada aguardando liberação (alerta clínico — assinar o protocolo também libera o
-   * PAR-Q, no backend, dentro da própria assinatura); `EDIT` = um CREF editou o conteúdo
-   * e precisa de sign-off fresco. `null` em itens `optional` e nos que não são protocolo.
+   * POR QUE este item exige revisão humana. `PARQ` = a sessão de origem está bloqueada
+   * aguardando liberação (alerta clínico — assinar o protocolo também libera o PAR-Q, no
+   * backend, dentro da própria assinatura); `EDIT` = um CREF editou o conteúdo e precisa
+   * de sign-off fresco; `AI_SUBSTITUTION` = troca de exercício confirmada pelo aluno via
+   * WhatsApp, aguardando revisão/liberação automática. `null` nos demais itens `optional`.
    */
-  origin: 'PARQ' | 'EDIT' | null;
+  origin: 'PARQ' | 'EDIT' | 'AI_SUBSTITUTION' | null;
 }
 
 /**
- * Fila do profissional — só protocolo (US: duas categorias de revisão).
- * `mandatory` nunca libera sozinho; `optional` libera sozinho após `autoReleaseAt` se
- * o CREF não agir. Cada array já vem ordenado por idade (mais antigo primeiro).
+ * Fila do profissional — protocolo (`mandatory`/`optional`) e substituição de exercício
+ * via IA (`substitutionMandatory`/`substitutionOptional`, achado 2026-09-03). Os dois
+ * pares seguem a MESMA regra: o `mandatory`/`substitutionMandatory` nunca libera
+ * sozinho; o `optional`/`substitutionOptional` libera sozinho após `autoReleaseAt` se o
+ * CREF não agir. Cada array já vem ordenado por idade (mais antigo primeiro).
  */
 export interface QueueResponse {
   mandatory: QueueItem[];
   optional: QueueItem[];
-  counts: { mandatory: number; optional: number; total: number };
+  substitutionMandatory: QueueItem[];
+  substitutionOptional: QueueItem[];
+  counts: {
+    mandatory: number;
+    optional: number;
+    substitutionMandatory: number;
+    substitutionOptional: number;
+    total: number;
+  };
 }
 
 export interface ReplayMessage {
@@ -65,12 +79,30 @@ export interface ProtocolDetail {
   validation?: { valid: boolean; issues: string[] };
 }
 
+/** Detalhe de uma proposta de substituição de exercício via IA (achado 2026-09-02). */
+export interface SubstitutionDetail {
+  id: string;
+  protocolId: string;
+  from: { id: string; name: string };
+  to: { id: string; name: string };
+  diff: {
+    type: 'EXERCISE_SUBSTITUTION';
+    from: { id: string; name: string };
+    to: { id: string; name: string };
+    sessionsAffected: string[];
+  };
+  changeReason: string;
+  status: 'PENDING' | 'RELEASED' | 'DISCARDED';
+  decidedAt: string | null;
+}
+
 export interface QueueDetail {
   item: QueueItem;
   context: Record<string, string | number | boolean | null>;
   protocol?: ProtocolDetail;
   replay?: AnonymizedReplay;
   handoff?: { reason: string; level: string; status: string };
+  substitution?: SubstitutionDetail;
 }
 
 /** Todas as respostas que o titular preencheu no formulário de anamnese (US: olho). */

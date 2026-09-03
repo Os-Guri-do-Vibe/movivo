@@ -9,6 +9,7 @@ import {
   parqProtocolItem,
   protocolItem,
   queueResponse,
+  substitutionItem,
 } from '../../../test/dashboard-fixtures';
 
 const { getQueue, getAnamnesisAnswers } = vi.hoisted(() => ({
@@ -387,6 +388,82 @@ describe('QueueBoard', () => {
     expect(within(optionalCard).queryByText(/Origem:/)).not.toBeInTheDocument();
   });
 
+  // Achado 2026-09-02, ampliado 2026-09-03: proposta de substituição de exercício via IA
+  // carrega sua própria legenda de origem e fica na seção própria "Revisão de
+  // Substituição de Exercício Opcional" — não mais misturada com protocolo.
+  it('card de substituição via IA mostra a legenda própria e fica na seção de substituição opcional', async () => {
+    // `autoReleaseAt` relativo a "agora" — evita depender de data fixa da fixture (o
+    // relógio muda de rótulo pra "Disparando…" quando o prazo já passou).
+    const optionalSubstitution = {
+      ...substitutionItem,
+      autoReleaseAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+    };
+    getQueue.mockResolvedValue({
+      ...queueResponse,
+      substitutionOptional: [optionalSubstitution],
+      counts: {
+        ...queueResponse.counts,
+        substitutionOptional: 1,
+        total: queueResponse.counts.total + 1,
+      },
+    });
+    render(<QueueBoard />);
+
+    const section = await screen.findByRole('region', {
+      name: 'Revisão de Substituição de Exercício Opcional',
+    });
+    const card = within(section).getByText(optionalSubstitution.title).closest('li') as HTMLElement;
+    expect(within(card).getByText('Origem: substituição confirmada pelo aluno')).toBeVisible();
+    expect(card.className).not.toContain('border-l-coral');
+    // Continua auto-liberando — o relógio de prazo aparece igual a qualquer OPTIONAL.
+    expect(
+      within(card).getByRole('button', { name: /dispara automaticamente.*whatsapp/i }),
+    ).toBeVisible();
+  });
+
+  // Achado 2026-09-03 (a pedido do fundador): aluno com protocolo de origem em PAR-Q
+  // bloqueante — a substituição cai na seção obrigatória própria, com o MESMO
+  // tratamento visual/de ação do protocolo MANDATORY: faixa coral, sem relógio de
+  // auto-liberação, sem badge de status, e os mesmos botões existentes (na tela de
+  // detalhe, gated só por `kind`+`status`, não por seção — ver `queue-detail.tsx`).
+  it('substituição com origem em PAR-Q bloqueante cai na seção obrigatória, sem auto-liberação', async () => {
+    const mandatorySubstitution = {
+      ...substitutionItem,
+      id: 'sub-mandatory-1',
+      severity: 'SAFETY' as const,
+      autoReleaseAt: null,
+      title: 'Substituição de Exercício: Carla Teste',
+      // Vazio de propósito: isola a checagem do badge de status (abaixo) do parágrafo
+      // de resumo, que também renderizaria 'PENDING' e confundiria a asserção.
+      summary: '',
+    };
+    getQueue.mockResolvedValue({
+      ...queueResponse,
+      substitutionMandatory: [mandatorySubstitution],
+      counts: {
+        ...queueResponse.counts,
+        substitutionMandatory: 1,
+        total: queueResponse.counts.total + 1,
+      },
+    });
+    render(<QueueBoard />);
+
+    const section = await screen.findByRole('region', {
+      name: 'Revisão de Substituição de Exercício Obrigatória',
+    });
+    const card = within(section)
+      .getByText(mandatorySubstitution.title)
+      .closest('li') as HTMLElement;
+    expect(card.className).toContain('border-l-coral');
+    expect(
+      within(card).getByText('Origem: substituição confirmada pelo aluno · PAR-Q bloqueante'),
+    ).toBeVisible();
+    expect(within(card).queryByRole('button', { name: /whatsapp/i })).not.toBeInTheDocument();
+    expect(within(card).queryByText(mandatorySubstitution.status)).not.toBeInTheDocument();
+    // Mesmo botão de navegação que qualquer outro card da fila — "Abrir caso".
+    expect(within(card).getByRole('link', { name: 'Abrir caso' })).toBeVisible();
+  });
+
   it('sem resumo: não mostra nenhum texto de placeholder, só omite o parágrafo', async () => {
     getQueue.mockResolvedValue({
       ...queueResponse,
@@ -401,7 +478,15 @@ describe('QueueBoard', () => {
     getQueue.mockResolvedValue({
       mandatory: [],
       optional: [],
-      counts: { mandatory: 0, optional: 0, total: 0 },
+      substitutionMandatory: [],
+      substitutionOptional: [],
+      counts: {
+        mandatory: 0,
+        optional: 0,
+        substitutionMandatory: 0,
+        substitutionOptional: 0,
+        total: 0,
+      },
     });
     render(<QueueBoard />);
     expect(await screen.findByRole('heading', { name: 'Fila em dia' })).toBeVisible();
@@ -433,7 +518,7 @@ describe('QueueBoard', () => {
     getQueue.mockResolvedValueOnce(queueResponse).mockRejectedValueOnce(new Error('timeout'));
     render(<QueueBoard />);
     await screen.findByText(protocolItem.title);
-    await userEvent.click(screen.getByRole('button', { name: /atualizar fila/i }));
+    await userEvent.click(screen.getByRole('button', { name: /^atualizar$/i }));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('timeout'));
     expect(screen.getByText(protocolItem.title)).toBeVisible();
   });

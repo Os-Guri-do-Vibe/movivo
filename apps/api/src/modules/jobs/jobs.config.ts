@@ -21,6 +21,12 @@ import { buildRedisOptions } from '../../core/redis';
 export const QUEUE = {
   protocolGeneration: 'protocol-generation',
   protocolAutoRelease: 'protocol-auto-release',
+  // Achado 2026-09-02: liberação da proposta de substituição de exercício via IA, após a
+  // janela de cortesia de 30 min (`AI_SUBSTITUTION_REVIEW_WINDOW_MS`) — fila própria, e não
+  // um branch dentro de `protocolAutoRelease`, porque o job carrega o id da PROPOSTA
+  // (`protocol_substitution_requests.id`), não o do protocolo — o mesmo protocolo pode ter
+  // várias propostas ao longo do tempo, cada uma com seu próprio job/estado.
+  protocolSubstitutionRelease: 'protocol-substitution-release',
   aiResponse: 'ai-response',
   whatsappOutbound: 'whatsapp-outbound',
   checkinWeekly: 'checkin-weekly',
@@ -58,6 +64,12 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
   // Liberação automática após a janela de cortesia de 1h (fila do profissional,
   // categoria "Disponível para Revisão"). Baixo volume, sem urgência de latência.
   [QUEUE.protocolAutoRelease]: {
+    attempts: 3,
+    backoffMs: [5_000, 15_000, 45_000],
+    concurrency: 3,
+  },
+  // Mesmo perfil de `protocolAutoRelease`: baixo volume, sem urgência de latência.
+  [QUEUE.protocolSubstitutionRelease]: {
     attempts: 3,
     backoffMs: [5_000, 15_000, 45_000],
     concurrency: 3,

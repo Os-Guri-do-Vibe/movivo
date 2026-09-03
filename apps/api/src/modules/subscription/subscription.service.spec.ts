@@ -90,7 +90,7 @@ describe('SubscriptionService.startTrial (US-4.1)', () => {
     const { svc, insert } = make(null);
     await svc.startTrial(USER);
     expect(insert).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'TRIALING', plan: 'MONTHLY', priceCents: 3900 }),
+      expect.objectContaining({ status: 'TRIALING', plan: 'MONTHLY', priceCents: 7990 }),
     );
   });
 
@@ -153,7 +153,7 @@ describe('SubscriptionService.createCheckout / getAccess (US-4.2)', () => {
     expect(createCheckoutSession).toHaveBeenCalledWith(
       expect.objectContaining({
         plan: 'ANNUAL',
-        priceCents: 34900,
+        priceCents: 71500,
         method: 'CARD',
         termsVersion: 'terms-v1',
       }),

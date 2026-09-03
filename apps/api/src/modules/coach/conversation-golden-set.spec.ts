@@ -10,8 +10,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { clinicalGuardrail } from '../ai-coach/intent/clinical-guardrail';
-import { EXERCISE_BY_ID } from '../protocol/exercise-catalog';
-import { findExerciseByMention, findSafeSubstitute } from '../protocol/exercise-substitution';
+import { EXERCISE_BY_ID, EXERCISE_CATALOG } from '../protocol/exercise-catalog';
+import { findSafeCandidates } from '../protocol/exercise-substitution';
 import { ValidationService } from '../protocol/validation/validation.service';
 import {
   GUARDRAIL_CASES,
@@ -60,21 +60,26 @@ describe(`golden set conversacional — validação da saída (${RESPONSE_CASES.
 });
 
 describe('golden set conversacional — substituição fiel à base (US-3.5)', () => {
+  // Achado 2026-09-02: IDENTIFICAR o alvo a partir da mensagem virou julgamento de LLM
+  // (`SubstitutionTargetService`), fora do escopo determinístico deste gate — `c.message`
+  // fica só como documentação do caso. O que este teste prova, determinística e
+  // exaustivamente, é o FILTRO DE SEGURANÇA (`findSafeCandidates`) sobre um alvo conhecido.
   it.each(SUBSTITUTION_CASES.map((c) => [c.label, c] as const))('%s', (_label, c) => {
-    const target = findExerciseByMention(c.message);
-    expect(target).not.toBeNull();
-    const substitute = target ? findSafeSubstitute(target, c.constraints) : null;
+    const target = EXERCISE_BY_ID.get(c.targetExerciseId);
+    expect(target).toBeDefined();
+    if (!target) return;
+    const candidates = findSafeCandidates(target, c.constraints, EXERCISE_CATALOG);
 
     if (!c.expectSubstitute) {
-      expect(substitute).toBeNull(); // não inventa: sem substituto seguro → fallback humano
+      expect(candidates).toHaveLength(0); // não inventa: sem candidato seguro → fallback humano
       return;
     }
-    expect(substitute).not.toBeNull();
-    if (substitute) {
-      expect(EXERCISE_BY_ID.has(substitute.id)).toBe(true); // sempre da base
+    expect(candidates.length).toBeGreaterThan(0);
+    for (const candidate of candidates) {
+      expect(EXERCISE_BY_ID.has(candidate.id)).toBe(true); // sempre da base
       // Nunca contraindicado pela lesão do usuário.
       for (const tag of c.constraints.injuryTags) {
-        expect(substitute.contraindicatedFor).not.toContain(tag);
+        expect(candidate.contraindicatedFor).not.toContain(tag);
       }
     }
   });

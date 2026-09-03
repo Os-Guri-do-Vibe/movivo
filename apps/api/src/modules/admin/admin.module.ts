@@ -35,6 +35,8 @@ import { FaqAdminController } from './faq-admin.controller';
 import { FaqAdminService } from './faq-admin.service';
 import { ForbiddenTopicAdminController } from './forbidden-topic-admin.controller';
 import { ForbiddenTopicAdminService } from './forbidden-topic-admin.service';
+import { ExerciseCatalogAdminController } from './exercise-catalog-admin.controller';
+import { ExerciseCatalogAdminService } from './exercise-catalog-admin.service';
 import { MarketingController } from './marketing.controller';
 import { MarketingService } from './marketing.service';
 import { L1GuardrailAdminController } from './l1-guardrail-admin.controller';
@@ -58,6 +60,7 @@ import { PartnersService } from './partners.service';
     PartnersController,
     FaqAdminController,
     ForbiddenTopicAdminController,
+    ExerciseCatalogAdminController,
     L1GuardrailAdminController,
     AuditQueryController,
     KnowledgeAdminController,
@@ -73,6 +76,7 @@ import { PartnersService } from './partners.service';
     PartnersService,
     FaqAdminService,
     ForbiddenTopicAdminService,
+    ExerciseCatalogAdminService,
     L1GuardrailAdminService,
     AuditQueryService,
     KnowledgeAdminService,

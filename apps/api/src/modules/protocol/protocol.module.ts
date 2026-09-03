@@ -23,6 +23,9 @@ import { ProtocolController } from './protocol.controller';
 import { ProtocolAutoReleaseWorker } from './protocol-auto-release.worker';
 import { ProtocolGenerationWorker } from './protocol-generation.worker';
 import { ProtocolGeneratorService } from './protocol-generator.service';
+import { ProtocolSubstitutionReleaseWorker } from './protocol-substitution-release.worker';
+import { ProtocolSubstitutionRepository } from './protocol-substitution.repository';
+import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
 import { MethodologyProvider } from './methodology-provider.service';
 import { ProtocolRepository } from './protocol.repository';
 import { ValidationService } from './validation/validation.service';
@@ -38,11 +41,20 @@ import { ValidationService } from './validation/validation.service';
   providers: [
     ProtocolGeneratorService,
     MethodologyProvider,
+    ExerciseCatalogProvider,
     ValidationService,
     ProtocolRepository,
     ProtocolGenerationWorker,
     ProtocolAutoReleaseWorker,
+    ProtocolSubstitutionRepository,
+    ProtocolSubstitutionReleaseWorker,
   ],
-  exports: [ProtocolGeneratorService, ValidationService, MethodologyProvider],
+  exports: [
+    ProtocolGeneratorService,
+    ValidationService,
+    MethodologyProvider,
+    ExerciseCatalogProvider,
+    ProtocolSubstitutionRepository,
+  ],
 })
 export class ProtocolModule {}

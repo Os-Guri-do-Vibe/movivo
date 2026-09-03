@@ -7,8 +7,13 @@ import {
   forwardBackendJson,
 } from '../../../_lib/bff';
 
-/** Espelha `kindSchema` do backend — `PARQ` saiu do enum em 2026-08-24. */
-const KINDS = new Set(['PROTOCOL', 'HANDOFF', 'CHECKIN']);
+/**
+ * Espelha `kindSchema` do backend — `PARQ` saiu do enum em 2026-08-24. `SUBSTITUTION`
+ * faltava aqui desde que a feature nasceu em 2026-09-02 (achado 2026-09-03, ao testar
+ * as novas seções de fila): o card renderizava, mas "Abrir caso" sempre voltava 400 —
+ * a tela de detalhe (e os botões Aprovar/Recusar dentro dela) nunca era alcançada.
+ */
+const KINDS = new Set(['PROTOCOL', 'HANDOFF', 'CHECKIN', 'SUBSTITUTION']);
 
 export async function GET(
   _request: Request,

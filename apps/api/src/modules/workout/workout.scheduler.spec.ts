@@ -30,6 +30,7 @@ const STRUCTURE = {
   promptVersion: 'methodology-2026-08-v2+catalog-2026-08-v2',
   goal: 'GAIN_MUSCLE',
   phase: 'ADAPTACAO',
+  phaseDurationWeeks: 3,
   weeklyFrequency: 3,
   sessions: [session('A'), session('B'), session('C')],
 };

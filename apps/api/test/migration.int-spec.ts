@@ -81,6 +81,11 @@ const EXPECTED_TABLES = [
   'knowledge_chunk_embeddings',
   'methodology_versions',
   'methodology_events',
+  // Achado 2026-09-02/03: substituição de exercício via IA (fila de revisão) e o
+  // catálogo de exercícios agora servido do banco (`ExerciseCatalogProvider`), não
+  // mais só do array estático em `exercise-catalog.ts`.
+  'protocol_substitution_requests',
+  'exercise_catalog_entries',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;
