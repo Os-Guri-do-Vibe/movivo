@@ -148,6 +148,16 @@ export function buildFormattingBlock(formatting: AgentFormatting): string {
     list,
     'Não use tabelas, títulos, numeração aninhada, blocos de código nem links.',
     BOLD_INSTRUCTION[formatting.boldPolicy],
+    // Achado 2026-09-02 (correção do fundador): a saída soava "AI slop" — genérica demais
+    // pro tom de uma conversa de WhatsApp de verdade. Travessão (—) é o sintoma mais citado
+    // (o fundador foi explícito: NUNCA usar), mas o problema é mais amplo — texto estruturado
+    // como resposta de assistente, não como mensagem de uma pessoa. `applyResponseFormatting`
+    // (worker) troca qualquer travessão que escapar por vírgula como rede de segurança
+    // determinística — instrução de prompt sozinha nunca é teto neste sistema.
+    'NUNCA use travessão (o símbolo "—") em nenhuma frase, nem para separar uma explicação, ' +
+      'nem para unir duas ideias. Prefira vírgula, ponto, ou duas frases curtas separadas. ' +
+      'Escreva como uma pessoa mandando mensagem de verdade no WhatsApp para o aluno: direto, ' +
+      'natural, sem soar como um assistente de IA respondendo um ticket.',
     'Prefira sempre a resposta mais curta que resolve a dúvida.',
   ].join(' ');
 }

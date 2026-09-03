@@ -122,17 +122,16 @@ export const methodologyStatusSchema = z.enum([
 ]);
 
 /**
- * `summary` — resumo curto que o RT publica junto com a metodologia completa.
- *
- * Existe porque o gerador de protocolo lê `methodology_versions`, mas o coach conversacional
- * não: a metodologia não está indexada em `knowledge_base`, então ele não a alcança nem por
- * prompt nem por RAG (achado do Victor). O resumo é a ponte barata (~200 tokens) — injetado
- * só em `DUVIDA_TECNICA` e `SUBSTITUICAO_EXERCICIO`, para EXPLICAR decisões do protocolo.
- * Opcional de propósito: versão sem resumo simplesmente omite o bloco, sem resumo automático.
+ * Achado 2026-09-02 (decisão do fundador): removido o campo `summary` ("Resumo para o
+ * Coach") que existia aqui. O AI Coach não deve raciocinar sobre um resumo comprimido da
+ * metodologia — ele recebe o `content` completo (mesmo texto que o gerador de protocolo
+ * usa), mais o contexto individualizado do aluno (anamnese, protocolo completo). Sem
+ * resumo, "a metodologia dele" É a metodologia da MOVIVO, não uma versão editada à parte.
+ * `content` também deixou de ter teto de caracteres: o profissional CREF decide o quanto a
+ * metodologia precisa, sem um limite arbitrário de produto.
  */
 export const createMethodologyVersionSchema = z.object({
-  content: z.string().trim().min(200).max(100_000),
-  summary: z.string().trim().min(200).max(1000).optional(),
+  content: z.string().trim().min(200),
   changeNote: z.string().trim().min(10).max(500),
 });
 export type CreateMethodologyVersionInput = z.infer<typeof createMethodologyVersionSchema>;
@@ -155,7 +154,6 @@ export const methodologyVersionSchema = z.object({
   version: z.int().positive(),
   versionLabel: z.string(),
   content: z.string(),
-  summary: z.string().nullable(),
   contentSha256: z.string().length(64),
   changeNote: z.string(),
   status: methodologyStatusSchema,

@@ -317,3 +317,22 @@ export const statusTransitionActorEnum = pgEnum('status_transition_actor', [
   'PROFESSIONAL',
   'BACKFILL',
 ]);
+
+// ---------------------------------------------------------------------------
+// SUBSTITUIÇÃO DE EXERCÍCIO VIA IA
+// ---------------------------------------------------------------------------
+
+/**
+ * Ciclo de vida de uma proposta de substituição de exercício (achado 2026-09-02).
+ *
+ * Nasce `PENDING` sem tocar o protocolo `ACTIVE` do aluno — ver comentário de topo de
+ * `protocol-substitution-requests.ts` para o porquê de a mudança ficar em staging em vez
+ * de mutar `protocols` direto. Vira `RELEASED` quando efetivamente aplicada (aprovação do
+ * profissional ou fim da janela de cortesia de 30 min) ou `DISCARDED` quando o profissional
+ * recusa a troca, mantendo o exercício original.
+ */
+export const substitutionRequestStatusEnum = pgEnum('substitution_request_status', [
+  'PENDING',
+  'RELEASED',
+  'DISCARDED',
+]);

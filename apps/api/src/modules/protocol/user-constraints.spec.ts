@@ -7,6 +7,7 @@ import { evaluateParq } from '../anamnesis/parq';
 import {
   demoteLevel,
   emphasisToMuscleGroups,
+  importantEventForPrompt,
   levelFromExperience,
   mapInjuriesToTags,
   painToConstraints,
@@ -180,5 +181,67 @@ describe('demoteLevel (PAR-Q bloqueado rebaixa um degrau)', () => {
     expect(demoteLevel('AVANCADO')).toBe('INTERMEDIARIO');
     expect(demoteLevel('INTERMEDIARIO')).toBe('INICIANTE');
     expect(demoteLevel('INICIANTE')).toBe('INICIANTE');
+  });
+});
+
+/**
+ * Achado 2026-09-02 (correção do fundador): o evento-alvo da anamnese é contexto de
+ * OTIMIZAÇÃO pro prompt (fase/ênfase/progressão dentro do prazo real), nunca fonte de
+ * `total_weeks`/`end_date` — isso é `phaseDurationWeeks`, decidido só pela faixa de
+ * evidência da fase (`protocol-timeline.ts`).
+ */
+describe('importantEventForPrompt', () => {
+  const from = new Date('2026-09-02T12:00:00.000Z');
+
+  it('sem hasImportantEvent → undefined', () => {
+    expect(
+      importantEventForPrompt({ hasImportantEvent: false }, 'chegar a 70kg', from),
+    ).toBeUndefined();
+  });
+
+  it('hasImportantEvent sem data → undefined (schema já obriga os dois juntos, mas defensivo)', () => {
+    expect(importantEventForPrompt({ hasImportantEvent: true }, undefined, from)).toBeUndefined();
+  });
+
+  it('data já passada → undefined (nada a otimizar pra um prazo que não existe mais)', () => {
+    expect(
+      importantEventForPrompt(
+        { hasImportantEvent: true, importantEventDate: '2026-01-01' },
+        undefined,
+        from,
+      ),
+    ).toBeUndefined();
+  });
+
+  it('data hoje (sem sobra de tempo) → undefined', () => {
+    expect(
+      importantEventForPrompt(
+        { hasImportantEvent: true, importantEventDate: '2026-09-02' },
+        undefined,
+        from,
+      ),
+    ).toBeUndefined();
+  });
+
+  it('data futura → date + daysUntil arredondado pra cima, sem description quando ausente', () => {
+    const result = importantEventForPrompt(
+      { hasImportantEvent: true, importantEventDate: '2026-12-25' },
+      undefined,
+      from,
+    );
+    expect(result).toEqual({ date: '2026-12-25', daysUntil: 114 });
+  });
+
+  it('inclui description (texto livre do usuário) quando presente', () => {
+    const result = importantEventForPrompt(
+      { hasImportantEvent: true, importantEventDate: '2026-12-25' },
+      'quero emagrecer e chegar a 70kg pro Natal',
+      from,
+    );
+    expect(result).toEqual({
+      date: '2026-12-25',
+      daysUntil: 114,
+      description: 'quero emagrecer e chegar a 70kg pro Natal',
+    });
   });
 });

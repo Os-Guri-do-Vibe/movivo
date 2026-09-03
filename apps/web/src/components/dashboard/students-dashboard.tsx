@@ -35,7 +35,6 @@ import {
 } from './control-center-table';
 import type { FilterChip, SortDirection } from './control-center-table';
 import {
-  DataQuality,
   EmptyState,
   ResourceState,
   SectorHeader,
@@ -586,7 +585,6 @@ export function StudentsDashboard({ canReadHealth = false }: { canReadHealth?: b
           </TableCard>
         </>
       )}
-      <DataQuality notes={data.meta.dataQuality} />
     </div>
   );
 }

@@ -40,6 +40,18 @@ export const loadStrategySchema = z.enum(['BODYWEIGHT', 'FIXED_LOAD', 'DOUBLE_PR
 export type LoadStrategy = z.infer<typeof loadStrategySchema>;
 
 /**
+ * Rótulos exibidos da estratégia de carga (coluna "Estratégia", ao lado de "Técnica" — dado
+ * de treino como qualquer outro, exibido no dashboard do CREF e no PDF enviado ao aluno; a
+ * conversa com o AI Coach complementa, não substitui a exibição).
+ */
+export const LOAD_STRATEGY_LABELS: Readonly<Record<LoadStrategy, string>> = {
+  BODYWEIGHT: 'Peso corporal',
+  FIXED_LOAD: 'Carga fixa',
+  DOUBLE_PROGRESSION: 'Progressão de carga',
+  RPE: 'Percepção de esforço (RPE)',
+};
+
+/**
  * Divisão de treino (metodologia do RT CREF, item 1). O RT **não usa divisão fixa**: escolhe
  * conforme objetivo, nível, condicionamento, disponibilidade semanal, histórico de lesão e
  * recuperação. `FOCO_MUSCULAR` = "um ou dois grupos musculares por dia".
@@ -203,6 +215,15 @@ export const protocolStructureSchema = z.object({
   weeklyFrequency: z.number().int().min(1).max(7),
   sessions: z.array(protocolSessionSchema).min(1).max(7),
   generalNotes: z.string().trim().max(1000).optional(),
+  /**
+   * Duração do mesociclo/fase ATUAL, em semanas — decidida pela IA dentro da faixa
+   * baseada em evidência para a fase escolhida (achado 2026-09-02, correção do fundador:
+   * `total_weeks`/`end_date` do protocolo vinham de um padrão estático de 12 semanas,
+   * sem nenhuma relação com a fase real do bloco — ver `PHASE_DURATION_WEEKS_RANGE` em
+   * `protocol-timeline.ts`, apps/api). Faixa larga aqui (1-8) é só FORMA; o teto/piso por
+   * fase é semântica de segurança, vetada pelo `ValidationService`, não por este schema.
+   */
+  phaseDurationWeeks: z.number().int().min(1).max(8),
 });
 export type ProtocolStructure = z.infer<typeof protocolStructureSchema>;
 

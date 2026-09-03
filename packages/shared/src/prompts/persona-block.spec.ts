@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import { AgentToneDescriptor } from '../enums/agent-config';
 import { DEFAULT_AGENT_PERSONA, type AgentPersona } from '../schemas/agent-config.schema';
-import { buildPersonaBlock, TONE_LABEL } from './persona-block';
+import { buildFormattingBlock, buildPersonaBlock, TONE_LABEL } from './persona-block';
 
 const MALE_PERSONA: AgentPersona = {
   ...DEFAULT_AGENT_PERSONA,
@@ -95,5 +95,21 @@ describe('buildPersonaBlock — neutralidade de gênero', () => {
     });
     expect(block).toContain('Você é Marina.');
     expect(block).toContain('Seu tom é: acolhimento, motivação.');
+  });
+});
+
+// Achado 2026-09-02 (correção do fundador — "NUNCA DEVE SER USADO"): a saída soava "AI
+// slop"; o travessão foi o sintoma mais citado. `applyResponseFormatting` (apps/api) é a
+// rede de segurança determinística — este teste tranca só a instrução no prompt.
+describe('buildFormattingBlock — travessão nunca é instruído', () => {
+  it('instrui o modelo a nunca usar travessão, em toda combinação de formatação', () => {
+    for (const blockSize of ['CURTO', 'MEDIO', 'LIVRE'] as const) {
+      for (const allowLists of [true, false]) {
+        for (const boldPolicy of ['NENHUM', 'UMA_PALAVRA', 'MODERADO'] as const) {
+          const block = buildFormattingBlock({ blockSize, allowLists, boldPolicy });
+          expect(block).toContain('NUNCA use travessão');
+        }
+      }
+    }
   });
 });

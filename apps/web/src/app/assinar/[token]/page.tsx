@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 };
 
 /** Plano recomendado (pré-seleção padrão quando o `?plano=` é ausente/ inválido). */
-const DEFAULT_PLAN: SubscriptionPlanId = 'QUARTERLY';
+const DEFAULT_PLAN: SubscriptionPlanId = 'SEMIANNUAL';
 
 function resolvePlan(raw: string | undefined): SubscriptionPlanId {
   const parsed = subscriptionPlanIdSchema.safeParse(raw?.toUpperCase());

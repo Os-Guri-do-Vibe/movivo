@@ -1,15 +1,20 @@
 'use client';
 
 import {
-  PARQ_QUESTION_TEXT,
+  ADVANCED_TECHNIQUE_LABELS,
+  LOAD_STRATEGY_LABELS,
+  PARQ_QUESTION_IDS,
+  PARQ_RISK_FACTOR_LABEL,
   PRIMARY_GOAL_LABELS,
   protocolStructureSchema,
+  type AdvancedTechnique,
   type ProtocolExercise,
   type ProtocolStructure,
 } from '@movivo/shared';
 import {
   ArrowLeft,
   CheckCircle2,
+  Eye,
   Pencil,
   Plus,
   RefreshCw,
@@ -25,8 +30,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
+  approveSubstitutionNow,
   captureDashboardEvent,
   DashboardApiError,
+  discardSubstitution,
   getAnamnesisAnswers,
   getQueueDetail,
   resolveHandoff,
@@ -38,6 +45,7 @@ import type {
   ProtocolDetail,
   QueueDetail as QueueDetailType,
   QueueKind,
+  SubstitutionDetail,
 } from '@/lib/dashboard-types';
 
 import { ConfirmAction } from './confirm-action';
@@ -51,7 +59,7 @@ import {
   type FieldOption,
 } from './fields';
 import { WEEKDAY_ITEMS } from '../onboarding/step2-anamnesis';
-import { BIOLOGICAL_SEX_LABELS } from './protocol-anamnesis-answers';
+import { AnamnesisAnswersModal, BIOLOGICAL_SEX_LABELS } from './protocol-anamnesis-answers';
 import { meaningfulText } from './queue-board';
 
 const fieldClass =
@@ -77,21 +85,33 @@ const PHASE_ITEMS: readonly FieldOption<ProtocolStructure['phase']>[] = [
   { value: 'DELOAD', label: 'Deload' },
 ];
 
-const LOAD_STRATEGY_LABELS: Record<string, string> = {
-  BODYWEIGHT: 'Peso corporal',
-  FIXED_LOAD: 'Carga fixa',
-  DOUBLE_PROGRESSION: 'Progressão dupla',
-  RPE: 'Percepção de esforço (RPE)',
-};
+/**
+ * Achado 2026-09-02: a coluna "Estratégia" mostrava `loadStrategy` — mas o próprio schema
+ * (`packages/shared/src/schemas/protocol.schema.ts`) já documentava essa coluna como sendo
+ * a de TÉCNICA avançada (`ADVANCED_TECHNIQUE_LABELS`), e é isso que a página pública do
+ * protocolo e o PDF (que já usam `ADVANCED_TECHNIQUE_LABELS`) sempre mostraram. Só esta
+ * tela de revisão do CREF estava com o campo errado — corrigido para "Técnica". A pedido
+ * do fundador, `loadStrategy` (dado de treino como outro qualquer) ganhou coluna própria
+ * "Estratégia" ao lado direito, em vez de ficar só na conversa do AI Coach. `NONE_TECHNIQUE`
+ * é sentinela de UI apenas — vira `technique: undefined` ao salvar (a maioria dos
+ * exercícios não usa técnica avançada; `loadStrategy`, ao contrário, é sempre obrigatório).
+ */
+const NONE_TECHNIQUE = 'NONE' as const;
+type TechniqueFieldValue = AdvancedTechnique | typeof NONE_TECHNIQUE;
+
+const TECHNIQUE_ITEMS: readonly FieldOption<TechniqueFieldValue>[] = [
+  { value: NONE_TECHNIQUE, label: 'Nenhuma (série tradicional)' },
+  ...(Object.entries(ADVANCED_TECHNIQUE_LABELS) as [AdvancedTechnique, string][]).map(
+    ([value, label]) => ({ value, label }),
+  ),
+];
 
 const LOAD_STRATEGY_ITEMS: readonly FieldOption<
   ProtocolStructure['sessions'][number]['exercises'][number]['loadStrategy']
->[] = [
-  { value: 'BODYWEIGHT', label: 'Peso corporal' },
-  { value: 'FIXED_LOAD', label: 'Carga fixa' },
-  { value: 'DOUBLE_PROGRESSION', label: 'Progressão dupla' },
-  { value: 'RPE', label: 'Percepção de esforço (RPE)' },
-];
+>[] = Object.entries(LOAD_STRATEGY_LABELS).map(([value, label]) => ({
+  value: value as ProtocolStructure['sessions'][number]['exercises'][number]['loadStrategy'],
+  label,
+}));
 
 const WEEKLY_FREQUENCY_ITEMS: readonly FieldOption<string>[] = Array.from(
   { length: 7 },
@@ -322,7 +342,7 @@ function ExerciseEditorCard({
         </Button>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
         <MiniField label="Séries válidas">
           <NumberField
             min={1}
@@ -351,6 +371,18 @@ function ExerciseEditorCard({
               update({
                 rir: value === '' || Number.isNaN(Number(value)) ? undefined : Number(value),
               })
+            }
+          />
+        </MiniField>
+        <MiniField label="Técnica">
+          <ComboboxField
+            id={`technique-${exercise.exerciseId}`}
+            label="Técnica avançada"
+            items={TECHNIQUE_ITEMS}
+            value={exercise.technique ?? NONE_TECHNIQUE}
+            className="[&>span]:sr-only"
+            onChange={(technique) =>
+              update({ technique: technique === NONE_TECHNIQUE ? undefined : technique })
             }
           />
         </MiniField>
@@ -584,6 +616,7 @@ function ProtocolSummary({
   const [reason, setReason] = useState('');
   const [issues, setIssues] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
+  const [anamnesisOpen, setAnamnesisOpen] = useState(false);
 
   function startEdit() {
     setDraft(structuredClone(protocol.content));
@@ -742,36 +775,54 @@ function ProtocolSummary({
             </p>
           )}
         </div>
-        {editing ? (
-          <div className="flex gap-2">
-            <Button type="button" size="sm" onClick={() => void save()} disabled={pending}>
-              <Save aria-hidden="true" className="size-4" /> {pending ? 'Validando…' : 'Salvar'}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={cancelEdit}
-              disabled={pending}
-              aria-label="Cancelar edição"
-              title="Cancelar edição"
-            >
-              <X aria-hidden="true" className="size-4" />
-            </Button>
-          </div>
-        ) : (
+        <div className="flex items-center gap-2">
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            onClick={startEdit}
-            aria-label="Editar Protocolo"
-            title="Editar Protocolo"
+            onClick={() => setAnamnesisOpen(true)}
+            aria-label="Ver respostas da anamnese"
+            title="Ver respostas da anamnese"
           >
-            <Pencil aria-hidden="true" className="size-4" />
+            <Eye aria-hidden="true" className="size-4" />
           </Button>
-        )}
+          {editing ? (
+            <div className="flex gap-2">
+              <Button type="button" size="sm" onClick={() => void save()} disabled={pending}>
+                <Save aria-hidden="true" className="size-4" /> {pending ? 'Validando…' : 'Salvar'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={cancelEdit}
+                disabled={pending}
+                aria-label="Cancelar edição"
+                title="Cancelar edição"
+              >
+                <X aria-hidden="true" className="size-4" />
+              </Button>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={startEdit}
+              aria-label="Editar Protocolo"
+              title="Editar Protocolo"
+            >
+              <Pencil aria-hidden="true" className="size-4" />
+            </Button>
+          )}
+        </div>
       </div>
+      <AnamnesisAnswersModal
+        kind="PROTOCOL"
+        id={protocol.id}
+        open={anamnesisOpen}
+        onOpenChange={setAnamnesisOpen}
+      />
 
       {issues.length > 0 ? (
         <div
@@ -867,28 +918,38 @@ function ProtocolSummary({
               </div>
             ) : (
               <div className="mt-4 overflow-x-auto">
-                <table className="w-full min-w-[38rem] border-collapse text-left text-label">
+                {/* Achado 2026-09-02: cada sessão tem sua PRÓPRIA <table>, e sem largura de
+                    coluna fixa o navegador calcula cada uma com base só no conteúdo daquela
+                    tabela — nomes de exercício mais longos numa sessão empurravam as colunas
+                    seguintes, então "Séries"/"Descanso"/etc. ficavam em posições X diferentes
+                    entre uma sessão e outra. `table-fixed` + largura em % igual em toda tabela
+                    (mesmo container pai, mesma largura disponível) alinha as colunas entre
+                    TODAS as sessões da tela, não só dentro de uma. */}
+                <table className="w-full min-w-[44rem] table-fixed border-collapse text-left text-label">
                   <thead>
                     <tr className="border-b border-border text-muted-foreground">
-                      <th scope="col" className="p-2 font-semibold">
+                      <th scope="col" className="w-[24%] p-2 font-semibold">
                         Exercício
                       </th>
-                      <th scope="col" className="p-2 font-semibold">
+                      <th scope="col" className="w-[7%] p-2 font-semibold">
                         Séries
                       </th>
-                      <th scope="col" className="p-2 font-semibold">
+                      <th scope="col" className="w-[12%] p-2 font-semibold">
                         Repetições / Duração
                       </th>
-                      <th scope="col" className="p-2 font-semibold">
+                      <th scope="col" className="w-[9%] p-2 font-semibold">
                         Descanso
                       </th>
-                      <th scope="col" className="p-2 font-semibold">
+                      <th scope="col" className="w-[12%] p-2 font-semibold">
                         Repetições em Reserva (RIR)
                       </th>
-                      <th scope="col" className="p-2 font-semibold">
+                      <th scope="col" className="w-[12%] p-2 font-semibold">
+                        Técnica
+                      </th>
+                      <th scope="col" className="w-[13%] p-2 font-semibold">
                         Estratégia
                       </th>
-                      <th scope="col" className="p-2 font-semibold">
+                      <th scope="col" className="w-[11%] p-2 font-semibold">
                         Vídeo de execução
                       </th>
                     </tr>
@@ -930,7 +991,10 @@ function ProtocolSummary({
                         <td className="p-2 font-mono">{exercise.restSeconds}s</td>
                         <td className="p-2 font-mono">{exercise.rir ?? '—'}</td>
                         <td className="p-2 text-xs">
-                          {LOAD_STRATEGY_LABELS[exercise.loadStrategy] ?? exercise.loadStrategy}
+                          {exercise.technique ? ADVANCED_TECHNIQUE_LABELS[exercise.technique] : '—'}
+                        </td>
+                        <td className="p-2 text-xs">
+                          {LOAD_STRATEGY_LABELS[exercise.loadStrategy]}
                         </td>
                         <td className="p-2 text-xs">
                           {exercise.videoUrl ? (
@@ -1062,14 +1126,19 @@ function ProtocolStudentHeader({
     new Date(protocol.createdAt).getTime() + protocol.totalWeeks * 7 * 24 * 60 * 60 * 1000,
   ).toISOString();
 
-  const riskFactors =
-    answers?.health.parq?.answers
-      .filter((answer) => answer.answer)
-      .map(
-        (answer) =>
-          PARQ_QUESTION_TEXT[answer.questionId as keyof typeof PARQ_QUESTION_TEXT] ??
-          answer.questionId,
-      ) ?? [];
+  /**
+   * Resumo compacto (rótulo curto por pergunta, não a pergunta inteira — achado
+   * 2026-09-03, a pedido do fundador). Percorre `PARQ_QUESTION_IDS` em vez do array de
+   * respostas cru: normaliza a ORDEM (sempre Q1→Q9, independente de como a API devolveu)
+   * e a leitura do booleano (`=== true`, nunca truthy de um valor inesperado).
+   */
+  const riskFactors = answers?.health.parq
+    ? PARQ_QUESTION_IDS.filter(
+        (questionId) =>
+          answers.health.parq?.answers.find((answer) => answer.questionId === questionId)
+            ?.answer === true,
+      ).map((questionId) => PARQ_RISK_FACTOR_LABEL[questionId])
+    : [];
 
   return (
     <header className="mt-5 rounded-xl border border-border bg-card p-4 sm:p-6">
@@ -1106,7 +1175,7 @@ function ProtocolStudentHeader({
               <p>
                 <span className="font-semibold">Fatores de Risco:</span>{' '}
                 {riskFactors.length
-                  ? riskFactors.join('; ')
+                  ? riskFactors.join(', ')
                   : 'Nenhum fator de risco identificado.'}
               </p>
               <p>
@@ -1147,6 +1216,42 @@ function ProtocolStudentHeader({
         </div>
       ) : null}
     </header>
+  );
+}
+
+/**
+ * Detalhe de uma proposta de substituição de exercício via IA (achado 2026-09-02) — o que
+ * vai virar o quê, o motivo, e em quais dias da semana a troca se aplica. Só leitura: a
+ * decisão do profissional (aprovar agora ou recusar) é o `ConfirmAction` logo abaixo, em
+ * `QueueDetail` — mesma separação de `ProtocolSummary` (conteúdo) vs. o botão de assinar.
+ */
+function SubstitutionSummary({ substitution }: { substitution: SubstitutionDetail }) {
+  return (
+    <section
+      aria-labelledby="substitution-title"
+      className="rounded-xl border border-border bg-card p-4 sm:p-5"
+    >
+      <h2 id="substitution-title" className="text-h3 font-semibold">
+        Troca proposta
+      </h2>
+      <div className="mt-4 flex flex-wrap items-center gap-3 text-body">
+        <span className="rounded-lg bg-secondary px-3 py-1.5 font-medium line-through decoration-2">
+          {substitution.from.name}
+        </span>
+        <span aria-hidden="true" className="text-muted-foreground">
+          →
+        </span>
+        <span className="rounded-lg bg-accent px-3 py-1.5 font-semibold text-accent-foreground">
+          {substitution.to.name}
+        </span>
+      </div>
+      {substitution.diff.sessionsAffected.length > 0 ? (
+        <p className="mt-3 text-label text-muted-foreground">
+          Dias afetados: {substitution.diff.sessionsAffected.join(', ')}
+        </p>
+      ) : null}
+      <p className="mt-3 text-label text-muted-foreground">{substitution.changeReason}</p>
+    </section>
   );
 }
 
@@ -1304,11 +1409,14 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
             }}
           />
         ) : null}
+        {detail.substitution ? <SubstitutionSummary substitution={detail.substitution} /> : null}
         {detail.replay ? <ConversationReplay replay={detail.replay} /> : null}
 
         {/* Achado 2026-08-19: pra protocolo, "Contexto autorizado" só repetia a versão
-            (já no título) e um `humanReviewRequired` sempre `true` — sem valor pro RT. */}
-        {kind !== 'PROTOCOL' ? <Context detail={detail} /> : null}
+            (já no título) e um `humanReviewRequired` sempre `true` — sem valor pro RT. Mesma
+            razão pra substituição (2026-09-02): `context` sempre vem vazio, o que importa
+            já está em `SubstitutionSummary`. */}
+        {kind !== 'PROTOCOL' && kind !== 'SUBSTITUTION' ? <Context detail={detail} /> : null}
 
         {kind === 'PROTOCOL' && detail.protocol && !detail.protocol.signatureHash ? (
           <div className="flex justify-end">
@@ -1322,6 +1430,38 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
                   () => signProtocol(detail.protocol?.id ?? id),
                   'cref_protocol_signed',
                   'Protocolo assinado e auditoria registrada.',
+                )
+              }
+            />
+          </div>
+        ) : null}
+
+        {kind === 'SUBSTITUTION' && detail.substitution?.status === 'PENDING' ? (
+          <div className="flex flex-wrap justify-end gap-3">
+            <ConfirmAction
+              triggerLabel="Recusar"
+              title="Recusar esta troca?"
+              description="O exercício original é mantido no protocolo do aluno. Ele será avisado que a troca não foi aplicada."
+              confirmLabel="Confirmar recusa"
+              destructive
+              onConfirm={() =>
+                runAction(
+                  () => discardSubstitution(id),
+                  'cref_substitution_discarded',
+                  'Troca recusada — exercício original mantido.',
+                )
+              }
+            />
+            <ConfirmAction
+              triggerLabel="Aprovar agora"
+              title="Aplicar esta troca agora?"
+              description="A troca é aplicada ao protocolo do aluno imediatamente, sem esperar a liberação automática, e o PDF atualizado é reenviado pelo WhatsApp."
+              confirmLabel="Confirmar e aplicar"
+              onConfirm={() =>
+                runAction(
+                  () => approveSubstitutionNow(id),
+                  'cref_substitution_approved',
+                  'Troca aplicada e protocolo reenviado.',
                 )
               }
             />

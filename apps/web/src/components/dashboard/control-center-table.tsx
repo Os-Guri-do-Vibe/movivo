@@ -11,6 +11,7 @@ import {
   ChevronRight,
   X,
 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -372,6 +373,108 @@ export function FilterSelectOption({ value, children }: { value: string; childre
 /** Hairline vertical interna — separa dois controles dentro da mesma caixa. */
 export function FieldDivider() {
   return <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />;
+}
+
+export interface FilterMultiSelectOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * Combo de SELEÇÃO MÚLTIPLA da faixa de filtros — irmão do `FilterSelect`, mesma
+ * caixa/altura/anel de foco, mas guarda uma lista em vez de um valor só (ex.: filtrar
+ * por vários músculos ao mesmo tempo).
+ *
+ * Sem Radix aqui: o projeto só tem `@radix-ui/react-select`, que é fundamentalmente
+ * single-value (não modela seleção múltipla). `<details>/<summary>` é o MESMO mecanismo
+ * já usado no modal de exercício (`ExerciseEditorDialog`) para o checklist de músculo —
+ * reaproveita um padrão validado em vez de introduzir uma dependência nova só pra isso.
+ *
+ * Diferença do `<details>` cru do modal: aqui o `open` é semicontrolado (o navegador
+ * ainda alterna nativamente ao clicar no `<summary>`, `onToggle` sincroniza de volta pro
+ * estado do React) só para permitir fechar ao clicar FORA — importante numa faixa de
+ * filtros com vários campos lado a lado, onde um dropdown que não fecha sozinho cobre o
+ * campo vizinho.
+ */
+export function FilterMultiSelect({
+  options,
+  selected,
+  onChange,
+  emptyLabel = 'Todos',
+  className,
+}: {
+  options: readonly FilterMultiSelectOption[];
+  selected: readonly string[];
+  onChange: (next: string[]) => void;
+  /** Rótulo do gatilho quando nada está selecionado. */
+  emptyLabel?: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: PointerEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    }
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [open]);
+
+  function toggleOption(value: string) {
+    onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
+  }
+
+  const summary =
+    selected.length === 0
+      ? emptyLabel
+      : selected.length === 1
+        ? (options.find((o) => o.value === selected[0])?.label ?? selected[0])
+        : `${selected.length} selecionados`;
+
+  return (
+    <details
+      ref={ref}
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      className={cn('group relative', className)}
+    >
+      <summary
+        className={cn(
+          FIELD_SELECT,
+          CONTROL_H,
+          FOCUS_RING,
+          'flex cursor-pointer list-none items-center justify-between gap-2 marker:content-none',
+        )}
+      >
+        <span className="min-w-0 truncate text-left">{summary}</span>
+        <ChevronDown
+          aria-hidden="true"
+          className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+        />
+      </summary>
+      <div className="absolute z-50 mt-1 max-h-64 w-max min-w-full overflow-y-auto rounded-md border border-border bg-card p-1 text-label shadow-lg">
+        {options.map((option) => {
+          const checked = selected.includes(option.value);
+          return (
+            <label
+              key={option.value}
+              className="flex h-11 cursor-pointer items-center gap-2 rounded-sm px-2 whitespace-nowrap hover:bg-accent lg:h-9"
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => toggleOption(option.value)}
+                className="size-4 shrink-0 rounded border-input"
+              />
+              {option.label}
+            </label>
+          );
+        })}
+      </div>
+    </details>
+  );
 }
 
 /* -------------------------------------------------------------------------- */

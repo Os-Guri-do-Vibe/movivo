@@ -6,8 +6,14 @@
  *
  *  1. **Rate limit** (`ThrottlerGuard`, 30/min por IP) — antes de qualquer trabalho. Um
  *     endpoint público que verifica HMAC em todo request é um amplificador de CPU sem isto.
- *  2. **Limite de corpo** — `PAYMENT_WEBHOOK_BODY_LIMIT`, aplicado explicitamente no
- *     `main.ts`. Payload de gateway vive na casa dos poucos KB; o resto é abuso.
+ *  2. **Limite de corpo** — hoje o `DEFAULT_JSON_BODY_LIMIT` (2mb) do `main.ts`, compartilhado
+ *     com toda a API desde que o teto anterior (100kb, só desta rota) virou default global por
+ *     engano e passou a rejeitar POST legítimo de outras rotas (achado 2026-09-02, ex.:
+ *     metodologia CREF sem teto de caracteres). `PAYMENT_WEBHOOK_BODY_LIMIT` abaixo documenta
+ *     o tamanho REAL esperado do payload de gateway (poucos KB) — não é mais o valor imposto
+ *     nesta rota especificamente. HMAC em 2mb ainda é CPU trivial (milissegundos), e o rate
+ *     limit acima já limita volume — o risco de amplificação que motivou o teto original
+ *     continua coberto pelas outras duas camadas.
  *  3. **Assinatura verificada antes de processar** — dentro do `PaymentWebhookService`,
  *     sobre o `req.rawBody` (habilitado por `rawBody: true` no bootstrap, como o webhook
  *     AraraHQ). Nada é persistido nem enfileirado antes dela passar.
@@ -44,8 +50,11 @@ export const PAYMENT_SIGNATURE_HEADER = 'x-payment-signature';
 export const PAYMENT_TIMESTAMP_HEADER = 'x-payment-timestamp';
 
 /**
- * Teto do corpo JSON, aplicado no `main.ts`. É o mesmo valor que o express já usava por
- * default: o ponto de declará-lo é não depender de um default implícito nesta rota.
+ * Documenta o tamanho REAL esperado do payload do gateway (poucos KB) — não é mais o teto
+ * imposto nesta rota (achado 2026-09-02: ver rationale completo na docstring da classe e em
+ * `main.ts`, `DEFAULT_JSON_BODY_LIMIT`). Se algum dia esta rota precisar de um teto próprio
+ * de novo, mais apertado que o default global, aplique via `MiddlewareConsumer` escopado a
+ * este controller — não voltando a emprestar este valor como default de toda a API.
  */
 export const PAYMENT_WEBHOOK_BODY_LIMIT = '100kb';
 

@@ -21,21 +21,76 @@ import type { LlmRouter } from '../ai-coach/llm/llm-router.service';
 import type { EvidenceGroundingService } from '../ai-coach/rag/evidence-grounding.service';
 import type { QueueManager } from '../jobs/queue-manager.service';
 import type { WorkerFactory } from '../jobs/worker.factory';
+import { findSafeCandidates } from '../protocol/exercise-substitution';
+import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
+import type { ActiveProtocolForSubstitution } from '../protocol/protocol-substitution.repository';
 import { ValidationService } from '../protocol/validation/validation.service';
 import type { UserJobLock } from '../whatsapp/user-job-lock';
 import type { AiResponseJob } from '../whatsapp/whatsapp-inbound.service';
 import { AIResponseWorker } from './ai-response.worker';
 import {
   DAILY_LIMIT_MESSAGE,
+  DLQ_FALLBACK_MESSAGE,
   FORBIDDEN_TOPIC_RESPONSE,
   SAFETY_HANDOFF_MESSAGE,
   STANDARD_BLOCK_RESPONSE,
+  SUBSTITUTION_ALREADY_PENDING_MESSAGE,
   SUBSTITUTION_FALLBACK_MESSAGE,
+  SUBSTITUTION_NOT_SAFE_TO_APPLY_MESSAGE,
   TECHNICAL_NO_EVIDENCE_MESSAGE,
 } from './coach-messages';
 import type { ConversationRepository } from './conversation.repository';
 import { buildForaDeEscopoResponse, resolvePrompt } from '../ai-coach/intent/prompts';
 import type { PromptResolverService } from '../ai-coach/intent/prompt-resolver.service';
+
+const EXERCISE_CATALOG = new ExerciseCatalogProvider().getAll();
+const FLEXAO_LOOKUP = EXERCISE_CATALOG.find((ex) => ex.id === 'flexao');
+if (!FLEXAO_LOOKUP) throw new Error('fixture: exercício "flexao" ausente do catálogo');
+const FLEXAO = FLEXAO_LOOKUP;
+/** Candidato seguro real (nunca hardcoded — sempre o que `findSafeCandidates` de fato acha). */
+const FLEXAO_CANDIDATE = findSafeCandidates(
+  FLEXAO,
+  { level: 'INICIANTE', location: 'HOME', equipment: [], injuryTags: [] },
+  EXERCISE_CATALOG,
+)[0];
+if (!FLEXAO_CANDIDATE) throw new Error('fixture: nenhum candidato seguro para "flexao" em HOME');
+
+const DEFAULT_ACTIVE_PROTOCOL: ActiveProtocolForSubstitution = {
+  protocolId: 'proto1',
+  version: 3,
+  content: {
+    promptVersion: 'methodology-test',
+    goal: 'GAIN_MUSCLE',
+    phase: 'ADAPTACAO',
+    phaseDurationWeeks: 3,
+    weeklyFrequency: 1,
+    sessions: [
+      {
+        dayLabel: 'Dia A',
+        focus: 'Peito',
+        exercises: [
+          {
+            exerciseId: FLEXAO.id,
+            name: FLEXAO.name,
+            sets: 3,
+            reps: { min: 8, max: 12 },
+            loadStrategy: 'BODYWEIGHT',
+            restSeconds: 60,
+          },
+        ],
+      },
+    ],
+  } as never,
+  constraints: { level: 'INICIANTE', location: 'HOME', equipment: [], injuryTags: [] },
+  validationConstraints: {
+    goal: 'GAIN_MUSCLE',
+    injuryTags: [],
+    preferredDays: undefined,
+    level: 'INICIANTE',
+  },
+  parQFlags: [],
+  fromBlockingParq: false,
+};
 
 interface Deps {
   intent?: Intent;
@@ -51,7 +106,6 @@ interface Deps {
   forbiddenHit?: ForbiddenTopicHit | null;
   forbiddenUnavailable?: boolean;
   l1Flags?: L1GuardrailFlag[];
-  methodologySummary?: string | null;
   handoffMessage?: string;
   /** Sprint 11: slot da persona do titular (`null` = titular sem anamnese/coluna). */
   biologicalSex?: 'MALE' | 'FEMALE' | null;
@@ -64,6 +118,18 @@ interface Deps {
     snippet: string;
     score: number;
   }>;
+  /** `EvidenceGroundingService.answer()` status — default `VERIFIED` quando não informado. */
+  groundingStatus?: 'VERIFIED' | 'INSUFFICIENT' | 'CONFLICT' | 'UNVERIFIED';
+  /** Achado 2026-09-02 (fluxo de substituição via IA) — `undefined` cai no fixture padrão
+   * (protocolo ativo com "Flexão"); `null` simula ausência de protocolo ativo. */
+  activeProtocol?: ActiveProtocolForSubstitution | null;
+  substitutionHasPending?: boolean;
+  /** Confirmação de um candidato — default: nada resolvido, cai pra (re)oferta. */
+  substitutionResolved?: { resolved: true; chosenExerciseId: string } | { resolved: false };
+  /** Identificação do alvo — default: identifica "flexao" (o único do fixture). */
+  substitutionTargetIdentified?: { identified: true; exerciseId: string } | { identified: false };
+  substitutionCreateResult?:
+    { created: true; id: string } | { created: false; alreadyPending: true };
 }
 
 function makeWorker(deps: Deps = {}) {
@@ -148,15 +214,19 @@ function makeWorker(deps: Deps = {}) {
   );
   const llm = { complete } as unknown as LlmRouter;
   const grounding = {
-    answer: vi.fn(async () => ({
-      status: 'VERIFIED' as const,
-      text: `${deps.llmText ?? 'Resposta sustentada.'} [E1: Fonte aprovada]`,
-      model: 'deepseek-v4-pro',
-      verifierModel: 'deepseek-v4-pro',
-      latencyMs: 10,
-      humanReview: false,
-      sources: [],
-    })),
+    answer: vi.fn(async () => {
+      const status = deps.groundingStatus ?? 'VERIFIED';
+      if (status !== 'VERIFIED') return { status, latencyMs: 10 };
+      return {
+        status: 'VERIFIED' as const,
+        text: `${deps.llmText ?? 'Resposta sustentada.'} [E1: Fonte aprovada]`,
+        model: 'deepseek-v4-pro',
+        verifierModel: 'deepseek-v4-pro',
+        latencyMs: 10,
+        humanReview: false,
+        sources: [],
+      };
+    }),
   } as unknown as EvidenceGroundingService;
 
   const abuse = {
@@ -177,14 +247,36 @@ function makeWorker(deps: Deps = {}) {
         biologicalSex: deps.biologicalSex === undefined ? 'MALE' : deps.biologicalSex,
       }),
     ),
-    loadConstraints: vi.fn(() =>
+  } as unknown as ConversationRepository;
+
+  const substitutionHasPending = vi.fn(() => Promise.resolve(deps.substitutionHasPending ?? false));
+  const substitutionCreatePending = vi.fn((_input: unknown) =>
+    Promise.resolve(deps.substitutionCreateResult ?? { created: true, id: 'sub1' }),
+  );
+  const substitutionRepo = {
+    loadActiveProtocol: vi.fn(() =>
       Promise.resolve(
-        deps.constraints === undefined
-          ? { level: 'INICIANTE', location: 'HOME', equipment: [], injuryTags: [] }
-          : deps.constraints,
+        deps.activeProtocol === undefined ? DEFAULT_ACTIVE_PROTOCOL : deps.activeProtocol,
       ),
     ),
-  } as unknown as ConversationRepository;
+    hasPending: substitutionHasPending,
+    createPending: substitutionCreatePending,
+  } as never;
+
+  const substitutionResolve = vi.fn(() =>
+    Promise.resolve(deps.substitutionResolved ?? { resolved: false }),
+  );
+  const substitutionResolution = { resolve: substitutionResolve } as never;
+
+  const substitutionIdentify = vi.fn(() =>
+    Promise.resolve(
+      deps.substitutionTargetIdentified ?? { identified: true, exerciseId: FLEXAO.id },
+    ),
+  );
+  const substitutionTarget = { identify: substitutionIdentify } as never;
+
+  const queueEventsEmit = vi.fn();
+  const queueEvents = { emit: queueEventsEmit } as never;
 
   const items = deps.batchItems ?? [JSON.stringify({ text: 'oi' })];
   const batchLrange = vi.fn();
@@ -232,14 +324,18 @@ function makeWorker(deps: Deps = {}) {
         version: 1,
         versionLabel: 'methodology-v1',
         content: 'conteúdo',
-        summary: deps.methodologySummary ?? null,
         contentSha256: 'a'.repeat(64),
       })),
     } as never,
+    new ExerciseCatalogProvider(),
     repo,
     {
       hasActiveForUser: vi.fn(async () => deps.consentActive ?? true),
     } as unknown as HealthConsentService,
+    substitutionRepo,
+    substitutionTarget,
+    substitutionResolution,
+    queueEvents,
     redis,
     keys as never,
     logger,
@@ -265,6 +361,11 @@ function makeWorker(deps: Deps = {}) {
     personaResolve,
     context,
     grounding,
+    substitutionHasPending,
+    substitutionCreatePending,
+    substitutionResolve,
+    substitutionIdentify,
+    queueEventsEmit,
   };
 }
 
@@ -447,27 +548,168 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     expect(complete).not.toHaveBeenCalled();
   });
 
-  it('substituição: verbaliza o substituto da base (prompt injeta o aprovado)', async () => {
-    const { worker, complete, enqueue } = makeWorker({
-      intent: 'SUBSTITUICAO_EXERCICIO',
-      batchItems: [JSON.stringify({ text: 'quero trocar a Flexão de braço' })],
-      llmText: 'Pode trocar por Flexão de joelhos, mesmo movimento.',
+  // Achado 2026-09-02: motor determinístico de ESCOLHA removido — a IA identifica o alvo
+  // (turno 1) e lê a confirmação (turno 2); `findSafeCandidates` continua determinístico e
+  // é sempre RECOMPUTADO pelo worker, nunca confiado de uma chamada anterior.
+  describe('substituição de exercício via IA (dois turnos, sem motor determinístico)', () => {
+    it('turno 1 — identifica o alvo e oferece candidatos seguros da base, sem persistir nada', async () => {
+      const { worker, complete, enqueue, substitutionCreatePending } = makeWorker({
+        intent: 'SUBSTITUICAO_EXERCICIO',
+        batchItems: [JSON.stringify({ text: 'não gosto de fazer flexão, me sinto insegura' })],
+        llmText: `Pode ser ${FLEXAO_CANDIDATE.name}, mesmo movimento.`,
+      });
+      const res = await worker.process(job());
+      expect(res.status).toBe('SENT');
+      const system = complete.mock.calls[0]?.[0]?.system ?? '';
+      expect(system).toContain('OPÇÕES SEGURAS DA BASE');
+      expect(system).toContain(FLEXAO_CANDIDATE.name);
+      expect(sentText(enqueue)).toContain(FLEXAO_CANDIDATE.name);
+      expect(substitutionCreatePending).not.toHaveBeenCalled(); // nada persistido no turno 1
     });
-    const res = await worker.process(job());
-    expect(res.status).toBe('SENT');
-    const system = complete.mock.calls[0]?.[0]?.system ?? '';
-    expect(system).toContain('SUBSTITUTO APROVADO DA BASE');
-    expect(sentText(enqueue)).toContain('Flexão de joelhos');
-  });
 
-  it('substituição sem base viável → fallback pré-aprovado, sem LLM', async () => {
-    const { worker, complete, enqueue } = makeWorker({
-      intent: 'SUBSTITUICAO_EXERCICIO',
-      batchItems: [JSON.stringify({ text: 'to sem ideia do que fazer' })],
+    it('turno 1 — sem alvo identificável, pergunta qual exercício sem oferecer nada', async () => {
+      const { worker, complete } = makeWorker({
+        intent: 'SUBSTITUICAO_EXERCICIO',
+        batchItems: [JSON.stringify({ text: 'não gostei do treino de hoje' })],
+        substitutionTargetIdentified: { identified: false },
+      });
+      await worker.process(job());
+      const system = complete.mock.calls[0]?.[0]?.system ?? '';
+      expect(system).toContain('não ficou claro qual exercício');
+      expect(system).not.toContain('OPÇÕES SEGURAS DA BASE');
     });
-    await worker.process(job());
-    expect(complete).not.toHaveBeenCalled();
-    expect(sentText(enqueue)).toBe(SUBSTITUTION_FALLBACK_MESSAGE);
+
+    it('sem protocolo ativo → fallback pré-aprovado, sem LLM', async () => {
+      const { worker, complete, enqueue } = makeWorker({
+        intent: 'SUBSTITUICAO_EXERCICIO',
+        activeProtocol: null,
+      });
+      await worker.process(job());
+      expect(complete).not.toHaveBeenCalled();
+      expect(sentText(enqueue)).toBe(SUBSTITUTION_FALLBACK_MESSAGE);
+    });
+
+    it('alvo identificado sem nenhum candidato seguro na base → fallback, sem LLM', async () => {
+      const { worker, complete, enqueue } = makeWorker({
+        intent: 'SUBSTITUICAO_EXERCICIO',
+        // Lesões que zeram qualquer candidato do padrão HORIZONTAL_PUSH.
+        activeProtocol: {
+          ...DEFAULT_ACTIVE_PROTOCOL,
+          constraints: {
+            ...DEFAULT_ACTIVE_PROTOCOL.constraints,
+            injuryTags: ['SHOULDER', 'ELBOW', 'WRIST'],
+          },
+        },
+      });
+      await worker.process(job());
+      expect(complete).not.toHaveBeenCalled();
+      expect(sentText(enqueue)).toBe(SUBSTITUTION_FALLBACK_MESSAGE);
+    });
+
+    it('já existe proposta pendente → avisa, sem tentar identificar/oferecer de novo', async () => {
+      const { worker, complete, enqueue } = makeWorker({
+        intent: 'SUBSTITUICAO_EXERCICIO',
+        substitutionHasPending: true,
+      });
+      await worker.process(job());
+      expect(complete).not.toHaveBeenCalled();
+      expect(sentText(enqueue)).toBe(SUBSTITUTION_ALREADY_PENDING_MESSAGE);
+    });
+
+    it('turno 2 — confirmação de uma opção segura persiste em staging e agenda a liberação', async () => {
+      const { worker, complete, enqueue, substitutionCreatePending } = makeWorker({
+        intent: 'SUBSTITUICAO_EXERCICIO',
+        batchItems: [JSON.stringify({ text: `pode ser ${FLEXAO_CANDIDATE.name} mesmo` })],
+        llmText: `Perfeito, vou trocar por ${FLEXAO_CANDIDATE.name}.`,
+        substitutionResolved: { resolved: true, chosenExerciseId: FLEXAO_CANDIDATE.id },
+      });
+      const res = await worker.process(job());
+      expect(res.status).toBe('SENT');
+      expect(substitutionCreatePending).toHaveBeenCalledOnce();
+      const created = substitutionCreatePending.mock.calls[0]?.[0] as {
+        fromExerciseId: string;
+        toExerciseId: string;
+        baseVersion: number;
+      };
+      expect(created.fromExerciseId).toBe(FLEXAO.id);
+      expect(created.toExerciseId).toBe(FLEXAO_CANDIDATE.id);
+      expect(created.baseVersion).toBe(DEFAULT_ACTIVE_PROTOCOL.version);
+      const system = complete.mock.calls[0]?.[0]?.system ?? '';
+      expect(system).toContain('CONFIRMADA');
+      expect(sentText(enqueue)).toContain(FLEXAO_CANDIDATE.name);
+    });
+
+    it('turno 2 — enfileira a liberação automática com a janela de 30 min e emite o evento da fila', async () => {
+      const { worker, enqueue, queueEventsEmit } = makeWorker({
+        intent: 'SUBSTITUICAO_EXERCICIO',
+        substitutionResolved: { resolved: true, chosenExerciseId: FLEXAO_CANDIDATE.id },
+      });
+      await worker.process(job());
+      const releaseCall = enqueue.mock.calls.find((c) => c[0] === 'protocol-substitution-release');
+      expect(releaseCall).toBeDefined();
+      expect((releaseCall?.[3] as { delay?: number } | undefined)?.delay).toBe(30 * 60 * 1000);
+      expect(queueEventsEmit).toHaveBeenCalledWith('protocol');
+    });
+
+    it('turno 2 — origem em PAR-Q bloqueante: persiste mas NÃO agenda liberação automática', async () => {
+      const { worker, enqueue, queueEventsEmit, substitutionCreatePending } = makeWorker({
+        intent: 'SUBSTITUICAO_EXERCICIO',
+        substitutionResolved: { resolved: true, chosenExerciseId: FLEXAO_CANDIDATE.id },
+        activeProtocol: { ...DEFAULT_ACTIVE_PROTOCOL, fromBlockingParq: true },
+      });
+      await worker.process(job());
+      expect(substitutionCreatePending).toHaveBeenCalledOnce();
+      const releaseCall = enqueue.mock.calls.find((c) => c[0] === 'protocol-substitution-release');
+      expect(releaseCall).toBeUndefined();
+      // A fila do RT ainda precisa ser avisada — só o job de auto-liberação some.
+      expect(queueEventsEmit).toHaveBeenCalledWith('protocol');
+    });
+
+    it('turno 2 — escolha fora do conjunto seguro recém-recomputado cai pro fluxo de oferta, não persiste', async () => {
+      const { worker, substitutionCreatePending, complete } = makeWorker({
+        intent: 'SUBSTITUICAO_EXERCICIO',
+        llmText: `Que tal ${FLEXAO_CANDIDATE.name}?`,
+        // Defesa em profundidade: mesmo que a resolução afirme um id, o worker SEMPRE
+        // recomputa `findSafeCandidates` do zero antes de aceitar — um id real mas fora do
+        // padrão/segurança de "flexao" (ex.: um agachamento) nunca deve ser aceito só porque
+        // a resolução (mockada aqui) devolveu ele.
+        substitutionResolved: { resolved: true, chosenExerciseId: 'agachamento_barra' },
+      });
+      await worker.process(job());
+      expect(substitutionCreatePending).not.toHaveBeenCalled();
+      const system = complete.mock.calls[0]?.[0]?.system ?? '';
+      expect(system).toContain('OPÇÕES SEGURAS DA BASE'); // reofereceu, não inventou a troca
+    });
+
+    it('troca confirmada que quebraria a validação do protocolo inteiro não é aplicada sozinha', async () => {
+      const { worker, complete, enqueue, substitutionCreatePending } = makeWorker({
+        intent: 'SUBSTITUICAO_EXERCICIO',
+        substitutionResolved: { resolved: true, chosenExerciseId: FLEXAO_CANDIDATE.id },
+        // `goal` ausente do jeito que o `ValidationService` precisa faz `checkStructure`
+        // acusar reps fora de faixa pra qualquer objetivo — força BLOCK determinístico.
+        activeProtocol: {
+          ...DEFAULT_ACTIVE_PROTOCOL,
+          validationConstraints: {
+            ...DEFAULT_ACTIVE_PROTOCOL.validationConstraints,
+            goal: 'GAIN_STRENGTH', // faixa 3-10 reps; o fixture usa 8-12 → REPS_OUT_OF_RANGE
+          },
+        },
+      });
+      await worker.process(job());
+      expect(complete).not.toHaveBeenCalled();
+      expect(substitutionCreatePending).not.toHaveBeenCalled();
+      expect(sentText(enqueue)).toBe(SUBSTITUTION_NOT_SAFE_TO_APPLY_MESSAGE);
+    });
+
+    it('corrida na criação (já existe pendência) → avisa em vez de falhar', async () => {
+      const { worker, enqueue } = makeWorker({
+        intent: 'SUBSTITUICAO_EXERCICIO',
+        substitutionResolved: { resolved: true, chosenExerciseId: FLEXAO_CANDIDATE.id },
+        substitutionCreateResult: { created: false, alreadyPending: true },
+      });
+      await worker.process(job());
+      expect(sentText(enqueue)).toBe(SUBSTITUTION_ALREADY_PENDING_MESSAGE);
+    });
   });
 
   it('BLOCK do validador → resposta-padrão + status BLOCKED', async () => {
@@ -480,16 +722,70 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     expect(sentText(enqueue)).toBe(STANDARD_BLOCK_RESPONSE);
   });
 
-  it('dúvida técnica sem evidência se abstém antes do LLM', async () => {
+  // Achado 2026-09-02 (correção do fundador): a MOVIVO é uma proposta CONVERSACIONAL — a
+  // ausência de referência na Base de Conhecimento deixou de ser recusa automática (o
+  // agente virava um FAQ que só repetia o que estava cadastrado). Sem evidência, o coach
+  // agora responde com conhecimento geral de educação física (mesmo caminho generativo dos
+  // outros intents, com uma instrução extra de responsabilidade), sinalizado para
+  // acompanhamento assíncrono do profissional CREF — mas SEM travar a entrega.
+  it('dúvida técnica sem evidência responde com conhecimento geral (não trava mais no FAQ)', async () => {
     const { worker, enqueue, complete, persistHandoff } = makeWorker({
       intent: 'DUVIDA_TECNICA',
-      methodologySummary: 'Método aprovado, mas sem resposta específica para esta dúvida.',
       ragDocs: [],
+    });
+    await expect(worker.process(job())).resolves.toEqual({ status: 'SENT' });
+    expect(sentText(enqueue)).toBe('Boa, continua firme!');
+    expect(complete).toHaveBeenCalledOnce();
+    // Instrução extra de responsabilidade chega ao modelo mesmo sem base de conhecimento.
+    expect(complete.mock.calls[0]?.[0]?.system).toContain('conhecimento amplamente aceito');
+    expect(persistHandoff).toHaveBeenCalledWith('u1', 'ALERT', 'VALIDATOR_FLAG');
+  });
+
+  // A abstenção com o texto pré-aprovado (`TECHNICAL_NO_EVIDENCE_MESSAGE`) continua existindo,
+  // só que restrita a CONFLICT: a base recuperada contradiz o ESTADO_AUTORITATIVO do próprio
+  // aluno (ex.: uma restrição de PAR-Q/lesão) — aí a IA responder por conta própria ignoraria
+  // uma restrição de segurança já registrada, e isso vale mais que soar natural.
+  it('dúvida técnica com CONFLITO entre a base e o estado do aluno continua abstendo', async () => {
+    const { worker, enqueue, complete, persistHandoff } = makeWorker({
+      intent: 'DUVIDA_TECNICA',
+      ragDocs: [
+        {
+          chunkId: 'c1',
+          documentId: 'd1',
+          title: 'Metodologia aprovada',
+          snippet: 'Recomenda-se sobrecarga progressiva sem restrição.',
+          score: 0.9,
+        },
+      ],
+      groundingStatus: 'CONFLICT',
     });
     await expect(worker.process(job())).resolves.toEqual({ status: 'SENT' });
     expect(sentText(enqueue)).toBe(TECHNICAL_NO_EVIDENCE_MESSAGE);
     expect(complete).not.toHaveBeenCalled();
     expect(persistHandoff).toHaveBeenCalledWith('u1', 'ALERT', 'VALIDATOR_FLAG');
+  });
+
+  // Havia base pra tentar fundamentar, mas a verificação de entailment não sustentou a
+  // alegação (`UNVERIFIED`) — mesmo destino de `INSUFFICIENT`: cai pro conhecimento geral em
+  // vez de recusar, porque não é um CONFLITO com o estado do aluno, só falta de sustentação.
+  it('dúvida técnica com evidência insuficiente pra sustentar a alegação (UNVERIFIED) também cai pro conhecimento geral', async () => {
+    const { worker, enqueue, grounding, complete } = makeWorker({
+      intent: 'DUVIDA_TECNICA',
+      ragDocs: [
+        {
+          chunkId: 'c1',
+          documentId: 'd1',
+          title: 'Metodologia aprovada',
+          snippet: 'Trecho que não cobre a pergunta específica do aluno.',
+          score: 0.4,
+        },
+      ],
+      groundingStatus: 'UNVERIFIED',
+    });
+    await expect(worker.process(job())).resolves.toEqual({ status: 'SENT' });
+    expect(grounding.answer).toHaveBeenCalledOnce();
+    expect(sentText(enqueue)).toBe('Boa, continua firme!');
+    expect(complete).toHaveBeenCalledOnce();
   });
 
   it('dúvida técnica com evidência usa grounding, não o caminho generativo livre', async () => {
@@ -516,6 +812,32 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     );
     expect(complete).not.toHaveBeenCalled();
     expect(sentText(enqueue)).toContain('[E1: Fonte aprovada]');
+  });
+
+  // Achado 2026-09-02 (correção do fundador): esta era a única saída generativa que
+  // devolvia o texto do modelo sem passar por `applyResponseFormatting` — travessão que
+  // escapasse do prompt chegava intacto ao aluno. Agora passa pelo mesmo teto determinístico
+  // do caminho ungrounded.
+  it('dúvida técnica com evidência também passa pelo teto determinístico (travessão vira vírgula)', async () => {
+    const { worker, enqueue } = makeWorker({
+      intent: 'DUVIDA_TECNICA',
+      llmText: 'A barra dá mais carga — o halter dá mais amplitude',
+      ragDocs: [
+        {
+          chunkId: 'c1',
+          documentId: 'd1',
+          title: 'Metodologia aprovada',
+          snippet: 'O descanso recomendado está definido na metodologia.',
+          score: 0.9,
+        },
+      ],
+    });
+
+    await expect(worker.process(job())).resolves.toEqual({ status: 'SENT' });
+    expect(sentText(enqueue)).toBe(
+      'A barra dá mais carga, o halter dá mais amplitude [E1: Fonte aprovada]',
+    );
+    expect(sentText(enqueue)).not.toContain('—');
   });
 
   it('valida a saída bruta antes de truncar parágrafos', async () => {
@@ -548,6 +870,31 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     expect(res.status).toBe('EMPTY');
     expect(lock.acquire).toHaveBeenCalledWith('u1');
     expect(lock.release).toHaveBeenCalledWith('u1', 'tok');
+  });
+
+  // `job.attemptsMade` só é incrementado pelo BullMQ DEPOIS que o processor retorna/lança
+  // (`Job.moveToCompleted`/`moveToFailed`, dist/cjs/classes/job.js) — na 1ª chamada real o
+  // valor é `0`, não `1`. `job()` já devolve `attemptsMade: 0` por padrão (1ª tentativa).
+  it('batch vazio na 1ª tentativa não avisa o aluno (coalescimento normal de triggers)', async () => {
+    const { worker, enqueue } = makeWorker({ batchItems: [] });
+    const res = await worker.process(job());
+    expect(res.status).toBe('EMPTY');
+    expect(sentText(enqueue)).toBeUndefined();
+  });
+
+  // Achado 2026-09-02 (reproduzido ao vivo — aluno viu "digitando…" e depois silêncio
+  // permanente; e reproduzido de novo depois do fix, com um bug de off-by-one na 1ª
+  // versão): uma 1ª tentativa que drena a mensagem e trava DEPOIS disso (embedding/LLM
+  // indisponível) faz o BullMQ retentar; a retry acha o lote já vazio e "termina com
+  // sucesso" sem nunca responder, e o handler de DLQ nunca dispara (BullMQ não vê isso como
+  // falha). Na 2ª chamada (a retry em si) `job.attemptsMade` já é `1` — ainda não foi
+  // incrementado pra esta tentativa em curso —, então `> 0` (não `> 1`) é o teste certo pra
+  // "já houve uma tentativa anterior".
+  it('batch vazio numa RETRY avisa o aluno (tentativa anterior perdeu a mensagem após travar)', async () => {
+    const { worker, enqueue } = makeWorker({ batchItems: [] });
+    const res = await worker.process({ ...job(), attemptsMade: 1 } as Job<AiResponseJob>);
+    expect(res.status).toBe('EMPTY');
+    expect(sentText(enqueue)).toBe(DLQ_FALLBACK_MESSAGE);
   });
 });
 

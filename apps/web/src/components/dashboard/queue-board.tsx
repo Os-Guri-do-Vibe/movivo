@@ -32,6 +32,12 @@ import { SectorHeader } from './control-center-ui';
 const FALLBACK_INTERVAL_MS = 30_000;
 
 /**
+ * As quatro seções da fila (achado 2026-09-03, a pedido do fundador): protocolo e
+ * substituição de exercício, cada um com o mesmo par obrigatória/opcional.
+ */
+type QueueSectionId = 'mandatory' | 'optional' | 'substitutionMandatory' | 'substitutionOptional';
+
+/**
  * Rótulo de severidade. `detail` é só o COMPLEMENTO da frase, nunca a frase inteira
  * duplicada: o pill renderiza `label` (curto, cabe ao lado do título em 1280px) e
  * compõe a forma longa — `title` no hover, `sr-only` no leitor de tela — a partir do
@@ -104,7 +110,7 @@ function formatAutoRelease(autoReleaseAt: string): string {
   return `Dispara automaticamente pro WhatsApp em ${when} se ninguém agir antes`;
 }
 
-function QueueCard({ item, section }: { item: QueueItem; section: 'mandatory' | 'optional' }) {
+function QueueCard({ item, section }: { item: QueueItem; section: QueueSectionId }) {
   const { label, detail, icon: Icon } = LABELS[item.severity];
   const detailHref = `/dashboard/fila/${item.kind.toLowerCase()}/${encodeURIComponent(item.id)}`;
   const status = meaningfulText(item.status);
@@ -114,6 +120,10 @@ function QueueCard({ item, section }: { item: QueueItem; section: 'mandatory' | 
   // handoff/check-in, que nem aparecem nesta tela (ver docstring de `queue()` no backend).
   // Desde 2026-08-24 protocolo é o único kind que chega aqui, PAR-Q bloqueante incluso.
   const showEye = item.kind === 'PROTOCOL';
+  // Desde 2026-09-03 (a pedido do fundador) a substituição de exercício também tem par
+  // obrigatória/opcional, espelhando o de protocolo — mesmo tratamento visual dos dois.
+  const isOptionalSection = section === 'optional' || section === 'substitutionOptional';
+  const isMandatorySection = section === 'mandatory' || section === 'substitutionMandatory';
 
   function track(view?: 'anamnesis') {
     captureDashboardEvent('cref_queue_item_opened', {
@@ -135,7 +145,7 @@ function QueueCard({ item, section }: { item: QueueItem; section: 'mandatory' | 
         'rounded-xl border border-l-4 border-border bg-card p-4 text-card-foreground',
         item.severity === 'SAFETY'
           ? 'border-l-coral'
-          : section === 'optional'
+          : isOptionalSection
             ? 'border-l-verde-pulso'
             : null,
       )}
@@ -150,12 +160,13 @@ function QueueCard({ item, section }: { item: QueueItem; section: 'mandatory' | 
                 ? 'bg-destructive text-destructive-foreground'
                 : item.severity === 'ALERT'
                   ? 'bg-secondary text-secondary-foreground'
-                  : section === 'optional'
+                  : isOptionalSection
                     ? // Mesma lógica da faixa lateral (`border-l-verde-pulso`): a seção
-                      // "Revisão Humana Opcional" é identificada por `section`, não por
-                      // severidade. `text-petroleo` é o par de contraste da marca sobre
-                      // verde-pulso (= `--primary` / `--primary-foreground` em
-                      // `globals.css`) — branco aqui não passaria no 3:1 de WCAG 1.4.11.
+                      // "Revisão Humana Opcional"/"Revisão de Substituição de Exercício
+                      // Opcional" é identificada por `section`, não por severidade.
+                      // `text-petroleo` é o par de contraste da marca sobre verde-pulso
+                      // (= `--primary` / `--primary-foreground` em `globals.css`) —
+                      // branco aqui não passaria no 3:1 de WCAG 1.4.11.
                       'bg-verde-pulso text-petroleo'
                     : // Fora da seção opcional o item de rotina segue com contorno, não
                       // preenchimento: não há nada a sinalizar.
@@ -209,6 +220,19 @@ function QueueCard({ item, section }: { item: QueueItem; section: 'mandatory' | 
                   Origem: PAR-Q bloqueante
                 </span>
               ) : null}
+              {item.origin === 'AI_SUBSTITUTION' ? (
+                // Mesmo raciocínio do sinal de PAR-Q acima: legenda discreta do que já é
+                // visível pelo título ("Substituição de Exercício: <aluno>"), não um sinal
+                // novo — avisa que a troca já foi confirmada pelo aluno via WhatsApp e só
+                // espera a revisão (ou a liberação automática em 30 min). Na seção
+                // obrigatória (2026-09-03) complementa com o motivo — o mesmo sinal de
+                // severidade `SAFETY` que o protocolo PAR-Q já usa, só sem item próprio.
+                <span className="text-xs font-medium text-muted-foreground">
+                  {section === 'substitutionMandatory'
+                    ? 'Origem: substituição confirmada pelo aluno · PAR-Q bloqueante'
+                    : 'Origem: substituição confirmada pelo aluno'}
+                </span>
+              ) : null}
             </div>
             {summary ? (
               <p className="mt-1.5 max-w-3xl text-label text-muted-foreground">{summary}</p>
@@ -216,7 +240,7 @@ function QueueCard({ item, section }: { item: QueueItem; section: 'mandatory' | 
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {status && section !== 'mandatory' ? (
+          {status && !isMandatorySection ? (
             <StatusBadge tone={STATUS_TONE[status] ?? 'quiet'} variant="solid">
               {status}
             </StatusBadge>
@@ -298,7 +322,12 @@ export function QueueBoard() {
     setError('');
     try {
       const next = await getQueue(signal);
-      const allItems = [...next.mandatory, ...next.optional];
+      const allItems = [
+        ...next.mandatory,
+        ...next.optional,
+        ...next.substitutionMandatory,
+        ...next.substitutionOptional,
+      ];
       const newItems = allItems.filter((item) => !knownIds.current.has(item.id));
       if (knownIds.current.size > 0 && newItems.length > 0) {
         const safety = newItems.filter((item) => item.severity === 'SAFETY').length;
@@ -364,7 +393,10 @@ export function QueueBoard() {
 
   const mandatory = data ? sortQueue(data.mandatory) : [];
   const optional = data ? sortQueue(data.optional) : [];
-  const total = mandatory.length + optional.length;
+  const substitutionMandatory = data ? sortQueue(data.substitutionMandatory) : [];
+  const substitutionOptional = data ? sortQueue(data.substitutionOptional) : [];
+  const total =
+    mandatory.length + optional.length + substitutionMandatory.length + substitutionOptional.length;
 
   if (!data && !error) {
     return (
@@ -402,7 +434,6 @@ export function QueueBoard() {
       <div className="mb-6">
         <SectorHeader
           title="Fila de supervisão"
-          refreshLabel="Atualizar fila"
           refreshing={refreshing}
           onRefresh={() => void load()}
         />
@@ -437,7 +468,17 @@ export function QueueBoard() {
       ) : (
         <div className="space-y-10">
           <QueueSection id="mandatory" title="Revisão Humana Obrigatória" items={mandatory} />
+          <QueueSection
+            id="substitutionMandatory"
+            title="Revisão de Substituição de Exercício Obrigatória"
+            items={substitutionMandatory}
+          />
           <QueueSection id="optional" title="Revisão Humana Opcional" items={optional} />
+          <QueueSection
+            id="substitutionOptional"
+            title="Revisão de Substituição de Exercício Opcional"
+            items={substitutionOptional}
+          />
         </div>
       )}
     </section>
@@ -449,7 +490,7 @@ function QueueSection({
   title,
   items,
 }: {
-  id: 'mandatory' | 'optional';
+  id: QueueSectionId;
   title: string;
   items: QueueItem[];
 }) {

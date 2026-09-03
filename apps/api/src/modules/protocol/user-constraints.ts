@@ -58,6 +58,29 @@ export interface UserConstraints {
   parqTriggered: ParqQuestionId[];
   /** Teto de fase de periodização. Presente = nada além de `ADAPTACAO` é aceitável. */
   maxPhase?: 'ADAPTACAO';
+  /**
+   * Evento/meta com prazo real declarado na anamnese (Seção 1, "Data-alvo") — achado
+   * 2026-09-02, correção do fundador: até aqui esse dado só existia pra calcular
+   * `total_weeks`/`end_date` (lógica removida — quem decide isso agora é
+   * `phaseDurationWeeks`, dentro da faixa de evidência da fase, ver `protocol-timeline.ts`)
+   * e depois disso não influenciava a geração NENHUMA. É contexto de OTIMIZAÇÃO, não de
+   * prazo do bloco: "casamento em 8 semanas" não estica o mesociclo pra 8 semanas — dá à
+   * IA o prazo real do aluno para escolher fase/ênfase/progressão que rendam o melhor
+   * resultado cientificamente plausível NESSE tempo, sem prometer o resultado que o aluno
+   * descreveu (ex.: perder 19kg até o Natal não é saudável nem garantível — o protocolo
+   * ainda assim deve ser o mais eficiente possível dentro do prazo real).
+   *
+   * Ausente quando o aluno não declarou evento importante, ou quando a data já passou
+   * (nada a otimizar para um prazo que não existe mais).
+   */
+  importantEvent?: {
+    /** `YYYY-MM-DD`, igual ao que veio da anamnese. */
+    date: string;
+    /** Dias entre agora e a data-alvo, arredondado pra cima — sempre > 0 quando presente. */
+    daysUntil: number;
+    /** Texto livre do usuário (evento/objetivo numérico, ex.: "chegar a 70kg") — nunca instrução. */
+    description?: string;
+  };
 }
 
 /** Experiência declarada → nível do catálogo. É o fim do default hardcoded. */
@@ -69,6 +92,34 @@ const LEVEL_BY_EXPERIENCE: Record<TrainingExperience, ExerciseLevel> = {
 
 export function levelFromExperience(experience: TrainingExperience): ExerciseLevel {
   return LEVEL_BY_EXPERIENCE[experience];
+}
+
+/**
+ * `importantEvent` de `UserConstraints` a partir do evento-alvo declarado na anamnese.
+ * `from` é parâmetro (não `new Date()` direto no corpo) para o teste controlar o "agora"
+ * sem mockar relógio global — mesmo padrão de `protocol-timeline.ts` antes desta mudança.
+ *
+ * Sem evento, sem data, data mal formada ou data já passada → `undefined` (nada a
+ * otimizar para um prazo que não existe ou já passou — mesma regra que valia para
+ * `resolveTotalWeeks`, só que agora alimenta contexto de prompt, não `total_weeks`).
+ */
+export function importantEventForPrompt(
+  event: { hasImportantEvent: boolean; importantEventDate?: string },
+  description: string | undefined,
+  from: Date = new Date(),
+): UserConstraints['importantEvent'] {
+  if (!event.hasImportantEvent || !event.importantEventDate) return undefined;
+
+  const target = new Date(`${event.importantEventDate}T00:00:00Z`);
+  const msUntilTarget = target.getTime() - from.getTime();
+  if (!Number.isFinite(msUntilTarget) || msUntilTarget <= 0) return undefined;
+
+  const daysUntil = Math.ceil(msUntilTarget / (24 * 60 * 60 * 1000));
+  return {
+    date: event.importantEventDate,
+    daysUntil,
+    ...(description ? { description } : {}),
+  };
 }
 
 /** Um degrau abaixo, com piso em `INICIANTE`. Usado quando o PAR-Q bloqueia. */

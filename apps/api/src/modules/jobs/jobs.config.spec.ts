@@ -30,6 +30,9 @@ describe('jobs.config', () => {
         // Fila do profissional, categoria "Disponível para Revisão" — liberação automática
         // após a janela de cortesia de 1h.
         'protocol-auto-release',
+        // Liberação automática da proposta de substituição de exercício via IA, após a
+        // janela de cortesia de 30 min (achado 2026-09-02).
+        'protocol-substitution-release',
         'sanity',
         'whatsapp-outbound',
         // US-8.1 — quick reply diário de treino.

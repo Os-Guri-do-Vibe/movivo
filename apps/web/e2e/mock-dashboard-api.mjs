@@ -143,13 +143,17 @@ const protocolContent = {
   goal: 'GAIN_MUSCLE',
   phase: 'HIPERTROFIA',
   weeklyFrequency: 3,
+  // Achado 2026-09-03: `protocolStructureSchema` (shared) ganhou este campo obrigatório
+  // (duração real do mesociclo, antes um padrão estático de 12 semanas) — sem ele o Zod do
+  // frontend rejeita a resposta inteira e a tela cai em "O caso não carregou".
+  phaseDurationWeeks: 4,
   sessions: [
     {
       dayLabel: 'Treino A',
       focus: 'Membros inferiores',
       exercises: [
         {
-          exerciseId: 'goblet_squat',
+          exerciseId: 'agachamento_goblet',
           name: 'Agachamento goblet',
           sets: 3,
           reps: { min: 8, max: 10 },
@@ -526,12 +530,20 @@ createServer(async (request, response) => {
     );
     const mandatory = openItems.filter((item) => item.origin !== null);
     const optional = openItems.filter((item) => item.origin === null);
+    // Achado 2026-09-03: `QueueResponse` ganhou a dupla de substituição de exercício
+    // (Obrigatória/Opcional, ao lado da de protocolo) — sem os campos aqui, o Zod do
+    // frontend rejeita a resposta inteira e a tela cai em "A fila não carregou". Nenhum
+    // teste de e2e hoje exercita substituição, então as listas ficam vazias de propósito.
     return json(response, 200, {
       mandatory,
       optional,
+      substitutionMandatory: [],
+      substitutionOptional: [],
       counts: {
         mandatory: mandatory.length,
         optional: optional.length,
+        substitutionMandatory: 0,
+        substitutionOptional: 0,
         total: openItems.length,
       },
     });

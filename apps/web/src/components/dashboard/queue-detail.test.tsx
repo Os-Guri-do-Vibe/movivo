@@ -1,3 +1,4 @@
+import type { ParqQuestionId } from '@movivo/shared';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,6 +14,8 @@ import {
   parqProtocolItem,
   protocolDetail,
   PROTOCOL_ID,
+  substitutionDetail,
+  SUBSTITUTION_ID,
 } from '../../../test/dashboard-fixtures';
 
 const navigation = vi.hoisted(() => ({ replace: vi.fn() }));
@@ -24,6 +27,8 @@ const api = vi.hoisted(() => ({
   signProtocol: vi.fn(),
   resolveHandoff: vi.fn(),
   saveProtocol: vi.fn(),
+  approveSubstitutionNow: vi.fn(),
+  discardSubstitution: vi.fn(),
   captureDashboardEvent: vi.fn(),
 }));
 vi.mock('@/lib/dashboard-api', () => ({
@@ -136,6 +141,59 @@ beforeEach(() => {
   api.signProtocol.mockResolvedValue({ status: 'SIGNED' });
   api.resolveHandoff.mockResolvedValue({ status: 'RESOLVED' });
   api.getAnamnesisAnswers.mockResolvedValue(anamnesisAnswers);
+  api.approveSubstitutionNow.mockResolvedValue({ status: 'released' });
+  api.discardSubstitution.mockResolvedValue({ status: 'discarded' });
+});
+
+// Achado 2026-09-02 — fluxo de substituição de exercício via IA: o profissional pode
+// aprovar antes da janela de 30 min ou recusar, mantendo o exercício original.
+describe('QueueDetail — substituição de exercício via IA', () => {
+  it('mostra a troca proposta e exige confirmação antes de aprovar', async () => {
+    api.getQueueDetail.mockResolvedValue(substitutionDetail);
+    render(<QueueDetail kind="SUBSTITUTION" id={SUBSTITUTION_ID} />);
+    expect(await screen.findByText('Troca proposta')).toBeVisible();
+    expect(screen.getByText('Flexão')).toBeVisible();
+    expect(screen.getByText('Flexão Diamante')).toBeVisible();
+    expect(screen.getByText(/Dias afetados: Dia A, Dia B/)).toBeVisible();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Aprovar agora' }));
+    expect(api.approveSubstitutionNow).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar e aplicar' }));
+    await waitFor(() => expect(api.approveSubstitutionNow).toHaveBeenCalledWith(SUBSTITUTION_ID));
+    expect(await screen.findByRole('status')).toHaveTextContent('Troca aplicada');
+  });
+
+  it('recusa mantém o exercício original, sem chamar aprovação', async () => {
+    api.getQueueDetail.mockResolvedValue(substitutionDetail);
+    render(<QueueDetail kind="SUBSTITUTION" id={SUBSTITUTION_ID} />);
+    await screen.findByText('Troca proposta');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Recusar' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar recusa' }));
+    await waitFor(() => expect(api.discardSubstitution).toHaveBeenCalledWith(SUBSTITUTION_ID));
+    expect(api.approveSubstitutionNow).not.toHaveBeenCalled();
+    expect(await screen.findByRole('status')).toHaveTextContent('Troca recusada');
+  });
+
+  it('proposta já decidida não mostra ações de aprovar/recusar', async () => {
+    const substitution = substitutionDetail.substitution;
+    if (!substitution) throw new Error('fixture substitutionDetail sem substitution');
+    api.getQueueDetail.mockResolvedValue({
+      ...substitutionDetail,
+      substitution: { ...substitution, status: 'RELEASED' as const },
+    });
+    render(<QueueDetail kind="SUBSTITUTION" id={SUBSTITUTION_ID} />);
+    await screen.findByText('Troca proposta');
+    expect(screen.queryByRole('button', { name: 'Aprovar agora' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Recusar' })).not.toBeInTheDocument();
+  });
+
+  it('não mostra "Contexto autorizado" pra substituição (context sempre vazio)', async () => {
+    api.getQueueDetail.mockResolvedValue(substitutionDetail);
+    render(<QueueDetail kind="SUBSTITUTION" id={SUBSTITUTION_ID} />);
+    await screen.findByText('Troca proposta');
+    expect(screen.queryByText('Contexto autorizado')).not.toBeInTheDocument();
+  });
 });
 
 describe('QueueDetail', () => {
@@ -379,6 +437,45 @@ describe('QueueDetail', () => {
     expect(screen.getAllByText('Hipertrofia')).toHaveLength(2);
   });
 
+  // Achado 2026-09-03 (a pedido do fundador): fatores de risco viram rótulo curto, não a
+  // pergunta inteira do PAR-Q — e sempre na ordem Q1→Q9, não a ordem crua do array.
+  it('resume os fatores de risco com rótulo curto, na ordem Q1→Q9', async () => {
+    api.getQueueDetail.mockResolvedValue(protocolDetail);
+    api.getAnamnesisAnswers.mockResolvedValue({
+      ...anamnesisAnswers,
+      health: {
+        ...anamnesisAnswers.health,
+        parq: {
+          version: 'parq-2026-07-v1' as const,
+          // Fora de ordem de propósito (Q6 antes de Q1) — trava a normalização.
+          answers: (['Q6', 'Q2', 'Q3', 'Q4', 'Q5', 'Q1', 'Q7', 'Q8', 'Q9'] as ParqQuestionId[]).map(
+            (questionId) => ({ questionId, answer: questionId === 'Q6' || questionId === 'Q1' }),
+          ),
+        },
+      },
+    });
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+
+    expect(await screen.findByText('coração/pressão alta, osso/articulação/coluna')).toBeVisible();
+    expect(
+      screen.queryByText(/O seu médico já disse que você tem algum problema no coração/),
+    ).not.toBeInTheDocument();
+  });
+
+  // Achado 2026-09-03 (a pedido do fundador): o RT precisa ver o formulário completo sem
+  // sair da tela de edição — mesmo modal que o "olho" da fila já abre.
+  it('o olho ao lado de "Editar Protocolo" abre as respostas completas da anamnese', async () => {
+    api.getQueueDetail.mockResolvedValue(protocolDetail);
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await screen.findByRole('button', { name: 'Editar Protocolo' });
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Ver respostas da anamnese' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Respostas da anamnese' });
+    expect(within(dialog).getByText('Rodrigo de Barros')).toBeVisible();
+  });
+
   it('edita todos os campos do protocolo (sessão, exercício e observações gerais) e salva', async () => {
     api.getQueueDetail.mockResolvedValue(protocolDetail);
     api.saveProtocol.mockResolvedValue({ status: 'PENDING_REVIEW' });
@@ -428,8 +525,8 @@ describe('QueueDetail', () => {
     await userEvent.clear(rir);
     await userEvent.type(rir, '3');
 
-    await userEvent.click(screen.getByRole('combobox', { name: 'Estratégia de carga' }));
-    await userEvent.click(screen.getByRole('option', { name: 'Percepção de esforço (RPE)' }));
+    await userEvent.click(screen.getByRole('combobox', { name: 'Técnica avançada' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Drop-set' }));
 
     const videoUrl = screen.getByLabelText('Link de vídeo de execução');
     await userEvent.clear(videoUrl);
@@ -464,7 +561,7 @@ describe('QueueDetail', () => {
                   reps: { min: 6, max: 9 },
                   restSeconds: 120,
                   rir: 3,
-                  loadStrategy: 'RPE',
+                  technique: 'DROP_SET',
                   videoUrl: 'https://example.com/supino',
                 }),
               ],
@@ -616,7 +713,7 @@ describe('QueueDetail', () => {
     expect(screen.getByText('45s')).toBeVisible();
     expect(screen.queryByRole('link', { name: 'Assistir' })).not.toBeInTheDocument();
     const table = screen.getByRole('table');
-    expect(within(table).getAllByText('—')).toHaveLength(2); // RIR e vídeo ausentes
+    expect(within(table).getAllByText('—')).toHaveLength(3); // RIR, técnica e vídeo ausentes
 
     await userEvent.click(screen.getByRole('button', { name: 'Editar Protocolo' }));
     expect(screen.queryByLabelText('Repetições mín.')).not.toBeInTheDocument();

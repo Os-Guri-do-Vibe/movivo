@@ -4,7 +4,9 @@ import Image from 'next/image';
 import { LoginForm } from '@/components/dashboard/login-form';
 
 export const metadata: Metadata = {
-  title: 'Entrar no MOVIVO Control Center',
+  // `absolute` ignora o `title.template` (" · MOVIVO") do layout raiz — a aba deve
+  // mostrar exatamente "Movivo - Plataforma Interna", sem sufixo.
+  title: { absolute: 'Movivo - Plataforma Interna' },
   description: 'Acesso restrito à operação interna da MOVIVO.',
   robots: { index: false, follow: false, nocache: true },
 };

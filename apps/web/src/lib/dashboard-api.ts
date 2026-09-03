@@ -11,6 +11,7 @@ import type {
   QueueResponse,
   QueueSeverity,
   ReplayMessage,
+  SubstitutionDetail,
 } from './dashboard-types';
 import { isAnalyticsEnabled } from './env';
 
@@ -37,7 +38,14 @@ function finiteNumber(value: unknown, fallback = 0): number {
 }
 
 function parseQueueKind(value: unknown): QueueKind {
-  if (value === 'PROTOCOL' || value === 'HANDOFF' || value === 'CHECKIN') return value;
+  if (
+    value === 'PROTOCOL' ||
+    value === 'HANDOFF' ||
+    value === 'CHECKIN' ||
+    value === 'SUBSTITUTION'
+  ) {
+    return value;
+  }
   throw new DashboardApiError(502, 'A fila devolveu um tipo de item desconhecido.');
 }
 
@@ -48,7 +56,7 @@ function parseQueueKind(value: unknown): QueueKind {
  * `kind`/`severity`, que decidem rota e cor e por isso continuam estritos.
  */
 function parseOrigin(value: unknown): QueueItem['origin'] {
-  return value === 'PARQ' || value === 'EDIT' ? value : null;
+  return value === 'PARQ' || value === 'EDIT' || value === 'AI_SUBSTITUTION' ? value : null;
 }
 
 function parseSeverity(value: unknown): QueueSeverity {
@@ -77,16 +85,26 @@ export function parseQueueItem(value: unknown): QueueItem {
 }
 
 export function parseQueueResponse(value: unknown): QueueResponse {
-  if (!isRecord(value) || !Array.isArray(value.mandatory) || !Array.isArray(value.optional)) {
+  if (
+    !isRecord(value) ||
+    !Array.isArray(value.mandatory) ||
+    !Array.isArray(value.optional) ||
+    !Array.isArray(value.substitutionMandatory) ||
+    !Array.isArray(value.substitutionOptional)
+  ) {
     throw new DashboardApiError(502, 'Resposta da fila inválida.');
   }
   const counts = isRecord(value.counts) ? value.counts : {};
   return {
     mandatory: value.mandatory.map(parseQueueItem),
     optional: value.optional.map(parseQueueItem),
+    substitutionMandatory: value.substitutionMandatory.map(parseQueueItem),
+    substitutionOptional: value.substitutionOptional.map(parseQueueItem),
     counts: {
       mandatory: finiteNumber(counts.mandatory),
       optional: finiteNumber(counts.optional),
+      substitutionMandatory: finiteNumber(counts.substitutionMandatory),
+      substitutionOptional: finiteNumber(counts.substitutionOptional),
       total: finiteNumber(counts.total),
     },
   };
@@ -166,7 +184,39 @@ export function parseQueueDetail(value: unknown): QueueDetail {
       status: string(value.handoff.status) || item.status,
     };
   }
+  if (isRecord(value.substitution))
+    result.substitution = parseSubstitutionDetail(value.substitution);
   return result;
+}
+
+function parseExerciseRef(value: unknown): { id: string; name: string } {
+  if (!isRecord(value)) throw new DashboardApiError(502, 'Exercício da substituição inválido.');
+  return { id: string(value.id), name: string(value.name) };
+}
+
+function parseSubstitutionDetail(value: Record<string, unknown>): SubstitutionDetail {
+  const status = value.status;
+  if (status !== 'PENDING' && status !== 'RELEASED' && status !== 'DISCARDED') {
+    throw new DashboardApiError(502, 'Estado da substituição inválido.');
+  }
+  const diff = isRecord(value.diff) ? value.diff : {};
+  return {
+    id: string(value.id),
+    protocolId: string(value.protocolId),
+    from: parseExerciseRef(value.from),
+    to: parseExerciseRef(value.to),
+    diff: {
+      type: 'EXERCISE_SUBSTITUTION',
+      from: parseExerciseRef(diff.from),
+      to: parseExerciseRef(diff.to),
+      sessionsAffected: Array.isArray(diff.sessionsAffected)
+        ? diff.sessionsAffected.map((s) => string(s)).filter(Boolean)
+        : [],
+    },
+    changeReason: string(value.changeReason),
+    status,
+    decidedAt: typeof value.decidedAt === 'string' ? value.decidedAt : null,
+  };
 }
 
 export function parseOperations(value: unknown): OperationsResponse {
@@ -293,6 +343,20 @@ export async function signProtocol(id: string): Promise<ActionResult> {
   return (await request(`/protocols/${encodeURIComponent(id)}/sign`, {
     method: 'POST',
     body: JSON.stringify({ confirmation: true }),
+  })) as ActionResult;
+}
+
+/** Aprova a proposta de substituição de exercício ANTES da janela de 30 min. */
+export async function approveSubstitutionNow(id: string): Promise<ActionResult> {
+  return (await request(`/substitutions/${encodeURIComponent(id)}/approve`, {
+    method: 'POST',
+  })) as ActionResult;
+}
+
+/** Recusa a proposta — mantém o exercício original, sem tocar no protocolo do aluno. */
+export async function discardSubstitution(id: string): Promise<ActionResult> {
+  return (await request(`/substitutions/${encodeURIComponent(id)}/discard`, {
+    method: 'POST',
   })) as ActionResult;
 }
 

@@ -184,6 +184,18 @@ export class AuthService {
     };
   }
 
+  /** Nome e avatar da conta autenticada, para exibição em UI (ex: cabeçalho do dashboard). */
+  async getProfile(userId: string): Promise<{ name: string | null; avatarPath: string | null }> {
+    const [row] = await this.db.runAsSystem((tx) =>
+      tx
+        .select({ name: users.name, avatarPath: users.avatarPath })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1),
+    );
+    return { name: row?.name ?? null, avatarPath: row?.avatarPath ?? null };
+  }
+
   /** Logout: denylista o `jti` do access e revoga a sessão correspondente. */
   async logout(userId: string, role: TenantRole, jti: string): Promise<void> {
     await this.denylist.revoke(jti, this.accessDenyUntil());

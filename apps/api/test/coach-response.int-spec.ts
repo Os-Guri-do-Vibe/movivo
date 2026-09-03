@@ -148,6 +148,12 @@ const fakeLlm = {
         '{"verdicts":[{"claimId":"C1","verdict":"SUPPORTED","evidenceIds":["E1"]}]}',
       );
     }
+    // Achado 2026-09-03: sem este branch, `SubstitutionTargetService` recebia texto livre
+    // (o branch de conversa abaixo) onde esperava JSON estrito — "JSON ausente" — e a
+    // identificação do alvo da troca falhava sempre, travando o teste em timeout.
+    if (req.intent === 'substitution_target_match') {
+      return fakeResult('{"exerciseId":"flexao"}');
+    }
 
     const answer = text.includes('trocar')
       ? 'Claro! Pode trocar por Flexão de joelhos, mesmo movimento. 💪'
@@ -207,7 +213,7 @@ async function seedUser(): Promise<{ userId: string; to: string }> {
             focus: 'Corpo inteiro',
             exercises: [
               {
-                exerciseId: 'pushup',
+                exerciseId: 'flexao',
                 name: 'Flexão de braço',
                 sets: 3,
                 reps: { min: 8, max: 12 },

@@ -133,7 +133,7 @@ describe('EvolutionHttpTransport (painel "Sistema → Integração")', () => {
     }
   });
 
-  it('currentInstanceName: lê o nome da primeira instância existente', async () => {
+  it('currentInstanceName: lê o nome da única instância existente', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(
@@ -142,6 +142,26 @@ describe('EvolutionHttpTransport (painel "Sistema → Integração")', () => {
     const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger);
     await expect(t.currentInstanceName()).resolves.toBe('minha-empresa');
     expect(fetchSpy.mock.calls[0]?.[0]).toBe('http://localhost:8081/instance/fetchInstances');
+    fetchSpy.mockRestore();
+  });
+
+  // Achado 2026-09-02: com o mesmo número reaproveitado em instâncias de teste sucessivas
+  // (cada nova instância derruba a sessão da anterior — conflito "device_removed" do
+  // WhatsApp), `fetchInstances` devolve várias linhas em ordem ASCENDENTE de criação. Pegar
+  // o índice [0] cru resolvia sempre a instância mais ANTIGA (já morta), nunca a viva.
+  it('currentInstanceName: com várias instâncias, escolhe a mais RECENTE (createdAt), não a primeira do array', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          { name: 'movivo-novo-teste', createdAt: '2026-09-02T04:56:38.140Z' },
+          { name: 'movivo-teste', createdAt: '2026-09-02T19:00:29.658Z' },
+          { name: 'minha-empresa', createdAt: '2026-09-02T19:11:01.340Z' },
+        ]),
+        { status: 200 },
+      ),
+    );
+    const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger);
+    await expect(t.currentInstanceName()).resolves.toBe('minha-empresa');
     fetchSpy.mockRestore();
   });
 

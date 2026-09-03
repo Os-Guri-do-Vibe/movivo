@@ -35,6 +35,37 @@ describe('applyResponseFormatting', () => {
       }),
     ).toBe('primeiro\n\nsegundo');
   });
+
+  // Achado 2026-09-02 (correção do fundador — "NUNCA DEVE SER USADO"): a instrução no
+  // prompt (`buildFormattingBlock`) pede pro modelo nunca usar travessão, mas prompt sozinho
+  // nunca é teto neste sistema — isto é a rede de segurança determinística.
+  describe('travessão (—) — rede de segurança determinística', () => {
+    const fmt = { blockSize: 'LIVRE', allowLists: false, boldPolicy: 'NENHUM' } as const;
+
+    it('travessão no meio da frase vira vírgula', () => {
+      expect(
+        applyResponseFormatting('A barra dá mais carga — o halter dá mais amplitude.', fmt),
+      ).toBe('A barra dá mais carga, o halter dá mais amplitude.');
+    });
+
+    it('travessão colado (sem espaço) também é normalizado', () => {
+      expect(applyResponseFormatting('carga—amplitude', fmt)).toBe('carga, amplitude');
+    });
+
+    it('travessão logo antes de pontuação não vira ", ."', () => {
+      expect(applyResponseFormatting('Isso é o que importa —.', fmt)).toBe('Isso é o que importa.');
+    });
+
+    it('travessão no início da frase não vira ", Texto"', () => {
+      expect(applyResponseFormatting('— assim que você treina, evolui.', fmt)).toBe(
+        'assim que você treina, evolui.',
+      );
+    });
+
+    it('múltiplos travessões na mesma mensagem são todos normalizados', () => {
+      expect(applyResponseFormatting('Um — dois — três.', fmt)).toBe('Um, dois, três.');
+    });
+  });
 });
 
 describe('truncateAtBoundary', () => {

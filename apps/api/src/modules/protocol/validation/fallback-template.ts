@@ -18,7 +18,9 @@
  */
 import type { GenerationGoal, ProtocolStructure, Weekday } from '@movivo/shared';
 
-export const FALLBACK_TEMPLATE_VERSION = 'fallback-template-2026-08-v2';
+import { PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
+
+export const FALLBACK_TEMPLATE_VERSION = 'fallback-template-2026-09-v3';
 
 const CREF_RESPALDO =
   'Este é um plano inicial conservador, gerado enquanto um profissional de Educação Física ' +
@@ -28,31 +30,59 @@ const CREF_RESPALDO =
 /** Sem dias declarados (caso legado/parse falhou): 3x/semana alternados, nunca 1 sessão só. */
 const DEFAULT_WEEKDAYS: readonly Weekday[] = ['MON', 'WED', 'FRI'];
 
+/**
+ * Duração do mesociclo deste template (achado 2026-09-02): a fase é sempre `ADAPTACAO`
+ * (2-4 semanas, ver `protocol-timeline.ts`) — usa o piso da faixa. É um bloco conservador
+ * de fallback com revisão humana obrigatória logo em seguida (`humanReviewRequired: true`),
+ * então o horizonte mais curto plausível é o certo: o RT decide a duração real do próximo
+ * mesociclo já revisando o caso, não este template genérico.
+ */
+const FALLBACK_PHASE_DURATION_WEEKS = PHASE_DURATION_WEEKS_RANGE.ADAPTACAO.minWeeks;
+
 type FallbackExercise = ProtocolStructure['sessions'][number]['exercises'][number];
 
-/** Template A: core (isométrico) + cardio contínuo. Faixas conservadoras válidas para
+/** Template A: dois isométricos de core, por tempo. Faixas conservadoras válidas para
  *  qualquer um dos 8 objetivos de geração (a mais estreita é GAIN_STRENGTH, 3-10 reps). */
 function templateA(): { focus: string; exercises: FallbackExercise[] } {
   return {
-    focus: 'Corpo inteiro, adaptação (core e cardio)',
+    focus: 'Corpo inteiro, adaptação (core)',
     exercises: [
       {
+        // v7 (achado 2026-09-02): ids trocados de `dead_bug`/`brisk_walk` (catálogo
+        // legado v1-v6) pros equivalentes da Biblioteca MOVIVO (marco 0, 413
+        // exercícios) — o array antigo foi substituído, não mesclado. Peso do corpo,
+        // sem equipamento: funciona em qualquer local, mesmo o catálogo só listando
+        // HOME/OUTDOOR pra este id — este template nunca passa pelo filtro de local do
+        // validador (é o caminho de exaustão de retries, não a geração normal).
+        // Catálogo v7 reclassificou `dead_bug` como `measurement: DURATION` (isométrico
+        // controlado) — prescrito por tempo, não reps, igual prancha.
         exerciseId: 'dead_bug',
-        name: 'Dead bug',
+        name: 'Dead Bug',
         sets: 2,
-        reps: { min: 8, max: 10 },
+        durationSeconds: 30,
         loadStrategy: 'BODYWEIGHT',
         restSeconds: 60,
         notes: 'Movimento controlado, mantendo a lombar apoiada.',
       },
       {
-        exerciseId: 'brisk_walk',
-        name: 'Caminhada acelerada',
-        sets: 1,
-        durationSeconds: 600,
+        // Achado 2026-09-03: `caminhada` saiu daqui — a classificação por regra do
+        // catálogo v7 marca TODO exercício `pattern: 'CARDIO'` como contraindicado para
+        // CARDIAC (RASCUNHO A VALIDAR PELO RT, ver cabeçalho de `exercise-catalog.ts`).
+        // Este template é exatamente o caminho usado para PAR-Q bloqueante — inclusive
+        // usuário com flag CARDIAC — então um exercício CARDIO aqui contradiz a própria
+        // razão do template existir: `ValidationService` bloqueia a assinatura
+        // (`PROTOCOL_NOT_SAFE_TO_SIGN`) antes que o RT sequer veja o caso. `prancha` é
+        // outro isométrico de core (mesmo formato de dead_bug acima), sem contraindicação
+        // CARDIAC — o RT ainda revisa o caso antes de qualquer entrega
+        // (`humanReviewRequired: true`), então perder a variedade cardio aqui não perde
+        // segurança nenhuma.
+        exerciseId: 'prancha',
+        name: 'Prancha',
+        sets: 2,
+        durationSeconds: 30,
         loadStrategy: 'BODYWEIGHT',
-        restSeconds: 0,
-        notes: 'Ritmo confortável em que ainda consegue conversar.',
+        restSeconds: 60,
+        notes: 'Corpo alinhado, sem deixar o quadril cair.',
       },
     ],
   };
@@ -64,8 +94,8 @@ function templateB(): { focus: string; exercises: FallbackExercise[] } {
     focus: 'Corpo inteiro, adaptação (superior e quadril)',
     exercises: [
       {
-        exerciseId: 'knee_pushup',
-        name: 'Flexão de joelhos',
+        exerciseId: 'flexao_com_apoio_dos_joelhos',
+        name: 'Flexão com Apoio dos Joelhos',
         sets: 2,
         reps: { min: 8, max: 10 },
         loadStrategy: 'BODYWEIGHT',
@@ -73,8 +103,8 @@ function templateB(): { focus: string; exercises: FallbackExercise[] } {
         notes: 'Desça até onde o controle do movimento permitir.',
       },
       {
-        exerciseId: 'glute_bridge',
-        name: 'Elevação de quadril',
+        exerciseId: 'elevacao_pelvica_no_solo',
+        name: 'Elevação Pélvica no Solo',
         sets: 2,
         reps: { min: 8, max: 10 },
         loadStrategy: 'BODYWEIGHT',
@@ -101,6 +131,7 @@ export function buildFallbackProtocol(
     promptVersion: FALLBACK_TEMPLATE_VERSION,
     goal,
     phase: 'ADAPTACAO',
+    phaseDurationWeeks: FALLBACK_PHASE_DURATION_WEEKS,
     weeklyFrequency: weekdays.length,
     sessions: weekdays.map((weekday, index) => {
       const template = index % 2 === 0 ? templateA() : templateB();

@@ -63,6 +63,10 @@ userlist.txt
 kubeconfig
 gha-creds-*.json
 
+# Uploads locais em disco (foto de perfil da conta interna — MVP em VPS única,
+# ver ARQUITETURA.md e AvatarStorageService). Dado de runtime, nunca versionado.
+/apps/api/uploads/
+
 # Testes / cobertura
 coverage/
 

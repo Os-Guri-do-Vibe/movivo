@@ -13,6 +13,7 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
+import { TREND_ITEMS } from '../onboarding/pain-section';
 import {
   ACTIVITY_ITEMS,
   BARRIER_ITEMS,
@@ -243,7 +244,9 @@ export function AnamnesisAnswersContent({ answers }: { answers: AnamnesisAnswers
                 })
                 .join(', ')}
             />
-            {health.pain.trend ? <Field label="Tendência" value={health.pain.trend} /> : null}
+            {health.pain.trend ? (
+              <Field label="Tendência" value={labelFrom(TREND_ITEMS, health.pain.trend)} />
+            ) : null}
             {health.pain.trigger ? <Field label="Gatilho" value={health.pain.trigger} /> : null}
             <Field
               label="Acompanhamento médico"

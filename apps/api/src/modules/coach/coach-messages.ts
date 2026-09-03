@@ -29,6 +29,22 @@ export const SUBSTITUTION_FALLBACK_MESSAGE =
   'Quero te sugerir uma troca segura para esse exercício, mas prefiro confirmar com o ' +
   'profissional responsável antes. Assim que ele revisar, te aviso por aqui. 💪';
 
+/** Já existe uma troca pendente pra este protocolo (regra de v1: uma por vez). */
+export const SUBSTITUTION_ALREADY_PENDING_MESSAGE =
+  'Já registrei uma troca pra você e ela está em revisão. Assim que ela for confirmada, se ' +
+  'ainda quiser ajustar outro exercício, é só me chamar de novo. 🙌';
+
+/**
+ * Achado 2026-09-02: a troca foi confirmada pelo aluno mas, ao reaplicar o protocolo
+ * inteiro com a substituição, o validador do treino inteiro (`ValidationService.validate`)
+ * bloqueou — trocar um exercício pode quebrar uma regra de sessão (ex.: isolado virar
+ * base). Honestidade + revisão humana, sem aplicar sozinho.
+ */
+export const SUBSTITUTION_NOT_SAFE_TO_APPLY_MESSAGE =
+  'Entendi a troca que você quer, mas prefiro confirmar com o profissional responsável antes ' +
+  'de aplicar — quero ter certeza que o treino inteiro continua seguro pra você. Já registrei ' +
+  'aqui e te aviso assim que ele revisar. 💪';
+
 /** Falha persistente do worker (DLQ): tranquiliza sem prometer prazo (guardrails). */
 export const DLQ_FALLBACK_MESSAGE =
   'Recebi sua mensagem! Estou organizando aqui e já te respondo. 🙌';

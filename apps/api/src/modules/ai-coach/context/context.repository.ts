@@ -7,16 +7,22 @@
  */
 import { Injectable } from '@nestjs/common';
 import { and, desc, eq, isNotNull } from 'drizzle-orm';
-import type { ProtocolStructure } from '@movivo/shared';
+import { anamnesisStructuredSchema, type ProtocolStructure } from '@movivo/shared';
 
+import { HealthCipherService } from '../../../core/database/health-cipher.service';
 import {
+  anamnesisSessions,
   checkins,
   coachingSessions,
   protocols,
   users,
   workoutCompletions,
 } from '../../../core/database/schema';
-import { TenantDatabase } from '../../../core/database/tenant-database.service';
+import {
+  TenantDatabase,
+  type TenantTransaction,
+} from '../../../core/database/tenant-database.service';
+import { healthBlockSchema } from '../../anamnesis/health-block';
 import type { ScrubUser } from '../llm/llm.types';
 
 export interface EpisodicMemory {
@@ -28,7 +34,10 @@ export interface EpisodicMemory {
 
 @Injectable()
 export class ContextRepository {
-  constructor(private readonly db: TenantDatabase) {}
+  constructor(
+    private readonly db: TenantDatabase,
+    private readonly cipher: HealthCipherService,
+  ) {}
 
   /** Lê usuário (para scrub) + protocolo ativo + resumo do dia, tudo sob RLS do titular. */
   async loadEpisodic(userId: string, sessionDate: string): Promise<EpisodicMemory> {
@@ -45,6 +54,7 @@ export class ContextRepository {
           totalWeeks: protocols.totalWeeks,
           content: protocols.content,
           constraints: protocols.constraints,
+          anamnesisSessionId: protocols.anamnesisSessionId,
         })
         .from(protocols)
         .where(and(eq(protocols.userId, userId), eq(protocols.status, 'ACTIVE')))
@@ -88,15 +98,25 @@ export class ContextRepository {
       const c = (proto?.constraints ?? {}) as { injuryTags?: string[]; equipment?: string[] };
       const content = proto?.content as ProtocolStructure | undefined;
 
+      // Achado 2026-09-02 (decisão do fundador): o Coach passa a receber o protocolo
+      // COMPLETO (todas as sessões/exercícios, não só objetivo/fase resumidos) e a
+      // anamnese estruturada que o originou — ele é o Coach individual deste aluno, então
+      // "conhecimento individualizado" inclui o que o aluno respondeu no formulário, não só
+      // o que foi derivado dele. Revoga a minimização anterior (que só valia pro ciphertext
+      // de check-in, mantida abaixo) para este caso específico.
+      const anamnese = proto?.anamnesisSessionId
+        ? await this.loadAnamneseSummary(tx, proto.anamnesisSessionId)
+        : null;
+
       const state: Record<string, unknown> = proto
         ? {
             temProtocoloAtivo: true,
-            objetivo: content?.goal,
-            fase: content?.phase,
             semanaAtual: proto.currentWeek,
             totalSemanas: proto.totalWeeks,
             restricoes: c.injuryTags ?? [],
             equipamentos: c.equipment ?? [],
+            protocoloCompleto: content,
+            anamnese,
             eventosRecentes: {
               treinosConcluidos: recentWorkouts,
               checkins: recentCheckins,
@@ -104,6 +124,7 @@ export class ContextRepository {
           }
         : {
             temProtocoloAtivo: false,
+            anamnese,
             eventosRecentes: {
               treinosConcluidos: recentWorkouts,
               checkins: recentCheckins,
@@ -120,6 +141,48 @@ export class ContextRepository {
         summary: session?.summary ?? null,
       };
     });
+  }
+
+  /**
+   * Anamnese estruturada (dados_bloco_3, jsonb em claro) + dor/PAR-Q (dados_bloco_2,
+   * cifrado) da sessão que originou o protocolo ativo do titular. Melhor esforço, no
+   * mesmo padrão de `fallbackParqTags` do worker de geração: se o bloco cifrado não abrir
+   * ou não bater no schema, devolve `null` naquele pedaço — a conversa segue sem essa
+   * parte do contexto em vez de falhar a resposta inteira por causa dela.
+   */
+  private async loadAnamneseSummary(
+    tx: TenantTransaction,
+    anamnesisSessionId: string,
+  ): Promise<Record<string, unknown> | null> {
+    const [session] = await tx
+      .select({
+        dataBlock2: anamnesisSessions.dataBlock2,
+        dataBlock3: anamnesisSessions.dataBlock3,
+      })
+      .from(anamnesisSessions)
+      .where(eq(anamnesisSessions.id, anamnesisSessionId))
+      .limit(1);
+    if (!session) return null;
+
+    const structured = anamnesisStructuredSchema.safeParse(session.dataBlock3);
+
+    let health: { pain?: unknown; parq?: unknown } | null = null;
+    if (session.dataBlock2) {
+      try {
+        const parsed = healthBlockSchema.parse(
+          JSON.parse(await this.cipher.decryptHealth(session.dataBlock2)),
+        );
+        health = { pain: parsed.pain, parq: parsed.parq };
+      } catch {
+        health = null;
+      }
+    }
+
+    return {
+      respostasFormulario: structured.success ? structured.data : null,
+      dor: health?.pain ?? null,
+      parq: health?.parq ?? null,
+    };
   }
 
   async loadScrubUser(userId: string): Promise<ScrubUser> {

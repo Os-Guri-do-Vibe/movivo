@@ -23,6 +23,7 @@ import { Module } from '@nestjs/common';
 
 import { CoreModule } from './core/core.module';
 import { HealthModule } from './health/health.module';
+import { AccountModule } from './modules/account/account.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { AiCoachModule } from './modules/ai-coach/ai-coach.module';
 import { AnamnesisModule } from './modules/anamnesis/anamnesis.module';
@@ -43,6 +44,7 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 
     // Domínio — cascas vazias até as sprints correspondentes.
     AuthModule,
+    AccountModule,
     AnamnesisModule,
     ProtocolModule,
     WhatsappModule,

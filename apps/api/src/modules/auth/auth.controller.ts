@@ -75,10 +75,13 @@ export class AuthController {
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
-  me(@CurrentUser() user: AuthenticatedUser) {
+  async me(@CurrentUser() user: AuthenticatedUser) {
+    const { name, avatarPath } = await this.auth.getProfile(user.userId);
     return {
       userId: user.userId,
       role: user.role,
+      name,
+      avatarUrl: this.config.avatarUrl(avatarPath),
       capabilities: capabilitiesForRole(user.role),
     };
   }

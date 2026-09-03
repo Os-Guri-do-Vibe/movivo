@@ -5,16 +5,24 @@
 import { describe, expect, it } from 'vitest';
 import type { ProtocolExercise, ProtocolStructure } from '@movivo/shared';
 
+import { ExerciseCatalogProvider } from '../exercise-catalog-provider.service';
+import { PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import { aggregate, ValidationService, type ValidateProtocolInput } from './validation.service';
 
 const service = new ValidationService();
 
-/** Protocolo limpo (passa em tudo). Exercícios sem contraindicação p/ um usuário sem lesão. */
+/**
+ * Protocolo limpo (passa em tudo). Exercícios sem contraindicação p/ um usuário sem lesão.
+ * `phaseDurationWeeks` acompanha `phase` automaticamente (piso da faixa da fase) — quem
+ * sobrescreve só `phase` continua com uma duração VÁLIDA, sem precisar sobrescrever os dois.
+ */
 function validStructure(over: Partial<ProtocolStructure> = {}): ProtocolStructure {
+  const phase = over.phase ?? 'ADAPTACAO';
   return {
     promptVersion: 'test-v1',
     goal: 'GAIN_MUSCLE',
-    phase: 'ADAPTACAO',
+    phase,
+    phaseDurationWeeks: PHASE_DURATION_WEEKS_RANGE[phase].minWeeks,
     weeklyFrequency: 2,
     sessions: [
       {
@@ -22,8 +30,8 @@ function validStructure(over: Partial<ProtocolStructure> = {}): ProtocolStructur
         focus: 'Corpo inteiro',
         exercises: [
           {
-            exerciseId: 'dead_bug',
-            name: 'Dead bug',
+            exerciseId: 'flexao',
+            name: 'Flexão',
             sets: 3,
             reps: { min: 8, max: 12 },
             loadStrategy: 'BODYWEIGHT',
@@ -32,8 +40,8 @@ function validStructure(over: Partial<ProtocolStructure> = {}): ProtocolStructur
           },
           {
             // sem notes (cobre o ramo `ex.notes ?? ''`)
-            exerciseId: 'goblet_squat',
-            name: 'Agachamento goblet',
+            exerciseId: 'agachamento_goblet',
+            name: 'Agachamento Goblet',
             sets: 3,
             reps: { min: 8, max: 12 },
             loadStrategy: 'DOUBLE_PROGRESSION',
@@ -94,6 +102,14 @@ describe('ValidationService — caminho limpo', () => {
     );
     expect(v.action).toBe('PASS');
   });
+
+  // Cobre o outro lado do parâmetro default do construtor (achado 2026-09-02): os ~10
+  // `new ValidationService()` acima usam o catálogo padrão; este passa um explícito, o
+  // caminho real de produção via injeção do Nest.
+  it('aceita um ExerciseCatalogProvider explícito no construtor', () => {
+    const v = new ValidationService(new ExerciseCatalogProvider()).validate(input());
+    expect(v.action).toBe('PASS');
+  });
 });
 
 describe('ValidationService — bloqueios estruturais', () => {
@@ -107,7 +123,10 @@ describe('ValidationService — bloqueios estruturais', () => {
     // leg_press é contraindicado para KNEE.
     const v = service.validate(
       input({
-        structure: withExercise({ exerciseId: 'leg_press', name: 'Leg press' }),
+        structure: withExercise({
+          exerciseId: 'leg_press_45_maquina',
+          name: 'Leg Press 45º (Máquina)',
+        }),
         constraints: { goal: 'GAIN_MUSCLE', injuryTags: ['KNEE'] },
       }),
     );
@@ -119,7 +138,7 @@ describe('ValidationService — bloqueios estruturais', () => {
     // brisk_walk é contraindicado para CARDIAC.
     const v = service.validate(
       input({
-        structure: withExercise({ exerciseId: 'brisk_walk', name: 'Caminhada' }),
+        structure: withExercise({ exerciseId: 'caminhada', name: 'Caminhada' }),
         parqFlags: ['CARDIAC'],
       }),
     );
@@ -161,6 +180,16 @@ describe('ValidationService — bloqueios estruturais', () => {
     const v = service.validate(input({ structure: validStructure({ phase: 'FORCA' }) }));
     expect(v.violations.map((x) => x.rule)).not.toContain('PARQ_VIOLATION');
   });
+
+  it('BLOCK PHASE_DURATION_OUT_OF_RANGE: duração fora da faixa da fase', () => {
+    // ADAPTACAO vai de 2 a 4 semanas (protocol-timeline.ts) — 8 estoura o teto.
+    const v = service.validate(
+      input({ structure: validStructure({ phase: 'ADAPTACAO', phaseDurationWeeks: 8 }) }),
+    );
+    const violation = v.violations.find((x) => x.rule === 'PHASE_DURATION_OUT_OF_RANGE');
+    expect(violation?.detail).toBe('fase ADAPTACAO: 8 semana(s), fora da faixa 2-4');
+    expect(v.action).toBe('BLOCK_FALLBACK');
+  });
 });
 
 /**
@@ -195,6 +224,17 @@ describe('ValidationService — teto de PAR-Q (maxPhase)', () => {
       expect(v.action).toBe('BLOCK_FALLBACK');
       expect(v.violations.map((x) => x.rule)).toContain('PARQ_RIR_TOO_LOW');
     }
+  });
+
+  it('BLOCK com piso de RIR elevado (3) quando o PAR-Q traz alerta CARDÍACO', () => {
+    // rir 2 passaria no piso comum (2), mas o piso CARDIAC é 3 — a mesma folga que
+    // basta pra articulação não basta pra resposta cardiovascular aguda.
+    const v = service.validate(
+      capped({ structure: withExercise({ rir: 2 }), parqFlags: ['CARDIAC'] }),
+    );
+    expect(v.action).toBe('BLOCK_FALLBACK');
+    const violation = v.violations.find((x) => x.rule === 'PARQ_RIR_TOO_LOW');
+    expect(violation?.detail).toContain('abaixo do piso 3');
   });
 
   it('rir >= 2 e rir ausente não violam (ausente = não prescreve proximidade de falha)', () => {
@@ -365,7 +405,7 @@ describe('ValidationService — metodologia v2 (divisão e técnica avançada)',
     const base = validStructure().sessions[0];
     const exercise = base?.exercises[0];
     if (!base || !exercise) throw new Error('fixture inválida');
-    const iso = ['db_fly', 'cable_crossover', 'db_curl'];
+    const iso = ['crucifixo_reto_halter', 'crossover_na_polia', 'rosca_direta_halter'];
     return validStructure({
       sessions: [
         {
@@ -373,7 +413,7 @@ describe('ValidationService — metodologia v2 (divisão e técnica avançada)',
           exercises: [
             ...Array.from({ length: isolation }, (_, i) => ({
               ...exercise,
-              exerciseId: iso[i] ?? 'db_fly',
+              exerciseId: iso[i] ?? 'crucifixo_reto_halter',
             })),
             ...Array.from({ length: compound }, () => ({ ...exercise })),
           ],
@@ -476,7 +516,7 @@ function nSessionsNoWeekday(n: number): ProtocolStructure {
 describe('ValidationService — nível do exercício', () => {
   it('BLOCK exercício cujo minLevel é acima do nível do usuário', () => {
     const v = service.validate({
-      structure: withExercise({ exerciseId: 'bench_press', name: 'Supino reto' }),
+      structure: withExercise({ exerciseId: 'agachamento_barra', name: 'Agachamento (Barra)' }),
       constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'INICIANTE' },
     });
     expect(v.violations.map((x) => x.rule)).toContain('EXERCISE_LEVEL_TOO_HIGH');
@@ -485,7 +525,7 @@ describe('ValidationService — nível do exercício', () => {
 
   it('PASS o mesmo exercício quando o usuário é INTERMEDIARIO', () => {
     const v = service.validate({
-      structure: withExercise({ exerciseId: 'bench_press', name: 'Supino reto' }),
+      structure: withExercise({ exerciseId: 'agachamento_barra', name: 'Agachamento (Barra)' }),
       constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'INTERMEDIARIO' },
     });
     expect(v.violations.map((x) => x.rule)).not.toContain('EXERCISE_LEVEL_TOO_HIGH');
@@ -572,24 +612,23 @@ describe('ValidationService.validateResponse — texto livre da conversa (US-3.5
   });
 
   it('substituição: PASS quando cita só o exercício autorizado da base', () => {
-    const v = service.validateResponse(
-      'Pode trocar por Agachamento goblet com halter, mesmo movimento.',
-      { allowedExercises: ['Agachamento goblet com halter', 'Leg press'] },
-    );
+    const v = service.validateResponse('Pode trocar por Agachamento Goblet, mesmo movimento.', {
+      allowedExercises: ['Agachamento Goblet', 'Leg Press 45º (Máquina)'],
+    });
     expect(v.action).toBe('PASS');
   });
 
   it('substituição: BLOCK quando empurra um exercício da base fora do autorizado', () => {
-    const v = service.validateResponse('Na real, faz Leg press que é melhor.', {
-      allowedExercises: ['Agachamento goblet com halter'],
+    const v = service.validateResponse('Na real, faz Agachamento Sumô que é melhor.', {
+      allowedExercises: ['Agachamento Goblet'],
     });
     expect(v.action).toBe('BLOCK_FALLBACK');
     expect(v.violations.map((x) => x.rule)).toContain('EXERCISE_NOT_ALLOWED');
   });
 
   it('substituição: aceita id além do nome no conjunto autorizado', () => {
-    const v = service.validateResponse('Troca por Leg press.', {
-      allowedExercises: ['leg_press'],
+    const v = service.validateResponse('Troca por Leg Press 45º (Máquina).', {
+      allowedExercises: ['leg_press_45_maquina'],
     });
     expect(v.action).toBe('PASS');
   });

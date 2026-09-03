@@ -12,6 +12,7 @@ import {
   type DashboardCapability,
   type DashboardRole,
 } from '@/lib/control-center-access';
+import { toDashboardAvatarUrl } from '@/lib/avatar-url';
 import { publicEnv } from '@/lib/env';
 
 const API_BASE = (process.env.MOVIVO_API_URL?.trim() || publicEnv.apiUrl).replace(/\/$/, '');
@@ -30,6 +31,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export interface ServerDashboardSession {
   role: DashboardRole;
   capabilities: DashboardCapability[];
+  name: string | null;
+  avatarUrl: string | null;
 }
 
 export async function requireDashboardRole(
@@ -65,6 +68,8 @@ export async function requireDashboardRole(
     capabilities: [
       ...(capabilities.length ? capabilities : defaultCapabilitiesForRole(value.role)),
     ],
+    name: typeof value.name === 'string' ? value.name : null,
+    avatarUrl: toDashboardAvatarUrl(typeof value.avatarUrl === 'string' ? value.avatarUrl : null),
   };
 }
 

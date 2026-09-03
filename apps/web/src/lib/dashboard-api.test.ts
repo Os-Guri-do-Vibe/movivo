@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  approveSubstitutionNow,
   DashboardApiError,
+  discardSubstitution,
   getOperations,
   getQueue,
   getQueueDetail,
@@ -17,6 +19,7 @@ import {
   protocolContent,
   protocolDetail,
   queueResponse,
+  substitutionDetail,
 } from '../../test/dashboard-fixtures';
 
 function response(status: number, body: unknown): Response {
@@ -34,16 +37,28 @@ describe('parsers do contrato do dashboard', () => {
 
   it('recusa tipos, prioridades, protocolos e operações fora do contrato', () => {
     expect(() => parseQueueResponse(null)).toThrow(/fila inválida/i);
-    expect(() => parseQueueResponse({ mandatory: [null], optional: [] })).toThrow(
-      /item da fila inválido/i,
-    );
     expect(() =>
-      parseQueueResponse({ mandatory: [{ ...queueResponse.mandatory[0], id: '' }], optional: [] }),
+      parseQueueResponse({
+        mandatory: [null],
+        optional: [],
+        substitutionMandatory: [],
+        substitutionOptional: [],
+      }),
+    ).toThrow(/item da fila inválido/i);
+    expect(() =>
+      parseQueueResponse({
+        mandatory: [{ ...queueResponse.mandatory[0], id: '' }],
+        optional: [],
+        substitutionMandatory: [],
+        substitutionOptional: [],
+      }),
     ).toThrow(/incompleto/i);
     expect(() =>
       parseQueueResponse({
         mandatory: [{ ...queueResponse.mandatory[0], kind: 'UNKNOWN' }],
         optional: [],
+        substitutionMandatory: [],
+        substitutionOptional: [],
       }),
     ).toThrow(DashboardApiError);
     // `PARQ` saiu do enum em 2026-08-24 e é hoje um kind desconhecido como outro qualquer.
@@ -51,12 +66,16 @@ describe('parsers do contrato do dashboard', () => {
       parseQueueResponse({
         mandatory: [{ ...queueResponse.mandatory[0], kind: 'PARQ' }],
         optional: [],
+        substitutionMandatory: [],
+        substitutionOptional: [],
       }),
     ).toThrow(DashboardApiError);
     expect(() =>
       parseQueueResponse({
         mandatory: [{ ...queueResponse.mandatory[0], severity: 'RED' }],
         optional: [],
+        substitutionMandatory: [],
+        substitutionOptional: [],
       }),
     ).toThrow(/prioridade/i);
     expect(() =>
@@ -98,6 +117,8 @@ describe('parsers do contrato do dashboard', () => {
         counts: { mandatory: 1, optional: 0, total: 3, ignored: '3' },
         mandatory: [{ ...queueResponse.mandatory[0], ageMinutes: -2, summary: null, status: null }],
         optional: [],
+        substitutionMandatory: [],
+        substitutionOptional: [],
       }),
     ).toMatchObject({
       counts: { mandatory: 1, optional: 0, total: 3 },
@@ -110,18 +131,53 @@ describe('parsers do contrato do dashboard', () => {
   it('preserva a origem do protocolo obrigatório e degrada valor desconhecido para null', () => {
     const base = queueResponse.mandatory[0];
     if (!base) throw new Error('fixture sem item obrigatório');
-    expect(parseQueueResponse({ mandatory: [base], optional: [] }).mandatory[0]?.origin).toBe(
-      'PARQ',
-    );
+    const empty = { optional: [], substitutionMandatory: [], substitutionOptional: [] };
+    expect(parseQueueResponse({ mandatory: [base], ...empty }).mandatory[0]?.origin).toBe('PARQ');
     expect(
-      parseQueueResponse({ mandatory: [{ ...base, origin: 'EDIT' }], optional: [] }).mandatory[0]
+      parseQueueResponse({ mandatory: [{ ...base, origin: 'EDIT' }], ...empty }).mandatory[0]
         ?.origin,
     ).toBe('EDIT');
     for (const origin of ['DESCONHECIDA', undefined, null]) {
       expect(
-        parseQueueResponse({ mandatory: [{ ...base, origin }], optional: [] }).mandatory[0]?.origin,
+        parseQueueResponse({ mandatory: [{ ...base, origin }], ...empty }).mandatory[0]?.origin,
       ).toBeNull();
     }
+  });
+
+  // Achado 2026-09-02, ampliado 2026-09-03 — fluxo de substituição de exercício via IA,
+  // agora também com par obrigatória/opcional próprio.
+  it('valida item e detalhe de substituição', () => {
+    expect(
+      parseQueueResponse({
+        mandatory: [],
+        optional: [],
+        substitutionMandatory: [],
+        substitutionOptional: [substitutionDetail.item],
+      }),
+    ).toEqual({
+      mandatory: [],
+      optional: [],
+      substitutionMandatory: [],
+      substitutionOptional: [substitutionDetail.item],
+      counts: {
+        mandatory: 0,
+        optional: 0,
+        substitutionMandatory: 0,
+        substitutionOptional: 0,
+        total: 0,
+      },
+    });
+    const detail = parseQueueDetail(substitutionDetail);
+    expect(detail.substitution).toEqual(substitutionDetail.substitution);
+  });
+
+  it('recusa detalhe de substituição com estado desconhecido', () => {
+    expect(() =>
+      parseQueueDetail({
+        ...substitutionDetail,
+        substitution: { ...substitutionDetail.substitution, status: 'UNKNOWN' },
+      }),
+    ).toThrow(/estado da substituição/i);
   });
 
   it('preserva primeiro treino indisponível sem inventar zero', () => {
@@ -193,6 +249,19 @@ describe('cliente BFF same-origin', () => {
     await signProtocol('p1');
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/dashboard/protocols/p1/sign');
+  });
+
+  it('aprova ou recusa a substituição no endpoint certo, sem corpo', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response(200, { status: 'ok' }));
+    vi.stubGlobal('fetch', fetchMock);
+    await approveSubstitutionNow('s1');
+    await discardSubstitution('s1');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/dashboard/substitutions/s1/approve');
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/dashboard/substitutions/s1/discard');
+    for (const call of fetchMock.mock.calls) {
+      expect((call[1] as RequestInit).method).toBe('POST');
+      expect((call[1] as RequestInit).body).toBeUndefined();
+    }
   });
 
   it('propaga mensagem e detalhes seguros de validação', async () => {

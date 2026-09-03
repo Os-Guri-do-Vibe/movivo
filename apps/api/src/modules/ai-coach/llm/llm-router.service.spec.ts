@@ -268,15 +268,32 @@ describe('LlmRouter.complete', () => {
     expect(result.attempt).toBe(2);
   });
 
-  it('aplica o teto de tokens (clamp no config) no request do provedor', async () => {
+  it('sem maxTokens no request, usa o default do config', async () => {
     let seen: ProviderCompleteRequest | undefined;
     const primary = new FakeProvider('OPENAI_GPT41', 'gpt-4.1', (req) => {
       seen = req;
       return Promise.resolve({ text: 'ok', model: 'gpt-4.1', usage: usage() });
     });
     const { router } = make([primary]);
-    await router.complete(request({ maxTokens: 999_999 }));
+    await router.complete(request({ maxTokens: undefined }));
     expect(seen?.maxTokens).toBe(4096);
+  });
+
+  // Achado 2026-09-02: `Math.min(request.maxTokens ?? cfg.maxTokens, cfg.maxTokens)` clampava
+  // TODO caller de volta ao teto genérico de chat, mesmo quando o caller (ex: geração de
+  // protocolo) pedia de propósito um teto maior — protocolo real truncava aos 4096 tokens e
+  // caía em retry/fallback sempre. `maxTokens` explícito do request nunca é controlado por
+  // usuário final (só por código interno com valor fixo calibrado por propósito) — o router
+  // deve honrar, não sobrepor.
+  it('com maxTokens explícito no request (ex: protocolMaxTokens), honra o valor pedido', async () => {
+    let seen: ProviderCompleteRequest | undefined;
+    const primary = new FakeProvider('OPENAI_GPT41', 'gpt-4.1', (req) => {
+      seen = req;
+      return Promise.resolve({ text: 'ok', model: 'gpt-4.1', usage: usage() });
+    });
+    const { router } = make([primary]);
+    await router.complete(request({ maxTokens: 6000 }));
+    expect(seen?.maxTokens).toBe(6000);
   });
 
   it('pseudonimiza system e messages antes de enviar ao provedor (scrubber inescapável)', async () => {

@@ -15,7 +15,13 @@ import { Logger as PinoLogger } from 'nestjs-pino';
 
 import { AppModule } from './app.module';
 import { AppConfigService, getAppConfig, InvalidConfigurationError } from './core/config';
-import { PAYMENT_WEBHOOK_BODY_LIMIT } from './modules/subscription/payment-webhook.controller';
+
+/**
+ * Default global do parser JSON (achado 2026-09-02). Generoso o bastante pra qualquer texto
+ * humano legítimo (metodologia CREF, notas de mudança longas) sem depender do default
+ * implícito do Express — ver rationale completo no bootstrap, junto de `useBodyParser`.
+ */
+export const DEFAULT_JSON_BODY_LIMIT = '2mb';
 
 async function bootstrap(): Promise<void> {
   /*
@@ -39,12 +45,20 @@ async function bootstrap(): Promise<void> {
   app.useLogger(app.get(PinoLogger));
 
   /*
-   * Teto explícito do corpo JSON (US-8.5). O valor é o mesmo que o express já aplicava por
-   * default — o ganho aqui não é apertar, é **parar de depender de um default implícito**:
-   * `POST /webhook/payment` é público e verifica HMAC sobre o corpo bruto, então um
-   * corpo sem teto vira amplificador de CPU. Payload de gateway tem poucos KB; o resto é abuso.
+   * Teto explícito do corpo JSON (US-8.5), aplicado a TODA a API — parar de depender de um
+   * default implícito, não um valor específico de rota.
+   *
+   * Achado 2026-09-02: este teto usava `PAYMENT_WEBHOOK_BODY_LIMIT` (100kb) como default
+   * global — e isso passou a rejeitar POST legítimo de outras rotas autenticadas com corpo
+   * de texto longo por natureza (ex.: nova versão da metodologia CREF, sem teto de
+   * caracteres por decisão do fundador). Subir o default global pra `DEFAULT_JSON_BODY_LIMIT`
+   * não reabre o risco original do webhook: o corpo aqui só passa por HMAC (SHA-256) — MBs
+   * de HMAC ainda são milissegundos de CPU, não um amplificador — e a rota do webhook
+   * também tem rate limit de 30/min por IP na frente. O que protegia de verdade contra
+   * abuso continua de pé; só o número parou de ser emprestado de uma rota que não tem nada
+   * a ver com o resto da API.
    */
-  app.useBodyParser('json', { limit: PAYMENT_WEBHOOK_BODY_LIMIT });
+  app.useBodyParser('json', { limit: DEFAULT_JSON_BODY_LIMIT });
   const config = app.get(AppConfigService);
 
   // Versionamento de API na URL — regra §12.10. Todo endpoint vive sob /api/v1.

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { SUBSCRIPTION_PLANS } from '@movivo/shared';
+
 import { canTransition, PLAN_CATALOG, resolveAccess, TRIAL_DAYS } from './subscription-model';
 
 describe('subscription-model — catálogo de planos (US-4.1)', () => {
@@ -7,9 +9,19 @@ describe('subscription-model — catálogo de planos (US-4.1)', () => {
     expect(Object.keys(PLAN_CATALOG).sort()).toEqual(
       ['ANNUAL', 'MONTHLY', 'QUARTERLY', 'SEMIANNUAL'].sort(),
     );
-    expect(PLAN_CATALOG.MONTHLY.priceCents).toBe(3900);
-    expect(PLAN_CATALOG.QUARTERLY.priceCents).toBe(9900);
-    expect(PLAN_CATALOG.ANNUAL.priceCents).toBe(34900);
+    expect(PLAN_CATALOG.MONTHLY.priceCents).toBe(7990);
+    expect(PLAN_CATALOG.QUARTERLY.priceCents).toBe(20282);
+    expect(PLAN_CATALOG.SEMIANNUAL.priceCents).toBe(38721);
+    expect(PLAN_CATALOG.ANNUAL.priceCents).toBe(71500);
+    expect(
+      ['QUARTERLY', 'SEMIANNUAL', 'ANNUAL'].map((id) => {
+        const months = { QUARTERLY: 3, SEMIANNUAL: 6, ANNUAL: 12 }[id] ?? 1;
+        return Math.round(
+          (1 - PLAN_CATALOG[id as keyof typeof PLAN_CATALOG].priceCents / (7990 * months)) * 100,
+        );
+      }),
+    ).toEqual([15, 19, 25]);
+    expect(SUBSCRIPTION_PLANS.find((plan) => plan.recommended)?.id).toBe('SEMIANNUAL');
     for (const spec of Object.values(PLAN_CATALOG)) {
       expect(Number.isInteger(spec.priceCents)).toBe(true);
       expect(Number.isInteger(spec.periodDays)).toBe(true);

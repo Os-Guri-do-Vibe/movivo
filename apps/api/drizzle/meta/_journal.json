@@ -267,6 +267,41 @@
       "when": 1787945291175,
       "tag": "0037_peaceful_rockslide",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1788323366656,
+      "tag": "0038_striped_doctor_doom",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1788328512789,
+      "tag": "0039_heavy_lord_tyger",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1788363126646,
+      "tag": "0040_premium_mantis",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1788392491735,
+      "tag": "0041_skinny_tomas",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1788399057276,
+      "tag": "0042_parched_war_machine",
+      "breakpoints": true
     }
   ]
 }

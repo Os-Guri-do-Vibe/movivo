@@ -192,3 +192,19 @@ describe('logout', () => {
     expect(db.runAsUser).toHaveBeenCalledWith('u1', 'PROFESSIONAL', expect.any(Function));
   });
 });
+
+describe('getProfile', () => {
+  it('devolve nome e avatar cadastrados da conta', async () => {
+    tx.select.mockReturnValueOnce(q([{ name: 'Ana Souza', avatarPath: 'abc.jpg' }]));
+    await expect(service.getProfile('u1')).resolves.toEqual({
+      name: 'Ana Souza',
+      avatarPath: 'abc.jpg',
+    });
+    expect(db.runAsSystem).toHaveBeenCalledWith(expect.any(Function));
+  });
+
+  it('devolve null quando a conta não tem nome/avatar cadastrado ou não existe', async () => {
+    tx.select.mockReturnValueOnce(q([]));
+    await expect(service.getProfile('u1')).resolves.toEqual({ name: null, avatarPath: null });
+  });
+});

@@ -15,6 +15,7 @@ const content: ProtocolStructure = {
   promptVersion: 'v1',
   goal: 'CONDITIONING',
   phase: 'ADAPTACAO',
+  phaseDurationWeeks: 3,
   weeklyFrequency: 1,
   sessions: [
     {

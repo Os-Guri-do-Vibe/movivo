@@ -17,7 +17,8 @@ export const BFF_REFRESH_COOKIE = 'movivo_bff_refresh';
 const BACKEND_REFRESH_COOKIE = 'movivo_refresh';
 const ACCESS_MAX_AGE_SECONDS = 15 * 60;
 const REFRESH_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
-const API_BASE = (process.env.MOVIVO_API_URL?.trim() || publicEnv.apiUrl).replace(/\/$/, '');
+/** Exportado para rotas que fazem passthrough direto (ex.: `account/avatar/[filename]`). */
+export const API_BASE = (process.env.MOVIVO_API_URL?.trim() || publicEnv.apiUrl).replace(/\/$/, '');
 
 export const DASHBOARD_PRIVATE_HEADERS = {
   'Cache-Control': 'private, no-store, max-age=0',

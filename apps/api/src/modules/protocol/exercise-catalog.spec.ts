@@ -62,7 +62,7 @@ describe('exercise-catalog (base de referência)', () => {
   });
 
   it('isKnownExercise distingue id conhecido de desconhecido', () => {
-    expect(isKnownExercise('pushup')).toBe(true);
+    expect(isKnownExercise('flexao')).toBe(true);
     expect(isKnownExercise('exercicio_inventado')).toBe(false);
   });
 });
@@ -76,11 +76,16 @@ describe('cobertura por local de treino (Sprint 6 — os 4 valores reais)', () =
     }
   });
 
-  it('exercício de máquina/polia/barra só existe em academia completa', () => {
+  it('exercício de máquina/polia/barra nunca serve casa nem ao ar livre', () => {
+    // v7 (achado ao vivo): a Biblioteca MOVIVO lista vários exercícios de barra também
+    // em "academia de condomínio" (nem toda academia de condomínio é só halteres) — a
+    // invariante real de segurança/equipamento é "nunca em casa/ao ar livre sem esse
+    // equipamento", não "exclusivo de academia completa".
     const gymOnlyEquipment = ['máquina', 'polia', 'barra'];
     for (const exercise of EXERCISE_CATALOG) {
       if (exercise.equipment.some((e) => gymOnlyEquipment.includes(e))) {
-        expect(exercise.locations, `${exercise.id}`).toEqual(['FULL_GYM']);
+        expect(exercise.locations, `${exercise.id}`).not.toContain('HOME');
+        expect(exercise.locations, `${exercise.id}`).not.toContain('OUTDOOR');
       }
     }
   });

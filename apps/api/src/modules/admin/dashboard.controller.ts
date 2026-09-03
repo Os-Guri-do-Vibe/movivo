@@ -69,6 +69,18 @@ export class DashboardController {
     return this.dashboard.signProtocol(actor, id, body);
   }
 
+  @Post('substitutions/:id/approve')
+  @Roles('PROFESSIONAL', 'ADMIN')
+  approveSubstitutionNow(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.dashboard.approveSubstitutionNow(actor, id);
+  }
+
+  @Post('substitutions/:id/discard')
+  @Roles('PROFESSIONAL', 'ADMIN')
+  discardSubstitution(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.dashboard.discardSubstitution(actor, id);
+  }
+
   @Post('handoffs/:id/resolve')
   @Roles('PROFESSIONAL', 'ADMIN')
   resolveHandoff(
