@@ -128,7 +128,15 @@ export class LlmRouter {
     // 2. Anti-abuso (LLM10) — pode lançar LLMAbuseError.
     await this.abuse.check(request.userId, request.operationId);
 
-    const maxTokens = Math.min(request.maxTokens ?? cfg.maxTokens, cfg.maxTokens);
+    // Achado 2026-09-02: `Math.min(request.maxTokens ?? cfg.maxTokens, cfg.maxTokens)` clampava
+    // TODO caller de volta ao teto genérico de chat (`LLM_MAX_TOKENS`, 4096) — inclusive quando o
+    // caller passava um teto MAIOR de propósito (ex: `protocolMaxTokens`, 6000, porque um
+    // protocolo é um JSON bem maior que uma resposta de chat). Efeito: toda geração de protocolo
+    // truncava aos 4096 tokens, saía com JSON cortado no meio e caía em retry/fallback sempre —
+    // reproduzido ao vivo tentando regerar o protocolo do Rodrigo (`tokensOutput: 4096` idêntico
+    // em toda tentativa, seguido de "saída de geração malformada"). `cfg.maxTokens` agora só serve
+    // de default quando o caller não pede nada — nunca mais de teto por cima do que ele pediu.
+    const maxTokens = request.maxTokens ?? cfg.maxTokens;
     const temperature = request.temperature ?? 0.4;
     let lastError: unknown;
 

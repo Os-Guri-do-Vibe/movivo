@@ -148,25 +148,31 @@ export const RESPONSE_CASES: readonly ResponseCase[] = [
   // Substituição: só pode citar o alvo + o substituto autorizado da base.
   {
     label: 'substituição fiel ao substituto autorizado passa',
-    text: 'No lugar da Flexão de braço, faça Flexão de joelhos.',
+    text: 'No lugar da Flexão, faça Flexão com Apoio dos Joelhos.',
     expected: 'PASS',
-    allowedExercises: ['Flexão de braço', 'Flexão de joelhos'],
+    allowedExercises: ['Flexão', 'Flexão com Apoio dos Joelhos'],
   },
   {
     label: 'substituição que empurra exercício NÃO autorizado é bloqueada',
-    text: 'Na real, faz Leg press que é melhor.',
+    text: 'Na real, faz Peito na Paralela que é melhor.',
     expected: 'BLOCK_FALLBACK',
     expectRule: 'EXERCISE_NOT_ALLOWED',
-    allowedExercises: ['Flexão de braço', 'Flexão de joelhos'],
+    allowedExercises: ['Flexão', 'Flexão com Apoio dos Joelhos'],
   },
 ];
 
-/** Caso de substituição: alvo mencionado + constraints → o substituto deve ser seguro e da base. */
+/**
+ * Caso de substituição: alvo (por id — achado 2026-09-02, a IDENTIFICAÇÃO do alvo a partir da
+ * mensagem virou julgamento de LLM e saiu do escopo determinístico deste golden set; o que
+ * continua determinístico, e é o que este caso prova, é o FILTRO DE SEGURANÇA sobre um alvo
+ * já conhecido) + constraints → os candidatos devem ser sempre seguros e da base.
+ */
 export interface SubstitutionCase {
   label: string;
   message: string;
+  targetExerciseId: string;
   constraints: SubstitutionConstraints;
-  /** `true` = espera um substituto seguro; `false` = nada seguro disponível (fallback humano). */
+  /** `true` = espera ao menos um candidato seguro; `false` = nada seguro (fallback humano). */
   expectSubstitute: boolean;
 }
 
@@ -174,20 +180,22 @@ const NO_INJURY: ContraindicationTag[] = [];
 
 export const SUBSTITUTION_CASES: readonly SubstitutionCase[] = [
   {
-    label: 'trocar flexão em casa sem lesão → substituto seguro da base',
-    message: 'quero trocar a Flexão de braço',
+    label: 'trocar flexão em casa sem lesão → candidato seguro da base',
+    message: 'quero trocar a Flexão',
+    targetExerciseId: 'flexao',
     constraints: { level: 'INICIANTE', location: 'HOME', equipment: [], injuryTags: NO_INJURY },
     expectSubstitute: true,
   },
   {
     label:
-      'trocar agachamento com lesão no joelho → nada seguro na base (fallback humano, não inventa)',
-    message: 'posso trocar o Agachamento goblet com halter?',
+      'trocar leg press com lesões múltiplas → nada seguro na base (fallback humano, não inventa)',
+    message: 'posso trocar o Leg Press (Máquina)?',
+    targetExerciseId: 'leg_press_45_maquina',
     constraints: {
       level: 'INICIANTE',
       location: 'FULL_GYM',
       equipment: ['máquina'],
-      injuryTags: ['KNEE'],
+      injuryTags: ['KNEE', 'HIP', 'LOWER_BACK'],
     },
     expectSubstitute: false,
   },

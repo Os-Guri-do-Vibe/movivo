@@ -3,6 +3,10 @@ import {
   auditSearchResponseSchema,
   agentPersonaResponseSchema,
   configSimulationResponseSchema,
+  exerciseCatalogResponseSchema,
+  type ExerciseCatalogResponse,
+  type PublishExerciseCatalogEntryInput,
+  type RetireExerciseCatalogEntryInput,
   faqEntriesResponseSchema,
   forbiddenTopicsResponseSchema,
   inviolableRulesResponseSchema,
@@ -119,7 +123,6 @@ export interface MethodologyVersionView {
   version: number | string;
   status: MethodologyStatus;
   content: string;
-  summary: string | null;
   sha256: string | null;
   changeNote: string | null;
   createdBy: string | null;
@@ -257,7 +260,6 @@ const methodologyResponseSchema: Parser<MethodologyResponse> = {
         version: (entry.version ?? entry.versionLabel) as number | string,
         status,
         content: entry.content,
-        summary: optionalString(entry.summary),
         sha256: optionalString(entry.sha256 ?? entry.contentHash ?? entry.contentSha256),
         changeNote: optionalString(entry.changeNote),
         createdBy: optionalString(entry.createdBy ?? entry.createdByName),
@@ -477,6 +479,22 @@ export function retireFaqEntry(input: RetireFaqEntryInput): Promise<FaqEntriesRe
   return mutate('ai/faq/retire', input, faqEntriesResponseSchema);
 }
 
+export function getExerciseCatalog(signal?: AbortSignal): Promise<ExerciseCatalogResponse> {
+  return request('ai/exercise-catalog', exerciseCatalogResponseSchema, signal);
+}
+
+export function publishExerciseCatalogEntry(
+  input: PublishExerciseCatalogEntryInput,
+): Promise<ExerciseCatalogResponse> {
+  return mutate('ai/exercise-catalog', input, exerciseCatalogResponseSchema);
+}
+
+export function retireExerciseCatalogEntry(
+  input: RetireExerciseCatalogEntryInput,
+): Promise<ExerciseCatalogResponse> {
+  return mutate('ai/exercise-catalog/retire', input, exerciseCatalogResponseSchema);
+}
+
 export function getL1Guardrails(signal?: AbortSignal): Promise<L1GuardrailsResponse> {
   return request('ai/guardrails', l1GuardrailsResponseSchema, signal);
 }
@@ -586,7 +604,6 @@ export function getMethodology(signal?: AbortSignal): Promise<MethodologyRespons
 
 export function createMethodologyVersion(input: {
   content: string;
-  summary?: string;
   changeNote: string;
 }): Promise<MethodologyResponse> {
   return mutate('ai/methodology', input, methodologyResponseSchema);

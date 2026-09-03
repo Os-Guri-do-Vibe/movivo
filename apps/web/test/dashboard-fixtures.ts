@@ -7,6 +7,7 @@ import type {
   QueueDetail,
   QueueItem,
   QueueResponse,
+  SubstitutionDetail,
 } from '@/lib/dashboard-types';
 
 export const PROTOCOL_ID = '11111111-1111-4111-8111-111111111111';
@@ -16,6 +17,10 @@ export const PARQ_PROTOCOL_ID = '33333333-3333-4333-8333-333333333333';
 export const CHECKIN_ID = '44444444-4444-4444-8444-444444444444';
 /** Protocolo `MANDATORY` que um CREF editou à mão e precisa de sign-off fresco. */
 export const EDIT_PROTOCOL_ID = '55555555-5555-4555-8555-555555555555';
+/** Proposta de substituição de exercício via IA (achado 2026-09-02). */
+export const SUBSTITUTION_ID = '77777777-7777-4777-8777-777777777777';
+/** Substituição de aluno com protocolo de origem em PAR-Q bloqueante (achado 2026-09-03). */
+export const SUBSTITUTION_MANDATORY_ID = '88888888-8888-4888-8888-888888888888';
 
 export const anamnesisAnswers: AnamnesisAnswers = {
   userId: 'user-1',
@@ -72,6 +77,7 @@ export const protocolContent: ProtocolStructure = {
   promptVersion: 'methodology-2026-07',
   goal: 'GAIN_MUSCLE',
   phase: 'HIPERTROFIA',
+  phaseDurationWeeks: 5,
   weeklyFrequency: 3,
   sessions: [
     {
@@ -168,6 +174,58 @@ export const editProtocolItem: QueueItem = {
   origin: 'EDIT',
 };
 
+export const substitutionItem: QueueItem = {
+  id: SUBSTITUTION_ID,
+  kind: 'SUBSTITUTION',
+  severity: 'ROUTINE',
+  createdAt: '2026-09-02T11:30:00.000Z',
+  ageMinutes: 5,
+  title: 'Substituição de Exercício: Ana Teste',
+  summary: 'PENDING',
+  status: 'PENDING',
+  autoReleaseAt: '2026-09-02T12:00:00.000Z',
+  origin: 'AI_SUBSTITUTION',
+};
+
+/**
+ * Substituição de aluno com protocolo de origem em PAR-Q bloqueante (achado
+ * 2026-09-03): mesma regra de `parqProtocolItem` — `severity: SAFETY`,
+ * `autoReleaseAt: null` (sem job de auto-liberação agendado).
+ */
+export const substitutionMandatoryItem: QueueItem = {
+  id: SUBSTITUTION_MANDATORY_ID,
+  kind: 'SUBSTITUTION',
+  severity: 'SAFETY',
+  createdAt: '2026-09-02T11:00:00.000Z',
+  ageMinutes: 35,
+  title: 'Substituição de Exercício: Carla Teste',
+  summary: 'PENDING',
+  status: 'PENDING',
+  autoReleaseAt: null,
+  origin: 'AI_SUBSTITUTION',
+};
+
+export const substitutionDetail: QueueDetail = {
+  item: substitutionItem,
+  context: {},
+  substitution: {
+    id: SUBSTITUTION_ID,
+    protocolId: PROTOCOL_ID,
+    from: { id: 'flexao', name: 'Flexão' },
+    to: { id: 'flexao_diamante', name: 'Flexão Diamante' },
+    diff: {
+      type: 'EXERCISE_SUBSTITUTION',
+      from: { id: 'flexao', name: 'Flexão' },
+      to: { id: 'flexao_diamante', name: 'Flexão Diamante' },
+      sessionsAffected: ['Dia A', 'Dia B'],
+    },
+    changeReason: 'Substituição solicitada pelo aluno via WhatsApp: Flexão → Flexão Diamante',
+    status: 'PENDING',
+    decidedAt: null,
+  } satisfies SubstitutionDetail,
+  replay: undefined,
+};
+
 export const checkinItem: QueueItem = {
   id: CHECKIN_ID,
   kind: 'CHECKIN',
@@ -183,11 +241,22 @@ export const checkinItem: QueueItem = {
 
 // Todo item das duas caixas é protocolo. `mandatory` cobre as duas origens (PAR-Q e
 // edição manual) e nunca libera sozinho; `optional` é o resto — só quem carrega
-// `autoReleaseAt` (optionalProtocolItem) de fato libera sozinho.
+// `autoReleaseAt` (optionalProtocolItem) de fato libera sozinho. As duas caixas de
+// substituição (achado 2026-09-03) ficam vazias aqui de propósito — os testes que
+// cobrem o par obrigatória/opcional de SUBSTITUTION usam `substitutionItem` e
+// `substitutionMandatoryItem` num fixture próprio, não este.
 export const queueResponse: QueueResponse = {
   mandatory: [parqProtocolItem, editProtocolItem],
   optional: [optionalProtocolItem, protocolItem],
-  counts: { mandatory: 2, optional: 2, total: 4 },
+  substitutionMandatory: [],
+  substitutionOptional: [],
+  counts: {
+    mandatory: 2,
+    optional: 2,
+    substitutionMandatory: 0,
+    substitutionOptional: 0,
+    total: 4,
+  },
 };
 
 export const anonymizedReplay: AnonymizedReplay = {

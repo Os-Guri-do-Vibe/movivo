@@ -23,6 +23,25 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   reactStrictMode: true,
 
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'img.icons8.com',
+        port: '',
+        pathname: '/ios/50/25e27e/**',
+        search: '',
+      },
+      {
+        protocol: 'https',
+        hostname: 'img.icons8.com',
+        port: '',
+        pathname: '/ios/50/06302a/**',
+        search: '',
+      },
+    ],
+  },
+
   /*
    * Num monorepo, o Next infere a raiz do projeto pelo lockfile mais próximo e emite
    * aviso quando encontra mais de um candidato. Fixar a raiz torna o file tracing do

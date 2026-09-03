@@ -10,6 +10,7 @@ const KINDS: Record<string, QueueKind> = {
   protocol: 'PROTOCOL',
   handoff: 'HANDOFF',
   checkin: 'CHECKIN',
+  substitution: 'SUBSTITUTION',
 };
 
 export default async function QueueDetailPage({

@@ -1,6 +1,6 @@
 # Relatório — Sofia Almeida (Senior Product Designer / UX-UI Designer)
 
-**Data:** 2026-07-22
+**Data:** 2026-07-22 · **Revisão:** 2026-08-31 (seções 11.5–11.9 e Gap 3 — sistema de acompanhamento contínuo, gamificação e reengajamento proativo)
 **Ideia analisada:** MOVIVO — AI Coach de treino individualizado via WhatsApp, com supervisão de profissional de Educação Física (CREF)
 **Pasta do projeto:** docs/fitness-ia-whatsapp/
 **Status do pipeline:** Fase 1 concluída (Clóvis/Gabriel/Caio/Kimura/Helena) → Fase 2 concluída (Alexandre/Eduardo) → **Fase 3 concluída (Lucas + Sofia)** → Próxima: Fase 4 (Rafael/Sato/Victor)
@@ -24,6 +24,8 @@ As cinco decisões de design mais importantes:
 4. **Microcopy é compliance.** Todo texto de produto foi escrito sob os guardrails jurídicos: MOVI nunca "prescreve", "diagnostica" ou "garante resultado" — sempre reforça que o método é de um profissional CREF. A linguagem de marca (Gabriel: "manda áudio pro amigo") convive com a sobriedade regulatória.
 
 5. **Reengajamento e pausa são fluxos de primeira classe.** Win-back de inativos e um offboarding que converte cancelamento em pausa (não em perda) são desenhados como jornadas, resolvendo os gaps 3 e 4 de Lucas.
+
+6. **[REVISÃO 2026-08-31] O acompanhamento é um sistema de três camadas com orçamento fixo de atenção.** Check-in diário (só em dia de treino, 1 pergunta, supressível) + check-in semanal (julgamento e ajuste) + reengajamento proativo em escada. As três camadas compartilham **um único toque proativo por dia** e uma regra inegociável: *nenhum dado coletado sem devolução visível em até 7 dias*. A gamificação (streak, marcos, recap) nunca gera mensagem própria — pega carona nas que já iam sair — e o streak é **insumo do motor de periodização**, não troféu. **Sem ranking entre usuários no MVP** (fere "acompanhado, não julgado" e o isolamento de contexto). Detalhado nas seções 11.5 a 11.9.
 
 Tudo é **mobile-first** (o ICP vive no celular) e aplica o design system "O Pulso" de Kimura (Petróleo Vivo + Verde Pulso + Coral, Hanken Grotesk + mono para dado), com acessibilidade WCAG 2.2 AA no dashboard web.
 
@@ -67,6 +69,8 @@ Traduzidos das personas de Gabriel para jobs concretos:
 - **"Quero entender o que fazem com meus dados antes de dá-los"** (consciente de privacidade) → consentimento legível, não juridiquês.
 - **"Quero começar a treinar hoje, não receber um PDF"** (Letícia, a otimizadora) → primeiro treino executável imediato.
 - **"Quero me sentir acompanhado, não spammado"** → check-in que abre com vitória, não com cobrança.
+- **"Quero que alguém note se eu sumir"** (a demanda que sustenta o preço) → a MOVIVO vende acompanhamento, e acompanhamento significa **iniciativa**: quem paga por um coach espera ser cobrado. O que o usuário rejeita não é a cobrança — é a cobrança *genérica*. "Cadê você?" é spam; "sua terça de treino passou em branco pela primeira vez em 3 semanas" é acompanhamento. A diferença é evidência específica.
+- **"Quero poder pedir espaço sem cancelar"** → controle explícito da frequência ("me chama todo dia" / "só na segunda" / "me deixa quieto") em linguagem natural, sem menu de configurações.
 
 ---
 
@@ -90,6 +94,14 @@ Pesquisa web (fontes na seção 17) confirmou e calibrou as decisões:
 
 Referências de produto observadas: Future/Trainwell (human+AI, accountability relacional), Duolingo (streak sem culpa, celebração), Typeform (form conversacional), Linear/Notion (densidade e clareza de dashboard B2B).
 
+**Pesquisa adicional da revisão 2026-08-31** (streaks, cadência e gamificação — fontes na seção 17):
+
+- **Streaks funcionam por aversão à perda, não por recompensa.** A dor de perder pesa ~2x o prazer de ganhar equivalente; usuários com sequência acima de 14 dias mostram ~60% menos probabilidade de abandono voluntário (MIT Media Lab, 2024, citado em levantamentos de 2026). Apps gamificados reportam ~47% mais retenção nos primeiros 90 dias. → Justifica o streak, **e explica por que quebrá-lo sem rede é perigoso**: o mesmo mecanismo que retém é o que faz o usuário sumir de vez ao falhar.
+- **Streak freeze é o que separa streak de armadilha.** Fittr e HealthifyMe adotam 1 perdão/mês, que remove a sensação de punição sem matar a aversão à perda. → Adotamos o "escudo" automático (11.7).
+- **Cadência no WhatsApp:** opt-out de 0,37% por mensagem (benchmark de 382 marcas, mar–mai/2026) — baixo, mas cumulativo; a zona segura é **1–2 mensagens promocionais/semana**, e a Meta aplica frequency capping de ~2 mensagens de marketing/dia por usuário somando todas as marcas. → Nosso acompanhamento **não pode ser categorizado como marketing**: é serviço contratado (Utility), e ainda assim precisa de teto próprio (11.9).
+- **Leaderboards globais desmotivam a maioria para energizar o topo**; estudos longitudinais registram queda de motivação e satisfação em coortes gamificadas com comparação pública. Comparação *relativa/entre pares semelhantes* ou *contra o próprio histórico* converte a métrica em motivadora para 100% em vez de 1%. → Base do veredito "sem ranking no MVP" (11.7c).
+- **Reengajamento de treino perdido:** a mudança de mindset que funciona é do "tudo ou nada" para a regra **"nunca falhe duas vezes seguidas"**, com replanejamento adaptativo em vez de cobrança; mensagens curtas e humanas ("e aí, tá tudo bem?") reengajam melhor que um check-in completo; e o momento de maior valor do toque é **antes das quebras previsíveis de rotina** (véspera de fim de semana e feriado). → Estrutura a escada do Gap 3.
+
 ---
 
 ## 7. Solução Proposta — Visão Geral
@@ -103,8 +115,9 @@ Três superfícies, um sistema:
 │  Objetivo: coletar com mínima fricção + compliance embutido      │
 ├──────────────────────────────────────────────────────────────────┤
 │  SUPERFÍCIE 2 — WHATSAPP (MOVI, o AI Coach)                      │
-│  Boas-vindas → Protocolo/aha moment → Conversa → Check-in →      │
-│  Conversão → Reengajamento → Offboarding/Pausa                  │
+│  Boas-vindas → Protocolo/aha moment → Conversa →                 │
+│  Acompanhamento (diário + semanal + streak) → Conversão →        │
+│  Reengajamento proativo → Offboarding/Pausa                      │
 │  Objetivo: entregar valor e reter na conversa que já existe      │
 ├──────────────────────────────────────────────────────────────────┤
 │  SUPERFÍCIE 3 — DASHBOARD CREF (Next.js 15 + Socket.io)         │
@@ -621,9 +634,164 @@ Isto é o **feedback loop visível** que Lucas exigiu: o usuário vê que o repo
 
 MOVI responde: substituição de exercício (motor determinístico), execução/técnica, motivação, dúvidas gerais de treino (RAG). MOVI **não** responde e redireciona com elegância: nutrição clínica, suplementação, dor persistente/patologia — sempre com *"isso foge do que eu posso orientar com segurança; melhor falar com [médico / o profissional responsável]"*. Handoff humano acessível ("quero falar com o profissional") — direito de contestação (Alexandre/AI Act).
 
-### 11.5 Check-in semanal (pós-conversão)
+### 11.5 Sistema de acompanhamento contínuo — três camadas, um orçamento de atenção
 
-Estruturado em **máximo 3 perguntas via quick reply** (benchmark WhatsApp: 3 botões é o teto). Abre sempre com **vitória** (positivity bias — Lucas):
+**[REVISÃO 2026-08-31 — pedido do fundador]** A MOVIVO não vende um protocolo; vende **acompanhamento**. Acompanhamento tem uma assinatura comportamental muito específica: alguém percebe quando você some, e o que você conta muda o que você recebe. O check-in semanal sozinho não produz essa sensação — sete dias é tempo demais para o usuário sentir que está sendo acompanhado, e é tempo demais para o sistema aprender.
+
+Desenho, portanto, **três camadas com papéis não sobrepostos**, operando sob um único orçamento de atenção.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ CAMADA          QUANDO                O QUE COLETA        O QUE DEVOLVE  │
+├─────────────────────────────────────────────────────────────────────────┤
+│ DIÁRIO          só em dia com         FATO binário        streak, marco, │
+│ (11.6)          treino agendado       (fez/não/parcial)   reposição do   │
+│                 1 pergunta            + causa se não fez  treino perdido │
+│                 ~2h após a janela                                        │
+│                 de horário do usuário                                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│ SEMANAL         segunda 08:00-10:00   JULGAMENTO          o AJUSTE do    │
+│ (11.7)          2-3 perguntas         (esforço, o que     protocolo +    │
+│                                       ajustar)            recap          │
+├─────────────────────────────────────────────────────────────────────────┤
+│ REENGAJAMENTO   só quando há          CAUSA da ausência   rota de volta  │
+│ (Gap 3, §12)    ausência detectada    + intenção          com degrau     │
+│                 escada de 4 degraus                       menor          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**A regra que impede a duplicação de esforço:** cada camada só pergunta o que a camada anterior não resolveu.
+
+- O diário **conta**. O semanal **nunca repergunta a contagem** — ele *afirma* o número já apurado e pede só confirmação. Isso elimina a pergunta 2 do check-in semanal original de Lucas ("treinos completados") para quem responde o diário.
+- **Fricção decrescente como recompensa:** quem respondeu ≥ 3 check-ins diários na semana recebe um check-in semanal de **2 perguntas**, não 3, e MOVI diz isso ("como você já foi me contando durante a semana, hoje é rapidinho"). Quem não respondeu nenhum recebe as 3 perguntas. Responder passa a *economizar* esforço, em vez de somar.
+- O reengajamento **só existe onde o diário registrou ausência**. Ele nunca dispara em cima de um dia já respondido, nem duplica o semanal.
+
+#### Orçamento de atenção (teto duro, não recomendação)
+
+Este é um requisito funcional, não uma diretriz de tom. Ele existe porque fadiga de mensagem é o modo de falha mais provável deste desenho — e porque cada toque proativo passa a ter custo real (ver nota de custo abaixo).
+
+| Regra | Valor |
+|---|---|
+| Máximo de mensagens proativas por dia | **1** (inegociável, somando todas as camadas) |
+| Máximo de mensagens proativas por semana | **6** (≈4 diários + 1 semanal + ≤1 reengajamento) |
+| Dias sem treino agendado | **silêncio total** (exceto o semanal) |
+| Perguntas por mensagem proativa | **1** (o diário); **≤3** (o semanal) |
+| Botões por pergunta | **3** (teto do WhatsApp) |
+
+**Regras de supressão** — o job é cancelado antes de sair, não enviado e ignorado:
+
+1. **Já reportou espontaneamente.** Se o usuário mandou "fiz o treino" às 19h, o check-in das 21h30 **não sai**. Esta é a regra mais importante do sistema: o usuário engajado é o que menos deve ser interrompido.
+2. **Conversa ativa.** Se houve qualquer troca nas últimas 4 horas, o proativo do dia é suprimido — MOVI enxerta a pergunta na conversa que já existe.
+3. **Auto-redução por silêncio.** Dois check-ins diários seguidos sem resposta → o diário se desliga sozinho por 7 dias e **MOVI avisa que se desligou**: *"Vou parar de te cutucar todo dia — te chamo na segunda. Se quiser que eu volte a acompanhar diário, é só falar."* Isso transforma o silêncio do usuário em um sinal respeitado, e não em uma escalada. Retomada só por pedido explícito ou por retomada de atividade.
+4. **Janela de sono.** Nada entre 22h00 e 07h00, em nenhuma hipótese.
+
+#### Controle do usuário — sem menu de configurações
+
+O ICP não vai procurar um painel de preferências (não existe painel). O controle é conversacional e é **oferecido proativamente no dia 1**, junto da negociação de horário (11.2), e reofertado sempre que o usuário demonstra irritação:
+
+```
+MOVI:
+Uma última coisa e te deixo treinar: quanto
+você quer que eu apareça?
+
+  [ Todo dia de treino ]  [ Só na segunda ]  [ Só se eu chamar ]
+
+(dá pra mudar quando quiser — é só me falar)
+```
+
+Comandos em linguagem natural reconhecidos a qualquer momento: *"me chama todo dia"*, *"só na segunda"*, *"me deixa quieto"*, *"para de me mandar mensagem"*, *"volta a me cobrar"*. **"Me deixa quieto" nunca é tratado como churn** — é tratado como preferência, confirmada e respeitada: *"Fechado. Não te chamo mais — quando quiser, manda um oi que eu volto do jeito que a gente parou."* Esta é a alternativa honesta ao bloqueio do número, que é o que o usuário faz quando não tem essa saída.
+
+> **Nota de custo [ATENÇÃO — RAFAEL / HENRIQUE / EDUARDO]:** a partir de **2026-10-01** a Meta passa a cobrar pelas *service messages* (respostas livres dentro da janela de 24h aberta pelo usuário), que eram gratuitas desde 2024-11-01, e a cobrança já é **por mensagem**, não por janela. Isso desmonta a premissa "conversa iniciada pelo usuário = R$0" que sustenta o FinOps de Eduardo e a seção 5 deste relatório. Consequências de design, já incorporadas acima: (a) o teto de 1 proativo/dia deixa de ser boa prática e vira controle de margem; (b) as regras de supressão têm valor financeiro direto — cada supressão é uma mensagem não cobrada; (c) a gamificação **nunca** pode gerar mensagem própria (11.8); (d) o acompanhamento deve ser classificado como **Utility** (serviço contratado), não Marketing, o que também o mantém fora do frequency capping de marketing da Meta. Recomendo recalcular o custo por usuário/mês assim que a Meta publicar a tarifa exata (prevista para até 2026-09-01) e tratar o número de proativos/semana como **parâmetro configurável em runtime**, não constante em código.
+
+---
+
+### 11.6 Check-in diário (dias de treino) — "fecha o dia"
+
+**Princípio de desenho:** o check-in diário não é um check-in semanal menor. É um **fato binário**, resolvido em um toque, que existe para (a) alimentar o motor com dados frescos, (b) sustentar o streak, e (c) permitir que a ausência seja detectada em 24h em vez de 7 dias.
+
+**Quando dispara:** apenas em dias com treino agendado no protocolo, **~2 horas após o fim da janela de horário declarada pelo usuário** (Bloco 3 da anamnese → "Noite" = disparo às 21h30). Decisão deliberada: **é um fecha-dia, não um lembrete de véspera.** Um lembrete pré-treino seria um segundo toque no mesmo dia, o que o orçamento de atenção proíbe — e o dado que precisamos ("rolou?") só existe depois. O lembrete de véspera fica para o usuário que *pediu* ("me lembra antes"), consumindo o toque do dia.
+
+#### Mensagem-tipo
+
+```
+21:30 · terça (dia de Treino B no protocolo)
+MOVI:
+E aí, Bruno — hoje era Treino B (costas e bíceps).
+Rolou?
+
+   [ ✅ Fechei ]   [ 🕗 Ainda vou ]   [ 🚫 Hoje não ]
+```
+
+Três linhas, uma pergunta, três botões. A abertura **nomeia o treino específico do dia** — é o que separa "acompanhamento" de "notificação automática": MOVI demonstra saber o que estava no plano dele, hoje.
+
+#### Ramificação — o que acontece em cada resposta
+
+**[ ✅ Fechei ]** — caminho de menor fricção, e o mais frequente. Encerra em **um toque** na maioria dos dias:
+
+```
+MOVI:
+Isso! 🔥 Sequência: 5 treinos sem furar.
+Amanhã é descanso — descansar é parte do plano.
+```
+
+Nada de pergunta extra. A pergunta de esforço (RPE) **não é diária** — perguntar todo dia é a receita da fadiga. Ela é **amostrada por regra**, aparecendo como segundo balão apenas quando tem consequência no motor:
+
+- no **primeiro treino de um novo bloco** ou após mudança de carga;
+- **uma vez por semana**, no treino mais pesado (o que alimenta o ajuste do semanal);
+- **sempre que o usuário retoma** depois de uma quebra de sequência (recalibrar o ponto de partida).
+
+```
+(só nos dias amostrados)
+MOVI:
+Como pegou o peso hoje?
+   [ 🟢 Tranquilo ]  [ 🟡 No ponto ]  [ 🔴 Puxado ]
+```
+
+**[ 🕗 Ainda vou ]** — validação e **silêncio deliberado**:
+
+```
+MOVI:
+Boa. Tô por aqui — me conta quando fechar 💪
+```
+
+Regra crítica: **não sai nenhuma mensagem de cobrança depois disso, no mesmo dia.** O toque do dia foi gasto. Se o usuário não voltar, o dia entra como `SEM_REGISTRO` — **nunca como "falhou"**. A distinção importa: o streak não quebra por falta de dado, quebra por treino não feito confirmado. Dias sem registro são resolvidos no check-in semanal ("terça ficou em branco aqui — rolou ou passou?"), com dois botões.
+
+**[ 🚫 Hoje não ]** — o caminho mais importante do fluxo, e o que faz a diferença entre reter e perder. Sem culpa, **uma** pergunta de causa, e cada causa tem uma **ação concreta**, não uma frase de encorajamento:
+
+```
+MOVI:
+Tranquilo, acontece. Só pra eu ajustar a semana:
+o que pegou?
+
+   [ Sem tempo ]   [ Sem pique ]   [ Corpo pedindo pausa ]
+```
+
+| Resposta | O que MOVI devolve | O que o sistema faz |
+|---|---|---|
+| **Sem tempo** | *"Bora de versão curta amanhã? Corto pra 20 min mantendo o essencial — e sua sequência continua de pé."* → `[ Fecha, 20 min ]` `[ Repor no sábado ]` `[ Deixa passar ]` | Gera variante reduzida do mesmo treino (motor determinístico, mesmos grupos musculares, volume mínimo eficaz). Reposição agendada = streak preservado. |
+| **Sem pique** | *"Já tive dias assim. Proposta: amanhã só o aquecimento e a primeira série. Se depois disso você quiser parar, para — mas geralmente não para."* → `[ Topo o mínimo ]` `[ Amanhã eu vejo ]` | Ativa o **"treino mínimo"** (menor compromisso viável, ~10 min). Aplicação direta da regra "nunca falhe duas vezes seguidas" — o objetivo não é o treino de hoje, é impedir a segunda falha. |
+| **Corpo pedindo pausa** | *"Então descansa mesmo. Vou redistribuir o volume da semana pra não sobrecarregar na quinta — e usei seu escudo do mês, sua sequência tá de pé 🛡"* | Marca `RECOVERY`, redistribui volume no motor, **consome o streak freeze automaticamente**. Se houver menção a dor articular/lesão → dispara a validação de compliance e o handoff ao RT (11.4), nunca "treino mínimo". |
+
+**Guardrail de linguagem no fluxo diário:** MOVI nunca escreve "você falhou", "você furou", "não deu conta", nem usa emoji de decepção. O vocabulário é de replanejamento, não de julgamento — em coerência com o valor "consistência acima de perfeição" (Gabriel) e com a tabela da seção 13.
+
+#### Como o diário se soma ao semanal sem duplicar esforço
+
+| | Check-in diário | Check-in semanal |
+|---|---|---|
+| **Pergunta** | "Rolou?" (fato) | "Como foi?" (julgamento) + "o que ajustar?" |
+| **Custo p/ o usuário** | 1 toque, ~3 segundos | 2-3 toques, ~30 segundos |
+| **Coleta** | presença/ausência, causa | esforço percebido, intenção, pedidos |
+| **Devolve** | streak, marco, reposição imediata | **o ajuste do protocolo** + recap |
+| **Horizonte** | hoje | próxima semana |
+| **Se o usuário ignora** | vira `SEM_REGISTRO`, resolvido no semanal | vira lacuna de calibração, resolvida por default conservador do motor |
+
+A sobreposição zero é garantida por **uma regra de produto verificável**: o check-in semanal **não pode conter nenhuma pergunta cuja resposta já esteja no banco pelos check-ins diários da semana**. Isso vira critério de aceite para Lucas/Leonardo, não uma intenção de copy.
+
+---
+
+### 11.7 Check-in semanal (pós-conversão)
+
+Estruturado em **máximo 3 perguntas via quick reply** (benchmark WhatsApp: 3 botões é o teto) — e **reduzido a 2 perguntas** quando os check-ins diários já resolveram a contagem (11.5). Abre sempre com **vitória** (positivity bias — Lucas):
 
 ```
 Segunda, 08:30 —
@@ -639,7 +807,35 @@ Como foi o peso dos treinos, no geral?
 (2 perguntas rápidas e te deixo em paz 😄)
 ```
 
-Depois: pergunta 2 (treinos completados — confirma/ajusta a contagem da North Star) e pergunta 3 (algo pra ajustar?). **Fechamento com loop visível:**
+**[REVISÃO 2026-08-31] Composição da abertura.** A vitória de abertura passa a vir do **recap** (11.8d), que é gerado a partir dos check-ins diários — não de uma contagem pedida ao usuário. Quando o usuário respondeu ≥3 diários na semana, MOVI **afirma** o número em vez de perguntá-lo, e a mensagem se abre reconhecendo isso:
+
+```
+Segunda, 08:30 —
+MOVI:
+Bom dia, Bruno! 🌤
+
+Como você foi me contando durante a semana,
+hoje é rapidinho:
+
+📊 Sua semana
+   Treinos: 4 de 4  ✅ semana cheia
+   Sequência: 🔥 9 sem furar (seu recorde)
+   Agachamento: 40kg → 45kg
+   vs. 3 semanas atrás: +1 treino/semana
+
+Uma pergunta só: como foi o peso, no geral?
+   [ 🟢 Tranquilo ]  [ 🟡 No ponto ]  [ 🔴 Puxado ]
+```
+
+Sequência de perguntas do semanal, por cenário:
+
+| Cenário | Perguntas |
+|---|---|
+| ≥3 diários respondidos | **2**: (1) esforço geral, (2) algo pra ajustar? — a contagem já está resolvida |
+| <3 diários respondidos | **3**: (1) esforço geral, (2) confirmação da contagem apurada + dias `SEM_REGISTRO` ("terça ficou em branco — rolou ou passou?"), (3) algo pra ajustar? |
+| Semana sem nenhum treino | **1**: sem métricas, sem recap, sem streak. Vai direto para o degrau de reengajamento adequado (§12, Gap 3) — exibir "0 de 4" para quem já está desanimado é o oposto de acompanhar |
+
+**Fechamento com loop visível** (formato obrigatório da frase de causalidade — ver 11.9):
 
 ```
 MOVI:
@@ -651,7 +847,122 @@ Tudo dentro do que o(a) Prof. ___ aprovou.
 Bora pra mais uma semana 💪
 ```
 
-**Timing:** segunda 08:00-10:00 (Rafael/Lucas), mas A/B contra domingo à noite. Sempre **conversa iniciada no template mínimo**, maximizando a janela de 24h gratuita (FinOps de Eduardo).
+**Timing:** segunda 08:00-10:00 (Rafael/Lucas), mas A/B contra domingo à noite. Sempre **conversa iniciada no template mínimo** — o que antes maximizava a janela de 24h gratuita e agora, com a mudança de tarifação da Meta em 2026-10-01, minimiza o número de mensagens cobradas (ver nota de custo em 11.5).
+
+---
+
+### 11.8 Gamificação dentro das restrições do WhatsApp
+
+**Restrições reais do canal:** sem tela própria, sem app, sem barra de progresso, sem badge visual persistente, sem tela de perfil. Só texto, emoji e no máximo 3 botões, dentro de uma conversa — e, a partir de outubro/2026, **cada mensagem tem custo**. Isso elimina de saída a maior parte do vocabulário de gamificação de app (grid de conquistas, XP, níveis visuais, ranking navegável).
+
+**A regra que organiza tudo:** *a gamificação nunca gera mensagem própria.* Nenhum marco, streak ou recap justifica um envio; todos pegam carona em mensagens que já iam sair (check-in diário, semanal, resposta a uma pergunta do usuário). Uma mensagem cujo único conteúdo é "parabéns, você ganhou um badge" é ruído pago — e é exatamente o tipo de mensagem que produz opt-out.
+
+#### (a) Streak — "🔥 Sequência"
+
+**Decisão central: a sequência conta treinos cumpridos conforme o plano, não dias corridos.** Streak por dia corrido é ativamente nocivo aqui — puniria o dia de descanso, que é parte prescrita do protocolo, e empurraria o usuário a treinar em dia de recuperação. Isso contradiria o método do profissional CREF e criaria risco de saúde. Contamos dois números:
+
+| Métrica | Definição | Onde aparece |
+|---|---|---|
+| **🔥 Sequência** | treinos agendados consecutivos cumpridos. Descanso planejado **não** quebra | check-in diário, quando é notícia |
+| **✅ Semana cheia** | bateu a meta de dias/semana declarada na anamnese | recap semanal |
+
+**Regras de perdão e de tom:**
+
+- **Escudo (streak freeze): 1 por mês, automático.** Aplicado sem pedir permissão e **comunicado depois do fato** — *"usei seu escudo do mês, sua sequência tá de pé 🛡"*. Não pedimos permissão porque um botão "quer usar seu escudo?" transforma um alívio em mais uma decisão, e porque a resposta é sempre sim. Benchmark: Fittr e HealthifyMe usam exatamente 1/mês.
+- **Nunca zerar em silêncio, nunca zerar com linguagem de perda.** Quando a sequência quebra, a âncora é o recorde, não o zero: *"Sua sequência era 9 — a maior que você já teve. Começa outra hoje; quem chegou a 9 chega de novo."*
+- **Só exibir quando é notícia:** marco alcançado, sequência em risco, ou retomada. Um contador repetido em toda mensagem deixa de ser reconhecimento e vira rodapé.
+- **Nunca usar o streak como ameaça** ("sua sequência vai acabar em 3h!"). A aversão à perda já opera sozinha; explorá-la explicitamente é dark pattern, e Alexandre proibiu dark patterns.
+
+#### (b) Marcos — poucos, nomeados, ligados a comportamento
+
+Seis marcos no MVP. Entregues como **uma linha** dentro de uma mensagem existente, sem clique, sem coleção a completar:
+
+| Marco | Gatilho | Por que existe |
+|---|---|---|
+| 🎉 **Primeiro treino** | 1º treino reportado | é o aha moment (11.3) |
+| ✅ **Primeira semana cheia** | bateu a meta semanal pela 1ª vez | prova que o protocolo é executável |
+| 🔟 **10 treinos** | 10 treinos acumulados | fica logo acima da North Star (8/30 dias) |
+| 💪 **Progrediu** | aumento de carga/reps em exercício-chave | o único marco de **resultado**, não de presença |
+| 🗓 **Um mês** | 30 dias de assinatura ativa | ancora a renovação |
+| 🫱 **Voltei** | retomou após 7+ dias parado | **o mais importante** |
+
+**Sobre o marco "Voltei":** é deliberadamente o antídoto da gamificação convencional, que só premia a perfeição e por isso abandona exatamente quem mais precisa. Celebrar o retorno — e não apenas a sequência ininterrupta — é a tradução mecânica da promessa "acompanhado, não julgado" e do valor "consistência acima de perfeição" (Gabriel). Sem ele, o streak vira um sistema que pune quem falhou uma vez.
+
+#### (c) Reconhecimento social/competitivo — **veredito: sem ranking entre usuários no MVP**
+
+Avaliei ranking e recomendo **não implementar**, por quatro razões independentes, qualquer uma delas suficiente:
+
+1. **Evidência de UX.** Leaderboards globais motivam o topo e desmotivam a maioria; estudos longitudinais registram queda de motivação e satisfação em coortes com comparação pública. O ICP da MOVIVO tem uma proporção alta de recomeço (persona Bruno, de Gabriel) — precisamente o grupo que um ranking coloca no fundo da lista na primeira semana.
+2. **Contradição com a promessa de marca.** A necessidade que levantei na pesquisa de usuário é *"me sentir acompanhado, não spammado"* — e, no fundo, **não julgado**. Ranking é julgamento comparativo por definição. Não é um ajuste de tom que resolve: é o mecanismo que contradiz o posicionamento.
+3. **Conflito com o isolamento de contexto.** Rafael e Lucas definiram como requisito funcional a percepção de que "seu coach só fala com você". Ranking exige que dados de atividade de um usuário apareçam na tela de outro — o oposto exato do requisito.
+4. **Risco jurídico.** Frequência de treino é dado comportamental atrelado a um contexto de saúde. Expô-lo entre titulares exigiria base legal e consentimento específicos (Alexandre), para um ganho de retenção não comprovado.
+
+**Substitutos aprovados** — mantêm o efeito motivacional sem o custo:
+
+- **Comparação contra o próprio histórico (principal).** "Você vs. você" no recap: *"vs. 3 semanas atrás: +1 treino/semana"*. Sempre com pelo menos um número que subiu; se nenhum subiu, o recap não mostra comparação (nunca mostrar regressão como manchete).
+- **Norma social descritiva, anônima e agregada.** Uma linha, sem nomes, sem posições: *"essa semana, 7 em cada 10 alunos da MOVIVO treinaram 3x ou mais"*. É o único elemento social do MVP, custa zero mensagem extra (entra no recap) e usa o mecanismo comprovado de norma descritiva sem criar hierarquia. **Só exibir quando o usuário está dentro ou acima da norma** — usar a norma contra quem está abaixo é vergonha, não motivação.
+- **Compartilhável, não comparável.** O recap do mês em formato encaminhável (texto + sticker do Pulso — Kimura já preparou o kit). O usuário escolhe se e para quem mostra. Isso captura o valor social real do fitness (contar a alguém) sem ranking, e abre uma alça de referral orgânica.
+
+**Fase 2 (não MVP):** desafio entre **duplas convidadas mutuamente** ("parceiro de treino"), opt-in dos dois lados, sem placar público e sem terceiros. É a única forma de competição compatível com a promessa — e depende de validar a retenção orgânica primeiro, como Lucas já havia condicionado.
+
+#### (d) Recap semanal — o formato
+
+Anexado ao check-in semanal (11.7), **nunca uma mensagem separada**. Quatro linhas no máximo, números em destaque, e sempre nesta ordem: presença → sequência → progresso de carga → comparação temporal. O marco, se houver, entra como quinta linha. Se a semana foi ruim, o recap **não é enviado** — a mensagem vira reengajamento.
+
+---
+
+### 11.9 Fechamento de loop — do dado coletado à ação percebida
+
+Este é o mecanismo que separa a MOVIVO de um contador de vaidade com emoji. Um streak que não muda nada é um número; um streak que muda o treino é coaching. Quatro dispositivos, todos verificáveis.
+
+#### (a) Regra de ouro (critério de aceite, não princípio)
+
+> **Nenhum dado coletado sem devolução visível ao usuário em até 7 dias.** Se um campo do check-in diário ou semanal não produz consequência observável no protocolo ou na conversa, esse campo **sai** do check-in.
+
+Isso é um filtro de escopo, não uma aspiração: qualquer pergunta nova proposta para o check-in precisa nomear, antes de ser aprovada, qual mudança ela produz e em quanto tempo.
+
+#### (b) Frase de causalidade — template linguístico obrigatório
+
+Toda mudança no protocolo é comunicada no formato:
+
+> **"Porque você `[dado observado]`, eu `[ação concreta no protocolo]`."**
+
+Nunca "ajustei seu treino" solto — a versão genérica não fecha o loop, porque o usuário não consegue ligar a mudança ao que ele contou. Exemplos:
+
+- *"Porque você marcou 🔴 puxado nas duas últimas pernas, **baixei o agachamento de 3x10 para 3x8** e subi o descanso pra 2 min."*
+- *"Porque você fechou 3 semanas cheias seguidas, **destravei a próxima fase**: a carga sobe a partir de quarta."*
+- *"Porque a terça é o dia que mais some na sua semana, **movi o treino mais curto pra terça** e o mais longo pro sábado."*
+
+**Para Victor:** este é um slot **obrigatório e grounded** na geração do fechamento de check-in. O `[dado observado]` vem do banco/motor determinístico, nunca da inferência do LLM — o modelo redige, mas não inventa a causa. Se o motor não devolver um par (dado, ajuste), MOVI **não afirma que ajustou nada**; diz a verdade: *"essa semana o plano segue igual — tá funcionando, não vou mexer."* Alucinar um ajuste inexistente é o pior modo de falha possível deste produto, porque destrói exatamente a percepção que ele vende.
+
+#### (c) Diff visível — o número que muda
+
+Quando o protocolo muda, MOVI mostra o antes→depois em uma linha, com o número em mono:
+
+```
+Agachamento:  3x10 · 40kg  →  3x8 · 45kg
+Terça:        Treino C  →  Treino C curto (25 min)
+```
+
+Um diff de uma linha faz mais pela percepção de acompanhamento do que um parágrafo de explicação.
+
+#### (d) Streak como insumo do motor, não como troféu
+
+**A decisão mais importante desta seção.** O streak precisa ter consequência mecânica na periodização — e o usuário precisa saber disso. Regras propostas para o motor determinístico (a validar com o RT CREF):
+
+| Sinal do acompanhamento | Efeito no motor | O que MOVI diz |
+|---|---|---|
+| 3 semanas cheias consecutivas | libera progressão de carga/volume da próxima fase | *"sua sequência de 3 semanas cheias destravou a próxima fase"* |
+| 2 relatos 🔴 puxado no mesmo padrão de movimento | reduz carga e insere deload | *"porque pegou pesado duas vezes, aliviei essa semana"* |
+| 2 ausências no mesmo dia da semana | remaneja o treino desse dia para versão curta | *"terça tá difícil pra você — encurtei a terça"* |
+| "corpo pedindo pausa" | `RECOVERY` + redistribuição de volume | *"redistribuí o volume pra quinta"* |
+| Retomada após 7+ dias | protocolo de reinício com carga reduzida | *"voltei sua carga um degrau — a gente sobe de novo em 2 semanas"* |
+
+Com isso, o "🔥 5" deixa de ser decoração e vira **gate de periodização visível**. O usuário não está colecionando fogo; está destravando fase de treino — e essa é a frase que justifica a assinatura.
+
+#### (e) Auditoria do loop no Dashboard CREF
+
+Cada ajuste aparece na timeline do aluno (10.3) com a tripla **dado → regra do motor → mudança aplicada**. Serve a três fins simultâneos: o RT audita a supervisão real, a explicabilidade exigida pelo AI Act (Alexandre) fica documentada, e o time consegue medir a *taxa de ajuste atribuível* (16.2).
 
 ---
 
@@ -665,12 +976,94 @@ Bora pra mais uma semana 💪
 - **Antes:** anamnese monolítica, 60-70% de abandono.
 - **Design:** conversacional, 3 blocos, progresso rotulado, salvamento por PATCH, retomada por token (+1h de lembrete), consentimento como tela-ponte (não muro). Meta: conclusão ≥ 65%.
 
-### Gap 3 — Falta de reengajamento entre check-ins (novo fluxo)
+### Gap 3 — Falta de reengajamento entre check-ins **[REVISADO 2026-08-31 — a IA toma a iniciativa]**
+
 - **Antes:** silêncio entre check-ins; inativos sem win-back.
-- **Design — escada de reengajamento (respeitando custo de template):**
-  - **Micro-nudge dentro da semana** (dia 3-4 sem atividade): MOVI puxa conversa leve *"E aí, Bruno, o treino de hoje tá de pé? Se tiver corrido, dá pra fazer a versão de 20 min 💪"* — sempre com uma saída fácil (versão reduzida), nunca cobrança culpada.
-  - **Win-back de inativo (2 semanas sem responder):** mensagem sem julgamento (Duolingo-like, "consistência acima de perfeição" — valor de Gabriel) + oferta de **protocolo simplificado de retorno**: *"Sumiu e tá tudo bem — acontece com todo mundo. Quer voltar com um treino levinho de reinício, só pra destravar?"* → `[ Bora voltar ]  [ Semana que vem ]`.
-  - Meta: reengajamento de inativos ≥ 30% (Lucas).
+- **Requisito adicional do fundador:** MOVI deve **cobrar treino e rotina por iniciativa própria**, de forma humanizada. Isso não conflita com "acompanhado, não spammado" — é o que sustenta a promessa. Quem contrata acompanhamento espera ser notado. O que o usuário rejeita é a **cobrança genérica**; o que ele paga para receber é a **cobrança específica**.
+
+#### O princípio que torna cobrança aceitável: evidência antes do pedido
+
+| ❌ Cobrança genérica (spam) | ✅ Cobrança com evidência (acompanhamento) |
+|---|---|
+| "Cadê você? Não te vejo faz tempo!" | "Sua terça de treino passou em branco — foi a primeira em 3 semanas." |
+| "Bora treinar! 💪🔥" | "Faltam 2 treinos pra sua semana cheia e ainda dá tempo até domingo." |
+| "Sentimos sua falta!" | "Você parou logo depois da semana em que subiu a carga do agachamento. Aconteceu alguma coisa com aquele treino?" |
+
+Regras de tom obrigatórias em todo o degrau da escada:
+
+1. **Nomear o fato observado** (dia, treino, número) antes de qualquer pedido.
+2. **Nunca atribuir intenção nem caráter** — "você desistiu", "você não tá se esforçando" são proibidos. MOVI descreve, não interpreta.
+3. **Sempre oferecer um degrau menor**, nunca o compromisso original. Quem não fez o treino de 45 min não vai fazer 45 min amanhã.
+4. **Sempre oferecer uma saída digna** — pausar, adiar, ou pedir silêncio — no mesmo conjunto de 3 botões.
+5. **Cada degrau reduz a frequência e aumenta o valor da oferta.** A escada desacelera; nunca acelera.
+
+#### A escada — 4 degraus e um encerramento
+
+| Degrau | Gatilho | Frequência máx. | Oferta |
+|---|---|---|---|
+| **1 · Treino perdido** | dia respondido "🚫 hoje não" ou `SEM_REGISTRO` | 1x/semana | reposição curta, "nunca duas seguidas" |
+| **2 · Silêncio curto** | 4-5 dias sem nenhuma interação | 1x | rota de escolha + pergunta aberta |
+| **3 · Win-back** | 10-14 dias sem interação | 1x | protocolo de reinício + pausa honesta |
+| **4 · Última chamada** | 21 dias sem interação | 1x, e **para** | porta aberta + fim explícito dos toques |
+
+**Degrau 1 — após treino perdido** (dispara no dia seguinte, consumindo o toque proativo daquele dia; se o dia seguinte também é dia de treino, o check-in diário incorpora a mensagem em vez de duplicá-la):
+
+```
+Quarta, 09:15 —
+MOVI:
+Bom dia, Bruno. Ontem era Treino B e não rolou —
+e tá tudo bem, foi o primeiro que você perdeu
+em 3 semanas 🔥
+
+Só que eu tenho uma regra chata: nunca duas
+seguidas. Hoje é dia de descanso no seu plano,
+mas dá pra encaixar o B de ontem em versão
+curta, 25 min.
+
+   [ Bora, 25 min ]  [ Reponho sábado ]  [ Deixa pra lá ]
+```
+
+Por que funciona: nomeia o fato (Treino B, ontem), remove a culpa com um dado positivo (3 semanas), oferece um degrau menor (25 min em vez de 45), e a terceira opção é uma saída real sem punição. "Deixa pra lá" é respondido com *"fechado, sem drama — sexta a gente se vê"* e **encerra o assunto**, sem nova tentativa.
+
+**Degrau 3 — após silêncio prolongado** (10-14 dias; o degrau 2, de 4-5 dias, é mais leve: *"Sumiu essa semana. Tá corrido ou o treino que não tá encaixando? Pergunto porque, se for o treino, isso eu consigo resolver."* + `[ Tá corrido ]` `[ É o treino ]` `[ Só pausa ]`):
+
+```
+MOVI:
+Bruno, faz 12 dias. Não vim cobrar — vim
+entender.
+
+Olhando aqui: você tinha 9 treinos seguidos e
+parou logo depois da semana em que a carga subiu.
+Pode ter sido a vida, pode ter sido o treino
+ter ficado pesado demais. As duas coisas eu
+sei resolver.
+
+Se quiser voltar, eu não te devolvo o plano de
+antes — monto um reinício de 2 semanas, mais
+leve, só pra destravar.
+
+   [ Bora recomeçar ]  [ Pausar 30 dias ]  [ Me deixa quieto ]
+```
+
+Decisões de design aqui: **"não vim cobrar — vim entender"** desarma a expectativa de sermão; a **hipótese específica** (parou depois do aumento de carga) é a prova de que alguém olhou; **não devolver o plano antigo** reconhece que o plano antigo é justamente o que ele não conseguiu cumprir; e **"me deixa quieto"** aparece como opção de primeira classe, no mesmo peso visual das outras — é a alternativa honesta ao bloqueio do número. Escolher pausa não é churn: cai no fluxo de hibernação reversível do Gap 4, com o histórico e o streak congelados.
+
+**Degrau 4 — encerramento com dignidade** (21 dias; a MOVIVO para de falar e **diz que parou**):
+
+```
+MOVI:
+Última de mim, Bruno — prometo.
+
+Não vou mais te chamar. Seu histórico fica
+guardado (9 treinos seguidos foi seu recorde,
+e continua sendo).
+
+Quando quiser, manda um "oi" que a gente
+recomeça de onde parou. Sem recomeçar do zero.
+```
+
+Sem botão, sem link, sem oferta. Peak-End Rule: a última mensagem é a que fica na memória e define se ele volta em 3 meses ou bloqueia o número hoje. Também protege a reputação do número na plataforma — block rate e opt-out são o custo real de uma escada que não sabe terminar.
+
+- **Metas:** reengajamento de inativos ≥ 30% (Lucas); resposta ao degrau 1 ≥ 45%; **opt-out/bloqueio ≤ 1%/mês** (anti-métrica de guarda — se subir, a escada está agressiva demais e é reduzida antes de qualquer otimização de conversão).
 
 ### Gap 4 — Ausência de offboarding que converta cancelamento em pausa (novo fluxo)
 - **Antes:** cancelamento = perda total.
@@ -709,6 +1102,13 @@ Princípios de voz (Gabriel) filtrados pelos guardrails (Alexandre). Tabela de r
 | IA | (esconder que é IA) | "Sou uma IA, supervisionada por um profissional CREF" |
 | Cancelamento | (esconder o botão / fricção) | "Você cancela quando quiser, sem burocracia" |
 | Erro de form | "Campo inválido!" (vermelho-alarme) | "Ops, faltou o DDD aqui 🙂" (Coral, gentil) |
+| Treino não feito | "Você falhou", "você furou de novo" | "Ontem era Treino B e não rolou — acontece" |
+| Sequência quebrada | "Você perdeu sua sequência de 9 😢" | "Sua sequência era 9 — a maior que você já teve. Começa outra hoje" |
+| Sequência em risco | "Sua sequência acaba em 3h!" (urgência artificial = dark pattern) | (nada — não usamos ameaça de perda) |
+| Cobrança de treino | "Cadê você? Sentimos sua falta!" | "Sua terça passou em branco — foi a primeira em 3 semanas" |
+| Ajuste de protocolo | "Ajustei seu treino" (genérico, não fecha loop) | "Porque você marcou 🔴 puxado duas vezes, baixei o agachamento pra 3x8" |
+| Sem ajuste a fazer | (inventar um ajuste para parecer ativo) | "Essa semana o plano segue igual — tá funcionando, não vou mexer" |
+| Pedido de silêncio | (ignorar / insistir / tratar como churn) | "Fechado. Não te chamo mais — quando quiser, manda um oi" |
 
 **Termos proibidos hard-coded** (alinhar com a validação pós-geração de Rafael): prescrever, prescrição, diagnóstico, diagnosticar, tratamento, tratar, cura, curar, garantido, garantia de resultado. Toda saída de MOVI passa por esse filtro antes de ir ao usuário.
 
@@ -780,6 +1180,10 @@ Componentes-chave (mapeados aos wireframes)
 | Reengajamento/win-back | Reativação inativos ≥ 30% | Gap 3 |
 | Offboarding-pausa | ≥ 20% dos cancelamentos viram pausa/downgrade | Gap 4 |
 | Confirmação micro-onboarding | Confirmação do nº WhatsApp ≥ 90% | Ativação |
+| **Check-in diário (11.6)** | Resposta ao diário ≥ 60%; treinos reportados/semana +1 vs. baseline | North Star (8 treinos/30d) |
+| **Streak com escudo (11.8a)** | ≥ 40% dos pagantes com sequência ativa ≥ 2 semanas no mês 2 | Retenção 30d |
+| **Loop dado→ajuste (11.9)** | Taxa de ajuste atribuível ≥ 90% | Churn por valor não percebido |
+| **Escada de reengajamento (Gap 3)** | Resposta ao degrau 1 ≥ 45% | Retenção 30/90d |
 
 ### 16.2 Métricas de UX a instrumentar (com Felipe/PostHog)
 
@@ -791,11 +1195,45 @@ Componentes-chave (mapeados aos wireframes)
 - **CSAT inline** das respostas de MOVI (thumbs up/down — meta ≥ 80% positivo).
 - **Funil de ativação:** form_submitted → protocol_sent → 1º treino reportado → conversão.
 
+**[REVISÃO 2026-08-31] Eventos e métricas do sistema de acompanhamento** (adicionar à instrumentação de Lucas/Rafael):
+
+| Evento novo | Para quê |
+|---|---|
+| `daily_checkin_sent` / `daily_checkin_suppressed` (com motivo) | medir quantas mensagens **não** enviamos — supressão é qualidade *e* margem |
+| `daily_checkin_responded` (com resposta) | taxa de resposta do diário; base do streak |
+| `workout_reported` (fonte: diário / espontâneo / semanal) | North Star sem depender só do check-in semanal |
+| `streak_incremented` / `streak_broken` / `streak_shield_used` | saúde do mecanismo de sequência |
+| `milestone_awarded` (qual) | correlação marco × retenção |
+| `protocol_adjusted` (com `causa_dado_id`) | numerador da taxa de ajuste atribuível |
+| `reengagement_sent` (degrau) / `reengagement_responded` | eficácia por degrau da escada |
+| `frequency_preference_changed` (valor) | quantos pedem menos — sinal precoce de fadiga |
+| `opt_out` / `blocked` | **anti-métrica de guarda** |
+
+**Métricas de UX específicas da revisão:**
+
+- **Taxa de ajuste atribuível** = ajustes de protocolo com um dado de check-in dos últimos 7 dias como causa registrada ÷ total de ajustes. **Meta ≥ 90%.** É a métrica que prova o fechamento de loop (11.9) em vez de presumi-lo.
+- **Percepção de acompanhamento** — pergunta única no NPS da semana 4: *"Você sente que seu treino muda com base no que você conta?"* **Meta ≥ 70% sim.** Um número alto de ajustes com percepção baixa significa que o problema é de comunicação, não de motor.
+- **Índice de fadiga** = (`opt_out` + `blocked` + `frequency_preference_changed` para menos) ÷ pagantes ativos. **Teto ≤ 5%/mês.** Ultrapassou, reduz-se a cadência antes de qualquer otimização de conversão.
+- **Custo de mensagens proativas por usuário/mês** — instrumentar desde o dia 1 (com Henrique/Eduardo), dado o fim da isenção de *service messages* em 2026-10-01.
+- **Mensagens proativas por usuário/semana** — deve ficar ≤ 6 por construção; se o dado mostrar mais, há bug de supressão.
+
 ### 16.3 Plano de validação
 
 - **Onda 0 (protótipo, pré-código):** teste de usabilidade moderado do fluxo de anamnese com **5-8 pessoas do perfil** (base do Cahuã) em protótipo Figma clicável — foco no Bloco 2 (saúde) e na tela-ponte de consentimento (o ponto de maior fricção). Card sorting rápido dos campos para confirmar a ordem dos 3 blocos.
 - **Onda 1 (concierge/beta — alinhado a Helena/Eduardo):** teste não-moderado com Maze no formulário real; **A/B** de (a) timing do check-in (domingo à noite vs. segunda de manhã) e (b) copy do aha moment. Session replay (PostHog/Clarity) para caçar fricção no mobile.
 - **Onda 2 (escala):** teste de usabilidade do dashboard com o profissional CREF (SUS); revisão de acessibilidade com leitor de tela; iteração do offboarding com dados reais de motivo de churn.
+
+**[REVISÃO 2026-08-31] Experimentos do sistema de acompanhamento** — nesta ordem, porque cada um depende do anterior:
+
+| # | Hipótese | Desenho | Critério de decisão |
+|---|---|---|---|
+| E1 | O check-in diário aumenta treinos reportados sem aumentar fadiga | Holdout: 50% recebe diário + semanal, 50% só semanal, 4 semanas | Adotar se treinos/semana ↑ **e** índice de fadiga ≤ 5% nos dois braços. **Fadiga tem poder de veto sobre volume.** |
+| E2 | Horário do disparo diário | A/B: +2h após a janela declarada vs. horário fixo 20h30 | Taxa de resposta ao diário |
+| E3 | Enquadramento do streak | A/B: sequência de treinos (nosso desenho) vs. dias corridos | Retenção 30d + taxa de retomada após quebra. Hipótese: dias corridos perde por punir descanso |
+| E4 | Norma social descritiva | A/B: recap com vs. sem a linha "7 em cada 10 alunos" | Resposta ao check-in semanal; monitorar efeito adverso em quem está abaixo da norma |
+| E5 | Degrau 1 do reengajamento | A/B: com evidência específica vs. genérico | Taxa de resposta ≥ 45% e opt-out |
+
+**Teste qualitativo prévio (obrigatório antes de E1):** 5-8 entrevistas de 20 min com a base do Cahuã, mostrando as mensagens do 11.6 e do Gap 3 impressas em mockup de conversa, com uma pergunta central — *"se você recebesse isso num dia em que não treinou, o que você faria?"*. Procuro especificamente o ponto em que a cobrança vira irritação; esse limiar é uma hipótese minha, não um dado, e precisa ser medido antes de escalar.
 
 ---
 
@@ -805,7 +1243,13 @@ Componentes-chave (mapeados aos wireframes)
 
 **Para Rafael/Leonardo (backend):** o fluxo de consentimento exige `consents` com **versão do texto** referenciando artefato imutável (validado por Alexandre). O gate PAR-Q precisa dos estados `LIBERADO / BLOQUEADO_AGUARDANDO_CLEARANCE / LIBERADO_COM_RESSALVA_RT` — nenhum protocolo é gerado em estado bloqueado. O estado `PAUSED` (já no schema) suporta o offboarding-pausa. Upload de atestado precisa de endpoint.
 
-**Para Victor (IA):** MOVI precisa (a) do filtro de termos proibidos na saída (seção 13), (b) do padrão de "quebrar mensagens longas em curtas com digitando", (c) da lógica de fechamento de loop no check-in ("ajustei X por causa do seu feedback Y"), (d) da pseudonimização antes do LLM (Alexandre BL2) — nenhum identificador direto no prompt.
+**Para Victor (IA):** MOVI precisa (a) do filtro de termos proibidos na saída (seção 13), (b) do padrão de "quebrar mensagens longas em curtas com digitando", (c) da lógica de fechamento de loop no check-in ("ajustei X por causa do seu feedback Y"), (d) da pseudonimização antes do LLM (Alexandre BL2) — nenhum identificador direto no prompt. **[REVISÃO 2026-08-31]** Acrescento: (e) a **frase de causalidade** de 11.9b é um slot **grounded e obrigatório** — o par `(dado observado, ajuste aplicado)` vem do motor determinístico, o LLM só redige; sem par, MOVI declara que não houve ajuste, **jamais inventa um**; (f) o LLM **não decide** se dispara reengajamento nem qual degrau — isso é máquina de estados determinística (regras da escada em §12/Gap 3); o LLM apenas personaliza a redação dentro do degrau escolhido; (g) o texto de reengajamento precisa **citar um fato verificável** (dia, treino, número, sequência) recuperado do banco — reengajamento genérico é falha de qualidade, não só de tom.
+
+**[REVISÃO 2026-08-31] Para Lucas (produto):** o sistema de acompanhamento (11.5-11.9) exige três decisões de escopo que são suas: (a) o check-in diário entra no **MVP** ou na Fase 2? Minha recomendação: **entra no MVP**, porque é ele que alimenta a North Star (8 treinos/30 dias) — sem ele, a contagem depende de auto-relato semanal, que é o dado mais frágil do produto; (b) a gamificação estava listada como Fase 2 no seu escopo — proponho **antecipar apenas streak + 6 marcos + recap** (custo de implementação baixo, zero telas novas, zero mensagens novas) e **manter ranking fora, permanentemente** conforme o veredito de 11.8c; (c) o Épico 6 ganha as user stories do diário, da escada de 4 degraus e do controle de frequência pelo usuário.
+
+**[REVISÃO 2026-08-31] Para Leonardo (backend) / Rafael:** o acompanhamento exige `workout_logs` (dia, status `DONE`/`PARTIAL`/`SKIPPED`/`SEM_REGISTRO`, causa, fonte), `streaks` (contador, recorde, escudos disponíveis/mês, `last_shield_at`), `milestones` (concedidos por usuário), `messaging_preferences` (frequência, janela de silêncio) e `protocol_adjustments.causa_dado_id` (FK obrigatória para a taxa de ajuste atribuível). O **orçamento de atenção de 11.5 é lógica de servidor, não de prompt**: um serviço de despacho que aplica teto diário, supressões e janela de sono antes de qualquer envio, com o número de proativos/semana como **parâmetro de runtime** (não constante) — porque a tarifa da Meta muda em 2026-10-01 e vamos precisar ajustar cadência sem deploy.
+
+**[REVISÃO 2026-08-31] Para Eduardo (CFO) / Henrique:** o desenho tem teto de **≤6 mensagens proativas/usuário/semana** (≈24-26/mês), mais as respostas do usuário. Com o fim da isenção de *service messages* em 2026-10-01, isso vira linha de custo relevante por assinante de R$39/mês — recomendo recalcular o custo por usuário/mês assim que a Meta publicar a tarifa e classificar todo o acompanhamento como **Utility** (serviço contratado), nunca Marketing, o que também o mantém fora do frequency capping de marketing da Meta.
 
 **Para Felipe (frontend):** tokens da seção 15 → Tailwind config; formulário conversacional com PATCH por bloco; dashboard com Socket.io + `aria-live`; WCAG 2.2 AA; `prefers-reduced-motion`. Entrego os wireframes como especificação; protótipo Figma de alta fidelidade é a próxima etapa.
 
@@ -832,6 +1276,25 @@ Componentes-chave (mapeados aos wireframes)
 - Chat UI Design 2026 — UXPin: https://www.uxpin.com/studio/blog/chat-user-interface-design/
 - WCAG 2.2 (referência de conformidade AA) — W3C: https://www.w3.org/TR/WCAG22/
 
+**Fontes da revisão 2026-08-31 (acompanhamento, streaks e gamificação):**
+
+- Streaks & Milestones: Habit-Forming Gamification (2026) — AppStorys: https://appstorys.com/blog-Streaks-Milestones-Habit-Gamification
+- Gamification in Mobile Apps: Streaks, Rewards & Retention — Digia: https://www.digia.tech/post/gamification-mobile-apps-streaks-rewards-retention/
+- Fitness App Retention: What Top Apps Do Differently — Product Growth: https://productgrowth.in/insights/healthtech/fitness-apps-retention/
+- Why Health App Retention Fails in Week One — Martechvibe: https://martechvibe.com/article/why-health-app-retention-fails-in-week-one/
+- Strava Gamification Strategy: How It Drives Retention (2026) — Trophy: https://trophy.so/blog/strava-gamification-case-study
+- The Dark Side of Gamification: When Points, Badges & Leaderboards Go Wrong — Growth Engineering: https://www.growthengineering.co.uk/dark-side-of-gamification/
+- Gamification Leaderboards That Motivate the Other 90% — Yu-kai Chou: https://yukaichou.com/advanced-gamification/how-to-design-effective-leaderboards-boosting-motivation-and-engagement/
+- Gamification in Fitness Apps: How do Leaderboards influence Exercise? — ResearchGate: https://www.researchgate.net/publication/309557443_Gamification_in_Fitness_Apps_How_do_Leaderboards_influence_Exercise
+- How to Reduce Your WhatsApp Opt-Out Rate — Uptail: https://www.uptail.ai/blog/how-to-reduce-your-whatsapp-opt-out-rate
+- Meta's Frequency Capping for WhatsApp Marketing (2026) — AiSensy: https://m.aisensy.com/blog/meta-frequency-capping-for-whatsapp-marketing-messages/
+- WhatsApp for Customer Retention — WhatsAble: https://whatsable.app/blog/whatsapp-for-customer-retention-explained-2026-guide
+- What to Do When You Miss a Workout (regra "never miss twice") — FitCraft: https://getfitcraft.com/guides/missed-workout-recovery
+- Best Fitness Accountability Apps With Real Coaches (2026) — Trainwell: https://www.trainwell.net/blog/best-fitness-accountability-apps-with-real-coaches-2026
+- Workout Accountability Ideas — Trainerize: https://www.trainerize.com/blog/workout-accountability/
+
 **Fontes internas do pipeline:** 02-relatorio-gabriel.md, 04-relatorio-kimura.md, 08-relatorio-lucas.md, 06-relatorio-alexandre.md, 07-relatorio-eduardo.md, 10-relatorio-rafael.md.
 
 > **Limitações de pesquisa declaradas:** (1) WebSearch é US-only e retorna majoritariamente agregadores em inglês; os benchmarks de completion rate/WhatsApp buttons são direcionais, a validar com testes na base real do Cahuã. (2) Não há benchmark público de UX de "coaching de treino via WhatsApp com CREF no Brasil" — as decisões apoiam-se em princípios consolidados (Fitts, Hick, Peak-End, WCAG) + análise de produtos análogos. (3) Os wireframes em texto são especificação de baixa/média fidelidade; a validação visual e de interação exige protótipo Figma de alta fidelidade (próxima etapa). (4) Métricas-alvo herdam as metas de Lucas/Helena/Eduardo e são hipóteses a calibrar no beta.
+>
+> **Limitações adicionais da revisão 2026-08-31:** (5) **Não existe benchmark público de check-in diário conversacional em WhatsApp para fitness** — a evidência de streaks e cadência vem de apps com tela própria (Duolingo, Strava, Fittr, HealthifyMe), onde o custo marginal de um toque é zero e o usuário vai até o app. No WhatsApp o produto vai até o usuário e cada toque é pago: a transposição é uma inferência de design minha, e é exatamente por isso que E1 (16.3) é um **holdout com poder de veto da métrica de fadiga**, e não um rollout. (6) O limiar em que a cobrança proativa vira irritação é a maior incerteza deste desenho e **não tem número confiável na literatura** — precisa das entrevistas qualitativas antes de E1. (7) A tarifa das *service messages* da Meta pós-2026-10-01 ainda não foi publicada (prevista para até 2026-09-01); o teto de 6 proativos/semana foi definido por critério de UX (fadiga), não de custo, e pode precisar ser **apertado** por razão financeira. (8) As regras de efeito do streak sobre o motor de periodização (11.9d) são propostas de UX e **exigem validação do Responsável Técnico CREF** antes de irem para código — nenhuma delas pode ser implementada por decisão de design isolada.

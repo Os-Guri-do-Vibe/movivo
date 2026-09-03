@@ -28,4 +28,7 @@ regexes = [
   # classe de dado do LLMRouter citado em comentários/docs, não um par chave=segredo.
   # O generic-api-key do gitleaks casa o padrão key=value; é um termo de domínio fixo.
   '''default=HEALTH''',
+  # apps/api/test/account.int-spec.ts — senha SINTÉTICA de teste (fluxo de troca de
+  # senha da conta), nunca real. Mesma convenção de QA das demais entradas acima.
+  '''Nova-Senha-Forte-123''',
 ]

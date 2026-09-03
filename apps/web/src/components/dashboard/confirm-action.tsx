@@ -1,12 +1,13 @@
 'use client';
 
-import { AlertTriangle, X } from 'lucide-react';
+import { AlertTriangle, X, type LucideIcon } from 'lucide-react';
 import { useId, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 
 export function ConfirmAction({
   triggerLabel,
+  triggerIcon: TriggerIcon,
   title,
   description,
   confirmLabel,
@@ -16,7 +17,13 @@ export function ConfirmAction({
   triggerVariant,
   triggerSize = 'lg',
 }: {
+  /** Texto do gatilho. Vira `aria-label`/rótulo `sr-only` quando `triggerIcon` é passado. */
   triggerLabel: string;
+  /**
+   * Gatilho vira botão só-ícone (ex.: lixeira numa linha de tabela) — `triggerLabel`
+   * continua obrigatório, só passa a ser rótulo acessível em vez de texto visível.
+   */
+  triggerIcon?: LucideIcon;
   title: string;
   description: string;
   confirmLabel: string;
@@ -30,7 +37,7 @@ export function ConfirmAction({
    * da página — dois botões sólidos ali competiriam pelo mesmo olhar.
    */
   triggerVariant?: 'default' | 'outline' | 'destructive' | 'ghost';
-  triggerSize?: 'default' | 'sm' | 'lg';
+  triggerSize?: 'default' | 'sm' | 'lg' | 'icon';
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -59,8 +66,10 @@ export function ConfirmAction({
         variant={triggerVariant ?? (destructive ? 'destructive' : 'default')}
         disabled={disabled}
         onClick={() => dialogRef.current?.showModal()}
+        aria-label={TriggerIcon ? triggerLabel : undefined}
+        title={TriggerIcon ? triggerLabel : undefined}
       >
-        {triggerLabel}
+        {TriggerIcon ? <TriggerIcon aria-hidden="true" /> : triggerLabel}
       </Button>
       <dialog
         ref={dialogRef}

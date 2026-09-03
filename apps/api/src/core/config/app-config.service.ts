@@ -60,6 +60,8 @@ export interface LlmConfig {
   readonly timeoutMs: number;
   /** Timeout só de `PROTOCOL_GENERATION` — job em fila, tolera bem mais que o chat. */
   readonly protocolTimeoutMs: number;
+  /** Teto de tokens só de `PROTOCOL_GENERATION` — saída maior que a de chat/check-in. */
+  readonly protocolMaxTokens: number;
   readonly userDailyMessageLimit: number;
   readonly dailyCostAlertBrl: number;
   readonly usdBrlRate: number;
@@ -124,6 +126,11 @@ export interface KnowledgeConfig {
   readonly openaiEmbeddingHealthDataApproved: boolean;
   readonly complexFormatsEnabled: boolean;
   readonly allowedMimeTypes: readonly string[];
+  readonly uploadMaxBytes: number;
+}
+
+export interface AvatarStorageConfig {
+  readonly uploadDir: string;
   readonly uploadMaxBytes: number;
 }
 
@@ -216,6 +223,7 @@ export class AppConfigService {
       maxTokens: this.config.LLM_MAX_TOKENS,
       timeoutMs: this.config.LLM_TIMEOUT_MS,
       protocolTimeoutMs: this.config.LLM_PROTOCOL_TIMEOUT_MS,
+      protocolMaxTokens: this.config.LLM_PROTOCOL_MAX_TOKENS,
       userDailyMessageLimit: this.config.LLM_USER_DAILY_MESSAGE_LIMIT,
       dailyCostAlertBrl: this.config.LLM_DAILY_COST_ALERT_BRL,
       usdBrlRate: this.config.LLM_USD_BRL_RATE,
@@ -280,6 +288,25 @@ export class AppConfigService {
       allowedMimeTypes: this.config.KNOWLEDGE_ALLOWED_MIME_TYPES,
       uploadMaxBytes: this.config.KNOWLEDGE_UPLOAD_MAX_BYTES,
     };
+  }
+
+  /** Foto de perfil das contas internas do dashboard — disco persistente da VPS (MVP). */
+  get avatarStorage(): AvatarStorageConfig {
+    return {
+      uploadDir: this.config.AVATAR_UPLOAD_DIR,
+      uploadMaxBytes: this.config.AVATAR_UPLOAD_MAX_BYTES,
+    };
+  }
+
+  /**
+   * URL pública e absoluta da foto de perfil a partir do nome do arquivo salvo
+   * (`users.avatar_path`), ou `null` quando a conta não tem avatar. Usada tanto por
+   * `GET /auth/me` (header do dashboard) quanto por `GET /account/profile` (tela Minha
+   * Conta) — centralizada aqui para as duas rotas nunca divergirem na montagem da URL.
+   */
+  avatarUrl(avatarPath: string | null): string | null {
+    if (!avatarPath) return null;
+    return `${this.apiPublicUrl}/${this.globalPrefix}/account/avatar/${avatarPath}`;
   }
 
   /** Config de pagamento (US-4.1). Chaves são segredos redigidos no snapshot. */

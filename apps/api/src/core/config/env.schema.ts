@@ -192,11 +192,39 @@ export const envSchema = z
     LLM_DEEPSEEK_HEALTH_DATA_APPROVED: envBoolean.default(false),
     LLM_OPENAI_HEALTH_DATA_APPROVED: envBoolean.default(false),
     LLM_ANTHROPIC_HEALTH_DATA_APPROVED: envBoolean.default(false),
-    /** Teto de tokens por chamada (o router faz clamp do `maxTokens` do request). */
+    /**
+     * Default de tokens por chamada quando o caller não pede um valor explícito (chat/
+     * check-in). NÃO é teto sobre um `maxTokens` explícito do request (achado 2026-09-02:
+     * o router chegou a fazer esse clamp por engano e truncava toda geração de protocolo
+     * de volta a este valor, mesmo com `LLM_PROTOCOL_MAX_TOKENS` maior — ver
+     * `llm-router.service.ts`).
+     */
     LLM_MAX_TOKENS: z.coerce.number().int().min(1).max(32_000).default(4096),
-    /** Timeout hard por tentativa de provedor (Victor §1.2). Vale para chat/check-in
-     * (latência importa numa conversa de WhatsApp em tempo real). */
-    LLM_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(8000),
+    /**
+     * Teto de tokens só para `PROTOCOL_GENERATION` (achado 2026-09-02: o valor fixo de
+     * 1.800 tokens no código, calibrado para a metodologia curta original, passou a
+     * truncar a saída — e falhar no parse do JSON — assim que a metodologia publicada
+     * ficou mais detalhada e o protocolo gerado passou a ter mais sessões/exercícios).
+     * Mesmo raciocínio do `LLM_PROTOCOL_TIMEOUT_MS` acima: geração de protocolo é job de
+     * fila, sem pressão de UX em tempo real, então pode usar um teto bem mais alto que
+     * chat/check-in.
+     */
+    LLM_PROTOCOL_MAX_TOKENS: z.coerce.number().int().min(1).max(32_000).default(6000),
+    /**
+     * Timeout hard por tentativa de provedor (Victor §1.2). Vale para chat/check-in
+     * (latência importa numa conversa de WhatsApp em tempo real).
+     *
+     * Subido de 8s pra 15s (achado 2026-09-02, reproduzido ao vivo): com a OpenAI sem
+     * crédito (`insufficient_quota`, falha instantânea) e o DeepSeek ainda não aprovado
+     * pra HEALTH, toda conversa real caía pro Claude Sonnet 4.5 como único provedor
+     * viável — e o prompt real do coach (persona + metodologia + histórico) precisa de
+     * mais que 8s pra responder (medido direto contra a API: ~6s numa chamada isolada
+     * bem menor que o prompt real, sem cache). 8s estourava consistentemente e o aluno
+     * recebia só o fallback genérico ("já te respondo") em vez de uma resposta de
+     * verdade. 15s ainda é curto o bastante pra não quebrar a sensação de tempo real do
+     * WhatsApp (com "digitando…" ativo durante a espera).
+     */
+    LLM_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(15_000),
     /**
      * Timeout hard só para `PROTOCOL_GENERATION` (achado 2026-08-18: 8s é curto demais
      * pra uma geração real de protocolo estruturado completo — toda tentativa contra o
@@ -272,11 +300,17 @@ export const envSchema = z
 
     // -------------------------------------------------------- RAG (US-3.3)
     /**
-     * Threshold de cosseno do retrieval denso (Victor §4.2). Default 0.75 é a calibração do
-     * `text-embedding-3-small` real; o embedding fake de dev tem outra distribuição, então
-     * o teste ajusta este valor (a nota de calibração fica com a impl real).
+     * Threshold de cosseno do retrieval denso (Victor §4.2). Achado 2026-09-02: o default
+     * documentado (0.75) nunca foi medido contra o `text-embedding-3-small` real — só contra
+     * o embedding fake de dev, que tem outra distribuição. Com o provedor real habilitado
+     * (`KNOWLEDGE_OPENAI_EMBEDDING_HEALTH_DATA_APPROVED=true`) e conteúdo genuinamente
+     * relevante indexado, os melhores matches medidos ficaram em ~0.35-0.45 — 0.75 filtrava
+     * TUDO, sempre, tornando a busca densa morta por config (`candidateCount: 0` em todo log
+     * de produção). 0.25 é calibrado pelo que foi medido de verdade: deixa passar match
+     * genuinamente relevante, ainda filtra ruído (pares não relacionados do mesmo modelo
+     * ficaram bem abaixo disso). Recalibrar de novo se o corpus real mostrar outro padrão.
      */
-    RAG_MIN_COSINE: z.coerce.number().min(0).max(1).default(0.75),
+    RAG_MIN_COSINE: z.coerce.number().min(0).max(1).default(0.25),
     /** Score mínimo pós-rerank (Victor §4.3). */
     RAG_RERANK_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.5),
     /** Trechos retornados após rerank. */
@@ -297,6 +331,21 @@ export const envSchema = z
       .min(1_024)
       .max(10 * 1024 * 1024)
       .default(512 * 1024),
+
+    // ------------------------------- Foto de perfil (conta interna do dashboard)
+    /**
+     * Diretório persistente na VPS onde os arquivos de avatar são gravados. Relativo ao
+     * cwd do processo em dev; em produção deve apontar para um volume persistente fora
+     * de `dist/` (sobrevive a deploy/rebuild). Não é servido do Postgres — decisão
+     * deliberada de MVP em VPS única (ver `ARQUITETURA.md` — sem S3/R2 ainda).
+     */
+    AVATAR_UPLOAD_DIR: z.string().min(1).default('./uploads/avatars'),
+    AVATAR_UPLOAD_MAX_BYTES: z.coerce
+      .number()
+      .int()
+      .min(1_024)
+      .max(5 * 1024 * 1024)
+      .default(2 * 1024 * 1024),
 
     // -------------------------------------------- Pagamento (US-4.1)
     /**

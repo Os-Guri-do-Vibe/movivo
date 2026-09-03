@@ -59,12 +59,13 @@ const apiRoot = process.cwd();
 const RUN = Date.now().toString().slice(-8);
 const ORIGIN = { ip: '203.0.113.40', userAgent: 'vitest/protocol-pipeline' };
 
-/** Protocolo canônico do fake: usa `goblet_squat` (contraindicado p/ KNEE — útil no bloqueio). */
+/** Protocolo canônico do fake: usa `agachamento_goblet` (contraindicado p/ KNEE — útil no bloqueio). */
 function fakeStructure(goal: ProtocolStructure['goal']): ProtocolStructure {
   return {
     promptVersion: 'methodology-int+catalog-int',
     goal,
     phase: 'ADAPTACAO',
+    phaseDurationWeeks: 3,
     weeklyFrequency: 3,
     sessions: [
       {
@@ -72,7 +73,7 @@ function fakeStructure(goal: ProtocolStructure['goal']): ProtocolStructure {
         focus: 'Corpo inteiro',
         exercises: [
           {
-            exerciseId: 'goblet_squat',
+            exerciseId: 'agachamento_goblet',
             name: 'Agachamento goblet',
             sets: 3,
             reps: { min: 8, max: 12 },
@@ -388,7 +389,7 @@ describe('pipeline de protocolo — caminho feliz (US-2.4)', () => {
 
 describe('pipeline de protocolo — bloqueado pelo validador (US-2.4)', () => {
   it('lesão contraindica o exercício gerado → template → PENDING_REVIEW, sem entrega', async () => {
-    const { userId } = await submitAnamnesis(['KNEE']); // KNEE contraindica goblet_squat
+    const { userId } = await submitAnamnesis(['KNEE']); // KNEE contraindica agachamento_goblet
 
     const proto = await waitFor(async () => (await readProtocol(userId))[0]);
     expect(proto.approvalStatus).toBe('PENDING_REVIEW');

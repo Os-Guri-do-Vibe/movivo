@@ -265,18 +265,22 @@ export default async function ProtocoloPage({ params }: { params: Promise<{ toke
                 <p className="text-label text-muted-foreground">{session.focus}</p>
               </div>
               <div className="sidebar-scrollbar overflow-x-auto rounded-lg border border-border">
-                <table className="w-full min-w-[640px] border-collapse text-label">
+                {/* Achado 2026-09-02 (mesmo da tela do CREF): cada sessão tem sua própria
+                    <table>; sem largura de coluna fixa, o navegador calcula cada tabela pelo
+                    próprio conteúdo, e as colunas saem de alinhamento entre uma sessão e
+                    outra. `table-fixed` + % igual em toda tabela alinha todas as sessões. */}
+                <table className="w-full min-w-[640px] table-fixed border-collapse text-label">
                   <thead>
                     {/* Barra sempre escura (petroleo) com texto branco fixo: dá destaque ao
                         cabeçalho independente do tema, mesmo tratamento do chip da logo. */}
                     <tr className="border-b border-white/15 bg-petroleo text-left">
-                      <th className="px-3 py-2 font-bold text-white">Exercício</th>
-                      <th className="px-3 py-2 font-bold text-white">Série</th>
-                      <th className="px-3 py-2 font-bold text-white">Repetição/Duração</th>
-                      <th className="px-3 py-2 font-bold text-white">Descanso</th>
-                      <th className="px-3 py-2 font-bold text-white">RIR</th>
-                      <th className="px-3 py-2 font-bold text-white">Estratégia</th>
-                      <th className="px-3 py-2 font-bold text-white">Vídeo</th>
+                      <th className="w-[28%] px-3 py-2 font-bold text-white">Exercício</th>
+                      <th className="w-[8%] px-3 py-2 font-bold text-white">Série</th>
+                      <th className="w-[14%] px-3 py-2 font-bold text-white">Repetição/Duração</th>
+                      <th className="w-[10%] px-3 py-2 font-bold text-white">Descanso</th>
+                      <th className="w-[14%] px-3 py-2 font-bold text-white">RIR</th>
+                      <th className="w-[14%] px-3 py-2 font-bold text-white">Técnica</th>
+                      <th className="w-[12%] px-3 py-2 font-bold text-white">Vídeo</th>
                     </tr>
                   </thead>
                   <tbody>

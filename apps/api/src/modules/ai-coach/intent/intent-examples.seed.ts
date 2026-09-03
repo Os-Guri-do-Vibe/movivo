@@ -20,6 +20,26 @@ export const INTENT_EXAMPLES_SEED: readonly IntentExampleSeed[] = [
   { intent: 'SUBSTITUICAO_EXERCICIO', text: 'não consigo fazer leg press, tem outro exercício?' },
   { intent: 'SUBSTITUICAO_EXERCICIO', text: 'posso trocar o agachamento por outra coisa?' },
   { intent: 'SUBSTITUICAO_EXERCICIO', text: 'não tenho halteres, o que faço no lugar?' },
+  // Achado 2026-09-02 (pedido do fundador): insatisfação/insegurança com um exercício, sem
+  // usar a palavra "trocar" — o motor determinístico de substring exigia a palavra; a IA
+  // agora precisa reconhecer a intenção por trás disso também.
+  {
+    intent: 'SUBSTITUICAO_EXERCICIO',
+    text: 'não gosto de fazer agachamento livre, me sinto insegura',
+  },
+  {
+    intent: 'SUBSTITUICAO_EXERCICIO',
+    text: 'esse exercício me dá um desconforto no joelho, tem jeito?',
+  },
+  {
+    intent: 'SUBSTITUICAO_EXERCICIO',
+    text: 'fico com medo de fazer esse movimento, é muito pesado pra mim',
+  },
+  {
+    intent: 'SUBSTITUICAO_EXERCICIO',
+    text: 'detesto esse exercício, dá pra ser outro no lugar dele?',
+  },
+  { intent: 'SUBSTITUICAO_EXERCICIO', text: 'não me sinto confiante fazendo esse aí do treino' },
   // MOTIVACAO
   { intent: 'MOTIVACAO', text: 'tô sem vontade de treinar hoje' },
   { intent: 'MOTIVACAO', text: 'tá difícil manter a rotina, me ajuda' },

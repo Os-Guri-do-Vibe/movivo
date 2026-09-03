@@ -105,7 +105,6 @@ export function KnowledgeMethodologyPanel({
   const { data, error, forbidden, loading, refresh } = useControlCenterResource(getMethodology);
   const [editing, setEditing] = useState(false);
   const [content, setContent] = useState('');
-  const [summary, setSummary] = useState('');
   const [changeNote, setChangeNote] = useState('');
   const [compareId, setCompareId] = useState<string | null>(null);
   const [workflow, setWorkflow] = useState<WorkflowAction | null>(null);
@@ -139,12 +138,10 @@ export function KnowledgeMethodologyPanel({
     try {
       await createMethodologyVersion({
         content: content.trim(),
-        summary: summary.trim() || undefined,
         changeNote: changeNote.trim(),
       });
       setEditing(false);
       setContent('');
-      setSummary('');
       setChangeNote('');
       setFeedback('Nova versão salva como rascunho. Ela ainda não afeta a IA.');
       await refresh();
@@ -222,7 +219,6 @@ export function KnowledgeMethodologyPanel({
           <Button
             onClick={() => {
               setContent(current?.content ?? '');
-              setSummary(current?.summary ?? '');
               setChangeNote('');
               setEditing(true);
             }}
@@ -299,20 +295,10 @@ export function KnowledgeMethodologyPanel({
               value={content}
               onChange={(event) => setContent(event.target.value)}
             />
-          </label>
-          <label className="mt-4 block text-label font-semibold">
-            Resumo para o Coach
-            <textarea
-              className={`${INPUT_CLASS} min-h-36`}
-              minLength={200}
-              maxLength={1000}
-              value={summary}
-              placeholder="Resumo revisado pelo profissional CREF, usado apenas para explicar decisões do protocolo."
-              onChange={(event) => setSummary(event.target.value)}
-            />
             <span className="mt-1 block text-xs font-normal text-muted-foreground">
-              Opcional. Quando informado, deve ter entre 200 e 1.000 caracteres e viaja como
-              contexto não confiável, nunca como regra do sistema.
+              Sem teto de caracteres — é o texto completo que a IA usa tanto para gerar protocolo
+              quanto para responder o aluno no AI Coach, junto com o contexto individualizado de
+              cada aluno (não um resumo à parte).
             </span>
           </label>
           <label className="mt-4 block text-label font-semibold">
@@ -333,12 +319,7 @@ export function KnowledgeMethodologyPanel({
           <div className="mt-4 flex flex-wrap gap-2">
             <Button
               type="submit"
-              disabled={
-                busy ||
-                content.trim().length < 200 ||
-                (summary.trim().length > 0 && summary.trim().length < 200) ||
-                changeNote.trim().length < 10
-              }
+              disabled={busy || content.trim().length < 200 || changeNote.trim().length < 10}
             >
               Salvar rascunho
             </Button>

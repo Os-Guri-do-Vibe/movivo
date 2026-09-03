@@ -13,8 +13,10 @@
  * instrução. Determinística, sem I/O, sem regex vinda de configuração.
  *
  * ## Ordem das operações (importa)
- * 1. markdown proibido some primeiro — `**x**` vira `*x*` (negrito real do WhatsApp) ou some,
- *    conforme `boldPolicy`; título/cerca de código somem sempre;
+ * 0. travessão (—) vira vírgula primeiro (achado 2026-09-02, correção do fundador — ver
+ *    `stripEmDash`), antes de qualquer outra normalização mexer no texto;
+ * 1. markdown proibido some em seguida — `**x**` vira `*x*` (negrito real do WhatsApp) ou
+ *    some, conforme `boldPolicy`; título/cerca de código somem sempre;
  * 2. listas são normalizadas/desmontadas conforme `allowLists`, com teto de itens;
  * 3. só então o teto de parágrafos/caracteres é aplicado — cortar antes faria o corte contar
  *    caractere de markup que ia ser removido.
@@ -32,6 +34,25 @@ const LIST_ITEM = /^\s*(?:[-*•]|\d+[.)])\s+/u;
 /** Cerca de bloco de código e título markdown — nunca renderizam no WhatsApp. */
 const CODE_FENCE = /^\s*```.*$/gmu;
 const HEADING = /^\s{0,3}#{1,6}\s*/gmu;
+
+/**
+ * Travessão (—, U+2014) — achado 2026-09-02, correção do fundador: a saída soava "AI slop",
+ * e o travessão foi o sintoma mais citado ("NUNCA DEVE SER USADO"). O bloco `FORMATO DA
+ * MENSAGEM` do prompt já pede pra nunca usar, mas prompt sozinho nunca é teto neste sistema
+ * (mesma razão de `applyBoldPolicy`/`applyListPolicy` existirem) — isto é a rede de
+ * segurança determinística. Vírgula é a substituição mais segura pro uso típico de travessão
+ * em português (marcar um aposto/explicação no meio da frase); troca sem espaço extra dos
+ * dois lados vira dois espaços, por isso o `replace` seguinte limpa isso.
+ */
+const EM_DASH = /\s*—\s*/gu;
+
+/** Troca travessão por vírgula — rede de segurança determinística (ver `EM_DASH`). */
+function stripEmDash(text: string): string {
+  return text
+    .replace(EM_DASH, ', ')
+    .replace(/,\s*([,.!?…])/gu, '$1') // travessão colado em outra pontuação não vira ", ,"/", ."
+    .replace(/^,\s*/gmu, ''); // travessão no início da frase/linha não vira ", Texto"
+}
 
 /**
  * Corta em `limit` caracteres preferindo o fim de frase; sem frase, o fim de palavra.
@@ -100,7 +121,7 @@ export function applyResponseFormatting(text: string, formatting: AgentFormattin
   const spec = BLOCK_SIZE_SPEC[formatting.blockSize];
 
   const normalized = applyListPolicy(
-    applyBoldPolicy(text, formatting.boldPolicy),
+    applyBoldPolicy(stripEmDash(text), formatting.boldPolicy),
     formatting.allowLists,
   )
     .replace(/[ \t]+\n/gu, '\n')

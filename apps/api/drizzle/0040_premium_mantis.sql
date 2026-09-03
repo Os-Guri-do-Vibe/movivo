@@ -1,0 +1,1 @@
+ALTER TABLE "exercise_catalog_entries" ADD COLUMN "video_url" text;

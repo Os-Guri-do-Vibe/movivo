@@ -33,7 +33,12 @@ describe('DashboardShell', () => {
 
   it('não renderiza links proibidos para financeiro', async () => {
     render(
-      <DashboardShell role="FINANCE" capabilities={['control_center.finance.read']}>
+      <DashboardShell
+        role="FINANCE"
+        capabilities={['control_center.finance.read']}
+        name="Ana Souza"
+        avatarUrl={null}
+      >
         <p>Conteúdo</p>
       </DashboardShell>,
     );
@@ -57,7 +62,7 @@ describe('DashboardShell', () => {
   });
 
   it('admin recebe todos os setores quando possui todas as capabilities necessárias', () => {
-    expect(navigationFor(ADMIN_CAPABILITIES)).toHaveLength(18);
+    expect(navigationFor(ADMIN_CAPABILITIES)).toHaveLength(19);
   });
 
   it('esconde Compliance & Privacidade quando falta uma das capabilities exigidas (AND, como no backend)', () => {
@@ -92,7 +97,12 @@ describe('DashboardShell', () => {
 
   it('marca o setor atual com aria-current e mostra o título no cabeçalho', () => {
     render(
-      <DashboardShell role="MARKETING" capabilities={['control_center.marketing.read']}>
+      <DashboardShell
+        role="MARKETING"
+        capabilities={['control_center.marketing.read']}
+        name="Ana Souza"
+        avatarUrl={null}
+      >
         <p>Conteúdo</p>
       </DashboardShell>,
     );
@@ -104,7 +114,12 @@ describe('DashboardShell', () => {
 
   it('abre o menu mobile, fecha com Esc e fecha ao clicar no overlay', async () => {
     render(
-      <DashboardShell role="MARKETING" capabilities={['control_center.marketing.read']}>
+      <DashboardShell
+        role="MARKETING"
+        capabilities={['control_center.marketing.read']}
+        name="Ana Souza"
+        avatarUrl={null}
+      >
         <p>Conteúdo</p>
       </DashboardShell>,
     );
@@ -126,7 +141,12 @@ describe('DashboardShell', () => {
 
   it('recolhe e expande a barra lateral guardando a preferência', async () => {
     render(
-      <DashboardShell role="MARKETING" capabilities={['control_center.marketing.read']}>
+      <DashboardShell
+        role="MARKETING"
+        capabilities={['control_center.marketing.read']}
+        name="Ana Souza"
+        avatarUrl={null}
+      >
         <p>Conteúdo</p>
       </DashboardShell>,
     );

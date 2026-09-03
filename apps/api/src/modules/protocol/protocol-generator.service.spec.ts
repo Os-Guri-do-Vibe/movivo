@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import type { AppConfigService } from '../../core/config';
 import type { LlmRouter } from '../ai-coach/llm/llm-router.service';
 import type { LLMRequest, LLMResult } from '../ai-coach/llm/llm.types';
 import type { SemanticMemoryPort } from '../ai-coach/context/semantic-memory.port';
+import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
 import { METHODOLOGY_GUIDELINES, METHODOLOGY_VERSION } from './methodology';
 import type { MethodologyProvider } from './methodology-provider.service';
 import {
@@ -29,11 +31,12 @@ function llmResult(text: string): LLMResult {
 }
 
 /** JSON de protocolo válido usando um exerciseId REAL da base. */
-function validProtocolJson(exerciseId = 'goblet_squat'): string {
+function validProtocolJson(exerciseId = 'agachamento_barra'): string {
   return JSON.stringify({
     promptVersion: PROMPT_VERSION,
     goal: 'GAIN_MUSCLE',
     phase: 'ADAPTACAO',
+    phaseDurationWeeks: 3,
     weeklyFrequency: 3,
     sessions: [
       {
@@ -60,6 +63,7 @@ function threeSessionsJson(weekdays: (string | undefined)[]): string {
     promptVersion: PROMPT_VERSION,
     goal: 'GAIN_MUSCLE',
     phase: 'ADAPTACAO',
+    phaseDurationWeeks: 3,
     weeklyFrequency: 3,
     sessions: weekdays.map((weekday, i) => ({
       dayLabel: `Dia ${i + 1}`,
@@ -67,7 +71,7 @@ function threeSessionsJson(weekdays: (string | undefined)[]): string {
       focus: 'Corpo inteiro',
       exercises: [
         {
-          exerciseId: 'goblet_squat',
+          exerciseId: 'agachamento_barra',
           name: 'Agachamento goblet',
           sets: 3,
           reps: { min: 8, max: 12 },
@@ -118,7 +122,15 @@ function makeService(
     }),
   } as unknown as MethodologyProvider;
   const semantic = { retrieve } as unknown as SemanticMemoryPort;
-  const service = new ProtocolGeneratorService(llm, logger as never, methodology, semantic);
+  const config = { llm: { protocolMaxTokens: 6000 } } as unknown as AppConfigService;
+  const service = new ProtocolGeneratorService(
+    llm,
+    logger as never,
+    methodology,
+    config,
+    new ExerciseCatalogProvider(),
+    semantic,
+  );
   return { service, calls, logger, retrieve };
 }
 
@@ -143,7 +155,7 @@ describe('ProtocolGeneratorService', () => {
     const { service } = makeService([validProtocolJson()]);
     const result = await service.generate(command);
     expect(result.structure.goal).toBe('GAIN_MUSCLE');
-    expect(result.structure.sessions[0]?.exercises[0]?.exerciseId).toBe('goblet_squat');
+    expect(result.structure.sessions[0]?.exercises[0]?.exerciseId).toBe('agachamento_barra');
     expect(result.promptVersion).toBe(PROMPT_VERSION);
     expect(result.unknownExerciseIds).toEqual([]);
   });
@@ -157,9 +169,46 @@ describe('ProtocolGeneratorService', () => {
     expect(req.temperature).toBe(0.4);
     expect(req.system).not.toContain(METHODOLOGY_GUIDELINES);
     expect(req.messages[0]?.content).toContain('METODOLOGIA_PUBLICADA');
-    expect(req.system).toContain('goblet_squat'); // vocabulário da base
+    // `remada_baixa_iso_lateral` (não contraindicado por KNEE) confirma que a base aparece no prompt sem
+    // contradizer o filtro de contraindicação do catálogo (constraints usa injuryTags: ['KNEE']).
+    expect(req.system).toContain('remada_baixa_iso_lateral');
+    expect(req.system).not.toContain('agachamento_barra'); // contraindicado por KNEE — filtrado do prompt
     expect(constraintsMessage(req)).toContain('GAIN_MUSCLE');
     expect(constraintsMessage(req)).toContain('KNEE');
+  });
+
+  // Achado 2026-09-02 (correção do fundador): o evento-alvo é contexto de OTIMIZAÇÃO do
+  // prompt (fase/ênfase/progressão dentro do prazo real) — nunca fonte de
+  // "phaseDurationWeeks" nem instrução pra prometer o resultado que o aluno descreveu.
+  it('inclui o evento-alvo (Data-alvo) no prompt como otimização, nunca como promessa', async () => {
+    const { service, calls } = makeService([validProtocolJson()]);
+    await service.generate({
+      ...command,
+      constraints: {
+        ...constraints,
+        importantEvent: {
+          date: '2026-12-25',
+          daysUntil: 114,
+          description: 'quero emagrecer e chegar a 70kg pro Natal',
+        },
+      },
+    });
+    const req = calls[0];
+    if (!req) throw new Error('esperava uma chamada ao LLM');
+    const message = constraintsMessage(req);
+    expect(message).toContain('faltam 114 dias');
+    expect(message).toContain('2026-12-25');
+    expect(message).toContain('quero emagrecer e chegar a 70kg pro Natal');
+    expect(message).toContain('NÃO prometa nem confirme esse número');
+    expect(req.system).toContain('DURAÇÃO DO MESOCICLO');
+  });
+
+  it('sem evento-alvo, não inclui o bloco de otimização no prompt', async () => {
+    const { service, calls } = makeService([validProtocolJson()]);
+    await service.generate(command);
+    const req = calls[0];
+    if (!req) throw new Error('esperava uma chamada ao LLM');
+    expect(constraintsMessage(req)).not.toContain('Evento/objetivo com prazo real');
   });
 
   it('busca evidência por facetas, combina mais de 3 trechos e remove duplicatas', async () => {

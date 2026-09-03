@@ -52,6 +52,7 @@ import { evaluateParq, type ParqEvaluation } from '../anamnesis/parq';
 import {
   demoteLevel,
   emphasisToMuscleGroups,
+  importantEventForPrompt,
   levelFromExperience,
   mapInjuriesToTags,
   painToConstraints,
@@ -69,9 +70,6 @@ export interface ProtocolGenerationJob {
   submittedAt?: string;
   correlationId?: string;
 }
-
-/** ponytail: horizonte fixo do protocolo no MVP; o check-in (Sprint 5) reperiodiza. */
-const DEFAULT_TOTAL_WEEKS = 12;
 
 /**
  * Janela de cortesia da fila "Disponível para Revisão" (fila do profissional). Exportada
@@ -151,6 +149,13 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       user: scrubUser,
       constraints,
     });
+    // Achado 2026-09-02 (correção do fundador): `totalWeeks` era um padrão estático de 12
+    // semanas pra todo mundo, sem relação com a fase (`phase`) real do protocolo — a data de
+    // término gravada nunca respondia "até quando vale este mesociclo?". Agora vem do
+    // `phaseDurationWeeks` que a própria IA declarou (ou do template de fallback, que também
+    // o declara), já dentro da faixa baseada em evidência que o `ValidationService` garante.
+    // Ver `protocol-timeline.ts`.
+    const totalWeeks = plan.content.phaseDurationWeeks;
 
     // Achado 2026-08-18: sem isso, um protocolo que cai no fallback (MANDATORY, sem
     // auto-liberação) não deixava rastro nenhum de POR QUE — nem em log. `detail` das
@@ -186,7 +191,7 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       humanReviewRequired: true,
       reviewUrgency: mandatory ? 'MANDATORY' : 'OPTIONAL',
       anamnesisSessionId,
-      totalWeeks: DEFAULT_TOTAL_WEEKS,
+      totalWeeks,
       generatedBy: plan.generatedBy,
       modelVersion: plan.modelVersion,
       promptVersion: plan.promptVersion,
@@ -304,7 +309,16 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       requiresProfessionalReview,
       parqTags: parq.tags,
       parqTriggered: evaluation.triggeredQuestions,
-      ...(parq.maxPhase ? { maxPhase: parq.maxPhase } : {}),
+      // Achado 2026-09-02: isto só nascia de `parq.maxPhase`, que só existe quando Q4
+      // (equilíbrio/desmaio) dispara. O teto de fase + piso de RIR do `ValidationService`
+      // (o veto que "um prompt pode ser ignorado pelo modelo, mas este não pode") ficava
+      // então mudo pra qualquer titular travado por OUTRO gatilho de PAR-Q (cardíaco,
+      // gravidez, cirurgia recente...) — o `CONSERVATIVE_MODE_BLOCK` do prompt pedia
+      // ADAPTACAO+RIR>=2, mas nada no validador cobrava isso de verdade fora do caso Q4.
+      // `requiresProfessionalReview` é o sinal autoritativo (`triggeredQuestions.length >
+      // 0`, ver `parq.ts`) — Q4 já está contido nele, então isto substitui `parq.maxPhase`
+      // sem perder nenhum caso que ele cobria.
+      ...(requiresProfessionalReview ? { maxPhase: 'ADAPTACAO' as const } : {}),
       // "Outro" nunca chega ao gerador: `toGenerationGoal` o traduz para o objetivo
       // genérico seguro; o texto bruto do usuário fica na anamnese, para o painel CREF.
       goal: toGenerationGoal(structured.primaryGoal),
@@ -325,6 +339,10 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       // "CARDIAC vindo do PAR-Q" só existiria como etiqueta, sem vetar exercício nenhum.
       injuryTags: [...new Set([...pain.tags, ...mapInjuriesToTags(injuriesRaw), ...parq.tags])],
       injuriesRaw,
+      importantEvent: importantEventForPrompt(
+        structured,
+        health.freeText?.importantEventDescription,
+      ),
     };
   }
 
@@ -366,7 +384,9 @@ export class ProtocolGenerationWorker implements OnModuleInit {
         humanReviewRequired: true,
         reviewUrgency: requiresProfessionalReview ? 'MANDATORY' : 'OPTIONAL',
         anamnesisSessionId,
-        totalWeeks: DEFAULT_TOTAL_WEEKS,
+        // Achado 2026-09-02: o template declara a própria duração (`phaseDurationWeeks`,
+        // sempre ADAPTACAO) — não depende mais de ler o evento-alvo da anamnese aqui.
+        totalWeeks: content.phaseDurationWeeks,
         generatedBy: 'FALLBACK_TEMPLATE',
         modelVersion: null,
         promptVersion: FALLBACK_TEMPLATE_VERSION,

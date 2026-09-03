@@ -1,0 +1,1 @@
+ALTER TABLE "methodology_versions" DROP COLUMN "summary";

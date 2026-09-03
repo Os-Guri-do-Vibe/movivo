@@ -33,10 +33,6 @@ vi.mock('@/lib/control-center-api', async (importOriginal) => ({
 import { KnowledgeMethodologyPanel } from './knowledge-methodology';
 
 const CONTENT = `${'Diretriz metodológica validada pelo profissional CREF. '.repeat(6)}\nProgressão conservadora e revisão humana.`;
-const SUMMARY =
-  'Resumo metodológico validado pelo profissional CREF para explicar decisões do protocolo com linguagem simples, sem criar prescrição nova e sem substituir a supervisão humana. '.repeat(
-    2,
-  );
 const meta = {
   generatedAt: '2026-08-20T12:00:00.000Z',
   timezone: 'America/Sao_Paulo' as const,
@@ -50,7 +46,6 @@ const response = {
         version: 1,
         status: 'PUBLISHED' as const,
         content: CONTENT,
-        summary: SUMMARY.trim(),
         sha256: 'a'.repeat(64),
         changeNote: 'Versão inicial migrada.',
         createdBy: 'Rodrigo',
@@ -66,7 +61,6 @@ const response = {
         version: 2,
         status: 'DRAFT' as const,
         content: `${CONTENT}\nRascunho.`,
-        summary: SUMMARY,
         sha256: 'b'.repeat(64),
         changeNote: 'Inclui nova progressão.',
         createdBy: 'Admin',
@@ -82,7 +76,6 @@ const response = {
         version: 3,
         status: 'IN_REVIEW' as const,
         content: `${CONTENT}\nEm revisão.`,
-        summary: SUMMARY,
         sha256: 'c'.repeat(64),
         changeNote: 'Ajusta deload programado.',
         createdBy: 'Admin',
@@ -98,7 +91,6 @@ const response = {
         version: 4,
         status: 'APPROVED' as const,
         content: `${CONTENT}\nAprovada.`,
-        summary: SUMMARY,
         sha256: 'd'.repeat(64),
         changeNote: 'Parecer CREF concluído.',
         createdBy: 'Admin',
@@ -114,7 +106,6 @@ const response = {
         version: 0,
         status: 'ARCHIVED' as const,
         content: `${CONTENT}\nArquivada.`,
-        summary: SUMMARY,
         sha256: 'e'.repeat(64),
         changeNote: 'Versão anterior.',
         createdBy: 'Admin',
@@ -163,7 +154,6 @@ describe('KnowledgeMethodologyPanel', () => {
     await waitFor(() =>
       expect(createMethodologyVersion).toHaveBeenCalledWith({
         content: CONTENT,
-        summary: SUMMARY.trim(),
         changeNote: 'Ajuste metodológico auditável.',
       }),
     );

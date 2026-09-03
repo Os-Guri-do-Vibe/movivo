@@ -28,6 +28,7 @@ import {
 } from '../../core/agent-config/forbidden-topics.service';
 import { L1GuardrailService } from '../../core/agent-config/l1-guardrail.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
+import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { ContextService } from '../ai-coach/context/context.service';
 import { EvidenceGroundingService } from '../ai-coach/rag/evidence-grounding.service';
 import { clinicalGuardrail } from '../ai-coach/intent/clinical-guardrail';
@@ -41,7 +42,20 @@ import { isFinalFailure } from '../jobs/dlq.handler';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
-import { findExerciseByMention, findSafeSubstitute } from '../protocol/exercise-substitution';
+import type { CatalogExercise } from '../protocol/exercise-catalog';
+import { findSafeCandidates } from '../protocol/exercise-substitution';
+import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
+import {
+  applySubstitution,
+  collectProtocolExercises,
+} from '../protocol/protocol-substitution-apply';
+import {
+  ProtocolSubstitutionRepository,
+  type ActiveProtocolForSubstitution,
+  type SubstitutionDiff,
+} from '../protocol/protocol-substitution.repository';
+import { AI_SUBSTITUTION_REVIEW_WINDOW_MS } from '../protocol/protocol-substitution-release.worker';
+import type { ProtocolSubstitutionReleaseJob } from '../protocol/protocol-substitution-release.worker';
 import { ValidationService } from '../protocol/validation/validation.service';
 import type { AiResponseJob } from '../whatsapp/whatsapp-inbound.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
@@ -52,11 +66,15 @@ import {
   FORBIDDEN_TOPIC_RESPONSE,
   SAFETY_HANDOFF_MESSAGE,
   STANDARD_BLOCK_RESPONSE,
+  SUBSTITUTION_ALREADY_PENDING_MESSAGE,
   SUBSTITUTION_FALLBACK_MESSAGE,
+  SUBSTITUTION_NOT_SAFE_TO_APPLY_MESSAGE,
   TECHNICAL_NO_EVIDENCE_MESSAGE,
 } from './coach-messages';
 import { ConversationRepository } from './conversation.repository';
 import { applyResponseFormatting } from './response-formatter';
+import { SubstitutionResolutionService } from './substitution-resolution.service';
+import { SubstitutionTargetService } from './substitution-target.service';
 import { untrustedDataEnvelope } from '../ai-coach/context/untrusted-context';
 import { METHODOLOGY_AWARE_INTENTS } from '../ai-coach/intent/prompts';
 import { MethodologyProvider } from '../protocol/methodology-provider.service';
@@ -114,8 +132,13 @@ export class AIResponseWorker implements OnModuleInit {
     private readonly abuse: LlmAbuseGuard,
     private readonly validation: ValidationService,
     private readonly methodology: MethodologyProvider,
+    private readonly exerciseCatalog: ExerciseCatalogProvider,
     private readonly repo: ConversationRepository,
     private readonly healthConsent: HealthConsentService,
+    private readonly substitutionRepo: ProtocolSubstitutionRepository,
+    private readonly substitutionTarget: SubstitutionTargetService,
+    private readonly substitutionResolution: SubstitutionResolutionService,
+    private readonly queueEvents: DashboardQueueEventsService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
     private readonly logger: PinoLogger,
@@ -164,7 +187,30 @@ export class AIResponseWorker implements OnModuleInit {
       }
 
       const message = await this.drainBatch(batchKey);
-      if (!message) return { status: 'EMPTY' };
+      if (!message) {
+        // Achado 2026-09-02 (reproduzido ao vivo, incluindo um bug de off-by-one na 1ª
+        // versão deste fix): lote vazio na 1ª tentativa é normal (múltiplos triggers
+        // coalescendo no mesmo lote). Lote vazio numa RETRY é outra coisa — significa que
+        // uma tentativa anterior já drenou a mensagem do aluno e travou DEPOIS disso (ex.:
+        // provedor de embedding/LLM indisponível), antes de entregar qualquer resposta. O
+        // BullMQ não enxerga isso como falha (a retry "termina com sucesso" sem fazer
+        // nada), então o handler de DLQ (`handleTerminalFailure`, mais abaixo) nunca
+        // dispara — o aluno via "digitando…" da 1ª tentativa e depois silêncio permanente,
+        // sem nenhum aviso. `job.attemptsMade` só é incrementado pelo BullMQ DEPOIS que o
+        // processor retorna/lança (`Job.moveToCompleted`/`moveToFailed`, não antes) —
+        // durante a 2ª chamada (a retry em si) o valor ainda é `1`, não `2`: `> 0` é o
+        // teste certo pra "já houve pelo menos uma tentativa anterior", `> 1` nunca era
+        // verdadeiro dentro do processor (confirmado ao vivo — a mensagem de fallback
+        // nunca saía).
+        if (job.attemptsMade > 0) {
+          this.logger.warn(
+            { userId, event: 'ai_response_empty_batch_after_retry' },
+            'lote vazio numa nova tentativa — uma tentativa anterior perdeu a mensagem após travar; avisando o aluno',
+          );
+          await this.deliver(userId, correlationId, DLQ_FALLBACK_MESSAGE, null, false, enqueuedAt);
+        }
+        return { status: 'EMPTY' };
+      }
 
       // ⚠️ Persona resolvida UMA vez por job, e propagada como OBJETO daqui para baixo.
       // Nunca repassar `biologicalSex` para os call sites resolverem de novo: uma publicação
@@ -413,7 +459,23 @@ export class AIResponseWorker implements OnModuleInit {
     );
   }
 
-  /** Substituição segura: substituto SEMPRE da base; a IA só verbaliza; o validador confirma. */
+  /**
+   * Fluxo de substituição de exercício via IA (achado 2026-09-02) — sem motor determinístico
+   * de ESCOLHA. A IA tem autonomia para IDENTIFICAR o exercício-alvo e para ler a confirmação
+   * do aluno; o filtro de SEGURANÇA (`findSafeCandidates`) continua 100% determinístico e é
+   * SEMPRE recomputado aqui — nunca reaproveitado de uma chamada anterior — tanto no que é
+   * oferecido quanto no que pode ser persistido no protocolo do aluno.
+   *
+   * Achado 2026-09-02 (reproduzido ao vivo): a primeira versão tentava resolver a confirmação
+   * ANTES de identificar o alvo, extraindo o nome do exercício escolhido do texto livre da
+   * conversa — e nunca resolvia nada, porque o turno de oferta verbaliza o candidato de forma
+   * humanizada ("supino reto com halter"), não com o nome literal do catálogo ("Supino Reto
+   * (Halter)"), então a comparação exata nunca batia. A ordem certa: sempre IDENTIFICAR o
+   * alvo primeiro (mesmo dado já disponível todo turno — via `protocoloCompleto`), computar os
+   * candidatos seguros, e só então perguntar à IA se a última mensagem confirma um DESSES
+   * candidatos específicos (lista fechada, mesmo padrão de `SubstitutionTargetService` — a IA
+   * escolhe um id que RECEBEU, nunca extrai um nome livre).
+   */
   private async buildSubstitution(
     userId: string,
     intent: Intent,
@@ -422,21 +484,201 @@ export class AIResponseWorker implements OnModuleInit {
     personaCtx: PersonaContext,
     operationId: string,
   ): Promise<ResponseDraft> {
-    const constraints = await this.repo.loadConstraints(userId);
-    const target = findExerciseByMention(message);
-    const substitute = target && constraints ? findSafeSubstitute(target, constraints) : null;
+    const active = await this.substitutionRepo.loadActiveProtocol(userId);
+    if (!active) {
+      return { ...draftPass(SUBSTITUTION_FALLBACK_MESSAGE, null, 0), humanReview: true };
+    }
+    // Regra de v1 (decisão do fundador): uma proposta pendente por vez. Uma segunda troca
+    // pedida antes da primeira ser decidida é recusada na conversa, não empilhada.
+    if (await this.substitutionRepo.hasPending(userId, active.protocolId)) {
+      return draftPass(SUBSTITUTION_ALREADY_PENDING_MESSAGE, null, 0);
+    }
 
-    if (!target || !substitute) {
-      // Nada seguro na base → honestidade + revisão humana, sem LLM.
+    const catalog = this.exerciseCatalog.getAll();
+    const protocolExercises = collectProtocolExercises(active.content);
+    // Construído ANTES da identificação: turnos de continuação ("é insegurança mesmo, sem
+    // dor") não citam o exercício sozinhos — só fazem sentido com a conversa recente junto
+    // (achado 2026-09-02, reproduzido ao vivo).
+    const ctx = await this.context.build(userId, intent, message, personaCtx.persona.agentName);
+
+    const identified = await this.substitutionTarget.identify({
+      userId,
+      operationId,
+      user: scrubUser,
+      recentConversation: ctx.volatileSuffix,
+      protocolExercises,
+      personaSlot: personaCtx.slot,
+    });
+    const target = identified.identified
+      ? this.exerciseCatalog.getById(identified.exerciseId)
+      : undefined;
+
+    if (!target) {
+      // Não ficou claro qual exercício. `allowedExercises` trava no que JÁ está no protocolo
+      // do aluno — a IA pode fazer referência ao que já existe pra ajudar a esclarecer ("você
+      // quer dizer o agachamento ou o levantamento terra romeno?"), mas NUNCA nomear um
+      // substituto novo aqui: sem alvo identificado, não há candidato seguro recomputado, e
+      // nada garante que o que a IA diria por conta própria passaria pelo filtro determinístico
+      // (achado 2026-09-02, reproduzido ao vivo — a IA verbalizava uma troca de qualquer jeito
+      // quando este branch não tinha nenhuma restrição de vocabulário).
+      return this.buildGenerative(userId, intent, message, scrubUser, personaCtx, operationId, {
+        extraSystem:
+          'O aluno expressou insatisfação com um exercício do protocolo dele, mas não ficou ' +
+          'claro qual exercício específico do treino ele quer trocar. Pergunte de forma ' +
+          'natural qual exercício ele quer trocar, sem sugerir nenhuma alternativa ainda.',
+        allowedExercises: protocolExercises.flatMap((ex) => [ex.id, ex.name]),
+      });
+    }
+
+    const safeCandidates = findSafeCandidates(target, active.constraints, catalog);
+    if (safeCandidates.length === 0) {
+      // Nada seguro na base para este aluno → honestidade + revisão humana, sem LLM.
       return { ...draftPass(SUBSTITUTION_FALLBACK_MESSAGE, null, 0), humanReview: true };
     }
 
+    const resolution = await this.substitutionResolution.resolve({
+      userId,
+      operationId,
+      user: scrubUser,
+      recentConversation: ctx.volatileSuffix,
+      targetExerciseName: target.name,
+      candidates: safeCandidates,
+      personaSlot: personaCtx.slot,
+    });
+
+    if (resolution.resolved) {
+      // Recomputa do zero — nunca confia no cálculo de cima, que já pode estar obsoleto no
+      // instante em que a confirmação chega (dupla checagem, defesa em profundidade).
+      const freshCandidates = findSafeCandidates(target, active.constraints, catalog);
+      const chosen = freshCandidates.find((c) => c.id === resolution.chosenExerciseId);
+      if (chosen) {
+        return this.applyAndPersistSubstitution(
+          userId,
+          intent,
+          message,
+          scrubUser,
+          personaCtx,
+          operationId,
+          active,
+          target,
+          chosen,
+        );
+      }
+      // Confirmou algo que não está mais no conjunto seguro (estado mudou entre o cálculo e
+      // a confirmação) — cai pra reoferecer os candidatos atuais abaixo, sem persistir.
+    }
+
+    const names = safeCandidates.map((candidate) => candidate.name);
     const extra =
-      `SUBSTITUTO APROVADO DA BASE: no lugar de "${target.name}", oriente "${substitute.name}". ` +
-      'Explique só essa troca; NÃO sugira nenhum outro exercício nem invente carga.';
+      `OPÇÕES SEGURAS DA BASE para substituir "${target.name}": ${names.join(', ')}. ` +
+      'Apresente essas opções de forma humanizada (não uma lista técnica) e pergunte qual o ' +
+      'aluno prefere. NÃO sugira nenhum exercício fora desta lista nem invente carga.';
     return this.buildGenerative(userId, intent, message, scrubUser, personaCtx, operationId, {
       extraSystem: extra,
-      allowedExercises: [target.name, substitute.name, target.id, substitute.id],
+      allowedExercises: [
+        target.name,
+        target.id,
+        ...safeCandidates.flatMap((candidate) => [candidate.name, candidate.id]),
+      ],
+    });
+  }
+
+  /**
+   * Aluno confirmou uma troca segura: aplica ao conteúdo, revalida a ESTRUTURA INTEIRA do
+   * protocolo (trocar um exercício pode quebrar uma regra de sessão mesmo quando o
+   * substituto em si é seguro — ex.: `ISOLATION_AS_BASE`), e só então persiste em staging
+   * (`protocol_substitution_requests`, nunca o protocolo `ACTIVE` diretamente — ver o
+   * comentário de topo do schema). O protocolo do aluno só muda de fato na liberação
+   * (`ProtocolSubstitutionReleaseWorker`, 30 min, ou aprovação manual do profissional).
+   */
+  private async applyAndPersistSubstitution(
+    userId: string,
+    intent: Intent,
+    message: string,
+    scrubUser: ScrubUser,
+    personaCtx: PersonaContext,
+    operationId: string,
+    active: ActiveProtocolForSubstitution,
+    target: CatalogExercise,
+    chosen: CatalogExercise,
+  ): Promise<ResponseDraft> {
+    const applied = applySubstitution(active.content, target.id, chosen);
+    const verdict = this.validation.validate({
+      structure: applied.content,
+      constraints: active.validationConstraints,
+      parqFlags: active.parQFlags,
+    });
+    if (verdict.action !== 'PASS') {
+      this.logger.warn(
+        {
+          userId,
+          event: 'substitution_not_safe_to_apply',
+          violations: verdict.violations.map((v) => v.rule),
+        },
+        'troca de exercício confirmada pelo aluno quebrou a validação do protocolo inteiro — não aplicada sozinha',
+      );
+      return { ...draftPass(SUBSTITUTION_NOT_SAFE_TO_APPLY_MESSAGE, null, 0), humanReview: true };
+    }
+
+    const diff: SubstitutionDiff = {
+      type: 'EXERCISE_SUBSTITUTION',
+      from: { id: target.id, name: target.name },
+      to: { id: chosen.id, name: chosen.name },
+      sessionsAffected: applied.sessionsAffected,
+    };
+    const created = await this.substitutionRepo.createPending({
+      userId,
+      protocolId: active.protocolId,
+      baseVersion: active.version,
+      fromExerciseId: target.id,
+      fromExerciseName: target.name,
+      toExerciseId: chosen.id,
+      toExerciseName: chosen.name,
+      proposedContent: applied.content,
+      diff,
+      changeReason: `Substituição solicitada pelo aluno via WhatsApp: ${target.name} → ${chosen.name}`,
+    });
+    if (!created.created) {
+      // Corrida com uma segunda pendência criada entre a checagem `hasPending` e aqui.
+      return draftPass(SUBSTITUTION_ALREADY_PENDING_MESSAGE, null, 0);
+    }
+
+    // Aluno com protocolo de origem em PAR-Q bloqueante (achado 2026-09-03, a pedido do
+    // fundador): a substituição nasce MANDATORY, sem job de auto-liberação — mesma regra
+    // de segurança de `protocols.reviewUrgency` (alerta clínico, "nenhum sai sozinho").
+    if (!active.fromBlockingParq) {
+      const releaseJob: ProtocolSubstitutionReleaseJob = { userId, requestId: created.id };
+      await this.queues.enqueue(
+        QUEUE.protocolSubstitutionRelease,
+        'substitution-release',
+        releaseJob,
+        {
+          delay: AI_SUBSTITUTION_REVIEW_WINDOW_MS,
+          jobId: `substitution-auto-release-${created.id}`,
+        },
+      );
+    }
+    this.queueEvents.emit('protocol');
+    this.logger.info(
+      {
+        userId,
+        event: 'substitution_pending_created',
+        requestId: created.id,
+        mandatory: active.fromBlockingParq,
+      },
+      active.fromBlockingParq
+        ? 'substituição de exercício confirmada — origem PAR-Q bloqueante, aguardando revisão humana obrigatória'
+        : 'substituição de exercício confirmada — proposta em staging, aguardando revisão/liberação automática',
+    );
+
+    const extra =
+      `A troca foi CONFIRMADA e já está registrada: "${target.name}" vai virar "${chosen.name}". ` +
+      'Confirme isso pro aluno de forma humanizada, avisando que a mudança passa por uma ' +
+      'checagem rápida e ele recebe o protocolo atualizado em breve. NÃO ofereça nenhuma ' +
+      'outra opção agora nem volte a perguntar qual exercício trocar.';
+    return this.buildGenerative(userId, intent, message, scrubUser, personaCtx, operationId, {
+      extraSystem: extra,
+      allowedExercises: [target.name, target.id, chosen.name, chosen.id],
     });
   }
 
@@ -452,38 +694,36 @@ export class AIResponseWorker implements OnModuleInit {
   ): Promise<ResponseDraft> {
     const ctx = await this.context.build(userId, intent, message, personaCtx.persona.agentName);
     const runtime = await this.prompts.resolveRuntimeFor(intent, personaCtx.persona);
-    const system = [runtime.system, opts?.extraSystem].filter(Boolean).join('\n\n');
+    let system = [runtime.system, opts?.extraSystem].filter(Boolean).join('\n\n');
+    // Achado 2026-09-02 (correção do fundador): sinaliza quando DUVIDA_TECNICA cai do
+    // caminho fundamentado (base de conhecimento) pro conhecimento geral do modelo — vira
+    // `humanReview: true` no retorno compartilhado lá embaixo, sem duplicar a lógica de
+    // formatação/validação que já existe pra todo outro intent.
+    let ungroundedTechnicalFallback = false;
 
     const methodology = METHODOLOGY_AWARE_INTENTS.includes(intent)
       ? await this.methodology.current().catch((error: unknown) => {
           this.logger.warn(
             { event: 'methodology_context_unavailable', err: String(error) },
-            'coach segue sem resumo metodológico',
+            'coach segue sem contexto metodológico',
           );
           return null;
         })
       : null;
-
-    if (intent === 'DUVIDA_TECNICA' && ctx.ragDocs.length === 0) {
-      return {
-        ...draftPass(TECHNICAL_NO_EVIDENCE_MESSAGE, null, 0),
-        humanReview: true,
-      };
-    }
 
     const messages = [
       {
         role: 'user' as const,
         content: untrustedDataEnvelope('ESTADO_E_MEMORIA', ctx.cacheablePrefix),
       },
-      ...(methodology?.summary
+      ...(methodology
         ? [
             {
               role: 'user' as const,
               content: untrustedDataEnvelope('METODOLOGIA_MOVIVO_APROVADA', {
                 version: methodology.versionLabel,
                 sha256: methodology.contentSha256,
-                summary: methodology.summary,
+                content: methodology.content,
               }),
             },
           ]
@@ -495,47 +735,84 @@ export class AIResponseWorker implements OnModuleInit {
     ];
 
     if (intent === 'DUVIDA_TECNICA') {
-      const grounded = await this.grounding.answer({
-        userId,
-        operationId,
-        user: scrubUser,
-        question: message,
-        authoritativeState: ctx.authoritativeState,
-        system,
-        contextMessages: messages,
-        documents: ctx.ragDocs,
-        maxClaims: { CURTO: 1, MEDIO: 2, LIVRE: 3 }[runtime.formatting.blockSize],
-        personaSlot: personaCtx.slot,
-      });
-      if (grounded.status !== 'VERIFIED') {
+      const grounded =
+        ctx.ragDocs.length > 0
+          ? await this.grounding.answer({
+              userId,
+              operationId,
+              user: scrubUser,
+              question: message,
+              authoritativeState: ctx.authoritativeState,
+              system,
+              contextMessages: messages,
+              documents: ctx.ragDocs,
+              maxClaims: { CURTO: 1, MEDIO: 2, LIVRE: 3 }[runtime.formatting.blockSize],
+              personaSlot: personaCtx.slot,
+            })
+          : ({ status: 'INSUFFICIENT', latencyMs: 0 } as const);
+
+      if (grounded.status === 'VERIFIED') {
+        const groundedVerdict = this.validation.validateResponse(grounded.text);
+        if (groundedVerdict.action === 'BLOCK_FALLBACK') {
+          return {
+            text: STANDARD_BLOCK_RESPONSE,
+            modelUsed: grounded.model,
+            latencyMs: grounded.latencyMs,
+            validationPassed: false,
+            humanReview: true,
+            blocked: true,
+          };
+        }
+        return {
+          // Achado 2026-09-02 (correção do fundador): esta era a única saída generativa do
+          // worker que devolvia o texto do modelo direto, sem passar por
+          // `applyResponseFormatting` — o teto determinístico de travessão/negrito/lista
+          // (mesmo raciocínio de "prompt sozinho nunca é teto" do resto do arquivo) nunca
+          // rodava aqui. O caminho ungrounded logo abaixo sempre aplicou; agora os dois são
+          // consistentes.
+          text: applyResponseFormatting(grounded.text, runtime.formatting),
+          modelUsed: grounded.model,
+          latencyMs: grounded.latencyMs,
+          validationPassed: true,
+          humanReview: grounded.humanReview || groundedVerdict.humanReviewRequired,
+          blocked: false,
+          ragSources: grounded.sources.map((source) => ({
+            ...source,
+            verifierModel: grounded.verifierModel,
+          })),
+        };
+      }
+
+      // Achado 2026-09-02 (correção do fundador): "sem referência na base" deixou de ser
+      // recusa automática — a MOVIVO é uma proposta CONVERSACIONAL, não um FAQ que só repete
+      // o que está cadastrado. Só CONFLICT continua abstendo: é quando a evidência recuperada
+      // contradiz o ESTADO_AUTORITATIVO do próprio aluno (ex.: uma restrição de PAR-Q/lesão) —
+      // aí a IA responder por conta própria seria ignorar uma restrição de segurança já
+      // registrada, e isso vale mais que soar natural. INSUFFICIENT (nada na base, ou a base
+      // nem chegou a ser consultada por falta de documento) e UNVERIFIED (a base não sustentou
+      // a alegação que o modelo tentou fazer) caem pro caminho generativo comum logo abaixo,
+      // com uma instrução extra pra usar conhecimento geral de educação física com
+      // responsabilidade — igual um personal trainer de verdade respondendo no WhatsApp.
+      if (grounded.status === 'CONFLICT') {
         return {
           ...draftPass(TECHNICAL_NO_EVIDENCE_MESSAGE, null, grounded.latencyMs),
           humanReview: true,
         };
       }
-      const groundedVerdict = this.validation.validateResponse(grounded.text);
-      if (groundedVerdict.action === 'BLOCK_FALLBACK') {
-        return {
-          text: STANDARD_BLOCK_RESPONSE,
-          modelUsed: grounded.model,
-          latencyMs: grounded.latencyMs,
-          validationPassed: false,
-          humanReview: true,
-          blocked: true,
-        };
-      }
-      return {
-        text: grounded.text,
-        modelUsed: grounded.model,
-        latencyMs: grounded.latencyMs,
-        validationPassed: true,
-        humanReview: grounded.humanReview || groundedVerdict.humanReviewRequired,
-        blocked: false,
-        ragSources: grounded.sources.map((source) => ({
-          ...source,
-          verifierModel: grounded.verifierModel,
-        })),
-      };
+      ungroundedTechnicalFallback = true;
+      system = [
+        system,
+        'Você NÃO tem uma referência específica da Base de Conhecimento da MOVIVO pra esta ' +
+          'pergunta. Responda mesmo assim, com conhecimento amplamente aceito de educação ' +
+          'física/ciência do exercício — como um personal trainer experiente respondendo no ' +
+          'WhatsApp, de forma natural e direta, nunca como um FAQ que só repete o que está ' +
+          'cadastrado. NUNCA invente ou afirme com certeza um detalhe específico da ' +
+          'metodologia proprietária da MOVIVO ou do protocolo deste aluno que você não tenha ' +
+          'nas mensagens acima — nesse caso, diga que vai confirmar com o profissional ' +
+          'responsável em vez de arriscar. Se a pergunta pedir avaliação clínica, diagnóstico ' +
+          'ou algo que foge do que um treinador pode responder com segurança, encaminhe ao ' +
+          'profissional de Educação Física responsável em vez de responder.',
+      ].join('\n\n');
     }
 
     const startedAt = Date.now();
@@ -586,7 +863,14 @@ export class AIResponseWorker implements OnModuleInit {
       modelUsed: result.model,
       latencyMs,
       validationPassed: true,
-      humanReview: rawVerdict.humanReviewRequired || verdict.humanReviewRequired,
+      // `ungroundedTechnicalFallback`: resposta de DUVIDA_TECNICA sem base na Base de
+      // Conhecimento continua visível pro profissional CREF acompanhar (alerta assíncrono,
+      // não bloqueia a entrega — ver `humanReview` em `deliver()`), mesmo passando limpo
+      // no validador de linguagem.
+      humanReview:
+        ungroundedTechnicalFallback ||
+        rawVerdict.humanReviewRequired ||
+        verdict.humanReviewRequired,
       blocked: false,
       ragSources: ctx.ragDocs.map((document) => ({
         chunkId: document.chunkId,

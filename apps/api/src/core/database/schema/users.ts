@@ -34,6 +34,13 @@ export const users = pgTable(
     /** Opcional: só existe para quem acessa o dashboard/recibos. */
     email: varchar('email', { length: 255 }).unique(),
 
+    /**
+     * Caminho relativo do arquivo de foto de perfil no disco persistente da VPS (ex:
+     * `avatars/<uuid>.webp`), servido por rota estática dedicada — nunca uma URL externa.
+     * Só existe para contas internas (dashboard); `NULL` cai no fallback de iniciais na UI.
+     */
+    avatarPath: varchar('avatar_path', { length: 512 }),
+
     /** Nome do perfil no WhatsApp, retornado pela AraraHQ. Dado pessoal comum. */
     whatsappName: varchar('whatsapp_name', { length: 255 }),
 

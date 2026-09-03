@@ -23,7 +23,13 @@ export function LogoutButton() {
   }
 
   return (
-    <Button type="button" variant="ghost" onClick={logout} disabled={pending}>
+    <Button
+      type="button"
+      variant="ghost"
+      onClick={logout}
+      disabled={pending}
+      className="rounded-full text-red-600 hover:bg-red-600/10 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-400/10 dark:hover:text-red-400"
+    >
       <LogOut aria-hidden="true" />
       {pending ? 'Saindo…' : 'Sair'}
     </Button>

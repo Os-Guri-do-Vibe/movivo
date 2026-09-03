@@ -1,0 +1,266 @@
+FORMULÁRIO DE INSCRIÇÃO — MOVIVO (/anamnese)
+Extraído do código-fonte em:
+- apps/web/src/components/onboarding/step1-registration.tsx
+- apps/web/src/components/onboarding/step2-anamnesis.tsx
+- apps/web/src/components/onboarding/step3-parq.tsx
+- apps/web/src/components/onboarding/pain-section.tsx
+- packages/shared/src/schemas/anamnesis.schema.ts
+- packages/shared/src/schemas/consent.schema.ts
+
+Fluxo: usuário entra em /anamnese → sessão criada → redireciona para /anamnese/[token]
+(link retomável). O formulário tem 3 etapas.
+
+================================================================================
+ETAPA 1 — CADASTRO PESSOAL
+================================================================================
+Título: "Vamos começar por você"
+Descrição: "É rápido. Estas informações ajudam o profissional responsável a preparar
+um treino que faça sentido para a sua rotina."
+
+1. Qual é o seu nome completo?
+   - Texto livre (mín. 2, máx. 120 caracteres)
+
+2. Qual é a sua data de nascimento?
+   - Date picker
+   - Regra: usuário precisa ter 18+ anos. Se menor:
+     "No momento, a Movivo está disponível apenas para maiores de 18 anos."
+
+3. Qual é o seu sexo biológico?
+   - Escolha única: Feminino / Masculino
+
+4. Qual é a sua altura? (cm)
+   - Numérico, entre 100 e 250 cm
+
+5. Qual é o seu peso? (kg)
+   - Numérico, entre 30 e 300 kg
+
+6. Qual é o seu WhatsApp?
+   - Ajuda: "Enviaremos seu treino e faremos seu acompanhamento por este número."
+   - Campo de telefone (seletor de país + número) com verificação por código
+     enviado via WhatsApp (OTP)
+
+7. Qual é o seu e-mail? (opcional)
+   - Texto livre, tipo e-mail
+
+--- Aviso operacional (não é consentimento, sem checkbox) ---
+Título: "Como a MOVIVO fala com você"
+"Seu treino, os check-ins e a conversa com o Coach acontecem no WhatsApp. É assim
+que a MOVIVO funciona. Ao continuar, você passa a receber neste número as
+mensagens necessárias para o serviço funcionar: seu protocolo de treino, respostas
+do Coach, check-ins, avisos de segurança, recados do profissional de Educação
+Física responsável e informações da sua assinatura."
+"Essas mensagens não são propaganda e não podem ser desligadas separadamente,
+porque são necessárias para o serviço funcionar. Novidades e ofertas são
+diferentes. Na última opção abaixo, você decide se quer recebê-las."
+
+--- Consentimentos (checkboxes, ordem de exibição) ---
+
+a) TERMOS DE USO (obrigatório)
+   "Li e aceito os [Termos de Uso] e a [Política de Privacidade] da MOVIVO."
+
+b) DADOS DE SAÚDE (obrigatório)
+   Título: "Sobre a sua saúde"
+   Corpo (resumo): para montar um treino seguro, a MOVIVO trata dados de saúde
+   (dores atuais, lesões/cirurgias, diagnósticos recebidos, acompanhamento
+   médico/fisioterapêutico, orientações de evitar movimentos, medicações de uso
+   contínuo e respostas ao PAR-Q). Uso exclusivo para elaborar/adaptar/acompanhar
+   o treino e identificar quando o caso precisa de análise humana antes da geração.
+   Acesso: usuário e o profissional de Educação Física responsável (CREF), que usa
+   IA apenas como ferramenta de apoio — decisão e supervisão são sempre do
+   profissional. Dados criptografados e isolados. Retenção: enquanto cliente +
+   até 5 anos após encerramento (obrigação legal/defesa), depois anonimizados ou
+   eliminados. Pode ser revogado a qualquer momento pelo WhatsApp ou e-mail do
+   Encarregado de Dados (revogação interrompe a geração de novos treinos).
+   Checkbox: "Autorizo a MOVIVO a tratar os meus dados de saúde para elaborar,
+   adaptar e acompanhar o meu treino, conforme descrito acima e na Política de
+   Privacidade."
+
+c) CIÊNCIA SOBRE USO DE IA (obrigatório)
+   Título: "Como o seu treino é feito"
+   Corpo: o treino é montado a partir da metodologia de um profissional de
+   Educação Física registrado no CREF, responsável técnico da MOVIVO. A IA é a
+   ferramenta que aplica essa metodologia ao caso do usuário e conversa com ele
+   no dia a dia — nunca decide sozinha e nunca substitui o profissional. Quando as
+   respostas indicarem necessidade de olhar humano, nenhum treino é gerado
+   automaticamente antes da análise do profissional. A MOVIVO não faz diagnóstico
+   e não substitui avaliação médica.
+   Checkbox: "Estou ciente de que a MOVIVO usa inteligência artificial como
+   ferramenta, com metodologia e supervisão de um profissional de Educação Física
+   registrado no CREF."
+   (Este consentimento é de ciência, não de autorização — e não pode ser
+   revogado.)
+
+d) MARKETING (opcional)
+   Checkbox: "Quero receber novidades, conteúdos e condições especiais da MOVIVO
+   pelo WhatsApp e por e-mail. Isso é opcional, e posso cancelar quando quiser."
+
+Botão: "Continuar" (ou "Salvando…")
+
+================================================================================
+ETAPA 2 — ANAMNESE (5 seções internas)
+================================================================================
+
+--- Seção 1: "Seus objetivos" ("Pra onde estamos indo.") ---
+
+1. Qual é o seu principal objetivo? (escolha única)
+   - Hipertrofia
+   - Força
+   - Emagrecimento
+   - Condicionamento físico
+   - Saúde e bem estar
+   - Competir em fisiculturismo
+   - Outro (se marcado, pede texto livre: "Conta em poucas palavras qual é seu
+     objetivo.", máx. 120 caracteres)
+   [Obs.: o vocabulário completo do backend também inclui "Criar uma rotina de
+   treino" (BUILD_ROUTINE) e "Voltar a treinar" (RETURN_TO_TRAINING), mas essas
+   duas opções não aparecem atualmente na tela do formulário.]
+
+2. Em quais regiões você gostaria de dar mais ênfase? (opcional, até 2)
+   - Peitoral / Costas / Ombros / Braço / Abdômen e core / Quadríceps /
+     Posterior de coxa / Glúteos / Panturrilhas
+   (existe também "Corpo todo, sem preferência", mutuamente exclusiva com as
+   demais, e "Tríceps" tratado como sinônimo de "Braço" na tela)
+
+3. Existe alguma data ou evento importante relacionado ao seu objetivo? (Sim/Não)
+   Se Sim:
+   3a. Qual é a data? (data mínima: amanhã)
+   3b. Qual é o evento ou resultado esperado? (texto livre, máx. 300 caracteres)
+
+--- Seção 2: "Seu histórico" ("De onde você está partindo.") ---
+
+4. Você treina atualmente? (escolha única)
+   - Nunca treinei / Estou parado / Treino ocasionalmente / Treino regularmente
+
+   Se "Estou parado":
+   4a. Há quanto tempo você não treina?
+       - Menos de 1 mês / Entre 1 e 3 meses / Entre 4 e 6 meses /
+         Entre 7 e 12 meses / Mais de 1 ano
+
+5. Qual é a sua experiência com musculação? (combobox, escolha única)
+   - Iniciante: nunca treinei ou ainda preciso de bastante orientação
+   - Intermediário: conheço os principais exercícios e já treinei com
+     regularidade
+   - Avançado: treino consistentemente e tenho experiência com controle de
+     cargas
+
+6. Quais atividades você pratica ou já praticou? (múltipla escolha)
+   - Nenhuma (exclui as demais) / Musculação / Corrida / Ciclismo /
+     Treino funcional / Cross training / Esportes coletivos / Lutas / Dança /
+     Pilates / Natação / Outra (se marcado, pede texto livre, máx. 120
+     caracteres)
+
+7. O que mais dificultou sua consistência nos treinos anteriormente?
+   (múltipla escolha)
+   - Falta de tempo / Falta de motivação / Não saber o que fazer /
+     Treinos muito longos / Dor ou lesão / Rotina imprevisível /
+     Falta de resultados / Não me identificava com os treinos /
+     Nunca tentei manter uma rotina / Outro (se marcado, pede texto livre,
+     máx. 120 caracteres)
+
+--- Seção 3: "Sua rotina" ("O que cabe na sua semana de verdade.") ---
+
+8. Quantos dias por semana você consegue treinar? (combobox, 1 a 7 dias)
+
+9. Quais dias da semana você consegue treinar? (múltipla escolha)
+   - Segunda / Terça / Quarta / Quinta / Sexta / Sábado / Domingo
+
+10. Quanto tempo você tem disponível por treino? (escolha única)
+    - Até 20 minutos / Aproximadamente 30 minutos / Aproximadamente 45 minutos /
+      Aproximadamente 60 minutos / Mais de 60 minutos
+
+11. Onde você pretende treinar? (escolha única)
+    - Academia completa / Academia de condomínio / Em casa / Ao ar livre
+
+12. Em qual período você prefere treinar? (escolha única)
+    - Manhã / Tarde / Noite / Varia conforme o dia
+
+--- Seção 4: "Dores e limitações" ("Isso é o que mantém seu treino seguro.") ---
+
+13. Você sente alguma dor hoje que atrapalha ou preocupa na hora de treinar?
+    (Sim/Não — pergunta-porta; se "Não", a seção encerra aqui)
+
+    Se Sim:
+    13a. Em qual região você sente dor, desconforto ou limitação?
+         (múltipla escolha)
+         - Pescoço / Ombro / Cotovelo / Punho / Lombar /
+           Costas (região torácica) / Quadril / Joelho / Tornozelo ou pé /
+           Outra (se marcado, pede texto livre: "Qual é a outra região?")
+
+    13b. Para cada região marcada: intensidade do desconforto (escala 0 a 10,
+         "0 · Nenhuma dor" a "10 · Dor muito intensa")
+
+    13c. Esse desconforto está: (escolha única)
+         - Melhorando / Estável / Piorando / Não sei informar
+
+    13d. Quais movimentos ou situações provocam o desconforto? (texto livre,
+         máx. 300 caracteres)
+
+    13e. Algum profissional de saúde já te explicou o que é essa dor? (Sim/Não)
+         Se Sim: "O que ele te disse? Com suas palavras, tudo bem não lembrar o
+         nome exato." (texto livre, máx. 500 caracteres)
+
+    13f. Você está fazendo acompanhamento médico ou fisioterapêutico? (Sim/Não)
+
+    13g. Algum profissional recomendou evitar movimentos ou exercícios
+         específicos? (Sim/Não)
+         Se Sim: "Quais movimentos ou exercícios devem ser evitados?" (texto
+         livre, máx. 500 caracteres)
+
+    Nota exibida: "Seus dados ficam protegidos e só o profissional de Educação
+    Física responsável tem acesso."
+
+--- Seção 5: "Suas preferências" ("O que você prefere não fazer.") ---
+
+14. Existe algum exercício que você não gosta ou não deseja realizar? (Sim/Não)
+    Se Sim: "Qual exercício você prefere evitar?" (texto livre, máx. 300
+    caracteres)
+
+Botão final da etapa: "Continuar para saúde"
+
+================================================================================
+ETAPA 3 — PAR-Q (Questionário de Prontidão para Atividade Física) + SEGURANÇA
+================================================================================
+Versão do conjunto: parq-2026-07-v1
+Título: "Última parte: sua segurança"
+Intro: "São 9 perguntas rápidas, de sim ou não. É o questionário que o
+profissional de Educação Física usa antes de preparar um treino."
+Aviso: "Se alguma resposta for 'sim', tudo bem. O profissional responsável só
+vai olhar seu caso antes de o treino ser preparado."
+
+Todas as perguntas são Sim/Não; toda resposta "Sim" permite (Q1–Q8) ou exige
+(Q9) um campo de texto livre com detalhe (máx. 500 caracteres).
+
+Q1. O seu médico já disse que você tem algum problema no coração ou pressão
+    alta?
+Q2. Você sente dor no peito quando faz atividade física?
+Q3. No último mês, você sentiu dor no peito mesmo sem estar se exercitando?
+Q4. Você já perdeu o equilíbrio por tontura ou já desmaiou?
+Q5. Você toma algum medicamento contínuo para pressão ou para o coração?
+Q6. Você tem algum problema em osso, articulação ou coluna que pode piorar com
+    atividade física?
+Q7. Você está grávida ou teve bebê nas últimas semanas?
+Q8. Você passou por alguma cirurgia nos últimos 6 meses?
+Q9. Você sabe de algum outro motivo pelo qual não deveria praticar atividade
+    física? (se "Sim", motivo é OBRIGATÓRIO)
+
+--- Confirmações finais (3 declarações obrigatórias, todas com checkbox) ---
+Versão: parq-declaracoes-2026-08-v1
+
+1. "Declaro que as informações que forneci são verdadeiras e estão atualizadas
+   nesta data."
+2. "Estou ciente de que devo comunicar à MOVIVO qualquer mudança na minha
+   condição de saúde."
+3. "Estou ciente de que uma resposta positiva neste questionário pode exigir a
+   análise do profissional de Educação Física responsável antes de o meu treino
+   ser preparado."
+
+Botão final: "Finalizar avaliação" (ou "Guardando suas respostas…")
+
+================================================================================
+RESULTADO DA SUBMISSÃO
+================================================================================
+Ao finalizar, o backend retorna um de dois desfechos (a UI nunca calcula isso,
+apenas exibe):
+- READY: treino pode ser gerado normalmente.
+- PENDING_REVIEW: o caso precisa de análise do profissional CREF antes de o
+  treino ser gerado (gate do PAR-Q).

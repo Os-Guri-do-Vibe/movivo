@@ -24,7 +24,21 @@ overrides:
   'undici@>=7.0.0 <7.29.0': '>=7.29.0 <8'
   # fast-uri <3.1.5 — host confusion via backslash. Origem: @nestjs/cli>...>ajv>fast-uri
   # (devDependency). Mesmo major (3.x) — correção segura. Datado: 2026-08-03.
-  'fast-uri@>=3.0.0 <3.1.5': '>=3.1.5'
+  # Teto <4.0.0 acrescentado em 2026-09-03: sem ele, um range aberto ">=3.1.5" deixa
+  # o pnpm resolver saltar pra linha 4.x (que tem outro conjunto de CVEs, ver abaixo),
+  # já que semver não respeita fronteira de major sem teto explícito.
+  'fast-uri@>=3.0.0 <3.1.5': '>=3.1.5 <4.0.0'
+  # fast-uri <4.1.3 (linha 4.x) — host confusion (IDN/percent-encoding) + SSRF via
+  # normalização de IPv6/hostname. Mesma origem (@nestjs/cli>...>ajv>fast-uri,
+  # devDependency); a linha 3.x já tinha override acima, esta cobre a 4.x que também
+  # aparece na árvore. Teto <5.0.0 pelo mesmo motivo do override da linha 3.x acima.
+  # Datado: 2026-09-03.
+  'fast-uri@>=4.0.0 <4.1.3': '>=4.1.3 <5.0.0'
+  # browserslist <=4.28.6 — crescimento ilimitado de memória (sem eviction de cache) e
+  # crash/prototype-write via browserslist-stats.json não confiável. Origem:
+  # next>styled-jsx>@babel/core>...>browserslist e vitest>...>@babel/core (devDependency).
+  # Datado: 2026-09-03.
+  'browserslist@<=4.28.6': '>=4.28.7'
   # js-yaml <4.3.1 — quadratic CPU consumption em !!omap (CVE-2026-59870). Origem:
   # @nestjs/cli>fork-ts-checker-webpack-plugin>cosmiconfig>js-yaml (devDependency).
   # Mesmo major (4.x) — correção segura. Datado: 2026-08-07.

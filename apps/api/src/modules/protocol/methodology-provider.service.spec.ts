@@ -9,7 +9,6 @@ const PUBLISHED_ROW = {
   version_label: 'methodology-v2',
   content: 'Progressão dupla conforme protocolo assinado pelo profissional CREF.',
   content_sha256: 'a'.repeat(64),
-  summary: 'Resumo curto',
 };
 
 function providerWith(executeQueue: unknown[][]) {
@@ -38,7 +37,6 @@ describe('MethodologyProvider.current', () => {
       version: 2,
       versionLabel: 'methodology-v2',
       content: PUBLISHED_ROW.content,
-      summary: 'Resumo curto',
       contentSha256: PUBLISHED_ROW.content_sha256,
     });
     expect(db.runAsSystem).toHaveBeenCalledTimes(2); // ensureBootstrap + a consulta

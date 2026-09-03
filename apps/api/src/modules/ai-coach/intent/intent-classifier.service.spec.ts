@@ -73,6 +73,30 @@ describe('IntentClassifier — kNN (Etapa 1) e fallback (Etapa 2)', () => {
     expect(r.stage).toBe('FALLBACK');
     expect(complete).toHaveBeenCalledOnce();
   });
+
+  // Achado 2026-09-02 (reproduzido ao vivo — aluno viu "digitando…" e depois silêncio
+  // permanente): o embedding lançando sem try/catch derrubava a classificação inteira, e
+  // por consequência o job de resposta inteiro, DEPOIS de já ter drenado a mensagem do
+  // aluno do lote — a retry do BullMQ achava o lote vazio e "terminava com sucesso" sem
+  // nunca responder. Etapa 1 agora é best-effort, mesmo padrão de `retrieveEvidence` do RAG.
+  it('embedding indisponível (ex.: 429 do provedor) não derruba a classificação — cai no fallback nano', async () => {
+    const { svc, embedding, repo, complete } = make({ nano: 'DUVIDA_TECNICA' });
+    vi.mocked(embedding.embed).mockRejectedValue(
+      new Error('Provider de embedding recusou a requisição (429).'),
+    );
+    const r = await svc.classify({ ...input, message: 'como faço agachamento?' });
+    expect(r).toMatchObject({ intent: 'DUVIDA_TECNICA', stage: 'FALLBACK' });
+    expect(repo.classifyByKnn).not.toHaveBeenCalled();
+    expect(complete).toHaveBeenCalledOnce();
+  });
+
+  it('erro no repositório de kNN (ex.: banco fora do ar) também cai no fallback nano', async () => {
+    const { svc, repo, complete } = make({ nano: 'MOTIVACAO' });
+    vi.mocked(repo.classifyByKnn).mockRejectedValue(new Error('connection refused'));
+    const r = await svc.classify({ ...input, message: 'e aí' });
+    expect(r).toMatchObject({ intent: 'MOTIVACAO', stage: 'FALLBACK' });
+    expect(complete).toHaveBeenCalledOnce();
+  });
 });
 
 // Achado BLOQUEANTE do Victor: antes disso, handoff de segurança só existia via regex.

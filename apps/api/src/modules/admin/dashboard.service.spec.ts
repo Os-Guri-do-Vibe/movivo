@@ -8,6 +8,7 @@ import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { QueueManager } from '../jobs/queue-manager.service';
+import type { ProtocolSubstitutionRepository } from '../protocol/protocol-substitution.repository';
 import { ValidationService } from '../protocol/validation/validation.service';
 import { AuditService } from './audit.service';
 import { DashboardService } from './dashboard.service';
@@ -23,6 +24,7 @@ const content = {
   promptVersion: 'v1',
   goal: 'CONDITIONING',
   phase: 'ADAPTACAO',
+  phaseDurationWeeks: 3,
   weeklyFrequency: 1,
   sessions: [
     {
@@ -81,6 +83,14 @@ function makeService(row: Record<string, unknown>, verdict: 'PASS' | 'FLAG_HUMAN
     info: vi.fn(),
     error: vi.fn(),
   } as unknown as PinoLogger;
+  const substitutionRepo = {
+    loadActiveProtocol: vi.fn(),
+    hasPending: vi.fn(),
+    createPending: vi.fn(),
+    release: vi.fn(),
+    discard: vi.fn(),
+    findById: vi.fn(),
+  } as unknown as ProtocolSubstitutionRepository;
   const service = new DashboardService(
     db,
     validation,
@@ -89,9 +99,10 @@ function makeService(row: Record<string, unknown>, verdict: 'PASS' | 'FLAG_HUMAN
     queues,
     { emit: vi.fn(), stream: vi.fn() } as unknown as DashboardQueueEventsService,
     consentService(),
+    substitutionRepo,
     logger,
   );
-  return { service, enqueue, append, update, insert, execute };
+  return { service, enqueue, append, update, insert, execute, substitutionRepo };
 }
 
 function makeSequencedService(
@@ -142,6 +153,14 @@ function makeSequencedService(
   const decryptHealth = vi.fn(async () => decrypted.shift() ?? JSON.stringify({}));
   const enqueue = vi.fn(async () => 'job');
   const emit = vi.fn();
+  const substitutionRepo = {
+    loadActiveProtocol: vi.fn(),
+    hasPending: vi.fn(),
+    createPending: vi.fn(),
+    release: vi.fn(),
+    discard: vi.fn(),
+    findById: vi.fn(),
+  } as unknown as ProtocolSubstitutionRepository;
   const service = new DashboardService(
     db,
     validation,
@@ -150,6 +169,7 @@ function makeSequencedService(
     { enqueue } as unknown as QueueManager,
     { emit, stream: vi.fn() } as unknown as DashboardQueueEventsService,
     consentService(consentActive),
+    substitutionRepo,
     { setContext: vi.fn(), warn: vi.fn(), info: vi.fn(), error: vi.fn() } as unknown as PinoLogger,
   );
   return {
@@ -163,6 +183,7 @@ function makeSequencedService(
     decryptHealth,
     forUpdate,
     emit,
+    substitutionRepo,
   };
 }
 
@@ -429,6 +450,97 @@ describe('DashboardService invariantes de mutacao', () => {
       }),
     ).rejects.toThrow('Handoff nao encontrado.');
   });
+
+  // Achado 2026-09-02 — fluxo de substituição de exercício via IA: aprovação/recusa manual
+  // do profissional reusam `ProtocolSubstitutionRepository.release()`/`.discard()` (o mesmo
+  // caminho de aplicação do worker de liberação automática), nunca reimplementam a mecânica.
+  describe('substituição de exercício via IA — aprovação/recusa manual', () => {
+    it('aprova antes da janela de 30 min: aplica, entrega e emite o evento da fila', async () => {
+      const { service, enqueue, substitutionRepo } = makeService(pendingProtocol);
+      vi.mocked(substitutionRepo.release).mockResolvedValue({
+        released: true,
+        protocolId: RESOURCE_ID,
+        userId: USER_ID,
+        version: 4,
+        content,
+        mesocycleName: 'Mesociclo 1',
+        startDate: new Date('2026-01-01'),
+        endDate: new Date('2026-02-01'),
+        totalWeeks: 4,
+      } as never);
+
+      const result = await service.approveSubstitutionNow(actor, RESOURCE_ID);
+      expect(result).toEqual({
+        id: RESOURCE_ID,
+        protocolId: RESOURCE_ID,
+        version: 4,
+        released: true,
+      });
+      expect(substitutionRepo.release).toHaveBeenCalledWith(
+        { userId: ACTOR_ID, role: 'PROFESSIONAL' },
+        RESOURCE_ID,
+      );
+      expect(enqueue).toHaveBeenCalledWith(
+        'whatsapp-outbound',
+        'protocol-delivery',
+        expect.objectContaining({ userId: USER_ID, protocolId: RESOURCE_ID, protocolVersion: 4 }),
+        expect.objectContaining({ jobId: `substitution-delivery_manual_${RESOURCE_ID}` }),
+      );
+    });
+
+    it('proposta já decidida (ou protocolo mudou de versão) → 400, sem entregar nada', async () => {
+      const { service, enqueue, substitutionRepo } = makeService(pendingProtocol);
+      vi.mocked(substitutionRepo.release).mockResolvedValue({ released: false } as never);
+
+      await expect(service.approveSubstitutionNow(actor, RESOURCE_ID)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(enqueue).not.toHaveBeenCalled();
+    });
+
+    it('recusa mantém o exercício original (não chama release) e audita com o ator', async () => {
+      const { service, append, substitutionRepo } = makeService(pendingProtocol);
+      vi.mocked(substitutionRepo.discard).mockResolvedValue({
+        discarded: true,
+        protocolId: RESOURCE_ID,
+        userId: USER_ID,
+      } as never);
+
+      const result = await service.discardSubstitution(actor, RESOURCE_ID);
+      expect(result).toEqual({ id: RESOURCE_ID, discarded: true });
+      expect(substitutionRepo.release).not.toHaveBeenCalled();
+      expect(append).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          actorId: ACTOR_ID,
+          userId: USER_ID,
+          action: 'PROTOCOL_SUBSTITUTION_DISCARDED',
+          entityId: RESOURCE_ID,
+        }),
+      );
+    });
+
+    it('recusa de proposta já decidida → 400, sem auditar', async () => {
+      const { service, append, substitutionRepo } = makeService(pendingProtocol);
+      vi.mocked(substitutionRepo.discard).mockResolvedValue({
+        discarded: false,
+        protocolId: null,
+        userId: null,
+      } as never);
+
+      await expect(service.discardSubstitution(actor, RESOURCE_ID)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(append).not.toHaveBeenCalled();
+    });
+
+    it('papel fora de PROFESSIONAL/ADMIN não aprova nem recusa', async () => {
+      const { service } = makeService(pendingProtocol);
+      const outsider: AuthenticatedUser = { userId: ACTOR_ID, role: 'SUPPORT', jti: 'jti' };
+      await expect(service.approveSubstitutionNow(outsider, RESOURCE_ID)).rejects.toThrow();
+      await expect(service.discardSubstitution(outsider, RESOURCE_ID)).rejects.toThrow();
+    });
+  });
 });
 
 describe('DashboardService leituras operacionais', () => {
@@ -502,7 +614,13 @@ describe('DashboardService leituras operacionais', () => {
       ],
     ]);
     const result = await service.queue(actor);
-    expect(result.counts).toEqual({ mandatory: 2, optional: 1, total: 3 });
+    expect(result.counts).toEqual({
+      mandatory: 2,
+      optional: 1,
+      substitutionMandatory: 0,
+      substitutionOptional: 0,
+      total: 3,
+    });
     // Ambos são PROTOCOL agora, ordenados por idade (mais antigo primeiro).
     expect(
       result.mandatory.map((item) => ({
@@ -534,6 +652,78 @@ describe('DashboardService leituras operacionais', () => {
     expect(result.optional[0]?.origin).toBeNull();
     expect(result.optional[0]?.severity).toBe('ROUTINE');
     expect(result.optional[0]?.autoReleaseAt).toBe('2026-08-02T13:00:00.000Z');
+  });
+
+  // Achado 2026-09-02, ampliado 2026-09-03 (a pedido do fundador): proposta de
+  // substituição de exercício via IA entra na fila como `SUBSTITUTION`, em
+  // `substitutionOptional` quando o protocolo de origem NÃO veio de PAR-Q bloqueante —
+  // continua sempre auto-liberando.
+  it('proposta de substituição via IA sem origem em PAR-Q bloqueante entra em substitutionOptional', async () => {
+    const createdAt = new Date('2026-09-01T10:00:00.000Z');
+    const { service } = makeSequencedService([
+      [], // protocolos pendentes: nenhum
+      [
+        {
+          id: RESOURCE_ID,
+          createdAt,
+          status: 'PENDING',
+          name: 'Ana Teste',
+          parqState: 'LIBERADO',
+        },
+      ],
+    ]);
+    const result = await service.queue(actor);
+    expect(result.counts).toEqual({
+      mandatory: 0,
+      optional: 0,
+      substitutionMandatory: 0,
+      substitutionOptional: 1,
+      total: 1,
+    });
+    expect(result.substitutionOptional[0]).toMatchObject({
+      id: RESOURCE_ID,
+      kind: 'SUBSTITUTION',
+      severity: 'ROUTINE',
+      title: 'Substituição de Exercício: Ana Teste',
+      origin: 'AI_SUBSTITUTION',
+      autoReleaseAt: '2026-09-01T10:30:00.000Z',
+    });
+  });
+
+  // Achado 2026-09-03 (a pedido do fundador): aluno cujo protocolo ATIVO veio de PAR-Q
+  // bloqueante — a substituição entra em `substitutionMandatory`, `severity: SAFETY`,
+  // SEM prazo de auto-liberação (mesma regra de "nenhum sai sozinho" do protocolo
+  // MANDATORY — o job nem chega a ser agendado, ver `AiResponseWorker`).
+  it('proposta de substituição com origem em PAR-Q bloqueante entra em substitutionMandatory, sem auto-liberação', async () => {
+    const createdAt = new Date('2026-09-01T10:00:00.000Z');
+    const { service } = makeSequencedService([
+      [], // protocolos pendentes: nenhum
+      [
+        {
+          id: RESOURCE_ID,
+          createdAt,
+          status: 'PENDING',
+          name: 'Carla Teste',
+          parqState: 'BLOQUEADO_AGUARDANDO_CLEARANCE',
+        },
+      ],
+    ]);
+    const result = await service.queue(actor);
+    expect(result.counts).toEqual({
+      mandatory: 0,
+      optional: 0,
+      substitutionMandatory: 1,
+      substitutionOptional: 0,
+      total: 1,
+    });
+    expect(result.substitutionMandatory[0]).toMatchObject({
+      id: RESOURCE_ID,
+      kind: 'SUBSTITUTION',
+      severity: 'SAFETY',
+      title: 'Substituição de Exercício: Carla Teste',
+      origin: 'AI_SUBSTITUTION',
+      autoReleaseAt: null,
+    });
   });
 
   it('protocolo anterior à migração 0035 (sem sessão vinculada) segue na fila como EDIT', async () => {

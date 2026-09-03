@@ -10,6 +10,7 @@ import {
   CircleGauge,
   ClipboardCheck,
   Coins,
+  Dumbbell,
   FlaskConical,
   Handshake,
   Landmark,
@@ -34,12 +35,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ThemeToggle } from '@/components/theme-toggle';
 import {
   hasAllCapabilities,
-  ROLE_LABELS,
   type DashboardCapability,
   type DashboardRole,
 } from '@/lib/control-center-access';
 import { cn } from '@/lib/utils';
 
+import { AvatarMenu } from './avatar-menu';
 import { LogoutButton } from './logout-button';
 
 export interface DashboardNavigationItem {
@@ -99,6 +100,15 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
   {
     label: 'IA',
     items: [
+      {
+        // Achado 2026-09-02: base de exercícios que a IA pode prescrever. Vem antes de
+        // "Base de Conhecimento" porque é o vocabulário concreto do protocolo (o que pode
+        // ser prescrito), enquanto a Base de Conhecimento é o raciocínio por trás dele.
+        href: '/dashboard/ia/exercicios',
+        label: 'Exercícios',
+        icon: Dumbbell,
+        capabilities: ['control_center.ai.config.read'],
+      },
       {
         href: '/dashboard/ia/base-conhecimento',
         label: 'Base de Conhecimento',
@@ -401,9 +411,6 @@ function DashboardNavigation({
   );
 }
 
-const ACCESS_NOTICE =
-  'Cada setor mostra somente os dados necessários para este papel. Ações e leituras sensíveis são auditadas pelo servidor.';
-
 function PulsoMark({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 64 64" aria-hidden="true" className={cn('size-9 shrink-0', className)}>
@@ -590,10 +597,14 @@ function MobileDrawer({
 export function DashboardShell({
   role,
   capabilities,
+  name,
+  avatarUrl,
   children,
 }: {
   role: DashboardRole;
   capabilities: readonly DashboardCapability[];
+  name: string | null;
+  avatarUrl: string | null;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -662,22 +673,7 @@ export function DashboardShell({
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <span
-              title={ACCESS_NOTICE}
-              className="hidden rounded-full border border-verde-pulso/40 bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground sm:inline"
-            >
-              {ROLE_LABELS[role]}
-            </span>
-            <div className="hidden md:block">
-              <ThemeToggle />
-            </div>
-            <span
-              aria-hidden="true"
-              title={ROLE_LABELS[role]}
-              className="flex size-9 items-center justify-center rounded-full bg-verde-pulso text-label font-semibold text-petroleo"
-            >
-              {role.slice(0, 2)}
-            </span>
+            <AvatarMenu role={role} name={name} avatarUrl={avatarUrl} />
             <LogoutButton />
           </div>
         </header>

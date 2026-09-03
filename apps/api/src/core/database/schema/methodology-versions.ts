@@ -20,13 +20,6 @@ export const methodologyVersions = pgTable(
     version: integer('version').notNull(),
     versionLabel: varchar('version_label', { length: 80 }).notNull(),
     content: text('content').notNull(),
-    /**
-     * Resumo curto (200-1000 chars) publicado junto com a metodologia completa. É a única
-     * parte da metodologia que o coach conversacional alcança: o texto completo não está
-     * indexado em `knowledge_base`, então nem prompt nem RAG chegam nele hoje. Opcional —
-     * versão sem resumo omite o bloco, sem geração automática.
-     */
-    summary: text('summary'),
     contentSha256: varchar('content_sha256', { length: 64 }).notNull(),
     changeNote: text('change_note').notNull(),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'restrict' }),

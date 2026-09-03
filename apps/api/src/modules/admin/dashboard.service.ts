@@ -24,6 +24,7 @@ import {
   conversations,
   handoffAlerts,
   protocols,
+  protocolSubstitutionRequests,
   protocolVersions,
   subscriptions,
   users,
@@ -40,6 +41,8 @@ import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { buildProtocolPdf } from '../protocol/protocol-pdf.service';
 import { signatureHash } from '../protocol/protocol.repository';
+import { ProtocolSubstitutionRepository } from '../protocol/protocol-substitution.repository';
+import { AI_SUBSTITUTION_REVIEW_WINDOW_MS } from '../protocol/protocol-substitution-release.worker';
 import type { UserConstraints } from '../protocol/user-constraints';
 import { ValidationService } from '../protocol/validation/validation.service';
 import { PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS } from '../protocol/protocol-generation.worker';
@@ -75,7 +78,9 @@ type SignProtocolResult =
 const uuidSchema = z.uuid();
 // `PARQ` saiu do enum em 2026-08-24: não existe mais item de fila nem tela de PAR-Q — o
 // PAR-Q bloqueado agora vive DENTRO do item de protocolo (`origin: 'PARQ'`).
-const kindSchema = z.enum(['PROTOCOL', 'HANDOFF', 'CHECKIN']);
+// `SUBSTITUTION` entrou em 2026-09-02: proposta de substituição de exercício via IA, em
+// staging (`protocol_substitution_requests`) — ver `ProtocolSubstitutionRepository`.
+const kindSchema = z.enum(['PROTOCOL', 'HANDOFF', 'CHECKIN', 'SUBSTITUTION']);
 const editSchema = z.object({
   content: protocolStructureSchema,
   reason: z.string().trim().min(5).max(500),
@@ -89,27 +94,34 @@ const resolveSchema = z.object({
 
 export interface QueueItem {
   id: string;
-  kind: 'PROTOCOL' | 'HANDOFF' | 'CHECKIN';
+  kind: 'PROTOCOL' | 'HANDOFF' | 'CHECKIN' | 'SUBSTITUTION';
   severity: 'SAFETY' | 'ALERT' | 'ROUTINE';
   createdAt: string;
   ageMinutes: number;
   title: string;
   summary: string;
   status: string;
-  /** Só protocolos `OPTIONAL` na categoria "Disponível para Revisão" (fila do CREF). */
+  /** Só itens `OPTIONAL`/`PENDING` na categoria "Disponível para Revisão" (fila do CREF). */
   autoReleaseAt: string | null;
   /**
-   * POR QUE este protocolo exige revisão humana (2026-08-24). `PARQ` = a sessão de origem
-   * está `BLOQUEADO_AGUARDANDO_CLEARANCE` (alerta clínico — assinar aqui também libera o
-   * PAR-Q); `EDIT` = um CREF editou o conteúdo e precisa de sign-off fresco. `null` para
-   * itens `optional` e para os que não são protocolo — não têm motivo a exibir.
+   * POR QUE este item exige revisão humana (2026-08-24, ampliado 2026-09-02). `PARQ` = a
+   * sessão de origem está `BLOQUEADO_AGUARDANDO_CLEARANCE` (alerta clínico — assinar aqui
+   * também libera o PAR-Q); `EDIT` = um CREF editou o conteúdo e precisa de sign-off fresco;
+   * `AI_SUBSTITUTION` = troca de exercício confirmada pelo aluno via WhatsApp, aguardando
+   * revisão/liberação automática. `null` para os demais itens `optional` e para os que não
+   * são protocolo/substituição — não têm motivo a exibir.
    */
-  origin: 'PARQ' | 'EDIT' | null;
+  origin: 'PARQ' | 'EDIT' | 'AI_SUBSTITUTION' | null;
 }
 
 /** Titulo do item de fila de protocolo, com o nome completo do titular. */
 function protocolTitle(name: string | null | undefined) {
   return name ? `Protocolo para Revisão: ${name}` : 'Protocolo para Revisão';
+}
+
+/** Título do item de fila de substituição de exercício, com o nome completo do titular. */
+function substitutionTitle(name: string | null | undefined) {
+  return name ? `Substituição de Exercício: ${name}` : 'Substituição de Exercício';
 }
 
 @Injectable()
@@ -122,6 +134,7 @@ export class DashboardService {
     private readonly queues: QueueManager,
     private readonly queueEvents: DashboardQueueEventsService,
     private readonly healthConsent: HealthConsentService,
+    private readonly substitutionRepo: ProtocolSubstitutionRepository,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(DashboardService.name);
@@ -150,56 +163,116 @@ export class DashboardService {
    *   sempre existe.
    */
   async queue(actor: AuthenticatedUser) {
-    const { mandatory, optional } = await this.scopedRead(actor, async (tx) => {
-      // LEFT JOIN (não INNER): protocolo anterior à migração 0035 não tem
-      // `anamnesis_session_id` e continua aparecendo na fila normalmente, como `EDIT`.
-      const pendingProtocols = await tx
-        .select({
-          id: protocols.id,
-          createdAt: protocols.createdAt,
-          status: protocols.status,
-          name: users.name,
-          reviewUrgency: protocols.reviewUrgency,
-          parqState: anamnesisSessions.parqState,
-        })
-        .from(protocols)
-        .innerJoin(users, eq(users.id, protocols.userId))
-        .leftJoin(anamnesisSessions, eq(anamnesisSessions.id, protocols.anamnesisSessionId))
-        .where(eq(protocols.approvalStatus, 'PENDING_REVIEW'));
+    const { mandatory, optional, substitutionMandatory, substitutionOptional } =
+      await this.scopedRead(actor, async (tx) => {
+        // LEFT JOIN (não INNER): protocolo anterior à migração 0035 não tem
+        // `anamnesis_session_id` e continua aparecendo na fila normalmente, como `EDIT`.
+        const pendingProtocols = await tx
+          .select({
+            id: protocols.id,
+            createdAt: protocols.createdAt,
+            status: protocols.status,
+            name: users.name,
+            reviewUrgency: protocols.reviewUrgency,
+            parqState: anamnesisSessions.parqState,
+          })
+          .from(protocols)
+          .innerJoin(users, eq(users.id, protocols.userId))
+          .leftJoin(anamnesisSessions, eq(anamnesisSessions.id, protocols.anamnesisSessionId))
+          .where(eq(protocols.approvalStatus, 'PENDING_REVIEW'));
 
-      const mandatory: QueueItem[] = [];
-      const optional: QueueItem[] = [];
-      for (const row of pendingProtocols) {
-        const isOptional = row.reviewUrgency === 'OPTIONAL';
-        const fromParq = row.parqState === 'BLOQUEADO_AGUARDANDO_CLEARANCE';
-        (isOptional ? optional : mandatory).push(
-          this.item(
-            row.id,
-            'PROTOCOL',
-            isOptional ? 'ROUTINE' : fromParq ? 'SAFETY' : 'ALERT',
-            row.createdAt,
-            protocolTitle(row.name),
-            row.status,
-            row.status,
-            isOptional
-              ? new Date(row.createdAt.getTime() + PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS).toISOString()
-              : null,
-            isOptional ? null : fromParq ? 'PARQ' : 'EDIT',
-          ),
-        );
-      }
+        const mandatory: QueueItem[] = [];
+        const optional: QueueItem[] = [];
+        for (const row of pendingProtocols) {
+          const isOptional = row.reviewUrgency === 'OPTIONAL';
+          const fromParq = row.parqState === 'BLOQUEADO_AGUARDANDO_CLEARANCE';
+          (isOptional ? optional : mandatory).push(
+            this.item(
+              row.id,
+              'PROTOCOL',
+              isOptional ? 'ROUTINE' : fromParq ? 'SAFETY' : 'ALERT',
+              row.createdAt,
+              protocolTitle(row.name),
+              row.status,
+              row.status,
+              isOptional
+                ? new Date(
+                    row.createdAt.getTime() + PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS,
+                  ).toISOString()
+                : null,
+              isOptional ? null : fromParq ? 'PARQ' : 'EDIT',
+            ),
+          );
+        }
 
-      const byAge = (a: QueueItem, b: QueueItem) => a.createdAt.localeCompare(b.createdAt);
-      return { mandatory: mandatory.sort(byAge), optional: optional.sort(byAge) };
-    });
+        // Propostas de substituição de exercício via IA, ainda pendentes de decisão. Desde
+        // 2026-09-03 (a pedido do fundador) têm a MESMA divisão obrigatória/opcional do
+        // protocolo: `substitutionMandatory` quando a sessão de origem do protocolo ATIVO do
+        // titular está `BLOQUEADO_AGUARDANDO_CLEARANCE` (mesmo LEFT JOIN de `pendingProtocols`
+        // acima) — essas nunca têm `autoReleaseAt` (o job nem chega a ser agendado, ver
+        // `AiResponseWorker.applyAndPersistSubstitution`). As demais continuam em
+        // `substitutionOptional`, auto-liberando em 30min como sempre.
+        const pendingSubstitutions = await tx
+          .select({
+            id: protocolSubstitutionRequests.id,
+            createdAt: protocolSubstitutionRequests.createdAt,
+            status: protocolSubstitutionRequests.status,
+            name: users.name,
+            parqState: anamnesisSessions.parqState,
+          })
+          .from(protocolSubstitutionRequests)
+          .innerJoin(users, eq(users.id, protocolSubstitutionRequests.userId))
+          .leftJoin(protocols, eq(protocols.id, protocolSubstitutionRequests.protocolId))
+          .leftJoin(anamnesisSessions, eq(anamnesisSessions.id, protocols.anamnesisSessionId))
+          .where(eq(protocolSubstitutionRequests.status, 'PENDING'));
+
+        const substitutionMandatory: QueueItem[] = [];
+        const substitutionOptional: QueueItem[] = [];
+        for (const row of pendingSubstitutions) {
+          const fromParq = row.parqState === 'BLOQUEADO_AGUARDANDO_CLEARANCE';
+          (fromParq ? substitutionMandatory : substitutionOptional).push(
+            this.item(
+              row.id,
+              'SUBSTITUTION',
+              fromParq ? 'SAFETY' : 'ROUTINE',
+              row.createdAt,
+              substitutionTitle(row.name),
+              row.status,
+              row.status,
+              fromParq
+                ? null
+                : new Date(
+                    row.createdAt.getTime() + AI_SUBSTITUTION_REVIEW_WINDOW_MS,
+                  ).toISOString(),
+              'AI_SUBSTITUTION',
+            ),
+          );
+        }
+
+        const byAge = (a: QueueItem, b: QueueItem) => a.createdAt.localeCompare(b.createdAt);
+        return {
+          mandatory: mandatory.sort(byAge),
+          optional: optional.sort(byAge),
+          substitutionMandatory: substitutionMandatory.sort(byAge),
+          substitutionOptional: substitutionOptional.sort(byAge),
+        };
+      });
 
     return {
       mandatory,
       optional,
+      substitutionMandatory,
+      substitutionOptional,
       counts: {
         mandatory: mandatory.length,
         optional: optional.length,
-        total: mandatory.length + optional.length,
+        substitutionMandatory: substitutionMandatory.length,
+        substitutionOptional: substitutionOptional.length,
+        total:
+          mandatory.length +
+          optional.length +
+          substitutionMandatory.length +
+          substitutionOptional.length,
       },
     };
   }
@@ -214,6 +287,7 @@ export class DashboardService {
     const id = this.parse(uuidSchema, rawId);
     if (kind === 'PROTOCOL') return this.protocolDetail(actor, id);
     if (kind === 'CHECKIN') return this.checkinDetail(actor, id);
+    if (kind === 'SUBSTITUTION') return this.substitutionDetail(actor, id);
     return this.handoffDetail(actor, id);
   }
 
@@ -497,6 +571,158 @@ export class DashboardService {
       signedAt: signed.signedAt,
       alreadySigned: signed.alreadySigned,
     };
+  }
+
+  /**
+   * Detalhe de uma proposta de substituição de exercício via IA (achado 2026-09-02): o que
+   * vai virar o quê, o motivo, e a conversa recente em volta (contexto pro profissional
+   * decidir sem precisar abrir o WhatsApp à parte).
+   */
+  private async substitutionDetail(actor: AuthenticatedUser, id: string) {
+    return this.scopedRead(actor, async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(protocolSubstitutionRequests)
+        .where(eq(protocolSubstitutionRequests.id, id))
+        .limit(1);
+      if (!row) throw new NotFoundException('Proposta de substituição nao encontrada.');
+      const [owner] = await tx
+        .select({ name: users.name })
+        .from(users)
+        .where(eq(users.id, row.userId))
+        .limit(1);
+      await this.auditRead(tx, actor, row.userId, 'protocol_substitution_request', id);
+
+      const replayRows = await tx
+        .select({
+          id: conversations.id,
+          userId: conversations.userId,
+          direction: conversations.direction,
+          content: conversations.content,
+          createdAt: conversations.createdAt,
+          name: users.name,
+          phoneNumber: users.phoneNumber,
+          email: users.email,
+        })
+        .from(conversations)
+        .innerJoin(users, eq(users.id, conversations.userId))
+        .where(eq(conversations.userId, row.userId))
+        .orderBy(desc(conversations.createdAt))
+        .limit(20);
+
+      const item = this.item(
+        id,
+        'SUBSTITUTION',
+        'ROUTINE',
+        row.createdAt,
+        substitutionTitle(owner?.name),
+        row.status,
+        row.status,
+        row.status === 'PENDING'
+          ? new Date(row.createdAt.getTime() + AI_SUBSTITUTION_REVIEW_WINDOW_MS).toISOString()
+          : null,
+        'AI_SUBSTITUTION',
+      );
+      return {
+        item,
+        context: {},
+        substitution: {
+          id: row.id,
+          protocolId: row.protocolId,
+          from: { id: row.fromExerciseId, name: row.fromExerciseName },
+          to: { id: row.toExerciseId, name: row.toExerciseName },
+          diff: row.diff,
+          changeReason: row.changeReason,
+          status: row.status,
+          decidedAt: row.decidedAt?.toISOString() ?? null,
+        },
+        replay: this.groupReplays(replayRows)[0],
+      };
+    });
+  }
+
+  /**
+   * Profissional aprova a troca ANTES da janela de 30 min — aplica imediatamente, mesma
+   * mecânica de `ProtocolSubstitutionReleaseWorker` (reusada via `ProtocolSubstitutionRepository
+   * .release()`, o único caminho que de fato aplica). PDF completo do protocolo atualizado é
+   * gerado e a entrega por WhatsApp reusa o mesmo pipeline (`PROTOCOL_DELIVERY`).
+   */
+  async approveSubstitutionNow(actor: AuthenticatedUser, rawId: string) {
+    this.assertStaffWrite(actor);
+    const id = this.parse(uuidSchema, rawId);
+    const release = await this.substitutionRepo.release(
+      { userId: actor.userId, role: actor.role },
+      id,
+    );
+    if (!release.released) {
+      throw new BadRequestException(
+        'Proposta ja decidida, ou o protocolo mudou de versao desde a proposta.',
+      );
+    }
+
+    let pdf: Buffer | null = null;
+    try {
+      const { personal } = await this.protocolAnamnesisAnswers(actor, release.protocolId);
+      pdf = await buildProtocolPdf({
+        content: release.content,
+        mesocycleName: release.mesocycleName,
+        startDate: release.startDate,
+        endDate: release.endDate,
+        totalWeeks: release.totalWeeks,
+        signatureHash: null,
+        signedAt: null,
+        student: personal,
+      });
+    } catch (error) {
+      this.logger.warn(
+        { id, err: error instanceof Error ? error.message : String(error) },
+        'geracao do PDF da substituicao aprovada manualmente falhou — entrega cai para texto+link',
+      );
+    }
+    if (pdf) {
+      await this.scoped(actor, (tx) =>
+        tx.update(protocols).set({ pdfContent: pdf }).where(eq(protocols.id, release.protocolId)),
+      );
+    }
+
+    await this.queues.enqueue(
+      QUEUE.whatsappOutbound,
+      'protocol-delivery',
+      {
+        userId: release.userId,
+        protocolId: release.protocolId,
+        protocolVersion: release.version,
+        type: 'PROTOCOL_DELIVERY',
+      },
+      { jobId: `substitution-delivery_manual_${id}` },
+    );
+    this.queueEvents.emit('protocol');
+    return { id, protocolId: release.protocolId, version: release.version, released: true };
+  }
+
+  /** Profissional recusa a troca — mantém o exercício original, sem tocar o protocolo. */
+  async discardSubstitution(actor: AuthenticatedUser, rawId: string) {
+    this.assertStaffWrite(actor);
+    const id = this.parse(uuidSchema, rawId);
+    const result = await this.substitutionRepo.discard(
+      { userId: actor.userId, role: actor.role },
+      id,
+    );
+    if (!result.discarded) {
+      throw new BadRequestException('Proposta ja decidida — nao ha mais o que recusar.');
+    }
+    await this.scoped(actor, (tx) =>
+      this.audit.append(tx, {
+        actorId: actor.userId,
+        userId: result.userId,
+        action: 'PROTOCOL_SUBSTITUTION_DISCARDED',
+        entityType: 'protocol_substitution_request',
+        entityId: id,
+        changes: {},
+      }),
+    );
+    this.queueEvents.emit('protocol');
+    return { id, discarded: true };
   }
 
   async resolveHandoff(actor: AuthenticatedUser, rawId: string, rawBody: unknown) {

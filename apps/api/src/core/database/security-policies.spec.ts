@@ -49,6 +49,8 @@ describe('buildRlsPoliciesSql', () => {
       'ai_jobs',
       'protocols',
       'protocol_versions',
+      // Achado 2026-09-02 — proposta de substituição de exercício via IA, em staging.
+      'protocol_substitution_requests',
       'coaching_sessions',
       'handoff_alerts',
       'subscriptions',

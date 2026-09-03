@@ -14,6 +14,7 @@
 import type { ProtocolStructure } from '@movivo/shared';
 
 import type { ContraindicationTag } from '../exercise-catalog';
+import { PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import type { ValidateProtocolInput, ValidationAction } from './validation.service';
 
 export const GOLDEN_SET_VERSION = 'golden-set-2026-08-v2';
@@ -28,12 +29,18 @@ export interface GoldenCase {
   input: ValidateProtocolInput;
 }
 
-/** Sessão limpa base: exercícios da base, sem contraindicação p/ usuário sem lesão. */
+/**
+ * Sessão limpa base: exercícios da base, sem contraindicação p/ usuário sem lesão.
+ * `phaseDurationWeeks` acompanha `phase` automaticamente (piso da faixa da fase) — quem
+ * sobrescreve só `phase` continua com uma duração VÁLIDA, sem precisar sobrescrever os dois.
+ */
 function cleanStructure(over: Partial<ProtocolStructure> = {}): ProtocolStructure {
+  const phase = over.phase ?? 'ADAPTACAO';
   return {
     promptVersion: 'golden-v1',
     goal: 'GAIN_MUSCLE',
-    phase: 'ADAPTACAO',
+    phase,
+    phaseDurationWeeks: PHASE_DURATION_WEEKS_RANGE[phase].minWeeks,
     weeklyFrequency: 3,
     sessions: [
       {
@@ -41,16 +48,16 @@ function cleanStructure(over: Partial<ProtocolStructure> = {}): ProtocolStructur
         focus: 'Corpo inteiro',
         exercises: [
           {
-            exerciseId: 'goblet_squat',
-            name: 'Agachamento goblet',
+            exerciseId: 'agachamento_goblet',
+            name: 'Agachamento Goblet',
             sets: 3,
             reps: { min: 8, max: 12 },
             loadStrategy: 'DOUBLE_PROGRESSION',
             restSeconds: 90,
           },
           {
-            exerciseId: 'db_bench_press',
-            name: 'Supino com halteres',
+            exerciseId: 'supino_reto_halter',
+            name: 'Supino Reto (Halter)',
             sets: 3,
             reps: { min: 8, max: 12 },
             loadStrategy: 'DOUBLE_PROGRESSION',
@@ -99,7 +106,7 @@ function allExercisesWithTechnique(): ProtocolStructure {
   if (!session || !first) throw new Error('fixture inválida');
   session.exercises = [
     { ...first, technique: 'DROP_SET' },
-    { ...first, exerciseId: 'db_bench_press', technique: 'REST_PAUSE' },
+    { ...first, exerciseId: 'supino_reto_halter', technique: 'REST_PAUSE' },
     { ...first, exerciseId: 'dead_bug', technique: 'PIRAMIDE' },
   ];
   return s;
@@ -137,8 +144,8 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
             focus: 'Circuito',
             exercises: [
               {
-                exerciseId: 'bodyweight_squat',
-                name: 'Agachamento livre',
+                exerciseId: 'agachamento_peso_corporal',
+                name: 'Agachamento (Peso Corporal)',
                 sets: 3,
                 reps: { min: 15, max: 25 },
                 loadStrategy: 'BODYWEIGHT',
@@ -171,7 +178,10 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     expected: 'BLOCK_FALLBACK',
     expectRule: 'EXERCISE_CONTRAINDICATED',
     input: {
-      structure: withExercise({ exerciseId: 'leg_press', name: 'Leg press' }),
+      structure: withExercise({
+        exerciseId: 'leg_press_45_maquina',
+        name: 'Leg Press 45º (Máquina)',
+      }),
       constraints: { goal: 'GAIN_MUSCLE', injuryTags: ['KNEE'] as ContraindicationTag[] },
     },
   },
@@ -203,8 +213,8 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     expected: 'PASS',
     input: baseInput(
       withExercise({
-        exerciseId: 'plank',
-        name: 'Prancha isométrica',
+        exerciseId: 'prancha',
+        name: 'Prancha',
         reps: undefined,
         durationSeconds: 40,
       }),
@@ -216,8 +226,8 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     expected: 'PASS',
     input: baseInput(
       withExercise({
-        exerciseId: 'brisk_walk',
-        name: 'Caminhada acelerada',
+        exerciseId: 'caminhada',
+        name: 'Caminhada',
         sets: 1,
         reps: undefined,
         durationSeconds: 900,
@@ -234,8 +244,8 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     expected: 'PASS',
     input: baseInput(
       withExercise({
-        exerciseId: 'wall_sit',
-        name: 'Isometria na parede',
+        exerciseId: 'agachamento_isometrico_na_parede',
+        name: 'Agachamento Isométrico na Parede',
         reps: undefined,
         durationSeconds: 45,
       }),
@@ -248,8 +258,8 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     expectRule: 'DURATION_OUT_OF_RANGE',
     input: baseInput(
       withExercise({
-        exerciseId: 'plank',
-        name: 'Prancha isométrica',
+        exerciseId: 'prancha',
+        name: 'Prancha',
         reps: undefined,
         durationSeconds: 600,
       }),
@@ -370,16 +380,16 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
             focus: 'Peito',
             exercises: [
               {
-                exerciseId: 'db_fly',
-                name: 'Crucifixo com halteres',
+                exerciseId: 'crucifixo_reto_halter',
+                name: 'Crucifixo Reto (Halter)',
                 sets: 3,
                 reps: { min: 8, max: 12 },
                 loadStrategy: 'DOUBLE_PROGRESSION',
                 restSeconds: 60,
               },
               {
-                exerciseId: 'cable_crossover',
-                name: 'Crucifixo na polia',
+                exerciseId: 'crossover_na_polia',
+                name: 'Crossover na Polia',
                 sets: 3,
                 reps: { min: 8, max: 12 },
                 loadStrategy: 'DOUBLE_PROGRESSION',
@@ -397,7 +407,7 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     expected: 'BLOCK_FALLBACK',
     expectRule: 'EXERCISE_LEVEL_TOO_HIGH',
     input: {
-      structure: withExercise({ exerciseId: 'bench_press', name: 'Supino reto' }),
+      structure: withExercise({ exerciseId: 'agachamento_barra', name: 'Agachamento (Barra)' }),
       constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'INICIANTE' },
     },
   },

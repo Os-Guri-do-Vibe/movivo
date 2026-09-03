@@ -7,6 +7,8 @@ const STATIC_MUTATIONS = new Set([
   'ai/faq',
   'ai/faq/rollback',
   'ai/faq/retire',
+  'ai/exercise-catalog',
+  'ai/exercise-catalog/retire',
   'ai/guardrails',
   'ai/guardrails/rollback',
   'ai/guardrails/retire',

@@ -9,17 +9,23 @@ let auth: {
   login: ReturnType<typeof vi.fn>;
   refresh: ReturnType<typeof vi.fn>;
   logout: ReturnType<typeof vi.fn>;
+  getProfile: ReturnType<typeof vi.fn>;
 };
 let res: { cookie: ReturnType<typeof vi.fn>; clearCookie: ReturnType<typeof vi.fn> };
 let controller: AuthController;
 
-const config = { jwt: { refreshTtlSeconds: 2_592_000 }, isProduction: false };
+const config = {
+  jwt: { refreshTtlSeconds: 2_592_000 },
+  isProduction: false,
+  avatarUrl: vi.fn((path: string | null) => (path ? `https://api.test/avatar/${path}` : null)),
+};
 
 beforeEach(() => {
   auth = {
     login: vi.fn(),
     refresh: vi.fn(),
     logout: vi.fn(async () => undefined),
+    getProfile: vi.fn(async () => ({ name: 'Ana Souza', avatarPath: 'abc.jpg' })),
   };
   res = { cookie: vi.fn(), clearCookie: vi.fn() };
   controller = new AuthController(auth as never, config as never);
@@ -80,12 +86,16 @@ describe('POST /auth/logout', () => {
 });
 
 describe('endpoints de sanidade', () => {
-  it('GET /auth/me devolve o usuário autenticado', () => {
-    expect(controller.me({ userId: 'u1', role: 'USER', jti: 'j1' })).toEqual({
+  it('GET /auth/me devolve o usuário autenticado, incluindo nome e avatar cadastrados', async () => {
+    await expect(controller.me({ userId: 'u1', role: 'USER', jti: 'j1' })).resolves.toEqual({
       userId: 'u1',
       role: 'USER',
+      name: 'Ana Souza',
+      avatarUrl: 'https://api.test/avatar/abc.jpg',
       capabilities: [],
     });
+    expect(auth.getProfile).toHaveBeenCalledWith('u1');
+    expect(config.avatarUrl).toHaveBeenCalledWith('abc.jpg');
   });
 
   it('GET /auth/admin/ping devolve ok com o papel', () => {

@@ -5,7 +5,7 @@ import { KnowledgeBaseShell } from '@/components/dashboard/knowledge-base-shell'
 import { requireDashboardCapability } from '../../_lib/session';
 
 export const metadata: Metadata = {
-  title: 'Base de Conhecimento | MOVIVO Control Center',
+  title: { absolute: 'Base de Conhecimento | Movivo - Plataforma Interna' },
 };
 
 export default async function KnowledgeBaseLayout({ children }: { children: React.ReactNode }) {

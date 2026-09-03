@@ -100,6 +100,9 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   // tem `user_id` denormalizado justamente para ancorar a RLS sem JOIN (Sato §4.5).
   { table: 'protocols', column: 'user_id', professional: 'write' },
   { table: 'protocol_versions', column: 'user_id', professional: 'write' },
+  // Achado 2026-09-02: proposta de substituição de exercício via IA, em staging até
+  // aprovação/janela de cortesia — mesma FORCE RLS por titular de `protocols`.
+  { table: 'protocol_substitution_requests', column: 'user_id', professional: 'write' },
   // Sprint 3 (US-3.2): resumo de longo prazo da conversa de saúde — mesma FORCE RLS por titular.
   { table: 'coaching_sessions', column: 'user_id', professional: 'read' },
   // Sprint 3 (US-3.6): alerta/handoff ao painel CREF — dado de titular, isolado por RLS FORCE.

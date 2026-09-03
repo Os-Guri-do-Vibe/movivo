@@ -318,8 +318,15 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
 
   async currentInstanceName(): Promise<string | null> {
     const res = await this.request('/instance/fetchInstances', { method: 'GET' });
-    const body = (await res.json()) as Array<{ name?: string }>;
-    const name = body[0]?.name ?? null;
+    const body = (await res.json()) as Array<{ name?: string; createdAt?: string }>;
+    // Achado 2026-09-02: com mais de uma instância criada (teste local reaproveitando o
+    // mesmo número — cada instância nova derruba a sessão da anterior com um conflito
+    // "device_removed" do WhatsApp), o índice [0] cru pegava a instância mais ANTIGA, não
+    // a "mais recente" que este método promete: a EvolutionAPI devolve `fetchInstances` em
+    // ordem ASCENDENTE de criação. `connectionStatus` do próprio endpoint não é confiável
+    // pro status real (comentário do cabeçalho do arquivo) — a ordenação usa só `createdAt`.
+    const sorted = [...body].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+    const name = sorted[0]?.name ?? null;
     // Todo caminho que já descobre o nome alimenta o cache lido pela borda de ENTRADA.
     if (name) this.knownInstanceName = name;
     return name;

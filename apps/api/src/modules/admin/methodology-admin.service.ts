@@ -26,7 +26,6 @@ interface MethodologyListRow {
   version: number;
   version_label: string;
   content: string;
-  summary: string | null;
   content_sha256: string;
   change_note: string;
   status: MethodologyStatus;
@@ -49,7 +48,7 @@ export class MethodologyAdminService {
     const rows = await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
       const result = (await tx.execute(sql`
         SELECT version.id, version.version, version.version_label, version.content,
-          version.content_sha256, version.summary, version.change_note, version.created_at,
+          version.content_sha256, version.change_note, version.created_at,
           creator.name AS created_by_name, latest.status,
           latest.created_at AS status_changed_at, last_actor.name AS last_actor_name
         FROM methodology_versions version
@@ -80,7 +79,6 @@ export class MethodologyAdminService {
         version: Number(row.version),
         versionLabel: row.version_label,
         content: row.content,
-        summary: row.summary,
         contentSha256: row.content_sha256,
         changeNote: row.change_note,
         status: row.status,
@@ -107,11 +105,11 @@ export class MethodologyAdminService {
       if (existing.length) throw new ConflictException('Esta metodologia já possui uma versão.');
       const rows = (await tx.execute(sql`
         INSERT INTO methodology_versions (
-          version, version_label, content, summary, content_sha256, change_note, created_by
+          version, version_label, content, content_sha256, change_note, created_by
         )
         SELECT COALESCE(max(version), 0) + 1,
           'methodology-v' || (COALESCE(max(version), 0) + 1)::text,
-          ${input.content}, ${input.summary ?? null}, ${hash}, ${input.changeNote}, ${actor.userId}::uuid
+          ${input.content}, ${hash}, ${input.changeNote}, ${actor.userId}::uuid
         FROM methodology_versions
         RETURNING id, version
       `)) as unknown as Array<{ id: string; version: number }>;
@@ -224,17 +222,17 @@ export class MethodologyAdminService {
     await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('movivo.methodology.workflow'))`);
       const source = (await tx.execute(sql`
-        SELECT content, summary FROM methodology_versions WHERE id = ${input.versionId}::uuid
-      `)) as unknown as Array<{ content: string; summary: string | null }>;
+        SELECT content FROM methodology_versions WHERE id = ${input.versionId}::uuid
+      `)) as unknown as Array<{ content: string }>;
       if (!source[0]) throw new NotFoundException('Versão de metodologia inexistente.');
       const hash = createHash('sha256').update(source[0].content).digest('hex');
       const rows = (await tx.execute(sql`
         INSERT INTO methodology_versions (
-          version, version_label, content, summary, content_sha256, change_note, created_by
+          version, version_label, content, content_sha256, change_note, created_by
         )
         SELECT COALESCE(max(version), 0) + 1,
           'methodology-v' || (COALESCE(max(version), 0) + 1)::text,
-          ${source[0].content}, ${source[0].summary}, ${hash},
+          ${source[0].content}, ${hash},
           ${`Rollback proposto: ${input.note}`}, ${actor.userId}::uuid
         FROM methodology_versions
         RETURNING id, version

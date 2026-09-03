@@ -114,7 +114,7 @@ describe('SubscriptionModule — gateway MOCK e ciclo de vida (US-4.1)', () => {
     const [row] = await adminClient<Array<{ status: string; price_cents: number }>>`
       SELECT status, price_cents FROM subscriptions WHERE user_id = ${userId}`;
     expect(row.status).toBe('TRIALING');
-    expect(row.price_cents).toBe(3900);
+    expect(row.price_cents).toBe(7990);
   });
 
   it('checkout confirmado → ACTIVE; reenvio é idempotente', async () => {
@@ -124,7 +124,7 @@ describe('SubscriptionModule — gateway MOCK e ciclo de vida (US-4.1)', () => {
       userId,
       externalSubscriptionId: `sub_${RUN}_${seq}`,
       plan: 'ANNUAL',
-      priceCents: 34900,
+      priceCents: 71500,
     });
 
     expect((await svc.applyGatewayEvent(event)).status).toBe('ACTIVE');
@@ -149,7 +149,7 @@ describe('SubscriptionModule — gateway MOCK e ciclo de vida (US-4.1)', () => {
         userId,
         externalSubscriptionId: sub,
         plan: 'MONTHLY',
-        priceCents: 3900,
+        priceCents: 7990,
       }),
     );
     expect(
@@ -168,7 +168,7 @@ describe('SubscriptionModule — gateway MOCK e ciclo de vida (US-4.1)', () => {
           userId,
           externalSubscriptionId: sub,
           plan: 'MONTHLY',
-          priceCents: 3900,
+          priceCents: 7990,
         }),
       ),
     ).rejects.toBeInstanceOf(InvalidTransitionError);
@@ -196,7 +196,7 @@ describe('Ações self-service: cancelar / pausar / retomar (US-4.5)', () => {
       userId,
       externalSubscriptionId: `ext_${userId}`,
       plan: 'MONTHLY',
-      priceCents: 3900,
+      priceCents: 7990,
     });
   }
 

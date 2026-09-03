@@ -15,13 +15,9 @@ import { Injectable } from '@nestjs/common';
 import type { ProtocolStructure, Weekday } from '@movivo/shared';
 
 import { canonicalizeSecurityText } from '../../../core/agent-config/text-normalize';
-import {
-  type ContraindicationTag,
-  EXERCISE_BY_ID,
-  EXERCISE_CATALOG,
-  type ExerciseLevel,
-  LEVEL_ORDER,
-} from '../exercise-catalog';
+import { type ContraindicationTag, type ExerciseLevel, LEVEL_ORDER } from '../exercise-catalog';
+import { ExerciseCatalogProvider } from '../exercise-catalog-provider.service';
+import { isPhaseDurationWithinRange, PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import type { UserConstraints } from '../user-constraints';
 import { containsPromptLeak } from './prompt-injection';
 import {
@@ -41,6 +37,12 @@ export type ValidationAction = 'PASS' | 'FLAG_HUMAN_REVIEW' | 'BLOCK_FALLBACK';
 
 /** Piso de Repetições em Reserva sob teto de PAR-Q — nunca treinar perto da falha. */
 const PARQ_MIN_RIR = 2;
+
+/**
+ * Piso mais alto para quem tem alerta CARDÍACO aberto no PAR-Q (Q1/Q2/Q3/Q5) — RIR é proxy
+ * de esforço percebido e de resposta cardiovascular aguda, não só de risco ortopédico.
+ */
+const PARQ_CARDIAC_MIN_RIR = 3;
 
 export interface ValidationViolation {
   rule: string;
@@ -92,8 +94,19 @@ export interface ValidateResponseOptions {
   allowedExercises?: readonly string[];
 }
 
+/* v8 ignore start -- ramo sintético do `emitDecoratorMetadata` (design:paramtypes), não
+ * lógica de aplicação: os hits do lcov mostram que independe do argumento passado ao
+ * construtor, dispara uma vez por carregamento do módulo. */
 @Injectable()
+/* v8 ignore stop */
 export class ValidationService {
+  /**
+   * `catalog` tem valor padrão de propósito: os ~10 call sites que hoje fazem
+   * `new ValidationService()` (testes unitários) continuam funcionando sem harness do Nest
+   * nem banco — servem o bootstrap estático, o mesmo catálogo de antes desta mudança.
+   */
+  constructor(private readonly catalog: ExerciseCatalogProvider = new ExerciseCatalogProvider()) {}
+
   /** Veredito determinístico sobre o protocolo inteiro. Nunca lança — sempre devolve. */
   validate(input: ValidateProtocolInput): ValidationVerdict {
     const violations: ValidationViolation[] = [];
@@ -111,6 +124,7 @@ export class ValidationService {
     this.checkStructure(input.structure, input.constraints.goal, level, excluded, violations);
     this.checkMethodology(input.structure, level, input.constraints.preferredDays, violations);
     this.checkParq(input.structure, input.parqFlags ?? [], input.constraints.maxPhase, violations);
+    this.checkPhaseDuration(input.structure, violations);
     this.checkLanguage(collectText(input.structure), violations);
 
     return aggregate(violations);
@@ -140,7 +154,7 @@ export class ValidationService {
     const allowedSet = new Set(
       allowed.map((a) => canonicalizeSecurityText(a).toLocaleLowerCase('pt-BR')),
     );
-    for (const ex of EXERCISE_CATALOG) {
+    for (const ex of this.catalog.getAll()) {
       const exerciseName = canonicalizeSecurityText(ex.name).toLocaleLowerCase('pt-BR');
       if (allowedSet.has(exerciseName) || allowedSet.has(ex.id)) continue;
       if (lower.includes(exerciseName)) {
@@ -163,7 +177,7 @@ export class ValidationService {
     const repsRange = REPS_RANGE_BY_GOAL[goal];
     for (const session of structure.sessions) {
       for (const ex of session.exercises) {
-        const catalog = EXERCISE_BY_ID.get(ex.exerciseId);
+        const catalog = this.catalog.getById(ex.exerciseId);
         if (!catalog) {
           out.push({
             rule: 'EXERCISE_UNKNOWN',
@@ -232,6 +246,27 @@ export class ValidationService {
   }
 
   /**
+   * Achado 2026-09-02 (correção do fundador): `phaseDurationWeeks` é quem decide
+   * `total_weeks`/`end_date` do protocolo — a IA declara a duração do mesociclo dentro da
+   * faixa baseada em evidência da fase escolhida (`PHASE_DURATION_WEEKS_RANGE`,
+   * `protocol-timeline.ts`). Nunca confiar só no prompt: mesmo raciocínio de defesa em
+   * profundidade de `REPS_OUT_OF_RANGE`/`DURATION_OUT_OF_RANGE` acima — um valor fora da
+   * faixa da fase é BLOCK, não um ajuste silencioso.
+   */
+  private checkPhaseDuration(structure: ProtocolStructure, out: ValidationViolation[]): void {
+    if (!isPhaseDurationWithinRange(structure.phase, structure.phaseDurationWeeks)) {
+      const range = PHASE_DURATION_WEEKS_RANGE[structure.phase];
+      out.push({
+        rule: 'PHASE_DURATION_OUT_OF_RANGE',
+        detail:
+          `fase ${structure.phase}: ${structure.phaseDurationWeeks} semana(s), fora da faixa ` +
+          `${range.minWeeks}-${range.maxWeeks}`,
+        action: 'BLOCK',
+      });
+    }
+  }
+
+  /**
    * Metodologia v2 do RT: divisão coerente com nível e frequência real, isolado como
    * complemento (nunca base da sessão) e técnica avançada como recurso pontual restrito a
    * intermediário/avançado. Tudo BLOCK — divisão/intensidade acima
@@ -294,7 +329,7 @@ export class ValidationService {
     for (const session of structure.sessions) {
       // RT item 2: isolado é COMPLEMENTO, nunca a base da sessão. Sessão só de isolados passava.
       const isolation = session.exercises.filter(
-        (ex) => EXERCISE_BY_ID.get(ex.exerciseId)?.pattern === 'ISOLATION',
+        (ex) => this.catalog.getById(ex.exerciseId)?.pattern === 'ISOLATION',
       ).length;
       if (isolation > session.exercises.length - isolation) {
         out.push({
@@ -359,13 +394,22 @@ export class ValidationService {
       }
       // Piso de RIR: quem tem alerta clínico aberto não treina perto da falha. `rir`
       // é opcional no schema — ausente não é violação (o exercício simplesmente não
-      // prescreve proximidade de falha); declarado abaixo de 2 é.
+      // prescreve proximidade de falha); declarado abaixo do piso é.
+      //
+      // Achado 2026-09-02: piso único (2) tratava restrição cardiovascular igual a
+      // restrição ortopédica. RIR mede proximidade da falha — proxy direto de esforço
+      // percebido e resposta cardiovascular aguda (FC/PA sobem com a proximidade da
+      // falha), não só de técnica sob fadiga. Para quem tem alerta CARDÍACO aberto
+      // (PAR-Q Q1/Q2/Q3/Q5 — problema no coração, dor no peito, medicação de pressão),
+      // o piso sobe: a mesma folga que basta pra proteger uma articulação não basta pra
+      // conter a resposta cardiovascular de alguém nessa condição.
+      const rirFloor = parqFlags.includes('CARDIAC') ? PARQ_CARDIAC_MIN_RIR : PARQ_MIN_RIR;
       for (const session of structure.sessions) {
         for (const ex of session.exercises) {
-          if (ex.rir !== undefined && ex.rir < PARQ_MIN_RIR) {
+          if (ex.rir !== undefined && ex.rir < rirFloor) {
             out.push({
               rule: 'PARQ_RIR_TOO_LOW',
-              detail: `${ex.exerciseId}: rir ${ex.rir} abaixo do piso ${PARQ_MIN_RIR} exigido pelo PAR-Q`,
+              detail: `${ex.exerciseId}: rir ${ex.rir} abaixo do piso ${rirFloor} exigido pelo PAR-Q`,
               action: 'BLOCK',
             });
           }
