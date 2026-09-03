@@ -130,6 +130,9 @@ interface Deps {
   substitutionTargetIdentified?: { identified: true; exerciseId: string } | { identified: false };
   substitutionCreateResult?:
     { created: true; id: string } | { created: false; alreadyPending: true };
+  reminderResolution?:
+    | { resolved: true; time: string; model: string; latencyMs: number }
+    | { resolved: false; model: string | null; latencyMs: number };
 }
 
 function makeWorker(deps: Deps = {}) {
@@ -275,6 +278,18 @@ function makeWorker(deps: Deps = {}) {
   );
   const substitutionTarget = { identify: substitutionIdentify } as never;
 
+  const reminderResolve = vi.fn(() =>
+    Promise.resolve(
+      deps.reminderResolution ?? {
+        resolved: true as const,
+        time: '16:00',
+        model: 'deepseek-v4-pro',
+        latencyMs: 12,
+      },
+    ),
+  );
+  const workoutPreferences = vi.fn(() => Promise.resolve());
+
   const queueEventsEmit = vi.fn();
   const queueEvents = { emit: queueEventsEmit } as never;
 
@@ -335,6 +350,8 @@ function makeWorker(deps: Deps = {}) {
     substitutionRepo,
     substitutionTarget,
     substitutionResolution,
+    { resolve: reminderResolve } as never,
+    { preferences: workoutPreferences } as never,
     queueEvents,
     redis,
     keys as never,
@@ -365,6 +382,8 @@ function makeWorker(deps: Deps = {}) {
     substitutionCreatePending,
     substitutionResolve,
     substitutionIdentify,
+    reminderResolve,
+    workoutPreferences,
     queueEventsEmit,
   };
 }
@@ -418,6 +437,39 @@ describe('AIResponseWorker.process (US-3.5)', () => {
 
     expect(batchLrange).toHaveBeenCalledWith('bk', 0, -1);
     expect(batchLrange).not.toHaveBeenCalledWith(forged.data.batchKey, 0, -1);
+  });
+
+  it('usa a IA para entender um pedido natural e salva o novo horario do link', async () => {
+    const { worker, enqueue, reminderResolve, workoutPreferences, complete } = makeWorker({
+      intent: 'AJUSTE_LEMBRETE_TREINO',
+      batchItems: [JSON.stringify({ text: 'beleza, me manda o link as 16h' })],
+      reminderResolution: {
+        resolved: true,
+        time: '16:00',
+        model: 'deepseek-v4-pro',
+        latencyMs: 12,
+      },
+    });
+
+    await expect(worker.process(job())).resolves.toEqual({ status: 'SENT' });
+    expect(reminderResolve).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'beleza, me manda o link as 16h' }),
+    );
+    expect(workoutPreferences).toHaveBeenCalledWith('u1', { reminderTime: '16:00' });
+    expect(sentText(enqueue)).toContain('16:00');
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it('pede esclarecimento e nao altera o cadastro quando a IA nao resolve o horario', async () => {
+    const { worker, enqueue, workoutPreferences } = makeWorker({
+      intent: 'AJUSTE_LEMBRETE_TREINO',
+      batchItems: [JSON.stringify({ text: 'me manda o link mais tarde' })],
+      reminderResolution: { resolved: false, model: 'deepseek-v4-pro', latencyMs: 12 },
+    });
+
+    await expect(worker.process(job())).resolves.toEqual({ status: 'SENT' });
+    expect(workoutPreferences).not.toHaveBeenCalled();
+    expect(sentText(enqueue)).toContain('Qual horario');
   });
 
   it('fora de escopo: recusa honesta SEM chamar o LLM', async () => {

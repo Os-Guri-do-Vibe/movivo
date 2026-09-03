@@ -60,6 +60,21 @@ export class IntentClassifier {
     // retrieveEvidence` para o RAG: uma faceta indisponível não pode derrubar o pipeline
     // inteiro — aqui, degrada pra Etapa 2 (fallback nano), o mesmo caminho já usado quando
     // o kNN tem baixa confiança.
+    // A regex so seleciona uma mensagem operacional candidata. A classificacao e da IA.
+    // Isso evita que "manda o link as 16h" caia no vizinho antigo "que horas sao?".
+    let operationalFallback: Intent | null = null;
+    if (isPotentialReminderMessage(input.message)) {
+      operationalFallback = await this.fallback(input);
+      if (operationalFallback === 'AJUSTE_LEMBRETE_TREINO') {
+        return {
+          intent: operationalFallback,
+          confidence: 0.5,
+          stage: 'FALLBACK',
+          safetyHandoff: false,
+        };
+      }
+    }
+
     try {
       const vec = await this.embedding.embed(scrubPII(input.message, input.user));
       const knn = await this.repo.classifyByKnn(vec);
@@ -79,7 +94,7 @@ export class IntentClassifier {
     }
 
     // Etapa 2 — fallback nano (só os ambíguos).
-    const intent = await this.fallback(input);
+    const intent = operationalFallback ?? (await this.fallback(input));
     return { intent, confidence: 0.5, stage: 'FALLBACK', safetyHandoff: isEmergency(intent) };
   }
 
@@ -104,6 +119,17 @@ export class IntentClassifier {
 }
 
 /** Único ponto que decide handoff de segurança fora do guardrail regex (Etapa 0). */
+function isPotentialReminderMessage(message: string): boolean {
+  const normalized = message
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  return (
+    /\b(link|lembrete|mensagem|aviso|treino)\b/.test(normalized) &&
+    /\b(mand|envi|receb|cheg|lembr|horario|hora|manha|tarde|noite)\w*/.test(normalized)
+  );
+}
+
 function isEmergency(intent: Intent): boolean {
   return intent === 'EMERGENCIA_CLINICA';
 }

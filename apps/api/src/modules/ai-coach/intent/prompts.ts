@@ -33,7 +33,7 @@ import {
 import { UNTRUSTED_CONTEXT_POLICY } from '../context/untrusted-context';
 import type { Intent } from './intent.types';
 
-export const PROMPT_VERSION = 'coach-prompts-2026-08-v3';
+export const PROMPT_VERSION = 'coach-prompts-2026-09-v4';
 
 // `DEFAULT_AGENT_PERSONA` mora em @movivo/shared (fonte única) — o serviço de resolução
 // vive no CORE (DI global, §12.5) e não pode importar deste módulo de domínio.
@@ -208,6 +208,9 @@ const PER_INTENT: Record<Intent, string> = {
     'Acolha o pedido de ajuste, colete de forma leve o que mudou e INFORME que o ajuste do ' +
     'protocolo acontece no check-in semanal (não altere o treino agora).',
   RELATO_TREINO: 'Celebre a conclusão do treino (momento de vitória) e reforce o próximo passo.',
+  AJUSTE_LEMBRETE_TREINO:
+    'Identifique o horario em que o aluno quer receber o link diario. A alteracao so pode ser ' +
+    'confirmada depois que o horario for extraido e validado pelo sistema.',
   SAUDACAO: 'Cumprimente de volta, breve e caloroso, e pergunte como pode ajudar hoje.',
   // O caminho normal NÃO chega aqui desde a Sprint 10: `PEDIDO_HANDOFF` virou entrega
   // determinística (`buildHumanHandoffMessage`), no mesmo padrão de `FORA_DE_ESCOPO`. Além de
