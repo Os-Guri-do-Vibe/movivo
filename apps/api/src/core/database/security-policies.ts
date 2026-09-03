@@ -117,6 +117,10 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   // esta tabela (não existe UI de aluno) — a RLS existe para que o painel do
   // profissional e os jobs de sistema sejam a única porta, e ela seja escopada.
   { table: 'workout_completions', column: 'user_id', professional: 'read' },
+  { table: 'workout_sessions', column: 'user_id', professional: 'read' },
+  { table: 'workout_set_entries', column: 'user_id', professional: 'read' },
+  { table: 'workout_access_tokens', column: 'user_id' },
+  { table: 'workout_insights', column: 'user_id', professional: 'read' },
   // Sprint 8 (US-8.3): sequência de marcos do ciclo de vida do titular. Append-only
   // (ver `buildStatusTransitionsImmutabilitySql`) e sob a mesma FORCE RLS por titular.
   { table: 'user_status_transitions', column: 'user_id', professional: 'read' },

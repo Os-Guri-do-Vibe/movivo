@@ -60,6 +60,7 @@ import { ValidationService } from '../protocol/validation/validation.service';
 import type { AiResponseJob } from '../whatsapp/whatsapp-inbound.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { UserJobLock } from '../whatsapp/user-job-lock';
+import { WorkoutJournalService } from '../workout/workout-journal.service';
 import {
   DAILY_LIMIT_MESSAGE,
   DLQ_FALLBACK_MESSAGE,
@@ -75,6 +76,7 @@ import { ConversationRepository } from './conversation.repository';
 import { applyResponseFormatting } from './response-formatter';
 import { SubstitutionResolutionService } from './substitution-resolution.service';
 import { SubstitutionTargetService } from './substitution-target.service';
+import { WorkoutReminderResolutionService } from './workout-reminder-resolution.service';
 import { untrustedDataEnvelope } from '../ai-coach/context/untrusted-context';
 import { METHODOLOGY_AWARE_INTENTS } from '../ai-coach/intent/prompts';
 import { MethodologyProvider } from '../protocol/methodology-provider.service';
@@ -138,6 +140,8 @@ export class AIResponseWorker implements OnModuleInit {
     private readonly substitutionRepo: ProtocolSubstitutionRepository,
     private readonly substitutionTarget: SubstitutionTargetService,
     private readonly substitutionResolution: SubstitutionResolutionService,
+    private readonly workoutReminderResolution: WorkoutReminderResolutionService,
+    private readonly workoutJournal: WorkoutJournalService,
     private readonly queueEvents: DashboardQueueEventsService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
@@ -448,6 +452,9 @@ export class AIResponseWorker implements OnModuleInit {
     if (intent === 'SUBSTITUICAO_EXERCICIO') {
       return this.buildSubstitution(userId, intent, message, scrubUser, personaCtx, operationId);
     }
+    if (intent === 'AJUSTE_LEMBRETE_TREINO') {
+      return this.buildWorkoutReminderUpdate(userId, message, scrubUser, personaCtx, operationId);
+    }
     return this.buildGenerative(
       userId,
       intent,
@@ -456,6 +463,35 @@ export class AIResponseWorker implements OnModuleInit {
       personaCtx,
       operationId,
       undefined,
+    );
+  }
+
+  private async buildWorkoutReminderUpdate(
+    userId: string,
+    message: string,
+    scrubUser: ScrubUser,
+    personaCtx: PersonaContext,
+    operationId: string,
+  ): Promise<ResponseDraft> {
+    const resolution = await this.workoutReminderResolution.resolve({
+      userId,
+      operationId,
+      user: scrubUser,
+      message,
+      personaSlot: personaCtx.slot,
+    });
+    if (!resolution.resolved) {
+      return draftPass(
+        'Claro. Qual horario voce prefere receber o link do treino? Pode me dizer, por exemplo, 16h ou quatro da tarde.',
+        resolution.model,
+        resolution.latencyMs,
+      );
+    }
+    await this.workoutJournal.preferences(userId, { reminderTime: resolution.time });
+    return draftPass(
+      `Beleza! Vou enviar o link dos seus treinos as ${resolution.time}, no seu horario local.`,
+      resolution.model,
+      resolution.latencyMs,
     );
   }
 

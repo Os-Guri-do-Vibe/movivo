@@ -264,6 +264,7 @@ export const aiJobStatusEnum = pgEnum('ai_job_status', [
  * `where source > excluded.source`. Não reordenar sem reler `workout-completions.ts`.
  */
 export const workoutCompletionSourceEnum = pgEnum('workout_completion_source', [
+  'WEB_JOURNAL',
   'WHATSAPP_QUICK_REPLY',
   'CHECKIN',
   'CONVERSATION',

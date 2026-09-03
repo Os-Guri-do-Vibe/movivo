@@ -50,6 +50,8 @@ export type WhatsappJobType =
   | 'CHECKIN_MESSAGE'
   // US-8.1 — quick reply diario de treino ("Treinei"/"Hoje nao").
   | 'WORKOUT_QUICK_REPLY'
+  | 'WORKOUT_DAILY_LINK'
+  | 'WORKOUT_INSIGHT'
   | 'REENGAGEMENT'
   | 'CONSENT_STATUS'
   // US-6.5 — código de verificação de posse do número, ANTES de existir `users`.
@@ -100,6 +102,8 @@ const HEALTH_JOB_TYPES: ReadonlySet<WhatsappJobType> = new Set([
   'COACH_MESSAGE',
   'CHECKIN_MESSAGE',
   'WORKOUT_QUICK_REPLY',
+  'WORKOUT_DAILY_LINK',
+  'WORKOUT_INSIGHT',
   'REENGAGEMENT',
 ]);
 
@@ -268,6 +272,8 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       case 'COACH_MESSAGE':
       case 'CHECKIN_MESSAGE':
       case 'WORKOUT_QUICK_REPLY':
+      case 'WORKOUT_DAILY_LINK':
+      case 'WORKOUT_INSIGHT':
       case 'REENGAGEMENT':
       case 'CONSENT_STATUS':
         return data.text ?? null;

@@ -1,38 +1,41 @@
-/**
- * Quick reply diário de treino (US-8.1 / TASK-8.1.3).
- *
- * Um scan por dia às 20h `America/Sao_Paulo` varre quem tem protocolo `ACTIVE`,
- * assinatura `ACTIVE` e consentimento de saúde vigente — a **mesma** elegibilidade do
- * `CheckinScheduler.scan()` — e, se hoje for dia de treino previsto pelo protocolo,
- * enfileira UMA mensagem com dois botões.
- *
- * ponytail: horário fixo às 20h para todo aluno, sem preferência individual. Derivar o
- * horário do padrão de conversa do aluno (o que a US sugere como refinamento) exigiria
- * agregar `conversations` por titular a cada scan para mover a mensagem em algumas horas.
- * Quando houver evidência de que o horário muda a taxa de resposta, trocar `SCAN_CRON`
- * por um delay por aluno — nada mais neste arquivo muda.
- *
- * **Sem reenvio no mesmo dia:** o `jobId` do outbound é `wa-workout-<userId>-<dia>`.
- * BullMQ descarta o duplicado, então um scan que rode duas vezes (retry, failover,
- * deploy no meio da janela) não gera segunda mensagem. Mesmo mecanismo do check-in.
- */
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { and, eq, isNull } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
-import { CONSENT_TEXTS, protocolStructureSchema } from '@movivo/shared';
+import { CONSENT_TEXTS } from '@movivo/shared';
 
-import { consents, protocols, subscriptions } from '../../core/database/schema';
+import { consents, protocols, subscriptions, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { WorkerFactory } from '../jobs/worker.factory';
-import { WORKOUT_QUICK_REPLY_TEXT, workoutButtons } from './workout-messages';
-import { dayKey, sessionKeyFor } from './workout-schedule';
+import { WorkoutAccessService } from './workout-access.service';
+import { WorkoutJournalService } from './workout-journal.service';
+import { dailyWorkoutMessage } from './workout-messages';
 
 type WorkoutJob = { kind: 'SCAN' };
+const SCAN_CRON = '* * * * *';
 
-const SCAN_CRON = '0 20 * * *';
+function localParts(now: Date, timezone: string): { date: string; time: string } | null {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(now);
+    const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return {
+      date: `${value.year}-${value.month}-${value.day}`,
+      time: `${value.hour}:${value.minute}`,
+    };
+  } catch {
+    return null;
+  }
+}
 
 @Injectable()
 export class WorkoutScheduler implements OnModuleInit {
@@ -40,6 +43,8 @@ export class WorkoutScheduler implements OnModuleInit {
     private readonly workers: WorkerFactory,
     private readonly queues: QueueManager,
     private readonly db: TenantDatabase,
+    private readonly access: WorkoutAccessService,
+    private readonly journal: WorkoutJournalService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(WorkoutScheduler.name);
@@ -51,7 +56,7 @@ export class WorkoutScheduler implements OnModuleInit {
       .get(QUEUE.workoutDaily)
       .upsertJobScheduler(
         'daily-workout-scan',
-        { pattern: SCAN_CRON, tz: 'America/Sao_Paulo' },
+        { pattern: SCAN_CRON, tz: 'UTC' },
         { name: 'daily-workout-scan', data: { kind: 'SCAN' } satisfies WorkoutJob },
       );
   }
@@ -61,9 +66,13 @@ export class WorkoutScheduler implements OnModuleInit {
       tx
         .selectDistinct({
           userId: protocols.userId,
-          content: protocols.content,
+          name: users.name,
+          timezone: users.timezone,
+          reminderTime: users.workoutReminderTime,
+          reminderEnabled: users.workoutReminderEnabled,
         })
         .from(protocols)
+        .innerJoin(users, eq(users.id, protocols.userId))
         .innerJoin(subscriptions, eq(subscriptions.userId, protocols.userId))
         .innerJoin(
           consents,
@@ -78,29 +87,28 @@ export class WorkoutScheduler implements OnModuleInit {
         .where(and(eq(protocols.status, 'ACTIVE'), eq(subscriptions.status, 'ACTIVE'))),
     );
 
-    const completedAt = dayKey(now);
     let sent = 0;
     for (const row of eligible) {
-      const structure = protocolStructureSchema.safeParse(row.content);
-      if (!structure.success) continue;
-      const sessionKey = sessionKeyFor(now, structure.data);
-      if (!sessionKey) continue; // hoje não é dia de treino previsto para este aluno
-
+      if (!row.reminderEnabled) continue;
+      const local = localParts(now, row.timezone);
+      if (!local || local.time !== row.reminderTime) continue;
+      const view = await this.journal.journal(row.userId, local.date, now);
+      if (!view.workout) continue;
+      const link = await this.access.createMagicLink(row.userId, view.workout.id);
       const outbound: WhatsappOutboundJob = {
         userId: row.userId,
-        type: 'WORKOUT_QUICK_REPLY',
-        dedupeId: `workout-${completedAt}`,
-        text: WORKOUT_QUICK_REPLY_TEXT,
-        buttons: workoutButtons(completedAt, sessionKey),
+        type: 'WORKOUT_DAILY_LINK',
+        dedupeId: `workout-link-${local.date}`,
+        text: dailyWorkoutMessage(row.name?.trim().split(/\s+/)[0] || 'atleta', link),
       };
-      await this.queues.enqueue(QUEUE.whatsappOutbound, 'workout-quick-reply', outbound, {
-        jobId: `wa-workout-${row.userId}-${completedAt}`,
+      await this.queues.enqueue(QUEUE.whatsappOutbound, 'workout-daily-link', outbound, {
+        jobId: `wa-workout-link-${row.userId}-${local.date}`,
       });
       sent += 1;
     }
     this.logger.info(
-      { event: 'workout_scan_completed', eligible: eligible.length, sent, completedAt },
-      'scan diario de treino concluido',
+      { event: 'workout_scan_completed', eligible: eligible.length, sent },
+      'scan de links diarios de treino concluido',
     );
     return { status: 'SCANNED', eligible: eligible.length, sent };
   }

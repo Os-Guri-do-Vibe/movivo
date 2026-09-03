@@ -43,7 +43,7 @@ export default defineConfig({
         'src/**/*.constants.ts',
         'src/core/database/schema/**',
         'src/core/database/migrate.ts',
-        'src/core/database/seed.ts',
+        'src/core/database/seed*.ts',
         // Mesma categoria do item 4 acima: script CLI de uso único (`--dry-run` via
         // `process.argv`, `process.exitCode` no topo, conexão de banco/fila própria,
         // fora do processo da API) — não roda em produção, só uma vez manualmente

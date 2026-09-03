@@ -20,3 +20,4 @@ export * from './ad-spend.schema';
 export * from './partners.schema';
 export * from './knowledge.schema';
 export * from './exercise-catalog.schema';
+export * from './workout.schema';

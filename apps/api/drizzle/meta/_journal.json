@@ -302,6 +302,20 @@
       "when": 1788399057276,
       "tag": "0042_parched_war_machine",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1788462182788,
+      "tag": "0043_perpetual_mantis",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1788464623515,
+      "tag": "0044_strong_malcolm_colcord",
+      "breakpoints": true
     }
   ]
 }

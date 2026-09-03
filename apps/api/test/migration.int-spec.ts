@@ -86,6 +86,11 @@ const EXPECTED_TABLES = [
   // mais só do array estático em `exercise-catalog.ts`.
   'protocol_substitution_requests',
   'exercise_catalog_entries',
+  // Acompanhamento diario: acesso publico revogavel, sessoes, series e insights.
+  'workout_access_tokens',
+  'workout_insights',
+  'workout_sessions',
+  'workout_set_entries',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;

@@ -409,7 +409,11 @@ describe('AiAgentDashboard — dois slots de persona', () => {
     ).toBeInTheDocument();
 
     // O cartão-resumo conta a verdade dos dois slots no lugar do antigo "vN" no singular.
-    expect(screen.getByText(/1 de 2 personas publicadas/)).toBeVisible();
+    // `findByText` (não `getByText`): os dois slots resolvem via promises independentes
+    // (uma por sexo) e o cartão-resumo é um consumer separado do mesmo contexto — sob
+    // carga (ex.: suíte completa em paralelo), o commit dele pode ficar um tick atrás dos
+    // painéis checados acima, então a asserção precisa tolerar esse atraso.
+    expect(await screen.findByText(/1 de 2 personas publicadas/)).toBeVisible();
 
     await openSlot(user, 'Persona masculina');
     expect(screen.getByText(/Persona masculina · usa a persona feminina/)).toBeVisible();

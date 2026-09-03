@@ -50,6 +50,12 @@ export const INTENT_EXAMPLES_SEED: readonly IntentExampleSeed[] = [
   // RELATO_TREINO
   { intent: 'RELATO_TREINO', text: 'terminei o treino de hoje!' },
   { intent: 'RELATO_TREINO', text: 'consegui fazer todas as séries, foi ótimo' },
+  // AJUSTE_LEMBRETE_TREINO — linguagem natural, sem exigir comando ou palavra-chave.
+  { intent: 'AJUSTE_LEMBRETE_TREINO', text: 'beleza, me manda o link as 16h' },
+  { intent: 'AJUSTE_LEMBRETE_TREINO', text: 'prefiro receber meu treino sete da manha' },
+  { intent: 'AJUSTE_LEMBRETE_TREINO', text: 'pode trocar o horario da mensagem para 18:30?' },
+  { intent: 'AJUSTE_LEMBRETE_TREINO', text: 'amanha me lembra do treino as quatro da tarde' },
+  { intent: 'AJUSTE_LEMBRETE_TREINO', text: 'quero que o link chegue mais tarde, umas 9h' },
   // SAUDACAO
   { intent: 'SAUDACAO', text: 'oi, tudo bem?' },
   { intent: 'SAUDACAO', text: 'bom dia MOVI' },

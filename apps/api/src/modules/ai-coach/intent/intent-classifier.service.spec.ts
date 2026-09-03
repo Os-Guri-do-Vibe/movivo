@@ -74,6 +74,22 @@ describe('IntentClassifier — kNN (Etapa 1) e fallback (Etapa 2)', () => {
     expect(complete).toHaveBeenCalledOnce();
   });
 
+  it('deixa a IA reconhecer pedido natural de horario antes de um vizinho kNN incorreto', async () => {
+    const { svc, repo, complete } = make({
+      knn: { intent: 'FORA_DE_ESCOPO', confidence: 0.99 },
+      nano: 'AJUSTE_LEMBRETE_TREINO',
+    });
+
+    const result = await svc.classify({
+      ...input,
+      message: 'beleza, me manda o link as 16h',
+    });
+
+    expect(result).toMatchObject({ intent: 'AJUSTE_LEMBRETE_TREINO', stage: 'FALLBACK' });
+    expect(complete).toHaveBeenCalledOnce();
+    expect(repo.classifyByKnn).not.toHaveBeenCalled();
+  });
+
   // Achado 2026-09-02 (reproduzido ao vivo — aluno viu "digitando…" e depois silêncio
   // permanente): o embedding lançando sem try/catch derrubava a classificação inteira, e
   // por consequência o job de resposta inteiro, DEPOIS de já ter drenado a mensagem do
@@ -131,6 +147,7 @@ describe('IntentClassifier — EMERGENCIA_CLINICA fora do guardrail regex', () =
     const { svc, complete } = make({ knn: null, nano: 'MOTIVACAO' });
     await svc.classify({ ...input, message: 'qualquer coisa' });
     expect(complete.mock.calls[0]?.[0]?.system).toContain('EMERGENCIA_CLINICA');
+    expect(complete.mock.calls[0]?.[0]?.system).toContain('AJUSTE_LEMBRETE_TREINO');
   });
 });
 
@@ -153,6 +170,9 @@ describe('IntentClassifier — default-deny (nenhum caminho vira prompt sem guar
 });
 
 describe('parseIntent', () => {
+  it('reconhece ajuste de lembrete classificado pelo modelo', () => {
+    expect(parseIntent('AJUSTE_LEMBRETE_TREINO')).toBe('AJUSTE_LEMBRETE_TREINO');
+  });
   it('extrai o rótulo conhecido da saída do nano', () => {
     expect(parseIntent('a intenção é SUBSTITUICAO_EXERCICIO')).toBe('SUBSTITUICAO_EXERCICIO');
   });
