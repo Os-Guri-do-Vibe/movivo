@@ -266,7 +266,7 @@ describe('outbound WhatsApp — confirmação no submit (US-2.5)', () => {
   it('boota sem credencial AraraHQ e envia a confirmação (PAR-Q liberado)', async () => {
     const { phone: to } = await submitAnamnesis();
     const msg = await waitFor(() =>
-      sent.find((m) => m.to === to && /está sendo preparado/i.test(m.text)),
+      sent.find((m) => m.to === to && /já começamos a preparar seu treino/i.test(m.text)),
     );
     // Exceção deliberada ao guardrail de menção ao CREF nesta mensagem específica
     // (`message-templates.ts`, achado 2026-08-18, a pedido do fundador).
@@ -276,7 +276,8 @@ describe('outbound WhatsApp — confirmação no submit (US-2.5)', () => {
   it('PAR-Q de risco recebe a variante de cuidado (sem prometer plano)', async () => {
     const { phone: to } = await submitAnamnesis(['Q2']);
     const msg = await waitFor(() => sent.find((m) => m.to === to && /revisar/i.test(m.text)));
-    expect(msg.text).not.toMatch(/está sendo preparado/i); // variante de cuidado não promete o plano
+    // variante de cuidado não promete o plano
+    expect(msg.text).not.toMatch(/já começamos a preparar seu treino/i);
   }, 30_000);
 });
 
@@ -295,7 +296,11 @@ describe('outbound WhatsApp — entrega do protocolo e idempotência (US-2.5)', 
     await waitFor(() => sent.find((m) => m.to === to && m.text.includes('/protocolo/')));
 
     const afterFirst = sent.filter((m) => m.to === to).length;
-    expect(afterFirst).toBe(4); // 4 bolhas (intro, contexto do plano, 1º treino, link)
+    // 5 bolhas: a apresentação antecipada da agente (`sendPresentationIfNeeded`, achado
+    // 2026-09-04 — dispara ANTES da entrega quando o `PROTOCOL_WAITING` de 30min ainda não
+    // rodou, mesmo marcador do `buildWaiting`) + as 4 de sempre (intro, contexto do plano,
+    // 1º treino, link).
+    expect(afterFirst).toBe(5);
 
     // Reprocesso com jobId distinto (bypassa o dedup do BullMQ) — o marcador Redis barra.
     await queues.enqueue(QUEUE.whatsappOutbound, 'protocol-delivery', {
@@ -304,6 +309,6 @@ describe('outbound WhatsApp — entrega do protocolo e idempotência (US-2.5)', 
       type: 'PROTOCOL_DELIVERY',
     });
     await new Promise((r) => setTimeout(r, 3_000));
-    expect(sent.filter((m) => m.to === to).length).toBe(4); // não reenviou
+    expect(sent.filter((m) => m.to === to).length).toBe(5); // não reenviou
   }, 30_000);
 });

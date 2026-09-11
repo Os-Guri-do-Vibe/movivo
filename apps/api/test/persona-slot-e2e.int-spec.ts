@@ -69,7 +69,12 @@ let baselineMale: { version: number; agentName: string } | null = null;
 function persona(agentName: string, intro: string): AgentPersona {
   return {
     agentName,
-    agentSelfIntro: intro,
+    // Achado 2026-09-04: `buildWaiting`/`analyzingMessage` passaram a devolver
+    // `agentSelfIntro` VERBATIM (sem prefixar o nome) — mesmo padrão dos defaults de
+    // código (`DEFAULT_AGENT_PERSONA_FEMALE`/`_MALE`), cujo `agentSelfIntro` já inclui
+    // "Eu sou a Mariana"/"Eu sou o Leonardo". Sem o nome aqui, os testes que verificam o
+    // slot certo pelo nome no texto de espera nunca encontrariam nada.
+    agentSelfIntro: `Sou ${agentName}, ${intro}.`,
     toneDescriptors: ['caloroso', 'direto'],
     personaTraits: ['ACOLHE_ANTES_DE_ORIENTAR', 'EXPLICA_O_PORQUE'],
     emojiPolicy: 'RARO',
@@ -196,20 +201,31 @@ describe('1. estado inicial — empréstimo do slot órfão', () => {
     expect(rows[0]?.n).toBeGreaterThan(0);
   });
 
-  it('FEMALE sem publicação é atendido pela persona de MALE, com servedFromSex divergente', async () => {
+  // Achado 2026-09-11: `AgentPersonaService.resolve()` passou a chamar `ensureBootstrap()`
+  // (decisão do fundador, 2026-09-04) ANTES de checar o próprio slot — então a primeira
+  // chamada de `resolve()` do processo, pra QUALQUER slot, semeia os DOIS com o default de
+  // código (`DEFAULT_AGENT_PERSONA_FEMALE`/`_MALE`, `version = 1`, `PUBLISHED`). Na prática
+  // isso fecha a janela de "slot órfão" — o empréstimo entre slots (código ainda existe,
+  // ver `AgentPersonaService.resolve()`) só seria observável se o bootstrap falhasse pro
+  // slot pedido mas funcionasse pro outro, o que não é reproduzível deterministicamente
+  // aqui. Este teste passa a provar o bootstrap: FEMALE nunca publicado explicitamente
+  // ainda assim resolve para a SUA PRÓPRIA persona (a padrão), não pra de MALE.
+  it('FEMALE sem publicação explícita é atendido pelo bootstrap da própria persona (não empresta de MALE)', async () => {
     const resolved = await personaService.resolve('FEMALE');
-    expect(resolved.servedFromSex).toBe('MALE');
-    expect(resolved.persona.agentName).toBe(baselineMale?.agentName);
+    expect(resolved.servedFromSex).toBe('FEMALE');
+    expect(resolved.persona.agentName).toBe('Mariana');
 
     const response = await aiConfig.persona('FEMALE');
-    expect(response.data.servedFromSex).toBe('MALE');
+    expect(response.data.servedFromSex).toBe('FEMALE');
     expect(response.data.targetSex).toBe('FEMALE');
-    expect(response.meta.dataQuality.join(' ')).toContain('Ainda não há persona publicada');
+    // `borrowed` (em `AiConfigService.persona()`) só é true quando `servedFromSex !==
+    // targetSex` — como o bootstrap já publicou a própria persona de FEMALE, não há aviso.
+    expect(response.meta.dataQuality).toEqual([]);
   });
 });
 
 describe('2. publicação real nos dois slots', () => {
-  it('publicar FEMALE não toca no slot MALE e encerra o empréstimo', async () => {
+  it('publicar FEMALE não toca no slot MALE', async () => {
     const published = await aiConfig.publish(actor, {
       targetSex: 'FEMALE',
       payload: FEMALE_V1,
@@ -217,7 +233,14 @@ describe('2. publicação real nos dois slots', () => {
     });
     expect(published.data.targetSex).toBe('FEMALE');
     expect(published.data.servedFromSex).toBe('FEMALE');
-    expect(published.meta.dataQuality.join(' ')).toContain('primeiro texto publicado');
+    // Achado 2026-09-11: o bootstrap do bloco 1 já publicou uma versão (a padrão) para
+    // FEMALE antes desta publicação — `wasOrphan` (`AiConfigService.publish()`) é
+    // calculado por `activePayload(targetSex) === null` ANTES do insert, então dá `false`
+    // aqui, e a mensagem de "primeiro texto publicado" (exclusiva de `wasOrphan`) não
+    // aparece; sobra só o aviso padrão de propagação.
+    expect(published.meta.dataQuality).toEqual([
+      'A nova persona vale em até 60 segundos, sem deploy.',
+    ]);
 
     const female = await personaService.resolve('FEMALE');
     expect(female.servedFromSex).toBe('FEMALE');
