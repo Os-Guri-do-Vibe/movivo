@@ -1040,6 +1040,16 @@ describe('ControlCenterService projections', () => {
   });
 
   it('publica percentis reais e o orçamento de erro consumido por SLO', async () => {
+    // Dia relativo a "hoje" (nunca um literal fixo): `fillDays` só mantém os últimos
+    // INSIGHT_WINDOW_DAYS (30) dias a partir de `Date.now()` — uma data fixa sairia da
+    // janela com a passagem do tempo e este teste ficaria vermelho sem nenhuma mudança
+    // de código (achado 2026-09-11, junto do bump de vitest para 5.0.0).
+    const yesterday = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(Date.now() - 86_400_000));
     const { service } = serviceWithSystemResults(
       [
         {
@@ -1065,7 +1075,7 @@ describe('ControlCenterService projections', () => {
           p99: '9000',
         },
       ],
-      [{ day: '2026-08-12', total: '4800.5' }],
+      [{ day: yesterday, total: '4800.5' }],
       [{ samples: 50, p50: '9000', p95: '25000', p99: '31000', withinSla: 49 }],
       [],
       [{ total: 12 }],
