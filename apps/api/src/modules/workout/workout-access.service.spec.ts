@@ -95,7 +95,9 @@ describe('WorkoutAccessService', () => {
 
   it('espia o primeiro nome sem consumir o token, falhando em silencio quando invalido', async () => {
     await expect(makeService().service.peekFirstName('curto')).resolves.toBeNull();
-    await expect(makeService({ selects: [[]] }).service.peekFirstName(RAW_TOKEN)).resolves.toBeNull();
+    await expect(
+      makeService({ selects: [[]] }).service.peekFirstName(RAW_TOKEN),
+    ).resolves.toBeNull();
 
     const { service, updated, inserted } = makeService({
       selects: [[{ name: 'Ana Souza' }]],

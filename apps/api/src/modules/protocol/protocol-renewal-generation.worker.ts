@@ -173,7 +173,10 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
     });
 
     if (persisted.alreadyExisted) {
-      this.logger.info({ userId, renewalSessionId }, 'corrida de persistência — renovação já existia');
+      this.logger.info(
+        { userId, renewalSessionId },
+        'corrida de persistência — renovação já existia',
+      );
       return { status: 'ALREADY_EXISTS' };
     }
 
@@ -217,7 +220,10 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
 
   // --- carregamento sob RLS -------------------------------------------------
 
-  private async load(userId: string, renewalSessionId: string): Promise<LoadedRenewalContext | null> {
+  private async load(
+    userId: string,
+    renewalSessionId: string,
+  ): Promise<LoadedRenewalContext | null> {
     return this.db.runAsUser(userId, 'USER', async (tx) => {
       const [user] = await tx.select().from(users).where(eq(users.id, userId)).limit(1);
       if (!user) return null;
@@ -287,51 +293,67 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
     const { block1, block2, block3, block4, block5 } = ctx;
     const safety = evaluateRenewalSafety(block3);
 
-    const newPainAssessment: PainAssessment = block3.newPain.hasNewPain
-      ? {
-          hasPain: true,
-          points: [
-            {
-              region: block3.newPain.region!,
-              intensity: block3.newPain.intensity!,
-              ...(block3.newPain.regionOther ? { regionOther: block3.newPain.regionOther } : {}),
-            },
-          ],
-          trend: block3.newPain.trend,
-          hasProfessionalExplanation: false,
-          underMedicalFollowUp: false,
-          hasAvoidanceRecommendation: false,
-        }
-      : {
-          hasPain: false,
-          points: [],
-          hasProfessionalExplanation: false,
-          underMedicalFollowUp: false,
-          hasAvoidanceRecommendation: false,
-        };
+    let newPainAssessment: PainAssessment;
+    if (block3.newPain.hasNewPain) {
+      const { region, intensity } = block3.newPain;
+      // O schema (`protocolRenewalNewPainSchema.superRefine`) já exige region/intensity
+      // quando hasNewPain=true, mas essa validação não é visível pro TypeScript — chegar
+      // aqui sem os dois é uma violação de invariante upstream, não um caminho esperado.
+      if (!region || intensity === undefined) {
+        throw new Error(
+          'Renovação com hasNewPain=true sem region/intensity — invariante do schema violada.',
+        );
+      }
+      newPainAssessment = {
+        hasPain: true,
+        points: [
+          {
+            region,
+            intensity,
+            ...(block3.newPain.regionOther ? { regionOther: block3.newPain.regionOther } : {}),
+          },
+        ],
+        trend: block3.newPain.trend,
+        hasProfessionalExplanation: false,
+        underMedicalFollowUp: false,
+        hasAvoidanceRecommendation: false,
+      };
+    } else {
+      newPainAssessment = {
+        hasPain: false,
+        points: [],
+        hasProfessionalExplanation: false,
+        underMedicalFollowUp: false,
+        hasAvoidanceRecommendation: false,
+      };
+    }
     const newPain = painToConstraints(newPainAssessment);
     const parqRecheckTags = block3.parqRecheck.detail
       ? mapInjuriesToTags([block3.parqRecheck.detail])
       : [];
 
     const level = safety.requiresProfessionalReview ? demoteLevel(base.level) : base.level;
-    const location = block5.changes.includes('TRAINING_LOCATION') && block5.location
-      ? block5.location
-      : base.location;
-    const daysPerWeek = block5.changes.includes('DAYS_PER_WEEK') && block5.daysPerWeek
-      ? block5.daysPerWeek
-      : base.daysPerWeek;
+    const location =
+      block5.changes.includes('TRAINING_LOCATION') && block5.location
+        ? block5.location
+        : base.location;
+    const daysPerWeek =
+      block5.changes.includes('DAYS_PER_WEEK') && block5.daysPerWeek
+        ? block5.daysPerWeek
+        : base.daysPerWeek;
     const preferredDays = block5.preferredDays.length ? block5.preferredDays : base.preferredDays;
     const sessionMinutes =
       block5.changes.includes('SESSION_DURATION') && block5.sessionDuration
         ? SESSION_DURATION_MINUTES[block5.sessionDuration]
         : base.sessionMinutes;
-    const goal = block5.goalChange.changed && block5.goalChange.newGoal
-      ? toGenerationGoal(block5.goalChange.newGoal)
-      : base.goal;
-    const avoid = block5.dislikedExercise.has && block5.dislikedExercise.description
-      ? [...base.avoid, block5.dislikedExercise.description]
-      : base.avoid;
+    const goal =
+      block5.goalChange.changed && block5.goalChange.newGoal
+        ? toGenerationGoal(block5.goalChange.newGoal)
+        : base.goal;
+    const avoid =
+      block5.dislikedExercise.has && block5.dislikedExercise.description
+        ? [...base.avoid, block5.dislikedExercise.description]
+        : base.avoid;
 
     const importantEvent = this.resolveImportantEvent(base, block5);
 
@@ -351,7 +373,9 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
       injuryTags: [...new Set([...base.injuryTags, ...newPain.tags, ...parqRecheckTags])],
       injuriesRaw: [...base.injuriesRaw, ...newPain.raw],
       requiresProfessionalReview: safety.requiresProfessionalReview,
-      parqTags: safety.requiresProfessionalReview ? [...new Set([...base.parqTags, ...parqRecheckTags])] : [],
+      parqTags: safety.requiresProfessionalReview
+        ? [...new Set([...base.parqTags, ...parqRecheckTags])]
+        : [],
       parqTriggered: base.parqTriggered,
       ...(safety.requiresProfessionalReview ? { maxPhase: 'ADAPTACAO' as const } : {}),
       importantEvent,
@@ -445,7 +469,13 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
   ): Promise<void> {
     const { userId, renewalSessionId } = job.data;
     this.logger.error(
-      { userId, renewalSessionId, jobId: job.id, err: err.message, event: 'protocol_renewal_generation_dlq' },
+      {
+        userId,
+        renewalSessionId,
+        jobId: job.id,
+        err: err.message,
+        event: 'protocol_renewal_generation_dlq',
+      },
       'renovação de mesociclo esgotou os retries — acionando fallback',
     );
     try {

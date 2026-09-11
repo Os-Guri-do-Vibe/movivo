@@ -30,7 +30,12 @@ import type { ZodType } from 'zod';
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
-import { anamnesisSessions, handoffAlerts, protocolRenewalSessions, users } from '../../core/database/schema';
+import {
+  anamnesisSessions,
+  handoffAlerts,
+  protocolRenewalSessions,
+  users,
+} from '../../core/database/schema';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { evaluateRenewalSafety } from './protocol-renewal-safety';
@@ -142,7 +147,13 @@ export class ProtocolRenewalService {
   /** `POST /protocol-renewal/session/{token}/submit`. */
   async submit(token: string): Promise<RenewalSubmitResult> {
     const row = await this.requireActiveSession(token);
-    if (!row.dataBlock1 || !row.dataBlock2 || !row.dataBlock3 || !row.dataBlock4 || !row.dataBlock5) {
+    if (
+      !row.dataBlock1 ||
+      !row.dataBlock2 ||
+      !row.dataBlock3 ||
+      !row.dataBlock4 ||
+      !row.dataBlock5
+    ) {
       throw new BadRequestException('Complete os 5 blocos antes de enviar.');
     }
     if (!(await this.healthConsent.hasActiveForUser(row.userId))) {
@@ -214,7 +225,11 @@ export class ProtocolRenewalService {
     // existe desde a criação da linha (nunca é órfã), então basta `runAsSystem` para este
     // único SELECT; toda leitura/escrita seguinte já roda sob `runAsUser`.
     const [row] = await this.db.runAsSystem((tx) =>
-      tx.select().from(protocolRenewalSessions).where(eq(protocolRenewalSessions.token, token)).limit(1),
+      tx
+        .select()
+        .from(protocolRenewalSessions)
+        .where(eq(protocolRenewalSessions.token, token))
+        .limit(1),
     );
     return row;
   }
@@ -274,7 +289,12 @@ export class ProtocolRenewalService {
       tx
         .update(protocolRenewalSessions)
         .set({ status: 'EXPIRED', dataBlock3: null })
-        .where(and(eq(protocolRenewalSessions.id, id), eq(protocolRenewalSessions.status, 'IN_PROGRESS'))),
+        .where(
+          and(
+            eq(protocolRenewalSessions.id, id),
+            eq(protocolRenewalSessions.status, 'IN_PROGRESS'),
+          ),
+        ),
     );
   }
 

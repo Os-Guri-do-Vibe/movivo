@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { EXERCISE_BY_ID, EXERCISE_CATALOG } from './exercise-catalog';
-import { findSafeCandidates, isViable, type SubstitutionConstraints } from './exercise-substitution';
+import {
+  findSafeCandidates,
+  isViable,
+  type SubstitutionConstraints,
+} from './exercise-substitution';
 
 const beginnerHome: SubstitutionConstraints = {
   level: 'INICIANTE',

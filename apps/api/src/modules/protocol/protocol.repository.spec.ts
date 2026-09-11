@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto';
 import type { ProtocolStructure } from '@movivo/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { TenantDatabase, TenantTransaction } from '../../core/database/tenant-database.service';
+import type {
+  TenantDatabase,
+  TenantTransaction,
+} from '../../core/database/tenant-database.service';
 import { protocols } from '../../core/database/schema';
 import {
   ProtocolRepository,

@@ -648,6 +648,19 @@ describe('ValidationService.validateResponse — texto livre da conversa (US-3.5
     expect(v.action).toBe('BLOCK_FALLBACK');
     expect(v.violations.map((x) => x.rule)).toContain('EXERCISE_NOT_ALLOWED');
   });
+
+  // Uma entrada vazia (ou que canonicaliza pra vazio) em `allowedExercises` não pode virar
+  // máscara de tamanho zero — `split('').join(...)` inseriria um espaço entre TODO par de
+  // caracteres do texto, corrompendo a busca dos nomes não autorizados que vêm depois dela
+  // na ordenação por tamanho.
+  it('substituição: entrada autorizada vazia é ignorada na máscara, sem corromper o texto', () => {
+    const v = service.validateResponse(
+      'Troquei por Esteira. Se preferir, também dá pra fazer uma Caminhada depois.',
+      { allowedExercises: ['Caminhada de Mala (Halter)', 'Esteira', ''] },
+    );
+    expect(v.action).toBe('BLOCK_FALLBACK');
+    expect(v.violations.map((x) => x.rule)).toContain('EXERCISE_NOT_ALLOWED');
+  });
 });
 
 describe('aggregate — derivação do veredito final', () => {

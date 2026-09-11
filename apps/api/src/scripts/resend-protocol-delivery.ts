@@ -83,7 +83,9 @@ async function main(): Promise<void> {
 
     const markerKey = `${env.REDIS_KEY_PREFIX}:u:${row.userId.toLowerCase()}:wa-sent:PROTOCOL_DELIVERY:${row.version}`;
     const deleted = await redis.del(markerKey);
-    console.warn(`[resend] marcador de idempotência removido: ${markerKey} (existia: ${deleted === 1})`);
+    console.warn(
+      `[resend] marcador de idempotência removido: ${markerKey} (existia: ${deleted === 1})`,
+    );
 
     const jobId = `manual-resend-${row.protocolId}-${row.version}-${randomUUID()}`;
     await queue.add(
@@ -97,7 +99,9 @@ async function main(): Promise<void> {
       },
       { ...resolveJobOptions(QUEUE.whatsappOutbound), jobId },
     );
-    console.warn(`[resend] job enfileirado (jobId=${jobId}) — o worker real vai processar em instantes.`);
+    console.warn(
+      `[resend] job enfileirado (jobId=${jobId}) — o worker real vai processar em instantes.`,
+    );
   } finally {
     await queue.close();
     await redis.quit();

@@ -113,9 +113,17 @@ export class WorkoutPresentationService {
         purpose: 'AI_RESPONSE',
         userId: params.userId,
         user: params.user,
-        system: systemPrompt(persona, params.reason, params.substitutionFrom, params.substitutionTo),
+        system: systemPrompt(
+          persona,
+          params.reason,
+          params.substitutionFrom,
+          params.substitutionTo,
+        ),
         messages: [
-          { role: 'user', content: userPrompt(params.content, params.totalWeeks, params.mesocycleName) },
+          {
+            role: 'user',
+            content: userPrompt(params.content, params.totalWeeks, params.mesocycleName),
+          },
         ],
         temperature: 0.6,
         maxTokens: 300,

@@ -328,8 +328,8 @@ function IdentityStep() {
           Como ela se apresenta
         </label>
         <p id={slotId('agent-intro-help')} className="mt-1 text-xs text-muted-foreground">
-          Mensagem estática enviada ao aluno 30 minutos após o formulário. Não entra no
-          prompt da IA (a identidade dela na conversa é definida nas outras abas).
+          Mensagem estática enviada ao aluno 30 minutos após o formulário. Não entra no prompt da IA
+          (a identidade dela na conversa é definida nas outras abas).
         </p>
         <textarea
           id={slotId('agent-intro')}
@@ -400,9 +400,9 @@ function VoiceStep() {
           Exemplo real de fala (opcional)
         </label>
         <p id={slotId('voice-example-help')} className="mt-1 text-xs text-muted-foreground">
-          Uma mensagem real, no vocabulário e na energia certos, pra calibrar a IA além dos
-          rótulos acima (ex.: &quot;Salve! Bom dia, brother. Bora nessa treino de hoje.&quot;).
-          A IA usa como referência de registro, nunca repete literalmente.
+          Uma mensagem real, no vocabulário e na energia certos, pra calibrar a IA além dos rótulos
+          acima (ex.: &quot;Salve! Bom dia, brother. Bora nessa treino de hoje.&quot;). A IA usa
+          como referência de registro, nunca repete literalmente.
         </p>
         <textarea
           id={slotId('voice-example')}
@@ -772,8 +772,18 @@ function HandoffStep() {
 }
 
 function ReviewStep() {
-  const { data, current, form, changedFields, publishing, publish, rollback, canPublish, canWrite, goToStep } =
-    useAgentPersona();
+  const {
+    data,
+    current,
+    form,
+    changedFields,
+    publishing,
+    publish,
+    rollback,
+    canPublish,
+    canWrite,
+    goToStep,
+  } = useAgentPersona();
   if (!data || !current || !form) return null;
 
   return (

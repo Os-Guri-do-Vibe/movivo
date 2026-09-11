@@ -474,9 +474,11 @@ export class WhatsappOutboundWorker implements OnModuleInit {
   ): Promise<void> {
     const key = this.waitingMarkerKey(userId);
     if ((await this.redis.exists(key)) === 1) return;
-    await this.sendBubbles(analyzingMessage(persona), phone, data).catch(
-      (err: unknown) =>
-        this.logger.warn({ err, userId }, 'apresentação antecipada falhou — entrega segue de qualquer forma'),
+    await this.sendBubbles(analyzingMessage(persona), phone, data).catch((err: unknown) =>
+      this.logger.warn(
+        { err, userId },
+        'apresentação antecipada falhou — entrega segue de qualquer forma',
+      ),
     );
     await this.redis.set(key, '1', 'EX', SENT_MARKER_TTL_SECONDS);
   }

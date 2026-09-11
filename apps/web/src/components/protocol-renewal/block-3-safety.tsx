@@ -127,7 +127,12 @@ export function Block3Safety({
     <div className="flex flex-col gap-6 pb-4">
       {screen === 0 && (
         <section className="flex flex-col gap-6" aria-labelledby="block3-title">
-          <QuestionHeader index={1} total={TOTAL_QUESTIONS} titleId="block3-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={1}
+            total={TOTAL_QUESTIONS}
+            titleId="block3-title"
+            titleRef={titleRef}
+          >
             Você sentiu alguma dor, desconforto ou limitação NOVA durante os treinos deste ciclo —
             algo que não tinha antes?
           </QuestionHeader>
@@ -183,7 +188,10 @@ export function Block3Safety({
                 />
                 <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-3 text-label text-muted-foreground">
                   <span>0 · Nenhuma dor</span>
-                  <span className="font-mono text-h3 font-semibold text-foreground" aria-hidden="true">
+                  <span
+                    className="font-mono text-h3 font-semibold text-foreground"
+                    aria-hidden="true"
+                  >
                     {data.newPain.intensity}
                   </span>
                   <span className="text-right">10 · Dor muito intensa</span>
@@ -211,7 +219,12 @@ export function Block3Safety({
 
       {screen === 1 && (
         <section className="flex flex-col gap-6" aria-labelledby="block3-title">
-          <QuestionHeader index={2} total={TOTAL_QUESTIONS} titleId="block3-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={2}
+            total={TOTAL_QUESTIONS}
+            titleId="block3-title"
+            titleRef={titleRef}
+          >
             Alguma pergunta do questionário de segurança que você respondeu &quot;Não&quot; antes
             mudaria para &quot;Sim&quot; hoje? (ex.: novo problema de saúde, nova medicação contínua
             para pressão/coração, gravidez, cirurgia recente)

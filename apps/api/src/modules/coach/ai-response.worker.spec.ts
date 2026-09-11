@@ -65,7 +65,8 @@ if (!FLEXAO_CANDIDATE) throw new Error('fixture: nenhum candidato seguro para "f
  * dois asserts abaixo travam a fixture nesse estado exato caso o catálogo mude.
  */
 const CAMALA_LOOKUP = EXERCISE_CATALOG.find((ex) => ex.id === 'caminhada_de_mala_halter');
-if (!CAMALA_LOOKUP) throw new Error('fixture: exercício "caminhada_de_mala_halter" ausente do catálogo');
+if (!CAMALA_LOOKUP)
+  throw new Error('fixture: exercício "caminhada_de_mala_halter" ausente do catálogo');
 const CAMALA = CAMALA_LOOKUP;
 const CAMALA_CONSTRAINTS = {
   level: 'INICIANTE' as const,
@@ -77,13 +78,15 @@ const ESTEIRA_LOOKUP = EXERCISE_CATALOG.find((ex) => ex.id === 'esteira');
 if (!ESTEIRA_LOOKUP) throw new Error('fixture: exercício "esteira" ausente do catálogo');
 const ESTEIRA = ESTEIRA_LOOKUP;
 const CAMALA_FULL_CURATION = findSafeCandidates(CAMALA, CAMALA_CONSTRAINTS, EXERCISE_CATALOG);
-if (
-  CAMALA_FULL_CURATION.slice(0, SUBSTITUTION_BATCH_SIZE).some((c) => c.id === ESTEIRA.id)
-) {
-  throw new Error('fixture desatualizada: "esteira" já está no 1º lote de caminhada_de_mala_halter');
+if (CAMALA_FULL_CURATION.slice(0, SUBSTITUTION_BATCH_SIZE).some((c) => c.id === ESTEIRA.id)) {
+  throw new Error(
+    'fixture desatualizada: "esteira" já está no 1º lote de caminhada_de_mala_halter',
+  );
 }
 if (!CAMALA_FULL_CURATION.some((c) => c.id === ESTEIRA.id)) {
-  throw new Error('fixture: "esteira" precisa ser um candidato seguro (curadoria completa) de caminhada_de_mala_halter');
+  throw new Error(
+    'fixture: "esteira" precisa ser um candidato seguro (curadoria completa) de caminhada_de_mala_halter',
+  );
 }
 
 const DEFAULT_ACTIVE_PROTOCOL: ActiveProtocolForSubstitution = {
@@ -157,8 +160,7 @@ interface Deps {
   substitutionHasPending?: boolean;
   /** Confirmação de um candidato — default: nada resolvido, cai pra (re)oferta. */
   substitutionResolved?:
-    | { resolved: true; chosenExerciseId: string }
-    | { resolved: false; rejectedAll?: boolean };
+    { resolved: true; chosenExerciseId: string } | { resolved: false; rejectedAll?: boolean };
   /** Pedido explícito de substituto NA MESMA mensagem (turno 1) — default: nada resolvido. */
   substitutionExplicitRequest?: { resolved: true; chosenExerciseId: string } | { resolved: false };
   /** Identificação do alvo — default: identifica "flexao" (o único do fixture). */
@@ -850,9 +852,7 @@ describe('AIResponseWorker.process (US-3.5)', () => {
       const { worker, complete, enqueue, substitutionCreateCatalogGapPending, queueEventsEmit } =
         makeWorker({
           intent: 'SUBSTITUICAO_EXERCICIO',
-          batchItems: [
-            JSON.stringify({ text: 'Nenhuma, queria o supino reto na máquina mesmo' }),
-          ],
+          batchItems: [JSON.stringify({ text: 'Nenhuma, queria o supino reto na máquina mesmo' })],
           substitutionResolved: { resolved: false, rejectedAll: true },
           substitutionCatalogLookupResult: {
             requestedName: 'supino reto na máquina',

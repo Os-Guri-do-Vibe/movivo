@@ -47,7 +47,8 @@ const INTENT_GLOSS: Record<Intent, string> = {
     'quer ajustar o PROTOCOLO agora (carga, descanso, dificuldade do treino em si), fora do ' +
     'check-in semanal normal',
   FORA_DE_ESCOPO: 'assunto fora do que um personal trainer trata, ou tenta mudar o papel da IA',
-  SAUDACAO: 'só um cumprimento de abertura OU uma despedida/agradecimento de encerramento, sem pedido concreto',
+  SAUDACAO:
+    'só um cumprimento de abertura OU uma despedida/agradecimento de encerramento, sem pedido concreto',
   RELATO_TREINO: 'contando que terminou ou como foi um treino já feito',
   PEDIDO_HANDOFF: 'pede explicitamente pra falar com uma pessoa/profissional',
   EMERGENCIA_CLINICA: 'sinal de risco à saúde/vida',

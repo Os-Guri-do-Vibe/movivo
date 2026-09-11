@@ -4,7 +4,13 @@ import * as React from 'react';
 
 import { MAX_WEIGHT_KG, MIN_WEIGHT_KG, type RenewalGoalProgress } from '@movivo/shared';
 
-import { ChoiceGroup, FieldHelp, FieldLabel, QuestionField, TextInput } from '@/components/onboarding/fields';
+import {
+  ChoiceGroup,
+  FieldHelp,
+  FieldLabel,
+  QuestionField,
+  TextInput,
+} from '@/components/onboarding/fields';
 import { BlockFooter, QuestionHeader } from './block-shell';
 
 /** Bloco 4 — resultado percebido (perguntas 11-13). */
@@ -81,7 +87,12 @@ export function Block4Outcome({
     <div className="flex flex-col gap-6 pb-4">
       {screen === 0 && (
         <section className="flex flex-col gap-6" aria-labelledby="block4-title">
-          <QuestionHeader index={1} total={TOTAL_QUESTIONS} titleId="block4-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={1}
+            total={TOTAL_QUESTIONS}
+            titleId="block4-title"
+            titleRef={titleRef}
+          >
             Peso atual (kg)
           </QuestionHeader>
           <QuestionField>
@@ -103,7 +114,12 @@ export function Block4Outcome({
 
       {screen === 1 && (
         <section className="flex flex-col gap-6" aria-labelledby="block4-title">
-          <QuestionHeader index={2} total={TOTAL_QUESTIONS} titleId="block4-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={2}
+            total={TOTAL_QUESTIONS}
+            titleId="block4-title"
+            titleRef={titleRef}
+          >
             Em relação ao seu objetivo principal, como você sente que está a evolução?
           </QuestionHeader>
           <ChoiceGroup<RenewalGoalProgress>
@@ -119,7 +135,12 @@ export function Block4Outcome({
 
       {screen === 2 && (
         <section className="flex flex-col gap-6" aria-labelledby="block4-title">
-          <QuestionHeader index={3} total={TOTAL_QUESTIONS} titleId="block4-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={3}
+            total={TOTAL_QUESTIONS}
+            titleId="block4-title"
+            titleRef={titleRef}
+          >
             De 0 a 10, o quanto você está satisfeito com os resultados até agora?
           </QuestionHeader>
           <QuestionField className="rounded-xl border border-border bg-secondary p-4">

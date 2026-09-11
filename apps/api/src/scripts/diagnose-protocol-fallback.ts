@@ -33,7 +33,12 @@ import { ValidationService } from '../modules/protocol/validation/validation.ser
 
 @Module({
   imports: [CoreModule, AiCoachModule],
-  providers: [ProtocolGeneratorService, MethodologyProvider, ExerciseCatalogProvider, ValidationService],
+  providers: [
+    ProtocolGeneratorService,
+    MethodologyProvider,
+    ExerciseCatalogProvider,
+    ValidationService,
+  ],
 })
 class DiagnosticModule {}
 

@@ -62,7 +62,10 @@ export const CATALOG_MUSCLE_GROUPS = [
   'sistema cardiovascular',
 ] as const;
 
-const MUSCLE_FILTER_OPTIONS = CATALOG_MUSCLE_GROUPS.map((muscle) => ({ value: muscle, label: muscle }));
+const MUSCLE_FILTER_OPTIONS = CATALOG_MUSCLE_GROUPS.map((muscle) => ({
+  value: muscle,
+  label: muscle,
+}));
 const LOCATION_FILTER_OPTIONS = trainingLocationSchema.options.map((loc) => ({
   value: loc,
   label: TRAINING_LOCATION_LABELS[loc],

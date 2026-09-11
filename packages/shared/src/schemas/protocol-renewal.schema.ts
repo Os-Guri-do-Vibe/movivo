@@ -126,13 +126,25 @@ export const protocolRenewalNewPainSchema = z
       ctx.addIssue({ code: 'custom', path: ['region'], message: 'Informe a região.' });
     }
     if (val.region === 'OTHER' && !val.regionOther) {
-      ctx.addIssue({ code: 'custom', path: ['regionOther'], message: 'Informe qual outra região.' });
+      ctx.addIssue({
+        code: 'custom',
+        path: ['regionOther'],
+        message: 'Informe qual outra região.',
+      });
     }
     if (val.intensity === undefined) {
-      ctx.addIssue({ code: 'custom', path: ['intensity'], message: 'Informe a intensidade (0-10).' });
+      ctx.addIssue({
+        code: 'custom',
+        path: ['intensity'],
+        message: 'Informe a intensidade (0-10).',
+      });
     }
     if (!val.trend) {
-      ctx.addIssue({ code: 'custom', path: ['trend'], message: 'Informe se está melhorando, estável ou piorando.' });
+      ctx.addIssue({
+        code: 'custom',
+        path: ['trend'],
+        message: 'Informe se está melhorando, estável ou piorando.',
+      });
     }
     if (val.soughtCare === undefined) {
       ctx.addIssue({

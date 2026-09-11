@@ -68,8 +68,8 @@ function NotFoundScreen() {
       <p className="font-mono text-label text-muted-foreground">link indisponível</p>
       <h1 className="text-h1 font-bold">Não encontramos este formulário</h1>
       <p className="max-w-prose text-body text-muted-foreground">
-        O link pode estar incorreto. Abra o link mais recente enviado no seu WhatsApp, ou fale com
-        a gente por lá para pedir um novo.
+        O link pode estar incorreto. Abra o link mais recente enviado no seu WhatsApp, ou fale com a
+        gente por lá para pedir um novo.
       </p>
     </div>
   );
@@ -81,8 +81,8 @@ function ExpiredScreen() {
       <p className="font-mono text-label text-muted-foreground">link expirado</p>
       <h1 className="text-h1 font-bold">Este formulário expirou</h1>
       <p className="max-w-prose text-body text-muted-foreground">
-        O prazo deste link já passou. Fale com a gente pelo WhatsApp da MOVIVO para receber um
-        novo link de troca de protocolo.
+        O prazo deste link já passou. Fale com a gente pelo WhatsApp da MOVIVO para receber um novo
+        link de troca de protocolo.
       </p>
     </div>
   );

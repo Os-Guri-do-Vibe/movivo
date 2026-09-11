@@ -24,7 +24,13 @@ describe('protocolRenewalBlock3Schema (segurança — repescagem de PAR-Q)', () 
 
   it('dor nova região OTHER sem regionOther é rejeitada', () => {
     const result = protocolRenewalBlock3Schema.safeParse({
-      newPain: { hasNewPain: true, region: 'OTHER', intensity: 5, trend: 'STABLE', soughtCare: false },
+      newPain: {
+        hasNewPain: true,
+        region: 'OTHER',
+        intensity: 5,
+        trend: 'STABLE',
+        soughtCare: false,
+      },
       parqRecheck: { changedToYes: false },
     });
     expect(result.success).toBe(false);
@@ -32,7 +38,13 @@ describe('protocolRenewalBlock3Schema (segurança — repescagem de PAR-Q)', () 
 
   it('dor nova completa é aceita', () => {
     const result = protocolRenewalBlock3Schema.safeParse({
-      newPain: { hasNewPain: true, region: 'KNEE', intensity: 5, trend: 'STABLE', soughtCare: false },
+      newPain: {
+        hasNewPain: true,
+        region: 'KNEE',
+        intensity: 5,
+        trend: 'STABLE',
+        soughtCare: false,
+      },
       parqRecheck: { changedToYes: false },
     });
     expect(result.success).toBe(true);
@@ -78,7 +90,10 @@ describe('protocolRenewalBlock5Schema (contexto e logística)', () => {
   });
 
   it('DAYS_PER_WEEK marcado sem daysPerWeek é rejeitado', () => {
-    const result = protocolRenewalBlock5Schema.safeParse({ ...BASE_BLOCK5, changes: ['DAYS_PER_WEEK'] });
+    const result = protocolRenewalBlock5Schema.safeParse({
+      ...BASE_BLOCK5,
+      changes: ['DAYS_PER_WEEK'],
+    });
     expect(result.success).toBe(false);
   });
 

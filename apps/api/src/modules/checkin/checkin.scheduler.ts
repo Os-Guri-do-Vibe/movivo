@@ -83,7 +83,10 @@ export class CheckinScheduler implements OnModuleInit {
           ),
         )
         .where(
-          and(eq(protocols.status, 'ACTIVE'), inArray(subscriptions.status, ['ACTIVE', 'TRIALING'])),
+          and(
+            eq(protocols.status, 'ACTIVE'),
+            inArray(subscriptions.status, ['ACTIVE', 'TRIALING']),
+          ),
         ),
     );
 

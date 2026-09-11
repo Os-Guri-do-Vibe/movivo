@@ -1002,7 +1002,9 @@ function ProtocolSummary({
                               ? `${exercise.reps.min}–${exercise.reps.max}`
                               : ''}
                         </td>
-                        <td className="p-2 font-mono">{formatDurationLabel(exercise.restSeconds)}</td>
+                        <td className="p-2 font-mono">
+                          {formatDurationLabel(exercise.restSeconds)}
+                        </td>
                         <td className="p-2 font-mono">{exercise.rir ?? '—'}</td>
                         <td className="p-2 text-xs">
                           {exercise.technique ? ADVANCED_TECHNIQUE_LABELS[exercise.technique] : '—'}

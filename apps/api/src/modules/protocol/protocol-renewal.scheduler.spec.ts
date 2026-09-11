@@ -16,21 +16,29 @@ const LOGGER = { setContext: vi.fn(), info: vi.fn() } as unknown as PinoLogger;
 function makeInsertTx(created: { id: string } | undefined) {
   const onConflictDoNothing = vi.fn(() => ({ returning: async () => (created ? [created] : []) }));
   const values = vi.fn(() => ({ onConflictDoNothing }));
-  const insert = vi.fn((table: unknown) => (table === protocolRenewalSessions ? { values } : { values: () => ({}) }));
+  const insert = vi.fn((table: unknown) =>
+    table === protocolRenewalSessions ? { values } : { values: () => ({}) },
+  );
   return { insert, values, onConflictDoNothing };
 }
 
 describe('ProtocolRenewalScheduler.scan', () => {
   it('varre protocolos ACTIVE vencidos, cria a sessão de renovação e enfileira o convite', async () => {
     const eligible = [{ userId: USER_ID, protocolId: PROTOCOL_ID, name: 'Maria Silva' }];
-    const selectChain = { from: () => selectChain, innerJoin: () => selectChain, where: async () => eligible };
+    const selectChain = {
+      from: () => selectChain,
+      innerJoin: () => selectChain,
+      where: async () => eligible,
+    };
     const { insert, values } = makeInsertTx({ id: 'renewal-1' });
     const db = {
       runAsSystem: vi.fn((callback: (tx: unknown) => Promise<unknown>) =>
         callback({ selectDistinct: () => selectChain, insert } as never),
       ),
     } as unknown as TenantDatabase;
-    const enqueue = vi.fn(async () => 'job');
+    const enqueue = vi.fn((_q: string, _name: string, _data: unknown, _opts?: unknown) =>
+      Promise.resolve('job'),
+    );
     const scheduler = new ProtocolRenewalScheduler(
       {} as WorkerFactory,
       { enqueue } as unknown as QueueManager,
@@ -54,12 +62,17 @@ describe('ProtocolRenewalScheduler.scan', () => {
       }),
       { jobId: 'wa-renewal-invite-renewal-1' },
     );
-    expect(enqueue.mock.calls[0]?.[2].text).toContain('https://movivo.app/mesociclo/');
+    const sentPayload = enqueue.mock.calls[0]?.[2] as { text: string };
+    expect(sentPayload.text).toContain('https://movivo.app/mesociclo/');
   });
 
   it('idempotente: se a sessão já existe (conflito no índice único), não enfileira de novo', async () => {
     const eligible = [{ userId: USER_ID, protocolId: PROTOCOL_ID, name: 'Maria Silva' }];
-    const selectChain = { from: () => selectChain, innerJoin: () => selectChain, where: async () => eligible };
+    const selectChain = {
+      from: () => selectChain,
+      innerJoin: () => selectChain,
+      where: async () => eligible,
+    };
     const { insert } = makeInsertTx(undefined);
     const db = {
       runAsSystem: vi.fn((callback: (tx: unknown) => Promise<unknown>) =>
@@ -80,7 +93,11 @@ describe('ProtocolRenewalScheduler.scan', () => {
   });
 
   it('sem elegíveis: não cria nem enfileira nada', async () => {
-    const selectChain = { from: () => selectChain, innerJoin: () => selectChain, where: async () => [] };
+    const selectChain = {
+      from: () => selectChain,
+      innerJoin: () => selectChain,
+      where: async () => [],
+    };
     const db = {
       runAsSystem: vi.fn((callback: (tx: unknown) => Promise<unknown>) =>
         callback({ selectDistinct: () => selectChain } as never),

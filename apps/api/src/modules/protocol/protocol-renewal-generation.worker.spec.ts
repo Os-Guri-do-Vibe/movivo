@@ -1,4 +1,4 @@
-import type { ProtocolStructure, UserConstraints as SharedUserConstraints } from '@movivo/shared';
+import type { ProtocolStructure } from '@movivo/shared';
 import type { Job } from 'bullmq';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -13,7 +13,10 @@ import {
   ProtocolRenewalGenerationWorker,
   type ProtocolRenewalGenerationJob,
 } from './protocol-renewal-generation.worker';
-import type { GenerateProtocolResult, ProtocolGeneratorService } from './protocol-generator.service';
+import type {
+  GenerateProtocolResult,
+  ProtocolGeneratorService,
+} from './protocol-generator.service';
 import type { UserConstraints } from './user-constraints';
 import type { ProtocolRepository } from './protocol.repository';
 import type { ValidationService, ValidationVerdict } from './validation/validation.service';
@@ -75,7 +78,7 @@ const PREVIOUS_CONSTRAINTS: UserConstraints = {
 function previousProtocolRow(over: Record<string, unknown> = {}) {
   return {
     content: structure({ phase: 'ADAPTACAO' }),
-    constraints: PREVIOUS_CONSTRAINTS as unknown as SharedUserConstraints,
+    constraints: PREVIOUS_CONSTRAINTS as unknown as UserConstraints,
     totalWeeks: 3,
     mesocycleNumber: 1,
     ...over,
@@ -92,7 +95,12 @@ function renewalSessionRow(over: Record<string, unknown> = {}) {
       loadProgression: 'EVOLUI_NA_MAIORIA',
       perceivedEffort: 'SOBRAVA_UM_POUCO',
     },
-    dataBlock2: { fatigueLevel: 'MODERADO', sleepQuality: 'BOA', stressLevel: 'BAIXO', muscleSoreness: 'NORMAL' },
+    dataBlock2: {
+      fatigueLevel: 'MODERADO',
+      sleepQuality: 'BOA',
+      stressLevel: 'BAIXO',
+      muscleSoreness: 'NORMAL',
+    },
     dataBlock3: Buffer.from('cipher'),
     dataBlock4: { goalProgress: 'DENTRO_DO_ESPERADO', satisfaction: 8 },
     dataBlock5: {
@@ -109,7 +117,9 @@ function renewalSessionRow(over: Record<string, unknown> = {}) {
 function block3Json(changedToYes = false) {
   return JSON.stringify({
     newPain: { hasNewPain: false },
-    parqRecheck: changedToYes ? { changedToYes: true, detail: 'nova medicação contínua' } : { changedToYes: false },
+    parqRecheck: changedToYes
+      ? { changedToYes: true, detail: 'nova medicação contínua' }
+      : { changedToYes: false },
   });
 }
 
@@ -173,15 +183,21 @@ function makeWorker(deps: Deps = {}) {
     (tx as { limit: () => unknown }).limit = () => Promise.resolve([{ id: 'already-1' }]);
   }
   const db = {
-    runAsUser: vi.fn((_uid: string, _role: string, cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
+    runAsUser: vi.fn((_uid: string, _role: string, cb: (tx: unknown) => Promise<unknown>) =>
+      cb(tx),
+    ),
   } as unknown as TenantDatabase;
 
   const cipher = {
     decryptHealth: vi.fn(() => Promise.resolve(block3Json(deps.changedToYes ?? false))),
   } as unknown as HealthCipherService;
 
-  const generator = { generate: vi.fn(() => Promise.resolve(genResult)) } as unknown as ProtocolGeneratorService;
-  const validation = { validate: vi.fn(() => verdict(deps.action ?? 'PASS')) } as unknown as ValidationService;
+  const generator = {
+    generate: vi.fn(() => Promise.resolve(genResult)),
+  } as unknown as ProtocolGeneratorService;
+  const validation = {
+    validate: vi.fn(() => verdict(deps.action ?? 'PASS')),
+  } as unknown as ValidationService;
 
   const repository = {
     persist: vi.fn(() => Promise.resolve({ protocolId: 'p1', version: 1, alreadyExisted: false })),
@@ -195,7 +211,9 @@ function makeWorker(deps: Deps = {}) {
     workers,
     queues,
     db,
-    { hasActiveForUser: vi.fn(async () => deps.consentActive ?? true) } as unknown as HealthConsentService,
+    {
+      hasActiveForUser: vi.fn(async () => deps.consentActive ?? true),
+    } as unknown as HealthConsentService,
     cipher,
     generator,
     validation,
@@ -272,18 +290,28 @@ describe('ProtocolRenewalGenerationWorker.process', () => {
     expect(res.status).toBe('PENDING_REVIEW');
     expect(generator.generate).toHaveBeenCalledWith(
       expect.objectContaining({
-        constraints: expect.objectContaining({ requiresProfessionalReview: true, maxPhase: 'ADAPTACAO' }),
+        constraints: expect.objectContaining({
+          requiresProfessionalReview: true,
+          maxPhase: 'ADAPTACAO',
+        }),
       }),
     );
-    expect(repository.persist).toHaveBeenCalledWith(expect.objectContaining({ reviewUrgency: 'MANDATORY' }));
+    expect(repository.persist).toHaveBeenCalledWith(
+      expect.objectContaining({ reviewUrgency: 'MANDATORY' }),
+    );
     expect(enqueue).not.toHaveBeenCalled();
   });
 
   it('conteúdo cai no fallback (BLOCK persistente): MANDATORY mesmo com PAR-Q liberado', async () => {
-    const { worker, repository, enqueue } = makeWorker({ action: 'BLOCK_FALLBACK', changedToYes: false });
+    const { worker, repository, enqueue } = makeWorker({
+      action: 'BLOCK_FALLBACK',
+      changedToYes: false,
+    });
     const res = await worker.process(job());
     expect(res.status).toBe('PENDING_REVIEW');
-    expect(repository.persist).toHaveBeenCalledWith(expect.objectContaining({ reviewUrgency: 'MANDATORY' }));
+    expect(repository.persist).toHaveBeenCalledWith(
+      expect.objectContaining({ reviewUrgency: 'MANDATORY' }),
+    );
     expect(enqueue).not.toHaveBeenCalled();
   });
 });

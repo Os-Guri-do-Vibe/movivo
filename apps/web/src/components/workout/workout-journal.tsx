@@ -551,14 +551,18 @@ export function WorkoutJournalView() {
               </div>
             ) : null}
             {error ? (
-              <p role="alert" className="mt-4 rounded-xl border border-destructive bg-destructive/10 p-3 text-label text-petroleo">
+              <p
+                role="alert"
+                className="mt-4 rounded-xl border border-destructive bg-destructive/10 p-3 text-label text-petroleo"
+              >
                 {error}
               </p>
             ) : null}
             <button
               type="button"
               disabled={
-                busy || (painReported && (painExerciseIds.length === 0 || painNotes.trim().length < 3))
+                busy ||
+                (painReported && (painExerciseIds.length === 0 || painNotes.trim().length < 3))
               }
               onClick={finish}
               className="mt-8 min-h-14 w-full rounded-2xl bg-petroleo font-extrabold text-white transition-colors hover:bg-petroleo/85 disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground"
@@ -643,7 +647,10 @@ export function WorkoutJournalView() {
           ) : null}
         </section>
         {error ? (
-          <p role="alert" className="mt-4 rounded-xl border border-destructive bg-destructive/10 p-3 text-label text-petroleo">
+          <p
+            role="alert"
+            className="mt-4 rounded-xl border border-destructive bg-destructive/10 p-3 text-label text-petroleo"
+          >
             {error}
           </p>
         ) : null}
@@ -690,194 +697,194 @@ export function WorkoutJournalView() {
               </div>
               <div className="divide-y divide-border">
                 {workout.prescription.exercises.map((exercise) => {
-                const exerciseSets = sets.filter(
-                  (entry) => entry.exerciseId === exercise.exerciseId,
-                );
-                const exerciseSkipped =
-                  exerciseSets.length > 0 && exerciseSets.every((entry) => entry.skipped);
-                const exerciseFilled = isExerciseFilled(exercise, exerciseSets);
-                const exerciseConfirmed = confirmedExercises.has(exercise.exerciseId);
-                return (
-                  <details
-                    key={exercise.exerciseId}
-                    open={openExercises.has(exercise.exerciseId)}
-                    onToggle={(event) => {
-                      const isOpen = event.currentTarget.open;
-                      setOpenExercises((current) => {
-                        const next = new Set(current);
-                        if (isOpen) next.add(exercise.exerciseId);
-                        else next.delete(exercise.exerciseId);
-                        return next;
-                      });
-                    }}
-                    className="group px-4 py-4"
-                  >
-                    <summary className="flex cursor-pointer list-none items-center justify-between">
-                      <div>
-                        <h3
-                          className={`text-h3 font-extrabold ${exerciseConfirmed ? 'text-muted-foreground line-through decoration-2' : ''}`}
-                        >
-                          {exercise.name}
-                        </h3>
-                        <p className="mt-1 text-label text-muted-foreground">
-                          {exercise.sets} séries ·{' '}
-                          {exercise.reps
-                            ? `${exercise.reps.min}-${exercise.reps.max} repetições`
-                            : formatDurationLabel(exercise.durationSeconds ?? 0)}{' '}
-                          · descanso {formatDurationLabel(exercise.restSeconds)}
-                        </p>
-                      </div>
-                      <ChevronDown className="transition group-open:rotate-180" />
-                    </summary>
-                    {exerciseSkipped ? (
-                      <div className="mt-5 rounded-2xl bg-muted p-4 text-label text-muted-foreground">
-                        Este exercício foi marcado como pulado e não entrará como realizado.
-                      </div>
-                    ) : exercise.isCardio ? null : (
-                      <div className="mt-5 space-y-3">
-                        {sets.map((entry, index) => {
-                          if (entry.exerciseId !== exercise.exerciseId) return null;
-                          const previous = previousByKey.get(
-                            `${entry.exerciseId}:${entry.setNumber}`,
-                          );
-                          const delta =
-                            entry.loadValue != null &&
-                            previous?.loadValue != null &&
-                            entry.loadUnit === previous.loadUnit
-                              ? entry.loadValue - previous.loadValue
-                              : null;
-                          const warmupBlock =
-                            entry.setNumber <= 0
-                              ? warmupBlockForSet(exercise, entry.setNumber)
-                              : undefined;
-                          return (
-                            <div
-                              key={entry.setNumber}
-                              className="grid grid-cols-[2rem_1fr_1fr] items-end gap-2"
-                            >
-                              <span className="pb-3 text-center font-bold">
-                                {entry.setNumber <= 0 ? 'Aq' : entry.setNumber}
-                              </span>
-                              {exercise.reps ? (
-                                <label className="text-label text-muted-foreground">
-                                  {warmupBlock?.reps
-                                    ? `Reps ${warmupBlock.reps.min}-${warmupBlock.reps.max}`
-                                    : `Reps ${exercise.reps.min}-${exercise.reps.max}`}
-                                  <input
-                                    inputMode="numeric"
-                                    {...numberFieldProps(
-                                      `${entry.exerciseId}:${entry.setNumber}:reps`,
-                                      entry.reps,
-                                      (reps) => updateSet(index, { reps }),
-                                    )}
-                                    placeholder={
-                                      previous?.reps != null
-                                        ? `Treino passado: ${previous.reps}`
-                                        : '—'
-                                    }
-                                    className="mt-1 min-h-11 w-full rounded-xl border border-verde-pulso px-3 text-body text-foreground"
-                                  />
-                                </label>
-                              ) : (
-                                <label className="text-label text-muted-foreground">
-                                  {warmupBlock?.durationSeconds != null
-                                    ? `Aq · ${formatDurationLabel(warmupBlock.durationSeconds)}`
-                                    : 'Tempo'}
-                                  <input
-                                    inputMode="numeric"
-                                    {...numberFieldProps(
-                                      `${entry.exerciseId}:${entry.setNumber}:durationSeconds`,
-                                      entry.durationSeconds,
-                                      (durationSeconds) => updateSet(index, { durationSeconds }),
-                                    )}
-                                    placeholder={
-                                      previous?.durationSeconds != null
-                                        ? `Treino passado: ${formatDurationLabel(previous.durationSeconds)}`
-                                        : '—'
-                                    }
-                                    className="mt-1 min-h-11 w-full rounded-xl border border-verde-pulso px-3 text-body text-foreground"
-                                  />
-                                </label>
-                              )}
-                              <label className="text-label text-muted-foreground">
-                                Carga (kg)
-                                <span
-                                  className={`ml-1 font-bold ${delta && delta > 0 ? 'text-emerald-700' : 'text-muted-foreground'}`}
-                                >
-                                  {delta === null
-                                    ? ''
-                                    : delta > 0
-                                      ? `+${delta}kg`
-                                      : delta < 0
-                                        ? `${delta}kg`
-                                        : '—'}
+                  const exerciseSets = sets.filter(
+                    (entry) => entry.exerciseId === exercise.exerciseId,
+                  );
+                  const exerciseSkipped =
+                    exerciseSets.length > 0 && exerciseSets.every((entry) => entry.skipped);
+                  const exerciseFilled = isExerciseFilled(exercise, exerciseSets);
+                  const exerciseConfirmed = confirmedExercises.has(exercise.exerciseId);
+                  return (
+                    <details
+                      key={exercise.exerciseId}
+                      open={openExercises.has(exercise.exerciseId)}
+                      onToggle={(event) => {
+                        const isOpen = event.currentTarget.open;
+                        setOpenExercises((current) => {
+                          const next = new Set(current);
+                          if (isOpen) next.add(exercise.exerciseId);
+                          else next.delete(exercise.exerciseId);
+                          return next;
+                        });
+                      }}
+                      className="group px-4 py-4"
+                    >
+                      <summary className="flex cursor-pointer list-none items-center justify-between">
+                        <div>
+                          <h3
+                            className={`text-h3 font-extrabold ${exerciseConfirmed ? 'text-muted-foreground line-through decoration-2' : ''}`}
+                          >
+                            {exercise.name}
+                          </h3>
+                          <p className="mt-1 text-label text-muted-foreground">
+                            {exercise.sets} séries ·{' '}
+                            {exercise.reps
+                              ? `${exercise.reps.min}-${exercise.reps.max} repetições`
+                              : formatDurationLabel(exercise.durationSeconds ?? 0)}{' '}
+                            · descanso {formatDurationLabel(exercise.restSeconds)}
+                          </p>
+                        </div>
+                        <ChevronDown className="transition group-open:rotate-180" />
+                      </summary>
+                      {exerciseSkipped ? (
+                        <div className="mt-5 rounded-2xl bg-muted p-4 text-label text-muted-foreground">
+                          Este exercício foi marcado como pulado e não entrará como realizado.
+                        </div>
+                      ) : exercise.isCardio ? null : (
+                        <div className="mt-5 space-y-3">
+                          {sets.map((entry, index) => {
+                            if (entry.exerciseId !== exercise.exerciseId) return null;
+                            const previous = previousByKey.get(
+                              `${entry.exerciseId}:${entry.setNumber}`,
+                            );
+                            const delta =
+                              entry.loadValue != null &&
+                              previous?.loadValue != null &&
+                              entry.loadUnit === previous.loadUnit
+                                ? entry.loadValue - previous.loadValue
+                                : null;
+                            const warmupBlock =
+                              entry.setNumber <= 0
+                                ? warmupBlockForSet(exercise, entry.setNumber)
+                                : undefined;
+                            return (
+                              <div
+                                key={entry.setNumber}
+                                className="grid grid-cols-[2rem_1fr_1fr] items-end gap-2"
+                              >
+                                <span className="pb-3 text-center font-bold">
+                                  {entry.setNumber <= 0 ? 'Aq' : entry.setNumber}
                                 </span>
-                                <input
-                                  inputMode="decimal"
-                                  {...numberFieldProps(
-                                    `${entry.exerciseId}:${entry.setNumber}:loadValue`,
-                                    entry.loadValue,
-                                    (loadValue) => updateSet(index, { loadValue }),
-                                  )}
-                                  placeholder={
-                                    previous?.loadValue != null
-                                      ? `Treino passado: ${previous.loadValue}`
-                                      : '—'
-                                  }
-                                  className="mt-1 min-h-11 w-full rounded-xl border border-verde-pulso px-3 text-body text-foreground"
-                                />
-                              </label>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                    {exerciseSkipped ? (
-                      <button
-                        type="button"
-                        onClick={() => void toggleExerciseSkipped(exercise.exerciseId)}
-                        aria-pressed={exerciseSkipped}
-                        className="mt-4 min-h-11 w-full rounded-xl border border-verde-pulso px-4 text-label font-bold text-petroleo"
-                      >
-                        Incluir exercício novamente
-                      </button>
-                    ) : exerciseFilled ? (
-                      <button
-                        type="button"
-                        onClick={() => confirmExerciseDone(exercise.exerciseId)}
-                        className="mt-4 min-h-11 w-full rounded-xl bg-petroleo px-4 text-label font-bold text-white"
-                      >
-                        Concluído
-                      </button>
-                    ) : exercise.isCardio ? (
-                      <div className="mt-4 flex flex-col gap-3">
+                                {exercise.reps ? (
+                                  <label className="text-label text-muted-foreground">
+                                    {warmupBlock?.reps
+                                      ? `Reps ${warmupBlock.reps.min}-${warmupBlock.reps.max}`
+                                      : `Reps ${exercise.reps.min}-${exercise.reps.max}`}
+                                    <input
+                                      inputMode="numeric"
+                                      {...numberFieldProps(
+                                        `${entry.exerciseId}:${entry.setNumber}:reps`,
+                                        entry.reps,
+                                        (reps) => updateSet(index, { reps }),
+                                      )}
+                                      placeholder={
+                                        previous?.reps != null
+                                          ? `Treino passado: ${previous.reps}`
+                                          : '—'
+                                      }
+                                      className="mt-1 min-h-11 w-full rounded-xl border border-verde-pulso px-3 text-body text-foreground"
+                                    />
+                                  </label>
+                                ) : (
+                                  <label className="text-label text-muted-foreground">
+                                    {warmupBlock?.durationSeconds != null
+                                      ? `Aq · ${formatDurationLabel(warmupBlock.durationSeconds)}`
+                                      : 'Tempo'}
+                                    <input
+                                      inputMode="numeric"
+                                      {...numberFieldProps(
+                                        `${entry.exerciseId}:${entry.setNumber}:durationSeconds`,
+                                        entry.durationSeconds,
+                                        (durationSeconds) => updateSet(index, { durationSeconds }),
+                                      )}
+                                      placeholder={
+                                        previous?.durationSeconds != null
+                                          ? `Treino passado: ${formatDurationLabel(previous.durationSeconds)}`
+                                          : '—'
+                                      }
+                                      className="mt-1 min-h-11 w-full rounded-xl border border-verde-pulso px-3 text-body text-foreground"
+                                    />
+                                  </label>
+                                )}
+                                <label className="text-label text-muted-foreground">
+                                  Carga (kg)
+                                  <span
+                                    className={`ml-1 font-bold ${delta && delta > 0 ? 'text-emerald-700' : 'text-muted-foreground'}`}
+                                  >
+                                    {delta === null
+                                      ? ''
+                                      : delta > 0
+                                        ? `+${delta}kg`
+                                        : delta < 0
+                                          ? `${delta}kg`
+                                          : '—'}
+                                  </span>
+                                  <input
+                                    inputMode="decimal"
+                                    {...numberFieldProps(
+                                      `${entry.exerciseId}:${entry.setNumber}:loadValue`,
+                                      entry.loadValue,
+                                      (loadValue) => updateSet(index, { loadValue }),
+                                    )}
+                                    placeholder={
+                                      previous?.loadValue != null
+                                        ? `Treino passado: ${previous.loadValue}`
+                                        : '—'
+                                    }
+                                    className="mt-1 min-h-11 w-full rounded-xl border border-verde-pulso px-3 text-body text-foreground"
+                                  />
+                                </label>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {exerciseSkipped ? (
                         <button
                           type="button"
                           onClick={() => void toggleExerciseSkipped(exercise.exerciseId)}
-                          className="min-h-11 w-full rounded-xl border border-verde-pulso px-4 text-label font-bold text-muted-foreground"
+                          aria-pressed={exerciseSkipped}
+                          className="mt-4 min-h-11 w-full rounded-xl border border-verde-pulso px-4 text-label font-bold text-petroleo"
                         >
-                          Pular este exercício
+                          Incluir exercício novamente
                         </button>
+                      ) : exerciseFilled ? (
                         <button
                           type="button"
-                          onClick={() => void completeCardioExercise(exercise)}
-                          className="min-h-11 w-full rounded-xl bg-petroleo px-4 text-label font-bold text-white"
+                          onClick={() => confirmExerciseDone(exercise.exerciseId)}
+                          className="mt-4 min-h-11 w-full rounded-xl bg-petroleo px-4 text-label font-bold text-white"
                         >
                           Concluído
                         </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => void toggleExerciseSkipped(exercise.exerciseId)}
-                        className="mt-4 min-h-11 w-full rounded-xl border border-verde-pulso px-4 text-label font-bold text-muted-foreground"
-                      >
-                        Pular este exercício
-                      </button>
-                    )}
-                  </details>
-                );
-              })}
+                      ) : exercise.isCardio ? (
+                        <div className="mt-4 flex flex-col gap-3">
+                          <button
+                            type="button"
+                            onClick={() => void toggleExerciseSkipped(exercise.exerciseId)}
+                            className="min-h-11 w-full rounded-xl border border-verde-pulso px-4 text-label font-bold text-muted-foreground"
+                          >
+                            Pular este exercício
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void completeCardioExercise(exercise)}
+                            className="min-h-11 w-full rounded-xl bg-petroleo px-4 text-label font-bold text-white"
+                          >
+                            Concluído
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void toggleExerciseSkipped(exercise.exerciseId)}
+                          className="mt-4 min-h-11 w-full rounded-xl border border-verde-pulso px-4 text-label font-bold text-muted-foreground"
+                        >
+                          Pular este exercício
+                        </button>
+                      )}
+                    </details>
+                  );
+                })}
               </div>
             </section>
             {workout.status === 'IN_PROGRESS' ? (

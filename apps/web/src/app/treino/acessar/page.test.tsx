@@ -47,7 +47,10 @@ describe('WorkoutAccessPage', () => {
         const url = String(input);
         if (url.includes('/api/workout/access/peek')) return { ok: true, json: async () => ({}) };
         if (url === '/api/workout/access') {
-          return { ok: false, json: async () => ({ message: 'Este link expirou ou ja foi utilizado.' }) };
+          return {
+            ok: false,
+            json: async () => ({ message: 'Este link expirou ou ja foi utilizado.' }),
+          };
         }
         if (url === '/api/workout/journal') return { ok: true };
         throw new Error(`fetch inesperado: ${url}`);
@@ -66,7 +69,10 @@ describe('WorkoutAccessPage', () => {
         const url = String(input);
         if (url.includes('/api/workout/access/peek')) return { ok: true, json: async () => ({}) };
         if (url === '/api/workout/access') {
-          return { ok: false, json: async () => ({ message: 'Este link expirou ou ja foi utilizado.' }) };
+          return {
+            ok: false,
+            json: async () => ({ message: 'Este link expirou ou ja foi utilizado.' }),
+          };
         }
         if (url === '/api/workout/journal') return { ok: false };
         throw new Error(`fetch inesperado: ${url}`);
@@ -76,7 +82,9 @@ describe('WorkoutAccessPage', () => {
       render(<WorkoutAccessPage />);
       await userEvent.click(await screen.findByRole('button', { name: /abrir meu treino/i }));
 
-      expect(await screen.findByRole('alert')).toHaveTextContent('Este link expirou ou ja foi utilizado.');
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'Este link expirou ou ja foi utilizado.',
+      );
       expect(replace).not.toHaveBeenCalled();
     });
 

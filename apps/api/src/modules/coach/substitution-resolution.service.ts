@@ -64,13 +64,11 @@ export interface ResolveChoiceRequest {
 }
 
 export type ResolveChoiceResult =
-  | { resolved: true; chosenExerciseId: string }
-  | { resolved: false };
+  { resolved: true; chosenExerciseId: string } | { resolved: false };
 
 /** `resolve()` only — turno 2 distingue "ainda não decidiu" de "recusou tudo". */
 export type ResolveConfirmationResult =
-  | { resolved: true; chosenExerciseId: string }
-  | { resolved: false; rejectedAll: boolean };
+  { resolved: true; chosenExerciseId: string } | { resolved: false; rejectedAll: boolean };
 
 function parseJson(text: string): unknown {
   const trimmed = text

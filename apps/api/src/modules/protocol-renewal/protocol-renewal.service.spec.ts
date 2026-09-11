@@ -1,7 +1,13 @@
+import {
+  BadRequestException,
+  ConflictException,
+  GoneException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 import { describe, expect, it, vi } from 'vitest';
 
-import { anamnesisSessions, handoffAlerts, protocolRenewalSessions, users } from '../../core/database/schema';
+import { anamnesisSessions, protocolRenewalSessions, users } from '../../core/database/schema';
 import type { HealthCipherService } from '../../core/database/health-cipher.service';
 import type { HealthConsentService } from '../../core/database/health-consent.service';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
@@ -42,20 +48,23 @@ function makeTxFor(session: unknown, userName: string | null, anamnesisSession: 
     limit: () => {
       if (table === protocolRenewalSessions) return Promise.resolve(session ? [session] : []);
       if (table === users) return Promise.resolve(userName !== null ? [{ name: userName }] : []);
-      if (table === anamnesisSessions) return Promise.resolve(anamnesisSession ? [anamnesisSession] : []);
+      if (table === anamnesisSessions)
+        return Promise.resolve(anamnesisSession ? [anamnesisSession] : []);
       return Promise.resolve([]);
     },
   };
   return chain;
 }
 
-function makeService(deps: {
-  session?: unknown;
-  userName?: string | null;
-  anamnesisSession?: unknown;
-  consentActive?: boolean;
-  decrypted?: string;
-} = {}) {
+function makeService(
+  deps: {
+    session?: unknown;
+    userName?: string | null;
+    anamnesisSession?: unknown;
+    consentActive?: boolean;
+    decrypted?: string;
+  } = {},
+) {
   const session = 'session' in deps ? deps.session : fullSessionRow();
   const userName = 'userName' in deps ? deps.userName : 'Maria Silva';
   const anamnesisSession = 'anamnesisSession' in deps ? deps.anamnesisSession : undefined;
@@ -71,15 +80,23 @@ function makeService(deps: {
 
   const db = {
     runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(fullTx)),
-    runAsUser: vi.fn((_uid: string, _role: string, cb: (tx: unknown) => Promise<unknown>) => cb(fullTx)),
+    runAsUser: vi.fn((_uid: string, _role: string, cb: (tx: unknown) => Promise<unknown>) =>
+      cb(fullTx),
+    ),
   } as unknown as TenantDatabase;
 
   const cipher = {
-    decryptHealth: vi.fn(async () => deps.decrypted ?? JSON.stringify({ newPain: { hasNewPain: false }, parqRecheck: { changedToYes: false } })),
+    decryptHealth: vi.fn(
+      async () =>
+        deps.decrypted ??
+        JSON.stringify({ newPain: { hasNewPain: false }, parqRecheck: { changedToYes: false } }),
+    ),
     encryptHealth: vi.fn(async (text: string) => Buffer.from(text)),
   } as unknown as HealthCipherService;
 
-  const healthConsent = { hasActiveForUser: vi.fn(async () => deps.consentActive ?? true) } as unknown as HealthConsentService;
+  const healthConsent = {
+    hasActiveForUser: vi.fn(async () => deps.consentActive ?? true),
+  } as unknown as HealthConsentService;
   const enqueue = vi.fn(async () => 'job');
   const queues = { enqueue } as unknown as QueueManager;
   const logger = { setContext: vi.fn(), info: vi.fn(), warn: vi.fn() } as unknown as PinoLogger;
@@ -153,7 +170,10 @@ describe('ProtocolRenewalService.submit', () => {
 
   it('pergunta 10 "mudou para Sim": confirmação vira CONFIRMATION_CARE', async () => {
     const { service, enqueue } = makeService({
-      decrypted: JSON.stringify({ newPain: { hasNewPain: false }, parqRecheck: { changedToYes: true, detail: 'nova medicação' } }),
+      decrypted: JSON.stringify({
+        newPain: { hasNewPain: false },
+        parqRecheck: { changedToYes: true, detail: 'nova medicação' },
+      }),
     });
     await service.submit(TOKEN);
     expect(enqueue).toHaveBeenCalledWith(
@@ -167,7 +187,13 @@ describe('ProtocolRenewalService.submit', () => {
   it('dor nova de alta intensidade cria handoff alert, mesmo sem repescagem do PAR-Q', async () => {
     const { service, updateWhere } = makeService({
       decrypted: JSON.stringify({
-        newPain: { hasNewPain: true, region: 'KNEE', intensity: 9, trend: 'STABLE', soughtCare: false },
+        newPain: {
+          hasNewPain: true,
+          region: 'KNEE',
+          intensity: 9,
+          trend: 'STABLE',
+          soughtCare: false,
+        },
         parqRecheck: { changedToYes: false },
       }),
     });
@@ -181,5 +207,77 @@ describe('ProtocolRenewalService.submit', () => {
   it('consentimento revogado → ForbiddenException', async () => {
     const { service } = makeService({ consentActive: false });
     await expect(service.submit(TOKEN)).rejects.toThrow('Consentimento');
+  });
+});
+
+describe('ProtocolRenewalService.patchStep', () => {
+  const VALID_PAYLOAD_BY_STEP = {
+    1: {
+      completionRate: 'SEMPRE',
+      actualFrequency: 'TODOS_OS_DIAS_PLANEJADOS',
+      loadProgression: 'EVOLUI_NA_MAIORIA',
+      perceivedEffort: 'SOBRAVA_BASTANTE',
+    },
+    2: {
+      fatigueLevel: 'BAIXO_RECUPERADO',
+      sleepQuality: 'BOA',
+      stressLevel: 'BAIXO',
+      muscleSoreness: 'NORMAL',
+    },
+    3: { newPain: { hasNewPain: false }, parqRecheck: { changedToYes: false } },
+    4: { goalProgress: 'DENTRO_DO_ESPERADO', satisfaction: 8 },
+    5: { changes: ['NONE'], dislikedExercise: { has: false }, goalChange: { changed: false } },
+  } as const;
+
+  it.each([1, 2, 3, 4, 5] as const)(
+    'bloco %s com payload válido: persiste e devolve o próximo currentStep',
+    async (step) => {
+      const { service, updateWhere } = makeService({
+        session: fullSessionRow({ lastStep: 1 }),
+      });
+      const result = await service.patchStep(TOKEN, step, VALID_PAYLOAD_BY_STEP[step]);
+      expect(result.currentStep).toBe(Math.min(step + 1, 5));
+      expect(updateWhere).toHaveBeenCalled();
+    },
+  );
+
+  it('payload inválido → BadRequestException, sem persistir', async () => {
+    const { service, updateWhere } = makeService({ session: fullSessionRow({ lastStep: 1 }) });
+    await expect(service.patchStep(TOKEN, 1, {})).rejects.toBeInstanceOf(BadRequestException);
+    expect(updateWhere).not.toHaveBeenCalled();
+  });
+
+  it('consentimento revogado → ForbiddenException', async () => {
+    const { service } = makeService({ consentActive: false });
+    await expect(service.patchStep(TOKEN, 1, VALID_PAYLOAD_BY_STEP[1])).rejects.toThrow(
+      'Consentimento',
+    );
+  });
+
+  it('sessão inexistente → NotFoundException', async () => {
+    const { service } = makeService({ session: undefined });
+    await expect(service.patchStep(TOKEN, 1, VALID_PAYLOAD_BY_STEP[1])).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('sessão já enviada (status != IN_PROGRESS) → ConflictException', async () => {
+    const { service } = makeService({ session: fullSessionRow({ status: 'SUBMITTED' }) });
+    await expect(service.patchStep(TOKEN, 1, VALID_PAYLOAD_BY_STEP[1])).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+  });
+
+  it('sessão vencida (expiresAt no passado) → GoneException e marca EXPIRED', async () => {
+    const { service, updateWhere } = makeService({
+      session: fullSessionRow({ expiresAt: new Date(Date.now() - 1_000) }),
+    });
+    await expect(service.patchStep(TOKEN, 1, VALID_PAYLOAD_BY_STEP[1])).rejects.toBeInstanceOf(
+      GoneException,
+    );
+    // `expire()` é best-effort (não aguardado por `assertActive`) — dá um tick pro
+    // microtask da expiração rodar antes de checar a persistência.
+    await Promise.resolve();
+    expect(updateWhere).toHaveBeenCalled();
   });
 });

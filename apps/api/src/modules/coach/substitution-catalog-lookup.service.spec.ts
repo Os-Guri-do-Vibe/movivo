@@ -38,7 +38,9 @@ describe('SubstitutionCatalogLookupService', () => {
         matchedExerciseId: 'supino_sentado_maquina',
       }),
     );
-    const result = await service.identify(request('Aluno: quero o supino sentado na máquina mesmo'));
+    const result = await service.identify(
+      request('Aluno: quero o supino sentado na máquina mesmo'),
+    );
     expect(result).toEqual({
       requestedName: 'supino sentado na máquina mesmo',
       matchedExerciseId: 'supino_sentado_maquina',
@@ -82,9 +84,7 @@ describe('SubstitutionCatalogLookupService', () => {
   });
 
   it('nada específico pedido (recusa vaga) → os dois campos null', async () => {
-    const { service } = make(
-      JSON.stringify({ requestedName: null, matchedExerciseId: null }),
-    );
+    const { service } = make(JSON.stringify({ requestedName: null, matchedExerciseId: null }));
     const result = await service.identify(request('Aluno: nenhuma dessas'));
     expect(result).toEqual({ requestedName: null, matchedExerciseId: null });
   });
@@ -108,7 +108,10 @@ describe('SubstitutionCatalogLookupService', () => {
   it('falha do LLM → tratado como nada específico pedido, sem lançar', async () => {
     const complete = vi.fn().mockRejectedValue(new Error('timeout'));
     const logger = { setContext: vi.fn(), info: vi.fn(), warn: vi.fn() } as unknown as PinoLogger;
-    const service = new SubstitutionCatalogLookupService({ complete } as unknown as LlmRouter, logger);
+    const service = new SubstitutionCatalogLookupService(
+      { complete } as unknown as LlmRouter,
+      logger,
+    );
     await expect(service.identify(request('Aluno: oi'))).resolves.toEqual({
       requestedName: null,
       matchedExerciseId: null,
@@ -116,7 +119,9 @@ describe('SubstitutionCatalogLookupService', () => {
   });
 
   it('usa o catálogo COMPLETO recebido (não um subconjunto) e um intent curto', async () => {
-    const { service, complete } = make(JSON.stringify({ requestedName: null, matchedExerciseId: null }));
+    const { service, complete } = make(
+      JSON.stringify({ requestedName: null, matchedExerciseId: null }),
+    );
     await service.identify(request('Aluno: oi'));
     expect(complete.mock.calls[0]?.[0]?.intent).toBe('substitution_catalog_lookup');
     expect(complete.mock.calls[0]?.[0]?.intent.length).toBeLessThanOrEqual(30);
@@ -129,7 +134,9 @@ describe('SubstitutionCatalogLookupService', () => {
    * serem os dois "supino numa máquina", quando são exercícios diferentes.
    */
   it('o prompt instrui a nunca confundir exercício parecido com a mesma identidade', async () => {
-    const { service, complete } = make(JSON.stringify({ requestedName: null, matchedExerciseId: null }));
+    const { service, complete } = make(
+      JSON.stringify({ requestedName: null, matchedExerciseId: null }),
+    );
     await service.identify(request('Aluno: oi'));
     const system = String(complete.mock.calls[0]?.[0]?.system ?? '');
     expect(system).toContain('NUNCA um exercício diferente só porque parece');

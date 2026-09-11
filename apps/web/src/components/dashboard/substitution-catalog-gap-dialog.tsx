@@ -19,10 +19,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { getExerciseCatalog } from '@/lib/control-center-api';
-import {
-  addCatalogExerciseAndApproveSubstitution,
-  DashboardApiError,
-} from '@/lib/dashboard-api';
+import { addCatalogExerciseAndApproveSubstitution, DashboardApiError } from '@/lib/dashboard-api';
 import { cn } from '@/lib/utils';
 
 import {
@@ -131,8 +128,8 @@ export function SubstitutionCatalogGapDialog({
         </DialogHeader>
 
         <p className="text-label text-muted-foreground">
-          O aluno pediu este exercício e ele ainda não está na nossa base. Publique-o pra
-          aplicar a troca — vira uma opção real do catálogo daqui pra frente.
+          O aluno pediu este exercício e ele ainda não está na nossa base. Publique-o pra aplicar a
+          troca — vira uma opção real do catálogo daqui pra frente.
         </p>
 
         {error ? (

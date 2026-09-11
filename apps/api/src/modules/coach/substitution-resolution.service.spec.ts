@@ -123,13 +123,18 @@ describe('SubstitutionResolutionService', () => {
 
     it('chosenExerciseId null (pedido sem nomear substituto) → não resolvido', async () => {
       const { service } = make(JSON.stringify({ chosenExerciseId: null }));
-      const result = await service.resolveExplicitRequest(request('Aluno: não gosto desse exercício'));
+      const result = await service.resolveExplicitRequest(
+        request('Aluno: não gosto desse exercício'),
+      );
       expect(result).toEqual({ resolved: false });
     });
 
     it('lista de candidatos vazia → não resolvido, sem chamar o LLM', async () => {
       const { service, complete } = make(JSON.stringify({ chosenExerciseId: 'flexao_diamante' }));
-      const result = await service.resolveExplicitRequest({ ...request('Aluno: ok'), candidates: [] });
+      const result = await service.resolveExplicitRequest({
+        ...request('Aluno: ok'),
+        candidates: [],
+      });
       expect(result).toEqual({ resolved: false });
       expect(complete).not.toHaveBeenCalled();
     });

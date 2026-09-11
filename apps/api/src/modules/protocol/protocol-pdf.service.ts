@@ -285,7 +285,9 @@ export async function buildProtocolPdf(input: ProtocolPdfInput): Promise<Buffer>
           vLineWidth: (colIndex: number, node) =>
             colIndex === 0 || colIndex === node.table.widths?.length ? 1 : 0,
           hLineColor: (rowIndex: number, node) =>
-            rowIndex === 0 || rowIndex === node.table.body.length ? COLOR.petroleo : COLOR.musgoTenue,
+            rowIndex === 0 || rowIndex === node.table.body.length
+              ? COLOR.petroleo
+              : COLOR.musgoTenue,
           vLineColor: () => COLOR.petroleo,
           paddingLeft: () => 6,
           paddingRight: () => 6,

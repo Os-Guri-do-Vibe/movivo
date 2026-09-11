@@ -22,7 +22,13 @@ import { PinoLogger } from 'nestjs-pino';
 import { CONSENT_TEXTS } from '@movivo/shared';
 
 import { AppConfigService } from '../../core/config';
-import { consents, protocolRenewalSessions, protocols, subscriptions, users } from '../../core/database/schema';
+import {
+  consents,
+  protocolRenewalSessions,
+  protocols,
+  subscriptions,
+  users,
+} from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { mesocycleRenewalMessage } from '../whatsapp/message-templates';
 import { QUEUE } from '../jobs/jobs.config';

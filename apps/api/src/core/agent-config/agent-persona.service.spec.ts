@@ -335,8 +335,18 @@ describe('AgentConfigRepository', () => {
     const inserted = values.mock.calls.map(([v]) => v as Record<string, unknown>);
     const male = inserted.find((v) => v.targetSex === 'MALE');
     const female = inserted.find((v) => v.targetSex === 'FEMALE');
-    expect(male).toMatchObject({ version: 1, status: 'PUBLISHED', payload: MALE_PERSONA, createdBy: null });
-    expect(female).toMatchObject({ version: 1, status: 'PUBLISHED', payload: FEMALE_PERSONA, createdBy: null });
+    expect(male).toMatchObject({
+      version: 1,
+      status: 'PUBLISHED',
+      payload: MALE_PERSONA,
+      createdBy: null,
+    });
+    expect(female).toMatchObject({
+      version: 1,
+      status: 'PUBLISHED',
+      payload: FEMALE_PERSONA,
+      createdBy: null,
+    });
     expect(onConflictDoNothing).toHaveBeenCalledTimes(2);
   });
 });

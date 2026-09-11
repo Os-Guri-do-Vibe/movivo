@@ -22,7 +22,10 @@ import {
   type ProtocolStructure,
 } from '@movivo/shared';
 
-import { TenantDatabase, type TenantTransaction } from '../../core/database/tenant-database.service';
+import {
+  TenantDatabase,
+  type TenantTransaction,
+} from '../../core/database/tenant-database.service';
 import { anamnesisSessions, protocols, protocolVersions } from '../../core/database/schema';
 import type { ContraindicationTag } from './exercise-catalog';
 
@@ -135,7 +138,10 @@ export class ProtocolRepository {
         .select({ id: protocols.id })
         .from(protocols)
         .where(
-          and(eq(protocols.userId, userId), eq(protocols.mesocycleNumber, INITIAL_MESOCYCLE_NUMBER)),
+          and(
+            eq(protocols.userId, userId),
+            eq(protocols.mesocycleNumber, INITIAL_MESOCYCLE_NUMBER),
+          ),
         )
         .limit(1),
     );

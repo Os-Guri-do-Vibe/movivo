@@ -234,7 +234,12 @@ export function Block5Context({
     <div className="flex flex-col gap-6 pb-4">
       {screen === 0 && (
         <section className="flex flex-col gap-6" aria-labelledby="block5-title">
-          <QuestionHeader index={1} total={totalQuestions} titleId="block5-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={1}
+            total={totalQuestions}
+            titleId="block5-title"
+            titleRef={titleRef}
+          >
             Algo mudou desde o início deste ciclo?
           </QuestionHeader>
           <ChoiceGroup<RenewalContextChange>
@@ -299,7 +304,12 @@ export function Block5Context({
 
       {screen === 1 && (
         <section className="flex flex-col gap-6" aria-labelledby="block5-title">
-          <QuestionHeader index={2} total={totalQuestions} titleId="block5-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={2}
+            total={totalQuestions}
+            titleId="block5-title"
+            titleRef={titleRef}
+          >
             Existe algum exercício deste ciclo que você não gostou e prefere não repetir?
           </QuestionHeader>
           <YesNo
@@ -326,7 +336,12 @@ export function Block5Context({
 
       {screen === 2 && (
         <section className="flex flex-col gap-6" aria-labelledby="block5-title">
-          <QuestionHeader index={3} total={totalQuestions} titleId="block5-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={3}
+            total={totalQuestions}
+            titleId="block5-title"
+            titleRef={titleRef}
+          >
             Alguma das dificuldades que você relatou no início ainda te atrapalha? Surgiu alguma
             nova?
           </QuestionHeader>
@@ -344,7 +359,12 @@ export function Block5Context({
 
       {screen === 3 && (
         <section className="flex flex-col gap-6" aria-labelledby="block5-title">
-          <QuestionHeader index={4} total={totalQuestions} titleId="block5-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={4}
+            total={totalQuestions}
+            titleId="block5-title"
+            titleRef={titleRef}
+          >
             Seu objetivo principal continua o mesmo?
           </QuestionHeader>
           <ChoiceGroup<'same' | 'changed'>
@@ -358,9 +378,7 @@ export function Block5Context({
                 ? []
                 : [data.goalChange.changed ? 'changed' : 'same']
             }
-            onToggle={(value) =>
-              set('goalChange', { changed: value === 'changed', newGoal: null })
-            }
+            onToggle={(value) => set('goalChange', { changed: value === 'changed', newGoal: null })}
             indicatorSide="left"
           />
           {data.goalChange.changed && (
@@ -380,7 +398,12 @@ export function Block5Context({
 
       {screen === 4 && hasTargetEvent && (
         <section className="flex flex-col gap-6" aria-labelledby="block5-title">
-          <QuestionHeader index={5} total={totalQuestions} titleId="block5-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={5}
+            total={totalQuestions}
+            titleId="block5-title"
+            titleRef={titleRef}
+          >
             Sua data-alvo/evento ainda está de pé?
           </QuestionHeader>
           <ChoiceGroup<RenewalTargetEventStatus>

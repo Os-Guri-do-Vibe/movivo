@@ -15,7 +15,8 @@ const CATALOG = new ExerciseCatalogProvider().getAll();
 const FLEXAO = CATALOG.find((ex) => ex.id === 'flexao');
 if (!FLEXAO) throw new Error('fixture: exercício "flexao" ausente do catálogo');
 const AGACHAMENTO_BARRA = CATALOG.find((ex) => ex.id === 'agachamento_barra');
-if (!AGACHAMENTO_BARRA) throw new Error('fixture: exercício "agachamento_barra" ausente do catálogo');
+if (!AGACHAMENTO_BARRA)
+  throw new Error('fixture: exercício "agachamento_barra" ausente do catálogo');
 
 const content: ProtocolStructure = {
   promptVersion: 'v1',
@@ -223,8 +224,8 @@ describe('ProtocolSubstitutionRepository.createPending', () => {
 describe('ProtocolSubstitutionRepository.createCatalogGapPending', () => {
   it('cria sem substituto real — toExerciseId null, catalogGap true, reviewUrgency MANDATORY', async () => {
     const { tx, inserts } = fakeTx([]);
-    const runAsUser = vi.fn((_userId: string, _role: string, cb: (tx: unknown) => Promise<unknown>) =>
-      cb(tx),
+    const runAsUser = vi.fn(
+      (_userId: string, _role: string, cb: (tx: unknown) => Promise<unknown>) => cb(tx),
     );
     const db = { runAsUser } as unknown as TenantDatabase;
     const repository = new ProtocolSubstitutionRepository(db, new ValidationService());
@@ -312,7 +313,9 @@ describe('ProtocolSubstitutionRepository.attachCatalogExerciseAndRelease', () =>
     );
     expect(result).toMatchObject({ released: true, version: 4, protocolId: 'protocol-1' });
     const requestUpdate = updates.find(
-      (u) => u.table === protocolSubstitutionRequests && (u.values as { toExerciseId?: string }).toExerciseId,
+      (u) =>
+        u.table === protocolSubstitutionRequests &&
+        (u.values as { toExerciseId?: string }).toExerciseId,
     );
     expect(requestUpdate?.values).toMatchObject({
       toExerciseId: FLEXAO.id,
@@ -360,7 +363,9 @@ describe('ProtocolSubstitutionRepository.attachCatalogExerciseAndRelease', () =>
   });
 
   it('proposta não é catalogGap (ou não está PENDING) → NOT_FOUND, sem tocar nada', async () => {
-    const { repository, updates } = repositoryWith([[{ ...CATALOG_GAP_REQUEST, catalogGap: false }]]);
+    const { repository, updates } = repositoryWith([
+      [{ ...CATALOG_GAP_REQUEST, catalogGap: false }],
+    ]);
     const result = await repository.attachCatalogExerciseAndRelease(
       { userId: 'staff-1', role: 'ADMIN' },
       'sub-request-1',

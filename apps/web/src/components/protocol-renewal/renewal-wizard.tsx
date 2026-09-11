@@ -90,7 +90,8 @@ function block5FromServer(raw: unknown): Block5State {
   };
 }
 
-const GENERIC_SAVE_ERROR = 'Não conseguimos salvar suas respostas. Confira os campos e tente de novo.';
+const GENERIC_SAVE_ERROR =
+  'Não conseguimos salvar suas respostas. Confira os campos e tente de novo.';
 
 export function RenewalWizard({ token, initial }: { token: string; initial: RenewalSessionView }) {
   const firstName = initial.firstName?.trim() || 'você';
@@ -258,9 +259,13 @@ export function RenewalWizard({ token, initial }: { token: string; initial: Rene
     } catch (err) {
       if (err instanceof ProtocolRenewalApiError) {
         if (err.status === 410) {
-          setError('Sua sessão expirou. Recarregue a página para pedir um novo link pelo WhatsApp.');
+          setError(
+            'Sua sessão expirou. Recarregue a página para pedir um novo link pelo WhatsApp.',
+          );
         } else if (err.status === 409) {
-          setError('Este formulário já tinha sido enviado. Recarregue a página para ver o status atual.');
+          setError(
+            'Este formulário já tinha sido enviado. Recarregue a página para ver o status atual.',
+          );
         } else if (err.status === 400 && err.issues[0]) {
           setError(err.issues[0]);
         } else {
@@ -279,10 +284,16 @@ export function RenewalWizard({ token, initial }: { token: string; initial: Rene
   }
 
   const blockContextTotal = { 1: 4, 2: 4, 3: 2, 4: 3, 5: hasTargetEvent ? 5 : 4 }[block];
-  const blockScreen = { 1: block1Screen, 2: block2Screen, 3: block3Screen, 4: block4Screen, 5: block5Screen }[
-    block
-  ];
-  const blockContext = showIntro ? 'Introdução' : `Pergunta ${blockScreen + 1} de ${blockContextTotal}`;
+  const blockScreen = {
+    1: block1Screen,
+    2: block2Screen,
+    3: block3Screen,
+    4: block4Screen,
+    5: block5Screen,
+  }[block];
+  const blockContext = showIntro
+    ? 'Introdução'
+    : `Pergunta ${blockScreen + 1} de ${blockContextTotal}`;
 
   return (
     <div className="flex flex-col gap-6">
@@ -303,7 +314,11 @@ export function RenewalWizard({ token, initial }: { token: string; initial: Rene
             <p className="font-mono text-label text-muted-foreground">
               MOVIVO — Formulário de troca de protocolo por fim de mesociclo
             </p>
-            <h1 id="renewal-intro-title" tabIndex={-1} className="text-h1 font-bold text-petroleo outline-none">
+            <h1
+              id="renewal-intro-title"
+              tabIndex={-1}
+              className="text-h1 font-bold text-petroleo outline-none"
+            >
               Olá, {firstName}! Vamos preparar seu próximo protocolo.
             </h1>
           </div>

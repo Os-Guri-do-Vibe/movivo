@@ -340,9 +340,9 @@ describe('WorkoutJournalService.journal', () => {
     const result = await service.journal(USER_ID, '2026-08-10', new Date('2026-08-10T12:00:00Z'));
 
     const exercises = result.workout?.prescription.exercises ?? [];
-    expect(exercises.find((exercise) => exercise.exerciseId === 'bicicleta_horizontal')?.isCardio).toBe(
-      true,
-    );
+    expect(
+      exercises.find((exercise) => exercise.exerciseId === 'bicicleta_horizontal')?.isCardio,
+    ).toBe(true);
     expect(exercises.find((exercise) => exercise.exerciseId === 'squat')?.isCardio).toBe(false);
   });
 
@@ -409,8 +409,16 @@ describe('WorkoutJournalService.journal', () => {
         protocolVersion: 2,
         content: { ...STRUCTURE, sessions: [SESSION_A_SUBSTITUIDA, SESSION_B] },
       };
-      const v1 = { version: 1, content: STRUCTURE, createdAt: new Date('2026-08-01T00:00:00.000Z') };
-      const v2 = { version: 2, content: owner.content, createdAt: new Date('2026-08-10T15:00:00.000Z') };
+      const v1 = {
+        version: 1,
+        content: STRUCTURE,
+        createdAt: new Date('2026-08-01T00:00:00.000Z'),
+      };
+      const v2 = {
+        version: 2,
+        content: owner.content,
+        createdAt: new Date('2026-08-10T15:00:00.000Z'),
+      };
       const { service, inserted } = makeService({
         selects: [[owner], [], [v1, v2], [], []],
       });

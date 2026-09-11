@@ -17,7 +17,12 @@ export async function GET(request: NextRequest) {
     const firstName = typeof payload?.firstName === 'string' ? payload.firstName : null;
     return Response.json(
       { firstName },
-      { headers: { 'Cache-Control': 'private, no-store, max-age=0', 'Referrer-Policy': 'no-referrer' } },
+      {
+        headers: {
+          'Cache-Control': 'private, no-store, max-age=0',
+          'Referrer-Policy': 'no-referrer',
+        },
+      },
     );
   } catch {
     return Response.json({ firstName: null });

@@ -107,7 +107,12 @@ export function Block1Performance({
     <div className="flex flex-col gap-6 pb-4">
       {screen === 0 && (
         <section className="flex flex-col gap-6" aria-labelledby="block1-title">
-          <QuestionHeader index={1} total={TOTAL_QUESTIONS} titleId="block1-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={1}
+            total={TOTAL_QUESTIONS}
+            titleId="block1-title"
+            titleRef={titleRef}
+          >
             Nas últimas semanas, você conseguiu completar as séries e repetições planejadas?
           </QuestionHeader>
           <ChoiceGroup<RenewalCompletionRate>
@@ -123,7 +128,12 @@ export function Block1Performance({
 
       {screen === 1 && (
         <section className="flex flex-col gap-6" aria-labelledby="block1-title">
-          <QuestionHeader index={2} total={TOTAL_QUESTIONS} titleId="block1-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={2}
+            total={TOTAL_QUESTIONS}
+            titleId="block1-title"
+            titleRef={titleRef}
+          >
             Em quantos dias por semana, em média, você de fato treinou (não o planejado, o real)?
           </QuestionHeader>
           <ChoiceGroup<RenewalActualFrequency>
@@ -139,7 +149,12 @@ export function Block1Performance({
 
       {screen === 2 && (
         <section className="flex flex-col gap-6" aria-labelledby="block1-title">
-          <QuestionHeader index={3} total={TOTAL_QUESTIONS} titleId="block1-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={3}
+            total={TOTAL_QUESTIONS}
+            titleId="block1-title"
+            titleRef={titleRef}
+          >
             Nos exercícios principais (agachamento, supino, remada, etc.), como foi sua evolução de
             carga ou repetições desde o início do ciclo?
           </QuestionHeader>
@@ -156,7 +171,12 @@ export function Block1Performance({
 
       {screen === 3 && (
         <section className="flex flex-col gap-6" aria-labelledby="block1-title">
-          <QuestionHeader index={4} total={TOTAL_QUESTIONS} titleId="block1-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={4}
+            total={TOTAL_QUESTIONS}
+            titleId="block1-title"
+            titleRef={titleRef}
+          >
             De forma geral, como estava seu esforço ao final da maioria das séries de trabalho?
           </QuestionHeader>
           <ChoiceGroup<RenewalPerceivedEffort>

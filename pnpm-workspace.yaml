@@ -47,6 +47,14 @@ overrides:
   # @nestjs/cli>...>postcss>nanoid e vitest>...>vite>postcss>nanoid (devDependency).
   # Mesmo major (3.x) — correção segura. Datado: 2026-08-11.
   'nanoid@<3.3.17': '>=3.3.17'
+  # multer <2.3.0 — 3 CVEs HIGH (vazamento de file descriptor em upload abortado,
+  # DoS via índice de array desmedido em nome de campo). Origem:
+  # @nestjs/platform-express>multer (dependency de runtime de apps/api, upload do
+  # PDF do protocolo) — a 12.0.1 do NestJS ainda trava em multer@2.2.0, então o
+  # `multer` direto em apps/api/package.json (já em 2.3.0) não bastava: o pnpm
+  # mantinha as duas versões na árvore e o `pnpm audit` seguia acusando a
+  # transitiva. Mesmo major (2.x) — correção segura. Datado: 2026-09-11.
+  'multer@<2.3.0': '>=2.3.0'
 allowBuilds:
   # `core-js` entra como dependência transitiva de `posthog-js` (US-0.5). Seu script de
   # postinstall só imprime uma mensagem de financiamento — não produz artefato nenhum.

@@ -367,7 +367,9 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
     expect(sendDocument).toHaveBeenCalledTimes(1);
     const caption = sendDocument.mock.calls[0]?.[2];
     expect(caption).toMatch(/^Ana, seu treino está pronto!/);
-    expect(caption).toContain('Seu treino trabalha corpo inteiro 3x por semana, com foco em técnica.');
+    expect(caption).toContain(
+      'Seu treino trabalha corpo inteiro 3x por semana, com foco em técnica.',
+    );
     expect(caption).not.toContain('---');
   });
 

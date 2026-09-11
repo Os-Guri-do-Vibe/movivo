@@ -50,9 +50,19 @@ const dto: ProtocolRead = {
 
 const VALID_UUID = '11111111-1111-4111-8111-111111111111';
 
-function makeController(findByToken = vi.fn(() => Promise.resolve<ProtocolRead | null>(dto))) {
-  const repo = { findByToken } as unknown as ProtocolRepository;
-  return { controller: new ProtocolController(repo), findByToken };
+function makeController(
+  findByToken = vi.fn(() => Promise.resolve<ProtocolRead | null>(dto)),
+  findPdfByToken = vi.fn(() => Promise.resolve<Buffer | null>(Buffer.from('%PDF-1.4'))),
+) {
+  const repo = { findByToken, findPdfByToken } as unknown as ProtocolRepository;
+  return { controller: new ProtocolController(repo), findByToken, findPdfByToken };
+}
+
+function fakeResponse() {
+  return {
+    setHeader: vi.fn(),
+    send: vi.fn(),
+  } as unknown as import('express').Response;
 }
 
 describe('ProtocolController (US-2.6)', () => {
@@ -73,5 +83,36 @@ describe('ProtocolController (US-2.6)', () => {
   it('protocolo inexistente/não-ACTIVE (null) → 404', async () => {
     const { controller } = makeController(vi.fn(() => Promise.resolve(null)));
     await expect(controller.byToken(VALID_UUID)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('PDF: token UUID válido devolve o binário com os headers corretos', async () => {
+    const { controller, findPdfByToken } = makeController();
+    const res = fakeResponse();
+    await controller.pdfByToken(VALID_UUID, res);
+    expect(findPdfByToken).toHaveBeenCalledWith(VALID_UUID);
+    expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      'inline; filename="protocolo-movivo.pdf"',
+    );
+    expect(res.send).toHaveBeenCalledWith(Buffer.from('%PDF-1.4'));
+  });
+
+  it('PDF: token não-UUID → 404 sem tocar o repositório', async () => {
+    const { controller, findPdfByToken } = makeController();
+    await expect(controller.pdfByToken('not-a-uuid', fakeResponse())).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(findPdfByToken).not.toHaveBeenCalled();
+  });
+
+  it('PDF: protocolo sem PDF assinado (null) → 404', async () => {
+    const { controller } = makeController(
+      undefined,
+      vi.fn(() => Promise.resolve(null)),
+    );
+    await expect(controller.pdfByToken(VALID_UUID, fakeResponse())).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });

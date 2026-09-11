@@ -101,7 +101,12 @@ export function Block2Fatigue({
     <div className="flex flex-col gap-6 pb-4">
       {screen === 0 && (
         <section className="flex flex-col gap-6" aria-labelledby="block2-title">
-          <QuestionHeader index={1} total={TOTAL_QUESTIONS} titleId="block2-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={1}
+            total={TOTAL_QUESTIONS}
+            titleId="block2-title"
+            titleRef={titleRef}
+          >
             Como está seu nível de fadiga acumulada nas últimas semanas?
           </QuestionHeader>
           <ChoiceGroup<RenewalFatigueLevel>
@@ -117,7 +122,12 @@ export function Block2Fatigue({
 
       {screen === 1 && (
         <section className="flex flex-col gap-6" aria-labelledby="block2-title">
-          <QuestionHeader index={2} total={TOTAL_QUESTIONS} titleId="block2-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={2}
+            total={TOTAL_QUESTIONS}
+            titleId="block2-title"
+            titleRef={titleRef}
+          >
             Como está sua qualidade de sono nas últimas semanas?
           </QuestionHeader>
           <ChoiceGroup<RenewalSleepQuality>
@@ -133,7 +143,12 @@ export function Block2Fatigue({
 
       {screen === 2 && (
         <section className="flex flex-col gap-6" aria-labelledby="block2-title">
-          <QuestionHeader index={3} total={TOTAL_QUESTIONS} titleId="block2-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={3}
+            total={TOTAL_QUESTIONS}
+            titleId="block2-title"
+            titleRef={titleRef}
+          >
             Como está seu nível de estresse fora dos treinos (trabalho, rotina, pessoal)?
           </QuestionHeader>
           <ChoiceGroup<RenewalStressLevel>
@@ -149,7 +164,12 @@ export function Block2Fatigue({
 
       {screen === 3 && (
         <section className="flex flex-col gap-6" aria-labelledby="block2-title">
-          <QuestionHeader index={4} total={TOTAL_QUESTIONS} titleId="block2-title" titleRef={titleRef}>
+          <QuestionHeader
+            index={4}
+            total={TOTAL_QUESTIONS}
+            titleId="block2-title"
+            titleRef={titleRef}
+          >
             A dor muscular pós-treino (aquela normal, não lesão) tem sido diferente do habitual?
           </QuestionHeader>
           <ChoiceGroup<RenewalMuscleSoreness>

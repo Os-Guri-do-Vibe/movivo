@@ -153,7 +153,11 @@ beforeEach(() => {
   api.addCatalogExerciseAndApproveSubstitution.mockResolvedValue({ status: 'released' });
   controlCenterApi.getExerciseCatalog.mockResolvedValue({
     data: { versions: [], totalPublished: 0 },
-    meta: { generatedAt: '2026-09-09T12:00:00.000Z', timezone: 'America/Sao_Paulo', dataQuality: [] },
+    meta: {
+      generatedAt: '2026-09-09T12:00:00.000Z',
+      timezone: 'America/Sao_Paulo',
+      dataQuality: [],
+    },
   });
 });
 
@@ -220,9 +224,7 @@ describe('QueueDetail — substituição fora do catálogo (catalogGap)', () => 
     expect(screen.getByText('Revisão obrigatória')).toBeVisible();
     expect(screen.getByText('“Supino Reto Máquina” (fora do catálogo)')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Aprovar agora' })).not.toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Adicionar exercício ao catálogo' }),
-    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Adicionar exercício ao catálogo' })).toBeVisible();
   });
 
   it('publica o exercício e aprova a troca no mesmo gesto', async () => {
@@ -230,9 +232,7 @@ describe('QueueDetail — substituição fora do catálogo (catalogGap)', () => 
     render(<QueueDetail kind="SUBSTITUTION" id={CATALOG_GAP_SUBSTITUTION_ID} />);
     await screen.findByText('Troca proposta');
 
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Adicionar exercício ao catálogo' }),
-    );
+    await userEvent.click(screen.getByRole('button', { name: 'Adicionar exercício ao catálogo' }));
     const dialog = await screen.findByRole('dialog');
     const scope = within(dialog);
 
@@ -261,9 +261,7 @@ describe('QueueDetail — substituição fora do catálogo (catalogGap)', () => 
     render(<QueueDetail kind="SUBSTITUTION" id={CATALOG_GAP_SUBSTITUTION_ID} />);
     await screen.findByText('Troca proposta');
 
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Adicionar exercício ao catálogo' }),
-    );
+    await userEvent.click(screen.getByRole('button', { name: 'Adicionar exercício ao catálogo' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('button', { name: 'Adicionar e aprovar' })).toBeDisabled();
     expect(api.addCatalogExerciseAndApproveSubstitution).not.toHaveBeenCalled();

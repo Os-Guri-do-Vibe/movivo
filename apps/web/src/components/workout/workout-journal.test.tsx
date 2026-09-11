@@ -259,12 +259,17 @@ describe('WorkoutJournalView — iniciar treino', () => {
   it('inicia o treino e recarrega o dia com status em andamento', async () => {
     let reloaded = false;
     const startSpy = vi.fn(() => ok({}));
+    // `startedAt` relativo a "agora" (nunca um literal fixo): o cronômetro renderiza
+    // `HH:MM:SS` a partir do tempo decorrido — um timestamp fixo antigo faz as horas
+    // passarem de 2 dígitos com a passagem do tempo e quebra o regex do teste (achado
+    // 2026-09-11).
+    const startedAt = new Date(Date.now() - 5_000).toISOString();
     installFetch({
       journal: () =>
         ok(
           journalFor(TODAY, {
             workout: workoutInProgress({
-              ...(reloaded ? {} : { status: 'PLANNED' as const, startedAt: null }),
+              ...(reloaded ? { startedAt } : { status: 'PLANNED' as const, startedAt: null }),
             }),
           }),
         ),
@@ -456,10 +461,7 @@ describe('WorkoutJournalView — série em andamento', () => {
     // Exercício prescrito com 60 s exatos: fica no limite superior de "segundos" (SI).
     expect(await screen.findByText(/60 s · descanso 0 s/)).toBeVisible();
 
-    expect(screen.getByLabelText('Tempo')).toHaveAttribute(
-      'placeholder',
-      'Treino passado: 10 min',
-    );
+    expect(screen.getByLabelText('Tempo')).toHaveAttribute('placeholder', 'Treino passado: 10 min');
   });
 
   it('marca a série de aquecimento (warmupBlocks) com "Aq" antes das séries válidas', async () => {

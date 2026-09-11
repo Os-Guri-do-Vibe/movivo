@@ -247,8 +247,7 @@ export const DEFAULT_AGENT_PERSONA_MALE: AgentPersona = {
   // Achado 2026-09-10 (pedido do fundador): adaptado de um exemplo real do coach humano dele
   // ("salve ROD, bom dia meu brother! ótima quarta pra nós e bora nessa!") — sem o nome do
   // aluno fixo no texto, que é sempre gerado pela IA, nunca copiado literalmente.
-  voiceExample:
-    'Salve! Bom dia, brother. Show de dia pra gente, bora nessa treino de hoje.',
+  voiceExample: 'Salve! Bom dia, brother. Show de dia pra gente, bora nessa treino de hoje.',
   emojiPolicy: 'NENHUM',
   formatting: { blockSize: 'MEDIO', allowLists: true, boldPolicy: 'MODERADO' },
   humanHandoffMessage: DEFAULT_HUMAN_HANDOFF_MESSAGE,

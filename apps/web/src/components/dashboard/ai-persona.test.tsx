@@ -187,7 +187,9 @@ describe('AiPersonaDashboard', () => {
     expect(screen.queryByText('Regras que a agente nunca quebra')).not.toBeInTheDocument();
     expect(screen.queryByText('Perímetro: só se fala de treino')).not.toBeInTheDocument();
     expect(screen.queryByText('Fonte de conhecimento')).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Abrir Base de Conhecimento' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Abrir Base de Conhecimento' }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Temas proibidos' })).toBeVisible();
     expect(screen.queryByRole('tab', { name: /Conhecimento/ })).not.toBeInTheDocument();
   });

@@ -73,7 +73,8 @@ function workspace({
 } = {}) {
   const slots: Partial<Record<BiologicalSex, Workspace.AgentSlotSummary>> = {};
   if (female !== null) slots.FEMALE = female ?? slot();
-  if (male !== null) slots.MALE = male ?? slot({ targetSex: 'MALE', agentName: 'Leonardo', version: 4 });
+  if (male !== null)
+    slots.MALE = male ?? slot({ targetSex: 'MALE', agentName: 'Leonardo', version: 4 });
   return {
     canWrite,
     canApprove: false,
@@ -120,7 +121,9 @@ describe('AgentPersonaCards', () => {
   });
 
   it('com dado: badge "Ativo" (sem repetir "Persona feminina/masculina")', () => {
-    useAgentPersonaWorkspace.mockReturnValue(workspace({ female: slot({ version: 3 }), male: null }));
+    useAgentPersonaWorkspace.mockReturnValue(
+      workspace({ female: slot({ version: 3 }), male: null }),
+    );
     renderCards();
     expect(screen.getByText('Ativo')).toBeVisible();
     expect(screen.queryByText(/persona feminina/i)).not.toBeInTheDocument();
@@ -152,7 +155,12 @@ describe('AgentPersonaCards', () => {
     useAgentPersonaWorkspace.mockReturnValue(
       workspace({
         female: slot({ agentName: 'Mariana', version: 1 }),
-        male: slot({ targetSex: 'MALE', agentName: 'Leonardo', version: null, servedFromSex: null }),
+        male: slot({
+          targetSex: 'MALE',
+          agentName: 'Leonardo',
+          version: null,
+          servedFromSex: null,
+        }),
       }),
     );
     renderCards();

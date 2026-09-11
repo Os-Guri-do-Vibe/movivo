@@ -104,7 +104,8 @@ function prescribedSession(
 
 function expectedSets(session: ProtocolSession): WorkoutSetInput[] {
   return session.exercises.flatMap((exercise) => {
-    const loadUnit = exercise.loadStrategy === 'BODYWEIGHT' ? ('BODYWEIGHT' as const) : ('KG' as const);
+    const loadUnit =
+      exercise.loadStrategy === 'BODYWEIGHT' ? ('BODYWEIGHT' as const) : ('KG' as const);
     const warmupCount = (exercise.warmupBlocks ?? []).reduce((sum, block) => sum + block.sets, 0);
     // Aquecimento numerado em ordem crescente terminando em 0, logo antes da série 1.
     const warmupSets = Array.from({ length: warmupCount }, (_, index) => ({

@@ -7,7 +7,11 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { conversionMessage, dunningMessage, type ConversionTouchpoint } from './subscription-messages';
+import {
+  conversionMessage,
+  dunningMessage,
+  type ConversionTouchpoint,
+} from './subscription-messages';
 
 const TOUCHPOINTS: ConversionTouchpoint[] = ['day7', 'day10', 'day13', 'day14', 'winback'];
 
