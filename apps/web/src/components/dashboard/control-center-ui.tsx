@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertTriangle, Clock3, DatabaseZap, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Clock3, DatabaseZap, RefreshCw, type LucideIcon } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { ControlCenterMetric, DataAvailability } from '@movivo/shared';
 
@@ -52,7 +52,7 @@ export function useControlCenterResource<T>(load: (signal?: AbortSignal) => Prom
 
 export function SectorHeader({
   title,
-  description,
+  icon: Icon,
   meta,
   refreshing,
   onRefresh,
@@ -61,11 +61,12 @@ export function SectorHeader({
 }: {
   title: string;
   /**
-   * Subtítulo do setor. Opcional: a Fila de supervisão é um painel de trabalho, não
-   * um setor analítico — o título sozinho já diz o que a tela é, e uma linha de
-   * descrição ali só empurraria a fila pra baixo.
+   * Mesmo ícone do item da sidebar para esta rota (achado 2026-09-04, a pedido do
+   * fundador, "de todos os painéis"): reforça em que setor o fundador está sem
+   * precisar olhar de volta pro menu. Sempre em `text-verde-pulso`, a mesma cor que o
+   * ícone ganha na sidebar quando aquele item está ativo.
    */
-  description?: string;
+  icon?: LucideIcon;
   meta?: ControlCenterMeta;
   refreshing?: boolean;
   onRefresh?: () => void;
@@ -78,10 +79,10 @@ export function SectorHeader({
   return (
     <header className="flex flex-wrap items-end justify-between gap-4">
       <div>
-        <Heading className="text-h1 font-bold">{title}</Heading>
-        {description ? (
-          <p className="mt-2 max-w-3xl text-body text-muted-foreground">{description}</p>
-        ) : null}
+        <Heading className="flex items-center gap-3 text-h1 font-bold">
+          {Icon ? <Icon aria-hidden="true" className="size-7 text-verde-pulso" /> : null}
+          {title}
+        </Heading>
         {meta ? (
           <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
             <Clock3 aria-hidden="true" className="size-3.5" />

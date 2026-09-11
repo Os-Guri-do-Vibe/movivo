@@ -26,11 +26,15 @@ export interface QueueItem {
   /**
    * POR QUE este item exige revisão humana. `PARQ` = a sessão de origem está bloqueada
    * aguardando liberação (alerta clínico — assinar o protocolo também libera o PAR-Q, no
-   * backend, dentro da própria assinatura); `EDIT` = um CREF editou o conteúdo e precisa
-   * de sign-off fresco; `AI_SUBSTITUTION` = troca de exercício confirmada pelo aluno via
-   * WhatsApp, aguardando revisão/liberação automática. `null` nos demais itens `optional`.
+   * backend, dentro da própria assinatura); `FALLBACK` (2026-09-03) = o protocolo caiu no
+   * template conservador do RT porque a geração/validação nunca passou limpa, mesmo com
+   * PAR-Q liberado; `EDIT` = um CREF editou o conteúdo e precisa de sign-off fresco;
+   * `AI_SUBSTITUTION` = troca de exercício confirmada pelo aluno via WhatsApp, aguardando
+   * revisão/liberação automática. `CATALOG_GAP` (2026-09-09) = o aluno pediu um exercício
+   * que não existe em nenhum lugar do catálogo — mandatory, com a opção de adicionar ao
+   * catálogo na tela de detalhe (`substitution.catalogGap`). `null` nos demais itens `optional`.
    */
-  origin: 'PARQ' | 'EDIT' | 'AI_SUBSTITUTION' | null;
+  origin: 'PARQ' | 'FALLBACK' | 'EDIT' | 'AI_SUBSTITUTION' | 'CATALOG_GAP' | null;
 }
 
 /**
@@ -63,6 +67,8 @@ export interface ReplayMessage {
 export interface AnonymizedReplay {
   conversationId: string;
   startedAt: string;
+  /** Nome real do titular da conversa — `null` quando não resolvido. */
+  studentName: string | null;
   messages: ReplayMessage[];
 }
 
@@ -84,16 +90,23 @@ export interface SubstitutionDetail {
   id: string;
   protocolId: string;
   from: { id: string; name: string };
-  to: { id: string; name: string };
+  /** Achado 2026-09-09: `id: null` quando `catalogGap` — o exercício pedido ainda não tem
+   * id nenhum, `name` carrega o texto exatamente como o aluno pediu. */
+  to: { id: string | null; name: string };
   diff: {
     type: 'EXERCISE_SUBSTITUTION';
     from: { id: string; name: string };
     to: { id: string; name: string };
     sessionsAffected: string[];
-  };
+  } | null;
   changeReason: string;
   status: 'PENDING' | 'RELEASED' | 'DISCARDED';
   decidedAt: string | null;
+  /** Achado 2026-09-09 — nasce decidido na criação da proposta (não depende de PAR-Q ao vivo). */
+  reviewUrgency: 'OPTIONAL' | 'MANDATORY';
+  /** `true` só quando o exercício pedido não existe em nenhum lugar do catálogo — liga a
+   * opção "Adicionar exercício ao catálogo" na tela. */
+  catalogGap: boolean;
 }
 
 export interface QueueDetail {

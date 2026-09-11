@@ -1,4 +1,10 @@
-import { DEFAULT_AGENT_PERSONA, type AgentPersona, type BiologicalSex } from '@movivo/shared';
+import {
+  DEFAULT_AGENT_PERSONA,
+  DEFAULT_AGENT_PERSONA_FEMALE,
+  DEFAULT_AGENT_PERSONA_MALE,
+  type AgentPersona,
+  type BiologicalSex,
+} from '@movivo/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RedisKeyBuilder } from '../redis/redis-key.util';
@@ -22,6 +28,7 @@ function make(overrides?: {
   repoActivePayload?: (
     targetSex: BiologicalSex,
   ) => Promise<{ version: number; payload: unknown } | null>;
+  repoEnsureBootstrap?: (seeds: Record<BiologicalSex, AgentPersona>) => Promise<void>;
 }) {
   const subscriber = {
     subscribe: vi.fn(() => Promise.resolve()),
@@ -34,6 +41,7 @@ function make(overrides?: {
   };
   const repo = {
     activePayload: vi.fn(overrides?.repoActivePayload ?? (() => Promise.resolve(null))),
+    ensureBootstrap: vi.fn(overrides?.repoEnsureBootstrap ?? (() => Promise.resolve())),
   } as unknown as AgentConfigRepository;
   const logger = { setContext: vi.fn(), warn: vi.fn(), info: vi.fn() };
   const svc = new AgentPersonaService(
@@ -56,10 +64,30 @@ function dbWith(payloads: Partial<Record<BiologicalSex, AgentPersona>>) {
 describe('AgentPersonaService', () => {
   beforeEach(() => vi.useRealTimers());
 
-  it('sem config publicada (Redis e banco vazios), cai para o default de código', async () => {
+  it('sem config publicada (Redis e banco vazios), cai para o default de código DAQUELE slot', async () => {
     const { svc } = make();
-    expect(await svc.persona('MALE')).toEqual(DEFAULT_AGENT_PERSONA);
-    expect(await svc.agentName('FEMALE')).toBe(DEFAULT_AGENT_PERSONA.agentName);
+    expect(await svc.persona('MALE')).toEqual(DEFAULT_AGENT_PERSONA_MALE);
+    expect(await svc.agentName('FEMALE')).toBe(DEFAULT_AGENT_PERSONA_FEMALE.agentName);
+  });
+
+  it('achado 2026-09-04: toda resolução (num cache miss) semeia o bootstrap dos dois slots', async () => {
+    const { svc, repo } = make();
+    await svc.persona('MALE');
+    expect(repo.ensureBootstrap).toHaveBeenCalledWith({
+      FEMALE: DEFAULT_AGENT_PERSONA_FEMALE,
+      MALE: DEFAULT_AGENT_PERSONA_MALE,
+    });
+  });
+
+  it('falha no bootstrap não derruba a resolução — segue pro caminho normal', async () => {
+    const { svc, logger } = make({
+      repoEnsureBootstrap: () => Promise.reject(new Error('insert falhou')),
+    });
+    expect(await svc.persona('MALE')).toEqual(DEFAULT_AGENT_PERSONA_MALE);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'agent_config_bootstrap_failed' }),
+      expect.any(String),
+    );
   });
 
   it('lê o snapshot do Redis quando presente e válido', async () => {
@@ -84,7 +112,7 @@ describe('AgentPersonaService', () => {
       redisGet: () => Promise.reject(new Error('ECONNREFUSED')),
       repoActivePayload: () => Promise.reject(new Error('banco indisponível')),
     });
-    expect(await svc.persona('MALE')).toEqual(DEFAULT_AGENT_PERSONA);
+    expect(await svc.persona('MALE')).toEqual(DEFAULT_AGENT_PERSONA_MALE);
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ event: 'agent_config_fallback' }),
       expect.any(String),
@@ -103,12 +131,12 @@ describe('AgentPersonaService', () => {
     const { svc } = make({
       repoActivePayload: () => Promise.resolve({ version: 1, payload: { agentName: 'X' } }),
     });
-    expect(await svc.persona('MALE')).toEqual(DEFAULT_AGENT_PERSONA);
+    expect(await svc.persona('MALE')).toEqual(DEFAULT_AGENT_PERSONA_MALE);
   });
 
   it('nenhuma linha publicada (`activePayload` null) cai para o default', async () => {
     const { svc } = make({ repoActivePayload: () => Promise.resolve(null) });
-    expect(await svc.persona('MALE')).toEqual(DEFAULT_AGENT_PERSONA);
+    expect(await svc.persona('MALE')).toEqual(DEFAULT_AGENT_PERSONA_MALE);
   });
 
   it('resultado é cacheado em memória: uma segunda chamada não bate no Redis de novo', async () => {
@@ -161,7 +189,7 @@ describe('AgentPersonaService', () => {
       throw new Error('sem conexão dedicada');
     });
     expect(() => svc.onModuleInit()).not.toThrow();
-    expect(await svc.persona('MALE')).toEqual(DEFAULT_AGENT_PERSONA);
+    expect(await svc.persona('MALE')).toEqual(DEFAULT_AGENT_PERSONA_MALE);
     await expect(svc.onModuleDestroy()).resolves.toBeUndefined();
   });
 
@@ -213,10 +241,10 @@ describe('AgentPersonaService', () => {
     expect(await svc.agentName(null)).toBe('Marina');
   });
 
-  it('sem persona em NENHUM slot, `null` cai no default compilado', async () => {
+  it('sem persona em NENHUM slot, `null` cai no default compilado do slot MASCULINO (SLOT_WITHOUT_SUBJECT)', async () => {
     const { svc } = make();
     const resolved = await svc.resolve(null);
-    expect(resolved.persona).toEqual(DEFAULT_AGENT_PERSONA);
+    expect(resolved.persona).toEqual(DEFAULT_AGENT_PERSONA_MALE);
     expect(resolved.servedFromSex).toBeNull();
   });
 
@@ -292,5 +320,33 @@ describe('AgentConfigRepository', () => {
     } as never;
     const repo = new AgentConfigRepository(db);
     expect(await repo.activePayload('FEMALE')).toBeNull();
+  });
+
+  it('ensureBootstrap (achado 2026-09-04): insere version=1 PUBLISHED em cada slot, com created_by nulo e ON CONFLICT DO NOTHING', async () => {
+    const onConflictDoNothing = vi.fn(() => Promise.resolve());
+    const values = vi.fn((_v: Record<string, unknown>) => ({ onConflictDoNothing }));
+    const insert = vi.fn(() => ({ values }));
+    const db = { insert } as never;
+    const repo = new AgentConfigRepository(db);
+
+    await repo.ensureBootstrap({ MALE: MALE_PERSONA, FEMALE: FEMALE_PERSONA });
+
+    expect(insert).toHaveBeenCalledTimes(2);
+    const inserted = values.mock.calls.map(([v]) => v as Record<string, unknown>);
+    const male = inserted.find((v) => v.targetSex === 'MALE');
+    const female = inserted.find((v) => v.targetSex === 'FEMALE');
+    expect(male).toMatchObject({
+      version: 1,
+      status: 'PUBLISHED',
+      payload: MALE_PERSONA,
+      createdBy: null,
+    });
+    expect(female).toMatchObject({
+      version: 1,
+      status: 'PUBLISHED',
+      payload: FEMALE_PERSONA,
+      createdBy: null,
+    });
+    expect(onConflictDoNothing).toHaveBeenCalledTimes(2);
   });
 });

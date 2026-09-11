@@ -18,8 +18,11 @@ import { generationGoalSchema, weekdaySchema } from './anamnesis.schema';
 import { uuidSchema } from './common.schema';
 
 /**
- * Fase de periodização (Rafael §5.2 `TrainingPhase`). A IA escolhe a fase inicial
- * coerente com objetivo/nível; a progressão entre fases é da geração/ajuste futuro.
+ * Fase de periodização (Rafael §5.2 `TrainingPhase`). A IA escolhe a fase — tanto a
+ * inicial (coerente com objetivo/nível) quanto a de cada renovação de mesociclo
+ * (informada pelo mesociclo anterior + respostas do formulário de transição, ver
+ * `UserConstraints.continuation` em `apps/api/src/modules/protocol/user-constraints.ts`)
+ * — dentro dos trilhos da metodologia publicada. Não há máquina de estados no código.
  */
 export const trainingPhaseSchema = z.enum(['ADAPTACAO', 'HIPERTROFIA', 'FORCA', 'DELOAD']);
 export type TrainingPhase = z.infer<typeof trainingPhaseSchema>;
@@ -179,6 +182,13 @@ export const protocolExerciseSchema = z
      */
     videoUrl: z.url().max(500).optional(),
     notes: z.string().trim().max(400).optional(),
+    /**
+     * Achado 2026-09-04: cardio contínuo (bike, esteira) não tem "repetição" nem
+     * "carga" pra registrar — só se foi feito ou não. Calculado a partir do
+     * catálogo (`CatalogExercise.pattern === 'CARDIO'`) ao servir o diário de
+     * treino, nunca gerado/persistido pela IA — por isso sempre opcional aqui.
+     */
+    isCardio: z.boolean().optional(),
   })
   .refine((ex) => (ex.reps !== undefined) !== (ex.durationSeconds !== undefined), {
     message: 'Exercício deve ter "reps" OU "durationSeconds", nunca os dois nem nenhum.',

@@ -15,7 +15,7 @@
  *
  * ## Empréstimo entre slots — enquanto só uma das duas personas existir, ela atende todo mundo
  * Ordem de resolução para o slot pedido: Redis do slot → banco do slot → Redis/banco do
- * OUTRO slot (empréstimo) → `DEFAULT_AGENT_PERSONA`. Ou seja: **havendo qualquer persona
+ * OUTRO slot (empréstimo) → default base DAQUELE slot. Ou seja: **havendo qualquer persona
  * publicada, ninguém cai no default de fábrica**. O empréstimo emite `agent_config_fallback`
  * com `reason: 'SLOT_BORROWED'` — em `info`, não `warn`, porque não é falha: é o estado
  * normal e esperado entre a primeira e a segunda publicação. Os `reason` de falha real
@@ -24,9 +24,10 @@
  *
  * ## A regra que manda em tudo aqui: fail-safe nunca é "sem guardrail"
  * Se o Redis cair, se o banco não responder, se não houver configuração publicada em slot
- * nenhum, ou se o payload publicado não validar contra o Zod — o serviço devolve
- * `DEFAULT_AGENT_PERSONA` (`@movivo/shared`), o default **compilado**. Em nenhum caminho de
- * erro este serviço devolve persona vazia ou parcial.
+ * nenhum, ou se o payload publicado não validar contra o Zod — o serviço devolve o default
+ * **compilado daquele slot** (`DEFAULT_AGENT_PERSONA_FEMALE`/`DEFAULT_AGENT_PERSONA_MALE`,
+ * `@movivo/shared` — decisão do fundador, 2026-09-04: Mariana/Leonardo). Em nenhum caminho
+ * de erro este serviço devolve persona vazia ou parcial.
  *
  * ## Cache
  * Um slot, uma entrada: `Map<BiologicalSex, …>` com TTL de 60s (o teto de propagação
@@ -52,7 +53,8 @@ import { Inject, Injectable, type OnModuleDestroy, type OnModuleInit } from '@ne
 // de `agentPersonaStoredSchema`). O schema estrito continua valendo na gravação.
 import {
   agentPersonaStoredSchema,
-  DEFAULT_AGENT_PERSONA,
+  DEFAULT_AGENT_PERSONA_FEMALE,
+  DEFAULT_AGENT_PERSONA_MALE,
   type AgentPersona,
   type BiologicalSex,
 } from '@movivo/shared';
@@ -80,6 +82,16 @@ export const AGENT_CONFIG_CHANNEL_SEGMENTS = ['agent-config', 'invalidate'] as c
 
 /** Slot de onde o outro empresta quando está órfão. */
 const OTHER_SLOT: Record<BiologicalSex, BiologicalSex> = { MALE: 'FEMALE', FEMALE: 'MALE' };
+
+/**
+ * Persona base por slot (decisão do fundador, 2026-09-04: Mariana/Leonardo) — o fail-safe
+ * de código quando NENHUM dos dois slots tem versão publicada (nem o próprio, nem o
+ * emprestado). Substitui, aqui, o `DEFAULT_AGENT_PERSONA` genérico de `@movivo/shared`.
+ */
+const DEFAULT_PERSONA_BY_SLOT: Record<BiologicalSex, AgentPersona> = {
+  FEMALE: DEFAULT_AGENT_PERSONA_FEMALE,
+  MALE: DEFAULT_AGENT_PERSONA_MALE,
+};
 
 /**
  * Slot consultado primeiro quando **não há titular em contexto** (`null`) — mensagem de
@@ -187,6 +199,7 @@ export class AgentPersonaService implements OnModuleInit, OnModuleDestroy {
       return { persona: hit.persona, servedFromSex: hit.servedFromSex };
     }
 
+    await this.ensureBootstrap();
     let reason = 'CONFIG_ABSENT';
     const own = await this.load(slot, (failure) => {
       reason = failure;
@@ -210,7 +223,7 @@ export class AgentPersonaService implements OnModuleInit, OnModuleDestroy {
         );
         resolved = { persona: borrowed, servedFromSex: other };
       } else {
-        resolved = { persona: this.fallback(reason), servedFromSex: null };
+        resolved = { persona: this.fallback(reason, slot), servedFromSex: null };
       }
     }
 
@@ -220,12 +233,34 @@ export class AgentPersonaService implements OnModuleInit, OnModuleDestroy {
     return resolved;
   }
 
-  private fallback(reason: string): AgentPersona {
+  private fallback(reason: string, slot: BiologicalSex): AgentPersona {
     this.logger.warn(
-      { event: 'agent_config_fallback', reason },
+      { event: 'agent_config_fallback', reason, personaSlot: slot },
       'configuração da agente indisponível — usando o default de código (guardrail compilado)',
     );
-    return DEFAULT_AGENT_PERSONA;
+    return DEFAULT_PERSONA_BY_SLOT[slot];
+  }
+
+  /**
+   * Achado 2026-09-04 (mesmo padrão de `MethodologyProvider.ensureBootstrap()`/
+   * `ExerciseCatalogProvider`): semeia os dois slots no banco a partir do default de
+   * código, uma vez por expiração de cache — idempotente no banco (`ON CONFLICT DO
+   * NOTHING`), então chamadas repetidas são baratas. Nunca lança: bootstrap é um extra,
+   * não um requisito — se falhar, a leitura segue pro caminho normal (Redis/banco/
+   * empréstimo/fallback), só sem a linha semeada ainda.
+   */
+  private async ensureBootstrap(): Promise<void> {
+    try {
+      await this.repo.ensureBootstrap(DEFAULT_PERSONA_BY_SLOT);
+    } catch (err) {
+      this.logger.warn(
+        {
+          event: 'agent_config_bootstrap_failed',
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'bootstrap das personas base falhou — segue pelo caminho normal de resolução',
+      );
+    }
   }
 
   /** Snapshot do slot no Redis; na falta dele, o banco. `null` = slot sem persona utilizável. */

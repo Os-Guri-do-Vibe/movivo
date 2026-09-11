@@ -52,7 +52,11 @@ export const workoutSessions = pgTable(
     /** Texto livre de sensação/dor cifrado com a mesma chave dos check-ins. */
     feedbackCipher: bytea('feedback_cipher'),
     painReported: boolean('pain_reported').notNull().default(false),
-    painExerciseId: varchar('pain_exercise_id', { length: 80 }),
+    /**
+     * Achado 2026-09-04: dor pode aparecer em mais de um exercício na mesma
+     * sessão — substitui a antiga coluna `pain_exercise_id` (um único texto).
+     */
+    painExerciseIds: jsonb('pain_exercise_ids').$type<string[]>().notNull().default([]),
     ...timestampColumns,
   },
   (table) => [
@@ -108,7 +112,16 @@ export const workoutSetEntries = pgTable(
       table.setNumber,
     ),
     index('idx_workout_set_entries_user_exercise').on(table.userId, table.exerciseId),
-    check('ck_workout_set_entries_set', sql`${table.setNumber} between 1 and 20`),
+    /**
+     * >= 1: série válida. <= 0, até -24: série de aquecimento (achado 2026-09-04,
+     * mesmo dia do achado 2026-09-04 que criou a convenção em
+     * `workout.schema.ts`) — essa migração ficou pra trás quando o Zod foi
+     * relaxado, e todo `saveSets`/`PATCH` que incluísse uma série de aquecimento
+     * (setNumber <= 0) vinha sendo rejeitado pelo Postgres, revertendo a
+     * transação inteira em silêncio (a UI não distinguia esse 500 de qualquer
+     * outra falha de rede).
+     */
+    check('ck_workout_set_entries_set', sql`${table.setNumber} between -24 and 20`),
     check(
       'ck_workout_set_entries_reps',
       sql`${table.reps} is null or ${table.reps} between 0 and 300`,

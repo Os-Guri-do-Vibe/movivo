@@ -1,0 +1,1 @@
+ALTER TABLE "workout_sessions" DROP COLUMN "pain_exercise_id";

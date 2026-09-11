@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 
@@ -309,6 +309,189 @@ export function ComboboxField<T extends string>({
                 {item.label}
               </button>
             ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Combobox de múltipla escolha (achado 2026-09-04, a pedido do fundador): mesmo padrão de
+ * `ComboboxField`, mas o menu fica aberto entre seleções (cada opção é um checkbox) e o
+ * gatilho mostra os rótulos escolhidos em vez de um único valor. `max` limita quantas
+ * opções cabem ao mesmo tempo — a opção seguinte fica desabilitada ao atingir o teto, em
+ * vez de deixar o usuário estourar o limite e só descobrir isso depois, no erro de campo.
+ */
+export function MultiComboboxField<T extends string>({
+  id,
+  label,
+  items,
+  selected,
+  onChange,
+  max,
+  disabled = false,
+  invalid = false,
+  errorId,
+  className,
+}: {
+  id: string;
+  label: string;
+  items: readonly FieldOption<T>[];
+  selected: readonly T[];
+  onChange: (values: T[]) => void;
+  max: number;
+  disabled?: boolean;
+  invalid?: boolean;
+  errorId?: string;
+  className?: string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
+  const optionRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    function closeOnOutsideClick(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick);
+    return () => document.removeEventListener('pointerdown', closeOnOutsideClick);
+  }, [open]);
+
+  function closeMenu() {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  function toggleOption(item: FieldOption<T>) {
+    const checked = selected.includes(item.value);
+    const blocked = !checked && selected.length >= max;
+    if (blocked) return;
+    onChange(
+      checked ? selected.filter((value) => value !== item.value) : [...selected, item.value],
+    );
+  }
+
+  function handleOptionKeyDown(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeMenu();
+      return;
+    }
+    if (event.key === 'Tab') {
+      setOpen(false);
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      toggleOption(items[index] as FieldOption<T>);
+      return;
+    }
+    let nextIndex: number | undefined;
+    if (event.key === 'ArrowDown') nextIndex = Math.min(index + 1, items.length - 1);
+    if (event.key === 'ArrowUp') nextIndex = Math.max(index - 1, 0);
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = items.length - 1;
+    if (nextIndex === undefined) return;
+    event.preventDefault();
+    optionRefs.current[nextIndex]?.focus();
+  }
+
+  const labelId = `${id}-label`;
+  const listboxId = `${id}-listbox`;
+  const selectedLabels = items.filter((item) => selected.includes(item.value)).map((i) => i.label);
+
+  return (
+    <div className={cn('min-w-0', className)}>
+      <span id={labelId} className={FIELD_LABEL_CLASS}>
+        {label}
+      </span>
+      <p className="mt-1 text-xs text-muted-foreground">Escolha de 1 a {max} opções.</p>
+      <div ref={rootRef} className="relative mt-1">
+        <button
+          ref={triggerRef}
+          id={id}
+          type="button"
+          role="combobox"
+          disabled={disabled}
+          aria-invalid={invalid || undefined}
+          aria-describedby={invalid ? errorId : undefined}
+          aria-labelledby={labelId}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-controls={listboxId}
+          onClick={() => setOpen((current) => !current)}
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+            event.preventDefault();
+            setOpen(true);
+          }}
+          className="flex min-h-11 w-full items-center gap-2 rounded-xl border border-input bg-background px-3 text-left text-label font-medium text-foreground outline-none transition-colors hover:border-primary hover:bg-secondary focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <span
+            className={cn(
+              'min-w-0 flex-1 truncate',
+              selectedLabels.length === 0 && 'text-muted-foreground',
+            )}
+          >
+            {selectedLabels.length > 0
+              ? selectedLabels.join(', ')
+              : `Selecione até ${max} opç${max === 1 ? 'ão' : 'ões'}`}
+          </span>
+          <ChevronDown
+            aria-hidden="true"
+            className={cn(
+              'size-4 shrink-0 text-primary transition-transform',
+              open && 'rotate-180',
+            )}
+          />
+        </button>
+
+        {open && (
+          <div
+            id={listboxId}
+            role="listbox"
+            aria-multiselectable="true"
+            aria-labelledby={labelId}
+            className="absolute inset-x-0 top-full z-40 mt-1 max-h-72 w-full overflow-y-auto rounded-xl border border-border bg-popover p-1.5 shadow-lg"
+          >
+            {items.map((item, index) => {
+              const checked = selected.includes(item.value);
+              const blocked = !checked && selected.length >= max;
+              return (
+                <button
+                  key={item.value}
+                  ref={(element) => {
+                    optionRefs.current[index] = element;
+                  }}
+                  type="button"
+                  role="option"
+                  aria-selected={checked}
+                  disabled={blocked}
+                  tabIndex={-1}
+                  onClick={() => toggleOption(item)}
+                  onKeyDown={(event) => handleOptionKeyDown(event, index)}
+                  className={cn(
+                    'flex min-h-10 w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-label text-popover-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring',
+                    checked && 'bg-accent font-semibold text-accent-foreground',
+                    blocked && 'cursor-not-allowed opacity-50',
+                  )}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      'flex size-4 shrink-0 items-center justify-center rounded border',
+                      checked ? 'border-verde-pulso bg-verde-pulso text-petroleo' : 'border-input',
+                    )}
+                  >
+                    {checked ? <Check className="size-3" /> : null}
+                  </span>
+                  {item.label}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

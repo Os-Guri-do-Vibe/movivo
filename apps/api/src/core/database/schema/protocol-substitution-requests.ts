@@ -21,6 +21,7 @@
  */
 import { sql } from 'drizzle-orm';
 import {
+  boolean,
   index,
   jsonb,
   pgTable,
@@ -32,7 +33,7 @@ import {
 } from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
-import { substitutionRequestStatusEnum } from './enums';
+import { reviewUrgencyEnum, substitutionRequestStatusEnum } from './enums';
 import { protocols } from './protocols';
 import { users } from './users';
 
@@ -54,18 +55,28 @@ export const protocolSubstitutionRequests = pgTable(
 
     fromExerciseId: varchar('from_exercise_id', { length: 100 }).notNull(),
     fromExerciseName: varchar('from_exercise_name', { length: 200 }).notNull(),
-    toExerciseId: varchar('to_exercise_id', { length: 100 }).notNull(),
+
+    /**
+     * Achado 2026-09-09 (pedido do fundador): `null` quando o aluno pediu um exercício que
+     * ainda não existe no catálogo (`catalog_gap = true`) — `toExerciseName` carrega o texto
+     * exatamente como ele pediu. Deixa de ser `notNull` de propósito: uma proposta pode
+     * nascer sem substituto real algum, só um pedido a avaliar.
+     */
+    toExerciseId: varchar('to_exercise_id', { length: 100 }),
     toExerciseName: varchar('to_exercise_name', { length: 200 }).notNull(),
 
     /**
      * -- LGPD Art. 11 — DADO SENSÍVEL DE SAÚDE (derivado).
      * `ProtocolStructure` completo já com a troca aplicada — o que vira `protocols.content`
-     * no momento da liberação. Mesmo escopo de cifra em repouso de `protocols.content`.
+     * no momento da liberação. `null` enquanto `catalog_gap = true`: não há substituto real
+     * ainda pra calcular a troca contra. Mesmo escopo de cifra em repouso de
+     * `protocols.content`.
      */
-    proposedContent: jsonb('proposed_content').notNull(),
+    proposedContent: jsonb('proposed_content'),
 
-    /** Registro estruturado do que muda: `{ type, from, to, sessionsAffected }`. */
-    diff: jsonb('diff').notNull(),
+    /** Registro estruturado do que muda: `{ type, from, to, sessionsAffected }`. `null`
+     * enquanto `catalog_gap = true`, mesmo motivo de `proposedContent`. */
+    diff: jsonb('diff'),
 
     /** Motivo humano-legível (ex.: "Substituição solicitada pelo aluno via WhatsApp: X → Y"). */
     changeReason: text('change_reason').notNull(),
@@ -75,6 +86,24 @@ export const protocolSubstitutionRequests = pgTable(
     baseVersion: smallint('base_version').notNull(),
 
     status: substitutionRequestStatusEnum('status').notNull().default('PENDING'),
+
+    /**
+     * Achado 2026-09-09 (pedido do fundador): reaproveita o MESMO enum de
+     * `protocols.review_urgency` — `MANDATORY` quando o exercício pedido existe no catálogo
+     * mas não é elegível pra este aluno, OU não existe em lugar nenhum (`catalog_gap`); os
+     * dois nunca auto-liberam, sempre exigem decisão do time (ver `AiResponseWorker`). PAR-Q
+     * bloqueante continua sendo computado ao vivo no `DashboardService.queue()` (LEFT JOIN
+     * com a anamnese), sem duplicar aqui — este campo cobre só os motivos que nascem já
+     * decididos na criação da proposta.
+     */
+    reviewUrgency: reviewUrgencyEnum('review_urgency').notNull().default('OPTIONAL'),
+
+    /**
+     * Achado 2026-09-09: `true` só quando o exercício pedido não existe em NENHUM lugar do
+     * catálogo publicado — é o que liga a opção "Adicionar exercício ao catálogo" na tela de
+     * revisão (um exercício que já existe, só não elegível, não ganha essa opção).
+     */
+    catalogGap: boolean('catalog_gap').notNull().default(false),
 
     decidedAt: eventTimestamp('decided_at'),
     decidedBy: uuid('decided_by').references(() => users.id, { onDelete: 'restrict' }),

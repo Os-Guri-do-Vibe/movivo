@@ -116,9 +116,9 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         capabilities: ['control_center.ai.config.read'],
       },
       {
-        // Persona, Regras invioláveis, Conhecimento (RAG) e FAQ viraram etapas de um
-        // único painel — cada etapa continua publicando e auditando sua própria
-        // configuração, só a navegação foi unificada.
+        // Persona e Regras invioláveis viraram etapas de um único painel — cada etapa
+        // continua publicando e auditando sua própria configuração, só a navegação foi
+        // unificada. FAQ mora em Base de Conhecimento (achado 2026-09-04).
         href: '/dashboard/ia/agente',
         label: 'Agente',
         icon: Bot,
@@ -413,18 +413,12 @@ function DashboardNavigation({
 
 function PulsoMark({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 64 64" aria-hidden="true" className={cn('size-9 shrink-0', className)}>
-      <rect width="64" height="64" rx="14" fill="#06302A" />
-      <path
-        d="M11 38 L19 30 L26 41 L36 17 L43 27"
-        fill="none"
-        stroke="#25E27E"
-        strokeWidth="6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="51" cy="22" r="4.5" fill="#25E27E" />
-    </svg>
+    // eslint-disable-next-line @next/next/no-img-element -- SVG estático de marca, sem otimização de imagem necessária.
+    <img
+      src="/brand/movivo-symbol.svg"
+      alt="MOVIVO"
+      className={cn('h-9 w-auto shrink-0', className)}
+    />
   );
 }
 
@@ -643,7 +637,7 @@ export function DashboardShell({
         >
           <Menu aria-hidden="true" className="size-5" />
         </button>
-        <PulsoMark className="size-8" />
+        <PulsoMark className="h-8 w-auto" />
         <ThemeToggle />
       </div>
       <MobileDrawer capabilities={capabilities} open={drawerOpen} onClose={closeDrawer} />

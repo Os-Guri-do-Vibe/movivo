@@ -85,12 +85,25 @@ async function fetchProtocol(token: string): Promise<ProtocolRead | null> {
   return parsed.success ? parsed.data : null;
 }
 
-/** "8–12 reps" para exercício tradicional, "40s por série" para isométrico/cardio (achado 2026-08-18). */
+/** Segundos até 60 "40 s", minutos até 60min "1 min 30 s", acima disso em horas "1 h 30 min". */
+function formatDurationLabel(totalSeconds: number): string {
+  if (totalSeconds <= 60) return `${totalSeconds} s`;
+  if (totalSeconds <= 3600) {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return seconds === 0 ? `${minutes} min` : `${minutes} min ${seconds} s`;
+  }
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  return minutes === 0 ? `${hours} h` : `${hours} h ${minutes} min`;
+}
+
+/** "8–12 reps" para exercício tradicional, "40 s por série" para isométrico/cardio (achado 2026-08-18). */
 function amountLabel(entry: {
   durationSeconds?: number;
   reps?: { min: number; max: number };
 }): string {
-  if (entry.durationSeconds !== undefined) return `${entry.durationSeconds}s`;
+  if (entry.durationSeconds !== undefined) return formatDurationLabel(entry.durationSeconds);
   if (!entry.reps) return '';
   const { min, max } = entry.reps;
   return min === max ? `${min} reps` : `${min}–${max} reps`;
@@ -299,7 +312,9 @@ export default async function ProtocoloPage({ params }: { params: Promise<{ toke
                             <td className="px-3 py-1.5 font-mono">{block.sets}</td>
                             <td className="px-3 py-1.5 font-mono">{amountLabel(block)}</td>
                             <td className="px-3 py-1.5 font-mono">
-                              {block.restSeconds !== undefined ? `${block.restSeconds}s` : '-'}
+                              {block.restSeconds !== undefined
+                                ? formatDurationLabel(block.restSeconds)
+                                : '-'}
                             </td>
                             <td className="px-3 py-1.5 font-mono">-</td>
                             <td className="px-3 py-1.5">-</td>
@@ -317,7 +332,7 @@ export default async function ProtocoloPage({ params }: { params: Promise<{ toke
                             {amountLabel(exercise)}
                           </td>
                           <td className="px-3 py-2 font-mono text-card-foreground">
-                            {exercise.restSeconds}s
+                            {formatDurationLabel(exercise.restSeconds)}
                           </td>
                           <td className="px-3 py-2 font-mono text-card-foreground">
                             {exercise.rir ?? '-'}

@@ -245,7 +245,6 @@ export function AiKnowledgeDashboard({
       {showHeader ? (
         <SectorHeader
           title="Documentos e evidências"
-          description="Fontes entram isoladas, são processadas e só ficam disponíveis para recuperação depois da revisão do profissional CREF."
           meta={data.meta}
           refreshing={loading}
           onRefresh={() => void refresh()}

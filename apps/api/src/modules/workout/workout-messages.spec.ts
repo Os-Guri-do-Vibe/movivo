@@ -31,6 +31,11 @@ describe('copy do quick reply de treino', () => {
     for (const text of COPY) expect(text).not.toMatch(FORBIDDEN);
   });
 
+  // Regra de produto (achado 2026-09-09, correção do fundador): nunca travessão "—".
+  it('não usa travessão (—)', () => {
+    for (const text of COPY) expect(text).not.toContain('—');
+  });
+
   it('mantém o profissional CREF visível e o registro como fato, não interpretação', () => {
     expect(WORKOUT_QUICK_REPLY_TEXT).toMatch(/profissional CREF/);
     expect(WORKOUT_DONE_ACK).toMatch(/Treino registrado/);

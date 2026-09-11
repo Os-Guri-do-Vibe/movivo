@@ -296,7 +296,12 @@ describe('LlmRouter.complete', () => {
     expect(seen?.maxTokens).toBe(6000);
   });
 
-  it('pseudonimiza system e messages antes de enviar ao provedor (scrubber inescapável)', async () => {
+  // Achado 2026-09-10 (bug reportado pelo fundador, reproduzido ao vivo): `system` deixou de
+  // ser escrubado — é o prompt estático (guardrails + persona), nunca interpolado com PII do
+  // titular; escrubar mesmo assim corrompia qualquer prosa comum do prompt sempre que uma
+  // palavra normal (ex.: "de") coincidisse com um token do nome do titular. `messages`
+  // continua escrubado — é o único lugar que pode carregar PII de verdade.
+  it('pseudonimiza messages antes de enviar ao provedor, mas NÃO mexe em system (nunca tem PII)', async () => {
     let seen: ProviderCompleteRequest | undefined;
     const primary = new FakeProvider('OPENAI_GPT41', 'gpt-4.1', (req) => {
       seen = req;
@@ -309,7 +314,7 @@ describe('LlmRouter.complete', () => {
         messages: [{ role: 'user', content: 'meu tel +5511999998888' }],
       }),
     );
-    expect(seen?.system).not.toContain('João');
+    expect(seen?.system).toBe('Olá João');
     expect(seen?.messages[0]?.content).not.toContain('+5511999998888');
   });
 

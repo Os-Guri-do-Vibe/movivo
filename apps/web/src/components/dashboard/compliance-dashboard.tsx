@@ -1,5 +1,6 @@
 'use client';
 
+import { LockKeyhole } from 'lucide-react';
 import { useCallback } from 'react';
 
 import { getComplianceSummary } from '@/lib/control-center-api';
@@ -43,8 +44,8 @@ export function ComplianceDashboard() {
   return (
     <div>
       <SectorHeader
-        title="Compliance e auditoria"
-        description="Consentimentos, solicitações de privacidade e rastreabilidade dos acessos sensíveis."
+        title="Compliance & Privacidade"
+        icon={LockKeyhole}
         meta={data.meta}
         refreshing={loading}
         onRefresh={() => void refresh()}

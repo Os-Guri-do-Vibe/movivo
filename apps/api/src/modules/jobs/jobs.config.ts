@@ -27,6 +27,13 @@ export const QUEUE = {
   // (`protocol_substitution_requests.id`), não o do protocolo — o mesmo protocolo pode ter
   // várias propostas ao longo do tempo, cada uma com seu próprio job/estado.
   protocolSubstitutionRelease: 'protocol-substitution-release',
+  // Renovação de protocolo por fim de mesociclo: `protocolRenewalScan` é o cron diário
+  // que detecta vencimento e cria a sessão do formulário (mesmo papel de
+  // `checkinWeekly`/SCAN); `protocolRenewalGeneration` consome o submit do formulário e
+  // gera o próximo mesociclo — fila própria, não um branch de `protocolGeneration`,
+  // porque o payload carrega `renewalSessionId`, não `anamnesisSessionId`.
+  protocolRenewalScan: 'protocol-renewal-scan',
+  protocolRenewalGeneration: 'protocol-renewal-generation',
   aiResponse: 'ai-response',
   whatsappOutbound: 'whatsapp-outbound',
   checkinWeekly: 'checkin-weekly',
@@ -73,6 +80,19 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
     attempts: 3,
     backoffMs: [5_000, 15_000, 45_000],
     concurrency: 3,
+  },
+  // Um scan por dia, sem urgência de latência — mesmo perfil de `checkinWeekly`.
+  [QUEUE.protocolRenewalScan]: {
+    attempts: 3,
+    backoffMs: [5_000, 15_000, 45_000],
+    concurrency: 3,
+  },
+  // Mesmo perfil de `protocolGeneration` (chama o mesmo pipeline gera-e-valida).
+  [QUEUE.protocolRenewalGeneration]: {
+    attempts: 3,
+    backoffMs: [2_000, 8_000, 32_000],
+    concurrency: 5,
+    lockMs: 120_000,
   },
   [QUEUE.aiResponse]: {
     attempts: 2,

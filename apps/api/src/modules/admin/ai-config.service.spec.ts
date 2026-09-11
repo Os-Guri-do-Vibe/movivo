@@ -1,5 +1,11 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { DEFAULT_AGENT_PERSONA, type AgentPersona, type BiologicalSex } from '@movivo/shared';
+import {
+  DEFAULT_AGENT_PERSONA,
+  DEFAULT_AGENT_PERSONA_FEMALE,
+  DEFAULT_AGENT_PERSONA_MALE,
+  type AgentPersona,
+  type BiologicalSex,
+} from '@movivo/shared';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type { Redis } from 'ioredis';
 import type { SQL } from 'drizzle-orm';
@@ -121,6 +127,38 @@ describe('AiConfigService', () => {
     );
     expect(personaService.invalidate).toHaveBeenCalled();
     expect(response.data.version).toBe(2);
+  });
+
+  it('decisão do fundador (2026-09-04): publica mesmo que o simulador reprovaria a persona', async () => {
+    const configSimulator = await import('./config-simulator.js');
+    const spy = vi.spyOn(configSimulator, 'simulatePersonaConfig').mockReturnValue({
+      kind: 'PERSONA',
+      passed: false,
+      candidateHash: 'hash',
+      checks: [
+        {
+          id: 'GOLDEN_INPUT',
+          title: 'Guardrail clínico',
+          passed: false,
+          cases: 1,
+          failures: ['reprovado de propósito neste teste'],
+        },
+      ],
+    });
+    try {
+      const { service, values } = buildService([[{ max: 1 }]]);
+      const response = await service.publish(ACTOR, {
+        targetSex: 'MALE',
+        payload: PERSONA,
+        changeNote: 'Configuração salva e ativada pelo painel.',
+      });
+      expect(values).toHaveBeenCalledWith(
+        expect.objectContaining({ version: 2, status: 'PUBLISHED' }),
+      );
+      expect(response.data.version).toBe(2);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('recusa apresentação com padrão de injeção antes de gravar', async () => {
@@ -277,10 +315,13 @@ describe('AiConfigService', () => {
       { append: vi.fn().mockResolvedValue(undefined) } as unknown as AuditService,
     );
 
-    // Estado inicial: sem config publicada em slot nenhum, a IA responde com o default.
-    expect((await personaService.persona('MALE')).agentName).toBe(DEFAULT_AGENT_PERSONA.agentName);
+    // Estado inicial: sem config publicada em slot nenhum, cada slot responde com o
+    // default DAQUELE slot (Mariana/Leonardo — decisão do fundador, 2026-09-04).
+    expect((await personaService.persona('MALE')).agentName).toBe(
+      DEFAULT_AGENT_PERSONA_MALE.agentName,
+    );
     expect((await personaService.persona('FEMALE')).agentName).toBe(
-      DEFAULT_AGENT_PERSONA.agentName,
+      DEFAULT_AGENT_PERSONA_FEMALE.agentName,
     );
 
     const before = Date.now();
@@ -490,12 +531,17 @@ describe('AiConfigService', () => {
     it('despacha FORBIDDEN_TOPIC para o simulador de tema proibido', () => {
       const { service } = buildService([]);
 
+      // Achado 2026-09-10: "anabolizante" não serve mais de exemplo aqui — passou a ser
+      // hard-bloqueado no guardrail determinístico de entrada (`clinical-guardrail.ts`), e
+      // um `GUARDRAIL_CASES` cobre exatamente esse termo; usá-lo faria o simulador acusar
+      // "Bloqueio excessivo" (redundância com o guardrail já existente), que é o
+      // comportamento CORRETO do simulador, só não serve mais pra este teste de despacho.
       const result = service.simulate({
         kind: 'FORBIDDEN_TOPIC',
         candidate: {
-          topicKey: 'suplementos-anabolizantes',
-          label: 'Suplementos e Anabolizantes',
-          phrases: ['anabolizante', 'esteroide anabolico'],
+          topicKey: 'consumo-de-alcool',
+          label: 'Consumo de Álcool',
+          phrases: ['álcool', 'bebida alcoólica'],
         },
       });
 

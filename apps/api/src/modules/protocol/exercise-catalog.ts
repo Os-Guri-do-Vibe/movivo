@@ -129,16 +129,16 @@ export interface CatalogExercise {
   /** Ausente = `REPS` (maioria do catálogo, sets×reps tradicional). */
   measurement?: ExerciseMeasurement;
   /**
-   * Só relevante com `measurement: 'DURATION'`: faixa plausível de segundos por série/intervalo.
-   * Ausente = faixa padrão de isometria (`DURATION_SECONDS_RANGE`, validation-rules.ts) — curta
-   * (segurar prancha). Cardio contínuo (caminhada/bike, 1 série só) e intervalo (tiros) têm faixa
-   * própria porque a escala de tempo é completamente diferente de um hold isométrico.
+   * Só relevante com `measurement: 'DURATION'`. Puramente informativo desde a decisão do
+   * fundador (2026-09-04): não é mais lido pelo `ValidationService` nem por nenhum outro
+   * lugar do código — quanto tempo prescrever é julgamento do Coach Agente que gera o
+   * protocolo, não uma faixa fixa por exercício. Fica no catálogo só como referência para
+   * quem edita a base.
    */
   durationSecondsRange?: { min: number; max: number };
   /**
-   * Só relevante com `measurement: 'DURATION'`: piso de descanso entre séries/intervalos.
-   * Ausente = piso padrão (`REST_SECONDS_RANGE.min`, 15s). Cardio contínuo é UMA série só —
-   * "descanso zero" não é erro, é a única resposta correta.
+   * Só relevante com `measurement: 'DURATION'`. Mesma ressalva do campo acima: puramente
+   * informativo, não enforced em lugar nenhum desde 2026-09-04.
    */
   minRestSeconds?: number;
   /**
@@ -4944,6 +4944,12 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     id: 'burpee',
     name: 'Burpee',
     pattern: 'CARDIO',
+    // Achado 2026-09-03 (reproduzido ao vivo): sem isso, cai no default genérico de HOLD
+    // isométrico (15-120s / descanso mín. 15s) — mas burpee em circuito/HIIT é feito em
+    // blocos de vários minutos (ou intervalos curtos) SEM descanso entre exercícios; o
+    // validador bloqueava um treino de circuito legítimo por faixa errada pro tipo de uso.
+    durationSecondsRange: { min: 15, max: 1200 },
+    minRestSeconds: 0,
     muscleGroups: ['corpo todo'],
     equipment: [],
     locations: ['HOME', 'OUTDOOR'],
@@ -4960,6 +4966,9 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     id: 'burpee_com_salto_a_distancia',
     name: 'Burpee com Salto à Distância',
     pattern: 'CARDIO',
+    // Mesmo achado do burpee (2026-09-03): circuito/HIIT, minutos seguidos sem descanso.
+    durationSecondsRange: { min: 15, max: 1200 },
+    minRestSeconds: 0,
     muscleGroups: ['corpo todo'],
     equipment: [],
     locations: ['HOME', 'OUTDOOR'],
@@ -4976,6 +4985,9 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     id: 'joelhos_altos',
     name: 'Joelhos Altos',
     pattern: 'CARDIO',
+    // Mesmo achado do burpee (2026-09-03): circuito/HIIT, minutos seguidos sem descanso.
+    durationSecondsRange: { min: 15, max: 1200 },
+    minRestSeconds: 0,
     muscleGroups: ['corpo todo'],
     equipment: [],
     locations: ['HOME', 'OUTDOOR'],
@@ -4992,6 +5004,9 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     id: 'mountain_climber',
     name: 'Mountain Climber',
     pattern: 'CARDIO',
+    // Mesmo achado do burpee (2026-09-03): circuito/HIIT, minutos seguidos sem descanso.
+    durationSecondsRange: { min: 15, max: 1200 },
+    minRestSeconds: 0,
     muscleGroups: ['corpo todo'],
     equipment: [],
     locations: ['HOME', 'OUTDOOR'],
@@ -5020,6 +5035,10 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     id: 'polichinelo',
     name: 'Polichinelo',
     pattern: 'CARDIO',
+    // Achado 2026-09-03 (reproduzido ao vivo, protocolo bloqueado por isto): circuito/HIIT,
+    // minutos seguidos sem descanso entre exercícios.
+    durationSecondsRange: { min: 15, max: 1200 },
+    minRestSeconds: 0,
     muscleGroups: ['corpo todo'],
     equipment: [],
     locations: ['HOME', 'OUTDOOR'],
@@ -5036,6 +5055,9 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     id: 'saltito_com_joelhos_altos',
     name: 'Saltito com Joelhos Altos',
     pattern: 'CARDIO',
+    // Mesmo achado do polichinelo (2026-09-03): circuito/HIIT, sem descanso entre exercícios.
+    durationSecondsRange: { min: 15, max: 1200 },
+    minRestSeconds: 0,
     muscleGroups: ['corpo todo'],
     equipment: [],
     locations: ['HOME', 'OUTDOOR'],
@@ -5367,6 +5389,10 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     id: 'hiit',
     name: 'HIIT',
     pattern: 'CARDIO',
+    // Achado 2026-09-03 (reproduzido ao vivo, protocolo bloqueado por isto — 600s): bloco
+    // de HIIT real dura vários minutos contínuos, sem descanso entre exercícios.
+    durationSecondsRange: { min: 15, max: 1200 },
+    minRestSeconds: 0,
     muscleGroups: ['sistema cardiovascular'],
     equipment: [],
     locations: ['HOME', 'OUTDOOR'],
@@ -5379,6 +5405,10 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     id: 'pular_corda',
     name: 'Pular Corda',
     pattern: 'CARDIO',
+    // Mesmo achado do HIIT (2026-09-03, reproduzido ao vivo, 600s bloqueado): sessão
+    // contínua de vários minutos, sem descanso entre exercícios do circuito.
+    durationSecondsRange: { min: 15, max: 1200 },
+    minRestSeconds: 0,
     muscleGroups: ['sistema cardiovascular'],
     equipment: [],
     locations: ['HOME', 'OUTDOOR'],
@@ -5473,6 +5503,9 @@ export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
     id: 'corda_naval',
     name: 'Corda Naval',
     pattern: 'CARDIO',
+    // Mesmo achado do HIIT/pular_corda (2026-09-03): circuito, sem descanso entre exercícios.
+    durationSecondsRange: { min: 15, max: 1200 },
+    minRestSeconds: 0,
     muscleGroups: ['sistema cardiovascular'],
     equipment: [],
     locations: ['HOME', 'OUTDOOR'],

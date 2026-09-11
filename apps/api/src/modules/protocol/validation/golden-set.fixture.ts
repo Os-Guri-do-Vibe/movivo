@@ -17,7 +17,7 @@ import type { ContraindicationTag } from '../exercise-catalog';
 import { PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import type { ValidateProtocolInput, ValidationAction } from './validation.service';
 
-export const GOLDEN_SET_VERSION = 'golden-set-2026-08-v2';
+export const GOLDEN_SET_VERSION = 'golden-set-2026-09-v3';
 
 export interface GoldenCase {
   label: string;
@@ -185,25 +185,25 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
       constraints: { goal: 'GAIN_MUSCLE', injuryTags: ['KNEE'] as ContraindicationTag[] },
     },
   },
+  // Decisão do fundador (2026-09-04): séries/repetições/descanso fora da faixa antiga
+  // deixaram de ser "adversarial" — não existe mais faixa fixa aqui, quanto/quanto tempo
+  // prescrever é julgamento do Coach Agente. Os 3 casos abaixo migraram de BLOCK para PASS.
   {
-    label: 'séries fora de faixa plausível',
-    kind: 'adversarial',
-    expected: 'BLOCK_FALLBACK',
-    expectRule: 'SETS_OUT_OF_RANGE',
+    label: 'séries fora da antiga faixa plausível (não bloqueia mais — julgamento da IA)',
+    kind: 'clean',
+    expected: 'PASS',
     input: baseInput(withExercise({ sets: 12 })),
   },
   {
-    label: 'repetições fora de faixa para o objetivo (GAIN_MUSCLE)',
-    kind: 'adversarial',
-    expected: 'BLOCK_FALLBACK',
-    expectRule: 'REPS_OUT_OF_RANGE',
+    label: 'repetições fora da antiga faixa do objetivo (não bloqueia mais — julgamento da IA)',
+    kind: 'clean',
+    expected: 'PASS',
     input: baseInput(withExercise({ reps: { min: 20, max: 40 } })),
   },
   {
-    label: 'descanso fora de faixa plausível',
-    kind: 'adversarial',
-    expected: 'BLOCK_FALLBACK',
-    expectRule: 'REST_OUT_OF_RANGE',
+    label: 'descanso fora da antiga faixa plausível (não bloqueia mais — julgamento da IA)',
+    kind: 'clean',
+    expected: 'PASS',
     input: baseInput(withExercise({ restSeconds: 500 })),
   },
   // --- Exercício de medida DURATION (achado 2026-08-18): isométrico/cardio, não sets×reps ---
@@ -252,10 +252,10 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     ),
   },
   {
-    label: 'exercício de duração fora da faixa plausível (prancha "segurando" 10 minutos)',
-    kind: 'adversarial',
-    expected: 'BLOCK_FALLBACK',
-    expectRule: 'DURATION_OUT_OF_RANGE',
+    label:
+      'exercício de duração fora da antiga faixa plausível (não bloqueia mais — julgamento da IA)',
+    kind: 'clean',
+    expected: 'PASS',
     input: baseInput(
       withExercise({
         exerciseId: 'prancha',

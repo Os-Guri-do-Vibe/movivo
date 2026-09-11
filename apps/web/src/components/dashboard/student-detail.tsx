@@ -83,7 +83,6 @@ export function StudentDetail({ id }: { id: string }) {
       </Link>
       <SectorHeader
         title={text(student.name)}
-        description="Visão 360 do cadastro, rotina e acompanhamento técnico dentro do escopo autorizado."
         meta={data.meta}
         refreshing={loading}
         onRefresh={() => void refresh()}
@@ -263,10 +262,7 @@ export function StudentDetail({ id }: { id: string }) {
           />
           {student.aiQuality.occurrences.length > 0 ? (
             <>
-              <h3 className="mt-5 text-h3 font-semibold">Ocorrências anonimizadas</h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Identificadores diretos foram removidos no backend antes da exibição.
-              </p>
+              <h3 className="mt-5 text-h3 font-semibold">Ocorrências</h3>
               <ul className="mt-3 space-y-2">
                 {student.aiQuality.occurrences.map((occurrence) => (
                   <li key={occurrence.at} className="rounded-lg bg-secondary p-3 text-label">

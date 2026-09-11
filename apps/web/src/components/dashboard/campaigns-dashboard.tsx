@@ -1,5 +1,6 @@
 'use client';
 
+import { FlaskConical } from 'lucide-react';
 import { useCallback } from 'react';
 
 import { getCampaigns } from '@/lib/control-center-api';
@@ -39,7 +40,7 @@ export function CampaignsDashboard() {
     <div>
       <SectorHeader
         title="Campanhas & Experimentos"
-        description="Economia por utm_campaign, calculada sobre primeiro toque, conversao na janela declarada e receita recebida. Grupos pequenos permanecem ocultos."
+        icon={FlaskConical}
         meta={meta}
         refreshing={state.loading}
         onRefresh={() => void state.refresh()}

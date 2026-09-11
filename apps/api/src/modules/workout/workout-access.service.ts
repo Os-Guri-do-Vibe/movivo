@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { and, eq, gt, isNull } from 'drizzle-orm';
 
 import { AppConfigService } from '../../core/config';
-import { workoutAccessTokens } from '../../core/database/schema';
+import { users, workoutAccessTokens } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 
 const MAGIC_TTL_MS = 48 * 60 * 60 * 1000;
@@ -67,6 +67,34 @@ export class WorkoutAccessService {
     });
     if (!consumed) throw new GoneException('Este link expirou ou ja foi utilizado.');
     return sessionToken;
+  }
+
+  /**
+   * Le o primeiro nome do dono do link sem consumir o token (mesma validacao do
+   * `exchange`, so que SELECT em vez de UPDATE). Usado so para personalizar a tela
+   * de acesso antes do aluno tocar em "Abrir meu treino" - falha em silencio
+   * (retorna null) para nunca bloquear o fluxo real de autenticacao.
+   */
+  async peekFirstName(rawToken: string): Promise<string | null> {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(rawToken)) return null;
+    const hash = tokenHash(rawToken);
+    const [row] = await this.db.runAsSystem((tx) =>
+      tx
+        .select({ name: users.name })
+        .from(workoutAccessTokens)
+        .innerJoin(users, eq(users.id, workoutAccessTokens.userId))
+        .where(
+          and(
+            eq(workoutAccessTokens.tokenHash, hash),
+            eq(workoutAccessTokens.kind, 'MAGIC'),
+            gt(workoutAccessTokens.expiresAt, new Date()),
+            isNull(workoutAccessTokens.consumedAt),
+            isNull(workoutAccessTokens.revokedAt),
+          ),
+        )
+        .limit(1),
+    );
+    return row?.name?.trim().split(/\s+/)[0] || null;
   }
 
   async requireUser(authorization: string | undefined): Promise<string> {

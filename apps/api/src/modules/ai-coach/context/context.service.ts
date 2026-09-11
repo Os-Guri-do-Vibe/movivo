@@ -94,7 +94,11 @@ export class ContextService {
 
     const authoritativeState = scrub(JSON.stringify(episodic.state));
     const prefix = [
-      'ESTADO ATUAL DO ALUNO (não repita ao usuário; use para personalizar):',
+      // Achado 2026-09-10 (correção do fundador, reproduzido ao vivo): "usuário" apareceu
+      // vazado numa resposta casual ("o treino o usuário hoje ou o usuário amanhã"). O resto
+      // do prompt inteiro fala "aluno"/"você" — esse rótulo era a única ocorrência de
+      // "usuário" perto do bloco de estado que o modelo lê a cada turno; padronizado.
+      'ESTADO ATUAL DO ALUNO (não repita ao aluno; use para personalizar):',
       authoritativeState,
       episodic.summary ? `RESUMO DA CONVERSA ATÉ AQUI: ${episodic.summary}` : '',
     ]

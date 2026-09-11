@@ -14,13 +14,13 @@ async function login(page: Page) {
   await page.getByRole('button', { name: 'Acessar' }).click();
   // Rota padrão por papel (US-7.1): PROFESSIONAL cai na Fila do Profissional.
   await expect(page).toHaveURL(/\/dashboard\/educacao-fisica$/);
-  await expect(page.getByRole('heading', { name: 'Fila de supervisão' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Fila do Profissional' })).toBeVisible();
 }
 
 async function openQueue(page: Page) {
   await page.getByRole('link', { name: 'Fila do Profissional' }).first().click();
   await expect(page).toHaveURL(/\/dashboard\/educacao-fisica$/);
-  await expect(page.getByRole('heading', { name: 'Fila de supervisão' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Fila do Profissional' })).toBeVisible();
 }
 
 test('protege a rota e cria sessão somente em cookies httpOnly', async ({

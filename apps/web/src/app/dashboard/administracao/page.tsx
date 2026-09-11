@@ -1,4 +1,4 @@
-import { LockKeyhole } from 'lucide-react';
+import { LockKeyhole, Settings } from 'lucide-react';
 
 import { requireDashboardCapability } from '../_lib/session';
 
@@ -11,10 +11,10 @@ export default async function AdministrationPage() {
   return (
     <div>
       <header>
-        <h1 className="text-h1 font-bold">Administração</h1>
-        <p className="mt-2 max-w-3xl text-body text-muted-foreground">
-          Governança de acessos e solicitações administrativas críticas do Control Center.
-        </p>
+        <h1 className="flex items-center gap-3 text-h1 font-bold">
+          <Settings aria-hidden="true" className="size-7 text-verde-pulso" />
+          Administração
+        </h1>
       </header>
       <section
         className="mt-6 rounded-xl border border-dashed border-border bg-card p-6"

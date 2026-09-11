@@ -66,10 +66,10 @@ describe('DeepSeekProvider', () => {
     const body = JSON.parse(String((fetch as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.body));
     expect(body).toMatchObject({
       model: 'deepseek-v4-pro',
-      thinking: { type: 'enabled' },
-      reasoning_effort: 'high',
+      thinking: { type: 'disabled' },
       response_format: { type: 'json_object' },
     });
+    expect(body).not.toHaveProperty('reasoning_effort');
   });
 
   it('lança NO_CREDENTIALS sem chave e não chama fetch', async () => {

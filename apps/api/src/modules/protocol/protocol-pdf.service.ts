@@ -106,12 +106,25 @@ function pngDataUri(filename: string): string {
   return `data:image/png;base64,${buffer.toString('base64')}`;
 }
 
-/** "8–12 reps" para exercício tradicional, "40s" para isométrico/cardio. */
+/** Segundos até 60 "40 s", minutos até 60min "1 min 30 s", acima disso em horas "1 h 30 min". */
+function formatDurationLabel(totalSeconds: number): string {
+  if (totalSeconds <= 60) return `${totalSeconds} s`;
+  if (totalSeconds <= 3600) {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return seconds === 0 ? `${minutes} min` : `${minutes} min ${seconds} s`;
+  }
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  return minutes === 0 ? `${hours} h` : `${hours} h ${minutes} min`;
+}
+
+/** "8–12 reps" para exercício tradicional, "40 s" para isométrico/cardio. */
 function amountLabel(entry: {
   durationSeconds?: number;
   reps?: { min: number; max: number };
 }): string {
-  if (entry.durationSeconds !== undefined) return `${entry.durationSeconds}s`;
+  if (entry.durationSeconds !== undefined) return formatDurationLabel(entry.durationSeconds);
   if (!entry.reps) return '';
   const { min, max } = entry.reps;
   return min === max ? `${min} reps` : `${min}–${max} reps`;
@@ -164,7 +177,7 @@ function exerciseTableBody(exercises: readonly ProtocolExercise[]): Table {
       { text: String(block.sets), font: 'JetBrainsMono', fontSize: 8, color: COLOR.musgo },
       { text: amountLabel(block), font: 'JetBrainsMono', fontSize: 8, color: COLOR.musgo },
       {
-        text: block.restSeconds !== undefined ? `${block.restSeconds}s` : '-',
+        text: block.restSeconds !== undefined ? formatDurationLabel(block.restSeconds) : '-',
         font: 'JetBrainsMono',
         fontSize: 8,
         color: COLOR.musgo,
@@ -178,7 +191,7 @@ function exerciseTableBody(exercises: readonly ProtocolExercise[]): Table {
       { text: exercise.name, fontSize: 9, bold: true, color: COLOR.grafite },
       { text: String(exercise.sets), font: 'JetBrainsMono', fontSize: 8.5 },
       { text: amountLabel(exercise), font: 'JetBrainsMono', fontSize: 8.5 },
-      { text: `${exercise.restSeconds}s`, font: 'JetBrainsMono', fontSize: 8.5 },
+      { text: formatDurationLabel(exercise.restSeconds), font: 'JetBrainsMono', fontSize: 8.5 },
       {
         text: exercise.rir !== undefined ? String(exercise.rir) : '-',
         font: 'JetBrainsMono',
@@ -199,7 +212,11 @@ function exerciseTableBody(exercises: readonly ProtocolExercise[]): Table {
   });
   return {
     headerRows: 1,
-    widths: ['*', 24, 68, 38, 18, 52, 58, 34],
+    // "Repetição/Duração" e "Descanso" alargadas (68→74, 38→54): rótulos como
+    // "1 min 30 s" não cabiam mais nas larguras antigas, pensadas só para "40s".
+    // "Repetição/Duração" reduzida de novo (74→66, achado do fundador): sobrava espaço
+    // vazio antes de "Descanso" — 66 ainda cabe o pior caso ("25–30 reps"/"1 min 30 s").
+    widths: ['*', 24, 66, 54, 18, 52, 58, 34],
     body: [header, ...rows],
   };
 }
@@ -247,8 +264,7 @@ export async function buildProtocolPdf(input: ProtocolPdfInput): Promise<Buffer>
     `avise seu profissional responsável antes de continuar.`;
 
   const sessionBlocks: Content[] = content.sessions.flatMap((session, i): Content[] => {
-    const notes = session.exercises.filter((exercise) => exercise.notes);
-    const block: Content[] = [
+    return [
       {
         text: sessionTitle(session),
         style: 'h3',
@@ -260,9 +276,19 @@ export async function buildProtocolPdf(input: ProtocolPdfInput): Promise<Buffer>
         layout: {
           fillColor: (rowIndex: number) =>
             rowIndex === 0 ? COLOR.petroleo : rowIndex % 2 === 0 ? COLOR.nevoaElevada : null,
-          hLineWidth: () => 0.5,
-          vLineWidth: () => 0,
-          hLineColor: () => COLOR.musgoTenue,
+          hLineWidth: (rowIndex: number, node) =>
+            rowIndex === 0 || rowIndex === node.table.body.length ? 1 : 0.5,
+          // Decisão do fundador: contorno fino verde petróleo no perímetro externo da
+          // tabela (todo exercício ali pertence ao mesmo dia de treino) — só o contorno,
+          // as linhas internas continuam sem divisória vertical e com a horizontal clara
+          // de sempre.
+          vLineWidth: (colIndex: number, node) =>
+            colIndex === 0 || colIndex === node.table.widths?.length ? 1 : 0,
+          hLineColor: (rowIndex: number, node) =>
+            rowIndex === 0 || rowIndex === node.table.body.length
+              ? COLOR.petroleo
+              : COLOR.musgoTenue,
+          vLineColor: () => COLOR.petroleo,
           paddingLeft: () => 6,
           paddingRight: () => 6,
           paddingTop: () => 4,
@@ -270,20 +296,6 @@ export async function buildProtocolPdf(input: ProtocolPdfInput): Promise<Buffer>
         },
       },
     ];
-    if (notes.length) {
-      block.push({
-        margin: [0, 4, 0, 0],
-        stack: notes.map((exercise) => ({
-          text: [
-            { text: `${exercise.name}: `, bold: true, color: COLOR.grafite },
-            { text: exercise.notes as string, color: COLOR.musgo },
-          ],
-          fontSize: 8.5,
-          margin: [0, 0, 0, 2] as [number, number, number, number],
-        })),
-      });
-    }
-    return block;
   });
 
   // Cabeçalho do exercício vem branco/negrito por causa do style('tableHeader'); mas a cor de

@@ -1,11 +1,12 @@
 /**
  * `ProtocolAutoReleaseWorker` — categoria "Revisão Humana Opcional" da fila do
  * profissional. Consome o job com `delay` de 1h que `ProtocolGenerationWorker` agenda pra
- * TODO protocolo que sai da geração — PASS limpo, validador sinalizando
- * (`FLAG_HUMAN_REVIEW`) e o fallback (`BLOCK_FALLBACK`/DLQ) por igual, todos nascem
- * `PENDING_REVIEW`/`OPTIONAL` (decisão do fundador, 2026-08-18): o único motivo de negócio
- * pra travar a auto-liberação (`MANDATORY`, sem prazo, sem job nenhum agendado) é PAR-Q —
- * e quem chega em `PENDING_REVIEW` já passou pelo gate de PAR-Q antes de gerar.
+ * protocolo que sai da geração com conteúdo limpo (PASS) ou sinalizado pelo validador
+ * (`FLAG_HUMAN_REVIEW`) — nasce `PENDING_REVIEW`/`OPTIONAL` (decisão do fundador,
+ * 2026-08-18). Dois motivos travam a auto-liberação (`MANDATORY`, sem prazo, sem job nenhum
+ * agendado): PAR-Q do titular (gate já aplicado antes de gerar) e — desde 2026-09-03 —
+ * qualquer protocolo que caiu no template de fallback (`BLOCK_FALLBACK` persistente ou
+ * DLQ), que nunca passou limpo pela geração/validação e por isso nunca agenda este job.
  *
  * Idempotente por construção: `ProtocolRepository.autoRelease` só libera se o estado
  * ainda bater (`PENDING_REVIEW` + `OPTIONAL`) na hora em que o job dispara. Se o CREF já
@@ -24,6 +25,7 @@ import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { buildProtocolPdf } from './protocol-pdf.service';
 import { ProtocolRepository } from './protocol.repository';
+import { WorkoutPresentationService } from './workout-presentation.service';
 
 export interface ProtocolAutoReleaseJob {
   userId: string;
@@ -37,6 +39,7 @@ export class ProtocolAutoReleaseWorker implements OnModuleInit {
     private readonly queues: QueueManager,
     private readonly repository: ProtocolRepository,
     private readonly queueEvents: DashboardQueueEventsService,
+    private readonly workoutPresentation: WorkoutPresentationService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(ProtocolAutoReleaseWorker.name);
@@ -65,6 +68,7 @@ export class ProtocolAutoReleaseWorker implements OnModuleInit {
     // a liberação nem a entrega — se falhar, fica `NULL` e o worker de outbound cai pro
     // texto+link de sempre. Todo protocolo que vira ACTIVE ganha PDF, não só o assinado
     // manualmente (decisão do fundador, 2026-08-22).
+    let aiSummary: string | undefined;
     try {
       const personal = await this.repository.findLatestPersonalInfo(userId);
       if (!personal) throw new Error('anamnese submetida do titular não encontrada');
@@ -79,6 +83,17 @@ export class ProtocolAutoReleaseWorker implements OnModuleInit {
         student: personal,
       });
       await this.repository.setPdfContent(userId, protocolId, pdf);
+      // 2ª bolha da entrega (achado 2026-09-04): só vale a pena gerar quando o PDF saiu —
+      // sem PDF, a entrega cai no texto+link de sempre, que não usa este resumo.
+      aiSummary = await this.workoutPresentation.present({
+        userId,
+        user: { name: personal.name, phoneNumber: personal.phoneNumber, email: personal.email },
+        biologicalSex: personal.biologicalSex,
+        content: release.content,
+        totalWeeks: release.totalWeeks,
+        mesocycleName: release.mesocycleName,
+        reason: 'INITIAL',
+      });
     } catch (error) {
       this.logger.warn(
         { userId, protocolId, err: error instanceof Error ? error.message : String(error) },
@@ -89,7 +104,7 @@ export class ProtocolAutoReleaseWorker implements OnModuleInit {
     await this.queues.enqueue(
       QUEUE.whatsappOutbound,
       'protocol-delivery',
-      { userId, protocolId, protocolVersion: version, type: 'PROTOCOL_DELIVERY' },
+      { userId, protocolId, protocolVersion: version, type: 'PROTOCOL_DELIVERY', text: aiSummary },
       { jobId: `protocol-delivery_${userId}_${version}` },
     );
     this.queueEvents.emit('protocol');

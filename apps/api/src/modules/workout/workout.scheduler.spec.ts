@@ -10,14 +10,16 @@ import { WorkoutScheduler } from './workout.scheduler';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 
-function makeScheduler(reminderTime = '05:00', hasWorkout = true) {
+// Achado 2026-09-10 (pedido do fundador): horário deixou de ser configurável por aluno — o
+// link diário dispara sempre às 04:00 no fuso LOCAL do aluno (`users.timezone`). Só
+// `reminderEnabled` (opt-out) e ter treino no dia continuam variando por titular.
+function makeScheduler(reminderEnabled = true, hasWorkout = true) {
   const rows = [
     {
       userId: USER_ID,
       name: 'Pedro Teste',
       timezone: 'America/Sao_Paulo',
-      reminderTime,
-      reminderEnabled: true,
+      reminderEnabled,
     },
   ];
   const chain = { from: () => chain, innerJoin: () => chain, where: async () => rows };
@@ -44,9 +46,10 @@ function makeScheduler(reminderTime = '05:00', hasWorkout = true) {
 }
 
 describe('WorkoutScheduler.scan', () => {
-  it('envia o link na hora local configurada com dedupe por titular e dia', async () => {
+  it('envia o link às 04:00 no fuso local, com dedupe por titular e dia', async () => {
     const { scheduler, enqueue } = makeScheduler();
-    const result = await scheduler.scan(new Date('2026-08-10T08:00:00.000Z'));
+    // 07:00 UTC == 04:00 em America/Sao_Paulo (UTC-3).
+    const result = await scheduler.scan(new Date('2026-08-10T07:00:00.000Z'));
     expect(result.sent).toBe(1);
     expect(enqueue).toHaveBeenCalledWith(
       'whatsapp-outbound',
@@ -56,15 +59,22 @@ describe('WorkoutScheduler.scan', () => {
     );
   });
 
-  it('nao envia fora da hora configurada', async () => {
-    const { scheduler, enqueue } = makeScheduler('06:00');
+  it('nao envia fora do horario fixo (04:00)', async () => {
+    const { scheduler, enqueue } = makeScheduler();
+    // 08:00 UTC == 05:00 em America/Sao_Paulo — não é 04:00.
     await scheduler.scan(new Date('2026-08-10T08:00:00.000Z'));
     expect(enqueue).not.toHaveBeenCalled();
   });
 
+  it('nao envia quando o aluno desativou o lembrete', async () => {
+    const { scheduler, enqueue } = makeScheduler(false);
+    await scheduler.scan(new Date('2026-08-10T07:00:00.000Z'));
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
   it('nao envia em dia sem sessao prescrita', async () => {
-    const { scheduler, enqueue } = makeScheduler('05:00', false);
-    await scheduler.scan(new Date('2026-08-10T08:00:00.000Z'));
+    const { scheduler, enqueue } = makeScheduler(true, false);
+    await scheduler.scan(new Date('2026-08-10T07:00:00.000Z'));
     expect(enqueue).not.toHaveBeenCalled();
   });
 });

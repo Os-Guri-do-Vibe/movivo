@@ -15,11 +15,11 @@ describe('OperationsDashboard', () => {
   it('renderiza funil, SLA textual e replay já anonimizado', async () => {
     getOperations.mockResolvedValue(operationsResponse);
     render(<OperationsDashboard />);
-    expect(await screen.findByRole('heading', { name: 'Operações' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: 'Filas & Jobs' })).toBeVisible();
     expect(screen.getByText('Atenção · SLA excedido')).toBeVisible();
     expect(screen.getByText('Dentro da meta')).toBeVisible();
     expect(screen.getByLabelText(/Conversão: 22, 22%/)).toHaveAttribute('value', '22');
-    expect(screen.getByText('[PESSOA] relatou dificuldade.')).toBeVisible();
+    expect(screen.getByText('Relatei dificuldade no exercício de hoje.')).toBeVisible();
   });
 
   it('mostra vazio de replays e recupera de erro', async () => {

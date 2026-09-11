@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Landmark } from 'lucide-react';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -74,13 +75,7 @@ describe('MetricCard', () => {
 
 describe('SectorHeader', () => {
   it('exibe o horário da geração no fuso de São Paulo', () => {
-    render(
-      <SectorHeader
-        title="Visão geral"
-        description="Sinais da operação."
-        meta={controlCenterMeta}
-      />,
-    );
+    render(<SectorHeader title="Visão geral" meta={controlCenterMeta} />);
     expect(screen.getByRole('heading', { name: 'Visão geral' })).toBeVisible();
     expect(screen.getByText('11/08/2026, 12:00')).toHaveAttribute(
       'dateTime',
@@ -89,16 +84,30 @@ describe('SectorHeader', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
+  /*
+   * Achado 2026-09-04 (a pedido do fundador, "de todos os painéis"): o título ganha o
+   * mesmo ícone do item correspondente na sidebar, sempre em verde-pulso — nunca mais
+   * um subtítulo de descrição embaixo (removido do componente, não só escondido).
+   */
+  it('com `icon`, renderiza o ícone em verde-pulso ao lado do título', () => {
+    render(<SectorHeader title="Financeiro" icon={Landmark} />);
+    const heading = screen.getByRole('heading', { name: 'Financeiro' });
+    const icon = heading.querySelector('svg');
+    expect(icon).not.toBeNull();
+    expect(icon).toHaveClass('text-verde-pulso');
+  });
+
+  it('sem `icon`, não renderiza nenhum ícone', () => {
+    render(<SectorHeader title="Financeiro" />);
+    expect(screen.getByRole('heading', { name: 'Financeiro' }).querySelector('svg')).toBeNull();
+  });
+
   it('desabilita o botão enquanto a atualização está em andamento', async () => {
     const onRefresh = vi.fn();
-    const { rerender } = render(
-      <SectorHeader title="Financeiro" description="Receita." onRefresh={onRefresh} />,
-    );
+    const { rerender } = render(<SectorHeader title="Financeiro" onRefresh={onRefresh} />);
     await userEvent.click(screen.getByRole('button', { name: 'Atualizar' }));
     expect(onRefresh).toHaveBeenCalledOnce();
-    rerender(
-      <SectorHeader title="Financeiro" description="Receita." onRefresh={onRefresh} refreshing />,
-    );
+    rerender(<SectorHeader title="Financeiro" onRefresh={onRefresh} refreshing />);
     expect(screen.getByRole('button', { name: /Atualizando/ })).toBeDisabled();
   });
 
@@ -109,7 +118,7 @@ describe('SectorHeader', () => {
    * 40px em ponteiro fino). Agora os três compartilham a mesma constante.
    */
   it('usa a altura de controle da faixa de filtros no botão "Atualizar"', () => {
-    render(<SectorHeader title="Financeiro" description="Receita." onRefresh={vi.fn()} />);
+    render(<SectorHeader title="Financeiro" onRefresh={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Atualizar' })).toHaveClass('h-11', 'lg:h-10');
   });
 });

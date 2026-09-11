@@ -18,9 +18,24 @@ export const INTENTS = [
   'FORA_DE_ESCOPO',
   'SAUDACAO',
   'RELATO_TREINO',
-  'AJUSTE_LEMBRETE_TREINO',
+  // Achado 2026-09-10 (pedido do fundador): `AJUSTE_LEMBRETE_TREINO` existiu pra deixar o
+  // aluno pedir "me manda o link às 16h" pelo chat — removida porque o link diário passou a
+  // ter horário fixo (04:00 local, `workout.scheduler.ts`) pra todo mundo, não mais
+  // configurável por aluno. Também era fonte real de bug de classificação: mensagens sem
+  // nada a ver (ex.: "vou descansar mais entre as séries") caíam aqui por causa de uma regex
+  // heurística ampla demais (`isPotentialReminderMessage`, removida junto).
   'PEDIDO_HANDOFF',
   'EMERGENCIA_CLINICA',
+  // Achado 2026-09-10 (a pedido do fundador, ver memória `rt-leo-credenciais-escopo`): antes
+  // desta intenção, QUALQUER assunto que não fosse literalmente sobre a execução do treino
+  // caía em `FORA_DE_ESCOPO` — que nem chama o LLM (resposta fixa, ver `PER_INTENT` em
+  // `prompts.ts`). Isso fazia até um pedido de recomendação de música pro treino ser recusado
+  // com "isso foge do que posso te orientar". `PAPO_CASUAL` cobre o que um personal trainer de
+  // verdade conversaria com o aluno — vida pessoal, sono, hábitos, bem-estar, saúde emocional,
+  // alimentação básica e small talk — dentro do perímetro ampliado (`SCOPE_PERIMETER_BLOCK`).
+  // `FORA_DE_ESCOPO` continua existindo pro que segue genuinamente fora (medicamento/dopagem,
+  // finanças, política, crime, pedido genérico de IA, tentativa de trocar de papel).
+  'PAPO_CASUAL',
 ] as const;
 
 export type Intent = (typeof INTENTS)[number];

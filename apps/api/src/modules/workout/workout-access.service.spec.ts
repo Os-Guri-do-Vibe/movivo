@@ -46,6 +46,7 @@ function makeService(options: { updates?: unknown[][]; selects?: unknown[][] } =
       const rows = selects.shift() ?? [];
       const chain = {
         from: () => chain,
+        innerJoin: () => chain,
         where: () => chain,
         limit: async () => rows,
       };
@@ -90,6 +91,20 @@ describe('WorkoutAccessService', () => {
 
     expect(sessionToken).toMatch(/^[\w-]{43}$/);
     expect(inserted[0]).toMatchObject({ userId: USER_ID, kind: 'SESSION' });
+  });
+
+  it('espia o primeiro nome sem consumir o token, falhando em silencio quando invalido', async () => {
+    await expect(makeService().service.peekFirstName('curto')).resolves.toBeNull();
+    await expect(
+      makeService({ selects: [[]] }).service.peekFirstName(RAW_TOKEN),
+    ).resolves.toBeNull();
+
+    const { service, updated, inserted } = makeService({
+      selects: [[{ name: 'Ana Souza' }]],
+    });
+    await expect(service.peekFirstName(RAW_TOKEN)).resolves.toBe('Ana');
+    expect(updated).toHaveLength(0);
+    expect(inserted).toHaveLength(0);
   });
 
   it('exige bearer de sessao valido e registra o ultimo uso', async () => {

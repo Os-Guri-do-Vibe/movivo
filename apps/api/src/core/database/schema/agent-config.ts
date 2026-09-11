@@ -23,6 +23,16 @@
  * slot masculino não arquiva nada do feminino, e vice-versa. Enquanto um dos slots não
  * tiver nenhuma versão publicada, o runtime **empresta** a persona do outro
  * (`AgentPersonaService`) — nunca cai no default compilado só porque o slot está órfão.
+ *
+ * ## Bootstrap dos dois slots (achado 2026-09-04)
+ * Mesmo padrão de `methodology_versions`/`exercise_catalog_entries`: `AgentPersonaService.
+ * ensureBootstrap()` semeia `version = 1` PUBLISHED em cada slot a partir do default de
+ * código (`DEFAULT_AGENT_PERSONA_FEMALE`/`DEFAULT_AGENT_PERSONA_MALE`, `@movivo/shared`),
+ * idempotente via `ON CONFLICT (target_sex, version) DO NOTHING`. Por isso `created_by`
+ * é nullable aqui (diferente do resto da tabela, que é sempre uma publicação humana): a
+ * linha semeada não tem publicador. Na prática, um slot "órfão" (empréstimo do outro) só
+ * existe entre o deploy e a primeira leitura — depois disso os dois sempre têm pelo menos
+ * a versão 1 do bootstrap.
  */
 import { integer, jsonb, pgEnum, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
 
@@ -61,9 +71,14 @@ export const agentConfig = pgTable(
     payload: jsonb('payload').notNull(),
     /** Motivo da publicação. NOT NULL: publicar sem motivo não é auditável. */
     changeNote: text('change_note').notNull(),
-    createdBy: uuid('created_by')
-      .notNull()
-      .references(() => users.id, { onDelete: 'restrict' }),
+    /**
+     * `NULL` = versão semeada pelo bootstrap de código (`AgentPersonaService.ensureBootstrap`,
+     * achado 2026-09-04), nunca por uma publicação humana — mesma convenção de
+     * `methodology_versions.created_by`/`exercise_catalog_entries.created_by` (ambos
+     * nullable pelo mesmo motivo). Toda publicação de verdade, feita pelo painel, sempre
+     * tem um `created_by` real.
+     */
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'restrict' }),
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },
   (table) => [

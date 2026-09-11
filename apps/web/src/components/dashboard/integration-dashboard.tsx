@@ -10,7 +10,7 @@
  * EvolutionAPI via `GET .../integration` — por isso faz polling a cada 3s enquanto
  * `CONNECTING`, mesmo espírito do fallback de polling já usado em `queue-board.tsx`.
  */
-import { CircleHelp, MessageSquare } from 'lucide-react';
+import { Cable, CircleHelp, MessageSquare } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { ControlCenterIntegrationResponse, EvolutionConnectionState } from '@movivo/shared';
 
@@ -94,7 +94,7 @@ export function IntegrationDashboard() {
     <section aria-labelledby="integration-title">
       <SectorHeader
         title="Integração"
-        description="Ferramenta interna de teste do fluxo de WhatsApp — não é o canal de produção dos usuários finais."
+        icon={Cable}
         meta={data?.meta}
         refreshing={loading}
         onRefresh={() => void refresh()}

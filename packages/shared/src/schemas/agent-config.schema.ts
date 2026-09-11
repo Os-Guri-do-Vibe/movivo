@@ -32,17 +32,25 @@ import { l1GuardrailCandidateSchema } from './guardrail.schema';
 export const AGENT_NAME_PATTERN = /^[A-Za-zÀ-ú ]{2,20}$/;
 
 /**
- * Apresentação: texto Unicode, espaços tipográficos, pontuação de frase e emojis,
- * 10-200 caracteres. `trim()` remove whitespace invisível nas bordas trazido pelo clipboard.
+ * Apresentação: texto Unicode, espaços tipográficos (inclusive quebra de linha, para
+ * parágrafos), pontuação de frase e emojis, 10-600 caracteres. `trim()` remove whitespace
+ * invisível nas bordas trazido pelo clipboard.
  *
- * Sato (revisão TASK-7.9.5): este é o único texto livre que entra no system prompt
- * (`buildPersonaBlock`), e `detectInjection` é uma **denylist** de 4 regexes — insuficiente
- * sozinha. O charset segue como allowlist: emojis e pontuação natural são aceitos, mas quebra
- * de linha, `:`, `#`, `*`, `[`, `<` e `{` continuam proibidos para impedir a criação de um
- * cabeçalho/bloco novo dentro do prompt. As duas checagens permanecem complementares.
+ * Decisão do fundador (2026-09-04): este campo **não entra mais no system prompt da LLM**
+ * (`buildPersonaBlock` passou a montar a identidade só com `agentName` + tom + traços +
+ * política de emoji — ver `prompts/persona-block.ts`). `agentSelfIntro` virou copy
+ * **estática**, enviada verbatim ao titular 30min após o formulário (achado 2026-09-04,
+ * `apps/api/.../message-templates.ts`, `analyzingMessage`), por isso o cap de 200 caracteres
+ * numa linha só deixou de fazer sentido — precisa caber uma mensagem de WhatsApp de verdade,
+ * com parágrafos.
+ *
+ * O charset segue como allowlist (`:`, `#`, `*`, `[`, `<` e `{` continuam fora): não é mais
+ * defesa contra cabeçalho falso de prompt, mas ainda evita que o painel publique markdown
+ * quebrado ou uma URL disfarçada na mensagem que o aluno recebe. `detectInjection` (denylist)
+ * continua rodando na gravação como checagem complementar, sem relação com o prompt agora.
  */
 export const AGENT_SELF_INTRO_PATTERN =
-  /^[\p{L}\p{M}\p{N}\p{Zs},.;\-'"’“”()!?…\p{Extended_Pictographic}\p{Emoji_Modifier}\uFE0F\u200D]{10,200}$/u;
+  /^[\p{L}\p{M}\p{N}\p{Zs}\n,.;\-'"’“”()!?…\p{Extended_Pictographic}\p{Emoji_Modifier}\uFE0F\u200D]{10,600}$/u;
 
 /**
  * Mensagem entregue quando o aluno pede para falar com uma pessoa (`PEDIDO_HANDOFF`).
@@ -54,6 +62,18 @@ export const AGENT_SELF_INTRO_PATTERN =
  * decide emoji é `emojiPolicy`, que já existe.
  */
 export const AGENT_HANDOFF_MESSAGE_PATTERN = /^[A-Za-zÀ-ú0-9 ,.\-'()!?]{40,320}$/;
+
+/**
+ * Exemplo real de mensagem no tom/vocabulário da persona (achado 2026-09-10, pedido do
+ * fundador: os rótulos ENUM de tom, sozinhos, calibram mal expressões concretas — a IA
+ * continuava soando "IA tentando parecer descontraída" mesmo com `caloroso`+`informal`
+ * publicados). Mesmo raciocínio de charset de `AGENT_SELF_INTRO_PATTERN` (allowlist, não
+ * denylist): permite pontuação e emoji de mensagem real de WhatsApp, mas nada de `:`, `#`,
+ * `*`, `[`, `<`, `{` que sirva pra forjar cabeçalho/markup de prompt. Opcional: nem toda
+ * persona precisa de um exemplo além dos rótulos de tom.
+ */
+export const AGENT_VOICE_EXAMPLE_PATTERN =
+  /^[\p{L}\p{M}\p{N}\p{Zs}\n,.;\-'"’“”()!?…\p{Extended_Pictographic}\p{Emoji_Modifier}\uFE0F\u200D]{5,240}$/u;
 
 /**
  * Regras de formatação da mensagem no WhatsApp (**L2, editável direto pelo painel**).
@@ -116,6 +136,18 @@ export const agentPersonaSchema = z.object({
     .max(3),
   emojiPolicy: z.enum(Object.values(AgentEmojiPolicy) as [AgentEmojiPolicy, ...AgentEmojiPolicy[]]),
   formatting: agentFormattingSchema,
+  // Exceção deliberada à regra acima ("campo novo é obrigatório"): é suplementar, não uma
+  // escolha de comportamento — uma persona sem exemplo simplesmente usa só os rótulos de
+  // tom, exatamente como antes deste campo existir. Forçar obrigatoriedade quebraria toda
+  // publicação histórica sem ganho real (ver `AGENT_VOICE_EXAMPLE_PATTERN` acima).
+  voiceExample: z
+    .string()
+    .trim()
+    .regex(
+      AGENT_VOICE_EXAMPLE_PATTERN,
+      'exemplo inválido (5-240 caracteres; use texto, pontuação e emojis)',
+    )
+    .optional(),
   humanHandoffMessage: z
     .string()
     .regex(AGENT_HANDOFF_MESSAGE_PATTERN, 'mensagem inválida (40-320 caracteres, sem símbolos)'),
@@ -164,6 +196,60 @@ export const DEFAULT_AGENT_PERSONA: AgentPersona = {
   personaTraits: DEFAULT_AGENT_PERSONA_TRAITS,
   emojiPolicy: 'MODERADO',
   formatting: DEFAULT_AGENT_FORMATTING,
+  humanHandoffMessage: DEFAULT_HUMAN_HANDOFF_MESSAGE,
+};
+
+/**
+ * Personas base dos dois slots (decisão do fundador, 2026-09-04) — o que
+ * `AgentPersonaService.fallback()` devolve por SEXO quando aquele slot (e o outro, via
+ * empréstimo) ainda não tem nenhuma versão publicada no painel. Substituem, para esse
+ * caminho, o `DEFAULT_AGENT_PERSONA` genérico acima — que continua existindo só para os
+ * poucos usos que não têm (nem precisam de) um slot resolvido (ex.: o fallback de
+ * segurança de `AIResponseWorker` para a mensagem de handoff).
+ *
+ * `agentSelfIntro` aqui é a mensagem ESTÁTICA de 30min pós-formulário (não entra no
+ * prompt — ver `AGENT_SELF_INTRO_PATTERN`), por isso já é a saudação completa, com
+ * parágrafos e sem precisar de "Sou {nome}." na frente.
+ */
+export const DEFAULT_AGENT_PERSONA_FEMALE: AgentPersona = {
+  agentName: 'Mariana',
+  agentSelfIntro:
+    'Oi, muito prazer! Eu sou a Mariana e vou acompanhar você por aqui durante sua jornada ' +
+    'com a Movivo.\n\n' +
+    'Já recebi suas informações e estou finalizando seu protocolo de treino. A ideia é ' +
+    'montar um treino que realmente faça sentido para você e permita que alcance seus ' +
+    'objetivos com a gente.\n\n' +
+    'Assim que estiver pronto, te envio tudo por aqui. E parabéns por dar o primeiro ' +
+    'passo! 💚💪🏼',
+  toneDescriptors: ['bem-humorado', 'tecnico', 'motivacional', 'informal'],
+  personaTraits: ['ACOLHE_ANTES_DE_ORIENTAR', 'EXPLICA_O_PORQUE', 'CELEBRA_PROGRESSO'],
+  // Achado 2026-09-10 (pedido do fundador, a partir de um exemplo real do coach humano dele):
+  // calibrado pra soar caloroso e feminino sem imitar o vocabulário masculino do Léo — a
+  // concordância em "animada" é o que evita a agente se referir a si mesma no masculino.
+  voiceExample:
+    'Oi! Bom dia. Show de dia pra gente, tô super animada pro treino de hoje, vamos com tudo.',
+  emojiPolicy: 'RARO',
+  formatting: { blockSize: 'MEDIO', allowLists: true, boldPolicy: 'MODERADO' },
+  humanHandoffMessage: DEFAULT_HUMAN_HANDOFF_MESSAGE,
+};
+
+export const DEFAULT_AGENT_PERSONA_MALE: AgentPersona = {
+  agentName: 'Leonardo',
+  agentSelfIntro:
+    'Oi, muito prazer! Eu sou o Leonardo, especialista responsável pelos seus treinos na ' +
+    'Movivo.\n\n' +
+    'Já recebi suas informações e estou finalizando seu protocolo. A ideia é montar algo ' +
+    'que realmente faça sentido para você e permita uma evolução consistente e otimizada.\n\n' +
+    'Você já deu o primeiro passo. Agora vamos trabalhar para transformar isso em ' +
+    'progresso. 💪🏼👊🏼',
+  toneDescriptors: ['direto', 'tecnico', 'motivacional', 'sem_hype'],
+  personaTraits: ['ACOLHE_ANTES_DE_ORIENTAR', 'EXPLICA_O_PORQUE', 'CELEBRA_PROGRESSO'],
+  // Achado 2026-09-10 (pedido do fundador): adaptado de um exemplo real do coach humano dele
+  // ("salve ROD, bom dia meu brother! ótima quarta pra nós e bora nessa!") — sem o nome do
+  // aluno fixo no texto, que é sempre gerado pela IA, nunca copiado literalmente.
+  voiceExample: 'Salve! Bom dia, brother. Show de dia pra gente, bora nessa treino de hoje.',
+  emojiPolicy: 'NENHUM',
+  formatting: { blockSize: 'MEDIO', allowLists: true, boldPolicy: 'MODERADO' },
   humanHandoffMessage: DEFAULT_HUMAN_HANDOFF_MESSAGE,
 };
 

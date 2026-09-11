@@ -56,7 +56,13 @@ function parseQueueKind(value: unknown): QueueKind {
  * `kind`/`severity`, que decidem rota e cor e por isso continuam estritos.
  */
 function parseOrigin(value: unknown): QueueItem['origin'] {
-  return value === 'PARQ' || value === 'EDIT' || value === 'AI_SUBSTITUTION' ? value : null;
+  return value === 'PARQ' ||
+    value === 'FALLBACK' ||
+    value === 'EDIT' ||
+    value === 'AI_SUBSTITUTION' ||
+    value === 'CATALOG_GAP'
+    ? value
+    : null;
 }
 
 function parseSeverity(value: unknown): QueueSeverity {
@@ -126,6 +132,7 @@ function parseReplay(value: unknown): AnonymizedReplay {
   return {
     conversationId: string(value.conversationId),
     startedAt: string(value.startedAt),
+    studentName: typeof value.studentName === 'string' ? value.studentName : null,
     messages: value.messages.map(parseReplayMessage),
   };
 }
@@ -194,28 +201,39 @@ function parseExerciseRef(value: unknown): { id: string; name: string } {
   return { id: string(value.id), name: string(value.name) };
 }
 
+/** Achado 2026-09-09: `to.id` pode ser `null` (proposta `catalogGap`, sem substituto real
+ * ainda) — `name` continua sempre presente (texto pedido pelo aluno). */
+function parseNullableExerciseRef(value: unknown): { id: string | null; name: string } {
+  if (!isRecord(value)) throw new DashboardApiError(502, 'Exercício da substituição inválido.');
+  return { id: typeof value.id === 'string' ? value.id : null, name: string(value.name) };
+}
+
 function parseSubstitutionDetail(value: Record<string, unknown>): SubstitutionDetail {
   const status = value.status;
   if (status !== 'PENDING' && status !== 'RELEASED' && status !== 'DISCARDED') {
     throw new DashboardApiError(502, 'Estado da substituição inválido.');
   }
-  const diff = isRecord(value.diff) ? value.diff : {};
+  const diff = isRecord(value.diff) ? value.diff : null;
   return {
     id: string(value.id),
     protocolId: string(value.protocolId),
     from: parseExerciseRef(value.from),
-    to: parseExerciseRef(value.to),
-    diff: {
-      type: 'EXERCISE_SUBSTITUTION',
-      from: parseExerciseRef(diff.from),
-      to: parseExerciseRef(diff.to),
-      sessionsAffected: Array.isArray(diff.sessionsAffected)
-        ? diff.sessionsAffected.map((s) => string(s)).filter(Boolean)
-        : [],
-    },
+    to: parseNullableExerciseRef(value.to),
+    diff: diff
+      ? {
+          type: 'EXERCISE_SUBSTITUTION',
+          from: parseExerciseRef(diff.from),
+          to: parseExerciseRef(diff.to),
+          sessionsAffected: Array.isArray(diff.sessionsAffected)
+            ? diff.sessionsAffected.map((s) => string(s)).filter(Boolean)
+            : [],
+        }
+      : null,
     changeReason: string(value.changeReason),
     status,
     decidedAt: typeof value.decidedAt === 'string' ? value.decidedAt : null,
+    reviewUrgency: value.reviewUrgency === 'MANDATORY' ? 'MANDATORY' : 'OPTIONAL',
+    catalogGap: value.catalogGap === true,
   };
 }
 
@@ -357,6 +375,38 @@ export async function approveSubstitutionNow(id: string): Promise<ActionResult> 
 export async function discardSubstitution(id: string): Promise<ActionResult> {
   return (await request(`/substitutions/${encodeURIComponent(id)}/discard`, {
     method: 'POST',
+  })) as ActionResult;
+}
+
+/** Payload pra publicar um exercício novo no catálogo — mesmos campos da tela "Exercícios". */
+export interface NewCatalogExercisePayload {
+  exerciseKey: string;
+  changeNote: string;
+  name: string;
+  pattern: string;
+  muscleGroups: string[];
+  equipment: string[];
+  locations: string[];
+  minLevel: string;
+  contraindicatedFor: string[];
+  substitutes: string[];
+  videoUrl?: string;
+}
+
+/**
+ * Achado 2026-09-09 (pedido do fundador): só pra proposta `catalogGap` — publica o
+ * exercício pedido pelo aluno no catálogo e aprova a troca no mesmo gesto. Se o exercício
+ * recém-publicado, aplicado ao protocolo inteiro, quebrar a validação, nada é aplicado
+ * (o erro descreve o motivo) — o exercício fica publicado pra tentar de novo com outra
+ * categorização.
+ */
+export async function addCatalogExerciseAndApproveSubstitution(
+  id: string,
+  payload: NewCatalogExercisePayload,
+): Promise<ActionResult> {
+  return (await request(`/substitutions/${encodeURIComponent(id)}/add-and-approve`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
   })) as ActionResult;
 }
 

@@ -22,17 +22,20 @@
  * de qual instância está acima dele na árvore. O que é global (temas proibidos, sessão,
  * aba ativa) mora em `agent-persona-workspace.tsx`.
  *
- * ## O que NÃO mudou
- * O caminho de escrita continua sendo o mesmo de antes: espaço de valores fechado,
- * simulador obrigatório antes de publicar e o servidor repetindo os dois gates. A UI
- * reorganiza a navegação; ela nunca foi (e não passou a ser) a barreira de segurança.
+ * ## Simulador e motivo de publicação — removidos (decisão do fundador, 2026-09-04)
+ * Existia um simulador obrigatório ("Teste de segurança e consistência") e um campo de
+ * "Motivo da alteração" como pré-requisito de publicação, os dois também reforçados pelo
+ * servidor (`ai-config.service.ts::insertVersion`). Ambos os gates foram removidos, cliente
+ * e servidor: publicar (`publish`, botão "Salvar e ativar") exige só uma alteração
+ * pendente e o payload validar contra `agentPersonaSchema` — nenhum teste prévio, nenhum
+ * motivo digitado. O `changeNote` que o servidor grava para auditoria agora é um texto
+ * fixo (ver `publish` abaixo), não mais escolha do usuário.
  */
 import {
   agentPersonaSchema,
   type AgentConfigVersion,
   type AgentPersona,
   type BiologicalSex,
-  type ConfigSimulationResponse,
   type PromptBlockView,
 } from '@movivo/shared';
 import { Ban, MessagesSquare, ShieldCheck, UserRound, UserRoundCheck } from 'lucide-react';
@@ -53,7 +56,6 @@ import {
   getInviolableRules,
   publishAgentPersona,
   rollbackAgentPersona,
-  simulateAgentConfig,
 } from '@/lib/control-center-api';
 
 import {
@@ -91,7 +93,7 @@ export const PERSONA_STEPS: readonly PersonaStep[] = [
     id: 'fala',
     label: 'Jeito de falar',
     icon: MessagesSquare,
-    fields: ['toneDescriptors', 'personaTraits', 'emojiPolicy', 'formatting'],
+    fields: ['toneDescriptors', 'personaTraits', 'emojiPolicy', 'formatting', 'voiceExample'],
   },
   { id: 'limites', label: 'Limites', icon: Ban, fields: [] },
   {
@@ -110,6 +112,7 @@ export const FIELD_LABEL: Record<keyof AgentPersona, string> = {
   personaTraits: 'Comportamentos',
   emojiPolicy: 'Uso de emoji',
   formatting: 'Formato da mensagem',
+  voiceExample: 'Exemplo real de fala',
   humanHandoffMessage: 'Mensagem de passagem',
 };
 
@@ -238,8 +241,6 @@ interface AgentPersonaState {
   form: AgentPersona | null;
   update: (patch: Partial<AgentPersona>) => void;
   discard: () => void;
-  changeNote: string;
-  setChangeNote: (value: string) => void;
   step: PersonaStepId;
   goToStep: (id: PersonaStepId) => void;
   fieldErrors: Map<string, string>;
@@ -247,11 +248,6 @@ interface AgentPersonaState {
   changedFields: Array<keyof AgentPersona>;
   changedInStep: (step: PersonaStep) => Array<keyof AgentPersona>;
   erroredInStep: (step: PersonaStep) => Array<keyof AgentPersona>;
-  simulation: ConfigSimulationResponse['data'] | null;
-  simulating: boolean;
-  runSimulation: () => Promise<void>;
-  /** Campos tocados DEPOIS da última simulação aprovada — invalida o teste. */
-  staleFields: Array<keyof AgentPersona>;
   publishing: boolean;
   feedback: string;
   writeError: string;
@@ -281,24 +277,14 @@ export function AgentPersonaProvider({
   const load = useCallback((signal?: AbortSignal) => loadAiPersona(targetSex, signal), [targetSex]);
   const { data, error, forbidden, loading, refresh } = useControlCenterResource(load);
   const [draft, setDraft] = useState<AgentPersona | null>(null);
-  const [changeNote, setChangeNote] = useState('');
   const [step, setStep] = useState<PersonaStepId>('identidade');
   const [publishing, setPublishing] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [writeError, setWriteError] = useState('');
-  const [simulating, setSimulating] = useState(false);
-  const [simulation, setSimulation] = useState<ConfigSimulationResponse['data'] | null>(null);
-  const [staleFields, setStaleFields] = useState<Array<keyof AgentPersona>>([]);
 
   const current = data?.persona ?? null;
   const form = draft ?? current;
 
-  /**
-   * Toda edição derruba a simulação em curso — não se confirma um diff que já não é o
-   * atual. A diferença para o comportamento anterior: em vez de sumir em silêncio, os
-   * campos tocados ficam registrados em `staleFields`, e a etapa 5 nomeia o que mudou
-   * ("Você mudou o tom depois do último teste").
-   */
   const update = useCallback(
     (patch: Partial<AgentPersona>) => {
       setFeedback('');
@@ -307,22 +293,12 @@ export function AgentPersonaProvider({
         const base = previous ?? current;
         return base ? { ...base, ...patch } : base;
       });
-      setSimulation((previous) => {
-        if (previous) {
-          const touched = Object.keys(patch) as Array<keyof AgentPersona>;
-          setStaleFields((fields) => [...new Set([...fields, ...touched])]);
-        }
-        return null;
-      });
     },
     [current],
   );
 
   const reset = useCallback(() => {
     setDraft(null);
-    setChangeNote('');
-    setSimulation(null);
-    setStaleFields([]);
   }, []);
 
   const discard = useCallback(() => {
@@ -391,33 +367,21 @@ export function AgentPersonaProvider({
     [refresh, refreshSlot, reset, targetSex],
   );
 
-  const runSimulation = useCallback(async () => {
-    if (!validation?.success) return;
-    setSimulating(true);
-    setWriteError('');
-    setSimulation(null);
-    try {
-      const response = await simulateAgentConfig({ kind: 'PERSONA', candidate: validation.data });
-      setSimulation(response.data);
-      setStaleFields([]);
-    } catch (caught) {
-      setWriteError(
-        caught instanceof ControlCenterApiError
-          ? caught.message
-          : 'Não foi possível executar o simulador.',
-      );
-    } finally {
-      setSimulating(false);
-    }
-  }, [validation]);
-
   const publish = useCallback(async () => {
     if (!validation?.success) return;
     await runWrite(
-      () => publishAgentPersona({ targetSex, payload: validation.data, changeNote }),
+      () =>
+        publishAgentPersona({
+          targetSex,
+          payload: validation.data,
+          // Decisão do fundador (2026-09-04): publicar não pede mais motivo — o contrato
+          // ainda exige `changeNote` (mín. 5 chars, auditoria de quem/quando publicou),
+          // então mandamos um valor fixo em vez de expor o campo.
+          changeNote: 'Configuração salva e ativada pelo painel.',
+        }),
       'Publicado. A nova persona passa a valer em até 60 segundos, sem deploy.',
     );
-  }, [changeNote, runWrite, targetSex, validation]);
+  }, [runWrite, targetSex, validation]);
 
   const rollback = useCallback(
     async (version: number) => {
@@ -436,12 +400,7 @@ export function AgentPersonaProvider({
     [runWrite, targetSex],
   );
 
-  const canPublish =
-    canWrite &&
-    validation?.success === true &&
-    changedFields.length > 0 &&
-    changeNote.trim().length >= 5 &&
-    simulation?.passed === true;
+  const canPublish = canWrite && validation?.success === true && changedFields.length > 0;
 
   useEffect(() => {
     if (changedFields.length === 0) return;
@@ -508,8 +467,6 @@ export function AgentPersonaProvider({
       form,
       update,
       discard,
-      changeNote,
-      setChangeNote,
       step,
       goToStep: setStep,
       fieldErrors,
@@ -517,10 +474,6 @@ export function AgentPersonaProvider({
       changedFields,
       changedInStep,
       erroredInStep,
-      simulation,
-      simulating,
-      runSimulation,
-      staleFields,
       publishing,
       feedback,
       writeError,
@@ -543,17 +496,12 @@ export function AgentPersonaProvider({
       form,
       update,
       discard,
-      changeNote,
       step,
       fieldErrors,
       validation,
       changedFields,
       changedInStep,
       erroredInStep,
-      simulation,
-      simulating,
-      runSimulation,
-      staleFields,
       publishing,
       feedback,
       writeError,

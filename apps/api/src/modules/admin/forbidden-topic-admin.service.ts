@@ -82,6 +82,15 @@ export class ForbiddenTopicAdminService {
     });
   }
 
+  /**
+   * Decisão do fundador (2026-09-04): criar um tema proibido já o ATIVA — sem o passo de
+   * aprovação por um segundo CREF que existia antes (propose DRAFT → submit
+   * PENDING_APPROVAL → approve). `submit`/`approve` continuam existindo (não removidos)
+   * para qualquer tema legado que já esteja parado nesses estados, mas nenhum tema novo
+   * passa por eles. `assertCapacity` — antes chamada só dentro de `approve()` — entra
+   * aqui, porque agora é ESTE o único gate de orçamento antes de algo virar ativo.
+   * `approvedBy: null` de propósito: ninguém aprovou, o tema simplesmente nasceu ativo.
+   */
   async propose(actor: AuthenticatedUser, body: unknown): Promise<ForbiddenTopicsResponse> {
     const input = this.parse(createForbiddenTopicSchema, body);
     const simulation = simulateForbiddenTopicConfig(input);
@@ -93,7 +102,8 @@ export class ForbiddenTopicAdminService {
       if (current && current.status !== 'RETIRED') {
         throw new ConflictException('Já existe uma proposta ativa para esta chave.');
       }
-      await this.insert(tx, actor, input.topicKey, input, input.changeNote, 'DRAFT', null, {
+      await this.assertCapacity(tx, input.topicKey, input.phrases.length);
+      await this.insert(tx, actor, input.topicKey, input, input.changeNote, 'APPROVED', null, {
         action: 'forbidden_topic.propose',
       });
     });

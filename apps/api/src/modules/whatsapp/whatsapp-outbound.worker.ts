@@ -14,6 +14,7 @@ import { type Job } from 'bullmq';
 import { and, desc, eq } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
+import { type AgentPersona } from '@movivo/shared';
 
 import { AgentPersonaService } from '../../core/agent-config/agent-persona.service';
 import { AppConfigService } from '../../core/config';
@@ -32,7 +33,7 @@ import {
   confirmationMessage,
   formatProtocolDelivery,
   PHONE_VERIFICATION_TEMPLATE,
-  protocolDeliveryText,
+  protocolDeliveryPdfText,
 } from './message-templates';
 import {
   type QuickReplyButton,
@@ -45,6 +46,8 @@ export type WhatsappJobType =
   | 'CONFIRMATION_CARE'
   | 'PROTOCOL_DELIVERY'
   | 'PROTOCOL_WAITING'
+  // Renovação de protocolo por fim de mesociclo — convite ao formulário de transição.
+  | 'MESOCYCLE_RENEWAL_INVITE'
   // US-3.5 — conversa do Coach: texto dinâmico + indicador de digitação.
   | 'COACH_MESSAGE'
   | 'CHECKIN_MESSAGE'
@@ -64,7 +67,13 @@ export interface WhatsappOutboundJob {
   type: WhatsappJobType;
   protocolId?: string;
   protocolVersion?: number;
-  /** COACH_MESSAGE: texto já pronto (pode ter `\n---\n` para bolhas). */
+  /**
+   * COACH_MESSAGE: texto já pronto (pode ter `\n---\n` para bolhas).
+   * PROTOCOL_DELIVERY (achado 2026-09-04): resumo do treino gerado pela IA no módulo de
+   * protocolo (`WorkoutPresentationService`) ANTES de enfileirar — vira a 2ª bolha da
+   * entrega com PDF, junto da 1ª bolha estática (ver `buildDelivery`). O `whatsapp` nunca
+   * fala com o LLM diretamente (§12.5) — o texto sempre chega pronto no payload.
+   */
   text?: string;
   /** COACH_MESSAGE: chave de idempotência única por resposta (evita colidir no marcador). */
   dedupeId?: string;
@@ -75,6 +84,15 @@ export interface WhatsappOutboundJob {
   /** `PHONE_VERIFICATION`: destino e código de 6 dígitos. */
   phoneNumber?: string;
   code?: string;
+  /**
+   * `PROTOCOL_DELIVERY` apenas (achado 2026-09-08): distingue a 1ª entrega do treino de uma
+   * reentrega após substituição de exercício aprovada — a saudação estática muda (ver
+   * `protocolDeliveryPdfText`). Ausente/`'INITIAL'` mantém o texto de sempre.
+   */
+  deliveryReason?: 'INITIAL' | 'SUBSTITUTION';
+  /** Só com `deliveryReason: 'SUBSTITUTION'` — nomes do exercício trocado, pra saudação. */
+  substitutionFromExercise?: string;
+  substitutionToExercise?: string;
 }
 
 /**
@@ -190,30 +208,35 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       return { status: 'ALREADY_SENT' };
     }
 
-    // PROTOCOL_DELIVERY é tratado à parte: quando há PDF gerado (assinatura CREF), o texto
-    // explicativo vai em bolhas E o plano vai como documento; sem PDF, só o texto+link de
-    // sempre. Os dois caminhos usam o MESMO marker de idempotência acima, então nunca
-    // duplica entre um e outro.
+    // PROTOCOL_DELIVERY é tratado à parte: quando há PDF gerado (assinatura CREF), saudação +
+    // resumo da IA vão na LEGENDA do documento — uma mensagem só; sem PDF, cai no texto+link
+    // de sempre, em bolhas separadas (sem documento para legendar). Os dois caminhos usam o
+    // MESMO marker de idempotência acima, então nunca duplica entre um e outro.
     if (type === 'PROTOCOL_DELIVERY') {
       const delivery = await this.buildDelivery(job.data);
       if (!delivery) return { status: 'SKIPPED' };
+      // Achado 2026-09-04, a pedido do fundador: se o profissional aprovar/assinar ANTES
+      // dos 30min do `PROTOCOL_WAITING` agendado no submit, o aluno não pode pular direto
+      // da confirmação pro treino pronto sem nunca conhecer a agente. Garante a ordem
+      // apresentação → entrega DENTRO deste mesmo job (duas mensagens separadas enfileiradas
+      // não garantiriam ordem entre si) e marca o `PROTOCOL_WAITING` como enviado, para o job
+      // de 30min (que ainda dispara — não há como cancelar um delay do BullMQ) virar no-op.
+      await this.sendPresentationIfNeeded(userId, phone, job.data, delivery.persona);
       if (delivery.pdfUrl && this.transport.sendDocument) {
-        // O texto explicativo vem ANTES do documento (contexto primeiro, anexo depois) e é
-        // best-effort: se falhar, o PDF — que é a entrega em si — segue de qualquer forma.
-        await this.sendBubbles(delivery.text, phone, job.data).catch((err: unknown) =>
-          this.logger.warn(
-            { err, userId },
-            'texto explicativo da entrega falhou — PDF segue de qualquer forma',
-          ),
-        );
+        // Achado 2026-09-04 (reproduzido ao vivo, print real do WhatsApp): mandar
+        // `delivery.text` como bolha ANTES do documento E de novo como legenda do documento
+        // duplicava a saudação ("seu treino está pronto!") nas duas mensagens seguidas — e
+        // quando havia resumo de IA, ele saía como uma 3ª bolha à parte, se reapresentando
+        // como "Leonardo" de novo (redundante com a apresentação de `sendPresentationIfNeeded`
+        // acima) e chegando a afirmar "o PDF já foi enviado" ANTES do documento de fato sair.
+        // Agora é uma mensagem só: a legenda do documento carrega saudação + resumo da IA
+        // juntos (troca só o separador de bolhas por quebra de parágrafo — a legenda não
+        // divide em mensagens, então `BUBBLE_SEPARATOR` apareceria como "---" literal nela).
+        const caption = delivery.text.split(BUBBLE_SEPARATOR).join('\n\n');
         await this.transport.sendDocument(
           phone,
           delivery.pdfUrl,
-          // Só afirma revisão humana quando ela realmente aconteceu: auto-liberação é
-          // assinatura em nível de metodologia, não leitura caso a caso do protocolo.
-          delivery.humanSigned
-            ? 'Seu plano de treino em PDF. 📄 Revisado e assinado pelo profissional de Educação Física registrado no CREF responsável pela MOVIVO.'
-            : 'Seu plano de treino em PDF. 📄 Montado dentro da metodologia do profissional de Educação Física registrado no CREF responsável pela MOVIVO.',
+          caption,
           this.config.whatsapp.protocolPdfTemplateName,
           protocolFileName(delivery.studentName),
         );
@@ -262,7 +285,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
   private async buildText(data: WhatsappOutboundJob): Promise<string | null> {
     switch (data.type) {
       case 'CONFIRMATION':
-        return confirmationMessage();
+        return confirmationMessage(await this.resolveFirstName(data.userId));
       case 'CONFIRMATION_CARE':
         return confirmationCareMessage();
       case 'PROTOCOL_WAITING':
@@ -276,6 +299,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       case 'WORKOUT_INSIGHT':
       case 'REENGAGEMENT':
       case 'CONSENT_STATUS':
+      case 'MESOCYCLE_RENEWAL_INVITE':
         return data.text ?? null;
       case 'PHONE_VERIFICATION':
       case 'TYPING':
@@ -285,15 +309,17 @@ export class WhatsappOutboundWorker implements OnModuleInit {
 
   /**
    * `pdfUrl` só vem preenchido quando o protocolo já tem PDF gerado (assinatura CREF,
-   * `DashboardService.signProtocol` → `buildProtocolPdf`) — `AUTO_APPROVED` ainda não gera
-   * PDF (Sprint futura), então cai no texto+link de sempre (`text`, sempre montado).
+   * `DashboardService.signProtocol` → `buildProtocolPdf`). Com PDF, `text` é a saudação
+   * estática + o resumo gerado pela IA (`data.text`, já pronto — quem enfileirou o job
+   * chamou `WorkoutPresentationService` antes; achado 2026-09-04). Sem PDF (fallback raro),
+   * `text` é a entrega inteira de sempre.
    */
   private async buildDelivery(data: WhatsappOutboundJob): Promise<{
     text: string;
     pdfUrl?: string;
     studentName: string | null;
-    /** Assinado por um humano de verdade (não a auto-liberação) — decide a legenda do PDF. */
-    humanSigned: boolean;
+    /** Persona do slot do titular — usada aqui e pela apresentação enviada antes (ver `process`). */
+    persona: AgentPersona;
   } | null> {
     const userId = data.userId;
     if (!userId) return null;
@@ -358,31 +384,41 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     const content = proto.content as Parameters<typeof formatProtocolDelivery>[0];
     const persona = await this.agentPersona.persona(biologicalSex);
     const pdfUrl = proto.pdfContent ? `${link}/pdf` : undefined;
-    // Com PDF, o anexo JÁ é o plano completo — o texto vira só o "porquê" curto (achado
-    // 2026-08-25). Sem PDF (fallback raro), o texto é a entrega inteira: precisa do
-    // primeiro treino e do link, senão o titular não vê o plano em lugar nenhum.
+    // Com PDF, a bolha é saudação + resumo da IA (já veio pronto em `data.text`, ver doc
+    // acima). Sem PDF (fallback raro), o texto é a entrega inteira: precisa do primeiro
+    // treino e do link, senão o titular não vê o plano em lugar nenhum.
+    const firstName = studentName?.trim().split(/\s+/)[0] ?? null;
+    const substitution =
+      data.deliveryReason === 'SUBSTITUTION' &&
+      data.substitutionFromExercise &&
+      data.substitutionToExercise
+        ? { from: data.substitutionFromExercise, to: data.substitutionToExercise }
+        : undefined;
     const text = pdfUrl
-      ? protocolDeliveryText(content, persona, proto.totalWeeks, proto.mesocycleName)
+      ? protocolDeliveryPdfText(firstName, data.text?.trim() || undefined, substitution)
       : formatProtocolDelivery(content, link, persona, proto.totalWeeks, proto.mesocycleName);
     return {
       text,
       pdfUrl,
       studentName,
-      humanSigned: proto.approvalStatus === 'HUMAN_APPROVED' && Boolean(proto.signedAt),
+      persona,
     };
   }
 
   /**
    * "Estou analisando" (PROTOCOL_WAITING), agendada no SUBMIT com 30min de atraso
    * (`AnamnesisService.submit`). Nesses 30min o protocolo pode ter sido gerado e entregue —
-   * por auto-liberação ou por assinatura do CREF. Por isso o estado é reconfirmado aqui, na
-   * hora do envio, e não só no enqueue: mandar "já estou analisando" depois que o plano de
-   * verdade chegou seria ruído.
+   * por auto-liberação ou por assinatura do CREF — e nesse caso quem manda a apresentação
+   * primeiro é `sendPresentationIfNeeded` (achado 2026-09-04, chamado pelo próprio job de
+   * entrega, ANTES da entrega), com o mesmo marker desta mensagem — então este job chega
+   * aqui e vira `ALREADY_SENT` no topo de `process()`, antes mesmo de entrar nesta função.
+   * `alreadyDelivered` abaixo é só o cinto-e-suspensório caso aquele envio antecipado tenha
+   * falhado parcialmente (mandou mas não marcou): nesse caso raro, melhor engolir a
+   * apresentação atrasada do que duplicá-la depois que o plano de verdade já chegou.
    *
-   * O mesmo carregamento decide a variante do texto: `reviewUrgency = MANDATORY` (PAR-Q
-   * bloqueado) é o único caso em que o protocolo só sai por assinatura humana — aí a copy
-   * não promete prazo. Sem protocolo ainda (geração em curso/atrasada), trata como o caso
-   * comum: `mandatory: false`.
+   * Achado 2026-09-04 (a pedido do fundador): o texto não varia mais por `reviewUrgency` —
+   * é sempre a apresentação do agente (`agentSelfIntro`), mandatory ou optional (ver
+   * `analyzingMessage`).
    */
   private async buildWaiting(userId: string | null): Promise<string | null> {
     if (!userId) return null;
@@ -391,7 +427,6 @@ export class WhatsappOutboundWorker implements OnModuleInit {
         .select({
           status: protocols.status,
           approvalStatus: protocols.approvalStatus,
-          reviewUrgency: protocols.reviewUrgency,
         })
         .from(protocols)
         .where(eq(protocols.userId, userId))
@@ -412,9 +447,49 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       ['AUTO_APPROVED', 'HUMAN_APPROVED'].includes(proto.approvalStatus);
     if (alreadyDelivered) return null;
 
-    return analyzingMessage(await this.agentPersona.persona(biologicalSex), {
-      mandatory: proto?.reviewUrgency === 'MANDATORY',
-    });
+    return analyzingMessage(await this.agentPersona.persona(biologicalSex));
+  }
+
+  /** Mesma chave que um job `PROTOCOL_WAITING` real produziria (sem `protocolVersion`/`dedupeId`). */
+  private waitingMarkerKey(userId: string): string {
+    return this.keys.forUser(userId, 'wa-sent', 'PROTOCOL_WAITING', 'na');
+  }
+
+  /**
+   * Garante que a apresentação de 30min saia ANTES da entrega quando o profissional
+   * aprova/assina mais rápido que isso (achado 2026-09-04, a pedido do fundador): sem essa
+   * garantia, o aluno pularia direto de "recebemos seus dados" pro treino pronto sem nunca
+   * conhecer a agente. As duas mensagens saem NO MESMO job (não em dois jobs separados)
+   * porque BullMQ não garante ordem entre jobs distintos — só dentro de um.
+   *
+   * Idempotente pelo MESMO marker que o job `PROTOCOL_WAITING` real usaria: ao marcar aqui,
+   * aquele job (ainda agendado — não há como cancelar um delay do BullMQ) chega depois e
+   * vira `ALREADY_SENT` no topo de `process()`, sem duplicar.
+   */
+  private async sendPresentationIfNeeded(
+    userId: string,
+    phone: string,
+    data: Pick<WhatsappOutboundJob, 'buttons' | 'feedback'>,
+    persona: AgentPersona,
+  ): Promise<void> {
+    const key = this.waitingMarkerKey(userId);
+    if ((await this.redis.exists(key)) === 1) return;
+    await this.sendBubbles(analyzingMessage(persona), phone, data).catch((err: unknown) =>
+      this.logger.warn(
+        { err, userId },
+        'apresentação antecipada falhou — entrega segue de qualquer forma',
+      ),
+    );
+    await this.redis.set(key, '1', 'EX', SENT_MARKER_TTL_SECONDS);
+  }
+
+  /** Primeiro nome pra saudar na confirmação (US-2.5) — `null` se o titular não tiver nome salvo. */
+  private async resolveFirstName(userId: string | null): Promise<string | null> {
+    if (!userId) return null;
+    const [row] = await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1),
+    );
+    return row?.name?.trim().split(/\s+/)[0] ?? null;
   }
 
   private async resolvePhone(userId: string): Promise<string | null> {

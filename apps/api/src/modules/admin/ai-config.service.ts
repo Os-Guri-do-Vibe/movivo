@@ -4,10 +4,11 @@
  *
  * ## Por que a escrita é tão estreita
  * O único caminho que alcança o system prompt é `agentPersonaSchema` — campo curto validado
- * por regex, ENUMs de lista fechada e uma faixa numérica. `agentSelfIntro` é o único texto
- * livre do payload e passa por `detectInjection` **antes** de gravar. Não existe textarea
- * livre no contrato: é isso que impede que alguém com login no painel escreva instrução
- * para a IA (Sato — superfície de injeção pelo painel).
+ * por regex, ENUMs de lista fechada e uma faixa numérica. `agentSelfIntro` e `voiceExample`
+ * (achado 2026-09-10: exemplo real de tom/vocabulário, ver `persona-block.ts`) são os dois
+ * únicos textos livres do payload e passam por `detectInjection` **antes** de gravar. Não
+ * existe textarea sem esse gate no contrato: é isso que impede que alguém com login no
+ * painel escreva instrução para a IA (Sato — superfície de injeção pelo painel).
  *
  * ## Append-only
  * Publicar e reverter fazem a mesma coisa: `INSERT` de uma versão nova. Rollback nunca
@@ -41,8 +42,11 @@ import {
 } from '../../core/database/tenant-database.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import {
+  CONVERSATION_MEMORY_BLOCK,
   INVIOLABLE_RULES_BLOCK,
+  NATURAL_CONVERSATION_BLOCK,
   PROMPT_BLOCKS,
+  SCHEDULE_GROUNDING_BLOCK,
   SCOPE_PERIMETER_BLOCK,
 } from '../ai-coach/intent/prompts';
 import { detectInjection } from '../protocol/validation/prompt-injection';
@@ -63,6 +67,9 @@ const HISTORY_LIMIT = 50;
 const BLOCK_CONTENT: Record<string, (persona: AgentPersona) => string> = {
   PERSONA: buildPersonaBlock,
   SCOPE_PERIMETER: () => SCOPE_PERIMETER_BLOCK,
+  SCHEDULE_GROUNDING: () => SCHEDULE_GROUNDING_BLOCK,
+  CONVERSATION_MEMORY: () => CONVERSATION_MEMORY_BLOCK,
+  NATURAL_CONVERSATION: () => NATURAL_CONVERSATION_BLOCK,
   INVIOLABLE_RULES: () => INVIOLABLE_RULES_BLOCK,
 };
 
@@ -250,18 +257,16 @@ export class AiConfigService {
     action: string,
     wasOrphan: boolean,
   ): Promise<AgentPersonaResponse> {
-    const simulation = simulatePersonaConfig(payload);
-    if (!simulation.passed) {
-      throw new BadRequestException({
-        code: 'CONFIG_SIMULATION_FAILED',
-        message: 'A configuração candidata não passou no simulador e não pode ser publicada.',
-        checks: simulation.checks,
-      });
-    }
+    // Decisão do fundador (2026-09-04): publicar/reverter não depende mais do simulador
+    // ("Teste de segurança e consistência") passar — removido cliente e servidor. O
+    // `simulate()` deste service continua existindo pra quem quiser rodar o teste à parte
+    // (e pros outros `kind` do simulador, que não mudaram); só deixou de ser pré-requisito
+    // de escrita aqui. `detectInjection` abaixo continua sendo o gate real, sem exceção.
     if (
       detectInjection(payload.agentSelfIntro) ||
       detectInjection(payload.agentName) ||
-      detectInjection(payload.humanHandoffMessage)
+      detectInjection(payload.humanHandoffMessage) ||
+      (payload.voiceExample !== undefined && detectInjection(payload.voiceExample))
     ) {
       throw new BadRequestException({
         code: 'INJECTION_DETECTED',

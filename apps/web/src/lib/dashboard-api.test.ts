@@ -137,6 +137,10 @@ describe('parsers do contrato do dashboard', () => {
       parseQueueResponse({ mandatory: [{ ...base, origin: 'EDIT' }], ...empty }).mandatory[0]
         ?.origin,
     ).toBe('EDIT');
+    expect(
+      parseQueueResponse({ mandatory: [{ ...base, origin: 'FALLBACK' }], ...empty }).mandatory[0]
+        ?.origin,
+    ).toBe('FALLBACK');
     for (const origin of ['DESCONHECIDA', undefined, null]) {
       expect(
         parseQueueResponse({ mandatory: [{ ...base, origin }], ...empty }).mandatory[0]?.origin,

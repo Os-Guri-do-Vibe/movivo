@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 
 import { AppConfigService } from '../config';
+import { BatchingEmbedding } from './batching-embedding';
 import { EMBEDDING_PORT, FakeEmbedding, type EmbeddingPort } from './embedding.port';
 import { OpenAiEmbedding } from './openai-embedding';
 
@@ -8,7 +9,10 @@ import { OpenAiEmbedding } from './openai-embedding';
 export function createEmbedding(config: AppConfigService): EmbeddingPort {
   const { openaiApiKey, timeoutMs } = config.llm;
   if (openaiApiKey && config.knowledge.openaiEmbeddingHealthDataApproved) {
-    return new OpenAiEmbedding(openaiApiKey, timeoutMs);
+    // `BatchingEmbedding`: agrupa `embed()` concorrentes numa única chamada HTTP — sem
+    // isso, uma geração de protocolo sozinha estoura o rate limit da chave (ver doc do
+    // decorator).
+    return new BatchingEmbedding(new OpenAiEmbedding(openaiApiKey, timeoutMs));
   }
   if (config.isProduction) {
     throw new Error(

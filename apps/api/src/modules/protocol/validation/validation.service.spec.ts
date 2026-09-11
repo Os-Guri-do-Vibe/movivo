@@ -145,28 +145,23 @@ describe('ValidationService — bloqueios estruturais', () => {
     expect(v.violations.map((x) => x.rule)).toContain('EXERCISE_CONTRAINDICATED');
   });
 
-  it('BLOCK séries fora de faixa', () => {
-    const v = service.validate(input({ structure: withExercise({ sets: 10 }) }));
-    expect(v.violations.map((x) => x.rule)).toContain('SETS_OUT_OF_RANGE');
-  });
+  // Decisão do fundador (2026-09-04): séries, repetições, duração e descanso deixaram de
+  // ter faixa fixa aqui (nem geral, nem por objetivo, nem por exercício via catálogo) —
+  // reproduzido ao vivo um protocolo real caindo em FALLBACK_TEMPLATE por uma faixa que só
+  // fazia sentido pro "treino tradicional de academia" (ex.: bike de 5-40min bloqueada por
+  // "SETS_OUT_OF_RANGE"/"DURATION_OUT_OF_RANGE" — cardio contínuo não é sets×reps). Estes
+  // valores passam limpo agora — julgamento de carga/tempo é do Coach Agente, não da tabela.
+  it('PASS: séries/repetições/descanso fora da faixa antiga não bloqueiam mais', () => {
+    const highSets = service.validate(input({ structure: withExercise({ sets: 10 }) }));
+    expect(highSets.violations.map((x) => x.rule)).not.toContain('SETS_OUT_OF_RANGE');
 
-  it('BLOCK repetições fora de faixa (por objetivo)', () => {
-    const v = service.validate(input({ structure: withExercise({ reps: { min: 20, max: 40 } }) }));
-    expect(v.violations.map((x) => x.rule)).toContain('REPS_OUT_OF_RANGE');
-  });
+    const highReps = service.validate(
+      input({ structure: withExercise({ reps: { min: 20, max: 40 } }) }),
+    );
+    expect(highReps.violations.map((x) => x.rule)).not.toContain('REPS_OUT_OF_RANGE');
 
-  // Achado 2026-08-18: exercício de medida REPS sem o campo `reps` nem `durationSeconds`
-  // (schema permite estruturalmente, já que os dois são opcionais) — mensagem cobre o
-  // ramo "ausente" em vez de assumir que `reps` sempre existe.
-  it('BLOCK repetições ausentes num exercício de medida REPS', () => {
-    const v = service.validate(input({ structure: withExercise({ reps: undefined }) }));
-    const violation = v.violations.find((x) => x.rule === 'REPS_OUT_OF_RANGE');
-    expect(violation?.detail).toContain('ausente reps');
-  });
-
-  it('BLOCK descanso fora de faixa', () => {
-    const v = service.validate(input({ structure: withExercise({ restSeconds: 500 }) }));
-    expect(v.violations.map((x) => x.rule)).toContain('REST_OUT_OF_RANGE');
+    const longRest = service.validate(input({ structure: withExercise({ restSeconds: 500 }) }));
+    expect(longRest.violations.map((x) => x.rule)).not.toContain('REST_OUT_OF_RANGE');
   });
 
   it('BLOCK PARQ_VIOLATION: fase FORCA com flag de PAR-Q', () => {
@@ -631,6 +626,40 @@ describe('ValidationService.validateResponse — texto livre da conversa (US-3.5
       allowedExercises: ['leg_press_45_maquina'],
     });
     expect(v.action).toBe('PASS');
+  });
+
+  // Achado 2026-09-08 (bug reproduzido ao vivo pelo fundador): "Caminhada de Mala (Halter)"
+  // é um exercício DISTINTO de "Caminhada" no catálogo, mas contém o nome dele como
+  // substring. Citar o nome composto (autorizado) não pode disparar um falso positivo pro
+  // nome curto (não autorizado) que só aparece embutido nele.
+  it('substituição: nome composto autorizado não dispara falso positivo pro nome curto de outro exercício embutido nele', () => {
+    const v = service.validateResponse(
+      'Combinado! Troquei "Caminhada de Mala (Halter)" por "Esteira".',
+      { allowedExercises: ['Caminhada de Mala (Halter)', 'Esteira'] },
+    );
+    expect(v.action).toBe('PASS');
+  });
+
+  it('substituição: nome curto continua sendo BLOCK quando aparece sozinho, fora do nome composto autorizado', () => {
+    const v = service.validateResponse(
+      'Troquei por Esteira. Se preferir, também dá pra fazer uma Caminhada depois.',
+      { allowedExercises: ['Caminhada de Mala (Halter)', 'Esteira'] },
+    );
+    expect(v.action).toBe('BLOCK_FALLBACK');
+    expect(v.violations.map((x) => x.rule)).toContain('EXERCISE_NOT_ALLOWED');
+  });
+
+  // Uma entrada vazia (ou que canonicaliza pra vazio) em `allowedExercises` não pode virar
+  // máscara de tamanho zero — `split('').join(...)` inseriria um espaço entre TODO par de
+  // caracteres do texto, corrompendo a busca dos nomes não autorizados que vêm depois dela
+  // na ordenação por tamanho.
+  it('substituição: entrada autorizada vazia é ignorada na máscara, sem corromper o texto', () => {
+    const v = service.validateResponse(
+      'Troquei por Esteira. Se preferir, também dá pra fazer uma Caminhada depois.',
+      { allowedExercises: ['Caminhada de Mala (Halter)', 'Esteira', ''] },
+    );
+    expect(v.action).toBe('BLOCK_FALLBACK');
+    expect(v.violations.map((x) => x.rule)).toContain('EXERCISE_NOT_ALLOWED');
   });
 });
 

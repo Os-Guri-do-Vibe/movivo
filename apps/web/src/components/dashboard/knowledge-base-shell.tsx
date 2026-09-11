@@ -1,6 +1,14 @@
 'use client';
 
-import { AlertTriangle, BookOpenText, Files, History, ShieldCheck } from 'lucide-react';
+import {
+  AlertTriangle,
+  BookOpenText,
+  Brain,
+  Files,
+  HelpCircle,
+  History,
+  ShieldCheck,
+} from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -17,6 +25,7 @@ const BASE = '/dashboard/ia/base-conhecimento';
 const SECTIONS = [
   { href: BASE, label: 'Metodologia', icon: BookOpenText },
   { href: `${BASE}/documentos`, label: 'Documentos', icon: Files },
+  { href: `${BASE}/faq`, label: 'FAQ', icon: HelpCircle },
   { href: `${BASE}/seguranca`, label: 'Segurança', icon: ShieldCheck },
   { href: `${BASE}/historico`, label: 'Histórico', icon: History },
 ] as const;
@@ -95,14 +104,10 @@ export function KnowledgeBaseShell({ children }: { children: React.ReactNode }) 
   return (
     <div>
       <header>
-        <p className="text-xs font-semibold tracking-[0.14em] text-muted-foreground uppercase">
-          Governança da IA
-        </p>
-        <h1 className="mt-2 text-h1 font-bold text-foreground">Base de Conhecimento</h1>
-        <p className="mt-2 max-w-3xl text-body text-muted-foreground">
-          Controle a metodologia oficial, as evidências e as barreiras usadas pela IA. A publicação
-          depende de revisão humana e deixa trilha de auditoria.
-        </p>
+        <h1 className="flex items-center gap-3 text-h1 font-bold text-foreground">
+          <Brain aria-hidden="true" className="size-7 text-verde-pulso" />
+          Base de Conhecimento
+        </h1>
       </header>
 
       <SummaryStrip />
