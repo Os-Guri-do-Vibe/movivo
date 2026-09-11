@@ -16,7 +16,6 @@ const api = vi.hoisted(() => ({
   publishAgentPersona: vi.fn(),
   retireForbiddenTopic: vi.fn(),
   rollbackAgentPersona: vi.fn(),
-  simulateAgentConfig: vi.fn(),
   submitForbiddenTopic: vi.fn(),
 }));
 
@@ -137,20 +136,6 @@ beforeEach(() => {
     },
     meta,
   });
-  api.simulateAgentConfig.mockResolvedValue({
-    data: {
-      kind: 'PERSONA',
-      passed: true,
-      candidateHash: 'a'.repeat(64),
-      checks: [
-        { id: 'SCHEMA', title: 'Contrato fechado', passed: true, cases: 1, failures: [] },
-        { id: 'GOLDEN_INPUT', title: 'Golden de entrada', passed: true, cases: 14, failures: [] },
-        { id: 'GOLDEN_OUTPUT', title: 'Golden de saída', passed: true, cases: 8, failures: [] },
-        { id: 'PROMPT_INTEGRITY', title: 'Integridade L0', passed: true, cases: 9, failures: [] },
-      ],
-    },
-    meta,
-  });
 });
 
 describe('AiPersonaDashboard', () => {
@@ -163,8 +148,8 @@ describe('AiPersonaDashboard', () => {
     await user.type(name, 'NOVA');
     await user.click(screen.getByRole('button', { name: 'Jeito de falar' }));
 
-    expect(screen.getByRole('group', { name: 'Tom de voz' })).toBeVisible();
-    expect(screen.getByRole('group', { name: 'Persona e comportamento' })).toBeVisible();
+    expect(screen.getByRole('combobox', { name: 'Tom de voz' })).toBeVisible();
+    expect(screen.getByRole('combobox', { name: 'Persona e comportamento' })).toBeVisible();
     expect(screen.getByRole('switch', { name: 'Permitir listas curtas' })).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: 'Identidade' }));
@@ -184,26 +169,28 @@ describe('AiPersonaDashboard', () => {
 
     expect(screen.queryByText(/apresentação inválida/i)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Revisar e publicar' }));
-    await user.click(screen.getByRole('button', { name: 'Executar teste' }));
+    await user.click(screen.getByRole('button', { name: 'Salvar e ativar' }));
 
     await waitFor(() =>
-      expect(api.simulateAgentConfig).toHaveBeenCalledWith({
-        kind: 'PERSONA',
-        candidate: { ...DEFAULT_AGENT_PERSONA, agentSelfIntro: `“${intro}”` },
+      expect(api.publishAgentPersona).toHaveBeenCalledWith({
+        targetSex: 'FEMALE',
+        payload: { ...DEFAULT_AGENT_PERSONA, agentSelfIntro: `“${intro}”` },
+        changeNote: 'Configuração salva e ativada pelo painel.',
       }),
     );
   });
 
-  it('mostra limites travados, temas proibidos e um único link para a Base', async () => {
+  it('remove os cards de limites travados e o link para a Base, mantém temas proibidos', async () => {
     renderPersona();
     await goToStep('Limites');
 
-    expect(screen.getByText('Regras que a agente nunca quebra')).toBeVisible();
+    expect(screen.queryByText('Regras que a agente nunca quebra')).not.toBeInTheDocument();
+    expect(screen.queryByText('Perímetro: só se fala de treino')).not.toBeInTheDocument();
+    expect(screen.queryByText('Fonte de conhecimento')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Abrir Base de Conhecimento' }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Temas proibidos' })).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Abrir Base de Conhecimento' })).toHaveAttribute(
-      'href',
-      '/dashboard/ia/base-conhecimento',
-    );
     expect(screen.queryByRole('tab', { name: /Conhecimento/ })).not.toBeInTheDocument();
   });
 
@@ -230,39 +217,35 @@ describe('AiPersonaDashboard', () => {
     expect(screen.getAllByText(new RegExp(CREF_HANDOFF_SUFFIX)).length).toBeGreaterThan(0);
   });
 
-  it('simula o payload atual antes de publicar com rastreabilidade', async () => {
+  it('publica direto com a nota de alteração fixa do painel', async () => {
     const user = userEvent.setup();
     renderPersona();
     const name = await screen.findByLabelText('Nome da agente');
     await user.clear(name);
     await user.type(name, 'NOVA');
     await user.click(screen.getByRole('button', { name: 'Revisar e publicar' }));
-    await user.type(screen.getByLabelText('Motivo da alteração'), 'novo nome da agente');
 
-    expect(screen.getByRole('button', { name: 'Publicar configuração' })).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: 'Executar teste' }));
-    expect(await screen.findByText('Integridade L0')).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Publicar configuração' }));
+    await user.click(screen.getByRole('button', { name: 'Salvar e ativar' }));
 
     await waitFor(() =>
       expect(api.publishAgentPersona).toHaveBeenCalledWith({
         targetSex: 'FEMALE',
         payload: { ...DEFAULT_AGENT_PERSONA, agentName: 'NOVA' },
-        changeNote: 'novo nome da agente',
+        changeNote: 'Configuração salva e ativada pelo painel.',
       }),
     );
     expect(await screen.findByRole('status')).toHaveTextContent('60 segundos');
   });
 
-  it('nome inválido: "Executar teste" não chama o simulador', async () => {
+  it('nome inválido: "Salvar e ativar" não chama a publicação', async () => {
     const user = userEvent.setup();
     renderPersona();
     const name = await screen.findByLabelText('Nome da agente');
     await user.clear(name);
     await user.type(name, 'X');
     await user.click(screen.getByRole('button', { name: 'Revisar e publicar' }));
-    await user.click(screen.getByRole('button', { name: 'Executar teste' }));
-    expect(api.simulateAgentConfig).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Salvar e ativar' }));
+    expect(api.publishAgentPersona).not.toHaveBeenCalled();
   });
 
   it('erro conhecido da API ao publicar mostra a mensagem específica do servidor', async () => {
@@ -275,10 +258,7 @@ describe('AiPersonaDashboard', () => {
     await user.clear(name);
     await user.type(name, 'NOVA');
     await user.click(screen.getByRole('button', { name: 'Revisar e publicar' }));
-    await user.type(screen.getByLabelText('Motivo da alteração'), 'novo nome da agente');
-    await user.click(screen.getByRole('button', { name: 'Executar teste' }));
-    await screen.findByText('Integridade L0');
-    await user.click(screen.getByRole('button', { name: 'Publicar configuração' }));
+    await user.click(screen.getByRole('button', { name: 'Salvar e ativar' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('motivo da alteração inválido');
   });
@@ -291,29 +271,11 @@ describe('AiPersonaDashboard', () => {
     await user.clear(name);
     await user.type(name, 'NOVA');
     await user.click(screen.getByRole('button', { name: 'Revisar e publicar' }));
-    await user.type(screen.getByLabelText('Motivo da alteração'), 'novo nome da agente');
-    await user.click(screen.getByRole('button', { name: 'Executar teste' }));
-    await screen.findByText('Integridade L0');
-    await user.click(screen.getByRole('button', { name: 'Publicar configuração' }));
+    await user.click(screen.getByRole('button', { name: 'Salvar e ativar' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Não foi possível concluir a publicação.',
     );
-  });
-
-  it('erro ao executar o simulador mostra a mensagem de falha', async () => {
-    const user = userEvent.setup();
-    api.simulateAgentConfig.mockRejectedValueOnce(
-      new ControlCenterApiError(503, 'simulador fora do ar'),
-    );
-    renderPersona();
-    const name = await screen.findByLabelText('Nome da agente');
-    await user.clear(name);
-    await user.type(name, 'NOVA');
-    await user.click(screen.getByRole('button', { name: 'Revisar e publicar' }));
-    await user.click(screen.getByRole('button', { name: 'Executar teste' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('simulador fora do ar');
   });
 
   it('restaura uma versão antiga como nova versão auditável', async () => {
@@ -401,7 +363,6 @@ describe('AiPersonaDashboard', () => {
     renderPersona({ canWrite: false });
     expect(await screen.findByLabelText('Nome da agente')).toBeDisabled();
     await goToStep('Revisar e publicar');
-    expect(screen.getByLabelText('Motivo da alteração')).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Executar teste' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Salvar e ativar' })).toBeDisabled();
   });
 });

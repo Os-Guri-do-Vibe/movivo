@@ -343,10 +343,16 @@ describe('Coach — resposta conversacional ponta a ponta (US-3.5)', () => {
     expect(seenTo(to).some((m) => /ibuprofeno/i.test(m.text))).toBe(false);
   }, 30_000);
 
-  it('51ª msg/dia: aviso de limite SEM custo de LLM', async () => {
+  it('msg acima do teto diário: aviso de limite SEM custo de LLM', async () => {
     const { userId, to } = await seedUser();
     const day = new Date().toISOString().slice(0, 10);
-    await redis.set(keys.forUser(userId, 'llm-usage', day), '50');
+    // Achado 2026-09-11: `LLM_USER_DAILY_MESSAGE_LIMIT` subiu de 50 para 90 (achado da
+    // Sprint 11) — semeia o teto REAL do ambiente, não um literal fixo que já ficou
+    // desatualizado uma vez.
+    await redis.set(
+      keys.forUser(userId, 'llm-usage', day),
+      String(env.LLM_USER_DAILY_MESSAGE_LIMIT),
+    );
     const before = llmCalls;
     await ask(userId, 'me manda mais dicas ai');
     const msg = await waitFor(() => seenTo(to).find((m) => m.text === DAILY_LIMIT_MESSAGE));

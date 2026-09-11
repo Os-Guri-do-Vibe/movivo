@@ -1,5 +1,6 @@
 'use client';
 
+import { CircleGauge, Landmark, ServerCog } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback } from 'react';
 import type {
@@ -30,22 +31,11 @@ type Resource = 'overview' | 'system' | 'finance';
 type SummaryResponse =
   ControlCenterOverviewResponse | ControlCenterSystemResponse | ControlCenterFinanceResponse;
 
-const COPY: Record<Resource, { title: string; description: string }> = {
-  overview: {
-    title: 'Visão Geral',
-    description:
-      'Resumo operacional: indicadores do dia, receita, movimento dos últimos 30 dias e concentração de atendimento. Métricas aproximadas ou sem fonte aparecem identificadas.',
-  },
-  system: {
-    title: 'Saúde do sistema',
-    description:
-      'Disponibilidade, filas e IA com identificadores técnicos. Nenhuma identidade de aluno é exibida.',
-  },
-  finance: {
-    title: 'Financeiro',
-    description:
-      'Receita contratada, assinaturas e custos disponíveis, sem dados individuais de saúde.',
-  },
+/** Título e ícone iguais ao item da sidebar de cada rota (achado 2026-09-04). */
+const COPY: Record<Resource, { title: string; icon: typeof CircleGauge }> = {
+  overview: { title: 'Visão Geral', icon: CircleGauge },
+  system: { title: 'Saúde & Disponibilidade', icon: ServerCog },
+  finance: { title: 'Receita & Assinaturas', icon: Landmark },
 };
 
 function metricsFor(resource: Exclude<Resource, 'overview'>, response: SummaryResponse) {

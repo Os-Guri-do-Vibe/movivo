@@ -1043,7 +1043,7 @@ describe('ControlCenterService projections', () => {
     // Dia relativo a "hoje" (nunca um literal fixo): `fillDays` só mantém os últimos
     // INSIGHT_WINDOW_DAYS (30) dias a partir de `Date.now()` — uma data fixa sairia da
     // janela com a passagem do tempo e este teste ficaria vermelho sem nenhuma mudança
-    // de código (achado 2026-09-11, junto do bump de vitest para 5.0.0).
+    // de código (achado 2026-09-11).
     const yesterday = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'America/Sao_Paulo',
       year: 'numeric',

@@ -25,7 +25,7 @@ describe('ComplianceDashboard', () => {
   it('mostra os indicadores de consentimento e marca o que não tem fonte', async () => {
     getComplianceSummary.mockResolvedValue(complianceResponse);
     render(<ComplianceDashboard />);
-    expect(await screen.findByRole('heading', { name: 'Compliance e auditoria' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: 'Compliance & Privacidade' })).toBeVisible();
     expect(screen.getByLabelText('Consentimentos ativos: 40')).toBeVisible();
     expect(screen.getByLabelText('Leituras de saúde auditadas: 118')).toBeVisible();
     expect(screen.getByLabelText('Solicitações de privacidade: —')).toBeVisible();

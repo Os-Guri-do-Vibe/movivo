@@ -22,6 +22,7 @@ import { WorkerFactory } from '../jobs/worker.factory';
 import { buildProtocolPdf } from './protocol-pdf.service';
 import { ProtocolRepository } from './protocol.repository';
 import { ProtocolSubstitutionRepository } from './protocol-substitution.repository';
+import { WorkoutPresentationService } from './workout-presentation.service';
 
 /** Janela de cortesia da substituição — bem mais curta que a de geração completa (1h),
  * porque o escopo da mudança é uma troca pontual, não um protocolo inteiro novo. */
@@ -40,6 +41,7 @@ export class ProtocolSubstitutionReleaseWorker implements OnModuleInit {
     private readonly repository: ProtocolSubstitutionRepository,
     private readonly protocolRepository: ProtocolRepository,
     private readonly queueEvents: DashboardQueueEventsService,
+    private readonly workoutPresentation: WorkoutPresentationService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(ProtocolSubstitutionReleaseWorker.name);
@@ -63,6 +65,8 @@ export class ProtocolSubstitutionReleaseWorker implements OnModuleInit {
       return { status: 'SKIPPED' };
     }
 
+    let aiSummary: string | undefined;
+    let pdfPersisted = false;
     try {
       const personal = await this.protocolRepository.findLatestPersonalInfo(userId);
       if (!personal) throw new Error('anamnese submetida do titular não encontrada');
@@ -78,11 +82,33 @@ export class ProtocolSubstitutionReleaseWorker implements OnModuleInit {
         student: personal,
       });
       await this.protocolRepository.setPdfContent(userId, release.protocolId, pdf);
+      pdfPersisted = true;
+      // 2ª bolha da entrega (achado 2026-09-04): só vale a pena gerar quando o PDF saiu —
+      // sem PDF, a entrega cai no texto+link de sempre, que não usa este resumo.
+      aiSummary = await this.workoutPresentation.present({
+        userId,
+        user: { name: personal.name, phoneNumber: personal.phoneNumber, email: personal.email },
+        biologicalSex: personal.biologicalSex,
+        content: release.content,
+        totalWeeks: release.totalWeeks,
+        mesocycleName: release.mesocycleName,
+        reason: 'SUBSTITUTION',
+        substitutionFrom: release.fromExerciseName,
+        substitutionTo: release.toExerciseName,
+      });
     } catch (error) {
       this.logger.warn(
         { userId, requestId, err: error instanceof Error ? error.message : String(error) },
         'geração do PDF da substituição falhou — entrega cai para texto+link',
       );
+      // Achado 2026-09-09 (bug reportado pelo fundador): se o PDF novo nunca chegou a ser
+      // persistido, a coluna ainda guarda o PDF da versão ANTERIOR (assinatura original ou
+      // substituição prévia) — sem isto, `WhatsappOutboundWorker.buildDelivery` acharia
+      // `pdfContent` truthy e mandaria esse PDF desatualizado como se fosse o atual, em vez
+      // de cair no fallback texto+link (que já reflete `release.content`, correto).
+      if (!pdfPersisted) {
+        await this.protocolRepository.setPdfContent(userId, release.protocolId, null);
+      }
     }
 
     await this.queues.enqueue(
@@ -93,6 +119,10 @@ export class ProtocolSubstitutionReleaseWorker implements OnModuleInit {
         protocolId: release.protocolId,
         protocolVersion: release.version,
         type: 'PROTOCOL_DELIVERY',
+        text: aiSummary,
+        deliveryReason: 'SUBSTITUTION',
+        substitutionFromExercise: release.fromExerciseName,
+        substitutionToExercise: release.toExerciseName,
       },
       { jobId: `substitution-delivery_${userId}_${release.version}` },
     );

@@ -11,7 +11,6 @@ const api = vi.hoisted(() => ({
   getInviolableRules: vi.fn(),
   getForbiddenTopics: vi.fn(),
   publishAgentPersona: vi.fn(),
-  simulateAgentConfig: vi.fn(),
 }));
 
 vi.mock('@/lib/control-center-api', async (importOriginal) => ({
@@ -67,23 +66,6 @@ function FieldErrorsProbe() {
         }
       >
         invalidar dois campos de formatting
-      </button>
-    </div>
-  );
-}
-
-/** Expõe `runSimulation`/`update`/`staleFields` para provar que editar depois de simular marca o campo como obsoleto. */
-function StaleFieldsProbe() {
-  const { update, runSimulation, simulation, staleFields } = useAgentPersona();
-  return (
-    <div>
-      <p>{`simulation=${simulation ? 'ok' : 'nenhuma'}`}</p>
-      <p>{`stale=${staleFields.join(',')}`}</p>
-      <button type="button" onClick={() => void runSimulation()}>
-        simular
-      </button>
-      <button type="button" onClick={() => update({ agentSelfIntro: 'nova apresentação' })}>
-        editar depois
       </button>
     </div>
   );
@@ -183,39 +165,6 @@ describe('publish — validação também é checada no lado de dentro, não só
     await user.click(screen.getByRole('button', { name: 'publicar mesmo assim' }));
 
     await waitFor(() => expect(api.publishAgentPersona).not.toHaveBeenCalled());
-  });
-
-  it('editar um campo depois de simular com sucesso invalida o teste e marca o campo como obsoleto', async () => {
-    const user = userEvent.setup();
-    api.simulateAgentConfig.mockResolvedValue({
-      data: {
-        kind: 'PERSONA',
-        passed: true,
-        candidateHash: 'a'.repeat(64),
-        checks: [],
-      },
-      meta: {
-        generatedAt: '2026-08-21T12:00:00.000Z',
-        timezone: 'America/Sao_Paulo',
-        dataQuality: [],
-      },
-    });
-    render(
-      <AgentPersonaWorkspaceProvider canWrite canApprove={false}>
-        <AgentPersonaProvider targetSex="FEMALE">
-          <StaleFieldsProbe />
-        </AgentPersonaProvider>
-      </AgentPersonaWorkspaceProvider>,
-    );
-    await screen.findByText('simulation=nenhuma');
-
-    await user.click(screen.getByRole('button', { name: 'simular' }));
-    await screen.findByText('simulation=ok');
-
-    await user.click(screen.getByRole('button', { name: 'editar depois' }));
-
-    await screen.findByText('simulation=nenhuma');
-    await screen.findByText('stale=agentSelfIntro');
   });
 
   it('editar antes de a persona carregar não quebra: form continua vazio', async () => {

@@ -51,6 +51,12 @@ export default defineConfig({
         // exercitar os `if` de um script de missão única não prova nada que a leitura
         // do código já não prove.
         'src/scripts/reenqueue-blocked-parq.ts',
+        // Mesma categoria: scripts descartáveis de operação/diagnóstico manual (US-8.1/8.2),
+        // nunca chamados pela API em execução — ver cabeçalho de cada um.
+        'src/scripts/diagnose-protocol-fallback.ts',
+        'src/scripts/generate-workout-magic-link.ts',
+        'src/scripts/render-sample-pdf.ts',
+        'src/scripts/resend-protocol-delivery.ts',
         'src/core/database/database-health.service.ts',
         'src/core/redis/redis-health.service.ts',
         // I/O de banco sob RLS (US-2.2): mapeamento Drizzle sem ramo, provado pelo

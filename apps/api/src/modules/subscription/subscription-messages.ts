@@ -5,8 +5,8 @@
  */
 export function dunningMessage(checkoutUrl: string): string {
   return (
-    'Oi! Notei que o pagamento da sua assinatura não passou desta vez. 💛 Seu acesso segue ' +
-    'liberado por enquanto — quando puder, é só atualizar por aqui: ' +
+    'Oi! Notei que o pagamento da sua assinatura não passou desta vez. 💚 Seu acesso segue ' +
+    'liberado por enquanto, quando puder, é só atualizar por aqui: ' +
     checkoutUrl +
     '\nQualquer dúvida, me chama. Você pode cancelar quando quiser, sem burocracia.'
   );
@@ -27,14 +27,14 @@ export function conversionMessage(
   switch (touchpoint) {
     case 'day7':
       return (
-        'Uma semana treinando com a gente — você está mandando muito bem! 💪 Pra continuar com ' +
+        'Uma semana treinando com a gente, você está mandando muito bem! 💪 Pra continuar com ' +
         'seu plano montado sob a metodologia do profissional CREF, dá uma olhada nas opções de ' +
         'assinatura quando quiser. Sem compromisso: cancela quando quiser.'
       );
     case 'day10':
       return (
         '10 dias de treino! Já dá pra sentir a diferença de ter um plano feito pra você. ⏳ ' +
-        'Faltam poucos dias do seu período de experiência — se quiser seguir, tô por aqui pra ajudar.'
+        'Faltam poucos dias do seu período de experiência, se quiser seguir, tô por aqui pra ajudar.'
       );
     case 'day13':
       return (
@@ -48,7 +48,7 @@ export function conversionMessage(
       // último recurso antes de perder o usuário. Mesmo produto, período mais curto/barato.
       return (
         'Último dia do seu período de experiência! 🙌 Se o valor pesou, o plano Mensal sai por ' +
-        `R$39 — o jeito mais leve de continuar com seu plano e a ${agentName}: ` +
+        `R$39, o jeito mais leve de continuar com seu plano e a ${agentName}: ` +
         checkoutUrl +
         '\nSem fidelidade: você cancela quando quiser.'
       );
@@ -56,14 +56,14 @@ export function conversionMessage(
       // US-4.4 — win-back 3 dias pós-trial, SEM julgamento (Peak-End/Sofia): pergunta o motivo
       // e deixa a porta aberta com o plano mais barato. Sem dark pattern, saída digna.
       return (
-        'Vi que seu período de experiência terminou e você decidiu não seguir agora — tudo bem, ' +
+        'Vi que seu período de experiência terminou e você decidiu não seguir agora, tudo bem, ' +
         'sem pressão! 🙏 Só pra eu melhorar: o que faltou pra fazer sentido? (preço, tempo, ' +
         'resultado...) Se quiser voltar, o plano Mensal é R$39 e você entra quando quiser: ' +
         checkoutUrl +
         // "Valeu por treinar" no lugar de "obrigada por treinar" (Sprint 11): a mensagem é
         // assinada pela persona do titular, que pode ser masculina ou feminina, e o
         // particípio "obrigada/obrigado" travaria o gênero da agente. Mesmo tom informal.
-        '\nDe qualquer forma, valeu por treinar com a gente. 💛'
+        '\nDe qualquer forma, valeu por treinar com a gente. 💚'
       );
   }
 }

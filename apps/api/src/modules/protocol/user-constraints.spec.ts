@@ -101,6 +101,19 @@ describe('anamnese v2 → UserConstraints (US-6.9)', () => {
     expect(tags).toContain('LOWER_BACK');
   });
 
+  it('"outra região" sem detalhe cai no rótulo genérico; gatilho da dor entra no raw', () => {
+    const { raw } = painToConstraints({
+      hasPain: true,
+      trigger: 'ficar muito tempo sentado',
+      points: [{ region: 'OTHER', intensity: 4 }],
+      hasProfessionalExplanation: false,
+      underMedicalFollowUp: false,
+      hasAvoidanceRecommendation: false,
+    });
+    expect(raw.join(' ')).toContain('Dor em outra região');
+    expect(raw.join(' ')).toContain('O que provoca: ficar muito tempo sentado');
+  });
+
   it('sem dor, nenhuma contraindicação e nenhum texto de saúde é derivado', () => {
     expect(
       painToConstraints({

@@ -91,6 +91,8 @@ const EXPECTED_TABLES = [
   'workout_insights',
   'workout_sessions',
   'workout_set_entries',
+  // Renovação de mesociclo: formulário de troca de protocolo por fim de ciclo.
+  'protocol_renewal_sessions',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;

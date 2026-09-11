@@ -12,21 +12,20 @@ import { AiCoachModule } from '../ai-coach/ai-coach.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { ProtocolModule } from '../protocol/protocol.module';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
-import { WorkoutModule } from '../workout/workout.module';
 import { AIResponseWorker } from './ai-response.worker';
 import { ConversationRepository } from './conversation.repository';
+import { SubstitutionCatalogLookupService } from './substitution-catalog-lookup.service';
 import { SubstitutionResolutionService } from './substitution-resolution.service';
 import { SubstitutionTargetService } from './substitution-target.service';
-import { WorkoutReminderResolutionService } from './workout-reminder-resolution.service';
 
 @Module({
-  imports: [ProtocolModule, AiCoachModule, JobsModule, WhatsappModule, WorkoutModule],
+  imports: [ProtocolModule, AiCoachModule, JobsModule, WhatsappModule],
   providers: [
     AIResponseWorker,
     ConversationRepository,
     SubstitutionTargetService,
     SubstitutionResolutionService,
-    WorkoutReminderResolutionService,
+    SubstitutionCatalogLookupService,
   ],
 })
 export class CoachModule {}

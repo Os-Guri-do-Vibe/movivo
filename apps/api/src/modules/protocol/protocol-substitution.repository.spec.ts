@@ -7,7 +7,16 @@ import {
   protocols,
   protocolVersions,
 } from '../../core/database/schema';
+import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
 import { ProtocolSubstitutionRepository } from './protocol-substitution.repository';
+import { ValidationService } from './validation/validation.service';
+
+const CATALOG = new ExerciseCatalogProvider().getAll();
+const FLEXAO = CATALOG.find((ex) => ex.id === 'flexao');
+if (!FLEXAO) throw new Error('fixture: exercício "flexao" ausente do catálogo');
+const AGACHAMENTO_BARRA = CATALOG.find((ex) => ex.id === 'agachamento_barra');
+if (!AGACHAMENTO_BARRA)
+  throw new Error('fixture: exercício "agachamento_barra" ausente do catálogo');
 
 const content: ProtocolStructure = {
   promptVersion: 'v1',
@@ -78,7 +87,12 @@ function repositoryWith(selectResults: unknown[][]) {
     cb(tx),
   );
   const db = { runAsUser } as unknown as TenantDatabase;
-  return { repository: new ProtocolSubstitutionRepository(db), updates, inserts, runAsUser };
+  return {
+    repository: new ProtocolSubstitutionRepository(db, new ValidationService()),
+    updates,
+    inserts,
+    runAsUser,
+  };
 }
 
 const PENDING_REQUEST = {
@@ -185,7 +199,7 @@ describe('ProtocolSubstitutionRepository.createPending', () => {
       throw error;
     });
     const db = { runAsUser } as unknown as TenantDatabase;
-    const repository = new ProtocolSubstitutionRepository(db);
+    const repository = new ProtocolSubstitutionRepository(db, new ValidationService());
     const result = await repository.createPending({
       userId: 'user-1',
       protocolId: 'protocol-1',
@@ -204,5 +218,160 @@ describe('ProtocolSubstitutionRepository.createPending', () => {
       changeReason: 'teste',
     });
     expect(result).toEqual({ created: false, alreadyPending: true });
+  });
+});
+
+describe('ProtocolSubstitutionRepository.createCatalogGapPending', () => {
+  it('cria sem substituto real — toExerciseId null, catalogGap true, reviewUrgency MANDATORY', async () => {
+    const { tx, inserts } = fakeTx([]);
+    const runAsUser = vi.fn(
+      (_userId: string, _role: string, cb: (tx: unknown) => Promise<unknown>) => cb(tx),
+    );
+    const db = { runAsUser } as unknown as TenantDatabase;
+    const repository = new ProtocolSubstitutionRepository(db, new ValidationService());
+    const result = await repository.createCatalogGapPending({
+      userId: 'user-1',
+      protocolId: 'protocol-1',
+      baseVersion: 3,
+      fromExerciseId: 'flexao_diamante',
+      fromExerciseName: 'Flexão Diamante',
+      requestedExerciseName: 'supino reto máquina',
+      changeReason: 'teste',
+    });
+    expect(result).toEqual({ created: true, id: 'sub-request-1' });
+    const insert = inserts.find((i) => i.table === protocolSubstitutionRequests);
+    expect(insert?.values).toMatchObject({
+      toExerciseId: null,
+      toExerciseName: 'supino reto máquina',
+      proposedContent: null,
+      diff: null,
+      reviewUrgency: 'MANDATORY',
+      catalogGap: true,
+    });
+  });
+
+  it('corrida com uma pendência concorrente (unique violation) → alreadyPending, sem lançar', async () => {
+    const runAsUser = vi.fn(() => {
+      const error = new Error('duplicate key') as Error & { code: string };
+      error.code = '23505';
+      throw error;
+    });
+    const db = { runAsUser } as unknown as TenantDatabase;
+    const repository = new ProtocolSubstitutionRepository(db, new ValidationService());
+    const result = await repository.createCatalogGapPending({
+      userId: 'user-1',
+      protocolId: 'protocol-1',
+      baseVersion: 3,
+      fromExerciseId: 'flexao_diamante',
+      fromExerciseName: 'Flexão Diamante',
+      requestedExerciseName: 'supino reto máquina',
+      changeReason: 'teste',
+    });
+    expect(result).toEqual({ created: false, alreadyPending: true });
+  });
+});
+
+describe('ProtocolSubstitutionRepository.attachCatalogExerciseAndRelease', () => {
+  const CATALOG_GAP_REQUEST = {
+    id: 'sub-request-1',
+    protocolId: 'protocol-1',
+    userId: 'user-1',
+    status: 'PENDING',
+    catalogGap: true,
+    baseVersion: 3,
+    fromExerciseId: 'flexao_diamante',
+    fromExerciseName: 'Flexão Diamante',
+    toExerciseId: null,
+    toExerciseName: 'supino reto máquina',
+    proposedContent: null,
+    diff: null,
+    changeReason: 'teste',
+  };
+
+  const ACTIVE_PROTOCOL_FULL_ROW = {
+    id: 'protocol-1',
+    version: 3,
+    status: 'ACTIVE',
+    content,
+    constraints: { level: 'INICIANTE', location: 'HOME', equipment: [], injuryTags: [] },
+    parQFlags: [],
+    mesocycleName: 'Mesociclo 1',
+    startDate: new Date('2026-01-01'),
+    endDate: new Date('2026-02-01'),
+    totalWeeks: 4,
+  };
+
+  it('recomputa a troca contra o protocolo vivo, revalida e aplica quando a validação passa', async () => {
+    const { repository, updates, inserts } = repositoryWith([
+      [CATALOG_GAP_REQUEST],
+      [ACTIVE_PROTOCOL_FULL_ROW],
+    ]);
+    const result = await repository.attachCatalogExerciseAndRelease(
+      { userId: 'staff-1', role: 'ADMIN' },
+      'sub-request-1',
+      FLEXAO,
+    );
+    expect(result).toMatchObject({ released: true, version: 4, protocolId: 'protocol-1' });
+    const requestUpdate = updates.find(
+      (u) =>
+        u.table === protocolSubstitutionRequests &&
+        (u.values as { toExerciseId?: string }).toExerciseId,
+    );
+    expect(requestUpdate?.values).toMatchObject({
+      toExerciseId: FLEXAO.id,
+      toExerciseName: FLEXAO.name,
+    });
+    const versionInsert = inserts.find((i) => i.table === protocolVersions);
+    expect(versionInsert?.values).toMatchObject({ protocolId: 'protocol-1', version: 4 });
+    const statusUpdate = updates.find(
+      (u) => u.table === protocolSubstitutionRequests && (u.values as { status?: string }).status,
+    );
+    expect(statusUpdate?.values).toMatchObject({ status: 'RELEASED' });
+  });
+
+  it('exercício publicado quebra a validação do protocolo inteiro → VALIDATION_FAILED, nada é escrito', async () => {
+    const { repository, updates } = repositoryWith([
+      [CATALOG_GAP_REQUEST],
+      [ACTIVE_PROTOCOL_FULL_ROW],
+    ]);
+    // `agachamento_barra` exige nível INTERMEDIARIO — o protocolo fixture é INICIANTE.
+    const result = await repository.attachCatalogExerciseAndRelease(
+      { userId: 'staff-1', role: 'ADMIN' },
+      'sub-request-1',
+      AGACHAMENTO_BARRA,
+    );
+    expect(result).toMatchObject({ released: false, reason: 'VALIDATION_FAILED' });
+    if (!result.released && result.reason === 'VALIDATION_FAILED') {
+      expect(result.violations).toContain('EXERCISE_LEVEL_TOO_HIGH');
+    }
+    expect(updates).toHaveLength(0);
+  });
+
+  it('protocolo mudou de versão desde que a proposta nasceu → STALE, descarta em vez de aplicar', async () => {
+    const { repository, updates } = repositoryWith([
+      [CATALOG_GAP_REQUEST],
+      [{ ...ACTIVE_PROTOCOL_FULL_ROW, version: 5 }],
+    ]);
+    const result = await repository.attachCatalogExerciseAndRelease(
+      { userId: 'staff-1', role: 'ADMIN' },
+      'sub-request-1',
+      FLEXAO,
+    );
+    expect(result).toEqual({ released: false, reason: 'STALE' });
+    const requestUpdate = updates.find((u) => u.table === protocolSubstitutionRequests);
+    expect(requestUpdate?.values).toMatchObject({ status: 'DISCARDED' });
+  });
+
+  it('proposta não é catalogGap (ou não está PENDING) → NOT_FOUND, sem tocar nada', async () => {
+    const { repository, updates } = repositoryWith([
+      [{ ...CATALOG_GAP_REQUEST, catalogGap: false }],
+    ]);
+    const result = await repository.attachCatalogExerciseAndRelease(
+      { userId: 'staff-1', role: 'ADMIN' },
+      'sub-request-1',
+      FLEXAO,
+    );
+    expect(result).toEqual({ released: false, reason: 'NOT_FOUND' });
+    expect(updates).toHaveLength(0);
   });
 });

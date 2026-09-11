@@ -82,11 +82,10 @@ function forbiddenTopicsWith(
     return chain;
   });
 
-  const insert = vi.fn(() => ({
-    values: () => ({
-      returning: () => Promise.resolve(insertResult ? [insertResult] : []),
-    }),
+  const insertValues = vi.fn(() => ({
+    returning: () => Promise.resolve(insertResult ? [insertResult] : []),
   }));
+  const insert = vi.fn(() => ({ values: insertValues }));
 
   const tx = { execute, select, insert };
   const db = {
@@ -122,7 +121,7 @@ function forbiddenTopicsWith(
   );
 
   const service = new ForbiddenTopicAdminService(db, runtime, audit as unknown as AuditService);
-  return { service, audit, runtime, execute, select, insert, db };
+  return { service, audit, runtime, execute, select, insert, insertValues, db };
 }
 
 describe('ForbiddenTopicAdminService.list', () => {
@@ -143,9 +142,12 @@ describe('ForbiddenTopicAdminService.list', () => {
 });
 
 describe('ForbiddenTopicAdminService.propose', () => {
-  it('cria a proposta como DRAFT quando o simulador aprova', async () => {
-    const { service, audit, runtime } = forbiddenTopicsWith({
-      executeQueue: [[]], // lock
+  it('cria o tema já como APPROVED, sem aprovador (sem passo de aprovação)', async () => {
+    const { service, audit, runtime, insertValues } = forbiddenTopicsWith({
+      executeQueue: [
+        [], // lock
+        [{ active_count: 0, phrase_count: 0 }], // assertCapacity
+      ],
       selectQueue: [
         [], // current(): nenhuma proposta anterior para a chave
         [], // nextVersion(): sem versões, começa em 1
@@ -159,6 +161,9 @@ describe('ForbiddenTopicAdminService.propose', () => {
     expect(audit.append).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ action: 'forbidden_topic.propose' }),
+    );
+    expect(insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'APPROVED', approvedBy: null }),
     );
   });
 
@@ -186,10 +191,21 @@ describe('ForbiddenTopicAdminService.propose', () => {
 
   it('permite nova proposta quando a última versão da chave está RETIRED', async () => {
     const { service } = forbiddenTopicsWith({
-      executeQueue: [[]],
+      executeQueue: [
+        [], // lock
+        [{ active_count: 0, phrase_count: 0 }], // assertCapacity
+      ],
       selectQueue: [[currentRow({ status: 'RETIRED' })], [{ max: 3 }], []],
     });
     await expect(service.propose(ACTOR, VALID_BODY)).resolves.toBeDefined();
+  });
+
+  it('recusa criar ao estourar o teto de temas ativos', async () => {
+    const { service } = forbiddenTopicsWith({
+      executeQueue: [[], [{ active_count: 12, phrase_count: 0 }]],
+      selectQueue: [[]],
+    });
+    await expect(service.propose(ACTOR, VALID_BODY)).rejects.toBeInstanceOf(ConflictException);
   });
 });
 

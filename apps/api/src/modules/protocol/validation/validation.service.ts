@@ -3,8 +3,12 @@
  *
  * Com a rejeição do motor determinístico, a segurança do produto mora aqui. Duas camadas,
  * <100ms, sem I/O:
- *  1. **Estrutural** (gabarito = base de referência + constraints): todo exercício existe;
- *     nenhum contraindicado pela lesão/PAR-Q; carga/volume/descanso em faixa plausível.
+ *  1. **Estrutural** (gabarito = base de referência + constraints): todo exercício existe,
+ *     é do nível certo e não é contraindicado pela lesão/PAR-Q. Quanto treinar (séries,
+ *     repetições, duração, descanso) NÃO tem faixa fixa aqui — decisão do fundador
+ *     (2026-09-04): é julgamento do Coach Agente que gera o protocolo, não tabela de
+ *     código. Exceção: piso de RIR sob PAR-Q (`checkParq`), que é modo conservador de
+ *     segurança para quem tem alerta clínico aberto, não uma faixa de treino padrão.
  *  2. **Linguagem/compliance**: sem prescrição/diagnóstico/promessa/violação-PAR-Q/leak.
  *
  * Falha dura → `BLOCK_FALLBACK` (o Worker regenera com fallback de modelo e, persistindo,
@@ -21,14 +25,10 @@ import { isPhaseDurationWithinRange, PHASE_DURATION_WEEKS_RANGE } from '../proto
 import type { UserConstraints } from '../user-constraints';
 import { containsPromptLeak } from './prompt-injection';
 import {
-  DURATION_SECONDS_RANGE,
-  inRange,
+  ISOLATION_MAJORITY_THRESHOLD,
   LANGUAGE_RULES,
   MAX_TECHNIQUES_PER_SESSION,
   MIN_FREQUENCY_BY_SPLIT,
-  REPS_RANGE_BY_GOAL,
-  REST_SECONDS_RANGE,
-  SETS_RANGE,
   SPLITS_BY_LEVEL,
   type ValidationActionCode,
 } from './validation-rules';
@@ -121,7 +121,7 @@ export class ValidationService {
     ]);
 
     const level = input.constraints.level ?? 'INICIANTE';
-    this.checkStructure(input.structure, input.constraints.goal, level, excluded, violations);
+    this.checkStructure(input.structure, level, excluded, violations);
     this.checkMethodology(input.structure, level, input.constraints.preferredDays, violations);
     this.checkParq(input.structure, input.parqFlags ?? [], input.constraints.maxPhase, violations);
     this.checkPhaseDuration(input.structure, violations);
@@ -143,7 +143,20 @@ export class ValidationService {
     return aggregate(violations);
   }
 
-  /** Substituição: a resposta não pode empurrar um exercício da base fora do autorizado. */
+  /**
+   * Substituição: a resposta não pode empurrar um exercício da base fora do autorizado.
+   *
+   * Achado 2026-09-08 (bug reproduzido ao vivo pelo fundador): nome de exercício composto
+   * pode conter, como SUBSTRING, o nome de outro exercício distinto do catálogo — ex.:
+   * "Caminhada de Mala (Halter)" contém "Caminhada". Um scan ingênuo de substring sinalizava
+   * "Caminhada" como não autorizado mesmo quando "Caminhada de Mala (Halter)" (o texto que
+   * REALMENTE apareceu) estava no `allowedExercises` daquele turno — bloqueando respostas
+   * legítimas mesmo com o vocabulário 100% dentro do autorizado. Correção: mascara toda
+   * ocorrência de um nome AUTORIZADO no texto (do mais longo pro mais curto, pra um nome
+   * autorizado não mascarar parcialmente outro nome autorizado maior que o contém) antes de
+   * procurar por nomes NÃO autorizados no que sobrar — assim "caminhada" só é sinalizado se
+   * aparecer sozinho, fora de qualquer trecho já coberto por um nome autorizado.
+   */
   private checkAllowedExercises(
     text: string,
     allowed: readonly string[] | undefined,
@@ -154,10 +167,16 @@ export class ValidationService {
     const allowedSet = new Set(
       allowed.map((a) => canonicalizeSecurityText(a).toLocaleLowerCase('pt-BR')),
     );
+    const allowedNamesByLengthDesc = [...allowedSet].sort((a, b) => b.length - a.length);
+    let masked = lower;
+    for (const name of allowedNamesByLengthDesc) {
+      if (name.length === 0) continue;
+      masked = masked.split(name).join(' '.repeat(name.length));
+    }
     for (const ex of this.catalog.getAll()) {
       const exerciseName = canonicalizeSecurityText(ex.name).toLocaleLowerCase('pt-BR');
       if (allowedSet.has(exerciseName) || allowedSet.has(ex.id)) continue;
-      if (lower.includes(exerciseName)) {
+      if (masked.includes(exerciseName)) {
         out.push({
           rule: 'EXERCISE_NOT_ALLOWED',
           detail: `resposta cita exercício não autorizado: ${ex.id}`,
@@ -169,12 +188,10 @@ export class ValidationService {
 
   private checkStructure(
     structure: ProtocolStructure,
-    goal: ValidateProtocolInput['constraints']['goal'],
     level: ExerciseLevel,
     excluded: Set<ContraindicationTag>,
     out: ValidationViolation[],
   ): void {
-    const repsRange = REPS_RANGE_BY_GOAL[goal];
     for (const session of structure.sessions) {
       for (const ex of session.exercises) {
         const catalog = this.catalog.getById(ex.exerciseId);
@@ -203,44 +220,13 @@ export class ValidationService {
             action: 'BLOCK',
           });
         }
-        if (!inRange(ex.sets, SETS_RANGE)) {
-          out.push({
-            rule: 'SETS_OUT_OF_RANGE',
-            detail: `${ex.exerciseId}: ${ex.sets} séries`,
-            action: 'BLOCK',
-          });
-        }
-        // `measurement` (achado 2026-08-18): isométrico (prancha) e cardio contínuo/intervalado
-        // (caminhada, bike, tiros) são prescritos por TEMPO, não por reps — cada um checa a
-        // faixa do campo que de fato faz sentido pra ele, em vez de forçar reps em tudo.
-        if (catalog.measurement === 'DURATION') {
-          const durationRange = catalog.durationSecondsRange ?? DURATION_SECONDS_RANGE;
-          if (ex.durationSeconds === undefined || !inRange(ex.durationSeconds, durationRange)) {
-            out.push({
-              rule: 'DURATION_OUT_OF_RANGE',
-              detail: `${ex.exerciseId}: ${ex.durationSeconds ?? 'ausente'}s`,
-              action: 'BLOCK',
-            });
-          }
-        } else if (
-          ex.reps === undefined ||
-          !inRange(ex.reps.min, repsRange) ||
-          !inRange(ex.reps.max, repsRange)
-        ) {
-          out.push({
-            rule: 'REPS_OUT_OF_RANGE',
-            detail: `${ex.exerciseId}: ${ex.reps ? `${ex.reps.min}-${ex.reps.max}` : 'ausente'} reps`,
-            action: 'BLOCK',
-          });
-        }
-        const restFloor = catalog.minRestSeconds ?? REST_SECONDS_RANGE.min;
-        if (!inRange(ex.restSeconds, { min: restFloor, max: REST_SECONDS_RANGE.max })) {
-          out.push({
-            rule: 'REST_OUT_OF_RANGE',
-            detail: `${ex.exerciseId}: ${ex.restSeconds}s`,
-            action: 'BLOCK',
-          });
-        }
+        // Decisão do fundador (2026-09-04): séries, repetições, duração e descanso deixaram
+        // de ter faixa fixa aqui (e no catálogo). O catálogo só diz QUAL exercício é seguro
+        // prescrever (nível, contraindicação) — quanto/quanto tempo é julgamento do próprio
+        // Coach Agente que gera o protocolo, com autonomia real, não uma tabela de código.
+        // O piso de RIR sob PAR-Q (`checkParq` abaixo) continua existindo: é modo
+        // conservador de segurança para quem tem alerta clínico aberto, categoria diferente
+        // de "faixa de treino padrão para todo mundo".
       }
     }
   }
@@ -249,9 +235,10 @@ export class ValidationService {
    * Achado 2026-09-02 (correção do fundador): `phaseDurationWeeks` é quem decide
    * `total_weeks`/`end_date` do protocolo — a IA declara a duração do mesociclo dentro da
    * faixa baseada em evidência da fase escolhida (`PHASE_DURATION_WEEKS_RANGE`,
-   * `protocol-timeline.ts`). Nunca confiar só no prompt: mesmo raciocínio de defesa em
-   * profundidade de `REPS_OUT_OF_RANGE`/`DURATION_OUT_OF_RANGE` acima — um valor fora da
-   * faixa da fase é BLOCK, não um ajuste silencioso.
+   * `protocol-timeline.ts`). Nunca confiar só no prompt: um valor fora da faixa da fase é
+   * BLOCK, não um ajuste silencioso. Diferente das faixas de série/repetição/duração por
+   * exercício (removidas — ver docstring da classe), isto é duração de MESOCICLO
+   * (periodização baseada em evidência), não prescrição por exercício.
    */
   private checkPhaseDuration(structure: ProtocolStructure, out: ValidationViolation[]): void {
     if (!isPhaseDurationWithinRange(structure.phase, structure.phaseDurationWeeks)) {
@@ -328,10 +315,12 @@ export class ValidationService {
     let sessionsWithTechnique = 0;
     for (const session of structure.sessions) {
       // RT item 2: isolado é COMPLEMENTO, nunca a base da sessão. Sessão só de isolados passava.
+      // Achado 2026-09-03: o corte é por MAIORIA CLARA (ISOLATION_MAJORITY_THRESHOLD), não
+      // qualquer maioria — ver o comentário da constante em validation-rules.ts.
       const isolation = session.exercises.filter(
         (ex) => this.catalog.getById(ex.exerciseId)?.pattern === 'ISOLATION',
       ).length;
-      if (isolation > session.exercises.length - isolation) {
+      if (isolation > session.exercises.length * ISOLATION_MAJORITY_THRESHOLD) {
         out.push({
           rule: 'ISOLATION_AS_BASE',
           detail: `${session.dayLabel}: ${isolation} isolados de ${session.exercises.length} exercícios — isolado é complemento, não base`,
@@ -339,8 +328,18 @@ export class ValidationService {
         });
       }
 
+      // Achado 2026-09-03 (reproduzido ao vivo): as duas regras de técnica abaixo partem
+      // do modelo mental de treino tradicional em academia — técnica avançada (drop-set,
+      // superset etc.) como "recurso pontual" sobre uma base de séries retas. CIRCUITO é
+      // outra coisa: por definição, a sessão INTEIRA é uma sequência de exercícios
+      // encadeados sem descanso — a IA legitimamente marca `technique` (ex.: SUPERSET/
+      // DESCANSO_ATIVO) na maioria ou em todos os exercícios pra representar exatamente
+      // isso, e bloquear por "técnica em excesso"/"em todas as sessões" rejeitava um
+      // circuito válido só por não ser o formato que a regra tinha em mente. `split` já é
+      // metodologia aprovada pro nível (`SPLIT_LEVEL_NOT_ALLOWED` acima cobre isso), então
+      // não há necessidade de duplicar a barreira aqui.
       const techniques = session.exercises.filter((ex) => ex.technique);
-      if (techniques.length === 0) continue;
+      if (techniques.length === 0 || split === 'CIRCUITO') continue;
       sessionsWithTechnique++;
       if (level === 'INICIANTE') {
         out.push({
@@ -358,6 +357,7 @@ export class ValidationService {
       }
     }
     // "Não precisam aparecer em todos os treinos": com 2+ sessões, uma tem que ficar limpa.
+    // CIRCUITO não conta pro `sessionsWithTechnique` acima (loop pulado), então não dispara aqui.
     if (structure.sessions.length > 1 && sessionsWithTechnique === structure.sessions.length) {
       out.push({
         rule: 'TECHNIQUE_OVERUSE',

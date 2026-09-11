@@ -164,7 +164,7 @@ async function main() {
         humanReviewRequired: false,
       })
       .onConflictDoUpdate({
-        target: [protocols.userId, protocols.version],
+        target: [protocols.userId, protocols.mesocycleNumber, protocols.version],
         set: {
           status: 'ACTIVE',
           approvalStatus: 'AUTO_APPROVED',
@@ -245,7 +245,7 @@ async function main() {
           perceivedEffort: null,
           feedbackCipher: null,
           painReported: false,
-          painExerciseId: null,
+          painExerciseIds: [],
         },
       })
       .returning({ id: workoutSessions.id });

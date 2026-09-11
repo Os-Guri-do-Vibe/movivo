@@ -21,7 +21,7 @@ import type { LlmRouter } from '../ai-coach/llm/llm-router.service';
 import type { EvidenceGroundingService } from '../ai-coach/rag/evidence-grounding.service';
 import type { QueueManager } from '../jobs/queue-manager.service';
 import type { WorkerFactory } from '../jobs/worker.factory';
-import { findSafeCandidates } from '../protocol/exercise-substitution';
+import { findSafeCandidates, SUBSTITUTION_BATCH_SIZE } from '../protocol/exercise-substitution';
 import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
 import type { ActiveProtocolForSubstitution } from '../protocol/protocol-substitution.repository';
 import { ValidationService } from '../protocol/validation/validation.service';
@@ -35,6 +35,7 @@ import {
   SAFETY_HANDOFF_MESSAGE,
   STANDARD_BLOCK_RESPONSE,
   SUBSTITUTION_ALREADY_PENDING_MESSAGE,
+  SUBSTITUTION_CATALOG_GAP_MESSAGE,
   SUBSTITUTION_FALLBACK_MESSAGE,
   SUBSTITUTION_NOT_SAFE_TO_APPLY_MESSAGE,
   TECHNICAL_NO_EVIDENCE_MESSAGE,
@@ -54,6 +55,39 @@ const FLEXAO_CANDIDATE = findSafeCandidates(
   EXERCISE_CATALOG,
 )[0];
 if (!FLEXAO_CANDIDATE) throw new Error('fixture: nenhum candidato seguro para "flexao" em HOME');
+
+/**
+ * Fixture do bug reproduzido ao vivo (achado 2026-09-08): em `FULL_GYM`, a lista CURADA de
+ * `caminhada_de_mala_halter` enche o 1º LOTE de exibição (`SUBSTITUTION_BATCH_SIZE`) sem
+ * incluir "Esteira" — que só aparece mais adiante na curadoria completa (mesmo padrão
+ * `CARDIO`, sem contraindicação). Achado 2026-09-09: a curadoria em si (`findSafeCandidates`)
+ * deixou de ter teto — "capado" agora é só o 1º lote, fatiado pelo worker. Nunca hardcoded: os
+ * dois asserts abaixo travam a fixture nesse estado exato caso o catálogo mude.
+ */
+const CAMALA_LOOKUP = EXERCISE_CATALOG.find((ex) => ex.id === 'caminhada_de_mala_halter');
+if (!CAMALA_LOOKUP)
+  throw new Error('fixture: exercício "caminhada_de_mala_halter" ausente do catálogo');
+const CAMALA = CAMALA_LOOKUP;
+const CAMALA_CONSTRAINTS = {
+  level: 'INICIANTE' as const,
+  location: 'FULL_GYM' as const,
+  equipment: [],
+  injuryTags: [],
+};
+const ESTEIRA_LOOKUP = EXERCISE_CATALOG.find((ex) => ex.id === 'esteira');
+if (!ESTEIRA_LOOKUP) throw new Error('fixture: exercício "esteira" ausente do catálogo');
+const ESTEIRA = ESTEIRA_LOOKUP;
+const CAMALA_FULL_CURATION = findSafeCandidates(CAMALA, CAMALA_CONSTRAINTS, EXERCISE_CATALOG);
+if (CAMALA_FULL_CURATION.slice(0, SUBSTITUTION_BATCH_SIZE).some((c) => c.id === ESTEIRA.id)) {
+  throw new Error(
+    'fixture desatualizada: "esteira" já está no 1º lote de caminhada_de_mala_halter',
+  );
+}
+if (!CAMALA_FULL_CURATION.some((c) => c.id === ESTEIRA.id)) {
+  throw new Error(
+    'fixture: "esteira" precisa ser um candidato seguro (curadoria completa) de caminhada_de_mala_halter',
+  );
+}
 
 const DEFAULT_ACTIVE_PROTOCOL: ActiveProtocolForSubstitution = {
   protocolId: 'proto1',
@@ -125,14 +159,23 @@ interface Deps {
   activeProtocol?: ActiveProtocolForSubstitution | null;
   substitutionHasPending?: boolean;
   /** Confirmação de um candidato — default: nada resolvido, cai pra (re)oferta. */
-  substitutionResolved?: { resolved: true; chosenExerciseId: string } | { resolved: false };
+  substitutionResolved?:
+    { resolved: true; chosenExerciseId: string } | { resolved: false; rejectedAll?: boolean };
+  /** Pedido explícito de substituto NA MESMA mensagem (turno 1) — default: nada resolvido. */
+  substitutionExplicitRequest?: { resolved: true; chosenExerciseId: string } | { resolved: false };
   /** Identificação do alvo — default: identifica "flexao" (o único do fixture). */
   substitutionTargetIdentified?: { identified: true; exerciseId: string } | { identified: false };
   substitutionCreateResult?:
     { created: true; id: string } | { created: false; alreadyPending: true };
-  reminderResolution?:
-    | { resolved: true; time: string; model: string; latencyMs: number }
-    | { resolved: false; model: string | null; latencyMs: number };
+  /** Achado 2026-09-09 — pedido de exercício fora da curadoria elegível. Default: nada
+   * específico pedido (cai no fluxo de lote normal). */
+  substitutionCatalogLookupResult?:
+    | { requestedName: null; matchedExerciseId: null }
+    | { requestedName: string; matchedExerciseId: string | null };
+  substitutionCreateCatalogGapResult?:
+    { created: true; id: string } | { created: false; alreadyPending: true };
+  /** Offset já salvo em Redis pro lote de apresentação (achado 2026-09-09) — default: 0. */
+  substitutionBatchOffset?: number;
 }
 
 function makeWorker(deps: Deps = {}) {
@@ -256,6 +299,9 @@ function makeWorker(deps: Deps = {}) {
   const substitutionCreatePending = vi.fn((_input: unknown) =>
     Promise.resolve(deps.substitutionCreateResult ?? { created: true, id: 'sub1' }),
   );
+  const substitutionCreateCatalogGapPending = vi.fn((_input: unknown) =>
+    Promise.resolve(deps.substitutionCreateCatalogGapResult ?? { created: true, id: 'catgap1' }),
+  );
   const substitutionRepo = {
     loadActiveProtocol: vi.fn(() =>
       Promise.resolve(
@@ -264,12 +310,26 @@ function makeWorker(deps: Deps = {}) {
     ),
     hasPending: substitutionHasPending,
     createPending: substitutionCreatePending,
+    createCatalogGapPending: substitutionCreateCatalogGapPending,
   } as never;
 
   const substitutionResolve = vi.fn(() =>
     Promise.resolve(deps.substitutionResolved ?? { resolved: false }),
   );
-  const substitutionResolution = { resolve: substitutionResolve } as never;
+  const substitutionResolveExplicit = vi.fn(() =>
+    Promise.resolve(deps.substitutionExplicitRequest ?? { resolved: false }),
+  );
+  const substitutionResolution = {
+    resolve: substitutionResolve,
+    resolveExplicitRequest: substitutionResolveExplicit,
+  } as never;
+
+  const substitutionCatalogLookupIdentify = vi.fn(() =>
+    Promise.resolve(
+      deps.substitutionCatalogLookupResult ?? { requestedName: null, matchedExerciseId: null },
+    ),
+  );
+  const substitutionCatalogLookup = { identify: substitutionCatalogLookupIdentify } as never;
 
   const substitutionIdentify = vi.fn(() =>
     Promise.resolve(
@@ -277,18 +337,6 @@ function makeWorker(deps: Deps = {}) {
     ),
   );
   const substitutionTarget = { identify: substitutionIdentify } as never;
-
-  const reminderResolve = vi.fn(() =>
-    Promise.resolve(
-      deps.reminderResolution ?? {
-        resolved: true as const,
-        time: '16:00',
-        model: 'deepseek-v4-pro',
-        latencyMs: 12,
-      },
-    ),
-  );
-  const workoutPreferences = vi.fn(() => Promise.resolve());
 
   const queueEventsEmit = vi.fn();
   const queueEvents = { emit: queueEventsEmit } as never;
@@ -313,8 +361,26 @@ function makeWorker(deps: Deps = {}) {
     },
     exec: batchExec,
   };
+  // Achado 2026-09-09: offset do lote de apresentação em Redis, por (aluno, alvo) — chave
+  // constante no mock (`keys.forUser` sempre devolve 'bk'), então um Map simples basta.
+  const redisData = new Map<string, string>();
+  if (deps.substitutionBatchOffset !== undefined) {
+    redisData.set('bk', String(deps.substitutionBatchOffset));
+  }
+  const redisGet = vi.fn((key: string) => Promise.resolve(redisData.get(key) ?? null));
+  const redisSet = vi.fn((key: string, value: string) => {
+    redisData.set(key, value);
+    return Promise.resolve('OK');
+  });
+  const redisDel = vi.fn((key: string) => {
+    const existed = redisData.delete(key);
+    return Promise.resolve(existed ? 1 : 0);
+  });
   const redis = {
     multi: vi.fn(() => batchTransaction),
+    get: redisGet,
+    set: redisSet,
+    del: redisDel,
   } as unknown as Redis;
   const keys = { forUser: vi.fn(() => 'bk') };
 
@@ -350,8 +416,7 @@ function makeWorker(deps: Deps = {}) {
     substitutionRepo,
     substitutionTarget,
     substitutionResolution,
-    { resolve: reminderResolve } as never,
-    { preferences: workoutPreferences } as never,
+    substitutionCatalogLookup,
     queueEvents,
     redis,
     keys as never,
@@ -380,11 +445,15 @@ function makeWorker(deps: Deps = {}) {
     grounding,
     substitutionHasPending,
     substitutionCreatePending,
+    substitutionCreateCatalogGapPending,
     substitutionResolve,
+    substitutionResolveExplicit,
     substitutionIdentify,
-    reminderResolve,
-    workoutPreferences,
+    substitutionCatalogLookupIdentify,
     queueEventsEmit,
+    redisGet,
+    redisSet,
+    redisDel,
   };
 }
 
@@ -437,39 +506,6 @@ describe('AIResponseWorker.process (US-3.5)', () => {
 
     expect(batchLrange).toHaveBeenCalledWith('bk', 0, -1);
     expect(batchLrange).not.toHaveBeenCalledWith(forged.data.batchKey, 0, -1);
-  });
-
-  it('usa a IA para entender um pedido natural e salva o novo horario do link', async () => {
-    const { worker, enqueue, reminderResolve, workoutPreferences, complete } = makeWorker({
-      intent: 'AJUSTE_LEMBRETE_TREINO',
-      batchItems: [JSON.stringify({ text: 'beleza, me manda o link as 16h' })],
-      reminderResolution: {
-        resolved: true,
-        time: '16:00',
-        model: 'deepseek-v4-pro',
-        latencyMs: 12,
-      },
-    });
-
-    await expect(worker.process(job())).resolves.toEqual({ status: 'SENT' });
-    expect(reminderResolve).toHaveBeenCalledWith(
-      expect.objectContaining({ message: 'beleza, me manda o link as 16h' }),
-    );
-    expect(workoutPreferences).toHaveBeenCalledWith('u1', { reminderTime: '16:00' });
-    expect(sentText(enqueue)).toContain('16:00');
-    expect(complete).not.toHaveBeenCalled();
-  });
-
-  it('pede esclarecimento e nao altera o cadastro quando a IA nao resolve o horario', async () => {
-    const { worker, enqueue, workoutPreferences } = makeWorker({
-      intent: 'AJUSTE_LEMBRETE_TREINO',
-      batchItems: [JSON.stringify({ text: 'me manda o link mais tarde' })],
-      reminderResolution: { resolved: false, model: 'deepseek-v4-pro', latencyMs: 12 },
-    });
-
-    await expect(worker.process(job())).resolves.toEqual({ status: 'SENT' });
-    expect(workoutPreferences).not.toHaveBeenCalled();
-    expect(sentText(enqueue)).toContain('Qual horario');
   });
 
   it('fora de escopo: recusa honesta SEM chamar o LLM', async () => {
@@ -619,6 +655,79 @@ describe('AIResponseWorker.process (US-3.5)', () => {
       expect(substitutionCreatePending).not.toHaveBeenCalled(); // nada persistido no turno 1
     });
 
+    // Achado 2026-09-08 (bug reproduzido ao vivo pelo fundador): "posso trocar [X] por
+    // esteira normal?" nomeia o substituto na MESMA mensagem que pede a troca. Antes desta
+    // correção, `findSafeCandidates` capado nunca incluía "Esteira" (a lista curada de
+    // "Caminhada de Mala" já enche o teto com 3 outras opções), a resposta do LLM citava
+    // "esteira" de volta pro aluno, o `ValidationService` bloqueava por
+    // `EXERCISE_NOT_ALLOWED` e a troca nunca chegava na fila de substituição — só um alerta
+    // genérico (`VALIDATOR_BLOCK`) sem contexto nenhum.
+    it('turno 1 — aluno já nomeia o substituto na mesma mensagem: resolve e persiste direto, sem passar pelo bloqueio do validador', async () => {
+      const activeProtocol: ActiveProtocolForSubstitution = {
+        ...DEFAULT_ACTIVE_PROTOCOL,
+        content: {
+          ...DEFAULT_ACTIVE_PROTOCOL.content,
+          sessions: [
+            {
+              dayLabel: 'Dia A',
+              focus: 'Cardio',
+              exercises: [
+                {
+                  exerciseId: CAMALA.id,
+                  name: CAMALA.name,
+                  sets: 1,
+                  reps: { min: 1, max: 1 },
+                  loadStrategy: 'BODYWEIGHT',
+                  restSeconds: 0,
+                },
+              ],
+            },
+          ],
+        } as never,
+        constraints: CAMALA_CONSTRAINTS,
+      };
+      const {
+        worker,
+        complete,
+        enqueue,
+        substitutionCreatePending,
+        substitutionResolve,
+        persistHandoff,
+      } = makeWorker({
+        intent: 'SUBSTITUICAO_EXERCICIO',
+        activeProtocol,
+        substitutionTargetIdentified: { identified: true, exerciseId: CAMALA.id },
+        substitutionExplicitRequest: { resolved: true, chosenExerciseId: ESTEIRA.id },
+        llmText: `Combinado! Troquei "${CAMALA.name}" por "${ESTEIRA.name}".`,
+        batchItems: [
+          JSON.stringify({
+            text: 'Muito obrigado, mas, não gostei do Caminhada do Mala, posso trocar por esteira normal?',
+          }),
+        ],
+      });
+      const res = await worker.process(job());
+      expect(res.status).toBe('SENT');
+      expect(substitutionCreatePending).toHaveBeenCalledOnce();
+      const created = substitutionCreatePending.mock.calls[0]?.[0] as {
+        fromExerciseId: string;
+        toExerciseId: string;
+      };
+      expect(created.fromExerciseId).toBe(CAMALA.id);
+      expect(created.toExerciseId).toBe(ESTEIRA.id);
+      const system = complete.mock.calls[0]?.[0]?.system ?? '';
+      expect(system).toContain('CONFIRMADA');
+      expect(system).toContain(ESTEIRA.name); // agora está no allowedExercises — não bloqueia
+      expect(sentText(enqueue)).not.toBe(STANDARD_BLOCK_RESPONSE);
+      expect(persistHandoff).not.toHaveBeenCalledWith(
+        expect.anything(),
+        'ALERT',
+        'VALIDATOR_BLOCK',
+      );
+      // Turno 2 (`resolve`, contra a lista já capada e oferecida) nem chega a rodar — o
+      // pedido explícito já resolveu tudo no turno 1.
+      expect(substitutionResolve).not.toHaveBeenCalled();
+    });
+
     it('turno 1 — sem alvo identificável, pergunta qual exercício sem oferecer nada', async () => {
       const { worker, complete } = makeWorker({
         intent: 'SUBSTITUICAO_EXERCICIO',
@@ -733,18 +842,210 @@ describe('AIResponseWorker.process (US-3.5)', () => {
       expect(system).toContain('OPÇÕES SEGURAS DA BASE'); // reofereceu, não inventou a troca
     });
 
+    // Achado 2026-09-09 (pedido do fundador, "supino reto máquina"): o aluno insiste num
+    // exercício que não existe em NENHUM lugar do catálogo. Antes disso (achado 2026-09-08),
+    // caía num caminho generativo livre e a IA chegava a dizer "vou registrar/encaminhar pro
+    // profissional" sem que NENHUM registro real fosse criado. Agora vira uma proposta REAL
+    // em `protocol_substitution_requests` (Revisão Obrigatória, `catalogGap: true`), visível
+    // na Fila do Profissional de verdade — resposta FIXA, sem LLM.
+    it('aluno pede exercício que não existe no catálogo: cria proposta catalogGap MANDATORY, sem LLM', async () => {
+      const { worker, complete, enqueue, substitutionCreateCatalogGapPending, queueEventsEmit } =
+        makeWorker({
+          intent: 'SUBSTITUICAO_EXERCICIO',
+          batchItems: [JSON.stringify({ text: 'Nenhuma, queria o supino reto na máquina mesmo' })],
+          substitutionResolved: { resolved: false, rejectedAll: true },
+          substitutionCatalogLookupResult: {
+            requestedName: 'supino reto na máquina',
+            matchedExerciseId: null,
+          },
+        });
+      const res = await worker.process(job());
+      expect(res.status).toBe('SENT');
+      expect(complete).not.toHaveBeenCalled(); // resposta fixa, não gerada
+      expect(substitutionCreateCatalogGapPending).toHaveBeenCalledOnce();
+      const created = substitutionCreateCatalogGapPending.mock.calls[0]?.[0] as {
+        fromExerciseId: string;
+        requestedExerciseName: string;
+      };
+      expect(created.fromExerciseId).toBe(FLEXAO.id);
+      expect(created.requestedExerciseName).toBe('supino reto na máquina');
+      expect(sentText(enqueue)).toBe(SUBSTITUTION_CATALOG_GAP_MESSAGE);
+      expect(queueEventsEmit).toHaveBeenCalledWith('protocol');
+    });
+
+    // Achado 2026-09-09 (bug reportado pelo fundador, conversa real: "Supino Reto (Máquina)"
+    // → "Remada Curvada" foi registrado como Revisão Obrigatória, como se fosse uma dúvida
+    // clínica legítima — a IA chegou a sugerir depois um exercício de OUTRO grupo muscular
+    // como alternativa). `agachamento_barra` (SQUAT, pernas) não tem nexo fisiológico nenhum
+    // como substituto de "flexao" (HORIZONTAL_PUSH, peito) — a IA agora orienta na hora, sem
+    // criar NENHUMA pendência na fila do profissional, e reoferece a curadoria segura real.
+    it('aluno pede exercício que existe no catálogo mas não tem nexo fisiológico (grupo muscular/padrão diferente): orienta na hora, sem registrar na fila', async () => {
+      const { worker, complete, enqueue, substitutionCreatePending, redisDel } = makeWorker({
+        intent: 'SUBSTITUICAO_EXERCICIO',
+        batchItems: [JSON.stringify({ text: 'Nenhuma, quero o agachamento com barra mesmo' })],
+        substitutionResolved: { resolved: false, rejectedAll: true },
+        substitutionCatalogLookupResult: {
+          requestedName: 'agachamento com barra',
+          matchedExerciseId: 'agachamento_barra',
+        },
+      });
+      const res = await worker.process(job());
+      expect(res.status).toBe('SENT');
+      expect(substitutionCreatePending).not.toHaveBeenCalled(); // nada registrado na fila
+      const system = complete.mock.calls[0]?.[0]?.system ?? '';
+      expect(system).toContain('não é possível');
+      expect(system).toContain('Agachamento (Barra)');
+      expect(system).toContain('OPÇÕES SEGURAS DA BASE');
+      expect(system).toContain(FLEXAO_CANDIDATE.name);
+      expect(sentText(enqueue)).not.toBe(SUBSTITUTION_NOT_SAFE_TO_APPLY_MESSAGE);
+      expect(redisDel).toHaveBeenCalled(); // limpa o offset do lote deste alvo
+    });
+
+    // Contraste do teste acima: `supino_sentado_maquina` É plausível pra "flexao" (mesmo
+    // padrão HORIZONTAL_PUSH, mesmo grupo muscular "peito") — só não é elegível pra ESTE
+    // aluno porque exige `FULL_GYM` e o protocolo dele é `HOME`. Essa É uma dúvida clínica
+    // real (pode fazer sentido liberar se as condições do aluno mudarem) — continua indo
+    // pra Revisão Obrigatória de verdade (`reviewUrgency: MANDATORY`), sem auto-liberação e
+    // sem a IA dizer "confirmada" antes da revisão real.
+    it('aluno pede exercício plausível (mesmo padrão/grupo muscular) mas inelegível por local: persiste MANDATORY, sem auto-liberação, sem "confirmada"', async () => {
+      const { worker, complete, enqueue, substitutionCreatePending, redisDel } = makeWorker({
+        intent: 'SUBSTITUICAO_EXERCICIO',
+        batchItems: [JSON.stringify({ text: 'Nenhuma, quero o supino sentado na máquina mesmo' })],
+        substitutionResolved: { resolved: false, rejectedAll: true },
+        substitutionCatalogLookupResult: {
+          requestedName: 'supino sentado na máquina',
+          matchedExerciseId: 'supino_sentado_maquina',
+        },
+      });
+      const res = await worker.process(job());
+      expect(res.status).toBe('SENT');
+      expect(complete).not.toHaveBeenCalled(); // resposta fixa, não gerada
+      expect(substitutionCreatePending).toHaveBeenCalledOnce();
+      const created = substitutionCreatePending.mock.calls[0]?.[0] as {
+        toExerciseId: string;
+        reviewUrgency: string;
+      };
+      expect(created.toExerciseId).toBe('supino_sentado_maquina');
+      expect(created.reviewUrgency).toBe('MANDATORY');
+      expect(sentText(enqueue)).toBe(SUBSTITUTION_NOT_SAFE_TO_APPLY_MESSAGE);
+      expect(redisDel).toHaveBeenCalled(); // limpa o offset do lote deste alvo
+    });
+
+    // Achado 2026-09-09 (pedido do fundador): "curadoria ilimitada, apresentação em blocos de
+    // 3" — se ainda há candidatos elegíveis não apresentados, uma rejeição explícita avança
+    // pro PRÓXIMO lote (não cai direto no fallback genérico).
+    it('lote rejeitado com mais candidatos elegíveis disponíveis: oferece o PRÓXIMO lote de 3', async () => {
+      const activeProtocol: ActiveProtocolForSubstitution = {
+        ...DEFAULT_ACTIVE_PROTOCOL,
+        content: {
+          ...DEFAULT_ACTIVE_PROTOCOL.content,
+          sessions: [
+            {
+              dayLabel: 'Dia A',
+              focus: 'Cardio',
+              exercises: [
+                {
+                  exerciseId: CAMALA.id,
+                  name: CAMALA.name,
+                  sets: 1,
+                  reps: { min: 1, max: 1 },
+                  loadStrategy: 'BODYWEIGHT',
+                  restSeconds: 0,
+                },
+              ],
+            },
+          ],
+        } as never,
+        constraints: CAMALA_CONSTRAINTS,
+      };
+      const { worker, complete, redisSet } = makeWorker({
+        intent: 'SUBSTITUICAO_EXERCICIO',
+        activeProtocol,
+        substitutionTargetIdentified: { identified: true, exerciseId: CAMALA.id },
+        substitutionResolved: { resolved: false, rejectedAll: true },
+        substitutionBatchOffset: 0,
+      });
+      await worker.process(job());
+      const system = complete.mock.calls[0]?.[0]?.system ?? '';
+      // O 2º lote (offset 3) nomeia candidatos que NÃO estavam no 1º lote (offset 0..2).
+      const firstBatchNames = CAMALA_FULL_CURATION.slice(0, SUBSTITUTION_BATCH_SIZE).map(
+        (c) => c.name,
+      );
+      const secondBatchNames = CAMALA_FULL_CURATION.slice(
+        SUBSTITUTION_BATCH_SIZE,
+        SUBSTITUTION_BATCH_SIZE * 2,
+      ).map((c) => c.name);
+      expect(system).toContain('OPÇÕES SEGURAS DA BASE');
+      for (const name of secondBatchNames) expect(system).toContain(name);
+      for (const name of firstBatchNames) expect(system).not.toContain(name);
+      expect(redisSet).toHaveBeenCalledWith(
+        'bk',
+        String(SUBSTITUTION_BATCH_SIZE),
+        'EX',
+        expect.any(Number),
+      );
+    });
+
+    // Achado 2026-09-09: quando a curadoria inteira já foi oferecida (nenhum lote sobrando) e
+    // o aluno ainda não escolheu nem pediu nada específico, cai no fallback honesto de sempre
+    // — não fica repetindo o último lote pra sempre.
+    it('lote rejeitado e curadoria esgotada: cai no fallback honesto, sem LLM', async () => {
+      const activeProtocol: ActiveProtocolForSubstitution = {
+        ...DEFAULT_ACTIVE_PROTOCOL,
+        content: {
+          ...DEFAULT_ACTIVE_PROTOCOL.content,
+          sessions: [
+            {
+              dayLabel: 'Dia A',
+              focus: 'Cardio',
+              exercises: [
+                {
+                  exerciseId: CAMALA.id,
+                  name: CAMALA.name,
+                  sets: 1,
+                  reps: { min: 1, max: 1 },
+                  loadStrategy: 'BODYWEIGHT',
+                  restSeconds: 0,
+                },
+              ],
+            },
+          ],
+        } as never,
+        constraints: CAMALA_CONSTRAINTS,
+      };
+      const lastOffset =
+        Math.floor((CAMALA_FULL_CURATION.length - 1) / SUBSTITUTION_BATCH_SIZE) *
+        SUBSTITUTION_BATCH_SIZE;
+      const { worker, complete, enqueue, redisDel } = makeWorker({
+        intent: 'SUBSTITUICAO_EXERCICIO',
+        activeProtocol,
+        substitutionTargetIdentified: { identified: true, exerciseId: CAMALA.id },
+        substitutionResolved: { resolved: false, rejectedAll: true },
+        substitutionBatchOffset: lastOffset,
+      });
+      const res = await worker.process(job());
+      expect(res.status).toBe('SENT');
+      expect(complete).not.toHaveBeenCalled();
+      expect(sentText(enqueue)).toBe(SUBSTITUTION_FALLBACK_MESSAGE);
+      expect(redisDel).toHaveBeenCalled();
+    });
+
     it('troca confirmada que quebraria a validação do protocolo inteiro não é aplicada sozinha', async () => {
       const { worker, complete, enqueue, substitutionCreatePending } = makeWorker({
         intent: 'SUBSTITUICAO_EXERCICIO',
         substitutionResolved: { resolved: true, chosenExerciseId: FLEXAO_CANDIDATE.id },
-        // `goal` ausente do jeito que o `ValidationService` precisa faz `checkStructure`
-        // acusar reps fora de faixa pra qualquer objetivo — força BLOCK determinístico.
+        // Decisão do fundador (2026-09-04): faixa de reps por objetivo não bloqueia mais
+        // (removida do `ValidationService` — ver validation-rules.ts). Força BLOCK
+        // determinístico por outra regra que continua existindo: duração de mesociclo
+        // fora da faixa de evidência da fase (`PHASE_DURATION_OUT_OF_RANGE`), sem relação
+        // nenhuma com o exercício sendo trocado — o que importa aqui é só provar que UM
+        // BLOCK qualquer no protocolo inteiro impede a troca de ser aplicada sozinha.
         activeProtocol: {
           ...DEFAULT_ACTIVE_PROTOCOL,
-          validationConstraints: {
-            ...DEFAULT_ACTIVE_PROTOCOL.validationConstraints,
-            goal: 'GAIN_STRENGTH', // faixa 3-10 reps; o fixture usa 8-12 → REPS_OUT_OF_RANGE
-          },
+          content: {
+            ...DEFAULT_ACTIVE_PROTOCOL.content,
+            phaseDurationWeeks: 1, // ADAPTACAO exige 2-4 semanas
+          } as never,
         },
       });
       await worker.process(job());

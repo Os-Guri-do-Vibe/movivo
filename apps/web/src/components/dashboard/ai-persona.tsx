@@ -7,24 +7,10 @@ import {
   AgentPersonaTrait,
   AgentToneDescriptor,
   CREF_HANDOFF_SUFFIX,
-  buildHumanHandoffMessage,
   type AgentPersona,
   type ForbiddenTopicVersion,
 } from '@movivo/shared';
-import {
-  AlertTriangle,
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  CheckCircle2,
-  Circle,
-  Database,
-  Lock,
-  Send,
-  ShieldCheck,
-  XCircle,
-} from 'lucide-react';
-import Link from 'next/link';
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, Lock, Send, ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -36,6 +22,8 @@ import {
   submitForbiddenTopic,
 } from '@/lib/control-center-api';
 import { cn } from '@/lib/utils';
+
+import { MultiComboboxField } from './fields';
 
 import {
   BLOCK_SIZE_LABEL,
@@ -82,6 +70,8 @@ const TONE_LABEL: Record<AgentPersona['toneDescriptors'][number], string> = {
 
 const TONES = Object.values(AgentToneDescriptor);
 const TRAITS = Object.values(AgentPersonaTrait);
+const TONE_OPTIONS = TONES.map((value) => ({ value, label: TONE_LABEL[value] }));
+const TRAIT_OPTIONS = TRAITS.map((value) => ({ value, label: PERSONA_TRAIT_LABEL[value] }));
 
 const STEP_DESCRIPTION: Record<PersonaStepId, string> = {
   identidade: 'Defina o nome e a apresentação usada nas conversas.',
@@ -114,82 +104,6 @@ function topicKey(label: string): string {
     .replace(/[^a-z0-9]+/gu, '-')
     .replace(/^-|-$/gu, '')
     .slice(0, 60);
-}
-
-function voicePreview(persona: AgentPersona): string {
-  const emoji = persona.emojiPolicy === 'NENHUM' ? '' : ' 💚';
-  const nextStep = persona.formatting.boldPolicy === 'NENHUM' ? 'próximo passo' : '*próximo passo*';
-  const opening = persona.personaTraits.includes('ACOLHE_ANTES_DE_ORIENTAR')
-    ? `Entendi — vamos ajustar isso com calma${emoji}`
-    : `Vamos direto ao que ajuda agora${emoji}`;
-  if (persona.formatting.blockSize === 'CURTO') return `${opening}. Foque no ${nextStep}.`;
-  if (persona.formatting.allowLists) {
-    return `${opening}.\n\n- Revise sua posição\n- Faça uma repetição controlada\n- Conte como se sentiu`;
-  }
-  return `${opening}. Primeiro, revise sua posição e faça uma repetição controlada.\n\nDepois, me conte como se sentiu para definirmos o ${nextStep}.`;
-}
-
-function ToggleCards<T extends string>({
-  legend,
-  values,
-  selected,
-  max,
-  label,
-  disabled,
-  invalid = false,
-  errorId,
-  onChange,
-}: {
-  legend: string;
-  values: readonly T[];
-  selected: readonly T[];
-  max: number;
-  label: (value: T) => string;
-  disabled: boolean;
-  invalid?: boolean;
-  errorId?: string;
-  onChange: (values: T[]) => void;
-}) {
-  return (
-    <fieldset
-      disabled={disabled}
-      aria-invalid={invalid || undefined}
-      aria-describedby={invalid ? errorId : undefined}
-      tabIndex={invalid ? -1 : undefined}
-    >
-      <legend className="text-label font-semibold">{legend}</legend>
-      <p className="mt-1 text-xs text-muted-foreground">Escolha de 1 a {max} opções.</p>
-      <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {values.map((value) => {
-          const checked = selected.includes(value);
-          const blocked = !checked && selected.length >= max;
-          return (
-            <label
-              key={value}
-              className={cn(
-                'flex min-h-11 items-center gap-2 rounded-lg border px-3 py-2 text-label',
-                'has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring',
-                checked ? 'border-verde-pulso bg-accent' : 'border-border bg-card',
-                (disabled || blocked) && 'cursor-not-allowed opacity-60',
-              )}
-            >
-              <input
-                type="checkbox"
-                checked={checked}
-                disabled={disabled || blocked}
-                onChange={() =>
-                  onChange(
-                    checked ? selected.filter((item) => item !== value) : [...selected, value],
-                  )
-                }
-              />
-              {label(value)}
-            </label>
-          );
-        })}
-      </div>
-    </fieldset>
-  );
 }
 
 export function AiPersonaDashboard() {
@@ -278,7 +192,7 @@ export function AiPersonaDashboard() {
         aria-label="Etapas da configuração"
         className="overflow-x-auto border-y border-border px-5"
       >
-        <ol className="flex min-w-max items-center gap-2 py-4">
+        <ol className="flex min-w-max items-center justify-center gap-2 py-4">
           {PERSONA_STEPS.map((item, index) => {
             const Icon = item.icon;
             const active = item.id === state.step;
@@ -414,12 +328,13 @@ function IdentityStep() {
           Como ela se apresenta
         </label>
         <p id={slotId('agent-intro-help')} className="mt-1 text-xs text-muted-foreground">
-          Explique quem ela é e seu papel. A supervisão CREF permanece obrigatória no sistema.
+          Mensagem estática enviada ao aluno 30 minutos após o formulário. Não entra no prompt da IA
+          (a identidade dela na conversa é definida nas outras abas).
         </p>
         <textarea
           id={slotId('agent-intro')}
-          rows={4}
-          maxLength={200}
+          rows={8}
+          maxLength={600}
           className={INPUT_CLASS}
           value={form.agentSelfIntro}
           disabled={!canWrite}
@@ -446,12 +361,12 @@ function VoiceStep() {
   if (!form) return null;
   return (
     <div className="grid gap-6">
-      <ToggleCards
-        legend="Tom de voz"
-        values={TONES}
+      <MultiComboboxField
+        id={slotId('tone-descriptors')}
+        label="Tom de voz"
+        items={TONE_OPTIONS}
         selected={form.toneDescriptors}
         max={4}
-        label={(value) => TONE_LABEL[value]}
         disabled={!canWrite}
         invalid={fieldErrors.has('toneDescriptors')}
         errorId={slotId('tone-descriptors-error')}
@@ -463,12 +378,12 @@ function VoiceStep() {
         </FieldError>
       ) : null}
 
-      <ToggleCards
-        legend="Persona e comportamento"
-        values={TRAITS}
+      <MultiComboboxField
+        id={slotId('persona-traits')}
+        label="Persona e comportamento"
+        items={TRAIT_OPTIONS}
         selected={form.personaTraits}
         max={3}
-        label={(value) => PERSONA_TRAIT_LABEL[value]}
         disabled={!canWrite}
         invalid={fieldErrors.has('personaTraits')}
         errorId={slotId('persona-traits-error')}
@@ -479,6 +394,35 @@ function VoiceStep() {
           {fieldErrors.get('personaTraits')}
         </FieldError>
       ) : null}
+
+      <div>
+        <label htmlFor={slotId('voice-example')} className="text-label font-semibold">
+          Exemplo real de fala (opcional)
+        </label>
+        <p id={slotId('voice-example-help')} className="mt-1 text-xs text-muted-foreground">
+          Uma mensagem real, no vocabulário e na energia certos, pra calibrar a IA além dos rótulos
+          acima (ex.: &quot;Salve! Bom dia, brother. Bora nessa treino de hoje.&quot;). A IA usa
+          como referência de registro, nunca repete literalmente.
+        </p>
+        <textarea
+          id={slotId('voice-example')}
+          rows={2}
+          maxLength={240}
+          className={INPUT_CLASS}
+          value={form.voiceExample ?? ''}
+          disabled={!canWrite}
+          aria-invalid={fieldErrors.has('voiceExample') || undefined}
+          aria-describedby={`${slotId('voice-example-help')} ${slotId('voice-example-error')}`}
+          onChange={(event) =>
+            update({ voiceExample: event.target.value === '' ? undefined : event.target.value })
+          }
+        />
+        {fieldErrors.get('voiceExample') ? (
+          <FieldError id={slotId('voice-example-error')}>
+            {fieldErrors.get('voiceExample')}
+          </FieldError>
+        ) : null}
+      </div>
 
       <RadioCards
         legend="Uso de emojis"
@@ -548,17 +492,12 @@ function VoiceStep() {
           onChange={(boldPolicy) => update({ formatting: { ...form.formatting, boldPolicy } })}
         />
       </section>
-      <WhatsappBubble
-        agentName={form.agentName}
-        text={voicePreview(form)}
-        caption="Exemplo ilustrativo de como as escolhas aparecem no WhatsApp."
-      />
     </div>
   );
 }
 
 function LimitsStep() {
-  const { data, slotId } = useAgentPersona();
+  const { slotId } = useAgentPersona();
   /*
    * Temas proibidos são globais, não do slot: a mesma lista bloqueia os dois públicos, com
    * um único fluxo auditável de publicação. Por isso vêm (e são recarregados) pelo workspace — as
@@ -567,7 +506,6 @@ function LimitsStep() {
   const { topics, topicsLoading, refreshTopics, canWrite, canApprove } = useAgentPersonaWorkspace();
   const [label, setLabel] = useState('');
   const [phrases, setPhrases] = useState('');
-  const [changeNote, setChangeNote] = useState('');
   const [actionNote, setActionNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -587,7 +525,6 @@ function LimitsStep() {
         setFeedback(success);
         setLabel('');
         setPhrases('');
-        setChangeNote('');
         setActionNote('');
         await refreshTopics();
       } catch (caught) {
@@ -608,38 +545,10 @@ function LimitsStep() {
     .map((item) => item.trim())
     .filter(Boolean);
   const key = topicKey(label);
-  const canPropose =
-    canWrite && key.length >= 3 && parsedPhrases.length > 0 && changeNote.trim().length >= 5;
+  const canPropose = canWrite && key.length >= 3 && parsedPhrases.length > 0;
 
   return (
     <div className="grid gap-6">
-      <div className="grid gap-3">
-        {data?.blocks
-          .filter((block) => !block.editable)
-          .map((block) => (
-            <LockedBlock key={block.id} title={block.title} description={block.rationale} />
-          ))}
-      </div>
-
-      <section
-        className="rounded-xl border border-border p-4"
-        aria-labelledby={slotId('knowledge-source-title')}
-      >
-        <h3
-          id={slotId('knowledge-source-title')}
-          className="flex items-center gap-2 text-label font-semibold"
-        >
-          <Database aria-hidden="true" className="size-4" /> Fonte de conhecimento
-        </h3>
-        <p className="mt-2 text-label text-muted-foreground">
-          O Coach usa a mesma Base de Conhecimento e a mesma metodologia aprovada usadas na geração
-          dos protocolos. Não existe uma segunda base nesta tela.
-        </p>
-        <Button asChild variant="outline" className="mt-3">
-          <Link href="/dashboard/ia/base-conhecimento">Abrir Base de Conhecimento</Link>
-        </Button>
-      </section>
-
       <section
         className="rounded-xl border border-border p-4"
         aria-labelledby={slotId('topics-title')}
@@ -648,8 +557,8 @@ function LimitsStep() {
           Temas proibidos
         </h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          O bloqueio acontece no servidor antes de FAQ e IA. Ativar ou retirar exige aprovação de
-          outro profissional CREF.
+          O bloqueio acontece no servidor antes de FAQ e IA. Um tema criado já entra ativo, sem
+          precisar de aprovação; retirar um tema ativo exige aprovação de outro profissional CREF.
         </p>
         {feedback ? (
           <p role="status" className="mt-3 text-label">
@@ -763,7 +672,7 @@ function LimitsStep() {
 
         {canWrite ? (
           <div className="mt-6 grid gap-4 border-t border-border pt-5">
-            <h4 className="text-label font-semibold">Propor novo tema</h4>
+            <h4 className="text-label font-semibold">Adicionar novo tema</h4>
             <div>
               <label htmlFor={slotId('topic-label')} className="text-label font-semibold">
                 Nome do tema
@@ -791,17 +700,6 @@ function LimitsStep() {
                 Os termos nunca são enviados ao modelo nem mostrados ao aluno.
               </p>
             </div>
-            <div>
-              <label htmlFor={slotId('topic-change-note')} className="text-label font-semibold">
-                Motivo da proposta
-              </label>
-              <input
-                id={slotId('topic-change-note')}
-                className={INPUT_CLASS}
-                value={changeNote}
-                onChange={(event) => setChangeNote(event.target.value)}
-              />
-            </div>
             <Button
               disabled={!canPropose || saving}
               onClick={() =>
@@ -811,13 +709,17 @@ function LimitsStep() {
                       topicKey: key,
                       label,
                       phrases: parsedPhrases,
-                      changeNote,
+                      // Decisão do fundador (2026-09-04): adicionar um tema não pede mais
+                      // motivo nem aprovação — o tema entra ativo direto. O contrato ainda
+                      // exige `changeNote` (mín. 5 chars, auditoria de quem/quando criou),
+                      // então mandamos um valor fixo em vez de expor o campo.
+                      changeNote: 'Tema criado pelo painel de administração.',
                     }),
-                  'Proposta criada. Envie para aprovação quando estiver pronta.',
+                  'Tema criado e já ativo.',
                 )
               }
             >
-              Criar proposta
+              Criar tema
             </Button>
           </div>
         ) : null}
@@ -865,7 +767,6 @@ function HandoffStep() {
       <p className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
         <Lock aria-hidden="true" className="size-3.5" /> Trecho fixo: {CREF_HANDOFF_SUFFIX}
       </p>
-      <WhatsappBubble agentName={form.agentName} text={buildHumanHandoffMessage(form)} />
     </div>
   );
 }
@@ -876,19 +777,12 @@ function ReviewStep() {
     current,
     form,
     changedFields,
-    changeNote,
-    setChangeNote,
-    simulation,
-    simulating,
-    runSimulation,
-    staleFields,
     publishing,
     publish,
     rollback,
     canPublish,
     canWrite,
     goToStep,
-    slotId,
   } = useAgentPersona();
   if (!data || !current || !form) return null;
 
@@ -926,75 +820,18 @@ function ReviewStep() {
       </section>
 
       <section className="rounded-xl border border-border p-4">
-        <h3 className="text-label font-semibold">Teste de segurança e consistência</h3>
-        <p className="mt-1 text-xs text-muted-foreground">
-          A publicação só é liberada depois que o contrato, os guardrails e os casos críticos
-          passam.
-        </p>
-        {staleFields.length > 0 ? (
-          <FieldWarning>
-            Você editou {staleFields.map((field) => FIELD_LABEL[field]).join(', ')} depois do último
-            teste. Execute novamente.
-          </FieldWarning>
-        ) : null}
-        {simulation ? (
-          <ul className="mt-3 grid gap-2">
-            {simulation.checks.map((check) => (
-              <li key={check.id} className="flex items-start gap-2 text-label">
-                {check.passed ? (
-                  <CheckCircle2 aria-hidden="true" className="mt-0.5 size-4" />
-                ) : (
-                  <XCircle aria-hidden="true" className="mt-0.5 size-4 text-coral" />
-                )}
-                <span>
-                  {check.title}
-                  {check.passed ? '' : ` — ${check.failures.join('; ')}`}
-                </span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="mt-3 flex items-center gap-2 text-label text-muted-foreground">
-            <Circle aria-hidden="true" className="size-4" /> Teste ainda não executado.
-          </p>
-        )}
         <Button
-          variant="outline"
-          className="mt-4"
-          disabled={!canWrite || changedFields.length === 0 || simulating}
-          onClick={() => void runSimulation()}
-        >
-          <ShieldCheck aria-hidden="true" /> {simulating ? 'Testando…' : 'Executar teste'}
-        </Button>
-      </section>
-
-      <section className="rounded-xl border border-border p-4">
-        <label htmlFor={slotId('persona-change-note')} className="text-label font-semibold">
-          Motivo da alteração
-        </label>
-        <input
-          id={slotId('persona-change-note')}
-          className={INPUT_CLASS}
-          value={changeNote}
-          disabled={!canWrite}
-          placeholder="Ex.: ajusta o tom após revisão da equipe"
-          onChange={(event) => setChangeNote(event.target.value)}
-        />
-        <Button
-          className="mt-4"
           disabled={!canPublish || publishing}
           aria-busy={publishing}
           onClick={() => void publish()}
         >
-          <Send aria-hidden="true" /> {publishing ? 'Publicando…' : 'Publicar configuração'}
+          <Send aria-hidden="true" /> {publishing ? 'Salvando…' : 'Salvar e ativar'}
         </Button>
         <ul
           className="mt-3 grid gap-1 text-xs text-muted-foreground"
           aria-label="Requisitos da publicação"
         >
           <li>{changedFields.length > 0 ? '✓' : '○'} Existe ao menos uma alteração</li>
-          <li>{changeNote.trim().length >= 5 ? '✓' : '○'} Motivo com pelo menos 5 caracteres</li>
-          <li>{simulation?.passed === true ? '✓' : '○'} Teste de segurança aprovado</li>
         </ul>
       </section>
 

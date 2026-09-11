@@ -6,7 +6,16 @@ import type { OnboardingOutcome } from '@movivo/shared';
  * por query string (Sofia §9.2/9.3). Visualmente idênticas (mesmo Pulso, sem Coral,
  * sem ícone de alerta): no instante em que parecem diferentes, a V2 vira rejeição.
  */
-const WHATSAPP_URL = 'https://wa.me/5500000000000';
+const MOVIVO_CLUB_URL = 'https://chat.whatsapp.com/J3xNcNWE0UcH4qd9I2uMgR';
+
+const CLUB_PERKS = [
+  '🏋🏼‍♂️ Estar perto de pessoas que também buscam evolução',
+  '🚀 Receber novidades e conteúdos em primeira mão',
+  '🤝 Conhecer novas pessoas e criar novas amizades',
+  '🎁 Participar de sorteios e ações exclusivas da movivo',
+  '💬 Compartilhar experiências, conquistas e aprendizados',
+  '✨ E muito mais!',
+];
 
 const READY_STEPS = [
   'Seu perfil será processado pela MOVIVO.',
@@ -63,17 +72,27 @@ export function SuccessScreen({ outcome, name }: { outcome: OnboardingOutcome; n
         </ol>
       </div>
 
-      <p className="text-body text-muted-foreground">
-        Salve nosso número para {ready ? 'não perder nenhuma mensagem' : 'acompanhar a análise'}:
-      </p>
+      <div>
+        <p className="text-h3 font-semibold">
+          Enquanto seu treino é preparado, aproveite para entrar na nossa comunidade.
+        </p>
+        <p className="mt-3 text-body text-muted-foreground">
+          Por lá, você encontra um ambiente alinhado aos seus objetivos, onde pode:
+        </p>
+        <ul className="mt-3 flex flex-col gap-2 text-body text-muted-foreground">
+          {CLUB_PERKS.map((perk) => (
+            <li key={perk}>{perk}</li>
+          ))}
+        </ul>
+      </div>
 
       <a
-        href={WHATSAPP_URL}
+        href={MOVIVO_CLUB_URL}
         target="_blank"
         rel="noreferrer"
         className="flex h-[52px] items-center justify-center rounded-xl bg-primary px-6 text-body font-semibold text-primary-foreground shadow-xs transition-colors hover:bg-primary/90"
       >
-        ABRIR WHATSAPP
+        ENTRAR NO MOVIVO CLUB
       </a>
     </div>
   );

@@ -26,9 +26,40 @@ import {
   type TenantTransaction,
 } from '../../core/database/tenant-database.service';
 import { signatureHash } from './protocol.repository';
-import type { ContraindicationTag, ExerciseLevel } from './exercise-catalog';
+import { applySubstitution } from './protocol-substitution-apply';
+import type { CatalogExercise, ContraindicationTag, ExerciseLevel } from './exercise-catalog';
 import type { SubstitutionConstraints } from './exercise-substitution';
-import type { ValidateProtocolInput } from './validation/validation.service';
+import { ValidationService, type ValidateProtocolInput } from './validation/validation.service';
+
+/** Mesma extração de `loadActiveProtocol` — reaproveitada por `attachCatalogExerciseAndRelease`,
+ * que precisa recomputar a troca contra o protocolo VIVO no momento da aprovação. */
+function deriveConstraints(
+  rawConstraints: unknown,
+  parQFlags: unknown,
+): {
+  constraints: SubstitutionConstraints;
+  validationConstraints: ValidateProtocolInput['constraints'];
+  parQFlags: ContraindicationTag[];
+} {
+  const raw = (rawConstraints ?? {}) as Partial<SubstitutionConstraints> &
+    ValidateProtocolInput['constraints'];
+  const level: ExerciseLevel = raw.level ?? 'INICIANTE';
+  return {
+    constraints: {
+      level,
+      location: raw.location ?? 'HOME',
+      equipment: raw.equipment ?? [],
+      injuryTags: raw.injuryTags ?? [],
+    },
+    validationConstraints: {
+      goal: raw.goal,
+      injuryTags: raw.injuryTags ?? [],
+      preferredDays: raw.preferredDays,
+      level,
+    },
+    parQFlags: (parQFlags ?? []) as ContraindicationTag[],
+  };
+}
 
 /**
  * Quem está executando a transação. `release()`/`discard()` são chamados por dois tipos de
@@ -85,6 +116,25 @@ export interface CreatePendingSubstitutionInput {
   proposedContent: ProtocolStructure;
   diff: SubstitutionDiff;
   changeReason: string;
+  /** Achado 2026-09-09 — default `'OPTIONAL'` (comportamento de sempre). */
+  reviewUrgency?: 'OPTIONAL' | 'MANDATORY';
+}
+
+/**
+ * Achado 2026-09-09 (pedido do fundador): proposta sem substituto real ainda — o aluno pediu
+ * um exercício que não existe em NENHUM lugar do catálogo publicado. Nasce sempre `MANDATORY`
+ * e `catalogGap: true`; só vira uma troca de verdade via `attachCatalogExerciseAndRelease`,
+ * depois que o time publica o exercício no catálogo.
+ */
+export interface CreateCatalogGapPendingInput {
+  userId: string;
+  protocolId: string;
+  baseVersion: number;
+  fromExerciseId: string;
+  fromExerciseName: string;
+  /** Nome exatamente como o aluno pediu (texto livre, nunca um id do catálogo). */
+  requestedExerciseName: string;
+  changeReason: string;
 }
 
 export type CreatePendingSubstitutionResult =
@@ -105,14 +155,44 @@ export type ReleaseSubstitutionResult =
       startDate: Date;
       endDate: Date;
       totalWeeks: number;
+      /** Achado 2026-09-08: nomes do de/para, pra reentrega saudar a troca em vez de repetir
+       * a saudação de 1ª entrega (ver `protocolDeliveryPdfText`/`WorkoutPresentationService`). */
+      fromExerciseName: string;
+      toExerciseName: string;
     }
   /** Estado não bate mais (já decidida, ou o protocolo mudou de versão/saiu de ACTIVE
    * desde que a proposta nasceu) — no-op seguro, mesmo raciocínio de `autoRelease`. */
   | { released: false };
 
+/** Achado 2026-09-09 — resultado de `attachCatalogExerciseAndRelease`. */
+export type AttachCatalogExerciseResult =
+  | {
+      released: true;
+      protocolId: string;
+      userId: string;
+      version: number;
+      content: ProtocolStructure;
+      mesocycleName: string;
+      startDate: Date;
+      endDate: Date;
+      totalWeeks: number;
+      fromExerciseName: string;
+      toExerciseName: string;
+    }
+  /** Proposta não existe, não é `catalogGap`, ou não está mais `PENDING`. */
+  | { released: false; reason: 'NOT_FOUND' }
+  /** Protocolo mudou de versão/saiu de `ACTIVE` desde que a proposta nasceu. */
+  | { released: false; reason: 'STALE' }
+  /** O exercício recém-publicado, aplicado ao protocolo inteiro, quebrou a validação —
+   * nada foi tocado; o time pode recategorizar o exercício ou recusar a proposta. */
+  | { released: false; reason: 'VALIDATION_FAILED'; violations: string[] };
+
 @Injectable()
 export class ProtocolSubstitutionRepository {
-  constructor(private readonly db: TenantDatabase) {}
+  constructor(
+    private readonly db: TenantDatabase,
+    private readonly validation: ValidationService,
+  ) {}
 
   /** Protocolo ATIVO do titular, sempre a linha VIVA — nunca um snapshot antigo. */
   async loadActiveProtocol(userId: string): Promise<ActiveProtocolForSubstitution | null> {
@@ -134,27 +214,12 @@ export class ProtocolSubstitutionRepository {
         .limit(1),
     );
     if (!row) return null;
-    const raw = (row.constraints ?? {}) as Partial<SubstitutionConstraints> &
-      ValidateProtocolInput['constraints'];
-    const level: ExerciseLevel = raw.level ?? 'INICIANTE';
+    const derived = deriveConstraints(row.constraints, row.parQFlags);
     return {
       protocolId: row.protocolId,
       version: row.version,
       content: row.content as ProtocolStructure,
-      // Mesmos defaults seguros que existiam em `ConversationRepository.loadConstraints`.
-      constraints: {
-        level,
-        location: raw.location ?? 'HOME',
-        equipment: raw.equipment ?? [],
-        injuryTags: raw.injuryTags ?? [],
-      },
-      validationConstraints: {
-        goal: raw.goal,
-        injuryTags: raw.injuryTags ?? [],
-        preferredDays: raw.preferredDays,
-        level,
-      },
-      parQFlags: (row.parQFlags ?? []) as ContraindicationTag[],
+      ...derived,
       fromBlockingParq: row.parqState === 'BLOQUEADO_AGUARDANDO_CLEARANCE',
     };
   }
@@ -198,10 +263,47 @@ export class ProtocolSubstitutionRepository {
             diff: input.diff,
             changeReason: input.changeReason,
             baseVersion: input.baseVersion,
+            reviewUrgency: input.reviewUrgency ?? 'OPTIONAL',
           })
           .returning({ id: protocolSubstitutionRequests.id }),
       );
       if (!row) throw new Error('createPending: INSERT não retornou id.');
+      return { created: true, id: row.id };
+    } catch (error) {
+      if (isUniqueViolation(error)) return { created: false, alreadyPending: true };
+      throw error;
+    }
+  }
+
+  /**
+   * Cria a proposta em staging SEM substituto real (achado 2026-09-09) — o aluno pediu um
+   * exercício que não existe em nenhum lugar do catálogo publicado. Nasce sempre `MANDATORY`
+   * e `catalogGap: true`; nunca agenda auto-liberação (não há o que aplicar sozinho ainda).
+   */
+  async createCatalogGapPending(
+    input: CreateCatalogGapPendingInput,
+  ): Promise<CreatePendingSubstitutionResult> {
+    try {
+      const [row] = await this.db.runAsUser(input.userId, 'USER', (tx) =>
+        tx
+          .insert(protocolSubstitutionRequests)
+          .values({
+            protocolId: input.protocolId,
+            userId: input.userId,
+            fromExerciseId: input.fromExerciseId,
+            fromExerciseName: input.fromExerciseName,
+            toExerciseId: null,
+            toExerciseName: input.requestedExerciseName,
+            proposedContent: null,
+            diff: null,
+            changeReason: input.changeReason,
+            baseVersion: input.baseVersion,
+            reviewUrgency: 'MANDATORY',
+            catalogGap: true,
+          })
+          .returning({ id: protocolSubstitutionRequests.id }),
+      );
+      if (!row) throw new Error('createCatalogGapPending: INSERT não retornou id.');
       return { created: true, id: row.id };
     } catch (error) {
       if (isUniqueViolation(error)) return { created: false, alreadyPending: true };
@@ -224,7 +326,17 @@ export class ProtocolSubstitutionRepository {
         .where(eq(protocolSubstitutionRequests.id, requestId))
         .for('update')
         .limit(1);
-      if (!request || request.status !== 'PENDING') return { released: false };
+      // `toExerciseId`/`proposedContent` nulos = proposta de `catalogGap` ainda sem
+      // substituto real (achado 2026-09-09) — `release()` nunca aplica essas; só
+      // `attachCatalogExerciseAndRelease`, depois que o time publica o exercício.
+      if (
+        !request ||
+        request.status !== 'PENDING' ||
+        request.toExerciseId === null ||
+        request.proposedContent === null
+      ) {
+        return { released: false };
+      }
 
       const [protocol] = await tx
         .select({
@@ -249,27 +361,13 @@ export class ProtocolSubstitutionRepository {
       }
 
       const content = request.proposedContent as ProtocolStructure;
-      const nextVersion = protocol.version + 1;
-      await tx
-        .update(protocols)
-        .set({ version: nextVersion, content })
-        .where(eq(protocols.id, protocol.id));
-      await tx.insert(protocolVersions).values({
-        protocolId: protocol.id,
-        userId: request.userId,
-        version: nextVersion,
-        status: 'ACTIVE',
+      const { nextVersion } = await this.applyReleaseTail(
+        tx,
+        protocol,
+        request,
         content,
-        diff: request.diff,
-        changeReason: request.changeReason,
-        generatedBy: 'AI_SUBSTITUTION',
-        signatureHash: signatureHash(content),
-        signedAt: new Date(),
-      });
-      await tx
-        .update(protocolSubstitutionRequests)
-        .set({ status: 'RELEASED', decidedAt: new Date() })
-        .where(eq(protocolSubstitutionRequests.id, requestId));
+        request.diff as SubstitutionDiff,
+      );
 
       return {
         released: true,
@@ -281,8 +379,152 @@ export class ProtocolSubstitutionRepository {
         startDate: protocol.startDate,
         endDate: protocol.endDate,
         totalWeeks: protocol.totalWeeks,
+        fromExerciseName: request.fromExerciseName,
+        toExerciseName: request.toExerciseName,
       };
     });
+  }
+
+  /**
+   * Publica o exercício pedido pelo aluno no catálogo (fora daqui — `ExerciseCatalogAdminService
+   * .publish()`) e SÓ ENTÃO chama isto: recomputa a troca contra o protocolo VIVO (nunca
+   * confia no que existia quando a proposta nasceu), revalida a estrutura inteira igual a
+   * qualquer outra substituição, e aplica com a MESMA mecânica de `release()` (bump de
+   * versão, insere `protocol_versions`). Se a validação falhar, nada é tocado — o time pode
+   * tentar categorizar o exercício de outro jeito ou recusar a proposta.
+   */
+  async attachCatalogExerciseAndRelease(
+    actor: SubstitutionActor,
+    requestId: string,
+    chosen: CatalogExercise,
+  ): Promise<AttachCatalogExerciseResult> {
+    return this.db.runAsUser(actor.userId, actor.role, async (tx) => {
+      const [request] = await tx
+        .select()
+        .from(protocolSubstitutionRequests)
+        .where(eq(protocolSubstitutionRequests.id, requestId))
+        .for('update')
+        .limit(1);
+      if (!request || request.status !== 'PENDING' || !request.catalogGap) {
+        return { released: false, reason: 'NOT_FOUND' };
+      }
+
+      const [protocol] = await tx
+        .select({
+          id: protocols.id,
+          version: protocols.version,
+          status: protocols.status,
+          content: protocols.content,
+          constraints: protocols.constraints,
+          parQFlags: protocols.parQFlags,
+          mesocycleName: protocols.mesocycleName,
+          startDate: protocols.startDate,
+          endDate: protocols.endDate,
+          totalWeeks: protocols.totalWeeks,
+        })
+        .from(protocols)
+        .where(eq(protocols.id, request.protocolId))
+        .for('update')
+        .limit(1);
+      if (!protocol || protocol.status !== 'ACTIVE' || protocol.version !== request.baseVersion) {
+        await tx
+          .update(protocolSubstitutionRequests)
+          .set({ status: 'DISCARDED', decidedAt: new Date() })
+          .where(eq(protocolSubstitutionRequests.id, requestId));
+        return { released: false, reason: 'STALE' };
+      }
+
+      const derived = deriveConstraints(protocol.constraints, protocol.parQFlags);
+      const applied = applySubstitution(
+        protocol.content as ProtocolStructure,
+        request.fromExerciseId,
+        chosen,
+      );
+      const verdict = this.validation.validate({
+        structure: applied.content,
+        constraints: derived.validationConstraints,
+        parqFlags: derived.parQFlags,
+      });
+      if (verdict.action !== 'PASS') {
+        return {
+          released: false,
+          reason: 'VALIDATION_FAILED',
+          violations: verdict.violations.map((v) => v.rule),
+        };
+      }
+
+      const diff: SubstitutionDiff = {
+        type: 'EXERCISE_SUBSTITUTION',
+        from: { id: request.fromExerciseId, name: request.fromExerciseName },
+        to: { id: chosen.id, name: chosen.name },
+        sessionsAffected: applied.sessionsAffected,
+      };
+      await tx
+        .update(protocolSubstitutionRequests)
+        .set({
+          toExerciseId: chosen.id,
+          toExerciseName: chosen.name,
+          proposedContent: applied.content,
+          diff,
+        })
+        .where(eq(protocolSubstitutionRequests.id, requestId));
+
+      const { nextVersion } = await this.applyReleaseTail(
+        tx,
+        protocol,
+        request,
+        applied.content,
+        diff,
+      );
+
+      return {
+        released: true,
+        protocolId: protocol.id,
+        userId: request.userId,
+        version: nextVersion,
+        content: applied.content,
+        mesocycleName: protocol.mesocycleName,
+        startDate: protocol.startDate,
+        endDate: protocol.endDate,
+        totalWeeks: protocol.totalWeeks,
+        fromExerciseName: request.fromExerciseName,
+        toExerciseName: chosen.name,
+      };
+    });
+  }
+
+  /** Bump de versão + `protocol_versions` + marca a proposta `RELEASED` — cauda compartilhada
+   * entre `release()` (conteúdo já calculado na criação) e `attachCatalogExerciseAndRelease`
+   * (conteúdo recalculado agora, contra o protocolo vivo). */
+  private async applyReleaseTail(
+    tx: TenantTransaction,
+    protocol: { id: string; version: number },
+    request: { id: string; userId: string; changeReason: string },
+    content: ProtocolStructure,
+    diff: SubstitutionDiff,
+  ): Promise<{ nextVersion: number }> {
+    const nextVersion = protocol.version + 1;
+    await tx
+      .update(protocols)
+      .set({ version: nextVersion, content })
+      .where(eq(protocols.id, protocol.id));
+    await tx.insert(protocolVersions).values({
+      protocolId: protocol.id,
+      userId: request.userId,
+      version: nextVersion,
+      status: 'ACTIVE',
+      content,
+      diff,
+      changeReason: request.changeReason,
+      generatedBy: 'AI_SUBSTITUTION',
+      signatureHash: signatureHash(content),
+      signedAt: new Date(),
+    });
+    await tx
+      .update(protocolSubstitutionRequests)
+      .set({ status: 'RELEASED', decidedAt: new Date() })
+      .where(eq(protocolSubstitutionRequests.id, request.id));
+    return { nextVersion };
   }
 
   /** Recusa a troca — mantém o exercício original, sem tocar `protocols`. Só staff chama isto. */

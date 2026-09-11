@@ -94,23 +94,15 @@ export const MAX_BOLD_SPANS: Record<AgentFormatting['boldPolicy'], number> = {
 
 /**
  * **L2 — identidade/persona.** Único bloco que vem da configuração publicada no painel.
- * Renderizado a partir de campos de espaço fechado: nome (regex), auto-apresentação curta
- * (checada contra padrões de injeção antes de gravar), descritores de tom (ENUM, máx. 4) e
- * política de emoji (ENUM).
+ * Renderizado a partir de campos de espaço fechado: nome (regex), descritores de tom
+ * (ENUM, máx. 4), traços de comportamento (ENUM, máx. 3) e política de emoji (ENUM).
+ *
+ * Decisão do fundador (2026-09-04): `agentSelfIntro` deixou de entrar aqui.
+ * "Como ela se apresenta" virou copy ESTÁTICA para a mensagem de 30min pós-formulário
+ * (`apps/api/.../message-templates.ts`, `analyzingMessage`), não mais um fragmento de
+ * identidade injetado em toda conversa — a identidade da agente na conversa em si é só
+ * nome + tom + comportamento + política de emoji, as outras abas do painel.
  */
-/**
- * Achado de QA 2026-08-25 (`apps/api/src/modules/whatsapp/message-templates.ts`,
- * `presentPersona`): `agentSelfIntro` é texto livre do painel, sem contrato gramatical —
- * já foi publicado tanto como fragmento em terceira pessoa ("a coach digital da MOVIVO,
- * supervisionada por...") quanto como frase completa em primeira pessoa ("Olá, sou o
- * Leonardo, seu treinador..."). "Você é a {nome}, {intro}" travava artigo em feminino e
- * virava emenda por vírgula com o segundo caso. "Você é {nome}." como frase própria não
- * exige concordância de gênero e vale para os dois formatos.
- */
-function capitalizeFirst(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
 export function buildPersonaBlock(persona: AgentPersona): string {
   const tone = persona.toneDescriptors.map((descriptor) => TONE_LABEL[descriptor]).join(', ');
   const behavior = persona.personaTraits
@@ -120,13 +112,32 @@ export function buildPersonaBlock(persona: AgentPersona): string {
     // "Seu tom é: <substantivos>" no lugar de "Fale de forma <adjetivos>": nenhuma das duas
     // metades da frase pode carregar gênero, porque a mesma função renderiza a persona
     // masculina e a feminina (ver o cabeçalho de `TONE_LABEL`).
-    `Você é ${persona.agentName}. ${capitalizeFirst(persona.agentSelfIntro)}. Seu tom é: ${tone}.`,
+    `Você é ${persona.agentName}. Seu tom é: ${tone}.`,
     // `PERSONA_TRAIT_INSTRUCTION` já são imperativos neutros de gênero ("acolha o contexto
     // antes de orientar"); o antigo "seja" antes deles era, além de agramatical, o único
     // ponto da frase que pediria concordância. Sem ele a lista fica correta e neutra.
     `Durante a conversa, ${behavior}.`,
     EMOJI_INSTRUCTION[persona.emojiPolicy],
-  ].join(' ');
+    // Achado 2026-09-10 (pedido do fundador): os rótulos ENUM acima, sozinhos, calibram mal
+    // vocabulário/energia concretos — a saída soava "IA tentando parecer descontraída" mesmo
+    // com `caloroso`+`informal` publicados. Um exemplo real (opcional, por persona) calibra
+    // muito melhor que mais adjetivo — mesmo raciocínio do exemplo ERRADO/CERTO em
+    // `buildFormattingBlock`.
+    //
+    // Achado 2026-09-10 (2ª rodada, reproduzido ao vivo): "nunca repita literalmente" não foi
+    // suficiente — a IA passou a usar "brother" (a ÚNICA palavra de vocativo do exemplo) em
+    // praticamente toda mensagem, virando cacoete tão robótico quanto o problema original.
+    // Pessoa de verdade não repete o mesmo vocativo sempre; a maioria das frases não tem
+    // vocativo nenhum. Instrução reforçada pra travar exatamente esse padrão.
+    persona.voiceExample
+      ? 'Exemplo real do seu tom, pra calibrar vocabulário e energia (NUNCA repita ' +
+        'literalmente, é só referência de registro; e NUNCA deixe uma palavra específica do ' +
+        'exemplo, como um vocativo, virar cacoete repetido em toda mensagem — a maioria das ' +
+        `respostas não deveria ter vocativo nenhum, só ocasionalmente): "${persona.voiceExample}"`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 }
 
 /**
@@ -134,6 +145,13 @@ export function buildPersonaBlock(persona: AgentPersona): string {
  * uma diferença que é o ponto da mudança: além de instruir o modelo, o valor é aplicado
  * como teto determinístico na saída (`applyResponseFormatting`, no worker), antes da
  * entrega. Instrução de prompt sozinha nunca foi um teto.
+ *
+ * Achado 2026-09-10: as regras de VOZ (não comentar a pergunta, não fechar com frase de
+ * efeito, o exemplo ERRADO/CERTO, "resposta mais curta que resolve") viviam aqui, mas são
+ * conteúdo de conversa, não layout — viraram diretriz de produto e se mudaram pra
+ * `NATURAL_CONVERSATION_BLOCK` (`apps/api/.../prompts.ts`). Este bloco ficou só com regra de
+ * LAYOUT de verdade (parágrafo/linha/lista/negrito) + a proibição de travessão, que é
+ * caractere, não voz, e tem rede de segurança determinística própria (`applyResponseFormatting`).
  */
 export function buildFormattingBlock(formatting: AgentFormatting): string {
   const spec = BLOCK_SIZE_SPEC[formatting.blockSize];
@@ -148,17 +166,12 @@ export function buildFormattingBlock(formatting: AgentFormatting): string {
     list,
     'Não use tabelas, títulos, numeração aninhada, blocos de código nem links.',
     BOLD_INSTRUCTION[formatting.boldPolicy],
-    // Achado 2026-09-02 (correção do fundador): a saída soava "AI slop" — genérica demais
-    // pro tom de uma conversa de WhatsApp de verdade. Travessão (—) é o sintoma mais citado
-    // (o fundador foi explícito: NUNCA usar), mas o problema é mais amplo — texto estruturado
-    // como resposta de assistente, não como mensagem de uma pessoa. `applyResponseFormatting`
+    // Achado 2026-09-02 (correção do fundador): a saída soava "AI slop". Travessão (—) é o
+    // sintoma mais citado (o fundador foi explícito: NUNCA usar). `applyResponseFormatting`
     // (worker) troca qualquer travessão que escapar por vírgula como rede de segurança
     // determinística — instrução de prompt sozinha nunca é teto neste sistema.
     'NUNCA use travessão (o símbolo "—") em nenhuma frase, nem para separar uma explicação, ' +
-      'nem para unir duas ideias. Prefira vírgula, ponto, ou duas frases curtas separadas. ' +
-      'Escreva como uma pessoa mandando mensagem de verdade no WhatsApp para o aluno: direto, ' +
-      'natural, sem soar como um assistente de IA respondendo um ticket.',
-    'Prefira sempre a resposta mais curta que resolve a dúvida.',
+      'nem para unir duas ideias. Prefira vírgula, ponto, ou duas frases curtas separadas.',
   ].join(' ');
 }
 

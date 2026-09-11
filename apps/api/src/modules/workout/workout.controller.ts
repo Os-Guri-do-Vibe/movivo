@@ -23,6 +23,7 @@ import { WorkoutAccessService } from './workout-access.service';
 import { WorkoutJournalService } from './workout-journal.service';
 
 const exchangeSchema = z.object({ token: z.string().min(40).max(100) });
+const peekSchema = z.object({ token: z.string().min(40).max(100) });
 
 @Controller('workouts')
 @UseGuards(ThrottlerGuard)
@@ -38,6 +39,14 @@ export class WorkoutController {
   async exchange(@Body() raw: unknown) {
     const { token } = exchangeSchema.parse(raw);
     return { sessionToken: await this.access.exchange(token) };
+  }
+
+  @Get('access/peek')
+  @Header('Cache-Control', 'private, no-store')
+  @Header('Referrer-Policy', 'no-referrer')
+  async peek(@Query() raw: unknown) {
+    const { token } = peekSchema.parse(raw);
+    return { firstName: await this.access.peekFirstName(token) };
   }
 
   @Get('journal')

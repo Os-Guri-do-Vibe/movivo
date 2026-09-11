@@ -78,3 +78,6 @@ export * from './exercise-catalog-entries';
 
 // Achado 2026-09-02 - proposta de substituição de exercício via IA, em staging.
 export * from './protocol-substitution-requests';
+
+// Renovação de protocolo por fim de mesociclo - formulário de transição.
+export * from './protocol-renewal-sessions';

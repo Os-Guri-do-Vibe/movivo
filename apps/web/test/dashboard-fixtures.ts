@@ -21,6 +21,10 @@ export const EDIT_PROTOCOL_ID = '55555555-5555-4555-8555-555555555555';
 export const SUBSTITUTION_ID = '77777777-7777-4777-8777-777777777777';
 /** Substituição de aluno com protocolo de origem em PAR-Q bloqueante (achado 2026-09-03). */
 export const SUBSTITUTION_MANDATORY_ID = '88888888-8888-4888-8888-888888888888';
+/** Protocolo `MANDATORY` que caiu no template de fallback (achado 2026-09-03). */
+export const FALLBACK_PROTOCOL_ID = '99999999-9999-4999-8999-999999999999';
+/** Substituição `catalogGap` — exercício pedido não existe no catálogo (achado 2026-09-09). */
+export const CATALOG_GAP_SUBSTITUTION_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 export const anamnesisAnswers: AnamnesisAnswers = {
   userId: 'user-1',
@@ -174,6 +178,24 @@ export const editProtocolItem: QueueItem = {
   origin: 'EDIT',
 };
 
+/**
+ * A terceira origem de `MANDATORY` (achado 2026-09-03): caiu no template de fallback do
+ * RT — a geração/validação nunca passou limpa. Trava mesmo sem alerta de PAR-Q, por isso
+ * `severity: ALERT` (igual `editProtocolItem`), não `SAFETY`.
+ */
+export const fallbackProtocolItem: QueueItem = {
+  id: FALLBACK_PROTOCOL_ID,
+  kind: 'PROTOCOL',
+  severity: 'ALERT',
+  createdAt: '2026-09-03T11:20:00.000Z',
+  ageMinutes: 50,
+  title: 'Protocolo para Revisão: Fábio Teste',
+  summary: 'PENDING_REVIEW',
+  status: 'PENDING_REVIEW',
+  autoReleaseAt: null,
+  origin: 'FALLBACK',
+};
+
 export const substitutionItem: QueueItem = {
   id: SUBSTITUTION_ID,
   kind: 'SUBSTITUTION',
@@ -222,6 +244,42 @@ export const substitutionDetail: QueueDetail = {
     changeReason: 'Substituição solicitada pelo aluno via WhatsApp: Flexão → Flexão Diamante',
     status: 'PENDING',
     decidedAt: null,
+    reviewUrgency: 'OPTIONAL',
+    catalogGap: false,
+  } satisfies SubstitutionDetail,
+  replay: undefined,
+};
+
+/** Item de fila `catalogGap` — mesmo molde de `substitutionMandatoryItem`, origem diferente. */
+export const catalogGapSubstitutionItem: QueueItem = {
+  id: CATALOG_GAP_SUBSTITUTION_ID,
+  kind: 'SUBSTITUTION',
+  severity: 'ALERT',
+  createdAt: '2026-09-09T11:00:00.000Z',
+  ageMinutes: 12,
+  title: 'Substituição de Exercício: Rodrigo Teste',
+  summary: 'PENDING',
+  status: 'PENDING',
+  autoReleaseAt: null,
+  origin: 'CATALOG_GAP',
+};
+
+export const catalogGapSubstitutionDetail: QueueDetail = {
+  item: catalogGapSubstitutionItem,
+  context: {},
+  substitution: {
+    id: CATALOG_GAP_SUBSTITUTION_ID,
+    protocolId: PROTOCOL_ID,
+    from: { id: 'supino_reto_barra', name: 'Supino Reto (Barra)' },
+    to: { id: null, name: 'Supino Reto Máquina' },
+    diff: null,
+    changeReason:
+      'Substituição solicitada pelo aluno via WhatsApp: Supino Reto (Barra) → ' +
+      '"Supino Reto Máquina" (não existe no catálogo)',
+    status: 'PENDING',
+    decidedAt: null,
+    reviewUrgency: 'MANDATORY',
+    catalogGap: true,
   } satisfies SubstitutionDetail,
   replay: undefined,
 };
@@ -262,10 +320,11 @@ export const queueResponse: QueueResponse = {
 export const anonymizedReplay: AnonymizedReplay = {
   conversationId: 'anonymous-conversation',
   startedAt: '2026-08-03T11:30:00.000Z',
+  studentName: 'Ana Souza',
   messages: [
     {
       role: 'USER',
-      content: '[PESSOA] relatou dificuldade.',
+      content: 'Relatei dificuldade no exercício de hoje.',
       createdAt: '2026-08-03T11:31:00.000Z',
     },
     {

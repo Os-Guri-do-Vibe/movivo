@@ -12,7 +12,7 @@
  * capturar os dias preferidos, trocar `TRAINING_WEEKDAYS` pela preferência persistida —
  * nada mais neste arquivo muda.
  */
-import type { ProtocolStructure } from '@movivo/shared';
+import type { ProtocolStructure, Weekday } from '@movivo/shared';
 
 export const WORKOUT_TIMEZONE = 'America/Sao_Paulo' as const;
 
@@ -59,7 +59,7 @@ export function trainingWeekdays(weeklyFrequency: number): readonly number[] {
  * A sessão gira pela posição do dia dentro da semana, então frequência 3 com sessões
  * A/B/C dá segunda=A, quarta=B, sexta=C.
  */
-const PROTOCOL_WEEKDAY: Readonly<Record<number, string>> = {
+const PROTOCOL_WEEKDAY: Readonly<Record<number, Weekday>> = {
   0: 'SUN',
   1: 'MON',
   2: 'TUE',
@@ -68,6 +68,11 @@ const PROTOCOL_WEEKDAY: Readonly<Record<number, string>> = {
   5: 'FRI',
   6: 'SAT',
 };
+
+/** Código do dia da semana (`session.weekday`) para a data, no fuso do produto. */
+export function weekdayCode(at: Date): Weekday {
+  return PROTOCOL_WEEKDAY[weekday(at)] ?? 'SUN';
+}
 
 export function sessionFor(at: Date, structure: ProtocolStructure) {
   const explicit = structure.sessions.find(

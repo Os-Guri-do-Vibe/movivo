@@ -40,12 +40,13 @@ import { ResourceState, SectorHeader, useControlCenterResource } from './control
 
 const PAGE_SIZE = 50;
 
-const INPUT_CLASS =
+export const CATALOG_INPUT_CLASS =
   'mt-1 w-full rounded-lg border border-border bg-card px-3 py-2 text-body focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none';
+const INPUT_CLASS = CATALOG_INPUT_CLASS;
 
 /** Vocabulário hoje em uso no catálogo (`exercise-catalog.ts`) — texto livre no schema,
  *  lista fechada aqui só pra dar um seletor em vez de digitar à mão. */
-const MUSCLE_GROUPS = [
+export const CATALOG_MUSCLE_GROUPS = [
   'peito',
   'costas',
   'ombro',
@@ -61,7 +62,10 @@ const MUSCLE_GROUPS = [
   'sistema cardiovascular',
 ] as const;
 
-const MUSCLE_FILTER_OPTIONS = MUSCLE_GROUPS.map((muscle) => ({ value: muscle, label: muscle }));
+const MUSCLE_FILTER_OPTIONS = CATALOG_MUSCLE_GROUPS.map((muscle) => ({
+  value: muscle,
+  label: muscle,
+}));
 const LOCATION_FILTER_OPTIONS = trainingLocationSchema.options.map((loc) => ({
   value: loc,
   label: TRAINING_LOCATION_LABELS[loc],
@@ -93,7 +97,9 @@ const DEFAULT_TECHNICAL_FIELDS: Pick<
   equipment: [],
 };
 
-function slugifyExerciseName(name: string): string {
+/** Exportadas pra reaproveitar em `queue-detail.tsx` (achado 2026-09-09 — "Adicionar
+ * exercício ao catálogo" a partir de uma proposta de substituição `catalogGap`). */
+export function slugifyExerciseName(name: string): string {
   const base = name
     .normalize('NFD')
     .replace(/\p{M}/gu, '')
@@ -104,7 +110,7 @@ function slugifyExerciseName(name: string): string {
   return base.length >= 3 && /^[a-z]/.test(base) ? base : `exercicio_${base || 'novo'}`;
 }
 
-function uniqueExerciseKey(base: string, taken: ReadonlySet<string>): string {
+export function uniqueExerciseKey(base: string, taken: ReadonlySet<string>): string {
   if (!taken.has(base)) return base;
   for (let suffix = 2; suffix < 100; suffix++) {
     const candidate = `${base}_${suffix}`.slice(0, 60);
@@ -227,7 +233,7 @@ function ExerciseEditorDialog({
                 </span>
               </summary>
               <div className="grid gap-1 border-t border-border p-2">
-                {MUSCLE_GROUPS.map((muscle) => {
+                {CATALOG_MUSCLE_GROUPS.map((muscle) => {
                   const checked = form.muscleGroups.includes(muscle);
                   return (
                     <label
@@ -427,8 +433,7 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
       <SectorHeader
         title="Exercícios"
         headingLevel="h2"
-        description="A base de referência que a IA pode usar para montar um protocolo — nenhum exercício fora desta lista é prescrito."
-        meta={data.meta}
+        icon={Dumbbell}
         refreshing={loading}
         onRefresh={() => void refresh()}
       />

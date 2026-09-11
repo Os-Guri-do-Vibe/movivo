@@ -7,7 +7,16 @@ import {
   type FaqEntriesResponse,
   type FaqEntryVersion,
 } from '@movivo/shared';
-import { CheckCircle2, Circle, History, Lock, Pencil, Send, XCircle } from 'lucide-react';
+import {
+  CheckCircle2,
+  Circle,
+  History,
+  Lock,
+  Pencil,
+  RefreshCw,
+  Send,
+  XCircle,
+} from 'lucide-react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -36,7 +45,13 @@ function dateLabel(value: string): string {
   }).format(new Date(value));
 }
 
-export function AiFaqDashboard({ canWrite = false }: { canWrite?: boolean }) {
+export function AiFaqDashboard({
+  canWrite = false,
+  showHeader = true,
+}: {
+  canWrite?: boolean;
+  showHeader?: boolean;
+}) {
   const { data, error, forbidden, loading, refresh } =
     useControlCenterResource<FaqEntriesResponse>(getFaqEntries);
   const [draft, setDraft] = useState<FaqCandidate>(EMPTY);
@@ -148,14 +163,29 @@ export function AiFaqDashboard({ canWrite = false }: { canWrite?: boolean }) {
 
   return (
     <div>
-      <SectorHeader
-        title="FAQ"
-        headingLevel="h2"
-        description="Quando uma pergunta corresponde a uma dúvida cadastrada, a resposta revisada é enviada sem chamar o modelo, sempre com respaldo do profissional CREF."
-        meta={data.meta}
-        refreshing={loading}
-        onRefresh={() => void refresh()}
-      />
+      {showHeader ? (
+        <SectorHeader
+          title="FAQ"
+          headingLevel="h2"
+          meta={data.meta}
+          refreshing={loading}
+          onRefresh={() => void refresh()}
+        />
+      ) : (
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-h2 font-bold">FAQ</h2>
+            <p className="mt-2 max-w-3xl text-label text-muted-foreground">
+              Respostas publicadas para o AI Coach, com simulador obrigatório antes de qualquer
+              alteração.
+            </p>
+          </div>
+          <Button variant="outline" onClick={() => void refresh()} disabled={loading}>
+            <RefreshCw aria-hidden="true" className={loading ? 'animate-spin' : undefined} />
+            {loading ? 'Atualizando…' : 'Atualizar'}
+          </Button>
+        </div>
+      )}
 
       {feedback ? (
         <p

@@ -81,6 +81,16 @@ export class DashboardController {
     return this.dashboard.discardSubstitution(actor, id);
   }
 
+  @Post('substitutions/:id/add-and-approve')
+  @Roles('PROFESSIONAL', 'ADMIN')
+  addCatalogExerciseAndApproveSubstitution(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    return this.dashboard.addCatalogExerciseAndApproveSubstitution(actor, id, body);
+  }
+
   @Post('handoffs/:id/resolve')
   @Roles('PROFESSIONAL', 'ADMIN')
   resolveHandoff(

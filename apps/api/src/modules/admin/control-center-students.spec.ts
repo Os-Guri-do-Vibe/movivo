@@ -185,7 +185,11 @@ describe('ControlCenterService.student — ficha unificada (US-7.4)', () => {
     expect(data.student.workoutHistory.status).toBe('UNAVAILABLE');
   });
 
-  it('decifra a evolução declarada e anonimiza a ocorrência de resposta bloqueada', async () => {
+  // Achado 2026-09-08 (decisão do fundador): painel é de uso interno da equipe MOVIVO — a
+  // ocorrência de resposta bloqueada não é mais anonimizada (a mesma tela já mostra a
+  // identidade completa do titular em outros campos; redigir só o conteúdo era inconsistente
+  // e chegou a corromper nome de exercício composto — ver `pii-scrubber.ts`).
+  it('decifra a evolução declarada e devolve a ocorrência de resposta bloqueada sem redigir', async () => {
     const { service, decryptHealth } = build(...studentResults());
 
     const { data } = await service.student({ ...ACTOR, role: 'PROFESSIONAL' }, STUDENT_ID);
@@ -198,8 +202,7 @@ describe('ControlCenterService.student — ficha unificada (US-7.4)', () => {
     expect(data.student.health?.parqState).toBe('CLEARED');
     expect(data.student.aiQuality.blockedRate.value).toBe(5);
     const [occurrence] = data.student.aiQuality.occurrences;
-    expect(occurrence?.content).not.toContain('Ana Souza');
-    expect(occurrence?.content).not.toContain('+5511999990001');
+    expect(occurrence?.content).toBe('Fala com a Ana Souza no +5511999990001');
   });
 
   it('sem STUDENTS_HEALTH_READ o payload não carrega nenhum campo de saúde', async () => {

@@ -1,20 +1,28 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { EmbeddingPort } from '../rag/embedding.port';
+import type { WorkingMemory } from '../context/working-memory.service';
 import type { LlmRouter } from '../llm/llm-router.service';
 import type { IntentRepository } from './intent.repository';
 import { IntentClassifier, parseIntent } from './intent-classifier.service';
 
-function make(overrides?: { knn?: { intent: string; confidence: number } | null; nano?: string }) {
+function make(overrides?: {
+  knn?: { intent: string; confidence: number } | null;
+  nano?: string;
+  recentTurns?: Array<{ role: 'user' | 'assistant'; content: string; ts: number }>;
+}) {
   const embedding = { embed: vi.fn().mockResolvedValue([0.1, 0.2]) } as unknown as EmbeddingPort;
   const repo = {
     classifyByKnn: vi.fn().mockResolvedValue(overrides?.knn ?? null),
   } as unknown as IntentRepository;
   const complete = vi.fn().mockResolvedValue({ text: overrides?.nano ?? 'MOTIVACAO' });
   const llm = { complete } as unknown as LlmRouter;
+  const working = {
+    recent: vi.fn().mockResolvedValue(overrides?.recentTurns ?? []),
+  } as unknown as WorkingMemory;
   const logger = { setContext: vi.fn(), info: vi.fn(), warn: vi.fn() } as never;
-  const svc = new IntentClassifier(embedding, repo, llm, logger);
-  return { svc, embedding, repo, complete };
+  const svc = new IntentClassifier(embedding, repo, llm, working, logger);
+  return { svc, embedding, repo, complete, working };
 }
 
 const input = { userId: 'u1', user: { name: null, phoneNumber: null, email: null }, message: '' };
@@ -74,20 +82,41 @@ describe('IntentClassifier — kNN (Etapa 1) e fallback (Etapa 2)', () => {
     expect(complete).toHaveBeenCalledOnce();
   });
 
-  it('deixa a IA reconhecer pedido natural de horario antes de um vizinho kNN incorreto', async () => {
-    const { svc, repo, complete } = make({
-      knn: { intent: 'FORA_DE_ESCOPO', confidence: 0.99 },
-      nano: 'AJUSTE_LEMBRETE_TREINO',
+  // Achado 2026-09-10 (bug reportado pelo fundador, reproduzido ao vivo): "vou descansar
+  // mais entre as séries então" (aceitando um ajuste de treino sugerido pela IA na resposta
+  // anterior) foi classificado errado — a mensagem sozinha, sem o contexto de que era uma
+  // continuação sobre descanso ENTRE SÉRIES no treino, não tinha como ser desambiguada.
+  // Garante que o histórico recente chega no fallback.
+  it('passa o histórico recente da conversa pro fallback nano, pra desambiguar uma continuação', async () => {
+    const { svc, complete } = make({
+      knn: null,
+      nano: 'CHECKIN_ANTECIPADO',
+      recentTurns: [
+        { role: 'user', content: 'que treino de perna difícil, quase morri', ts: 1 },
+        {
+          role: 'assistant',
+          content: 'Quer que eu veja com você em qual exercício do Dia 3 vale mexer primeiro?',
+          ts: 2,
+        },
+        { role: 'user', content: 'vou descansar mais entre as series entao', ts: 3 },
+      ],
     });
 
-    const result = await svc.classify({
+    const r = await svc.classify({
       ...input,
-      message: 'beleza, me manda o link as 16h',
+      message: 'vou descansar mais entre as series entao',
     });
 
-    expect(result).toMatchObject({ intent: 'AJUSTE_LEMBRETE_TREINO', stage: 'FALLBACK' });
-    expect(complete).toHaveBeenCalledOnce();
-    expect(repo.classifyByKnn).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ intent: 'CHECKIN_ANTECIPADO', stage: 'FALLBACK' });
+    const call = complete.mock.calls[0]?.[0];
+    expect(call.system).toContain('CHECKIN_ANTECIPADO: quer ajustar o PROTOCOLO agora');
+    expect(JSON.stringify(call.messages)).toContain('CONTEXTO RECENTE DA CONVERSA');
+    expect(JSON.stringify(call.messages)).toContain('quase morri');
+    // A mensagem atual não duplica no bloco de histórico (já foi persistida antes de
+    // classificar) — só aparece uma vez, na mensagem "atual" embrulhada.
+    expect(
+      JSON.stringify(call.messages).split('vou descansar mais entre as series entao').length - 1,
+    ).toBe(1);
   });
 
   // Achado 2026-09-02 (reproduzido ao vivo — aluno viu "digitando…" e depois silêncio
@@ -147,7 +176,7 @@ describe('IntentClassifier — EMERGENCIA_CLINICA fora do guardrail regex', () =
     const { svc, complete } = make({ knn: null, nano: 'MOTIVACAO' });
     await svc.classify({ ...input, message: 'qualquer coisa' });
     expect(complete.mock.calls[0]?.[0]?.system).toContain('EMERGENCIA_CLINICA');
-    expect(complete.mock.calls[0]?.[0]?.system).toContain('AJUSTE_LEMBRETE_TREINO');
+    expect(complete.mock.calls[0]?.[0]?.system).toContain('PAPO_CASUAL');
   });
 });
 
@@ -170,8 +199,8 @@ describe('IntentClassifier — default-deny (nenhum caminho vira prompt sem guar
 });
 
 describe('parseIntent', () => {
-  it('reconhece ajuste de lembrete classificado pelo modelo', () => {
-    expect(parseIntent('AJUSTE_LEMBRETE_TREINO')).toBe('AJUSTE_LEMBRETE_TREINO');
+  it('reconhece papo casual classificado pelo modelo', () => {
+    expect(parseIntent('PAPO_CASUAL')).toBe('PAPO_CASUAL');
   });
   it('extrai o rótulo conhecido da saída do nano', () => {
     expect(parseIntent('a intenção é SUBSTITUICAO_EXERCICIO')).toBe('SUBSTITUICAO_EXERCICIO');

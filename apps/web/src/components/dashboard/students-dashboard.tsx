@@ -1,7 +1,7 @@
 'use client';
 
 import type { ChurnRisk, ControlCenterStudentSummary } from '@movivo/shared';
-import { AlertTriangle, Search } from 'lucide-react';
+import { AlertTriangle, Search, UsersRound } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
@@ -184,14 +184,13 @@ function sortValue(student: ControlCenterStudentSummary, key: SortKey): string {
 /**
  * Base de alunos — tela única (US-7.1, TASK-7.1.4). O antigo "Suporte" é esta mesma
  * tela sob `SUPPORT_READ`/`STUDENTS_READ`: sem campo de saúde. O backend já não envia
- * dado de saúde nesta projeção nem na ficha de quem não tem a capacidade;
- * `canReadHealth` só ajusta a copy.
+ * dado de saúde nesta projeção nem na ficha de quem não tem a capacidade.
  *
  * Faixa de filtros com chips do que está aplicado (achado 2026-08-19, spec de Sofia)
  * + tabela ordenável por qualquer coluna — busca livre, status, plano e período
  * combinam entre si (E lógico).
  */
-export function StudentsDashboard({ canReadHealth = false }: { canReadHealth?: boolean }) {
+export function StudentsDashboard() {
   const load = useCallback((signal?: AbortSignal) => getStudents(signal), []);
   const { data, error, forbidden, loading, refresh } = useControlCenterResource(load);
   // `form` é o rascunho editado nos campos; `applied` só muda ao clicar "Buscar" (ou
@@ -334,11 +333,7 @@ export function StudentsDashboard({ canReadHealth = false }: { canReadHealth?: b
     <div>
       <SectorHeader
         title="Base de Alunos"
-        description={
-          canReadHealth
-            ? 'Cadastro e situação de assinatura de todos os alunos, com ficha completa disponível por aluno.'
-            : 'Cadastro e situação de assinatura de todos os alunos. Dados de saúde não fazem parte deste acesso.'
-        }
+        icon={UsersRound}
         refreshing={loading}
         onRefresh={() => void refresh()}
       />

@@ -94,10 +94,14 @@ describe('simulateFaqConfig', () => {
 });
 
 describe('simulateForbiddenTopicConfig', () => {
+  // Achado 2026-09-10: "anabolizante" não serve mais de exemplo válido — passou a ser
+  // hard-bloqueado no guardrail determinístico de entrada (`clinical-guardrail.ts`), então
+  // um `GUARDRAIL_CASES` cobre exatamente esse termo e o gate acusaria "Bloqueio excessivo"
+  // (comportamento correto do simulador: o termo já é redundante com o guardrail existente).
   const VALID = {
-    topicKey: 'suplementos-anabolizantes',
-    label: 'Suplementos e Anabolizantes',
-    phrases: ['anabolizante', 'esteroide anabolico'],
+    topicKey: 'consumo-de-alcool',
+    label: 'Consumo de Álcool',
+    phrases: ['álcool', 'bebida alcoólica'],
   };
 
   it('aprova tema válido nas quatro etapas do gate', () => {

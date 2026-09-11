@@ -17,10 +17,16 @@ describe('SuccessScreen', () => {
     expect(screen.queryByText(/diagnóstico|tratamento|cura/i)).not.toBeInTheDocument();
   });
 
-  it('as duas variantes têm o mesmo botão ABRIR WHATSAPP', () => {
+  it('as duas variantes têm o mesmo botão ENTRAR NO MOVIVO CLUB, com o link da comunidade', () => {
     const { rerender } = render(<SuccessScreen outcome="READY" name="Ana" />);
-    expect(screen.getByRole('link', { name: 'ABRIR WHATSAPP' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'ENTRAR NO MOVIVO CLUB' })).toHaveAttribute(
+      'href',
+      'https://chat.whatsapp.com/J3xNcNWE0UcH4qd9I2uMgR',
+    );
     rerender(<SuccessScreen outcome="PENDING_REVIEW" name="Ana" />);
-    expect(screen.getByRole('link', { name: 'ABRIR WHATSAPP' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'ENTRAR NO MOVIVO CLUB' })).toHaveAttribute(
+      'href',
+      'https://chat.whatsapp.com/J3xNcNWE0UcH4qd9I2uMgR',
+    );
   });
 });

@@ -15,15 +15,12 @@ export function ConversationReplay({ replay }: { replay: AnonymizedReplay }) {
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="replay-title" className="text-h3 font-semibold">
-          Conversa anonimizada
+          Conversa
         </h2>
         <span className="font-mono text-xs text-muted-foreground">
           Início {formatDate(replay.startedAt)}
         </span>
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">
-        Identificadores diretos foram removidos no backend antes da exibição.
-      </p>
       {replay.messages.length === 0 ? (
         <p className="mt-4 text-label text-muted-foreground">
           Nenhuma mensagem disponível neste recorte.
@@ -38,9 +35,9 @@ export function ConversationReplay({ replay }: { replay: AnonymizedReplay }) {
               <div className="flex flex-wrap justify-between gap-2 font-mono text-xs text-muted-foreground">
                 <span>
                   {message.role === 'USER'
-                    ? 'Pessoa usuária'
+                    ? (replay.studentName ?? 'Aluno')
                     : message.role === 'ASSISTANT'
-                      ? 'MOVI'
+                      ? 'Movivo'
                       : 'Equipe profissional'}
                 </span>
                 <time dateTime={message.createdAt}>{formatDate(message.createdAt)}</time>

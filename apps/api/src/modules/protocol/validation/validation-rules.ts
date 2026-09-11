@@ -1,10 +1,16 @@
 /**
  * Regras versionadas do ValidationService (US-2.3 / TASK-2.3.1/2.3.2).
  *
- * ⚠️ RASCUNHO — A VALIDAR PELO RT CREF / ALEXANDRE. As faixas plausíveis de carga/volume,
- * a lista de termos proibidos e o mapeamento de ações são o ponto de partida do MVP para
- * destravar o desenvolvimento; o Responsável Técnico (CREF) e o jurídico precisam ratificar
- * cada faixa/termo antes de qualquer uso com pessoas reais. Mudou a regra, muda a versão.
+ * ⚠️ RASCUNHO — A VALIDAR PELO RT CREF / ALEXANDRE. A lista de termos proibidos e o
+ * mapeamento de ações são o ponto de partida do MVP para destravar o desenvolvimento; o
+ * Responsável Técnico (CREF) e o jurídico precisam ratificar cada termo antes de qualquer
+ * uso com pessoas reais. Mudou a regra, muda a versão.
+ *
+ * Decisão do fundador (2026-09-04): não existe mais faixa fixa de séries/repetições/
+ * duração/descanso aqui (nem por objetivo, nem geral, nem por exercício via catálogo) —
+ * removida de propósito. Quanto/quanto tempo prescrever é julgamento do Coach Agente que
+ * gera o protocolo, com autonomia real; a segurança que resta aqui é sobre QUAL exercício
+ * é apropriado (nível, contraindicação), não QUANTO dele prescrever.
  *
  * Determinístico, sem I/O. É o gabarito de segurança do produto (a segurança mora aqui).
  */
@@ -12,48 +18,9 @@ import type { GenerationGoal, WorkoutSplit } from '@movivo/shared';
 
 import type { ExerciseLevel } from '../exercise-catalog';
 
-export const VALIDATION_RULES_VERSION = 'validation-rules-2026-08-v3';
+export const VALIDATION_RULES_VERSION = 'validation-rules-2026-09-v4';
 
 export type ValidationActionCode = 'PASS' | 'FLAG' | 'BLOCK';
-
-export interface NumericRange {
-  min: number;
-  max: number;
-}
-
-/** Faixa plausível de séries e descanso (comum a todos os objetivos). */
-export const SETS_RANGE: NumericRange = { min: 1, max: 6 };
-export const REST_SECONDS_RANGE: NumericRange = { min: 15, max: 240 };
-
-/**
- * Faixa padrão de segundos por série/intervalo para exercício de medida `DURATION`
- * (achado 2026-08-18, `CatalogExercise.measurement`). É o default de HOLD ISOMÉTRICO (prancha);
- * cardio contínuo/intervalado tem faixa própria em `durationSecondsRange` no próprio catálogo,
- * porque a escala de tempo (minutos, não segundos) é outra.
- */
-export const DURATION_SECONDS_RANGE: NumericRange = { min: 15, max: 120 };
-
-/**
- * Faixa de repetições plausível por objetivo (a validar pelo RT CREF).
- *
- * v3 (Sprint 6): passou de 3 para os **8 objetivos de geração** da anamnese v2. Cada faixa é
- * própria, não um alias das antigas — foi justamente o atalho que o fundador rejeitou:
- *  - `GAIN_STRENGTH` é a única faixa que desce abaixo de 4 reps (trabalho neural, séries curtas);
- *  - `SPORT_EVENT` cobre de força a resistência específica, então é ampla nos dois extremos;
- *  - `HEALTH_ENERGY`, `BUILD_ROUTINE` e `RETURN_TO_TRAINING` são objetivos de adesão e
- *    reentrada: teto moderado, sem faixa de baixa repetição/alta carga.
- * `OTHER` não aparece porque não é objetivo de geração (`toGenerationGoal` o traduz antes).
- */
-export const REPS_RANGE_BY_GOAL: Record<GenerationGoal, NumericRange> = {
-  GAIN_MUSCLE: { min: 6, max: 15 },
-  GAIN_STRENGTH: { min: 3, max: 10 },
-  LOSE_FAT: { min: 8, max: 25 },
-  CONDITIONING: { min: 8, max: 30 },
-  HEALTH_ENERGY: { min: 8, max: 20 },
-  BUILD_ROUTINE: { min: 8, max: 20 },
-  RETURN_TO_TRAINING: { min: 8, max: 20 },
-  SPORT_EVENT: { min: 4, max: 25 },
-};
 
 /**
  * Padrões de movimento priorizados por objetivo — o gerador recebe isto como orientação
@@ -128,10 +95,17 @@ export const MIN_FREQUENCY_BY_SPLIT: Record<WorkoutSplit, number> = {
  */
 export const MAX_TECHNIQUES_PER_SESSION = 2;
 
-/** `value` está dentro de `[min, max]`? */
-export function inRange(value: number, range: NumericRange): boolean {
-  return value >= range.min && value <= range.max;
-}
+/**
+ * Fração máxima de exercícios ISOLATION numa sessão antes de virar "isolado como base"
+ * (metodologia: "isoladores devem atuar PREDOMINANTEMENTE como complementos... e não
+ * necessariamente como sua base"). Achado 2026-09-03 (reproduzido ao vivo): o corte
+ * original era >50% (bare majority) — bloqueava sessões reais e legítimas de "Superior"
+ * geradas pela IA com 60% (3 de 5) e 66,7% (4 de 6) de isolados, comuns em dia de
+ * ombro/braço numa divisão ABC/upper-lower. "Predominantemente" é maioria CLARA, não
+ * qualquer maioria — 70% deixa passar esses casos reais e ainda bloqueia sessão
+ * degenerada (quase só isolado).
+ */
+export const ISOLATION_MAJORITY_THRESHOLD = 0.7;
 
 /**
  * Regra de compliance de linguagem: um padrão + a ação que ele dispara.

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { applyResponseFormatting, truncateAtBoundary } from './response-formatter';
+import { BUBBLE_SEPARATOR } from '../whatsapp/message-templates';
+import { applyResponseFormatting } from './response-formatter';
 
 describe('applyResponseFormatting', () => {
   it('aplica o teto total de cinco itens em toda a mensagem', () => {
@@ -26,14 +27,32 @@ describe('applyResponseFormatting', () => {
     expect(formatted).not.toContain('*segundo*');
   });
 
-  it('limita parágrafos de forma determinística', () => {
+  // Achado 2026-09-08 (bug reproduzido ao vivo pelo fundador): antes, parágrafo além do
+  // teto de `blockSize` era DESCARTADO — a IA parava no meio da explicação sem aviso nenhum.
+  // Agora vira a bolha seguinte: nada é perdido, só reparticionado entre mensagens.
+  it('parágrafo além do teto vira bolha seguinte, nunca é descartado', () => {
     expect(
       applyResponseFormatting('primeiro\n\nsegundo\n\nterceiro', {
         blockSize: 'MEDIO',
         allowLists: false,
         boldPolicy: 'NENHUM',
       }),
-    ).toBe('primeiro\n\nsegundo');
+    ).toBe(`primeiro\n\nsegundo${BUBBLE_SEPARATOR}terceiro`);
+  });
+
+  it('frase maior que o teto de caracteres vira bolha seguinte, sem reticências nem perda', () => {
+    const long =
+      'Como seu foco é hipertrofia e você treina costas e bíceps juntos, a martelo compensa ' +
+      'o desgaste que a puxada e a remada já causam no bíceps, trabalhando o braço de um ' +
+      'ângulo diferente e ajudando a evitar platô de força no treino de puxar.';
+    const formatted = applyResponseFormatting(long, {
+      blockSize: 'CURTO',
+      allowLists: false,
+      boldPolicy: 'NENHUM',
+    });
+    // Nada some, nem reticências: junta as bolhas de volta e o texto é IDÊNTICO ao original.
+    expect(formatted.split(BUBBLE_SEPARATOR).join(' ')).toBe(long);
+    expect(formatted).not.toContain('…');
   });
 
   // Achado 2026-09-02 (correção do fundador — "NUNCA DEVE SER USADO"): a instrução no
@@ -65,12 +84,5 @@ describe('applyResponseFormatting', () => {
     it('múltiplos travessões na mesma mensagem são todos normalizados', () => {
       expect(applyResponseFormatting('Um — dois — três.', fmt)).toBe('Um, dois, três.');
     });
-  });
-});
-
-describe('truncateAtBoundary', () => {
-  it('não corta no meio de palavra', () => {
-    const result = truncateAtBoundary('uma resposta longa demais para o limite', 20);
-    expect(result).toBe('uma resposta longa…');
   });
 });

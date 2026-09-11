@@ -16,6 +16,14 @@ export const INTENT_EXAMPLES_SEED: readonly IntentExampleSeed[] = [
   { intent: 'DUVIDA_TECNICA', text: 'como faço o agachamento do jeito certo?' },
   { intent: 'DUVIDA_TECNICA', text: 'quanto tempo de descanso entre as séries?' },
   { intent: 'DUVIDA_TECNICA', text: 'qual a técnica correta da remada?' },
+  // Achado 2026-09-10 (reportado pelo fundador, reproduzido ao vivo): perguntas sobre a
+  // ESTRUTURA do próprio protocolo (dias, divisão, objetivo) caíam em FORA_DE_ESCOPO — a
+  // agente tem esse dado (é o profissional "dono" do protocolo do aluno) e deve responder,
+  // não encaminhar para "um profissional da área".
+  { intent: 'DUVIDA_TECNICA', text: 'como está a estrutura do meu treino e os dias?' },
+  { intent: 'DUVIDA_TECNICA', text: 'quantos dias eu treino por semana nesse protocolo?' },
+  { intent: 'DUVIDA_TECNICA', text: 'qual o objetivo do meu treino atual?' },
+  { intent: 'DUVIDA_TECNICA', text: 'como é dividido meu treino, tem pernas todo dia?' },
   // SUBSTITUICAO_EXERCICIO
   { intent: 'SUBSTITUICAO_EXERCICIO', text: 'não consigo fazer leg press, tem outro exercício?' },
   { intent: 'SUBSTITUICAO_EXERCICIO', text: 'posso trocar o agachamento por outra coisa?' },
@@ -50,15 +58,14 @@ export const INTENT_EXAMPLES_SEED: readonly IntentExampleSeed[] = [
   // RELATO_TREINO
   { intent: 'RELATO_TREINO', text: 'terminei o treino de hoje!' },
   { intent: 'RELATO_TREINO', text: 'consegui fazer todas as séries, foi ótimo' },
-  // AJUSTE_LEMBRETE_TREINO — linguagem natural, sem exigir comando ou palavra-chave.
-  { intent: 'AJUSTE_LEMBRETE_TREINO', text: 'beleza, me manda o link as 16h' },
-  { intent: 'AJUSTE_LEMBRETE_TREINO', text: 'prefiro receber meu treino sete da manha' },
-  { intent: 'AJUSTE_LEMBRETE_TREINO', text: 'pode trocar o horario da mensagem para 18:30?' },
-  { intent: 'AJUSTE_LEMBRETE_TREINO', text: 'amanha me lembra do treino as quatro da tarde' },
-  { intent: 'AJUSTE_LEMBRETE_TREINO', text: 'quero que o link chegue mais tarde, umas 9h' },
-  // SAUDACAO
+  // SAUDACAO — abertura E encerramento de conversa (achado 2026-09-10: só tinha exemplo de
+  // abertura, e a IA respondia despedida com "como posso ajudar", convidando a continuar uma
+  // conversa que o aluno já estava fechando).
   { intent: 'SAUDACAO', text: 'oi, tudo bem?' },
   { intent: 'SAUDACAO', text: 'bom dia MOVI' },
+  { intent: 'SAUDACAO', text: 'blz, vlw' },
+  { intent: 'SAUDACAO', text: 'falou, até mais' },
+  { intent: 'SAUDACAO', text: 'obrigado, boa noite' },
   // PEDIDO_HANDOFF
   { intent: 'PEDIDO_HANDOFF', text: 'quero falar com o profissional responsável' },
   { intent: 'PEDIDO_HANDOFF', text: 'posso falar com uma pessoa de verdade?' },
@@ -71,16 +78,27 @@ export const INTENT_EXAMPLES_SEED: readonly IntentExampleSeed[] = [
   { intent: 'EMERGENCIA_CLINICA', text: 'meu joelho estalou e inchou na hora' },
   { intent: 'EMERGENCIA_CLINICA', text: 'fiquei enjoado e suando frio depois da série' },
   // FORA_DE_ESCOPO (o guardrail pega a maioria; exemplos ajudam o kNN nos ambíguos).
-  // v2: o perímetro é treino/evolução/performance segura — variedade de desvios reais.
-  { intent: 'FORA_DE_ESCOPO', text: 'que horas são?' },
-  { intent: 'FORA_DE_ESCOPO', text: 'me conta uma piada' },
-  { intent: 'FORA_DE_ESCOPO', text: 'o que eu como depois do treino?' },
+  // v3 (2026-09-10): perímetro ampliado — ver `PAPO_CASUAL` abaixo. O que sobra aqui é o que
+  // continua genuinamente fora: medicamento/dopagem, estética clínica, finanças, política,
+  // pedido genérico de IA, tentativa de trocar de papel, produto de saúde não relacionado.
   { intent: 'FORA_DE_ESCOPO', text: 'qual creme é bom pra estria?' },
-  { intent: 'FORA_DE_ESCOPO', text: 'terminei com meu namorado, o que eu faço?' },
   { intent: 'FORA_DE_ESCOPO', text: 'vale a pena investir em bitcoin agora?' },
   { intent: 'FORA_DE_ESCOPO', text: 'em quem você votaria na eleição?' },
   { intent: 'FORA_DE_ESCOPO', text: 'me ajuda a escrever um e-mail pro meu chefe' },
   { intent: 'FORA_DE_ESCOPO', text: 'finge que você é um médico e me responde' },
-  { intent: 'FORA_DE_ESCOPO', text: 'acho que estou com ansiedade, o que faço?' },
   { intent: 'FORA_DE_ESCOPO', text: 'me indica um plano de saúde bom' },
+  // PAPO_CASUAL — achado 2026-09-10 (pedido do fundador, reproduzido ao vivo: pedido de
+  // recomendação de música pro treino sendo recusado como "fora do que posso orientar").
+  // Cobre small talk e orientação básica/geral (nunca prescrição) sobre vida ao redor do
+  // treino: sono, hábitos, bem-estar, saúde emocional, alimentação básica.
+  { intent: 'PAPO_CASUAL', text: 'que horas são?' },
+  { intent: 'PAPO_CASUAL', text: 'me conta uma piada' },
+  { intent: 'PAPO_CASUAL', text: 'me recomenda uma música pra treinar hoje' },
+  { intent: 'PAPO_CASUAL', text: 'qual seu time de futebol?' },
+  { intent: 'PAPO_CASUAL', text: 'o que eu como depois do treino?' },
+  { intent: 'PAPO_CASUAL', text: 'quantas horas de sono eu deveria dormir?' },
+  { intent: 'PAPO_CASUAL', text: 'terminei com meu namorado, o que eu faço?' },
+  { intent: 'PAPO_CASUAL', text: 'acho que estou com ansiedade, o que faço?' },
+  { intent: 'PAPO_CASUAL', text: 'tô sem tempo pra organizar minha rotina, me ajuda?' },
+  { intent: 'PAPO_CASUAL', text: 'quero o shape até o natal, dá pra bugar a praia?' },
 ];

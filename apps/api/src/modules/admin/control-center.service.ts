@@ -73,7 +73,6 @@ import {
   type RedisKeyBuilder,
 } from '../../core/redis';
 import { ragUsageDay, ragUsageKeys } from '../ai-coach/rag/rag-usage.keys';
-import { scrubPII } from '../ai-coach/llm/pii-scrubber';
 import { roleHasCapabilities } from '../auth/capabilities';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { EVOLUTION_TRANSPORT, type EvolutionTransport } from '../whatsapp/evolution-transport';
@@ -1496,8 +1495,6 @@ export class ControlCenterService {
     const checkinsResponded = raw.checkinRows.filter(
       (checkin) => checkin.respondedAt ?? checkin.completedAt,
     ).length;
-    const scrubUser = { name: row.name, phoneNumber: row.phoneNumber, email: row.email };
-
     const student = {
       id: row.id,
       name: row.name,
@@ -1546,10 +1543,12 @@ export class ControlCenterService {
         blockedRate: this.blockedRate(raw.quality?.blocked ?? 0, raw.quality?.validated ?? 0),
         blocked: raw.quality?.blocked ?? 0,
         validated: raw.quality?.validated ?? 0,
+        // Achado 2026-09-08 (decisão do fundador): painel é de uso interno da equipe MOVIVO —
+        // sem anonimização do conteúdo real da conversa.
         occurrences: canReadHealth
           ? raw.blockedRows.map((occurrence) => ({
               at: occurrence.createdAt.toISOString(),
-              content: scrubPII(occurrence.content, scrubUser),
+              content: occurrence.content,
             }))
           : [],
       },

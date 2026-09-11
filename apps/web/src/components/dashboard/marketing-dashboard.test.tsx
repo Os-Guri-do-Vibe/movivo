@@ -22,7 +22,7 @@ describe('MarketingDashboard', () => {
   it('numera as etapas do funil e não inventa zero na etapa sem amostra', async () => {
     getMarketing.mockResolvedValue(marketingResponse);
     render(<MarketingDashboard />);
-    expect(await screen.findByRole('heading', { name: 'Analytics' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: 'Aquisição & Canais' })).toBeVisible();
 
     const steps = screen.getAllByRole('listitem');
     expect(steps[0]).toHaveTextContent('Etapa 1');
@@ -93,7 +93,7 @@ describe('MarketingDashboard', () => {
   it('exibe CAC/ROAS por canal e nunca R$ 0,00 em canal sem investimento (US-8.6)', async () => {
     getMarketing.mockResolvedValue(marketingResponse);
     render(<MarketingDashboard />);
-    expect(await screen.findByRole('heading', { name: 'Aquisição & Canais' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: 'Desempenho por canal' })).toBeVisible();
     // Janela de atribuição declarada na tela, nunca implícita.
     expect(screen.getByText(/convertidos em até 60 dias após o cadastro/i)).toBeVisible();
     // Canal com investimento: CAC em reais.

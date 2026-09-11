@@ -8,6 +8,7 @@ export type WhatsappJobType =
   | 'CONFIRMATION_CARE'
   | 'PROTOCOL_DELIVERY'
   | 'PROTOCOL_WAITING'
+  | 'MESOCYCLE_RENEWAL_INVITE'
   | 'COACH_MESSAGE'
   | 'CHECKIN_MESSAGE'
   | 'WORKOUT_QUICK_REPLY'
@@ -35,4 +36,13 @@ export interface WhatsappOutboundJob {
   /** `PHONE_VERIFICATION`: destino e código. Só neste tipo o telefone viaja no payload. */
   phoneNumber?: string;
   code?: string;
+  /**
+   * `PROTOCOL_DELIVERY` apenas (achado 2026-09-08): distingue a 1ª entrega do treino de uma
+   * reentrega após substituição de exercício aprovada — a saudação estática muda (ver
+   * `protocolDeliveryPdfText`). Ausente/`'INITIAL'` mantém o texto de sempre.
+   */
+  deliveryReason?: 'INITIAL' | 'SUBSTITUTION';
+  /** Só com `deliveryReason: 'SUBSTITUTION'` — nomes do exercício trocado, pra saudação. */
+  substitutionFromExercise?: string;
+  substitutionToExercise?: string;
 }

@@ -4,7 +4,6 @@ import { EXERCISE_BY_ID, EXERCISE_CATALOG } from './exercise-catalog';
 import {
   findSafeCandidates,
   isViable,
-  MAX_SUBSTITUTION_CANDIDATES,
   type SubstitutionConstraints,
 } from './exercise-substitution';
 
@@ -60,24 +59,28 @@ describe('findSafeCandidates (achado 2026-09-02 — substitui o antigo findSafeS
     }
   });
 
-  it('respeita o teto de candidatos (MAX_SUBSTITUTION_CANDIDATES por padrão)', () => {
-    const pushup = EXERCISE_BY_ID.get('flexao');
-    if (!pushup) throw new Error('fixture');
-    const candidates = findSafeCandidates(pushup, beginnerHome, EXERCISE_CATALOG);
-    expect(candidates.length).toBeLessThanOrEqual(MAX_SUBSTITUTION_CANDIDATES);
-  });
-
-  it('respeita um limite explícito menor que o teto padrão', () => {
-    const pushup = EXERCISE_BY_ID.get('flexao');
-    if (!pushup) throw new Error('fixture');
-    const candidates = findSafeCandidates(pushup, beginnerHome, EXERCISE_CATALOG, 1);
-    expect(candidates.length).toBeLessThanOrEqual(1);
+  // Achado 2026-09-09 (pedido do fundador): a curadoria deixou de ter teto — `findSafeCandidates`
+  // devolve TODOS os elegíveis. Quem particiona em lotes de apresentação é o worker
+  // (`SUBSTITUTION_BATCH_SIZE`, em `ai-response.worker.ts`), não esta função.
+  it('curadoria ilimitada: devolve TODOS os candidatos elegíveis, sem teto embutido', () => {
+    const target = EXERCISE_BY_ID.get('supino_reto_barra');
+    if (!target) throw new Error('fixture');
+    const fullGymNoInjury: SubstitutionConstraints = {
+      level: 'AVANCADO',
+      location: 'FULL_GYM',
+      equipment: [],
+      injuryTags: [],
+    };
+    const candidates = findSafeCandidates(target, fullGymNoInjury, EXERCISE_CATALOG);
+    // Mesmo padrão de movimento, nível AVANCADO liberado, academia completa: a base real tem
+    // dezenas de push horizontais elegíveis — muito além do antigo teto fixo de 3.
+    expect(candidates.length).toBeGreaterThan(3);
   });
 
   it('nunca repete um candidato (curados e mesmo-padrão podem colidir)', () => {
     const pushup = EXERCISE_BY_ID.get('flexao');
     if (!pushup) throw new Error('fixture');
-    const candidates = findSafeCandidates(pushup, beginnerHome, EXERCISE_CATALOG, 20);
+    const candidates = findSafeCandidates(pushup, beginnerHome, EXERCISE_CATALOG);
     const ids = candidates.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
   });

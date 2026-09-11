@@ -11,6 +11,7 @@ import type { UserConstraints } from './user-constraints';
 const constraints: UserConstraints = {
   goal: 'GAIN_MUSCLE',
   level: 'INICIANTE',
+  trainingStatus: 'REGULAR',
   daysPerWeek: 3,
   preferredDays: ['MON', 'WED', 'FRI'],
   location: 'FULL_GYM',

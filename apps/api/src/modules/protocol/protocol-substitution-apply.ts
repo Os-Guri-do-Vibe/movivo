@@ -33,7 +33,7 @@ const FALLBACK_REPS = { min: 10, max: 15 };
 
 /** Ajusta um exercício da sessão para o substituto — preserva volume/descanso/RIR/técnica. */
 function withSubstitutedExercise(ex: ProtocolExercise, to: CatalogExercise): ProtocolExercise {
-  const next: ProtocolExercise = { ...ex, exerciseId: to.id, name: to.name };
+  const next: ProtocolExercise = { ...ex, exerciseId: to.id, name: to.name, videoUrl: to.videoUrl };
   if (to.measurement === 'DURATION') {
     if (ex.durationSeconds === undefined) {
       next.durationSeconds = FALLBACK_DURATION_SECONDS;

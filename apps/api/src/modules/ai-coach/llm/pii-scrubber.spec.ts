@@ -37,7 +37,7 @@ describe('scrubPII', () => {
     expect(out).toContain('[telefone]');
   });
 
-  it('normaliza lesão em rótulo estável e derruba nome de terceiro (caso registrado)', () => {
+  it('normaliza lesão em rótulo estável, derrubando o resto da frase junto (inclui nome citado nela)', () => {
     const out = scrubPII('Tenho lesão no ombro direito do João.', {});
     expect(out).toContain('lesão: ombro D');
     expect(out).not.toContain('João');
@@ -48,9 +48,47 @@ describe('scrubPII', () => {
     expect(out).toBe('Quero ganhar massa treinando 4x por semana em casa.');
   });
 
-  it('substitui nome de terceiro precedido por de/do/da (heurística)', () => {
-    const out = scrubPII('Segui o conselho do Carlos Souza.', {});
-    expect(out).not.toContain('Carlos');
-    expect(out).toContain('terceiro');
+  // Achado 2026-09-08 (decisão do fundador): a heurística de "menção a terceiro" (de/do/da +
+  // Nome Próprio) foi REMOVIDA — o painel de profissionais é de uso interno da MOVIVO, não
+  // precisa desse nível de anonimização, e a heurística disparava em qualquer nome de
+  // exercício composto ("Caminhada de Mala" → "Caminhada de terceiro"), corrompendo tanto o
+  // texto enviado ao LLM quanto a conversa exibida ao profissional.
+  it('NÃO mexe mais em menção a terceiro, mesmo composta com "de/do/da" (heurística removida)', () => {
+    const out = scrubPII('Segui o conselho do Carlos Souza sobre a Caminhada de Mala.', {});
+    expect(out).toBe('Segui o conselho do Carlos Souza sobre a Caminhada de Mala.');
+  });
+
+  // Achado 2026-09-10 (bug reportado pelo fundador, reproduzido ao vivo): nome com partícula
+  // ("Rodrigo Cavalcante DE Barros") fazia TODO "de" do texto virar "o usuário" — "a vontade
+  // de ir treinar" saía como "a vontade o usuário ir treinar". Partícula sozinha não é PII (não
+  // identifica ninguém), então não deve ser substituída como token isolado.
+  it('não substitui a partícula do nome ("de"/"da"/"do"/"dos"/"das"/"e") como token isolado', () => {
+    const user = {
+      name: 'Rodrigo Cavalcante de Barros',
+      phoneNumber: null,
+      email: null,
+      birthDate: null,
+    };
+    const out = scrubPII(
+      'Sono é onde o corpo se recupera do treino, e isso derruba a vontade de ir treinar.',
+      user,
+    );
+    expect(out).toBe(
+      'Sono é onde o corpo se recupera do treino, e isso derruba a vontade de ir treinar.',
+    );
+  });
+
+  it('ainda remove o nome de verdade quando o titular tem partícula no sobrenome', () => {
+    const user = {
+      name: 'Rodrigo Cavalcante de Barros',
+      phoneNumber: null,
+      email: null,
+      birthDate: null,
+    };
+    const out = scrubPII('Aqui fala o Rodrigo Cavalcante de Barros.', user);
+    expect(out).not.toContain('Rodrigo');
+    expect(out).not.toContain('Cavalcante');
+    expect(out).not.toContain('Barros');
+    expect(out).toContain('o usuário');
   });
 });

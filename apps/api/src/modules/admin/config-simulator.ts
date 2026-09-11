@@ -47,9 +47,12 @@ function result(
 
 export function simulatePersonaConfig(candidate: AgentPersona) {
   const schemaFailures = agentPersonaSchema.safeParse(candidate).success
-    ? [candidate.agentName, candidate.agentSelfIntro, candidate.humanHandoffMessage].some((value) =>
-        detectInjection(value),
-      )
+    ? [
+        candidate.agentName,
+        candidate.agentSelfIntro,
+        candidate.humanHandoffMessage,
+        ...(candidate.voiceExample !== undefined ? [candidate.voiceExample] : []),
+      ].some((value) => detectInjection(value))
       ? ['A persona contém padrão de instrução para a IA.']
       : []
     : ['A persona não atende ao contrato fechado de configuração.'];

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { AppConfigService } from '../config';
+import { BatchingEmbedding } from './batching-embedding';
 import { FakeEmbedding } from './embedding.port';
 import { createEmbedding } from './knowledge.module';
 import { OpenAiEmbedding } from './openai-embedding';
@@ -24,9 +25,11 @@ function config(overrides: {
 
 describe('createEmbedding — gate neutro de dados', () => {
   it('só libera o endpoint externo quando chave e aprovação HEALTH existem', () => {
-    expect(createEmbedding(config({ key: 'sk-test', approved: true }))).toBeInstanceOf(
-      OpenAiEmbedding,
-    );
+    // `BatchingEmbedding` agrupa `embed()` concorrentes numa única chamada ao provedor
+    // real (ver doc do decorator) — o provedor real ainda precisa ser o `OpenAiEmbedding`.
+    const embedding = createEmbedding(config({ key: 'sk-test', approved: true }));
+    expect(embedding).toBeInstanceOf(BatchingEmbedding);
+    expect((embedding as BatchingEmbedding).inner).toBeInstanceOf(OpenAiEmbedding);
   });
 
   it('usa fake local em desenvolvimento se o endpoint não foi aprovado', () => {

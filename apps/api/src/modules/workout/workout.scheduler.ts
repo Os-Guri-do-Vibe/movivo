@@ -1,5 +1,5 @@
 import { Injectable, type OnModuleInit } from '@nestjs/common';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 import { CONSENT_TEXTS } from '@movivo/shared';
 
@@ -15,6 +15,16 @@ import { dailyWorkoutMessage } from './workout-messages';
 
 type WorkoutJob = { kind: 'SCAN' };
 const SCAN_CRON = '* * * * *';
+
+/**
+ * Achado 2026-09-10 (pedido do fundador): o link diário deixou de ter horário configurável
+ * por aluno (a feature de chat que deixava pedir "me manda às 16h" foi removida, junto com a
+ * intenção `AJUSTE_LEMBRETE_TREINO` — ver `AIResponseWorker`). Todo mundo recebe no mesmo
+ * horário, 04:00 no fuso LOCAL de cada aluno (`users.timezone`, que continua necessário —
+ * "04:00 fixo" nunca significou 04:00 UTC). `users.workoutReminderTime` fica órfã a partir
+ * daqui: ninguém mais escreve nela, e o scan não lê mais essa coluna.
+ */
+const FIXED_WORKOUT_REMINDER_TIME = '04:00';
 
 function localParts(now: Date, timezone: string): { date: string; time: string } | null {
   try {
@@ -68,7 +78,6 @@ export class WorkoutScheduler implements OnModuleInit {
           userId: protocols.userId,
           name: users.name,
           timezone: users.timezone,
-          reminderTime: users.workoutReminderTime,
           reminderEnabled: users.workoutReminderEnabled,
         })
         .from(protocols)
@@ -84,14 +93,19 @@ export class WorkoutScheduler implements OnModuleInit {
             isNull(consents.revokedAt),
           ),
         )
-        .where(and(eq(protocols.status, 'ACTIVE'), eq(subscriptions.status, 'ACTIVE'))),
+        .where(
+          and(
+            eq(protocols.status, 'ACTIVE'),
+            inArray(subscriptions.status, ['ACTIVE', 'TRIALING']),
+          ),
+        ),
     );
 
     let sent = 0;
     for (const row of eligible) {
       if (!row.reminderEnabled) continue;
       const local = localParts(now, row.timezone);
-      if (!local || local.time !== row.reminderTime) continue;
+      if (!local || local.time !== FIXED_WORKOUT_REMINDER_TIME) continue;
       const view = await this.journal.journal(row.userId, local.date, now);
       if (!view.workout) continue;
       const link = await this.access.createMagicLink(row.userId, view.workout.id);

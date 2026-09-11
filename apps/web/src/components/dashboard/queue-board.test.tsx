@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   editProtocolItem,
+  fallbackProtocolItem,
   handoffItem,
   optionalProtocolItem,
   parqProtocolItem,
@@ -369,10 +370,14 @@ describe('QueueBoard', () => {
   /**
    * A legenda é o único sinal LEGÍVEL de origem no card: a faixa coral é CSS e o ícone é
    * `aria-hidden`, e o título de um PAR-Q bloqueante é igual ao de qualquer protocolo.
-   * `EDIT` (a outra origem de `MANDATORY`) não ganha legenda — já tem o pill "Atenção".
+   * `EDIT` (a terceira origem de `MANDATORY`, junto de `FALLBACK` desde 2026-09-03) não
+   * ganha legenda — já tem o pill "Atenção" sozinho, sem ambiguidade a desfazer.
    */
-  it('legenda de origem: só o card de PAR-Q bloqueante a exibe, junto da faixa e do ícone de segurança', async () => {
-    getQueue.mockResolvedValue(queueResponse);
+  it('legenda de origem: PAR-Q e FALLBACK exibem, EDIT não — só PAR-Q ganha faixa/ícone de segurança', async () => {
+    getQueue.mockResolvedValue({
+      ...queueResponse,
+      mandatory: [...queueResponse.mandatory, fallbackProtocolItem],
+    });
     render(<QueueBoard />);
 
     const parqCard = (await screen.findByText(parqProtocolItem.title)).closest('li') as HTMLElement;
@@ -383,6 +388,12 @@ describe('QueueBoard', () => {
     const editCard = screen.getByText(editProtocolItem.title).closest('li') as HTMLElement;
     expect(within(editCard).queryByText(/Origem:/)).not.toBeInTheDocument();
     expect(editCard.className).not.toContain('border-l-coral');
+
+    const fallbackCard = screen.getByText(fallbackProtocolItem.title).closest('li') as HTMLElement;
+    expect(
+      within(fallbackCard).getByText('Origem: template conservador (geração não validou)'),
+    ).toBeVisible();
+    expect(fallbackCard.className).not.toContain('border-l-coral');
 
     const optionalCard = screen.getByText(optionalProtocolItem.title).closest('li') as HTMLElement;
     expect(within(optionalCard).queryByText(/Origem:/)).not.toBeInTheDocument();

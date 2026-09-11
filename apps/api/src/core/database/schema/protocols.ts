@@ -1,15 +1,20 @@
 /**
- * Tabela `protocols` — o protocolo de treino **vigente** de cada usuário.
+ * Tabela `protocols` — uma linha por MESOCICLO do titular (`mesocycleNumber`), a partir
+ * da renovação de fim de mesociclo: nunca mais de uma `ACTIVE` por titular ao mesmo
+ * tempo (`ProtocolRepository.activateProtocol` supersede a anterior atomicamente), mas
+ * o histórico completo de mesociclos passados fica retido, cada um em sua própria linha.
  *
- * Um protocolo nunca é produto de LLM puro: ele nasce do Motor Determinístico e
- * só chega ao usuário depois de assinado/supervisionado por profissional CREF
- * (`ARQUITETURA.md` §12.4/§12.5). O schema materializa essa regra em colunas —
- * `professional_id`, `signed_at`, `signature_hash`, `human_review_required` —
- * para que a supervisão seja um fato consultável no banco, e não uma promessa
- * de camada de aplicação.
+ * Um protocolo nunca é produto de LLM puro: ele nasce da geração por IA dentro dos
+ * trilhos da metodologia do RT CREF (não de um motor determinístico — decisão do
+ * fundador, ver `protocol-generator.service.ts`) e só chega ao usuário depois de
+ * assinado/supervisionado por profissional CREF (`ARQUITETURA.md` §12.4/§12.5). O schema
+ * materializa essa regra em colunas — `professional_id`, `signed_at`, `signature_hash`,
+ * `human_review_required` — para que a supervisão seja um fato consultável no banco, e
+ * não uma promessa de camada de aplicação.
  */
 import { sql } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
   boolean,
   check,
   index,
@@ -24,6 +29,7 @@ import {
 import { bytea, eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
 import { protocolApprovalStatusEnum, protocolStatusEnum, reviewUrgencyEnum } from './enums';
 import { anamnesisSessions } from './anamnesis-sessions';
+import { protocolRenewalSessions } from './protocol-renewal-sessions';
 import { users } from './users';
 import { methodologyVersions } from './methodology-versions';
 
@@ -53,8 +59,36 @@ export const protocols = pgTable(
       onDelete: 'restrict',
     }),
 
-    /** Versão vigente. O histórico completo vive em `protocol_versions`. */
+    /**
+     * Sessão de renovação (formulário de troca de protocolo por fim de mesociclo) que
+     * originou este protocolo. Exclusivo com `anamnesisSessionId`: todo protocolo nasce de
+     * UM dos dois — o primeiro (`mesocycleNumber = 1`) de uma anamnese, os seguintes de uma
+     * renovação. `RESTRICT` pelo mesmo motivo de `anamnesisSessionId` (prova documental).
+     */
+    // `(): AnyPgColumn =>` quebra a inferência circular com `protocol-renewal-sessions.ts`
+    // (que referencia esta tabela de volta via `previousProtocolId`).
+    renewalSessionId: uuid('renewal_session_id').references(
+      (): AnyPgColumn => protocolRenewalSessions.id,
+      { onDelete: 'restrict' },
+    ),
+
+    /**
+     * Versão vigente **desta linha** — conta REVISÕES do mesmo protocolo (ex.: edição do
+     * CREF antes de assinar), nunca o número do mesociclo. `signProtocol` incrementa este
+     * campo ao assinar; o histórico completo vive em `protocol_versions`. Não confundir com
+     * `mesocycleNumber` abaixo, que é quem numera o mesociclo na vida do titular.
+     */
     version: smallint('version').notNull().default(1),
+
+    /**
+     * Nº sequencial do mesociclo na vida do titular (1 = protocolo inicial, 2 = primeira
+     * renovação, e assim por diante). Existe porque `version` (acima) já tinha semântica
+     * própria antes desta feature — reaproveitá-lo para contar mesociclo colidiria com o
+     * incremento que `signProtocol` já faz a cada assinatura. É o que `mesocycleName()`
+     * usa para nomear o bloco ("Mesociclo {mesocycleNumber}: {fase}") e o que
+     * `ProtocolRepository.persist()` calcula como `MAX(mesocycleNumber) + 1` por titular.
+     */
+    mesocycleNumber: smallint('mesocycle_number').notNull().default(1),
 
     status: protocolStatusEnum('status').notNull().default('DRAFT'),
 
@@ -87,7 +121,7 @@ export const protocols = pgTable(
     currentWeek: smallint('current_week').notNull().default(1),
     totalWeeks: smallint('total_weeks').notNull().default(12),
 
-    /** Nome do bloco de periodização vigente (ex.: "Mesociclo 1 — Hipertrofia"). Computado no `persist()` a partir de `content.phase`. */
+    /** Nome do bloco de periodização vigente (ex.: "Mesociclo 1: Hipertrofia"). Computado no `persist()` a partir de `mesocycleNumber` + `content.phase`; congelado na criação, nunca recalculado numa revisão/assinatura posterior. */
     mesocycleName: varchar('mesocycle_name', { length: 120 }).notNull(),
 
     /** Início do mesociclo vigente. `end_date` = `start_date` + `total_weeks` semanas, ambos gravados no `persist()`. */
@@ -171,7 +205,14 @@ export const protocols = pgTable(
     ...timestampColumns,
   },
   (table) => [
-    unique('uq_protocols_user_version').on(table.userId, table.version),
+    // Escopado por mesociclo: `version` sozinho não é mais globalmente único por titular
+    // desde que um titular passou a poder ter mais de um mesociclo (uma linha por
+    // mesociclo, cada uma com sua própria sequência de revisão a partir de 1).
+    unique('uq_protocols_user_mesocycle_version').on(
+      table.userId,
+      table.mesocycleNumber,
+      table.version,
+    ),
     index('idx_protocols_user').on(table.userId, table.createdAt),
     index('idx_protocols_status').on(table.status),
     // Fila de trabalho do dashboard CREF.
@@ -179,6 +220,8 @@ export const protocols = pgTable(
     // Join da fila com `anamnesis_sessions` (severidade do item) e lookup da liberação
     // de PAR-Q na assinatura.
     index('idx_protocols_anamnesis_session').on(table.anamnesisSessionId),
+    // Rastreabilidade da renovação — mesmo papel do índice de anamnese acima.
+    index('idx_protocols_renewal_session').on(table.renewalSessionId),
     /**
      * Defesa em profundidade exigida pela revisão de segurança (2026-08-24): protocolo
      * `MANDATORY` NUNCA pode terminar `AUTO_APPROVED`. Hoje três camadas já impedem isso

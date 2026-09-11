@@ -10,6 +10,7 @@ import {
   type ProtocolAutoReleaseJob,
 } from './protocol-auto-release.worker';
 import type { AutoReleaseResult, ProtocolRepository } from './protocol.repository';
+import type { WorkoutPresentationService } from './workout-presentation.service';
 
 const content: ProtocolStructure = {
   promptVersion: 'v1',
@@ -47,7 +48,10 @@ const personal = {
 function makeWorker(
   released: boolean,
   version = 1,
-  opts: { findLatestPersonalInfo?: () => Promise<typeof personal | null> } = {},
+  opts: {
+    findLatestPersonalInfo?: () => Promise<typeof personal | null>;
+    aiSummary?: string | undefined;
+  } = {},
 ) {
   const workers = { create: vi.fn() } as unknown as WorkerFactory;
   const releaseResult: AutoReleaseResult = released
@@ -55,7 +59,7 @@ function makeWorker(
         released: true,
         version,
         content,
-        mesocycleName: 'Mesociclo 1 — Adaptação',
+        mesocycleName: 'Mesociclo 1: Adaptação',
         startDate: new Date('2026-08-22T00:00:00.000Z'),
         endDate: new Date('2026-11-14T00:00:00.000Z'),
         totalWeeks: 12,
@@ -75,9 +79,27 @@ function makeWorker(
   const queues = { enqueue } as unknown as QueueManager;
   const emit = vi.fn();
   const queueEvents = { emit } as unknown as DashboardQueueEventsService;
+  const present = vi.fn(async () => opts.aiSummary);
+  const workoutPresentation = { present } as unknown as WorkoutPresentationService;
   const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() } as never;
-  const worker = new ProtocolAutoReleaseWorker(workers, queues, repository, queueEvents, logger);
-  return { worker, workers, autoRelease, findLatestPersonalInfo, setPdfContent, enqueue, emit };
+  const worker = new ProtocolAutoReleaseWorker(
+    workers,
+    queues,
+    repository,
+    queueEvents,
+    workoutPresentation,
+    logger,
+  );
+  return {
+    worker,
+    workers,
+    autoRelease,
+    findLatestPersonalInfo,
+    setPdfContent,
+    enqueue,
+    emit,
+    present,
+  };
 }
 
 function job(over: Partial<ProtocolAutoReleaseJob> = {}): Job<ProtocolAutoReleaseJob> {
@@ -103,6 +125,26 @@ describe('ProtocolAutoReleaseWorker (fila do profissional — "Disponível para 
       { jobId: 'protocol-delivery_u1_3' },
     );
     expect(emit).toHaveBeenCalledWith('protocol');
+  });
+
+  it('achado 2026-09-04: gera o resumo de IA e manda no payload da entrega', async () => {
+    const { worker, present, enqueue } = makeWorker(true, 3, { aiSummary: 'Resumo do treino.' });
+    await worker.process(job());
+    expect(present).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'u1',
+        biologicalSex: 'MALE',
+        content,
+        totalWeeks: 12,
+        mesocycleName: 'Mesociclo 1: Adaptação',
+      }),
+    );
+    expect(enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'protocol-delivery',
+      expect.objectContaining({ text: 'Resumo do treino.' }),
+      { jobId: 'protocol-delivery_u1_3' },
+    );
   });
 
   it('CREF já agiu (ou virou MANDATORY) → no-op, sem entrega', async () => {

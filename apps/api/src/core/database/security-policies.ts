@@ -100,6 +100,10 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   // tem `user_id` denormalizado justamente para ancorar a RLS sem JOIN (Sato §4.5).
   { table: 'protocols', column: 'user_id', professional: 'write' },
   { table: 'protocol_versions', column: 'user_id', professional: 'write' },
+  // Renovação de protocolo por fim de mesociclo: titular já existe desde a criação da
+  // linha (sem fase anônima, diferente de `anamnesis_sessions`) — sem `anon` aqui. CREF
+  // lê as respostas ao revisar o protocolo gerado a partir delas, mas não edita.
+  { table: 'protocol_renewal_sessions', column: 'user_id', professional: 'read' },
   // Achado 2026-09-02: proposta de substituição de exercício via IA, em staging até
   // aprovação/janela de cortesia — mesma FORCE RLS por titular de `protocols`.
   { table: 'protocol_substitution_requests', column: 'user_id', professional: 'write' },

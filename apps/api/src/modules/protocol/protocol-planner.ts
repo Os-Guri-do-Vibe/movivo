@@ -9,12 +9,18 @@
  *
  * Decisão do fundador (2026-08-18): **todo** protocolo gerado — PASS limpo, FLAG do
  * validador ou BLOCK persistente caindo no template — entra na Fila do Profissional como
- * `PENDING_REVIEW`/`OPTIONAL`, nunca entrega sozinho na hora. O único motivo de negócio pra
- * travar sem prazo (`MANDATORY`) é PAR-Q, e quem chega até aqui já passou por esse gate no
- * `ProtocolGenerationWorker.process()` (sessão de risco nem gera). `OPTIONAL` dá ao RT uma
- * janela de cortesia de 1h pra revisar qualquer protocolo — mesmo o limpo — antes da
- * auto-liberação (`ProtocolAutoReleaseWorker`). Isso substitui o antigo atalho onde PASS
- * pulava a fila e entregava imediato: um único fluxo, sem caminho paralelo.
+ * `PENDING_REVIEW`, nunca entrega sozinho na hora. `OPTIONAL` dá ao RT uma janela de
+ * cortesia de 1h pra revisar qualquer protocolo — mesmo o limpo — antes da auto-liberação
+ * (`ProtocolAutoReleaseWorker`). Isso substitui o antigo atalho onde PASS pulava a fila e
+ * entregava imediato: um único fluxo, sem caminho paralelo.
+ *
+ * Quem decide `OPTIONAL` vs `MANDATORY` é o `ProtocolGenerationWorker`, não este arquivo —
+ * aqui só devolvemos `usedFallbackTemplate` (true quando `BLOCK_FALLBACK` persistiu nas
+ * duas tentativas, ver abaixo). Dois motivos de negócio independentes travam em
+ * `MANDATORY`, sem auto-liberação: PAR-Q do titular (gate já aplicado antes de chegar
+ * aqui, em `ProtocolGenerationWorker.process()`) e `usedFallbackTemplate` (decisão do
+ * fundador, 2026-09-03 — o conteúdo nunca passou limpo pela geração/validação, então
+ * nunca sai sozinho, mesmo com PAR-Q liberado).
  */
 import type { ProtocolStructure } from '@movivo/shared';
 
