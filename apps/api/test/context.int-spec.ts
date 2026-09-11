@@ -49,7 +49,32 @@ async function giveActiveProtocol(userId: string): Promise<void> {
       status: 'ACTIVE',
       currentWeek: 3,
       totalWeeks: 12,
-      content: { goal: 'GAIN_MUSCLE', phase: 'HIPERTROFIA' },
+      // `ProtocolStructure` completo (achado 2026-09-11): `ContextRepository` agora
+      // calcula o treino de hoje via `sessionFor`, que lê `.sessions` — um stub sem
+      // esse campo derrubava o teste com um TypeError não relacionado ao que ele prova.
+      content: {
+        promptVersion: 'test-v1',
+        goal: 'GAIN_MUSCLE',
+        phase: 'HIPERTROFIA',
+        weeklyFrequency: 3,
+        phaseDurationWeeks: 8,
+        sessions: [
+          {
+            dayLabel: 'Treino A',
+            focus: 'Full body',
+            exercises: [
+              {
+                exerciseId: 'goblet_squat',
+                name: 'Agachamento Goblet',
+                sets: 3,
+                reps: { min: 8, max: 12 },
+                loadStrategy: 'DOUBLE_PROGRESSION',
+                restSeconds: 90,
+              },
+            ],
+          },
+        ],
+      },
       constraints: { injuryTags: ['SHOULDER'], equipment: ['halteres'] },
       // NOT NULL sem default desde a migração 0033.
       mesocycleName: 'Mesociclo 1 — Hipertrofia',
