@@ -86,6 +86,7 @@ function threeSessionsJson(weekdays: (string | undefined)[]): string {
 const constraints: UserConstraints = {
   goal: 'GAIN_MUSCLE',
   level: 'INICIANTE',
+  trainingStatus: 'REGULAR',
   daysPerWeek: 3,
   preferredDays: ['MON', 'WED', 'FRI'],
   location: 'FULL_GYM',
@@ -167,8 +168,10 @@ describe('ProtocolGeneratorService', () => {
     if (!req) throw new Error('esperava uma chamada ao LLM');
     expect(req.purpose).toBe('PROTOCOL_GENERATION');
     expect(req.temperature).toBe(0.4);
-    expect(req.system).not.toContain(METHODOLOGY_GUIDELINES);
-    expect(req.messages[0]?.content).toContain('METODOLOGIA_PUBLICADA');
+    // Achado 2026-09-03: a metodologia mora no `system` (canal confiável), não mais
+    // como mensagem `user` no envelope de dado não confiável — ver cabeçalho do arquivo.
+    expect(req.system).toContain(METHODOLOGY_GUIDELINES);
+    expect(req.messages.some((m) => m.content.includes('METODOLOGIA_PUBLICADA'))).toBe(false);
     // `remada_baixa_iso_lateral` (não contraindicado por KNEE) confirma que a base aparece no prompt sem
     // contradizer o filtro de contraindicação do catálogo (constraints usa injuryTags: ['KNEE']).
     expect(req.system).toContain('remada_baixa_iso_lateral');

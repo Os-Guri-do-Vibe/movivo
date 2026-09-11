@@ -70,14 +70,13 @@ async function userFacingTexts(persona: AgentPersona): Promise<string[]> {
       'https://movivo.test/protocolo/abc',
       persona,
       12,
-      'Mesociclo 1 — Adaptação',
+      'Mesociclo 1: Adaptação',
     ),
     // `analyzingMessage`/`formatProtocolDelivery` reproduzem `agentSelfIntro`, que cita a
     // marca MOVIVO — o teste de renomeação abaixo usa `\bMOVI\b` (fronteira de palavra),
     // não substring crua, exatamente para não confundir "MOVI" (nome antigo) com "MOVIVO"
     // (a marca, que é legítimo continuar aparecendo).
-    analyzingMessage(persona, { mandatory: false }),
-    analyzingMessage(persona, { mandatory: true }),
+    analyzingMessage(persona),
     ...(['day7', 'day10', 'day13', 'day14', 'winback'] as const).map((key) =>
       conversionMessage(key, 'https://movivo.test/checkout', persona.agentName),
     ),

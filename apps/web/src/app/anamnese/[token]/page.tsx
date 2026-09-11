@@ -10,7 +10,7 @@ import { getSession, type SessionView } from '@/lib/anamnesis-api';
  * inicial, para retomada funcionar mesmo após reload.
  */
 export const metadata: Metadata = {
-  title: 'Seu cadastro · MOVIVO',
+  title: { absolute: 'Movivo - Anamnese' },
   robots: { index: false },
 };
 

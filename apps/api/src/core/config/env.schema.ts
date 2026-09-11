@@ -234,7 +234,7 @@ export const envSchema = z
      */
     LLM_PROTOCOL_TIMEOUT_MS: z.coerce.number().int().min(500).max(120_000).default(45_000),
     /** Teto anti-abuso: chamadas por usuário/dia (LLM10 — Sato §9.4). */
-    LLM_USER_DAILY_MESSAGE_LIMIT: z.coerce.number().int().min(1).default(50),
+    LLM_USER_DAILY_MESSAGE_LIMIT: z.coerce.number().int().min(1).default(90),
     /** Baseline do budget alert de custo por usuário/dia em BRL (LLM10). */
     LLM_DAILY_COST_ALERT_BRL: z.coerce.number().positive().default(0.5),
     /** Câmbio USD→BRL para o cálculo de custo por chamada (Victor §8). */

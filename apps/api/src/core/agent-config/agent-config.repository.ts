@@ -19,7 +19,7 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq } from 'drizzle-orm';
-import type { BiologicalSex } from '@movivo/shared';
+import type { AgentPersona, BiologicalSex } from '@movivo/shared';
 
 import { DRIZZLE } from '../database/database.constants';
 import type { DrizzleClient } from '../database/database.module';
@@ -43,5 +43,29 @@ export class AgentConfigRepository {
       .orderBy(desc(agentConfig.version))
       .limit(1);
     return row ?? null;
+  }
+
+  /**
+   * Bootstrap idempotente (achado 2026-09-04, mesmo padrão de `MethodologyProvider.
+   * ensureBootstrap()`/`ExerciseCatalogProvider`): semeia `version = 1` PUBLISHED em CADA
+   * slot a partir do default de código, só se aquele slot ainda não tiver nenhuma versão.
+   * `ON CONFLICT DO NOTHING` sobre `(target_sex, version)` torna chamadas repetidas (um
+   * slot já semeado, ou dois processos correndo o bootstrap ao mesmo tempo) no-op seguro,
+   * sem precisar de lock — `created_by: null` marca a origem como sistema.
+   */
+  async ensureBootstrap(seeds: Record<BiologicalSex, AgentPersona>): Promise<void> {
+    for (const [targetSex, payload] of Object.entries(seeds) as [BiologicalSex, AgentPersona][]) {
+      await this.db
+        .insert(agentConfig)
+        .values({
+          targetSex,
+          version: 1,
+          status: 'PUBLISHED',
+          payload,
+          changeNote: 'Bootstrap: persona base semeada pelo sistema na migração.',
+          createdBy: null,
+        })
+        .onConflictDoNothing({ target: [agentConfig.targetSex, agentConfig.version] });
+    }
   }
 }

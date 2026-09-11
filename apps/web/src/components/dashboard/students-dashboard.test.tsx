@@ -47,7 +47,7 @@ function filterSelects(): [HTMLElement, HTMLElement] {
 describe('StudentsDashboard', () => {
   it('lista todos os alunos numa tabela com nome, status, plano, whatsapp, e-mail e data de inscrição', async () => {
     getStudents.mockResolvedValue(studentsResponse);
-    render(<StudentsDashboard canReadHealth />);
+    render(<StudentsDashboard />);
     const table = await screen.findByRole('table');
 
     // Ordem das colunas (a pedido do fundador): o nome abre a linha.
@@ -70,14 +70,6 @@ describe('StudentsDashboard', () => {
     expect(within(unnamedRow).getByText('Desativado')).toBeVisible();
     expect(within(unnamedRow).getAllByText('Não informado')).toHaveLength(3); // plano, e-mail, data
     expect(within(unnamedRow).getByText('+55 (11) 99999-0002')).toBeVisible();
-  });
-
-  it('sem `canReadHealth` (recorte de suporte) a tabela continua acessível, sem promessa de saúde', async () => {
-    getStudents.mockResolvedValue(studentsResponse);
-    render(<StudentsDashboard />);
-    await screen.findByRole('table');
-    expect(screen.getAllByRole('link', { name: /Ana Souza|Nome não informado/ })).toHaveLength(2);
-    expect(screen.getByText(/Dados de saúde não fazem parte deste acesso/)).toBeVisible();
   });
 
   // Achado 2026-08-19 (a pedido do fundador): "Limpar filtro" virou botão permanente da

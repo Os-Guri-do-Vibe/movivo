@@ -203,6 +203,20 @@ function QueueCard({ item, section }: { item: QueueItem; section: QueueSectionId
                   {detail ? <span className="sr-only">, {detail}</span> : null}
                 </StatusBadge>
               ) : null}
+              {item.origin === 'FALLBACK' ? (
+                /*
+                 * Mesmo raciocínio do sinal de PAR-Q (2026-09-03): sem esta linha, um
+                 * fallback ficaria indistinguível de `EDIT` — os dois só têm o pill
+                 * "Atenção" em comum, mas a ação esperada do RT é bem diferente (revisar
+                 * um template conservador nunca visto por ninguém, não re-conferir uma
+                 * edição própria). "Template conservador" é o termo que já aparece no
+                 * resto do produto pra este conteúdo, evita reintroduzir jargão técnico
+                 * como "fallback" pra quem lê a fila.
+                 */
+                <span className="text-xs font-medium text-muted-foreground">
+                  Origem: template conservador (geração não validou)
+                </span>
+              ) : null}
               {item.origin === 'PARQ' ? (
                 /*
                  * Único sinal LEGÍVEL de que este protocolo obrigatório veio de um PAR-Q
@@ -433,7 +447,8 @@ export function QueueBoard() {
     <section aria-label="Fila de supervisão">
       <div className="mb-6">
         <SectorHeader
-          title="Fila de supervisão"
+          title="Fila do Profissional"
+          icon={ClipboardCheck}
           refreshing={refreshing}
           onRefresh={() => void load()}
         />

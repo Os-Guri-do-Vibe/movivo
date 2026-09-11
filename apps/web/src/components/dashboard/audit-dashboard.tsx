@@ -1,7 +1,7 @@
 'use client';
 
 import type { AuditSearchQuery } from '@movivo/shared';
-import { Search } from 'lucide-react';
+import { ScrollText, Search } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import type { FormEvent } from 'react';
 
@@ -58,7 +58,7 @@ export function AuditDashboard() {
     <div>
       <SectorHeader
         title="Auditoria"
-        description="Busca operacional na trilha imutável. Cada consulta também fica registrada para preservar a cadeia de responsabilidade."
+        icon={ScrollText}
         meta={data.meta}
         refreshing={loading}
         onRefresh={() => void refresh()}

@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -8,10 +8,13 @@ import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { QueueManager } from '../jobs/queue-manager.service';
+import type { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
 import type { ProtocolSubstitutionRepository } from '../protocol/protocol-substitution.repository';
 import { ValidationService } from '../protocol/validation/validation.service';
+import type { WorkoutPresentationService } from '../protocol/workout-presentation.service';
 import { AuditService } from './audit.service';
 import { DashboardService } from './dashboard.service';
+import type { ExerciseCatalogAdminService } from './exercise-catalog-admin.service';
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
 const USER_ID = '22222222-2222-4222-8222-222222222222';
@@ -56,7 +59,7 @@ function makeService(row: Record<string, unknown>, verdict: 'PASS' | 'FLAG_HUMAN
     for: () => chain,
     limit: async () => [row],
   };
-  const update = vi.fn();
+  const update = vi.fn(() => ({ set: () => ({ where: async () => undefined }) }));
   const insert = vi.fn();
   const execute = vi.fn();
   const tx = { select: () => chain, update, insert, execute } as never;
@@ -87,10 +90,19 @@ function makeService(row: Record<string, unknown>, verdict: 'PASS' | 'FLAG_HUMAN
     loadActiveProtocol: vi.fn(),
     hasPending: vi.fn(),
     createPending: vi.fn(),
+    createCatalogGapPending: vi.fn(),
     release: vi.fn(),
+    attachCatalogExerciseAndRelease: vi.fn(),
     discard: vi.fn(),
     findById: vi.fn(),
   } as unknown as ProtocolSubstitutionRepository;
+  const workoutPresentation = {
+    present: vi.fn(async () => undefined),
+  } as unknown as WorkoutPresentationService;
+  const exerciseCatalogAdmin = {
+    publish: vi.fn(async () => ({ data: { versions: [], totalPublished: 0 }, meta: {} })),
+  } as unknown as ExerciseCatalogAdminService;
+  const exerciseCatalog = { getById: vi.fn() } as unknown as ExerciseCatalogProvider;
   const service = new DashboardService(
     db,
     validation,
@@ -100,9 +112,23 @@ function makeService(row: Record<string, unknown>, verdict: 'PASS' | 'FLAG_HUMAN
     { emit: vi.fn(), stream: vi.fn() } as unknown as DashboardQueueEventsService,
     consentService(),
     substitutionRepo,
+    workoutPresentation,
+    exerciseCatalogAdmin,
+    exerciseCatalog,
     logger,
   );
-  return { service, enqueue, append, update, insert, execute, substitutionRepo };
+  return {
+    service,
+    enqueue,
+    append,
+    update,
+    insert,
+    execute,
+    substitutionRepo,
+    workoutPresentation,
+    exerciseCatalogAdmin,
+    exerciseCatalog,
+  };
 }
 
 function makeSequencedService(
@@ -161,6 +187,13 @@ function makeSequencedService(
     discard: vi.fn(),
     findById: vi.fn(),
   } as unknown as ProtocolSubstitutionRepository;
+  const workoutPresentation = {
+    present: vi.fn(async () => undefined),
+  } as unknown as WorkoutPresentationService;
+  const exerciseCatalogAdmin = {
+    publish: vi.fn(async () => ({ data: { versions: [], totalPublished: 0 }, meta: {} })),
+  } as unknown as ExerciseCatalogAdminService;
+  const exerciseCatalog = { getById: vi.fn() } as unknown as ExerciseCatalogProvider;
   const service = new DashboardService(
     db,
     validation,
@@ -170,6 +203,9 @@ function makeSequencedService(
     { emit, stream: vi.fn() } as unknown as DashboardQueueEventsService,
     consentService(consentActive),
     substitutionRepo,
+    workoutPresentation,
+    exerciseCatalogAdmin,
+    exerciseCatalog,
     { setContext: vi.fn(), warn: vi.fn(), info: vi.fn(), error: vi.fn() } as unknown as PinoLogger,
   );
   return {
@@ -184,6 +220,9 @@ function makeSequencedService(
     forUpdate,
     emit,
     substitutionRepo,
+    workoutPresentation,
+    exerciseCatalogAdmin,
+    exerciseCatalog,
   };
 }
 
@@ -277,7 +316,10 @@ describe('DashboardService invariantes de mutacao', () => {
     await expect(
       service.signProtocol(actor, RESOURCE_ID, { confirmation: true }),
     ).resolves.toMatchObject({ id: RESOURCE_ID, version: 2, alreadySigned: false });
-    expect(updateWhere).toHaveBeenCalledOnce();
+    // 2 updates em `protocols`: ativa este protocolo + supersede o mesociclo anterior
+    // ACTIVE do mesmo titular (`supersedePreviousActiveProtocols`, no-op aqui pois o mock
+    // não tem outra linha ACTIVE, mas a chamada acontece sempre na mesma transação).
+    expect(updateWhere).toHaveBeenCalledTimes(2);
     expect(insertValues).toHaveBeenCalledWith(expect.objectContaining({ version: 2 }));
     expect(append).toHaveBeenCalledWith(
       expect.anything(),
@@ -294,7 +336,7 @@ describe('DashboardService invariantes de mutacao', () => {
     await expect(
       service.signProtocol(admin, RESOURCE_ID, { confirmation: true }),
     ).resolves.toMatchObject({ id: RESOURCE_ID, version: 2, alreadySigned: false });
-    expect(updateWhere).toHaveBeenCalledOnce();
+    expect(updateWhere).toHaveBeenCalledTimes(2);
     expect(insertValues).toHaveBeenCalledWith(expect.objectContaining({ version: 2 }));
     expect(append).toHaveBeenCalledWith(
       expect.anything(),
@@ -498,8 +540,8 @@ describe('DashboardService invariantes de mutacao', () => {
       expect(enqueue).not.toHaveBeenCalled();
     });
 
-    it('recusa mantém o exercício original (não chama release) e audita com o ator', async () => {
-      const { service, append, substitutionRepo } = makeService(pendingProtocol);
+    it('recusa mantém o exercício original (não chama release), audita com o ator e avisa o aluno', async () => {
+      const { service, append, enqueue, substitutionRepo } = makeService(pendingProtocol);
       vi.mocked(substitutionRepo.discard).mockResolvedValue({
         discarded: true,
         protocolId: RESOURCE_ID,
@@ -518,10 +560,22 @@ describe('DashboardService invariantes de mutacao', () => {
           entityId: RESOURCE_ID,
         }),
       );
+      // Achado 2026-09-09 (pedido do fundador): a recusa era silenciosa pro aluno — agora
+      // avisa por WhatsApp, mesmo padrão de `coach-message` do `AiResponseWorker`.
+      expect(enqueue).toHaveBeenCalledWith(
+        'whatsapp-outbound',
+        'coach-message',
+        expect.objectContaining({
+          userId: USER_ID,
+          type: 'COACH_MESSAGE',
+          text: expect.stringContaining('Revisei a solicitação de substituição'),
+        }),
+        expect.objectContaining({ jobId: `substitution-discarded_${RESOURCE_ID}` }),
+      );
     });
 
-    it('recusa de proposta já decidida → 400, sem auditar', async () => {
-      const { service, append, substitutionRepo } = makeService(pendingProtocol);
+    it('recusa de proposta já decidida → 400, sem auditar nem avisar', async () => {
+      const { service, append, enqueue, substitutionRepo } = makeService(pendingProtocol);
       vi.mocked(substitutionRepo.discard).mockResolvedValue({
         discarded: false,
         protocolId: null,
@@ -532,6 +586,7 @@ describe('DashboardService invariantes de mutacao', () => {
         BadRequestException,
       );
       expect(append).not.toHaveBeenCalled();
+      expect(enqueue).not.toHaveBeenCalled();
     });
 
     it('papel fora de PROFESSIONAL/ADMIN não aprova nem recusa', async () => {
@@ -539,6 +594,128 @@ describe('DashboardService invariantes de mutacao', () => {
       const outsider: AuthenticatedUser = { userId: ACTOR_ID, role: 'SUPPORT', jti: 'jti' };
       await expect(service.approveSubstitutionNow(outsider, RESOURCE_ID)).rejects.toThrow();
       await expect(service.discardSubstitution(outsider, RESOURCE_ID)).rejects.toThrow();
+    });
+  });
+
+  // Achado 2026-09-09 (pedido do fundador): "Adicionar exercício ao catálogo" — publica o
+  // exercício (reaproveita `ExerciseCatalogAdminService.publish`, sem alteração) e SÓ ENTÃO
+  // aprova a substituição, reusando a MESMA entrega por WhatsApp de `approveSubstitutionNow`
+  // (`deliverReleasedSubstitution`, extraído pra não duplicar).
+  describe('substituição catalogGap — adicionar exercício ao catálogo e aprovar', () => {
+    const CATALOG_BODY = {
+      exerciseKey: 'supino_reto_maquina',
+      changeNote: 'Adicionado a partir de pedido de aluno via WhatsApp',
+      name: 'Supino Reto (Máquina)',
+      pattern: 'HORIZONTAL_PUSH',
+      muscleGroups: ['peito'],
+      equipment: ['máquina'],
+      locations: ['FULL_GYM'],
+      minLevel: 'INICIANTE',
+      contraindicatedFor: [],
+      substitutes: [],
+    };
+
+    it('publica o exercício, aplica a troca e entrega o protocolo atualizado', async () => {
+      const { service, enqueue, substitutionRepo, exerciseCatalogAdmin, exerciseCatalog } =
+        makeService(pendingProtocol);
+      const chosen = { id: 'supino_reto_maquina', name: 'Supino Reto (Máquina)' };
+      vi.mocked(exerciseCatalog.getById).mockReturnValue(chosen as never);
+      vi.mocked(substitutionRepo.attachCatalogExerciseAndRelease).mockResolvedValue({
+        released: true,
+        protocolId: RESOURCE_ID,
+        userId: USER_ID,
+        version: 4,
+        content,
+        mesocycleName: 'Mesociclo 1',
+        startDate: new Date('2026-01-01'),
+        endDate: new Date('2026-02-01'),
+        totalWeeks: 4,
+        fromExerciseName: 'Supino Reto (Barra)',
+        toExerciseName: 'Supino Reto (Máquina)',
+      } as never);
+
+      const result = await service.addCatalogExerciseAndApproveSubstitution(
+        admin,
+        RESOURCE_ID,
+        CATALOG_BODY,
+      );
+      expect(result).toEqual({
+        id: RESOURCE_ID,
+        protocolId: RESOURCE_ID,
+        version: 4,
+        released: true,
+      });
+      expect(exerciseCatalogAdmin.publish).toHaveBeenCalledWith(admin, CATALOG_BODY);
+      expect(substitutionRepo.attachCatalogExerciseAndRelease).toHaveBeenCalledWith(
+        { userId: ACTOR_ID, role: 'ADMIN' },
+        RESOURCE_ID,
+        chosen,
+      );
+      expect(enqueue).toHaveBeenCalledWith(
+        'whatsapp-outbound',
+        'protocol-delivery',
+        expect.objectContaining({ userId: USER_ID, protocolId: RESOURCE_ID, protocolVersion: 4 }),
+        expect.anything(),
+      );
+    });
+
+    it('exercício recém-publicado quebra a validação do protocolo inteiro → 400 com as violações, sem entregar', async () => {
+      const { service, enqueue, substitutionRepo, exerciseCatalog } = makeService(pendingProtocol);
+      vi.mocked(exerciseCatalog.getById).mockReturnValue({
+        id: 'supino_reto_maquina',
+        name: 'Supino Reto (Máquina)',
+      } as never);
+      vi.mocked(substitutionRepo.attachCatalogExerciseAndRelease).mockResolvedValue({
+        released: false,
+        reason: 'VALIDATION_FAILED',
+        violations: ['EXERCISE_LEVEL_TOO_HIGH'],
+      } as never);
+
+      await expect(
+        service.addCatalogExerciseAndApproveSubstitution(admin, RESOURCE_ID, CATALOG_BODY),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'VALIDATION_FAILED' }),
+      });
+      expect(enqueue).not.toHaveBeenCalled();
+    });
+
+    it('proposta já decidida ou protocolo mudou de versão → 400, sem entregar', async () => {
+      const { service, enqueue, substitutionRepo, exerciseCatalog } = makeService(pendingProtocol);
+      vi.mocked(exerciseCatalog.getById).mockReturnValue({
+        id: 'supino_reto_maquina',
+        name: 'Supino Reto (Máquina)',
+      } as never);
+      vi.mocked(substitutionRepo.attachCatalogExerciseAndRelease).mockResolvedValue({
+        released: false,
+        reason: 'STALE',
+      } as never);
+
+      await expect(
+        service.addCatalogExerciseAndApproveSubstitution(admin, RESOURCE_ID, CATALOG_BODY),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(enqueue).not.toHaveBeenCalled();
+    });
+
+    it('papel fora de PROFESSIONAL/ADMIN não adiciona nem aprova', async () => {
+      const { service } = makeService(pendingProtocol);
+      const outsider: AuthenticatedUser = { userId: ACTOR_ID, role: 'SUPPORT', jti: 'jti' };
+      await expect(
+        service.addCatalogExerciseAndApproveSubstitution(outsider, RESOURCE_ID, CATALOG_BODY),
+      ).rejects.toThrow();
+    });
+
+    // Achado 2026-09-09: `PROFESSIONAL` passa no guard de PAPEL (`@Roles`), mas não tem
+    // `AI_CONFIG_WRITE` (`CAPABILITIES_BY_ROLE`, @movivo/shared) — só aprova conteúdo
+    // curado (conhecimento/metodologia/guardrail), nunca publica exercício novo livremente.
+    // Sem este guard explícito, o service-to-service pra `ExerciseCatalogAdminService`
+    // (fora do `@RequireCapabilities` do controller de catálogo) furaria esse limite.
+    it('PROFESSIONAL tem papel válido mas não tem AI_CONFIG_WRITE → 403, sem publicar nem tocar a proposta', async () => {
+      const { service, exerciseCatalogAdmin, substitutionRepo } = makeService(pendingProtocol);
+      await expect(
+        service.addCatalogExerciseAndApproveSubstitution(actor, RESOURCE_ID, CATALOG_BODY),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(exerciseCatalogAdmin.publish).not.toHaveBeenCalled();
+      expect(substitutionRepo.attachCatalogExerciseAndRelease).not.toHaveBeenCalled();
     });
   });
 });
@@ -726,6 +903,62 @@ describe('DashboardService leituras operacionais', () => {
     });
   });
 
+  // Achado 2026-09-09 (pedido do fundador): exercício pedido existe no catálogo mas não é
+  // elegível — `reviewUrgency: MANDATORY` nasce já decidido na criação da proposta (não
+  // depende do PAR-Q), mesma regra de "nenhum sai sozinho": `severity: ALERT` (não SAFETY,
+  // que é reservado pro alerta clínico de PAR-Q), sem `autoReleaseAt`.
+  it('proposta com reviewUrgency MANDATORY (exercício não elegível) entra em substitutionMandatory, severity ALERT', async () => {
+    const createdAt = new Date('2026-09-01T10:00:00.000Z');
+    const { service } = makeSequencedService([
+      [],
+      [
+        {
+          id: RESOURCE_ID,
+          createdAt,
+          status: 'PENDING',
+          name: 'Rodrigo Teste',
+          parqState: 'LIBERADO',
+          reviewUrgency: 'MANDATORY',
+          catalogGap: false,
+        },
+      ],
+    ]);
+    const result = await service.queue(actor);
+    expect(result.counts).toMatchObject({ substitutionMandatory: 1, substitutionOptional: 0 });
+    expect(result.substitutionMandatory[0]).toMatchObject({
+      severity: 'ALERT',
+      origin: 'AI_SUBSTITUTION',
+      autoReleaseAt: null,
+    });
+  });
+
+  // Achado 2026-09-09: exercício pedido NÃO existe em lugar nenhum do catálogo —
+  // `catalogGap: true` muda só o `origin` (liga a opção "adicionar ao catálogo" na tela),
+  // continua `reviewUrgency: MANDATORY`/`substitutionMandatory`.
+  it('proposta catalogGap entra em substitutionMandatory com origin CATALOG_GAP', async () => {
+    const createdAt = new Date('2026-09-01T10:00:00.000Z');
+    const { service } = makeSequencedService([
+      [],
+      [
+        {
+          id: RESOURCE_ID,
+          createdAt,
+          status: 'PENDING',
+          name: 'Rodrigo Teste',
+          parqState: 'LIBERADO',
+          reviewUrgency: 'MANDATORY',
+          catalogGap: true,
+        },
+      ],
+    ]);
+    const result = await service.queue(actor);
+    expect(result.substitutionMandatory[0]).toMatchObject({
+      severity: 'ALERT',
+      origin: 'CATALOG_GAP',
+      autoReleaseAt: null,
+    });
+  });
+
   it('protocolo anterior à migração 0035 (sem sessão vinculada) segue na fila como EDIT', async () => {
     const { service } = makeSequencedService([
       [
@@ -745,7 +978,30 @@ describe('DashboardService leituras operacionais', () => {
     expect(result.mandatory[0]).toMatchObject({ origin: 'EDIT', severity: 'ALERT' });
   });
 
-  it('calcula funil/SLA, primeiro treino e replays anonimizados', async () => {
+  // Achado 2026-09-03 (a pedido do fundador): protocolo que caiu no template de fallback
+  // é MANDATORY mesmo com PAR-Q liberado, e a fila precisa distinguir isso de EDIT — ver
+  // `ProtocolGenerationWorker`/`protocol-planner.ts`.
+  it('protocolo gerado pelo template de fallback entra como MANDATORY/FALLBACK, mesmo com PAR-Q liberado', async () => {
+    const { service } = makeSequencedService([
+      [
+        {
+          id: RESOURCE_ID,
+          createdAt: new Date('2026-09-03T12:00:00.000Z'),
+          status: 'PENDING_SIGNATURE',
+          name: 'Fallback Teste',
+          reviewUrgency: 'MANDATORY',
+          generatedBy: 'FALLBACK_TEMPLATE',
+          parqState: 'LIBERADO',
+        },
+      ],
+    ]);
+    const result = await service.queue(actor);
+    expect(result.counts).toMatchObject({ mandatory: 1 });
+    expect(result.mandatory[0]).toMatchObject({ origin: 'FALLBACK', severity: 'ALERT' });
+    expect(result.mandatory[0]?.autoReleaseAt).toBeNull();
+  });
+
+  it('calcula funil/SLA, primeiro treino e replays com o conteúdo real da conversa', async () => {
     const conversationAt = new Date('2026-08-03T12:00:00.000Z');
     const { service, append } = makeSequencedService(
       [
@@ -759,9 +1015,7 @@ describe('DashboardService leituras operacionais', () => {
             direction: 'INBOUND',
             content: 'Meu email e pessoa@example.com',
             createdAt: conversationAt,
-            name: 'Pessoa',
-            phoneNumber: '+5511999999999',
-            email: 'pessoa@example.com',
+            studentName: 'Pessoa',
           },
           {
             id: 'c2',
@@ -769,9 +1023,7 @@ describe('DashboardService leituras operacionais', () => {
             direction: 'OUTBOUND',
             content: 'Resposta segura',
             createdAt: new Date(conversationAt.getTime() + 1_000),
-            name: 'Pessoa',
-            phoneNumber: '+5511999999999',
-            email: 'pessoa@example.com',
+            studentName: 'Pessoa',
           },
         ],
         [
@@ -802,7 +1054,11 @@ describe('DashboardService leituras operacionais', () => {
       coachBreached: true,
     });
     expect(result.replays[0]?.messages).toHaveLength(2);
-    expect(result.replays[0]?.messages[0]?.content).not.toContain('pessoa@example.com');
+    // Achado 2026-09-08 (pedido do fundador): nome real do titular, não "Pessoa usuária".
+    expect(result.replays[0]?.studentName).toBe('Pessoa');
+    // Achado 2026-09-08 (decisão do fundador): painel de uso interno da MOVIVO, sem
+    // anonimização do conteúdo da conversa.
+    expect(result.replays[0]?.messages[0]?.content).toBe('Meu email e pessoa@example.com');
     expect(append).toHaveBeenCalledTimes(3);
     expect(append).toHaveBeenCalledWith(
       expect.anything(),
@@ -1000,7 +1256,7 @@ describe('DashboardService leituras operacionais', () => {
           createdAt,
         },
       ],
-      [{ name: null, phoneNumber: '+5511000000000', email: null }],
+      [{ name: 'Pessoa Teste' }],
       [
         {
           id: 'c1',
@@ -1013,7 +1269,7 @@ describe('DashboardService leituras operacionais', () => {
     await expect(handoff.service.detail(actor, 'HANDOFF', RESOURCE_ID)).resolves.toMatchObject({
       item: { kind: 'HANDOFF' },
       context: { messages: 1 },
-      replay: { messages: [{ role: 'USER' }] },
+      replay: { studentName: 'Pessoa Teste', messages: [{ role: 'USER' }] },
     });
   });
 

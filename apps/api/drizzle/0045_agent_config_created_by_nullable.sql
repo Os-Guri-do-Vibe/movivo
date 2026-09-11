@@ -1,0 +1,1 @@
+ALTER TABLE "agent_config" ALTER COLUMN "created_by" DROP NOT NULL;

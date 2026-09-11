@@ -10,6 +10,7 @@ const SESSION_ID = '22222222-2222-4222-8222-222222222222';
 function makeController() {
   const access = {
     exchange: vi.fn(async () => 'session-token'),
+    peekFirstName: vi.fn(async () => 'Pedro'),
     requireUser: vi.fn(async () => USER_ID),
   } as unknown as WorkoutAccessService;
   const journal = {
@@ -28,6 +29,14 @@ describe('WorkoutController', () => {
       sessionToken: 'session-token',
     });
     expect(access.exchange).toHaveBeenCalledWith('a'.repeat(43));
+  });
+
+  it('espia o primeiro nome do link sem consumir o token', async () => {
+    const { controller, access } = makeController();
+    await expect(controller.peek({ token: 'a'.repeat(43) })).resolves.toEqual({
+      firstName: 'Pedro',
+    });
+    expect(access.peekFirstName).toHaveBeenCalledWith('a'.repeat(43));
   });
 
   it('abre hoje ou uma data passada apos validar a sessao', async () => {

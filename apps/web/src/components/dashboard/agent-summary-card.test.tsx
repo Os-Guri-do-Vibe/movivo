@@ -1,9 +1,11 @@
 import { DEFAULT_AGENT_PERSONA, type BiologicalSex } from '@movivo/shared';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type * as Workspace from './agent-persona-workspace';
+import type * as PersonaContext from './agent-persona-context';
 
 const { useAgentPersonaWorkspace } = vi.hoisted(() => ({
   useAgentPersonaWorkspace: vi.fn(),
@@ -14,7 +16,18 @@ vi.mock('./agent-persona-workspace', async (importOriginal) => ({
   useAgentPersonaWorkspace,
 }));
 
-import { AgentSummaryCard } from './agent-summary-card';
+// `AgentPersonaProvider` de verdade dispara a busca da persona pela rede — fora do escopo
+// deste teste (o formulário em si já é coberto por `ai-persona.test.tsx`). Aqui interessa
+// só o comportamento do CARTÃO: resumo do slot e abrir/fechar a edição inline do slot certo.
+vi.mock('./agent-persona-context', async (importOriginal) => ({
+  ...(await importOriginal<typeof PersonaContext>()),
+  AgentPersonaProvider: ({ children }: { children: ReactNode }) => children,
+}));
+vi.mock('./ai-persona', () => ({
+  AiPersonaDashboard: () => <div data-testid="persona-form">formulário</div>,
+}));
+
+import { AgentPersonaCards } from './agent-summary-card';
 
 const meta = {
   generatedAt: '2026-08-21T12:00:00.000Z',
@@ -42,15 +55,17 @@ function slot(overrides: Partial<Workspace.AgentSlotSummary> = {}): Workspace.Ag
   };
 }
 
-/** Estado do workspace com os dois slots registrados, salvo sobrescrita. */
+/**
+ * Estado do workspace. `female`/`male` default para um slot carregado quando omitidos —
+ * passe `null` explicitamente pra suprimir o cartão daquele slot num teste que só quer
+ * falar do outro (os dois cartões renderizam sempre, não há mais "slot ativo" escondendo um).
+ */
 function workspace({
-  activeSex = 'FEMALE' as BiologicalSex,
   female,
   male,
   canWrite = true,
   topics = null,
 }: {
-  activeSex?: BiologicalSex;
   female?: Workspace.AgentSlotSummary | null;
   male?: Workspace.AgentSlotSummary | null;
   canWrite?: boolean;
@@ -58,7 +73,7 @@ function workspace({
 } = {}) {
   const slots: Partial<Record<BiologicalSex, Workspace.AgentSlotSummary>> = {};
   if (female !== null) slots.FEMALE = female ?? slot();
-  if (male !== null) slots.MALE = male ?? slot({ targetSex: 'MALE', version: 4 });
+  if (male !== null) slots.MALE = male ?? slot({ targetSex: 'MALE', agentName: 'Leonardo', version: 4 });
   return {
     canWrite,
     canApprove: false,
@@ -66,121 +81,115 @@ function workspace({
     topicsLoading: false,
     topicsError: '',
     refreshTopics: vi.fn(),
-    activeSex,
+    activeSex: 'FEMALE' as BiologicalSex,
     selectSlot: vi.fn(),
     slots,
-    activeSlot: slots[activeSex] ?? null,
+    activeSlot: slots.FEMALE ?? null,
     registerSlot: vi.fn(),
     forgetSlot: vi.fn(),
     refreshSlot: vi.fn(),
   };
 }
 
-function topicVersion(overrides: Record<string, unknown> = {}) {
-  return {
-    id: '11111111-1111-4111-8111-111111111111',
-    topicKey: 'exemplo',
-    label: 'Tema de exemplo',
-    phrases: ['exemplo'],
-    action: 'BLOCK' as const,
-    version: 1,
-    status: 'DRAFT' as const,
-    changeNote: 'proposta inicial',
-    createdBy: null,
-    approvedBy: null,
-    createdAt: '2026-08-21T12:00:00.000Z',
-    current: true,
-    ...overrides,
-  };
-}
+const renderCards = () => render(<AgentPersonaCards />);
 
-const onOpenPersona = vi.fn();
-const renderCard = () => render(<AgentSummaryCard onOpenPersona={onOpenPersona} />);
+describe('AgentPersonaCards', () => {
+  beforeEach(() => discard.mockClear());
 
-describe('AgentSummaryCard', () => {
-  beforeEach(() => {
-    onOpenPersona.mockClear();
-    discard.mockClear();
-  });
-
-  it('sem dados: "—" no avatar e "Sem configuração"', () => {
+  it('sem dados: dois cartões com "—" e "Sem configuração"', () => {
     useAgentPersonaWorkspace.mockReturnValue(workspace({ female: null, male: null }));
-    renderCard();
-    expect(screen.getByText('Sem configuração')).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'Agente' })).toBeVisible();
+    renderCards();
+    expect(screen.getAllByText('Sem configuração')).toHaveLength(2);
+    expect(screen.getAllByRole('heading', { name: 'Agente' })).toHaveLength(2);
   });
 
   it('carregando (sem dado ainda): badge "Carregando"', () => {
     useAgentPersonaWorkspace.mockReturnValue(
-      workspace({ female: slot({ agentName: null, version: null, loading: true }) }),
+      workspace({ female: slot({ agentName: null, version: null, loading: true }), male: null }),
     );
-    renderCard();
+    renderCards();
     expect(screen.getByText('Carregando')).toBeVisible();
   });
 
   it('erro (sem dado ainda): badge "Indisponível"', () => {
     useAgentPersonaWorkspace.mockReturnValue(
-      workspace({ female: slot({ agentName: null, version: null, error: 'falhou' }) }),
+      workspace({ female: slot({ agentName: null, version: null, error: 'falhou' }), male: null }),
     );
-    renderCard();
+    renderCards();
     expect(screen.getByText('Indisponível')).toBeVisible();
   });
 
-  it('com dado: badge "Ativo", versão do slot ativo e data de atualização', () => {
-    useAgentPersonaWorkspace.mockReturnValue(workspace({ female: slot({ version: 3 }) }));
-    renderCard();
+  it('com dado: badge "Ativo" (sem repetir "Persona feminina/masculina")', () => {
+    useAgentPersonaWorkspace.mockReturnValue(workspace({ female: slot({ version: 3 }), male: null }));
+    renderCards();
     expect(screen.getByText('Ativo')).toBeVisible();
-    expect(screen.getByText(/Persona feminina · v3 · vigente/)).toBeVisible();
-    expect(screen.getByText(/Atualizado em/)).toBeVisible();
+    expect(screen.queryByText(/persona feminina/i)).not.toBeInTheDocument();
   });
 
-  it('conta os dois slots e nomeia o estado de cada um', () => {
+  it('não mostra os badges "Coach de treino · WhatsApp"/"Supervisão CREF", "Atualizado em" nem o status de versão ("padrão do código"/"vN · vigente"/"usa a persona X")', () => {
     useAgentPersonaWorkspace.mockReturnValue(
       workspace({
-        female: slot({ version: 3 }),
-        male: slot({ targetSex: 'MALE', version: null, servedFromSex: 'FEMALE', borrowed: true }),
+        female: slot({ agentName: 'Mariana', version: 1 }),
+        male: slot({
+          targetSex: 'MALE',
+          agentName: 'Leonardo',
+          version: null,
+          servedFromSex: 'FEMALE',
+          borrowed: true,
+        }),
       }),
     );
-    renderCard();
-    expect(screen.getByText(/1 de 2 personas publicadas/)).toBeVisible();
-    expect(screen.getByText(/Persona masculina: usa a persona feminina/)).toBeVisible();
+    renderCards();
+    expect(screen.queryByText('Coach de treino · WhatsApp')).not.toBeInTheDocument();
+    expect(screen.queryByText('Supervisão CREF')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Atualizado em/)).not.toBeInTheDocument();
+    expect(screen.queryByText('v1 · vigente')).not.toBeInTheDocument();
+    expect(screen.queryByText('padrão do código')).not.toBeInTheDocument();
+    expect(screen.queryByText(/usa a persona/)).not.toBeInTheDocument();
   });
 
-  it('versão nula sem empréstimo: "padrão do código"', () => {
+  it('renderiza os dois cartões (feminino e masculino) sempre, sem seletor de aba', () => {
     useAgentPersonaWorkspace.mockReturnValue(
       workspace({
-        female: slot({ version: null, servedFromSex: null }),
-        male: slot({ targetSex: 'MALE', version: null, servedFromSex: null }),
+        female: slot({ agentName: 'Mariana', version: 1 }),
+        male: slot({ targetSex: 'MALE', agentName: 'Leonardo', version: null, servedFromSex: null }),
       }),
     );
-    renderCard();
-    expect(screen.getByText(/0 de 2 personas publicadas/)).toBeVisible();
-    expect(screen.getByText(/Persona feminina · padrão do código/)).toBeVisible();
+    renderCards();
+    expect(screen.getByRole('heading', { name: 'Mariana' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Leonardo' })).toBeVisible();
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
   });
 
-  it('canWrite=false: mostra "Acesso de leitura" e nunca "Revisar e publicar"', () => {
-    useAgentPersonaWorkspace.mockReturnValue(workspace({ canWrite: false }));
-    renderCard();
-    expect(screen.getByText('Acesso de leitura')).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Revisar e publicar' })).not.toBeInTheDocument();
-  });
-
-  it('canWrite=true: "Revisar e publicar" e "Ver histórico" acionam onOpenPersona("revisao")', async () => {
-    const user = userEvent.setup();
-    useAgentPersonaWorkspace.mockReturnValue(workspace());
-    renderCard();
-    await user.click(screen.getByRole('button', { name: 'Ver histórico' }));
-    expect(onOpenPersona).toHaveBeenCalledWith('revisao');
-    await user.click(screen.getByRole('button', { name: 'Revisar e publicar' }));
-    expect(onOpenPersona).toHaveBeenLastCalledWith('revisao');
-  });
-
-  it('1 alteração pendente no slot ativo: singular, e descarta o rascunho DAQUELE slot', async () => {
+  it('lápis abre a edição do slot certo INLINE (nunca modal), e ela começa fechada', async () => {
     const user = userEvent.setup();
     useAgentPersonaWorkspace.mockReturnValue(
-      workspace({ female: slot({ version: 2, pending: 1 }) }),
+      workspace({
+        female: slot({ agentName: 'Mariana' }),
+        male: slot({ targetSex: 'MALE', agentName: 'Leonardo', version: 4 }),
+      }),
     );
-    renderCard();
+    renderCards();
+
+    expect(screen.queryByTestId('persona-form')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Editar Leonardo' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByTestId('persona-form')).toBeVisible();
+
+    // "Fechar edição" (o lápis virou X) volta o cartão pro resumo.
+    await user.click(screen.getByRole('button', { name: 'Fechar edição' }));
+    expect(screen.queryByTestId('persona-form')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Editar Leonardo' })).toBeVisible();
+  });
+
+  it('1 alteração pendente: singular, e descarta o rascunho DAQUELE slot', async () => {
+    const user = userEvent.setup();
+    useAgentPersonaWorkspace.mockReturnValue(
+      workspace({ female: slot({ version: 2, pending: 1 }), male: null }),
+    );
+    renderCards();
     expect(screen.getByText('1 alteração não publicada')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Descartar alterações' }));
     expect(screen.getByText(/na persona feminina/)).toBeVisible();
@@ -190,75 +199,36 @@ describe('AgentSummaryCard', () => {
 
   it('múltiplas alterações pendentes: plural, sem descarte quando canWrite=false', () => {
     useAgentPersonaWorkspace.mockReturnValue(
-      workspace({ canWrite: false, female: slot({ version: 2, pending: 2 }) }),
+      workspace({ canWrite: false, female: slot({ version: 2, pending: 2 }), male: null }),
     );
-    renderCard();
+    renderCards();
     expect(screen.getByText('2 alterações não publicadas')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Descartar alterações' })).not.toBeInTheDocument();
   });
 
-  /*
-   * Rascunho do slot ESCONDIDO não pode virar um segundo "Descartar alterações" com o mesmo
-   * nome acessível: vira aviso com atalho para a aba onde o descarte tem contexto.
-   */
-  it('rascunho do outro slot vira aviso com atalho, não um segundo botão de descarte', async () => {
-    const user = userEvent.setup();
+  it('cada cartão descarta só o seu próprio rascunho — dois botões de descarte, um por slot', () => {
     useAgentPersonaWorkspace.mockReturnValue(
       workspace({
         female: slot({ pending: 1 }),
-        male: slot({ targetSex: 'MALE', version: 4, pending: 2 }),
+        male: slot({ targetSex: 'MALE', agentName: 'Leonardo', version: 4, pending: 2 }),
       }),
     );
-    renderCard();
-
-    expect(screen.getAllByRole('button', { name: 'Descartar alterações' })).toHaveLength(1);
-    expect(
-      screen.getByText('A persona masculina também tem 2 alterações não publicadas.'),
-    ).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Abrir persona masculina' }));
-    expect(onOpenPersona).toHaveBeenCalledWith('revisao', 'MALE');
+    renderCards();
+    expect(screen.getAllByRole('button', { name: 'Descartar alterações' })).toHaveLength(2);
+    expect(screen.getByText('1 alteração não publicada')).toBeVisible();
+    expect(screen.getByText('2 alterações não publicadas')).toBeVisible();
   });
 
   it('descrição do descarte referencia "configuração padrão" quando a versão do slot é nula', async () => {
     const user = userEvent.setup();
     useAgentPersonaWorkspace.mockReturnValue(
-      workspace({ female: slot({ version: null, servedFromSex: null, pending: 1 }) }),
+      workspace({
+        female: slot({ version: null, servedFromSex: null, pending: 1 }),
+        male: null,
+      }),
     );
-    renderCard();
+    renderCards();
     await user.click(screen.getByRole('button', { name: 'Descartar alterações' }));
     expect(screen.getByText(/a configuração padrão continua valendo/i)).toBeVisible();
-  });
-
-  it('1 tema proibido pendente: singular', () => {
-    useAgentPersonaWorkspace.mockReturnValue(
-      workspace({
-        topics: { versions: [topicVersion()], activeLabels: [], limits: { maxActiveTopics: 12 } },
-      }),
-    );
-    renderCard();
-    expect(
-      screen.getByText('1 tema proibido aguarda conclusão do fluxo de aprovação'),
-    ).toBeVisible();
-  });
-
-  it('múltiplos temas proibidos pendentes: plural, ignora versões não-current e RETIRED', () => {
-    useAgentPersonaWorkspace.mockReturnValue(
-      workspace({
-        topics: {
-          versions: [
-            topicVersion({ topicKey: 'a', status: 'PENDING_APPROVAL' }),
-            topicVersion({ topicKey: 'b', status: 'DRAFT' }),
-            topicVersion({ topicKey: 'c', status: 'DRAFT', current: false }),
-            topicVersion({ topicKey: 'd', status: 'RETIRED' }),
-          ],
-          activeLabels: [],
-          limits: { maxActiveTopics: 12 },
-        },
-      }),
-    );
-    renderCard();
-    expect(
-      screen.getByText('2 temas proibidos aguardam conclusão do fluxo de aprovação'),
-    ).toBeVisible();
   });
 });

@@ -76,7 +76,7 @@ describe('SummaryDashboard', () => {
   it('consulta o setor de sistema e abre pelo SLO board com orçamento de erro', async () => {
     getSystemSummary.mockResolvedValue(systemResponse);
     render(<SummaryDashboard resource="system" />);
-    expect(await screen.findByRole('heading', { name: 'Saúde do sistema' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: 'Saúde & Disponibilidade' })).toBeVisible();
     expect(screen.getByLabelText('Latência do banco: 18 ms')).toBeVisible();
 
     const board = screen.getByRole('region', { name: 'Objetivos de serviço' });
@@ -120,7 +120,7 @@ describe('SummaryDashboard', () => {
   it('consulta o setor financeiro em moeda brasileira', async () => {
     getFinanceSummary.mockResolvedValue(financeResponse);
     render(<SummaryDashboard resource="finance" />);
-    expect(await screen.findByRole('heading', { name: 'Financeiro' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: 'Receita & Assinaturas' })).toBeVisible();
     expect(screen.getByLabelText(/^Custo de IA \(30 dias\): R\$\s?40,90$/)).toBeVisible();
     expect(screen.getByLabelText('Receita recebida: —')).toBeVisible();
   });

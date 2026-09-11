@@ -9,7 +9,12 @@ export const workoutLoadUnitSchema = z.enum(['KG', 'LB', 'BODYWEIGHT', 'NONE']);
 export const workoutSetInputSchema = z
   .object({
     exerciseId: z.string().trim().min(1).max(80),
-    setNumber: z.number().int().min(1).max(20),
+    /**
+     * >= 1: série válida (numeração normal). <= 0: série de aquecimento (achado
+     * 2026-09-04) — `warmupBlocks` do exercício, numeradas em ordem crescente
+     * terminando em 0 (a última série de aquecimento, logo antes da série 1).
+     */
+    setNumber: z.number().int().min(-24).max(20),
     reps: z.number().int().min(0).max(300).nullable().optional(),
     loadValue: z.number().min(0).max(2000).nullable().optional(),
     loadUnit: workoutLoadUnitSchema.default('KG'),
@@ -47,12 +52,21 @@ export const finishWorkoutSchema = z
     perceivedEffort: z.number().int().min(1).max(10),
     feelingNotes: z.string().trim().max(1000).default(''),
     painReported: z.boolean().default(false),
-    painExerciseId: z.string().trim().min(1).max(80).nullable().optional(),
+    /**
+     * Achado 2026-09-04: a dor pode aparecer em mais de um exercício na mesma
+     * sessão — antes só um `painExerciseId` era aceito, forçando o aluno a
+     * escolher um só quando doeu em vários.
+     */
+    painExerciseIds: z.array(z.string().trim().min(1).max(80)).max(30).default([]),
     painNotes: z.string().trim().max(1000).default(''),
   })
   .superRefine((value, ctx) => {
-    if (value.painReported && !value.painExerciseId) {
-      ctx.addIssue({ code: 'custom', path: ['painExerciseId'], message: 'Selecione o exercício.' });
+    if (value.painReported && value.painExerciseIds.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['painExerciseIds'],
+        message: 'Selecione ao menos um exercício.',
+      });
     }
     if (value.painReported && value.painNotes.length < 3) {
       ctx.addIssue({

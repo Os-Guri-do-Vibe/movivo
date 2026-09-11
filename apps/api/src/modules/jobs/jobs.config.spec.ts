@@ -33,6 +33,9 @@ describe('jobs.config', () => {
         // Liberação automática da proposta de substituição de exercício via IA, após a
         // janela de cortesia de 30 min (achado 2026-09-02).
         'protocol-substitution-release',
+        // Renovação de protocolo por fim de mesociclo: scan diário + geração do próximo mesociclo.
+        'protocol-renewal-scan',
+        'protocol-renewal-generation',
         'sanity',
         'whatsapp-outbound',
         // US-8.1 — quick reply diário de treino.

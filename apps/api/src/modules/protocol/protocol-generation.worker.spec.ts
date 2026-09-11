@@ -370,7 +370,7 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
     expect(repository.persist).not.toHaveBeenCalled();
   });
 
-  it('validador bloqueou (template) → PENDING_REVIEW, sem entrega, mas agenda auto-liberação em 1h', async () => {
+  it('validador bloqueou (template) → PENDING_REVIEW, MANDATORY, sem auto-liberação', async () => {
     const { worker, enqueue, repository } = makeWorker({ action: 'BLOCK_FALLBACK' });
     const res = await worker.process(job());
     expect(res.status).toBe('PENDING_REVIEW');
@@ -378,16 +378,16 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
       expect.objectContaining({
         signed: false,
         humanReviewRequired: true,
-        // OPTIONAL, não MANDATORY (decisão do fundador, 2026-08-18): PAR-Q é o único
-        // motivo pra travar sem prazo, e quem chega aqui já passou por esse gate.
-        reviewUrgency: 'OPTIONAL',
+        // MANDATORY (decisão do fundador, 2026-09-03): caiu no template de fallback, então
+        // trava mesmo sem PAR-Q — o conteúdo nunca passou limpo pela validação.
+        reviewUrgency: 'MANDATORY',
       }),
     );
-    expect(enqueue).toHaveBeenCalledWith(
+    expect(enqueue).not.toHaveBeenCalledWith(
       'protocol-auto-release',
-      'auto-release',
-      { userId: 'u1', protocolId: 'p1' },
-      { delay: 60 * 60 * 1000, jobId: 'auto-release-p1' },
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
     );
   });
 
@@ -468,19 +468,17 @@ describe('ProtocolGenerationWorker.onModuleInit + DLQ fallback (US-2.4)', () => 
       expect.objectContaining({
         humanReviewRequired: true,
         generatedBy: 'FALLBACK_TEMPLATE',
-        // OPTIONAL, não MANDATORY (decisão do fundador, 2026-08-18): DLQ é indisponibilidade
-        // de infra (LLM fora do ar), não risco clínico — PAR-Q já filtrou antes de chegar
-        // aqui, então a mesma janela de cortesia de 1h se aplica.
-        reviewUrgency: 'OPTIONAL',
+        // MANDATORY sempre (decisão do fundador, 2026-09-03): este caminho só existe pra
+        // persistir o template de fallback, então nunca sai sozinho por auto-liberação,
+        // mesmo com PAR-Q liberado.
+        reviewUrgency: 'MANDATORY',
       }),
     );
-    // Mesma janela de cortesia de 1h que o caminho normal agenda — antes do achado
-    // 2026-08-18 o DLQ nunca agendava auto-liberação nenhuma (era sempre MANDATORY).
-    expect(enqueue).toHaveBeenCalledWith(
+    expect(enqueue).not.toHaveBeenCalledWith(
       'protocol-auto-release',
-      'auto-release',
-      expect.objectContaining({ userId: 'u1' }),
-      expect.objectContaining({ delay: 60 * 60 * 1000 }),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
     );
   });
 

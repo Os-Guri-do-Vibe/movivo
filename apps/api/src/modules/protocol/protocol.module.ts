@@ -23,12 +23,15 @@ import { ProtocolController } from './protocol.controller';
 import { ProtocolAutoReleaseWorker } from './protocol-auto-release.worker';
 import { ProtocolGenerationWorker } from './protocol-generation.worker';
 import { ProtocolGeneratorService } from './protocol-generator.service';
+import { ProtocolRenewalGenerationWorker } from './protocol-renewal-generation.worker';
+import { ProtocolRenewalScheduler } from './protocol-renewal.scheduler';
 import { ProtocolSubstitutionReleaseWorker } from './protocol-substitution-release.worker';
 import { ProtocolSubstitutionRepository } from './protocol-substitution.repository';
 import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
 import { MethodologyProvider } from './methodology-provider.service';
 import { ProtocolRepository } from './protocol.repository';
 import { ValidationService } from './validation/validation.service';
+import { WorkoutPresentationService } from './workout-presentation.service';
 
 /**
  * Importa `JobsModule` (fila `protocol-generation`/`whatsapp-outbound`) — a comunicação
@@ -46,8 +49,11 @@ import { ValidationService } from './validation/validation.service';
     ProtocolRepository,
     ProtocolGenerationWorker,
     ProtocolAutoReleaseWorker,
+    ProtocolRenewalScheduler,
+    ProtocolRenewalGenerationWorker,
     ProtocolSubstitutionRepository,
     ProtocolSubstitutionReleaseWorker,
+    WorkoutPresentationService,
   ],
   exports: [
     ProtocolGeneratorService,
@@ -55,6 +61,7 @@ import { ValidationService } from './validation/validation.service';
     MethodologyProvider,
     ExerciseCatalogProvider,
     ProtocolSubstitutionRepository,
+    WorkoutPresentationService,
   ],
 })
 export class ProtocolModule {}

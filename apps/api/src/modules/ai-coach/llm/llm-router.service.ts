@@ -43,6 +43,9 @@ interface Pricing {
 const DEFAULT_PRICING: Pricing = { input: 2.0, cached: 0.5, output: 8.0 };
 const PRICING: Record<string, Pricing> = {
   'deepseek-v4-pro': { input: 0.435, cached: 0.003625, output: 0.87 },
+  // Snapshot 2026-09-03 (api-docs.deepseek.com/quick_start/pricing) — tarifa de horário
+  // de pico (a fora-de-pico é metade); usar o teto de propósito pra nunca subestimar custo.
+  'deepseek-v4-flash': { input: 0.44, cached: 0.014, output: 1.32 },
   'gpt-4.1': DEFAULT_PRICING,
   'claude-sonnet-4-5': { input: 3.0, cached: 0.3, output: 15.0 },
 };
@@ -118,7 +121,19 @@ export class LlmRouter {
     const cfg = this.config.llm;
 
     // 1. PII Scrubber — a porta do router. O que sai e o que se loga é pseudonimizado.
-    const system = scrubPII(request.system, request.user);
+    //
+    // Achado 2026-09-10 (bug reportado pelo fundador, reproduzido ao vivo — "vontade o
+    // usuário ir treinar" no lugar de "vontade de ir treinar"): `system` NUNCA contém PII do
+    // titular — é o prompt estático (guardrails + persona + `extraSystem` por intenção),
+    // 100% autorado em código/painel, nunca interpolado com nome/telefone/e-mail/nascimento
+    // do aluno (conferido em todo `extraSystem` do worker). Escrubar mesmo assim, pelo nome
+    // do titular, corrompia qualquer ocorrência de uma PALAVRA comum do prompt (preposições
+    // como "de"/"da"/"do") sempre que esse mesmo token fizesse parte do nome do titular (ex.:
+    // "Rodrigo Cavalcante **de** Barros" → todo "de" do prompt virava "o usuário") — nome
+    // brasileiro com partícula é comum, não é caso de borda. A IA então "aprendia" esse
+    // padrão quebrado a partir do próprio prompt e repetia no texto gerado. Só `messages`
+    // (mensagem do aluno, histórico, estado) pode conter PII de verdade — só ali escruba.
+    const system = request.system;
     const messages: ChatTurn[] = request.messages.map((m) => ({
       role: m.role,
       content: scrubPII(m.content, request.user),

@@ -10,7 +10,7 @@
  */
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import {
   onboardingStep1Schema,
   TRAINING_PHASE_LABELS,
@@ -22,7 +22,7 @@ import {
   type ProtocolStructure,
 } from '@movivo/shared';
 
-import { TenantDatabase } from '../../core/database/tenant-database.service';
+import { TenantDatabase, type TenantTransaction } from '../../core/database/tenant-database.service';
 import { anamnesisSessions, protocols, protocolVersions } from '../../core/database/schema';
 import type { ContraindicationTag } from './exercise-catalog';
 
@@ -38,9 +38,18 @@ export function signatureHash(content: ProtocolStructure): string {
 
 const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
 
-/** "Mesociclo {version} — {fase}" — nome do bloco de periodização vigente. */
-function mesocycleName(version: number, phase: ProtocolStructure['phase']): string {
-  return `Mesociclo ${version} — ${TRAINING_PHASE_LABELS[phase] ?? phase}`;
+/**
+ * "Mesociclo {mesocycleNumber}: {fase}" — nome do bloco de periodização vigente. Colon,
+ * não travessão: este nome entra literal na mensagem de WhatsApp de entrega do protocolo
+ * (`explanationBlock` em `message-templates.ts`), onde travessão é proibido por regra de
+ * produto (achado 2026-09-09, correção do fundador).
+ *
+ * `mesocycleNumber` é o nº sequencial do mesociclo na vida do titular (coluna
+ * `protocols.mesocycleNumber`) — nunca `protocols.version` (que conta revisões desta
+ * MESMA linha, incrementado por `signProtocol` a cada assinatura).
+ */
+function mesocycleName(mesocycleNumber: number, phase: ProtocolStructure['phase']): string {
+  return `Mesociclo ${mesocycleNumber}: ${TRAINING_PHASE_LABELS[phase] ?? phase}`;
 }
 
 export interface PersistProtocolInput {
@@ -59,6 +68,13 @@ export interface PersistProtocolInput {
    * consegue liberar o PAR-Q da sessão certa (`release_parq_on_signature`).
    */
   anamnesisSessionId: string | null;
+  /**
+   * Sessão de renovação que originou este protocolo (mesociclo 2+). `null` para a
+   * geração inicial (mesociclo 1, que tem `anamnesisSessionId` em vez disto). Um dos dois
+   * deve estar preenchido a partir do segundo mesociclo — não há CHECK de banco para
+   * isso ainda (mesmo racional de nullable "normal" já documentado no schema).
+   */
+  renewalSessionId?: string | null;
   totalWeeks: number;
   generatedBy: string;
   modelVersion: string | null;
@@ -97,19 +113,30 @@ export interface PersistedProtocol {
   alreadyExisted: boolean;
 }
 
-const PROTOCOL_VERSION = 1;
+/** Toda linha nasce nesta revisão-de-conteúdo; `signProtocol` incrementa a partir daqui. */
+const INITIAL_REVISION_VERSION = 1;
+
+/** Mesociclo inicial (o único que nasce de anamnese, não de renovação). */
+const INITIAL_MESOCYCLE_NUMBER = 1;
 
 @Injectable()
 export class ProtocolRepository {
   constructor(private readonly db: TenantDatabase) {}
 
-  /** Já existe protocolo v1 para o titular? (pré-checagem de idempotência do Worker). */
+  /**
+   * Já existe o protocolo INICIAL (mesociclo 1) do titular? Pré-checagem de idempotência
+   * do `ProtocolGenerationWorker` — não tem relação com renovação: a idempotência de um
+   * protocolo de renovação é por `renewalSessionId` (uma sessão de renovação gera no
+   * máximo um protocolo), verificada por quem chama `persist()` naquele fluxo.
+   */
   async existsForUser(userId: string): Promise<boolean> {
     const rows = await this.db.runAsUser(userId, 'USER', (tx) =>
       tx
         .select({ id: protocols.id })
         .from(protocols)
-        .where(and(eq(protocols.userId, userId), eq(protocols.version, PROTOCOL_VERSION)))
+        .where(
+          and(eq(protocols.userId, userId), eq(protocols.mesocycleNumber, INITIAL_MESOCYCLE_NUMBER)),
+        )
         .limit(1),
     );
     return rows.length > 0;
@@ -176,7 +203,18 @@ export class ProtocolRepository {
     return rows[0]?.pdfContent ?? null;
   }
 
-  /** Persiste `protocols` v1 + `protocol_versions`. Corrida (23505) → `alreadyExisted`. */
+  /**
+   * Persiste `protocols` (uma linha nova por mesociclo) + `protocol_versions`. O nº do
+   * mesociclo é calculado DENTRO da transação, sob `FOR UPDATE`: `MAX(mesocycleNumber)`
+   * do titular + 1 (ou o inicial, se não houver nenhum). Isso serializa qualquer chamada
+   * concorrente para o MESMO titular a partir do segundo mesociclo (o `SELECT ... FOR
+   * UPDATE` trava as linhas existentes); só a corrida do PRIMEIRO mesociclo (zero linhas
+   * para travar) ainda depende do backstop de `isUniqueViolation` abaixo — mesmo cenário
+   * que o código já tratava antes desta mudança.
+   *
+   * Nunca toca o protocolo anterior: quem o supersede é `activateProtocol()`, no
+   * instante em que ESTE (o novo) vira `ACTIVE` — nunca na geração/persistência.
+   */
   async persist(input: PersistProtocolInput): Promise<PersistedProtocol> {
     const signedAt = input.signed ? new Date() : null;
     const hash = input.signed ? signatureHash(input.content) : null;
@@ -188,11 +226,13 @@ export class ProtocolRepository {
         const professionalId = input.signed
           ? await this.assignedActiveProfessional(tx, input.userId)
           : null;
+        const mesocycleNumber = await this.nextMesocycleNumber(tx, input.userId);
         const [proto] = await tx
           .insert(protocols)
           .values({
             userId: input.userId,
-            version: PROTOCOL_VERSION,
+            version: INITIAL_REVISION_VERSION,
+            mesocycleNumber,
             status: input.status,
             approvalStatus: input.approvalStatus,
             professionalId,
@@ -200,7 +240,7 @@ export class ProtocolRepository {
             signatureHash: hash,
             currentWeek: 1,
             totalWeeks: input.totalWeeks,
-            mesocycleName: mesocycleName(PROTOCOL_VERSION, input.content.phase),
+            mesocycleName: mesocycleName(mesocycleNumber, input.content.phase),
             startDate,
             endDate,
             content: input.content,
@@ -209,6 +249,7 @@ export class ProtocolRepository {
             humanReviewRequired: input.humanReviewRequired,
             reviewUrgency: input.reviewUrgency,
             anamnesisSessionId: input.anamnesisSessionId,
+            renewalSessionId: input.renewalSessionId ?? null,
             generatedBy: input.generatedBy,
             modelVersion: input.modelVersion,
             promptVersion: input.promptVersion,
@@ -222,10 +263,12 @@ export class ProtocolRepository {
         await tx.insert(protocolVersions).values({
           protocolId: proto.id,
           userId: input.userId,
-          version: PROTOCOL_VERSION,
+          version: INITIAL_REVISION_VERSION,
           status: input.status,
           content: input.content,
-          changeReason: 'geração inicial (US-2.4)',
+          changeReason: input.renewalSessionId
+            ? 'geração de renovação por fim de mesociclo'
+            : 'geração inicial (US-2.4)',
           generatedBy: input.generatedBy,
           knowledgeSources: input.knowledgeSources ?? [],
           methodologyVersionId: input.methodologyVersionId ?? null,
@@ -236,23 +279,27 @@ export class ProtocolRepository {
 
         return {
           protocolId: proto.id,
-          version: PROTOCOL_VERSION,
+          version: INITIAL_REVISION_VERSION,
           professionalId,
           alreadyExisted: false,
         };
       });
     } catch (error) {
       if (isUniqueViolation(error)) {
+        // Backstop de corrida (ver doc do método): só alcançável na disputa pelo
+        // PRIMEIRO mesociclo do titular (sem linha nenhuma para o `FOR UPDATE` travar).
+        // Devolve a linha mais recente do titular — é o que "já existe" quer dizer aqui.
         const [existing] = await this.db.runAsUser(input.userId, 'USER', (tx) =>
           tx
             .select({ id: protocols.id, professionalId: protocols.professionalId })
             .from(protocols)
-            .where(and(eq(protocols.userId, input.userId), eq(protocols.version, PROTOCOL_VERSION)))
+            .where(eq(protocols.userId, input.userId))
+            .orderBy(desc(protocols.mesocycleNumber), desc(protocols.version))
             .limit(1),
         );
         return {
           protocolId: existing?.id ?? 'unknown',
-          version: PROTOCOL_VERSION,
+          version: INITIAL_REVISION_VERSION,
           professionalId: existing?.professionalId ?? null,
           alreadyExisted: true,
         };
@@ -303,6 +350,10 @@ export class ProtocolRepository {
           humanReviewRequired: false,
         })
         .where(eq(protocols.id, protocolId));
+      // Renovação de mesociclo: o mesociclo anterior (se houver) só deixa de ser `ACTIVE`
+      // agora, no mesmo instante/transação em que este vira `ACTIVE` — nunca antes, para
+      // o titular nunca ficar sem protocolo vigente durante a espera pela renovação.
+      await supersedePreviousActiveProtocols(tx, userId, protocolId);
       return {
         released: true,
         version: row.version,
@@ -318,7 +369,7 @@ export class ProtocolRepository {
   }
 
   /** PDF gerado depois (fora da transação de liberação) — `signProtocol` grava o mesmo jeito. */
-  async setPdfContent(userId: string, protocolId: string, pdf: Buffer): Promise<void> {
+  async setPdfContent(userId: string, protocolId: string, pdf: Buffer | null): Promise<void> {
     await this.db.runAsUser(userId, 'USER', (tx) =>
       tx.update(protocols).set({ pdfContent: pdf }).where(eq(protocols.id, protocolId)),
     );
@@ -357,9 +408,63 @@ export class ProtocolRepository {
     if (!professionalId) throw new Error('Nenhum profissional CREF ativo atribuido ao titular.');
     return professionalId;
   }
+
+  /**
+   * Próximo nº de mesociclo do titular, sob `FOR UPDATE` — trava as linhas existentes
+   * (se houver) para serializar qualquer chamada concorrente de `persist()` para o MESMO
+   * titular. Zero linhas não trava nada (ver doc de `persist()` sobre o backstop de corrida
+   * que cobre exatamente esse caso residual).
+   *
+   * Achado 2026-09-10 (bug reportado pelo fundador, reproduzido ao vivo — geração de
+   * protocolo de titular novo falhando 100% das vezes, 3/3 tentativas do BullMQ, nunca
+   * persistindo nada): a versão anterior fazia `SELECT max(...) ... FOR UPDATE` — Postgres
+   * proíbe `FOR UPDATE` junto de função de agregação ("FOR UPDATE is not allowed with
+   * aggregate functions"), então a query nunca rodava, sempre. Corrigido: `FOR UPDATE` só
+   * trava as linhas (sem agregar), o máximo é calculado em código depois de travar — mesma
+   * semântica de lock, sql válido.
+   */
+  private async nextMesocycleNumber(tx: TenantTransaction, userId: string): Promise<number> {
+    const rows = (await tx.execute(
+      sql`SELECT ${protocols.mesocycleNumber} AS mesocycle_number
+          FROM ${protocols}
+          WHERE ${protocols.userId} = ${userId}
+          FOR UPDATE`,
+    )) as unknown as Array<{ mesocycle_number: number | string }>;
+    if (rows.length === 0) return INITIAL_MESOCYCLE_NUMBER;
+    const max = rows.reduce((acc, row) => Math.max(acc, Number(row.mesocycle_number)), 0);
+    return max + 1;
+  }
 }
 
 /** 23505 = unique_violation do PostgreSQL. */
 function isUniqueViolation(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
+}
+
+/**
+ * Marca `SUPERSEDED` qualquer OUTRO protocolo `ACTIVE` do mesmo titular, na MESMA
+ * transação que ativa `activatingProtocolId` — nunca antes (o titular não pode ficar sem
+ * protocolo vigente enquanto o novo é gerado/revisado). Chamada tanto por
+ * `ProtocolRepository.autoRelease()` quanto por `DashboardService.signProtocol()`
+ * (função solta, não método de classe, para não criar uma dependência de NestJS DI entre
+ * os dois módulos — mesmo padrão de `signatureHash` já exportado deste arquivo).
+ *
+ * Idempotente e seguro na primeiríssima ativação de um titular: não há nenhuma linha
+ * `ACTIVE` para encontrar, então é no-op.
+ */
+export async function supersedePreviousActiveProtocols(
+  tx: TenantTransaction,
+  userId: string,
+  activatingProtocolId: string,
+): Promise<void> {
+  await tx
+    .update(protocols)
+    .set({ status: 'SUPERSEDED' })
+    .where(
+      and(
+        eq(protocols.userId, userId),
+        eq(protocols.status, 'ACTIVE'),
+        ne(protocols.id, activatingProtocolId),
+      ),
+    );
 }

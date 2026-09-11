@@ -20,7 +20,7 @@ export const WORKOUT_SKIPPED_TITLE = 'Hoje não';
 
 /** Confirmação após o toque. Registra o fato; não promete nem interpreta resultado. */
 export const WORKOUT_DONE_ACK =
-  'Treino registrado. Obrigado por avisar — isso mantém seu acompanhamento com o profissional CREF da MOVIVO em dia.';
+  'Treino registrado. Obrigado por avisar, isso mantém seu acompanhamento com o profissional CREF da MOVIVO em dia.';
 export const WORKOUT_SKIPPED_ACK =
   'Anotado, nenhum treino registrado hoje. Sem cobrança: seu plano continua igual e o profissional CREF da MOVIVO acompanha o conjunto da semana.';
 

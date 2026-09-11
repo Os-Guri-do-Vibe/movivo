@@ -23,6 +23,7 @@ import {
   type TenantTransaction,
 } from '../../../core/database/tenant-database.service';
 import { healthBlockSchema } from '../../anamnesis/health-block';
+import { dayKey, sessionFor, weekdayCode, WORKOUT_TIMEZONE } from '../../workout/workout-schedule';
 import type { ScrubUser } from '../llm/llm.types';
 
 export interface EpisodicMemory {
@@ -108,6 +109,27 @@ export class ContextRepository {
         ? await this.loadAnamneseSummary(tx, proto.anamnesisSessionId)
         : null;
 
+      // Achado 2026-09-09: o Coach respondia "qual treino hoje" tratando o protocolo como
+      // um ciclo rotativo a partir do 1º treino do aluno (Dia1→Dia2→Dia3...), contradizendo
+      // o calendário real — cada sessão tem `weekday` fixo (dia da semana), e é essa mesma
+      // regra (`sessionFor`, `workout-schedule.ts`) que decide o treino do check-in diário.
+      // Sem "hoje" no contexto, o modelo não tinha como cruzar `protocoloCompleto` com o
+      // calendário real e preenchia a lacuna com uma heurística genérica. Aqui o cálculo é
+      // feito em código — o mesmo algoritmo determinístico do check-in — e entregue pronto,
+      // para o Coach nunca precisar (nem tentar) recalcular isso sozinho.
+      const now = new Date();
+      const hoje = {
+        data: dayKey(now),
+        diaDaSemana: weekdayCode(now),
+        rotulo: new Intl.DateTimeFormat('pt-BR', {
+          timeZone: WORKOUT_TIMEZONE,
+          weekday: 'long',
+        }).format(now),
+      };
+      const treinoDeHojeSegundoCalendario = content
+        ? (sessionFor(now, content) ?? 'Hoje não é dia de treino previsto no protocolo.')
+        : null;
+
       const state: Record<string, unknown> = proto
         ? {
             temProtocoloAtivo: true,
@@ -116,6 +138,8 @@ export class ContextRepository {
             restricoes: c.injuryTags ?? [],
             equipamentos: c.equipment ?? [],
             protocoloCompleto: content,
+            hoje,
+            treinoDeHojeSegundoCalendario,
             anamnese,
             eventosRecentes: {
               treinosConcluidos: recentWorkouts,
@@ -123,6 +147,7 @@ export class ContextRepository {
             },
           }
         : {
+            hoje,
             temProtocoloAtivo: false,
             anamnese,
             eventosRecentes: {

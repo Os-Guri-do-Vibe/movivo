@@ -16,8 +16,11 @@ import type {
   PainAssessment,
   ParqAnswer,
   ParqQuestionId,
+  StoppedFor,
   TrainingExperience,
   TrainingLocation,
+  TrainingPhase,
+  TrainingStatus,
   Weekday,
 } from '@movivo/shared';
 import { EMPHASIS_MUSCLE_GROUPS, PAIN_REGION_LABELS } from '@movivo/shared';
@@ -30,6 +33,19 @@ export interface UserConstraints {
   goal: GenerationGoal;
   /** Nível REAL, vindo da experiência com musculação declarada na anamnese v2. */
   level: ExerciseLevel;
+  /**
+   * Achado 2026-09-03 (reproduzido ao vivo): a anamnese coleta `trainingStatus`
+   * (NEVER/STOPPED/OCCASIONAL/REGULAR) desde sempre, mas ele nunca chegava até aqui — o
+   * gerador não tinha NENHUM sinal sobre se o aluno está treinando regularmente ou
+   * voltando de uma pausa, e a metodologia é explícita que é esse dado (não `level`) que
+   * decide o ponto de entrada: "o status atual de treinamento... deve determinar o ponto
+   * de entrada no programa", independente da experiência declarada. Sem o campo, um
+   * intermediário REGULAR (sem motivo nenhum pra ADAPTACAO) e um intermediário voltando de
+   * 1 ano parado (que precisa de readaptação) eram indistinguíveis pro LLM.
+   */
+  trainingStatus: TrainingStatus;
+  /** Faixa de tempo parado — só presente quando `trainingStatus === 'STOPPED'`. */
+  stoppedFor?: StoppedFor;
   daysPerWeek: number;
   /** Dias reais da semana declarados na anamnese (achado 2026-08-18) — uma sessão do
    *  protocolo por dia aqui, nunca menos/mais (ver `ValidationService`). */
@@ -80,6 +96,29 @@ export interface UserConstraints {
     daysUntil: number;
     /** Texto livre do usuário (evento/objetivo numérico, ex.: "chegar a 70kg") — nunca instrução. */
     description?: string;
+  };
+  /**
+   * Presente SÓ na geração de renovação de mesociclo (protocolo 2+, a partir do
+   * formulário de troca de protocolo por fim de mesociclo). Ausente na geração inicial —
+   * é o que distingue as duas no gerador (`ProtocolGeneratorService.buildUserMessage`).
+   *
+   * Decisão do fundador: não existe máquina de estados decidindo a próxima fase
+   * (adaptação/hipertrofia/força/deload) em código — a IA decide, como já faz na geração
+   * inicial, agora informada por este histórico + pela metodologia publicada (que já
+   * descreve a lógica de transição entre fases). `maxPhase`/`requiresProfessionalReview`
+   * (acima) continuam sendo o único teto determinístico, exatamente como na geração
+   * inicial — nenhuma trava nova para a renovação.
+   */
+  continuation?: {
+    previousMesocycleNumber: number;
+    previousPhase: TrainingPhase;
+    previousPhaseDurationWeeks: number;
+    /**
+     * Resumo em texto corrido das respostas do formulário de renovação (desempenho,
+     * fadiga/recuperação e resultado percebido) — DADO do usuário, nunca instrução
+     * (delimitado com `wrapUserMessage` no gerador, mesmo tratamento de `injuriesRaw`).
+     */
+    summary: string;
   };
 }
 

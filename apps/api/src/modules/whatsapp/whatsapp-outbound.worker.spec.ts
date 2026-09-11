@@ -57,6 +57,14 @@ interface Deps {
     reviewUrgency?: string | null;
   } | null;
   markerExists?: boolean;
+  /**
+   * Marker de `wa-sent:PROTOCOL_WAITING:na` — separado de `markerExists` (o marker do job
+   * corrente) porque a entrega adiantada (achado 2026-09-04) checa essa chave ANTES de
+   * mandar o protocolo, pra decidir se manda a apresentação primeiro. Default `undefined`
+   * (não existe ainda): testes de entrega que não se importam com a apresentação passam
+   * `true` pra isolar o que estão testando.
+   */
+  waitingMarkerExists?: boolean;
   consentActive?: boolean;
 }
 
@@ -68,7 +76,7 @@ interface Deps {
  */
 function makeTx(deps: Deps) {
   let table: unknown;
-  const defaults = { totalWeeks: 12, mesocycleName: 'Mesociclo 1 — Adaptação' };
+  const defaults = { totalWeeks: 12, mesocycleName: 'Mesociclo 1: Adaptação' };
   const proto =
     deps.proto === undefined
       ? {
@@ -116,11 +124,18 @@ function makeWorker(deps: Deps = {}) {
       cb(makeTx(deps)),
     ),
   } as unknown as TenantDatabase;
+  const keys = new RedisKeyBuilder('movivo');
+  // Mesma chave que `PROTOCOL_WAITING` usa como marker principal E que a entrega adiantada
+  // (achado 2026-09-04) checa como marker SECUNDÁRIO — por isso o fake distingue pela
+  // chave, não por um único booleano: um job `PROTOCOL_DELIVERY` consulta as DUAS chaves
+  // (a sua própria e esta), um job `PROTOCOL_WAITING` só consulta esta.
+  const waitingKey = keys.forUser(USER_ID, 'wa-sent', 'PROTOCOL_WAITING', 'na');
   const redis = {
-    exists: vi.fn(() => Promise.resolve(deps.markerExists ? 1 : 0)),
+    exists: vi.fn((key: string) =>
+      Promise.resolve((key === waitingKey ? deps.waitingMarkerExists : deps.markerExists) ? 1 : 0),
+    ),
     set: vi.fn(() => Promise.resolve('OK')),
   } as unknown as Redis;
-  const keys = new RedisKeyBuilder('movivo');
   const send = vi.fn((_m: OutboundMessage) => Promise.resolve());
   const sendTyping = vi.fn((_to: string) => Promise.resolve());
   const sendTemplate = vi.fn((_to: string, _templateName: string, _variables?: readonly string[]) =>
@@ -203,12 +218,19 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
     expect(send).toHaveBeenCalledOnce();
   });
 
-  it('confirmação: envia uma bolha e marca como enviado', async () => {
-    const { worker, send, redis } = makeWorker();
+  it('confirmação: envia uma bolha saudando pelo primeiro nome e marca como enviado', async () => {
+    const { worker, send, redis } = makeWorker({ name: 'Ana Beatriz' });
     const res = await worker.process(job({ type: 'CONFIRMATION' }));
     expect(res.status).toBe('SENT');
     expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0]?.text).toMatch(/^Olá, Ana!/);
     expect(redis.set).toHaveBeenCalled();
+  });
+
+  it('confirmação sem nome salvo: saúda genericamente', async () => {
+    const { worker, send } = makeWorker({ name: null });
+    await worker.process(job({ type: 'CONFIRMATION' }));
+    expect(send.mock.calls[0]?.[0]?.text).toMatch(/^Olá!/);
   });
 
   it('variante de cuidado é enviada para PAR-Q de risco', async () => {
@@ -235,20 +257,21 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
   });
 
   it('entrega AUTO_APPROVED/ACTIVE: envia 4 bolhas (com a explicação do plano) e emite protocol_sent', async () => {
-    const { worker, send } = makeWorker();
+    const { worker, send } = makeWorker({ waitingMarkerExists: true });
     const res = await worker.process(
       job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 }),
     );
     expect(res.status).toBe('SENT');
     expect(send).toHaveBeenCalledTimes(4);
     // Bolha 2: contexto do plano, com o mesociclo e a duração vindos da linha do protocolo.
-    expect(send.mock.calls[1]?.[0]?.text).toContain('Mesociclo 1 — Adaptação');
+    expect(send.mock.calls[1]?.[0]?.text).toContain('Mesociclo 1: Adaptação');
     expect(send.mock.calls[1]?.[0]?.text).toContain('12 semanas');
     expect(send.mock.calls[3]?.[0]?.text).toContain('https://movivo.test/protocolo/p1');
   });
 
-  it('entrega com PDF: manda o texto explicativo E o documento, com um marcador só', async () => {
+  it('entrega com PDF, sem resumo de IA: a saudação vai só na legenda do documento, nenhuma bolha antes', async () => {
     const { worker, send, sendDocument, redis } = makeWorker({
+      waitingMarkerExists: true,
       name: 'Ana Beatriz Souza',
       proto: {
         id: 'p1',
@@ -265,19 +288,147 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
       job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 }),
     );
     expect(res.status).toBe('SENT');
-    // Com PDF, o texto vira só intro + contexto (achado 2026-08-25) — o anexo já é o
-    // plano completo, sem prévia de treino nem link redundante ao lado do PDF real.
-    expect(send).toHaveBeenCalledTimes(2);
+    // Achado 2026-09-04 (reproduzido ao vivo, print real de WhatsApp): a saudação saía como
+    // bolha ANTES do documento E de novo como legenda dele — duplicada. Agora é uma mensagem
+    // só: a legenda do documento.
+    expect(send).not.toHaveBeenCalled();
     expect(sendDocument).toHaveBeenCalledTimes(1);
     expect(redis.set).toHaveBeenCalledTimes(1);
     const [, url, caption, , fileName] = sendDocument.mock.calls[0] ?? [];
     expect(url).toBe('https://movivo.test/protocolo/p1/pdf');
     expect(fileName).toBe('protocolo-ana-beatriz-souza-movivo.pdf');
-    // Assinado por humano: a legenda pode afirmar a revisão.
-    expect(caption).toMatch(/Revisado e assinado/i);
+    expect(caption).toMatch(/^Ana, seu treino está pronto!/);
   });
 
-  it('entrega com PDF auto-liberado: a legenda NÃO afirma revisão humana', async () => {
+  // Achado 2026-09-08 (bug reproduzido ao vivo pelo fundador): a reentrega pós-substituição
+  // usava a MESMA saudação de "seu treino está pronto! Montamos tudo com base nos seus
+  // objetivos..." da 1ª entrega, como se fosse a primeira vez — sem nunca dizer que era uma
+  // ATUALIZAÇÃO por causa da troca de exercício que o aluno pediu.
+  it('entrega pós-substituição (`deliveryReason: SUBSTITUTION`): saudação nomeia a troca, não repete a de 1ª entrega', async () => {
+    const { worker, sendDocument } = makeWorker({
+      waitingMarkerExists: true,
+      name: 'Ana Beatriz Souza',
+      proto: {
+        id: 'p1',
+        content: structure(),
+        status: 'ACTIVE',
+        approvalStatus: 'HUMAN_APPROVED',
+        signedAt: new Date(),
+        signatureHash: 'a'.repeat(64),
+        professionalId: '00000000-0000-4000-8000-000000000001',
+        pdfContent: Buffer.from('%PDF-1.4'),
+      },
+    });
+    const res = await worker.process(
+      job({
+        type: 'PROTOCOL_DELIVERY',
+        protocolId: 'p1',
+        protocolVersion: 1,
+        deliveryReason: 'SUBSTITUTION',
+        substitutionFromExercise: 'Caminhada de Mala (Halter)',
+        substitutionToExercise: 'Esteira',
+      }),
+    );
+    expect(res.status).toBe('SENT');
+    const caption = sendDocument.mock.calls[0]?.[2] as string;
+    expect(caption).toMatch(/^Ana, a troca do seu exercício já foi feita!/);
+    expect(caption).toContain('"Caminhada de Mala (Halter)" virou "Esteira"');
+    expect(caption).not.toContain('seu treino está pronto');
+  });
+
+  it('entrega com PDF e resumo de IA (`data.text`): saudação + resumo viram UMA legenda só, nenhuma bolha antes', async () => {
+    const { worker, send, sendDocument } = makeWorker({
+      waitingMarkerExists: true,
+      name: 'Ana Beatriz Souza',
+      proto: {
+        id: 'p1',
+        content: structure(),
+        status: 'ACTIVE',
+        approvalStatus: 'HUMAN_APPROVED',
+        signedAt: new Date(),
+        signatureHash: 'a'.repeat(64),
+        professionalId: '00000000-0000-4000-8000-000000000001',
+        pdfContent: Buffer.from('%PDF-1.4'),
+      },
+    });
+    const res = await worker.process(
+      job({
+        type: 'PROTOCOL_DELIVERY',
+        protocolId: 'p1',
+        protocolVersion: 1,
+        text: 'Seu treino trabalha corpo inteiro 3x por semana, com foco em técnica.',
+      }),
+    );
+    expect(res.status).toBe('SENT');
+    // Achado 2026-09-04: o resumo da IA não sai mais como 3ª bolha à parte (chegava a se
+    // reapresentar como "Leonardo" de novo e a afirmar "o PDF já foi enviado" antes de sair)
+    // — entra junto na MESMA legenda do documento, separado por parágrafo.
+    expect(send).not.toHaveBeenCalled();
+    expect(sendDocument).toHaveBeenCalledTimes(1);
+    const caption = sendDocument.mock.calls[0]?.[2];
+    expect(caption).toMatch(/^Ana, seu treino está pronto!/);
+    expect(caption).toContain('Seu treino trabalha corpo inteiro 3x por semana, com foco em técnica.');
+    expect(caption).not.toContain('---');
+  });
+
+  it('achado 2026-09-04: aprovação antes dos 30min manda a apresentação ANTES da entrega, e marca PROTOCOL_WAITING como enviado', async () => {
+    const { worker, send, sendDocument, redis } = makeWorker({
+      // Sem `waitingMarkerExists`: simula o caso que motivou a mudança — o profissional
+      // assinou antes do job de 30min disparar, então a apresentação nunca saiu ainda.
+      name: 'Ana Beatriz Souza',
+      proto: {
+        id: 'p1',
+        content: structure(),
+        status: 'ACTIVE',
+        approvalStatus: 'HUMAN_APPROVED',
+        signedAt: new Date(),
+        signatureHash: 'a'.repeat(64),
+        professionalId: '00000000-0000-4000-8000-000000000001',
+        pdfContent: Buffer.from('%PDF-1.4'),
+      },
+    });
+    const res = await worker.process(
+      job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 }),
+    );
+    expect(res.status).toBe('SENT');
+    // Única bolha: apresentação da agente (`agentSelfIntro`, via `analyzingMessage`) — a
+    // saudação da entrega não sai mais como bolha própria, só como legenda do documento
+    // (achado 2026-09-04, ver testes acima). A ORDEM apresentação→entrega continua sendo
+    // o ponto desta mudança: a apresentação sai ANTES do documento.
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0]?.text).toBe(DEFAULT_AGENT_PERSONA.agentSelfIntro);
+    expect(sendDocument).toHaveBeenCalledTimes(1);
+    expect(sendDocument.mock.calls[0]?.[2]).toMatch(/^Ana, seu treino está pronto!/);
+    // Marca o MESMO marker que um job `PROTOCOL_WAITING` real usaria — quando ele disparar
+    // depois (o delay do BullMQ não é cancelável), vira `ALREADY_SENT` sem duplicar.
+    const waitingKey = new RedisKeyBuilder('movivo').forUser(
+      USER_ID,
+      'wa-sent',
+      'PROTOCOL_WAITING',
+      'na',
+    );
+    expect(redis.set).toHaveBeenCalledWith(waitingKey, '1', 'EX', expect.any(Number));
+  });
+
+  it('achado 2026-09-04: se a apresentação já saiu (30min normais), a entrega não repete', async () => {
+    const { worker, send } = makeWorker({
+      waitingMarkerExists: true,
+      proto: {
+        id: 'p1',
+        content: structure(),
+        status: 'ACTIVE',
+        approvalStatus: 'AUTO_APPROVED',
+        signedAt: new Date(),
+        signatureHash: 'a'.repeat(64),
+        professionalId: '00000000-0000-4000-8000-000000000001',
+      },
+    });
+    await worker.process(job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 }));
+    // Sem PDF, as 4 bolhas de sempre (`formatProtocolDelivery`) — nenhuma apresentação extra.
+    expect(send).toHaveBeenCalledTimes(4);
+  });
+
+  it('entrega com PDF auto-liberado: a legenda é a mesma saudação, independente de revisão humana', async () => {
     const { worker, sendDocument } = makeWorker({
       proto: {
         id: 'p1',
@@ -292,29 +443,7 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
     });
     await worker.process(job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 }));
     const caption = sendDocument.mock.calls[0]?.[2];
-    expect(caption).not.toMatch(/revisou|revisado|assinou|assinado/i);
-    expect(caption).toMatch(/metodologia do profissional de Educação Física registrado no CREF/i);
-  });
-
-  it('entrega com PDF: falha no texto explicativo não impede o envio do documento', async () => {
-    const { worker, send, sendDocument } = makeWorker({
-      proto: {
-        id: 'p1',
-        content: structure(),
-        status: 'ACTIVE',
-        approvalStatus: 'HUMAN_APPROVED',
-        signedAt: new Date(),
-        signatureHash: 'a'.repeat(64),
-        professionalId: '00000000-0000-4000-8000-000000000001',
-        pdfContent: Buffer.from('%PDF-1.4'),
-      },
-    });
-    send.mockRejectedValueOnce(new Error('transport 500'));
-    const res = await worker.process(
-      job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 }),
-    );
-    expect(res.status).toBe('SENT');
-    expect(sendDocument).toHaveBeenCalledTimes(1);
+    expect(caption).toMatch(/^Ana, seu treino está pronto!/);
   });
 
   it('entrega com PDF, sem nome cadastrado: cai no nome de arquivo genérico', async () => {
@@ -359,43 +488,43 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('espera (30min do submit): sem protocolo ainda, a agente se apresenta e promete o plano', async () => {
+  it('espera (30min do submit): sem protocolo ainda, é só a apresentação do agente (exceção deliberada)', async () => {
     const { worker, send } = makeWorker({ proto: null });
     const res = await worker.process(job({ type: 'PROTOCOL_WAITING' }));
     expect(res.status).toBe('SENT');
     expect(send).toHaveBeenCalledTimes(1);
     const text = send.mock.calls[0]?.[0]?.text ?? '';
     expect(text).toContain(DEFAULT_AGENT_PERSONA.agentName);
-    expect(text).toMatch(/analisando as informações/i);
-    expect(text).toMatch(/Logo te mando o plano completo/i);
+    expect(text).not.toMatch(/analisando as informações|intelig[êe]ncia artificial/i);
   });
 
-  it('espera (30min do submit): PAR-Q bloqueado (MANDATORY) anuncia revisão humana, sem prazo', async () => {
-    const { worker, send } = makeWorker({
+  it('espera (30min do submit): MANDATORY (PAR-Q bloqueado) e OPTIONAL mandam o MESMO texto', async () => {
+    // Achado 2026-09-04 (a pedido do fundador, reproduzido ao vivo): a variante MANDATORY
+    // chegou a sair pro fundador em teste quando o esperado era a apresentação normal do
+    // agente — unificado, `reviewUrgency` não decide mais o texto desta mensagem.
+    const mandatory = makeWorker({
       proto: {
         status: 'PENDING_SIGNATURE',
         approvalStatus: 'PENDING_REVIEW',
         reviewUrgency: 'MANDATORY',
       },
     });
-    const res = await worker.process(job({ type: 'PROTOCOL_WAITING' }));
+    const res = await mandatory.worker.process(job({ type: 'PROTOCOL_WAITING' }));
     expect(res.status).toBe('SENT');
-    const text = send.mock.calls[0]?.[0]?.text ?? '';
-    expect(text).toMatch(/profissional de Educação Física registrado no CREF/i);
-    expect(text).toMatch(/esse profissional vai olhar/i);
-    expect(text).not.toMatch(/logo te mando/i);
-  });
+    const mandatoryText = mandatory.send.mock.calls[0]?.[0]?.text ?? '';
+    expect(mandatoryText).toContain(DEFAULT_AGENT_PERSONA.agentName);
+    expect(mandatoryText).not.toMatch(/analisando as informações|intelig[êe]ncia artificial/i);
 
-  it('espera (30min do submit): revisão OPTIONAL ainda pendente usa a variante com prazo', async () => {
-    const { worker, send } = makeWorker({
+    const optional = makeWorker({
       proto: {
         status: 'PENDING_SIGNATURE',
         approvalStatus: 'PENDING_REVIEW',
         reviewUrgency: 'OPTIONAL',
       },
     });
-    await worker.process(job({ type: 'PROTOCOL_WAITING' }));
-    expect(send.mock.calls[0]?.[0]?.text).toMatch(/Logo te mando o plano completo/i);
+    await optional.worker.process(job({ type: 'PROTOCOL_WAITING' }));
+    const optionalText = optional.send.mock.calls[0]?.[0]?.text ?? '';
+    expect(optionalText).toBe(mandatoryText);
   });
 
   it('espera (30min do submit): entrega já saiu nesse meio tempo → não manda nada', async () => {

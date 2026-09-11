@@ -20,6 +20,14 @@
  * retries) → fallback: template conservador pendente de revisão (task manual consultável no
  * painel — Sprint 5). A mensagem "estou analisando" NÃO é agendada aqui: ela é agendada no
  * submit do formulário (`AnamnesisService.submit`), sempre, e independe deste caminho.
+ *
+ * **Mudança de 2026-09-03 (decisão do fundador):** todo protocolo que cai no template de
+ * fallback (`plan.usedFallbackTemplate` no caminho normal, ou o próprio caminho de DLQ —
+ * que só existe pra persistir o template) nasce `reviewUrgency: MANDATORY` e nunca agenda
+ * auto-liberação, mesmo com PAR-Q liberado (`requiresProfessionalReview: false`). O motivo
+ * não é risco clínico do titular — é o conteúdo em si nunca ter passado limpo pela geração
+ * ou pelo validador. Fallback e PAR-Q são dois motivos independentes pra `MANDATORY`,
+ * qualquer um dos dois basta.
  */
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { type Job } from 'bullmq';
@@ -177,7 +185,13 @@ export class ProtocolGenerationWorker implements OnModuleInit {
     // PENDING_REVIEW — nunca entrega sozinho na hora, PASS incluso. `OPTIONAL` ganha a
     // janela de cortesia de 1h; `MANDATORY` (PAR-Q bloqueado, 2026-08-24) nunca sai sem
     // assinatura humana. Ver `protocol-planner.ts` para o raciocínio completo.
-    const mandatory = constraints.requiresProfessionalReview;
+    //
+    // Decisão do fundador (2026-09-03): protocolo que caiu no template de fallback
+    // (`plan.usedFallbackTemplate` — as duas tentativas de geração bloquearam na
+    // validação) também é sempre `MANDATORY`, mesmo com PAR-Q liberado. Não é sobre
+    // risco clínico do titular — é sobre o próprio conteúdo do protocolo nunca ter
+    // passado limpo pelo validador. Nunca sai sozinho por auto-liberação.
+    const mandatory = constraints.requiresProfessionalReview || plan.usedFallbackTemplate;
     const persisted = await this.repository.persist({
       userId,
       content: plan.content,
@@ -324,6 +338,8 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       goal: toGenerationGoal(structured.primaryGoal),
       // Fim do default hardcoded (D6 / TASK-6.9.2). PAR-Q bloqueado rebaixa um degrau.
       level: requiresProfessionalReview ? demoteLevel(level) : level,
+      trainingStatus: structured.trainingStatus,
+      ...(structured.stoppedFor ? { stoppedFor: structured.stoppedFor } : {}),
       daysPerWeek: structured.daysPerWeek,
       preferredDays: structured.preferredDays,
       sessionMinutes: SESSION_DURATION_MINUTES[structured.sessionDuration],
@@ -364,12 +380,15 @@ export class ProtocolGenerationWorker implements OnModuleInit {
     // human_review_required — aparece na fila de revisão do painel (Sprint 5). Se já
     // existir protocolo (corrida), o UNIQUE(user_id, version) devolve `alreadyExisted`.
     //
-    // Esgotar os retries é indisponibilidade de infraestrutura (LLM fora do ar), não risco
-    // clínico: por si só, o DLQ é `OPTIONAL` e agenda a MESMA janela de cortesia de 1h do
-    // caminho normal (achado 2026-08-18). O que decide `MANDATORY` aqui é a MESMA regra do
-    // caminho normal — PAR-Q do titular. Antes de 2026-08-24 este caminho fixava `OPTIONAL`
-    // e `parqFlags: []` no braço, o que era correto só porque o gate de PAR-Q travava a
-    // geração lá atrás; sem o gate, fixar seria auto-liberar um titular bloqueado.
+    // Decisão do fundador (2026-09-03): este caminho SEMPRE persiste o template de
+    // fallback (`buildFallbackProtocol`, `generatedBy: 'FALLBACK_TEMPLATE'`) — logo é
+    // sempre `MANDATORY`, nunca agenda auto-liberação, independente do PAR-Q do titular.
+    // Antes disso, PAR-Q liberado aqui produzia `OPTIONAL` com a mesma janela de cortesia
+    // de 1h do caminho normal (achado 2026-08-18) — o raciocínio de então era que esgotar
+    // os retries é indisponibilidade de infraestrutura (LLM fora do ar), não risco
+    // clínico. A regra nova trata o motivo do fallback (nunca passou pelo validador com
+    // conteúdo gerado, ou a própria geração nunca saiu do ar) como risco de CONTEÚDO, não
+    // de PAR-Q — e por isso vale por igual aqui e no template do `protocol-planner.ts`.
     try {
       const { goal, preferredDays, requiresProfessionalReview, parqTags } =
         await this.constraintsForFallback(userId, anamnesisSessionId);
@@ -382,7 +401,7 @@ export class ProtocolGenerationWorker implements OnModuleInit {
         approvalStatus: 'PENDING_REVIEW',
         status: 'PENDING_SIGNATURE',
         humanReviewRequired: true,
-        reviewUrgency: requiresProfessionalReview ? 'MANDATORY' : 'OPTIONAL',
+        reviewUrgency: 'MANDATORY',
         anamnesisSessionId,
         // Achado 2026-09-02: o template declara a própria duração (`phaseDurationWeeks`,
         // sempre ADAPTACAO) — não depende mais de ler o evento-alvo da anamnese aqui.
@@ -394,17 +413,6 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       });
       if (!persisted.alreadyExisted) {
         this.queueEvents.emit('protocol');
-        if (!requiresProfessionalReview) {
-          await this.queues.enqueue(
-            QUEUE.protocolAutoRelease,
-            'auto-release',
-            { userId, protocolId: persisted.protocolId },
-            {
-              delay: PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS,
-              jobId: `auto-release-${persisted.protocolId}`,
-            },
-          );
-        }
       }
     } catch (persistErr) {
       this.logger.error(

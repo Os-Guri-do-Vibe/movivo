@@ -1,5 +1,6 @@
 'use client';
 
+import { Megaphone } from 'lucide-react';
 import { useCallback } from 'react';
 
 import { getMarketing } from '@/lib/control-center-api';
@@ -59,8 +60,8 @@ export function MarketingDashboard() {
   return (
     <div>
       <SectorHeader
-        title="Analytics"
-        description="Aquisição, conversão e público em grupos protegidos. Nenhum dado individual de saúde ou contato é exibido."
+        title="Aquisição & Canais"
+        icon={Megaphone}
         meta={meta}
         refreshing={state.loading}
         onRefresh={() => void state.refresh()}
@@ -149,8 +150,14 @@ export function MarketingDashboard() {
       <section aria-labelledby="attribution-title" className="mt-8">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
+            {/*
+             * Achado 2026-09-04: renomeado de "Aquisição & Canais" — o título da página
+             * (`SectorHeader`, acima) passou a usar exatamente esse texto (mesmo nome da
+             * sidebar), e `getByRole('heading', { name })` do RTL não distinguia mais os
+             * dois "Aquisição & Canais" na mesma tela.
+             */}
             <h2 id="attribution-title" className="text-h2 font-bold">
-              Aquisição &amp; Canais
+              Desempenho por canal
             </h2>
             <p className="mt-1 text-label text-muted-foreground">
               CAC, ROAS e LTV/CAC por origem. Janela de atribuição: convertidos em até{' '}

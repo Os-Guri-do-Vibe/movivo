@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Handshake } from 'lucide-react';
 
 import { getPartnerDistribution } from '@/lib/control-center-api';
 
@@ -41,7 +41,7 @@ export function PartnersDashboard() {
     <div>
       <SectorHeader
         title="Sócios & Distribuição"
-        description="Participação vigente de cada sócio e quanto caberia a cada um do lucro do período. Número gerencial de referência — leia as ressalvas antes de tratá-lo como retirada."
+        icon={Handshake}
         meta={data.meta}
         refreshing={loading}
         onRefresh={() => void refresh()}

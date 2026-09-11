@@ -263,13 +263,12 @@ describe('WorkoutJournalService.journal', () => {
   });
 
   it('usa o dia atual, fallback da frequencia e nome padrao sem criar treino em descanso', async () => {
-    const owner = {
-      ...OWNER,
-      name: '   ',
-      totalWeeks: 1,
-      content: { ...STRUCTURE, weeklyFrequency: 1, sessions: [SESSION_B] },
-    };
-    const { service } = makeService({ selects: [[owner], [], []] });
+    const content = { ...STRUCTURE, weeklyFrequency: 1, sessions: [SESSION_B] };
+    const owner = { ...OWNER, name: '   ', totalWeeks: 1, content };
+    const version = { version: 2, content, createdAt: new Date('2026-08-01T00:00:00.000Z') };
+    // 4 selects: dono/protocolo vigente, sessao existente (nenhuma), versao historica
+    // (resolvida via `protocol_versions` — achado 2026-09-10), semana.
+    const { service } = makeService({ selects: [[owner], [], [version], []] });
     const result = await service.journal(USER_ID, undefined, new Date('2026-08-13T12:00:00Z'));
     expect(result).toMatchObject({ firstName: 'atleta', today: '2026-08-13', workout: null });
     expect(result.week.some((day) => day.state === 'MISSED')).toBe(true);
@@ -282,19 +281,187 @@ describe('WorkoutJournalService.journal', () => {
     const result = await service.journal(USER_ID, '2026-08-10', new Date('2026-08-10T12:00:00Z'));
     expect(result.workout?.sets.every((entry) => entry.previous === null)).toBe(true);
   });
+
+  it('inclui as series de aquecimento (warmupBlocks) antes das series validas', async () => {
+    const sessionWithWarmup = {
+      dayLabel: 'C',
+      focus: 'Peito',
+      exercises: [
+        {
+          exerciseId: 'bench',
+          name: 'Supino',
+          sets: 2,
+          reps: { min: 10, max: 15 },
+          loadStrategy: 'DOUBLE_PROGRESSION' as const,
+          restSeconds: 75,
+          warmupBlocks: [{ sets: 1, reps: { min: 12, max: 15 }, restSeconds: 60 }],
+        },
+      ],
+    };
+    const owner = { ...OWNER, content: { ...STRUCTURE, sessions: [sessionWithWarmup] } };
+    const workout = { ...WORKOUT, prescription: sessionWithWarmup };
+    const { service } = makeService({
+      selects: [[owner], [workout], [], [], []],
+    });
+
+    const result = await service.journal(USER_ID, '2026-08-10', new Date('2026-08-10T12:00:00Z'));
+
+    expect(result.workout?.sets.map((entry) => entry.setNumber)).toEqual([0, 1, 2]);
+    expect(result.workout?.sets.every((entry) => entry.exerciseId === 'bench')).toBe(true);
+  });
+
+  it('marca isCardio a partir do catalogo (achado 2026-09-04): cardio nao tem reps/carga', async () => {
+    const sessionWithCardio = {
+      dayLabel: 'C',
+      focus: 'Condicionamento',
+      exercises: [
+        {
+          exerciseId: 'bicicleta_horizontal',
+          name: 'Bicicleta Horizontal',
+          sets: 1,
+          durationSeconds: 600,
+          loadStrategy: 'BODYWEIGHT' as const,
+          restSeconds: 0,
+        },
+        {
+          exerciseId: 'squat',
+          name: 'Agachamento',
+          sets: 3,
+          reps: { min: 8, max: 12 },
+          loadStrategy: 'FIXED_LOAD' as const,
+          restSeconds: 60,
+        },
+      ],
+    };
+    const owner = { ...OWNER, content: { ...STRUCTURE, sessions: [sessionWithCardio] } };
+    const workout = { ...WORKOUT, prescription: sessionWithCardio };
+    const { service } = makeService({ selects: [[owner], [workout], [], [], []] });
+
+    const result = await service.journal(USER_ID, '2026-08-10', new Date('2026-08-10T12:00:00Z'));
+
+    const exercises = result.workout?.prescription.exercises ?? [];
+    expect(exercises.find((exercise) => exercise.exerciseId === 'bicicleta_horizontal')?.isCardio).toBe(
+      true,
+    );
+    expect(exercises.find((exercise) => exercise.exerciseId === 'squat')?.isCardio).toBe(false);
+  });
+
+  // Achado 2026-09-10 (pedido do fundador): uma substituição de exercício só pode valer da
+  // data de aprovação em diante — nunca reescrever um dia passado nunca visitado antes.
+  describe('substituição de exercício não reescreve dia passado nunca visitado', () => {
+    const SESSION_A_SUBSTITUIDA = {
+      ...SESSION_A,
+      exercises: [
+        { ...SESSION_A.exercises[0], exerciseId: 'lunge', name: 'Avanço' },
+        SESSION_A.exercises[1],
+      ],
+    };
+
+    it('dia passado sem sessão ainda: usa a versão HISTÓRICA vigente naquele dia, não a atual', async () => {
+      // Aluno treinava Agachamento (v1) na segunda 2026-08-03; a troca pra Avanço (v2) só
+      // foi aprovada em 2026-08-10. `owner.content`/`owner.protocolVersion` já refletem a
+      // v2 (estado vigente), mas o aluno nunca abriu o dia 2026-08-03.
+      const owner = {
+        ...OWNER,
+        protocolVersion: 2,
+        content: { ...STRUCTURE, sessions: [SESSION_A_SUBSTITUIDA, SESSION_B] },
+      };
+      const v1 = {
+        version: 1,
+        content: STRUCTURE, // SESSION_A original (Agachamento)
+        createdAt: new Date('2026-08-01T00:00:00.000Z'),
+      };
+      const v2 = {
+        version: 2,
+        content: owner.content, // SESSION_A_SUBSTITUIDA (Avanço)
+        createdAt: new Date('2026-08-10T15:00:00.000Z'),
+      };
+      const { service, inserted } = makeService({
+        // dono, sessão existente (nenhuma), histórico de versões, releitura pós-insert
+        // (vazia — irrelevante pro que este teste prova), semana.
+        selects: [[owner], [], [v1, v2], [], []],
+      });
+
+      const result = await service.journal(
+        USER_ID,
+        '2026-08-03', // segunda-feira, antes da aprovação da troca
+        new Date('2026-08-12T12:00:00Z'),
+      );
+
+      expect(inserted).toHaveLength(1);
+      expect(inserted[0]).toMatchObject({
+        protocolVersion: 1,
+        prescription: expect.objectContaining({
+          exercises: expect.arrayContaining([expect.objectContaining({ exerciseId: 'squat' })]),
+        }),
+      });
+      expect(
+        (inserted[0]?.prescription as { exercises: { exerciseId: string }[] }).exercises.some(
+          (e) => e.exerciseId === 'lunge',
+        ),
+      ).toBe(false);
+      expect(result.selectedDate).toBe('2026-08-03');
+    });
+
+    it('dia atual sem sessão ainda: usa a versão VIGENTE (nenhuma versão futura existe)', async () => {
+      const owner = {
+        ...OWNER,
+        protocolVersion: 2,
+        content: { ...STRUCTURE, sessions: [SESSION_A_SUBSTITUIDA, SESSION_B] },
+      };
+      const v1 = { version: 1, content: STRUCTURE, createdAt: new Date('2026-08-01T00:00:00.000Z') };
+      const v2 = { version: 2, content: owner.content, createdAt: new Date('2026-08-10T15:00:00.000Z') };
+      const { service, inserted } = makeService({
+        selects: [[owner], [], [v1, v2], [], []],
+      });
+
+      await service.journal(USER_ID, '2026-08-10', new Date('2026-08-10T18:00:00Z'));
+
+      expect(inserted).toHaveLength(1);
+      expect(inserted[0]).toMatchObject({ protocolVersion: 2 });
+      expect(
+        (inserted[0]?.prescription as { exercises: { exerciseId: string }[] }).exercises.some(
+          (e) => e.exerciseId === 'lunge',
+        ),
+      ).toBe(true);
+    });
+  });
 });
 
 describe('WorkoutJournalService mutations', () => {
   it('inicia idempotentemente e rejeita sessao alheia', async () => {
+    const now = new Date('2026-08-10T12:00:00Z');
+    const owned = [{ scheduledDate: '2026-08-10', timezone: 'UTC' }];
     await expect(
-      makeService({ updateReturns: [[{ id: WORKOUT_ID }]] }).service.start(USER_ID, WORKOUT_ID),
+      makeService({ selects: [owned], updateReturns: [[{ id: WORKOUT_ID }]] }).service.start(
+        USER_ID,
+        WORKOUT_ID,
+        now,
+      ),
     ).resolves.toBeUndefined();
     await expect(
-      makeService({ updateReturns: [[]], selects: [[WORKOUT]] }).service.start(USER_ID, WORKOUT_ID),
+      makeService({ selects: [owned, [WORKOUT]], updateReturns: [[]] }).service.start(
+        USER_ID,
+        WORKOUT_ID,
+        now,
+      ),
     ).resolves.toBeUndefined();
     await expect(
-      makeService({ updateReturns: [[]], selects: [[]] }).service.start(USER_ID, WORKOUT_ID),
+      makeService({ selects: [[]] }).service.start(USER_ID, WORKOUT_ID, now),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  // Achado 2026-09-10 (pedido do fundador): "Iniciar treino" só pode valer pro dia atual —
+  // dia passado é só consulta de protocolo/carga, nunca pode virar treino em andamento.
+  it('recusa iniciar treino de um dia passado', async () => {
+    const owned = [{ scheduledDate: '2026-08-05', timezone: 'UTC' }];
+    await expect(
+      makeService({ selects: [owned] }).service.start(
+        USER_ID,
+        WORKOUT_ID,
+        new Date('2026-08-10T12:00:00Z'), // "hoje" é 08-10; a sessão é do dia 08-05
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('valida pertencimento e estado antes de salvar series', async () => {
@@ -344,6 +511,7 @@ describe('WorkoutJournalService mutations', () => {
         perceivedEffort: 5,
         feelingNotes: '',
         painReported: false,
+        painExerciseIds: [],
         painNotes: '',
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
@@ -352,6 +520,7 @@ describe('WorkoutJournalService mutations', () => {
         perceivedEffort: 5,
         feelingNotes: '',
         painReported: false,
+        painExerciseIds: [],
         painNotes: '',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
@@ -363,7 +532,7 @@ describe('WorkoutJournalService mutations', () => {
           perceivedEffort: 5,
           feelingNotes: '',
           painReported: true,
-          painExerciseId: 'outro',
+          painExerciseIds: ['outro'],
           painNotes: 'dor',
         },
       ),
@@ -405,7 +574,7 @@ describe('WorkoutJournalService mutations', () => {
         perceivedEffort: 9,
         feelingNotes: 'Treino puxado',
         painReported: true,
-        painExerciseId: 'squat',
+        painExerciseIds: ['squat'],
         painNotes: 'Dor no joelho',
       });
 
@@ -445,6 +614,7 @@ describe('WorkoutJournalService mutations', () => {
       perceivedEffort: 6,
       feelingNotes: '',
       painReported: false,
+      painExerciseIds: [],
       painNotes: '',
     });
     expect(invalid.queues.enqueue).not.toHaveBeenCalled();
@@ -467,6 +637,7 @@ describe('WorkoutJournalService mutations', () => {
       perceivedEffort: 6,
       feelingNotes: '',
       painReported: false,
+      painExerciseIds: [],
       painNotes: '',
     });
     expect(within.queues.enqueue).not.toHaveBeenCalled();

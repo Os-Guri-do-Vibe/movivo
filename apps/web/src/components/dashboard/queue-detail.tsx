@@ -61,6 +61,7 @@ import {
 import { WEEKDAY_ITEMS } from '../onboarding/step2-anamnesis';
 import { AnamnesisAnswersModal, BIOLOGICAL_SEX_LABELS } from './protocol-anamnesis-answers';
 import { meaningfulText } from './queue-board';
+import { SubstitutionCatalogGapDialog } from './substitution-catalog-gap-dialog';
 
 const fieldClass =
   'min-h-11 w-full rounded-lg border border-input bg-background px-3 text-label focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring';
@@ -198,6 +199,19 @@ function formatDate(value: string): string {
   return Number.isNaN(date.getTime())
     ? 'horário não informado'
     : new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(date);
+}
+
+/** Segundos até 60 "40 s", minutos até 60min "1 min 30 s", acima disso em horas "1 h 30 min". */
+function formatDurationLabel(totalSeconds: number): string {
+  if (totalSeconds <= 60) return `${totalSeconds} s`;
+  if (totalSeconds <= 3600) {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return seconds === 0 ? `${minutes} min` : `${minutes} min ${seconds} s`;
+  }
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  return minutes === 0 ? `${hours} h` : `${hours} h ${minutes} min`;
 }
 
 /**
@@ -928,7 +942,7 @@ function ProtocolSummary({
                 <table className="w-full min-w-[44rem] table-fixed border-collapse text-left text-label">
                   <thead>
                     <tr className="border-b border-border text-muted-foreground">
-                      <th scope="col" className="w-[24%] p-2 font-semibold">
+                      <th scope="col" className="w-[27%] p-2 font-semibold">
                         Exercício
                       </th>
                       <th scope="col" className="w-[7%] p-2 font-semibold">
@@ -937,11 +951,11 @@ function ProtocolSummary({
                       <th scope="col" className="w-[12%] p-2 font-semibold">
                         Repetições / Duração
                       </th>
-                      <th scope="col" className="w-[9%] p-2 font-semibold">
+                      <th scope="col" className="w-[12%] p-2 font-semibold">
                         Descanso
                       </th>
-                      <th scope="col" className="w-[12%] p-2 font-semibold">
-                        Repetições em Reserva (RIR)
+                      <th scope="col" className="w-[6%] p-2 font-semibold">
+                        RIR
                       </th>
                       <th scope="col" className="w-[12%] p-2 font-semibold">
                         Técnica
@@ -973,7 +987,7 @@ function ProtocolSummary({
                               {exercise.warmupBlocks
                                 .map((block) =>
                                   block.durationSeconds !== undefined
-                                    ? `${block.sets}×${block.durationSeconds}s`
+                                    ? `${block.sets}×${formatDurationLabel(block.durationSeconds)}`
                                     : `${block.sets}×${block.reps?.min}–${block.reps?.max}`,
                                 )
                                 .join(', ')}
@@ -983,12 +997,12 @@ function ProtocolSummary({
                         <td className="p-2 font-mono">{exercise.sets}</td>
                         <td className="p-2 font-mono">
                           {exercise.durationSeconds !== undefined
-                            ? `${exercise.durationSeconds}s`
+                            ? formatDurationLabel(exercise.durationSeconds)
                             : exercise.reps
                               ? `${exercise.reps.min}–${exercise.reps.max}`
                               : ''}
                         </td>
-                        <td className="p-2 font-mono">{exercise.restSeconds}s</td>
+                        <td className="p-2 font-mono">{formatDurationLabel(exercise.restSeconds)}</td>
                         <td className="p-2 font-mono">{exercise.rir ?? '—'}</td>
                         <td className="p-2 text-xs">
                           {exercise.technique ? ADVANCED_TECHNIQUE_LABELS[exercise.technique] : '—'}
@@ -1226,14 +1240,29 @@ function ProtocolStudentHeader({
  * `QueueDetail` — mesma separação de `ProtocolSummary` (conteúdo) vs. o botão de assinar.
  */
 function SubstitutionSummary({ substitution }: { substitution: SubstitutionDetail }) {
+  // Achado 2026-09-09: `to.id === null` é a proposta `catalogGap` — o aluno pediu um
+  // exercício que ainda não existe no catálogo, então não há substituto real pra mostrar
+  // como uma troca de verdade ainda, só o texto exatamente como ele pediu.
+  const catalogGap = substitution.to.id === null;
   return (
     <section
       aria-labelledby="substitution-title"
       className="rounded-xl border border-border bg-card p-4 sm:p-5"
     >
-      <h2 id="substitution-title" className="text-h3 font-semibold">
-        Troca proposta
-      </h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="substitution-title" className="text-h3 font-semibold">
+          Troca proposta
+        </h2>
+        {substitution.reviewUrgency === 'MANDATORY' ? (
+          // Coral só na borda (elemento gráfico) — texto em `--foreground`, mesma regra de
+          // contraste de `FieldError`/`FieldWarning` (WCAG 1.4.3: coral em texto pequeno
+          // sobre fundo claro reprova AA).
+          <span className="flex items-center gap-1.5 rounded-full border border-coral px-2.5 py-1 text-xs font-semibold text-foreground">
+            <ShieldAlert aria-hidden="true" className="size-3.5 text-coral" />
+            Revisão obrigatória
+          </span>
+        ) : null}
+      </div>
       <div className="mt-4 flex flex-wrap items-center gap-3 text-body">
         <span className="rounded-lg bg-secondary px-3 py-1.5 font-medium line-through decoration-2">
           {substitution.from.name}
@@ -1241,11 +1270,17 @@ function SubstitutionSummary({ substitution }: { substitution: SubstitutionDetai
         <span aria-hidden="true" className="text-muted-foreground">
           →
         </span>
-        <span className="rounded-lg bg-accent px-3 py-1.5 font-semibold text-accent-foreground">
-          {substitution.to.name}
-        </span>
+        {catalogGap ? (
+          <span className="rounded-lg border border-dashed border-coral px-3 py-1.5 font-semibold text-foreground">
+            “{substitution.to.name}” (fora do catálogo)
+          </span>
+        ) : (
+          <span className="rounded-lg bg-accent px-3 py-1.5 font-semibold text-accent-foreground">
+            {substitution.to.name}
+          </span>
+        )}
       </div>
-      {substitution.diff.sessionsAffected.length > 0 ? (
+      {substitution.diff && substitution.diff.sessionsAffected.length > 0 ? (
         <p className="mt-3 text-label text-muted-foreground">
           Dias afetados: {substitution.diff.sessionsAffected.join(', ')}
         </p>
@@ -1292,6 +1327,7 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
   const [success, setSuccess] = useState('');
   const [resolution, setResolution] = useState('Contato realizado e orientação registrada.');
   const [resolutionNotes, setResolutionNotes] = useState('');
+  const [showCatalogGapDialog, setShowCatalogGapDialog] = useState(false);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -1452,20 +1488,40 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
                 )
               }
             />
-            <ConfirmAction
-              triggerLabel="Aprovar agora"
-              title="Aplicar esta troca agora?"
-              description="A troca é aplicada ao protocolo do aluno imediatamente, sem esperar a liberação automática, e o PDF atualizado é reenviado pelo WhatsApp."
-              confirmLabel="Confirmar e aplicar"
-              onConfirm={() =>
-                runAction(
-                  () => approveSubstitutionNow(id),
-                  'cref_substitution_approved',
-                  'Troca aplicada e protocolo reenviado.',
-                )
-              }
-            />
+            {detail.substitution.catalogGap ? (
+              <Button onClick={() => setShowCatalogGapDialog(true)}>
+                Adicionar exercício ao catálogo
+              </Button>
+            ) : (
+              <ConfirmAction
+                triggerLabel="Aprovar agora"
+                title="Aplicar esta troca agora?"
+                description="A troca é aplicada ao protocolo do aluno imediatamente, sem esperar a liberação automática, e o PDF atualizado é reenviado pelo WhatsApp."
+                confirmLabel="Confirmar e aplicar"
+                onConfirm={() =>
+                  runAction(
+                    () => approveSubstitutionNow(id),
+                    'cref_substitution_approved',
+                    'Troca aplicada e protocolo reenviado.',
+                  )
+                }
+              />
+            )}
           </div>
+        ) : null}
+
+        {showCatalogGapDialog && detail.substitution ? (
+          <SubstitutionCatalogGapDialog
+            substitutionId={id}
+            requestedName={detail.substitution.to.name}
+            onClose={() => setShowCatalogGapDialog(false)}
+            onSaved={(message) => {
+              setShowCatalogGapDialog(false);
+              captureDashboardEvent('cref_substitution_catalog_gap_approved', { kind });
+              setSuccess(message);
+              void load();
+            }}
+          />
         ) : null}
 
         {kind === 'HANDOFF' || kind === 'CHECKIN' ? (

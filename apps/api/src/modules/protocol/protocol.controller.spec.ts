@@ -43,7 +43,7 @@ const dto: ProtocolRead = {
   signedAt: '2026-07-30T12:00:00.000Z',
   totalWeeks: 12,
   currentWeek: 1,
-  mesocycleName: 'Mesociclo 1 — Adaptação',
+  mesocycleName: 'Mesociclo 1: Adaptação',
   startDate: '2026-07-30T12:00:00.000Z',
   endDate: '2026-10-22T12:00:00.000Z',
 };

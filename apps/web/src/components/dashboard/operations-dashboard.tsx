@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertTriangle, CheckCircle2, CircleMinus, Gauge, RefreshCw } from 'lucide-react';
+import { Activity, AlertTriangle, CheckCircle2, CircleMinus, Gauge, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -123,11 +123,10 @@ export function OperationsDashboard() {
     <div>
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-h1 font-bold">Operações</h1>
-          <p className="mt-2 max-w-3xl text-body text-muted-foreground">
-            Funil operacional, compromissos de nível de serviço e conversas anonimizadas para
-            supervisão.
-          </p>
+          <h1 className="flex items-center gap-3 text-h1 font-bold">
+            <Activity aria-hidden="true" className="size-7 text-verde-pulso" />
+            Filas & Jobs
+          </h1>
         </div>
         <Button variant="outline" onClick={() => void load()} disabled={refreshing}>
           <RefreshCw aria-hidden="true" className={refreshing ? 'animate-spin' : undefined} />
@@ -221,17 +220,16 @@ export function OperationsDashboard() {
 
       <section aria-labelledby="replays-heading" className="mt-8">
         <h2 id="replays-heading" className="text-h2 font-bold">
-          Replays anonimizados
+          Replays de conversa
         </h2>
         <p className="mt-2 max-w-3xl text-label text-muted-foreground">
-          Recortes para avaliar a qualidade e a segurança do atendimento. O PII Scrubber roda no
-          backend antes de qualquer conteúdo chegar aqui.
+          Recortes para avaliar a qualidade e a segurança do atendimento.
         </p>
         {data.replays.length === 0 ? (
           <div className="mt-4 rounded-xl border border-dashed border-input bg-card p-8 text-center">
             <p className="text-body font-semibold">Nenhum replay disponível</p>
             <p className="mt-1 text-label text-muted-foreground">
-              Novas conversas elegíveis aparecerão após a anonimização.
+              Novas conversas elegíveis aparecerão aqui.
             </p>
           </div>
         ) : (
@@ -239,7 +237,7 @@ export function OperationsDashboard() {
             {data.replays.map((replay, index) => (
               <div key={replay.conversationId || index}>
                 <p className="mb-2 font-mono text-xs text-muted-foreground">
-                  Conversa anonimizada #{index + 1}
+                  Conversa #{index + 1}
                 </p>
                 <ConversationReplay replay={replay} />
               </div>

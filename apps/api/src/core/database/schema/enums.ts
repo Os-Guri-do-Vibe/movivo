@@ -181,6 +181,19 @@ export const protocolApprovalStatusEnum = pgEnum(
  */
 export const reviewUrgencyEnum = pgEnum('review_urgency', valuesOf(ProtocolReviewUrgency));
 
+/**
+ * Estado da sessão do formulário de troca de protocolo por fim de mesociclo. Mesmos 4
+ * valores de `anamnesis_status` e mesmo motivo de não derivar de `@movivo/shared`: é
+ * ciclo de vida de sessão de formulário, não um conceito que o frontend precisa tipar
+ * fora do que a própria resposta da API já devolve.
+ */
+export const protocolRenewalStatusEnum = pgEnum('protocol_renewal_status', [
+  'IN_PROGRESS',
+  'SUBMITTED',
+  'EXPIRED',
+  'PROCESSED',
+]);
+
 // ---------------------------------------------------------------------------
 // CONVERSA (WhatsApp)
 // ---------------------------------------------------------------------------

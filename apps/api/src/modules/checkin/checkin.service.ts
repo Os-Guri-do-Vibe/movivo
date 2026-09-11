@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 import { z } from 'zod';
 
@@ -93,7 +93,7 @@ export class CheckinService {
           and(
             eq(protocols.userId, userId),
             eq(protocols.status, 'ACTIVE'),
-            eq(subscriptions.status, 'ACTIVE'),
+            inArray(subscriptions.status, ['ACTIVE', 'TRIALING']),
           ),
         )
         .orderBy(desc(protocols.createdAt))

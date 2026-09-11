@@ -55,7 +55,6 @@ export function AiRulesDashboard({
       {showHeader ? (
         <SectorHeader
           title="Regras invioláveis"
-          description="O que a agente nunca faz, e por quê. Estas regras estão travadas em código e não são editáveis por nenhum painel."
           meta={data.meta}
           refreshing={loading}
           onRefresh={() => void refresh()}

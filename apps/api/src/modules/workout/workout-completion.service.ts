@@ -20,7 +20,7 @@
  * sem CASE. Fonte de maior precedência sobrescreve; a de menor não faz nada.
  */
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 import { protocolStructureSchema, type ProtocolStructure } from '@movivo/shared';
 
@@ -199,7 +199,7 @@ export class WorkoutCompletionService {
           and(
             eq(protocols.userId, userId),
             eq(protocols.status, 'ACTIVE'),
-            eq(subscriptions.status, 'ACTIVE'),
+            inArray(subscriptions.status, ['ACTIVE', 'TRIALING']),
           ),
         )
         .orderBy(desc(protocols.createdAt))

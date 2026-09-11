@@ -9,14 +9,17 @@ import { and, desc, eq, isNotNull, or, sql } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 import {
   anamnesisStructuredSchema,
+  ControlCenterCapability,
   onboardingStep1Schema,
   protocolStructureSchema,
+  publishExerciseCatalogEntrySchema,
   type ProtocolStructure,
 } from '@movivo/shared';
 import { z } from 'zod';
 
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
+import { roleHasCapabilities } from '../auth/capabilities';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import {
   anamnesisSessions,
@@ -35,18 +38,21 @@ import {
   TenantDatabase,
   type TenantTransaction,
 } from '../../core/database/tenant-database.service';
-import { scrubPII } from '../ai-coach/llm/pii-scrubber';
 import { healthBlockSchema, type HealthBlock } from '../anamnesis/health-block';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
+import { SUBSTITUTION_DISCARDED_MESSAGE } from '../coach/coach-messages';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
+import { ExerciseCatalogAdminService } from './exercise-catalog-admin.service';
 import { buildProtocolPdf } from '../protocol/protocol-pdf.service';
-import { signatureHash } from '../protocol/protocol.repository';
+import { signatureHash, supersedePreviousActiveProtocols } from '../protocol/protocol.repository';
+import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
 import { ProtocolSubstitutionRepository } from '../protocol/protocol-substitution.repository';
 import { AI_SUBSTITUTION_REVIEW_WINDOW_MS } from '../protocol/protocol-substitution-release.worker';
 import type { UserConstraints } from '../protocol/user-constraints';
 import { ValidationService } from '../protocol/validation/validation.service';
+import { WorkoutPresentationService } from '../protocol/workout-presentation.service';
 import { PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS } from '../protocol/protocol-generation.worker';
 import { AuditService } from './audit.service';
 
@@ -106,14 +112,19 @@ export interface QueueItem {
   /** Só itens `OPTIONAL`/`PENDING` na categoria "Disponível para Revisão" (fila do CREF). */
   autoReleaseAt: string | null;
   /**
-   * POR QUE este item exige revisão humana (2026-08-24, ampliado 2026-09-02). `PARQ` = a
-   * sessão de origem está `BLOQUEADO_AGUARDANDO_CLEARANCE` (alerta clínico — assinar aqui
-   * também libera o PAR-Q); `EDIT` = um CREF editou o conteúdo e precisa de sign-off fresco;
+   * POR QUE este item exige revisão humana (2026-08-24, ampliado 2026-09-02 e 2026-09-03).
+   * `PARQ` = a sessão de origem está `BLOQUEADO_AGUARDANDO_CLEARANCE` (alerta clínico —
+   * assinar aqui também libera o PAR-Q); `FALLBACK` = o protocolo caiu no template
+   * conservador do RT (`generated_by = 'FALLBACK_TEMPLATE'`) — o conteúdo nunca passou
+   * limpo pela geração/validação, então trava mesmo com PAR-Q liberado (decisão do
+   * fundador, 2026-09-03); `EDIT` = um CREF editou o conteúdo e precisa de sign-off fresco;
    * `AI_SUBSTITUTION` = troca de exercício confirmada pelo aluno via WhatsApp, aguardando
-   * revisão/liberação automática. `null` para os demais itens `optional` e para os que não
-   * são protocolo/substituição — não têm motivo a exibir.
+   * revisão/liberação automática. `CATALOG_GAP` (2026-09-09) = o aluno pediu um exercício
+   * específico que não existe em nenhum lugar do catálogo — mandatory, sem substituto real
+   * ainda calculado (ver `substitution.catalogGap`). `null` para os demais itens `optional` e
+   * para os que não são protocolo/substituição — não têm motivo a exibir.
    */
-  origin: 'PARQ' | 'EDIT' | 'AI_SUBSTITUTION' | null;
+  origin: 'PARQ' | 'FALLBACK' | 'EDIT' | 'AI_SUBSTITUTION' | 'CATALOG_GAP' | null;
 }
 
 /** Titulo do item de fila de protocolo, com o nome completo do titular. */
@@ -137,6 +148,9 @@ export class DashboardService {
     private readonly queueEvents: DashboardQueueEventsService,
     private readonly healthConsent: HealthConsentService,
     private readonly substitutionRepo: ProtocolSubstitutionRepository,
+    private readonly workoutPresentation: WorkoutPresentationService,
+    private readonly exerciseCatalogAdmin: ExerciseCatalogAdminService,
+    private readonly exerciseCatalog: ExerciseCatalogProvider,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(DashboardService.name);
@@ -148,13 +162,19 @@ export class DashboardService {
    * só não aparecem aqui). Duas categorias, cada uma ordenada só por idade (mais antigo
    * primeiro):
    *
-   * - `mandatory` — protocolo `reviewUrgency: MANDATORY`, de duas origens:
+   * - `mandatory` — protocolo `reviewUrgency: MANDATORY`, de três origens:
    *   · `PARQ` (2026-08-24): a sessão que originou o protocolo está
    *     `BLOQUEADO_AGUARDANDO_CLEARANCE`. Antes desta data, PAR-Q bloqueado era um item
    *     `kind: 'PARQ'` SEPARADO, apontando pra uma sessão sem protocolo nenhum, com tela
    *     e ação próprias. Agora o protocolo existe (gerado em modo conservador) e a
    *     liberação do PAR-Q acontece dentro da assinatura dele — um item, uma tela, uma
    *     ação. `severity: SAFETY`, porque é alerta clínico, não só sign-off.
+   *   · `FALLBACK` (2026-09-03): `generated_by = 'FALLBACK_TEMPLATE'` — caiu no template
+   *     conservador do RT porque a geração/validação nunca passou limpa (duas tentativas
+   *     bloqueadas, ou o LLM esgotou os retries). `severity: ALERT`, checado ANTES de
+   *     `EDIT` porque as duas colunas podem ser verdade ao mesmo tempo só em teoria (um
+   *     fallback nunca é editado antes de existir) — a ordem documenta a prioridade, não
+   *     resolve ambiguidade real.
    *   · `EDIT`: um CREF editou o conteúdo à mão e precisa de sign-off fresco.
    *     `severity: ALERT`.
    *   Nenhum tem job de auto-liberação agendado; nenhum sai sozinho.
@@ -181,6 +201,7 @@ export class DashboardService {
           status: protocols.status,
           name: users.name,
           reviewUrgency: protocols.reviewUrgency,
+          generatedBy: protocols.generatedBy,
           parqState: anamnesisSessions.parqState,
         })
         .from(protocols)
@@ -193,6 +214,7 @@ export class DashboardService {
       for (const row of pendingProtocols) {
         const isOptional = row.reviewUrgency === 'OPTIONAL';
         const fromParq = row.parqState === 'BLOQUEADO_AGUARDANDO_CLEARANCE';
+        const fromFallback = row.generatedBy === 'FALLBACK_TEMPLATE';
         (isOptional ? optional : mandatory).push(
           this.item(
             row.id,
@@ -205,7 +227,7 @@ export class DashboardService {
             isOptional
               ? new Date(row.createdAt.getTime() + PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS).toISOString()
               : null,
-            isOptional ? null : fromParq ? 'PARQ' : 'EDIT',
+            isOptional ? null : fromParq ? 'PARQ' : fromFallback ? 'FALLBACK' : 'EDIT',
           ),
         );
       }
@@ -214,14 +236,18 @@ export class DashboardService {
       // 2026-09-03 (a pedido do fundador) têm a MESMA divisão obrigatória/opcional do
       // protocolo: `substitutionMandatory` quando a sessão de origem do protocolo ATIVO do
       // titular está `BLOQUEADO_AGUARDANDO_CLEARANCE` (mesmo LEFT JOIN de `pendingProtocols`
-      // acima) — essas nunca têm `autoReleaseAt` (o job nem chega a ser agendado, ver
-      // `AiResponseWorker.applyAndPersistSubstitution`). As demais continuam em
+      // acima) OU quando a própria proposta já nasceu `reviewUrgency: MANDATORY` (2026-09-09
+      // — pedido de exercício que não é elegível ou não existe no catálogo, ver
+      // `AiResponseWorker`/`ProtocolSubstitutionRepository`) — nenhuma dessas tem
+      // `autoReleaseAt` (o job nem chega a ser agendado). As demais continuam em
       // `substitutionOptional`, auto-liberando em 30min como sempre.
       const pendingSubstitutions = await tx
         .select({
           id: protocolSubstitutionRequests.id,
           createdAt: protocolSubstitutionRequests.createdAt,
           status: protocolSubstitutionRequests.status,
+          reviewUrgency: protocolSubstitutionRequests.reviewUrgency,
+          catalogGap: protocolSubstitutionRequests.catalogGap,
           name: users.name,
           parqState: anamnesisSessions.parqState,
         })
@@ -235,19 +261,20 @@ export class DashboardService {
       const substitutionOptional: QueueItem[] = [];
       for (const row of pendingSubstitutions) {
         const fromParq = row.parqState === 'BLOQUEADO_AGUARDANDO_CLEARANCE';
-        (fromParq ? substitutionMandatory : substitutionOptional).push(
+        const mandatory = fromParq || row.reviewUrgency === 'MANDATORY';
+        (mandatory ? substitutionMandatory : substitutionOptional).push(
           this.item(
             row.id,
             'SUBSTITUTION',
-            fromParq ? 'SAFETY' : 'ROUTINE',
+            fromParq ? 'SAFETY' : mandatory ? 'ALERT' : 'ROUTINE',
             row.createdAt,
             substitutionTitle(row.name),
             row.status,
             row.status,
-            fromParq
+            mandatory
               ? null
               : new Date(row.createdAt.getTime() + AI_SUBSTITUTION_REVIEW_WINDOW_MS).toISOString(),
-            'AI_SUBSTITUTION',
+            row.catalogGap ? 'CATALOG_GAP' : 'AI_SUBSTITUTION',
           ),
         );
       }
@@ -501,6 +528,9 @@ export class DashboardService {
           humanReviewRequired: false,
         })
         .where(eq(protocols.id, id));
+      // Renovação de mesociclo: o mesociclo anterior (se houver) só deixa de ser `ACTIVE`
+      // agora, na MESMA transação — mesmo racional de `ProtocolRepository.autoRelease()`.
+      await supersedePreviousActiveProtocols(tx, row.userId, id);
       await tx.insert(protocolVersions).values({
         protocolId: id,
         userId: row.userId,
@@ -568,6 +598,7 @@ export class DashboardService {
     // conteúdo final. Nunca bloqueia a assinatura em si nem a entrega: se falhar, o PDF
     // fica `NULL` e o worker de outbound cai automaticamente no texto+link de sempre
     // (`WhatsappOutboundWorker.buildDelivery`) — "nunca lança, sempre decide" (§12).
+    let aiSummary: string | undefined;
     if (!signed.alreadySigned) {
       try {
         const { personal } = await this.protocolAnamnesisAnswers(actor, id);
@@ -584,6 +615,17 @@ export class DashboardService {
         await this.scoped(actor, (tx) =>
           tx.update(protocols).set({ pdfContent: pdf }).where(eq(protocols.id, id)),
         );
+        // 2ª bolha da entrega (achado 2026-09-04): só vale a pena gerar quando o PDF saiu —
+        // sem PDF, a entrega cai no texto+link de sempre, que não usa este resumo.
+        aiSummary = await this.workoutPresentation.present({
+          userId: signed.userId,
+          user: { name: personal.name, phoneNumber: personal.phoneNumber, email: personal.email },
+          biologicalSex: personal.biologicalSex,
+          content: signed.content,
+          totalWeeks: signed.totalWeeks,
+          mesocycleName: signed.mesocycleName,
+          reason: 'INITIAL',
+        });
       } catch (error) {
         this.logger.warn(
           { id, err: error instanceof Error ? error.message : String(error) },
@@ -598,6 +640,7 @@ export class DashboardService {
       protocolId: id,
       protocolVersion: signed.version,
       dedupeId: `signed-${id}-${signed.version}`,
+      text: aiSummary,
     };
     if (!signed.alreadySigned) {
       await this.queues.enqueue(QUEUE.whatsappOutbound, 'signed-protocol-delivery', outbound, {
@@ -634,35 +677,37 @@ export class DashboardService {
         .limit(1);
       await this.auditRead(tx, actor, row.userId, 'protocol_substitution_request', id);
 
-      const replayRows = await tx
-        .select({
-          id: conversations.id,
-          userId: conversations.userId,
-          direction: conversations.direction,
-          content: conversations.content,
-          createdAt: conversations.createdAt,
-          name: users.name,
-          phoneNumber: users.phoneNumber,
-          email: users.email,
-        })
-        .from(conversations)
-        .innerJoin(users, eq(users.id, conversations.userId))
-        .where(eq(conversations.userId, row.userId))
-        .orderBy(desc(conversations.createdAt))
-        .limit(20);
+      const replayRows = (
+        await tx
+          .select({
+            id: conversations.id,
+            userId: conversations.userId,
+            direction: conversations.direction,
+            content: conversations.content,
+            createdAt: conversations.createdAt,
+          })
+          .from(conversations)
+          .where(eq(conversations.userId, row.userId))
+          .orderBy(desc(conversations.createdAt))
+          .limit(20)
+      ).map((r) => ({ ...r, studentName: owner?.name ?? null }));
 
+      // Achado 2026-09-09: `reviewUrgency: MANDATORY` (elegibilidade fora da curadoria, ou
+      // `catalogGap`) nunca tem `autoReleaseAt` — mesma regra de PAR-Q bloqueante, só que
+      // decidida na criação da proposta em vez de derivada ao vivo (ver `queue()`).
+      const mandatory = row.reviewUrgency === 'MANDATORY';
       const item = this.item(
         id,
         'SUBSTITUTION',
-        'ROUTINE',
+        mandatory ? 'ALERT' : 'ROUTINE',
         row.createdAt,
         substitutionTitle(owner?.name),
         row.status,
         row.status,
-        row.status === 'PENDING'
+        row.status === 'PENDING' && !mandatory
           ? new Date(row.createdAt.getTime() + AI_SUBSTITUTION_REVIEW_WINDOW_MS).toISOString()
           : null,
-        'AI_SUBSTITUTION',
+        row.catalogGap ? 'CATALOG_GAP' : 'AI_SUBSTITUTION',
       );
       return {
         item,
@@ -676,6 +721,8 @@ export class DashboardService {
           changeReason: row.changeReason,
           status: row.status,
           decidedAt: row.decidedAt?.toISOString() ?? null,
+          reviewUrgency: row.reviewUrgency,
+          catalogGap: row.catalogGap,
         },
         replay: this.groupReplays(replayRows)[0],
       };
@@ -700,8 +747,88 @@ export class DashboardService {
         'Proposta ja decidida, ou o protocolo mudou de versao desde a proposta.',
       );
     }
+    await this.deliverReleasedSubstitution(actor, id, release);
+    return { id, protocolId: release.protocolId, version: release.version, released: true };
+  }
 
+  /**
+   * Achado 2026-09-09 (pedido do fundador): aluno pediu um exercício que não existe em
+   * NENHUM lugar do catálogo — o time publica o exercício (mesmo endpoint/schema de
+   * `ExerciseCatalogAdminService.publish`, reaproveitado sem alteração) e aprova a troca no
+   * mesmo gesto. `attachCatalogExerciseAndRelease` recomputa a troca contra o protocolo VIVO
+   * e revalida a estrutura inteira antes de aplicar — se falhar, nada é publicado como
+   * aplicado ao aluno, só o exercício fica no catálogo pra tentar de novo com outra
+   * categorização.
+   */
+  async addCatalogExerciseAndApproveSubstitution(
+    actor: AuthenticatedUser,
+    rawId: string,
+    body: unknown,
+  ) {
+    this.assertStaffWrite(actor);
+    // Achado 2026-09-09: esta rota é gated só por PAPEL (`@Roles('PROFESSIONAL','ADMIN')`,
+    // no controller) — mas escrever no catálogo é `AI_CONFIG_WRITE`, capacidade que
+    // `PROFESSIONAL` deliberadamente NÃO tem (`CAPABILITIES_BY_ROLE`, `@movivo/shared`): o
+    // RT CREF aprova conteúdo curado (conhecimento/metodologia/guardrail), mas não publica
+    // exercício novo livremente. Sem esta checagem explícita, chamar
+    // `exerciseCatalogAdmin.publish()` por aqui (service-to-service, fora do
+    // `@RequireCapabilities` do controller de catálogo) furaria esse limite.
+    if (!roleHasCapabilities(actor.role, [ControlCenterCapability.AI_CONFIG_WRITE])) {
+      throw new ForbiddenException('Sem permissão para publicar exercício no catálogo.');
+    }
+    const id = this.parse(uuidSchema, rawId);
+    const input = this.parse(publishExerciseCatalogEntrySchema, body);
+    await this.exerciseCatalogAdmin.publish(actor, input);
+    const chosen = this.exerciseCatalog.getById(input.exerciseKey);
+    if (!chosen) {
+      // `publish()` já invalida o cache do catálogo antes de devolver — não deveria
+      // acontecer, mas sem isso ficaríamos aplicando a troca contra um exercício fantasma.
+      throw new BadRequestException('Exercício publicado, mas não ficou disponível a tempo.');
+    }
+    const release = await this.substitutionRepo.attachCatalogExerciseAndRelease(
+      { userId: actor.userId, role: actor.role },
+      id,
+      chosen,
+    );
+    if (!release.released) {
+      if (release.reason === 'VALIDATION_FAILED') {
+        throw new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: 'O exercício publicado, aplicado ao protocolo inteiro, quebrou a validação.',
+          violations: release.violations,
+        });
+      }
+      throw new BadRequestException(
+        'Proposta ja decidida, ou o protocolo mudou de versao desde a proposta.',
+      );
+    }
+    await this.deliverReleasedSubstitution(actor, id, release);
+    return { id, protocolId: release.protocolId, version: release.version, released: true };
+  }
+
+  /**
+   * Cauda compartilhada de `approveSubstitutionNow`/`addCatalogExerciseAndApproveSubstitution`
+   * (achado 2026-09-09): PDF completo do protocolo atualizado + resumo de IA + reenvio por
+   * WhatsApp — idêntico nos dois casos, a única diferença é como a troca foi liberada.
+   */
+  private async deliverReleasedSubstitution(
+    actor: AuthenticatedUser,
+    id: string,
+    release: {
+      protocolId: string;
+      userId: string;
+      version: number;
+      content: ProtocolStructure;
+      mesocycleName: string;
+      startDate: Date;
+      endDate: Date;
+      totalWeeks: number;
+      fromExerciseName: string;
+      toExerciseName: string;
+    },
+  ): Promise<void> {
     let pdf: Buffer | null = null;
+    let aiSummary: string | undefined;
     try {
       const { personal } = await this.protocolAnamnesisAnswers(actor, release.protocolId);
       pdf = await buildProtocolPdf({
@@ -714,17 +841,33 @@ export class DashboardService {
         signedAt: null,
         student: personal,
       });
+      // 2ª bolha da entrega (achado 2026-09-04): só vale a pena gerar quando o PDF saiu —
+      // sem PDF, a entrega cai no texto+link de sempre, que não usa este resumo.
+      aiSummary = await this.workoutPresentation.present({
+        userId: release.userId,
+        user: { name: personal.name, phoneNumber: personal.phoneNumber, email: personal.email },
+        biologicalSex: personal.biologicalSex,
+        content: release.content,
+        totalWeeks: release.totalWeeks,
+        mesocycleName: release.mesocycleName,
+        reason: 'SUBSTITUTION',
+        substitutionFrom: release.fromExerciseName,
+        substitutionTo: release.toExerciseName,
+      });
     } catch (error) {
       this.logger.warn(
         { id, err: error instanceof Error ? error.message : String(error) },
         'geracao do PDF da substituicao aprovada manualmente falhou — entrega cai para texto+link',
       );
     }
-    if (pdf) {
-      await this.scoped(actor, (tx) =>
-        tx.update(protocols).set({ pdfContent: pdf }).where(eq(protocols.id, release.protocolId)),
-      );
-    }
+    // Achado 2026-09-09 (bug reportado pelo fundador): sempre atualiza a coluna, mesmo quando
+    // `pdf` saiu `null` — senão o PDF da versão ANTERIOR (assinatura original ou substituição
+    // prévia) permanece salvo e `WhatsappOutboundWorker.buildDelivery` o trata como truthy,
+    // mandando um PDF desatualizado em vez de cair no fallback texto+link (que já reflete o
+    // `release.content` correto, com a troca aplicada).
+    await this.scoped(actor, (tx) =>
+      tx.update(protocols).set({ pdfContent: pdf }).where(eq(protocols.id, release.protocolId)),
+    );
 
     await this.queues.enqueue(
       QUEUE.whatsappOutbound,
@@ -734,11 +877,14 @@ export class DashboardService {
         protocolId: release.protocolId,
         protocolVersion: release.version,
         type: 'PROTOCOL_DELIVERY',
+        text: aiSummary,
+        deliveryReason: 'SUBSTITUTION',
+        substitutionFromExercise: release.fromExerciseName,
+        substitutionToExercise: release.toExerciseName,
       },
       { jobId: `substitution-delivery_manual_${id}` },
     );
     this.queueEvents.emit('protocol');
-    return { id, protocolId: release.protocolId, version: release.version, released: true };
   }
 
   /** Profissional recusa a troca — mantém o exercício original, sem tocar o protocolo. */
@@ -762,6 +908,18 @@ export class DashboardService {
         changes: {},
       }),
     );
+    // Achado 2026-09-09 (pedido do fundador): até aqui a recusa era silenciosa — o aluno
+    // pedia a troca, ouvia "vou confirmar com o profissional" e nunca mais sabia o que
+    // aconteceu. Mesmo padrão de `coach-message` do `AiResponseWorker`.
+    const notification: WhatsappOutboundJob = {
+      userId: result.userId,
+      type: 'COACH_MESSAGE',
+      text: SUBSTITUTION_DISCARDED_MESSAGE,
+      dedupeId: `substitution-discarded_${id}`,
+    };
+    await this.queues.enqueue(QUEUE.whatsappOutbound, 'coach-message', notification, {
+      jobId: `substitution-discarded_${id}`,
+    });
     this.queueEvents.emit('protocol');
     return { id, discarded: true };
   }
@@ -831,9 +989,7 @@ export class DashboardService {
           direction: conversations.direction,
           content: conversations.content,
           createdAt: conversations.createdAt,
-          name: users.name,
-          phoneNumber: users.phoneNumber,
-          email: users.email,
+          studentName: users.name,
         })
         .from(conversations)
         .innerJoin(users, eq(users.id, conversations.userId))
@@ -1051,7 +1207,7 @@ export class DashboardService {
         .limit(1);
       if (!alert) throw new NotFoundException('Handoff nao encontrado.');
       const [owner] = await tx
-        .select({ name: users.name, phoneNumber: users.phoneNumber, email: users.email })
+        .select({ name: users.name })
         .from(users)
         .where(eq(users.id, alert.userId))
         .limit(1);
@@ -1070,9 +1226,7 @@ export class DashboardService {
       const replayRows = context.reverse().map((message) => ({
         ...message,
         userId: alert.userId,
-        name: owner?.name ?? null,
-        phoneNumber: owner?.phoneNumber ?? '',
-        email: owner?.email ?? null,
+        studentName: owner?.name ?? null,
       }));
       const [workout] =
         alert.sourceType === 'WORKOUT' && alert.sourceId
@@ -1082,7 +1236,7 @@ export class DashboardService {
                 scheduledDate: workoutSessions.scheduledDate,
                 durationSeconds: workoutSessions.durationSeconds,
                 perceivedEffort: workoutSessions.perceivedEffort,
-                painExerciseId: workoutSessions.painExerciseId,
+                painExerciseIds: workoutSessions.painExerciseIds,
                 feedbackCipher: workoutSessions.feedbackCipher,
               })
               .from(workoutSessions)
@@ -1120,7 +1274,7 @@ export class DashboardService {
                 scheduledDate: workout.scheduledDate,
                 durationSeconds: workout.durationSeconds,
                 perceivedEffort: workout.perceivedEffort,
-                painExerciseId: workout.painExerciseId,
+                painExerciseIds: workout.painExerciseIds,
               }
             : {}),
           ...(insight ?? {}),
@@ -1269,9 +1423,10 @@ export class DashboardService {
       direction: 'INBOUND' | 'OUTBOUND';
       content: string;
       createdAt: Date;
-      name: string | null;
-      phoneNumber: string;
-      email: string | null;
+      /** Achado 2026-09-08 (pedido do fundador): o painel mostrava "Pessoa usuária" genérico
+       * em vez do nome real do titular — o profissional já vê a identidade completa em outros
+       * campos da mesma tela, então esconder o nome aqui só piorava a leitura da conversa. */
+      studentName?: string | null;
     }>,
   ) {
     const groups = new Map<
@@ -1279,6 +1434,7 @@ export class DashboardService {
       {
         conversationId: string;
         startedAt: string;
+        studentName: string | null;
         messages: Array<{
           role: 'USER' | 'ASSISTANT';
           content: string;
@@ -1291,11 +1447,16 @@ export class DashboardService {
       const current = groups.get(conversationId) ?? {
         conversationId,
         startedAt: row.createdAt.toISOString(),
+        studentName: row.studentName ?? null,
         messages: [],
       };
+      // Achado 2026-09-08 (decisão do fundador): painel é de uso interno da equipe MOVIVO —
+      // sem anonimização do conteúdo real da conversa (`scrubPII` era pensado pro boundary
+      // de envio ao provedor de LLM, não pra leitura da própria equipe, e corrompia nomes de
+      // exercício compostos, ex.: "Caminhada de Mala" → "Caminhada de terceiro").
       current.messages.push({
         role: row.direction === 'INBOUND' ? 'USER' : 'ASSISTANT',
-        content: scrubPII(row.content, row),
+        content: row.content,
         createdAt: row.createdAt.toISOString(),
       });
       groups.set(conversationId, current);

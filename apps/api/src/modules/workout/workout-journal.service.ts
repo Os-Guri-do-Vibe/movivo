@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, desc, eq, gte, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lte } from 'drizzle-orm';
 import {
   anamnesisStructuredSchema,
   protocolStructureSchema,
@@ -15,19 +15,40 @@ import {
   anamnesisSessions,
   handoffAlerts,
   protocols,
+  protocolVersions,
   subscriptions,
   users,
   workoutInsights,
   workoutSessions,
   workoutSetEntries,
 } from '../../core/database/schema';
-import { TenantDatabase } from '../../core/database/tenant-database.service';
+import {
+  TenantDatabase,
+  type TenantTransaction,
+} from '../../core/database/tenant-database.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
+import { EXERCISE_BY_ID } from '../protocol/exercise-catalog';
 import { WorkoutCompletionService } from './workout-completion.service';
 import { durationInsightButtons, durationInsightMessage } from './workout-messages';
+
+/**
+ * Cardio contínuo (bike, esteira) não tem reps/carga pra registrar — só "fez ou
+ * não fez" (achado 2026-09-04). Calculado do catálogo aqui, na leitura, e nunca
+ * persistido: protocolos já gerados (sem este dado) passam a ter o sinal certo
+ * sem precisar de backfill.
+ */
+function withCardioFlag(session: ProtocolSession): ProtocolSession {
+  return {
+    ...session,
+    exercises: session.exercises.map((exercise) => ({
+      ...exercise,
+      isCardio: EXERCISE_BY_ID.get(exercise.exerciseId)?.pattern === 'CARDIO',
+    })),
+  };
+}
 
 const WEEKDAY = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as const;
 const DURATION_CEILING: Readonly<Record<string, number>> = {
@@ -82,18 +103,32 @@ function prescribedSession(
 }
 
 function expectedSets(session: ProtocolSession): WorkoutSetInput[] {
-  return session.exercises.flatMap((exercise) =>
-    Array.from({ length: exercise.sets }, (_, index) => ({
+  return session.exercises.flatMap((exercise) => {
+    const loadUnit = exercise.loadStrategy === 'BODYWEIGHT' ? ('BODYWEIGHT' as const) : ('KG' as const);
+    const warmupCount = (exercise.warmupBlocks ?? []).reduce((sum, block) => sum + block.sets, 0);
+    // Aquecimento numerado em ordem crescente terminando em 0, logo antes da série 1.
+    const warmupSets = Array.from({ length: warmupCount }, (_, index) => ({
+      exerciseId: exercise.exerciseId,
+      setNumber: index - warmupCount + 1,
+      reps: null,
+      loadValue: null,
+      loadUnit,
+      durationSeconds: null,
+      completed: false,
+      skipped: false,
+    }));
+    const workingSets = Array.from({ length: exercise.sets }, (_, index) => ({
       exerciseId: exercise.exerciseId,
       setNumber: index + 1,
       reps: null,
       loadValue: null,
-      loadUnit: exercise.loadStrategy === 'BODYWEIGHT' ? ('BODYWEIGHT' as const) : ('KG' as const),
+      loadUnit,
       durationSeconds: null,
       completed: false,
       skipped: false,
-    })),
-  );
+    }));
+    return [...warmupSets, ...workingSets];
+  });
 }
 
 @Injectable()
@@ -111,8 +146,10 @@ export class WorkoutJournalService {
     const today = localDate(now, owner.timezone);
     const selectedDate = requestedDate ?? today;
     if (selectedDate > today) throw new BadRequestException('Nao e possivel abrir um dia futuro.');
+    // Usada só pra classificar PLANNED/REST da semana exibida (achado abaixo não se aplica
+    // aqui: o padrão de dias/frequência é metadado do protocolo, não algo que uma
+    // substituição de exercício altera).
     const structure = protocolStructureSchema.parse(owner.content);
-    const prescription = prescribedSession(selectedDate, structure);
     const weekNumber = Math.max(
       1,
       Math.min(
@@ -123,20 +160,42 @@ export class WorkoutJournalService {
     );
 
     const workout = await this.db.runAsUser(userId, 'USER', async (tx) => {
-      if (prescription) {
-        await tx
-          .insert(workoutSessions)
-          .values({
-            userId,
-            protocolId: owner.protocolId,
-            protocolVersion: owner.protocolVersion,
-            weekNumber,
-            sessionKey: prescription.dayLabel,
-            scheduledDate: selectedDate,
-            prescription,
-          })
-          .onConflictDoNothing();
-      }
+      const [existing] = await tx
+        .select()
+        .from(workoutSessions)
+        .where(
+          and(eq(workoutSessions.userId, userId), eq(workoutSessions.scheduledDate, selectedDate)),
+        )
+        .orderBy(desc(workoutSessions.createdAt))
+        .limit(1);
+      if (existing) return existing;
+
+      /**
+       * Achado 2026-09-10 (pedido do fundador): a substituição de exercício só pode valer
+       * da data de aprovação em diante. Um dia PASSADO nunca visitado antes de hoje não
+       * pode "herdar" o exercício novo só porque este era o primeiro toque nele — resolve
+       * qual versão de `protocol_versions` estava de fato vigente no dia local
+       * `selectedDate`, nunca a versão vigente AGORA (`owner.content`/`owner.protocolVersion`).
+       * Pra "hoje" isso sempre resolve pra a versão vigente mesmo (nenhuma versão futura
+       * existe ainda) — não precisa de caminho especial.
+       */
+      const { structure: historicalStructure, version: historicalVersion } =
+        await this.structureAsOf(tx, owner.protocolId, owner.timezone, selectedDate);
+      const prescription = prescribedSession(selectedDate, historicalStructure);
+      if (!prescription) return undefined;
+
+      await tx
+        .insert(workoutSessions)
+        .values({
+          userId,
+          protocolId: owner.protocolId,
+          protocolVersion: historicalVersion,
+          weekNumber,
+          sessionKey: prescription.dayLabel,
+          scheduledDate: selectedDate,
+          prescription,
+        })
+        .onConflictDoNothing();
       const [row] = await tx
         .select()
         .from(workoutSessions)
@@ -247,7 +306,7 @@ export class WorkoutJournalService {
       workoutView = {
         id: workout.id,
         status: workout.status,
-        prescription: workout.prescription,
+        prescription: withCardioFlag(workout.prescription),
         startedAt: workout.startedAt?.toISOString() ?? null,
         finishedAt: workout.finishedAt?.toISOString() ?? null,
         durationSeconds: workout.durationSeconds,
@@ -266,7 +325,27 @@ export class WorkoutJournalService {
     };
   }
 
-  async start(userId: string, id: string): Promise<void> {
+  async start(userId: string, id: string, now = new Date()): Promise<void> {
+    const [owned] = await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx
+        .select({ scheduledDate: workoutSessions.scheduledDate, timezone: users.timezone })
+        .from(workoutSessions)
+        .innerJoin(users, eq(users.id, workoutSessions.userId))
+        .where(and(eq(workoutSessions.id, id), eq(workoutSessions.userId, userId)))
+        .limit(1),
+    );
+    if (!owned) throw new NotFoundException();
+    /**
+     * Achado 2026-09-10 (pedido do fundador): "Iniciar treino" só vale pro dia ATUAL — um
+     * dia passado é só consulta (protocolo, carga/repetições já registradas), nunca pode
+     * virar um treino em andamento retroativo. A tela já esconde o botão fora de hoje, mas
+     * o endpoint nunca pode confiar só nisso (mesma defesa em profundidade do resto do
+     * módulo).
+     */
+    if (owned.scheduledDate !== localDate(now, owned.timezone)) {
+      throw new BadRequestException('So e possivel iniciar o treino do dia atual.');
+    }
+
     const [row] = await this.db.runAsUser(userId, 'USER', (tx) =>
       tx
         .update(workoutSessions)
@@ -328,9 +407,11 @@ export class WorkoutJournalService {
     if (!workout) throw new NotFoundException();
     if (!workout.startedAt) throw new BadRequestException('Inicie o treino antes de finalizar.');
     if (
-      input.painExerciseId &&
-      !workout.prescription.exercises.some(
-        (exercise) => exercise.exerciseId === input.painExerciseId,
+      input.painExerciseIds.some(
+        (painExerciseId) =>
+          !workout.prescription.exercises.some(
+            (exercise) => exercise.exerciseId === painExerciseId,
+          ),
       )
     ) {
       throw new BadRequestException('Exercicio de dor invalido.');
@@ -353,7 +434,7 @@ export class WorkoutJournalService {
           perceivedEffort: input.perceivedEffort,
           feedbackCipher,
           painReported: input.painReported,
-          painExerciseId: input.painExerciseId ?? null,
+          painExerciseIds: input.painExerciseIds,
         })
         .where(and(eq(workoutSessions.id, id), eq(workoutSessions.userId, userId)));
       if (input.painReported) {
@@ -436,6 +517,38 @@ export class WorkoutJournalService {
     return Boolean(row);
   }
 
+  /**
+   * Qual `protocol_versions.content` estava vigente no FIM do dia local `selectedDate` —
+   * nunca a versão vigente agora. Compara pela DATA LOCAL de `createdAt` de cada versão
+   * (mesma conversão de `localDate()`, sem aritmética de fuso nova): a última versão cuja
+   * data local de criação seja `<= selectedDate` é a que valia naquele dia. Toda versão
+   * (inclusive a v1 inicial) nasce em `protocol_versions` (ver `ProtocolRepository.persist`/
+   * `ProtocolSubstitutionRepository.applyReleaseTail`), então sempre há pelo menos uma.
+   */
+  private async structureAsOf(
+    tx: TenantTransaction,
+    protocolId: string,
+    timezone: string,
+    selectedDate: string,
+  ): Promise<{ structure: ReturnType<typeof protocolStructureSchema.parse>; version: number }> {
+    const versions = await tx
+      .select({
+        version: protocolVersions.version,
+        content: protocolVersions.content,
+        createdAt: protocolVersions.createdAt,
+      })
+      .from(protocolVersions)
+      .where(eq(protocolVersions.protocolId, protocolId))
+      .orderBy(asc(protocolVersions.version));
+    let chosen = versions[0];
+    for (const candidate of versions) {
+      if (localDate(candidate.createdAt, timezone) > selectedDate) break;
+      chosen = candidate;
+    }
+    if (!chosen) throw new NotFoundException('Nenhuma versao de protocolo encontrada.');
+    return { structure: protocolStructureSchema.parse(chosen.content), version: chosen.version };
+  }
+
   private async ownerAndProtocol(userId: string) {
     const [row] = await this.db.runAsUser(userId, 'USER', (tx) =>
       tx
@@ -455,7 +568,7 @@ export class WorkoutJournalService {
           and(
             eq(users.id, userId),
             eq(protocols.status, 'ACTIVE'),
-            eq(subscriptions.status, 'ACTIVE'),
+            inArray(subscriptions.status, ['ACTIVE', 'TRIALING']),
           ),
         )
         .orderBy(desc(protocols.createdAt))

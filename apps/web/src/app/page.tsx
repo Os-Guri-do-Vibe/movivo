@@ -18,7 +18,7 @@ import { PricingCards } from '@/components/pricing-cards';
 import styles from './landing.module.css';
 
 export const metadata: Metadata = {
-  title: { absolute: 'Movivo' },
+  title: { absolute: 'Movivo - Assessoria Fitness' },
   description:
     'Treino individualizado com metodologia profissional, acompanhamento e conversa pelo WhatsApp. Conheça a MOVIVO por 7 dias, sem cartão.',
   alternates: { canonical: '/' },

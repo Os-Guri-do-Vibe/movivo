@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   anamnesisAnswers,
+  CATALOG_GAP_SUBSTITUTION_ID,
+  catalogGapSubstitutionDetail,
   CHECKIN_ID,
   checkinItem,
   HANDOFF_ID,
@@ -29,6 +31,7 @@ const api = vi.hoisted(() => ({
   saveProtocol: vi.fn(),
   approveSubstitutionNow: vi.fn(),
   discardSubstitution: vi.fn(),
+  addCatalogExerciseAndApproveSubstitution: vi.fn(),
   captureDashboardEvent: vi.fn(),
 }));
 vi.mock('@/lib/dashboard-api', () => ({
@@ -43,6 +46,9 @@ vi.mock('@/lib/dashboard-api', () => ({
   },
   ...api,
 }));
+
+const controlCenterApi = vi.hoisted(() => ({ getExerciseCatalog: vi.fn() }));
+vi.mock('@/lib/control-center-api', () => controlCenterApi);
 
 import { DashboardApiError } from '@/lib/dashboard-api';
 
@@ -137,12 +143,18 @@ async function renderProtocolScreen(
 
 beforeEach(() => {
   Object.values(api).forEach((mock) => mock.mockReset());
+  controlCenterApi.getExerciseCatalog.mockReset();
   navigation.replace.mockReset();
   api.signProtocol.mockResolvedValue({ status: 'SIGNED' });
   api.resolveHandoff.mockResolvedValue({ status: 'RESOLVED' });
   api.getAnamnesisAnswers.mockResolvedValue(anamnesisAnswers);
   api.approveSubstitutionNow.mockResolvedValue({ status: 'released' });
   api.discardSubstitution.mockResolvedValue({ status: 'discarded' });
+  api.addCatalogExerciseAndApproveSubstitution.mockResolvedValue({ status: 'released' });
+  controlCenterApi.getExerciseCatalog.mockResolvedValue({
+    data: { versions: [], totalPublished: 0 },
+    meta: { generatedAt: '2026-09-09T12:00:00.000Z', timezone: 'America/Sao_Paulo', dataQuality: [] },
+  });
 });
 
 // Achado 2026-09-02 — fluxo de substituição de exercício via IA: o profissional pode
@@ -196,12 +208,74 @@ describe('QueueDetail — substituição de exercício via IA', () => {
   });
 });
 
+// Achado 2026-09-09 — pedido explícito do aluno por um exercício que não existe em lugar
+// nenhum do catálogo: vira revisão obrigatória com a opção de publicar o exercício e
+// aprovar a troca no mesmo gesto, em vez do par normal "Recusar"/"Aprovar agora".
+describe('QueueDetail — substituição fora do catálogo (catalogGap)', () => {
+  it('mostra "Revisão obrigatória" e "Adicionar exercício ao catálogo" em vez de "Aprovar agora"', async () => {
+    api.getQueueDetail.mockResolvedValue(catalogGapSubstitutionDetail);
+    render(<QueueDetail kind="SUBSTITUTION" id={CATALOG_GAP_SUBSTITUTION_ID} />);
+
+    expect(await screen.findByText('Troca proposta')).toBeVisible();
+    expect(screen.getByText('Revisão obrigatória')).toBeVisible();
+    expect(screen.getByText('“Supino Reto Máquina” (fora do catálogo)')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Aprovar agora' })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Adicionar exercício ao catálogo' }),
+    ).toBeVisible();
+  });
+
+  it('publica o exercício e aprova a troca no mesmo gesto', async () => {
+    api.getQueueDetail.mockResolvedValue(catalogGapSubstitutionDetail);
+    render(<QueueDetail kind="SUBSTITUTION" id={CATALOG_GAP_SUBSTITUTION_ID} />);
+    await screen.findByText('Troca proposta');
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Adicionar exercício ao catálogo' }),
+    );
+    const dialog = await screen.findByRole('dialog');
+    const scope = within(dialog);
+
+    expect(scope.getByLabelText('Nome do exercício')).toHaveValue('Supino Reto Máquina');
+    await userEvent.click(scope.getByText('Selecione o(s) músculo(s)'));
+    await userEvent.click(scope.getByRole('checkbox', { name: 'peito' }));
+    await userEvent.click(scope.getByRole('checkbox', { name: /Academia completa/ }));
+
+    await userEvent.click(scope.getByRole('button', { name: 'Adicionar e aprovar' }));
+
+    await waitFor(() =>
+      expect(api.addCatalogExerciseAndApproveSubstitution).toHaveBeenCalledWith(
+        CATALOG_GAP_SUBSTITUTION_ID,
+        expect.objectContaining({
+          name: 'Supino Reto Máquina',
+          muscleGroups: ['peito'],
+          locations: ['FULL_GYM'],
+        }),
+      ),
+    );
+    expect(await screen.findByRole('status')).toHaveTextContent('adicionado ao catálogo');
+  });
+
+  it('não deixa aprovar sem selecionar músculo e local', async () => {
+    api.getQueueDetail.mockResolvedValue(catalogGapSubstitutionDetail);
+    render(<QueueDetail kind="SUBSTITUTION" id={CATALOG_GAP_SUBSTITUTION_ID} />);
+    await screen.findByText('Troca proposta');
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Adicionar exercício ao catálogo' }),
+    );
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('button', { name: 'Adicionar e aprovar' })).toBeDisabled();
+    expect(api.addCatalogExerciseAndApproveSubstitution).not.toHaveBeenCalled();
+  });
+});
+
 describe('QueueDetail', () => {
   it('renderiza protocolo e exige confirmação para assinar', async () => {
     api.getQueueDetail.mockResolvedValue(protocolDetail);
     render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
     expect(await screen.findByRole('heading', { name: /Protocolo · versão 1/i })).toBeVisible();
-    expect(screen.getByText('[PESSOA] relatou dificuldade.')).toBeVisible();
+    expect(screen.getByText('Relatei dificuldade no exercício de hoje.')).toBeVisible();
     await userEvent.click(screen.getByRole('button', { name: 'Assinar e liberar' }));
     expect(api.signProtocol).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole('button', { name: 'Confirmar e assinar' }));
@@ -710,7 +784,7 @@ describe('QueueDetail', () => {
     render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
     await screen.findByRole('heading', { name: /Protocolo · versão 1/i });
 
-    expect(screen.getByText('45s')).toBeVisible();
+    expect(screen.getByText('45 s')).toBeVisible();
     expect(screen.queryByRole('link', { name: 'Assistir' })).not.toBeInTheDocument();
     const table = screen.getByRole('table');
     expect(within(table).getAllByText('—')).toHaveLength(3); // RIR, técnica e vídeo ausentes

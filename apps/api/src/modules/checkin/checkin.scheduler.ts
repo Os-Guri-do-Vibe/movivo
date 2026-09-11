@@ -1,6 +1,6 @@
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 import { CONSENT_TEXTS } from '@movivo/shared';
 
@@ -82,7 +82,9 @@ export class CheckinScheduler implements OnModuleInit {
             isNull(consents.revokedAt),
           ),
         )
-        .where(and(eq(protocols.status, 'ACTIVE'), eq(subscriptions.status, 'ACTIVE'))),
+        .where(
+          and(eq(protocols.status, 'ACTIVE'), inArray(subscriptions.status, ['ACTIVE', 'TRIALING'])),
+        ),
     );
 
     for (const row of eligible) {

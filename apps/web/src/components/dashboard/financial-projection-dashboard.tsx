@@ -1,5 +1,6 @@
 'use client';
 
+import { Calculator } from 'lucide-react';
 import { useCallback } from 'react';
 
 import { getFinanceSummary } from '@/lib/control-center-api';
@@ -46,7 +47,7 @@ export function FinancialProjectionDashboard() {
     <div>
       <SectorHeader
         title="Resultado & Projeção"
-        description="O realizado permanece separado dos três cenários projetados. As projeções apoiam decisão dos fundadores; não são promessa de receita ou resultado."
+        icon={Calculator}
         meta={meta}
         refreshing={state.loading}
         onRefresh={() => void state.refresh()}

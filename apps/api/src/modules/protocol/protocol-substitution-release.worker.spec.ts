@@ -14,6 +14,7 @@ import type {
   ProtocolSubstitutionRepository,
   ReleaseSubstitutionResult,
 } from './protocol-substitution.repository';
+import type { WorkoutPresentationService } from './workout-presentation.service';
 
 const content: ProtocolStructure = {
   promptVersion: 'v1',
@@ -51,7 +52,10 @@ const personal = {
 function makeWorker(
   released: boolean,
   version = 1,
-  opts: { findLatestPersonalInfo?: () => Promise<typeof personal | null> } = {},
+  opts: {
+    findLatestPersonalInfo?: () => Promise<typeof personal | null>;
+    aiSummary?: string | undefined;
+  } = {},
 ) {
   const workers = { create: vi.fn() } as unknown as WorkerFactory;
   const releaseResult: ReleaseSubstitutionResult = released
@@ -61,10 +65,12 @@ function makeWorker(
         userId: 'u1',
         version,
         content,
-        mesocycleName: 'Mesociclo 1 — Adaptação',
+        mesocycleName: 'Mesociclo 1: Adaptação',
         startDate: new Date('2026-08-22T00:00:00.000Z'),
         endDate: new Date('2026-11-14T00:00:00.000Z'),
         totalWeeks: 12,
+        fromExerciseName: 'Flexão',
+        toExerciseName: 'Supino Reto (Halter)',
       }
     : { released: false };
   const release = vi.fn(async () => releaseResult);
@@ -79,6 +85,8 @@ function makeWorker(
   const queues = { enqueue } as unknown as QueueManager;
   const emit = vi.fn();
   const queueEvents = { emit } as unknown as DashboardQueueEventsService;
+  const present = vi.fn(async () => opts.aiSummary);
+  const workoutPresentation = { present } as unknown as WorkoutPresentationService;
   const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() } as never;
   const worker = new ProtocolSubstitutionReleaseWorker(
     workers,
@@ -86,9 +94,19 @@ function makeWorker(
     repository,
     protocolRepository,
     queueEvents,
+    workoutPresentation,
     logger,
   );
-  return { worker, workers, release, findLatestPersonalInfo, setPdfContent, enqueue, emit };
+  return {
+    worker,
+    workers,
+    release,
+    findLatestPersonalInfo,
+    setPdfContent,
+    enqueue,
+    emit,
+    present,
+  };
 }
 
 function job(
@@ -117,10 +135,49 @@ describe('ProtocolSubstitutionReleaseWorker (janela de cortesia de 30min da subs
     expect(enqueue).toHaveBeenCalledWith(
       'whatsapp-outbound',
       'protocol-delivery',
-      { userId: 'u1', protocolId: 'p1', protocolVersion: 3, type: 'PROTOCOL_DELIVERY' },
+      {
+        userId: 'u1',
+        protocolId: 'p1',
+        protocolVersion: 3,
+        type: 'PROTOCOL_DELIVERY',
+        deliveryReason: 'SUBSTITUTION',
+        substitutionFromExercise: 'Flexão',
+        substitutionToExercise: 'Supino Reto (Halter)',
+      },
       { jobId: 'substitution-delivery_u1_3' },
     );
     expect(emit).toHaveBeenCalledWith('protocol');
+  });
+
+  it('achado 2026-09-04: gera o resumo de IA e manda no payload da entrega', async () => {
+    const { worker, present, enqueue } = makeWorker(true, 3, { aiSummary: 'Resumo do treino.' });
+    await worker.process(job());
+    // Achado 2026-09-08: reason/from/to distinguem a reentrega pós-substituição da 1ª
+    // entrega, tanto pro resumo de IA (`WorkoutPresentationService`) quanto pra saudação
+    // estática do worker de WhatsApp (`protocolDeliveryPdfText`).
+    expect(present).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'u1',
+        biologicalSex: 'MALE',
+        content,
+        totalWeeks: 12,
+        mesocycleName: 'Mesociclo 1: Adaptação',
+        reason: 'SUBSTITUTION',
+        substitutionFrom: 'Flexão',
+        substitutionTo: 'Supino Reto (Halter)',
+      }),
+    );
+    expect(enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'protocol-delivery',
+      expect.objectContaining({
+        text: 'Resumo do treino.',
+        deliveryReason: 'SUBSTITUTION',
+        substitutionFromExercise: 'Flexão',
+        substitutionToExercise: 'Supino Reto (Halter)',
+      }),
+      { jobId: 'substitution-delivery_u1_3' },
+    );
   });
 
   it('já decidida ou protocolo mudou de versão → no-op, sem entrega', async () => {
@@ -144,7 +201,11 @@ describe('ProtocolSubstitutionReleaseWorker (janela de cortesia de 30min da subs
     });
     const res = await worker.process(job());
     expect(res.status).toBe('RELEASED');
-    expect(setPdfContent).not.toHaveBeenCalled();
+    // Achado 2026-09-09 (bug reportado pelo fundador): a coluna precisa ser explicitamente
+    // limpa quando a regeneração falha — senão o PDF da versão ANTERIOR (já desatualizado
+    // com a troca) fica salvo e `WhatsappOutboundWorker.buildDelivery` o trata como válido,
+    // mandando um PDF que não reflete o protocolo atual em vez de cair no texto+link.
+    expect(setPdfContent).toHaveBeenCalledWith('u1', 'p1', null);
     expect(enqueue).toHaveBeenCalledOnce();
   });
 });

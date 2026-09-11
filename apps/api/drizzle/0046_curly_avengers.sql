@@ -1,0 +1,2 @@
+ALTER TABLE "workout_set_entries" DROP CONSTRAINT "ck_workout_set_entries_set";--> statement-breakpoint
+ALTER TABLE "workout_set_entries" ADD CONSTRAINT "ck_workout_set_entries_set" CHECK ("workout_set_entries"."set_number" between -24 and 20);
