@@ -39,6 +39,16 @@ updates:
         update-types:
           - 'minor'
           - 'patch'
+      # `vitest` e seus provedores de cobertura (`@vitest/coverage-v8`,
+      # `@vitest/coverage-istanbul`) têm que subir de versão JUNTOS — são major
+      # lockstep, não pacotes independentes. Achado 2026-09-11: sem este grupo o
+      # Dependabot abriu 3 PRs de major separados (um por pacote), cada um deixando
+      # os outros dois presos na versão antiga; a cobertura ia a 0% e a suíte
+      # acumulava um "unhandled error" por arquivo de teste em cada PR isolado.
+      vitest:
+        patterns:
+          - 'vitest'
+          - '@vitest/*'
     ignore:
       # typescript fixado em 5.9.x de propósito: o typescript-eslint (v8) exige
       # `typescript <6.1.0`. Subir major quebra o lint de todo o monorepo (README §Requisitos).
