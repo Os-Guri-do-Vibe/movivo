@@ -49,7 +49,7 @@
     "postgres": "3.4.9",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
-    "zod": "4.5.4"
+    "zod": "4.6.2"
   },
   "devDependencies": {
     "@nestjs/cli": "12.0.0",
@@ -59,7 +59,7 @@
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "2.2.0",
-    "@types/node": "22.20.1",
+    "@types/node": "22.20.2",
     "@types/passport-jwt": "^4.0.1",
     "@types/pdfmake": "^0.3.3",
     "@types/supertest": "7.2.1",
