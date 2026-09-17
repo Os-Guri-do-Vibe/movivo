@@ -220,8 +220,9 @@ export function StudentDetail({ id }: { id: string }) {
                   <li key={point.week} className="rounded-lg bg-secondary p-3 text-label">
                     <span className="font-semibold">Semana {point.week}</span>{' '}
                     <span className="text-muted-foreground">
-                      esforço percebido {text(point.fatigue)} · treinos declarados{' '}
-                      {text(point.workouts)} · ajuste {text(point.adjustment)}
+                      sono {text(point.sleepQuality)} · humor {text(point.mood)} · alimentação{' '}
+                      {text(point.nutritionScore)} · aderência {text(point.adherenceScore)} ·
+                      duração do treino: {text(point.durationFit)}
                     </span>
                   </li>
                 ))}

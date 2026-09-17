@@ -194,6 +194,18 @@ export const protocolRenewalStatusEnum = pgEnum('protocol_renewal_status', [
   'PROCESSED',
 ]);
 
+/**
+ * Estado do formulário web de check-in semanal (achado 2026-09-13: substitui o fluxo de
+ * botão do WhatsApp). Só 3 estados — diferente da renovação de mesociclo, não há um
+ * "PROCESSED" separado: o comentário da IA é best-effort e assíncrono, mas a experiência
+ * do aluno termina em `SUBMITTED` (tela de sucesso já aparece antes da IA responder).
+ */
+export const checkinWeeklyStatusEnum = pgEnum('checkin_weekly_status', [
+  'PENDING',
+  'SUBMITTED',
+  'EXPIRED',
+]);
+
 // ---------------------------------------------------------------------------
 // CONVERSA (WhatsApp)
 // ---------------------------------------------------------------------------

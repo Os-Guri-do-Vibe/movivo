@@ -1,9 +1,16 @@
 /**
  * `WorkoutCompletionService` — gravação do treino que o aluno **realmente fez** (US-8.1).
  *
- * # Canais de captura (decisão de produto TASK-8.1.1, fechada)
- *  1. **Quick reply diário no WhatsApp** (`WHATSAPP_QUICK_REPLY`) — canal primário.
- *  2. **Check-in semanal** (`CHECKIN`) — fallback, ver `recordFromCheckin`.
+ * # Canais de captura (revisão 2026-09-12 — decisão do fundador)
+ *  1. **Diário de treino web** (`WEB_JOURNAL`) — fonte de verdade. `workout_sessions.status
+ *     = 'COMPLETED'` (`WorkoutJournalService.finish()`) é a ÚNICA definição de "treinou";
+ *     nenhum canal de WhatsApp coleta esse sinal (o quick reply "Treinei ✅"/"Hoje não" da
+ *     US-8.1 original foi removido — nunca chegou a ser enviado por nenhum scheduler).
+ *  2. **Check-in semanal** (`CHECKIN`) — fallback, ver `recordFromCheckin`. Achado
+ *     2026-09-13: o check-in virou formulário web de 8 perguntas; a pergunta fechada de 3
+ *     faixas ("quantos treinos você concluiu") virou uma escala 0-10 ("quanto você seguiu
+ *     seu protocolo") — `recordFromCheckin` foi adaptado (bucket 0-10 → contagem estimada)
+ *     em vez de reescrito, resolvendo o pendente citado aqui antes desta revisão.
  *  3. ~~Menção espontânea na conversa~~ (`CONVERSATION`) — **fora desta entrega**. O valor
  *     do enum fica declarado porque ele define a precedência do dedupe, mas nada grava
  *     com essa fonte hoje: capturar "acabei de treinar" custaria inflar o classificador
@@ -37,20 +44,17 @@ export interface ActiveProtocol {
 }
 
 /**
- * Fallback do check-in (TASK-8.1.4): a resposta fechada `workouts` vira contagem.
- *
- * ponytail: **reusa a pergunta que o check-in já faz** em vez de acrescentar uma quarta.
- * O check-in já pergunta "quantos treinos você concluiu desde o último check-in?" com
- * três faixas — acrescentar outra pergunta pediria mais um toque do aluno para produzir
- * o mesmo dado que já está no banco. `TRES_MAIS` é gravado como 3 (piso da faixa):
- * contagem inflada é pior que contagem baixa, e a US é explícita nisso. Se um dia o
- * check-in coletar o número exato, trocar este mapa pelo valor informado.
+ * Fallback do check-in (TASK-8.1.4, adaptado 2026-09-13): a pergunta 4 do formulário web
+ * ("quanto você conseguiu seguir seu protocolo de treino nesta última semana", 0-10) vira
+ * uma contagem estimada de treinos. Baldes conservadores (piso, nunca teto — contagem
+ * inflada é pior que contagem baixa, mesma régua do mapa anterior de 3 faixas):
+ * `0-3` → nenhum treino, `4-7` → metade dos planejados na janela, `8-10` → todos.
  */
-const CHECKIN_WORKOUT_COUNT: Readonly<Record<string, number>> = {
-  NENHUM: 0,
-  UM_DOIS: 1,
-  TRES_MAIS: 3,
-};
+function estimatedWorkoutCount(adherenceScore: number): number {
+  if (adherenceScore <= 3) return 0;
+  if (adherenceScore <= 7) return 1;
+  return 3;
+}
 
 /** Janela do check-in semanal: os 7 dias que antecedem a resposta. */
 const CHECKIN_WINDOW_DAYS = 7;
@@ -76,7 +80,7 @@ export class WorkoutCompletionService {
     weekNumber: number,
     sessionKey: string,
     completedAt: string,
-    source: 'WEB_JOURNAL' | 'WHATSAPP_QUICK_REPLY' | 'CHECKIN' | 'CONVERSATION',
+    source: 'WEB_JOURNAL' | 'CHECKIN' | 'CONVERSATION',
     extra?: { exercisesDone?: unknown; perceivedEffort?: number },
   ): Promise<boolean> {
     const values = {
@@ -117,37 +121,13 @@ export class WorkoutCompletionService {
     return row !== undefined;
   }
 
-  /** Toque em "Treinei ✅": resolve o protocolo vigente e grava a conclusão do dia. */
-  async recordFromQuickReply(
-    userId: string,
-    completedAt: string,
-    sessionKey: string,
-  ): Promise<boolean> {
-    const active = await this.activeProtocol(userId);
-    if (!active) return false;
-    const recorded = await this.record(
-      userId,
-      active.id,
-      active.version,
-      active.weekNumber,
-      sessionKey,
-      completedAt,
-      'WHATSAPP_QUICK_REPLY',
-    );
-    this.logger.info(
-      { event: 'workout_completion_recorded', userId, completedAt, source: 'WHATSAPP_QUICK_REPLY' },
-      'treino registrado pelo quick reply',
-    );
-    return recorded;
-  }
-
   /**
    * Fallback do check-in (TASK-8.1.4). As conclusões são atribuídas aos **dias previstos
    * pelo protocolo** dentro da janela, nunca à data em que o aluno respondeu — e o
    * quick reply, de fonte mais específica, permanece intocado pela precedência do enum.
    */
-  async recordFromCheckin(userId: string, workouts: string | undefined): Promise<number> {
-    const count = workouts ? CHECKIN_WORKOUT_COUNT[workouts] : undefined;
+  async recordFromCheckin(userId: string, adherenceScore: number | undefined): Promise<number> {
+    const count = adherenceScore !== undefined ? estimatedWorkoutCount(adherenceScore) : 0;
     if (!count) return 0;
     const active = await this.activeProtocol(userId);
     if (!active) return 0;

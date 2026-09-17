@@ -137,7 +137,11 @@ function makeSequencedService(
   decrypted: string[] = [],
   consentActive = true,
 ) {
-  const updateWhere = vi.fn(async () => []);
+  // Casca de `update(...).set(...).where(...)`: thenable (array vazio) + `.returning()` —
+  // `supersedePreviousActiveProtocols` (ADR-008) encadeia `.returning()` na mesma chamada.
+  const updateWhere = vi.fn(() =>
+    Object.assign(Promise.resolve([]), { returning: vi.fn(async () => []) }),
+  );
   const updateSet = vi.fn(() => ({ where: updateWhere }));
   const insertValues = vi.fn(async () => []);
   const execute = vi.fn(async () => []);
@@ -1027,18 +1031,13 @@ describe('DashboardService leituras operacionais', () => {
           },
         ],
         [
-          { userId: USER_ID, responsesCipher: Buffer.from('one') },
-          { userId: USER_ID, responsesCipher: Buffer.from('duplicate') },
-          { userId: ACTOR_ID, responsesCipher: Buffer.from('none') },
-          { userId: 'x', responsesCipher: null },
+          { userId: USER_ID, answers: { adherenceScore: 4 } },
+          { userId: USER_ID, answers: { adherenceScore: 8 } },
+          { userId: ACTOR_ID, answers: { adherenceScore: 0 } },
+          { userId: 'x', answers: null },
         ],
       ],
       'PASS',
-      [
-        JSON.stringify({ workouts: 'UM_DOIS' }),
-        JSON.stringify({ workouts: 'TRES_MAIS' }),
-        JSON.stringify({ workouts: 'NENHUM' }),
-      ],
     );
     const result = await service.operations(actor);
     expect(result.funnel).toEqual({
@@ -1235,10 +1234,17 @@ describe('DashboardService leituras operacionais', () => {
             createdAt,
           },
         ],
-        [{ responsesCipher: Buffer.from('x'), weekNumber: 2, completedAt: null }],
+        [
+          {
+            answers: { sleepQuality: 'BOA' },
+            notesCipher: Buffer.from('x'),
+            weekNumber: 2,
+            submittedAt: null,
+          },
+        ],
       ],
       'PASS',
-      [JSON.stringify({ painReport: 'dor' })],
+      [JSON.stringify({ difficultExerciseDescription: 'dor' })],
     );
     await expect(checkin.service.detail(actor, 'CHECKIN', RESOURCE_ID)).resolves.toMatchObject({
       item: { severity: 'SAFETY' },

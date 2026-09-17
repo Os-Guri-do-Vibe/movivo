@@ -64,10 +64,7 @@ function build(...results: unknown[][]) {
   const audit = { append: vi.fn().mockResolvedValue(undefined) };
   const decryptHealth = vi.fn().mockResolvedValue(
     JSON.stringify({
-      fatigue: 'ADEQUADO',
-      workouts: 'TRES_MAIS',
-      adjustment: 'MANTER',
-      painReport: 'desconforto leve no ombro',
+      difficultExerciseDescription: 'desconforto leve no ombro',
     }),
   );
   const service = new ControlCenterService(
@@ -132,9 +129,9 @@ function studentResults() {
       {
         weekNumber: 3,
         sentAt: day(-4),
-        respondedAt: day(-3),
-        completedAt: day(-3),
-        responsesCipher: Buffer.from('cipher'),
+        submittedAt: day(-3),
+        answers: { sleepQuality: 'BOA', mood: 'FELIZ', nutritionScore: 8, adherenceScore: 9 },
+        notesCipher: Buffer.from('cipher'),
       },
     ],
     [
@@ -196,7 +193,7 @@ describe('ControlCenterService.student — ficha unificada (US-7.4)', () => {
 
     expect(decryptHealth).toHaveBeenCalledTimes(1);
     expect(data.student.health?.evolution).toEqual([
-      expect.objectContaining({ week: 3, fatigue: 'ADEQUADO', workouts: 'TRES_MAIS' }),
+      expect.objectContaining({ week: 3, sleepQuality: 'BOA', mood: 'FELIZ' }),
     ]);
     expect(data.student.health?.painReports).toHaveLength(1);
     expect(data.student.health?.parqState).toBe('CLEARED');

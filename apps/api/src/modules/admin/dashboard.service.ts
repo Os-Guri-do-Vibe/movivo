@@ -530,7 +530,7 @@ export class DashboardService {
         .where(eq(protocols.id, id));
       // Renovação de mesociclo: o mesociclo anterior (se houver) só deixa de ser `ACTIVE`
       // agora, na MESMA transação — mesmo racional de `ProtocolRepository.autoRelease()`.
-      await supersedePreviousActiveProtocols(tx, row.userId, id);
+      await supersedePreviousActiveProtocols(tx, this.cipher, row.userId, id, this.logger);
       await tx.insert(protocolVersions).values({
         protocolId: id,
         userId: row.userId,
@@ -996,9 +996,9 @@ export class DashboardService {
         .orderBy(desc(conversations.createdAt))
         .limit(100);
       const completedCheckins = await tx
-        .select({ userId: checkins.userId, responsesCipher: checkins.responsesCipher })
+        .select({ userId: checkins.userId, answers: checkins.answers })
         .from(checkins)
-        .where(and(eq(checkins.currentQuestion, 4), isNotNull(checkins.responsesCipher)));
+        .where(eq(checkins.status, 'SUBMITTED'));
       const accessedUsers = new Set([
         ...replayRows.map((row) => row.userId),
         ...completedCheckins.map((row) => row.userId),
@@ -1006,7 +1006,7 @@ export class DashboardService {
       for (const userId of accessedUsers) {
         await this.auditRead(tx, actor, userId, 'operations_dashboard', userId);
       }
-      const firstWorkout = await this.countUsersWithWorkout(completedCheckins);
+      const firstWorkout = this.countUsersWithWorkout(completedCheckins);
       const replays = this.groupReplays(replayRows);
       const protocolDeliveryMinutes = this.nullableNumber(protocolSla?.protocolAverageMinutes);
       const coachP95Seconds = this.nullableNumber(coachSla?.coachP95Ms, 1_000);
@@ -1152,9 +1152,10 @@ export class DashboardService {
       if (!alert?.checkinId) throw new NotFoundException('Check-in nao encontrado.');
       const [checkin] = await tx
         .select({
-          responsesCipher: checkins.responsesCipher,
+          answers: checkins.answers,
+          notesCipher: checkins.notesCipher,
           weekNumber: checkins.weekNumber,
-          completedAt: checkins.completedAt,
+          submittedAt: checkins.submittedAt,
         })
         .from(checkins)
         .where(eq(checkins.id, alert.checkinId))
@@ -1163,12 +1164,10 @@ export class DashboardService {
       await this.auditRead(tx, actor, alert.userId, 'checkin', alert.checkinId);
       return { ...alert, ...checkin };
     });
-    const responses = row.responsesCipher
-      ? (JSON.parse(await this.cipher.decryptHealth(row.responsesCipher)) as Record<
-          string,
-          unknown
-        >)
+    const notes = row.notesCipher
+      ? (JSON.parse(await this.cipher.decryptHealth(row.notesCipher)) as Record<string, unknown>)
       : {};
+    const responses = { ...(row.answers as Record<string, unknown> | null), ...notes };
     return {
       item: this.item(
         alertId,
@@ -1182,7 +1181,7 @@ export class DashboardService {
       ),
       context: {
         weekNumber: row.weekNumber,
-        completedAt: row.completedAt?.toISOString() ?? null,
+        completedAt: row.submittedAt?.toISOString() ?? null,
         responses: JSON.stringify(responses),
       },
       handoff: { reason: row.reason, level: row.level, status: row.status },
@@ -1396,16 +1395,17 @@ export class DashboardService {
     return createHash('sha256').update(JSON.stringify(value)).digest('hex');
   }
 
-  private async countUsersWithWorkout(
-    rows: Array<{ userId: string; responsesCipher: Buffer | null }>,
-  ): Promise<number> {
+  /**
+   * Achado 2026-09-13: `checkins.answers` é plaintext (mesmo tratamento que os blocos
+   * comuns da renovação de mesociclo dão a pergunta equivalente) — sem cifra pra abrir.
+   * `adherenceScore` é a nova escala 0-10 ("quanto você seguiu seu protocolo"); qualquer
+   * valor acima de 0 conta como "reportou pelo menos um treino".
+   */
+  private countUsersWithWorkout(rows: Array<{ userId: string; answers: unknown }>): number {
     const usersWithWorkout = new Set<string>();
     for (const row of rows) {
-      if (!row.responsesCipher) continue;
-      const response = JSON.parse(await this.cipher.decryptHealth(row.responsesCipher)) as {
-        workouts?: string;
-      };
-      if (response.workouts && response.workouts !== 'NENHUM') usersWithWorkout.add(row.userId);
+      const answers = row.answers as { adherenceScore?: number } | null;
+      if (answers?.adherenceScore && answers.adherenceScore > 0) usersWithWorkout.add(row.userId);
     }
     return usersWithWorkout.size;
   }

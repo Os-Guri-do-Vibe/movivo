@@ -52,6 +52,7 @@ const ORIGIN = { ip: '203.0.113.55', userAgent: 'vitest/whatsapp-outbound' };
 
 /** Fake transport: grava os envios em memória, sem rede. */
 const sent: OutboundMessage[] = [];
+const sentDocuments: Array<{ to: string; documentUrl: string; caption: string }> = [];
 const fakeTransport: WhatsappTransport = {
   hasCredentials: () => true,
   async send(message) {
@@ -59,6 +60,9 @@ const fakeTransport: WhatsappTransport = {
   },
   async sendTemplate() {
     // Não exercido por este spec (fluxo de confirmação/entrega, sem template de OTP).
+  },
+  async sendDocument(to, documentUrl, caption) {
+    sentDocuments.push({ to, documentUrl, caption });
   },
 };
 
@@ -206,6 +210,9 @@ async function seedActiveProtocol() {
       professionalId: PROFESSIONAL_ID,
       signedAt: new Date(),
       signatureHash: 'a'.repeat(64),
+      // Entrega exige PDF já gerado (decisão do fundador, 2026-09-12) — sem isso
+      // `buildDelivery` lança em vez de degradar para texto+link.
+      pdfContent: Buffer.from('%PDF-1.4 fake'),
       content: structure(),
       constraints: {},
       // NOT NULL sem default desde a migração 0033.
@@ -282,7 +289,7 @@ describe('outbound WhatsApp — confirmação no submit (US-2.5)', () => {
 });
 
 describe('outbound WhatsApp — entrega do protocolo e idempotência (US-2.5)', () => {
-  it('entrega AUTO_APPROVED em bolhas com link; reprocesso não reenvia', async () => {
+  it('entrega AUTO_APPROVED como PDF com legenda; reprocesso não reenvia', async () => {
     const userId = await seedActiveProtocol();
     const [{ phone_number: to }] = await adminClient<Array<{ phone_number: string }>>`
       SELECT phone_number FROM users WHERE id = ${userId}`;
@@ -293,14 +300,14 @@ describe('outbound WhatsApp — entrega do protocolo e idempotência (US-2.5)', 
       { userId, protocolVersion: 1, type: 'PROTOCOL_DELIVERY' },
       { jobId: `protocol-delivery_${userId}_1` },
     );
-    await waitFor(() => sent.find((m) => m.to === to && m.text.includes('/protocolo/')));
+    await waitFor(() => sentDocuments.find((m) => m.to === to));
 
-    const afterFirst = sent.filter((m) => m.to === to).length;
-    // 5 bolhas: a apresentação antecipada da agente (`sendPresentationIfNeeded`, achado
-    // 2026-09-04 — dispara ANTES da entrega quando o `PROTOCOL_WAITING` de 30min ainda não
-    // rodou, mesmo marcador do `buildWaiting`) + as 4 de sempre (intro, contexto do plano,
-    // 1º treino, link).
-    expect(afterFirst).toBe(5);
+    const documentsAfterFirst = sentDocuments.filter((m) => m.to === to).length;
+    // Não existe mais entrega por texto+link (decisão do fundador, 2026-09-12): a
+    // apresentação antecipada da agente (`sendPresentationIfNeeded`) sai como 1 bolha de
+    // texto e a entrega em si é 1 único documento (PDF), com a saudação na legenda.
+    expect(sent.filter((m) => m.to === to).length).toBe(1);
+    expect(documentsAfterFirst).toBe(1);
 
     // Reprocesso com jobId distinto (bypassa o dedup do BullMQ) — o marcador Redis barra.
     await queues.enqueue(QUEUE.whatsappOutbound, 'protocol-delivery', {
@@ -309,6 +316,6 @@ describe('outbound WhatsApp — entrega do protocolo e idempotência (US-2.5)', 
       type: 'PROTOCOL_DELIVERY',
     });
     await new Promise((r) => setTimeout(r, 3_000));
-    expect(sent.filter((m) => m.to === to).length).toBe(5); // não reenviou
+    expect(sentDocuments.filter((m) => m.to === to).length).toBe(1); // não reenviou
   }, 30_000);
 });

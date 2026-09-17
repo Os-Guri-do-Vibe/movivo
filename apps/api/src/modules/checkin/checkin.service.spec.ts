@@ -1,371 +1,566 @@
+import {
+  ForbiddenException,
+  GoneException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 import { describe, expect, it, vi } from 'vitest';
 
-import { HealthCipherService } from '../../core/database/health-cipher.service';
-import { HealthConsentService } from '../../core/database/health-consent.service';
-import { TenantDatabase } from '../../core/database/tenant-database.service';
-import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
-import { QueueManager } from '../jobs/queue-manager.service';
-import { WorkoutCompletionService } from '../workout/workout-completion.service';
+import type { AppConfigService } from '../../core/config';
+import type { HealthCipherService } from '../../core/database/health-cipher.service';
+import type { HealthConsentService } from '../../core/database/health-consent.service';
+import { users } from '../../core/database/schema';
+import type { TenantDatabase } from '../../core/database/tenant-database.service';
+import type { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
+import type { QueueManager } from '../jobs/queue-manager.service';
+import type { ShortLinkService } from '../short-link/short-link.service';
 import { CheckinService } from './checkin.service';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const PROTOCOL_ID = '22222222-2222-4222-8222-222222222222';
 const CHECKIN_ID = '33333333-3333-4333-8333-333333333333';
+const TOKEN = 'a'.repeat(64);
 
-function makeService(
-  existing: { id: string; sentAt: Date | null } | undefined,
-  inserted?: { id: string; sentAt: Date | null },
-  consentActive = true,
-) {
-  const returning = vi.fn(async () => (inserted ? [inserted] : []));
-  const insertChain = {
-    values: () => ({ onConflictDoNothing: () => ({ returning }) }),
-  };
-  const selectChain = {
-    from: () => selectChain,
-    where: () => selectChain,
-    limit: async () => (existing ? [existing] : []),
-  };
-  const updateWhere = vi.fn(async (_args?: unknown[]) => []);
-  const tx = {
-    insert: () => insertChain,
-    select: () => selectChain,
-    update: () => ({ set: () => ({ where: updateWhere }) }),
-  } as never;
-  const db = {
-    runAsSystem: vi.fn((callback: (value: unknown) => Promise<unknown>) => callback(tx)),
-  } as unknown as TenantDatabase;
+const CONFIG = {
+  whatsapp: { publicSiteUrl: 'https://movivo.test' },
+} as unknown as AppConfigService;
+
+function makeDeps(opts: { hasConsent?: boolean } = {}) {
+  const enqueue = vi.fn(async () => 'job');
+  const queues = { enqueue } as unknown as QueueManager;
+  const queueEvents = { emit: vi.fn() } as unknown as DashboardQueueEventsService;
+  const shorten = vi.fn(async () => 'aB3xK9pQ');
+  const shortLinks = { create: shorten } as unknown as ShortLinkService;
   const cipher = {
-    encryptHealth: vi.fn(async () => Buffer.from('cipher')),
+    encryptHealth: vi.fn(async (s: string) => Buffer.from(s)),
+    decryptHealth: vi.fn(async (b: Buffer) => b.toString()),
   } as unknown as HealthCipherService;
-  const enqueue = vi.fn(async () => 'job');
-  const queues = { enqueue } as unknown as QueueManager;
-  const logger = {
-    setContext: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-  } as unknown as PinoLogger;
-  const consent = {
-    hasActiveForUser: vi.fn(async () => consentActive),
+  const healthConsent = {
+    hasActiveForUser: vi.fn(async () => opts.hasConsent ?? true),
   } as unknown as HealthConsentService;
-  return {
-    service: new CheckinService(
-      db,
-      cipher,
-      consent,
-      queues,
-      { emit: vi.fn() } as unknown as DashboardQueueEventsService,
-      {
-        recordFromCheckin: vi.fn(async () => 0),
-      } as unknown as WorkoutCompletionService,
-      logger,
-    ),
-    enqueue,
-    updateWhere,
-  };
-}
-
-function makeInteractiveService(
-  selections: unknown[][],
-  decrypted: string[] = [JSON.stringify({})],
-  consentActive = true,
-  advanceSucceeds = true,
-) {
-  const updateWhere = vi.fn(async (_args?: unknown[]) => []);
-  const insertConflict = vi.fn(async () => []);
-  const tx = {
-    select: vi.fn(() => {
-      const result = selections.shift() ?? [];
-      const chain = {
-        from: () => chain,
-        innerJoin: () => chain,
-        where: () => chain,
-        for: () => chain,
-        orderBy: () => chain,
-        limit: async () => result,
-      };
-      return chain;
-    }),
-    update: () => ({
-      set: () => ({
-        where: (...args: unknown[]) => {
-          updateWhere(args);
-          return { returning: async () => (advanceSucceeds ? [{ id: CHECKIN_ID }] : []) };
-        },
-      }),
-    }),
-    insert: () => ({ values: () => ({ onConflictDoNothing: insertConflict }) }),
-  } as never;
-  const runAsUser = vi.fn(
-    (_id: string, _role: string, callback: (value: unknown) => Promise<unknown>) => callback(tx),
-  );
-  const db = { runAsUser } as unknown as TenantDatabase;
-  const encryptHealth = vi.fn(async () => Buffer.from('encrypted'));
-  const decryptHealth = vi.fn(async () => decrypted.shift() ?? JSON.stringify({}));
-  const cipher = { encryptHealth, decryptHealth } as unknown as HealthCipherService;
-  const enqueue = vi.fn(async () => 'job');
-  const queues = { enqueue } as unknown as QueueManager;
-  const logger = {
-    setContext: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-  } as unknown as PinoLogger;
-  return {
-    service: new CheckinService(
-      db,
-      cipher,
-      {
-        hasActiveForUser: vi.fn(async () => consentActive),
-      } as unknown as HealthConsentService,
-      queues,
-      { emit: vi.fn() } as unknown as DashboardQueueEventsService,
-      {
-        recordFromCheckin: vi.fn(async () => 0),
-      } as unknown as WorkoutCompletionService,
-      logger,
-    ),
-    enqueue,
-    encryptHealth,
-    decryptHealth,
-    updateWhere,
-    insertConflict,
-    runAsUser,
-  };
+  const logger = { setContext: vi.fn(), info: vi.fn() } as unknown as PinoLogger;
+  return { enqueue, queues, queueEvents, shorten, shortLinks, cipher, healthConsent, logger };
 }
 
 describe('CheckinService.createAndSend', () => {
-  it('recupera linha criada antes de enqueue falho quando sentAt ainda e nulo', async () => {
-    const { service, enqueue, updateWhere } = makeService({ id: CHECKIN_ID, sentAt: null });
-    await expect(service.createAndSend(USER_ID, PROTOCOL_ID, 3)).resolves.toBe('SENT');
-    expect(enqueue).toHaveBeenCalledOnce();
-    expect(enqueue).toHaveBeenCalledWith(
-      'whatsapp-outbound',
-      'checkin-message',
-      expect.objectContaining({ dedupeId: `${CHECKIN_ID}-q1` }),
-      expect.objectContaining({ jobId: `wa-${USER_ID}-${CHECKIN_ID}-q1` }),
+  it('cria o check-in, encurta o link e enfileira o convite', async () => {
+    const deps = makeDeps();
+    const insertReturning = vi.fn(async () => [{ id: CHECKIN_ID }]);
+    const tx = {
+      insert: () => ({
+        values: () => ({ onConflictDoNothing: () => ({ returning: insertReturning }) }),
+      }),
+      update: () => ({ set: () => ({ where: async () => [] }) }),
+    } as never;
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
     );
-    expect(updateWhere).toHaveBeenCalledOnce();
-  });
 
-  it('nao reenvia quando o marcador duravel sentAt ja existe', async () => {
-    const { service, enqueue } = makeService({ id: CHECKIN_ID, sentAt: new Date() });
-    await expect(service.createAndSend(USER_ID, PROTOCOL_ID, 3)).resolves.toBe('EXISTS');
-    expect(enqueue).not.toHaveBeenCalled();
-  });
+    await expect(service.createAndSend(USER_ID, PROTOCOL_ID, 3, 'Maria')).resolves.toBe('SENT');
 
-  it('usa a linha inserida no caminho nominal', async () => {
-    const { service, enqueue } = makeService(undefined, { id: CHECKIN_ID, sentAt: null });
-    await expect(service.createAndSend(USER_ID, PROTOCOL_ID, 1)).resolves.toBe('SENT');
-    expect(enqueue).toHaveBeenCalledWith(
+    expect(deps.shorten).toHaveBeenCalledWith(
+      expect.stringContaining('/checkin-semanal/'),
+      expect.any(Date),
+    );
+    expect(deps.enqueue).toHaveBeenCalledWith(
       'whatsapp-outbound',
       'checkin-message',
-      expect.objectContaining({ dedupeId: `${CHECKIN_ID}-q1` }),
+      expect.objectContaining({
+        userId: USER_ID,
+        type: 'CHECKIN_MESSAGE',
+        text: expect.stringContaining('https://movivo.test/semana/aB3xK9pQ'),
+      }),
       expect.any(Object),
     );
   });
 
-  it('nao envia quando conflito nao encontra registro recuperavel', async () => {
-    const { service, enqueue } = makeService(undefined);
-    await expect(service.createAndSend(USER_ID, PROTOCOL_ID, 1)).resolves.toBe('EXISTS');
-    expect(enqueue).not.toHaveBeenCalled();
+  it('devolve NO_CONSENT sem gravar nada quando o consentimento de saude nao esta ativo', async () => {
+    const deps = makeDeps({ hasConsent: false });
+    const db = { runAsSystem: vi.fn() } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
+    );
+
+    await expect(service.createAndSend(USER_ID, PROTOCOL_ID, 3, 'Maria')).resolves.toBe(
+      'NO_CONSENT',
+    );
+    expect(db.runAsSystem).not.toHaveBeenCalled();
   });
 
-  it('nao cria nem envia check-in depois da revogacao', async () => {
-    const { service, enqueue } = makeService(undefined, undefined, false);
-    await expect(service.createAndSend(USER_ID, PROTOCOL_ID, 1)).resolves.toBe('NO_CONSENT');
-    expect(enqueue).not.toHaveBeenCalled();
+  it('reenvia com token novo (NUDGE) quando o check-in da semana ja existe e segue PENDING', async () => {
+    const deps = makeDeps();
+    const existingSelect = vi.fn(async () => [{ id: CHECKIN_ID, status: 'PENDING' }]);
+    const updateSet = vi.fn(() => ({ where: async () => [] }));
+    const tx = {
+      insert: () => ({
+        values: () => ({ onConflictDoNothing: () => ({ returning: async () => [] }) }),
+      }),
+      select: () => ({ from: () => ({ where: () => ({ limit: existingSelect }) }) }),
+      update: () => ({ set: updateSet }),
+    } as never;
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
+    );
+
+    await expect(service.createAndSend(USER_ID, PROTOCOL_ID, 3, 'Maria', 'NUDGE')).resolves.toBe(
+      'SENT',
+    );
+    // Token novo => update do token/expiresAt aconteceu antes do envio.
+    expect(updateSet).toHaveBeenCalled();
+    expect(deps.enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'checkin-message',
+      expect.objectContaining({ text: expect.not.stringContaining('mais uma semana') }),
+      expect.any(Object),
+    );
+  });
+
+  it('devolve EXISTS quando o check-in da semana ja foi enviado e nao esta mais PENDING', async () => {
+    const deps = makeDeps();
+    const tx = {
+      insert: () => ({
+        values: () => ({ onConflictDoNothing: () => ({ returning: async () => [] }) }),
+      }),
+      select: () => ({
+        from: () => ({
+          where: () => ({ limit: async () => [{ id: CHECKIN_ID, status: 'SUBMITTED' }] }),
+        }),
+      }),
+    } as never;
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
+    );
+
+    await expect(service.createAndSend(USER_ID, PROTOCOL_ID, 3, 'Maria')).resolves.toBe('EXISTS');
+    expect(deps.enqueue).not.toHaveBeenCalled();
   });
 });
 
-describe('CheckinService fluxo conversacional', () => {
-  it('ignora texto comum e dor quando nao existe check-in aberto', async () => {
-    const { service } = makeInteractiveService([[]]);
-    await expect(service.tryHandleInbound(USER_ID, undefined, 'ola')).resolves.toBe(false);
-    await expect(
-      service.tryHandleInbound(USER_ID, undefined, 'estou com dor no joelho'),
-    ).resolves.toBe(false);
-  });
+function makeSessionTx(
+  row: Record<string, unknown> | undefined,
+  selfRow?: { name: string | null },
+) {
+  let table: unknown;
+  const chain: Record<string, unknown> = {
+    select: () => chain,
+    from: (t: unknown) => {
+      table = t;
+      return chain;
+    },
+    where: () => chain,
+    limit: () => Promise.resolve(table === users ? (selfRow ? [selfRow] : []) : row ? [row] : []),
+    update: () => ({ set: () => ({ where: async () => [] }) }),
+  };
+  return chain;
+}
 
-  it('antecipa check-in somente para protocolo e assinatura ativos', async () => {
-    const createdAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1_000);
-    const { service, enqueue } = makeInteractiveService([
-      [{ protocolId: PROTOCOL_ID, createdAt, totalWeeks: 8 }],
-    ]);
-    await expect(service.tryHandleInbound(USER_ID, 'checkin:anticipated', '')).resolves.toBe(true);
-    expect(enqueue).toHaveBeenCalledWith(
-      'checkin-weekly',
-      'checkin-anticipated',
-      expect.objectContaining({ kind: 'SEND', weekNumber: 2 }),
-      expect.any(Object),
+describe('CheckinService.getByToken', () => {
+  it('lanca NotFoundException quando o token nao existe', async () => {
+    const deps = makeDeps();
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(makeSessionTx(undefined))),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
     );
+    await expect(service.getByToken(TOKEN)).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('encerra antecipacao silenciosamente quando usuario nao e elegivel', async () => {
-    const { service, enqueue } = makeInteractiveService([[]]);
-    await service.startAnticipated(USER_ID);
-    expect(enqueue).not.toHaveBeenCalled();
-  });
-
-  it('percorre as tres perguntas e conclui sem ajuste automatico', async () => {
-    const row = (currentQuestion: number) => ({
+  it('devolve status e semana quando o token e valido', async () => {
+    const deps = makeDeps();
+    const row = {
       id: CHECKIN_ID,
-      responsesCipher: Buffer.from('x'),
-      completedAt: null,
-      currentQuestion,
+      userId: USER_ID,
+      status: 'PENDING',
+      expiresAt: new Date(Date.now() + 60_000),
+      weekNumber: 4,
+    };
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(makeSessionTx(row))),
+      runAsUser: vi.fn((_u: string, _r: string, cb: (tx: unknown) => Promise<unknown>) =>
+        cb(makeSessionTx(row, { name: 'Maria Silva' })),
+      ),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
+    );
+    await expect(service.getByToken(TOKEN)).resolves.toEqual({
+      status: 'PENDING',
+      firstName: 'Maria',
+      weekNumber: 4,
     });
-    const { service, enqueue, updateWhere } = makeInteractiveService(
-      [[row(1)], [row(2)], [row(3)]],
-      [
-        JSON.stringify({}),
-        JSON.stringify({ fatigue: 'ADEQUADO' }),
-        JSON.stringify({ fatigue: 'ADEQUADO', workouts: 'TRES_MAIS' }),
-      ],
-    );
-
-    await expect(
-      service.tryHandleInbound(USER_ID, `checkin:${CHECKIN_ID}:fatigue:ADEQUADO`, ''),
-    ).resolves.toBe(true);
-    await expect(
-      service.tryHandleInbound(USER_ID, `checkin:${CHECKIN_ID}:workouts:TRES_MAIS`, ''),
-    ).resolves.toBe(true);
-    await expect(
-      service.tryHandleInbound(USER_ID, `checkin:${CHECKIN_ID}:adjustment:MANTER`, ''),
-    ).resolves.toBe(true);
-
-    expect(updateWhere).toHaveBeenCalledTimes(6);
-    expect(enqueue).toHaveBeenCalledTimes(3);
-    expect(enqueue).toHaveBeenLastCalledWith(
-      'whatsapp-outbound',
-      'checkin-message',
-      expect.objectContaining({ dedupeId: `${CHECKIN_ID}-done` }),
-      expect.any(Object),
-    );
   });
 
-  it('cria alerta por ajuste solicitado e por baixa aderencia recorrente', async () => {
+  it('titular sem nome cadastrado: firstName vem null', async () => {
+    const deps = makeDeps();
     const row = {
       id: CHECKIN_ID,
-      responsesCipher: Buffer.from('x'),
-      completedAt: null,
-      currentQuestion: 3,
+      userId: USER_ID,
+      status: 'PENDING',
+      expiresAt: new Date(Date.now() + 60_000),
+      weekNumber: 4,
     };
-    const priorId = '44444444-4444-4444-8444-444444444444';
-    const { service, insertConflict, enqueue } = makeInteractiveService(
-      [[row], [{ id: priorId, responsesCipher: Buffer.from('prior') }]],
-      [
-        JSON.stringify({ fatigue: 'PESADO', workouts: 'NENHUM' }),
-        JSON.stringify({ workouts: 'UM_DOIS' }),
-      ],
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(makeSessionTx(row))),
+      runAsUser: vi.fn((_u: string, _r: string, cb: (tx: unknown) => Promise<unknown>) =>
+        cb(makeSessionTx(row, { name: null })),
+      ),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
     );
-    await service.tryHandleInbound(USER_ID, `checkin:${CHECKIN_ID}:adjustment:REDUZIR`, '');
-    expect(insertConflict).toHaveBeenCalledOnce();
-    expect(enqueue).toHaveBeenCalledOnce();
+    await expect(service.getByToken(TOKEN)).resolves.toEqual({
+      status: 'PENDING',
+      firstName: null,
+      weekNumber: 4,
+    });
   });
 
-  it('roteia dor de check-in aberto para SAFETY e preserva relato cifrado', async () => {
-    const open = { id: CHECKIN_ID, responsesCipher: Buffer.from('x') };
-    const owned = { ...open, completedAt: null };
-    const { service, enqueue, insertConflict, encryptHealth, runAsUser } = makeInteractiveService(
-      [[open], [owned]],
-      [JSON.stringify({ fatigue: 'ADEQUADO' })],
-    );
-    await expect(
-      service.tryHandleInbound(USER_ID, undefined, 'Senti uma fisgada no ombro'),
-    ).resolves.toBe(true);
-    expect(encryptHealth).toHaveBeenCalledWith(expect.stringContaining('fisgada no ombro'));
-    expect(insertConflict).toHaveBeenCalledOnce();
-    // Uma leitura localiza o check-in; persistência cifrada + SAFETY compartilham
-    // a segunda e única transação de escrita.
-    expect(runAsUser).toHaveBeenCalledTimes(2);
-    expect(enqueue).toHaveBeenCalledWith(
-      'whatsapp-outbound',
-      'checkin-message',
-      expect.objectContaining({ dedupeId: `${CHECKIN_ID}-safety` }),
-      expect.any(Object),
-    );
-  });
-
-  it('nao envia orientacao se a transacao atomica de SAFETY falhar', async () => {
-    const open = { id: CHECKIN_ID, responsesCipher: Buffer.from('x') };
-    const owned = { ...open, completedAt: null };
-    const { service, enqueue, insertConflict } = makeInteractiveService(
-      [[open], [owned]],
-      [JSON.stringify({})],
-    );
-    insertConflict.mockRejectedValueOnce(new Error('rollback'));
-    await expect(service.tryHandleInbound(USER_ID, undefined, 'dor no quadril')).rejects.toThrow(
-      'rollback',
-    );
-    expect(enqueue).not.toHaveBeenCalled();
-  });
-
-  it('ignora botao pertencente a check-in ausente ou ja concluido', async () => {
-    const completed = {
-      id: CHECKIN_ID,
-      responsesCipher: Buffer.from('x'),
-      completedAt: new Date(),
-      currentQuestion: 4,
-    };
-    const { service, enqueue } = makeInteractiveService([[], [completed]]);
-    await service.tryHandleInbound(USER_ID, `checkin:${CHECKIN_ID}:fatigue:LEVE`, '');
-    await service.tryHandleInbound(USER_ID, `checkin:${CHECKIN_ID}:fatigue:LEVE`, '');
-    expect(enqueue).not.toHaveBeenCalled();
-  });
-
-  it('limita o numero da semana ao intervalo do protocolo', () => {
-    const { service } = makeInteractiveService([]);
-    expect(service.weekNumber(new Date(Date.now() + 86_400_000), 8)).toBe(1);
-    expect(service.weekNumber(new Date(Date.now() - 100 * 86_400_000), 8)).toBe(8);
-  });
-
-  it('ignora quick reply fora de ordem sem persistir nem responder', async () => {
+  it('token vencido: expira, devolve status EXPIRED (sem lancar exceção)', async () => {
+    const deps = makeDeps();
     const row = {
       id: CHECKIN_ID,
-      responsesCipher: Buffer.from('x'),
-      completedAt: null,
-      currentQuestion: 1,
+      userId: USER_ID,
+      status: 'PENDING',
+      expiresAt: new Date(Date.now() - 60_000),
+      weekNumber: 4,
     };
-    const { service, enqueue, updateWhere } = makeInteractiveService([[row]]);
-    await service.tryHandleInbound(USER_ID, `checkin:${CHECKIN_ID}:adjustment:MANTER`, '');
-    expect(updateWhere).not.toHaveBeenCalled();
-    expect(enqueue).not.toHaveBeenCalled();
+    const updateSet = vi.fn(() => ({ where: async () => [] }));
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(makeSessionTx(row))),
+      runAsUser: vi.fn((_u: string, _r: string, cb: (tx: unknown) => Promise<unknown>) =>
+        cb({
+          update: () => ({ set: updateSet }),
+          select: () => makeSessionTx(row, { name: null }),
+        }),
+      ),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
+    );
+    await expect(service.getByToken(TOKEN)).resolves.toEqual({
+      status: 'EXPIRED',
+      firstName: null,
+      weekNumber: 4,
+    });
+    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ status: 'EXPIRED' }));
+  });
+});
+
+describe('CheckinService.lastSentOrRespondedAt', () => {
+  function makeQueryTx(row: Record<string, unknown> | undefined) {
+    return {
+      select: () => ({
+        from: () => ({
+          where: () => ({ orderBy: () => ({ limit: async () => (row ? [row] : []) }) }),
+        }),
+      }),
+    };
+  }
+
+  it('sem nenhum check-in enviado para o titular: undefined', async () => {
+    const deps = makeDeps();
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(makeQueryTx(undefined))),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
+    );
+    await expect(service.lastSentOrRespondedAt(USER_ID)).resolves.toBeUndefined();
   });
 
-  it('nao avanca nem envia em replay perdido pelo compare-and-set', async () => {
+  it('check-in enviado mas ainda nao respondido: usa sentAt', async () => {
+    const deps = makeDeps();
+    const sentAt = new Date('2026-08-01T08:00:00Z');
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) =>
+        cb(makeQueryTx({ sentAt, submittedAt: null })),
+      ),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
+    );
+    await expect(service.lastSentOrRespondedAt(USER_ID)).resolves.toBe(sentAt);
+  });
+
+  it('check-in ja respondido: usa submittedAt em vez de sentAt', async () => {
+    const deps = makeDeps();
+    const sentAt = new Date('2026-08-01T08:00:00Z');
+    const submittedAt = new Date('2026-08-01T09:00:00Z');
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) =>
+        cb(makeQueryTx({ sentAt, submittedAt })),
+      ),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
+    );
+    await expect(service.lastSentOrRespondedAt(USER_ID)).resolves.toBe(submittedAt);
+  });
+});
+
+const VALID_PAYLOAD = {
+  sleepQuality: 'BOA',
+  mood: 'FELIZ',
+  nutritionScore: 8,
+  adherenceScore: 9,
+  changesNoticed: ['FORCA'],
+  durationFit: 'ADEQUADA',
+};
+
+describe('CheckinService.submit', () => {
+  it('valida, cifra os textos livres, grava e enfileira o worker de comentario', async () => {
+    const deps = makeDeps();
     const row = {
       id: CHECKIN_ID,
-      responsesCipher: Buffer.from('x'),
-      completedAt: null,
-      currentQuestion: 1,
+      userId: USER_ID,
+      status: 'PENDING',
+      expiresAt: new Date(Date.now() + 60_000),
+      weekNumber: 4,
     };
-    const { service, enqueue } = makeInteractiveService([[row]], [JSON.stringify({})], true, false);
-    await service.tryHandleInbound(USER_ID, `checkin:${CHECKIN_ID}:fatigue:LEVE`, '');
-    expect(enqueue).not.toHaveBeenCalled();
+    const updateSet = vi.fn(() => ({ where: async () => [] }));
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(makeSessionTx(row))),
+      runAsUser: vi.fn((_u: string, _r: string, cb: (tx: unknown) => Promise<unknown>) =>
+        cb({ update: () => ({ set: updateSet }) }),
+      ),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
+    );
+
+    await expect(service.submit(TOKEN, VALID_PAYLOAD)).resolves.toEqual({ status: 'SUBMITTED' });
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'SUBMITTED',
+        answers: expect.objectContaining({ mood: 'FELIZ' }),
+      }),
+    );
+    expect(deps.enqueue).toHaveBeenCalledWith(
+      'checkin-weekly-feedback',
+      'checkin-weekly-feedback',
+      {
+        userId: USER_ID,
+        checkinId: CHECKIN_ID,
+      },
+    );
   });
 
-  it.each(['sem dor', 'meu joelho esta otimo', 'mobilidade articular'])(
-    'nao classifica texto seguro como SAFETY: %s',
-    async (text) => {
-      const { service, enqueue } = makeInteractiveService([]);
-      await expect(service.tryHandleInbound(USER_ID, undefined, text)).resolves.toBe(false);
-      expect(enqueue).not.toHaveBeenCalled();
-    },
-  );
+  it('lanca NotFoundException quando o token nao existe', async () => {
+    const deps = makeDeps();
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(makeSessionTx(undefined))),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
+    );
+    await expect(service.submit(TOKEN, VALID_PAYLOAD)).rejects.toBeInstanceOf(NotFoundException);
+  });
 
-  it.each(['dor no quadril', 'desconforto forte no tornozelo'])(
-    'encaminha sinal conservador para SAFETY: %s',
-    async (text) => {
-      const open = { id: CHECKIN_ID, responsesCipher: Buffer.from('x') };
-      const owned = { ...open, completedAt: null, currentQuestion: 1 };
-      const { service, enqueue } = makeInteractiveService([[open], [owned]], [JSON.stringify({})]);
-      await expect(service.tryHandleInbound(USER_ID, undefined, text)).resolves.toBe(true);
-      expect(enqueue).toHaveBeenCalledWith(
-        'whatsapp-outbound',
-        'checkin-message',
-        expect.objectContaining({ dedupeId: `${CHECKIN_ID}-safety` }),
-        expect.any(Object),
-      );
-    },
-  );
+  it('lanca ForbiddenException quando o consentimento de saude foi revogado', async () => {
+    const deps = makeDeps({ hasConsent: false });
+    const row = {
+      id: CHECKIN_ID,
+      userId: USER_ID,
+      status: 'PENDING',
+      expiresAt: new Date(Date.now() + 60_000),
+      weekNumber: 4,
+    };
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(makeSessionTx(row))),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
+    );
+    await expect(service.submit(TOKEN, VALID_PAYLOAD)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(deps.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('rejeita payload invalido com BadRequestException', async () => {
+    const deps = makeDeps();
+    const row = {
+      id: CHECKIN_ID,
+      userId: USER_ID,
+      status: 'PENDING',
+      expiresAt: new Date(Date.now() + 60_000),
+      weekNumber: 4,
+    };
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(makeSessionTx(row))),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
+    );
+    await expect(service.submit(TOKEN, { sleepQuality: 'BOA' })).rejects.toThrow();
+  });
+
+  it('lanca ConflictException quando o check-in ja foi enviado', async () => {
+    const deps = makeDeps();
+    const row = {
+      id: CHECKIN_ID,
+      userId: USER_ID,
+      status: 'SUBMITTED',
+      expiresAt: new Date(Date.now() + 60_000),
+      weekNumber: 4,
+    };
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(makeSessionTx(row))),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
+    );
+    await expect(service.submit(TOKEN, VALID_PAYLOAD)).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('lanca GoneException e expira quando o token esta vencido', async () => {
+    const deps = makeDeps();
+    const row = {
+      id: CHECKIN_ID,
+      userId: USER_ID,
+      status: 'PENDING',
+      expiresAt: new Date(Date.now() - 60_000),
+      weekNumber: 4,
+    };
+    const updateSet = vi.fn(() => ({ where: async () => [] }));
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(makeSessionTx(row))),
+      runAsUser: vi.fn((_u: string, _r: string, cb: (tx: unknown) => Promise<unknown>) =>
+        cb({ update: () => ({ set: updateSet }) }),
+      ),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
+    );
+    await expect(service.submit(TOKEN, VALID_PAYLOAD)).rejects.toBeInstanceOf(GoneException);
+    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ status: 'EXPIRED' }));
+  });
 });

@@ -12,28 +12,10 @@ import { describe, expect, it } from 'vitest';
 
 import type { AgentPersonaService } from '../../../core/agent-config/agent-persona.service';
 import { conversionMessage } from '../../subscription/subscription-messages';
-import { analyzingMessage, formatProtocolDelivery } from '../../whatsapp/message-templates';
+import { analyzingMessage, protocolDeliveryPdfText } from '../../whatsapp/message-templates';
 import { INTENTS } from './intent.types';
 import { PromptResolverService } from './prompt-resolver.service';
 import { INVIOLABLE_RULES_BLOCK, SCOPE_PERIMETER_BLOCK } from './prompts';
-
-const PROTOCOL = {
-  goal: 'GAIN_MUSCLE',
-  sessions: [
-    {
-      focus: 'Corpo inteiro',
-      exercises: [
-        {
-          name: 'Agachamento livre',
-          sets: 3,
-          reps: { min: 8, max: 12 },
-          loadStrategy: 'DOUBLE_PROGRESSION',
-          restSeconds: 90,
-        },
-      ],
-    },
-  ],
-} as unknown as Parameters<typeof formatProtocolDelivery>[0];
 
 /** Personas válidas (espaço fechado do schema) usadas no golden set. */
 const PERSONAS: AgentPersona[] = [
@@ -65,17 +47,11 @@ function resolver(persona: AgentPersona): PromptResolverService {
 async function userFacingTexts(persona: AgentPersona): Promise<string[]> {
   return [
     resolver(persona).foraDeEscopoResponseFor(persona),
-    formatProtocolDelivery(
-      PROTOCOL,
-      'https://movivo.test/protocolo/abc',
-      persona,
-      12,
-      'Mesociclo 1: Adaptação',
-    ),
-    // `analyzingMessage`/`formatProtocolDelivery` reproduzem `agentSelfIntro`, que cita a
-    // marca MOVIVO — o teste de renomeação abaixo usa `\bMOVI\b` (fronteira de palavra),
-    // não substring crua, exatamente para não confundir "MOVI" (nome antigo) com "MOVIVO"
-    // (a marca, que é legítimo continuar aparecendo).
+    protocolDeliveryPdfText('Ana'),
+    // `analyzingMessage` reproduz `agentSelfIntro`, que cita a marca MOVIVO — o teste de
+    // renomeação abaixo usa `\bMOVI\b` (fronteira de palavra), não substring crua,
+    // exatamente para não confundir "MOVI" (nome antigo) com "MOVIVO" (a marca, que é
+    // legítimo continuar aparecendo).
     analyzingMessage(persona),
     ...(['day7', 'day10', 'day13', 'day14', 'winback'] as const).map((key) =>
       conversionMessage(key, 'https://movivo.test/checkout', persona.agentName),
@@ -94,10 +70,7 @@ describe('renomear a agente propaga (TASK-7.9.3)', () => {
     expect(resolver(persona).foraDeEscopoResponseFor(persona)).toContain('ATLAS');
   });
 
-  it('chega às mensagens estáticas de WhatsApp e de assinatura', () => {
-    expect(formatProtocolDelivery(PROTOCOL, 'https://x/p/1', persona, 12, 'Mesociclo 1')).toContain(
-      'ATLAS',
-    );
+  it('chega à mensagem estática de assinatura', () => {
     expect(conversionMessage('day14', 'https://x/c', 'ATLAS')).toContain('ATLAS');
   });
 
@@ -114,14 +87,6 @@ describe('golden set de conversa verde (TASK-7.9.3)', () => {
       for (const text of await userFacingTexts(persona)) {
         for (const term of FORBIDDEN) expect(text).not.toMatch(term);
       }
-    }
-  });
-
-  it('o respaldo do profissional CREF continua visível na entrega do protocolo', () => {
-    for (const persona of PERSONAS) {
-      expect(formatProtocolDelivery(PROTOCOL, 'https://x/p/1', persona, 12, 'Mesociclo 1')).toMatch(
-        /CREF/,
-      );
     }
   });
 

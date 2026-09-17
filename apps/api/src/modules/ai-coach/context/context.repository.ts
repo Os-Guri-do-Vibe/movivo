@@ -6,8 +6,12 @@
  * integração contra Postgres real — por isso fica fora da cobertura unitária (vitest.config).
  */
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, isNotNull } from 'drizzle-orm';
-import { anamnesisStructuredSchema, type ProtocolStructure } from '@movivo/shared';
+import { and, desc, eq, inArray } from 'drizzle-orm';
+import {
+  anamnesisStructuredSchema,
+  type ProtocolSession,
+  type ProtocolStructure,
+} from '@movivo/shared';
 
 import { HealthCipherService } from '../../../core/database/health-cipher.service';
 import {
@@ -17,6 +21,8 @@ import {
   protocols,
   users,
   workoutCompletions,
+  workoutSessions,
+  workoutSetEntries,
 } from '../../../core/database/schema';
 import {
   TenantDatabase,
@@ -32,6 +38,9 @@ export interface EpisodicMemory {
   state: Record<string, unknown>;
   summary: string | null;
 }
+
+/** Últimas sessões do diário fino (planejado x realizado) que entram no contexto do Coach. */
+const RECENT_DIARY_SESSIONS = 3;
 
 @Injectable()
 export class ContextRepository {
@@ -86,13 +95,24 @@ export class ContextRepository {
       const recentCheckins = await tx
         .select({
           weekNumber: checkins.weekNumber,
-          completedAt: checkins.completedAt,
-          adjustments: checkins.adjustments,
+          submittedAt: checkins.submittedAt,
+          answers: checkins.answers,
         })
         .from(checkins)
-        .where(and(eq(checkins.userId, userId), isNotNull(checkins.completedAt)))
-        .orderBy(desc(checkins.completedAt))
+        .where(and(eq(checkins.userId, userId), eq(checkins.status, 'SUBMITTED')))
+        .orderBy(desc(checkins.submittedAt))
         .limit(3);
+
+      // Achado 2026-09-12 (decisão do fundador): o Coach passava a orientar o aluno sem
+      // NUNCA ver o que de fato aconteceu no treino — carga/repetição/série real, esforço
+      // percebido e dor por sessão (o diário fino, `workout_sessions`/`workout_set_entries`).
+      // Sem isso ele só tinha o AUTORRELATO agregado de `workout_completions`. Aqui entram os
+      // últimos treinos CONCLUÍDOS com planejado (a `prescription` já é o snapshot exato do
+      // que foi prescrito NAQUELE dia — não precisa cruzar com `protocoloCompleto`) vs.
+      // realizado (agregado por exercício a partir de `workout_set_entries`), para o Coach
+      // comparar os dois e falar com base no que realmente aconteceu, não só no que o aluno
+      // lembra ter feito.
+      const diarioFino = await this.loadWorkoutDiary(tx, userId);
 
       // `constraints` lido como shape solto de propósito: ai-coach não importa o tipo do
       // domínio de protocolo (fronteira §12.5).
@@ -144,6 +164,7 @@ export class ContextRepository {
             eventosRecentes: {
               treinosConcluidos: recentWorkouts,
               checkins: recentCheckins,
+              diarioFino,
             },
           }
         : {
@@ -153,6 +174,7 @@ export class ContextRepository {
             eventosRecentes: {
               treinosConcluidos: recentWorkouts,
               checkins: recentCheckins,
+              diarioFino,
             },
           };
 
@@ -164,6 +186,92 @@ export class ContextRepository {
         },
         state,
         summary: session?.summary ?? null,
+      };
+    });
+  }
+
+  /**
+   * Diário fino (2026-09-12): últimos treinos CONCLUÍDOS com planejado vs. realizado.
+   * `prescription` (coluna de `workout_sessions`) já é o snapshot exato do que foi
+   * prescrito naquele dia — não precisa cruzar com `protocoloCompleto`. `realizado` agrega
+   * `workout_set_entries` por exercício (carga/reps por série, só séries concluídas) — é o
+   * dado que faltava para o Coach comparar planejado x realizado em vez de confiar só no
+   * autorrelato agregado de `workout_completions`.
+   */
+  private async loadWorkoutDiary(
+    tx: TenantTransaction,
+    userId: string,
+  ): Promise<Record<string, unknown>[]> {
+    const sessions = await tx
+      .select({
+        id: workoutSessions.id,
+        scheduledDate: workoutSessions.scheduledDate,
+        sessionKey: workoutSessions.sessionKey,
+        weekNumber: workoutSessions.weekNumber,
+        prescription: workoutSessions.prescription,
+        perceivedEffort: workoutSessions.perceivedEffort,
+        painReported: workoutSessions.painReported,
+        painExerciseIds: workoutSessions.painExerciseIds,
+      })
+      .from(workoutSessions)
+      .where(and(eq(workoutSessions.userId, userId), eq(workoutSessions.status, 'COMPLETED')))
+      .orderBy(desc(workoutSessions.scheduledDate))
+      .limit(RECENT_DIARY_SESSIONS);
+    if (sessions.length === 0) return [];
+
+    const entries = await tx
+      .select({
+        workoutSessionId: workoutSetEntries.workoutSessionId,
+        exerciseId: workoutSetEntries.exerciseId,
+        setNumber: workoutSetEntries.setNumber,
+        reps: workoutSetEntries.reps,
+        loadValue: workoutSetEntries.loadValue,
+        loadUnit: workoutSetEntries.loadUnit,
+        durationSeconds: workoutSetEntries.durationSeconds,
+        completed: workoutSetEntries.completed,
+        skipped: workoutSetEntries.skipped,
+      })
+      .from(workoutSetEntries)
+      .where(
+        inArray(
+          workoutSetEntries.workoutSessionId,
+          sessions.map((s) => s.id),
+        ),
+      );
+
+    return sessions.map((session) => {
+      const prescription = session.prescription as ProtocolSession;
+      const bySessionEntries = entries.filter((e) => e.workoutSessionId === session.id);
+      const byExercise = new Map<string, typeof bySessionEntries>();
+      for (const entry of bySessionEntries) {
+        const list = byExercise.get(entry.exerciseId) ?? [];
+        list.push(entry);
+        byExercise.set(entry.exerciseId, list);
+      }
+      const realizadoPorExercicio = [...byExercise.entries()].map(([exerciseId, sets]) => ({
+        exercicio: exerciseId,
+        series: sets
+          .sort((a, b) => a.setNumber - b.setNumber)
+          .map((s) => ({
+            serie: s.setNumber,
+            reps: s.reps,
+            carga: s.loadValue !== null ? Number(s.loadValue) : null,
+            unidade: s.loadUnit,
+            duracaoSegundos: s.durationSeconds,
+            concluida: s.completed,
+            pulada: s.skipped,
+          })),
+      }));
+
+      return {
+        data: session.scheduledDate,
+        semana: session.weekNumber,
+        sessionKey: session.sessionKey,
+        esforcoPercebido: session.perceivedEffort,
+        dorRelatada: session.painReported,
+        exerciciosComDor: session.painExerciseIds,
+        planejado: { foco: prescription.focus, exercicios: prescription.exercises },
+        realizado: realizadoPorExercicio,
       };
     });
   }

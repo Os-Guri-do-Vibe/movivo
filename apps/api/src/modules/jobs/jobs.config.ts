@@ -38,6 +38,15 @@ export const QUEUE = {
   whatsappOutbound: 'whatsapp-outbound',
   checkinWeekly: 'checkin-weekly',
   workoutDaily: 'workout-daily',
+  // Comentário do Coach sobre o treino que o aluno acabou de registrar no diário
+  // (`WorkoutJournalService.finish()`) — fila própria (não um branch de `whatsappOutbound`)
+  // porque quem enfileira (`workout`) não pode falar com `LlmRouter`/`ValidationService`
+  // diretamente (fronteira §12.5); o worker que fala com a IA mora no `CoachModule`.
+  workoutFeedback: 'workout-feedback',
+  // Comentário do Coach sobre o check-in semanal (achado 2026-09-13) — mesmo racional de
+  // `workoutFeedback`: quem enfileira (`checkin`) não pode falar com `LlmRouter`/
+  // `ValidationService` diretamente (fronteira §12.5); o worker mora no `CoachModule`.
+  checkinWeeklyFeedback: 'checkin-weekly-feedback',
   conversionSequence: 'conversion-sequence',
   paymentReconciliation: 'payment-reconciliation',
   knowledgeProcessing: 'knowledge-processing',
@@ -112,6 +121,11 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
   // Quick reply diário de treino (US-8.1). Mesmo perfil do check-in: um scan por dia,
   // sem urgência de latência, retry curto — o envio real acontece em `whatsappOutbound`.
   [QUEUE.workoutDaily]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
+  // Best-effort (mesmo espírito do resumo de entrega do protocolo): poucas tentativas,
+  // nunca trava o diário do aluno por causa de um comentário que não saiu.
+  [QUEUE.workoutFeedback]: { attempts: 2, backoffMs: [5_000], concurrency: 5 },
+  // Mesmo perfil de `workoutFeedback`: best-effort, poucas tentativas.
+  [QUEUE.checkinWeeklyFeedback]: { attempts: 2, backoffMs: [5_000], concurrency: 5 },
   [QUEUE.conversionSequence]: { attempts: 1, backoffMs: [], concurrency: 5 },
   // Conciliação de liquidação (US-8.5). Retenta bastante e por bastante tempo: é fato
   // financeiro que já foi autenticado no webhook — perdê-lo por um blip do banco seria

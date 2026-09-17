@@ -1,15 +1,21 @@
 /**
- * Tabela `checkins` — check-in semanal que realimenta o ajuste do protocolo.
+ * Tabela `checkins` — check-in semanal.
  *
- * O check-in é disparado por job BullMQ repetível na janela de segunda-feira
- * 08–10h no fuso America/Sao_Paulo (`ARQUITETURA.md` §8). A constraint única por
- * (titular, protocolo, semana) é o que torna esse disparo **idempotente**: um
- * failover do scheduler não gera dois check-ins da mesma semana.
+ * Achado 2026-09-13 (pedido do fundador): o fluxo por botão de WhatsApp (3 perguntas,
+ * `current_question` como state machine) foi substituído por um formulário web de 8
+ * perguntas, no mesmo molde de `protocol_renewal_sessions` — token opaco na URL (por trás
+ * do alias curto do `ShortLinkService`), TTL de 7 dias (cobre a semana inteira até o
+ * próximo disparo), sem retomada por etapa (o aluno responde tudo numa visita e envia de
+ * uma vez, diferente da renovação de mesociclo).
+ *
+ * `sentAt`/`weekNumber`/a unicidade `(user, protocolo, semana)` continuam de pé — ainda é
+ * o que torna o disparo do `CheckinScheduler` idempotente.
  */
 import { sql } from 'drizzle-orm';
-import { check, index, jsonb, pgTable, smallint, unique, uuid } from 'drizzle-orm/pg-core';
+import { check, index, jsonb, pgTable, smallint, unique, uuid, varchar } from 'drizzle-orm/pg-core';
 
 import { bytea, eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
+import { checkinWeeklyStatusEnum } from './enums';
 import { protocols } from './protocols';
 import { users } from './users';
 
@@ -31,31 +37,31 @@ export const checkins = pgTable(
     /** Semana do protocolo (1..`protocols.total_weeks`). */
     weekNumber: smallint('week_number').notNull(),
 
+    /** Token opaco CSPRNG (256 bits) — mesmo racional de `protocol_renewal_sessions.token`. */
+    token: varchar('token', { length: 64 }).notNull().unique(),
+
+    status: checkinWeeklyStatusEnum('status').notNull().default('PENDING'),
+
+    /** TTL de 7 dias aplicado pela aplicação — cobre até o próximo check-in semanal. */
+    expiresAt: eventTimestamp('expires_at').notNull(),
+
     sentAt: eventTimestamp('sent_at'),
-    respondedAt: eventTimestamp('responded_at'),
+    submittedAt: eventTimestamp('submitted_at'),
 
     /**
-     * -- LGPD Art. 11 — DADO SENSÍVEL DE SAÚDE.
-     * Respostas às perguntas do check-in: aderência, percepção de esforço e
-     * **dor/desconforto**. A pergunta de dor é dado de saúde direto. Mesmo
-     * escopo de cifra em repouso da anamnese; não cifrada nesta sprint.
+     * Respostas estruturadas (sono, humor, alimentação/aderência 0-10, mudanças percebidas,
+     * adequação da duração) — dado comum, em claro. Mesmo tratamento que os blocos 1/2/4/5
+     * da renovação de mesociclo dão a perguntas equivalentes (ex.: qualidade do sono).
      */
-    /** @deprecated Coluna pre-Sprint 5; constraint exige NULL para impedir plaintext. */
-    responses: jsonb('responses'),
-    responsesCipher: bytea('responses_cipher'),
-    currentQuestion: smallint('current_question').notNull().default(1),
-    completedAt: eventTimestamp('completed_at'),
-
-    /** Ajustes aplicados pelo Motor Determinístico a partir das respostas. */
-    adjustments: jsonb('adjustments'),
+    answers: jsonb('answers'),
 
     /**
-     * Nova versão de protocolo gerada por este check-in, quando houve ajuste.
-     * `SET NULL` para não travar a limpeza de um protocolo rascunho descartado.
+     * -- LGPD Art. 11 — dado sensível de saúde quando menciona dor/desconforto.
+     * Só os DOIS campos de texto livre do formulário (explicação do exercício difícil +
+     * feedback aberto final) — cifrados com `HealthCipherService`, mesmo tratamento que
+     * `workout_sessions.feedback_cipher` dá a texto livre do diário de treino.
      */
-    newProtocolId: uuid('new_protocol_id').references(() => protocols.id, {
-      onDelete: 'set null',
-    }),
+    notesCipher: bytea('notes_cipher'),
 
     ...timestampColumns,
   },
@@ -65,7 +71,8 @@ export const checkins = pgTable(
     index('idx_checkins_user_week').on(table.userId, table.weekNumber),
     // Fila do scheduler: check-ins enviados e ainda sem resposta.
     index('idx_checkins_sent_at').on(table.sentAt),
-    check('ck_checkins_no_plaintext_responses', sql`${table.responses} IS NULL`),
+    index('idx_checkins_expires_at').on(table.expiresAt),
+    check('ck_checkins_token_len', sql`char_length(${table.token}) = 64`),
   ],
 );
 

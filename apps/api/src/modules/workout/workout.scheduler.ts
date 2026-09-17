@@ -3,13 +3,15 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 import { CONSENT_TEXTS } from '@movivo/shared';
 
+import { AppConfigService } from '../../core/config';
 import { consents, protocols, subscriptions, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { WorkerFactory } from '../jobs/worker.factory';
-import { WorkoutAccessService } from './workout-access.service';
+import { ShortLinkService } from '../short-link/short-link.service';
+import { MAGIC_TTL_MS, WorkoutAccessService } from './workout-access.service';
 import { WorkoutJournalService } from './workout-journal.service';
 import { dailyWorkoutMessage } from './workout-messages';
 
@@ -55,6 +57,8 @@ export class WorkoutScheduler implements OnModuleInit {
     private readonly db: TenantDatabase,
     private readonly access: WorkoutAccessService,
     private readonly journal: WorkoutJournalService,
+    private readonly shortLinks: ShortLinkService,
+    private readonly config: AppConfigService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(WorkoutScheduler.name);
@@ -108,7 +112,9 @@ export class WorkoutScheduler implements OnModuleInit {
       if (!local || local.time !== FIXED_WORKOUT_REMINDER_TIME) continue;
       const view = await this.journal.journal(row.userId, local.date, now);
       if (!view.workout) continue;
-      const link = await this.access.createMagicLink(row.userId, view.workout.id);
+      const magicLink = await this.access.createMagicLink(row.userId, view.workout.id);
+      const code = await this.shortLinks.create(magicLink, new Date(Date.now() + MAGIC_TTL_MS));
+      const link = `${this.config.whatsapp.publicSiteUrl}/check-in/${code}`;
       const outbound: WhatsappOutboundJob = {
         userId: row.userId,
         type: 'WORKOUT_DAILY_LINK',
