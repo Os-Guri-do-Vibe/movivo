@@ -93,6 +93,8 @@ const EXPECTED_TABLES = [
   'workout_set_entries',
   // Renovação de mesociclo: formulário de troca de protocolo por fim de ciclo.
   'protocol_renewal_sessions',
+  // Alias curto e público para links longos enviados por WhatsApp.
+  'short_links',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;
