@@ -45,19 +45,39 @@ export type VerifyResult = { ok: true } | { ok: false; reason: string };
  * a partir do envelope do provedor — se sobrou campo, ou a edge tem bug ou o corpo não é
  * o que dizemos que é. Nos dois casos a resposta certa é rejeitar, não propagar dado não
  * modelado para dentro do contexto do titular.
+ *
+ * `text` XOR `audio`: uma mensagem de voz chega da edge SEM texto — só a referência
+ * (`audio.mediaKey`) que `WhatsappInboundService` usa pra baixar e transcrever ANTES do
+ * resto do pipeline rodar (nonce/orçamento/consentimento primeiro, transcrição por
+ * último — ver `resolveText()`). Depois de resolvida, vira uma mensagem com `text`
+ * igual a qualquer outra; nada além da borda de entrada enxerga `audio`.
  */
 export const normalizedInboundSchema = z
   .object({
     messageId: z.string().min(1).max(200),
     /** Telefone E.164 do remetente — chave EXATA de `resolveUser()`. */
     from: z.string().min(8).max(20),
-    text: z.string().min(1).max(4096),
+    text: z.string().min(1).max(4096).optional(),
     /** Toque num quick-reply (ex.: feedback 👍/👎, US-3.6). Ausente numa mensagem normal. */
     buttonId: z.string().max(100).optional(),
+    /** Mensagem de voz ainda não transcrita — ver nota acima. Ausente em mensagem normal. */
+    audio: z
+      .object({
+        /** Referência opaca, só o transporte do PRÓPRIO provedor sabe interpretar. */
+        mediaKey: z.string().min(1).max(2000),
+        durationSeconds: z.number().int().positive().max(3600).optional(),
+      })
+      .optional(),
   })
-  .strict();
+  .strict()
+  .refine((value) => Boolean(value.text) || Boolean(value.audio), {
+    message: 'normalizedInbound precisa de text ou audio',
+  });
 
 export type NormalizedInbound = z.infer<typeof normalizedInboundSchema>;
+
+/** Mensagem já com `text` resolvido — texto normal, ou transcrição de um áudio. */
+export type ResolvedInbound = NormalizedInbound & { text: string };
 
 /** Limite de texto do schema acima — usado pelas edges ao truncar. */
 export const MAX_INBOUND_TEXT_LENGTH = 4096;

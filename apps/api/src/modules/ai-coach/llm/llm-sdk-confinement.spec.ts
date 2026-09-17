@@ -1,9 +1,11 @@
 /**
- * Unit ESTRUTURAL — o SDK/HTTP de provedor de LLM é confinado ao router (US-2.2 · §12.12).
+ * Unit ESTRUTURAL — o SDK/HTTP de provedor de LLM/IA é confinado a um arquivo por
+ * fornecedor (US-2.2 · §12.12; ADR-009 estende o mesmo padrão à transcrição de áudio).
  *
- * Varre `src/` e prova que nenhum arquivo (fora de `llm/providers.ts`) fala com um provedor:
- * nem endpoint HTTP (`api.openai.com`/`api.anthropic.com`) nem import de SDK (`openai`,
- * `@anthropic-ai/*`). Se um módulo qualquer passar a chamar o LLM direto, este teste falha.
+ * Varre `src/` e prova que nenhum arquivo fora da lista `ALLOWED` fala com um provedor:
+ * nem endpoint HTTP (`api.openai.com`/`api.anthropic.com`/`api.groq.com`) nem import de
+ * SDK (`openai`, `@anthropic-ai/*`). Se um módulo qualquer passar a chamar um provedor
+ * direto, este teste falha.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -11,10 +13,16 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const SRC = join(process.cwd(), 'src');
-const ALLOWED = [join('llm', 'providers.ts'), join('core', 'knowledge', 'openai-embedding.ts')];
+const ALLOWED = [
+  join('llm', 'providers.ts'),
+  join('core', 'knowledge', 'openai-embedding.ts'),
+  join('core', 'audio', 'openai-transcription.ts'),
+  join('core', 'audio', 'groq-transcription.ts'),
+];
 const PROVIDER_MARKERS = [
   /api\.openai\.com/,
   /api\.anthropic\.com/,
+  /api\.groq\.com/,
   /from ['"]openai['"]/,
   /from ['"]@anthropic-ai\//,
 ];

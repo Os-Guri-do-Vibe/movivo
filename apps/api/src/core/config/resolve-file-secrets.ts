@@ -58,6 +58,10 @@ export const SECRET_KEYS = [
   'ASAAS_WEBHOOK_SECRET',
   // Sprint 5 - credencial exclusivamente local para o seed do painel CREF.
   'DEV_PROFESSIONAL_PASSWORD',
+  // ADR-009 — fornecedor alternativo de STT, só para teste LOCAL (o fornecedor padrão
+  // de produção continua sendo a OpenAI). OPCIONAL no boot: sem ela, AUDIO_TRANSCRIPTION_
+  // PROVIDER=GROQ cai no fallback fail-closed que lança em vez de transcrever.
+  'GROQ_API_KEY',
 ] as const;
 
 export type SecretKey = (typeof SECRET_KEYS)[number];

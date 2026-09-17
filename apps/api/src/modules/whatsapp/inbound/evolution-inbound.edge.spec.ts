@@ -155,16 +155,33 @@ describe('EvolutionInboundEdge.normalize', () => {
     expect(makeEdge().normalize(upsert({ timestamp: elevenHoursAgo }))).toHaveLength(1);
   });
 
-  it('tipo não suportado (imagem/áudio/sticker/reaction) → descarte, nunca alimenta o LLM', () => {
+  it('tipo não suportado (imagem/sticker/reaction) → descarte, nunca alimenta o LLM', () => {
     for (const message of [
       { imageMessage: { caption: 'olha meu treino' } },
-      { audioMessage: { seconds: 12 } },
       { stickerMessage: {} },
       { reactionMessage: { text: '👍' } },
       { protocolMessage: { type: 'REVOKE' } },
     ]) {
       expect(makeEdge().normalize(upsert({ message }))).toEqual([]);
     }
+  });
+
+  it('mensagem de voz (audioMessage) → referência de mídia, sem texto', () => {
+    const out = makeEdge().normalize(upsert({ message: { audioMessage: { seconds: 12.4 } } }));
+    expect(out).toHaveLength(1);
+    expect(out?.[0]?.text).toBeUndefined();
+    expect(out?.[0]?.audio?.durationSeconds).toBe(13); // arredonda pra cima
+    // `mediaKey` é o `key` original serializado — é isso que `EvolutionTransport.downloadAudio`
+    // manda de volta pra EvolutionAPI buscar o áudio.
+    expect(JSON.parse(out?.[0]?.audio?.mediaKey ?? '{}')).toMatchObject({
+      remoteJid: JID,
+      id: 'WA-MSG-1',
+    });
+  });
+
+  it('mensagem de voz sem `seconds` → referência de mídia sem duração conhecida', () => {
+    const out = makeEdge().normalize(upsert({ message: { audioMessage: {} } }));
+    expect(out?.[0]?.audio?.durationSeconds).toBeUndefined();
   });
 
   it('envelope fora do contrato → null (rejeição, categoria diferente de descarte)', () => {

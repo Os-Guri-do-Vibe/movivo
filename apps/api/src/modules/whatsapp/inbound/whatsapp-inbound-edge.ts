@@ -27,7 +27,8 @@ export interface WhatsappInboundEdge {
    * diz entregar — merece log de rejeição).
    *
    * Array **vazio** = descarte LEGÍTIMO — eco `fromMe`, mensagem de grupo, tipo não
-   * suportado (imagem/áudio/sticker/reaction), instância errada, backlog antigo. É uma
+   * suportado (imagem/sticker/reaction — áudio hoje é transcrito, não descartado, na
+   * EvolutionAPI), instância errada, backlog antigo. É uma
    * categoria diferente de "inválido": nada de errado aconteceu, só não há o que
    * processar. Distinguir as duas evita que o painel de segurança encha de "rejeição"
    * por cada figurinha que o aluno manda.

@@ -31,20 +31,23 @@ import { eq } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 
+import {
+  AUDIO_TRANSCRIPTION_PORT,
+  isAudioTranscriptionConfigured,
+  type AudioTranscriptionPort,
+} from '../../core/audio/audio-transcription.port';
+import { AppConfigService } from '../../core/config';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { conversations, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
-import {
-  CHECKIN_INBOUND_EVENT,
-  WORKOUT_INBOUND_EVENT,
-  type CheckinInboundEvent,
-} from '../../core/event-bus/events';
+import { WORKOUT_INBOUND_EVENT, type CheckinInboundEvent } from '../../core/event-bus/events';
 import { DomainEventBus } from '../../core/event-bus/event-bus.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
+import { EVOLUTION_TRANSPORT, type EvolutionTransport } from './evolution-transport';
 import { parseFeedback } from './feedback';
 import { type NormalizedInbound, type RawDelivery } from './inbound/inbound-message';
 import {
@@ -53,8 +56,13 @@ import {
   type WhatsappInboundEdges,
 } from './inbound/whatsapp-inbound-edge';
 
-/** Janela de debounce (Rafael §6): 3-5s. Concatena a rajada do usuário num só job. */
-const DEBOUNCE_MS = 3_000;
+/**
+ * Janela de debounce. Concatena a rajada do usuário num só job — ex.: "oi" / "tudo bem?" /
+ * "bom dia" mandados em bolhas separadas viram um único turno do AI Coach. Rafael §6
+ * recomendava 3-5s; aumentado para 7s por decisão do fundador (achado 2026-09-12) para dar
+ * mais folga a rajadas mais longas antes da IA responder.
+ */
+const DEBOUNCE_MS = 7_000;
 /** TTL do buffer de batch: cobre a janela de debounce + o processamento de US-3.5. */
 const BATCH_TTL_SECONDS = 120;
 /**
@@ -108,11 +116,14 @@ export class WhatsappInboundService {
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
     @Inject(WHATSAPP_INBOUND_EDGES) private readonly edges: WhatsappInboundEdges,
+    @Inject(AUDIO_TRANSCRIPTION_PORT) private readonly audioTranscription: AudioTranscriptionPort,
+    @Inject(EVOLUTION_TRANSPORT) private readonly evolutionTransport: EvolutionTransport,
     private readonly db: TenantDatabase,
     private readonly queues: QueueManager,
     private readonly healthConsent: HealthConsentService,
     private readonly events: DomainEventBus,
     private readonly queueEvents: DashboardQueueEventsService,
+    private readonly config: AppConfigService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(WhatsappInboundService.name);
@@ -177,7 +188,7 @@ export class WhatsappInboundService {
     correlationId: string,
   ): Promise<void> {
     const startedAt = Date.now();
-    const { messageId, from, text } = message;
+    const { messageId, from } = message;
 
     // Nonce de uso único: `SET NX` — se já existe, é replay dentro da janela. O messageId
     // é hasheado para virar um segmento de chave válido (independe do formato do provedor)
@@ -196,12 +207,19 @@ export class WhatsappInboundService {
       return;
     }
 
-    const isRevocation = this.isHealthConsentRevocation(text);
+    // Frase de revogação só é checável em mensagem de TEXTO — uma mensagem de voz ainda
+    // não foi transcrita aqui (transcrição custa dinheiro de verdade e só roda DEPOIS do
+    // orçamento abaixo passar). Áudio nunca ganha a isenção de orçamento da revogação por
+    // causa disso — trade-off aceito: o direito de revogar (LGPD Art. 18) continua 100%
+    // exercível por texto, e a frase dita por voz ainda é honrada mais abaixo, depois de
+    // transcrita, só não fura o orçamento pra chegar lá.
+    const isTextRevocation =
+      message.text !== undefined && this.isHealthConsentRevocation(message.text);
     const withinBudget = await this.consumeUserBudget(userId);
     // O orçamento nunca pode bloquear o exercício de um direito do titular (LGPD Art. 18):
     // a frase de revogação de consentimento passa mesmo com o orçamento estourado — ela
     // não gera inferência de LLM, que é justamente o recurso protegido aqui.
-    if (!withinBudget && !isRevocation) {
+    if (!withinBudget && !isTextRevocation) {
       // Não é ataque externo (o remetente é um titular autenticado pelo próprio canal):
       // log próprio, sem `reject()`, e nenhum job de IA enfileirado.
       this.logger.warn(
@@ -210,6 +228,17 @@ export class WhatsappInboundService {
       );
       return;
     }
+
+    // Mensagem de voz (US audio, 2026-09-14): resolve `text` transcrevendo AGORA — só
+    // depois do nonce/titular/orçamento acima, porque transcrição é custo real de
+    // terceiro (nunca pago por uma entrega ainda não autenticada ou fora de orçamento).
+    // Qualquer falha já avisou o aluno e descartou dentro de `resolveAudioText`.
+    const text =
+      message.text ?? (await this.resolveAudioText(message, provider, userId, correlationId));
+    if (text === null) return;
+
+    const isRevocation =
+      message.text !== undefined ? isTextRevocation : this.isHealthConsentRevocation(text);
 
     const consentCommandId = this.hash(messageId);
 
@@ -272,23 +301,17 @@ export class WhatsappInboundService {
       'EX',
       INBOUND_ROUTE_TTL_SECONDS,
     );
-    // Cadeia determinística: treino (US-8.1) antes do check-in. Cada elo devolve
-    // `false` sem consumir a rota quando o botão não é dele.
+    // Cadeia determinística (US-8.1): só o treino intercepta botão determinístico hoje — o
+    // check-in semanal virou formulário web (achado 2026-09-13), sem botão pra rotear aqui.
     const handled =
-      ((await this.events.request<CheckinInboundEvent, boolean>(WORKOUT_INBOUND_EVENT, {
+      (await this.events.request<CheckinInboundEvent, boolean>(WORKOUT_INBOUND_EVENT, {
         userId,
         routeKey,
-      })) ??
-        false) ||
-      ((await this.events.request<CheckinInboundEvent, boolean>(CHECKIN_INBOUND_EVENT, {
-        userId,
-        routeKey,
-      })) ??
-        false);
+      })) ?? false;
     if (handled) {
       this.logger.info(
-        { event: 'checkin_inbound_handled', userId, correlationId },
-        'resposta de check-in tratada sem LLM',
+        { event: 'workout_inbound_handled', userId, correlationId },
+        'resposta determinística tratada sem LLM',
       );
       return;
     }
@@ -334,6 +357,150 @@ export class WhatsappInboundService {
         'inbound agregado à janela de debounce em curso',
       );
     }
+  }
+
+  /**
+   * Resolve `text` de uma mensagem de voz (US audio — ADR-009, revisão 2026-09-14):
+   * teto de duração → download do áudio → transcrição via `AudioTranscriptionCascade`
+   * (OpenAI perna primária de produção, Groq fallback automático em produção E local),
+   * atrás de um gate de HEALTH PRÓPRIO por fornecedor, sempre separado de
+   * `LLM_OPENAI_HEALTH_DATA_APPROVED`.
+   *
+   * `null` = descartado. Toda saída `null` já avisou o aluno por `notifyAudioFallback`
+   * antes de retornar — ninguém fica esperando uma resposta que nunca vai chegar.
+   *
+   * Escopo inicial (decisão do fundador): só a EvolutionAPI emite `audio` hoje — a AraraHQ
+   * segue descartando áudio na borda (`arara-inbound.edge.ts`) até o webhook de voz de
+   * produção ser confirmado. `provider !== 'EVOLUTION'` abaixo é defensivo, não deveria
+   * disparar na prática.
+   */
+  private async resolveAudioText(
+    message: NormalizedInbound,
+    provider: InboundProvider,
+    userId: string,
+    correlationId: string,
+  ): Promise<string | null> {
+    const audio = message.audio;
+    /* v8 ignore next 3 -- defensivo: `normalizedInboundSchema` garante text XOR audio. */
+    if (!audio) return null;
+
+    const maxDuration = this.config.audioTranscription.maxDurationSeconds;
+    if (audio.durationSeconds !== undefined && audio.durationSeconds > maxDuration) {
+      await this.notifyAudioFallback(
+        userId,
+        message.messageId,
+        'Esse áudio é mais longo do que eu consigo ouvir por aqui — pode escrever ou mandar um áudio mais curto?',
+      );
+      this.logger.info(
+        {
+          event: 'audio_too_long',
+          provider,
+          userId,
+          correlationId,
+          durationSeconds: audio.durationSeconds,
+        },
+        'áudio descartado: acima do teto de duração',
+      );
+      return null;
+    }
+
+    if (!isAudioTranscriptionConfigured(this.config.audioTranscription)) {
+      await this.notifyAudioFallback(
+        userId,
+        message.messageId,
+        'Ainda não consigo ouvir áudio por aqui — pode escrever, por favor?',
+      );
+      this.logger.info(
+        { event: 'audio_transcription_not_configured', provider, userId, correlationId },
+        'áudio descartado: transcrição sem credencial ou sem aprovação de dado de saúde',
+      );
+      return null;
+    }
+
+    if (provider !== 'EVOLUTION') {
+      await this.notifyAudioFallback(
+        userId,
+        message.messageId,
+        'Ainda não consigo ouvir áudio por aqui — pode escrever, por favor?',
+      );
+      this.logger.warn(
+        { event: 'audio_unsupported_provider', provider, userId, correlationId },
+        'áudio recebido de provedor sem download de mídia implementado',
+      );
+      return null;
+    }
+
+    const instanceName = this.evolutionTransport.lastKnownInstanceName();
+    if (!instanceName) {
+      await this.notifyAudioFallback(
+        userId,
+        message.messageId,
+        'Não consegui ouvir esse áudio agora — pode escrever, por favor?',
+      );
+      this.logger.warn(
+        { event: 'audio_download_failed', reason: 'no_instance', provider, userId, correlationId },
+        'download de áudio falhou: instância da EvolutionAPI desconhecida',
+      );
+      return null;
+    }
+
+    try {
+      const { base64, mimetype } = await this.evolutionTransport.downloadAudio(
+        instanceName,
+        audio.mediaKey,
+      );
+      const transcript = await this.audioTranscription.transcribe({
+        audio: Buffer.from(base64, 'base64'),
+        mimeType: mimetype,
+      });
+      this.logger.info(
+        {
+          event: 'audio_transcribed',
+          provider,
+          userId,
+          correlationId,
+          durationSeconds: audio.durationSeconds,
+        },
+        'áudio transcrito',
+      );
+      return transcript;
+    } catch (error) {
+      await this.notifyAudioFallback(
+        userId,
+        message.messageId,
+        'Não consegui entender esse áudio — pode tentar de novo ou escrever?',
+      );
+      this.logger.warn(
+        {
+          event: 'audio_transcription_failed',
+          provider,
+          userId,
+          correlationId,
+          err: error instanceof Error ? error.message : 'erro desconhecido',
+        },
+        'download ou transcrição de áudio falhou',
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Avisa o aluno quando um áudio não pôde virar resposta — reusa `COACH_MESSAGE` (texto
+   * livre, sem cabeçalho especial, ver `whatsapp-outbound.worker.ts::buildText`).
+   * `dedupeId` a partir do `messageId` evita duplicar o aviso se o BullMQ reentregar o job.
+   */
+  private async notifyAudioFallback(
+    userId: string,
+    messageId: string,
+    text: string,
+  ): Promise<void> {
+    const dedupeId = `audio-fallback-${this.hash(messageId)}`;
+    await this.queues.enqueue(
+      QUEUE.whatsappOutbound,
+      'audio-transcription-fallback',
+      { userId, type: 'COACH_MESSAGE', dedupeId, text },
+      { jobId: dedupeId },
+    );
   }
 
   /**
