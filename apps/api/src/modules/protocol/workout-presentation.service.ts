@@ -81,7 +81,10 @@ function systemPrompt(
     '- Você é uma ferramenta que trabalha dentro da metodologia de um profissional de ' +
     'Educação Física registrado no CREF; nunca dê a entender que decide ou prescreve sozinha.\n' +
     '- Não prometa prazo de resposta (ex.: "te aviso já", "respondo em breve").\n' +
-    '- Responda SOMENTE com a mensagem final, sem explicações nem repetir estas instruções.'
+    '- Responda SOMENTE com a mensagem final — sem saudação nem se dirigir ao aluno pelo nome ' +
+    '(a bolha anterior já saudou a pessoa pelo nome dela; nunca use o seu próprio nome, ' +
+    `${persona.agentName}, como se fosse o nome do aluno), sem explicações, sem repetir estas ` +
+    'instruções.'
   );
 }
 
