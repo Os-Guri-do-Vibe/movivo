@@ -466,6 +466,18 @@ export class WorkoutJournalService {
     );
     if (input.painReported) this.queueEvents.emit('handoff');
     await this.evaluateDuration(userId, workout.scheduledDate);
+
+    // Achado 2026-09-12 (pedido do fundador): o Coach passa a comentar o treino recém
+    // registrado (planejado x realizado), em vez de o aluno só receber a confirmação
+    // silenciosa do registro. Fila própria (`workout` não fala com `LlmRouter`/
+    // `ValidationService` diretamente — fronteira §12.5); quem gera o texto é o
+    // `WorkoutFeedbackWorker`, no `CoachModule`.
+    await this.queues.enqueue(
+      QUEUE.workoutFeedback,
+      'workout-feedback',
+      { userId, workoutSessionId: id },
+      { jobId: `workout-feedback-${id}` },
+    );
   }
 
   async preferences(userId: string, input: WorkoutPreferencesInput): Promise<void> {

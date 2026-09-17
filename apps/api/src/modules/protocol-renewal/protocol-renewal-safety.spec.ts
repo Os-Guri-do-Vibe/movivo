@@ -77,6 +77,36 @@ describe('evaluateRenewalSafety', () => {
     expect(result.newPainNeedsHandoff).toBe(true);
   });
 
+  it('ADR-008: intensidade alta mas ESTÁVEL, já sob avaliação profissional, não escala (soughtCare abranda)', () => {
+    const result = evaluateRenewalSafety(
+      block3({
+        newPain: {
+          hasNewPain: true,
+          region: 'KNEE',
+          intensity: 9,
+          trend: 'STABLE',
+          soughtCare: true,
+        },
+      }),
+    );
+    expect(result.newPainNeedsHandoff).toBe(false);
+  });
+
+  it('ADR-008: mesma intensidade alta e estável, SEM avaliação profissional, continua escalando', () => {
+    const result = evaluateRenewalSafety(
+      block3({
+        newPain: {
+          hasNewPain: true,
+          region: 'KNEE',
+          intensity: 9,
+          trend: 'STABLE',
+          soughtCare: false,
+        },
+      }),
+    );
+    expect(result.newPainNeedsHandoff).toBe(true);
+  });
+
   it('as duas perguntas de segurança podem disparar juntas', () => {
     const result = evaluateRenewalSafety(
       block3({

@@ -62,6 +62,7 @@ Serverless (Vercel/Lambda) foi rejeitado: cold start de 500–2000ms é incompat
 | **005-R2** | LLM routing: **DeepSeek V4 Pro → GPT-4.1 → Claude Sonnet 4.5**, com gate neutro por classe de dado | Banimento por marca/país; aprovação implícita por marca |
 | **006** | Auth: **JWT access (15min) + refresh httpOnly (30 dias) com rotation** | Sessão server-side pura, OAuth-only |
 | **007** | Frontend↔Backend: **REST para CRUD + WebSocket seletivo** (só notificações real-time do dashboard CREF) | gRPC, GraphQL (complexidade desnecessária no estágio atual) |
+| **009** | AI Coach por voz: cascata STT **`gpt-4o-mini-transcribe`(OpenAI) → `whisper-large-v3-turbo`(Groq)**, gate de HEALTH próprio por perna, só EvolutionAPI | Fornecedor único sem fallback (decisão original, revisada no mesmo dia); self-hosted (custo de infra maior que o de qualquer vendor no volume do MVP) |
 
 ### 3.1 ADR-005-R2 — Seleção neutra e condicionada de LLM
 
@@ -79,6 +80,30 @@ ANPD 19/2024. Da mesma forma, ZDR de OpenAI/Anthropic não é presumido sem cont
 
 O `LLMRouter` continua sendo o único boundary de LLM, com PII Scrubber inescapável. Detalhamento:
 `docs/arquitetura/decisoes/adr-005-r2-selecao-neutra-de-provedor-llm.md`.
+
+### 3.2 ADR-009 — Transcrição de áudio (STT) do AI Coach
+
+O aluno pode mandar áudio no WhatsApp; o AI Coach transcreve (nunca processa áudio bruto com o
+LLM — nenhum dos três provedores da ADR-005-R2 aceita áudio nesta integração) e o resto do
+pipeline (contexto, RAG, guardrails, `LLMRouter`) trata o transcrito como qualquer mensagem de
+texto.
+
+**Decisão vigente:** **cascata `AudioTranscriptionCascade`** (`core/audio/`) — **`gpt-4o-mini-transcribe`**
+(OpenAI) como perna PRIMÁRIA, **`whisper-large-v3-turbo`** (Groq) como FALLBACK automático, em
+produção E local (revisão 2026-09-14: a decisão original era fornecedor único sem fallback, até a
+chave OpenAI de dev ficar sem saldo durante teste). Cada perna atrás de um gate de HEALTH
+**próprio** (`STT_OPENAI_HEALTH_DATA_APPROVED`/`STT_GROQ_HEALTH_DATA_APPROVED`, sempre separados de
+`LLM_OPENAI_HEALTH_DATA_APPROVED`) — só entra na cascata com chave e aprovação PRÓPRIAS. Só o texto
+transcrito é retido; o áudio bruto nunca é persistido. Escopo inicial só EvolutionAPI
+(`EvolutionInboundEdge` + `EvolutionTransport.downloadAudio`) — a AraraHQ segue descartando áudio
+até o webhook de voz de produção ser confirmado. Transcrição só roda depois do nonce/titular/
+orçamento de `WhatsappInboundService` passarem (custo real de terceiro, nunca pago por entrega
+não autenticada ou fora de orçamento). Qualquer falha da cascata inteira avisa o aluno a escrever,
+nunca descarta em silêncio. **Pendência para Alexandre:** Groq virou dependência de produção (como
+fallback) — precisa da mesma diligência de DPA que qualquer perna do `LLMRouter` antes de
+qualquer tráfego real de aluno passar por ela.
+
+Detalhamento: `docs/arquitetura/decisoes/adr-009-transcricao-de-audio-stt-whatsapp.md`.
 
 ---
 

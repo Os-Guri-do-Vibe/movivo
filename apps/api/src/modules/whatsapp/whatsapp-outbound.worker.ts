@@ -31,7 +31,6 @@ import {
   BUBBLE_SEPARATOR,
   confirmationCareMessage,
   confirmationMessage,
-  formatProtocolDelivery,
   PHONE_VERIFICATION_TEMPLATE,
   protocolDeliveryPdfText,
 } from './message-templates';
@@ -51,8 +50,6 @@ export type WhatsappJobType =
   // US-3.5 — conversa do Coach: texto dinâmico + indicador de digitação.
   | 'COACH_MESSAGE'
   | 'CHECKIN_MESSAGE'
-  // US-8.1 — quick reply diario de treino ("Treinei"/"Hoje nao").
-  | 'WORKOUT_QUICK_REPLY'
   | 'WORKOUT_DAILY_LINK'
   | 'WORKOUT_INSIGHT'
   | 'REENGAGEMENT'
@@ -86,10 +83,11 @@ export interface WhatsappOutboundJob {
   code?: string;
   /**
    * `PROTOCOL_DELIVERY` apenas (achado 2026-09-08): distingue a 1ª entrega do treino de uma
-   * reentrega após substituição de exercício aprovada — a saudação estática muda (ver
-   * `protocolDeliveryPdfText`). Ausente/`'INITIAL'` mantém o texto de sempre.
+   * reentrega após substituição de exercício aprovada, ou (achado 2026-09-13) após ajuste de
+   * volume pelo check-in semanal — a saudação estática muda (ver `protocolDeliveryPdfText`).
+   * Ausente/`'INITIAL'` mantém o texto de sempre.
    */
-  deliveryReason?: 'INITIAL' | 'SUBSTITUTION';
+  deliveryReason?: 'INITIAL' | 'SUBSTITUTION' | 'CHECKIN_ADJUSTMENT';
   /** Só com `deliveryReason: 'SUBSTITUTION'` — nomes do exercício trocado, pra saudação. */
   substitutionFromExercise?: string;
   substitutionToExercise?: string;
@@ -119,7 +117,6 @@ const HEALTH_JOB_TYPES: ReadonlySet<WhatsappJobType> = new Set([
   'PROTOCOL_WAITING',
   'COACH_MESSAGE',
   'CHECKIN_MESSAGE',
-  'WORKOUT_QUICK_REPLY',
   'WORKOUT_DAILY_LINK',
   'WORKOUT_INSIGHT',
   'REENGAGEMENT',
@@ -208,13 +205,17 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       return { status: 'ALREADY_SENT' };
     }
 
-    // PROTOCOL_DELIVERY é tratado à parte: quando há PDF gerado (assinatura CREF), saudação +
-    // resumo da IA vão na LEGENDA do documento — uma mensagem só; sem PDF, cai no texto+link
-    // de sempre, em bolhas separadas (sem documento para legendar). Os dois caminhos usam o
-    // MESMO marker de idempotência acima, então nunca duplica entre um e outro.
+    // PROTOCOL_DELIVERY exige documento: saudação + resumo da IA vão na LEGENDA do PDF, uma
+    // mensagem só. Não existe mais entrega por texto+link (decisão do fundador, 2026-09-12
+    // — ver `buildDelivery`): sem PDF ou sem suporte a documento no transporte, o job FALHA
+    // e usa o retry/DLQ genéricos (`whatsappOutbound.attempts=5` em `jobs.config.ts` +
+    // `LoggingDeadLetterHandler` via `WorkerFactory`), nunca degrada a entrega.
     if (type === 'PROTOCOL_DELIVERY') {
       const delivery = await this.buildDelivery(job.data);
       if (!delivery) return { status: 'SKIPPED' };
+      if (!this.transport.sendDocument) {
+        throw new Error('Transporte WhatsApp configurado não suporta envio de documento.');
+      }
       // Achado 2026-09-04, a pedido do fundador: se o profissional aprovar/assinar ANTES
       // dos 30min do `PROTOCOL_WAITING` agendado no submit, o aluno não pode pular direto
       // da confirmação pro treino pronto sem nunca conhecer a agente. Garante a ordem
@@ -222,27 +223,23 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       // não garantiriam ordem entre si) e marca o `PROTOCOL_WAITING` como enviado, para o job
       // de 30min (que ainda dispara — não há como cancelar um delay do BullMQ) virar no-op.
       await this.sendPresentationIfNeeded(userId, phone, job.data, delivery.persona);
-      if (delivery.pdfUrl && this.transport.sendDocument) {
-        // Achado 2026-09-04 (reproduzido ao vivo, print real do WhatsApp): mandar
-        // `delivery.text` como bolha ANTES do documento E de novo como legenda do documento
-        // duplicava a saudação ("seu treino está pronto!") nas duas mensagens seguidas — e
-        // quando havia resumo de IA, ele saía como uma 3ª bolha à parte, se reapresentando
-        // como "Leonardo" de novo (redundante com a apresentação de `sendPresentationIfNeeded`
-        // acima) e chegando a afirmar "o PDF já foi enviado" ANTES do documento de fato sair.
-        // Agora é uma mensagem só: a legenda do documento carrega saudação + resumo da IA
-        // juntos (troca só o separador de bolhas por quebra de parágrafo — a legenda não
-        // divide em mensagens, então `BUBBLE_SEPARATOR` apareceria como "---" literal nela).
-        const caption = delivery.text.split(BUBBLE_SEPARATOR).join('\n\n');
-        await this.transport.sendDocument(
-          phone,
-          delivery.pdfUrl,
-          caption,
-          this.config.whatsapp.protocolPdfTemplateName,
-          protocolFileName(delivery.studentName),
-        );
-      } else {
-        await this.sendBubbles(delivery.text, phone, job.data);
-      }
+      // Achado 2026-09-04 (reproduzido ao vivo, print real do WhatsApp): mandar
+      // `delivery.text` como bolha ANTES do documento E de novo como legenda do documento
+      // duplicava a saudação ("seu treino está pronto!") nas duas mensagens seguidas — e
+      // quando havia resumo de IA, ele saía como uma 3ª bolha à parte, se reapresentando
+      // como "Leonardo" de novo (redundante com a apresentação de `sendPresentationIfNeeded`
+      // acima) e chegando a afirmar "o PDF já foi enviado" ANTES do documento de fato sair.
+      // Uma mensagem só: a legenda do documento carrega saudação + resumo da IA juntos
+      // (troca só o separador de bolhas por quebra de parágrafo — a legenda não divide em
+      // mensagens, então `BUBBLE_SEPARATOR` apareceria como "---" literal nela).
+      const caption = delivery.text.split(BUBBLE_SEPARATOR).join('\n\n');
+      await this.transport.sendDocument(
+        phone,
+        delivery.pdfUrl,
+        caption,
+        this.config.whatsapp.protocolPdfTemplateName,
+        protocolFileName(delivery.studentName),
+      );
       await this.redis.set(markerKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);
       // ponytail: SLA submit→entrega junta este evento com o `protocol_sent` de enfileiramento
       // da US-2.4 (o job de entrega não carrega submittedAt). Server SDK do PostHog: Sprint futura.
@@ -294,7 +291,6 @@ export class WhatsappOutboundWorker implements OnModuleInit {
         return null; // tratado antes em process() (pode virar documento, não só texto)
       case 'COACH_MESSAGE':
       case 'CHECKIN_MESSAGE':
-      case 'WORKOUT_QUICK_REPLY':
       case 'WORKOUT_DAILY_LINK':
       case 'WORKOUT_INSIGHT':
       case 'REENGAGEMENT':
@@ -308,15 +304,19 @@ export class WhatsappOutboundWorker implements OnModuleInit {
   }
 
   /**
-   * `pdfUrl` só vem preenchido quando o protocolo já tem PDF gerado (assinatura CREF,
-   * `DashboardService.signProtocol` → `buildProtocolPdf`). Com PDF, `text` é a saudação
-   * estática + o resumo gerado pela IA (`data.text`, já pronto — quem enfileirou o job
-   * chamou `WorkoutPresentationService` antes; achado 2026-09-04). Sem PDF (fallback raro),
-   * `text` é a entrega inteira de sempre.
+   * `pdfUrl` só existe quando o protocolo já tem PDF gerado (assinatura CREF,
+   * `DashboardService.signProtocol` → `buildProtocolPdf`). `text` é a saudação estática +
+   * o resumo gerado pela IA (`data.text`, já pronto — quem enfileirou o job chamou
+   * `WorkoutPresentationService` antes; achado 2026-09-04).
+   *
+   * Decisão do fundador (2026-09-12): entrega por texto+link (sem PDF) foi REMOVIDA —
+   * um protocolo `ACTIVE`/aprovado/assinado sem `pdfContent` é falha de geração de PDF,
+   * não um caminho normal de produto. Em vez de degradar silenciosamente para uma
+   * descrição em texto do plano, o método lança e deixa o job retry/DLQ (ver `process`).
    */
   private async buildDelivery(data: WhatsappOutboundJob): Promise<{
     text: string;
-    pdfUrl?: string;
+    pdfUrl: string;
     studentName: string | null;
     /** Persona do slot do titular — usada aqui e pela apresentação enviada antes (ver `process`). */
     persona: AgentPersona;
@@ -330,15 +330,12 @@ export class WhatsappOutboundWorker implements OnModuleInit {
         const [row] = await tx
           .select({
             id: protocols.id,
-            content: protocols.content,
             status: protocols.status,
             approvalStatus: protocols.approvalStatus,
             signedAt: protocols.signedAt,
             signatureHash: protocols.signatureHash,
             professionalId: protocols.professionalId,
             pdfContent: protocols.pdfContent,
-            totalWeeks: protocols.totalWeeks,
-            mesocycleName: protocols.mesocycleName,
           })
           .from(protocols)
           .where(
@@ -380,13 +377,18 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       );
       return null;
     }
+    if (!proto.pdfContent) {
+      // Removido 2026-09-12: nunca mais degrada para texto+link. Protocolo aprovado/
+      // assinado sem PDF é falha de geração — falha aqui, o job retenta (`whatsappOutbound`,
+      // 5 tentativas) e, esgotado, cai na DLQ (`LoggingDeadLetterHandler`), visível em log
+      // hoje; alerta dedicado no dashboard fica para uma sprint futura.
+      throw new Error(
+        `Protocolo ${proto.id} aprovado/assinado mas sem PDF gerado — entrega bloqueada até o PDF existir.`,
+      );
+    }
     const link = `${this.config.whatsapp.publicSiteUrl}/protocolo/${proto.id}`;
-    const content = proto.content as Parameters<typeof formatProtocolDelivery>[0];
     const persona = await this.agentPersona.persona(biologicalSex);
-    const pdfUrl = proto.pdfContent ? `${link}/pdf` : undefined;
-    // Com PDF, a bolha é saudação + resumo da IA (já veio pronto em `data.text`, ver doc
-    // acima). Sem PDF (fallback raro), o texto é a entrega inteira: precisa do primeiro
-    // treino e do link, senão o titular não vê o plano em lugar nenhum.
+    const pdfUrl = `${link}/pdf`;
     const firstName = studentName?.trim().split(/\s+/)[0] ?? null;
     const substitution =
       data.deliveryReason === 'SUBSTITUTION' &&
@@ -394,9 +396,13 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       data.substitutionToExercise
         ? { from: data.substitutionFromExercise, to: data.substitutionToExercise }
         : undefined;
-    const text = pdfUrl
-      ? protocolDeliveryPdfText(firstName, data.text?.trim() || undefined, substitution)
-      : formatProtocolDelivery(content, link, persona, proto.totalWeeks, proto.mesocycleName);
+    const volumeAdjusted = data.deliveryReason === 'CHECKIN_ADJUSTMENT';
+    const text = protocolDeliveryPdfText(
+      firstName,
+      data.text?.trim() || undefined,
+      substitution,
+      volumeAdjusted,
+    );
     return {
       text,
       pdfUrl,

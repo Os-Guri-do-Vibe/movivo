@@ -1,30 +1,57 @@
+/**
+ * `CheckinScheduler` — dispara o check-in semanal.
+ *
+ * Achado 2026-09-13 (pedido do fundador): domingo 18h no fuso LOCAL de cada aluno, em vez
+ * do antigo cron fixo de segunda 08h no fuso único do servidor (`America/Sao_Paulo`) —
+ * mesmo desenho de `WorkoutScheduler.scan()`: scan a cada minuto em UTC, compara contra um
+ * horário fixo já convertido para o fuso do aluno (`users.timezone`). O jitter artificial
+ * de até 2h (`delayWithinTwoHours`) deixou de existir — o disparo já nasce espalhado, cada
+ * aluno no seu próprio horário exato.
+ */
 import { Injectable, type OnModuleInit } from '@nestjs/common';
-import { createHash } from 'node:crypto';
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 import { CONSENT_TEXTS } from '@movivo/shared';
 
-import { HealthConsentService } from '../../core/database/health-consent.service';
-import {
-  checkins,
-  consents,
-  protocols,
-  reengagementNudges,
-  subscriptions,
-} from '../../core/database/schema';
+import { consents, protocols, subscriptions, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
-import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { CheckinService } from './checkin.service';
 
-type CheckinJob =
-  | { kind: 'SCAN' }
-  | { kind: 'SEND'; userId: string; protocolId: string; weekNumber: number }
-  | { kind: 'NUDGE'; userId: string; windowStartedAt: string };
+type CheckinJob = { kind: 'SCAN' } | { kind: 'NUDGE'; userId: string; windowStartedAt: string };
 
+const SCAN_CRON = '* * * * *';
+const FIXED_CHECKIN_TIME = '18:00';
+const SUNDAY = 'Sun';
 const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
+
+function localParts(
+  now: Date,
+  timezone: string,
+): { date: string; time: string; weekday: string } | null {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      weekday: 'short',
+    }).formatToParts(now);
+    const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return {
+      date: `${value.year}-${value.month}-${value.day}`,
+      time: `${value.hour}:${value.minute}`,
+      weekday: value.weekday ?? '',
+    };
+  } catch {
+    return null;
+  }
+}
 
 @Injectable()
 export class CheckinScheduler implements OnModuleInit {
@@ -32,7 +59,6 @@ export class CheckinScheduler implements OnModuleInit {
     private readonly workers: WorkerFactory,
     private readonly queues: QueueManager,
     private readonly db: TenantDatabase,
-    private readonly healthConsent: HealthConsentService,
     private readonly checkinsService: CheckinService,
     private readonly logger: PinoLogger,
   ) {
@@ -42,13 +68,6 @@ export class CheckinScheduler implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     this.workers.create<CheckinJob>(QUEUE.checkinWeekly, async (job) => {
       if (job.data.kind === 'SCAN') return this.scan();
-      if (job.data.kind === 'SEND') {
-        return this.checkinsService.createAndSend(
-          job.data.userId,
-          job.data.protocolId,
-          job.data.weekNumber,
-        );
-      }
       return this.sendNudge(job.data.userId, new Date(job.data.windowStartedAt));
     });
 
@@ -56,21 +75,24 @@ export class CheckinScheduler implements OnModuleInit {
       .get(QUEUE.checkinWeekly)
       .upsertJobScheduler(
         'weekly-checkin-scan',
-        { pattern: '0 8 * * 1', tz: 'America/Sao_Paulo' },
+        { pattern: SCAN_CRON, tz: 'UTC' },
         { name: 'weekly-checkin-scan', data: { kind: 'SCAN' } satisfies CheckinJob },
       );
   }
 
-  async scan(): Promise<{ status: string; eligible: number }> {
+  async scan(now = new Date()): Promise<{ status: string; eligible: number; sent: number }> {
     const eligible = await this.db.runAsSystem((tx) =>
       tx
         .selectDistinct({
           userId: protocols.userId,
+          name: users.name,
+          timezone: users.timezone,
           protocolId: protocols.id,
           createdAt: protocols.createdAt,
           totalWeeks: protocols.totalWeeks,
         })
         .from(protocols)
+        .innerJoin(users, eq(users.id, protocols.userId))
         .innerJoin(subscriptions, eq(subscriptions.userId, protocols.userId))
         .innerJoin(
           consents,
@@ -90,42 +112,32 @@ export class CheckinScheduler implements OnModuleInit {
         ),
     );
 
+    let sent = 0;
     for (const row of eligible) {
+      const local = localParts(now, row.timezone);
+      if (!local || local.weekday !== SUNDAY || local.time !== FIXED_CHECKIN_TIME) continue;
       const weekNumber = this.checkinsService.weekNumber(row.createdAt, row.totalWeeks);
-      const delay = this.delayWithinTwoHours(row.userId, weekNumber);
-      await this.queues.enqueue(
-        QUEUE.checkinWeekly,
-        'weekly-checkin-send',
-        {
-          kind: 'SEND',
-          userId: row.userId,
-          protocolId: row.protocolId,
-          weekNumber,
-        } satisfies CheckinJob,
-        { jobId: `checkin-send-${row.userId}-${row.protocolId}-${weekNumber}`, delay },
+      const firstName = row.name?.trim().split(/\s+/)[0] ?? null;
+      const result = await this.checkinsService.createAndSend(
+        row.userId,
+        row.protocolId,
+        weekNumber,
+        firstName,
       );
+      if (result === 'SENT') sent += 1;
       await this.enqueueNudgeIfDue(row.userId);
     }
     this.logger.info(
-      { event: 'checkin_scan_completed', eligible: eligible.length },
-      'scan semanal concluido',
+      { event: 'checkin_scan_completed', eligible: eligible.length, sent },
+      'scan semanal concluído',
     );
-    return { status: 'SCANNED', eligible: eligible.length };
+    return { status: 'SCANNED', eligible: eligible.length, sent };
   }
 
-  /** @internal Publico apenas para teste deterministico da janela de reengajamento. */
+  /** @internal Público apenas para teste determinístico da janela de reengajamento. */
   async enqueueNudgeIfDue(userId: string): Promise<void> {
-    if (!(await this.healthConsent.hasActiveForUser(userId))) return;
     const cutoff = new Date(Date.now() - TWO_WEEKS_MS);
-    const [last] = await this.db.runAsSystem((tx) =>
-      tx
-        .select({ sentAt: checkins.sentAt, respondedAt: checkins.respondedAt })
-        .from(checkins)
-        .where(eq(checkins.userId, userId))
-        .orderBy(desc(checkins.sentAt))
-        .limit(1),
-    );
-    const windowStartedAt = last?.respondedAt ?? last?.sentAt;
+    const windowStartedAt = await this.checkinsService.lastSentOrRespondedAt(userId);
     if (!windowStartedAt || windowStartedAt > cutoff) return;
     await this.queues.enqueue(
       QUEUE.checkinWeekly,
@@ -139,42 +151,45 @@ export class CheckinScheduler implements OnModuleInit {
     );
   }
 
+  /**
+   * Reengajamento (14 dias sem resposta): reenvia o MESMO check-in `PENDING` da semana
+   * corrente com um token novo (`CheckinService.createAndSend` já cuida da rotação), como
+   * mensagem simples — sem botão, já que o fluxo inteiro virou link (achado 2026-09-13).
+   */
   private async sendNudge(
     userId: string,
-    windowStartedAt: Date,
-  ): Promise<'SENT' | 'EXISTS' | 'NO_CONSENT'> {
-    if (!(await this.healthConsent.hasActiveForUser(userId))) return 'NO_CONSENT';
-    const created = await this.db.runAsSystem(async (tx) => {
-      const [row] = await tx
-        .insert(reengagementNudges)
-        .values({ userId, windowStartedAt })
-        .onConflictDoNothing()
-        .returning({ id: reengagementNudges.id });
-      return row;
-    });
-    if (!created) return 'EXISTS';
-    const outbound: WhatsappOutboundJob = {
-      userId,
-      type: 'REENGAGEMENT',
-      dedupeId: created.id,
-      text: 'Seu movimento pode recomecar no seu ritmo. Quer fazer um check-in agora? O profissional CREF da MOVIVO acompanha as respostas.',
-      buttons: [{ id: 'checkin:anticipated', title: 'Fazer check-in' }],
-    };
-    await this.queues.enqueue(QUEUE.whatsappOutbound, 'checkin-reengagement', outbound, {
-      jobId: `wa-nudge-${created.id}`,
-    });
-    await this.db.runAsSystem((tx) =>
+    _windowStartedAt: Date,
+  ): Promise<'SENT' | 'EXISTS' | 'NO_CONSENT' | 'NO_ACTIVE_PROTOCOL'> {
+    const [eligible] = await this.db.runAsSystem((tx) =>
       tx
-        .update(reengagementNudges)
-        .set({ sentAt: new Date() })
-        .where(eq(reengagementNudges.id, created.id)),
+        .select({
+          userId: protocols.userId,
+          name: users.name,
+          protocolId: protocols.id,
+          createdAt: protocols.createdAt,
+          totalWeeks: protocols.totalWeeks,
+        })
+        .from(protocols)
+        .innerJoin(users, eq(users.id, protocols.userId))
+        .innerJoin(subscriptions, eq(subscriptions.userId, protocols.userId))
+        .where(
+          and(
+            eq(protocols.userId, userId),
+            eq(protocols.status, 'ACTIVE'),
+            inArray(subscriptions.status, ['ACTIVE', 'TRIALING']),
+          ),
+        )
+        .limit(1),
     );
-    this.logger.info({ event: 'reengagement_sent', userId }, 'reengajamento enfileirado');
-    return 'SENT';
-  }
-
-  private delayWithinTwoHours(userId: string, weekNumber: number): number {
-    const digest = createHash('sha256').update(`${userId}:${weekNumber}`).digest();
-    return digest.readUInt32BE(0) % (2 * 60 * 60 * 1000);
+    if (!eligible) return 'NO_ACTIVE_PROTOCOL';
+    const weekNumber = this.checkinsService.weekNumber(eligible.createdAt, eligible.totalWeeks);
+    const firstName = eligible.name?.trim().split(/\s+/)[0] ?? null;
+    return this.checkinsService.createAndSend(
+      userId,
+      eligible.protocolId,
+      weekNumber,
+      firstName,
+      'NUDGE',
+    );
   }
 }

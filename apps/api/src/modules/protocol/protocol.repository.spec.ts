@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ProtocolStructure } from '@movivo/shared';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { HealthCipherService } from '../../core/database/health-cipher.service';
 import type {
   TenantDatabase,
   TenantTransaction,
@@ -12,6 +13,14 @@ import {
   signatureHash,
   supersedePreviousActiveProtocols,
 } from './protocol.repository';
+
+const mockCipher = {} as unknown as HealthCipherService;
+const mockLogger = { setContext: vi.fn(), warn: vi.fn() } as never;
+
+/** Casca de resultado de `update(...).set(...).where(...)`: thenable (array vazio) + `.returning()`. */
+function fakeUpdateWhereResult(rows: unknown[] = []) {
+  return Object.assign(Promise.resolve(rows), { returning: vi.fn(async () => rows) });
+}
 
 const content: ProtocolStructure = {
   promptVersion: 'v1',
@@ -73,7 +82,11 @@ function repositoryWithSigner(professionalId: string | undefined) {
       callback(tx),
     ),
   } as unknown as TenantDatabase;
-  return { repository: new ProtocolRepository(db), execute, protocolValues };
+  return {
+    repository: new ProtocolRepository(db, mockCipher, mockLogger),
+    execute,
+    protocolValues,
+  };
 }
 
 const SESSION_ID = '33333333-3333-4333-8333-333333333333';
@@ -195,7 +208,7 @@ describe('ProtocolRepository.persist — numeração de mesociclo (renovação)'
         callback(tx),
       ),
     } as unknown as TenantDatabase;
-    return { repository: new ProtocolRepository(db), protocolValues };
+    return { repository: new ProtocolRepository(db, mockCipher, mockLogger), protocolValues };
   }
 
   it('primeiro mesociclo do titular (sem linha nenhuma): mesocycleNumber = 1', async () => {
@@ -255,7 +268,7 @@ function repositoryForAutoRelease(
 ) {
   const execute = vi.fn(async () => [{ professional_id: professionalId }]);
   const updateSet = vi.fn(() => ({ where: updateWhere }));
-  const updateWhere = vi.fn(async () => []);
+  const updateWhere = vi.fn(() => fakeUpdateWhereResult([]));
   const tx = {
     select: () => ({
       from: () => ({
@@ -270,7 +283,12 @@ function repositoryForAutoRelease(
       callback(tx),
     ),
   } as unknown as TenantDatabase;
-  return { repository: new ProtocolRepository(db), updateSet, updateWhere, execute };
+  return {
+    repository: new ProtocolRepository(db, mockCipher, mockLogger),
+    updateSet,
+    updateWhere,
+    execute,
+  };
 }
 
 describe('ProtocolRepository.autoRelease (fila do profissional — "Disponível para Revisão")', () => {
@@ -357,14 +375,31 @@ describe('ProtocolRepository.autoRelease (fila do profissional — "Disponível 
 
 describe('supersedePreviousActiveProtocols', () => {
   it('marca SUPERSEDED só outros protocolos ACTIVE do mesmo titular, nunca o que está ativando', async () => {
-    const where = vi.fn(async () => []);
+    const where = vi.fn(() => fakeUpdateWhereResult([]));
     const set = vi.fn(() => ({ where }));
     const tx = { update: vi.fn(() => ({ set })) } as unknown as TenantTransaction;
 
-    await supersedePreviousActiveProtocols(tx, 'user-1', 'protocol-new');
+    await supersedePreviousActiveProtocols(tx, mockCipher, 'user-1', 'protocol-new');
 
     expect(tx.update).toHaveBeenCalledWith(protocols);
     expect(set).toHaveBeenCalledWith({ status: 'SUPERSEDED' });
     expect(where).toHaveBeenCalledOnce();
+  });
+
+  it('ADR-008: falha ao computar mesocycle_summary nunca propaga (titular não pode ficar sem protocolo por causa de um resumo)', async () => {
+    const where = vi.fn(() => fakeUpdateWhereResult([{ id: 'protocol-old' }]));
+    const set = vi.fn(() => ({ where }));
+    const warn = vi.fn();
+    const tx = {
+      update: vi.fn(() => ({ set })),
+      select: vi.fn(() => {
+        throw new Error('boom');
+      }),
+    } as unknown as TenantTransaction;
+
+    await expect(
+      supersedePreviousActiveProtocols(tx, mockCipher, 'user-1', 'protocol-new', { warn }),
+    ).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledOnce();
   });
 });

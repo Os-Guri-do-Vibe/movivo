@@ -27,13 +27,13 @@ export function conversionMessage(
   switch (touchpoint) {
     case 'day7':
       return (
-        'Uma semana treinando com a gente, você está mandando muito bem! 💪 Pra continuar com ' +
-        'seu plano montado sob a metodologia do profissional CREF, dá uma olhada nas opções de ' +
+        'Uma semana treinando com a gente, você está mandando muito bem! Pra continuar com ' +
+        'seu plano montado sob a metodologia profissional MOVIVO, dá uma olhada nas opções de ' +
         'assinatura quando quiser. Sem compromisso: cancela quando quiser.'
       );
     case 'day10':
       return (
-        '10 dias de treino! Já dá pra sentir a diferença de ter um plano feito pra você. ⏳ ' +
+        '10 dias de treino! Já dá pra sentir a diferença de ter um plano feito pra você.' +
         'Faltam poucos dias do seu período de experiência, se quiser seguir, tô por aqui pra ajudar.'
       );
     case 'day13':
@@ -48,7 +48,7 @@ export function conversionMessage(
       // último recurso antes de perder o usuário. Mesmo produto, período mais curto/barato.
       return (
         'Último dia do seu período de experiência! 🙌 Se o valor pesou, o plano Mensal sai por ' +
-        `R$39, o jeito mais leve de continuar com seu plano e a ${agentName}: ` +
+        `R$79,90 o jeito mais leve de continuar com seu plano e a ${agentName}: ` +
         checkoutUrl +
         '\nSem fidelidade: você cancela quando quiser.'
       );

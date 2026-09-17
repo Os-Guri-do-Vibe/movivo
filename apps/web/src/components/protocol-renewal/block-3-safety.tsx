@@ -133,7 +133,7 @@ export function Block3Safety({
             titleId="block3-title"
             titleRef={titleRef}
           >
-            Você sentiu alguma dor, desconforto ou limitação NOVA durante os treinos deste ciclo —
+            Você sentiu alguma dor, desconforto ou limitação NOVA durante os treinos deste ciclo,
             algo que não tinha antes?
           </QuestionHeader>
           <YesNo

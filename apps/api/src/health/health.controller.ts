@@ -15,10 +15,12 @@
  */
 import { Controller, Get } from '@nestjs/common';
 import { HealthCheck, HealthCheckService, type HealthCheckResult } from '@nestjs/terminus';
+import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 
 import { DatabaseHealthIndicator } from './indicators/database.health-indicator';
 import { RedisHealthIndicator } from './indicators/redis.health-indicator';
 
+@ApiTags('Health')
 @Controller('health')
 export class HealthController {
   constructor(
@@ -29,6 +31,16 @@ export class HealthController {
 
   @Get()
   @HealthCheck()
+  @ApiOperation({
+    summary: 'Liveness/readiness da API',
+    description:
+      'Faz I/O real contra Postgres (via PgBouncer) e Redis (via Sentinel) — não é um 200 decorativo. Sem autenticação (consumido por Docker healthcheck, load balancer e smoke test). Nunca expõe segredo/senha/connection string.',
+  })
+  @ApiResponse({ status: 200, description: 'Todas as dependências saudáveis.' })
+  @ApiResponse({
+    status: 503,
+    description: 'Ao menos uma dependência caiu — detalha qual indicador falhou.',
+  })
   check(): Promise<HealthCheckResult> {
     return this.health.check([
       () => this.database.isHealthy('db'),

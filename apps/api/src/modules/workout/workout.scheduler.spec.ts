@@ -1,12 +1,18 @@
 import { PinoLogger } from 'nestjs-pino';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { AppConfigService } from '../../core/config';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
+import type { ShortLinkService } from '../short-link/short-link.service';
 import type { WorkoutAccessService } from './workout-access.service';
 import type { WorkoutJournalService } from './workout-journal.service';
 import { WorkoutScheduler } from './workout.scheduler';
+
+const CONFIG = {
+  whatsapp: { publicSiteUrl: 'https://movivo.test' },
+} as unknown as AppConfigService;
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -32,6 +38,7 @@ function makeScheduler(reminderEnabled = true, hasWorkout = true) {
   const journal = vi.fn(async () => ({
     workout: hasWorkout ? { id: '22222222-2222-4222-8222-222222222222' } : null,
   }));
+  const create = vi.fn(async () => 'aB3xK9pQ');
   const scheduler = new WorkoutScheduler(
     {} as WorkerFactory,
     { enqueue } as unknown as QueueManager,
@@ -40,9 +47,11 @@ function makeScheduler(reminderEnabled = true, hasWorkout = true) {
       createMagicLink: vi.fn(async () => 'https://movivo.test/treino/acessar#token=secret'),
     } as unknown as WorkoutAccessService,
     { journal } as unknown as WorkoutJournalService,
+    { create } as unknown as ShortLinkService,
+    CONFIG,
     { setContext: vi.fn(), info: vi.fn() } as unknown as PinoLogger,
   );
-  return { scheduler, enqueue, journal };
+  return { scheduler, enqueue, journal, create };
 }
 
 describe('WorkoutScheduler.scan', () => {
@@ -57,6 +66,19 @@ describe('WorkoutScheduler.scan', () => {
       expect.objectContaining({ userId: USER_ID, type: 'WORKOUT_DAILY_LINK' }),
       { jobId: `wa-workout-link-${USER_ID}-2026-08-10` },
     );
+  });
+
+  it('encurta o magic link para /check-in/<código> no domínio da marca (achado 2026-09-12)', async () => {
+    const { scheduler, enqueue, create } = makeScheduler();
+    await scheduler.scan(new Date('2026-08-10T07:00:00.000Z'));
+
+    expect(create).toHaveBeenCalledWith(
+      'https://movivo.test/treino/acessar#token=secret',
+      expect.any(Date),
+    );
+    const [, , payload] = enqueue.mock.calls[0] as unknown as [string, string, { text: string }];
+    expect(payload.text).toContain('https://movivo.test/check-in/aB3xK9pQ');
+    expect(payload.text).not.toContain('#token=secret');
   });
 
   it('nao envia fora do horario fixo (04:00)', async () => {

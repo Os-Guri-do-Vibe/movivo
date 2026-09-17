@@ -66,7 +66,7 @@ export function BlockFooter({
           type="button"
           onClick={onBack}
           disabled={saving}
-          className="h-[52px] flex-1 rounded-xl border border-input bg-white px-6 text-body font-semibold text-petroleo transition-colors hover:bg-secondary disabled:opacity-50"
+          className="min-h-[52px] flex-1 rounded-xl border border-input bg-white px-6 text-body font-semibold text-petroleo transition-colors hover:bg-secondary disabled:opacity-50"
         >
           {backLabel}
         </button>
@@ -75,7 +75,7 @@ export function BlockFooter({
         type="button"
         disabled={disabled || saving}
         onClick={onContinue}
-        className="h-[52px] flex-1 rounded-xl bg-primary px-6 text-body font-semibold text-primary-foreground transition-colors hover:bg-primary/85 disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground"
+        className="min-h-[52px] flex-1 rounded-xl bg-primary px-6 text-body font-semibold text-primary-foreground transition-colors hover:bg-primary/85 disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground"
       >
         {saving ? savingLabel : continueLabel}
       </button>

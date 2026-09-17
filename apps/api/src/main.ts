@@ -15,6 +15,7 @@ import { Logger as PinoLogger } from 'nestjs-pino';
 
 import { AppModule } from './app.module';
 import { AppConfigService, getAppConfig, InvalidConfigurationError } from './core/config';
+import { setupSwagger } from './core/swagger/setup-swagger';
 
 /**
  * Default global do parser JSON (achado 2026-09-02). Generoso o bastante pra qualquer texto
@@ -107,6 +108,11 @@ async function bootstrap(): Promise<void> {
    */
   app.enableShutdownHooks();
 
+  // Swagger/OpenAPI (US-doc). Fora de produção por padrão — a doc expõe o shape de
+  // payloads de saúde/anamnese, e este monólito ainda não tem um público externo de API
+  // que justifique aceitar esse risco em prod. Ver `core/swagger/setup-swagger.ts`.
+  const swaggerPath = setupSwagger(app, config);
+
   await app.listen(config.httpPort, '0.0.0.0');
 
   const logger = new Logger('Bootstrap');
@@ -115,6 +121,9 @@ async function bootstrap(): Promise<void> {
       `(env=${config.appEnv}, tz=${config.timezone})`,
   );
   logger.log(`Health check: http://localhost:${config.httpPort}/${config.globalPrefix}/health`);
+  if (swaggerPath) {
+    logger.log(`Documentação da API (Swagger): http://localhost:${config.httpPort}/${swaggerPath}`);
+  }
 }
 
 bootstrap().catch((error: unknown) => {

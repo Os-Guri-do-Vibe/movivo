@@ -99,6 +99,26 @@ export interface EvolutionConfig {
   readonly webhookToken: string | undefined;
 }
 
+/**
+ * Config da transcrição de áudio do AI Coach (STT) — cascata (ADR-009, revisão
+ * 2026-09-14): OpenAI é a perna PRIMÁRIA de produção, Groq é o FALLBACK automático, em
+ * produção e local (`createAudioTranscription`, `core/audio/audio.module.ts`, monta as
+ * duas pernas configuradas nessa ordem). Cada uma tem chave e gate de HEALTH próprios —
+ * nenhuma "escolhe" a outra, as duas coexistem sempre que estiverem configuradas.
+ */
+export interface AudioTranscriptionConfig {
+  /** Reaproveita `OPENAI_API_KEY`; `undefined` em dev/CI sem segredo. Segredo redigido. */
+  readonly openaiApiKey: string | undefined;
+  /** Atestado separado de `llm.openaiHealthDataApproved` — ver `env.schema.ts`. */
+  readonly openaiHealthDataApproved: boolean;
+  /** `undefined` sem segredo — a cascata segue funcionando só com a perna OpenAI. Segredo redigido. */
+  readonly groqApiKey: string | undefined;
+  /** Gate PRÓPRIO, simétrico ao da OpenAI — cascata nunca contorna o gate de nenhuma perna. */
+  readonly groqHealthDataApproved: boolean;
+  readonly maxDurationSeconds: number;
+  readonly timeoutMs: number;
+}
+
 export interface PaymentConfig {
   /** Gateway ativo. `MOCK` em dev/CI; real só com chave (senão o factory cai no MOCK). */
   readonly provider: 'MOCK' | 'STRIPE' | 'ASAAS';
@@ -257,6 +277,18 @@ export class AppConfigService {
       baseUrl: this.config.EVOLUTION_API_URL,
       apiKey: this.config.EVOLUTION_API_KEY,
       webhookToken: this.config.EVOLUTION_WEBHOOK_TOKEN,
+    };
+  }
+
+  /** Config da transcrição de áudio do AI Coach (US audio). Chaves são segredos redigidos. */
+  get audioTranscription(): AudioTranscriptionConfig {
+    return {
+      openaiApiKey: this.config.OPENAI_API_KEY,
+      openaiHealthDataApproved: this.config.STT_OPENAI_HEALTH_DATA_APPROVED,
+      groqApiKey: this.config.GROQ_API_KEY,
+      groqHealthDataApproved: this.config.STT_GROQ_HEALTH_DATA_APPROVED,
+      maxDurationSeconds: this.config.AUDIO_TRANSCRIPTION_MAX_DURATION_SECONDS,
+      timeoutMs: this.config.AUDIO_TRANSCRIPTION_TIMEOUT_MS,
     };
   }
 

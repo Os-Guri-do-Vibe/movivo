@@ -625,7 +625,15 @@ describe('WorkoutJournalService mutations', () => {
       painExerciseIds: [],
       painNotes: '',
     });
-    expect(invalid.queues.enqueue).not.toHaveBeenCalled();
+    // Sem insight de duração — mas o comentário de feedback do Coach sempre é enfileirado
+    // (achado 2026-09-12), independente de haver ou não desvio de duração.
+    expect(invalid.queues.enqueue).toHaveBeenCalledTimes(1);
+    expect(invalid.queues.enqueue).toHaveBeenCalledWith(
+      'workout-feedback',
+      'workout-feedback',
+      { userId: USER_ID, workoutSessionId: WORKOUT_ID },
+      { jobId: `workout-feedback-${WORKOUT_ID}` },
+    );
 
     const structured = {
       primaryGoal: 'GAIN_MUSCLE',
@@ -648,7 +656,14 @@ describe('WorkoutJournalService mutations', () => {
       painExerciseIds: [],
       painNotes: '',
     });
-    expect(within.queues.enqueue).not.toHaveBeenCalled();
+    // Idem: sem insight de duração, mas o feedback do Coach sempre é enfileirado.
+    expect(within.queues.enqueue).toHaveBeenCalledTimes(1);
+    expect(within.queues.enqueue).toHaveBeenCalledWith(
+      'workout-feedback',
+      'workout-feedback',
+      { userId: USER_ID, workoutSessionId: WORKOUT_ID },
+      { jobId: `workout-feedback-${WORKOUT_ID}` },
+    );
   });
 
   it('valida fuso e atualiza somente preferencias informadas', async () => {

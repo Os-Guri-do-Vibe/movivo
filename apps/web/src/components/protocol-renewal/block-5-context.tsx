@@ -16,10 +16,12 @@ import {
 
 import {
   ChoiceGroup,
+  Combobox,
   FieldLabel,
   QuestionField,
   QuestionStack,
   TextArea,
+  TextInput,
   YesNo,
 } from '@/components/onboarding/fields';
 import { DatePicker } from '@/components/onboarding/date-picker';
@@ -34,7 +36,8 @@ export interface Block5State {
   location: TrainingLocation | null;
   dislikedExercise: { has: boolean | undefined; description: string };
   barriers: ConsistencyBarrier[];
-  goalChange: { changed: boolean | undefined; newGoal: PrimaryGoal | null };
+  barrierOther: string;
+  goalChange: { changed: boolean | undefined; newGoal: PrimaryGoal | null; newGoalOther: string };
   /** Só relevante quando `hasTargetEvent` (o GET informa se a pergunta 18 aparece). */
   targetEvent: { status: RenewalTargetEventStatus | null; newDate: string };
 }
@@ -47,7 +50,8 @@ export const EMPTY_BLOCK5: Block5State = {
   location: null,
   dislikedExercise: { has: undefined, description: '' },
   barriers: [],
-  goalChange: { changed: undefined, newGoal: null },
+  barrierOther: '',
+  goalChange: { changed: undefined, newGoal: null, newGoalOther: '' },
   targetEvent: { status: null, newDate: '' },
 };
 
@@ -214,9 +218,13 @@ export function Block5Context({
     data.dislikedExercise.has === false ||
     (data.dislikedExercise.has === true && hasText(data.dislikedExercise.description));
 
+  const barriersComplete = !data.barriers.includes('OTHER') || hasText(data.barrierOther);
+
   const goalChangeComplete =
     data.goalChange.changed === false ||
-    (data.goalChange.changed === true && data.goalChange.newGoal !== null);
+    (data.goalChange.changed === true &&
+      data.goalChange.newGoal !== null &&
+      (data.goalChange.newGoal !== 'OTHER' || hasText(data.goalChange.newGoalOther)));
 
   const targetEventComplete =
     data.targetEvent.status !== null &&
@@ -225,7 +233,7 @@ export function Block5Context({
   const screenComplete = [
     changesComplete,
     dislikedExerciseComplete,
-    true, // barriers: vazio já é uma resposta válida ("Nenhuma, está indo bem")
+    barriersComplete,
     goalChangeComplete,
     targetEventComplete,
   ][screen];
@@ -255,13 +263,13 @@ export function Block5Context({
 
           {data.changes.includes('DAYS_PER_WEEK') && (
             <QuestionStack className="border-l-2 border-primary pl-4" aria-live="polite">
-              <ChoiceGroup
+              <Combobox
+                id="renewalDaysPerWeek"
                 legend="Quantos dias por semana você tem disponível agora?"
                 items={DAYS_ITEMS}
-                selected={data.daysPerWeek ? [String(data.daysPerWeek)] : []}
-                onToggle={(value) => set('daysPerWeek', Number(value))}
-                columns
-                indicatorSide="left"
+                value={data.daysPerWeek ? String(data.daysPerWeek) : null}
+                onChange={(value) => set('daysPerWeek', Number(value))}
+                placeholder="Selecione a quantidade de dias"
               />
               <ChoiceGroup<Weekday>
                 legend="Quais dias da semana? (opcional)"
@@ -354,6 +362,17 @@ export function Block5Context({
             stack
             indicatorSide="left"
           />
+          {data.barriers.includes('OTHER') && (
+            <QuestionField className="border-l-2 border-primary pl-4" aria-live="polite">
+              <FieldLabel htmlFor="barrierOther">Qual dificuldade?</FieldLabel>
+              <TextInput
+                id="barrierOther"
+                value={data.barrierOther}
+                onChange={(value) => set('barrierOther', value)}
+                maxLength={120}
+              />
+            </QuestionField>
+          )}
         </section>
       )}
 
@@ -378,7 +397,9 @@ export function Block5Context({
                 ? []
                 : [data.goalChange.changed ? 'changed' : 'same']
             }
-            onToggle={(value) => set('goalChange', { changed: value === 'changed', newGoal: null })}
+            onToggle={(value) =>
+              set('goalChange', { changed: value === 'changed', newGoal: null, newGoalOther: '' })
+            }
             indicatorSide="left"
           />
           {data.goalChange.changed && (
@@ -391,6 +412,21 @@ export function Block5Context({
                 stack
                 indicatorSide="left"
               />
+              {data.goalChange.newGoal === 'OTHER' && (
+                <QuestionField className="mt-6" aria-live="polite">
+                  <FieldLabel htmlFor="goalChangeOther">
+                    Conta em poucas palavras qual é seu novo objetivo.
+                  </FieldLabel>
+                  <TextArea
+                    id="goalChangeOther"
+                    value={data.goalChange.newGoalOther}
+                    maxLength={120}
+                    onChange={(newGoalOther) =>
+                      set('goalChange', { ...data.goalChange, newGoalOther })
+                    }
+                  />
+                </QuestionField>
+              )}
             </div>
           )}
         </section>

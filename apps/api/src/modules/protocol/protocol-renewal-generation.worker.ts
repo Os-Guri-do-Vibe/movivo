@@ -18,9 +18,10 @@
  */
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { type Job } from 'bullmq';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, lt } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 import {
+  anamnesisStructuredSchema,
   PROTOCOL_RENEWAL_STEP_SCHEMAS,
   SESSION_DURATION_MINUTES,
   toGenerationGoal,
@@ -35,14 +36,34 @@ import {
 
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
-import { protocolRenewalSessions, protocols, users } from '../../core/database/schema';
-import { TenantDatabase } from '../../core/database/tenant-database.service';
+import {
+  anamnesisSessions,
+  protocolRenewalSessions,
+  protocols,
+  users,
+} from '../../core/database/schema';
+import {
+  TenantDatabase,
+  type TenantTransaction,
+} from '../../core/database/tenant-database.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { isFinalFailure } from '../jobs/dlq.handler';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
+import { healthBlockSchema } from '../anamnesis/health-block';
 import { evaluateRenewalSafety } from '../protocol-renewal/protocol-renewal-safety';
+import type { ContraindicationTag } from './exercise-catalog';
+import {
+  buildCareerDigestLine,
+  computeMesocycleSummary,
+  formatExecutionDigest,
+  formatPeriodizationLedger,
+  persistMesocycleSummary,
+  readMesocycleNotes,
+  PERIODIZATION_LEDGER_WINDOW,
+  type MesocycleSummary,
+} from './mesocycle-summary';
 import { ProtocolGeneratorService } from './protocol-generator.service';
 import { PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS } from './protocol-generation.worker';
 import { planProtocol } from './protocol-planner';
@@ -246,10 +267,13 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
 
       const [previous] = await tx
         .select({
+          id: protocols.id,
           content: protocols.content,
           constraints: protocols.constraints,
           totalWeeks: protocols.totalWeeks,
           mesocycleNumber: protocols.mesocycleNumber,
+          mesocycleSummary: protocols.mesocycleSummary,
+          mesocycleNotesCipher: protocols.mesocycleNotesCipher,
         })
         .from(protocols)
         .where(eq(protocols.id, session.previousProtocolId))
@@ -264,6 +288,13 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
       const block4 = PROTOCOL_RENEWAL_STEP_SCHEMAS[4].parse(session.dataBlock4);
       const block5 = PROTOCOL_RENEWAL_STEP_SCHEMAS[5].parse(session.dataBlock5);
 
+      const { periodizationLedger, executionDigest } = await this.loadLongitudinalContext(
+        tx,
+        userId,
+        previous,
+      );
+      const anamnesis = await this.loadAnamnesisInvariants(tx, userId);
+
       return {
         name: user.name,
         phoneNumber: user.phoneNumber,
@@ -272,6 +303,10 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
         previousConstraints: previous.constraints as UserConstraints,
         previousTotalWeeks: previous.totalWeeks,
         previousMesocycleNumber: previous.mesocycleNumber,
+        periodizationLedger,
+        executionDigest,
+        anamnesisInvariants: anamnesis?.text,
+        anamnesisInjuryTags: anamnesis?.injuryTags ?? [],
         block1,
         block2,
         block3,
@@ -279,6 +314,126 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
         block5,
       };
     });
+  }
+
+  /**
+   * ADR-008 Camadas 1+2 — ficha de periodização (todos os mesociclos, tamanho fixo) e
+   * digest de execução do mesociclo que acabou de fechar. Se o resumo do mesociclo
+   * anterior ainda for `NULL` (rollup do fechamento falhou, ou protocolo anterior a esta
+   * feature), computa sob demanda — best-effort, nunca bloqueia a renovação (ADR-008 §Riscos).
+   */
+  private async loadLongitudinalContext(
+    tx: TenantTransaction,
+    userId: string,
+    previous: {
+      id: string;
+      mesocycleNumber: number;
+      mesocycleSummary: unknown;
+      mesocycleNotesCipher: Buffer | null;
+    },
+  ): Promise<{ periodizationLedger?: string; executionDigest?: string }> {
+    let currentSummary = previous.mesocycleSummary as MesocycleSummary | null;
+    let currentNotesCipher = previous.mesocycleNotesCipher;
+
+    if (!currentSummary) {
+      try {
+        const computed = await computeMesocycleSummary(tx, this.cipher, userId, previous.id);
+        if (computed) {
+          await persistMesocycleSummary(tx, previous.id, computed);
+          currentSummary = computed.summary;
+          currentNotesCipher = computed.notesCipher;
+        }
+      } catch (err) {
+        this.logger.warn(
+          { err, userId, protocolId: previous.id },
+          'ADR-008: cálculo sob demanda do mesocycle_summary falhou — renovação segue sem periodização/digest',
+        );
+      }
+    }
+    if (!currentSummary) return {};
+
+    const notes = await readMesocycleNotes(this.cipher, currentNotesCipher);
+    const executionDigest = formatExecutionDigest(currentSummary, notes);
+
+    const olderRows = await tx
+      .select({ mesocycleSummary: protocols.mesocycleSummary })
+      .from(protocols)
+      .where(
+        and(
+          eq(protocols.userId, userId),
+          isNotNull(protocols.mesocycleSummary),
+          lt(protocols.mesocycleNumber, previous.mesocycleNumber),
+        ),
+      )
+      .orderBy(desc(protocols.mesocycleNumber));
+    const olderSummaries = olderRows.map((r) => r.mesocycleSummary as MesocycleSummary);
+
+    // Janela = o ciclo que acabou de fechar + até (WINDOW-1) anteriores a ele, do mais
+    // antigo pro mais recente ("mais recente por último", texto do prompt).
+    const windowOlderDesc = olderSummaries.slice(0, PERIODIZATION_LEDGER_WINDOW - 1);
+    const beyondWindow = olderSummaries.slice(PERIODIZATION_LEDGER_WINDOW - 1);
+    const recentLedgerLines = [
+      ...[...windowOlderDesc].reverse().map((s) => s.ledgerLine),
+      currentSummary.ledgerLine,
+    ];
+    const periodizationLedger = formatPeriodizationLedger(
+      recentLedgerLines,
+      buildCareerDigestLine(beyondWindow),
+    );
+
+    return { periodizationLedger, executionDigest };
+  }
+
+  /**
+   * ADR-008 Camada 3 — invariantes da anamnese de cadastro original, lidos de novo a cada
+   * renovação (nunca cacheados — leitura de 1x a cada ~6 semanas, ver ADR-008 §3.1).
+   * Também devolve as `injuryTags` originais para a RECONCILIAÇÃO em `toConstraints()`:
+   * segurança nunca é rebaixada por uma cascata de `constraints` que perdeu uma tag num
+   * fallback no meio do caminho — a união com a raiz é sempre conservadora.
+   */
+  private async loadAnamnesisInvariants(
+    tx: TenantTransaction,
+    userId: string,
+  ): Promise<{ text?: string; injuryTags: ContraindicationTag[] } | null> {
+    const [row] = await tx
+      .select({
+        dataBlock2: anamnesisSessions.dataBlock2,
+        dataBlock3: anamnesisSessions.dataBlock3,
+      })
+      .from(anamnesisSessions)
+      .where(and(eq(anamnesisSessions.userId, userId), eq(anamnesisSessions.status, 'SUBMITTED')))
+      .orderBy(desc(anamnesisSessions.submittedAt))
+      .limit(1);
+    if (!row?.dataBlock2 || !row.dataBlock3) return null;
+
+    const health = healthBlockSchema.parse(
+      JSON.parse(await this.cipher.decryptHealth(row.dataBlock2)),
+    );
+    const structured = anamnesisStructuredSchema.parse(row.dataBlock3);
+    const pain = painToConstraints(health.pain);
+
+    const lines: string[] = [
+      `Experiência declarada no cadastro original: ${structured.experience}.`,
+    ];
+    if (pain.raw.length) {
+      lines.push(`Histórico de lesão/dor relatado no cadastro original: ${pain.raw.join('; ')}.`);
+    }
+    const freeText = health.freeText;
+    if (freeText?.primaryGoalOther) {
+      lines.push(`Objetivo original descrito como "Outro": ${freeText.primaryGoalOther}.`);
+    }
+    if (freeText?.consistencyBarrierOther) {
+      lines.push(
+        `Dificuldade original descrita como "Outra": ${freeText.consistencyBarrierOther}.`,
+      );
+    }
+    if (freeText?.pastActivityOther) {
+      lines.push(`Atividade prévia descrita como "Outra": ${freeText.pastActivityOther}.`);
+    }
+    if (freeText?.avoidedExercise) {
+      lines.push(`Exercício que pediu para evitar desde o cadastro: ${freeText.avoidedExercise}.`);
+    }
+    return { text: lines.join('\n'), injuryTags: pain.tags };
   }
 
   /**
@@ -370,7 +525,18 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
       sessionMinutes,
       location,
       avoid,
-      injuryTags: [...new Set([...base.injuryTags, ...newPain.tags, ...parqRecheckTags])],
+      // ADR-008 §3.1 (Rafael) — reconciliação: a `constraints` em cascata pode ter perdido
+      // uma tag num fallback no meio do caminho; a união com `anamnesisInjuryTags` (a raiz
+      // de verdade) é sempre conservadora — segurança nunca é rebaixada por preferência
+      // nem por uma cascata incompleta.
+      injuryTags: [
+        ...new Set([
+          ...base.injuryTags,
+          ...newPain.tags,
+          ...parqRecheckTags,
+          ...ctx.anamnesisInjuryTags,
+        ]),
+      ],
       injuriesRaw: [...base.injuriesRaw, ...newPain.raw],
       requiresProfessionalReview: safety.requiresProfessionalReview,
       parqTags: safety.requiresProfessionalReview
@@ -379,11 +545,14 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
       parqTriggered: base.parqTriggered,
       ...(safety.requiresProfessionalReview ? { maxPhase: 'ADAPTACAO' as const } : {}),
       importantEvent,
+      ...(ctx.anamnesisInvariants ? { anamnesisInvariants: ctx.anamnesisInvariants } : {}),
       continuation: {
         previousMesocycleNumber: ctx.previousMesocycleNumber,
         previousPhase: ctx.previousContent.phase,
         previousPhaseDurationWeeks: ctx.previousTotalWeeks,
-        summary: this.buildContinuationSummary(block1, block2, block4, block5),
+        summary: this.buildContinuationSummary(block1, block2, block3, block4, block5),
+        ...(ctx.periodizationLedger ? { periodizationLedger: ctx.periodizationLedger } : {}),
+        ...(ctx.executionDigest ? { executionDigest: ctx.executionDigest } : {}),
       },
     };
   }
@@ -439,10 +608,15 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
     return lowAdherence ? 'OCCASIONAL' : 'REGULAR';
   }
 
-  /** Narrativa em PT-BR das respostas de desempenho/fadiga/resultado — DADO, nunca instrução. */
+  /**
+   * Narrativa em PT-BR das respostas de desempenho/fadiga/resultado — DADO, nunca
+   * instrução. ADR-008 (campos órfãos, Victor): `barrierOther` e `goalChange.newGoalOther`
+   * passam a entrar aqui — antes desta ADR eram salvos e nunca chegavam ao gerador.
+   */
   private buildContinuationSummary(
     block1: ProtocolRenewalBlock1,
     block2: ProtocolRenewalBlock2,
+    block3: ProtocolRenewalBlock3,
     block4: ProtocolRenewalBlock4,
     block5: ProtocolRenewalBlock5,
   ): string {
@@ -454,10 +628,35 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
       `Fadiga acumulada: ${block2.fatigueLevel}. Sono: ${block2.sleepQuality}. Estresse fora do treino: ${block2.stressLevel}.`,
       `Dor muscular pós-treino comparada ao habitual: ${block2.muscleSoreness}.`,
       `Evolução percebida em relação ao objetivo: ${block4.goalProgress}. Satisfação (0-10): ${block4.satisfaction}.`,
+      `Peso atual informado: ${block4.currentWeightKg}kg.`,
     ];
-    if (block4.currentWeightKg) lines.push(`Peso atual informado: ${block4.currentWeightKg}kg.`);
+    // Dor nova já sob avaliação profissional: sinal curto pro modelo calibrar a
+    // progressão na região SEM nomear diagnóstico (`evaluateRenewalSafety` já usa o mesmo
+    // campo para o gate de handoff — aqui é só contexto, nunca instrução clínica).
+    if (block3.newPain.hasNewPain && block3.newPain.soughtCare !== undefined) {
+      lines.push(
+        block3.newPain.soughtCare
+          ? 'A dor nova relatada já está sendo avaliada por um profissional de saúde.'
+          : 'A dor nova relatada ainda NÃO foi avaliada por nenhum profissional de saúde.',
+      );
+    }
     if (block5.barriers.length) {
-      lines.push(`Dificuldades relatadas para este novo ciclo: ${block5.barriers.join(', ')}.`);
+      const other =
+        block5.barriers.includes('OTHER') && block5.barrierOther
+          ? ` (detalhe do "Outra": ${block5.barrierOther})`
+          : '';
+      lines.push(
+        `Dificuldades relatadas para este novo ciclo: ${block5.barriers.join(', ')}${other}.`,
+      );
+    }
+    if (
+      block5.goalChange.changed &&
+      block5.goalChange.newGoal === 'OTHER' &&
+      block5.goalChange.newGoalOther
+    ) {
+      lines.push(
+        `Novo objetivo descrito em texto livre pelo aluno: ${block5.goalChange.newGoalOther}.`,
+      );
     }
     return lines.join('\n');
   }
@@ -521,6 +720,14 @@ interface LoadedRenewalContext {
   previousConstraints: UserConstraints;
   previousTotalWeeks: number;
   previousMesocycleNumber: number;
+  /** ADR-008 Camada 1 — ausente quando o resumo do mesociclo anterior não pôde ser lido/computado. */
+  periodizationLedger?: string;
+  /** ADR-008 Camada 2 — idem. */
+  executionDigest?: string;
+  /** ADR-008 Camada 3 — ausente só se não houver anamnese SUBMITTED (não deveria ocorrer). */
+  anamnesisInvariants?: string;
+  /** Tags de lesão da anamnese ORIGINAL, para a reconciliação em `toConstraints()`. */
+  anamnesisInjuryTags: ContraindicationTag[];
   block1: ProtocolRenewalBlock1;
   block2: ProtocolRenewalBlock2;
   block3: ProtocolRenewalBlock3;

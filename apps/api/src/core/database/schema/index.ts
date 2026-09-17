@@ -81,3 +81,6 @@ export * from './protocol-substitution-requests';
 
 // Renovação de protocolo por fim de mesociclo - formulário de transição.
 export * from './protocol-renewal-sessions';
+
+// Achado 2026-09-12 - alias curto e público para links longos enviados por WhatsApp.
+export * from './short-links';

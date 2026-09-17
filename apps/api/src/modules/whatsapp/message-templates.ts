@@ -6,19 +6,10 @@
  *
  * `\n---\n` separa bolhas — o outbound envia cada trecho como uma mensagem (Sofia §11).
  */
-import { PRIMARY_GOAL_LABELS, type AgentPersona, type ProtocolStructure } from '@movivo/shared';
+import type { AgentPersona } from '@movivo/shared';
 
 /** Separador de bolhas — o worker envia cada trecho como uma mensagem distinta. */
 export const BUBBLE_SEPARATOR = '\n---\n';
-
-/**
- * Emoji só quando a persona permite — `emojiPolicy: 'NENHUM'` é uma escolha do painel
- * (US-7.6), não um detalhe de copy. Devolve o glifo já prefixado por espaço, para ser
- * concatenado logo depois de uma frase encerrada por pontuação (`...pronto.${emoji(...)} `).
- */
-function emoji(persona: AgentPersona, glyph: string): string {
-  return persona.emojiPolicy === 'NENHUM' ? '' : ` ${glyph}`;
-}
 
 /**
  * Atraso da mensagem "estou analisando" — contado do SUBMIT do formulário, não da geração.
@@ -78,10 +69,10 @@ export function mesocycleRenewalMessage(firstName: string | null, link: string):
   const greeting = firstName ? `Olá, ${firstName}!` : 'Olá!';
   return (
     `${greeting}\n\n` +
-    'Seu mesociclo atual chegou ao fim! Para preparar seu treino atualizado, precisamos ' +
-    'saber como foram estas últimas semanas — leva poucos minutos.\n\n' +
+    'Seu mesociclo atual chegou ao fim! Para preparar seu novo protocolo, precisamos ' +
+    'saber como foram estas últimas semanas. Leva poucos minutos.\n\n' +
     `Responda por aqui: ${link}\n\n` +
-    'O profissional de Educação Física registrado no CREF que acompanha seu treino revisa ' +
+    'O seu treinador irá revisar ' +
     'suas respostas antes de liberar o próximo mesociclo.'
   );
 }
@@ -130,102 +121,6 @@ export function analyzingMessage(persona: AgentPersona): string {
   return persona.agentSelfIntro.trim();
 }
 
-/** Segundos até 60 "40 s", minutos até 60min "1 min 30 s", acima disso em horas "1 h 30 min". */
-function formatDurationLabel(totalSeconds: number): string {
-  if (totalSeconds <= 60) return `${totalSeconds} s`;
-  if (totalSeconds <= 3600) {
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return seconds === 0 ? `${minutes} min` : `${minutes} min ${seconds} s`;
-  }
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  return minutes === 0 ? `${hours} h` : `${hours} h ${minutes} min`;
-}
-
-/**
- * Uma linha por exercício: "• Nome: 3x8-12 (descanso 1 min 30 s)" para exercício de reps, ou
- * "• Nome: 3x40 s (descanso 20 s)" para exercício de duração (prancha/caminhada/bike/tiros,
- * achado 2026-08-18, `reps`/`durationSeconds` são mutuamente exclusivos no schema).
- */
-function exerciseLine(ex: ProtocolStructure['sessions'][number]['exercises'][number]): string {
-  const amount =
-    ex.durationSeconds !== undefined
-      ? formatDurationLabel(ex.durationSeconds)
-      : ex.reps && ex.reps.min === ex.reps.max
-        ? `${ex.reps.min}`
-        : `${ex.reps?.min}-${ex.reps?.max}`;
-  return `• ${ex.name}: ${ex.sets}x${amount} (descanso ${formatDurationLabel(ex.restSeconds)})`;
-}
-
-/**
- * Contexto do plano — entra ANTES do primeiro treino e do CTA. Curto de propósito: dá o
- * porquê, não repete o que o PDF/link já detalham.
- */
-/**
- * Achado de QA 2026-08-25: `mesocycleName` ("Mesociclo N — Hipertrofia") nomeia a ÊNFASE
- * TÉCNICA do bloco de periodização — um eixo diferente do objetivo pessoal declarado no
- * formulário (`goal`, ex. "Emagrecimento"). Juxtapor os dois na mesma frase lia como
- * contradição ("o objetivo é X, mas o plano é Y"). Aqui o objetivo vem PRIMEIRO, como o
- * que orienta o desenho do plano; o mesociclo vem depois, enquadrado como uma etapa/bloco
- * de tempo, não como uma segunda resposta a "pra que serve isso".
- */
-function explanationBlock(
-  goal: ProtocolStructure['goal'],
-  totalWeeks: number,
-  mesocycleName: string,
-): string {
-  return (
-    `Seu objetivo no formulário foi ${PRIMARY_GOAL_LABELS[goal]}, e é em torno disso que todo ` +
-    'o plano foi desenhado, da escolha dos exercícios ao número de séries e às faixas de ' +
-    `repetição. Ele começa pelo ${mesocycleName}, um bloco de ${totalWeeks} semanas: esse é o ` +
-    'tempo que o corpo precisa treinando no mesmo estímulo antes de fazer sentido evoluir pra ' +
-    'próxima etapa. Ao longo das semanas, repare em como você se sentiu em cada treino e se ' +
-    'conseguiu completar as séries com a técnica que queria: é sobre isso que vou te perguntar ' +
-    'no check-in semanal, e é a partir daí que o profissional CREF responsável ajusta o que for ' +
-    'preciso.'
-  );
-}
-
-function deliveryIntro(persona: AgentPersona): string {
-  return (
-    `Oi!${emoji(persona, '💪')} Sou ${persona.agentName}. Sou uma inteligência artificial e ` +
-    'seu plano de treino está pronto, montado dentro da metodologia de um profissional de ' +
-    'Educação Física registrado no CREF.'
-  );
-}
-
-/**
- * Entrega **sem PDF** (fallback raro — protocolo ativo cujo PDF falhou ao gerar): o texto É
- * a entrega inteira, por isso carrega tudo que o PDF traria em outro caminho — (1)
- * transparência de IA + respaldo CREF; (2) contexto do plano; (3) primeiro treino da semana
- * em destaque (aha moment); (4) link para o plano completo (US-2.6).
- */
-export function formatProtocolDelivery(
-  content: ProtocolStructure,
-  link: string,
-  persona: AgentPersona,
-  totalWeeks: number,
-  mesocycleName: string,
-): string {
-  const first = content.sessions[0];
-  const firstWorkout = first
-    ? [
-        `Seu primeiro treino desta semana (${first.focus}):`,
-        ...first.exercises.map(exerciseLine),
-      ].join('\n')
-    : 'Seu primeiro treino desta semana já está no seu plano.';
-
-  const cta = `Quer ver o plano completo das próximas semanas? É só abrir: ${link}`;
-
-  return [
-    deliveryIntro(persona),
-    explanationBlock(content.goal, totalWeeks, mesocycleName),
-    firstWorkout,
-    cta,
-  ].join(BUBBLE_SEPARATOR);
-}
-
 /** De/para de exercício de uma substituição liberada — usado só na saudação de reentrega. */
 export interface SubstitutionDeliveryInfo {
   from: string;
@@ -247,18 +142,27 @@ export interface SubstitutionDeliveryInfo {
  * seus objetivos...", como se fosse a primeira entrega — nunca mencionando que era uma
  * ATUALIZAÇÃO por causa da troca que ele mesmo pediu. `substitution`, quando informado, troca
  * a saudação inteira por uma que nomeia a troca aplicada.
+ *
+ * `volumeAdjusted` (achado 2026-09-13): mesma lógica, pro ajuste de volume (séries/reps)
+ * aplicado a partir da resposta "poderia ser mais curto" do check-in semanal.
  */
 export function protocolDeliveryPdfText(
   firstName: string | null,
   aiSummary?: string,
   substitution?: SubstitutionDeliveryInfo,
+  volumeAdjusted?: boolean,
 ): string {
   const intro = substitution
     ? `${firstName ? `${firstName}, a` : 'A'} troca do seu exercício já foi feita! 💚🔄\n\n` +
       `"${substitution.from}" virou "${substitution.to}" no seu protocolo, segue o treino ` +
       'atualizado em PDF.'
-    : `${firstName ? `${firstName}, seu` : 'Seu'} treino está pronto! 💚🔥\n\n` +
-      'Montamos tudo com base nos seus objetivos, na sua rotina e nas informações que você ' +
-      'compartilhou com a gente.';
+    : volumeAdjusted
+      ? `${firstName ? `${firstName}, ajustei` : 'Ajustei'} seu treino pra ficar mais rápido, ` +
+        'como você pediu no check-in semanal! 💚⏱️\n\n' +
+        'Reduzi volume respeitando a metodologia do profissional CREF, sem trocar nenhum ' +
+        'exercício — segue o protocolo atualizado em PDF.'
+      : `${firstName ? `${firstName}, seu` : 'Seu'} treino está pronto! 💚🔥\n\n` +
+        'Montamos tudo com base nos seus objetivos, na sua rotina e nas informações que você ' +
+        'compartilhou com a gente.';
   return aiSummary ? [intro, aiSummary].join(BUBBLE_SEPARATOR) : intro;
 }

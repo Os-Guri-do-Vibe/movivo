@@ -34,9 +34,15 @@ const HIGH_INTENSITY_THRESHOLD = 7;
 
 export function evaluateRenewalSafety(block3: ProtocolRenewalBlock3): RenewalSafetyEvaluation {
   const { newPain, parqRecheck } = block3;
+  // ADR-008 (campo órfão `soughtCare`, Victor): tendência de piora escala o alerta
+  // sempre, independente de acompanhamento — uma trajetória piorando merece um novo olhar
+  // mesmo para quem já é acompanhado. Intensidade alta ISOLADA (sem piora) só escala
+  // quando NÃO há avaliação profissional em curso: dor já sob acompanhamento não precisa
+  // do mesmo grau de conservadorismo que dor não avaliada por ninguém.
   const newPainNeedsHandoff =
     newPain.hasNewPain &&
-    ((newPain.intensity ?? 0) >= HIGH_INTENSITY_THRESHOLD || newPain.trend === 'WORSENING');
+    (newPain.trend === 'WORSENING' ||
+      (!newPain.soughtCare && (newPain.intensity ?? 0) >= HIGH_INTENSITY_THRESHOLD));
 
   return {
     requiresProfessionalReview: parqRecheck.changedToYes,

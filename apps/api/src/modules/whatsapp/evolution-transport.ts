@@ -115,6 +115,28 @@ export interface EvolutionTransport {
    * EvolutionAPI ainda não gerou nenhum QR pra essa instância.
    */
   fetchQrCode(instanceName: string): Promise<string | null>;
+  /**
+   * Baixa uma mensagem de voz (US audio — AI Coach por áudio). `mediaKey` é o `key`
+   * (`{ remoteJid, fromMe, id, participant? }`) que `EvolutionInboundEdge` serializou em
+   * `audio.mediaKey` — a única coisa que este endpoint da EvolutionAPI aceita pra
+   * localizar a mídia (ela não embute o áudio no webhook: `base64: false` em
+   * `configureWebhook`).
+   *
+   * `POST /chat/getBase64FromMediaMessage/{instance}` **confirmado contra o container
+   * real** (`evoapicloud/evolution-api:v2.3.7`, lendo
+   * `whatsapp.baileys.service.js::getBase64FromMediaMessage`, 2026-09-14): a rota não tem
+   * schema de validação (`schema: null`), então `{ message: { key } }` é aceito — sem
+   * `message.message` (não mandamos o conteúdo, só a referência), o serviço cai no
+   * caminho `getMessage(key, true)`, que busca a mensagem pelo `key.id` no Postgres
+   * PRÓPRIO da EvolutionAPI (`DATABASE_SAVE_DATA_NEW_MESSAGE=true` no `docker-compose.yml`
+   * — todo inbound já é persistido lá por padrão, então a busca sempre acha). O retorno
+   * real é `{ mediaType, fileName, caption, size, mimetype, base64, buffer }` — os dois
+   * campos que este método lê (`base64`, `mimetype`) batem exatamente.
+   */
+  downloadAudio(
+    instanceName: string,
+    mediaKey: string,
+  ): Promise<{ base64: string; mimetype: string }>;
 }
 
 export const EVOLUTION_TRANSPORT = Symbol('MOVIVO_EVOLUTION_TRANSPORT');
@@ -471,6 +493,29 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
         caption,
       }),
     });
+  }
+
+  /**
+   * Ver a nota de confirmação contra o container real na assinatura da interface.
+   * `{ message: { key } }`, sem `convertToMp4` — deixamos o formato original (Opus/OGG),
+   * a OpenAI aceita direto, sem custo de transcodificação. Lança em qualquer resposta sem
+   * `base64` — melhor falhar claro (o chamador já tem fallback de UX pra isso) do que
+   * seguir com áudio vazio.
+   */
+  async downloadAudio(
+    instanceName: string,
+    mediaKey: string,
+  ): Promise<{ base64: string; mimetype: string }> {
+    const key = JSON.parse(mediaKey) as unknown;
+    const res = await this.request(
+      `/chat/getBase64FromMediaMessage/${encodeURIComponent(instanceName)}`,
+      { method: 'POST', body: JSON.stringify({ message: { key }, convertToMp4: false }) },
+    );
+    const body = (await res.json()) as { base64?: string; mimetype?: string };
+    if (!body.base64) {
+      throw new Error('EvolutionAPI não devolveu base64 para a mensagem de voz.');
+    }
+    return { base64: body.base64, mimetype: body.mimetype ?? 'audio/ogg; codecs=opus' };
   }
 
   /** Indicador "digitando…" imediato (US-3.5) — best-effort, nunca lança. */

@@ -12,6 +12,7 @@ import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { AudioTranscriptionPort } from '../../core/audio/audio-transcription.port';
 import type { AppConfigService } from '../../core/config';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
@@ -19,6 +20,7 @@ import { DomainEventBus } from '../../core/event-bus/event-bus.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QueueManager } from '../jobs/queue-manager.service';
+import type { EvolutionTransport } from './evolution-transport';
 import { AraraInboundEdge } from './inbound/arara-inbound.edge';
 import type { WhatsappInboundEdge, WhatsappInboundEdges } from './inbound/whatsapp-inbound-edge';
 import { signWebhookBody, SIGNATURE_HEADER, TIMESTAMP_HEADER } from './webhook-signature';
@@ -27,6 +29,7 @@ import { type AiResponseJob, WhatsappInboundService } from './whatsapp-inbound.s
 const SECRET = 'unit-webhook-secret';
 const USER_ID = '33333333-3333-4333-8333-333333333333';
 const PHONE = '+5541999998888';
+const INSTANCE_NAME = 'movivo-teste';
 
 /** Fake Redis: SET (com/sem NX), RPUSH, EXPIRE, INCR em memória. */
 function fakeRedis(): {
@@ -71,6 +74,12 @@ function makeService(
     consentActive?: boolean;
     checkinHandled?: boolean;
     evolutionEdge?: WhatsappInboundEdge;
+    audioHealthDataApproved?: boolean;
+    audioApiKey?: string | undefined;
+    audioMaxDurationSeconds?: number;
+    transcribe?: ReturnType<typeof vi.fn>;
+    evolutionInstanceName?: string | null;
+    downloadAudio?: ReturnType<typeof vi.fn>;
   } = {},
 ) {
   const { redis, rpush, keys, seed } = fakeRedis();
@@ -82,6 +91,21 @@ function makeService(
   const config = {
     get whatsapp() {
       return { webhookSecret: 'secret' in opts ? opts.secret : SECRET };
+    },
+    // OpenAI aprovada por padrão: a maioria dos testes de áudio quer exercitar o caminho
+    // feliz sem precisar declarar as flags toda vez; os testes de gate desligam de
+    // propósito. Groq fica desligado — a cascata em si (OpenAI → Groq) tem spec própria
+    // em `audio-transcription-cascade.spec.ts`/`audio.module.spec.ts`; aqui o
+    // `audioTranscription` injetado já é um fake direto (`transcribe`), não a cascata real.
+    get audioTranscription() {
+      return {
+        openaiApiKey: 'audioApiKey' in opts ? opts.audioApiKey : 'sk-fake-openai-key',
+        openaiHealthDataApproved: opts.audioHealthDataApproved ?? true,
+        groqApiKey: undefined,
+        groqHealthDataApproved: false,
+        maxDurationSeconds: opts.audioMaxDurationSeconds ?? 120,
+        timeoutMs: 20_000,
+      };
     },
   } as unknown as AppConfigService;
   const logger = { setContext: vi.fn(), info: vi.fn(), warn: vi.fn() } as unknown as PinoLogger;
@@ -105,18 +129,43 @@ function makeService(
     ARARA: new AraraInboundEdge(config),
     EVOLUTION: evolutionEdge,
   };
+  const transcribe = opts.transcribe ?? vi.fn(async () => 'transcrição de teste');
+  const audioTranscription = { transcribe } as unknown as AudioTranscriptionPort;
+  const downloadAudio =
+    opts.downloadAudio ??
+    vi.fn(async () => ({ base64: 'YWJj', mimetype: 'audio/ogg; codecs=opus' }));
+  const evolutionTransport = {
+    lastKnownInstanceName: () =>
+      'evolutionInstanceName' in opts ? opts.evolutionInstanceName : INSTANCE_NAME,
+    downloadAudio,
+  } as unknown as EvolutionTransport;
   const service = new WhatsappInboundService(
     redis,
     new RedisKeyBuilder('movivo'),
     edges,
+    audioTranscription,
+    evolutionTransport,
     db,
     queues,
     healthConsent,
     events,
     { emit: vi.fn() } as unknown as DashboardQueueEventsService,
+    config,
     logger,
   );
-  return { service, enqueue, rpush, hasActiveForUser, revokeForUser, events, keys, seed, logger };
+  return {
+    service,
+    enqueue,
+    rpush,
+    hasActiveForUser,
+    revokeForUser,
+    events,
+    keys,
+    seed,
+    logger,
+    transcribe,
+    downloadAudio,
+  };
 }
 
 function signed(payload: object, secret = SECRET) {
@@ -163,7 +212,7 @@ describe('WhatsappInboundService.ingest', () => {
     expect(job.batchKey).toContain(USER_ID.toLowerCase());
     expect(job).not.toHaveProperty('text'); // nenhum PII no job
     expect(job.enqueuedAt).toBeGreaterThan(0);
-    expect(overrides.delay).toBe(3_000);
+    expect(overrides.delay).toBe(7_000);
   });
 
   it('descarta payload com HMAC inválido (forjado) sem enfileirar', async () => {
@@ -328,5 +377,133 @@ describe('WhatsappInboundService.ingest', () => {
     );
     expect(events).toContain('webhook_no_message');
     expect(events).not.toContain('webhook_rejected');
+  });
+});
+
+describe('WhatsappInboundService.ingest — mensagem de voz (US audio, EvolutionAPI)', () => {
+  /** Borda fake que devolve direto uma mensagem de voz — a EvolutionInboundEdge real (que
+   * monta `audio.mediaKey` a partir do `key` do Baileys) é testada no spec dela. */
+  function audioEdge(audio: { mediaKey: string; durationSeconds?: number }): WhatsappInboundEdge {
+    return {
+      provider: 'EVOLUTION',
+      verify: () => ({ ok: true }),
+      normalize: () => [{ messageId: 'aud-1', from: PHONE, audio } as never],
+    };
+  }
+
+  function ingestAudio(created: ReturnType<typeof makeService>, correlationId = 'audio') {
+    return created.service.ingest({
+      provider: 'EVOLUTION',
+      rawBody: undefined,
+      headers: {},
+      body: {},
+      correlationId,
+    });
+  }
+
+  it('caminho feliz: baixa, transcreve e segue o pipeline normal — o job nunca carrega o texto', async () => {
+    const created = makeService({
+      evolutionEdge: audioEdge({ mediaKey: '{"id":"WA-1"}', durationSeconds: 12 }),
+      transcribe: vi.fn(async () => 'quantas series eu faço?'),
+    });
+    await ingestAudio(created);
+    expect(created.downloadAudio).toHaveBeenCalledWith(INSTANCE_NAME, '{"id":"WA-1"}');
+    expect(created.transcribe).toHaveBeenCalledWith({
+      audio: expect.any(Buffer),
+      mimeType: 'audio/ogg; codecs=opus',
+    });
+    expect(created.rpush).toHaveBeenCalledOnce();
+    const [, raw] = created.rpush.mock.calls[0] as [string, string];
+    expect(JSON.parse(raw)).toMatchObject({ text: 'quantas series eu faço?' });
+    // Só o job de ai-response — nenhum aviso de fallback junto.
+    expect(created.enqueue).toHaveBeenCalledTimes(1);
+    expect(created.enqueue).toHaveBeenCalledWith(
+      'ai-response',
+      'coach-response',
+      expect.any(Object),
+      expect.any(Object),
+    );
+  });
+
+  it('acima do teto de duração: nunca baixa nem transcreve, avisa o aluno', async () => {
+    const created = makeService({
+      evolutionEdge: audioEdge({ mediaKey: '{"id":"WA-1"}', durationSeconds: 200 }),
+      audioMaxDurationSeconds: 120,
+    });
+    await ingestAudio(created);
+    expect(created.downloadAudio).not.toHaveBeenCalled();
+    expect(created.transcribe).not.toHaveBeenCalled();
+    expect(created.rpush).not.toHaveBeenCalled();
+    expect(created.enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'audio-transcription-fallback',
+      expect.objectContaining({ type: 'COACH_MESSAGE' }),
+      expect.any(Object),
+    );
+  });
+
+  it('sem aprovação de dado de saúde para STT (gate próprio do ADR-005-R2): não transcreve', async () => {
+    const created = makeService({
+      evolutionEdge: audioEdge({ mediaKey: '{"id":"WA-1"}' }),
+      audioHealthDataApproved: false,
+    });
+    await ingestAudio(created);
+    expect(created.downloadAudio).not.toHaveBeenCalled();
+    expect(created.enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'audio-transcription-fallback',
+      expect.objectContaining({ type: 'COACH_MESSAGE' }),
+      expect.any(Object),
+    );
+  });
+
+  it('falha ao baixar/transcrever: avisa o aluno e descarta, sem quebrar o pipeline', async () => {
+    const created = makeService({
+      evolutionEdge: audioEdge({ mediaKey: '{"id":"WA-1"}' }),
+      transcribe: vi.fn(async () => {
+        throw new Error('provider fora do ar');
+      }),
+    });
+    await ingestAudio(created);
+    expect(created.rpush).not.toHaveBeenCalled();
+    expect(created.enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'audio-transcription-fallback',
+      expect.objectContaining({ type: 'COACH_MESSAGE' }),
+      expect.any(Object),
+    );
+  });
+
+  it('instância da EvolutionAPI ainda desconhecida: avisa e descarta sem tentar baixar', async () => {
+    const created = makeService({
+      evolutionEdge: audioEdge({ mediaKey: '{"id":"WA-1"}' }),
+      evolutionInstanceName: null,
+    });
+    await ingestAudio(created);
+    expect(created.downloadAudio).not.toHaveBeenCalled();
+    expect(created.enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'audio-transcription-fallback',
+      expect.objectContaining({ type: 'COACH_MESSAGE' }),
+      expect.any(Object),
+    );
+  });
+
+  it('frase de revogação dita por voz é honrada depois de transcrita', async () => {
+    const created = makeService({
+      evolutionEdge: audioEdge({ mediaKey: '{"id":"WA-1"}' }),
+      transcribe: vi.fn(async () => 'Revogar consentimento de saude'),
+    });
+    await ingestAudio(created);
+    expect(created.revokeForUser).toHaveBeenCalledWith(USER_ID);
+  });
+
+  it('orçamento estourado: descarta ANTES de transcrever (nunca gasta com STT)', async () => {
+    const created = makeService({ evolutionEdge: audioEdge({ mediaKey: '{"id":"WA-1"}' }) });
+    created.seed(`movivo:u:${USER_ID.toLowerCase()}:inbound-rate`, '30');
+    await ingestAudio(created);
+    expect(created.downloadAudio).not.toHaveBeenCalled();
+    expect(created.transcribe).not.toHaveBeenCalled();
+    expect(created.enqueue).not.toHaveBeenCalled();
   });
 });

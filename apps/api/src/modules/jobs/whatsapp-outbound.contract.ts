@@ -11,7 +11,6 @@ export type WhatsappJobType =
   | 'MESOCYCLE_RENEWAL_INVITE'
   | 'COACH_MESSAGE'
   | 'CHECKIN_MESSAGE'
-  | 'WORKOUT_QUICK_REPLY'
   | 'WORKOUT_DAILY_LINK'
   | 'WORKOUT_INSIGHT'
   | 'REENGAGEMENT'
@@ -38,10 +37,11 @@ export interface WhatsappOutboundJob {
   code?: string;
   /**
    * `PROTOCOL_DELIVERY` apenas (achado 2026-09-08): distingue a 1ª entrega do treino de uma
-   * reentrega após substituição de exercício aprovada — a saudação estática muda (ver
-   * `protocolDeliveryPdfText`). Ausente/`'INITIAL'` mantém o texto de sempre.
+   * reentrega após substituição de exercício aprovada, ou (achado 2026-09-13) após ajuste de
+   * volume pelo check-in semanal — a saudação estática muda (ver `protocolDeliveryPdfText`).
+   * Ausente/`'INITIAL'` mantém o texto de sempre.
    */
-  deliveryReason?: 'INITIAL' | 'SUBSTITUTION';
+  deliveryReason?: 'INITIAL' | 'SUBSTITUTION' | 'CHECKIN_ADJUSTMENT';
   /** Só com `deliveryReason: 'SUBSTITUTION'` — nomes do exercício trocado, pra saudação. */
   substitutionFromExercise?: string;
   substitutionToExercise?: string;

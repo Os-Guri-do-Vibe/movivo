@@ -36,8 +36,10 @@
  *  - `key.participant` (grupo) e qualquer JID não-individual são descartados em
  *    `resolveSenderPhone()` — mensagem de grupo é fala de TERCEIRO. O fallback para
  *    `remoteJidAlt` é restrito ao caso individual-LID justamente para não abrir essa porta.
- *  - Só texto e resposta de botão alimentam o LLM. Imagem, áudio, sticker, reaction e
- *    protocolMessage são descartados sem nunca virar prompt.
+ *  - Texto, resposta de botão e mensagem de voz (`audioMessage`, transcrita por
+ *    `WhatsappInboundService` antes do LLM — achado 2026-09-14, decisão do fundador)
+ *    alimentam o LLM. Imagem, sticker, reaction e protocolMessage seguem descartados sem
+ *    nunca virar prompt — fora do escopo pedido, mesmo espírito de menor superfície.
  */
 import { Injectable } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
@@ -86,8 +88,8 @@ const keySchema = z.object({
 });
 
 /**
- * Só os campos de texto/botão são modelados. Tudo que não aparece aqui (imagem, áudio,
- * sticker, reaction, protocolMessage…) simplesmente não produz texto e vira descarte —
+ * Campos de texto/botão/voz são modelados. Tudo que não aparece aqui (imagem, sticker,
+ * reaction, protocolMessage…) simplesmente não produz texto nem áudio e vira descarte —
  * o allowlist é a AUSÊNCIA de campo, não uma lista negra de `messageType` (cujo
  * vocabulário completo do Baileys não está confirmado contra o container).
  */
@@ -104,6 +106,19 @@ const messageSchema = z.object({
     .object({
       title: z.string().optional(),
       singleSelectReply: z.object({ selectedRowId: z.string().optional() }).optional(),
+    })
+    .optional(),
+  /**
+   * Mensagem de voz (nota de áudio ou arquivo de áudio — `ptt` distingue as duas, mas não
+   * tratamos diferente: as duas viram transcrição). `seconds` alimenta o teto de duração
+   * ANTES de gastar orçamento de transcrição (`WhatsappInboundService`); sem o campo, o
+   * teto é aplicado só depois de baixar o áudio.
+   */
+  audioMessage: z
+    .object({
+      seconds: z.number().positive().optional(),
+      mimetype: z.string().optional(),
+      ptt: z.boolean().optional(),
     })
     .optional(),
 });
@@ -216,18 +231,37 @@ export class EvolutionInboundEdge implements WhatsappInboundEdge {
       message?.listResponseMessage?.title,
       buttonId,
     );
-    // Imagem, áudio, sticker, reaction, protocolMessage: nenhum campo de texto → descarte.
-    if (!rawText) return this.discard('unsupported_message_type');
 
-    const text = sanitizeText(rawText);
-    if (text.length === 0) return this.discard('empty_text');
+    let candidate: unknown;
+    if (rawText) {
+      const text = sanitizeText(rawText);
+      if (text.length === 0) return this.discard('empty_text');
+      candidate = {
+        messageId: key.id,
+        from,
+        text,
+        ...(buttonId ? { buttonId: buttonId.slice(0, 100) } : {}),
+      };
+    } else if (message?.audioMessage) {
+      // Sem URL/base64 no próprio webhook (Baileys nunca embute mídia — `base64: false`
+      // em `configureWebhook`): `mediaKey` carrega o `key` da mensagem, a única coisa
+      // que `WhatsappInboundService`/`EvolutionTransport` precisam pra buscar o áudio
+      // depois em `getBase64FromMediaMessage` — ver nota em `evolution-transport.ts`.
+      candidate = {
+        messageId: key.id,
+        from,
+        audio: {
+          mediaKey: JSON.stringify(key),
+          ...(message.audioMessage.seconds !== undefined
+            ? { durationSeconds: Math.ceil(message.audioMessage.seconds) }
+            : {}),
+        },
+      };
+    } else {
+      // Imagem, sticker, reaction, protocolMessage: nenhum campo suportado → descarte.
+      return this.discard('unsupported_message_type');
+    }
 
-    const candidate = {
-      messageId: key.id,
-      from,
-      text,
-      ...(buttonId ? { buttonId: buttonId.slice(0, 100) } : {}),
-    };
     const normalized = normalizedInboundSchema.safeParse(candidate);
     // Não bateu com o próprio contrato que acabamos de montar = bug NOSSO, não descarte
     // legítimo. `null` para cair no caminho de payload inválido (que loga rejeição).

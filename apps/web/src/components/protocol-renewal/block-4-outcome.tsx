@@ -4,18 +4,11 @@ import * as React from 'react';
 
 import { MAX_WEIGHT_KG, MIN_WEIGHT_KG, type RenewalGoalProgress } from '@movivo/shared';
 
-import {
-  ChoiceGroup,
-  FieldHelp,
-  FieldLabel,
-  QuestionField,
-  TextInput,
-} from '@/components/onboarding/fields';
+import { ChoiceGroup, FieldLabel, QuestionField, TextInput } from '@/components/onboarding/fields';
 import { BlockFooter, QuestionHeader } from './block-shell';
 
 /** Bloco 4 — resultado percebido (perguntas 11-13). */
 export interface Block4State {
-  /** String vazia = não informado (campo opcional). */
   currentWeightKg: string;
   goalProgress: RenewalGoalProgress | null;
   /** Escala 0-10; começa em 5 (ponto médio), mesma convenção do slider de dor da anamnese. */
@@ -38,7 +31,7 @@ const GOAL_PROGRESS_ITEMS: { value: RenewalGoalProgress; label: string }[] = [
 const TOTAL_QUESTIONS = 3;
 
 function isWeightValid(weightKg: string): boolean {
-  if (weightKg.trim().length === 0) return true;
+  if (weightKg.trim().length === 0) return false;
   const value = Number(weightKg.replace(',', '.'));
   return Number.isFinite(value) && value >= MIN_WEIGHT_KG && value <= MAX_WEIGHT_KG;
 }
@@ -96,18 +89,14 @@ export function Block4Outcome({
             Peso atual (kg)
           </QuestionHeader>
           <QuestionField>
-            <FieldLabel htmlFor="currentWeightKg">Peso atual, em kg (opcional)</FieldLabel>
+            <FieldLabel htmlFor="currentWeightKg">Peso atual, em kg</FieldLabel>
             <TextInput
               id="currentWeightKg"
               value={data.currentWeightKg}
               onChange={(value) => set('currentWeightKg', value)}
               inputMode="decimal"
               placeholder="Ex.: 78"
-              error={!isWeightValid(data.currentWeightKg)}
             />
-            <FieldHelp>
-              Opcional — mais relevante para quem tem objetivo de emagrecimento ou hipertrofia.
-            </FieldHelp>
           </QuestionField>
         </section>
       )}

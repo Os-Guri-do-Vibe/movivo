@@ -42,6 +42,7 @@ import {
 } from '@nestjs/common';
 import { type RawBodyRequest } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import { ApiHeader, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { type Request } from 'express';
 
 import { PaymentWebhookService } from './payment-webhook.service';
@@ -58,6 +59,7 @@ export const PAYMENT_TIMESTAMP_HEADER = 'x-payment-timestamp';
  */
 export const PAYMENT_WEBHOOK_BODY_LIMIT = '100kb';
 
+@ApiTags('Webhook de Pagamento')
 @Controller('webhook')
 export class PaymentWebhookController {
   constructor(private readonly webhook: PaymentWebhookService) {}
@@ -68,6 +70,26 @@ export class PaymentWebhookController {
   // backoff), apertado para quem varre a rota testando assinaturas.
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @UseGuards(ThrottlerGuard)
+  @ApiOperation({
+    summary: 'Callback de evento de pagamento (Stripe/Asaas)',
+    description:
+      'Chamado pelo GATEWAY de pagamento, nunca pelo app cliente. Autenticado por HMAC ' +
+      'sobre o corpo bruto (não por Bearer JWT) — `x-payment-signature` + ' +
+      '`x-payment-timestamp` (em produção real, o header nativo do provedor, ex.: ' +
+      '`stripe-signature`). Responde 200 rápido e enfileira a conciliação — nada pesado ' +
+      'roda inline. Idempotente por `(gateway, gateway_event_id)`.',
+  })
+  @ApiHeader({ name: PAYMENT_SIGNATURE_HEADER, description: 'Assinatura HMAC do corpo bruto.' })
+  @ApiHeader({
+    name: PAYMENT_TIMESTAMP_HEADER,
+    description: 'Timestamp assinado, usado para janela anti-replay.',
+  })
+  @ApiResponse({ status: 200, description: 'Evento aceito e enfileirado para conciliação.' })
+  @ApiResponse({
+    status: 401,
+    description: 'Assinatura não verificada — motivo específico nunca é exposto na resposta.',
+  })
+  @ApiResponse({ status: 429, description: 'Rate limit de 30/min por IP excedido.' })
   async payment(
     @Req() req: RawBodyRequest<Request>,
     @Body() _body: unknown,

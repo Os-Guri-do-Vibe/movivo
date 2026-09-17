@@ -256,17 +256,15 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('entrega AUTO_APPROVED/ACTIVE: envia 4 bolhas (com a explicação do plano) e emite protocol_sent', async () => {
-    const { worker, send } = makeWorker({ waitingMarkerExists: true });
-    const res = await worker.process(
-      job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 }),
-    );
-    expect(res.status).toBe('SENT');
-    expect(send).toHaveBeenCalledTimes(4);
-    // Bolha 2: contexto do plano, com o mesociclo e a duração vindos da linha do protocolo.
-    expect(send.mock.calls[1]?.[0]?.text).toContain('Mesociclo 1: Adaptação');
-    expect(send.mock.calls[1]?.[0]?.text).toContain('12 semanas');
-    expect(send.mock.calls[3]?.[0]?.text).toContain('https://movivo.test/protocolo/p1');
+  // Decisão do fundador (2026-09-12): entrega por texto+link (protocolo sem PDF) foi
+  // REMOVIDA — nunca mais degrada silenciosamente. Falha e usa o retry/DLQ genéricos.
+  it('protocolo aprovado/assinado sem PDF: falha (retry automático + DLQ), nunca degrada para texto+link', async () => {
+    const { worker, send, sendDocument } = makeWorker({ waitingMarkerExists: true });
+    await expect(
+      worker.process(job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 })),
+    ).rejects.toThrow(/sem PDF gerado/);
+    expect(send).not.toHaveBeenCalled();
+    expect(sendDocument).not.toHaveBeenCalled();
   });
 
   it('entrega com PDF, sem resumo de IA: a saudação vai só na legenda do documento, nenhuma bolha antes', async () => {
@@ -413,7 +411,7 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
   });
 
   it('achado 2026-09-04: se a apresentação já saiu (30min normais), a entrega não repete', async () => {
-    const { worker, send } = makeWorker({
+    const { worker, send, sendDocument } = makeWorker({
       waitingMarkerExists: true,
       proto: {
         id: 'p1',
@@ -423,11 +421,14 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
         signedAt: new Date(),
         signatureHash: 'a'.repeat(64),
         professionalId: '00000000-0000-4000-8000-000000000001',
+        pdfContent: Buffer.from('%PDF-1.4'),
       },
     });
     await worker.process(job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 }));
-    // Sem PDF, as 4 bolhas de sempre (`formatProtocolDelivery`) — nenhuma apresentação extra.
-    expect(send).toHaveBeenCalledTimes(4);
+    // `waitingMarkerExists: true` já cobre a apresentação — a entrega manda só o documento,
+    // nenhuma bolha extra de apresentação antes.
+    expect(send).not.toHaveBeenCalled();
+    expect(sendDocument).toHaveBeenCalledTimes(1);
   });
 
   it('entrega com PDF auto-liberado: a legenda é a mesma saudação, independente de revisão humana', async () => {

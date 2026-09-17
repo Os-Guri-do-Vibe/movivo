@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_PERSONA, type AgentPersona, type ProtocolStructure } from '@movivo/shared';
+import { DEFAULT_AGENT_PERSONA, type AgentPersona } from '@movivo/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -6,40 +6,12 @@ import {
   BUBBLE_SEPARATOR,
   confirmationCareMessage,
   confirmationMessage,
-  formatProtocolDelivery,
   protocolDeliveryPdfText,
   PROTOCOL_WAITING_DELAY_MS,
 } from './message-templates';
 
-const content: ProtocolStructure = {
-  promptVersion: 'v1',
-  goal: 'GAIN_MUSCLE',
-  phase: 'ADAPTACAO',
-  phaseDurationWeeks: 3,
-  weeklyFrequency: 3,
-  sessions: [
-    {
-      dayLabel: 'Dia A',
-      focus: 'Corpo inteiro',
-      exercises: [
-        {
-          exerciseId: 'goblet_squat',
-          name: 'Agachamento goblet',
-          sets: 3,
-          reps: { min: 8, max: 12 },
-          loadStrategy: 'DOUBLE_PROGRESSION',
-          restSeconds: 90,
-        },
-      ],
-    },
-  ],
-};
-
 const PERSONA = DEFAULT_AGENT_PERSONA;
 const NO_EMOJI: AgentPersona = { ...DEFAULT_AGENT_PERSONA, emojiPolicy: 'NENHUM' };
-
-const delivery = (persona: AgentPersona = PERSONA) =>
-  formatProtocolDelivery(content, 'https://x/protocolo/abc', persona, 8, 'Mesociclo 1: Adaptação');
 
 /** Guardrails inegociáveis (CLAUDE.md / Sofia §13): a copy nunca pode conter estes termos. */
 const FORBIDDEN = /diagn[óo]stico|tratamento|\bcura\b|garantid|garantia|prescri/i;
@@ -49,8 +21,6 @@ const allTexts = [
   confirmationCareMessage(),
   analyzingMessage(PERSONA),
   analyzingMessage(NO_EMOJI),
-  delivery(),
-  delivery(NO_EMOJI),
   protocolDeliveryPdfText('Ana'),
   protocolDeliveryPdfText(null),
   protocolDeliveryPdfText('Ana', 'Seu treino trabalha corpo inteiro 3x por semana.'),
@@ -79,11 +49,8 @@ describe('templates de WhatsApp (US-2.5)', () => {
     for (const text of allTexts) expect(text).not.toContain('—');
   });
 
-  // `confirmationMessage` é uma exceção deliberada ao guardrail geral de citar o CREF
-  // (ver comentário na função, `message-templates.ts`) — não entra nesta checagem.
-  it('variante de cuidado e entrega do protocolo citam o CREF', () => {
+  it('variante de cuidado cita o CREF', () => {
     expect(confirmationCareMessage()).toMatch(/CREF/);
-    expect(delivery()).toMatch(/CREF/);
   });
 
   it('variante de cuidado não promete plano automático', () => {
@@ -99,25 +66,6 @@ describe('templates de WhatsApp (US-2.5)', () => {
   it('confirmação saúda pelo primeiro nome quando disponível, e genericamente quando não', () => {
     expect(confirmationMessage('Ana')).toMatch(/^Olá, Ana!/);
     expect(confirmationMessage(null)).toMatch(/^Olá!/);
-  });
-
-  it('entrega quebra em bolhas, explica o plano, destaca o 1º treino e inclui o link', () => {
-    const bubbles = delivery().split(BUBBLE_SEPARATOR);
-    expect(bubbles.length).toBe(4);
-    expect(bubbles[0]).toMatch(/intelig[êe]ncia artificial/i); // transparência de IA
-    expect(bubbles[2]).toContain('Corpo inteiro');
-    expect(bubbles[2]).toContain('Agachamento goblet: 3x8-12 (descanso 1 min 30 s)');
-    expect(bubbles[3]).toContain('https://x/protocolo/abc');
-  });
-
-  it('o bloco de explicação nomeia o mesociclo, a duração e o rótulo do objetivo', () => {
-    const explanation = delivery().split(BUBBLE_SEPARATOR)[1] ?? '';
-    expect(explanation).toContain('Mesociclo 1: Adaptação');
-    expect(explanation).toContain('8 semanas');
-    // Rótulo humano do objetivo, nunca o enum cru (`GAIN_MUSCLE`).
-    expect(explanation).toContain('Hipertrofia');
-    expect(explanation).not.toContain('GAIN_MUSCLE');
-    expect(explanation).toMatch(/check-in semanal/i);
   });
 
   it('entrega COM PDF: saúda pelo primeiro nome (achado 2026-09-04)', () => {
@@ -158,10 +106,5 @@ describe('analyzingMessage — apresentação 30min após o submit', () => {
     expect(text).toBe('Oi! Sou a ATLAS.\n\nJá recebi suas informações.');
     expect(text).not.toMatch(/intelig[êe]ncia artificial/i);
     expect(text).not.toMatch(/já estou analisando/i);
-  });
-
-  it('a entrega do protocolo respeita a mesma política de emoji', () => {
-    expect(delivery(NO_EMOJI)).not.toMatch(/\p{Extended_Pictographic}/u);
-    expect(delivery(NO_EMOJI)).not.toMatch(/ {2}/);
   });
 });

@@ -407,16 +407,21 @@ export const controlCenterTimelineEventSchema = z.object({
 });
 export type ControlCenterTimelineEvent = z.infer<typeof controlCenterTimelineEventSchema>;
 
-/** Ponto da evolução **declarada** pelo aluno no check-in. Dado de saúde. */
+/**
+ * Ponto da evolução **declarada** pelo aluno no check-in semanal. Dado de saúde.
+ * Achado 2026-09-13: substitui `fatigue`/`workouts`/`adjustment` (fluxo antigo de botão de
+ * WhatsApp) pelas respostas do formulário web.
+ */
 export const controlCenterEvolutionPointSchema = z.object({
   week: z.number().int().positive(),
   at: z.iso.datetime(),
-  /** Percepção de esforço declarada (proxy de RPE). */
-  fatigue: nullableText,
-  /** Treinos declarados na semana — declaração, não execução verificada. */
-  workouts: nullableText,
-  /** Pedido de ajuste de carga declarado. */
-  adjustment: nullableText,
+  sleepQuality: nullableText,
+  mood: nullableText,
+  /** "N/10" — alimentação e aderência ao protocolo, ambas em escala 0-10. */
+  nutritionScore: nullableText,
+  adherenceScore: nullableText,
+  /** Adequação percebida da duração do treino. */
+  durationFit: nullableText,
 });
 export type ControlCenterEvolutionPoint = z.infer<typeof controlCenterEvolutionPointSchema>;
 

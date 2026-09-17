@@ -76,7 +76,7 @@ describe('WorkoutCompletionService.record', () => {
     const { service, inserted } = makeService({});
 
     await expect(
-      service.record(USER_ID, 'p1', 2, 3, 'A', '2026-08-10', 'WHATSAPP_QUICK_REPLY'),
+      service.record(USER_ID, 'p1', 2, 3, 'A', '2026-08-10', 'WEB_JOURNAL'),
     ).resolves.toBe(true);
 
     expect(inserted[0]).toMatchObject({
@@ -86,7 +86,7 @@ describe('WorkoutCompletionService.record', () => {
       weekNumber: 3,
       sessionKey: 'A',
       completedAt: '2026-08-10',
-      source: 'WHATSAPP_QUICK_REPLY',
+      source: 'WEB_JOURNAL',
       exercisesDone: null,
       perceivedEffort: null,
     });
@@ -131,50 +131,22 @@ describe('WorkoutCompletionService.activeProtocol', () => {
   });
 });
 
-describe('WorkoutCompletionService.recordFromQuickReply', () => {
-  it('não grava nada quando o aluno não tem protocolo vigente', async () => {
-    const { service, inserted } = makeService({ protocolRows: [] });
-    await expect(service.recordFromQuickReply(USER_ID, '2026-08-10', 'A')).resolves.toBe(false);
-    expect(inserted).toHaveLength(0);
-  });
-
-  it('grava com fonte WHATSAPP_QUICK_REPLY a partir do protocolo vigente', async () => {
-    const { service, inserted } = makeService({
-      protocolRows: [{ id: 'p1', version: 2, currentWeek: 3, content: STRUCTURE }],
-    });
-
-    await expect(service.recordFromQuickReply(USER_ID, '2026-08-10', 'A')).resolves.toBe(true);
-
-    expect(inserted[0]).toMatchObject({
-      protocolId: 'p1',
-      protocolVersion: 2,
-      weekNumber: 3,
-      sessionKey: 'A',
-      completedAt: '2026-08-10',
-      source: 'WHATSAPP_QUICK_REPLY',
-    });
-  });
-});
-
 describe('WorkoutCompletionService.recordFromCheckin', () => {
-  it.each([[undefined], ['NENHUM'], ['RESPOSTA_DESCONHECIDA']])(
-    'não grava nada para a resposta %s',
-    async (workouts) => {
-      const { service, inserted } = makeService({
-        protocolRows: [{ id: 'p1', version: 1, currentWeek: 1, content: STRUCTURE }],
-      });
-      await expect(service.recordFromCheckin(USER_ID, workouts)).resolves.toBe(0);
-      expect(inserted).toHaveLength(0);
-    },
-  );
-
-  it('não grava nada quando o aluno não tem protocolo vigente', async () => {
-    const { service, inserted } = makeService({ protocolRows: [] });
-    await expect(service.recordFromCheckin(USER_ID, 'TRES_MAIS')).resolves.toBe(0);
+  it.each([[undefined], [0], [3]])('não grava nada para adherenceScore %s', async (score) => {
+    const { service, inserted } = makeService({
+      protocolRows: [{ id: 'p1', version: 1, currentWeek: 1, content: STRUCTURE }],
+    });
+    await expect(service.recordFromCheckin(USER_ID, score)).resolves.toBe(0);
     expect(inserted).toHaveLength(0);
   });
 
-  it('atribui as conclusões aos dias PREVISTOS mais recentes, não à data da resposta', async () => {
+  it('não grava nada quando o aluno não tem protocolo vigente', async () => {
+    const { service, inserted } = makeService({ protocolRows: [] });
+    await expect(service.recordFromCheckin(USER_ID, 9)).resolves.toBe(0);
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('atribui as conclusões aos dias PREVISTOS mais recentes, não à data da resposta (balde 4-7 = 1)', async () => {
     const { service, inserted } = makeService({
       protocolRows: [{ id: 'p1', version: 1, currentWeek: 1, content: STRUCTURE }],
     });
@@ -182,7 +154,7 @@ describe('WorkoutCompletionService.recordFromCheckin', () => {
     // Domingo 2026-08-16: os dias de treino dos 7 dias anteriores são seg/qua/sex.
     vi.setSystemTime(new Date('2026-08-16T15:00:00.000Z'));
     try {
-      await expect(service.recordFromCheckin(USER_ID, 'UM_DOIS')).resolves.toBe(1);
+      await expect(service.recordFromCheckin(USER_ID, 6)).resolves.toBe(1);
     } finally {
       vi.useRealTimers();
     }
@@ -191,14 +163,14 @@ describe('WorkoutCompletionService.recordFromCheckin', () => {
     expect(inserted[0]).toMatchObject({ completedAt: '2026-08-14', source: 'CHECKIN' });
   });
 
-  it('TRES_MAIS grava o piso da faixa (3), do dia mais recente para trás', async () => {
+  it('balde 8-10 grava o piso da faixa (3), do dia mais recente para trás', async () => {
     const { service, inserted } = makeService({
       protocolRows: [{ id: 'p1', version: 1, currentWeek: 1, content: STRUCTURE }],
     });
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-16T15:00:00.000Z'));
     try {
-      await expect(service.recordFromCheckin(USER_ID, 'TRES_MAIS')).resolves.toBe(3);
+      await expect(service.recordFromCheckin(USER_ID, 10)).resolves.toBe(3);
     } finally {
       vi.useRealTimers();
     }

@@ -205,6 +205,35 @@ describe('EvolutionHttpTransport (painel "Sistema → Integração")', () => {
     await expect(t.fetchQrCode('minha-empresa')).resolves.toBeNull();
     fetchSpy.mockRestore();
   });
+
+  it('downloadAudio: POST /chat/getBase64FromMediaMessage/{instance} com o key original', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ base64: 'YWJj', mimetype: 'audio/ogg; codecs=opus' }), {
+        status: 200,
+      }),
+    );
+    const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger);
+    const key = { remoteJid: '5541999998888@s.whatsapp.net', fromMe: false, id: 'WA-MSG-1' };
+    await expect(t.downloadAudio('minha-empresa', JSON.stringify(key))).resolves.toEqual({
+      base64: 'YWJj',
+      mimetype: 'audio/ogg; codecs=opus',
+    });
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+      'http://localhost:8081/chat/getBase64FromMediaMessage/minha-empresa',
+    );
+    const init = fetchSpy.mock.calls[0]?.[1];
+    expect(JSON.parse(init?.body as string)).toEqual({ message: { key }, convertToMp4: false });
+    fetchSpy.mockRestore();
+  });
+
+  it('downloadAudio: sem base64 na resposta → lança (nunca segue com áudio vazio)', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+    const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger);
+    await expect(t.downloadAudio('minha-empresa', '{}')).rejects.toThrow();
+    fetchSpy.mockRestore();
+  });
 });
 
 function spyOnRandom() {

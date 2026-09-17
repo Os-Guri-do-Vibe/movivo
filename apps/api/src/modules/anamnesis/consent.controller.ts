@@ -19,10 +19,13 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
+import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { recordConsentsSchema } from '@movivo/shared';
 
+import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
 import { ConsentService } from './consent.service';
 
+@ApiTags('Consentimento')
 @Controller('anamnesis/session/:token/consents')
 @UseGuards(ThrottlerGuard)
 export class ConsentController {
@@ -37,6 +40,16 @@ export class ConsentController {
   @Post()
   @HttpCode(HttpStatus.NO_CONTENT)
   @Header('Referrer-Policy', 'no-referrer')
+  @ApiOperation({
+    summary: 'Registra o lote de consentimentos LGPD',
+    description:
+      'Exibido na tela-ponte, entre os Blocos 1 e 2, antes de o usuário existir como conta. Sem eco do que foi consentido na resposta, para não abrir superfície de enumeração.',
+  })
+  @ApiParam({ name: 'token', description: 'Token opaco da sessão de anamnese.' })
+  @ApiBody({ schema: zodSchemaToOpenApi(recordConsentsSchema) })
+  @ApiResponse({ status: 204, description: 'Consentimentos registrados — sem corpo de resposta.' })
+  @ApiResponse({ status: 400, description: 'Corpo fora do schema.' })
+  @ApiResponse({ status: 404, description: 'Token inexistente ou expirado.' })
   async record(
     @Param('token') token: string,
     @Body() body: unknown,

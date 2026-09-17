@@ -19,6 +19,7 @@ import { Module } from '@nestjs/common';
 
 import { AiCoachModule } from '../ai-coach/ai-coach.module';
 import { JobsModule } from '../jobs/jobs.module';
+import { ShortLinkModule } from '../short-link/short-link.module';
 import { ProtocolController } from './protocol.controller';
 import { ProtocolAutoReleaseWorker } from './protocol-auto-release.worker';
 import { ProtocolGenerationWorker } from './protocol-generation.worker';
@@ -35,11 +36,12 @@ import { WorkoutPresentationService } from './workout-presentation.service';
 
 /**
  * Importa `JobsModule` (fila `protocol-generation`/`whatsapp-outbound`) — a comunicação
- * entre domínios é por fila (regra §12.5); e `AiCoachModule` (LLMRouter). O Worker (US-2.4)
- * orquestra gera-e-valida→persiste→auto-aprova→entrega.
+ * entre domínios é por fila (regra §12.5); `AiCoachModule` (LLMRouter); e `ShortLinkModule`
+ * (utilitário sem regra de negócio, encurta o link de convite de renovação). O Worker
+ * (US-2.4) orquestra gera-e-valida→persiste→auto-aprova→entrega.
  */
 @Module({
-  imports: [AiCoachModule, JobsModule],
+  imports: [AiCoachModule, JobsModule, ShortLinkModule],
   controllers: [ProtocolController],
   providers: [
     ProtocolGeneratorService,
@@ -61,6 +63,7 @@ import { WorkoutPresentationService } from './workout-presentation.service';
     MethodologyProvider,
     ExerciseCatalogProvider,
     ProtocolSubstitutionRepository,
+    ProtocolRepository,
     WorkoutPresentationService,
   ],
 })

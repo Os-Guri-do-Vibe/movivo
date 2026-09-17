@@ -34,6 +34,7 @@ import { mesocycleRenewalMessage } from '../whatsapp/message-templates';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
+import { ShortLinkService } from '../short-link/short-link.service';
 
 type RenewalScanJob = { kind: 'SCAN' };
 
@@ -48,6 +49,7 @@ export class ProtocolRenewalScheduler implements OnModuleInit {
     private readonly queues: QueueManager,
     private readonly db: TenantDatabase,
     private readonly config: AppConfigService,
+    private readonly shortLinks: ShortLinkService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(ProtocolRenewalScheduler.name);
@@ -73,6 +75,9 @@ export class ProtocolRenewalScheduler implements OnModuleInit {
           userId: protocols.userId,
           protocolId: protocols.id,
           name: users.name,
+          renewalSessionId: protocolRenewalSessions.id,
+          renewalStatus: protocolRenewalSessions.status,
+          renewalExpiresAt: protocolRenewalSessions.expiresAt,
         })
         .from(protocols)
         .innerJoin(users, eq(users.id, protocols.userId))
@@ -87,6 +92,12 @@ export class ProtocolRenewalScheduler implements OnModuleInit {
             isNull(consents.revokedAt),
           ),
         )
+        // LEFT JOIN (não INNER): a maioria dos protocolos vencidos ainda não tem sessão
+        // nenhuma — é exatamente o caso que cria uma pela primeira vez.
+        .leftJoin(
+          protocolRenewalSessions,
+          eq(protocolRenewalSessions.previousProtocolId, protocols.id),
+        )
         .where(
           and(
             eq(protocols.status, 'ACTIVE'),
@@ -98,7 +109,13 @@ export class ProtocolRenewalScheduler implements OnModuleInit {
 
     let created = 0;
     for (const row of eligible) {
-      const startedRenewal = await this.startRenewal(row.userId, row.protocolId, row.name);
+      if (!this.needsInvite(row.renewalStatus, row.renewalExpiresAt, now)) continue;
+      const startedRenewal = await this.startOrReissueRenewal(
+        row.userId,
+        row.protocolId,
+        row.name,
+        row.renewalSessionId,
+      );
       if (startedRenewal) created += 1;
     }
     this.logger.info(
@@ -109,44 +126,84 @@ export class ProtocolRenewalScheduler implements OnModuleInit {
   }
 
   /**
-   * `onConflictDoNothing` no índice único de `previousProtocolId` é a idempotência real:
-   * mesmo que o scan rode mais de uma vez sobre o mesmo protocolo vencido (retry de fila,
-   * reexecução manual), nunca cria uma segunda sessão nem manda um segundo convite.
+   * Achado 2026-09-11 (ADR-008 §8.1) — bug de ciclo de vida corrigido aqui: o convite era
+   * irrepetível (`onConflictDoNothing` sozinho travava para sempre depois da 1ª sessão).
+   * Sem sessão nenhuma → convite novo. Sessão `EXPIRED` → reconvite. Sessão `IN_PROGRESS`
+   * cujo TTL já passou mas que ainda não foi acessada (a marcação de `EXPIRED` é
+   * preguiçosa, só acontece no acesso — `ProtocolRenewalService.assertActive`) → mesmo
+   * tratamento de `EXPIRED`. `IN_PROGRESS` dentro do TTL ou `SUBMITTED` → nada a fazer,
+   * não reenvia convite pra quem já está respondendo ou já respondeu.
    */
-  private async startRenewal(
+  private needsInvite(status: string | null, expiresAt: Date | null, now: Date): boolean {
+    if (status === null) return true;
+    if (status === 'EXPIRED') return true;
+    return status === 'IN_PROGRESS' && expiresAt !== null && expiresAt.getTime() < now.getTime();
+  }
+
+  /**
+   * Cria a sessão de renovação (1ª vez) ou reconvida sobre a MESMA linha quando ela já
+   * expirou (`existingSessionId` presente) — o índice único de `previous_protocol_id`
+   * exige isto: nunca pode existir uma SEGUNDA linha para o mesmo protocolo vencido.
+   * `onConflictDoNothing` continua sendo a idempotência real do caminho de criação: um
+   * retry de fila/reexecução manual sobre o MESMO protocolo, na MESMA passagem do scan,
+   * nunca cria uma segunda sessão nem manda um segundo convite.
+   */
+  private async startOrReissueRenewal(
     userId: string,
     protocolId: string,
     name: string | null,
+    existingSessionId: string | null,
   ): Promise<boolean> {
     const token = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + RENEWAL_SESSION_TTL_MS);
 
-    const created = await this.db.runAsSystem(async (tx) => {
+    const sessionId = await this.db.runAsSystem(async (tx) => {
+      if (existingSessionId) {
+        const [row] = await tx
+          .update(protocolRenewalSessions)
+          .set({ token, expiresAt, status: 'IN_PROGRESS' })
+          .where(eq(protocolRenewalSessions.id, existingSessionId))
+          .returning({ id: protocolRenewalSessions.id });
+        return row?.id ?? null;
+      }
       const [row] = await tx
         .insert(protocolRenewalSessions)
         .values({ userId, previousProtocolId: protocolId, token, expiresAt })
         .onConflictDoNothing({ target: protocolRenewalSessions.previousProtocolId })
         .returning({ id: protocolRenewalSessions.id });
-      return row;
+      return row?.id ?? null;
     });
-    if (!created) return false;
+    if (!sessionId) return false;
 
-    const link = `${this.config.whatsapp.publicSiteUrl}/mesociclo/${token}`;
+    const longLink = `${this.config.whatsapp.publicSiteUrl}/mesociclo/${token}`;
+    const code = await this.shortLinks.create(longLink, expiresAt);
+    const link = `${this.config.whatsapp.publicSiteUrl}/renovacao/${code}`;
     const firstName = name?.trim().split(/\s+/)[0] ?? null;
+    // `dedupeId`/`jobId` levam o token (novo a cada reconvite) — nunca colidem com o job
+    // do convite anterior à mesma sessão, que já foi processado/mantido no histórico do
+    // BullMQ; sem isso, um reconvite reusando o `jobId` original seria descartado como
+    // "já existe" e o WhatsApp nunca sairia.
     await this.queues.enqueue(
       QUEUE.whatsappOutbound,
       'mesocycle-renewal-invite',
       {
         userId,
         type: 'MESOCYCLE_RENEWAL_INVITE',
-        dedupeId: `renewal-invite-${created.id}`,
+        dedupeId: `renewal-invite-${sessionId}-${token}`,
         text: mesocycleRenewalMessage(firstName, link),
       },
-      { jobId: `wa-renewal-invite-${created.id}` },
+      { jobId: `wa-renewal-invite-${sessionId}-${token}` },
     );
     this.logger.info(
-      { event: 'protocol_renewal_started', userId, protocolId, renewalSessionId: created.id },
-      'convite de renovação de mesociclo enfileirado',
+      {
+        event: existingSessionId ? 'protocol_renewal_reissued' : 'protocol_renewal_started',
+        userId,
+        protocolId,
+        renewalSessionId: sessionId,
+      },
+      existingSessionId
+        ? 'reconvite de renovação de mesociclo enfileirado (sessão anterior expirada)'
+        : 'convite de renovação de mesociclo enfileirado',
     );
     return true;
   }

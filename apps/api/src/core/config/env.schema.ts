@@ -298,6 +298,42 @@ export const envSchema = z
      */
     WHATSAPP_TRANSPORT_PROVIDER: z.enum(['ARARA', 'EVOLUTION']).default('ARARA'),
 
+    // ------------------------------------------ Transcrição de áudio (AI Coach entende
+    // voz — ADR-009, revisão 2026-09-14, decisão do fundador). CASCATA: OpenAI é a perna
+    // PRIMÁRIA de produção (`gpt-4o-mini-transcribe`, mesmo fornecedor já em diligência
+    // no ADR-005-R2 — reaproveita `OPENAI_API_KEY` acima, não é relação nova), Groq é o
+    // FALLBACK automático — em produção E local, não uma troca manual de provedor. Hoje
+    // só a borda da EvolutionAPI produz `audio` (escopo inicial — AraraHQ fica de fora
+    // até o webhook de voz de produção ser confirmado).
+    /**
+     * Atestado SEPARADO de `LLM_OPENAI_HEALTH_DATA_APPROVED`: é a MESMA OpenAI, mas uma
+     * superfície de dado diferente (áudio bruto do titular, não texto já escrito por
+     * ele) — pode exigir avaliação própria de Jurídico/Segurança antes de ligar.
+     * Fail-closed: sem aprovação explícita, essa perna não entra na cascata.
+     */
+    STT_OPENAI_HEALTH_DATA_APPROVED: envBoolean.default(false),
+    /**
+     * Teto de duração aceito por áudio, verificado ANTES de baixar/transcrever (o
+     * `audioMessage.seconds` do Baileys já vem no próprio webhook). Acima disso, o AI
+     * Coach pede pro aluno escrever ou resumir — protege custo de STT e o SLA de latência
+     * do turno (Sofia §5.4: ≤8s até a 1ª bolha), não é limite técnico do provedor.
+     */
+    AUDIO_TRANSCRIPTION_MAX_DURATION_SECONDS: z.coerce.number().int().min(5).max(600).default(120),
+    /** Timeout hard da chamada de transcrição — áudio curto, não deveria nunca chegar perto. */
+    AUDIO_TRANSCRIPTION_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60_000).default(20_000),
+    /**
+     * Chave da Groq — perna de FALLBACK da cascata de STT (`whisper-large-v3-turbo`, API
+     * compatível com a da OpenAI, free tier cobre folgado o volume de teste/MVP).
+     * Opcional no boot: sem ela a cascata segue funcionando só com a perna OpenAI.
+     */
+    GROQ_API_KEY: z.string().min(1).optional(),
+    /**
+     * Atestado de HEALTH da Groq — gate PRÓPRIO, simétrico ao `STT_OPENAI_HEALTH_DATA_
+     * APPROVED` acima (ADR-009 §"gate neutro por fornecedor", mesmo espírito do
+     * ADR-005-R2): a cascata nunca contorna o gate de nenhuma perna.
+     */
+    STT_GROQ_HEALTH_DATA_APPROVED: envBoolean.default(false),
+
     // -------------------------------------------------------- RAG (US-3.3)
     /**
      * Threshold de cosseno do retrieval denso (Victor §4.2). Achado 2026-09-02: o default

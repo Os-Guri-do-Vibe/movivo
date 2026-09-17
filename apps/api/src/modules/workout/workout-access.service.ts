@@ -6,7 +6,8 @@ import { AppConfigService } from '../../core/config';
 import { users, workoutAccessTokens } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 
-const MAGIC_TTL_MS = 48 * 60 * 60 * 1000;
+/** Exportado para quem encurta o link (`ShortLinkService`) casar o TTL do alias com o token. */
+export const MAGIC_TTL_MS = 48 * 60 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 function opaqueToken(): string {

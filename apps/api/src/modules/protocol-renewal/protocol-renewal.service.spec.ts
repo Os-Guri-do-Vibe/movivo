@@ -225,7 +225,7 @@ describe('ProtocolRenewalService.patchStep', () => {
       muscleSoreness: 'NORMAL',
     },
     3: { newPain: { hasNewPain: false }, parqRecheck: { changedToYes: false } },
-    4: { goalProgress: 'DENTRO_DO_ESPERADO', satisfaction: 8 },
+    4: { currentWeightKg: 78, goalProgress: 'DENTRO_DO_ESPERADO', satisfaction: 8 },
     5: { changes: ['NONE'], dislikedExercise: { has: false }, goalChange: { changed: false } },
   } as const;
 

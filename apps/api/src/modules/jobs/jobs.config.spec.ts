@@ -38,8 +38,11 @@ describe('jobs.config', () => {
         'protocol-renewal-generation',
         'sanity',
         'whatsapp-outbound',
-        // US-8.1 — quick reply diário de treino.
         'workout-daily',
+        // Comentário do Coach sobre o treino registrado no diário (achado 2026-09-12).
+        'workout-feedback',
+        // Comentário do Coach sobre o check-in semanal (achado 2026-09-13).
+        'checkin-weekly-feedback',
       ].sort(),
     );
   });

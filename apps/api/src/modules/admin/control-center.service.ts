@@ -180,12 +180,23 @@ const OVERVIEW_ATTENTION_THRESHOLDS = {
 const DECLARED_ADHERENCE_NOTICE =
   'Adesão declarada via check-in: mede resposta ao check-in, não execução. Treino concluído verificado é medido à parte, na North Star (`workout_completions`).';
 
-/** Forma persistida das respostas de check-in (`checkins.responses_cipher`). */
-const checkinDeclaredSchema = z.object({
-  fatigue: z.string().optional(),
-  workouts: z.string().optional(),
-  adjustment: z.string().optional(),
-  painReport: z.string().optional(),
+/**
+ * Forma persistida das respostas estruturadas de check-in (`checkins.answers`, plaintext —
+ * achado 2026-09-13, mesmo tratamento que os blocos comuns da renovação de mesociclo dão a
+ * pergunta equivalente).
+ */
+const checkinAnswersSchema = z.object({
+  sleepQuality: z.string().optional(),
+  mood: z.string().optional(),
+  nutritionScore: z.number().optional(),
+  adherenceScore: z.number().optional(),
+  durationFit: z.string().optional(),
+});
+
+/** Forma persistida do bloco cifrado (`checkins.notes_cipher`) — só os dois textos livres. */
+const checkinNotesSchema = z.object({
+  difficultExerciseDescription: z.string().optional(),
+  improvementFeedback: z.string().optional(),
 });
 
 type MetricUnit = ControlCenterMetric['unit'];
@@ -1002,7 +1013,7 @@ export class ControlCenterService {
           )`,
           unansweredCheckinSentAt: sql<Date | null>`(
             select min(k.sent_at) from ${checkins} k
-            where k.user_id = users.id and k.sent_at is not null and k.responded_at is null
+            where k.user_id = users.id and k.sent_at is not null and k.submitted_at is null
           )`,
           renewalAt: sql<Date | null>`(
             select coalesce(s.trial_ends_at, s.current_period_end) from ${subscriptions} s
@@ -1152,7 +1163,7 @@ export class ControlCenterService {
       tx
         .select({
           sent: sql<number>`count(*) filter (where ${checkins.sentAt} is not null)::int`,
-          responded: sql<number>`count(*) filter (where ${checkins.respondedAt} is not null)::int`,
+          responded: sql<number>`count(*) filter (where ${checkins.submittedAt} is not null)::int`,
         })
         .from(checkins),
     );
@@ -1209,7 +1220,7 @@ export class ControlCenterService {
           )`,
           unansweredCheckinSentAt: sql<Date | null>`(
             select min(k.sent_at) from ${checkins} k
-            where k.user_id = users.id and k.sent_at is not null and k.responded_at is null
+            where k.user_id = users.id and k.sent_at is not null and k.submitted_at is null
           )`,
           renewalAt: sql<Date | null>`(
             select coalesce(s.trial_ends_at, s.current_period_end) from ${subscriptions} s
@@ -1267,9 +1278,9 @@ export class ControlCenterService {
         .select({
           weekNumber: checkins.weekNumber,
           sentAt: checkins.sentAt,
-          respondedAt: checkins.respondedAt,
-          completedAt: checkins.completedAt,
-          responsesCipher: checkins.responsesCipher,
+          submittedAt: checkins.submittedAt,
+          answers: checkins.answers,
+          notesCipher: checkins.notesCipher,
         })
         .from(checkins)
         .where(eq(checkins.userId, studentId))
@@ -1425,7 +1436,7 @@ export class ControlCenterService {
       );
       events.push(
         this.event(
-          checkin.respondedAt ?? checkin.completedAt,
+          checkin.submittedAt,
           'CHECKIN',
           `Check-in da semana ${checkin.weekNumber} respondido`,
           canReadHealth ? (declared[index]?.summary ?? null) : null,
@@ -1492,9 +1503,7 @@ export class ControlCenterService {
       .sort((a, b) => b.at.localeCompare(a.at));
 
     const checkinsSent = raw.checkinRows.filter((checkin) => checkin.sentAt).length;
-    const checkinsResponded = raw.checkinRows.filter(
-      (checkin) => checkin.respondedAt ?? checkin.completedAt,
-    ).length;
+    const checkinsResponded = raw.checkinRows.filter((checkin) => checkin.submittedAt).length;
     const student = {
       id: row.id,
       name: row.name,
@@ -1566,16 +1575,17 @@ export class ControlCenterService {
   }
 
   /**
-   * Abre as respostas de check-in cifradas. A anotação clínica não existe aqui: o que
-   * o aluno declarou é percepção de esforço, treinos declarados e pedido de ajuste.
+   * Monta a evolução declarada por semana. `answers` já vem em claro (achado 2026-09-13,
+   * mesmo tratamento dos blocos comuns da renovação de mesociclo); só o texto livre em
+   * `notesCipher` precisa ser decifrado — é onde um relato de dor/desconforto pode aparecer.
    */
   private async decryptCheckins(
     rows: Array<{
       weekNumber: number;
-      respondedAt: Date | null;
-      completedAt: Date | null;
+      submittedAt: Date | null;
       sentAt: Date | null;
-      responsesCipher: Buffer | null;
+      answers: unknown;
+      notesCipher: Buffer | null;
     }>,
   ) {
     const declared: Array<{
@@ -1584,18 +1594,25 @@ export class ControlCenterService {
       summary: string | null;
     }> = [];
     for (const row of rows) {
-      const at = row.respondedAt ?? row.completedAt ?? row.sentAt;
-      if (!row.responsesCipher || !at) continue;
-      const parsed = checkinDeclaredSchema.safeParse(
-        JSON.parse(await this.cipher.decryptHealth(row.responsesCipher)),
-      );
-      if (!parsed.success) continue;
-      const { fatigue, workouts, adjustment, painReport } = parsed.data;
+      const at = row.submittedAt ?? row.sentAt;
+      const parsedAnswers = checkinAnswersSchema.safeParse(row.answers ?? {});
+      if (!at || !parsedAnswers.success) continue;
+      const { sleepQuality, mood, nutritionScore, adherenceScore, durationFit } =
+        parsedAnswers.data;
+      const notes = row.notesCipher
+        ? checkinNotesSchema.safeParse(JSON.parse(await this.cipher.decryptHealth(row.notesCipher)))
+        : undefined;
+      const painReport =
+        notes?.success && notes.data.difficultExerciseDescription
+          ? notes.data.difficultExerciseDescription
+          : null;
       const summary =
         [
-          fatigue && `esforço percebido ${fatigue}`,
-          workouts && `treinos declarados ${workouts}`,
-          adjustment && `pedido de ajuste ${adjustment}`,
+          sleepQuality && `sono ${sleepQuality}`,
+          mood && `humor ${mood}`,
+          nutritionScore !== undefined && `alimentação ${nutritionScore}/10`,
+          adherenceScore !== undefined && `aderência ${adherenceScore}/10`,
+          durationFit && `duração do treino: ${durationFit}`,
         ]
           .filter(Boolean)
           .join(' · ') || null;
@@ -1603,11 +1620,13 @@ export class ControlCenterService {
         point: {
           week: row.weekNumber,
           at: at.toISOString(),
-          fatigue: fatigue ?? null,
-          workouts: workouts ?? null,
-          adjustment: adjustment ?? null,
+          sleepQuality: sleepQuality ?? null,
+          mood: mood ?? null,
+          nutritionScore: nutritionScore !== undefined ? `${nutritionScore}/10` : null,
+          adherenceScore: adherenceScore !== undefined ? `${adherenceScore}/10` : null,
+          durationFit: durationFit ?? null,
         },
-        painReport: painReport ?? null,
+        painReport,
         summary,
       });
     }
