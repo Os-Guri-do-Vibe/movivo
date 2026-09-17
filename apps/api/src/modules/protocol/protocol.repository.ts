@@ -11,6 +11,7 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { and, desc, eq, ne, sql } from 'drizzle-orm';
+import { PinoLogger } from 'nestjs-pino';
 import {
   onboardingStep1Schema,
   TRAINING_PHASE_LABELS,
@@ -26,8 +27,10 @@ import {
   TenantDatabase,
   type TenantTransaction,
 } from '../../core/database/tenant-database.service';
+import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { anamnesisSessions, protocols, protocolVersions } from '../../core/database/schema';
 import type { ContraindicationTag } from './exercise-catalog';
+import { computeMesocycleSummary, persistMesocycleSummary } from './mesocycle-summary';
 
 /**
  * Id da assinatura da metodologia do RT CREF. ponytail: constante fixa — a tabela
@@ -124,7 +127,13 @@ const INITIAL_MESOCYCLE_NUMBER = 1;
 
 @Injectable()
 export class ProtocolRepository {
-  constructor(private readonly db: TenantDatabase) {}
+  constructor(
+    private readonly db: TenantDatabase,
+    private readonly cipher: HealthCipherService,
+    private readonly logger: PinoLogger,
+  ) {
+    this.logger.setContext(ProtocolRepository.name);
+  }
 
   /**
    * Já existe o protocolo INICIAL (mesociclo 1) do titular? Pré-checagem de idempotência
@@ -359,7 +368,7 @@ export class ProtocolRepository {
       // Renovação de mesociclo: o mesociclo anterior (se houver) só deixa de ser `ACTIVE`
       // agora, no mesmo instante/transação em que este vira `ACTIVE` — nunca antes, para
       // o titular nunca ficar sem protocolo vigente durante a espera pela renovação.
-      await supersedePreviousActiveProtocols(tx, userId, protocolId);
+      await supersedePreviousActiveProtocols(tx, this.cipher, userId, protocolId, this.logger);
       return {
         released: true,
         version: row.version,
@@ -457,13 +466,22 @@ function isUniqueViolation(error: unknown): boolean {
  *
  * Idempotente e seguro na primeiríssima ativação de um titular: não há nenhuma linha
  * `ACTIVE` para encontrar, então é no-op.
+ *
+ * ADR-008 (memória longitudinal): este é o evento de "fechamento de mesociclo" — o
+ * instante certo (e único) para computar `mesocycleSummary`/`mesocycleNotesCipher` do
+ * protocolo que está deixando de ser `ACTIVE`. A computação é best-effort: uma falha aqui
+ * NUNCA pode reverter a ativação do novo protocolo (o titular ficaria sem protocolo
+ * vigente por causa de um resumo). Se falhar, fica `NULL` e o worker de renovação computa
+ * sob demanda na próxima leitura (`protocol-renewal-generation.worker.ts::load()`).
  */
 export async function supersedePreviousActiveProtocols(
   tx: TenantTransaction,
+  cipher: HealthCipherService,
   userId: string,
   activatingProtocolId: string,
+  logger?: { warn: (obj: unknown, msg: string) => void },
 ): Promise<void> {
-  await tx
+  const superseded = await tx
     .update(protocols)
     .set({ status: 'SUPERSEDED' })
     .where(
@@ -472,5 +490,18 @@ export async function supersedePreviousActiveProtocols(
         eq(protocols.status, 'ACTIVE'),
         ne(protocols.id, activatingProtocolId),
       ),
-    );
+    )
+    .returning({ id: protocols.id });
+
+  for (const { id } of superseded) {
+    try {
+      const computed = await computeMesocycleSummary(tx, cipher, userId, id);
+      if (computed) await persistMesocycleSummary(tx, id, computed);
+    } catch (err) {
+      logger?.warn(
+        { err, userId, protocolId: id },
+        'ADR-008: falha ao computar mesocycle_summary no fechamento — seguirá NULL até o worker de renovação recalcular sob demanda',
+      );
+    }
+  }
 }

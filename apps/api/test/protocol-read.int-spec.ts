@@ -19,6 +19,7 @@ import postgres from 'postgres';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { loadEnv } from '../src/core/config/load-env';
+import { HealthCipherService } from '../src/core/database/health-cipher.service';
 import { type DrizzleClient } from '../src/core/database/database.module';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { ProtocolRepository } from '../src/modules/protocol/protocol.repository';
@@ -42,7 +43,17 @@ const appClient = postgres({
 });
 const db = drizzle(appClient) as unknown as DrizzleClient;
 const tenant = new TenantDatabase(db);
-const repo = new ProtocolRepository(tenant);
+const cipher = new HealthCipherService(db, {
+  pgcryptoKey:
+    env.PGCRYPTO_KEY ??
+    readFileSync(resolve(apiRoot, '..', '..', 'secrets', 'pgcrypto_key'), 'utf8').trimEnd(),
+} as never);
+const logger = {
+  info: () => undefined,
+  warn: () => undefined,
+  setContext: () => undefined,
+} as never;
+const repo = new ProtocolRepository(tenant, cipher, logger);
 
 const adminClient = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',

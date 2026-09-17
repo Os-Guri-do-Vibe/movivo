@@ -102,7 +102,7 @@ function renewalSessionRow(over: Record<string, unknown> = {}) {
       muscleSoreness: 'NORMAL',
     },
     dataBlock3: Buffer.from('cipher'),
-    dataBlock4: { goalProgress: 'DENTRO_DO_ESPERADO', satisfaction: 8 },
+    dataBlock4: { currentWeightKg: 78, goalProgress: 'DENTRO_DO_ESPERADO', satisfaction: 8 },
     dataBlock5: {
       changes: ['NONE'],
       preferredDays: [],
@@ -127,27 +127,41 @@ function userRow(over: Record<string, unknown> = {}) {
   return { id: 'u1', name: 'Fulano', phoneNumber: '+5541999999999', email: null, ...over };
 }
 
-/** tx falso: distingue tabelas por `.from()`; `protocols` responde diferente na 1ª (idempotência) e 2ª chamada (previous). */
+/**
+ * tx falso: distingue tabelas por `.from()`; `protocols` responde diferente na 1ª
+ * (idempotência) e 2ª chamada (previous). A partir da 3ª chamada a `protocols` (ADR-008:
+ * `computeMesocycleSummary` sob demanda, quando `mesocycleSummary` vem `undefined` do
+ * fixture) e qualquer tabela do diário/anamnese (`workout_*`, `checkins`,
+ * `anamnesis_sessions`) respondem vazio — estes testes cobrem o pipeline de geração
+ * central, não a memória longitudinal (que tem specs próprias em `mesocycle-summary`).
+ * `then` faz `chain` funcionar tanto com `.limit()` quanto com `await` direto
+ * (`loadLongitudinalContext` usa `.orderBy(...)` sem `.limit()` em algumas consultas).
+ */
 function makeTx(user: unknown, session: unknown, previousProtocol: unknown) {
   let table: unknown;
   let protocolsCalls = 0;
-  const chain = {
+  const resolve = (): unknown[] => {
+    if (table === users) return user ? [user] : [];
+    if (table === protocolRenewalSessions) return session ? [session] : [];
+    if (table === protocols) {
+      protocolsCalls += 1;
+      if (protocolsCalls === 1) return []; // alreadyGenerated(): nada ainda
+      if (protocolsCalls === 2) return previousProtocol ? [previousProtocol] : [];
+      return []; // ADR-008: qualquer leitura extra de `protocols` (compute sob demanda, carreira)
+    }
+    return [];
+  };
+  const chain: Record<string, unknown> = {
     select: () => chain,
     from: (t: unknown) => {
       table = t;
       return chain;
     },
     where: () => chain,
-    limit: () => {
-      if (table === users) return Promise.resolve(user ? [user] : []);
-      if (table === protocolRenewalSessions) return Promise.resolve(session ? [session] : []);
-      if (table === protocols) {
-        protocolsCalls += 1;
-        if (protocolsCalls === 1) return Promise.resolve([]); // alreadyGenerated(): nada ainda
-        return Promise.resolve(previousProtocol ? [previousProtocol] : []);
-      }
-      return Promise.resolve([]);
-    },
+    orderBy: () => chain,
+    limit: () => Promise.resolve(resolve()),
+    then: (onFulfilled: (v: unknown[]) => unknown, onRejected?: (e: unknown) => unknown) =>
+      Promise.resolve(resolve()).then(onFulfilled, onRejected),
   };
   return chain;
 }

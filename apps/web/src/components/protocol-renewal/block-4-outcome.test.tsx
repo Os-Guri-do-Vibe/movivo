@@ -42,16 +42,16 @@ function renderBlock4({
   return { onChange, onContinue, onScreenChange };
 }
 
-describe('Block4Outcome — pergunta 11 (peso, opcional)', () => {
-  it('peso vazio é válido — Continuar já habilitado', () => {
+describe('Block4Outcome — pergunta 11 (peso, obrigatório)', () => {
+  it('peso vazio é inválido — Continuar desabilitado', () => {
     renderBlock4();
-    expect(screen.getByRole('button', { name: 'Continuar' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled();
   });
 
   it('peso fora da faixa desabilita Continuar', async () => {
     const user = userEvent.setup();
     render(<ControlledBlock4 />);
-    await user.type(screen.getByLabelText('Peso atual, em kg (opcional)'), '5000');
+    await user.type(screen.getByLabelText('Peso atual, em kg'), '5000');
     expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled();
   });
 

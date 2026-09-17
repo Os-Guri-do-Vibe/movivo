@@ -79,9 +79,11 @@ function block5FromServer(raw: unknown): Block5State {
         typeof dislikedExercise.description === 'string' ? dislikedExercise.description : '',
     },
     barriers: Array.isArray(r.barriers) ? (r.barriers as Block5State['barriers']) : [],
+    barrierOther: typeof r.barrierOther === 'string' ? r.barrierOther : '',
     goalChange: {
       changed: typeof goalChange.changed === 'boolean' ? goalChange.changed : undefined,
       newGoal: (goalChange.newGoal as Block5State['goalChange']['newGoal']) ?? null,
+      newGoalOther: typeof goalChange.newGoalOther === 'string' ? goalChange.newGoalOther : '',
     },
     targetEvent: {
       status: (targetEvent.status as Block5State['targetEvent']['status']) ?? null,
@@ -206,9 +208,7 @@ export function RenewalWizard({ token, initial }: { token: string; initial: Rene
     setError(null);
     try {
       await patchRenewalStep(token, 4, {
-        currentWeightKg: block4.currentWeightKg.trim()
-          ? Number(block4.currentWeightKg.replace(',', '.'))
-          : undefined,
+        currentWeightKg: Number(block4.currentWeightKg.replace(',', '.')),
         goalProgress: block4.goalProgress,
         satisfaction: block4.satisfaction,
       });
@@ -241,8 +241,18 @@ export function RenewalWizard({ token, initial }: { token: string; initial: Rene
           ? { has: true, description: block5.dislikedExercise.description.trim() || undefined }
           : { has: false },
         barriers: block5.barriers,
+        barrierOther: block5.barriers.includes('OTHER')
+          ? block5.barrierOther.trim() || undefined
+          : undefined,
         goalChange: block5.goalChange.changed
-          ? { changed: true, newGoal: block5.goalChange.newGoal ?? undefined }
+          ? {
+              changed: true,
+              newGoal: block5.goalChange.newGoal ?? undefined,
+              newGoalOther:
+                block5.goalChange.newGoal === 'OTHER'
+                  ? block5.goalChange.newGoalOther.trim() || undefined
+                  : undefined,
+            }
           : { changed: false },
         targetEvent: hasTargetEvent
           ? {
@@ -283,21 +293,9 @@ export function RenewalWizard({ token, initial }: { token: string; initial: Rene
     return <RenewalSuccessScreen name={firstName} />;
   }
 
-  const blockContextTotal = { 1: 4, 2: 4, 3: 2, 4: 3, 5: hasTargetEvent ? 5 : 4 }[block];
-  const blockScreen = {
-    1: block1Screen,
-    2: block2Screen,
-    3: block3Screen,
-    4: block4Screen,
-    5: block5Screen,
-  }[block];
-  const blockContext = showIntro
-    ? 'Introdução'
-    : `Pergunta ${blockScreen + 1} de ${blockContextTotal}`;
-
   return (
     <div className="flex flex-col gap-6">
-      <ProgressBar currentBlock={block} blockContext={blockContext} />
+      <ProgressBar currentBlock={block} />
 
       {error && (
         <p
@@ -310,26 +308,21 @@ export function RenewalWizard({ token, initial }: { token: string; initial: Rene
 
       {showIntro && (
         <section className="flex flex-col gap-6" aria-labelledby="renewal-intro-title">
-          <div className="flex flex-col gap-2">
-            <p className="font-mono text-label text-muted-foreground">
-              MOVIVO — Formulário de troca de protocolo por fim de mesociclo
-            </p>
-            <h1
-              id="renewal-intro-title"
-              tabIndex={-1}
-              className="text-h1 font-bold text-petroleo outline-none"
-            >
-              Olá, {firstName}! Vamos preparar seu próximo protocolo.
-            </h1>
-          </div>
+          <h1
+            id="renewal-intro-title"
+            tabIndex={-1}
+            className="text-h1 font-bold text-petroleo outline-none"
+          >
+            Olá, {firstName}! Vamos preparar seu próximo protocolo.
+          </h1>
           <p className="text-body text-muted-foreground">
             Preencha este formulário para receber seu protocolo atualizado para o seu novo
             mesociclo. São 5 blocos rápidos sobre como foi seu desempenho, sua fadiga, sua
             segurança, seus resultados percebidos e sua rotina atual.
           </p>
           <p className="rounded-xl border border-coral bg-coral/10 p-4 text-body text-petroleo">
-            Suas respostas ajudam a ajustar seu treino. Um profissional de Educação Física
-            registrado no CREF revisa seu novo protocolo antes de ele ser liberado.
+            Suas respostas são fundamentais para ajustar seu novo protocolo de forma personalizada e
+            otimizar seus resultados.
           </p>
           <button
             type="button"

@@ -35,9 +35,10 @@ const FATIGUE_LEVEL_ITEMS: { value: RenewalFatigueLevel; label: string }[] = [
 ];
 
 const SLEEP_QUALITY_ITEMS: { value: RenewalSleepQuality; label: string }[] = [
-  { value: 'BOA', label: 'Boa' },
-  { value: 'REGULAR', label: 'Regular' },
-  { value: 'RUIM', label: 'Ruim' },
+  { value: 'OTIMA', label: 'Ótima: 8 horas ou mais por noite' },
+  { value: 'BOA', label: 'Boa: cerca de 7 horas por noite' },
+  { value: 'REGULAR', label: 'Regular: cerca de 6 horas por noite' },
+  { value: 'RUIM', label: 'Ruim: 5 horas ou menos por noite' },
 ];
 
 const STRESS_LEVEL_ITEMS: { value: RenewalStressLevel; label: string }[] = [
@@ -128,7 +129,7 @@ export function Block2Fatigue({
             titleId="block2-title"
             titleRef={titleRef}
           >
-            Como está sua qualidade de sono nas últimas semanas?
+            Em média, quantas horas você tem dormido por noite nas últimas semanas?
           </QuestionHeader>
           <ChoiceGroup<RenewalSleepQuality>
             legend="Selecione uma resposta"

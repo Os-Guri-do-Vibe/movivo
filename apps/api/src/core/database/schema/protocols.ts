@@ -202,6 +202,24 @@ export const protocols = pgTable(
     }),
     methodologySha256: varchar('methodology_sha256', { length: 64 }),
 
+    /**
+     * Resumo do mesociclo (ADR-008 — memória longitudinal da renovação), escrito UMA VEZ
+     * quando este protocolo é superseded (`supersedePreviousActiveProtocols`) — write-once,
+     * read-many. Agregação determinística em SQL sobre `workout_sessions`/
+     * `workout_set_entries`/`checkins`: aderência, tendência de carga por exercício, RPE,
+     * incidência de dor, peso ao fim do ciclo. Nunca contém texto livre em claro — ver
+     * `mesocycleNotesCipher`. `NULL` em protocolos que nunca fecharam (ainda `ACTIVE`) ou
+     * anteriores a esta feature; o worker de renovação computa sob demanda quando ausente.
+     */
+    mesocycleSummary: jsonb('mesocycle_summary'),
+    /**
+     * Comentários de texto livre destilados (sessões com dor relatada ou RPE>=9, no
+     * máximo 5, deduplicados) — cifrados com a mesma chave de `feedback_cipher`
+     * (`pgp_sym_encrypt`), nunca em claro no JSONB acima (Sato §7.3, mesmo padrão de
+     * `checkins.responses_cipher`).
+     */
+    mesocycleNotesCipher: bytea('mesocycle_notes_cipher'),
+
     ...timestampColumns,
   },
   (table) => [
@@ -215,6 +233,12 @@ export const protocols = pgTable(
     ),
     index('idx_protocols_user').on(table.userId, table.createdAt),
     index('idx_protocols_status').on(table.status),
+    // ADR-008 §8.2: o scan diário de vencimento de mesociclo (`ProtocolRenewalScheduler`)
+    // filtra `status='ACTIVE' AND end_date <= now`; sem este parcial, ele varre toda linha
+    // ACTIVE por dia (`idx_protocols_status` só cobre o predicado de igualdade).
+    index('idx_protocols_active_end_date')
+      .on(table.endDate)
+      .where(sql`${table.status} = 'ACTIVE'`),
     // Fila de trabalho do dashboard CREF.
     index('idx_protocols_review').on(table.humanReviewRequired, table.createdAt),
     // Join da fila com `anamnesis_sessions` (severidade do item) e lookup da liberação

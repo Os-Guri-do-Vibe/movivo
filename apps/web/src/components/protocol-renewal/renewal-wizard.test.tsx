@@ -151,7 +151,7 @@ describe('RenewalWizard — bloco 2: salva e avança pro bloco 3', () => {
     });
     expect(
       await screen.findByText(
-        'Você sentiu alguma dor, desconforto ou limitação NOVA durante os treinos deste ciclo — algo que não tinha antes?',
+        'Você sentiu alguma dor, desconforto ou limitação NOVA durante os treinos deste ciclo, algo que não tinha antes?',
       ),
     ).toBeInTheDocument();
   });

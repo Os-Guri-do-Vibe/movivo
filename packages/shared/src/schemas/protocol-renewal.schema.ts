@@ -84,7 +84,7 @@ export const renewalFatigueLevelSchema = z.enum([
 ]);
 export type RenewalFatigueLevel = z.infer<typeof renewalFatigueLevelSchema>;
 
-export const renewalSleepQualitySchema = z.enum(['BOA', 'REGULAR', 'RUIM']);
+export const renewalSleepQualitySchema = z.enum(['OTIMA', 'BOA', 'REGULAR', 'RUIM']);
 export type RenewalSleepQuality = z.infer<typeof renewalSleepQualitySchema>;
 
 export const renewalStressLevelSchema = z.enum(['BAIXO', 'MODERADO', 'ALTO']);
@@ -193,8 +193,8 @@ export const renewalGoalProgressSchema = z.enum([
 export type RenewalGoalProgress = z.infer<typeof renewalGoalProgressSchema>;
 
 export const protocolRenewalBlock4Schema = z.object({
-  /** Pergunta 11 — opcional, mais relevante para Emagrecimento/Hipertrofia. */
-  currentWeightKg: z.number().min(MIN_WEIGHT_KG).max(MAX_WEIGHT_KG).optional(),
+  /** Pergunta 11. */
+  currentWeightKg: z.number().min(MIN_WEIGHT_KG).max(MAX_WEIGHT_KG),
   goalProgress: renewalGoalProgressSchema,
   satisfaction: z.number().int().min(0).max(10),
 });
@@ -244,15 +244,26 @@ export const protocolRenewalBlock5Schema = z
       }),
     /** Pergunta 16 — vazio equivale a "Nenhuma, está indo bem". */
     barriers: z.array(consistencyBarrierSchema).max(10).default([]),
+    /** Texto livre quando `barriers` inclui `OTHER` — mesmo padrão de `consistencyBarrierOther`. */
+    barrierOther: z.string().trim().max(120).optional(),
     /** Pergunta 17. */
     goalChange: z
       .object({
         changed: z.boolean(),
         newGoal: primaryGoalSchema.optional(),
+        /** Texto livre quando `newGoal` é `OTHER` — mesmo padrão de `primaryGoalOther`. */
+        newGoalOther: z.string().trim().max(120).optional(),
       })
       .superRefine((val, ctx) => {
         if (val.changed && !val.newGoal) {
           ctx.addIssue({ code: 'custom', path: ['newGoal'], message: 'Informe o novo objetivo.' });
+        }
+        if (val.changed && val.newGoal === 'OTHER' && !val.newGoalOther) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['newGoalOther'],
+            message: 'Informe o novo objetivo.',
+          });
         }
       }),
     /** Pergunta 18 — só enviada quando o protocolo anterior tinha data-alvo cadastrada. */
@@ -295,6 +306,13 @@ export const protocolRenewalBlock5Schema = z
         code: 'custom',
         path: ['location'],
         message: 'Informe o novo local de treino.',
+      });
+    }
+    if (val.barriers.includes('OTHER') && !val.barrierOther) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['barrierOther'],
+        message: 'Informe qual dificuldade.',
       });
     }
   });

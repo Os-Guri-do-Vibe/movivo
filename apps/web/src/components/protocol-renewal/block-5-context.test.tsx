@@ -94,7 +94,10 @@ describe('Block5Context — pergunta 14 (o que mudou)', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled();
 
-    await user.click(screen.getByRole('radio', { name: '3 dias' }));
+    await user.click(
+      screen.getByRole('combobox', { name: 'Quantos dias por semana você tem disponível agora?' }),
+    );
+    await user.click(screen.getByRole('option', { name: '3 dias' }));
     expect(onChange).toHaveBeenCalledWith({
       ...EMPTY_BLOCK5,
       changes: ['DAYS_PER_WEEK'],
@@ -260,13 +263,13 @@ describe('Block5Context — pergunta 17 (objetivo)', () => {
     await user.click(screen.getByRole('radio', { name: 'Sim, continua o mesmo' }));
     expect(onChange).toHaveBeenCalledWith({
       ...AT_SCREEN_3,
-      goalChange: { changed: false, newGoal: null },
+      goalChange: { changed: false, newGoal: null, newGoalOther: '' },
     });
   });
 
   it('"mudou" revela a lista de objetivos e exige escolha', () => {
     renderBlock5({
-      data: { ...AT_SCREEN_3, goalChange: { changed: true, newGoal: null } },
+      data: { ...AT_SCREEN_3, goalChange: { changed: true, newGoal: null, newGoalOther: '' } },
       initialScreen: 3,
     });
     expect(screen.getByText('Qual é o seu novo objetivo principal?')).toBeInTheDocument();
@@ -277,7 +280,10 @@ describe('Block5Context — pergunta 17 (objetivo)', () => {
     const user = userEvent.setup();
     const onContinue = vi.fn();
     renderBlock5({
-      data: { ...AT_SCREEN_3, goalChange: { changed: true, newGoal: 'GAIN_MUSCLE' } },
+      data: {
+        ...AT_SCREEN_3,
+        goalChange: { changed: true, newGoal: 'GAIN_MUSCLE', newGoalOther: '' },
+      },
       initialScreen: 3,
       onContinue,
       hasTargetEvent: false,
@@ -293,7 +299,7 @@ describe('Block5Context — pergunta 18 (data-alvo, só quando hasTargetEvent)',
     ...EMPTY_BLOCK5,
     changes: ['NONE' as const],
     dislikedExercise: { has: false, description: '' },
-    goalChange: { changed: false, newGoal: null },
+    goalChange: { changed: false, newGoal: null, newGoalOther: '' },
   };
 
   it('sem hasTargetEvent, o formulário tem só 4 perguntas (bloco 17 já envia)', () => {
@@ -367,7 +373,7 @@ describe('Block5Context — rótulos do rodapé', () => {
         ...EMPTY_BLOCK5,
         changes: ['NONE'],
         dislikedExercise: { has: false, description: '' },
-        goalChange: { changed: false, newGoal: null },
+        goalChange: { changed: false, newGoal: null, newGoalOther: '' },
       },
       initialScreen: 3,
       saving: true,

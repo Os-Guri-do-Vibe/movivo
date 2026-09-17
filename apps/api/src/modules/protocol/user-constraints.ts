@@ -98,6 +98,17 @@ export interface UserConstraints {
     description?: string;
   };
   /**
+   * ADR-008 (memória longitudinal do titular na renovação) — Camada 3. Invariantes da
+   * anamnese de cadastro original (histórico de lesão/PAR-Q original, experiência
+   * declarada, preferências duradouras em texto livre) que a cascata de `constraints`
+   * mesociclo-a-mesociclo não reconcilia sozinha. Bloco fixo de ~150 tokens, presente só
+   * na renovação (a geração inicial já lê a anamnese diretamente — ver
+   * `ProtocolGenerationWorker.toConstraints`). `undefined` quando não há anamnese
+   * `SUBMITTED` para reconciliar (não deveria acontecer em uso normal, mas a ausência é
+   * estado válido, nunca erro — mesmo princípio de `continuation` abaixo).
+   */
+  anamnesisInvariants?: string;
+  /**
    * Presente SÓ na geração de renovação de mesociclo (protocolo 2+, a partir do
    * formulário de troca de protocolo por fim de mesociclo). Ausente na geração inicial —
    * é o que distingue as duas no gerador (`ProtocolGeneratorService.buildUserMessage`).
@@ -119,6 +130,19 @@ export interface UserConstraints {
      * (delimitado com `wrapUserMessage` no gerador, mesmo tratamento de `injuriesRaw`).
      */
     summary: string;
+    /**
+     * ADR-008 Camada 1 — ficha de periodização: últimos N mesociclos em linha completa
+     * (write-once, `protocols.mesocycle_summary.ledgerLine`) + um dígito de carreira para
+     * o resto. Tamanho FIXO no prompt independente de quantos anos de assinatura o
+     * titular tenha — é isto (e só isto) que dá "visão do todo" de periodização.
+     */
+    periodizationLedger?: string;
+    /**
+     * ADR-008 Camada 2 — digest de execução (carga/reps/RPE/dor/aderência REAIS,
+     * agregados em SQL) do mesociclo que acabou de fechar. É a evidência de execução que,
+     * antes desta ADR, nunca chegava ao gerador — só o autorrelato do formulário chegava.
+     */
+    executionDigest?: string;
   };
 }
 
