@@ -62,6 +62,10 @@ allowBuilds:
   # `argon2` (US-1.4, hash de senha do PROFESSIONAL/ADMIN) é um addon nativo: seu
   # script de instalação resolve/compila o binário. Sem ele o `require('argon2')`
   # falha no boot. Confinado ao runtime da API — é a função de hashing de senha.
+  # `@scarf/scarf` é dependência transitiva de pacotes usados pelo `@nestjs/swagger`. Seu
+  # script de postinstall só reporta telemetria de instalação — mesmo princípio de menor
+  # privilégio aplicado a `core-js` acima: negado, não produz artefato nenhum.
+  '@scarf/scarf': false
   argon2: true
   core-js: false
   # esbuild é dependência transitiva de `drizzle-kit` e `tsx` (US-0.4). Seu script de

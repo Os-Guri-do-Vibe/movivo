@@ -21,11 +21,25 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
-import { createCheckoutSchema, uuidSchema, type SubscriptionView } from '@movivo/shared';
+import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  createCheckoutSchema,
+  subscriptionViewSchema,
+  uuidSchema,
+  type SubscriptionView,
+} from '@movivo/shared';
 
+import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
 import { SUBSCRIPTION_TERMS_VERSION } from './subscription-model';
 import { SubscriptionService } from './subscription.service';
 
+const TOKEN_PARAM = {
+  name: 'token',
+  description:
+    'UUID v4 do titular (o próprio `userId`, não-enumerável) — é o token de acesso ao portal de assinatura.',
+} as const;
+
+@ApiTags('Assinatura')
 @Controller('subscription')
 @UseGuards(ThrottlerGuard)
 export class SubscriptionController {
@@ -34,6 +48,17 @@ export class SubscriptionController {
   /** Estado do portal de gestão (US-4.6) — sem PII/dado de cartão. Sem assinatura → 404. */
   @Get(':token')
   @Header('Referrer-Policy', 'no-referrer')
+  @ApiOperation({
+    summary: 'Estado do portal de assinatura',
+    description: 'Plano, status do trial/cobrança e datas relevantes — nunca dado de cartão.',
+  })
+  @ApiParam(TOKEN_PARAM)
+  @ApiResponse({
+    status: 200,
+    description: 'Estado da assinatura.',
+    schema: zodSchemaToOpenApi(subscriptionViewSchema),
+  })
+  @ApiResponse({ status: 404, description: 'Token não é UUID ou titular sem assinatura.' })
   async view(@Param('token') token: string): Promise<SubscriptionView> {
     const view = await this.subs.getView(this.userId(token));
     if (!view) throw new NotFoundException();
@@ -46,6 +71,16 @@ export class SubscriptionController {
    */
   @Post(':token/checkout')
   @Header('Referrer-Policy', 'no-referrer')
+  @ApiOperation({
+    summary: 'Cria a sessão de checkout hospedada',
+    description:
+      'Retorna só a `checkoutUrl` (Stripe/Asaas) para redirecionamento — nenhum dado de cartão toca o backend (escopo PCI).',
+  })
+  @ApiParam(TOKEN_PARAM)
+  @ApiBody({ schema: zodSchemaToOpenApi(createCheckoutSchema) })
+  @ApiResponse({ status: 200, description: 'Sessão criada — retorna `checkoutUrl`.' })
+  @ApiResponse({ status: 400, description: 'Plano ou método de pagamento inválido.' })
+  @ApiResponse({ status: 404, description: 'Token não é UUID.' })
   async checkout(
     @Param('token') token: string,
     @Body() body: unknown,
@@ -63,6 +98,17 @@ export class SubscriptionController {
 
   @Post(':token/cancel')
   @Header('Referrer-Policy', 'no-referrer')
+  @ApiOperation({
+    summary: 'Cancela a assinatura',
+    description:
+      'Ação direta, sem fricção artificial (guardrail anti-dark-pattern). `reason` é opcional, texto livre.',
+  })
+  @ApiParam(TOKEN_PARAM)
+  @ApiBody({
+    schema: { type: 'object', properties: { reason: { type: 'string', maxLength: 500 } } },
+  })
+  @ApiResponse({ status: 200, description: 'Assinatura cancelada — retorna o novo status.' })
+  @ApiResponse({ status: 404, description: 'Token não é UUID ou titular sem assinatura.' })
   async cancel(@Param('token') token: string, @Body() body: unknown): Promise<{ status: string }> {
     const userId = this.userId(token);
     const reason = extractReason(body);
@@ -71,12 +117,20 @@ export class SubscriptionController {
 
   @Post(':token/pause')
   @Header('Referrer-Policy', 'no-referrer')
+  @ApiOperation({ summary: 'Pausa a assinatura' })
+  @ApiParam(TOKEN_PARAM)
+  @ApiResponse({ status: 200, description: 'Assinatura pausada — retorna o novo status.' })
+  @ApiResponse({ status: 404, description: 'Token não é UUID ou titular sem assinatura.' })
   async pause(@Param('token') token: string): Promise<{ status: string }> {
     return this.ensureFound(await this.subs.pause(this.userId(token)));
   }
 
   @Post(':token/resume')
   @Header('Referrer-Policy', 'no-referrer')
+  @ApiOperation({ summary: 'Retoma a assinatura pausada' })
+  @ApiParam(TOKEN_PARAM)
+  @ApiResponse({ status: 200, description: 'Assinatura retomada — retorna o novo status.' })
+  @ApiResponse({ status: 404, description: 'Token não é UUID ou titular sem assinatura.' })
   async resume(@Param('token') token: string): Promise<{ status: string }> {
     return this.ensureFound(await this.subs.resume(this.userId(token)));
   }

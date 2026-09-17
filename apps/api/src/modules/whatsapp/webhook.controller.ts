@@ -20,6 +20,7 @@
 import { Body, Controller, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
 import { type RawBodyRequest } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { randomUUID } from 'node:crypto';
 import { type Request } from 'express';
 
@@ -34,6 +35,7 @@ import { WhatsappInboundService } from './whatsapp-inbound.service';
  */
 const EVOLUTION_THROTTLE = { default: { limit: 300, ttl: 60_000 } };
 
+@ApiTags('WhatsApp')
 @Controller('webhook')
 @UseGuards(ThrottlerGuard)
 export class WebhookController {
@@ -44,6 +46,20 @@ export class WebhookController {
 
   @Post('whatsapp')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Entrada de mensagens do WhatsApp (AraraHQ — produção)',
+    description:
+      'Chamado pelo BSP AraraHQ, nunca pelo app cliente. Autenticado por HMAC sobre o ' +
+      'corpo bruto (`req.rawBody`) dentro do serviço — o controller não decide a ' +
+      'autenticação. Responde **sempre 200** em <1s (nunca vaza qual verificação falhou ' +
+      'nem processa a IA na própria thread do webhook); o processamento real é ' +
+      'enfileirado em `ai-response`.',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Sempre 200 — entrega forjada/replay/desconhecida é descartada silenciosamente dentro do serviço.',
+  })
   async whatsapp(
     @Req() req: RawBodyRequest<Request>,
     @Body() body: unknown,
@@ -69,6 +85,17 @@ export class WebhookController {
   @Post('whatsapp/evolution')
   @HttpCode(HttpStatus.OK)
   @Throttle(EVOLUTION_THROTTLE)
+  @ApiOperation({
+    summary: 'Entrada de mensagens do WhatsApp (EvolutionAPI — teste interno)',
+    description:
+      'Só processa algo quando `WHATSAPP_TRANSPORT_PROVIDER=EVOLUTION` (não é o valor de ' +
+      'produção). Com o transporte AraraHQ ativo, responde 200 sem processar nada — ' +
+      'mesmo retorno uniforme das outras rejeições, para não revelar qual camada recusou.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Sempre 200 (no-op quando EvolutionAPI não é o transporte ativo).',
+  })
   async whatsappEvolution(
     @Req() req: RawBodyRequest<Request>,
     @Body() body: unknown,

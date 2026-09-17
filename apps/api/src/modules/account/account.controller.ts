@@ -24,6 +24,15 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { changePasswordSchema, updateAccountProfileSchema } from '@movivo/shared';
 import type { Response } from 'express';
 import type { ZodType } from 'zod';
@@ -35,6 +44,7 @@ import 'multer';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/roles.decorator';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
+import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
 import { AccountService } from './account.service';
 import { AVATAR_UPLOAD_HARD_CEILING_BYTES, AvatarStorageService } from './avatar-storage.service';
 
@@ -55,6 +65,7 @@ function parseOrBadRequest<T>(schema: ZodType<T>, body: unknown): T {
   return result.data;
 }
 
+@ApiTags('Conta')
 @Controller('account')
 export class AccountController {
   constructor(
@@ -64,12 +75,31 @@ export class AccountController {
 
   @Get('profile')
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Perfil da própria conta',
+    description: 'Nome, e-mail (imutável), telefone, URL do avatar e papel da conta autenticada.',
+  })
+  @ApiResponse({ status: 200, description: 'Perfil da conta.' })
+  @ApiResponse({ status: 401, description: 'Access token ausente ou inválido.' })
   getProfile(@CurrentUser() user: AuthenticatedUser) {
     return this.account.getProfile(user.userId, user.role);
   }
 
   @Patch('profile')
   @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Atualiza nome e/ou telefone',
+    description:
+      'E-mail é imutável (decisão do fundador). Ao menos um dos dois campos deve ser enviado.',
+  })
+  @ApiBody({ schema: zodSchemaToOpenApi(updateAccountProfileSchema) })
+  @ApiResponse({ status: 200, description: 'Perfil atualizado.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Nenhum campo enviado, ou telefone fora do formato E.164.',
+  })
   updateProfile(@CurrentUser() user: AuthenticatedUser, @Body() body: unknown) {
     const input = parseOrBadRequest(updateAccountProfileSchema, body);
     return this.account.updateProfile(user.userId, user.role, input);
@@ -78,6 +108,16 @@ export class AccountController {
   @Post('password')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Troca a própria senha',
+    description:
+      'Exige a senha atual (defesa contra sequestro de sessão). Nova senha com mínimo de 12 caracteres.',
+  })
+  @ApiBody({ schema: zodSchemaToOpenApi(changePasswordSchema) })
+  @ApiResponse({ status: 204, description: 'Senha alterada — sem corpo de resposta.' })
+  @ApiResponse({ status: 400, description: 'Nova senha abaixo do piso de 12 caracteres.' })
+  @ApiResponse({ status: 401, description: 'Senha atual incorreta.' })
   async changePassword(@CurrentUser() user: AuthenticatedUser, @Body() body: unknown) {
     const input = parseOrBadRequest(changePasswordSchema, body);
     await this.account.changePassword(user.userId, user.role, input);
@@ -88,6 +128,28 @@ export class AccountController {
   @UseInterceptors(
     FileInterceptor('avatar', { limits: { fileSize: AVATAR_UPLOAD_HARD_CEILING_BYTES } }),
   )
+  @ApiBearerAuth('access-token')
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Upload da foto de perfil',
+    description:
+      'Aceita JPEG, PNG ou WebP, respeitando o tamanho máximo configurado (`AVATAR_UPLOAD_MAX_BYTES`).',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { avatar: { type: 'string', format: 'binary' } },
+      required: ['avatar'],
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Avatar atualizado — retorna a URL pública do novo arquivo.',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Arquivo ausente, formato não suportado ou acima do tamanho máximo.',
+  })
   async uploadAvatar(
     @CurrentUser() user: AuthenticatedUser,
     @UploadedFile() file: Express.Multer.File | undefined,
@@ -111,6 +173,20 @@ export class AccountController {
    * controle de acesso — ver o cabeçalho do módulo e `AvatarStorageService`.
    */
   @Get('avatar/:filename')
+  @ApiOperation({
+    summary: 'Serve a imagem do avatar (público)',
+    description:
+      'Sem autenticação de propósito — consumida por `<img src>` no navegador. O nome do arquivo (UUID) é o próprio controle de acesso.',
+  })
+  @ApiParam({
+    name: 'filename',
+    description: 'Nome do arquivo salvo (UUID + extensão), retornado em `avatarUrl`.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Bytes da imagem, com `Cache-Control` imutável de 1 ano.',
+  })
+  @ApiResponse({ status: 404, description: 'Arquivo inexistente.' })
   async serveAvatar(@Param('filename') filename: string, @Res() res: Response): Promise<void> {
     const file = await this.avatarStorage.read(filename);
     if (!file) {
