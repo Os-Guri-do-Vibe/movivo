@@ -70,6 +70,27 @@ Element.prototype.setPointerCapture ??= () => {};
 Element.prototype.releasePointerCapture ??= () => {};
 Element.prototype.scrollIntoView ??= () => {};
 
+/*
+ * Regressão do jsdom 30.1.0 (https://github.com/jsdom/jsdom/issues/4347, sem correção
+ * publicada): remover um elemento focado e focar outro em seguida passou a disparar um
+ * `blur` espúrio na `window`, com o elemento recém-focado como `relatedTarget`. O
+ * `cleanup()` do Testing Library desmonta a árvore com foco ativo entre testes, então
+ * o próximo `focus()` — inclusive o do próprio Testing Library ao montar um novo teste —
+ * dispara esse `blur`. O Radix Select fecha no `blur` da `window`; o combo abria e
+ * fechava no mesmo clique. O guard replica a correção recusada a montante (PR fechado
+ * sem merge): ignora apenas o `blur` sintético da própria `window` (bolha nunca chega
+ * de um elemento real) que carrega `relatedTarget`, sinal exclusivo dessa regressão.
+ */
+window.addEventListener(
+  'blur',
+  (event) => {
+    if (event.target === event.currentTarget && (event as FocusEvent).relatedTarget !== null) {
+      event.stopImmediatePropagation();
+    }
+  },
+  { capture: true },
+);
+
 afterEach(() => {
   cleanup();
 });
