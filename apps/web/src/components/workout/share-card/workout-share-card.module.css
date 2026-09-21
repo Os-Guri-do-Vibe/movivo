@@ -1,0 +1,213 @@
+.card {
+  position: relative;
+  isolation: isolate;
+  width: 1080px;
+  height: 1920px;
+  overflow: hidden;
+  box-sizing: border-box;
+  color: #f4f7f5;
+  background: transparent;
+  font-family: Arial, sans-serif;
+  text-align: left;
+  line-height: 1.3;
+}
+.card * {
+  box-sizing: border-box;
+}
+.card::before,
+.card::after,
+.card *::before,
+.card *::after {
+  content: none;
+}
+.accentTop,
+.accentBottom {
+  position: absolute;
+  width: 500px;
+  height: 150px;
+  border: 2px solid #25e27e;
+  border-radius: 100px;
+  transform: rotate(-48deg);
+  opacity: 0.5;
+}
+.accentTop {
+  top: -65px;
+  left: -215px;
+}
+.accentBottom {
+  bottom: 15px;
+  right: -225px;
+}
+.header {
+  position: absolute;
+  top: 120px;
+  left: 74px;
+  right: 74px;
+}
+.header p {
+  margin: 0;
+  font-size: 25px;
+  font-weight: 600;
+  text-align: center;
+}
+.grid {
+  position: absolute;
+  bottom: 150px;
+  left: 36px;
+  right: 56px;
+  display: grid;
+  grid-template-columns: 510px minmax(0, 1fr);
+  gap: 26px;
+  align-items: center;
+}
+.anatomy {
+  min-width: 0;
+}
+.bodies {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: end;
+}
+.bodyColumn {
+  position: relative;
+  min-width: 0;
+  text-align: center;
+}
+.hair {
+  position: absolute;
+  top: 0;
+  left: -52px;
+  width: 360px;
+  height: 540px;
+  pointer-events: none;
+}
+.body {
+  width: 360px;
+  margin-left: -52px;
+  pointer-events: none;
+}
+.bodyColumn > span {
+  display: block;
+  margin-top: 22px;
+  color: #83a294;
+  font-size: 17px;
+  letter-spacing: 5px;
+}
+.anatomyLegend {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-top: 48px;
+  font-size: 17px;
+  letter-spacing: 2px;
+  color: #a3c1b3;
+}
+.anatomyLegend i {
+  display: block;
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  border-radius: 100%;
+  background: #25e27e;
+}
+.details {
+  min-width: 0;
+}
+.logo {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+  margin-top: 26px;
+  padding: 18px 10px;
+  border: 2px solid #25e27e;
+  border-radius: 60px;
+  font-size: 23px;
+  letter-spacing: 2px;
+  font-weight: 650;
+  color: #25e27e;
+}
+.badge svg {
+  background: #25e27e;
+  border-radius: 50%;
+  color: #06271a;
+  padding: 4px;
+}
+.duration {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+  margin-top: 44px;
+  padding: 28px 0;
+  border-top: 1px solid #28553f;
+  border-bottom: 1px solid #28553f;
+  color: #25e27e;
+}
+.duration span {
+  display: block;
+  font-size: 19px;
+  letter-spacing: 4px;
+}
+.duration strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 46px;
+  line-height: 1.1;
+  font-weight: 600;
+  color: #f4f7f5;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.motto {
+  margin: 32px 0 0;
+  white-space: nowrap;
+  font-size: 24px;
+  line-height: 1.45;
+  color: #fff;
+  text-align: center;
+  font-weight: 600;
+}
+.follow {
+  margin: 22px 0 0;
+  font-size: 25px;
+  color: #25e27e;
+  text-align: center;
+}
+.follow strong {
+  font-weight: 600;
+}
+.renderSurface {
+  position: fixed;
+  top: 0;
+  left: -12000px;
+  pointer-events: none;
+}
+.preview {
+  display: block;
+  width: 100%;
+  max-width: 310px;
+  /* Só a prévia tem xadrez para tornar o alfa visível; não faz parte do PNG. */
+  background-color: #101b16;
+  background-image:
+    linear-gradient(45deg, #1c2b23 25%, transparent 25%),
+    linear-gradient(-45deg, #1c2b23 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #1c2b23 75%),
+    linear-gradient(-45deg, transparent 75%, #1c2b23 75%);
+  background-size: 24px 24px;
+  background-position:
+    0 0,
+    0 12px,
+    12px -12px,
+    -12px 0;
+  height: auto;
+  margin: 0 auto;
+  border-radius: 16px;
+}

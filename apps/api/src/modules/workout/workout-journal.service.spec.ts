@@ -138,6 +138,7 @@ function makeService(
   const updated: Record<string, unknown>[] = [];
   const tx = {
     select: () => queryChain(selects.shift() ?? []),
+    selectDistinctOn: () => queryChain(selects.shift() ?? []),
     insert: () => mutationChain(() => insertReturns.shift() ?? [], inserted, updated),
     update: () => mutationChain(() => updateReturns.shift() ?? [], inserted, updated),
   };
@@ -166,6 +167,49 @@ function makeService(
 }
 
 describe('WorkoutJournalService.journal', () => {
+  it('deriva o share card do cadastro e dos exercícios realizados na prescrição salva', async () => {
+    const { service } = makeService({
+      selects: [
+        [{ ...OWNER, biologicalSex: 'FEMALE' }],
+        [
+          {
+            ...WORKOUT,
+            status: 'COMPLETED',
+            finishedAt: new Date('2026-08-10T11:05:00Z'),
+            durationSeconds: 3900,
+          },
+        ],
+        [],
+        [
+          { exerciseId: 'squat', setNumber: 1, completed: true, skipped: false },
+          { exerciseId: 'plank', setNumber: 1, completed: false, skipped: true },
+        ],
+        [],
+        [{ id: 'squat', muscleGroups: ['quadríceps', 'glúteo'] }],
+      ],
+    });
+    const result = await service.journal(USER_ID, '2026-08-10', new Date('2026-08-12T12:00:00Z'));
+    expect(result.workout?.shareCard).toEqual({
+      user: { name: 'Pedro', gender: 'female' },
+      workout: {
+        name: 'A',
+        durationMinutes: 65,
+        completedAt: '2026-08-10T11:05:00.000Z',
+        trainedMuscles: ['Quadríceps', 'Glúteos'],
+        muscleGroupsForHighlighter: ['quads', 'glutes'],
+      },
+    });
+  });
+
+  it('não presume sexo ausente nem gera card para treino em andamento', async () => {
+    for (const owner of [OWNER, { ...OWNER, biologicalSex: 'MALE' }]) {
+      const { service } = makeService({ selects: [[owner], [WORKOUT], [], [], []] });
+      expect(
+        (await service.journal(USER_ID, '2026-08-10', new Date('2026-08-12T12:00:00Z'))).workout
+          ?.shareCard,
+      ).toBeUndefined();
+    }
+  });
   it('rejeita futuro e ausencia de protocolo ativo', async () => {
     await expect(
       makeService({ selects: [[OWNER]] }).service.journal(

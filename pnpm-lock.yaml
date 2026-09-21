@@ -217,6 +217,12 @@ importers:
       clsx:
         specifier: 2.1.1
         version: 2.1.1
+      html-to-image:
+        specifier: 1.11.13
+        version: 1.11.13
+      js-rich-body-highlighter:
+        specifier: 0.1.1
+        version: 0.1.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       libphonenumber-js:
         specifier: 1.13.12
         version: 1.13.12
@@ -3634,6 +3640,9 @@ packages:
     resolution: {integrity: sha512-CV9TW3Y3f8/wT0BRFc1/KAVQ3TUHiXmaAb6VW9vtiMFf7SLoMd1PdAc4W3KFOFETBJUb90KatHqlsZMWV+R9Gg==}
     engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
 
+  html-to-image@1.11.13:
+    resolution: {integrity: sha512-cuOPoI7WApyhBElTTb9oqsawRvZ0rHhaHwghRLlTuffoD1B2aDemlCruLeZrUIIdvG7gs9xeELEPm6PhuASqrg==}
+
   http-errors@2.0.1:
     resolution: {integrity: sha512-4FbRdAX+bSdmo4AUFuS0WNiPz8NgFt+r8ThgNWmlrjQjt1Q7ZR9+zTlce2859x4KSXrwIsaeTqDoKQmtP8pLmQ==}
     engines: {node: '>= 0.8'}
@@ -3741,15 +3750,25 @@ packages:
   js-md5@0.8.3:
     resolution: {integrity: sha512-qR0HB5uP6wCuRMrWPTrkMaev7MJZwJuuw4fnwAzRgP4J4/F8RwtodOKpGp4XpqsLBFzzgqIO42efFAyz2Et6KQ==}
 
+  js-rich-body-highlighter@0.1.1:
+    resolution: {integrity: sha512-IcyVbTXwsliUxvSpxbA0eLG6JuFj6Zb7L5is817CU8EtqOoFOvSIoEx/TcZOOA4VIXB0BQDpVkt9QN4fToqYlQ==}
+    peerDependencies:
+      react: '>=18'
+      react-dom: '>=18'
+      vue: '>=3'
+    peerDependenciesMeta:
+      react:
+        optional: true
+      react-dom:
+        optional: true
+      vue:
+        optional: true
+
   js-tokens@10.0.0:
     resolution: {integrity: sha512-lM/UBzQmfJRo9ABXbPWemivdCW8V2G8FHaHdypQaIy523snUjog0W71ayWXTjiR+ixeMyVHN2XcpnTd/liPg/Q==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
-
-  js-yaml@5.2.3:
-    resolution: {integrity: sha512-n+mUVyUX5bVv7G/G2zyIHOhdxfuU1dY2NOFzTQUWiMUbFss8b57NFlgCCaggU78wSw5KVS9cllzeLyzyR+n5nw==}
-    hasBin: true
 
   js-yaml@5.4.1:
     resolution: {integrity: sha512-28R/k+NAjeuf7+CKlTxWZVExJGwVVLwY06DgEnOMz2gEpfNkDcD7QvyiVPT0xy0XXhU8vHsd4Ot42OOPdJG7dQ==}
@@ -7573,7 +7592,7 @@ snapshots:
   cosmiconfig@8.3.6(typescript@5.9.3):
     dependencies:
       import-fresh: 3.3.1
-      js-yaml: 5.2.3
+      js-yaml: 5.4.1
       parse-json: 5.2.0
       path-type: 4.0.0
     optionalDependencies:
@@ -8218,6 +8237,8 @@ snapshots:
     transitivePeerDependencies:
       - '@noble/hashes'
 
+  html-to-image@1.11.13: {}
+
   http-errors@2.0.1:
     dependencies:
       depd: 2.0.0
@@ -8305,14 +8326,14 @@ snapshots:
 
   js-md5@0.8.3: {}
 
+  js-rich-body-highlighter@0.1.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+    optionalDependencies:
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
+
   js-tokens@10.0.0: {}
 
   js-tokens@4.0.0: {}
-
-  js-yaml@5.2.3:
-    dependencies:
-      argparse: 2.0.1
-    optional: true
 
   js-yaml@5.4.1:
     dependencies:
