@@ -59,7 +59,11 @@ describe('WorkoutShareCardPanel', () => {
   });
 
   it('desabilita as ações sem imagem pronta ou durante uma ação em andamento', () => {
-    vi.mocked(useWorkoutShareCard).mockReturnValue({ ...baseCard, imageUrl: 'blob:card', acting: true });
+    vi.mocked(useWorkoutShareCard).mockReturnValue({
+      ...baseCard,
+      imageUrl: 'blob:card',
+      acting: true,
+    });
     render(<WorkoutShareCardPanel data={workoutShareCardMock} />);
     expect(screen.getByRole('button', { name: 'Compartilhar imagem' })).toBeDisabled();
   });
