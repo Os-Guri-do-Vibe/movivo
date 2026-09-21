@@ -22,6 +22,7 @@ export * from './schemas';
 export * from './types';
 
 export * from './attribution';
+export * from './workout-share-card';
 
 export * from './prompts/persona-block';
 

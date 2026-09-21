@@ -3,8 +3,15 @@
 import type { WorkoutJournal, WorkoutSetInput } from '@movivo/shared';
 import { ChevronDown, ChevronLeft, ChevronRight, Clock3 } from 'lucide-react';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+
+// Biblioteca anatômica e exportador só entram após o treino ser concluído.
+const WorkoutShareCardPanel = dynamic(
+  () => import('./share-card/WorkoutShareCardPanel').then((module) => module.WorkoutShareCardPanel),
+  { ssr: false },
+);
 
 const DAY_LABELS: Readonly<Record<string, string>> = {
   SUN: 'Dom',
@@ -668,6 +675,9 @@ export function WorkoutJournalView() {
               Tempo total: {formatTimer(workout.durationSeconds ?? 0)} · Esforço{' '}
               {workout.perceivedEffort}/10
             </p>
+            {workout.shareCard ? (
+              <WorkoutShareCardPanel key={workout.id} data={workout.shareCard} />
+            ) : null}
           </section>
         ) : (
           <>

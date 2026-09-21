@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { and, asc, desc, eq, gte, inArray, lte } from 'drizzle-orm';
 import {
   anamnesisStructuredSchema,
+  mapWorkoutMuscles,
   protocolStructureSchema,
   type FinishWorkoutInput,
   type ProtocolSession,
@@ -13,6 +14,7 @@ import {
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import {
   anamnesisSessions,
+  exerciseCatalogEntries,
   handoffAlerts,
   protocols,
   protocolVersions,
@@ -315,6 +317,55 @@ export class WorkoutJournalService {
         painReported: workout.painReported,
         sets,
       };
+      const finishedAt = workout.finishedAt;
+      if (workout.status === 'COMPLETED' && finishedAt && owner.biologicalSex) {
+        const completedIds = workout.prescription.exercises
+          .filter((exercise) =>
+            sets.some(
+              (entry) =>
+                entry.exerciseId === exercise.exerciseId &&
+                entry.setNumber > 0 &&
+                entry.completed &&
+                !entry.skipped,
+            ),
+          )
+          .map((exercise) => exercise.exerciseId);
+        // O catálogo é versionado: uma edição posterior não muda os músculos de um
+        // treino passado. IDs vêm da prescrição salva, nunca do protocolo atual.
+        const catalog = completedIds.length
+          ? await this.db.runAsUser(userId, 'USER', (tx) =>
+              tx
+                .selectDistinctOn([exerciseCatalogEntries.exerciseKey], {
+                  id: exerciseCatalogEntries.exerciseKey,
+                  muscleGroups: exerciseCatalogEntries.muscleGroups,
+                })
+                .from(exerciseCatalogEntries)
+                .where(
+                  and(
+                    inArray(exerciseCatalogEntries.exerciseKey, completedIds),
+                    lte(exerciseCatalogEntries.createdAt, finishedAt),
+                  ),
+                )
+                .orderBy(exerciseCatalogEntries.exerciseKey, desc(exerciseCatalogEntries.version)),
+            )
+          : [];
+        const byId = new Map(catalog.map((entry) => [entry.id, entry.muscleGroups]));
+        const muscles = completedIds.flatMap(
+          (id) => byId.get(id) ?? EXERCISE_BY_ID.get(id)?.muscleGroups ?? [],
+        );
+        workoutView.shareCard = {
+          user: {
+            name: owner.name?.trim().split(/\s+/)[0] || 'atleta',
+            gender: owner.biologicalSex === 'FEMALE' ? 'female' : 'male',
+          },
+          workout: {
+            name: workout.prescription.dayLabel,
+            durationMinutes: (workout.durationSeconds ?? 0) / 60,
+            completedAt: finishedAt.toISOString(),
+            ...mapWorkoutMuscles(muscles),
+          },
+        };
+      }
     }
 
     return {
@@ -567,6 +618,7 @@ export class WorkoutJournalService {
       tx
         .select({
           name: users.name,
+          biologicalSex: users.biologicalSex,
           timezone: users.timezone,
           protocolId: protocols.id,
           protocolVersion: protocols.version,

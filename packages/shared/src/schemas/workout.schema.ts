@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { protocolSessionSchema } from './protocol.schema';
 import { uuidSchema } from './common.schema';
+import { workoutShareCardDataSchema } from './workout-share-card.schema';
 
 export const workoutDateSchema = z.iso.date();
 export const workoutLoadUnitSchema = z.enum(['KG', 'LB', 'BODYWEIGHT', 'NONE']);
@@ -127,6 +128,8 @@ export const workoutJournalSchema = z.object({
       perceivedEffort: z.number().int().min(1).max(10).nullable(),
       painReported: z.boolean(),
       sets: z.array(workoutSetViewSchema),
+      // Aditivo para manter compatibilidade com respostas anteriores da API.
+      shareCard: workoutShareCardDataSchema.nullable().optional(),
     })
     .nullable(),
 });
