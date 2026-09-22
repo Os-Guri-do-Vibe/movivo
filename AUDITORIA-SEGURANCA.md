@@ -14,8 +14,8 @@
 
 A MOVIVO tem uma postura de segurança **acima da média para um MVP pré-lançamento** — substancialmente acima do que normalmente se encontra em startups nesta fase. O código demonstra maturidade real e não cosmética:
 
-- **Isolamento multi-tenant genuíno e em profundidade**: RLS `FORCE` no PostgreSQL com GUC por transação (`set_config(..., is_local := true)`), corretamente desenhado para sobreviver ao PgBouncer em *transaction mode* — e, além da RLS, **todo** query de domínio repete o predicado `eq(tabela.userId, userId)` na aplicação. Não encontrei um único IDOR explorável.
-- **Autenticação sólida**: JWT RS256 com `algorithms` fixo (recusa `alg:none`/HS256), seleção de chave por `kid` com rotação N/N-1, denylist por `jti` no Redis, revalidação do papel contra o banco, refresh opaco de 256 bits armazenado apenas como hash SHA-256, comparação em tempo constante, Argon2id com *dummy hash* contra enumeração de usuários.
+- **Isolamento multi-tenant genuíno e em profundidade**: RLS `FORCE` no PostgreSQL com GUC por transação (`set_config(..., is_local := true)`), corretamente desenhado para sobreviver ao PgBouncer em _transaction mode_ — e, além da RLS, **todo** query de domínio repete o predicado `eq(tabela.userId, userId)` na aplicação. Não encontrei um único IDOR explorável.
+- **Autenticação sólida**: JWT RS256 com `algorithms` fixo (recusa `alg:none`/HS256), seleção de chave por `kid` com rotação N/N-1, denylist por `jti` no Redis, revalidação do papel contra o banco, refresh opaco de 256 bits armazenado apenas como hash SHA-256, comparação em tempo constante, Argon2id com _dummy hash_ contra enumeração de usuários.
 - **Zero segredos vazados no Git**: nenhum `.env`, chave privada ou credencial jamais foi commitado. `.gitignore` é rigoroso, `gitleaks` roda sobre o histórico completo no CI, e a allowlist do gitleaks é por regex específica (não por caminho amplo).
 - **Sem SQL injection**: todo `sql.unsafe` está confinado ao caminho de migração com constantes hardcoded; todo dado de request vai parametrizado.
 - **DevSecOps real no CI**: gitleaks (histórico completo) + semgrep (OWASP Top Ten) + `pnpm audit --audit-level=high`, todos bloqueantes, com `permissions: contents: read` por padrão.
@@ -30,14 +30,14 @@ O padrão é claro e vale registrar: **a engenharia de segurança deste projeto 
 
 ### Contagem por severidade
 
-| Severidade | Quantidade |
-|---|---|
-| 🔴 **CRÍTICO** | 2 |
-| 🟠 **ALTO** | 5 |
-| 🟡 **MÉDIO** | 9 |
-| 🔵 **BAIXO** | 5 |
-| ⚪ **INFORMATIVO / HARDENING** | 6 |
-| **Total** | **27** |
+| Severidade                     | Quantidade |
+| ------------------------------ | ---------- |
+| 🔴 **CRÍTICO**                 | 2          |
+| 🟠 **ALTO**                    | 5          |
+| 🟡 **MÉDIO**                   | 9          |
+| 🔵 **BAIXO**                   | 5          |
+| ⚪ **INFORMATIVO / HARDENING** | 6          |
+| **Total**                      | **27**     |
 
 ---
 
@@ -45,16 +45,16 @@ O padrão é claro e vale registrar: **a engenharia de segurança deste projeto 
 
 ### Efetivamente analisado
 
-| Área | Cobertura |
-|---|---|
-| `apps/api/src/**` | Leitura direcionada de ~60 arquivos: bootstrap, config/env schema, auth (guards, estratégia JWT, tokens, senha), RLS/tenant DB, cifra pgcrypto, logger/redação, LLM router e providers, RAG/contexto, prompt injection, webhooks WhatsApp (AraraHQ + Evolution), webhook de pagamento e gateways, workout/journal/access, anamnese, account/avatar, admin/control-center, short-link |
-| `apps/web/src/**` | BFF do dashboard, sessão/cookies, proxy/CSP, rotas de API (avatar, control catch-all, workout, session), `next.config.ts`, componentes novos de share-card |
-| `packages/shared/src/**` | Schemas Zod compartilhados (uso nos boundaries) |
-| Segredos | `git log --all --full-history --diff-filter=A` sobre todo o histórico; `.gitignore`; `.gitleaks.toml`; inspeção de `.env`, `apps/api/.env`, `apps/web/.env.local`, `secrets/` (nomes e permissões; **valores não foram lidos nem exfiltrados**) |
-| Dependências | `pnpm audit` executado com sucesso; versões resolvidas conferidas em `node_modules/.pnpm` |
-| CI/CD | `.github/workflows/ci.yml` integral |
-| Infra | `docker-compose.yml` (bindings de porta, `security_opt`), ausência de Dockerfile |
-| Pesquisa externa | Advisories Next.js jul/ago 2026, npm advisories (qs, esbuild), verificação de reputação do pacote `js-rich-body-highlighter` |
+| Área                     | Cobertura                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `apps/api/src/**`        | Leitura direcionada de ~60 arquivos: bootstrap, config/env schema, auth (guards, estratégia JWT, tokens, senha), RLS/tenant DB, cifra pgcrypto, logger/redação, LLM router e providers, RAG/contexto, prompt injection, webhooks WhatsApp (AraraHQ + Evolution), webhook de pagamento e gateways, workout/journal/access, anamnese, account/avatar, admin/control-center, short-link |
+| `apps/web/src/**`        | BFF do dashboard, sessão/cookies, proxy/CSP, rotas de API (avatar, control catch-all, workout, session), `next.config.ts`, componentes novos de share-card                                                                                                                                                                                                                           |
+| `packages/shared/src/**` | Schemas Zod compartilhados (uso nos boundaries)                                                                                                                                                                                                                                                                                                                                      |
+| Segredos                 | `git log --all --full-history --diff-filter=A` sobre todo o histórico; `.gitignore`; `.gitleaks.toml`; inspeção de `.env`, `apps/api/.env`, `apps/web/.env.local`, `secrets/` (nomes e permissões; **valores não foram lidos nem exfiltrados**)                                                                                                                                      |
+| Dependências             | `pnpm audit` executado com sucesso; versões resolvidas conferidas em `node_modules/.pnpm`                                                                                                                                                                                                                                                                                            |
+| CI/CD                    | `.github/workflows/ci.yml` integral                                                                                                                                                                                                                                                                                                                                                  |
+| Infra                    | `docker-compose.yml` (bindings de porta, `security_opt`), ausência de Dockerfile                                                                                                                                                                                                                                                                                                     |
+| Pesquisa externa         | Advisories Next.js jul/ago 2026, npm advisories (qs, esbuild), verificação de reputação do pacote `js-rich-body-highlighter`                                                                                                                                                                                                                                                         |
 
 ### Limitações declaradas — o que NÃO foi possível verificar
 
@@ -76,6 +76,7 @@ Sou explícito sobre os limites desta auditoria, porque um relatório que escond
 **Vulnerabilidade:** OWASP A07:2021 (Identification and Authentication Failures) + A05:2021 (Security Misconfiguration) + CWE-798 (Use of Hard-coded Credentials). Bypass de autenticação na superfície de escrita financeira.
 
 **Local:**
+
 - `apps/api/src/modules/subscription/payment/mock-gateway.ts:27` — `export const MOCK_WEBHOOK_SECRET = 'mock-webhook-secret-dev';`
 - `apps/api/src/modules/subscription/subscription.module.ts:41-48` — factory do `PAYMENT_GATEWAY`
 - `apps/api/src/core/config/env.schema.ts:392` — `PAYMENT_PROVIDER: z.enum([...]).default('MOCK')`
@@ -121,6 +122,7 @@ Atacante (qualquer um na internet que conheça o segredo do código)
 ```
 
 **Impacto:**
+
 - **Fraude de receita direta** — assinatura vitalícia gratuita para si e para quem quiser, em escala. O modelo de negócio inteiro é B2C por assinatura: este é o cofre.
 - **Negação de serviço contra pagantes** — forjar `SUBSCRIPTION_CANCELED` ou `PAYMENT_FAILED` para o `userId` de qualquer cliente pagante derruba o acesso dele e dispara a régua de dunning por WhatsApp (dano reputacional direto, cliente recebe cobrança indevida).
 - **Envenenamento do livro-razão financeiro** — `PaymentReconciliationWorker` grava `amountCents`/`feeCents` controlados pelo atacante em `payments`, tabela imutável por trigger. A contabilidade (Eduardo) passa a operar sobre dados forjados, e a imutabilidade garante que o lixo **não pode ser corrigido**, só compensado.
@@ -186,6 +188,7 @@ if (config.APP_ENV === 'production' && config.PAYMENT_PROVIDER === 'MOCK') {
 export const MOCK_WEBHOOK_SECRET =
   process.env.MOCK_WEBHOOK_SECRET ?? randomBytes(32).toString('hex');
 ```
+
 Para os testes, injetar o segredo explicitamente no construtor do `MockGateway` em vez de importar a constante.
 
 **(d) Validar o evento com Zod** — ver **A-01**, que é a segunda metade desta correção e vale mesmo depois do Stripe real entrar.
@@ -199,6 +202,7 @@ Para os testes, injetar o segredo explicitamente no construtor do `MockGateway` 
 **Vulnerabilidade:** Violação de controle de conformidade / transferência internacional de dado pessoal sensível sem base legal. LGPD Art. 11 (dado de saúde), Art. 33 (transferência internacional), Art. 46 (medidas de segurança). OWASP LLM06 (Sensitive Information Disclosure).
 
 **Local:**
+
 - `apps/api/.env:111` — `LLM_OPENAI_HEALTH_DATA_APPROVED=true`
 - `apps/api/.env:115` — `LLM_ANTHROPIC_HEALTH_DATA_APPROVED=true`
 - `apps/api/.env:119` — `LLM_DEEPSEEK_HEALTH_DATA_APPROVED=true`
@@ -217,16 +221,19 @@ canProcess(dataClass: DataClass): boolean {
   return dataClass === 'NON_HEALTH' || this.healthDataApproved;  // default = false
 }
 ```
+
 ```ts
 // llm-router.service.ts:120 — fail-safe na classificação
 const dataClass: DataClass = request.dataClass ?? 'HEALTH';
 // llm-router.service.ts:159 — bloqueio ANTES de qualquer byte sair
-if (!provider.canProcess(dataClass)) { /* pula o provedor */ }
+if (!provider.canProcess(dataClass)) {
+  /* pula o provedor */
+}
 ```
 
 Implementação correta, defensiva, testada. **E derrotada por seis linhas de configuração.**
 
-O ADR-005-R2 e o `CLAUDE.md` afirmam: *"Nenhum endpoint recebe `HEALTH` até aprovação explícita de DPA, transferência internacional, retenção/no-training, suboperadores e segurança."* Cada uma dessas flags é um **atestado formal de que essa diligência foi concluída**. Nenhuma evidência de DPA assinado, cláusulas-padrão de transferência internacional, ou atestado de não-treinamento existe no repositório.
+O ADR-005-R2 e o `CLAUDE.md` afirmam: _"Nenhum endpoint recebe `HEALTH` até aprovação explícita de DPA, transferência internacional, retenção/no-training, suboperadores e segurança."_ Cada uma dessas flags é um **atestado formal de que essa diligência foi concluída**. Nenhuma evidência de DPA assinado, cláusulas-padrão de transferência internacional, ou atestado de não-treinamento existe no repositório.
 
 Consequência prática, **hoje, em ambiente de desenvolvimento com dados reais** (a memória do projeto registra protocolos gerados a partir da anamnese real do fundador):
 
@@ -237,6 +244,7 @@ Consequência prática, **hoje, em ambiente de desenvolvimento com dados reais**
 O PII Scrubber (`llm-router.service.ts:137-140`) remove identificadores diretos (nome, telefone, e-mail) — o que é **pseudonimização, não anonimização**. A LGPD é explícita: dado pseudonimizado continua sendo dado pessoal. E o conteúdo clínico em si (lesão, medicação, condição cardíaca declarada no PAR-Q) atravessa intacto — é justamente o que o modelo precisa ler para funcionar.
 
 **Impacto:**
+
 - **Sanção administrativa da ANPD**: até 2% do faturamento, limitado a R$50 milhões por infração, além de publicização da infração — que para uma marca de saúde que se vende como "Ciência que treina com você" é o dano maior.
 - **Transferência internacional sem base legal** (Art. 33) para jurisdição sem decisão de adequação da ANPD.
 - **Contradição direta com um ADR vigente** — o gate executável que o ADR-005-R2 descreve como garantia existe, mas está desarmado. Qualquer auditoria externa (SOC 2, due diligence de investidor, requisição da ANPD) que compare o ADR com o `.env` encontra isso em minutos.
@@ -249,10 +257,12 @@ O PII Scrubber (`llm-router.service.ts:137-140`) remove identificadores diretos 
 **(a) Imediato — desarmar até haver evidência.** Voltar as seis flags para `false` em `apps/api/.env`. O sistema continua funcional para conteúdo `NON_HEALTH`; o que falhar revela exatamente quais caminhos tratam dado de saúde (informação valiosa por si só).
 
 **(b) Classificar antes de reabrir.** Mapear cada `LLMRequest` do código e declarar `dataClass` explicitamente. Hoje o default `?? 'HEALTH'` é o correto como fail-safe, mas significa que caminhos genuinamente não-sensíveis também estão bloqueados. Separar de verdade:
+
 - `PROTOCOL_GENERATION`, `CHECKIN_ADJUSTMENT`, `AI_RESPONSE` sobre conversa do aluno → `HEALTH`;
 - geração de copy, classificação de intenção sobre texto já neutralizado → `NON_HEALTH`.
 
 **(c) Reabrir provedor a provedor, com evidência versionada.** Antes de ligar qualquer flag, exigir e arquivar em `docs/juridico/dpa/<provedor>/`:
+
 1. DPA / Data Processing Addendum assinado;
 2. Base de transferência internacional (cláusulas-padrão contratuais da ANPD, ou decisão de adequação);
 3. Atestado de **zero data retention** e **no-training** por escrito (OpenAI e Anthropic oferecem via ZDR/enterprise; para a DeepSeek, verificar se existe equivalente contratual — se não existir, a flag não sobe);
@@ -295,12 +305,12 @@ return JSON.parse(rawBody.toString('utf8')) as GatewayEvent;
 
 **Como é explorável / que brecha abre:**
 
-O `as GatewayEvent` é um *type assertion* do TypeScript — **apagado em tempo de compilação, zero verificação em runtime**. O que chega em `applyGatewayEvent` é literalmente o que o remetente escreveu no corpo.
+O `as GatewayEvent` é um _type assertion_ do TypeScript — **apagado em tempo de compilação, zero verificação em runtime**. O que chega em `applyGatewayEvent` é literalmente o que o remetente escreveu no corpo.
 
 Isoladamente isso exige a assinatura HMAC válida (portanto encadeia com **C-01**). Mas é um achado independente e mais duradouro por dois motivos:
 
 1. **O padrão será copiado.** `real-gateways.ts:47-53` tem `parseWebhookEvent` como stub a ser implementado no lançamento. Quem implementar vai espelhar o mock. Se o Stripe real herdar `JSON.parse(...) as GatewayEvent`, qualquer falha futura na verificação de assinatura (segredo rotacionado errado, bug de preimage, confusão de endpoint de teste/produção) vira controle total do domínio de assinaturas.
-2. **Defesa em profundidade.** A assinatura prova *origem*, não *forma*. Um payload legítimo do Stripe com um campo inesperado (`amountCents: -999999`, `userId` de outro tenant por bug do provedor, `type` desconhecido) atravessa sem resistência. Campos numéricos negativos entram direto na contabilidade.
+2. **Defesa em profundidade.** A assinatura prova _origem_, não _forma_. Um payload legítimo do Stripe com um campo inesperado (`amountCents: -999999`, `userId` de outro tenant por bug do provedor, `type` desconhecido) atravessa sem resistência. Campos numéricos negativos entram direto na contabilidade.
 
 **Impacto:** Escalada de qualquer falha de assinatura para comprometimento total do domínio financeiro; corrupção silenciosa do livro-razão; `userId` arbitrário atravessando a fronteira de tenant.
 
@@ -312,22 +322,24 @@ Criar o schema em `packages/shared/src/schemas/` e validar em **todos** os gatew
 // packages/shared/src/schemas/payment-event.schema.ts
 import { z } from 'zod';
 
-export const gatewayEventSchema = z.object({
-  type: z.enum([
-    'CHECKOUT_CONFIRMED',
-    'PAYMENT_FAILED',
-    'SUBSCRIPTION_CANCELED',
-    'SUBSCRIPTION_RENEWED',
-  ]),
-  eventId: z.string().min(1).max(200),
-  externalSubscriptionId: z.string().min(1).max(200),
-  userId: z.uuid(),
-  plan: z.enum(['MONTHLY', 'QUARTERLY', 'ANNUAL']).optional(),
-  priceCents: z.number().int().nonnegative().max(1_000_000).optional(),
-  amountCents: z.number().int().nonnegative().max(1_000_000).optional(),
-  feeCents: z.number().int().nonnegative().max(1_000_000).optional(),
-  occurredAt: z.iso.datetime().optional(),
-}).strict();   // .strict() rejeita campo desconhecido — barra mass assignment futuro
+export const gatewayEventSchema = z
+  .object({
+    type: z.enum([
+      'CHECKOUT_CONFIRMED',
+      'PAYMENT_FAILED',
+      'SUBSCRIPTION_CANCELED',
+      'SUBSCRIPTION_RENEWED',
+    ]),
+    eventId: z.string().min(1).max(200),
+    externalSubscriptionId: z.string().min(1).max(200),
+    userId: z.uuid(),
+    plan: z.enum(['MONTHLY', 'QUARTERLY', 'ANNUAL']).optional(),
+    priceCents: z.number().int().nonnegative().max(1_000_000).optional(),
+    amountCents: z.number().int().nonnegative().max(1_000_000).optional(),
+    feeCents: z.number().int().nonnegative().max(1_000_000).optional(),
+    occurredAt: z.iso.datetime().optional(),
+  })
+  .strict(); // .strict() rejeita campo desconhecido — barra mass assignment futuro
 
 export type GatewayEvent = z.infer<typeof gatewayEventSchema>;
 ```
@@ -336,7 +348,7 @@ export type GatewayEvent = z.infer<typeof gatewayEventSchema>;
 // mock-gateway.ts — e idêntico em StripeGateway/AsaasGateway
 try {
   const parsed = gatewayEventSchema.safeParse(JSON.parse(rawBody.toString('utf8')));
-  if (!parsed.success) return null;   // null ⇒ 401 uniforme, não vaza o motivo
+  if (!parsed.success) return null; // null ⇒ 401 uniforme, não vaza o motivo
   return parsed.data;
 } catch {
   return null;
@@ -365,15 +377,15 @@ A CSP construída em `proxy.ts:28-43` é de alta qualidade — nonce por request
 
 Mas o `matcher` só a aplica a quatro caminhos. **Ficam sem nenhuma CSP** justamente as rotas que manipulam o dado mais sensível do produto:
 
-| Rota descoberta | Dado que trafega |
-|---|---|
+| Rota descoberta                  | Dado que trafega                                                    |
+| -------------------------------- | ------------------------------------------------------------------- |
 | `/anamnese`, `/anamnese/[token]` | **Anamnese completa + PAR-Q integral + dor clínica** — LGPD Art. 11 |
-| `/checkin-semanal/[token]` | Evolução clínica, fadiga, sinais de segurança |
-| `/protocolo/[token]` | Protocolo de treino individualizado + PDF |
-| `/assinar/[token]` | **Fluxo de pagamento** |
-| `/conta/[token]` | Dados cadastrais + gestão de assinatura |
-| `/mesociclo/[token]` | Histórico de performance |
-| `/api/dashboard/:path*` | Todo o BFF do Control Center |
+| `/checkin-semanal/[token]`       | Evolução clínica, fadiga, sinais de segurança                       |
+| `/protocolo/[token]`             | Protocolo de treino individualizado + PDF                           |
+| `/assinar/[token]`               | **Fluxo de pagamento**                                              |
+| `/conta/[token]`                 | Dados cadastrais + gestão de assinatura                             |
+| `/mesociclo/[token]`             | Histórico de performance                                            |
+| `/api/dashboard/:path*`          | Todo o BFF do Control Center                                        |
 
 O formulário de anamnese (`onboarding-wizard.tsx`, `step3-parq.tsx`) é o ponto onde o titular digita condição cardíaca, medicação em uso e lesões. É literalmente o dado mais sensível que a MOVIVO toca — e é a página com **menos** proteção de browser do app inteiro.
 
@@ -433,7 +445,7 @@ Validar após a mudança com `curl -sI https://<host>/anamnese | grep -i content
 
 **Como é explorável / que brecha abre:**
 
-O próprio comentário no código (linhas 42-45) reconhece o problema com honestidade: *"clínica em texto livre — não há como classificar previamente o que é ou não... não cifrada nesta sprint."*
+O próprio comentário no código (linhas 42-45) reconhece o problema com honestidade: _"clínica em texto livre — não há como classificar previamente o que é ou não... não cifrada nesta sprint."_
 
 A arquitetura de cifra da MOVIVO é, no resto, excelente e coerente: `anamnesis_sessions.data_block_2` (PAR-Q + dor + todo texto livre), `checkins.notes_cipher`, `protocol_renewal_sessions.data_block_3`, `protocols.mesocycle_notes_cipher` — todos `bytea` via `pgp_sym_encrypt`. A decisão de "cifrar tudo que é livre em vez de auditar o que o usuário digitou" (recomendação de Alexandre §5.7) é exatamente a decisão certa.
 
@@ -472,7 +484,7 @@ async append(userId: string, turn: ConversationTurn): Promise<void> {
 
 Migração: adicionar `content_cipher` nullable → job de backfill que cifra linha a linha sob `runAsSystem` → tornar `NOT NULL` → `DROP COLUMN content`. Importante: `VACUUM FULL` na tabela após o drop, porque o Postgres mantém as tuplas antigas em páginas mortas até então.
 
-**Custo a considerar:** a janela de contexto do AI Coach é a query mais frequente do produto (comentário em `conversations.ts:95`). Cifrar significa decifrar N turnos a cada mensagem recebida. Mitigação: manter a janela quente decifrada no `WorkingMemory` (Redis, com TTL curto e `REDIS_TLS_ENABLED=true` em produção), pagando a decifra só no *cache miss*. Medir antes de assumir que é caro — `pgp_sym_decrypt` de alguns KB é da ordem de microssegundos.
+**Custo a considerar:** a janela de contexto do AI Coach é a query mais frequente do produto (comentário em `conversations.ts:95`). Cifrar significa decifrar N turnos a cada mensagem recebida. Mitigação: manter a janela quente decifrada no `WorkingMemory` (Redis, com TTL curto e `REDIS_TLS_ENABLED=true` em produção), pagando a decifra só no _cache miss_. Medir antes de assumir que é caro — `pgp_sym_decrypt` de alguns KB é da ordem de microssegundos.
 
 ---
 
@@ -481,6 +493,7 @@ Migração: adicionar `content_cipher` nullable → job de backfill que cifra li
 **Vulnerabilidade:** OWASP A02:2021 (Cryptographic Failures) / CWE-319 (Cleartext Transmission).
 
 **Local:**
+
 - `apps/web/next.config.ts:64-80` — bloco `headers()` sem `Strict-Transport-Security`
 - `apps/web/src/proxy.ts:28-43` — CSP tem `upgrade-insecure-requests`, mas isso não é HSTS
 - `apps/api/src/main.ts` — nenhum header de segurança na API (ver **M-01**)
@@ -511,6 +524,7 @@ Adicionar em `apps/web/next.config.ts`, no array de headers existente:
 ```
 
 Cuidados de implantação, nesta ordem:
+
 1. Confirmar que **todos** os subdomínios (incluindo `api.`, `staging.`, qualquer painel interno) servem HTTPS válido antes de ligar `includeSubDomains` — HSTS é irreversível pelo tempo do `max-age`;
 2. Subir gradualmente: `max-age=300` → `86400` → `63072000`;
 3. Só depois de estável, submeter a https://hstspreload.org/.
@@ -614,7 +628,7 @@ async anonymizeSubject(actorId: string, targetUserId: string, justification: str
 
 `app.disable('x-powered-by')` (`main.ts:101`) está correto, mas é o único controle presente.
 
-Encadeia com **M-04**: um arquivo de avatar com bytes de HTML servido sem `nosniff` é a receita de XSS por *content sniffing*.
+Encadeia com **M-04**: um arquivo de avatar com bytes de HTML servido sem `nosniff` é a receita de XSS por _content sniffing_.
 
 **Impacto:** Content sniffing; vazamento de URL com token via `Referer`; enquadramento de respostas da API; leitura cross-origin de recursos sem CORP.
 
@@ -663,15 +677,16 @@ Nota: `crossOriginResourcePolicy: 'cross-origin'` é necessário porque `apps/we
 **Vulnerabilidade:** OWASP A04:2021 (Insecure Design) / CWE-770 (Allocation Without Limits or Throttling).
 
 **Local:**
+
 - `apps/api/src/modules/subscription/subscription.module.ts:32` — `ThrottlerModule.forRoot({ throttlers: [{ ttl: 60_000, limit: 60 }] })` sem `storage`
 - `apps/api/src/modules/anamnesis/anamnesis.module.ts:24`, `apps/api/src/modules/protocol-renewal/protocol-renewal.module.ts:18` — idem
-- Comentário honesto no próprio código: `subscription.module.ts:31` — *"ponytail: storage em memória (MVP single-instance)"*
+- Comentário honesto no próprio código: `subscription.module.ts:31` — _"ponytail: storage em memória (MVP single-instance)"_
 
 **Como é explorável:**
 
 O storage padrão do `@nestjs/throttler` é um `Map` em memória do processo. Consequências:
 
-1. **Multi-instância anula o limite.** Com N réplicas (ou N processos PM2/cluster), o limite efetivo vira `N × limit`. A memória do projeto já registra o problema de *"processos da API duplicados"* rodando na máquina do fundador — ou seja, o cenário não é hipotético.
+1. **Multi-instância anula o limite.** Com N réplicas (ou N processos PM2/cluster), o limite efetivo vira `N × limit`. A memória do projeto já registra o problema de _"processos da API duplicados"_ rodando na máquina do fundador — ou seja, o cenário não é hipotético.
 2. **Restart zera o contador.** Um atacante que force crash/restart (ou simplesmente aguarde um deploy) recomeça do zero.
 3. **Rotas protegidas são as mais sensíveis**: login (10/min — `auth.controller.ts:59`), webhook de pagamento (30/min), anamnese (60/min), geração de protocolo.
 
@@ -744,7 +759,10 @@ export class LoginAttemptService {
 
   /** Chave pelo HASH do e-mail: o e-mail é PII e não entra no keyspace do Redis. */
   private key(email: string): string {
-    return this.keys.global('login-fail', createHash('sha256').update(email.toLowerCase()).digest('hex'));
+    return this.keys.global(
+      'login-fail',
+      createHash('sha256').update(email.toLowerCase()).digest('hex'),
+    );
   }
 
   async assertNotLocked(email: string): Promise<void> {
@@ -759,7 +777,10 @@ export class LoginAttemptService {
   async recordFailure(email: string): Promise<void> {
     const k = this.key(email);
     const fails = await this.redis.incr(k);
-    await this.redis.expire(k, Math.min(BASE_LOCK_SECONDS * 2 ** Math.max(0, fails - MAX_ATTEMPTS), 900));
+    await this.redis.expire(
+      k,
+      Math.min(BASE_LOCK_SECONDS * 2 ** Math.max(0, fails - MAX_ATTEMPTS), 900),
+    );
   }
 
   async recordSuccess(email: string): Promise<void> {
@@ -769,6 +790,7 @@ export class LoginAttemptService {
 ```
 
 Pontos não negociáveis desta implementação:
+
 - **A mensagem de erro do bloqueio deve ser idêntica à de senha errada.** Dizer "conta bloqueada" recria o oráculo de enumeração que o dummy hash eliminou.
 - **Chavear pelo hash do e-mail**, nunca pelo e-mail em claro — o Redis é sistema de terceiros na prática (mesma regra de `redaction.util.ts`).
 - Emitir evento de auditoria em `audit_logs` no bloqueio, e alertar o fundador por WhatsApp quando uma conta administrativa for bloqueada (sinal de ataque direcionado).
@@ -780,6 +802,7 @@ Pontos não negociáveis desta implementação:
 **Vulnerabilidade:** OWASP A04:2021 (Insecure Design) / CWE-434 (Unrestricted Upload of File with Dangerous Type).
 
 **Local:**
+
 - `apps/api/src/modules/account/account.controller.ts:158-160` — valida `file.mimetype`
 - `apps/api/src/modules/account/avatar-storage.service.ts:68-79` — escolhe a extensão a partir do mesmo `file.mimetype`
 
@@ -795,7 +818,7 @@ A resposta força `Content-Type: image/png` (`account.controller.ts:196`), o que
 
 Atenuantes reais que rebaixam isto de ALTO para MÉDIO: requer conta autenticada do Control Center (5 pessoas de confiança hoje), e o `Content-Type` é definido pelo servidor. Mas o vetor é de **insider/conta comprometida para persistência de XSS no dashboard**, e o dashboard é o ponto de acesso a todos os dados de saúde.
 
-**Impacto:** XSS armazenado *same-origin* no Control Center via content sniffing; consumo de disco com conteúdo arbitrário; hospedagem inadvertida de conteúdo malicioso sob o domínio da MOVIVO.
+**Impacto:** XSS armazenado _same-origin_ no Control Center via content sniffing; consumo de disco com conteúdo arbitrário; hospedagem inadvertida de conteúdo malicioso sob o domínio da MOVIVO.
 
 **Correção completa:**
 
@@ -804,9 +827,26 @@ Atenuantes reais que rebaixam isto de ALTO para MÉDIO: requer conta autenticada
 ```ts
 // avatar-storage.service.ts
 const MAGIC: ReadonlyArray<{ mime: string; ext: string; test: (b: Buffer) => boolean }> = [
-  { mime: 'image/jpeg', ext: 'jpg',  test: (b) => b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
-  { mime: 'image/png',  ext: 'png',  test: (b) => b.length > 8 && b.subarray(0, 8).equals(Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a])) },
-  { mime: 'image/webp', ext: 'webp', test: (b) => b.length > 12 && b.subarray(0,4).toString('ascii') === 'RIFF' && b.subarray(8,12).toString('ascii') === 'WEBP' },
+  {
+    mime: 'image/jpeg',
+    ext: 'jpg',
+    test: (b) => b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  },
+  {
+    mime: 'image/png',
+    ext: 'png',
+    test: (b) =>
+      b.length > 8 &&
+      b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  },
+  {
+    mime: 'image/webp',
+    ext: 'webp',
+    test: (b) =>
+      b.length > 12 &&
+      b.subarray(0, 4).toString('ascii') === 'RIFF' &&
+      b.subarray(8, 12).toString('ascii') === 'WEBP',
+  },
 ];
 
 /** Detecta o tipo REAL pelos bytes. `null` ⇒ não é imagem suportada, rejeita. */
@@ -822,13 +862,15 @@ No `save()`, usar **exclusivamente** o resultado de `sniffImageType(file.buffer)
 ```bash
 pnpm --filter @movivo/api add sharp
 ```
+
 ```ts
 const normalized = await sharp(file.buffer)
-  .rotate()                                  // aplica orientação EXIF
+  .rotate() // aplica orientação EXIF
   .resize(512, 512, { fit: 'cover' })
   .webp({ quality: 82 })
-  .toBuffer();                               // metadados descartados por padrão
+  .toBuffer(); // metadados descartados por padrão
 ```
+
 Atenção: `sharp` depende de `libvips`; acompanhar advisories (o release de agosto/2026 do Next.js citou RCE via `libheif` em `sharp`). Desabilitar formatos que não sejam JPEG/PNG/WebP na entrada.
 
 **(c) Adicionar `nosniff` explicitamente** nos dois lados:
@@ -838,6 +880,7 @@ Atenção: `sharp` depende de `libvips`; acompanhar advisories (o release de ago
 res.setHeader('X-Content-Type-Options', 'nosniff');
 res.setHeader('Content-Disposition', 'inline');
 ```
+
 ```ts
 // apps/web/src/app/api/dashboard/account/avatar/[filename]/route.ts
 headers: {
@@ -857,7 +900,7 @@ headers: {
 
 **Como é explorável:**
 
-Este achado é reportado **como o próprio código o documenta** — e a documentação é modelar. O comentário de cabeçalho declara abertamente: *"PREIMAGE AINDA NÃO CONFIRMADO... A doc consultada diz 'HMAC-SHA256 sobre o corpo bruto apenas, sem timestamp no preimage' — DIFERENTE do que este arquivo assume."*
+Este achado é reportado **como o próprio código o documenta** — e a documentação é modelar. O comentário de cabeçalho declara abertamente: _"PREIMAGE AINDA NÃO CONFIRMADO... A doc consultada diz 'HMAC-SHA256 sobre o corpo bruto apenas, sem timestamp no preimage' — DIFERENTE do que este arquivo assume."_
 
 A análise de risco embutida no código está **correta**: o erro é fail-closed nas duas direções (assinatura nunca bate → sempre rejeita, nunca aceita forjada). Não há vulnerabilidade de segurança direta.
 
@@ -874,21 +917,21 @@ Além disso, o mesmo comentário registra um segundo item em aberto: o nonce ant
 
 ```ts
 const candidates = [
-  Buffer.concat([Buffer.from(`${timestamp}.`, 'utf8'), rawBody]),  // hipótese atual
-  rawBody,                                                          // hipótese da doc
+  Buffer.concat([Buffer.from(`${timestamp}.`, 'utf8'), rawBody]), // hipótese atual
+  rawBody, // hipótese da doc
 ];
 for (const [i, preimage] of candidates.entries()) {
   const expected = createHmac('sha256', secret).update(preimage).digest();
   if (provided.length === expected.length && timingSafeEqual(provided, expected)) {
-    if (i === 1) logger.warn({ event: 'arara_preimage_is_raw_body' }, 'preimage confirmado: corpo puro');
+    if (i === 1)
+      logger.warn({ event: 'arara_preimage_is_raw_body' }, 'preimage confirmado: corpo puro');
     return { ok: true };
   }
 }
 return { ok: false, reason: 'bad_signature' };
 ```
-Após confirmação, **remover o candidato incorreto** — aceitar dois formatos indefinidamente dobra a superfície.
-3. **Alerta de saúde do webhook**: se a taxa de `bad_signature` ultrapassar 5% numa janela de 5 minutos, alertar imediatamente. Hoje esse modo de falha é invisível por design (200 uniforme).
-4. **Corrigir o nonce anti-replay** para `x-arara-webhook-id`, conforme o achado já registrado.
+
+Após confirmação, **remover o candidato incorreto** — aceitar dois formatos indefinidamente dobra a superfície. 3. **Alerta de saúde do webhook**: se a taxa de `bad_signature` ultrapassar 5% numa janela de 5 minutos, alertar imediatamente. Hoje esse modo de falha é invisível por design (200 uniforme). 4. **Corrigir o nonce anti-replay** para `x-arara-webhook-id`, conforme o achado já registrado.
 
 ---
 
@@ -902,7 +945,7 @@ Após confirmação, **remover o candidato incorreto** — aceitar dois formatos
 
 O design aqui é bem fundamentado e as mitigações são reais: comparação em tempo constante (`secret-compare.ts`), fail-closed sem segredo, validação do nome da instância (`evolution-inbound.edge.ts:199-202`), descarte de `fromMe` e de mensagens de grupo, e nonce anti-replay em Redis. A decisão de **não** reusar `EVOLUTION_API_KEY` como token de webhook — porque a EvolutionAPI publica essa chave no corpo de toda entrega — é uma observação fina que muita gente sênior deixaria passar.
 
-A limitação é estrutural do provedor: a EvolutionAPI não assina o corpo. O token é um *bearer* estático, repetido identicamente em toda entrega, sem vínculo criptográfico ao payload e sem janela de tempo.
+A limitação é estrutural do provedor: a EvolutionAPI não assina o corpo. O token é um _bearer_ estático, repetido identicamente em toda entrega, sem vínculo criptográfico ao payload e sem janela de tempo.
 
 Consequência: quem obtiver o token **uma vez** (log de proxy reverso, histórico de shell, captura de tráfego se algum hop for HTTP, um `console.log` de debug) pode injetar mensagens arbitrárias atribuídas a **qualquer número de telefone** conhecido pelo sistema. O `resolveSenderPhone` mapeia o telefone para o titular, e a mensagem entra na conversa dele — envenenando o contexto do AI Coach, disparando geração de protocolo, ou induzindo o coach a responder algo fora de escopo em nome da MOVIVO.
 
@@ -924,6 +967,7 @@ if (config.APP_ENV === 'production' && config.WHATSAPP_TRANSPORT_PROVIDER === 'E
   });
 }
 ```
+
 Isso complementa o guard já existente em `webhook.controller.ts:103`, que desliga a rota quando o transporte não é EVOLUTION.
 
 2. **Restringir por IP na borda.** A EvolutionAPI roda em container conhecido: aplicar allowlist de origem no nginx/Cloudflare para `/api/v1/webhook/whatsapp/evolution`. Defesa que independe do segredo.
@@ -937,6 +981,7 @@ Isso complementa o guard já existente em `webhook.controller.ts:103`, que desli
 **Vulnerabilidade:** OWASP A06:2021 (Vulnerable and Outdated Components) / A08:2021 (Software and Data Integrity Failures).
 
 **Local:**
+
 - `apps/web/package.json:26` (adicionado no working tree, ainda não commitado)
 - `apps/web/src/components/workout/share-card/WorkoutShareCard.tsx:4` — `import { MuscleMap } from 'js-rich-body-highlighter/react';`
 
@@ -950,7 +995,7 @@ O pacote foi adicionado nas alterações não commitadas. Perfil de risco:
 - **Publica um web component** com `sideEffects: ["**/web-component/**"]`, ou seja, executa código no import;
 - É renderizado dentro de `/treino`, que é uma superfície autenticada por `sessionToken` de 30 dias.
 
-Não encontrei indício de que seja malicioso — a pesquisa não retornou alerta algum, e o pacote parece ser exatamente o que anuncia (mapa muscular SVG para fitness). **Declaro isso explicitamente para não inflar o achado.** O risco é de *perfil*, não de comprometimento conhecido: pacotes novos, de mantenedor único e baixa adoção são o vetor preferencial de ataques de supply chain (comprometimento de conta npm do mantenedor, publicação de versão maliciosa), e o histórico recente do ecossistema npm é farto de casos assim.
+Não encontrei indício de que seja malicioso — a pesquisa não retornou alerta algum, e o pacote parece ser exatamente o que anuncia (mapa muscular SVG para fitness). **Declaro isso explicitamente para não inflar o achado.** O risco é de _perfil_, não de comprometimento conhecido: pacotes novos, de mantenedor único e baixa adoção são o vetor preferencial de ataques de supply chain (comprometimento de conta npm do mantenedor, publicação de versão maliciosa), e o histórico recente do ecossistema npm é farto de casos assim.
 
 O agravante específico da MOVIVO: um `postinstall` malicioso numa máquina de dev roda com acesso ao diretório `secrets/` — que contém chaves de API vivas, a chave privada JWT e a chave pgcrypto de dado de saúde (ver **M-08**).
 
@@ -960,15 +1005,14 @@ O agravante específico da MOVIVO: um `postinstall` malicioso numa máquina de d
 
 1. **Fixar versão exata** (já está: `0.1.1`, sem `^`) e **confiar no lockfile** — `pnpm-lock.yaml` já registra o integrity hash. Manter `frozen-lockfile` no CI.
 2. **Desabilitar scripts de instalação por padrão** no monorepo:
+
 ```yaml
 # pnpm-workspace.yaml
 neverBuiltDependencies:
   - js-rich-body-highlighter
 ```
-Ou, mais robusto, `enable-pre-post-scripts=false` em `.npmrc` e allowlist explícita via `onlyBuiltDependencies` para os pacotes que genuinamente precisam compilar (`argon2`, `sharp`).
-3. **Revisar o código do pacote** antes do go-live — é pequeno; ler `dist/` e confirmar que não há rede, `eval`, nem acesso a `process.env`.
-4. **Avaliar vendorizar.** É um SVG de mapa muscular. Copiar o componente para `apps/web/src/components/workout/share-card/muscle-map/` sob licença MIT (com atribuição) elimina a dependência externa permanentemente. Para um app de saúde, essa é provavelmente a decisão certa.
-5. **Adicionar Socket.dev ou `pnpm audit --audit-level=moderate`** ao CI para detecção de comportamento anômalo em dependências novas.
+
+Ou, mais robusto, `enable-pre-post-scripts=false` em `.npmrc` e allowlist explícita via `onlyBuiltDependencies` para os pacotes que genuinamente precisam compilar (`argon2`, `sharp`). 3. **Revisar o código do pacote** antes do go-live — é pequeno; ler `dist/` e confirmar que não há rede, `eval`, nem acesso a `process.env`. 4. **Avaliar vendorizar.** É um SVG de mapa muscular. Copiar o componente para `apps/web/src/components/workout/share-card/muscle-map/` sob licença MIT (com atribuição) elimina a dependência externa permanentemente. Para um app de saúde, essa é provavelmente a decisão certa. 5. **Adicionar Socket.dev ou `pnpm audit --audit-level=moderate`** ao CI para detecção de comportamento anômalo em dependências novas.
 
 ---
 
@@ -997,6 +1041,7 @@ drwx------  secrets/                              ← diretório OK (0700)
 O diretório em `0700` é a proteção efetiva — outro usuário local não consegue atravessá-lo, então os `0644` internos não são exploráveis hoje. Por isso MÉDIO e não ALTO.
 
 Mas a configuração é frágil por três razões:
+
 1. **Inconsistência revela ausência de padrão.** Dois arquivos estão em `0600` e dez em `0644`. Isso indica que a permissão correta acontece por acidente, não por política — e o próximo segredo gerado tem chance de nascer errado.
 2. **Uma única mudança no diretório expõe tudo.** Um `chmod 755 secrets/` acidental (ou um processo de cópia/backup que não preserve modo) torna dez segredos legíveis por qualquer processo do sistema.
 3. **Backup e sincronização não preservam a proteção do diretório.** Time Machine, sincronização de nuvem, ou um `tar` sem `--preserve-permissions` propagam o `0644`.
@@ -1008,6 +1053,7 @@ Estes são segredos vivos: `pgcrypto_key` é a **única** coisa entre um dump do
 **Correção completa:**
 
 **(a)** Corrigir agora:
+
 ```bash
 chmod 700 /Users/rodrigo/Documents/movivo/secrets
 chmod 600 /Users/rodrigo/Documents/movivo/secrets/*
@@ -1015,6 +1061,7 @@ chmod 644 /Users/rodrigo/Documents/movivo/secrets/README.md
 ```
 
 **(b)** Corrigir na origem, em `scripts/gen-local-secrets.sh`, para que nunca mais nasça errado:
+
 ```bash
 umask 077                       # tudo criado a partir daqui nasce 0600
 mkdir -p "$SECRETS_DIR"
@@ -1023,9 +1070,11 @@ chmod 700 "$SECRETS_DIR"
 chmod 600 "$SECRETS_DIR"/*
 chmod 644 "$SECRETS_DIR/README.md"   # o README é público de propósito
 ```
+
 Espelhar em `scripts/gen-local-secrets.ps1` (ACL do Windows).
 
 **(c)** Adicionar verificação ao `scripts/verify-infra.sh`, para que o desvio seja detectado e não apenas corrigido uma vez:
+
 ```bash
 find "$SECRETS_DIR" -type f ! -name 'README.md' ! -perm 600 -print | \
   grep -q . && { echo "ERRO: segredo com permissão diferente de 600"; exit 1; }
@@ -1043,11 +1092,11 @@ find "$SECRETS_DIR" -type f ! -name 'README.md' ! -perm 600 -print | \
 
 **Local:** `pnpm-lock.yaml`. Resultado real de `pnpm audit` executado nesta auditoria: **3 vulnerabilidades moderadas, 0 altas, 0 críticas.**
 
-| Pacote | Versão | Advisory | Caminho |
-|---|---|---|---|
-| `qs` | 6.15.3 | [GHSA-x5fp-wj9c-mxmx](https://github.com/advisories/GHSA-x5fp-wj9c-mxmx) — array-limit bypass (corrigido em 6.15.4) | `@nestjs/platform-express > express > qs` (19 caminhos) |
-| `qs` | 6.15.3 | [GHSA-4mjr-xmp4-gh2g](https://github.com/advisories/GHSA-4mjr-xmp4-gh2g) — DoS via `isBuffer` controlado (corrigido em 6.16.0) | idem |
-| `esbuild` | ≤0.24.2 | [GHSA-67mh-4wv8-2f99](https://github.com/advisories/GHSA-67mh-4wv8-2f99) — qualquer site pode ler respostas do dev server | `drizzle-kit > @esbuild-kit/* > esbuild` (**devDependency**) |
+| Pacote    | Versão  | Advisory                                                                                                                       | Caminho                                                      |
+| --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| `qs`      | 6.15.3  | [GHSA-x5fp-wj9c-mxmx](https://github.com/advisories/GHSA-x5fp-wj9c-mxmx) — array-limit bypass (corrigido em 6.15.4)            | `@nestjs/platform-express > express > qs` (19 caminhos)      |
+| `qs`      | 6.15.3  | [GHSA-4mjr-xmp4-gh2g](https://github.com/advisories/GHSA-4mjr-xmp4-gh2g) — DoS via `isBuffer` controlado (corrigido em 6.16.0) | idem                                                         |
+| `esbuild` | ≤0.24.2 | [GHSA-67mh-4wv8-2f99](https://github.com/advisories/GHSA-67mh-4wv8-2f99) — qualquer site pode ler respostas do dev server      | `drizzle-kit > @esbuild-kit/* > esbuild` (**devDependency**) |
 
 **Como é explorável:**
 
@@ -1061,24 +1110,30 @@ find "$SECRETS_DIR" -type f ! -name 'README.md' ! -perm 600 -print | \
 **Correção completa:**
 
 **(a)** Forçar a resolução de `qs` via override do pnpm (o Express ainda não publicou release com a versão corrigida):
+
 ```yaml
 # pnpm-workspace.yaml
 overrides:
   qs: '>=6.16.0'
 ```
+
 Depois: `pnpm install` e rodar a suíte de integração — `qs` está no caminho quente do parsing de request, então a regressão precisa ser verificada, não presumida.
 
 **(b)** `esbuild`: atualizar o `drizzle-kit` para uma versão que não dependa dos `@esbuild-kit/*` (arquivados e substituídos por `tsx`):
+
 ```bash
 pnpm --filter @movivo/api up drizzle-kit@latest
 ```
+
 Se não houver versão disponível: aceitar o risco formalmente **e** nunca rodar `db:studio` com o navegador de uso geral aberto — ou fazer o bind em `127.0.0.1` com um perfil de navegador dedicado.
 
 **(c)** Baixar o gate do CI para `moderate` e tratar exceções explicitamente, de modo que aceitar risco vire uma decisão registrada e não um silêncio:
+
 ```yaml
 - name: pnpm audit (bloqueia MODERATE+)
   run: pnpm audit --audit-level=moderate
 ```
+
 Com `pnpm.auditConfig.ignoreGhsas` no `pnpm-workspace.yaml` listando, com justificativa e data de revisão, os advisories conscientemente aceitos.
 
 **(d) Positivo a registrar:** `next@16.3.4` está **acima** de `16.3.3`, a versão que corrigiu CVE-2026-75604 (RCE via filesystem Windows) e a RCE via `libheif`/AVIF do release de agosto/2026. A stack está em dia com os advisories críticos do framework. As CVEs de julho/2026 (CVE-2026-64642, bypass de middleware com Turbopack + i18n; CVE-2026-64645, SSRF via `rewrites()`) **não se aplicam**: o projeto usa webpack explicitamente (`next.config.ts:8-21`), não usa `i18n`, e não define `rewrites()`/`redirects()`.
@@ -1093,7 +1148,7 @@ Com `pnpm.auditConfig.ignoreGhsas` no `pnpm-workspace.yaml` listando, com justif
 
 **Local:** `apps/api/src/modules/subscription/payment/real-gateways.ts:46-53` combinado com `apps/api/src/modules/subscription/payment-webhook.service.ts:74`
 
-**Como é explorável:** `RealGatewayBase.parseWebhookEvent` **lança** `PaymentGatewayError` em vez de retornar `null`. Em `payment-webhook.service.ts:74` a chamada não está protegida por `try/catch`, e o `ingest()` promete no próprio docstring (linha 58) *"Nunca lança ao chamador"*. Com `PAYMENT_PROVIDER=STRIPE` configurado antes de a implementação real existir, qualquer requisição não autenticada a `POST /api/v1/webhook/payment` retorna **500** com a mensagem `STRIPE.parseWebhookEvent: gateway real ainda não implementado (mocks-first)` — revelando provedor, estado de implementação e stack interno a quem estiver sondando. Também quebra o contrato de status uniforme (401) que o próprio módulo estabelece para não vazar qual camada falhou.
+**Como é explorável:** `RealGatewayBase.parseWebhookEvent` **lança** `PaymentGatewayError` em vez de retornar `null`. Em `payment-webhook.service.ts:74` a chamada não está protegida por `try/catch`, e o `ingest()` promete no próprio docstring (linha 58) _"Nunca lança ao chamador"_. Com `PAYMENT_PROVIDER=STRIPE` configurado antes de a implementação real existir, qualquer requisição não autenticada a `POST /api/v1/webhook/payment` retorna **500** com a mensagem `STRIPE.parseWebhookEvent: gateway real ainda não implementado (mocks-first)` — revelando provedor, estado de implementação e stack interno a quem estiver sondando. Também quebra o contrato de status uniforme (401) que o próprio módulo estabelece para não vazar qual camada falhou.
 
 **Impacto:** Divulgação de informação a atacante em reconhecimento; quebra do contrato de resposta uniforme; log de erro poluído mascarando ataques reais.
 
@@ -1109,7 +1164,7 @@ try {
     { event: 'gateway_parse_error', gateway: this.gateway.name, err: safeErrorCode(error) },
     'falha ao parsear evento de pagamento',
   );
-  return this.reject('parse_error', input.correlationId);   // 401 uniforme
+  return this.reject('parse_error', input.correlationId); // 401 uniforme
 }
 if (!event) return this.reject('bad_signature', input.correlationId);
 ```
@@ -1123,6 +1178,7 @@ Complementarmente, implementar um `ExceptionFilter` global que em produção nun
 **Vulnerabilidade:** CWE-1270 (Generation of Incorrect Security Tokens).
 
 **Local:**
+
 - `apps/api/src/modules/auth/jwt.strategy.ts:78-85` — `StrategyOptionsWithoutRequest` sem `issuer`/`audience`
 - `apps/api/src/modules/auth/token.service.ts:42-48` — `jwt.sign` sem `issuer`/`audience`
 
@@ -1140,10 +1196,11 @@ const token = jwt.sign({ role }, jwtConfig.privateKey, {
   jwtid: jti,
   keyid: jwtConfig.keyId,
   issuer: 'movivo-api',
-  audience: `movivo-${this.config.appEnv}`,   // separa prod de staging
+  audience: `movivo-${this.config.appEnv}`, // separa prod de staging
   expiresIn: jwtConfig.accessTtl as jwt.SignOptions['expiresIn'],
 });
 ```
+
 ```ts
 // jwt.strategy.ts
 const options: StrategyOptionsWithoutRequest = {
@@ -1155,6 +1212,7 @@ const options: StrategyOptionsWithoutRequest = {
   secretOrKeyProvider: buildSecretOrKeyProvider(keys),
 };
 ```
+
 Implantar em duas etapas: primeiro emitir com `iss`/`aud`, depois (após expirarem os tokens antigos de 15min) passar a validar.
 
 ---
@@ -1164,6 +1222,7 @@ Implantar em duas etapas: primeiro emitir com `iss`/`aud`, depois (após expirar
 **Vulnerabilidade:** CWE-601 (URL Redirection to Untrusted Site).
 
 **Local:**
+
 - `apps/api/src/modules/short-link/short-link.service.ts:82-90` — `resolve()` devolve `targetUrl` sem validação
 - `apps/web/src/app/check-in/[code]/route.ts:18` — `NextResponse.redirect(target, 302)`
 - Idem em `apps/web/src/app/renovacao/[code]/route.ts` e `apps/web/src/app/semana/[code]/route.ts`
@@ -1193,6 +1252,7 @@ if (parsed.origin !== allowed) {
 }
 return NextResponse.redirect(parsed.toString(), 302);
 ```
+
 Adicionar também `Referrer-Policy: no-referrer` nessas rotas, já que o destino carrega token no fragmento/path.
 
 ---
@@ -1210,12 +1270,16 @@ Como não pude inspecionar a topologia de produção (ver Limitações §2), nã
 **Impacto:** Bypass completo de rate limiting por IP; poluição da trilha de auditoria.
 
 **Correção completa:**
+
 1. Contar os hops reais em produção e ajustar o número (Cloudflare + nginx = `2`).
 2. Melhor: com Cloudflare, ignorar `X-Forwarded-For` e usar o header assinado pela borda:
+
 ```ts
 app.set('trust proxy', (ip: string) => CLOUDFLARE_IP_RANGES.some((cidr) => inCidr(ip, cidr)));
 ```
+
 3. Alternativa robusta para o throttler — chavear pelo `CF-Connecting-IP`, que só a Cloudflare define e que ela sobrescreve se o cliente tentar forjar:
+
 ```ts
 @Injectable()
 export class CloudflareThrottlerGuard extends ThrottlerGuard {
@@ -1224,6 +1288,7 @@ export class CloudflareThrottlerGuard extends ThrottlerGuard {
   }
 }
 ```
+
 4. Garantir no nginx que `X-Forwarded-For` de entrada seja **substituído**, nunca concatenado, para requisições que não venham da borda confiável.
 
 ---
@@ -1245,7 +1310,7 @@ Risco residual real: os jobs materializam segredos locais (`ci.yml:134` roda `ge
 **Correção completa:** Fixar por SHA de commit, mantendo a tag em comentário para legibilidade:
 
 ```yaml
-- uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v7.0.0
+- uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v7.0.0
 - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v6.0.0
 - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v7.0.0
 ```
@@ -1300,6 +1365,7 @@ Não há segundo fator. As contas do dashboard acessam dado de saúde de **todos
 ### I-06 — Sem SBOM nem assinatura de artefatos
 
 Não há geração de SBOM (CycloneDX/SPDX) nem assinatura de build. Recomendo para o go-live, especialmente pela trajetória de conformidade (ISO 27001 / SOC 2) e porque um app de saúde será cobrado nisso por parceiros B2B:
+
 ```yaml
 - name: Gerar SBOM
   run: pnpm dlx @cyclonedx/cyclonedx-npm --output-file sbom.json
@@ -1313,34 +1379,34 @@ Não há geração de SBOM (CycloneDX/SPDX) nem assinatura de build. Recomendo p
 
 ### Bloqueadores de lançamento — nenhum usuário real antes disto
 
-| # | Achado | Esforço | Por quê primeiro |
-|---|---|---|---|
-| 1 | **C-01** — fail-closed no gateway de pagamento + remover segredo hardcoded | 2-3h | Fraude de receita trivial; correção pequena e de baixo risco |
-| 2 | **C-02** — desarmar as 6 flags de HEALTH | 15min | Para o vazamento em curso **hoje**; reabrir só com DPA arquivado |
-| 3 | **A-01** — schema Zod no evento de pagamento | 2h | Fecha C-01 em profundidade e protege o Stripe real |
-| 4 | **A-02** — estender matcher da CSP | 30min | Maior ganho por minuto de esforço de todo o relatório |
-| 5 | **M-08** — `chmod 600` + corrigir o gerador + rotacionar chaves | 1h | Chaves vivas; rotacionar agora é barato |
-| 6 | **A-04** + **M-01** — HSTS e helmet | 1-2h | Dois `pnpm add` e um bloco de config |
+| #   | Achado                                                                     | Esforço | Por quê primeiro                                                 |
+| --- | -------------------------------------------------------------------------- | ------- | ---------------------------------------------------------------- |
+| 1   | **C-01** — fail-closed no gateway de pagamento + remover segredo hardcoded | 2-3h    | Fraude de receita trivial; correção pequena e de baixo risco     |
+| 2   | **C-02** — desarmar as 6 flags de HEALTH                                   | 15min   | Para o vazamento em curso **hoje**; reabrir só com DPA arquivado |
+| 3   | **A-01** — schema Zod no evento de pagamento                               | 2h      | Fecha C-01 em profundidade e protege o Stripe real               |
+| 4   | **A-02** — estender matcher da CSP                                         | 30min   | Maior ganho por minuto de esforço de todo o relatório            |
+| 5   | **M-08** — `chmod 600` + corrigir o gerador + rotacionar chaves            | 1h      | Chaves vivas; rotacionar agora é barato                          |
+| 6   | **A-04** + **M-01** — HSTS e helmet                                        | 1-2h    | Dois `pnpm add` e um bloco de config                             |
 
 ### Antes do go-live público
 
-| # | Achado | Esforço |
-|---|---|---|
-| 7 | **A-05** — runbook manual de direitos do titular (obrigatório) + iniciar implementação | 4h + 3d |
-| 8 | **M-02** — throttler no Redis, centralizado no CoreModule | 3h |
-| 9 | **M-03** — lockout por conta com backoff exponencial | 4h |
-| 10 | **M-05** — confirmar preimage HMAC da AraraHQ contra entrega real | 2-4h |
-| 11 | **M-06** — proibir EvolutionAPI em produção por schema + allowlist de IP | 1h |
-| 12 | **M-09** — override de `qs`, atualizar `drizzle-kit`, baixar gate para moderate | 2h |
-| 13 | **M-04** — magic bytes + re-encode com sharp + nosniff | 4h |
-| 14 | **M-07** — revisar ou vendorizar `js-rich-body-highlighter`; desabilitar postinstall | 2-4h |
-| 15 | **A-03** — cifrar `conversations.content` + backfill | 1-2d |
+| #   | Achado                                                                                 | Esforço |
+| --- | -------------------------------------------------------------------------------------- | ------- |
+| 7   | **A-05** — runbook manual de direitos do titular (obrigatório) + iniciar implementação | 4h + 3d |
+| 8   | **M-02** — throttler no Redis, centralizado no CoreModule                              | 3h      |
+| 9   | **M-03** — lockout por conta com backoff exponencial                                   | 4h      |
+| 10  | **M-05** — confirmar preimage HMAC da AraraHQ contra entrega real                      | 2-4h    |
+| 11  | **M-06** — proibir EvolutionAPI em produção por schema + allowlist de IP               | 1h      |
+| 12  | **M-09** — override de `qs`, atualizar `drizzle-kit`, baixar gate para moderate        | 2h      |
+| 13  | **M-04** — magic bytes + re-encode com sharp + nosniff                                 | 4h      |
+| 14  | **M-07** — revisar ou vendorizar `js-rich-body-highlighter`; desabilitar postinstall   | 2-4h    |
+| 15  | **A-03** — cifrar `conversations.content` + backfill                                   | 1-2d    |
 
 ### Sprint seguinte
 
-16. **B-01** a **B-05** — tratamento de exceção, `iss`/`aud`, allowlist de redirect, `trust proxy`, SHAs das actions *(~1 dia no total)*
-17. **I-03** — passkeys/WebAuthn no Control Center *(pré-requisito de A-05)*
-18. **I-01** — Dockerfile endurecido + scan de imagem no CI *(Fase 6, Henrique)*
+16. **B-01** a **B-05** — tratamento de exceção, `iss`/`aud`, allowlist de redirect, `trust proxy`, SHAs das actions _(~1 dia no total)_
+17. **I-03** — passkeys/WebAuthn no Control Center _(pré-requisito de A-05)_
+18. **I-01** — Dockerfile endurecido + scan de imagem no CI _(Fase 6, Henrique)_
 19. **A-05** completo — anonimização com step-up + portabilidade
 20. **I-04**, **I-06** — rotação de chave versionada, SBOM e proveniência
 
@@ -1358,7 +1424,7 @@ Não há geração de SBOM (CycloneDX/SPDX) nem assinatura de build. Recomendo p
 
 Preciso registrar algo que normalmente não escrevo num relatório de auditoria.
 
-A qualidade de engenharia de segurança deste código é **incomum**. O isolamento por transação sob PgBouncer em transaction mode é um detalhe que a maioria dos times descobre depois de um incidente de vazamento entre titulares — aqui está documentado, testado e correto desde a Sprint 1. A redação de PII pelo *nome do campo* no pino, incluindo o raciocínio de que redigir `biologicalSex` sem redigir `personaSlot` não fecha nada, é o tipo de pensamento que distingue segurança real de checklist. O serializer que remove valores de query string porque um telefone foi visto em claro num log durante validação — isso é aprendizado operacional incorporado ao código.
+A qualidade de engenharia de segurança deste código é **incomum**. O isolamento por transação sob PgBouncer em transaction mode é um detalhe que a maioria dos times descobre depois de um incidente de vazamento entre titulares — aqui está documentado, testado e correto desde a Sprint 1. A redação de PII pelo _nome do campo_ no pino, incluindo o raciocínio de que redigir `biologicalSex` sem redigir `personaSlot` não fecha nada, é o tipo de pensamento que distingue segurança real de checklist. O serializer que remove valores de query string porque um telefone foi visto em claro num log durante validação — isso é aprendizado operacional incorporado ao código.
 
 Os comentários que admitem o que **não** foi verificado (o preimage da AraraHQ, a cifra pendente de `conversations`, o storage em memória do throttler) valem mais que qualquer relatório externo: um time que documenta honestamente suas próprias lacunas é um time que as fecha.
 
@@ -1373,6 +1439,7 @@ Com os seis bloqueadores corrigidos, eu consideraria esta plataforma apta a rece
 ## 10. Fontes consultadas
 
 **Advisories e CVEs**
+
 - [Next.js — August 2026 Security Release](https://nextjs.org/blog/august-2026-security-release) — CVE-2026-75604 (RCE em filesystem Windows), RCE via `libheif`/AVIF em `sharp`; corrigidos em 16.3.3
 - [Next.js — July 2026 Security Release](https://nextjs.org/blog/july-2026-security-release) — CVE-2026-64641 (DoS via Server Actions), CVE-2026-64642 (bypass de middleware, Turbopack + i18n), CVE-2026-64645 (SSRF via `rewrites()`)
 - [GHSA-x5fp-wj9c-mxmx](https://github.com/advisories/GHSA-x5fp-wj9c-mxmx) — `qs` array-limit bypass
@@ -1381,12 +1448,14 @@ Com os seis bloqueadores corrigidos, eu consideraria esta plataforma apta a rece
 - [GHSA-q4gf-8mx6-v5v3](https://github.com/vercel/next.js/security/advisories/GHSA-q4gf-8mx6-v5v3) — DoS com Server Components
 
 **Reputação de dependência**
+
 - [js-rich-body-highlighter — jsDelivr](https://www.jsdelivr.com/package/npm/js-rich-body-highlighter)
 - [Socket.dev — alerts de pacotes body-highlighter](https://socket.dev/npm/package/react-native-body-highlighter/alerts)
 - [Snyk — react-body-highlighter](https://security.snyk.io/package/npm/react-body-highlighter)
 - [JFrog — 8 Malicious npm Packages Deliver Chrome Information Stealer](https://jfrog.com/blog/malicious-npm-packages-chrome-browser-information-stealer/) — contexto de risco de supply chain npm
 
 **Ferramentas e referências**
+
 - `pnpm audit` executado localmente em 2026-09-18 (3 moderate, 0 high/critical)
 - [CSP Evaluator — Google](https://csp-evaluator.withgoogle.com/)
 - [HSTS Preload List](https://hstspreload.org/)
@@ -1395,6 +1464,7 @@ Com os seis bloqueadores corrigidos, eu consideraria esta plataforma apta a rece
 - LGPD (Lei 13.709/2018) — Art. 5º II, Art. 11, Art. 16 I, Art. 18 (V e VI), Art. 33, Art. 46, Art. 48
 
 **Documentos internos**
+
 - `docs/arquitetura/ARQUITETURA.md`
 - `docs/arquitetura/decisoes/adr-005-r2-selecao-neutra-de-provedor-llm.md`
 - `docs/fitness-ia-whatsapp/10-relatorio-rafael.md`, `11-relatorio-sato.md`
