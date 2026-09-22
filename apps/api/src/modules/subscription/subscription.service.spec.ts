@@ -20,6 +20,10 @@ function row(over: Partial<SubscriptionRow> = {}): SubscriptionRow {
     status: 'TRIALING',
     paymentProvider: null,
     externalSubscriptionId: null,
+    externalCustomerId: null,
+    externalCheckoutSessionId: null,
+    externalPriceId: null,
+    trialStartedAt: new Date(),
     trialEndsAt: new Date(),
     currentPeriodStart: null,
     currentPeriodEnd: null,
@@ -71,7 +75,7 @@ function evt(over: Partial<GatewayEvent> = {}): GatewayEvent {
     externalSubscriptionId: 'sub_1',
     userId: USER,
     plan: 'QUARTERLY',
-    priceCents: 9900,
+    priceCents: 20370,
     ...over,
   };
 }
@@ -92,6 +96,12 @@ describe('SubscriptionService.startTrial (US-4.1)', () => {
     expect(insert).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'TRIALING', plan: 'MONTHLY', priceCents: 7990 }),
     );
+    const inserted = insert.mock.calls[0]?.[0] as Partial<SubscriptionRow>;
+    expect(inserted.trialStartedAt).toBeInstanceOf(Date);
+    if (!inserted.trialStartedAt || !inserted.trialEndsAt) throw new Error('trial sem datas');
+    expect(inserted.trialEndsAt.getTime()).toBe(
+      inserted.trialStartedAt.getTime() + 7 * 24 * 60 * 60 * 1000,
+    );
   });
 
   it('é idempotente: assinatura existente não recria', async () => {
@@ -101,9 +111,37 @@ describe('SubscriptionService.startTrial (US-4.1)', () => {
   });
 });
 
+describe('SubscriptionService.expireTrial', () => {
+  it('faz TRIALING → EXPIRED apenas depois de 7 dias', async () => {
+    const ended = row({ status: 'TRIALING', trialEndsAt: new Date('2026-09-21T10:00:00Z') });
+    const { svc, patch } = make(ended);
+    expect((await svc.expireTrial(USER, new Date('2026-09-21T10:00:01Z'))).status).toBe('EXPIRED');
+    expect(patch).toHaveBeenCalledWith(
+      USER,
+      's1',
+      { status: 'EXPIRED' },
+      { actor: 'SYSTEM', reason: 'TRIAL_ENDED' },
+    );
+  });
+
+  it('não expira antes do prazo nem altera assinatura ativa', async () => {
+    const futureTrial = make(
+      row({ status: 'TRIALING', trialEndsAt: new Date('2026-09-22T10:00:00Z') }),
+    );
+    expect((await futureTrial.svc.expireTrial(USER, new Date('2026-09-22T09:59:59Z'))).status).toBe(
+      'TRIAL_NOT_ENDED',
+    );
+    expect(futureTrial.patch).not.toHaveBeenCalled();
+
+    const active = make(row({ status: 'ACTIVE' }));
+    expect((await active.svc.expireTrial(USER)).status).toBe('SKIP_ACTIVE');
+    expect(active.patch).not.toHaveBeenCalled();
+  });
+});
+
 describe('SubscriptionService.applyGatewayEvent (US-4.1)', () => {
   it('checkout confirmado: TRIALING → ACTIVE com plano/preço/período', async () => {
-    const { svc, patch } = make(row({ status: 'TRIALING' }));
+    const { svc, patch } = make(row({ status: 'TRIALING', plan: 'QUARTERLY' }));
     const res = await svc.applyGatewayEvent(evt());
     expect(res.status).toBe('ACTIVE');
     expect(patch).toHaveBeenCalledWith(
@@ -112,7 +150,7 @@ describe('SubscriptionService.applyGatewayEvent (US-4.1)', () => {
       expect.objectContaining({
         status: 'ACTIVE',
         plan: 'QUARTERLY',
-        priceCents: 9900,
+        priceCents: 20370,
         externalSubscriptionId: 'sub_1',
       }),
       // US-8.3: o repositório emite a transição de ciclo de vida; o ator vem daqui.
@@ -121,7 +159,9 @@ describe('SubscriptionService.applyGatewayEvent (US-4.1)', () => {
   });
 
   it('replay do mesmo checkout já ativo → idempotente (não repatch)', async () => {
-    const { svc, patch } = make(row({ status: 'ACTIVE', externalSubscriptionId: 'sub_1' }));
+    const { svc, patch } = make(
+      row({ status: 'ACTIVE', plan: 'QUARTERLY', externalSubscriptionId: 'sub_1' }),
+    );
     const res = await svc.applyGatewayEvent(evt({ externalSubscriptionId: 'sub_1' }));
     expect(res.status).toBe('IDEMPOTENT');
     expect(patch).not.toHaveBeenCalled();
@@ -135,7 +175,7 @@ describe('SubscriptionService.applyGatewayEvent (US-4.1)', () => {
   });
 
   it('transição inválida é rejeitada (CANCELED terminal não reativa)', async () => {
-    const { svc } = make(row({ status: 'CANCELED' }));
+    const { svc } = make(row({ status: 'CANCELED', plan: 'QUARTERLY' }));
     await expect(svc.applyGatewayEvent(evt())).rejects.toBeInstanceOf(InvalidTransitionError);
   });
 
@@ -146,14 +186,14 @@ describe('SubscriptionService.applyGatewayEvent (US-4.1)', () => {
 });
 
 describe('SubscriptionService.createCheckout / getAccess (US-4.2)', () => {
-  it('cria checkout hospedado com plano/preço/URLs e registra o aceite de termos', async () => {
-    const { svc, patch, createCheckoutSession } = make(row({ status: 'TRIALING' }));
+  it('cria checkout hospedado com plano/preço/URLs sem antecipar o aceite de termos', async () => {
+    const { svc, patch, createCheckoutSession } = make(row({ status: 'TRIALING', plan: 'ANNUAL' }));
     const cs = await svc.createCheckout(USER, 'ANNUAL', 'CARD', 'terms-v1');
     expect(cs.checkoutUrl).toBe('https://mock/co');
     expect(createCheckoutSession).toHaveBeenCalledWith(
       expect.objectContaining({
         plan: 'ANNUAL',
-        priceCents: 71500,
+        priceCents: 71880,
         method: 'CARD',
         termsVersion: 'terms-v1',
       }),
@@ -163,6 +203,8 @@ describe('SubscriptionService.createCheckout / getAccess (US-4.2)', () => {
       's1',
       expect.objectContaining({ plan: 'ANNUAL', termsVersion: 'terms-v1' }),
     );
+    const patchValues = (patch.mock.calls[0] as unknown as [string, string, object])[2];
+    expect(patchValues).not.toHaveProperty('termsAcceptedAt');
   });
 
   it('getAccess deriva o acesso do estado (ACTIVE → FULL)', async () => {

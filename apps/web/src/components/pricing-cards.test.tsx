@@ -44,6 +44,9 @@ describe('PricingCards', () => {
             `pricing_${plan.id.toLowerCase()}_anamnesis_click`,
         ),
       ).toBe(true);
+      expect(ctas.some((cta) => cta.getAttribute('href') === `/anamnese?plano=${plan.id}`)).toBe(
+        true,
+      );
     }
     expect(screen.getAllByText('Treinos 100% personalizados')).toHaveLength(
       SUBSCRIPTION_PLANS.length,

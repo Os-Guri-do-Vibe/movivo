@@ -27,14 +27,17 @@ export function conversionMessage(
   switch (touchpoint) {
     case 'day7':
       return (
-        'Uma semana treinando com a gente, você está mandando muito bem! Pra continuar com ' +
-        'seu plano montado sob a metodologia profissional MOVIVO, dá uma olhada nas opções de ' +
-        'assinatura quando quiser. Sem compromisso: cancela quando quiser.'
+        'Seus 7 dias gratuitos terminaram. Para continuar com a assessoria de treino MOVIVO, ' +
+        'supervisionada por profissional CREF, assine o plano que você escolheu aqui: ' +
+        checkoutUrl +
+        '\nVocê pode cancelar quando quiser, sem burocracia.'
       );
     case 'day10':
       return (
-        '10 dias de treino! Já dá pra sentir a diferença de ter um plano feito pra você.' +
-        'Faltam poucos dias do seu período de experiência, se quiser seguir, tô por aqui pra ajudar.'
+        'Seu período gratuito terminou, mas seu plano escolhido continua disponível. ' +
+        'Se quiser seguir com a assessoria MOVIVO, é só assinar por aqui: ' +
+        checkoutUrl +
+        '\nVocê pode cancelar quando quiser.'
       );
     case 'day13':
       return (
@@ -44,21 +47,16 @@ export function conversionMessage(
         '\nVocê tem 7 dias de garantia e pode cancelar quando quiser, sem burocracia.'
       );
     case 'day14':
-      // US-4.4 — downgrade: no último dia, oferece o plano mais barato (Mensal R$39) como
-      // último recurso antes de perder o usuário. Mesmo produto, período mais curto/barato.
       return (
-        'Último dia do seu período de experiência! 🙌 Se o valor pesou, o plano Mensal sai por ' +
-        `R$79,90 o jeito mais leve de continuar com seu plano e a ${agentName}: ` +
+        `Se quiser retomar seus treinos com a ${agentName}, seu plano escolhido está aqui: ` +
         checkoutUrl +
-        '\nSem fidelidade: você cancela quando quiser.'
+        '\nA assessoria é supervisionada por profissional CREF e você pode cancelar quando quiser.'
       );
     case 'winback':
-      // US-4.4 — win-back 3 dias pós-trial, SEM julgamento (Peak-End/Sofia): pergunta o motivo
-      // e deixa a porta aberta com o plano mais barato. Sem dark pattern, saída digna.
       return (
         'Vi que seu período de experiência terminou e você decidiu não seguir agora, tudo bem, ' +
         'sem pressão! 🙏 Só pra eu melhorar: o que faltou pra fazer sentido? (preço, tempo, ' +
-        'resultado...) Se quiser voltar, o plano Mensal é R$39 e você entra quando quiser: ' +
+        'rotina...) Se quiser voltar, o plano que você escolheu continua aqui: ' +
         checkoutUrl +
         // "Valeu por treinar" no lugar de "obrigada por treinar" (Sprint 11): a mensagem é
         // assinada pela persona do titular, que pode ser masculina ou feminina, e o

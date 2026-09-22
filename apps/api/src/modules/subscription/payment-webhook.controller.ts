@@ -99,7 +99,7 @@ export class PaymentWebhookController {
     );
     const verdict = await this.webhook.ingest({
       rawBody: req.rawBody,
-      signature: header(req, PAYMENT_SIGNATURE_HEADER),
+      signature: header(req, 'stripe-signature') ?? header(req, PAYMENT_SIGNATURE_HEADER),
       timestamp: header(req, PAYMENT_TIMESTAMP_HEADER),
       correlationId,
     });

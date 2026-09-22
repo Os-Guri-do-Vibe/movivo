@@ -393,6 +393,11 @@ export const envSchema = z
     /** Chaves dos gateways — **opcionais** no boot (via `*_FILE`/Secret). Sem elas → MOCK. */
     STRIPE_SECRET_KEY: z.string().min(1).optional(),
     STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
+    /** IDs públicos dos Prices recorrentes; nunca URLs de checkout. */
+    STRIPE_PRICE_MONTHLY: z.string().startsWith('price_').optional(),
+    STRIPE_PRICE_QUARTERLY: z.string().startsWith('price_').optional(),
+    STRIPE_PRICE_SEMIANNUAL: z.string().startsWith('price_').optional(),
+    STRIPE_PRICE_ANNUAL: z.string().startsWith('price_').optional(),
     ASAAS_API_KEY: z.string().min(1).optional(),
     ASAAS_WEBHOOK_SECRET: z.string().min(1).optional(),
     /**

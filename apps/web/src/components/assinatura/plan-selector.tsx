@@ -16,8 +16,7 @@ import { formatBRL, startCheckout } from '@/lib/subscription-api';
  * (renderizada no server, fora deste componente).
  */
 const METHODS: { id: PaymentMethodId; label: string }[] = [
-  { id: 'CARD', label: 'Cartão de crédito' },
-  { id: 'PIX', label: 'PIX' },
+  { id: 'CARD', label: 'Cartão, Apple Pay ou Google Pay' },
 ];
 
 function track(event: string, props?: Record<string, unknown>): void {

@@ -8,7 +8,7 @@
 import { index, integer, jsonb, pgTable, smallint, varchar } from 'drizzle-orm/pg-core';
 
 import { bytea, eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
-import { anamnesisStatusEnum, parqStateEnum } from './enums';
+import { anamnesisStatusEnum, parqStateEnum, subscriptionPlanEnum } from './enums';
 import { users } from './users';
 
 export const anamnesisSessions = pgTable(
@@ -113,6 +113,9 @@ export const anamnesisSessions = pgTable(
 
     /** Pré-qualificação capturada na landing, antes do formulário. */
     primaryGoal: varchar('primary_goal', { length: 30 }),
+
+    /** Plano escolhido antes da anamnese; atravessa todo o onboarding até o trial. */
+    selectedPlan: subscriptionPlanEnum('selected_plan').notNull().default('MONTHLY'),
 
     /**
      * Estado do gate PAR-Q, definido no submit (US-1.3). Nulo enquanto

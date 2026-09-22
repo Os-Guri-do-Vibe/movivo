@@ -125,6 +125,12 @@ export interface PaymentConfig {
   /** Segredos redigidos no snapshot; `undefined` sem credencial → adaptador MOCK. */
   readonly stripeSecretKey: string | undefined;
   readonly stripeWebhookSecret: string | undefined;
+  readonly stripePriceIds: Readonly<{
+    MONTHLY: string | undefined;
+    QUARTERLY: string | undefined;
+    SEMIANNUAL: string | undefined;
+    ANNUAL: string | undefined;
+  }>;
   readonly asaasApiKey: string | undefined;
   readonly asaasWebhookSecret: string | undefined;
   /** Dias de graça do `PAST_DUE` antes de restringir o acesso (US-4.2.3). */
@@ -347,6 +353,12 @@ export class AppConfigService {
       provider: this.config.PAYMENT_PROVIDER,
       stripeSecretKey: this.config.STRIPE_SECRET_KEY,
       stripeWebhookSecret: this.config.STRIPE_WEBHOOK_SECRET,
+      stripePriceIds: {
+        MONTHLY: this.config.STRIPE_PRICE_MONTHLY,
+        QUARTERLY: this.config.STRIPE_PRICE_QUARTERLY,
+        SEMIANNUAL: this.config.STRIPE_PRICE_SEMIANNUAL,
+        ANNUAL: this.config.STRIPE_PRICE_ANNUAL,
+      },
       asaasApiKey: this.config.ASAAS_API_KEY,
       asaasWebhookSecret: this.config.ASAAS_WEBHOOK_SECRET,
       pastDueGraceDays: this.config.SUBSCRIPTION_PAST_DUE_GRACE_DAYS,

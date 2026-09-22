@@ -146,6 +146,7 @@ export class PaymentWebhookService {
     status: string,
     correlationId: string,
   ): Promise<void> {
+    if (status !== 'ACTIVE' && type === 'CHECKOUT_CONFIRMED') return;
     if (status === 'IDEMPOTENT' || status === 'NO_SUBSCRIPTION') return;
 
     if (type === 'CHECKOUT_CONFIRMED') {

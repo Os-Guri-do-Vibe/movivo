@@ -4,6 +4,8 @@ import * as React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 
+import type { SubscriptionPlanId } from '@movivo/shared';
+
 import { Button } from '@/components/ui/button';
 import { isAnalyticsEnabled } from '@/lib/env';
 import { captureFirstTouch } from '@/lib/first-touch';
@@ -26,6 +28,7 @@ type StartCtaProps = {
   showMicrocopy?: boolean;
   className?: string;
   buttonClassName?: string;
+  plan?: SubscriptionPlanId;
 };
 
 export function StartCta({
@@ -35,6 +38,7 @@ export function StartCta({
   showMicrocopy = true,
   className,
   buttonClassName,
+  plan,
 }: StartCtaProps = {}) {
   // Primeiro toque (US-8.2): a query string chega AQUI, na landing, e some na
   // navegação para `/anamnese`. Capturar na montagem é o que faz a origem
@@ -54,7 +58,7 @@ export function StartCta({
     <div className={cn('flex flex-col gap-3', className)}>
       <Button asChild size="lg" className={cn('w-full rounded-full sm:w-auto', buttonClassName)}>
         <Link
-          href="/anamnese"
+          href={plan ? `/anamnese?plano=${plan}` : '#planos'}
           onClick={handleStart}
           data-analytics-event={`${location}_anamnesis_click`}
         >

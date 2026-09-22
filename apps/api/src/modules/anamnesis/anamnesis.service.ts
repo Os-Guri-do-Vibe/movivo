@@ -149,6 +149,7 @@ export class AnamnesisService {
         .values({
           token,
           primaryGoal: input.primaryGoal ?? null,
+          selectedPlan: input.planId,
           expiresAt,
         })
         .returning({ id: anamnesisSessions.id });
@@ -393,7 +394,7 @@ export class AnamnesisService {
     await this.queues.enqueue(
       QUEUE.conversionSequence,
       'trial-start',
-      { userId },
+      { userId, plan: row.selectedPlan },
       { jobId: `trial-start_${userId}` },
     );
 

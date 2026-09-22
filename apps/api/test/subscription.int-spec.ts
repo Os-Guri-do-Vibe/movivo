@@ -119,12 +119,12 @@ describe('SubscriptionModule — gateway MOCK e ciclo de vida (US-4.1)', () => {
 
   it('checkout confirmado → ACTIVE; reenvio é idempotente', async () => {
     const userId = await createUser();
-    await svc.startTrial(userId);
+    await svc.startTrial(userId, 'ANNUAL');
     const event = (gateway as MockGateway).emit('CHECKOUT_CONFIRMED', {
       userId,
       externalSubscriptionId: `sub_${RUN}_${seq}`,
       plan: 'ANNUAL',
-      priceCents: 71500,
+      priceCents: 71880,
     });
 
     expect((await svc.applyGatewayEvent(event)).status).toBe('ACTIVE');

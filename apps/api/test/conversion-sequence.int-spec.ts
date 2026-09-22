@@ -62,6 +62,17 @@ async function createUser(): Promise<string> {
 
 const jobOf = (name: string, data: unknown) => ({ name, data }) as unknown as Job<never>;
 
+/** Força o fim do trial no passado (sob contexto de sistema). */
+async function expireTrial(userId: string): Promise<void> {
+  await db.runAsSystem(async (tx) => {
+    await tx
+      .update(subscriptions)
+      .set({ trialEndsAt: new Date(Date.now() - 24 * 3600 * 1000) })
+      .where(eq(subscriptions.userId, userId));
+    return undefined;
+  });
+}
+
 beforeAll(async () => {
   app = await NestFactory.create(AppModule, { logger: false });
   await app.init();
@@ -91,14 +102,16 @@ afterAll(async () => {
 describe('ConversionSequenceWorker (US-4.3)', () => {
   it('trial-start cria a assinatura TRIALING', async () => {
     const userId = await createUser();
-    await worker.process(jobOf('trial-start', { userId }));
+    await worker.process(jobOf('trial-start', { userId, plan: 'QUARTERLY' }));
     const sub = await subs.getForUser(userId);
     expect(sub?.status).toBe('TRIALING');
+    expect(sub?.plan).toBe('QUARTERLY');
   });
 
   it('touchpoint em trial envia uma vez (idempotente)', async () => {
     const userId = await createUser();
     await subs.startTrial(userId);
+    await expireTrial(userId);
     const first = await worker.process(jobOf('touchpoint', { userId, key: 'day7' }));
     const second = await worker.process(jobOf('touchpoint', { userId, key: 'day7' }));
     expect(first.status).toBe('SENT');
@@ -120,24 +133,15 @@ describe('ConversionSequenceWorker (US-4.3)', () => {
   });
 });
 
-describe('Downgrade + win-back (US-4.4)', () => {
-  /** Força o fim do trial no passado (sob contexto de sistema). */
-  async function expireTrial(userId: string): Promise<void> {
-    await db.runAsSystem(async (tx) => {
-      await tx
-        .update(subscriptions)
-        .set({ trialEndsAt: new Date(Date.now() - 24 * 3600 * 1000) })
-        .where(eq(subscriptions.userId, userId));
-      return undefined;
-    });
-  }
-
-  it('dia 14 (downgrade) dispara em trial e para se já convertido', async () => {
+describe('Plano persistido + win-back (US-4.4)', () => {
+  it('dia 14 mantém o plano originalmente escolhido', async () => {
     const userId = await createUser();
     await subs.startTrial(userId, 'ANNUAL');
+    await expireTrial(userId);
     expect((await worker.process(jobOf('touchpoint', { userId, key: 'day14' }))).status).toBe(
       'SENT',
     );
+    expect((await subs.getForUser(userId))?.plan).toBe('ANNUAL');
   });
 
   it('win-back: trial vencido → envia uma vez (idempotente); registra o motivo', async () => {
