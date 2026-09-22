@@ -11,6 +11,27 @@ const PRICES: StripePriceIds = {
   ANNUAL: 'price_annual',
 };
 
+const CHECKOUT_INPUT = {
+  userId: 'user-1',
+  plan: 'MONTHLY' as const,
+  priceCents: 7990,
+  method: 'CARD' as const,
+  termsVersion: 'terms-v1',
+  successUrl: 'https://movivo.test/ok',
+  cancelUrl: 'https://movivo.test/cancel',
+};
+
+function signedWebhook(
+  payload: unknown,
+  timestamp = Math.floor(Date.now() / 1000),
+): { raw: Buffer; signature: string } {
+  const raw = Buffer.from(JSON.stringify(payload));
+  const digest = createHmac('sha256', 'whsec_test')
+    .update(`${timestamp}.${raw.toString('utf8')}`)
+    .digest('hex');
+  return { raw, signature: `t=${timestamp},v1=${digest}` };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -146,6 +167,210 @@ describe('StripeGateway', () => {
     expect(new StripeGateway('sk_test', 'whsec_test', PRICES).hasCredentials()).toBe(true);
     expect(new StripeGateway(undefined, 'whsec_test', PRICES).hasCredentials()).toBe(false);
   });
+
+  it('falha de forma fechada sem chave, com resposta inválida ou indisponibilidade', async () => {
+    await expect(
+      new StripeGateway(undefined, 'whsec_test', PRICES).createCheckoutSession(CHECKOUT_INPUT),
+    ).rejects.toThrow(/sem credencial/);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response(JSON.stringify({ id: 'cs_1' }), { status: 200 }))),
+    );
+    await expect(
+      new StripeGateway('sk_test', 'whsec_test', PRICES).createCheckoutSession(CHECKOUT_INPUT),
+    ).rejects.toThrow(/resposta inválida/);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('offline'))),
+    );
+    await expect(
+      new StripeGateway('sk_test', 'whsec_test', PRICES).createCheckoutSession(CHECKOUT_INPUT),
+    ).rejects.toThrow(/provedor indisponível/);
+  });
+
+  it('propaga erros HTTP do Stripe com mensagem ou status', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: 'cartão recusado' } }), { status: 402 }),
+      )
+      .mockResolvedValueOnce(new Response('não-json', { status: 500 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const gateway = new StripeGateway('sk_test', 'whsec_test', PRICES);
+
+    await expect(gateway.createCheckoutSession(CHECKOUT_INPUT)).rejects.toThrow(/cartão recusado/);
+    await expect(gateway.createCheckoutSession(CHECKOUT_INPUT)).rejects.toThrow(/HTTP 500/);
+  });
+
+  it('cancela, consulta e trata assinatura ausente no Stripe', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('{}', { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 'sub_1', status: 'active' }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'sub_1' }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: 'não encontrada' } }), { status: 404 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: 'falha temporária' } }), { status: 503 }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const gateway = new StripeGateway('sk_test', 'whsec_test', PRICES);
+
+    await expect(gateway.cancelSubscription('sub/1')).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://api.stripe.com/v1/subscriptions/sub%2F1');
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe('DELETE');
+    await expect(gateway.getSubscription('sub_1')).resolves.toEqual({
+      externalSubscriptionId: 'sub_1',
+      status: 'active',
+    });
+    await expect(gateway.getSubscription('sub_1')).resolves.toBeNull();
+    await expect(gateway.getSubscription('sub_missing')).resolves.toBeNull();
+    await expect(gateway.getSubscription('sub_error')).rejects.toThrow(/falha temporária/);
+  });
+
+  it('rejeita assinaturas de webhook ausentes, inválidas ou expiradas', () => {
+    const now = Math.floor(Date.now() / 1000);
+    const gateway = new StripeGateway('sk_test', 'whsec_test', PRICES);
+    const noSecret = new StripeGateway('sk_test', undefined, PRICES);
+    const raw = Buffer.from('{}');
+
+    expect(noSecret.parseWebhookEvent(raw, `t=${now},v1=${'0'.repeat(64)}`, undefined)).toBeNull();
+    expect(gateway.parseWebhookEvent(raw, undefined, undefined)).toBeNull();
+    expect(gateway.parseWebhookEvent(raw, 'v1=abc', undefined)).toBeNull();
+    expect(gateway.parseWebhookEvent(raw, `t=${now}`, undefined)).toBeNull();
+    expect(gateway.parseWebhookEvent(raw, `t=${now},v1=abc`, undefined)).toBeNull();
+
+    const stale = signedWebhook({}, now - 301);
+    expect(gateway.parseWebhookEvent(stale.raw, stale.signature, undefined)).toBeNull();
+  });
+
+  it('rejeita payload de webhook malformado, incompleto ou desconhecido', () => {
+    const gateway = new StripeGateway('sk_test', 'whsec_test', PRICES);
+    const timestamp = Math.floor(Date.now() / 1000);
+    const malformed = Buffer.from('{');
+    const malformedDigest = createHmac('sha256', 'whsec_test')
+      .update(`${timestamp}.{`)
+      .digest('hex');
+    expect(
+      gateway.parseWebhookEvent(malformed, `t=${timestamp},v1=${malformedDigest}`, undefined),
+    ).toBeNull();
+
+    for (const payload of [[], {}, { id: 'evt_1', type: 'irrelevant', data: { object: {} } }]) {
+      const signed = signedWebhook(payload);
+      expect(gateway.parseWebhookEvent(signed.raw, signed.signature, undefined)).toBeNull();
+    }
+  });
+
+  it('aceita checkout com IDs expandidos e userId vindo da metadata', () => {
+    const gateway = new StripeGateway('sk_test', 'whsec_test', PRICES);
+    const signed = signedWebhook({
+      id: 'evt_checkout',
+      type: 'checkout.session.completed',
+      created: 0,
+      data: {
+        object: {
+          id: 'cs_2',
+          subscription: { id: 'sub_2' },
+          customer: { id: 'cus_2' },
+          metadata: { userId: 'user-2', plan: 'MONTHLY', priceId: 'price_monthly' },
+        },
+      },
+    });
+
+    expect(gateway.parseWebhookEvent(signed.raw, signed.signature, undefined)).toEqual(
+      expect.objectContaining({
+        type: 'CHECKOUT_CONFIRMED',
+        userId: 'user-2',
+        externalSubscriptionId: 'sub_2',
+        externalCustomerId: 'cus_2',
+        occurredAt: undefined,
+      }),
+    );
+  });
+
+  it('normaliza falha de cobrança com metadata nova e legada', () => {
+    const gateway = new StripeGateway('sk_test', 'whsec_test', PRICES);
+    const modern = signedWebhook({
+      id: 'evt_failed_modern',
+      type: 'invoice.payment_failed',
+      data: {
+        object: {
+          amount_due: 7990,
+          customer: { id: 'cus_1' },
+          parent: {
+            subscription_details: {
+              subscription: { id: 'sub_1' },
+              metadata: { userId: 'user-1', plan: 'MONTHLY' },
+            },
+          },
+        },
+      },
+    });
+    expect(gateway.parseWebhookEvent(modern.raw, modern.signature, undefined)).toEqual(
+      expect.objectContaining({
+        type: 'PAYMENT_FAILED',
+        userId: 'user-1',
+        externalSubscriptionId: 'sub_1',
+        externalCustomerId: 'cus_1',
+        priceCents: 7990,
+      }),
+    );
+
+    const legacy = signedWebhook({
+      id: 'evt_failed_legacy',
+      type: 'invoice.payment_failed',
+      data: {
+        object: {
+          subscription: 'sub_2',
+          metadata: { userId: 'user-2', plan: 'QUARTERLY' },
+        },
+      },
+    });
+    expect(gateway.parseWebhookEvent(legacy.raw, legacy.signature, undefined)).toEqual(
+      expect.objectContaining({ userId: 'user-2', externalSubscriptionId: 'sub_2' }),
+    );
+
+    const invalid = signedWebhook({
+      id: 'evt_failed_invalid',
+      type: 'invoice.payment_failed',
+      data: { object: { metadata: { userId: 'user-3' } } },
+    });
+    expect(gateway.parseWebhookEvent(invalid.raw, invalid.signature, undefined)).toBeNull();
+  });
+
+  it('normaliza cancelamento de assinatura e rejeita evento sem vínculo', () => {
+    const gateway = new StripeGateway('sk_test', 'whsec_test', PRICES);
+    const valid = signedWebhook({
+      id: 'evt_cancel',
+      type: 'customer.subscription.deleted',
+      data: {
+        object: {
+          id: 'sub_1',
+          customer: { id: 'cus_1' },
+          metadata: { userId: 'user-1', plan: 'ANNUAL' },
+        },
+      },
+    });
+    expect(gateway.parseWebhookEvent(valid.raw, valid.signature, undefined)).toEqual(
+      expect.objectContaining({
+        type: 'SUBSCRIPTION_CANCELED',
+        externalSubscriptionId: 'sub_1',
+        externalCustomerId: 'cus_1',
+      }),
+    );
+
+    const invalid = signedWebhook({
+      id: 'evt_cancel_invalid',
+      type: 'customer.subscription.deleted',
+      data: { object: { id: 'sub_2', metadata: {} } },
+    });
+    expect(gateway.parseWebhookEvent(invalid.raw, invalid.signature, undefined)).toBeNull();
+  });
 });
 
 describe('AsaasGateway', () => {
@@ -154,5 +379,10 @@ describe('AsaasGateway', () => {
     expect(gateway.hasCredentials()).toBe(true);
     expect(() => gateway.cancelSubscription('sub_1')).toThrow(PaymentGatewayError);
     expect(() => gateway.createCheckoutSession({} as never)).toThrow(/api\.asaas\.com/);
+    expect(() => gateway.parseWebhookEvent(Buffer.from('{}'), undefined, undefined)).toThrow(
+      PaymentGatewayError,
+    );
+    expect(() => gateway.getSubscription('sub_1')).toThrow(PaymentGatewayError);
+    expect(new AsaasGateway(undefined, undefined).hasCredentials()).toBe(false);
   });
 });
