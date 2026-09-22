@@ -39,7 +39,7 @@ import { SubscriptionService } from './subscription.service';
       useFactory: (config: AppConfigService, logger: PinoLogger): PaymentGateway => {
         const p = config.payment;
         if (p.provider === 'STRIPE' && p.stripeSecretKey) {
-          return new StripeGateway(p.stripeSecretKey, p.stripeWebhookSecret);
+          return new StripeGateway(p.stripeSecretKey, p.stripeWebhookSecret, p.stripePriceIds);
         }
         if (p.provider === 'ASAAS' && p.asaasApiKey) {
           return new AsaasGateway(p.asaasApiKey, p.asaasWebhookSecret);

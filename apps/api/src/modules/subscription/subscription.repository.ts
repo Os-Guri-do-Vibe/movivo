@@ -56,8 +56,20 @@ export class SubscriptionRepository {
 
   async insert(values: NewSubscriptionRow): Promise<SubscriptionRow> {
     const row = await this.db.runAsUser(values.userId, 'USER', async (tx) => {
-      const [inserted] = await tx.insert(subscriptions).values(values).returning();
-      if (!inserted) return null;
+      const [inserted] = await tx
+        .insert(subscriptions)
+        .values(values)
+        .onConflictDoNothing({ target: subscriptions.userId })
+        .returning();
+      if (!inserted) {
+        // Outro worker venceu a corrida; devolve a linha única já criada, sem duplicar trial.
+        const [existing] = await tx
+          .select()
+          .from(subscriptions)
+          .where(eq(subscriptions.userId, values.userId))
+          .limit(1);
+        return existing ?? null;
+      }
       // Primeira transição do titular: `from` é nulo por definição (nasce no funil).
       const marker = lifecycleMarkerFor(null, inserted.status);
       if (marker) {

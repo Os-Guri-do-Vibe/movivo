@@ -60,32 +60,37 @@ export class SubscriptionService {
   /**
    * Cria a sessão de checkout HOSPEDADA (US-4.2.1) com o plano pré-selecionado e devolve o link.
    * Nenhum dado de cartão toca o backend (PCI). Idempotente: reusa a assinatura do titular (uma
-   * por usuário) e registra o aceite de termos; o `externalSubscriptionId` é fixado no webhook.
+   * por usuário) e registra a versão dos termos; o aceite/data e `externalSubscriptionId` só são
+   * fixados depois da confirmação assinada do webhook.
    */
   async createCheckout(
     userId: string,
     plan: SubscriptionPlan,
     method: PaymentMethod,
     termsVersion: string,
+    idempotencyKey?: string,
   ): Promise<CheckoutSession> {
     const sub = (await this.repo.findByUserId(userId)) ?? (await this.startTrial(userId, plan));
-    const priceCents = PLAN_CATALOG[plan].priceCents;
+    // O plano persistido no backend é autoritativo; o cliente não pode trocar o Price do trial.
+    const selectedPlan = sub.plan;
+    const priceCents = PLAN_CATALOG[selectedPlan].priceCents;
     const site = this.config.whatsapp.publicSiteUrl;
     const session = await this.gateway.createCheckoutSession({
       userId,
-      plan,
+      plan: selectedPlan,
       priceCents,
       method,
       termsVersion,
       successUrl: `${site}/checkout/sucesso`,
       cancelUrl: `${site}/checkout/cancelado`,
+      idempotencyKey,
     });
-    // Registra intenção de plano + aceite de termos (idempotente — só patch, não duplica linha).
+    // Registra intenção e versão exibida; gerar um link não equivale a aceitar os termos.
     await this.repo.patch(userId, sub.id, {
-      plan,
+      plan: selectedPlan,
       priceCents,
+      externalCheckoutSessionId: session.externalSessionId,
       termsVersion,
-      termsAcceptedAt: new Date(),
     });
     return session;
   }
@@ -108,13 +113,33 @@ export class SubscriptionService {
   async startTrial(userId: string, plan: SubscriptionPlan = 'MONTHLY'): Promise<SubscriptionRow> {
     const existing = await this.repo.findByUserId(userId);
     if (existing) return existing;
+    const trialStartedAt = new Date();
     return this.repo.insert({
       userId,
       plan,
       priceCents: PLAN_CATALOG[plan].priceCents,
       status: 'TRIALING',
-      trialEndsAt: new Date(Date.now() + TRIAL_DAYS * DAY_MS),
+      trialStartedAt,
+      trialEndsAt: new Date(trialStartedAt.getTime() + TRIAL_DAYS * DAY_MS),
     });
+  }
+
+  /** Expira o trial somente depois do instante persistido; segura contra job adiantado/repetido. */
+  async expireTrial(userId: string, now: Date = new Date()): Promise<{ status: string }> {
+    const current = await this.repo.findByUserId(userId);
+    if (!current) return { status: 'NO_SUBSCRIPTION' };
+    if (current.status === 'EXPIRED') return { status: 'IDEMPOTENT' };
+    if (current.status !== 'TRIALING') return { status: `SKIP_${current.status}` };
+    if (!current.trialEndsAt || current.trialEndsAt.getTime() > now.getTime()) {
+      return { status: 'TRIAL_NOT_ENDED' };
+    }
+    await this.repo.patch(
+      userId,
+      current.id,
+      { status: 'EXPIRED' },
+      { actor: 'SYSTEM', reason: 'TRIAL_ENDED' },
+    );
+    return { status: 'EXPIRED' };
   }
 
   /** Lê a assinatura vigente do titular (consumido por US-4.2/4.6). */
@@ -151,6 +176,18 @@ export class SubscriptionService {
         'evento sem assinatura — ignorado',
       );
       return { status: 'NO_SUBSCRIPTION' };
+    }
+
+    if (
+      event.type === 'CHECKOUT_CONFIRMED' &&
+      event.plan !== undefined &&
+      event.plan !== current.plan
+    ) {
+      this.logger.warn(
+        { userId: event.userId, expectedPlan: current.plan, receivedPlan: event.plan },
+        'checkout confirmado com plano divergente — ignorado',
+      );
+      return { status: 'PLAN_MISMATCH' };
     }
 
     const target = nextStatusForEvent(event.type);
@@ -250,6 +287,11 @@ export class SubscriptionService {
         plan,
         priceCents: event.priceCents ?? PLAN_CATALOG[plan].priceCents,
         externalSubscriptionId: event.externalSubscriptionId,
+        externalCustomerId: event.externalCustomerId ?? null,
+        externalCheckoutSessionId: event.externalCheckoutSessionId,
+        externalPriceId: event.externalPriceId,
+        termsVersion: event.termsVersion,
+        termsAcceptedAt: event.termsVersion ? now : undefined,
         // MOCK (dev) não é um provedor fiscal real → deixa nulo; real grava STRIPE/ASAAS.
         paymentProvider: this.gateway.name === 'MOCK' ? null : this.gateway.name,
         currentPeriodStart: now,

@@ -45,9 +45,10 @@ describe('PlanSelector', () => {
   it('CTA chama o checkout com o plano e método escolhidos', async () => {
     const user = userEvent.setup();
     render(<PlanSelector token={TOKEN} initialPlan="MONTHLY" />);
-    await user.click(screen.getByRole('button', { name: 'PIX' }));
+    expect(screen.queryByRole('button', { name: 'PIX' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cartão, Apple Pay ou Google Pay' })).toBeVisible();
     await user.click(screen.getByRole('button', { name: /Ir para o pagamento/ }));
-    await waitFor(() => expect(startCheckout).toHaveBeenCalledWith(TOKEN, 'MONTHLY', 'PIX'));
+    await waitFor(() => expect(startCheckout).toHaveBeenCalledWith(TOKEN, 'MONTHLY', 'CARD'));
   });
 
   it('mostra erro quando o checkout falha', async () => {

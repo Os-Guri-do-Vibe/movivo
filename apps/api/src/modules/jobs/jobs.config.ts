@@ -126,7 +126,11 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
   [QUEUE.workoutFeedback]: { attempts: 2, backoffMs: [5_000], concurrency: 5 },
   // Mesmo perfil de `workoutFeedback`: best-effort, poucas tentativas.
   [QUEUE.checkinWeeklyFeedback]: { attempts: 2, backoffMs: [5_000], concurrency: 5 },
-  [QUEUE.conversionSequence]: { attempts: 1, backoffMs: [], concurrency: 5 },
+  [QUEUE.conversionSequence]: {
+    attempts: 3,
+    backoffMs: [5_000, 30_000],
+    concurrency: 5,
+  },
   // Conciliação de liquidação (US-8.5). Retenta bastante e por bastante tempo: é fato
   // financeiro que já foi autenticado no webhook — perdê-lo por um blip do banco seria
   // perder receita da apuração. A idempotência é a UNIQUE de `payments`, então retry

@@ -10,9 +10,9 @@ describe('subscription-model — catálogo de planos (US-4.1)', () => {
       ['ANNUAL', 'MONTHLY', 'QUARTERLY', 'SEMIANNUAL'].sort(),
     );
     expect(PLAN_CATALOG.MONTHLY.priceCents).toBe(7990);
-    expect(PLAN_CATALOG.QUARTERLY.priceCents).toBe(20282);
-    expect(PLAN_CATALOG.SEMIANNUAL.priceCents).toBe(38721);
-    expect(PLAN_CATALOG.ANNUAL.priceCents).toBe(71500);
+    expect(PLAN_CATALOG.QUARTERLY.priceCents).toBe(20370);
+    expect(PLAN_CATALOG.SEMIANNUAL.priceCents).toBe(38760);
+    expect(PLAN_CATALOG.ANNUAL.priceCents).toBe(71880);
     expect(
       ['QUARTERLY', 'SEMIANNUAL', 'ANNUAL'].map((id) => {
         const months = { QUARTERLY: 3, SEMIANNUAL: 6, ANNUAL: 12 }[id] ?? 1;

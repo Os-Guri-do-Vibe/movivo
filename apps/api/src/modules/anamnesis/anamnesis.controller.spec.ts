@@ -26,13 +26,13 @@ describe('AnamnesisController', () => {
   it('start valida o corpo e delega ao serviço', async () => {
     const { controller, svc } = makeController();
     await controller.start({ primaryGoal: 'SPORT_EVENT' });
-    expect(svc.start).toHaveBeenCalledWith({ primaryGoal: 'SPORT_EVENT' });
+    expect(svc.start).toHaveBeenCalledWith({ planId: 'MONTHLY', primaryGoal: 'SPORT_EVENT' });
   });
 
   it('start aceita corpo vazio (objetivo é opcional)', async () => {
     const { controller, svc } = makeController();
     await controller.start(undefined);
-    expect(svc.start).toHaveBeenCalledWith({});
+    expect(svc.start).toHaveBeenCalledWith({ planId: 'MONTHLY' });
   });
 
   it('start recusa objetivo fora do vocabulário do RT', async () => {

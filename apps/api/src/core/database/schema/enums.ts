@@ -227,8 +227,8 @@ export const messageTypeEnum = pgEnum('message_type', [
 // ---------------------------------------------------------------------------
 
 /**
- * Planos vigentes: **plano único por período** — Mensal R$39 / Trimestral R$99 /
- * Anual R$349 (Eduardo, `07-relatorio-eduardo.md`).
+ * Planos vigentes: **plano único por período** — Mensal, Trimestral, Semestral e Anual.
+ * Os valores vivem exclusivamente no catálogo compartilhado, não neste enum.
  *
  * Divergência consciente do DDL de Rafael: ele lista `BASICO`/`PRO`, tiering que
  * foi **explicitamente rejeitado** por Eduardo (retenção vem do compromisso de

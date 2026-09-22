@@ -379,6 +379,20 @@
       "when": 1789450000000,
       "tag": "0053_checkin_weekly_web_form",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1790043988530,
+      "tag": "0054_uneven_electro",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1790082514120,
+      "tag": "0055_slippery_mauler",
+      "breakpoints": true
     }
   ]
 }

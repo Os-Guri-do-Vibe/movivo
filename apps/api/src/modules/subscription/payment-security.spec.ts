@@ -3,10 +3,9 @@
  * qualidade do fluxo de DINHEIRO num arquivo nomeado. Aqui um bug não é resposta ruim: é fraude,
  * cobrança indevida ou receita fantasma.
  *
- * ⚠️ Mocks-first (sem gateway real no CI): a segurança é DETERMINÍSTICA. O que a garante é a
- * assinatura HMAC do `MockGateway` (mesma interface do real), o PCI-boundary do CONTRATO de API
- * (schemas Zod) e as regras de guardrail — não uma conta de gateway. Gateway real (`real-gateways.ts`)
- * é bloqueador de LANÇAMENTO, não de dev.
+ * No CI o MockGateway mantém os testes determinísticos; o adaptador Stripe real possui suíte
+ * própria para assinatura nativa, metadata, Price e idempotência. Aqui ficam os invariantes
+ * compartilhados de contrato, PCI e linguagem.
  *
  * NÃO duplica o que já é verde: a máquina de estados e o `resolveAccess` estão em
  * `subscription-model.spec.ts`; a HMAC válida/tolerância em `mock-gateway.spec.ts`; a idempotência
@@ -87,13 +86,12 @@ describe('4.7.4 — unit economics sobre o PLAN_CATALOG (determinístico)', () =
     }
   });
 
-  it('downgrade para Mensal preserva payback: Mensal é o MAIOR preço por mês', () => {
+  it('planos longos preservam payback: Mensal é o MAIOR preço por mês', () => {
     const perMonth = (p: SubscriptionPlan) =>
       PLAN_CATALOG[p].priceCents / (PLAN_CATALOG[p].periodDays / 30);
     const monthly = perMonth('MONTHLY');
     for (const p of Object.keys(PLAN_CATALOG) as SubscriptionPlan[]) {
-      // Planos mais longos dão desconto por mês; Mensal nunca pode sair mais barato/mês,
-      // senão o downgrade destruiria o payback (meses p/ recuperar CAC ao ARPU mensal).
+      // Planos mais longos dão desconto por mês; Mensal nunca sai mais barato por mês.
       expect(monthly).toBeGreaterThanOrEqual(perMonth(p));
     }
   });

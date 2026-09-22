@@ -102,10 +102,11 @@ describe('startAnamnesis', () => {
   it('POST /anamnesis/start e devolve o token', async () => {
     const fetchMock = mockFetch(201, { token: 'abc', expiresAt: 'x', currentStep: 1 });
     vi.stubGlobal('fetch', fetchMock);
-    const res = await startAnamnesis();
+    const res = await startAnamnesis('ANNUAL');
     expect(res.token).toBe('abc');
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/anamnesis/start');
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toContain('"planId":"ANNUAL"');
   });
 });
 

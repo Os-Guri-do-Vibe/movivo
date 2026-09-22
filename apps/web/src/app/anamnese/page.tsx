@@ -3,6 +3,8 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 
+import { subscriptionPlanIdSchema } from '@movivo/shared';
+
 import { startAnamnesis } from '@/lib/anamnesis-api';
 import { captureFirstTouch } from '@/lib/first-touch';
 
@@ -19,7 +21,10 @@ export default function AnamneseBootstrapPage() {
     // Cobre quem chega direto em `/anamnese?utm_source=...` sem passar pela landing.
     captureFirstTouch();
     let cancelled = false;
-    void startAnamnesis()
+    const plan = subscriptionPlanIdSchema
+      .catch('MONTHLY')
+      .parse(new URLSearchParams(window.location.search).get('plano'));
+    void startAnamnesis(plan)
       .then(({ token }) => {
         if (!cancelled) router.replace(`/anamnese/${token}`);
       })

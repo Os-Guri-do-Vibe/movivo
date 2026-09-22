@@ -180,6 +180,7 @@ function sessionRow(over: Record<string, unknown> = {}) {
     status: 'IN_PROGRESS',
     lastStep: 1,
     primaryGoal: null,
+    selectedPlan: 'MONTHLY',
     parqState: null,
     dataBlock1: STEP1,
     dataBlock2: Buffer.from('cipher'),
@@ -199,10 +200,17 @@ function sessionRow(over: Record<string, unknown> = {}) {
 describe('AnamnesisService — sessão e retomada', () => {
   it('start gera token CSPRNG de 64 hex e TTL de 72h', async () => {
     const { svc } = makeService();
-    const res = await svc.start({});
+    const res = await svc.start({ planId: 'MONTHLY' });
     expect(res.token).toMatch(/^[0-9a-f]{64}$/);
     expect(res.currentStep).toBe(1);
     expect(res.expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('persiste o plano escolhido antes de iniciar a anamnese', async () => {
+    const inserts: Record<string, unknown>[] = [];
+    const { svc } = makeService({ inserts });
+    await svc.start({ planId: 'ANNUAL' });
+    expect(inserts[0]).toEqual(expect.objectContaining({ selectedPlan: 'ANNUAL' }));
   });
 
   it('getByToken lança 404 quando o token não existe', async () => {
@@ -435,6 +443,19 @@ describe('Submit — gate PAR-Q e outcome', () => {
       submittedAt: string;
     };
     expect(generation.submittedAt).toBe(persisted.toISOString());
+  });
+
+  it('leva o plano persistido da anamnese para o início do trial', async () => {
+    const { svc, queues } = makeService({
+      select: [sessionRow({ selectedPlan: 'SEMIANNUAL' })],
+      insert: [{ id: 'user-plan' }],
+    });
+    await svc.submit('t');
+    const calls = (queues.enqueue as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls.find((call) => call[1] === 'trial-start')?.[2]).toEqual({
+      userId: 'user-plan',
+      plan: 'SEMIANNUAL',
+    });
   });
 
   it('PAR-Q de risco também agenda a apresentação (a regra é "30min do formulário")', async () => {

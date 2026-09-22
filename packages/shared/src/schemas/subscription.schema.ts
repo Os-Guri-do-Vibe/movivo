@@ -32,9 +32,9 @@ export interface SubscriptionPlanOption {
 /** Catálogo do MVP. Valores definidos pelo fundador em 2026-09-01. */
 export const SUBSCRIPTION_PLANS: readonly SubscriptionPlanOption[] = [
   { id: 'MONTHLY', label: 'Mensal', priceCents: 7990, periodDays: 30, recommended: false },
-  { id: 'QUARTERLY', label: 'Trimestral', priceCents: 20282, periodDays: 90, recommended: false },
-  { id: 'SEMIANNUAL', label: 'Semestral', priceCents: 38721, periodDays: 180, recommended: true },
-  { id: 'ANNUAL', label: 'Anual', priceCents: 71500, periodDays: 365, recommended: false },
+  { id: 'QUARTERLY', label: 'Trimestral', priceCents: 20370, periodDays: 90, recommended: false },
+  { id: 'SEMIANNUAL', label: 'Semestral', priceCents: 38760, periodDays: 180, recommended: true },
+  { id: 'ANNUAL', label: 'Anual', priceCents: 71880, periodDays: 365, recommended: false },
 ];
 
 /** Body do checkout (`POST /subscription/:token/checkout`). Sem dado de cartão (PCI). */

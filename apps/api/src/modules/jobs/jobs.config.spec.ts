@@ -70,7 +70,7 @@ describe('jobs.config', () => {
     expect(backoffDelay(QUEUE.protocolGeneration, 1)).toBe(2_000);
     expect(backoffDelay(QUEUE.protocolGeneration, 2)).toBe(8_000);
     expect(backoffDelay(QUEUE.protocolGeneration, 9)).toBe(32_000); // satura
-    expect(backoffDelay(QUEUE.conversionSequence, 1)).toBe(0); // sem backoff
+    expect(backoffDelay(QUEUE.conversionSequence, 1)).toBe(5_000);
   });
 
   it('buildBullConnection reusa a descoberta via Sentinel e força maxRetriesPerRequest null', () => {

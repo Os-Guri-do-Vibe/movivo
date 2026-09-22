@@ -1,8 +1,8 @@
 /**
  * Testes do CTA da landing (US-1.5, Sofia §9.1).
  *
- * A landing não coleta nada de anamnese: o CTA leva direto a `/anamnese`, sem query
- * param, e o clique dispara `form_started` no PostHog.
+ * A landing não coleta nada de anamnese: CTA genérico leva aos planos e o CTA de plano
+ * leva à anamnese com o identificador escolhido; ambos disparam `form_started`.
  *
  * `@/lib/env` e `posthog-js` são mockados: `isAnalyticsEnabled` liga o caminho de
  * captura, e o default do PostHog expõe um spy em `capture`.
@@ -28,13 +28,18 @@ beforeEach(() => {
 });
 
 describe('StartCta', () => {
-  it('renderiza o CTA apontando para a anamnese, sem coletar objetivo', () => {
+  it('CTA genérico aponta para a escolha de planos, sem coletar objetivo', () => {
     render(<StartCta />);
+    expect(screen.getByRole('link', { name: 'Começar agora' })).toHaveAttribute('href', '#planos');
+    expect(screen.queryByRole('button', { name: 'Perder peso' })).not.toBeInTheDocument();
+  });
+
+  it('CTA de plano preserva a escolha na navegação', () => {
+    render(<StartCta plan="ANNUAL" />);
     expect(screen.getByRole('link', { name: 'Começar agora' })).toHaveAttribute(
       'href',
-      '/anamnese',
+      '/anamnese?plano=ANNUAL',
     );
-    expect(screen.queryByRole('button', { name: 'Perder peso' })).not.toBeInTheDocument();
   });
 
   it('dispara form_started ao clicar no CTA', async () => {

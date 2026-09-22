@@ -23,6 +23,8 @@ export interface CreateCheckoutInput {
   /** Retorno do checkout hospedado (US-4.6). */
   successUrl: string;
   cancelUrl: string;
+  /** Chave estável do caso de uso; impede sessões duplicadas em retry do job. */
+  idempotencyKey?: string;
 }
 
 export interface CheckoutSession {
@@ -42,6 +44,10 @@ export interface GatewayEvent {
   eventId: string;
   /** Id da assinatura no provedor — chave de idempotência da ativação (uniqueIndex). */
   externalSubscriptionId: string;
+  externalCustomerId?: string;
+  externalCheckoutSessionId?: string;
+  externalPriceId?: string;
+  termsVersion?: string;
   /** Titular alvo (mapeado do metadata do provedor). */
   userId: string;
   plan?: SubscriptionPlan;

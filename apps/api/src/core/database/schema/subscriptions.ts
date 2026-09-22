@@ -1,10 +1,9 @@
 /**
  * Tabela `subscriptions` — assinatura do usuário.
  *
- * Modelo de negócio vigente (Eduardo, `07-relatorio-eduardo.md`): **plano único
- * por período** — Mensal R$39 / Trimestral R$99 / Anual R$349 — com trial de 7
- * dias **sem cartão**. Não existe tiering de features; a retenção vem do
- * compromisso de período.
+ * Modelo de negócio vigente: **plano único por período** (Mensal, Trimestral,
+ * Semestral ou Anual), com trial de 7 dias **sem cartão**. Os preços vivem na
+ * fonte única `SUBSCRIPTION_PLANS`; não existe tiering de features.
  */
 import { index, integer, pgTable, text, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
 
@@ -26,7 +25,7 @@ export const subscriptions = pgTable(
 
     /**
      * Preço em **centavos**, inteiro. Nunca `numeric`/`float` para dinheiro:
-     * ponto flutuante binário não representa R$39,00 exatamente e o erro se
+     * ponto flutuante binário não representa R$79,90 exatamente e o erro se
      * acumula em relatório de receita.
      */
     priceCents: integer('price_cents').notNull(),
@@ -41,9 +40,13 @@ export const subscriptions = pgTable(
      */
     paymentProvider: paymentProviderEnum('payment_provider'),
 
-    /** ID da assinatura no Stripe/Asaas. Chave de idempotência do webhook. */
+    /** IDs externos para conciliação e idempotência do checkout/webhook. */
     externalSubscriptionId: varchar('external_subscription_id', { length: 255 }),
+    externalCustomerId: varchar('external_customer_id', { length: 255 }),
+    externalCheckoutSessionId: varchar('external_checkout_session_id', { length: 255 }),
+    externalPriceId: varchar('external_price_id', { length: 255 }),
 
+    trialStartedAt: eventTimestamp('trial_started_at'),
     trialEndsAt: eventTimestamp('trial_ends_at'),
     currentPeriodStart: eventTimestamp('current_period_start'),
     currentPeriodEnd: eventTimestamp('current_period_end'),
@@ -62,7 +65,8 @@ export const subscriptions = pgTable(
     ...timestampColumns,
   },
   (table) => [
-    index('idx_subscriptions_user').on(table.userId, table.createdAt),
+    // Uma assinatura por titular: fecha a corrida de dois jobs `trial-start` simultâneos.
+    uniqueIndex('uq_subscriptions_user').on(table.userId),
     index('idx_subscriptions_status').on(table.status),
     // Sequência de conversão do trial (dias 7/10/13/14 — Lucas §MVP).
     index('idx_subscriptions_trial_ends_at').on(table.trialEndsAt),
@@ -74,6 +78,7 @@ export const subscriptions = pgTable(
      * comportamento desejado aqui.
      */
     uniqueIndex('uq_subscriptions_external_id').on(table.externalSubscriptionId),
+    uniqueIndex('uq_subscriptions_external_checkout_session').on(table.externalCheckoutSessionId),
   ],
 );
 

@@ -89,6 +89,7 @@ export function PricingCards() {
               <StartCta
                 label="Treinar Grátis"
                 location={`pricing_${plan.id.toLowerCase()}`}
+                plan={plan.id}
                 showMicrocopy={false}
                 buttonClassName={styles.planCta}
               />

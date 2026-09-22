@@ -25,6 +25,8 @@
  */
 import { z } from 'zod';
 
+import { subscriptionPlanIdSchema } from './subscription.schema';
+
 import { attributionInputSchema } from '../attribution';
 
 // ---------------------------------------------------------------------------
@@ -706,6 +708,8 @@ export type VerifyPhoneCodeInput = z.infer<typeof verifyPhoneCodeSchema>;
 // ---------------------------------------------------------------------------
 
 export const startAnamnesisSchema = z.object({
+  /** Plano selecionado na landing; default mantém links antigos compatíveis. */
+  planId: subscriptionPlanIdSchema.default('MONTHLY'),
   primaryGoal: primaryGoalSchema.optional(),
   /**
    * Atribuição de primeiro toque (US-8.2). Entrada não confiável vinda da query

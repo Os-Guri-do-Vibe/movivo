@@ -4,7 +4,7 @@
  * O token é o identificador opaco da sessão (72h), sempre no PATH (nunca query
  * string, ADR-006/Sato §8.1) — mesmo padrão de `subscription-api.ts`.
  */
-import type { OnboardingOutcome } from '@movivo/shared';
+import type { OnboardingOutcome, SubscriptionPlanId } from '@movivo/shared';
 import {
   AsYouType,
   getCountries,
@@ -98,10 +98,14 @@ function patch<T>(path: string, body: unknown): Promise<T> {
 
 export { AnamnesisApiError };
 
-export function startAnamnesis(primaryGoal?: string): Promise<StartResult> {
+export function startAnamnesis(
+  planId: SubscriptionPlanId,
+  primaryGoal?: string,
+): Promise<StartResult> {
   // A atribuição de primeiro toque (US-8.2) viaja aqui: é a única chamada em que a
   // sessão nasce, e é no servidor que ela é saneada e gravada em escrita única.
   return post<StartResult>('/anamnesis/start', {
+    planId,
     ...(primaryGoal ? { primaryGoal } : {}),
     attribution: getFirstTouch() ?? {},
   });

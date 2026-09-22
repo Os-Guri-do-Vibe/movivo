@@ -19,11 +19,10 @@ test('a landing carrega com hero, CTA e respaldo CREF', async ({ page }) => {
     }),
   ).toBeVisible();
 
-  // CTA principal do funil (client component StartCta): leva à anamnese, sem coletar
-  // nada de anamnese na landing (o objetivo é perguntado no bloco 1 do formulário).
+  // CTA principal leva à escolha do plano; só o CTA de cada plano abre a anamnese.
   const cta = page.locator('[data-analytics-event="hero_anamnesis_click"]');
   await expect(cta).toBeVisible();
-  await expect(cta).toHaveAttribute('href', '/anamnese');
+  await expect(cta).toHaveAttribute('href', '#planos');
   await expect(page.getByText('Qual é o seu foco agora?')).toHaveCount(0);
 
   // Guardrail de linguagem: o respaldo do profissional CREF é sempre visível.
