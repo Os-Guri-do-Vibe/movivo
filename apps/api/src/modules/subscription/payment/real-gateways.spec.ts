@@ -38,7 +38,7 @@ describe('StripeGateway', () => {
       termsVersion: 'terms-v1',
       successUrl: 'https://movivo.test/checkout/sucesso',
       cancelUrl: 'https://movivo.test/checkout/cancelado',
-      idempotencyKey: 'trial_sub-1_day7',
+      idempotencyKey: 'test',
     });
 
     expect(session).toEqual({
@@ -54,7 +54,7 @@ describe('StripeGateway', () => {
     expect(body.get('subscription_data[metadata][userId]')).toBe(
       '11111111-1111-4111-8111-111111111111',
     );
-    expect(new Headers(init.headers).get('Idempotency-Key')).toBe('trial_sub-1_day7');
+    expect(new Headers(init.headers).get('Idempotency-Key')).toBe('test');
   });
 
   it('rejeita PIX para assinatura recorrente e configuração sem Price', async () => {
