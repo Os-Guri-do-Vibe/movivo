@@ -23,6 +23,14 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   reactStrictMode: true,
 
+  /*
+   * Build de produção em container (apps/web/Dockerfile): `standalone` gera um
+   * `server.js` com só as dependências rastreadas, sem o node_modules inteiro do
+   * monorepo. Ligado apenas pela env do Dockerfile — `next dev`, o `next start`
+   * do E2E e o CI seguem no modo padrão.
+   */
+  output: process.env.NEXT_OUTPUT_STANDALONE === '1' ? 'standalone' : undefined,
+
   images: {
     remotePatterns: [
       {
