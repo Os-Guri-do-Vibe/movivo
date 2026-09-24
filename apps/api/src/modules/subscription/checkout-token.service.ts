@@ -53,7 +53,7 @@ export class CheckoutTokenService {
       const iv = packed.subarray(0, IV_BYTES);
       const tag = packed.subarray(IV_BYTES, IV_BYTES + TAG_BYTES);
       const ciphertext = packed.subarray(IV_BYTES + TAG_BYTES);
-      const decipher = createDecipheriv('aes-256-gcm', this.key, iv);
+      const decipher = createDecipheriv('aes-256-gcm', this.key, iv, { authTagLength: TAG_BYTES });
       decipher.setAuthTag(tag);
       const parsed: unknown = JSON.parse(
         Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8'),
