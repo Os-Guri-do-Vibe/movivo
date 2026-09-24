@@ -1,0 +1,41 @@
+# =============================================================================
+# MOVIVO — .dockerignore (contexto de build = raiz do monorepo)
+# =============================================================================
+# Dono: Henrique (Platform/SRE)
+#
+# Duas funções: (1) nenhum segredo entra no contexto de build — nem por engano,
+# nem em camada intermediária; (2) o contexto fica pequeno, e o cache de camada
+# não invalida por arquivo que a imagem não usa.
+# =============================================================================
+
+# Segredos e ambiente — NUNCA no contexto (ARQUITETURA.md §12.7 · Sato §9.3)
+secrets
+.env
+.env.*
+*.env
+**/.env
+**/.env.*
+
+# Dados de runtime (fotos de usuário) — não é código
+apps/api/uploads
+
+# Dependências e artefatos: a imagem instala e compila do zero
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/coverage
+**/*.tsbuildinfo
+**/test-results
+**/playwright-report
+
+# Git, docs e ferramental que a imagem não usa
+.git
+.github
+.claude
+docs
+sprint
+infra/vps
+**/*.md
+!packages/*/README.md
+.DS_Store
