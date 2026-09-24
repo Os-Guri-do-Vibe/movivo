@@ -2,8 +2,9 @@
  * Ingestão do webhook de pagamento (US-4.2.2) — o vetor de fraude nº 1 (Sato T-15). Reusa o
  * padrão da US-3.1: verifica assinatura sobre o **corpo bruto** (via `PaymentGateway`), resiste a
  * replay (dedup por `event_id` `SET NX` + `uniqueIndex(externalSubscriptionId)` da ativação) e
- * NUNCA vaza QUAL camada falhou — assinatura inválida/replay são descartados (o controller
- * responde 200). A transição roda sob RLS via `SubscriptionService.applyGatewayEvent`.
+ * NUNCA vaza QUAL camada falhou — origem não provada vira 401 uniforme; replay e evento
+ * autenticado sem efeito viram 200 sem reprocessar. A transição roda sob RLS via
+ * `SubscriptionService.applyGatewayEvent`.
  *
  * PAST_DUE (decisão do fundador): dunning conversacional — a MOVI envia o link de pagamento no
  * WhatsApp (fila `whatsapp-outbound`); o acesso segue na janela de graça (gate em US-4.2.3).
@@ -20,12 +21,17 @@ import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import {
   type GatewayEvent,
+  isIgnoredWebhookEvent,
   PAYMENT_GATEWAY,
   type PaymentGateway,
 } from './payment/payment-gateway.types';
 import type { PaymentReconciliationJob } from './payment-reconciliation.worker';
-import { InvalidTransitionError, SUBSCRIPTION_TERMS_VERSION } from './subscription-model';
-import { dunningMessage } from './subscription-messages';
+import { InvalidTransitionError } from './subscription-model';
+import {
+  dunningMessage,
+  firstPaymentFailedMessage,
+  paymentConfirmationMessage,
+} from './subscription-messages';
 import { SubscriptionService } from './subscription.service';
 
 /** TTL do dedup de evento — cobre a janela de reentrega do provedor com folga. */
@@ -69,11 +75,24 @@ export class PaymentWebhookService {
       return this.reject('missing_body', input.correlationId);
     }
 
-    // 1. Assinatura sobre o corpo bruto (Stripe constructEvent / Asaas HMAC) → GatewayEvent.
+    // 1. Autenticação oficial do Asaas sobre o corpo bruto → GatewayEvent.
     //    NADA acontece antes desta linha: nem persistência, nem fila, nem efeito.
     const event = this.gateway.parseWebhookEvent(input.rawBody, input.signature, input.timestamp);
     if (!event) {
       return this.reject('bad_signature', input.correlationId); // T-15: tentativa de forja
+    }
+    // Autenticado, mas sem efeito (ex.: `PAYMENT_CREATED`). 200 obrigatório: qualquer outra
+    // resposta conta como falha no Asaas e, no envio sequencial, trava os eventos seguintes.
+    if (isIgnoredWebhookEvent(event)) {
+      this.logger.info(
+        {
+          event: 'webhook_ignored',
+          eventName: event.eventName,
+          correlationId: input.correlationId,
+        },
+        'evento de pagamento sem efeito na MOVIVO — ignorado',
+      );
+      return 'ACCEPTED';
     }
 
     // 2. Liquidação (US-8.5): enfileira a conciliação ANTES do dedup em Redis, de propósito.
@@ -98,7 +117,16 @@ export class PaymentWebhookService {
     // 4. Transição de estado (sob RLS). `uniqueIndex(externalSubscriptionId)` é a 2ª barreira.
     try {
       const result = await this.subscriptions.applyGatewayEvent(event);
-      await this.afterTransition(event.type, event.userId, result.status, input.correlationId);
+      const resolvedUserId = result.userId ?? event.userId;
+      if (resolvedUserId) {
+        await this.afterTransition(
+          event.type,
+          event.eventId,
+          resolvedUserId,
+          result.status,
+          input.correlationId,
+        );
+      }
     } catch (error) {
       if (error instanceof InvalidTransitionError) {
         this.logger.warn(
@@ -142,21 +170,36 @@ export class PaymentWebhookService {
   /** Efeitos por evento: analytics + dunning conversacional no PAST_DUE. */
   private async afterTransition(
     type: string,
+    eventId: string,
     userId: string,
     status: string,
     correlationId: string,
   ): Promise<void> {
     if (status !== 'ACTIVE' && type === 'CHECKOUT_CONFIRMED') return;
-    if (status === 'IDEMPOTENT' || status === 'NO_SUBSCRIPTION') return;
+    if (
+      status === 'IDEMPOTENT' ||
+      status === 'NO_SUBSCRIPTION' ||
+      status === 'STALE_EVENT' ||
+      status === 'STALE_CONTRACT'
+    ) {
+      return;
+    }
 
-    if (type === 'CHECKOUT_CONFIRMED') {
+    if (type === 'CHECKOUT_CONFIRMED' || type === 'AUTHORIZATION_ACTIVE') {
       this.logger.info(
         { event: 'subscription_created', userId, correlationId },
         'assinatura ativada',
       );
+      await this.queues.enqueue(QUEUE.whatsappOutbound, 'payment-confirmed', {
+        userId,
+        type: 'COACH_MESSAGE',
+        text: paymentConfirmationMessage(),
+        dedupeId: `payment_${this.hash(eventId).slice(0, 56)}`,
+      } satisfies WhatsappOutboundJob);
     } else if (type === 'PAYMENT_FAILED') {
       this.logger.info({ event: 'payment_failed', userId, correlationId }, 'pagamento falhou');
-      await this.enqueueDunning(userId);
+      // Primeira cobrança não liquidada: sem acesso pago a preservar, só um novo link.
+      await this.enqueueDunning(userId, status === 'PENDING_PAYMENT');
     } else if (status === 'CANCELED') {
       this.logger.info(
         { event: 'subscription_cancelled', userId, correlationId },
@@ -166,19 +209,14 @@ export class PaymentWebhookService {
   }
 
   /** Dunning: cria um link de checkout e o envia no WhatsApp (fila outbound). */
-  private async enqueueDunning(userId: string): Promise<void> {
+  private async enqueueDunning(userId: string, firstPayment: boolean): Promise<void> {
     const sub = await this.subscriptions.getForUser(userId);
     if (!sub) return;
-    const session = await this.subscriptions.createCheckout(
-      userId,
-      sub.plan,
-      'CARD',
-      sub.termsVersion ?? SUBSCRIPTION_TERMS_VERSION,
-    );
+    const checkoutUrl = await this.subscriptions.createCheckoutLink(userId);
     const job: WhatsappOutboundJob = {
       userId,
       type: 'COACH_MESSAGE',
-      text: dunningMessage(session.checkoutUrl),
+      text: firstPayment ? firstPaymentFailedMessage(checkoutUrl) : dunningMessage(checkoutUrl),
       dedupeId: `dunning_${sub.id}_${Date.now()}`,
     };
     await this.queues.enqueue(QUEUE.whatsappOutbound, 'dunning', job);

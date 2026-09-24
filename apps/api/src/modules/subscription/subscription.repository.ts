@@ -4,7 +4,7 @@
  * provado pela integração contra Postgres real).
  */
 import { Injectable } from '@nestjs/common';
-import { desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, lte, or, type SQL } from 'drizzle-orm';
 
 import type { BiologicalSex } from '@movivo/shared';
 
@@ -20,6 +20,7 @@ import {
   recordLifecycleTransition,
   type TransitionActor,
 } from './subscription-lifecycle';
+import type { GatewayEvent } from './payment/payment-gateway.types';
 
 @Injectable()
 export class SubscriptionRepository {
@@ -36,6 +37,53 @@ export class SubscriptionRepository {
         .limit(1),
     );
     return row ?? null;
+  }
+
+  /** Resolve um webhook sem metadata pelos IDs opacos que o próprio Asaas devolveu. */
+  async findForGatewayEvent(event: GatewayEvent): Promise<SubscriptionRow | null> {
+    const predicates: SQL[] = [];
+    if (event.externalSubscriptionId) {
+      predicates.push(eq(subscriptions.externalSubscriptionId, event.externalSubscriptionId));
+    }
+    if (event.externalPaymentId) {
+      predicates.push(eq(subscriptions.externalPaymentId, event.externalPaymentId));
+    }
+    if (event.externalInstallmentId) {
+      predicates.push(eq(subscriptions.externalInstallmentId, event.externalInstallmentId));
+    }
+    if (event.externalAuthorizationId) {
+      predicates.push(eq(subscriptions.externalAuthorizationId, event.externalAuthorizationId));
+    }
+    if (event.externalCustomerId) {
+      predicates.push(eq(subscriptions.externalCustomerId, event.externalCustomerId));
+    }
+    if (predicates.length === 0) return null;
+    const [row] = await this.db.runAsSystem((tx) =>
+      tx
+        .select()
+        .from(subscriptions)
+        .where(or(...predicates))
+        .orderBy(desc(subscriptions.createdAt))
+        .limit(1),
+    );
+    return row ?? null;
+  }
+
+  /**
+   * Titulares ACTIVE cujo período pago já terminou — candidatos da varredura de fim de
+   * período. A decisão final (margem do recorrente) fica em `SubscriptionService.expirePeriod`,
+   * que relê a linha sob RLS do titular.
+   */
+  async findActiveWithEndedPeriod(now: Date, limit: number): Promise<string[]> {
+    const rows = await this.db.runAsSystem((tx) =>
+      tx
+        .select({ userId: subscriptions.userId })
+        .from(subscriptions)
+        .where(and(eq(subscriptions.status, 'ACTIVE'), lte(subscriptions.currentPeriodEnd, now)))
+        .orderBy(asc(subscriptions.currentPeriodEnd))
+        .limit(limit),
+    );
+    return rows.map((row) => row.userId);
   }
 
   /**

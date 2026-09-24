@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { GatewayEvent } from './payment/payment-gateway.types';
 import {
+  financialKeyOf,
   PaymentReconciliationWorker,
   type PaymentReconciliationJob,
   settlementOf,
@@ -101,7 +102,39 @@ describe('settlementOf — sinal e status por tipo de evento', () => {
   });
 });
 
+describe('financialKeyOf — uma linha por cobrança, não por evento', () => {
+  it('captura (CONFIRMED) e repasse (RECEIVED) do cartão convergem para a mesma chave', () => {
+    const confirmed = event({ eventId: 'evt_confirmed', externalPaymentId: 'pay_1' });
+    const received = event({ eventId: 'evt_received', externalPaymentId: 'pay_1' });
+    expect(financialKeyOf(confirmed, 'SETTLED')).toBe('SETTLED:pay_1');
+    expect(financialKeyOf(received, 'SETTLED')).toBe(financialKeyOf(confirmed, 'SETTLED'));
+  });
+
+  it('estorno em andamento e concluído da mesma cobrança também convergem', () => {
+    const inProgress = event({ type: 'REFUNDED', eventId: 'evt_a', externalPaymentId: 'pay_1' });
+    const done = event({ type: 'REFUNDED', eventId: 'evt_b', externalPaymentId: 'pay_1' });
+    expect(financialKeyOf(inProgress, 'REFUNDED')).toBe(financialKeyOf(done, 'REFUNDED'));
+    // Liquidação e estorno da mesma cobrança são linhas distintas (a soma dá o líquido).
+    expect(financialKeyOf(done, 'REFUNDED')).not.toBe(financialKeyOf(done, 'SETTLED'));
+  });
+
+  it('falha e evento sem id de cobrança (MOCK) usam o id do evento', () => {
+    expect(
+      financialKeyOf(event({ type: 'PAYMENT_FAILED', externalPaymentId: 'pay_1' }), 'FAILED'),
+    ).toBe('evt_1');
+    expect(financialKeyOf(event(), 'SETTLED')).toBe('evt_1');
+  });
+});
+
 describe('PaymentReconciliationWorker.process', () => {
+  it('grava a liquidação pela chave da cobrança quando o provedor informa', async () => {
+    const { worker, values } = make();
+    await worker.process(job({ event: event({ externalPaymentId: 'pay_1' }) }));
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({ gatewayEventId: 'SETTLED:pay_1', status: 'SETTLED' }),
+    );
+  });
+
   it('vincula à assinatura e desconta a taxa do gateway do líquido', async () => {
     const { worker, values } = make();
     await worker.process(job({ event: event({ feeCents: 150 }) }));

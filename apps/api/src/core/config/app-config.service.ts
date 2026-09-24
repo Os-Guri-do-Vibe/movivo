@@ -120,19 +120,11 @@ export interface AudioTranscriptionConfig {
 }
 
 export interface PaymentConfig {
-  /** Gateway ativo. `MOCK` em dev/CI; real só com chave (senão o factory cai no MOCK). */
-  readonly provider: 'MOCK' | 'STRIPE' | 'ASAAS';
-  /** Segredos redigidos no snapshot; `undefined` sem credencial → adaptador MOCK. */
-  readonly stripeSecretKey: string | undefined;
-  readonly stripeWebhookSecret: string | undefined;
-  readonly stripePriceIds: Readonly<{
-    MONTHLY: string | undefined;
-    QUARTERLY: string | undefined;
-    SEMIANNUAL: string | undefined;
-    ANNUAL: string | undefined;
-  }>;
+  readonly provider: 'MOCK' | 'ASAAS';
+  readonly asaasApiUrl: 'https://api-sandbox.asaas.com/v3';
   readonly asaasApiKey: string | undefined;
   readonly asaasWebhookSecret: string | undefined;
+  readonly timeoutMs: number;
   /** Dias de graça do `PAST_DUE` antes de restringir o acesso (US-4.2.3). */
   readonly pastDueGraceDays: number;
 }
@@ -351,16 +343,10 @@ export class AppConfigService {
   get payment(): PaymentConfig {
     return {
       provider: this.config.PAYMENT_PROVIDER,
-      stripeSecretKey: this.config.STRIPE_SECRET_KEY,
-      stripeWebhookSecret: this.config.STRIPE_WEBHOOK_SECRET,
-      stripePriceIds: {
-        MONTHLY: this.config.STRIPE_PRICE_MONTHLY,
-        QUARTERLY: this.config.STRIPE_PRICE_QUARTERLY,
-        SEMIANNUAL: this.config.STRIPE_PRICE_SEMIANNUAL,
-        ANNUAL: this.config.STRIPE_PRICE_ANNUAL,
-      },
+      asaasApiUrl: this.config.ASAAS_API_URL,
       asaasApiKey: this.config.ASAAS_API_KEY,
       asaasWebhookSecret: this.config.ASAAS_WEBHOOK_SECRET,
+      timeoutMs: this.config.ASAAS_TIMEOUT_MS,
       pastDueGraceDays: this.config.SUBSCRIPTION_PAST_DUE_GRACE_DAYS,
     };
   }

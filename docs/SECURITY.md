@@ -99,7 +99,7 @@ o ambiente local e a Fase B.
 | `REDIS_SENTINEL_PASSWORD`     | `/run/secrets/redis_password`             | `../../secrets/redis_password`             |
 
 Chaves das próximas sprints (`JWT_PRIVATE_KEY`, `PGCRYPTO_KEY`, `ARARAHQ_WEBHOOK_SECRET`,
-`STRIPE_SECRET_KEY`, `OPENAI_API_KEY`, …) seguem exatamente o mesmo contrato e já
+`ASAAS_API_KEY`, `OPENAI_API_KEY`, …) seguem exatamente o mesmo contrato e já
 estão listadas comentadas em `.env.example`.
 
 ### 2.3 Referência de implementação (esboço — Leonardo adapta ao NestJS)
@@ -236,7 +236,7 @@ Responsável pela auditoria: **Sato**. Toda rotação é registrada em `audit_lo
 | ------------------------------------------ | ---------------------- | ------------------------------- | ---------------------------------------- |
 | JWT signing key (par RS256)                | Docker secret + `kid`  | Vault PKI / rotação automática  | **Trimestral** (com `kid`, sem downtime) |
 | AraraHQ webhook secret                     | Docker secret          | Vault                           | Semestral ou sob suspeita                |
-| Stripe / Asaas webhook secrets             | Docker secret          | Vault                           | No painel do provedor; semestral         |
+| Asaas API key e webhook token               | Docker secret          | Vault                           | No painel do provedor; semestral         |
 | LLM API keys (OpenAI / Anthropic)          | Docker secret          | Vault                           | Trimestral + imediata sob suspeita       |
 | Postgres (`movivo_app`, `movivo_migrator`) | Docker secret          | Vault dynamic secrets           | Trimestral                               |
 | Redis password / ACL                       | Docker secret          | Vault                           | Trimestral                               |

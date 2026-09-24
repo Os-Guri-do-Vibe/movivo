@@ -384,22 +384,16 @@ export const envSchema = z
       .default(2 * 1024 * 1024),
 
     // -------------------------------------------- Pagamento (US-4.1)
-    /**
-     * Gateway ativo. `MOCK` (default) roda em dev/CI sem conta real; `STRIPE`/`ASAAS` usam o
-     * adaptador real SE a chave existir, senão o factory cai no MOCK com aviso (como o LLM).
-     * Trocar de provedor é config, não refactor — o SDK/HTTP fica confinado ao gateway.
-     */
-    PAYMENT_PROVIDER: z.enum(['MOCK', 'STRIPE', 'ASAAS']).default('MOCK'),
-    /** Chaves dos gateways — **opcionais** no boot (via `*_FILE`/Secret). Sem elas → MOCK. */
-    STRIPE_SECRET_KEY: z.string().min(1).optional(),
-    STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
-    /** IDs públicos dos Prices recorrentes; nunca URLs de checkout. */
-    STRIPE_PRICE_MONTHLY: z.string().startsWith('price_').optional(),
-    STRIPE_PRICE_QUARTERLY: z.string().startsWith('price_').optional(),
-    STRIPE_PRICE_SEMIANNUAL: z.string().startsWith('price_').optional(),
-    STRIPE_PRICE_ANNUAL: z.string().startsWith('price_').optional(),
+    /** Stripe saiu da operação. O enum do banco permanece para preservar histórico fiscal. */
+    PAYMENT_PROVIDER: z.enum(['MOCK', 'ASAAS']).default('MOCK'),
+    /** Integração deliberadamente travada no Sandbox até uma mudança explícita de produção. */
+    ASAAS_API_URL: z
+      .literal('https://api-sandbox.asaas.com/v3')
+      .default('https://api-sandbox.asaas.com/v3'),
     ASAAS_API_KEY: z.string().min(1).optional(),
-    ASAAS_WEBHOOK_SECRET: z.string().min(1).optional(),
+    /** `authToken` do webhook, enviado pelo Asaas no header `asaas-access-token`. */
+    ASAAS_WEBHOOK_SECRET: z.string().min(32).max(255).optional(),
+    ASAAS_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(30_000).default(10_000),
     /**
      * Janela de graça (dias) do `PAST_DUE` antes de restringir o acesso (US-4.2.3, decisão do
      * fundador: dunning conversacional no WhatsApp durante a graça, só depois restringe).
@@ -464,6 +458,28 @@ export const envSchema = z
         code: 'custom',
         path: ['KNOWLEDGE_UPLOAD_MAX_BYTES'],
         message: 'não pode exceder 524288 enquanto blobs permanecem no Postgres',
+      });
+    }
+
+    if (config.PAYMENT_PROVIDER === 'ASAAS' && !config.ASAAS_API_KEY) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ASAAS_API_KEY'],
+        message: 'é obrigatória quando PAYMENT_PROVIDER=ASAAS',
+      });
+    }
+    if (config.PAYMENT_PROVIDER === 'ASAAS' && !config.ASAAS_WEBHOOK_SECRET) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ASAAS_WEBHOOK_SECRET'],
+        message: 'é obrigatório quando PAYMENT_PROVIDER=ASAAS',
+      });
+    }
+    if (config.NODE_ENV === 'production' && config.PAYMENT_PROVIDER === 'MOCK') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['PAYMENT_PROVIDER'],
+        message: 'MOCK é proibido em produção',
       });
     }
   });

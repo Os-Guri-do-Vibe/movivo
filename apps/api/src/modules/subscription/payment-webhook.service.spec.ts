@@ -3,7 +3,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import type { QueueManager } from '../jobs/queue-manager.service';
-import type { GatewayEvent, PaymentGateway } from './payment/payment-gateway.types';
+import type {
+  GatewayEvent,
+  IgnoredWebhookEvent,
+  PaymentGateway,
+} from './payment/payment-gateway.types';
 import { PaymentWebhookService } from './payment-webhook.service';
 import { InvalidTransitionError } from './subscription-model';
 import type { SubscriptionService } from './subscription.service';
@@ -21,7 +25,7 @@ function event(over: Partial<GatewayEvent> = {}): GatewayEvent {
 }
 
 interface Deps {
-  parsed?: GatewayEvent | null;
+  parsed?: GatewayEvent | IgnoredWebhookEvent | null;
   fresh?: boolean; // SET NX devolve OK?
   applyResult?: { status: string };
   applyThrows?: Error;
@@ -37,13 +41,11 @@ function make(deps: Deps = {}) {
   const getForUser = vi.fn(() =>
     Promise.resolve({ id: 's1', plan: 'MONTHLY', termsVersion: 'v1' }),
   );
-  const createCheckout = vi.fn(() =>
-    Promise.resolve({ checkoutUrl: 'https://mock/co', externalSessionId: 'cs_1' }),
-  );
+  const createCheckoutLink = vi.fn(() => Promise.resolve('https://movivo.test/assinar/opaque'));
   const subscriptions = {
     applyGatewayEvent,
     getForUser,
-    createCheckout,
+    createCheckoutLink,
   } as unknown as SubscriptionService;
 
   const set = vi.fn(() => Promise.resolve(deps.fresh === false ? null : 'OK'));
@@ -89,10 +91,18 @@ describe('PaymentWebhookService.ingest (US-4.2)', () => {
     );
   });
 
-  it('checkout válido → aplica a transição (ativação)', async () => {
-    const { svc, applyGatewayEvent } = make({ applyResult: { status: 'ACTIVE' } });
+  it('checkout válido → ativa e enfileira confirmação pelo WhatsApp existente', async () => {
+    const { svc, applyGatewayEvent, enqueue } = make({ applyResult: { status: 'ACTIVE' } });
     await svc.ingest(input);
     expect(applyGatewayEvent).toHaveBeenCalledTimes(1);
+    expect(enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'payment-confirmed',
+      expect.objectContaining({
+        type: 'COACH_MESSAGE',
+        dedupeId: expect.stringMatching(/^payment_[0-9a-f]{56}$/),
+      }),
+    );
   });
 
   it('replay (SET NX falha) → não aplica de novo (idempotência)', async () => {
@@ -117,6 +127,49 @@ describe('PaymentWebhookService.ingest (US-4.2)', () => {
   it('transição inválida é engolida (responde 200, não relança)', async () => {
     const { svc } = make({ applyThrows: new InvalidTransitionError('CANCELED', 'ACTIVE') });
     await expect(svc.ingest(input)).resolves.toBe('ACCEPTED');
+  });
+
+  /**
+   * O Asaas trata qualquer resposta ≠ 200 como falha e, no envio sequencial, segura os
+   * eventos seguintes até pausar a fila. `PAYMENT_CREATED` chega antes de toda confirmação.
+   */
+  it('evento autenticado sem efeito → 200, sem transição nem conciliação', async () => {
+    const { svc, applyGatewayEvent, enqueue, logger } = make({
+      parsed: { ignored: true, eventName: 'PAYMENT_CREATED' },
+    });
+    await expect(svc.ingest(input)).resolves.toBe('ACCEPTED');
+    expect(applyGatewayEvent).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(logger.warn).not.toHaveBeenCalled(); // não é tentativa de forja
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'webhook_ignored', eventName: 'PAYMENT_CREATED' }),
+      expect.any(String),
+    );
+  });
+
+  it('primeira cobrança não liquidada → novo link sem prometer acesso liberado', async () => {
+    const { svc, enqueue } = make({
+      parsed: event({ type: 'PAYMENT_FAILED' }),
+      applyResult: { status: 'PENDING_PAYMENT' },
+    });
+    await svc.ingest(input);
+    const calls = enqueue.mock.calls as unknown as [string, string, { text: string }][];
+    const dunning = calls.find(([, name]) => name === 'dunning');
+    expect(dunning?.[2].text).toContain('/assinar/');
+    expect(dunning?.[2].text).not.toMatch(/acesso segue liberado/i);
+  });
+
+  it('evento de contrato substituído não manda mensagem nenhuma', async () => {
+    const { svc, enqueue } = make({
+      parsed: event({ type: 'SUBSCRIPTION_CANCELED' }),
+      applyResult: { status: 'STALE_CONTRACT' },
+    });
+    await svc.ingest(input);
+    expect(enqueue).not.toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      expect.anything(),
+      expect.anything(),
+    );
   });
 });
 

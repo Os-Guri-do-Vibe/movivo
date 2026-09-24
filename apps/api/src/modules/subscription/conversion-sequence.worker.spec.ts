@@ -33,18 +33,15 @@ function make(opts?: { guardExists?: boolean; status?: string; trialEndsAt?: Dat
     status = 'EXPIRED';
     return Promise.resolve({ status: 'EXPIRED' });
   });
-  const createCheckout = vi.fn((_userId: string, plan: string) =>
-    Promise.resolve({
-      checkoutUrl: `https://buy.stripe.test/${plan}`,
-      externalSessionId: 'cs_test_1',
-    }),
+  const createCheckoutLink = vi.fn(() =>
+    Promise.resolve('https://movivo.test/assinar/opaque-token'),
   );
   const personaSlotFor = vi.fn(() => Promise.resolve('FEMALE' as const));
   const subs = {
     startTrial,
     getForUser,
     expireTrial,
-    createCheckout,
+    createCheckoutLink,
     personaSlotFor,
   } as unknown as SubscriptionService;
   const redis = {
@@ -68,7 +65,7 @@ function make(opts?: { guardExists?: boolean; status?: string; trialEndsAt?: Dat
     startTrial,
     getForUser,
     expireTrial,
-    createCheckout,
+    createCheckoutLink,
     personaSlotFor,
     agentPersona,
     logger,
@@ -100,29 +97,23 @@ describe('ConversionSequenceWorker — trial-start', () => {
 });
 
 describe('ConversionSequenceWorker — expiração e checkout', () => {
-  it('expira no backend e envia checkout Stripe do plano originalmente escolhido', async () => {
-    const { worker, createCheckout, expireTrial, enqueue } = make();
+  it('expira no backend e envia link opaco do contrato originalmente escolhido', async () => {
+    const { worker, createCheckoutLink, expireTrial, enqueue } = make();
     const result = await worker.process(job('touchpoint', { userId: U, key: 'day7' }));
     expect(result.status).toBe('SENT');
     expect(expireTrial).toHaveBeenCalledWith(U);
-    expect(createCheckout).toHaveBeenCalledWith(
-      U,
-      'ANNUAL',
-      'CARD',
-      expect.any(String),
-      'trial_sub-local-1_day7',
-    );
-    expect(sentText({ mock: enqueue.mock })).toContain('https://buy.stripe.test/ANNUAL');
+    expect(createCheckoutLink).toHaveBeenCalledWith(U);
+    expect(sentText({ mock: enqueue.mock })).toContain('https://movivo.test/assinar/opaque-token');
   });
 
   it('dia 14 e win-back continuam no plano escolhido, sem downgrade silencioso', async () => {
     const day14 = make({ status: 'EXPIRED' });
     await day14.worker.process(job('touchpoint', { userId: U, key: 'day14' }));
-    expect(sentText({ mock: day14.enqueue.mock })).toContain('/ANNUAL');
+    expect(sentText({ mock: day14.enqueue.mock })).toContain('/assinar/opaque-token');
 
     const winback = make({ status: 'EXPIRED' });
     await winback.worker.process(job('touchpoint', { userId: U, key: 'winback' }));
-    expect(sentText({ mock: winback.enqueue.mock })).toContain('/ANNUAL');
+    expect(sentText({ mock: winback.enqueue.mock })).toContain('/assinar/opaque-token');
   });
 
   it('não envia antes de completar os 7 dias', async () => {
@@ -133,17 +124,17 @@ describe('ConversionSequenceWorker — expiração e checkout', () => {
   });
 
   it('assinatura ativa interrompe qualquer nova cobrança do trial', async () => {
-    const { worker, createCheckout } = make({ status: 'ACTIVE' });
+    const { worker, createCheckoutLink } = make({ status: 'ACTIVE' });
     const result = await worker.process(job('touchpoint', { userId: U, key: 'day10' }));
     expect(result.status).toBe('SKIP_ACTIVE');
-    expect(createCheckout).not.toHaveBeenCalled();
+    expect(createCheckoutLink).not.toHaveBeenCalled();
   });
 
   it('guard já confirmado evita mensagem duplicada', async () => {
-    const { worker, createCheckout } = make({ status: 'EXPIRED', guardExists: true });
+    const { worker, createCheckoutLink } = make({ status: 'EXPIRED', guardExists: true });
     const result = await worker.process(job('touchpoint', { userId: U, key: 'day13' }));
     expect(result.status).toBe('ALREADY_SENT');
-    expect(createCheckout).not.toHaveBeenCalled();
+    expect(createCheckoutLink).not.toHaveBeenCalled();
   });
 
   it('usa a persona do slot do titular na mensagem', async () => {

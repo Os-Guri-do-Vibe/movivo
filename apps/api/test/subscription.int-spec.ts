@@ -36,6 +36,8 @@ import {
 import { InvalidTransitionError } from '../src/modules/subscription/subscription-model';
 import { SubscriptionController } from '../src/modules/subscription/subscription.controller';
 import { SubscriptionService } from '../src/modules/subscription/subscription.service';
+import { SubscriptionRepository } from '../src/modules/subscription/subscription.repository';
+import { CheckoutTokenService } from '../src/modules/subscription/checkout-token.service';
 
 const { env } = loadEnv();
 const apiRoot = process.cwd();
@@ -46,6 +48,7 @@ let svc: SubscriptionService;
 let controller: SubscriptionController;
 let db: TenantDatabase;
 let gateway: PaymentGateway;
+let checkoutTokens: CheckoutTokenService;
 
 const adminClient = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
@@ -80,6 +83,7 @@ beforeAll(async () => {
   controller = app.get(SubscriptionController);
   db = app.get(TenantDatabase);
   gateway = app.get(PAYMENT_GATEWAY);
+  checkoutTokens = app.get(CheckoutTokenService);
 }, 60_000);
 
 afterAll(async () => {
@@ -187,6 +191,52 @@ describe('SubscriptionModule — gateway MOCK e ciclo de vida (US-4.1)', () => {
   });
 });
 
+describe('Fim do período pago (varredura de expiração)', () => {
+  it('período vencido de cobrança única → EXPIRED, sem acesso, e recompra liberada', async () => {
+    const userId = await createUser();
+    await svc.startTrial(userId, 'QUARTERLY');
+    await svc.applyGatewayEvent(
+      (gateway as MockGateway).emit('CHECKOUT_CONFIRMED', {
+        userId,
+        externalSubscriptionId: `sub_${RUN}_${seq}`,
+        plan: 'QUARTERLY',
+        priceCents: 22770,
+      }),
+    );
+    // Só leitura na varredura global: não expira linhas de outros testes/dados locais.
+    const repo = app.get(SubscriptionRepository);
+    expect(await repo.findActiveWithEndedPeriod(new Date(), 500)).not.toContain(userId);
+
+    await adminClient`
+      UPDATE subscriptions SET current_period_end = now() - interval '1 hour'
+      WHERE user_id = ${userId}`;
+    expect(await repo.findActiveWithEndedPeriod(new Date(), 500)).toContain(userId);
+
+    expect((await svc.expirePeriod(userId)).status).toBe('EXPIRED');
+    expect((await svc.getForUser(userId))?.status).toBe('EXPIRED');
+    expect(await svc.getAccess(userId)).toBe('RESTRICTED');
+    // Repetir é inofensivo; EXPIRED volta a aceitar checkout (win-back).
+    expect((await svc.expirePeriod(userId)).status).toBe('SKIP_EXPIRED');
+    expect(await repo.findActiveWithEndedPeriod(new Date(), 500)).not.toContain(userId);
+  });
+
+  it('cancelar mantém o acesso até o fim do período pago', async () => {
+    const userId = await createUser();
+    await svc.startTrial(userId, 'ANNUAL');
+    await svc.applyGatewayEvent(
+      (gateway as MockGateway).emit('CHECKOUT_CONFIRMED', {
+        userId,
+        externalSubscriptionId: `sub_${RUN}_${seq}`,
+        plan: 'ANNUAL',
+        priceCents: 81480,
+      }),
+    );
+    await svc.cancel(userId, 'teste');
+    expect((await svc.getForUser(userId))?.status).toBe('CANCELED');
+    expect(await svc.getAccess(userId)).toBe('FULL');
+  });
+});
+
 describe('Ações self-service: cancelar / pausar / retomar (US-4.5)', () => {
   /** Ativa uma assinatura (checkout confirmado) para o titular. */
   async function activate(userId: string): Promise<void> {
@@ -203,10 +253,12 @@ describe('Ações self-service: cancelar / pausar / retomar (US-4.5)', () => {
   it('cancelar sincroniza com o gateway e grava o motivo', async () => {
     const userId = await createUser();
     await activate(userId);
-    const cancelSpy = vi.spyOn(gateway, 'cancelSubscription');
+    const cancelSpy = vi.spyOn(gateway, 'cancelContract');
     const res = await controller.cancel(userId, { reason: 'sem tempo agora' });
     expect(res.status).toBe('CANCELED');
-    expect(cancelSpy).toHaveBeenCalledWith(`ext_${userId}`);
+    expect(cancelSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ subscriptionId: `ext_${userId}` }),
+    );
     const [row] = await adminClient<Array<{ status: string; cancel_reason: string }>>`
       SELECT status, cancel_reason FROM subscriptions WHERE user_id = ${userId}`;
     expect(row.status).toBe('CANCELED');
@@ -240,12 +292,13 @@ describe('Ações self-service: cancelar / pausar / retomar (US-4.5)', () => {
 });
 
 describe('Endpoints US-4.6: checkout e portal (view)', () => {
-  it('checkout devolve só a checkoutUrl hospedada (nenhum dado de cartão)', async () => {
+  it('checkout opaco devolve o snapshot persistido, sem aceitar preço do cliente', async () => {
     const userId = await createUser();
-    await svc.startTrial(userId);
-    const res = await controller.checkout(userId, { plan: 'QUARTERLY', method: 'PIX' });
-    expect(res.checkoutUrl).toMatch(/^https?:\/\//);
-    expect(Object.keys(res)).toEqual(['checkoutUrl']);
+    await svc.startTrial(userId, 'QUARTERLY');
+    const { token } = checkoutTokens.issue(userId);
+    const res = await controller.checkoutSummary(token);
+    expect(res).toMatchObject({ plan: 'QUARTERLY', monthlyCents: 7590, totalCents: 22770 });
+    expect(JSON.stringify(res)).not.toContain(userId);
   });
 
   it('view devolve plano/status/acesso/próxima-cobrança sem PII nem id de gateway', async () => {

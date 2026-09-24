@@ -52,8 +52,6 @@ export const SECRET_KEYS = [
   'EVOLUTION_WEBHOOK_TOKEN',
   // Sprint 4 — gateways de pagamento (US-4.1). OPCIONAIS no boot: sem elas o app sobe com o
   // adaptador MOCK (dev/CI); conta/chave real é bloqueador de lançamento, não de dev.
-  'STRIPE_SECRET_KEY',
-  'STRIPE_WEBHOOK_SECRET',
   'ASAAS_API_KEY',
   'ASAAS_WEBHOOK_SECRET',
   // Sprint 5 - credencial exclusivamente local para o seed do painel CREF.

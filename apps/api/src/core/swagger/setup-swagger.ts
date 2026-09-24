@@ -38,7 +38,7 @@ metodologia e supervisão de profissional de Educação Física registrado no CR
   DTO paralelo). Corpo fora do schema retorna \`400\`.
 - **Idempotência de webhooks:** \`POST /whatsapp/webhook\` e
   \`POST /subscription/payment-webhook\` são chamados por sistemas externos (AraraHQ,
-  Stripe/Asaas), não pelo app cliente — autenticados por HMAC/assinatura do provedor, não
+  Asaas), não pelo app cliente — autenticados pelo mecanismo oficial do provedor, não
   por Bearer JWT.
 - **Guardrails de linguagem:** nenhuma resposta da IA (ver módulo AI Coach) usa
   "diagnóstico", "tratamento", "cura" ou promete resultado garantido — a IA é sempre
@@ -81,7 +81,7 @@ export function setupSwagger(app: INestApplication, config: AppConfigService): s
     .addTag('Assinatura', 'Plano, trial e ciclo de cobrança da assinatura do aluno.')
     .addTag(
       'Webhook de Pagamento',
-      'Callback assinado de Stripe/Asaas — não é chamado pelo app cliente.',
+      'Callback autenticado do Asaas — não é chamado pelo app cliente.',
     )
     .addTag(
       'WhatsApp',

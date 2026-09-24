@@ -3,8 +3,8 @@
  * qualidade do fluxo de DINHEIRO num arquivo nomeado. Aqui um bug não é resposta ruim: é fraude,
  * cobrança indevida ou receita fantasma.
  *
- * No CI o MockGateway mantém os testes determinísticos; o adaptador Stripe real possui suíte
- * própria para assinatura nativa, metadata, Price e idempotência. Aqui ficam os invariantes
+ * No CI o MockGateway mantém os testes determinísticos; o adaptador Asaas possui suíte
+ * própria para assinatura, cobrança, parcelamento e idempotência. Aqui ficam os invariantes
  * compartilhados de contrato, PCI e linguagem.
  *
  * NÃO duplica o que já é verde: a máquina de estados e o `resolveAccess` estão em
@@ -12,7 +12,12 @@
  * de ativação (event_id SET NX + uniqueIndex) e o isolamento por titular (RLS/IDOR) em
  * `payment-webhook.int-spec.ts` / `subscription.int-spec.ts`. Esta suíte cobre os BURACOS.
  */
-import { subscriptionViewSchema, createCheckoutSchema, SUBSCRIPTION_PLANS } from '@movivo/shared';
+import {
+  checkoutPaymentResultSchema,
+  subscriptionViewSchema,
+  createCheckoutSchema,
+  SUBSCRIPTION_PLANS,
+} from '@movivo/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import { LANGUAGE_RULES } from '../protocol/validation/validation-rules';
@@ -48,8 +53,17 @@ describe('4.7.1 — webhook de pagamento: vetor plantado (T-15) NUNCA ativa', ()
   });
 });
 
-describe('4.7.3 — PCI-boundary: nenhum dado de cartão/gateway no contrato de API', () => {
-  const FORBIDDEN = ['card', 'cartao', 'cvv', 'number', 'pan', 'gateway', 'externalsubscriptionid'];
+describe('4.7.3 — PCI-boundary: cartão só atravessa o request e nunca volta', () => {
+  const FORBIDDEN = [
+    'card',
+    'cartao',
+    'cvv',
+    'ccv',
+    'number',
+    'pan',
+    'gateway',
+    'externalsubscriptionid',
+  ];
 
   it('a view do portal só expõe plano/estado/acesso/período (sem cartão, sem id externo)', () => {
     expect(Object.keys(subscriptionViewSchema.shape).sort()).toEqual(
@@ -60,19 +74,30 @@ describe('4.7.3 — PCI-boundary: nenhum dado de cartão/gateway no contrato de 
     }
   });
 
-  it('o body do checkout aceita só plan+method — cartão nunca chega ao backend', () => {
-    expect(Object.keys(createCheckoutSchema.shape).sort()).toEqual(['method', 'plan']);
-    // Campo de cartão injetado é rejeitado/ignorado pelo schema estrito (nunca persistido).
+  it('valida cartão no request transparente, mas o contrato de resposta não pode expô-lo', () => {
     const parsed = createCheckoutSchema.safeParse({
-      plan: 'MONTHLY',
       method: 'CARD',
-      cardNumber: '4111111111111111',
-      cvv: '123',
+      payer: {
+        name: 'Pessoa Sandbox',
+        email: 'sandbox@movivo.test',
+        cpfCnpj: '111.444.777-35',
+        postalCode: '01310-100',
+        addressNumber: '100',
+        phone: '(11) 99999-9999',
+      },
+      card: {
+        holderName: 'PESSOA SANDBOX',
+        number: '4111111111111111',
+        expiryMonth: '12',
+        expiryYear: '2030',
+        ccv: '123',
+      },
+      installments: 1,
+      acceptTerms: true,
     });
     expect(parsed.success).toBe(true);
-    if (parsed.success) {
-      expect(parsed.data).not.toHaveProperty('cardNumber');
-      expect(parsed.data).not.toHaveProperty('cvv');
+    for (const key of Object.keys(checkoutPaymentResultSchema.shape)) {
+      expect(FORBIDDEN).not.toContain(key.toLowerCase());
     }
   });
 });

@@ -606,12 +606,13 @@ leia o documento completo antes de escrever código:
 
 ## Documentação de referência
 
-| Documento                                                            | Conteúdo                                                                                                                    |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| [`docs/arquitetura/ARQUITETURA.md`](docs/arquitetura/ARQUITETURA.md) | Stack obrigatória, ADRs, C4, segurança, roadmap, regras inegociáveis                                                        |
-| [`docs/SECURITY.md`](docs/SECURITY.md)                               | Política de segredos: contrato `*_FILE`, Docker Secrets, segredos de CI, inventário e cadência de rotação                   |
-| [`sprint/sprint-0-fundacao.md`](sprint/sprint-0-fundacao.md)         | Planejamento operacional da Sprint 0 (Épico 0)                                                                              |
-| `docs/fitness-ia-whatsapp/`                                          | Relatórios completos do pipeline de agentes (negócio, marca, jurídico, financeiro, produto, UX, arquitetura, segurança, IA) |
+| Documento                                                                                | Conteúdo                                                                                                                    |
+| ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| [`docs/arquitetura/ARQUITETURA.md`](docs/arquitetura/ARQUITETURA.md)                     | Stack obrigatória, ADRs, C4, segurança, roadmap, regras inegociáveis                                                        |
+| [`docs/SECURITY.md`](docs/SECURITY.md)                                                   | Política de segredos: contrato `*_FILE`, Docker Secrets, segredos de CI, inventário e cadência de rotação                   |
+| [`docs/pagamentos/MIGRACAO-ASAAS-SANDBOX.md`](docs/pagamentos/MIGRACAO-ASAAS-SANDBOX.md) | Fluxos Asaas, configuração Sandbox, webhooks, homologação, rollback e gates de produção                                     |
+| [`sprint/sprint-0-fundacao.md`](sprint/sprint-0-fundacao.md)                             | Planejamento operacional da Sprint 0 (Épico 0)                                                                              |
+| `docs/fitness-ia-whatsapp/`                                                              | Relatórios completos do pipeline de agentes (negócio, marca, jurídico, financeiro, produto, UX, arquitetura, segurança, IA) |
 
 ---
 

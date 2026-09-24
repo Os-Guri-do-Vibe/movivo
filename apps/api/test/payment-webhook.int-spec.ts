@@ -32,6 +32,7 @@ import {
   type GatewayEvent,
   type GatewayEventType,
 } from '../src/modules/subscription/payment/payment-gateway.types';
+import { PaymentReconciliationWorker } from '../src/modules/subscription/payment-reconciliation.worker';
 import { PaymentWebhookService } from '../src/modules/subscription/payment-webhook.service';
 import { SubscriptionService } from '../src/modules/subscription/subscription.service';
 import {
@@ -166,11 +167,12 @@ afterAll(async () => {
 }, 60_000);
 
 describe('checkout + webhook de pagamento (US-4.2)', () => {
-  it('boota sem chave → MOCK; checkout devolve link (0 dado de cartão)', async () => {
+  it('boota sem chave → MOCK; gera link opaco sem criar cobrança', async () => {
     expect(gateway).toBeInstanceOf(MockGateway);
     const { userId } = await createUser();
-    const cs = await subs.createCheckout(userId, 'MONTHLY', 'CARD', 'terms-v1');
-    expect(cs.checkoutUrl).toMatch(/^https:\/\//);
+    await subs.startTrial(userId);
+    const checkoutUrl = await subs.createCheckoutLink(userId);
+    expect(checkoutUrl).toMatch(/^https?:\/\/.*\/assinar\//);
     expect(await statusOf(userId)).toBe('TRIALING'); // ativa só no webhook
   }, 20_000);
 
@@ -228,6 +230,69 @@ describe('checkout + webhook de pagamento (US-4.2)', () => {
     const dunning = await waitFor(() =>
       sent.find((m) => m.to === to && /cancelar quando quiser/i.test(m.text)),
     );
-    expect(dunning.text).toContain('https://mock.checkout/'); // link de pagamento no WhatsApp
+    expect(dunning.text).toContain('/assinar/'); // link individual no WhatsApp
+  }, 20_000);
+
+  it('primeira cobrança não liquidada segue pendente, sem carência, e manda novo link', async () => {
+    const { userId, to } = await createUser();
+    await subs.startTrial(userId);
+    await subs.startCheckoutPayment(
+      userId,
+      {
+        method: 'PIX',
+        payer: {
+          name: 'Pessoa Teste',
+          email: 'teste@movivo.test',
+          cpfCnpj: '11144477735',
+          postalCode: '01310100',
+          addressNumber: '100',
+          phone: '11999999999',
+        },
+        acceptTerms: true,
+      },
+      '127.0.0.1',
+    );
+    const pending = await subs.getForUser(userId);
+    await webhook.ingest({
+      ...signedWebhook('PAYMENT_FAILED', {
+        userId,
+        externalSubscriptionId: pending?.externalSubscriptionId ?? undefined,
+      }),
+      correlationId: 'first-fail',
+    });
+    expect(await statusOf(userId)).toBe('PENDING_PAYMENT');
+    expect(await subs.getAccess(userId)).toBe('RESTRICTED');
+    const retry = await waitFor(() =>
+      sent.find((m) => m.to === to && /não foi concluído/i.test(m.text)),
+    );
+    expect(retry.text).toContain('/assinar/');
+    expect(retry.text).not.toMatch(/acesso segue liberado/i);
+  }, 20_000);
+});
+
+describe('conciliação: uma linha por cobrança (US-8.5)', () => {
+  it('captura e repasse da mesma cobrança gravam UMA liquidação', async () => {
+    const { userId } = await createUser();
+    await subs.startTrial(userId);
+    const worker = app.get(PaymentReconciliationWorker);
+    const base: GatewayEvent = {
+      type: 'CHECKOUT_CONFIRMED',
+      eventId: `evt_confirmed_${RUN}_${seq}`,
+      externalSubscriptionId: `sub_${RUN}_${seq}`,
+      externalPaymentId: `pay_${RUN}_${seq}`,
+      userId,
+      amountCents: 7990,
+    };
+    const job = (event: GatewayEvent) =>
+      ({ data: { gateway: 'MOCK', event, rawPayload: {}, correlationId: 'c' } }) as never;
+
+    await worker.process(job(base)); // PAYMENT_CONFIRMED
+    await worker.process(job({ ...base, eventId: `evt_received_${RUN}_${seq}` })); // PAYMENT_RECEIVED
+
+    const [{ count, total }] = await adminClient<Array<{ count: number; total: number }>>`
+      SELECT count(*)::int AS count, coalesce(sum(amount_cents), 0)::int AS total
+      FROM payments WHERE user_id = ${userId}`;
+    expect(count).toBe(1);
+    expect(total).toBe(7990);
   }, 20_000);
 });

@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import {
   conversionMessage,
   dunningMessage,
+  paymentConfirmationMessage,
   type ConversionTouchpoint,
 } from './subscription-messages';
 
@@ -17,6 +18,7 @@ const TOUCHPOINTS: ConversionTouchpoint[] = ['day7', 'day10', 'day13', 'day14', 
 
 const ALL_MESSAGES = [
   dunningMessage('https://pay.example/checkout/abc'),
+  paymentConfirmationMessage(),
   ...TOUCHPOINTS.map((touchpoint) =>
     conversionMessage(touchpoint, 'https://pay.example/checkout/abc', 'ATLAS'),
   ),

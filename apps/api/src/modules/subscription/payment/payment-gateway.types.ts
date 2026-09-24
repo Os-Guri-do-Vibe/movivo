@@ -1,55 +1,75 @@
 /**
  * Contrato do gateway de pagamento (US-4.1) — o `PaymentGatewayService`/adaptadores são o
- * ÚNICO ponto autorizado a falar com Stripe/Asaas (padrão do `LLMRouter`). Nenhum outro
+ * ÚNICO ponto autorizado a falar com Asaas (padrão do `LLMRouter`). Nenhum outro
  * módulo importa SDK/HTTP de gateway (teste estrutural garante). Trocar de provedor é config.
  *
- * Dado de cartão NUNCA passa pelo backend (PCI-DSS): o checkout é hospedado pelo gateway;
- * guardamos só `externalSubscriptionId`/`status`/`plan`/`priceCents`.
+ * Dados de cartão ficam somente em memória durante a chamada transparente ao Asaas Sandbox.
+ * Nunca são persistidos nem logados. Produção é bloqueada até validação PCI/QSA.
  */
+import type { CheckoutCard, CheckoutPayer } from '@movivo/shared';
 import type { SubscriptionPlan } from '../subscription-model';
 
-export type GatewayName = 'MOCK' | 'STRIPE' | 'ASAAS';
+export type GatewayName = 'MOCK' | 'ASAAS';
 
-/** Meio de pagamento do checkout (decisão do fundador: PIX avulso ou cartão recorrente). */
-export type PaymentMethod = 'CARD' | 'PIX';
+export type PaymentMethod = 'CARD' | 'PIX' | 'PIX_AUTOMATIC';
 
-export interface CreateCheckoutInput {
+export interface StartPaymentInput {
+  subscriptionId: string;
   userId: string;
   plan: SubscriptionPlan;
-  priceCents: number;
+  monthlyCents: number;
+  totalCents: number;
+  months: number;
   method: PaymentMethod;
-  /** Versão dos Termos aceita no checkout (registro contratual — US-4.1.3). */
+  payer: CheckoutPayer;
+  card?: CheckoutCard;
+  installments?: number;
+  /** IP real do navegador, exigido pelo endpoint de cartão do Asaas. */
+  remoteIp: string;
   termsVersion: string;
-  /** Retorno do checkout hospedado (US-4.6). */
-  successUrl: string;
-  cancelUrl: string;
-  /** Chave estável do caso de uso; impede sessões duplicadas em retry do job. */
   idempotencyKey?: string;
 }
 
-export interface CheckoutSession {
-  /** URL hospedada do gateway para onde o frontend redireciona (US-4.6). */
-  checkoutUrl: string;
-  /** Id da sessão de checkout no provedor (para conciliação). */
-  externalSessionId: string;
+export interface PaymentQrCode {
+  encodedImage: string;
+  payload: string;
+  expirationDate: string;
+}
+
+export interface PaymentStartResult {
+  status: 'PENDING' | 'CONFIRMED' | 'REFUSED' | 'EXPIRED';
+  externalCustomerId: string;
+  externalSubscriptionId?: string;
+  externalPaymentId?: string;
+  externalInstallmentId?: string;
+  externalAuthorizationId?: string;
+  qrCode?: PaymentQrCode;
+  nextBillingAt?: string;
 }
 
 /** Tipos de evento de webhook normalizados (o adaptador mapeia o payload do provedor nisto). */
 export type GatewayEventType =
-  'CHECKOUT_CONFIRMED' | 'PAYMENT_FAILED' | 'SUBSCRIPTION_CANCELED' | 'REFUNDED';
+  | 'CHECKOUT_CONFIRMED'
+  | 'AUTHORIZATION_ACTIVE'
+  | 'PAYMENT_FAILED'
+  | 'SUBSCRIPTION_CANCELED'
+  | 'REFUNDED';
 
 export interface GatewayEvent {
   type: GatewayEventType;
   /** Id do evento no provedor — chave de idempotência do webhook (US-4.2). */
   eventId: string;
-  /** Id da assinatura no provedor — chave de idempotência da ativação (uniqueIndex). */
+  /** Id externo principal do contrato (assinatura, parcelamento ou cobrança). */
   externalSubscriptionId: string;
+  externalPaymentId?: string;
+  externalInstallmentId?: string;
+  externalAuthorizationId?: string;
   externalCustomerId?: string;
   externalCheckoutSessionId?: string;
   externalPriceId?: string;
   termsVersion?: string;
-  /** Titular alvo (mapeado do metadata do provedor). */
-  userId: string;
+  /** Pode vir ausente no Asaas; o serviço resolve pelo ID externo sob RLS de sistema. */
+  userId?: string;
   plan?: SubscriptionPlan;
   priceCents?: number;
 
@@ -64,6 +84,25 @@ export interface GatewayEvent {
   feeCents?: number;
   /** Instante da liquidação NO GATEWAY (ISO 8601), não a chegada do webhook. */
   occurredAt?: string;
+  /** Vencimento (competência) da cobrança, ISO 8601 — âncora do período pago recorrente. */
+  dueDate?: string;
+}
+
+/**
+ * Evento **autenticado** que não muda nada na MOVIVO (ex.: `PAYMENT_CREATED`). Precisa de
+ * 200: o Asaas trata qualquer outra resposta como falha, e no envio sequencial um evento
+ * falhando segura os seguintes até pausar a fila.
+ */
+export interface IgnoredWebhookEvent {
+  readonly ignored: true;
+  /** Nome do evento no provedor — seguro para log (não carrega dado de cobrança). */
+  readonly eventName: string;
+}
+
+export function isIgnoredWebhookEvent(
+  value: GatewayEvent | IgnoredWebhookEvent,
+): value is IgnoredWebhookEvent {
+  return 'ignored' in value;
 }
 
 export interface GatewaySubscription {
@@ -71,23 +110,32 @@ export interface GatewaySubscription {
   status: string;
 }
 
-/** Adaptador de um provedor de pagamento. Real (Stripe/Asaas) ou MOCK (dev/CI). */
+export interface ExternalContractRefs {
+  subscriptionId?: string | null;
+  paymentId?: string | null;
+  installmentId?: string | null;
+  authorizationId?: string | null;
+}
+
+/** Adaptador de um provedor de pagamento. Real (Asaas) ou MOCK (dev/CI). */
 export interface PaymentGateway {
   readonly name: GatewayName;
   /** `false` quando a chave não foi provisionada — o factory cai no MOCK. */
   hasCredentials(): boolean;
-  createCheckoutSession(input: CreateCheckoutInput): Promise<CheckoutSession>;
+  startPayment(input: StartPaymentInput): Promise<PaymentStartResult>;
   /**
-   * Verifica assinatura (Stripe `constructEvent` / Asaas HMAC+`timingSafeEqual`) + parseia o
-   * webhook em `GatewayEvent`. `null` se assinatura inválida/replay/evento desconhecido — o
-   * controller responde 200 e não processa (não vaza QUAL camada falhou).
+   * Verifica o token do webhook Asaas em tempo constante + parseia o webhook em
+   * `GatewayEvent`. `null` SOMENTE quando a origem não foi provada (token/assinatura
+   * inválidos, corpo malformado) — o controller responde 401 sem dizer qual camada falhou.
+   * Evento autenticado sem efeito para a MOVIVO → `IgnoredWebhookEvent` (200).
    */
   parseWebhookEvent(
     rawBody: Buffer,
     signature: string | undefined,
     timestamp: string | undefined,
-  ): GatewayEvent | null;
-  cancelSubscription(externalSubscriptionId: string): Promise<void>;
+  ): GatewayEvent | IgnoredWebhookEvent | null;
+  /** Cancela a cobrança/contrato pendente. Referência já inexistente no provedor é sucesso. */
+  cancelContract(refs: ExternalContractRefs): Promise<void>;
   getSubscription(externalSubscriptionId: string): Promise<GatewaySubscription | null>;
 }
 

@@ -93,4 +93,39 @@ describe('envSchema', () => {
       port: 6379,
     });
   });
+
+  it('exige chave e token de webhook quando o provedor é ASAAS', () => {
+    const result = envSchema.safeParse({ ...VALID, PAYMENT_PROVIDER: 'ASAAS' });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const message = formatEnvError(result.error);
+    expect(message).toContain('ASAAS_API_KEY');
+    expect(message).toContain('ASAAS_WEBHOOK_SECRET');
+  });
+
+  it('aceita Asaas somente com a URL literal do Sandbox', () => {
+    const sandbox = envSchema.safeParse({
+      ...VALID,
+      PAYMENT_PROVIDER: 'ASAAS',
+      ASAAS_API_KEY: '$aact_hmlg_teste',
+      ASAAS_WEBHOOK_SECRET: 'token-webhook-sandbox-com-32-caracteres',
+    });
+    expect(sandbox.success).toBe(true);
+
+    const productionUrl = envSchema.safeParse({
+      ...VALID,
+      PAYMENT_PROVIDER: 'ASAAS',
+      ASAAS_API_KEY: 'teste',
+      ASAAS_WEBHOOK_SECRET: 'token-webhook-sandbox-com-32-caracteres',
+      ASAAS_API_URL: 'https://api.asaas.com/v3',
+    });
+    expect(productionUrl.success).toBe(false);
+  });
+
+  it('proíbe o gateway MOCK no processo de produção', () => {
+    const result = envSchema.safeParse({ ...VALID, NODE_ENV: 'production' });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(formatEnvError(result.error)).toContain('MOCK é proibido em produção');
+  });
 });

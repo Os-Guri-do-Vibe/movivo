@@ -1,0 +1,119 @@
+.actions {
+  display: grid;
+  gap: 12px;
+}
+
+.primaryAction,
+.secondaryAction,
+.cancelAction,
+.dangerAction,
+.backAction {
+  min-height: 52px;
+  border-radius: 14px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.primaryAction {
+  color: var(--petroleo-vivo);
+  background: var(--verde-pulso);
+}
+
+.secondaryAction {
+  border-color: rgba(6, 48, 42, 0.2);
+  color: var(--petroleo-vivo);
+  background: var(--branco);
+}
+
+.secondaryAction:hover {
+  border-color: var(--petroleo-vivo);
+  background: var(--verde-pulso-tenue);
+}
+
+.cancelAction {
+  justify-content: flex-start;
+  padding-inline: 4px;
+  color: var(--petroleo-vivo);
+  text-decoration: underline;
+  text-decoration-color: rgba(6, 48, 42, 0.28);
+  text-underline-offset: 5px;
+}
+
+.cancelAction:hover {
+  color: #9b351b;
+  background: transparent;
+  text-decoration-color: var(--coral-vivo);
+}
+
+.confirmBox {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 14px;
+  border: 1px solid rgba(255, 106, 61, 0.35);
+  border-radius: 16px;
+  padding: 18px;
+  background: rgba(255, 106, 61, 0.08);
+}
+
+.alertIcon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--petroleo-vivo);
+  background: rgba(255, 106, 61, 0.3);
+}
+
+.alertIcon svg {
+  width: 18px;
+}
+
+.confirmBox h3 {
+  margin: 0;
+  color: var(--grafite);
+  font-size: 16px;
+}
+
+.confirmBox p {
+  margin: 6px 0 0;
+  color: var(--musgo);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.confirmActions {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.dangerAction {
+  color: var(--petroleo-vivo);
+  background: var(--coral-vivo);
+}
+
+.backAction {
+  color: var(--petroleo-vivo);
+}
+
+.error {
+  margin: 2px 0 0;
+  color: #9b351b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.actions button:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 3px;
+}
+
+@media (max-width: 480px) {
+  .confirmActions {
+    grid-template-columns: 1fr;
+  }
+}

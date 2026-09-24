@@ -18,19 +18,25 @@ import {
   NotFoundException,
   Param,
   Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
-import { ThrottlerGuard } from '@nestjs/throttler';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import {
   createCheckoutSchema,
+  checkoutPaymentResultSchema,
+  checkoutSummarySchema,
   subscriptionViewSchema,
   uuidSchema,
+  type CheckoutPaymentResult,
+  type CheckoutSummary,
   type SubscriptionView,
 } from '@movivo/shared';
+import type { Request } from 'express';
 
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
-import { SUBSCRIPTION_TERMS_VERSION } from './subscription-model';
+import { CheckoutTokenService } from './checkout-token.service';
 import { SubscriptionService } from './subscription.service';
 
 const TOKEN_PARAM = {
@@ -43,7 +49,10 @@ const TOKEN_PARAM = {
 @Controller('subscription')
 @UseGuards(ThrottlerGuard)
 export class SubscriptionController {
-  constructor(private readonly subs: SubscriptionService) {}
+  constructor(
+    private readonly subs: SubscriptionService,
+    private readonly checkoutTokens: CheckoutTokenService,
+  ) {}
 
   /** Estado do portal de gestão (US-4.6) — sem PII/dado de cartão. Sem assinatura → 404. */
   @Get(':token')
@@ -65,35 +74,45 @@ export class SubscriptionController {
     return view;
   }
 
-  /**
-   * Cria a sessão de checkout HOSPEDADA (US-4.2/4.6) e devolve só a `checkoutUrl` para o
-   * frontend redirecionar. Nenhum dado de cartão toca o backend (PCI). Body validado por Zod.
-   */
-  @Post(':token/checkout')
+  /** Resumo autoritativo: o token resolve o titular e o plano; a URL não leva preço editável. */
+  @Get('checkout/:token')
   @Header('Referrer-Policy', 'no-referrer')
   @ApiOperation({
-    summary: 'Cria a sessão de checkout hospedada',
-    description:
-      'Retorna só a `checkoutUrl` (Stripe/Asaas) para redirecionamento — nenhum dado de cartão toca o backend (escopo PCI).',
+    summary: 'Obtém o checkout individual',
+    description: 'Valida o token opaco e devolve apenas o snapshot comercial do contrato.',
   })
-  @ApiParam(TOKEN_PARAM)
+  @ApiParam({ name: 'token', description: 'Token opaco, autenticado e expirável do checkout.' })
+  @ApiResponse({ status: 200, schema: zodSchemaToOpenApi(checkoutSummarySchema) })
+  @ApiResponse({ status: 404, description: 'Token inválido, adulterado ou expirado.' })
+  async checkoutSummary(@Param('token') token: string): Promise<CheckoutSummary> {
+    const verified = this.checkoutToken(token);
+    const summary = await this.subs.getCheckoutSummary(verified.userId, verified.expiresAt);
+    if (!summary) throw new NotFoundException();
+    return summary;
+  }
+
+  /** Inicia a operação transparente no Asaas Sandbox; preço vem do contrato, não do body. */
+  @Post('checkout/:token/payment')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Header('Referrer-Policy', 'no-referrer')
+  @ApiOperation({
+    summary: 'Inicia pagamento no Asaas Sandbox',
+    description:
+      'Aceita cartão, Pix à vista ou Pix Automático. O backend nunca retorna nem persiste PAN/CVV.',
+  })
+  @ApiParam({ name: 'token', description: 'Token opaco, autenticado e expirável do checkout.' })
   @ApiBody({ schema: zodSchemaToOpenApi(createCheckoutSchema) })
-  @ApiResponse({ status: 200, description: 'Sessão criada — retorna `checkoutUrl`.' })
-  @ApiResponse({ status: 400, description: 'Plano ou método de pagamento inválido.' })
-  @ApiResponse({ status: 404, description: 'Token não é UUID.' })
-  async checkout(
+  @ApiResponse({ status: 200, schema: zodSchemaToOpenApi(checkoutPaymentResultSchema) })
+  @ApiResponse({ status: 400, description: 'Dados ou parcelamento inválidos.' })
+  @ApiResponse({ status: 404, description: 'Token inválido, adulterado ou expirado.' })
+  async checkoutPayment(
     @Param('token') token: string,
     @Body() body: unknown,
-  ): Promise<{ checkoutUrl: string }> {
-    const userId = this.userId(token);
-    const { plan, method } = createCheckoutSchema.parse(body);
-    const session = await this.subs.createCheckout(
-      userId,
-      plan,
-      method,
-      SUBSCRIPTION_TERMS_VERSION,
-    );
-    return { checkoutUrl: session.checkoutUrl };
+    @Req() req: Request,
+  ): Promise<CheckoutPaymentResult> {
+    const { userId } = this.checkoutToken(token);
+    const input = createCheckoutSchema.parse(body);
+    return this.subs.startCheckoutPayment(userId, input, req.ip || '127.0.0.1');
   }
 
   @Post(':token/cancel')
@@ -139,6 +158,12 @@ export class SubscriptionController {
   private userId(token: string): string {
     if (!uuidSchema.safeParse(token).success) throw new NotFoundException();
     return token;
+  }
+
+  private checkoutToken(token: string): { userId: string; expiresAt: number } {
+    const verified = this.checkoutTokens.verify(token);
+    if (!verified) throw new NotFoundException();
+    return verified;
   }
 
   private ensureFound(result: { status: string }): { status: string } {

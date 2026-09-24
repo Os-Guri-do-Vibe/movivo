@@ -1,7 +1,8 @@
 /**
  * Unit ESTRUTURAL — o SDK/HTTP do gateway de pagamento é confinado a `subscription/payment/`
  * (US-4.1, padrão do `LLMRouter`/AraraHQ). Nenhum outro arquivo referencia os endpoints reais
- * (`api.stripe.com`/`api.asaas.com`) nem importa SDK de gateway (`from 'stripe'` / `'asaas'`).
+ * (`api.stripe.com`/`api.asaas.com`) nem importa SDK de gateway. Os padrões Stripe continuam
+ * aqui deliberadamente para impedir a reintrodução acidental do provedor removido.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';

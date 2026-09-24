@@ -19,7 +19,9 @@
  * ## Idempotência
  * Não há `select` antes do `insert`. A garantia é a UNIQUE `(gateway, gateway_event_id)` +
  * `onConflictDoNothing`: reentrega do gateway, retry do BullMQ e duas instâncias
- * processando em paralelo convergem para uma linha, sem janela de corrida.
+ * processando em paralelo convergem para uma linha, sem janela de corrida. Para liquidação
+ * e estorno, `gateway_event_id` guarda a chave financeira da COBRANÇA (`financialKeyOf`),
+ * não a do evento — eventos distintos sobre o mesmo dinheiro também convergem.
  *
  * ## Estorno / chargeback
  * Linha NOVA de sinal contrário (`amount_cents` negativo), nunca alteração da original.
@@ -35,7 +37,7 @@
  * payload; o que sobe ao log é id de evento, tipo e status.
  */
 import { Injectable, type OnModuleInit } from '@nestjs/common';
-import { desc, eq, or, sql } from 'drizzle-orm';
+import { desc, eq, or, type SQL, sql } from 'drizzle-orm';
 import { type Job } from 'bullmq';
 import { PinoLogger } from 'nestjs-pino';
 
@@ -81,10 +83,27 @@ export function settlementOf(
     case 'REFUNDED':
       return { status: PaymentStatus.REFUNDED, amountCents: -magnitude };
     case 'SUBSCRIPTION_CANCELED':
+    case 'AUTHORIZATION_ACTIVE':
       return null;
     default:
       return null;
   }
+}
+
+/**
+ * Chave de idempotência financeira gravada em `gateway_event_id`. O mesmo dinheiro chega em
+ * mais de um evento do gateway: no cartão o Asaas manda `PAYMENT_CONFIRMED` (captura) e,
+ * semanas depois, `PAYMENT_RECEIVED` (repasse) — dois IDs de evento para UMA liquidação; o
+ * estorno idem (`PAYMENT_REFUND_IN_PROGRESS` → `PAYMENT_REFUNDED`). Com o id da cobrança,
+ * liquidação e estorno viram uma linha por cobrança e a UNIQUE do banco descarta o segundo.
+ * Sem id de cobrança (MOCK) vale o id do evento. Falha fica fora: cada vencimento/recusa é
+ * um fato próprio, com valor zero, e não soma receita.
+ */
+export function financialKeyOf(event: GatewayEvent, status: PaymentStatus): string {
+  if (event.externalPaymentId && status !== PaymentStatus.FAILED) {
+    return `${status}:${event.externalPaymentId}`;
+  }
+  return event.eventId;
 }
 
 @Injectable()
@@ -129,28 +148,36 @@ export class PaymentReconciliationWorker implements OnModuleInit {
       // Sem assinatura correspondente os dois ficam nulos: é a fila de exceção.
       //
       // Duas chaves, nesta ordem, e a segunda não é redundância:
-      //  1. `external_subscription_id` — o vínculo forte, vale para toda renovação.
+      //  1. qualquer ID externo do contrato — assinatura, cobrança, parcelamento ou
+      //     autorização Pix Automático. É o vínculo forte e vale para toda renovação; o
+      //     débito do Pix Automático, por exemplo, só traz cobrança e autorização.
       //  2. `user_id` do evento — necessário para a PRIMEIRA cobrança. Quem grava o
       //     `external_subscription_id` na assinatura é o próprio evento de checkout, então
       //     na primeira liquidação a coluna ainda está nula e a busca (1) não acha nada.
       //     Sem este passo, toda conversão nasceria órfã na fila de exceção — foi
       //     exatamente o que o teste de integração pegou.
+      const contractMatch = or(
+        eq(subscriptions.externalSubscriptionId, event.externalSubscriptionId),
+        event.externalPaymentId
+          ? eq(subscriptions.externalPaymentId, event.externalPaymentId)
+          : undefined,
+        event.externalInstallmentId
+          ? eq(subscriptions.externalInstallmentId, event.externalInstallmentId)
+          : undefined,
+        event.externalAuthorizationId
+          ? eq(subscriptions.externalAuthorizationId, event.externalAuthorizationId)
+          : undefined,
+      ) as SQL;
       const [linked] = await tx
         .select({ id: subscriptions.id, userId: subscriptions.userId })
         .from(subscriptions)
         .where(
-          or(
-            eq(subscriptions.externalSubscriptionId, event.externalSubscriptionId),
-            eq(subscriptions.userId, event.userId),
-          ),
+          event.userId ? or(contractMatch, eq(subscriptions.userId, event.userId)) : contractMatch,
         )
         // Assinatura que casou pelo id externo ganha da que casou só pelo titular; entre
         // as do titular, vale a mais recente. `nulls last` é explícito porque em `desc` o
         // PostgreSQL põe NULL primeiro por default — o oposto do que se quer aqui.
-        .orderBy(
-          sql`(${subscriptions.externalSubscriptionId} = ${event.externalSubscriptionId}) desc nulls last`,
-          desc(subscriptions.createdAt),
-        )
+        .orderBy(sql`(${contractMatch}) desc nulls last`, desc(subscriptions.createdAt))
         .limit(1);
 
       await tx
@@ -159,7 +186,7 @@ export class PaymentReconciliationWorker implements OnModuleInit {
           subscriptionId: linked?.id ?? null,
           userId: linked?.userId ?? null,
           gateway,
-          gatewayEventId: event.eventId,
+          gatewayEventId: financialKeyOf(event, settlement.status),
           status: settlement.status,
           amountCents: settlement.amountCents,
           netAmountCents,
