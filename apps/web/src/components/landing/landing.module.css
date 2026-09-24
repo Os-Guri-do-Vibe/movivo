@@ -40,7 +40,7 @@
   --color-pulso-64: rgba(37, 226, 126, 0.64);
 
   /* --- Tipografia ---------------------------------------------------------- */
-  --font-brand: var(--font-quicksand), 'Quicksand', sans-serif;
+  --font-brand: var(--font-satoshi), 'Helvetica Neue', Arial, sans-serif;
   --font-display: var(--font-cabinet), 'Cabinet Grotesk', 'Helvetica Neue', Arial, sans-serif;
   --font-body: var(--font-satoshi), 'Satoshi', 'Helvetica Neue', Arial, system-ui, sans-serif;
 

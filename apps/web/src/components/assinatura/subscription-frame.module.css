@@ -3,7 +3,7 @@
   color: var(--grafite);
   background:
     radial-gradient(circle at 12% 8%, rgba(37, 226, 126, 0.12), transparent 24rem), var(--nevoa);
-  font-family: var(--font-quicksand), var(--font-hanken-grotesk), sans-serif;
+  font-family: var(--font-hanken-grotesk), sans-serif;
 }
 
 .topbar {

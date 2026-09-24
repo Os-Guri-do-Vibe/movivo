@@ -1,5 +1,4 @@
 import localFont from 'next/font/local';
-import { Quicksand } from 'next/font/google';
 
 /*
  * Tipografia da landing pública. Declarada aqui (e não no layout raiz) para que só a
@@ -31,17 +30,4 @@ export const satoshi = localFont({
   fallback: ['Helvetica Neue', 'Arial', 'system-ui', 'sans-serif'],
 });
 
-/** Assinaturas proprietárias (a mesma família do lettering do logo). */
-export const quicksand = Quicksand({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
-  display: 'swap',
-  variable: '--font-quicksand',
-  preload: false,
-});
-
-export const landingFontVariables = [
-  cabinetGrotesk.variable,
-  satoshi.variable,
-  quicksand.variable,
-].join(' ');
+export const landingFontVariables = [cabinetGrotesk.variable, satoshi.variable].join(' ');
