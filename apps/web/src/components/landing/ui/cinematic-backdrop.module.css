@@ -1,0 +1,157 @@
+.backdrop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--color-bg-deep);
+}
+
+/* Iluminação: um "céu" petróleo difuso + um rebote quente mínimo no chão. */
+.light {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      70% 60% at 72% 28%,
+      rgba(10, 62, 53, 0.95) 0%,
+      rgba(6, 48, 42, 0.4) 38%,
+      rgba(3, 17, 14, 0) 72%
+    ),
+    radial-gradient(50% 40% at 88% 70%, rgba(37, 226, 126, 0.07) 0%, rgba(37, 226, 126, 0) 70%),
+    linear-gradient(180deg, #04201b 0%, #03110e 70%);
+}
+
+.final .light {
+  background:
+    radial-gradient(
+      70% 60% at 50% 30%,
+      rgba(10, 62, 53, 0.95) 0%,
+      rgba(6, 48, 42, 0.35) 40%,
+      rgba(3, 17, 14, 0) 75%
+    ),
+    radial-gradient(40% 30% at 50% 80%, rgba(37, 226, 126, 0.08) 0%, rgba(37, 226, 126, 0) 70%),
+    linear-gradient(180deg, #03110e 0%, #04201b 55%, #03110e 100%);
+}
+
+.architecture {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* No retrato, a arquitetura ocupa a metade de cima; a copy fica embaixo. */
+@media (max-width: 767.98px) {
+  .hero .architecture {
+    inset: 0 -30% auto -40%;
+    width: 170%;
+    height: 72%;
+  }
+}
+
+.final .architecture {
+  transform: scaleX(-1);
+  opacity: 0.8;
+}
+
+.horizon {
+  fill: none;
+  stroke: rgba(244, 247, 243, 0.06);
+  stroke-width: 1;
+}
+
+.edge {
+  fill: none;
+  stroke: rgba(244, 247, 243, 0.14);
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+}
+
+.edgeSoft {
+  fill: none;
+  stroke: rgba(244, 247, 243, 0.06);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.trail,
+.trailHalo {
+  fill: none;
+  stroke: var(--color-pulso);
+  stroke-linecap: round;
+  stroke-dasharray: 90 910;
+  stroke-dashoffset: 1000;
+}
+
+.trail {
+  stroke-width: 2.4;
+  vector-effect: non-scaling-stroke;
+}
+
+.trailHalo {
+  stroke-width: 14;
+  opacity: 0.12;
+  vector-effect: non-scaling-stroke;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .trail,
+  .trailHalo {
+    animation: travel 11s var(--ease-cinematic) infinite;
+  }
+}
+
+/* Movimento reduzido: o Pulse fica parado sobre a laje, visível e sem viajar. */
+@media (prefers-reduced-motion: reduce) {
+  .trail,
+  .trailHalo {
+    stroke-dashoffset: 560;
+  }
+}
+
+@keyframes travel {
+  0% {
+    stroke-dashoffset: 1000;
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  86%,
+  100% {
+    stroke-dashoffset: 90;
+    opacity: 0;
+  }
+}
+
+.trailHalo {
+  animation-name: travel-halo;
+}
+
+@keyframes travel-halo {
+  0% {
+    stroke-dashoffset: 1000;
+    opacity: 0;
+  }
+  8%,
+  70% {
+    opacity: 0.12;
+  }
+  86%,
+  100% {
+    stroke-dashoffset: 90;
+    opacity: 0;
+  }
+}
+
+.grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.08;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+}

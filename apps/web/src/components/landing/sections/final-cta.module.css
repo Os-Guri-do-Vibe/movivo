@@ -1,0 +1,117 @@
+.final {
+  position: relative;
+  display: grid;
+  align-items: center;
+  min-height: 100vh;
+  min-height: 100svh;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.media {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-media);
+}
+
+/* --- Web Threads (fundo) ------------------------------------------------------ */
+.threads {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Fallback: os fios parados, com um halo largo e translúcido no lugar do glow. */
+.threadsStill {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.thread,
+.threadHalo {
+  fill: none;
+  stroke: var(--color-pulso);
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.thread {
+  stroke-width: 1.5;
+  opacity: 0.7;
+}
+
+.threadHalo {
+  stroke-width: 14;
+  opacity: 0.07;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-overlay);
+  pointer-events: none;
+  background:
+    radial-gradient(60% 55% at 50% 55%, rgba(3, 17, 14, 0.7) 0%, rgba(3, 17, 14, 0.2) 70%),
+    linear-gradient(
+      180deg,
+      #03110e 0%,
+      rgba(3, 17, 14, 0) 22%,
+      rgba(3, 17, 14, 0) 78%,
+      #03110e 100%
+    );
+}
+
+.content {
+  position: relative;
+  z-index: var(--z-section-ui);
+  display: grid;
+  justify-items: center;
+  gap: var(--space-5);
+  padding-block: var(--section-pad);
+  text-align: center;
+}
+
+.small {
+  font-size: var(--text-eyebrow);
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary-dark);
+}
+
+.display {
+  font-family: var(--font-display);
+  font-size: clamp(5rem, 1rem + 18vw, 15rem);
+  font-weight: 800;
+  line-height: 0.82;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+
+.logo {
+  width: clamp(132px, 16vw, 200px);
+  margin-top: var(--space-4);
+  color: var(--color-text-primary-dark);
+}
+
+.signature {
+  font-family: var(--font-brand);
+  font-size: clamp(1.125rem, 0.9rem + 0.8vw, 1.5rem);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-text-secondary-dark);
+}
+
+.action {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+.micro {
+  font-size: var(--text-small);
+  color: var(--color-text-secondary-dark);
+}

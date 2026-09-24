@@ -1,0 +1,152 @@
+.adaptive {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(60% 80% at 100% 0%, rgba(37, 226, 126, 0.08) 0%, rgba(37, 226, 126, 0) 60%),
+    var(--color-petroleo);
+}
+
+.header {
+  display: grid;
+  gap: var(--space-6);
+  margin-bottom: clamp(56px, 8vw, 128px);
+}
+
+.title {
+  max-width: 18ch;
+}
+
+/* --- Timeline: vertical nativa no mobile, horizontal no desktop ------------ */
+.timelineWrap {
+  --node: 14px;
+  position: relative;
+}
+
+.track {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: calc(var(--node) / 2 - 0.5px);
+  width: 1px;
+  background: rgba(244, 247, 243, 0.16);
+}
+
+.trackFill {
+  position: absolute;
+  inset: 0;
+  background: var(--color-pulso);
+  transform-origin: top;
+}
+
+.trackHead {
+  position: absolute;
+  left: -5px;
+  top: 100%;
+  width: 11px;
+  height: 11px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--color-pulso);
+  box-shadow:
+    0 0 0 6px rgba(37, 226, 126, 0.18),
+    0 0 26px 6px rgba(37, 226, 126, 0.4);
+}
+
+.timeline {
+  position: relative;
+  display: grid;
+  gap: var(--space-10);
+}
+
+.step {
+  position: relative;
+  display: grid;
+  gap: var(--space-2);
+  padding-left: calc(var(--node) + var(--space-6));
+}
+
+.node {
+  position: absolute;
+  top: 4px;
+  left: 0;
+  width: var(--node);
+  height: var(--node);
+  border: 1px solid rgba(244, 247, 243, 0.4);
+  border-radius: 50%;
+  background: var(--color-petroleo);
+  transition:
+    background-color 400ms var(--ease-ui),
+    border-color 400ms var(--ease-ui),
+    box-shadow 400ms var(--ease-ui);
+}
+
+.step[data-reached] .node,
+.timelineWrap:not([data-motion-live]) .node {
+  border-color: var(--color-pulso);
+  background: var(--color-pulso);
+  box-shadow: 0 0 0 5px rgba(37, 226, 126, 0.16);
+}
+
+.when {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-pulso);
+}
+
+.what {
+  max-width: 14ch;
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 1rem + 1.6vw, 2.25rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+.loop {
+  font-size: 1.25rem;
+  color: var(--color-pulso);
+}
+
+@media (min-width: 1024px) {
+  .track {
+    top: calc(var(--node) / 2 - 0.5px);
+    bottom: auto;
+    left: 0;
+    right: 0;
+    width: auto;
+    height: 1px;
+  }
+
+  .trackFill {
+    transform-origin: left;
+  }
+
+  .trackHead {
+    top: -5px;
+    left: 100%;
+    margin: 0 0 0 -5px;
+  }
+
+  .timeline {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: var(--space-6);
+  }
+
+  .step {
+    align-content: start;
+    padding-left: 0;
+    padding-top: calc(var(--node) + var(--space-8));
+  }
+
+  .node {
+    top: 0;
+  }
+}
+
+.body {
+  max-width: 44ch;
+  margin-top: clamp(56px, 8vw, 128px);
+  color: rgba(247, 250, 247, 0.84);
+}

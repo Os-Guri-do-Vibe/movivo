@@ -9,7 +9,7 @@ const QUESTION_TITLE_CLASS_NAME = 'text-body font-semibold text-foreground';
 
 /**
  * Primitivas de campo do onboarding v2 (Sofia §§2-8) — reusam o padrão de chip
- * (`aria-pressed` + Verde Pulso) já estabelecido em `plan-selector.tsx`/`start-cta.tsx`,
+ * (`aria-pressed` + Verde Pulso) já estabelecido em `plan-selector.tsx`,
  * em vez de introduzir uma lib de formulário nova (nenhuma existe no projeto).
  */
 

@@ -1,0 +1,376 @@
+/* =============================================================================
+ * MOVIVO — landing pública: tokens, tipografia, grid e primitivas de layout.
+ *
+ * Tudo é escopado em `.root` (a landing), nunca em `:root`: painel, onboarding e
+ * protocolo continuam com o design system "O Pulso" de `globals.css`. As seções
+ * consomem apenas estes tokens — nenhuma cor, fonte ou espaçamento solto.
+ * ========================================================================== */
+
+.root {
+  /* --- Paleta oficial ----------------------------------------------------- */
+  --color-petroleo: #06302a;
+  --color-pulso: #25e27e;
+  --color-coral: #ff6a3d;
+  --color-nevoa: #f4f7f3;
+  --color-grafite: #14201c;
+  --color-musgo: #5b6b63;
+  --color-white: #ffffff;
+
+  /* --- Derivados ---------------------------------------------------------- */
+  --color-bg-deep: #03110e;
+  --color-bg-dark: #071713;
+  --color-bg-light: #f4f7f3;
+  --color-surface-dark: #0b1f1a;
+  --color-surface-graphite: #1a2823;
+
+  --color-text-primary-dark: #f7faf7;
+  --color-text-secondary-dark: rgba(244, 247, 243, 0.68);
+  --color-text-muted-dark: rgba(244, 247, 243, 0.44);
+
+  --color-text-primary-light: #14201c;
+  --color-text-secondary-light: #5b6b63;
+  --color-text-muted-light: rgba(20, 32, 28, 0.52);
+
+  --color-border-dark: rgba(255, 255, 255, 0.12);
+  --color-border-light: rgba(20, 32, 28, 0.12);
+
+  --color-pulso-08: rgba(37, 226, 126, 0.08);
+  --color-pulso-16: rgba(37, 226, 126, 0.16);
+  --color-pulso-32: rgba(37, 226, 126, 0.32);
+  --color-pulso-64: rgba(37, 226, 126, 0.64);
+
+  /* --- Tipografia ---------------------------------------------------------- */
+  --font-brand: var(--font-quicksand), 'Quicksand', sans-serif;
+  --font-display: var(--font-cabinet), 'Cabinet Grotesk', 'Helvetica Neue', Arial, sans-serif;
+  --font-body: var(--font-satoshi), 'Satoshi', 'Helvetica Neue', Arial, system-ui, sans-serif;
+
+  /* Hero: 52–64px no mobile (15vw), 72–140px do tablet em diante (8vw). */
+  --text-hero: clamp(3.25rem, 15vw, 4rem);
+  --text-h2: clamp(2.35rem, 1.2rem + 4.4vw, 5rem);
+  --text-h3: clamp(1.75rem, 1.2rem + 2.6vw, 3rem);
+  --text-lead: clamp(1.125rem, 0.95rem + 0.6vw, 1.375rem);
+  --text-body: clamp(1rem, 0.96rem + 0.2vw, 1.125rem);
+  --text-small: 0.875rem;
+  --text-eyebrow: clamp(0.7rem, 0.66rem + 0.14vw, 0.78rem);
+
+  /* --- Grid e espaçamento (base 4px) -------------------------------------- */
+  --container-max: 1440px;
+  --content-max: 1280px;
+  --gutter: clamp(20px, 4vw, 72px);
+  --grid-gap: clamp(16px, 1.5vw, 24px);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+  --space-32: 128px;
+  --space-40: 160px;
+  --section-pad: clamp(88px, 10vw, 176px);
+  --section-pad-compact: clamp(64px, 7vw, 112px);
+  --nav-height: 68px;
+
+  /* --- Raios, bordas, sombras -------------------------------------------- */
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 18px;
+  --radius-lg: 24px;
+  --radius-xl: 32px;
+  --radius-pill: 999px;
+  --border-dark: 1px solid var(--color-border-dark);
+  --border-light: 1px solid var(--color-border-light);
+  --shadow-premium: 0 24px 80px rgba(0, 0, 0, 0.14);
+  --glow-pulso: 0 0 0 1px var(--color-pulso-32), 0 12px 40px -12px var(--color-pulso-64);
+
+  /* --- Curvas (equivalentes CSS das curvas GSAP) ------------------------- */
+  --ease-ui: cubic-bezier(0.33, 1, 0.68, 1); /* power2.out */
+  --ease-editorial: cubic-bezier(0.25, 1, 0.5, 1); /* power3.out */
+  --ease-cinematic: cubic-bezier(0.83, 0, 0.17, 1); /* power4.inOut */
+  --ease-organic: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* --- Camadas ------------------------------------------------------------ */
+  --z-background: 0;
+  --z-media: 10;
+  --z-overlay: 20;
+  --z-section-ui: 30;
+  --z-sticky: 40;
+  --z-navbar: 50;
+  --z-mobile-cta: 60;
+  --z-menu: 70;
+  --z-cursor: 80;
+  --z-preloader: 90;
+
+  /* Anel de foco por tema: Verde Pulso no escuro, Petróleo no claro (contraste 3:1+). */
+  --focus-ring: var(--color-pulso);
+
+  position: relative;
+  min-height: 100svh;
+  overflow-x: clip;
+  background: var(--color-bg-deep);
+  color: var(--color-text-primary-dark);
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  line-height: 1.6;
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@media (min-width: 768px) {
+  .root {
+    --nav-height: 76px;
+    --text-hero: clamp(4.5rem, 8vw, 8.75rem);
+  }
+}
+
+@media (min-width: 1024px) {
+  .root {
+    --nav-height: 84px;
+  }
+}
+
+.root :where(h1, h2, h3, h4, p, ul, ol, figure, blockquote) {
+  margin: 0;
+}
+
+.root :where(ul, ol) {
+  padding: 0;
+  list-style: none;
+}
+
+.root :where(a) {
+  color: inherit;
+}
+
+.root :where(section[id], [data-anchor]) {
+  scroll-margin-top: calc(var(--nav-height) - 1px);
+}
+
+.root :where(a, button, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 4px;
+  border-radius: var(--radius-xs);
+}
+
+.root ::selection {
+  background: var(--color-pulso);
+  color: var(--color-bg-dark);
+}
+
+/* --- Temas de seção ------------------------------------------------------ */
+.themeDeep {
+  background: var(--color-bg-deep);
+  color: var(--color-text-primary-dark);
+  --focus-ring: var(--color-pulso);
+}
+
+.themeDark {
+  background: var(--color-bg-dark);
+  color: var(--color-text-primary-dark);
+  --focus-ring: var(--color-pulso);
+}
+
+.themeGraphite {
+  background: var(--color-grafite);
+  color: var(--color-text-primary-dark);
+  --focus-ring: var(--color-pulso);
+}
+
+.themePetroleum {
+  background: var(--color-petroleo);
+  color: var(--color-text-primary-dark);
+  --focus-ring: var(--color-pulso);
+}
+
+.themeLight {
+  background: var(--color-bg-light);
+  color: var(--color-text-primary-light);
+  --focus-ring: var(--color-petroleo);
+}
+
+.themeWhite {
+  background: var(--color-white);
+  color: var(--color-text-primary-light);
+  --focus-ring: var(--color-petroleo);
+}
+
+/* --- Layout ------------------------------------------------------------- */
+.container {
+  width: 100%;
+  max-width: calc(var(--content-max) + 2 * var(--gutter));
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.containerWide {
+  width: 100%;
+  max-width: calc(var(--container-max) + 2 * var(--gutter));
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--grid-gap);
+}
+
+@media (min-width: 768px) {
+  .grid {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .grid {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+}
+
+.section {
+  position: relative;
+  padding-block: var(--section-pad);
+}
+
+.sectionCompact {
+  position: relative;
+  padding-block: var(--section-pad-compact);
+}
+
+/* --- Tipografia ---------------------------------------------------------- */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-body);
+  font-size: var(--text-eyebrow);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.eyebrow::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--color-pulso);
+  box-shadow: 0 0 0 4px var(--color-pulso-16);
+}
+
+.themeLight .eyebrow,
+.themeWhite .eyebrow {
+  color: var(--color-petroleo);
+}
+
+.themeLight .eyebrow::before,
+.themeWhite .eyebrow::before {
+  box-shadow: 0 0 0 4px rgba(6, 48, 42, 0.1);
+}
+
+.h2 {
+  max-width: 14ch;
+  font-family: var(--font-display);
+  font-size: var(--text-h2);
+  font-weight: 700;
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+
+.h3 {
+  font-family: var(--font-display);
+  font-size: var(--text-h3);
+  font-weight: 700;
+  line-height: 1.02;
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+
+.lead {
+  max-width: 52ch;
+  font-size: var(--text-lead);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.body {
+  max-width: 62ch;
+  font-size: var(--text-body);
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+.secondaryText {
+  color: var(--color-text-secondary-dark);
+}
+
+.themeLight .secondaryText,
+.themeWhite .secondaryText {
+  color: var(--color-text-secondary-light);
+}
+
+/* Máscara de linha para o reveal de títulos (o texto continua semântico). */
+.line {
+  display: block;
+  overflow: hidden;
+  /* Folga para descendentes/acentos não serem cortados pela máscara. */
+  padding-block: 0.06em 0.1em;
+  margin-block: -0.06em -0.1em;
+}
+
+.lineInner {
+  display: block;
+  will-change: transform;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skipLink {
+  position: fixed;
+  top: var(--space-3);
+  left: var(--space-3);
+  z-index: var(--z-preloader);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-pill);
+  background: var(--color-pulso);
+  color: var(--color-bg-dark);
+  font-weight: 700;
+  text-decoration: none;
+  transform: translateY(-160%);
+  transition: transform 200ms var(--ease-ui);
+}
+
+.skipLink:focus-visible {
+  transform: translateY(0);
+}
+
+/* Grão fotográfico discreto (SVG procedural, sem arquivo). */
+.grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.07;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+}

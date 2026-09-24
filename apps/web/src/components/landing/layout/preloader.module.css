@@ -1,0 +1,184 @@
+/*
+ * Pulse → divide em 5 partículas → converge → MOVIVO. CSS puro: roda antes do JS da
+ * página existir. Oculto por padrão; o script inline ativa só quando há espera real.
+ */
+.preloader {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-preloader);
+  display: none;
+  place-items: center;
+  background: var(--color-bg-deep);
+  color: var(--color-text-primary-dark);
+}
+
+.preloader[data-state='active'],
+.preloader[data-state='exit'] {
+  display: grid;
+}
+
+.preloader[data-state='exit'] {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 600ms var(--ease-cinematic),
+    visibility 0s linear 600ms;
+}
+
+.stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(240px, 60vw);
+  aspect-ratio: 1;
+}
+
+.core,
+.particle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: var(--color-pulso);
+}
+
+.core {
+  box-shadow:
+    0 0 0 8px var(--color-pulso-08),
+    0 0 32px 6px var(--color-pulso-32);
+}
+
+.particle {
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  opacity: 0;
+}
+
+.logo {
+  width: min(180px, 46vw);
+  color: var(--color-text-primary-dark);
+  opacity: 0;
+}
+
+.caption {
+  position: absolute;
+  bottom: 8%;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary-dark);
+  opacity: 0;
+}
+
+.preloader[data-state='active'] .core {
+  animation: core 1.4s var(--ease-organic) forwards;
+}
+
+.preloader[data-state='active'] .particle {
+  animation: particle 1.4s var(--ease-organic) forwards;
+}
+
+.preloader[data-state='active'] .logo {
+  animation: logo 1.4s var(--ease-editorial) forwards;
+}
+
+.preloader[data-state='active'] .caption {
+  animation: caption 2s linear 0.6s infinite;
+}
+
+.particle[data-index='0'] {
+  --tx: 0px;
+  --ty: -46px;
+}
+.particle[data-index='1'] {
+  --tx: 44px;
+  --ty: -14px;
+}
+.particle[data-index='2'] {
+  --tx: 27px;
+  --ty: 37px;
+}
+.particle[data-index='3'] {
+  --tx: -27px;
+  --ty: 37px;
+}
+.particle[data-index='4'] {
+  --tx: -44px;
+  --ty: -14px;
+}
+
+@keyframes core {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  18% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+  32% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  42% {
+    transform: scale(0.2);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(0);
+    opacity: 0;
+  }
+}
+
+@keyframes particle {
+  0%,
+  34% {
+    transform: translate(0, 0);
+    opacity: 0;
+  }
+  42% {
+    opacity: 1;
+  }
+  58% {
+    transform: translate(var(--tx), var(--ty));
+    opacity: 1;
+  }
+  76% {
+    transform: translate(0, 0) scale(0.6);
+    opacity: 0.9;
+  }
+  84%,
+  100% {
+    transform: translate(0, 0) scale(0);
+    opacity: 0;
+  }
+}
+
+@keyframes logo {
+  0%,
+  72% {
+    transform: scale(0.94);
+    opacity: 0;
+    filter: blur(6px);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+@keyframes caption {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}

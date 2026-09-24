@@ -51,6 +51,15 @@ export default defineConfig({
         // Código vendorizado do shadcn/ui (gerado pelo CLI, não editado aqui): é
         // dependência, não unidade nossa. Medir cobertura dele mede a lib, não o produto.
         'src/components/ui/chart.tsx',
+        // Cenas WebGL da landing (Three.js + shaders): exigem contexto de GPU que o jsdom
+        // não tem. O ciclo de vida (lazy, pausa, descarte, fallback) é testado em
+        // `scene-canvas.test.tsx`; o render é validado no navegador (QA visual/Playwright).
+        'src/components/landing/scenes/pulse-scene.ts',
+        'src/components/landing/scenes/club-scene.ts',
+        'src/components/landing/scenes/aurora-scene.ts',
+        'src/components/landing/scenes/web-threads-scene.ts',
+        // `next/font` é macro de build (SWC): não executa no Vitest.
+        'src/components/landing/fonts.ts',
       ],
       // Casca de fundação: só há 3 unidades com lógica testável (Button, ThemeToggle, cn).
       // Limiar honesto da Sprint 0 documentado em docs/qualidade/quality-gates.md §"Cobertura".

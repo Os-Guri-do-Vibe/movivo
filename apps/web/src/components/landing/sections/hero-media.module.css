@@ -1,0 +1,27 @@
+/*
+ * Pôster e filme ocupam exatamente a mesma área, com o mesmo recorte (`cover`) e o
+ * mesmo `object-position` — a troca pôster → vídeo não desloca nada.
+ * `--hero-focus` é definido pelo Hero por breakpoint (enquadramento mobile).
+ */
+.layer {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 600ms var(--ease-editorial);
+  pointer-events: none;
+}
+
+.playing {
+  opacity: 1;
+}
+
+.video,
+.poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: var(--hero-focus, 50% 50%);
+  pointer-events: none;
+}

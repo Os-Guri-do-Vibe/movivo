@@ -1,0 +1,409 @@
+.how {
+  position: relative;
+}
+
+.header {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-6);
+  margin-bottom: clamp(48px, 7vw, 112px);
+  text-align: center;
+}
+
+/* Uma linha só, centrada. No celular a frase não cabe inteira no tamanho de título e
+ * quebra (continua centrada); do tablet em diante a fonte é limitada pela largura. */
+.title {
+  max-width: none;
+}
+
+@media (min-width: 768px) {
+  .title {
+    font-size: min(var(--text-h2), 5.8vw);
+    white-space: nowrap;
+  }
+}
+
+.layout {
+  display: grid;
+  gap: var(--space-16);
+}
+
+@media (min-width: 1024px) {
+  .layout {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    gap: clamp(48px, 7vw, 128px);
+    align-items: start;
+  }
+}
+
+/* --- Palco sticky (desktop): o visual acompanha o ato em leitura ------------ */
+.stage {
+  display: none;
+}
+
+@media (min-width: 1024px) {
+  .stage {
+    position: sticky;
+    top: calc(var(--nav-height) + 6vh);
+    display: block;
+  }
+}
+
+.stageFrame {
+  position: relative;
+  aspect-ratio: 1;
+  border: var(--border-light);
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(70% 60% at 50% 40%, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0) 70%),
+    #eef2ed;
+}
+
+.stageVisual {
+  position: absolute;
+  inset: 6%;
+  opacity: 0;
+  transform: translateY(12px);
+  transition:
+    opacity 500ms var(--ease-editorial),
+    transform 700ms var(--ease-editorial);
+}
+
+.layout[data-active-act='0'] .stageVisual[data-visual='0'],
+.layout[data-active-act='1'] .stageVisual[data-visual='1'],
+.layout[data-active-act='2'] .stageVisual[data-visual='2'],
+.layout[data-active-act='3'] .stageVisual[data-visual='3'] {
+  opacity: 1;
+  transform: none;
+}
+
+.progress {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-5);
+  display: flex;
+  gap: var(--space-2);
+  transform: translateX(-50%);
+}
+
+.progress li {
+  display: grid;
+  place-items: center;
+  min-width: 40px;
+  height: 26px;
+  padding-inline: var(--space-2);
+  border: var(--border-light);
+  border-radius: var(--radius-pill);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary-light);
+  transition:
+    background-color 300ms var(--ease-ui),
+    color 300ms var(--ease-ui),
+    border-color 300ms var(--ease-ui);
+}
+
+.layout[data-active-act='0'] .progress [data-step='0'],
+.layout[data-active-act='1'] .progress [data-step='1'],
+.layout[data-active-act='2'] .progress [data-step='2'],
+.layout[data-active-act='3'] .progress [data-step='3'] {
+  border-color: var(--color-petroleo);
+  background: var(--color-petroleo);
+  color: var(--color-nevoa);
+}
+
+/* --- Atos ---------------------------------------------------------------- */
+.acts {
+  display: grid;
+  gap: var(--space-16);
+}
+
+@media (min-width: 1024px) {
+  .acts {
+    gap: 0;
+  }
+
+  .act {
+    display: grid;
+    align-content: center;
+    min-height: 72vh;
+  }
+}
+
+.act {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.actVisual {
+  width: 100%;
+  max-width: 420px;
+  aspect-ratio: 1.15;
+  margin-bottom: var(--space-2);
+  padding: 4%;
+  border: var(--border-light);
+  border-radius: var(--radius-lg);
+  background: #eef2ed;
+}
+
+@media (min-width: 1024px) {
+  .actVisual {
+    display: none;
+  }
+}
+
+.actLabel {
+  font-size: var(--text-eyebrow);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-petroleo);
+}
+
+.actTitle {
+  max-width: 16ch;
+}
+
+.act .actTitle {
+  transition: color 400ms var(--ease-ui);
+}
+
+@media (min-width: 1024px) {
+  .act:not([data-active]) .actTitle {
+    color: rgba(20, 32, 28, 0.42);
+  }
+
+  .act:not([data-active]) > p {
+    opacity: 0.7;
+  }
+}
+
+/* CTA + nota centrada no eixo do botão. Mobile: botão em largura total. */
+.cta {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: clamp(56px, 8vw, 112px);
+  text-align: center;
+}
+
+@media (min-width: 640px) {
+  .cta {
+    justify-items: center;
+    width: fit-content;
+  }
+}
+
+@media (min-width: 1024px) {
+  .cta {
+    margin-left: auto;
+  }
+}
+
+.ctaNote {
+  font-size: var(--text-small);
+}
+
+/* --- Gramática dos visuais ------------------------------------------------ */
+.svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.ring {
+  fill: none;
+  stroke: rgba(6, 48, 42, 0.22);
+  stroke-width: 1.2;
+}
+
+.ringSoft {
+  fill: none;
+  stroke: rgba(6, 48, 42, 0.1);
+  stroke-width: 1;
+}
+
+.flow {
+  stroke: rgba(6, 48, 42, 0.2);
+  stroke-width: 1;
+  stroke-dasharray: 3 5;
+}
+
+.node {
+  fill: var(--color-white);
+  stroke: var(--color-petroleo);
+  stroke-width: 1.4;
+}
+
+.core {
+  fill: var(--color-petroleo);
+}
+
+.pulseDot {
+  fill: var(--color-pulso);
+}
+
+.label {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  fill: var(--color-musgo);
+}
+
+.labelStrong {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  fill: var(--color-grafite);
+}
+
+.block {
+  fill: var(--color-petroleo);
+  transform-box: fill-box;
+  transform-origin: bottom;
+}
+
+.blockToday {
+  fill: var(--color-pulso);
+}
+
+.rest {
+  fill: none;
+  stroke: rgba(6, 48, 42, 0.24);
+  stroke-dasharray: 3 4;
+}
+
+.card {
+  fill: var(--color-white);
+  stroke: rgba(6, 48, 42, 0.16);
+  stroke-width: 1;
+}
+
+.textLine {
+  stroke: rgba(20, 32, 28, 0.14);
+  stroke-width: 8;
+  stroke-linecap: round;
+}
+
+.signature {
+  fill: none;
+  stroke: var(--color-petroleo);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+.sealRing {
+  fill: var(--color-petroleo);
+}
+
+.sealText {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  fill: var(--color-nevoa);
+}
+
+.check {
+  fill: none;
+  stroke: var(--color-pulso);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+.seal {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.bubble {
+  fill: rgba(6, 48, 42, 0.1);
+}
+
+.bubbleOut {
+  fill: rgba(37, 226, 126, 0.35);
+}
+
+.wave {
+  fill: none;
+  stroke: var(--color-pulso);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+/* Animações só no ato ativo; o estado final é o estilo base (sem JS = completo). */
+@media (prefers-reduced-motion: no-preference) {
+  [data-active] .learnInput {
+    animation: input-in 700ms var(--ease-editorial) backwards;
+  }
+
+  [data-active] .flow {
+    animation: flow 1.6s linear infinite;
+  }
+
+  [data-active] .block {
+    animation: grow 700ms var(--ease-organic) backwards;
+  }
+
+  [data-active] .signature {
+    animation: draw 1.2s var(--ease-editorial) 200ms backwards;
+  }
+
+  [data-active] .seal {
+    animation: seal 700ms var(--ease-organic) 900ms backwards;
+  }
+
+  [data-active] .check {
+    animation: draw 500ms var(--ease-editorial) 1300ms backwards;
+  }
+
+  [data-active] .wave {
+    animation: draw 1.4s var(--ease-editorial) backwards;
+  }
+
+  [data-active] .bubble,
+  [data-active] .bubbleOut {
+    animation: input-in 600ms var(--ease-editorial) backwards;
+  }
+}
+
+@keyframes input-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes flow {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+
+@keyframes grow {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+@keyframes draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+
+@keyframes seal {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}

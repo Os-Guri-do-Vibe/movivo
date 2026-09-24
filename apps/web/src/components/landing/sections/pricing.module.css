@@ -1,0 +1,374 @@
+.pricing {
+  position: relative;
+}
+
+.header {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-5);
+  margin-bottom: clamp(40px, 6vw, 88px);
+}
+
+@media (min-width: 1024px) {
+  .header {
+    justify-items: center;
+    text-align: center;
+  }
+
+  .header > * {
+    margin-inline: auto;
+  }
+}
+
+/* --- Cartões (desktop) --------------------------------------------------- */
+.cards {
+  display: none;
+}
+
+@media (min-width: 1024px) {
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--grid-gap);
+    align-items: stretch;
+  }
+}
+
+.card {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto auto auto auto 1fr;
+  gap: var(--space-3);
+  align-content: start;
+  padding: var(--space-8) var(--space-6);
+  border: var(--border-light);
+  border-radius: var(--radius-lg);
+  background: var(--color-white);
+}
+
+/*
+ * Plano em destaque: borda Coral Vivo neon com um ponto de luz que percorre o contorno
+ * sem parar (gradiente cônico girando, recortado só na borda) e um brilho desfocado que
+ * acompanha a luz por fora do cartão. Selo sobre a borda superior, fora do fluxo: o
+ * conteúdo dos quatro cartões continua alinhado.
+ */
+@property --orbit {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+/* Contexto próprio: o brilho (z-index −1) fica atrás do cartão, mas acima do fundo. */
+.cards,
+.picker {
+  isolation: isolate;
+}
+
+.cardFeatured {
+  border-color: transparent;
+}
+
+.cardFeatured::before,
+.cardFeatured::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  /* Sobre fundo claro, neon é cor saturada (não branco): base Coral suave e a luz que
+   * corre em Coral pleno, com o pico um tom mais quente. */
+  background: conic-gradient(
+    from var(--orbit),
+    rgba(255, 106, 61, 0.38) 0deg,
+    rgba(255, 106, 61, 0.38) 220deg,
+    var(--color-coral) 275deg,
+    #ff4f1f 318deg,
+    var(--color-coral) 345deg,
+    rgba(255, 106, 61, 0.38) 360deg
+  );
+  pointer-events: none;
+}
+
+/* A borda: o gradiente só aparece numa faixa de 2,5px (máscara vazada no miolo). */
+.cardFeatured::before {
+  padding: 2.5px;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+/* O brilho neon por fora: o mesmo gradiente, desfocado, atrás do cartão. */
+.cardFeatured::after {
+  z-index: -1;
+  inset: -3px;
+  filter: blur(14px);
+  opacity: 0.85;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cardFeatured::before,
+  .cardFeatured::after {
+    animation: orbit 3.6s linear infinite;
+  }
+}
+
+/* Sem movimento: borda Coral inteira e brilho uniforme, sem luz correndo. */
+@media (prefers-reduced-motion: reduce) {
+  .cardFeatured::before,
+  .cardFeatured::after {
+    background: var(--color-coral);
+  }
+
+  .cardFeatured::after {
+    opacity: 0.45;
+  }
+}
+
+@keyframes orbit {
+  to {
+    --orbit: 360deg;
+  }
+}
+
+.featuredBadge {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  padding: 5px 14px;
+  border-radius: var(--radius-pill);
+  background: var(--color-coral);
+  box-shadow: 0 0 16px -2px rgba(255, 106, 61, 0.65);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  /* Grafite sobre Coral (≈6,5:1); branco ficaria em ≈2,6:1. */
+  color: var(--color-grafite);
+  transform: translate(-50%, -50%);
+}
+
+.cardHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 32px;
+}
+
+.planName {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.price {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-top: var(--space-3);
+  color: var(--color-grafite);
+}
+
+.price strong {
+  font-family: var(--font-display);
+  font-size: clamp(2.5rem, 1.6rem + 2vw, 3.25rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.currency {
+  align-self: flex-start;
+  margin-top: 0.35em;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.per {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--color-text-secondary-light);
+}
+
+.total {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--color-text-secondary-light);
+}
+
+.discount {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 26px;
+  margin-bottom: var(--space-3);
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary-light);
+}
+
+.discount span {
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(37, 226, 126, 0.22);
+  font-weight: 700;
+  color: var(--color-petroleo);
+}
+
+.discountNone {
+  color: var(--color-text-secondary-light);
+}
+
+.benefits {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding-top: var(--space-5);
+  border-top: var(--border-light);
+}
+
+.benefits li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: 0.9375rem;
+  line-height: 1.4;
+}
+
+.benefits svg {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  margin-top: 1px;
+  fill: none;
+  stroke: var(--color-petroleo);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* --- Seletor (mobile/tablet) --------------------------------------------- */
+.picker {
+  display: grid;
+  gap: var(--space-4);
+}
+
+@media (min-width: 768px) and (max-width: 1023.98px) {
+  .picker {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    align-items: start;
+    gap: var(--space-6);
+  }
+}
+
+.options {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.option {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  grid-template-areas:
+    'radio name price'
+    'radio off price';
+  align-items: center;
+  column-gap: var(--space-3);
+  min-height: 64px;
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-white);
+  cursor: pointer;
+  transition:
+    border-color 200ms var(--ease-ui),
+    box-shadow 200ms var(--ease-ui);
+}
+
+.optionActive {
+  border-color: var(--color-petroleo);
+  box-shadow: 0 0 0 1px var(--color-petroleo);
+}
+
+.option:has(:focus-visible) {
+  outline: 2px solid var(--color-petroleo);
+  outline-offset: 3px;
+}
+
+.radio {
+  grid-area: radio;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--color-petroleo);
+}
+
+.optionName {
+  grid-area: name;
+  font-weight: 700;
+}
+
+.optionPrice {
+  grid-area: price;
+  font-family: var(--font-display);
+  font-size: 1.125rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+.optionPrice small {
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary-light);
+}
+
+.optionOff {
+  grid-area: off;
+  width: fit-content;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-petroleo);
+}
+
+.detail {
+  box-shadow: var(--shadow-premium);
+}
+
+@media (min-width: 1024px) {
+  .picker {
+    display: none;
+  }
+}
+
+/* CTA dos cartões: rótulo completo cabendo na coluna estreita do desktop. */
+.cards .card > a {
+  gap: var(--space-2);
+  padding-inline: var(--space-4);
+  font-size: 0.8125rem;
+  letter-spacing: 0.05em;
+}
+
+/* --- Rodapé da seção ---------------------------------------------------- */
+.footnote {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 62ch;
+  margin-top: clamp(32px, 5vw, 64px);
+  font-size: 0.9375rem;
+}
+
+@media (min-width: 1024px) {
+  .footnote {
+    margin-inline: auto;
+    text-align: center;
+  }
+}
