@@ -1,0 +1,62 @@
+.manifesto {
+  position: relative;
+}
+
+.stage {
+  padding-block: var(--section-pad);
+}
+
+/* --- Frases ----------------------------------------------------------------- */
+.statements {
+  /* Sublinhado de "continuar." em Pulso, como antes. */
+  --fold-underline-color: var(--color-pulso);
+  display: grid;
+  justify-items: center;
+  gap: clamp(56px, 9vw, 136px);
+  text-align: center;
+}
+
+.statement {
+  max-width: 15ch;
+  font-family: var(--font-display);
+  font-size: clamp(2.75rem, 0.6rem + 11vw, 8rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.035em;
+  color: var(--color-text-primary-light);
+  text-wrap: balance;
+}
+
+.closing {
+  max-width: 11ch;
+  /* Piso do mobile: "ACONTECER!" (≈5,9em) cabe inteiro em 320px. */
+  font-size: clamp(2.875rem, 0.6rem + 11.5vw, 10rem);
+  font-weight: 800;
+  line-height: 0.92;
+  letter-spacing: -0.025em;
+  text-transform: uppercase;
+}
+
+.pulso {
+  color: var(--color-pulso);
+}
+
+.coral {
+  color: var(--color-coral);
+}
+
+/* --- Caixa: uma frase por vez, no mesmo lugar (só com o efeito ativo) -------- */
+/* Sem piso de tela cheia: a altura é a da frase mais alta mais o --section-pad. */
+.stage[data-motion-live] {
+  display: grid;
+  align-items: center;
+}
+
+/* Todas na mesma célula: a caixa tem a altura da frase mais alta e não pula na troca. */
+.stage[data-motion-live] .statements {
+  grid-template-areas: 'phrase';
+}
+
+.stage[data-motion-live] .statement {
+  grid-area: phrase;
+}

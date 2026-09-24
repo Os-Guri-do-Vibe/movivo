@@ -11,16 +11,17 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { PinoLogger } from 'nestjs-pino';
 
 import {
-  type CheckoutSession,
-  type CreateCheckoutInput,
   type GatewayEvent,
   type GatewayEventType,
   type GatewaySubscription,
   type PaymentGateway,
+  type PaymentStartResult,
+  type StartPaymentInput,
 } from './payment-gateway.types';
 
 /**
- * Segredo de webhook do MOCK — **dev-only** (o mock nunca roda em produção; lá é STRIPE/ASAAS
+ * Segredo de webhook do MOCK — **dev-only** (o mock nunca roda em produção; o adaptador real é
+ * Asaas e permanece travado no Sandbox até liberação explícita
  * com o secret real). Permite ao teste gerar assinatura válida via `sign()` e exercitar
  * forjado/replay. ponytail: fixo de propósito; não é credencial de produção.
  */
@@ -46,22 +47,31 @@ export class MockGateway implements PaymentGateway {
     return true; // o mock está sempre "configurado"
   }
 
-  createCheckoutSession(input: CreateCheckoutInput): Promise<CheckoutSession> {
-    const externalSessionId = `mock_cs_${randomUUID()}`;
+  startPayment(input: StartPaymentInput): Promise<PaymentStartResult> {
+    const id = randomUUID();
     this.logger.info(
       { userId: input.userId, plan: input.plan, method: input.method },
-      'checkout MOCK criado',
+      'pagamento MOCK iniciado',
     );
-    // URL fake — o frontend (US-4.6) trata; nenhuma cobrança acontece.
     return Promise.resolve({
-      checkoutUrl: `https://mock.checkout/${externalSessionId}`,
-      externalSessionId,
+      status: 'PENDING',
+      externalCustomerId: `mock_cus_${input.userId}`,
+      externalSubscriptionId: `mock_sub_${id}`,
+      ...(input.method === 'PIX' || input.method === 'PIX_AUTOMATIC'
+        ? {
+            qrCode: {
+              encodedImage: 'mock-base64',
+              payload: `mock-pix-${id}`,
+              expirationDate: new Date(Date.now() + 3_600_000).toISOString(),
+            },
+          }
+        : {}),
     });
   }
 
   /**
    * Verifica a assinatura HMAC (+ janela de 300s) e parseia o corpo bruto no `GatewayEvent`
-   * normalizado. Assinatura ausente/errada/expirada → `null` (o webhook responde 200 e ignora).
+   * normalizado. Assinatura ausente/errada/expirada → `null` (o webhook responde 401).
    * O corpo é o mesmo formato que `emit()` produz, serializado em JSON.
    */
   parseWebhookEvent(
@@ -94,8 +104,8 @@ export class MockGateway implements PaymentGateway {
     return mockSignature(timestamp, rawBody);
   }
 
-  cancelSubscription(externalSubscriptionId: string): Promise<void> {
-    this.logger.info({ externalSubscriptionId }, 'cancelamento MOCK');
+  cancelContract(refs: import('./payment-gateway.types').ExternalContractRefs): Promise<void> {
+    this.logger.info({ refs }, 'cancelamento MOCK');
     return Promise.resolve();
   }
 

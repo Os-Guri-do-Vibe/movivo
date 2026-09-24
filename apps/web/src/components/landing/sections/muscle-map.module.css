@@ -1,0 +1,222 @@
+.muscle {
+  position: relative;
+  background:
+    radial-gradient(45% 50% at 30% 60%, rgba(6, 48, 42, 0.6) 0%, rgba(6, 48, 42, 0) 70%),
+    var(--color-grafite);
+}
+
+.layout {
+  display: grid;
+  gap: var(--space-12);
+}
+
+.header {
+  display: grid;
+  gap: var(--space-6);
+}
+
+@media (min-width: 1024px) {
+  .header {
+    grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+    align-items: end;
+    column-gap: var(--space-12);
+  }
+
+  .body {
+    padding-bottom: 0.6rem;
+  }
+}
+
+.explorer {
+  display: grid;
+  gap: var(--space-10);
+}
+
+@media (min-width: 1024px) {
+  .explorer {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    align-items: center;
+    gap: var(--space-16);
+  }
+}
+
+/* --- Corpos -------------------------------------------------------------- */
+.figuresWrap {
+  position: relative;
+  border: var(--border-dark);
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(60% 55% at 50% 45%, rgba(37, 226, 126, 0.07) 0%, rgba(37, 226, 126, 0) 70%),
+    #101a17;
+  padding: clamp(16px, 3vw, 40px);
+}
+
+.figures,
+.figuresLoading {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(8px, 3vw, 40px);
+  /* Proporção do corpo (361.16 × 541.87) reservada: zero CLS enquanto a imagem carrega. */
+  aspect-ratio: calc(2 * 361.16 / 541.87 + 0.08);
+}
+
+.figure {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: var(--space-2);
+}
+
+.body {
+  width: 100%;
+}
+
+.body :global(svg path) {
+  transition:
+    opacity 300ms var(--ease-ui),
+    fill 300ms var(--ease-ui);
+  cursor: pointer;
+}
+
+.viewLabel {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary-dark);
+}
+
+/* --- Controles ----------------------------------------------------------- */
+.controls {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.controlsLabel {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary-dark);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: 0 var(--space-5);
+  border: var(--border-dark);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--color-text-primary-dark);
+  cursor: pointer;
+  transition:
+    background-color 280ms var(--ease-ui),
+    border-color 280ms var(--ease-ui),
+    color 280ms var(--ease-ui);
+}
+
+.chipDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(37, 226, 126, 0.42);
+  transition:
+    background-color 280ms var(--ease-ui),
+    box-shadow 280ms var(--ease-ui);
+}
+
+.chipActive {
+  border-color: var(--color-pulso);
+  background: var(--color-pulso-08);
+}
+
+.chipActive .chipDot {
+  background: var(--color-pulso);
+  box-shadow: 0 0 0 4px rgba(37, 226, 126, 0.2);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .chip:hover {
+    border-color: rgba(37, 226, 126, 0.5);
+  }
+}
+
+.panel {
+  display: grid;
+  gap: var(--space-5);
+  padding: var(--space-6);
+  border: var(--border-dark);
+  border-radius: var(--radius-lg);
+  background: rgba(3, 17, 14, 0.4);
+}
+
+.panelTitle {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 1.4rem + 2vw, 3rem);
+  font-weight: 800;
+  line-height: 0.95;
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+}
+
+.panelData {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.panelData div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: var(--border-dark);
+}
+
+.panelData dt {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary-dark);
+}
+
+.panelData dd {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+.week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: var(--space-2);
+}
+
+.weekDay {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  max-width: 40px;
+  border: var(--border-dark);
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-text-secondary-dark);
+}
+
+.weekDayOn {
+  border-color: var(--color-pulso);
+  background: var(--color-pulso);
+  color: var(--color-bg-dark);
+}

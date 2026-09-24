@@ -1,0 +1,586 @@
+/* =============================================================================
+ * Hero cinematográfico. Mobile-first: < 1024px a composição é vertical (copy na
+ * metade de baixo, máscara vertical); ≥ 1024px a copy fica à esquerda e a máscara
+ * principal é horizontal. O filme é o protagonista — as máscaras só protegem a copy.
+ * ========================================================================== */
+
+.hero {
+  /* Enquadramento do filme (pôster e vídeo usam o mesmo): no retrato, a janela de
+   * 16:9 recortada privilegia a faixa onde a personagem passa (~30–50% da largura). */
+  --hero-focus: 36% 50%;
+  position: relative;
+  display: grid;
+  align-items: end;
+  min-height: 100vh;
+  min-height: 100svh;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--color-grafite);
+}
+
+/* Altura travada só quando há espaço: em telas baixas (paisagem, zoom 200%) o Hero
+ * cresce com o conteúdo em vez de cortá-lo. */
+@media (min-height: 600px) {
+  .hero {
+    height: 100vh;
+    height: 100svh;
+  }
+}
+
+@media (min-width: 1024px) {
+  .hero {
+    --hero-focus: 50% 50%;
+    align-items: center;
+  }
+}
+
+/* --- Filme --------------------------------------------------------------- */
+.film {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-media);
+  overflow: hidden;
+  background: var(--color-grafite);
+  transform-origin: 50% 50%;
+  pointer-events: none;
+}
+
+/* --- Máscaras (cada uma com um papel; nenhuma captura ponteiro) -------------- */
+.mask {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-overlay);
+  pointer-events: none;
+}
+
+/* 01 · Base color wash: integra o filme à identidade (Petróleo), sem tingir de verde. */
+.maskBase {
+  background: rgba(6, 48, 42, 0.18);
+}
+
+/*
+ * 02 · Legibilidade. Mobile/tablet: composição vertical (a copy está embaixo), com
+ * Petróleo na transição. Desktop: gradiente horizontal atrás da copy à esquerda.
+ */
+.maskReadability {
+  background: linear-gradient(
+    180deg,
+    rgba(20, 32, 28, 0.16) 0%,
+    rgba(20, 32, 28, 0.16) 28%,
+    rgba(6, 48, 42, 0.46) 52%,
+    rgba(20, 32, 28, 0.74) 74%,
+    rgba(20, 32, 28, 0.86) 100%
+  );
+}
+
+@media (min-width: 1024px) {
+  .maskReadability {
+    background: linear-gradient(
+      90deg,
+      rgba(20, 32, 28, 0.84) 0%,
+      rgba(20, 32, 28, 0.7) 20%,
+      rgba(6, 48, 42, 0.48) 38%,
+      rgba(6, 48, 42, 0.18) 62%,
+      rgba(6, 48, 42, 0.03) 100%
+    );
+  }
+}
+
+/*
+ * 03 · Vertical cinematográfica: segura os altos no topo (navbar legível sobre janelas
+ * claras) e aprofunda a base, entregando a seção seguinte em Grafite.
+ */
+.maskCinematic {
+  background: linear-gradient(
+    180deg,
+    rgba(20, 32, 28, 0.42) 0%,
+    rgba(20, 32, 28, 0.12) 14%,
+    rgba(20, 32, 28, 0) 30%
+  );
+}
+
+@media (min-width: 1024px) {
+  .maskCinematic {
+    background: linear-gradient(
+      180deg,
+      rgba(20, 32, 28, 0.34) 0%,
+      rgba(20, 32, 28, 0.08) 16%,
+      rgba(20, 32, 28, 0.02) 32%,
+      rgba(20, 32, 28, 0.04) 63%,
+      rgba(20, 32, 28, 0.4) 88%,
+      rgba(20, 32, 28, 0.66) 100%
+    );
+  }
+}
+
+/* 04 · Vinheta quase inconsciente. */
+.maskVignette {
+  background: radial-gradient(
+    ellipse at center,
+    rgba(20, 32, 28, 0) 42%,
+    rgba(20, 32, 28, 0.08) 70%,
+    rgba(20, 32, 28, 0.24) 100%
+  );
+}
+
+/* --- Conteúdo ------------------------------------------------------------- */
+.content {
+  position: relative;
+  z-index: var(--z-section-ui);
+  padding-top: calc(var(--nav-height) + env(safe-area-inset-top) + var(--space-6));
+  /* Espaço do scroll cue + barra do navegador / home indicator. */
+  padding-bottom: calc(104px + env(safe-area-inset-bottom));
+}
+
+@media (min-width: 1024px) {
+  .content {
+    /* Centro vertical, levemente abaixo do centro óptico. */
+    padding-top: calc(var(--nav-height) + 7svh);
+    padding-bottom: 6svh;
+  }
+}
+
+.copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 880px;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: var(--text-hero);
+  font-weight: 700;
+  line-height: 0.92;
+  /* Mais fechado que isso, a Cabinet 700 encosta "TI", "IA" e "AL" em POTENTIAL. */
+  letter-spacing: -0.03em;
+  text-transform: uppercase;
+  color: var(--color-nevoa);
+}
+
+/* "MOVE YOUR / POTENTIAL." — a quebra é controlada; só em 320px "MOVE YOUR" pode
+ * quebrar para nunca gerar rolagem horizontal. */
+@media (min-width: 360px) {
+  .titleLine,
+  .typed {
+    white-space: nowrap;
+  }
+}
+
+@media (min-width: 1024px) {
+  .title {
+    line-height: 0.9;
+  }
+}
+
+.titleLine {
+  padding-right: 0.04em;
+}
+
+/*
+ * "POTENTIAL." na mesma cor do título, digitado em loop. Ciclo de 4,3s para as 10 teclas:
+ *   digita  tecla i em i × 70ms ............................ 0 → 630ms
+ *   segura  com o cursor piscando .......................... até 2830ms
+ *   apaga   tecla i em 2830 + (9 − i) × 45ms (da última) ..... 2830 → 3235ms
+ *   vazio   com o cursor piscando no início ................ 3235 → 4300ms
+ * Os percentuais dos @keyframes (key-on, key-off e caret-…) derivam destes tempos: se
+ * mudar um valor aqui, recalcule-os. A folga à direita guarda o cursor.
+ */
+.typed {
+  --type-start: 560ms; /* primeira volta: depois de "MOVE YOUR" subir */
+  --type-step: 70ms;
+  --type-hold-end: 2830ms;
+  --type-del: 45ms;
+  --type-cycle: 4300ms;
+  position: relative;
+  display: block;
+  padding-right: 0.14em;
+}
+
+.key {
+  position: relative;
+  display: inline-block;
+}
+
+/* Cursor: existe em cada tecla (::after ao digitar, ::before ao apagar) e no início da
+ * palavra (vazia), mas só aparece enquanto está na posição certa. */
+.key::after,
+.key::before,
+.typed::before {
+  content: '';
+  position: absolute;
+  top: 0.06em;
+  bottom: 0.1em;
+  right: -0.08em;
+  width: 0.055em;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0;
+}
+
+.typed::before {
+  top: 0.14em;
+  bottom: 0.18em;
+  right: auto;
+  left: -0.02em;
+}
+
+.lead {
+  max-width: 34ch;
+  margin-top: var(--space-6);
+  font-size: 1rem;
+  line-height: 1.5;
+  color: rgba(244, 247, 243, 0.84);
+}
+
+@media (min-width: 768px) {
+  .lead {
+    max-width: 560px;
+    margin-top: var(--space-8);
+    font-size: clamp(1.125rem, 0.9rem + 0.45vw, 1.3125rem);
+  }
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  gap: var(--space-4) var(--space-3);
+  margin-top: var(--space-8);
+}
+
+@media (min-width: 640px) {
+  .actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    /* Botões alinhados pelo topo; a microcopy fica só sob o CTA primário. */
+    align-items: flex-start;
+    align-self: flex-start;
+  }
+}
+
+/* CTA primário + microcopy centralizada logo abaixo dele. */
+.primaryGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+@media (min-width: 640px) {
+  .primaryGroup {
+    align-items: center;
+  }
+}
+
+@media (min-width: 1024px) {
+  .actions {
+    margin-top: var(--space-10);
+  }
+}
+
+/* CTA primário: Pulse Button do DS, com hover contido (sem escala, sem halo largo). */
+.primaryCta {
+  color: var(--color-grafite);
+  transition-duration: 220ms;
+}
+
+.secondaryCta {
+  border-color: rgba(244, 247, 243, 0.3);
+  color: var(--color-nevoa);
+  transition-duration: 220ms;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .actions .primaryCta:hover {
+    --scale: 1;
+    --my: -1px;
+    filter: brightness(1.06);
+    box-shadow: 0 10px 28px -16px rgba(37, 226, 126, 0.6);
+  }
+
+  .actions .secondaryCta:hover {
+    --scale: 1;
+    --my: -1px;
+    border-color: rgba(244, 247, 243, 0.55);
+    background: rgba(244, 247, 243, 0.08);
+  }
+}
+
+.micro {
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  text-align: center;
+  color: rgba(244, 247, 243, 0.62);
+}
+
+/* --- Scroll cue ----------------------------------------------------------- */
+.scrollCue {
+  position: absolute;
+  z-index: var(--z-section-ui);
+  left: 50%;
+  bottom: calc(var(--space-6) + env(safe-area-inset-bottom));
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 44px;
+  min-height: 44px;
+  padding: var(--space-1) var(--space-2);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(244, 247, 243, 0.62);
+  text-decoration: none;
+  transform: translateX(-50%);
+}
+
+@media (min-width: 1024px) {
+  .scrollCue {
+    bottom: var(--space-8);
+  }
+}
+
+.scrollLine {
+  position: relative;
+  width: 1px;
+  height: 26px;
+  background: linear-gradient(180deg, rgba(244, 247, 243, 0), rgba(244, 247, 243, 0.45));
+}
+
+.scrollLine::after {
+  content: '';
+  position: absolute;
+  left: -2px;
+  bottom: -2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-pulso);
+}
+
+/* --- Entrada (CSS: acontece na primeira pintura, sem esperar o JS) -------- */
+@media (prefers-reduced-motion: no-preference) {
+  .lead,
+  .primaryCta,
+  .secondaryCta,
+  .micro {
+    animation: hero-rise 850ms var(--ease-editorial) backwards;
+  }
+
+  .titleLine {
+    animation: line-up 1000ms var(--ease-editorial) 260ms backwards;
+  }
+
+  /* Cada tecla: aparece em --key-at (opacidade) e some em --key-gone (visibilidade);
+   * as duas animações têm o mesmo ciclo, então o par se repete sem parar. */
+  .key {
+    --key-at: calc(var(--type-start) + var(--key) * var(--type-step));
+    --key-gone: calc(var(--type-start) + var(--type-hold-end) + var(--key-rev) * var(--type-del));
+    opacity: 0;
+    animation:
+      key-on var(--type-cycle) step-end var(--key-at) infinite,
+      key-off var(--type-cycle) step-end var(--key-gone) infinite;
+  }
+
+  .key::after {
+    animation: caret-type var(--type-cycle) step-end var(--key-at) infinite;
+  }
+
+  .key::before {
+    animation: caret-del var(--type-cycle) step-end calc(var(--key-gone) - var(--type-del)) infinite;
+  }
+
+  /* Última tecla: o cursor pisca enquanto a palavra fica inteira. */
+  .key:last-child::after {
+    animation: caret-hold var(--type-cycle) step-end var(--key-at) infinite;
+  }
+
+  .key:last-child::before {
+    animation: none;
+  }
+
+  /* Palavra apagada: o cursor pisca no início até a próxima volta. */
+  .typed::before {
+    animation: caret-empty var(--type-cycle) step-end
+      calc(var(--type-start) + var(--type-hold-end) + var(--key-last) * var(--type-del)) infinite;
+  }
+
+  .lead {
+    animation-delay: 880ms;
+  }
+
+  .primaryCta {
+    animation-delay: 980ms;
+  }
+
+  .secondaryCta {
+    animation-delay: 1040ms;
+  }
+
+  .micro {
+    animation-delay: 1100ms;
+  }
+
+  .scrollCue {
+    animation: fade 900ms var(--ease-ui) 1400ms backwards;
+  }
+
+  .scrollLine {
+    animation: cue 2.8s var(--ease-organic) 2s infinite;
+  }
+
+  /* Enquanto o preloader estiver na tela, a entrada espera por ele. */
+  :global(#mv-preloader[data-state='active']) ~ * .hero *,
+  :global(#mv-preloader[data-state='active']) ~ * .hero *::before,
+  :global(#mv-preloader[data-state='active']) ~ * .hero *::after {
+    animation-play-state: paused;
+  }
+}
+
+@keyframes line-up {
+  from {
+    transform: translateY(105%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+/* Ciclo de 4300ms (ver .typed). Com step-end, cada valor vale até o próximo quadro. */
+
+/* Visível por 3235ms a partir de --key-at (até a primeira tecla ser apagada). */
+@keyframes key-on {
+  0% {
+    opacity: 1;
+  }
+  75.2326% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Escondida por 1035ms a partir de --key-gone (cobre o fim da janela de key-on). */
+@keyframes key-off {
+  0% {
+    visibility: hidden;
+  }
+  24.0698% {
+    visibility: visible;
+  }
+  100% {
+    visibility: visible;
+  }
+}
+
+/* Cursor depois da tecla recém-digitada: 70ms. */
+@keyframes caret-type {
+  0% {
+    opacity: 1;
+  }
+  1.6279% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Cursor depois da tecla que ficou por último ao apagar: 45ms. */
+@keyframes caret-del {
+  0% {
+    opacity: 1;
+  }
+  1.0465% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Palavra inteira (2200ms): pisca a cada 275ms. */
+@keyframes caret-hold {
+  0% {
+    opacity: 1;
+  }
+  6.3953% {
+    opacity: 0;
+  }
+  12.7907% {
+    opacity: 1;
+  }
+  19.186% {
+    opacity: 0;
+  }
+  25.5814% {
+    opacity: 1;
+  }
+  31.9767% {
+    opacity: 0;
+  }
+  38.3721% {
+    opacity: 1;
+  }
+  44.7674% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Palavra vazia (1065ms): pisca duas vezes no início. */
+@keyframes caret-empty {
+  0% {
+    opacity: 1;
+  }
+  6.186% {
+    opacity: 0;
+  }
+  12.372% {
+    opacity: 1;
+  }
+  18.558% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes hero-rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes cue {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  50% {
+    transform: translateY(5px);
+    opacity: 1;
+  }
+}

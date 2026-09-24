@@ -1,0 +1,289 @@
+.footer {
+  /* Corpo do cartão: Névoa com 8% de Musgo, um passo abaixo do fundo da página. */
+  --footer-shell: #e9edea;
+  --footer-radius: var(--radius-lg);
+  position: relative;
+  padding-top: clamp(var(--space-6), 4vw, var(--space-16));
+  padding-bottom: max(var(--space-6), env(safe-area-inset-bottom));
+  overflow: hidden;
+}
+
+@media (min-width: 768px) {
+  .footer {
+    --footer-radius: var(--radius-xl);
+  }
+}
+
+/* --- Cartões sobrepostos --------------------------------------------------- */
+/* O raio de fora = raio de dentro + a margem entre eles: as curvas ficam concêntricas. */
+.shell {
+  overflow: hidden;
+  border: var(--border-light);
+  border-radius: calc(var(--footer-radius) + var(--space-2));
+  background: var(--footer-shell);
+  box-shadow: 0 1px 2px rgba(20, 32, 28, 0.05);
+}
+
+.card {
+  display: grid;
+  gap: var(--space-12);
+  margin: var(--space-2);
+  padding: var(--space-8) var(--space-6);
+  border-radius: var(--footer-radius);
+  background: var(--color-white);
+  box-shadow:
+    0 1px 3px rgba(20, 32, 28, 0.06),
+    0 1px 2px rgba(20, 32, 28, 0.04);
+}
+
+@media (min-width: 768px) {
+  .card {
+    padding: var(--space-10);
+  }
+}
+
+@media (min-width: 1024px) {
+  .card {
+    grid-template-columns: 2fr 3fr;
+    padding: var(--space-12);
+  }
+}
+
+/* --- Marca ----------------------------------------------------------------- */
+.brand {
+  display: grid;
+  align-content: start;
+  gap: var(--space-6);
+}
+
+.logoLink {
+  display: inline-flex;
+  width: fit-content;
+  color: var(--color-text-primary-light);
+}
+
+.logo {
+  width: 148px;
+}
+
+.description {
+  max-width: 34ch;
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--color-text-secondary-light);
+}
+
+.professional {
+  max-width: 44ch;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--color-text-secondary-light);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.social {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(20, 32, 28, 0.08);
+  border-radius: var(--radius-sm);
+  background: var(--color-white);
+  box-shadow: 0 1px 2px rgba(20, 32, 28, 0.05);
+  color: var(--color-text-primary-light);
+  transition:
+    background-color 200ms var(--ease-ui),
+    transform 160ms var(--ease-ui);
+}
+
+.social:active {
+  transform: scale(0.95);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .social:hover {
+    background: var(--color-bg-light);
+  }
+}
+
+.socialIcon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.socialDot {
+  fill: currentColor;
+}
+
+/* --- Navegação ------------------------------------------------------------- */
+.columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-10) var(--space-6);
+}
+
+@media (min-width: 768px) {
+  .columns {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-8);
+  }
+}
+
+.column {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+}
+
+.columnTitle {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary-light);
+}
+
+.columnLinks {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.columnLinks a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--color-text-primary-light);
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 5px;
+  transition: text-decoration-color 200ms var(--ease-ui);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .columnLinks a:hover {
+    text-decoration-color: var(--color-pulso);
+  }
+}
+
+/* --- Barra legal (no corpo, fora do cartão) -------------------------------- */
+.legal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-6);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-secondary-light);
+  text-align: center;
+}
+
+@media (min-width: 768px) {
+  .legal {
+    flex-direction: row;
+    justify-content: space-between;
+    padding-inline: var(--space-16);
+    font-size: 0.9375rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .legal {
+    padding-inline: var(--space-20);
+  }
+}
+
+.legalLinks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  row-gap: var(--space-2);
+}
+
+.legalLinks li {
+  display: flex;
+  align-items: center;
+}
+
+/* Fio vertical entre os links, como separador. */
+.legalLinks li + li::before {
+  content: '';
+  width: 1px;
+  height: 16px;
+  margin-inline: var(--space-8);
+  background: rgba(20, 32, 28, 0.2);
+}
+
+.legalLinks a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  color: inherit;
+  text-decoration: none;
+  transition: color 200ms var(--ease-ui);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .legalLinks a:hover {
+    color: var(--color-text-primary-light);
+  }
+}
+
+/* --- Assinatura em vidro ----------------------------------------------------- */
+.glass {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  padding: clamp(var(--space-6), 3vw, var(--space-10)) var(--space-4) 0;
+  user-select: none;
+}
+
+.filterDefs {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.glassWord {
+  width: 100%;
+  color: var(--color-white);
+  filter: url(#movivo-glass-effect);
+}
+
+.wordmark {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+/* Entrada: opacidade + escala 0,98 → 1 em 1,8s na curva orgânica. Só com o efeito ativo;
+ * sem JS ou com movimento reduzido a assinatura já está no lugar. */
+.glass[data-motion-live] .glassWord {
+  opacity: 0;
+  transform: scale(0.98);
+  transition:
+    opacity 1.8s var(--ease-organic),
+    transform 1.8s var(--ease-organic);
+}
+
+.glass[data-motion-live] .glassWord[data-in] {
+  opacity: 1;
+  transform: none;
+}

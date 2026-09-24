@@ -66,8 +66,12 @@ beforeAll(async () => {
             ${SUBMITTED_AT}, ${SUBMITTED_AT}, ${SUBMITTED_AT})
   `;
   await migrator`
-    INSERT INTO subscriptions (user_id, plan, price_cents, status, trial_ends_at, created_at, updated_at)
-    VALUES (${studentId}::uuid, 'MONTHLY', 3900, 'TRIALING', '2026-09-01T00:00:00Z', ${SUBMITTED_AT}, ${SUBMITTED_AT})
+    INSERT INTO subscriptions
+      (user_id, plan, price_cents, monthly_price_cents, total_price_cents,
+       commitment_months, status, trial_ends_at, created_at, updated_at)
+    VALUES
+      (${studentId}::uuid, 'MONTHLY', 3900, 3900, 3900, 1, 'TRIALING',
+       '2026-09-01T00:00:00Z', ${SUBMITTED_AT}, ${SUBMITTED_AT})
   `;
 
   app = await NestFactory.create(AppModule, { logger: false });

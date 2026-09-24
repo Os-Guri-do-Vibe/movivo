@@ -5,7 +5,8 @@
  * Semestral ou Anual), com trial de 7 dias **sem cartão**. Os preços vivem na
  * fonte única `SUBSCRIPTION_PLANS`; não existe tiering de features.
  */
-import { index, integer, pgTable, text, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { check, index, integer, pgTable, text, uniqueIndex, varchar } from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
 import { paymentProviderEnum, subscriptionPlanEnum, subscriptionStatusEnum } from './enums';
@@ -30,6 +31,11 @@ export const subscriptions = pgTable(
      */
     priceCents: integer('price_cents').notNull(),
 
+    /** Snapshot comercial do contrato. Atualização futura do catálogo nunca reprecifica a linha. */
+    monthlyPriceCents: integer('monthly_price_cents').notNull(),
+    totalPriceCents: integer('total_price_cents').notNull(),
+    commitmentMonths: integer('commitment_months').notNull(),
+
     currency: varchar('currency', { length: 3 }).notNull().default('BRL'),
 
     status: subscriptionStatusEnum('status').notNull().default('TRIALING'),
@@ -45,11 +51,22 @@ export const subscriptions = pgTable(
     externalCustomerId: varchar('external_customer_id', { length: 255 }),
     externalCheckoutSessionId: varchar('external_checkout_session_id', { length: 255 }),
     externalPriceId: varchar('external_price_id', { length: 255 }),
+    externalPaymentId: varchar('external_payment_id', { length: 255 }),
+    externalInstallmentId: varchar('external_installment_id', { length: 255 }),
+    externalAuthorizationId: varchar('external_authorization_id', { length: 255 }),
+
+    /** Forma e limites autorizados no contrato — nunca inferidos depois pelo catálogo atual. */
+    paymentMethod: varchar('payment_method', { length: 30 }),
+    installmentCount: integer('installment_count'),
+    authorizedPaymentCount: integer('authorized_payment_count'),
+    /** Incrementado somente ao substituir uma cobrança Pix expirada/cancelada. */
+    paymentAttempt: integer('payment_attempt').notNull().default(0),
 
     trialStartedAt: eventTimestamp('trial_started_at'),
     trialEndsAt: eventTimestamp('trial_ends_at'),
     currentPeriodStart: eventTimestamp('current_period_start'),
     currentPeriodEnd: eventTimestamp('current_period_end'),
+    nextBillingAt: eventTimestamp('next_billing_at'),
     canceledAt: eventTimestamp('canceled_at'),
 
     /** Motivo declarado do cancelamento — insumo direto de retenção/churn. */
@@ -72,13 +89,29 @@ export const subscriptions = pgTable(
     index('idx_subscriptions_trial_ends_at').on(table.trialEndsAt),
     /*
      * Idempotência do webhook de pagamento: o mesmo evento reentregue pelo
-     * Stripe/Asaas não pode criar uma segunda assinatura. `uniqueIndex` em vez
+     * O provedor não pode criar uma segunda assinatura. `uniqueIndex` em vez
      * de `unique` porque a coluna é nula durante o trial e, no PostgreSQL,
      * múltiplos NULLs não colidem em índice único — que é exatamente o
      * comportamento desejado aqui.
      */
     uniqueIndex('uq_subscriptions_external_id').on(table.externalSubscriptionId),
     uniqueIndex('uq_subscriptions_external_checkout_session').on(table.externalCheckoutSessionId),
+    uniqueIndex('uq_subscriptions_external_payment').on(table.externalPaymentId),
+    uniqueIndex('uq_subscriptions_external_installment').on(table.externalInstallmentId),
+    uniqueIndex('uq_subscriptions_external_authorization').on(table.externalAuthorizationId),
+    check('ck_subscriptions_monthly_price_positive', sql`${table.monthlyPriceCents} > 0`),
+    check('ck_subscriptions_total_price_positive', sql`${table.totalPriceCents} > 0`),
+    check('ck_subscriptions_commitment_months', sql`${table.commitmentMonths} between 1 and 12`),
+    check(
+      'ck_subscriptions_payment_method',
+      sql`${table.paymentMethod} in ('CARD', 'PIX', 'PIX_AUTOMATIC')`,
+    ),
+    check('ck_subscriptions_installment_count', sql`${table.installmentCount} between 1 and 12`),
+    check(
+      'ck_subscriptions_authorized_payment_count',
+      sql`${table.authorizedPaymentCount} between 1 and 12`,
+    ),
+    check('ck_subscriptions_payment_attempt', sql`${table.paymentAttempt} >= 0`),
   ],
 );
 

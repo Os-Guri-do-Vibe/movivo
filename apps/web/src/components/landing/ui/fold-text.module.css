@@ -1,0 +1,44 @@
+/* Fold Text — estrutura estática. Estados de animação (rotateX, opacidade e
+ * `--fold-crease`) são aplicados inline pelo GSAP enquanto a peça dobra. */
+
+.fold {
+  display: inline;
+}
+
+/* A palavra não quebra no meio: as peças são inline-block e, sem este invólucro,
+ * o navegador poderia quebrar a linha entre dois caracteres. */
+.word {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.run {
+  position: relative;
+  display: inline-block;
+}
+
+.segment {
+  display: inline-block;
+  perspective: 700px;
+}
+
+.piece {
+  display: inline-block;
+  transform-origin: 50% 0%;
+  backface-visibility: hidden;
+  /* Sombra da dobra só na letra (nunca uma caixa atrás dela, que no fundo claro vira um
+   * cartão cinza): escurece a cor herdada enquanto a peça ainda está inclinada. Sem
+   * suporte a color-mix, a letra fica na cor normal. */
+  color: color-mix(in srgb, currentColor, #000 calc(var(--fold-crease, 0) * 60%));
+}
+
+.underline {
+  position: absolute;
+  left: 0.02em;
+  right: 0.12em;
+  bottom: 0.02em;
+  height: 0.08em;
+  border-radius: 999px;
+  background: var(--fold-underline-color, currentColor);
+  transform-origin: left;
+}

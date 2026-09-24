@@ -11,6 +11,8 @@
 export const SubscriptionStatus = {
   /** Trial de 7 dias, sem cartão cadastrado. */
   TRIALING: 'TRIALING',
+  /** Cobrança criada no Asaas, aguardando liquidação ou autorização bancária. */
+  PENDING_PAYMENT: 'PENDING_PAYMENT',
   /** Assinatura paga e adimplente. */
   ACTIVE: 'ACTIVE',
   /** Cobrança falhou; em janela de recuperação (dunning). */

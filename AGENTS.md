@@ -93,7 +93,7 @@ Herdados de Clóvis e Gabriel, valem para **qualquer texto gerado pelo sistema o
 
 ### Escopo do MVP (definido por Lucas em `08-relatorio-lucas.md`)
 
-**Dentro do MVP (P0):** Landing page → formulário de anamnese + PAR-Q conversacional em 3 blocos com salvamento de progresso → confirmação síncrona no WhatsApp → geração e entrega do protocolo inicial → conversa com AI Coach (escopo definido, memória, fallback) → check-in semanal → sequência de conversão do trial (dias 7, 10, 13, 14) → pagamento (Stripe/Asaas) → dashboard mínimo de operações para o profissional CREF → isolamento de contexto por usuário.
+**Dentro do MVP (P0):** Landing page → formulário de anamnese + PAR-Q conversacional em 3 blocos com salvamento de progresso → confirmação síncrona no WhatsApp → geração e entrega do protocolo inicial → conversa com AI Coach (escopo definido, memória, fallback) → check-in semanal → sequência de conversão do trial (dias 7, 10, 13, 14) → pagamento (Asaas Sandbox; produção condicionada ao gate PCI) → dashboard mínimo de operações para o profissional CREF → isolamento de contexto por usuário.
 
 **Fora do MVP (Fase 2):** app mobile, dashboard dedicado ao usuário final, planos anuais, wearables, gamificação, referral automatizado, nutrition coaching, PIX recorrente automático, multi-idioma, API para parceiros B2B.
 

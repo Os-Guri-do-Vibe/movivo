@@ -11,4 +11,8 @@ pnpm-lock.yaml linguist-generated=true -diff
 *.jpg binary
 *.jpeg binary
 *.webp binary
+*.avif binary
+*.mp4 binary
+*.webm binary
+*.woff2 binary
 *.svg text eol=lf

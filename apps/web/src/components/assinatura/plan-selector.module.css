@@ -1,0 +1,633 @@
+.checkoutGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(420px, 1.08fr);
+  gap: 64px;
+  align-items: start;
+}
+
+.planColumn {
+  padding: 44px 0;
+}
+.eyebrow {
+  margin: 0 0 12px;
+  color: var(--petroleo-vivo);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+.planColumn h1 {
+  max-width: 620px;
+  margin: 0;
+  color: var(--petroleo-vivo);
+  font-size: clamp(2.5rem, 5vw, 3rem);
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  line-height: 1.04;
+}
+.subtitle {
+  max-width: 520px;
+  margin: 18px 0 32px;
+  color: var(--musgo);
+  font-size: 18px;
+  line-height: 1.5;
+}
+
+.planCard {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--petroleo-vivo) 12%, transparent);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--branco) 86%, transparent);
+  box-shadow: 0 18px 50px rgba(6, 48, 42, 0.07);
+}
+.planHeading {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px;
+  color: var(--branco);
+  background: var(--petroleo-vivo);
+}
+.planHeading > div {
+  display: grid;
+}
+.planHeading span {
+  font-size: 15px;
+  font-weight: 600;
+}
+.planHeading strong {
+  margin-top: 8px;
+  color: var(--verde-pulso);
+  font-size: clamp(2rem, 5vw, 2.65rem);
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+.planHeading small {
+  margin-top: 6px;
+  color: var(--nevoa-suave);
+  font-size: 13px;
+}
+.period {
+  align-self: start;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+  padding: 7px 12px;
+  white-space: nowrap;
+}
+.planFacts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin: 0;
+  padding: 10px 24px 20px;
+}
+.planFacts div {
+  display: grid;
+  gap: 3px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.planFacts div:nth-child(odd) {
+  padding-right: 16px;
+}
+.planFacts div:nth-child(even) {
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+}
+.planFacts dt {
+  color: var(--musgo);
+  font-size: 12px;
+}
+.planFacts dd {
+  margin: 0;
+  color: var(--grafite);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.benefits {
+  display: grid;
+  gap: 13px;
+  margin: 26px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--grafite);
+  font-size: 15px;
+}
+.benefits li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.benefits svg {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  padding: 4px;
+  color: var(--petroleo-vivo);
+  background: var(--verde-pulso);
+  stroke-width: 3;
+}
+
+.paymentCard {
+  min-height: 620px;
+  padding: 30px;
+  border: 1px solid rgba(6, 48, 42, 0.12);
+  border-radius: 24px;
+  background: var(--branco);
+  box-shadow: 0 28px 80px rgba(6, 48, 42, 0.12);
+}
+.secureTitle {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 28px;
+}
+.secureTitle > div {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.secureTitle > span {
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: var(--musgo);
+  background: var(--nevoa);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.secureTitle h2 {
+  margin: 0;
+  color: var(--petroleo-vivo);
+  font-size: 22px;
+}
+.secureTitle p {
+  margin: 2px 0 0;
+  color: var(--musgo);
+  font-size: 12px;
+}
+.lock {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--petroleo-vivo);
+  background: var(--verde-pulso-tenue);
+}
+.lock svg {
+  width: 19px;
+}
+
+.methods {
+  margin: 0 0 26px;
+  padding: 0;
+  border: 0;
+}
+.methods legend {
+  margin-bottom: 10px;
+  color: var(--grafite);
+  font-size: 13px;
+  font-weight: 700;
+}
+.methodGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.methodGrid button {
+  display: grid;
+  min-height: 86px;
+  gap: 7px;
+  justify-items: start;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--grafite);
+  background: var(--branco);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    transform 180ms ease;
+}
+.methodGrid button:hover {
+  transform: translateY(-1px);
+  border-color: var(--musgo);
+}
+.methodGrid button[aria-pressed='true'] {
+  border-color: var(--petroleo-vivo);
+  background: var(--verde-pulso-tenue);
+  box-shadow: inset 0 0 0 1px var(--petroleo-vivo);
+}
+.methodGrid button:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+.methodGrid svg {
+  width: 20px;
+  height: 20px;
+}
+.methodGrid span {
+  display: grid;
+  gap: 1px;
+}
+.methodGrid strong {
+  font-size: 13px;
+}
+.methodGrid small {
+  color: var(--musgo);
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.fields {
+  display: grid;
+  gap: 14px;
+}
+.twoColumns,
+.addressRow,
+.cardRow {
+  display: grid;
+  gap: 10px;
+}
+.twoColumns {
+  grid-template-columns: 1fr 1fr;
+}
+.addressRow {
+  grid-template-columns: 1fr 0.72fr 1.3fr;
+}
+.cardRow {
+  grid-template-columns: 1fr 0.75fr;
+}
+.contextFields {
+  display: grid;
+  gap: 14px;
+  padding-top: 4px;
+  animation: reveal 200ms ease both;
+}
+.field,
+.selectLabel {
+  display: grid;
+  gap: 6px;
+  color: var(--grafite);
+  font-size: 12px;
+  font-weight: 700;
+}
+.field input,
+.selectLabel select {
+  width: 100%;
+  min-width: 0;
+  height: 48px;
+  border: 1px solid var(--input);
+  border-radius: 12px;
+  padding: 0 13px;
+  color: var(--grafite);
+  background: var(--branco);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  outline: none;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+.field input:focus,
+.selectLabel select:focus {
+  border-color: var(--petroleo-vivo);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--petroleo-vivo) 18%, transparent);
+}
+.field input:user-invalid {
+  border-color: var(--coral-vivo);
+}
+.cardNumberControl {
+  position: relative;
+  display: block;
+}
+.cardNumberControl input {
+  padding-right: 82px;
+}
+.cardBrand {
+  position: absolute;
+  top: 50%;
+  right: 11px;
+  display: grid;
+  width: 56px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--musgo) 18%, transparent);
+  border-radius: 7px;
+  color: var(--petroleo-vivo);
+  background: var(--branco);
+  font-family: Arial, sans-serif;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+.cardBrandGeneric {
+  width: 38px;
+  color: var(--musgo);
+  background: var(--nevoa);
+}
+.cardBrandGeneric svg {
+  width: 18px;
+  height: 18px;
+}
+.cardBrandVISA {
+  color: #1434cb;
+  font-size: 14px;
+  font-style: italic;
+}
+.cardBrandAMEX {
+  color: #fff;
+  background: #1976d2;
+  font-size: 10px;
+  letter-spacing: -0.05em;
+}
+.cardBrandELO {
+  color: #111;
+  font-size: 13px;
+  text-transform: lowercase;
+}
+.cardBrandHIPERCARD {
+  color: #fff;
+  background: #b3131b;
+  font-size: 9px;
+}
+.cardBrandDISCOVER {
+  color: #171717;
+  font-size: 8px;
+}
+.cardBrandJCB {
+  color: #fff;
+  background: #176bb4;
+  font-size: 12px;
+}
+.mastercardMark {
+  position: relative;
+  display: block;
+  width: 38px;
+  height: 20px;
+}
+.mastercardMark i {
+  position: absolute;
+  top: 1px;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: #eb001b;
+}
+.mastercardMark i:first-child {
+  left: 3px;
+}
+.mastercardMark i:last-child {
+  right: 3px;
+  background: #f79e1b;
+  mix-blend-mode: multiply;
+}
+.methodNotice {
+  padding: 15px;
+  border-radius: 14px;
+  color: var(--petroleo-vivo);
+  background: var(--nevoa);
+  animation: reveal 200ms ease both;
+}
+.methodNotice strong {
+  font-size: 14px;
+}
+.methodNotice p {
+  margin: 5px 0 0;
+  color: var(--musgo);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.terms {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 18px;
+  color: var(--musgo);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.terms input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--petroleo-vivo);
+}
+.terms a {
+  color: var(--petroleo-vivo);
+  font-weight: 700;
+  text-underline-offset: 2px;
+}
+.submit {
+  width: 100%;
+  min-height: 54px;
+  margin-top: 18px;
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.chargeSummary {
+  margin: 9px 0 0;
+  color: var(--musgo);
+  font-size: 12px;
+  text-align: center;
+}
+.error {
+  margin: 14px 0 0;
+  border-left: 3px solid var(--coral-vivo);
+  padding: 8px 10px;
+  color: var(--grafite);
+  background: color-mix(in srgb, var(--coral-vivo) 11%, white);
+  font-size: 13px;
+}
+
+.pixState,
+.success {
+  display: flex;
+  min-height: 550px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.pixState h2,
+.success h2 {
+  margin: 16px 0 7px;
+  color: var(--petroleo-vivo);
+  font-size: 26px;
+}
+.pixState > p,
+.success p {
+  margin: 0 0 20px;
+  color: var(--musgo);
+}
+.pixState img {
+  border: 10px solid var(--branco);
+  border-radius: 18px;
+  box-shadow: 0 10px 35px rgba(6, 48, 42, 0.12);
+  image-rendering: crisp-edges;
+}
+.pendingPulse {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--verde-pulso);
+  box-shadow: 0 0 0 7px var(--verde-pulso-tenue);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+.pixCode {
+  display: flex;
+  width: 100%;
+  gap: 8px;
+  margin-top: 20px;
+}
+.pixCode > span {
+  overflow: hidden;
+  flex: 1;
+  padding: 12px;
+  border-radius: 10px;
+  color: var(--musgo);
+  background: var(--nevoa);
+  font:
+    11px/1.3 var(--font-jetbrains-mono),
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timer {
+  margin: 12px 0 !important;
+  font-size: 13px;
+  font-weight: 700;
+}
+.success > span {
+  display: grid;
+  width: 72px;
+  height: 72px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--petroleo-vivo);
+  background: var(--verde-pulso);
+}
+.success svg {
+  width: 34px;
+  height: 34px;
+  stroke-width: 3;
+}
+
+.loading,
+.fatal {
+  max-width: 620px;
+  margin: 100px auto;
+  border-radius: 18px;
+  padding: 30px;
+  color: var(--petroleo-vivo);
+  background: var(--branco);
+  box-shadow: 0 20px 50px rgba(6, 48, 42, 0.1);
+  text-align: center;
+}
+.fatal {
+  border-top: 4px solid var(--coral-vivo);
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pulse {
+  50% {
+    box-shadow: 0 0 0 12px rgba(37, 226, 126, 0);
+  }
+}
+
+@media (max-width: 900px) {
+  .checkoutGrid {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .planColumn {
+    padding: 24px 0 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .checkoutGrid {
+    gap: 20px;
+  }
+  .planColumn h1 {
+    font-size: 2rem;
+  }
+  .subtitle {
+    margin-bottom: 22px;
+    font-size: 16px;
+  }
+  .planCard {
+    border-radius: 18px;
+  }
+  .planHeading {
+    padding: 20px;
+  }
+  .planFacts {
+    grid-template-columns: 1fr;
+    padding: 8px 20px 16px;
+  }
+  .planFacts div:nth-child(n) {
+    padding: 12px 0;
+    border-left: 0;
+  }
+  .benefits {
+    display: none;
+  }
+  .paymentCard {
+    min-height: 0;
+    padding: 20px;
+    border-radius: 20px;
+  }
+  .methodGrid {
+    grid-template-columns: 1fr;
+  }
+  .methodGrid button {
+    min-height: 62px;
+    grid-template-columns: 24px 1fr;
+    align-items: center;
+  }
+  .twoColumns {
+    grid-template-columns: 1fr;
+  }
+  .addressRow {
+    grid-template-columns: 1fr 1fr;
+  }
+  .addressRow > :last-child {
+    grid-column: 1 / -1;
+  }
+  .pixCode {
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .contextFields,
+  .methodNotice,
+  .pendingPulse {
+    animation: none;
+  }
+  .methodGrid button,
+  .field input,
+  .selectLabel select {
+    transition: none;
+  }
+}

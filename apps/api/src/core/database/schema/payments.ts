@@ -50,7 +50,7 @@ export const payments = pgTable(
     /** Nulo pelo mesmo motivo. `RESTRICT`: liquidação é registro fiscal, não some com o titular. */
     userId: userIdColumn().references(() => users.id, { onDelete: 'restrict' }),
 
-    /** `MOCK` | `STRIPE` | `ASAAS` — o `GatewayName` do adaptador que verificou a assinatura. */
+    /** `MOCK` | `ASAAS`; `STRIPE` aparece apenas em registros históricos preservados. */
     gateway: text('gateway').notNull(),
 
     /** Id do evento no provedor. Metade da chave de idempotência. */

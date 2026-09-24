@@ -2,12 +2,15 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
+import { AlertTriangle, Pause, RotateCcw, X } from 'lucide-react';
 
 import type { SubscriptionStatus } from '@movivo/shared';
 
 import { Button } from '@/components/ui/button';
 import { isAnalyticsEnabled } from '@/lib/env';
 import { manageSubscription, type ManageAction } from '@/lib/subscription-api';
+
+import styles from './manage-subscription.module.css';
 
 /**
  * Ações self-service do portal (US-4.6/4.5): pausar / retomar / cancelar.
@@ -20,7 +23,7 @@ function track(event: string, props?: Record<string, unknown>): void {
   void import('posthog-js').then(({ default: posthog }) => posthog.capture(event, props));
 }
 
-const CAN_PAUSE: SubscriptionStatus[] = ['ACTIVE', 'TRIALING', 'PAST_DUE'];
+const CAN_PAUSE: SubscriptionStatus[] = ['ACTIVE'];
 const CAN_CANCEL: SubscriptionStatus[] = ['ACTIVE', 'TRIALING', 'PAST_DUE', 'PAUSED'];
 
 export function ManageSubscription({
@@ -56,25 +59,41 @@ export function ManageSubscription({
   const paused = status === 'PAUSED';
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className={styles.actions}>
       {paused ? (
-        <Button onClick={() => void run('resume')} disabled={busy !== null}>
+        <Button
+          className={styles.primaryAction}
+          onClick={() => void run('resume')}
+          disabled={busy !== null}
+        >
+          <RotateCcw aria-hidden="true" />
           {busy === 'resume' ? 'Retomando…' : 'Retomar assinatura'}
         </Button>
       ) : CAN_PAUSE.includes(status) ? (
-        <Button variant="outline" onClick={() => void run('pause')} disabled={busy !== null}>
+        <Button
+          className={styles.secondaryAction}
+          variant="outline"
+          onClick={() => void run('pause')}
+          disabled={busy !== null}
+        >
+          <Pause aria-hidden="true" />
           {busy === 'pause' ? 'Pausando…' : 'Pausar assinatura'}
         </Button>
       ) : null}
 
       {CAN_CANCEL.includes(status) ? (
         confirmCancel ? (
-          <div className="flex flex-col gap-2 rounded-lg border border-border p-4">
-            <p className="text-body">
-              Tem certeza que quer cancelar? Você pode pausar em vez disso.
-            </p>
-            <div className="flex flex-col gap-2 sm:flex-row">
+          <div className={styles.confirmBox} role="alertdialog" aria-labelledby="cancel-title">
+            <span className={styles.alertIcon}>
+              <AlertTriangle aria-hidden="true" />
+            </span>
+            <div>
+              <h3 id="cancel-title">Confirmar cancelamento?</h3>
+              <p>Interromperemos as próximas cobranças. Seu histórico continuará preservado.</p>
+            </div>
+            <div className={styles.confirmActions}>
               <Button
+                className={styles.dangerAction}
                 variant="destructive"
                 onClick={() => void run('cancel')}
                 disabled={busy !== null}
@@ -82,6 +101,7 @@ export function ManageSubscription({
                 {busy === 'cancel' ? 'Cancelando…' : 'Sim, cancelar'}
               </Button>
               <Button
+                className={styles.backAction}
                 variant="ghost"
                 onClick={() => setConfirmCancel(false)}
                 disabled={busy !== null}
@@ -91,14 +111,19 @@ export function ManageSubscription({
             </div>
           </div>
         ) : (
-          <Button variant="ghost" onClick={() => setConfirmCancel(true)}>
+          <Button
+            className={styles.cancelAction}
+            variant="ghost"
+            onClick={() => setConfirmCancel(true)}
+          >
+            <X aria-hidden="true" />
             Cancelar assinatura
           </Button>
         )
       ) : null}
 
       {error ? (
-        <p role="alert" className="text-label text-destructive">
+        <p role="alert" className={styles.error}>
           Não conseguimos concluir a ação agora. Tente novamente em instantes.
         </p>
       ) : null}

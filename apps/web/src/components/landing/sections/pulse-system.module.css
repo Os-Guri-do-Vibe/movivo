@@ -1,0 +1,268 @@
+.system {
+  position: relative;
+  background: var(--color-petroleo);
+}
+
+.layout {
+  display: grid;
+  gap: var(--space-12);
+  width: 100%;
+  max-width: calc(var(--content-max) + 2 * var(--gutter));
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+@media (min-width: 1024px) {
+  .layout {
+    grid-template-columns: minmax(0, 6fr) minmax(0, 6fr);
+    align-items: center;
+    gap: var(--space-8);
+  }
+}
+
+.copy {
+  display: grid;
+  gap: var(--space-6);
+  align-content: start;
+}
+
+.title {
+  max-width: 12ch;
+}
+
+@media (min-width: 1024px) {
+  .title {
+    max-width: none;
+    font-size: clamp(2.75rem, 1rem + 3.2vw, 3.75rem);
+  }
+}
+
+.body {
+  max-width: 44ch;
+}
+
+/* --- Palco: sticky só no desktop com movimento; mobile em fluxo normal --- */
+.scroller {
+  --pulse-progress: 1;
+  position: relative;
+  padding-block: var(--section-pad);
+}
+
+.pin {
+  position: relative;
+}
+
+@media (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
+  .scroller {
+    height: 280vh;
+    padding-block: 0;
+  }
+
+  .pin {
+    position: sticky;
+    top: 0;
+    display: grid;
+    align-items: center;
+    height: 100vh;
+    height: 100svh;
+    padding-top: var(--nav-height);
+    overflow: hidden;
+  }
+}
+
+/* --- Conceitos: VOCÊ → EVOLUÇÃO acendem com o progresso -------------------- */
+.concepts {
+  display: flex;
+  flex-wrap: wrap;
+  /* Mobile/tablet: as pílulas quebram em linhas de tamanhos diferentes; centradas no
+   * eixo x, as linhas ficam equilibradas em vez de sobrar espaço só à direita. */
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+@media (min-width: 1024px) {
+  .concepts {
+    display: grid;
+    justify-content: start;
+    gap: var(--space-1);
+    margin-top: var(--space-6);
+  }
+}
+
+.concept {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-dark);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-display);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--color-text-primary-dark);
+  transition:
+    color 400ms var(--ease-ui),
+    border-color 400ms var(--ease-ui),
+    background-color 400ms var(--ease-ui);
+}
+
+@media (min-width: 1024px) {
+  .concept {
+    min-height: 0;
+    padding: var(--space-1) 0;
+    border: 0;
+    font-size: clamp(1.0625rem, 0.6rem + 0.7vw, 1.375rem);
+    letter-spacing: -0.005em;
+  }
+}
+
+.conceptIndex {
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--color-coral);
+}
+
+.concept[data-state='future'] {
+  color: rgba(244, 247, 243, 0.32);
+}
+
+/* Os números seguem em Coral; só esmaecem junto com o item ainda não alcançado. */
+.concept[data-state='future'] .conceptIndex {
+  color: rgba(255, 106, 61, 0.45);
+}
+
+.concept[data-state='past'] {
+  color: var(--color-text-secondary-dark);
+}
+
+.concept[data-state='active'] {
+  border-color: var(--color-pulso-64);
+  background: var(--color-pulso-08);
+}
+
+@media (min-width: 1024px) {
+  .concept[data-state='active'] {
+    background: transparent;
+  }
+}
+
+/* --- Palco da esfera ------------------------------------------------------ */
+.stage {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  aspect-ratio: 1;
+  margin-inline: auto;
+}
+
+@media (min-width: 1024px) {
+  .stage {
+    max-width: none;
+    height: min(72svh, 720px);
+    aspect-ratio: auto;
+  }
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.contexts {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.context {
+  position: absolute;
+  transform: translate(-50%, 22px);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border-dark);
+  border-radius: var(--radius-pill);
+  background: rgba(3, 17, 14, 0.6);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--color-text-primary-dark);
+  opacity: clamp(0, calc((var(--pulse-progress) - 0.84) * 7), 1);
+}
+
+@media (min-width: 1024px) {
+  .context {
+    font-size: 0.75rem;
+  }
+}
+
+/* --- Fallback estático (primeira pintura / sem WebGL / movimento reduzido) - */
+.fallback {
+  position: absolute;
+  inset: 0;
+}
+
+.fallbackLines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.fallbackLines line {
+  stroke: rgba(37, 226, 126, 0.32);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.fallbackHalo {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 70%;
+  aspect-ratio: 1;
+  max-height: 90%;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(closest-side, rgba(37, 226, 126, 0.16), rgba(37, 226, 126, 0));
+}
+
+.fallbackSphere {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  /* Mesma proporção da esfera WebGL (30% maior que o desenho original). */
+  width: min(39%, 55vh);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(
+    circle at 50% 50%,
+    #06302a 0%,
+    #052620 58%,
+    rgba(37, 226, 126, 0.55) 92%,
+    rgba(37, 226, 126, 0.9) 100%
+  );
+  box-shadow:
+    0 0 0 1px rgba(37, 226, 126, 0.35),
+    0 0 60px 8px rgba(37, 226, 126, 0.18);
+}
+
+.fallbackNucleus {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--color-pulso);
+  box-shadow:
+    0 0 0 8px rgba(37, 226, 126, 0.12),
+    0 0 28px 6px rgba(37, 226, 126, 0.35);
+}

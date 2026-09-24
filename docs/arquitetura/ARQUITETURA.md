@@ -38,7 +38,7 @@ Serverless (Vercel/Lambda) foi rejeitado: cold start de 500–2000ms é incompat
 | Embeddings RAG | **text-embedding-3-small** (OpenAI) | 1536 dimensões |
 | Vector search | **PGVector HNSW** | `m=16`, `ef_construction=64` |
 | WhatsApp | **AraraHQ** (WhatsApp Business API) | Rate limit: 80 msg/s (Meta), 100K msg/dia (verificado) |
-| Pagamentos | **Stripe** (internacional/cartão) + **Asaas** (PIX/boleto BR) | Webhooks idempotentes obrigatórios |
+| Pagamentos | **Asaas Sandbox** (cartão, Pix e Pix Automático) | Checkout transparente; produção bloqueada até aprovação PCI; webhooks idempotentes obrigatórios |
 | Observabilidade | **OpenTelemetry + Prometheus + Grafana + Loki + Sentry** | Spans obrigatórios — ver §8 |
 | Analytics de produto | **PostHog** | Eventos de funil obrigatórios (herdados de Lucas) |
 | CDN / WAF | **Cloudflare** | DDoS, bot management, OWASP Top 10 |
@@ -123,7 +123,7 @@ Detalhamento: `docs/arquitetura/decisoes/adr-009-transcricao-de-audio-stt-whatsa
 │   Browser ──────────► Dashboard de Operações (Next.js 15)              │
 │                                                                         │
 │   [Sistema MOVIVO] ◄──► AraraHQ (WhatsApp Business API)               │
-│   [Sistema MOVIVO] ◄──► Stripe / Asaas (Pagamentos)                   │
+│   [Sistema MOVIVO] ◄──► Asaas Sandbox (Pagamentos)                    │
 │   [Sistema MOVIVO] ◄──► OpenAI / Anthropic (LLM APIs, ZDR+DPA/SCC)   │
 │   [Sistema MOVIVO] ──── PostHog (Analytics)                            │
 │   [Sistema MOVIVO] ──── Cloudflare (CDN / WAF / DDoS)                 │
@@ -188,8 +188,8 @@ Detalhamento: `docs/arquitetura/decisoes/adr-009-transcricao-de-audio-stt-whatsa
 │  │  WHATSAPP      │  │  AI COACH        │  │  SUBSCRIPTION MODULE   │  │
 │  │  MODULE        │  │  MODULE          │  │  - TrialService        │  │
 │  │  - WebhookCtrl │  │  - ContextSvc    │  │  - ConversionSeq       │  │
-│  │  - MessageSvc  │  │  - LLMRouter     │  │  - StripeService       │  │
-│  │  - TemplateSvc │  │  - RAGService    │  │  - AsaasService        │  │
+│  │  - MessageSvc  │  │  - LLMRouter     │  │  - PaymentGateway      │  │
+│  │  - TemplateSvc │  │  - RAGService    │  │  - AsaasAdapter        │  │
 │  │  - RateLimiter │  │  - ValidatorSvc  │  │  - WebhookHandlers     │  │
 │  └────────────────┘  └──────────────────┘  └────────────────────────┘  │
 │  ┌────────────────┐  ┌──────────────────┐  ┌────────────────────────┐  │
@@ -302,7 +302,7 @@ SPRINT 3 (2 sem) — AI Coach
   Indexação PGVector · RAGService
 
 SPRINT 4 (1 sem) — Conversão / Billing
-  SUBSCRIPTION (Stripe+Asaas) · ConversionSequenceWorker (d7/10/13/14)
+  SUBSCRIPTION (Asaas Sandbox) · ConversionSequenceWorker (d7/10/13/14)
   Webhooks de pagamento (idempotentes) · eventos PostHog de conversão
 
 SPRINT 5 (2 sem) — Check-in / Dashboard CREF
@@ -355,7 +355,8 @@ Todos os relatórios de Fase 2–4 (Alexandre, Eduardo, Sofia, Sato, Victor) já
 12. `LLMRouter` é o único ponto do sistema autorizado a chamar um provedor de LLM; todo prompt passa pelo PII Scrubber antes de sair do backend.
 13. RLS no Postgres exige `SET LOCAL app.current_user_id` por transação e `FORCE ROW LEVEL SECURITY` — nunca confiar em RLS "por padrão" sob PgBouncer transaction mode.
 14. Redis nunca sobe em produção sem o patch para CVE-2025-49844 (RediShell) aplicado.
-15. Webhooks (AraraHQ, Stripe, Asaas) exigem validação de assinatura + proteção contra replay (timestamp + nonce) + idempotência — nunca apenas checagem de secret estático.
+15. Webhooks exigem a autenticação definida pelo provedor e idempotência por evento. AraraHQ usa assinatura, timestamp e nonce; Asaas usa `asaas-access-token` comparado em tempo constante e deduplicação persistente/Redis.
+16. O checkout transparente Asaas permanece restrito ao Sandbox até avaliação PCI/QSA ou adoção de um componente homologado que impeça PAN/CVV de atravessar a infraestrutura MOVIVO.
 
 ---
 

@@ -49,6 +49,9 @@ export const QUEUE = {
   checkinWeeklyFeedback: 'checkin-weekly-feedback',
   conversionSequence: 'conversion-sequence',
   paymentReconciliation: 'payment-reconciliation',
+  // Fim do período pago: cron horário que leva ACTIVE → EXPIRED quando não houve renovação
+  // (parcelado no cartão e Pix à vista não renovam sozinhos).
+  subscriptionPeriodScan: 'subscription-period-scan',
   knowledgeProcessing: 'knowledge-processing',
   sanity: 'sanity',
   deadLetter: 'dead-letter',
@@ -140,6 +143,12 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
     backoffMs: [2_000, 10_000, 60_000, 300_000, 900_000],
     concurrency: 5,
     lockMs: 30_000,
+  },
+  // Mesmo perfil de `protocolRenewalScan`: varredura idempotente, sem urgência de latência.
+  [QUEUE.subscriptionPeriodScan]: {
+    attempts: 3,
+    backoffMs: [5_000, 15_000, 45_000],
+    concurrency: 1,
   },
   // Parsing/indexação de documentos: idempotente, fora da requisição e com retry.
   [QUEUE.knowledgeProcessing]: {

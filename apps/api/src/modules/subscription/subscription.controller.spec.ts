@@ -6,7 +6,7 @@
  * `checkoutUrl` volta (nenhum dado de cartão).
  */
 import { NotFoundException } from '@nestjs/common';
-import type { SubscriptionView } from '@movivo/shared';
+import type { CheckoutSummary, SubscriptionView } from '@movivo/shared';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SubscriptionController } from './subscription.controller';
@@ -21,15 +21,31 @@ const view: SubscriptionView = {
   currentPeriodEnd: '2026-11-01T00:00:00.000Z',
 };
 
+const summary: CheckoutSummary = {
+  plan: 'QUARTERLY',
+  label: 'Trimestral',
+  monthlyCents: 7590,
+  totalCents: 22770,
+  months: 3,
+  maxInstallments: 3,
+  status: 'TRIALING',
+  expiresAt: '2026-09-26T00:00:00.000Z',
+  methods: ['CARD', 'PIX', 'PIX_AUTOMATIC'],
+};
+
 function make(overrides: Partial<Record<keyof SubscriptionService, unknown>> = {}) {
   const svc = {
     getView: vi.fn(() => Promise.resolve<SubscriptionView | null>(view)),
-    createCheckout: vi.fn(() =>
-      Promise.resolve({ checkoutUrl: 'https://gw.test/c/abc', externalSessionId: 'abc' }),
-    ),
+    getCheckoutSummary: vi.fn(() => Promise.resolve<CheckoutSummary | null>(summary)),
+    startCheckoutPayment: vi.fn(() => Promise.resolve({ status: 'PENDING', method: 'PIX' })),
     ...overrides,
   } as unknown as SubscriptionService;
-  return { controller: new SubscriptionController(svc), svc };
+  const tokens = {
+    verify: vi.fn((token: string) =>
+      token === 'opaque' ? { userId: VALID, expiresAt: Date.parse(summary.expiresAt) } : null,
+    ),
+  } as never;
+  return { controller: new SubscriptionController(svc, tokens), svc };
 }
 
 describe('SubscriptionController — view (US-4.6)', () => {
@@ -53,26 +69,26 @@ describe('SubscriptionController — view (US-4.6)', () => {
 });
 
 describe('SubscriptionController — checkout (US-4.6)', () => {
-  it('body válido chama createCheckout e devolve só a checkoutUrl', async () => {
+  it('token opaco válido devolve o snapshot autoritativo', async () => {
     const { controller, svc } = make();
-    const result = await controller.checkout(VALID, { plan: 'ANNUAL', method: 'PIX' });
-    expect(svc.createCheckout).toHaveBeenCalledWith(VALID, 'ANNUAL', 'PIX', expect.any(String));
-    expect(result).toEqual({ checkoutUrl: 'https://gw.test/c/abc' });
-    expect(Object.keys(result)).toEqual(['checkoutUrl']);
+    await expect(controller.checkoutSummary('opaque')).resolves.toEqual(summary);
+    expect(svc.getCheckoutSummary).toHaveBeenCalledWith(VALID, Date.parse(summary.expiresAt));
   });
 
-  it('body inválido (plano/método desconhecido) → rejeita, não cria checkout', async () => {
-    const { controller, svc } = make();
-    await expect(controller.checkout(VALID, { plan: 'X', method: 'BOLETO' })).rejects.toThrow();
-    expect(svc.createCheckout).not.toHaveBeenCalled();
-  });
-
-  it('token não-UUID → 404 antes de validar o corpo', async () => {
+  it('body inválido é rejeitado antes de iniciar pagamento', async () => {
     const { controller, svc } = make();
     await expect(
-      controller.checkout('nope', { plan: 'ANNUAL', method: 'PIX' }),
+      controller.checkoutPayment('opaque', { method: 'BOLETO' }, { ip: '127.0.0.1' } as never),
+    ).rejects.toThrow();
+    expect(svc.startCheckoutPayment).not.toHaveBeenCalled();
+  });
+
+  it('token opaco inválido → 404 antes de validar o corpo', async () => {
+    const { controller, svc } = make();
+    await expect(
+      controller.checkoutPayment('nope', { method: 'PIX' }, { ip: '127.0.0.1' } as never),
     ).rejects.toBeInstanceOf(NotFoundException);
-    expect(svc.createCheckout).not.toHaveBeenCalled();
+    expect(svc.startCheckoutPayment).not.toHaveBeenCalled();
   });
 });
 

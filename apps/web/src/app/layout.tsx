@@ -13,16 +13,23 @@ import './globals.css';
  * `display: 'swap'` evita texto invisível enquanto a fonte carrega (CLS controlado
  * pelo ajuste automático de métricas do próprio next/font).
  */
+/*
+ * `preload: false`: a landing pública (`/`) usa a própria tipografia (Cabinet Grotesk +
+ * Satoshi, ver `components/landing/fonts.ts`); pré-carregar estas duas famílias ali só
+ * disputaria banda com o LCP. Nas demais rotas elas continuam carregando pelo CSS.
+ */
 const hankenGrotesk = Hanken_Grotesk({
   subsets: ['latin'],
   display: 'swap',
   variable: '--font-hanken-grotesk',
+  preload: false,
 });
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ['latin'],
   display: 'swap',
   variable: '--font-jetbrains-mono',
+  preload: false,
 });
 
 export const metadata: Metadata = {

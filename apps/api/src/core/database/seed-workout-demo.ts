@@ -94,7 +94,15 @@ async function main() {
 
     await db
       .insert(subscriptions)
-      .values({ userId: owner.id, plan: 'MONTHLY', priceCents: 3900, status: 'ACTIVE' })
+      .values({
+        userId: owner.id,
+        plan: 'MONTHLY',
+        priceCents: 3900,
+        monthlyPriceCents: 3900,
+        totalPriceCents: 3900,
+        commitmentMonths: 1,
+        status: 'ACTIVE',
+      })
       .onConflictDoNothing();
     await db
       .insert(consents)

@@ -13,6 +13,29 @@ export function dunningMessage(checkoutUrl: string): string {
 }
 
 /**
+ * Primeira cobrança não liquidada (Pix vencido, QR do Pix Automático expirado, cartão reprovado
+ * na análise de risco). Diferente do dunning: não existe período pago em curso, então a copy
+ * não promete acesso liberado — só oferece um novo link.
+ */
+export function firstPaymentFailedMessage(checkoutUrl: string): string {
+  return (
+    'Oi! O pagamento da sua assinatura MOVIVO não foi concluído, então ela ainda não está ' +
+    'ativa. Se quiser seguir, é só gerar um novo pagamento por aqui: ' +
+    checkoutUrl +
+    '\nQualquer dúvida, me chama. Você pode cancelar quando quiser, sem burocracia.'
+  );
+}
+
+/** Confirmação pós-webhook: só sai depois que o backend autenticou o evento do provedor. */
+export function paymentConfirmationMessage(): string {
+  return (
+    'Pagamento confirmado 💚 Sua assinatura MOVIVO está ativa e seu acesso continua liberado. ' +
+    'Sua orientação de treino segue supervisionada por profissional de Educação Física ' +
+    'registrado no CREF. Qualquer dúvida, me chama por aqui.'
+  );
+}
+
+/**
  * Sequência de nurturing de conversão do trial (US-4.3), dias 7/10/13/14 (Lucas §Épico 5).
  * ⚠️ Copy a aprovar (Helena/Sofia/Alexandre). Persona MOVI, dentro dos guardrails: garantia de
  * cancelamento visível, respaldo CREF, **nunca** "resultado garantido"/diagnóstico/tratamento.

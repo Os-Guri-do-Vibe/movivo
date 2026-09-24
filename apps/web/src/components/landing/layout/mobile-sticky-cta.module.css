@@ -1,0 +1,38 @@
+.bar {
+  position: fixed;
+  left: 50%;
+  bottom: max(14px, env(safe-area-inset-bottom));
+  z-index: var(--z-mobile-cta);
+  width: calc(100% - 32px);
+  max-width: 480px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-pill);
+  background: rgba(3, 17, 14, 0.66);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, calc(100% + 24px));
+  transition:
+    transform 420ms var(--ease-editorial),
+    opacity 300ms var(--ease-ui),
+    visibility 0s linear 420ms;
+}
+
+.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+  transition:
+    transform 520ms var(--ease-organic),
+    opacity 300ms var(--ease-ui),
+    visibility 0s;
+}
+
+@media (min-width: 1024px) {
+  .bar {
+    display: none;
+  }
+}

@@ -1,10 +1,11 @@
-/**
- * Testes do cliente HTTP de assinatura (US-4.6): formatação BRL e as chamadas de
- * checkout/gestão. `fetch` é mockado — o contrato do backend é exercitado no E2E.
- */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { formatBRL, manageSubscription, startCheckout } from './subscription-api';
+import {
+  formatBRL,
+  getCheckoutSummary,
+  manageSubscription,
+  startCheckoutPayment,
+} from './subscription-api';
 
 function mockFetch(status: number, body: unknown) {
   return vi.fn().mockResolvedValue({
@@ -14,40 +15,54 @@ function mockFetch(status: number, body: unknown) {
   } as Response);
 }
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
+afterEach(() => vi.restoreAllMocks());
 
-describe('formatBRL', () => {
-  it('converte centavos inteiros em BRL', () => {
-    expect(formatBRL(3900)).toContain('39,00');
-    expect(formatBRL(34900)).toContain('349,00');
+describe('checkout API', () => {
+  it('formata centavos inteiros em BRL', () => {
+    expect(formatBRL(7990)).toContain('79,90');
+    expect(formatBRL(81480)).toContain('814,80');
   });
-});
 
-describe('startCheckout', () => {
-  it('POST no endpoint de checkout e devolve a checkoutUrl', async () => {
-    const fetchMock = mockFetch(201, { checkoutUrl: 'https://gateway.test/c/abc' });
+  it('busca o resumo pelo token opaco com cache desabilitado', async () => {
+    const fetchMock = mockFetch(200, { plan: 'MONTHLY' });
     vi.stubGlobal('fetch', fetchMock);
-    const res = await startCheckout('11111111-1111-4111-8111-111111111111', 'MONTHLY', 'PIX');
-    expect(res.checkoutUrl).toBe('https://gateway.test/c/abc');
+    await getCheckoutSummary('token/seguro');
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain('/subscription/11111111-1111-4111-8111-111111111111/checkout');
-    expect(JSON.parse(init.body as string)).toEqual({ plan: 'MONTHLY', method: 'PIX' });
+    expect(url).toContain('/subscription/checkout/token%2Fseguro');
+    expect(init.cache).toBe('no-store');
   });
 
-  it('lança em status de erro', async () => {
-    vi.stubGlobal('fetch', mockFetch(500, {}));
-    await expect(startCheckout('u', 'ANNUAL', 'CARD')).rejects.toThrow('request_failed_500');
+  it('inicia o pagamento sem enviar plano nem preço', async () => {
+    const fetchMock = mockFetch(200, { status: 'PENDING', method: 'PIX' });
+    vi.stubGlobal('fetch', fetchMock);
+    await startCheckoutPayment('opaque', {
+      method: 'PIX',
+      payer: {
+        name: 'Pessoa Teste',
+        email: 'teste@movivo.test',
+        cpfCnpj: '11144477735',
+        postalCode: '01310100',
+        addressNumber: '100',
+        phone: '11999999999',
+      },
+      acceptTerms: true,
+    });
+    const body = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body));
+    expect(body).not.toHaveProperty('plan');
+    expect(body).not.toHaveProperty('totalCents');
+  });
+
+  it('propaga status de erro sem expor o corpo da resposta', async () => {
+    vi.stubGlobal('fetch', mockFetch(500, { card: 'não pode vazar no erro' }));
+    await expect(getCheckoutSummary('opaque')).rejects.toThrow('request_failed_500');
   });
 });
 
 describe('manageSubscription', () => {
-  it('POST na ação self-service (cancel/pause/resume)', async () => {
+  it('POST na ação self-service', async () => {
     const fetchMock = mockFetch(200, { status: 'CANCELED' });
     vi.stubGlobal('fetch', fetchMock);
-    const res = await manageSubscription('u1', 'cancel');
-    expect(res.status).toBe('CANCELED');
+    await expect(manageSubscription('u1', 'cancel')).resolves.toEqual({ status: 'CANCELED' });
     expect((fetchMock.mock.calls[0] as [string])[0]).toContain('/subscription/u1/cancel');
   });
 });

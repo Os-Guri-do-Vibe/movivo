@@ -20,11 +20,7 @@ import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { type ConversionTouchpoint, conversionMessage } from './subscription-messages';
-import {
-  SUBSCRIPTION_TERMS_VERSION,
-  TRIAL_DAYS,
-  type SubscriptionPlan,
-} from './subscription-model';
+import { TRIAL_DAYS, type SubscriptionPlan } from './subscription-model';
 import { SubscriptionService } from './subscription.service';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -115,11 +111,11 @@ export class ConversionSequenceWorker implements OnModuleInit {
     sub = await this.subs.getForUser(userId);
     if (!sub || sub.status !== 'EXPIRED') return { status: `SKIP_${sub?.status ?? 'NONE'}` };
 
-    // Marca somente DEPOIS do enqueue; falha de Stripe/Redis/WhatsApp continua reprocessável.
+    // Marca somente DEPOIS do enqueue; falha de Redis/WhatsApp continua reprocessável.
     const guard = this.keys.forUser(userId, 'conv-sent', key);
     if (await this.redis.get(guard)) return { status: 'ALREADY_SENT' };
 
-    await this.sendMessage(userId, key, sub.plan, sub.id);
+    await this.sendMessage(userId, key);
     await this.redis.set(guard, '1', 'EX', GUARD_TTL_SECONDS, 'NX');
     this.logger.info(
       { event: 'conversion_message_sent', userId, touchpoint: key },
@@ -130,19 +126,8 @@ export class ConversionSequenceWorker implements OnModuleInit {
   }
 
   /** Enfileira a mensagem no outbound com o link do plano pré-preenchido. */
-  private async sendMessage(
-    userId: string,
-    key: ConversionTouchpoint,
-    plan: SubscriptionPlan,
-    subscriptionId: string,
-  ): Promise<void> {
-    const session = await this.subs.createCheckout(
-      userId,
-      plan,
-      'CARD',
-      SUBSCRIPTION_TERMS_VERSION,
-      `trial_${subscriptionId}_${key}`,
-    );
+  private async sendMessage(userId: string, key: ConversionTouchpoint): Promise<void> {
+    const checkoutUrl = await this.subs.createCheckoutLink(userId);
     // Sprint 11: a copy de conversão cita o nome da agente, então precisa da persona do
     // slot do titular — não da persona global, que não existe mais.
     const agentName = await this.agentPersona.agentName(await this.subs.personaSlotFor(userId));
@@ -152,7 +137,7 @@ export class ConversionSequenceWorker implements OnModuleInit {
       {
         userId,
         type: 'COACH_MESSAGE',
-        text: conversionMessage(key, session.checkoutUrl, agentName),
+        text: conversionMessage(key, checkoutUrl, agentName),
         dedupeId: `conv_${key}`,
       },
       { jobId: `conv-msg_${userId}_${key}` },

@@ -24,6 +24,8 @@ describe('jobs.config', () => {
         'conversion-sequence',
         // US-8.5 — conciliacao da liquidacao do gateway.
         'payment-reconciliation',
+        // Fim do período pago sem renovação (ACTIVE → EXPIRED).
+        'subscription-period-scan',
         'knowledge-processing',
         'dead-letter',
         'protocol-generation',

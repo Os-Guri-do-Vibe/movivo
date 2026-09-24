@@ -27,8 +27,8 @@
  * vira reenvio, que viraria duplicata se a idempotência não estivesse no banco — e está
  * (UNIQUE `(gateway, gateway_event_id)`).
  *
- * ponytail: headers genéricos `x-payment-*` no dev/mock; o adaptador Stripe real lê
- * `stripe-signature` (ts+sig no mesmo header) — seam de lançamento no `real-gateways.ts`.
+ * ponytail: headers genéricos `x-payment-*` existem apenas no dev/mock; o adaptador Asaas
+ * real lê o `asaas-access-token` oficial no `real-gateways.ts`.
  */
 import {
   Body,
@@ -47,7 +47,7 @@ import { type Request } from 'express';
 
 import { PaymentWebhookService } from './payment-webhook.service';
 
-export const PAYMENT_SIGNATURE_HEADER = 'x-payment-signature';
+export const PAYMENT_SIGNATURE_HEADER = 'asaas-access-token';
 export const PAYMENT_TIMESTAMP_HEADER = 'x-payment-timestamp';
 
 /**
@@ -71,12 +71,10 @@ export class PaymentWebhookController {
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @UseGuards(ThrottlerGuard)
   @ApiOperation({
-    summary: 'Callback de evento de pagamento (Stripe/Asaas)',
+    summary: 'Callback de evento de pagamento Asaas',
     description:
-      'Chamado pelo GATEWAY de pagamento, nunca pelo app cliente. Autenticado por HMAC ' +
-      'sobre o corpo bruto (não por Bearer JWT) — `x-payment-signature` + ' +
-      '`x-payment-timestamp` (em produção real, o header nativo do provedor, ex.: ' +
-      '`stripe-signature`). Responde 200 rápido e enfileira a conciliação — nada pesado ' +
+      'Chamado pelo Asaas, nunca pelo app cliente. Autenticado pelo `authToken` configurado ' +
+      'no webhook e recebido em `asaas-access-token`. Responde 200 rápido e enfileira a conciliação — nada pesado ' +
       'roda inline. Idempotente por `(gateway, gateway_event_id)`.',
   })
   @ApiHeader({ name: PAYMENT_SIGNATURE_HEADER, description: 'Assinatura HMAC do corpo bruto.' })
@@ -99,7 +97,7 @@ export class PaymentWebhookController {
     );
     const verdict = await this.webhook.ingest({
       rawBody: req.rawBody,
-      signature: header(req, 'stripe-signature') ?? header(req, PAYMENT_SIGNATURE_HEADER),
+      signature: header(req, PAYMENT_SIGNATURE_HEADER) ?? header(req, 'x-payment-signature'),
       timestamp: header(req, PAYMENT_TIMESTAMP_HEADER),
       correlationId,
     });

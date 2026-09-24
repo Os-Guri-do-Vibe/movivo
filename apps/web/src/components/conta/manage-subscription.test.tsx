@@ -33,6 +33,12 @@ describe('ManageSubscription', () => {
     expect(screen.getByRole('button', { name: /Cancelar assinatura/ })).toBeInTheDocument();
   });
 
+  it('TRIALING: oferece cancelamento sem exibir pausa indisponível na API', () => {
+    render(<ManageSubscription token={TOKEN} status="TRIALING" />);
+    expect(screen.queryByRole('button', { name: /Pausar/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Cancelar assinatura/ })).toBeInTheDocument();
+  });
+
   it('cancelar pede confirmação e então chama a API', async () => {
     const user = userEvent.setup();
     render(<ManageSubscription token={TOKEN} status="ACTIVE" />);
