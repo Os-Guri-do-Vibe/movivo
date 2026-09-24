@@ -596,7 +596,8 @@ export class ControlCenterService {
           .select({ value, total: count() })
           .from(anamnesisSessions)
           .where(and(isNotNull(anamnesisSessions.dataBlock3), sql`${value} is not null`))
-          .groupBy(value);
+          // group by ordinal: `groupBy(value)` reemite `jsonKey` como outro parâmetro.
+          .groupBy(sql`1`);
         const validRows = rows.filter((row) => valueSchema.safeParse(row.value).success);
         suppressedSegments += rows.length - validRows.length;
         if (validRows.some((row) => row.total < MINIMUM_SEGMENT_SIZE)) {
