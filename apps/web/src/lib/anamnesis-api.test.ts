@@ -4,8 +4,10 @@ import {
   AnamnesisApiError,
   getSession,
   isPhoneComplete,
+  isSessionReplaced,
   maskNationalPhone,
   parsePhoneE164,
+  patchStep,
   sendPhoneCode,
   startAnamnesis,
   submitAnamnesis,
@@ -99,29 +101,50 @@ describe('telefone internacional', () => {
 });
 
 describe('startAnamnesis', () => {
-  it('POST /anamnesis/start e devolve o token', async () => {
-    const fetchMock = mockFetch(201, { token: 'abc', expiresAt: 'x', currentStep: 1 });
+  it('POST /api/anamnesis/start (BFF) e devolve só a referência + estado, nunca o token', async () => {
+    const entry = { ref: 'ref-abc', session: { status: 'IN_PROGRESS', currentStep: 1 } };
+    const fetchMock = mockFetch(200, entry);
     vi.stubGlobal('fetch', fetchMock);
     const res = await startAnamnesis('ANNUAL');
-    expect(res.token).toBe('abc');
-    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain('/anamnesis/start');
-    expect(fetchMock.mock.calls[0]?.[1]?.body).toContain('"planId":"ANNUAL"');
+    expect(res).toEqual(entry);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/anamnesis/start');
+    expect(init.method).toBe('POST');
+    expect(init.body).toContain('"planId":"ANNUAL"');
   });
 });
 
 describe('getSession', () => {
-  it('GET /anamnesis/session/{token}', async () => {
-    const fetchMock = mockFetch(200, { status: 'IN_PROGRESS', currentStep: 1 });
+  it('GET /api/anamnesis/session — a sessão vem do cookie, sem token no path', async () => {
+    const fetchMock = mockFetch(200, { ref: 'r', session: { status: 'IN_PROGRESS' } });
     vi.stubGlobal('fetch', fetchMock);
-    await getSession('tok123');
+    await getSession();
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain('/anamnesis/session/tok123');
+    expect(url).toBe('/api/anamnesis/session');
   });
 
   it('lança AnamnesisApiError em 404', async () => {
     vi.stubGlobal('fetch', mockFetch(404, { message: 'não encontrada' }));
-    await expect(getSession('bad')).rejects.toBeInstanceOf(AnamnesisApiError);
+    await expect(getSession()).rejects.toBeInstanceOf(AnamnesisApiError);
+  });
+});
+
+describe('escritas na sessão', () => {
+  it('mandam a referência da aba no cabeçalho para o BFF conferir', async () => {
+    const fetchMock = mockFetch(200, { currentStep: 2 });
+    vi.stubGlobal('fetch', fetchMock);
+    await patchStep('ref-da-aba', 1, { name: 'Maria' });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/anamnesis/session/step/1');
+    expect(init.method).toBe('PATCH');
+    expect((init.headers as Record<string, string>)['x-anamnesis-ref']).toBe('ref-da-aba');
+  });
+
+  it('412 do BFF = cadastro substituído por outra aba', async () => {
+    vi.stubGlobal('fetch', mockFetch(412, { message: 'substituído' }));
+    const error = await submitAnamnesis('ref').catch((e: unknown) => e);
+    expect(isSessionReplaced(error)).toBe(true);
+    expect(isSessionReplaced(new AnamnesisApiError(409, []))).toBe(false);
   });
 });
 
@@ -129,15 +152,16 @@ describe('sendPhoneCode / verifyPhoneCode', () => {
   it('envia o número e recebe o estado de reenvio', async () => {
     const fetchMock = mockFetch(200, { sent: true, resendAvailableAt: 'x', expiresAt: 'y' });
     vi.stubGlobal('fetch', fetchMock);
-    const res = await sendPhoneCode('tok', '+5511999999999');
+    const res = await sendPhoneCode('ref', '+5511999999999');
     expect(res.sent).toBe(true);
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/anamnesis/session/phone/send-code');
     expect(JSON.parse(init.body as string)).toEqual({ phoneNumber: '+5511999999999' });
   });
 
   it('verifica o código', async () => {
     vi.stubGlobal('fetch', mockFetch(200, { phoneVerified: true }));
-    const res = await verifyPhoneCode('tok', '123456');
+    const res = await verifyPhoneCode('ref', '123456');
     expect(res.phoneVerified).toBe(true);
   });
 });
@@ -145,7 +169,7 @@ describe('sendPhoneCode / verifyPhoneCode', () => {
 describe('submitAnamnesis', () => {
   it('devolve status e outcome, nada mais', async () => {
     vi.stubGlobal('fetch', mockFetch(200, { status: 'SUBMITTED', outcome: 'READY' }));
-    const res = await submitAnamnesis('tok');
+    const res = await submitAnamnesis('ref');
     expect(res).toEqual({ status: 'SUBMITTED', outcome: 'READY' });
   });
 });

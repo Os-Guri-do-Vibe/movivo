@@ -25,6 +25,11 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
+      /*
+       * `server-only` não é pacote instalado: o Next o resolve no build (vazio no
+       * servidor, erro no cliente). Aqui os BFFs rodam fora do RSC, então vale o vazio.
+       */
+      'server-only': resolve(__dirname, 'node_modules/next/dist/compiled/server-only/empty.js'),
     },
   },
   test: {

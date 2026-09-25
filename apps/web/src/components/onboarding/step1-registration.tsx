@@ -73,7 +73,7 @@ export function Step1Registration({
   onToggleConsent,
   phoneVerified,
   onPhoneVerified,
-  token,
+  sessionRef,
   onContinue,
   saving,
 }: {
@@ -84,7 +84,7 @@ export function Step1Registration({
   onToggleConsent: (type: string, checked: boolean) => void;
   phoneVerified: boolean;
   onPhoneVerified: () => void;
-  token: string;
+  sessionRef: string;
   onContinue: () => void;
   saving: boolean;
 }) {
@@ -190,7 +190,7 @@ export function Step1Registration({
           }
         />
         {phoneComplete && !phoneVerified && (
-          <PhoneOtp token={token} phoneNumber={phoneE164} onVerified={onPhoneVerified} />
+          <PhoneOtp sessionRef={sessionRef} phoneNumber={phoneE164} onVerified={onPhoneVerified} />
         )}
         {phoneVerified && (
           <p className="text-label font-semibold text-petroleo">✓ WhatsApp confirmado</p>

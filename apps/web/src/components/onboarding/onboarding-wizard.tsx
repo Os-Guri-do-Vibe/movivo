@@ -6,9 +6,11 @@ import { PARQ_DECLARATIONS_VERSION, PARQ_VERSION, type BiologicalSex } from '@mo
 
 import {
   AnamnesisApiError,
+  isSessionReplaced,
   parsePhoneE164,
   patchStep,
   recordConsents,
+  SESSION_REPLACED_MESSAGE,
   submitAnamnesis,
   toE164,
   type SessionView,
@@ -19,7 +21,7 @@ import { Step2Anamnesis, EMPTY_STEP2, type Step2State } from './step2-anamnesis'
 import { Step3Parq, EMPTY_PARQ, type ParqState } from './step3-parq';
 import { SuccessScreen } from './success-screen';
 
-/** `unknown` de `SessionView.step1` → `Step1Data` (retomada por token). */
+/** `unknown` de `SessionView.step1` → `Step1Data` (retomada no F5). */
 function step1FromServer(raw: unknown): Partial<Step1Data> {
   if (!raw || typeof raw !== 'object') return {};
   const r = raw as Record<string, unknown>;
@@ -36,7 +38,13 @@ function step1FromServer(raw: unknown): Partial<Step1Data> {
   };
 }
 
-export function OnboardingWizard({ token, initial }: { token: string; initial: SessionView }) {
+export function OnboardingWizard({
+  sessionRef,
+  initial,
+}: {
+  sessionRef: string;
+  initial: SessionView;
+}) {
   const [session, setSession] = React.useState(initial);
   const [step, setStep] = React.useState<1 | 2 | 3>(
     (initial.currentStep >= 1 && initial.currentStep <= 3 ? initial.currentStep : 1) as 1 | 2 | 3,
@@ -71,12 +79,12 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
     setError(null);
     try {
       await recordConsents(
-        token,
+        sessionRef,
         session.consents
           .filter((c) => acceptedConsents.has(c.type))
           .map((c) => ({ type: c.type, version: c.version, accepted: true })),
       );
-      await patchStep(token, 1, {
+      await patchStep(sessionRef, 1, {
         name: step1.name.trim(),
         birthDate: step1.birthDate,
         biologicalSex: step1.biologicalSex,
@@ -87,8 +95,12 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
       });
       setCompletedStep1Here(true);
       setStep(2);
-    } catch {
-      setError('Não conseguimos salvar suas informações. Confira os campos e tente de novo.');
+    } catch (err) {
+      setError(
+        isSessionReplaced(err)
+          ? SESSION_REPLACED_MESSAGE
+          : 'Não conseguimos salvar suas informações. Confira os campos e tente de novo.',
+      );
     } finally {
       setSaving(false);
     }
@@ -98,7 +110,7 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
     setSaving(true);
     setError(null);
     try {
-      await patchStep(token, 2, {
+      await patchStep(sessionRef, 2, {
         anamnesis: {
           structured: {
             primaryGoal: step2.primaryGoal,
@@ -146,8 +158,12 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
       });
       setCompletedStep2Here(true);
       setStep(3);
-    } catch {
-      setError('Não conseguimos salvar suas respostas. Confira os campos e tente de novo.');
+    } catch (err) {
+      setError(
+        isSessionReplaced(err)
+          ? SESSION_REPLACED_MESSAGE
+          : 'Não conseguimos salvar suas respostas. Confira os campos e tente de novo.',
+      );
     } finally {
       setSaving(false);
     }
@@ -157,7 +173,7 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
     setSaving(true);
     setError(null);
     try {
-      await patchStep(token, 3, {
+      await patchStep(sessionRef, 3, {
         parq: {
           version: PARQ_VERSION,
           answers: Object.entries(parqAnswers).map(([questionId, a]) => ({
@@ -169,10 +185,12 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
         declarationsVersion: PARQ_DECLARATIONS_VERSION,
         declarations: [...declarations],
       });
-      const result = await submitAnamnesis(token);
+      const result = await submitAnamnesis(sessionRef);
       setOutcome(result.outcome);
     } catch (err) {
-      if (err instanceof AnamnesisApiError && err.status === 409) {
+      if (isSessionReplaced(err)) {
+        setError(SESSION_REPLACED_MESSAGE);
+      } else if (err instanceof AnamnesisApiError && err.status === 409) {
         // Telefone/e-mail já cadastrado (conta anterior) — "tente de novo" seria
         // conselho errado aqui: reenviar com os mesmos dados falha sempre do mesmo
         // jeito. O backend já manda o motivo certo em `issues`.
@@ -243,7 +261,7 @@ export function OnboardingWizard({ token, initial }: { token: string; initial: S
           }
           phoneVerified={session.phoneVerified}
           onPhoneVerified={() => setSession((prev) => ({ ...prev, phoneVerified: true }))}
-          token={token}
+          sessionRef={sessionRef}
           onContinue={() => void handleStep1Continue()}
           saving={saving}
         />

@@ -9,6 +9,7 @@ import { NAV_LINKS, SECTION_IDS } from '@/lib/landing/site';
 
 import { MovivoLogo } from '../ui/movivo-logo';
 import { TrialCta } from '../ui/pulse-button';
+import { scrollToSection } from '../ui/scroll-to-section';
 import { useLandingPortal } from '../ui/use-landing-portal';
 
 import styles from './navbar.module.css';
@@ -58,12 +59,7 @@ export function Navbar() {
     if (!id) return;
     pendingTarget.current = null;
     event.preventDefault();
-    const target = document.getElementById(id);
-    if (!target) return;
-    window.history.pushState(null, '', `#${id}`);
-    target.scrollIntoView({ block: 'start' });
-    target.setAttribute('tabindex', '-1');
-    target.focus({ preventScroll: true });
+    scrollToSection(id);
   }
 
   return (

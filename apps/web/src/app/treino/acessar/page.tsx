@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Landing do magic link de treino (US-8.1). Mesma casca de `/anamnese/[token]` (achado
+ * Landing do magic link de treino (US-8.1). Mesma casca de `/anamnese` (achado
  * 2026-09-04, a pedido do fundador): faixa `bg-petroleo` de ponta a ponta com a logo
  * centralizada, página clara (`onboarding-light`) por baixo — nunca mais um cartão
  * flutuando sobre fundo escuro. Tokens semânticos (`bg-primary`, `text-foreground`,

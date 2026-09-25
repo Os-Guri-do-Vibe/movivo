@@ -95,7 +95,7 @@ export function Hero() {
               <p className={styles.micro}>Teste sem cadastrar nenhum cartão</p>
             </div>
             <PulseLink
-              href={`#${SECTION_IDS.manifesto}`}
+              href={`#${SECTION_IDS.howItWorks}`}
               event={LANDING_EVENTS.heroLearnMore}
               variant="secondary"
               width="block"

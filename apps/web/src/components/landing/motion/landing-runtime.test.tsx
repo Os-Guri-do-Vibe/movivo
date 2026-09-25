@@ -2,7 +2,8 @@
  * Runtime da landing e pontes de motion: primeiro toque, `section_view_*` uma vez por
  * seção, e o progresso do scroll chegando à esfera/constelação e à lista de conceitos.
  */
-import { act, render } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as GsapModule from './gsap';
 
@@ -85,6 +86,59 @@ describe('LandingRuntime', () => {
     expect(track).toHaveBeenCalledWith('section_view_pricing');
     // Reveals: o lote de ScrollTrigger é registrado para os blocos da página.
     expect(gsapState.fake.ScrollTrigger.batch).toHaveBeenCalled();
+  });
+
+  it('âncora interna rola até a seção sem gravar #hash nem criar entrada de histórico', async () => {
+    gsapState.fake = createFakeGsap(ALL_OFF);
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    const scrollIntoView = vi.spyOn(Element.prototype, 'scrollIntoView');
+    const pushState = vi.spyOn(window.history, 'pushState');
+    render(
+      <div data-landing-root="">
+        <a href="#como-funciona">Conheça a MOVIVO</a>
+        <section id="como-funciona" />
+        <LandingRuntime />
+      </div>,
+    );
+    await flush();
+
+    await userEvent.setup().click(screen.getByRole('link', { name: 'Conheça a MOVIVO' }));
+    const section = document.getElementById('como-funciona');
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView.mock.contexts[0]).toBe(section);
+    expect(section).toHaveFocus();
+    expect(window.location.hash).toBe('');
+    expect(pushState).not.toHaveBeenCalled();
+  });
+
+  it('abre no topo; âncora vinda de fora leva à seção e sai da URL, sem perder o estado', async () => {
+    gsapState.fake = createFakeGsap(ALL_OFF);
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    const scrollIntoView = vi.spyOn(Element.prototype, 'scrollIntoView');
+    const initialRestoration = window.history.scrollRestoration;
+    // Estado do App Router na entrada: não pode ser apagado ao limpar o hash.
+    window.history.replaceState({ __NA: true }, '', '/#planos');
+
+    const first = render(
+      <>
+        <section id="planos" />
+        <LandingRuntime />
+      </>,
+    );
+    await flush();
+    expect(window.location.pathname + window.location.hash).toBe('/');
+    expect(window.history.state).toEqual({ __NA: true });
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: 'instant' });
+    expect(scrollIntoView.mock.contexts[0]).toBe(document.getElementById('planos'));
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(window.history.scrollRestoration).toBe('manual');
+    first.unmount();
+    expect(window.history.scrollRestoration).toBe(initialRestoration);
+
+    render(<LandingRuntime />);
+    await flush();
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, left: 0, behavior: 'instant' });
+    window.history.replaceState(null, '', '/');
   });
 
   it('com movimento reduzido, nenhum reveal é preparado', async () => {

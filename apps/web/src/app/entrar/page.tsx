@@ -33,7 +33,7 @@ export default async function LoginPage({
           Entrar no MOVIVO Control Center
         </h1>
         {/* O SVG do logo é lettering branco sobre fundo transparente (uso pensado pra fundo
-            escuro, mesmo padrão do header em `/anamnese/[token]`) — precisa da faixa petróleo
+            escuro, mesmo padrão do header em `/anamnese`) — precisa da faixa petróleo
             por trás pra não ficar invisível sobre o card branco. */}
         <div className="flex flex-col items-center justify-center gap-2 bg-petroleo px-6 py-8">
           <Image

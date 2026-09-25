@@ -137,14 +137,14 @@ beforeEach(() => {
 
 describe('OnboardingWizard', () => {
   it('começa na etapa 1 sem exibir a validade do link', () => {
-    render(<OnboardingWizard token="tok" initial={SESSION} />);
+    render(<OnboardingWizard sessionRef="tok" initial={SESSION} />);
     expect(screen.getByText('Vamos começar por você')).toBeInTheDocument();
     expect(screen.queryByText(/link fica disponível/i)).not.toBeInTheDocument();
   });
 
   it('preenche a etapa 1 e avança para a primeira subtela da etapa 2', async () => {
     const user = userEvent.setup();
-    render(<OnboardingWizard token="tok" initial={SESSION} />);
+    render(<OnboardingWizard sessionRef="tok" initial={SESSION} />);
     await completeStep1(user);
     await waitFor(() => expect(recordConsents).toHaveBeenCalled());
     await waitFor(() => expect(patchStep).toHaveBeenCalledWith('tok', 1, expect.any(Object)));
@@ -153,7 +153,7 @@ describe('OnboardingWizard', () => {
 
   it('usa o DDI selecionado no OTP e no PATCH da etapa 1', async () => {
     const user = userEvent.setup();
-    render(<OnboardingWizard token="tok" initial={SESSION} />);
+    render(<OnboardingWizard sessionRef="tok" initial={SESSION} />);
     await user.type(screen.getByLabelText(/nome completo/i), 'Fulano de Tal');
     await user.click(screen.getByLabelText(/data de nascimento/i));
     await user.click(screen.getByRole('button', { name: 'Ano' }));
@@ -185,7 +185,7 @@ describe('OnboardingWizard', () => {
   it('restaura país e número E.164 da sessão salva', () => {
     render(
       <OnboardingWizard
-        token="tok"
+        sessionRef="tok"
         initial={{
           ...SESSION,
           phoneVerified: true,
@@ -202,7 +202,7 @@ describe('OnboardingWizard', () => {
     const user = userEvent.setup();
     render(
       <OnboardingWizard
-        token="tok"
+        sessionRef="tok"
         initial={{
           ...SESSION,
           phoneVerified: true,
@@ -219,7 +219,7 @@ describe('OnboardingWizard', () => {
     const user = userEvent.setup();
     render(
       <OnboardingWizard
-        token="tok"
+        sessionRef="tok"
         initial={{
           ...SESSION,
           phoneVerified: true,
@@ -234,24 +234,24 @@ describe('OnboardingWizard', () => {
   });
 
   it('outcome presente pula direto para a tela de sucesso', () => {
-    render(<OnboardingWizard token="tok" initial={{ ...SESSION, outcome: 'READY' }} />);
+    render(<OnboardingWizard sessionRef="tok" initial={{ ...SESSION, outcome: 'READY' }} />);
     expect(screen.getByText(/Tudo pronto/)).toBeInTheDocument();
   });
 
   it('não oferece retorno entre macroetapas em sessão retomada sem estado local completo', () => {
     const { unmount } = render(
-      <OnboardingWizard token="tok" initial={{ ...SESSION, currentStep: 2 }} />,
+      <OnboardingWizard sessionRef="tok" initial={{ ...SESSION, currentStep: 2 }} />,
     );
     expect(screen.queryByRole('button', { name: 'Voltar' })).not.toBeInTheDocument();
     unmount();
-    render(<OnboardingWizard token="tok" initial={{ ...SESSION, currentStep: 3 }} />);
+    render(<OnboardingWizard sessionRef="tok" initial={{ ...SESSION, currentStep: 3 }} />);
     expect(screen.queryByRole('button', { name: 'Voltar' })).not.toBeInTheDocument();
   });
 
   it('salva uma vez por macroetapa e submete a resposta do servidor', async () => {
     const user = userEvent.setup();
     submitAnamnesis.mockResolvedValue({ status: 'SUBMITTED', outcome: 'READY' });
-    render(<OnboardingWizard token="tok" initial={SESSION} />);
+    render(<OnboardingWizard sessionRef="tok" initial={SESSION} />);
     await completeStep1(user);
     await screen.findByText('Seus objetivos');
     await completeStep2(user);
@@ -268,7 +268,7 @@ describe('OnboardingWizard', () => {
     submitAnamnesis.mockResolvedValue({ status: 'SUBMITTED', outcome: 'PENDING_REVIEW' });
     render(
       <OnboardingWizard
-        token="tok"
+        sessionRef="tok"
         initial={{ ...SESSION, currentStep: 3, step1: { name: 'Fulano de Tal' } }}
       />,
     );
@@ -284,7 +284,7 @@ describe('OnboardingWizard', () => {
     );
     render(
       <OnboardingWizard
-        token="tok"
+        sessionRef="tok"
         initial={{ ...SESSION, currentStep: 3, step1: { name: 'Fulano de Tal' } }}
       />,
     );
@@ -300,7 +300,7 @@ describe('OnboardingWizard', () => {
     submitAnamnesis.mockRejectedValue(new AnamnesisApiError(410, []));
     render(
       <OnboardingWizard
-        token="tok"
+        sessionRef="tok"
         initial={{ ...SESSION, currentStep: 3, step1: { name: 'Fulano de Tal' } }}
       />,
     );
@@ -311,7 +311,7 @@ describe('OnboardingWizard', () => {
   it('erro ao salvar mantém os dados na etapa 1', async () => {
     const user = userEvent.setup();
     recordConsents.mockRejectedValue(new Error('boom'));
-    render(<OnboardingWizard token="tok" initial={SESSION} />);
+    render(<OnboardingWizard sessionRef="tok" initial={SESSION} />);
     await completeStep1(user);
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.getByText('Vamos começar por você')).toBeInTheDocument();

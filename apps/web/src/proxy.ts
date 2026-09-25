@@ -11,6 +11,12 @@ function safeOrigin(value: string): string | null {
 }
 
 /**
+ * Ícones das regiões musculares da anamnese, servidos pelo CDN do Icons8 (crédito no
+ * rodapé do onboarding). Liberado só nessa rota — o dashboard não carrega imagem externa.
+ */
+const ANAMNESIS_IMAGE_ORIGIN = 'https://img.icons8.com';
+
+/**
  * CSP estrita com nonce por request (Next.js 16).
  *
  * O dashboard processa dado de saúde derivado e, por isso, não aceita uma política
@@ -30,7 +36,9 @@ export function proxy(request: NextRequest) {
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ''}`,
     `style-src 'self' 'nonce-${nonce}'${isDev ? " 'unsafe-inline'" : ''}`,
     "style-src-attr 'unsafe-inline'",
-    "img-src 'self' blob: data:",
+    `img-src 'self' blob: data:${
+      request.nextUrl.pathname.startsWith('/anamnese') ? ` ${ANAMNESIS_IMAGE_ORIGIN}` : ''
+    }`,
     "font-src 'self'",
     `connect-src 'self' ${connectOrigins}`.trim(),
     "object-src 'none'",
@@ -52,7 +60,8 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Nonces exigem renderização dinâmica. A superfície CREF é dinâmica;
-  // a landing permanece estática e não recebe uma política incompatível com seu HTML.
-  matcher: ['/entrar', '/dashboard/:path*', '/treino/:path*', '/api/workout/:path*'],
+  // Nonces exigem renderização dinâmica. A superfície CREF e a anamnese (dado de saúde)
+  // são dinâmicas; a landing permanece estática e não recebe uma política incompatível
+  // com seu HTML.
+  matcher: ['/entrar', '/dashboard/:path*', '/treino/:path*', '/api/workout/:path*', '/anamnese'],
 };

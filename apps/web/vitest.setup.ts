@@ -71,6 +71,13 @@ Element.prototype.releasePointerCapture ??= () => {};
 Element.prototype.scrollIntoView ??= () => {};
 
 /*
+ * O jsdom define `window.scrollTo` só para avisar "Not implemented". A landing volta ao
+ * topo ao montar; sem layout real não há rolagem a observar, então o stub é inerte.
+ * Quem precisa verificar a chamada usa `vi.spyOn(window, 'scrollTo')`.
+ */
+window.scrollTo = () => {};
+
+/*
  * Regressão do jsdom 30.1.0 (https://github.com/jsdom/jsdom/issues/4347, sem correção
  * publicada): remover um elemento focado e focar outro em seguida passou a disparar um
  * `blur` espúrio na `window`, com o elemento recém-focado como `relatedTarget`. O

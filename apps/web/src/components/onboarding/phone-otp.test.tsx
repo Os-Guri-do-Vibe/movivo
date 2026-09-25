@@ -29,7 +29,7 @@ beforeEach(() => {
 
 describe('PhoneOtp', () => {
   it('envia o código automaticamente ao montar', async () => {
-    render(<PhoneOtp token="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
+    render(<PhoneOtp sessionRef="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
     await waitFor(() => expect(sendPhoneCode).toHaveBeenCalledWith('tok', '+5511999999999'));
   });
 
@@ -37,7 +37,7 @@ describe('PhoneOtp', () => {
     const user = userEvent.setup();
     const onVerified = vi.fn();
     verifyPhoneCode.mockResolvedValue({ phoneVerified: true });
-    render(<PhoneOtp token="tok" phoneNumber="+5511999999999" onVerified={onVerified} />);
+    render(<PhoneOtp sessionRef="tok" phoneNumber="+5511999999999" onVerified={onVerified} />);
     await waitFor(() => expect(sendPhoneCode).toHaveBeenCalled());
 
     await user.type(screen.getByLabelText(/código de verificação/i), '123456');
@@ -49,7 +49,7 @@ describe('PhoneOtp', () => {
   it('permite colar o código, filtra a pontuação e mantém um único input real', async () => {
     const user = userEvent.setup();
     verifyPhoneCode.mockResolvedValue({ phoneVerified: true });
-    render(<PhoneOtp token="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
+    render(<PhoneOtp sessionRef="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
     await waitFor(() => expect(sendPhoneCode).toHaveBeenCalled());
 
     const input = screen.getByLabelText(/código de verificação/i);
@@ -65,7 +65,7 @@ describe('PhoneOtp', () => {
 
   it('permite selecionar qualquer quadrado e move o cursor visual para ele', async () => {
     const user = userEvent.setup();
-    render(<PhoneOtp token="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
+    render(<PhoneOtp sessionRef="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
     await waitFor(() => expect(sendPhoneCode).toHaveBeenCalled());
 
     await user.click(screen.getByTestId('otp-slot-4'));
@@ -77,7 +77,7 @@ describe('PhoneOtp', () => {
 
   it('substitui um dígito ao selecionar seu quadrado', async () => {
     const user = userEvent.setup();
-    render(<PhoneOtp token="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
+    render(<PhoneOtp sessionRef="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
     await waitFor(() => expect(sendPhoneCode).toHaveBeenCalled());
     const input = screen.getByLabelText(/código de verificação/i);
 
@@ -91,7 +91,7 @@ describe('PhoneOtp', () => {
   it('código incorreto mostra erro e limpa o campo', async () => {
     const user = userEvent.setup();
     verifyPhoneCode.mockRejectedValue(new AnamnesisApiError(400, []));
-    render(<PhoneOtp token="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
+    render(<PhoneOtp sessionRef="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
     await waitFor(() => expect(sendPhoneCode).toHaveBeenCalled());
 
     await user.type(screen.getByLabelText(/código de verificação/i), '000000');
@@ -102,7 +102,7 @@ describe('PhoneOtp', () => {
   it('código expirado (410) mostra mensagem específica', async () => {
     const user = userEvent.setup();
     verifyPhoneCode.mockRejectedValue(new AnamnesisApiError(410, []));
-    render(<PhoneOtp token="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
+    render(<PhoneOtp sessionRef="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
     await waitFor(() => expect(sendPhoneCode).toHaveBeenCalled());
 
     await user.type(screen.getByLabelText(/código de verificação/i), '111111');

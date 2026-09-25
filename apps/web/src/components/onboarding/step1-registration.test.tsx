@@ -55,7 +55,7 @@ function renderStep1(overrides: Partial<Parameters<typeof Step1Registration>[0]>
     onToggleConsent: vi.fn(),
     phoneVerified: true,
     onPhoneVerified: vi.fn(),
-    token: 'tok',
+    sessionRef: 'tok',
     onContinue: vi.fn(),
     saving: false,
     ...overrides,

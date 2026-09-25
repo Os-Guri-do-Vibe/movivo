@@ -7,7 +7,7 @@ import { getRenewalSession, type RenewalSessionView } from '@/lib/protocol-renew
 
 /**
  * Formulário de troca de protocolo por fim de mesociclo (pós-MVP) — RSC que busca a
- * sessão no servidor (mesmo padrão de `/anamnese/[token]`) e hidrata o wizard
+ * sessão no servidor (mesmo padrão de `/protocolo/[token]`) e hidrata o wizard
  * client-side com o estado inicial, para retomada funcionar mesmo após reload.
  *
  * Diferente da anamnese, o token não é consumido (TTL de 14 dias, reaberto de
