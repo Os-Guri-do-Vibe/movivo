@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { connection } from 'next/server';
 
 import { AnamneseEntry } from '@/components/onboarding/anamnese-entry';
 
@@ -11,6 +12,9 @@ export const metadata: Metadata = {
   robots: { index: false },
 };
 
-export default function AnamnesePage() {
+export default async function AnamnesePage() {
+  // Recebe CSP com nonce pelo proxy. Sem renderização por request, o build estático
+  // emite scripts sem nonce e o formulário não hidrata.
+  await connection();
   return <AnamneseEntry />;
 }
