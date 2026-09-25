@@ -1,8 +1,10 @@
 /**
- * Cliente HTTP do onboarding v2 (Sprint 6) — consome o `AnamnesisController`.
+ * Cliente HTTP do onboarding v2 (Sprint 6) — fala só com o BFF `/api/anamnesis/*`.
  *
- * O token é o identificador opaco da sessão (72h), sempre no PATH (nunca query
- * string, ADR-006/Sato §8.1) — mesmo padrão de `subscription-api.ts`.
+ * O token da sessão (72h, credencial de dado de saúde — ADR-006/Sato §8.1) nunca chega
+ * a este código: fica num cookie httpOnly e o BFF o coloca no PATH das chamadas à API.
+ * Aqui circula só a referência da sessão desta aba (`ref`), que não serve como
+ * credencial — ver `anamnesis-session-ref.ts`.
  */
 import type { OnboardingOutcome, SubscriptionPlanId } from '@movivo/shared';
 import {
@@ -18,10 +20,10 @@ import {
 } from 'libphonenumber-js';
 import mobilePhoneExamples from 'libphonenumber-js/mobile/examples';
 
-import { publicEnv } from './env';
+import { ANAMNESIS_REF_HEADER, SESSION_REPLACED_STATUS } from './anamnesis-session-ref';
 import { getFirstTouch } from './first-touch';
 
-const BASE = publicEnv.apiUrl;
+const BASE = '/api/anamnesis';
 
 export interface ConsentItemView {
   type: 'TERMS_OF_SERVICE' | 'HEALTH_DATA' | 'AI_DISCLOSURE' | 'MARKETING';
@@ -46,10 +48,10 @@ export interface SessionView {
   expiresAt: string;
 }
 
-export interface StartResult {
-  token: string;
-  expiresAt: string;
-  currentStep: number;
+/** Sessão aberta ou retomada: estado + referência desta aba (nunca o token). */
+export interface SessionEntry {
+  ref: string;
+  session: SessionView;
 }
 
 export interface SendCodeResult {
@@ -72,6 +74,14 @@ class AnamnesisApiError extends Error {
   }
 }
 
+/** O cookie passou a ser de um cadastro aberto em outra aba: esta aba precisa recarregar. */
+export function isSessionReplaced(error: unknown): boolean {
+  return error instanceof AnamnesisApiError && error.status === SESSION_REPLACED_STATUS;
+}
+
+export const SESSION_REPLACED_MESSAGE =
+  'Um novo cadastro foi aberto em outra aba. Recarregue a página para continuar por ele.';
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
@@ -85,15 +95,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json().catch(() => ({}))) as T;
 }
 
-function post<T>(path: string, body?: unknown): Promise<T> {
+/** Escrita na sessão desta aba: a referência vai junto para o BFF conferir. */
+function write<T>(method: 'POST' | 'PATCH', path: string, ref: string, body?: unknown) {
   return request<T>(path, {
-    method: 'POST',
+    method,
+    headers: { [ANAMNESIS_REF_HEADER]: ref },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-}
-
-function patch<T>(path: string, body: unknown): Promise<T> {
-  return request<T>(path, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
 export { AnamnesisApiError };
@@ -101,45 +109,49 @@ export { AnamnesisApiError };
 export function startAnamnesis(
   planId: SubscriptionPlanId,
   primaryGoal?: string,
-): Promise<StartResult> {
+): Promise<SessionEntry> {
   // A atribuição de primeiro toque (US-8.2) viaja aqui: é a única chamada em que a
   // sessão nasce, e é no servidor que ela é saneada e gravada em escrita única.
-  return post<StartResult>('/anamnesis/start', {
-    planId,
-    ...(primaryGoal ? { primaryGoal } : {}),
-    attribution: getFirstTouch() ?? {},
+  return request<SessionEntry>('/start', {
+    method: 'POST',
+    body: JSON.stringify({
+      planId,
+      ...(primaryGoal ? { primaryGoal } : {}),
+      attribution: getFirstTouch() ?? {},
+    }),
   });
 }
 
-export function getSession(token: string): Promise<SessionView> {
-  return request<SessionView>(`/anamnesis/session/${token}`, { cache: 'no-store' });
+/** Sessão do cookie, para retomar no F5. 404 = nenhum cadastro em andamento. */
+export function getSession(): Promise<SessionEntry> {
+  return request<SessionEntry>('/session', { cache: 'no-store' });
 }
 
 export function patchStep(
-  token: string,
+  ref: string,
   step: 1 | 2 | 3,
   data: unknown,
 ): Promise<{ currentStep: number }> {
-  return patch(`/anamnesis/session/${token}/step/${step}`, data);
+  return write('PATCH', `/session/step/${step}`, ref, data);
 }
 
-export function sendPhoneCode(token: string, phoneNumber: string): Promise<SendCodeResult> {
-  return post<SendCodeResult>(`/anamnesis/session/${token}/phone/send-code`, { phoneNumber });
+export function sendPhoneCode(ref: string, phoneNumber: string): Promise<SendCodeResult> {
+  return write<SendCodeResult>('POST', '/session/phone/send-code', ref, { phoneNumber });
 }
 
-export function verifyPhoneCode(token: string, code: string): Promise<{ phoneVerified: true }> {
-  return post<{ phoneVerified: true }>(`/anamnesis/session/${token}/phone/verify`, { code });
+export function verifyPhoneCode(ref: string, code: string): Promise<{ phoneVerified: true }> {
+  return write<{ phoneVerified: true }>('POST', '/session/phone/verify', ref, { code });
 }
 
 export function recordConsents(
-  token: string,
+  ref: string,
   consents: { type: string; version: string; accepted: boolean }[],
 ): Promise<void> {
-  return post(`/anamnesis/session/${token}/consents`, { consents });
+  return write('POST', '/session/consents', ref, { consents });
 }
 
-export function submitAnamnesis(token: string): Promise<SubmitResult> {
-  return post<SubmitResult>(`/anamnesis/session/${token}/submit`);
+export function submitAnamnesis(ref: string): Promise<SubmitResult> {
+  return write<SubmitResult>('POST', '/session/submit', ref);
 }
 
 export type PhoneCountryIso = CountryCode;

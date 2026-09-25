@@ -3,7 +3,13 @@
 import * as React from 'react';
 
 import { cn } from '@/lib/utils';
-import { AnamnesisApiError, sendPhoneCode, verifyPhoneCode } from '@/lib/anamnesis-api';
+import {
+  AnamnesisApiError,
+  isSessionReplaced,
+  sendPhoneCode,
+  SESSION_REPLACED_MESSAGE,
+  verifyPhoneCode,
+} from '@/lib/anamnesis-api';
 
 /**
  * Verificação de posse do WhatsApp por código (US-6.5, Sofia §4).
@@ -17,11 +23,11 @@ const CODE_LENGTH = 6;
 const RESEND_MAX_ATTEMPTS = 3;
 
 export function PhoneOtp({
-  token,
+  sessionRef,
   phoneNumber,
   onVerified,
 }: {
-  token: string;
+  sessionRef: string;
   phoneNumber: string;
   onVerified: () => void;
 }) {
@@ -48,17 +54,21 @@ export function PhoneOtp({
   const sendCode = React.useCallback(async () => {
     setError(null);
     try {
-      const res = await sendPhoneCode(token, phoneNumber);
+      const res = await sendPhoneCode(sessionRef, phoneNumber);
       setSent(true);
       setResendAvailableAt(new Date(res.resendAvailableAt).getTime());
       setResendCount((c) => c + 1);
       setCode('');
       setActiveSlot(0);
       inputRef.current?.focus();
-    } catch {
-      setError('Não conseguimos enviar o código agora. Tente de novo em instantes.');
+    } catch (err) {
+      setError(
+        isSessionReplaced(err)
+          ? SESSION_REPLACED_MESSAGE
+          : 'Não conseguimos enviar o código agora. Tente de novo em instantes.',
+      );
     }
-  }, [token, phoneNumber]);
+  }, [sessionRef, phoneNumber]);
 
   React.useEffect(() => {
     if (autoSentForRef.current === phoneNumber) return;
@@ -73,10 +83,12 @@ export function PhoneOtp({
     setVerifying(true);
     setError(null);
     try {
-      await verifyPhoneCode(token, candidate);
+      await verifyPhoneCode(sessionRef, candidate);
       onVerified();
     } catch (err) {
-      if (err instanceof AnamnesisApiError && err.status === 410) {
+      if (isSessionReplaced(err)) {
+        setError(SESSION_REPLACED_MESSAGE);
+      } else if (err instanceof AnamnesisApiError && err.status === 410) {
         setError('Esse código expirou. Peça um novo.');
       } else {
         setError('Código incorreto. Confira e tente de novo.');

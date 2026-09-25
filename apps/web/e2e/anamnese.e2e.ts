@@ -1,12 +1,13 @@
 /**
  * E2E do onboarding v2 (Sprint 6 · TASK-6.12.3) contra `mock-dashboard-api.mjs` (porta
- * 3101), o mesmo mock server real usado pelo dashboard — necessário aqui porque a página
- * `/anamnese/[token]` busca a sessão no SERVIDOR (RSC), e `page.route()` só intercepta
- * chamadas do browser. O fluxo contra a API real é validado por `test:int`.
+ * 3101), o mesmo mock server real usado pelo dashboard — necessário aqui porque o BFF
+ * `/api/anamnesis/*` chama a API a partir do SERVIDOR Next, e `page.route()` só
+ * intercepta chamadas do browser. O fluxo contra a API real é validado por `test:int`.
  *
- * Cobre as 3 etapas nas DUAS saídas (V1 READY / V2 PENDING_REVIEW) e a retomada por
- * token. A variante da tela de sucesso é decidida pelo `outcome` do servidor: o mock
- * avalia o PAR-Q no submit, exatamente como a API.
+ * Cobre as 3 etapas nas DUAS saídas (V1 READY / V2 PENDING_REVIEW), a retomada no F5 e
+ * que o token da sessão nunca aparece na URL nem ao JavaScript da página. A variante da
+ * tela de sucesso é decidida pelo `outcome` do servidor: o mock avalia o PAR-Q no
+ * submit, exatamente como a API.
  */
 import { expect, test, type Page } from '@playwright/test';
 
@@ -16,8 +17,8 @@ test.describe.configure({ mode: 'serial' });
 
 async function fillStep1(page: Page) {
   await page.goto('/anamnese');
-  await expect(page).toHaveURL(/\/anamnese\/e2e-onboarding-token$/);
   await expect(page.getByRole('heading', { name: 'Vamos começar por você' })).toBeVisible();
+  await expect(page).toHaveURL(/\/anamnese$/);
   await expect(page.getByRole('button', { name: /tema/i })).toHaveCount(0);
   await expect(page.getByRole('img', { name: 'MOVIVO' })).toBeVisible();
   await expect(page.getByRole('progressbar', { name: 'Progresso do cadastro' })).toHaveAttribute(
@@ -165,12 +166,53 @@ test('jornada V2: um "Sim" no PAR-Q leva à tela de supervisão, sem revelar o m
   await expect(page.locator('body')).not.toContainText(/diagnóstico|tratamento|cura/i);
 });
 
-test('retomada por token: recarregar o link volta na etapa salva, não do zero', async ({
+test('retomada: F5 volta na etapa salva, não do zero, e o token não vai para a URL', async ({
   page,
 }) => {
   await fillStep1(page);
 
-  await page.goto('/anamnese/e2e-onboarding-token');
+  await page.reload();
   await expect(page.getByRole('heading', { name: 'Seus objetivos' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Vamos começar por você' })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/anamnese$/);
+  expect(page.url()).not.toContain('e2e-onboarding-token');
+});
+
+test('segurança: token da sessão fora do alcance do JavaScript', async ({ page, context }) => {
+  await fillStep1(page);
+
+  const cookie = (await context.cookies()).find(({ name }) => name === 'movivo_anamnesis_session');
+  expect(cookie).toMatchObject({
+    value: 'e2e-onboarding-token',
+    httpOnly: true,
+    sameSite: 'Strict',
+    path: '/api/anamnesis',
+    expires: -1,
+  });
+  const visibleToScripts = await page.evaluate(() =>
+    [document.cookie, JSON.stringify(sessionStorage), JSON.stringify(localStorage)].join(' '),
+  );
+  expect(visibleToScripts).not.toContain('e2e-onboarding-token');
+});
+
+test('CTA com plano abre /anamnese limpa e "voltar" leva à landing no topo', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.goto('/', { waitUntil: 'networkidle' });
+  // Passa por uma seção antes, como quem lê a landing antes de escolher o plano.
+  await page
+    .getByRole('navigation', { name: 'Navegação principal' })
+    .getByRole('link', { name: 'Planos' })
+    .click();
+  await page.locator('#planos article', { hasText: 'Trimestral' }).getByRole('link').click();
+
+  await expect(page.getByRole('heading', { name: 'Vamos começar por você' })).toBeVisible();
+  await expect(page).toHaveURL(/\/anamnese$/);
+
+  await page.goBack();
+  await expect(
+    page.getByRole('heading', { level: 1, name: /Move your potential\./i }),
+  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Vamos começar por você' })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/$/);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
 });
