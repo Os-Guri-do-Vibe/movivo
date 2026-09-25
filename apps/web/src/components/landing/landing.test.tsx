@@ -5,12 +5,21 @@
  * motion": todo o conteúdo precisa estar presente e legível mesmo assim.
  */
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./fonts', () => ({ landingFontVariables: '' }));
 vi.mock('./sections/muscle-map-figures', () => ({ default: () => null }));
 
 import { Landing } from './landing';
+import { loadGsap } from './motion/gsap';
+
+/*
+ * O runtime e as seções pedem o GSAP por `import()` dinâmico e não esperam a resposta.
+ * Sem aguardar aqui, num runner lento o import termina depois de o ambiente do arquivo
+ * ser desmontado e o Vitest acusa `EnvironmentTeardownError` (o CI falha com os testes
+ * verdes). É a mesma promessa que os componentes já iniciaram.
+ */
+afterAll(() => loadGsap());
 
 describe('Landing', () => {
   it('tem um único H1 e as seções na ordem narrativa', () => {
