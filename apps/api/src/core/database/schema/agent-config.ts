@@ -40,7 +40,7 @@ import { AgentConfigStatus } from '@movivo/shared';
 
 import { eventTimestamp, primaryKeyColumn } from './_shared';
 import { biologicalSexEnum } from './enums';
-import { users } from './users';
+import { staff } from './staff';
 
 export const agentConfigStatusEnum = pgEnum('agent_config_status', [
   AgentConfigStatus.DRAFT,
@@ -78,7 +78,7 @@ export const agentConfig = pgTable(
      * nullable pelo mesmo motivo). Toda publicação de verdade, feita pelo painel, sempre
      * tem um `created_by` real.
      */
-    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'restrict' }),
+    createdBy: uuid('created_by').references(() => staff.id, { onDelete: 'restrict' }),
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },
   (table) => [

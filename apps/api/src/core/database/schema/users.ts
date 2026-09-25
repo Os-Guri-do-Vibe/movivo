@@ -6,7 +6,7 @@
  * `current_setting('app.current_user_id')` (Sato §4.2), e é por isso que ele é
  * **coluna líder** dos índices por usuário (Sato §4.5).
  */
-import { boolean, check, index, pgTable, text, varchar } from 'drizzle-orm/pg-core';
+import { boolean, check, index, pgTable, varchar } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 import { eventTimestamp, primaryKeyColumn, timestampColumns } from './_shared';
@@ -76,23 +76,13 @@ export const users = pgTable(
      * para um papel interno por provisionamento administrativo (fora do fluxo
      * público). Consumido pelos guards e pelo GUC `app.current_role`.
      */
-    role: userRoleEnum('role').notNull().default('USER'),
-
     /**
-     * Hash Argon2id da senha — existe somente para contas internas provisionadas
-     * (o titular final não faz login no MVP). Nulo para `USER`.
-     *
-     * -- SENSÍVEL: credencial. Nunca é logado (LoggerModule redige), nunca sai
-     * em resposta de API e nunca trafega em claro. O hashing (Argon2id) é feito
-     * na aplicação em US-1.4 — esta coluna guarda apenas o *encoded hash* final,
-     * jamais a senha. `text` porque o encoded do Argon2id não tem tamanho fixo.
+     * Papel do titular perante o RBAC — na prática sempre `USER` desde a separação
+     * das contas internas para a tabela `staff`. Mantido (em vez de removido) para
+     * não reabrir a policy de RLS `users.role = 'USER'` (SUPPORT) nem o enum
+     * `user_role`; ver `staff.ts` para ADMIN/PROFESSIONAL/etc.
      */
-    passwordHash: text('password_hash'),
-
-    /** Credencial profissional verificada no provisionamento interno. */
-    crefNumber: varchar('cref_number', { length: 30 }),
-    crefRegion: varchar('cref_region', { length: 2 }),
-    crefActive: boolean('cref_active').notNull().default(false),
+    role: userRoleEnum('role').notNull().default('USER'),
 
     trialStartedAt: eventTimestamp('trial_started_at'),
     trialEndsAt: eventTimestamp('trial_ends_at'),

@@ -330,7 +330,7 @@ export class AppConfigService {
 
   /**
    * URL pública e absoluta da foto de perfil a partir do nome do arquivo salvo
-   * (`users.avatar_path`), ou `null` quando a conta não tem avatar. Usada tanto por
+   * (`staff.avatar_path`), ou `null` quando a conta não tem avatar. Usada tanto por
    * `GET /auth/me` (header do dashboard) quanto por `GET /account/profile` (tela Minha
    * Conta) — centralizada aqui para as duas rotas nunca divergirem na montagem da URL.
    */

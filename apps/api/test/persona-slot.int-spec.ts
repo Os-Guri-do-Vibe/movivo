@@ -80,7 +80,8 @@ beforeAll(async () => {
     RETURNING id
   `;
   const [author] = await migratorClient<{ id: string }[]>`
-    INSERT INTO users (phone_number, name) VALUES (${`+5544${RUN}3`}, 'Autor slot')
+    INSERT INTO staff (phone_number, email, name, role, password_hash)
+    VALUES (${`+5544${RUN}3`}, ${`autor-slot-${RUN}@movivo.test`}, 'Autor slot', 'ADMIN', 'x')
     RETURNING id
   `;
   if (!submitted || !without || !author) throw new Error('falha ao semear titulares do teste');

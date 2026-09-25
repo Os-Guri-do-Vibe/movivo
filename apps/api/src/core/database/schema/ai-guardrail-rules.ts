@@ -2,7 +2,7 @@
 import { index, integer, jsonb, pgEnum, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn } from './_shared';
-import { users } from './users';
+import { staff } from './staff';
 
 export const aiGuardrailScopeEnum = pgEnum('ai_guardrail_scope', ['INPUT', 'OUTPUT', 'BOTH']);
 export const aiGuardrailActionEnum = pgEnum('ai_guardrail_action', ['FLAG']);
@@ -22,7 +22,7 @@ export const aiGuardrailRules = pgTable(
     changeNote: text('change_note').notNull(),
     createdBy: uuid('created_by')
       .notNull()
-      .references(() => users.id, { onDelete: 'restrict' }),
+      .references(() => staff.id, { onDelete: 'restrict' }),
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },
   (table) => [

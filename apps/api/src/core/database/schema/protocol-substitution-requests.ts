@@ -35,6 +35,7 @@ import {
 import { eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
 import { reviewUrgencyEnum, substitutionRequestStatusEnum } from './enums';
 import { protocols } from './protocols';
+import { staff } from './staff';
 import { users } from './users';
 
 export const protocolSubstitutionRequests = pgTable(
@@ -106,7 +107,7 @@ export const protocolSubstitutionRequests = pgTable(
     catalogGap: boolean('catalog_gap').notNull().default(false),
 
     decidedAt: eventTimestamp('decided_at'),
-    decidedBy: uuid('decided_by').references(() => users.id, { onDelete: 'restrict' }),
+    decidedBy: uuid('decided_by').references(() => staff.id, { onDelete: 'restrict' }),
 
     ...timestampColumns,
   },

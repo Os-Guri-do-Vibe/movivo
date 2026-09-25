@@ -13,7 +13,7 @@ import { desc, eq, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 
 import { FaqService, normalizeFaqQuestion } from '../../core/agent-config/faq.service';
-import { faqEntries, users } from '../../core/database/schema';
+import { faqEntries, staff } from '../../core/database/schema';
 import {
   TenantDatabase,
   type TenantTransaction,
@@ -44,10 +44,10 @@ export class FaqAdminService {
           status: faqEntries.status,
           changeNote: faqEntries.changeNote,
           createdAt: faqEntries.createdAt,
-          createdBy: users.name,
+          createdBy: staff.name,
         })
         .from(faqEntries)
-        .leftJoin(users, eq(users.id, faqEntries.createdBy))
+        .leftJoin(staff, eq(staff.id, faqEntries.createdBy))
         .orderBy(desc(faqEntries.createdAt), desc(faqEntries.version)),
     );
     const currentKeys = new Set<string>();

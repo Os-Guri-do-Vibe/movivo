@@ -22,7 +22,7 @@ import type {
   MovementPattern,
 } from '../../../modules/protocol/exercise-catalog';
 import { eventTimestamp, primaryKeyColumn } from './_shared';
-import { users } from './users';
+import { staff } from './staff';
 
 export const exerciseCatalogEntryStatusEnum = pgEnum('exercise_catalog_entry_status', [
   'PUBLISHED',
@@ -57,7 +57,7 @@ export const exerciseCatalogEntries = pgTable(
     status: exerciseCatalogEntryStatusEnum('status').notNull().default('PUBLISHED'),
     changeNote: text('change_note').notNull(),
     /** Nulo só na linha de bootstrap (migração automática do array legado — sem ator humano). */
-    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'restrict' }),
+    createdBy: uuid('created_by').references(() => staff.id, { onDelete: 'restrict' }),
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },
   (table) => [

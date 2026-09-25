@@ -18,7 +18,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import type { z } from 'zod';
 
 import { ForbiddenTopicsService } from '../../core/agent-config/forbidden-topics.service';
-import { aiForbiddenTopics, users } from '../../core/database/schema';
+import { aiForbiddenTopics, staff } from '../../core/database/schema';
 import {
   TenantDatabase,
   type TenantTransaction,
@@ -41,8 +41,8 @@ export class ForbiddenTopicAdminService {
 
   async list(): Promise<ForbiddenTopicsResponse> {
     const rows = await this.db.runAsSystem((tx) => {
-      const maker = alias(users, 'forbidden_topic_maker');
-      const checker = alias(users, 'forbidden_topic_checker');
+      const maker = alias(staff, 'forbidden_topic_maker');
+      const checker = alias(staff, 'forbidden_topic_checker');
       return tx
         .select({
           id: aiForbiddenTopics.id,
@@ -257,7 +257,7 @@ export class ForbiddenTopicAdminService {
   ): Promise<void> {
     if (actor.role === 'ADMIN') return;
     const rows = (await tx.execute(sql`
-      SELECT id FROM users
+      SELECT id FROM staff
       WHERE id = ${actor.userId}::uuid AND role = 'PROFESSIONAL' AND cref_active = true
       LIMIT 1
     `)) as unknown as Array<{ id: string }>;

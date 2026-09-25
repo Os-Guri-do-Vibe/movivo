@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { boolean, index, pgTable, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
+import { staff } from './staff';
 import { users } from './users';
 
 /** Vinculo de escopo: RBAC profissional nunca equivale a acesso global. */
@@ -11,7 +12,7 @@ export const professionalAssignments = pgTable(
     id: primaryKeyColumn(),
     professionalId: uuid('professional_id')
       .notNull()
-      .references(() => users.id, { onDelete: 'restrict' }),
+      .references(() => staff.id, { onDelete: 'restrict' }),
     userId: userIdColumn()
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),

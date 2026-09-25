@@ -26,7 +26,7 @@ import argon2 from 'argon2';
 import postgres from 'postgres';
 
 import { loadEnv } from '../config/load-env';
-import { professionalAssignments, users } from './schema';
+import { professionalAssignments, staff, users } from './schema';
 
 const { env } = loadEnv();
 
@@ -108,7 +108,7 @@ async function main(): Promise<void> {
     if (devPassword) {
       const passwordHash = await argon2.hash(devPassword, { type: argon2.argon2id });
       await db
-        .insert(users)
+        .insert(staff)
         .values({
           phoneNumber: '+5555000000099',
           name: 'Profissional CREF Dev (sintetico)',
@@ -120,11 +120,11 @@ async function main(): Promise<void> {
           crefRegion: 'ZZ',
           crefActive: true,
         })
-        .onConflictDoNothing({ target: users.phoneNumber });
+        .onConflictDoNothing({ target: staff.email });
       const [professional] = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.phoneNumber, '+5555000000099'))
+        .select({ id: staff.id })
+        .from(staff)
+        .where(eq(staff.email, 'cref-dev@example.invalid'))
         .limit(1);
       const titulars = await db.select({ id: users.id }).from(users).where(eq(users.role, 'USER'));
       if (professional) {
@@ -143,7 +143,7 @@ async function main(): Promise<void> {
     if (devPassword) {
       const adminPasswordHash = await argon2.hash(devPassword, { type: argon2.argon2id });
       await db
-        .insert(users)
+        .insert(staff)
         .values({
           phoneNumber: '+5555000000098',
           name: 'Fundador Admin Dev (sintetico)',
@@ -152,7 +152,7 @@ async function main(): Promise<void> {
           role: 'ADMIN',
           passwordHash: adminPasswordHash,
         })
-        .onConflictDoNothing({ target: users.phoneNumber });
+        .onConflictDoNothing({ target: staff.email });
       console.log('[db:seed] Conta ADMIN sintetica provisionada.');
     }
 

@@ -43,6 +43,8 @@ describe('buildRlsPoliciesSql', () => {
   it('cobre exatamente as tabelas de titular (Sprint 1 + ai_jobs/protocols da US-2.x)', () => {
     expect(RLS_TENANT_TABLES).toEqual([
       'users',
+      // Conta da Plataforma Interna (login, dashboard) — não é dado de titular.
+      'staff',
       'consents',
       'anamnesis_sessions',
       'auth_sessions',

@@ -2,7 +2,7 @@
 import { index, integer, pgEnum, pgTable, text, unique, uuid, varchar } from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn } from './_shared';
-import { users } from './users';
+import { staff } from './staff';
 
 export const methodologyStatusEnum = pgEnum('methodology_status', [
   'DRAFT',
@@ -22,7 +22,7 @@ export const methodologyVersions = pgTable(
     content: text('content').notNull(),
     contentSha256: varchar('content_sha256', { length: 64 }).notNull(),
     changeNote: text('change_note').notNull(),
-    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'restrict' }),
+    createdBy: uuid('created_by').references(() => staff.id, { onDelete: 'restrict' }),
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
@@ -40,7 +40,7 @@ export const methodologyEvents = pgTable(
       .references(() => methodologyVersions.id, { onDelete: 'restrict' }),
     sequence: integer('sequence').notNull(),
     status: methodologyStatusEnum('status').notNull(),
-    actorId: uuid('actor_id').references(() => users.id, { onDelete: 'restrict' }),
+    actorId: uuid('actor_id').references(() => staff.id, { onDelete: 'restrict' }),
     note: text('note').notNull(),
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },

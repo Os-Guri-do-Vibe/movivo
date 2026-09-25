@@ -95,6 +95,8 @@ const EXPECTED_TABLES = [
   'protocol_renewal_sessions',
   // Alias curto e público para links longos enviados por WhatsApp.
   'short_links',
+  // Separação da Plataforma Interna (staff) da tabela do titular final (users).
+  'staff',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;
@@ -198,106 +200,16 @@ describe('migração versionada num Postgres limpo', () => {
     }
   });
 
-  it('migra assinaturas legadas para CREF atribuido ou falha fechado antes da FK', async () => {
-    const client = connect(throwawayDb, migratorUser, migratorPassword);
-    const mappedHolder = '10000000-0000-4000-8000-000000000001';
-    const blockedHolder = '10000000-0000-4000-8000-000000000002';
-    const invalidRoleHolder = '10000000-0000-4000-8000-000000000003';
-    const inactiveCrefHolder = '10000000-0000-4000-8000-000000000004';
-    const professional = '20000000-0000-4000-8000-000000000001';
-    const invalidSigner = '30000000-0000-4000-8000-000000000001';
-    const inactiveSigner = '30000000-0000-4000-8000-000000000002';
-    const orphanSigner = '40000000-0000-4000-8000-000000000001';
-    try {
-      await client.unsafe(
-        'ALTER TABLE "protocols" DROP CONSTRAINT "protocols_professional_id_users_id_fk"',
-      );
-      await client`
-        INSERT INTO users (id, phone_number, role, cref_number, cref_region, cref_active)
-        VALUES
-          (${mappedHolder}::uuid, '+5555100000001', 'USER', NULL, NULL, false),
-          (${blockedHolder}::uuid, '+5555100000002', 'USER', NULL, NULL, false),
-          (${invalidRoleHolder}::uuid, '+5555100000003', 'USER', NULL, NULL, false),
-          (${inactiveCrefHolder}::uuid, '+5555100000004', 'USER', NULL, NULL, false),
-          (${professional}::uuid, '+5555200000001', 'PROFESSIONAL', '123456', 'SP', true),
-          (${invalidSigner}::uuid, '+5555300000001', 'USER', NULL, NULL, false),
-          (${inactiveSigner}::uuid, '+5555300000002', 'PROFESSIONAL', '999999', 'SP', false)
-      `;
-      await client`
-        INSERT INTO professional_assignments (professional_id, user_id)
-        VALUES (${professional}::uuid, ${mappedHolder}::uuid),
-               (${professional}::uuid, ${invalidRoleHolder}::uuid)
-      `;
-      await client`
-        INSERT INTO protocols (
-          id, user_id, status, approval_status, professional_id, signed_at,
-          signature_hash, content, constraints, human_review_required,
-          -- NOT NULL sem default desde a migração 0033.
-          mesocycle_name, start_date, end_date
-        ) VALUES
-          ('50000000-0000-4000-8000-000000000001', ${mappedHolder}::uuid,
-           'ACTIVE', 'AUTO_APPROVED', ${orphanSigner}::uuid, now(), repeat('a', 64), '{}', '{}', false,
-           'Mesociclo 1 — Adaptação', now(), now() + interval '12 weeks'),
-          ('50000000-0000-4000-8000-000000000002', ${blockedHolder}::uuid,
-           'ACTIVE', 'AUTO_APPROVED', ${orphanSigner}::uuid, now(), repeat('b', 64), '{}', '{}', false,
-           'Mesociclo 1 — Adaptação', now(), now() + interval '12 weeks'),
-          ('50000000-0000-4000-8000-000000000003', ${invalidRoleHolder}::uuid,
-           'ACTIVE', 'AUTO_APPROVED', ${invalidSigner}::uuid, now(), repeat('c', 64), '{}', '{}', false,
-           'Mesociclo 1 — Adaptação', now(), now() + interval '12 weeks'),
-          ('50000000-0000-4000-8000-000000000004', ${inactiveCrefHolder}::uuid,
-           'ACTIVE', 'AUTO_APPROVED', ${inactiveSigner}::uuid, now(), repeat('d', 64), '{}', '{}', false,
-           'Mesociclo 1 — Adaptação', now(), now() + interval '12 weeks')
-      `;
-
-      const migration = readFileSync(resolve(apiRoot, 'drizzle', '0015_calm_sage.sql'), 'utf8');
-      await client.unsafe(migration);
-
-      const rows = await client<
-        {
-          id: string;
-          professionalId: string | null;
-          status: string;
-          approvalStatus: string;
-          signedAt: Date | null;
-          signatureHash: string | null;
-          humanReviewRequired: boolean;
-        }[]
-      >`
-        SELECT id, professional_id AS "professionalId", status,
-          approval_status AS "approvalStatus", signed_at AS "signedAt",
-          signature_hash AS "signatureHash", human_review_required AS "humanReviewRequired"
-        FROM protocols WHERE id::text LIKE '50000000-%' ORDER BY id
-      `;
-
-      expect(rows[0]).toMatchObject({ professionalId: professional, status: 'ACTIVE' });
-      expect(rows[1]).toMatchObject({
-        professionalId: null,
-        status: 'PENDING_SIGNATURE',
-        approvalStatus: 'PENDING_REVIEW',
-        signedAt: null,
-        signatureHash: null,
-        humanReviewRequired: true,
-      });
-      expect(rows[2]).toMatchObject({ professionalId: professional, status: 'ACTIVE' });
-      expect(rows[3]).toMatchObject({
-        professionalId: null,
-        status: 'PENDING_SIGNATURE',
-        approvalStatus: 'PENDING_REVIEW',
-        humanReviewRequired: true,
-      });
-      await client`DELETE FROM protocols WHERE id::text LIKE '50000000-%'`;
-      await client`DELETE FROM professional_assignments WHERE professional_id = ${professional}::uuid`;
-      await client`
-        DELETE FROM users WHERE id IN (
-          ${mappedHolder}::uuid, ${blockedHolder}::uuid, ${invalidRoleHolder}::uuid,
-          ${inactiveCrefHolder}::uuid, ${professional}::uuid, ${invalidSigner}::uuid,
-          ${inactiveSigner}::uuid
-        )
-      `;
-    } finally {
-      await client.end({ timeout: 5 });
-    }
-  });
+  // Removido (separação staff/users): este teste reexecutava a SQL BRUTA e histórica da
+  // migração 0015_calm_sage.sql — que hardcoda `users."role" = 'PROFESSIONAL'` e
+  // `users."cref_active"` — para provar, isoladamente, o backfill que ela fazia na época.
+  // A migração 0059 (separação da Plataforma Interna) remove `cref_number`/`cref_region`/
+  // `cref_active`/`password_hash` de `users` para sempre (viram exclusivos de `staff`).
+  // Não há como "consertar" o teste sem reescrever uma migração histórica já aplicada em
+  // produção — e reescrevê-la quebraria o hash que o `drizzle-orm` usa para saber quais
+  // migrações já rodaram. O comportamento ATUAL de atribuição/reatribuição de profissional
+  // (não mais uma migração pontual de dado legado) continua coberto pelo teste seguinte,
+  // que exercita `assign_unique_active_professional` ao vivo contra `staff`.
 
   it('preserva ciclos revogado e reaceito e reativa o vinculo CREF explicitamente', async () => {
     const client = connect(throwawayDb, migratorUser, migratorPassword);
@@ -308,10 +220,13 @@ describe('migração versionada num Postgres limpo', () => {
       await client.unsafe(buildAuditIntegritySql(appRole));
       await client.unsafe(buildProfessionalAccessSql(appRole));
       await client`
-        INSERT INTO users (id, phone_number, role, cref_number, cref_region, cref_active)
-        VALUES
-          (${holder}::uuid, '+5555700000001', 'USER', NULL, NULL, false),
-          (${professional}::uuid, '+5555700000002', 'PROFESSIONAL', '700001', 'SP', true)
+        INSERT INTO users (id, phone_number, role)
+        VALUES (${holder}::uuid, '+5555700000001', 'USER')
+      `;
+      await client`
+        INSERT INTO staff (id, phone_number, email, role, password_hash, cref_number, cref_region, cref_active)
+        VALUES (${professional}::uuid, '+5555700000002', 'migration-professional-70@movivo.test',
+                'PROFESSIONAL', 'x', '700001', 'SP', true)
       `;
       await client`
         INSERT INTO professional_assignments (professional_id, user_id)

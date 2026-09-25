@@ -3,7 +3,7 @@
  *
  * Argon2id é o algoritmo recomendado (OWASP): resistente a GPU e a side-channel. A senha
  * em claro nunca é logada (o LoggerModule redige `password`) nem persistida — só o
- * *encoded hash* vai para `users.password_hash`.
+ * *encoded hash* vai para `staff.password_hash`.
  */
 import { Injectable } from '@nestjs/common';
 import argon2 from 'argon2';

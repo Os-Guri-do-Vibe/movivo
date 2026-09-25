@@ -102,8 +102,9 @@ beforeAll(async () => {
       (${userB}::uuid, 'HEALTH_DATA', ${CONSENT_TEXTS.HEALTH_DATA.version}, true)
   `;
   const [professional] = await adminClient<{ id: string }[]>`
-    INSERT INTO users (phone_number, name, role, cref_number, cref_region, cref_active)
-    VALUES (${phone(3)}, 'CREF (teste Sprint 5)', 'PROFESSIONAL', '900001', 'SP', true)
+    INSERT INTO staff (phone_number, email, name, role, password_hash, cref_number, cref_region, cref_active)
+    VALUES (${phone(3)}, ${`cref-sprint5-${RUN}@movivo.test`}, 'CREF (teste Sprint 5)', 'PROFESSIONAL', 'x',
+            '900001', 'SP', true)
     RETURNING id
   `;
   professionalId = professional.id;
@@ -122,9 +123,10 @@ afterAll(async () => {
        DELETE FROM consents WHERE user_id IN ('${userA}','${userB}');
        -- \`audit_logs\` é append-only por trigger (imutável até para o superusuário). O titular
        -- que ficou com trilha de revogação é preservado — apagá-lo destruiria a prova.
-       DELETE FROM users WHERE id IN ('${userA}','${userB}','${professionalId}')
-         AND id NOT IN (SELECT user_id FROM audit_logs WHERE user_id IS NOT NULL
-                        UNION SELECT actor_id FROM audit_logs WHERE actor_id IS NOT NULL);`,
+       DELETE FROM users WHERE id IN ('${userA}','${userB}')
+         AND id NOT IN (SELECT user_id FROM audit_logs WHERE user_id IS NOT NULL);
+       DELETE FROM staff WHERE id = '${professionalId}'
+         AND id NOT IN (SELECT actor_id FROM audit_logs WHERE actor_id IS NOT NULL);`,
     );
   } finally {
     await adminClient.end({ timeout: 5 });
@@ -186,13 +188,14 @@ describe('RLS FORCE + SET LOCAL — isolamento entre titulares', () => {
     const rollback = new Error('rollback esperado');
     await expect(
       appClient.begin(async (tx) => {
-        // Um agente de suporte é um `users` com role SUPPORT — criado aqui e desfeito
+        // Um agente de suporte é um `staff` com role SUPPORT — criado aqui e desfeito
         // no rollback, sem sujar o banco compartilhado da suíte.
         await tx`SELECT set_config('app.current_role', 'SYSTEM', true)`;
         await tx`SELECT set_config('app.current_user_id', '', true)`;
         const [agent] = await tx<{ id: string }[]>`
-          INSERT INTO users (phone_number, name, role)
-          VALUES (${phone(4)}, 'Suporte (teste A2)', 'SUPPORT') RETURNING id
+          INSERT INTO staff (phone_number, email, name, role, password_hash)
+          VALUES (${phone(4)}, ${`suporte-teste-a2-${RUN}@movivo.test`}, 'Suporte (teste A2)', 'SUPPORT', 'x')
+          RETURNING id
         `;
 
         await tx`SELECT set_config('app.current_role', 'SUPPORT', true)`;

@@ -53,7 +53,13 @@ beforeAll(async () => {
       )
     `;
   }
-  actorId = userIds[0];
+  const [author] = await migrator<{ id: string }[]>`
+    INSERT INTO staff (phone_number, email, name, role, password_hash)
+    VALUES (${`+5560${RUN}99`}, ${`ad-spend-${RUN}@movivo.test`}, 'Autor Ad Spend (teste)', 'MARKETING', 'x')
+    RETURNING id
+  `;
+  if (!author) throw new Error('Falha ao criar staff da campanha de teste.');
+  actorId = author.id;
   for (const [index, userId] of userIds.slice(0, 2).entries()) {
     await migrator`
       INSERT INTO user_status_transitions (user_id, to_status, occurred_at, actor)
@@ -90,6 +96,7 @@ afterAll(async () => {
   await migrator`ALTER TABLE user_status_transitions ENABLE TRIGGER trg_user_status_transitions_immutable`;
   await migrator`DELETE FROM anamnesis_sessions WHERE user_id = ANY(${userIds}::uuid[])`;
   await migrator`DELETE FROM users WHERE id = ANY(${userIds}::uuid[])`;
+  await migrator`DELETE FROM staff WHERE id = ${actorId}::uuid`;
   await migrator.end({ timeout: 5 });
 });
 

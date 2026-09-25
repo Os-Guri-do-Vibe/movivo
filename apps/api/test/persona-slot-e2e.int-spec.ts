@@ -90,8 +90,8 @@ const MALE_NEW = persona('Rodrigo', 'o coach digital da MOVIVO que acompanha o s
 
 beforeAll(async () => {
   const [admin] = await migrator<{ id: string }[]>`
-    INSERT INTO users (phone_number, name, role, status)
-    VALUES (${`+5562${RUN}00`}, ${`QA persona ${RUN}`}, 'ADMIN', 'ACTIVE')
+    INSERT INTO staff (phone_number, email, name, role, status, password_hash)
+    VALUES (${`+5562${RUN}00`}, ${`qa-persona-${RUN}@movivo.test`}, ${`QA persona ${RUN}`}, 'ADMIN', 'ACTIVE', 'x')
     RETURNING id
   `;
   if (!admin) throw new Error('falha ao criar ADMIN de teste');
@@ -186,8 +186,9 @@ afterAll(async () => {
                    ${nullSexStudentId}::uuid)`;
   await migrator`ALTER TABLE audit_logs ENABLE TRIGGER trg_audit_logs_immutable`;
 
-  await migrator`DELETE FROM users WHERE id IN (${actor.userId}::uuid, ${maleStudentId}::uuid,
+  await migrator`DELETE FROM users WHERE id IN (${maleStudentId}::uuid,
     ${femaleStudentId}::uuid, ${nullSexStudentId}::uuid)`;
+  await migrator`DELETE FROM staff WHERE id = ${actor.userId}::uuid`;
   await migrator.end({ timeout: 5 });
 }, 60_000);
 

@@ -49,7 +49,9 @@ let authorId = '';
 beforeAll(async () => {
   authorId = await tenant.runAsSystem(async (tx) => {
     const rows = (await tx.execute(
-      sql`INSERT INTO users (phone_number, name) VALUES (${`+5554${RUN}8`}, 'Autor FAQ imutável') RETURNING id`,
+      sql`INSERT INTO staff (phone_number, email, name, role, password_hash)
+          VALUES (${`+5554${RUN}8`}, ${`autor-faq-${RUN}@movivo.test`}, 'Autor FAQ imutável', 'ADMIN', 'x')
+          RETURNING id`,
     )) as unknown as Array<{ id: string }>;
     return rows[0].id;
   });

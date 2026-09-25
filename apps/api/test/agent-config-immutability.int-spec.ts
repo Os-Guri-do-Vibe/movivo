@@ -79,7 +79,9 @@ const TEST_VERSION = 900_000 + Number(RUN.slice(-5));
 beforeAll(async () => {
   authorId = await tenant.runAsSystem(async (tx) => {
     const rows = (await tx.execute(
-      sql`INSERT INTO users (phone_number, name) VALUES (${`+5555${RUN}9`}, 'Autor (teste US-7.9)') RETURNING id`,
+      sql`INSERT INTO staff (phone_number, email, name, role, password_hash)
+          VALUES (${`+5555${RUN}9`}, ${`autor-agent-config-${RUN}@movivo.test`}, 'Autor (teste US-7.9)', 'ADMIN', 'x')
+          RETURNING id`,
     )) as unknown as Array<{ id: string }>;
     return rows[0].id;
   });

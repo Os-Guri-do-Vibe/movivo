@@ -8,7 +8,7 @@ import {
 import { desc, eq, inArray, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 
-import { exerciseCatalogEntries, users } from '../../core/database/schema';
+import { exerciseCatalogEntries, staff } from '../../core/database/schema';
 import {
   TenantDatabase,
   type TenantTransaction,
@@ -56,10 +56,10 @@ export class ExerciseCatalogAdminService {
           status: exerciseCatalogEntries.status,
           changeNote: exerciseCatalogEntries.changeNote,
           createdAt: exerciseCatalogEntries.createdAt,
-          createdBy: users.name,
+          createdBy: staff.name,
         })
         .from(exerciseCatalogEntries)
-        .leftJoin(users, eq(users.id, exerciseCatalogEntries.createdBy))
+        .leftJoin(staff, eq(staff.id, exerciseCatalogEntries.createdBy))
         .orderBy(desc(exerciseCatalogEntries.exerciseKey), desc(exerciseCatalogEntries.version)),
     );
 

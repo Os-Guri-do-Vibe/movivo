@@ -122,13 +122,13 @@ export class KnowledgeAdminService {
           WHERE event.document_id = document.id
           ORDER BY event.sequence DESC, event.created_at DESC, event.id DESC LIMIT 1
         ) latest ON true
-        LEFT JOIN users uploader ON uploader.id = document.uploaded_by
+        LEFT JOIN staff uploader ON uploader.id = document.uploaded_by
         LEFT JOIN LATERAL (
           SELECT item.note, item.reviewer_id, item.created_at
           FROM knowledge_document_reviews item WHERE item.document_id = document.id
           ORDER BY item.created_at DESC, item.id DESC LIMIT 1
         ) review ON true
-        LEFT JOIN users reviewer ON reviewer.id = review.reviewer_id
+        LEFT JOIN staff reviewer ON reviewer.id = review.reviewer_id
         LEFT JOIN knowledge_document_blobs blob ON blob.document_id = document.id
         LEFT JOIN knowledge_base chunk ON chunk.document_id = document.id
         GROUP BY document.id, uploader.name, latest.status, latest.stage,
@@ -459,7 +459,7 @@ export class KnowledgeAdminService {
   ): Promise<void> {
     if (actor.role === 'ADMIN') return;
     const rows = (await tx.execute(sql`
-      SELECT 1 FROM users
+      SELECT 1 FROM staff
       WHERE id = ${actor.userId}::uuid AND role = 'PROFESSIONAL' AND cref_active = true
     `)) as unknown as unknown[];
     if (!rows.length) throw new ConflictException('A ação exige profissional CREF ativo.');

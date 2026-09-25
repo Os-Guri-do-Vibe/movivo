@@ -52,14 +52,14 @@ export class MethodologyAdminService {
           creator.name AS created_by_name, latest.status,
           latest.created_at AS status_changed_at, last_actor.name AS last_actor_name
         FROM methodology_versions version
-        LEFT JOIN users creator ON creator.id = version.created_by
+        LEFT JOIN staff creator ON creator.id = version.created_by
         JOIN LATERAL (
           SELECT event.status, event.actor_id, event.created_at
           FROM methodology_events event
           WHERE event.methodology_version_id = version.id
           ORDER BY event.sequence DESC, event.created_at DESC, event.id DESC LIMIT 1
         ) latest ON true
-        LEFT JOIN users last_actor ON last_actor.id = latest.actor_id
+        LEFT JOIN staff last_actor ON last_actor.id = latest.actor_id
         ORDER BY version.version DESC
       `)) as unknown as MethodologyListRow[];
       await this.audit.append(tx, {
@@ -311,7 +311,7 @@ export class MethodologyAdminService {
   ): Promise<void> {
     if (actor.role === 'ADMIN') return;
     const rows = (await tx.execute(sql`
-      SELECT 1 FROM users
+      SELECT 1 FROM staff
       WHERE id = ${actor.userId}::uuid AND role = 'PROFESSIONAL' AND cref_active = true
     `)) as unknown as unknown[];
     if (!rows.length) throw new ConflictException('A ação exige Responsável Técnico CREF ativo.');

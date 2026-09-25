@@ -3,7 +3,7 @@ import { index, integer, pgEnum, pgTable, text, unique, uuid, varchar } from 'dr
 
 import { bytea, eventTimestamp, primaryKeyColumn } from './_shared';
 import { embeddingVector } from './vector';
-import { users } from './users';
+import { staff } from './staff';
 
 export const knowledgeReviewDecisionEnum = pgEnum('knowledge_review_decision', [
   'APPROVED',
@@ -48,7 +48,7 @@ export const knowledgeDocuments = pgTable(
     sha256: varchar('sha256', { length: 64 }).notNull().unique(),
     uploadedBy: uuid('uploaded_by')
       .notNull()
-      .references(() => users.id, { onDelete: 'restrict' }),
+      .references(() => staff.id, { onDelete: 'restrict' }),
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
@@ -78,7 +78,7 @@ export const knowledgeDocumentReviews = pgTable(
     note: text('note').notNull(),
     reviewerId: uuid('reviewer_id')
       .notNull()
-      .references(() => users.id, { onDelete: 'restrict' }),
+      .references(() => staff.id, { onDelete: 'restrict' }),
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
@@ -99,7 +99,7 @@ export const knowledgeDocumentEvents = pgTable(
     stage: varchar('stage', { length: 40 }).notNull(),
     errorCode: varchar('error_code', { length: 80 }),
     note: text('note'),
-    actorId: uuid('actor_id').references(() => users.id, { onDelete: 'restrict' }),
+    actorId: uuid('actor_id').references(() => staff.id, { onDelete: 'restrict' }),
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },
   (table) => [

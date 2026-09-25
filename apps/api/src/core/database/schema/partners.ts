@@ -27,7 +27,7 @@
 import { date, integer, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn } from './_shared';
-import { users } from './users';
+import { staff } from './staff';
 
 export const partners = pgTable(
   'partners',
@@ -48,7 +48,7 @@ export const partners = pgTable(
     notes: text('notes'),
 
     /** `NULL` = linha semeada pela migração (não houve ator humano). */
-    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'restrict' }),
+    createdBy: uuid('created_by').references(() => staff.id, { onDelete: 'restrict' }),
 
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },
