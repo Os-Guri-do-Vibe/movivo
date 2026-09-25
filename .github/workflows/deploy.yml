@@ -97,6 +97,16 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
+      # Só config (CORS, portas, nomes de modelo) — nenhum segredo real, todo valor
+      # sensível é um ponteiro `_FILE` pro Docker Secret. Não é versionado (regra do
+      # .gitignore §12.7 cobre qualquer *.env) — por isso vem de secret do Actions,
+      # não do checkout. Mudou infra/vps/api.env no seu Mac? Atualize o secret também:
+      #   gh secret set API_ENV_PRODUCTION --env production < infra/vps/api.env
+      - name: Configuração da API (api.env)
+        env:
+          API_ENV_PRODUCTION: ${{ secrets.API_ENV_PRODUCTION }}
+        run: printf '%s\n' "$API_ENV_PRODUCTION" > infra/vps/api.env
+
       - name: Deploy
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
