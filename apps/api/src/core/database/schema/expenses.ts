@@ -40,7 +40,7 @@ import {
 import { ExpenseCategory, ExpenseRecurrencePeriod } from '@movivo/shared';
 
 import { eventTimestamp, primaryKeyColumn } from './_shared';
-import { users } from './users';
+import { staff } from './staff';
 
 export const expenseCategoryEnum = pgEnum(
   'expense_category',
@@ -86,7 +86,7 @@ export const expenses = pgTable(
 
     createdBy: uuid('created_by')
       .notNull()
-      .references(() => users.id, { onDelete: 'restrict' }),
+      .references(() => staff.id, { onDelete: 'restrict' }),
 
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },

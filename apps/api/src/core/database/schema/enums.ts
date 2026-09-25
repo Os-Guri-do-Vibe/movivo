@@ -103,6 +103,24 @@ export const userRoleEnum = pgEnum('user_role', [
   'DPO',
 ]);
 
+/**
+ * Papel de autorização da conta interna (tabela `staff`) — os mesmos 7 papéis
+ * não-`USER` de `userRoleEnum` acima, agora só na tabela que representa quem
+ * loga em `/entrar` (nunca o titular final).
+ */
+export const staffRoleEnum = pgEnum('staff_role', [
+  'PROFESSIONAL',
+  'ADMIN',
+  'MARKETING',
+  'FINANCE',
+  'SUPPORT',
+  'ENGINEERING',
+  'DPO',
+]);
+
+/** Ciclo de vida da conta interna — bem mais simples que o do titular (sem trial/churn). */
+export const staffStatusEnum = pgEnum('staff_status', ['ACTIVE', 'INACTIVE', 'SUSPENDED']);
+
 // ---------------------------------------------------------------------------
 // ANAMNESE
 // ---------------------------------------------------------------------------

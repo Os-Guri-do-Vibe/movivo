@@ -14,15 +14,16 @@
  *    com o mesmo `family_id`.
  *  - `expires_at` (30 dias) e `revoked_at` (nulo = sessão viva) governam a validade.
  *
- * Está sob `FORCE ROW LEVEL SECURITY` por `user_id` como as demais tabelas de
- * titular: uma sessão só é legível/alterável no contexto do próprio usuário ou
- * num contexto de sistema (`app.current_role = 'SYSTEM'`), nunca cross-tenant.
+ * Está sob `FORCE ROW LEVEL SECURITY` por `user_id`: uma sessão só é
+ * legível/alterável no contexto da própria conta ou num contexto de sistema
+ * (`app.current_role = 'SYSTEM'`), nunca cross-tenant. Só existe para contas
+ * `staff` — o titular final não loga (WhatsApp, sem JWT).
  */
 import { index, pgTable, uniqueIndex } from 'drizzle-orm/pg-core';
 import { text, uuid } from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
-import { users } from './users';
+import { staff } from './staff';
 
 export const authSessions = pgTable(
   'auth_sessions',
@@ -31,13 +32,12 @@ export const authSessions = pgTable(
 
     /**
      * `CASCADE`: um refresh token é estado de sessão efêmero — não é prova
-     * documental. Se o titular for removido (caso raro; o padrão é anonimizar),
-     * as sessões vão junto. Distinto de `consents`/`protocols`, que usam
-     * `RESTRICT` por serem prova.
+     * documental. Se a conta for removida (caso raro), as sessões vão junto.
+     * Distinto de `consents`/`protocols`, que usam `RESTRICT` por serem prova.
      */
     userId: userIdColumn()
       .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+      .references(() => staff.id, { onDelete: 'cascade' }),
 
     /**
      * -- SENSÍVEL: SHA-256 do refresh token opaco. Nunca o token em claro

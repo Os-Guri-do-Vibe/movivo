@@ -13,8 +13,8 @@
  *  - **Logout**: coloca o `jti` do access na denylist Redis (TTL = janela do access) e
  *    revoga a sessão.
  *
- * Toda operação em `auth_sessions`/`users` roda em `runAsSystem`: o login acontece antes
- * de existir contexto de titular, e a RLS libera essas linhas via `app.current_role='SYSTEM'`
+ * Toda operação em `auth_sessions`/`staff` roda em `runAsSystem`: o login acontece antes
+ * de existir contexto de sessão, e a RLS libera essas linhas via `app.current_role='SYSTEM'`
  * (contexto privilegiado e bem delimitado — ver `TenantDatabase`).
  */
 import { Injectable, UnauthorizedException } from '@nestjs/common';
@@ -25,7 +25,7 @@ import { PinoLogger } from 'nestjs-pino';
 
 import { AppConfigService, parseDurationSeconds } from '../../core/config';
 import { TenantDatabase, type TenantRole } from '../../core/database';
-import { authSessions, users } from '../../core/database/schema';
+import { authSessions, staff } from '../../core/database/schema';
 import { PasswordService } from './password.service';
 import { TokenDenylistService } from './token-denylist.service';
 import { TokenService } from './token.service';
@@ -54,9 +54,9 @@ export class AuthService {
   async login(input: LoginInput): Promise<LoginResult> {
     const user = await this.db.runAsSystem(async (tx) => {
       const [row] = await tx
-        .select({ id: users.id, role: users.role, passwordHash: users.passwordHash })
-        .from(users)
-        .where(eq(users.email, input.email))
+        .select({ id: staff.id, role: staff.role, passwordHash: staff.passwordHash })
+        .from(staff)
+        .where(eq(staff.email, input.email))
         .limit(1);
       return row;
     });
@@ -122,9 +122,9 @@ export class AuthService {
       }
 
       const [user] = await tx
-        .select({ role: users.role })
-        .from(users)
-        .where(eq(users.id, session.userId))
+        .select({ role: staff.role })
+        .from(staff)
+        .where(eq(staff.id, session.userId))
         .limit(1);
       if (!user) throw new UnauthorizedException('Usuário da sessão não encontrado.');
 
@@ -188,9 +188,9 @@ export class AuthService {
   async getProfile(userId: string): Promise<{ name: string | null; avatarPath: string | null }> {
     const [row] = await this.db.runAsSystem((tx) =>
       tx
-        .select({ name: users.name, avatarPath: users.avatarPath })
-        .from(users)
-        .where(eq(users.id, userId))
+        .select({ name: staff.name, avatarPath: staff.avatarPath })
+        .from(staff)
+        .where(eq(staff.id, userId))
         .limit(1),
     );
     return { name: row?.name ?? null, avatarPath: row?.avatarPath ?? null };

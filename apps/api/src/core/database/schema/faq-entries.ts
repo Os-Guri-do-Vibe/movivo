@@ -2,7 +2,7 @@
 import { index, integer, pgEnum, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn } from './_shared';
-import { users } from './users';
+import { staff } from './staff';
 
 export const faqEntryStatusEnum = pgEnum('faq_entry_status', ['PUBLISHED', 'RETIRED']);
 
@@ -19,7 +19,7 @@ export const faqEntries = pgTable(
     changeNote: text('change_note').notNull(),
     createdBy: uuid('created_by')
       .notNull()
-      .references(() => users.id, { onDelete: 'restrict' }),
+      .references(() => staff.id, { onDelete: 'restrict' }),
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },
   (table) => [

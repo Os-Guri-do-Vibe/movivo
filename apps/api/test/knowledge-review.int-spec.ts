@@ -56,9 +56,9 @@ const ZERO_EMBEDDING = `[${new Array(1536).fill(0).join(',')}]`;
 beforeAll(async () => {
   [uploaderId, professionalId] = await tenant.runAsSystem(async (tx) => {
     const rows = (await tx.execute(sql`
-      INSERT INTO users (phone_number, name, role, cref_active) VALUES
-        (${`+5551${RUN}1`}, 'Uploader RAG', 'ADMIN', false),
-        (${`+5551${RUN}2`}, 'Revisor RAG', 'PROFESSIONAL', true)
+      INSERT INTO staff (phone_number, email, name, role, password_hash, cref_active) VALUES
+        (${`+5551${RUN}1`}, ${`uploader-rag-${RUN}@movivo.test`}, 'Uploader RAG', 'ADMIN', 'x', false),
+        (${`+5551${RUN}2`}, ${`revisor-rag-${RUN}@movivo.test`}, 'Revisor RAG', 'PROFESSIONAL', 'x', true)
       RETURNING id
     `)) as unknown as Array<{ id: string }>;
     return [rows[0].id, rows[1].id];
@@ -87,7 +87,7 @@ afterAll(async () => {
   // não o efêmero do CI). Os documentos/reviews continuam intactos — são histórico
   // imutável por design, não resíduo de teste.
   await tenant.runAsSystem((tx) =>
-    tx.execute(sql`UPDATE users SET cref_active = false WHERE id = ${professionalId}::uuid`),
+    tx.execute(sql`UPDATE staff SET cref_active = false WHERE id = ${professionalId}::uuid`),
   );
   await appClient.end({ timeout: 5 });
   await migratorClient.end({ timeout: 5 });

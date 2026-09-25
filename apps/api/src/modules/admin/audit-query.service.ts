@@ -7,7 +7,7 @@ import {
 import { and, asc, count, desc, eq, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
-import { auditLogs, users } from '../../core/database/schema';
+import { auditLogs, staff } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { AuditService } from './audit.service';
@@ -32,7 +32,7 @@ export class AuditQueryService {
     }
 
     const response = await this.db.runAsSystem(async (tx) => {
-      const actorUser = alias(users, 'audit_actor');
+      const actorUser = alias(staff, 'audit_actor');
       const where = this.filters(input);
       const offset = (input.page - 1) * input.pageSize;
       const [events, totals, actors, actions] = await Promise.all([

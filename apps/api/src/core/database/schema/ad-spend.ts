@@ -29,7 +29,7 @@
 import { date, index, integer, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn } from './_shared';
-import { users } from './users';
+import { staff } from './staff';
 
 export const adSpend = pgTable(
   'ad_spend',
@@ -57,7 +57,7 @@ export const adSpend = pgTable(
 
     createdBy: uuid('created_by')
       .notNull()
-      .references(() => users.id, { onDelete: 'restrict' }),
+      .references(() => staff.id, { onDelete: 'restrict' }),
 
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },

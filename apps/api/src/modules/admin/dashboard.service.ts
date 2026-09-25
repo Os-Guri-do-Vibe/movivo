@@ -29,6 +29,7 @@ import {
   protocols,
   protocolSubstitutionRequests,
   protocolVersions,
+  staff,
   subscriptions,
   users,
   workoutInsights,
@@ -467,12 +468,12 @@ export class DashboardService {
       if (actor.role !== 'ADMIN') {
         const [professional] = await tx
           .select({
-            crefActive: users.crefActive,
-            crefNumber: users.crefNumber,
-            crefRegion: users.crefRegion,
+            crefActive: staff.crefActive,
+            crefNumber: staff.crefNumber,
+            crefRegion: staff.crefRegion,
           })
-          .from(users)
-          .where(eq(users.id, actor.userId))
+          .from(staff)
+          .where(eq(staff.id, actor.userId))
           .limit(1);
         if (!professional?.crefActive || !professional.crefNumber || !professional.crefRegion) {
           throw new BadRequestException(

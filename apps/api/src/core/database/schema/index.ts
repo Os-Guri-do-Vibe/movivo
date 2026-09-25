@@ -84,3 +84,6 @@ export * from './protocol-renewal-sessions';
 
 // Achado 2026-09-12 - alias curto e público para links longos enviados por WhatsApp.
 export * from './short-links';
+
+// Separação da Plataforma Interna (staff) da tabela do titular final (users).
+export * from './staff';

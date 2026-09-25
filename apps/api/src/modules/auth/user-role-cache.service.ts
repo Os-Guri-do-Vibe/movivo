@@ -1,5 +1,5 @@
 /**
- * `UserRoleCacheService` — cache curto do `users.role` usado pelo `JwtStrategy`.
+ * `UserRoleCacheService` — cache curto do `staff.role` usado pelo `JwtStrategy`.
  *
  * # Por que existe
  * O `JwtStrategy` revalida no banco o papel alegado pelo token a CADA request
@@ -20,7 +20,7 @@ import { eq } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 
 import { TenantDatabase, type TenantRole } from '../../core/database';
-import { users } from '../../core/database/schema';
+import { staff } from '../../core/database/schema';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.util';
 
@@ -47,14 +47,14 @@ export class UserRoleCacheService {
     if (cached) return cached === ABSENT ? null : (cached as TenantRole);
 
     const [account] = await this.db.runAsSystem((tx) =>
-      tx.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1),
+      tx.select({ role: staff.role }).from(staff).where(eq(staff.id, userId)).limit(1),
     );
     await this.redis.set(this.key(userId), account?.role ?? ABSENT, 'EX', TTL_SECONDS);
     return account?.role ?? null;
   }
 
   /**
-   * Descarta o papel cacheado. Chame ao alterar `users.role` para que a revogação valha
+   * Descarta o papel cacheado. Chame ao alterar `staff.role` para que a revogação valha
    * na próxima request em vez de esperar o TTL. Hoje o papel só muda por SQL fora da
    * aplicação (seed/DBA), então o TTL é o teto efetivo; este é o gancho para quando
    * existir um endpoint de gestão de papéis.

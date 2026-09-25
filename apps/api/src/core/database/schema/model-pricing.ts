@@ -22,7 +22,7 @@
 import { date, numeric, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn } from './_shared';
-import { users } from './users';
+import { staff } from './staff';
 
 export const modelPricing = pgTable(
   'model_pricing',
@@ -50,7 +50,7 @@ export const modelPricing = pgTable(
     validTo: date('valid_to'),
 
     /** `NULL` = linha semeada pela migração (não houve ator humano). */
-    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'restrict' }),
+    createdBy: uuid('created_by').references(() => staff.id, { onDelete: 'restrict' }),
 
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },

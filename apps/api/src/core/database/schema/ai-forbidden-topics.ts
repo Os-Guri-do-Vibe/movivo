@@ -38,7 +38,7 @@ import {
 import { ForbiddenTopicStatus } from '@movivo/shared';
 
 import { eventTimestamp, primaryKeyColumn } from './_shared';
-import { users } from './users';
+import { staff } from './staff';
 
 export const aiForbiddenTopicStatusEnum = pgEnum('ai_forbidden_topic_status', [
   ForbiddenTopicStatus.DRAFT,
@@ -67,9 +67,9 @@ export const aiForbiddenTopics = pgTable(
     /** Maker: autor da proposta original, carregado adiante em cada transição. */
     createdBy: uuid('created_by')
       .notNull()
-      .references(() => users.id, { onDelete: 'restrict' }),
+      .references(() => staff.id, { onDelete: 'restrict' }),
     /** Ator que aprovou ou retirou; pode coincidir com o maker quando for ADMIN. */
-    approvedBy: uuid('approved_by').references(() => users.id, { onDelete: 'restrict' }),
+    approvedBy: uuid('approved_by').references(() => staff.id, { onDelete: 'restrict' }),
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },
   (table) => [

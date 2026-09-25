@@ -7,7 +7,7 @@
  *   · login (Argon2id) emite access + refresh (cookie httpOnly);
  *   · refresh rotaciona e invalida o anterior; reuse do anterior invalida a FAMÍLIA;
  *   · logout coloca o jti na denylist Redis (o access deixa de valer);
- *   · RBAC barra `USER` num endpoint `@Roles(PROFESSIONAL, ADMIN)`;
+ *   · RBAC barra papel de staff sem privilégio num endpoint `@Roles(PROFESSIONAL, ADMIN)`;
  *   · `alg:none` e `HS256` são recusados;
  *   · rate limit de `/auth/login` (10/min por IP).
  *
@@ -95,7 +95,7 @@ beforeAll(async () => {
 
   proId = await tenant.runAsSystem(async (tx) => {
     const rows = (await tx.execute(
-      sql`INSERT INTO users (phone_number, email, name, role, password_hash)
+      sql`INSERT INTO staff (phone_number, email, name, role, password_hash)
           VALUES (${`+55558${RUN}1`}, ${proEmail}, 'Pro Teste', 'PROFESSIONAL', ${hash})
           RETURNING id`,
     )) as unknown as Array<{ id: string }>;
@@ -103,8 +103,8 @@ beforeAll(async () => {
   });
   userId = await tenant.runAsSystem(async (tx) => {
     const rows = (await tx.execute(
-      sql`INSERT INTO users (phone_number, email, name, role, password_hash)
-          VALUES (${`+55558${RUN}2`}, ${userEmail}, 'User Teste', 'USER', ${hash})
+      sql`INSERT INTO staff (phone_number, email, name, role, password_hash)
+          VALUES (${`+55558${RUN}2`}, ${userEmail}, 'Staff Sem Privilegio Teste', 'SUPPORT', ${hash})
           RETURNING id`,
     )) as unknown as Array<{ id: string }>;
     return rows[0].id;
@@ -113,7 +113,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   try {
-    await adminClient.unsafe(`DELETE FROM users WHERE id IN ('${proId}','${userId}')`);
+    await adminClient.unsafe(`DELETE FROM staff WHERE id IN ('${proId}','${userId}')`);
   } finally {
     await adminClient.end({ timeout: 5 });
     await app?.close();
@@ -148,7 +148,7 @@ describe('login (Argon2id) — o app boota com as chaves RS256', () => {
 });
 
 describe('RBAC — @Roles(PROFESSIONAL, ADMIN)', () => {
-  it('PROFESSIONAL passa em /auth/admin/ping; USER é barrado (403)', async () => {
+  it('PROFESSIONAL passa em /auth/admin/ping; SUPPORT é barrado (403)', async () => {
     const proAccess = (await login()).body.accessToken as string;
     const userAccess = (await login(userEmail)).body.accessToken as string;
 
@@ -166,7 +166,7 @@ describe('RBAC — @Roles(PROFESSIONAL, ADMIN)', () => {
     // /auth/me é autenticado (qualquer papel).
     const me = await base().get(`/${prefix}/auth/me`).set('Authorization', `Bearer ${userAccess}`);
     expect(me.status).toBe(200);
-    expect(me.body).toMatchObject({ userId, role: 'USER' });
+    expect(me.body).toMatchObject({ userId, role: 'SUPPORT' });
   });
 });
 

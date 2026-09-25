@@ -59,9 +59,9 @@ let adSpendId: string;
 
 beforeAll(async () => {
   const [actor] = await migratorClient<{ id: string }[]>`
-    SELECT id FROM public.users ORDER BY created_at LIMIT 1
+    SELECT id FROM public.staff ORDER BY created_at LIMIT 1
   `;
-  if (!actor) throw new Error('Base sem usuário: rode `pnpm --filter @movivo/api run db:seed`.');
+  if (!actor) throw new Error('Base sem staff: rode `pnpm --filter @movivo/api run db:seed`.');
   actorId = actor.id;
 
   const [row] = await migratorClient<{ id: string }[]>`

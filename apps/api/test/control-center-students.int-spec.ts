@@ -45,8 +45,8 @@ const SUBMITTED_AT = '2026-08-01T12:00:00Z';
 
 beforeAll(async () => {
   const [admin] = await migrator<{ id: string }[]>`
-    INSERT INTO users (phone_number, name, role, status)
-    VALUES (${`+5561${RUN}00`}, ${`Admin ${RUN}`}, 'ADMIN', 'ACTIVE')
+    INSERT INTO staff (phone_number, email, name, role, status, password_hash)
+    VALUES (${`+5561${RUN}00`}, ${`admin_${RUN}@movivo.test`}, ${`Admin ${RUN}`}, 'ADMIN', 'ACTIVE', 'x')
     RETURNING id
   `;
   if (!admin) throw new Error('Falha ao criar ADMIN de teste.');
@@ -88,7 +88,8 @@ afterAll(async () => {
   await migrator`ALTER TABLE audit_logs DISABLE TRIGGER trg_audit_logs_immutable`;
   await migrator`DELETE FROM audit_logs WHERE actor_id = ${actor.userId}::uuid OR user_id = ${studentId}::uuid`;
   await migrator`ALTER TABLE audit_logs ENABLE TRIGGER trg_audit_logs_immutable`;
-  await migrator`DELETE FROM users WHERE id IN (${studentId}::uuid, ${actor.userId}::uuid)`;
+  await migrator`DELETE FROM users WHERE id = ${studentId}::uuid`;
+  await migrator`DELETE FROM staff WHERE id = ${actor.userId}::uuid`;
   await migrator.end({ timeout: 5 });
 });
 

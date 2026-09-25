@@ -76,6 +76,11 @@ interface TenantTable {
 
 const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   { table: 'users', column: 'id', professional: 'read', support: true },
+  // Conta da Plataforma Interna (login, dashboard) — não é dado de titular, então
+  // sem `professional`/`support`/`anon`: o predicado genérico já é o certo aqui —
+  // cada staff vê a própria linha, ADMIN/SYSTEM veem todas, e só ADMIN/SYSTEM
+  // inserem (não há auto-cadastro público de staff).
+  { table: 'staff', column: 'id' },
   // `consents` tem fase anônima pelo mesmo motivo da anamnese (US-1.2): o
   // consentimento de saúde é registrado na tela-ponte, ANTES de o `users` existir
   // (que só nasce no submit). A âncora nessa fase é `anamnesis_session_id`, escopada
@@ -661,11 +666,11 @@ export function buildProfessionalAccessSql(appRole: string): string {
       -- valia para signProtocol()/release_parq_on_signature(). Prefere o RT CREF
       -- explícito quando existe (menor id, estável); cai para o ADMIN mais antigo só
       -- quando não há nenhum CREF ativo cadastrado ainda.
-      SELECT id INTO professional FROM public.users
+      SELECT id INTO professional FROM public.staff
       WHERE role = 'PROFESSIONAL' AND cref_active = true
       ORDER BY id LIMIT 1;
       IF professional IS NULL THEN
-        SELECT id INTO professional FROM public.users WHERE role = 'ADMIN' ORDER BY id LIMIT 1;
+        SELECT id INTO professional FROM public.staff WHERE role = 'ADMIN' ORDER BY id LIMIT 1;
       END IF;
       IF professional IS NULL THEN
         RAISE EXCEPTION 'no active CREF professional or admin available for assignment'
@@ -707,12 +712,12 @@ export function buildProfessionalAccessSql(appRole: string): string {
 
       -- 1) AUTORIZAÇÃO PRIMEIRO — nunca RETURN NULL antes de confirmar quem está chamando.
       IF actor_role = 'ADMIN' THEN
-        IF NOT EXISTS (SELECT 1 FROM public.users u WHERE u.id = actor AND u.role = 'ADMIN') THEN
+        IF NOT EXISTS (SELECT 1 FROM public.staff u WHERE u.id = actor AND u.role = 'ADMIN') THEN
           RAISE EXCEPTION 'admin role required' USING ERRCODE = '42501';
         END IF;
       ELSIF actor_role = 'PROFESSIONAL' THEN
         IF NOT EXISTS (
-          SELECT 1 FROM public.users p
+          SELECT 1 FROM public.staff p
           WHERE p.id = actor AND p.role = 'PROFESSIONAL' AND p.cref_active = true
         ) THEN
           RAISE EXCEPTION 'active CREF professional required' USING ERRCODE = '42501';
@@ -771,7 +776,7 @@ export function buildProfessionalAccessSql(appRole: string): string {
       -- aquela função pode ter atribuído.
       SELECT pa.professional_id INTO assigned_professional
       FROM public.professional_assignments pa
-      INNER JOIN public.users professional ON professional.id = pa.professional_id
+      INNER JOIN public.staff professional ON professional.id = pa.professional_id
       WHERE pa.user_id = target_user
         AND pa.active = true AND pa.revoked_at IS NULL
         AND (
@@ -961,7 +966,7 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
         RAISE EXCEPTION 'knowledge publisher role denied' USING ERRCODE = '42501';
       END IF;
       IF caller_role = 'PROFESSIONAL' AND (actor IS NULL OR NOT EXISTS (
-        SELECT 1 FROM public.users professional
+        SELECT 1 FROM public.staff professional
         WHERE professional.id = actor AND professional.role = 'PROFESSIONAL'
           AND professional.cref_active = true
       )) THEN
@@ -969,7 +974,7 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
       END IF;
       IF NOT EXISTS (
         SELECT 1 FROM public.knowledge_document_reviews review
-        JOIN public.users reviewer ON reviewer.id = review.reviewer_id
+        JOIN public.staff reviewer ON reviewer.id = review.reviewer_id
         WHERE review.document_id = target_document
           AND review.decision = 'APPROVED'::public.knowledge_review_decision
           AND (

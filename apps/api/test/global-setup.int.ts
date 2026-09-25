@@ -41,15 +41,16 @@ export async function setup() {
     // Id FIXO: vários specs asseram `professionalId === '0000...0001'` (o RT que assina
     // o protocolo). O upsert por id o garante ativo em toda re-execução da suíte.
     await admin`
-      INSERT INTO users (id, phone_number, name, role, cref_number, cref_region, cref_active)
+      INSERT INTO staff (id, phone_number, email, name, role, password_hash, cref_number, cref_region, cref_active)
       VALUES ('00000000-0000-4000-8000-000000000001', '+5599000000010',
-              'RT CREF (suite integração)', 'PROFESSIONAL', '999000', 'SP', true)
+              'rt-cref-integracao@movivo.test', 'RT CREF (suite integração)', 'PROFESSIONAL', 'x',
+              '999000', 'SP', true)
       ON CONFLICT (id) DO UPDATE SET role = 'PROFESSIONAL', cref_active = true
     `;
     // `assign_unique_active_professional` exige EXATAMENTE um profissional ativo. Desativa
     // quaisquer outros (seed de dev ou resíduo de run anterior) para deixar o singleton só.
     await admin`
-      UPDATE users SET cref_active = false
+      UPDATE staff SET cref_active = false
       WHERE role = 'PROFESSIONAL' AND cref_active = true
         AND id <> '00000000-0000-4000-8000-000000000001'
     `;

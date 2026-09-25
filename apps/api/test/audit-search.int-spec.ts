@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { loadEnv } from '../src/core/config/load-env';
 import type { DrizzleClient } from '../src/core/database/database.module';
-import { auditLogs, users } from '../src/core/database/schema';
+import { auditLogs, staff } from '../src/core/database/schema';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { AuditQueryService } from '../src/modules/admin/audit-query.service';
 import { AuditService } from '../src/modules/admin/audit.service';
@@ -39,9 +39,15 @@ let actor: AuthenticatedUser;
 beforeAll(async () => {
   const actorId = await tenant.runAsSystem(async (tx) => {
     const [created] = await tx
-      .insert(users)
-      .values({ phoneNumber: `+5552${RUN}6`, name: 'Auditor de integração' })
-      .returning({ id: users.id });
+      .insert(staff)
+      .values({
+        phoneNumber: `+5552${RUN}6`,
+        email: `auditor_${RUN}@movivo.test`,
+        name: 'Auditor de integração',
+        role: 'ADMIN',
+        passwordHash: 'x',
+      })
+      .returning({ id: staff.id });
     if (!created) throw new Error('ator não criado');
     for (let index = 0; index < 11; index++) {
       await audit.append(tx, {

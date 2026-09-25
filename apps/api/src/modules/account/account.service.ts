@@ -2,7 +2,7 @@
  * `AccountService` — perfil da própria conta interna do dashboard (tela "Minha Conta").
  *
  * Escopo deliberadamente estreito: todo método aqui lê/escreve só a linha do PRÓPRIO
- * usuário autenticado (`runAsUser` — a RLS de `users` libera UPDATE na própria linha,
+ * usuário autenticado (`runAsUser` — a RLS de `staff` libera UPDATE na própria linha,
  * ver `security-policies.ts`). Isto não é gestão de conta de terceiro — isso é
  * `AdminModule`. E-mail é IMUTÁVEL por decisão do fundador (é o e-mail corporativo):
  * não existe update para esse campo aqui, de propósito.
@@ -14,7 +14,7 @@ import { PinoLogger } from 'nestjs-pino';
 
 import { AppConfigService } from '../../core/config';
 import { TenantDatabase, type TenantRole } from '../../core/database';
-import { users } from '../../core/database/schema';
+import { staff } from '../../core/database/schema';
 import { PasswordService } from '../auth/password.service';
 import { AvatarStorageService, type UploadedAvatarFile } from './avatar-storage.service';
 
@@ -57,13 +57,13 @@ export class AccountService {
     const [row] = await this.db.runAsUser(userId, role, (tx) =>
       tx
         .select({
-          name: users.name,
-          email: users.email,
-          phoneNumber: users.phoneNumber,
-          avatarPath: users.avatarPath,
+          name: staff.name,
+          email: staff.email,
+          phoneNumber: staff.phoneNumber,
+          avatarPath: staff.avatarPath,
         })
-        .from(users)
-        .where(eq(users.id, userId))
+        .from(staff)
+        .where(eq(staff.id, userId))
         .limit(1),
     );
     if (!row) throw new UnauthorizedException('Conta não encontrada.');
@@ -84,12 +84,12 @@ export class AccountService {
     try {
       await this.db.runAsUser(userId, role, (tx) =>
         tx
-          .update(users)
+          .update(staff)
           .set({
             ...(input.name !== undefined ? { name: input.name } : {}),
             ...(input.phoneNumber !== undefined ? { phoneNumber: input.phoneNumber } : {}),
           })
-          .where(eq(users.id, userId)),
+          .where(eq(staff.id, userId)),
       );
     } catch (error) {
       if (isUniqueViolation(error)) {
@@ -108,9 +108,9 @@ export class AccountService {
   ): Promise<void> {
     const [row] = await this.db.runAsUser(userId, role, (tx) =>
       tx
-        .select({ passwordHash: users.passwordHash })
-        .from(users)
-        .where(eq(users.id, userId))
+        .select({ passwordHash: staff.passwordHash })
+        .from(staff)
+        .where(eq(staff.id, userId))
         .limit(1),
     );
     const ok = await this.passwords.verify(row?.passwordHash ?? null, input.currentPassword);
@@ -118,7 +118,7 @@ export class AccountService {
 
     const passwordHash = await this.passwords.hash(input.newPassword);
     await this.db.runAsUser(userId, role, (tx) =>
-      tx.update(users).set({ passwordHash }).where(eq(users.id, userId)),
+      tx.update(staff).set({ passwordHash }).where(eq(staff.id, userId)),
     );
     this.logger.info({ event: 'account_password_changed', userId }, 'senha da conta alterada');
   }
@@ -129,11 +129,11 @@ export class AccountService {
     file: UploadedAvatarFile,
   ): Promise<AccountProfileView> {
     const [existing] = await this.db.runAsUser(userId, role, (tx) =>
-      tx.select({ avatarPath: users.avatarPath }).from(users).where(eq(users.id, userId)).limit(1),
+      tx.select({ avatarPath: staff.avatarPath }).from(staff).where(eq(staff.id, userId)).limit(1),
     );
     const filename = await this.avatarStorage.save(file);
     await this.db.runAsUser(userId, role, (tx) =>
-      tx.update(users).set({ avatarPath: filename }).where(eq(users.id, userId)),
+      tx.update(staff).set({ avatarPath: filename }).where(eq(staff.id, userId)),
     );
     if (existing?.avatarPath) await this.avatarStorage.delete(existing.avatarPath);
     this.logger.info({ event: 'account_avatar_updated', userId }, 'avatar da conta atualizado');

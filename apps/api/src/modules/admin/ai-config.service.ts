@@ -35,7 +35,7 @@ import type { z } from 'zod';
 
 import { AgentConfigRepository } from '../../core/agent-config/agent-config.repository';
 import { AgentPersonaService } from '../../core/agent-config/agent-persona.service';
-import { agentConfig, users } from '../../core/database/schema';
+import { agentConfig, staff } from '../../core/database/schema';
 import {
   TenantDatabase,
   type TenantTransaction,
@@ -125,10 +125,10 @@ export class AiConfigService {
           payload: agentConfig.payload,
           changeNote: agentConfig.changeNote,
           createdAt: agentConfig.createdAt,
-          createdBy: users.name,
+          createdBy: staff.name,
         })
         .from(agentConfig)
-        .leftJoin(users, eq(users.id, agentConfig.createdBy))
+        .leftJoin(staff, eq(staff.id, agentConfig.createdBy))
         // Histórico é por slot: sem este filtro a lista misturaria as duas personas e o
         // botão de rollback ofereceria versão do público errado.
         .where(eq(agentConfig.targetSex, targetSex))

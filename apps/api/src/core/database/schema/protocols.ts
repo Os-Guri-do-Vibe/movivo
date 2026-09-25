@@ -30,6 +30,7 @@ import { bytea, eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn
 import { protocolApprovalStatusEnum, protocolStatusEnum, reviewUrgencyEnum } from './enums';
 import { anamnesisSessions } from './anamnesis-sessions';
 import { protocolRenewalSessions } from './protocol-renewal-sessions';
+import { staff } from './staff';
 import { users } from './users';
 import { methodologyVersions } from './methodology-versions';
 
@@ -105,7 +106,7 @@ export const protocols = pgTable(
      * Profissional CREF responsável. A FK impede assinaturas órfãs; a atribuição
      * ativa e o `cref_active` são validados transacionalmente antes da persistência.
      */
-    professionalId: uuid('professional_id').references(() => users.id, {
+    professionalId: uuid('professional_id').references(() => staff.id, {
       onDelete: 'restrict',
     }),
 

@@ -1,7 +1,7 @@
 /**
  * Integração — ACCOUNT (tela "Minha Conta"): sobe o `AppModule` REAL contra o stack
  * Docker (Postgres via PgBouncer, Redis) e prova, por I/O de verdade — não mock —, o
- * que a RLS de `users` (self-service) e o storage de avatar em disco precisam garantir:
+ * que a RLS de `staff` (self-service) e o storage de avatar em disco precisam garantir:
  *
  *   · GET/PATCH /account/profile só enxerga e só grava a PRÓPRIA linha (RLS `self`);
  *   · e-mail nunca muda, mesmo enviado no corpo (não existe no schema Zod do endpoint);
@@ -93,7 +93,7 @@ beforeAll(async () => {
 
   userAId = await tenant.runAsSystem(async (tx) => {
     const rows = (await tx.execute(
-      sql`INSERT INTO users (phone_number, email, name, role, password_hash)
+      sql`INSERT INTO staff (phone_number, email, name, role, password_hash)
           VALUES (${phoneA}, ${emailA}, 'Conta A', 'ADMIN', ${hash})
           RETURNING id`,
     )) as unknown as Array<{ id: string }>;
@@ -101,7 +101,7 @@ beforeAll(async () => {
   });
   userBId = await tenant.runAsSystem(async (tx) => {
     const rows = (await tx.execute(
-      sql`INSERT INTO users (phone_number, email, name, role, password_hash)
+      sql`INSERT INTO staff (phone_number, email, name, role, password_hash)
           VALUES (${phoneB}, ${emailB}, 'Conta B', 'MARKETING', ${hash})
           RETURNING id`,
     )) as unknown as Array<{ id: string }>;
@@ -114,7 +114,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   try {
-    await adminClient.unsafe(`DELETE FROM users WHERE id IN ('${userAId}','${userBId}')`);
+    await adminClient.unsafe(`DELETE FROM staff WHERE id IN ('${userAId}','${userBId}')`);
   } finally {
     await adminClient.end({ timeout: 5 });
     await app?.close();

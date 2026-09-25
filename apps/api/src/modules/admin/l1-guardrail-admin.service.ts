@@ -13,7 +13,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 
 import { L1GuardrailService } from '../../core/agent-config/l1-guardrail.service';
-import { aiGuardrailRules, users } from '../../core/database/schema';
+import { aiGuardrailRules, staff } from '../../core/database/schema';
 import {
   TenantDatabase,
   type TenantTransaction,
@@ -46,10 +46,10 @@ export class L1GuardrailAdminService {
           status: aiGuardrailRules.status,
           changeNote: aiGuardrailRules.changeNote,
           createdAt: aiGuardrailRules.createdAt,
-          createdBy: users.name,
+          createdBy: staff.name,
         })
         .from(aiGuardrailRules)
-        .leftJoin(users, eq(users.id, aiGuardrailRules.createdBy))
+        .leftJoin(staff, eq(staff.id, aiGuardrailRules.createdBy))
         .orderBy(desc(aiGuardrailRules.createdAt), desc(aiGuardrailRules.version)),
     );
     const currentKeys = new Set<string>();

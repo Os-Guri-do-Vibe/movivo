@@ -329,15 +329,17 @@ afterAll(async () => {
        ALTER TABLE user_status_transitions DISABLE TRIGGER trg_user_status_transitions_immutable;
        DELETE FROM user_status_transitions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        ALTER TABLE user_status_transitions ENABLE TRIGGER trg_user_status_transitions_immutable;
-       -- A assinatura CREF (testes de auditoria) grava em audit_logs, que referencia
-       -- users tanto por actor_id quanto por user_id. A tabela é imutável por trigger;
-       -- desligá-lo aqui é o mesmo tratamento já dado a user_status_transitions acima, e
-       -- vale só para as linhas DESTA execução (prefixo de telefone com o RUN).
+       -- A assinatura CREF (testes de auditoria) grava em audit_logs: user_id (titular)
+       -- referencia users, actor_id (quem assinou) referencia staff. A tabela é imutável
+       -- por trigger; desligá-lo aqui é o mesmo tratamento já dado a
+       -- user_status_transitions acima, e vale só para as linhas DESTA execução (prefixo
+       -- de telefone com o RUN, presente tanto em users quanto em staff).
        ALTER TABLE audit_logs DISABLE TRIGGER trg_audit_logs_immutable;
        DELETE FROM audit_logs WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%')
-         OR actor_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
+         OR actor_id IN (SELECT id FROM staff WHERE phone_number LIKE '+5541${RUN}%');
        ALTER TABLE audit_logs ENABLE TRIGGER trg_audit_logs_immutable;
-       DELETE FROM users WHERE phone_number LIKE '+5541${RUN}%';`,
+       DELETE FROM users WHERE phone_number LIKE '+5541${RUN}%';
+       DELETE FROM staff WHERE phone_number LIKE '+5541${RUN}%';`,
     );
   } finally {
     await Promise.all([app?.close(), adminClient.end({ timeout: 5 })]);
@@ -540,8 +542,9 @@ describe('assinatura CREF — libera o PAR-Q e deixa trilha auditável (2026-08-
   beforeAll(async () => {
     dashboard = app.get(DashboardService);
     const [row] = await adminClient<Array<{ id: string }>>`
-      INSERT INTO users (phone_number, name, role)
-      VALUES (${phone()}, 'Admin Assinatura', 'ADMIN') RETURNING id`;
+      INSERT INTO staff (phone_number, email, name, role, password_hash)
+      VALUES (${phone()}, ${`admin-assinatura-${RUN}@movivo.test`}, 'Admin Assinatura', 'ADMIN', 'x')
+      RETURNING id`;
     admin = { userId: row.id, role: 'ADMIN', jti: 'int-sign' };
   }, 30_000);
 
