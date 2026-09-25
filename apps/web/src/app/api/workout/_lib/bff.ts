@@ -5,6 +5,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 import { publicEnv } from '@/lib/env';
 
+import { trustedOrigins } from '../../_lib/trusted-origins';
+
 const API_BASE = (process.env.MOVIVO_API_URL?.trim() || publicEnv.apiUrl).replace(/\/$/, '');
 const COOKIE = 'movivo_workout_session';
 const PRIVATE_HEADERS = {
@@ -23,7 +25,8 @@ export class WorkoutBffError extends Error {
 }
 
 export function assertSameOrigin(request: NextRequest): void {
-  if (request.headers.get('origin') !== request.nextUrl.origin) {
+  const origin = request.headers.get('origin');
+  if (!origin || !trustedOrigins(request).has(origin)) {
     throw new WorkoutBffError(403, 'Origem nao autorizada.');
   }
   const fetchSite = request.headers.get('sec-fetch-site');

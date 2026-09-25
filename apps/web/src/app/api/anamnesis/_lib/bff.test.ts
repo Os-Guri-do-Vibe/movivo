@@ -11,6 +11,9 @@ const jar = vi.hoisted(() => {
   return new Map<string, { value: string; options?: Record<string, unknown> }>();
 });
 
+vi.mock('@/lib/env', () => ({
+  publicEnv: { apiUrl: 'http://api.test/api/v1', siteUrl: 'https://movivo.test' },
+}));
 vi.mock('next/headers', () => ({
   cookies: async () => ({
     get: (name: string) => {
@@ -103,6 +106,21 @@ describe('POST /api/anamnesis/start', () => {
     expect(headers.get('X-Forwarded-For')).toBe('203.0.113.7');
     expect(headers.get('User-Agent')).toBe('Navegador/1.0');
     expect(fetchMock.mock.calls[1]?.[0]).toBe(`http://api.test/api/v1/anamnesis/session/${TOKEN}`);
+  });
+
+  it('aceita a origem pública do site quando o Next vê a URL interna (produção atrás do Nginx)', async () => {
+    fetchMock
+      .mockResolvedValueOnce(Response.json({ token: TOKEN }))
+      .mockResolvedValueOnce(Response.json(SESSION));
+    const response = await start(
+      new NextRequest('https://localhost:3000/api/anamnesis/start', {
+        method: 'POST',
+        headers: { origin: 'https://movivo.test', 'sec-fetch-site': 'same-origin' },
+        body: '{}',
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(jar.get(COOKIE)?.value).toBe(TOKEN);
   });
 
   it('recusa origem cruzada sem chamar a API', async () => {

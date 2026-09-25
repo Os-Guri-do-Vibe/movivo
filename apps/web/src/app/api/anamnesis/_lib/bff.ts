@@ -8,6 +8,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { ANAMNESIS_REF_HEADER, SESSION_REPLACED_STATUS } from '@/lib/anamnesis-session-ref';
 import { publicEnv } from '@/lib/env';
 
+import { trustedOrigins } from '../../_lib/trusted-origins';
+
 /**
  * BFF da anamnese. O token da sessão é credencial de acesso a dado de saúde (Sato §8.1):
  * fica num cookie httpOnly, que script nenhum da página lê, e só este servidor o coloca
@@ -36,7 +38,8 @@ export class AnamnesisBffError extends Error {
 }
 
 export function assertSameOrigin(request: NextRequest): void {
-  if (request.headers.get('origin') !== request.nextUrl.origin) {
+  const origin = request.headers.get('origin');
+  if (!origin || !trustedOrigins(request).has(origin)) {
     throw new AnamnesisBffError(403, 'Origem não autorizada.');
   }
   const fetchSite = request.headers.get('sec-fetch-site');
