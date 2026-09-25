@@ -41,9 +41,31 @@ test('a landing expõe navegação e seções principais', async ({ page }) => {
     await expect(page.locator(id)).toBeAttached();
   }
 
+  // A seção chega sem `#hash` na URL: F5 e "voltar" nunca caem no meio da página.
   await nav.getByRole('link', { name: 'Planos' }).click();
-  await expect(page).toHaveURL(/#planos$/);
   await expect(page.locator('#planos')).toBeInViewport();
+  expect(new URL(page.url()).hash).toBe('');
+
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  await expect(page.locator('#topo')).toBeInViewport();
+});
+
+test('"Conheça a MOVIVO" leva a Como funciona', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/', { waitUntil: 'networkidle' });
+
+  await page.getByRole('link', { name: 'Conheça a MOVIVO' }).click();
+  await expect(page.locator('#como-funciona')).toBeInViewport();
+  expect(new URL(page.url()).hash).toBe('');
+});
+
+test('link externo com âncora leva à seção e limpa a URL', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/#planos', { waitUntil: 'networkidle' });
+
+  await expect(page.locator('#planos')).toBeInViewport();
+  await expect.poll(() => new URL(page.url()).hash).toBe('');
 });
 
 test('planos no desktop: valores do catálogo, destaque verdadeiro e plano preservado', async ({
@@ -129,8 +151,8 @@ test('menu mobile abre em tela cheia, fecha com ESC e navega', async ({ page }) 
     .getByRole('navigation', { name: 'Navegação mobile' })
     .getByRole('link', { name: /Como funciona/ })
     .click();
-  await expect(page).toHaveURL(/#como-funciona$/);
   await expect(page.locator('#como-funciona')).toBeInViewport();
+  expect(new URL(page.url()).hash).toBe('');
 });
 
 test('mobile: CTA fixo aparece depois do hero e some nos planos', async ({ page }) => {

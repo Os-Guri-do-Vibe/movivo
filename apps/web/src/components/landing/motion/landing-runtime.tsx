@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect } from 'react';
 
 import { captureFirstTouch } from '@/lib/first-touch';
 import {
@@ -10,6 +10,7 @@ import {
   type LandingSection,
 } from '@/lib/landing/analytics';
 
+import { scrollToSection } from '../ui/scroll-to-section';
 import { LANDING_ROOT_SELECTOR } from '../ui/use-landing-portal';
 
 import { loadGsap, MOTION_QUERIES, type MotionConditions } from './gsap';
@@ -20,14 +21,59 @@ function isLandingSection(value: string | undefined): value is LandingSection {
   return value !== undefined && SECTION_SET.has(value);
 }
 
+/** Clique simples (sem modificador): Ctrl/⌘/Shift/botão do meio seguem o navegador. */
+function isPlainClick(event: MouseEvent): boolean {
+  return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+}
+
 /**
  * Comportamento global da landing, montado uma vez:
+ *  - a landing sempre abre no hero (F5 e "voltar" da anamnese incluídos) e a URL fica
+ *    sem `#seção`; âncoras internas rolam via script (`scrollToSection`);
  *  - primeiro toque (US-8.2): a query string chega aqui e some ao navegar para a anamnese;
  *  - `section_view_*`: uma vez por seção por visita, quando ~35% dela aparece;
  *  - reveals editoriais (`[data-reveal]`, `[data-reveal-lines]`) via GSAP/ScrollTrigger,
  *    só para o que ainda está abaixo da dobra — nada que já está visível pisca.
  */
 export function LandingRuntime() {
+  /*
+   * Layout effect: ao voltar da anamnese, a landing precisa aparecer já no topo, sem
+   * pintar um quadro na rolagem herdada. Com `manual`, o navegador não restaura a
+   * rolagem desta entrada no F5/voltar. Um link externo com âncora (`/#planos`) ainda
+   * leva à seção, e o hash sai da URL — o próximo F5 já abre no hero.
+   *
+   * `history.state` é repassado de propósito: na hidratação este efeito roda antes de o
+   * App Router instalar o patch de `replaceState`, e um `null` apagaria o estado interno
+   * do Next desta entrada — o "voltar" até ela voltaria a ser ignorado.
+   */
+  useLayoutEffect(() => {
+    const { history } = window;
+    const previous = history.scrollRestoration;
+    history.scrollRestoration = 'manual';
+    const { hash, pathname, search } = window.location;
+    const deepLink = hash ? document.getElementById(hash.slice(1)) : null;
+    if (hash) history.replaceState(history.state, '', pathname + search);
+    // Instantâneo: a rolagem suave nativa até o fragmento é interrompida na hidratação.
+    if (deepLink) deepLink.scrollIntoView({ block: 'start', behavior: 'instant' });
+    else window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    return () => {
+      history.scrollRestoration = previous;
+    };
+  }, []);
+
+  useEffect(() => {
+    function onClick(event: MouseEvent) {
+      // `defaultPrevented`: o menu mobile trata a própria âncora depois de fechar.
+      if (event.defaultPrevented || !isPlainClick(event)) return;
+      const anchor = event.target instanceof Element ? event.target.closest('a') : null;
+      const href = anchor?.getAttribute('href');
+      if (!href?.startsWith('#') || href.length < 2) return;
+      if (scrollToSection(href.slice(1))) event.preventDefault();
+    }
+    document.addEventListener('click', onClick);
+    return () => document.removeEventListener('click', onClick);
+  }, []);
+
   useEffect(() => {
     captureFirstTouch();
   }, []);
