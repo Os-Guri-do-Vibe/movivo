@@ -8,6 +8,7 @@
 #   docker build -f apps/web/Dockerfile \
 #     --build-arg NEXT_PUBLIC_SITE_URL=https://movivo.com.br \
 #     --build-arg NEXT_PUBLIC_API_URL=https://api.movivo.com.br/api/v1 \
+#     --build-arg NEXT_PUBLIC_ADMIN_URL=https://admin.movivo.com.br \
 #     -t movivo-web .
 #
 # ⚠️ Tudo que é NEXT_PUBLIC_* é gravado no bundle NO BUILD (não no runtime):
@@ -44,6 +45,7 @@ COPY apps/web apps/web
 ARG NEXT_PUBLIC_APP_ENV=production
 ARG NEXT_PUBLIC_SITE_URL=https://movivo.com.br
 ARG NEXT_PUBLIC_API_URL=https://api.movivo.com.br/api/v1
+ARG NEXT_PUBLIC_ADMIN_URL=https://admin.movivo.com.br
 ARG NEXT_PUBLIC_POSTHOG_KEY=
 ARG NEXT_PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
 ENV NODE_ENV=production \
@@ -51,6 +53,7 @@ ENV NODE_ENV=production \
     NEXT_PUBLIC_APP_ENV=${NEXT_PUBLIC_APP_ENV} \
     NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL} \
     NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
+    NEXT_PUBLIC_ADMIN_URL=${NEXT_PUBLIC_ADMIN_URL} \
     NEXT_PUBLIC_POSTHOG_KEY=${NEXT_PUBLIC_POSTHOG_KEY} \
     NEXT_PUBLIC_POSTHOG_HOST=${NEXT_PUBLIC_POSTHOG_HOST}
 

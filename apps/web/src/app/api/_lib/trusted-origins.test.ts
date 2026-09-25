@@ -5,7 +5,9 @@
 import { NextRequest } from 'next/server';
 import { describe, expect, it, vi } from 'vitest';
 
-const env = vi.hoisted(() => ({ publicEnv: { siteUrl: 'https://movivo.test' } }));
+const env = vi.hoisted(() => ({
+  publicEnv: { siteUrl: 'https://movivo.test', adminUrl: undefined as string | undefined },
+}));
 vi.mock('@/lib/env', () => env);
 
 import { trustedOrigins } from './trusted-origins';
@@ -24,5 +26,20 @@ describe('trustedOrigins', () => {
     env.publicEnv.siteUrl = 'não é url';
     expect([...trustedOrigins(internal)]).toEqual(['https://localhost:3000']);
     env.publicEnv.siteUrl = 'https://movivo.test';
+  });
+
+  it('aceita a origem da Plataforma Interna (NEXT_PUBLIC_ADMIN_URL) quando definida', () => {
+    env.publicEnv.adminUrl = 'https://admin.movivo.test';
+    expect(trustedOrigins(internal).has('https://admin.movivo.test')).toBe(true);
+    env.publicEnv.adminUrl = undefined;
+  });
+
+  it('ignora NEXT_PUBLIC_ADMIN_URL malformada em vez de confiar nela', () => {
+    env.publicEnv.adminUrl = 'não é url';
+    expect([...trustedOrigins(internal)]).toEqual([
+      'https://localhost:3000',
+      'https://movivo.test',
+    ]);
+    env.publicEnv.adminUrl = undefined;
   });
 });

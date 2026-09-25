@@ -1,0 +1,457 @@
+# =============================================================================
+# MOVIVO — Stack de PRODUÇÃO (VPS Hostinger · Docker Compose)
+# =============================================================================
+# Dono: Henrique (Platform/SRE)
+#
+# Vive na VPS como /opt/movivo/compose.yml — quem copia é infra/vps/deploy.sh,
+# junto com api.env, nginx/ e os configs de infra/{postgres,pgbouncer,redis}.
+# Nunca edite a cópia da VPS à mão: edite aqui e rode o deploy de novo.
+#
+# Diferenças em relação ao docker-compose.yml de dev:
+#   · NENHUMA porta publicada, exceto a 443 do Nginx (só IPv4 — o Cloudflare
+#     fala com a origem pelo registro A). Postgres, Redis, PgBouncer e
+#     EvolutionAPI só existem na rede interna `movivo-net`.
+#   · Segredos vêm de /opt/movivo/secrets (gerados NA VPS por
+#     gen-prod-secrets.sh — nunca os do dev, exceto chaves de API externas).
+#   · API e web são imagens versionadas (tag = SHA curto do commit), nunca build
+#     local. `MOVIVO_VERSION` vem do .env que o deploy grava ao lado deste arquivo.
+#   · A migração é um serviço one-shot (profile `migrate`): o deploy roda
+#     `docker compose run --rm migrate` ANTES de trocar a API.
+#
+# Orçamento de memória (KVM 2 = 8 GB + 4 GB swap): soma dos limites ≈ 6,6 GB.
+# =============================================================================
+
+name: movivo
+
+x-common: &common
+  restart: unless-stopped
+  networks: [movivo-net]
+  security_opt:
+    - no-new-privileges:true
+  # Rotação de log vem do daemon (/etc/docker/daemon.json: driver `local`,
+  # 5 × 20 MB por container — ver bootstrap.sh).
+
+x-api-image: &api-image ghcr.io/os-guri-do-vibe/movivo-api:${MOVIVO_VERSION:?defina MOVIVO_VERSION no .env}
+
+services:
+  # ===========================================================================
+  # Dados — PostgreSQL 17 + PGVector, PgBouncer, Redis (master/replica/sentinel)
+  # ===========================================================================
+  postgres:
+    <<: *common
+    image: pgvector/pgvector:pg17
+    container_name: movivo-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: movivo
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_superuser_password
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+      POSTGRES_APP_USER: movivo_app
+      POSTGRES_MIGRATOR_USER: movivo_migrator
+      TZ: America/Sao_Paulo
+      PGTZ: UTC
+    secrets:
+      - postgres_superuser_password
+      - postgres_app_password
+      - postgres_migrator_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    shm_size: 256mb
+    command:
+      - postgres
+      - -c
+      - max_connections=100
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1536MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - log_lock_waits=on
+      - -c
+      - track_io_timing=on
+      - -c
+      - password_encryption=scram-sha-256
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -h 127.0.0.1']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 2G
+
+  pgbouncer:
+    <<: *common
+    image: edoburu/pgbouncer:v1.24.1-p1
+    container_name: movivo-pgbouncer
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: America/Sao_Paulo
+    secrets:
+      - pgbouncer_userlist
+    volumes:
+      - ./infra/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -p 5433 -U movivo_app -d movivo']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+
+  redis-master:
+    <<: *common
+    # Linha 8.10 (a mesma que o CI testa), patch mais recente — acima do mínimo
+    # exigido pela CVE-2025-49844 (RediShell). Nunca rebaixar.
+    image: redis:8.10.2-alpine
+    container_name: movivo-redis-master
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        test -s /run/secrets/redis_password || { echo "[movivo/redis] secret ausente" >&2; exit 1; }
+        umask 077
+        sed "s|@REDIS_PASSWORD@|$$(cat /run/secrets/redis_password)|g" \
+          /etc/movivo/redis-master.conf.tpl > /tmp/redis.conf
+        exec redis-server /tmp/redis.conf
+    secrets:
+      - redis_password
+    volumes:
+      - redis-master-data:/data
+      - ./infra/redis/redis-master.conf.tpl:/etc/movivo/redis-master.conf.tpl:ro
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'redis-cli --no-auth-warning -a "$$(cat /run/secrets/redis_password)" ping | grep -q PONG',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.35'
+          memory: 640M
+
+  redis-replica:
+    <<: *common
+    image: redis:8.10.2-alpine
+    container_name: movivo-redis-replica
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        test -s /run/secrets/redis_password || { echo "[movivo/redis] secret ausente" >&2; exit 1; }
+        umask 077
+        sed "s|@REDIS_PASSWORD@|$$(cat /run/secrets/redis_password)|g" \
+          /etc/movivo/redis-replica.conf.tpl > /tmp/redis.conf
+        exec redis-server /tmp/redis.conf
+    secrets:
+      - redis_password
+    volumes:
+      - redis-replica-data:/data
+      - ./infra/redis/redis-replica.conf.tpl:/etc/movivo/redis-replica.conf.tpl:ro
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'redis-cli --no-auth-warning -a "$$(cat /run/secrets/redis_password)" info replication | grep -q ''master_link_status:up''',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 640M
+
+  redis-sentinel:
+    <<: *common
+    image: redis:8.10.2-alpine
+    container_name: movivo-redis-sentinel
+    depends_on:
+      redis-master:
+        condition: service_healthy
+      redis-replica:
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        test -s /run/secrets/redis_password || { echo "[movivo/sentinel] secret ausente" >&2; exit 1; }
+        umask 077
+        sed "s|@REDIS_PASSWORD@|$$(cat /run/secrets/redis_password)|g" \
+          /etc/movivo/sentinel.conf.tpl > /tmp/sentinel.conf
+        exec redis-sentinel /tmp/sentinel.conf
+    secrets:
+      - redis_password
+    volumes:
+      - ./infra/redis/sentinel.conf.tpl:/etc/movivo/sentinel.conf.tpl:ro
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'redis-cli --no-auth-warning -a "$$(cat /run/secrets/redis_password)" -p 26379 sentinel master movivo-master | grep -qx movivo-master',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.15'
+          memory: 96M
+
+  # ===========================================================================
+  # WhatsApp — EvolutionAPI (decisão do 1º deploy: canal de produção, número
+  # dedicado). Postgres próprio, isolado do `movivo`. Sem porta publicada: o
+  # painel CREF fala com ela pela API, e o QR Code é lido pelo dashboard.
+  # ===========================================================================
+  evolution-postgres:
+    <<: *common
+    image: postgres:18-alpine
+    container_name: movivo-evolution-postgres
+    environment:
+      POSTGRES_USER: evolution
+      POSTGRES_DB: evolution
+      POSTGRES_PASSWORD_FILE: /run/secrets/evolution_postgres_password
+      TZ: America/Sao_Paulo
+      PGDATA: /var/lib/postgresql/data/pgdata
+    secrets:
+      - evolution_postgres_password
+    volumes:
+      - evolution-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -h 127.0.0.1']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 384M
+
+  evolution-api:
+    <<: *common
+    image: evoapicloud/evolution-api:v2.3.7
+    container_name: movivo-evolution-api
+    depends_on:
+      evolution-postgres:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: '8080'
+      SERVER_URL: http://evolution-api:8080
+      DATABASE_ENABLED: 'true'
+      DATABASE_PROVIDER: postgresql
+      DATABASE_SAVE_DATA_INSTANCE: 'true'
+      CACHE_REDIS_ENABLED: 'false'
+      CACHE_LOCAL_ENABLED: 'true'
+      LOG_LEVEL: ERROR,WARN,INFO
+      TZ: America/Sao_Paulo
+    secrets:
+      - evolution_api_key
+      - evolution_postgres_password
+    entrypoint: []
+    command:
+      - bash
+      - -c
+      - |
+        set -eu
+        test -s /run/secrets/evolution_api_key || { echo "[movivo/evolution-api] secret ausente" >&2; exit 1; }
+        export AUTHENTICATION_API_KEY="$$(cat /run/secrets/evolution_api_key)"
+        export DATABASE_CONNECTION_URI="postgresql://evolution:$$(cat /run/secrets/evolution_postgres_password)@evolution-postgres:5432/evolution"
+        exec bash -c ". ./Docker/scripts/deploy_database.sh && npm run start:prod"
+    volumes:
+      - evolution-instances:/evolution/instances
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: 768M
+
+  # ===========================================================================
+  # Aplicação
+  # ===========================================================================
+  # One-shot: aplica as migrações e reconcilia os grants de `movivo_app`.
+  # Único serviço que recebe a senha do `movivo_migrator` (menor privilégio).
+  migrate:
+    image: *api-image
+    container_name: movivo-migrate
+    profiles: [migrate]
+    restart: 'no'
+    networks: [movivo-net]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      APP_ENV: production
+      DATABASE_NAME: movivo
+      DATABASE_USER: movivo_app
+      MIGRATION_DATABASE_HOST: postgres
+      MIGRATION_DATABASE_PORT: '5432'
+      MIGRATION_DATABASE_USER: movivo_migrator
+      MIGRATION_DATABASE_PASSWORD_FILE: /run/secrets/postgres_migrator_password
+    secrets:
+      - postgres_migrator_password
+    command: ['node', '--enable-source-maps', 'dist/core/database/migrate.js']
+
+  api:
+    <<: *common
+    image: *api-image
+    container_name: movivo-api
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis-sentinel:
+        condition: service_healthy
+      evolution-api:
+        condition: service_healthy
+    env_file: [api.env]
+    secrets:
+      - postgres_app_password
+      - redis_password
+      - pgcrypto_key
+      - jwt_private_key
+      - jwt_public_key
+      - evolution_api_key
+      - evolution_webhook_token
+      - asaas_api_key
+      - asaas_webhook_secret
+      - deepseek_api_key
+      - openai_api_key
+      - anthropic_api_key
+      - groq_api_key
+      - ararahq_api_key
+    volumes:
+      # Fotos de perfil (AVATAR_UPLOAD_DIR=./uploads/avatars, cwd /app/apps/api).
+      # Dono uid 1000 no host = usuário `node` da imagem.
+      - /opt/movivo/uploads:/app/apps/api/uploads
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 1G
+
+  web:
+    <<: *common
+    image: ghcr.io/os-guri-do-vibe/movivo-web:${MOVIVO_VERSION}
+    container_name: movivo-web
+    environment:
+      NODE_ENV: production
+      # BFF do dashboard fala com a API pela rede interna, sem sair para o Cloudflare.
+      MOVIVO_API_URL: http://api:3001/api/v1
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: 512M
+
+  # ===========================================================================
+  # Borda — Nginx termina o TLS do Cloudflare (Origin Certificate, Full strict)
+  # ===========================================================================
+  nginx:
+    <<: *common
+    image: nginx:1.30.5-alpine
+    container_name: movivo-nginx
+    depends_on:
+      - api
+      - web
+    ports:
+      # Só IPv4: o firewall da Hostinger limita a 443 às faixas IPv4 do
+      # Cloudflare; publicar em [::] abriria a origem por IPv6 fora desse filtro.
+      - '0.0.0.0:443:443'
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8080/nginx-health || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 128M
+
+# ─────────────────────────────────────────────────────────────────────────────
+networks:
+  movivo-net:
+    name: movivo-net
+    driver: bridge
+
+volumes:
+  postgres-data:
+    name: movivo-postgres-data
+  redis-master-data:
+    name: movivo-redis-master-data
+  redis-replica-data:
+    name: movivo-redis-replica-data
+  evolution-postgres-data:
+    name: movivo-evolution-postgres-data
+  evolution-instances:
+    name: movivo-evolution-instances
+
+# Arquivos em /opt/movivo/secrets (dono deploy, diretório 700). Os internos são
+# gerados por gen-prod-secrets.sh; as chaves de API externas são copiadas do
+# dev pelo deploy.sh. Todo secret declarado aqui PRECISA existir (o Compose
+# recusa subir com arquivo ausente).
+secrets:
+  postgres_superuser_password: { file: ./secrets/postgres_superuser_password }
+  postgres_app_password: { file: ./secrets/postgres_app_password }
+  postgres_migrator_password: { file: ./secrets/postgres_migrator_password }
+  pgbouncer_userlist: { file: ./secrets/pgbouncer_userlist.txt }
+  redis_password: { file: ./secrets/redis_password }
+  pgcrypto_key: { file: ./secrets/pgcrypto_key }
+  jwt_private_key: { file: ./secrets/jwt_private_key }
+  jwt_public_key: { file: ./secrets/jwt_public_key }
+  evolution_postgres_password: { file: ./secrets/evolution_postgres_password }
+  evolution_api_key: { file: ./secrets/evolution_api_key }
+  evolution_webhook_token: { file: ./secrets/evolution_webhook_token }
+  asaas_api_key: { file: ./secrets/asaas_api_key }
+  asaas_webhook_secret: { file: ./secrets/asaas_webhook_secret }
+  deepseek_api_key: { file: ./secrets/deepseek_api_key }
+  openai_api_key: { file: ./secrets/openai_api_key }
+  anthropic_api_key: { file: ./secrets/anthropic_api_key }
+  groq_api_key: { file: ./secrets/groq_api_key }
+  ararahq_api_key: { file: ./secrets/ararahq_api_key }
