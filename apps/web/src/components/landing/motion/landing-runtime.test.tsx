@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as GsapModule from './gsap';
 
 import type * as AnalyticsModule from '@/lib/landing/analytics';
+import { getSelectedPlan, selectPlan } from '@/lib/landing/plan-selection';
 
 import {
   ALL_OFF,
@@ -139,6 +140,18 @@ describe('LandingRuntime', () => {
     await flush();
     expect(scrollTo).toHaveBeenCalledWith({ top: 0, left: 0, behavior: 'instant' });
     window.history.replaceState(null, '', '/');
+  });
+
+  it('esquece o plano escolhido quando a landing sai de cena (ida para a anamnese)', async () => {
+    gsapState.fake = createFakeGsap(ALL_OFF);
+    vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    const { unmount } = render(<LandingRuntime />);
+    await flush();
+    act(() => selectPlan('ANNUAL'));
+    expect(getSelectedPlan()).toBe('ANNUAL');
+
+    unmount();
+    expect(getSelectedPlan()).toBeNull();
   });
 
   it('com movimento reduzido, nenhum reveal é preparado', async () => {

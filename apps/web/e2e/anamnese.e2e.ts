@@ -251,4 +251,11 @@ test('CTA com plano abre /anamnese limpa e "voltar" leva à landing no topo', as
   await expect(page.getByRole('heading', { name: 'Vamos começar por você' })).toHaveCount(0);
   await expect(page).toHaveURL(/\/$/);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+
+  // A escolha anterior não vale mais: o CTA genérico leva aos planos, não ao formulário.
+  const heroCta = page.locator('[data-analytics-event="hero_start_trial"]');
+  await expect(heroCta).toHaveAttribute('href', '#planos');
+  await heroCta.click();
+  await expect(page.locator('#planos')).toBeInViewport();
+  await expect(page.getByRole('heading', { name: 'Vamos começar por você' })).toHaveCount(0);
 });

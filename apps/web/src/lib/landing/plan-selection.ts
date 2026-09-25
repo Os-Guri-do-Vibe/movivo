@@ -1,5 +1,6 @@
 /**
- * Plano escolhido pelo visitante nesta visita à landing.
+ * Plano escolhido pelo visitante nesta visita à landing (o `LandingRuntime` o esquece
+ * quando a landing é desmontada — por exemplo, ao seguir para a anamnese).
  *
  * Store mínimo (sem provider): o seletor de planos grava, os CTAs genéricos leem. Com
  * plano escolhido, "Começar 7 dias grátis" vai direto para a anamnese com ele; sem

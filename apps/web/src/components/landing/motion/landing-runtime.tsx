@@ -9,6 +9,7 @@ import {
   trackLandingEvent,
   type LandingSection,
 } from '@/lib/landing/analytics';
+import { selectPlan } from '@/lib/landing/plan-selection';
 
 import { scrollToSection } from '../ui/scroll-to-section';
 import { LANDING_ROOT_SELECTOR } from '../ui/use-landing-portal';
@@ -30,6 +31,8 @@ function isPlainClick(event: MouseEvent): boolean {
  * Comportamento global da landing, montado uma vez:
  *  - a landing sempre abre no hero (F5 e "voltar" da anamnese incluídos) e a URL fica
  *    sem `#seção`; âncoras internas rolam via script (`scrollToSection`);
+ *  - o plano escolhido vale só para esta visita: ao sair (ex.: para a anamnese) ele é
+ *    esquecido, e quem volta encontra os CTAs genéricos levando aos planos de novo;
  *  - primeiro toque (US-8.2): a query string chega aqui e some ao navegar para a anamnese;
  *  - `section_view_*`: uma vez por seção por visita, quando ~35% dela aparece;
  *  - reveals editoriais (`[data-reveal]`, `[data-reveal-lines]`) via GSAP/ScrollTrigger,
@@ -77,6 +80,10 @@ export function LandingRuntime() {
   useEffect(() => {
     captureFirstTouch();
   }, []);
+
+  // A navegação para a anamnese é client-side: sem isto, a escolha sobrevive em memória e,
+  // na volta, "Começar grátis" abriria o formulário direto em vez de levar aos planos.
+  useEffect(() => () => selectPlan(null), []);
 
   useEffect(() => {
     if (typeof IntersectionObserver !== 'function') return;
