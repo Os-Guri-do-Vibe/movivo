@@ -71,6 +71,7 @@ jobs:
             NEXT_PUBLIC_APP_ENV=production
             NEXT_PUBLIC_SITE_URL=https://movivo.com.br
             NEXT_PUBLIC_API_URL=https://api.movivo.com.br/api/v1
+            NEXT_PUBLIC_ADMIN_URL=https://admin.movivo.com.br
           cache-from: type=gha,scope=${{ matrix.app }}
           cache-to: type=gha,mode=max,scope=${{ matrix.app }}
 

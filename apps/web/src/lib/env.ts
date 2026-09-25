@@ -38,6 +38,11 @@ export const publicEnv = {
   siteUrl: optional(process.env.NEXT_PUBLIC_SITE_URL) ?? 'http://localhost:3000',
   /** Base da API NestJS (US-0.3), sempre versionada em `api/v1` (regra §12.10). */
   apiUrl: optional(process.env.NEXT_PUBLIC_API_URL) ?? 'http://localhost:3001/api/v1',
+  /**
+   * Origem pública da Plataforma Interna (`/entrar` + `/dashboard`), servida em
+   * subdomínio próprio. `undefined` em dev — lá o login roda no mesmo host do site.
+   */
+  adminUrl: optional(process.env.NEXT_PUBLIC_ADMIN_URL),
   posthog: {
     key: resolvePostHogKey(),
     host: optional(process.env.NEXT_PUBLIC_POSTHOG_HOST) ?? 'https://us.i.posthog.com',
