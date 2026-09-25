@@ -36,7 +36,10 @@ describe('trustedOrigins', () => {
 
   it('ignora NEXT_PUBLIC_ADMIN_URL malformada em vez de confiar nela', () => {
     env.publicEnv.adminUrl = 'não é url';
-    expect([...trustedOrigins(internal)]).toEqual(['https://localhost:3000', 'https://movivo.test']);
+    expect([...trustedOrigins(internal)]).toEqual([
+      'https://localhost:3000',
+      'https://movivo.test',
+    ]);
     env.publicEnv.adminUrl = undefined;
   });
 });

@@ -137,7 +137,11 @@ services:
       - redis-master-data:/data
       - ./infra/redis/redis-master.conf.tpl:/etc/movivo/redis-master.conf.tpl:ro
     healthcheck:
-      test: ['CMD-SHELL', 'redis-cli --no-auth-warning -a "$$(cat /run/secrets/redis_password)" ping | grep -q PONG']
+      test:
+        [
+          'CMD-SHELL',
+          'redis-cli --no-auth-warning -a "$$(cat /run/secrets/redis_password)" ping | grep -q PONG',
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
