@@ -12,6 +12,8 @@ import {
 } from '@/lib/control-center-access';
 import { publicEnv } from '@/lib/env';
 
+import { trustedOrigins } from '../../_lib/trusted-origins';
+
 export const BFF_ACCESS_COOKIE = 'movivo_bff_access';
 export const BFF_REFRESH_COOKIE = 'movivo_bff_refresh';
 const BACKEND_REFRESH_COOKIE = 'movivo_refresh';
@@ -296,21 +298,11 @@ export async function logoutBackend(): Promise<void> {
   }
 }
 
-function allowedOrigins(request: NextRequest): Set<string> {
-  const origins = new Set([request.nextUrl.origin]);
-  try {
-    origins.add(new URL(publicEnv.siteUrl).origin);
-  } catch {
-    // O build já usa fallback válido; este ramo apenas evita confiar em env malformada.
-  }
-  return origins;
-}
-
 /** Defesa CSRF adicional ao SameSite=Strict: mutações exigem Origin same-origin. */
 export function assertTrustedMutation(request: NextRequest): void {
   const origin = request.headers.get('origin');
   const fetchSite = request.headers.get('sec-fetch-site');
-  if (!origin || !allowedOrigins(request).has(origin)) {
+  if (!origin || !trustedOrigins(request).has(origin)) {
     throw new BffError(403, 'Origem da solicitação não autorizada.');
   }
   if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none') {
