@@ -87,7 +87,11 @@ for cidr in $cf_v4 $cf_v6; do echo "${cidr} 1;"; done > "$stage/nginx/conf.d/clo
 
 # pgbouncer.ini e templates do Redis são bind mount de ARQUIVO: o container
 # segura o inode antigo, então mudança neles exige recriar esses serviços.
-COPYFILE_DISABLE=1 tar -C "$stage" --no-xattrs --no-mac-metadata -cf - \
+# --no-mac-metadata só existe no bsdtar do macOS (de onde normalmente se roda este
+# script) — no GNU tar do runner do GitHub Actions (Linux) a flag nem existe.
+mac_tar_flags=()
+[[ "$(uname -s)" == Darwin ]] && mac_tar_flags=(--no-mac-metadata)
+COPYFILE_DISABLE=1 tar -C "$stage" --no-xattrs "${mac_tar_flags[@]}" -cf - \
     compose.yml api.env nginx infra bin \
   | "${SSH[@]}" "set -e; cd ${APP_DIR}
       before=\$(sha256sum infra/pgbouncer/pgbouncer.ini infra/redis/*.tpl 2>/dev/null || true)
