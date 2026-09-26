@@ -16,11 +16,11 @@
  * (nunca vazio) e é substituído em background por `refresh()` — que roda no boot
  * (`onModuleInit`) e sempre que o admin publica/retira uma entrada (`invalidate()`).
  */
-import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { desc, sql } from 'drizzle-orm';
 
 import { TenantDatabase } from '../../core/database/tenant-database.service';
-import { exerciseCatalogEntries } from '../../core/database/schema';
+import { exerciseCatalogEntries, exerciseCatalogFavorites } from '../../core/database/schema';
 import {
   CATALOG_VERSION,
   EXERCISE_CATALOG as BOOTSTRAP_EXERCISE_CATALOG,
@@ -35,6 +35,12 @@ const REFRESH_MS = 5 * 60_000;
 @Injectable()
 /* v8 ignore stop */
 export class ExerciseCatalogProvider implements OnModuleInit {
+  /**
+   * `Logger` do Nest (roteado ao pino por `app.useLogger` em `main.ts`), e não `PinoLogger`
+   * injetado: injetar mudaria a assinatura do construtor usada pelos ~10 `new
+   * ValidationService()`/`new ExerciseCatalogProvider()` sem harness do Nest (ver `db` abaixo).
+   */
+  private readonly logger = new Logger(ExerciseCatalogProvider.name);
   private snapshot: readonly CatalogExercise[] = BOOTSTRAP_EXERCISE_CATALOG;
   private byId: ReadonlyMap<string, CatalogExercise> = new Map(
     BOOTSTRAP_EXERCISE_CATALOG.map((e) => [e.id, e]),
@@ -84,6 +90,8 @@ export class ExerciseCatalogProvider implements OnModuleInit {
         .orderBy(desc(exerciseCatalogEntries.exerciseKey), desc(exerciseCatalogEntries.version));
     });
 
+    const favoritedKeys = await this.readFavoritedKeys(this.db);
+
     const latestByKey = new Map<string, (typeof rows)[number]>();
     for (const row of rows) {
       if (!latestByKey.has(row.exerciseKey)) latestByKey.set(row.exerciseKey, row);
@@ -106,12 +114,39 @@ export class ExerciseCatalogProvider implements OnModuleInit {
         ...(row.durationSecondsRange ? { durationSecondsRange: row.durationSecondsRange } : {}),
         ...(row.minRestSeconds != null ? { minRestSeconds: row.minRestSeconds } : {}),
         ...(row.videoUrl ? { videoUrl: row.videoUrl } : {}),
+        isFavorite: favoritedKeys.has(row.exerciseKey),
       });
     }
 
     if (published.length === 0) return; // nunca esvazia o snapshot por uma leitura ruim.
     this.snapshot = published;
     this.byId = new Map(published.map((e) => [e.id, e]));
+  }
+
+  /**
+   * Chaves favoritadas pelo RT CREF (achado 2026-09-26). Favorito é preferência de
+   * prescrição, não conteúdo clínico: uma falha aqui NUNCA pode impedir o snapshot de
+   * exercícios de atualizar — degrada para "nenhum favorito" e só avisa no log.
+   *
+   * Transação própria (não a mesma da leitura do catálogo) de propósito: no Postgres, um
+   * erro dentro de uma transação a deixa abortada por inteiro, então um try/catch em volta
+   * de uma segunda query na MESMA transação não isolaria de verdade a falha.
+   */
+  private async readFavoritedKeys(db: TenantDatabase): Promise<ReadonlySet<string>> {
+    try {
+      const rows = await db.runAsSystem(async (tx) =>
+        tx
+          .select({ exerciseKey: exerciseCatalogFavorites.exerciseKey })
+          .from(exerciseCatalogFavorites),
+      );
+      return new Set(rows.map((row) => row.exerciseKey));
+    } catch (error) {
+      this.logger.warn(
+        { event: 'exercise_catalog_favorites_read_failed', err: String(error) },
+        'leitura de favoritos do catálogo falhou — snapshot segue atualizado, sem favoritos',
+      );
+      return new Set();
+    }
   }
 
   /**

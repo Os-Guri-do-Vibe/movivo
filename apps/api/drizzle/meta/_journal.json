@@ -428,6 +428,13 @@
       "when": 1790396762075,
       "tag": "0060_medical_vulcan",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1790457271956,
+      "tag": "0061_yielding_thena",
+      "breakpoints": true
     }
   ]
 }

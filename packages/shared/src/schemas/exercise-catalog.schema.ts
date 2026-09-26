@@ -93,6 +93,16 @@ export const retireExerciseCatalogEntrySchema = z.object({
 });
 export type RetireExerciseCatalogEntryInput = z.infer<typeof retireExerciseCatalogEntrySchema>;
 
+/**
+ * Favoritar/desfavoritar (achado 2026-09-26) — sem `changeNote`: é um toggle de
+ * preferência de prescrição do RT, não uma mudança de conteúdo clínico versionada
+ * (diferente de `publish`/`retire` acima).
+ */
+export const favoriteExerciseCatalogEntrySchema = z.object({
+  exerciseKey: z.string().regex(exerciseKeyPattern),
+});
+export type FavoriteExerciseCatalogEntryInput = z.infer<typeof favoriteExerciseCatalogEntrySchema>;
+
 export const exerciseCatalogEntryVersionSchema = catalogExerciseCandidateSchema.extend({
   id: z.uuid(),
   exerciseKey: z.string(),
@@ -102,6 +112,8 @@ export const exerciseCatalogEntryVersionSchema = catalogExerciseCandidateSchema.
   createdBy: z.string().nullable(),
   createdAt: z.iso.datetime(),
   current: z.boolean(),
+  /** Preferido pelo RT para prescrição (achado 2026-09-26) — ver `favoriteExerciseCatalogEntrySchema`. */
+  isFavorite: z.boolean(),
 });
 export type ExerciseCatalogEntryVersion = z.infer<typeof exerciseCatalogEntryVersionSchema>;
 

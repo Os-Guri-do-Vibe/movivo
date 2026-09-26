@@ -64,9 +64,19 @@ function catalogWith(
     selectsDistinct?: unknown[][];
     /** `false` simula o `.returning()` do insert vindo vazio (linha de segurança). */
     insertReturns?: boolean;
+    /** `false` simula `onConflictDoNothing` (favoritar já favoritado — nenhuma linha nova). */
+    favoriteInsertReturns?: boolean;
+    /** Linhas devolvidas pelo `.delete().returning()` do `unfavorite` (vazio = nada a remover). */
+    deleteReturns?: unknown[];
   } = {},
 ) {
-  const { selects = [], selectsDistinct = [], insertReturns = true } = options;
+  const {
+    selects = [],
+    selectsDistinct = [],
+    insertReturns = true,
+    favoriteInsertReturns = true,
+    deleteReturns = [{ id: '66666666-6666-4666-8666-666666666666' }],
+  } = options;
   const inserted: unknown[] = [];
   const chainFor = (rows: unknown[]) => {
     const chain: Record<string, unknown> = {
@@ -96,8 +106,17 @@ function catalogWith(
         return {
           returning: async () =>
             insertReturns ? [{ id: '55555555-5555-4555-8555-555555555555' }] : [],
+          onConflictDoNothing: () => ({
+            returning: async () =>
+              favoriteInsertReturns ? [{ id: '55555555-5555-4555-8555-555555555555' }] : [],
+          }),
         };
       },
+    }),
+    delete: () => ({
+      where: () => ({
+        returning: async () => deleteReturns,
+      }),
     }),
   };
   const db = {
@@ -147,6 +166,98 @@ describe('ExerciseCatalogAdminService.list', () => {
     const response = await service.list();
 
     expect(response.data.totalPublished).toBe(0); // "a" é o corrente, e está RETIRED
+  });
+
+  it('marca isFavorite só para exerciseKey presente na tabela de favoritos', async () => {
+    const { service } = catalogWith({
+      selects: [
+        [listRow({ id: 'a', exerciseKey: 'favoritado' }), listRow({ id: 'b', exerciseKey: 'outro' })],
+        [{ exerciseKey: 'favoritado' }],
+      ],
+    });
+
+    const response = await service.list();
+
+    expect(response.data.versions.map((v) => [v.exerciseKey, v.isFavorite])).toEqual([
+      ['favoritado', true],
+      ['outro', false],
+    ]);
+  });
+});
+
+describe('ExerciseCatalogAdminService.favorite', () => {
+  it('favorita um exercício existente e audita como exercise_catalog.favorite', async () => {
+    const { service, audit, inserted, invalidate } = catalogWith({
+      selects: [[listRow({ status: 'PUBLISHED' })], [], []],
+    });
+
+    await service.favorite(ACTOR, { exerciseKey: VALID.exerciseKey });
+
+    expect(inserted[0]).toMatchObject({
+      exerciseKey: VALID.exerciseKey,
+      favoritedBy: ACTOR.userId,
+    });
+    expect(audit.append).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'exercise_catalog.favorite',
+        entityType: 'exercise_catalog_favorite',
+      }),
+    );
+    // Mesmo motivo de publish/retire: o motor de IA lê `isFavorite` do snapshot em
+    // memória do `ExerciseCatalogProvider` — sem invalidar, o favorito só valeria
+    // pra geração de protocolo até 5min depois (timer de `REFRESH_MS`).
+    expect(invalidate).toHaveBeenCalledOnce();
+  });
+
+  it('não audita de novo quando já está favoritado (onConflictDoNothing idempotente)', async () => {
+    const { service, audit, inserted } = catalogWith({
+      selects: [[listRow({ status: 'PUBLISHED' })], [], []],
+      favoriteInsertReturns: false,
+    });
+
+    await service.favorite(ACTOR, { exerciseKey: VALID.exerciseKey });
+
+    expect(inserted).toHaveLength(1); // tentou inserir, mas o conflito não gerou nova linha
+    expect(audit.append).not.toHaveBeenCalled();
+  });
+
+  it('404 ao favoritar exercício inexistente', async () => {
+    const { service } = catalogWith({ selects: [[]] });
+    await expect(
+      service.favorite(ACTOR, { exerciseKey: VALID.exerciseKey }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('recusa favoritar exercício retirado do catálogo', async () => {
+    const { service } = catalogWith({ selects: [[listRow({ status: 'RETIRED' })]] });
+    await expect(
+      service.favorite(ACTOR, { exerciseKey: VALID.exerciseKey }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('ExerciseCatalogAdminService.unfavorite', () => {
+  it('remove o favorito e audita como exercise_catalog.unfavorite', async () => {
+    const { service, audit } = catalogWith({ selects: [[], []] });
+
+    await service.unfavorite(ACTOR, { exerciseKey: VALID.exerciseKey });
+
+    expect(audit.append).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'exercise_catalog.unfavorite',
+        entityType: 'exercise_catalog_favorite',
+      }),
+    );
+  });
+
+  it('é idempotente quando o exercício já não está favoritado', async () => {
+    const { service, audit } = catalogWith({ selects: [[], []], deleteReturns: [] });
+
+    await service.unfavorite(ACTOR, { exerciseKey: VALID.exerciseKey });
+
+    expect(audit.append).not.toHaveBeenCalled();
   });
 });
 

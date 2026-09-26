@@ -147,6 +147,15 @@ export interface CatalogExercise {
    * prescrever — a IA nunca preenche isso sozinha (evita alucinar URL quebrada).
    */
   videoUrl?: string;
+  /**
+   * Favoritado pelo RT CREF no painel "Exercícios" (achado 2026-09-26) — preferência de
+   * prescrição GLOBAL, lida de `exercise_catalog_favorites` (tabela separada, não versiona o
+   * exercício). Preenchido só por `ExerciseCatalogProvider.refresh()`; `undefined` no snapshot
+   * de bootstrap (antes do primeiro refresh / testes sem banco), tratado como "não favorito".
+   * NUNCA é eixo de segurança: não entra em filtro, validação nem substituição — só no
+   * desempate de ordem e na marcação da BASE DE REFERÊNCIA do `ProtocolGeneratorService`.
+   */
+  isFavorite?: boolean;
 }
 
 /** Ordem de nível — filtro do prompt (gerador) e veto do validador usam o MESMO critério. */
