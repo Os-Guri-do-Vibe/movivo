@@ -197,6 +197,36 @@
   --ring: var(--petroleo-vivo);
 }
 
+/*
+ * `/entrar` (login da Plataforma Interna) é deliberadamente só escura — mesmo
+ * racional do `.onboarding-light`/`.protocolo-light` acima, mas fixando os tokens
+ * do tema `.dark` em vez do claro: o fundo animado (AcidSquares) só faz sentido
+ * sobre Petróleo, então a tela nunca deve virar clara por preferência do sistema
+ * ou tema salvo em outra rota.
+ */
+.login-fixed {
+  color-scheme: dark;
+  --background: var(--petroleo-vivo);
+  --foreground: var(--nevoa);
+  --card: var(--petroleo-elevado);
+  --card-foreground: var(--nevoa);
+  --popover: var(--petroleo-elevado);
+  --popover-foreground: var(--nevoa);
+  --primary: var(--verde-pulso);
+  --primary-foreground: var(--petroleo-vivo);
+  --secondary: var(--petroleo-superficie);
+  --secondary-foreground: var(--nevoa);
+  --muted: var(--petroleo-superficie);
+  --muted-foreground: var(--nevoa-suave);
+  --accent: var(--petroleo-superficie);
+  --accent-foreground: var(--verde-pulso);
+  --destructive: var(--coral-vivo);
+  --destructive-foreground: var(--petroleo-vivo);
+  --border: #17564a;
+  --input: var(--petroleo-borda);
+  --ring: var(--verde-pulso);
+}
+
 /* --- 3. Exposição para o Tailwind ----------------------------------------- */
 @theme inline {
   /* Tokens de marca: `bg-petroleo`, `text-musgo`, `ring-verde-pulso`, ... */
