@@ -97,7 +97,8 @@ let seq = 0;
 async function createUser(): Promise<string> {
   const phone = `+5542${RUN}${(seq += 1)}`;
   const [row] = await adminClient<Array<{ id: string }>>`
-    INSERT INTO users (phone_number) VALUES (${phone}) RETURNING id`;
+    INSERT INTO users (phone_number, email)
+    VALUES (${phone}, ${`${phone.replace(/\D/g, '')}@example.invalid`}) RETURNING id`;
   // persist() assina o protocolo via assigned_active_professional → exige vínculo + consentimento.
   await seedHealthEligibility(adminClient, row.id);
   return row.id;

@@ -394,7 +394,7 @@ export const onboardingStep1Schema = z.object({
   heightCm: z.number().int().min(MIN_HEIGHT_CM).max(MAX_HEIGHT_CM),
   weightKg: z.number().min(MIN_WEIGHT_KG).max(MAX_WEIGHT_KG),
   phoneNumber: phoneE164Schema,
-  email: z.email().max(255).optional(),
+  email: z.email().max(255),
 });
 export type OnboardingStep1 = z.infer<typeof onboardingStep1Schema>;
 

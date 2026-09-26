@@ -71,6 +71,7 @@ beforeAll(async () => {
         id: USER.userId,
         phoneNumber: '+5511900000001',
         name: 'Usuário de teste (intent.int-spec)',
+        email: 'intent-int-spec@example.invalid',
         role: 'USER',
       })
       .onConflictDoNothing(),

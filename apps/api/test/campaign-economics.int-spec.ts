@@ -34,9 +34,14 @@ let app: INestApplication;
 
 beforeAll(async () => {
   for (let index = 0; index < 19; index += 1) {
+    const campaignPhone = `+5560${RUN}${index.toString().padStart(2, '0')}`;
     const [user] = await migrator<{ id: string }[]>`
-      INSERT INTO users (phone_number, name)
-      VALUES (${`+5560${RUN}${index.toString().padStart(2, '0')}`}, ${`Campanha ${RUN} ${index}`})
+      INSERT INTO users (phone_number, name, email)
+      VALUES (
+        ${campaignPhone},
+        ${`Campanha ${RUN} ${index}`},
+        ${`${campaignPhone.replace(/\D/g, '')}@example.invalid`}
+      )
       RETURNING id
     `;
     if (!user) throw new Error('Falha ao criar titular da campanha de teste.');

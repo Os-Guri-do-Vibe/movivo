@@ -70,7 +70,11 @@ const phone = () => `+5541${RUN}${(seq += 1)}`;
 
 async function createUser(): Promise<string> {
   return db.runAsSystem(async (tx) => {
-    const [u] = await tx.insert(users).values({ phoneNumber: phone() }).returning({ id: users.id });
+    const to = phone();
+    const [u] = await tx
+      .insert(users)
+      .values({ phoneNumber: to, email: `${to.replace(/\D/g, '')}@example.invalid` })
+      .returning({ id: users.id });
     if (!u) throw new Error('seed user');
     return u.id;
   });

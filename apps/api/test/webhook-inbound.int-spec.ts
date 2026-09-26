@@ -80,7 +80,11 @@ async function seedUser(): Promise<{ userId: string; phoneNumber: string }> {
   const userId = await db.runAsSystem(async (tx) => {
     const [u] = await tx
       .insert(users)
-      .values({ phoneNumber, name: 'Seed WH' })
+      .values({
+        phoneNumber,
+        name: 'Seed WH',
+        email: `${phoneNumber.replace(/\D/g, '')}@example.invalid`,
+      })
       .returning({ id: users.id });
     if (!u) throw new Error('seed: usuário não criado');
     return u.id;

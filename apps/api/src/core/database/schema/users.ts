@@ -32,8 +32,12 @@ export const users = pgTable(
     /** Nome informado no cadastro. Dado pessoal comum. */
     name: varchar('name', { length: 255 }),
 
-    /** Opcional: só existe para quem acessa o dashboard/recibos. */
-    email: varchar('email', { length: 255 }).unique(),
+    /**
+     * Obrigatório desde a etapa 1 da anamnese (dado de contato futuro: recibos,
+     * recuperação de conta, comunicação fora do WhatsApp). Único por titular —
+     * um mesmo e-mail não pode se cadastrar duas vezes.
+     */
+    email: varchar('email', { length: 255 }).notNull().unique(),
 
     /**
      * Caminho relativo do arquivo de foto de perfil no disco persistente da VPS (ex:

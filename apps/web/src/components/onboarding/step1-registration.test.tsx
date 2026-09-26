@@ -43,7 +43,7 @@ const VALID_DATA: Step1Data = {
   weightKg: '75',
   phoneCountryIso: 'BR',
   phoneMasked: '(11) 99999-9999',
-  email: '',
+  email: 'fulano@example.com',
 };
 
 function renderStep1(overrides: Partial<Parameters<typeof Step1Registration>[0]> = {}) {
@@ -110,6 +110,17 @@ describe('Step1Registration', () => {
   it('sem verificação de telefone, CONTINUAR fica desabilitado', () => {
     renderStep1({ phoneVerified: false });
     expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled();
+  });
+
+  it('Continuar fica desabilitado sem e-mail', () => {
+    renderStep1({ data: { ...VALID_DATA, email: '' } });
+    expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled();
+  });
+
+  it('Continuar fica desabilitado com e-mail mal formatado e mostra o erro', () => {
+    renderStep1({ data: { ...VALID_DATA, email: 'nao-e-um-email' } });
+    expect(screen.getByRole('button', { name: 'Continuar' })).toBeDisabled();
+    expect(screen.getByText('Digite um e-mail válido.')).toBeInTheDocument();
   });
 
   it('envia ao OTP o E.164 do país selecionado', () => {

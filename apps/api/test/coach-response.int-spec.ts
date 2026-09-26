@@ -192,7 +192,11 @@ async function seedUser(): Promise<{ userId: string; to: string }> {
   const userId = await db.runAsSystem(async (tx) => {
     const [u] = await tx
       .insert(users)
-      .values({ phoneNumber: to, name: 'Coach Teste' })
+      .values({
+        phoneNumber: to,
+        name: 'Coach Teste',
+        email: `${to.replace(/\D/g, '')}@example.invalid`,
+      })
       .returning({ id: users.id });
     if (!u) throw new Error('seed user');
     return u.id;

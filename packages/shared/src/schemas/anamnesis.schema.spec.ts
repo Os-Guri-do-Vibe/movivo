@@ -109,6 +109,7 @@ describe('gate 18+ (regra de negócio, validada no servidor)', () => {
       heightCm: 178,
       weightKg: 75,
       phoneNumber: '+5511988887777',
+      email: 'bruno@example.com',
     });
     expect(parsed.success).toBe(true);
   });
@@ -121,6 +122,7 @@ describe('gate 18+ (regra de negócio, validada no servidor)', () => {
       heightCm: 178,
       weightKg: 75,
       phoneNumber: '+5511988887777',
+      email: 'bruno@example.com',
     });
     expect(parsed.success).toBe(false);
   });
@@ -131,6 +133,7 @@ describe('gate 18+ (regra de negócio, validada no servidor)', () => {
       birthDate: '1996-04-02',
       biologicalSex: 'MALE' as const,
       phoneNumber: '+5511988887777',
+      email: 'bruno@example.com',
     };
     expect(onboardingStep1Schema.safeParse({ ...base, heightCm: 60, weightKg: 75 }).success).toBe(
       false,
@@ -138,6 +141,31 @@ describe('gate 18+ (regra de negócio, validada no servidor)', () => {
     expect(onboardingStep1Schema.safeParse({ ...base, heightCm: 178, weightKg: 10 }).success).toBe(
       false,
     );
+  });
+
+  it('recusa cadastro sem e-mail', () => {
+    const parsed = onboardingStep1Schema.safeParse({
+      name: 'Bruno',
+      birthDate: '1996-04-02',
+      biologicalSex: 'MALE',
+      heightCm: 178,
+      weightKg: 75,
+      phoneNumber: '+5511988887777',
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('recusa e-mail mal formatado', () => {
+    const parsed = onboardingStep1Schema.safeParse({
+      name: 'Bruno',
+      birthDate: '1996-04-02',
+      biologicalSex: 'MALE',
+      heightCm: 178,
+      weightKg: 75,
+      phoneNumber: '+5511988887777',
+      email: 'nao-e-um-email',
+    });
+    expect(parsed.success).toBe(false);
   });
 });
 

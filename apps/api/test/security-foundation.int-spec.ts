@@ -82,13 +82,15 @@ beforeAll(async () => {
   // Criação de usuários no contexto de SISTEMA (bootstrap sem titular — TASK-1.1.4).
   userA = await tenant.runAsSystem(async (tx) => {
     const rows = (await tx.execute(
-      sql`INSERT INTO users (phone_number, name) VALUES (${phone(1)}, 'A (teste US-1.1)') RETURNING id`,
+      sql`INSERT INTO users (phone_number, name, email)
+          VALUES (${phone(1)}, 'A (teste US-1.1)', ${`titular-a-${RUN}@example.invalid`}) RETURNING id`,
     )) as unknown as Array<{ id: string }>;
     return rows[0].id;
   });
   userB = await tenant.runAsSystem(async (tx) => {
     const rows = (await tx.execute(
-      sql`INSERT INTO users (phone_number, name) VALUES (${phone(2)}, 'B (teste US-1.1)') RETURNING id`,
+      sql`INSERT INTO users (phone_number, name, email)
+          VALUES (${phone(2)}, 'B (teste US-1.1)', ${`titular-b-${RUN}@example.invalid`}) RETURNING id`,
     )) as unknown as Array<{ id: string }>;
     return rows[0].id;
   });
