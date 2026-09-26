@@ -17,7 +17,7 @@ describe('LoginBackground', () => {
     const { container } = render(<LoginBackground />);
     const wrapper = container.firstElementChild;
     expect(wrapper).toHaveAttribute('aria-hidden', 'true');
-    expect(wrapper).toHaveClass('fixed', 'inset-0', '-z-10');
+    expect(wrapper).toHaveClass('fixed', 'inset-0', 'z-0');
   });
 
   it('configura o AcidSquares com a paleta Petróleo/Verde Pulso da marca', () => {
