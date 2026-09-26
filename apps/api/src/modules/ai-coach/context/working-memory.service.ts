@@ -21,6 +21,13 @@ const WINDOW = 15;
 const TTL_SECONDS = 24 * 3600;
 const MAX_TURN_CHARS = 4000;
 
+/** `yyyy-mm-dd` do dia civil anterior — puramente calendário, sem depender de fuso horário. */
+function previousSessionDate(sessionDate: string): string {
+  const date = new Date(`${sessionDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
 function isConversationTurn(value: unknown): value is ConversationTurn {
   if (!value || typeof value !== 'object') return false;
   const turn = value as Partial<ConversationTurn>;
@@ -63,19 +70,39 @@ export class WorkingMemory {
       .exec();
   }
 
-  /** Janela recente (ordem cronológica). Turno malformado é ignorado (defensivo). */
+  /**
+   * Janela recente (ordem cronológica). Turno malformado é ignorado (defensivo).
+   *
+   * Achado 2026-09-26 (bug reportado pelo fundador, reproduzido ao vivo — pedido de
+   * substituição de exercício virou recusa "fora de escopo"): a lista é particionada por
+   * `sessionDate` (dia civil em America/Sao_Paulo), mas a virada da meia-noite acontece NO
+   * MEIO de uma conversa em andamento — um aluno respondendo às 00:00:48 uma pergunta feita
+   * às 23:56:24 do dia anterior caía numa chave NOVA e vazia, perdendo o turno que dava
+   * sentido à resposta ("quero compressão de anilha" sem contexto é ambíguo até para o LLM
+   * de fallback). A janela precisa ser rolante de verdade (mesmo espírito do TTL de 24h
+   * renovado a cada escrita), não cortada no fuso — por isso sempre funde a cauda do dia
+   * anterior com a cabeça do dia atual antes de aplicar a janela.
+   */
   async recent(userId: string, sessionDate: string): Promise<ConversationTurn[]> {
-    const raw = await this.redis.lrange(this.key(userId, sessionDate), -WINDOW, -1);
-    const turns: ConversationTurn[] = [];
-    for (const item of raw) {
-      try {
-        const parsed: unknown = JSON.parse(item);
-        if (isConversationTurn(parsed)) turns.push(parsed);
-      } catch {
-        // turno corrompido — ignora em vez de derrubar a montagem do contexto.
+    const [todayRaw, yesterdayRaw] = await Promise.all([
+      this.redis.lrange(this.key(userId, sessionDate), -WINDOW, -1),
+      this.redis.lrange(this.key(userId, previousSessionDate(sessionDate)), -WINDOW, -1),
+    ]);
+    const parse = (raw: string[]): ConversationTurn[] => {
+      const turns: ConversationTurn[] = [];
+      for (const item of raw) {
+        try {
+          const parsed: unknown = JSON.parse(item);
+          if (isConversationTurn(parsed)) turns.push(parsed);
+        } catch {
+          // turno corrompido — ignora em vez de derrubar a montagem do contexto.
+        }
       }
-    }
-    return turns;
+      return turns;
+    };
+    return [...parse(yesterdayRaw), ...parse(todayRaw)]
+      .sort((a, b) => a.ts - b.ts)
+      .slice(-WINDOW);
   }
 
   /** Nº de turnos desde o último resumo — gatilho incremental da condensação. */
