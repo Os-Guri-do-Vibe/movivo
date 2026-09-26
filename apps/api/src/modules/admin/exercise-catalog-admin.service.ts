@@ -69,7 +69,9 @@ export class ExerciseCatalogAdminService {
           .orderBy(desc(exerciseCatalogEntries.exerciseKey), desc(exerciseCatalogEntries.version)),
       ),
       this.db.runAsSystem((tx) =>
-        tx.select({ exerciseKey: exerciseCatalogFavorites.exerciseKey }).from(exerciseCatalogFavorites),
+        tx
+          .select({ exerciseKey: exerciseCatalogFavorites.exerciseKey })
+          .from(exerciseCatalogFavorites),
       ),
     ]);
     const favoritedKeys = new Set(favoriteRows.map((f) => f.exerciseKey));

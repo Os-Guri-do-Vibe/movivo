@@ -171,7 +171,10 @@ describe('ExerciseCatalogAdminService.list', () => {
   it('marca isFavorite só para exerciseKey presente na tabela de favoritos', async () => {
     const { service } = catalogWith({
       selects: [
-        [listRow({ id: 'a', exerciseKey: 'favoritado' }), listRow({ id: 'b', exerciseKey: 'outro' })],
+        [
+          listRow({ id: 'a', exerciseKey: 'favoritado' }),
+          listRow({ id: 'b', exerciseKey: 'outro' }),
+        ],
         [{ exerciseKey: 'favoritado' }],
       ],
     });
