@@ -100,9 +100,7 @@ export class WorkingMemory {
       }
       return turns;
     };
-    return [...parse(yesterdayRaw), ...parse(todayRaw)]
-      .sort((a, b) => a.ts - b.ts)
-      .slice(-WINDOW);
+    return [...parse(yesterdayRaw), ...parse(todayRaw)].sort((a, b) => a.ts - b.ts).slice(-WINDOW);
   }
 
   /** Nº de turnos desde o último resumo — gatilho incremental da condensação. */
