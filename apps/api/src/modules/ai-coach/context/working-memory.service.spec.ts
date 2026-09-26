@@ -97,6 +97,25 @@ describe('WorkingMemory', () => {
     expect(recent).toHaveLength(1); // o turno bom sobrevive; o corrompido é ignorado
   });
 
+  it('funde a cauda do dia anterior com a cabeça do dia atual (virada da meia-noite)', async () => {
+    const { wm } = make();
+    const YESTERDAY = '2026-09-25';
+    const TODAY = '2026-09-26';
+    await wm.append(U1, YESTERDAY, {
+      role: 'assistant',
+      content: 'Qual dessas você prefere?',
+      ts: 1,
+    });
+    await wm.append(U1, TODAY, { role: 'user', content: 'quero a opção 2', ts: 2 });
+
+    const recent = await wm.recent(U1, TODAY);
+
+    expect(recent).toEqual([
+      { role: 'assistant', content: 'Qual dessas você prefere?', ts: 1 },
+      { role: 'user', content: 'quero a opção 2', ts: 2 },
+    ]);
+  });
+
   it('ignora JSON válido com papel ou conteúdo fora do contrato', async () => {
     const { wm, redis, keys } = make();
     const key = keys.forUser(U1, 'session', DATE);
