@@ -240,7 +240,10 @@ export class WhatsappInboundService {
     const isRevocation =
       message.text !== undefined ? isTextRevocation : this.isHealthConsentRevocation(text);
 
-    const consentCommandId = this.hash(messageId);
+    // .slice(0, 40): igual à correção de `notifyAudioFallback` — o hash cheio (64 chars)
+    // somado ao maior prefixo daqui ("health-consent-inactive-", 24 chars) estourava o
+    // limite de 64 chars do RedisKeyBuilder e derrubava a notificação de consentimento.
+    const consentCommandId = this.hash(messageId).slice(0, 40);
 
     if (isRevocation) {
       await this.healthConsent.revokeForUser(userId);
@@ -494,7 +497,9 @@ export class WhatsappInboundService {
     messageId: string,
     text: string,
   ): Promise<void> {
-    const dedupeId = `audio-fallback-${this.hash(messageId)}`;
+    // "audio-fallback-" (15) + 48 = 63 chars, dentro do limite de 64 do RedisKeyBuilder
+    // (SEGMENT_PATTERN) — hash cheio (64 chars) estourava o segmento e derrubava o job.
+    const dedupeId = `audio-fallback-${this.hash(messageId).slice(0, 48)}`;
     await this.queues.enqueue(
       QUEUE.whatsappOutbound,
       'audio-transcription-fallback',
