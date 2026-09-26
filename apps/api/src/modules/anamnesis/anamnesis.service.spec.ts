@@ -46,6 +46,7 @@ const STEP1 = {
   heightCm: 178,
   weightKg: 75,
   phoneNumber: PHONE,
+  email: 'fulano@example.com',
 };
 
 const STRUCTURED = {
@@ -290,6 +291,21 @@ describe('Etapa 1 — gate 18+, consentimentos e posse do número', () => {
   it('lança 410 em sessão expirada', async () => {
     const { svc } = makeService({ select: [sessionRow({ expiresAt: past() })] });
     await expect(svc.patchStep('t', 1, STEP1)).rejects.toThrow(/expirada/i);
+  });
+
+  it('recusa a etapa 1 sem e-mail (BadRequestException, 400)', async () => {
+    const { svc } = makeService({ select: [sessionRow()] });
+    const { email: _email, ...withoutEmail } = STEP1;
+    await expect(svc.patchStep('t', 1, withoutEmail)).rejects.toMatchObject({
+      constructor: BadRequestException,
+    });
+  });
+
+  it('recusa a etapa 1 com e-mail mal formatado', async () => {
+    const { svc } = makeService({ select: [sessionRow()] });
+    await expect(
+      svc.patchStep('t', 1, { ...STEP1, email: 'nao-e-um-email' }),
+    ).rejects.toMatchObject({ constructor: BadRequestException });
   });
 });
 

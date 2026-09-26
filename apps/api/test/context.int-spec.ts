@@ -34,7 +34,10 @@ const createdUserIds: string[] = [];
 async function createUser(name: string): Promise<string> {
   const phone = `+55119${Math.floor(10_000_000 + Math.random() * 89_999_999)}`;
   const rows = await db.runAsSystem((tx) =>
-    tx.insert(users).values({ phoneNumber: phone, name }).returning({ id: users.id }),
+    tx
+      .insert(users)
+      .values({ phoneNumber: phone, name, email: `${phone.replace(/\D/g, '')}@example.invalid` })
+      .returning({ id: users.id }),
   );
   const id = rows[0]?.id;
   if (!id) throw new Error('falha ao criar usuário de teste');

@@ -243,9 +243,15 @@ async function submitAnamnesis(painRegions: string[], riskIds: string[] = []) {
 /** Cria usuário + sessão SUBMITTED direto no banco (sem auto-enqueue) — para DLQ/idempotência. */
 async function seedUser(painRegions: string[], trigger?: string) {
   const userId = await db.runAsSystem(async (tx) => {
+    const seedPhone = phone();
     const [u] = await tx
       .insert(users)
-      .values({ phoneNumber: phone(), name: 'Seed', requiresProfessionalReview: false })
+      .values({
+        phoneNumber: seedPhone,
+        name: 'Seed',
+        email: `${seedPhone.replace(/\D/g, '')}@example.invalid`,
+        requiresProfessionalReview: false,
+      })
       .returning({ id: users.id });
     if (!u) throw new Error('seed: usuário não criado');
     return u.id;

@@ -92,6 +92,7 @@ async function completeStep1(user: UserEvent) {
   await user.type(screen.getByLabelText(/qual é o seu peso/i), '75');
   await user.type(screen.getByLabelText(/whatsapp/i), '11999999999');
   await user.click(screen.getByText('simular verificação'));
+  await user.type(screen.getByLabelText(/e-mail/i), 'fulano@example.com');
   for (const label of ['Aceito.', 'Autorizo.', 'Estou ciente.']) {
     await user.click(screen.getByLabelText(label));
   }
@@ -169,6 +170,7 @@ describe('OnboardingWizard', () => {
     await user.type(screen.getByLabelText(/whatsapp/i), '912345678');
     expect(screen.getByTestId('otp-phone')).toHaveTextContent('+351912345678');
     await user.click(screen.getByText('simular verificação'));
+    await user.type(screen.getByLabelText(/e-mail/i), 'fulano@example.com');
     for (const label of ['Aceito.', 'Autorizo.', 'Estou ciente.']) {
       await user.click(screen.getByLabelText(label));
     }

@@ -28,9 +28,12 @@ const DAY = '2026-08-10';
 async function createUserWithProtocol(): Promise<{ userId: string; protocolId: string }> {
   const phone = `+55119${Math.floor(10_000_000 + Math.random() * 89_999_999)}`;
   const { userId, protocolId } = await db.runAsSystem(async (tx) => {
-    const [user] = await tx.insert(users).values({ phoneNumber: phone }).returning({
-      id: users.id,
-    });
+    const [user] = await tx
+      .insert(users)
+      .values({ phoneNumber: phone, email: `${phone.replace(/\D/g, '')}@example.invalid` })
+      .returning({
+        id: users.id,
+      });
     if (!user) throw new Error('falha ao criar usuário de teste');
     const [protocol] = await tx
       .insert(protocols)

@@ -98,18 +98,18 @@ beforeAll(async () => {
   actor = { userId: admin.id, role: 'ADMIN', jti: randomUUID() };
 
   const [male] = await migrator<{ id: string }[]>`
-    INSERT INTO users (phone_number, name, role, status, biological_sex)
-    VALUES (${`+5562${RUN}01`}, ${`Aluno M ${RUN}`}, 'USER', 'ACTIVE', 'MALE')
+    INSERT INTO users (phone_number, name, role, status, biological_sex, email)
+    VALUES (${`+5562${RUN}01`}, ${`Aluno M ${RUN}`}, 'USER', 'ACTIVE', 'MALE', ${`aluno-m-${RUN}@example.invalid`})
     RETURNING id
   `;
   const [female] = await migrator<{ id: string }[]>`
-    INSERT INTO users (phone_number, name, role, status, biological_sex)
-    VALUES (${`+5562${RUN}02`}, ${`Aluna F ${RUN}`}, 'USER', 'ACTIVE', 'FEMALE')
+    INSERT INTO users (phone_number, name, role, status, biological_sex, email)
+    VALUES (${`+5562${RUN}02`}, ${`Aluna F ${RUN}`}, 'USER', 'ACTIVE', 'FEMALE', ${`aluna-f-${RUN}@example.invalid`})
     RETURNING id
   `;
   const [nullSex] = await migrator<{ id: string }[]>`
-    INSERT INTO users (phone_number, name, role, status)
-    VALUES (${`+5562${RUN}03`}, ${`Aluno sem sexo ${RUN}`}, 'USER', 'ACTIVE')
+    INSERT INTO users (phone_number, name, role, status, email)
+    VALUES (${`+5562${RUN}03`}, ${`Aluno sem sexo ${RUN}`}, 'USER', 'ACTIVE', ${`aluno-sem-sexo-${RUN}@example.invalid`})
     RETURNING id
   `;
   if (!male || !female || !nullSex) throw new Error('falha ao criar titulares de teste');

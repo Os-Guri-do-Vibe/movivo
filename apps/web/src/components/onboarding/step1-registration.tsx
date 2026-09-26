@@ -65,6 +65,12 @@ function isWeightValid(weightKg: string): boolean {
   );
 }
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function isEmailValid(email: string): boolean {
+  return EMAIL_REGEX.test(email.trim());
+}
+
 export function Step1Registration({
   data,
   onChange,
@@ -94,6 +100,7 @@ export function Step1Registration({
   const phoneE164 = toE164(data.phoneCountryIso, data.phoneMasked);
   const requiredConsents = consents.filter((c) => c.required);
   const allRequiredAccepted = requiredConsents.every((c) => acceptedConsents.has(c.type));
+  const emailInvalid = data.email.trim().length > 0 && !isEmailValid(data.email);
 
   const canContinue =
     data.name.trim().length >= 2 &&
@@ -103,6 +110,7 @@ export function Step1Registration({
     isHeightValid(data.heightCm) &&
     isWeightValid(data.weightKg) &&
     phoneVerified &&
+    isEmailValid(data.email) &&
     allRequiredAccepted &&
     !saving;
 
@@ -198,7 +206,7 @@ export function Step1Registration({
       </QuestionField>
 
       <QuestionField>
-        <FieldLabel htmlFor="email">Qual é o seu e-mail? (opcional)</FieldLabel>
+        <FieldLabel htmlFor="email">Qual é o seu e-mail?</FieldLabel>
         <TextInput
           id="email"
           type="email"
@@ -206,6 +214,7 @@ export function Step1Registration({
           value={data.email}
           onChange={(email) => onChange({ ...data, email })}
         />
+        <FieldError message={emailInvalid ? 'Digite um e-mail válido.' : undefined} />
       </QuestionField>
 
       <div className="flex flex-col gap-3 rounded-xl border border-coral bg-coral/10 p-4">

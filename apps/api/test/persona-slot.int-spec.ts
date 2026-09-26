@@ -72,11 +72,13 @@ const TEST_VERSION = 900_000 + Number(RUN.slice(-5));
 
 beforeAll(async () => {
   const [submitted] = await migratorClient<{ id: string }[]>`
-    INSERT INTO users (phone_number, name) VALUES (${`+5544${RUN}1`}, 'Backfill submetido')
+    INSERT INTO users (phone_number, name, email)
+    VALUES (${`+5544${RUN}1`}, 'Backfill submetido', ${`backfill-submetido-${RUN}@example.invalid`})
     RETURNING id
   `;
   const [without] = await migratorClient<{ id: string }[]>`
-    INSERT INTO users (phone_number, name) VALUES (${`+5544${RUN}2`}, 'Backfill sem anamnese')
+    INSERT INTO users (phone_number, name, email)
+    VALUES (${`+5544${RUN}2`}, 'Backfill sem anamnese', ${`backfill-sem-anamnese-${RUN}@example.invalid`})
     RETURNING id
   `;
   const [author] = await migratorClient<{ id: string }[]>`

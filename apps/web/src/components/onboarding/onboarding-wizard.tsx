@@ -91,7 +91,7 @@ export function OnboardingWizard({
         heightCm: Number(step1.heightCm),
         weightKg: Number(step1.weightKg.replace(',', '.')),
         phoneNumber: toE164(step1.phoneCountryIso, step1.phoneMasked),
-        email: step1.email.trim() || undefined,
+        email: step1.email.trim(),
       });
       setCompletedStep1Here(true);
       setStep(2);

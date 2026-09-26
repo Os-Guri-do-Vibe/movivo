@@ -220,8 +220,8 @@ describe('migração versionada num Postgres limpo', () => {
       await client.unsafe(buildAuditIntegritySql(appRole));
       await client.unsafe(buildProfessionalAccessSql(appRole));
       await client`
-        INSERT INTO users (id, phone_number, role)
-        VALUES (${holder}::uuid, '+5555700000001', 'USER')
+        INSERT INTO users (id, phone_number, email, role)
+        VALUES (${holder}::uuid, '+5555700000001', 'migration-holder-70@example.invalid', 'USER')
       `;
       await client`
         INSERT INTO staff (id, phone_number, email, role, password_hash, cref_number, cref_region, cref_active)

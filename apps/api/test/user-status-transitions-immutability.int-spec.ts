@@ -74,7 +74,8 @@ let transitionId = '';
 beforeAll(async () => {
   userId = await tenant.runAsSystem(async (tx) => {
     const rows = (await tx.execute(
-      sql`INSERT INTO users (phone_number, name) VALUES (${`+5555${RUN}8`}, 'Titular (teste US-8.3)') RETURNING id`,
+      sql`INSERT INTO users (phone_number, name, email)
+          VALUES (${`+5555${RUN}8`}, 'Titular (teste US-8.3)', ${`titular-${RUN}8@example.invalid`}) RETURNING id`,
     )) as unknown as Array<{ id: string }>;
     return rows[0].id;
   });

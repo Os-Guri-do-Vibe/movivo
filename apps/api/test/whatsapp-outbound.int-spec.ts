@@ -171,6 +171,7 @@ async function submitAnamnesis(riskIds: string[] = []) {
     heightCm: 178,
     weightKg: 80,
     phoneNumber,
+    email: `${phoneNumber.replace(/\D/g, '')}@example.invalid`,
   });
   await anamnesis.patchStep(token, 2, {
     anamnesis: { structured: structured(), freeText: {} },
@@ -194,7 +195,7 @@ async function seedActiveProtocol() {
   const userId = await db.runAsSystem(async (tx) => {
     const [u] = await tx
       .insert(users)
-      .values({ phoneNumber: p, name: 'Seed WA' })
+      .values({ phoneNumber: p, name: 'Seed WA', email: `${p.replace(/\D/g, '')}@example.invalid` })
       .returning({ id: users.id });
     if (!u) throw new Error('seed: usuário não criado');
     return u.id;

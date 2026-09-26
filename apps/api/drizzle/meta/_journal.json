@@ -421,6 +421,13 @@
       "when": 1790310961380,
       "tag": "0059_true_mojo",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1790396762075,
+      "tag": "0060_medical_vulcan",
+      "breakpoints": true
     }
   ]
 }

@@ -53,8 +53,8 @@ beforeAll(async () => {
   actor = { userId: admin.id, role: 'ADMIN', jti: randomUUID() };
 
   const [student] = await migrator<{ id: string }[]>`
-    INSERT INTO users (phone_number, name, role, status)
-    VALUES (${`+5561${RUN}01`}, ${`Aluno ${RUN}`}, 'USER', 'ONBOARDING')
+    INSERT INTO users (phone_number, name, role, status, email)
+    VALUES (${`+5561${RUN}01`}, ${`Aluno ${RUN}`}, 'USER', 'ONBOARDING', ${`aluno_${RUN}@example.invalid`})
     RETURNING id
   `;
   if (!student) throw new Error('Falha ao criar aluno de teste.');

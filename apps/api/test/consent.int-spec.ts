@@ -223,7 +223,8 @@ describe('CONSENT — prova de consentimento LGPD (US-1.2)', () => {
 
     const userId = await tenant.runAsSystem(async (tx) => {
       const rows = (await tx.execute(
-        sql`INSERT INTO users (phone_number, name) VALUES (${`+5555${RUN}9`}, 'Titular US-1.2')
+        sql`INSERT INTO users (phone_number, name, email)
+            VALUES (${`+5555${RUN}9`}, 'Titular US-1.2', ${`consent-${RUN}9@example.invalid`})
             RETURNING id`,
       )) as unknown as Array<{ id: string }>;
       return rows[0].id;

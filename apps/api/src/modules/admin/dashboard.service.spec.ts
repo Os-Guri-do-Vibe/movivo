@@ -1114,6 +1114,7 @@ describe('DashboardService leituras operacionais', () => {
       heightCm: 165,
       weightKg: 60,
       phoneNumber: '+5511999999999',
+      email: 'maria@example.com',
     };
     const validRoutine = {
       primaryGoal: 'GAIN_MUSCLE',
@@ -1178,6 +1179,7 @@ describe('DashboardService leituras operacionais', () => {
             heightCm: 165,
             weightKg: 60,
             phoneNumber: '+5511999999999',
+            email: 'maria@example.com',
           },
           dataBlock2: null,
           dataBlock3: {
