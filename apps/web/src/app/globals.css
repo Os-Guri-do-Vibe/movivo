@@ -198,33 +198,31 @@
 }
 
 /*
- * `/entrar` (login da Plataforma Interna) é deliberadamente só escura — mesmo
- * racional do `.onboarding-light`/`.protocolo-light` acima, mas fixando os tokens
- * do tema `.dark` em vez do claro: o fundo animado (AcidSquares) só faz sentido
- * sobre Petróleo, então a tela nunca deve virar clara por preferência do sistema
- * ou tema salvo em outra rota.
+ * `/entrar` (login da Plataforma Interna) é deliberadamente só clara — mesmo racional
+ * do `.onboarding-light`/`.protocolo-light` acima: a tela nunca deve virar escura por
+ * preferência do sistema ou tema salvo em outra rota.
  */
 .login-fixed {
-  color-scheme: dark;
-  --background: var(--petroleo-vivo);
-  --foreground: var(--nevoa);
-  --card: var(--petroleo-elevado);
-  --card-foreground: var(--nevoa);
-  --popover: var(--petroleo-elevado);
-  --popover-foreground: var(--nevoa);
+  color-scheme: light;
+  --background: var(--nevoa);
+  --foreground: var(--grafite);
+  --card: var(--branco);
+  --card-foreground: var(--grafite);
+  --popover: var(--branco);
+  --popover-foreground: var(--grafite);
   --primary: var(--verde-pulso);
   --primary-foreground: var(--petroleo-vivo);
-  --secondary: var(--petroleo-superficie);
-  --secondary-foreground: var(--nevoa);
-  --muted: var(--petroleo-superficie);
-  --muted-foreground: var(--nevoa-suave);
-  --accent: var(--petroleo-superficie);
-  --accent-foreground: var(--verde-pulso);
+  --secondary: var(--nevoa-elevada);
+  --secondary-foreground: var(--petroleo-vivo);
+  --muted: var(--nevoa-elevada);
+  --muted-foreground: var(--musgo);
+  --accent: var(--verde-pulso-tenue);
+  --accent-foreground: var(--petroleo-vivo);
   --destructive: var(--coral-vivo);
   --destructive-foreground: var(--petroleo-vivo);
-  --border: #17564a;
-  --input: var(--petroleo-borda);
-  --ring: var(--verde-pulso);
+  --border: var(--musgo-tenue);
+  --input: var(--musgo-contraste);
+  --ring: var(--petroleo-vivo);
 }
 
 /* --- 3. Exposição para o Tailwind ----------------------------------------- */

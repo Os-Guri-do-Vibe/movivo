@@ -2,7 +2,6 @@ import type { Metadata } from 'next';
 import Image from 'next/image';
 
 import { LoginForm } from '@/components/dashboard/login-form';
-import { LoginBackground } from '@/components/login/login-background';
 
 export const metadata: Metadata = {
   // `absolute` ignora o `title.template` (" · MOVIVO") do layout raiz — a aba deve
@@ -25,11 +24,10 @@ export default async function LoginPage({
         ? 'Sua sessão expirou. Entre novamente.'
         : '';
   return (
-    <main className="login-fixed relative grid min-h-dvh place-items-center overflow-hidden bg-background px-4 py-10">
-      <LoginBackground />
+    <main className="login-fixed grid min-h-dvh place-items-center bg-background px-4 py-10">
       <section
         aria-labelledby="login-title"
-        className="relative z-10 w-full max-w-md overflow-hidden rounded-xl border border-border bg-card shadow-sm"
+        className="w-full max-w-md overflow-hidden rounded-xl border border-border bg-card shadow-sm"
       >
         <h1 id="login-title" className="sr-only">
           Entrar no MOVIVO Control Center
@@ -47,10 +45,7 @@ export default async function LoginPage({
             className="h-auto w-44"
           />
         </div>
-        {/* `onboarding-light`: mesma trava de contraste do resto do produto — o anel de
-            foco em Verde Pulso reprova WCAG sobre claro (1,59:1), então aqui ele volta a
-            ser Petróleo (13,3:1), como em qualquer outra superfície clara do design system. */}
-        <div className="onboarding-light bg-background p-6 sm:p-8">
+        <div className="p-6 sm:p-8">
           <LoginForm initialError={initialError} />
         </div>
       </section>

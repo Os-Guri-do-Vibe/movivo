@@ -63,11 +63,6 @@ export default defineConfig({
         'src/components/landing/scenes/club-scene.ts',
         'src/components/landing/scenes/aurora-scene.ts',
         'src/components/landing/scenes/web-threads-scene.ts',
-        // Mesma categoria: fundo animado de `/entrar` (`ogl` + shader WebGL2), exige
-        // contexto de GPU que o jsdom não tem. `login-background.test.tsx` cobre a
-        // composição (wrapper, aria-hidden, props repassadas); o render é validado no
-        // navegador.
-        'src/components/login/acid-squares.tsx',
         // `next/font` é macro de build (SWC): não executa no Vitest.
         'src/components/landing/fonts.ts',
       ],
