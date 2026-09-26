@@ -3,10 +3,17 @@ import AcidSquares from './acid-squares';
 /**
  * Fundo animado de `/entrar`. Fixo na viewport, atrás do cartão de login — decorativo
  * (`aria-hidden`), então nunca compete com o formulário na ordem de leitura/foco.
+ *
+ * `z-0`, nunca negativo: `<main>` (o pai) não abre stacking context próprio, então um
+ * `-z` aqui pintaria atrás do `background` OPACO do `<body>` (`bg-background` no
+ * `@layer base`) — o fundo ficaria escondido atrás da própria página, sempre invisível,
+ * não importa o que o shader desenhe. Com `z-0` (ou qualquer valor não-negativo) e o
+ * cartão do login em `z-10`, os dois participam do MESMO stacking context como
+ * elementos posicionados comuns, na ordem certa.
  */
 export function LoginBackground() {
   return (
-    <div aria-hidden="true" className="fixed inset-0 -z-10">
+    <div aria-hidden="true" className="fixed inset-0 z-0">
       <AcidSquares
         color1="#06302A"
         color2="#25E27E"
