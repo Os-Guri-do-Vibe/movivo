@@ -47,7 +47,10 @@ export default async function LoginPage({
             className="h-auto w-44"
           />
         </div>
-        <div className="p-6 sm:p-8">
+        {/* `onboarding-light`: mesma trava de contraste do resto do produto — o anel de
+            foco em Verde Pulso reprova WCAG sobre claro (1,59:1), então aqui ele volta a
+            ser Petróleo (13,3:1), como em qualquer outra superfície clara do design system. */}
+        <div className="onboarding-light bg-background p-6 sm:p-8">
           <LoginForm initialError={initialError} />
         </div>
       </section>
