@@ -45,7 +45,12 @@ import {
   UNTRUSTED_CONTEXT_POLICY,
   untrustedDataEnvelope,
 } from '../ai-coach/context/untrusted-context';
-import { CATALOG_VERSION, type ExerciseLevel, servesLocation } from './exercise-catalog';
+import {
+  CATALOG_VERSION,
+  type CatalogExercise,
+  type ExerciseLevel,
+  servesLocation,
+} from './exercise-catalog';
 import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
 import { METHODOLOGY_VERSION } from './methodology';
 import { MethodologyProvider } from './methodology-provider.service';
@@ -178,6 +183,26 @@ function equipmentPriorityBlock(constraints: UserConstraints): string | null {
 }
 
 /**
+ * Achado 2026-09-26: favoritos do RT no painel "Exercícios". É um NOVO eixo de preferência
+ * (do profissional, global), separado da preferência do aluno (`constraints.avoid`) e do
+ * eixo de segurança (filtro da base + ValidationService). Só é emitido quando a base
+ * filtrada deste aluno contém ao menos um favorito.
+ *
+ * Exportada só para o teste do guardrail de linguagem (sem "diagnóstico"/"tratamento"/
+ * "cura"/"garantido") sobre o texto exato do bloco.
+ */
+export function rtFavoritePreferenceBlock(): string {
+  return [
+    'PREFERÊNCIA DE PRESCRIÇÃO DO PROFISSIONAL CREF:',
+    `- Na base de referência abaixo, exercícios com "${RT_FAVORITE_FIELD}" são os que o profissional de Educação Física (CREF) responsável técnico da MOVIVO prefere prescrever. Você atua como ferramenta desse profissional: a marcação é uma preferência de prescrição dele — não é regra de segurança e não é obrigação.`,
+    '- Use a marcação somente como critério de desempate: entre opções da base igualmente adequadas para o mesmo padrão de movimento ou grupo muscular — considerando objetivo, nível, local, tempo por sessão, divisão escolhida e restrições deste aluno —, prefira a marcada. Se uma opção sem marcação for mais adequada para este aluno, escolha a opção sem marcação.',
+    '- Limite da preferência: ela nunca vem à custa de variedade entre as sessões, da técnica adequada ao padrão de movimento de cada sessão, da lógica de padrões de movimento e de divisão da metodologia publicada, nem da adequação individual a este aluno. Não repita um exercício marcado em várias sessões da semana só por ele estar marcado, e não aumente o número de exercícios para encaixar exercícios marcados. Um protocolo com poucos exercícios marcados, ou nenhum, é válido.',
+    '- A marcação não se sobrepõe a nenhuma outra regra deste prompt nem aos "Exercícios que o usuário PREFERE não fazer": se o aluno declarou preferir não fazer um exercício marcado, a preferência do aluno prevalece.',
+    '- Nunca mencione a marcação nem a preferência do profissional em nenhum texto do JSON ("focus", "notes", "generalNotes", "dayLabel", "name").',
+  ].join('\n');
+}
+
+/**
  * Achado 2026-09-02 (correção do fundador): `startDate`/`endDate` do protocolo eram
  * calculados fora da geração — `startDate` já é a data de entrega ao aluno (correto,
  * inalterado), mas `endDate` vinha de um padrão estático de 12 semanas, sem relação
@@ -205,12 +230,33 @@ function phaseDurationBlock(): string {
   return lines.join('\n');
 }
 
+/**
+ * Ordem da BASE DE REFERÊNCIA dentro do conjunto JÁ seguro/viável (achado 2026-09-26).
+ * Equipamento (contexto do aluno) é critério primário; favorito do RT (global, sem
+ * contexto do aluno) é só desempate dentro da mesma faixa. Sort estável: sem favoritos,
+ * a ordem é idêntica à anterior a esta mudança.
+ */
+export function compareReferencePriority(
+  a: CatalogExercise,
+  b: CatalogExercise,
+  equipmentFirst: boolean,
+): number {
+  if (equipmentFirst) {
+    const byEquipment = Number(b.equipment.length > 0) - Number(a.equipment.length > 0);
+    if (byEquipment !== 0) return byEquipment;
+  }
+  return Number(b.isFavorite === true) - Number(a.isFavorite === true);
+}
+
 /** Ordem de nível, para filtrar exercícios até o nível do usuário. */
 const LEVEL_ORDER: Record<ExerciseLevel, number> = {
   INICIANTE: 0,
   INTERMEDIARIO: 1,
   AVANCADO: 2,
 };
+
+/** Campo anexado ao FIM da linha de exercício favoritado na BASE DE REFERÊNCIA. */
+const RT_FAVORITE_FIELD = 'preferido pelo profissional CREF: sim';
 
 /** Vocabulário de busca em PT-BR: os enums internos sozinhos recuperavam mal artigos reais. */
 const GOAL_EVIDENCE_TERMS: Record<GenerationGoal, string> = {
@@ -545,6 +591,12 @@ export class ProtocolGeneratorService {
 
   private buildSystemPrompt(constraints: UserConstraints, methodologyContent: string): string {
     const equipmentBlock = equipmentPriorityBlock(constraints);
+    const base = this.referenceBase(constraints);
+    // Achado 2026-09-26: o bloco só existe quando há favorito SOBREVIVENTE ao filtro deste
+    // aluno — favorito vetado por local/nível/contraindicação nem aparece, nem a instrução.
+    const favoriteBlock = base.some((e) => e.isFavorite === true)
+      ? rtFavoritePreferenceBlock()
+      : null;
     return [
       UNTRUSTED_CONTEXT_POLICY,
       // Achado 2026-09-03 (reproduzido ao vivo, comparação real DeepSeek vs GPT-4.1/Claude
@@ -571,6 +623,7 @@ export class ProtocolGeneratorService {
       '',
       phaseDurationBlock(),
       '',
+      ...(favoriteBlock ? [favoriteBlock, ''] : []),
       // Achado 2026-09-03 (reproduzido ao vivo): sem isto, a IA às vezes escreve uma
       // variação PRÓXIMA de um "id" real (troca/omite "com"/"na", adiciona uma palavra) em
       // vez do id exato — bloqueia no validador e queima uma regeração inteira por um
@@ -579,7 +632,7 @@ export class ProtocolGeneratorService {
       // entre várias frases (mesmo raciocínio do achado do "weekday" mais abaixo no arquivo).
       'BASE DE REFERÊNCIA (use SOMENTE estes exercícios, pelo "id" — já ordenada pela prioridade acima):',
       'Cada "id" abaixo é uma string EXATA e fixa — copie-a caractere por caractere, sem parafrasear, sem adicionar/remover palavra, sem trocar "com"/"na"/"de" por outra ou omitir. Se o exercício que você quer não está na lista, escolha o mais próximo que ESTÁ na lista — nunca invente uma variação do nome esperando que exista.',
-      this.catalogContext(constraints),
+      this.catalogContext(base),
       '',
       'SCHEMA DO JSON DE SAÍDA:',
       SCHEMA_HINT,
@@ -655,8 +708,8 @@ export class ProtocolGeneratorService {
   }
 
   /**
-   * Catálogo filtrado ao local, nível e contraindicações do usuário, compacto para caber
-   * no cache do prompt.
+   * Conjunto seguro/viável deste aluno, já na ordem de prioridade que o modelo vai ler:
+   * catálogo filtrado ao local, nível e contraindicações do usuário.
    *
    * Achado 2026-09-02: até aqui só local/nível eram filtrados no PROMPT — contraindicação
    * (lesão/dor/PAR-Q) só era checada DEPOIS, pelo validador (`EXERCISE_CONTRAINDICATED`).
@@ -667,8 +720,12 @@ export class ProtocolGeneratorService {
    * prompt (a IA nem VÊ o exercício vetado) é muito mais confiável que depender do modelo
    * evitar algo que está na lista. O validador continua sendo o gabarito/rede de
    * segurança — este filtro só reduz a chance de precisar dele para isto.
+   *
+   * Achado 2026-09-26: separado da formatação (`catalogContext`) para que o
+   * `buildSystemPrompt` saiba se sobrou algum favorito do RT DEPOIS do filtro — o favorito
+   * nunca entra no filtro (eixo de segurança), só no desempate da ordem.
    */
-  private catalogContext(constraints: UserConstraints): string {
+  private referenceBase(constraints: UserConstraints): CatalogExercise[] {
     const maxLevel = LEVEL_ORDER[constraints.level];
     const excluded = new Set(constraints.injuryTags);
     const filtered = this.catalog
@@ -682,25 +739,28 @@ export class ProtocolGeneratorService {
     // Reforço estrutural do `equipmentPriorityBlock`: em local com equipamento robusto,
     // lista as opções com equipamento primeiro. O texto do prompt pode ser ignorado; a
     // ORDEM dos itens que o modelo lê não depende de obediência — é o mesmo raciocínio já
-    // aplicado ao filtro de local/nível/contraindicação logo acima.
+    // aplicado ao filtro de local/nível/contraindicação logo acima. Favorito do RT só
+    // desempata dentro da mesma faixa (`compareReferencePriority`).
     const equipmentFirst =
       constraints.location === 'FULL_GYM' || constraints.location === 'CONDO_GYM';
-    const ordered = equipmentFirst
-      ? [...filtered].sort(
-          (a, b) => Number(b.equipment.length > 0) - Number(a.equipment.length > 0),
-        )
-      : filtered;
-    return ordered
+    return [...filtered].sort((a, b) => compareReferencePriority(a, b, equipmentFirst));
+  }
+
+  /** Base de referência já filtrada/ordenada, compacta para caber no cache do prompt. */
+  private catalogContext(base: readonly CatalogExercise[]): string {
+    return base
       .map(
         (e) =>
           // grupos musculares: a divisão v2 (ABC/PPL/FOCO_MUSCULAR) escolhe por grupo, não só padrão.
           // medida: DURATION (achado 2026-08-18) avisa que ESTE exercício usa "durationSeconds"
           // no JSON de saída, não "reps" — sem isso a IA inventava reps pra prancha/caminhada.
+          // preferido (achado 2026-09-26): campo SÓ na linha favoritada, sempre por último —
+          // linha de não favorito fica byte a byte igual à de antes desta mudança.
           `- ${e.id} | ${e.name} | ${e.pattern} | grupos: ${e.muscleGroups.join(',')} | equip: ${
             e.equipment.length ? e.equipment.join(',') : 'nenhum'
           } | evitar se: ${e.contraindicatedFor.join(',') || 'nada'} | medida: ${
             e.measurement ?? 'REPS'
-          }`,
+          }${e.isFavorite === true ? ` | ${RT_FAVORITE_FIELD}` : ''}`,
       )
       .join('\n');
   }

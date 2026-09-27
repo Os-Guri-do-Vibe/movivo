@@ -4,6 +4,7 @@ import type { AppConfigService } from '../../core/config';
 import type { LlmRouter } from '../ai-coach/llm/llm-router.service';
 import type { LLMRequest, LLMResult } from '../ai-coach/llm/llm.types';
 import type { SemanticMemoryPort } from '../ai-coach/context/semantic-memory.port';
+import { EXERCISE_BY_ID, EXERCISE_CATALOG, LEVEL_ORDER, servesLocation } from './exercise-catalog';
 import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
 import { METHODOLOGY_GUIDELINES, METHODOLOGY_VERSION } from './methodology';
 import type { MethodologyProvider } from './methodology-provider.service';
@@ -12,6 +13,7 @@ import {
   ProtocolGenerationError,
   ProtocolGeneratorService,
   PROMPT_VERSION,
+  rtFavoritePreferenceBlock,
 } from './protocol-generator.service';
 import type { UserConstraints } from './user-constraints';
 
@@ -103,6 +105,7 @@ const constraints: UserConstraints = {
 function makeService(
   responses: string[],
   retrieve: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue([]),
+  catalog: ExerciseCatalogProvider = new ExerciseCatalogProvider(),
 ) {
   const calls: LLMRequest[] = [];
   const queue = [...responses];
@@ -129,7 +132,7 @@ function makeService(
     logger as never,
     methodology,
     config,
-    new ExerciseCatalogProvider(),
+    catalog,
     semantic,
   );
   return { service, calls, logger, retrieve };
@@ -383,6 +386,191 @@ describe('ProtocolGeneratorService', () => {
       });
       expect(result.structure.sessions.every((s) => s.weekday === undefined)).toBe(true);
     });
+  });
+});
+
+// Achado 2026-09-26: favoritos do RT CREF no painel "Exercícios" viram PREFERÊNCIA de
+// prescrição (desempate), nunca eixo de segurança — o filtro da base não muda.
+describe('favoritos do RT na BASE DE REFERÊNCIA (achado 2026-09-26)', () => {
+  const FAVORITE_MARKER = 'preferido pelo profissional CREF: sim';
+  const FAVORITE_BLOCK_HEADER = 'PREFERÊNCIA DE PRESCRIÇÃO DO PROFISSIONAL CREF';
+  const BASE_HEADER = 'BASE DE REFERÊNCIA (use SOMENTE';
+
+  const baseConstraints: UserConstraints = {
+    ...constraints,
+    location: 'FULL_GYM',
+    level: 'INICIANTE',
+    injuryTags: [],
+    injuriesRaw: [],
+  };
+
+  /** Catálogo estático com `isFavorite` explícito (true nos ids dados, false no resto). */
+  function catalogWithFavorites(favoriteIds: readonly string[]): ExerciseCatalogProvider {
+    for (const id of favoriteIds) {
+      // Um id digitado errado faria o teste passar sem testar nada.
+      if (!EXERCISE_BY_ID.has(id)) throw new Error(`id de teste fora do catálogo: ${id}`);
+    }
+    const favorites = new Set(favoriteIds);
+    const entries = EXERCISE_CATALOG.map((e) => ({ ...e, isFavorite: favorites.has(e.id) }));
+    const byId = new Map(entries.map((e) => [e.id, e]));
+    return {
+      getAll: () => entries,
+      getById: (id: string) => byId.get(id),
+      isKnown: (id: string) => byId.has(id),
+    } as unknown as ExerciseCatalogProvider;
+  }
+
+  /** `system` prompt real enviado ao LLM. Sem `catalog`: bootstrap (`isFavorite` undefined). */
+  async function systemPromptFor(
+    c: UserConstraints,
+    catalog?: ExerciseCatalogProvider,
+  ): Promise<string> {
+    const { service, calls } = makeService([validProtocolJson()], undefined, catalog);
+    await service.generate({ ...command, constraints: c });
+    const system = calls[0]?.system;
+    if (!system) throw new Error('esperava uma chamada ao LLM');
+    return system;
+  }
+
+  /** Linhas de exercício ("- id | ...") da seção BASE DE REFERÊNCIA, na ordem do prompt. */
+  function referenceBaseLines(system: string): string[] {
+    const lines = system.split('\n');
+    const start = lines.findIndex((line) => line.startsWith(BASE_HEADER));
+    const end = lines.indexOf('SCHEMA DO JSON DE SAÍDA:');
+    if (start === -1 || end <= start) throw new Error('seção BASE DE REFERÊNCIA não encontrada');
+    return lines.slice(start + 1, end).filter((line) => line.startsWith('- '));
+  }
+
+  const lineId = (line: string): string => line.slice(2).split(' | ', 1)[0] ?? '';
+
+  /** Ordem ANTERIOR a esta mudança (filtro + sort estável só por equipamento), congelada. */
+  function legacyOrderIds(c: UserConstraints): string[] {
+    const filtered = EXERCISE_CATALOG.filter(
+      (e) =>
+        servesLocation(e, c.location) &&
+        LEVEL_ORDER[e.minLevel] <= LEVEL_ORDER[c.level] &&
+        !e.contraindicatedFor.some((tag) => c.injuryTags.includes(tag)),
+    );
+    const equipmentFirst = c.location === 'FULL_GYM' || c.location === 'CONDO_GYM';
+    const ordered = equipmentFirst
+      ? [...filtered].sort(
+          (a, b) => Number(b.equipment.length > 0) - Number(a.equipment.length > 0),
+        )
+      : filtered;
+    return ordered.map((e) => e.id);
+  }
+
+  it('zero favoritos na base: prompt byte a byte igual ao do catálogo sem favoritos, sem o bloco', async () => {
+    const baseline = await systemPromptFor(baseConstraints); // bootstrap: isFavorite undefined
+    const allFalse = await systemPromptFor(baseConstraints, catalogWithFavorites([]));
+
+    expect(allFalse).toBe(baseline);
+    expect(baseline).not.toContain(FAVORITE_BLOCK_HEADER);
+    expect(baseline).not.toContain(FAVORITE_MARKER);
+    // Sort estável: sem favoritos, a ordem é a MESMA de antes desta mudança — inclusive em
+    // HOME, onde antes não havia sort nenhum.
+    for (const c of [baseConstraints, { ...baseConstraints, location: 'HOME' as const }]) {
+      expect(referenceBaseLines(await systemPromptFor(c)).map(lineId)).toEqual(legacyOrderIds(c));
+    }
+  });
+
+  it('FULL_GYM: equipamento é critério primário, favorito só desempata dentro da faixa', async () => {
+    const favorites = ['supino_reto_halter', 'roda_abdominal']; // com equip / sem equip
+    const system = await systemPromptFor(baseConstraints, catalogWithFavorites(favorites));
+    const ids = referenceBaseLines(system).map(lineId);
+    const rank = (id: string): number => {
+      const exercise = EXERCISE_BY_ID.get(id);
+      if (!exercise) throw new Error(`id fora do catálogo no prompt: ${id}`);
+      return 2 * Number(exercise.equipment.length > 0) + Number(favorites.includes(id));
+    };
+    const ranks = ids.map(rank);
+
+    // [equip+fav] > [equip] > [sem equip+fav] > [sem equip] — ordem não-crescente.
+    expect(ranks).toEqual([...ranks].sort((a, b) => b - a));
+    expect(new Set(ranks)).toEqual(new Set([3, 2, 1, 0]));
+    expect(ids[0]).toBe('supino_reto_halter');
+    expect(ids[ranks.indexOf(1)]).toBe('roda_abdominal');
+    // Bloco presente, depois da DURAÇÃO DO MESOCICLO e imediatamente antes da BASE.
+    expect(system).toContain(`${rtFavoritePreferenceBlock()}\n\n${BASE_HEADER}`);
+    expect(system.indexOf('DURAÇÃO DO MESOCICLO')).toBeLessThan(
+      system.indexOf(FAVORITE_BLOCK_HEADER),
+    );
+  });
+
+  it('caso do fundador: cadeira_flexora_maquina favoritada, aluno HOME + KNEE — some do prompt, sem bloco', async () => {
+    // Só serve FULL_GYM e é contraindicada para KNEE: vetada por local (e por contraindicação).
+    const c: UserConstraints = { ...baseConstraints, location: 'HOME', injuryTags: ['KNEE'] };
+    const baseline = await systemPromptFor(c);
+    const system = await systemPromptFor(c, catalogWithFavorites(['cadeira_flexora_maquina']));
+
+    expect(system).not.toContain('cadeira_flexora_maquina');
+    expect(system).not.toContain(FAVORITE_BLOCK_HEADER);
+    expect(system).toBe(baseline);
+  });
+
+  it('HOME: favorito remada_invertida vira a PRIMEIRA linha, com o marcador no fim e o id intacto', async () => {
+    const c: UserConstraints = { ...baseConstraints, location: 'HOME' };
+    const baselineLine = referenceBaseLines(await systemPromptFor(c)).find(
+      (line) => lineId(line) === 'remada_invertida',
+    );
+    const system = await systemPromptFor(c, catalogWithFavorites(['remada_invertida']));
+    const first = referenceBaseLines(system)[0] ?? '';
+
+    expect(lineId(first)).toBe('remada_invertida');
+    expect(first.startsWith('- remada_invertida | ')).toBe(true);
+    expect(first.endsWith(` | ${FAVORITE_MARKER}`)).toBe(true);
+    // Resto da linha idêntico ao de antes: o marcador é só um sufixo.
+    expect(first).toBe(`${baselineLine} | ${FAVORITE_MARKER}`);
+    expect(system).toContain(FAVORITE_BLOCK_HEADER);
+  });
+
+  it('favorito eliminado SÓ por contraindicação (supino_reto_halter, FULL_GYM + SHOULDER) não aparece', async () => {
+    const catalog = catalogWithFavorites(['supino_reto_halter']);
+    // Controle: mesmo local e nível, sem a tag — aparece. Prova que local/nível não o excluem.
+    const control = await systemPromptFor(baseConstraints, catalog);
+    expect(referenceBaseLines(control).map(lineId)).toContain('supino_reto_halter');
+
+    const c: UserConstraints = { ...baseConstraints, injuryTags: ['SHOULDER'] };
+    const system = await systemPromptFor(c, catalog);
+
+    expect(system).not.toContain('supino_reto_halter');
+    expect(system).not.toContain(FAVORITE_BLOCK_HEADER);
+    expect(system).toBe(await systemPromptFor(c));
+  });
+
+  it('o marcador aparece só nas linhas favoritadas que sobreviveram ao filtro', async () => {
+    // FULL_GYM + KNEE: supino_reto_halter e roda_abdominal sobrevivem; cadeira_flexora_maquina
+    // sai por KNEE; remada_invertida sai por local (não serve FULL_GYM).
+    const c: UserConstraints = { ...baseConstraints, injuryTags: ['KNEE'] };
+    const system = await systemPromptFor(
+      c,
+      catalogWithFavorites([
+        'supino_reto_halter',
+        'roda_abdominal',
+        'cadeira_flexora_maquina',
+        'remada_invertida',
+      ]),
+    );
+    const marked = referenceBaseLines(system)
+      .filter((line) => line.includes(FAVORITE_MARKER))
+      .map(lineId);
+    const section = system.slice(
+      system.indexOf(BASE_HEADER),
+      system.indexOf('SCHEMA DO JSON DE SAÍDA:'),
+    );
+
+    expect(marked.sort()).toEqual(['roda_abdominal', 'supino_reto_halter']);
+    expect(section.split(FAVORITE_MARKER).length - 1).toBe(2);
+  });
+
+  it('guardrail de linguagem: o bloco não usa termos vetados e mantém a IA como ferramenta do CREF', () => {
+    const block = rtFavoritePreferenceBlock();
+
+    expect(block).not.toMatch(/diagnóstic/i);
+    expect(block).not.toMatch(/tratamento/i);
+    expect(block).not.toMatch(/\bcura\b/i);
+    expect(block).not.toMatch(/garantid/i);
+    expect(block).toContain('Você atua como ferramenta desse profissional');
   });
 });
 

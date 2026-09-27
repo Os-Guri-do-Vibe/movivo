@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { Logger } from '@nestjs/common';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { exerciseCatalogFavorites } from '../../core/database/schema';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
 import { EXERCISE_CATALOG } from './exercise-catalog';
 import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
@@ -10,6 +12,8 @@ describe('ExerciseCatalogProvider (achado 2026-09-02)', () => {
     expect(provider.getAll().length).toBe(EXERCISE_CATALOG.length);
     expect(provider.isKnown('agachamento_peso_corporal')).toBe(true);
     expect(provider.getById('agachamento_peso_corporal')?.pattern).toBe('SQUAT');
+    // Achado 2026-09-26: favorito só vem do banco — bootstrap não sabe, fica `undefined`.
+    expect(provider.getById('agachamento_peso_corporal')?.isFavorite).toBeUndefined();
   });
 
   it('isKnown/getById devolvem falso/undefined para id inexistente', () => {
@@ -55,14 +59,21 @@ function row(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function dbWith(selectRows: unknown[]) {
+/**
+ * `favorites`: chaves em `exercise_catalog_favorites` — ou um `Error` para simular falha na
+ * leitura dessa tabela (achado 2026-09-26), sem afetar a leitura de `exercise_catalog_entries`.
+ */
+function dbWith(selectRows: unknown[], favorites: readonly string[] | Error = []) {
   const values = vi.fn(async () => undefined);
   const execute = vi.fn(async (): Promise<unknown> => [{ count: 0 }]);
   const tx = {
     select: () => ({
-      from: () => ({
-        orderBy: () => Promise.resolve(selectRows),
-      }),
+      from: (table: unknown) =>
+        table === exerciseCatalogFavorites
+          ? favorites instanceof Error
+            ? Promise.reject(favorites)
+            : Promise.resolve(favorites.map((exerciseKey) => ({ exerciseKey })))
+          : { orderBy: () => Promise.resolve(selectRows) },
     }),
     execute,
     insert: () => ({ values }),
@@ -132,6 +143,53 @@ describe('ExerciseCatalogProvider.refresh() — com TenantDatabase', () => {
     await provider.refresh();
 
     expect(provider.getAll()).toBe(before);
+  });
+});
+
+describe('ExerciseCatalogProvider.refresh() — favoritos do RT (achado 2026-09-26)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('marca isFavorite: true na chave favoritada e false nas demais', async () => {
+    const { db } = dbWith(
+      [
+        row({ exerciseKey: 'flexao' }),
+        row({ exerciseKey: 'remada_invertida', name: 'Remada Invertida' }),
+        row({ exerciseKey: 'agachamento', status: 'RETIRED' }),
+      ],
+      // `agachamento` favoritado mas RETIRED: favorito nunca ressuscita exercício retirado.
+      ['remada_invertida', 'agachamento'],
+    );
+    const provider = new ExerciseCatalogProvider(db);
+
+    await provider.refresh();
+
+    expect(provider.getById('remada_invertida')?.isFavorite).toBe(true);
+    expect(provider.getById('flexao')?.isFavorite).toBe(false);
+    expect(provider.isKnown('agachamento')).toBe(false);
+  });
+
+  it('falha ao ler favoritos NÃO impede o snapshot de exercícios de atualizar (cai para nenhum favorito)', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const { db } = dbWith(
+      [row({ exerciseKey: 'novo_exercicio' }), row({ exerciseKey: 'flexao' })],
+      new Error('relation "exercise_catalog_favorites" does not exist'),
+    );
+    const provider = new ExerciseCatalogProvider(db);
+
+    await expect(provider.refresh()).resolves.toBeUndefined();
+
+    expect(provider.getAll()).toHaveLength(2);
+    expect(provider.isKnown('novo_exercicio')).toBe(true);
+    expect(provider.getAll().every((e) => e.isFavorite === false)).toBe(true);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'exercise_catalog_favorites_read_failed',
+        err: expect.stringContaining('exercise_catalog_favorites'),
+      }),
+      expect.stringContaining('sem favoritos'),
+    );
   });
 });
 

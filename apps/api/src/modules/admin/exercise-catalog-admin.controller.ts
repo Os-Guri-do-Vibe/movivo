@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nes
 import {
   ControlCenterCapability as Capability,
   exerciseCatalogResponseSchema,
+  favoriteExerciseCatalogEntrySchema,
   publishExerciseCatalogEntrySchema,
   retireExerciseCatalogEntrySchema,
 } from '@movivo/shared';
@@ -77,5 +78,39 @@ export class ExerciseCatalogAdminController {
   })
   retire(@CurrentUser() actor: AuthenticatedUser, @Body() body: unknown) {
     return this.exerciseCatalog.retire(actor, body);
+  }
+
+  @Post('favorite')
+  @RequireCapabilities(Capability.AI_CONFIG_READ, Capability.AI_CONFIG_WRITE)
+  @ApiOperation({
+    summary: 'Favorita um exercício (preferência de prescrição do RT)',
+    description:
+      'Favorito é global (não por staff) — a IA passa a priorizar este exercício na geração de protocolo, quando adequado ao contexto do aluno. Não gera nova versão do exercício.',
+  })
+  @ApiBody({ schema: zodSchemaToOpenApi(favoriteExerciseCatalogEntrySchema) })
+  @ApiResponse({ status: 200, description: 'Exercício favoritado.' })
+  @ApiResponse({ status: 400, description: '`exerciseKey` inexistente ou retirado do catálogo.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Ator sem as capabilities AI_CONFIG_READ + AI_CONFIG_WRITE.',
+  })
+  favorite(@CurrentUser() actor: AuthenticatedUser, @Body() body: unknown) {
+    return this.exerciseCatalog.favorite(actor, body);
+  }
+
+  @Post('unfavorite')
+  @RequireCapabilities(Capability.AI_CONFIG_READ, Capability.AI_CONFIG_WRITE)
+  @ApiOperation({
+    summary: 'Remove o favorito de um exercício',
+    description: 'Idempotente — remover um favorito que já não existe não é erro.',
+  })
+  @ApiBody({ schema: zodSchemaToOpenApi(favoriteExerciseCatalogEntrySchema) })
+  @ApiResponse({ status: 200, description: 'Favorito removido.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Ator sem as capabilities AI_CONFIG_READ + AI_CONFIG_WRITE.',
+  })
+  unfavorite(@CurrentUser() actor: AuthenticatedUser, @Body() body: unknown) {
+    return this.exerciseCatalog.unfavorite(actor, body);
   }
 }

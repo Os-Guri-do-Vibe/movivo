@@ -12,19 +12,27 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ControlCenterApi from '@/lib/control-center-api';
 import type { ExerciseCatalogEntryVersion, ExerciseCatalogResponse } from '@movivo/shared';
 
-const { getExerciseCatalog, publishExerciseCatalogEntry, retireExerciseCatalogEntry } = vi.hoisted(
-  () => ({
-    getExerciseCatalog: vi.fn(),
-    publishExerciseCatalogEntry: vi.fn(),
-    retireExerciseCatalogEntry: vi.fn(),
-  }),
-);
+const {
+  getExerciseCatalog,
+  publishExerciseCatalogEntry,
+  retireExerciseCatalogEntry,
+  favoriteExerciseCatalogEntry,
+  unfavoriteExerciseCatalogEntry,
+} = vi.hoisted(() => ({
+  getExerciseCatalog: vi.fn(),
+  publishExerciseCatalogEntry: vi.fn(),
+  retireExerciseCatalogEntry: vi.fn(),
+  favoriteExerciseCatalogEntry: vi.fn(),
+  unfavoriteExerciseCatalogEntry: vi.fn(),
+}));
 
 vi.mock('@/lib/control-center-api', async (importOriginal) => ({
   ...(await importOriginal<typeof ControlCenterApi>()),
   getExerciseCatalog,
   publishExerciseCatalogEntry,
   retireExerciseCatalogEntry,
+  favoriteExerciseCatalogEntry,
+  unfavoriteExerciseCatalogEntry,
 }));
 
 import { ControlCenterApiError } from '@/lib/control-center-api';
@@ -55,6 +63,7 @@ const supino: ExerciseCatalogEntryVersion = {
   createdBy: 'Rodrigo',
   createdAt: '2026-08-20T12:00:00.000Z',
   current: true,
+  isFavorite: false,
 };
 
 const agachamento: ExerciseCatalogEntryVersion = {
@@ -74,6 +83,7 @@ const agachamento: ExerciseCatalogEntryVersion = {
   createdBy: 'Rodrigo',
   createdAt: '2026-08-21T12:00:00.000Z',
   current: true,
+  isFavorite: true,
 };
 
 /** Retirado: some da lista mesmo sendo a versão `current` da chave. */
@@ -94,6 +104,7 @@ const flexaoRetirada: ExerciseCatalogEntryVersion = {
   createdBy: 'Rodrigo',
   createdAt: '2026-08-22T12:00:00.000Z',
   current: true,
+  isFavorite: false,
 };
 
 /** Versão antiga (não `current`) da mesma chave do supino: some da lista, mas conta para `existingKeys`. */
@@ -114,6 +125,7 @@ const supinoAntigo: ExerciseCatalogEntryVersion = {
   createdBy: 'Rodrigo',
   createdAt: '2026-08-19T12:00:00.000Z',
   current: false,
+  isFavorite: false,
 };
 
 function buildResponse(versions: ExerciseCatalogEntryVersion[]): ExerciseCatalogResponse {
@@ -143,6 +155,7 @@ function manyPublishedVersions(count: number): ExerciseCatalogEntryVersion[] {
     createdBy: 'Rodrigo',
     createdAt: '2026-08-20T12:00:00.000Z',
     current: true,
+    isFavorite: false,
   }));
 }
 
@@ -150,6 +163,8 @@ beforeEach(() => {
   getExerciseCatalog.mockReset().mockResolvedValue(response);
   publishExerciseCatalogEntry.mockReset().mockResolvedValue(response);
   retireExerciseCatalogEntry.mockReset().mockResolvedValue(response);
+  favoriteExerciseCatalogEntry.mockReset().mockResolvedValue(response);
+  unfavoriteExerciseCatalogEntry.mockReset().mockResolvedValue(response);
 });
 
 describe('AiExerciseCatalogDashboard', () => {
@@ -418,5 +433,31 @@ describe('AiExerciseCatalogDashboard', () => {
       '“Supino reto” removido do catálogo.',
     );
     expect(getExerciseCatalog).toHaveBeenCalledTimes(2);
+  });
+
+  it('favorita um exercício não favoritado e desfavorita um já favoritado', async () => {
+    const user = userEvent.setup();
+    render(<AiExerciseCatalogDashboard canWrite />);
+    await screen.findByText('Supino reto');
+
+    const favoritarSupino = screen.getByRole('button', { name: 'Favoritar Supino reto' });
+    expect(favoritarSupino).toHaveAttribute('aria-pressed', 'false');
+    const removerAgachamento = screen.getByRole('button', {
+      name: 'Remover Agachamento livre dos favoritos',
+    });
+    expect(removerAgachamento).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(favoritarSupino);
+    await waitFor(() =>
+      expect(favoriteExerciseCatalogEntry).toHaveBeenCalledWith({ exerciseKey: 'supino_reto' }),
+    );
+    expect(unfavoriteExerciseCatalogEntry).not.toHaveBeenCalled();
+
+    await user.click(removerAgachamento);
+    await waitFor(() =>
+      expect(unfavoriteExerciseCatalogEntry).toHaveBeenCalledWith({
+        exerciseKey: 'agachamento_livre',
+      }),
+    );
   });
 });

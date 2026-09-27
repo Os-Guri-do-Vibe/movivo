@@ -76,6 +76,9 @@ export * from './ai-forbidden-topics';
 // Achado 2026-09-02 - base de exercícios parametrizada (era array const em código).
 export * from './exercise-catalog-entries';
 
+// Achado 2026-09-26 - exercícios favoritados pelo RT CREF (preferência de prescrição, global).
+export * from './exercise-catalog-favorites';
+
 // Achado 2026-09-02 - proposta de substituição de exercício via IA, em staging.
 export * from './protocol-substitution-requests';
 

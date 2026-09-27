@@ -5,6 +5,7 @@ import {
   configSimulationResponseSchema,
   exerciseCatalogResponseSchema,
   type ExerciseCatalogResponse,
+  type FavoriteExerciseCatalogEntryInput,
   type PublishExerciseCatalogEntryInput,
   type RetireExerciseCatalogEntryInput,
   faqEntriesResponseSchema,
@@ -493,6 +494,18 @@ export function retireExerciseCatalogEntry(
   input: RetireExerciseCatalogEntryInput,
 ): Promise<ExerciseCatalogResponse> {
   return mutate('ai/exercise-catalog/retire', input, exerciseCatalogResponseSchema);
+}
+
+export function favoriteExerciseCatalogEntry(
+  input: FavoriteExerciseCatalogEntryInput,
+): Promise<ExerciseCatalogResponse> {
+  return mutate('ai/exercise-catalog/favorite', input, exerciseCatalogResponseSchema);
+}
+
+export function unfavoriteExerciseCatalogEntry(
+  input: FavoriteExerciseCatalogEntryInput,
+): Promise<ExerciseCatalogResponse> {
+  return mutate('ai/exercise-catalog/unfavorite', input, exerciseCatalogResponseSchema);
 }
 
 export function getL1Guardrails(signal?: AbortSignal): Promise<L1GuardrailsResponse> {

@@ -8,7 +8,7 @@ import {
   type ExerciseCatalogResponse,
   type TrainingLocation,
 } from '@movivo/shared';
-import { Dumbbell, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { Dumbbell, Pencil, Plus, Search, Star, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 
@@ -16,9 +16,11 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   ControlCenterApiError,
+  favoriteExerciseCatalogEntry,
   getExerciseCatalog,
   publishExerciseCatalogEntry,
   retireExerciseCatalogEntry,
+  unfavoriteExerciseCatalogEntry,
 } from '@/lib/control-center-api';
 import { cn } from '@/lib/utils';
 
@@ -327,6 +329,7 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
   >(null);
   const [feedback, setFeedback] = useState('');
   const [retiringKey, setRetiringKey] = useState<string | null>(null);
+  const [favoritingKey, setFavoritingKey] = useState<string | null>(null);
   // `form` é o rascunho editado nos campos; `applied` só muda ao clicar "Buscar" (ou
   // "Limpar filtro"/remover um chip, que sincronizam os dois) — mesmo padrão da Base de
   // Alunos (`StudentsDashboard`).
@@ -346,6 +349,26 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
   function searchExercises(event: FormEvent) {
     event.preventDefault();
     setApplied(form);
+  }
+
+  async function toggleFavorite(entry: ExerciseCatalogEntryVersion) {
+    setFavoritingKey(entry.exerciseKey);
+    try {
+      if (entry.isFavorite) {
+        await unfavoriteExerciseCatalogEntry({ exerciseKey: entry.exerciseKey });
+      } else {
+        await favoriteExerciseCatalogEntry({ exerciseKey: entry.exerciseKey });
+      }
+      await refresh();
+    } catch (caught) {
+      setFeedback(
+        caught instanceof ControlCenterApiError
+          ? caught.message
+          : 'Não foi possível atualizar o favorito.',
+      );
+    } finally {
+      setFavoritingKey(null);
+    }
   }
 
   function clearFilters() {
@@ -547,6 +570,25 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
                 </div>
                 {canWrite ? (
                   <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void toggleFavorite(entry)}
+                      disabled={favoritingKey === entry.exerciseKey}
+                      className={cn(
+                        buttonVariants({ variant: 'ghost', size: 'icon' }),
+                        ICON_BUTTON,
+                        entry.isFavorite && 'text-amber-500 hover:text-amber-500',
+                      )}
+                      aria-pressed={entry.isFavorite}
+                      aria-label={
+                        entry.isFavorite
+                          ? `Remover ${entry.name} dos favoritos`
+                          : `Favoritar ${entry.name}`
+                      }
+                      title={entry.isFavorite ? 'Remover dos favoritos' : 'Favoritar'}
+                    >
+                      <Star aria-hidden="true" className={cn(entry.isFavorite && 'fill-current')} />
+                    </button>
                     <button
                       type="button"
                       onClick={() => setModal({ kind: 'edit', entry })}

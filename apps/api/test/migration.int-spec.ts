@@ -86,6 +86,8 @@ const EXPECTED_TABLES = [
   // mais só do array estático em `exercise-catalog.ts`.
   'protocol_substitution_requests',
   'exercise_catalog_entries',
+  // Achado 2026-09-26: favoritos do RT CREF, global e separado do versionamento acima.
+  'exercise_catalog_favorites',
   // Acompanhamento diario: acesso publico revogavel, sessoes, series e insights.
   'workout_access_tokens',
   'workout_insights',

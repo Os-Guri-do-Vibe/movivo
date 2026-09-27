@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  favoriteExerciseCatalogEntrySchema,
   publishExerciseCatalogEntrySchema,
   retireExerciseCatalogEntrySchema,
   type CatalogExerciseCandidate,
@@ -8,7 +9,11 @@ import {
 import { desc, eq, inArray, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 
-import { exerciseCatalogEntries, staff } from '../../core/database/schema';
+import {
+  exerciseCatalogEntries,
+  exerciseCatalogFavorites,
+  staff,
+} from '../../core/database/schema';
 import {
   TenantDatabase,
   type TenantTransaction,
@@ -35,33 +40,41 @@ export class ExerciseCatalogAdminService {
   ) {}
 
   async list(): Promise<ExerciseCatalogResponse> {
-    const rows = await this.db.runAsSystem((tx) =>
-      tx
-        .select({
-          id: exerciseCatalogEntries.id,
-          exerciseKey: exerciseCatalogEntries.exerciseKey,
-          name: exerciseCatalogEntries.name,
-          pattern: exerciseCatalogEntries.pattern,
-          muscleGroups: exerciseCatalogEntries.muscleGroups,
-          equipment: exerciseCatalogEntries.equipment,
-          locations: exerciseCatalogEntries.locations,
-          minLevel: exerciseCatalogEntries.minLevel,
-          contraindicatedFor: exerciseCatalogEntries.contraindicatedFor,
-          substitutes: exerciseCatalogEntries.substitutes,
-          measurement: exerciseCatalogEntries.measurement,
-          durationSecondsRange: exerciseCatalogEntries.durationSecondsRange,
-          minRestSeconds: exerciseCatalogEntries.minRestSeconds,
-          videoUrl: exerciseCatalogEntries.videoUrl,
-          version: exerciseCatalogEntries.version,
-          status: exerciseCatalogEntries.status,
-          changeNote: exerciseCatalogEntries.changeNote,
-          createdAt: exerciseCatalogEntries.createdAt,
-          createdBy: staff.name,
-        })
-        .from(exerciseCatalogEntries)
-        .leftJoin(staff, eq(staff.id, exerciseCatalogEntries.createdBy))
-        .orderBy(desc(exerciseCatalogEntries.exerciseKey), desc(exerciseCatalogEntries.version)),
-    );
+    const [rows, favoriteRows] = await Promise.all([
+      this.db.runAsSystem((tx) =>
+        tx
+          .select({
+            id: exerciseCatalogEntries.id,
+            exerciseKey: exerciseCatalogEntries.exerciseKey,
+            name: exerciseCatalogEntries.name,
+            pattern: exerciseCatalogEntries.pattern,
+            muscleGroups: exerciseCatalogEntries.muscleGroups,
+            equipment: exerciseCatalogEntries.equipment,
+            locations: exerciseCatalogEntries.locations,
+            minLevel: exerciseCatalogEntries.minLevel,
+            contraindicatedFor: exerciseCatalogEntries.contraindicatedFor,
+            substitutes: exerciseCatalogEntries.substitutes,
+            measurement: exerciseCatalogEntries.measurement,
+            durationSecondsRange: exerciseCatalogEntries.durationSecondsRange,
+            minRestSeconds: exerciseCatalogEntries.minRestSeconds,
+            videoUrl: exerciseCatalogEntries.videoUrl,
+            version: exerciseCatalogEntries.version,
+            status: exerciseCatalogEntries.status,
+            changeNote: exerciseCatalogEntries.changeNote,
+            createdAt: exerciseCatalogEntries.createdAt,
+            createdBy: staff.name,
+          })
+          .from(exerciseCatalogEntries)
+          .leftJoin(staff, eq(staff.id, exerciseCatalogEntries.createdBy))
+          .orderBy(desc(exerciseCatalogEntries.exerciseKey), desc(exerciseCatalogEntries.version)),
+      ),
+      this.db.runAsSystem((tx) =>
+        tx
+          .select({ exerciseKey: exerciseCatalogFavorites.exerciseKey })
+          .from(exerciseCatalogFavorites),
+      ),
+    ]);
+    const favoritedKeys = new Set(favoriteRows.map((f) => f.exerciseKey));
 
     const currentKeys = new Set<string>();
     const versions = rows.map((row) => {
@@ -75,12 +88,82 @@ export class ExerciseCatalogAdminService {
         videoUrl: row.videoUrl ?? undefined,
         createdAt: row.createdAt.toISOString(),
         current,
+        isFavorite: favoritedKeys.has(row.exerciseKey),
       };
     });
     return this.envelope({
       versions,
       totalPublished: versions.filter((v) => v.current && v.status === 'PUBLISHED').length,
     });
+  }
+
+  /**
+   * Favoritar é idempotente (`ON CONFLICT DO NOTHING` pela chave natural `exercise_key`) —
+   * clicar duas vezes seguidas não é erro, só não duplica linha. Exige que o exercício
+   * exista no catálogo (mesma checagem de `validateSubstitutes`).
+   */
+  async favorite(actor: AuthenticatedUser, body: unknown): Promise<ExerciseCatalogResponse> {
+    const input = this.parse(favoriteExerciseCatalogEntrySchema, body);
+    await this.assertExerciseExists(input.exerciseKey);
+    await this.db.runAsSystem(async (tx) => {
+      const [inserted] = await tx
+        .insert(exerciseCatalogFavorites)
+        .values({ exerciseKey: input.exerciseKey, favoritedBy: actor.userId })
+        .onConflictDoNothing({ target: exerciseCatalogFavorites.exerciseKey })
+        .returning({ id: exerciseCatalogFavorites.id });
+      if (inserted) {
+        await this.audit.append(tx, {
+          actorId: actor.userId,
+          userId: actor.userId,
+          action: 'exercise_catalog.favorite',
+          entityType: 'exercise_catalog_favorite',
+          entityId: inserted.id,
+          changes: { exerciseKey: input.exerciseKey },
+        });
+      }
+    });
+    // Igual a publish/retire: o motor de IA lê `isFavorite` do snapshot em memória do
+    // `ExerciseCatalogProvider` — sem isto, o RT favoritaria e a geração de protocolo só
+    // enxergaria a mudança até 5min depois (timer de `REFRESH_MS`).
+    await this.catalog.invalidate();
+    return this.list();
+  }
+
+  async unfavorite(actor: AuthenticatedUser, body: unknown): Promise<ExerciseCatalogResponse> {
+    const input = this.parse(favoriteExerciseCatalogEntrySchema, body);
+    await this.db.runAsSystem(async (tx) => {
+      const deleted = await tx
+        .delete(exerciseCatalogFavorites)
+        .where(eq(exerciseCatalogFavorites.exerciseKey, input.exerciseKey))
+        .returning({ id: exerciseCatalogFavorites.id });
+      for (const row of deleted) {
+        await this.audit.append(tx, {
+          actorId: actor.userId,
+          userId: actor.userId,
+          action: 'exercise_catalog.unfavorite',
+          entityType: 'exercise_catalog_favorite',
+          entityId: row.id,
+          changes: { exerciseKey: input.exerciseKey },
+        });
+      }
+    });
+    await this.catalog.invalidate();
+    return this.list();
+  }
+
+  private async assertExerciseExists(exerciseKey: string): Promise<void> {
+    const [current] = await this.db.runAsSystem((tx) =>
+      tx
+        .select({ status: exerciseCatalogEntries.status })
+        .from(exerciseCatalogEntries)
+        .where(eq(exerciseCatalogEntries.exerciseKey, exerciseKey))
+        .orderBy(desc(exerciseCatalogEntries.version))
+        .limit(1),
+    );
+    if (!current) throw new NotFoundException('Exercício inexistente.');
+    if (current.status === 'RETIRED') {
+      throw new BadRequestException('O exercício está retirado do catálogo.');
+    }
   }
 
   async publish(actor: AuthenticatedUser, body: unknown): Promise<ExerciseCatalogResponse> {
