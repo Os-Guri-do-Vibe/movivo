@@ -150,6 +150,7 @@ function makeService(state: TxState = {}) {
   } as unknown as HealthCipherService;
 
   const consents = {
+    assertTermsPublished: vi.fn(),
     hasValidHealthConsent: vi.fn(() => Promise.resolve(true)),
     acceptedTypesForSession: vi.fn(() =>
       Promise.resolve(['TERMS_OF_SERVICE', 'HEALTH_DATA', 'AI_DISCLOSURE']),
@@ -310,6 +311,15 @@ describe('Etapa 1 — gate 18+, consentimentos e posse do número', () => {
 });
 
 describe('Etapa 2 — seção 4 cifrada e gated por consentimento de saúde', () => {
+  it('bloqueia nova coleta em sessão antiga enquanto os documentos estão em revisão', async () => {
+    const { svc, consents, cipher } = makeService({ select: [sessionRow({ lastStep: 2 })] });
+    (consents.assertTermsPublished as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      throw new Error('Termos de Uso em revisão');
+    });
+    await expect(svc.patchStep('t', 2, STEP2)).rejects.toThrow(/Termos de Uso em revisão/i);
+    expect(cipher.encryptHealth).not.toHaveBeenCalled();
+  });
+
   it('devolve 400 com a mensagem do campo condicional inválido', async () => {
     const { svc } = makeService({ select: [sessionRow()] });
 
@@ -398,6 +408,15 @@ describe('Etapa 3 — PAR-Q e declarações', () => {
 });
 
 describe('Submit — gate PAR-Q e outcome', () => {
+  it('bloqueia sessões antigas quando o par de documentos jurídicos não está publicado', async () => {
+    const { svc, consents } = makeService({ select: [sessionRow()] });
+    (consents.assertTermsPublished as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      throw new Error('Termos de Uso em revisão');
+    });
+    await expect(svc.submit('t')).rejects.toThrow(/Termos de Uso em revisão/i);
+    expect(consents.linkSessionToUser).not.toHaveBeenCalled();
+  });
+
   it('exige as três etapas preenchidas', async () => {
     const { svc } = makeService({ select: [sessionRow({ dataBlock3: null })] });
     await expect(svc.submit('t')).rejects.toThrow(/complete as três etapas/i);

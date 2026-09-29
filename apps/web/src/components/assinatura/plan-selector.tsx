@@ -13,6 +13,7 @@ import type {
 } from '@movivo/shared';
 
 import { Button } from '@/components/ui/button';
+import { LEGAL_LINKS } from '@/lib/landing/site';
 import { formatBRL, getCheckoutSummary, startCheckoutPayment } from '@/lib/subscription-api';
 
 import styles from './plan-selector.module.css';
@@ -97,6 +98,7 @@ function detectCardBrand(value: string): CardBrand | null {
 }
 
 export function PlanSelector({ token }: { token: string }) {
+  const legalDocumentsAvailable = Boolean(LEGAL_LINKS.terms && LEGAL_LINKS.privacy);
   const [summary, setSummary] = React.useState<CheckoutSummary>();
   const [method, setMethod] = React.useState<PaymentMethodId>('CARD');
   const [installments, setInstallments] = React.useState(1);
@@ -146,6 +148,10 @@ export function PlanSelector({ token }: { token: string }) {
   async function submit(event: React.FormEvent<HTMLFormElement>, regenerate = false) {
     event.preventDefault();
     if (!summary) return;
+    if (!legalDocumentsAvailable) {
+      setError('A contratação está indisponível enquanto os documentos legais são finalizados.');
+      return;
+    }
     setState('SUBMITTING');
     setError('');
     const data = new FormData(event.currentTarget);
@@ -447,10 +453,30 @@ export function PlanSelector({ token }: { token: string }) {
               )}
             </div>
 
-            <label className={styles.terms}>
-              <input name="acceptTerms" type="checkbox" required />
-              <span>Li e aceito os Termos de Assinatura vigentes e a Política de Privacidade.</span>
-            </label>
+            {LEGAL_LINKS.terms && LEGAL_LINKS.privacy ? (
+              <div className={styles.terms}>
+                <label>
+                  <input name="acceptTerms" type="checkbox" required />
+                  <span>Li e aceito os documentos legais vigentes da MOVIVO.</span>
+                </label>
+                <p>
+                  Consulte os{' '}
+                  <a href={LEGAL_LINKS.terms} target="_blank" rel="noopener noreferrer">
+                    Termos de Uso
+                  </a>{' '}
+                  e a{' '}
+                  <a href={LEGAL_LINKS.privacy} target="_blank" rel="noopener noreferrer">
+                    Política de Privacidade
+                  </a>{' '}
+                  antes de confirmar.
+                </p>
+              </div>
+            ) : (
+              <p className={styles.error} role="status">
+                A contratação está temporariamente indisponível enquanto os documentos legais são
+                finalizados.
+              </p>
+            )}
 
             {error ? (
               <p className={styles.error} role="alert">
@@ -458,7 +484,11 @@ export function PlanSelector({ token }: { token: string }) {
               </p>
             ) : null}
 
-            <Button className={styles.submit} size="lg" disabled={state === 'SUBMITTING'}>
+            <Button
+              className={styles.submit}
+              size="lg"
+              disabled={state === 'SUBMITTING' || !legalDocumentsAvailable}
+            >
               {state === 'SUBMITTING' ? 'Processando com segurança…' : ctaLabel(method)}
             </Button>
             <p className={styles.chargeSummary}>
