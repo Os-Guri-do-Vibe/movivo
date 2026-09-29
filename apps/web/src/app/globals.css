@@ -97,6 +97,16 @@
   --chart-4: var(--petroleo-vivo);
   --chart-5: var(--coral-vivo);
 
+  /*
+   * Estado "favorito" (estrela do RT no catálogo de exercícios). Não é cor de marca:
+   * é um token de ESTADO, usado só no ícone preenchido. O preenchimento dourado sozinho
+   * dá 1,85:1 sobre o card branco — reprova em 1.4.11 —, então o contorno usa um âmbar
+   * escuro (5,02:1 sobre branco, 4,39:1 sobre o hover `--accent`). No escuro o próprio
+   * dourado já passa (6,46:1 sobre o card Petróleo) e contorno = preenchimento.
+   */
+  --favorite: #f5b301;
+  --favorite-stroke: #b45309;
+
   /* Cantos suaves — arquétipo Mentor-acessível de Gabriel, nunca vértice cortante. */
   --radius: 0.75rem;
 }
@@ -138,6 +148,9 @@
   --chart-3: #0a7d52;
   --chart-4: var(--nevoa-suave);
   --chart-5: var(--coral-vivo);
+
+  --favorite: #f5b301; /* 6,46:1 sobre --card; 5,47:1 sobre o hover --accent */
+  --favorite-stroke: var(--favorite);
 }
 
 /*
@@ -260,6 +273,8 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-favorite: var(--favorite);
+  --color-favorite-stroke: var(--favorite-stroke);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

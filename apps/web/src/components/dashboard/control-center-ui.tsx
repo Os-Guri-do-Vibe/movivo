@@ -47,7 +47,9 @@ export function useControlCenterResource<T>(load: (signal?: AbortSignal) => Prom
     return () => controller.abort();
   }, [refresh]);
 
-  return { data, error, forbidden, loading, refresh };
+  // `setData`: para mutações cuja resposta já É o recurso atualizado (ex.: favoritar no
+  // catálogo de exercícios) — sincroniza sem um segundo GET nem o piscar de `loading`.
+  return { data, error, forbidden, loading, refresh, setData };
 }
 
 export function SectorHeader({
