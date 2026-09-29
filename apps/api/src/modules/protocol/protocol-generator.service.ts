@@ -231,21 +231,26 @@ function phaseDurationBlock(): string {
 }
 
 /**
- * Ordem da BASE DE REFERÊNCIA dentro do conjunto JÁ seguro/viável (achado 2026-09-26).
- * Equipamento (contexto do aluno) é critério primário; favorito do RT (global, sem
- * contexto do aluno) é só desempate dentro da mesma faixa. Sort estável: sem favoritos,
- * a ordem é idêntica à anterior a esta mudança.
+ * Ordem da BASE DE REFERÊNCIA dentro do conjunto JÁ seguro/viável (achado 2026-09-26,
+ * revisto em 2026-09-29). Favorito do RT é o critério PRIMÁRIO; equipamento (academia/
+ * condomínio) é o segundo: favorito com equipamento > favorito sem equipamento >
+ * equipamento > resto. Validado pelo Victor com 42 chamadas reais ao deepseek-v4-pro
+ * (cobertura de favoritos 84%→88% na academia, 73%→100% no condomínio, sem efeito
+ * colateral) — com o favorito só desempatando dentro da faixa de equipamento, favorito sem
+ * equipamento ficava enterrado atrás de toda a faixa com equipamento.
+ *
+ * Segurança não muda: local/nível/contraindicação são FILTRO, aplicado antes desta ordem.
+ * Sort estável: sem favoritos, a ordem é idêntica à anterior aos favoritos.
  */
 export function compareReferencePriority(
   a: CatalogExercise,
   b: CatalogExercise,
   equipmentFirst: boolean,
 ): number {
-  if (equipmentFirst) {
-    const byEquipment = Number(b.equipment.length > 0) - Number(a.equipment.length > 0);
-    if (byEquipment !== 0) return byEquipment;
-  }
-  return Number(b.isFavorite === true) - Number(a.isFavorite === true);
+  const byFavorite = Number(b.isFavorite === true) - Number(a.isFavorite === true);
+  if (byFavorite !== 0) return byFavorite;
+  if (equipmentFirst) return Number(b.equipment.length > 0) - Number(a.equipment.length > 0);
+  return 0;
 }
 
 /** Ordem de nível, para filtrar exercícios até o nível do usuário. */
@@ -723,7 +728,8 @@ export class ProtocolGeneratorService {
    *
    * Achado 2026-09-26: separado da formatação (`catalogContext`) para que o
    * `buildSystemPrompt` saiba se sobrou algum favorito do RT DEPOIS do filtro — o favorito
-   * nunca entra no filtro (eixo de segurança), só no desempate da ordem.
+   * nunca entra no filtro (eixo de segurança), só na ORDEM (critério primário desde
+   * 2026-09-29, ver `compareReferencePriority`).
    */
   private referenceBase(constraints: UserConstraints): CatalogExercise[] {
     const maxLevel = LEVEL_ORDER[constraints.level];
@@ -739,11 +745,31 @@ export class ProtocolGeneratorService {
     // Reforço estrutural do `equipmentPriorityBlock`: em local com equipamento robusto,
     // lista as opções com equipamento primeiro. O texto do prompt pode ser ignorado; a
     // ORDEM dos itens que o modelo lê não depende de obediência — é o mesmo raciocínio já
-    // aplicado ao filtro de local/nível/contraindicação logo acima. Favorito do RT só
-    // desempata dentro da mesma faixa (`compareReferencePriority`).
+    // aplicado ao filtro de local/nível/contraindicação logo acima. Favorito do RT vem
+    // antes de tudo; equipamento é o segundo critério (`compareReferencePriority`).
     const equipmentFirst =
       constraints.location === 'FULL_GYM' || constraints.location === 'CONDO_GYM';
     return [...filtered].sort((a, b) => compareReferencePriority(a, b, equipmentFirst));
+  }
+
+  /**
+   * Instrumentação pós-deploy dos favoritos do RT (2026-09-29): quantos favoritos a base
+   * DESTE aluno oferecia (mesmo `referenceBase` do prompt, nunca um filtro paralelo), quantos
+   * exercícios prescritos são favoritos e o total de exercícios prescritos. Só contagens —
+   * nenhum id de exercício nem dado do titular.
+   */
+  favoriteUsage(
+    constraints: UserConstraints,
+    structure: ProtocolStructure,
+  ): { favoritesInBase: number; favoritesPrescribed: number; slots: number } {
+    const favoritesInBase = this.referenceBase(constraints).filter(
+      (e) => e.isFavorite === true,
+    ).length;
+    const prescribed = structure.sessions.flatMap((session) => session.exercises);
+    const favoritesPrescribed = prescribed.filter(
+      (exercise) => this.catalog.getById(exercise.exerciseId)?.isFavorite === true,
+    ).length;
+    return { favoritesInBase, favoritesPrescribed, slots: prescribed.length };
   }
 
   /** Base de referência já filtrada/ordenada, compacta para caber no cache do prompt. */

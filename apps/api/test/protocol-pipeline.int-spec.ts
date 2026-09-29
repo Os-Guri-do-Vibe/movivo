@@ -87,7 +87,9 @@ function fakeStructure(goal: ProtocolStructure['goal']): ProtocolStructure {
 }
 
 /** Fake do gerador: throw se `injuriesRaw` pede DLQ; senão devolve o protocolo canônico. */
-const fakeGenerator: Pick<ProtocolGeneratorService, 'generate'> = {
+const fakeGenerator: Pick<ProtocolGeneratorService, 'generate' | 'favoriteUsage'> = {
+  // Instrumentação de favoritos (2026-09-29) — o worker loga só as contagens.
+  favoriteUsage: () => ({ favoritesInBase: 0, favoritesPrescribed: 0, slots: 0 }),
   async generate(command: GenerateProtocolCommand): Promise<GenerateProtocolResult> {
     if (command.constraints.injuriesRaw.some((i) => i.includes('forcar-dlq'))) {
       throw new Error('LLM indisponível (fake DLQ)');

@@ -171,6 +171,7 @@ function makeWorker(deps: Deps = {}) {
 
   const generator = {
     generate: vi.fn(() => Promise.resolve(genResult)),
+    favoriteUsage: vi.fn(() => ({ favoritesInBase: 4, favoritesPrescribed: 2, slots: 9 })),
   } as unknown as ProtocolGeneratorService;
 
   const validation = {
@@ -259,6 +260,27 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
       { userId: 'u1', protocolId: 'p1' },
       { delay: 60 * 60 * 1000, jobId: 'auto-release-p1' },
     );
+  });
+
+  it('loga o uso de favoritos do RT (só contagens) depois de validar e antes de persistir', async () => {
+    const { worker, generator, repository, logger } = makeWorker({ action: 'PASS' });
+    await worker.process(job());
+
+    const plannedContent = (repository.persist as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
+      ?.content;
+    expect(generator.favoriteUsage).toHaveBeenCalledWith(
+      expect.objectContaining({ goal: expect.any(String) }),
+      plannedContent,
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      { userId: 'u1', favoritesInBase: 4, favoritesPrescribed: 2, slots: 9 },
+      'uso de favoritos do RT no protocolo gerado',
+    );
+    const usageOrder = (generator.favoriteUsage as ReturnType<typeof vi.fn>).mock
+      .invocationCallOrder[0];
+    const persistOrder = (repository.persist as ReturnType<typeof vi.fn>).mock
+      .invocationCallOrder[0];
+    expect(usageOrder).toBeLessThan(persistOrder ?? 0);
   });
 
   /**
