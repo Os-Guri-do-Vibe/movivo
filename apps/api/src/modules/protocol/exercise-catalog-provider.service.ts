@@ -16,7 +16,7 @@
  * (nunca vazio) e é substituído em background por `refresh()` — que roda no boot
  * (`onModuleInit`) e sempre que o admin publica/retira uma entrada (`invalidate()`).
  */
-import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { desc, sql } from 'drizzle-orm';
 
 import { TenantDatabase } from '../../core/database/tenant-database.service';
@@ -29,12 +29,28 @@ import {
 
 const REFRESH_MS = 5 * 60_000;
 
+/**
+ * Campos de log de uma falha de banco (validação 2026-09-29, int-spec dos favoritos). O
+ * Drizzle embrulha o erro do driver: `String(error)` vira só `"Failed query: select ...
+ * params: "` e o motivo real (`permission denied for table ...`, SQLSTATE `42501`) fica em
+ * `error.cause` — sem isto o warn em produção diria QUE falhou, nunca POR QUE.
+ */
+function dbErrorFields(error: unknown): { err: string; cause?: string; code?: string } {
+  const cause = error instanceof Error ? error.cause : undefined;
+  const code = (cause as { code?: unknown } | undefined)?.code;
+  return {
+    err: String(error),
+    ...(cause !== undefined ? { cause: String(cause) } : {}),
+    ...(typeof code === 'string' ? { code } : {}),
+  };
+}
+
 /* v8 ignore start -- ramo sintético do `emitDecoratorMetadata` (design:paramtypes), não
  * lógica de aplicação: mesmo achado de `validation.service.ts`, independe de argumento
  * passado ao construtor. */
 @Injectable()
 /* v8 ignore stop */
-export class ExerciseCatalogProvider implements OnModuleInit {
+export class ExerciseCatalogProvider implements OnModuleInit, OnModuleDestroy {
   /**
    * `Logger` do Nest (roteado ao pino por `app.useLogger` em `main.ts`), e não `PinoLogger`
    * injetado: injetar mudaria a assinatura do construtor usada pelos ~10 `new
@@ -59,8 +75,25 @@ export class ExerciseCatalogProvider implements OnModuleInit {
     if (!this.db) return;
     await this.ensureBootstrap();
     await this.refresh();
-    this.refreshTimer = setInterval(() => void this.refresh(), REFRESH_MS);
+    // Validação 2026-09-29: era `() => void this.refresh()` — uma queda momentânea do banco
+    // no tick virava rejeição NÃO tratada, e o Node (>=15) derruba o processo inteiro da API
+    // (worker de geração incluso). No timer a falha só é logada: o snapshot anterior segue
+    // valendo e o próximo tick (ou um `invalidate()`) tenta de novo.
+    this.refreshTimer = setInterval(() => {
+      this.refresh().catch((error: unknown) => {
+        this.logger.warn(
+          { event: 'exercise_catalog_refresh_failed', ...dbErrorFields(error) },
+          'refresh periódico do catálogo falhou — mantendo o snapshot anterior',
+        );
+      });
+    }, REFRESH_MS);
     this.refreshTimer.unref?.();
+  }
+
+  /** Sem isto o timer sobrevive ao `app.close()` e bate num pool já encerrado. */
+  onModuleDestroy(): void {
+    if (this.refreshTimer) clearInterval(this.refreshTimer);
+    this.refreshTimer = null;
   }
 
   getAll(): readonly CatalogExercise[] {
@@ -142,7 +175,7 @@ export class ExerciseCatalogProvider implements OnModuleInit {
       return new Set(rows.map((row) => row.exerciseKey));
     } catch (error) {
       this.logger.warn(
-        { event: 'exercise_catalog_favorites_read_failed', err: String(error) },
+        { event: 'exercise_catalog_favorites_read_failed', ...dbErrorFields(error) },
         'leitura de favoritos do catálogo falhou — snapshot segue atualizado, sem favoritos',
       );
       return new Set();

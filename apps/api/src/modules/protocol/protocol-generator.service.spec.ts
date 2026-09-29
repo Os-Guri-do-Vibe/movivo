@@ -390,7 +390,8 @@ describe('ProtocolGeneratorService', () => {
 });
 
 // Achado 2026-09-26: favoritos do RT CREF no painel "Exercícios" viram PREFERÊNCIA de
-// prescrição (desempate), nunca eixo de segurança — o filtro da base não muda.
+// prescrição (critério primário da ORDEM desde 2026-09-29), nunca eixo de segurança — o
+// filtro da base não muda.
 describe('favoritos do RT na BASE DE REFERÊNCIA (achado 2026-09-26)', () => {
   const FAVORITE_MARKER = 'preferido pelo profissional CREF: sim';
   const FAVORITE_BLOCK_HEADER = 'PREFERÊNCIA DE PRESCRIÇÃO DO PROFISSIONAL CREF';
@@ -474,22 +475,26 @@ describe('favoritos do RT na BASE DE REFERÊNCIA (achado 2026-09-26)', () => {
     }
   });
 
-  it('FULL_GYM: equipamento é critério primário, favorito só desempata dentro da faixa', async () => {
+  it('FULL_GYM: favorito é critério primário, equipamento é o segundo (revisão 2026-09-29)', async () => {
     const favorites = ['supino_reto_halter', 'roda_abdominal']; // com equip / sem equip
     const system = await systemPromptFor(baseConstraints, catalogWithFavorites(favorites));
     const ids = referenceBaseLines(system).map(lineId);
     const rank = (id: string): number => {
       const exercise = EXERCISE_BY_ID.get(id);
       if (!exercise) throw new Error(`id fora do catálogo no prompt: ${id}`);
-      return 2 * Number(exercise.equipment.length > 0) + Number(favorites.includes(id));
+      return 2 * Number(favorites.includes(id)) + Number(exercise.equipment.length > 0);
     };
     const ranks = ids.map(rank);
 
-    // [equip+fav] > [equip] > [sem equip+fav] > [sem equip] — ordem não-crescente.
+    // [fav+equip] > [fav sem equip] > [equip] > [sem equip] — ordem não-crescente.
     expect(ranks).toEqual([...ranks].sort((a, b) => b - a));
     expect(new Set(ranks)).toEqual(new Set([3, 2, 1, 0]));
     expect(ids[0]).toBe('supino_reto_halter');
-    expect(ids[ranks.indexOf(1)]).toBe('roda_abdominal');
+    expect(ids[1]).toBe('roda_abdominal');
+    // Não favoritos mantêm a ordem anterior (sort estável): equipamento antes, depois o resto.
+    expect(ids.slice(2)).toEqual(
+      legacyOrderIds(baseConstraints).filter((id) => !favorites.includes(id)),
+    );
     // Bloco presente, depois da DURAÇÃO DO MESOCICLO e imediatamente antes da BASE.
     expect(system).toContain(`${rtFavoritePreferenceBlock()}\n\n${BASE_HEADER}`);
     expect(system.indexOf('DURAÇÃO DO MESOCICLO')).toBeLessThan(
@@ -571,6 +576,33 @@ describe('favoritos do RT na BASE DE REFERÊNCIA (achado 2026-09-26)', () => {
     expect(block).not.toMatch(/\bcura\b/i);
     expect(block).not.toMatch(/garantid/i);
     expect(block).toContain('Você atua como ferramenta desse profissional');
+  });
+
+  it('favoriteUsage(): favoritos na base filtrada, favoritos prescritos e total de slots', () => {
+    const catalog = catalogWithFavorites([
+      'supino_reto_halter',
+      'roda_abdominal',
+      'cadeira_flexora_maquina', // vetada por KNEE: não conta como "na base"
+    ]);
+    const { service } = makeService([], undefined, catalog);
+    const structure = {
+      sessions: [
+        { exercises: [{ exerciseId: 'supino_reto_halter' }, { exerciseId: 'roda_abdominal' }] },
+        { exercises: [{ exerciseId: 'agachamento_barra' }, { exerciseId: 'supino_reto_halter' }] },
+      ],
+    } as unknown as Parameters<typeof service.favoriteUsage>[1];
+
+    expect(service.favoriteUsage({ ...baseConstraints, injuryTags: ['KNEE'] }, structure)).toEqual({
+      favoritesInBase: 2,
+      favoritesPrescribed: 3,
+      slots: 4,
+    });
+    // Sem favoritos (bootstrap, `isFavorite` undefined): tudo zero, menos os slots.
+    expect(makeService([]).service.favoriteUsage(baseConstraints, structure)).toEqual({
+      favoritesInBase: 0,
+      favoritesPrescribed: 0,
+      slots: 4,
+    });
   });
 });
 

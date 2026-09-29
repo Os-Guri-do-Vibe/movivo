@@ -16,6 +16,12 @@ describe('allowlist de mutações do Control Center', () => {
     `ai/methodology/${ID}/publish`,
     `ai/methodology/${ID}/rollback`,
     'ai/guardrails',
+    'ai/exercise-catalog',
+    'ai/exercise-catalog/retire',
+    // Favoritos do RT: sem estas duas entradas o BFF devolvia 404 e a estrela nunca
+    // gravava em produção (bug 2026-09-29).
+    'ai/exercise-catalog/favorite',
+    'ai/exercise-catalog/unfavorite',
   ])('autoriza somente a mutação conhecida %s', (path) => {
     expect(isAllowedControlMutationPath(path)).toBe(true);
   });
@@ -27,6 +33,12 @@ describe('allowlist de mutações do Control Center', () => {
     `ai/knowledge/${ID}/content`,
     `ai/methodology/${ID}/delete`,
     `ai/methodology/${ID}/review/extra`,
+    // Parecidos com os de favorito, mas não listados: a allowlist é por igualdade exata.
+    'ai/exercise-catalog/favorites',
+    'ai/exercise-catalog/favorite/extra',
+    'ai/exercise-catalog/unfavorite-all',
+    'ai/exercise-catalog/Favorite',
+    'ai/exercise-catalog/delete',
   ])('recusa o caminho não autorizado %s', (path) => {
     expect(isAllowedControlMutationPath(path)).toBe(false);
   });

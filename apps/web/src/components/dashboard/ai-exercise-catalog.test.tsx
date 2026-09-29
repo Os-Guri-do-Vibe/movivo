@@ -436,6 +436,17 @@ describe('AiExerciseCatalogDashboard', () => {
   });
 
   it('favorita um exercício não favoritado e desfavorita um já favoritado', async () => {
+    favoriteExerciseCatalogEntry.mockResolvedValue(
+      buildResponse([supinoAntigo, { ...supino, isFavorite: true }, agachamento, flexaoRetirada]),
+    );
+    unfavoriteExerciseCatalogEntry.mockResolvedValue(
+      buildResponse([
+        supinoAntigo,
+        { ...supino, isFavorite: true },
+        { ...agachamento, isFavorite: false },
+        flexaoRetirada,
+      ]),
+    );
     const user = userEvent.setup();
     render(<AiExerciseCatalogDashboard canWrite />);
     await screen.findByText('Supino reto');
@@ -452,6 +463,9 @@ describe('AiExerciseCatalogDashboard', () => {
       expect(favoriteExerciseCatalogEntry).toHaveBeenCalledWith({ exerciseKey: 'supino_reto' }),
     );
     expect(unfavoriteExerciseCatalogEntry).not.toHaveBeenCalled();
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '“Supino reto” adicionado aos favoritos.',
+    );
 
     await user.click(removerAgachamento);
     await waitFor(() =>
@@ -459,5 +473,321 @@ describe('AiExerciseCatalogDashboard', () => {
         exerciseKey: 'agachamento_livre',
       }),
     );
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '“Agachamento livre” removido dos favoritos.',
+    );
+    // A resposta da mutação já é o catálogo: sincroniza sem um segundo GET.
+    expect(getExerciseCatalog).toHaveBeenCalledTimes(1);
+  });
+
+  it('estrela favoritada é dourada e preenchida (tokens de estado), a não favoritada não', async () => {
+    render(<AiExerciseCatalogDashboard canWrite />);
+    await screen.findByText('Supino reto');
+
+    const favorita = starIcon('Remover Agachamento livre dos favoritos');
+    expect(favorita).toHaveClass('fill-favorite', 'text-favorite-stroke');
+    const comum = starIcon('Favoritar Supino reto');
+    expect(comum).not.toHaveClass('fill-favorite');
+    expect(comum).not.toHaveClass('text-favorite-stroke');
+  });
+
+  it('atualização otimista: a estrela acende e o item sobe antes da API responder', async () => {
+    const pending = deferred<ExerciseCatalogResponse>();
+    favoriteExerciseCatalogEntry.mockReturnValue(pending.promise);
+    const user = userEvent.setup();
+    render(<AiExerciseCatalogDashboard canWrite />);
+    await screen.findByText('Supino reto');
+    expect(listedNames()).toEqual(['Agachamento livre', 'Supino reto']);
+
+    await user.click(screen.getByRole('button', { name: 'Favoritar Supino reto' }));
+
+    // Ainda sem resposta do servidor: estado e posição já refletem o clique.
+    const star = screen.getByRole('button', { name: 'Remover Supino reto dos favoritos' });
+    expect(star).toHaveAttribute('aria-pressed', 'true');
+    expect(star).toBeEnabled();
+    expect(starIcon('Remover Supino reto dos favoritos')).toHaveClass('fill-favorite');
+    // Os dois são favoritos agora: ordem do catálogo mantida dentro do grupo.
+    expect(listedNames()).toEqual(['Supino reto', 'Agachamento livre']);
+    // O item reordenado não perde o foco (a linha foi movida no DOM).
+    expect(star).toHaveFocus();
+
+    // Clique repetido durante a chamada em voo é ignorado — nada de dupla requisição.
+    await user.click(star);
+    expect(favoriteExerciseCatalogEntry).toHaveBeenCalledTimes(1);
+    expect(unfavoriteExerciseCatalogEntry).not.toHaveBeenCalled();
+
+    pending.resolve(
+      buildResponse([supinoAntigo, { ...supino, isFavorite: true }, agachamento, flexaoRetirada]),
+    );
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '“Supino reto” adicionado aos favoritos.',
+    );
+    expect(
+      screen.getByRole('button', { name: 'Remover Supino reto dos favoritos' }),
+    ).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('falha ao favoritar reverte a estrela e a posição, e mostra a mensagem do servidor', async () => {
+    const pending = deferred<ExerciseCatalogResponse>();
+    favoriteExerciseCatalogEntry.mockReturnValue(pending.promise);
+    const user = userEvent.setup();
+    render(<AiExerciseCatalogDashboard canWrite />);
+    await screen.findByText('Supino reto');
+
+    await user.click(screen.getByRole('button', { name: 'Favoritar Supino reto' }));
+    expect(
+      screen.getByRole('button', { name: 'Remover Supino reto dos favoritos' }),
+    ).toHaveAttribute('aria-pressed', 'true');
+
+    pending.reject(new ControlCenterApiError(400, 'Exercício retirado do catálogo.'));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Exercício retirado do catálogo.');
+    const star = screen.getByRole('button', { name: 'Favoritar Supino reto' });
+    expect(star).toHaveAttribute('aria-pressed', 'false');
+    expect(starIcon('Favoritar Supino reto')).not.toHaveClass('fill-favorite');
+    expect(listedNames()).toEqual(['Agachamento livre', 'Supino reto']);
+  });
+
+  it('a resposta do servidor prevalece sobre o estado otimista', async () => {
+    // Servidor devolve o catálogo SEM o favorito (ex.: outro RT desfez em paralelo).
+    favoriteExerciseCatalogEntry.mockResolvedValue(response);
+    const user = userEvent.setup();
+    render(<AiExerciseCatalogDashboard canWrite />);
+    await screen.findByText('Supino reto');
+
+    await user.click(screen.getByRole('button', { name: 'Favoritar Supino reto' }));
+    expect(await screen.findByRole('button', { name: 'Favoritar Supino reto' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('favoritos vêm primeiro no conjunto inteiro, antes de paginar', async () => {
+    const versions = manyPublishedVersions(55).map((v) =>
+      v.exerciseKey === 'exercicio_52' ? { ...v, isFavorite: true } : v,
+    );
+    getExerciseCatalog.mockReset().mockResolvedValue(buildResponse(versions));
+    const user = userEvent.setup();
+    render(<AiExerciseCatalogDashboard canWrite />);
+    await screen.findByText('Exercício 00');
+
+    // Pela ordem do catálogo o 52 estaria na página 2; favorito, abre a página 1.
+    let names = listedNames();
+    expect(names).toHaveLength(50);
+    expect(names[0]).toBe('Exercício 52');
+    expect(names[1]).toBe('Exercício 00');
+    expect(names[49]).toBe('Exercício 48');
+
+    const nav = screen.getByRole('navigation', { name: 'Paginação do catálogo de exercícios' });
+    await user.click(within(nav).getByRole('button', { name: 'Próxima página' }));
+    names = listedNames();
+    expect(names).toEqual([
+      'Exercício 49',
+      'Exercício 50',
+      'Exercício 51',
+      'Exercício 53',
+      'Exercício 54',
+    ]);
+
+    // Favoritar na página 2 sobe o item para a página 1 — a página atual não muda.
+    favoriteExerciseCatalogEntry.mockReturnValue(new Promise(() => {}));
+    await user.click(screen.getByRole('button', { name: 'Favoritar Exercício 51' }));
+    expect(within(nav).getByText('2 / 2')).toBeVisible();
+    expect(listedNames()).toEqual([
+      'Exercício 48',
+      'Exercício 49',
+      'Exercício 50',
+      'Exercício 53',
+      'Exercício 54',
+    ]);
+    await user.click(within(nav).getByRole('button', { name: 'Página anterior' }));
+    expect(listedNames().slice(0, 3)).toEqual(['Exercício 51', 'Exercício 52', 'Exercício 00']);
+  });
+
+  describe('filtro de favoritos', () => {
+    beforeEach(() => {
+      getExerciseCatalog.mockReset().mockResolvedValue(filterResponse);
+    });
+
+    it('"Somente favoritos" e "Não favoritos" só valem após "Buscar", com chip e contagem', async () => {
+      const user = userEvent.setup();
+      render(<AiExerciseCatalogDashboard />);
+      await screen.findByText('Supino reto');
+      expect(listedNames()).toEqual([
+        'Agachamento livre',
+        'Remada curvada',
+        'Supino reto',
+        'Prancha',
+      ]);
+
+      await chooseFavorite(user, 'Somente favoritos');
+      // Rascunho: nada muda até "Buscar".
+      expect(listedNames()).toHaveLength(4);
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(listedNames()).toEqual(['Agachamento livre', 'Remada curvada']);
+      expect(screen.getByText('Favoritos: somente favoritos')).toBeVisible();
+      expect(countText()).toBe('2 exercício(s) encontrado(s) para o filtro aplicado.');
+
+      await chooseFavorite(user, 'Não favoritos');
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(listedNames()).toEqual(['Supino reto', 'Prancha']);
+      expect(screen.getByText('Favoritos: não favoritos')).toBeVisible();
+
+      await chooseFavorite(user, 'Todos');
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(listedNames()).toHaveLength(4);
+      expect(screen.queryByText(/^Favoritos:/)).not.toBeInTheDocument();
+      expect(countText()).toBe('4 exercício(s) cadastrado(s) no total.');
+    });
+
+    it('combina (AND) com Nome, Músculo e Local', async () => {
+      const user = userEvent.setup();
+      render(<AiExerciseCatalogDashboard />);
+      await screen.findByText('Supino reto');
+
+      // Favoritos + Local "Em casa": só o agachamento (a remada é de academia).
+      await chooseFavorite(user, 'Somente favoritos');
+      await user.click(screen.getByRole('checkbox', { name: 'Em casa' }));
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(listedNames()).toEqual(['Agachamento livre']);
+
+      // Troca Local por Músculo "costas": só a remada.
+      await user.click(screen.getByRole('button', { name: 'Remover filtro Local' }));
+      await user.click(screen.getByRole('checkbox', { name: 'costas' }));
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(listedNames()).toEqual(['Remada curvada']);
+
+      // Não favoritos + Músculo "costas": vazio — a remada é favorita.
+      await chooseFavorite(user, 'Não favoritos');
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(screen.getByText('Nenhum exercício encontrado.')).toBeVisible();
+      expect(countText()).toBe('0 exercício(s) encontrado(s) para o filtro aplicado.');
+
+      // Não favoritos + Nome "pran": só a prancha.
+      await user.click(screen.getByRole('button', { name: 'Remover filtro Músculo' }));
+      await user.type(screen.getByPlaceholderText('Nome do exercício'), 'pran');
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(listedNames()).toEqual(['Prancha']);
+      expect(screen.getByText('Nome: "pran"')).toBeVisible();
+      expect(screen.getByText('Favoritos: não favoritos')).toBeVisible();
+    });
+
+    it('remover o chip ou "Limpar filtro" desfaz também o filtro de favoritos', async () => {
+      const user = userEvent.setup();
+      render(<AiExerciseCatalogDashboard />);
+      await screen.findByText('Supino reto');
+
+      await chooseFavorite(user, 'Somente favoritos');
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(listedNames()).toHaveLength(2);
+
+      await user.click(screen.getByRole('button', { name: 'Remover filtro Favoritos' }));
+      expect(listedNames()).toHaveLength(4);
+      expect(favoriteSelect()).toHaveTextContent('Todos');
+
+      await chooseFavorite(user, 'Não favoritos');
+      await user.type(screen.getByPlaceholderText('Nome do exercício'), 'supino');
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(listedNames()).toEqual(['Supino reto']);
+
+      await user.click(screen.getByRole('button', { name: 'Limpar filtro' }));
+      expect(listedNames()).toHaveLength(4);
+      expect(favoriteSelect()).toHaveTextContent('Todos');
+      expect(screen.getByPlaceholderText('Nome do exercício')).toHaveValue('');
+      expect(screen.queryByText(/^Favoritos:/)).not.toBeInTheDocument();
+    });
+
+    it('nova busca por favoritos volta para a página 1', async () => {
+      const versions = manyPublishedVersions(55).map((v, index) =>
+        index % 2 === 0 ? v : { ...v, isFavorite: true },
+      );
+      getExerciseCatalog.mockReset().mockResolvedValue(buildResponse(versions));
+      const user = userEvent.setup();
+      render(<AiExerciseCatalogDashboard />);
+      await screen.findByText('Exercício 00');
+
+      const nav = screen.getByRole('navigation', {
+        name: 'Paginação do catálogo de exercícios',
+      });
+      await user.click(within(nav).getByRole('button', { name: 'Próxima página' }));
+      expect(within(nav).getByText('2 / 2')).toBeVisible();
+
+      await chooseFavorite(user, 'Não favoritos');
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      // 28 não favoritos (índices pares) cabem numa página só: sem paginação, página 1.
+      expect(listedNames()).toHaveLength(28);
+      expect(listedNames()[0]).toBe('Exercício 00');
+      expect(
+        screen.queryByRole('navigation', { name: 'Paginação do catálogo de exercícios' }),
+      ).not.toBeInTheDocument();
+    });
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* Auxiliares                                                                 */
+/* -------------------------------------------------------------------------- */
+
+const remada: ExerciseCatalogEntryVersion = {
+  ...supino,
+  id: '55555555-5555-4555-8555-555555555555',
+  exerciseKey: 'remada_curvada',
+  name: 'Remada curvada',
+  pattern: 'HORIZONTAL_PULL',
+  muscleGroups: ['costas'],
+  locations: ['FULL_GYM'],
+  isFavorite: true,
+};
+
+const prancha: ExerciseCatalogEntryVersion = {
+  ...supino,
+  id: '66666666-6666-4666-8666-666666666666',
+  exerciseKey: 'prancha',
+  name: 'Prancha',
+  pattern: 'ISOLATION',
+  muscleGroups: ['core'],
+  locations: ['HOME'],
+  isFavorite: false,
+};
+
+/** Ordem do catálogo: supino, agachamento★, remada★, prancha → na tela, favoritos antes. */
+const filterResponse = buildResponse([supino, agachamento, remada, prancha]);
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function listedNames(): string[] {
+  const list = screen.getByRole('list', { name: 'Catálogo de exercícios' });
+  return within(list)
+    .getAllByRole('heading', { level: 3 })
+    .map((heading) => heading.textContent ?? '');
+}
+
+function starIcon(buttonName: string): SVGElement {
+  const icon = screen.getByRole('button', { name: buttonName }).querySelector('svg');
+  if (!icon) throw new Error(`ícone da estrela não encontrado em "${buttonName}"`);
+  return icon;
+}
+
+function favoriteSelect(): HTMLElement {
+  return screen.getByRole('combobox', { name: /Favoritos/ });
+}
+
+async function chooseFavorite(user: ReturnType<typeof userEvent.setup>, option: string) {
+  await user.click(favoriteSelect());
+  await user.click(await screen.findByRole('option', { name: option }));
+}
+
+function countText(): string {
+  return (
+    screen.getByText(/exercício\(s\) (encontrado|cadastrado)/).textContent?.replace(/\s+/g, ' ') ??
+    ''
+  ).trim();
+}
