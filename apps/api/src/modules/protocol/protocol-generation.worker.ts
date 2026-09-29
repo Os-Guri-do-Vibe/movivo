@@ -192,6 +192,11 @@ export class ProtocolGenerationWorker implements OnModuleInit {
     // risco clínico do titular — é sobre o próprio conteúdo do protocolo nunca ter
     // passado limpo pelo validador. Nunca sai sozinho por auto-liberação.
     const mandatory = constraints.requiresProfessionalReview || plan.usedFallbackTemplate;
+    // Verificação pós-deploy da ordenação por favoritos (2026-09-29): só contagens.
+    this.logger.info(
+      { userId, ...this.generator.favoriteUsage(constraints, plan.content) },
+      'uso de favoritos do RT no protocolo gerado',
+    );
     const persisted = await this.repository.persist({
       userId,
       content: plan.content,

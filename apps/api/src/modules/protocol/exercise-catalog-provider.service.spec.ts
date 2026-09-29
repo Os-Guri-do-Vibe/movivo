@@ -193,6 +193,101 @@ describe('ExerciseCatalogProvider.refresh() — favoritos do RT (achado 2026-09-
   });
 });
 
+describe('ExerciseCatalogProvider — log de falha com a causa real (validação 2026-09-29)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('inclui cause/code do erro do driver embrulhado pelo Drizzle no warn de favoritos', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const driverError = Object.assign(
+      new Error('permission denied for table exercise_catalog_favorites'),
+      { code: '42501' },
+    );
+    const { db } = dbWith(
+      [row({ exerciseKey: 'flexao' })],
+      new Error('Failed query: select "exercise_key" from "exercise_catalog_favorites"', {
+        cause: driverError,
+      }),
+    );
+
+    await new ExerciseCatalogProvider(db).refresh();
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'exercise_catalog_favorites_read_failed',
+        err: expect.stringContaining('Failed query'),
+        cause: expect.stringContaining('permission denied'),
+        code: '42501',
+      }),
+      expect.any(String),
+    );
+  });
+
+  it('erro sem cause não inventa campos cause/code', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const { db } = dbWith([row({ exerciseKey: 'flexao' })], new Error('conexão recusada'));
+
+    await new ExerciseCatalogProvider(db).refresh();
+
+    const [fields] = warn.mock.calls[0] ?? [];
+    expect(fields).toEqual({
+      event: 'exercise_catalog_favorites_read_failed',
+      err: 'Error: conexão recusada',
+    });
+  });
+});
+
+describe('ExerciseCatalogProvider — timer de refresh (validação 2026-09-29)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('falha no refresh periódico é logada, nunca vira rejeição não tratada', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    const { db, execute } = dbWith([row({ exerciseKey: 'flexao' })]);
+    execute.mockResolvedValueOnce(undefined).mockResolvedValueOnce([{ count: 5 }]);
+    const provider = new ExerciseCatalogProvider(db);
+    await provider.onModuleInit();
+    const before = provider.getAll();
+
+    vi.mocked(db.runAsSystem).mockRejectedValue(new Error('Failed query', { cause: 'ECONNRESET' }));
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await Promise.resolve();
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'exercise_catalog_refresh_failed', cause: 'ECONNRESET' }),
+      expect.stringContaining('snapshot anterior'),
+    );
+    expect(provider.getAll()).toBe(before);
+    process.off('unhandledRejection', unhandled);
+    expect(unhandled).not.toHaveBeenCalled();
+    provider.onModuleDestroy();
+  });
+
+  it('onModuleDestroy() para o timer — nenhum refresh depois do shutdown', async () => {
+    vi.useFakeTimers();
+    const { db, execute } = dbWith([row({ exerciseKey: 'flexao' })]);
+    execute.mockResolvedValueOnce(undefined).mockResolvedValueOnce([{ count: 5 }]);
+    const provider = new ExerciseCatalogProvider(db);
+    await provider.onModuleInit();
+    const callsAfterInit = vi.mocked(db.runAsSystem).mock.calls.length;
+
+    provider.onModuleDestroy();
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+
+    expect(vi.mocked(db.runAsSystem).mock.calls.length).toBe(callsAfterInit);
+  });
+
+  it('onModuleDestroy() sem timer (sem db) é no-op', () => {
+    expect(() => new ExerciseCatalogProvider().onModuleDestroy()).not.toThrow();
+  });
+});
+
 describe('ExerciseCatalogProvider.invalidate() — com TenantDatabase', () => {
   it('chama refresh() e atualiza o snapshot', async () => {
     const { db } = dbWith([row({ exerciseKey: 'novo_exercicio' })]);
