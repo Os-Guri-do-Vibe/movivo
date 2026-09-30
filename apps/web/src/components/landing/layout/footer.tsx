@@ -14,6 +14,7 @@ import landing from '../landing.module.css';
 import { SectionMotion } from '../motion/section-motion';
 import { MovivoLogo, MovivoWordmark } from '../ui/movivo-logo';
 import { TrialCta } from '../ui/pulse-button';
+import { TrackedLink } from '../ui/tracked-link';
 
 import styles from './footer.module.css';
 
@@ -110,14 +111,15 @@ export function Footer() {
                 {RESPONSIBLE_PROFESSIONAL.profession} · {crefLabel(RESPONSIBLE_PROFESSIONAL)}
               </p>
               <div className={styles.actions}>
-                <a
+                <TrackedLink
                   href={SOCIAL.instagram.url}
+                  event="footer_instagram_click"
                   className={styles.social}
                   aria-label={`Instagram ${SOCIAL.instagram.handle}`}
                   {...externalProps(SOCIAL.instagram.url)}
                 >
                   <InstagramMark className={styles.socialIcon} />
-                </a>
+                </TrackedLink>
                 <TrialCta event={LANDING_EVENTS.footerStartTrial} size="compact">
                   Começar grátis
                 </TrialCta>
