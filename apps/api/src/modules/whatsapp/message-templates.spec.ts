@@ -6,6 +6,7 @@ import {
   BUBBLE_SEPARATOR,
   confirmationCareMessage,
   confirmationMessage,
+  phoneVerificationMessage,
   protocolDeliveryPdfText,
   PROTOCOL_WAITING_DELAY_MS,
 } from './message-templates';
@@ -18,6 +19,7 @@ const FORBIDDEN = /diagn[óo]stico|tratamento|\bcura\b|garantid|garantia|prescri
 
 const allTexts = [
   confirmationMessage('Ana'),
+  phoneVerificationMessage('268267'),
   confirmationCareMessage(),
   analyzingMessage(PERSONA),
   analyzingMessage(NO_EMOJI),
@@ -89,23 +91,35 @@ describe('templates de WhatsApp (US-2.5)', () => {
     expect(confirmationCareMessage()).not.toMatch(/2 horas|em até 2h/i);
   });
 
+  it('código de verificação sai em negrito do WhatsApp (*código*)', () => {
+    expect(phoneVerificationMessage('268267')).toBe(
+      'Seu código de confirmação da MOVIVO é *268267*.\n\n' +
+        'Ele confirma que este WhatsApp é seu e é válido por 10 minutos.\n\n' +
+        'Não compartilhe este código com ninguém.',
+    );
+  });
+
   it('confirma sincronamente sem prometer prazo operacional', () => {
     expect(confirmationMessage('Ana')).toMatch(/Recebemos suas informações/i);
     expect(confirmationMessage('Ana')).not.toMatch(/2 horas|em até 2h|prazo/i);
   });
 
   it('confirmação saúda pelo primeiro nome quando disponível, e genericamente quando não', () => {
-    expect(confirmationMessage('Ana')).toMatch(/^Olá, Ana!/);
-    expect(confirmationMessage(null)).toMatch(/^Olá!/);
+    expect(confirmationMessage('Ana')).toMatch(/^Olá, Ana! 💚/);
+    expect(confirmationMessage(null)).toMatch(/^Olá! 💚/);
   });
 
   it('entrega COM PDF: saúda pelo primeiro nome (achado 2026-09-04)', () => {
     expect(protocolDeliveryPdfText('Ana')).toBe(
-      'Ana, seu treino está pronto! 💚🔥\n\n' +
-        'Montamos tudo com base nos seus objetivos, na sua rotina e nas informações que ' +
-        'você compartilhou com a gente.',
+      'Ana, seu treino está pronto. 💚\n\n' +
+        'Montamos seu protocolo considerando seus objetivos, sua rotina, sua disponibilidade e ' +
+        'tudo o que você compartilhou com a gente.\n\n' +
+        'A partir de agora, esse é o seu ponto de partida.\n\n' +
+        'Acesse seu treino, conheça cada etapa e, sempre que precisar, fale com a gente por ' +
+        'aqui.\n\n' +
+        'Agora é colocar o corpo em movimento e construir progresso, um treino de cada vez.',
     );
-    expect(protocolDeliveryPdfText(null)).toMatch(/^Seu treino está pronto! 💚🔥/);
+    expect(protocolDeliveryPdfText(null)).toMatch(/^Seu treino está pronto\. 💚/);
   });
 
   it('entrega COM PDF: sem resumo de IA é 1 bolha; com resumo vira 2 bolhas', () => {

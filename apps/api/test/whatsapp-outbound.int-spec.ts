@@ -280,7 +280,7 @@ describe('outbound WhatsApp — confirmação no submit (US-2.5)', () => {
   it('boota sem credencial AraraHQ e envia a confirmação (PAR-Q liberado)', async () => {
     const { phone: to } = await submitAnamnesis();
     const msg = await waitFor(() =>
-      sent.find((m) => m.to === to && /já começamos a preparar seu treino/i.test(m.text)),
+      sent.find((m) => m.to === to && /seu processo na MOVIVO já começou/i.test(m.text)),
     );
     // Exceção deliberada ao guardrail de menção ao CREF nesta mensagem específica
     // (`message-templates.ts`, achado 2026-08-18, a pedido do fundador).
@@ -291,7 +291,7 @@ describe('outbound WhatsApp — confirmação no submit (US-2.5)', () => {
     const { phone: to } = await submitAnamnesis(['Q2']);
     const msg = await waitFor(() => sent.find((m) => m.to === to && /revisar/i.test(m.text)));
     // variante de cuidado não promete o plano
-    expect(msg.text).not.toMatch(/já começamos a preparar seu treino/i);
+    expect(msg.text).not.toMatch(/seu processo na MOVIVO já começou/i);
   }, 30_000);
 });
 

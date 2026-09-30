@@ -38,11 +38,12 @@ export const PROTOCOL_WAITING_DELAY_MS = 30 * 60 * 1000;
 export function confirmationMessage(firstName: string | null): string {
   const greeting = firstName ? `Olá, ${firstName}!` : 'Olá!';
   return (
-    `${greeting}\n\n` +
-    'Recebemos suas informações e já começamos a preparar seu treino, levando em conta seus ' +
-    'objetivos, sua rotina e o que você respondeu no formulário.\n\n' +
-    'Assim que estiver tudo pronto, enviaremos seu treino por aqui. 💚\n\n' +
-    'Agora é só aguardar, a MOVIVO cuida do resto. 💪🏼'
+    `${greeting} 💚\n\n` +
+    'Recebemos suas informações e seu processo na MOVIVO já começou.\n\n' +
+    'Agora vamos analisar seus objetivos, sua rotina e tudo o que você compartilhou com a ' +
+    'gente para preparar um treino que realmente faça sentido para você.\n\n' +
+    'Assim que estiver pronto, você recebe tudo por aqui.\n\n' +
+    'Seu próximo movimento começa agora.'
   );
 }
 
@@ -101,8 +102,10 @@ export const PHONE_VERIFICATION_TEMPLATE = 'verificacao_numero';
  */
 export function phoneVerificationMessage(code: string): string {
   return (
-    `Seu código da MOVIVO é ${code}. Ele confirma que este WhatsApp é seu e vale por 10 minutos. ` +
-    'Nunca compartilhe este código com ninguém.'
+    // `*...*` é o negrito do WhatsApp (o `**` do markdown apareceria literal).
+    `Seu código de confirmação da MOVIVO é *${code}*.\n\n` +
+    'Ele confirma que este WhatsApp é seu e é válido por 10 minutos.\n\n' +
+    'Não compartilhe este código com ninguém.'
   );
 }
 
@@ -167,8 +170,12 @@ export function protocolDeliveryPdfText(
         'como você pediu no check-in semanal! 💚⏱️\n\n' +
         'Reduzi volume respeitando a metodologia do profissional CREF, sem trocar nenhum ' +
         'exercício — segue o protocolo atualizado em PDF.'
-      : `${firstName ? `${firstName}, seu` : 'Seu'} treino está pronto! 💚🔥\n\n` +
-        'Montamos tudo com base nos seus objetivos, na sua rotina e nas informações que você ' +
-        'compartilhou com a gente.';
+      : `${firstName ? `${firstName}, seu` : 'Seu'} treino está pronto. 💚\n\n` +
+        'Montamos seu protocolo considerando seus objetivos, sua rotina, sua disponibilidade e ' +
+        'tudo o que você compartilhou com a gente.\n\n' +
+        'A partir de agora, esse é o seu ponto de partida.\n\n' +
+        'Acesse seu treino, conheça cada etapa e, sempre que precisar, fale com a gente por ' +
+        'aqui.\n\n' +
+        'Agora é colocar o corpo em movimento e construir progresso, um treino de cada vez.';
   return aiSummary ? [intro, aiSummary].join(BUBBLE_SEPARATOR) : intro;
 }
