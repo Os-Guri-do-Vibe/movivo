@@ -153,13 +153,18 @@ export class DashboardController {
   @Roles('PROFESSIONAL', 'ADMIN')
   @ApiOperation({
     summary: 'Aprova a substituição de exercício proposta pela IA',
-    description: 'Reenvia o PDF do protocolo atualizado + resumo por WhatsApp ao aluno.',
+    description:
+      'Reenvia o PDF do protocolo atualizado + resumo por WhatsApp ao aluno. Corpo opcional: `items` traz a decisão por item (`APPROVE`, com outro `toExerciseId` opcional, ou `DISCARD`) — troca em lote. Sem corpo, aprova todos os itens como estão; todos descartados equivale a recusar a proposta.',
   })
   @ApiParam({ name: 'id', description: 'UUID da proposta de substituição.' })
   @ApiResponse({ status: 200, description: 'Substituição aprovada e entregue ao aluno.' })
   @ApiResponse({ status: 404, description: 'Proposta inexistente.' })
-  approveSubstitutionNow(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
-    return this.dashboard.approveSubstitutionNow(actor, id);
+  approveSubstitutionNow(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    return this.dashboard.approveSubstitutionNow(actor, id, body);
   }
 
   @Post('substitutions/:id/discard')
@@ -175,18 +180,19 @@ export class DashboardController {
     return this.dashboard.discardSubstitution(actor, id);
   }
 
-  @Post('substitutions/:id/add-and-approve')
+  @Post('substitutions/:id/items/:index/catalog-exercise')
   @Roles('PROFESSIONAL', 'ADMIN')
   @ApiOperation({
-    summary: 'Publica um exercício novo no catálogo e aprova a substituição',
+    summary: 'Publica um exercício novo no catálogo e o liga a um item da substituição',
     description:
-      'Requer a capability `AI_CONFIG_WRITE` além do papel (verificado explicitamente no serviço) — `PROFESSIONAL` aprova conteúdo curado, mas publicar exercício novo é decisão deliberadamente mais restrita.',
+      'Não aprova a proposta: o item vira uma troca comum e o profissional decide na tela única. Requer a capability `AI_CONFIG_WRITE` além do papel (verificado explicitamente no serviço) — `PROFESSIONAL` aprova conteúdo curado, mas publicar exercício novo é decisão deliberadamente mais restrita.',
   })
   @ApiParam({ name: 'id', description: 'UUID da proposta de substituição.' })
+  @ApiParam({ name: 'index', description: 'Posição do item na proposta (0 a 2).' })
   @ApiBody({ schema: zodSchemaToOpenApi(publishExerciseCatalogEntrySchema) })
   @ApiResponse({
     status: 200,
-    description: 'Exercício publicado no catálogo e substituição aprovada.',
+    description: 'Exercício publicado no catálogo e ligado ao item.',
   })
   @ApiResponse({ status: 400, description: 'Corpo fora do schema de publicação de catálogo.' })
   @ApiResponse({
@@ -194,12 +200,13 @@ export class DashboardController {
     description: 'Ator sem a capability AI_CONFIG_WRITE (mesmo tendo o papel PROFESSIONAL/ADMIN).',
   })
   @ApiResponse({ status: 404, description: 'Proposta inexistente.' })
-  addCatalogExerciseAndApproveSubstitution(
+  addCatalogExerciseToSubstitutionItem(
     @CurrentUser() actor: AuthenticatedUser,
     @Param('id') id: string,
+    @Param('index') index: string,
     @Body() body: unknown,
   ) {
-    return this.dashboard.addCatalogExerciseAndApproveSubstitution(actor, id, body);
+    return this.dashboard.addCatalogExerciseToSubstitutionItem(actor, id, index, body);
   }
 
   @Post('handoffs/:id/resolve')

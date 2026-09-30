@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  addCatalogExerciseToSubstitutionItem,
   approveSubstitutionNow,
   DashboardApiError,
   discardSubstitution,
@@ -19,6 +20,7 @@ import {
   protocolContent,
   protocolDetail,
   queueResponse,
+  batchSubstitutionDetail,
   substitutionDetail,
 } from '../../test/dashboard-fixtures';
 
@@ -175,6 +177,41 @@ describe('parsers do contrato do dashboard', () => {
     expect(detail.substitution).toEqual(substitutionDetail.substitution);
   });
 
+  it('troca em lote: parseia cada item (decisão, obrigatório, opções seguras)', () => {
+    const detail = parseQueueDetail(batchSubstitutionDetail);
+    expect(detail.substitution?.items).toHaveLength(3);
+    expect(detail.substitution?.items[1]).toMatchObject({
+      index: 1,
+      to: { id: null, name: 'Extensora Unilateral' },
+      catalogGap: true,
+      mandatory: true,
+      decision: 'PENDING',
+    });
+    expect(detail.substitution?.items[0]?.options.map((o) => o.id)).toEqual([
+      'agachamento_hack',
+      'afundo',
+    ]);
+  });
+
+  it('resposta de API anterior ao lote (sem `items`) vira um único item das colunas from/to', () => {
+    const legacy = {
+      ...substitutionDetail,
+      substitution: { ...substitutionDetail.substitution, items: undefined },
+    };
+    const detail = parseQueueDetail(legacy);
+    expect(detail.substitution?.items).toEqual([
+      {
+        index: 0,
+        from: { id: 'flexao', name: 'Flexão' },
+        to: { id: 'flexao_diamante', name: 'Flexão Diamante' },
+        catalogGap: false,
+        mandatory: false,
+        decision: 'PENDING',
+        options: [],
+      },
+    ]);
+  });
+
   it('recusa detalhe de substituição com estado desconhecido', () => {
     expect(() =>
       parseQueueDetail({
@@ -266,6 +303,44 @@ describe('cliente BFF same-origin', () => {
       expect((call[1] as RequestInit).method).toBe('POST');
       expect((call[1] as RequestInit).body).toBeUndefined();
     }
+  });
+
+  // Achado 2026-09-30 (troca em lote): a aprovação carrega a decisão do profissional por item.
+  it('aprova a substituição enviando a decisão por item (editar e descartar)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response(200, { status: 'ok' }));
+    vi.stubGlobal('fetch', fetchMock);
+    await approveSubstitutionNow('s1', [
+      { index: 0, action: 'APPROVE', toExerciseId: 'afundo' },
+      { index: 1, action: 'DISCARD' },
+    ]);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/dashboard/substitutions/s1/approve');
+    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toEqual({
+      items: [
+        { index: 0, action: 'APPROVE', toExerciseId: 'afundo' },
+        { index: 1, action: 'DISCARD' },
+      ],
+    });
+  });
+
+  it('liga o exercício publicado ao item certo da proposta (por posição), sem aprovar', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response(200, { attached: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    await addCatalogExerciseToSubstitutionItem('s1', 2, {
+      exerciseKey: 'extensora_unilateral',
+      changeNote: 'nota',
+      name: 'Extensora Unilateral',
+      pattern: 'ISOLATION',
+      muscleGroups: ['quadríceps'],
+      equipment: [],
+      locations: ['FULL_GYM'],
+      levels: ['INICIANTE'],
+      contraindicatedFor: [],
+      substitutes: [],
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/dashboard/substitutions/s1/items/2/catalog-exercise',
+    );
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe('POST');
   });
 
   it('propaga mensagem e detalhes seguros de validação', async () => {

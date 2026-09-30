@@ -74,3 +74,30 @@ export function applySubstitution(
   });
   return { content: { ...content, sessions }, sessionsAffected };
 }
+
+export interface SubstitutionSwap {
+  fromExerciseId: string;
+  to: CatalogExercise;
+}
+
+export interface ApplySubstitutionsResult {
+  content: ProtocolStructure;
+  /** `dayLabel`s afetados por cada troca, na mesma ordem de `swaps`. */
+  sessionsAffectedBySwap: string[][];
+}
+
+/** Aplica várias trocas em sequência (troca em lote) — cada uma sobre o resultado da anterior.
+ * Quem chama SEMPRE revalida a estrutura inteira, igual à troca única. */
+export function applySubstitutions(
+  content: ProtocolStructure,
+  swaps: readonly SubstitutionSwap[],
+): ApplySubstitutionsResult {
+  let current = content;
+  const sessionsAffectedBySwap: string[][] = [];
+  for (const swap of swaps) {
+    const applied = applySubstitution(current, swap.fromExerciseId, swap.to);
+    current = applied.content;
+    sessionsAffectedBySwap.push(applied.sessionsAffected);
+  }
+  return { content: current, sessionsAffectedBySwap };
+}

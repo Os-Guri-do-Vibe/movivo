@@ -26,9 +26,15 @@ import {
   type TenantTransaction,
 } from '../../core/database/tenant-database.service';
 import { signatureHash } from './protocol.repository';
-import { applySubstitution } from './protocol-substitution-apply';
+import { applySubstitutions } from './protocol-substitution-apply';
+import {
+  itemsOf,
+  type SubstitutionChange,
+  type SubstitutionItem,
+} from './protocol-substitution-items';
 import type { CatalogExercise, ContraindicationTag, ExerciseLevel } from './exercise-catalog';
-import type { SubstitutionConstraints } from './exercise-substitution';
+import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
+import { isViable, type SubstitutionConstraints } from './exercise-substitution';
 import { ValidationService, type ValidateProtocolInput } from './validation/validation.service';
 
 /** Mesma extração de `loadActiveProtocol` — reaproveitada por `attachCatalogExerciseAndRelease`,
@@ -100,47 +106,47 @@ export interface ActiveProtocolForSubstitution {
 
 export interface SubstitutionDiff {
   type: 'EXERCISE_SUBSTITUTION';
+  /** Espelho da 1ª troca — mantido para leitores anteriores ao lote (`items` é o completo). */
   from: { id: string; name: string };
   to: { id: string; name: string };
   sessionsAffected: string[];
+  /** Achado 2026-09-30 (troca em lote): uma entrada por troca aplicada. */
+  items?: Array<{
+    from: { id: string; name: string };
+    to: { id: string; name: string };
+    sessionsAffected: string[];
+  }>;
 }
 
 export interface CreatePendingSubstitutionInput {
   userId: string;
   protocolId: string;
   baseVersion: number;
-  fromExerciseId: string;
-  fromExerciseName: string;
-  toExerciseId: string;
-  toExerciseName: string;
-  proposedContent: ProtocolStructure;
-  diff: SubstitutionDiff;
+  /** 1 a `MAX_SUBSTITUTION_ITEMS` trocas. Item `mandatory`/`catalogGap` torna a proposta
+   * inteira `MANDATORY` (nunca auto-libera). */
+  items: SubstitutionItem[];
+  /** Protocolo com as trocas resolvidas já aplicadas. `null` sem nenhuma troca aplicável
+   * (todas as trocas pedidas são de catálogo). Informativo — a liberação recalcula. */
+  proposedContent: ProtocolStructure | null;
+  diff: SubstitutionDiff | null;
   changeReason: string;
-  /** Achado 2026-09-09 — default `'OPTIONAL'` (comportamento de sempre). */
+  /** Força `MANDATORY` (ex.: PAR-Q bloqueante). Item obrigatório também força. */
   reviewUrgency?: 'OPTIONAL' | 'MANDATORY';
-}
-
-/**
- * Achado 2026-09-09 (pedido do fundador): proposta sem substituto real ainda — o aluno pediu
- * um exercício que não existe em NENHUM lugar do catálogo publicado. Nasce sempre `MANDATORY`
- * e `catalogGap: true`; só vira uma troca de verdade via `attachCatalogExerciseAndRelease`,
- * depois que o time publica o exercício no catálogo.
- */
-export interface CreateCatalogGapPendingInput {
-  userId: string;
-  protocolId: string;
-  baseVersion: number;
-  fromExerciseId: string;
-  fromExerciseName: string;
-  /** Nome exatamente como o aluno pediu (texto livre, nunca um id do catálogo). */
-  requestedExerciseName: string;
-  changeReason: string;
 }
 
 export type CreatePendingSubstitutionResult =
   | { created: true; id: string }
   /** Já existe uma proposta `PENDING` para este protocolo (regra de v1: uma por vez). */
   | { created: false; alreadyPending: true };
+
+/** Decisão do profissional sobre um item, na tela única da proposta. Item sem decisão
+ * explícita é aprovado como está. */
+export interface SubstitutionItemEdit {
+  index: number;
+  action: 'APPROVE' | 'DISCARD';
+  /** Só com `APPROVE`: outro exercício do catálogo no lugar do proposto. */
+  toExerciseId?: string;
+}
 
 export type ReleaseSubstitutionResult =
   | {
@@ -155,43 +161,43 @@ export type ReleaseSubstitutionResult =
       startDate: Date;
       endDate: Date;
       totalWeeks: number;
-      /** Achado 2026-09-08: nomes do de/para, pra reentrega saudar a troca em vez de repetir
-       * a saudação de 1ª entrega (ver `protocolDeliveryPdfText`/`WorkoutPresentationService`). */
-      fromExerciseName: string;
-      toExerciseName: string;
+      /** De/para de cada troca APLICADA — a reentrega saúda e resume todas (troca em lote). */
+      changes: SubstitutionChange[];
     }
-  /** Estado não bate mais (já decidida, ou o protocolo mudou de versão/saiu de ACTIVE
-   * desde que a proposta nasceu) — no-op seguro, mesmo raciocínio de `autoRelease`. */
-  | { released: false };
-
-/** Achado 2026-09-09 — resultado de `attachCatalogExerciseAndRelease`. */
-export type AttachCatalogExerciseResult =
-  | {
-      released: true;
-      protocolId: string;
-      userId: string;
-      version: number;
-      content: ProtocolStructure;
-      mesocycleName: string;
-      startDate: Date;
-      endDate: Date;
-      totalWeeks: number;
-      fromExerciseName: string;
-      toExerciseName: string;
-    }
-  /** Proposta não existe, não é `catalogGap`, ou não está mais `PENDING`. */
-  | { released: false; reason: 'NOT_FOUND' }
-  /** Protocolo mudou de versão/saiu de `ACTIVE` desde que a proposta nasceu. */
+  /** Proposta inexistente ou já decidida. */
+  | { released: false; reason: 'NOT_PENDING' }
+  /** O protocolo mudou de versão/saiu de `ACTIVE` desde que a proposta nasceu: descartada. */
   | { released: false; reason: 'STALE' }
-  /** O exercício recém-publicado, aplicado ao protocolo inteiro, quebrou a validação —
-   * nada foi tocado; o time pode recategorizar o exercício ou recusar a proposta. */
+  /** O profissional descartou todos os itens: proposta descartada (o aluno é avisado). */
+  | { released: false; reason: 'ALL_DISCARDED'; userId: string; protocolId: string }
+  /** Item aprovado sem exercício resolvido (pedido de catálogo ainda sem exercício) ou
+   * edição inválida (índice inexistente, exercício fora do catálogo/inelegível). */
+  | { released: false; reason: 'UNRESOLVED_ITEM' | 'INVALID_EDIT'; detail: string }
+  /** As trocas aprovadas, aplicadas ao protocolo inteiro, quebraram a validação — nada foi
+   * tocado; o profissional pode ajustar os itens ou recusar a proposta. */
   | { released: false; reason: 'VALIDATION_FAILED'; violations: string[] };
+
+/** Resultado de `attachCatalogExercise`. */
+export type AttachCatalogExerciseResult =
+  | { attached: true; userId: string }
+  /** Proposta/item inexistente, não é `catalogGap`, ou proposta não está mais `PENDING`. */
+  | { attached: false; reason: 'NOT_FOUND' }
+  /** Protocolo mudou de versão/saiu de `ACTIVE` desde que a proposta nasceu. */
+  | { attached: false; reason: 'STALE' }
+  /** O exercício publicado não é elegível para este aluno (nível/local/contraindicação). */
+  | { attached: false; reason: 'NOT_VIABLE' }
+  /** O exercício recém-publicado, aplicado ao protocolo inteiro, quebrou a validação. */
+  | { attached: false; reason: 'VALIDATION_FAILED'; violations: string[] };
+
+/** Protocolo referenciado por uma proposta, para o painel calcular as opções de edição. */
+export type ProtocolForReview = ActiveProtocolForSubstitution & { status: string };
 
 @Injectable()
 export class ProtocolSubstitutionRepository {
   constructor(
     private readonly db: TenantDatabase,
     private readonly validation: ValidationService,
+    private readonly catalog: ExerciseCatalogProvider,
   ) {}
 
   /** Protocolo ATIVO do titular, sempre a linha VIVA — nunca um snapshot antigo. */
@@ -244,10 +250,18 @@ export class ProtocolSubstitutionRepository {
     return rows.length > 0;
   }
 
-  /** Cria a proposta em staging. Corrida com uma pendência concorrente → índice único trata. */
+  /**
+   * Cria a proposta em staging, com todas as trocas no MESMO registro (troca em lote). Corrida
+   * com uma pendência concorrente → índice único parcial trata. As colunas `from_*`/`to_*`
+   * continuam gravadas, espelhando o 1º item, para leitores anteriores à coluna `items`.
+   */
   async createPending(
     input: CreatePendingSubstitutionInput,
   ): Promise<CreatePendingSubstitutionResult> {
+    const first = input.items[0];
+    if (!first) throw new Error('createPending: proposta sem itens.');
+    const mandatory =
+      input.reviewUrgency === 'MANDATORY' || input.items.some((item) => item.mandatory);
     try {
       const [row] = await this.db.runAsUser(input.userId, 'USER', (tx) =>
         tx
@@ -255,55 +269,21 @@ export class ProtocolSubstitutionRepository {
           .values({
             protocolId: input.protocolId,
             userId: input.userId,
-            fromExerciseId: input.fromExerciseId,
-            fromExerciseName: input.fromExerciseName,
-            toExerciseId: input.toExerciseId,
-            toExerciseName: input.toExerciseName,
+            fromExerciseId: first.fromExerciseId,
+            fromExerciseName: first.fromExerciseName,
+            toExerciseId: first.toExerciseId,
+            toExerciseName: first.toExerciseName,
+            items: input.items,
             proposedContent: input.proposedContent,
             diff: input.diff,
             changeReason: input.changeReason,
             baseVersion: input.baseVersion,
-            reviewUrgency: input.reviewUrgency ?? 'OPTIONAL',
+            reviewUrgency: mandatory ? 'MANDATORY' : 'OPTIONAL',
+            catalogGap: input.items.some((item) => item.catalogGap),
           })
           .returning({ id: protocolSubstitutionRequests.id }),
       );
       if (!row) throw new Error('createPending: INSERT não retornou id.');
-      return { created: true, id: row.id };
-    } catch (error) {
-      if (isUniqueViolation(error)) return { created: false, alreadyPending: true };
-      throw error;
-    }
-  }
-
-  /**
-   * Cria a proposta em staging SEM substituto real (achado 2026-09-09) — o aluno pediu um
-   * exercício que não existe em nenhum lugar do catálogo publicado. Nasce sempre `MANDATORY`
-   * e `catalogGap: true`; nunca agenda auto-liberação (não há o que aplicar sozinho ainda).
-   */
-  async createCatalogGapPending(
-    input: CreateCatalogGapPendingInput,
-  ): Promise<CreatePendingSubstitutionResult> {
-    try {
-      const [row] = await this.db.runAsUser(input.userId, 'USER', (tx) =>
-        tx
-          .insert(protocolSubstitutionRequests)
-          .values({
-            protocolId: input.protocolId,
-            userId: input.userId,
-            fromExerciseId: input.fromExerciseId,
-            fromExerciseName: input.fromExerciseName,
-            toExerciseId: null,
-            toExerciseName: input.requestedExerciseName,
-            proposedContent: null,
-            diff: null,
-            changeReason: input.changeReason,
-            baseVersion: input.baseVersion,
-            reviewUrgency: 'MANDATORY',
-            catalogGap: true,
-          })
-          .returning({ id: protocolSubstitutionRequests.id }),
-      );
-      if (!row) throw new Error('createCatalogGapPending: INSERT não retornou id.');
       return { created: true, id: row.id };
     } catch (error) {
       if (isUniqueViolation(error)) return { created: false, alreadyPending: true };
@@ -317,87 +297,17 @@ export class ProtocolSubstitutionRepository {
    * MESMA versão em que a proposta nasceu — se um profissional editou/assinou o protocolo
    * nesse meio-tempo (ou a proposta já foi decidida por outro caminho), vira no-op seguro,
    * mesmo raciocínio de `ProtocolRepository.autoRelease`.
+   *
+   * O conteúdo é SEMPRE recalculado contra o protocolo VIVO a partir dos itens aprovados
+   * (nunca reaproveita `proposed_content`): o profissional pode ter editado ou descartado
+   * itens, e a estrutura inteira é revalidada antes de qualquer escrita. `edits` traz as
+   * decisões do profissional por item; item sem decisão explícita é aprovado como está.
    */
-  async release(actor: SubstitutionActor, requestId: string): Promise<ReleaseSubstitutionResult> {
-    return this.db.runAsUser(actor.userId, actor.role, async (tx) => {
-      const [request] = await tx
-        .select()
-        .from(protocolSubstitutionRequests)
-        .where(eq(protocolSubstitutionRequests.id, requestId))
-        .for('update')
-        .limit(1);
-      // `toExerciseId`/`proposedContent` nulos = proposta de `catalogGap` ainda sem
-      // substituto real (achado 2026-09-09) — `release()` nunca aplica essas; só
-      // `attachCatalogExerciseAndRelease`, depois que o time publica o exercício.
-      if (
-        !request ||
-        request.status !== 'PENDING' ||
-        request.toExerciseId === null ||
-        request.proposedContent === null
-      ) {
-        return { released: false };
-      }
-
-      const [protocol] = await tx
-        .select({
-          id: protocols.id,
-          version: protocols.version,
-          status: protocols.status,
-          mesocycleName: protocols.mesocycleName,
-          startDate: protocols.startDate,
-          endDate: protocols.endDate,
-          totalWeeks: protocols.totalWeeks,
-        })
-        .from(protocols)
-        .where(eq(protocols.id, request.protocolId))
-        .for('update')
-        .limit(1);
-      if (!protocol || protocol.status !== 'ACTIVE' || protocol.version !== request.baseVersion) {
-        await tx
-          .update(protocolSubstitutionRequests)
-          .set({ status: 'DISCARDED', decidedAt: new Date() })
-          .where(eq(protocolSubstitutionRequests.id, requestId));
-        return { released: false };
-      }
-
-      const content = request.proposedContent as ProtocolStructure;
-      const { nextVersion } = await this.applyReleaseTail(
-        tx,
-        protocol,
-        request,
-        content,
-        request.diff as SubstitutionDiff,
-      );
-
-      return {
-        released: true,
-        protocolId: protocol.id,
-        userId: request.userId,
-        version: nextVersion,
-        content,
-        mesocycleName: protocol.mesocycleName,
-        startDate: protocol.startDate,
-        endDate: protocol.endDate,
-        totalWeeks: protocol.totalWeeks,
-        fromExerciseName: request.fromExerciseName,
-        toExerciseName: request.toExerciseName,
-      };
-    });
-  }
-
-  /**
-   * Publica o exercício pedido pelo aluno no catálogo (fora daqui — `ExerciseCatalogAdminService
-   * .publish()`) e SÓ ENTÃO chama isto: recomputa a troca contra o protocolo VIVO (nunca
-   * confia no que existia quando a proposta nasceu), revalida a estrutura inteira igual a
-   * qualquer outra substituição, e aplica com a MESMA mecânica de `release()` (bump de
-   * versão, insere `protocol_versions`). Se a validação falhar, nada é tocado — o time pode
-   * tentar categorizar o exercício de outro jeito ou recusar a proposta.
-   */
-  async attachCatalogExerciseAndRelease(
+  async release(
     actor: SubstitutionActor,
     requestId: string,
-    chosen: CatalogExercise,
-  ): Promise<AttachCatalogExerciseResult> {
+    edits: readonly SubstitutionItemEdit[] = [],
+  ): Promise<ReleaseSubstitutionResult> {
     return this.db.runAsUser(actor.userId, actor.role, async (tx) => {
       const [request] = await tx
         .select()
@@ -405,8 +315,61 @@ export class ProtocolSubstitutionRepository {
         .where(eq(protocolSubstitutionRequests.id, requestId))
         .for('update')
         .limit(1);
-      if (!request || request.status !== 'PENDING' || !request.catalogGap) {
-        return { released: false, reason: 'NOT_FOUND' };
+      if (!request || request.status !== 'PENDING') {
+        return { released: false, reason: 'NOT_PENDING' };
+      }
+
+      const items = itemsOf(request).map((item) => ({ ...item }));
+      const editedIndexes = new Set<number>();
+      for (const edit of edits) {
+        const item = items[edit.index];
+        if (!item) {
+          return {
+            released: false,
+            reason: 'INVALID_EDIT',
+            detail: `Item ${edit.index} inexistente.`,
+          };
+        }
+        if (edit.action === 'DISCARD') {
+          item.decision = 'DISCARDED';
+          continue;
+        }
+        item.decision = 'APPROVED';
+        if (edit.toExerciseId && edit.toExerciseId !== item.toExerciseId) {
+          const replacement = this.catalog.getById(edit.toExerciseId);
+          if (!replacement) {
+            return {
+              released: false,
+              reason: 'INVALID_EDIT',
+              detail: `Exercício "${edit.toExerciseId}" não está no catálogo.`,
+            };
+          }
+          item.toExerciseId = replacement.id;
+          item.toExerciseName = replacement.name;
+          item.catalogGap = false;
+          editedIndexes.add(edit.index);
+        }
+      }
+      for (const item of items) {
+        if (item.decision === 'PENDING') item.decision = 'APPROVED';
+      }
+
+      const approved = items.filter((item) => item.decision === 'APPROVED');
+      if (approved.length === 0) {
+        await this.markDiscarded(tx, request.id, items, actor);
+        return {
+          released: false,
+          reason: 'ALL_DISCARDED',
+          userId: request.userId,
+          protocolId: request.protocolId,
+        };
+      }
+      if (approved.some((item) => item.toExerciseId === null)) {
+        return {
+          released: false,
+          reason: 'UNRESOLVED_ITEM',
+          detail: 'Há item aprovado sem exercício definido — adicione ao catálogo ou descarte.',
+        };
       }
 
       const [protocol] = await tx
@@ -427,19 +390,36 @@ export class ProtocolSubstitutionRepository {
         .for('update')
         .limit(1);
       if (!protocol || protocol.status !== 'ACTIVE' || protocol.version !== request.baseVersion) {
-        await tx
-          .update(protocolSubstitutionRequests)
-          .set({ status: 'DISCARDED', decidedAt: new Date() })
-          .where(eq(protocolSubstitutionRequests.id, requestId));
+        await this.markDiscarded(tx, request.id, items, actor);
         return { released: false, reason: 'STALE' };
       }
 
       const derived = deriveConstraints(protocol.constraints, protocol.parQFlags);
-      const applied = applySubstitution(
-        protocol.content as ProtocolStructure,
-        request.fromExerciseId,
-        chosen,
-      );
+      const swaps: Array<{ fromExerciseId: string; to: CatalogExercise }> = [];
+      for (const [index, item] of items.entries()) {
+        if (item.decision !== 'APPROVED' || item.toExerciseId === null) continue;
+        const to = this.catalog.getById(item.toExerciseId);
+        if (!to) {
+          return {
+            released: false,
+            reason: 'INVALID_EDIT',
+            detail: `Exercício "${item.toExerciseName}" não está mais no catálogo.`,
+          };
+        }
+        // Edição do profissional: o filtro de segurança (nível/local/contraindicação) vale
+        // para o exercício escolhido por ele também. Itens não editados já nasceram com o
+        // seu veredito (inclusive os obrigatórios, que o profissional decide por definição).
+        if (editedIndexes.has(index) && !isViable(to, derived.constraints)) {
+          return {
+            released: false,
+            reason: 'INVALID_EDIT',
+            detail: `"${to.name}" não é elegível para este aluno (nível, local ou contraindicação).`,
+          };
+        }
+        swaps.push({ fromExerciseId: item.fromExerciseId, to });
+      }
+
+      const applied = applySubstitutions(protocol.content as ProtocolStructure, swaps);
       const verdict = this.validation.validate({
         structure: applied.content,
         constraints: derived.validationConstraints,
@@ -453,28 +433,15 @@ export class ProtocolSubstitutionRepository {
         };
       }
 
-      const diff: SubstitutionDiff = {
-        type: 'EXERCISE_SUBSTITUTION',
-        from: { id: request.fromExerciseId, name: request.fromExerciseName },
-        to: { id: chosen.id, name: chosen.name },
-        sessionsAffected: applied.sessionsAffected,
-      };
-      await tx
-        .update(protocolSubstitutionRequests)
-        .set({
-          toExerciseId: chosen.id,
-          toExerciseName: chosen.name,
-          proposedContent: applied.content,
-          diff,
-        })
-        .where(eq(protocolSubstitutionRequests.id, requestId));
-
+      const diff = buildSubstitutionDiff(approved, applied.sessionsAffectedBySwap);
       const { nextVersion } = await this.applyReleaseTail(
         tx,
         protocol,
         request,
         applied.content,
         diff,
+        items,
+        actor,
       );
 
       return {
@@ -487,21 +454,143 @@ export class ProtocolSubstitutionRepository {
         startDate: protocol.startDate,
         endDate: protocol.endDate,
         totalWeeks: protocol.totalWeeks,
-        fromExerciseName: request.fromExerciseName,
-        toExerciseName: chosen.name,
+        changes: approved.map((item) => ({ from: item.fromExerciseName, to: item.toExerciseName })),
       };
     });
   }
 
-  /** Bump de versão + `protocol_versions` + marca a proposta `RELEASED` — cauda compartilhada
-   * entre `release()` (conteúdo já calculado na criação) e `attachCatalogExerciseAndRelease`
-   * (conteúdo recalculado agora, contra o protocolo vivo). */
+  /**
+   * Publicado o exercício pedido pelo aluno no catálogo (fora daqui —
+   * `ExerciseCatalogAdminService.publish()`), liga-o ao item de catálogo da proposta. NÃO
+   * libera nada: o profissional segue decidindo na tela única, item a item. Recomputa a troca
+   * contra o protocolo VIVO e revalida a estrutura inteira antes de aceitar — se falhar, nada
+   * é tocado (o time pode recategorizar o exercício ou descartar o item).
+   */
+  async attachCatalogExercise(
+    actor: SubstitutionActor,
+    requestId: string,
+    itemIndex: number,
+    chosen: CatalogExercise,
+  ): Promise<AttachCatalogExerciseResult> {
+    return this.db.runAsUser(actor.userId, actor.role, async (tx) => {
+      const [request] = await tx
+        .select()
+        .from(protocolSubstitutionRequests)
+        .where(eq(protocolSubstitutionRequests.id, requestId))
+        .for('update')
+        .limit(1);
+      if (!request || request.status !== 'PENDING') return { attached: false, reason: 'NOT_FOUND' };
+      const items = itemsOf(request).map((item) => ({ ...item }));
+      const target = items[itemIndex];
+      if (!target || !target.catalogGap || target.decision === 'DISCARDED') {
+        return { attached: false, reason: 'NOT_FOUND' };
+      }
+
+      const [protocol] = await tx
+        .select({
+          id: protocols.id,
+          version: protocols.version,
+          status: protocols.status,
+          content: protocols.content,
+          constraints: protocols.constraints,
+          parQFlags: protocols.parQFlags,
+        })
+        .from(protocols)
+        .where(eq(protocols.id, request.protocolId))
+        .for('update')
+        .limit(1);
+      if (!protocol || protocol.status !== 'ACTIVE' || protocol.version !== request.baseVersion) {
+        await this.markDiscarded(tx, request.id, items, actor);
+        return { attached: false, reason: 'STALE' };
+      }
+
+      const derived = deriveConstraints(protocol.constraints, protocol.parQFlags);
+      if (!isViable(chosen, derived.constraints)) return { attached: false, reason: 'NOT_VIABLE' };
+      const applied = applySubstitutions(protocol.content as ProtocolStructure, [
+        { fromExerciseId: target.fromExerciseId, to: chosen },
+      ]);
+      const verdict = this.validation.validate({
+        structure: applied.content,
+        constraints: derived.validationConstraints,
+        parqFlags: derived.parQFlags,
+      });
+      if (verdict.action !== 'PASS') {
+        return {
+          attached: false,
+          reason: 'VALIDATION_FAILED',
+          violations: verdict.violations.map((v) => v.rule),
+        };
+      }
+
+      target.toExerciseId = chosen.id;
+      target.toExerciseName = chosen.name;
+      target.catalogGap = false;
+      const first = items[0];
+      await tx
+        .update(protocolSubstitutionRequests)
+        .set({
+          items,
+          catalogGap: items.some((item) => item.catalogGap),
+          // Espelho do 1º item nas colunas legadas.
+          ...(first
+            ? {
+                fromExerciseId: first.fromExerciseId,
+                fromExerciseName: first.fromExerciseName,
+                toExerciseId: first.toExerciseId,
+                toExerciseName: first.toExerciseName,
+              }
+            : {}),
+        })
+        .where(eq(protocolSubstitutionRequests.id, requestId));
+      return { attached: true, userId: request.userId };
+    });
+  }
+
+  /** Item(ns) inelegíveis que a liberação automática não conseguiu aplicar (validação da
+   * estrutura inteira falhou): passa a exigir decisão humana em vez de ficar pendente para
+   * sempre bloqueando novas propostas. */
+  async escalateToMandatory(actor: SubstitutionActor, requestId: string): Promise<void> {
+    await this.db.runAsUser(actor.userId, actor.role, (tx) =>
+      tx
+        .update(protocolSubstitutionRequests)
+        .set({ reviewUrgency: 'MANDATORY' })
+        .where(
+          and(
+            eq(protocolSubstitutionRequests.id, requestId),
+            eq(protocolSubstitutionRequests.status, 'PENDING'),
+          ),
+        ),
+    );
+  }
+
+  /** Marca a proposta `DISCARDED`, registrando a decisão de cada item. */
+  private async markDiscarded(
+    tx: TenantTransaction,
+    requestId: string,
+    items: readonly SubstitutionItem[],
+    actor: SubstitutionActor,
+  ): Promise<void> {
+    await tx
+      .update(protocolSubstitutionRequests)
+      .set({
+        status: 'DISCARDED',
+        decidedAt: new Date(),
+        ...(actor.role === 'USER' ? {} : { decidedBy: actor.userId }),
+        items: items.map((item) => ({ ...item, decision: 'DISCARDED' as const })),
+      })
+      .where(eq(protocolSubstitutionRequests.id, requestId));
+  }
+
+  /** Bump de versão + `protocol_versions` + marca a proposta `RELEASED`, gravando a decisão
+   * final de cada item e o conteúdo efetivamente aplicado. */
   private async applyReleaseTail(
     tx: TenantTransaction,
     protocol: { id: string; version: number },
     request: { id: string; userId: string; changeReason: string },
     content: ProtocolStructure,
     diff: SubstitutionDiff,
+    items: readonly SubstitutionItem[],
+    actor: SubstitutionActor,
   ): Promise<{ nextVersion: number }> {
     const nextVersion = protocol.version + 1;
     await tx
@@ -520,14 +609,31 @@ export class ProtocolSubstitutionRepository {
       signatureHash: signatureHash(content),
       signedAt: new Date(),
     });
+    const first = items[0];
     await tx
       .update(protocolSubstitutionRequests)
-      .set({ status: 'RELEASED', decidedAt: new Date() })
+      .set({
+        status: 'RELEASED',
+        decidedAt: new Date(),
+        ...(actor.role === 'USER' ? {} : { decidedBy: actor.userId }),
+        items: [...items],
+        proposedContent: content,
+        diff,
+        ...(first
+          ? {
+              fromExerciseId: first.fromExerciseId,
+              fromExerciseName: first.fromExerciseName,
+              toExerciseId: first.toExerciseId,
+              toExerciseName: first.toExerciseName,
+            }
+          : {}),
+      })
       .where(eq(protocolSubstitutionRequests.id, request.id));
     return { nextVersion };
   }
 
-  /** Recusa a troca — mantém o exercício original, sem tocar `protocols`. Só staff chama isto. */
+  /** Recusa a proposta inteira — mantém os exercícios originais, sem tocar `protocols`. Só
+   * staff chama isto. */
   async discard(
     actor: SubstitutionActor,
     requestId: string,
@@ -537,11 +643,7 @@ export class ProtocolSubstitutionRepository {
   > {
     return this.db.runAsUser(actor.userId, actor.role, async (tx) => {
       const [request] = await tx
-        .select({
-          status: protocolSubstitutionRequests.status,
-          protocolId: protocolSubstitutionRequests.protocolId,
-          userId: protocolSubstitutionRequests.userId,
-        })
+        .select()
         .from(protocolSubstitutionRequests)
         .where(eq(protocolSubstitutionRequests.id, requestId))
         .for('update')
@@ -549,10 +651,7 @@ export class ProtocolSubstitutionRepository {
       if (!request || request.status !== 'PENDING') {
         return { discarded: false, protocolId: null, userId: null };
       }
-      await tx
-        .update(protocolSubstitutionRequests)
-        .set({ status: 'DISCARDED', decidedAt: new Date(), decidedBy: actor.userId })
-        .where(eq(protocolSubstitutionRequests.id, requestId));
+      await this.markDiscarded(tx, request.id, itemsOf(request), actor);
       return { discarded: true, protocolId: request.protocolId, userId: request.userId };
     });
   }
@@ -568,6 +667,60 @@ export class ProtocolSubstitutionRepository {
     );
     return row ?? null;
   }
+
+  /** Protocolo referenciado por uma proposta (linha viva), sob o papel do ator — o painel
+   * calcula daqui as opções seguras de edição de cada item. `null` se não existir. */
+  async loadProtocolForReview(
+    actor: SubstitutionActor,
+    protocolId: string,
+  ): Promise<ProtocolForReview | null> {
+    const [row] = await this.db.runAsUser(actor.userId, actor.role, (tx) =>
+      tx
+        .select({
+          protocolId: protocols.id,
+          version: protocols.version,
+          status: protocols.status,
+          content: protocols.content,
+          constraints: protocols.constraints,
+          parQFlags: protocols.parQFlags,
+          parqState: anamnesisSessions.parqState,
+        })
+        .from(protocols)
+        .leftJoin(anamnesisSessions, eq(anamnesisSessions.id, protocols.anamnesisSessionId))
+        .where(eq(protocols.id, protocolId))
+        .limit(1),
+    );
+    if (!row) return null;
+    return {
+      protocolId: row.protocolId,
+      version: row.version,
+      status: row.status,
+      content: row.content as ProtocolStructure,
+      ...deriveConstraints(row.constraints, row.parQFlags),
+      fromBlockingParq: row.parqState === 'BLOQUEADO_AGUARDANDO_CLEARANCE',
+    };
+  }
+}
+
+/** `diff` gravado em `protocol_versions`: espelho da 1ª troca + uma entrada por troca. */
+export function buildSubstitutionDiff(
+  approved: readonly SubstitutionItem[],
+  sessionsAffectedBySwap: readonly string[][],
+): SubstitutionDiff {
+  const entries = approved.map((item, index) => ({
+    from: { id: item.fromExerciseId, name: item.fromExerciseName },
+    to: { id: item.toExerciseId ?? '', name: item.toExerciseName },
+    sessionsAffected: sessionsAffectedBySwap[index] ?? [],
+  }));
+  const [first] = entries;
+  if (!first) throw new Error('buildDiff: sem trocas aprovadas.');
+  return {
+    type: 'EXERCISE_SUBSTITUTION',
+    from: first.from,
+    to: first.to,
+    sessionsAffected: [...new Set(entries.flatMap((entry) => entry.sessionsAffected))],
+    items: entries,
+  };
 }
 
 /** 23505 = unique_violation do PostgreSQL (índice parcial de pendência única). */

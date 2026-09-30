@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   anamnesisAnswers,
+  BATCH_SUBSTITUTION_ID,
+  batchSubstitutionDetail,
   CATALOG_GAP_SUBSTITUTION_ID,
   catalogGapSubstitutionDetail,
   CHECKIN_ID,
@@ -31,7 +33,7 @@ const api = vi.hoisted(() => ({
   saveProtocol: vi.fn(),
   approveSubstitutionNow: vi.fn(),
   discardSubstitution: vi.fn(),
-  addCatalogExerciseAndApproveSubstitution: vi.fn(),
+  addCatalogExerciseToSubstitutionItem: vi.fn(),
   captureDashboardEvent: vi.fn(),
 }));
 vi.mock('@/lib/dashboard-api', () => ({
@@ -150,7 +152,7 @@ beforeEach(() => {
   api.getAnamnesisAnswers.mockResolvedValue(anamnesisAnswers);
   api.approveSubstitutionNow.mockResolvedValue({ status: 'released' });
   api.discardSubstitution.mockResolvedValue({ status: 'discarded' });
-  api.addCatalogExerciseAndApproveSubstitution.mockResolvedValue({ status: 'released' });
+  api.addCatalogExerciseToSubstitutionItem.mockResolvedValue({ attached: true });
   controlCenterApi.getExerciseCatalog.mockResolvedValue({
     data: { versions: [], totalPublished: 0 },
     meta: {
@@ -175,7 +177,10 @@ describe('QueueDetail — substituição de exercício via IA', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Aprovar agora' }));
     expect(api.approveSubstitutionNow).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole('button', { name: 'Confirmar e aplicar' }));
-    await waitFor(() => expect(api.approveSubstitutionNow).toHaveBeenCalledWith(SUBSTITUTION_ID));
+    // Sem edição nenhuma: aprova como está (nenhuma decisão por item enviada).
+    await waitFor(() =>
+      expect(api.approveSubstitutionNow).toHaveBeenCalledWith(SUBSTITUTION_ID, []),
+    );
     expect(await screen.findByRole('status')).toHaveTextContent('Troca aplicada');
   });
 
@@ -213,26 +218,29 @@ describe('QueueDetail — substituição de exercício via IA', () => {
 });
 
 // Achado 2026-09-09 — pedido explícito do aluno por um exercício que não existe em lugar
-// nenhum do catálogo: vira revisão obrigatória com a opção de publicar o exercício e
-// aprovar a troca no mesmo gesto, em vez do par normal "Recusar"/"Aprovar agora".
+// nenhum do catálogo: vira revisão obrigatória. Achado 2026-09-30: adicionar ao catálogo liga o
+// exercício ao item, mas NÃO aprova — a aprovação é uma decisão à parte, na tela única.
 describe('QueueDetail — substituição fora do catálogo (catalogGap)', () => {
-  it('mostra "Revisão obrigatória" e "Adicionar exercício ao catálogo" em vez de "Aprovar agora"', async () => {
+  it('mostra "Revisão obrigatória", bloqueia "Aprovar agora" e oferece adicionar ao catálogo', async () => {
     api.getQueueDetail.mockResolvedValue(catalogGapSubstitutionDetail);
     render(<QueueDetail kind="SUBSTITUTION" id={CATALOG_GAP_SUBSTITUTION_ID} />);
 
     expect(await screen.findByText('Troca proposta')).toBeVisible();
     expect(screen.getByText('Revisão obrigatória')).toBeVisible();
     expect(screen.getByText('“Supino Reto Máquina” (fora do catálogo)')).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Aprovar agora' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Adicionar exercício ao catálogo' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Aprovar agora' })).toBeDisabled();
+    expect(screen.getByRole('note')).toHaveTextContent('fora do catálogo');
+    expect(
+      screen.getByRole('button', { name: /Adicionar ao catálogo: Supino Reto Máquina/ }),
+    ).toBeVisible();
   });
 
-  it('publica o exercício e aprova a troca no mesmo gesto', async () => {
+  it('publica o exercício e o liga ao item, sem aprovar a troca', async () => {
     api.getQueueDetail.mockResolvedValue(catalogGapSubstitutionDetail);
     render(<QueueDetail kind="SUBSTITUTION" id={CATALOG_GAP_SUBSTITUTION_ID} />);
     await screen.findByText('Troca proposta');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Adicionar exercício ao catálogo' }));
+    await userEvent.click(screen.getByRole('button', { name: /Adicionar ao catálogo: Supino/ }));
     const dialog = await screen.findByRole('dialog');
     const scope = within(dialog);
 
@@ -240,7 +248,7 @@ describe('QueueDetail — substituição fora do catálogo (catalogGap)', () => 
     await userEvent.click(scope.getByText('Selecione o(s) músculo(s)'));
     await userEvent.click(scope.getByRole('checkbox', { name: 'peito' }));
     await userEvent.click(scope.getByRole('checkbox', { name: /Academia completa/ }));
-    const adicionar = scope.getByRole('button', { name: 'Adicionar e aprovar' });
+    const adicionar = scope.getByRole('button', { name: 'Adicionar ao catálogo' });
     // Nível (achado 2026-09-29): mesmo combo do modal da tela Exercícios, obrigatório.
     const nivel = scope.getByRole('group', { name: 'Nível' });
     expect(within(nivel).getAllByRole('checkbox')).toHaveLength(3);
@@ -252,8 +260,9 @@ describe('QueueDetail — substituição fora do catálogo (catalogGap)', () => 
     await userEvent.click(adicionar);
 
     await waitFor(() =>
-      expect(api.addCatalogExerciseAndApproveSubstitution).toHaveBeenCalledWith(
+      expect(api.addCatalogExerciseToSubstitutionItem).toHaveBeenCalledWith(
         CATALOG_GAP_SUBSTITUTION_ID,
+        0,
         expect.objectContaining({
           name: 'Supino Reto Máquina',
           muscleGroups: ['peito'],
@@ -266,18 +275,19 @@ describe('QueueDetail — substituição fora do catálogo (catalogGap)', () => 
         }),
       ),
     );
-    expect(await screen.findByRole('status')).toHaveTextContent('adicionado ao catálogo');
+    expect(await screen.findByRole('status')).toHaveTextContent('Agora revise e aprove');
+    expect(api.approveSubstitutionNow).not.toHaveBeenCalled();
   });
 
-  it('não deixa aprovar sem selecionar músculo, nível e local', async () => {
+  it('não deixa adicionar sem selecionar músculo, nível e local', async () => {
     api.getQueueDetail.mockResolvedValue(catalogGapSubstitutionDetail);
     render(<QueueDetail kind="SUBSTITUTION" id={CATALOG_GAP_SUBSTITUTION_ID} />);
     await screen.findByText('Troca proposta');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Adicionar exercício ao catálogo' }));
+    await userEvent.click(screen.getByRole('button', { name: /Adicionar ao catálogo: Supino/ }));
     const dialog = await screen.findByRole('dialog');
     const scope = within(dialog);
-    const adicionar = scope.getByRole('button', { name: 'Adicionar e aprovar' });
+    const adicionar = scope.getByRole('button', { name: 'Adicionar ao catálogo' });
     expect(adicionar).toBeDisabled();
 
     // Músculo e local sem nível: continua bloqueado.
@@ -285,7 +295,125 @@ describe('QueueDetail — substituição fora do catálogo (catalogGap)', () => 
     await userEvent.click(scope.getByRole('checkbox', { name: /Academia completa/ }));
     expect(adicionar).toBeDisabled();
     await userEvent.click(adicionar);
-    expect(api.addCatalogExerciseAndApproveSubstitution).not.toHaveBeenCalled();
+    expect(api.addCatalogExerciseToSubstitutionItem).not.toHaveBeenCalled();
+  });
+});
+
+// Achado 2026-09-30 — troca em lote: a proposta carrega até 3 trocas no mesmo registro, e o
+// profissional aprova, edita ou descarta cada uma individualmente na tela única.
+describe('QueueDetail — troca em lote (itens da proposta)', () => {
+  it('lista todas as trocas da proposta numa única tela', async () => {
+    api.getQueueDetail.mockResolvedValue(batchSubstitutionDetail);
+    render(<QueueDetail kind="SUBSTITUTION" id={BATCH_SUBSTITUTION_ID} />);
+
+    expect(await screen.findByText('Trocas propostas')).toBeVisible();
+    expect(screen.getByText('Leg Press 45°')).toBeVisible();
+    expect(screen.getByText('Agachamento Hack')).toBeVisible();
+    expect(screen.getByText('Cadeira Extensora')).toBeVisible();
+    expect(screen.getByText('“Extensora Unilateral” (fora do catálogo)')).toBeVisible();
+    expect(screen.getByText('Mesa Flexora')).toBeVisible();
+    expect(screen.getByText('Cadeira Flexora')).toBeVisible();
+  });
+
+  it('edita um item (outra opção segura) e descarta outro, enviando uma decisão por item', async () => {
+    api.getQueueDetail.mockResolvedValue(batchSubstitutionDetail);
+    render(<QueueDetail kind="SUBSTITUTION" id={BATCH_SUBSTITUTION_ID} />);
+    await screen.findByText('Trocas propostas');
+
+    // Item 0: troca o Hack por Afundo (edição). Item 1 (fora do catálogo): descarta. Item 2: mantém.
+    const trocaLegPress = screen.getByRole('listitem', { name: /Troca 1/ });
+    await userEvent.selectOptions(
+      within(trocaLegPress).getByLabelText('Trocar por outra opção segura'),
+      'afundo',
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Descartar a troca de Cadeira Extensora' }),
+    );
+    expect(screen.getByText('Item descartado')).toBeVisible();
+
+    // Com o pedido de catálogo descartado, o bloqueio de aprovação some.
+    await userEvent.click(screen.getByRole('button', { name: 'Aprovar agora' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Confirmar e aplicar' }));
+
+    await waitFor(() =>
+      expect(api.approveSubstitutionNow).toHaveBeenCalledWith(BATCH_SUBSTITUTION_ID, [
+        { index: 0, action: 'APPROVE', toExerciseId: 'afundo' },
+        { index: 1, action: 'DISCARD' },
+      ]),
+    );
+    expect(await screen.findByRole('status')).toHaveTextContent('Trocas aplicadas');
+  });
+
+  it('bloqueia a aprovação enquanto houver pedido de catálogo sem resolução', async () => {
+    api.getQueueDetail.mockResolvedValue(batchSubstitutionDetail);
+    render(<QueueDetail kind="SUBSTITUTION" id={BATCH_SUBSTITUTION_ID} />);
+    await screen.findByText('Trocas propostas');
+
+    expect(screen.getByRole('button', { name: 'Aprovar agora' })).toBeDisabled();
+    expect(screen.getByRole('note')).toHaveTextContent('fora do catálogo');
+  });
+
+  it('desfazer o descarte devolve o item à aprovação', async () => {
+    api.getQueueDetail.mockResolvedValue(batchSubstitutionDetail);
+    render(<QueueDetail kind="SUBSTITUTION" id={BATCH_SUBSTITUTION_ID} />);
+    await screen.findByText('Trocas propostas');
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Descartar a troca de Mesa Flexora' }),
+    );
+    expect(screen.getByText('Item descartado')).toBeVisible();
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Desfazer o descarte da troca de Mesa Flexora' }),
+    );
+    expect(screen.queryByText('Item descartado')).not.toBeInTheDocument();
+  });
+
+  it('adiciona ao catálogo o item certo da proposta (por posição)', async () => {
+    api.getQueueDetail.mockResolvedValue(batchSubstitutionDetail);
+    render(<QueueDetail kind="SUBSTITUTION" id={BATCH_SUBSTITUTION_ID} />);
+    await screen.findByText('Trocas propostas');
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /Adicionar ao catálogo: Extensora Unilateral/ }),
+    );
+    const scope = within(await screen.findByRole('dialog'));
+    expect(scope.getByLabelText('Nome do exercício')).toHaveValue('Extensora Unilateral');
+    await userEvent.click(scope.getByText('Selecione o(s) músculo(s)'));
+    await userEvent.click(scope.getByRole('checkbox', { name: 'quadríceps' }));
+    await userEvent.click(scope.getByRole('checkbox', { name: /Academia completa/ }));
+    await userEvent.click(
+      within(scope.getByRole('group', { name: 'Nível' })).getByRole('checkbox', {
+        name: 'Iniciante',
+      }),
+    );
+    await userEvent.click(scope.getByRole('button', { name: 'Adicionar ao catálogo' }));
+
+    await waitFor(() =>
+      expect(api.addCatalogExerciseToSubstitutionItem).toHaveBeenCalledWith(
+        BATCH_SUBSTITUTION_ID,
+        1,
+        expect.objectContaining({ name: 'Extensora Unilateral' }),
+      ),
+    );
+  });
+
+  it('descartar todos os itens esconde "Aprovar agora" e deixa só "Recusar"', async () => {
+    api.getQueueDetail.mockResolvedValue(batchSubstitutionDetail);
+    render(<QueueDetail kind="SUBSTITUTION" id={BATCH_SUBSTITUTION_ID} />);
+    await screen.findByText('Trocas propostas');
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Descartar a troca de Leg Press 45°' }),
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Descartar a troca de Cadeira Extensora' }),
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Descartar a troca de Mesa Flexora' }),
+    );
+
+    expect(screen.queryByRole('button', { name: 'Aprovar agora' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Recusar' })).toBeVisible();
   });
 });
 

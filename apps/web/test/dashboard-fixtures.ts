@@ -235,6 +235,20 @@ export const substitutionDetail: QueueDetail = {
     protocolId: PROTOCOL_ID,
     from: { id: 'flexao', name: 'Flexão' },
     to: { id: 'flexao_diamante', name: 'Flexão Diamante' },
+    items: [
+      {
+        index: 0,
+        from: { id: 'flexao', name: 'Flexão' },
+        to: { id: 'flexao_diamante', name: 'Flexão Diamante' },
+        catalogGap: false,
+        mandatory: false,
+        decision: 'PENDING',
+        options: [
+          { id: 'flexao_diamante', name: 'Flexão Diamante' },
+          { id: 'flexao_inclinada', name: 'Flexão Inclinada' },
+        ],
+      },
+    ],
     diff: {
       type: 'EXERCISE_SUBSTITUTION',
       from: { id: 'flexao', name: 'Flexão' },
@@ -272,10 +286,80 @@ export const catalogGapSubstitutionDetail: QueueDetail = {
     protocolId: PROTOCOL_ID,
     from: { id: 'supino_reto_barra', name: 'Supino Reto (Barra)' },
     to: { id: null, name: 'Supino Reto Máquina' },
+    items: [
+      {
+        index: 0,
+        from: { id: 'supino_reto_barra', name: 'Supino Reto (Barra)' },
+        to: { id: null, name: 'Supino Reto Máquina' },
+        catalogGap: true,
+        mandatory: true,
+        decision: 'PENDING',
+        options: [],
+      },
+    ],
     diff: null,
     changeReason:
       'Substituição solicitada pelo aluno via WhatsApp: Supino Reto (Barra) → ' +
       '"Supino Reto Máquina" (não existe no catálogo)',
+    status: 'PENDING',
+    decidedAt: null,
+    reviewUrgency: 'MANDATORY',
+    catalogGap: true,
+  } satisfies SubstitutionDetail,
+  replay: undefined,
+};
+
+/**
+ * Troca em lote (achado 2026-09-30): 3 exercícios numa única proposta. O 1º é uma troca
+ * comum com opções de edição, o 2º foi pedido fora do catálogo e o 3º é uma troca comum sem
+ * alternativas — cobre aprovar, editar, descartar e adicionar ao catálogo por item.
+ */
+export const BATCH_SUBSTITUTION_ID = '8a2d7f50-3c1e-4b66-9f0a-2b6c5d1e7a90';
+export const batchSubstitutionDetail: QueueDetail = {
+  item: { ...substitutionItem, id: BATCH_SUBSTITUTION_ID },
+  context: {},
+  substitution: {
+    id: BATCH_SUBSTITUTION_ID,
+    protocolId: PROTOCOL_ID,
+    from: { id: 'leg_press_45', name: 'Leg Press 45°' },
+    to: { id: 'agachamento_hack', name: 'Agachamento Hack' },
+    items: [
+      {
+        index: 0,
+        from: { id: 'leg_press_45', name: 'Leg Press 45°' },
+        to: { id: 'agachamento_hack', name: 'Agachamento Hack' },
+        catalogGap: false,
+        mandatory: false,
+        decision: 'PENDING',
+        options: [
+          { id: 'agachamento_hack', name: 'Agachamento Hack' },
+          { id: 'afundo', name: 'Afundo' },
+        ],
+      },
+      {
+        index: 1,
+        from: { id: 'cadeira_extensora', name: 'Cadeira Extensora' },
+        to: { id: null, name: 'Extensora Unilateral' },
+        catalogGap: true,
+        mandatory: true,
+        decision: 'PENDING',
+        options: [],
+      },
+      {
+        index: 2,
+        from: { id: 'mesa_flexora', name: 'Mesa Flexora' },
+        to: { id: 'cadeira_flexora', name: 'Cadeira Flexora' },
+        catalogGap: false,
+        mandatory: false,
+        decision: 'PENDING',
+        options: [{ id: 'cadeira_flexora', name: 'Cadeira Flexora' }],
+      },
+    ],
+    diff: null,
+    changeReason:
+      'Substituição solicitada pelo aluno via WhatsApp: Leg Press 45° → Agachamento Hack; ' +
+      'Cadeira Extensora → "Extensora Unilateral" (não existe no catálogo); ' +
+      'Mesa Flexora → Cadeira Flexora',
     status: 'PENDING',
     decidedAt: null,
     reviewUrgency: 'MANDATORY',

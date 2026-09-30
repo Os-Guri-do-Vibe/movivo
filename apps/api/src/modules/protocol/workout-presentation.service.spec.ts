@@ -138,8 +138,7 @@ describe('WorkoutPresentationService (achado 2026-09-04)', () => {
     await service.present({
       ...baseParams,
       reason: 'SUBSTITUTION',
-      substitutionFrom: 'Agachamento Livre',
-      substitutionTo: 'Agachamento Goblet',
+      substitutionChanges: [{ from: 'Agachamento Livre', to: 'Agachamento Goblet' }],
     });
     const system = complete.mock.calls[0]?.[0]?.system ?? '';
     expect(system).toContain('Agachamento Livre');
@@ -148,5 +147,24 @@ describe('WorkoutPresentationService (achado 2026-09-04)', () => {
     // Tarefa da 1ª entrega ("...que apresenta...o treino que acabou de ser entregue") não
     // pode ser a mesma da reentrega por substituição ("...que confirma...a ATUALIZAÇÃO").
     expect(system).not.toContain('que apresenta, de forma simples e resumida, o treino');
+  });
+
+  it('troca em lote: cita todas as trocas no prompt, no plural', async () => {
+    const { service, complete } = makeService({
+      complete: async () => llmResult('Atualizei suas trocas com segurança.'),
+    });
+    await service.present({
+      ...baseParams,
+      reason: 'SUBSTITUTION',
+      substitutionChanges: [
+        { from: 'Leg Press 45°', to: 'Agachamento Hack' },
+        { from: 'Cadeira Extensora', to: 'Afundo' },
+      ],
+    });
+    const system = complete.mock.calls[0]?.[0]?.system ?? '';
+    expect(system).toContain(
+      '"Leg Press 45°" por "Agachamento Hack" e "Cadeira Extensora" por "Afundo"',
+    );
+    expect(system).toContain('as trocas já foram aplicadas');
   });
 });

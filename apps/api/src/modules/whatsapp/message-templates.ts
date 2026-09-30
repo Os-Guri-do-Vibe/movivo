@@ -8,6 +8,11 @@
  */
 import type { AgentPersona } from '@movivo/shared';
 
+import {
+  describeChangesBecame,
+  type SubstitutionChange,
+} from '../protocol/protocol-substitution-items';
+
 /** Separador de bolhas — o worker envia cada trecho como uma mensagem distinta. */
 export const BUBBLE_SEPARATOR = '\n---\n';
 
@@ -121,11 +126,9 @@ export function analyzingMessage(persona: AgentPersona): string {
   return persona.agentSelfIntro.trim();
 }
 
-/** De/para de exercício de uma substituição liberada — usado só na saudação de reentrega. */
-export interface SubstitutionDeliveryInfo {
-  from: string;
-  to: string;
-}
+/** De/para de cada exercício de uma substituição liberada (1+ na troca em lote) — usado só na
+ * saudação de reentrega. */
+export type SubstitutionDeliveryInfo = readonly SubstitutionChange[];
 
 /**
  * Entrega **com PDF** — 1ª bolha: saudação estática pelo primeiro nome. 2ª bolha
@@ -152,10 +155,13 @@ export function protocolDeliveryPdfText(
   substitution?: SubstitutionDeliveryInfo,
   volumeAdjusted?: boolean,
 ): string {
-  const intro = substitution
-    ? `${firstName ? `${firstName}, a` : 'A'} troca do seu exercício já foi feita! 💚🔄\n\n` +
-      `"${substitution.from}" virou "${substitution.to}" no seu protocolo, segue o treino ` +
-      'atualizado em PDF.'
+  const intro = substitution?.length
+    ? `${firstName ? `${firstName}, a` : 'A'} ${
+        substitution.length > 1
+          ? 'troca dos seus exercícios já foi feita'
+          : 'troca do seu exercício já foi feita'
+      }! 💚🔄\n\n` +
+      `${describeChangesBecame(substitution)} no seu protocolo, segue o treino atualizado em PDF.`
     : volumeAdjusted
       ? `${firstName ? `${firstName}, ajustei` : 'Ajustei'} seu treino pra ficar mais rápido, ` +
         'como você pediu no check-in semanal! 💚⏱️\n\n' +

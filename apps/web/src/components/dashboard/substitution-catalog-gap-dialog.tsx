@@ -6,8 +6,9 @@
  * nenhum lugar da base. Publica o exercício (mesmos campos simplificados do modal "Novo
  * exercício" da tela Exercícios — `ExerciseEditorDialog` em `ai-exercise-catalog.tsx`,
  * reaproveitando `slugifyExerciseName`/`uniqueExerciseKey`/`CATALOG_MUSCLE_GROUPS` de lá pra
- * não duplicar) e aprova a troca no mesmo gesto (`addCatalogExerciseAndApproveSubstitution`,
- * um único endpoint que faz as duas coisas atomicamente do lado do servidor).
+ * não duplicar) e o liga ao ITEM da proposta (`addCatalogExerciseToSubstitutionItem`).
+ * Achado 2026-09-30 (troca em lote): NÃO aprova mais — o item vira uma troca comum e o
+ * profissional decide na tela única, item a item.
  */
 import {
   TRAINING_LOCATION_LABELS,
@@ -20,7 +21,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { getExerciseCatalog } from '@/lib/control-center-api';
-import { addCatalogExerciseAndApproveSubstitution, DashboardApiError } from '@/lib/dashboard-api';
+import { addCatalogExerciseToSubstitutionItem, DashboardApiError } from '@/lib/dashboard-api';
 import { cn } from '@/lib/utils';
 
 import {
@@ -43,11 +44,14 @@ interface Form {
 
 export function SubstitutionCatalogGapDialog({
   substitutionId,
+  itemIndex,
   requestedName,
   onClose,
   onSaved,
 }: {
   substitutionId: string;
+  /** Posição do item (troca) da proposta ao qual o exercício será ligado. */
+  itemIndex: number;
   requestedName: string;
   onClose: () => void;
   onSaved: (message: string) => void;
@@ -94,7 +98,7 @@ export function SubstitutionCatalogGapDialog({
     setError('');
     try {
       const exerciseKey = uniqueExerciseKey(slugifyExerciseName(form.name), existingKeys);
-      await addCatalogExerciseAndApproveSubstitution(substitutionId, {
+      await addCatalogExerciseToSubstitutionItem(substitutionId, itemIndex, {
         exerciseKey,
         changeNote: 'Adicionado a partir de pedido de aluno via WhatsApp (fila de substituição)',
         name: form.name.trim(),
@@ -113,12 +117,12 @@ export function SubstitutionCatalogGapDialog({
         locations: form.locations,
         videoUrl: form.videoUrl.trim() || undefined,
       });
-      onSaved(`"${form.name.trim()}" adicionado ao catálogo e a troca foi aplicada.`);
+      onSaved(`"${form.name.trim()}" adicionado ao catálogo. Agora revise e aprove a troca.`);
     } catch (caught) {
       setError(
         caught instanceof DashboardApiError
           ? caught.message
-          : 'Não foi possível adicionar o exercício e aprovar a troca.',
+          : 'Não foi possível adicionar o exercício ao catálogo.',
       );
     } finally {
       setSaving(false);
@@ -133,8 +137,8 @@ export function SubstitutionCatalogGapDialog({
         </DialogHeader>
 
         <p className="text-label text-muted-foreground">
-          O aluno pediu este exercício e ele ainda não está na nossa base. Publique-o pra aplicar a
-          troca — vira uma opção real do catálogo daqui pra frente.
+          O aluno pediu este exercício e ele ainda não está na nossa base. Publique-o pra poder
+          aprovar a troca — vira uma opção real do catálogo daqui pra frente.
         </p>
 
         {error ? (
@@ -223,7 +227,7 @@ export function SubstitutionCatalogGapDialog({
             Cancelar
           </Button>
           <Button disabled={!canSave || saving} onClick={() => void save()}>
-            {saving ? 'Adicionando…' : 'Adicionar e aprovar'}
+            {saving ? 'Adicionando…' : 'Adicionar ao catálogo'}
           </Button>
         </div>
       </DialogContent>

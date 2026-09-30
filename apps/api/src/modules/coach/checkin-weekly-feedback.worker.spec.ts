@@ -83,7 +83,7 @@ function makeWorker(opts: {
     version?: number;
     reason?: string;
   };
-  identifyResult?: { identified: boolean; exerciseId?: string };
+  identifyResult?: { identified: boolean; exerciseIds?: string[] };
   personalInfo?: unknown;
 }) {
   const userRow = opts.userRow ?? DEFAULT_USER_ROW;
@@ -265,7 +265,7 @@ describe('CheckinWeeklyFeedbackWorker', () => {
     const { worker, identifyFn, commentFn } = makeWorker({
       notesCipher: Buffer.from('cipher'),
       decryptedNotes: { difficultExerciseDescription: 'tive dificuldade no agachamento' },
-      identifyResult: { identified: true, exerciseId: 'goblet_squat' },
+      identifyResult: { identified: true, exerciseIds: ['goblet_squat'] },
     });
     await worker.process(job());
     expect(identifyFn).toHaveBeenCalledWith(

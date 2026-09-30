@@ -64,6 +64,57 @@ export const SUBSTITUTION_NOT_SAFE_TO_APPLY_MESSAGE =
   'de aplicar, quero ter certeza que o treino inteiro continua seguro pra você. Já registrei ' +
   'aqui e te aviso assim que ele revisar. 💪';
 
+/**
+ * Achado 2026-09-30 (troca só de hoje x no protocolo): copy FIXA do fluxo de substituição.
+ * A pergunta de alcance é sempre determinística (nunca depende de o LLM lembrar de fazê-la), e
+ * deixa visível que mudança no protocolo passa pela revisão do profissional CREF.
+ */
+const SUBSTITUTION_PROTOCOL_REVIEW_NOTE =
+  '(Mudanças no protocolo passam pela revisão do profissional CREF.)';
+
+/** Pergunta de alcance para um único exercício. */
+export const SUBSTITUTION_SCOPE_QUESTION_SINGLE =
+  'Essa troca é só pra hoje ou você quer que eu troque no seu protocolo? ' +
+  SUBSTITUTION_PROTOCOL_REVIEW_NOTE;
+
+/** Pergunta de alcance para vários exercícios de uma vez. */
+export const SUBSTITUTION_SCOPE_QUESTION_MULTI =
+  'Cada troca é só pra hoje ou você quer levar pro seu protocolo? ' +
+  SUBSTITUTION_PROTOCOL_REVIEW_NOTE;
+
+/** Pergunta de alcance só dos exercícios que ainda não têm alcance definido. */
+export function substitutionScopeQuestionFor(exerciseNames: readonly string[]): string {
+  const names =
+    exerciseNames.length > 1
+      ? `${exerciseNames.slice(0, -1).join(', ')} e ${exerciseNames[exerciseNames.length - 1]}`
+      : (exerciseNames[0] ?? '');
+  return `E pra ${names}: é só pra hoje ou você quer levar pro seu protocolo? ${SUBSTITUTION_PROTOCOL_REVIEW_NOTE}`;
+}
+
+/** Fecha a recomendação de hoje: nada muda no protocolo. */
+export const SUBSTITUTION_TODAY_NOTE =
+  'Isso vale só pra hoje: na próxima sessão você volta pro exercício do seu protocolo. Se ' +
+  'quiser trocar de vez, é só me avisar. 🙌';
+
+/** Já existe troca em análise: a recomendação vale só pra hoje. */
+export const SUBSTITUTION_FORCED_TODAY_NOTE =
+  'Como você já tem uma troca em análise no seu protocolo, essa recomendação vale só pra ' +
+  'hoje. 🙌';
+
+/** Troca no protocolo pedida junto com uma de hoje, mas já existe uma em análise. */
+export const SUBSTITUTION_PROTOCOL_PART_PENDING_NOTE =
+  'A troca no protocolo fica para depois, porque você já tem outra em análise. Assim que ' +
+  'ela for confirmada, é só me chamar de novo. 🙌';
+
+/** Mais de 3 exercícios de uma vez: não é troca, é revisão de treino. */
+export const SUBSTITUTION_TOO_MANY_MESSAGE =
+  'Consigo cuidar de até 3 trocas por vez. Me diz quais são as mais importantes agora e a ' +
+  'gente segue por aqui. 💪';
+
+/** O aluno não se decidiu depois de algumas perguntas: encerra sem pressionar. */
+export const SUBSTITUTION_GAVE_UP_MESSAGE =
+  'Sem problema! Quando decidir, é só me chamar que a gente resolve a troca por aqui. 💪';
+
 /** Falha persistente do worker (DLQ): tranquiliza sem prometer prazo (guardrails). */
 export const DLQ_FALLBACK_MESSAGE =
   'Recebi sua mensagem! Estou organizando aqui e já te respondo. 🙌';

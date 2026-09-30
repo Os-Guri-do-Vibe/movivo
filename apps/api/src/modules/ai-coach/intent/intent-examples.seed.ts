@@ -48,6 +48,17 @@ export const INTENT_EXAMPLES_SEED: readonly IntentExampleSeed[] = [
     text: 'detesto esse exercício, dá pra ser outro no lugar dele?',
   },
   { intent: 'SUBSTITUICAO_EXERCICIO', text: 'não me sinto confiante fazendo esse aí do treino' },
+  // Achado 2026-09-30: troca só do momento (aparelho ocupado, pressa) é a MESMA intenção — o
+  // fluxo pergunta depois se é só hoje ou no protocolo.
+  {
+    intent: 'SUBSTITUICAO_EXERCICIO',
+    text: 'o leg press está cheio e estou com pressa, por qual posso substituir?',
+  },
+  {
+    intent: 'SUBSTITUICAO_EXERCICIO',
+    text: 'o banco do supino está com fila, posso fazer outro exercício no lugar hoje?',
+  },
+  { intent: 'SUBSTITUICAO_EXERCICIO', text: 'a máquina tá ocupada, o que faço no lugar dela?' },
   // MOTIVACAO
   { intent: 'MOTIVACAO', text: 'tô sem vontade de treinar hoje' },
   { intent: 'MOTIVACAO', text: 'tá difícil manter a rotina, me ajuda' },

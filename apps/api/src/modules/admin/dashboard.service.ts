@@ -9,6 +9,7 @@ import { and, desc, eq, isNotNull, or, sql } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 import {
   anamnesisStructuredSchema,
+  approveSubstitutionSchema,
   ControlCenterCapability,
   onboardingStep1Schema,
   protocolStructureSchema,
@@ -49,7 +50,12 @@ import { ExerciseCatalogAdminService } from './exercise-catalog-admin.service';
 import { buildProtocolPdf } from '../protocol/protocol-pdf.service';
 import { signatureHash, supersedePreviousActiveProtocols } from '../protocol/protocol.repository';
 import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
-import { ProtocolSubstitutionRepository } from '../protocol/protocol-substitution.repository';
+import { findSafeCandidates } from '../protocol/exercise-substitution';
+import {
+  ProtocolSubstitutionRepository,
+  type SubstitutionItemEdit,
+} from '../protocol/protocol-substitution.repository';
+import { itemsOf, type SubstitutionChange } from '../protocol/protocol-substitution-items';
 import { AI_SUBSTITUTION_REVIEW_WINDOW_MS } from '../protocol/protocol-substitution-release.worker';
 import type { UserConstraints } from '../protocol/user-constraints';
 import { ValidationService } from '../protocol/validation/validation.service';
@@ -85,6 +91,8 @@ type SignProtocolResult =
     };
 
 const uuidSchema = z.uuid();
+// Posição do item numa proposta de troca em lote (0 a MAX_SUBSTITUTION_ITEMS - 1).
+const itemIndexSchema = z.coerce.number().int().min(0).max(2);
 // `PARQ` saiu do enum em 2026-08-24: não existe mais item de fila nem tela de PAR-Q — o
 // PAR-Q bloqueado agora vive DENTRO do item de protocolo (`origin: 'PARQ'`).
 // `SUBSTITUTION` entrou em 2026-09-02: proposta de substituição de exercício via IA, em
@@ -664,7 +672,7 @@ export class DashboardService {
    * decidir sem precisar abrir o WhatsApp à parte).
    */
   private async substitutionDetail(actor: AuthenticatedUser, id: string) {
-    return this.scopedRead(actor, async (tx) => {
+    const loaded = await this.scopedRead(actor, async (tx) => {
       const [row] = await tx
         .select()
         .from(protocolSubstitutionRequests)
@@ -692,42 +700,84 @@ export class DashboardService {
           .orderBy(desc(conversations.createdAt))
           .limit(20)
       ).map((r) => ({ ...r, studentName: owner?.name ?? null }));
+      return { row, owner, replayRows };
+    });
+    const { row, owner, replayRows } = loaded;
 
-      // Achado 2026-09-09: `reviewUrgency: MANDATORY` (elegibilidade fora da curadoria, ou
-      // `catalogGap`) nunca tem `autoReleaseAt` — mesma regra de PAR-Q bloqueante, só que
-      // decidida na criação da proposta em vez de derivada ao vivo (ver `queue()`).
-      const mandatory = row.reviewUrgency === 'MANDATORY';
-      const item = this.item(
-        id,
-        'SUBSTITUTION',
-        mandatory ? 'ALERT' : 'ROUTINE',
-        row.createdAt,
-        substitutionTitle(owner?.name),
-        row.status,
-        row.status,
-        row.status === 'PENDING' && !mandatory
-          ? new Date(row.createdAt.getTime() + AI_SUBSTITUTION_REVIEW_WINDOW_MS).toISOString()
-          : null,
-        row.catalogGap ? 'CATALOG_GAP' : 'AI_SUBSTITUTION',
-      );
+    // Achado 2026-09-30 (troca em lote): a tela única lista cada troca; para cada item o
+    // profissional pode aprovar, descartar ou trocar por outra opção SEGURA para este aluno
+    // (mesmo filtro determinístico da oferta ao aluno, recomputado agora contra o protocolo
+    // vivo). Só proposta pendente precisa das opções.
+    const items = itemsOf(row);
+    const review =
+      row.status === 'PENDING'
+        ? await this.substitutionRepo.loadProtocolForReview(
+            { userId: actor.userId, role: actor.role },
+            row.protocolId,
+          )
+        : null;
+    const catalog = this.exerciseCatalog.getAll();
+    const itemViews = items.map((item, index) => {
+      const source = this.exerciseCatalog.getById(item.fromExerciseId);
+      const options =
+        review && source
+          ? findSafeCandidates(source, review.constraints, catalog).map((candidate) => ({
+              id: candidate.id,
+              name: candidate.name,
+            }))
+          : [];
+      // A escolha atual sempre aparece entre as opções (mesmo a que o aluno pediu fora da
+      // curadoria) para o seletor nunca perder o valor corrente.
+      if (item.toExerciseId && !options.some((option) => option.id === item.toExerciseId)) {
+        options.unshift({ id: item.toExerciseId, name: item.toExerciseName });
+      }
       return {
-        item,
-        context: {},
-        substitution: {
-          id: row.id,
-          protocolId: row.protocolId,
-          from: { id: row.fromExerciseId, name: row.fromExerciseName },
-          to: { id: row.toExerciseId, name: row.toExerciseName },
-          diff: row.diff,
-          changeReason: row.changeReason,
-          status: row.status,
-          decidedAt: row.decidedAt?.toISOString() ?? null,
-          reviewUrgency: row.reviewUrgency,
-          catalogGap: row.catalogGap,
-        },
-        replay: this.groupReplays(replayRows)[0],
+        index,
+        from: { id: item.fromExerciseId, name: item.fromExerciseName },
+        to: { id: item.toExerciseId, name: item.toExerciseName },
+        catalogGap: item.catalogGap,
+        mandatory: item.mandatory,
+        decision: item.decision,
+        options,
       };
     });
+
+    // Achado 2026-09-09: `reviewUrgency: MANDATORY` (elegibilidade fora da curadoria, ou
+    // `catalogGap`) nunca tem `autoReleaseAt` — mesma regra de PAR-Q bloqueante, só que
+    // decidida na criação da proposta em vez de derivada ao vivo (ver `queue()`).
+    const mandatory = row.reviewUrgency === 'MANDATORY';
+    const item = this.item(
+      id,
+      'SUBSTITUTION',
+      mandatory ? 'ALERT' : 'ROUTINE',
+      row.createdAt,
+      substitutionTitle(owner?.name),
+      row.status,
+      row.status,
+      row.status === 'PENDING' && !mandatory
+        ? new Date(row.createdAt.getTime() + AI_SUBSTITUTION_REVIEW_WINDOW_MS).toISOString()
+        : null,
+      row.catalogGap ? 'CATALOG_GAP' : 'AI_SUBSTITUTION',
+    );
+    return {
+      item,
+      context: {},
+      substitution: {
+        id: row.id,
+        protocolId: row.protocolId,
+        // Espelho do 1º item para leitores anteriores ao lote; `items` é o completo.
+        from: { id: row.fromExerciseId, name: row.fromExerciseName },
+        to: { id: row.toExerciseId, name: row.toExerciseName },
+        items: itemViews,
+        diff: row.diff,
+        changeReason: row.changeReason,
+        status: row.status,
+        decidedAt: row.decidedAt?.toISOString() ?? null,
+        reviewUrgency: row.reviewUrgency,
+        catalogGap: row.catalogGap,
+      },
+      replay: this.groupReplays(replayRows)[0],
+    };
   }
 
   /**
@@ -735,18 +785,44 @@ export class DashboardService {
    * mecânica de `ProtocolSubstitutionReleaseWorker` (reusada via `ProtocolSubstitutionRepository
    * .release()`, o único caminho que de fato aplica). PDF completo do protocolo atualizado é
    * gerado e a entrega por WhatsApp reusa o mesmo pipeline (`PROTOCOL_DELIVERY`).
+   *
+   * Achado 2026-09-30 (troca em lote): o corpo é opcional e traz a decisão do profissional por
+   * item (`APPROVE` com outro exercício, ou `DISCARD`); sem corpo, aprova todos como estão.
+   * Todos os itens descartados equivale a recusar a proposta (e o aluno é avisado).
    */
-  async approveSubstitutionNow(actor: AuthenticatedUser, rawId: string) {
+  async approveSubstitutionNow(actor: AuthenticatedUser, rawId: string, rawBody?: unknown) {
     this.assertStaffWrite(actor);
     const id = this.parse(uuidSchema, rawId);
+    const body = this.parse(approveSubstitutionSchema, rawBody ?? {});
+    const edits: SubstitutionItemEdit[] = (body.items ?? []).map((edit) => ({
+      index: edit.index,
+      action: edit.action,
+      toExerciseId: edit.toExerciseId,
+    }));
     const release = await this.substitutionRepo.release(
       { userId: actor.userId, role: actor.role },
       id,
+      edits,
     );
     if (!release.released) {
-      throw new BadRequestException(
-        'Proposta ja decidida, ou o protocolo mudou de versao desde a proposta.',
-      );
+      switch (release.reason) {
+        case 'ALL_DISCARDED':
+          await this.notifySubstitutionDiscarded(actor, id, release.userId);
+          return { id, protocolId: release.protocolId, discarded: true };
+        case 'VALIDATION_FAILED':
+          throw new BadRequestException({
+            code: 'VALIDATION_FAILED',
+            message: 'As trocas aprovadas, aplicadas ao protocolo inteiro, quebraram a validação.',
+            violations: release.violations,
+          });
+        case 'UNRESOLVED_ITEM':
+        case 'INVALID_EDIT':
+          throw new BadRequestException(release.detail);
+        default:
+          throw new BadRequestException(
+            'Proposta ja decidida, ou o protocolo mudou de versao desde a proposta.',
+          );
+      }
     }
     await this.deliverReleasedSubstitution(actor, id, release);
     return { id, protocolId: release.protocolId, version: release.version, released: true };
@@ -755,15 +831,16 @@ export class DashboardService {
   /**
    * Achado 2026-09-09 (pedido do fundador): aluno pediu um exercício que não existe em
    * NENHUM lugar do catálogo — o time publica o exercício (mesmo endpoint/schema de
-   * `ExerciseCatalogAdminService.publish`, reaproveitado sem alteração) e aprova a troca no
-   * mesmo gesto. `attachCatalogExerciseAndRelease` recomputa a troca contra o protocolo VIVO
-   * e revalida a estrutura inteira antes de aplicar — se falhar, nada é publicado como
-   * aplicado ao aluno, só o exercício fica no catálogo pra tentar de novo com outra
-   * categorização.
+   * `ExerciseCatalogAdminService.publish`, reaproveitado sem alteração) e o liga ao item da
+   * proposta. Achado 2026-09-30 (troca em lote): isto NÃO aprova mais — o item vira uma troca
+   * comum e o profissional decide na tela única, item a item, como nos demais. O vínculo
+   * recomputa a troca contra o protocolo VIVO e revalida a estrutura inteira; se falhar, só o
+   * exercício fica no catálogo, pra tentar de novo com outra categorização.
    */
-  async addCatalogExerciseAndApproveSubstitution(
+  async addCatalogExerciseToSubstitutionItem(
     actor: AuthenticatedUser,
     rawId: string,
+    rawIndex: string,
     body: unknown,
   ) {
     this.assertStaffWrite(actor);
@@ -778,6 +855,7 @@ export class DashboardService {
       throw new ForbiddenException('Sem permissão para publicar exercício no catálogo.');
     }
     const id = this.parse(uuidSchema, rawId);
+    const index = this.parse(itemIndexSchema, rawIndex);
     const input = this.parse(publishExerciseCatalogEntrySchema, body);
     await this.exerciseCatalogAdmin.publish(actor, input);
     const chosen = this.exerciseCatalog.getById(input.exerciseKey);
@@ -786,25 +864,31 @@ export class DashboardService {
       // acontecer, mas sem isso ficaríamos aplicando a troca contra um exercício fantasma.
       throw new BadRequestException('Exercício publicado, mas não ficou disponível a tempo.');
     }
-    const release = await this.substitutionRepo.attachCatalogExerciseAndRelease(
+    const attached = await this.substitutionRepo.attachCatalogExercise(
       { userId: actor.userId, role: actor.role },
       id,
+      index,
       chosen,
     );
-    if (!release.released) {
-      if (release.reason === 'VALIDATION_FAILED') {
+    if (!attached.attached) {
+      if (attached.reason === 'VALIDATION_FAILED') {
         throw new BadRequestException({
           code: 'VALIDATION_FAILED',
           message: 'O exercício publicado, aplicado ao protocolo inteiro, quebrou a validação.',
-          violations: release.violations,
+          violations: attached.violations,
         });
       }
+      if (attached.reason === 'NOT_VIABLE') {
+        throw new BadRequestException(
+          'O exercício publicado não é elegível para este aluno (nível, local ou contraindicação).',
+        );
+      }
       throw new BadRequestException(
-        'Proposta ja decidida, ou o protocolo mudou de versao desde a proposta.',
+        'Proposta ja decidida, item inexistente, ou o protocolo mudou de versao desde a proposta.',
       );
     }
-    await this.deliverReleasedSubstitution(actor, id, release);
-    return { id, protocolId: release.protocolId, version: release.version, released: true };
+    this.queueEvents.emit('protocol');
+    return { id, itemIndex: index, attached: true };
   }
 
   /**
@@ -824,8 +908,7 @@ export class DashboardService {
       startDate: Date;
       endDate: Date;
       totalWeeks: number;
-      fromExerciseName: string;
-      toExerciseName: string;
+      changes: readonly SubstitutionChange[];
     },
   ): Promise<void> {
     let pdf: Buffer | null = null;
@@ -852,8 +935,7 @@ export class DashboardService {
         totalWeeks: release.totalWeeks,
         mesocycleName: release.mesocycleName,
         reason: 'SUBSTITUTION',
-        substitutionFrom: release.fromExerciseName,
-        substitutionTo: release.toExerciseName,
+        substitutionChanges: release.changes,
       });
     } catch (error) {
       this.logger.warn(
@@ -880,15 +962,17 @@ export class DashboardService {
         type: 'PROTOCOL_DELIVERY',
         text: aiSummary,
         deliveryReason: 'SUBSTITUTION',
-        substitutionFromExercise: release.fromExerciseName,
-        substitutionToExercise: release.toExerciseName,
+        substitutionFromExercise: release.changes[0]?.from,
+        substitutionToExercise: release.changes[0]?.to,
+        substitutionChanges: release.changes,
       },
       { jobId: `substitution-delivery_manual_${id}` },
     );
     this.queueEvents.emit('protocol');
   }
 
-  /** Profissional recusa a troca — mantém o exercício original, sem tocar o protocolo. */
+  /** Profissional recusa a proposta inteira — mantém os exercícios originais, sem tocar o
+   * protocolo. */
   async discardSubstitution(actor: AuthenticatedUser, rawId: string) {
     this.assertStaffWrite(actor);
     const id = this.parse(uuidSchema, rawId);
@@ -899,10 +983,21 @@ export class DashboardService {
     if (!result.discarded) {
       throw new BadRequestException('Proposta ja decidida — nao ha mais o que recusar.');
     }
+    await this.notifySubstitutionDiscarded(actor, id, result.userId);
+    return { id, discarded: true };
+  }
+
+  /** Trilha de auditoria + aviso ao aluno de uma proposta recusada (por inteiro, ou com todos
+   * os itens descartados na tela de revisão). */
+  private async notifySubstitutionDiscarded(
+    actor: AuthenticatedUser,
+    id: string,
+    userId: string,
+  ): Promise<void> {
     await this.scoped(actor, (tx) =>
       this.audit.append(tx, {
         actorId: actor.userId,
-        userId: result.userId,
+        userId,
         action: 'PROTOCOL_SUBSTITUTION_DISCARDED',
         entityType: 'protocol_substitution_request',
         entityId: id,
@@ -913,7 +1008,7 @@ export class DashboardService {
     // pedia a troca, ouvia "vou confirmar com o profissional" e nunca mais sabia o que
     // aconteceu. Mesmo padrão de `coach-message` do `AiResponseWorker`.
     const notification: WhatsappOutboundJob = {
-      userId: result.userId,
+      userId,
       type: 'COACH_MESSAGE',
       text: SUBSTITUTION_DISCARDED_MESSAGE,
       dedupeId: `substitution-discarded_${id}`,
@@ -922,7 +1017,6 @@ export class DashboardService {
       jobId: `substitution-discarded_${id}`,
     });
     this.queueEvents.emit('protocol');
-    return { id, discarded: true };
   }
 
   async resolveHandoff(actor: AuthenticatedUser, rawId: string, rawBody: unknown) {
