@@ -31,8 +31,8 @@ const CONVERSATION: readonly ChatItem[] = [
     kind: 'in',
     attachment: 'seu-treino.pdf',
     text: [
-      'Seu treino está pronto! 💚',
-      'Montamos tudo com base nos seus objetivos, na sua rotina e nas informações que você compartilhou com a gente.',
+      'Seu treino está pronto. 💚',
+      'Montamos seu protocolo considerando seus objetivos, sua rotina, sua disponibilidade e tudo o que você compartilhou com a gente.',
     ],
     time: '07:02',
   },

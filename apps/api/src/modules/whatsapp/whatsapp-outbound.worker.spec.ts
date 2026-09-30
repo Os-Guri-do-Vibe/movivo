@@ -295,7 +295,7 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
     const [, url, caption, , fileName] = sendDocument.mock.calls[0] ?? [];
     expect(url).toBe('https://movivo.test/protocolo/p1/pdf');
     expect(fileName).toBe('protocolo-ana-beatriz-souza-movivo.pdf');
-    expect(caption).toMatch(/^Ana, seu treino está pronto!/);
+    expect(caption).toMatch(/^Ana, seu treino está pronto\./);
   });
 
   // Achado 2026-09-08 (bug reproduzido ao vivo pelo fundador): a reentrega pós-substituição
@@ -364,7 +364,7 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
     expect(send).not.toHaveBeenCalled();
     expect(sendDocument).toHaveBeenCalledTimes(1);
     const caption = sendDocument.mock.calls[0]?.[2];
-    expect(caption).toMatch(/^Ana, seu treino está pronto!/);
+    expect(caption).toMatch(/^Ana, seu treino está pronto\./);
     expect(caption).toContain(
       'Seu treino trabalha corpo inteiro 3x por semana, com foco em técnica.',
     );
@@ -398,7 +398,7 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0]?.[0]?.text).toBe(DEFAULT_AGENT_PERSONA.agentSelfIntro);
     expect(sendDocument).toHaveBeenCalledTimes(1);
-    expect(sendDocument.mock.calls[0]?.[2]).toMatch(/^Ana, seu treino está pronto!/);
+    expect(sendDocument.mock.calls[0]?.[2]).toMatch(/^Ana, seu treino está pronto\./);
     // Marca o MESMO marker que um job `PROTOCOL_WAITING` real usaria — quando ele disparar
     // depois (o delay do BullMQ não é cancelável), vira `ALREADY_SENT` sem duplicar.
     const waitingKey = new RedisKeyBuilder('movivo').forUser(
@@ -446,7 +446,7 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
     });
     await worker.process(job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 }));
     const caption = sendDocument.mock.calls[0]?.[2];
-    expect(caption).toMatch(/^Ana, seu treino está pronto!/);
+    expect(caption).toMatch(/^Ana, seu treino está pronto\./);
   });
 
   it('entrega com PDF, sem nome cadastrado: cai no nome de arquivo genérico', async () => {
