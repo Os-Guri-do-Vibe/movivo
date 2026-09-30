@@ -38,4 +38,8 @@ sprint
 infra/vps
 **/*.md
 !packages/*/README.md
+# Únicos documentos jurídicos lidos no build do web (apps/web/src/lib/legal-documents.ts);
+# os demais arquivos de docs/juridico (pendências, validações) ficam fora da imagem.
+!docs/juridico/termos-de-uso.md
+!docs/juridico/politica-de-privacidade.md
 .DS_Store
