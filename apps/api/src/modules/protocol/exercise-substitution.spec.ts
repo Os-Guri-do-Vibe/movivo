@@ -18,7 +18,32 @@ describe('isViable (US-3.5)', () => {
   it('rejeita exercício acima do nível do usuário', () => {
     const ex = EXERCISE_BY_ID.get('flexao');
     if (!ex) throw new Error('fixture');
-    expect(isViable({ ...ex, minLevel: 'AVANCADO' }, beginnerHome)).toBe(false);
+    expect(isViable({ ...ex, levels: ['AVANCADO'] }, beginnerHome)).toBe(false);
+  });
+
+  // 2026-09-29 (decisão do fundador): oferta ESTRITA — só os níveis marcados.
+  it('oferta estrita por nível: só "Iniciante" não é oferecido a aluno avançado', () => {
+    const ex = EXERCISE_BY_ID.get('flexao');
+    if (!ex) throw new Error('fixture');
+    const onlyBeginner = { ...ex, levels: ['INICIANTE' as const] };
+    expect(isViable(onlyBeginner, beginnerHome)).toBe(true);
+    expect(isViable(onlyBeginner, { ...beginnerHome, level: 'AVANCADO' })).toBe(false);
+    const gap = { ...ex, levels: ['INICIANTE' as const, 'AVANCADO' as const] };
+    expect(isViable(gap, { ...beginnerHome, level: 'INTERMEDIARIO' })).toBe(false);
+    expect(isViable(gap, { ...beginnerHome, level: 'AVANCADO' })).toBe(true);
+  });
+
+  it('findSafeCandidates respeita os níveis marcados do candidato', () => {
+    const pushup = EXERCISE_BY_ID.get('flexao');
+    if (!pushup) throw new Error('fixture');
+    const advanced = { ...beginnerHome, level: 'AVANCADO' as const };
+    const before = findSafeCandidates(pushup, advanced, EXERCISE_CATALOG);
+    const first = before[0];
+    if (!first) throw new Error('fixture sem candidato');
+    const catalog = EXERCISE_CATALOG.map((e) =>
+      e.id === first.id ? { ...e, levels: ['INICIANTE' as const] } : e,
+    );
+    expect(findSafeCandidates(pushup, advanced, catalog).map((c) => c.id)).not.toContain(first.id);
   });
 
   it('rejeita exercício contraindicado pela lesão do usuário', () => {

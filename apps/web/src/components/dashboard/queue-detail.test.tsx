@@ -240,8 +240,16 @@ describe('QueueDetail — substituição fora do catálogo (catalogGap)', () => 
     await userEvent.click(scope.getByText('Selecione o(s) músculo(s)'));
     await userEvent.click(scope.getByRole('checkbox', { name: 'peito' }));
     await userEvent.click(scope.getByRole('checkbox', { name: /Academia completa/ }));
+    const adicionar = scope.getByRole('button', { name: 'Adicionar e aprovar' });
+    // Nível (achado 2026-09-29): mesmo combo do modal da tela Exercícios, obrigatório.
+    const nivel = scope.getByRole('group', { name: 'Nível' });
+    expect(within(nivel).getAllByRole('checkbox')).toHaveLength(3);
+    expect(adicionar).toBeDisabled();
+    await userEvent.click(within(nivel).getByRole('checkbox', { name: 'Avançado' }));
+    await userEvent.click(within(nivel).getByRole('checkbox', { name: 'Intermediário' }));
+    expect(adicionar).toBeEnabled();
 
-    await userEvent.click(scope.getByRole('button', { name: 'Adicionar e aprovar' }));
+    await userEvent.click(adicionar);
 
     await waitFor(() =>
       expect(api.addCatalogExerciseAndApproveSubstitution).toHaveBeenCalledWith(
@@ -250,20 +258,33 @@ describe('QueueDetail — substituição fora do catálogo (catalogGap)', () => 
           name: 'Supino Reto Máquina',
           muscleGroups: ['peito'],
           locations: ['FULL_GYM'],
+          levels: ['INTERMEDIARIO', 'AVANCADO'],
+          pattern: 'ISOLATION',
+          contraindicatedFor: [],
+          substitutes: [],
+          equipment: [],
         }),
       ),
     );
     expect(await screen.findByRole('status')).toHaveTextContent('adicionado ao catálogo');
   });
 
-  it('não deixa aprovar sem selecionar músculo e local', async () => {
+  it('não deixa aprovar sem selecionar músculo, nível e local', async () => {
     api.getQueueDetail.mockResolvedValue(catalogGapSubstitutionDetail);
     render(<QueueDetail kind="SUBSTITUTION" id={CATALOG_GAP_SUBSTITUTION_ID} />);
     await screen.findByText('Troca proposta');
 
     await userEvent.click(screen.getByRole('button', { name: 'Adicionar exercício ao catálogo' }));
     const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByRole('button', { name: 'Adicionar e aprovar' })).toBeDisabled();
+    const scope = within(dialog);
+    const adicionar = scope.getByRole('button', { name: 'Adicionar e aprovar' });
+    expect(adicionar).toBeDisabled();
+
+    // Músculo e local sem nível: continua bloqueado.
+    await userEvent.click(scope.getByRole('checkbox', { name: 'peito' }));
+    await userEvent.click(scope.getByRole('checkbox', { name: /Academia completa/ }));
+    expect(adicionar).toBeDisabled();
+    await userEvent.click(adicionar);
     expect(api.addCatalogExerciseAndApproveSubstitution).not.toHaveBeenCalled();
   });
 });

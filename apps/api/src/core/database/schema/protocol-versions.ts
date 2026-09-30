@@ -58,7 +58,12 @@ export const protocolVersions = pgTable(
      */
     content: jsonb('content').notNull(),
 
-    /** Diferença estruturada para a versão anterior. Nulo na versão 1. */
+    /**
+     * Diferença estruturada para a versão anterior (objeto com discriminante `type`). Na
+     * versão 1 gerada pelo planner (2026-09-29) guarda o rastro da geração
+     * (`type: 'GENERATION_TRACE'` — tentativas, correções, reparos; sem PII); nulo na v1 dos
+     * caminhos sem planner (DLQ). Comentário apenas — sem mudança de coluna/migração.
+     */
     diff: jsonb('diff'),
 
     /** Motivo da nova versão (ex.: ajuste pós check-in da semana 3). */

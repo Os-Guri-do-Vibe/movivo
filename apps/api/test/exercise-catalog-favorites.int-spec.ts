@@ -66,6 +66,8 @@ const EVERYWHERE = 'agachamento_profundo';
 /** Chave de teste com v1 PUBLISHED e v2 RETIRED (criada pelo migrador no `beforeAll`). */
 const RETIRED_KEY = `teste_fav_retirado_${RUN}`;
 const MISSING_KEY = `teste_fav_inexistente_${RUN}`;
+/** Publicado pelo código novo com `levels` não contíguo (2026-09-29). */
+const LEVELS_KEY = `teste_niveis_${RUN}`;
 
 const FAVORITE_MARKER = 'preferido pelo profissional CREF: sim';
 const FAVORITE_BLOCK_HEADER = 'PREFERÊNCIA DE PRESCRIÇÃO DO PROFISSIONAL CREF:';
@@ -288,6 +290,8 @@ afterAll(async () => {
         VALUES (${fav.exercise_key}, ${fav.favorited_by}::uuid, ${fav.favorited_at})`;
     }
     await migrator`DELETE FROM exercise_catalog_entries WHERE exercise_key = ${RETIRED_KEY}`;
+    await migrator`DELETE FROM exercise_catalog_entries WHERE exercise_key = ${LEVELS_KEY}`;
+    await app?.get(ExerciseCatalogProvider).invalidate();
     // `audit_logs` NÃO é limpo de propósito (mesma escolha do audit-search.int-spec): a
     // cadeia de hash é GLOBAL, e apagar as linhas deste teste quebra o encadeamento de
     // qualquer linha que outro processo (API local, outro spec) tenha gravado depois delas
@@ -391,6 +395,78 @@ describe('HTTP — favorite/unfavorite com role de runtime real', () => {
 
     const list = await http().get(url()).set('Authorization', `Bearer ${adminToken}`);
     expect(currentVersion(list.body, GYM_ONLY)?.isFavorite).toBe(false);
+  });
+});
+
+// 2026-09-29 (`levels`, seleção múltipla — migração 0062 aditiva): a escrita nova grava os
+// dois campos (min_level = menor nível, para a API anterior seguir funcionando num rollback)
+// e a leitura de linha sem `levels` (escrita pela API anterior) deriva de min_level.
+describe('HTTP — níveis (levels) com role de runtime real', () => {
+  it('publish grava `levels` e `min_level` = menor nível; GET e o snapshot devolvem `levels`', async () => {
+    const res = await http()
+      .post(url())
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        exerciseKey: LEVELS_KEY,
+        changeNote: 'fixture de integração dos níveis',
+        name: 'Teste Níveis',
+        pattern: 'SQUAT',
+        muscleGroups: ['quadríceps'],
+        equipment: [],
+        locations: ['HOME'],
+        levels: ['AVANCADO', 'INICIANTE'],
+        contraindicatedFor: [],
+        substitutes: [],
+      });
+    expect(res.status).toBe(201);
+    expect(
+      (currentVersion(res.body, LEVELS_KEY) as unknown as { levels: string[] }).levels,
+    ).toEqual(['AVANCADO', 'INICIANTE']);
+
+    const [row] = await migrator<{ min_level: string; levels: string[] }[]>`
+      SELECT min_level, levels FROM exercise_catalog_entries WHERE exercise_key = ${LEVELS_KEY}`;
+    expect(row).toEqual({ min_level: 'INICIANTE', levels: ['AVANCADO', 'INICIANTE'] });
+    expect(app.get(ExerciseCatalogProvider).getById(LEVELS_KEY)?.levels).toEqual([
+      'AVANCADO',
+      'INICIANTE',
+    ]);
+    // Fora do snapshot antes dos testes do motor abaixo (não mexe na base que eles leem).
+    await migrator`DELETE FROM exercise_catalog_entries WHERE exercise_key = ${LEVELS_KEY}`;
+    await app.get(ExerciseCatalogProvider).invalidate();
+  });
+
+  it('publish com `levels` vazio → 400 e nada é gravado', async () => {
+    const res = await http()
+      .post(url())
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        exerciseKey: `${LEVELS_KEY}_x`,
+        changeNote: 'fixture de integração dos níveis',
+        name: 'Teste Níveis Vazio',
+        pattern: 'SQUAT',
+        muscleGroups: ['quadríceps'],
+        equipment: [],
+        locations: ['HOME'],
+        levels: [],
+        contraindicatedFor: [],
+        substitutes: [],
+      });
+    expect(res.status).toBe(400);
+    const rows = await migrator`
+      SELECT 1 FROM exercise_catalog_entries WHERE exercise_key = ${`${LEVELS_KEY}_x`}`;
+    expect(rows).toHaveLength(0);
+  });
+
+  it('linha sem `levels` (escrita pela API anterior) sai no GET com `levels` derivado', async () => {
+    const res = await http().get(url()).set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    const retired = res.body.data.versions.filter(
+      (v: CatalogVersion) => v.exerciseKey === RETIRED_KEY,
+    ) as Array<{ levels: string[] }>;
+    expect(retired).toHaveLength(2);
+    for (const version of retired) {
+      expect(version.levels).toEqual(['INICIANTE', 'INTERMEDIARIO', 'AVANCADO']);
+    }
   });
 });
 

@@ -18,14 +18,9 @@ import {
   type ContraindicationTag,
   type ExerciseLevel,
   type ExerciseLocation,
+  offeredToLevel,
   servesLocation,
 } from './exercise-catalog';
-
-const LEVEL_ORDER: Record<ExerciseLevel, number> = {
-  INICIANTE: 0,
-  INTERMEDIARIO: 1,
-  AVANCADO: 2,
-};
 
 /** Restrições do usuário que filtram um substituto seguro. */
 export interface SubstitutionConstraints {
@@ -49,7 +44,9 @@ export interface SubstitutionConstraints {
  */
 export function isViable(ex: CatalogExercise, c: SubstitutionConstraints): boolean {
   return (
-    LEVEL_ORDER[ex.minLevel] <= LEVEL_ORDER[c.level] &&
+    // 2026-09-29 (decisão do fundador): só os níveis MARCADOS — mesmo critério da base de
+    // referência do gerador. Um exercício só "Iniciante" não é oferecido a aluno avançado.
+    offeredToLevel(ex, c.level) &&
     servesLocation(ex, c.location) &&
     !ex.contraindicatedFor.some((t) => c.injuryTags.includes(t))
   );

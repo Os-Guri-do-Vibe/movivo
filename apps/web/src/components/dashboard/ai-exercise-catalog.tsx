@@ -1,11 +1,13 @@
 'use client';
 
 import {
+  exerciseLevelSchema,
   TRAINING_LOCATION_LABELS,
   trainingLocationSchema,
   type CatalogExerciseCandidate,
   type ExerciseCatalogEntryVersion,
   type ExerciseCatalogResponse,
+  type ExerciseLevel,
   type TrainingLocation,
 } from '@movivo/shared';
 import { Dumbbell, Pencil, Plus, Search, Star, Trash2 } from 'lucide-react';
@@ -39,6 +41,7 @@ import {
   TablePagination,
 } from './control-center-table';
 import type { FilterChip } from './control-center-table';
+import { CatalogCheckboxCombo } from './catalog-checkbox-combo';
 import { ConfirmAction } from './confirm-action';
 import { ResourceState, SectorHeader, useControlCenterResource } from './control-center-ui';
 
@@ -66,10 +69,31 @@ export const CATALOG_MUSCLE_GROUPS = [
   'sistema cardiovascular',
 ] as const;
 
-const MUSCLE_FILTER_OPTIONS = CATALOG_MUSCLE_GROUPS.map((muscle) => ({
+export const CATALOG_MUSCLE_OPTIONS = CATALOG_MUSCLE_GROUPS.map((muscle) => ({
   value: muscle,
   label: muscle,
 }));
+/**
+ * Nível do exercício (achado 2026-09-29, decisão do fundador): a IA só recebe o exercício
+ * para alunos dos níveis marcados. Não há mapa de rótulos no `@movivo/shared`; exportado
+ * daqui pro "Adicionar exercício ao catálogo" (`substitution-catalog-gap-dialog.tsx`).
+ */
+export const EXERCISE_LEVEL_LABELS: Record<ExerciseLevel, string> = {
+  INICIANTE: 'Iniciante',
+  INTERMEDIARIO: 'Intermediário',
+  AVANCADO: 'Avançado',
+};
+
+export const EXERCISE_LEVEL_OPTIONS = exerciseLevelSchema.options.map((level) => ({
+  value: level,
+  label: EXERCISE_LEVEL_LABELS[level],
+}));
+
+/** Ordem canônica (Iniciante → Avançado), sem repetição — o schema recusa nível repetido. */
+export function canonicalExerciseLevels(levels: readonly ExerciseLevel[]): ExerciseLevel[] {
+  return exerciseLevelSchema.options.filter((level) => levels.includes(level));
+}
+
 const LOCATION_FILTER_OPTIONS = trainingLocationSchema.options.map((loc) => ({
   value: loc,
   label: TRAINING_LOCATION_LABELS[loc],
@@ -87,24 +111,30 @@ interface ExerciseFilters {
   query: string;
   muscleGroups: string[];
   locations: TrainingLocation[];
+  levels: ExerciseLevel[];
   favorite: FavoriteFilter;
 }
 
-const EMPTY_FILTERS: ExerciseFilters = { query: '', muscleGroups: [], locations: [], favorite: '' };
+const EMPTY_FILTERS: ExerciseFilters = {
+  query: '',
+  muscleGroups: [],
+  locations: [],
+  levels: [],
+  favorite: '',
+};
 
 /**
- * Campos "técnicos" do exercício (padrão de movimento, nível, contraindicações,
- * substitutos, equipamento) — o modal deste painel só edita nome/músculo/local/vídeo
- * (decisão do fundador, achado 2026-09-02). Editar um exercício EXISTENTE preserva esses
+ * Campos "técnicos" do exercício (padrão de movimento, contraindicações, substitutos,
+ * equipamento) — o modal deste painel só edita nome/músculo/nível/local/vídeo
+ * (decisão do fundador, achados 2026-09-02 e 2026-09-29 — nível). Editar um exercício EXISTENTE preserva esses
  * campos tal como estavam (nunca zera contraindicação de segurança já cadastrada); só um
  * exercício NOVO nasce com os defaults abaixo — mais permissivo, sem restrição marcada.
  */
 const DEFAULT_TECHNICAL_FIELDS: Pick<
   CatalogExerciseCandidate,
-  'pattern' | 'minLevel' | 'contraindicatedFor' | 'substitutes' | 'equipment'
+  'pattern' | 'contraindicatedFor' | 'substitutes' | 'equipment'
 > = {
   pattern: 'ISOLATION',
-  minLevel: 'INICIANTE',
   contraindicatedFor: [],
   substitutes: [],
   equipment: [],
@@ -135,6 +165,7 @@ export function uniqueExerciseKey(base: string, taken: ReadonlySet<string>): str
 interface EditableFields {
   name: string;
   muscleGroups: string[];
+  levels: ExerciseLevel[];
   locations: TrainingLocation[];
   videoUrl: string;
 }
@@ -153,10 +184,11 @@ function ExerciseEditorDialog({
   const isCreate = mode.kind === 'create';
   const [form, setForm] = useState<EditableFields>(() =>
     isCreate
-      ? { name: '', muscleGroups: [], locations: [], videoUrl: '' }
+      ? { name: '', muscleGroups: [], levels: [], locations: [], videoUrl: '' }
       : {
           name: mode.entry.name,
           muscleGroups: mode.entry.muscleGroups,
+          levels: canonicalExerciseLevels(mode.entry.levels),
           locations: mode.entry.locations,
           videoUrl: mode.entry.videoUrl ?? '',
         },
@@ -165,10 +197,10 @@ function ExerciseEditorDialog({
   const [error, setError] = useState('');
 
   const canSave =
-    form.name.trim().length >= 2 && form.muscleGroups.length > 0 && form.locations.length > 0;
-
-  const muscleSummary =
-    form.muscleGroups.length > 0 ? form.muscleGroups.join(', ') : 'Selecione o(s) músculo(s)';
+    form.name.trim().length >= 2 &&
+    form.muscleGroups.length > 0 &&
+    form.levels.length > 0 &&
+    form.locations.length > 0;
 
   async function save() {
     setSaving(true);
@@ -181,10 +213,10 @@ function ExerciseEditorDialog({
       const candidate: CatalogExerciseCandidate = {
         name: form.name.trim(),
         muscleGroups: form.muscleGroups,
+        levels: canonicalExerciseLevels(form.levels),
         locations: form.locations,
         videoUrl: form.videoUrl.trim() || undefined,
         pattern: technical.pattern,
-        minLevel: technical.minLevel,
         contraindicatedFor: technical.contraindicatedFor,
         substitutes: technical.substitutes,
         equipment: technical.equipment,
@@ -234,44 +266,21 @@ function ExerciseEditorDialog({
             />
           </label>
 
-          <div className="text-label font-semibold">
-            Músculo
-            <details className="group mt-1 rounded-lg border border-border bg-card">
-              <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-body font-normal marker:content-none">
-                <span className="truncate text-muted-foreground group-open:text-foreground">
-                  {muscleSummary}
-                </span>
-                <span aria-hidden="true" className="ml-2 text-muted-foreground">
-                  ▾
-                </span>
-              </summary>
-              <div className="grid gap-1 border-t border-border p-2">
-                {CATALOG_MUSCLE_GROUPS.map((muscle) => {
-                  const checked = form.muscleGroups.includes(muscle);
-                  return (
-                    <label
-                      key={muscle}
-                      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-label hover:bg-secondary"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() =>
-                          setForm((f) => ({
-                            ...f,
-                            muscleGroups: checked
-                              ? f.muscleGroups.filter((m) => m !== muscle)
-                              : [...f.muscleGroups, muscle],
-                          }))
-                        }
-                      />
-                      {muscle}
-                    </label>
-                  );
-                })}
-              </div>
-            </details>
-          </div>
+          <CatalogCheckboxCombo
+            legend="Músculo"
+            placeholder="Selecione o(s) músculo(s)"
+            options={CATALOG_MUSCLE_OPTIONS}
+            selected={form.muscleGroups}
+            onChange={(next) => setForm((f) => ({ ...f, muscleGroups: next }))}
+          />
+
+          <CatalogCheckboxCombo
+            legend="Nível"
+            placeholder="Selecione o(s) nível(is)"
+            options={EXERCISE_LEVEL_OPTIONS}
+            selected={form.levels}
+            onChange={(next) => setForm((f) => ({ ...f, levels: canonicalExerciseLevels(next) }))}
+          />
 
           <fieldset>
             <legend className="text-label font-semibold">Local disponível</legend>
@@ -446,6 +455,9 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
         return false;
       if (applied.locations.length > 0 && !applied.locations.some((l) => v.locations.includes(l)))
         return false;
+      // Nível: OR dentro do filtro (ao menos um nível marcado bate), como Músculo e Local.
+      if (applied.levels.length > 0 && !applied.levels.some((l) => v.levels.includes(l)))
+        return false;
       if (!q) return true;
       return v.name.toLowerCase().includes(q);
     });
@@ -482,6 +494,14 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
         label: `Local: ${applied.locations.map((l) => TRAINING_LOCATION_LABELS[l]).join(', ')}`,
         removeLabel: 'Remover filtro Local',
         onRemove: () => removeFilter({ locations: [] }),
+      });
+    }
+    if (applied.levels.length > 0) {
+      active.push({
+        key: 'levels',
+        label: `Nível: ${applied.levels.map((l) => EXERCISE_LEVEL_LABELS[l]).join(', ')}`,
+        removeLabel: 'Remover filtro Nível',
+        onRemove: () => removeFilter({ levels: [] }),
       });
     }
     if (applied.favorite) {
@@ -594,7 +614,7 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
 
         <FilterFieldset legend="Músculo" className="lg:w-56">
           <FilterMultiSelect
-            options={MUSCLE_FILTER_OPTIONS}
+            options={CATALOG_MUSCLE_OPTIONS}
             selected={form.muscleGroups}
             onChange={(next) => setForm((current) => ({ ...current, muscleGroups: next }))}
           />
@@ -606,6 +626,20 @@ export function AiExerciseCatalogDashboard({ canWrite = false }: { canWrite?: bo
             selected={form.locations}
             onChange={(next) =>
               setForm((current) => ({ ...current, locations: next as TrainingLocation[] }))
+            }
+          />
+        </FilterFieldset>
+
+        <FilterFieldset legend="Nível" className="lg:w-56">
+          <FilterMultiSelect
+            options={EXERCISE_LEVEL_OPTIONS}
+            selected={form.levels}
+            // Ordem canônica (Iniciante → Avançado) no chip, independente da ordem do clique.
+            onChange={(next) =>
+              setForm((current) => ({
+                ...current,
+                levels: canonicalExerciseLevels(next as ExerciseLevel[]),
+              }))
             }
           />
         </FilterFieldset>

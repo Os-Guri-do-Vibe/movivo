@@ -35,7 +35,7 @@ import {
 
 import { AppConfigService } from '../../core/config';
 import { LlmRouter } from '../ai-coach/llm/llm-router.service';
-import type { ScrubUser } from '../ai-coach/llm/llm.types';
+import type { ChatTurn, ScrubUser } from '../ai-coach/llm/llm.types';
 import {
   type RagDoc,
   SEMANTIC_MEMORY,
@@ -48,7 +48,7 @@ import {
 import {
   CATALOG_VERSION,
   type CatalogExercise,
-  type ExerciseLevel,
+  offeredToLevel,
   servesLocation,
 } from './exercise-catalog';
 import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
@@ -57,7 +57,14 @@ import { MethodologyProvider } from './methodology-provider.service';
 import { PHASE_DURATION_WEEKS_RANGE } from './protocol-timeline';
 import type { UserConstraints } from './user-constraints';
 import { wrapUserMessage } from './validation/prompt-injection';
-import { PRIORITY_PATTERNS_BY_GOAL, SPLITS_BY_LEVEL } from './validation/validation-rules';
+import {
+  ISOLATION_MAJORITY_THRESHOLD,
+  MAX_TECHNIQUES_PER_SESSION,
+  PRIORITY_PATTERNS_BY_GOAL,
+  SPLITS_BY_LEVEL,
+} from './validation/validation-rules';
+import type { ValidationViolation } from './validation/validation.service';
+import { buildCorrectionMessage } from './validation/violation-feedback';
 
 /**
  * Versão do pipeline de geração (metodologia + base). Registrada no protocolo
@@ -203,6 +210,42 @@ export function rtFavoritePreferenceBlock(): string {
 }
 
 /**
+ * Achado 2026-09-29 (medição do Victor, pipeline real DeepSeek, 83 execuções): a maior
+ * causa de bloqueio na 1ª tentativa era conflito prompt × validador — regras que o
+ * `ValidationService` cobra mas que o prompt nunca dizia de forma explícita (técnica
+ * proibida a iniciante inclusive em "superséries"/"circuito", teto de técnicas, teto de
+ * isolados, id exato, palavras vetadas). Este bloco declara essas regras a partir das
+ * MESMAS constantes do validador (nada de número copiado), no fim da mensagem do aluno.
+ *
+ * As palavras vetadas aparecem aqui só como proibição — mesmo precedente do
+ * `conservativeModeBlock`. Isto é entrada do modelo; `checkLanguage`/`PROMPT_LEAK` só
+ * varrem a SAÍDA. A sentinela "BASE DE REFERÊNCIA" citada aqui já existe no system prompt
+ * desde sempre — nada muda na superfície de vazamento.
+ */
+export function verifiedRulesBlock(constraints: Pick<UserConstraints, 'level'>): string {
+  const lines = [
+    'REGRAS VERIFICADAS AUTOMATICAMENTE (o protocolo é reprovado se violar qualquer uma):',
+  ];
+  if (constraints.level === 'INICIANTE') {
+    lines.push(
+      '- Nível INICIANTE: o campo "technique" é PROIBIDO em todos os exercícios de todas as sessões — inclusive SUPERSET, BI_SET, TRI_SET e DESCANSO_ATIVO, e inclusive se a divisão for CIRCUITO. Densidade, quando desejada, vem de "restSeconds" menores e da ordem dos exercícios; cardio vem como exercício separado. Onde a metodologia fala em "superséries", para INICIANTE isso se traduz em ordem dos exercícios + descanso curto, nunca no campo "technique".',
+    );
+  } else {
+    lines.push(
+      `- Campo "technique" é recurso pontual: no máximo ${MAX_TECHNIQUES_PER_SESSION} exercícios com "technique" por sessão e, havendo 2 ou mais sessões, pelo menos 1 sessão da semana sem nenhum "technique" (a divisão CIRCUITO é a única exceção). Um dia "em circuito" dentro de outra divisão se expressa pela ordem dos exercícios e por "restSeconds" curtos — não marque "technique" em cada exercício. Cardio no fim da sessão nunca usa "technique".`,
+    );
+  }
+  lines.push(
+    `- Isolados (padrão ISOLATION na base) são complemento: em cada sessão, no máximo ${Math.round(
+      ISOLATION_MAJORITY_THRESHOLD * 100,
+    )}% dos exercícios podem ser ISOLATION — o restante são multiarticulares, core ou cardio.`,
+    '- Todo "exerciseId" deve ser copiado EXATAMENTE de um "id" da BASE DE REFERÊNCIA deste prompt. Se o nome que você pensou não existe como id, use o id da base que corresponde a ele.',
+    '- Textos livres ("generalNotes", "notes", "focus", "dayLabel") falam só de execução do treino: nunca cite nome de doença, lesão ou condição de saúde (nem a que o aluno relatou), nunca use as palavras "diagnóstico", "tratamento", "cura", "garantido", "prescrição", "remédio", "dose", nem "tome" (use "tenha cuidado"), e nunca prometa prazo de resposta.',
+  );
+  return lines.join('\n');
+}
+
+/**
  * Achado 2026-09-02 (correção do fundador): `startDate`/`endDate` do protocolo eram
  * calculados fora da geração — `startDate` já é a data de entrega ao aluno (correto,
  * inalterado), mas `endDate` vinha de um padrão estático de 12 semanas, sem relação
@@ -253,13 +296,6 @@ export function compareReferencePriority(
   return 0;
 }
 
-/** Ordem de nível, para filtrar exercícios até o nível do usuário. */
-const LEVEL_ORDER: Record<ExerciseLevel, number> = {
-  INICIANTE: 0,
-  INTERMEDIARIO: 1,
-  AVANCADO: 2,
-};
-
 /** Campo anexado ao FIM da linha de exercício favoritado na BASE DE REFERÊNCIA. */
 const RT_FAVORITE_FIELD = 'preferido pelo profissional CREF: sim';
 
@@ -281,10 +317,24 @@ const PROTOCOL_EVIDENCE_MAX_CHARS = 18_000;
 const PROTOCOL_EVIDENCE_PER_DOCUMENT = 2;
 const PROTOCOL_RETRIEVAL_TOP_K = 10;
 
+/**
+ * Rodada de correção com feedback (redução de fallback, 2026-09-29). Presente = o gerador
+ * anexa, depois da mensagem do aluno e das evidências, o JSON reprovado como turno
+ * `assistant` e a mensagem de `buildCorrectionMessage` como turno `user` — o modelo REPARA
+ * a própria saída em vez de regerar do zero. Só o último JSON, nunca histórico acumulado.
+ */
+export interface ProtocolCorrection {
+  previous: ProtocolStructure;
+  violations: readonly ValidationViolation[];
+  /** 1..`MAX_CORRECTION_ROUNDS` — só para log/rastro. */
+  round: number;
+}
+
 export interface GenerateProtocolCommand {
   userId: string;
   user: ScrubUser;
   constraints: UserConstraints;
+  correction?: ProtocolCorrection;
 }
 
 export interface GenerateProtocolResult {
@@ -308,6 +358,20 @@ export interface GenerateProtocolResult {
   }>;
   /** Ids gerados que NÃO existem na base — sinalizados para o validador (US-2.3) rejeitar. */
   unknownExerciseIds: string[];
+  /** Retries de JSON malformado consumidos nesta chamada (0 ou 1). Só observabilidade. */
+  malformedRetries?: number;
+}
+
+/** O JSON reprovado como o modelo o escreveu: sem `promptVersion` nem `videoUrl` (nossos). */
+function previousAsModelOutput(previous: ProtocolStructure): string {
+  const { promptVersion: _promptVersion, ...rest } = previous;
+  return JSON.stringify({
+    ...rest,
+    sessions: rest.sessions.map((session) => ({
+      ...session,
+      exercises: session.exercises.map(({ videoUrl: _videoUrl, ...exercise }) => exercise),
+    })),
+  });
 }
 
 /** Falha de geração após o retry (LLM indisponível ou saída irreparavelmente malformada). */
@@ -341,8 +405,8 @@ export class ProtocolGeneratorService {
     const system = this.buildSystemPrompt(constraints, methodology.content);
     const userMessage = this.buildUserMessage(constraints);
 
-    const messages = [
-      { role: 'user' as const, content: userMessage },
+    const messages: ChatTurn[] = [
+      { role: 'user', content: userMessage },
       ...(evidence.length
         ? [
             {
@@ -360,10 +424,32 @@ export class ProtocolGeneratorService {
             },
           ]
         : []),
+      // Rodada de correção (2026-09-29): o JSON reprovado + o que corrigir, depois das
+      // evidências. O prefixo (system + mensagem do aluno) fica idêntico ao da 1ª geração,
+      // então o cache de prompt do provedor continua valendo.
+      ...(command.correction
+        ? [
+            {
+              role: 'assistant' as const,
+              content: previousAsModelOutput(command.correction.previous),
+            },
+            {
+              role: 'user' as const,
+              content: buildCorrectionMessage(
+                command.correction.previous,
+                command.correction.violations,
+                constraints,
+                this.referenceBase(constraints).map((e) => e.id),
+                this.catalog,
+              ),
+            },
+          ]
+        : []),
     ];
     let lastError: unknown;
 
-    // 1 tentativa + 1 retry corretivo: variância do LLM não pode virar erro do usuário.
+    // 1 tentativa + 1 retry corretivo: variância do LLM não pode virar erro do usuário. O
+    // retry de JSON malformado vai sempre por ÚLTIMO, inclusive numa rodada de correção.
     for (let attempt = 1; attempt <= 2; attempt++) {
       const result = await this.llm.complete({
         purpose: 'PROTOCOL_GENERATION',
@@ -390,7 +476,7 @@ export class ProtocolGeneratorService {
 
       const parsed = this.tryParse(result.text);
       if (parsed) {
-        const repaired = this.repairHallucinatedExerciseIds(parsed, userId);
+        const repaired = this.repairHallucinatedExerciseIds(parsed, constraints, userId);
         const withWeekdays = this.backfillWeekdays(
           { ...repaired, promptVersion },
           constraints.preferredDays,
@@ -426,11 +512,15 @@ export class ProtocolGeneratorService {
               : {}),
           })),
           unknownExerciseIds,
+          malformedRetries: attempt - 1,
         };
       }
 
       lastError = new Error(`saída malformada na tentativa ${attempt}`);
-      this.logger.warn({ userId, attempt }, 'saída de geração malformada — tentando novamente');
+      this.logger.warn(
+        { userId, attempt, correctionRound: command.correction?.round ?? 0 },
+        'saída de geração malformada — tentando novamente',
+      );
     }
 
     throw new ProtocolGenerationError('não foi possível gerar um protocolo válido', {
@@ -530,11 +620,19 @@ export class ProtocolGeneratorService {
    * coincidência de token não é coincidência de exercício). Ainda ambíguo depois dos dois
    * critérios, ou zero candidato: não mexe em nada — fica pro `EXERCISE_UNKNOWN` do
    * validador, fail-closed.
+   *
+   * Revisão 2026-09-29 (Victor, níveis marcados): candidato só da BASE DESTE ALUNO
+   * (`referenceBase` — local + nível + contraindicação, o mesmo conjunto do prompt), nunca do
+   * catálogo inteiro. Sem isso, `remada_invertida_na_mesa` virava `remada_invertida` para um
+   * aluno avançado mesmo com o exercício marcado só como Iniciante — e o validador não pega
+   * (só barra "avançado demais" e não confere local). Sem candidato na base: não mexe.
    */
   private repairHallucinatedExerciseIds(
     structure: ProtocolStructure,
+    constraints: UserConstraints,
     userId: string,
   ): ProtocolStructure {
+    const base = this.referenceBase(constraints);
     const cache = new Map<string, string>();
     const resolve = (exerciseId: string): string => {
       if (this.catalog.isKnown(exerciseId)) return exerciseId;
@@ -544,7 +642,7 @@ export class ProtocolGeneratorService {
       const candidateWords = tokenizeExerciseId(exerciseId);
       const candidateFirstWord = exerciseId.split('_')[0];
       let topTier: { id: string; wordCount: number }[] = [];
-      for (const entry of this.catalog.getAll()) {
+      for (const entry of base) {
         const catalogWords = tokenizeExerciseId(entry.id);
         if (![...catalogWords].every((word) => candidateWords.has(word))) continue;
         const current = { id: entry.id, wordCount: catalogWords.size };
@@ -732,16 +830,15 @@ export class ProtocolGeneratorService {
    * 2026-09-29, ver `compareReferencePriority`).
    */
   private referenceBase(constraints: UserConstraints): CatalogExercise[] {
-    const maxLevel = LEVEL_ORDER[constraints.level];
     const excluded = new Set(constraints.injuryTags);
-    const filtered = this.catalog
-      .getAll()
-      .filter(
-        (e) =>
-          servesLocation(e, constraints.location) &&
-          LEVEL_ORDER[e.minLevel] <= maxLevel &&
-          !e.contraindicatedFor.some((tag) => excluded.has(tag)),
-      );
+    const filtered = this.catalog.getAll().filter(
+      (e) =>
+        servesLocation(e, constraints.location) &&
+        // 2026-09-29 (decisão do fundador): só os níveis MARCADOS no painel — um exercício
+        // só "Iniciante" não é oferecido a aluno avançado (antes: "a partir de minLevel").
+        offeredToLevel(e, constraints.level) &&
+        !e.contraindicatedFor.some((tag) => excluded.has(tag)),
+    );
     // Reforço estrutural do `equipmentPriorityBlock`: em local com equipamento robusto,
     // lista as opções com equipamento primeiro. O texto do prompt pode ser ignorado; a
     // ORDEM dos itens que o modelo lê não depende de obediência — é o mesmo raciocínio já
@@ -795,7 +892,12 @@ export class ProtocolGeneratorService {
     const lines = [
       `Objetivo: ${constraints.goal}`,
       `Nível: ${constraints.level}`,
-      `Status de treino: ${TRAINING_STATUS_PROMPT_LINE[constraints.trainingStatus]}`,
+      // Achado 2026-09-29 (Victor): com PAR-Q travando a fase, a linha de status REGULAR
+      // ("NÃO force ADAPTACAO") contradizia o modo conservador e o modelo às vezes escolhia
+      // HIPERTROFIA — bloqueio certo (`PARQ_PHASE_CAP_EXCEEDED`), mas causado pelo prompt.
+      constraints.maxPhase === 'ADAPTACAO'
+        ? 'Status de treino: fase travada em ADAPTACAO pelo modo conservador — independentemente do status de treino, "phase" DEVE ser ADAPTACAO.'
+        : `Status de treino: ${TRAINING_STATUS_PROMPT_LINE[constraints.trainingStatus]}`,
       ...(constraints.trainingStatus === 'STOPPED' && constraints.stoppedFor
         ? [`Tempo parado: ${STOPPED_FOR_LABEL[constraints.stoppedFor]}.`]
         : []),
@@ -833,24 +935,31 @@ export class ProtocolGeneratorService {
       `Padrões de movimento prioritários para este objetivo: ${PRIORITY_PATTERNS_BY_GOAL[
         constraints.goal
       ].join(', ')}`,
-      // Achado 2026-09-03 (reproduzido ao vivo): "CARDIO" já entrava na lista de padrões
-      // prioritários acima pra LOSE_FAT/CONDITIONING, mas como item de uma lista genérica
-      // não é instrução forte o suficiente — a IA gerou um protocolo de emagrecimento 100%
-      // musculação tradicional, zero componente cardiorrespiratório, mesmo a metodologia
-      // pedindo "maior densidade de treinamento, intervalos menores ou circuitos" (LOSE_FAT)
-      // e "acompanhado de um componente cardiorrespiratório estruturado" (CONDITIONING, onde
-      // a força sozinha "não representa toda a estratégia necessária"). Frase isolada,
-      // citando a metodologia quase ao pé da letra, pelo mesmo motivo do "weekday" abaixo.
+      // Achado 2026-09-03 (reproduzido ao vivo): "CARDIO" na lista de padrões prioritários
+      // não bastava — a IA gerava emagrecimento/condicionamento sem nenhum componente
+      // cardiorrespiratório. Frase isolada, pelo mesmo motivo do "weekday" abaixo.
+      //
+      // Revisão 2026-09-29 (decisão clínica do fundador + medição do Victor): a frase antiga
+      // de LOSE_FAT exigia "circuito, HIIT ou cardio" e dizia que musculação sozinha "não
+      // atende" — empurrava o modelo a marcar SUPERSET/DESCANSO_ATIVO em iniciante para
+      // "fazer circuito", bloqueado com razão por `TECHNIQUE_LEVEL_NOT_ALLOWED`. Regra do
+      // fundador: emagrecimento é alto gasto calórico, não necessariamente circuito;
+      // musculação bem feita já é válida, e cardio/HIIT no FIM da sessão é o complemento
+      // preferido — como exercício separado, nunca como "technique".
       ...(constraints.goal === 'LOSE_FAT'
         ? [
-            'Para emagrecimento: inclua de fato um componente de maior densidade/gasto calórico — pelo menos um bloco de circuito, HIIT ou cardio contínuo (exercícios "medida: DURATION" da base de referência) em pelo menos parte das sessões, além do treino resistido. Musculação tradicional sozinha, sem NENHUM elemento de densidade/cardio em nenhuma sessão, não atende este objetivo.',
+            'Para emagrecimento/recomposição corporal: o que o objetivo pede é gasto calórico alto preservando (ou ganhando) massa muscular — NÃO é obrigatório usar circuito. Musculação bem estruturada (multiarticulares como base, volume e intensidade adequados ao nível, descansos controlados) já é, sozinha, um treino completo e válido para este objetivo. Forma preferida de acrescentar gasto calórico, a seu critério (opcional, não precisa estar em todas as sessões): um bloco de cardio no FIM da sessão, depois da musculação — contínuo ou intervalado (HIIT) —, como exercício(s) separado(s) de "medida: DURATION" da base de referência, com intensidade e duração compatíveis com o nível (INICIANTE: cardio contínuo moderado ou intervalado leve e curto, sem saltos/sprints de alta intensidade) e cabendo no tempo por sessão. Esse bloco NÃO é técnica: nunca use o campo "technique" para representá-lo. Se a base de referência deste aluno não tiver nenhum exercício de cardio, não inclua cardio.',
           ]
         : []),
       ...(constraints.goal === 'CONDITIONING'
         ? [
-            'Para condicionamento físico: o treino resistido sozinho NÃO é a estratégia completa — inclua um componente cardiorrespiratório estruturado real (exercícios "medida: DURATION" da base de referência) em pelo menos parte das sessões, não só padrões de força.',
+            'Para condicionamento físico: o treino resistido sozinho NÃO é a estratégia completa — inclua um componente cardiorrespiratório estruturado (contínuo ou intervalado) como exercício(s) separado(s) de "medida: DURATION" da base de referência em pelo menos parte das sessões, com intensidade compatível com o nível. Esse componente NÃO é técnica: não use o campo "technique" para representá-lo. Se a base de referência deste aluno não tiver nenhum exercício de cardio, não inclua cardio — o profissional CREF complementa na revisão.',
           ]
         : []),
+      // Revisão 2026-09-29 (Victor, níveis marcados): com a oferta estrita por nível, um
+      // padrão pode ficar sem nenhuma opção na base deste aluno — sem esta regra o modelo
+      // inventava um id (EXERCISE_UNKNOWN) e a correção não tinha para onde ir.
+      'Se a base de referência não tiver nenhum exercício de um padrão de movimento, não invente um id: omita o padrão e equilibre a sessão com os demais.',
       // Achado 2026-09-02 (raiz do viés pra peso do corpo em academia completa): a anamnese
       // não pergunta equipamento item a item (ver `protocol-generation.worker.ts`) —
       // `constraints.equipment` é SEMPRE `[]`, de propósito, porque é o LOCAL que determina
@@ -949,7 +1058,12 @@ export class ProtocolGeneratorService {
         'Decida a fase deste NOVO mesociclo (ADAPTACAO/HIPERTROFIA/FORCA/DELOAD) com base na metodologia publicada e neste histórico — nunca repita ou avance a fase automaticamente só por hábito: julgue pelo que o relato E a execução real indicam sobre progresso, fadiga acumulada e aderência, exatamente como um treinador revisaria o ciclo anterior (e os anteriores a ele) antes de montar o próximo. Quando o autorrelato e a execução real divergirem (ex.: aluno relata "progredi bem" mas a carga registrada ficou estável), confie na execução real.',
       );
     }
-    lines.push('', 'Monte o protocolo individualizado seguindo as diretrizes e o schema.');
+    lines.push(
+      '',
+      verifiedRulesBlock(constraints),
+      '',
+      'Monte o protocolo individualizado seguindo as diretrizes e o schema.',
+    );
     return lines.join('\n');
   }
 }
@@ -984,7 +1098,7 @@ const SCHEMA_HINT = `{
           "durationSeconds": number — CAMPO OBRIGATÓRIO em TODO exercício "medida: DURATION" (prancha/caminhada/bike/tiros/circuito/HIIT), sem exceção, mesmo em circuito ou treino intervalado: NUNCA omita, NUNCA junto com reps,
           "loadStrategy": "BODYWEIGHT" | "FIXED_LOAD" | "DOUBLE_PROGRESSION" | "RPE",
           "restSeconds": number (cardio contínuo de 1 série só, ex.: caminhada/bike, pode ser 0 — é a resposta certa, não erro),
-          "technique": "DROP_SET" | "REST_PAUSE" | "CLUSTER_SET" | "BI_SET" | "TRI_SET" | "SUPERSET" | "ISOMETRIA" | "REPETICOES_CONTROLADAS" | "PIRAMIDE" | "DESCANSO_ATIVO" (opcional; NUNCA para INICIANTE),
+          "technique": "DROP_SET" | "REST_PAUSE" | "CLUSTER_SET" | "BI_SET" | "TRI_SET" | "SUPERSET" | "ISOMETRIA" | "REPETICOES_CONTROLADAS" | "PIRAMIDE" | "DESCANSO_ATIVO" (opcional; NUNCA para INICIANTE — nem em CIRCUITO; cardio no fim da sessão não é técnica),
           "rir": number (0-5, opcional) — Repetições em Reserva: quantas repetições ainda dariam pra fazer ao fim da série (0 = falha concêntrica). INICIANTE/ADAPTACAO: prefira 2-4 (mais margem, foco na execução). INTERMEDIARIO/AVANCADO em FORCA: pode chegar a 0-2 nas séries finais. Nunca abaixo de 1 pra quem treina há menos de 6 meses,
           "notes": string (opcional)
         }

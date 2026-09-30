@@ -13,8 +13,9 @@
  *
  * Pré-requisito: `pnpm run infra:up`.
  */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
@@ -302,4 +303,115 @@ describe('migração versionada num Postgres limpo', () => {
       await client.end({ timeout: 5 });
     }
   });
+});
+
+/**
+ * Migração 0062 (2026-09-29, `levels` substitui `min_level` como seleção múltipla): aditiva,
+ * com backfill no próprio .sql. Aplica as migrações ATÉ a 0061 num banco descartável próprio,
+ * grava linhas no formato antigo (só `min_level`), aplica o resto e confere o mapeamento —
+ * que preserva exatamente o comportamento anterior ("a partir de X").
+ */
+describe('migração 0062 — backfill de exercise_catalog_entries.levels', () => {
+  const levelsDb = `${throwawayDb}_levels`;
+  let partialFolder = '';
+
+  beforeAll(async () => {
+    const admin = connect('postgres', superUser, superPassword);
+    try {
+      await admin.unsafe(`CREATE DATABASE "${levelsDb}"`);
+    } finally {
+      await admin.end({ timeout: 5 });
+    }
+    const setup = connect(levelsDb, superUser, superPassword);
+    try {
+      for (const ext of REQUIRED_EXTENSIONS) {
+        await setup.unsafe(`CREATE EXTENSION IF NOT EXISTS "${ext}"`);
+      }
+      await setup.unsafe(`ALTER SCHEMA public OWNER TO "${migratorUser}"`);
+      await setup.unsafe(`GRANT ALL ON SCHEMA public TO "${migratorUser}"`);
+      await setup.unsafe(`GRANT CREATE ON DATABASE "${levelsDb}" TO "${migratorUser}"`);
+    } finally {
+      await setup.end({ timeout: 5 });
+    }
+    // Pasta de migrações truncada: mesmo conteúdo, journal só até a 0061.
+    partialFolder = mkdtempSync(join(tmpdir(), 'movivo-mig-0061-'));
+    cpSync(resolve(apiRoot, 'drizzle'), partialFolder, { recursive: true });
+    const journalPath = join(partialFolder, 'meta', '_journal.json');
+    const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as {
+      entries: { idx: number }[];
+    };
+    journal.entries = journal.entries.filter((entry) => entry.idx <= 61);
+    writeFileSync(journalPath, JSON.stringify(journal));
+  }, 60_000);
+
+  afterAll(async () => {
+    rmSync(partialFolder, { recursive: true, force: true });
+    const admin = connect('postgres', superUser, superPassword);
+    try {
+      await admin.unsafe(
+        `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${levelsDb}' AND pid <> pg_backend_pid()`,
+      );
+      await admin.unsafe(`DROP DATABASE IF EXISTS "${levelsDb}"`);
+    } finally {
+      await admin.end({ timeout: 5 });
+    }
+  });
+
+  it('linhas antigas ganham `levels` pelo mapeamento de min_level; min_level fica intacto', async () => {
+    const client = connect(levelsDb, migratorUser, migratorPassword);
+    try {
+      await migrate(drizzle(client), { migrationsFolder: partialFolder });
+      const [before] = await client<{ count: number }[]>`
+        SELECT count(*)::int AS count FROM information_schema.columns
+        WHERE table_name = 'exercise_catalog_entries' AND column_name = 'levels'`;
+      expect(before?.count).toBe(0);
+
+      for (const [key, minLevel] of [
+        ['nivel_iniciante', 'INICIANTE'],
+        ['nivel_intermediario', 'INTERMEDIARIO'],
+        ['nivel_avancado', 'AVANCADO'],
+      ] as const) {
+        await client`
+          INSERT INTO exercise_catalog_entries
+            (exercise_key, name, pattern, muscle_groups, equipment, locations, min_level,
+             contraindicated_for, substitutes, version, status, change_note)
+          VALUES (${key}, ${key}, 'SQUAT', '["quadríceps"]'::jsonb, '[]'::jsonb,
+                  '["HOME"]'::jsonb, ${minLevel}, '[]'::jsonb, '[]'::jsonb, 1, 'PUBLISHED',
+                  'linha no formato anterior à 0062')`;
+      }
+
+      await migrate(drizzle(client), { migrationsFolder: resolve(apiRoot, 'drizzle') });
+
+      const rows = await client<{ exercise_key: string; min_level: string; levels: string[] }[]>`
+        SELECT exercise_key, min_level, levels FROM exercise_catalog_entries
+        ORDER BY exercise_key`;
+      expect(rows).toEqual([
+        { exercise_key: 'nivel_avancado', min_level: 'AVANCADO', levels: ['AVANCADO'] },
+        {
+          exercise_key: 'nivel_iniciante',
+          min_level: 'INICIANTE',
+          levels: ['INICIANTE', 'INTERMEDIARIO', 'AVANCADO'],
+        },
+        {
+          exercise_key: 'nivel_intermediario',
+          min_level: 'INTERMEDIARIO',
+          levels: ['INTERMEDIARIO', 'AVANCADO'],
+        },
+      ]);
+
+      // Aditiva: `levels` nullable (API anterior pós-rollback grava sem ele) e `min_level`
+      // continua NOT NULL.
+      const columns = await client<{ column_name: string; is_nullable: string }[]>`
+        SELECT column_name, is_nullable FROM information_schema.columns
+        WHERE table_name = 'exercise_catalog_entries'
+          AND column_name IN ('levels', 'min_level')
+        ORDER BY column_name`;
+      expect(columns).toEqual([
+        { column_name: 'levels', is_nullable: 'YES' },
+        { column_name: 'min_level', is_nullable: 'NO' },
+      ]);
+    } finally {
+      await client.end({ timeout: 5 });
+    }
+  }, 60_000);
 });

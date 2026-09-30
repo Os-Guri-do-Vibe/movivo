@@ -7,7 +7,7 @@ import type {
   TenantDatabase,
   TenantTransaction,
 } from '../../core/database/tenant-database.service';
-import { protocols } from '../../core/database/schema';
+import { protocols, protocolVersions } from '../../core/database/schema';
 import {
   ProtocolRepository,
   signatureHash,
@@ -65,6 +65,7 @@ function repositoryWithSigner(professionalId: string | undefined) {
     professionalId === undefined ? [] : [{ professional_id: professionalId }],
   );
   const protocolValues = vi.fn();
+  const versionValues = vi.fn();
   const tx = {
     execute,
     insert: (table: unknown) => ({
@@ -73,6 +74,7 @@ function repositoryWithSigner(professionalId: string | undefined) {
           protocolValues(values);
           return { returning: async () => [{ id: 'protocol-1' }] };
         }
+        if (table === protocolVersions) versionValues(values);
         return Promise.resolve([]);
       },
     }),
@@ -86,6 +88,7 @@ function repositoryWithSigner(professionalId: string | undefined) {
     repository: new ProtocolRepository(db, mockCipher, mockLogger),
     execute,
     protocolValues,
+    versionValues,
   };
 }
 
@@ -134,6 +137,35 @@ describe('ProtocolRepository assinatura automatica', () => {
     expect(protocolValues).toHaveBeenCalledWith(
       expect.objectContaining({ anamnesisSessionId: SESSION_ID }),
     );
+  });
+
+  // Redução de fallback (2026-09-29): o rastro da geração vai em `protocol_versions.diff`
+  // da versão inicial (jsonb existente, sem migração); sem rastro (DLQ), continua nulo.
+  it('grava o rastro da geração em protocol_versions.diff da v1 (nulo sem rastro)', async () => {
+    const { repository, versionValues } = repositoryWithSigner(
+      '22222222-2222-4222-8222-222222222222',
+    );
+    const generationTrace = {
+      type: 'GENERATION_TRACE' as const,
+      pipelineVersion: 'p',
+      validationRulesVersion: 'r',
+      promptVersion: 'v1',
+      attempts: [],
+      corrections: 0,
+      malformedRetries: 0,
+      repairOutcome: 'APPLIED' as const,
+      repairs: ['CLAMP_PHASE_DURATION' as const],
+      finalAction: 'PASS',
+      finalRules: [],
+      usedFallbackTemplate: false,
+      durationMs: 10,
+    };
+    await repository.persist({ ...persistInput, generationTrace });
+    expect(versionValues).toHaveBeenLastCalledWith(
+      expect.objectContaining({ version: 1, diff: generationTrace }),
+    );
+    await repository.persist(persistInput);
+    expect(versionValues).toHaveBeenLastCalledWith(expect.objectContaining({ diff: null }));
   });
 
   it('aceita protocolo sem sessão vinculada (linha anterior à migração 0035)', async () => {

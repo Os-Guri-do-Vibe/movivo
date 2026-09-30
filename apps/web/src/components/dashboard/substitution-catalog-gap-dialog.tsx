@@ -12,6 +12,7 @@
 import {
   TRAINING_LOCATION_LABELS,
   trainingLocationSchema,
+  type ExerciseLevel,
   type TrainingLocation,
 } from '@movivo/shared';
 import { useEffect, useState } from 'react';
@@ -23,15 +24,19 @@ import { addCatalogExerciseAndApproveSubstitution, DashboardApiError } from '@/l
 import { cn } from '@/lib/utils';
 
 import {
+  canonicalExerciseLevels,
   CATALOG_INPUT_CLASS,
-  CATALOG_MUSCLE_GROUPS,
+  CATALOG_MUSCLE_OPTIONS,
+  EXERCISE_LEVEL_OPTIONS,
   slugifyExerciseName,
   uniqueExerciseKey,
 } from './ai-exercise-catalog';
+import { CatalogCheckboxCombo } from './catalog-checkbox-combo';
 
 interface Form {
   name: string;
   muscleGroups: string[];
+  levels: ExerciseLevel[];
   locations: TrainingLocation[];
   videoUrl: string;
 }
@@ -50,6 +55,7 @@ export function SubstitutionCatalogGapDialog({
   const [form, setForm] = useState<Form>({
     name: requestedName,
     muscleGroups: [],
+    levels: [],
     locations: [],
     videoUrl: '',
   });
@@ -79,10 +85,8 @@ export function SubstitutionCatalogGapDialog({
     existingKeys !== null &&
     form.name.trim().length >= 2 &&
     form.muscleGroups.length > 0 &&
+    form.levels.length > 0 &&
     form.locations.length > 0;
-
-  const muscleSummary =
-    form.muscleGroups.length > 0 ? form.muscleGroups.join(', ') : 'Selecione o(s) músculo(s)';
 
   async function save() {
     if (!existingKeys) return;
@@ -94,13 +98,14 @@ export function SubstitutionCatalogGapDialog({
         exerciseKey,
         changeNote: 'Adicionado a partir de pedido de aluno via WhatsApp (fila de substituição)',
         name: form.name.trim(),
-        // Campos técnicos (padrão de movimento, nível, contraindicações, substitutos,
-        // equipamento) nascem com o MESMO default conservador do "Novo exercício" da tela
+        // Nível vem do formulário (mesmo combo do modal da tela Exercícios, achado
+        // 2026-09-29). Os demais campos técnicos (padrão de movimento, contraindicações,
+        // substitutos, equipamento) nascem com o MESMO default conservador do "Novo exercício" da tela
         // Exercícios — quem prescreve daqui pra frente valida de novo pelo `ValidationService`
         // de qualquer forma; ajuste fino de categorização é edição posterior, não bloqueia
         // esta aprovação.
         pattern: 'ISOLATION',
-        minLevel: 'INICIANTE',
+        levels: canonicalExerciseLevels(form.levels),
         contraindicatedFor: [],
         substitutes: [],
         equipment: [],
@@ -151,44 +156,21 @@ export function SubstitutionCatalogGapDialog({
             />
           </label>
 
-          <div className="text-label font-semibold">
-            Músculo
-            <details className="group mt-1 rounded-lg border border-border bg-card">
-              <summary className="flex cursor-pointer list-none items-center justify-between px-3 py-2 text-body font-normal marker:content-none">
-                <span className="truncate text-muted-foreground group-open:text-foreground">
-                  {muscleSummary}
-                </span>
-                <span aria-hidden="true" className="ml-2 text-muted-foreground">
-                  ▾
-                </span>
-              </summary>
-              <div className="grid gap-1 border-t border-border p-2">
-                {CATALOG_MUSCLE_GROUPS.map((muscle) => {
-                  const checked = form.muscleGroups.includes(muscle);
-                  return (
-                    <label
-                      key={muscle}
-                      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-label hover:bg-secondary"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() =>
-                          setForm((f) => ({
-                            ...f,
-                            muscleGroups: checked
-                              ? f.muscleGroups.filter((m) => m !== muscle)
-                              : [...f.muscleGroups, muscle],
-                          }))
-                        }
-                      />
-                      {muscle}
-                    </label>
-                  );
-                })}
-              </div>
-            </details>
-          </div>
+          <CatalogCheckboxCombo
+            legend="Músculo"
+            placeholder="Selecione o(s) músculo(s)"
+            options={CATALOG_MUSCLE_OPTIONS}
+            selected={form.muscleGroups}
+            onChange={(next) => setForm((f) => ({ ...f, muscleGroups: next }))}
+          />
+
+          <CatalogCheckboxCombo
+            legend="Nível"
+            placeholder="Selecione o(s) nível(is)"
+            options={EXERCISE_LEVEL_OPTIONS}
+            selected={form.levels}
+            onChange={(next) => setForm((f) => ({ ...f, levels: canonicalExerciseLevels(next) }))}
+          />
 
           <fieldset>
             <legend className="text-label font-semibold">Local disponível</legend>

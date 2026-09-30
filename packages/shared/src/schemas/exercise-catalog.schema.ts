@@ -61,7 +61,16 @@ export const catalogExerciseCandidateSchema = z.object({
   muscleGroups: z.array(z.string().trim().min(2).max(40)).min(1).max(6),
   equipment: z.array(z.string().trim().min(2).max(40)).max(6),
   locations: z.array(trainingLocationSchema).min(1),
-  minLevel: exerciseLevelSchema,
+  /**
+   * Níveis de aluno para os quais o exercício é indicado (achado 2026-09-29, decisão do
+   * fundador): a IA só recebe o exercício para alunos de um nível marcado aqui. Substitui o
+   * antigo `minLevel` (nível mínimo, monotônico). Ao menos um nível, sem repetição.
+   */
+  levels: z
+    .array(exerciseLevelSchema)
+    .min(1)
+    .max(3)
+    .refine((levels) => new Set(levels).size === levels.length, 'níveis repetidos'),
   contraindicatedFor: z.array(contraindicationTagSchema).max(11),
   /** Ids de outras entradas do catálogo, mesmo padrão de movimento. Validado no servidor. */
   substitutes: z.array(z.string().regex(exerciseKeyPattern)).max(10),
