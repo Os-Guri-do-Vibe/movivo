@@ -1,12 +1,26 @@
 import type { Metadata, Viewport } from 'next';
 
 import { Landing } from '@/components/landing/landing';
+import { HOME_DESCRIPTION, HOME_TITLE, SITE_NAME } from '@/lib/landing/seo';
 
 export const metadata: Metadata = {
-  title: { absolute: 'Movivo - Assessoria de Treino' },
-  description:
-    'Treino individualizado, acompanhamento contínuo e respaldo profissional direto no WhatsApp. Experimente a MOVIVO por 7 dias grátis.',
+  title: { absolute: HOME_TITLE },
+  description: HOME_DESCRIPTION,
   alternates: { canonical: '/' },
+  /* A imagem vem do arquivo `opengraph-image.jpg` desta pasta (convenção do Next). */
+  openGraph: {
+    type: 'website',
+    locale: 'pt_BR',
+    siteName: SITE_NAME,
+    url: '/',
+    title: HOME_TITLE,
+    description: HOME_DESCRIPTION,
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: HOME_TITLE,
+    description: HOME_DESCRIPTION,
+  },
 };
 
 export const viewport: Viewport = {
