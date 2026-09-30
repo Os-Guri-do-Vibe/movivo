@@ -25,9 +25,27 @@ import {
   CATALOG_VERSION,
   EXERCISE_CATALOG as BOOTSTRAP_EXERCISE_CATALOG,
   type CatalogExercise,
+  type ExerciseLevel,
+  levelsFromMinLevel,
+  lowestLevel,
 } from './exercise-catalog';
 
 const REFRESH_MS = 5 * 60_000;
+
+/**
+ * Níveis de uma linha do catálogo (2026-09-29, `levels` substitui `min_level`). Desenho de
+ * menor risco: `levels` é a ÚNICA fonte de verdade em runtime (`CatalogExercise` não carrega
+ * mais `minLevel`, para os dois nunca divergirem); `min_level` só é lido quando `levels` é
+ * nulo — linha escrita pela versão anterior da API depois de um rollback — e derivado com o
+ * mesmo mapeamento do backfill da migração 0062. Array vazio (nunca deveria existir: o
+ * schema exige 1+) também cai na derivação, fail-safe para não sumir exercício da base.
+ */
+export function levelsOfRow(row: {
+  levels: readonly ExerciseLevel[] | null;
+  minLevel: ExerciseLevel;
+}): ExerciseLevel[] {
+  return row.levels && row.levels.length > 0 ? [...row.levels] : levelsFromMinLevel(row.minLevel);
+}
 
 /**
  * Campos de log de uma falha de banco (validação 2026-09-29, int-spec dos favoritos). O
@@ -140,7 +158,7 @@ export class ExerciseCatalogProvider implements OnModuleInit, OnModuleDestroy {
         muscleGroups: row.muscleGroups,
         equipment: row.equipment,
         locations: row.locations,
-        minLevel: row.minLevel,
+        levels: levelsOfRow(row),
         contraindicatedFor: row.contraindicatedFor,
         substitutes: row.substitutes,
         ...(row.measurement ? { measurement: row.measurement } : {}),
@@ -207,7 +225,8 @@ export class ExerciseCatalogProvider implements OnModuleInit, OnModuleDestroy {
           muscleGroups: [...exercise.muscleGroups],
           equipment: [...exercise.equipment],
           locations: [...exercise.locations],
-          minLevel: exercise.minLevel,
+          levels: [...exercise.levels],
+          minLevel: lowestLevel(exercise.levels),
           contraindicatedFor: [...exercise.contraindicatedFor],
           substitutes: [...exercise.substitutes],
           measurement: exercise.measurement ?? null,

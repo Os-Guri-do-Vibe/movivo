@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { exerciseCatalogFavorites } from '../../core/database/schema';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
 import { EXERCISE_CATALOG } from './exercise-catalog';
-import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
+import { ExerciseCatalogProvider, levelsOfRow } from './exercise-catalog-provider.service';
 
 describe('ExerciseCatalogProvider (achado 2026-09-02)', () => {
   it('sem TenantDatabase, serve o bootstrap estático de forma síncrona (nunca vazio)', () => {
@@ -47,6 +47,7 @@ function row(overrides: Record<string, unknown> = {}) {
     equipment: [],
     locations: ['HOME'],
     minLevel: 'INICIANTE',
+    levels: ['INICIANTE', 'INTERMEDIARIO', 'AVANCADO'],
     contraindicatedFor: ['SHOULDER'],
     substitutes: ['flexao_com_apoio_dos_joelhos'],
     measurement: null,
@@ -98,6 +99,47 @@ describe('ExerciseCatalogProvider.refresh() — com TenantDatabase', () => {
     expect(provider.getAll()).toHaveLength(1);
     expect(provider.getById('flexao')?.name).toBe('Flexão v2');
     expect(provider.isKnown('agachamento')).toBe(false);
+  });
+
+  // 2026-09-29: `levels` é a fonte de verdade; `min_level` só é lido quando `levels` é nulo
+  // (linha escrita pela API anterior depois de um rollback).
+  it('usa `levels` da linha quando presente (inclusive conjunto não contíguo)', async () => {
+    const { db } = dbWith([row({ minLevel: 'INICIANTE', levels: ['INICIANTE', 'AVANCADO'] })]);
+    const provider = new ExerciseCatalogProvider(db);
+    await provider.refresh();
+    expect(provider.getById('flexao')?.levels).toEqual(['INICIANTE', 'AVANCADO']);
+    expect(provider.getById('flexao')).not.toHaveProperty('minLevel');
+  });
+
+  it.each([
+    ['INICIANTE', ['INICIANTE', 'INTERMEDIARIO', 'AVANCADO']],
+    ['INTERMEDIARIO', ['INTERMEDIARIO', 'AVANCADO']],
+    ['AVANCADO', ['AVANCADO']],
+  ])('`levels` nulo cai na derivação de min_level=%s', async (minLevel, expected) => {
+    const { db } = dbWith([row({ minLevel, levels: null })]);
+    const provider = new ExerciseCatalogProvider(db);
+    await provider.refresh();
+    expect(provider.getById('flexao')?.levels).toEqual(expected);
+  });
+
+  it('`levels: []` (nunca deveria existir) também cai na derivação de min_level — fail-safe', () => {
+    expect(levelsOfRow({ levels: [], minLevel: 'INTERMEDIARIO' })).toEqual([
+      'INTERMEDIARIO',
+      'AVANCADO',
+    ]);
+  });
+
+  it('seed/bootstrap deriva `levels` de `minLevel` com o mesmo mapeamento do backfill', () => {
+    // `agachamento_barra` é INTERMEDIARIO no seed; `flexao`, INICIANTE.
+    expect(new ExerciseCatalogProvider().getById('agachamento_barra')?.levels).toEqual([
+      'INTERMEDIARIO',
+      'AVANCADO',
+    ]);
+    expect(new ExerciseCatalogProvider().getById('flexao')?.levels).toEqual([
+      'INICIANTE',
+      'INTERMEDIARIO',
+      'AVANCADO',
+    ]);
   });
 
   it('inclui os campos opcionais quando presentes na linha', async () => {
@@ -332,6 +374,14 @@ describe('ExerciseCatalogProvider — ensureBootstrap (via onModuleInit)', () =>
     expect(values).toHaveBeenCalledTimes(EXERCISE_CATALOG.length);
     expect(values).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'PUBLISHED', version: 1, createdBy: null }),
+    );
+    // 2026-09-29: grava `levels` derivado do seed E `min_level` (menor nível — rollback).
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        exerciseKey: 'agachamento_barra',
+        levels: ['INTERMEDIARIO', 'AVANCADO'],
+        minLevel: 'INTERMEDIARIO',
+      }),
     );
   });
 

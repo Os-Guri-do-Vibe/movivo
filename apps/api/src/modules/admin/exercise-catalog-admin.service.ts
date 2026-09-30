@@ -19,7 +19,11 @@ import {
   type TenantTransaction,
 } from '../../core/database/tenant-database.service';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
-import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
+import { lowestLevel } from '../protocol/exercise-catalog';
+import {
+  ExerciseCatalogProvider,
+  levelsOfRow,
+} from '../protocol/exercise-catalog-provider.service';
 import { AuditService } from './audit.service';
 
 const TIMEZONE = 'America/Sao_Paulo' as const;
@@ -52,6 +56,7 @@ export class ExerciseCatalogAdminService {
             equipment: exerciseCatalogEntries.equipment,
             locations: exerciseCatalogEntries.locations,
             minLevel: exerciseCatalogEntries.minLevel,
+            levels: exerciseCatalogEntries.levels,
             contraindicatedFor: exerciseCatalogEntries.contraindicatedFor,
             substitutes: exerciseCatalogEntries.substitutes,
             measurement: exerciseCatalogEntries.measurement,
@@ -77,11 +82,13 @@ export class ExerciseCatalogAdminService {
     const favoritedKeys = new Set(favoriteRows.map((f) => f.exerciseKey));
 
     const currentKeys = new Set<string>();
-    const versions = rows.map((row) => {
+    const versions = rows.map(({ minLevel, levels, ...row }) => {
       const current = !currentKeys.has(row.exerciseKey);
       currentKeys.add(row.exerciseKey);
       return {
         ...row,
+        // `levels` nulo = linha escrita pela API anterior (rollback) → deriva de `min_level`.
+        levels: levelsOfRow({ levels, minLevel }),
         measurement: row.measurement ?? undefined,
         durationSecondsRange: row.durationSecondsRange ?? undefined,
         minRestSeconds: row.minRestSeconds ?? undefined,
@@ -200,7 +207,7 @@ export class ExerciseCatalogAdminService {
       muscleGroups: current.muscleGroups,
       equipment: current.equipment,
       locations: current.locations,
-      minLevel: current.minLevel,
+      levels: levelsOfRow(current),
       contraindicatedFor: current.contraindicatedFor,
       substitutes: current.substitutes,
       ...(current.measurement ? { measurement: current.measurement } : {}),
@@ -269,7 +276,9 @@ export class ExerciseCatalogAdminService {
           muscleGroups: candidate.muscleGroups,
           equipment: candidate.equipment,
           locations: candidate.locations,
-          minLevel: candidate.minLevel,
+          levels: candidate.levels,
+          // Compatibilidade de rollback (migração 0062 aditiva): a API anterior lê `min_level`.
+          minLevel: lowestLevel(candidate.levels),
           contraindicatedFor: candidate.contraindicatedFor,
           substitutes: candidate.substitutes,
           measurement: candidate.measurement ?? null,

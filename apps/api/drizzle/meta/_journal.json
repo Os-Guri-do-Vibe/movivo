@@ -435,6 +435,13 @@
       "when": 1790457271956,
       "tag": "0061_yielding_thena",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1790734928564,
+      "tag": "0062_aspiring_warstar",
+      "breakpoints": true
     }
   ]
 }

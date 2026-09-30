@@ -10,6 +10,7 @@ import {
   type Weekday,
 } from '@movivo/shared';
 
+import { EXERCISE_BY_ID } from '../exercise-catalog';
 import { buildFallbackProtocol } from './fallback-template';
 import { ValidationService } from './validation.service';
 
@@ -26,6 +27,29 @@ describe('buildFallbackProtocol', () => {
     const verdict = service.validate({ structure, constraints: { goal, injuryTags: [] } });
     expect(verdict.action).toBe('PASS');
   });
+
+  // 2026-09-29 (`levels`, seleção múltipla): o template continua válido para os 3 níveis —
+  // todos os exercícios fixos são "a partir de INICIANTE" no seed/backfill (os 3 marcados).
+  it.each(['INICIANTE', 'INTERMEDIARIO', 'AVANCADO'] as const)(
+    'passa no validador para aluno %s, com todos os exercícios marcados nos 3 níveis',
+    (level) => {
+      for (const goal of GOALS) {
+        const structure = buildFallbackProtocol(goal, ['MON', 'WED', 'FRI']);
+        const verdict = service.validate({
+          structure,
+          constraints: { goal, injuryTags: [], level, preferredDays: ['MON', 'WED', 'FRI'] },
+        });
+        expect(verdict.action).toBe('PASS');
+        for (const exercise of structure.sessions.flatMap((s) => s.exercises)) {
+          expect(EXERCISE_BY_ID.get(exercise.exerciseId)?.levels).toEqual([
+            'INICIANTE',
+            'INTERMEDIARIO',
+            'AVANCADO',
+          ]);
+        }
+      }
+    },
+  );
 
   it('sem preferredDays: usa o default de 3 dias alternados (nunca 1 sessão só)', () => {
     const structure = buildFallbackProtocol('GAIN_MUSCLE');

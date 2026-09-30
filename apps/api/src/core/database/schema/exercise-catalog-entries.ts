@@ -41,7 +41,19 @@ export const exerciseCatalogEntries = pgTable(
     muscleGroups: jsonb('muscle_groups').$type<string[]>().notNull(),
     equipment: jsonb('equipment').$type<string[]>().notNull(),
     locations: jsonb('locations').$type<ExerciseLocation[]>().notNull(),
+    /**
+     * Legado (antes de 2026-09-29): nível MÍNIMO. Continua NOT NULL e gravado em toda escrita
+     * como o MENOR nível de `levels` — é o que a versão anterior da API lê, então um rollback
+     * só de imagem segue funcionando. Leitura nova usa `levels`.
+     */
     minLevel: text('min_level').notNull().$type<ExerciseLevel>(),
+    /**
+     * Níveis marcados no painel (decisão do fundador, 2026-09-29): a IA só recebe o exercício
+     * para alunos desses níveis. Nullable de propósito (migração 0062 aditiva): linha escrita
+     * pela API antiga após rollback vem nula e o leitor deriva de `min_level`
+     * (`levelsFromMinLevel`).
+     */
+    levels: jsonb('levels').$type<ExerciseLevel[]>(),
     contraindicatedFor: jsonb('contraindicated_for').$type<ContraindicationTag[]>().notNull(),
     substitutes: jsonb('substitutes').$type<string[]>().notNull(),
     measurement: text('measurement').$type<ExerciseMeasurement>(),

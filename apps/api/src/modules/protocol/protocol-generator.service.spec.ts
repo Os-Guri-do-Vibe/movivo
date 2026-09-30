@@ -1,10 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { ProtocolStructure } from '@movivo/shared';
 
 import type { AppConfigService } from '../../core/config';
 import type { LlmRouter } from '../ai-coach/llm/llm-router.service';
 import type { LLMRequest, LLMResult } from '../ai-coach/llm/llm.types';
 import type { SemanticMemoryPort } from '../ai-coach/context/semantic-memory.port';
-import { EXERCISE_BY_ID, EXERCISE_CATALOG, LEVEL_ORDER, servesLocation } from './exercise-catalog';
+import {
+  EXERCISE_BY_ID,
+  EXERCISE_CATALOG,
+  LEVEL_ORDER,
+  lowestLevel,
+  servesLocation,
+} from './exercise-catalog';
 import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
 import { METHODOLOGY_GUIDELINES, METHODOLOGY_VERSION } from './methodology';
 import type { MethodologyProvider } from './methodology-provider.service';
@@ -389,6 +396,203 @@ describe('ProtocolGeneratorService', () => {
   });
 });
 
+// Redução de fallback (2026-09-29): conflito prompt × validador resolvido no prompt e
+// rodada de correção com o JSON reprovado + feedback estruturado.
+describe('prompt de regras verificadas e rodada de correção (2026-09-29)', () => {
+  const loseFat: UserConstraints = {
+    ...constraints,
+    goal: 'LOSE_FAT',
+    injuryTags: [],
+    injuriesRaw: [],
+  };
+
+  async function userMessageFor(c: UserConstraints): Promise<string> {
+    const { service, calls } = makeService([validProtocolJson()]);
+    await service.generate({ ...command, constraints: c });
+    return calls[0]?.messages[0]?.content ?? '';
+  }
+
+  it('LOSE_FAT: sai a exigência de circuito, entra musculação válida + cardio no fim sem "technique"', async () => {
+    const message = await userMessageFor(loseFat);
+    expect(message).not.toContain('Musculação tradicional sozinha');
+    expect(message).not.toContain('não atende este objetivo');
+    expect(message).toContain('NÃO é obrigatório usar circuito');
+    expect(message).toContain('já é, sozinha, um treino completo e válido para este objetivo');
+    expect(message).toContain('um bloco de cardio no FIM da sessão');
+    expect(message).toContain('nunca use o campo "technique" para representá-lo');
+    expect(message).toContain(
+      'Padrões de movimento prioritários para este objetivo: SQUAT, HINGE, HORIZONTAL_PUSH, HORIZONTAL_PULL, LUNGE, CARDIO',
+    );
+  });
+
+  it('CONDITIONING: mantém a exigência de cardio, como exercício separado e nunca "technique"', async () => {
+    const message = await userMessageFor({ ...loseFat, goal: 'CONDITIONING' });
+    expect(message).toContain('o treino resistido sozinho NÃO é a estratégia completa');
+    expect(message).toContain('não use o campo "technique" para representá-lo');
+    expect(message).toContain('o profissional CREF complementa na revisão');
+  });
+
+  it('INICIANTE: bloco de regras proíbe "technique" inclusive em CIRCUITO/superséries', async () => {
+    const message = await userMessageFor(constraints);
+    const rules = message.slice(message.indexOf('REGRAS VERIFICADAS AUTOMATICAMENTE'));
+    expect(rules).toContain(
+      'REGRAS VERIFICADAS AUTOMATICAMENTE (o protocolo é reprovado se violar qualquer uma):',
+    );
+    expect(rules).toContain('Nível INICIANTE: o campo "technique" é PROIBIDO');
+    expect(rules).toContain('inclusive SUPERSET, BI_SET, TRI_SET e DESCANSO_ATIVO');
+    expect(rules).toContain('no máximo 70% dos exercícios podem ser ISOLATION');
+    expect(rules).toContain('Todo "exerciseId" deve ser copiado EXATAMENTE');
+    expect(rules).toContain('nunca prometa prazo de resposta');
+    // Bloco vem antes do fechamento da mensagem.
+    expect(message.indexOf('REGRAS VERIFICADAS')).toBeLessThan(
+      message.indexOf('Monte o protocolo individualizado'),
+    );
+  });
+
+  it('INTERMEDIARIO/AVANCADO: teto de técnicas por sessão vem da constante do validador', async () => {
+    const message = await userMessageFor({ ...constraints, level: 'INTERMEDIARIO' });
+    expect(message).not.toContain('Nível INICIANTE: o campo "technique" é PROIBIDO');
+    expect(message).toContain('no máximo 2 exercícios com "technique" por sessão');
+    expect(message).toContain('a divisão CIRCUITO é a única exceção');
+  });
+
+  it('maxPhase ADAPTACAO substitui a linha de status (sem o "NÃO force ADAPTACAO")', async () => {
+    const regular = await userMessageFor(constraints);
+    expect(regular).toContain('NÃO force ADAPTACAO');
+    const capped = await userMessageFor({ ...constraints, maxPhase: 'ADAPTACAO' });
+    expect(capped).not.toContain('NÃO force ADAPTACAO');
+    expect(capped).toContain(
+      'Status de treino: fase travada em ADAPTACAO pelo modo conservador — independentemente do status de treino, "phase" DEVE ser ADAPTACAO.',
+    );
+  });
+
+  it('schema: "technique" nunca para INICIANTE, nem em CIRCUITO; cardio no fim não é técnica', async () => {
+    const { service, calls } = makeService([validProtocolJson()]);
+    await service.generate(command);
+    expect(calls[0]?.system).toContain(
+      '(opcional; NUNCA para INICIANTE — nem em CIRCUITO; cardio no fim da sessão não é técnica)',
+    );
+  });
+
+  it('regra genérica: padrão sem opção na base → não inventar id, omitir o padrão', async () => {
+    const message = await userMessageFor(constraints);
+    expect(message).toContain(
+      'Se a base de referência não tiver nenhum exercício de um padrão de movimento, não invente um id: omita o padrão e equilibre a sessão com os demais.',
+    );
+  });
+
+  // Revisão do Victor (2026-09-29): o reparo de id alucinado só aceita candidato da BASE
+  // DESTE ALUNO (local + nível + contraindicação), nunca do catálogo inteiro.
+  describe('reparo de id alucinado restrito à base do aluno', () => {
+    const onlyBeginnerRow = (() => {
+      const entries = EXERCISE_CATALOG.map((e) =>
+        e.id === 'remada_invertida' ? { ...e, levels: ['INICIANTE' as const] } : e,
+      );
+      const byId = new Map(entries.map((e) => [e.id, e]));
+      return {
+        getAll: () => entries,
+        getById: (id: string) => byId.get(id),
+        isKnown: (id: string) => byId.has(id),
+      } as unknown as ExerciseCatalogProvider;
+    })();
+    const home: UserConstraints = {
+      ...constraints,
+      location: 'HOME',
+      injuryTags: [],
+      injuriesRaw: [],
+    };
+
+    it('remada_invertida só Iniciante + aluno Avançado em Casa: não repara, fica EXERCISE_UNKNOWN', async () => {
+      const { service } = makeService(
+        [validProtocolJson('remada_invertida_na_mesa')],
+        undefined,
+        onlyBeginnerRow,
+      );
+      const result = await service.generate({
+        ...command,
+        constraints: { ...home, level: 'AVANCADO' },
+      });
+      expect(result.structure.sessions[0]?.exercises[0]?.exerciseId).toBe(
+        'remada_invertida_na_mesa',
+      );
+      expect(result.unknownExerciseIds).toEqual(['remada_invertida_na_mesa']);
+    });
+
+    it('mesmo catálogo, aluno Iniciante em Casa (dentro da base): repara para remada_invertida', async () => {
+      const { service } = makeService(
+        [validProtocolJson('remada_invertida_na_mesa')],
+        undefined,
+        onlyBeginnerRow,
+      );
+      const result = await service.generate({ ...command, constraints: home });
+      expect(result.structure.sessions[0]?.exercises[0]?.exerciseId).toBe('remada_invertida');
+      expect(result.unknownExerciseIds).toEqual([]);
+    });
+  });
+
+  describe('rodada de correção', () => {
+    // HINGE contraindicado por KNEE (as `constraints` deste arquivo têm KNEE).
+    const vetoed = 'levantamento_terra_romeno_halter';
+    const previous = JSON.parse(validProtocolJson(vetoed)) as ProtocolStructure;
+    const previousFirst = previous.sessions[0]?.exercises[0];
+    if (!previousFirst) throw new Error('fixture inválida');
+    previousFirst.videoUrl = 'https://example.com/v.mp4';
+    const correction = {
+      previous,
+      violations: [{ rule: 'EXERCISE_CONTRAINDICATED', detail: 'x', action: 'BLOCK' as const }],
+      round: 1,
+    };
+
+    it('ordem das mensagens: user, evidências, assistant (JSON anterior), user (correção)', async () => {
+      const retrieve = vi.fn().mockResolvedValue([ragDoc('chunk-1', 'doc-1')]);
+      const { service, calls } = makeService([validProtocolJson()], retrieve);
+      await service.generate({ ...command, correction });
+      const messages = calls[0]?.messages ?? [];
+
+      expect(messages.map((m) => m.role)).toEqual(['user', 'user', 'assistant', 'user']);
+      expect(messages[0]?.content).toContain('Objetivo: GAIN_MUSCLE');
+      expect(messages[1]?.content).toContain('EVIDENCIAS_SELETIVAS');
+      const assistant = JSON.parse(messages[2]?.content ?? '{}') as Record<string, unknown>;
+      expect(assistant).not.toHaveProperty('promptVersion');
+      expect(messages[2]?.content).not.toContain('videoUrl');
+      expect(messages[2]?.content).toContain(vetoed);
+      expect(messages[3]?.content).toMatch(/^CORREÇÃO OBRIGATÓRIA:/);
+      expect(messages[3]?.content).toContain(`[EXERCISE_CONTRAINDICATED] "${vetoed}"`);
+    });
+
+    it('opções de troca saem da base filtrada deste aluno (KNEE) — nunca um id vetado', async () => {
+      const { service, calls } = makeService([validProtocolJson()]);
+      await service.generate({ ...command, correction });
+      const correctionMessage = calls[0]?.messages.at(-1)?.content ?? '';
+      const options = (correctionMessage.match(/Opções válidas: ([^.]+)\./)?.[1] ?? '').split(', ');
+      expect(options.filter(Boolean).length).toBeGreaterThan(0);
+      expect(options).not.toContain(vetoed);
+      for (const id of options.filter(Boolean)) {
+        expect(EXERCISE_BY_ID.get(id)?.pattern).toBe('HINGE');
+        expect(EXERCISE_BY_ID.get(id)?.contraindicatedFor).not.toContain('KNEE');
+        expect(calls[0]?.system).toContain(`- ${id} | `);
+      }
+    });
+
+    it('retry de JSON malformado vai por último, depois da correção', async () => {
+      const { service, calls } = makeService(['lixo', validProtocolJson()]);
+      const result = await service.generate({ ...command, correction });
+      expect(result.malformedRetries).toBe(1);
+      const roles = calls[1]?.messages.map((m) => m.role);
+      expect(roles).toEqual(['user', 'assistant', 'user', 'user']);
+      expect(calls[1]?.messages.at(-1)?.content).toContain('JSON válido');
+      expect(calls[1]?.messages.at(-2)?.content).toMatch(/^CORREÇÃO OBRIGATÓRIA:/);
+    });
+
+    it('sem correção: só a mensagem do aluno (e evidências), sem turno assistant', async () => {
+      const { service, calls } = makeService([validProtocolJson()]);
+      const result = await service.generate(command);
+      expect(calls[0]?.messages.map((m) => m.role)).toEqual(['user']);
+      expect(result.malformedRetries).toBe(0);
+    });
+  });
+});
+
 // Achado 2026-09-26: favoritos do RT CREF no painel "Exercícios" viram PREFERÊNCIA de
 // prescrição (critério primário da ORDEM desde 2026-09-29), nunca eixo de segurança — o
 // filtro da base não muda.
@@ -449,7 +653,9 @@ describe('favoritos do RT na BASE DE REFERÊNCIA (achado 2026-09-26)', () => {
     const filtered = EXERCISE_CATALOG.filter(
       (e) =>
         servesLocation(e, c.location) &&
-        LEVEL_ORDER[e.minLevel] <= LEVEL_ORDER[c.level] &&
+        // Critério LEGADO ("a partir do nível mínimo"): com o seed/backfill (níveis contíguos
+        // até AVANCADO) a oferta estrita por `levels` tem de dar exatamente a mesma base.
+        LEVEL_ORDER[lowestLevel(e.levels)] <= LEVEL_ORDER[c.level] &&
         !e.contraindicatedFor.some((tag) => c.injuryTags.includes(tag)),
     );
     const equipmentFirst = c.location === 'FULL_GYM' || c.location === 'CONDO_GYM';
@@ -460,6 +666,53 @@ describe('favoritos do RT na BASE DE REFERÊNCIA (achado 2026-09-26)', () => {
       : filtered;
     return ordered.map((e) => e.id);
   }
+
+  // 2026-09-29 (decisão do fundador): oferta ESTRITA — só os níveis marcados.
+  it('oferta estrita por nível: exercício só "Iniciante" some da base de aluno avançado', async () => {
+    const target = 'supino_reto_halter';
+    const entries = EXERCISE_CATALOG.map((e) =>
+      e.id === target ? { ...e, levels: ['INICIANTE' as const] } : e,
+    );
+    const byId = new Map(entries.map((e) => [e.id, e]));
+    const catalog = {
+      getAll: () => entries,
+      getById: (id: string) => byId.get(id),
+      isKnown: (id: string) => byId.has(id),
+    } as unknown as ExerciseCatalogProvider;
+    const beginner = referenceBaseLines(await systemPromptFor(baseConstraints, catalog));
+    const advanced = referenceBaseLines(
+      await systemPromptFor({ ...baseConstraints, level: 'AVANCADO' }, catalog),
+    );
+    expect(beginner.map(lineId)).toContain(target);
+    expect(advanced.map(lineId)).not.toContain(target);
+    // Controle: com os 3 níveis marcados (seed), o avançado recebe o exercício.
+    expect(
+      referenceBaseLines(await systemPromptFor({ ...baseConstraints, level: 'AVANCADO' })).map(
+        lineId,
+      ),
+    ).toContain(target);
+  });
+
+  it('único favorito sai da base POR NÍVEL (marcado só Iniciante, aluno Avançado): some o bloco', async () => {
+    const target = 'supino_reto_halter';
+    const entries = EXERCISE_CATALOG.map((e) => ({
+      ...e,
+      isFavorite: e.id === target,
+      ...(e.id === target ? { levels: ['INICIANTE' as const] } : {}),
+    }));
+    const byId = new Map(entries.map((e) => [e.id, e]));
+    const catalog = {
+      getAll: () => entries,
+      getById: (id: string) => byId.get(id),
+      isKnown: (id: string) => byId.has(id),
+    } as unknown as ExerciseCatalogProvider;
+    const beginner = await systemPromptFor(baseConstraints, catalog);
+    expect(beginner).toContain(FAVORITE_BLOCK_HEADER);
+    const advanced = await systemPromptFor({ ...baseConstraints, level: 'AVANCADO' }, catalog);
+    expect(advanced).not.toContain(FAVORITE_BLOCK_HEADER);
+    expect(advanced).not.toContain(FAVORITE_MARKER);
+    expect(referenceBaseLines(advanced).map(lineId)).not.toContain(target);
+  });
 
   it('zero favoritos na base: prompt byte a byte igual ao do catálogo sem favoritos, sem o bloco', async () => {
     const baseline = await systemPromptFor(baseConstraints); // bootstrap: isFavorite undefined

@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ProtocolExercise, ProtocolStructure } from '@movivo/shared';
 
+import { EXERCISE_BY_ID, type ExerciseLevel } from '../exercise-catalog';
 import { ExerciseCatalogProvider } from '../exercise-catalog-provider.service';
 import { PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import { aggregate, ValidationService, type ValidateProtocolInput } from './validation.service';
@@ -509,7 +510,7 @@ function nSessionsNoWeekday(n: number): ProtocolStructure {
 
 // Achado do Victor: o filtro por nível do gerador só existia no PROMPT.
 describe('ValidationService — nível do exercício', () => {
-  it('BLOCK exercício cujo minLevel é acima do nível do usuário', () => {
+  it('BLOCK exercício cujo menor nível marcado é acima do nível do usuário', () => {
     const v = service.validate({
       structure: withExercise({ exerciseId: 'agachamento_barra', name: 'Agachamento (Barra)' }),
       constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'INICIANTE' },
@@ -525,6 +526,50 @@ describe('ValidationService — nível do exercício', () => {
     });
     expect(v.violations.map((x) => x.rule)).not.toContain('EXERCISE_LEVEL_TOO_HIGH');
     expect(v.action).toBe('PASS');
+  });
+});
+
+// 2026-09-29 (`levels`, seleção múltipla — decisão do fundador): o veto só barra "avançado
+// demais" (aluno abaixo do MENOR nível marcado); nunca "fácil demais" nem buraco no conjunto.
+describe('ValidationService — níveis marcados (levels)', () => {
+  function serviceWithLevels(levels: ExerciseLevel[]): ValidationService {
+    const base = EXERCISE_BY_ID.get('agachamento_barra');
+    if (!base) throw new Error('fixture');
+    const entry = { ...base, levels };
+    const provider = {
+      getAll: () => [entry],
+      getById: (id: string) => (id === entry.id ? entry : EXERCISE_BY_ID.get(id)),
+      isKnown: (id: string) => id === entry.id || EXERCISE_BY_ID.has(id),
+    } as unknown as ExerciseCatalogProvider;
+    return new ValidationService(provider);
+  }
+  const verdictFor = (levels: ExerciseLevel[], level: ExerciseLevel) =>
+    serviceWithLevels(levels).validate({
+      structure: withExercise({ exerciseId: 'agachamento_barra', name: 'Agachamento (Barra)' }),
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level },
+    });
+
+  it('BLOCK "avançado demais": só AVANCADO para aluno INTERMEDIARIO', () => {
+    const v = verdictFor(['AVANCADO'], 'INTERMEDIARIO');
+    expect(v.violations.map((x) => x.rule)).toContain('EXERCISE_LEVEL_TOO_HIGH');
+    expect(v.violations[0]?.detail).toContain('a partir do nível AVANCADO');
+  });
+
+  it('nunca bloqueia "fácil demais": só INICIANTE para aluno AVANCADO', () => {
+    expect(verdictFor(['INICIANTE'], 'AVANCADO').action).toBe('PASS');
+  });
+
+  it('nunca bloqueia buraco em conjunto não contíguo: [INICIANTE, AVANCADO] para INTERMEDIARIO', () => {
+    expect(verdictFor(['INICIANTE', 'AVANCADO'], 'INTERMEDIARIO').action).toBe('PASS');
+  });
+});
+
+describe('ValidationService.exerciseById', () => {
+  it('lê do MESMO catálogo-gabarito do validador (o reparo de nome usa isto)', () => {
+    const provider = new ExerciseCatalogProvider();
+    const validator = new ValidationService(provider);
+    expect(validator.exerciseById('prancha')).toBe(provider.getById('prancha'));
+    expect(validator.exerciseById('exercicio_fantasma')).toBeUndefined();
   });
 });
 

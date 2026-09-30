@@ -20,7 +20,7 @@ const VALID = {
   muscleGroups: ['quadríceps'],
   equipment: [],
   locations: ['FULL_GYM' as const],
-  minLevel: 'INICIANTE' as const,
+  levels: ['INTERMEDIARIO' as const, 'AVANCADO' as const],
   contraindicatedFor: ['KNEE' as const],
   substitutes: [] as string[],
   changeNote: 'entrada de teste',
@@ -36,7 +36,8 @@ function listRow(overrides: Record<string, unknown> = {}) {
     muscleGroups: VALID.muscleGroups,
     equipment: VALID.equipment,
     locations: VALID.locations,
-    minLevel: VALID.minLevel,
+    minLevel: 'INTERMEDIARIO',
+    levels: VALID.levels,
     contraindicatedFor: VALID.contraindicatedFor,
     substitutes: VALID.substitutes,
     measurement: null,
@@ -188,6 +189,23 @@ describe('ExerciseCatalogAdminService.list', () => {
   });
 });
 
+describe('ExerciseCatalogAdminService.list — levels (2026-09-29)', () => {
+  it('devolve `levels` da linha e não expõe `minLevel`', async () => {
+    const { service } = catalogWith({ selects: [[listRow()]] });
+    const [version] = (await service.list()).data.versions;
+    expect(version?.levels).toEqual(['INTERMEDIARIO', 'AVANCADO']);
+    expect(version).not.toHaveProperty('minLevel');
+  });
+
+  it('`levels` nulo (linha da API anterior após rollback) deriva de min_level', async () => {
+    const { service } = catalogWith({
+      selects: [[listRow({ levels: null, minLevel: 'INICIANTE' })]],
+    });
+    const [version] = (await service.list()).data.versions;
+    expect(version?.levels).toEqual(['INICIANTE', 'INTERMEDIARIO', 'AVANCADO']);
+  });
+});
+
 describe('ExerciseCatalogAdminService.favorite', () => {
   it('favorita um exercício existente e audita como exercise_catalog.favorite', async () => {
     const { service, audit, inserted, invalidate } = catalogWith({
@@ -286,6 +304,36 @@ describe('ExerciseCatalogAdminService.publish', () => {
     expect(invalidate).toHaveBeenCalledOnce();
   });
 
+  it('grava `levels` e `min_level` = menor nível marcado (compatível com rollback)', async () => {
+    const { service, inserted } = catalogWith({ selects: [[{ max: 0 }], []] });
+    await service.publish(ACTOR, { ...VALID, levels: ['AVANCADO', 'INICIANTE'] });
+    expect(inserted[0]).toMatchObject({
+      levels: ['AVANCADO', 'INICIANTE'],
+      minLevel: 'INICIANTE',
+    });
+  });
+
+  it.each([
+    ['vazio', []],
+    ['repetido', ['INICIANTE', 'INICIANTE']],
+    ['nível inválido', ['EXPERT']],
+  ])('recusa `levels` %s antes de tocar o banco', async (_label, levels) => {
+    const { service, inserted } = catalogWith();
+    await expect(service.publish(ACTOR, { ...VALID, levels })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('recusa o contrato antigo (`minLevel` sem `levels`)', async () => {
+    const { service, inserted } = catalogWith();
+    const { levels: _levels, ...legacy } = VALID;
+    await expect(
+      service.publish(ACTOR, { ...legacy, minLevel: 'INICIANTE' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(inserted).toHaveLength(0);
+  });
+
   it('nova versão do mesmo exerciseKey incrementa a versão', async () => {
     const { service, inserted } = catalogWith({ selects: [[{ max: 3 }], []] });
 
@@ -379,6 +427,18 @@ describe('ExerciseCatalogAdminService.retire', () => {
       minRestSeconds: 0,
       videoUrl: 'https://movivo.test/v.mp4',
     });
+  });
+
+  it('reconstrói o candidato com `levels` (derivado de min_level quando nulo)', async () => {
+    const { service, inserted } = catalogWith({
+      selects: [
+        [listRow({ status: 'PUBLISHED', levels: null, minLevel: 'AVANCADO' })],
+        [{ max: 1 }],
+        [],
+      ],
+    });
+    await service.retire(ACTOR, { exerciseKey: VALID.exerciseKey, changeNote: 'saiu do escopo' });
+    expect(inserted[0]).toMatchObject({ levels: ['AVANCADO'], minLevel: 'AVANCADO' });
   });
 
   it('não retira duas vezes o mesmo exercício', async () => {

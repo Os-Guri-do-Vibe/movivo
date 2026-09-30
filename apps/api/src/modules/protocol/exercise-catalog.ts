@@ -121,7 +121,14 @@ export interface CatalogExercise {
   equipment: string[];
   /** Locais em que o exercício é viável. Vazio nunca — todo exercício serve a algum lugar. */
   locations: readonly ExerciseLocation[];
-  minLevel: ExerciseLevel;
+  /**
+   * Níveis de aluno para os quais o exercício é oferecido à IA (decisão do fundador,
+   * 2026-09-29: "só os níveis marcados"). FONTE DE VERDADE em runtime — substitui o antigo
+   * `minLevel`, que deixou de existir neste tipo de propósito (um campo derivado ao lado
+   * poderia divergir). Quem precisa do "nível mínimo" (veto de segurança do validador) usa
+   * `lowestLevel(levels)`. Nunca vazio. Ver `levelsFromMinLevel` para o mapeamento legado.
+   */
+  levels: readonly ExerciseLevel[];
   /** Lesões que contraindicam este exercício (evitar quando a flag está presente). */
   contraindicatedFor: ContraindicationTag[];
   /** Substitutos no MESMO padrão de movimento (ids do catálogo). */
@@ -166,6 +173,36 @@ export const LEVEL_ORDER: Record<ExerciseLevel, number> = {
   AVANCADO: 2,
 };
 
+/**
+ * Mapeamento do `minLevel` legado (monotônico) para `levels` — preserva EXATAMENTE o
+ * comportamento anterior: "a partir de X" = X e todos os níveis acima. Usado no seed, no
+ * backfill da migração 0062 (mesmo mapeamento em SQL) e na leitura de linha com `levels`
+ * nulo (escrita pela API antiga após um rollback).
+ */
+export function levelsFromMinLevel(minLevel: ExerciseLevel): ExerciseLevel[] {
+  return (['INICIANTE', 'INTERMEDIARIO', 'AVANCADO'] as const).filter(
+    (level) => LEVEL_ORDER[level] >= LEVEL_ORDER[minLevel],
+  );
+}
+
+/** Menor nível marcado — é o que o veto de segurança (`EXERCISE_LEVEL_TOO_HIGH`) usa. */
+export function lowestLevel(levels: readonly ExerciseLevel[]): ExerciseLevel {
+  let lowest: ExerciseLevel = 'AVANCADO';
+  for (const level of levels) if (LEVEL_ORDER[level] < LEVEL_ORDER[lowest]) lowest = level;
+  return lowest;
+}
+
+/**
+ * Oferta à IA (base de referência, substituição, opções do feedback): SÓ os níveis marcados.
+ * Não é o veto de segurança — esse só barra "avançado demais" (ver `ValidationService`).
+ */
+export function offeredToLevel(
+  exercise: Pick<CatalogExercise, 'levels'>,
+  level: ExerciseLevel,
+): boolean {
+  return exercise.levels.includes(level);
+}
+
 export const CATALOG_VERSION = 'catalog-2026-09-v7';
 
 /**
@@ -186,7 +223,13 @@ export const CATALOG_VERSION = 'catalog-2026-09-v7';
  * ponytail: cobertura suficiente para as divisões, não exaustiva — novo exercício entra quando
  * uma divisão real ficar sem opção, não "por completude".
  */
-export const EXERCISE_CATALOG: readonly CatalogExercise[] = [
+/**
+ * Formato do SEED: as 413 entradas abaixo seguem com `minLevel` (autoria do RT, não editadas
+ * na troca para `levels`, 2026-09-29) — `EXERCISE_CATALOG` deriva `levels` delas.
+ */
+type SeedCatalogExercise = Omit<CatalogExercise, 'levels'> & { minLevel: ExerciseLevel };
+
+const SEED_EXERCISE_CATALOG: readonly SeedCatalogExercise[] = [
   {
     id: 'abdominal_maquina',
     name: 'Abdominal (Máquina)',
@@ -5621,6 +5664,11 @@ export function servesLocation(
 ): boolean {
   return exercise.locations.includes(location);
 }
+
+/** Seed com `levels` derivado de `minLevel` (mesmo mapeamento do backfill da migração 0062). */
+export const EXERCISE_CATALOG: readonly CatalogExercise[] = SEED_EXERCISE_CATALOG.map(
+  ({ minLevel, ...exercise }) => ({ ...exercise, levels: levelsFromMinLevel(minLevel) }),
+);
 
 /** Índice por id, para lookup O(1) do validador (US-2.3) e do gerador. */
 export const EXERCISE_BY_ID: ReadonlyMap<string, CatalogExercise> = new Map(
