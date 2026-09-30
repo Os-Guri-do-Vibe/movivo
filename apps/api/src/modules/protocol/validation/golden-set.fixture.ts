@@ -17,7 +17,7 @@ import type { ContraindicationTag } from '../exercise-catalog';
 import { PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import type { ValidateProtocolInput, ValidationAction } from './validation.service';
 
-export const GOLDEN_SET_VERSION = 'golden-set-2026-09-v3';
+export const GOLDEN_SET_VERSION = 'golden-set-2026-09-v4';
 
 export interface GoldenCase {
   label: string;
@@ -122,6 +122,87 @@ function cleanExercises(): ProtocolStructure['sessions'][number]['exercises'] {
   if (!exercises) throw new Error('fixture inválida');
   return exercises;
 }
+
+/**
+ * Emagrecimento/iniciante/FULL_BODY (2026-09-29, decisão clínica do fundador): musculação
+ * bem feita já é válida para emagrecimento; cardio contínuo ou HIIT no FIM da sessão, como
+ * exercício separado (nunca `technique`), também. `finisher` entra por último.
+ */
+function loseFatBeginner(finisher?: ProtocolStructure['sessions'][number]['exercises'][number]) {
+  const strength: ProtocolStructure['sessions'][number]['exercises'] = [
+    {
+      exerciseId: 'agachamento_goblet',
+      name: 'Agachamento Goblet',
+      sets: 3,
+      reps: { min: 10, max: 12 },
+      loadStrategy: 'DOUBLE_PROGRESSION',
+      restSeconds: 60,
+    },
+    {
+      exerciseId: 'supino_reto_halter',
+      name: 'Supino Reto (Halter)',
+      sets: 3,
+      reps: { min: 10, max: 12 },
+      loadStrategy: 'DOUBLE_PROGRESSION',
+      restSeconds: 60,
+    },
+    {
+      exerciseId: 'remada_curvada_halter',
+      name: 'Remada Curvada (Halter)',
+      sets: 3,
+      reps: { min: 10, max: 12 },
+      loadStrategy: 'DOUBLE_PROGRESSION',
+      restSeconds: 60,
+    },
+    {
+      exerciseId: 'levantamento_terra_romeno_halter',
+      name: 'Levantamento Terra Romeno (Halter)',
+      sets: 3,
+      reps: { min: 10, max: 12 },
+      loadStrategy: 'DOUBLE_PROGRESSION',
+      restSeconds: 60,
+    },
+  ];
+  return cleanStructure({
+    goal: 'LOSE_FAT',
+    splitType: 'FULL_BODY',
+    weeklyFrequency: 3,
+    sessions: (['MON', 'WED', 'FRI'] as const).map((weekday, i) => ({
+      dayLabel: `Treino ${i + 1}`,
+      weekday,
+      focus: 'Corpo inteiro',
+      exercises: [...strength, ...(finisher ? [finisher] : [])],
+    })),
+    generalNotes: 'Priorize a execução e respeite os descansos.',
+  });
+}
+
+function loseFatBeginnerInput(
+  structure: ProtocolStructure,
+  over: Partial<ValidateProtocolInput['constraints']> = {},
+  parqFlags: ContraindicationTag[] = [],
+): ValidateProtocolInput {
+  return {
+    structure,
+    constraints: {
+      goal: 'LOSE_FAT',
+      injuryTags: [],
+      level: 'INICIANTE',
+      preferredDays: ['MON', 'WED', 'FRI'],
+      ...over,
+    },
+    parqFlags,
+  };
+}
+
+const WALK_FINISHER = {
+  exerciseId: 'caminhada',
+  name: 'Caminhada',
+  sets: 1,
+  durationSeconds: 900,
+  loadStrategy: 'BODYWEIGHT' as const,
+  restSeconds: 0,
+};
 
 export const GOLDEN_SET: readonly GoldenCase[] = [
   // --- LIMPOS: a IA planejou dentro dos trilhos → PASS ---
@@ -454,5 +535,87 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
         preferredDays: ['MON', 'WED', 'FRI'],
       },
     },
+  },
+  // --- Emagrecimento sem circuito obrigatório (2026-09-29, decisão clínica do fundador) ---
+  {
+    label: 'emagrecimento iniciante FULL_BODY só com musculação (sem cardio, sem técnica)',
+    kind: 'clean',
+    expected: 'PASS',
+    input: loseFatBeginnerInput(loseFatBeginner()),
+  },
+  {
+    label: 'emagrecimento iniciante FULL_BODY com caminhada no fim da sessão',
+    kind: 'clean',
+    expected: 'PASS',
+    input: loseFatBeginnerInput(loseFatBeginner(WALK_FINISHER)),
+  },
+  {
+    label: 'emagrecimento iniciante FULL_BODY com HIIT de 600 s no fim, sem "technique"',
+    kind: 'clean',
+    expected: 'PASS',
+    input: loseFatBeginnerInput(
+      loseFatBeginner({
+        exerciseId: 'hiit',
+        name: 'HIIT',
+        sets: 1,
+        durationSeconds: 600,
+        loadStrategy: 'BODYWEIGHT',
+        restSeconds: 0,
+      }),
+    ),
+  },
+  {
+    label:
+      'iniciante FULL_BODY com cardio marcado como técnica (mountain_climber + DESCANSO_ATIVO)',
+    kind: 'adversarial',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'TECHNIQUE_LEVEL_NOT_ALLOWED',
+    input: loseFatBeginnerInput(
+      loseFatBeginner({
+        exerciseId: 'mountain_climber',
+        name: 'Mountain Climber',
+        sets: 3,
+        durationSeconds: 30,
+        loadStrategy: 'BODYWEIGHT',
+        restSeconds: 30,
+        technique: 'DESCANSO_ATIVO',
+      }),
+    ),
+  },
+  {
+    label: 'caminhada para aluno com restrição CARDIAC (contraindicada no catálogo)',
+    kind: 'adversarial',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'EXERCISE_CONTRAINDICATED',
+    input: loseFatBeginnerInput(loseFatBeginner(WALK_FINISHER), {
+      injuryTags: ['CARDIAC'] as ContraindicationTag[],
+    }),
+  },
+  {
+    label: 'observação cita condição de saúde relatada ("histórico de hérnia de disco")',
+    kind: 'adversarial',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'DIAGNOSIS',
+    input: loseFatBeginnerInput(
+      cleanStructure({
+        ...loseFatBeginner(),
+        generalNotes: 'Cuidado redobrado por causa do histórico de hérnia de disco.',
+      }),
+    ),
+  },
+  {
+    label: 'fase HIPERTROFIA com teto de fase do PAR-Q (maxPhase ADAPTACAO)',
+    kind: 'adversarial',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'PARQ_PHASE_CAP_EXCEEDED',
+    input: loseFatBeginnerInput(
+      cleanStructure({
+        ...loseFatBeginner(),
+        phase: 'HIPERTROFIA',
+        phaseDurationWeeks: PHASE_DURATION_WEEKS_RANGE.HIPERTROFIA.minWeeks,
+      }),
+      { maxPhase: 'ADAPTACAO' },
+      ['BALANCE_FALL_RISK'] as ContraindicationTag[],
+    ),
   },
 ];

@@ -2,38 +2,99 @@
  * Planner do pipeline "gera-e-valida" (US-2.4 / TASK-2.4.3) — a decisão pura, sem I/O de
  * banco/fila, para ser testável com fakes do gerador/validador (mocks-first).
  *
- * Fluxo:
- *   1. gera → valida;
- *   2. BLOCK → 1 regeração de modelo (US-2.3.3) → revalida;
- *   3. ainda BLOCK após a 2ª tentativa → cai no template pré-aprovado do RT.
+ * Fluxo (revisão 2026-09-29 — redução de fallback, medição do Victor):
+ *   1. gera → valida (erro de geração aqui continua lançando: o job re-tenta, como antes);
+ *   2. BLOCK → até `MAX_CORRECTION_ROUNDS` rodadas de CORREÇÃO: o modelo recebe o próprio
+ *      JSON reprovado + a lista estruturada do que violou (`buildCorrectionMessage`) e
+ *      devolve o protocolo reparado → revalida. A 2ª tentativa antiga regenerava com o
+ *      prompt idêntico, sem dizer o que estava errado, e o modelo repetia o erro. Erro de
+ *      geração (`ProtocolGenerationError`) numa rodada de correção NÃO relança o job: conta
+ *      como bloqueio e segue para o passo 3 com a última saída válida;
+ *   3. ainda BLOCK → reparo determinístico (`deterministicRepair`) sobre a ÚLTIMA saída, só
+ *      se TODAS as violações BLOCK forem mecânicas — e sempre revalidado no validador inteiro;
+ *   4. nada disso limpou → template pré-aprovado do RT.
+ *
+ * Nenhuma regra do validador mudou nesta revisão: todas as violações da linha de base eram
+ * verdadeiros positivos ou erro de prompt (Victor, 83 execuções reais).
  *
  * Decisão do fundador (2026-08-18): **todo** protocolo gerado — PASS limpo, FLAG do
- * validador ou BLOCK persistente caindo no template — entra na Fila do Profissional como
- * `PENDING_REVIEW`, nunca entrega sozinho na hora. `OPTIONAL` dá ao RT uma janela de
- * cortesia de 1h pra revisar qualquer protocolo — mesmo o limpo — antes da auto-liberação
- * (`ProtocolAutoReleaseWorker`). Isso substitui o antigo atalho onde PASS pulava a fila e
- * entregava imediato: um único fluxo, sem caminho paralelo.
+ * validador, reparado ou BLOCK persistente caindo no template — entra na Fila do
+ * Profissional como `PENDING_REVIEW`, nunca entrega sozinho na hora.
  *
- * Quem decide `OPTIONAL` vs `MANDATORY` é o `ProtocolGenerationWorker`, não este arquivo —
- * aqui só devolvemos `usedFallbackTemplate` (true quando `BLOCK_FALLBACK` persistiu nas
- * duas tentativas, ver abaixo). Dois motivos de negócio independentes travam em
- * `MANDATORY`, sem auto-liberação: PAR-Q do titular (gate já aplicado antes de chegar
- * aqui, em `ProtocolGenerationWorker.process()`) e `usedFallbackTemplate` (decisão do
- * fundador, 2026-09-03 — o conteúdo nunca passou limpo pela geração/validação, então
- * nunca sai sozinho, mesmo com PAR-Q liberado).
+ * Quem decide `OPTIONAL` vs `MANDATORY` é o `ProtocolGenerationWorker`
+ * (`reviewUrgencyForPlan`), não este arquivo — aqui só devolvemos `usedFallbackTemplate` e
+ * `repairs`.
  */
 import type { ProtocolStructure } from '@movivo/shared';
 
-import type { GenerateProtocolCommand, GenerateProtocolResult } from './protocol-generator.service';
+import {
+  type GenerateProtocolCommand,
+  type GenerateProtocolResult,
+  ProtocolGenerationError,
+} from './protocol-generator.service';
+import {
+  deterministicRepair,
+  type DeterministicRepairCode,
+} from './validation/deterministic-repair';
 import { buildFallbackProtocol, FALLBACK_TEMPLATE_VERSION } from './validation/fallback-template';
+import { VALIDATION_RULES_VERSION } from './validation/validation-rules';
 import type {
   ValidateProtocolInput,
   ValidationService,
+  ValidationVerdict,
   ValidationViolation,
 } from './validation/validation.service';
 
+/** Rodadas de correção com feedback depois da 1ª geração (máx. 1 + 2 = 3 gerações). */
+export const MAX_CORRECTION_ROUNDS = 2;
+
+/**
+ * Versão do pipeline gera-e-valida (prompt de regras verificadas + correção com feedback +
+ * reparo determinístico). Vai no log e no rastro persistido — `promptVersion` só carrega
+ * metodologia+catálogo e não muda quando o código do prompt/planner muda.
+ */
+export const PROTOCOL_PIPELINE_VERSION = 'protocol-pipeline-2026-09-v2';
+
 export interface ProtocolGenerator {
   generate(command: GenerateProtocolCommand): Promise<GenerateProtocolResult>;
+}
+
+/** Logger mínimo (pino) — opcional para os scripts ad-hoc que chamam o planner sem Nest. */
+export type PlanLogger = { info(obj: object, msg?: string): void };
+
+export type PlanAttemptOutcome = 'PASS' | 'FLAG' | 'BLOCK' | 'GENERATION_ERROR';
+
+/** Uma geração do modelo (1ª ou rodada de correção). Só códigos — nunca `detail`/texto. */
+export interface PlanAttempt {
+  attempt: number;
+  kind: 'GENERATION' | 'CORRECTION';
+  outcome: PlanAttemptOutcome;
+  /** Códigos de regra únicos (BLOCK e FLAG), na ordem em que o validador os emitiu. */
+  rules: string[];
+  malformedRetries: number;
+}
+
+export type RepairOutcome = 'NOT_NEEDED' | 'NOT_ELIGIBLE' | 'APPLIED' | 'REJECTED_BY_REVALIDATION';
+
+/**
+ * Rastro da geração — persistido junto do protocolo (`protocol_versions.diff` da versão 1)
+ * e logado em `protocol.plan.summary`. Sem PII: só códigos, contagens e versões.
+ */
+export interface ProtocolGenerationTrace {
+  type: 'GENERATION_TRACE';
+  pipelineVersion: string;
+  validationRulesVersion: string;
+  promptVersion: string;
+  attempts: PlanAttempt[];
+  corrections: number;
+  malformedRetries: number;
+  repairOutcome: RepairOutcome;
+  /** Ajustes automáticos aplicados ao conteúdo final — base do selo "ajustado automaticamente". */
+  repairs: DeterministicRepairCode[];
+  finalAction: string;
+  finalRules: string[];
+  usedFallbackTemplate: boolean;
+  durationMs: number;
 }
 
 export interface PlanResult {
@@ -50,35 +111,26 @@ export interface PlanResult {
   /**
    * Motivo real da última verificação (achado 2026-08-18: sem isso, um protocolo que
    * caiu no template de fallback não deixava rastro nenhum de POR QUE — nem em log).
-   * Vazio em `PASS` limpo.
+   * Vazio em `PASS` limpo. No template: 1ª tentativa + última, para ver se repetiu.
    */
   violations: readonly ValidationViolation[];
+  /** Reparos determinísticos aplicados ao `content` (vazio quando não houve). */
+  repairs: DeterministicRepairCode[];
+  attempts: PlanAttempt[];
+  trace: ProtocolGenerationTrace;
 }
 
-function fromGeneration(
-  gen: GenerateProtocolResult,
-  validationAction: string,
-  violations: readonly ValidationViolation[],
-): PlanResult {
-  return {
-    content: gen.structure,
-    generatedBy: gen.provider,
-    modelVersion: gen.model,
-    promptVersion: gen.promptVersion,
-    knowledgeSources: gen.knowledgeSources ?? [],
-    methodologyVersionId: gen.methodologyVersionId ?? null,
-    methodologySha256: gen.methodologySha256 ?? null,
-    validationAction,
-    usedFallbackTemplate: false,
-    violations,
-  };
-}
+const uniqueRules = (violations: readonly ValidationViolation[]): string[] => [
+  ...new Set(violations.map((v) => v.rule)),
+];
 
 export async function planProtocol(
   generator: ProtocolGenerator,
   validation: ValidationService,
   command: GenerateProtocolCommand,
+  logger?: PlanLogger,
 ): Promise<PlanResult> {
+  const startedAt = Date.now();
   const constraints: ValidateProtocolInput['constraints'] = {
     goal: command.constraints.goal,
     injuryTags: command.constraints.injuryTags,
@@ -93,40 +145,165 @@ export async function planProtocol(
     ...(command.constraints.maxPhase ? { maxPhase: command.constraints.maxPhase } : {}),
   };
   // Achado 2026-08-24: `parqFlags` nunca chegava ao validador por aqui (só o painel
-  // passava, ao reeditar/assinar). Enquanto o PAR-Q era trava de geração isso não tinha
-  // consequência — nenhum protocolo gerado tinha flag. Agora tem, e sem isto `checkParq`
-  // seria letra morta no caminho que mais precisa dele.
+  // passava, ao reeditar/assinar). Sem isto `checkParq` seria letra morta no caminho
+  // que mais precisa dele.
   const parqFlags = command.constraints.parqTags;
+  const validate = (structure: ProtocolStructure): ValidationVerdict =>
+    validation.validate({ structure, constraints, parqFlags });
 
-  const gen1 = await generator.generate(command);
-  const v1 = validation.validate({ structure: gen1.structure, constraints, parqFlags });
+  const attempts: PlanAttempt[] = [];
+  const record = (
+    kind: PlanAttempt['kind'],
+    outcome: PlanAttemptOutcome,
+    violations: readonly ValidationViolation[],
+    malformedRetries: number,
+  ): void => {
+    const attempt: PlanAttempt = {
+      attempt: attempts.length + 1,
+      kind,
+      outcome,
+      rules: uniqueRules(violations),
+      malformedRetries,
+    };
+    attempts.push(attempt);
+    logger?.info(
+      { event: 'protocol.plan.attempt', userId: command.userId, ...attempt },
+      'protocol.plan.attempt',
+    );
+  };
 
-  if (v1.action !== 'BLOCK_FALLBACK') {
+  // 1ª geração: erro aqui continua subindo (retry do job/DLQ, contrato inalterado).
+  let gen = await generator.generate(command);
+  let verdict = validate(gen.structure);
+  const firstVerdict = verdict;
+  record('GENERATION', verdict.code, verdict.violations, gen.malformedRetries ?? 0);
+
+  let corrections = 0;
+  while (verdict.action === 'BLOCK_FALLBACK' && corrections < MAX_CORRECTION_ROUNDS) {
+    corrections++;
+    let next: GenerateProtocolResult;
+    try {
+      next = await generator.generate({
+        ...command,
+        correction: { previous: gen.structure, violations: verdict.violations, round: corrections },
+      });
+    } catch (error) {
+      if (!(error instanceof ProtocolGenerationError)) throw error;
+      // Saída irreparavelmente malformada numa correção: conta como bloqueio e segue para
+      // o reparo/fallback com a última saída válida — sem relançar o job.
+      record('CORRECTION', 'GENERATION_ERROR', [], 1);
+      break;
+    }
+    gen = next;
+    verdict = validate(gen.structure);
+    record('CORRECTION', verdict.code, verdict.violations, gen.malformedRetries ?? 0);
+  }
+
+  let content = gen.structure;
+  let repairs: DeterministicRepairCode[] = [];
+  let repairOutcome: RepairOutcome = 'NOT_NEEDED';
+  let finalVerdict = verdict;
+
+  if (verdict.action === 'BLOCK_FALLBACK') {
+    const repaired = deterministicRepair(gen.structure, verdict.violations, {
+      preferredDays: command.constraints.preferredDays,
+      parqFlags,
+      // Lookup preguiçoso no MESMO catálogo-gabarito do validador (só o reparo de nome usa).
+      catalog: { getById: (id) => validation.exerciseById(id) },
+    });
+    if (!repaired) {
+      repairOutcome = 'NOT_ELIGIBLE';
+    } else {
+      const revalidated = validate(repaired.structure);
+      finalVerdict = revalidated;
+      if (revalidated.action === 'BLOCK_FALLBACK') {
+        repairOutcome = 'REJECTED_BY_REVALIDATION';
+      } else {
+        repairOutcome = 'APPLIED';
+        content = repaired.structure;
+        repairs = repaired.repairs;
+      }
+    }
+  }
+
+  const usedFallbackTemplate = finalVerdict.action === 'BLOCK_FALLBACK';
+  const promptVersion = usedFallbackTemplate ? FALLBACK_TEMPLATE_VERSION : gen.promptVersion;
+  const validationAction = usedFallbackTemplate ? 'BLOCK' : finalVerdict.code;
+  const trace: ProtocolGenerationTrace = {
+    type: 'GENERATION_TRACE',
+    pipelineVersion: PROTOCOL_PIPELINE_VERSION,
+    validationRulesVersion: VALIDATION_RULES_VERSION,
+    promptVersion,
+    attempts,
+    corrections,
+    malformedRetries: attempts.reduce((sum, a) => sum + a.malformedRetries, 0),
+    repairOutcome,
+    repairs,
+    finalAction: validationAction,
+    finalRules: uniqueRules(finalVerdict.violations),
+    usedFallbackTemplate,
+    durationMs: Date.now() - startedAt,
+  };
+  logger?.info(
+    {
+      event: 'protocol.plan.summary',
+      userId: command.userId,
+      attempts: attempts.length,
+      corrections,
+      malformedRetries: trace.malformedRetries,
+      deterministicRepairs: repairs,
+      repairOutcome,
+      firstAttemptRules: uniqueRules(firstVerdict.violations),
+      finalRules: trace.finalRules,
+      finalAction: validationAction,
+      usedFallbackTemplate,
+      durationMs: trace.durationMs,
+      promptVersion,
+      pipelineVersion: PROTOCOL_PIPELINE_VERSION,
+      validationRulesVersion: VALIDATION_RULES_VERSION,
+    },
+    'protocol.plan.summary',
+  );
+
+  if (usedFallbackTemplate) {
+    // Persistiu o bloqueio em todas as tentativas (e o reparo não resolveu) → template
+    // pré-aprovado pelo RT.
+    return {
+      content: buildFallbackProtocol(command.constraints.goal, command.constraints.preferredDays),
+      generatedBy: 'FALLBACK_TEMPLATE',
+      modelVersion: null,
+      promptVersion: FALLBACK_TEMPLATE_VERSION,
+      knowledgeSources: [],
+      methodologyVersionId: null,
+      methodologySha256: null,
+      validationAction: 'BLOCK',
+      usedFallbackTemplate: true,
+      // A última (`verdict`) decidiu o fallback; a 1ª ajuda a ver se o problema repetiu.
+      violations:
+        verdict === firstVerdict
+          ? [...verdict.violations]
+          : [...firstVerdict.violations, ...verdict.violations],
+      repairs: [],
+      attempts,
+      trace,
+    };
+  }
+
+  return {
+    content,
+    generatedBy: gen.provider,
+    modelVersion: gen.model,
+    promptVersion: gen.promptVersion,
+    knowledgeSources: gen.knowledgeSources ?? [],
+    methodologyVersionId: gen.methodologyVersionId ?? null,
+    methodologySha256: gen.methodologySha256 ?? null,
     // PASS ou FLAG_HUMAN_REVIEW — os dois entram na fila igual (só o `validationAction`
     // e as `violations` distinguem um do outro pro painel).
-    return fromGeneration(gen1, v1.code, v1.violations);
-  }
-
-  // Fallback de modelo (US-2.3.3): regenera e revalida antes de cair no template.
-  const gen2 = await generator.generate(command);
-  const v2 = validation.validate({ structure: gen2.structure, constraints, parqFlags });
-  if (v2.action !== 'BLOCK_FALLBACK') {
-    return fromGeneration(gen2, v2.code, v2.violations);
-  }
-
-  // Persistiu o bloqueio nas duas tentativas → template pré-aprovado pelo RT.
-  return {
-    content: buildFallbackProtocol(command.constraints.goal, command.constraints.preferredDays),
-    generatedBy: 'FALLBACK_TEMPLATE',
-    modelVersion: null,
-    promptVersion: FALLBACK_TEMPLATE_VERSION,
-    knowledgeSources: [],
-    methodologyVersionId: null,
-    methodologySha256: null,
-    validationAction: 'BLOCK',
-    usedFallbackTemplate: true,
-    // As duas tentativas violaram — a 2ª (`v2`) é a que efetivamente decidiu o
-    // fallback, mas a 1ª (`v1`) ajuda a ver se foi o mesmo problema repetindo.
-    violations: [...v1.violations, ...v2.violations],
+    validationAction,
+    usedFallbackTemplate: false,
+    violations: finalVerdict.violations,
+    repairs,
+    attempts,
+    trace,
   };
 }

@@ -9,7 +9,12 @@ import type { TenantDatabase } from '../../core/database/tenant-database.service
 import type { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import type { QueueManager } from '../jobs/queue-manager.service';
 import type { WorkerFactory } from '../jobs/worker.factory';
-import { ProtocolGenerationWorker, type ProtocolGenerationJob } from './protocol-generation.worker';
+import {
+  ProtocolGenerationWorker,
+  REPAIRED_PROTOCOL_REVIEW_URGENCY,
+  reviewUrgencyForPlan,
+  type ProtocolGenerationJob,
+} from './protocol-generation.worker';
 import type {
   GenerateProtocolResult,
   ProtocolGeneratorService,
@@ -144,6 +149,8 @@ interface Deps {
   exists?: boolean;
   action?: ValidationVerdict['action'];
   violations?: ValidationVerdict['violations'];
+  /** Sequência de vereditos (um por chamada de `validate`); depois dela, `action`. */
+  verdicts?: ValidationVerdict[];
   alreadyExisted?: boolean;
   consentActive?: boolean;
   /** Respostas "Sim" do PAR-Q; valor string vira o `detail` do follow-up. */
@@ -174,8 +181,10 @@ function makeWorker(deps: Deps = {}) {
     favoriteUsage: vi.fn(() => ({ favoritesInBase: 4, favoritesPrescribed: 2, slots: 9 })),
   } as unknown as ProtocolGeneratorService;
 
+  const verdictQueue = [...(deps.verdicts ?? [])];
   const validation = {
-    validate: vi.fn(() => verdict(deps.action ?? 'PASS', deps.violations)),
+    validate: vi.fn(() => verdictQueue.shift() ?? verdict(deps.action ?? 'PASS', deps.violations)),
+    exerciseById: vi.fn(() => undefined),
   } as unknown as ValidationService;
 
   const repository = {
@@ -410,6 +419,51 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
       expect.anything(),
       expect.anything(),
       expect.anything(),
+    );
+  });
+
+  // Decisão do fundador (2026-09-29): protocolo que só passou depois do reparo determinístico
+  // segue o fluxo normal (OPTIONAL + janela de 1h), com os reparos registrados no rastro.
+  it('reparo determinístico → OPTIONAL com auto-liberação, e o rastro (repairs) é persistido', async () => {
+    const phaseBlock = verdict('BLOCK_FALLBACK', [
+      { rule: 'PHASE_DURATION_OUT_OF_RANGE', detail: 'fase ADAPTACAO: 9 semanas', action: 'BLOCK' },
+    ]);
+    const { worker, repository, enqueue, generator } = makeWorker({
+      verdicts: [phaseBlock, phaseBlock, phaseBlock, verdict('PASS')],
+    });
+    const res = await worker.process(job());
+    expect(res.status).toBe('PENDING_REVIEW');
+    expect(generator.generate).toHaveBeenCalledTimes(3); // 1 geração + 2 correções
+    expect(REPAIRED_PROTOCOL_REVIEW_URGENCY).toBe('OPTIONAL');
+    expect(repository.persist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reviewUrgency: 'OPTIONAL',
+        generatedBy: 'OPENAI_GPT41',
+        generationTrace: expect.objectContaining({
+          type: 'GENERATION_TRACE',
+          repairOutcome: 'APPLIED',
+          repairs: ['CLAMP_PHASE_DURATION'],
+          corrections: 2,
+          usedFallbackTemplate: false,
+        }),
+      }),
+    );
+    expect(enqueue).toHaveBeenCalledWith(
+      'protocol-auto-release',
+      'auto-release',
+      { userId: 'u1', protocolId: 'p1' },
+      { delay: 60 * 60 * 1000, jobId: 'auto-release-p1' },
+    );
+  });
+
+  it('reviewUrgencyForPlan: PAR-Q e template são MANDATORY; reparo segue a política; limpo é OPTIONAL', () => {
+    const clean = { usedFallbackTemplate: false, repairs: [] };
+    const repaired = { usedFallbackTemplate: false, repairs: ['STRIP_ALL_TECHNIQUES' as const] };
+    expect(reviewUrgencyForPlan(clean, false)).toBe('OPTIONAL');
+    expect(reviewUrgencyForPlan(repaired, false)).toBe(REPAIRED_PROTOCOL_REVIEW_URGENCY);
+    expect(reviewUrgencyForPlan(repaired, true)).toBe('MANDATORY');
+    expect(reviewUrgencyForPlan({ usedFallbackTemplate: true, repairs: [] }, false)).toBe(
+      'MANDATORY',
     );
   });
 

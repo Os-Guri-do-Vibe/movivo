@@ -65,7 +65,10 @@ import {
   type MesocycleSummary,
 } from './mesocycle-summary';
 import { ProtocolGeneratorService } from './protocol-generator.service';
-import { PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS } from './protocol-generation.worker';
+import {
+  PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS,
+  reviewUrgencyForPlan,
+} from './protocol-generation.worker';
 import { planProtocol } from './protocol-planner';
 import { ProtocolRepository } from './protocol.repository';
 import {
@@ -149,11 +152,12 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
     const constraints = this.toConstraints(loaded);
     const scrubUser = { name: loaded.name, phoneNumber: loaded.phoneNumber, email: loaded.email };
 
-    const plan = await planProtocol(this.generator, this.validation, {
-      userId,
-      user: scrubUser,
-      constraints,
-    });
+    const plan = await planProtocol(
+      this.generator,
+      this.validation,
+      { userId, user: scrubUser, constraints },
+      this.logger,
+    );
     const totalWeeks = plan.content.phaseDurationWeeks;
 
     if (plan.violations.length > 0) {
@@ -171,7 +175,9 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
 
     // Mesmo critério da geração inicial (`ProtocolGenerationWorker`): PAR-Q bloqueado
     // (aqui, a pergunta 10) OU conteúdo caiu no fallback → `MANDATORY`, nunca auto-libera.
-    const mandatory = constraints.requiresProfessionalReview || plan.usedFallbackTemplate;
+    // Reparo determinístico segue a mesma política da geração inicial (`reviewUrgencyForPlan`).
+    const reviewUrgency = reviewUrgencyForPlan(plan, constraints.requiresProfessionalReview);
+    const mandatory = reviewUrgency === 'MANDATORY';
     const persisted = await this.repository.persist({
       userId,
       content: plan.content,
@@ -180,7 +186,7 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
       approvalStatus: 'PENDING_REVIEW',
       status: 'PENDING_SIGNATURE',
       humanReviewRequired: true,
-      reviewUrgency: mandatory ? 'MANDATORY' : 'OPTIONAL',
+      reviewUrgency,
       anamnesisSessionId: null,
       renewalSessionId,
       totalWeeks,
@@ -190,6 +196,7 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
       knowledgeSources: plan.knowledgeSources,
       methodologyVersionId: plan.methodologyVersionId,
       methodologySha256: plan.methodologySha256,
+      generationTrace: plan.trace,
       signed: false,
     });
 
@@ -218,7 +225,8 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
         userId,
         renewalSessionId,
         protocolId: persisted.protocolId,
-        reviewUrgency: mandatory ? 'MANDATORY' : 'OPTIONAL',
+        reviewUrgency,
+        deterministicRepairs: plan.repairs,
       },
       mandatory
         ? 'renovação PENDING_REVIEW/MANDATORY — só sai por assinatura humana CREF'

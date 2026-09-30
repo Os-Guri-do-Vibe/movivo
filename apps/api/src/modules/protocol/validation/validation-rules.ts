@@ -31,7 +31,9 @@ export type ValidationActionCode = 'PASS' | 'FLAG' | 'BLOCK';
 export const PRIORITY_PATTERNS_BY_GOAL: Record<GenerationGoal, readonly string[]> = {
   GAIN_MUSCLE: ['HORIZONTAL_PUSH', 'VERTICAL_PULL', 'SQUAT', 'HINGE', 'ISOLATION'],
   GAIN_STRENGTH: ['SQUAT', 'HINGE', 'HORIZONTAL_PUSH', 'VERTICAL_PULL'],
-  LOSE_FAT: ['SQUAT', 'HINGE', 'LUNGE', 'HORIZONTAL_PUSH', 'CARDIO'],
+  // Revisão 2026-09-29 (Victor): sem puxada, a lista induzia sessões de emagrecimento sem
+  // nenhum padrão de puxar — musculação bem estruturada para recomposição cobre os dois.
+  LOSE_FAT: ['SQUAT', 'HINGE', 'HORIZONTAL_PUSH', 'HORIZONTAL_PULL', 'LUNGE', 'CARDIO'],
   CONDITIONING: ['CARDIO', 'SQUAT', 'LUNGE', 'CORE'],
   HEALTH_ENERGY: ['CARDIO', 'CORE', 'SQUAT', 'HORIZONTAL_PULL'],
   BUILD_ROUTINE: ['SQUAT', 'HORIZONTAL_PUSH', 'HORIZONTAL_PULL', 'CORE'],
