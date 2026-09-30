@@ -1,5 +1,7 @@
 import Image from 'next/image';
 
+import { LEGAL_LINKS } from '@/lib/landing/site';
+
 /** Casca clara do onboarding: faixa petróleo com a marca, coluna de 640px e crédito Icons8. */
 export function OnboardingShell({ children }: { children: React.ReactNode }) {
   return (
@@ -22,6 +24,16 @@ export function OnboardingShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
         <footer className="mt-8 border-t border-border pt-4 text-center">
+          {LEGAL_LINKS.terms && LEGAL_LINKS.privacy ? (
+            <nav aria-label="Documentos legais" className="mb-2 flex justify-center gap-4 text-xs">
+              <a href={LEGAL_LINKS.terms} className="underline underline-offset-4">
+                Termos de Uso
+              </a>
+              <a href={LEGAL_LINKS.privacy} className="underline underline-offset-4">
+                Política de Privacidade
+              </a>
+            </nav>
+          ) : null}
           <a
             href="https://icons8.com"
             target="_blank"

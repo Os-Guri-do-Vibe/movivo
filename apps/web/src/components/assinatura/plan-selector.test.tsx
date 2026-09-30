@@ -11,7 +11,12 @@ vi.mock('@/lib/subscription-api', () => ({
   formatBRL: (cents: number) => `R$ ${(cents / 100).toFixed(2)}`,
 }));
 
+vi.mock('@/lib/landing/site', () => ({
+  LEGAL_LINKS: { terms: '/termos', privacy: '/privacidade' },
+}));
+
 import { PlanSelector } from './plan-selector';
+import { LEGAL_LINKS } from '@/lib/landing/site';
 
 const SUMMARY = {
   plan: 'ANNUAL',
@@ -36,11 +41,21 @@ async function fillPayer(user: ReturnType<typeof userEvent.setup>) {
 }
 
 beforeEach(() => {
+  LEGAL_LINKS.terms = '/termos';
+  LEGAL_LINKS.privacy = '/privacidade';
   getCheckoutSummary.mockReset().mockResolvedValue(SUMMARY);
   startCheckoutPayment.mockReset().mockResolvedValue({ status: 'PENDING', method: 'PIX' });
 });
 
 describe('checkout MOVIVO', () => {
+  it('bloqueia contratação quando os documentos não estão publicados', async () => {
+    LEGAL_LINKS.terms = null;
+    LEGAL_LINKS.privacy = null;
+    render(<PlanSelector token="opaque" />);
+    expect(await screen.findByText(/contratação está temporariamente indisponível/i)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Confirmar assinatura' })).toBeDisabled();
+    expect(startCheckoutPayment).not.toHaveBeenCalled();
+  });
   it('carrega o plano fixado no backend, os três meios reais e nenhuma carteira falsa', async () => {
     render(<PlanSelector token="opaque" />);
     expect(

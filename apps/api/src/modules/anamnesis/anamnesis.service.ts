@@ -228,6 +228,7 @@ export class AnamnesisService {
     data: unknown,
   ): Promise<{ currentStep: number }> {
     const row = await this.requireActiveSession(token);
+    this.consents.assertTermsPublished();
 
     switch (step) {
       case 1:
@@ -308,6 +309,7 @@ export class AnamnesisService {
    */
   async submit(token: string): Promise<SubmitResult> {
     const row = await this.requireActiveSession(token);
+    this.consents.assertTermsPublished();
 
     if (!row.dataBlock1 || !row.dataBlock2 || !row.dataBlock3) {
       throw new BadRequestException('Complete as três etapas antes de enviar.');

@@ -69,7 +69,14 @@ const cipher = new HealthCipherService(db, {
     env.PGCRYPTO_KEY ??
     readFileSync(resolve(apiRoot, '..', '..', 'secrets', 'pgcrypto_key'), 'utf8').trimEnd(),
 } as never);
-const consents = new ConsentService(tenant);
+// Fixture de integração: mantém a cobertura do fluxo pós-gate sem habilitar minutas
+// no serviço real. O teste abaixo exercita separadamente o bloqueio de publicação.
+class PublishedFixtureConsentService extends ConsentService {
+  protected override areTermsPublished(): boolean {
+    return true;
+  }
+}
+const consents = new PublishedFixtureConsentService(tenant);
 const logger = {
   info: () => undefined,
   warn: () => undefined,

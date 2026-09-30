@@ -5,7 +5,7 @@
  * a validação Zod do checkout, o mapeamento da view (sem assinatura → 404) e que só a
  * `checkoutUrl` volta (nenhum dado de cartão).
  */
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import type { CheckoutSummary, SubscriptionView } from '@movivo/shared';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -69,6 +69,29 @@ describe('SubscriptionController — view (US-4.6)', () => {
 });
 
 describe('SubscriptionController — checkout (US-4.6)', () => {
+  it('não inicia pagamento sem contrato de assinatura publicado', async () => {
+    const { controller, svc } = make();
+    await expect(
+      controller.checkoutPayment(
+        'opaque',
+        {
+          method: 'PIX',
+          acceptTerms: true,
+          payer: {
+            name: 'Aluno Teste',
+            email: 'aluno@example.invalid',
+            cpfCnpj: '12345678901',
+            postalCode: '01234567',
+            addressNumber: '10',
+            phone: '11999999999',
+          },
+        },
+        { ip: '127.0.0.1' } as never,
+      ),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(svc.startCheckoutPayment).not.toHaveBeenCalled();
+  });
+
   it('token opaco válido devolve o snapshot autoritativo', async () => {
     const { controller, svc } = make();
     await expect(controller.checkoutSummary('opaque')).resolves.toEqual(summary);

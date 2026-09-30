@@ -53,6 +53,7 @@ import { ProtocolGeneratorService } from '../src/modules/protocol/protocol-gener
 import { ProtocolRepository } from '../src/modules/protocol/protocol.repository';
 import { DashboardService } from '../src/modules/admin/dashboard.service';
 import { seedHealthEligibility } from './health-fixtures';
+import { PublishedFixtureConsentService } from './published-consent-fixture';
 
 const { env } = loadEnv();
 const apiRoot = process.cwd();
@@ -309,6 +310,11 @@ beforeAll(async () => {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(ProtocolGeneratorService)
     .useValue(fakeGenerator)
+    .overrideProvider(ConsentService)
+    .useFactory({
+      factory: (tenant: TenantDatabase) => new PublishedFixtureConsentService(tenant),
+      inject: [TenantDatabase],
+    })
     .compile();
   app = moduleRef.createNestApplication({ logger: false });
   app.enableShutdownHooks();

@@ -3,6 +3,8 @@
  * Técnico. Tudo que é fato (número de CREF, links legais) fica aqui e só aparece na
  * página quando estiver preenchido — nenhum componente inventa credencial ou link.
  */
+import { legalReleaseMatchesConsent } from '@/lib/legal-release';
+
 export const SECTION_IDS = {
   top: 'topo',
   manifesto: 'manifesto',
@@ -65,8 +67,8 @@ export const SOCIAL = {
  * de apontar para um 404. Preencha com a rota/URL quando o documento for aprovado.
  */
 export const LEGAL_LINKS: { terms: string | null; privacy: string | null } = {
-  terms: null,
-  privacy: null,
+  terms: legalReleaseMatchesConsent ? '/termos' : null,
+  privacy: legalReleaseMatchesConsent ? '/privacidade' : null,
 };
 
 /** Canal de contato público. Direct do Instagram oficial até existir e-mail/WhatsApp público. */

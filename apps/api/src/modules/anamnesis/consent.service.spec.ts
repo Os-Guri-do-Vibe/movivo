@@ -68,7 +68,27 @@ describe('ConsentService', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it('aceita a versão vigente de cada finalidade', async () => {
+  it('recusa aceite dos Termos enquanto não há par de documentos publicado', async () => {
+    const { db, run } = makeDb([{ id: SESSION }]);
+    const svc = new ConsentService(db);
+
+    await expect(
+      svc.recordForSessionToken(
+        'tok',
+        [
+          {
+            type: 'TERMS_OF_SERVICE',
+            version: CONSENT_TEXTS.TERMS_OF_SERVICE.version,
+            accepted: true,
+          },
+        ],
+        ORIGIN,
+      ),
+    ).rejects.toThrow(/Termos de Uso em revisão/i);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('preserva o registro independente de marketing e recusa dos Termos', async () => {
     // O lookup por token precisa encontrar a sessão ativa.
     const { db } = makeDb([{ id: SESSION }]);
     const svc = new ConsentService(db);
@@ -81,12 +101,22 @@ describe('ConsentService', () => {
           {
             type: 'TERMS_OF_SERVICE',
             version: CONSENT_TEXTS.TERMS_OF_SERVICE.version,
-            accepted: true,
+            accepted: false,
           },
         ],
         ORIGIN,
       ),
     ).resolves.toBeUndefined();
+  });
+
+  it('não reconhece como vigente um aceite contratual histórico sem texto publicado', async () => {
+    const svc = new ConsentService(
+      makeDb([
+        { type: 'TERMS_OF_SERVICE', version: CONSENT_TEXTS.TERMS_OF_SERVICE.version },
+        { type: 'HEALTH_DATA', version: CONSENT_TEXTS.HEALTH_DATA.version },
+      ]).db,
+    );
+    await expect(svc.acceptedTypesForSession(SESSION)).resolves.toEqual(['HEALTH_DATA']);
   });
 
   it('hasValidHealthConsent é false quando não há linha e true quando há', async () => {

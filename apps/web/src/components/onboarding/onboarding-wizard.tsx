@@ -99,7 +99,9 @@ export function OnboardingWizard({
       setError(
         isSessionReplaced(err)
           ? SESSION_REPLACED_MESSAGE
-          : 'Não conseguimos salvar suas informações. Confira os campos e tente de novo.',
+          : err instanceof AnamnesisApiError && err.status === 503
+            ? 'As inscrições estão temporariamente indisponíveis enquanto os documentos legais são finalizados. Tente novamente mais tarde.'
+            : 'Não conseguimos salvar suas informações. Confira os campos e tente de novo.',
       );
     } finally {
       setSaving(false);

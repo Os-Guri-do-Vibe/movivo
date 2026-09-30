@@ -19,6 +19,7 @@ import {
   Param,
   Post,
   Req,
+  ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
@@ -37,7 +38,11 @@ import type { Request } from 'express';
 
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
 import { CheckoutTokenService } from './checkout-token.service';
+import { SUBSCRIPTION_TERMS_VERSION } from './subscription-model';
 import { SubscriptionService } from './subscription.service';
+
+/** Sem contrato integral publicado, nenhum novo pagamento pode ser iniciado. */
+const PUBLISHED_SUBSCRIPTION_TERMS_VERSION: string | null = null;
 
 const TOKEN_PARAM = {
   name: 'token',
@@ -105,6 +110,7 @@ export class SubscriptionController {
   @ApiResponse({ status: 200, schema: zodSchemaToOpenApi(checkoutPaymentResultSchema) })
   @ApiResponse({ status: 400, description: 'Dados ou parcelamento inválidos.' })
   @ApiResponse({ status: 404, description: 'Token inválido, adulterado ou expirado.' })
+  @ApiResponse({ status: 503, description: 'Contrato de assinatura ainda não publicado.' })
   async checkoutPayment(
     @Param('token') token: string,
     @Body() body: unknown,
@@ -112,6 +118,13 @@ export class SubscriptionController {
   ): Promise<CheckoutPaymentResult> {
     const { userId } = this.checkoutToken(token);
     const input = createCheckoutSchema.parse(body);
+    // ponytail: após aprovação jurídica, preencher a versão publicada com o texto
+    // integral exibido no checkout e atualizar SUBSCRIPTION_TERMS_VERSION no mesmo PR.
+    if (PUBLISHED_SUBSCRIPTION_TERMS_VERSION !== SUBSCRIPTION_TERMS_VERSION) {
+      throw new ServiceUnavailableException(
+        'Termos de Assinatura em revisão. Pagamento temporariamente indisponível.',
+      );
+    }
     return this.subs.startCheckoutPayment(userId, input, req.ip || '127.0.0.1');
   }
 

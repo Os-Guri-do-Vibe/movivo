@@ -41,6 +41,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 
 COPY packages/shared packages/shared
 COPY apps/web apps/web
+COPY docs/juridico docs/juridico
 
 ARG NEXT_PUBLIC_APP_ENV=production
 ARG NEXT_PUBLIC_SITE_URL=https://movivo.com.br
@@ -77,6 +78,7 @@ WORKDIR /app
 COPY --from=build --chown=node:node /app/apps/web/.next/standalone ./
 COPY --from=build --chown=node:node /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build --chown=node:node /app/apps/web/public ./apps/web/public
+COPY --from=build --chown=node:node /app/docs/juridico ./docs/juridico
 
 USER node
 EXPOSE 3000
