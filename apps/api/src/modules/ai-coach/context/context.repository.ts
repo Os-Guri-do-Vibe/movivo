@@ -52,67 +52,71 @@ export class ContextRepository {
   /** Lê usuário (para scrub) + protocolo ativo + resumo do dia, tudo sob RLS do titular. */
   async loadEpisodic(userId: string, sessionDate: string): Promise<EpisodicMemory> {
     return this.db.runAsUser(userId, 'USER', async (tx) => {
-      const [user] = await tx
-        .select({ name: users.name, phoneNumber: users.phoneNumber, email: users.email })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
-
-      const [proto] = await tx
-        .select({
-          currentWeek: protocols.currentWeek,
-          totalWeeks: protocols.totalWeeks,
-          content: protocols.content,
-          constraints: protocols.constraints,
-          anamnesisSessionId: protocols.anamnesisSessionId,
-        })
-        .from(protocols)
-        .where(and(eq(protocols.userId, userId), eq(protocols.status, 'ACTIVE')))
-        .limit(1);
-
-      const [session] = await tx
-        .select({ summary: coachingSessions.summary })
-        .from(coachingSessions)
-        .where(
-          and(eq(coachingSessions.userId, userId), eq(coachingSessions.sessionDate, sessionDate)),
-        )
-        .limit(1);
-
-      // Memória factual mínima: eventos imutáveis e campos estruturados. O ciphertext das
-      // respostas do check-in não é aberto aqui; princípio de minimização de dado sensível.
-      const recentWorkouts = await tx
-        .select({
-          completedAt: workoutCompletions.completedAt,
-          sessionKey: workoutCompletions.sessionKey,
-          weekNumber: workoutCompletions.weekNumber,
-          perceivedEffort: workoutCompletions.perceivedEffort,
-        })
-        .from(workoutCompletions)
-        .where(eq(workoutCompletions.userId, userId))
-        .orderBy(desc(workoutCompletions.completedAt))
-        .limit(5);
-
-      const recentCheckins = await tx
-        .select({
-          weekNumber: checkins.weekNumber,
-          submittedAt: checkins.submittedAt,
-          answers: checkins.answers,
-        })
-        .from(checkins)
-        .where(and(eq(checkins.userId, userId), eq(checkins.status, 'SUBMITTED')))
-        .orderBy(desc(checkins.submittedAt))
-        .limit(3);
-
-      // Achado 2026-09-12 (decisão do fundador): o Coach passava a orientar o aluno sem
-      // NUNCA ver o que de fato aconteceu no treino — carga/repetição/série real, esforço
-      // percebido e dor por sessão (o diário fino, `workout_sessions`/`workout_set_entries`).
-      // Sem isso ele só tinha o AUTORRELATO agregado de `workout_completions`. Aqui entram os
-      // últimos treinos CONCLUÍDOS com planejado (a `prescription` já é o snapshot exato do
-      // que foi prescrito NAQUELE dia — não precisa cruzar com `protocoloCompleto`) vs.
-      // realizado (agregado por exercício a partir de `workout_set_entries`), para o Coach
-      // comparar os dois e falar com base no que realmente aconteceu, não só no que o aluno
-      // lembra ter feito.
-      const diarioFino = await this.loadWorkoutDiary(tx, userId);
+      // As leituras abaixo são independentes entre si: disparadas juntas, o driver as
+      // enfileira (pipelining) na MESMA conexão da transação — uma ida e volta de rede em vez
+      // de seis em série por mensagem do Coach. Só a anamnese depende do protocolo.
+      const [[user], [proto], [session], recentWorkouts, recentCheckins, diarioFino] =
+        await Promise.all([
+          tx
+            .select({ name: users.name, phoneNumber: users.phoneNumber, email: users.email })
+            .from(users)
+            .where(eq(users.id, userId))
+            .limit(1),
+          tx
+            .select({
+              currentWeek: protocols.currentWeek,
+              totalWeeks: protocols.totalWeeks,
+              content: protocols.content,
+              constraints: protocols.constraints,
+              anamnesisSessionId: protocols.anamnesisSessionId,
+            })
+            .from(protocols)
+            .where(and(eq(protocols.userId, userId), eq(protocols.status, 'ACTIVE')))
+            .limit(1),
+          tx
+            .select({ summary: coachingSessions.summary })
+            .from(coachingSessions)
+            .where(
+              and(
+                eq(coachingSessions.userId, userId),
+                eq(coachingSessions.sessionDate, sessionDate),
+              ),
+            )
+            .limit(1),
+          // Memória factual mínima: eventos imutáveis e campos estruturados. O ciphertext das
+          // respostas do check-in não é aberto aqui; princípio de minimização de dado sensível.
+          tx
+            .select({
+              completedAt: workoutCompletions.completedAt,
+              sessionKey: workoutCompletions.sessionKey,
+              weekNumber: workoutCompletions.weekNumber,
+              perceivedEffort: workoutCompletions.perceivedEffort,
+            })
+            .from(workoutCompletions)
+            .where(eq(workoutCompletions.userId, userId))
+            .orderBy(desc(workoutCompletions.completedAt))
+            .limit(5),
+          tx
+            .select({
+              weekNumber: checkins.weekNumber,
+              submittedAt: checkins.submittedAt,
+              answers: checkins.answers,
+            })
+            .from(checkins)
+            .where(and(eq(checkins.userId, userId), eq(checkins.status, 'SUBMITTED')))
+            .orderBy(desc(checkins.submittedAt))
+            .limit(3),
+          // Achado 2026-09-12 (decisão do fundador): o Coach passava a orientar o aluno sem
+          // NUNCA ver o que de fato aconteceu no treino — carga/repetição/série real, esforço
+          // percebido e dor por sessão (o diário fino, `workout_sessions`/`workout_set_entries`).
+          // Sem isso ele só tinha o AUTORRELATO agregado de `workout_completions`. Aqui entram os
+          // últimos treinos CONCLUÍDOS com planejado (a `prescription` já é o snapshot exato do
+          // que foi prescrito NAQUELE dia — não precisa cruzar com `protocoloCompleto`) vs.
+          // realizado (agregado por exercício a partir de `workout_set_entries`), para o Coach
+          // comparar os dois e falar com base no que realmente aconteceu, não só no que o aluno
+          // lembra ter feito.
+          this.loadWorkoutDiary(tx, userId),
+        ]);
 
       // `constraints` lido como shape solto de propósito: ai-coach não importa o tipo do
       // domínio de protocolo (fronteira §12.5).
