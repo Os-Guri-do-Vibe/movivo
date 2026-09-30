@@ -327,8 +327,14 @@ describe('Coach — resposta conversacional ponta a ponta (US-3.5)', () => {
 
     const msg = await waitFor(() => seenTo(to).find((m) => m.text.includes('Flexão de joelhos')));
     expect(msg).toBeDefined();
-    // A pergunta de alcance é texto fixo acrescentado à resposta (nunca depende do LLM).
-    expect(msg?.text).toContain('só pra hoje ou você quer que eu troque no seu protocolo');
+    // A pergunta de alcance é texto fixo acrescentado à resposta, em OUTRA bolha do WhatsApp
+    // (nunca depende do LLM).
+    const scopeQuestion = await waitFor(() =>
+      seenTo(to).find((m) =>
+        m.text.includes('só pra hoje ou você quer que eu troque no seu protocolo'),
+      ),
+    );
+    expect(scopeQuestion).toBeDefined();
 
     // Conversa persistida: INBOUND do aluno + OUTBOUND de MOVI.
     const rows = await adminClient<Array<{ direction: string; content: string }>>`
