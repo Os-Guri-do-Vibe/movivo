@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { SOCIAL } from '@/lib/landing/site';
+import { buildLandingStructuredData } from '@/lib/landing/structured-data';
 import { publicEnv } from '@/lib/env';
 
 import { landingFontVariables } from './fonts';
@@ -11,6 +11,7 @@ import { Preloader } from './layout/preloader';
 import { LandingRuntime } from './motion/landing-runtime';
 import { AdaptiveTraining } from './sections/adaptive-training';
 import { DayWithMovivo } from './sections/day-with-movivo';
+import { Faq } from './sections/faq';
 import { FinalCta } from './sections/final-cta';
 import { Hero } from './sections/hero';
 import { HowItWorks } from './sections/how-it-works';
@@ -22,16 +23,9 @@ import { Pricing } from './sections/pricing';
 import { PulseSystem } from './sections/pulse-system';
 import { WhatsAppExperience } from './sections/whatsapp-experience';
 
-/** Dados estruturados só com fatos verificáveis: nome, site, logo e perfil oficial. */
-function OrganizationJsonLd() {
-  const data = {
-    '@context': 'https://schema.org',
-    '@type': 'Organization',
-    name: 'MOVIVO',
-    url: publicEnv.siteUrl,
-    logo: new URL('/brand/movivo-logo-horizontal.svg', publicEnv.siteUrl).toString(),
-    sameAs: [SOCIAL.instagram.url],
-  };
+/** Dados estruturados só com fatos da página: organização, site, serviço, planos e FAQ. */
+function StructuredData() {
+  const data = buildLandingStructuredData(publicEnv.siteUrl);
   return (
     <script
       type="application/ld+json"
@@ -42,7 +36,7 @@ function OrganizationJsonLd() {
 
 /**
  * Landing pública da MOVIVO. Ordem narrativa: MOVE → BELIEVE → UNDERSTAND → EXPERIENCE
- * → LEARN → TRUST → PERSONALIZE → ADAPT → LIVE → BELONG → BEGIN → MOVE IT.
+ * → LEARN → TRUST → PERSONALIZE → ADAPT → LIVE → BELONG → BEGIN → ASK → MOVE IT.
  */
 export function Landing() {
   return (
@@ -64,12 +58,13 @@ export function Landing() {
         <DayWithMovivo />
         <MovivoClub />
         <Pricing />
+        <Faq />
         <FinalCta />
       </main>
       <Footer />
       <MobileStickyCta />
       <LandingRuntime />
-      <OrganizationJsonLd />
+      <StructuredData />
     </div>
   );
 }
