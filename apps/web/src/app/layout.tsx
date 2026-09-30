@@ -3,6 +3,7 @@ import { Hanken_Grotesk, JetBrains_Mono } from 'next/font/google';
 
 import { ThemeProvider } from '@/components/theme-provider';
 import { publicEnv } from '@/lib/env';
+import { HOME_DESCRIPTION } from '@/lib/landing/seo';
 
 import './globals.css';
 
@@ -38,8 +39,7 @@ export const metadata: Metadata = {
     default: 'MOVIVO: Ciência que treina com você',
     template: '%s · MOVIVO',
   },
-  description:
-    'Orientação de treino conversacional no WhatsApp, com protocolo calculado por motor determinístico e supervisionado por profissional de Educação Física registrado no CREF.',
+  description: HOME_DESCRIPTION,
   applicationName: 'MOVIVO',
   authors: [{ name: 'MOVIVO' }],
   /* Landing real da Sprint 1 (US-1.5): indexável — é a porta de entrada do funil. */
@@ -49,9 +49,9 @@ export const metadata: Metadata = {
     locale: 'pt_BR',
     siteName: 'MOVIVO',
     title: 'MOVIVO: Ciência que treina com você',
-    description:
-      'Orientação de treino conversacional no WhatsApp, com supervisão de profissional de Educação Física registrado no CREF.',
+    description: HOME_DESCRIPTION,
   },
+  twitter: { card: 'summary_large_image' },
 };
 
 export const viewport: Viewport = {

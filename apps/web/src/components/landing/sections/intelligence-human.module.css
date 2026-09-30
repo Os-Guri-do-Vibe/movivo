@@ -89,6 +89,11 @@
   color: var(--color-coral);
 }
 
+/* Coral puro sobre Névoa dá 2,63:1; este tom passa os 4,5:1 do WCAG AA. */
+.sideA .itemIndex {
+  color: #c2390f;
+}
+
 .itemText {
   display: block;
   margin-top: 2px;

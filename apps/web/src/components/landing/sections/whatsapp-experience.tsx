@@ -117,6 +117,9 @@ export function WhatsAppExperience() {
 
           <div className={styles.phoneColumn}>
             <figure className={styles.figure}>
+              <figcaption className="sr-only">
+                Exemplo ilustrativo de conversa entre a pessoa e a MOVIVO no WhatsApp.
+              </figcaption>
               <div className={styles.phone} data-phone="">
                 <span className={styles.camera} aria-hidden="true" />
                 <div className={styles.screen}>

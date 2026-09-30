@@ -125,7 +125,8 @@
   font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.1em;
-  color: var(--color-coral);
+  /* Um passo mais claro que o Coral: sobre o fundo Pulso ativo o original dava 4,23:1 (AA exige 4,5). */
+  color: #ff7a50;
 }
 
 .concept[data-state='future'] {

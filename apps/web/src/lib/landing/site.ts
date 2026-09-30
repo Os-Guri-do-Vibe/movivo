@@ -17,6 +17,7 @@ export const SECTION_IDS = {
   day: 'um-dia',
   club: 'club',
   pricing: 'planos',
+  faq: 'perguntas-frequentes',
   finalCta: 'comecar',
 } as const;
 
@@ -38,6 +39,7 @@ export const FOOTER_COLUMNS = [
       { label: 'Treino no WhatsApp', href: `#${SECTION_IDS.whatsapp}` },
       { label: 'Treino adaptativo', href: `#${SECTION_IDS.adaptive}` },
       { label: 'Planos', href: PRICING_HASH },
+      { label: 'Perguntas frequentes', href: `#${SECTION_IDS.faq}` },
     ],
   },
   {

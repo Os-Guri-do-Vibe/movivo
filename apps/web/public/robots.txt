@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /treino
+Disallow: /protocolo/
+Disallow: /assinar/
+Disallow: /conta/
+Disallow: /checkin-semanal/
+Disallow: /mesociclo/
+Disallow: /check-in/
+Disallow: /semana/
+Disallow: /renovacao/
+
+Sitemap: https://movivo.com.br/sitemap.xml

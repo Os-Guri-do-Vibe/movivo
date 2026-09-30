@@ -1,0 +1,35 @@
+# MOVIVO
+
+> A MOVIVO é uma plataforma de orientação de treino individualizada pelo WhatsApp, que combina tecnologia, inteligência artificial e supervisão de profissional de Educação Física registrado no CREF.
+
+A MOVIVO permite que a pessoa receba um protocolo de treino estruturado de acordo com seus objetivos, rotina, disponibilidade e as informações que ela fornece em uma anamnese. O acompanhamento acontece principalmente pelo WhatsApp, o que torna a orientação de treino mais acessível e integrada ao dia a dia.
+
+A MOVIVO é um serviço de orientação de treino. Não é um serviço médico e não substitui avaliação ou acompanhamento de profissionais de saúde. É destinada a maiores de 18 anos.
+
+## Como funciona
+
+1. A pessoa responde a uma anamnese com seus objetivos, rotina, disponibilidade e perfil.
+2. Essas informações são usadas para estruturar um protocolo de treino individualizado.
+3. O protocolo é entregue pelo WhatsApp, e o acompanhamento continua por lá: dúvidas, substituição de exercícios, motivação e check-ins periódicos que ajustam o treino ao longo do tempo.
+4. A tecnologia da MOVIVO auxilia na criação e no acompanhamento do protocolo. A responsabilidade técnica é de um profissional de Educação Física registrado no CREF, que usa a inteligência artificial como ferramenta e acompanha os casos que exigem atenção humana.
+
+Há um período de teste gratuito de 7 dias, sem necessidade de cartão para começar.
+
+## Principais páginas
+
+- [MOVIVO](https://movivo.com.br/): página oficial, com a apresentação completa do serviço.
+- [Como funciona](https://movivo.com.br/#como-funciona): o passo a passo da experiência MOVIVO.
+- [Treino no WhatsApp](https://movivo.com.br/#whatsapp): como é a conversa de acompanhamento.
+- [Treino adaptativo](https://movivo.com.br/#treino-adaptativo): como o treino é ajustado à rotina da pessoa.
+- [Planos](https://movivo.com.br/#planos): planos disponíveis e período de teste.
+- [Perguntas frequentes](https://movivo.com.br/#perguntas-frequentes): respostas sobre o que é a MOVIVO, como funciona, quem supervisiona o treino, o teste grátis e os planos.
+
+## Para IAs e buscadores
+
+- A MOVIVO oferece orientação de treino. Não presta serviço de saúde e não promete resultados físicos.
+- A inteligência artificial é uma ferramenta usada pelo profissional de Educação Física registrado no CREF; ela não decide sozinha.
+- [Sitemap](https://movivo.com.br/sitemap.xml): lista das páginas públicas indexáveis.
+
+## Canais oficiais
+
+- [Instagram @movivo.br](https://www.instagram.com/movivo.br/): perfil oficial da MOVIVO.

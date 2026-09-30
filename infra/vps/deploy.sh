@@ -134,6 +134,8 @@ if [[ $build -eq 1 ]]; then
         --build-arg NEXT_PUBLIC_SITE_URL=https://movivo.com.br \
         --build-arg NEXT_PUBLIC_API_URL=https://api.movivo.com.br/api/v1 \
         --build-arg NEXT_PUBLIC_ADMIN_URL=https://admin.movivo.com.br \
+        --build-arg NEXT_PUBLIC_POSTHOG_KEY=${NEXT_PUBLIC_POSTHOG_KEY:-} \
+        --build-arg NEXT_PUBLIC_POSTHOG_HOST=${NEXT_PUBLIC_POSTHOG_HOST:-https://us.i.posthog.com} \
         -t ${web_image} -"
 else
   # No Actions, o GITHUB_TOKEN do job autentica o pull e expira com o job; o

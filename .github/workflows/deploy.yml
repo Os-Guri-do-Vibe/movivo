@@ -59,6 +59,8 @@ jobs:
 
       # NEXT_PUBLIC_* é gravado no bundle no build: trocar domínio = nova imagem.
       # A imagem da API ignora esses build args.
+      # A project key do PostHog (phc_) é pública por desenho; vem de Variables do repositório.
+      # Vazia, a analytics fica desligada (sem erro). Host vazio cai no default do app (env.ts).
       - name: Build e push
         uses: docker/build-push-action@v7
         with:
@@ -72,6 +74,8 @@ jobs:
             NEXT_PUBLIC_SITE_URL=https://movivo.com.br
             NEXT_PUBLIC_API_URL=https://api.movivo.com.br/api/v1
             NEXT_PUBLIC_ADMIN_URL=https://admin.movivo.com.br
+            NEXT_PUBLIC_POSTHOG_KEY=${{ vars.NEXT_PUBLIC_POSTHOG_KEY }}
+            NEXT_PUBLIC_POSTHOG_HOST=${{ vars.NEXT_PUBLIC_POSTHOG_HOST }}
           cache-from: type=gha,scope=${{ matrix.app }}
           cache-to: type=gha,mode=max,scope=${{ matrix.app }}
 

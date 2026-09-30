@@ -10,6 +10,8 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 vi.mock('./fonts', () => ({ landingFontVariables: '' }));
 vi.mock('./sections/muscle-map-figures', () => ({ default: () => null }));
 
+import { buildFaq } from '@/lib/landing/faq';
+
 import { Landing } from './landing';
 import { loadGsap } from './motion/gsap';
 
@@ -41,6 +43,7 @@ describe('Landing', () => {
       'um-dia',
       'club',
       'planos',
+      'perguntas-frequentes',
       'comecar',
     ]);
   });
@@ -88,6 +91,22 @@ describe('Landing', () => {
     expect(screen.getByText('Performance')).toBeInTheDocument();
     for (const image of container.querySelectorAll('img')) {
       expect(image.hasAttribute('alt')).toBe(true);
+    }
+  });
+
+  it('FAQ: respostas no HTML, JSON-LD parseável e todo heading com nome', () => {
+    const { container } = render(<Landing />);
+    const faq = container.querySelector('#perguntas-frequentes');
+    expect(faq?.querySelectorAll('details')).toHaveLength(buildFaq().length);
+    // Conteúdo no DOM mesmo com as perguntas fechadas: é o que buscadores e IAs leem.
+    expect(faq?.textContent).toMatch(/orientação de treino individualizada pelo WhatsApp/);
+
+    const script = container.querySelector('script[type="application/ld+json"]');
+    const data = JSON.parse(script?.textContent ?? '{}') as { '@graph': { '@type': string }[] };
+    expect(data['@graph'].map((node) => node['@type'])).toContain('FAQPage');
+
+    for (const heading of container.querySelectorAll('h1, h2, h3')) {
+      expect(heading.textContent?.trim()).not.toBe('');
     }
   });
 });

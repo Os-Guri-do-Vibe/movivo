@@ -34,6 +34,7 @@ export const LANDING_SECTIONS = [
   'day',
   'club',
   'pricing',
+  'faq',
 ] as const;
 
 export type LandingSection = (typeof LANDING_SECTIONS)[number];
@@ -46,7 +47,11 @@ export type LandingEvent =
   | PlanSelectEvent
   | SectionViewEvent
   /** Evento de funil pré-existente (US-1.5): o visitante saiu da landing rumo à anamnese. */
-  | 'form_started';
+  | 'form_started'
+  /** A pessoa abriu uma pergunta do FAQ (propriedade `item`: id estável da pergunta). */
+  | 'faq_item_open'
+  /** Clique no perfil oficial do Instagram (rodapé). */
+  | 'footer_instagram_click';
 
 export function planSelectEvent(plan: SubscriptionPlanId): PlanSelectEvent {
   return `pricing_select_${plan.toLowerCase() as Lowercase<SubscriptionPlanId>}`;
@@ -58,7 +63,7 @@ export function sectionViewEvent(section: LandingSection): SectionViewEvent {
 
 export function trackLandingEvent(
   event: LandingEvent,
-  properties?: { plan?: SubscriptionPlanId },
+  properties?: { plan?: SubscriptionPlanId; item?: string },
 ): void {
   if (!isAnalyticsEnabled) return;
   void import('posthog-js')
