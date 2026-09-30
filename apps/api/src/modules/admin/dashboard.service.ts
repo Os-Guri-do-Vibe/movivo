@@ -5,7 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { and, desc, eq, isNotNull, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, isNotNull, or, sql } from 'drizzle-orm';
+import { type PgColumn } from 'drizzle-orm/pg-core';
 import { PinoLogger } from 'nestjs-pino';
 import {
   anamnesisStructuredSchema,
@@ -1051,15 +1052,29 @@ export class DashboardService {
 
   async operations(actor: AuthenticatedUser) {
     return this.scopedRead(actor, async (tx) => {
-      const [funnel] = await tx
-        .select({
-          formStarted: sql<number>`count(distinct ${anamnesisSessions.id})::int`,
-          protocolSent: sql<number>`count(distinct ${protocols.id}) filter (where ${protocols.status} = 'ACTIVE')::int`,
-          converted: sql<number>`count(distinct ${subscriptions.id}) filter (where ${subscriptions.status} = 'ACTIVE')::int`,
-        })
-        .from(anamnesisSessions)
-        .leftJoin(protocols, eq(protocols.userId, anamnesisSessions.userId))
-        .leftJoin(subscriptions, eq(subscriptions.userId, anamnesisSessions.userId));
+      // Funil: o desenho anterior (LEFT JOIN de sessões × protocolos × assinaturas +
+      // `count(distinct)`) multiplicava as linhas pelo produto cartesiano por titular antes de
+      // agregar. Aqui cada métrica lê a própria tabela uma vez e cruza o titular com EXISTS
+      // (índice `idx_anamnesis_sessions_user`); as três contagens seguem juntas na conexão.
+      // Mesmos números: protocolo/assinatura ATIVOS de quem já iniciou o formulário.
+      const hasAnamnesis = (userId: PgColumn) =>
+        sql`exists (select 1 from ${anamnesisSessions} where ${anamnesisSessions.userId} = ${userId})`;
+      const [[formStarted], [protocolSent], [converted]] = await Promise.all([
+        tx.select({ total: count() }).from(anamnesisSessions),
+        tx
+          .select({ total: count() })
+          .from(protocols)
+          .where(and(eq(protocols.status, 'ACTIVE'), hasAnamnesis(protocols.userId))),
+        tx
+          .select({ total: count() })
+          .from(subscriptions)
+          .where(and(eq(subscriptions.status, 'ACTIVE'), hasAnamnesis(subscriptions.userId))),
+      ]);
+      const funnel = {
+        formStarted: formStarted?.total ?? 0,
+        protocolSent: protocolSent?.total ?? 0,
+        converted: converted?.total ?? 0,
+      };
       const [coachSla] = await tx
         .select({
           coachP95Ms: sql<
@@ -1090,18 +1105,31 @@ export class DashboardService {
         .innerJoin(users, eq(users.id, conversations.userId))
         .orderBy(desc(conversations.createdAt))
         .limit(100);
-      const completedCheckins = await tx
-        .select({ userId: checkins.userId, answers: checkins.answers })
-        .from(checkins)
-        .where(eq(checkins.status, 'SUBMITTED'));
+      // Antes: baixava TODO check-in enviado (com o `answers` inteiro) só para contar, em JS,
+      // quem reportou adesão > 0. Agora o banco conta (`firstWorkoutUsers`) e só os ids dos
+      // titulares — necessários para a trilha de auditoria abaixo — atravessam a rede.
+      const [checkinUsers, [firstWorkoutRow]] = await Promise.all([
+        tx
+          .selectDistinct({ userId: checkins.userId })
+          .from(checkins)
+          .where(eq(checkins.status, 'SUBMITTED')),
+        tx
+          .select({
+            firstWorkout: sql<number>`count(distinct ${checkins.userId}) filter (
+              where jsonb_typeof(${checkins.answers} -> 'adherenceScore') = 'number'
+                and (${checkins.answers} ->> 'adherenceScore')::numeric > 0)::int`,
+          })
+          .from(checkins)
+          .where(eq(checkins.status, 'SUBMITTED')),
+      ]);
       const accessedUsers = new Set([
         ...replayRows.map((row) => row.userId),
-        ...completedCheckins.map((row) => row.userId),
+        ...checkinUsers.map((row) => row.userId),
       ]);
       for (const userId of accessedUsers) {
         await this.auditRead(tx, actor, userId, 'operations_dashboard', userId);
       }
-      const firstWorkout = this.countUsersWithWorkout(completedCheckins);
+      const firstWorkout = firstWorkoutRow?.firstWorkout ?? 0;
       const replays = this.groupReplays(replayRows);
       const protocolDeliveryMinutes = this.nullableNumber(protocolSla?.protocolAverageMinutes);
       const coachP95Seconds = this.nullableNumber(coachSla?.coachP95Ms, 1_000);
@@ -1488,21 +1516,6 @@ export class DashboardService {
 
   private hashJson(value: unknown): string {
     return createHash('sha256').update(JSON.stringify(value)).digest('hex');
-  }
-
-  /**
-   * Achado 2026-09-13: `checkins.answers` é plaintext (mesmo tratamento que os blocos
-   * comuns da renovação de mesociclo dão a pergunta equivalente) — sem cifra pra abrir.
-   * `adherenceScore` é a nova escala 0-10 ("quanto você seguiu seu protocolo"); qualquer
-   * valor acima de 0 conta como "reportou pelo menos um treino".
-   */
-  private countUsersWithWorkout(rows: Array<{ userId: string; answers: unknown }>): number {
-    const usersWithWorkout = new Set<string>();
-    for (const row of rows) {
-      const answers = row.answers as { adherenceScore?: number } | null;
-      if (answers?.adherenceScore && answers.adherenceScore > 0) usersWithWorkout.add(row.userId);
-    }
-    return usersWithWorkout.size;
   }
 
   private nullableNumber(value: unknown, divisor = 1): number | null {
