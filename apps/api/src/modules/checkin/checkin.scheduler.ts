@@ -9,7 +9,7 @@
  * aluno no seu próprio horário exato.
  */
 import { Injectable, type OnModuleInit } from '@nestjs/common';
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 import { CONSENT_TEXTS } from '@movivo/shared';
 
@@ -81,9 +81,13 @@ export class CheckinScheduler implements OnModuleInit {
   }
 
   async scan(now = new Date()): Promise<{ status: string; eligible: number; sent: number }> {
+    // Roda a cada minuto, então o custo da query importa: o consentimento entra como EXISTS
+    // (semi-join) em vez de INNER JOIN + DISTINCT. Protocolo ativo, usuário e assinatura são
+    // 1:1 (`uq_subscriptions_user`); só `consents` podia duplicar linhas (um registro por
+    // `cycle`), e era isso que exigia o DISTINCT — a ordenação/hash de todo o resultado.
     const eligible = await this.db.runAsSystem((tx) =>
       tx
-        .selectDistinct({
+        .select({
           userId: protocols.userId,
           name: users.name,
           timezone: users.timezone,
@@ -94,20 +98,18 @@ export class CheckinScheduler implements OnModuleInit {
         .from(protocols)
         .innerJoin(users, eq(users.id, protocols.userId))
         .innerJoin(subscriptions, eq(subscriptions.userId, protocols.userId))
-        .innerJoin(
-          consents,
-          and(
-            eq(consents.userId, protocols.userId),
-            eq(consents.consentType, 'HEALTH_DATA'),
-            eq(consents.version, CONSENT_TEXTS.HEALTH_DATA.version),
-            eq(consents.accepted, true),
-            isNull(consents.revokedAt),
-          ),
-        )
         .where(
           and(
             eq(protocols.status, 'ACTIVE'),
             inArray(subscriptions.status, ['ACTIVE', 'TRIALING']),
+            sql`exists (
+              select 1 from ${consents}
+              where ${consents.userId} = ${protocols.userId}
+                and ${consents.consentType} = 'HEALTH_DATA'
+                and ${consents.version} = ${CONSENT_TEXTS.HEALTH_DATA.version}
+                and ${consents.accepted} = true
+                and ${consents.revokedAt} is null
+            )`,
           ),
         ),
     );

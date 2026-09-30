@@ -18,7 +18,7 @@ function makeSelectDistinctChain(eligible: unknown[]) {
 function makeScan(eligible: unknown[]) {
   const db = {
     runAsSystem: vi.fn((callback: (value: unknown) => Promise<unknown>) =>
-      callback({ selectDistinct: () => makeSelectDistinctChain(eligible) } as never),
+      callback({ select: () => makeSelectDistinctChain(eligible) } as never),
     ),
   } as unknown as TenantDatabase;
   const createAndSend = vi.fn(async () => 'SENT' as const);
@@ -190,7 +190,7 @@ describe('CheckinScheduler.onModuleInit', () => {
     } as unknown as QueueManager;
     const db = {
       runAsSystem: vi.fn((callback: (value: unknown) => Promise<unknown>) =>
-        callback({ selectDistinct: () => makeSelectDistinctChain([]) } as never),
+        callback({ select: () => makeSelectDistinctChain([]) } as never),
       ),
     } as unknown as TenantDatabase;
     const service = { weekNumber: vi.fn(() => 1) } as unknown as CheckinService;
