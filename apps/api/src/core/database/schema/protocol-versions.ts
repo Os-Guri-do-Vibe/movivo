@@ -89,7 +89,6 @@ export const protocolVersions = pgTable(
   (table) => [
     unique('uq_protocol_versions_protocol_version').on(table.protocolId, table.version),
     index('idx_protocol_versions_user').on(table.userId, table.createdAt),
-    index('idx_protocol_versions_protocol').on(table.protocolId, table.version),
   ],
 );
 

@@ -74,7 +74,6 @@ export const exerciseCatalogEntries = pgTable(
   },
   (table) => [
     unique('uq_exercise_catalog_entries_key_version').on(table.exerciseKey, table.version),
-    index('idx_exercise_catalog_entries_key').on(table.exerciseKey, table.version),
     index('idx_exercise_catalog_entries_pattern').on(table.pattern),
   ],
 );

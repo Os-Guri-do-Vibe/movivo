@@ -13,6 +13,7 @@
  *  - **Índice HNSW / coluna de embedding**: pertence à tabela `knowledge_base`
  *    (corpus do RAG), que é da sprint de RAG.
  */
+import { sql } from 'drizzle-orm';
 import { boolean, index, integer, jsonb, pgTable, text, uuid, varchar } from 'drizzle-orm/pg-core';
 
 import { primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
@@ -96,6 +97,15 @@ export const conversations = pgTable(
     // chave de particionamento. `user_id` líder por causa da RLS (Sato §4.5).
     index('idx_conversations_user_created_at').on(table.userId, table.createdAt),
     index('idx_conversations_protocol').on(table.protocolId),
+    // Painel de operações/SLA: janelas globais `created_at >= :since` (volume, latência do
+    // WhatsApp, qualidade da IA) varriam a tabela inteira — a maior do produto — porque o
+    // índice acima tem `user_id` líder e não serve a consulta sem titular.
+    index('idx_conversations_created_at').on(table.createdAt),
+    // Respostas bloqueadas pelo validador, por titular (detalhe do aluno no Control Center):
+    // parcial porque são a exceção — o índice fica minúsculo e a leitura não percorre o histórico.
+    index('idx_conversations_user_blocked')
+      .on(table.userId, table.createdAt)
+      .where(sql`${table.validationPassed} = false`),
   ],
 );
 
