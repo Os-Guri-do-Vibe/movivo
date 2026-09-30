@@ -1,4 +1,4 @@
-import { protocolStructureSchema } from '@movivo/shared';
+import { protocolStructureSchema, type ExerciseLevel } from '@movivo/shared';
 
 import type {
   ActionResult,
@@ -387,7 +387,8 @@ export interface NewCatalogExercisePayload {
   muscleGroups: string[];
   equipment: string[];
   locations: string[];
-  minLevel: string;
+  /** Níveis de aluno que recebem o exercício (substitui `minLevel`, achado 2026-09-29). */
+  levels: ExerciseLevel[];
   contraindicatedFor: string[];
   substitutes: string[];
   videoUrl?: string;

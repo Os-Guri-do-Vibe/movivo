@@ -31,6 +31,7 @@ import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { anamnesisSessions, protocols, protocolVersions } from '../../core/database/schema';
 import type { ContraindicationTag } from './exercise-catalog';
 import { computeMesocycleSummary, persistMesocycleSummary } from './mesocycle-summary';
+import type { ProtocolGenerationTrace } from './protocol-planner';
 
 /**
  * Id da assinatura da metodologia do RT CREF. ponytail: constante fixa — a tabela
@@ -88,6 +89,14 @@ export interface PersistProtocolInput {
   knowledgeSources?: unknown;
   methodologyVersionId?: string | null;
   methodologySha256?: string | null;
+  /**
+   * Rastro da geração (planner, 2026-09-29): tentativas com códigos de regra, rodadas de
+   * correção e reparos determinísticos aplicados. Sem PII — só códigos, contagens e versões.
+   * Gravado em `protocol_versions.diff` da versão inicial (jsonb existente, nulo na v1 até
+   * aqui e sem leitor), com discriminante `type: 'GENERATION_TRACE'` — mesmo padrão tipado de
+   * `VOLUME_ADJUSTMENT`. Ausente (DLQ/scripts) → `diff` continua nulo.
+   */
+  generationTrace?: ProtocolGenerationTrace | null;
   /** `AUTO_APPROVED` assina em nível de metodologia (RT); demais nascem sem assinatura. */
   signed: boolean;
 }
@@ -281,6 +290,7 @@ export class ProtocolRepository {
           version: INITIAL_REVISION_VERSION,
           status: input.status,
           content: input.content,
+          diff: input.generationTrace ?? null,
           changeReason: input.renewalSessionId
             ? 'geração de renovação por fim de mesociclo'
             : 'geração inicial (US-2.4)',

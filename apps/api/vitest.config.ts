@@ -57,6 +57,9 @@ export default defineConfig({
         'src/scripts/generate-workout-magic-link.ts',
         'src/scripts/render-sample-pdf.ts',
         'src/scripts/resend-protocol-delivery.ts',
+        'src/scripts/check-protocol-queue-state.ts',
+        'src/scripts/enqueue-protocol-auto-release.ts',
+        'src/scripts/reprocess-protocol-fallback.ts',
         'src/core/database/database-health.service.ts',
         'src/core/redis/redis-health.service.ts',
         // I/O de banco sob RLS (US-2.2): mapeamento Drizzle sem ramo, provado pelo

@@ -614,7 +614,7 @@ describe('DashboardService invariantes de mutacao', () => {
       muscleGroups: ['peito'],
       equipment: ['máquina'],
       locations: ['FULL_GYM'],
-      minLevel: 'INICIANTE',
+      levels: ['INICIANTE'],
       contraindicatedFor: [],
       substitutes: [],
     };

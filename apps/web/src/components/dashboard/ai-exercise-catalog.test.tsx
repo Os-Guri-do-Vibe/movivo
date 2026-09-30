@@ -53,7 +53,8 @@ const supino: ExerciseCatalogEntryVersion = {
   muscleGroups: ['peito'],
   equipment: ['barra'],
   locations: ['FULL_GYM'],
-  minLevel: 'INICIANTE',
+  // Vem do servidor fora da ordem canônica: o modal reordena (Iniciante → Avançado).
+  levels: ['AVANCADO', 'INICIANTE'],
   contraindicatedFor: ['SHOULDER'],
   substitutes: [],
   videoUrl: 'https://videos.test/supino',
@@ -74,7 +75,7 @@ const agachamento: ExerciseCatalogEntryVersion = {
   muscleGroups: ['quadríceps', 'glúteo'],
   equipment: [],
   locations: ['FULL_GYM', 'HOME'],
-  minLevel: 'INTERMEDIARIO',
+  levels: ['INTERMEDIARIO', 'AVANCADO'],
   contraindicatedFor: [],
   substitutes: [],
   version: 1,
@@ -95,7 +96,7 @@ const flexaoRetirada: ExerciseCatalogEntryVersion = {
   muscleGroups: ['peito'],
   equipment: [],
   locations: ['HOME'],
-  minLevel: 'INICIANTE',
+  levels: ['INICIANTE'],
   contraindicatedFor: [],
   substitutes: [],
   version: 2,
@@ -116,7 +117,7 @@ const supinoAntigo: ExerciseCatalogEntryVersion = {
   muscleGroups: ['peito'],
   equipment: ['barra'],
   locations: ['FULL_GYM'],
-  minLevel: 'INICIANTE',
+  levels: ['INICIANTE'],
   contraindicatedFor: [],
   substitutes: [],
   version: 2,
@@ -146,7 +147,7 @@ function manyPublishedVersions(count: number): ExerciseCatalogEntryVersion[] {
     muscleGroups: ['core'],
     equipment: [],
     locations: ['HOME'],
-    minLevel: 'INICIANTE',
+    levels: ['INICIANTE', 'INTERMEDIARIO', 'AVANCADO'],
     contraindicatedFor: [],
     substitutes: [],
     version: 1,
@@ -311,6 +312,14 @@ describe('AiExerciseCatalogDashboard', () => {
 
     const academiaCheckbox = within(dialog).getByRole('checkbox', { name: 'Academia completa' });
     await user.click(academiaCheckbox);
+    // Nível também é obrigatório — e a criação começa sem nenhum marcado.
+    const nivel = within(dialog).getByRole('group', { name: 'Nível' });
+    expect(within(nivel).getByText('Selecione o(s) nível(is)')).toBeInTheDocument();
+    for (const option of within(nivel).getAllByRole('checkbox')) expect(option).not.toBeChecked();
+    expect(salvar).toBeDisabled();
+    // Marcado fora de ordem: o envio sai na ordem canônica.
+    await user.click(within(nivel).getByRole('checkbox', { name: 'Avançado' }));
+    await user.click(within(nivel).getByRole('checkbox', { name: 'Iniciante' }));
     expect(salvar).toBeEnabled();
 
     await user.click(salvar);
@@ -322,8 +331,8 @@ describe('AiExerciseCatalogDashboard', () => {
           muscleGroups: ['peito'],
           locations: ['FULL_GYM'],
           videoUrl: undefined,
+          levels: ['INICIANTE', 'AVANCADO'],
           pattern: 'ISOLATION',
-          minLevel: 'INICIANTE',
           contraindicatedFor: [],
           substitutes: [],
           equipment: [],
@@ -362,6 +371,13 @@ describe('AiExerciseCatalogDashboard', () => {
     expect(videoInput).toHaveValue('https://videos.test/supino');
     expect(within(dialog).getByRole('checkbox', { name: 'peito' })).toBeChecked();
     expect(within(dialog).getByRole('checkbox', { name: 'Academia completa' })).toBeChecked();
+    // Nível pré-preenchido com `entry.levels`, exibido na ordem canônica.
+    const nivel = within(dialog).getByRole('group', { name: 'Nível' });
+    expect(within(nivel).getByText('Iniciante, Avançado')).toBeInTheDocument();
+    expect(within(nivel).getByRole('checkbox', { name: 'Iniciante' })).toBeChecked();
+    expect(within(nivel).getByRole('checkbox', { name: 'Intermediário' })).not.toBeChecked();
+    expect(within(nivel).getByRole('checkbox', { name: 'Avançado' })).toBeChecked();
+    await user.click(within(nivel).getByRole('checkbox', { name: 'Intermediário' }));
 
     await user.clear(nameInput);
     await user.type(nameInput, 'Supino reto inclinado');
@@ -374,8 +390,9 @@ describe('AiExerciseCatalogDashboard', () => {
           exerciseKey: 'supino_reto',
           name: 'Supino reto inclinado',
           videoUrl: undefined,
+          // Intermediário marcado por último, mas enviado no meio: ordem canônica.
+          levels: ['INICIANTE', 'INTERMEDIARIO', 'AVANCADO'],
           pattern: 'HORIZONTAL_PUSH',
-          minLevel: 'INICIANTE',
           contraindicatedFor: ['SHOULDER'],
           substitutes: [],
           equipment: ['barra'],
@@ -398,6 +415,7 @@ describe('AiExerciseCatalogDashboard', () => {
     const dialog = screen.getByRole('dialog');
     await user.type(within(dialog).getByLabelText('Nome do exercício'), 'Prancha isométrica');
     await user.click(within(dialog).getByRole('checkbox', { name: 'core' }));
+    await user.click(within(dialog).getByRole('checkbox', { name: 'Iniciante' }));
     await user.click(within(dialog).getByRole('checkbox', { name: 'Em casa' }));
     await user.click(within(dialog).getByRole('button', { name: 'Salvar' }));
 
@@ -405,6 +423,66 @@ describe('AiExerciseCatalogDashboard', () => {
       'Chave já utilizada por outro exercício.',
     );
     expect(within(dialog).getByRole('heading', { name: 'Novo exercício' })).toBeVisible();
+  });
+
+  it('combo de Nível lista Iniciante, Intermediário e Avançado nessa ordem', async () => {
+    const user = userEvent.setup();
+    render(<AiExerciseCatalogDashboard canWrite />);
+    await screen.findByText('Supino reto');
+
+    await user.click(screen.getByRole('button', { name: 'Novo exercício' }));
+    const nivel = within(screen.getByRole('dialog')).getByRole('group', { name: 'Nível' });
+    expect(
+      within(nivel)
+        .getAllByRole('checkbox')
+        .map((box) => box.closest('label')?.textContent),
+    ).toEqual(['Iniciante', 'Intermediário', 'Avançado']);
+  });
+
+  it('na edição, desmarcar todos os níveis desabilita "Salvar"', async () => {
+    const user = userEvent.setup();
+    render(<AiExerciseCatalogDashboard canWrite />);
+    await screen.findByText('Supino reto');
+
+    await user.click(screen.getByRole('button', { name: 'Editar Supino reto' }));
+    const dialog = screen.getByRole('dialog');
+    const salvar = within(dialog).getByRole('button', { name: 'Salvar' });
+    expect(salvar).toBeEnabled();
+
+    const nivel = within(dialog).getByRole('group', { name: 'Nível' });
+    await user.click(within(nivel).getByRole('checkbox', { name: 'Iniciante' }));
+    expect(salvar).toBeEnabled();
+    await user.click(within(nivel).getByRole('checkbox', { name: 'Avançado' }));
+    expect(salvar).toBeDisabled();
+    expect(within(nivel).getByText('Selecione o(s) nível(is)')).toBeInTheDocument();
+
+    await user.click(salvar);
+    expect(publishExerciseCatalogEntry).not.toHaveBeenCalled();
+  });
+
+  it('o combo compartilhado se comporta igual em Músculo e Nível (resumo, marcar, desmarcar)', async () => {
+    const user = userEvent.setup();
+    render(<AiExerciseCatalogDashboard canWrite />);
+    await screen.findByText('Supino reto');
+
+    await user.click(screen.getByRole('button', { name: 'Novo exercício' }));
+    const dialog = screen.getByRole('dialog');
+    const cases = [
+      { group: 'Músculo', placeholder: 'Selecione o(s) músculo(s)', a: 'peito', b: 'costas' },
+      { group: 'Nível', placeholder: 'Selecione o(s) nível(is)', a: 'Iniciante', b: 'Avançado' },
+    ];
+    for (const { group, placeholder, a, b } of cases) {
+      const combo = within(dialog).getByRole('group', { name: group });
+      const summary = () => combo.querySelector('summary')?.textContent?.replace('▾', '').trim();
+      expect(summary()).toBe(placeholder);
+      await user.click(within(combo).getByRole('checkbox', { name: a }));
+      await user.click(within(combo).getByRole('checkbox', { name: b }));
+      expect(summary()).toBe(`${a}, ${b}`);
+      await user.click(within(combo).getByRole('checkbox', { name: a }));
+      expect(summary()).toBe(b);
+      expect(within(combo).getByRole('checkbox', { name: a })).not.toBeChecked();
+      expect(within(combo).getByRole('checkbox', { name: b })).toBeChecked();
+    }
   });
 
   it('exclui um exercício após confirmação destrutiva, atualizando a lista e o aviso', async () => {
@@ -722,6 +800,150 @@ describe('AiExerciseCatalogDashboard', () => {
       ).not.toBeInTheDocument();
     });
   });
+
+  describe('filtro de nível', () => {
+    beforeEach(() => {
+      getExerciseCatalog.mockReset().mockResolvedValue(filterResponse);
+    });
+
+    it('um nível só vale após "Buscar", com chip, contagem e remoção pelo chip', async () => {
+      const user = userEvent.setup();
+      render(<AiExerciseCatalogDashboard />);
+      await screen.findByText('Supino reto');
+
+      await user.click(levelOption('Iniciante'));
+      expect(listedNames()).toHaveLength(4);
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(listedNames()).toEqual(['Supino reto', 'Prancha']);
+      expect(screen.getByText('Nível: Iniciante')).toBeVisible();
+      expect(countText()).toBe('2 exercício(s) encontrado(s) para o filtro aplicado.');
+
+      // Remover o chip limpa rascunho e aplicado de uma vez.
+      await user.click(screen.getByRole('button', { name: 'Remover filtro Nível' }));
+      expect(listedNames()).toHaveLength(4);
+      expect(levelOption('Iniciante')).not.toBeChecked();
+      expect(screen.queryByText(/^Nível:/)).not.toBeInTheDocument();
+      expect(countText()).toBe('4 exercício(s) cadastrado(s) no total.');
+    });
+
+    it('vários níveis combinam por OU, e o chip sai na ordem canônica', async () => {
+      const user = userEvent.setup();
+      render(<AiExerciseCatalogDashboard />);
+      await screen.findByText('Supino reto');
+
+      await user.click(levelOption('Avançado'));
+      await user.click(levelOption('Intermediário'));
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(listedNames()).toEqual(['Agachamento livre', 'Remada curvada', 'Supino reto']);
+      expect(screen.getByText('Nível: Intermediário, Avançado')).toBeVisible();
+    });
+
+    it('conjunto não contíguo: [Iniciante, Avançado] aparece em Iniciante e em Avançado, não em Intermediário', async () => {
+      const user = userEvent.setup();
+      render(<AiExerciseCatalogDashboard />);
+      await screen.findByText('Supino reto');
+
+      const only = async (level: string) => {
+        for (const label of ['Iniciante', 'Intermediário', 'Avançado']) {
+          if (levelOption(label).checked !== (label === level))
+            await user.click(levelOption(label));
+        }
+        await user.click(screen.getByRole('button', { name: 'Buscar' }));
+        return listedNames();
+      };
+      expect(await only('Iniciante')).toContain('Supino reto');
+      expect(await only('Avançado')).toContain('Supino reto');
+      expect(await only('Intermediário')).toEqual(['Agachamento livre', 'Remada curvada']);
+    });
+
+    it('combina (AND) com Nome, Músculo, Local e Favoritos', async () => {
+      const user = userEvent.setup();
+      render(<AiExerciseCatalogDashboard />);
+      await screen.findByText('Supino reto');
+
+      // Avançado + Local "Em casa": só o agachamento (o supino é de academia).
+      await user.click(levelOption('Avançado'));
+      await user.click(screen.getByRole('checkbox', { name: 'Em casa' }));
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(listedNames()).toEqual(['Agachamento livre']);
+      await user.click(screen.getByRole('button', { name: 'Remover filtro Local' }));
+
+      // Avançado + "Não favoritos": só o supino.
+      await chooseFavorite(user, 'Não favoritos');
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(listedNames()).toEqual(['Supino reto']);
+
+      // Troca para Iniciante + Músculo "core" (+ não favoritos): só a prancha.
+      await user.click(levelOption('Avançado'));
+      await user.click(levelOption('Iniciante'));
+      await user.click(screen.getByRole('checkbox', { name: 'core' }));
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(listedNames()).toEqual(['Prancha']);
+      await user.click(screen.getByRole('button', { name: 'Remover filtro Músculo' }));
+
+      // Iniciante + Nome "sup" (+ não favoritos): só o supino.
+      await user.type(screen.getByPlaceholderText('Nome do exercício'), 'sup');
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(listedNames()).toEqual(['Supino reto']);
+      expect(screen.getByText('Nível: Iniciante')).toBeVisible();
+      expect(screen.getByText('Nome: "sup"')).toBeVisible();
+      expect(screen.getByText('Favoritos: não favoritos')).toBeVisible();
+
+      // Intermediário + "Somente favoritos": agachamento e remada; com "Não favoritos": vazio.
+      await user.click(screen.getByRole('button', { name: 'Limpar filtro' }));
+      await user.click(levelOption('Intermediário'));
+      await chooseFavorite(user, 'Somente favoritos');
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(listedNames()).toEqual(['Agachamento livre', 'Remada curvada']);
+      await chooseFavorite(user, 'Não favoritos');
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(screen.getByText('Nenhum exercício encontrado.')).toBeVisible();
+      expect(countText()).toBe('0 exercício(s) encontrado(s) para o filtro aplicado.');
+    });
+
+    it('"Limpar filtro" desfaz também o nível', async () => {
+      const user = userEvent.setup();
+      render(<AiExerciseCatalogDashboard />);
+      await screen.findByText('Supino reto');
+
+      await user.click(levelOption('Intermediário'));
+      await user.type(screen.getByPlaceholderText('Nome do exercício'), 'remada');
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      expect(listedNames()).toEqual(['Remada curvada']);
+
+      await user.click(screen.getByRole('button', { name: 'Limpar filtro' }));
+      expect(listedNames()).toHaveLength(4);
+      expect(levelOption('Intermediário')).not.toBeChecked();
+      expect(screen.queryByText(/^Nível:/)).not.toBeInTheDocument();
+    });
+
+    it('nova busca por nível volta para a página 1, mantendo favoritos primeiro', async () => {
+      const versions = manyPublishedVersions(55).map((v, index): ExerciseCatalogEntryVersion => ({
+        ...v,
+        levels: [index % 5 === 0 ? 'AVANCADO' : 'INICIANTE'],
+        isFavorite: index === 50,
+      }));
+      getExerciseCatalog.mockReset().mockResolvedValue(buildResponse(versions));
+      const user = userEvent.setup();
+      render(<AiExerciseCatalogDashboard />);
+      await screen.findByText('Exercício 00');
+
+      const nav = screen.getByRole('navigation', {
+        name: 'Paginação do catálogo de exercícios',
+      });
+      await user.click(within(nav).getByRole('button', { name: 'Próxima página' }));
+      expect(within(nav).getByText('2 / 2')).toBeVisible();
+
+      await user.click(levelOption('Avançado'));
+      await user.click(screen.getByRole('button', { name: 'Buscar' }));
+      // Índices múltiplos de 5 (0…50) = 11 exercícios, uma página só; o favorito 50 abre a lista.
+      expect(listedNames()).toHaveLength(11);
+      expect(listedNames().slice(0, 2)).toEqual(['Exercício 50', 'Exercício 00']);
+      expect(
+        screen.queryByRole('navigation', { name: 'Paginação do catálogo de exercícios' }),
+      ).not.toBeInTheDocument();
+    });
+  });
 });
 
 /* -------------------------------------------------------------------------- */
@@ -736,6 +958,7 @@ const remada: ExerciseCatalogEntryVersion = {
   pattern: 'HORIZONTAL_PULL',
   muscleGroups: ['costas'],
   locations: ['FULL_GYM'],
+  levels: ['INTERMEDIARIO'],
   isFavorite: true,
 };
 
@@ -747,10 +970,15 @@ const prancha: ExerciseCatalogEntryVersion = {
   pattern: 'ISOLATION',
   muscleGroups: ['core'],
   locations: ['HOME'],
+  levels: ['INICIANTE'],
   isFavorite: false,
 };
 
-/** Ordem do catálogo: supino, agachamento★, remada★, prancha → na tela, favoritos antes. */
+/**
+ * Ordem do catálogo: supino, agachamento★, remada★, prancha → na tela, favoritos antes.
+ * Níveis: supino [Iniciante, Avançado] (não contíguo), agachamento [Intermediário, Avançado],
+ * remada [Intermediário], prancha [Iniciante].
+ */
 const filterResponse = buildResponse([supino, agachamento, remada, prancha]);
 
 function deferred<T>() {
@@ -774,6 +1002,11 @@ function starIcon(buttonName: string): SVGElement {
   const icon = screen.getByRole('button', { name: buttonName }).querySelector('svg');
   if (!icon) throw new Error(`ícone da estrela não encontrado em "${buttonName}"`);
   return icon;
+}
+
+function levelOption(label: string): HTMLInputElement {
+  const group = screen.getByRole('group', { name: 'Nível' });
+  return within(group).getByRole('checkbox', { name: label }) as HTMLInputElement;
 }
 
 function favoriteSelect(): HTMLElement {

@@ -28,6 +28,11 @@
  * não é risco clínico do titular — é o conteúdo em si nunca ter passado limpo pela geração
  * ou pelo validador. Fallback e PAR-Q são dois motivos independentes pra `MANDATORY`,
  * qualquer um dos dois basta.
+ *
+ * **Mudança de 2026-09-29 (decisão do fundador):** protocolo que só passou no validador
+ * depois do reparo determinístico do planner NÃO é motivo de `MANDATORY` — segue o fluxo
+ * normal (`OPTIONAL`, janela de 1h), com o ajuste registrado no rastro. A política mora em
+ * `REPAIRED_PROTOCOL_REVIEW_URGENCY`/`reviewUrgencyForPlan`, única para geração e renovação.
  */
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { type Job } from 'bullmq';
@@ -53,7 +58,7 @@ import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { ProtocolGeneratorService } from './protocol-generator.service';
-import { planProtocol } from './protocol-planner';
+import { planProtocol, type PlanResult } from './protocol-planner';
 import { ProtocolRepository } from './protocol.repository';
 import { healthBlockSchema, type HealthBlock } from '../anamnesis/health-block';
 import { evaluateParq, type ParqEvaluation } from '../anamnesis/parq';
@@ -86,6 +91,31 @@ export interface ProtocolGenerationJob {
  * `delay` real do job.
  */
 export const PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS = 60 * 60 * 1000;
+
+/**
+ * Política de liberação de protocolo AJUSTADO pelo reparo determinístico do planner
+ * (`plan.repairs` não vazio). Decisão do fundador (2026-09-29): liberação automática — o
+ * mesmo fluxo de um PASS (janela de cortesia de 1h para o RT e depois auto-liberação). O
+ * conteúdo foi revalidado limpo pelo `ValidationService` inteiro depois do ajuste, e o
+ * rastro (`repairs`) fica gravado para o painel exibir o selo "ajustado automaticamente".
+ * Trocar para `'MANDATORY'` aqui é a única mudança necessária para exigir assinatura.
+ */
+export const REPAIRED_PROTOCOL_REVIEW_URGENCY: 'MANDATORY' | 'OPTIONAL' = 'OPTIONAL';
+
+/**
+ * ÚNICO ponto de decisão `MANDATORY` × `OPTIONAL` da geração (inicial e renovação). Motivos
+ * independentes de `MANDATORY`, qualquer um basta: PAR-Q do titular (2026-08-24) e conteúdo
+ * do template de fallback (2026-09-03). Reparo determinístico segue
+ * `REPAIRED_PROTOCOL_REVIEW_URGENCY`.
+ */
+export function reviewUrgencyForPlan(
+  plan: Pick<PlanResult, 'usedFallbackTemplate' | 'repairs'>,
+  requiresProfessionalReview: boolean,
+): 'MANDATORY' | 'OPTIONAL' {
+  if (requiresProfessionalReview || plan.usedFallbackTemplate) return 'MANDATORY';
+  if (plan.repairs.length > 0) return REPAIRED_PROTOCOL_REVIEW_URGENCY;
+  return 'OPTIONAL';
+}
 
 @Injectable()
 export class ProtocolGenerationWorker implements OnModuleInit {
@@ -152,11 +182,12 @@ export class ProtocolGenerationWorker implements OnModuleInit {
     const scrubUser = { name: loaded.name, phoneNumber: loaded.phoneNumber, email: loaded.email };
 
     // TASK-2.4.3 — gera+valida (planner) → persiste → auto-aprova/assina → entrega.
-    const plan = await planProtocol(this.generator, this.validation, {
-      userId,
-      user: scrubUser,
-      constraints,
-    });
+    const plan = await planProtocol(
+      this.generator,
+      this.validation,
+      { userId, user: scrubUser, constraints },
+      this.logger,
+    );
     // Achado 2026-09-02 (correção do fundador): `totalWeeks` era um padrão estático de 12
     // semanas pra todo mundo, sem relação com a fase (`phase`) real do protocolo — a data de
     // término gravada nunca respondia "até quando vale este mesociclo?". Agora vem do
@@ -191,7 +222,11 @@ export class ProtocolGenerationWorker implements OnModuleInit {
     // validação) também é sempre `MANDATORY`, mesmo com PAR-Q liberado. Não é sobre
     // risco clínico do titular — é sobre o próprio conteúdo do protocolo nunca ter
     // passado limpo pelo validador. Nunca sai sozinho por auto-liberação.
-    const mandatory = constraints.requiresProfessionalReview || plan.usedFallbackTemplate;
+    //
+    // Decisão do fundador (2026-09-29): protocolo com reparo determinístico segue
+    // `REPAIRED_PROTOCOL_REVIEW_URGENCY` — ver `reviewUrgencyForPlan`.
+    const reviewUrgency = reviewUrgencyForPlan(plan, constraints.requiresProfessionalReview);
+    const mandatory = reviewUrgency === 'MANDATORY';
     // Verificação pós-deploy da ordenação por favoritos (2026-09-29): só contagens.
     this.logger.info(
       { userId, ...this.generator.favoriteUsage(constraints, plan.content) },
@@ -208,7 +243,7 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       approvalStatus: 'PENDING_REVIEW',
       status: 'PENDING_SIGNATURE',
       humanReviewRequired: true,
-      reviewUrgency: mandatory ? 'MANDATORY' : 'OPTIONAL',
+      reviewUrgency,
       anamnesisSessionId,
       totalWeeks,
       generatedBy: plan.generatedBy,
@@ -217,6 +252,7 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       knowledgeSources: plan.knowledgeSources,
       methodologyVersionId: plan.methodologyVersionId,
       methodologySha256: plan.methodologySha256,
+      generationTrace: plan.trace,
       signed: false,
     });
 
@@ -245,7 +281,8 @@ export class ProtocolGenerationWorker implements OnModuleInit {
         userId,
         protocolId: persisted.protocolId,
         validationAction: plan.validationAction,
-        reviewUrgency: mandatory ? 'MANDATORY' : 'OPTIONAL',
+        reviewUrgency,
+        deterministicRepairs: plan.repairs,
         parqTriggered: constraints.parqTriggered,
       },
       mandatory

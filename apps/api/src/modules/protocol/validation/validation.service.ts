@@ -11,15 +11,22 @@
  *     segurança para quem tem alerta clínico aberto, não uma faixa de treino padrão.
  *  2. **Linguagem/compliance**: sem prescrição/diagnóstico/promessa/violação-PAR-Q/leak.
  *
- * Falha dura → `BLOCK_FALLBACK` (o Worker regenera com fallback de modelo e, persistindo,
- * cai no template pré-aprovado). Falha leve → `FLAG_HUMAN_REVIEW` (roteia sem bloquear).
+ * Falha dura → `BLOCK_FALLBACK` (o planner pede correção ao modelo com o feedback das
+ * violações, tenta o reparo determinístico só do que é mecânico — sempre revalidado aqui —
+ * e, persistindo, cai no template pré-aprovado). Falha leve → `FLAG_HUMAN_REVIEW`.
  * O `code` alimenta `ai_jobs.validation_action` (PASS|FLAG|BLOCK).
  */
 import { Injectable } from '@nestjs/common';
 import type { ProtocolStructure, Weekday } from '@movivo/shared';
 
 import { canonicalizeSecurityText } from '../../../core/agent-config/text-normalize';
-import { type ContraindicationTag, type ExerciseLevel, LEVEL_ORDER } from '../exercise-catalog';
+import {
+  type CatalogExercise,
+  type ContraindicationTag,
+  type ExerciseLevel,
+  LEVEL_ORDER,
+  lowestLevel,
+} from '../exercise-catalog';
 import { ExerciseCatalogProvider } from '../exercise-catalog-provider.service';
 import { isPhaseDurationWithinRange, PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import type { UserConstraints } from '../user-constraints';
@@ -43,6 +50,15 @@ const PARQ_MIN_RIR = 2;
  * de esforço percebido e de resposta cardiovascular aguda, não só de risco ortopédico.
  */
 const PARQ_CARDIAC_MIN_RIR = 3;
+
+/**
+ * Piso de RIR efetivo sob teto de PAR-Q (`maxPhase`) para estas flags. Exportado para o
+ * feedback de correção e o reparo determinístico do planner usarem EXATAMENTE o mesmo piso
+ * que `checkParq` cobra — nunca uma cópia do número.
+ */
+export function parqRirFloor(parqFlags: readonly ContraindicationTag[]): number {
+  return parqFlags.includes('CARDIAC') ? PARQ_CARDIAC_MIN_RIR : PARQ_MIN_RIR;
+}
 
 export interface ValidationViolation {
   rule: string;
@@ -106,6 +122,14 @@ export class ValidationService {
    * nem banco — servem o bootstrap estático, o mesmo catálogo de antes desta mudança.
    */
   constructor(private readonly catalog: ExerciseCatalogProvider = new ExerciseCatalogProvider()) {}
+
+  /**
+   * Entrada do MESMO catálogo que este validador usa como gabarito — para o reparo
+   * determinístico do planner restaurar o nome canônico sem abrir um segundo catálogo.
+   */
+  exerciseById(exerciseId: string): CatalogExercise | undefined {
+    return this.catalog.getById(exerciseId);
+  }
 
   /** Veredito determinístico sobre o protocolo inteiro. Nunca lança — sempre devolve. */
   validate(input: ValidateProtocolInput): ValidationVerdict {
@@ -205,10 +229,18 @@ export class ValidationService {
         }
         // O filtro por nível do `catalogContext()` (gerador) só existe no PROMPT — id de nível
         // acima (alucinação/cache de geração anterior) precisa morrer aqui também.
-        if (LEVEL_ORDER[catalog.minLevel] > LEVEL_ORDER[level]) {
+        //
+        // 2026-09-29 (`levels`, seleção múltipla — decisão do fundador): o VETO continua sendo
+        // só de segurança, "avançado demais" = aluno abaixo do MENOR nível marcado. "Fácil
+        // demais" (aluno acima de todos os níveis marcados) e buraco num conjunto não contíguo
+        // (ex.: [INICIANTE, AVANCADO] para INTERMEDIARIO) NÃO bloqueiam: não são risco, e
+        // bloquear só empurraria protocolo válido pro template. Esses casos já não são
+        // OFERECIDOS à IA (`offeredToLevel` na base de referência).
+        const minimum = lowestLevel(catalog.levels);
+        if (LEVEL_ORDER[level] < LEVEL_ORDER[minimum]) {
           out.push({
             rule: 'EXERCISE_LEVEL_TOO_HIGH',
-            detail: `${ex.exerciseId} exige nível ${catalog.minLevel}, usuário é ${level}`,
+            detail: `${ex.exerciseId} indicado a partir do nível ${minimum}, usuário é ${level}`,
             action: 'BLOCK',
           });
         }
@@ -403,7 +435,7 @@ export class ValidationService {
       // (PAR-Q Q1/Q2/Q3/Q5 — problema no coração, dor no peito, medicação de pressão),
       // o piso sobe: a mesma folga que basta pra proteger uma articulação não basta pra
       // conter a resposta cardiovascular de alguém nessa condição.
-      const rirFloor = parqFlags.includes('CARDIAC') ? PARQ_CARDIAC_MIN_RIR : PARQ_MIN_RIR;
+      const rirFloor = parqRirFloor(parqFlags);
       for (const session of structure.sessions) {
         for (const ex of session.exercises) {
           if (ex.rir !== undefined && ex.rir < rirFloor) {
