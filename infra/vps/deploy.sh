@@ -187,5 +187,9 @@ for url in https://api.movivo.com.br/api/v1/health https://movivo.com.br/; do
   echo "  ${code}  ${url}"
   [[ "$code" == "200" ]] || smoke_ok=0
 done
+dashboard_404_url=https://movivo.com.br/dashboard
+dashboard_404_code="$(curl -s -o "$stage/dashboard-404.html" -w '%{http_code}' --max-time 20 "$dashboard_404_url" || true)"
+echo "  ${dashboard_404_code}  ${dashboard_404_url} (404 estilizada)"
+[[ "$dashboard_404_code" == "404" ]] && grep -q 'Essa rota saiu do treino' "$stage/dashboard-404.html" || smoke_ok=0
 [[ $smoke_ok -eq 1 ]] || die "smoke test falhou (se é o 1º deploy, rode infra/vps/cloudflare-origin.sh --strict)"
 log "Deploy ${version} no ar"
