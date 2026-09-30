@@ -171,11 +171,8 @@
 
 @media (min-width: 1024px) {
   .act:not([data-active]) .actTitle {
-    color: rgba(20, 32, 28, 0.42);
-  }
-
-  .act:not([data-active]) > p {
-    opacity: 0.7;
+    /* 0.52 mantém os 3:1 do WCAG AA para texto grande sobre a Névoa (0.42 dava 2,56:1). */
+    color: rgba(20, 32, 28, 0.52);
   }
 }
 
