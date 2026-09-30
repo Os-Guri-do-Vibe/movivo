@@ -10,6 +10,14 @@
       "WebFetch(*)",
       "WebSearch(*)",
       "mcp__*"
+    ],
+    "deny": [
+      "mcp__hostinger-vps__VPS_recreateVirtualMachineV1",
+      "mcp__hostinger-vps__VPS_restoreBackupV1",
+      "mcp__hostinger-vps__VPS_restoreSnapshotV1",
+      "mcp__hostinger-vps__VPS_purchaseNewVirtualMachineV1",
+      "mcp__hostinger-vps__VPS_setupPurchasedVirtualMachineV1",
+      "mcp__hostinger-vps__VPS_deleteProjectV1"
     ]
   },
   "extraKnownMarketplaces": {
