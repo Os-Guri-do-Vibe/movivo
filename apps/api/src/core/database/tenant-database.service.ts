@@ -52,6 +52,29 @@ export type TenantTransaction = Parameters<Parameters<DrizzleClient['transaction
  */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * Emite o contexto de tenant numa ÚNICA instrução `SELECT set_config(...), set_config(...)`.
+ * Antes eram 2–3 statements sequenciais — cada um uma ida e volta app → PgBouncer → Postgres —
+ * e todo acesso com escopo de titular paga esse custo. Semântica idêntica: `is_local = true`
+ * (reverte no COMMIT/ROLLBACK) e valores sempre por bind param, nunca interpolados.
+ */
+async function setTenantContext(
+  tx: TenantTransaction,
+  userId: string | null,
+  role: string,
+  anamnesisSessionId?: string,
+): Promise<void> {
+  if (anamnesisSessionId === undefined) {
+    await tx.execute(
+      sql`SELECT set_config('app.current_user_id', ${userId}, true), set_config('app.current_role', ${role}, true)`,
+    );
+    return;
+  }
+  await tx.execute(
+    sql`SELECT set_config('app.current_user_id', ${userId}, true), set_config('app.current_role', ${role}, true), set_config('app.current_anamnesis_session_id', ${anamnesisSessionId}, true)`,
+  );
+}
+
 @Injectable()
 export class TenantDatabase {
   constructor(@Inject(DRIZZLE) private readonly db: DrizzleClient) {}
@@ -72,8 +95,7 @@ export class TenantDatabase {
       throw new TypeError(`runAsUser: role inválida "${role}".`);
     }
     return this.db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT set_config('app.current_user_id', ${userId}, true)`);
-      await tx.execute(sql`SELECT set_config('app.current_role', ${role}, true)`);
+      await setTenantContext(tx, userId, role);
       return cb(tx);
     });
   }
@@ -86,8 +108,7 @@ export class TenantDatabase {
   async runAsSystem<T>(cb: (tx: TenantTransaction) => Promise<T>): Promise<T> {
     return this.db.transaction(async (tx) => {
       // NULL (e não '') para que `current_user_id IS NULL` seja verdadeiro nas policies.
-      await tx.execute(sql`SELECT set_config('app.current_user_id', ${null}, true)`);
-      await tx.execute(sql`SELECT set_config('app.current_role', 'SYSTEM', true)`);
+      await setTenantContext(tx, null, 'SYSTEM');
       return cb(tx);
     });
   }
@@ -101,8 +122,7 @@ export class TenantDatabase {
    */
   async runAsToken<T>(cb: (tx: TenantTransaction) => Promise<T>): Promise<T> {
     return this.db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT set_config('app.current_user_id', ${null}, true)`);
-      await tx.execute(sql`SELECT set_config('app.current_role', 'ANONYMOUS', true)`);
+      await setTenantContext(tx, null, 'ANONYMOUS');
       return cb(tx);
     });
   }
@@ -122,11 +142,7 @@ export class TenantDatabase {
       throw new TypeError('runAsTokenScoped: sessionId inválido — esperado UUID.');
     }
     return this.db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT set_config('app.current_user_id', ${null}, true)`);
-      await tx.execute(sql`SELECT set_config('app.current_role', 'ANONYMOUS', true)`);
-      await tx.execute(
-        sql`SELECT set_config('app.current_anamnesis_session_id', ${sessionId}, true)`,
-      );
+      await setTenantContext(tx, null, 'ANONYMOUS', sessionId);
       return cb(tx);
     });
   }
