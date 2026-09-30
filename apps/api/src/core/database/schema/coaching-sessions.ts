@@ -9,7 +9,7 @@
  * Dado derivado de conversa de saúde: sob FORCE RLS (a policy é registrada em
  * `security-policies.ts`); leitura/escrita sempre sob `runAsUser`/`SET LOCAL`.
  */
-import { date, index, pgTable, text, unique } from 'drizzle-orm/pg-core';
+import { date, pgTable, text, unique } from 'drizzle-orm/pg-core';
 
 import { primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
 import { users } from './users';
@@ -32,10 +32,7 @@ export const coachingSessions = pgTable(
 
     ...timestampColumns,
   },
-  (table) => [
-    unique('uq_coaching_sessions_user_date').on(table.userId, table.sessionDate),
-    index('idx_coaching_sessions_user').on(table.userId, table.sessionDate),
-  ],
+  (table) => [unique('uq_coaching_sessions_user_date').on(table.userId, table.sessionDate)],
 );
 
 export type CoachingSessionRow = typeof coachingSessions.$inferSelect;

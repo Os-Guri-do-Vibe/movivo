@@ -23,17 +23,7 @@
  * Configuração global do produto, não dado de aluno — mesmo raciocínio de `agent_config`.
  */
 import { sql } from 'drizzle-orm';
-import {
-  check,
-  index,
-  jsonb,
-  integer,
-  pgEnum,
-  pgTable,
-  text,
-  unique,
-  uuid,
-} from 'drizzle-orm/pg-core';
+import { check, jsonb, integer, pgEnum, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
 
 import { ForbiddenTopicStatus } from '@movivo/shared';
 
@@ -74,7 +64,6 @@ export const aiForbiddenTopics = pgTable(
   },
   (table) => [
     unique('uq_ai_forbidden_topics_key_version').on(table.topicKey, table.version),
-    index('idx_ai_forbidden_topics_key').on(table.topicKey, table.version),
     // A ação é BLOCK e só. Repetido aqui porque o Zod protege a API, não o banco.
     check('ck_ai_forbidden_topics_action_block', sql`${table.action} = 'BLOCK'`),
   ],

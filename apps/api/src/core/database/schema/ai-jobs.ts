@@ -123,6 +123,9 @@ export const aiJobs = pgTable(
     index('idx_ai_jobs_user_created_at').on(table.userId, table.createdAt),
     // Predicado do SLO de DLQ e do painel de fila.
     index('idx_ai_jobs_status').on(table.status),
+    // Painel de SLA/custo de IA: janelas globais `created_at >= :since` sem filtro por titular
+    // (o índice por usuário acima não as atende). `ai_jobs` cresce a cada chamada de LLM.
+    index('idx_ai_jobs_created_at').on(table.createdAt),
   ],
 );
 

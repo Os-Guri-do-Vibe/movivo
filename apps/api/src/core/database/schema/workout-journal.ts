@@ -65,7 +65,6 @@ export const workoutSessions = pgTable(
       table.scheduledDate,
       table.sessionKey,
     ),
-    index('idx_workout_sessions_user_date').on(table.userId, table.scheduledDate),
     check('ck_workout_sessions_week', sql`${table.weekNumber} between 1 and 52`),
     check(
       'ck_workout_sessions_status',

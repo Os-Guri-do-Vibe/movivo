@@ -25,7 +25,6 @@ export const faqEntries = pgTable(
   (table) => [
     unique('uq_faq_entries_key_version').on(table.faqKey, table.version),
     index('idx_faq_entries_lookup').on(table.normalizedQuestion, table.createdAt),
-    index('idx_faq_entries_key').on(table.faqKey, table.version),
   ],
 );
 

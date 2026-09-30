@@ -1,5 +1,5 @@
 /** Guardrails L1 globais e versionados. A linha mais recente de cada chave é o estado atual. */
-import { index, integer, jsonb, pgEnum, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
+import { integer, jsonb, pgEnum, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
 
 import { eventTimestamp, primaryKeyColumn } from './_shared';
 import { staff } from './staff';
@@ -25,10 +25,7 @@ export const aiGuardrailRules = pgTable(
       .references(() => staff.id, { onDelete: 'restrict' }),
     createdAt: eventTimestamp('created_at').notNull().defaultNow(),
   },
-  (table) => [
-    unique('uq_ai_guardrail_rules_key_version').on(table.ruleKey, table.version),
-    index('idx_ai_guardrail_rules_key').on(table.ruleKey, table.version),
-  ],
+  (table) => [unique('uq_ai_guardrail_rules_key_version').on(table.ruleKey, table.version)],
 );
 
 export type AiGuardrailRuleRow = typeof aiGuardrailRules.$inferSelect;
