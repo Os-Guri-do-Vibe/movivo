@@ -44,6 +44,7 @@ import {
   type WhatsappTransport,
 } from '../src/modules/whatsapp/whatsapp-transport';
 import { PROFESSIONAL_ID, seedHealthEligibility } from './health-fixtures';
+import { PublishedFixtureConsentService } from './published-consent-fixture';
 
 const { env } = loadEnv();
 const apiRoot = process.cwd();
@@ -239,6 +240,11 @@ beforeAll(async () => {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(WHATSAPP_TRANSPORT)
     .useValue(fakeTransport)
+    .overrideProvider(ConsentService)
+    .useFactory({
+      factory: (tenant: TenantDatabase) => new PublishedFixtureConsentService(tenant),
+      inject: [TenantDatabase],
+    })
     .compile();
   app = moduleRef.createNestApplication({ logger: false });
   app.enableShutdownHooks();
