@@ -146,22 +146,24 @@ function makeSequencedService(
   const insertValues = vi.fn(async () => []);
   const execute = vi.fn(async () => []);
   const forUpdate = vi.fn();
-  const tx = {
-    select: vi.fn(() => {
-      const result = selections.shift() ?? [];
-      const chain: Record<string, unknown> = {};
-      for (const method of ['from', 'leftJoin', 'innerJoin', 'where', 'orderBy']) {
-        chain[method] = () => chain;
-      }
-      chain.for = (...args: unknown[]) => {
-        forUpdate(...args);
-        return chain;
-      };
-      chain.limit = async () => result;
-      chain.then = (resolve: (value: unknown[]) => unknown, reject: (reason: unknown) => unknown) =>
-        Promise.resolve(result).then(resolve, reject);
+  const select = vi.fn(() => {
+    const result = selections.shift() ?? [];
+    const chain: Record<string, unknown> = {};
+    for (const method of ['from', 'leftJoin', 'innerJoin', 'where', 'orderBy']) {
+      chain[method] = () => chain;
+    }
+    chain.for = (...args: unknown[]) => {
+      forUpdate(...args);
       return chain;
-    }),
+    };
+    chain.limit = async () => result;
+    chain.then = (resolve: (value: unknown[]) => unknown, reject: (reason: unknown) => unknown) =>
+      Promise.resolve(result).then(resolve, reject);
+    return chain;
+  });
+  const tx = {
+    select,
+    selectDistinct: select,
     update: vi.fn(() => ({ set: updateSet })),
     insert: vi.fn(() => ({ values: insertValues })),
     execute,
@@ -1136,7 +1138,9 @@ describe('DashboardService leituras operacionais', () => {
     const conversationAt = new Date('2026-08-03T12:00:00.000Z');
     const { service, append } = makeSequencedService(
       [
-        [{ formStarted: 4, protocolSent: 3, converted: 2 }],
+        [{ total: 4 }],
+        [{ total: 3 }],
+        [{ total: 2 }],
         [{ coachP95Ms: 35_000 }],
         [{ protocolAverageMinutes: 121 }],
         [
@@ -1157,12 +1161,10 @@ describe('DashboardService leituras operacionais', () => {
             studentName: 'Pessoa',
           },
         ],
-        [
-          { userId: USER_ID, answers: { adherenceScore: 4 } },
-          { userId: USER_ID, answers: { adherenceScore: 8 } },
-          { userId: ACTOR_ID, answers: { adherenceScore: 0 } },
-          { userId: 'x', answers: null },
-        ],
+        // Só os ids dos titulares com check-in enviado (alimentam a auditoria de leitura)...
+        [{ userId: USER_ID }, { userId: ACTOR_ID }, { userId: 'x' }],
+        // ...e a contagem de quem reportou adesão > 0, feita no banco.
+        [{ firstWorkout: 1 }],
       ],
       'PASS',
     );
@@ -1198,9 +1200,12 @@ describe('DashboardService leituras operacionais', () => {
 
   it('preserva SLA indisponivel quando nao existe amostra numerica', async () => {
     const { service } = makeSequencedService([
-      [{ formStarted: 0, protocolSent: 0, converted: 0 }],
+      [{ total: 0 }],
+      [{ total: 0 }],
+      [{ total: 0 }],
       [{ coachP95Ms: null }],
       [{ protocolAverageMinutes: 'invalido' }],
+      [],
       [],
       [],
     ]);
