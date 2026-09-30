@@ -36,7 +36,7 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL(publicEnv.siteUrl),
   title: {
-    default: 'MOVIVO: Ciência que treina com você',
+    default: 'Movivo - Assessoria de Treino',
     template: '%s · MOVIVO',
   },
   description: HOME_DESCRIPTION,
@@ -48,7 +48,7 @@ export const metadata: Metadata = {
     type: 'website',
     locale: 'pt_BR',
     siteName: 'MOVIVO',
-    title: 'MOVIVO: Ciência que treina com você',
+    title: 'Movivo - Assessoria de Treino',
     description: HOME_DESCRIPTION,
   },
   twitter: { card: 'summary_large_image' },

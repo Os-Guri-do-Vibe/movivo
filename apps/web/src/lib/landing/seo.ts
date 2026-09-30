@@ -5,8 +5,8 @@
  */
 export const SITE_NAME = 'MOVIVO';
 
-/** <title> da home: nome + proposta + respaldo, em ≤ 60 caracteres para não ser cortado no resultado. */
-export const HOME_TITLE = 'MOVIVO: treino individualizado no WhatsApp com respaldo CREF';
+/** <title> da home: mesmo padrão "Movivo - …" das demais páginas, curto para não ser cortado no resultado. */
+export const HOME_TITLE = 'Movivo - Assessoria de Treino';
 
 /** Meta description da home (≤ 160 caracteres). */
 export const HOME_DESCRIPTION =
