@@ -55,6 +55,8 @@ function makeWorker(
   opts: {
     findLatestPersonalInfo?: () => Promise<typeof personal | null>;
     aiSummary?: string | undefined;
+    changes?: Array<{ from: string; to: string }>;
+    failure?: { reason: 'VALIDATION_FAILED'; violations: string[] } | { reason: 'STALE' };
   } = {},
 ) {
   const workers = { create: vi.fn() } as unknown as WorkerFactory;
@@ -69,12 +71,14 @@ function makeWorker(
         startDate: new Date('2026-08-22T00:00:00.000Z'),
         endDate: new Date('2026-11-14T00:00:00.000Z'),
         totalWeeks: 12,
-        fromExerciseName: 'Flexão',
-        toExerciseName: 'Supino Reto (Halter)',
+        changes: opts.changes ?? [{ from: 'Flexão', to: 'Supino Reto (Halter)' }],
       }
-    : { released: false };
+    : opts.failure
+      ? { released: false, ...opts.failure }
+      : { released: false, reason: 'NOT_PENDING' };
   const release = vi.fn(async () => releaseResult);
-  const repository = { release } as unknown as ProtocolSubstitutionRepository;
+  const escalateToMandatory = vi.fn(async () => undefined);
+  const repository = { release, escalateToMandatory } as unknown as ProtocolSubstitutionRepository;
   const findLatestPersonalInfo = vi.fn(opts.findLatestPersonalInfo ?? (async () => personal));
   const setPdfContent = vi.fn(async () => undefined);
   const protocolRepository = {
@@ -101,6 +105,7 @@ function makeWorker(
     worker,
     workers,
     release,
+    escalateToMandatory,
     findLatestPersonalInfo,
     setPdfContent,
     enqueue,
@@ -143,6 +148,7 @@ describe('ProtocolSubstitutionReleaseWorker (janela de cortesia de 30min da subs
         deliveryReason: 'SUBSTITUTION',
         substitutionFromExercise: 'Flexão',
         substitutionToExercise: 'Supino Reto (Halter)',
+        substitutionChanges: [{ from: 'Flexão', to: 'Supino Reto (Halter)' }],
       },
       { jobId: 'substitution-delivery_u1_3' },
     );
@@ -163,8 +169,7 @@ describe('ProtocolSubstitutionReleaseWorker (janela de cortesia de 30min da subs
         totalWeeks: 12,
         mesocycleName: 'Mesociclo 1: Adaptação',
         reason: 'SUBSTITUTION',
-        substitutionFrom: 'Flexão',
-        substitutionTo: 'Supino Reto (Halter)',
+        substitutionChanges: [{ from: 'Flexão', to: 'Supino Reto (Halter)' }],
       }),
     );
     expect(enqueue).toHaveBeenCalledWith(
@@ -178,6 +183,39 @@ describe('ProtocolSubstitutionReleaseWorker (janela de cortesia de 30min da subs
       }),
       { jobId: 'substitution-delivery_u1_3' },
     );
+  });
+
+  it('troca em lote: entrega e resumo citam TODAS as trocas aplicadas', async () => {
+    const changes = [
+      { from: 'Leg Press 45°', to: 'Agachamento Hack' },
+      { from: 'Cadeira Extensora', to: 'Afundo' },
+    ];
+    const { worker, present, enqueue } = makeWorker(true, 3, { changes, aiSummary: 'Resumo.' });
+    await worker.process(job());
+    expect(present).toHaveBeenCalledWith(expect.objectContaining({ substitutionChanges: changes }));
+    expect(enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'protocol-delivery',
+      expect.objectContaining({
+        // Espelho da 1ª troca para consumidores anteriores ao lote.
+        substitutionFromExercise: 'Leg Press 45°',
+        substitutionToExercise: 'Agachamento Hack',
+        substitutionChanges: changes,
+      }),
+      { jobId: 'substitution-delivery_u1_3' },
+    );
+  });
+
+  it('as trocas aprovadas quebram a validação no protocolo vivo → escala para revisão obrigatória, sem entrega', async () => {
+    const { worker, escalateToMandatory, enqueue, emit } = makeWorker(false, 1, {
+      failure: { reason: 'VALIDATION_FAILED', violations: ['ISOLATION_AS_BASE'] },
+    });
+    const res = await worker.process(job());
+    expect(res.status).toBe('ESCALATED');
+    // Sem escalar, a proposta ficaria PENDING para sempre e bloquearia novas trocas.
+    expect(escalateToMandatory).toHaveBeenCalledWith({ userId: 'u1', role: 'USER' }, 'r1');
+    expect(emit).toHaveBeenCalledWith('protocol');
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
   it('já decidida ou protocolo mudou de versão → no-op, sem entrega', async () => {

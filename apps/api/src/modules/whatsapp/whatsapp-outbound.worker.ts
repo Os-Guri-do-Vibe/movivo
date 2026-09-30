@@ -91,6 +91,7 @@ export interface WhatsappOutboundJob {
   /** Só com `deliveryReason: 'SUBSTITUTION'` — nomes do exercício trocado, pra saudação. */
   substitutionFromExercise?: string;
   substitutionToExercise?: string;
+  substitutionChanges?: ReadonlyArray<{ from: string; to: string }>;
 }
 
 /**
@@ -391,11 +392,13 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     const pdfUrl = `${link}/pdf`;
     const firstName = studentName?.trim().split(/\s+/)[0] ?? null;
     const substitution =
-      data.deliveryReason === 'SUBSTITUTION' &&
-      data.substitutionFromExercise &&
-      data.substitutionToExercise
-        ? { from: data.substitutionFromExercise, to: data.substitutionToExercise }
-        : undefined;
+      data.deliveryReason !== 'SUBSTITUTION'
+        ? undefined
+        : data.substitutionChanges?.length
+          ? data.substitutionChanges
+          : data.substitutionFromExercise && data.substitutionToExercise
+            ? [{ from: data.substitutionFromExercise, to: data.substitutionToExercise }]
+            : undefined;
     const volumeAdjusted = data.deliveryReason === 'CHECKIN_ADJUSTMENT';
     const text = protocolDeliveryPdfText(
       firstName,

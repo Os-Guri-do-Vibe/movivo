@@ -1,0 +1,1 @@
+ALTER TABLE "protocol_substitution_requests" ADD COLUMN "items" jsonb;

@@ -45,7 +45,6 @@ import type {
   ProtocolDetail,
   QueueDetail as QueueDetailType,
   QueueKind,
-  SubstitutionDetail,
 } from '@/lib/dashboard-types';
 
 import { ConfirmAction } from './confirm-action';
@@ -62,6 +61,14 @@ import { WEEKDAY_ITEMS } from '../onboarding/step2-anamnesis';
 import { AnamnesisAnswersModal, BIOLOGICAL_SEX_LABELS } from './protocol-anamnesis-answers';
 import { meaningfulText } from './queue-board';
 import { SubstitutionCatalogGapDialog } from './substitution-catalog-gap-dialog';
+import {
+  allItemsDiscarded,
+  buildItemEdits,
+  SubstitutionItemsReview,
+  unresolvedItemIndexes,
+  type ItemDraft,
+  type ItemDrafts,
+} from './substitution-items-review';
 
 const fieldClass =
   'min-h-11 w-full rounded-lg border border-input bg-background px-3 text-label focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring';
@@ -1235,63 +1242,6 @@ function ProtocolStudentHeader({
   );
 }
 
-/**
- * Detalhe de uma proposta de substituição de exercício via IA (achado 2026-09-02) — o que
- * vai virar o quê, o motivo, e em quais dias da semana a troca se aplica. Só leitura: a
- * decisão do profissional (aprovar agora ou recusar) é o `ConfirmAction` logo abaixo, em
- * `QueueDetail` — mesma separação de `ProtocolSummary` (conteúdo) vs. o botão de assinar.
- */
-function SubstitutionSummary({ substitution }: { substitution: SubstitutionDetail }) {
-  // Achado 2026-09-09: `to.id === null` é a proposta `catalogGap` — o aluno pediu um
-  // exercício que ainda não existe no catálogo, então não há substituto real pra mostrar
-  // como uma troca de verdade ainda, só o texto exatamente como ele pediu.
-  const catalogGap = substitution.to.id === null;
-  return (
-    <section
-      aria-labelledby="substitution-title"
-      className="rounded-xl border border-border bg-card p-4 sm:p-5"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="substitution-title" className="text-h3 font-semibold">
-          Troca proposta
-        </h2>
-        {substitution.reviewUrgency === 'MANDATORY' ? (
-          // Coral só na borda (elemento gráfico) — texto em `--foreground`, mesma regra de
-          // contraste de `FieldError`/`FieldWarning` (WCAG 1.4.3: coral em texto pequeno
-          // sobre fundo claro reprova AA).
-          <span className="flex items-center gap-1.5 rounded-full border border-coral px-2.5 py-1 text-xs font-semibold text-foreground">
-            <ShieldAlert aria-hidden="true" className="size-3.5 text-coral" />
-            Revisão obrigatória
-          </span>
-        ) : null}
-      </div>
-      <div className="mt-4 flex flex-wrap items-center gap-3 text-body">
-        <span className="rounded-lg bg-secondary px-3 py-1.5 font-medium line-through decoration-2">
-          {substitution.from.name}
-        </span>
-        <span aria-hidden="true" className="text-muted-foreground">
-          →
-        </span>
-        {catalogGap ? (
-          <span className="rounded-lg border border-dashed border-coral px-3 py-1.5 font-semibold text-foreground">
-            “{substitution.to.name}” (fora do catálogo)
-          </span>
-        ) : (
-          <span className="rounded-lg bg-accent px-3 py-1.5 font-semibold text-accent-foreground">
-            {substitution.to.name}
-          </span>
-        )}
-      </div>
-      {substitution.diff && substitution.diff.sessionsAffected.length > 0 ? (
-        <p className="mt-3 text-label text-muted-foreground">
-          Dias afetados: {substitution.diff.sessionsAffected.join(', ')}
-        </p>
-      ) : null}
-      <p className="mt-3 text-label text-muted-foreground">{substitution.changeReason}</p>
-    </section>
-  );
-}
-
 function Context({ detail }: { detail: QueueDetailType }) {
   const entries = Object.entries(detail.context);
   return (
@@ -1329,13 +1279,18 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
   const [success, setSuccess] = useState('');
   const [resolution, setResolution] = useState('Contato realizado e orientação registrada.');
   const [resolutionNotes, setResolutionNotes] = useState('');
-  const [showCatalogGapDialog, setShowCatalogGapDialog] = useState(false);
+  // Item da proposta cujo exercício está sendo adicionado ao catálogo (`null` = diálogo fechado).
+  const [catalogGapItem, setCatalogGapItem] = useState<number | null>(null);
+  // Rascunho das decisões do profissional por item (troca em lote). Recomeça a cada carga do
+  // detalhe: depois de aprovar/adicionar ao catálogo o servidor é a fonte de verdade.
+  const [itemDrafts, setItemDrafts] = useState<ItemDrafts>({});
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
       setError('');
       try {
         setDetail(await getQueueDetail(kind, id, signal));
+        setItemDrafts({});
       } catch (caught) {
         if (caught instanceof DOMException && caught.name === 'AbortError') return;
         setError(caught instanceof Error ? caught.message : 'Não foi possível carregar o caso.');
@@ -1447,7 +1402,16 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
             }}
           />
         ) : null}
-        {detail.substitution ? <SubstitutionSummary substitution={detail.substitution} /> : null}
+        {detail.substitution ? (
+          <SubstitutionItemsReview
+            substitution={detail.substitution}
+            drafts={itemDrafts}
+            onChange={(index: number, draft: ItemDraft) =>
+              setItemDrafts((current) => ({ ...current, [index]: draft }))
+            }
+            onAddCatalog={setCatalogGapItem}
+          />
+        ) : null}
         {detail.replay ? <ConversationReplay replay={detail.replay} /> : null}
 
         {/* Achado 2026-08-19: pra protocolo, "Contexto autorizado" só repetia a versão
@@ -1474,52 +1438,85 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
           </div>
         ) : null}
 
-        {kind === 'SUBSTITUTION' && detail.substitution?.status === 'PENDING' ? (
-          <div className="flex flex-wrap justify-end gap-3">
-            <ConfirmAction
-              triggerLabel="Recusar"
-              title="Recusar esta troca?"
-              description="O exercício original é mantido no protocolo do aluno. Ele será avisado que a troca não foi aplicada."
-              confirmLabel="Confirmar recusa"
-              destructive
-              onConfirm={() =>
-                runAction(
-                  () => discardSubstitution(id),
-                  'cref_substitution_discarded',
-                  'Troca recusada — exercício original mantido.',
-                )
-              }
-            />
-            {detail.substitution.catalogGap ? (
-              <Button onClick={() => setShowCatalogGapDialog(true)}>
-                Adicionar exercício ao catálogo
-              </Button>
-            ) : (
-              <ConfirmAction
-                triggerLabel="Aprovar agora"
-                title="Aplicar esta troca agora?"
-                description="A troca é aplicada ao protocolo do aluno imediatamente, sem esperar a liberação automática, e o PDF atualizado é reenviado pelo WhatsApp."
-                confirmLabel="Confirmar e aplicar"
-                onConfirm={() =>
-                  runAction(
-                    () => approveSubstitutionNow(id),
-                    'cref_substitution_approved',
-                    'Troca aplicada e protocolo reenviado.',
-                  )
-                }
-              />
-            )}
-          </div>
-        ) : null}
+        {kind === 'SUBSTITUTION' && detail.substitution?.status === 'PENDING'
+          ? (() => {
+              const substitution = detail.substitution;
+              const unresolved = unresolvedItemIndexes(substitution, itemDrafts);
+              const everyItemDiscarded = allItemsDiscarded(substitution, itemDrafts);
+              const multiple = substitution.items.length > 1;
+              return (
+                <div className="space-y-3">
+                  {unresolved.length > 0 ? (
+                    <p role="note" className="text-label text-muted-foreground">
+                      {unresolved.length > 1
+                        ? 'Há pedidos de exercício fora do catálogo: adicione-os ao catálogo ou descarte esses itens para aprovar.'
+                        : 'O exercício pedido está fora do catálogo: adicione-o ao catálogo ou descarte o item para aprovar.'}
+                    </p>
+                  ) : null}
+                  <div className="flex flex-wrap justify-end gap-3">
+                    <ConfirmAction
+                      triggerLabel="Recusar"
+                      title={multiple ? 'Recusar todas as trocas?' : 'Recusar esta troca?'}
+                      description={
+                        multiple
+                          ? 'Os exercícios originais são mantidos no protocolo do aluno. Ele será avisado que as trocas não foram aplicadas.'
+                          : 'O exercício original é mantido no protocolo do aluno. Ele será avisado que a troca não foi aplicada.'
+                      }
+                      confirmLabel="Confirmar recusa"
+                      destructive
+                      onConfirm={() =>
+                        runAction(
+                          () => discardSubstitution(id),
+                          'cref_substitution_discarded',
+                          multiple
+                            ? 'Trocas recusadas — exercícios originais mantidos.'
+                            : 'Troca recusada — exercício original mantido.',
+                        )
+                      }
+                    />
+                    {everyItemDiscarded ? null : (
+                      <ConfirmAction
+                        triggerLabel="Aprovar agora"
+                        title={
+                          multiple ? 'Aplicar estas trocas agora?' : 'Aplicar esta troca agora?'
+                        }
+                        description={
+                          multiple
+                            ? 'As trocas mantidas são aplicadas ao protocolo do aluno imediatamente, sem esperar a liberação automática, com as edições que você fez. Itens descartados não são aplicados. O PDF atualizado é reenviado pelo WhatsApp.'
+                            : 'A troca é aplicada ao protocolo do aluno imediatamente, sem esperar a liberação automática, e o PDF atualizado é reenviado pelo WhatsApp.'
+                        }
+                        confirmLabel="Confirmar e aplicar"
+                        disabled={unresolved.length > 0}
+                        onConfirm={() =>
+                          runAction(
+                            () =>
+                              approveSubstitutionNow(id, buildItemEdits(substitution, itemDrafts)),
+                            'cref_substitution_approved',
+                            multiple
+                              ? 'Trocas aplicadas e protocolo reenviado.'
+                              : 'Troca aplicada e protocolo reenviado.',
+                          )
+                        }
+                      />
+                    )}
+                  </div>
+                </div>
+              );
+            })()
+          : null}
 
-        {showCatalogGapDialog && detail.substitution ? (
+        {catalogGapItem !== null && detail.substitution ? (
           <SubstitutionCatalogGapDialog
             substitutionId={id}
-            requestedName={detail.substitution.to.name}
-            onClose={() => setShowCatalogGapDialog(false)}
+            itemIndex={catalogGapItem}
+            requestedName={
+              detail.substitution.items.find((item) => item.index === catalogGapItem)?.to.name ??
+              detail.substitution.to.name
+            }
+            onClose={() => setCatalogGapItem(null)}
             onSaved={(message) => {
-              setShowCatalogGapDialog(false);
-              captureDashboardEvent('cref_substitution_catalog_gap_approved', { kind });
+              setCatalogGapItem(null);
+              captureDashboardEvent('cref_substitution_catalog_gap_added', { kind });
               setSuccess(message);
               void load();
             }}

@@ -21,6 +21,7 @@ export * from './ad-spend.schema';
 export * from './partners.schema';
 export * from './knowledge.schema';
 export * from './exercise-catalog.schema';
+export * from './substitution.schema';
 export * from './workout.schema';
 export * from './workout-share-card.schema';
 export * from './checkin-weekly.schema';

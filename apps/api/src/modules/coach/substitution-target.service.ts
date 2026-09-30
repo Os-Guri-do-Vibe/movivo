@@ -25,10 +25,11 @@ import { z } from 'zod';
 import { untrustedDataEnvelope } from '../ai-coach/context/untrusted-context';
 import { LlmRouter } from '../ai-coach/llm/llm-router.service';
 import type { ScrubUser } from '../ai-coach/llm/llm.types';
+import { MAX_SUBSTITUTION_ITEMS } from '../protocol/protocol-substitution-items';
 
 const targetSchema = z
   .object({
-    exerciseId: z.string().min(1).max(100).nullable(),
+    exerciseIds: z.array(z.string().min(1).max(100)).max(20),
   })
   .strict();
 
@@ -49,7 +50,13 @@ export interface IdentifyTargetRequest {
   personaSlot: BiologicalSex | null;
 }
 
-export type IdentifyTargetResult = { identified: true; exerciseId: string } | { identified: false };
+/**
+ * Achado 2026-09-30 (troca em lote): o aluno pode pedir várias trocas de uma vez ("troca o leg
+ * press e a extensora"). Devolve 1 a `MAX_SUBSTITUTION_ITEMS` alvos; acima disso `tooMany` —
+ * não é troca, é revisão de treino, e o fluxo pede pra ele priorizar.
+ */
+export type IdentifyTargetResult =
+  { identified: true; exerciseIds: string[] } | { identified: false; tooMany: boolean };
 
 function parseJson(text: string): unknown {
   const trimmed = text
@@ -72,7 +79,7 @@ export class SubstitutionTargetService {
   }
 
   async identify(request: IdentifyTargetRequest): Promise<IdentifyTargetResult> {
-    if (request.protocolExercises.length === 0) return { identified: false };
+    if (request.protocolExercises.length === 0) return { identified: false, tooMany: false };
     const allowedIds = new Set(request.protocolExercises.map((ex) => ex.id));
 
     try {
@@ -84,7 +91,7 @@ export class SubstitutionTargetService {
         dataClass: 'HEALTH',
         temperature: 0,
         json: true,
-        maxTokens: 160,
+        maxTokens: 200,
         // `ai_jobs.intent` é `varchar(30)` — achado 2026-09-02 (reproduzido ao vivo): um
         // valor mais longo aqui não falha a chamada em si, mas quebra a GRAVAÇÃO da
         // auditoria de falha (`LlmRouter.recordFailure`), que mascara o erro real do
@@ -92,17 +99,19 @@ export class SubstitutionTargetService {
         intent: 'substitution_target_match',
         personaSlot: request.personaSlot,
         system:
-          'Você identifica qual exercício do protocolo de treino do aluno ele quer trocar ou ' +
+          'Você identifica quais exercícios do protocolo de treino do aluno ele quer trocar ou ' +
           'está insatisfeito com — a partir de uma conversa recente de WhatsApp com o AI Coach ' +
           'da MOVIVO. O aluno pode não usar a palavra "trocar": insegurança, medo, desconforto, ' +
           '"não gosto desse", dor leve não emergencial ao fazer um exercício específico e ' +
           'pedido direto de substituição contam igualmente. A ÚLTIMA mensagem do aluno pode não ' +
           'nomear o exercício sozinha (ex.: uma resposta de continuação como "é insegurança ' +
           'mesmo, sem dor") — use as mensagens ANTERIORES da mesma conversa pra entender a que ' +
-          'exercício ele se refere. Se, mesmo considerando a conversa inteira, não der pra ' +
-          'apontar com confiança para UM exercício da lista recebida, responda null — não ' +
-          'adivinhe. Retorne somente JSON estrito: {"exerciseId": "<id da lista> ou null"}. O ' +
-          'id retornado TEM que ser exatamente um dos ids recebidos na lista.',
+          'exercício ele se refere. O aluno pode pedir a troca de mais de um exercício de uma ' +
+          'vez ("troca o leg press e a extensora"): inclua todos os que ele citar. Se, mesmo ' +
+          'considerando a conversa inteira, não der pra apontar com confiança para nenhum ' +
+          'exercício da lista recebida, retorne uma lista vazia — não adivinhe. Retorne ' +
+          'somente JSON estrito: {"exerciseIds": ["<id da lista>", ...]}. Cada id retornado ' +
+          'TEM que ser exatamente um dos ids recebidos na lista.',
         messages: [
           {
             role: 'user',
@@ -114,16 +123,17 @@ export class SubstitutionTargetService {
         ],
       });
       const parsed = targetSchema.parse(parseJson(result.text));
-      if (parsed.exerciseId === null || !allowedIds.has(parsed.exerciseId)) {
-        return { identified: false };
-      }
-      return { identified: true, exerciseId: parsed.exerciseId };
+      // Um id fora da lista (alucinação) é descartado, nunca aceito.
+      const ids = [...new Set(parsed.exerciseIds.filter((id) => allowedIds.has(id)))];
+      if (ids.length === 0) return { identified: false, tooMany: false };
+      if (ids.length > MAX_SUBSTITUTION_ITEMS) return { identified: false, tooMany: true };
+      return { identified: true, exerciseIds: ids };
     } catch (error) {
       this.logger.warn(
         { event: 'substitution_target_identification_failed', err: String(error) },
         'identificação do exercício-alvo falhou — fallback honesto',
       );
-      return { identified: false };
+      return { identified: false, tooMany: false };
     }
   }
 }

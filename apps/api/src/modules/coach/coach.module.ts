@@ -21,6 +21,7 @@ import { CheckinWeeklyFeedbackWorker } from './checkin-weekly-feedback.worker';
 import { ConversationRepository } from './conversation.repository';
 import { ProtocolVolumeAdjustmentService } from './protocol-volume-adjustment.service';
 import { SubstitutionCatalogLookupService } from './substitution-catalog-lookup.service';
+import { SubstitutionFlowService } from './substitution-flow.service';
 import { SubstitutionResolutionService } from './substitution-resolution.service';
 import { SubstitutionTargetService } from './substitution-target.service';
 import { WorkoutFeedbackService } from './workout-feedback.service';
@@ -34,6 +35,7 @@ import { WorkoutFeedbackWorker } from './workout-feedback.worker';
     SubstitutionTargetService,
     SubstitutionResolutionService,
     SubstitutionCatalogLookupService,
+    SubstitutionFlowService,
     WorkoutFeedbackService,
     WorkoutFeedbackWorker,
     CheckinWeeklyFeedbackService,

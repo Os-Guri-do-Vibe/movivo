@@ -27,11 +27,42 @@ const allTexts = [
   // Achado 2026-09-09 (bug reproduzido ao vivo pelo fundador): a saudação de reentrega
   // pós-substituição tinha um travessão que escapou da checagem por não ter cobertura
   // aqui — este é exatamente o caminho onde ele apareceu, por isso entra na varredura.
-  protocolDeliveryPdfText('Rodrigo', undefined, {
-    from: 'Supino Reto (Barra)',
-    to: 'Supino Reto (Máquina)',
-  }),
+  protocolDeliveryPdfText('Rodrigo', undefined, [
+    { from: 'Supino Reto (Barra)', to: 'Supino Reto (Máquina)' },
+  ]),
+  // Achado 2026-09-30 (troca em lote): a mesma saudação com mais de uma troca.
+  protocolDeliveryPdfText('Rodrigo', undefined, [
+    { from: 'Leg Press 45°', to: 'Agachamento Hack' },
+    { from: 'Cadeira Extensora', to: 'Afundo' },
+    { from: 'Mesa Flexora', to: 'Stiff' },
+  ]),
 ];
+
+describe('saudação de reentrega pós-substituição (troca em lote)', () => {
+  it('uma troca: singular, nomeando o de/para', () => {
+    const text = protocolDeliveryPdfText('Rodrigo', undefined, [
+      { from: 'Supino Reto (Barra)', to: 'Supino Reto (Máquina)' },
+    ]);
+    expect(text).toContain('a troca do seu exercício já foi feita');
+    expect(text).toContain('"Supino Reto (Barra)" virou "Supino Reto (Máquina)"');
+  });
+
+  it('várias trocas: plural, nomeando todas em português natural', () => {
+    const text = protocolDeliveryPdfText('Rodrigo', undefined, [
+      { from: 'Leg Press 45°', to: 'Agachamento Hack' },
+      { from: 'Cadeira Extensora', to: 'Afundo' },
+      { from: 'Mesa Flexora', to: 'Stiff' },
+    ]);
+    expect(text).toContain('a troca dos seus exercícios já foi feita');
+    expect(text).toContain(
+      '"Leg Press 45°" virou "Agachamento Hack", "Cadeira Extensora" virou "Afundo" e "Mesa Flexora" virou "Stiff"',
+    );
+  });
+
+  it('sem trocas (lista vazia) mantém a saudação de 1ª entrega', () => {
+    expect(protocolDeliveryPdfText('Rodrigo', undefined, [])).toContain('seu treino está pronto');
+  });
+});
 
 describe('templates de WhatsApp (US-2.5)', () => {
   it('nenhuma copy contém termo proibido', () => {

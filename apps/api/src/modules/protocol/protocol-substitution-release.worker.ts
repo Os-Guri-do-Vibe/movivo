@@ -58,6 +58,18 @@ export class ProtocolSubstitutionReleaseWorker implements OnModuleInit {
     const release = await this.repository.release({ userId, role: 'USER' }, requestId);
 
     if (!release.released) {
+      if (release.reason === 'VALIDATION_FAILED') {
+        // As trocas aprovadas, aplicadas ao protocolo VIVO, quebraram a validação (catálogo ou
+        // regras mudaram desde a criação da proposta). Sem escalar, a proposta ficaria
+        // `PENDING` para sempre, bloqueando novas trocas: passa a exigir decisão humana.
+        await this.repository.escalateToMandatory({ userId, role: 'USER' }, requestId);
+        this.queueEvents.emit('protocol');
+        this.logger.warn(
+          { userId, requestId, violations: release.violations },
+          'liberação automática de substituição falhou na validação — escalada para revisão obrigatória',
+        );
+        return { status: 'ESCALATED' };
+      }
       this.logger.info(
         { userId, requestId },
         'liberação de substituição pulada — já decidida ou protocolo mudou de versão',
@@ -93,8 +105,7 @@ export class ProtocolSubstitutionReleaseWorker implements OnModuleInit {
         totalWeeks: release.totalWeeks,
         mesocycleName: release.mesocycleName,
         reason: 'SUBSTITUTION',
-        substitutionFrom: release.fromExerciseName,
-        substitutionTo: release.toExerciseName,
+        substitutionChanges: release.changes,
       });
     } catch (error) {
       this.logger.warn(
@@ -121,8 +132,9 @@ export class ProtocolSubstitutionReleaseWorker implements OnModuleInit {
         type: 'PROTOCOL_DELIVERY',
         text: aiSummary,
         deliveryReason: 'SUBSTITUTION',
-        substitutionFromExercise: release.fromExerciseName,
-        substitutionToExercise: release.toExerciseName,
+        substitutionFromExercise: release.changes[0]?.from,
+        substitutionToExercise: release.changes[0]?.to,
+        substitutionChanges: release.changes,
       },
       { jobId: `substitution-delivery_${userId}_${release.version}` },
     );

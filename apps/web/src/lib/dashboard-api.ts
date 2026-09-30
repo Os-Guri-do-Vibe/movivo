@@ -12,6 +12,8 @@ import type {
   QueueSeverity,
   ReplayMessage,
   SubstitutionDetail,
+  SubstitutionItemEdit,
+  SubstitutionItemView,
 } from './dashboard-types';
 import { isAnalyticsEnabled } from './env';
 
@@ -208,6 +210,20 @@ function parseNullableExerciseRef(value: unknown): { id: string | null; name: st
   return { id: typeof value.id === 'string' ? value.id : null, name: string(value.name) };
 }
 
+function parseSubstitutionItem(value: unknown, fallbackIndex: number): SubstitutionItemView {
+  if (!isRecord(value)) throw new DashboardApiError(502, 'Item da substituição inválido.');
+  const decision = value.decision;
+  return {
+    index: typeof value.index === 'number' ? value.index : fallbackIndex,
+    from: parseExerciseRef(value.from),
+    to: parseNullableExerciseRef(value.to),
+    catalogGap: value.catalogGap === true,
+    mandatory: value.mandatory === true,
+    decision: decision === 'APPROVED' || decision === 'DISCARDED' ? decision : 'PENDING',
+    options: Array.isArray(value.options) ? value.options.map(parseExerciseRef) : [],
+  };
+}
+
 function parseSubstitutionDetail(value: Record<string, unknown>): SubstitutionDetail {
   const status = value.status;
   if (status !== 'PENDING' && status !== 'RELEASED' && status !== 'DISCARDED') {
@@ -219,6 +235,23 @@ function parseSubstitutionDetail(value: Record<string, unknown>): SubstitutionDe
     protocolId: string(value.protocolId),
     from: parseExerciseRef(value.from),
     to: parseNullableExerciseRef(value.to),
+    // Resposta sem `items` (API anterior ao lote): a proposta é o único item das colunas.
+    items: Array.isArray(value.items)
+      ? value.items.map(parseSubstitutionItem)
+      : [
+          parseSubstitutionItem(
+            {
+              index: 0,
+              from: value.from,
+              to: value.to,
+              catalogGap: value.catalogGap,
+              mandatory: value.reviewUrgency === 'MANDATORY',
+              decision: status,
+              options: [],
+            },
+            0,
+          ),
+        ],
     diff: diff
       ? {
           type: 'EXERCISE_SUBSTITUTION',
@@ -364,10 +397,18 @@ export async function signProtocol(id: string): Promise<ActionResult> {
   })) as ActionResult;
 }
 
-/** Aprova a proposta de substituição de exercício ANTES da janela de 30 min. */
-export async function approveSubstitutionNow(id: string): Promise<ActionResult> {
+/**
+ * Aprova a proposta de substituição de exercício ANTES da janela de 30 min. `edits` traz a
+ * decisão por item (troca em lote): outro exercício no lugar do proposto, ou descartar o item.
+ * Sem `edits`, aprova todos os itens como estão.
+ */
+export async function approveSubstitutionNow(
+  id: string,
+  edits?: readonly SubstitutionItemEdit[],
+): Promise<ActionResult> {
   return (await request(`/substitutions/${encodeURIComponent(id)}/approve`, {
     method: 'POST',
+    body: edits && edits.length > 0 ? JSON.stringify({ items: edits }) : undefined,
   })) as ActionResult;
 }
 
@@ -395,20 +436,24 @@ export interface NewCatalogExercisePayload {
 }
 
 /**
- * Achado 2026-09-09 (pedido do fundador): só pra proposta `catalogGap` — publica o
- * exercício pedido pelo aluno no catálogo e aprova a troca no mesmo gesto. Se o exercício
- * recém-publicado, aplicado ao protocolo inteiro, quebrar a validação, nada é aplicado
- * (o erro descreve o motivo) — o exercício fica publicado pra tentar de novo com outra
- * categorização.
+ * Achado 2026-09-09 (pedido do fundador): só pra item `catalogGap` — publica o exercício
+ * pedido pelo aluno no catálogo e o liga ao item. Achado 2026-09-30: NÃO aprova mais; o item
+ * vira uma troca comum e o profissional decide na tela única, item a item. Se o exercício
+ * recém-publicado, aplicado ao protocolo inteiro, quebrar a validação, nada é ligado (o erro
+ * descreve o motivo) — o exercício fica publicado pra tentar de novo com outra categorização.
  */
-export async function addCatalogExerciseAndApproveSubstitution(
+export async function addCatalogExerciseToSubstitutionItem(
   id: string,
+  itemIndex: number,
   payload: NewCatalogExercisePayload,
 ): Promise<ActionResult> {
-  return (await request(`/substitutions/${encodeURIComponent(id)}/add-and-approve`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })) as ActionResult;
+  return (await request(
+    `/substitutions/${encodeURIComponent(id)}/items/${itemIndex}/catalog-exercise`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  )) as ActionResult;
 }
 
 export async function resolveHandoff(

@@ -30,6 +30,7 @@ import { AgentPersonaService } from '../../core/agent-config/agent-persona.servi
 import { LlmRouter } from '../ai-coach/llm/llm-router.service';
 import type { ScrubUser } from '../ai-coach/llm/llm.types';
 import { stripEmDash } from '../coach/response-formatter';
+import { describeChangesAsk, type SubstitutionChange } from './protocol-substitution-items';
 import { ValidationService } from './validation/validation.service';
 
 export interface PresentWorkoutParams {
@@ -47,22 +48,21 @@ export interface PresentWorkoutParams {
    * mudar as regras de segurança/linguagem.
    */
   reason: 'INITIAL' | 'SUBSTITUTION';
-  /** Só com `reason: 'SUBSTITUTION'` — nomes do exercício trocado, pro resumo poder citá-los. */
-  substitutionFrom?: string;
-  substitutionTo?: string;
+  /** Só com `reason: 'SUBSTITUTION'` — as trocas aplicadas (1+ na troca em lote), pro resumo
+   * poder citá-las. */
+  substitutionChanges?: readonly SubstitutionChange[];
 }
 
 function systemPrompt(
   persona: AgentPersona,
   reason: 'INITIAL' | 'SUBSTITUTION',
-  substitutionFrom?: string,
-  substitutionTo?: string,
+  substitutionChanges?: readonly SubstitutionChange[],
 ): string {
   const task =
-    reason === 'SUBSTITUTION' && substitutionFrom && substitutionTo
+    reason === 'SUBSTITUTION' && substitutionChanges?.length
       ? `Tarefa: escrever a mensagem de WhatsApp que confirma, de forma simples e resumida, a ` +
-        `ATUALIZAÇÃO do protocolo — o aluno pediu pra trocar "${substitutionFrom}" por ` +
-        `"${substitutionTo}" e a troca já foi aplicada (o plano completo ATUALIZADO já foi ` +
+        `ATUALIZAÇÃO do protocolo — o aluno pediu pra trocar ${describeChangesAsk(substitutionChanges)} ` +
+        `e ${substitutionChanges.length > 1 ? 'as trocas já foram aplicadas' : 'a troca já foi aplicada'} (o plano completo ATUALIZADO já foi ` +
         'enviado em PDF; esta mensagem só reforça o que mudou e o que a pessoa vai encontrar ' +
         'nele). NÃO é a primeira entrega do treino — nunca trate como se fosse ("seu treino ' +
         'está pronto", "montamos tudo com base nos seus objetivos" etc. não cabem aqui). 2 a 4 ' +
@@ -116,12 +116,7 @@ export class WorkoutPresentationService {
         purpose: 'AI_RESPONSE',
         userId: params.userId,
         user: params.user,
-        system: systemPrompt(
-          persona,
-          params.reason,
-          params.substitutionFrom,
-          params.substitutionTo,
-        ),
+        system: systemPrompt(persona, params.reason, params.substitutionChanges),
         messages: [
           {
             role: 'user',

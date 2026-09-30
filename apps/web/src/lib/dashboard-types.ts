@@ -85,10 +85,37 @@ export interface ProtocolDetail {
   validation?: { valid: boolean; issues: string[] };
 }
 
+/**
+ * Uma troca da proposta (achado 2026-09-30, troca em lote): o profissional aprova, edita ou
+ * descarta cada item individualmente na tela única da proposta.
+ */
+export interface SubstitutionItemView {
+  index: number;
+  from: { id: string; name: string };
+  /** `id: null` quando o aluno pediu um exercício que não existe no catálogo. */
+  to: { id: string | null; name: string };
+  catalogGap: boolean;
+  /** Fora da curadoria segura padrão: exige decisão humana. */
+  mandatory: boolean;
+  decision: 'PENDING' | 'APPROVED' | 'DISCARDED';
+  /** Opções SEGURAS para este aluno (recomputadas contra o protocolo vivo) — a troca do
+   * item por outra opção é a "edição". Inclui a escolha atual. */
+  options: Array<{ id: string; name: string }>;
+}
+
+/** Decisão do profissional sobre um item, enviada na aprovação. */
+export interface SubstitutionItemEdit {
+  index: number;
+  action: 'APPROVE' | 'DISCARD';
+  toExerciseId?: string;
+}
+
 /** Detalhe de uma proposta de substituição de exercício via IA (achado 2026-09-02). */
 export interface SubstitutionDetail {
   id: string;
   protocolId: string;
+  /** Um item por troca pedida (1 a 3). */
+  items: SubstitutionItemView[];
   from: { id: string; name: string };
   /** Achado 2026-09-09: `id: null` quando `catalogGap` — o exercício pedido ainda não tem
    * id nenhum, `name` carrega o texto exatamente como o aluno pediu. */

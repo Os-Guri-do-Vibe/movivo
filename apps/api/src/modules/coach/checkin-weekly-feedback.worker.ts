@@ -136,10 +136,10 @@ export class CheckinWeeklyFeedbackWorker implements OnModuleInit {
         protocolExercises,
         personaSlot: loaded.biologicalSex,
       });
-      if (target.identified) {
+      const identifiedId = target.identified ? target.exerciseIds[0] : undefined;
+      if (identifiedId) {
         identifiedExerciseName =
-          protocolExercises.find((exercise) => exercise.id === target.exerciseId)?.name ??
-          target.exerciseId;
+          protocolExercises.find((exercise) => exercise.id === identifiedId)?.name ?? identifiedId;
       }
 
       if (hasSafetySignal(difficultDescription)) {

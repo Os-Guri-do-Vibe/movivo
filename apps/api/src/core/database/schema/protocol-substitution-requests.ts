@@ -79,6 +79,18 @@ export const protocolSubstitutionRequests = pgTable(
      * enquanto `catalog_gap = true`, mesmo motivo de `proposedContent`. */
     diff: jsonb('diff'),
 
+    /**
+     * Achado 2026-09-30 (troca em lote): as trocas da proposta, 1 a 3 itens no MESMO registro
+     * (`SubstitutionItem[]`, ver `protocol-substitution-items.ts`). O profissional aprova,
+     * edita ou descarta cada item individualmente na tela única da proposta.
+     *
+     * Aditiva e anulável de propósito: propostas anteriores a esta coluna (e a versão anterior
+     * da API, após um rollback só de imagem) seguem só com as colunas `from_*`/`to_*`, que
+     * continuam gravadas espelhando o 1º item. `null` = proposta de item único legada; quem lê
+     * deriva o item das colunas (`itemsOf`).
+     */
+    items: jsonb('items'),
+
     /** Motivo humano-legível (ex.: "Substituição solicitada pelo aluno via WhatsApp: X → Y"). */
     changeReason: text('change_reason').notNull(),
 

@@ -41,7 +41,8 @@ const INTENT_GLOSS: Record<Intent, string> = {
   DUVIDA_TECNICA:
     'dúvida sobre execução/técnica de um exercício, ou sobre a estrutura do próprio ' +
     'protocolo (dias de treino, divisão, foco de cada sessão, objetivo do plano)',
-  SUBSTITUICAO_EXERCICIO: 'quer trocar um exercício do treino por outro',
+  SUBSTITUICAO_EXERCICIO:
+    'quer trocar um exercício do treino por outro, para sempre ou só por hoje (ex.: aparelho ocupado)',
   MOTIVACAO: 'desânimo, dúvida sobre resultado/prazo, ou precisa de um empurrão pra treinar',
   CHECKIN_ANTECIPADO:
     'quer ajustar o PROTOCOLO agora (carga, descanso, dificuldade do treino em si), fora do ' +

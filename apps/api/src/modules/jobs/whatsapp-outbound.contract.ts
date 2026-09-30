@@ -42,7 +42,10 @@ export interface WhatsappOutboundJob {
    * Ausente/`'INITIAL'` mantém o texto de sempre.
    */
   deliveryReason?: 'INITIAL' | 'SUBSTITUTION' | 'CHECKIN_ADJUSTMENT';
-  /** Só com `deliveryReason: 'SUBSTITUTION'` — nomes do exercício trocado, pra saudação. */
+  /** Só com `deliveryReason: 'SUBSTITUTION'` — nomes do exercício trocado, pra saudação.
+   * Com troca em lote, espelham a 1ª troca; a lista completa está em `substitutionChanges`. */
   substitutionFromExercise?: string;
   substitutionToExercise?: string;
+  /** Só com `deliveryReason: 'SUBSTITUTION'` — todas as trocas aplicadas (troca em lote). */
+  substitutionChanges?: ReadonlyArray<{ from: string; to: string }>;
 }

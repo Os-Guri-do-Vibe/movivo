@@ -442,6 +442,13 @@
       "when": 1790734928564,
       "tag": "0062_aspiring_warstar",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1790783104486,
+      "tag": "0063_substituicao_itens_em_lote",
+      "breakpoints": true
     }
   ]
 }

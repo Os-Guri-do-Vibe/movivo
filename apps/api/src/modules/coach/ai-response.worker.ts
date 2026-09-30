@@ -28,7 +28,6 @@ import {
 } from '../../core/agent-config/forbidden-topics.service';
 import { L1GuardrailService } from '../../core/agent-config/l1-guardrail.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
-import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { ContextService } from '../ai-coach/context/context.service';
 import { EvidenceGroundingService } from '../ai-coach/rag/evidence-grounding.service';
 import { clinicalGuardrail } from '../ai-coach/intent/clinical-guardrail';
@@ -42,24 +41,7 @@ import { isFinalFailure } from '../jobs/dlq.handler';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
-import type { CatalogExercise } from '../protocol/exercise-catalog';
-import {
-  findSafeCandidates,
-  isPlausibleSubstitution,
-  SUBSTITUTION_BATCH_SIZE,
-} from '../protocol/exercise-substitution';
-import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
-import {
-  applySubstitution,
-  collectProtocolExercises,
-} from '../protocol/protocol-substitution-apply';
-import {
-  ProtocolSubstitutionRepository,
-  type ActiveProtocolForSubstitution,
-  type SubstitutionDiff,
-} from '../protocol/protocol-substitution.repository';
-import { AI_SUBSTITUTION_REVIEW_WINDOW_MS } from '../protocol/protocol-substitution-release.worker';
-import type { ProtocolSubstitutionReleaseJob } from '../protocol/protocol-substitution-release.worker';
+import { BUBBLE_SEPARATOR } from '../whatsapp/message-templates';
 import { ValidationService } from '../protocol/validation/validation.service';
 import type { AiResponseJob } from '../whatsapp/whatsapp-inbound.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
@@ -70,17 +52,11 @@ import {
   FORBIDDEN_TOPIC_RESPONSE,
   SAFETY_HANDOFF_MESSAGE,
   STANDARD_BLOCK_RESPONSE,
-  SUBSTITUTION_ALREADY_PENDING_MESSAGE,
-  SUBSTITUTION_CATALOG_GAP_MESSAGE,
-  SUBSTITUTION_FALLBACK_MESSAGE,
-  SUBSTITUTION_NOT_SAFE_TO_APPLY_MESSAGE,
   TECHNICAL_NO_EVIDENCE_MESSAGE,
 } from './coach-messages';
 import { ConversationRepository } from './conversation.repository';
 import { applyResponseFormatting } from './response-formatter';
-import { SubstitutionCatalogLookupService } from './substitution-catalog-lookup.service';
-import { SubstitutionResolutionService } from './substitution-resolution.service';
-import { SubstitutionTargetService } from './substitution-target.service';
+import { SUBSTITUTION_FLOW_INTENT, SubstitutionFlowService } from './substitution-flow.service';
 import { untrustedDataEnvelope } from '../ai-coach/context/untrusted-context';
 import { METHODOLOGY_AWARE_INTENTS } from '../ai-coach/intent/prompts';
 import { MethodologyProvider } from '../protocol/methodology-provider.service';
@@ -101,6 +77,11 @@ interface ResponseDraft {
    * conversa de novo com log manual).
    */
   blockedViolations?: string[];
+  /** Motivo do alerta ao painel quando `humanReview` (padrão: `VALIDATOR_FLAG`). */
+  handoffReason?: string;
+  /** Resposta montada pelo fluxo de troca de exercício — o alerta não herda a intenção que o
+   * classificador atribuiu à mensagem (que pode ter sido qualquer uma, numa continuação). */
+  viaSubstitutionFlow?: boolean;
   ragSources?: Array<{
     chunkId: string;
     documentId: string | null;
@@ -132,15 +113,6 @@ const MAX_MESSAGE_CHARS = 4000;
 const GENERATIVE_MAX_TOKENS = 2000;
 
 /**
- * Achado 2026-09-09 (pedido do fundador): "curadoria ilimitada, apresentação em blocos de 3"
- * — o offset de quantos candidatos já foram oferecidos pro aluno (por alvo de troca) vive em
- * Redis, mesmo padrão de `SENT_MARKER_TTL_SECONDS` no worker de WhatsApp. TTL generoso o
- * bastante pra uma conversa que pausa e retoma no mesmo dia, sem carregar offset de uma
- * negociação de dias atrás.
- */
-const SUBSTITUTION_BATCH_TTL_SECONDS = 6 * 3600;
-
-/**
  * Persona resolvida **uma única vez por job** (Sprint 11), com o slot pedido junto.
  *
  * O objeto desce inteiro pelas montagens de resposta: `persona` é o que de fato monta prompt
@@ -169,14 +141,9 @@ export class AIResponseWorker implements OnModuleInit {
     private readonly abuse: LlmAbuseGuard,
     private readonly validation: ValidationService,
     private readonly methodology: MethodologyProvider,
-    private readonly exerciseCatalog: ExerciseCatalogProvider,
     private readonly repo: ConversationRepository,
     private readonly healthConsent: HealthConsentService,
-    private readonly substitutionRepo: ProtocolSubstitutionRepository,
-    private readonly substitutionTarget: SubstitutionTargetService,
-    private readonly substitutionResolution: SubstitutionResolutionService,
-    private readonly substitutionCatalogLookup: SubstitutionCatalogLookupService,
-    private readonly queueEvents: DashboardQueueEventsService,
+    private readonly substitutionFlow: SubstitutionFlowService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
     private readonly logger: PinoLogger,
@@ -483,13 +450,25 @@ export class AIResponseWorker implements OnModuleInit {
     personaCtx: PersonaContext,
     operationId: string,
   ): Promise<ResponseDraft> {
+    // Fluxo de troca aberto (o Coach fez uma pergunta e espera a resposta): a resposta do
+    // aluno ("só hoje", "o segundo") pode ter sido classificada como QUALQUER intenção —
+    // inclusive fora de escopo — e não pode quebrar o fluxo no meio. Por isso o fluxo vem
+    // ANTES do roteamento por intenção e devolve `null` se a mensagem for de outro assunto.
+    if (intent === 'SUBSTITUICAO_EXERCICIO' || (await this.substitutionFlow.hasOpenFlow(userId))) {
+      const flow = await this.runSubstitutionFlow(
+        userId,
+        message,
+        scrubUser,
+        personaCtx,
+        operationId,
+        intent === 'SUBSTITUICAO_EXERCICIO' ? 'INTENT' : 'CONTINUATION',
+      );
+      if (flow) return flow;
+    }
     if (intent === 'FORA_DE_ESCOPO') {
       // Recusa honesta pré-aprovada — sem LLM generativo (US-3.4). O nome da agente vem
       // da configuração publicada (US-7.6), nunca de literal no código.
       return draftPass(this.prompts.foraDeEscopoResponseFor(personaCtx.persona), null, 0);
-    }
-    if (intent === 'SUBSTITUICAO_EXERCICIO') {
-      return this.buildSubstitution(userId, intent, message, scrubUser, personaCtx, operationId);
     }
     return this.buildGenerative(
       userId,
@@ -503,476 +482,61 @@ export class AIResponseWorker implements OnModuleInit {
   }
 
   /**
-   * Fluxo de substituição de exercício via IA (achado 2026-09-02) — sem motor determinístico
-   * de ESCOLHA. A IA tem autonomia para IDENTIFICAR o exercício-alvo e para ler a confirmação
-   * do aluno; o filtro de SEGURANÇA (`findSafeCandidates`) continua 100% determinístico e é
-   * SEMPRE recomputado aqui — nunca reaproveitado de uma chamada anterior — tanto no que é
-   * oferecido quanto no que pode ser persistido no protocolo do aluno.
+   * Fluxo de substituição de exercício (achado 2026-09-02; reescrito em 2026-09-30 — alcance
+   * "só hoje" x "no protocolo", troca em lote e estado explícito em Redis). Toda a lógica vive
+   * em `SubstitutionFlowService`; aqui só se traduz o resultado em resposta: mensagem fixa, ou
+   * caminho generativo restrito a `allowedExercises` seguido de um texto fixo (ex.: a pergunta
+   * de alcance, que nunca depende de o LLM lembrar de fazê-la).
    *
-   * Achado 2026-09-02 (reproduzido ao vivo): a primeira versão tentava resolver a confirmação
-   * ANTES de identificar o alvo, extraindo o nome do exercício escolhido do texto livre da
-   * conversa — e nunca resolvia nada, porque o turno de oferta verbaliza o candidato de forma
-   * humanizada ("supino reto com halter"), não com o nome literal do catálogo ("Supino Reto
-   * (Halter)"), então a comparação exata nunca batia. A ordem certa: sempre IDENTIFICAR o
-   * alvo primeiro (mesmo dado já disponível todo turno — via `protocoloCompleto`), computar os
-   * candidatos seguros, e só então perguntar à IA se a última mensagem confirma um DESSES
-   * candidatos específicos (lista fechada, mesmo padrão de `SubstitutionTargetService` — a IA
-   * escolhe um id que RECEBEU, nunca extrai um nome livre).
+   * `null` = há fluxo aberto, mas a mensagem é de outro assunto: segue o roteamento normal.
    */
-  private async buildSubstitution(
+  private async runSubstitutionFlow(
     userId: string,
-    intent: Intent,
     message: string,
     scrubUser: ScrubUser,
     personaCtx: PersonaContext,
     operationId: string,
-  ): Promise<ResponseDraft> {
-    const active = await this.substitutionRepo.loadActiveProtocol(userId);
-    if (!active) {
-      return { ...draftPass(SUBSTITUTION_FALLBACK_MESSAGE, null, 0), humanReview: true };
-    }
-    // Regra de v1 (decisão do fundador): uma proposta pendente por vez. Uma segunda troca
-    // pedida antes da primeira ser decidida é recusada na conversa, não empilhada.
-    if (await this.substitutionRepo.hasPending(userId, active.protocolId)) {
-      return draftPass(SUBSTITUTION_ALREADY_PENDING_MESSAGE, null, 0);
-    }
-
-    const catalog = this.exerciseCatalog.getAll();
-    const protocolExercises = collectProtocolExercises(active.content);
-    // Construído ANTES da identificação: turnos de continuação ("é insegurança mesmo, sem
-    // dor") não citam o exercício sozinhos — só fazem sentido com a conversa recente junto
-    // (achado 2026-09-02, reproduzido ao vivo).
-    const ctx = await this.context.build(userId, intent, message, personaCtx.persona.agentName);
-
-    const identified = await this.substitutionTarget.identify({
+    entry: 'INTENT' | 'CONTINUATION',
+  ): Promise<ResponseDraft | null> {
+    const outcome = await this.substitutionFlow.handle({
       userId,
-      operationId,
-      user: scrubUser,
-      recentConversation: ctx.volatileSuffix,
-      protocolExercises,
+      message,
+      scrubUser,
+      agentName: personaCtx.persona.agentName,
       personaSlot: personaCtx.slot,
-    });
-    const target = identified.identified
-      ? this.exerciseCatalog.getById(identified.exerciseId)
-      : undefined;
-
-    if (!target) {
-      // Não ficou claro qual exercício. `allowedExercises` trava no que JÁ está no protocolo
-      // do aluno — a IA pode fazer referência ao que já existe pra ajudar a esclarecer ("você
-      // quer dizer o agachamento ou o levantamento terra romeno?"), mas NUNCA nomear um
-      // substituto novo aqui: sem alvo identificado, não há candidato seguro recomputado, e
-      // nada garante que o que a IA diria por conta própria passaria pelo filtro determinístico
-      // (achado 2026-09-02, reproduzido ao vivo — a IA verbalizava uma troca de qualquer jeito
-      // quando este branch não tinha nenhuma restrição de vocabulário).
-      return this.buildGenerative(userId, intent, message, scrubUser, personaCtx, operationId, {
-        extraSystem:
-          'O aluno expressou insatisfação com um exercício do protocolo dele, mas não ficou ' +
-          'claro qual exercício específico do treino ele quer trocar. Pergunte de forma ' +
-          'natural qual exercício ele quer trocar, sem sugerir nenhuma alternativa ainda.',
-        allowedExercises: protocolExercises.flatMap((ex) => [ex.id, ex.name]),
-      });
-    }
-
-    // Curadoria de substitutos seguros — ILIMITADA (achado 2026-09-09, pedido do fundador):
-    // `findSafeCandidates` devolve TODOS os elegíveis, sem teto. A apresentação ao aluno é
-    // feita em LOTES de `SUBSTITUTION_BATCH_SIZE` mais abaixo — a curadoria em si nunca
-    // esconde um candidato elegível do fluxo de confirmação.
-    const fullCuration = findSafeCandidates(target, active.constraints, catalog);
-
-    // Achado 2026-09-08 (pedido do fundador, reproduzido ao vivo): "posso trocar X por
-    // esteira normal?" já NOMEIA o substituto na mesma mensagem que pede a troca. Checado
-    // contra a curadoria INTEIRA — elegível, mesmo que ainda não tenha aparecido em nenhum
-    // lote oferecido — pra um pedido explícito nunca depender de qual lote está na tela.
-    const explicitRequest = await this.substitutionResolution.resolveExplicitRequest({
-      userId,
       operationId,
-      user: scrubUser,
-      recentConversation: ctx.volatileSuffix,
-      targetExerciseName: target.name,
-      candidates: fullCuration,
-      personaSlot: personaCtx.slot,
+      entry,
     });
-    if (explicitRequest.resolved) {
-      // Recomputa do zero — mesma defesa em profundidade da confirmação de lote abaixo.
-      const fresh = findSafeCandidates(target, active.constraints, catalog);
-      const chosen = fresh.find((c) => c.id === explicitRequest.chosenExerciseId);
-      if (chosen) {
-        await this.clearSubstitutionBatch(userId, target.id);
-        return this.applyAndPersistSubstitution(
-          userId,
-          intent,
-          message,
-          scrubUser,
-          personaCtx,
-          operationId,
-          active,
-          target,
-          chosen,
-        );
-      }
-      // Confirmou algo que não está mais no conjunto seguro — cai pro lote atual, sem persistir.
+    if (outcome.kind === 'NOT_HANDLED') return null;
+    if (outcome.kind === 'FIXED') {
+      return {
+        ...draftPass(outcome.text, null, 0),
+        humanReview: outcome.humanReview ?? false,
+        handoffReason: outcome.handoffReason,
+        viaSubstitutionFlow: true,
+      };
     }
-
-    // Achado 2026-09-09 (pedido do fundador): "curadoria ilimitada, apresentação em blocos de
-    // 3" — o offset de quantos candidatos já foram oferecidos pra este aluno, pra ESTE alvo,
-    // vive em Redis (chave por alvo: pedir outra troca depois começa do zero naturalmente).
-    const batchKey = this.keys.forUser(userId, 'substitution-batch', target.id);
-    const storedOffset = Number(await this.redis.get(batchKey)) || 0;
-    const offset = Math.min(storedOffset, fullCuration.length);
-    const batch = fullCuration.slice(offset, offset + SUBSTITUTION_BATCH_SIZE);
-
-    const resolution = await this.substitutionResolution.resolve({
+    const draft = await this.buildGenerative(
       userId,
-      operationId,
-      user: scrubUser,
-      recentConversation: ctx.volatileSuffix,
-      targetExerciseName: target.name,
-      candidates: batch,
-      personaSlot: personaCtx.slot,
-    });
-
-    if (resolution.resolved) {
-      // Recomputa do zero — nunca confia no cálculo de cima, que já pode estar obsoleto no
-      // instante em que a confirmação chega (dupla checagem, defesa em profundidade).
-      const fresh = findSafeCandidates(target, active.constraints, catalog);
-      const chosen = fresh.find((c) => c.id === resolution.chosenExerciseId);
-      if (chosen) {
-        await this.clearSubstitutionBatch(userId, target.id);
-        return this.applyAndPersistSubstitution(
-          userId,
-          intent,
-          message,
-          scrubUser,
-          personaCtx,
-          operationId,
-          active,
-          target,
-          chosen,
-        );
-      }
-      // Confirmou algo que não está mais no conjunto seguro (estado mudou) — cai pro lote
-      // atual abaixo, sem persistir.
-    }
-    const rejectedAll = !resolution.resolved && resolution.rejectedAll;
-
-    // Achado 2026-09-09 (pedido do fundador, reproduzido ao vivo — "supino reto máquina"):
-    // nem confirmou nem recusou o lote com um "não gostei" vago — vale checar se o aluno
-    // nomeou um exercício ESPECÍFICO fora da curadoria elegível. Pode existir no catálogo sem
-    // ser opção segura pra ele (Revisão Obrigatória direto), ou pode não existir em lugar
-    // nenhum (Revisão Obrigatória + opção de adicionar ao catálogo). Só roda depois do lote
-    // atual já ter sido checado — referência posicional/vaga ("a segunda opção") é papel do
-    // `resolve()` acima, não deste lookup.
-    const lookup = await this.substitutionCatalogLookup.identify({
-      userId,
-      operationId,
-      user: scrubUser,
-      recentConversation: ctx.volatileSuffix,
-      targetExerciseName: target.name,
-      fullCatalog: catalog.map((ex) => ({ id: ex.id, name: ex.name })),
-      personaSlot: personaCtx.slot,
-    });
-    if (lookup.requestedName) {
-      if (lookup.matchedExerciseId) {
-        const matched = this.exerciseCatalog.getById(lookup.matchedExerciseId);
-        if (matched && !isPlausibleSubstitution(target, matched)) {
-          // Achado 2026-09-09 (bug reportado pelo fundador, reproduzido em conversa real:
-          // "Supino Reto (Máquina)" → "Remada Curvada" foi registrado na fila do profissional
-          // como se fosse uma dúvida clínica legítima). `matched` existe no catálogo, mas
-          // treina um padrão de movimento/grupo muscular DIFERENTE do alvo — não é uma troca
-          // plausível, é um pedido sem nexo fisiológico. A fila do profissional é reservada
-          // para trocas que a IA pode julgar clinicamente plausíveis (mesmo padrão + mesmo
-          // grupo muscular alvo) mas que caem fora da curadoria por outro motivo (nível,
-          // local, contraindicação) — isto NÃO é esse caso, então a IA já orienta na hora,
-          // sem criar nenhuma pendência, e reoferece a curadoria segura real (`batch`).
-          this.logger.info(
-            {
-              userId,
-              event: 'substitution_request_not_plausible',
-              targetExerciseId: target.id,
-              requestedExerciseId: matched.id,
-            },
-            'pedido de substituição sem nexo fisiológico (grupo muscular/padrão diferente) — orientado na hora, sem registrar na fila',
-          );
-          await this.clearSubstitutionBatch(userId, target.id);
-          if (batch.length === 0) {
-            return { ...draftPass(SUBSTITUTION_FALLBACK_MESSAGE, null, 0), humanReview: true };
-          }
-          return this.offerSubstitutionBatch(
-            userId,
-            intent,
-            message,
-            scrubUser,
-            personaCtx,
-            operationId,
-            target,
-            batch,
-            matched,
-          );
-        }
-        if (matched) {
-          // Mesmo padrão de movimento + mesmo grupo muscular alvo, mas não é elegível pra
-          // este aluno por outro motivo (nível, local, contraindicação) — aí sim é uma dúvida
-          // clínica real: Revisão Obrigatória, sem opção de "adicionar ao catálogo" (o
-          // exercício já existe).
-          await this.clearSubstitutionBatch(userId, target.id);
-          return this.applyAndPersistSubstitution(
-            userId,
-            intent,
-            message,
-            scrubUser,
-            personaCtx,
-            operationId,
-            active,
-            target,
-            matched,
-            'MANDATORY',
-          );
-        }
-      } else {
-        // Não existe em lugar nenhum do catálogo — Revisão Obrigatória + opção de o time
-        // adicionar ao catálogo antes de decidir (ver `DashboardService`/tela de revisão).
-        await this.clearSubstitutionBatch(userId, target.id);
-        const created = await this.substitutionRepo.createCatalogGapPending({
-          userId,
-          protocolId: active.protocolId,
-          baseVersion: active.version,
-          fromExerciseId: target.id,
-          fromExerciseName: target.name,
-          requestedExerciseName: lookup.requestedName,
-          changeReason:
-            `Substituição solicitada pelo aluno via WhatsApp: ${target.name} → ` +
-            `"${lookup.requestedName}" (não existe no catálogo)`,
-        });
-        if (!created.created) {
-          return draftPass(SUBSTITUTION_ALREADY_PENDING_MESSAGE, null, 0);
-        }
-        this.queueEvents.emit('protocol');
-        return draftPass(SUBSTITUTION_CATALOG_GAP_MESSAGE, null, 0);
-      }
-    }
-
-    if (batch.length === 0) {
-      // Curadoria vazia desde o início — nada seguro pra oferecer, nada específico pedido.
-      return { ...draftPass(SUBSTITUTION_FALLBACK_MESSAGE, null, 0), humanReview: true };
-    }
-
-    if (rejectedAll) {
-      const nextOffset = offset + batch.length;
-      if (nextOffset < fullCuration.length) {
-        // Ainda há candidatos elegíveis não apresentados — próximo lote de
-        // `SUBSTITUTION_BATCH_SIZE` (pedido do fundador: "3 primeiros, próximos 3...").
-        await this.redis.set(batchKey, String(nextOffset), 'EX', SUBSTITUTION_BATCH_TTL_SECONDS);
-        const nextBatch = fullCuration.slice(nextOffset, nextOffset + SUBSTITUTION_BATCH_SIZE);
-        return this.offerSubstitutionBatch(
-          userId,
-          intent,
-          message,
-          scrubUser,
-          personaCtx,
-          operationId,
-          target,
-          nextBatch,
-        );
-      }
-      // Esgotou a curadoria inteira — nada escolhido, nada específico reconhecível pedido.
-      await this.clearSubstitutionBatch(userId, target.id);
-      return { ...draftPass(SUBSTITUTION_FALLBACK_MESSAGE, null, 0), humanReview: true };
-    }
-
-    // Ambíguo — reoferece o MESMO lote (grava o offset, idempotente).
-    await this.redis.set(batchKey, String(offset), 'EX', SUBSTITUTION_BATCH_TTL_SECONDS);
-    return this.offerSubstitutionBatch(
-      userId,
-      intent,
+      SUBSTITUTION_FLOW_INTENT,
       message,
       scrubUser,
       personaCtx,
       operationId,
-      target,
-      batch,
+      { extraSystem: outcome.extraSystem, allowedExercises: outcome.allowedExercises },
     );
-  }
-
-  /** Apaga o offset do lote de apresentação (achado 2026-09-09) — chamado sempre que a
-   * substituição deste alvo é resolvida (aplicada ou virou pedido de catálogo), pra um pedido
-   * futuro do MESMO alvo começar do zero, não de onde a conversa anterior parou. */
-  private async clearSubstitutionBatch(userId: string, targetExerciseId: string): Promise<void> {
-    await this.redis.del(this.keys.forUser(userId, 'substitution-batch', targetExerciseId));
-  }
-
-  /** Oferece um lote de candidatos seguros ao aluno — extraído de `buildSubstitution`
-   * (achado 2026-09-09) porque é chamado tanto pro lote atual (ambíguo) quanto pro próximo
-   * lote (rejeição explícita do lote atual). */
-  private async offerSubstitutionBatch(
-    userId: string,
-    intent: Intent,
-    message: string,
-    scrubUser: ScrubUser,
-    personaCtx: PersonaContext,
-    operationId: string,
-    target: CatalogExercise,
-    batch: readonly CatalogExercise[],
-    /**
-     * Achado 2026-09-09: presente quando este lote é oferecido em RESPOSTA a um pedido
-     * específico do aluno que não é uma troca plausível (grupo muscular/padrão diferente) —
-     * a IA precisa explicar isso antes de oferecer as opções reais, não só listar candidatos.
-     */
-    rejectedRequest?: CatalogExercise,
-  ): Promise<ResponseDraft> {
-    const names = batch.map((candidate) => candidate.name);
-    const rejectionNote = rejectedRequest
-      ? `O aluno pediu para trocar "${target.name}" por "${rejectedRequest.name}", mas essa ` +
-        'troca não é possível: o exercício pedido trabalha um grupo muscular/padrão de ' +
-        'movimento diferente do original, então não é um substituto seguro. Explique isso de ' +
-        'forma simples e humanizada (evite jargão técnico se não soar natural), deixando claro ' +
-        'que esta troca específica não vai acontecer — NÃO diga que vai registrar/confirmar ' +
-        'com o profissional sobre ELA. Em seguida, '
-      : 'Apresente ';
-    const extra =
-      rejectionNote +
-      `as OPÇÕES SEGURAS DA BASE para substituir "${target.name}": ${names.join(', ')}. ` +
-      'Apresente essas opções de forma humanizada (não uma lista técnica) e pergunte qual o ' +
-      'aluno prefere. NÃO sugira nenhum exercício fora desta lista nem invente carga.';
-    return this.buildGenerative(userId, intent, message, scrubUser, personaCtx, operationId, {
-      extraSystem: extra,
-      allowedExercises: [
-        target.name,
-        target.id,
-        ...batch.flatMap((candidate) => [candidate.name, candidate.id]),
-        ...(rejectedRequest ? [rejectedRequest.name, rejectedRequest.id] : []),
-      ],
-    });
-  }
-
-  /**
-   * Aluno confirmou uma troca segura: aplica ao conteúdo, revalida a ESTRUTURA INTEIRA do
-   * protocolo (trocar um exercício pode quebrar uma regra de sessão mesmo quando o
-   * substituto em si é seguro — ex.: `ISOLATION_AS_BASE`), e só então persiste em staging
-   * (`protocol_substitution_requests`, nunca o protocolo `ACTIVE` diretamente — ver o
-   * comentário de topo do schema). O protocolo do aluno só muda de fato na liberação
-   * (`ProtocolSubstitutionReleaseWorker`, 30 min, ou aprovação manual do profissional).
-   */
-  private async applyAndPersistSubstitution(
-    userId: string,
-    intent: Intent,
-    message: string,
-    scrubUser: ScrubUser,
-    personaCtx: PersonaContext,
-    operationId: string,
-    active: ActiveProtocolForSubstitution,
-    target: CatalogExercise,
-    chosen: CatalogExercise,
-    /**
-     * Achado 2026-09-09 (pedido do fundador): `'MANDATORY'` quando o aluno pediu
-     * explicitamente um exercício que EXISTE no catálogo mas não é elegível pra ele
-     * (`SubstitutionCatalogLookupService` achou um `matchedExerciseId` fora da curadoria
-     * segura) — staff decide sem auto-liberação, e o aluno não ouve "confirmada" antes da
-     * revisão real. Default `'OPTIONAL'` preserva o comportamento de sempre.
-     */
-    reviewUrgency: 'OPTIONAL' | 'MANDATORY' = 'OPTIONAL',
-  ): Promise<ResponseDraft> {
-    const applied = applySubstitution(active.content, target.id, chosen);
-    const verdict = this.validation.validate({
-      structure: applied.content,
-      constraints: active.validationConstraints,
-      parqFlags: active.parQFlags,
-    });
-    if (verdict.action !== 'PASS') {
-      this.logger.warn(
-        {
-          userId,
-          event: 'substitution_not_safe_to_apply',
-          violations: verdict.violations.map((v) => v.rule),
-        },
-        'troca de exercício confirmada pelo aluno quebrou a validação do protocolo inteiro — não aplicada sozinha',
-      );
-      return { ...draftPass(SUBSTITUTION_NOT_SAFE_TO_APPLY_MESSAGE, null, 0), humanReview: true };
+    if (draft.blocked) {
+      // O aluno nunca viu as opções: o estado do fluxo não pode seguir como se tivesse visto.
+      await this.substitutionFlow.abandon(userId);
+      return { ...draft, viaSubstitutionFlow: true };
     }
-
-    const diff: SubstitutionDiff = {
-      type: 'EXERCISE_SUBSTITUTION',
-      from: { id: target.id, name: target.name },
-      to: { id: chosen.id, name: chosen.name },
-      sessionsAffected: applied.sessionsAffected,
+    return {
+      ...draft,
+      text: outcome.suffix ? [draft.text, outcome.suffix].join(BUBBLE_SEPARATOR) : draft.text,
+      humanReview: draft.humanReview || Boolean(outcome.humanReview),
+      handoffReason: outcome.handoffReason,
+      viaSubstitutionFlow: true,
     };
-    const created = await this.substitutionRepo.createPending({
-      userId,
-      protocolId: active.protocolId,
-      baseVersion: active.version,
-      fromExerciseId: target.id,
-      fromExerciseName: target.name,
-      toExerciseId: chosen.id,
-      toExerciseName: chosen.name,
-      proposedContent: applied.content,
-      diff,
-      changeReason: `Substituição solicitada pelo aluno via WhatsApp: ${target.name} → ${chosen.name}`,
-      reviewUrgency,
-    });
-    if (!created.created) {
-      // Corrida com uma segunda pendência criada entre a checagem `hasPending` e aqui.
-      return draftPass(SUBSTITUTION_ALREADY_PENDING_MESSAGE, null, 0);
-    }
-
-    // Mandatory por origem PAR-Q bloqueante (achado 2026-09-03) OU porque o exercício pedido
-    // não é uma opção segura padrão da base (achado 2026-09-09, `reviewUrgency` explícito) —
-    // nos dois casos, sem job de auto-liberação (mesma regra de `protocols.reviewUrgency`:
-    // "nenhum sai sozinho").
-    const isMandatory = active.fromBlockingParq || reviewUrgency === 'MANDATORY';
-    if (!isMandatory) {
-      const releaseJob: ProtocolSubstitutionReleaseJob = { userId, requestId: created.id };
-      await this.queues.enqueue(
-        QUEUE.protocolSubstitutionRelease,
-        'substitution-release',
-        releaseJob,
-        {
-          delay: AI_SUBSTITUTION_REVIEW_WINDOW_MS,
-          jobId: `substitution-auto-release-${created.id}`,
-        },
-      );
-    }
-    this.queueEvents.emit('protocol');
-    this.logger.info(
-      {
-        userId,
-        event: 'substitution_pending_created',
-        requestId: created.id,
-        mandatory: isMandatory,
-      },
-      isMandatory
-        ? 'substituição de exercício confirmada — aguardando revisão humana obrigatória'
-        : 'substituição de exercício confirmada — proposta em staging, aguardando revisão/liberação automática',
-    );
-
-    if (reviewUrgency === 'MANDATORY') {
-      // Achado 2026-09-09: diferente do PAR-Q bloqueante (que segue confirmando via IA —
-      // fora do escopo desta mudança), este exercício especificamente NÃO é uma opção segura
-      // padrão da base pra este aluno — ele não deve ouvir "confirmada" antes da revisão real
-      // acontecer. Resposta FIXA, sem LLM.
-      return draftPass(SUBSTITUTION_NOT_SAFE_TO_APPLY_MESSAGE, null, 0);
-    }
-
-    const extra =
-      `A troca foi CONFIRMADA e já está registrada: "${target.name}" vai virar "${chosen.name}". ` +
-      'Confirme isso pro aluno de forma humanizada, avisando que a mudança passa por uma ' +
-      'checagem rápida e ele recebe o protocolo atualizado em breve. NÃO ofereça nenhuma ' +
-      'outra opção agora nem volte a perguntar qual exercício trocar.';
-    // Achado 2026-09-08 (bug reproduzido ao vivo pelo fundador): `allowedExercises` só com
-    // alvo+escolhido bloqueava qualquer confirmação humanizada que também mencionasse OUTRO
-    // exercício já real do protocolo do aluno (ex.: o resto do treino do dia) — o validador
-    // não distingue "citar contexto real" de "empurrar substituto não vetado", então qualquer
-    // menção extra virava `EXERCISE_NOT_ALLOWED` e a confirmação inteira caía no fallback
-    // padrão, mesmo com a troca já persistida com sucesso. Ampliado pra incluir todo o
-    // protocolo ATUAL (antes da troca) + o escolhido — nunca um exercício fora do que já é
-    // real pra este aluno ou do que acabou de ser vetado como seguro.
-    const protocolExercises = collectProtocolExercises(active.content);
-    return this.buildGenerative(userId, intent, message, scrubUser, personaCtx, operationId, {
-      extraSystem: extra,
-      allowedExercises: [
-        ...protocolExercises.flatMap((ex) => [ex.id, ex.name]),
-        chosen.name,
-        chosen.id,
-      ],
-    });
   }
 
   /** Caminho generativo: contexto (+RAG) → LLM → validação da resposta. */
@@ -1271,9 +835,11 @@ function draftPass(text: string, modelUsed: string | null, latencyMs: number): R
  * Pedido explícito de humano e fora-de-escopo pesam mais que a sinalização do validador.
  */
 function handoffReason(intent: Intent, draft: ResponseDraft): string | null {
-  if (intent === 'PEDIDO_HANDOFF') return 'PEDIDO_HANDOFF';
-  if (intent === 'FORA_DE_ESCOPO') return 'FORA_DE_ESCOPO';
+  if (!draft.viaSubstitutionFlow) {
+    if (intent === 'PEDIDO_HANDOFF') return 'PEDIDO_HANDOFF';
+    if (intent === 'FORA_DE_ESCOPO') return 'FORA_DE_ESCOPO';
+  }
   if (draft.blocked) return 'VALIDATOR_BLOCK';
-  if (draft.humanReview) return 'VALIDATOR_FLAG';
+  if (draft.humanReview) return draft.handoffReason ?? 'VALIDATOR_FLAG';
   return null;
 }

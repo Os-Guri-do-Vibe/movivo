@@ -90,11 +90,11 @@ function makeService(row: Record<string, unknown>, verdict: 'PASS' | 'FLAG_HUMAN
     loadActiveProtocol: vi.fn(),
     hasPending: vi.fn(),
     createPending: vi.fn(),
-    createCatalogGapPending: vi.fn(),
     release: vi.fn(),
-    attachCatalogExerciseAndRelease: vi.fn(),
+    attachCatalogExercise: vi.fn(),
     discard: vi.fn(),
     findById: vi.fn(),
+    loadProtocolForReview: vi.fn(),
   } as unknown as ProtocolSubstitutionRepository;
   const workoutPresentation = {
     present: vi.fn(async () => undefined),
@@ -501,9 +501,8 @@ describe('DashboardService invariantes de mutacao', () => {
   // do profissional reusam `ProtocolSubstitutionRepository.release()`/`.discard()` (o mesmo
   // caminho de aplicação do worker de liberação automática), nunca reimplementam a mecânica.
   describe('substituição de exercício via IA — aprovação/recusa manual', () => {
-    it('aprova antes da janela de 30 min: aplica, entrega e emite o evento da fila', async () => {
-      const { service, enqueue, substitutionRepo } = makeService(pendingProtocol);
-      vi.mocked(substitutionRepo.release).mockResolvedValue({
+    const released = (changes = [{ from: 'Flexão', to: 'Flexão Diamante' }]) =>
+      ({
         released: true,
         protocolId: RESOURCE_ID,
         userId: USER_ID,
@@ -513,7 +512,12 @@ describe('DashboardService invariantes de mutacao', () => {
         startDate: new Date('2026-01-01'),
         endDate: new Date('2026-02-01'),
         totalWeeks: 4,
-      } as never);
+        changes,
+      }) as never;
+
+    it('aprova antes da janela de 30 min: aplica, entrega e emite o evento da fila', async () => {
+      const { service, enqueue, substitutionRepo } = makeService(pendingProtocol);
+      vi.mocked(substitutionRepo.release).mockResolvedValue(released());
 
       const result = await service.approveSubstitutionNow(actor, RESOURCE_ID);
       expect(result).toEqual({
@@ -522,21 +526,149 @@ describe('DashboardService invariantes de mutacao', () => {
         version: 4,
         released: true,
       });
+      // Sem corpo: nenhuma decisão por item, aprova todos como estão.
       expect(substitutionRepo.release).toHaveBeenCalledWith(
         { userId: ACTOR_ID, role: 'PROFESSIONAL' },
         RESOURCE_ID,
+        [],
       );
       expect(enqueue).toHaveBeenCalledWith(
         'whatsapp-outbound',
         'protocol-delivery',
-        expect.objectContaining({ userId: USER_ID, protocolId: RESOURCE_ID, protocolVersion: 4 }),
+        expect.objectContaining({
+          userId: USER_ID,
+          protocolId: RESOURCE_ID,
+          protocolVersion: 4,
+          substitutionFromExercise: 'Flexão',
+          substitutionToExercise: 'Flexão Diamante',
+          substitutionChanges: [{ from: 'Flexão', to: 'Flexão Diamante' }],
+        }),
         expect.objectContaining({ jobId: `substitution-delivery_manual_${RESOURCE_ID}` }),
       );
     });
 
+    // Achado 2026-09-30 (troca em lote): o profissional decide cada item na tela única.
+    it('troca em lote: repassa as decisões por item (editar e descartar) ao repositório', async () => {
+      const { service, enqueue, substitutionRepo } = makeService(pendingProtocol);
+      vi.mocked(substitutionRepo.release).mockResolvedValue(
+        released([
+          { from: 'Leg Press 45°', to: 'Afundo' },
+          { from: 'Mesa Flexora', to: 'Stiff' },
+        ]),
+      );
+      await service.approveSubstitutionNow(actor, RESOURCE_ID, {
+        items: [
+          { index: 0, action: 'APPROVE', toExerciseId: 'afundo' },
+          { index: 1, action: 'DISCARD' },
+        ],
+      });
+      expect(substitutionRepo.release).toHaveBeenCalledWith(
+        { userId: ACTOR_ID, role: 'PROFESSIONAL' },
+        RESOURCE_ID,
+        [
+          { index: 0, action: 'APPROVE', toExerciseId: 'afundo' },
+          { index: 1, action: 'DISCARD', toExerciseId: undefined },
+        ],
+      );
+      // A reentrega cita TODAS as trocas aplicadas.
+      expect(enqueue).toHaveBeenCalledWith(
+        'whatsapp-outbound',
+        'protocol-delivery',
+        expect.objectContaining({
+          substitutionChanges: [
+            { from: 'Leg Press 45°', to: 'Afundo' },
+            { from: 'Mesa Flexora', to: 'Stiff' },
+          ],
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('corpo fora do schema (índice inexistente, ação desconhecida) → 400, sem tocar nada', async () => {
+      const { service, substitutionRepo } = makeService(pendingProtocol);
+      await expect(
+        service.approveSubstitutionNow(actor, RESOURCE_ID, {
+          items: [{ index: 7, action: 'APPROVE' }],
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.approveSubstitutionNow(actor, RESOURCE_ID, {
+          items: [{ index: 0, action: 'TALVEZ' }],
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(substitutionRepo.release).not.toHaveBeenCalled();
+    });
+
+    it('todos os itens descartados equivale a recusar: audita, avisa o aluno e não entrega protocolo', async () => {
+      const { service, append, enqueue, substitutionRepo } = makeService(pendingProtocol);
+      vi.mocked(substitutionRepo.release).mockResolvedValue({
+        released: false,
+        reason: 'ALL_DISCARDED',
+        userId: USER_ID,
+        protocolId: RESOURCE_ID,
+      } as never);
+
+      const result = await service.approveSubstitutionNow(actor, RESOURCE_ID, {
+        items: [{ index: 0, action: 'DISCARD' }],
+      });
+      expect(result).toEqual({ id: RESOURCE_ID, protocolId: RESOURCE_ID, discarded: true });
+      expect(append).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ action: 'PROTOCOL_SUBSTITUTION_DISCARDED', userId: USER_ID }),
+      );
+      expect(enqueue).toHaveBeenCalledTimes(1);
+      expect(enqueue).toHaveBeenCalledWith(
+        'whatsapp-outbound',
+        'coach-message',
+        expect.objectContaining({ type: 'COACH_MESSAGE' }),
+        expect.objectContaining({ jobId: `substitution-discarded_${RESOURCE_ID}` }),
+      );
+    });
+
+    it('item de catálogo sem exercício ou edição inválida → 400 com o motivo, sem entregar', async () => {
+      const { service, enqueue, substitutionRepo } = makeService(pendingProtocol);
+      vi.mocked(substitutionRepo.release).mockResolvedValue({
+        released: false,
+        reason: 'UNRESOLVED_ITEM',
+        detail: 'Há item aprovado sem exercício definido.',
+      } as never);
+      await expect(service.approveSubstitutionNow(actor, RESOURCE_ID)).rejects.toMatchObject({
+        message: 'Há item aprovado sem exercício definido.',
+      });
+
+      vi.mocked(substitutionRepo.release).mockResolvedValue({
+        released: false,
+        reason: 'INVALID_EDIT',
+        detail: 'Exercício inelegível.',
+      } as never);
+      await expect(service.approveSubstitutionNow(actor, RESOURCE_ID)).rejects.toMatchObject({
+        message: 'Exercício inelegível.',
+      });
+      expect(enqueue).not.toHaveBeenCalled();
+    });
+
+    it('as trocas aprovadas quebram a validação do protocolo inteiro → 400 com as violações', async () => {
+      const { service, enqueue, substitutionRepo } = makeService(pendingProtocol);
+      vi.mocked(substitutionRepo.release).mockResolvedValue({
+        released: false,
+        reason: 'VALIDATION_FAILED',
+        violations: ['ISOLATION_AS_BASE'],
+      } as never);
+      await expect(service.approveSubstitutionNow(actor, RESOURCE_ID)).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'VALIDATION_FAILED',
+          violations: ['ISOLATION_AS_BASE'],
+        }),
+      });
+      expect(enqueue).not.toHaveBeenCalled();
+    });
+
     it('proposta já decidida (ou protocolo mudou de versão) → 400, sem entregar nada', async () => {
       const { service, enqueue, substitutionRepo } = makeService(pendingProtocol);
-      vi.mocked(substitutionRepo.release).mockResolvedValue({ released: false } as never);
+      vi.mocked(substitutionRepo.release).mockResolvedValue({
+        released: false,
+        reason: 'NOT_PENDING',
+      } as never);
 
       await expect(service.approveSubstitutionNow(actor, RESOURCE_ID)).rejects.toBeInstanceOf(
         BadRequestException,
@@ -602,10 +734,10 @@ describe('DashboardService invariantes de mutacao', () => {
   });
 
   // Achado 2026-09-09 (pedido do fundador): "Adicionar exercício ao catálogo" — publica o
-  // exercício (reaproveita `ExerciseCatalogAdminService.publish`, sem alteração) e SÓ ENTÃO
-  // aprova a substituição, reusando a MESMA entrega por WhatsApp de `approveSubstitutionNow`
-  // (`deliverReleasedSubstitution`, extraído pra não duplicar).
-  describe('substituição catalogGap — adicionar exercício ao catálogo e aprovar', () => {
+  // exercício (reaproveita `ExerciseCatalogAdminService.publish`, sem alteração). Achado
+  // 2026-09-30 (troca em lote): liga o exercício ao ITEM da proposta e NÃO aprova — o
+  // profissional decide na tela única, item a item.
+  describe('substituição catalogGap — adicionar exercício ao catálogo e ligar ao item', () => {
     const CATALOG_BODY = {
       exerciseKey: 'supino_reto_maquina',
       changeNote: 'Adicionado a partir de pedido de aluno via WhatsApp',
@@ -618,93 +750,88 @@ describe('DashboardService invariantes de mutacao', () => {
       contraindicatedFor: [],
       substitutes: [],
     };
+    const chosen = { id: 'supino_reto_maquina', name: 'Supino Reto (Máquina)' };
 
-    it('publica o exercício, aplica a troca e entrega o protocolo atualizado', async () => {
+    it('publica o exercício e o liga ao item indicado, SEM aprovar nem entregar protocolo', async () => {
       const { service, enqueue, substitutionRepo, exerciseCatalogAdmin, exerciseCatalog } =
         makeService(pendingProtocol);
-      const chosen = { id: 'supino_reto_maquina', name: 'Supino Reto (Máquina)' };
       vi.mocked(exerciseCatalog.getById).mockReturnValue(chosen as never);
-      vi.mocked(substitutionRepo.attachCatalogExerciseAndRelease).mockResolvedValue({
-        released: true,
-        protocolId: RESOURCE_ID,
+      vi.mocked(substitutionRepo.attachCatalogExercise).mockResolvedValue({
+        attached: true,
         userId: USER_ID,
-        version: 4,
-        content,
-        mesocycleName: 'Mesociclo 1',
-        startDate: new Date('2026-01-01'),
-        endDate: new Date('2026-02-01'),
-        totalWeeks: 4,
-        fromExerciseName: 'Supino Reto (Barra)',
-        toExerciseName: 'Supino Reto (Máquina)',
-      } as never);
+      });
 
-      const result = await service.addCatalogExerciseAndApproveSubstitution(
+      const result = await service.addCatalogExerciseToSubstitutionItem(
         admin,
         RESOURCE_ID,
+        '1',
         CATALOG_BODY,
       );
-      expect(result).toEqual({
-        id: RESOURCE_ID,
-        protocolId: RESOURCE_ID,
-        version: 4,
-        released: true,
-      });
+      expect(result).toEqual({ id: RESOURCE_ID, itemIndex: 1, attached: true });
       expect(exerciseCatalogAdmin.publish).toHaveBeenCalledWith(admin, CATALOG_BODY);
-      expect(substitutionRepo.attachCatalogExerciseAndRelease).toHaveBeenCalledWith(
+      expect(substitutionRepo.attachCatalogExercise).toHaveBeenCalledWith(
         { userId: ACTOR_ID, role: 'ADMIN' },
         RESOURCE_ID,
+        1,
         chosen,
       );
-      expect(enqueue).toHaveBeenCalledWith(
-        'whatsapp-outbound',
-        'protocol-delivery',
-        expect.objectContaining({ userId: USER_ID, protocolId: RESOURCE_ID, protocolVersion: 4 }),
-        expect.anything(),
-      );
+      expect(substitutionRepo.release).not.toHaveBeenCalled();
+      expect(enqueue).not.toHaveBeenCalled();
     });
 
-    it('exercício recém-publicado quebra a validação do protocolo inteiro → 400 com as violações, sem entregar', async () => {
-      const { service, enqueue, substitutionRepo, exerciseCatalog } = makeService(pendingProtocol);
-      vi.mocked(exerciseCatalog.getById).mockReturnValue({
-        id: 'supino_reto_maquina',
-        name: 'Supino Reto (Máquina)',
-      } as never);
-      vi.mocked(substitutionRepo.attachCatalogExerciseAndRelease).mockResolvedValue({
-        released: false,
+    it('índice de item fora do intervalo → 400, sem publicar nada', async () => {
+      const { service, exerciseCatalogAdmin } = makeService(pendingProtocol);
+      await expect(
+        service.addCatalogExerciseToSubstitutionItem(admin, RESOURCE_ID, '9', CATALOG_BODY),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(exerciseCatalogAdmin.publish).not.toHaveBeenCalled();
+    });
+
+    it('exercício recém-publicado quebra a validação do protocolo inteiro → 400 com as violações', async () => {
+      const { service, substitutionRepo, exerciseCatalog } = makeService(pendingProtocol);
+      vi.mocked(exerciseCatalog.getById).mockReturnValue(chosen as never);
+      vi.mocked(substitutionRepo.attachCatalogExercise).mockResolvedValue({
+        attached: false,
         reason: 'VALIDATION_FAILED',
         violations: ['EXERCISE_LEVEL_TOO_HIGH'],
-      } as never);
+      });
 
       await expect(
-        service.addCatalogExerciseAndApproveSubstitution(admin, RESOURCE_ID, CATALOG_BODY),
+        service.addCatalogExerciseToSubstitutionItem(admin, RESOURCE_ID, '0', CATALOG_BODY),
       ).rejects.toMatchObject({
         response: expect.objectContaining({ code: 'VALIDATION_FAILED' }),
       });
-      expect(enqueue).not.toHaveBeenCalled();
     });
 
-    it('proposta já decidida ou protocolo mudou de versão → 400, sem entregar', async () => {
-      const { service, enqueue, substitutionRepo, exerciseCatalog } = makeService(pendingProtocol);
-      vi.mocked(exerciseCatalog.getById).mockReturnValue({
-        id: 'supino_reto_maquina',
-        name: 'Supino Reto (Máquina)',
-      } as never);
-      vi.mocked(substitutionRepo.attachCatalogExerciseAndRelease).mockResolvedValue({
-        released: false,
-        reason: 'STALE',
-      } as never);
-
+    it('exercício publicado inelegível para o aluno → 400 com o motivo', async () => {
+      const { service, substitutionRepo, exerciseCatalog } = makeService(pendingProtocol);
+      vi.mocked(exerciseCatalog.getById).mockReturnValue(chosen as never);
+      vi.mocked(substitutionRepo.attachCatalogExercise).mockResolvedValue({
+        attached: false,
+        reason: 'NOT_VIABLE',
+      });
       await expect(
-        service.addCatalogExerciseAndApproveSubstitution(admin, RESOURCE_ID, CATALOG_BODY),
-      ).rejects.toBeInstanceOf(BadRequestException);
-      expect(enqueue).not.toHaveBeenCalled();
+        service.addCatalogExerciseToSubstitutionItem(admin, RESOURCE_ID, '0', CATALOG_BODY),
+      ).rejects.toMatchObject({ message: expect.stringContaining('não é elegível') });
     });
 
-    it('papel fora de PROFESSIONAL/ADMIN não adiciona nem aprova', async () => {
+    it('proposta já decidida, item inexistente ou protocolo mudou de versão → 400', async () => {
+      const { service, substitutionRepo, exerciseCatalog } = makeService(pendingProtocol);
+      vi.mocked(exerciseCatalog.getById).mockReturnValue(chosen as never);
+      vi.mocked(substitutionRepo.attachCatalogExercise).mockResolvedValue({
+        attached: false,
+        reason: 'STALE',
+      });
+      await expect(
+        service.addCatalogExerciseToSubstitutionItem(admin, RESOURCE_ID, '0', CATALOG_BODY),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('papel fora de PROFESSIONAL/ADMIN não adiciona', async () => {
       const { service } = makeService(pendingProtocol);
       const outsider: AuthenticatedUser = { userId: ACTOR_ID, role: 'SUPPORT', jti: 'jti' };
       await expect(
-        service.addCatalogExerciseAndApproveSubstitution(outsider, RESOURCE_ID, CATALOG_BODY),
+        service.addCatalogExerciseToSubstitutionItem(outsider, RESOURCE_ID, '0', CATALOG_BODY),
       ).rejects.toThrow();
     });
 
@@ -716,10 +843,10 @@ describe('DashboardService invariantes de mutacao', () => {
     it('PROFESSIONAL tem papel válido mas não tem AI_CONFIG_WRITE → 403, sem publicar nem tocar a proposta', async () => {
       const { service, exerciseCatalogAdmin, substitutionRepo } = makeService(pendingProtocol);
       await expect(
-        service.addCatalogExerciseAndApproveSubstitution(actor, RESOURCE_ID, CATALOG_BODY),
+        service.addCatalogExerciseToSubstitutionItem(actor, RESOURCE_ID, '0', CATALOG_BODY),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(exerciseCatalogAdmin.publish).not.toHaveBeenCalled();
-      expect(substitutionRepo.attachCatalogExerciseAndRelease).not.toHaveBeenCalled();
+      expect(substitutionRepo.attachCatalogExercise).not.toHaveBeenCalled();
     });
   });
 });
