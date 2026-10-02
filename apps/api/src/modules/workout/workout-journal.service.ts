@@ -9,6 +9,7 @@ import {
   type WorkoutJournal,
   type WorkoutPreferencesInput,
   type WorkoutSetInput,
+  type WorkoutShareCardData,
 } from '@movivo/shared';
 
 import { HealthCipherService } from '../../core/database/health-cipher.service';
@@ -33,6 +34,7 @@ import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { EXERCISE_BY_ID } from '../protocol/exercise-catalog';
+import { ShareCardRenderer, type ShareCardImage } from './share-card/share-card-renderer.service';
 import { WorkoutCompletionService } from './workout-completion.service';
 import { durationInsightButtons, durationInsightMessage } from './workout-messages';
 
@@ -142,6 +144,7 @@ export class WorkoutJournalService {
     private readonly completions: WorkoutCompletionService,
     private readonly queues: QueueManager,
     private readonly queueEvents: DashboardQueueEventsService,
+    private readonly shareCards: ShareCardRenderer,
   ) {}
 
   async journal(userId: string, requestedDate?: string, now = new Date()): Promise<WorkoutJournal> {
@@ -317,55 +320,8 @@ export class WorkoutJournalService {
         painReported: workout.painReported,
         sets,
       };
-      const finishedAt = workout.finishedAt;
-      if (workout.status === 'COMPLETED' && finishedAt && owner.biologicalSex) {
-        const completedIds = workout.prescription.exercises
-          .filter((exercise) =>
-            sets.some(
-              (entry) =>
-                entry.exerciseId === exercise.exerciseId &&
-                entry.setNumber > 0 &&
-                entry.completed &&
-                !entry.skipped,
-            ),
-          )
-          .map((exercise) => exercise.exerciseId);
-        // O catálogo é versionado: uma edição posterior não muda os músculos de um
-        // treino passado. IDs vêm da prescrição salva, nunca do protocolo atual.
-        const catalog = completedIds.length
-          ? await this.db.runAsUser(userId, 'USER', (tx) =>
-              tx
-                .selectDistinctOn([exerciseCatalogEntries.exerciseKey], {
-                  id: exerciseCatalogEntries.exerciseKey,
-                  muscleGroups: exerciseCatalogEntries.muscleGroups,
-                })
-                .from(exerciseCatalogEntries)
-                .where(
-                  and(
-                    inArray(exerciseCatalogEntries.exerciseKey, completedIds),
-                    lte(exerciseCatalogEntries.createdAt, finishedAt),
-                  ),
-                )
-                .orderBy(exerciseCatalogEntries.exerciseKey, desc(exerciseCatalogEntries.version)),
-            )
-          : [];
-        const byId = new Map(catalog.map((entry) => [entry.id, entry.muscleGroups]));
-        const muscles = completedIds.flatMap(
-          (id) => byId.get(id) ?? EXERCISE_BY_ID.get(id)?.muscleGroups ?? [],
-        );
-        workoutView.shareCard = {
-          user: {
-            name: owner.name?.trim().split(/\s+/)[0] || 'atleta',
-            gender: owner.biologicalSex === 'FEMALE' ? 'female' : 'male',
-          },
-          workout: {
-            name: workout.prescription.dayLabel,
-            durationMinutes: (workout.durationSeconds ?? 0) / 60,
-            completedAt: finishedAt.toISOString(),
-            ...mapWorkoutMuscles(muscles),
-          },
-        };
-      }
+      const shareCard = await this.buildShareCard(userId, workout, owner, sets);
+      if (shareCard) workoutView.shareCard = shareCard;
     }
 
     return {
@@ -641,6 +597,104 @@ export class WorkoutJournalService {
     );
     if (!row) throw new NotFoundException('Nenhum protocolo ativo encontrado.');
     return row;
+  }
+
+  /**
+   * Dados do card de um treino concluído (`undefined` enquanto não há o que mostrar).
+   * Fonte única: o diário os devolve ao front e o PNG é desenhado a partir deles.
+   */
+  private async buildShareCard(
+    userId: string,
+    workout: typeof workoutSessions.$inferSelect,
+    owner: { name: string | null; biologicalSex: 'MALE' | 'FEMALE' | null },
+    sets: ReadonlyArray<{
+      exerciseId: string;
+      setNumber: number;
+      completed: boolean;
+      skipped: boolean;
+    }>,
+  ): Promise<WorkoutShareCardData | undefined> {
+    const finishedAt = workout.finishedAt;
+    if (workout.status !== 'COMPLETED' || !finishedAt || !owner.biologicalSex) return undefined;
+    const completedIds = workout.prescription.exercises
+      .filter((exercise) =>
+        sets.some(
+          (entry) =>
+            entry.exerciseId === exercise.exerciseId &&
+            entry.setNumber > 0 &&
+            entry.completed &&
+            !entry.skipped,
+        ),
+      )
+      .map((exercise) => exercise.exerciseId);
+    // O catálogo é versionado: uma edição posterior não muda os músculos de um
+    // treino passado. IDs vêm da prescrição salva, nunca do protocolo atual.
+    const catalog = completedIds.length
+      ? await this.db.runAsUser(userId, 'USER', (tx) =>
+          tx
+            .selectDistinctOn([exerciseCatalogEntries.exerciseKey], {
+              id: exerciseCatalogEntries.exerciseKey,
+              muscleGroups: exerciseCatalogEntries.muscleGroups,
+            })
+            .from(exerciseCatalogEntries)
+            .where(
+              and(
+                inArray(exerciseCatalogEntries.exerciseKey, completedIds),
+                lte(exerciseCatalogEntries.createdAt, finishedAt),
+              ),
+            )
+            .orderBy(exerciseCatalogEntries.exerciseKey, desc(exerciseCatalogEntries.version)),
+        )
+      : [];
+    const byId = new Map(catalog.map((entry) => [entry.id, entry.muscleGroups]));
+    const muscles = completedIds.flatMap(
+      (id) => byId.get(id) ?? EXERCISE_BY_ID.get(id)?.muscleGroups ?? [],
+    );
+    return {
+      user: {
+        name: owner.name?.trim().split(/\s+/)[0] || 'atleta',
+        gender: owner.biologicalSex === 'FEMALE' ? 'female' : 'male',
+      },
+      workout: {
+        name: workout.prescription.dayLabel,
+        durationMinutes: (workout.durationSeconds ?? 0) / 60,
+        completedAt: finishedAt.toISOString(),
+        ...mapWorkoutMuscles(muscles),
+      },
+    };
+  }
+
+  /**
+   * PNG do card de Story. O desenho é feito aqui (e cacheado por conteúdo), nunca no
+   * aparelho do aluno: `finish` já o pré-aquece, então o `GET` costuma ser um cache hit.
+   */
+  async shareCardImage(userId: string, id: string): Promise<ShareCardImage> {
+    const workout = await this.ownedSession(userId, id);
+    if (!workout) throw new NotFoundException();
+    const { owner, sets } = await this.db.runAsUser(userId, 'USER', async (tx) => {
+      const [row] = await tx
+        .select({ name: users.name, biologicalSex: users.biologicalSex })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+      const entries = await tx
+        .select({
+          exerciseId: workoutSetEntries.exerciseId,
+          setNumber: workoutSetEntries.setNumber,
+          completed: workoutSetEntries.completed,
+          skipped: workoutSetEntries.skipped,
+        })
+        .from(workoutSetEntries)
+        .where(eq(workoutSetEntries.workoutSessionId, id));
+      return { owner: row, sets: entries };
+    });
+    const data = owner && (await this.buildShareCard(userId, workout, owner, sets));
+    if (!data) throw new NotFoundException('O card deste treino ainda não está disponível.');
+    return this.shareCards.render({
+      gender: data.user.gender,
+      groups: data.workout.muscleGroupsForHighlighter,
+      durationMinutes: data.workout.durationMinutes,
+    });
   }
 
   private async ownedSession(userId: string, id: string) {

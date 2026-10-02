@@ -7,7 +7,7 @@ import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-// Biblioteca anatômica e exportador só entram após o treino ser concluído.
+// O painel do card só entra após o treino ser concluído.
 const WorkoutShareCardPanel = dynamic(
   () => import('./share-card/WorkoutShareCardPanel').then((module) => module.WorkoutShareCardPanel),
   { ssr: false },
@@ -676,7 +676,11 @@ export function WorkoutJournalView() {
               {workout.perceivedEffort}/10
             </p>
             {workout.shareCard ? (
-              <WorkoutShareCardPanel key={workout.id} data={workout.shareCard} />
+              <WorkoutShareCardPanel
+                key={workout.id}
+                sessionId={workout.id}
+                data={workout.shareCard}
+              />
             ) : null}
           </section>
         ) : (

@@ -15,6 +15,7 @@ import { Module } from '@nestjs/common';
 
 import { JobsModule } from '../jobs/jobs.module';
 import { ShortLinkModule } from '../short-link/short-link.module';
+import { ShareCardRenderer } from './share-card/share-card-renderer.service';
 import { WorkoutAccessService } from './workout-access.service';
 import { WorkoutCompletionService } from './workout-completion.service';
 import { WorkoutController } from './workout.controller';
@@ -29,6 +30,7 @@ import { WorkoutScheduler } from './workout.scheduler';
     WorkoutAccessService,
     WorkoutCompletionService,
     WorkoutJournalService,
+    ShareCardRenderer,
     WorkoutScheduler,
     WorkoutInboundHandler,
   ],

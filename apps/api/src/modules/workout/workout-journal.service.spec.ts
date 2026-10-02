@@ -5,6 +5,7 @@ import type { HealthCipherService } from '../../core/database/health-cipher.serv
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
 import type { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import type { QueueManager } from '../jobs/queue-manager.service';
+import type { ShareCardRenderer } from './share-card/share-card-renderer.service';
 import type { WorkoutCompletionService } from './workout-completion.service';
 import { WorkoutJournalService } from './workout-journal.service';
 
@@ -155,8 +156,12 @@ function makeService(
   } as unknown as WorkoutCompletionService;
   const queues = { enqueue: vi.fn(async () => 'job') } as unknown as QueueManager;
   const queueEvents = { emit: vi.fn() } as unknown as DashboardQueueEventsService;
+  const shareCards = {
+    render: vi.fn(async () => ({ png: Buffer.from('png'), etag: 'etag' })),
+  } as unknown as ShareCardRenderer;
   return {
-    service: new WorkoutJournalService(db, cipher, completions, queues, queueEvents),
+    service: new WorkoutJournalService(db, cipher, completions, queues, queueEvents, shareCards),
+    shareCards,
     cipher,
     completions,
     queues,
@@ -165,6 +170,57 @@ function makeService(
     updated,
   };
 }
+
+describe('WorkoutJournalService.shareCardImage', () => {
+  const completed = {
+    ...WORKOUT,
+    status: 'COMPLETED' as const,
+    finishedAt: new Date('2026-08-10T11:05:00Z'),
+    durationSeconds: 3900,
+  };
+
+  it('desenha o card com os mesmos músculos/duração que o diário devolve', async () => {
+    const { service, shareCards } = makeService({
+      selects: [
+        [completed],
+        [{ name: 'Pedro da Silva', biologicalSex: 'FEMALE' }],
+        [
+          { exerciseId: 'squat', setNumber: 1, completed: true, skipped: false },
+          { exerciseId: 'plank', setNumber: 1, completed: false, skipped: true },
+        ],
+        [{ id: 'squat', muscleGroups: ['quadríceps', 'glúteo'] }],
+      ],
+    });
+    await expect(service.shareCardImage(USER_ID, WORKOUT_ID)).resolves.toEqual({
+      png: Buffer.from('png'),
+      etag: 'etag',
+    });
+    expect(shareCards.render).toHaveBeenCalledWith({
+      gender: 'female',
+      groups: ['quads', 'glutes'],
+      durationMinutes: 65,
+    });
+  });
+
+  it('não desenha card de treino alheio, em andamento ou sem sexo cadastrado', async () => {
+    const own = (selects: unknown[][]) => makeService({ selects }).service;
+    await expect(own([[]]).shareCardImage(USER_ID, WORKOUT_ID)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(
+      own([[WORKOUT], [{ name: 'Pedro', biologicalSex: 'MALE' }], []]).shareCardImage(
+        USER_ID,
+        WORKOUT_ID,
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      own([[completed], [{ name: 'Pedro', biologicalSex: null }], []]).shareCardImage(
+        USER_ID,
+        WORKOUT_ID,
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
 
 describe('WorkoutJournalService.journal', () => {
   it('deriva o share card do cadastro e dos exercícios realizados na prescrição salva', async () => {

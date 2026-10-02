@@ -3,12 +3,11 @@
 import type { WorkoutShareCardData } from '@movivo/shared';
 import { useEffect, useRef, useState } from 'react';
 
-import { generateWorkoutShareCard } from './generateWorkoutShareCard';
+import { fetchWorkoutShareCard } from './fetchWorkoutShareCard';
 
 type CardAction = 'download' | 'copy' | 'share' | 'save';
 
-export function useWorkoutShareCard(data: WorkoutShareCardData) {
-  const cardRef = useRef<HTMLDivElement>(null);
+export function useWorkoutShareCard(sessionId: string, data: WorkoutShareCardData) {
   const [image, setImage] = useState<{ blob: Blob; url: string } | null>(null);
   const [generationError, setGenerationError] = useState('');
   const [message, setMessage] = useState('');
@@ -17,34 +16,28 @@ export function useWorkoutShareCard(data: WorkoutShareCardData) {
   const actionLock = useRef(false);
 
   useEffect(() => {
-    let disposed = false;
+    const controller = new AbortController();
     let url: string | undefined;
     setImage(null);
     setGenerationError('');
     setMessage('');
-    const node = cardRef.current;
-    if (!node) return;
-    const timeout = window.setTimeout(() => {
-      disposed = true;
-      setGenerationError('Seu treino está salvo. A imagem demorou para carregar. Tente novamente.');
-    }, 20_000);
-    void generateWorkoutShareCard(node)
+    void fetchWorkoutShareCard(sessionId, controller.signal)
       .then((blob) => {
-        window.clearTimeout(timeout);
-        if (disposed) return;
+        if (controller.signal.aborted) return;
         url = URL.createObjectURL(blob);
         setImage({ blob, url });
       })
       .catch(() => {
-        window.clearTimeout(timeout);
-        if (!disposed) setGenerationError('Seu treino está salvo. Não foi possível gerar o card.');
+        if (!controller.signal.aborted) {
+          setGenerationError('Seu treino está salvo. Não foi possível carregar o card.');
+        }
       });
     return () => {
-      disposed = true;
-      window.clearTimeout(timeout);
+      controller.abort();
       if (url) URL.revokeObjectURL(url);
     };
-  }, [data, attempt]);
+    // O card só muda se o treino mudar; trocar a identidade do objeto não deve rebaixá-lo.
+  }, [sessionId, data.workout.completedAt, attempt]);
 
   async function act(action: CardAction) {
     if (!image || actionLock.current) return;
@@ -104,7 +97,6 @@ export function useWorkoutShareCard(data: WorkoutShareCardData) {
   }
 
   return {
-    cardRef,
     imageUrl: image?.url,
     generationError,
     message,

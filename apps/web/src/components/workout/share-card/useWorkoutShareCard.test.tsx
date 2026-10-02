@@ -2,16 +2,17 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./generateWorkoutShareCard', () => ({ generateWorkoutShareCard: vi.fn() }));
-import { generateWorkoutShareCard } from './generateWorkoutShareCard';
+vi.mock('./fetchWorkoutShareCard', () => ({ fetchWorkoutShareCard: vi.fn() }));
+import { fetchWorkoutShareCard } from './fetchWorkoutShareCard';
 import { useWorkoutShareCard } from './useWorkoutShareCard';
 import { workoutShareCardMock } from './workout-share-card.mocks';
 
+const SESSION_ID = '22222222-2222-4222-8222-222222222222';
+
 function Harness() {
-  const card = useWorkoutShareCard(workoutShareCardMock);
+  const card = useWorkoutShareCard(SESSION_ID, workoutShareCardMock);
   return (
     <>
-      <div ref={card.cardRef} />
       <p>{card.generationError || card.message}</p>
       {(['download', 'copy', 'share', 'save'] as const).map((action) => (
         <button
@@ -32,7 +33,7 @@ let download: ReturnType<typeof vi.spyOn>;
 let user: ReturnType<typeof userEvent.setup>;
 beforeEach(() => {
   user = userEvent.setup();
-  vi.mocked(generateWorkoutShareCard).mockReset().mockResolvedValue(blob);
+  vi.mocked(fetchWorkoutShareCard).mockReset().mockResolvedValue(blob);
   vi.stubGlobal('ClipboardItem', undefined);
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:card');
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
@@ -46,11 +47,12 @@ afterEach(() => {
 });
 
 describe('useWorkoutShareCard', () => {
-  it('gera automaticamente, baixa e libera a URL ao desmontar', async () => {
+  it('busca automaticamente, baixa e libera a URL ao desmontar', async () => {
     const view = render(<Harness />);
     await waitFor(() => expect(screen.getByText('download')).toBeEnabled());
     await user.click(screen.getByText('download'));
-    expect(generateWorkoutShareCard).toHaveBeenCalledOnce();
+    expect(fetchWorkoutShareCard).toHaveBeenCalledOnce();
+    expect(fetchWorkoutShareCard).toHaveBeenCalledWith(SESSION_ID, expect.any(AbortSignal));
     expect(download).toHaveBeenCalledOnce();
     view.unmount();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:card');
@@ -106,17 +108,17 @@ describe('useWorkoutShareCard', () => {
     await user.click(screen.getByText('share'));
     expect(download).not.toHaveBeenCalled();
   });
-  it('recupera falha de geração sem reenviar a conclusão do treino', async () => {
-    vi.mocked(generateWorkoutShareCard).mockRejectedValueOnce(new Error('asset failed'));
+  it('recupera falha ao carregar o card sem reenviar a conclusão do treino', async () => {
+    vi.mocked(fetchWorkoutShareCard).mockRejectedValueOnce(new Error('asset failed'));
     render(<Harness />);
     expect(await screen.findByText(/Seu treino está salvo/)).toBeVisible();
     await user.click(screen.getByText('retry'));
     await waitFor(() => expect(screen.getByText('download')).toBeEnabled());
-    expect(generateWorkoutShareCard).toHaveBeenCalledTimes(2);
+    expect(fetchWorkoutShareCard).toHaveBeenCalledTimes(2);
   });
   it('descarta exportação que termine depois da desmontagem', async () => {
     let resolve: (blob: Blob) => void = () => {};
-    vi.mocked(generateWorkoutShareCard).mockReturnValueOnce(
+    vi.mocked(fetchWorkoutShareCard).mockReturnValueOnce(
       new Promise((done) => {
         resolve = done;
       }),
