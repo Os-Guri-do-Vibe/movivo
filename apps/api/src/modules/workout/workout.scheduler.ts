@@ -119,7 +119,11 @@ export class WorkoutScheduler implements OnModuleInit {
         userId: row.userId,
         type: 'WORKOUT_DAILY_LINK',
         dedupeId: `workout-link-${local.date}`,
-        text: dailyWorkoutMessage(row.name?.trim().split(/\s+/)[0] || 'atleta', link),
+        text: dailyWorkoutMessage(
+          row.name?.trim().split(/\s+/)[0] || 'atleta',
+          view.workout.prescription.dayLabel,
+          link,
+        ),
       };
       await this.queues.enqueue(QUEUE.whatsappOutbound, 'workout-daily-link', outbound, {
         jobId: `wa-workout-link-${row.userId}-${local.date}`,
