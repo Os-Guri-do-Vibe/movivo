@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./fetchWorkoutShareCard', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('./fetchWorkoutShareCard')>()),
+  ...(await importOriginal<Record<string, unknown>>()),
   fetchWorkoutShareCard: vi.fn(),
 }));
 import { fetchWorkoutShareCard } from './fetchWorkoutShareCard';
