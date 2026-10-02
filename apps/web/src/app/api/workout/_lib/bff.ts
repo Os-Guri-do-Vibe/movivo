@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { cookies } from 'next/headers';
+import { cookies, headers as requestHeaders } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { publicEnv } from '@/lib/env';
@@ -65,6 +65,12 @@ export async function workoutBackendFetch(path: string, init: RequestInit = {}) 
   if (!token) throw new WorkoutBffError(401, 'Abra o link recebido pelo WhatsApp.');
   const headers = new Headers(init.headers);
   headers.set('Authorization', `Bearer ${token}`);
+  // Sem o IP do aluno toda chamada sairia com o IP deste servidor e o rate limit por IP
+  // da API viraria um limite global compartilhado por todos os alunos (60/min): "Iniciar"
+  // e o salvamento das séries passavam a falhar sozinhos. Mesmo contrato do BFF de anamnese.
+  const incoming = await requestHeaders();
+  const ip = incoming.get('x-real-ip');
+  if (ip) headers.set('X-Forwarded-For', ip);
   if (!headers.has('Content-Type') && init.body) headers.set('Content-Type', 'application/json');
   return fetch(`${API_BASE}${path}`, { ...init, headers, cache: 'no-store' });
 }
