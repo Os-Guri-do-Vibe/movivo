@@ -11,7 +11,10 @@ import {
   parseDurationInsightButton,
 } from './workout-messages';
 
-const COPY = [dailyWorkoutMessage('Ana', 'https://x/treino/abc'), durationInsightMessage(75, 60)];
+const COPY = [
+  dailyWorkoutMessage('Ana', 'Treino A', 'https://x/treino/abc'),
+  durationInsightMessage(75, 60),
+];
 
 const FORBIDDEN =
   /diagn[óo]stic|tratamento|cura\b|garantid|evolu[çc][ãa]o do quadro|progresso cl[íi]nico|resultado garantido/i;
@@ -26,8 +29,16 @@ describe('copy do treino diário', () => {
     for (const text of COPY) expect(text).not.toContain('—');
   });
 
-  it('mantém o profissional CREF visível na mensagem diária', () => {
-    expect(dailyWorkoutMessage('Ana', 'https://x/treino/abc')).toMatch(/profissional CREF/);
+  it('monta a mensagem diária com nome e título em negrito e o link em linha própria', () => {
+    expect(dailyWorkoutMessage('Ana', 'Treino A', 'https://x/check-in/abc')).toBe(
+      'Bom dia, *Ana*! 💚\n\nSeu treino de hoje é *Treino A*, não esqueça de realizar seu check-in diário quando for treinar:\nhttps://x/check-in/abc\n\nAgora é com você. Bora se mover. 👊🏼',
+    );
+  });
+
+  it('neutraliza marcadores de formatação e quebras de linha vindos do título', () => {
+    const text = dailyWorkoutMessage('A*na', '*Peito_\nTríceps~', 'https://x/check-in/abc');
+    expect(text).toContain('Bom dia, *Ana*!');
+    expect(text).toContain('é *Peito Tríceps*,');
   });
 });
 

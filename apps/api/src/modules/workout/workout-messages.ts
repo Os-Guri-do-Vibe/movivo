@@ -17,8 +17,21 @@
  */
 import type { WhatsappQuickReplyButton } from '../jobs/whatsapp-outbound.contract';
 
-export function dailyWorkoutMessage(firstName: string, link: string): string {
-  return `Bom dia, ${firstName}! Seu treino de hoje esta pronto: ${link}\n\nO planejamento segue a metodologia do profissional CREF da MOVIVO. Se quiser receber em outro horario, e so me dizer por aqui.`;
+/**
+ * Negrito do WhatsApp é `*texto*`. Nome e título vêm de dados livres (o `dayLabel` sai do
+ * LLM): marcadores de formatação e quebras de linha são removidos para que nada quebre o
+ * negrito nem injete formatação na mensagem.
+ */
+function bold(value: string): string {
+  const clean = value
+    .replace(/[*_~`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return `*${clean}*`;
+}
+
+export function dailyWorkoutMessage(firstName: string, workoutTitle: string, link: string): string {
+  return `Bom dia, ${bold(firstName)}! 💚\n\nSeu treino de hoje é ${bold(workoutTitle)}, não esqueça de realizar seu check-in diário quando for treinar:\n${link}\n\nAgora é com você. Bora se mover. 👊🏼`;
 }
 
 export function durationInsightMessage(observed: number, expected: number): string {

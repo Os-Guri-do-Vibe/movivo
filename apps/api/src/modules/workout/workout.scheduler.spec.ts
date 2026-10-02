@@ -36,7 +36,12 @@ function makeScheduler(reminderEnabled = true, hasWorkout = true) {
   } as unknown as TenantDatabase;
   const enqueue = vi.fn(async () => 'job');
   const journal = vi.fn(async () => ({
-    workout: hasWorkout ? { id: '22222222-2222-4222-8222-222222222222' } : null,
+    workout: hasWorkout
+      ? {
+          id: '22222222-2222-4222-8222-222222222222',
+          prescription: { dayLabel: 'Treino A' },
+        }
+      : null,
   }));
   const create = vi.fn(async () => 'aB3xK9pQ');
   const scheduler = new WorkoutScheduler(
@@ -79,6 +84,14 @@ describe('WorkoutScheduler.scan', () => {
     const [, , payload] = enqueue.mock.calls[0] as unknown as [string, string, { text: string }];
     expect(payload.text).toContain('https://movivo.test/check-in/aB3xK9pQ');
     expect(payload.text).not.toContain('#token=secret');
+  });
+
+  it('abre a mensagem com o título do treino do dia em negrito', async () => {
+    const { scheduler, enqueue } = makeScheduler();
+    await scheduler.scan(new Date('2026-08-10T07:00:00.000Z'));
+
+    const [, , payload] = enqueue.mock.calls[0] as unknown as [string, string, { text: string }];
+    expect(payload.text).toContain('Seu treino de hoje é *Treino A*,');
   });
 
   it('nao envia fora do horario fixo (04:00)', async () => {
