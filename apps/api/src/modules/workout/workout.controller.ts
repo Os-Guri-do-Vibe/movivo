@@ -7,10 +7,14 @@ import {
   Param,
   Patch,
   Post,
+  Logger,
   Query,
+  Res,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
-import { ThrottlerGuard } from '@nestjs/throttler';
+import { SkipThrottle, ThrottlerGuard } from '@nestjs/throttler';
+import type { Response } from 'express';
 import {
   ApiBody,
   ApiHeader,
@@ -52,6 +56,8 @@ const SESSION_TOKEN_HEADER = {
 @Controller('workouts')
 @UseGuards(ThrottlerGuard)
 export class WorkoutController {
+  private readonly logger = new Logger(WorkoutController.name);
+
   constructor(
     private readonly access: WorkoutAccessService,
     private readonly journalService: WorkoutJournalService,
@@ -189,11 +195,48 @@ export class WorkoutController {
     @Body() raw: unknown,
   ) {
     const userId = await this.access.requireUser(authorization);
-    await this.journalService.finish(
-      userId,
-      uuidSchema.parse(rawId),
-      finishWorkoutSchema.parse(raw),
-    );
+    const id = uuidSchema.parse(rawId);
+    await this.journalService.finish(userId, id, finishWorkoutSchema.parse(raw));
+    // Pré-aquece o card de Story: quando o aluno abrir a tela de conclusão o PNG já está
+    // desenhado e em cache. Best-effort — se falhar, o `GET share-card` desenha sob demanda.
+    void this.journalService.shareCardImage(userId, id).catch((error: unknown) => {
+      this.logger.warn(`pré-aquecimento do share-card falhou: ${String(error)}`);
+    });
     return { ok: true };
+  }
+
+  @Get('sessions/:id/share-card')
+  @SkipThrottle()
+  @ApiHeader(SESSION_TOKEN_HEADER)
+  @ApiOperation({
+    summary: 'Card de Story (PNG 1080×1920, fundo transparente) de um treino concluído',
+    description:
+      'Desenhado no servidor e cacheado por conteúdo (gênero, músculos, duração) — resposta imediata mesmo quando muitos alunos concluem ao mesmo tempo. Não contém dados pessoais.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID da sessão de treino concluída.' })
+  @ApiResponse({ status: 200, description: 'PNG do card.' })
+  @ApiResponse({ status: 304, description: 'O cliente já tem esta versão (ETag).' })
+  @ApiResponse({ status: 401, description: 'sessionToken ausente, inválido ou expirado.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Sessão inexistente, de outro titular ou não concluída.',
+  })
+  async shareCard(
+    @Headers('authorization') authorization: string | undefined,
+    @Headers('if-none-match') ifNoneMatch: string | undefined,
+    @Param('id') rawId: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const userId = await this.access.requireUser(authorization);
+    const { png, etag } = await this.journalService.shareCardImage(userId, uuidSchema.parse(rawId));
+    const quoted = `"${etag}"`;
+    // `private`: a URL é por sessão do aluno; o conteúdo, uma vez concluído o treino, não muda.
+    res.setHeader('Cache-Control', 'private, max-age=86400, stale-while-revalidate=604800');
+    res.setHeader('ETag', quoted);
+    if (ifNoneMatch === quoted) {
+      res.status(304);
+      return;
+    }
+    return new StreamableFile(png, { type: 'image/png', length: png.length });
   }
 }

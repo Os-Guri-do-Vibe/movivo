@@ -55,8 +55,12 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 
 # -----------------------------------------------------------------------------
 FROM node:${NODE_VERSION}-bookworm-slim AS runtime
+# MALLOC_ARENA_MAX: o glibc cria uma arena por thread do libuv; o resvg (card de Story)
+# aloca bitmaps grandes nelas e o RSS não volta. Duas arenas seguram o pico sob o limite
+# de 1 GB do container sem custo perceptível de latência.
 ENV NODE_ENV=production \
-    TZ=America/Sao_Paulo
+    TZ=America/Sao_Paulo \
+    MALLOC_ARENA_MAX=2
 # tini como PID 1: repassa SIGTERM ao Node (graceful shutdown do Nest drena
 # conexões e deixa os workers BullMQ terminarem o job em voo) e recolhe zumbis.
 RUN apt-get update \

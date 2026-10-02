@@ -4,12 +4,17 @@ import type { WorkoutShareCardData } from '@movivo/shared';
 import { Copy, Download, ImageDown, Share2 } from 'lucide-react';
 import Image from 'next/image';
 
-import { WorkoutShareCard } from './WorkoutShareCard';
 import { useWorkoutShareCard } from './useWorkoutShareCard';
 import styles from './workout-share-card.module.css';
 
-export function WorkoutShareCardPanel({ data }: { data: WorkoutShareCardData }) {
-  const card = useWorkoutShareCard(data);
+export function WorkoutShareCardPanel({
+  sessionId,
+  data,
+}: {
+  sessionId: string;
+  data: WorkoutShareCardData;
+}) {
+  const card = useWorkoutShareCard(sessionId, data);
   const buttons = [
     { action: 'share', label: 'Compartilhar imagem', icon: Share2 },
     { action: 'download', label: 'Baixar imagem', icon: Download },
@@ -22,9 +27,6 @@ export function WorkoutShareCardPanel({ data }: { data: WorkoutShareCardData }) 
       <p className="mt-2 mb-5 text-label text-muted-foreground">
         Compartilhe seu movimento com a MOVIVO.
       </p>
-      <div className={styles.renderSurface} aria-hidden="true" inert>
-        <WorkoutShareCard data={data} cardRef={card.cardRef} />
-      </div>
       {card.loading ? (
         <p role="status" className="py-8 text-muted-foreground">
           Preparando sua imagem…

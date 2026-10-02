@@ -1,3 +1,4 @@
+import type { Response } from 'express';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { WorkoutAccessService } from './workout-access.service';
@@ -18,6 +19,7 @@ function makeController() {
     start: vi.fn(async () => undefined),
     saveSets: vi.fn(async () => undefined),
     finish: vi.fn(async () => undefined),
+    shareCardImage: vi.fn(async () => ({ png: Buffer.from('png'), etag: 'abc' })),
   } as unknown as WorkoutJournalService;
   return { controller: new WorkoutController(access, journal), access, journal };
 }
@@ -81,5 +83,51 @@ describe('WorkoutController', () => {
       SESSION_ID,
       expect.objectContaining(finish),
     );
+  });
+
+  it('pré-aquece o card ao finalizar, sem falhar a finalização se o desenho falhar', async () => {
+    const { controller, journal } = makeController();
+    const body = { perceivedEffort: 7, feelingNotes: '', painReported: false, painNotes: '' };
+    await controller.finish('Bearer token', SESSION_ID, body);
+    expect(journal.shareCardImage).toHaveBeenCalledWith(USER_ID, SESSION_ID);
+
+    vi.mocked(journal.shareCardImage).mockRejectedValueOnce(new Error('resvg indisponível'));
+    await expect(controller.finish('Bearer token', SESSION_ID, body)).resolves.toEqual({
+      ok: true,
+    });
+  });
+
+  describe('share-card', () => {
+    const makeResponse = () => ({ setHeader: vi.fn(), status: vi.fn() });
+
+    it('entrega o PNG com cache privado e ETag', async () => {
+      const { controller } = makeController();
+      const res = makeResponse();
+      const file = await controller.shareCard(
+        'Bearer token',
+        undefined,
+        SESSION_ID,
+        res as unknown as Response,
+      );
+      expect(file?.getHeaders()).toMatchObject({ type: 'image/png', length: 3 });
+      expect(res.setHeader).toHaveBeenCalledWith('ETag', '"abc"');
+      expect(res.setHeader).toHaveBeenCalledWith(
+        'Cache-Control',
+        expect.stringContaining('private'),
+      );
+    });
+
+    it('responde 304 quando o cliente já tem a versão', async () => {
+      const { controller } = makeController();
+      const res = makeResponse();
+      const file = await controller.shareCard(
+        'Bearer token',
+        '"abc"',
+        SESSION_ID,
+        res as unknown as Response,
+      );
+      expect(file).toBeUndefined();
+      expect(res.status).toHaveBeenCalledWith(304);
+    });
   });
 });

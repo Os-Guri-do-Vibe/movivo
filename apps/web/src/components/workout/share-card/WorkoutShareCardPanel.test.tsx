@@ -7,8 +7,9 @@ import { WorkoutShareCardPanel } from './WorkoutShareCardPanel';
 import { useWorkoutShareCard } from './useWorkoutShareCard';
 import { workoutShareCardMock } from './workout-share-card.mocks';
 
+const SESSION_ID = '22222222-2222-4222-8222-222222222222';
+
 const baseCard = {
-  cardRef: { current: null },
   imageUrl: undefined as string | undefined,
   generationError: '',
   message: '',
@@ -27,7 +28,7 @@ beforeEach(() => {
 describe('WorkoutShareCardPanel', () => {
   it('mostra estado de carregamento enquanto a imagem não existe', () => {
     vi.mocked(useWorkoutShareCard).mockReturnValue({ ...baseCard, loading: true });
-    render(<WorkoutShareCardPanel data={workoutShareCardMock} />);
+    render(<WorkoutShareCardPanel sessionId={SESSION_ID} data={workoutShareCardMock} />);
     expect(screen.getByText('Preparando sua imagem…')).toBeVisible();
   });
 
@@ -35,10 +36,10 @@ describe('WorkoutShareCardPanel', () => {
     const user = userEvent.setup();
     vi.mocked(useWorkoutShareCard).mockReturnValue({
       ...baseCard,
-      generationError: 'Seu treino está salvo. Não foi possível gerar o card.',
+      generationError: 'Seu treino está salvo. Não foi possível carregar o card.',
     });
-    render(<WorkoutShareCardPanel data={workoutShareCardMock} />);
-    expect(screen.getByRole('alert')).toHaveTextContent('Não foi possível gerar o card.');
+    render(<WorkoutShareCardPanel sessionId={SESSION_ID} data={workoutShareCardMock} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Não foi possível carregar o card.');
     await user.click(screen.getByRole('button', { name: 'Gerar novamente' }));
     expect(baseCard.retry).toHaveBeenCalledOnce();
   });
@@ -50,7 +51,7 @@ describe('WorkoutShareCardPanel', () => {
       imageUrl: 'blob:card',
       message: 'Download iniciado.',
     });
-    render(<WorkoutShareCardPanel data={workoutShareCardMock} />);
+    render(<WorkoutShareCardPanel sessionId={SESSION_ID} data={workoutShareCardMock} />);
     const shareButton = screen.getByRole('button', { name: 'Compartilhar imagem' });
     expect(shareButton).toBeEnabled();
     await user.click(shareButton);
@@ -64,7 +65,7 @@ describe('WorkoutShareCardPanel', () => {
       imageUrl: 'blob:card',
       acting: true,
     });
-    render(<WorkoutShareCardPanel data={workoutShareCardMock} />);
+    render(<WorkoutShareCardPanel sessionId={SESSION_ID} data={workoutShareCardMock} />);
     expect(screen.getByRole('button', { name: 'Compartilhar imagem' })).toBeDisabled();
   });
 });

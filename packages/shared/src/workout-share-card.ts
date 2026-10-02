@@ -59,3 +59,12 @@ export function mapWorkoutMuscles(raw: readonly string[]): {
   }
   return { trainedMuscles: [...labels.values()], muscleGroupsForHighlighter: [...groups] };
 }
+
+/** Rótulo de duração do card ("1h 30min"). Único formatador: a API desenha o PNG com ele. */
+export function formatShareCardDuration(durationMinutes: number): string {
+  if (!Number.isFinite(durationMinutes) || durationMinutes < 0) return '—';
+  if (durationMinutes > 0 && durationMinutes < 1) return '<1min';
+  const minutes = Math.round(durationMinutes);
+  if (minutes < 60) return `${minutes}min`;
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}min`;
+}
