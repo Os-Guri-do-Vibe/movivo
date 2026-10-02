@@ -5,7 +5,7 @@ export const workoutShareCardMock: WorkoutShareCardData = {
   user: { name: 'Alex', gender: 'male' },
   workout: {
     name: 'Treino A',
-    durationMinutes: 90,
+    durationSeconds: 5_423,
     ...mapWorkoutMuscles(['Peito', 'Tríceps', 'Ombros']),
     completedAt: '2026-09-17T15:00:00.000Z',
   },
@@ -15,7 +15,7 @@ export const fullBodyShareCardMock: WorkoutShareCardData = {
   user: { name: 'Ana', gender: 'female' },
   workout: {
     name: 'Corpo inteiro',
-    durationMinutes: 65,
+    durationSeconds: 3_900,
     ...mapWorkoutMuscles([
       'chest',
       'shoulders',

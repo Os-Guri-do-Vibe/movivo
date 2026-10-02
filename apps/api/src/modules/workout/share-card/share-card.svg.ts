@@ -19,7 +19,7 @@ const BODY_VIEWBOX = `0 0 ${1365 * PX2MM} ${2048 * PX2MM}`;
  * Larguras (px) dos textos fixos em Hanken Grotesk, medidas com o próprio resvg (+ o espaçamento final, como o CSS faz). Servem só para
  * centralizar o ícone ao lado do texto; mudar a fonte exige remedir (ver o spec).
  */
-export const SHARE_CARD_TEXT_WIDTH = { badge: 247.5, legend: 256 } as const;
+export const SHARE_CARD_TEXT_WIDTH = { badge: 247.5, legend: 247 } as const;
 
 const esc = (value: string) => value.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
@@ -110,11 +110,10 @@ export function buildShareCardSvg(assets: ShareCardAssets, input: ShareCardSvgIn
     })
     .join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${SHARE_CARD_WIDTH}" height="${SHARE_CARD_HEIGHT}" viewBox="0 0 ${SHARE_CARD_WIDTH} ${SHARE_CARD_HEIGHT}" ${font}>
-${accent(35, 10)}${accent(1055, 1830)}
-${text('MOVE YOUR POTENTIAL.', { x: 540, y: 144.9, size: 25, fill: '#f4f7f5', weight: 700 })}
+${accent(1055, 1830)}
 ${bodies}
 <circle cx="${legendStart + 6.5}" cy="1759" r="6.5" fill="${GREEN}"/>
-${text('MOVIMENTO EM DESTAQUE', { x: legendStart + 25, y: 1764.8, size: 17, fill: '#a3c1b3', anchor: 'start', spacing: 2 })}
+${text('MÚSCULOS TRABALHADOS', { x: legendStart + 25, y: 1764.8, size: 17, fill: '#a3c1b3', anchor: 'start', spacing: 2 })}
 <image href="${assets.logo}" x="572" y="1184.3" width="452" height="117.5"/>
 <rect x="573" y="1328.8" width="450" height="68" rx="34" fill="none" stroke="${GREEN}" stroke-width="2"/>
 <circle cx="${badgeStart + 15}" cy="1362.8" r="15" fill="${GREEN}"/>
@@ -125,7 +124,7 @@ ${text('TREINO CONCLUÍDO', { x: badgeStart + 45, y: 1371, size: 23, fill: GREEN
 <g transform="translate(572 1487) scale(2)" fill="none" stroke="${GREEN}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6h4"/></g>
 ${text('Tempo de Treino', { x: 798, y: 1489.7, size: 19, fill: GREEN, spacing: 4 })}
 ${text(esc(input.durationLabel), { x: 798, y: 1541.7, size: 46, fill: '#f4f7f5', weight: 700 })}
-${text('BETTER THAN YESTERDAY.', { x: 798, y: 1637.8, size: 24, fill: '#ffffff', weight: 700 })}
+${text('MOVE YOUR POTENTIAL.', { x: 798, y: 1637.8, size: 24, fill: '#ffffff', weight: 700 })}
 <text x="798" y="1693.8" font-size="25" fill="${GREEN}" text-anchor="middle">Siga <tspan font-weight="700">@movivo.br</tspan></text>
 </svg>`;
 }

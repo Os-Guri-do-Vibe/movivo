@@ -198,7 +198,7 @@ describe('WorkoutJournalService.shareCardImage', () => {
     expect(shareCards.render).toHaveBeenCalledWith({
       gender: 'female',
       groups: ['quads', 'glutes'],
-      durationMinutes: 65,
+      durationSeconds: 3900,
     });
   });
 
@@ -278,7 +278,7 @@ describe('WorkoutJournalService.journal', () => {
       user: { name: 'Pedro', gender: 'female' },
       workout: {
         name: 'A',
-        durationMinutes: 65,
+        durationSeconds: 3900,
         completedAt: '2026-08-10T11:05:00.000Z',
         trainedMuscles: ['Quadríceps', 'Glúteos'],
         muscleGroupsForHighlighter: ['quads', 'glutes'],

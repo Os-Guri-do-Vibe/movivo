@@ -38,7 +38,7 @@ describe('mapWorkoutMuscles', () => {
     const data = {
       user: { name: 'Ana', gender: 'female' },
       workout: {
-        durationMinutes: 65,
+        durationSeconds: 3_900,
         completedAt: '2026-09-17T15:00:00.000Z',
         ...mapWorkoutMuscles(['glúteo', 'quadríceps', 'posterior de coxa', 'panturrilha']),
       },
@@ -49,7 +49,7 @@ describe('mapWorkoutMuscles', () => {
         ...data,
         workout: {
           ...data.workout,
-          durationMinutes: -1,
+          durationSeconds: -1,
         },
       }).success,
     ).toBe(false);

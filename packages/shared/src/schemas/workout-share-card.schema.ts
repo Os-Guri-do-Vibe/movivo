@@ -22,7 +22,7 @@ export const workoutShareCardDataSchema = z.object({
   user: z.object({ name: z.string().min(1).max(80), gender: z.enum(['male', 'female']) }),
   workout: z.object({
     name: z.string().max(160).optional(),
-    durationMinutes: z.number().finite().min(0).max(720),
+    durationSeconds: z.number().int().min(0).max(43_200),
     trainedMuscles: z.array(z.string().min(1).max(40)).max(180),
     muscleGroupsForHighlighter: z.array(shareCardMuscleSchema).max(14),
     completedAt: z.iso.datetime(),

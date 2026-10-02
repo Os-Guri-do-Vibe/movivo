@@ -682,7 +682,7 @@ export class WorkoutJournalService {
       },
       workout: {
         name: workout.prescription.dayLabel,
-        durationMinutes: (workout.durationSeconds ?? 0) / 60,
+        durationSeconds: workout.durationSeconds ?? 0,
         completedAt: finishedAt.toISOString(),
         ...mapWorkoutMuscles(muscles),
       },
@@ -718,7 +718,7 @@ export class WorkoutJournalService {
     return this.shareCards.render({
       gender: data.user.gender,
       groups: data.workout.muscleGroupsForHighlighter,
-      durationMinutes: data.workout.durationMinutes,
+      durationSeconds: data.workout.durationSeconds,
     });
   }
 
