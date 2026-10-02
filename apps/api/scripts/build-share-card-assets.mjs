@@ -32,7 +32,8 @@ for (const m of MUSCLES) {
   (muscles[key] ??= []).push({ group: m.group, d: m.d, ...(transform ? { transform } : {}) });
 }
 mkdirSync(join(out, 'bodies'), { recursive: true });
-writeFileSync(join(out, 'muscles.json'), `${JSON.stringify(muscles)}\n`);
+// Formatado em 2 espaços: `prettier --check .` (CI) exige; rode `pnpm exec prettier --write` no JSON.
+writeFileSync(join(out, 'muscles.json'), `${JSON.stringify(muscles, null, 2)}\n`);
 // `sharp` chega pelo Next (dependência dele, não nossa): resolve a partir do pacote `next`.
 const sharp = createRequire(webRequire.resolve('next/package.json'))('sharp');
 for (const gender of ['male', 'female']) {
