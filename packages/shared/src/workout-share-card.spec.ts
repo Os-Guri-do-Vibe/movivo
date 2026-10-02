@@ -18,6 +18,22 @@ describe('mapWorkoutMuscles', () => {
     expect(mapWorkoutMuscles([])).toEqual({ trainedMuscles: [], muscleGroupsForHighlighter: [] });
     expect(mapWorkoutMuscles(['corpo todo']).muscleGroupsForHighlighter).toHaveLength(14);
   });
+  it('"corpo todo" só vale sozinho: um burpee no fim do Push não pinta o corpo inteiro', () => {
+    expect(
+      mapWorkoutMuscles(['peito', 'ombros', 'tríceps', 'corpo todo', 'Corpo inteiro']),
+    ).toEqual({
+      trainedMuscles: ['Peito', 'Ombros', 'Tríceps'],
+      muscleGroupsForHighlighter: ['chest', 'shoulders', 'triceps'],
+    });
+    expect(mapWorkoutMuscles(['corpo todo', 'corpo todo'])).toMatchObject({
+      trainedMuscles: ['Corpo inteiro'],
+    });
+    // Músculo sem máscara (pescoço) também é "específico": não dispara o corpo inteiro.
+    expect(mapWorkoutMuscles(['corpo todo', 'pescoço'])).toEqual({
+      trainedMuscles: ['Pescoço'],
+      muscleGroupsForHighlighter: [],
+    });
+  });
   it('valida o contrato e rejeita duração inválida e identificador de músculo inventado', () => {
     const data = {
       user: { name: 'Ana', gender: 'female' },
