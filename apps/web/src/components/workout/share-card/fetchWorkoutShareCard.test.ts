@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchWorkoutShareCard } from './fetchWorkoutShareCard';
+import { fetchWorkoutShareCard, shareCardVersion } from './fetchWorkoutShareCard';
+import { fullBodyShareCardMock, workoutShareCardMock } from './workout-share-card.mocks';
 
 const ID = '22222222-2222-4222-8222-222222222222';
 const png = () =>
@@ -23,6 +24,28 @@ describe('fetchWorkoutShareCard', () => {
     const blob = await fetchWorkoutShareCard(ID, new AbortController().signal);
     expect(blob.type).toBe('image/png');
     expect(fetchMock.mock.calls[0]?.[0]).toBe(`/api/workout/sessions/${ID}/share-card`);
+  });
+
+  it('versiona a URL pelo conteúdo: o card corrigido nunca reutiliza o cache do antigo', async () => {
+    const fetchMock = vi.fn(async (_url: string) => png());
+    vi.stubGlobal('fetch', fetchMock);
+    const version = shareCardVersion(workoutShareCardMock);
+    await fetchWorkoutShareCard(ID, new AbortController().signal, version);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `/api/workout/sessions/${ID}/share-card?v=${encodeURIComponent(version)}`,
+    );
+    expect(version).not.toBe(shareCardVersion(fullBodyShareCardMock));
+    expect(version).toBe(
+      shareCardVersion({
+        ...workoutShareCardMock,
+        workout: {
+          ...workoutShareCardMock.workout,
+          muscleGroupsForHighlighter: [
+            ...workoutShareCardMock.workout.muscleGroupsForHighlighter,
+          ].reverse(),
+        },
+      }),
+    );
   });
 
   it('refaz a busca em 5xx e em queda de rede, até recuperar', async () => {

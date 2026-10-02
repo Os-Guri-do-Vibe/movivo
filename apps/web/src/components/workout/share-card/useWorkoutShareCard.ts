@@ -3,7 +3,7 @@
 import type { WorkoutShareCardData } from '@movivo/shared';
 import { useEffect, useRef, useState } from 'react';
 
-import { fetchWorkoutShareCard } from './fetchWorkoutShareCard';
+import { fetchWorkoutShareCard, shareCardVersion } from './fetchWorkoutShareCard';
 
 type CardAction = 'download' | 'copy' | 'share' | 'save';
 
@@ -15,13 +15,15 @@ export function useWorkoutShareCard(sessionId: string, data: WorkoutShareCardDat
   const [attempt, setAttempt] = useState(0);
   const actionLock = useRef(false);
 
+  const version = shareCardVersion(data);
+
   useEffect(() => {
     const controller = new AbortController();
     let url: string | undefined;
     setImage(null);
     setGenerationError('');
     setMessage('');
-    void fetchWorkoutShareCard(sessionId, controller.signal)
+    void fetchWorkoutShareCard(sessionId, controller.signal, version)
       .then((blob) => {
         if (controller.signal.aborted) return;
         url = URL.createObjectURL(blob);
@@ -36,8 +38,8 @@ export function useWorkoutShareCard(sessionId: string, data: WorkoutShareCardDat
       controller.abort();
       if (url) URL.revokeObjectURL(url);
     };
-    // O card só muda se o treino mudar; trocar a identidade do objeto não deve rebaixá-lo.
-  }, [sessionId, data.workout.completedAt, attempt]);
+    // `version` muda só se o conteúdo do card mudar; nova identidade do objeto não rebaixa.
+  }, [sessionId, version, attempt]);
 
   async function act(action: CardAction) {
     if (!image || actionLock.current) return;

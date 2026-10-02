@@ -1,3 +1,5 @@
+import type { WorkoutShareCardData } from '@movivo/shared';
+
 const ATTEMPTS = 3;
 const ATTEMPT_TIMEOUT_MS = 10_000;
 const BACKOFF_MS = [400, 1_200] as const;
@@ -36,13 +38,35 @@ async function attempt(url: string, signal: AbortSignal): Promise<Blob> {
   }
 }
 
+/** Subir quando o desenho do card mudar (layout, fonte, regra de músculos): invalida o cache dos aparelhos. */
+const CARD_REVISION = '2';
+
+/**
+ * Chave de versão da URL. A resposta é cacheada por 24 h no navegador; sem isto, um card já
+ * baixado continuava aparecendo mesmo depois de a API passar a desenhar outro (músculos
+ * corrigidos). O conteúdo do card determina a URL: mudou o treino ou a regra, muda a URL.
+ */
+export function shareCardVersion(data: WorkoutShareCardData): string {
+  const { muscleGroupsForHighlighter: groups, durationMinutes } = data.workout;
+  return [
+    CARD_REVISION,
+    data.user.gender,
+    [...groups].sort().join('.'),
+    Math.round(durationMinutes),
+  ].join('-');
+}
+
 /**
  * Baixa o PNG do card, desenhado e cacheado no servidor (a API o pré-aquece ao finalizar o
  * treino). O aparelho do aluno só recebe bytes: nada de renderizar DOM, buscar fontes ou
  * decodificar imagens aqui — era o que variava de celular para celular.
  */
-export async function fetchWorkoutShareCard(sessionId: string, signal: AbortSignal): Promise<Blob> {
-  const url = `/api/workout/sessions/${encodeURIComponent(sessionId)}/share-card`;
+export async function fetchWorkoutShareCard(
+  sessionId: string,
+  signal: AbortSignal,
+  version = '',
+): Promise<Blob> {
+  const url = `/api/workout/sessions/${encodeURIComponent(sessionId)}/share-card${version ? `?v=${encodeURIComponent(version)}` : ''}`;
   for (let index = 0; ; index += 1) {
     try {
       return await attempt(url, signal);

@@ -2,7 +2,10 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./fetchWorkoutShareCard', () => ({ fetchWorkoutShareCard: vi.fn() }));
+vi.mock('./fetchWorkoutShareCard', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./fetchWorkoutShareCard')>()),
+  fetchWorkoutShareCard: vi.fn(),
+}));
 import { fetchWorkoutShareCard } from './fetchWorkoutShareCard';
 import { useWorkoutShareCard } from './useWorkoutShareCard';
 import { workoutShareCardMock } from './workout-share-card.mocks';
@@ -52,7 +55,11 @@ describe('useWorkoutShareCard', () => {
     await waitFor(() => expect(screen.getByText('download')).toBeEnabled());
     await user.click(screen.getByText('download'));
     expect(fetchWorkoutShareCard).toHaveBeenCalledOnce();
-    expect(fetchWorkoutShareCard).toHaveBeenCalledWith(SESSION_ID, expect.any(AbortSignal));
+    expect(fetchWorkoutShareCard).toHaveBeenCalledWith(
+      SESSION_ID,
+      expect.any(AbortSignal),
+      expect.stringMatching(/^\d+-male-/),
+    );
     expect(download).toHaveBeenCalledOnce();
     view.unmount();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:card');
