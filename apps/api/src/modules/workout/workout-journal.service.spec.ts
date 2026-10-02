@@ -203,11 +203,12 @@ describe('WorkoutJournalService.shareCardImage', () => {
   });
 
   it('exercício de corpo todo (burpee) não apaga o foco do treino no card', async () => {
+    const [squat] = SESSION_A.exercises;
     const prescription = {
       ...SESSION_A,
       exercises: [
-        { ...SESSION_A.exercises[0]!, exerciseId: 'bench', name: 'Supino' },
-        { ...SESSION_A.exercises[0]!, exerciseId: 'burpee_sobre_a_barra', name: 'Burpee' },
+        { ...squat, exerciseId: 'bench', name: 'Supino' },
+        { ...squat, exerciseId: 'burpee_sobre_a_barra', name: 'Burpee' },
       ],
     };
     const { service, shareCards } = makeService({
