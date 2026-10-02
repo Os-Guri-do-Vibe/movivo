@@ -36,13 +36,23 @@ const MUSCLES: ReadonlyArray<{
   { label: 'Panturrilhas', groups: ['calves'], aliases: ['panturrilha', 'panturrilhas', 'calves'] },
 ];
 
-/** Texto e máscaras saem da mesma classificação; nunca inferimos músculos pelo nome do exercício. */
+const FULL_BODY_LABEL = 'Corpo inteiro';
+
+/**
+ * Texto e máscaras saem da mesma classificação; nunca inferimos músculos pelo nome do exercício.
+ *
+ * "Corpo todo" (burpee, farmer's walk, clean com kettlebell…) é a ausência de um músculo
+ * específico, não a soma de todos: num Push com um burpee no fim, expandi-lo pintaria o corpo
+ * inteiro e esconderia o que o aluno de fato treinou. Por isso só vale quando o treino não tem
+ * nenhum músculo específico.
+ */
 export function mapWorkoutMuscles(raw: readonly string[]): {
   trainedMuscles: string[];
   muscleGroupsForHighlighter: ShareCardMuscle[];
 } {
   const labels = new Map<string, string>();
   const groups = new Set<ShareCardMuscle>();
+  let fullBody: (typeof MUSCLES)[number] | undefined;
   for (const value of raw) {
     const name = value.trim();
     const key = name
@@ -51,11 +61,19 @@ export function mapWorkoutMuscles(raw: readonly string[]): {
       .toLowerCase();
     if (!key) continue;
     const muscle = MUSCLES.find((item) => item.aliases.includes(key));
+    if (muscle?.label === FULL_BODY_LABEL) {
+      fullBody = muscle;
+      continue;
+    }
     const label = muscle?.label ?? name.charAt(0).toUpperCase() + name.slice(1);
     labels.set(label.toLowerCase(), label);
     for (const group of muscle?.groups ?? []) groups.add(group);
     // ponytail: regiões sem máscara (ex.: pescoço) continuam na lista, sem pintar outra
     // região por aproximação. Novas máscaras entram aqui quando a biblioteca as oferecer.
+  }
+  if (fullBody && labels.size === 0) {
+    labels.set(fullBody.label.toLowerCase(), fullBody.label);
+    for (const group of fullBody.groups) groups.add(group);
   }
   return { trainedMuscles: [...labels.values()], muscleGroupsForHighlighter: [...groups] };
 }

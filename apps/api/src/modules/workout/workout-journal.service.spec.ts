@@ -202,6 +202,34 @@ describe('WorkoutJournalService.shareCardImage', () => {
     });
   });
 
+  it('exercício de corpo todo (burpee) não apaga o foco do treino no card', async () => {
+    const prescription = {
+      ...SESSION_A,
+      exercises: [
+        { ...SESSION_A.exercises[0]!, exerciseId: 'bench', name: 'Supino' },
+        { ...SESSION_A.exercises[0]!, exerciseId: 'burpee_sobre_a_barra', name: 'Burpee' },
+      ],
+    };
+    const { service, shareCards } = makeService({
+      selects: [
+        [{ ...completed, prescription }],
+        [{ name: 'Rodrigo', biologicalSex: 'MALE' }],
+        [
+          { exerciseId: 'bench', setNumber: 1, completed: true, skipped: false },
+          { exerciseId: 'burpee_sobre_a_barra', setNumber: 1, completed: true, skipped: false },
+        ],
+        [
+          { id: 'bench', muscleGroups: ['peito', 'ombros', 'tríceps'] },
+          { id: 'burpee_sobre_a_barra', muscleGroups: ['corpo todo'] },
+        ],
+      ],
+    });
+    await service.shareCardImage(USER_ID, WORKOUT_ID);
+    expect(shareCards.render).toHaveBeenCalledWith(
+      expect.objectContaining({ groups: ['chest', 'shoulders', 'triceps'] }),
+    );
+  });
+
   it('não desenha card de treino alheio, em andamento ou sem sexo cadastrado', async () => {
     const own = (selects: unknown[][]) => makeService({ selects }).service;
     await expect(own([[]]).shareCardImage(USER_ID, WORKOUT_ID)).rejects.toBeInstanceOf(
