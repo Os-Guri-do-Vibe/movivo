@@ -9,7 +9,7 @@ import { SHARE_CARD_TEXT_WIDTH, buildShareCardSvg } from './share-card.svg';
 const PEITO = {
   gender: 'male',
   groups: ['chest', 'triceps', 'shoulders'],
-  durationMinutes: 90,
+  durationSeconds: 5_423,
 } as const;
 
 function decode(png: Buffer) {
@@ -73,8 +73,8 @@ describe('ShareCardRenderer', () => {
     const groups = ['chest', 'abs', 'lats', 'quads', 'glutes', 'biceps'] as const;
     const out = await Promise.all(
       groups.flatMap((group) =>
-        [30, 45, 60].map((durationMinutes) =>
-          renderer.render({ gender: 'female', groups: [group], durationMinutes }),
+        [1_800, 2_700, 3_600].map((durationSeconds) =>
+          renderer.render({ gender: 'female', groups: [group], durationSeconds }),
         ),
       ),
     );
@@ -102,7 +102,7 @@ describe('medidas de texto do card', () => {
       SHARE_CARD_TEXT_WIDTH.badge,
       -1,
     );
-    expect(measure('MOVIMENTO EM DESTAQUE', 17, 400, 2) + 2).toBeCloseTo(
+    expect(measure('MÚSCULOS TRABALHADOS', 17, 400, 2) + 2).toBeCloseTo(
       SHARE_CARD_TEXT_WIDTH.legend,
       -1,
     );
@@ -114,20 +114,19 @@ describe('texto do card (guardrails de linguagem)', () => {
     const svg = buildShareCardSvg(loadShareCardAssets(), {
       gender: 'female',
       groups: new Set(['chest']),
-      durationLabel: '1h 05min',
+      durationLabel: '01:05:09',
     });
     const texts = [...svg.matchAll(/<text[^>]*>(.*?)<\/text>/g)].map((m) =>
       (m[1] ?? '').replace(/<[^>]+>/g, ''),
     );
     expect(texts).toEqual([
-      'MOVE YOUR POTENTIAL.',
       'FRENTE',
       'COSTAS',
-      'MOVIMENTO EM DESTAQUE',
+      'MÚSCULOS TRABALHADOS',
       'TREINO CONCLUÍDO',
       'Tempo de Treino',
-      '1h 05min',
-      'BETTER THAN YESTERDAY.',
+      '01:05:09',
+      'MOVE YOUR POTENTIAL.',
       'Siga @movivo.br',
     ]);
     expect(texts.join(' ')).not.toMatch(/diagn[óo]stico|tratamento|cura|garantid/i);

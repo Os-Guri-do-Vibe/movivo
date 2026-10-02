@@ -106,15 +106,42 @@ function joinNatural(items: string[]): string {
   return `${items.slice(0, -1).join(', ')} e ${items[items.length - 1]}`;
 }
 
+/**
+ * Série "feita" = reps (ou tempo) preenchidos com valor > 0. Carga vazia não invalida
+ * a série (feita sem peso); reps/tempo vazios ou 0 nunca contam — o placeholder do
+ * treino passado é só sugestão visual e jamais vira dado registrado.
+ */
+function isSetDone(entry: WorkoutSetInput): boolean {
+  return !entry.skipped && ((entry.reps ?? 0) > 0 || (entry.durationSeconds ?? 0) > 0);
+}
+
+/** Todas as séries feitas (cardio: basta o tempo registrado). Pulado nunca conta. */
 function isExerciseFilled(exercise: ProtocolExercise, exerciseSets: WorkoutSetInput[]): boolean {
   if (exerciseSets.length === 0) return false;
   if (exerciseSets.every((entry) => entry.skipped)) return false;
-  if (exercise.isCardio) return exerciseSets.every((entry) => entry.completed);
-  return exerciseSets.every(
-    (entry) =>
-      (exercise.reps ? entry.reps != null : entry.durationSeconds != null) &&
-      entry.loadValue != null,
-  );
+  return exercise.isCardio
+    ? exerciseSets.some(isSetDone)
+    : exerciseSets.every((entry) => isSetDone(entry));
+}
+
+const CARDIO_TIMER_STORAGE = 'movivo:cardio-timers:';
+
+function readCardioTimers(workoutId: string): Record<string, number> {
+  try {
+    const raw = window.localStorage.getItem(`${CARDIO_TIMER_STORAGE}${workoutId}`);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, number>) : {};
+    return Object.fromEntries(Object.entries(parsed).filter(([, value]) => Number.isFinite(value)));
+  } catch {
+    return {};
+  }
+}
+
+function writeCardioTimers(workoutId: string, timers: Record<string, number>) {
+  try {
+    window.localStorage.setItem(`${CARDIO_TIMER_STORAGE}${workoutId}`, JSON.stringify(timers));
+  } catch {
+    // Sem storage (aba privada) o cronômetro segue funcionando, só não sobrevive a recarregar.
+  }
 }
 
 function weekStart(date: string) {
@@ -143,31 +170,27 @@ function selectedDateLabel(date: string) {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
-export function acceptSuggestedWorkoutSets(
-  sets: WorkoutSetInput[],
-  workout: NonNullable<WorkoutJournal['workout']>,
-): WorkoutSetInput[] {
-  const exerciseById = new Map(
-    workout.prescription.exercises.map((exercise) => [exercise.exerciseId, exercise]),
+/**
+ * Fecha o treino só com o que foi digitado: nada é preenchido a partir do treino
+ * passado ou da prescrição. Série sem reps/tempo > 0 fica como não feita; exercício
+ * sem nenhuma série feita é registrado como pulado.
+ */
+export function finalizeWorkoutSets(sets: WorkoutSetInput[]): WorkoutSetInput[] {
+  const doneExercises = new Set(
+    sets.filter((entry) => isSetDone(entry)).map((entry) => entry.exerciseId),
   );
-  const previousByKey = new Map(
-    workout.sets.map((entry) => [`${entry.exerciseId}:${entry.setNumber}`, entry.previous]),
+  return sets.map((entry) =>
+    doneExercises.has(entry.exerciseId)
+      ? { ...entry, completed: isSetDone(entry), skipped: false }
+      : {
+          ...entry,
+          reps: null,
+          loadValue: null,
+          durationSeconds: null,
+          completed: false,
+          skipped: true,
+        },
   );
-  return sets.map((entry) => {
-    if (entry.skipped) return { ...entry, completed: false };
-    const exercise = exerciseById.get(entry.exerciseId);
-    const previous = previousByKey.get(`${entry.exerciseId}:${entry.setNumber}`);
-    return {
-      ...entry,
-      reps: entry.reps ?? previous?.reps ?? exercise?.reps?.min ?? null,
-      loadValue: entry.loadValue ?? previous?.loadValue ?? null,
-      loadUnit: previous?.loadValue != null ? previous.loadUnit : entry.loadUnit,
-      durationSeconds:
-        entry.durationSeconds ?? previous?.durationSeconds ?? exercise?.durationSeconds ?? null,
-      completed: true,
-      skipped: false,
-    };
-  });
 }
 
 async function request(path: string, init?: RequestInit) {
@@ -217,6 +240,9 @@ export function WorkoutJournalView() {
   // convertido, e "20,5" vira "205" (a vírgula/ponto intermediário some no re-render
   // antes do próximo dígito chegar). Some do mapa no blur, quando o valor se normaliza.
   const [rawInputs, setRawInputs] = useState<Readonly<Record<string, string>>>({});
+  // Cronômetro do cardio: exercício -> instante (ms) em que o aluno tocou em "Iniciar".
+  const [cardioStarts, setCardioStarts] = useState<Readonly<Record<string, number>>>({});
+  const [cardioNow, setCardioNow] = useState(() => Date.now());
 
   const load = useCallback(
     async (date?: string) => {
@@ -272,6 +298,17 @@ export function WorkoutJournalView() {
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
   }, [journal?.workout?.startedAt, journal?.workout?.status]);
+  const workoutId = journal?.workout?.id;
+  useEffect(() => {
+    setCardioStarts(workoutId ? readCardioTimers(workoutId) : {});
+  }, [workoutId]);
+  const cardioRunning = Object.keys(cardioStarts).length > 0;
+  useEffect(() => {
+    if (!cardioRunning) return;
+    setCardioNow(Date.now());
+    const id = window.setInterval(() => setCardioNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [cardioRunning]);
 
   const previousByKey = useMemo(
     () =>
@@ -307,11 +344,7 @@ export function WorkoutJournalView() {
       current.map((entry, at) => {
         if (at !== index) return entry;
         const updated = { ...entry, ...patch, skipped: false };
-        return {
-          ...updated,
-          completed:
-            updated.reps != null || updated.loadValue != null || updated.durationSeconds != null,
-        };
+        return { ...updated, completed: isSetDone(updated) };
       }),
     );
   }
@@ -352,58 +385,128 @@ export function WorkoutJournalView() {
     };
   }
 
-  async function toggleExerciseSkipped(exerciseId: string) {
-    const exerciseSets = sets.filter((entry) => entry.exerciseId === exerciseId);
-    const skipped = !exerciseSets.every((entry) => entry.skipped);
-    const next = sets.map((entry) =>
-      entry.exerciseId !== exerciseId
-        ? entry
-        : {
-            ...entry,
-            reps: skipped ? null : entry.reps,
-            loadValue: skipped ? null : entry.loadValue,
-            durationSeconds: skipped ? null : entry.durationSeconds,
-            completed: false,
-            skipped,
-          },
-    );
+  function stopCardioTimer(exerciseId: string) {
+    setCardioStarts((current) => {
+      if (!(exerciseId in current)) return current;
+      const { [exerciseId]: _stopped, ...rest } = current;
+      if (workout) writeCardioTimers(workout.id, rest);
+      return rest;
+    });
+  }
+
+  async function persistSets(next: WorkoutSetInput[]) {
     setSets(next);
     try {
       await save(next);
+      return true;
     } catch (reason) {
       setError((reason as Error).message);
+      return false;
     }
   }
 
-  // Cardio não tem campo pra digitar (achado 2026-09-04) — "Concluído" marca a
-  // série como feita direto, com o tempo prescrito como padrão, e já confirma.
+  async function setExerciseSkipped(exerciseId: string, skipped: boolean) {
+    if (skipped) stopCardioTimer(exerciseId);
+    await persistSets(
+      sets.map((entry) =>
+        entry.exerciseId !== exerciseId
+          ? entry
+          : {
+              ...entry,
+              reps: skipped ? null : entry.reps,
+              loadValue: skipped ? null : entry.loadValue,
+              durationSeconds: skipped ? null : entry.durationSeconds,
+              completed: false,
+              skipped,
+            },
+      ),
+    );
+  }
+
+  // "Concluído" registra só o que foi digitado: séries com reps/tempo vazios ou 0
+  // não contam, e um exercício sem nenhuma série feita vira pulado (nunca é preenchido
+  // com a prescrição ou com o treino passado).
+  async function completeExercise(exercise: ProtocolExercise) {
+    const exerciseSets = sets.filter((entry) => entry.exerciseId === exercise.exerciseId);
+    if (!exerciseSets.some(isSetDone)) {
+      await setExerciseSkipped(exercise.exerciseId, true);
+      return;
+    }
+    const next = sets.map((entry) =>
+      entry.exerciseId === exercise.exerciseId ? { ...entry, completed: isSetDone(entry) } : entry,
+    );
+    if (await persistSets(next)) confirmExerciseDone(exercise.exerciseId);
+  }
+
+  function startCardio(exerciseId: string) {
+    if (!workout) return;
+    const startedAt = Date.now();
+    setCardioNow(startedAt);
+    setCardioStarts((current) => {
+      const next = { ...current, [exerciseId]: startedAt };
+      writeCardioTimers(workout.id, next);
+      return next;
+    });
+  }
+
+  // Cardio registra o tempo exato do cronômetro no clique (5 min de 10 = 5 min; 20 min
+  // de 10 = 20 min); cronômetro em 00:00:00 vale como não feito.
   async function completeCardioExercise(exercise: ProtocolExercise) {
+    const startedAt = cardioStarts[exercise.exerciseId];
+    const savedSeconds = sets.find(
+      (entry) => entry.exerciseId === exercise.exerciseId && isSetDone(entry),
+    )?.durationSeconds;
+    const seconds =
+      startedAt === undefined
+        ? (savedSeconds ?? 0)
+        : Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    if (seconds <= 0) {
+      await setExerciseSkipped(exercise.exerciseId, true);
+      return;
+    }
+    const firstSet = Math.min(
+      ...sets.filter((entry) => entry.exerciseId === exercise.exerciseId).map((e) => e.setNumber),
+    );
     const next = sets.map((entry) =>
       entry.exerciseId !== exercise.exerciseId
         ? entry
-        : {
-            ...entry,
-            durationSeconds: entry.durationSeconds ?? exercise.durationSeconds ?? null,
-            completed: true,
-            skipped: false,
-          },
+        : entry.setNumber === firstSet
+          ? { ...entry, durationSeconds: seconds, completed: true, skipped: false }
+          : { ...entry, durationSeconds: null, completed: false, skipped: false },
     );
-    setSets(next);
-    try {
-      await save(next);
-      confirmExerciseDone(exercise.exerciseId);
-    } catch (reason) {
-      setError((reason as Error).message);
-    }
+    stopCardioTimer(exercise.exerciseId);
+    if (await persistSets(next)) confirmExerciseDone(exercise.exerciseId);
   }
 
   async function start() {
-    if (!workout) return;
+    if (!workout || busy) return;
     setBusy(true);
+    setError('');
+    // Otimista: o cronômetro aparece no toque, sem esperar a rede. Se a API recusar,
+    // volta ao estado anterior com o erro visível.
+    const previous = journal;
+    setJournal((current) =>
+      current?.workout
+        ? {
+            ...current,
+            workout: {
+              ...current.workout,
+              status: 'IN_PROGRESS',
+              startedAt: new Date().toISOString(),
+            },
+          }
+        : current,
+    );
     try {
-      await request(`/api/workout/sessions/${workout.id}/start`, { method: 'POST' });
-      await load(journal?.selectedDate);
+      try {
+        await request(`/api/workout/sessions/${workout.id}/start`, { method: 'POST' });
+      } catch {
+        // Uma nova tentativa cobre falha transitória de rede/proxy sem exigir novo toque.
+        await request(`/api/workout/sessions/${workout.id}/start`, { method: 'POST' });
+      }
+      await load(previous?.selectedDate);
     } catch (reason) {
+      setJournal(previous);
       setError((reason as Error).message);
     } finally {
       setBusy(false);
@@ -700,7 +803,7 @@ export function WorkoutJournalView() {
                     onClick={start}
                     className="min-h-12 rounded-xl bg-primary px-5 font-extrabold text-primary-foreground transition-colors hover:bg-primary/85"
                   >
-                    Iniciar treino
+                    Iniciar
                   </button>
                 ) : (
                   // Achado 2026-09-10 (pedido do fundador): dia passado é só consulta —
@@ -716,7 +819,6 @@ export function WorkoutJournalView() {
                   );
                   const exerciseSkipped =
                     exerciseSets.length > 0 && exerciseSets.every((entry) => entry.skipped);
-                  const exerciseFilled = isExerciseFilled(exercise, exerciseSets);
                   const exerciseConfirmed = confirmedExercises.has(exercise.exerciseId);
                   return (
                     <details
@@ -754,7 +856,46 @@ export function WorkoutJournalView() {
                         <div className="mt-5 rounded-2xl bg-muted p-4 text-label text-muted-foreground">
                           Este exercício foi marcado como pulado e não entrará como realizado.
                         </div>
-                      ) : exercise.isCardio ? null : (
+                      ) : exercise.isCardio ? (
+                        <div className="mt-5 flex items-center justify-between gap-3 rounded-2xl bg-muted p-4">
+                          {cardioStarts[exercise.exerciseId] !== undefined ? (
+                            <>
+                              <span className="text-label text-muted-foreground">Em andamento</span>
+                              <span
+                                role="timer"
+                                aria-label="Tempo do exercício"
+                                className="font-mono text-h3 font-extrabold text-foreground"
+                              >
+                                {formatTimer(
+                                  Math.max(
+                                    0,
+                                    Math.floor(
+                                      (cardioNow -
+                                        (cardioStarts[exercise.exerciseId] ?? cardioNow)) /
+                                        1000,
+                                    ),
+                                  ),
+                                )}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-label text-muted-foreground">
+                                {exerciseSets.find(isSetDone)?.durationSeconds
+                                  ? `Registrado: ${formatTimer(exerciseSets.find(isSetDone)?.durationSeconds ?? 0)}`
+                                  : 'Toque em Iniciar para cronometrar'}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => startCardio(exercise.exerciseId)}
+                                className="min-h-11 rounded-xl bg-primary px-5 text-label font-extrabold text-primary-foreground transition-colors hover:bg-primary/85"
+                              >
+                                Iniciar
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      ) : (
                         <div className="mt-5 space-y-3">
                           {sets.map((entry, index) => {
                             if (entry.exerciseId !== exercise.exerciseId) return null;
@@ -856,45 +997,35 @@ export function WorkoutJournalView() {
                       {exerciseSkipped ? (
                         <button
                           type="button"
-                          onClick={() => void toggleExerciseSkipped(exercise.exerciseId)}
+                          onClick={() => void setExerciseSkipped(exercise.exerciseId, false)}
                           aria-pressed={exerciseSkipped}
                           className="mt-4 min-h-11 w-full rounded-xl border border-verde-pulso px-4 text-label font-bold text-petroleo"
                         >
                           Incluir exercício novamente
                         </button>
-                      ) : exerciseFilled ? (
-                        <button
-                          type="button"
-                          onClick={() => confirmExerciseDone(exercise.exerciseId)}
-                          className="mt-4 min-h-11 w-full rounded-xl bg-petroleo px-4 text-label font-bold text-white"
-                        >
-                          Concluído
-                        </button>
-                      ) : exercise.isCardio ? (
+                      ) : (
                         <div className="mt-4 flex flex-col gap-3">
                           <button
                             type="button"
-                            onClick={() => void toggleExerciseSkipped(exercise.exerciseId)}
+                            onClick={() => void setExerciseSkipped(exercise.exerciseId, true)}
                             className="min-h-11 w-full rounded-xl border border-verde-pulso px-4 text-label font-bold text-muted-foreground"
                           >
                             Pular este exercício
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => void completeCardioExercise(exercise)}
-                            className="min-h-11 w-full rounded-xl bg-petroleo px-4 text-label font-bold text-white"
-                          >
-                            Concluído
-                          </button>
+                          {!exercise.isCardio || cardioStarts[exercise.exerciseId] !== undefined ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void (exercise.isCardio
+                                  ? completeCardioExercise(exercise)
+                                  : completeExercise(exercise))
+                              }
+                              className="min-h-11 w-full rounded-xl bg-petroleo px-4 text-label font-bold text-white"
+                            >
+                              Concluído
+                            </button>
+                          ) : null}
                         </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => void toggleExerciseSkipped(exercise.exerciseId)}
-                          className="mt-4 min-h-11 w-full rounded-xl border border-verde-pulso px-4 text-label font-bold text-muted-foreground"
-                        >
-                          Pular este exercício
-                        </button>
                       )}
                     </details>
                   );
@@ -908,7 +1039,7 @@ export function WorkoutJournalView() {
                   setBusy(true);
                   setError('');
                   try {
-                    const accepted = acceptSuggestedWorkoutSets(sets, workout);
+                    const accepted = finalizeWorkoutSets(sets);
                     setSets(accepted);
                     await save(accepted);
                     setFeedback(true);

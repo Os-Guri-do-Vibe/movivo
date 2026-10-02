@@ -198,7 +198,7 @@ describe('WorkoutJournalService.shareCardImage', () => {
     expect(shareCards.render).toHaveBeenCalledWith({
       gender: 'female',
       groups: ['quads', 'glutes'],
-      durationMinutes: 65,
+      durationSeconds: 3900,
     });
   });
 
@@ -278,7 +278,7 @@ describe('WorkoutJournalService.journal', () => {
       user: { name: 'Pedro', gender: 'female' },
       workout: {
         name: 'A',
-        durationMinutes: 65,
+        durationSeconds: 3900,
         completedAt: '2026-08-10T11:05:00.000Z',
         trainedMuscles: ['Quadríceps', 'Glúteos'],
         muscleGroupsForHighlighter: ['quads', 'glutes'],
@@ -340,6 +340,7 @@ describe('WorkoutJournalService.journal', () => {
         skipped: true,
       },
     ];
+    // Já ordenado como o banco devolve: sessão realizada mais recente primeiro.
     const previous = [
       {
         exerciseId: 'squat',
@@ -348,6 +349,7 @@ describe('WorkoutJournalService.journal', () => {
         loadValue: null,
         loadUnit: 'KG',
         durationSeconds: null,
+        date: '2026-08-03',
       },
       {
         exerciseId: 'squat',
@@ -356,6 +358,17 @@ describe('WorkoutJournalService.journal', () => {
         loadValue: '18.25',
         loadUnit: 'KG',
         durationSeconds: 15,
+        date: '2026-08-03',
+      },
+      {
+        // Sessão mais antiga do mesmo exercício: nunca sobrescreve a mais recente.
+        exerciseId: 'squat',
+        setNumber: 1,
+        reps: 5,
+        loadValue: '10',
+        loadUnit: 'KG',
+        durationSeconds: null,
+        date: '2026-07-27',
       },
     ];
     const weekRows = [
@@ -363,7 +376,7 @@ describe('WorkoutJournalService.journal', () => {
       { date: '2026-08-11', status: 'IN_PROGRESS' },
     ];
     const { service } = makeService({
-      selects: [[OWNER], [workout], weekRows, current, [{ id: 'previous' }], previous],
+      selects: [[OWNER], [workout], weekRows, current, previous],
     });
 
     const result = await service.journal(
@@ -387,7 +400,11 @@ describe('WorkoutJournalService.journal', () => {
       expect.objectContaining({ exerciseId: 'squat', loadValue: null, skipped: true }),
       expect.objectContaining({ exerciseId: 'plank', loadUnit: 'BODYWEIGHT', previous: null }),
     ]);
-    expect(result.workout?.sets[0]?.previous?.loadValue).toBeNull();
+    expect(result.workout?.sets[0]?.previous).toMatchObject({
+      reps: 8,
+      loadValue: null,
+      date: '2026-08-03',
+    });
     expect(result.workout?.sets[1]?.previous?.loadValue).toBe(18.25);
   });
 
@@ -640,6 +657,38 @@ describe('WorkoutJournalService mutations', () => {
     ]);
     expect(inserted[0]).toMatchObject({ loadValue: '22.5', workoutSessionId: WORKOUT_ID });
     expect(inserted[1]).toMatchObject({ loadValue: undefined, durationSeconds: 30 });
+  });
+
+  it('decide no servidor o que é série feita: reps/tempo > 0 e não pulada, nunca só carga', async () => {
+    const { service, inserted } = makeService({ selects: [[WORKOUT]] });
+    await service.saveSets(USER_ID, WORKOUT_ID, [
+      {
+        exerciseId: 'squat',
+        setNumber: 1,
+        reps: 10,
+        loadUnit: 'KG',
+        completed: false,
+        skipped: false,
+      },
+      {
+        exerciseId: 'squat',
+        setNumber: 2,
+        reps: 0,
+        loadValue: 30,
+        loadUnit: 'KG',
+        completed: true,
+        skipped: false,
+      },
+      {
+        exerciseId: 'plank',
+        setNumber: 1,
+        loadValue: 5,
+        loadUnit: 'KG',
+        completed: true,
+        skipped: false,
+      },
+    ]);
+    expect(inserted.map((row) => row.completed)).toEqual([true, false, false]);
   });
 
   it('valida inicio e exercicio informado no relato de dor', async () => {

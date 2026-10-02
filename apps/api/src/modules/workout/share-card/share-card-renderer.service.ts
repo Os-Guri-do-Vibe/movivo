@@ -21,7 +21,7 @@ export interface ShareCardImage {
 export interface ShareCardRenderInput {
   gender: CardGender;
   groups: readonly ShareCardMuscle[];
-  durationMinutes: number;
+  durationSeconds: number;
 }
 
 /** 65–315 KB por PNG: 32 MB guardam centenas de combinações (gênero × músculos × duração). */
@@ -49,7 +49,7 @@ export class ShareCardRenderer {
 
   async render(input: ShareCardRenderInput): Promise<ShareCardImage> {
     const groups = [...new Set(input.groups)].sort();
-    const durationLabel = formatShareCardDuration(input.durationMinutes);
+    const durationLabel = formatShareCardDuration(input.durationSeconds);
     const key = createHash('sha256')
       .update(JSON.stringify([input.gender, groups, durationLabel]))
       .digest('hex');

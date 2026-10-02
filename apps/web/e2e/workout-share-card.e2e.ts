@@ -58,7 +58,7 @@ async function mockJournal(page: Page, data: typeof workoutShareCardMock) {
           prescription: { dayLabel: 'A', focus: 'Treino', exercises: [] },
           startedAt: '2026-09-17T13:30:00.000Z',
           finishedAt: data.workout.completedAt,
-          durationSeconds: data.workout.durationMinutes * 60,
+          durationSeconds: data.workout.durationSeconds,
           perceivedEffort: 5,
           painReported: false,
           sets: [],

@@ -1,7 +1,7 @@
 import type { WorkoutJournal, WorkoutSetInput } from '@movivo/shared';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const navigation = vi.hoisted(() => ({ replace: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => navigation }));
@@ -279,11 +279,11 @@ describe('WorkoutJournalView — iniciar treino', () => {
       },
     });
     render(<WorkoutJournalView />);
-    const startButton = await screen.findByRole('button', { name: 'Iniciar treino' });
+    const startButton = await screen.findByRole('button', { name: 'Iniciar' });
     await userEvent.click(startButton);
     await waitFor(() => expect(startSpy).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/^\d{2}:\d{2}:\d{2}$/)).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Iniciar treino' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Iniciar' })).not.toBeInTheDocument();
   });
 
   it('mostra erro quando iniciar o treino falha, sem travar a tela', async () => {
@@ -295,14 +295,14 @@ describe('WorkoutJournalView — iniciar treino', () => {
       start: () => fail(500, { message: 'Não foi possível iniciar.' }),
     });
     render(<WorkoutJournalView />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Iniciar treino' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Iniciar' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Não foi possível iniciar.');
-    expect(screen.getByRole('button', { name: 'Iniciar treino' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Iniciar' })).not.toBeDisabled();
   });
 
   // Achado 2026-09-10 (pedido do fundador): dia passado é só consulta de protocolo e
   // carga/repetições — nunca pode virar um treino "iniciado" retroativo.
-  it('dia passado nunca mostra "Iniciar treino", mesmo com sessão ainda PLANNED', async () => {
+  it('dia passado nunca mostra "Iniciar", mesmo com sessão ainda PLANNED', async () => {
     installFetch({
       journal: () =>
         ok(
@@ -313,7 +313,7 @@ describe('WorkoutJournalView — iniciar treino', () => {
     });
     render(<WorkoutJournalView />);
     await screen.findByText('Agachamento');
-    expect(screen.queryByRole('button', { name: 'Iniciar treino' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Iniciar' })).not.toBeInTheDocument();
     expect(screen.getByText('Dia encerrado')).toBeVisible();
   });
 });
@@ -347,70 +347,107 @@ describe('WorkoutJournalView — série em andamento', () => {
     );
   });
 
-  it('exercício de cardio (isCardio) não mostra campos de input, só "Pular" (em cima) e "Concluído" (embaixo)', async () => {
-    const saveSpy = vi.fn(() => ok({}));
-    installFetch({
-      journal: () =>
-        ok(
-          journalFor(TODAY, {
-            workout: workoutInProgress({
-              prescription: {
-                dayLabel: 'Treino C',
-                focus: 'Condicionamento',
-                exercises: [
+  describe('exercício de cardio (isCardio)', () => {
+    async function renderCardio() {
+      const saveSpy = vi.fn(() => ok({}));
+      installFetch({
+        journal: () =>
+          ok(
+            journalFor(TODAY, {
+              workout: workoutInProgress({
+                prescription: {
+                  dayLabel: 'Treino C',
+                  focus: 'Condicionamento',
+                  exercises: [
+                    {
+                      exerciseId: 'bicicleta_horizontal',
+                      name: 'Bicicleta Horizontal',
+                      sets: 1,
+                      durationSeconds: 600,
+                      loadStrategy: 'BODYWEIGHT',
+                      restSeconds: 0,
+                      isCardio: true,
+                    },
+                  ],
+                },
+                sets: [
                   {
                     exerciseId: 'bicicleta_horizontal',
-                    name: 'Bicicleta Horizontal',
-                    sets: 1,
-                    durationSeconds: 600,
-                    loadStrategy: 'BODYWEIGHT',
-                    restSeconds: 0,
-                    isCardio: true,
+                    setNumber: 1,
+                    reps: null,
+                    loadValue: null,
+                    loadUnit: 'NONE',
+                    durationSeconds: null,
+                    completed: false,
+                    skipped: false,
+                    previous: null,
                   },
                 ],
-              },
-              sets: [
-                {
-                  exerciseId: 'bicicleta_horizontal',
-                  setNumber: 1,
-                  reps: null,
-                  loadValue: null,
-                  loadUnit: 'NONE',
-                  durationSeconds: null,
-                  completed: false,
-                  skipped: false,
-                  previous: null,
-                },
-              ],
+              }),
             }),
-          }),
-        ),
-      saveSets: saveSpy,
+          ),
+        saveSets: saveSpy,
+      });
+      render(<WorkoutJournalView />);
+      const heading = await screen.findByText('Bicicleta Horizontal');
+      const exerciseCard = heading.closest('details');
+      if (!exerciseCard) throw new Error('container do exercício não encontrado');
+      const lastEntry = () =>
+        (saveSpy.mock.calls.at(-1)?.[0] as { entries: WorkoutSetInput[] }).entries[0];
+      return { exerciseCard, saveSpy, lastEntry };
+    }
+
+    afterEach(() => vi.restoreAllMocks());
+
+    it('antes de iniciar mostra "Iniciar" e "Pular", sem campos de input nem "Concluído"', async () => {
+      const { exerciseCard } = await renderCardio();
+
+      expect(within(exerciseCard).queryByRole('textbox')).not.toBeInTheDocument();
+      expect(
+        within(exerciseCard)
+          .getAllByRole('button')
+          .map((button) => button.textContent),
+      ).toEqual(['Iniciar', 'Pular este exercício']);
     });
-    render(<WorkoutJournalView />);
-    const heading = await screen.findByText('Bicicleta Horizontal');
-    const exerciseCard = heading.closest('details');
-    if (!exerciseCard) throw new Error('container do exercício não encontrado');
 
-    expect(within(exerciseCard).queryByRole('textbox')).not.toBeInTheDocument();
-    const buttons = within(exerciseCard).getAllByRole('button');
-    expect(buttons.map((button) => button.textContent)).toEqual([
-      'Pular este exercício',
-      'Concluído',
-    ]);
+    it.each([
+      ['5 min de 10 previstos', 300_000, 300],
+      ['20 min (mais que o previsto)', 1_200_000, 1200],
+    ])('registra o tempo do contador ao concluir: %s', async (_label, elapsedMs, seconds) => {
+      const { exerciseCard, saveSpy, lastEntry } = await renderCardio();
+      const t0 = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(t0);
+      await userEvent.click(within(exerciseCard).getByRole('button', { name: 'Iniciar' }));
+      expect(within(exerciseCard).getByRole('timer')).toBeVisible();
 
-    await userEvent.click(within(exerciseCard).getByRole('button', { name: 'Concluído' }));
+      clock.mockReturnValue(t0 + elapsedMs);
+      await userEvent.click(within(exerciseCard).getByRole('button', { name: 'Concluído' }));
 
-    await waitFor(() => expect(saveSpy).toHaveBeenCalled());
-    const lastCall = saveSpy.mock.calls.at(-1)?.[0] as { entries: WorkoutSetInput[] };
-    expect(lastCall.entries[0]).toMatchObject({
-      exerciseId: 'bicicleta_horizontal',
-      durationSeconds: 600,
-      completed: true,
+      await waitFor(() => expect(saveSpy).toHaveBeenCalled());
+      expect(lastEntry()).toMatchObject({
+        exerciseId: 'bicicleta_horizontal',
+        durationSeconds: seconds,
+        completed: true,
+        skipped: false,
+      });
+      expect(exerciseCard).not.toHaveAttribute('open');
+      expect(screen.getByText('Bicicleta Horizontal')).toHaveClass('line-through');
     });
 
-    expect(exerciseCard).not.toHaveAttribute('open');
-    expect(screen.getByText('Bicicleta Horizontal')).toHaveClass('line-through');
+    it('concluir com o contador em 00:00:00 conta como não feito (pulado)', async () => {
+      const { exerciseCard, saveSpy, lastEntry } = await renderCardio();
+      vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+      await userEvent.click(within(exerciseCard).getByRole('button', { name: 'Iniciar' }));
+      await userEvent.click(within(exerciseCard).getByRole('button', { name: 'Concluído' }));
+
+      await waitFor(() => expect(saveSpy).toHaveBeenCalled());
+      expect(lastEntry()).toMatchObject({
+        durationSeconds: null,
+        completed: false,
+        skipped: true,
+      });
+      expect(screen.getByText('Bicicleta Horizontal')).not.toHaveClass('line-through');
+    });
   });
 
   it('campo "Tempo": converte segundos passados em s/min/h e respeita o limite de 60 s', async () => {
@@ -608,7 +645,7 @@ describe('WorkoutJournalView — série em andamento', () => {
     expect(secondCarga).toHaveValue('24');
   });
 
-  it('ao preencher todas as séries mostra "Concluído"; só o clique recolhe, risca e abre o próximo', async () => {
+  it('"Pular" e "Concluído" aparecem juntos; só o clique em "Concluído" recolhe, risca e abre o próximo', async () => {
     installFetch({ journal: () => ok(journalFor(TODAY, { workout: workoutInProgress() })) });
     render(<WorkoutJournalView />);
     await screen.findByText('Agachamento');
@@ -635,12 +672,15 @@ describe('WorkoutJournalView — série em andamento', () => {
     await userEvent.type(thirdInput, '9');
     await userEvent.tab();
 
-    // Preencher todos os campos troca o botão para "Concluído", mas não recolhe
-    // sozinho (achado 2026-09-04: reativo a cada tecla, digitar só o primeiro
+    // "Concluído" aparece junto de "Pular", mesmo sem tudo preenchido (treino parcial), e
+    // não recolhe sozinho (achado 2026-09-04: reativo a cada tecla, digitar só o primeiro
     // dígito da carga — ex.: "2" de "24" — já disparava a conclusão sozinho).
-    const confirmButton = await within(agachamentoCard).findByRole('button', {
-      name: 'Concluído',
-    });
+    const confirmButton = within(agachamentoCard).getByRole('button', { name: 'Concluído' });
+    expect(
+      within(agachamentoCard)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['Pular este exercício', 'Concluído']);
     expect(agachamentoCard).toHaveAttribute('open');
     expect(screen.getByText('Agachamento')).not.toHaveClass('line-through');
 

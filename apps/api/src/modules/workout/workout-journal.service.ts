@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, desc, eq, gte, inArray, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, lt, lte, or } from 'drizzle-orm';
 import {
   anamnesisStructuredSchema,
   mapWorkoutMuscles,
@@ -249,39 +249,57 @@ export class WorkoutJournalService {
 
     let workoutView: WorkoutJournal['workout'] = null;
     if (workout) {
-      const previousDate = addDays(selectedDate, -7);
       const entries = await this.db.runAsUser(userId, 'USER', async (tx) => {
         const current = await tx
           .select()
           .from(workoutSetEntries)
           .where(eq(workoutSetEntries.workoutSessionId, workout.id))
           .orderBy(asc(workoutSetEntries.exerciseId), asc(workoutSetEntries.setNumber));
-        const [previousSession] = await tx
-          .select({ id: workoutSessions.id })
-          .from(workoutSessions)
-          .where(
-            and(
-              eq(workoutSessions.userId, userId),
-              eq(workoutSessions.scheduledDate, previousDate),
-              eq(workoutSessions.sessionKey, workout.sessionKey),
-              eq(workoutSessions.status, 'COMPLETED'),
-            ),
-          )
-          .limit(1);
-        const previous = previousSession
+        // Placeholder do "treino passado": a última sessão CONCLUÍDA em que cada série do
+        // exercício foi de fato realizada (reps/tempo > 0). Sessão em que o exercício foi
+        // pulado ou ficou vazio é ignorada — vale a anterior mais recente com dado.
+        const exerciseIds = workout.prescription.exercises.map((exercise) => exercise.exerciseId);
+        const previous = exerciseIds.length
           ? await tx
-              .select()
+              .select({
+                exerciseId: workoutSetEntries.exerciseId,
+                setNumber: workoutSetEntries.setNumber,
+                reps: workoutSetEntries.reps,
+                loadValue: workoutSetEntries.loadValue,
+                loadUnit: workoutSetEntries.loadUnit,
+                durationSeconds: workoutSetEntries.durationSeconds,
+                date: workoutSessions.scheduledDate,
+              })
               .from(workoutSetEntries)
-              .where(eq(workoutSetEntries.workoutSessionId, previousSession.id))
+              .innerJoin(
+                workoutSessions,
+                eq(workoutSessions.id, workoutSetEntries.workoutSessionId),
+              )
+              .where(
+                and(
+                  eq(workoutSessions.userId, userId),
+                  eq(workoutSessions.status, 'COMPLETED'),
+                  lt(workoutSessions.scheduledDate, selectedDate),
+                  inArray(workoutSetEntries.exerciseId, exerciseIds),
+                  eq(workoutSetEntries.completed, true),
+                  eq(workoutSetEntries.skipped, false),
+                  or(gt(workoutSetEntries.reps, 0), gt(workoutSetEntries.durationSeconds, 0)),
+                ),
+              )
+              .orderBy(desc(workoutSessions.scheduledDate), desc(workoutSetEntries.updatedAt))
+              .limit(500)
           : [];
         return { current, previous };
       });
       const currentByKey = new Map(
         entries.current.map((entry) => [`${entry.exerciseId}:${entry.setNumber}`, entry]),
       );
-      const previousByKey = new Map(
-        entries.previous.map((entry) => [`${entry.exerciseId}:${entry.setNumber}`, entry]),
-      );
+      // Ordenado do mais recente ao mais antigo: o primeiro de cada chave é o último realizado.
+      const previousByKey = new Map<string, (typeof entries.previous)[number]>();
+      for (const entry of entries.previous) {
+        const key = `${entry.exerciseId}:${entry.setNumber}`;
+        if (!previousByKey.has(key)) previousByKey.set(key, entry);
+      }
       const sets = expectedSets(workout.prescription).map((expected) => {
         const key = `${expected.exerciseId}:${expected.setNumber}`;
         const current = currentByKey.get(key);
@@ -300,7 +318,7 @@ export class WorkoutJournalService {
           skipped: current?.skipped ?? false,
           previous: previous
             ? {
-                date: previousDate,
+                date: previous.date,
                 reps: previous.reps,
                 loadValue: previous.loadValue === null ? null : Number(previous.loadValue),
                 loadUnit: previous.loadUnit,
@@ -381,7 +399,14 @@ export class WorkoutJournalService {
       throw new BadRequestException('Serie nao pertence a prescricao deste treino.');
     }
     await this.db.runAsUser(userId, 'USER', async (tx) => {
-      for (const entry of entries) {
+      for (const raw of entries) {
+        // Fonte de verdade de "série feita": reps ou tempo > 0 e não pulada. O cliente
+        // nunca decide isso sozinho, e nada é preenchido por padrão (nem pela prescrição
+        // nem pelo treino passado).
+        const entry = {
+          ...raw,
+          completed: !raw.skipped && ((raw.reps ?? 0) > 0 || (raw.durationSeconds ?? 0) > 0),
+        };
         await tx
           .insert(workoutSetEntries)
           .values({
@@ -657,7 +682,7 @@ export class WorkoutJournalService {
       },
       workout: {
         name: workout.prescription.dayLabel,
-        durationMinutes: (workout.durationSeconds ?? 0) / 60,
+        durationSeconds: workout.durationSeconds ?? 0,
         completedAt: finishedAt.toISOString(),
         ...mapWorkoutMuscles(muscles),
       },
@@ -693,7 +718,7 @@ export class WorkoutJournalService {
     return this.shareCards.render({
       gender: data.user.gender,
       groups: data.workout.muscleGroupsForHighlighter,
-      durationMinutes: data.workout.durationMinutes,
+      durationSeconds: data.workout.durationSeconds,
     });
   }
 

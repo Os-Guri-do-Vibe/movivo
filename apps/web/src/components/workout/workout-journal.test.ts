@@ -1,84 +1,68 @@
-import type { WorkoutJournal, WorkoutSetInput } from '@movivo/shared';
+import type { WorkoutSetInput } from '@movivo/shared';
 import { describe, expect, it } from 'vitest';
 
-import { acceptSuggestedWorkoutSets } from './workout-journal';
+import { finalizeWorkoutSets } from './workout-journal';
 
-const sets: WorkoutSetInput[] = [
-  {
-    exerciseId: 'agachamento',
-    setNumber: 1,
+function entry(
+  exerciseId: string,
+  setNumber: number,
+  patch: Partial<WorkoutSetInput> = {},
+): WorkoutSetInput {
+  return {
+    exerciseId,
+    setNumber,
     reps: null,
     loadValue: null,
     loadUnit: 'KG',
     durationSeconds: null,
     completed: false,
     skipped: false,
-  },
-  {
-    exerciseId: 'agachamento',
-    setNumber: 2,
-    reps: null,
-    loadValue: null,
-    loadUnit: 'KG',
-    durationSeconds: null,
-    completed: false,
-    skipped: true,
-  },
-];
+    ...patch,
+  };
+}
 
-const workout = {
-  prescription: {
-    dayLabel: 'Treino A',
-    focus: 'Inferiores',
-    exercises: [
-      {
-        exerciseId: 'agachamento',
-        name: 'Agachamento',
-        sets: 2,
-        reps: { min: 8, max: 12 },
-        loadStrategy: 'FIXED_LOAD',
-        restSeconds: 60,
-      },
-    ],
-  },
-  sets: [
-    {
-      ...sets[0],
-      previous: {
-        date: '2026-08-27',
-        reps: 10,
-        loadValue: 12,
-        loadUnit: 'KG',
-        durationSeconds: null,
-      },
-    },
-    { ...sets[1], previous: null },
-  ],
-} as unknown as NonNullable<WorkoutJournal['workout']>;
+describe('finalizeWorkoutSets', () => {
+  it('registra só as séries preenchidas e não completa as demais com a prescrição', () => {
+    const result = finalizeWorkoutSets([
+      entry('supino', 1, { reps: 10, loadValue: 40 }),
+      entry('supino', 2, { reps: 8, loadValue: 40 }),
+      entry('supino', 3),
+      entry('supino', 4),
+    ]);
 
-describe('acceptSuggestedWorkoutSets', () => {
-  it('aceita o placeholder como realizado e preserva o pulo explicito', () => {
-    const result = acceptSuggestedWorkoutSets(sets, workout);
-
-    expect(result[0]).toMatchObject({
-      reps: 10,
-      loadValue: 12,
-      completed: true,
-      skipped: false,
-    });
-    expect(result[1]).toMatchObject({
-      reps: null,
-      loadValue: null,
-      completed: false,
-      skipped: true,
-    });
+    expect(result.map((set) => set.completed)).toEqual([true, true, false, false]);
+    expect(result[2]).toMatchObject({ reps: null, loadValue: null, skipped: false });
   });
 
-  it('mantem o valor digitado em vez da sugestao anterior', () => {
-    const first = sets[0];
-    if (!first) throw new Error('Fixture sem a primeira serie.');
-    const result = acceptSuggestedWorkoutSets([{ ...first, loadValue: 14 }], workout);
+  it('considera feita a série com reps e sem carga (sem peso)', () => {
+    const [set] = finalizeWorkoutSets([entry('flexao', 1, { reps: 12 })]);
 
-    expect(result[0]).toMatchObject({ reps: 10, loadValue: 14, completed: true });
+    expect(set).toMatchObject({ reps: 12, loadValue: null, completed: true });
+  });
+
+  it('trata reps 0 ou vazio sem nenhuma série feita como exercício pulado', () => {
+    const result = finalizeWorkoutSets([
+      entry('supino', 1, { reps: 0, loadValue: 30 }),
+      entry('supino', 2),
+    ]);
+
+    expect(result.every((set) => set.skipped && !set.completed)).toBe(true);
+    expect(result.every((set) => set.reps === null && set.loadValue === null)).toBe(true);
+  });
+
+  it('só marca como feita a série com tempo (> 0) quando o exercício é por duração', () => {
+    const result = finalizeWorkoutSets([
+      entry('bike', 1, { durationSeconds: 300 }),
+      entry('esteira', 1, { durationSeconds: 0 }),
+    ]);
+
+    expect(result[0]).toMatchObject({ completed: true, skipped: false });
+    expect(result[1]).toMatchObject({ completed: false, skipped: true });
+  });
+
+  it('preserva o exercício pulado explicitamente', () => {
+    const [set] = finalizeWorkoutSets([entry('supino', 1, { skipped: true })]);
+
+    expect(set).toMatchObject({ completed: false, skipped: true });
   });
 });

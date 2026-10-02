@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 const cookieGet = vi.fn();
-vi.mock('next/headers', () => ({ cookies: async () => ({ get: cookieGet, set: vi.fn() }) }));
+vi.mock('next/headers', () => ({
+  cookies: async () => ({ get: cookieGet, set: vi.fn() }),
+  headers: async () => new Headers(),
+}));
 
 import { GET } from './route';
 
