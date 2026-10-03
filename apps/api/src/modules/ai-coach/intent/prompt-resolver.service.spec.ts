@@ -53,7 +53,7 @@ async function userFacingTexts(persona: AgentPersona): Promise<string[]> {
     // exatamente para não confundir "MOVI" (nome antigo) com "MOVIVO" (a marca, que é
     // legítimo continuar aparecendo).
     analyzingMessage(persona),
-    ...(['day7', 'day10', 'day13', 'day14', 'winback'] as const).map((key) =>
+    ...(['day10', 'day13', 'day14', 'winback'] as const).map((key) =>
       conversionMessage(key, 'https://movivo.test/checkout', persona.agentName),
     ),
   ];

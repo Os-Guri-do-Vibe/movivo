@@ -13,6 +13,7 @@ import { PinoLogger } from 'nestjs-pino';
 
 import { AppConfigService } from '../../core/config';
 import { JobsModule } from '../jobs/jobs.module';
+import { ShortLinkModule } from '../short-link/short-link.module';
 import { MockGateway } from './payment/mock-gateway';
 import { type PaymentGateway, PAYMENT_GATEWAY } from './payment/payment-gateway.types';
 import { AsaasGateway } from './payment/real-gateways';
@@ -30,6 +31,8 @@ import { SubscriptionService } from './subscription.service';
   imports: [
     // JobsModule: enfileira o dunning (PAST_DUE) em `whatsapp-outbound` — via fila, sem ciclo (§12.5).
     JobsModule,
+    // Links curtos de checkout e cancelamento enviados por WhatsApp (infraestrutura compartilhada).
+    ShortLinkModule,
     // Rate limit das ações self-service (US-4.5). ponytail: storage em memória (MVP single-instance).
     ThrottlerModule.forRoot({ throttlers: [{ ttl: 60_000, limit: 60 }] }),
   ],

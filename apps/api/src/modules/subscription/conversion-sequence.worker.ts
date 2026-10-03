@@ -19,7 +19,11 @@ import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.u
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
-import { type ConversionTouchpoint, conversionMessage } from './subscription-messages';
+import {
+  type ConversionTouchpoint,
+  conversionMessage,
+  trialEndedMessage,
+} from './subscription-messages';
 import { TRIAL_DAYS, type SubscriptionPlan } from './subscription-model';
 import { SubscriptionService } from './subscription.service';
 
@@ -127,20 +131,33 @@ export class ConversionSequenceWorker implements OnModuleInit {
 
   /** Enfileira a mensagem no outbound com o link do plano pré-preenchido. */
   private async sendMessage(userId: string, key: ConversionTouchpoint): Promise<void> {
-    const checkoutUrl = await this.subs.createCheckoutLink(userId);
-    // Sprint 11: a copy de conversão cita o nome da agente, então precisa da persona do
-    // slot do titular — não da persona global, que não existe mais.
-    const agentName = await this.agentPersona.agentName(await this.subs.personaSlotFor(userId));
+    const text = await this.messageFor(userId, key);
     await this.queues.enqueue(
       QUEUE.whatsappOutbound,
       'coach-message',
       {
         userId,
         type: 'COACH_MESSAGE',
-        text: conversionMessage(key, checkoutUrl, agentName),
+        text,
         dedupeId: `conv_${key}`,
       },
       { jobId: `conv-msg_${userId}_${key}` },
     );
+  }
+
+  /** O fim do trial (dia 7) usa links curtos de checkout e cancelamento; os demais, o checkout longo. */
+  private async messageFor(userId: string, key: ConversionTouchpoint): Promise<string> {
+    if (key === 'day7') {
+      return trialEndedMessage(
+        await this.subs.firstNameFor(userId),
+        await this.subs.createShortCheckoutLink(userId),
+        await this.subs.createShortCancelLink(userId),
+      );
+    }
+    const checkoutUrl = await this.subs.createCheckoutLink(userId);
+    // Sprint 11: a copy de conversão cita o nome da agente, então precisa da persona do
+    // slot do titular — não da persona global, que não existe mais.
+    const agentName = await this.agentPersona.agentName(await this.subs.personaSlotFor(userId));
+    return conversionMessage(key, checkoutUrl, agentName);
   }
 }

@@ -75,6 +75,7 @@ function make(current: SubscriptionRow | null, gatewayName: PaymentGateway['name
   const insert = vi.fn((v: unknown) => Promise.resolve(row(v as Partial<SubscriptionRow>)));
   const repo = {
     findByUserId: vi.fn(() => Promise.resolve(current)),
+    findFirstName: vi.fn(() => Promise.resolve('Ana')),
     insert,
     patch,
   } as unknown as SubscriptionRepository;
@@ -103,8 +104,20 @@ function make(current: SubscriptionRow | null, gatewayName: PaymentGateway['name
   const evalLock = vi.fn(() => Promise.resolve(1));
   const redis = { set, eval: evalLock } as never;
   const keys = { forUser: vi.fn(() => 'movivo:u:test:payment:start-lock') } as never;
+  const createShortLink = vi.fn((_target: string, _expiresAt: Date) => Promise.resolve('aB3xK9pQ'));
+  const shortLinks = { create: createShortLink } as never;
   return {
-    svc: new SubscriptionService(repo, gateway, config, logger, checkoutTokens, redis, keys),
+    svc: new SubscriptionService(
+      repo,
+      gateway,
+      config,
+      logger,
+      checkoutTokens,
+      redis,
+      keys,
+      shortLinks,
+    ),
+    createShortLink,
     patch,
     insert,
     cancelContract,
@@ -429,6 +442,50 @@ describe('SubscriptionService checkout transparente / getAccess (US-4.2)', () =>
       'https://movivo.test/assinar/opaque-token',
     );
     expect(startPayment).not.toHaveBeenCalled();
+  });
+
+  it('gera o checkout curto: /checkout/<código> aponta para o link opaco, com a validade do token', async () => {
+    const { svc, createShortLink } = make(row({ status: 'EXPIRED', plan: 'ANNUAL' }));
+    await expect(svc.createShortCheckoutLink(USER)).resolves.toBe(
+      'https://movivo.test/checkout/aB3xK9pQ',
+    );
+    expect(createShortLink).toHaveBeenCalledWith(
+      'https://movivo.test/assinar/opaque-token',
+      expect.any(Date),
+    );
+  });
+
+  it('gera o cancelamento curto: /cancelar/<código> aponta para o portal do titular, por 90 dias', async () => {
+    const { svc, createShortLink } = make(row({ status: 'EXPIRED', plan: 'ANNUAL' }));
+    await expect(svc.createShortCancelLink(USER)).resolves.toBe(
+      'https://movivo.test/cancelar/aB3xK9pQ',
+    );
+    const [target, expiresAt] = createShortLink.mock.calls[0] ?? [];
+    expect(target).toBe(`https://movivo.test/conta/${USER}`);
+    const days = ((expiresAt as Date).getTime() - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(89);
+    expect(days).toBeLessThanOrEqual(90);
+  });
+
+  it('monta o aviso de fim de plano com nome, plano e os dois links curtos', async () => {
+    const { svc } = make(
+      row({
+        status: 'EXPIRED',
+        plan: 'QUARTERLY',
+        currentPeriodEnd: new Date('2026-10-23T12:00:00Z'),
+      }),
+    );
+    await expect(svc.periodEndedNotice(USER)).resolves.toEqual({
+      firstName: 'Ana',
+      planLabel: 'Trimestral',
+      periodEnd: new Date('2026-10-23T12:00:00Z'),
+      checkoutUrl: 'https://movivo.test/checkout/aB3xK9pQ',
+      cancelUrl: 'https://movivo.test/cancelar/aB3xK9pQ',
+    });
+  });
+
+  it('sem assinatura não há aviso de fim de plano', async () => {
+    await expect(make(null).svc.periodEndedNotice(USER)).resolves.toBeNull();
   });
 
   it('cobra sempre o snapshot persistido e marca PENDING_PAYMENT', async () => {
