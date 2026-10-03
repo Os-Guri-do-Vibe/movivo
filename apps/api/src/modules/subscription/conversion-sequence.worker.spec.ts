@@ -37,11 +37,21 @@ function make(opts?: { guardExists?: boolean; status?: string; trialEndsAt?: Dat
     Promise.resolve('https://movivo.test/assinar/opaque-token'),
   );
   const personaSlotFor = vi.fn(() => Promise.resolve('FEMALE' as const));
+  const createShortCheckoutLink = vi.fn(() =>
+    Promise.resolve('https://movivo.test/checkout/XcTJFfnN'),
+  );
+  const createShortCancelLink = vi.fn(() =>
+    Promise.resolve('https://movivo.test/cancelar/XcTJFfnN'),
+  );
+  const firstNameFor = vi.fn(() => Promise.resolve('Ana'));
   const subs = {
     startTrial,
     getForUser,
     expireTrial,
     createCheckoutLink,
+    createShortCheckoutLink,
+    createShortCancelLink,
+    firstNameFor,
     personaSlotFor,
   } as unknown as SubscriptionService;
   const redis = {
@@ -66,6 +76,8 @@ function make(opts?: { guardExists?: boolean; status?: string; trialEndsAt?: Dat
     getForUser,
     expireTrial,
     createCheckoutLink,
+    createShortCheckoutLink,
+    createShortCancelLink,
     personaSlotFor,
     agentPersona,
     logger,
@@ -97,11 +109,22 @@ describe('ConversionSequenceWorker — trial-start', () => {
 });
 
 describe('ConversionSequenceWorker — expiração e checkout', () => {
-  it('expira no backend e envia link opaco do contrato originalmente escolhido', async () => {
-    const { worker, createCheckoutLink, expireTrial, enqueue } = make();
+  it('dia 7: expira no backend e envia a mensagem de fim do teste com checkout e cancelamento curtos', async () => {
+    const { worker, createShortCheckoutLink, createShortCancelLink, expireTrial, enqueue } = make();
     const result = await worker.process(job('touchpoint', { userId: U, key: 'day7' }));
     expect(result.status).toBe('SENT');
     expect(expireTrial).toHaveBeenCalledWith(U);
+    expect(createShortCheckoutLink).toHaveBeenCalledWith(U);
+    expect(createShortCancelLink).toHaveBeenCalledWith(U);
+    const text = sentText({ mock: enqueue.mock });
+    expect(text).toContain('*Ana*, seus 7 dias gratuitos com a MOVIVO chegaram ao fim. 💚');
+    expect(text).toContain('https://movivo.test/checkout/XcTJFfnN');
+    expect(text).toContain('https://movivo.test/cancelar/XcTJFfnN');
+  });
+
+  it('dias 10, 13 e 14 seguem com o link opaco do contrato originalmente escolhido', async () => {
+    const { worker, createCheckoutLink, enqueue } = make({ status: 'EXPIRED' });
+    await worker.process(job('touchpoint', { userId: U, key: 'day10' }));
     expect(createCheckoutLink).toHaveBeenCalledWith(U);
     expect(sentText({ mock: enqueue.mock })).toContain('https://movivo.test/assinar/opaque-token');
   });

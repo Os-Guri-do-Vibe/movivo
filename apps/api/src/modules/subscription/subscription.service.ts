@@ -44,10 +44,13 @@ import {
   PAYMENT_GATEWAY,
   type PaymentGateway,
 } from './payment/payment-gateway.types';
+import { ShortLinkService } from '../short-link/short-link.service';
 import { CheckoutTokenService } from './checkout-token.service';
 import { SubscriptionRepository } from './subscription.repository';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** Validade do alias `/cancelar/<código>`: a página de destino não expira, o alias vive 90 dias. */
+const CANCEL_LINK_TTL_MS = 90 * DAY_MS;
 const PAYMENT_LOCK_TTL_MS = 30_000;
 const RELEASE_LOCK = `if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end`;
 
@@ -75,6 +78,7 @@ export class SubscriptionService {
     private readonly checkoutTokens: CheckoutTokenService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
+    private readonly shortLinks: ShortLinkService,
   ) {
     this.logger.setContext(SubscriptionService.name);
   }
@@ -86,6 +90,58 @@ export class SubscriptionService {
     const { token } = this.checkoutTokens.issue(userId);
     const site = this.config.whatsapp.publicSiteUrl;
     return `${site}/assinar/${token}`;
+  }
+
+  /**
+   * Link curto e personalizado do checkout (`/checkout/<código>` → `/assinar/<token>`), no
+   * mesmo padrão do link do check-in diário. Expira junto com o token do checkout.
+   */
+  async createShortCheckoutLink(userId: string): Promise<string> {
+    const sub = await this.repo.findByUserId(userId);
+    if (!sub) throw new Error('assinatura ausente para gerar checkout');
+    const { token, expiresAt } = this.checkoutTokens.issue(userId);
+    const site = this.config.whatsapp.publicSiteUrl;
+    const code = await this.shortLinks.create(`${site}/assinar/${token}`, expiresAt);
+    return `${site}/checkout/${code}`;
+  }
+
+  /**
+   * Link curto e personalizado do cancelamento (`/cancelar/<código>` → `/conta/<userId>`, o
+   * portal onde o próprio titular confirma). A página de destino não expira, então o alias
+   * dura bem mais que o do checkout: "cancelar quando quiser" não pode vencer em 3 dias.
+   */
+  async createShortCancelLink(userId: string): Promise<string> {
+    const site = this.config.whatsapp.publicSiteUrl;
+    const code = await this.shortLinks.create(
+      `${site}/conta/${userId}`,
+      new Date(Date.now() + CANCEL_LINK_TTL_MS),
+    );
+    return `${site}/cancelar/${code}`;
+  }
+
+  /** Dados da mensagem de fim de plano; `null` quando a assinatura sumiu ou o plano é desconhecido. */
+  async periodEndedNotice(userId: string): Promise<{
+    firstName: string;
+    planLabel: string;
+    periodEnd: Date | null;
+    checkoutUrl: string;
+    cancelUrl: string;
+  } | null> {
+    const sub = await this.repo.findByUserId(userId);
+    const plan = SUBSCRIPTION_PLANS.find((candidate) => candidate.id === sub?.plan);
+    if (!sub || !plan) return null;
+    return {
+      firstName: (await this.repo.findFirstName(userId)) ?? 'atleta',
+      planLabel: plan.label,
+      periodEnd: sub.currentPeriodEnd ?? null,
+      checkoutUrl: await this.createShortCheckoutLink(userId),
+      cancelUrl: await this.createShortCancelLink(userId),
+    };
+  }
+
+  /** Primeiro nome do titular para as mensagens da sequência de conversão. */
+  async firstNameFor(userId: string): Promise<string> {
+    return (await this.repo.findFirstName(userId)) ?? 'atleta';
   }
 
   async getCheckoutSummary(userId: string, expiresAt: number): Promise<CheckoutSummary | null> {

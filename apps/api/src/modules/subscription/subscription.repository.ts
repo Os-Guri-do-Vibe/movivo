@@ -91,6 +91,14 @@ export class SubscriptionRepository {
    * mensagens de conversão. `null` quando o titular é anterior à coluna ou nunca submeteu a
    * anamnese; nesse caso a resolução cai no empréstimo entre slots e a mensagem sai igual.
    */
+  /** Primeiro nome do titular para as mensagens; `null` quando não há nome cadastrado. */
+  async findFirstName(userId: string): Promise<string | null> {
+    const [row] = await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1),
+    );
+    return row?.name?.trim().split(/\s+/)[0] || null;
+  }
+
   async findBiologicalSex(userId: string): Promise<BiologicalSex | null> {
     const [row] = await this.db.runAsUser(userId, 'USER', (tx) =>
       tx

@@ -14,9 +14,11 @@ import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 
 import { QUEUE } from '../jobs/jobs.config';
+import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { SubscriptionRepository } from './subscription.repository';
+import { planEndedMessage } from './subscription-messages';
 import { SubscriptionService } from './subscription.service';
 
 type PeriodScanJob = { kind: 'SCAN' };
@@ -55,7 +57,10 @@ export class SubscriptionPeriodScheduler implements OnModuleInit {
     for (const userId of candidates) {
       try {
         const result = await this.subs.expirePeriod(userId, now);
-        if (result.status === 'EXPIRED') expired += 1;
+        if (result.status === 'EXPIRED') {
+          expired += 1;
+          await this.notifyPeriodEnded(userId);
+        }
       } catch (error) {
         // Um titular com problema não segura os demais; o retry da fila refaz a varredura,
         // e `expirePeriod` é idempotente para quem já foi encerrado.
@@ -72,5 +77,34 @@ export class SubscriptionPeriodScheduler implements OnModuleInit {
     );
     if (failed > 0) throw new Error(`varredura de fim de período: ${failed} falha(s)`);
     return { status: 'SCANNED', expired };
+  }
+
+  /**
+   * Avisa no WhatsApp que o plano chegou ao fim, com links curtos de renovação e cancelamento.
+   * Falha aqui não desfaz o encerramento nem segura os demais: só é registrada.
+   */
+  private async notifyPeriodEnded(userId: string): Promise<void> {
+    try {
+      const notice = await this.subs.periodEndedNotice(userId);
+      if (!notice) return;
+      const job: WhatsappOutboundJob = {
+        userId,
+        type: 'COACH_MESSAGE',
+        text: planEndedMessage(
+          notice.firstName,
+          notice.planLabel,
+          notice.checkoutUrl,
+          notice.cancelUrl,
+        ),
+        // Um aviso por fim de período: renovar e vencer de novo gera um novo fim, outro aviso.
+        dedupeId: `plan-ended_${notice.periodEnd?.toISOString() ?? 'sem-periodo'}`,
+      };
+      await this.queues.enqueue(QUEUE.whatsappOutbound, 'plan-ended', job);
+    } catch (error) {
+      this.logger.warn(
+        { userId, err: error instanceof Error ? error.message : String(error) },
+        'falha ao enfileirar o aviso de fim de plano',
+      );
+    }
   }
 }

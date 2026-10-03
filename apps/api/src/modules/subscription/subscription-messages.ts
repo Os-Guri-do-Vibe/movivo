@@ -1,3 +1,5 @@
+import { whatsappBold as bold } from '../../core/text/whatsapp-format';
+
 /**
  * Copy de assinatura (US-4.2) — dunning conversacional do PAST_DUE (decisão do fundador): a MOVI
  * manda o link de pagamento no WhatsApp durante a janela de graça, sem bloqueio abrupto. Dentro
@@ -42,19 +44,48 @@ export function paymentConfirmationMessage(): string {
  */
 export type ConversionTouchpoint = 'day7' | 'day10' | 'day13' | 'day14' | 'winback';
 
+/**
+ * Fim dos 7 dias gratuitos (touchpoint `day7`). Os dois links são curtos e personalizados
+ * (`/checkout/<código>` e `/cancelar/<código>`), no mesmo padrão do link do check-in diário.
+ */
+export function trialEndedMessage(
+  firstName: string,
+  checkoutUrl: string,
+  cancelUrl: string,
+): string {
+  return (
+    `${bold(firstName)}, seus 7 dias gratuitos com a MOVIVO chegaram ao fim. 💚\n\n` +
+    'Para continuar com o acompanhamento MOVIVO, é só ativar sua assinatura:\n' +
+    `${checkoutUrl}\n\n` +
+    'Você pode cancelar quando quiser, sem burocracia:\n' +
+    `${cancelUrl}\n\n` +
+    'Continue se movendo. 👊🏼'
+  );
+}
+
+/** Fim do período pago sem renovação (ACTIVE → EXPIRED). `planLabel`: mensal, trimestral… */
+export function planEndedMessage(
+  firstName: string,
+  planLabel: string,
+  checkoutUrl: string,
+  cancelUrl: string,
+): string {
+  return (
+    `${bold(firstName)}, seu plano ${bold(planLabel.toLowerCase())} MOVIVO chegou ao fim. 💚\n\n` +
+    'Para continuar com o acompanhamento MOVIVO, é só renovar sua assinatura:\n' +
+    `${checkoutUrl}\n\n` +
+    'Você pode cancelar quando quiser, sem burocracia:\n' +
+    `${cancelUrl}\n\n` +
+    'Continue se movendo. 👊🏼'
+  );
+}
+
 export function conversionMessage(
-  touchpoint: ConversionTouchpoint,
+  touchpoint: Exclude<ConversionTouchpoint, 'day7'>,
   checkoutUrl: string,
   agentName: string,
 ): string {
   switch (touchpoint) {
-    case 'day7':
-      return (
-        'Seus 7 dias gratuitos terminaram. Para continuar com a assessoria de treino MOVIVO, ' +
-        'supervisionada por profissional CREF, assine o plano que você escolheu aqui: ' +
-        checkoutUrl +
-        '\nVocê pode cancelar quando quiser, sem burocracia.'
-      );
     case 'day10':
       return (
         'Seu período gratuito terminou, mas seu plano escolhido continua disponível. ' +

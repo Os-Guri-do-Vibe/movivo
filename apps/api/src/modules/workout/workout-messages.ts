@@ -15,20 +15,8 @@
  * varre estas constantes contra a lista de termos proibidos — não editar a copy sem
  * rodar aquele teste.
  */
+import { whatsappBold as bold } from '../../core/text/whatsapp-format';
 import type { WhatsappQuickReplyButton } from '../jobs/whatsapp-outbound.contract';
-
-/**
- * Negrito do WhatsApp é `*texto*`. Nome e título vêm de dados livres (o `dayLabel` sai do
- * LLM): marcadores de formatação e quebras de linha são removidos para que nada quebre o
- * negrito nem injete formatação na mensagem.
- */
-function bold(value: string): string {
-  const clean = value
-    .replace(/[*_~`]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return `*${clean}*`;
-}
 
 export function dailyWorkoutMessage(firstName: string, workoutTitle: string, link: string): string {
   return `Bom dia, ${bold(firstName)}! 💚\n\nSeu treino de hoje é ${bold(workoutTitle)}, não esqueça de realizar seu check-in diário quando for treinar:\n${link}\n\nAgora é com você. Bora se mover. 👊🏼`;
