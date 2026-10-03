@@ -531,6 +531,103 @@ describe('SubscriptionService checkout transparente / getAccess (US-4.2)', () =>
     );
   });
 
+  describe('troca de plano no checkout', () => {
+    const body = {
+      method: 'PIX' as const,
+      payer: {
+        name: 'Pessoa Teste',
+        email: 'teste@movivo.test',
+        cpfCnpj: '11144477735',
+        postalCode: '01310100',
+        addressNumber: '100',
+        phone: '11999999999',
+      },
+      acceptTerms: true as const,
+    };
+
+    it('persiste o plano escolhido com o preço do catálogo e cobra por ele, não pelo da landing', async () => {
+      const { svc, patch, startPayment } = make(
+        row({
+          status: 'TRIALING',
+          plan: 'ANNUAL',
+          priceCents: 81480,
+          monthlyPriceCents: 6790,
+          totalPriceCents: 81480,
+          commitmentMonths: 12,
+        }),
+      );
+      await svc.startCheckoutPayment(USER, { ...body, plan: 'QUARTERLY' }, '127.0.0.1');
+
+      expect(patch).toHaveBeenNthCalledWith(1, USER, 's1', {
+        plan: 'QUARTERLY',
+        priceCents: 22770,
+        monthlyPriceCents: 7590,
+        totalPriceCents: 22770,
+        commitmentMonths: 3,
+      });
+      expect(startPayment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          plan: 'QUARTERLY',
+          monthlyCents: 7590,
+          totalCents: 22770,
+          months: 3,
+        }),
+      );
+    });
+
+    it('sem plano no body (ou o mesmo plano) não regrava o contrato', async () => {
+      const { svc, patch } = make(row({ status: 'TRIALING', plan: 'ANNUAL' }));
+      await svc.startCheckoutPayment(USER, { ...body, plan: 'ANNUAL' }, '127.0.0.1');
+      await svc.startCheckoutPayment(USER, body, '127.0.0.1');
+
+      const planWrites = patch.mock.calls.filter(([, , values]) => 'plan' in values);
+      expect(planWrites).toHaveLength(0);
+    });
+
+    it('rejeita parcelamento acima do período do plano escolhido', async () => {
+      const { svc, startPayment } = make(row({ status: 'TRIALING', plan: 'ANNUAL' }));
+      await expect(
+        svc.startCheckoutPayment(
+          USER,
+          {
+            method: 'CARD',
+            payer: body.payer,
+            card: {
+              holderName: 'Pessoa Teste',
+              number: '4111111111111111',
+              expiryMonth: '12',
+              expiryYear: '2030',
+              ccv: '123',
+            },
+            installments: 12,
+            acceptTerms: true,
+            plan: 'QUARTERLY',
+          },
+          '127.0.0.1',
+        ),
+      ).rejects.toThrow(/parcelas incompatível/);
+      expect(startPayment).not.toHaveBeenCalled();
+    });
+
+    it('trocar o plano com um Pix pendente abre contrato novo em vez de reaproveitar o QR antigo', async () => {
+      const { svc, startPayment, cancelContract } = make(
+        row({
+          status: 'PENDING_PAYMENT',
+          plan: 'ANNUAL',
+          paymentMethod: 'PIX',
+          paymentAttempt: 0,
+          externalPaymentId: 'pay_old',
+        }),
+      );
+      await svc.startCheckoutPayment(USER, { ...body, plan: 'MONTHLY' }, '127.0.0.1');
+
+      expect(cancelContract).toHaveBeenCalled();
+      expect(startPayment).toHaveBeenCalledWith(
+        expect.objectContaining({ plan: 'MONTHLY', idempotencyKey: 's1:1' }),
+      );
+    });
+  });
+
   it('serializa o início do pagamento e não chama o gateway quando outro request tem o lock', async () => {
     const { svc, set, startPayment } = make(row());
     set.mockResolvedValueOnce(null);

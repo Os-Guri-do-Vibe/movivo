@@ -33,6 +33,77 @@
   line-height: 1.5;
 }
 
+.planPicker {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 20px;
+  padding: 0;
+  border: 0;
+}
+.planPicker legend {
+  margin-bottom: 10px;
+  padding: 0;
+  color: var(--musgo);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.planOption {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  min-height: 64px;
+  padding: 12px 18px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--grafite);
+  background: var(--branco);
+  cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+.planOption:hover {
+  border-color: var(--musgo);
+}
+.planOption[data-selected='true'] {
+  border-color: var(--petroleo-vivo);
+  box-shadow: inset 0 0 0 1px var(--petroleo-vivo);
+}
+.planOption:has(input:focus-visible) {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
+}
+.planOption input {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--petroleo-vivo);
+}
+.planOptionText {
+  display: grid;
+  gap: 2px;
+}
+.planOptionText strong {
+  font-size: 17px;
+}
+.planOptionText small {
+  color: var(--petroleo-vivo);
+  font-size: 13px;
+  font-weight: 700;
+}
+.planOptionPrice {
+  color: var(--musgo);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.planOptionPrice strong {
+  color: var(--grafite);
+  font-size: 17px;
+}
+
 .planCard {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--petroleo-vivo) 12%, transparent);

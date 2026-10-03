@@ -4,12 +4,14 @@ import * as React from 'react';
 import { Check, Copy, CreditCard, LockKeyhole, QrCode, RefreshCw } from 'lucide-react';
 import Image from 'next/image';
 
-import type {
-  CheckoutPaymentResult,
-  CheckoutPayer,
-  CheckoutSummary,
-  CreateCheckoutBody,
-  PaymentMethodId,
+import {
+  SUBSCRIPTION_PLANS,
+  type CheckoutPaymentResult,
+  type CheckoutPayer,
+  type CheckoutSummary,
+  type CreateCheckoutBody,
+  type PaymentMethodId,
+  type SubscriptionPlanId,
 } from '@movivo/shared';
 
 import { Button } from '@/components/ui/button';
@@ -99,7 +101,9 @@ function detectCardBrand(value: string): CardBrand | null {
 
 export function PlanSelector({ token }: { token: string }) {
   const legalDocumentsAvailable = Boolean(LEGAL_LINKS.terms && LEGAL_LINKS.privacy);
-  const [summary, setSummary] = React.useState<CheckoutSummary>();
+  const [server, setServer] = React.useState<CheckoutSummary>();
+  // Plano escolhido na tela: nasce no plano persistido (o da landing) e o aluno pode trocá-lo.
+  const [selectedPlan, setSelectedPlan] = React.useState<SubscriptionPlanId>();
   const [method, setMethod] = React.useState<PaymentMethodId>('CARD');
   const [installments, setInstallments] = React.useState(1);
   const [state, setState] = React.useState<CheckoutState>('FORM');
@@ -111,11 +115,20 @@ export function PlanSelector({ token }: { token: string }) {
 
   const loadSummary = React.useCallback(async () => {
     const current = await getCheckoutSummary(token);
-    setSummary(current);
-    setInstallments((value) => Math.min(value, current.maxInstallments));
+    setServer(current);
+    setSelectedPlan((chosen) => chosen ?? current.plan);
     if (current.status === 'ACTIVE') setState('SUCCESS');
     return current;
   }, [token]);
+
+  const summary = React.useMemo(
+    () => (server ? summaryFor(server, selectedPlan ?? server.plan) : undefined),
+    [server, selectedPlan],
+  );
+
+  React.useEffect(() => {
+    if (summary) setInstallments((value) => Math.min(value, summary.maxInstallments));
+  }, [summary]);
 
   React.useEffect(() => {
     loadSummary().catch(() => {
@@ -180,8 +193,9 @@ export function PlanSelector({ token }: { token: string }) {
               },
               installments,
               acceptTerms: true as const,
+              plan: summary.plan,
             }
-          : { method, payer, acceptTerms: true as const, regenerate };
+          : { method, payer, acceptTerms: true as const, regenerate, plan: summary.plan };
       setLastBody(body);
       const next = await startCheckoutPayment(token, body);
       setResult(next);
@@ -242,6 +256,36 @@ export function PlanSelector({ token }: { token: string }) {
         <p className={styles.eyebrow}>Seu plano MOVIVO</p>
         <h1 id="checkout-title">Seu próximo passo começa aqui.</h1>
         <p className={styles.subtitle}>Escolha como deseja continuar sua evolução.</p>
+
+        <fieldset className={styles.planPicker} disabled={state === 'SUBMITTING'}>
+          <legend>Escolha seu plano</legend>
+          {SUBSCRIPTION_PLANS.map((option) => (
+            <label
+              key={option.id}
+              className={styles.planOption}
+              data-selected={summary.plan === option.id}
+            >
+              <input
+                type="radio"
+                name="plan"
+                value={option.id}
+                checked={summary.plan === option.id}
+                onChange={() => {
+                  setSelectedPlan(option.id);
+                  setError('');
+                  if (state === 'ERROR') setState('FORM');
+                }}
+              />
+              <span className={styles.planOptionText}>
+                <strong>{option.label}</strong>
+                {option.discountPercent > 0 ? <small>{option.discountPercent}% OFF</small> : null}
+              </span>
+              <span className={styles.planOptionPrice}>
+                <strong>{formatBRL(option.monthlyCents)}</strong>/mês
+              </span>
+            </label>
+          ))}
+        </fieldset>
 
         <div className={styles.planCard}>
           <div className={styles.planHeading}>
@@ -645,6 +689,25 @@ function ctaLabel(method: PaymentMethodId) {
   if (method === 'PIX') return 'Pagar com Pix';
   if (method === 'PIX_AUTOMATIC') return 'Autorizar Pix Automático';
   return 'Confirmar assinatura';
+}
+
+/**
+ * Resumo do plano escolhido na tela. O plano persistido usa o snapshot do contrato (preço
+ * que o aluno viu); outro plano usa o catálogo — o mesmo que o backend aplica ao trocar.
+ */
+function summaryFor(server: CheckoutSummary, plan: SubscriptionPlanId): CheckoutSummary {
+  if (plan === server.plan) return server;
+  const option = SUBSCRIPTION_PLANS.find((candidate) => candidate.id === plan);
+  if (!option) return server;
+  return {
+    ...server,
+    plan: option.id,
+    label: option.label,
+    monthlyCents: option.monthlyCents,
+    totalCents: option.priceCents,
+    months: option.months,
+    maxInstallments: option.months,
+  };
 }
 
 function paymentExplanation(method: PaymentMethodId, summary: CheckoutSummary): string {

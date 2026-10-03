@@ -176,10 +176,16 @@ export class SubscriptionService {
     }
     try {
       // Releitura depois do lock: uma retentativa vê os IDs persistidos pela primeira chamada.
-      const sub = await this.repo.findByUserId(userId);
+      let sub = await this.repo.findByUserId(userId);
       if (!sub) throw new Error('assinatura ausente para iniciar pagamento');
       if (sub.status === 'ACTIVE' || sub.status === 'CANCELED' || sub.status === 'PAUSED') {
         throw new ConflictException('assinatura não aceita um novo pagamento neste estado');
+      }
+      // O aluno pode trocar de plano no próprio checkout: o contrato persistido passa a ser o
+      // escolhido (preço e meses vêm do catálogo, nunca do cliente) ANTES de abrir a cobrança.
+      const planChanged = body.plan !== undefined && body.plan !== sub.plan;
+      if (body.plan !== undefined && planChanged) {
+        sub = await this.switchPlan(userId, sub, body.plan);
       }
       const spec = PLAN_CATALOG[sub.plan];
       const installments = body.method === 'CARD' ? body.installments : undefined;
@@ -195,7 +201,10 @@ export class SubscriptionService {
       // Asaas). Qualquer outro caso com contrato anterior — Pix regenerado, troca de método,
       // nova compra depois de expirar — abre contrato novo com tentativa nova.
       const retrying =
-        sub.status === 'PENDING_PAYMENT' && sub.paymentMethod === body.method && !regenerate;
+        sub.status === 'PENDING_PAYMENT' &&
+        sub.paymentMethod === body.method &&
+        !regenerate &&
+        !planChanged;
       const previous = !retrying && contractIdsOf(sub).length > 0 ? sub : null;
       const paymentAttempt = sub.paymentAttempt + (previous || regenerate ? 1 : 0);
       if (previous) await this.supersede(previous, paymentAttempt);
@@ -244,6 +253,28 @@ export class SubscriptionService {
     } finally {
       await this.redis.eval(RELEASE_LOCK, 1, lockKey, lockToken);
     }
+  }
+
+  /** Persiste o plano escolhido no checkout, com o snapshot de preço do catálogo vigente. */
+  private async switchPlan(
+    userId: string,
+    sub: SubscriptionRow,
+    plan: SubscriptionPlan,
+  ): Promise<SubscriptionRow> {
+    const spec = PLAN_CATALOG[plan];
+    const snapshot = {
+      plan,
+      priceCents: spec.priceCents,
+      monthlyPriceCents: spec.monthlyCents,
+      totalPriceCents: spec.priceCents,
+      commitmentMonths: spec.months,
+    };
+    await this.repo.patch(userId, sub.id, snapshot);
+    this.logger.info(
+      { event: 'checkout_plan_changed', userId, from: sub.plan, to: plan },
+      'checkout_plan_changed',
+    );
+    return { ...sub, ...snapshot };
   }
 
   /**

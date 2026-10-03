@@ -68,7 +68,7 @@ describe('checkout MOVIVO', () => {
     expect(screen.queryByText(/Apple Pay|Google Pay/)).not.toBeInTheDocument();
   });
 
-  it('envia Pix sem permitir alterar plano ou preço no cliente', async () => {
+  it('envia Pix com o plano persistido e nunca com preço vindo do cliente', async () => {
     const user = userEvent.setup();
     render(<PlanSelector token="opaque" />);
     await user.click(await screen.findByRole('button', { name: /Pix à vista/ }));
@@ -91,11 +91,62 @@ describe('checkout MOVIVO', () => {
         method: 'PIX',
         payer: expect.objectContaining({ cpfCnpj: '11144477735' }),
         acceptTerms: true,
+        plan: 'ANNUAL',
       }),
     );
     const sent = startCheckoutPayment.mock.calls[0]?.[1];
-    expect(sent).not.toHaveProperty('plan');
     expect(sent).not.toHaveProperty('totalCents');
+    expect(sent).not.toHaveProperty('monthlyCents');
+  });
+
+  describe('troca de plano no checkout', () => {
+    it('lista os quatro planos com o persistido (o da landing) pré-selecionado', async () => {
+      render(<PlanSelector token="opaque" />);
+      await screen.findByRole('heading', { name: 'Seu próximo passo começa aqui.' });
+
+      const radios = screen.getAllByRole('radio');
+      expect(radios.map((radio) => (radio as HTMLInputElement).value)).toEqual([
+        'MONTHLY',
+        'QUARTERLY',
+        'SEMIANNUAL',
+        'ANNUAL',
+      ]);
+      expect(screen.getByRole('radio', { name: /Anual/ })).toBeChecked();
+      expect(screen.getByText('15% OFF')).toBeVisible();
+    });
+
+    it('trocar o plano atualiza resumo, total e parcelas, e envia só o ID do plano escolhido', async () => {
+      const user = userEvent.setup();
+      render(<PlanSelector token="opaque" />);
+      await screen.findByRole('heading', { name: 'Seu próximo passo começa aqui.' });
+
+      await user.click(screen.getByRole('radio', { name: /Trimestral/ }));
+
+      expect(screen.getByText('Plano Trimestral')).toBeVisible();
+      expect(screen.getByText('R$ 227.70')).toBeVisible();
+      expect(screen.getByRole('combobox')).toHaveLength(3);
+
+      await user.click(screen.getByRole('button', { name: /Pix à vista/ }));
+      await fillPayer(user);
+      await user.click(screen.getByRole('button', { name: 'Pagar com Pix' }));
+
+      await waitFor(() => expect(startCheckoutPayment).toHaveBeenCalledTimes(1));
+      const sent = startCheckoutPayment.mock.calls[0]?.[1];
+      expect(sent).toMatchObject({ method: 'PIX', plan: 'QUARTERLY' });
+      expect(sent).not.toHaveProperty('totalCents');
+    });
+
+    it('limita as parcelas ao novo plano ao trocar para um período menor', async () => {
+      const user = userEvent.setup();
+      render(<PlanSelector token="opaque" />);
+      await screen.findByRole('heading', { name: 'Seu próximo passo começa aqui.' });
+
+      await user.selectOptions(screen.getByRole('combobox'), '12');
+      await user.click(screen.getByRole('radio', { name: /Mensal/ }));
+
+      expect(screen.getByText('Plano Mensal')).toBeVisible();
+      expect(screen.getByRole('combobox')).toHaveValue('1');
+    });
   });
 
   it('formata a validade como MM/AA e converte o ano antes de enviar ao Asaas', async () => {

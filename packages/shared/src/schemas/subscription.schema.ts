@@ -125,7 +125,15 @@ export const checkoutCardSchema = z.object({
 });
 export type CheckoutCard = z.infer<typeof checkoutCardSchema>;
 
-const payerPaymentFields = { payer: checkoutPayerSchema } as const;
+/**
+ * `plan` é opcional: o checkout vem pré-selecionado com o plano persistido (o da landing) e o
+ * aluno pode trocá-lo ali mesmo. Só o ID viaja — preço, meses e parcelas continuam sendo
+ * resolvidos pelo backend a partir do catálogo.
+ */
+const payerPaymentFields = {
+  payer: checkoutPayerSchema,
+  plan: subscriptionPlanIdSchema.optional(),
+} as const;
 
 /** Body do início do pagamento. Plano e preço são resolvidos pelo token no backend. */
 export const createCheckoutSchema = z.discriminatedUnion('method', [
