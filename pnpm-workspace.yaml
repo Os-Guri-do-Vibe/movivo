@@ -81,6 +81,15 @@ allowBuilds:
   # (`next start` / `next/image`). Sem o script de instalação, o binário nativo da
   # plataforma não é resolvido e a otimização de imagem cai para um caminho degradado.
   sharp: true
+auditConfig:
+  # GHSA-vfj7-8cjw-p6xm — braces <=3.0.3, DoS por exaustão de pilha com padrões muito
+  # aninhados. SEM versão corrigida publicada (npm `latest` = 3.0.3, 2026-10-03), então um
+  # override não resolve. Só entra por devDependency: @next/eslint-plugin-next>fast-glob>
+  # micromatch>braces (lint em desenvolvimento/CI), sem caminho para os runtimes de produção
+  # e sem entrada não confiável nos padrões. Ignorado SÓ este advisory — o gate segue valendo
+  # para o resto. REVISITAR e remover assim que o braces publicar a correção. Datado: 2026-10-03.
+  ignoreGhsas:
+    - GHSA-vfj7-8cjw-p6xm
 minimumReleaseAgeExclude:
   - '@turbo/darwin-64@2.10.6'
   - '@turbo/darwin-arm64@2.10.6'
