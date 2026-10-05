@@ -20,6 +20,8 @@
  * A camada 1 nunca é suficiente sozinha, e a camada 2 nunca é confiável sozinha.
  */
 
+import { SECRET_KEYS } from '../config/resolve-file-secrets';
+
 /** Token único usado em toda redação, para ser greppável em análise de log. */
 export const REDACTED = '[REDACTED]';
 
@@ -71,6 +73,7 @@ const PII_FIELDS = [
   'weight',
   'height',
   // Credenciais e material de autenticação.
+  ...SECRET_KEYS,
   'password',
   'senha',
   'token',
@@ -103,6 +106,9 @@ export const REDACT_PATHS: readonly string[] = [
     PII_CONTAINERS.flatMap((container) => PII_FIELDS.map((field) => `${container}${field}`)),
   ),
   'req.headers.authorization',
+  'req.headers.apikey',
+  'req.headers["asaas-access-token"]',
+  'req.headers["x-movivo-webhook-token"]',
   'req.headers.cookie',
   'req.headers["x-api-key"]',
   'req.headers["x-hub-signature-256"]',
@@ -133,11 +139,11 @@ const EMAIL_PATTERN = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
 /** CPF com ou sem máscara. */
 const CPF_PATTERN = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g;
 /**
- * Token da sessão de anamnese no path (`/anamnesis/session/<token>/...`). É
- * credencial de acesso a dado de saúde (Sato §8.1): nunca pode ir para o log,
- * mesmo estando no path e não na query string. Mascara só o segmento do token.
+ * Tokens bearer e aliases no path permitem acesso sem login (inclusive saúde).
+ * Redigir o segmento em todos os endpoints públicos, não só na anamnese.
  */
-const ANAMNESIS_TOKEN_PATTERN = /(\/anamnesis\/session\/)[^/?]+/g;
+const ACCESS_TOKEN_PATTERN =
+  /(\/(?:anamnesis\/session|protocols?\/by-token|protocol-renewal\/session|checkin\/session|subscription(?:\/checkout)?|short-links|protocolo|mesociclo|assinar|conta|cancelar|checkout|check-in|checkin-semanal|renovacao|renovacao-protocolo|semana)\/)[^/?\s"']+/g;
 
 /**
  * Remove PII de uma string livre. Aplicar antes de logar qualquer texto de origem
@@ -145,7 +151,7 @@ const ANAMNESIS_TOKEN_PATTERN = /(\/anamnesis\/session\/)[^/?]+/g;
  */
 export function redactPii(input: string): string {
   return input
-    .replace(ANAMNESIS_TOKEN_PATTERN, `$1${REDACTED}`)
+    .replace(ACCESS_TOKEN_PATTERN, `$1${REDACTED}`)
     .replace(EMAIL_PATTERN, REDACTED)
     .replace(CPF_PATTERN, REDACTED)
     .replace(PHONE_PATTERN, (match) => maskPhone(match));
@@ -162,6 +168,12 @@ export function redactObject(value: unknown, depth = 0): unknown {
   if (depth > 6) return REDACTED;
   if (typeof value === 'string') return redactPii(value);
   if (value === null || typeof value !== 'object') return value;
+  if (value instanceof Error) {
+    return redactObject(
+      { ...value, type: value.name, message: value.message, stack: value.stack },
+      depth + 1,
+    );
+  }
   if (Array.isArray(value)) return value.map((item) => redactObject(item, depth + 1));
 
   const sensitive = new Set<string>(PII_FIELDS);

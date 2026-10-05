@@ -116,6 +116,12 @@ function make(current: SubscriptionRow | null, gatewayName: PaymentGateway['name
       redis,
       keys,
       shortLinks,
+      {
+        issue: vi.fn(async () => ({
+          token: 'portal-token',
+          expiresAt: new Date(Date.now() + 90 * 86400000),
+        })),
+      } as never,
     ),
     createShortLink,
     patch,
@@ -461,7 +467,7 @@ describe('SubscriptionService checkout transparente / getAccess (US-4.2)', () =>
       'https://movivo.test/cancelar/aB3xK9pQ',
     );
     const [target, expiresAt] = createShortLink.mock.calls[0] ?? [];
-    expect(target).toBe(`https://movivo.test/conta/${USER}`);
+    expect(target).toBe('https://movivo.test/conta/portal-token');
     const days = ((expiresAt as Date).getTime() - Date.now()) / 86_400_000;
     expect(days).toBeGreaterThan(89);
     expect(days).toBeLessThanOrEqual(90);

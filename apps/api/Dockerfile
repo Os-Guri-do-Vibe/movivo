@@ -55,6 +55,10 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 
 # -----------------------------------------------------------------------------
 FROM node:${NODE_VERSION}-bookworm-slim AS runtime
+ARG MOVIVO_REVISION=unknown
+LABEL br.com.movivo.security.access-links="revocable-v1" \
+      org.opencontainers.image.source="https://github.com/Os-Guri-do-Vibe/movivo" \
+      org.opencontainers.image.revision="${MOVIVO_REVISION}"
 # MALLOC_ARENA_MAX: o glibc cria uma arena por thread do libuv; o resvg (card de Story)
 # aloca bitmaps grandes nelas e o RSS não volta. Duas arenas seguram o pico sob o limite
 # de 1 GB do container sem custo perceptível de latência.

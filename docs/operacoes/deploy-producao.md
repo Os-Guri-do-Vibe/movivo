@@ -79,13 +79,18 @@ deploy (senão a próxima execução desfaz a mudança).
 | Origem | Arquivos |
 |---|---|
 | Gerados **na VPS** por `gen-prod-secrets.sh` | senhas do Postgres/Redis/Evolution, `pgcrypto_key`, par JWT, `evolution_webhook_token`, `asaas_webhook_secret`, `backup_encryption_key` |
-| Copiados do dev pelo `deploy.sh` (só se faltarem) | `asaas_api_key`, `openai_api_key`, `anthropic_api_key`, `deepseek_api_key`, `groq_api_key`, `ararahq_api_key` |
+| Provisionados na VPS ou copiados de `PRODUCTION_SECRETS_DIR` explícito (só se faltarem) | `asaas_api_key`, `openai_api_key`, `anthropic_api_key`, `deepseek_api_key`, `groq_api_key` |
+
+Credenciais de terceiros devem ser exclusivas de produção. O deploy não usa `secrets/`
+de desenvolvimento como fallback. Para arquivos ainda ausentes, execute
+`PRODUCTION_SECRETS_DIR=/caminho/privado/producao infra/vps/deploy.sh <sha>`.
+Mantenha a fonte fora do Git e com modo `0700`.
 
 - O script **nunca sobrescreve** um segredo existente. Trocar a senha do
   Postgres ou o `pgcrypto_key` com o banco criado quebra o acesso ou torna dado
   de saúde ilegível — rotação é procedimento próprio (`docs/SECURITY.md`).
-- Trocar uma chave de API externa: edite o arquivo direto na VPS e rode
-  `docker compose up -d --force-recreate api`.
+- Trocar chave de API externa: use o helper validado descrito em “Atualizar
+  credenciais de fornecedores” abaixo; nunca substitua arquivos manualmente.
 - `backup_encryption_key`: sem ela os dumps são inúteis. Guarde uma cópia no
   gerenciador de senhas dos fundadores.
 
@@ -110,6 +115,8 @@ deploy (senão a próxima execução desfaz a mudança).
   completa o TLS para hostname desconhecido.
 - Cloudflare mudou as faixas de IP? Rode `bash infra/vps/hostinger-firewall.sh`
   (firewall da Hostinger) **e** um deploy (listas do Nginx).
+
+Credenciais de terceiros devem ser exclusivas do ambiente de produção. O deploy não usa `secrets/` de desenvolvimento como fallback. Para provisionar arquivos ainda ausentes, execute `PRODUCTION_SECRETS_DIR=/caminho/privado/producao infra/vps/deploy.sh <sha>`; mantenha esse diretório fora do Git e com modo `0700`. Valores existentes na VPS não são sobrescritos: rotação exige substituição coordenada e recriação dos consumidores.
 
 ## Backup e restauração
 
@@ -149,3 +156,48 @@ docker compose run --rm migrate && docker compose up -d api
 - Observabilidade: sem Sentry/uptime externo ainda — hoje o sinal é o
   healthcheck do Docker e o smoke test do deploy.
 - Authenticated Origin Pulls (mTLS Cloudflare → Nginx): recomendado, não ligado.
+
+## Links revogáveis e logs seguros (auditoria 2026-10-05)
+
+A autorização dos links públicos usa credencial aleatória, finalidade, recurso,
+TTL e revogação server-side. O banco guarda só SHA-256 do bearer. IDs antigos de
+usuário/protocolo e checkout AES legado falham fechados. Aliases também são
+hashados; destinos são criptografados com a PGCRYPTO_KEY runtime já existente.
+Não troque IDs nem a chave de dados para revogar acesso. O deploy e o rollback
+recusam imagens sem a capacidade `revocable-v1` após esta mudança.
+
+O access log não registra URI/query/Referer/User-Agent. O erro nativo passa por FIFO
+0600 em tmpfs e um coletor AWK antes do driver Docker: timestamp, severidade,
+categoria, errno e conexão são preservados, mensagem/URI/PII são descartadas. A
+falha do coletor encerra o Nginx para restart e aparece no healthcheck. Não há
+supressão de erros nem denylist de tokens na solução permanente.
+
+## Atualizar credenciais de fornecedores
+
+Os cinco arquivos são `asaas_api_key` (Sandbox), `openai_api_key`,
+`anthropic_api_key`, `deepseek_api_key` e `groq_api_key`. AraraHQ não é dependência
+runtime. Evolution usa suas credenciais próprias, diferentes das dos LLMs.
+`api.env` contém apenas ponteiros `*_FILE`, nunca os valores. Segredos não participam
+do build das imagens. Gere chave exclusiva desta instalação no console correto;
+não reutilize a chave de desenvolvimento.
+
+O script instalado em `/opt/movivo/bin/update-provider-secret.sh` recebe a chave
+por stdin, valida uma chamada GET autenticada ao fornecedor sem seguir redirects,
+substitui o arquivo atomicamente e recria apenas a API. Se a API não ficar saudável,
+restaura a anterior. **Revogue a anterior no console apenas após sucesso.** Asaas
+permanece Sandbox até a aprovação do gate PCI; não use chave de produção aqui.
+
+No terminal zsh do Mac (a entrada fica oculta e não vira argumento/histórico):
+
+```sh
+read -rs 'movivo_key?Cole a nova chave: '
+printf '\n'
+printf '%s\n' "$movivo_key" | ssh -T deploy@187.127.40.87 '/opt/movivo/bin/update-provider-secret.sh openai_api_key'
+unset movivo_key
+```
+
+Troque apenas o nome final por um dos cinco arquivos. Outra opção é arquivo privado
+modo 0600 enviado com redirecionamento stdin. Não cole a chave em chat, issue, logs
+ou argumento de comando. A validação confirma autenticação; confirme também o
+fluxo funcional correspondente (LLM/embedding/STT ou pagamento Sandbox) antes de
+revogar a anterior. As aprovações de tratamento de dados de saúde continuam vigentes.

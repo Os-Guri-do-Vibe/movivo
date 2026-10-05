@@ -1,8 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { type HealthCipherService } from '../../core/database/health-cipher.service';
 import { shortLinks } from '../../core/database/schema';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
 import { ShortLinkService } from './short-link.service';
+
+const cipher = {
+  encryptHealth: vi.fn(async () => Buffer.from('ciphertext')),
+  decryptHealth: vi.fn(async () => 'https://movivo.app/treino/acessar#token=secret'),
+} as unknown as HealthCipherService;
 
 function makeInsertTx(codes: (string | undefined)[]) {
   let call = 0;
@@ -35,13 +41,16 @@ describe('ShortLinkService.create', () => {
     const db = {
       runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
     } as unknown as TenantDatabase;
-    const service = new ShortLinkService(db);
+    const service = new ShortLinkService(db, cipher);
 
     const code = await service.create('https://movivo.app/treino/acessar#token=secret', new Date());
 
-    expect(code).toBe('aB3xK9pQ');
+    expect(code).toMatch(/^[A-Za-z0-9]{24}$/);
+    expect(JSON.stringify(tx.values.mock.calls)).not.toContain(code);
     expect(tx.values).toHaveBeenCalledWith(
-      expect.objectContaining({ targetUrl: 'https://movivo.app/treino/acessar#token=secret' }),
+      expect.objectContaining({
+        targetUrl: `pgp:v1:${Buffer.from('ciphertext').toString('base64')}`,
+      }),
     );
   });
 
@@ -50,11 +59,11 @@ describe('ShortLinkService.create', () => {
     const db = {
       runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
     } as unknown as TenantDatabase;
-    const service = new ShortLinkService(db);
+    const service = new ShortLinkService(db, cipher);
 
     const code = await service.create('https://movivo.app/x', new Date());
 
-    expect(code).toBe('novoCode1');
+    expect(code).toMatch(/^[A-Za-z0-9]{24}$/);
     expect(tx.returning).toHaveBeenCalledTimes(2);
   });
 
@@ -63,7 +72,7 @@ describe('ShortLinkService.create', () => {
     const db = {
       runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
     } as unknown as TenantDatabase;
-    const service = new ShortLinkService(db);
+    const service = new ShortLinkService(db, cipher);
 
     await expect(service.create('https://movivo.app/x', new Date())).rejects.toThrow(
       /falha ao gerar código único/,
@@ -73,11 +82,13 @@ describe('ShortLinkService.create', () => {
 
 describe('ShortLinkService.resolve', () => {
   it('devolve a URL alvo quando o código existe e não expirou', async () => {
-    const tx = makeSelectTx({ targetUrl: 'https://movivo.app/treino/acessar#token=secret' });
+    const tx = makeSelectTx({
+      targetUrl: `pgp:v1:${Buffer.from('ciphertext').toString('base64')}`,
+    });
     const db = {
       runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
     } as unknown as TenantDatabase;
-    const service = new ShortLinkService(db);
+    const service = new ShortLinkService(db, cipher);
 
     await expect(service.resolve('aB3xK9pQ')).resolves.toBe(
       'https://movivo.app/treino/acessar#token=secret',
@@ -89,8 +100,16 @@ describe('ShortLinkService.resolve', () => {
     const db = {
       runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
     } as unknown as TenantDatabase;
-    const service = new ShortLinkService(db);
+    const service = new ShortLinkService(db, cipher);
 
     await expect(service.resolve('inexistente')).resolves.toBeNull();
   });
+});
+
+it('não aceita destino legado em claro', async () => {
+  const tx = makeSelectTx({ targetUrl: 'https://movivo.app/conta/legacy-user-id' });
+  const db = {
+    runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
+  } as unknown as TenantDatabase;
+  await expect(new ShortLinkService(db, cipher).resolve('legacy')).resolves.toBeNull();
 });

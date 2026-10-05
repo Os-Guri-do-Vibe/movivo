@@ -210,6 +210,19 @@ async function main(): Promise<void> {
     await migrate(drizzle(sql), { migrationsFolder: resolve(apiRoot, 'drizzle') });
     console.log('[db:migrate] Migrações aplicadas.');
 
+    // URLs de aliases são credenciais: migrar em uma operação atômica, sem imprimir destinos.
+    const legacyRows = await sql<{ count: number }[]>`
+      SELECT count(*)::int AS count FROM short_links WHERE target_url NOT LIKE 'pgp:v1:%'`;
+    const legacyLinks = legacyRows[0]?.count ?? 0;
+    if (legacyLinks > 0) {
+      if (!env.PGCRYPTO_KEY)
+        throw new Error('[db:migrate] PGCRYPTO_KEY runtime obrigatória para cifrar aliases.');
+      await sql`UPDATE short_links SET target_url = 'pgp:v1:' ||
+        replace(encode(pgp_sym_encrypt(target_url, ${env.PGCRYPTO_KEY}), 'base64'), E'\n', '')
+        WHERE target_url NOT LIKE 'pgp:v1:%'`;
+      console.log(`[db:migrate] ${legacyLinks} destinos de aliases cifrados.`);
+    }
+
     console.log(`[db:migrate] Reconciliando grants mínimos de ${appRole} …`);
     await sql.unsafe(GRANTS_SQL(appRole));
     console.log('[db:migrate] Grants aplicados.');

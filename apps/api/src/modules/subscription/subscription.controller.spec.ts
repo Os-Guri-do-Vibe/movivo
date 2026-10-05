@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { SubscriptionController } from './subscription.controller';
 import { type SubscriptionService } from './subscription.service';
 
+const PORTAL = 'B'.repeat(43);
 const VALID = '11111111-1111-4111-8111-111111111111';
 
 const view: SubscriptionView = {
@@ -45,13 +46,18 @@ function make(overrides: Partial<Record<keyof SubscriptionService, unknown>> = {
       token === 'opaque' ? { userId: VALID, expiresAt: Date.parse(summary.expiresAt) } : null,
     ),
   } as never;
-  return { controller: new SubscriptionController(svc, tokens), svc };
+  return {
+    controller: new SubscriptionController(svc, tokens, {
+      verify: vi.fn(async (token: string) => (token === PORTAL ? { userId: VALID } : null)),
+    } as never),
+    svc,
+  };
 }
 
 describe('SubscriptionController — view (US-4.6)', () => {
   it('token válido devolve a view (sem PII/cartão)', async () => {
     const { controller } = make();
-    const result = await controller.view(VALID);
+    const result = await controller.view(PORTAL);
     expect(result).toEqual(view);
     expect(Object.keys(result)).not.toContain('userId');
   });
@@ -64,7 +70,7 @@ describe('SubscriptionController — view (US-4.6)', () => {
 
   it('sem assinatura (null) → 404', async () => {
     const { controller } = make({ getView: vi.fn(() => Promise.resolve(null)) });
-    await expect(controller.view(VALID)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(controller.view(PORTAL)).rejects.toBeInstanceOf(NotFoundException);
   });
 });
 
@@ -122,7 +128,7 @@ describe('SubscriptionController — cancelar / pausar / retomar (US-4.5)', () =
     ['resume', 'ACTIVE'],
   ] as const)('%s devolve o novo status da assinatura', async (action, status) => {
     const { controller, svc } = make({ [action]: vi.fn(() => Promise.resolve({ status })) });
-    await expect(controller[action](VALID, {})).resolves.toEqual({ status });
+    await expect(controller[action](PORTAL, {})).resolves.toEqual({ status });
     expect(svc[action]).toHaveBeenCalled();
   });
 
@@ -141,7 +147,7 @@ describe('SubscriptionController — cancelar / pausar / retomar (US-4.5)', () =
       const { controller } = make({
         [action]: vi.fn(() => Promise.resolve({ status: 'NO_SUBSCRIPTION' })),
       });
-      await expect(controller[action](VALID, {})).rejects.toBeInstanceOf(NotFoundException);
+      await expect(controller[action](PORTAL, {})).rejects.toBeInstanceOf(NotFoundException);
     },
   );
 
@@ -149,7 +155,7 @@ describe('SubscriptionController — cancelar / pausar / retomar (US-4.5)', () =
     const cancel = vi.fn(() => Promise.resolve({ status: 'CANCELED' }));
     const { controller } = make({ cancel });
 
-    await controller.cancel(VALID, { reason: `  ${'x'.repeat(600)}  ` });
+    await controller.cancel(PORTAL, { reason: `  ${'x'.repeat(600)}  ` });
 
     expect(cancel).toHaveBeenCalledWith(VALID, 'x'.repeat(500));
   });
@@ -163,8 +169,15 @@ describe('SubscriptionController — cancelar / pausar / retomar (US-4.5)', () =
     const cancel = vi.fn(() => Promise.resolve({ status: 'CANCELED' }));
     const { controller } = make({ cancel });
 
-    await controller.cancel(VALID, body);
+    await controller.cancel(PORTAL, body);
 
     expect(cancel).toHaveBeenCalledWith(VALID, undefined);
   });
+});
+
+it('recusa userId como credencial de gestão', async () => {
+  const { controller, svc } = make();
+  await expect(controller.view(VALID)).rejects.toBeInstanceOf(NotFoundException);
+  await expect(controller.pause(VALID)).rejects.toBeInstanceOf(NotFoundException);
+  expect(svc.getView).not.toHaveBeenCalled();
 });

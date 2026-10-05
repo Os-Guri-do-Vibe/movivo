@@ -30,6 +30,7 @@ import { DatabaseHealthService } from './database-health.service';
 import { HealthCipherService } from './health-cipher.service';
 import { HealthConsentService } from './health-consent.service';
 import { TenantDatabase } from './tenant-database.service';
+import { AccessLinkService } from './access-link.service';
 
 /** Tipo do client Drizzle exposto por DI. Ganha o genérico do schema na US-0.4. */
 export type DrizzleClient = PostgresJsDatabase<Record<string, never>>;
@@ -71,6 +72,7 @@ export function createPostgresClient(config: AppConfigService): Sql {
     },
     DatabaseHealthService,
     TenantDatabase,
+    AccessLinkService,
     HealthCipherService,
     HealthConsentService,
   ],
@@ -79,6 +81,7 @@ export function createPostgresClient(config: AppConfigService): Sql {
     POSTGRES_CLIENT,
     DatabaseHealthService,
     TenantDatabase,
+    AccessLinkService,
     HealthCipherService,
     HealthConsentService,
   ],

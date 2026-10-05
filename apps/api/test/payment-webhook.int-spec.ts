@@ -162,6 +162,7 @@ afterAll(async () => {
        DELETE FROM subscriptions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM consents WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM professional_assignments WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
+       DELETE FROM access_link_tokens WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM users WHERE phone_number LIKE '+5541${RUN}%';`,
     );
   } finally {

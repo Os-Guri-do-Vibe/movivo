@@ -166,16 +166,9 @@ export class ProtocolRepository {
     return rows.length > 0;
   }
 
-  /**
-   * Leitura read-only por token da página pública (US-2.6). O `token` É o `protocolId`
-   * (UUID v4 não-enumerável) — o próprio segredo; o cliente **nunca** manda `user_id`
-   * (IDOR-safe, herdado da US-1.1). Roda sob `runAsSystem` (a página não tem titular
-   * autenticado, ADR-006) e só expõe protocolo `ACTIVE` (que só nasce `AUTO_APPROVED` e
-   * assinado — Worker US-2.4); qualquer outro estado ou id inexistente → `null` (o
-   * controller vira 404 sem vazar dado). A projeção **omite `user_id`** de propósito.
-   */
-  async findByToken(protocolId: string): Promise<ProtocolRead | null> {
-    const rows = await this.db.runAsSystem((tx) =>
+  /** ID de recurso já autorizado pelo AccessLinkService; leitura ainda isolada pelo titular. */
+  async findById(userId: string, protocolId: string): Promise<ProtocolRead | null> {
+    const rows = await this.db.runAsUser(userId, 'USER', (tx) =>
       tx
         .select({
           content: protocols.content,
@@ -191,7 +184,13 @@ export class ProtocolRepository {
           endDate: protocols.endDate,
         })
         .from(protocols)
-        .where(and(eq(protocols.id, protocolId), eq(protocols.status, 'ACTIVE')))
+        .where(
+          and(
+            eq(protocols.id, protocolId),
+            eq(protocols.userId, userId),
+            eq(protocols.status, 'ACTIVE'),
+          ),
+        )
         .limit(1),
     );
     const row = rows[0];
@@ -212,16 +211,21 @@ export class ProtocolRepository {
   }
 
   /**
-   * Bytes do PDF assinado, mesma fronteira IDOR-safe de `findByToken` (token = id,
-   * `runAsSystem`, só `ACTIVE`). `null` se o protocolo não existe/não está ativo OU se
+   * Bytes do PDF assinado, mesma fronteira isolada por titular de `findById` (só `ACTIVE`). `null` se o protocolo não existe/não está ativo OU se
    * ainda não tem PDF gerado (protocolo `AUTO_APPROVED` sem passagem pela assinatura CREF).
    */
-  async findPdfByToken(protocolId: string): Promise<Buffer | null> {
-    const rows = await this.db.runAsSystem((tx) =>
+  async findPdfById(userId: string, protocolId: string): Promise<Buffer | null> {
+    const rows = await this.db.runAsUser(userId, 'USER', (tx) =>
       tx
         .select({ pdfContent: protocols.pdfContent })
         .from(protocols)
-        .where(and(eq(protocols.id, protocolId), eq(protocols.status, 'ACTIVE')))
+        .where(
+          and(
+            eq(protocols.id, protocolId),
+            eq(protocols.userId, userId),
+            eq(protocols.status, 'ACTIVE'),
+          ),
+        )
         .limit(1),
     );
     return rows[0]?.pdfContent ?? null;

@@ -12,7 +12,7 @@
 #     fala com a origem pelo registro A). Postgres, Redis, PgBouncer e
 #     EvolutionAPI só existem na rede interna `movivo-net`.
 #   · Segredos vêm de /opt/movivo/secrets (gerados NA VPS por
-#     gen-prod-secrets.sh — nunca os do dev, exceto chaves de API externas).
+#     gen-prod-secrets.sh — nunca os do dev; chaves externas são provisionadas separadamente).
 #   · API e web são imagens versionadas (tag = SHA curto do commit), nunca build
 #     local. `MOVIVO_VERSION` vem do .env que o deploy grava ao lado deste arquivo.
 #   · A migração é um serviço one-shot (profile `migrate`): o deploy roda
@@ -329,8 +329,11 @@ services:
       MIGRATION_DATABASE_PORT: '5432'
       MIGRATION_DATABASE_USER: movivo_migrator
       MIGRATION_DATABASE_PASSWORD_FILE: /run/secrets/postgres_migrator_password
+      # Somente runtime: migração criptografa destinos de links já existentes.
+      PGCRYPTO_KEY_FILE: /run/secrets/pgcrypto_key
     secrets:
       - postgres_migrator_password
+      - pgcrypto_key
     command: ['node', '--enable-source-maps', 'dist/core/database/migrate.js']
 
   api:
@@ -359,7 +362,6 @@ services:
       - openai_api_key
       - anthropic_api_key
       - groq_api_key
-      - ararahq_api_key
     volumes:
       # Fotos de perfil (AVATAR_UPLOAD_DIR=./uploads/avatars, cwd /app/apps/api).
       # Dono uid 1000 no host = usuário `node` da imagem.
@@ -392,6 +394,9 @@ services:
     <<: *common
     image: nginx:1.30.5-alpine
     container_name: movivo-nginx
+    entrypoint: ['/bin/sh', '/opt/movivo-logging/start-safe.sh']
+    tmpfs:
+      - /run/movivo-logs:rw,noexec,nosuid,size=1m,mode=0700
     depends_on:
       - api
       - web
@@ -402,8 +407,13 @@ services:
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/certs:/etc/nginx/certs:ro
+      - ./infra/nginx:/opt/movivo-logging:ro
     healthcheck:
-      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8080/nginx-health || exit 1']
+      test:
+        [
+          'CMD-SHELL',
+          'kill -0 $$(cat /run/movivo-logs/collector.pid) && wget -q -O /dev/null http://127.0.0.1:8080/nginx-health || exit 1',
+        ]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -433,8 +443,8 @@ volumes:
     name: movivo-evolution-instances
 
 # Arquivos em /opt/movivo/secrets (dono deploy, diretório 700). Os internos são
-# gerados por gen-prod-secrets.sh; as chaves de API externas são copiadas do
-# dev pelo deploy.sh. Todo secret declarado aqui PRECISA existir (o Compose
+# gerados por gen-prod-secrets.sh; chaves de API externas são provisionadas
+# em produção ou fornecidas por PRODUCTION_SECRETS_DIR explícito. Todo secret declarado aqui PRECISA existir (o Compose
 # recusa subir com arquivo ausente).
 secrets:
   postgres_superuser_password: { file: ./secrets/postgres_superuser_password }
@@ -454,4 +464,3 @@ secrets:
   openai_api_key: { file: ./secrets/openai_api_key }
   anthropic_api_key: { file: ./secrets/anthropic_api_key }
   groq_api_key: { file: ./secrets/groq_api_key }
-  ararahq_api_key: { file: ./secrets/ararahq_api_key }
