@@ -59,10 +59,7 @@ function headerValue(request: IncomingMessage, name: string): string | undefined
           },
           hooks: {
             logMethod(args, method) {
-              method.apply(
-                this,
-                args.map((arg) => redactObject(arg)) as typeof args,
-              );
+              method.apply(this, args.map((arg) => redactObject(arg)) as typeof args);
             },
           },
           genReqId: (request: IncomingMessage, response: ServerResponse): string => {
