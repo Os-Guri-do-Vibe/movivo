@@ -61,7 +61,7 @@ function headerValue(request: IncomingMessage, name: string): string | undefined
             logMethod(args, method) {
               method.apply(
                 this,
-                args.map((arg) => (typeof arg === 'string' ? redactPii(arg) : arg)) as typeof args,
+                args.map((arg) => redactObject(arg)) as typeof args,
               );
             },
           },

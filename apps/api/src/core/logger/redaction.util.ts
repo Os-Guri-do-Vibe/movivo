@@ -143,7 +143,10 @@ const CPF_PATTERN = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g;
  * Redigir o segmento em todos os endpoints públicos, não só na anamnese.
  */
 const ACCESS_TOKEN_PATTERN =
-  /(\/(?:anamnesis\/session|protocols?\/by-token|protocol-renewal\/session|checkin\/session|subscription(?:\/checkout)?|short-links|protocolo|mesociclo|assinar|conta|cancelar|checkout|check-in|checkin-semanal|renovacao|renovacao-protocolo|semana)\/)[^/?\s"']+/g;
+  /(\/(?:anamnesis\/session|protocols?\/by-token|protocol-renewal\/session|checkin\/session|subscription(?:\/(?:checkout|cancel|pause|resume))?|short-links|protocolo|mesociclo|assinar|conta|cancelar|checkout|check-in|checkin-semanal|renovacao|renovacao-protocolo|semana)\/)[^/?\s"']+/g;
+
+const CREDENTIAL_PATTERN =
+  /\bsk-[A-Za-z0-9_-]{16,}|\bgsk_[A-Za-z0-9_-]{16,}|\$aact_[A-Za-z0-9_$+./:=_-]{16,}|\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/gi;
 
 /**
  * Remove PII de uma string livre. Aplicar antes de logar qualquer texto de origem
@@ -151,6 +154,7 @@ const ACCESS_TOKEN_PATTERN =
  */
 export function redactPii(input: string): string {
   return input
+    .replace(CREDENTIAL_PATTERN, REDACTED)
     .replace(ACCESS_TOKEN_PATTERN, `$1${REDACTED}`)
     .replace(EMAIL_PATTERN, REDACTED)
     .replace(CPF_PATTERN, REDACTED)
@@ -176,10 +180,12 @@ export function redactObject(value: unknown, depth = 0): unknown {
   }
   if (Array.isArray(value)) return value.map((item) => redactObject(item, depth + 1));
 
-  const sensitive = new Set<string>(PII_FIELDS);
+  const sensitive = new Set(PII_FIELDS.map((key) => key.replace(/[_-]/g, '').toLowerCase()));
   const out: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    out[key] = sensitive.has(key) ? REDACTED : redactObject(item, depth + 1);
+    out[key] = sensitive.has(key.replace(/[_-]/g, '').toLowerCase())
+      ? REDACTED
+      : redactObject(item, depth + 1);
   }
   return out;
 }
