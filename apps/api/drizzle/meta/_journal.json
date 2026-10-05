@@ -456,6 +456,20 @@
       "when": 1790804910234,
       "tag": "0064_otimiza_indices_consultas",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1791239585382,
+      "tag": "0065_daffy_miss_america",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1791239822246,
+      "tag": "0066_lively_marauders",
+      "breakpoints": true
     }
   ]
 }

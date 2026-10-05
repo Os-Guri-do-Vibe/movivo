@@ -66,6 +66,7 @@ describe('buildRlsPoliciesSql', () => {
       'workout_sessions',
       'workout_set_entries',
       'workout_access_tokens',
+      'access_link_tokens',
       'workout_insights',
       'user_status_transitions',
       // US-8.5 — liquidacao recebida do gateway, dado financeiro do titular.

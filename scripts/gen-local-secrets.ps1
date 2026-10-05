@@ -180,9 +180,9 @@ if ($git) {
 
 # Chaves de terceiros (colocadas a mao). A API roda no container com
 # NODE_ENV=production, como na VPS: sem a chave da OpenAI e a do Asaas ela recusa
-# subir, e o Compose exige que os demais arquivos existam. Sao as mesmas que o
-# infra/vps/deploy.sh copia para a VPS.
-$missingExternal = @('asaas_api_key', 'openai_api_key', 'deepseek_api_key', 'anthropic_api_key', 'groq_api_key', 'ararahq_api_key') | Where-Object {
+# subir, e o Compose exige que os demais arquivos existam. Use credenciais exclusivas de desenvolvimento;
+# produção tem provisionamento separado.
+$missingExternal = @('asaas_api_key', 'openai_api_key', 'deepseek_api_key', 'anthropic_api_key', 'groq_api_key') | Where-Object {
   $path = Join-Path $SecretsDir $_
   (-not (Test-Path -LiteralPath $path)) -or ((Get-Item -LiteralPath $path).Length -eq 0)
 }

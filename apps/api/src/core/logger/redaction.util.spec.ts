@@ -20,6 +20,28 @@ describe('maskPhone', () => {
 });
 
 describe('redactPii', () => {
+  it('redige tokens bearer e códigos de links públicos em todos os paths compartilhados', () => {
+    const paths = [
+      'protocolo',
+      'protocol/by-token',
+      'protocols/by-token',
+      'assinar',
+      'conta',
+      'checkout',
+      'check-in',
+      'semana',
+      'cancelar',
+      'short-links',
+      'checkin/session',
+      'protocol-renewal/session',
+      'subscription/checkout',
+      'subscription',
+      'anamnesis/session',
+    ];
+    for (const path of paths) {
+      expect(redactPii(`/api/v1/${path}/secret-token/pdf`)).toBe(`/api/v1/${path}/${REDACTED}/pdf`);
+    }
+  });
   it('redige e-mail', () => {
     expect(redactPii('falha ao enviar para joao.silva@exemplo.com.br')).not.toContain('joao.silva');
   });
@@ -84,7 +106,22 @@ describe('REDACT_PATHS (redação estrutural do pino)', () => {
     expect(JSON.stringify(record)).not.toContain('4111111111111111');
   });
 
+  it('redige credenciais de provedores e configuração de runtime', () => {
+    expect(REDACT_PATHS).toContain('req.headers["asaas-access-token"]');
+    expect(REDACT_PATHS).toContain('req.headers.apikey');
+    const input = { OPENAI_API_KEY: 'canary', JWT_PRIVATE_KEY: 'canary', GROQ_API_KEY: 'canary' };
+    expect(JSON.stringify(redactObject(input))).not.toContain('canary');
+  });
+
   it('não contém caminhos duplicados', () => {
     expect(new Set(REDACT_PATHS).size).toBe(REDACT_PATHS.length);
   });
+});
+
+it('redige mensagem e stack de Error sem perder diagnóstico', () => {
+  const error = new Error('GET /assinar/secret-canary falhou');
+  const output = redactObject({ err: error, msg: '/protocolo/secret-canary' });
+  expect(JSON.stringify(output)).not.toContain('secret-canary');
+  expect(JSON.stringify(output)).toContain('Error');
+  expect(JSON.stringify(output)).toContain('falhou');
 });

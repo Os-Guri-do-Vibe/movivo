@@ -2,7 +2,7 @@
  * Teste de integração da LEITURA read-only do protocolo (US-2.6 / TASK-2.6.1).
  *
  * Roda contra o stack real, como a aplicação (`movivo_app` via PgBouncer 5433). Prova o
- * contrato IDOR-safe de `ProtocolRepository.findByToken` (o que o endpoint público
+ * contrato IDOR-safe de `ProtocolRepository.findById` (o que o endpoint público
  * devolve):
  *   - protocolo ACTIVE (auto-aprovado/assinado) → DTO **sem `userId`/PII**;
  *   - protocolo não-ACTIVE (PENDING_SIGNATURE) → null (o controller vira 404);
@@ -141,7 +141,7 @@ describe('LEITURA read-only do protocolo (US-2.6)', () => {
     const userId = await createUser();
     const { protocolId } = await repo.persist(persistInput(userId, true));
 
-    const dto = await repo.findByToken(protocolId);
+    const dto = await repo.findById(userId, protocolId);
     if (!dto) throw new Error('esperava DTO do protocolo ACTIVE');
     expect(Object.keys(dto)).not.toContain('userId');
     expect(JSON.stringify(dto)).not.toContain(userId);
@@ -156,10 +156,12 @@ describe('LEITURA read-only do protocolo (US-2.6)', () => {
     const userId = await createUser();
     const { protocolId } = await repo.persist(persistInput(userId, false));
 
-    expect(await repo.findByToken(protocolId)).toBeNull();
+    expect(await repo.findById(userId, protocolId)).toBeNull();
   });
 
   it('UUID inexistente → null (não vaza existência)', async () => {
-    expect(await repo.findByToken('99999999-9999-4999-8999-999999999999')).toBeNull();
+    expect(
+      await repo.findById(await createUser(), '99999999-9999-4999-8999-999999999999'),
+    ).toBeNull();
   });
 });

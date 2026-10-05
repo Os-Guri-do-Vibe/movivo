@@ -16,6 +16,17 @@ secrets
 **/.env
 **/.env.*
 
+# Material privado e credenciais auxiliares, inclusive em apps/ e packages/.
+**/*.key
+**/*.pem
+**/*.p12
+**/*.pfx
+**/*.jks
+**/*.keystore
+**/userlist.txt
+**/*kubeconfig
+**/gha-creds-*.json
+
 # Dados de runtime (fotos de usuário) — não é código
 apps/api/uploads
 

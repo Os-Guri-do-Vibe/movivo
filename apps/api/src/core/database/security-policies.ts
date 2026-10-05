@@ -129,6 +129,7 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   { table: 'workout_sessions', column: 'user_id', professional: 'read' },
   { table: 'workout_set_entries', column: 'user_id', professional: 'read' },
   { table: 'workout_access_tokens', column: 'user_id' },
+  { table: 'access_link_tokens', column: 'user_id' },
   { table: 'workout_insights', column: 'user_id', professional: 'read' },
   // Sprint 8 (US-8.3): sequência de marcos do ciclo de vida do titular. Append-only
   // (ver `buildStatusTransitionsImmutabilitySql`) e sob a mesma FORCE RLS por titular.

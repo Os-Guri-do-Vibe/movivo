@@ -91,6 +91,14 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      - name: Gate de logs seguros do Nginx
+        run: |
+          python3 scripts/verify-nginx-logs.py
+          python3 scripts/verify-provider-secret-update.py
+
+      - name: Gate de isolamento de secrets no build web
+        run: node scripts/build-web.test.mjs
+
       - name: Build (api, web, shared)
         run: pnpm run build
 

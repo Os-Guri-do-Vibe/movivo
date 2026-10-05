@@ -12,7 +12,7 @@
 #   1. bash scripts/gen-local-secrets.sh            (ou o .ps1 no Windows)
 #   2. cp .env.example .env
 #   3. colocar em secrets/ as chaves de terceiros (asaas, openai, deepseek,
-#      anthropic, groq, ararahq — as mesmas que o deploy copia para a VPS)
+#      anthropic, groq — exclusivas de desenvolvimento)
 #   4. pnpm run infra:up          (equivalente: make up)
 #
 #   O `up` constrói as imagens da API e do web a partir dos MESMOS Dockerfiles da
@@ -361,12 +361,8 @@ services:
           memory: 32M
 
   # ===========================================================================
-  # EvolutionAPI — ferramenta INTERNA de teste do fluxo de WhatsApp (painel
-  # "Sistema → Integração"), enquanto a criação de templates da AraraHQ está
-  # bloqueada. Conecta via protocolo não-oficial (QR Code/Baileys) — NUNCA é o
-  # canal de produção dos usuários finais, que continua 100% AraraHQ. Isolada em
-  # Postgres próprio: o `movivo` (RLS forçada, roles restritas — ver
-  # infra/postgres/init/02-roles.sh) não é o lugar de um schema de terceiro.
+  # EvolutionAPI — transporte WhatsApp configurado para esta instalação.
+  # Banco próprio isolado do schema MOVIVO (RLS forçada e roles restritas).
   # ===========================================================================
   evolution-postgres:
     <<: *common
@@ -503,8 +499,11 @@ services:
       MIGRATION_DATABASE_PORT: '5432'
       MIGRATION_DATABASE_USER: ${POSTGRES_MIGRATOR_USER:-movivo_migrator}
       MIGRATION_DATABASE_PASSWORD_FILE: /run/secrets/postgres_migrator_password
+      # Somente runtime: migração criptografa destinos de links já existentes.
+      PGCRYPTO_KEY_FILE: /run/secrets/pgcrypto_key
     secrets:
       - postgres_migrator_password
+      - pgcrypto_key
     command: ['node', '--enable-source-maps', 'dist/core/database/migrate.js']
 
   api:
@@ -552,7 +551,6 @@ services:
       - openai_api_key
       - anthropic_api_key
       - groq_api_key
-      - ararahq_api_key
     volumes:
       # Fotos de perfil (AVATAR_UPLOAD_DIR=./uploads/avatars, cwd /app/apps/api).
       # É o mesmo diretório que a API usa quando roda no host — as fotos já

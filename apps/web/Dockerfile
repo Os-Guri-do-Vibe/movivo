@@ -42,6 +42,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 COPY packages/shared packages/shared
 COPY apps/web apps/web
 COPY docs/juridico docs/juridico
+COPY scripts/build-web.mjs scripts/build-web.mjs
 
 ARG NEXT_PUBLIC_APP_ENV=production
 ARG NEXT_PUBLIC_SITE_URL=https://movivo.com.br
@@ -63,6 +64,9 @@ RUN pnpm --filter @movivo/shared run build \
 
 # -----------------------------------------------------------------------------
 FROM node:${NODE_VERSION}-bookworm-slim AS runtime
+ARG MOVIVO_REVISION=unknown
+LABEL org.opencontainers.image.source="https://github.com/Os-Guri-do-Vibe/movivo" \
+      org.opencontainers.image.revision="${MOVIVO_REVISION}"
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     TZ=America/Sao_Paulo \

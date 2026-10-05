@@ -1,15 +1,4 @@
-/**
- * Ações self-service de assinatura (US-4.5) — cancelar / pausar / retomar.
- *
- * Não-autenticado por token (ADR-006), mesmo padrão do `ProtocolController` (US-2.6): rota
- * pública com `ThrottlerGuard`, token no PATH, `Referrer-Policy: no-referrer` para o token não
- * vazar no `Referer`. IDOR-safe: o token É o `userId` (UUID v4 não-enumerável); o cliente
- * **nunca** manda um `user_id` arbitrário e as ações rodam sob `runAsUser(userId)` (RLS). Token
- * não-UUID ou sem assinatura → 404 uniforme. ponytail: token de portal dedicado (rotativo)
- * seria mais forte que reusar o `userId` — mesma nota da US-2.6.
- *
- * Sem fricção artificial (anti-dark-pattern, guardrail 6): as três ações são simétricas e diretas.
- */
+/** Portal e checkout validam credenciais opacas revogáveis no banco, nunca IDs de titulares. */
 import {
   Body,
   Controller,
@@ -29,7 +18,6 @@ import {
   checkoutPaymentResultSchema,
   checkoutSummarySchema,
   subscriptionViewSchema,
-  uuidSchema,
   type CheckoutPaymentResult,
   type CheckoutSummary,
   type SubscriptionView,
@@ -37,6 +25,7 @@ import {
 import type { Request } from 'express';
 
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
+import { AccessLinkService } from '../../core/database/access-link.service';
 import { CheckoutTokenService } from './checkout-token.service';
 import { SUBSCRIPTION_TERMS_VERSION } from './subscription-model';
 import { SubscriptionService } from './subscription.service';
@@ -46,8 +35,7 @@ const PUBLISHED_SUBSCRIPTION_TERMS_VERSION: string | null = null;
 
 const TOKEN_PARAM = {
   name: 'token',
-  description:
-    'UUID v4 do titular (o próprio `userId`, não-enumerável) — é o token de acesso ao portal de assinatura.',
+  description: 'Credencial opaca, expirável e revogável do portal de assinatura.',
 } as const;
 
 @ApiTags('Assinatura')
@@ -57,6 +45,7 @@ export class SubscriptionController {
   constructor(
     private readonly subs: SubscriptionService,
     private readonly checkoutTokens: CheckoutTokenService,
+    private readonly accessLinks: AccessLinkService,
   ) {}
 
   /** Estado do portal de gestão (US-4.6) — sem PII/dado de cartão. Sem assinatura → 404. */
@@ -72,9 +61,12 @@ export class SubscriptionController {
     description: 'Estado da assinatura.',
     schema: zodSchemaToOpenApi(subscriptionViewSchema),
   })
-  @ApiResponse({ status: 404, description: 'Token não é UUID ou titular sem assinatura.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Token inválido, expirado, revogado ou titular sem assinatura.',
+  })
   async view(@Param('token') token: string): Promise<SubscriptionView> {
-    const view = await this.subs.getView(this.userId(token));
+    const view = await this.subs.getView(await this.userId(token));
     if (!view) throw new NotFoundException();
     return view;
   }
@@ -90,7 +82,7 @@ export class SubscriptionController {
   @ApiResponse({ status: 200, schema: zodSchemaToOpenApi(checkoutSummarySchema) })
   @ApiResponse({ status: 404, description: 'Token inválido, adulterado ou expirado.' })
   async checkoutSummary(@Param('token') token: string): Promise<CheckoutSummary> {
-    const verified = this.checkoutToken(token);
+    const verified = await this.checkoutToken(token);
     const summary = await this.subs.getCheckoutSummary(verified.userId, verified.expiresAt);
     if (!summary) throw new NotFoundException();
     return summary;
@@ -116,7 +108,7 @@ export class SubscriptionController {
     @Body() body: unknown,
     @Req() req: Request,
   ): Promise<CheckoutPaymentResult> {
-    const { userId } = this.checkoutToken(token);
+    const { userId } = await this.checkoutToken(token);
     const input = createCheckoutSchema.parse(body);
     // ponytail: após aprovação jurídica, preencher a versão publicada com o texto
     // integral exibido no checkout e atualizar SUBSCRIPTION_TERMS_VERSION no mesmo PR.
@@ -140,9 +132,12 @@ export class SubscriptionController {
     schema: { type: 'object', properties: { reason: { type: 'string', maxLength: 500 } } },
   })
   @ApiResponse({ status: 200, description: 'Assinatura cancelada — retorna o novo status.' })
-  @ApiResponse({ status: 404, description: 'Token não é UUID ou titular sem assinatura.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Token inválido, expirado, revogado ou titular sem assinatura.',
+  })
   async cancel(@Param('token') token: string, @Body() body: unknown): Promise<{ status: string }> {
-    const userId = this.userId(token);
+    const userId = await this.userId(token);
     const reason = extractReason(body);
     return this.ensureFound(await this.subs.cancel(userId, reason));
   }
@@ -152,9 +147,12 @@ export class SubscriptionController {
   @ApiOperation({ summary: 'Pausa a assinatura' })
   @ApiParam(TOKEN_PARAM)
   @ApiResponse({ status: 200, description: 'Assinatura pausada — retorna o novo status.' })
-  @ApiResponse({ status: 404, description: 'Token não é UUID ou titular sem assinatura.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Token inválido, expirado, revogado ou titular sem assinatura.',
+  })
   async pause(@Param('token') token: string): Promise<{ status: string }> {
-    return this.ensureFound(await this.subs.pause(this.userId(token)));
+    return this.ensureFound(await this.subs.pause(await this.userId(token)));
   }
 
   @Post(':token/resume')
@@ -162,19 +160,22 @@ export class SubscriptionController {
   @ApiOperation({ summary: 'Retoma a assinatura pausada' })
   @ApiParam(TOKEN_PARAM)
   @ApiResponse({ status: 200, description: 'Assinatura retomada — retorna o novo status.' })
-  @ApiResponse({ status: 404, description: 'Token não é UUID ou titular sem assinatura.' })
+  @ApiResponse({
+    status: 404,
+    description: 'Token inválido, expirado, revogado ou titular sem assinatura.',
+  })
   async resume(@Param('token') token: string): Promise<{ status: string }> {
-    return this.ensureFound(await this.subs.resume(this.userId(token)));
+    return this.ensureFound(await this.subs.resume(await this.userId(token)));
   }
 
-  /** O token do portal É o `userId` (UUID). Não-UUID → 404 (não vaza existência). */
-  private userId(token: string): string {
-    if (!uuidSchema.safeParse(token).success) throw new NotFoundException();
-    return token;
+  private async userId(token: string): Promise<string> {
+    const verified = await this.accessLinks.verify(token, 'SUBSCRIPTION_PORTAL');
+    if (!verified) throw new NotFoundException();
+    return verified.userId;
   }
 
-  private checkoutToken(token: string): { userId: string; expiresAt: number } {
-    const verified = this.checkoutTokens.verify(token);
+  private async checkoutToken(token: string): Promise<{ userId: string; expiresAt: number }> {
+    const verified = await this.checkoutTokens.verify(token);
     if (!verified) throw new NotFoundException();
     return verified;
   }

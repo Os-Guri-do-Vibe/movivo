@@ -17,7 +17,7 @@ import { LoggerModule as PinoLoggerModule } from 'nestjs-pino';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { AppConfigService } from '../config';
-import { REDACT_PATHS, REDACTED, redactPii } from './redaction.util';
+import { REDACT_PATHS, REDACTED, redactObject, redactPii } from './redaction.util';
 
 export const CORRELATION_ID_HEADER = 'x-correlation-id';
 const REQUEST_ID_HEADER = 'x-request-id';
@@ -50,7 +50,21 @@ function headerValue(request: IncomingMessage, name: string): string | undefined
           base: { service: 'movivo-api', env: config.appEnv },
           // Redação estrutural: o pino substitui o valor ANTES de serializar, então o
           // valor em claro nunca chega ao buffer de saída nem ao transport.
-          redact: config.redactPii ? { paths: [...REDACT_PATHS], censor: REDACTED } : undefined,
+          redact: { paths: [...REDACT_PATHS], censor: REDACTED },
+          // Redigir também texto livre e erros antes de qualquer transport, inclusive
+          // quando LOG_REDACT_PII=false: credenciais não são uma opção de debug.
+          formatters: {
+            log: (record: Record<string, unknown>) =>
+              redactObject(record) as Record<string, unknown>,
+          },
+          hooks: {
+            logMethod(args, method) {
+              method.apply(
+                this,
+                args.map((arg) => (typeof arg === 'string' ? redactPii(arg) : arg)) as typeof args,
+              );
+            },
+          },
           genReqId: (request: IncomingMessage, response: ServerResponse): string => {
             const incoming =
               headerValue(request, CORRELATION_ID_HEADER) ??
