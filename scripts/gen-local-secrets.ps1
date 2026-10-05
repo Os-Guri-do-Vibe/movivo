@@ -15,6 +15,7 @@
     evolution_postgres_password   senha do Postgres dedicado da EvolutionAPI
     evolution_api_key             AUTHENTICATION_API_KEY da EvolutionAPI
     evolution_webhook_token       token do webhook de ENTRADA da EvolutionAPI (US-3.1-EVO)
+    asaas_webhook_secret          token do webhook do Asaas (Sandbox)
     jwt_private_key/jwt_public_key  par RS256 do JWT (Sprint 1 / US-1.4)
     pgbouncer_userlist.txt        auth_file do PgBouncer, derivado das senhas acima
 
@@ -122,6 +123,7 @@ Write-Secret -Name 'evolution_api_key'           -Value (New-RandomToken 40)
 # instancia no proprio corpo, entao reusa-lo como autenticacao de entrada seria
 # autenticar com um valor publico. 48 chars > o minimo de 43 do env.schema.
 Write-Secret -Name 'evolution_webhook_token'     -Value (New-RandomToken 48)
+Write-Secret -Name 'asaas_webhook_secret'        -Value (New-RandomToken 48)
 
 # Par de chaves RS256 do JWT (US-1.4). Gerado via openssl (vem com o Git for
 # Windows). O PowerShell 5.1 nao exporta PKCS#8/SPKI PEM de forma simples, entao
@@ -176,11 +178,24 @@ if ($git) {
   }
 }
 
+# Chaves de terceiros (colocadas a mao). A API roda no container com
+# NODE_ENV=production, como na VPS: sem a chave da OpenAI e a do Asaas ela recusa
+# subir, e o Compose exige que os demais arquivos existam. Sao as mesmas que o
+# infra/vps/deploy.sh copia para a VPS.
+$missingExternal = @('asaas_api_key', 'openai_api_key', 'deepseek_api_key', 'anthropic_api_key', 'groq_api_key', 'ararahq_api_key') | Where-Object {
+  $path = Join-Path $SecretsDir $_
+  (-not (Test-Path -LiteralPath $path)) -or ((Get-Item -LiteralPath $path).Length -eq 0)
+}
+if ($missingExternal) {
+  Write-Output ("  ! chaves de terceiros ainda ausentes em secrets/: {0}" -f ($missingExternal -join ' '))
+  Write-Output "    (cole cada valor no arquivo de mesmo nome; o 'docker compose up' so sobe com todos)"
+}
+
 Write-Output ''
 Write-Output 'Pronto. Proximos passos:'
 Write-Output '  1. copy .env.example .env                       (raiz, perfil do Docker Compose)'
-Write-Output '  2. copy apps\api\.env.example apps\api\.env     (API rodando no host)'
-Write-Output '  3. copy apps\web\.env.example apps\web\.env.local'
-Write-Output '  4. docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d   (US-0.2)'
+Write-Output '  2. pnpm run infra:up                            (sobe dados + migracao + API + web em Docker)'
+Write-Output '  3. (opcional) copy apps\api\.env.example apps\api\.env e apps\web\.env.example'
+Write-Output '     apps\web\.env.local: so para rodar API/web no host com hot reload (pnpm dev)'
 Write-Output ''
 Write-Output 'Nunca imprima, cole em chat/issue nem commite o conteudo de secrets/.'

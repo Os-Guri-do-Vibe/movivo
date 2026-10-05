@@ -177,7 +177,7 @@ especificação normativa que o `ConfigModule` implementa está em
 
 ---
 
-## Ambiente local de dados (Docker Compose)
+## Ambiente local (Docker Compose) — dados + aplicação, espelho da produção
 
 > Dono: Henrique (US-0.2). Definido em [`docker-compose.yml`](docker-compose.yml) +
 > [`docker-compose.secrets.yml`](docker-compose.secrets.yml) (puxado por `include:`)
@@ -187,9 +187,27 @@ especificação normativa que o `ConfigModule` implementa está em
 ### Subir tudo
 
 ```bash
-pnpm run infra:up      # sobe e BLOQUEIA até 100% dos serviços ficarem healthy
+pnpm run infra:up      # constrói e sobe TUDO; BLOQUEIA até 100% ficar healthy
 pnpm run infra:verify  # roda o checklist completo de sanidade e segurança
 ```
+
+O `infra:up` sobe os mesmos containers da VPS (`infra/vps/docker-compose.prod.yml`):
+dados, **migração** (one-shot), **API** e **web**, estes dois construídos dos mesmos
+Dockerfiles da produção (`NODE_ENV=production`, usuário não-root). Web em
+http://localhost:3000 e API em http://localhost:3001/api/v1. A API lê o **mesmo**
+`infra/vps/api.env` da VPS; só as URLs mudam (bloco `environment:` do serviço `api`).
+
+- **Pré-requisito extra:** as chaves de terceiros em `secrets/` (`asaas_api_key`,
+  `openai_api_key`, `deepseek_api_key`, `anthropic_api_key`, `groq_api_key`,
+  `ararahq_api_key`), as mesmas que o `deploy.sh` copia para a VPS. Com
+  `NODE_ENV=production` a API recusa subir sem OpenAI e sem Asaas (Sandbox).
+- **Mudou código?** Rode `pnpm run infra:up` de novo (reconstrói só o que mudou).
+  `pnpm run infra:rebuild` refaz as imagens sem cache.
+- **Sem Nginx/TLS/Cloudflare:** o browser fala direto com web e API em
+  `http://localhost`. É a única diferença estrutural em relação à VPS.
+- **Hot reload (`pnpm dev`):** pare os containers da aplicação (`docker compose stop api web`)
+  ou deixe `COMPOSE_PROFILES=` vazio no `.env` para subir só os dados.
+  O CI faz o segundo (job de integração).
 
 Quem tem `make` (Linux/macOS/WSL) pode usar `make up` / `make verify` — os alvos
 do [`Makefile`](Makefile) são equivalentes 1:1. No Windows, use os scripts pnpm.
@@ -271,7 +289,8 @@ devolve o endereço anunciado, que é o hostname do serviço (`redis-master:6379
 
 | Comando                     | Equivalente `make` | O que faz                                                         |
 | --------------------------- | ------------------ | ----------------------------------------------------------------- |
-| `pnpm run infra:up`         | `make up`          | Sobe e espera todos ficarem `healthy`                             |
+| `pnpm run infra:up`         | `make up`          | Constrói, sobe (dados + API + web) e espera `healthy`             |
+| `pnpm run infra:rebuild`    | —                  | Refaz as imagens da API e do web sem cache e sobe                 |
 | `pnpm run infra:down`       | `make down`        | Derruba containers e rede — **volumes preservados**               |
 | `pnpm run infra:ps`         | `make ps`          | Estado e health de cada serviço                                   |
 | `pnpm run infra:logs`       | `make logs`        | Segue os logs                                                     |
@@ -345,7 +364,13 @@ src/
 ### Rodar localmente
 
 ```bash
-pnpm run infra:up                      # stack de dados (uma vez)
+pnpm run infra:up                      # dados + API + web em Docker (http://localhost:3001/api/v1)
+```
+
+Para desenvolver com hot reload, rode a API no host (a porta 3001 precisa estar livre):
+
+```bash
+docker compose stop api web            # libera 3000/3001 (os dados continuam no ar)
 cp apps/api/.env.example apps/api/.env # perfil de quem roda a API no host
 pnpm --filter @movivo/api run dev      # http://localhost:3001/api/v1
 ```

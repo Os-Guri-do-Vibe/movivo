@@ -18,6 +18,7 @@
 #   postgres_migrator_password    senha da role movivo_migrator (migrações)
 #   redis_password                requirepass do Redis master/replica/sentinel
 #   pgcrypto_key                  chave de criptografia de dados de saúde (Sprint 1)
+#   asaas_webhook_secret          token do webhook do Asaas (Sandbox)
 #   jwt_private_key/jwt_public_key  par RS256 do JWT (Sprint 1 / US-1.4)
 #   pgbouncer_userlist.txt        auth_file do PgBouncer, derivado das senhas acima
 #
@@ -113,6 +114,7 @@ write_secret "evolution_api_key"           "$(rand_token 40)"
 # então reusá-lo como autenticação de entrada seria autenticar com um valor público.
 # 48 chars alfanuméricos > o mínimo de 43 exigido por EVOLUTION_WEBHOOK_TOKEN no env.schema.
 write_secret "evolution_webhook_token"     "$(rand_token 48)"
+write_secret "asaas_webhook_secret"        "$(rand_token 48)"
 write_jwt_keypair
 
 # --- userlist.txt do PgBouncer ------------------------------------------------
@@ -148,13 +150,26 @@ if command -v git >/dev/null 2>&1 && git -C "$REPO_ROOT" rev-parse --git-dir >/d
   echo "  ✓ verificação: nenhum secret visível para o Git"
 fi
 
+# --- Chaves de terceiros (colocadas à mão) -------------------------------------
+# A API roda no container com NODE_ENV=production, como na VPS: sem a chave da
+# OpenAI e a do Asaas ela recusa subir, e o Compose exige que os demais arquivos
+# existam. São as mesmas que o infra/vps/deploy.sh copia para a VPS.
+missing_external=""
+for key in asaas_api_key openai_api_key deepseek_api_key anthropic_api_key groq_api_key ararahq_api_key; do
+  [ -s "${SECRETS_DIR}/${key}" ] || missing_external="${missing_external} ${key}"
+done
+if [ -n "$missing_external" ]; then
+  echo "  ! chaves de terceiros ainda ausentes em secrets/:${missing_external}"
+  echo "    (cole cada valor no arquivo de mesmo nome — o 'docker compose up' só sobe com todos)"
+fi
+
 cat <<'EOF'
 
 Pronto. Próximos passos:
   1. cp .env.example .env                       (raiz — perfil do Docker Compose)
-  2. cp apps/api/.env.example apps/api/.env     (API rodando no host)
-  3. cp apps/web/.env.example apps/web/.env.local
-  4. docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d   (US-0.2)
+  2. pnpm run infra:up                          (sobe dados + migração + API + web em Docker)
+  3. (opcional) cp apps/api/.env.example apps/api/.env e apps/web/.env.example
+     apps/web/.env.local — só para rodar API/web no host com hot reload (pnpm dev)
 
 Nunca imprima, cole em chat/issue nem commite o conteúdo de secrets/.
 EOF
