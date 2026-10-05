@@ -13,6 +13,7 @@ const jar = vi.hoisted(() => {
 
 vi.mock('@/lib/env', () => ({
   publicEnv: { apiUrl: 'http://api.test/api/v1', siteUrl: 'https://movivo.test' },
+  secureCookies: true,
 }));
 vi.mock('next/headers', () => ({
   cookies: async () => ({

@@ -139,6 +139,10 @@ jobs:
           cp apps/api/.env.example apps/api/.env
 
       - name: Subir o stack de dados (US-0.2) e aguardar healthy
+        # API e web rodam no host neste job; o profile `app` (migração + API + web em
+        # Docker, ativado no .env.example) fica de fora.
+        env:
+          COMPOSE_PROFILES: ''
         run: pnpm run infra:up
 
       - name: Aplicar migração 0000_init (role movivo_migrator)

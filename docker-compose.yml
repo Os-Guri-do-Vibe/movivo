@@ -1,5 +1,5 @@
 # =============================================================================
-# MOVIVO — Ambiente local reprodutível (camada de dados)
+# MOVIVO — Ambiente local reprodutível (dados + aplicação, espelho da produção)
 # =============================================================================
 # Dono: Henrique Matsuda (Platform Engineering / SRE) · US-0.2 · Sprint 0
 # Requisitos de origem:
@@ -11,7 +11,22 @@
 # ─── COMO SUBIR ──────────────────────────────────────────────────────────────
 #   1. bash scripts/gen-local-secrets.sh            (ou o .ps1 no Windows)
 #   2. cp .env.example .env
-#   3. pnpm run infra:up          (equivalente: make up)
+#   3. colocar em secrets/ as chaves de terceiros (asaas, openai, deepseek,
+#      anthropic, groq, ararahq — as mesmas que o deploy copia para a VPS)
+#   4. pnpm run infra:up          (equivalente: make up)
+#
+#   O `up` constrói as imagens da API e do web a partir dos MESMOS Dockerfiles da
+#   produção, migra o banco e sobe tudo: http://localhost:3000 (web) e
+#   http://localhost:3001/api/v1 (API). A API lê o MESMO `infra/vps/api.env` da
+#   VPS — só as URLs mudam (bloco `environment:` do serviço, que tem precedência).
+#   Diferenças inevitáveis em relação à produção: sem Nginx/TLS/Cloudflare (o
+#   browser fala direto com web e API em http://localhost) e portas publicadas
+#   em 127.0.0.1.
+#
+#   Hot reload: os serviços `migrate`/`api`/`web` pertencem ao profile `app`
+#   (ativado por COMPOSE_PROFILES=app no .env). Para rodar API/web no host com
+#   `pnpm dev`, pare-os (`docker compose stop api web`) ou deixe o profile vazio
+#   (COMPOSE_PROFILES= no .env) — o CI faz isso, só precisa da camada de dados.
 #
 #   O bloco top-level `secrets:` continua morando em `docker-compose.secrets.yml`
 #   (contrato da US-0.6, referenciado por docs/SECURITY.md §2.4) e é puxado pelo
@@ -24,6 +39,8 @@
 #   · Nenhum valor sensível em `environment:` — só caminhos para /run/secrets/*.
 #   · Redis em versão com o patch da CVE-2025-49844 (RediShell). Nunca rebaixar.
 #   · A aplicação fala com o Postgres SOMENTE pela 5433 (PgBouncer).
+#   · API e web rodam como na VPS: mesma imagem (Dockerfile), NODE_ENV=production,
+#     usuário não-root, segredos só por /run/secrets/*.
 #   · `movivo_app` sem BYPASSRLS e sem ownership de tabela.
 #   · Nenhuma porta publicada em 0.0.0.0 — tudo em 127.0.0.1.
 # =============================================================================
@@ -457,6 +474,131 @@ services:
           memory: 768M
         reservations:
           memory: 128M
+
+  # ===========================================================================
+  # Aplicação — espelho de infra/vps/docker-compose.prod.yml (profile `app`)
+  # ===========================================================================
+  # One-shot: aplica as migrações e reconcilia os grants de `movivo_app`, igual ao
+  # deploy da VPS (que roda `docker compose run --rm migrate` ANTES de trocar a
+  # API). Aqui a API só sobe depois que ele termina com sucesso. Único serviço que
+  # recebe a senha do `movivo_migrator`. Usa a imagem construída pelo serviço `api`.
+  migrate:
+    profiles: [app]
+    image: &api-image movivo-api:local
+    pull_policy: never
+    container_name: movivo-migrate
+    restart: 'no'
+    networks: [movivo-net]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      APP_ENV: local
+      DATABASE_NAME: ${POSTGRES_DB:-movivo}
+      DATABASE_USER: ${POSTGRES_APP_USER:-movivo_app}
+      MIGRATION_DATABASE_HOST: postgres
+      MIGRATION_DATABASE_PORT: '5432'
+      MIGRATION_DATABASE_USER: ${POSTGRES_MIGRATOR_USER:-movivo_migrator}
+      MIGRATION_DATABASE_PASSWORD_FILE: /run/secrets/postgres_migrator_password
+    secrets:
+      - postgres_migrator_password
+    command: ['node', '--enable-source-maps', 'dist/core/database/migrate.js']
+
+  api:
+    <<: *common
+    profiles: [app]
+    image: *api-image
+    # Mesmo Dockerfile e mesmo contexto (raiz do monorepo) da produção.
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: movivo-api
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      pgbouncer:
+        condition: service_healthy
+      redis-sentinel:
+        condition: service_healthy
+      evolution-api:
+        condition: service_healthy
+    # Fonte ÚNICA da configuração da API: o arquivo da VPS. Nada é duplicado aqui;
+    # o que muda no local está em `environment:` logo abaixo (precedência maior).
+    env_file: [infra/vps/api.env]
+    environment:
+      APP_ENV: local
+      LOG_LEVEL: debug
+      # Origens do browser em http://localhost (sem Nginx/TLS na frente).
+      API_CORS_ORIGINS: http://localhost:${HOST_WEB_PORT:-3000}
+      PUBLIC_SITE_URL: http://localhost:${HOST_WEB_PORT:-3000}
+      # Base pública DA API: é a URL que a EvolutionAPI (outro container) chama de
+      # volta no webhook e de onde baixa o PDF do protocolo — por isso o nome do
+      # serviço, e não localhost (que dentro do container é ele mesmo).
+      API_PUBLIC_URL: http://api:3001
+    secrets:
+      - postgres_app_password
+      - redis_password
+      - pgcrypto_key
+      - jwt_private_key
+      - jwt_public_key
+      - evolution_api_key
+      - evolution_webhook_token
+      - asaas_api_key
+      - asaas_webhook_secret
+      - deepseek_api_key
+      - openai_api_key
+      - anthropic_api_key
+      - groq_api_key
+      - ararahq_api_key
+    volumes:
+      # Fotos de perfil (AVATAR_UPLOAD_DIR=./uploads/avatars, cwd /app/apps/api).
+      # É o mesmo diretório que a API usa quando roda no host — as fotos já
+      # enviadas continuam valendo. Dado de runtime: nunca apagar em "limpeza".
+      - ./apps/api/uploads:/app/apps/api/uploads
+    ports:
+      - '127.0.0.1:${HOST_API_PORT:-3001}:3001'
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 1G
+
+  web:
+    <<: *common
+    profiles: [app]
+    image: movivo-web:local
+    # Mesmo Dockerfile da produção. NEXT_PUBLIC_* é gravado no bundle NO BUILD:
+    # aqui apontam para localhost; na VPS, para os domínios (deploy.sh).
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_APP_ENV: local
+        NEXT_PUBLIC_SITE_URL: http://localhost:${HOST_WEB_PORT:-3000}
+        NEXT_PUBLIC_API_URL: http://localhost:${HOST_API_PORT:-3001}/api/v1
+        # Vazia em dev: login e dashboard rodam no mesmo host do site.
+        NEXT_PUBLIC_ADMIN_URL: ''
+        NEXT_PUBLIC_POSTHOG_KEY: ${NEXT_PUBLIC_POSTHOG_KEY:-}
+        NEXT_PUBLIC_POSTHOG_HOST: ${NEXT_PUBLIC_POSTHOG_HOST:-https://us.i.posthog.com}
+    container_name: movivo-web
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      # BFF do dashboard fala com a API pela rede interna, como na VPS.
+      MOVIVO_API_URL: http://api:3001/api/v1
+    ports:
+      - '127.0.0.1:${HOST_WEB_PORT:-3000}:3000'
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: 512M
 
 # ─────────────────────────────────────────────────────────────────────────────
 networks:

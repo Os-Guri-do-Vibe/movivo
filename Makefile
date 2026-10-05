@@ -29,9 +29,9 @@ help:
 secrets:
 	@bash scripts/gen-local-secrets.sh
 
-## up: sobe o stack e BLOQUEIA até todos os serviços ficarem healthy
+## up: constrói e sobe o stack (dados + migração + API + web) e BLOQUEIA até ficar healthy
 up:
-	$(COMPOSE) up -d --wait --wait-timeout 300
+	$(COMPOSE) up -d --build --wait --wait-timeout 600
 	@$(MAKE) --no-print-directory ps
 
 ## down: derruba os containers e a rede (VOLUMES PRESERVADOS — os dados ficam)
