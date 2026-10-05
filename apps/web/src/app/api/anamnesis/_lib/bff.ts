@@ -6,7 +6,7 @@ import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { ANAMNESIS_REF_HEADER, SESSION_REPLACED_STATUS } from '@/lib/anamnesis-session-ref';
-import { publicEnv } from '@/lib/env';
+import { publicEnv, secureCookies } from '@/lib/env';
 
 import { trustedOrigins } from '../../_lib/trusted-origins';
 
@@ -80,7 +80,7 @@ function json(payload: unknown, status: number): NextResponse {
 async function storeToken(token: string): Promise<void> {
   (await cookies()).set(COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: secureCookies,
     sameSite: 'strict',
     path: COOKIE_PATH,
     priority: 'high',

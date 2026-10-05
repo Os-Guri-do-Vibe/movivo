@@ -10,7 +10,7 @@ import {
   type DashboardCapability,
   type DashboardRole,
 } from '@/lib/control-center-access';
-import { publicEnv } from '@/lib/env';
+import { publicEnv, secureCookies } from '@/lib/env';
 
 import { trustedOrigins } from '../../_lib/trusted-origins';
 
@@ -87,7 +87,7 @@ export function extractRefreshCookie(setCookie: string | null): string | null {
 function sessionCookieOptions(maxAge: number) {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: secureCookies,
     sameSite: 'strict' as const,
     path: '/',
     maxAge,

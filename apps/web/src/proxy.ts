@@ -28,6 +28,10 @@ const ANAMNESIS_IMAGE_ORIGIN = 'https://img.icons8.com';
 export function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
   const isDev = process.env.NODE_ENV === 'development';
+  // Build de produção servido em http://localhost (Docker local): `upgrade-insecure-requests`
+  // reescreveria até os scripts do próprio site para https e o Safari/WebKit não carregaria
+  // a página. NEXT_PUBLIC_SITE_URL é gravado no build — na VPS é https, então nada muda lá.
+  const servedOverHttp = safeOrigin(publicEnv.siteUrl)?.startsWith('http://') ?? false;
   const connectOrigins = [safeOrigin(publicEnv.apiUrl), safeOrigin(publicEnv.posthog.host)]
     .filter((origin): origin is string => origin !== null)
     .join(' ');
@@ -47,7 +51,7 @@ export function proxy(request: NextRequest) {
     "frame-ancestors 'none'",
     "manifest-src 'self'",
     "worker-src 'self' blob:",
-    ...(isDev ? [] : ['upgrade-insecure-requests']),
+    ...(isDev || servedOverHttp ? [] : ['upgrade-insecure-requests']),
   ].join('; ');
 
   const requestHeaders = new Headers(request.headers);

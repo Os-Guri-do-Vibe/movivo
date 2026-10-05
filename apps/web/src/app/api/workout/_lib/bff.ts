@@ -3,7 +3,7 @@ import 'server-only';
 import { cookies, headers as requestHeaders } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 
-import { publicEnv } from '@/lib/env';
+import { publicEnv, secureCookies } from '@/lib/env';
 
 import { trustedOrigins } from '../../_lib/trusted-origins';
 
@@ -52,7 +52,7 @@ export async function exchangeMagicToken(token: string): Promise<void> {
   }
   (await cookies()).set(COOKIE, payload.sessionToken, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: secureCookies,
     sameSite: 'strict',
     path: '/',
     maxAge: 30 * 24 * 60 * 60,
