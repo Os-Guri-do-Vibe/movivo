@@ -14,7 +14,7 @@
 # Rotação é procedimento próprio (docs/SECURITY.md), não flag de script.
 # Arquivo que já existe é mantido; só o que falta é criado.
 #
-# Chaves de API de terceiros (OpenAI, Anthropic, DeepSeek, Groq, AraraHQ, Asaas)
+# Chaves de API de terceiros (OpenAI, Anthropic, DeepSeek, Groq, Asaas Sandbox)
 # NÃO são geradas aqui — vêm do deploy.sh.
 # =============================================================================
 set -euo pipefail

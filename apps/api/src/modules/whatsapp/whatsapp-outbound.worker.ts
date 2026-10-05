@@ -1,3 +1,4 @@
+import { AccessLinkService } from '../../core/database/access-link.service';
 /**
  * WhatsappOutboundWorker (US-2.5) — processor da fila `whatsapp-outbound`.
  *
@@ -135,6 +136,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     private readonly config: AppConfigService,
     private readonly agentPersona: AgentPersonaService,
     private readonly logger: PinoLogger,
+    private readonly accessLinks: AccessLinkService,
   ) {
     this.logger.setContext(WhatsappOutboundWorker.name);
   }
@@ -387,7 +389,13 @@ export class WhatsappOutboundWorker implements OnModuleInit {
         `Protocolo ${proto.id} aprovado/assinado mas sem PDF gerado — entrega bloqueada até o PDF existir.`,
       );
     }
-    const link = `${this.config.whatsapp.publicSiteUrl}/protocolo/${proto.id}`;
+    const { token } = await this.accessLinks.issue(
+      'PROTOCOL',
+      userId,
+      proto.id,
+      120 * 24 * 60 * 60 * 1000,
+    );
+    const link = `${this.config.whatsapp.publicSiteUrl}/protocolo/${token}`;
     const persona = await this.agentPersona.persona(biologicalSex);
     const pdfUrl = `${link}/pdf`;
     const firstName = studentName?.trim().split(/\s+/)[0] ?? null;

@@ -171,6 +171,9 @@ function makeWorker(deps: Deps = {}) {
       persona: vi.fn(async () => DEFAULT_AGENT_PERSONA),
     } as never,
     logger,
+    {
+      issue: vi.fn(async () => ({ token: 'protocol-access-token', expiresAt: new Date() })),
+    } as never,
   );
   return { worker, send, sendTemplate, sendTyping, sendDocument, redis };
 }
@@ -293,7 +296,7 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
     expect(sendDocument).toHaveBeenCalledTimes(1);
     expect(redis.set).toHaveBeenCalledTimes(1);
     const [, url, caption, , fileName] = sendDocument.mock.calls[0] ?? [];
-    expect(url).toBe('https://movivo.test/protocolo/p1/pdf');
+    expect(url).toBe('https://movivo.test/protocolo/protocol-access-token/pdf');
     expect(fileName).toBe('protocolo-ana-beatriz-souza-movivo.pdf');
     expect(caption).toMatch(/^Ana, seu treino está pronto\./);
   });

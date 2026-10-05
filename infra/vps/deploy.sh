@@ -53,6 +53,8 @@ if [[ $rollback -eq 1 ]]; then
   "${SSH[@]}" "set -e; cd ${APP_DIR}
     cur=\$(sed -n 's/^MOVIVO_VERSION=//p' .env); prev=\$(sed -n 's/^MOVIVO_PREVIOUS_VERSION=//p' .env)
     [ -n \"\$prev\" ] || { echo 'não há versão anterior registrada' >&2; exit 1; }
+    capability=\$(docker image inspect ${REGISTRY}/movivo-api:\$prev --format '{{ index .Config.Labels \"br.com.movivo.security.access-links\" }}' 2>/dev/null || true)
+    [ \"\$capability\" = 'revocable-v1' ] || { echo 'rollback recusado: imagem sem acesso opaco revogável' >&2; exit 1; }
     printf 'MOVIVO_VERSION=%s\nMOVIVO_PREVIOUS_VERSION=%s\n' \"\$prev\" \"\$cur\" > .env
     docker compose up -d --wait --wait-timeout 180 api web
     echo \"api/web: \$cur → \$prev\""
@@ -63,7 +65,8 @@ version="${version:-HEAD}"
 git rev-parse --verify --quiet "${version}^{commit}" >/dev/null || die "commit ${version} não existe"
 # Exatamente 7 caracteres (= ${GITHUB_SHA::7} do workflow), mesmo se o --short
 # precisasse de mais para desambiguar.
-version="$(git rev-parse "${version}^{commit}" | cut -c1-7)"
+revision="$(git rev-parse "${version}^{commit}")"
+version="$(printf '%s' "$revision" | cut -c1-7)"
 
 # -----------------------------------------------------------------------------
 log "1/8 Configuração (versão ${version})"
@@ -73,7 +76,8 @@ mkdir -p "$stage/nginx/conf.d" "$stage/infra" "$stage/bin"
 cp infra/vps/docker-compose.prod.yml "$stage/compose.yml"
 cp infra/vps/api.env "$stage/api.env"
 cp infra/vps/nginx/conf.d/movivo.conf "$stage/nginx/conf.d/"
-cp -R infra/postgres infra/pgbouncer infra/redis "$stage/infra/"
+cp -R infra/postgres infra/pgbouncer infra/redis infra/nginx "$stage/infra/"
+cp infra/vps/update-provider-secret.sh "$stage/bin/"
 cp infra/vps/backup/movivo-backup.sh infra/vps/backup/movivo-backup.service \
    infra/vps/backup/movivo-backup.timer "$stage/bin/"
 
@@ -91,6 +95,7 @@ for cidr in $cf_v4 $cf_v6; do echo "${cidr} 1;"; done > "$stage/nginx/conf.d/clo
 # script) — no GNU tar do runner do GitHub Actions (Linux) a flag nem existe.
 mac_tar_flags=()
 [[ "$(uname -s)" == Darwin ]] && mac_tar_flags=(--no-mac-metadata)
+
 COPYFILE_DISABLE=1 tar -C "$stage" --no-xattrs "${mac_tar_flags[@]}" -cf - \
     compose.yml api.env nginx infra bin \
   | "${SSH[@]}" "set -e; cd ${APP_DIR}
@@ -103,16 +108,20 @@ COPYFILE_DISABLE=1 tar -C "$stage" --no-xattrs "${mac_tar_flags[@]}" -cf - \
 # -----------------------------------------------------------------------------
 log "2/8 Segredos"
 "${SSH[@]}" 'bash -s' < infra/vps/gen-prod-secrets.sh
-# Chaves de API de terceiros: as mesmas do dev (decisão de 2026-09-24). Copiadas
-# só se ainda não existem na VPS — trocar uma delas é editar direto na VPS.
-for key in asaas_api_key deepseek_api_key openai_api_key anthropic_api_key groq_api_key ararahq_api_key; do
+# Chaves de produção devem ser provisionadas na VPS ou fornecidas explicitamente
+# via PRODUCTION_SECRETS_DIR. Nunca copiar automaticamente credenciais de dev.
+for key in asaas_api_key deepseek_api_key openai_api_key anthropic_api_key groq_api_key; do
   if "${SSH[@]}" "test -s ${APP_DIR}/secrets/${key}"; then
     echo "  = ${key} (já na VPS)"
     continue
   fi
-  [[ -s "secrets/${key}" ]] || die "secrets/${key} não existe no Mac nem na VPS"
-  "${SSH[@]}" "umask 022; cat > ${APP_DIR}/secrets/${key}; chmod 644 ${APP_DIR}/secrets/${key}" < "secrets/${key}"
-  echo "  + ${key} (copiada do dev)"
+  [[ -n "${PRODUCTION_SECRETS_DIR:-}" ]] || die "${key} ausente na VPS: provisione credencial de produção ou defina PRODUCTION_SECRETS_DIR"
+  [[ -s "${PRODUCTION_SECRETS_DIR}/${key}" ]] || die "credencial de produção ${key} ausente na fonte explícita"
+  if [[ -f "secrets/${key}" ]] && cmp -s "secrets/${key}" "${PRODUCTION_SECRETS_DIR}/${key}"; then
+    die "${key} repete a credencial local de desenvolvimento; gere chave exclusiva de produção no fornecedor"
+  fi
+  "${SSH[@]}" "umask 022; cat > ${APP_DIR}/secrets/${key}; chmod 644 ${APP_DIR}/secrets/${key}" < "${PRODUCTION_SECRETS_DIR}/${key}"
+  echo "  + ${key} (fonte de produção explícita)"
 done
 
 # -----------------------------------------------------------------------------
@@ -127,9 +136,10 @@ web_image="${REGISTRY}/movivo-web:${version}"
 if [[ $build -eq 1 ]]; then
   [[ "$(git rev-parse HEAD | cut -c1-7)" == "$version" ]] || die "--build só constrói o HEAD"
   git archive --format=tar "$version" \
-    | "${SSH[@]}" "docker build -q -f apps/api/Dockerfile -t ${api_image} -"
+    | "${SSH[@]}" "docker build -q -f apps/api/Dockerfile --build-arg MOVIVO_REVISION=${revision} -t ${api_image} -"
   git archive --format=tar "$version" \
     | "${SSH[@]}" "docker build -q -f apps/web/Dockerfile \
+        --build-arg MOVIVO_REVISION=${revision} \
         --build-arg NEXT_PUBLIC_APP_ENV=production \
         --build-arg NEXT_PUBLIC_SITE_URL=https://movivo.com.br \
         --build-arg NEXT_PUBLIC_API_URL=https://api.movivo.com.br/api/v1 \
@@ -147,6 +157,11 @@ else
     docker image inspect ${web_image} >/dev/null 2>&1 || docker pull -q ${web_image}
     docker logout ghcr.io >/dev/null 2>&1 || true"
 fi
+
+# Uma imagem legada reabriria o acesso por IDs após a migração. Nenhum caminho
+# (deploy normal ou rollback) pode iniciar API sem a capacidade verificada.
+"${SSH[@]}" "capability=\$(docker image inspect ${api_image} --format '{{ index .Config.Labels \"br.com.movivo.security.access-links\" }}' 2>/dev/null || true)
+  [ \"\$capability\" = 'revocable-v1' ] || { echo 'deploy recusado: imagem sem acesso opaco revogável' >&2; exit 1; }"
 
 "${SSH[@]}" "set -e; cd ${APP_DIR}
   cur=\$(sed -n 's/^MOVIVO_VERSION=//p' .env 2>/dev/null || true)

@@ -1,3 +1,4 @@
+import { AccessLinkService } from '../src/core/database/access-link.service';
 /**
  * Integração do SubscriptionModule (US-4.1) contra o stack Docker.
  *
@@ -97,6 +98,7 @@ afterAll(async () => {
        DELETE FROM user_status_transitions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        ALTER TABLE user_status_transitions ENABLE TRIGGER trg_user_status_transitions_immutable;
        DELETE FROM subscriptions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
+       DELETE FROM access_link_tokens WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM users WHERE phone_number LIKE '+5541${RUN}%';`,
     );
   } finally {
@@ -258,7 +260,7 @@ describe('Ações self-service: cancelar / pausar / retomar (US-4.5)', () => {
     const userId = await createUser();
     await activate(userId);
     const cancelSpy = vi.spyOn(gateway, 'cancelContract');
-    const res = await controller.cancel(userId, { reason: 'sem tempo agora' });
+    const res = await controller.cancel(await portal(userId), { reason: 'sem tempo agora' });
     expect(res.status).toBe('CANCELED');
     expect(cancelSpy).toHaveBeenCalledWith(
       expect.objectContaining({ subscriptionId: `ext_${userId}` }),
@@ -272,10 +274,10 @@ describe('Ações self-service: cancelar / pausar / retomar (US-4.5)', () => {
   it('pausar suspende e mantém o histórico; resume retoma PAUSED→ACTIVE', async () => {
     const userId = await createUser();
     await activate(userId);
-    expect((await controller.pause(userId)).status).toBe('PAUSED');
+    expect((await controller.pause(await portal(userId))).status).toBe('PAUSED');
     expect((await svc.getForUser(userId))?.status).toBe('PAUSED');
     // histórico preservado: a linha continua lá, só muda o estado.
-    expect((await controller.resume(userId)).status).toBe('ACTIVE');
+    expect((await controller.resume(await portal(userId))).status).toBe('ACTIVE');
     expect((await svc.getForUser(userId))?.status).toBe('ACTIVE');
   });
 
@@ -289,7 +291,7 @@ describe('Ações self-service: cancelar / pausar / retomar (US-4.5)', () => {
     const userB = await createUser();
     await activate(userA);
     await activate(userB);
-    await controller.cancel(userA, { reason: 'teste' });
+    await controller.cancel(await portal(userA), { reason: 'teste' });
     expect((await svc.getForUser(userA))?.status).toBe('CANCELED');
     expect((await svc.getForUser(userB))?.status).toBe('ACTIVE'); // B intacto
   });
@@ -299,7 +301,7 @@ describe('Endpoints US-4.6: checkout e portal (view)', () => {
   it('checkout opaco devolve o snapshot persistido, sem aceitar preço do cliente', async () => {
     const userId = await createUser();
     await svc.startTrial(userId, 'QUARTERLY');
-    const { token } = checkoutTokens.issue(userId);
+    const { token } = await checkoutTokens.issue(userId);
     const res = await controller.checkoutSummary(token);
     expect(res).toMatchObject({ plan: 'QUARTERLY', monthlyCents: 7590, totalCents: 22770 });
     expect(JSON.stringify(res)).not.toContain(userId);
@@ -308,7 +310,7 @@ describe('Endpoints US-4.6: checkout e portal (view)', () => {
   it('view devolve plano/status/acesso/próxima-cobrança sem PII nem id de gateway', async () => {
     const userId = await createUser();
     await svc.startTrial(userId);
-    const view = await controller.view(userId);
+    const view = await controller.view(await portal(userId));
     expect(view.status).toBe('TRIALING');
     expect(view.access).toBe('FULL'); // trial dentro da janela
     expect(SUBSCRIPTION_PLAN_IDS).toContain(view.plan);
@@ -322,3 +324,8 @@ describe('Endpoints US-4.6: checkout e portal (view)', () => {
     await expect(controller.view(userB)).rejects.toThrow();
   });
 });
+
+async function portal(userId: string): Promise<string> {
+  return (await app.get(AccessLinkService).issue('SUBSCRIPTION_PORTAL', userId, userId, 3600000))
+    .token;
+}

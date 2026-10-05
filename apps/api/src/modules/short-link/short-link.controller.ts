@@ -13,7 +13,7 @@ import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 
 import { ShortLinkService } from './short-link.service';
 
-const CODE_PATTERN = /^[A-Za-z0-9]{6,16}$/;
+const CODE_PATTERN = /^[A-Za-z0-9]{24}$/;
 
 @ApiTags('Link Curto')
 @Controller('short-links')
@@ -27,7 +27,7 @@ export class ShortLinkController {
     description:
       'Endpoint interno — não é roteável publicamente. Chamado server-side por rotas do `apps/web` (ex.: `/check-in/[code]`) que fazem o 302 real para o navegador do aluno.',
   })
-  @ApiParam({ name: 'code', description: 'Código alfanumérico de 6 a 16 caracteres.' })
+  @ApiParam({ name: 'code', description: 'Código alfanumérico de 24 caracteres.' })
   @ApiResponse({ status: 200, description: 'URL de destino.' })
   @ApiResponse({ status: 410, description: 'Código inválido, inexistente ou expirado.' })
   async resolve(@Param('code') code: string): Promise<{ url: string }> {

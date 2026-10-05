@@ -66,7 +66,7 @@ export default tseslint.config(
 
   {
     name: 'movivo/config-files',
-    files: ['*.{js,mjs,cjs}', '**/*.config.{js,mjs,cjs,ts}'],
+    files: ['*.{js,mjs,cjs}', '**/*.config.{js,mjs,cjs,ts}', 'scripts/**/*.mjs'],
     languageOptions: {
       globals: { ...globals.node },
     },

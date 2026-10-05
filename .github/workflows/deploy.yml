@@ -70,6 +70,7 @@ jobs:
           push: true
           tags: ghcr.io/os-guri-do-vibe/movivo-${{ matrix.app }}:${{ steps.tag.outputs.sha }}
           build-args: |
+            MOVIVO_REVISION=${{ github.sha }}
             NEXT_PUBLIC_APP_ENV=production
             NEXT_PUBLIC_SITE_URL=https://movivo.com.br
             NEXT_PUBLIC_API_URL=https://api.movivo.com.br/api/v1

@@ -153,9 +153,9 @@ fi
 # --- Chaves de terceiros (colocadas à mão) -------------------------------------
 # A API roda no container com NODE_ENV=production, como na VPS: sem a chave da
 # OpenAI e a do Asaas ela recusa subir, e o Compose exige que os demais arquivos
-# existam. São as mesmas que o infra/vps/deploy.sh copia para a VPS.
+# existam. Use credenciais exclusivas de desenvolvimento; produção tem provisionamento separado.
 missing_external=""
-for key in asaas_api_key openai_api_key deepseek_api_key anthropic_api_key groq_api_key ararahq_api_key; do
+for key in asaas_api_key openai_api_key deepseek_api_key anthropic_api_key groq_api_key; do
   [ -s "${SECRETS_DIR}/${key}" ] || missing_external="${missing_external} ${key}"
 done
 if [ -n "$missing_external" ]; then

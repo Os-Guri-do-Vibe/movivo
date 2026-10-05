@@ -45,6 +45,7 @@ import {
   type PaymentGateway,
 } from './payment/payment-gateway.types';
 import { ShortLinkService } from '../short-link/short-link.service';
+import { AccessLinkService } from '../../core/database/access-link.service';
 import { CheckoutTokenService } from './checkout-token.service';
 import { SubscriptionRepository } from './subscription.repository';
 
@@ -79,6 +80,7 @@ export class SubscriptionService {
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
     private readonly shortLinks: ShortLinkService,
+    private readonly accessLinks: AccessLinkService,
   ) {
     this.logger.setContext(SubscriptionService.name);
   }
@@ -87,7 +89,7 @@ export class SubscriptionService {
   async createCheckoutLink(userId: string): Promise<string> {
     const sub = await this.repo.findByUserId(userId);
     if (!sub) throw new Error('assinatura ausente para gerar checkout');
-    const { token } = this.checkoutTokens.issue(userId);
+    const { token } = await this.checkoutTokens.issue(userId);
     const site = this.config.whatsapp.publicSiteUrl;
     return `${site}/assinar/${token}`;
   }
@@ -99,23 +101,26 @@ export class SubscriptionService {
   async createShortCheckoutLink(userId: string): Promise<string> {
     const sub = await this.repo.findByUserId(userId);
     if (!sub) throw new Error('assinatura ausente para gerar checkout');
-    const { token, expiresAt } = this.checkoutTokens.issue(userId);
+    const { token, expiresAt } = await this.checkoutTokens.issue(userId);
     const site = this.config.whatsapp.publicSiteUrl;
     const code = await this.shortLinks.create(`${site}/assinar/${token}`, expiresAt);
     return `${site}/checkout/${code}`;
   }
 
   /**
-   * Link curto e personalizado do cancelamento (`/cancelar/<código>` → `/conta/<userId>`, o
-   * portal onde o próprio titular confirma). A página de destino não expira, então o alias
+   * Link curto e personalizado do cancelamento (`/cancelar/<código>` → `/conta/<token>`, o
+   * portal onde o próprio titular confirma). O portal e o alias expiram juntos; o link
    * dura bem mais que o do checkout: "cancelar quando quiser" não pode vencer em 3 dias.
    */
   async createShortCancelLink(userId: string): Promise<string> {
     const site = this.config.whatsapp.publicSiteUrl;
-    const code = await this.shortLinks.create(
-      `${site}/conta/${userId}`,
-      new Date(Date.now() + CANCEL_LINK_TTL_MS),
+    const { token, expiresAt } = await this.accessLinks.issue(
+      'SUBSCRIPTION_PORTAL',
+      userId,
+      userId,
+      CANCEL_LINK_TTL_MS,
     );
+    const code = await this.shortLinks.create(`${site}/conta/${token}`, expiresAt);
     return `${site}/cancelar/${code}`;
   }
 
