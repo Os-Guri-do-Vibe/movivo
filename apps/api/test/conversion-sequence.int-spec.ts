@@ -19,7 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { AppModule } from '../src/app.module';
 import { loadEnv } from '../src/core/config/load-env';
-import { subscriptions, users } from '../src/core/database/schema';
+import { accessLinkTokens, subscriptions, users } from '../src/core/database/schema';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { ConversionSequenceWorker } from '../src/modules/subscription/conversion-sequence.worker';
 import { SubscriptionService } from '../src/modules/subscription/subscription.service';
@@ -95,6 +95,7 @@ afterAll(async () => {
     );
     await db.runAsSystem(async (tx) => {
       await tx.delete(subscriptions).where(inArray(subscriptions.userId, createdUserIds));
+      await tx.delete(accessLinkTokens).where(inArray(accessLinkTokens.userId, createdUserIds));
       await tx.delete(users).where(inArray(users.id, createdUserIds));
       return undefined;
     });

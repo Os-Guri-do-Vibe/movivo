@@ -91,6 +91,7 @@ const EXPECTED_TABLES = [
   'exercise_catalog_favorites',
   // Acompanhamento diario: acesso publico revogavel, sessoes, series e insights.
   'workout_access_tokens',
+  'access_link_tokens',
   'workout_insights',
   'workout_sessions',
   'workout_set_entries',

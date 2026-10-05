@@ -352,6 +352,7 @@ afterAll(async () => {
        DELETE FROM audit_logs WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%')
          OR actor_id IN (SELECT id FROM staff WHERE phone_number LIKE '+5541${RUN}%');
        ALTER TABLE audit_logs ENABLE TRIGGER trg_audit_logs_immutable;
+       DELETE FROM access_link_tokens WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM users WHERE phone_number LIKE '+5541${RUN}%';
        DELETE FROM staff WHERE phone_number LIKE '+5541${RUN}%';`,
     );
