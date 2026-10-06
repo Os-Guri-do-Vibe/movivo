@@ -18,6 +18,50 @@ export const loginSchema = z.object({
 export type LoginInput = z.infer<typeof loginSchema>;
 
 /**
+ * Segundo fator (TOTP) — o login vira dois passos. `POST /auth/login` com senha correta e MFA
+ * pendente NÃO devolve sessão: devolve `{ mfa: { step, challengeToken } }`, um token opaco de
+ * uso único (5 min) que só serve para resolver o desafio nas rotas `/auth/mfa/*`.
+ *  - `verify`: a conta já tem MFA — informar o código do app (ou um código de recuperação).
+ *  - `setup`: a instalação exige MFA e a conta ainda não tem — inscrever-se e confirmar.
+ */
+export const mfaChallengeTokenSchema = z.string().regex(/^[0-9a-f]{64}$/);
+
+/** 6 dígitos do app autenticador OU código de recuperação `XXXXX-XXXXX` (com/sem hífen). */
+export const mfaCodeSchema = z
+  .string()
+  .trim()
+  .min(6)
+  .max(14)
+  .regex(/^[0-9A-Za-z -]+$/, 'Código inválido.');
+
+export const mfaSetupSchema = z.object({ challengeToken: mfaChallengeTokenSchema });
+export const mfaVerifySchema = z.object({
+  challengeToken: mfaChallengeTokenSchema,
+  code: mfaCodeSchema,
+});
+export const mfaEnableSchema = mfaVerifySchema;
+
+export type MfaSetupInput = z.infer<typeof mfaSetupSchema>;
+export type MfaVerifyInput = z.infer<typeof mfaVerifySchema>;
+
+export const mfaStepSchema = z.enum(['verify', 'setup']);
+export type MfaStep = z.infer<typeof mfaStepSchema>;
+
+/** Resposta do `login`: sessão completa OU desafio de MFA (nunca os dois). */
+export const mfaChallengeResponseSchema = z.object({
+  mfa: z.object({ step: mfaStepSchema, challengeToken: mfaChallengeTokenSchema }),
+});
+export type MfaChallengeResponse = z.infer<typeof mfaChallengeResponseSchema>;
+
+export const mfaSetupResponseSchema = z.object({
+  /** Chave em base32 para digitar à mão no app (caso o QR não funcione). */
+  secret: z.string(),
+  otpauthUri: z.string(),
+  account: z.string(),
+});
+export type MfaSetupResponse = z.infer<typeof mfaSetupResponseSchema>;
+
+/**
  * `PATCH /account/profile` (tela "Minha Conta"): nome e telefone da própria conta
  * interna. Sem `email` — é o e-mail corporativo, imutável por decisão do fundador
  * (Rodrigo, 2026-09-02). Ao menos um campo precisa vir preenchido.

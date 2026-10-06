@@ -9,9 +9,9 @@
  * (`protocols`, `professional_assignments`) apontam para `staff.id` — só o `user_id`
  * (o titular) continua em `users.id`.
  */
-import { boolean, pgTable, text, varchar } from 'drizzle-orm/pg-core';
+import { bigint, boolean, pgTable, text, timestamp, varchar } from 'drizzle-orm/pg-core';
 
-import { primaryKeyColumn, timestampColumns } from './_shared';
+import { bytea, primaryKeyColumn, timestampColumns } from './_shared';
 import { staffRoleEnum, staffStatusEnum } from './enums';
 
 export const staff = pgTable('staff', {
@@ -39,6 +39,24 @@ export const staff = pgTable('staff', {
 
   /** Hash Argon2id — sempre exigido (staff sempre loga por senha). */
   passwordHash: text('password_hash').notNull(),
+
+  /**
+   * MFA (TOTP, RFC 6238). Segredo **cifrado** (`pgp_sym_encrypt`, mesma chave do dado de
+   * saúde) — nunca em claro no banco nem em backup. `NULL` = conta sem MFA ativo.
+   */
+  mfaSecretCipher: bytea('mfa_secret_cipher'),
+  /** Quando o segundo fator foi confirmado. `NULL` = não inscrito (ou resetado). */
+  mfaEnabledAt: timestamp('mfa_enabled_at', { withTimezone: true }),
+  /**
+   * Último passo de 30 s (`floor(epoch/30)`) aceito. Um código só vale se o seu passo for
+   * MAIOR que este: o mesmo código (ou um interceptado) não autentica duas vezes.
+   */
+  mfaLastStep: bigint('mfa_last_step', { mode: 'number' }),
+  /**
+   * SHA-256 dos códigos de recuperação ainda não usados (o código em claro só é mostrado
+   * uma vez, na inscrição). Cada uso consome o hash.
+   */
+  mfaRecoveryHashes: text('mfa_recovery_hashes').array(),
 
   role: staffRoleEnum('role').notNull(),
   status: staffStatusEnum('status').notNull().default('ACTIVE'),

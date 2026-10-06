@@ -477,6 +477,13 @@
       "when": 1791244768709,
       "tag": "0067_prazo_absoluto_auth_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1791306711201,
+      "tag": "0068_mfa_contas_internas",
+      "breakpoints": true
     }
   ]
 }

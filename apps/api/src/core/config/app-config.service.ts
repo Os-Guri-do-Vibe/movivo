@@ -232,6 +232,11 @@ export class AppConfigService {
     };
   }
 
+  /** MFA das contas internas (TOTP). */
+  get mfa(): { readonly required: boolean; readonly issuer: string } {
+    return { required: this.config.AUTH_MFA_REQUIRED, issuer: this.config.AUTH_MFA_ISSUER };
+  }
+
   /** Config da camada de IA (US-2.2 / ADR-005-R2). Chaves são segredos redigidos no snapshot. */
   get llm(): LlmConfig {
     return {

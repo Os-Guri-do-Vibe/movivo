@@ -31,14 +31,20 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { loginSchema } from '@movivo/shared';
+import {
+  loginSchema,
+  mfaEnableSchema,
+  mfaSetupResponseSchema,
+  mfaSetupSchema,
+  mfaVerifySchema,
+} from '@movivo/shared';
 import type { Request, Response } from 'express';
 
 import { AppConfigService } from '../../core/config';
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
 import { parseBody } from '../../core/validation/strict-input';
 import { accessMetaFrom } from './auth-audit.service';
-import { AuthService } from './auth.service';
+import { AuthService, isMfaChallenge } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser, Roles } from './roles.decorator';
 import { RolesGuard } from './roles.guard';
@@ -87,8 +93,88 @@ export class AuthController {
   ) {
     const input = parseBody(loginSchema, body ?? {});
     const result = await this.auth.login(input, accessMetaFrom(req));
+    // Senha certa + 2º fator pendente: devolve só o desafio (sem cookie, sem access token).
+    if (isMfaChallenge(result)) return result;
     this.setRefreshCookie(res, result.refreshCookie);
     return { accessToken: result.accessToken, user: result.user };
+  }
+
+  @Post('mfa/verify')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(ThrottlerGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Passo 2 do login — código do 2º fator',
+    description:
+      'Resolve o desafio devolvido por `POST /auth/login` com o código de 6 dígitos do app ' +
+      'autenticador (ou um código de recuperação). Cada código TOTP vale uma única vez. 5 ' +
+      'erros destroem o desafio; 10 erros em 15 min travam a conta para novos códigos (429).',
+  })
+  @ApiBody({ schema: zodSchemaToOpenApi(mfaVerifySchema) })
+  @ApiResponse({ status: 200, description: 'Sessão emitida (access no corpo, refresh no cookie).' })
+  @ApiResponse({ status: 401, description: 'Código inválido ou desafio expirado.' })
+  @ApiResponse({ status: 429, description: 'Conta travada por excesso de tentativas.' })
+  async mfaVerify(
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const input = parseBody(mfaVerifySchema, body ?? {});
+    const result = await this.auth.completeMfaLogin(
+      input.challengeToken,
+      input.code,
+      accessMetaFrom(req),
+    );
+    this.setRefreshCookie(res, result.refreshCookie);
+    return { accessToken: result.accessToken, user: result.user };
+  }
+
+  @Post('mfa/setup')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(ThrottlerGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Inscrição no 2º fator — segredo e URI do QR',
+    description:
+      'Só para o desafio `setup` (instalação exige MFA e a conta ainda não tem). Idempotente ' +
+      'dentro do mesmo desafio: devolve sempre o mesmo segredo, que só é gravado na conta ' +
+      'depois de `POST /auth/mfa/enable` confirmar um código.',
+  })
+  @ApiBody({ schema: zodSchemaToOpenApi(mfaSetupSchema) })
+  @ApiResponse({ status: 200, schema: zodSchemaToOpenApi(mfaSetupResponseSchema) })
+  @ApiResponse({ status: 401, description: 'Desafio inválido, expirado ou de outro tipo.' })
+  async mfaSetup(@Body() body: unknown) {
+    const input = parseBody(mfaSetupSchema, body ?? {});
+    return this.auth.startMfaSetup(input.challengeToken);
+  }
+
+  @Post('mfa/enable')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(ThrottlerGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Confirma a inscrição no 2º fator e entra',
+    description:
+      'Valida o 1º código do app, ativa o MFA, emite a sessão e devolve os códigos de ' +
+      'recuperação — **a única vez em que aparecem em claro**.',
+  })
+  @ApiBody({ schema: zodSchemaToOpenApi(mfaEnableSchema) })
+  @ApiResponse({ status: 200, description: 'MFA ativo; sessão emitida + `recoveryCodes`.' })
+  @ApiResponse({ status: 401, description: 'Código inválido ou desafio expirado.' })
+  @ApiResponse({ status: 429, description: 'Conta travada por excesso de tentativas.' })
+  async mfaEnable(
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const input = parseBody(mfaEnableSchema, body ?? {});
+    const result = await this.auth.enableMfa(input.challengeToken, input.code, accessMetaFrom(req));
+    this.setRefreshCookie(res, result.refreshCookie);
+    return {
+      accessToken: result.accessToken,
+      user: result.user,
+      recoveryCodes: result.recoveryCodes,
+    };
   }
 
   @Post('refresh')

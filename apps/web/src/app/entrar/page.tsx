@@ -23,8 +23,11 @@ export default async function LoginPage({
       : erro === 'sessao-expirada'
         ? 'Sua sessão expirou. Entre novamente.'
         : '';
+  // `text-foreground` re-resolve a cor do texto com o `--foreground` claro de `.login-fixed`:
+  // sem isso o texto herda a cor do `body`, que em navegador com modo escuro é quase branca
+  // sobre o card branco (rótulos e títulos ilegíveis).
   return (
-    <main className="login-fixed grid min-h-dvh place-items-center bg-background px-4 py-10">
+    <main className="login-fixed grid min-h-dvh place-items-center bg-background px-4 py-10 text-foreground">
       <section
         aria-labelledby="login-title"
         className="w-full max-w-md overflow-hidden rounded-xl border border-border bg-card shadow-sm"

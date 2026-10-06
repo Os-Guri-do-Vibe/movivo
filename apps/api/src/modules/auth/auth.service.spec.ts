@@ -6,7 +6,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { AuthService } from './auth.service';
+import { AuthService, isMfaChallenge, type LoginResult } from './auth.service';
 
 /** Chain builder thenable que imita o query builder do Drizzle e resolve para `result`. */
 function q<T>(result: T) {
@@ -43,6 +43,13 @@ let trail: {
   record: ReturnType<typeof vi.fn>;
   recordFailedLogin: ReturnType<typeof vi.fn>;
 };
+let mfa: {
+  modeFor: ReturnType<typeof vi.fn>;
+  createChallenge: ReturnType<typeof vi.fn>;
+  verifyLogin: ReturnType<typeof vi.fn>;
+  enable: ReturnType<typeof vi.fn>;
+  beginSetup: ReturnType<typeof vi.fn>;
+};
 let service: AuthService;
 
 const config = { jwt: { refreshTtlSeconds: 2_592_000, accessTtl: '15m' }, isProduction: false };
@@ -78,6 +85,13 @@ beforeEach(() => {
     record: vi.fn(async () => undefined),
     recordFailedLogin: vi.fn(async () => undefined),
   };
+  mfa = {
+    modeFor: vi.fn(() => null),
+    createChallenge: vi.fn(async () => 'c'.repeat(64)),
+    verifyLogin: vi.fn(),
+    enable: vi.fn(),
+    beginSetup: vi.fn(),
+  };
   service = new AuthService(
     logger as never,
     db as never,
@@ -86,6 +100,7 @@ beforeEach(() => {
     passwords as never,
     config as never,
     trail as never,
+    mfa as never,
   );
 });
 
@@ -96,7 +111,10 @@ describe('login', () => {
     tx.select.mockReturnValueOnce(q([{ passwordHash: 'ph', role: 'PROFESSIONAL' }]));
     tx.insert.mockReturnValueOnce(q([{ id: 'sess-1' }]));
 
-    const result = await service.login({ email: 'p@movivo.app', password: 'x' }, META);
+    const result = (await service.login(
+      { email: 'p@movivo.app', password: 'x' },
+      META,
+    )) as LoginResult;
 
     expect(trail.record).toHaveBeenCalledWith('AUTH_LOGIN', 'u1', META, { role: 'PROFESSIONAL' });
     expect(trail.recordFailedLogin).not.toHaveBeenCalled();
@@ -127,6 +145,100 @@ describe('login', () => {
     );
     expect(trail.recordFailedLogin).toHaveBeenCalledWith('u1', META);
     expect(trail.record).not.toHaveBeenCalled();
+  });
+});
+
+describe('login — segundo fator (MFA)', () => {
+  const account = {
+    id: 'u1',
+    role: 'ADMIN',
+    passwordHash: 'ph',
+    mfaEnabledAt: new Date(),
+  };
+
+  it('senha certa + MFA ativo: devolve só o desafio — NENHUMA sessão, cookie ou AUTH_LOGIN', async () => {
+    tx.select.mockReturnValueOnce(q([account]));
+    passwords.verify.mockResolvedValue(true);
+    mfa.modeFor.mockReturnValueOnce('VERIFY');
+
+    const result = await service.login({ email: 'a@movivo.app', password: 'x' }, META);
+
+    expect(isMfaChallenge(result)).toBe(true);
+    expect(result).toEqual({ mfa: { step: 'verify', challengeToken: 'c'.repeat(64) } });
+    expect(mfa.createChallenge).toHaveBeenCalledWith('u1', 'VERIFY', 'ph');
+    expect(tx.insert).not.toHaveBeenCalled(); // nenhuma linha em auth_sessions
+    expect(tokens.signAccessToken).not.toHaveBeenCalled();
+    expect(trail.record).not.toHaveBeenCalled();
+  });
+
+  it('conta sem MFA numa instalação que exige: desafio de inscrição (setup)', async () => {
+    tx.select.mockReturnValueOnce(q([{ ...account, mfaEnabledAt: null }]));
+    passwords.verify.mockResolvedValue(true);
+    mfa.modeFor.mockReturnValueOnce('SETUP');
+
+    const result = await service.login({ email: 'a@movivo.app', password: 'x' });
+
+    expect(result).toEqual({ mfa: { step: 'setup', challengeToken: 'c'.repeat(64) } });
+    expect(tx.insert).not.toHaveBeenCalled();
+  });
+
+  it('senha ERRADA nunca cria desafio (não revela se a conta tem MFA)', async () => {
+    tx.select.mockReturnValueOnce(q([account]));
+    passwords.verify.mockResolvedValue(false);
+    await expect(service.login({ email: 'a@movivo.app', password: 'x' })).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(mfa.createChallenge).not.toHaveBeenCalled();
+  });
+
+  it('completeMfaLogin emite a sessão e audita o método do 2º fator', async () => {
+    mfa.verifyLogin.mockResolvedValueOnce({
+      userId: 'u1',
+      role: 'ADMIN',
+      passwordHash: 'ph',
+      method: 'totp',
+    });
+    tx.select.mockReturnValueOnce(q([{ passwordHash: 'ph', role: 'ADMIN' }]));
+    tx.insert.mockReturnValueOnce(q([{ id: 'sess-9' }]));
+
+    const result = await service.completeMfaLogin('c'.repeat(64), '123456', META);
+
+    expect(mfa.verifyLogin).toHaveBeenCalledWith('c'.repeat(64), '123456', META);
+    expect(result.refreshCookie).toBe('sess-9.newsecret');
+    expect(result.user).toEqual({ id: 'u1', role: 'ADMIN' });
+    expect(trail.record).toHaveBeenCalledWith('AUTH_LOGIN', 'u1', META, {
+      role: 'ADMIN',
+      mfa: 'totp',
+    });
+  });
+
+  it('código errado não emite sessão (a exceção do MfaService sobe)', async () => {
+    mfa.verifyLogin.mockRejectedValueOnce(new UnauthorizedException('Código inválido.'));
+    await expect(service.completeMfaLogin('c'.repeat(64), '000000')).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(tx.insert).not.toHaveBeenCalled();
+  });
+
+  it('enableMfa devolve sessão + códigos de recuperação', async () => {
+    mfa.enable.mockResolvedValueOnce({
+      userId: 'u1',
+      role: 'ADMIN',
+      passwordHash: 'ph',
+      method: 'enrollment',
+      recoveryCodes: ['AAAAA-BBBBB'],
+    });
+    tx.select.mockReturnValueOnce(q([{ passwordHash: 'ph', role: 'ADMIN' }]));
+    tx.insert.mockReturnValueOnce(q([{ id: 'sess-10' }]));
+
+    const result = await service.enableMfa('c'.repeat(64), '123456', META);
+
+    expect(result.recoveryCodes).toEqual(['AAAAA-BBBBB']);
+    expect(result.refreshCookie).toBe('sess-10.newsecret');
+    expect(trail.record).toHaveBeenCalledWith('AUTH_LOGIN', 'u1', META, {
+      role: 'ADMIN',
+      mfa: 'enrollment',
+    });
   });
 });
 

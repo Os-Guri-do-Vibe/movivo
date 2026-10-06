@@ -39,6 +39,7 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { CapabilitiesGuard } from './capabilities.guard';
 import { JwtStrategy } from './jwt.strategy';
+import { MfaService } from './mfa.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { PasswordService } from './password.service';
 import { RolesGuard } from './roles.guard';
@@ -53,6 +54,7 @@ import { UserRoleCacheService } from './user-role-cache.service';
     AuthService,
     AuthAuditService,
     AuditService,
+    MfaService,
     TokenService,
     TokenDenylistService,
     PasswordService,
@@ -66,6 +68,7 @@ import { UserRoleCacheService } from './user-role-cache.service';
     PassportModule,
     AuthService,
     AuthAuditService,
+    MfaService,
     TokenService,
     PasswordService,
     UserRoleCacheService,

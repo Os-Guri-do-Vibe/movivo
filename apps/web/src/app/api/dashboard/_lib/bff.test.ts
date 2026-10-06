@@ -8,6 +8,9 @@ vi.mock('next/headers', () => ({
 import {
   loginBackend,
   logoutBackend,
+  mfaEnableBackend,
+  mfaSetupBackend,
+  mfaVerifyBackend,
   authenticatedBackendFetch,
   BFF_ACCESS_COOKIE,
   BFF_REFRESH_COOKIE,
@@ -107,4 +110,102 @@ it('login sem cabeçalhos de visitante não inventa IP', async () => {
   await loginBackend({ email: 'a@movivo.app', password: 'x' });
   const init = fetch.mock.calls[0]?.[1] as { headers: Record<string, string> };
   expect(init.headers).not.toHaveProperty('X-Forwarded-For');
+});
+
+const CHALLENGE = 'b'.repeat(64);
+const sessionResponse = (extra: Record<string, unknown> = {}) =>
+  new Response(
+    JSON.stringify({ accessToken: 'access', user: { id: 'u1', role: 'ADMIN' }, ...extra }),
+    {
+      status: 200,
+      headers: { 'set-cookie': 'movivo_refresh=sess.secret; Path=/' },
+    },
+  );
+
+it('login com 2º fator pendente devolve o desafio e NÃO grava nenhum cookie de sessão', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ mfa: { step: 'verify', challengeToken: CHALLENGE } }), {
+        status: 200,
+      }),
+    ),
+  );
+  const outcome = await loginBackend({ email: 'a@movivo.app', password: 'x' });
+  expect(outcome).toEqual({ kind: 'mfa', step: 'verify', challengeToken: CHALLENGE });
+  expect(mocks.set).not.toHaveBeenCalled();
+});
+
+it('login sem MFA segue devolvendo a sessão (cookies gravados)', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sessionResponse()));
+  const outcome = await loginBackend({ email: 'a@movivo.app', password: 'x' });
+  expect(outcome.kind).toBe('session');
+  expect(mocks.set).toHaveBeenCalledWith(BFF_ACCESS_COOKIE, 'access', expect.any(Object));
+  expect(mocks.set).toHaveBeenCalledWith(BFF_REFRESH_COOKIE, 'sess.secret', expect.any(Object));
+});
+
+it('mfa/verify: sucesso grava a sessão; erro repassa status e mensagem da API (429 incluso)', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(sessionResponse()));
+  const session = await mfaVerifyBackend({ challengeToken: CHALLENGE, code: '123456' });
+  expect(session.role).toBe('ADMIN');
+  expect(mocks.set).toHaveBeenCalledWith(BFF_REFRESH_COOKIE, 'sess.secret', expect.any(Object));
+
+  mocks.set.mockClear();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ message: 'Muitas tentativas de código. Aguarde 15 minutos.' }),
+        {
+          status: 429,
+        },
+      ),
+    ),
+  );
+  await expect(
+    mfaVerifyBackend({ challengeToken: CHALLENGE, code: '000000' }),
+  ).rejects.toMatchObject({
+    status: 429,
+    message: expect.stringContaining('Muitas tentativas'),
+  });
+  expect(mocks.set).not.toHaveBeenCalled();
+});
+
+it('mfa/setup desenha o QR no servidor (PNG em data URL) e repassa a chave', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          secret: 'JBSWY3DPEHPK3PXP',
+          otpauthUri: 'otpauth://totp/MOVIVO:a%40movivo.app?secret=JBSWY3DPEHPK3PXP&issuer=MOVIVO',
+          account: 'a@movivo.app',
+        }),
+        { status: 200 },
+      ),
+    ),
+  );
+  const view = await mfaSetupBackend({ challengeToken: CHALLENGE });
+  expect(view.secret).toBe('JBSWY3DPEHPK3PXP');
+  expect(view.account).toBe('a@movivo.app');
+  expect(view.qrDataUrl).toMatch(/^data:image\/png;base64,/);
+});
+
+it('mfa/enable devolve sessão + códigos de recuperação; sem códigos é erro 502', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValueOnce(sessionResponse({ recoveryCodes: ['AAAAA-BBBBB', 7] })),
+  );
+  const result = await mfaEnableBackend({ challengeToken: CHALLENGE, code: '123456' });
+  expect(result.recoveryCodes).toEqual(['AAAAA-BBBBB']);
+  expect(mocks.set).toHaveBeenCalledWith(BFF_ACCESS_COOKIE, 'access', expect.any(Object));
+
+  mocks.set.mockClear();
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sessionResponse()));
+  await expect(
+    mfaEnableBackend({ challengeToken: CHALLENGE, code: '123456' }),
+  ).rejects.toMatchObject({
+    status: 502,
+  });
+  expect(mocks.set).not.toHaveBeenCalled();
 });

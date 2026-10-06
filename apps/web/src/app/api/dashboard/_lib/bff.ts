@@ -1,6 +1,8 @@
 import 'server-only';
 
+import { mfaChallengeResponseSchema, type MfaStep } from '@movivo/shared';
 import { cookies, headers } from 'next/headers';
+import QRCode from 'qrcode';
 import { NextResponse, type NextRequest } from 'next/server';
 
 import {
@@ -145,16 +147,18 @@ async function visitorHeaders(): Promise<Record<string, string>> {
   return out;
 }
 
-export async function loginBackend(body: unknown): Promise<DashboardSession> {
-  const response = await fetch(`${API_BASE}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(await visitorHeaders()) },
-    body: JSON.stringify(body),
-    cache: 'no-store',
-  });
-  const payload = await parseJson(response);
-  if (!response.ok) throw new BffError(response.status, 'E-mail ou senha incorretos.');
+/** Resultado do passo 1: sessão completa OU desafio de 2º fator (nenhum cookie é gravado). */
+export type LoginOutcome =
+  | { kind: 'session'; session: DashboardSession }
+  | { kind: 'mfa'; step: MfaStep; challengeToken: string };
 
+/** Mensagem da API quando ela é nossa (PT-BR, genérica); senão o texto de fallback. */
+function backendMessage(payload: unknown, fallback: string): string {
+  return isRecord(payload) && typeof payload.message === 'string' ? payload.message : fallback;
+}
+
+/** Valida a resposta de sessão da API, grava os cookies do BFF e devolve a sessão. */
+async function startSession(response: Response, payload: unknown): Promise<DashboardSession> {
   const auth = parseAuthPayload(payload);
   const refresh = extractRefreshCookie(response.headers.get('set-cookie'));
   if (!refresh) throw new BffError(502, 'A API não devolveu uma sessão renovável.');
@@ -168,6 +172,88 @@ export async function loginBackend(body: unknown): Promise<DashboardSession> {
   }
   await saveSession(auth.accessToken, refresh);
   return session;
+}
+
+async function postAuth(
+  path: string,
+  body: unknown,
+): Promise<{ response: Response; payload: unknown }> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(await visitorHeaders()) },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  });
+  return { response, payload: await parseJson(response) };
+}
+
+export async function loginBackend(body: unknown): Promise<LoginOutcome> {
+  const { response, payload } = await postAuth('/auth/login', body);
+  if (!response.ok) throw new BffError(response.status, 'E-mail ou senha incorretos.');
+
+  // Senha certa com 2º fator pendente: a API não emitiu sessão, só um desafio de uso único.
+  const challenge = mfaChallengeResponseSchema.safeParse(payload);
+  if (challenge.success) {
+    return { kind: 'mfa', ...challenge.data.mfa };
+  }
+  return { kind: 'session', session: await startSession(response, payload) };
+}
+
+/** Passo 2 do login: código do app autenticador (ou de recuperação) → sessão. */
+export async function mfaVerifyBackend(body: unknown): Promise<DashboardSession> {
+  const { response, payload } = await postAuth('/auth/mfa/verify', body);
+  if (!response.ok) {
+    throw new BffError(response.status, backendMessage(payload, 'Código inválido ou expirado.'));
+  }
+  return startSession(response, payload);
+}
+
+export interface MfaSetupView {
+  secret: string;
+  account: string;
+  /** PNG em data URL (o CSP já libera `img-src data:`); o segredo nunca vai a serviço externo. */
+  qrDataUrl: string;
+}
+
+/** Inscrição: pede o segredo à API e desenha o QR AQUI, no servidor do BFF. */
+export async function mfaSetupBackend(body: unknown): Promise<MfaSetupView> {
+  const { response, payload } = await postAuth('/auth/mfa/setup', body);
+  if (!response.ok) {
+    throw new BffError(
+      response.status,
+      backendMessage(payload, 'Desafio expirado. Entre novamente.'),
+    );
+  }
+  if (
+    !isRecord(payload) ||
+    typeof payload.secret !== 'string' ||
+    typeof payload.otpauthUri !== 'string' ||
+    typeof payload.account !== 'string'
+  ) {
+    throw new BffError(502, 'Resposta de inscrição inválida.');
+  }
+  const qrDataUrl = await QRCode.toDataURL(payload.otpauthUri, {
+    errorCorrectionLevel: 'M',
+    margin: 2,
+    width: 224,
+  });
+  return { secret: payload.secret, account: payload.account, qrDataUrl };
+}
+
+/** Confirma a inscrição: entra e devolve os códigos de recuperação (única vez em claro). */
+export async function mfaEnableBackend(
+  body: unknown,
+): Promise<{ session: DashboardSession; recoveryCodes: string[] }> {
+  const { response, payload } = await postAuth('/auth/mfa/enable', body);
+  if (!response.ok) {
+    throw new BffError(response.status, backendMessage(payload, 'Código inválido ou expirado.'));
+  }
+  const codes =
+    isRecord(payload) && Array.isArray(payload.recoveryCodes)
+      ? payload.recoveryCodes.filter((entry): entry is string => typeof entry === 'string')
+      : [];
+  if (codes.length === 0) throw new BffError(502, 'A API não devolveu os códigos de recuperação.');
+  return { session: await startSession(response, payload), recoveryCodes: codes };
 }
 
 async function refreshBackend(): Promise<AuthPayload> {
