@@ -18,6 +18,7 @@ import {
   Param,
   Patch,
   Post,
+  Req,
   Res,
   UploadedFile,
   UseGuards,
@@ -34,12 +35,13 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { changePasswordSchema, updateAccountProfileSchema } from '@movivo/shared';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 // Import só de tipo, por efeito colateral: traz a augmentation global
 // `Express.Multer.File` de `@types/multer` — o tsconfig restringe `types` a
 // `["node"]` (§ raiz), então sem esta linha o compilador não vê o namespace.
 import 'multer';
 
+import { accessMetaFrom } from '../auth/auth-audit.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/roles.decorator';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
@@ -101,9 +103,13 @@ export class AccountController {
   @ApiResponse({ status: 204, description: 'Senha alterada — sem corpo de resposta.' })
   @ApiResponse({ status: 400, description: 'Nova senha abaixo do piso de 12 caracteres.' })
   @ApiResponse({ status: 401, description: 'Senha atual incorreta.' })
-  async changePassword(@CurrentUser() user: AuthenticatedUser, @Body() body: unknown) {
+  async changePassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: unknown,
+    @Req() req: Request,
+  ) {
     const input = parseBody(changePasswordSchema, body);
-    await this.account.changePassword(user.userId, user.role, input);
+    await this.account.changePassword(user.userId, user.role, input, accessMetaFrom(req));
   }
 
   @Post('avatar')

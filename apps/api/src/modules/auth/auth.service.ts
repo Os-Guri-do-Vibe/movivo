@@ -26,6 +26,7 @@ import { PinoLogger } from 'nestjs-pino';
 import { AppConfigService, parseDurationSeconds } from '../../core/config';
 import { TenantDatabase, type TenantRole, type TenantTransaction } from '../../core/database';
 import { authSessions, staff } from '../../core/database/schema';
+import { AUTH_AUDIT_ACTIONS, AuthAuditService, type AccessMeta } from './auth-audit.service';
 import { PasswordService } from './password.service';
 import { TokenDenylistService } from './token-denylist.service';
 import { TokenService } from './token.service';
@@ -46,12 +47,13 @@ export class AuthService {
     private readonly denylist: TokenDenylistService,
     private readonly passwords: PasswordService,
     private readonly config: AppConfigService,
+    private readonly trail: AuthAuditService,
   ) {
     this.logger.setContext(AuthService.name);
   }
 
   /** Autentica uma conta interna por e-mail + senha (Argon2id) e emite o par de tokens. */
-  async login(input: LoginInput): Promise<LoginResult> {
+  async login(input: LoginInput, meta: AccessMeta = {}): Promise<LoginResult> {
     const user = await this.db.runAsSystem(async (tx) => {
       const [row] = await tx
         .select({ id: staff.id, role: staff.role, passwordHash: staff.passwordHash })
@@ -64,10 +66,14 @@ export class AuthService {
     // Verifica sempre (contra o dummy quando não há conta) para não vazar timing.
     const ok = await this.passwords.verify(user?.passwordHash ?? null, input.password);
     if (!user || !ok) {
+      // Só conta existente tem `staff.id` para ser o ator da trilha (e-mail desconhecido
+      // fica de fora, por design — ver `AuthAuditService`).
+      if (user) await this.trail.recordFailedLogin(user.id, meta);
       throw new UnauthorizedException('Credenciais inválidas.');
     }
 
     const result = await this.issueSession(user.id, user.role, randomUUID(), user.passwordHash);
+    await this.trail.record(AUTH_AUDIT_ACTIONS.login, user.id, meta, { role: user.role });
     this.logger.info({ event: 'auth_login', userId: user.id, role: user.role }, 'login');
     return { ...result, user: { id: user.id, role: user.role } };
   }
@@ -76,7 +82,7 @@ export class AuthService {
    * Rotaciona o refresh: valida o atual, invalida-o e emite um par novo. Reuse de um
    * refresh já revogado invalida a família inteira.
    */
-  async refresh(cookieValue: string | undefined): Promise<LoginResult> {
+  async refresh(cookieValue: string | undefined, meta: AccessMeta = {}): Promise<LoginResult> {
     const parsed = this.parseRefreshCookie(cookieValue);
     if (!parsed) throw new UnauthorizedException('Refresh token ausente ou malformado.');
 
@@ -182,6 +188,10 @@ export class AuthService {
     const denyUntil = this.accessDenyUntil();
     if (rotation.kind === 'REUSE') {
       await Promise.all(rotation.jtis.map((jti) => this.denylist.revoke(jti, denyUntil)));
+      await this.trail.record(AUTH_AUDIT_ACTIONS.refreshReuse, rotation.userId, meta, {
+        familyId: rotation.familyId,
+        sessionsRevoked: rotation.jtis.length,
+      });
       this.logger.warn(
         {
           event: 'auth_refresh_reuse',
@@ -239,7 +249,12 @@ export class AuthService {
   }
 
   /** Mantém o contrato Bearer e encerra toda a família, inclusive rotação concorrente. */
-  async logout(userId: string, _role: TenantRole, jti: string): Promise<void> {
+  async logout(
+    userId: string,
+    _role: TenantRole,
+    jti: string,
+    meta: AccessMeta = {},
+  ): Promise<void> {
     const rows = await this.db.runAsSystem(async (tx) => {
       const [session] = await tx
         .select({ familyId: authSessions.familyId })
@@ -251,11 +266,12 @@ export class AuthService {
       return this.revokeFamily(tx, session.familyId);
     });
     await Promise.all(rows.map((row) => this.denylist.revoke(row.jti, this.accessDenyUntil())));
+    await this.trail.record(AUTH_AUDIT_ACTIONS.logout, userId, meta);
     this.logger.info({ event: 'auth_logout', userId }, 'logout');
   }
 
   /** Logout pelo refresh funciona mesmo quando o access expirou; nunca emite outro token. */
-  async logoutRefresh(cookieValue: string | undefined): Promise<void> {
+  async logoutRefresh(cookieValue: string | undefined, meta: AccessMeta = {}): Promise<void> {
     const parsed = this.parseRefreshCookie(cookieValue);
     if (!parsed) throw new UnauthorizedException('Refresh token ausente ou malformado.');
     const result = await this.db.runAsSystem(async (tx) => {
@@ -278,6 +294,7 @@ export class AuthService {
     await Promise.all(
       result.rows.map((row) => this.denylist.revoke(row.jti, this.accessDenyUntil())),
     );
+    await this.trail.record(AUTH_AUDIT_ACTIONS.logout, result.userId, meta);
     this.logger.info({ event: 'auth_logout', userId: result.userId }, 'logout');
   }
 

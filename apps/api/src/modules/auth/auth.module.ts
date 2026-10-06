@@ -33,6 +33,8 @@
 import { Module } from '@nestjs/common';
 import { PassportModule } from '@nestjs/passport';
 
+import { AuditService } from '../admin/audit.service';
+import { AuthAuditService } from './auth-audit.service';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { CapabilitiesGuard } from './capabilities.guard';
@@ -49,6 +51,8 @@ import { UserRoleCacheService } from './user-role-cache.service';
   controllers: [AuthController],
   providers: [
     AuthService,
+    AuthAuditService,
+    AuditService,
     TokenService,
     TokenDenylistService,
     PasswordService,
@@ -61,6 +65,7 @@ import { UserRoleCacheService } from './user-role-cache.service';
   exports: [
     PassportModule,
     AuthService,
+    AuthAuditService,
     TokenService,
     PasswordService,
     UserRoleCacheService,

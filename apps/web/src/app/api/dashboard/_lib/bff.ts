@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 
 import {
@@ -123,10 +123,32 @@ function toDashboardSession(payload: AuthPayload): DashboardSession {
   };
 }
 
+/**
+ * IP e user-agent do visitante para a API. Sem isto, o login/refresh saem com o IP deste
+ * servidor: o rate limit de 10/min do `/auth/login` vira um balde GLOBAL (um atacante a
+ * 10 tentativas/min trava o login de todo mundo e o limite não protege nenhuma conta
+ * específica) e a trilha de acesso (`AUTH_LOGIN`) gravaria sempre o IP do container.
+ * Em produção o Nginx sobrescreve `X-Real-IP` com o IP do visitante e o web não tem porta
+ * pública; a API confia em um salto de proxy (`trust proxy` = 1), que é este BFF.
+ */
+async function visitorHeaders(): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  try {
+    const incoming = await headers();
+    const ip = incoming.get('x-real-ip');
+    if (ip) out['X-Forwarded-For'] = ip;
+    const userAgent = incoming.get('user-agent');
+    if (userAgent) out['User-Agent'] = userAgent;
+  } catch {
+    // Fora de um request scope (ex.: chamada interna) não há visitante a repassar.
+  }
+  return out;
+}
+
 export async function loginBackend(body: unknown): Promise<DashboardSession> {
   const response = await fetch(`${API_BASE}/auth/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(await visitorHeaders()) },
     body: JSON.stringify(body),
     cache: 'no-store',
   });
@@ -155,7 +177,7 @@ async function refreshBackend(): Promise<AuthPayload> {
 
   const response = await fetch(`${API_BASE}/auth/refresh`, {
     method: 'POST',
-    headers: { Cookie: `${BACKEND_REFRESH_COOKIE}=${refresh}` },
+    headers: { Cookie: `${BACKEND_REFRESH_COOKIE}=${refresh}`, ...(await visitorHeaders()) },
     cache: 'no-store',
   });
   const payload = await parseJson(response);
@@ -266,7 +288,7 @@ export async function logoutBackend(): Promise<void> {
   if (refresh) {
     response = await fetch(`${API_BASE}/auth/logout/refresh`, {
       method: 'POST',
-      headers: { Cookie: `${BACKEND_REFRESH_COOKIE}=${refresh}` },
+      headers: { Cookie: `${BACKEND_REFRESH_COOKIE}=${refresh}`, ...(await visitorHeaders()) },
       cache: 'no-store',
     });
   } else if (access) {

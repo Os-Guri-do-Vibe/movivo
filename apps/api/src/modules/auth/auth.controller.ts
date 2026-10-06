@@ -37,6 +37,7 @@ import type { Request, Response } from 'express';
 import { AppConfigService } from '../../core/config';
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
 import { parseBody } from '../../core/validation/strict-input';
+import { accessMetaFrom } from './auth-audit.service';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser, Roles } from './roles.decorator';
@@ -79,9 +80,13 @@ export class AuthController {
   })
   @ApiResponse({ status: 401, description: 'Credenciais inválidas.' })
   @ApiResponse({ status: 429, description: 'Rate limit de login excedido para o IP de origem.' })
-  async login(@Body() body: unknown, @Res({ passthrough: true }) res: Response) {
+  async login(
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const input = parseBody(loginSchema, body ?? {});
-    const result = await this.auth.login(input);
+    const result = await this.auth.login(input, accessMetaFrom(req));
     this.setRefreshCookie(res, result.refreshCookie);
     return { accessToken: result.accessToken, user: result.user };
   }
@@ -106,7 +111,7 @@ export class AuthController {
   })
   async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const cookie = (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
-    const result = await this.auth.refresh(cookie);
+    const result = await this.auth.refresh(cookie, accessMetaFrom(req));
     this.setRefreshCookie(res, result.refreshCookie);
     return { accessToken: result.accessToken, user: result.user };
   }
@@ -123,8 +128,12 @@ export class AuthController {
   })
   @ApiResponse({ status: 204, description: 'Logout efetuado — sem corpo de resposta.' })
   @ApiResponse({ status: 401, description: 'Access token ausente, expirado ou já denylistado.' })
-  async logout(@CurrentUser() user: AuthenticatedUser, @Res({ passthrough: true }) res: Response) {
-    await this.auth.logout(user.userId, user.role, user.jti);
+  async logout(
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    await this.auth.logout(user.userId, user.role, user.jti, accessMetaFrom(req));
     res.clearCookie(REFRESH_COOKIE, this.cookieOptions(0));
   }
 
@@ -137,6 +146,7 @@ export class AuthController {
   async logoutRefresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     await this.auth.logoutRefresh(
       (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE],
+      accessMetaFrom(req),
     );
     res.clearCookie(REFRESH_COOKIE, this.cookieOptions(0));
   }
