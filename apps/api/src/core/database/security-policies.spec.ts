@@ -105,6 +105,11 @@ describe('buildRlsPoliciesSql', () => {
 
   it('escrita de registros filhos exige o mesmo titular do recurso-pai', () => {
     for (const [table, parent, column] of [
+      ['protocols', 'anamnesis_sessions', 'anamnesis_session_id'],
+      ['protocols', 'protocol_renewal_sessions', 'renewal_session_id'],
+      ['protocol_renewal_sessions', 'protocols', 'previous_protocol_id'],
+      ['payments', 'subscriptions', 'subscription_id'],
+      ['conversations', 'protocols', 'protocol_id'],
       ['protocol_versions', 'protocols', 'protocol_id'],
       ['protocol_substitution_requests', 'protocols', 'protocol_id'],
       ['checkins', 'protocols', 'protocol_id'],
@@ -163,12 +168,18 @@ describe('buildRlsPoliciesSql', () => {
     expect(protocolsUpdate).not.toContain('professional_assignments');
   });
 
-  it('anamnesis_sessions libera a fase anônima escopada por sessão (Sato — achado 1)', () => {
-    // Órfã (user_id NULL + ANONYMOUS) só visível quando o GUC de sessão está
-    // ausente (lookup por token) OU bate a própria linha — nunca a de outra sessão.
-    expect(sql).toContain(
-      `"user_id" IS NULL AND nullif(current_setting('app.current_role', true), '') = 'ANONYMOUS' AND (nullif(current_setting('app.current_anamnesis_session_id', true), '') IS NULL OR "id"::text = nullif(current_setting('app.current_anamnesis_session_id', true), ''))`,
-    );
+  it('lookup anônimo exige token e consentimentos exigem sessão conhecida', () => {
+    const sessionRead = sql
+      .split(';')
+      .find((statement) => statement.includes('CREATE POLICY "anamnesis_sessions_rls_select"'));
+    expect(sessionRead).toContain("current_setting('app.current_anamnesis_token', true)");
+    expect(sessionRead).not.toContain("current_anamnesis_session_id', true), '') IS NULL");
+    const consentRead = sql
+      .split(';')
+      .find((statement) => statement.includes('CREATE POLICY "consents_rls_select"'));
+    expect(consentRead).toContain("current_setting('app.current_anamnesis_session_id', true)");
+    expect(consentRead).not.toContain('current_anamnesis_token');
+    expect(consentRead).not.toContain("current_anamnesis_session_id', true), '') IS NULL");
   });
 
   it('admin só grava auditoria em nome do próprio ator autenticado', () => {

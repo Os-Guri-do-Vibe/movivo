@@ -242,7 +242,7 @@ async function main(): Promise<void> {
     // Row-Level Security (US-1.1 / Sato §4): ENABLE+FORCE + políticas por tenant.
     // Idempotente e reaplicada a cada migração — mesma disciplina dos grants.
     console.log('[db:migrate] Reconciliando políticas RLS (FORCE) das tabelas de titular …');
-    await sql.unsafe(buildRlsPoliciesSql());
+    await sql.begin((tx) => tx.unsafe(buildRlsPoliciesSql()));
     console.log(`[db:migrate] RLS FORCE ativa em: ${RLS_TENANT_TABLES.join(', ')}.`);
 
     // Sprint 5: hash chain serializada + bloqueio de UPDATE/DELETE/TRUNCATE no banco.
@@ -324,6 +324,7 @@ async function main(): Promise<void> {
       SELECT relname AS table, relrowsecurity AS enabled, relforcerowsecurity AS forced
       FROM pg_class
       WHERE relname = ANY(${RLS_TENANT_TABLES}) AND relkind = 'r'
+        AND relnamespace = 'public'::regnamespace
     `;
     const notForced = rls.filter((r) => !r.enabled || !r.forced).map((r) => r.table);
     const missing = RLS_TENANT_TABLES.filter((t) => !rls.some((r) => r.table === t));

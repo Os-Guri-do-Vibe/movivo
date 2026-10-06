@@ -210,8 +210,9 @@ describe('CONSENT — prova de consentimento LGPD (US-1.2)', () => {
 
   it('(f) `movivo_app` NÃO consegue apagar consentimento (append-only)', async () => {
     await expect(
-      tenant.runAsToken((tx) =>
-        tx.execute(sql`DELETE FROM consents WHERE anamnesis_session_id = ${sessionA.id}`),
+      tenant.runAsToken(
+        (tx) => tx.execute(sql`DELETE FROM consents WHERE anamnesis_session_id = ${sessionA.id}`),
+        sessionA.token,
       ),
     ).rejects.toThrow();
     expect(await rowsOf(sessionA.id)).toHaveLength(2); // a prova sobreviveu
