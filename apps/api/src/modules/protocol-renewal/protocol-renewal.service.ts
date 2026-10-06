@@ -19,7 +19,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import {
   anamnesisStructuredSchema,
   PROTOCOL_RENEWAL_STEP_SCHEMAS,
@@ -106,83 +106,103 @@ export class ProtocolRenewalService {
       throw new ForbiddenException('Consentimento de dados de saúde revogado.');
     }
 
-    switch (step) {
-      case 1: {
-        const parsed = parseStepPayload(PROTOCOL_RENEWAL_STEP_SCHEMAS[1], data);
-        await this.writeJsonb(row.userId, row.id, 'dataBlock1', parsed);
-        break;
-      }
-      case 2: {
-        const parsed = parseStepPayload(PROTOCOL_RENEWAL_STEP_SCHEMAS[2], data);
-        await this.writeJsonb(row.userId, row.id, 'dataBlock2', parsed);
-        break;
-      }
-      case 3: {
-        const parsed = parseStepPayload(PROTOCOL_RENEWAL_STEP_SCHEMAS[3], data);
-        await this.writeHealthBlock(row.userId, row.id, parsed);
-        break;
-      }
-      case 4: {
-        const parsed = parseStepPayload(PROTOCOL_RENEWAL_STEP_SCHEMAS[4], data);
-        await this.writeJsonb(row.userId, row.id, 'dataBlock4', parsed);
-        break;
-      }
-      case 5: {
-        const parsed = parseStepPayload(PROTOCOL_RENEWAL_STEP_SCHEMAS[5], data);
-        await this.writeJsonb(row.userId, row.id, 'dataBlock5', parsed);
-        break;
-      }
-    }
-
-    const currentStep = Math.min(Math.max(row.lastStep, step + 1), 5);
-    await this.db.runAsUser(row.userId, 'USER', (tx) =>
+    const schema = PROTOCOL_RENEWAL_STEP_SCHEMAS[step];
+    if (!schema) throw new BadRequestException('Etapa de renovação inválida.');
+    const parsed = parseStepPayload(schema as ZodType<unknown>, data);
+    const value = step === 3 ? await this.cipher.encryptHealth(JSON.stringify(parsed)) : parsed;
+    const column = `dataBlock${step}`;
+    // Um único UPDATE salva o bloco e o progresso, sem reabrir uma sessão enviada.
+    const [updated] = await this.db.runAsUser(row.userId, 'USER', (tx) =>
       tx
         .update(protocolRenewalSessions)
-        .set({ lastStep: currentStep })
-        .where(eq(protocolRenewalSessions.id, row.id)),
+        .set({
+          [column]: value,
+          lastStep: sql`greatest(${protocolRenewalSessions.lastStep}, ${Math.min(step + 1, 5)})`,
+        })
+        .where(
+          and(
+            eq(protocolRenewalSessions.id, row.id),
+            eq(protocolRenewalSessions.token, token),
+            eq(protocolRenewalSessions.status, 'IN_PROGRESS'),
+            sql`${protocolRenewalSessions.expiresAt} > clock_timestamp()`,
+          ),
+        )
+        .returning({ currentStep: protocolRenewalSessions.lastStep }),
     );
-    return { currentStep };
+    if (!updated) {
+      await this.requireActiveSession(token);
+      throw new ConflictException('Este formulário mudou durante o salvamento.');
+    }
+    return updated;
   }
 
   /** `POST /protocol-renewal/session/{token}/submit`. */
   async submit(token: string): Promise<RenewalSubmitResult> {
-    const row = await this.requireActiveSession(token);
-    if (
-      !row.dataBlock1 ||
-      !row.dataBlock2 ||
-      !row.dataBlock3 ||
-      !row.dataBlock4 ||
-      !row.dataBlock5
-    ) {
-      throw new BadRequestException('Complete os 5 blocos antes de enviar.');
-    }
-    if (!(await this.healthConsent.hasActiveForUser(row.userId))) {
-      throw new ForbiddenException('Consentimento de dados de saúde revogado.');
-    }
+    const initial = await this.requireActiveSession(token);
+    const { row, safety, submittedAt } = await this.db.runAsUser(
+      initial.userId,
+      'USER',
+      async (tx) => {
+        // O snapshot usado na avaliação de segurança deve ser o mesmo enviado.
+        const [row] = await tx
+          .select()
+          .from(protocolRenewalSessions)
+          .where(
+            and(
+              eq(protocolRenewalSessions.id, initial.id),
+              eq(protocolRenewalSessions.token, token),
+            ),
+          )
+          .limit(1)
+          .for('update');
+        if (!row) throw new NotFoundException('Sessão de renovação não encontrada.');
+        if (this.isExpired(row.status, row.expiresAt))
+          throw new GoneException('Sessão de renovação expirada.');
+        if (row.status !== 'IN_PROGRESS')
+          throw new ConflictException('Este formulário de renovação já foi enviado.');
+        if (
+          !row.dataBlock1 ||
+          !row.dataBlock2 ||
+          !row.dataBlock3 ||
+          !row.dataBlock4 ||
+          !row.dataBlock5
+        ) {
+          throw new BadRequestException('Complete os 5 blocos antes de enviar.');
+        }
+        if (!(await this.healthConsent.hasActiveForUser(row.userId))) {
+          throw new ForbiddenException('Consentimento de dados de saúde revogado.');
+        }
+        const block3 = await this.readHealthBlock(row.dataBlock3);
+        const safety = evaluateRenewalSafety(block3);
+        const submittedAt = new Date();
+        const [submitted] = await tx
+          .update(protocolRenewalSessions)
+          .set({ status: 'SUBMITTED', submittedAt })
+          .where(
+            and(
+              eq(protocolRenewalSessions.id, row.id),
+              eq(protocolRenewalSessions.status, 'IN_PROGRESS'),
+              sql`${protocolRenewalSessions.expiresAt} > clock_timestamp()`,
+            ),
+          )
+          .returning({ id: protocolRenewalSessions.id });
+        if (!submitted) throw new GoneException('Sessão de renovação expirada.');
 
-    const block3 = await this.readHealthBlock(row.dataBlock3);
-    const safety = evaluateRenewalSafety(block3);
-    const submittedAt = new Date();
-
-    await this.db.runAsUser(row.userId, 'USER', async (tx) => {
-      await tx
-        .update(protocolRenewalSessions)
-        .set({ status: 'SUBMITTED', submittedAt })
-        .where(eq(protocolRenewalSessions.id, row.id));
-
-      if (safety.newPainNeedsHandoff) {
-        await tx
-          .insert(handoffAlerts)
-          .values({
-            userId: row.userId,
-            level: 'ALERT',
-            reason: 'RENOVACAO_DOR_NOVA',
-            sourceType: 'PROTOCOL_RENEWAL',
-            sourceId: row.id,
-          })
-          .onConflictDoNothing();
-      }
-    });
+        if (safety.newPainNeedsHandoff) {
+          await tx
+            .insert(handoffAlerts)
+            .values({
+              userId: row.userId,
+              level: 'ALERT',
+              reason: 'RENOVACAO_DOR_NOVA',
+              sourceType: 'PROTOCOL_RENEWAL',
+              sourceId: row.id,
+            })
+            .onConflictDoNothing();
+        }
+        return { row, safety, submittedAt };
+      },
+    );
 
     // Gatilho do pipeline de geração do próximo mesociclo — enfileira SEMPRE. O gate de
     // segurança (pergunta 10) é aplicado no Worker, exatamente como o PAR-Q inicial é
@@ -234,38 +254,10 @@ export class ProtocolRenewalService {
     return row;
   }
 
-  private async writeJsonb(
-    userId: string,
-    sessionId: string,
-    column: 'dataBlock1' | 'dataBlock2' | 'dataBlock4' | 'dataBlock5',
-    value: unknown,
-  ): Promise<void> {
-    await this.db.runAsUser(userId, 'USER', (tx) =>
-      tx
-        .update(protocolRenewalSessions)
-        .set({ [column]: value })
-        .where(eq(protocolRenewalSessions.id, sessionId)),
-    );
-  }
-
   private async readHealthBlock(ciphertext: Buffer | null): Promise<ProtocolRenewalBlock3> {
     if (!ciphertext) throw new BadRequestException('Bloco de segurança não preenchido.');
     const json = await this.cipher.decryptHealth(ciphertext);
     return PROTOCOL_RENEWAL_STEP_SCHEMAS[3].parse(JSON.parse(json));
-  }
-
-  private async writeHealthBlock(
-    userId: string,
-    sessionId: string,
-    value: ProtocolRenewalBlock3,
-  ): Promise<void> {
-    const encrypted = await this.cipher.encryptHealth(JSON.stringify(value));
-    await this.db.runAsUser(userId, 'USER', (tx) =>
-      tx
-        .update(protocolRenewalSessions)
-        .set({ dataBlock3: encrypted })
-        .where(eq(protocolRenewalSessions.id, sessionId)),
-    );
   }
 
   private isExpired(status: string, expiresAt: Date): boolean {
@@ -293,6 +285,7 @@ export class ProtocolRenewalService {
           and(
             eq(protocolRenewalSessions.id, id),
             eq(protocolRenewalSessions.status, 'IN_PROGRESS'),
+            sql`${protocolRenewalSessions.expiresAt} <= clock_timestamp()`,
           ),
         ),
     );

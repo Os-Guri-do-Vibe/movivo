@@ -13,14 +13,14 @@
  * composição na mesma transação. O serviço valida a soma antes (400 legível); o trigger
  * `trg_partners_share_total` valida de novo no commit (pega também SQL manual).
  */
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import {
   PARTNER_DISTRIBUTION_CAVEATS,
   TOTAL_SHARE_BASIS_POINTS,
   replacePartnersSchema,
   type PartnerDistributionResponse,
 } from '@movivo/shared';
-import { asc, isNull } from 'drizzle-orm';
+import { asc, desc, isNull, sql } from 'drizzle-orm';
 
 import { partners } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
@@ -96,6 +96,18 @@ export class PartnersService {
     }
 
     const rows = await this.db.runAsSystem(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('movivo.partners.composition'))`);
+      const [latest] = await tx
+        .select({ validFrom: partners.validFrom })
+        .from(partners)
+        .orderBy(desc(partners.validFrom))
+        .limit(1);
+      if (latest && input.validFrom <= latest.validFrom) {
+        throw new ConflictException(
+          'A nova composição deve ter vigência posterior à última composição.',
+        );
+      }
+
       await tx.update(partners).set({ validTo: input.validFrom }).where(isNull(partners.validTo));
       const inserted = await tx
         .insert(partners)

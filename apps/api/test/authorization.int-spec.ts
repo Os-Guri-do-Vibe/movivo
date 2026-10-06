@@ -6,7 +6,7 @@ import { ModulesContainer, NestFactory } from '@nestjs/core';
 import { GUARDS_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { eq, inArray } from 'drizzle-orm';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { AppModule } from '../src/app.module';
 import { AccessLinkService } from '../src/core/database/access-link.service';
@@ -18,12 +18,15 @@ import {
   users,
   workoutAccessTokens,
   workoutSessions,
+  workoutCompletions,
+  handoffAlerts,
   workoutSetEntries,
 } from '../src/core/database/schema';
 import {
   TenantDatabase,
   type TenantTransaction,
 } from '../src/core/database/tenant-database.service';
+import { QueueManager } from '../src/modules/jobs/queue-manager.service';
 import { WorkoutAccessService } from '../src/modules/workout/workout-access.service';
 import { RolesGuard } from '../src/modules/auth/roles.guard';
 import { ROLES_KEY } from '../src/modules/auth/roles.decorator';
@@ -42,6 +45,8 @@ beforeAll(async () => {
   app = await NestFactory.create(AppModule, { logger: false });
   app.setGlobalPrefix('api/v1');
   await app.init();
+  // Testa HTTP e persistência; consumidores de feedback ficam fora deste cenário.
+  vi.spyOn(app.get(QueueManager), 'enqueue').mockResolvedValue('fixture-job');
   db = app.get(TenantDatabase);
   access = app.get(AccessLinkService);
   for (const name of ['Aluno A isolado', 'Aluno B isolado']) {
@@ -104,6 +109,8 @@ afterAll(async () => {
   try {
     if (db && holders.length)
       await db.runAsSystem(async (tx) => {
+        await tx.delete(workoutCompletions).where(inArray(workoutCompletions.userId, holders));
+        await tx.delete(handoffAlerts).where(inArray(handoffAlerts.userId, holders));
         await tx.delete(workoutSetEntries).where(inArray(workoutSetEntries.userId, holders));
         await tx.delete(workoutAccessTokens).where(inArray(workoutAccessTokens.userId, holders));
         await tx.delete(workoutSessions).where(inArray(workoutSessions.userId, holders));
@@ -279,5 +286,80 @@ describe('autorização por recurso na API', () => {
     await http().get(`${prefix}/anamnesis/session/${ids[1].id}`).expect(404);
     await http().get(`${prefix}/checkin/session/${anamnesisTokens[0]}`).expect(404);
     await http().get(`${prefix}/protocol-renewal/session/${anamnesisTokens[0]}`).expect(404);
+  });
+});
+
+describe('validação server-side — HTTP direto sem frontend', () => {
+  it.each([
+    {},
+    { email: 'inválido', password: 'segredo' },
+    { email: 42, password: 'segredo' },
+    { email: 'aluno@example.invalid', password: [] },
+    { email: 'aluno@example.invalid', password: 'x'.repeat(201) },
+  ])('login rejeita tipos, formato, tamanho e obrigatórios', async (body) => {
+    const response = await http().post(`${prefix}/auth/login`).send(body).expect(400);
+    expect(response.body).toEqual({
+      statusCode: 400,
+      error: 'Bad Request',
+      message: 'Dados de entrada inválidos.',
+    });
+  });
+
+  it.each([
+    {},
+    { entries: 'série' },
+    { entries: [{ exerciseId: 'x', setNumber: 21 }] },
+    { entries: [{ exerciseId: 'x', setNumber: 1, reps: '10' }] },
+    { entries: [{ exerciseId: 'x', setNumber: 1, loadUnit: 'INVALID' }] },
+    { entries: [{ exerciseId: 'x', setNumber: 1, loadValue: -1 }] },
+    { entries: [{ exerciseId: 'x', setNumber: 1, reps: 301 }] },
+    { entries: [{ exerciseId: 'x', setNumber: 1, completed: true, skipped: true }] },
+    { entries: Array.from({ length: 301 }, () => ({ exerciseId: 'x', setNumber: 1 })) },
+  ])('séries rejeitam campos inválidos antes de persistir', async (body) => {
+    await http()
+      .patch(`${prefix}/workouts/sessions/${fixtures[0].sessionId}/sets`)
+      .set('Authorization', bearer)
+      .send(body)
+      .expect(400);
+  });
+
+  it('UUID e data de calendário são validados no backend', async () => {
+    await http()
+      .post(`${prefix}/workouts/sessions/not-a-uuid/start`)
+      .set('Authorization', bearer)
+      .expect(400);
+    await http()
+      .get(`${prefix}/workouts/journal`)
+      .query({ date: '2026-02-30' })
+      .set('Authorization', bearer)
+      .expect(400);
+  });
+
+  it('um treino só pode ser finalizado uma vez, mesmo com requisições simultâneas', async () => {
+    const path = `${prefix}/workouts/sessions/${fixtures[0].sessionId}`;
+    const responses = await Promise.all(
+      [5, 9].map((perceivedEffort) =>
+        http().post(`${path}/finish`).set('Authorization', bearer).send({ perceivedEffort }),
+      ),
+    );
+    expect(responses.map((response) => response.status).sort()).toEqual([201, 400]);
+    const [before] = await db.runAsSystem((tx) =>
+      tx.select().from(workoutSessions).where(eq(workoutSessions.id, fixtures[0].sessionId)),
+    );
+    await http()
+      .post(`${path}/finish`)
+      .set('Authorization', bearer)
+      .send({ perceivedEffort: 10 })
+      .expect(400);
+    await http().post(`${path}/start`).set('Authorization', bearer).expect(400);
+    await http()
+      .patch(`${path}/sets`)
+      .set('Authorization', bearer)
+      .send({ entries: [] })
+      .expect(400);
+    const [after] = await db.runAsSystem((tx) =>
+      tx.select().from(workoutSessions).where(eq(workoutSessions.id, fixtures[0].sessionId)),
+    );
+    expect(after).toEqual(before);
   });
 });

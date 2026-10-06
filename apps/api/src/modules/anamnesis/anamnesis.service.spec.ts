@@ -97,6 +97,7 @@ interface TxState {
   insertError?: unknown;
   /** Coletor dos payloads de `.set()` — usado para inspecionar o que o submit persiste. */
   updates?: Record<string, unknown>[];
+  lockedSelect?: unknown[];
 }
 
 function makeTx(state: TxState) {
@@ -113,7 +114,10 @@ function makeTx(state: TxState) {
   const selectChain = {
     from: () => selectChain,
     where: () => selectChain,
-    limit: () => Promise.resolve(state.select ?? []),
+    limit: () =>
+      Object.assign(Promise.resolve(state.select ?? []), {
+        for: async () => state.lockedSelect ?? state.select ?? [],
+      }),
   };
   return {
     select: () => selectChain,
@@ -126,7 +130,7 @@ function makeTx(state: TxState) {
     update: () => ({
       set: (values: Record<string, unknown>) => {
         state.updates?.push(values);
-        return { where: () => thenable(state.update ?? []) };
+        return { where: () => thenable(state.update ?? [{ id: 'sess-1' }]) };
       },
     }),
     execute: () => Promise.resolve([]),
@@ -178,6 +182,7 @@ function makeService(state: TxState = {}) {
 function sessionRow(over: Record<string, unknown> = {}) {
   return {
     id: 'sess-1',
+    userId: null,
     token: 't'.repeat(64),
     status: 'IN_PROGRESS',
     lastStep: 1,
@@ -567,5 +572,86 @@ describe('Submit — gate PAR-Q e outcome', () => {
   it('purgeExpiredSessions retorna a contagem de sessões expurgadas', async () => {
     const { svc } = makeService({ update: [{ id: 'a' }, { id: 'b' }] });
     await expect(svc.purgeExpiredSessions()).resolves.toBe(2);
+  });
+});
+
+describe('Submit — snapshot e transição atômicos', () => {
+  it.each([
+    { status: 'SUBMITTED', userId: 'existing-user' },
+    { status: 'IN_PROGRESS', userId: 'existing-user' },
+    { status: 'EXPIRED' },
+    { expiresAt: past() },
+  ])('recusa estado atual alterado após leitura por token: %o', async (over) => {
+    const inserts: Record<string, unknown>[] = [];
+    const updates: Record<string, unknown>[] = [];
+    const { svc, consents, queues } = makeService({
+      select: [sessionRow()],
+      lockedSelect: [sessionRow(over)],
+      inserts,
+      updates,
+    });
+    await expect(svc.submit('t')).rejects.toThrow();
+    expect(inserts).toEqual([]);
+    expect(updates).toEqual([]);
+    expect(consents.linkSessionToUser).not.toHaveBeenCalled();
+    expect(queues.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('revalida blocos sob lock antes de criar titular ou enviar ao pipeline', async () => {
+    const inserts: Record<string, unknown>[] = [];
+    const { svc, queues } = makeService({
+      select: [sessionRow()],
+      lockedSelect: [sessionRow({ dataBlock3: null })],
+      inserts,
+    });
+    await expect(svc.submit('t')).rejects.toThrow(/complete as três etapas/i);
+    expect(inserts).toEqual([]);
+    expect(queues.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('prazo vencido na escrita aborta a transação sem vincular consentimentos ou enfileirar', async () => {
+    const { svc, consents, queues } = makeService({ select: [sessionRow()], update: [] });
+    await expect(svc.submit('t')).rejects.toThrow(/expirada/i);
+    expect(consents.linkSessionToUser).not.toHaveBeenCalled();
+    expect(queues.enqueue).not.toHaveBeenCalled();
+  });
+});
+
+describe('PATCH — snapshot e progresso atômicos', () => {
+  it.each([
+    { lockedSelect: [] },
+    { lockedSelect: [sessionRow({ status: 'SUBMITTED', userId: 'user-1' })] },
+    { lockedSelect: [sessionRow({ status: 'EXPIRED' })] },
+    { lockedSelect: [sessionRow({ expiresAt: past() })] },
+  ])(
+    'nega edição se a sessão deixou de estar disponível antes do lock: %o',
+    async ({ lockedSelect }) => {
+      const updates: Record<string, unknown>[] = [];
+      const { svc, cipher } = makeService({ select: [sessionRow()], lockedSelect, updates });
+      await expect(svc.patchStep('t', 3, STEP3)).rejects.toThrow();
+      expect(cipher.encryptHealth).not.toHaveBeenCalled();
+      expect(updates).toEqual([]);
+    },
+  );
+
+  it('mescla a saúde da versão bloqueada, preservando mudanças de outra etapa', async () => {
+    const fresh = { ...HEALTH_BLOCK(), freeText: { consistencyBarrierOther: 'restrição recente' } };
+    const { svc, cipher } = makeService({
+      select: [sessionRow()],
+      lockedSelect: [sessionRow({ dataBlock2: Buffer.from(JSON.stringify(fresh)), lastStep: 3 })],
+    });
+    (cipher.decryptHealth as ReturnType<typeof vi.fn>).mockImplementation(async (buffer: Buffer) =>
+      buffer.toString(),
+    );
+    await expect(svc.patchStep('t', 3, STEP3)).resolves.toEqual({ currentStep: 3 });
+    const encrypted = (cipher.encryptHealth as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[0] as string;
+    expect(JSON.parse(encrypted).freeText).toEqual(fresh.freeText);
+    expect(JSON.parse(encrypted).parq).toEqual(STEP3.parq);
+  });
+
+  it('não confirma progresso quando o prazo venceu antes da escrita final', async () => {
+    const { svc } = makeService({ select: [sessionRow()], update: [] });
+    await expect(svc.patchStep('t', 3, STEP3)).rejects.toThrow(/expirada/i);
   });
 });

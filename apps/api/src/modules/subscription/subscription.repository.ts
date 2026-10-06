@@ -3,7 +3,7 @@
  * via `runAsUser` — mesma categoria dos outros `*.repository.ts` (fora da cobertura unitária,
  * provado pela integração contra Postgres real).
  */
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { and, asc, desc, eq, lte, or, type SQL } from 'drizzle-orm';
 
 import type { BiologicalSex } from '@movivo/shared';
@@ -21,6 +21,7 @@ import {
   type TransitionActor,
 } from './subscription-lifecycle';
 import type { GatewayEvent } from './payment/payment-gateway.types';
+import { canTransition, InvalidTransitionError } from './subscription-model';
 
 @Injectable()
 export class SubscriptionRepository {
@@ -161,9 +162,14 @@ export class SubscriptionRepository {
       const [before] = await tx
         .select({ status: subscriptions.status })
         .from(subscriptions)
-        .where(eq(subscriptions.id, id));
+        .where(eq(subscriptions.id, id))
+        .for('update');
+      if (!before) throw new NotFoundException('Assinatura não encontrada.');
+      if (!canTransition(before.status, values.status)) {
+        throw new InvalidTransitionError(before.status, values.status);
+      }
       await tx.update(subscriptions).set(values).where(eq(subscriptions.id, id));
-      const marker = lifecycleMarkerFor(before?.status ?? null, values.status);
+      const marker = lifecycleMarkerFor(before.status, values.status);
       if (marker) {
         await recordLifecycleTransition(tx, {
           userId,

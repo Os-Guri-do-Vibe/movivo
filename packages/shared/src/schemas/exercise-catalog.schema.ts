@@ -60,7 +60,11 @@ export const catalogExerciseCandidateSchema = z.object({
   pattern: movementPatternSchema,
   muscleGroups: z.array(z.string().trim().min(2).max(40)).min(1).max(6),
   equipment: z.array(z.string().trim().min(2).max(40)).max(6),
-  locations: z.array(trainingLocationSchema).min(1),
+  locations: z
+    .array(trainingLocationSchema)
+    .min(1)
+    .max(trainingLocationSchema.options.length)
+    .refine((locations) => new Set(locations).size === locations.length, 'locais repetidos'),
   /**
    * Níveis de aluno para os quais o exercício é indicado (achado 2026-09-29, decisão do
    * fundador): a IA só recebe o exercício para alunos de um nível marcado aqui. Substitui o

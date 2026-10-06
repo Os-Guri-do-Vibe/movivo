@@ -251,6 +251,21 @@ export class FinanceService {
   async createModelPricing(actor: AuthenticatedUser, body: unknown) {
     const input = this.parse(createModelPricingSchema, body);
     const row = await this.db.runAsSystem(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtextextended(${`movivo.model-pricing:${input.model}`}, 0))`,
+      );
+      const [latest] = await tx
+        .select({ validFrom: modelPricing.validFrom })
+        .from(modelPricing)
+        .where(eq(modelPricing.model, input.model))
+        .orderBy(desc(modelPricing.validFrom))
+        .limit(1);
+      if (latest && input.validFrom <= latest.validFrom) {
+        throw new ConflictException(
+          'A nova vigência deve ser posterior à última vigência do modelo.',
+        );
+      }
+
       await tx
         .update(modelPricing)
         .set({ validTo: input.validFrom })

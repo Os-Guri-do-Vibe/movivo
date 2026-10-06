@@ -10,7 +10,7 @@ import { z } from 'zod';
 
 import { CANONICAL_CHANNELS } from '../attribution';
 
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data deve estar em `YYYY-MM-DD`.');
+const isoDate = z.iso.date({ error: 'Data deve ser válida e estar em `YYYY-MM-DD`.' });
 
 /** Canal já canônico (taxonomia de Helena). Quem lança escolhe da lista. */
 export const adSpendChannelSchema = z.enum(CANONICAL_CHANNELS);

@@ -2,6 +2,7 @@
 import {
   Body,
   Controller,
+  ConflictException,
   Get,
   Header,
   NotFoundException,
@@ -23,15 +24,17 @@ import {
   type SubscriptionView,
 } from '@movivo/shared';
 import type { Request } from 'express';
+import { z } from 'zod';
 
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
 import { AccessLinkService } from '../../core/database/access-link.service';
 import { CheckoutTokenService } from './checkout-token.service';
-import { SUBSCRIPTION_TERMS_VERSION } from './subscription-model';
+import { InvalidTransitionError, SUBSCRIPTION_TERMS_VERSION } from './subscription-model';
 import { SubscriptionService } from './subscription.service';
 
 /** Sem contrato integral publicado, nenhum novo pagamento pode ser iniciado. */
 const PUBLISHED_SUBSCRIPTION_TERMS_VERSION: string | null = null;
+const cancelSchema = z.strictObject({ reason: z.string().trim().max(500).optional() });
 
 const TOKEN_PARAM = {
   name: 'token',
@@ -138,8 +141,8 @@ export class SubscriptionController {
   })
   async cancel(@Param('token') token: string, @Body() body: unknown): Promise<{ status: string }> {
     const userId = await this.userId(token);
-    const reason = extractReason(body);
-    return this.ensureFound(await this.subs.cancel(userId, reason));
+    const { reason } = cancelSchema.parse(body ?? {});
+    return this.ensureFound(this.subs.cancel(userId, reason || undefined));
   }
 
   @Post(':token/pause')
@@ -152,7 +155,7 @@ export class SubscriptionController {
     description: 'Token inválido, expirado, revogado ou titular sem assinatura.',
   })
   async pause(@Param('token') token: string): Promise<{ status: string }> {
-    return this.ensureFound(await this.subs.pause(await this.userId(token)));
+    return this.ensureFound(this.subs.pause(await this.userId(token)));
   }
 
   @Post(':token/resume')
@@ -165,7 +168,7 @@ export class SubscriptionController {
     description: 'Token inválido, expirado, revogado ou titular sem assinatura.',
   })
   async resume(@Param('token') token: string): Promise<{ status: string }> {
-    return this.ensureFound(await this.subs.resume(await this.userId(token)));
+    return this.ensureFound(this.subs.resume(await this.userId(token)));
   }
 
   private async userId(token: string): Promise<string> {
@@ -180,14 +183,17 @@ export class SubscriptionController {
     return verified;
   }
 
-  private ensureFound(result: { status: string }): { status: string } {
+  private async ensureFound(operation: Promise<{ status: string }>): Promise<{ status: string }> {
+    let result: { status: string };
+    try {
+      result = await operation;
+    } catch (error) {
+      if (error instanceof InvalidTransitionError) {
+        throw new ConflictException('Transição de assinatura não permitida.');
+      }
+      throw error;
+    }
     if (result.status === 'NO_SUBSCRIPTION') throw new NotFoundException();
     return result;
   }
-}
-
-/** Motivo do cancelamento — texto livre limitado (validação de trust boundary). */
-function extractReason(body: unknown): string | undefined {
-  const reason = (body as { reason?: unknown } | null)?.reason;
-  return typeof reason === 'string' && reason.trim() ? reason.trim().slice(0, 500) : undefined;
 }

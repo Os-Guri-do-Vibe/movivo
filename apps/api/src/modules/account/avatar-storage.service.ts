@@ -8,7 +8,7 @@
  * token de acesso opaco — por isso a rota de leitura (`AccountController.serveAvatar`)
  * não exige guard, e a defesa contra path traversal é o regex estrito do nome.
  */
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -31,11 +31,31 @@ const EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
   'image/webp': 'webp',
 };
 
+/** Identificação por assinatura; não é decodificação ou sanitização completa da imagem. */
+function hasImageSignature(buffer: Buffer, mimetype: string): boolean {
+  if (mimetype === 'image/jpeg') {
+    return buffer.length > 3 && buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]));
+  }
+  if (mimetype === 'image/png') {
+    return (
+      buffer.length > 8 && buffer.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))
+    );
+  }
+  return (
+    mimetype === 'image/webp' &&
+    buffer.length > 16 &&
+    buffer.toString('ascii', 0, 4) === 'RIFF' &&
+    buffer.toString('ascii', 8, 12) === 'WEBP' &&
+    ['VP8 ', 'VP8L', 'VP8X'].includes(buffer.toString('ascii', 12, 16)) &&
+    buffer.readUInt32LE(4) === buffer.length - 8
+  );
+}
+
 /**
  * Teto absoluto lido pelo `FileInterceptor` do multer, que precisa do número na
  * decoração da rota (antes da DI resolver `AppConfigService`). É só a rede de
  * segurança contra abuso grosseiro de memória — o limite de verdade, configurável via
- * `AVATAR_UPLOAD_MAX_BYTES`, é checado explicitamente no controller contra `file.size`.
+ * `AVATAR_UPLOAD_MAX_BYTES`, é checado no controller e novamente aqui contra os bytes reais do buffer.
  * Mantido igual ao teto do schema (`env.schema.ts`) para nunca divergir por engano.
  */
 export const AVATAR_UPLOAD_HARD_CEILING_BYTES = 5 * 1024 * 1024;
@@ -66,12 +86,19 @@ export class AvatarStorageService {
 
   /** Grava o arquivo com um nome novo (UUID) e devolve o nome salvo. */
   async save(file: UploadedAvatarFile): Promise<string> {
-    const extension = EXTENSION_BY_MIME[file.mimetype];
-    if (!extension) {
-      throw new Error(
-        `AvatarStorageService.save: tipo de imagem não suportado (${file.mimetype}).`,
-      );
+    if (!file || !Buffer.isBuffer(file.buffer) || file.buffer.length === 0) {
+      throw new BadRequestException('Envie um arquivo de imagem não vazio.');
     }
+    if (!this.allowedMimeTypes.includes(file.mimetype)) {
+      throw new BadRequestException('Formato de imagem não suportado (use JPEG, PNG ou WebP).');
+    }
+    if (file.buffer.length > Math.min(this.maxUploadBytes, AVATAR_UPLOAD_HARD_CEILING_BYTES)) {
+      throw new BadRequestException('Arquivo excede o tamanho máximo permitido.');
+    }
+    if (!hasImageSignature(file.buffer, file.mimetype)) {
+      throw new BadRequestException('O conteúdo do arquivo não corresponde ao formato da imagem.');
+    }
+    const extension = EXTENSION_BY_MIME[file.mimetype];
     await mkdir(this.dir(), { recursive: true });
     const filename = `${randomUUID()}.${extension}`;
     await writeFile(this.path(filename), file.buffer);

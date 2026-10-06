@@ -370,10 +370,7 @@ export const UNDER_AGE_MESSAGE =
   'No momento, a Movivo está disponível apenas para maiores de 18 anos.';
 
 /** Data civil `YYYY-MM-DD` (sem hora — nascimento não tem fuso). */
-export const isoDateSchema = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use o formato AAAA-MM-DD.')
-  .refine((value) => !Number.isNaN(Date.parse(`${value}T00:00:00Z`)), 'Data inválida.');
+export const isoDateSchema = z.iso.date({ error: 'Data inválida. Use o formato AAAA-MM-DD.' });
 
 /**
  * Idade completa em anos numa data de referência. Determinística e sem dependência:

@@ -107,6 +107,17 @@ afterAll(async () => {
 }, 60_000);
 
 describe('SubscriptionModule — gateway MOCK e ciclo de vida (US-4.1)', () => {
+  it('rejeita estado terminal na escrita mesmo se o chamador tiver lido um estado anterior', async () => {
+    const userId = await createUser();
+    const stale = await svc.startTrial(userId);
+    await svc.cancel(userId);
+    await expect(
+      app.get(SubscriptionRepository).patch(userId, stale.id, { status: 'ACTIVE' }),
+    ).rejects.toBeInstanceOf(InvalidTransitionError);
+    const current = await svc.getForUser(userId);
+    expect(current?.status).toBe('CANCELED');
+  });
+
   it('boota sem chave de gateway → adaptador MOCK ativo', () => {
     expect(gateway).toBeInstanceOf(MockGateway);
     expect(gateway.hasCredentials()).toBe(true);

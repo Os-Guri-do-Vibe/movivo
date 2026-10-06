@@ -93,6 +93,7 @@ function queryChain(rows: unknown[]) {
     from: () => chain,
     innerJoin: () => chain,
     where: () => chain,
+    for: () => chain,
     orderBy: () => chain,
     limit: () => chain,
     then: (resolve: (value: unknown[]) => unknown, reject: (reason: unknown) => unknown) =>
@@ -594,11 +595,10 @@ describe('WorkoutJournalService mutations', () => {
       ),
     ).resolves.toBeUndefined();
     await expect(
-      makeService({ selects: [owned, [WORKOUT]], updateReturns: [[]] }).service.start(
-        USER_ID,
-        WORKOUT_ID,
-        now,
-      ),
+      makeService({
+        selects: [owned, [{ ...WORKOUT, status: 'IN_PROGRESS' }]],
+        updateReturns: [[]],
+      }).service.start(USER_ID, WORKOUT_ID, now),
     ).resolves.toBeUndefined();
     await expect(
       makeService({ selects: [[]] }).service.start(USER_ID, WORKOUT_ID, now),
@@ -635,7 +635,9 @@ describe('WorkoutJournalService mutations', () => {
       ]),
     ).rejects.toBeInstanceOf(BadRequestException);
 
-    const { service, inserted } = makeService({ selects: [[WORKOUT]] });
+    const { service, inserted } = makeService({
+      selects: [[{ ...WORKOUT, status: 'IN_PROGRESS' }]],
+    });
     await service.saveSets(USER_ID, WORKOUT_ID, [
       {
         exerciseId: 'squat',
@@ -660,7 +662,9 @@ describe('WorkoutJournalService mutations', () => {
   });
 
   it('decide no servidor o que é série feita: reps/tempo > 0 e não pulada, nunca só carga', async () => {
-    const { service, inserted } = makeService({ selects: [[WORKOUT]] });
+    const { service, inserted } = makeService({
+      selects: [[{ ...WORKOUT, status: 'IN_PROGRESS' }]],
+    });
     await service.saveSets(USER_ID, WORKOUT_ID, [
       {
         exerciseId: 'squat',
@@ -711,17 +715,15 @@ describe('WorkoutJournalService mutations', () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
-      makeService({ selects: [[{ ...WORKOUT, startedAt: new Date() }]] }).service.finish(
-        USER_ID,
-        WORKOUT_ID,
-        {
-          perceivedEffort: 5,
-          feelingNotes: '',
-          painReported: true,
-          painExerciseIds: ['outro'],
-          painNotes: 'dor',
-        },
-      ),
+      makeService({
+        selects: [[{ ...WORKOUT, status: 'IN_PROGRESS', startedAt: new Date() }]],
+      }).service.finish(USER_ID, WORKOUT_ID, {
+        perceivedEffort: 5,
+        feelingNotes: '',
+        painReported: true,
+        painExerciseIds: ['outro'],
+        painNotes: 'dor',
+      }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -729,7 +731,11 @@ describe('WorkoutJournalService mutations', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-10T12:00:00.000Z'));
     try {
-      const workout = { ...WORKOUT, startedAt: new Date('2026-08-10T10:30:00.000Z') };
+      const workout = {
+        ...WORKOUT,
+        status: 'IN_PROGRESS',
+        startedAt: new Date('2026-08-10T10:30:00.000Z'),
+      };
       const structured = {
         primaryGoal: 'GAIN_MUSCLE',
         emphasis: [],
@@ -794,7 +800,11 @@ describe('WorkoutJournalService mutations', () => {
   });
 
   it('encerra sem insight quando faltam dados ou a media respeita a preferencia', async () => {
-    const workout = { ...WORKOUT, startedAt: new Date(Date.now() - 3_600_000) };
+    const workout = {
+      ...WORKOUT,
+      status: 'IN_PROGRESS',
+      startedAt: new Date(Date.now() - 3_600_000),
+    };
     const invalid = makeService({ selects: [[workout], [], [{ duration: 3600 }], []] });
     await invalid.service.finish(USER_ID, WORKOUT_ID, {
       perceivedEffort: 6,
@@ -879,5 +889,26 @@ describe('WorkoutJournalService mutations', () => {
     await expect(
       makeService({ updateReturns: [[]] }).service.respondToInsight(USER_ID, 'missing', true),
     ).resolves.toBe(false);
+  });
+});
+
+describe('WorkoutJournalService — estado final não pode ser sobrescrito', () => {
+  it('recusa nova finalização sem alterar dados ou enfileirar novamente', async () => {
+    const { service, updated, inserted, queues, completions } = makeService({
+      selects: [[{ ...WORKOUT, status: 'COMPLETED', startedAt: new Date() }]],
+    });
+    await expect(
+      service.finish(USER_ID, WORKOUT_ID, {
+        perceivedEffort: 8,
+        feelingNotes: '',
+        painReported: false,
+        painExerciseIds: [],
+        painNotes: '',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(updated).toHaveLength(0);
+    expect(inserted).toHaveLength(0);
+    expect(queues.enqueue).not.toHaveBeenCalled();
+    expect(completions.record).not.toHaveBeenCalled();
   });
 });

@@ -9,6 +9,7 @@
  * Fronteira: CORE nunca importa módulo de domínio. A seta aponta sempre para dentro.
  */
 import { Module } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
 
 import { AgentConfigModule } from './agent-config/agent-config.module';
 import { AudioModule } from './audio/audio.module';
@@ -19,8 +20,10 @@ import { LoggerModule } from './logger';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { RedisModule } from './redis';
 import { TelemetryModule } from './telemetry/telemetry.module';
+import { ZodExceptionFilter } from './validation/zod-exception.filter';
 
 @Module({
+  providers: [{ provide: APP_FILTER, useClass: ZodExceptionFilter }],
   imports: [
     ConfigModule,
     LoggerModule,
