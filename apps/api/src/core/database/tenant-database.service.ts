@@ -25,10 +25,10 @@
  *    submit da anamnese, buscar usuário por credencial no login, migrar consentimentos.
  *    `app.current_role = 'SYSTEM'`, sem `current_user_id`. É um contexto privilegiado:
  *    use-o só em métodos de serviço explícitos e revisados, nunca sobre dado do cliente.
- *  - `runAsToken(cb)` — fase **anônima** da anamnese (`user_id IS NULL`, TASK-1.1.4).
- *    `app.current_role = 'ANONYMOUS'`. A RLS libera apenas linhas sem titular; o
- *    isolamento entre sessões anônimas vem do token opaco (122 bits) + `WHERE token=$1`
- *    na aplicação, que **nunca** aceita `user_id` do cliente (IDOR — Sato §8.1).
+ *  - `runAsToken(cb, token)` — fase **anônima** da anamnese (`user_id IS NULL`, TASK-1.1.4).
+ *    `app.current_role = 'ANONYMOUS'`. A RLS compara o token opaco de 256 bits
+ *    parametrizado no contexto LOCAL, mesmo se a query esquecer seu WHERE.
+ *    A aplicação nunca aceita `user_id` do cliente (IDOR — Sato §8.1).
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { ControlCenterRole, type ControlCenterRole as ControlCenterRoleType } from '@movivo/shared';
@@ -63,7 +63,14 @@ async function setTenantContext(
   userId: string | null,
   role: string,
   anamnesisSessionId?: string,
+  anamnesisToken?: string,
 ): Promise<void> {
+  if (anamnesisToken !== undefined) {
+    await tx.execute(
+      sql`SELECT set_config('app.current_user_id', ${userId}, true), set_config('app.current_role', ${role}, true), set_config('app.current_anamnesis_token', ${anamnesisToken}, true)`,
+    );
+    return;
+  }
   if (anamnesisSessionId === undefined) {
     await tx.execute(
       sql`SELECT set_config('app.current_user_id', ${userId}, true), set_config('app.current_role', ${role}, true)`,
@@ -113,16 +120,10 @@ export class TenantDatabase {
     });
   }
 
-  /**
-   * Contexto **anônimo** SEM escopo de sessão (fase `user_id IS NULL`). Usado só
-   * para o **lookup inicial** `token → sessão` e o INSERT de uma sessão nova, que
-   * ainda não têm um `id` para escopar. A RLS libera a leitura de linha órfã com o
-   * GUC de sessão ausente; a aplicação DEVE filtrar por `token` (TASK-1.1.4). Para
-   * qualquer mutação de uma sessão já conhecida, use {@link runAsTokenScoped}.
-   */
-  async runAsToken<T>(cb: (tx: TenantTransaction) => Promise<T>): Promise<T> {
+  /** Contexto anônimo limitado ao token opaco, inclusive no lookup e INSERT inicial. */
+  async runAsToken<T>(cb: (tx: TenantTransaction) => Promise<T>, token: string): Promise<T> {
     return this.db.transaction(async (tx) => {
-      await setTenantContext(tx, null, 'ANONYMOUS');
+      await setTenantContext(tx, null, 'ANONYMOUS', undefined, token);
       return cb(tx);
     });
   }

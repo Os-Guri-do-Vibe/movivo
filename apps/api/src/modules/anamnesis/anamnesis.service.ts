@@ -155,7 +155,7 @@ export class AnamnesisService {
         .returning({ id: anamnesisSessions.id });
       if (!created) throw new Error('Falha ao criar sessão de anamnese.');
       return created.id;
-    });
+    }, token);
 
     await this.recordFirstTouch(sessionId, input.attribution);
 
@@ -189,7 +189,7 @@ export class AnamnesisService {
 
   /** `GET /anamnesis/session/{token}`: alimenta a retomada e os consentimentos da UI. */
   async getByToken(token: string): Promise<SessionView> {
-    const row = await this.db.runAsToken((tx) => this.selectByToken(tx, token));
+    const row = await this.db.runAsToken((tx) => this.selectByToken(tx, token), token);
     if (!row) throw new NotFoundException('Sessão de anamnese não encontrada.');
 
     if (this.isExpired(row.status, row.expiresAt)) {
@@ -440,7 +440,7 @@ export class AnamnesisService {
   }
 
   private async requireActiveSession(token: string): Promise<SessionRow> {
-    const row = await this.db.runAsToken((tx) => this.selectByToken(tx, token));
+    const row = await this.db.runAsToken((tx) => this.selectByToken(tx, token), token);
     if (!row) throw new NotFoundException('Sessão de anamnese não encontrada.');
     this.assertActive(row.id, row.status, row.expiresAt);
     return row;

@@ -392,14 +392,15 @@ describe('Anamnese anônima — token-scoped e IDOR (TASK-1.1.4 / Sato §8.1)', 
   const tokenB = `tkB_${RUN}_${'b'.repeat(40)}`.slice(0, 64);
 
   beforeAll(async () => {
-    await tenant.runAsToken(async (tx) => {
-      await tx.execute(
-        sql`INSERT INTO anamnesis_sessions (token, expires_at) VALUES (${tokenA}, now() + interval '72 hours')`,
+    for (const token of [tokenA, tokenB]) {
+      await tenant.runAsToken(
+        (tx) =>
+          tx.execute(
+            sql`INSERT INTO anamnesis_sessions (token, expires_at) VALUES (${token}, now() + interval '72 hours')`,
+          ),
+        token,
       );
-      await tx.execute(
-        sql`INSERT INTO anamnesis_sessions (token, expires_at) VALUES (${tokenB}, now() + interval '72 hours')`,
-      );
-    });
+    }
   });
 
   afterAll(async () => {
@@ -408,14 +409,56 @@ describe('Anamnese anônima — token-scoped e IDOR (TASK-1.1.4 / Sato §8.1)', 
     );
   });
 
-  it('o acesso anônimo filtra por token: token A retorna só a sessão A', async () => {
+  it('RLS limita token A à sessão A mesmo sem WHERE na query', async () => {
     const rows = await tenant.runAsToken(async (tx) => {
-      return (await tx.execute(
-        sql`SELECT token FROM anamnesis_sessions WHERE token = ${tokenA}`,
-      )) as unknown as Array<{ token: string }>;
-    });
+      return (await tx.execute(sql`SELECT token FROM anamnesis_sessions`)) as unknown as Array<{
+        token: string;
+      }>;
+    }, tokenA);
     expect(rows).toHaveLength(1);
     expect(rows[0].token).toBe(tokenA);
+  });
+
+  it('ANONYMOUS sem token nem escopo não lê nenhuma sessão órfã', async () => {
+    const rows = await appClient.begin(async (tx) => {
+      await tx`SELECT set_config('app.current_role', 'ANONYMOUS', true),
+        set_config('app.current_user_id', '', true),
+        set_config('app.current_anamnesis_token', '', true),
+        set_config('app.current_anamnesis_session_id', '', true)`;
+      return tx`SELECT id FROM anamnesis_sessions`;
+    });
+    expect(rows).toHaveLength(0);
+  });
+
+  it('token A não insere uma sessão com token diferente', async () => {
+    await expect(
+      tenant.runAsToken(async (tx) => {
+        await tx.execute(sql`INSERT INTO anamnesis_sessions (token, expires_at)
+        VALUES (${`forged-${RUN}`}, now() + interval '72 hours')`);
+        throw new Error('rollback de inserção inesperada');
+      }, tokenA),
+    ).rejects.toMatchObject({ cause: { code: '42501' } });
+  });
+
+  it('UPDATE anônimo sem WHERE altera só a sessão escopada e preserva B', async () => {
+    const [session] = await adminClient<
+      { id: string }[]
+    >`SELECT id FROM anamnesis_sessions WHERE token = ${tokenA}`;
+    const rollback = new Error('rollback de UPDATE autorizado');
+    await expect(
+      tenant.runAsTokenScoped(session.id, async (tx) => {
+        const changed = await tx.execute(
+          sql`UPDATE anamnesis_sessions SET primary_goal = 'ganhar força' RETURNING id`,
+        );
+        expect(changed).toHaveLength(1);
+        expect((changed as unknown as Array<{ id: string }>)[0].id).toBe(session.id);
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
+    const [other] = await adminClient<
+      { primary_goal: string | null }[]
+    >`SELECT primary_goal FROM anamnesis_sessions WHERE token = ${tokenB}`;
+    expect(other.primary_goal).toBeNull();
   });
 
   it('sessão vinculada a um titular fica sob RLS: B não a vê, A vê', async () => {

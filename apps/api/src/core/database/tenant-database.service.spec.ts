@@ -86,11 +86,13 @@ describe('TenantDatabase', () => {
     const { db, captured } = makeFakeDb();
     const svc = new TenantDatabase(db);
 
-    await svc.runAsToken(async () => 42);
+    await svc.runAsToken(async () => 42, 'opaque-test-token');
     expect(captured).toHaveLength(1);
     const [c0] = captured;
 
-    expect(c0?.params).toEqual([null, 'ANONYMOUS']);
+    expect(c0?.params).toEqual([null, 'ANONYMOUS', 'opaque-test-token']);
+    expect(c0?.text).toContain('app.current_anamnesis_token');
+    expect(c0?.text.match(/,\s*true\)/g)).toHaveLength(3);
   });
 
   it('runAsTokenScoped inclui o GUC da sessão anônima na mesma instrução', async () => {

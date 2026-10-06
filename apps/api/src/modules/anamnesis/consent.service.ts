@@ -72,10 +72,13 @@ export class ConsentService {
       this.assertTermsPublished();
     }
 
-    // Lookup token→sessão SEM escopo (o id ainda não é conhecido); a escrita roda
+    // Lookup token→sessão escopado pelo token (UUID ainda desconhecido); a escrita roda
     // ESCOPADA à sessão (Sato — achado 1): a RLS só aceita o consentimento preso a
     // esta sessão, nunca a de outro token.
-    const sessionId = await this.db.runAsToken((tx) => this.resolveActiveSessionId(tx, token));
+    const sessionId = await this.db.runAsToken(
+      (tx) => this.resolveActiveSessionId(tx, token),
+      token,
+    );
 
     await this.db.runAsTokenScoped(sessionId, async (tx) => {
       for (const input of inputs) {

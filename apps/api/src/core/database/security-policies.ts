@@ -22,21 +22,11 @@ import { CONSENT_TEXTS, ControlCenterRole } from '@movivo/shared';
  *
  * ## Fase anônima da anamnese (TASK-1.1.4) + escopo por sessão (Sato — achado 1)
  * Enquanto `anamnesis_sessions.user_id IS NULL`, a linha não tem titular para a RLS
- * comparar. A defesa primária é o **token opaco** (CSPRNG, 256 bits) + `WHERE token`
- * na aplicação, que nunca aceita `user_id` do cliente (IDOR — Sato §8.1). Mas isso
- * deixava a única barreira na aplicação: uma policy anônima checando apenas
- * `user_id IS NULL AND role='ANONYMOUS'` liberava QUALQUER linha órfã. Adicionamos
- * **defense-in-depth por sessão** com o GUC `app.current_anamnesis_session_id`
- * (setado por `runAsTokenScoped`):
- *  - **leitura** anônima: permitida quando o GUC não está setado (o lookup inicial
- *    `token → sessão`, que ainda não conhece o id — o token é o segredo que protege)
- *    OU quando a coluna de escopo bate o GUC;
- *  - **escrita** anônima (UPDATE/INSERT de consentimento): exige o GUC batendo a
- *    sessão — sem o GUC certo, nenhuma linha órfã de outra sessão é alterada.
- *
- * A criação de uma sessão nova (`INSERT` em `anamnesis_sessions`) é a exceção: o `id`
- * é gerado pelo banco e ainda não existe para comparar — o INSERT anônimo é liberado
- * pela condição de órfã, pois criar a própria linha nova não vaza outra sessão.
+ * comparar. O token opaco (CSPRNG, 256 bits) é passado por `runAsToken` ao GUC
+ * `app.current_anamnesis_token`: lookup e INSERT exigem o token na própria RLS,
+ * mesmo quando a consulta não tem WHERE. Depois do lookup, `runAsTokenScoped`
+ * usa `app.current_anamnesis_session_id` para leitura e UPDATE da sessão e para
+ * SELECT/INSERT dos consentimentos. Sem token ou escopo, nenhuma órfã é visível.
  * No submit o `user_id` é vinculado (contexto `SYSTEM`) e a linha passa a RLS por titular.
  */
 
@@ -73,7 +63,7 @@ interface TenantTable {
    */
   support?: true;
   /** A coluna denormalizada deve ter o mesmo titular do recurso-pai. */
-  parent?: { table: string; column: string };
+  parents?: ReadonlyArray<{ table: string; column: string }>;
 }
 
 const TENANT_TABLES: ReadonlyArray<TenantTable> = [
@@ -105,24 +95,37 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   // Sprint 2 (US-2.4): o protocolo é dado de saúde derivado (personalizado a partir de
   // condição/limitação física) — sob a mesma FORCE RLS por titular. `protocol_versions`
   // tem `user_id` denormalizado justamente para ancorar a RLS sem JOIN (Sato §4.5).
-  { table: 'protocols', column: 'user_id', professional: 'write' },
+  {
+    table: 'protocols',
+    column: 'user_id',
+    professional: 'write',
+    parents: [
+      { table: 'anamnesis_sessions', column: 'anamnesis_session_id' },
+      { table: 'protocol_renewal_sessions', column: 'renewal_session_id' },
+    ],
+  },
   {
     table: 'protocol_versions',
     column: 'user_id',
     professional: 'write',
-    parent: { table: 'protocols', column: 'protocol_id' },
+    parents: [{ table: 'protocols', column: 'protocol_id' }],
   },
   // Renovação de protocolo por fim de mesociclo: titular já existe desde a criação da
   // linha (sem fase anônima, diferente de `anamnesis_sessions`) — sem `anon` aqui. CREF
   // lê as respostas ao revisar o protocolo gerado a partir delas, mas não edita.
-  { table: 'protocol_renewal_sessions', column: 'user_id', professional: 'read' },
+  {
+    table: 'protocol_renewal_sessions',
+    column: 'user_id',
+    professional: 'read',
+    parents: [{ table: 'protocols', column: 'previous_protocol_id' }],
+  },
   // Achado 2026-09-02: proposta de substituição de exercício via IA, em staging até
   // aprovação/janela de cortesia — mesma FORCE RLS por titular de `protocols`.
   {
     table: 'protocol_substitution_requests',
     column: 'user_id',
     professional: 'write',
-    parent: { table: 'protocols', column: 'protocol_id' },
+    parents: [{ table: 'protocols', column: 'protocol_id' }],
   },
   // Sprint 3 (US-3.2): resumo de longo prazo da conversa de saúde — mesma FORCE RLS por titular.
   { table: 'coaching_sessions', column: 'user_id', professional: 'read' },
@@ -130,12 +133,17 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   { table: 'handoff_alerts', column: 'user_id', professional: 'write' },
   // Sprint 4 (US-4.1): assinatura/dado financeiro do titular — sob a mesma FORCE RLS.
   { table: 'subscriptions', column: 'user_id', professional: 'read', support: true },
-  { table: 'conversations', column: 'user_id', professional: 'read' },
+  {
+    table: 'conversations',
+    column: 'user_id',
+    professional: 'read',
+    parents: [{ table: 'protocols', column: 'protocol_id' }],
+  },
   {
     table: 'checkins',
     column: 'user_id',
     professional: 'read',
-    parent: { table: 'protocols', column: 'protocol_id' },
+    parents: [{ table: 'protocols', column: 'protocol_id' }],
   },
   { table: 'reengagement_nudges', column: 'user_id', professional: 'read' },
   { table: 'audit_logs', column: 'user_id', professional: 'write' },
@@ -146,24 +154,24 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
     table: 'workout_completions',
     column: 'user_id',
     professional: 'read',
-    parent: { table: 'protocols', column: 'protocol_id' },
+    parents: [{ table: 'protocols', column: 'protocol_id' }],
   },
   {
     table: 'workout_sessions',
     column: 'user_id',
     professional: 'read',
-    parent: { table: 'protocols', column: 'protocol_id' },
+    parents: [{ table: 'protocols', column: 'protocol_id' }],
   },
   {
     table: 'workout_set_entries',
     column: 'user_id',
     professional: 'read',
-    parent: { table: 'workout_sessions', column: 'workout_session_id' },
+    parents: [{ table: 'workout_sessions', column: 'workout_session_id' }],
   },
   {
     table: 'workout_access_tokens',
     column: 'user_id',
-    parent: { table: 'workout_sessions', column: 'workout_session_id' },
+    parents: [{ table: 'workout_sessions', column: 'workout_session_id' }],
   },
   { table: 'access_link_tokens', column: 'user_id' },
   { table: 'workout_insights', column: 'user_id', professional: 'read' },
@@ -174,7 +182,12 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   // `subscriptions`. Linha órfã (conciliação sem assinatura) tem `user_id` nulo e por isso
   // não casa com nenhuma política de titular — fica visível só a SYSTEM/ADMIN, que é
   // exatamente quem trata a fila de exceção. Append-only (`buildPaymentsImmutabilitySql`).
-  { table: 'payments', column: 'user_id', professional: 'read' },
+  {
+    table: 'payments',
+    column: 'user_id',
+    professional: 'read',
+    parents: [{ table: 'subscriptions', column: 'subscription_id' }],
+  },
 ];
 
 // `nullif(..., '')` é OBRIGATÓRIO, não cosmético: sob PgBouncer transaction mode,
@@ -185,8 +198,12 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
 // restaura a semântica "ausente ⇒ NULL ⇒ fail-closed".
 const UID = `nullif(current_setting('app.current_user_id', true), '')`;
 const ROLE = `nullif(current_setting('app.current_role', true), '')`;
+const AUTHENTICATED_ROLE = `${ROLE} IN (${Object.values(ControlCenterRole)
+  .map((role) => `'${role}'`)
+  .join(', ')})`;
 /** GUC de escopo da sessão anônima (Sato — achado 1). NULL quando não setado. */
 const SESSION = `nullif(current_setting('app.current_anamnesis_session_id', true), '')`;
+const ANAMNESIS_TOKEN = `nullif(current_setting('app.current_anamnesis_token', true), '')`;
 const HEALTH_CONSENT_VERSION = CONSENT_TEXTS.HEALTH_DATA.version.replaceAll("'", "''");
 const MARKETING_CONSENT_VERSION = CONSENT_TEXTS.MARKETING.version.replaceAll("'", "''");
 const TERMS_CONSENT_VERSION = CONSENT_TEXTS.TERMS_OF_SERVICE.version.replaceAll("'", "''");
@@ -214,13 +231,21 @@ function policyNames(table: string) {
  * permanece `NOBYPASSRLS` e não-dona: para ela, a RLS é inescapável.
  */
 export function buildRlsPoliciesSql(): string {
-  const statements: string[] = [];
+  // Essas tabelas são geridas exclusivamente por este catálogo. Policies extras
+  // permissivas se somariam por OR e poderiam anular o isolamento de titular.
+  const statements: string[] = [
+    `DO $$ DECLARE policy record; BEGIN
+    FOR policy IN SELECT schemaname, tablename, policyname FROM pg_policies
+      WHERE schemaname = 'public' AND tablename IN (${RLS_TENANT_TABLES.map((table) => `'${table}'`).join(', ')})
+    LOOP
+      EXECUTE format('DROP POLICY %I ON %I.%I', policy.policyname, policy.schemaname, policy.tablename);
+    END LOOP;
+  END $$`,
+  ];
 
-  for (const { table, column, anon, professional, support, parent } of TENANT_TABLES) {
+  for (const { table, column, anon, professional, support, parents } of TENANT_TABLES) {
     const p = policyNames(table);
-    const self = `("${column}"::text = ${UID} AND ${ROLE} IN (${Object.values(ControlCenterRole)
-      .map((role) => `'${role}'`)
-      .join(', ')}))`;
+    const self = `("${column}"::text = ${UID} AND ${AUTHENTICATED_ROLE})`;
     const system = `(${ROLE} = 'SYSTEM')`;
     const admin = `(${ROLE} = 'ADMIN')`;
     const base = `${self} OR ${system} OR ${admin}`;
@@ -240,11 +265,13 @@ export function buildRlsPoliciesSql(): string {
     if (anon) {
       const orphan = `"${column}" IS NULL AND ${ROLE} = 'ANONYMOUS'`;
       const scoped = `"${anon.scope}"::text = ${SESSION}`;
-      anonRead = ` OR (${orphan} AND (${SESSION} IS NULL OR ${scoped}))`;
+      anonRead = ` OR (${orphan} AND (${scoped}${table === 'anamnesis_sessions' ? ` OR "token" = ${ANAMNESIS_TOKEN}` : ''}))`;
       anonWrite = ` OR (${orphan} AND ${scoped})`;
       // INSERT: consents nasce preso à sessão (scopeAtInsert); a sessão nova não
       // tem `id` ainda, então seu INSERT é liberado pela condição de órfã.
-      anonInsert = anon.scopeAtInsert ? ` OR (${orphan} AND ${scoped})` : ` OR (${orphan})`;
+      anonInsert = anon.scopeAtInsert
+        ? ` OR (${orphan} AND ${scoped})`
+        : ` OR (${orphan} AND "token" = ${ANAMNESIS_TOKEN})`;
     }
 
     // Leitura do papel `SUPPORT`, só para linhas de titular final (`users.role = 'USER'`).
@@ -261,13 +288,16 @@ export function buildRlsPoliciesSql(): string {
           ))`
       : '';
 
-    const parentCheck = parent
-      ? ` AND ("${table}"."${parent.column}" IS NULL OR EXISTS (
+    const parentCheck =
+      parents
+        ?.map(
+          (parent) => ` AND ("${table}"."${parent.column}" IS NULL OR EXISTS (
           SELECT 1 FROM "${parent.table}" owner
           WHERE owner.id = "${table}"."${parent.column}"
             AND owner.user_id = "${table}"."${column}"
-        ))`
-      : '';
+        ))`,
+        )
+        .join('') ?? '';
     const visibleRead = `${base}${professional ? ` OR ${linkedProfessional}` : ''}${supportRead}${anonRead}`;
     const visibleWrite = `${base}${professional === 'write' ? ` OR ${linkedProfessional}` : ''}${anonWrite}`;
 
@@ -312,7 +342,7 @@ export function buildRlsPoliciesSql(): string {
     `DROP POLICY IF EXISTS "${assignment.insert}" ON "professional_assignments"`,
     `DROP POLICY IF EXISTS "${assignment.update}" ON "professional_assignments"`,
     `DROP POLICY IF EXISTS "${assignment.delete}" ON "professional_assignments"`,
-    `CREATE POLICY "${assignment.select}" ON "professional_assignments" FOR SELECT USING (professional_id::text = ${UID} OR ${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
+    `CREATE POLICY "${assignment.select}" ON "professional_assignments" FOR SELECT USING ((professional_id::text = ${UID} AND ${ROLE} = 'PROFESSIONAL') OR ${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
     `CREATE POLICY "${assignment.insert}" ON "professional_assignments" FOR INSERT WITH CHECK (${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
     `CREATE POLICY "${assignment.update}" ON "professional_assignments" FOR UPDATE USING (${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN') WITH CHECK (${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
     `CREATE POLICY "${assignment.delete}" ON "professional_assignments" FOR DELETE USING (${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
@@ -326,7 +356,7 @@ export function buildRlsPoliciesSql(): string {
     // editar/assinar o protocolo (RLS de `protocols` já liberado) mas a gravação da
     // própria trilha de auditoria dessa ação falharia.
     `DROP POLICY IF EXISTS "audit_logs_rls_insert" ON "audit_logs"`,
-    `CREATE POLICY "audit_logs_rls_insert" ON "audit_logs" FOR INSERT WITH CHECK ((actor_id::text = ${UID} AND ${ROLE} = 'PROFESSIONAL' AND public.has_active_health_consent(audit_logs.user_id)) OR (actor_id::text = ${UID} AND user_id::text = ${UID}) OR ${ROLE} = 'SYSTEM' OR (actor_id::text = ${UID} AND ${ROLE} = 'ADMIN'))`,
+    `CREATE POLICY "audit_logs_rls_insert" ON "audit_logs" FOR INSERT WITH CHECK ((actor_id::text = ${UID} AND ${ROLE} = 'PROFESSIONAL' AND public.has_active_health_consent(audit_logs.user_id)) OR (actor_id::text = ${UID} AND user_id::text = ${UID} AND ${AUTHENTICATED_ROLE}) OR ${ROLE} = 'SYSTEM' OR (actor_id::text = ${UID} AND ${ROLE} = 'ADMIN'))`,
   );
 
   // `;` como separador — executado por `sql.unsafe` (simple query, multi-statement),
