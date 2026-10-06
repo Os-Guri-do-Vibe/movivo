@@ -26,6 +26,7 @@ import { HealthConsentService } from '../../core/database/health-consent.service
 import { checkins, handoffAlerts, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
+import { strictSafeParse } from '../../core/validation/strict-input';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { ShortLinkService } from '../short-link/short-link.service';
@@ -164,7 +165,7 @@ export class CheckinService {
     if (!(await this.healthConsent.hasActiveForUser(row.userId))) {
       throw new ForbiddenException('Consentimento de dados de saúde revogado.');
     }
-    const parsed = checkinWeeklySubmitSchema.safeParse(payload);
+    const parsed = strictSafeParse(checkinWeeklySubmitSchema, payload);
     if (!parsed.success) {
       throw new BadRequestException(parsed.error.issues.map((issue) => issue.message));
     }

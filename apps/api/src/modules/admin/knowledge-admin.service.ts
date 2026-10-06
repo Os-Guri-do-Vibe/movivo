@@ -20,6 +20,7 @@ import { AppConfigService } from '../../core/config';
 import { knowledgeDocumentReviews, knowledgeDocuments } from '../../core/database/schema';
 import type { TenantTransaction } from '../../core/database/tenant-database.service';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
+import { strictSafeParse } from '../../core/validation/strict-input';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
@@ -189,7 +190,7 @@ export class KnowledgeAdminService {
   }
 
   async upload(actor: AuthenticatedUser, body: unknown): Promise<KnowledgeDocumentsResponse> {
-    const parsed = uploadKnowledgeDocumentSchema.safeParse(body);
+    const parsed = strictSafeParse(uploadKnowledgeDocumentSchema, body);
     if (!parsed.success) {
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
     }
@@ -321,7 +322,7 @@ export class KnowledgeAdminService {
   }
 
   async review(actor: AuthenticatedUser, body: unknown): Promise<KnowledgeDocumentsResponse> {
-    const parsed = reviewKnowledgeDocumentSchema.safeParse(body);
+    const parsed = strictSafeParse(reviewKnowledgeDocumentSchema, body);
     if (!parsed.success) {
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
     }
@@ -418,9 +419,18 @@ export class KnowledgeAdminService {
     id: string,
     body: unknown,
   ): Promise<KnowledgeDocumentsResponse> {
-    const parsed = knowledgeDocumentActionSchema.safeParse({
-      ...(typeof body === 'object' && body !== null ? body : {}),
+    // O `documentId` vem só do path: o corpo é validado sem ele, então `documentId` no
+    // JSON é rejeitado em vez de ser sobrescrito em silêncio (mass assignment / IDOR).
+    const bodyParsed = strictSafeParse(
+      knowledgeDocumentActionSchema.omit({ documentId: true }),
+      body ?? {},
+    );
+    if (!bodyParsed.success) {
+      throw new BadRequestException({ code: 'INVALID_INPUT', issues: bodyParsed.error.issues });
+    }
+    const parsed = strictSafeParse(knowledgeDocumentActionSchema, {
       documentId: id,
+      note: bodyParsed.data.note,
     });
     if (!parsed.success) {
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });

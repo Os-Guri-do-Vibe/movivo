@@ -27,6 +27,7 @@ import type { Request } from 'express';
 import { z } from 'zod';
 
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
+import { parseBody } from '../../core/validation/strict-input';
 import { AccessLinkService } from '../../core/database/access-link.service';
 import { CheckoutTokenService } from './checkout-token.service';
 import { InvalidTransitionError, SUBSCRIPTION_TERMS_VERSION } from './subscription-model';
@@ -112,7 +113,7 @@ export class SubscriptionController {
     @Req() req: Request,
   ): Promise<CheckoutPaymentResult> {
     const { userId } = await this.checkoutToken(token);
-    const input = createCheckoutSchema.parse(body);
+    const input = parseBody(createCheckoutSchema, body);
     // ponytail: após aprovação jurídica, preencher a versão publicada com o texto
     // integral exibido no checkout e atualizar SUBSCRIPTION_TERMS_VERSION no mesmo PR.
     if (PUBLISHED_SUBSCRIPTION_TERMS_VERSION !== SUBSCRIPTION_TERMS_VERSION) {
@@ -141,7 +142,7 @@ export class SubscriptionController {
   })
   async cancel(@Param('token') token: string, @Body() body: unknown): Promise<{ status: string }> {
     const userId = await this.userId(token);
-    const { reason } = cancelSchema.parse(body ?? {});
+    const { reason } = parseBody(cancelSchema, body ?? {});
     return this.ensureFound(this.subs.cancel(userId, reason || undefined));
   }
 

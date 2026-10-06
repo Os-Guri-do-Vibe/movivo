@@ -24,6 +24,7 @@ import { asc, desc, isNull, sql } from 'drizzle-orm';
 
 import { partners } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
+import { strictSafeParse } from '../../core/validation/strict-input';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { AuditService } from './audit.service';
 import { ControlCenterService } from './control-center.service';
@@ -81,7 +82,7 @@ export class PartnersService {
 
   /** Substitui a composição vigente inteira a partir de `validFrom`. */
   async replace(actor: AuthenticatedUser, body: unknown) {
-    const parsed = replacePartnersSchema.safeParse(body);
+    const parsed = strictSafeParse(replacePartnersSchema, body);
     if (!parsed.success) {
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
     }

@@ -144,15 +144,33 @@ describe('GET /account/profile', () => {
 });
 
 describe('PATCH /account/profile', () => {
-  it('atualiza o nome e ignora e-mail enviado no corpo (imutável)', async () => {
+  it('atualiza o nome com corpo dentro do contrato', async () => {
     const res = await base()
       .patch(`/${prefix}/account/profile`)
       .set('Authorization', `Bearer ${accessA}`)
-      .send({ name: 'Conta A Renomeada', email: 'nao-deveria-mudar@movivo.test' });
+      .send({ name: 'Conta A Renomeada' });
 
     expect(res.status).toBe(200);
     expect(res.body.name).toBe('Conta A Renomeada');
     expect(res.body.email).toBe(emailA);
+  });
+
+  it.each([
+    ['email (imutável)', { email: 'nao-deveria-mudar@movivo.test' }],
+    ['role', { role: 'ADMIN' }],
+    ['avatarPath', { avatarPath: 'outro-arquivo.png' }],
+  ])('mass assignment — rejeita 400 e não altera nada ao receber %s', async (_label, extra) => {
+    const res = await base()
+      .patch(`/${prefix}/account/profile`)
+      .set('Authorization', `Bearer ${accessA}`)
+      .send({ name: 'Nome Que Não Deve Gravar', ...extra });
+
+    expect(res.status).toBe(400);
+    const after = await base()
+      .get(`/${prefix}/account/profile`)
+      .set('Authorization', `Bearer ${accessA}`);
+    expect(after.body.name).not.toBe('Nome Que Não Deve Gravar');
+    expect(after.body.email).toBe(emailA);
   });
 
   it('recusa telefone fora do formato E.164 antes de tocar o banco', async () => {

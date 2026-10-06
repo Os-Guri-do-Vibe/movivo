@@ -30,6 +30,7 @@ import type { ZodType } from 'zod';
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
+import { strictSafeParse } from '../../core/validation/strict-input';
 import {
   anamnesisSessions,
   handoffAlerts,
@@ -62,7 +63,7 @@ export interface RenewalSubmitResult {
 }
 
 function parseStepPayload<T>(schema: ZodType<T>, data: unknown): T {
-  const parsed = schema.safeParse(data);
+  const parsed = strictSafeParse(schema, data);
   if (!parsed.success) {
     throw new BadRequestException(parsed.error.issues.map((issue) => issue.message));
   }

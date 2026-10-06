@@ -18,6 +18,7 @@ import {
   TenantDatabase,
   type TenantTransaction,
 } from '../../core/database/tenant-database.service';
+import { strictSafeParse } from '../../core/validation/strict-input';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { AuditService } from './audit.service';
 import { simulateFaqConfig } from './config-simulator';
@@ -202,7 +203,7 @@ export class FaqAdminService {
   }
 
   private parse<T>(schema: z.ZodType<T>, input: unknown): T {
-    const result = schema.safeParse(input);
+    const result = strictSafeParse(schema, input);
     if (!result.success) {
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: result.error.issues });
     }

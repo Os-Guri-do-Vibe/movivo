@@ -29,6 +29,7 @@ import type { z } from 'zod';
 
 import { expenses, modelPricing } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
+import { strictSafeParse } from '../../core/validation/strict-input';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { AuditService } from './audit.service';
 
@@ -317,7 +318,7 @@ export class FinanceService {
   }
 
   private parse<T>(schema: z.ZodType<T>, input: unknown): T {
-    const result = schema.safeParse(input);
+    const result = strictSafeParse(schema, input);
     if (!result.success) {
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: result.error.issues });
     }

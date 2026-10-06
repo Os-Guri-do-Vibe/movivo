@@ -53,6 +53,7 @@ import type { ZodType } from 'zod';
 
 import { HealthCipherService, TenantDatabase, type TenantTransaction } from '../../core/database';
 import { anamnesisSessions, users } from '../../core/database/schema';
+import { strictSafeParse } from '../../core/validation/strict-input';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { PROTOCOL_WAITING_DELAY_MS } from '../whatsapp/message-templates';
@@ -114,7 +115,7 @@ const CONSENT_ORDER = Object.keys(CONSENT_TEXTS) as ConsentTypeWithText[];
 
 /** Payload inválido é erro do cliente, não falha interna da API. */
 function parseStepPayload<T>(schema: ZodType<T>, data: unknown): T {
-  const parsed = schema.safeParse(data);
+  const parsed = strictSafeParse(schema, data);
   if (!parsed.success) {
     throw new BadRequestException(parsed.error.issues.map((issue) => issue.message));
   }

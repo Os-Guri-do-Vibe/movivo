@@ -72,6 +72,7 @@ import {
   RedisHealthService,
   type RedisKeyBuilder,
 } from '../../core/redis';
+import { strictSafeParse } from '../../core/validation/strict-input';
 import { ragUsageDay, ragUsageKeys } from '../ai-coach/rag/rag-usage.keys';
 import { roleHasCapabilities } from '../auth/capabilities';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
@@ -1973,7 +1974,7 @@ export class ControlCenterService {
   }
 
   async createWhatsappInstance(rawBody: unknown): Promise<ControlCenterIntegrationResponse> {
-    const parsed = createWhatsappInstanceSchema.safeParse(rawBody);
+    const parsed = strictSafeParse(createWhatsappInstanceSchema, rawBody);
     if (!parsed.success) {
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
     }

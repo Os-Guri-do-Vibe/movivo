@@ -34,6 +34,7 @@ import {
 import { z } from 'zod';
 
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
+import { parseBody } from '../../core/validation/strict-input';
 import { WorkoutAccessService } from './workout-access.service';
 import { WorkoutJournalService } from './workout-journal.service';
 
@@ -75,7 +76,7 @@ export class WorkoutController {
   @ApiResponse({ status: 200, description: 'Troca bem-sucedida — retorna o `sessionToken`.' })
   @ApiResponse({ status: 401, description: 'Token de acesso inválido, expirado ou já consumido.' })
   async exchange(@Body() raw: unknown) {
-    const { token } = exchangeSchema.parse(raw);
+    const { token } = parseBody(exchangeSchema, raw);
     return { sessionToken: await this.access.exchange(token) };
   }
 
@@ -94,7 +95,7 @@ export class WorkoutController {
   @ApiResponse({ status: 200, description: 'Primeiro nome do titular.' })
   @ApiResponse({ status: 401, description: 'Token inválido ou expirado.' })
   async peek(@Query() raw: unknown) {
-    const { token } = peekSchema.parse(raw);
+    const { token } = parseBody(peekSchema, raw);
     return { firstName: await this.access.peekFirstName(token) };
   }
 
@@ -168,7 +169,7 @@ export class WorkoutController {
     @Body() raw: unknown,
   ) {
     const userId = await this.access.requireUser(authorization);
-    const body = saveWorkoutSetsSchema.parse(raw);
+    const body = parseBody(saveWorkoutSetsSchema, raw);
     await this.journalService.saveSets(userId, uuidSchema.parse(rawId), body.entries);
     return { ok: true };
   }
@@ -196,7 +197,7 @@ export class WorkoutController {
   ) {
     const userId = await this.access.requireUser(authorization);
     const id = uuidSchema.parse(rawId);
-    await this.journalService.finish(userId, id, finishWorkoutSchema.parse(raw));
+    await this.journalService.finish(userId, id, parseBody(finishWorkoutSchema, raw));
     // Pré-aquece o card de Story: quando o aluno abrir a tela de conclusão o PNG já está
     // desenhado e em cache. Best-effort — se falhar, o `GET share-card` desenha sob demanda.
     void this.journalService.shareCardImage(userId, id).catch((error: unknown) => {

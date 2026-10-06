@@ -38,6 +38,7 @@ import {
 } from '@movivo/shared';
 
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
+import { parseBody } from '../../core/validation/strict-input';
 import { AnamnesisService, type StepNumber } from './anamnesis.service';
 
 const TOKEN_PARAM = {
@@ -63,7 +64,7 @@ export class AnamnesisController {
   @ApiResponse({ status: 201, description: 'Sessão criada — retorna o token da sessão.' })
   @ApiResponse({ status: 400, description: 'Corpo fora do schema.' })
   async start(@Body() body: unknown) {
-    const input = startAnamnesisSchema.parse(body ?? {});
+    const input = parseBody(startAnamnesisSchema, body ?? {});
     return this.anamnesis.start(input);
   }
 
@@ -134,7 +135,7 @@ export class AnamnesisController {
   @ApiResponse({ status: 400, description: 'Telefone fora do formato E.164.' })
   @ApiResponse({ status: 429, description: 'Limite de envio por sessão/número excedido.' })
   async sendPhoneCode(@Param('token') token: string, @Body() body: unknown) {
-    const { phoneNumber } = sendPhoneCodeSchema.parse(body);
+    const { phoneNumber } = parseBody(sendPhoneCodeSchema, body);
     return this.anamnesis.sendPhoneCode(token, phoneNumber);
   }
 
@@ -148,7 +149,7 @@ export class AnamnesisController {
   @ApiResponse({ status: 400, description: 'Código incorreto ou expirado.' })
   @ApiResponse({ status: 429, description: 'Limite de tentativas excedido.' })
   async verifyPhoneCode(@Param('token') token: string, @Body() body: unknown) {
-    const { code } = verifyPhoneCodeSchema.parse(body);
+    const { code } = parseBody(verifyPhoneCodeSchema, body);
     return this.anamnesis.verifyPhoneCode(token, code);
   }
 

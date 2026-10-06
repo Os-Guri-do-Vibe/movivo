@@ -9,6 +9,7 @@ import { alias } from 'drizzle-orm/pg-core';
 
 import { auditLogs, staff } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
+import { strictSafeParse } from '../../core/validation/strict-input';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { AuditService } from './audit.service';
 
@@ -22,7 +23,7 @@ export class AuditQueryService {
   ) {}
 
   async search(actor: AuthenticatedUser, raw: unknown): Promise<AuditSearchResponse> {
-    const parsed = auditSearchQuerySchema.safeParse(raw);
+    const parsed = strictSafeParse(auditSearchQuerySchema, raw);
     if (!parsed.success) {
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
     }

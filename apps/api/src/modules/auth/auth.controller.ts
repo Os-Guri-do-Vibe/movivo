@@ -36,6 +36,7 @@ import type { Request, Response } from 'express';
 
 import { AppConfigService } from '../../core/config';
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
+import { parseBody } from '../../core/validation/strict-input';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { CurrentUser, Roles } from './roles.decorator';
@@ -79,7 +80,7 @@ export class AuthController {
   @ApiResponse({ status: 401, description: 'Credenciais inválidas.' })
   @ApiResponse({ status: 429, description: 'Rate limit de login excedido para o IP de origem.' })
   async login(@Body() body: unknown, @Res({ passthrough: true }) res: Response) {
-    const input = loginSchema.parse(body ?? {});
+    const input = parseBody(loginSchema, body ?? {});
     const result = await this.auth.login(input);
     this.setRefreshCookie(res, result.refreshCookie);
     return { accessToken: result.accessToken, user: result.user };

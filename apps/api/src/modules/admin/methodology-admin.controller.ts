@@ -17,6 +17,7 @@ import {
 } from '@nestjs/swagger';
 
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
+import { strictSafeParse } from '../../core/validation/strict-input';
 import { RequireCapabilities } from '../auth/capabilities.decorator';
 import { CapabilitiesGuard } from '../auth/capabilities.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -89,7 +90,7 @@ export class MethodologyAdminController {
     description: 'Ator sem as capabilities AI_CONFIG_READ + AI_KNOWLEDGE_WRITE.',
   })
   submit(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() body: unknown) {
-    const note = methodologyNoteSchema.safeParse(body);
+    const note = strictSafeParse(methodologyNoteSchema, body);
     if (!note.success) throw new BadRequestException({ code: 'INVALID_INPUT' });
     return this.methodology.submit(actor, { versionId: id, note: note.data.note });
   }
@@ -110,7 +111,7 @@ export class MethodologyAdminController {
   })
   @ApiResponse({ status: 403, description: 'Ator sem a capability AI_METHODOLOGY_APPROVE.' })
   review(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() body: unknown) {
-    const review = methodologyReviewSchema.safeParse(body);
+    const review = strictSafeParse(methodologyReviewSchema, body);
     if (!review.success) throw new BadRequestException({ code: 'INVALID_INPUT' });
     return this.methodology.review(
       actor,
@@ -135,7 +136,7 @@ export class MethodologyAdminController {
   @ApiResponse({ status: 400, description: 'Versão fora do estágio APPROVED.' })
   @ApiResponse({ status: 403, description: 'Ator sem a capability AI_METHODOLOGY_APPROVE.' })
   publish(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() body: unknown) {
-    const note = methodologyNoteSchema.safeParse(body);
+    const note = strictSafeParse(methodologyNoteSchema, body);
     if (!note.success) throw new BadRequestException({ code: 'INVALID_INPUT' });
     return this.methodology.publish(actor, { versionId: id, note: note.data.note });
   }
@@ -160,7 +161,7 @@ export class MethodologyAdminController {
     @Param('id') id: string,
     @Body() body: unknown,
   ) {
-    const note = methodologyNoteSchema.safeParse(body);
+    const note = strictSafeParse(methodologyNoteSchema, body);
     if (!note.success) throw new BadRequestException({ code: 'INVALID_INPUT' });
     return this.methodology.rollback(actor, { versionId: id, note: note.data.note });
   }

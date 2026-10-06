@@ -7,6 +7,7 @@
  */
 import { NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import type { CheckoutSummary, SubscriptionView } from '@movivo/shared';
+import { ZodError } from 'zod';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SubscriptionController } from './subscription.controller';
@@ -102,6 +103,62 @@ describe('SubscriptionController — checkout (US-4.6)', () => {
     const { controller, svc } = make();
     await expect(controller.checkoutSummary('opaque')).resolves.toEqual(summary);
     expect(svc.getCheckoutSummary).toHaveBeenCalledWith(VALID, Date.parse(summary.expiresAt));
+  });
+
+  it.each([
+    ['priceCents', { priceCents: 1 }],
+    ['status', { status: 'ACTIVE' }],
+    ['userId', { userId: '00000000-0000-0000-0000-000000000001' }],
+    ['subscriptionActive', { subscriptionActive: true }],
+  ])(
+    'rejeita (400) mass assignment de %s no checkout, antes de qualquer cobrança',
+    async (_l, extra) => {
+      const { controller, svc } = make();
+      await expect(
+        controller.checkoutPayment(
+          'opaque',
+          {
+            method: 'PIX',
+            acceptTerms: true,
+            payer: {
+              name: 'Aluno Teste',
+              email: 'aluno@example.invalid',
+              cpfCnpj: '12345678901',
+              postalCode: '01234567',
+              addressNumber: '10',
+              phone: '11999999999',
+            },
+            ...extra,
+          },
+          { ip: '127.0.0.1' } as never,
+        ),
+      ).rejects.toBeInstanceOf(ZodError);
+      expect(svc.startCheckoutPayment).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejeita campo extra aninhado em payer', async () => {
+    const { controller, svc } = make();
+    await expect(
+      controller.checkoutPayment(
+        'opaque',
+        {
+          method: 'PIX',
+          acceptTerms: true,
+          payer: {
+            name: 'Aluno Teste',
+            email: 'aluno@example.invalid',
+            cpfCnpj: '12345678901',
+            postalCode: '01234567',
+            addressNumber: '10',
+            phone: '11999999999',
+            isAdmin: true,
+          },
+        },
+        { ip: '127.0.0.1' } as never,
+      ),
+    ).rejects.toBeInstanceOf(ZodError);
+    expect(svc.startCheckoutPayment).not.toHaveBeenCalled();
   });
 
   it('body inválido é rejeitado antes de iniciar pagamento', async () => {
