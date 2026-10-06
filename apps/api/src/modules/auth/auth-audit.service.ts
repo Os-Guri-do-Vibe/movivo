@@ -46,6 +46,10 @@ export const AUTH_AUDIT_ACTIONS = {
   logout: 'AUTH_LOGOUT',
   refreshReuse: 'AUTH_REFRESH_REUSE_DETECTED',
   passwordChanged: 'AUTH_PASSWORD_CHANGED',
+  mfaEnrolled: 'AUTH_MFA_ENROLLED',
+  mfaFailed: 'AUTH_MFA_FAILED',
+  mfaRecoveryUsed: 'AUTH_MFA_RECOVERY_USED',
+  mfaReset: 'AUTH_MFA_RESET',
 } as const;
 
 export type AuthAuditAction = (typeof AUTH_AUDIT_ACTIONS)[keyof typeof AUTH_AUDIT_ACTIONS];
@@ -97,9 +101,28 @@ export class AuthAuditService {
    * incrementam um contador, que sai junto do próximo registro.
    */
   async recordFailedLogin(staffId: string, meta: AccessMeta = {}): Promise<void> {
+    await this.recordDeduped(AUTH_AUDIT_ACTIONS.loginFailed, staffId, meta, {
+      reason: 'invalid_credentials',
+    });
+  }
+
+  /** Código MFA errado (TOTP ou recuperação), com o mesmo dedupe por conta da falha de login. */
+  async recordFailedMfa(staffId: string, meta: AccessMeta = {}): Promise<void> {
+    await this.recordDeduped(AUTH_AUDIT_ACTIONS.mfaFailed, staffId, meta, {
+      reason: 'invalid_code',
+    });
+  }
+
+  /** Grava `action` no máx. 1x por janela/conta; `attemptsSinceLast` leva a contagem do período. */
+  private async recordDeduped(
+    action: AuthAuditAction,
+    staffId: string,
+    meta: AccessMeta,
+    extra: Record<string, unknown>,
+  ): Promise<void> {
     try {
-      const counter = this.keys.global('auth-fail-audit', staffId, 'count');
-      const window = this.keys.global('auth-fail-audit', staffId, 'window');
+      const counter = this.keys.global('auth-audit', action, staffId, 'count');
+      const window = this.keys.global('auth-audit', action, staffId, 'window');
       const attempts = await this.redis.incr(counter);
       if (attempts === 1) await this.redis.expire(counter, FAILED_LOGIN_AUDIT_WINDOW_SECONDS * 4);
       const first = await this.redis.set(
@@ -111,15 +134,12 @@ export class AuthAuditService {
       );
       if (first !== 'OK') return;
       await this.redis.del(counter);
-      await this.record(AUTH_AUDIT_ACTIONS.loginFailed, staffId, meta, {
-        reason: 'invalid_credentials',
-        attemptsSinceLast: attempts,
-      });
+      await this.record(action, staffId, meta, { ...extra, attemptsSinceLast: attempts });
     } catch (error) {
       // Redis fora: audita sem dedupe é pior que perder o registro (flood). Só loga.
       this.logger.error(
-        { event: 'auth_audit_failed', action: AUTH_AUDIT_ACTIONS.loginFailed, err: error },
-        'falha ao registrar tentativa de login',
+        { event: 'auth_audit_failed', action, err: error },
+        'falha ao registrar tentativa na trilha de acesso',
       );
     }
   }

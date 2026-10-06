@@ -27,9 +27,19 @@ import { AppConfigService, parseDurationSeconds } from '../../core/config';
 import { TenantDatabase, type TenantRole, type TenantTransaction } from '../../core/database';
 import { authSessions, staff } from '../../core/database/schema';
 import { AUTH_AUDIT_ACTIONS, AuthAuditService, type AccessMeta } from './auth-audit.service';
+import { MfaService, type MfaIdentity, type MfaMode } from './mfa.service';
 import { PasswordService } from './password.service';
 import { TokenDenylistService } from './token-denylist.service';
 import { TokenService } from './token.service';
+
+/** Senha correta, mas falta o 2º fator: nenhuma sessão é emitida, só um desafio de uso único. */
+export interface MfaChallenge {
+  mfa: { step: 'verify' | 'setup'; challengeToken: string };
+}
+
+export function isMfaChallenge(result: LoginResult | MfaChallenge): result is MfaChallenge {
+  return 'mfa' in result;
+}
 
 export interface LoginResult {
   accessToken: string;
@@ -48,15 +58,21 @@ export class AuthService {
     private readonly passwords: PasswordService,
     private readonly config: AppConfigService,
     private readonly trail: AuthAuditService,
+    private readonly mfa: MfaService,
   ) {
     this.logger.setContext(AuthService.name);
   }
 
   /** Autentica uma conta interna por e-mail + senha (Argon2id) e emite o par de tokens. */
-  async login(input: LoginInput, meta: AccessMeta = {}): Promise<LoginResult> {
+  async login(input: LoginInput, meta: AccessMeta = {}): Promise<LoginResult | MfaChallenge> {
     const user = await this.db.runAsSystem(async (tx) => {
       const [row] = await tx
-        .select({ id: staff.id, role: staff.role, passwordHash: staff.passwordHash })
+        .select({
+          id: staff.id,
+          role: staff.role,
+          passwordHash: staff.passwordHash,
+          mfaEnabledAt: staff.mfaEnabledAt,
+        })
         .from(staff)
         .where(eq(staff.email, input.email))
         .limit(1);
@@ -72,10 +88,60 @@ export class AuthService {
       throw new UnauthorizedException('Credenciais inválidas.');
     }
 
+    // Senha correta NÃO basta quando há (ou é exigido) um 2º fator: sem sessão até resolver o
+    // desafio. Nada é auditado como login ainda — o `AUTH_LOGIN` sai quando a sessão sai.
+    const mode: MfaMode | null = this.mfa.modeFor(user);
+    if (mode) {
+      const challengeToken = await this.mfa.createChallenge(user.id, mode, user.passwordHash);
+      return { mfa: { step: mode === 'VERIFY' ? 'verify' : 'setup', challengeToken } };
+    }
+
     const result = await this.issueSession(user.id, user.role, randomUUID(), user.passwordHash);
     await this.trail.record(AUTH_AUDIT_ACTIONS.login, user.id, meta, { role: user.role });
     this.logger.info({ event: 'auth_login', userId: user.id, role: user.role }, 'login');
     return { ...result, user: { id: user.id, role: user.role } };
+  }
+
+  /** Passo 2 do login com MFA já ativo: código do app (ou de recuperação) → sessão. */
+  async completeMfaLogin(
+    challengeToken: string,
+    code: string,
+    meta: AccessMeta = {},
+  ): Promise<LoginResult> {
+    return this.sessionFromMfa(await this.mfa.verifyLogin(challengeToken, code, meta), meta);
+  }
+
+  /** Inscrição: gera o segredo e a URI do QR para a conta que acabou de passar na senha. */
+  async startMfaSetup(challengeToken: string) {
+    return this.mfa.beginSetup(challengeToken);
+  }
+
+  /** Confirma a inscrição, ativa o MFA e emite a sessão + os códigos de recuperação (uma vez). */
+  async enableMfa(
+    challengeToken: string,
+    code: string,
+    meta: AccessMeta = {},
+  ): Promise<LoginResult & { recoveryCodes: string[] }> {
+    const { recoveryCodes, ...identity } = await this.mfa.enable(challengeToken, code, meta);
+    return { ...(await this.sessionFromMfa(identity, meta)), recoveryCodes };
+  }
+
+  private async sessionFromMfa(identity: MfaIdentity, meta: AccessMeta): Promise<LoginResult> {
+    const result = await this.issueSession(
+      identity.userId,
+      identity.role,
+      randomUUID(),
+      identity.passwordHash,
+    );
+    await this.trail.record(AUTH_AUDIT_ACTIONS.login, identity.userId, meta, {
+      role: identity.role,
+      mfa: identity.method,
+    });
+    this.logger.info(
+      { event: 'auth_login', userId: identity.userId, role: identity.role, mfa: identity.method },
+      'login',
+    );
+    return { ...result, user: { id: identity.userId, role: identity.role } };
   }
 
   /**

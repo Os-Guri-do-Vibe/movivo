@@ -11,6 +11,9 @@ let auth: {
   logoutRefresh: ReturnType<typeof vi.fn>;
   logout: ReturnType<typeof vi.fn>;
   getProfile: ReturnType<typeof vi.fn>;
+  completeMfaLogin: ReturnType<typeof vi.fn>;
+  startMfaSetup: ReturnType<typeof vi.fn>;
+  enableMfa: ReturnType<typeof vi.fn>;
 };
 let res: { cookie: ReturnType<typeof vi.fn>; clearCookie: ReturnType<typeof vi.fn> };
 let controller: AuthController;
@@ -32,6 +35,9 @@ beforeEach(() => {
     logoutRefresh: vi.fn(async () => undefined),
     logout: vi.fn(async () => undefined),
     getProfile: vi.fn(async () => ({ name: 'Ana Souza', avatarPath: 'abc.jpg' })),
+    completeMfaLogin: vi.fn(),
+    startMfaSetup: vi.fn(),
+    enableMfa: vi.fn(),
   };
   res = { cookie: vi.fn(), clearCookie: vi.fn() };
   controller = new AuthController(auth as never, config as never);
@@ -130,4 +136,93 @@ it('logout pelo refresh não exige access token', async () => {
   );
   expect(auth.logoutRefresh).toHaveBeenCalledWith('sess.secret', META);
   expect(res.clearCookie).toHaveBeenCalledWith('movivo_refresh', expect.any(Object));
+});
+
+const TOKEN = 'a'.repeat(64);
+
+describe('login com 2º fator (MFA)', () => {
+  it('desafio pendente: devolve só o desafio, SEM cookie nem access token', async () => {
+    auth.login.mockResolvedValue({ mfa: { step: 'verify', challengeToken: TOKEN } });
+
+    const out = await controller.login(
+      { email: 'p@movivo.app', password: 'senha' },
+      REQ as never,
+      res as never,
+    );
+
+    expect(out).toEqual({ mfa: { step: 'verify', challengeToken: TOKEN } });
+    expect(res.cookie).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /auth/mfa/verify', () => {
+  it('resolve o desafio com o código, seta o cookie e devolve o access', async () => {
+    auth.completeMfaLogin.mockResolvedValue({
+      accessToken: 'access',
+      refreshCookie: 'sess.secret',
+      user: { id: 'u1', role: 'ADMIN' },
+    });
+
+    const out = await controller.mfaVerify(
+      { challengeToken: TOKEN, code: '123456' },
+      REQ as never,
+      res as never,
+    );
+
+    expect(auth.completeMfaLogin).toHaveBeenCalledWith(TOKEN, '123456', META);
+    expect(out).toEqual({ accessToken: 'access', user: { id: 'u1', role: 'ADMIN' } });
+    expect(res.cookie).toHaveBeenCalledWith(
+      'movivo_refresh',
+      'sess.secret',
+      expect.objectContaining({ httpOnly: true, sameSite: 'strict' }),
+    );
+  });
+
+  it.each([
+    ['sem desafio', { code: '123456' }],
+    ['desafio malformado', { challengeToken: 'curto', code: '123456' }],
+    ['código ausente', { challengeToken: TOKEN }],
+    ['código com injeção', { challengeToken: TOKEN, code: "1' OR '1'='1" }],
+    ['campo extra (mass assignment)', { challengeToken: TOKEN, code: '123456', role: 'ADMIN' }],
+  ])('rejeita corpo inválido: %s', async (_label, body) => {
+    await expect(controller.mfaVerify(body, REQ as never, res as never)).rejects.toBeTruthy();
+    expect(auth.completeMfaLogin).not.toHaveBeenCalled();
+    expect(res.cookie).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /auth/mfa/setup e /auth/mfa/enable', () => {
+  it('setup devolve segredo e URI do QR do desafio', async () => {
+    const setup = {
+      secret: 'JBSWY3DPEHPK3PXP',
+      otpauthUri: 'otpauth://totp/x',
+      account: 'a@x.com',
+    };
+    auth.startMfaSetup.mockResolvedValue(setup);
+    await expect(controller.mfaSetup({ challengeToken: TOKEN })).resolves.toEqual(setup);
+    expect(auth.startMfaSetup).toHaveBeenCalledWith(TOKEN);
+  });
+
+  it('enable entra e devolve os códigos de recuperação UMA vez, sem expor o refresh no corpo', async () => {
+    auth.enableMfa.mockResolvedValue({
+      accessToken: 'access',
+      refreshCookie: 'sess.secret',
+      user: { id: 'u1', role: 'ADMIN' },
+      recoveryCodes: ['AAAAA-BBBBB'],
+    });
+
+    const out = await controller.mfaEnable(
+      { challengeToken: TOKEN, code: '123456' },
+      REQ as never,
+      res as never,
+    );
+
+    expect(out).toEqual({
+      accessToken: 'access',
+      user: { id: 'u1', role: 'ADMIN' },
+      recoveryCodes: ['AAAAA-BBBBB'],
+    });
+    expect(JSON.stringify(out)).not.toContain('sess.secret');
+    expect(res.cookie).toHaveBeenCalled();
+  });
 });

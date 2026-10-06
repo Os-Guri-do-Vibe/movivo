@@ -189,6 +189,16 @@ export const envSchema = z
       )
       .default('30d'),
 
+    // ------------------------------------------------------- MFA (contas internas)
+    /**
+     * Exige o 2º fator (TOTP) de toda conta interna. `true`: quem ainda não se inscreveu é
+     * obrigado a se inscrever no próximo login (não há como entrar sem). `false`: só quem já
+     * ativou o MFA precisa do código. Ligado em produção (`infra/vps/api.env`).
+     */
+    AUTH_MFA_REQUIRED: envBoolean.default(false),
+    /** Nome mostrado no app autenticador (Google Authenticator, 1Password…). */
+    AUTH_MFA_ISSUER: z.string().trim().min(1).max(60).default('MOVIVO'),
+
     // -------------------------------------------------------- LLM (US-2.2)
     /**
      * Chaves de API dos provedores (ADR-005-R2). **Opcionais** (diferente de JWT/pgcrypto):
