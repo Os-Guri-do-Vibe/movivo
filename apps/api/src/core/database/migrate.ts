@@ -296,15 +296,18 @@ async function main(): Promise<void> {
     console.log('[db:migrate] ad_spend append-only reconciliado.');
 
     // Prova de que o modelo de permissões continua íntegro após a migração.
-    const [check] = await sql<{ bypassrls: boolean; owns: number }[]>`
+    const [check] = await sql<{ bypassrls: boolean; superuser: boolean; owns: number }[]>`
       SELECT
         (SELECT rolbypassrls FROM pg_roles WHERE rolname = ${appRole}) AS bypassrls,
+        (SELECT rolsuper FROM pg_roles WHERE rolname = ${appRole}) AS superuser,
         (SELECT count(*)::int FROM pg_tables
           WHERE schemaname = 'public' AND tableowner = ${appRole}) AS owns
     `;
 
-    if (check?.bypassrls) {
-      throw new Error(`[db:migrate] VIOLAÇÃO: ${appRole} tem BYPASSRLS (ARQUITETURA.md §12.13).`);
+    if (check?.bypassrls || check?.superuser) {
+      throw new Error(
+        `[db:migrate] VIOLAÇÃO: ${appRole} tem BYPASSRLS ou SUPERUSER (ARQUITETURA.md §12.13).`,
+      );
     }
     if (check && check.owns > 0) {
       throw new Error(

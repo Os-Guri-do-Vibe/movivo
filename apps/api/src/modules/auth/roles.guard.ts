@@ -3,7 +3,7 @@
  *
  * Roda **depois** do `JwtAuthGuard` (a ordem no `@UseGuards` importa): assume que
  * `req.user` já foi resolvido. Lê os papéis exigidos por `@Roles()` e barra quem não
- * os tem. Handler sem `@Roles()` ⇒ basta estar autenticado.
+ * os tem. Ausência de `@Roles()` ou lista vazia nega acesso por padrão.
  */
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -21,10 +21,8 @@ export class RolesGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    if (!required || required.length === 0) return true;
-
     const user = context.switchToHttp().getRequest<{ user?: AuthenticatedUser }>().user;
-    if (!user || !required.includes(user.role)) {
+    if (!user || !required?.length || !required.includes(user.role)) {
       throw new ForbiddenException('Você não tem permissão para acessar este recurso.');
     }
     return true;

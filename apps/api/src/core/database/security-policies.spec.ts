@@ -91,14 +91,37 @@ describe('buildRlsPoliciesSql', () => {
     expect(sql).not.toMatch(/[^(]current_setting\('app\.current_user_id', true\)(?!, '')/);
   });
 
-  it('users ancora pela própria id e permite criação sem contexto (onboarding público)', () => {
-    expect(sql).toContain(
-      `CREATE POLICY "users_rls_select" ON "users" FOR SELECT USING (("id"::text = nullif(current_setting('app.current_user_id', true), ''))`,
-    );
-    // INSERT liberado quando não há titular no contexto (criação anônima/sistema).
-    expect(sql).toMatch(
-      /CREATE POLICY "users_rls_insert" ON "users" FOR INSERT WITH CHECK \(nullif\(current_setting\('app.current_user_id', true\), ''\) IS NULL/,
-    );
+  it('cadastro de alunos e staff exige SYSTEM/ADMIN, nunca contexto ausente ou autocadastro', () => {
+    for (const table of ['users', 'staff']) {
+      const insert = sql
+        .split(';')
+        .find((statement) => statement.includes(`CREATE POLICY "${table}_rls_insert"`));
+      expect(insert).toContain("= 'SYSTEM'");
+      expect(insert).toContain("= 'ADMIN'");
+      expect(insert).not.toContain('IS NULL');
+      expect(insert).not.toContain('current_user_id');
+    }
+  });
+
+  it('escrita de registros filhos exige o mesmo titular do recurso-pai', () => {
+    for (const [table, parent, column] of [
+      ['protocol_versions', 'protocols', 'protocol_id'],
+      ['protocol_substitution_requests', 'protocols', 'protocol_id'],
+      ['checkins', 'protocols', 'protocol_id'],
+      ['workout_completions', 'protocols', 'protocol_id'],
+      ['workout_sessions', 'protocols', 'protocol_id'],
+      ['workout_set_entries', 'workout_sessions', 'workout_session_id'],
+      ['workout_access_tokens', 'workout_sessions', 'workout_session_id'],
+    ]) {
+      for (const operation of ['insert', 'update']) {
+        const policy = sql
+          .split(';')
+          .find((statement) => statement.includes(`CREATE POLICY "${table}_rls_${operation}"`));
+        expect(policy).toContain(`FROM "${parent}" owner`);
+        expect(policy).toContain(`owner.id = "${table}"."${column}"`);
+        expect(policy).toContain(`owner.user_id = "${table}"."user_id"`);
+      }
+    }
   });
 
   it('consents é append-only: NÃO gera policy de DELETE', () => {
