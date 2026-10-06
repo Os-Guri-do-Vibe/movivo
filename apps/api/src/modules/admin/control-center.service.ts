@@ -2758,13 +2758,22 @@ export class ControlCenterService {
     return sql<string>`to_char(${column} at time zone ${TIMEZONE}, 'YYYY-MM-DD')`;
   }
 
-  /** Intervalo literal em dias. Só recebe constante de código, nunca entrada de usuário. */
+  /**
+   * Intervalo em dias, com a quantidade como **parâmetro ligado** (`make_interval`), nunca
+   * concatenada no SQL. Hoje só recebe constante de código, mas o tipo `number` não impede
+   * `NaN`/fração/valor vindo de fora no futuro — o guard falha antes de chegar ao banco.
+   */
   private days(count: number) {
-    return sql.raw(`interval '${count} days'`);
+    if (!Number.isInteger(count) || count < 0) {
+      throw new RangeError(`intervalo em dias inválido: ${count}`);
+    }
+    return sql`make_interval(days => ${count}::int)`;
   }
 
+  /** `part` é um union fechado: cada ramo é um fragmento literal, sem `sql.raw`. */
   private localPart(part: 'dow' | 'hour', column: SQLWrapper) {
-    return sql<number>`extract(${sql.raw(part)} from ${column} at time zone ${TIMEZONE})::int`;
+    const field = part === 'dow' ? sql`dow` : sql`hour`;
+    return sql<number>`extract(${field} from ${column} at time zone ${TIMEZONE})::int`;
   }
 
   /**
