@@ -35,10 +35,11 @@ e ele nunca vai para log/URL sem `Referrer-Policy: no-referrer` (aplicado na US-
 seta `anamnesis_sessions.user_id` e migra os consentimentos. A partir daí a linha é
 protegida por RLS por `user_id` como as demais — provado no `security-foundation.int-spec`.
 
-**Criação de usuário sob RLS:** a policy de INSERT de `users` libera quando
-`current_setting('app.current_user_id', true) IS NULL` (contexto anônimo/sistema) ou
-quando a linha é o próprio titular. Assim o onboarding público insere sem travar, e um
-titular autenticado não consegue inserir usuários arbitrários.
+**Criação de usuário sob RLS — revisão de segurança 2026-10-05:** a policy de
+INSERT de `users` exige `SYSTEM` ou `ADMIN`. Ausência de identidade/papel não
+é autorização, e um titular não pode criar outra conta ou autocadastrar staff.
+O onboarding público continua criando o aluno dentro de `runAsSystem`, após as
+verificações do fluxo. Ver `docs/fitness-ia-whatsapp/11-auditoria-autorizacao-rls.md`.
 
 ## Armadilha resolvida — FORCE RLS × seed/migração de dados
 

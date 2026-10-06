@@ -55,6 +55,9 @@ overrides:
   # mantinha as duas versões na árvore e o `pnpm audit` seguia acusando a
   # transitiva. Mesmo major (2.x) — correção segura. Datado: 2026-09-11.
   'multer@<2.3.0': '>=2.3.0'
+  # source-map-js <1.2.2 — DoS no processamento de sourcemaps indexados
+  # (GHSA-68fv-2mgg-jv7q). @tailwindcss/node fixa 1.2.1; aplicar o patch da mesma linha.
+  'source-map-js@>=1.0.0 <1.2.2': '1.2.2'
 allowBuilds:
   # `core-js` entra como dependência transitiva de `posthog-js` (US-0.5). Seu script de
   # postinstall só imprime uma mensagem de financiamento — não produz artefato nenhum.

@@ -1,4 +1,4 @@
-import { CONSENT_TEXTS } from '@movivo/shared';
+import { CONSENT_TEXTS, ControlCenterRole } from '@movivo/shared';
 
 /**
  * Políticas de Row-Level Security (US-1.1 / TASK-1.1.2 / TASK-1.1.4 — Sato §4).
@@ -72,6 +72,8 @@ interface TenantTable {
    * e status de assinatura (`subscriptions`). Somente SELECT — nunca INSERT/UPDATE/DELETE.
    */
   support?: true;
+  /** A coluna denormalizada deve ter o mesmo titular do recurso-pai. */
+  parent?: { table: string; column: string };
 }
 
 const TENANT_TABLES: ReadonlyArray<TenantTable> = [
@@ -104,14 +106,24 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   // condição/limitação física) — sob a mesma FORCE RLS por titular. `protocol_versions`
   // tem `user_id` denormalizado justamente para ancorar a RLS sem JOIN (Sato §4.5).
   { table: 'protocols', column: 'user_id', professional: 'write' },
-  { table: 'protocol_versions', column: 'user_id', professional: 'write' },
+  {
+    table: 'protocol_versions',
+    column: 'user_id',
+    professional: 'write',
+    parent: { table: 'protocols', column: 'protocol_id' },
+  },
   // Renovação de protocolo por fim de mesociclo: titular já existe desde a criação da
   // linha (sem fase anônima, diferente de `anamnesis_sessions`) — sem `anon` aqui. CREF
   // lê as respostas ao revisar o protocolo gerado a partir delas, mas não edita.
   { table: 'protocol_renewal_sessions', column: 'user_id', professional: 'read' },
   // Achado 2026-09-02: proposta de substituição de exercício via IA, em staging até
   // aprovação/janela de cortesia — mesma FORCE RLS por titular de `protocols`.
-  { table: 'protocol_substitution_requests', column: 'user_id', professional: 'write' },
+  {
+    table: 'protocol_substitution_requests',
+    column: 'user_id',
+    professional: 'write',
+    parent: { table: 'protocols', column: 'protocol_id' },
+  },
   // Sprint 3 (US-3.2): resumo de longo prazo da conversa de saúde — mesma FORCE RLS por titular.
   { table: 'coaching_sessions', column: 'user_id', professional: 'read' },
   // Sprint 3 (US-3.6): alerta/handoff ao painel CREF — dado de titular, isolado por RLS FORCE.
@@ -119,16 +131,40 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   // Sprint 4 (US-4.1): assinatura/dado financeiro do titular — sob a mesma FORCE RLS.
   { table: 'subscriptions', column: 'user_id', professional: 'read', support: true },
   { table: 'conversations', column: 'user_id', professional: 'read' },
-  { table: 'checkins', column: 'user_id', professional: 'read' },
+  {
+    table: 'checkins',
+    column: 'user_id',
+    professional: 'read',
+    parent: { table: 'protocols', column: 'protocol_id' },
+  },
   { table: 'reengagement_nudges', column: 'user_id', professional: 'read' },
   { table: 'audit_logs', column: 'user_id', professional: 'write' },
   // Sprint 8 (US-8.1): treino concluído do titular. Não há caminho HTTP de aluno para
   // esta tabela (não existe UI de aluno) — a RLS existe para que o painel do
   // profissional e os jobs de sistema sejam a única porta, e ela seja escopada.
-  { table: 'workout_completions', column: 'user_id', professional: 'read' },
-  { table: 'workout_sessions', column: 'user_id', professional: 'read' },
-  { table: 'workout_set_entries', column: 'user_id', professional: 'read' },
-  { table: 'workout_access_tokens', column: 'user_id' },
+  {
+    table: 'workout_completions',
+    column: 'user_id',
+    professional: 'read',
+    parent: { table: 'protocols', column: 'protocol_id' },
+  },
+  {
+    table: 'workout_sessions',
+    column: 'user_id',
+    professional: 'read',
+    parent: { table: 'protocols', column: 'protocol_id' },
+  },
+  {
+    table: 'workout_set_entries',
+    column: 'user_id',
+    professional: 'read',
+    parent: { table: 'workout_sessions', column: 'workout_session_id' },
+  },
+  {
+    table: 'workout_access_tokens',
+    column: 'user_id',
+    parent: { table: 'workout_sessions', column: 'workout_session_id' },
+  },
   { table: 'access_link_tokens', column: 'user_id' },
   { table: 'workout_insights', column: 'user_id', professional: 'read' },
   // Sprint 8 (US-8.3): sequência de marcos do ciclo de vida do titular. Append-only
@@ -180,9 +216,11 @@ function policyNames(table: string) {
 export function buildRlsPoliciesSql(): string {
   const statements: string[] = [];
 
-  for (const { table, column, anon, professional, support } of TENANT_TABLES) {
+  for (const { table, column, anon, professional, support, parent } of TENANT_TABLES) {
     const p = policyNames(table);
-    const self = `("${column}"::text = ${UID})`;
+    const self = `("${column}"::text = ${UID} AND ${ROLE} IN (${Object.values(ControlCenterRole)
+      .map((role) => `'${role}'`)
+      .join(', ')}))`;
     const system = `(${ROLE} = 'SYSTEM')`;
     const admin = `(${ROLE} = 'ADMIN')`;
     const base = `${self} OR ${system} OR ${admin}`;
@@ -223,14 +261,21 @@ export function buildRlsPoliciesSql(): string {
           ))`
       : '';
 
+    const parentCheck = parent
+      ? ` AND ("${table}"."${parent.column}" IS NULL OR EXISTS (
+          SELECT 1 FROM "${parent.table}" owner
+          WHERE owner.id = "${table}"."${parent.column}"
+            AND owner.user_id = "${table}"."${column}"
+        ))`
+      : '';
     const visibleRead = `${base}${professional ? ` OR ${linkedProfessional}` : ''}${supportRead}${anonRead}`;
     const visibleWrite = `${base}${professional === 'write' ? ` OR ${linkedProfessional}` : ''}${anonWrite}`;
 
-    // Criação de titular / linha de fase anônima: permitida sem contexto de tenant
-    // (onboarding público e operações de sistema) ou dentro do próprio contexto.
+    // Cadastro de aluno/staff é bootstrap explícito de SYSTEM/ADMIN. Contexto
+    // ausente não autoriza INSERT; o onboarding usa runAsSystem após verificação.
     const insertCheck =
-      table === 'users'
-        ? `${UID} IS NULL OR ${self} OR ${system} OR ${admin}`
+      table === 'users' || table === 'staff'
+        ? `${system} OR ${admin}`
         : `${base}${professional === 'write' ? ` OR ${linkedProfessional}` : ''}${anonInsert}`;
 
     statements.push(
@@ -242,8 +287,8 @@ export function buildRlsPoliciesSql(): string {
       `DROP POLICY IF EXISTS "${p.update}" ON "${table}"`,
       `DROP POLICY IF EXISTS "${p.delete}" ON "${table}"`,
       `CREATE POLICY "${p.select}" ON "${table}" FOR SELECT USING (${visibleRead})`,
-      `CREATE POLICY "${p.insert}" ON "${table}" FOR INSERT WITH CHECK (${insertCheck})`,
-      `CREATE POLICY "${p.update}" ON "${table}" FOR UPDATE USING (${visibleWrite}) WITH CHECK (${visibleWrite})`,
+      `CREATE POLICY "${p.insert}" ON "${table}" FOR INSERT WITH CHECK ((${insertCheck})${parentCheck})`,
+      `CREATE POLICY "${p.update}" ON "${table}" FOR UPDATE USING (${visibleWrite}) WITH CHECK ((${visibleWrite})${parentCheck})`,
     );
 
     // DELETE: `consents` é append-only (revogação = UPDATE em `revoked_at`), então
@@ -502,12 +547,16 @@ export function buildProfessionalAccessSql(appRole: string): string {
       -- de qualquer titular — mesma mudança do linkedProfessional em
       -- buildRlsPoliciesSql acima, senão essa checagem (chamada de dentro da própria
       -- policy) travaria de novo o acesso que acabou de ser liberado ali.
-      IF NOT (
+      IF (
         actor_role = 'SYSTEM'
         OR actor_role = 'ADMIN'
         OR (actor_role = 'USER' AND actor IS NOT DISTINCT FROM target_user)
-        OR actor_role = 'PROFESSIONAL'
-      ) THEN
+        OR (actor_role = 'PROFESSIONAL' AND EXISTS (
+          SELECT 1 FROM public.staff professional
+          WHERE professional.id = actor AND professional.role = 'PROFESSIONAL'
+            AND professional.cref_active = true
+        ))
+      ) IS NOT TRUE THEN
         RETURN false;
       END IF;
       RETURN EXISTS (
@@ -525,7 +574,7 @@ export function buildProfessionalAccessSql(appRole: string): string {
     BEGIN
       actor_role := nullif(current_setting('app.current_role', true), '');
       actor := nullif(current_setting('app.current_user_id', true), '')::uuid;
-      IF actor_role <> 'USER' OR actor IS DISTINCT FROM target_user THEN
+      IF actor_role IS DISTINCT FROM 'USER' OR actor IS DISTINCT FROM target_user THEN
         RAISE EXCEPTION 'holder context required' USING ERRCODE = '42501';
       END IF;
       UPDATE public.consents SET revoked_at = now(), updated_at = now()
@@ -557,7 +606,7 @@ export function buildProfessionalAccessSql(appRole: string): string {
     BEGIN
       actor_role := nullif(current_setting('app.current_role', true), '');
       actor := nullif(current_setting('app.current_user_id', true), '')::uuid;
-      IF actor_role <> 'USER' OR actor IS DISTINCT FROM target_user THEN
+      IF actor_role IS DISTINCT FROM 'USER' OR actor IS DISTINCT FROM target_user THEN
         RAISE EXCEPTION 'holder context required' USING ERRCODE = '42501';
       END IF;
       IF target_type = 'HEALTH_DATA'::public.consent_type THEN
@@ -589,7 +638,7 @@ export function buildProfessionalAccessSql(appRole: string): string {
     DECLARE actor_role text; affected integer;
     BEGIN
       actor_role := nullif(current_setting('app.current_role', true), '');
-      IF actor_role <> 'SYSTEM' THEN
+      IF actor_role IS DISTINCT FROM 'SYSTEM' THEN
         RAISE EXCEPTION 'system context required' USING ERRCODE = '42501';
       END IF;
       PERFORM pg_advisory_xact_lock(hashtext('movivo.consent-cycle:' || target_user::text));
@@ -620,7 +669,7 @@ export function buildProfessionalAccessSql(appRole: string): string {
     BEGIN
       actor_role := nullif(current_setting('app.current_role', true), '');
       scoped_session := nullif(current_setting('app.current_anamnesis_session_id', true), '')::uuid;
-      IF actor_role <> 'ANONYMOUS' OR scoped_session IS DISTINCT FROM target_session THEN
+      IF actor_role IS DISTINCT FROM 'ANONYMOUS' OR scoped_session IS DISTINCT FROM target_session THEN
         RAISE EXCEPTION 'anonymous session scope required' USING ERRCODE = '42501';
       END IF;
       IF NOT EXISTS (
@@ -659,7 +708,7 @@ export function buildProfessionalAccessSql(appRole: string): string {
     RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
     DECLARE professional uuid;
     BEGIN
-      IF nullif(current_setting('app.current_role', true), '') NOT IN ('SYSTEM', 'ADMIN') THEN
+      IF coalesce(nullif(current_setting('app.current_role', true), ''), '') NOT IN ('SYSTEM', 'ADMIN') THEN
         RAISE EXCEPTION 'assignment requires system context' USING ERRCODE = '42501';
       END IF;
       -- Decisão do fundador (2026-08-25): no início da MOVIVO todo ADMIN é também
@@ -769,7 +818,7 @@ export function buildProfessionalAccessSql(appRole: string): string {
     BEGIN
       actor_role := nullif(current_setting('app.current_role', true), '');
       actor := nullif(current_setting('app.current_user_id', true), '')::uuid;
-      IF actor_role <> 'USER' OR actor IS DISTINCT FROM target_user THEN
+      IF actor_role IS DISTINCT FROM 'USER' OR actor IS DISTINCT FROM target_user THEN
         RAISE EXCEPTION 'holder context required' USING ERRCODE = '42501';
       END IF;
       -- ADMIN conta como profissional elegível pelo mesmo motivo de
@@ -963,7 +1012,7 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
     BEGIN
       actor := nullif(current_setting('app.current_user_id', true), '')::uuid;
       caller_role := nullif(current_setting('app.current_role', true), '');
-      IF caller_role NOT IN ('SYSTEM', 'PROFESSIONAL') THEN
+      IF coalesce(caller_role, '') NOT IN ('SYSTEM', 'PROFESSIONAL') THEN
         RAISE EXCEPTION 'knowledge publisher role denied' USING ERRCODE = '42501';
       END IF;
       IF caller_role = 'PROFESSIONAL' AND (actor IS NULL OR NOT EXISTS (
@@ -1051,7 +1100,7 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
     RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
     DECLARE affected integer;
     BEGIN
-      IF nullif(current_setting('app.current_role', true), '') NOT IN ('ADMIN', 'PROFESSIONAL', 'ENGINEERING', 'SYSTEM') THEN
+      IF coalesce(nullif(current_setting('app.current_role', true), ''), '') NOT IN ('ADMIN', 'PROFESSIONAL', 'ENGINEERING', 'SYSTEM') THEN
         RAISE EXCEPTION 'control center role required' USING ERRCODE = '42501';
       END IF;
       DELETE FROM public.knowledge_document_blobs WHERE retained_until <= now();

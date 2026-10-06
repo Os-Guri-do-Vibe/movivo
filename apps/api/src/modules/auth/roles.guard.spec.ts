@@ -22,9 +22,11 @@ function guardWith(required: TenantRole[] | undefined) {
 }
 
 describe('RolesGuard', () => {
-  it('libera quando o handler não declara @Roles()', () => {
-    expect(guardWith(undefined).canActivate(ctx({ role: 'USER' }))).toBe(true);
-    expect(guardWith([]).canActivate(ctx({ role: 'USER' }))).toBe(true);
+  it.each([undefined, []])('nega acesso sem política explícita: %s', (required) => {
+    for (const role of ['USER', 'PROFESSIONAL', 'ADMIN'] as const) {
+      expect(() => guardWith(required).canActivate(ctx({ role }))).toThrow(ForbiddenException);
+    }
+    expect(() => guardWith(required).canActivate(ctx(undefined))).toThrow(ForbiddenException);
   });
 
   it('libera PROFESSIONAL num endpoint @Roles(PROFESSIONAL, ADMIN)', () => {

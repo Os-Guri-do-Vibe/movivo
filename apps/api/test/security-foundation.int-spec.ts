@@ -21,6 +21,7 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { loadEnv } from '../src/core/config/load-env';
+import { RLS_TENANT_TABLES } from '../src/core/database/security-policies';
 import { HealthCipherService } from '../src/core/database/health-cipher.service';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { type DrizzleClient } from '../src/core/database/database.module';
@@ -260,10 +261,113 @@ describe('RLS FORCE + SET LOCAL — isolamento entre titulares', () => {
   });
 });
 
+describe('Autorização do banco — deny by default e CREF ativo', () => {
+  const rollback = new Error('rollback de verificação de autorização');
+
+  it('INSERT em users sem contexto é negado, sem persistir dados', async () => {
+    await expect(
+      appClient.begin(async (tx) => {
+        await tx`SELECT set_config('app.current_role', '', true), set_config('app.current_user_id', '', true)`;
+        await tx`INSERT INTO users (phone_number, name) VALUES (${phone(9)}, 'sem autorização')`;
+        throw rollback;
+      }),
+    ).rejects.toMatchObject({ code: '42501' });
+  });
+
+  it('não permite autocadastro de staff com papel elevado', async () => {
+    await expect(
+      tenant.runAsUser(userA, 'USER', async (tx) => {
+        await tx.execute(sql`INSERT INTO staff (id, phone_number, email, name, role, password_hash)
+        VALUES (${userA}, ${phone(8)}, ${`autocadastro-${RUN}@example.invalid`}, 'sem autorização', 'ADMIN', 'x')`);
+        throw rollback;
+      }),
+    ).rejects.toMatchObject({ cause: { code: '42501' } });
+  });
+
+  it('consulta de consentimento não revela estado sem papel definido', async () => {
+    const rows = await appClient.begin(async (tx) => {
+      await tx`SELECT set_config('app.current_role', '', true), set_config('app.current_user_id', ${userA}, true)`;
+      return tx`SELECT public.has_active_health_consent(${userB}::uuid) AS permitted`;
+    });
+    expect(rows[0].permitted).toBe(false);
+  });
+
+  it.each([
+    'SELECT public.link_session_consents_to_user($1::uuid, $2::uuid)',
+    'SELECT public.assign_unique_active_professional($2::uuid)',
+    'SELECT public.publish_knowledge_document($1::uuid)',
+    'SELECT public.purge_expired_knowledge_blobs()',
+    'SELECT public.revoke_health_data_consent($2::uuid)',
+    "SELECT public.revoke_non_health_consent($2::uuid, 'MARKETING'::public.consent_type)",
+    'SELECT public.assigned_active_professional($2::uuid)',
+    "SELECT public.record_session_consent($1::uuid, 'HEALTH_DATA'::public.consent_type, 'invalid', true, NULL, NULL)",
+  ])('função privilegiada nega contexto sem papel: %s', async (query) => {
+    await expect(
+      appClient.begin(async (tx) => {
+        await tx`SELECT set_config('app.current_role', '', true), set_config('app.current_user_id', ${userA}, true), set_config('app.current_anamnesis_session_id', ${userB}, true)`;
+        // Preenche por bind apenas os parâmetros presentes na instrução.
+        const parameters = query.includes('$2')
+          ? [userB, userA]
+          : query.includes('$1')
+            ? [userB]
+            : [];
+        await tx.unsafe(
+          query.includes('$1') ? query : query.replaceAll('$2', '$1'),
+          query.includes('$1') ? parameters : query.includes('$2') ? [userA] : [],
+        );
+        throw rollback;
+      }),
+    ).rejects.toMatchObject({ code: '42501' });
+  });
+
+  it('CREF inativo não lê alunos nem protocolos, mesmo com consentimento vigente', async () => {
+    await adminClient`UPDATE staff SET cref_active = false WHERE id = ${professionalId}::uuid`;
+    try {
+      const rows = await tenant.runAsUser(professionalId, 'PROFESSIONAL', async (tx) =>
+        tx.execute(sql`SELECT id FROM users WHERE id IN (${userA}, ${userB})`),
+      );
+      expect(rows).toHaveLength(0);
+      const [result] = (await tenant.runAsUser(professionalId, 'PROFESSIONAL', async (tx) =>
+        tx.execute(sql`SELECT public.has_active_health_consent(${userB}::uuid) AS permitted`),
+      )) as unknown as Array<{ permitted: boolean }>;
+      expect(result.permitted).toBe(false);
+    } finally {
+      await adminClient`UPDATE staff SET cref_active = true WHERE id = ${professionalId}::uuid`;
+    }
+  });
+});
+
 describe('movivo_app não pode burlar a RLS (TASK-1.8.2b — atributos da role)', () => {
   // Estes asserts FALHAM o pipeline se alguém conceder BYPASSRLS a movivo_app ou
   // torná-la dona das tabelas — as duas formas de anular a RLS FORCE sem tocar em
   // política nenhuma. São a prova de que o isolamento não depende só das policies.
+  it('todas as tabelas de titular têm ENABLE/FORCE e ownership fora do runtime', async () => {
+    const rows = await appClient<
+      { name: string; enabled: boolean; forced: boolean; owner: string }[]
+    >`
+      SELECT c.relname AS name, c.relrowsecurity AS enabled, c.relforcerowsecurity AS forced,
+             pg_get_userbyid(c.relowner) AS owner
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relname = ANY(${RLS_TENANT_TABLES})
+    `;
+    expect(rows).toHaveLength(RLS_TENANT_TABLES.length);
+    for (const row of rows) {
+      expect(row.enabled, row.name).toBe(true);
+      expect(row.forced, row.name).toBe(true);
+      expect(row.owner, row.name).not.toBe('movivo_app');
+    }
+  });
+
+  it('papel ausente ou desconhecido não autoriza leitura só por current_user_id', async () => {
+    for (const role of ['', 'UNKNOWN']) {
+      const rows = await appClient.begin(async (tx) => {
+        await tx`SELECT set_config('app.current_role', ${role}, true), set_config('app.current_user_id', ${userA}, true)`;
+        return tx`SELECT id FROM users WHERE id = ${userA}::uuid`;
+      });
+      expect(rows).toHaveLength(0);
+    }
+  });
+
   it('a role de aplicação não tem BYPASSRLS nem SUPERUSER', async () => {
     const rows = (await db.execute(
       sql`SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname = 'movivo_app'`,
