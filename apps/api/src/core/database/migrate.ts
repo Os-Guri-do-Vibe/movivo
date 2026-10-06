@@ -21,6 +21,7 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 
 import { loadEnv } from '../config/load-env';
+import { sqlIdentifier } from './sql-identifier';
 import {
   buildAgentConfigImmutabilitySql,
   buildAiForbiddenTopicsImmutabilitySql,
@@ -54,7 +55,8 @@ const port = Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_POR
 const user = env.MIGRATION_DATABASE_USER ?? 'movivo_migrator';
 const password = env.MIGRATION_DATABASE_PASSWORD;
 const database = env.DATABASE_NAME;
-const appRole = env.DATABASE_USER ?? 'movivo_app';
+// Entra em GRANT/REVOKE (DDL não aceita parâmetro): valida o formato já na configuração.
+const appRole = sqlIdentifier(env.DATABASE_USER ?? 'movivo_app');
 
 if (!host || !Number.isFinite(port) || !user || !password || !database) {
   throw new Error(
@@ -83,23 +85,23 @@ if (port === 5433) {
  * já nasçam com o grant correto.
  */
 const GRANTS_SQL = (role: string) => `
-  GRANT USAGE ON SCHEMA public TO ${role};
-  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role};
-  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${role};
+  GRANT USAGE ON SCHEMA public TO ${sqlIdentifier(role)};
+  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${sqlIdentifier(role)};
+  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${sqlIdentifier(role)};
   -- EXECUTE nas funções do schema (inclui pgp_sym_encrypt/decrypt do pgcrypto,
   -- usadas pelo HealthCipherService — US-1.1/TASK-1.1.3). O init já concede em
   -- dev; reafirmar aqui cobre bancos provisionados fora do init (RDS/staging).
-  GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO ${role};
+  GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO ${sqlIdentifier(role)};
 
   ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${role};
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${sqlIdentifier(role)};
   ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT USAGE, SELECT ON SEQUENCES TO ${role};
+    GRANT USAGE, SELECT ON SEQUENCES TO ${sqlIdentifier(role)};
   ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT EXECUTE ON FUNCTIONS TO ${role};
+    GRANT EXECUTE ON FUNCTIONS TO ${sqlIdentifier(role)};
 
   -- Reafirma o que a role NÃO pode: criar objeto no schema.
-  REVOKE CREATE ON SCHEMA public FROM ${role};
+  REVOKE CREATE ON SCHEMA public FROM ${sqlIdentifier(role)};
 `;
 
 /**
@@ -133,12 +135,12 @@ const KNOWLEDGE_BASE_SQL = (role: string) => `
     WITH (m = 16, ef_construction = 64);
   CREATE INDEX IF NOT EXISTS idx_knowledge_base_fts_pt
     ON knowledge_base USING gin (to_tsvector('portuguese', chunk_text));
-  REVOKE INSERT, UPDATE, DELETE ON knowledge_base FROM ${role};
+  REVOKE INSERT, UPDATE, DELETE ON knowledge_base FROM ${sqlIdentifier(role)};
 
   CREATE INDEX IF NOT EXISTS idx_intent_examples_embedding
     ON intent_examples USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
-  REVOKE INSERT, UPDATE, DELETE ON intent_examples FROM ${role};
+  REVOKE INSERT, UPDATE, DELETE ON intent_examples FROM ${sqlIdentifier(role)};
 `;
 
 /**

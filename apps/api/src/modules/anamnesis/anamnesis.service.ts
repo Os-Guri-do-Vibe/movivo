@@ -113,6 +113,13 @@ export interface SubmitResult {
 /** Ordem de exibição da Etapa 1 = ordem das chaves de `CONSENT_TEXTS` (Alexandre §5.8). */
 const CONSENT_ORDER = Object.keys(CONSENT_TEXTS) as ConsentTypeWithText[];
 
+/** Únicas colunas que `writeJsonb` pode escrever (nome de coluna não é parametrizável). */
+type JsonbBlockColumn = 'data_block_1' | 'data_block_3';
+const JSONB_BLOCK_COLUMNS: ReadonlySet<string> = new Set<JsonbBlockColumn>([
+  'data_block_1',
+  'data_block_3',
+]);
+
 /** Payload inválido é erro do cliente, não falha interna da API. */
 function parseStepPayload<T>(schema: ZodType<T>, data: unknown): T {
   const parsed = strictSafeParse(schema, data);
@@ -500,9 +507,14 @@ export class AnamnesisService {
   private async writeJsonb(
     tx: TenantTransaction,
     sessionId: string,
-    column: string,
+    column: JsonbBlockColumn,
     value: unknown,
   ): Promise<void> {
+    // Identificador não é parametrizável: por isso o tipo é um union fechado e a checagem em
+    // runtime protege contra um cast futuro. `sql.identifier` ainda escapa o nome.
+    if (!JSONB_BLOCK_COLUMNS.has(column)) {
+      throw new Error(`coluna jsonb não permitida: ${String(column)}`);
+    }
     await tx.execute(sql`UPDATE anamnesis_sessions
       SET ${sql.identifier(column)} = ${sql`${JSON.stringify(value)}::jsonb`}, updated_at = now()
       WHERE id = ${sessionId}`);

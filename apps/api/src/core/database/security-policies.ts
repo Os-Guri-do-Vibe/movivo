@@ -1,5 +1,6 @@
 import { CONSENT_TEXTS, ControlCenterRole } from '@movivo/shared';
 
+import { sqlIdentifier } from './sql-identifier';
 /**
  * Políticas de Row-Level Security (US-1.1 / TASK-1.1.2 / TASK-1.1.4 — Sato §4).
  *
@@ -402,8 +403,8 @@ export function buildAuditIntegritySql(appRole: string): string {
     CREATE TRIGGER trg_audit_logs_no_truncate BEFORE TRUNCATE ON public.audit_logs
       FOR EACH STATEMENT EXECUTE FUNCTION public.audit_logs_reject_mutation();
 
-    REVOKE UPDATE, DELETE, TRUNCATE ON public.audit_logs FROM ${appRole};
-    GRANT SELECT, INSERT ON public.audit_logs TO ${appRole};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.audit_logs FROM ${sqlIdentifier(appRole)};
+    GRANT SELECT, INSERT ON public.audit_logs TO ${sqlIdentifier(appRole)};
   `;
 }
 
@@ -435,8 +436,8 @@ export function buildAgentConfigImmutabilitySql(appRole: string): string {
     CREATE TRIGGER trg_agent_config_no_truncate BEFORE TRUNCATE ON public.agent_config
       FOR EACH STATEMENT EXECUTE FUNCTION public.agent_config_reject_mutation();
 
-    REVOKE UPDATE, DELETE, TRUNCATE ON public.agent_config FROM ${appRole};
-    GRANT SELECT, INSERT ON public.agent_config TO ${appRole};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.agent_config FROM ${sqlIdentifier(appRole)};
+    GRANT SELECT, INSERT ON public.agent_config TO ${sqlIdentifier(appRole)};
 
     -- Sprint 11 — resolução da persona por slot. A leitura de caminho quente é sempre
     -- "maior version PUBLISHED DESTE target_sex", executada a cada expiração de cache em
@@ -467,8 +468,8 @@ export function buildFaqEntriesImmutabilitySql(appRole: string): string {
     CREATE TRIGGER trg_faq_entries_no_truncate BEFORE TRUNCATE ON public.faq_entries
       FOR EACH STATEMENT EXECUTE FUNCTION public.faq_entries_reject_mutation();
 
-    REVOKE UPDATE, DELETE, TRUNCATE ON public.faq_entries FROM ${appRole};
-    GRANT SELECT, INSERT ON public.faq_entries TO ${appRole};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.faq_entries FROM ${sqlIdentifier(appRole)};
+    GRANT SELECT, INSERT ON public.faq_entries TO ${sqlIdentifier(appRole)};
   `;
 }
 
@@ -490,8 +491,8 @@ export function buildAiGuardrailRulesImmutabilitySql(appRole: string): string {
     CREATE TRIGGER trg_ai_guardrail_rules_no_truncate BEFORE TRUNCATE ON public.ai_guardrail_rules
       FOR EACH STATEMENT EXECUTE FUNCTION public.ai_guardrail_rules_reject_mutation();
 
-    REVOKE UPDATE, DELETE, TRUNCATE ON public.ai_guardrail_rules FROM ${appRole};
-    GRANT SELECT, INSERT ON public.ai_guardrail_rules TO ${appRole};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.ai_guardrail_rules FROM ${sqlIdentifier(appRole)};
+    GRANT SELECT, INSERT ON public.ai_guardrail_rules TO ${sqlIdentifier(appRole)};
   `;
 }
 
@@ -525,8 +526,8 @@ export function buildAiForbiddenTopicsImmutabilitySql(appRole: string): string {
       BEFORE TRUNCATE ON public.ai_forbidden_topics
       FOR EACH STATEMENT EXECUTE FUNCTION public.ai_forbidden_topics_reject_mutation();
 
-    REVOKE UPDATE, DELETE, TRUNCATE ON public.ai_forbidden_topics FROM ${appRole};
-    GRANT SELECT, INSERT ON public.ai_forbidden_topics TO ${appRole};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.ai_forbidden_topics FROM ${sqlIdentifier(appRole)};
+    GRANT SELECT, INSERT ON public.ai_forbidden_topics TO ${sqlIdentifier(appRole)};
   `;
 }
 
@@ -559,8 +560,8 @@ export function buildStatusTransitionsImmutabilitySql(appRole: string): string {
       BEFORE TRUNCATE ON public.user_status_transitions
       FOR EACH STATEMENT EXECUTE FUNCTION public.user_status_transitions_reject_mutation();
 
-    REVOKE UPDATE, DELETE, TRUNCATE ON public.user_status_transitions FROM ${appRole};
-    GRANT SELECT, INSERT ON public.user_status_transitions TO ${appRole};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.user_status_transitions FROM ${sqlIdentifier(appRole)};
+    GRANT SELECT, INSERT ON public.user_status_transitions TO ${sqlIdentifier(appRole)};
   `;
 }
 
@@ -880,15 +881,15 @@ export function buildProfessionalAccessSql(appRole: string): string {
     REVOKE ALL ON FUNCTION public.assign_unique_active_professional(uuid) FROM PUBLIC;
     REVOKE ALL ON FUNCTION public.release_parq_on_signature(uuid) FROM PUBLIC;
     REVOKE ALL ON FUNCTION public.assigned_active_professional(uuid) FROM PUBLIC;
-    GRANT EXECUTE ON FUNCTION public.has_active_health_consent(uuid) TO ${appRole};
-    GRANT EXECUTE ON FUNCTION public.revoke_health_data_consent(uuid) TO ${appRole};
-    GRANT EXECUTE ON FUNCTION public.revoke_non_health_consent(uuid, public.consent_type) TO ${appRole};
-    GRANT EXECUTE ON FUNCTION public.link_session_consents_to_user(uuid, uuid) TO ${appRole};
-    GRANT EXECUTE ON FUNCTION public.record_session_consent(uuid, public.consent_type, varchar, boolean, inet, text) TO ${appRole};
-    GRANT EXECUTE ON FUNCTION public.assign_unique_active_professional(uuid) TO ${appRole};
-    GRANT EXECUTE ON FUNCTION public.release_parq_on_signature(uuid) TO ${appRole};
-    GRANT EXECUTE ON FUNCTION public.assigned_active_professional(uuid) TO ${appRole};
-    REVOKE INSERT, UPDATE, DELETE ON public.consents FROM ${appRole};
+    GRANT EXECUTE ON FUNCTION public.has_active_health_consent(uuid) TO ${sqlIdentifier(appRole)};
+    GRANT EXECUTE ON FUNCTION public.revoke_health_data_consent(uuid) TO ${sqlIdentifier(appRole)};
+    GRANT EXECUTE ON FUNCTION public.revoke_non_health_consent(uuid, public.consent_type) TO ${sqlIdentifier(appRole)};
+    GRANT EXECUTE ON FUNCTION public.link_session_consents_to_user(uuid, uuid) TO ${sqlIdentifier(appRole)};
+    GRANT EXECUTE ON FUNCTION public.record_session_consent(uuid, public.consent_type, varchar, boolean, inet, text) TO ${sqlIdentifier(appRole)};
+    GRANT EXECUTE ON FUNCTION public.assign_unique_active_professional(uuid) TO ${sqlIdentifier(appRole)};
+    GRANT EXECUTE ON FUNCTION public.release_parq_on_signature(uuid) TO ${sqlIdentifier(appRole)};
+    GRANT EXECUTE ON FUNCTION public.assigned_active_professional(uuid) TO ${sqlIdentifier(appRole)};
+    REVOKE INSERT, UPDATE, DELETE ON public.consents FROM ${sqlIdentifier(appRole)};
   `;
 }
 
@@ -925,8 +926,8 @@ export function buildExpensesImmutabilitySql(appRole: string): string {
     CREATE TRIGGER trg_expenses_no_truncate BEFORE TRUNCATE ON public.expenses
       FOR EACH STATEMENT EXECUTE FUNCTION public.expenses_reject_mutation();
 
-    REVOKE UPDATE, DELETE, TRUNCATE ON public.expenses FROM ${appRole};
-    GRANT SELECT, INSERT ON public.expenses TO ${appRole};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.expenses FROM ${sqlIdentifier(appRole)};
+    GRANT SELECT, INSERT ON public.expenses TO ${sqlIdentifier(appRole)};
   `;
 }
 
@@ -963,8 +964,8 @@ export function buildPaymentsImmutabilitySql(appRole: string): string {
     CREATE TRIGGER trg_payments_no_truncate BEFORE TRUNCATE ON public.payments
       FOR EACH STATEMENT EXECUTE FUNCTION public.payments_reject_mutation();
 
-    REVOKE UPDATE, DELETE, TRUNCATE ON public.payments FROM ${appRole};
-    GRANT SELECT, INSERT ON public.payments TO ${appRole};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.payments FROM ${sqlIdentifier(appRole)};
+    GRANT SELECT, INSERT ON public.payments TO ${sqlIdentifier(appRole)};
   `;
 }
 
@@ -997,8 +998,8 @@ export function buildAdSpendImmutabilitySql(appRole: string): string {
     CREATE TRIGGER trg_ad_spend_no_truncate BEFORE TRUNCATE ON public.ad_spend
       FOR EACH STATEMENT EXECUTE FUNCTION public.ad_spend_reject_mutation();
 
-    REVOKE UPDATE, DELETE, TRUNCATE ON public.ad_spend FROM ${appRole};
-    GRANT SELECT, INSERT ON public.ad_spend TO ${appRole};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.ad_spend FROM ${sqlIdentifier(appRole)};
+    GRANT SELECT, INSERT ON public.ad_spend TO ${sqlIdentifier(appRole)};
   `;
 }
 
@@ -1140,22 +1141,22 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
 
     REVOKE ALL ON FUNCTION public.publish_knowledge_document(uuid) FROM PUBLIC;
     REVOKE ALL ON FUNCTION public.purge_expired_knowledge_blobs() FROM PUBLIC;
-    GRANT EXECUTE ON FUNCTION public.publish_knowledge_document(uuid) TO ${appRole};
-    GRANT EXECUTE ON FUNCTION public.purge_expired_knowledge_blobs() TO ${appRole};
-    REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_documents FROM ${appRole};
-    REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_document_reviews FROM ${appRole};
-    GRANT SELECT, INSERT ON public.knowledge_documents TO ${appRole};
-    GRANT SELECT, INSERT ON public.knowledge_document_reviews TO ${appRole};
-    REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_document_blobs FROM ${appRole};
-    GRANT SELECT, INSERT ON public.knowledge_document_blobs TO ${appRole};
+    GRANT EXECUTE ON FUNCTION public.publish_knowledge_document(uuid) TO ${sqlIdentifier(appRole)};
+    GRANT EXECUTE ON FUNCTION public.purge_expired_knowledge_blobs() TO ${sqlIdentifier(appRole)};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_documents FROM ${sqlIdentifier(appRole)};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_document_reviews FROM ${sqlIdentifier(appRole)};
+    GRANT SELECT, INSERT ON public.knowledge_documents TO ${sqlIdentifier(appRole)};
+    GRANT SELECT, INSERT ON public.knowledge_document_reviews TO ${sqlIdentifier(appRole)};
+    REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_document_blobs FROM ${sqlIdentifier(appRole)};
+    GRANT SELECT, INSERT ON public.knowledge_document_blobs TO ${sqlIdentifier(appRole)};
     REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_document_events,
       public.knowledge_document_extractions, public.knowledge_staged_chunks,
       public.knowledge_chunk_embeddings, public.methodology_versions,
-      public.methodology_events FROM ${appRole};
+      public.methodology_events FROM ${sqlIdentifier(appRole)};
     GRANT SELECT, INSERT ON public.knowledge_document_events,
       public.knowledge_document_extractions, public.knowledge_staged_chunks,
       public.knowledge_chunk_embeddings, public.methodology_versions,
-      public.methodology_events TO ${appRole};
+      public.methodology_events TO ${sqlIdentifier(appRole)};
   `;
 }
 
