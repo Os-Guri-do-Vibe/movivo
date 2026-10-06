@@ -24,11 +24,10 @@ import { LANGUAGE_RULES } from '../protocol/validation/validation-rules';
 import { MockGateway } from './payment/mock-gateway';
 import { PLAN_CATALOG, type SubscriptionPlan } from './subscription-model';
 import {
-  conversionMessage,
   planEndedMessage,
   trialEndedMessage,
+  winbackMessage,
   dunningMessage,
-  type ConversionTouchpoint,
 } from './subscription-messages';
 
 const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() } as never;
@@ -133,14 +132,8 @@ describe('4.7.4 — unit economics sobre o PLAN_CATALOG (determinístico)', () =
 
 describe('4.7.4 — copy dentro dos guardrails (Sofia §13, sem termos proibidos)', () => {
   const url = 'https://mock.checkout/x';
-  const touchpoints: Exclude<ConversionTouchpoint, 'day7'>[] = [
-    'day10',
-    'day13',
-    'day14',
-    'winback',
-  ];
   const texts = [
-    ...touchpoints.map((t) => conversionMessage(t, url, 'MOVI')),
+    winbackMessage(url),
     trialEndedMessage('Ana', url, url),
     planEndedMessage('Ana', 'Mensal', url, url),
     dunningMessage(url),

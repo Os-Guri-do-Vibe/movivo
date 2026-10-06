@@ -13,7 +13,6 @@ import { type Job } from 'bullmq';
 import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 
-import { AgentPersonaService } from '../../core/agent-config/agent-persona.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QUEUE } from '../jobs/jobs.config';
@@ -21,8 +20,8 @@ import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
 import {
   type ConversionTouchpoint,
-  conversionMessage,
   trialEndedMessage,
+  winbackMessage,
 } from './subscription-messages';
 import { TRIAL_DAYS, type SubscriptionPlan } from './subscription-model';
 import { SubscriptionService } from './subscription.service';
@@ -58,7 +57,6 @@ export class ConversionSequenceWorker implements OnModuleInit {
     private readonly workers: WorkerFactory,
     private readonly queues: QueueManager,
     private readonly subs: SubscriptionService,
-    private readonly agentPersona: AgentPersonaService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
     private readonly logger: PinoLogger,
@@ -145,19 +143,16 @@ export class ConversionSequenceWorker implements OnModuleInit {
     );
   }
 
-  /** O fim do trial (dia 7) usa links curtos de checkout e cancelamento; os demais, o checkout longo. */
+  /**
+   * Dias 7, 10, 13 e 14 enviam a mesma mensagem de fim do trial, com checkout e cancelamento
+   * curtos. Só o win-back (disparo manual) usa o checkout longo.
+   */
   private async messageFor(userId: string, key: ConversionTouchpoint): Promise<string> {
-    if (key === 'day7') {
-      return trialEndedMessage(
-        await this.subs.firstNameFor(userId),
-        await this.subs.createShortCheckoutLink(userId),
-        await this.subs.createShortCancelLink(userId),
-      );
-    }
-    const checkoutUrl = await this.subs.createCheckoutLink(userId);
-    // Sprint 11: a copy de conversão cita o nome da agente, então precisa da persona do
-    // slot do titular — não da persona global, que não existe mais.
-    const agentName = await this.agentPersona.agentName(await this.subs.personaSlotFor(userId));
-    return conversionMessage(key, checkoutUrl, agentName);
+    if (key === 'winback') return winbackMessage(await this.subs.createCheckoutLink(userId));
+    return trialEndedMessage(
+      await this.subs.firstNameFor(userId),
+      await this.subs.createShortCheckoutLink(userId),
+      await this.subs.createShortCancelLink(userId),
+    );
   }
 }

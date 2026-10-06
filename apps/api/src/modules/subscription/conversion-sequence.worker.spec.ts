@@ -36,7 +36,6 @@ function make(opts?: { guardExists?: boolean; status?: string; trialEndsAt?: Dat
   const createCheckoutLink = vi.fn(() =>
     Promise.resolve('https://movivo.test/assinar/opaque-token'),
   );
-  const personaSlotFor = vi.fn(() => Promise.resolve('FEMALE' as const));
   const createShortCheckoutLink = vi.fn(() =>
     Promise.resolve('https://movivo.test/checkout/XcTJFfnN'),
   );
@@ -52,19 +51,16 @@ function make(opts?: { guardExists?: boolean; status?: string; trialEndsAt?: Dat
     createShortCheckoutLink,
     createShortCancelLink,
     firstNameFor,
-    personaSlotFor,
   } as unknown as SubscriptionService;
   const redis = {
     get: vi.fn(() => Promise.resolve(opts?.guardExists ? '1' : null)),
     set: vi.fn(() => Promise.resolve('OK')),
   } as never;
-  const agentPersona = { agentName: vi.fn(async () => 'MOVI') } as never;
   const logger = { setContext: vi.fn(), info: vi.fn(), warn: vi.fn() };
   const worker = new ConversionSequenceWorker(
     { create: vi.fn() } as never,
     { enqueue } as never,
     subs,
-    agentPersona,
     redis,
     new RedisKeyBuilder('movivo') as never,
     logger as never,
@@ -78,8 +74,6 @@ function make(opts?: { guardExists?: boolean; status?: string; trialEndsAt?: Dat
     createCheckoutLink,
     createShortCheckoutLink,
     createShortCancelLink,
-    personaSlotFor,
-    agentPersona,
     logger,
   };
 }
@@ -122,18 +116,20 @@ describe('ConversionSequenceWorker — expiração e checkout', () => {
     expect(text).toContain('https://movivo.test/cancelar/XcTJFfnN');
   });
 
-  it('dias 10, 13 e 14 seguem com o link opaco do contrato originalmente escolhido', async () => {
-    const { worker, createCheckoutLink, enqueue } = make({ status: 'EXPIRED' });
-    await worker.process(job('touchpoint', { userId: U, key: 'day10' }));
-    expect(createCheckoutLink).toHaveBeenCalledWith(U);
-    expect(sentText({ mock: enqueue.mock })).toContain('https://movivo.test/assinar/opaque-token');
-  });
+  it.each(['day10', 'day13', 'day14'] as const)(
+    'dia %s: envia texto idêntico ao do dia 7, com checkout e cancelamento curtos',
+    async (key) => {
+      const day7 = make();
+      await day7.worker.process(job('touchpoint', { userId: U, key: 'day7' }));
+      const followUp = make({ status: 'EXPIRED' });
+      const result = await followUp.worker.process(job('touchpoint', { userId: U, key }));
+      expect(result.status).toBe('SENT');
+      expect(sentText({ mock: followUp.enqueue.mock })).toBe(sentText({ mock: day7.enqueue.mock }));
+      expect(followUp.createCheckoutLink).not.toHaveBeenCalled();
+    },
+  );
 
-  it('dia 14 e win-back continuam no plano escolhido, sem downgrade silencioso', async () => {
-    const day14 = make({ status: 'EXPIRED' });
-    await day14.worker.process(job('touchpoint', { userId: U, key: 'day14' }));
-    expect(sentText({ mock: day14.enqueue.mock })).toContain('/assinar/opaque-token');
-
+  it('win-back (disparo manual) segue com o link do plano escolhido', async () => {
     const winback = make({ status: 'EXPIRED' });
     await winback.worker.process(job('touchpoint', { userId: U, key: 'winback' }));
     expect(sentText({ mock: winback.enqueue.mock })).toContain('/assinar/opaque-token');
@@ -146,26 +142,31 @@ describe('ConversionSequenceWorker — expiração e checkout', () => {
     expect(enqueue.mock.calls.some((call) => call[0] === QUEUE.whatsappOutbound)).toBe(false);
   });
 
-  it('assinatura ativa interrompe qualquer nova cobrança do trial', async () => {
-    const { worker, createCheckoutLink } = make({ status: 'ACTIVE' });
-    const result = await worker.process(job('touchpoint', { userId: U, key: 'day10' }));
-    expect(result.status).toBe('SKIP_ACTIVE');
-    expect(createCheckoutLink).not.toHaveBeenCalled();
-  });
+  it.each(['day7', 'day10', 'day13', 'day14'] as const)(
+    'assinatura ativa interrompe o follow-up %s',
+    async (key) => {
+      const { worker, createShortCheckoutLink, enqueue } = make({ status: 'ACTIVE' });
+      const result = await worker.process(job('touchpoint', { userId: U, key }));
+      expect(result.status).toBe('SKIP_ACTIVE');
+      expect(createShortCheckoutLink).not.toHaveBeenCalled();
+      expect(enqueue.mock.calls.some((call) => call[0] === QUEUE.whatsappOutbound)).toBe(false);
+    },
+  );
+
+  it.each(['CANCELED', 'PAUSED', 'PAST_DUE'])(
+    'status %s também não recebe o follow-up',
+    async (status) => {
+      const { worker, enqueue } = make({ status });
+      const result = await worker.process(job('touchpoint', { userId: U, key: 'day10' }));
+      expect(result.status).toBe(`SKIP_${status}`);
+      expect(enqueue.mock.calls.some((call) => call[0] === QUEUE.whatsappOutbound)).toBe(false);
+    },
+  );
 
   it('guard já confirmado evita mensagem duplicada', async () => {
-    const { worker, createCheckoutLink } = make({ status: 'EXPIRED', guardExists: true });
+    const { worker, createShortCheckoutLink } = make({ status: 'EXPIRED', guardExists: true });
     const result = await worker.process(job('touchpoint', { userId: U, key: 'day13' }));
     expect(result.status).toBe('ALREADY_SENT');
-    expect(createCheckoutLink).not.toHaveBeenCalled();
-  });
-
-  it('usa a persona do slot do titular na mensagem', async () => {
-    const { worker, personaSlotFor, agentPersona } = make({ status: 'EXPIRED' });
-    await worker.process(job('touchpoint', { userId: U, key: 'day13' }));
-    expect(personaSlotFor).toHaveBeenCalledWith(U);
-    expect(
-      (agentPersona as { agentName: ReturnType<typeof vi.fn> }).agentName,
-    ).toHaveBeenCalledWith('FEMALE');
+    expect(createShortCheckoutLink).not.toHaveBeenCalled();
   });
 });

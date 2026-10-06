@@ -45,8 +45,9 @@ export function paymentConfirmationMessage(): string {
 export type ConversionTouchpoint = 'day7' | 'day10' | 'day13' | 'day14' | 'winback';
 
 /**
- * Fim dos 7 dias gratuitos (touchpoint `day7`). Os dois links são curtos e personalizados
- * (`/checkout/<código>` e `/cancelar/<código>`), no mesmo padrão do link do check-in diário.
+ * Fim dos 7 dias gratuitos (touchpoint `day7`) e seus follow-ups (`day10`, `day13`, `day14`),
+ * todos com este mesmo texto. Os dois links são curtos e personalizados (`/checkout/<código>` e
+ * `/cancelar/<código>`), no mesmo padrão do link do check-in diário.
  */
 export function trialEndedMessage(
   firstName: string,
@@ -80,42 +81,19 @@ export function planEndedMessage(
   );
 }
 
-export function conversionMessage(
-  touchpoint: Exclude<ConversionTouchpoint, 'day7'>,
-  checkoutUrl: string,
-  agentName: string,
-): string {
-  switch (touchpoint) {
-    case 'day10':
-      return (
-        'Seu período gratuito terminou, mas seu plano escolhido continua disponível. ' +
-        'Se quiser seguir com a assessoria MOVIVO, é só assinar por aqui: ' +
-        checkoutUrl +
-        '\nVocê pode cancelar quando quiser.'
-      );
-    case 'day13':
-      return (
-        'Seu período de experiência está acabando. Pra não perder seu plano e o acompanhamento, ' +
-        'é só assinar por aqui: ' +
-        checkoutUrl +
-        '\nVocê tem 7 dias de garantia e pode cancelar quando quiser, sem burocracia.'
-      );
-    case 'day14':
-      return (
-        `Se quiser retomar seus treinos com a ${agentName}, seu plano escolhido está aqui: ` +
-        checkoutUrl +
-        '\nA assessoria é supervisionada por profissional CREF e você pode cancelar quando quiser.'
-      );
-    case 'winback':
-      return (
-        'Vi que seu período de experiência terminou e você decidiu não seguir agora, tudo bem, ' +
-        'sem pressão! 🙏 Só pra eu melhorar: o que faltou pra fazer sentido? (preço, tempo, ' +
-        'rotina...) Se quiser voltar, o plano que você escolheu continua aqui: ' +
-        checkoutUrl +
-        // "Valeu por treinar" no lugar de "obrigada por treinar" (Sprint 11): a mensagem é
-        // assinada pela persona do titular, que pode ser masculina ou feminina, e o
-        // particípio "obrigada/obrigado" travaria o gênero da agente. Mesmo tom informal.
-        '\nDe qualquer forma, valeu por treinar com a gente. 💚'
-      );
-  }
+/**
+ * Win-back pós-trial. Não é agendado pela sequência (coincidiria com o dia 10); só sai quando
+ * disparado explicitamente.
+ */
+export function winbackMessage(checkoutUrl: string): string {
+  return (
+    'Vi que seu período de experiência terminou e você decidiu não seguir agora, tudo bem, ' +
+    'sem pressão! 🙏 Só pra eu melhorar: o que faltou pra fazer sentido? (preço, tempo, ' +
+    'rotina...) Se quiser voltar, o plano que você escolheu continua aqui: ' +
+    checkoutUrl +
+    // "Valeu por treinar" no lugar de "obrigada por treinar" (Sprint 11): a mensagem é
+    // assinada pela persona do titular, que pode ser masculina ou feminina, e o
+    // particípio "obrigada/obrigado" travaria o gênero da agente. Mesmo tom informal.
+    '\nDe qualquer forma, valeu por treinar com a gente. 💚'
+  );
 }
