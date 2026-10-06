@@ -55,81 +55,72 @@ describe('JwtStrategy.validate', () => {
       keyId: 'kid-current',
       publicKey: pub,
       privateKey: priv,
-      previousPublicKey: undefined,
+      accessTtl: '15m',
     } as JwtConfig,
   };
-
-  function roleCacheWith(role: string | null) {
-    return { get: vi.fn().mockResolvedValue(role) };
+  const payload = () => ({
+    sub: '11111111-1111-4111-8111-111111111111',
+    role: 'ADMIN' as const,
+    jti: '22222222-2222-4222-8222-222222222222',
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 900,
+  });
+  function setup() {
+    const denylist = { isRevoked: vi.fn().mockResolvedValue(false) };
+    const auth = { assertActiveSession: vi.fn().mockResolvedValue(undefined) };
+    return {
+      denylist,
+      auth,
+      strategy: new JwtStrategy(config as never, denylist as never, auth as never),
+    };
   }
-
-  it('retorna o usuário autenticado quando o jti não está revogado', async () => {
-    const denylist = { isRevoked: vi.fn().mockResolvedValue(false) };
-    const db = roleCacheWith('PROFESSIONAL');
-    const userId = '11111111-1111-4111-8111-111111111111';
-    const strategy = new JwtStrategy(config as never, denylist as never, db as never);
-    const user = await strategy.validate({ sub: userId, role: 'PROFESSIONAL', jti: 'j1' });
-    expect(user).toEqual({ userId, role: 'PROFESSIONAL', jti: 'j1' });
+  it('exige sessão persistida após assinatura, claims e denylist', async () => {
+    const { strategy, auth } = setup();
+    const p = payload();
+    await expect(strategy.validate(p)).resolves.toEqual({
+      userId: p.sub,
+      role: p.role,
+      jti: p.jti,
+      expiresAt: p.exp,
+    });
+    expect(auth.assertActiveSession).toHaveBeenCalledWith(p.sub, p.role, p.jti);
   });
-
-  it('recusa quando o jti está na denylist (logout/reuse)', async () => {
-    const denylist = { isRevoked: vi.fn().mockResolvedValue(true) };
-    const strategy = new JwtStrategy(
-      config as never,
-      denylist as never,
-      roleCacheWith('USER') as never,
-    );
-    await expect(
-      strategy.validate({
-        sub: '11111111-1111-4111-8111-111111111111',
-        role: 'USER',
-        jti: 'j1',
-      }),
-    ).rejects.toThrow();
+  it('recusa revogação Redis', async () => {
+    const { strategy, denylist, auth } = setup();
+    denylist.isRevoked.mockResolvedValue(true);
+    await expect(strategy.validate(payload())).rejects.toThrow(/revogada/);
+    expect(auth.assertActiveSession).not.toHaveBeenCalled();
   });
-
-  it('recusa imediatamente quando o papel persistido foi removido', async () => {
-    const denylist = { isRevoked: vi.fn().mockResolvedValue(false) };
-    const strategy = new JwtStrategy(
-      config as never,
-      denylist as never,
-      roleCacheWith('SUPPORT') as never,
-    );
-    await expect(
-      strategy.validate({
-        sub: '11111111-1111-4111-8111-111111111111',
-        role: 'ADMIN',
-        jti: 'j1',
-      }),
-    ).rejects.toThrow(/Papel da sessão/);
+  it('não autentica se o banco rejeita ou falha', async () => {
+    const { strategy, auth } = setup();
+    auth.assertActiveSession.mockRejectedValue(new Error('DB indisponível'));
+    await expect(strategy.validate(payload())).rejects.toThrow('DB indisponível');
   });
-
-  it('recusa conta removida e subject malformado', async () => {
-    const denylist = { isRevoked: vi.fn().mockResolvedValue(false) };
-    const db = roleCacheWith(null);
-    const strategy = new JwtStrategy(config as never, denylist as never, db as never);
-    await expect(
-      strategy.validate({
-        sub: '11111111-1111-4111-8111-111111111111',
-        role: 'ADMIN',
-        jti: 'j1',
-      }),
-    ).rejects.toThrow(/Papel da sessão/);
-    await expect(strategy.validate({ sub: 'nao-uuid', role: 'ADMIN', jti: 'j2' })).rejects.toThrow(
+  it.each([
+    { exp: undefined },
+    { iat: undefined },
+    { exp: 0 },
+    { exp: Math.floor(Date.now() / 1000) + 901 },
+    { iat: Math.floor(Date.now() / 1000) + 10 },
+    { jti: 'arbitrary' },
+    { role: 'UNKNOWN' },
+    { sub: 'not-uuid' },
+  ])('recusa claims inválidos %j', async (patch) => {
+    const { strategy, auth } = setup();
+    await expect(strategy.validate({ ...payload(), ...patch } as never)).rejects.toThrow(
       /malformado/,
     );
+    expect(auth.assertActiveSession).not.toHaveBeenCalled();
   });
-
-  it('registra a chave N-1 quando configurada (rotação)', () => {
-    const withPrev = {
-      jwt: {
-        ...config.jwt,
-        previousPublicKey: { keyId: 'kid-old', key: pub },
-      } as JwtConfig,
-    };
-    const denylist = { isRevoked: vi.fn() };
+  it('registra chave N-1 sem deixar de verificar sessão', () => {
+    const { denylist, auth } = setup();
     expect(
-      () => new JwtStrategy(withPrev as never, denylist as never, roleCacheWith('USER') as never),
+      () =>
+        new JwtStrategy(
+          { jwt: { ...config.jwt, previousPublicKey: { keyId: 'old', key: pub } } } as never,
+          denylist as never,
+          auth as never,
+        ),
     ).not.toThrow();
   });
 });

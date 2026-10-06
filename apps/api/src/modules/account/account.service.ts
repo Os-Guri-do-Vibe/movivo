@@ -9,12 +9,12 @@
  */
 import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import type { ChangePasswordInput, UpdateAccountProfileInput } from '@movivo/shared';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 
 import { AppConfigService } from '../../core/config';
 import { TenantDatabase, type TenantRole } from '../../core/database';
-import { staff } from '../../core/database/schema';
+import { authSessions, staff } from '../../core/database/schema';
 import { PasswordService } from '../auth/password.service';
 import { AvatarStorageService, type UploadedAvatarFile } from './avatar-storage.service';
 
@@ -106,20 +106,22 @@ export class AccountService {
     role: TenantRole,
     input: ChangePasswordInput,
   ): Promise<void> {
-    const [row] = await this.db.runAsUser(userId, role, (tx) =>
-      tx
+    await this.db.runAsUser(userId, role, async (tx) => {
+      const [row] = await tx
         .select({ passwordHash: staff.passwordHash })
         .from(staff)
         .where(eq(staff.id, userId))
-        .limit(1),
-    );
-    const ok = await this.passwords.verify(row?.passwordHash ?? null, input.currentPassword);
-    if (!row || !ok) throw new UnauthorizedException('Senha atual incorreta.');
-
-    const passwordHash = await this.passwords.hash(input.newPassword);
-    await this.db.runAsUser(userId, role, (tx) =>
-      tx.update(staff).set({ passwordHash }).where(eq(staff.id, userId)),
-    );
+        .for('update')
+        .limit(1);
+      const ok = await this.passwords.verify(row?.passwordHash ?? null, input.currentPassword);
+      if (!row || !ok) throw new UnauthorizedException('Senha atual incorreta.');
+      const passwordHash = await this.passwords.hash(input.newPassword);
+      await tx.update(staff).set({ passwordHash }).where(eq(staff.id, userId));
+      await tx
+        .update(authSessions)
+        .set({ revokedAt: new Date() })
+        .where(and(eq(authSessions.userId, userId), isNull(authSessions.revokedAt)));
+    });
     this.logger.info({ event: 'account_password_changed', userId }, 'senha da conta alterada');
   }
 

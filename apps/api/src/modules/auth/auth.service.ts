@@ -6,12 +6,12 @@
  *    cookie carrega `<sessionId>.<segredo>`; o lookup é por `sessionId` (PK) e o
  *    segredo é comparado em tempo constante contra o hash.
  *  - **Rotation**: todo refresh bem-sucedido invalida a linha anterior e emite um par
- *    novo na mesma `family_id`.
+ *    novo na mesma `family_id`, preservando o prazo absoluto do primeiro par.
  *  - **Detecção de reuse**: reapresentar um refresh já rotacionado (revogado) invalida
  *    **toda a família** — indício de roubo (Sato §9.1). Os `jti` da família vão para a
  *    denylist para matar os access tokens ainda vivos.
  *  - **Logout**: coloca o `jti` do access na denylist Redis (TTL = janela do access) e
- *    revoga a sessão.
+ *    revoga toda a família transacionalmente no banco, autoridade para access/refresh.
  *
  * Toda operação em `auth_sessions`/`staff` roda em `runAsSystem`: o login acontece antes
  * de existir contexto de sessão, e a RLS libera essas linhas via `app.current_role='SYSTEM'`
@@ -20,11 +20,11 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { LoginInput } from '@movivo/shared';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 
 import { AppConfigService, parseDurationSeconds } from '../../core/config';
-import { TenantDatabase, type TenantRole } from '../../core/database';
+import { TenantDatabase, type TenantRole, type TenantTransaction } from '../../core/database';
 import { authSessions, staff } from '../../core/database/schema';
 import { PasswordService } from './password.service';
 import { TokenDenylistService } from './token-denylist.service';
@@ -67,7 +67,7 @@ export class AuthService {
       throw new UnauthorizedException('Credenciais inválidas.');
     }
 
-    const result = await this.issueSession(user.id, user.role, randomUUID());
+    const result = await this.issueSession(user.id, user.role, randomUUID(), user.passwordHash);
     this.logger.info({ event: 'auth_login', userId: user.id, role: user.role }, 'login');
     return { ...result, user: { id: user.id, role: user.role } };
   }
@@ -81,6 +81,33 @@ export class AuthService {
     if (!parsed) throw new UnauthorizedException('Refresh token ausente ou malformado.');
 
     const rotation = await this.db.runAsSystem(async (tx) => {
+      const [lookup] = await tx
+        .select({
+          familyId: authSessions.familyId,
+          userId: authSessions.userId,
+          refreshTokenHash: authSessions.refreshTokenHash,
+        })
+        .from(authSessions)
+        .where(eq(authSessions.id, parsed.sessionId))
+        .limit(1);
+      if (
+        !lookup ||
+        !this.tokens.safeEqualHash(
+          lookup.refreshTokenHash,
+          this.tokens.hashRefreshSecret(parsed.secret),
+        )
+      ) {
+        throw new UnauthorizedException('Refresh token inválido.');
+      }
+      await this.lockFamily(tx, lookup.familyId);
+      // Ordem de locks igual à troca de senha: staff antes de auth_sessions.
+      const [user] = await tx
+        .select({ role: staff.role })
+        .from(staff)
+        .where(eq(staff.id, lookup.userId))
+        .for('update')
+        .limit(1);
+      if (!user) throw new UnauthorizedException('Usuário da sessão não encontrado.');
       // O lock torna consumo+substituição uma única operação. Sem ele, dois refreshes
       // concorrentes poderiam validar a mesma linha viva e emitir dois descendentes.
       const [session] = await tx
@@ -121,17 +148,10 @@ export class AuthService {
         throw new UnauthorizedException('Refresh token expirado.');
       }
 
-      const [user] = await tx
-        .select({ role: staff.role })
-        .from(staff)
-        .where(eq(staff.id, session.userId))
-        .limit(1);
-      if (!user) throw new UnauthorizedException('Usuário da sessão não encontrado.');
-
       const jti = randomUUID();
       const secret = this.tokens.generateRefreshSecret();
       const refreshTokenHash = this.tokens.hashRefreshSecret(secret);
-      const expiresAt = new Date(Date.now() + this.config.jwt.refreshTtlSeconds * 1000);
+      const expiresAt = session.expiresAt;
 
       await tx
         .update(authSessions)
@@ -196,16 +216,82 @@ export class AuthService {
     return { name: row?.name ?? null, avatarPath: row?.avatarPath ?? null };
   }
 
-  /** Logout: denylista o `jti` do access e revoga a sessão correspondente. */
-  async logout(userId: string, role: TenantRole, jti: string): Promise<void> {
-    await this.denylist.revoke(jti, this.accessDenyUntil());
-    await this.db.runAsUser(userId, role, async (tx) => {
-      await tx
-        .update(authSessions)
-        .set({ revokedAt: new Date() })
-        .where(and(eq(authSessions.jti, jti), isNull(authSessions.revokedAt)));
+  /** O banco é a autoridade: Redis perdido/limpo não ressuscita uma sessão. */
+  async assertActiveSession(userId: string, role: TenantRole, jti: string): Promise<void> {
+    if (role === 'USER') throw new UnauthorizedException('Conta interna inválida.');
+    const [session] = await this.db.runAsSystem((tx) =>
+      tx
+        .select({ id: authSessions.id })
+        .from(authSessions)
+        .innerJoin(staff, eq(staff.id, authSessions.userId))
+        .where(
+          and(
+            eq(authSessions.userId, userId),
+            eq(authSessions.jti, jti),
+            isNull(authSessions.revokedAt),
+            gt(authSessions.expiresAt, new Date()),
+            eq(staff.role, role),
+          ),
+        )
+        .limit(1),
+    );
+    if (!session) throw new UnauthorizedException('Sessão inválida ou revogada.');
+  }
+
+  /** Mantém o contrato Bearer e encerra toda a família, inclusive rotação concorrente. */
+  async logout(userId: string, _role: TenantRole, jti: string): Promise<void> {
+    const rows = await this.db.runAsSystem(async (tx) => {
+      const [session] = await tx
+        .select({ familyId: authSessions.familyId })
+        .from(authSessions)
+        .where(and(eq(authSessions.userId, userId), eq(authSessions.jti, jti)))
+        .limit(1);
+      if (!session) throw new UnauthorizedException('Sessão inválida.');
+      await this.lockFamily(tx, session.familyId);
+      return this.revokeFamily(tx, session.familyId);
     });
+    await Promise.all(rows.map((row) => this.denylist.revoke(row.jti, this.accessDenyUntil())));
     this.logger.info({ event: 'auth_logout', userId }, 'logout');
+  }
+
+  /** Logout pelo refresh funciona mesmo quando o access expirou; nunca emite outro token. */
+  async logoutRefresh(cookieValue: string | undefined): Promise<void> {
+    const parsed = this.parseRefreshCookie(cookieValue);
+    if (!parsed) throw new UnauthorizedException('Refresh token ausente ou malformado.');
+    const result = await this.db.runAsSystem(async (tx) => {
+      const [session] = await tx
+        .select()
+        .from(authSessions)
+        .where(eq(authSessions.id, parsed.sessionId))
+        .limit(1);
+      if (
+        !session ||
+        !this.tokens.safeEqualHash(
+          session.refreshTokenHash,
+          this.tokens.hashRefreshSecret(parsed.secret),
+        )
+      )
+        throw new UnauthorizedException('Refresh token inválido.');
+      await this.lockFamily(tx, session.familyId);
+      return { userId: session.userId, rows: await this.revokeFamily(tx, session.familyId) };
+    });
+    await Promise.all(
+      result.rows.map((row) => this.denylist.revoke(row.jti, this.accessDenyUntil())),
+    );
+    this.logger.info({ event: 'auth_logout', userId: result.userId }, 'logout');
+  }
+
+  private async lockFamily(tx: TenantTransaction, familyId: string): Promise<void> {
+    // Todas as gerações usam o mesmo lock transacional: logout/reuse não deixam descendentes vivos.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${familyId}, 0))`);
+  }
+
+  private revokeFamily(tx: TenantTransaction, familyId: string) {
+    return tx
+      .update(authSessions)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(authSessions.familyId, familyId), isNull(authSessions.revokedAt)))
+      .returning({ jti: authSessions.jti });
   }
 
   // --- helpers -------------------------------------------------------------
@@ -215,6 +301,7 @@ export class AuthService {
     userId: string,
     role: TenantRole,
     familyId: string,
+    passwordHash: string | null,
   ): Promise<Omit<LoginResult, 'user'>> {
     const jti = randomUUID();
     const secret = this.tokens.generateRefreshSecret();
@@ -222,6 +309,15 @@ export class AuthService {
     const expiresAt = new Date(Date.now() + this.config.jwt.refreshTtlSeconds * 1000);
 
     const sessionId = await this.db.runAsSystem(async (tx) => {
+      const [current] = await tx
+        .select({ passwordHash: staff.passwordHash, role: staff.role })
+        .from(staff)
+        .where(eq(staff.id, userId))
+        .for('update')
+        .limit(1);
+      if (!current || current.passwordHash !== passwordHash || current.role !== role) {
+        throw new UnauthorizedException('Credenciais alteradas durante o login.');
+      }
       const [created] = await tx
         .insert(authSessions)
         .values({ userId, refreshTokenHash, jti, familyId, expiresAt })

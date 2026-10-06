@@ -19,7 +19,9 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { type INestApplication } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
+import { ModulesContainer, NestFactory } from '@nestjs/core';
+import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { JwtAuthGuard } from '../src/modules/auth/jwt-auth.guard';
 import cookieParser from 'cookie-parser';
 import { sql } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
@@ -31,6 +33,10 @@ import { AppModule } from '../src/app.module';
 import { AppConfigService } from '../src/core/config';
 import { loadEnv } from '../src/core/config/load-env';
 import { TenantDatabase } from '../src/core/database';
+import { AuthService } from '../src/modules/auth/auth.service';
+import { REDIS_CLIENT } from '../src/core/redis/redis.constants';
+import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../src/core/redis/redis-key.util';
+import type { Redis } from 'ioredis';
 import { PasswordService } from '../src/modules/auth/password.service';
 
 const { env } = loadEnv();
@@ -237,6 +243,218 @@ describe('logout — denylist Redis', () => {
     // Depois do logout, o mesmo access é recusado pela denylist.
     const after = await base().get(`/${prefix}/auth/me`).set('Authorization', `Bearer ${access}`);
     expect(after.status).toBe(401);
+  });
+});
+
+describe('autenticação autoritativa no servidor', () => {
+  // Emissão real sem consumir o rate limit HTTP reservado ao teste de brute force.
+  const issue = () => app.get(AuthService).login({ email: proEmail, password: PASSWORD });
+  const me = (access: string) =>
+    base().get(`/${prefix}/auth/me`).set('Authorization', `Bearer ${access}`);
+  const cookie = (value: string) => `movivo_refresh=${value}`;
+  it('todas as operações administrativas recusam HTTP direto sem autenticação', async () => {
+    const modules = app.get(ModulesContainer);
+    const methods = { 0: 'get', 1: 'post', 2: 'put', 3: 'delete', 4: 'patch' } as const;
+    let checked = 0;
+    for (const module of modules.values()) {
+      if (module.metatype.name !== 'AdminModule') continue;
+      for (const wrapper of module.controllers.values()) {
+        const controller = wrapper.metatype;
+        if (!controller) throw new Error('Controller administrativo sem tipo.');
+        const guards = Reflect.getMetadata(GUARDS_METADATA, controller) as unknown[];
+        expect(guards).toContain(JwtAuthGuard);
+        const controllerPath = Reflect.getMetadata(PATH_METADATA, controller) as string;
+        for (const name of Object.getOwnPropertyNames(controller.prototype)) {
+          const handler = controller.prototype[name];
+          if (typeof handler !== 'function') continue;
+          const verb = Reflect.getMetadata(METHOD_METADATA, handler) as
+            keyof typeof methods | undefined;
+          if (verb === undefined) continue;
+          const method = methods[verb];
+          if (!method) throw new Error('Método HTTP administrativo não coberto.');
+          const routePath = Reflect.getMetadata(PATH_METADATA, handler) as string;
+          const path = `/${prefix}/${controllerPath}/${routePath}`
+            .replace(/\/+/g, '/')
+            .replace(/:[A-Za-z]+/g, '11111111-1111-4111-8111-111111111111');
+          const response = await base()[method](path);
+          expect(response.status, `${method} ${path}`).toBe(401);
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(50);
+  });
+  it('logout só com refresh revoga access e refresh, sem exigir access válido', async () => {
+    const session = await issue();
+    expect(
+      (
+        await base()
+          .post(`/${prefix}/auth/logout/refresh`)
+          .set('Cookie', cookie(session.refreshCookie))
+      ).status,
+    ).toBe(204);
+    expect((await me(session.accessToken)).status).toBe(401);
+    expect(
+      (await base().post(`/${prefix}/auth/refresh`).set('Cookie', cookie(session.refreshCookie)))
+        .status,
+    ).toBe(401);
+  });
+  it('nega segredo de logout adulterado sem revogar sessão legítima', async () => {
+    const session = await issue();
+    const id = session.refreshCookie.split('.')[0];
+    expect(
+      (
+        await base()
+          .post(`/${prefix}/auth/logout/refresh`)
+          .set('Cookie', cookie(id + '.' + '0'.repeat(64)))
+      ).status,
+    ).toBe(401);
+    expect((await me(session.accessToken)).status).toBe(200);
+  });
+  it('rotação mantém prazo absoluto e invalida access anterior', async () => {
+    const session = await issue();
+    const firstId = session.refreshCookie.split('.')[0];
+    const refresh = await app.get(AuthService).refresh(session.refreshCookie);
+    const secondId = refresh.refreshCookie.split('.')[0];
+    const rows = await app
+      .get(TenantDatabase)
+      .runAsSystem((tx) =>
+        tx.execute(
+          sql`SELECT expires_at FROM auth_sessions WHERE id IN (${firstId},${secondId}) ORDER BY created_at`,
+        ),
+      );
+    expect(rows).toHaveLength(2);
+    expect(rows[0].expires_at).toEqual(rows[1].expires_at);
+    expect((await me(session.accessToken)).status).toBe(401);
+    expect((await me(refresh.accessToken)).status).toBe(200);
+  });
+  it('migração recupera o primeiro prazo das famílias antigas sem estender outras', async () => {
+    const first = await issue(),
+      second = await app.get(AuthService).refresh(first.refreshCookie);
+    const firstId = first.refreshCookie.split('.')[0],
+      secondId = second.refreshCookie.split('.')[0];
+    await app.get(TenantDatabase).runAsUser(proId, 'PROFESSIONAL', async (tx) => {
+      await tx.execute(
+        sql`UPDATE auth_sessions SET expires_at=now()-interval '1 day' WHERE id=${firstId}`,
+      );
+      await tx.execute(
+        sql`UPDATE auth_sessions SET expires_at=now()+interval '30 days' WHERE id=${secondId}`,
+      );
+      const migration = readFileSync(
+        resolve(apiRoot, 'drizzle', '0067_prazo_absoluto_auth_sessions.sql'),
+        'utf8',
+      );
+      await tx.execute(sql.raw(migration));
+      const rows = await tx.execute(
+        sql`SELECT expires_at FROM auth_sessions WHERE id IN (${firstId},${secondId})`,
+      );
+      expect(rows).toHaveLength(2);
+      expect(rows[0].expires_at).toEqual(rows[1].expires_at);
+    });
+    await expect(app.get(AuthService).refresh(second.refreshCookie)).rejects.toThrow(/expirado/);
+    expect((await me(second.accessToken)).status).toBe(401);
+  });
+  it('duas rotações concorrentes não deixam um descendente válido após reuse', async () => {
+    const session = await issue();
+    const results = await Promise.allSettled([
+      app.get(AuthService).refresh(session.refreshCookie),
+      app.get(AuthService).refresh(session.refreshCookie),
+    ]);
+    const successful = results.filter((result) => result.status === 'fulfilled');
+    expect(successful).toHaveLength(1);
+    const rotated = successful[0];
+    if (rotated.status !== 'fulfilled') throw new Error('Rotação ausente');
+    expect((await me(rotated.value.accessToken)).status).toBe(401);
+    await expect(app.get(AuthService).refresh(rotated.value.refreshCookie)).rejects.toThrow();
+  });
+  it('logout de ancestral concorre com refresh sem deixar descendentes vivos', async () => {
+    const first = await issue();
+    const second = await app.get(AuthService).refresh(first.refreshCookie);
+    const results = await Promise.allSettled([
+      app.get(AuthService).refresh(second.refreshCookie),
+      app.get(AuthService).logoutRefresh(first.refreshCookie),
+    ]);
+    expect(results[1].status).toBe('fulfilled');
+    expect((await me(second.accessToken)).status).toBe(401);
+    const rotated = results[0];
+    if (rotated.status === 'fulfilled') {
+      expect((await me(rotated.value.accessToken)).status).toBe(401);
+      await expect(app.get(AuthService).refresh(rotated.value.refreshCookie)).rejects.toThrow();
+    }
+  });
+  it('Redis vazio não ressuscita logout persistido no PostgreSQL', async () => {
+    const session = await issue();
+    await app.get(AuthService).logoutRefresh(session.refreshCookie);
+    const claims = jwt.decode(session.accessToken) as jwt.JwtPayload;
+    if (!claims.jti) throw new Error('JWT sem jti');
+    const key = app.get<RedisKeyBuilder>(REDIS_KEY_BUILDER).global('jwt-denylist', claims.jti);
+    await app.get<Redis>(REDIS_CLIENT).del(key);
+    expect((await me(session.accessToken)).status).toBe(401);
+  });
+  it('sessão vencida no banco e claims sem exp/iat ou TTL excessivo são recusados', async () => {
+    const session = await issue();
+    const claims = jwt.decode(session.accessToken) as jwt.JwtPayload;
+    const now = Math.floor(Date.now() / 1000);
+    for (const payload of [
+      { sub: proId, role: 'PROFESSIONAL', jti: claims.jti },
+      { sub: proId, role: 'PROFESSIONAL', jti: claims.jti, iat: now, exp: now + 901 },
+      { sub: proId, role: 'PROFESSIONAL', jti: claims.jti, iat: now - 1000, exp: now - 1 },
+    ]) {
+      const token = jwt.sign(payload, config.jwt.privateKey, {
+        algorithm: 'RS256',
+        keyid: config.jwt.keyId,
+      });
+      expect((await me(token)).status).toBe(401);
+    }
+    await app
+      .get(TenantDatabase)
+      .runAsSystem((tx) =>
+        tx.execute(
+          sql`UPDATE auth_sessions SET expires_at = now() - interval '1 second' WHERE jti=${claims.jti}`,
+        ),
+      );
+    expect((await me(session.accessToken)).status).toBe(401);
+  });
+  it('papel removido no banco revoga acesso na próxima operação', async () => {
+    const session = await issue();
+    try {
+      await app
+        .get(TenantDatabase)
+        .runAsSystem((tx) => tx.execute(sql`UPDATE staff SET role='SUPPORT' WHERE id=${proId}`));
+      expect((await me(session.accessToken)).status).toBe(401);
+    } finally {
+      await app
+        .get(TenantDatabase)
+        .runAsSystem((tx) =>
+          tx.execute(sql`UPDATE staff SET role='PROFESSIONAL' WHERE id=${proId}`),
+        );
+    }
+  });
+  it('troca de senha revoga todas as sessões e exige novo login', async () => {
+    const first = await issue(),
+      second = await issue();
+    const changed = 'Senha-Nova-Teste-123!';
+    try {
+      const out = await base()
+        .post(`/${prefix}/account/password`)
+        .set('Authorization', `Bearer ${first.accessToken}`)
+        .send({ currentPassword: PASSWORD, newPassword: changed });
+      expect(out.status).toBe(204);
+      for (const session of [first, second]) {
+        expect((await me(session.accessToken)).status).toBe(401);
+        await expect(app.get(AuthService).refresh(session.refreshCookie)).rejects.toThrow();
+      }
+      await expect(issue()).rejects.toThrow();
+      const renewed = await app.get(AuthService).login({ email: proEmail, password: changed });
+      expect((await me(renewed.accessToken)).status).toBe(200);
+    } finally {
+      const hash = await app.get(PasswordService).hash(PASSWORD);
+      await app
+        .get(TenantDatabase)
+        .runAsSystem((tx) =>
+          tx.execute(sql`UPDATE staff SET password_hash=${hash} WHERE id=${proId}`),
+        );
+    }
   });
 });
 

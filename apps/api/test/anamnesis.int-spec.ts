@@ -381,8 +381,7 @@ describe('ANAMNESE — IDOR e expiração (Sato §8.1)', () => {
     // Força a expiração no passado.
     await adminClient`UPDATE anamnesis_sessions SET expires_at = now() - interval '1 hour' WHERE token = ${token}`;
 
-    const view = await service.getByToken(token);
-    expect(view.status).toBe('EXPIRED');
+    await expect(service.getByToken(token)).rejects.toThrow(/expirada/i);
 
     const [row] = await adminClient<Array<{ status: string; data_block_2: Buffer | null }>>`
       SELECT status, data_block_2 FROM anamnesis_sessions WHERE token = ${token}`;

@@ -13,7 +13,7 @@ import { AccountService } from './account.service';
 /** Chain builder thenable que imita o query builder do Drizzle e resolve para `result`. */
 function q<T>(result: T) {
   const b: Record<string, unknown> = {};
-  for (const m of ['from', 'where', 'limit', 'set']) {
+  for (const m of ['from', 'where', 'limit', 'set', 'for']) {
     b[m] = () => b;
   }
   b.then = (resolve: (v: T) => unknown, reject: (e: unknown) => unknown) =>
@@ -24,7 +24,7 @@ function q<T>(result: T) {
 /** Mesma forma, mas rejeita — simula erro de constraint do Postgres. */
 function qReject(error: unknown) {
   const b: Record<string, unknown> = {};
-  for (const m of ['from', 'where', 'limit', 'set']) {
+  for (const m of ['from', 'where', 'limit', 'set', 'for']) {
     b[m] = () => b;
   }
   b.then = (_resolve: unknown, reject: (e: unknown) => unknown) =>
@@ -134,7 +134,7 @@ describe('changePassword', () => {
     tx.select.mockReturnValueOnce(q([{ passwordHash: 'hash-atual' }]));
     passwords.verify.mockResolvedValueOnce(true);
     passwords.hash.mockResolvedValueOnce('hash-novo');
-    tx.update.mockReturnValueOnce(q(undefined));
+    tx.update.mockReturnValue(q(undefined));
 
     await service.changePassword(USER_ID, 'ADMIN', {
       currentPassword: 'senha-atual',
@@ -143,6 +143,8 @@ describe('changePassword', () => {
 
     expect(passwords.verify).toHaveBeenCalledWith('hash-atual', 'senha-atual');
     expect(passwords.hash).toHaveBeenCalledWith('senha-nova-123');
+    expect(tx.update).toHaveBeenCalledTimes(2);
+    expect(db.runAsUser).toHaveBeenCalledTimes(1);
   });
 
   it('lança UnauthorizedException quando a senha atual está incorreta', async () => {

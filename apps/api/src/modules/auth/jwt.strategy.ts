@@ -9,8 +9,11 @@
  *    permitindo rotação sem downtime (Sato §9.3). `kid` desconhecido ⇒ recusado.
  *  - **Denylist por `jti`**: após validar assinatura/expiração, checa o Redis — um token
  *    revogado por logout/reuse é recusado mesmo dentro da janela de 15min.
+ *  - **Sessão persistida obrigatória**: jti/titular/prazo/revogação e papel atual são
+ *    conferidos no PostgreSQL em cada operação; cache não concede autenticação.
  */
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ControlCenterRole } from '@movivo/shared';
 import { PassportStrategy } from '@nestjs/passport';
 import jwt from 'jsonwebtoken';
 import {
@@ -20,21 +23,25 @@ import {
   type StrategyOptionsWithoutRequest,
 } from 'passport-jwt';
 
-import { AppConfigService } from '../../core/config';
+import { AppConfigService, parseDurationSeconds } from '../../core/config';
 import { type TenantRole } from '../../core/database';
 import { TokenDenylistService } from './token-denylist.service';
-import { UserRoleCacheService } from './user-role-cache.service';
+import { AuthService } from './auth.service';
 
 export interface AuthenticatedUser {
   userId: string;
   role: TenantRole;
   jti: string;
+  /** Preenchido somente após validação criptográfica; usado para limitar streams. */
+  expiresAt?: number;
 }
 
 interface JwtPayload {
   sub: string;
   role: TenantRole;
   jti: string;
+  iat: number;
+  exp: number;
 }
 
 export const JWT_STRATEGY = 'jwt';
@@ -65,9 +72,9 @@ export function buildSecretOrKeyProvider(keys: ReadonlyMap<string, string>): Sec
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, JWT_STRATEGY) {
   constructor(
-    config: AppConfigService,
+    private readonly config: AppConfigService,
     @Inject(TokenDenylistService) private readonly denylist: TokenDenylistService,
-    private readonly roleCache: UserRoleCacheService,
+    private readonly auth: AuthService,
   ) {
     const jwtConfig = config.jwt;
     const keys = new Map<string, string>([[jwtConfig.keyId, jwtConfig.publicKey]]);
@@ -88,21 +95,27 @@ export class JwtStrategy extends PassportStrategy(Strategy, JWT_STRATEGY) {
 
   /** Passa só depois de assinatura+expiração válidas. Aqui aplicamos a denylist. */
   async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
-    if (!UUID_RE.test(payload?.sub ?? '') || !payload?.role || !payload?.jti) {
-      throw new UnauthorizedException('Token de acesso malformado.');
+    const now = Math.floor(Date.now() / 1000);
+    if (
+      typeof payload?.sub !== 'string' ||
+      !UUID_RE.test(payload.sub) ||
+      typeof payload.jti !== 'string' ||
+      !UUID_RE.test(payload.jti) ||
+      !Object.values(ControlCenterRole).includes(payload.role) ||
+      !Number.isSafeInteger(payload.iat) ||
+      !Number.isSafeInteger(payload.exp) ||
+      payload.iat > now ||
+      payload.exp <= now ||
+      payload.exp <= payload.iat ||
+      payload.exp - payload.iat > parseDurationSeconds(this.config.jwt.accessTtl)
+    ) {
+      throw new UnauthorizedException('Token de acesso malformado ou expirado.');
     }
     if (await this.denylist.isRevoked(payload.jti)) {
       throw new UnauthorizedException('Sessão revogada.');
     }
 
-    // O papel do JWT é apenas uma alegação assinada. Revalidá-lo contra o papel persistido
-    // revoga privilégios removidos sem aguardar o access de 15 min expirar. O lookup passa
-    // por um cache de 60s no Redis (`UserRoleCacheService`): a revogação continua valendo
-    // em no máximo ~1 minuto — muito abaixo dos 15 min do token — sem uma query por request.
-    const persistedRole = await this.roleCache.get(payload.sub);
-    if (persistedRole !== payload.role) {
-      throw new UnauthorizedException('Papel da sessão não corresponde à conta atual.');
-    }
-    return { userId: payload.sub, role: payload.role, jti: payload.jti };
+    await this.auth.assertActiveSession(payload.sub, payload.role, payload.jti);
+    return { userId: payload.sub, role: payload.role, jti: payload.jti, expiresAt: payload.exp };
   }
 }

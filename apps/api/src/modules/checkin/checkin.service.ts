@@ -148,7 +148,7 @@ export class CheckinService {
     if (!row) throw new NotFoundException('Check-in não encontrado.');
     if (this.isExpired(row.status, row.expiresAt)) {
       await this.expire(row.userId, row.id);
-      return this.toView({ ...row, status: 'EXPIRED' });
+      throw new GoneException('Sessão de check-in expirada.');
     }
     return this.toView(row);
   }
@@ -244,7 +244,7 @@ export class CheckinService {
   }
 
   private isExpired(status: string, expiresAt: Date): boolean {
-    return status === 'PENDING' && expiresAt.getTime() < Date.now();
+    return status === 'EXPIRED' || expiresAt.getTime() <= Date.now();
   }
 
   private async expire(userId: string, id: string): Promise<void> {

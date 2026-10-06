@@ -5,6 +5,7 @@ import {
   assertTrustedMutation,
   authenticatedBackendFetch,
   BffError,
+  clearSession,
   DASHBOARD_PRIVATE_HEADERS,
   errorResponse,
   forwardBackendJson,
@@ -22,6 +23,7 @@ export async function POST(request: NextRequest) {
     });
     // 204 não carrega corpo — `forwardBackendJson` espera JSON e não serve pra ele.
     if (response.status === 204) {
+      await clearSession();
       return new NextResponse(null, { status: 204, headers: DASHBOARD_PRIVATE_HEADERS });
     }
     return forwardBackendJson(response);

@@ -155,7 +155,9 @@ export function AccountSettings() {
     setSavingPassword(true);
     try {
       await changeAccountPassword({ currentPassword, newPassword });
-      setPasswordSuccess('Senha atualizada.');
+      setPasswordSuccess('Senha atualizada. Entre novamente para continuar.');
+      router.replace('/entrar?senha=atualizada');
+      router.refresh();
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');

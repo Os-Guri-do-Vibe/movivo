@@ -13,6 +13,7 @@
  */
 import { z } from 'zod';
 
+import { parseDurationSeconds } from './app-config.service';
 import { SECRET_KEYS } from './resolve-file-secrets';
 
 /** Porta canônica do PgBouncer. A aplicação nunca conecta direto na 5432. */
@@ -167,10 +168,26 @@ export const envSchema = z
     /** Chave pública N-1 (opcional): aceita tokens ainda válidos assinados antes da rotação. */
     JWT_PUBLIC_KEY_PREVIOUS: z.string().min(1).optional(),
     JWT_KEY_ID_PREVIOUS: z.string().min(1).optional(),
-    /** TTL do access token (curto — Sato §9.1). Aceita a sintaxe do `ms`/jsonwebtoken. */
-    JWT_ACCESS_TTL: z.string().min(1).default('15m'),
+    /** TTL do access token (curto — Sato §9.1). Aceita Ns/Nm/Nh/Nd, com teto de 15 minutos. */
+    JWT_ACCESS_TTL: z
+      .string()
+      .trim()
+      .regex(/^[1-9]\d*[smhd]$/)
+      .refine(
+        (value) => /^[1-9]\d*[smhd]$/.test(value) && parseDurationSeconds(value) <= 900,
+        'Access deve expirar em no máximo 15 minutos.',
+      )
+      .default('15m'),
     /** TTL do refresh token (cookie httpOnly, 30 dias — ADR-006). */
-    JWT_REFRESH_TTL: z.string().min(1).default('30d'),
+    JWT_REFRESH_TTL: z
+      .string()
+      .trim()
+      .regex(/^[1-9]\d*[smhd]$/)
+      .refine(
+        (value) => /^[1-9]\d*[smhd]$/.test(value) && parseDurationSeconds(value) <= 2_592_000,
+        'Refresh deve expirar em no máximo 30 dias.',
+      )
+      .default('30d'),
 
     // -------------------------------------------------------- LLM (US-2.2)
     /**

@@ -4,7 +4,7 @@
  * Sobe o `AppModule` REAL contra o stack Docker (US-0.2) e prova, por I/O de verdade,
  * o contrato que Leonardo (US-0.3) deixou para este teste:
  *   · 200 com db.status = 'up' e redis.status = 'up';
- *   · db.port === 5433  → o runtime não regrediu para a 5432 direta (ARQUITETURA §12.3);
+ *   · db.port corresponde à porta configurada do PgBouncer, sem a 5432 direta;
  *   · db.preparedStatements === false → PgBouncer transaction mode (ADR-003).
  *
  * Pré-requisito: `pnpm run infra:up`. Sem infra, o boot falha rápido — que é o
@@ -22,10 +22,11 @@ import { AppConfigService } from '../src/core/config';
 
 let app: INestApplication;
 let prefix: string;
+let config: AppConfigService;
 
 beforeAll(async () => {
   app = await NestFactory.create(AppModule, { logger: false });
-  const config = app.get(AppConfigService);
+  config = app.get(AppConfigService);
   prefix = config.globalPrefix;
   app.setGlobalPrefix(prefix);
   await app.init();
@@ -45,10 +46,11 @@ describe('GET /health (smoke de integração)', () => {
     expect(res.body.info.redis.status).toBe('up');
   });
 
-  it('prova via /health que a conexão vai pelo PgBouncer (5433) sem prepared statements', async () => {
+  it('prova via /health que a conexão vai pela porta configurada do PgBouncer sem prepared statements', async () => {
     const res = await request(app.getHttpServer()).get(`/${prefix}/health`);
 
-    expect(res.body.info.db.port).toBe(5433);
+    expect(res.body.info.db.port).toBe(config.database.port);
+    expect(res.body.info.db.port).not.toBe(5432);
     expect(res.body.info.db.preparedStatements).toBe(false);
     expect(res.body.info.db.via).toBe('pgbouncer');
   });

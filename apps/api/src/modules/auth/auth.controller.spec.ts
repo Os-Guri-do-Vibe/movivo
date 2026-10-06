@@ -8,6 +8,7 @@ import { AuthController } from './auth.controller';
 let auth: {
   login: ReturnType<typeof vi.fn>;
   refresh: ReturnType<typeof vi.fn>;
+  logoutRefresh: ReturnType<typeof vi.fn>;
   logout: ReturnType<typeof vi.fn>;
   getProfile: ReturnType<typeof vi.fn>;
 };
@@ -24,6 +25,7 @@ beforeEach(() => {
   auth = {
     login: vi.fn(),
     refresh: vi.fn(),
+    logoutRefresh: vi.fn(async () => undefined),
     logout: vi.fn(async () => undefined),
     getProfile: vi.fn(async () => ({ name: 'Ana Souza', avatarPath: 'abc.jpg' })),
   };
@@ -104,4 +106,13 @@ describe('endpoints de sanidade', () => {
       role: 'ADMIN',
     });
   });
+});
+
+it('logout pelo refresh não exige access token', async () => {
+  await controller.logoutRefresh(
+    { cookies: { movivo_refresh: 'sess.secret' } } as never,
+    res as never,
+  );
+  expect(auth.logoutRefresh).toHaveBeenCalledWith('sess.secret');
+  expect(res.clearCookie).toHaveBeenCalledWith('movivo_refresh', expect.any(Object));
 });
