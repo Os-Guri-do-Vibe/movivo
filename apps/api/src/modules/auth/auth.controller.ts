@@ -127,6 +127,19 @@ export class AuthController {
     res.clearCookie(REFRESH_COOKIE, this.cookieOptions(0));
   }
 
+  @Post('logout/refresh')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiCookieAuth('movivo_refresh')
+  @ApiOperation({ summary: 'Encerra a família da sessão mesmo após expiração do access token' })
+  @ApiResponse({ status: 204, description: 'Sessão revogada no servidor.' })
+  @ApiResponse({ status: 401, description: 'Refresh ausente ou inválido.' })
+  async logoutRefresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    await this.auth.logoutRefresh(
+      (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE],
+    );
+    res.clearCookie(REFRESH_COOKIE, this.cookieOptions(0));
+  }
+
   @Get('me')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')

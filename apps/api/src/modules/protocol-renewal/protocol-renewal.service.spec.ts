@@ -146,6 +146,23 @@ describe('ProtocolRenewalService.getByToken', () => {
   });
 });
 
+describe.each(['IN_PROGRESS', 'SUBMITTED', 'EXPIRED'])(
+  'TTL de leitura da renovação — %s',
+  (status) => {
+    it('recusa token vencido sem devolver respostas ou consultar perfil', async () => {
+      const { service } = makeService({
+        session: fullSessionRow({ status, expiresAt: new Date(Date.now() - 1_000) }),
+      });
+      await expect(service.getByToken(TOKEN)).rejects.toBeInstanceOf(GoneException);
+    });
+  },
+);
+
+it('estado EXPIRED não reativa a renovação mesmo com prazo futuro', async () => {
+  const { service } = makeService({ session: fullSessionRow({ status: 'EXPIRED' }) });
+  await expect(service.getByToken(TOKEN)).rejects.toBeInstanceOf(GoneException);
+});
+
 describe('ProtocolRenewalService.submit', () => {
   it('rejeita envio com bloco faltando', async () => {
     const { service } = makeService({ session: fullSessionRow({ dataBlock5: null }) });

@@ -194,7 +194,7 @@ export class AnamnesisService {
 
     if (this.isExpired(row.status, row.expiresAt)) {
       await this.expire(row.id);
-      return this.toView({ ...row, status: 'EXPIRED', dataBlock2: null });
+      throw new GoneException('Sessão de anamnese expirada. Recomece o formulário.');
     }
     return this.toView(row);
   }
@@ -514,7 +514,7 @@ export class AnamnesisService {
   }
 
   private isExpired(status: string, expiresAt: Date): boolean {
-    return status === 'IN_PROGRESS' && expiresAt.getTime() < Date.now();
+    return status === 'EXPIRED' || expiresAt.getTime() <= Date.now();
   }
 
   private assertActive(id: string, status: string, expiresAt: Date): void {

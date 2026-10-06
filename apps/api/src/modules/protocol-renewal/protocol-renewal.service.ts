@@ -90,7 +90,7 @@ export class ProtocolRenewalService {
 
     if (this.isExpired(row.status, row.expiresAt)) {
       await this.expire(row.userId, row.id);
-      return this.toView({ ...row, status: 'EXPIRED', dataBlock3: null }, row.userId);
+      throw new GoneException('Sessão de renovação expirada.');
     }
     return this.toView(row, row.userId);
   }
@@ -269,7 +269,7 @@ export class ProtocolRenewalService {
   }
 
   private isExpired(status: string, expiresAt: Date): boolean {
-    return status === 'IN_PROGRESS' && expiresAt.getTime() < Date.now();
+    return status === 'EXPIRED' || expiresAt.getTime() <= Date.now();
   }
 
   private assertActive(userId: string, id: string, status: string, expiresAt: Date): void {

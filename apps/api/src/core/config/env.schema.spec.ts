@@ -129,3 +129,13 @@ describe('envSchema', () => {
     expect(formatEnvError(result.error)).toContain('MOCK é proibido em produção');
   });
 });
+
+it.each(['0s', '1y', '900000', '16m', '10000000000000000000000000d'])(
+  'recusa TTL access inseguro %s',
+  (value) => {
+    expect(envSchema.safeParse({ ...VALID, JWT_ACCESS_TTL: value }).success).toBe(false);
+  },
+);
+it('recusa refresh acima de 30 dias', () => {
+  expect(envSchema.safeParse({ ...VALID, JWT_REFRESH_TTL: '31d' }).success).toBe(false);
+});

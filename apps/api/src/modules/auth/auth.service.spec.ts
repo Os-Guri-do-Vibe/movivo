@@ -13,6 +13,7 @@ function q<T>(result: T) {
   const b: Record<string, unknown> = {};
   for (const m of [
     'from',
+    'innerJoin',
     'where',
     'for',
     'limit',
@@ -32,6 +33,7 @@ let tx: {
   select: ReturnType<typeof vi.fn>;
   insert: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
+  execute: ReturnType<typeof vi.fn>;
 };
 let db: { runAsSystem: ReturnType<typeof vi.fn>; runAsUser: ReturnType<typeof vi.fn> };
 let tokens: Record<string, ReturnType<typeof vi.fn>>;
@@ -45,7 +47,12 @@ const SESSION_ID = '11111111-1111-4111-8111-111111111111';
 const GOOD_SECRET = 'a'.repeat(64);
 
 beforeEach(() => {
-  tx = { select: vi.fn(), insert: vi.fn(), update: vi.fn() };
+  tx = {
+    select: vi.fn(),
+    insert: vi.fn(),
+    update: vi.fn(),
+    execute: vi.fn().mockResolvedValue([]),
+  };
   db = {
     runAsSystem: vi.fn(async (cb: (t: unknown) => unknown) => cb(tx)),
     runAsUser: vi.fn(async (_u: string, _r: string, cb: (t: unknown) => unknown) => cb(tx)),
@@ -76,6 +83,7 @@ describe('login', () => {
   it('emite access + cookie de refresh para credencial válida', async () => {
     tx.select.mockReturnValueOnce(q([{ id: 'u1', role: 'PROFESSIONAL', passwordHash: 'ph' }]));
     passwords.verify.mockResolvedValue(true);
+    tx.select.mockReturnValueOnce(q([{ passwordHash: 'ph', role: 'PROFESSIONAL' }]));
     tx.insert.mockReturnValueOnce(q([{ id: 'sess-1' }]));
 
     const result = await service.login({ email: 'p@movivo.app', password: 'x' });
@@ -118,14 +126,16 @@ describe('refresh — rotation', () => {
 
   it('valida, invalida o anterior e emite um par novo na mesma família', async () => {
     tx.select
-      .mockReturnValueOnce(q([session])) // lookup da sessão
-      .mockReturnValueOnce(q([{ role: 'PROFESSIONAL' }])); // role do usuário
+      .mockReturnValueOnce(q([session]))
+      .mockReturnValueOnce(q([{ role: 'PROFESSIONAL' }]))
+      .mockReturnValueOnce(q([session]));
     tx.update.mockReturnValueOnce(q(undefined)); // revoga a linha atual
     tx.insert.mockReturnValueOnce(q([{ id: 'sess-2' }])); // nova sessão
 
     const result = await service.refresh(`${SESSION_ID}.${GOOD_SECRET}`);
 
     expect(result.refreshCookie).toBe('sess-2.newsecret');
+    expect(tx.execute).toHaveBeenCalledTimes(1);
     expect(result.accessToken).toBe('access:u1');
     // o refresh antigo foi revogado (update) e seu jti denylistado.
     expect(tx.update).toHaveBeenCalledTimes(1);
@@ -144,14 +154,20 @@ describe('refresh — rotation', () => {
   });
 
   it('recusa quando o segredo não bate o hash', async () => {
-    tx.select.mockReturnValueOnce(q([{ ...session, refreshTokenHash: 'hash:outro' }]));
+    tx.select
+      .mockReturnValueOnce(q([session]))
+      .mockReturnValueOnce(q([{ role: 'PROFESSIONAL' }]))
+      .mockReturnValueOnce(q([{ ...session, refreshTokenHash: 'hash:outro' }]));
     await expect(service.refresh(`${SESSION_ID}.${GOOD_SECRET}`)).rejects.toThrow(
       UnauthorizedException,
     );
   });
 
   it('recusa refresh expirado', async () => {
-    tx.select.mockReturnValueOnce(q([{ ...session, expiresAt: new Date(Date.now() - 1) }]));
+    tx.select
+      .mockReturnValueOnce(q([session]))
+      .mockReturnValueOnce(q([{ role: 'PROFESSIONAL' }]))
+      .mockReturnValueOnce(q([{ ...session, expiresAt: new Date(Date.now() - 1) }]));
     await expect(service.refresh(`${SESSION_ID}.${GOOD_SECRET}`)).rejects.toThrow(
       UnauthorizedException,
     );
@@ -174,7 +190,10 @@ describe('refresh — detecção de reuse', () => {
       expiresAt: new Date(Date.now() + 100_000),
       revokedAt: new Date(),
     };
-    tx.select.mockReturnValueOnce(q([revoked]));
+    tx.select
+      .mockReturnValueOnce(q([revoked]))
+      .mockReturnValueOnce(q([{ role: 'PROFESSIONAL' }]))
+      .mockReturnValueOnce(q([revoked]));
     tx.update.mockReturnValueOnce(q([{ jti: 'j1' }, { jti: 'j2' }])); // família revogada (returning)
 
     await expect(service.refresh(`${SESSION_ID}.${GOOD_SECRET}`)).rejects.toThrow(/reutilizado/i);
@@ -186,10 +205,11 @@ describe('refresh — detecção de reuse', () => {
 
 describe('logout', () => {
   it('denylista o jti do access e revoga a sessão', async () => {
-    tx.update.mockReturnValueOnce(q(undefined));
+    tx.select.mockReturnValueOnce(q([{ familyId: 'fam-1' }]));
+    tx.update.mockReturnValueOnce(q([{ jti: 'jti-x' }]));
     await service.logout('u1', 'PROFESSIONAL', 'jti-x');
     expect(denylist.revoke).toHaveBeenCalledWith('jti-x', expect.any(Number));
-    expect(db.runAsUser).toHaveBeenCalledWith('u1', 'PROFESSIONAL', expect.any(Function));
+    expect(db.runAsSystem).toHaveBeenCalledWith(expect.any(Function));
   });
 });
 
@@ -206,5 +226,39 @@ describe('getProfile', () => {
   it('devolve null quando a conta não tem nome/avatar cadastrado ou não existe', async () => {
     tx.select.mockReturnValueOnce(q([]));
     await expect(service.getProfile('u1')).resolves.toEqual({ name: null, avatarPath: null });
+  });
+});
+
+describe('logoutRefresh e sessão persistida', () => {
+  it('revoga toda a família pelo segredo mesmo com refresh antigo/expirado', async () => {
+    tx.select.mockReturnValueOnce(
+      q([
+        {
+          id: SESSION_ID,
+          userId: 'u1',
+          familyId: 'fam-1',
+          refreshTokenHash: `hash:${GOOD_SECRET}`,
+          revokedAt: new Date(),
+          expiresAt: new Date(0),
+        },
+      ]),
+    );
+    tx.update.mockReturnValueOnce(q([{ jti: 'descendant' }]));
+    await service.logoutRefresh(`${SESSION_ID}.${GOOD_SECRET}`);
+    expect(tx.execute).toHaveBeenCalledTimes(1);
+    expect(denylist.revoke).toHaveBeenCalledWith('descendant', expect.any(Number));
+  });
+  it('não revoga com segredo adulterado', async () => {
+    tx.select.mockReturnValueOnce(q([{ refreshTokenHash: 'other' }]));
+    await expect(service.logoutRefresh(`${SESSION_ID}.${GOOD_SECRET}`)).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(tx.update).not.toHaveBeenCalled();
+  });
+  it('nega sessão ausente/revogada mesmo se a denylist estiver vazia', async () => {
+    tx.select.mockReturnValueOnce(q([]));
+    await expect(service.assertActiveSession('u1', 'ADMIN', 'jti')).rejects.toThrow(
+      UnauthorizedException,
+    );
   });
 });

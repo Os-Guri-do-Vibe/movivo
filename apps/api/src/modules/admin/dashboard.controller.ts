@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Header, Param, Patch, Post, Sse, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  Param,
+  Patch,
+  Post,
+  Sse,
+  UnauthorizedException,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -12,6 +23,8 @@ import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { concatMap, takeUntil, timer } from 'rxjs';
+import { AuthService } from '../auth/auth.service';
 import { DashboardService } from './dashboard.service';
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
 
@@ -21,7 +34,10 @@ import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('PROFESSIONAL')
 export class DashboardController {
-  constructor(private readonly dashboard: DashboardService) {}
+  constructor(
+    private readonly dashboard: DashboardService,
+    private readonly auth: AuthService,
+  ) {}
 
   @Get('queue')
   @Roles('PROFESSIONAL', 'ADMIN')
@@ -47,7 +63,17 @@ export class DashboardController {
   })
   @ApiResponse({ status: 200, description: 'Stream SSE de eventos de fila.' })
   events(@CurrentUser() actor: AuthenticatedUser) {
-    return this.dashboard.events(actor);
+    const remainingMs = (actor.expiresAt ?? 0) * 1000 - Date.now();
+    if (remainingMs <= 0) throw new UnauthorizedException('Sessão expirada.');
+    return this.dashboard.events(actor).pipe(
+      concatMap(async (event) => {
+        if ((actor.expiresAt ?? 0) * 1000 <= Date.now())
+          throw new UnauthorizedException('Sessão expirada.');
+        await this.auth.assertActiveSession(actor.userId, actor.role, actor.jti);
+        return event;
+      }),
+      takeUntil(timer(remainingMs)),
+    );
   }
 
   @Get('queue/:kind/:id')

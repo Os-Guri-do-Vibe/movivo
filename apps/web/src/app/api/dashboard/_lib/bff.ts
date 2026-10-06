@@ -239,43 +239,13 @@ async function requireDashboardAccess(): Promise<DashboardAccess> {
   }
 }
 
-/**
- * Um 403 isolado é esperado no Control Center multi-setor (link direto para um setor
- * sem capability) e NÃO derruba a sessão. Vários 403 em sequência curta, porém,
- * parecem sondagem/enumeração de rotas — aí a sessão é encerrada.
- *
- * Limiar: 5 negativas em 60s. Um humano clicando errado não passa disso; um script
- * varrendo os 9 setores passa na primeira volta.
- *
- * ponytail: contador em memória do processo — some em cold start e não é compartilhado
- * entre instâncias serverless. É mitigação best-effort; a autorização real é do backend.
- * Se precisar de garantia entre instâncias, mover o contador para o Redis já usado pela API.
- */
-const FORBIDDEN_LIMIT = 5;
-const FORBIDDEN_WINDOW_MS = 60_000;
-const forbiddenHits = new Map<string, number[]>();
-
-async function registerForbidden(sessionId: string): Promise<void> {
-  const now = Date.now();
-  const hits = (forbiddenHits.get(sessionId) ?? []).filter((at) => now - at < FORBIDDEN_WINDOW_MS);
-  hits.push(now);
-  if (hits.length >= FORBIDDEN_LIMIT) {
-    forbiddenHits.delete(sessionId);
-    await clearSession();
-    return;
-  }
-  forbiddenHits.set(sessionId, hits);
-  if (forbiddenHits.size > 1000) forbiddenHits.clear();
-}
-
 /** Faz chamada autenticada após validar a sessão interna e executa uma rotação do access. */
 export async function authenticatedBackendFetch(
   path: string,
   init: RequestInit = {},
 ): Promise<Response> {
-  const { accessToken, session } = await requireDashboardAccess();
+  const { accessToken } = await requireDashboardAccess();
   let response = await requestWithAccess(path, init, accessToken);
-  if (response.status === 403) await registerForbidden(session.id);
   if (response.status !== 401) return response;
 
   const refreshed = await refreshBackend();
@@ -289,13 +259,23 @@ export async function readBackendSession(): Promise<DashboardSession> {
 }
 
 export async function logoutBackend(): Promise<void> {
-  try {
-    const store = await cookies();
-    const access = store.get(BFF_ACCESS_COOKIE)?.value;
-    if (access) await requestWithAccess('/auth/logout', { method: 'POST' }, access);
-  } finally {
-    await clearSession();
+  const store = await cookies();
+  const refresh = store.get(BFF_REFRESH_COOKIE)?.value;
+  const access = store.get(BFF_ACCESS_COOKIE)?.value;
+  let response: Response | undefined;
+  if (refresh) {
+    response = await fetch(`${API_BASE}/auth/logout/refresh`, {
+      method: 'POST',
+      headers: { Cookie: `${BACKEND_REFRESH_COOKIE}=${refresh}` },
+      cache: 'no-store',
+    });
+  } else if (access) {
+    response = await requestWithAccess('/auth/logout', { method: 'POST' }, access);
   }
+  if (response && !response.ok) {
+    throw new BffError(response.status, 'Não foi possível encerrar a sessão. Tente novamente.');
+  }
+  await clearSession();
 }
 
 /** Defesa CSRF adicional ao SameSite=Strict: mutações exigem Origin same-origin. */

@@ -240,12 +240,25 @@ describe('AnamnesisService — sessão e retomada', () => {
     expect(view.consents.every((c) => c.version.length > 0)).toBe(true);
   });
 
-  it('expira em voo e descarta o bloco de saúde da resposta', async () => {
+  it('expira em voo e rejeita a leitura sem expor dados', async () => {
     const { svc } = makeService({ select: [sessionRow({ expiresAt: past() })] });
-    const view = await svc.getByToken('t');
-    expect(view.status).toBe('EXPIRED');
-    expect(view.healthCompleted).toBe(false);
+    await expect(svc.getByToken('t')).rejects.toThrow(/expirada/i);
   });
+});
+
+describe.each(['IN_PROGRESS', 'SUBMITTED', 'EXPIRED'])(
+  'TTL de leitura da anamnese — %s',
+  (status) => {
+    it('recusa token vencido independentemente do estado persistido', async () => {
+      const { svc } = makeService({ select: [sessionRow({ status, expiresAt: past() })] });
+      await expect(svc.getByToken('t')).rejects.toThrow(/expirada/i);
+    });
+  },
+);
+
+it('estado EXPIRED não reativa a leitura mesmo com prazo futuro', async () => {
+  const { svc } = makeService({ select: [sessionRow({ status: 'EXPIRED', expiresAt: future() })] });
+  await expect(svc.getByToken('t')).rejects.toThrow(/expirada/i);
 });
 
 describe('Etapa 1 — gate 18+, consentimentos e posse do número', () => {

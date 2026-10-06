@@ -275,42 +275,41 @@ describe('CheckinService.getByToken', () => {
     });
   });
 
-  it('token vencido: expira, devolve status EXPIRED (sem lancar exceção)', async () => {
-    const deps = makeDeps();
-    const row = {
-      id: CHECKIN_ID,
-      userId: USER_ID,
-      status: 'PENDING',
-      expiresAt: new Date(Date.now() - 60_000),
-      weekNumber: 4,
-    };
-    const updateSet = vi.fn(() => ({ where: async () => [] }));
-    const db = {
-      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(makeSessionTx(row))),
-      runAsUser: vi.fn((_u: string, _r: string, cb: (tx: unknown) => Promise<unknown>) =>
-        cb({
-          update: () => ({ set: updateSet }),
-          select: () => makeSessionTx(row, { name: null }),
-        }),
-      ),
-    } as unknown as TenantDatabase;
-    const service = new CheckinService(
-      db,
-      CONFIG,
-      deps.cipher,
-      deps.healthConsent,
-      deps.queues,
-      deps.queueEvents,
-      deps.shortLinks,
-      deps.logger,
-    );
-    await expect(service.getByToken(TOKEN)).resolves.toEqual({
-      status: 'EXPIRED',
-      firstName: null,
-      weekNumber: 4,
-    });
-    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ status: 'EXPIRED' }));
-  });
+  it.each(['PENDING', 'SUBMITTED', 'EXPIRED'])(
+    'token vencido %s: rejeita leitura sem expor perfil',
+    async (status) => {
+      const deps = makeDeps();
+      const row = {
+        id: CHECKIN_ID,
+        userId: USER_ID,
+        status,
+        expiresAt: new Date(Date.now() - 60_000),
+        weekNumber: 4,
+      };
+      const updateSet = vi.fn(() => ({ where: async () => [] }));
+      const db = {
+        runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(makeSessionTx(row))),
+        runAsUser: vi.fn((_u: string, _r: string, cb: (tx: unknown) => Promise<unknown>) =>
+          cb({
+            update: () => ({ set: updateSet }),
+            select: () => makeSessionTx(row, { name: null }),
+          }),
+        ),
+      } as unknown as TenantDatabase;
+      const service = new CheckinService(
+        db,
+        CONFIG,
+        deps.cipher,
+        deps.healthConsent,
+        deps.queues,
+        deps.queueEvents,
+        deps.shortLinks,
+        deps.logger,
+      );
+      await expect(service.getByToken(TOKEN)).rejects.toBeInstanceOf(GoneException);
+      expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ status: 'EXPIRED' }));
+    },
+  );
 });
 
 describe('CheckinService.lastSentOrRespondedAt', () => {
