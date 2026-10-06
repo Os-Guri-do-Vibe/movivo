@@ -3,20 +3,17 @@
  * Coach do WhatsApp nunca usa travessão "—" em nenhuma mensagem, nem nas fixas/
  * determinísticas de dunning e conversão de trial como estas. Mesmo achado, segunda regra:
  * a cor de marca é verde (Verde Pulso) — todo coração usado tem que ser 💚 (achado ao vivo:
- * `dunningMessage`/`conversionMessage('winback', ...)` saíam com 💛).
+ * `dunningMessage`/`winbackMessage` saíam com 💛).
  */
 import { describe, expect, it } from 'vitest';
 
 import {
-  conversionMessage,
   dunningMessage,
   paymentConfirmationMessage,
   planEndedMessage,
   trialEndedMessage,
-  type ConversionTouchpoint,
+  winbackMessage,
 } from './subscription-messages';
-
-const TOUCHPOINTS: Exclude<ConversionTouchpoint, 'day7'>[] = ['day10', 'day13', 'day14', 'winback'];
 
 const ALL_MESSAGES = [
   dunningMessage('https://pay.example/checkout/abc'),
@@ -28,9 +25,7 @@ const ALL_MESSAGES = [
     'https://movivo.test/checkout/abc',
     'https://movivo.test/cancelar/abc',
   ),
-  ...TOUCHPOINTS.map((touchpoint) =>
-    conversionMessage(touchpoint, 'https://pay.example/checkout/abc', 'ATLAS'),
-  ),
+  winbackMessage('https://pay.example/checkout/abc'),
 ];
 
 /** Ver `coach-messages.spec.ts` para a explicação de por que é uma lista, não um range. */

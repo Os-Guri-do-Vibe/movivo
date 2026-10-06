@@ -11,7 +11,7 @@ import { DEFAULT_AGENT_PERSONA, type AgentPersona } from '@movivo/shared';
 import { describe, expect, it } from 'vitest';
 
 import type { AgentPersonaService } from '../../../core/agent-config/agent-persona.service';
-import { conversionMessage } from '../../subscription/subscription-messages';
+import { trialEndedMessage, winbackMessage } from '../../subscription/subscription-messages';
 import { analyzingMessage, protocolDeliveryPdfText } from '../../whatsapp/message-templates';
 import { INTENTS } from './intent.types';
 import { PromptResolverService } from './prompt-resolver.service';
@@ -53,9 +53,8 @@ async function userFacingTexts(persona: AgentPersona): Promise<string[]> {
     // exatamente para não confundir "MOVI" (nome antigo) com "MOVIVO" (a marca, que é
     // legítimo continuar aparecendo).
     analyzingMessage(persona),
-    ...(['day10', 'day13', 'day14', 'winback'] as const).map((key) =>
-      conversionMessage(key, 'https://movivo.test/checkout', persona.agentName),
-    ),
+    trialEndedMessage('Ana', 'https://movivo.test/checkout', 'https://movivo.test/cancelar'),
+    winbackMessage('https://movivo.test/checkout'),
   ];
 }
 
@@ -68,10 +67,6 @@ describe('renomear a agente propaga (TASK-7.9.3)', () => {
 
   it('chega à recusa de fora-de-escopo', async () => {
     expect(resolver(persona).foraDeEscopoResponseFor(persona)).toContain('ATLAS');
-  });
-
-  it('chega à mensagem estática de assinatura', () => {
-    expect(conversionMessage('day14', 'https://x/c', 'ATLAS')).toContain('ATLAS');
   });
 
   it('nenhum texto ao aluno carrega o nome antigo depois da troca', async () => {
