@@ -15,6 +15,7 @@ import { sql } from 'drizzle-orm';
 
 import type { TenantTransaction } from '../../core/database/tenant-database.service';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
+import { strictSafeParse } from '../../core/validation/strict-input';
 import { MethodologyProvider } from '../protocol/methodology-provider.service';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { AuditService } from './audit.service';
@@ -92,7 +93,7 @@ export class MethodologyAdminService {
   }
 
   async create(actor: AuthenticatedUser, body: unknown): Promise<MethodologyVersionsResponse> {
-    const parsed = createMethodologyVersionSchema.safeParse(body);
+    const parsed = strictSafeParse(createMethodologyVersionSchema, body);
     if (!parsed.success)
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
     const input = parsed.data;
@@ -137,7 +138,7 @@ export class MethodologyAdminService {
     body: unknown,
     decision: 'APPROVED' | 'REJECTED',
   ): Promise<MethodologyVersionsResponse> {
-    const parsed = methodologyActionSchema.safeParse(body);
+    const parsed = strictSafeParse(methodologyActionSchema, body);
     if (!parsed.success)
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
     const input = parsed.data;
@@ -166,7 +167,7 @@ export class MethodologyAdminService {
   }
 
   async publish(actor: AuthenticatedUser, body: unknown): Promise<MethodologyVersionsResponse> {
-    const parsed = methodologyActionSchema.safeParse(body);
+    const parsed = strictSafeParse(methodologyActionSchema, body);
     if (!parsed.success)
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
     const input = parsed.data;
@@ -215,7 +216,7 @@ export class MethodologyAdminService {
   }
 
   async rollback(actor: AuthenticatedUser, body: unknown): Promise<MethodologyVersionsResponse> {
-    const parsed = methodologyActionSchema.safeParse(body);
+    const parsed = strictSafeParse(methodologyActionSchema, body);
     if (!parsed.success)
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
     const input = parsed.data;
@@ -259,7 +260,7 @@ export class MethodologyAdminService {
     to: MethodologyStatus,
     action: string,
   ): Promise<MethodologyVersionsResponse> {
-    const parsed = methodologyActionSchema.safeParse(body);
+    const parsed = strictSafeParse(methodologyActionSchema, body);
     if (!parsed.success)
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
     const input = parsed.data;

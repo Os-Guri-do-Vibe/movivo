@@ -41,6 +41,7 @@ import {
   type TenantTransaction,
 } from '../../core/database/tenant-database.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
+import { strictSafeParse } from '../../core/validation/strict-input';
 import {
   CONVERSATION_MEMORY_BLOCK,
   INVIOLABLE_RULES_BLOCK,
@@ -364,7 +365,7 @@ export class AiConfigService {
   }
 
   private parse<T>(schema: z.ZodType<T>, input: unknown): T {
-    const result = schema.safeParse(input);
+    const result = strictSafeParse(schema, input);
     if (!result.success) {
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: result.error.issues });
     }

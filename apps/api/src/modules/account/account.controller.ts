@@ -35,7 +35,6 @@ import {
 } from '@nestjs/swagger';
 import { changePasswordSchema, updateAccountProfileSchema } from '@movivo/shared';
 import type { Response } from 'express';
-import type { ZodType } from 'zod';
 // Import só de tipo, por efeito colateral: traz a augmentation global
 // `Express.Multer.File` de `@types/multer` — o tsconfig restringe `types` a
 // `["node"]` (§ raiz), então sem esta linha o compilador não vê o namespace.
@@ -45,25 +44,9 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/roles.decorator';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
+import { parseBody } from '../../core/validation/strict-input';
 import { AccountService } from './account.service';
 import { AVATAR_UPLOAD_HARD_CEILING_BYTES, AvatarStorageService } from './avatar-storage.service';
-
-/**
- * `.parse()` direto lança `ZodError`, que não é `HttpException` — o filtro padrão do
- * Nest vira um 500 genérico em vez de um 400 com o motivo (mesmo achado já corrigido em
- * `dashboard.service.ts` para a assinatura de protocolo). `safeParse` + `BadRequestException`
- * explícito é o jeito certo aqui.
- */
-function parseOrBadRequest<T>(schema: ZodType<T>, body: unknown): T {
-  const result = schema.safeParse(body ?? {});
-  if (!result.success) {
-    throw new BadRequestException({
-      message: 'Corpo da requisição inválido.',
-      issues: result.error.issues,
-    });
-  }
-  return result.data;
-}
 
 @ApiTags('Conta')
 @Controller('account')
@@ -101,7 +84,7 @@ export class AccountController {
     description: 'Nenhum campo enviado, ou telefone fora do formato E.164.',
   })
   updateProfile(@CurrentUser() user: AuthenticatedUser, @Body() body: unknown) {
-    const input = parseOrBadRequest(updateAccountProfileSchema, body);
+    const input = parseBody(updateAccountProfileSchema, body);
     return this.account.updateProfile(user.userId, user.role, input);
   }
 
@@ -119,7 +102,7 @@ export class AccountController {
   @ApiResponse({ status: 400, description: 'Nova senha abaixo do piso de 12 caracteres.' })
   @ApiResponse({ status: 401, description: 'Senha atual incorreta.' })
   async changePassword(@CurrentUser() user: AuthenticatedUser, @Body() body: unknown) {
-    const input = parseOrBadRequest(changePasswordSchema, body);
+    const input = parseBody(changePasswordSchema, body);
     await this.account.changePassword(user.userId, user.role, input);
   }
 

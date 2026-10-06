@@ -70,6 +70,10 @@ async function bootstrap(): Promise<void> {
       // `whitelist` remove propriedade não declarada no DTO e `forbidNonWhitelisted`
       // rejeita a request que a enviou: mass assignment é o vetor clássico de
       // escalonamento de privilégio (OWASP API3). Nunca relaxar essas duas.
+      // ATENÇÃO: este pipe só inspeciona parâmetros tipados com classe de DTO. Os
+      // controllers daqui recebem `@Body() body: unknown`, então a allowlist de verdade é
+      // `parseBody`/`strictSafeParse` (`core/validation/strict-input.ts`), que rejeita chave
+      // fora do schema Zod em qualquer nível. Nunca chamar `schema.parse(body)` direto.
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,

@@ -4,6 +4,7 @@
  * ver `AvatarStorageService` sobre o porquê).
  */
 import { BadRequestException } from '@nestjs/common';
+import { ZodError } from 'zod';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AccountController } from './account.controller';
@@ -58,6 +59,17 @@ describe('PATCH /account/profile', () => {
   it('recusa telefone fora do formato E.164', () => {
     expect(() => controller.updateProfile(USER, { phoneNumber: '11999999999' })).toThrow();
   });
+
+  it.each([
+    ['role', { name: 'Ana', role: 'ADMIN' }],
+    ['email (imutável)', { name: 'Ana', email: 'outro@movivo.test' }],
+    ['avatarPath', { name: 'Ana', avatarPath: '../../etc/passwd' }],
+    ['passwordHash', { name: 'Ana', passwordHash: 'x' }],
+    ['id', { name: 'Ana', id: '00000000-0000-0000-0000-000000000000' }],
+  ])('rejeita (400) mass assignment de %s, sem tocar o service', (_label, body) => {
+    expect(() => controller.updateProfile(USER, body)).toThrow(ZodError);
+    expect(account.updateProfile).not.toHaveBeenCalled();
+  });
 });
 
 describe('POST /account/password', () => {
@@ -70,6 +82,17 @@ describe('POST /account/password', () => {
       currentPassword: 'atual',
       newPassword: 'senha-nova-123',
     });
+  });
+
+  it('rejeita (400) campo fora do contrato na troca de senha', async () => {
+    await expect(
+      controller.changePassword(USER, {
+        currentPassword: 'atual',
+        newPassword: 'senha-nova-123',
+        role: 'ADMIN',
+      }),
+    ).rejects.toBeInstanceOf(ZodError);
+    expect(account.changePassword).not.toHaveBeenCalled();
   });
 
   it('recusa senha nova curta (piso de 12 caracteres)', async () => {

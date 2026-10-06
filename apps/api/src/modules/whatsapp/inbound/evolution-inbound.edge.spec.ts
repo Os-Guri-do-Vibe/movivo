@@ -85,6 +85,24 @@ describe('EvolutionInboundEdge.normalize', () => {
     ]);
   });
 
+  it('MASS ASSIGNMENT — campo extra do provedor é descartado e nunca chega ao resultado', () => {
+    // Payload de terceiro evolui sem aviso (Baileys adiciona campos a cada versão), então este
+    // borda NÃO rejeita campo desconhecido — rejeitar derrubaria mensagem real de aluno. A
+    // garantia é a inversa: só os campos modelados saem; nada do corpo cru é repassado.
+    const base = upsert();
+    const out = makeEdge().normalize({
+      ...base,
+      apikey: 'segredo-do-provedor',
+      isAdmin: true,
+      data: {
+        ...(base.data as Record<string, unknown>),
+        role: 'ADMIN',
+        message: { conversation: 'oi movi', messageContextInfo: { x: 1 }, role: 'ADMIN' },
+      },
+    });
+    expect(out).toEqual([{ messageId: 'WA-MSG-1', from: '+5541999998888', text: 'oi movi' }]);
+  });
+
   it('aceita extendedTextMessage (resposta citando outra mensagem)', () => {
     const out = makeEdge().normalize(
       upsert({ message: { extendedTextMessage: { text: 'e o agachamento?' } } }),

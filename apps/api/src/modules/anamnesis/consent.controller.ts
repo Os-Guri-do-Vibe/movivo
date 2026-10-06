@@ -23,6 +23,7 @@ import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/s
 import { recordConsentsSchema } from '@movivo/shared';
 
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
+import { parseBody } from '../../core/validation/strict-input';
 import { ConsentService } from './consent.service';
 
 @ApiTags('Consentimento')
@@ -62,7 +63,7 @@ export class ConsentController {
   ): Promise<void> {
     // Zod aqui (e não só o ValidationPipe global): o contrato é o schema
     // compartilhado com o frontend — uma fonte, não duas.
-    const { consents: inputs } = recordConsentsSchema.parse(body);
+    const { consents: inputs } = parseBody(recordConsentsSchema, body);
 
     await this.consents.recordForSessionToken(token, inputs, {
       ip: ip || null,
