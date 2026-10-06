@@ -37,6 +37,7 @@ let db: { runAsUser: ReturnType<typeof vi.fn>; runAsSystem: ReturnType<typeof vi
 let config: { avatarUrl: ReturnType<typeof vi.fn> };
 let passwords: { verify: ReturnType<typeof vi.fn>; hash: ReturnType<typeof vi.fn> };
 let avatarStorage: { save: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn> };
+let trail: { record: ReturnType<typeof vi.fn> };
 let service: AccountService;
 
 const logger = { setContext: vi.fn(), info: vi.fn(), warn: vi.fn() };
@@ -60,12 +61,14 @@ beforeEach(() => {
   };
   passwords = { verify: vi.fn(), hash: vi.fn() };
   avatarStorage = { save: vi.fn(), delete: vi.fn(async () => undefined) };
+  trail = { record: vi.fn(async () => undefined) };
   service = new AccountService(
     logger as never,
     db as never,
     config as never,
     passwords as never,
     avatarStorage as never,
+    trail as never,
   );
 });
 
@@ -136,11 +139,19 @@ describe('changePassword', () => {
     passwords.hash.mockResolvedValueOnce('hash-novo');
     tx.update.mockReturnValue(q(undefined));
 
-    await service.changePassword(USER_ID, 'ADMIN', {
-      currentPassword: 'senha-atual',
-      newPassword: 'senha-nova-123',
-    });
+    await service.changePassword(
+      USER_ID,
+      'ADMIN',
+      { currentPassword: 'senha-atual', newPassword: 'senha-nova-123' },
+      { ip: '203.0.113.7', userAgent: 'vitest' },
+    );
 
+    expect(trail.record).toHaveBeenCalledWith(
+      'AUTH_PASSWORD_CHANGED',
+      USER_ID,
+      { ip: '203.0.113.7', userAgent: 'vitest' },
+      { sessionsRevoked: true },
+    );
     expect(passwords.verify).toHaveBeenCalledWith('hash-atual', 'senha-atual');
     expect(passwords.hash).toHaveBeenCalledWith('senha-nova-123');
     expect(tx.update).toHaveBeenCalledTimes(2);
@@ -157,6 +168,8 @@ describe('changePassword', () => {
         newPassword: 'senha-nova-123',
       }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+    // Senha atual errada não troca nada: nada a auditar como "senha alterada".
+    expect(trail.record).not.toHaveBeenCalled();
   });
 });
 

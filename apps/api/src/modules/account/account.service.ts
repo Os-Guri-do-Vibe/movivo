@@ -15,6 +15,7 @@ import { PinoLogger } from 'nestjs-pino';
 import { AppConfigService } from '../../core/config';
 import { TenantDatabase, type TenantRole } from '../../core/database';
 import { authSessions, staff } from '../../core/database/schema';
+import { AUTH_AUDIT_ACTIONS, AuthAuditService, type AccessMeta } from '../auth/auth-audit.service';
 import { PasswordService } from '../auth/password.service';
 import { AvatarStorageService, type UploadedAvatarFile } from './avatar-storage.service';
 
@@ -49,6 +50,7 @@ export class AccountService {
     private readonly config: AppConfigService,
     private readonly passwords: PasswordService,
     private readonly avatarStorage: AvatarStorageService,
+    private readonly trail: AuthAuditService,
   ) {
     this.logger.setContext(AccountService.name);
   }
@@ -105,6 +107,7 @@ export class AccountService {
     userId: string,
     role: TenantRole,
     input: ChangePasswordInput,
+    meta: AccessMeta = {},
   ): Promise<void> {
     await this.db.runAsUser(userId, role, async (tx) => {
       const [row] = await tx
@@ -121,6 +124,9 @@ export class AccountService {
         .update(authSessions)
         .set({ revokedAt: new Date() })
         .where(and(eq(authSessions.userId, userId), isNull(authSessions.revokedAt)));
+    });
+    await this.trail.record(AUTH_AUDIT_ACTIONS.passwordChanged, userId, meta, {
+      sessionsRevoked: true,
     });
     this.logger.info({ event: 'account_password_changed', userId }, 'senha da conta alterada');
   }

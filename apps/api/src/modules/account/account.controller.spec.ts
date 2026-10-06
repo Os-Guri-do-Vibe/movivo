@@ -22,6 +22,7 @@ let avatarStorage: {
 };
 let controller: AccountController;
 
+const REQ = { ip: '203.0.113.7', get: () => 'vitest' };
 const USER = { userId: 'u1', role: 'ADMIN' as const, jti: 'j1' };
 
 beforeEach(() => {
@@ -74,30 +75,37 @@ describe('PATCH /account/profile', () => {
 
 describe('POST /account/password', () => {
   it('valida o corpo e delega ao service', async () => {
-    await controller.changePassword(USER, {
-      currentPassword: 'atual',
-      newPassword: 'senha-nova-123',
-    });
-    expect(account.changePassword).toHaveBeenCalledWith('u1', 'ADMIN', {
-      currentPassword: 'atual',
-      newPassword: 'senha-nova-123',
-    });
+    await controller.changePassword(
+      USER,
+      { currentPassword: 'atual', newPassword: 'senha-nova-123' },
+      REQ as never,
+    );
+    expect(account.changePassword).toHaveBeenCalledWith(
+      'u1',
+      'ADMIN',
+      { currentPassword: 'atual', newPassword: 'senha-nova-123' },
+      { ip: '203.0.113.7', userAgent: 'vitest' },
+    );
   });
 
   it('rejeita (400) campo fora do contrato na troca de senha', async () => {
     await expect(
-      controller.changePassword(USER, {
-        currentPassword: 'atual',
-        newPassword: 'senha-nova-123',
-        role: 'ADMIN',
-      }),
+      controller.changePassword(
+        USER,
+        { currentPassword: 'atual', newPassword: 'senha-nova-123', role: 'ADMIN' },
+        REQ as never,
+      ),
     ).rejects.toBeInstanceOf(ZodError);
     expect(account.changePassword).not.toHaveBeenCalled();
   });
 
   it('recusa senha nova curta (piso de 12 caracteres)', async () => {
     await expect(
-      controller.changePassword(USER, { currentPassword: 'atual', newPassword: 'curta' }),
+      controller.changePassword(
+        USER,
+        { currentPassword: 'atual', newPassword: 'curta' },
+        REQ as never,
+      ),
     ).rejects.toThrow();
   });
 });

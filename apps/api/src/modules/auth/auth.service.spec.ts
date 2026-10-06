@@ -39,12 +39,17 @@ let db: { runAsSystem: ReturnType<typeof vi.fn>; runAsUser: ReturnType<typeof vi
 let tokens: Record<string, ReturnType<typeof vi.fn>>;
 let denylist: { revoke: ReturnType<typeof vi.fn>; isRevoked: ReturnType<typeof vi.fn> };
 let passwords: { verify: ReturnType<typeof vi.fn>; hash: ReturnType<typeof vi.fn> };
+let trail: {
+  record: ReturnType<typeof vi.fn>;
+  recordFailedLogin: ReturnType<typeof vi.fn>;
+};
 let service: AuthService;
 
 const config = { jwt: { refreshTtlSeconds: 2_592_000, accessTtl: '15m' }, isProduction: false };
 const logger = { setContext: vi.fn(), info: vi.fn(), warn: vi.fn() };
 const SESSION_ID = '11111111-1111-4111-8111-111111111111';
 const GOOD_SECRET = 'a'.repeat(64);
+const META = { ip: '203.0.113.7', userAgent: 'vitest' };
 
 beforeEach(() => {
   tx = {
@@ -69,6 +74,10 @@ beforeEach(() => {
   };
   denylist = { revoke: vi.fn(async () => undefined), isRevoked: vi.fn() };
   passwords = { verify: vi.fn(), hash: vi.fn() };
+  trail = {
+    record: vi.fn(async () => undefined),
+    recordFailedLogin: vi.fn(async () => undefined),
+  };
   service = new AuthService(
     logger as never,
     db as never,
@@ -76,6 +85,7 @@ beforeEach(() => {
     denylist as never,
     passwords as never,
     config as never,
+    trail as never,
   );
 });
 
@@ -86,8 +96,10 @@ describe('login', () => {
     tx.select.mockReturnValueOnce(q([{ passwordHash: 'ph', role: 'PROFESSIONAL' }]));
     tx.insert.mockReturnValueOnce(q([{ id: 'sess-1' }]));
 
-    const result = await service.login({ email: 'p@movivo.app', password: 'x' });
+    const result = await service.login({ email: 'p@movivo.app', password: 'x' }, META);
 
+    expect(trail.record).toHaveBeenCalledWith('AUTH_LOGIN', 'u1', META, { role: 'PROFESSIONAL' });
+    expect(trail.recordFailedLogin).not.toHaveBeenCalled();
     expect(result.accessToken).toBe('access:u1');
     expect(result.refreshCookie).toBe('sess-1.newsecret');
     expect(result.user).toEqual({ id: 'u1', role: 'PROFESSIONAL' });
@@ -102,14 +114,19 @@ describe('login', () => {
       UnauthorizedException,
     );
     expect(passwords.verify).toHaveBeenCalledWith(null, 'x');
+    // Sem conta não há ator para a trilha: nada é gravado (e-mail desconhecido só vai ao rate limit).
+    expect(trail.recordFailedLogin).not.toHaveBeenCalled();
+    expect(trail.record).not.toHaveBeenCalled();
   });
 
   it('recusa senha errada', async () => {
     tx.select.mockReturnValueOnce(q([{ id: 'u1', role: 'ADMIN', passwordHash: 'ph' }]));
     passwords.verify.mockResolvedValue(false);
-    await expect(service.login({ email: 'p@movivo.app', password: 'bad' })).rejects.toThrow(
+    await expect(service.login({ email: 'p@movivo.app', password: 'bad' }, META)).rejects.toThrow(
       UnauthorizedException,
     );
+    expect(trail.recordFailedLogin).toHaveBeenCalledWith('u1', META);
+    expect(trail.record).not.toHaveBeenCalled();
   });
 });
 
@@ -196,7 +213,13 @@ describe('refresh — detecção de reuse', () => {
       .mockReturnValueOnce(q([revoked]));
     tx.update.mockReturnValueOnce(q([{ jti: 'j1' }, { jti: 'j2' }])); // família revogada (returning)
 
-    await expect(service.refresh(`${SESSION_ID}.${GOOD_SECRET}`)).rejects.toThrow(/reutilizado/i);
+    await expect(service.refresh(`${SESSION_ID}.${GOOD_SECRET}`, META)).rejects.toThrow(
+      /reutilizado/i,
+    );
+    expect(trail.record).toHaveBeenCalledWith('AUTH_REFRESH_REUSE_DETECTED', 'u1', META, {
+      familyId: 'fam-1',
+      sessionsRevoked: 2,
+    });
     expect(denylist.revoke).toHaveBeenCalledWith('j1', expect.any(Number));
     expect(denylist.revoke).toHaveBeenCalledWith('j2', expect.any(Number));
     expect(logger.warn).toHaveBeenCalled();
@@ -207,7 +230,8 @@ describe('logout', () => {
   it('denylista o jti do access e revoga a sessão', async () => {
     tx.select.mockReturnValueOnce(q([{ familyId: 'fam-1' }]));
     tx.update.mockReturnValueOnce(q([{ jti: 'jti-x' }]));
-    await service.logout('u1', 'PROFESSIONAL', 'jti-x');
+    await service.logout('u1', 'PROFESSIONAL', 'jti-x', META);
+    expect(trail.record).toHaveBeenCalledWith('AUTH_LOGOUT', 'u1', META);
     expect(denylist.revoke).toHaveBeenCalledWith('jti-x', expect.any(Number));
     expect(db.runAsSystem).toHaveBeenCalledWith(expect.any(Function));
   });
@@ -244,7 +268,8 @@ describe('logoutRefresh e sessão persistida', () => {
       ]),
     );
     tx.update.mockReturnValueOnce(q([{ jti: 'descendant' }]));
-    await service.logoutRefresh(`${SESSION_ID}.${GOOD_SECRET}`);
+    await service.logoutRefresh(`${SESSION_ID}.${GOOD_SECRET}`, META);
+    expect(trail.record).toHaveBeenCalledWith('AUTH_LOGOUT', 'u1', META);
     expect(tx.execute).toHaveBeenCalledTimes(1);
     expect(denylist.revoke).toHaveBeenCalledWith('descendant', expect.any(Number));
   });
