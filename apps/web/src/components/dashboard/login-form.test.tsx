@@ -56,6 +56,8 @@ describe('LoginForm', () => {
 });
 
 const TOKEN = 'a'.repeat(64);
+// Fixture óbvia (não é segredo): montada por repetição para não parecer uma chave real ao scanner.
+const FAKE_SECRET = 'ABCD'.repeat(8);
 
 type Handler = (body: Record<string, unknown>) => { ok: boolean; json: unknown };
 
@@ -164,7 +166,7 @@ describe('LoginForm — segundo fator (MFA)', () => {
       '/api/dashboard/session/mfa/setup': () => ({
         ok: true,
         json: {
-          secret: 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP',
+          secret: FAKE_SECRET,
           account: 'adm@movivo.test',
           qrDataUrl: 'data:image/png;base64,iVBORw0KGgo=',
         },
@@ -184,7 +186,7 @@ describe('LoginForm — segundo fator (MFA)', () => {
       await screen.findByAltText(/QR Code para cadastrar a conta adm@movivo.test/i),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('Chave de configuração')).toHaveTextContent(
-      'JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP',
+      FAKE_SECRET.replace(/(.{4})/g, '$1 ').trim(),
     );
     expect(replace).not.toHaveBeenCalled();
 
