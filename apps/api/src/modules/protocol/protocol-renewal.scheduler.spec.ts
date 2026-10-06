@@ -204,6 +204,26 @@ describe('ProtocolRenewalScheduler.scan', () => {
       expect(enqueue).toHaveBeenCalledOnce();
     });
 
+    it('não reabre nem convida se a sessão mudou após o scan', async () => {
+      const selectChain = makeSelectChain([
+        eligibleRow({
+          renewalSessionId: 'renewal-1',
+          renewalStatus: 'EXPIRED',
+          renewalExpiresAt: new Date(Date.now() - 60_000),
+        }),
+      ]);
+      const { update } = makeUpdateTx(undefined);
+      const db = {
+        runAsSystem: vi.fn((callback: (tx: unknown) => Promise<unknown>) =>
+          callback({ selectDistinct: () => selectChain, update }),
+        ),
+      } as unknown as TenantDatabase;
+      const enqueue = vi.fn(async () => 'job');
+      const scheduler = makeScheduler(db, enqueue);
+      await expect(scheduler.scan()).resolves.toEqual({ status: 'SCANNED', created: 0 });
+      expect(enqueue).not.toHaveBeenCalled();
+    });
+
     it('IN_PROGRESS mas com TTL já vencido (expiração ainda não marcada no banco): reconvida do mesmo jeito', async () => {
       const eligible = [
         eligibleRow({

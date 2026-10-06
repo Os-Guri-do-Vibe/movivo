@@ -108,7 +108,10 @@ describe('CheckinService.createAndSend', () => {
   it('reenvia com token novo (NUDGE) quando o check-in da semana ja existe e segue PENDING', async () => {
     const deps = makeDeps();
     const existingSelect = vi.fn(async () => [{ id: CHECKIN_ID, status: 'PENDING' }]);
-    const updateSet = vi.fn(() => ({ where: async () => [] }));
+    const updateSet = vi.fn(() => ({
+      where: () =>
+        Object.assign(Promise.resolve([]), { returning: async () => [{ id: CHECKIN_ID }] }),
+    }));
     const tx = {
       insert: () => ({
         values: () => ({ onConflictDoNothing: () => ({ returning: async () => [] }) }),
@@ -141,6 +144,39 @@ describe('CheckinService.createAndSend', () => {
       expect.objectContaining({ text: expect.not.stringContaining('mais uma semana') }),
       expect.any(Object),
     );
+  });
+
+  it('não reconvida quando PENDING da leitura antiga perdeu a disputa com o envio', async () => {
+    const deps = makeDeps();
+    const tx = {
+      insert: () => ({
+        values: () => ({ onConflictDoNothing: () => ({ returning: async () => [] }) }),
+      }),
+      select: () => ({
+        from: () => ({
+          where: () => ({ limit: async () => [{ id: CHECKIN_ID, status: 'PENDING' }] }),
+        }),
+      }),
+      update: () => ({ set: () => ({ where: () => ({ returning: async () => [] }) }) }),
+    };
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
+    );
+    await expect(service.createAndSend(USER_ID, PROTOCOL_ID, 3, 'Maria', 'NUDGE')).resolves.toBe(
+      'EXISTS',
+    );
+    expect(deps.shorten).not.toHaveBeenCalled();
+    expect(deps.enqueue).not.toHaveBeenCalled();
   });
 
   it('devolve EXISTS quando o check-in da semana ja foi enviado e nao esta mais PENDING', async () => {
@@ -404,7 +440,9 @@ describe('CheckinService.submit', () => {
       expiresAt: new Date(Date.now() + 60_000),
       weekNumber: 4,
     };
-    const updateSet = vi.fn(() => ({ where: async () => [] }));
+    const updateSet = vi.fn(() => ({
+      where: () => ({ returning: async () => [{ id: CHECKIN_ID }] }),
+    }));
     const db = {
       runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(makeSessionTx(row))),
       runAsUser: vi.fn((_u: string, _r: string, cb: (tx: unknown) => Promise<unknown>) =>
@@ -561,5 +599,41 @@ describe('CheckinService.submit', () => {
     );
     await expect(service.submit(TOKEN, VALID_PAYLOAD)).rejects.toBeInstanceOf(GoneException);
     expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ status: 'EXPIRED' }));
+  });
+});
+
+describe('CheckinService.submit — condição atômica de envio', () => {
+  it('uma requisição com leitura antiga não enfileira se perdeu a disputa de escrita', async () => {
+    const deps = makeDeps();
+    const row = {
+      id: CHECKIN_ID,
+      userId: USER_ID,
+      token: TOKEN,
+      status: 'PENDING',
+      expiresAt: new Date(Date.now() + 60_000),
+    };
+    const returning = vi.fn(async () => []);
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(makeSessionTx(row))),
+      runAsUser: vi.fn((_u: string, _r: string, cb: (tx: unknown) => Promise<unknown>) =>
+        cb({
+          update: () => ({ set: () => ({ where: () => ({ returning }) }) }),
+        }),
+      ),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
+    );
+    await expect(service.submit(TOKEN, VALID_PAYLOAD)).rejects.toBeInstanceOf(ConflictException);
+    expect(returning).toHaveBeenCalledOnce();
+    expect(deps.enqueue).not.toHaveBeenCalled();
+    expect(deps.queueEvents.emit).not.toHaveBeenCalled();
   });
 });

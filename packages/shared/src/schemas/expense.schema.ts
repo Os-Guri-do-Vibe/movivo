@@ -10,7 +10,7 @@ import { z } from 'zod';
 
 import { ExpenseCategory, ExpenseRecurrencePeriod } from '../enums/expense';
 
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data deve estar em `YYYY-MM-DD`.');
+const isoDate = z.iso.date({ error: 'Data deve ser válida e estar em `YYYY-MM-DD`.' });
 
 export const expenseCategorySchema = z.enum(
   Object.values(ExpenseCategory) as [ExpenseCategory, ...ExpenseCategory[]],

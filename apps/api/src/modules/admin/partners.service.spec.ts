@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import {
   CAPABILITIES_BY_ROLE,
   ControlCenterCapability as Capability,
@@ -38,10 +38,21 @@ function partnersWith(profitBrl: number | null, rows: unknown[] = SEED) {
   const chain: Record<string, unknown> = {
     from: () => chain,
     where: () => chain,
-    orderBy: () => Promise.resolve(rows),
+    orderBy: () =>
+      Object.assign(Promise.resolve(rows), {
+        limit: async () =>
+          [...rows]
+            .sort((a, b) =>
+              String((b as { validFrom: string }).validFrom).localeCompare(
+                String((a as { validFrom: string }).validFrom),
+              ),
+            )
+            .slice(0, 1),
+      }),
   };
   const inserted: unknown[] = [];
   const tx = {
+    execute: vi.fn(async () => []),
     select: vi.fn(() => chain),
     update: vi.fn(() => ({ set: () => ({ where: () => Promise.resolve() }) })),
     insert: vi.fn(() => ({
@@ -78,7 +89,7 @@ function partnersWith(profitBrl: number | null, rows: unknown[] = SEED) {
     }),
   } as unknown as ControlCenterService;
   const service = new PartnersService(db, audit as unknown as AuditService, controlCenter);
-  return { service, audit, inserted };
+  return { service, audit, inserted, tx };
 }
 
 describe('PartnersService.distribution', () => {
@@ -132,6 +143,26 @@ describe('PartnersService.replace', () => {
     ).rejects.toThrow(BadRequestException);
     expect(audit.append).not.toHaveBeenCalled();
   });
+
+  it.each(['2026-07-21', '2026-07-22'])(
+    'rejeita vigência %s anterior ou igual sem fechar a composição vigente',
+    async (validFrom) => {
+      const { service, audit, inserted, tx } = partnersWith(100);
+      await expect(
+        service.replace(ACTOR, {
+          validFrom,
+          reason: 'Nova composição societária',
+          partners: [{ name: 'Rodrigo', shareBasisPoints: 10000 }],
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(tx.update).not.toHaveBeenCalled();
+      expect(inserted).toEqual([]);
+      expect(audit.append).not.toHaveBeenCalled();
+      expect(tx.execute.mock.invocationCallOrder[0]).toBeLessThan(
+        tx.select.mock.invocationCallOrder[0] ?? 0,
+      );
+    },
+  );
 
   it('fecha a vigência anterior, abre a nova e audita na mesma transação', async () => {
     const { service, audit, inserted } = partnersWith(100);

@@ -207,8 +207,8 @@ describe('POST /account/password', () => {
 describe('POST /account/avatar + GET /account/avatar/:filename', () => {
   it('grava o arquivo, devolve avatarUrl e a URL serve a imagem sem autenticação', async () => {
     const png = Buffer.from(
-      // Um PNG 1x1 mínimo válido é irrelevante aqui — o serviço confia no
-      // Content-Type declarado no multipart, não faz sniffing de bytes.
+      // Prefixo PNG suficiente para identificação por assinatura; este teste
+      // verifica armazenamento e entrega, sem exigir decodificação de imagem.
       '89504e470d0a1a0a0000000d49484452',
       'hex',
     );
@@ -241,5 +241,23 @@ describe('POST /account/avatar + GET /account/avatar/:filename', () => {
         contentType: 'application/pdf',
       });
     expect(res.status).toBe(400);
+  });
+
+  it('recusa conteúdo HTML disfarçado de PNG e preserva o avatar anterior', async () => {
+    const before = await base()
+      .get(`/${prefix}/account/profile`)
+      .set('Authorization', `Bearer ${accessA}`);
+    const upload = await base()
+      .post(`/${prefix}/account/avatar`)
+      .set('Authorization', `Bearer ${accessA}`)
+      .attach('avatar', Buffer.from('<html>arquivo forjado</html>'), {
+        filename: 'foto.png',
+        contentType: 'image/png',
+      });
+    expect(upload.status).toBe(400);
+    const after = await base()
+      .get(`/${prefix}/account/profile`)
+      .set('Authorization', `Bearer ${accessA}`);
+    expect(after.body.avatarUrl).toBe(before.body.avatarUrl);
   });
 });

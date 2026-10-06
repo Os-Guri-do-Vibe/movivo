@@ -17,7 +17,7 @@
  */
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
-import { and, eq, inArray, isNull, lte } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 import { CONSENT_TEXTS } from '@movivo/shared';
 
@@ -162,7 +162,18 @@ export class ProtocolRenewalScheduler implements OnModuleInit {
         const [row] = await tx
           .update(protocolRenewalSessions)
           .set({ token, expiresAt, status: 'IN_PROGRESS' })
-          .where(eq(protocolRenewalSessions.id, existingSessionId))
+          .where(
+            and(
+              eq(protocolRenewalSessions.id, existingSessionId),
+              or(
+                eq(protocolRenewalSessions.status, 'EXPIRED'),
+                and(
+                  eq(protocolRenewalSessions.status, 'IN_PROGRESS'),
+                  sql`${protocolRenewalSessions.expiresAt} <= clock_timestamp()`,
+                ),
+              ),
+            ),
+          )
           .returning({ id: protocolRenewalSessions.id });
         return row?.id ?? null;
       }

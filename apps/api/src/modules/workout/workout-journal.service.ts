@@ -385,20 +385,25 @@ export class WorkoutJournalService {
         )
         .returning({ id: workoutSessions.id }),
     );
-    if (!row && !(await this.ownedSession(userId, id))) throw new NotFoundException();
+    if (!row) {
+      const existing = await this.ownedSession(userId, id);
+      if (!existing) throw new NotFoundException();
+      if (existing.status !== 'IN_PROGRESS') throw new BadRequestException('Treino ja finalizado.');
+    }
   }
 
   async saveSets(userId: string, id: string, entries: WorkoutSetInput[]): Promise<void> {
-    const workout = await this.ownedSession(userId, id);
-    if (!workout) throw new NotFoundException();
-    if (workout.status === 'COMPLETED') throw new BadRequestException('Treino ja finalizado.');
-    const allowed = new Set(
-      expectedSets(workout.prescription).map((entry) => `${entry.exerciseId}:${entry.setNumber}`),
-    );
-    if (entries.some((entry) => !allowed.has(`${entry.exerciseId}:${entry.setNumber}`))) {
-      throw new BadRequestException('Serie nao pertence a prescricao deste treino.');
-    }
     await this.db.runAsUser(userId, 'USER', async (tx) => {
+      const workout = await this.ownedSession(userId, id, tx);
+      if (!workout) throw new NotFoundException();
+      if (workout.status !== 'IN_PROGRESS')
+        throw new BadRequestException('Treino nao esta em andamento.');
+      const allowed = new Set(
+        expectedSets(workout.prescription).map((entry) => `${entry.exerciseId}:${entry.setNumber}`),
+      );
+      if (entries.some((entry) => !allowed.has(`${entry.exerciseId}:${entry.setNumber}`))) {
+        throw new BadRequestException('Serie nao pertence a prescricao deste treino.');
+      }
       for (const raw of entries) {
         // Fonte de verdade de "série feita": reps ou tempo > 0 e não pulada. O cliente
         // nunca decide isso sozinho, e nada é preenchido por padrão (nem pela prescrição
@@ -436,28 +441,30 @@ export class WorkoutJournalService {
   }
 
   async finish(userId: string, id: string, input: FinishWorkoutInput): Promise<void> {
-    const workout = await this.ownedSession(userId, id);
-    if (!workout) throw new NotFoundException();
-    if (!workout.startedAt) throw new BadRequestException('Inicie o treino antes de finalizar.');
-    if (
-      input.painExerciseIds.some(
-        (painExerciseId) =>
-          !workout.prescription.exercises.some(
-            (exercise) => exercise.exerciseId === painExerciseId,
-          ),
-      )
-    ) {
-      throw new BadRequestException('Exercicio de dor invalido.');
-    }
-    const now = new Date();
-    const durationSeconds = Math.min(
-      43_200,
-      Math.max(0, Math.round((now.getTime() - workout.startedAt.getTime()) / 1000)),
-    );
-    const feedbackCipher = await this.cipher.encryptHealth(
-      JSON.stringify({ feelingNotes: input.feelingNotes, painNotes: input.painNotes }),
-    );
-    await this.db.runAsUser(userId, 'USER', async (tx) => {
+    const workout = await this.db.runAsUser(userId, 'USER', async (tx) => {
+      const workout = await this.ownedSession(userId, id, tx);
+      if (!workout) throw new NotFoundException();
+      if (workout.status === 'COMPLETED') throw new BadRequestException('Treino ja finalizado.');
+      if (workout.status !== 'IN_PROGRESS' || !workout.startedAt)
+        throw new BadRequestException('Inicie o treino antes de finalizar.');
+      if (
+        input.painExerciseIds.some(
+          (painExerciseId) =>
+            !workout.prescription.exercises.some(
+              (exercise) => exercise.exerciseId === painExerciseId,
+            ),
+        )
+      ) {
+        throw new BadRequestException('Exercicio de dor invalido.');
+      }
+      const now = new Date();
+      const durationSeconds = Math.min(
+        43_200,
+        Math.max(0, Math.round((now.getTime() - workout.startedAt.getTime()) / 1000)),
+      );
+      const feedbackCipher = await this.cipher.encryptHealth(
+        JSON.stringify({ feelingNotes: input.feelingNotes, painNotes: input.painNotes }),
+      );
       await tx
         .update(workoutSessions)
         .set({
@@ -482,6 +489,7 @@ export class WorkoutJournalService {
           })
           .onConflictDoNothing();
       }
+      return workout;
     });
     const exerciseEntries = await this.db.runAsUser(userId, 'USER', (tx) =>
       tx.select().from(workoutSetEntries).where(eq(workoutSetEntries.workoutSessionId, id)),
@@ -722,14 +730,16 @@ export class WorkoutJournalService {
     });
   }
 
-  private async ownedSession(userId: string, id: string) {
-    const [row] = await this.db.runAsUser(userId, 'USER', (tx) =>
+  private async ownedSession(userId: string, id: string, lockedTx?: TenantTransaction) {
+    const query = (tx: TenantTransaction) =>
       tx
         .select()
         .from(workoutSessions)
         .where(and(eq(workoutSessions.id, id), eq(workoutSessions.userId, userId)))
-        .limit(1),
-    );
+        .limit(1);
+    const [row] = lockedTx
+      ? await query(lockedTx).for('update')
+      : await this.db.runAsUser(userId, 'USER', query);
     return row;
   }
 

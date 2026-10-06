@@ -227,29 +227,49 @@ export class AnamnesisService {
     step: StepNumber,
     data: unknown,
   ): Promise<{ currentStep: number }> {
-    const row = await this.requireActiveSession(token);
+    const initial = await this.requireActiveSession(token);
     this.consents.assertTermsPublished();
-
-    switch (step) {
-      case 1:
-        await this.saveStep1(row, data);
-        break;
-      case 2:
-        await this.saveStep2(row, data);
-        break;
-      case 3:
-        await this.saveStep3(row, data);
-        break;
-    }
-
-    const currentStep = Math.min(Math.max(row.lastStep, step + 1), 3);
-    await this.db.runAsTokenScoped(row.id, async (tx) => {
-      await tx
+    return this.db.runAsTokenScoped(initial.id, async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(anamnesisSessions)
+        .where(and(eq(anamnesisSessions.id, initial.id), eq(anamnesisSessions.token, token)))
+        .limit(1)
+        .for('update');
+      if (!row)
+        throw new ConflictException('Esta sessão de anamnese não está disponível para edição.');
+      if (this.isExpired(row.status, row.expiresAt))
+        throw new GoneException('Sessão de anamnese expirada.');
+      if (row.status !== 'IN_PROGRESS' || row.userId !== null)
+        throw new ConflictException('Esta sessão de anamnese já foi enviada.');
+      switch (step) {
+        case 1:
+          await this.saveStep1(tx, row, data);
+          break;
+        case 2:
+          await this.saveStep2(tx, row, data);
+          break;
+        case 3:
+          await this.saveStep3(tx, row, data);
+          break;
+        default:
+          throw new BadRequestException('Etapa de anamnese inválida.');
+      }
+      const currentStep = Math.min(Math.max(row.lastStep, step + 1), 3);
+      const [updated] = await tx
         .update(anamnesisSessions)
         .set({ lastStep: currentStep })
-        .where(eq(anamnesisSessions.id, row.id));
+        .where(
+          and(
+            eq(anamnesisSessions.id, row.id),
+            eq(anamnesisSessions.status, 'IN_PROGRESS'),
+            sql`${anamnesisSessions.expiresAt} > clock_timestamp()`,
+          ),
+        )
+        .returning({ id: anamnesisSessions.id });
+      if (!updated) throw new GoneException('Sessão de anamnese expirada.');
+      return { currentStep };
     });
-    return { currentStep };
   }
 
   /**
@@ -258,7 +278,7 @@ export class AnamnesisService {
    * As três travas são de servidor. A ordem importa: recusamos o menor de 18 **antes**
    * de olhar consentimento, para não registrar aceite de quem não pode contratar.
    */
-  private async saveStep1(row: SessionRow, data: unknown): Promise<void> {
+  private async saveStep1(tx: TenantTransaction, row: SessionRow, data: unknown): Promise<void> {
     const step1 = parseStepPayload(onboardingStep1Schema, data);
 
     if (ageInYears(step1.birthDate) < MIN_AGE_YEARS) {
@@ -276,24 +296,24 @@ export class AnamnesisService {
       throw new ForbiddenException('Confirme o código enviado no WhatsApp antes de continuar.');
     }
 
-    await this.writeJsonb(row.id, 'data_block_1', step1);
+    await this.writeJsonb(tx, row.id, 'data_block_1', step1);
   }
 
   /** Etapa 2 — seções 1/2/3/5 em claro; seção 4 + textos livres no bloco cifrado. */
-  private async saveStep2(row: SessionRow, data: unknown): Promise<void> {
+  private async saveStep2(tx: TenantTransaction, row: SessionRow, data: unknown): Promise<void> {
     const { anamnesis, pain } = parseStepPayload(onboardingStep2Schema, data);
     await this.assertHealthConsent(row.id);
 
-    await this.writeJsonb(row.id, 'data_block_3', anamnesis.structured);
-    await this.mergeHealthBlock(row.id, { pain, freeText: anamnesis.freeText });
+    await this.writeJsonb(tx, row.id, 'data_block_3', anamnesis.structured);
+    await this.mergeHealthBlock(tx, row, { pain, freeText: anamnesis.freeText });
   }
 
   /** Etapa 3 — PAR-Q reusado sem alteração + as 3 declarações finais. */
-  private async saveStep3(row: SessionRow, data: unknown): Promise<void> {
+  private async saveStep3(tx: TenantTransaction, row: SessionRow, data: unknown): Promise<void> {
     const step3 = parseStepPayload(onboardingStep3Schema, data);
     await this.assertHealthConsent(row.id);
 
-    await this.mergeHealthBlock(row.id, {
+    await this.mergeHealthBlock(tx, row, {
       parq: step3.parq,
       declarations: {
         version: PARQ_DECLARATIONS_VERSION,
@@ -308,53 +328,67 @@ export class AnamnesisService {
    * vincula a sessão e migra os consentimentos. Devolve só o `outcome`.
    */
   async submit(token: string): Promise<SubmitResult> {
-    const row = await this.requireActiveSession(token);
+    const initial = await this.requireActiveSession(token);
     this.consents.assertTermsPublished();
+    const { row, userId, gate, submittedAt } = await this.db.runAsSystem(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(anamnesisSessions)
+        .where(and(eq(anamnesisSessions.id, initial.id), eq(anamnesisSessions.token, token)))
+        .limit(1)
+        .for('update');
+      if (!row) throw new NotFoundException('Sessão de anamnese não encontrada.');
+      if (row.status === 'EXPIRED' || row.expiresAt.getTime() <= Date.now()) {
+        throw new GoneException('Sessão de anamnese expirada.');
+      }
+      if (row.status !== 'IN_PROGRESS' || row.userId !== null) {
+        throw new ConflictException('Esta anamnese já foi enviada.');
+      }
+      if (!row.dataBlock1 || !row.dataBlock2 || !row.dataBlock3) {
+        throw new BadRequestException('Complete as três etapas antes de enviar.');
+      }
+      if (!row.phoneVerifiedAt) {
+        throw new ForbiddenException('Confirme o código enviado no WhatsApp antes de continuar.');
+      }
+      await this.assertHealthConsent(row.id);
 
-    if (!row.dataBlock1 || !row.dataBlock2 || !row.dataBlock3) {
-      throw new BadRequestException('Complete as três etapas antes de enviar.');
-    }
-    if (!row.phoneVerifiedAt) {
-      throw new ForbiddenException('Confirme o código enviado no WhatsApp antes de continuar.');
-    }
-    await this.assertHealthConsent(row.id);
+      // Revalida contra os contratos: o dado veio do banco, mas validar é barato e
+      // protege de linha corrompida/migração parcial.
+      const step1 = onboardingStep1Schema.parse(row.dataBlock1);
+      if (ageInYears(step1.birthDate) < MIN_AGE_YEARS) {
+        throw new UnprocessableEntityException(UNDER_AGE_MESSAGE);
+      }
+      anamnesisStructuredSchema.parse(row.dataBlock3);
 
-    // Revalida contra os contratos: o dado veio do banco, mas validar é barato e
-    // protege de linha corrompida/migração parcial.
-    const step1 = onboardingStep1Schema.parse(row.dataBlock1);
-    if (ageInYears(step1.birthDate) < MIN_AGE_YEARS) {
-      throw new UnprocessableEntityException(UNDER_AGE_MESSAGE);
-    }
-    anamnesisStructuredSchema.parse(row.dataBlock3);
+      const health = await this.readHealthBlock(row.dataBlock2);
+      if (!isHealthBlockComplete(health) || !health.parq) {
+        throw new BadRequestException('Complete as três etapas antes de enviar.');
+      }
 
-    const health = await this.readHealthBlock(row.dataBlock2);
-    if (!isHealthBlockComplete(health) || !health.parq) {
-      throw new BadRequestException('Complete as três etapas antes de enviar.');
-    }
+      const gate = evaluateParq({ parq: health.parq });
 
-    const gate = evaluateParq({ parq: health.parq });
+      // Um único instante de submit para TUDO que é contado a partir dele: a coluna
+      // `submitted_at`, o SLA submit→entrega (job de geração) e o atraso da mensagem
+      // "estou analisando". Duas chamadas a `new Date()` no mesmo bloco davam origens
+      // ligeiramente diferentes para o mesmo evento de negócio.
+      const submittedAt = new Date();
 
-    // Um único instante de submit para TUDO que é contado a partir dele: a coluna
-    // `submitted_at`, o SLA submit→entrega (job de geração) e o atraso da mensagem
-    // "estou analisando". Duas chamadas a `new Date()` no mesmo bloco davam origens
-    // ligeiramente diferentes para o mesmo evento de negócio.
-    const submittedAt = new Date();
-
-    const userId = await this.db.runAsSystem(async (tx) => {
       const created = await this.createUser(tx, step1, gate.requiresProfessionalReview);
-      // Conta unica do MVP, mas com vinculo explicito. A funcao falha se nao houver
-      // exatamente um RT CREF ativo, evitando titular orfao ou acesso profissional global.
       await tx.execute(sql`SELECT assign_unique_active_professional(${created}::uuid)`);
-      await tx
+      const [submitted] = await tx
         .update(anamnesisSessions)
-        .set({
-          userId: created,
-          status: 'SUBMITTED',
-          parqState: gate.parqState,
-          submittedAt,
-        })
-        .where(eq(anamnesisSessions.id, row.id));
-      return created;
+        .set({ userId: created, status: 'SUBMITTED', parqState: gate.parqState, submittedAt })
+        .where(
+          and(
+            eq(anamnesisSessions.id, row.id),
+            eq(anamnesisSessions.token, token),
+            eq(anamnesisSessions.status, 'IN_PROGRESS'),
+            sql`${anamnesisSessions.expiresAt} > clock_timestamp()`,
+          ),
+        )
+        .returning({ id: anamnesisSessions.id });
+      if (!submitted) throw new GoneException('Sessão de anamnese expirada.');
+      return { row, userId: created, gate, submittedAt };
     });
 
     // Migra os consentimentos da fase anônima para o titular (preserva a prova).
@@ -462,15 +496,15 @@ export class AnamnesisService {
     return REQUIRED_CONSENT_TYPES.filter((type) => !accepted.includes(type));
   }
 
-  private async writeJsonb(sessionId: string, column: string, value: unknown): Promise<void> {
-    await this.db.runAsTokenScoped(sessionId, async (tx) => {
-      await tx.execute(
-        sql`UPDATE anamnesis_sessions
-            SET ${sql.identifier(column)} = ${sql`${JSON.stringify(value)}::jsonb`},
-                updated_at = now()
-            WHERE id = ${sessionId}`,
-      );
-    });
+  private async writeJsonb(
+    tx: TenantTransaction,
+    sessionId: string,
+    column: string,
+    value: unknown,
+  ): Promise<void> {
+    await tx.execute(sql`UPDATE anamnesis_sessions
+      SET ${sql.identifier(column)} = ${sql`${JSON.stringify(value)}::jsonb`}, updated_at = now()
+      WHERE id = ${sessionId}`);
   }
 
   private async readHealthBlock(ciphertext: Buffer | null): Promise<HealthBlock> {
@@ -483,25 +517,17 @@ export class AnamnesisService {
    * Escreve o bloco de saúde fundindo com o que já existe. O bloco é preenchido em
    * duas etapas (seção 4 na 2, PAR-Q na 3) — sobrescrever perderia metade dele.
    */
-  private async mergeHealthBlock(sessionId: string, patch: HealthBlock): Promise<void> {
-    const current = await this.db.runAsTokenScoped(sessionId, async (tx) => {
-      const [row] = await tx
-        .select({ dataBlock2: anamnesisSessions.dataBlock2 })
-        .from(anamnesisSessions)
-        .where(eq(anamnesisSessions.id, sessionId))
-        .limit(1);
-      return row?.dataBlock2 ?? null;
-    });
-
-    const merged = { ...(await this.readHealthBlock(current)), ...patch };
+  private async mergeHealthBlock(
+    tx: TenantTransaction,
+    row: SessionRow,
+    patch: HealthBlock,
+  ): Promise<void> {
+    const merged = { ...(await this.readHealthBlock(row.dataBlock2)), ...patch };
     const encrypted = await this.cipher.encryptHealth(JSON.stringify(merged));
-
-    await this.db.runAsTokenScoped(sessionId, async (tx) => {
-      await tx
-        .update(anamnesisSessions)
-        .set({ dataBlock2: encrypted })
-        .where(eq(anamnesisSessions.id, sessionId));
-    });
+    await tx
+      .update(anamnesisSessions)
+      .set({ dataBlock2: encrypted })
+      .where(eq(anamnesisSessions.id, row.id));
   }
 
   private async selectByToken(tx: TenantTransaction, token: string) {
@@ -538,7 +564,13 @@ export class AnamnesisService {
       await tx
         .update(anamnesisSessions)
         .set({ status: 'EXPIRED', dataBlock2: null })
-        .where(and(eq(anamnesisSessions.id, id), eq(anamnesisSessions.status, 'IN_PROGRESS')));
+        .where(
+          and(
+            eq(anamnesisSessions.id, id),
+            eq(anamnesisSessions.status, 'IN_PROGRESS'),
+            sql`${anamnesisSessions.expiresAt} <= clock_timestamp()`,
+          ),
+        );
     });
   }
 

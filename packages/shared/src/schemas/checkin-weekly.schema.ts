@@ -53,7 +53,10 @@ export const checkinWeeklySubmitSchema = z
      */
     difficultExerciseDescription: z.string().trim().max(2000).optional(),
     /** Pergunta 6 — múltipla escolha; `OUTRAS` exige `changesOther`. */
-    changesNoticed: z.array(checkinWeeklyChangeSchema).default([]),
+    changesNoticed: z
+      .array(checkinWeeklyChangeSchema)
+      .max(checkinWeeklyChangeSchema.options.length)
+      .default([]),
     changesOther: z.string().trim().max(300).optional(),
     /** Pergunta 7. */
     durationFit: checkinWeeklyDurationFitSchema,

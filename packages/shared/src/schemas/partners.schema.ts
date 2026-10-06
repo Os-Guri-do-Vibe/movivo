@@ -10,7 +10,7 @@ import { z } from 'zod';
 
 import { controlCenterMetaSchema } from './control-center.schema';
 
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data deve estar em `YYYY-MM-DD`.');
+const isoDate = z.iso.date({ error: 'Data deve ser válida e estar em `YYYY-MM-DD`.' });
 
 /** Total de pontos-base de um cap table fechado. 2000 bps = 20%. */
 export const TOTAL_SHARE_BASIS_POINTS = 10_000;

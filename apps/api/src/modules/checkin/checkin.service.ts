@@ -16,7 +16,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 import { checkinWeeklySubmitSchema, type CheckinWeeklySubmit } from '@movivo/shared';
 
@@ -111,9 +111,14 @@ export class CheckinService {
       if (!existing || existing.status !== 'PENDING') return 'EXISTS';
       token = opaqueToken();
       checkinId = existing.id;
-      await this.db.runAsSystem((tx) =>
-        tx.update(checkins).set({ token, expiresAt }).where(eq(checkins.id, checkinId)),
+      const [refreshed] = await this.db.runAsSystem((tx) =>
+        tx
+          .update(checkins)
+          .set({ token, expiresAt })
+          .where(and(eq(checkins.id, checkinId), eq(checkins.status, 'PENDING')))
+          .returning({ id: checkins.id }),
       );
+      if (!refreshed) return 'EXISTS';
     }
 
     const longLink = `${this.config.whatsapp.publicSiteUrl}/checkin-semanal/${token}`;
@@ -186,12 +191,24 @@ export class CheckinService {
     );
     const submittedAt = new Date();
 
-    await this.db.runAsUser(row.userId, 'USER', (tx) =>
+    const [submitted] = await this.db.runAsUser(row.userId, 'USER', (tx) =>
       tx
         .update(checkins)
         .set({ status: 'SUBMITTED', submittedAt, answers, notesCipher })
-        .where(eq(checkins.id, row.id)),
+        .where(
+          and(
+            eq(checkins.id, row.id),
+            eq(checkins.token, token),
+            eq(checkins.status, 'PENDING'),
+            sql`${checkins.expiresAt} > clock_timestamp()`,
+          ),
+        )
+        .returning({ id: checkins.id }),
     );
+    if (!submitted) {
+      await this.requirePending(token);
+      throw new ConflictException('Este check-in mudou durante o envio.');
+    }
 
     await this.queues.enqueue(QUEUE.checkinWeeklyFeedback, 'checkin-weekly-feedback', {
       userId: row.userId,
@@ -252,7 +269,13 @@ export class CheckinService {
       tx
         .update(checkins)
         .set({ status: 'EXPIRED' })
-        .where(and(eq(checkins.id, id), eq(checkins.status, 'PENDING'))),
+        .where(
+          and(
+            eq(checkins.id, id),
+            eq(checkins.status, 'PENDING'),
+            sql`${checkins.expiresAt} <= clock_timestamp()`,
+          ),
+        ),
     );
   }
 

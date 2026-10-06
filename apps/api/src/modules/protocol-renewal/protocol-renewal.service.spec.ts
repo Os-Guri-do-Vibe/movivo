@@ -46,7 +46,10 @@ function makeTxFor(session: unknown, userName: string | null, anamnesisSession: 
     where: () => chain,
     orderBy: () => chain,
     limit: () => {
-      if (table === protocolRenewalSessions) return Promise.resolve(session ? [session] : []);
+      if (table === protocolRenewalSessions) {
+        const rows = session ? [session] : [];
+        return Object.assign(Promise.resolve(rows), { for: vi.fn(async () => rows) });
+      }
       if (table === users) return Promise.resolve(userName !== null ? [{ name: userName }] : []);
       if (table === anamnesisSessions)
         return Promise.resolve(anamnesisSession ? [anamnesisSession] : []);
@@ -63,6 +66,8 @@ function makeService(
     anamnesisSession?: unknown;
     consentActive?: boolean;
     decrypted?: string;
+    writeSucceeds?: boolean;
+    lockedSession?: unknown;
   } = {},
 ) {
   const session = 'session' in deps ? deps.session : fullSessionRow();
@@ -70,18 +75,41 @@ function makeService(
   const anamnesisSession = 'anamnesisSession' in deps ? deps.anamnesisSession : undefined;
   const tx = makeTxFor(session, userName ?? null, anamnesisSession);
 
-  const updateWhere = vi.fn(async () => []);
+  let currentStep = (session as { lastStep?: number } | undefined)?.lastStep ?? 1;
+  const updateWhere = vi.fn(() =>
+    Object.assign(Promise.resolve([]), {
+      returning: vi.fn(async (fields: Record<string, unknown>) =>
+        deps.writeSucceeds === false
+          ? []
+          : [fields.currentStep ? { currentStep } : { id: 'renewal-1' }],
+      ),
+    }),
+  );
   const insertOnConflict = vi.fn(async () => []);
   const fullTx = {
     ...tx,
-    update: vi.fn(() => ({ set: vi.fn(() => ({ where: updateWhere })) })),
+    update: vi.fn(() => ({
+      set: vi.fn((value: { lastStep?: { queryChunks: unknown[] } }) => {
+        if (value.lastStep) {
+          const next = value.lastStep.queryChunks.find(
+            (chunk) => typeof chunk === 'number',
+          ) as number;
+          currentStep = Math.max(currentStep, next);
+        }
+        return { where: updateWhere };
+      }),
+    })),
     insert: vi.fn(() => ({ values: vi.fn(() => ({ onConflictDoNothing: insertOnConflict })) })),
   };
 
   const db = {
     runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(fullTx)),
     runAsUser: vi.fn((_uid: string, _role: string, cb: (tx: unknown) => Promise<unknown>) =>
-      cb(fullTx),
+      cb(
+        'lockedSession' in deps
+          ? { ...fullTx, ...makeTxFor(deps.lockedSession, userName ?? null, anamnesisSession) }
+          : fullTx,
+      ),
     ),
   } as unknown as TenantDatabase;
 
@@ -296,5 +324,59 @@ describe('ProtocolRenewalService.patchStep', () => {
     // microtask da expiração rodar antes de checar a persistência.
     await Promise.resolve();
     expect(updateWhere).toHaveBeenCalled();
+  });
+});
+
+describe('ProtocolRenewalService — transições concorrentes', () => {
+  it.each(['SUBMITTED', 'EXPIRED'])(
+    'reconfere %s no snapshot bloqueado antes de enviar ou gerar protocolo',
+    async (status) => {
+      const { service, enqueue, updateWhere } = makeService({
+        lockedSession: fullSessionRow({ status }),
+      });
+      await expect(service.submit(TOKEN)).rejects.toBeInstanceOf(
+        status === 'EXPIRED' ? GoneException : ConflictException,
+      );
+      expect(enqueue).not.toHaveBeenCalled();
+      expect(updateWhere).not.toHaveBeenCalled();
+    },
+  );
+
+  it('reconfere os blocos do snapshot bloqueado, sem avaliar dados de leitura antiga', async () => {
+    const { service, enqueue, cipher } = makeService({
+      lockedSession: fullSessionRow({ dataBlock5: null }),
+    });
+    await expect(service.submit(TOKEN)).rejects.toBeInstanceOf(BadRequestException);
+    expect(cipher.decryptHealth).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('não gera protocolo se o prazo vence antes do UPDATE de submit', async () => {
+    const { service, enqueue, insertOnConflict } = makeService({ writeSucceeds: false });
+    await expect(service.submit(TOKEN)).rejects.toBeInstanceOf(GoneException);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(insertOnConflict).not.toHaveBeenCalled();
+  });
+
+  it('PATCH que perdeu a disputa com submit não salva progresso após envio', async () => {
+    const { service, updateWhere } = makeService({ writeSucceeds: false });
+    await expect(
+      service.patchStep(TOKEN, 3, {
+        newPain: { hasNewPain: false },
+        parqRecheck: { changedToYes: false },
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(updateWhere).toHaveBeenCalledOnce();
+  });
+
+  it('salva bloco e progresso em uma única escrita, mantendo lastStep maior', async () => {
+    const { service, updateWhere } = makeService({ session: fullSessionRow({ lastStep: 5 }) });
+    await expect(
+      service.patchStep(TOKEN, 3, {
+        newPain: { hasNewPain: false },
+        parqRecheck: { changedToYes: false },
+      }),
+    ).resolves.toEqual({ currentStep: 5 });
+    expect(updateWhere).toHaveBeenCalledOnce();
   });
 });

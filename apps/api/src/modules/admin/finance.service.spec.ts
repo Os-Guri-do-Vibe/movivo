@@ -50,13 +50,14 @@ function financeWith(...selects: unknown[][]) {
     },
   }));
   const update = vi.fn(() => ({ set: () => ({ where: () => Promise.resolve() }) }));
-  const tx = { select, insert, update };
+  const execute = vi.fn(async () => []);
+  const tx = { select, insert, update, execute };
   const db = {
     runAsSystem: vi.fn((callback: (value: unknown) => Promise<unknown>) => callback(tx)),
   } as unknown as TenantDatabase;
   const audit = { append: vi.fn().mockResolvedValue(undefined) };
   const service = new FinanceService(db, audit as unknown as AuditService);
-  return { service, audit, inserted };
+  return { service, audit, inserted, update, execute, select };
 }
 
 const ORIGINAL = {
@@ -152,6 +153,29 @@ describe('FinanceService (US-8.4)', () => {
     expect(inserted).toEqual([]);
     expect(result.data.created).toBe(0);
   });
+
+  it.each(['2026-08-31', '2026-09-01'])(
+    'rejeita vigência %s anterior ou igual à última sem alterar histórico',
+    async (validFrom) => {
+      const { service, audit, inserted, update, execute, select } = financeWith([
+        { validFrom: '2026-09-01' },
+      ]);
+      await expect(
+        service.createModelPricing(ACTOR, {
+          model: 'gpt-4.1',
+          inputPricePer1kCents: 0.25,
+          outputPricePer1kCents: 0.9,
+          validFrom,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(inserted).toEqual([]);
+      expect(update).not.toHaveBeenCalled();
+      expect(audit.append).not.toHaveBeenCalled();
+      expect(execute.mock.invocationCallOrder[0]).toBeLessThan(
+        select.mock.invocationCallOrder[0] ?? 0,
+      );
+    },
+  );
 
   it('nova vigência de preço fecha a anterior em vez de sobrescrevê-la', async () => {
     const { service, audit, inserted } = financeWith();

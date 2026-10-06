@@ -151,11 +151,13 @@ describe('SubscriptionController — cancelar / pausar / retomar (US-4.5)', () =
     },
   );
 
-  it('motivo do cancelamento é aparado e limitado a 500 caracteres', async () => {
+  it('motivo do cancelamento é aparado e validado antes da mutação', async () => {
     const cancel = vi.fn(() => Promise.resolve({ status: 'CANCELED' }));
     const { controller } = make({ cancel });
 
-    await controller.cancel(PORTAL, { reason: `  ${'x'.repeat(600)}  ` });
+    await expect(controller.cancel(PORTAL, { reason: 'x'.repeat(501) })).rejects.toThrow();
+    expect(cancel).not.toHaveBeenCalled();
+    await controller.cancel(PORTAL, { reason: `  ${'x'.repeat(500)}  ` });
 
     expect(cancel).toHaveBeenCalledWith(VALID, 'x'.repeat(500));
   });
@@ -164,7 +166,6 @@ describe('SubscriptionController — cancelar / pausar / retomar (US-4.5)', () =
     ['corpo ausente', null],
     ['sem motivo', {}],
     ['motivo em branco', { reason: '   ' }],
-    ['motivo de outro tipo', { reason: 42 }],
   ])('cancelamento com %s não inventa motivo', async (_label, body) => {
     const cancel = vi.fn(() => Promise.resolve({ status: 'CANCELED' }));
     const { controller } = make({ cancel });
@@ -181,3 +182,13 @@ it('recusa userId como credencial de gestão', async () => {
   await expect(controller.pause(VALID)).rejects.toBeInstanceOf(NotFoundException);
   expect(svc.getView).not.toHaveBeenCalled();
 });
+
+it.each([{ reason: 42 }, { reason: [] }, { reason: 'x'.repeat(501) }, { userId: VALID }])(
+  'recusa corpo de cancelamento inválido sem executar o serviço',
+  async (body) => {
+    const cancel = vi.fn();
+    const { controller } = make({ cancel });
+    await expect(controller.cancel(PORTAL, body)).rejects.toThrow();
+    expect(cancel).not.toHaveBeenCalled();
+  },
+);
