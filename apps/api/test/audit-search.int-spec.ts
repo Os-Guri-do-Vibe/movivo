@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /** Busca real e paginada sobre a trilha append-only, incluindo auditoria da própria leitura. */
 import { randomUUID } from 'node:crypto';
 
@@ -19,11 +20,12 @@ const RUN = Date.now().toString().slice(-8);
 const ACTION = `AUDIT_SEARCH_TEST_${RUN}`;
 const client = postgres({
   host: env.DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.DATABASE_HOST ?? 'localhost'),
   port: Number(env.DATABASE_PORT ?? 5433),
   user: env.DATABASE_USER ?? 'movivo_app',
   password: env.DATABASE_PASSWORD,
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 3,
   prepare: false,
   idle_timeout: 5,

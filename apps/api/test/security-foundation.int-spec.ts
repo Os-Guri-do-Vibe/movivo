@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /**
  * Teste de integração da fundação de segurança (US-1.1 / valida TASK-1.1.1..1.1.4).
  *
@@ -36,11 +37,12 @@ const phone = (n: number) => `+5555${RUN}${n}`;
 // --- Cliente de APLICAÇÃO: exatamente o caminho de runtime (movivo_app @ 5433) ---
 const appClient = postgres({
   host: env.DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.DATABASE_HOST ?? 'localhost'),
   port: Number(env.DATABASE_PORT ?? 5433),
   user: env.DATABASE_USER ?? 'movivo_app',
   password: env.DATABASE_PASSWORD,
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 3,
   prepare: false, // PgBouncer transaction mode
   idle_timeout: 5,
@@ -60,6 +62,7 @@ const cipher = new HealthCipherService(db, {
 const adminPort = Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 15432);
 const adminClient = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.MIGRATION_DATABASE_HOST ?? 'localhost'),
   port: adminPort,
   user: 'postgres',
   password: readFileSync(
@@ -67,7 +70,7 @@ const adminClient = postgres({
     'utf8',
   ).trimEnd(),
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 1,
   idle_timeout: 5,
   onnotice: () => {

@@ -1,10 +1,10 @@
 # Relatório — Sato: proteção de dados sensíveis
 
-**Data:** 2026-10-06  
-**Ideia analisada:** MOVIVO — treino conversacional supervisionado por profissional CREF  
-**Pasta do projeto:** docs/fitness-ia-whatsapp/  
-**Status:** correção implementada no código; controles externos ainda exigem implantação/evidência.  
-**Risco residual:** ALTO enquanto transporte interno e armazenamento não forem comprovados.
+**Data:** 2026-10-06
+**Ideia analisada:** MOVIVO — treino conversacional supervisionado por profissional CREF
+**Pasta do projeto:** docs/fitness-ia-whatsapp/
+**Status:** TLS e chaves locais concluídos e validados; produção em implantação.
+**Risco residual:** ALTO enquanto armazenamento cifrado e controles de produção não forem comprovados.
 
 ## 1. Resumo Executivo
 
@@ -16,8 +16,7 @@ sanitizados para impedir vazamento de parâmetros SQL. A rotação agora tem CLI
 verificação/recifra, compare-and-swap e auditoria atômica por escrita.
 
 Esta correção cobre o conteúdo já encaminhado ao `HealthCipherService`. Não equivale
-a cifrar todas as colunas nem a provar que a VPS usa discos criptografados. Nenhum
-deploy em produção nem recifra em massa foi executado nesta revisão.
+a cifrar todas as colunas nem a provar que a VPS usa discos criptografados. A recifra local foi executada e validada; o deploy em produção está em andamento.
 
 ## 2. Escopo Avaliado
 
@@ -31,7 +30,7 @@ aliases, configurações, Compose, proxy e runbooks existentes de backup.
 | Saúde de maior criticidade | `protocol_renewal_sessions.data_block_3` | Mesmo helper |
 | Saúde e texto livre | `checkins.notes_cipher`, `workout_sessions.feedback_cipher`, `protocols.mesocycle_notes_cipher` | Mesmo helper |
 | Saúde, derivação/inferências | `protocols.constraints`, `par_q_flags`, `content`, `mesocycle_summary`; dor/esforço no diário; `checkins.answers`; peso/fadiga/sono na renovação | **Em claro no schema**. Não classificar automaticamente como dado comum. Cifra de armazenamento obrigatória; RLS/minimização; avaliar cifra de aplicação por coluna sem eliminar queries de operação |
-| Saúde potencial e identificadores livres | `conversations.content`, `coaching_sessions.summary`, handoffs; memória/cache e payloads de fila Redis | **Em claro**. TTL/redação/RLS não substituem cifra at-rest. Armazenamento cifrado e TLS interno pendentes; cifra de aplicação deve considerar todos os leitores, dashboards e consumidores de fila |
+| Saúde potencial e identificadores livres | `conversations.content`, `coaching_sessions.summary`, handoffs; memória/cache e payloads de fila Redis | **Em claro**. TTL/redação/RLS não substituem cifra at-rest. Armazenamento cifrado pendente; TLS interno local comprovado, VPS em implantação; cifra de aplicação deve considerar todos os leitores, dashboards e consumidores de fila |
 | Identificação pessoal | `users`/`staff` e `anamnesis_sessions.data_block_1/3`: nome, telefone, e-mail, nascimento, dados demográficos e rotina | Em claro para busca/roteamento. Cifra de armazenamento com acesso mínimo; logs redigidos. Contexto de saúde torna ligação destes dados especialmente crítica |
 | Credenciais | TOTP `staff.mfa_secret_cipher`; destinos tokenizados `short_links.target_url` | Mesmo helper; wrapper externo `pgp:v1:` preservado por compatibilidade, pode conter envelope AES/Vault |
 | Credenciais não reversíveis | Senha, recuperação MFA, refresh/access tokens e códigos conforme seus fluxos | Hash/assinatura específicos; não substituir hashing de senha por cifra reversível |
@@ -331,3 +330,17 @@ recifra real local: **49/49 valores atualizados, zero conflitos**, run
 `c60e35fd-0b20-4df1-a5a9-1bf2c605290b`. Cada escrita valida round-trip, faz CAS e
 registra auditoria na mesma transação. Este resultado é exclusivo do ambiente local;
 backups antigos ainda exigem a chave pgcrypto e a custódia original preservadas.
+
+Continuidade CI: os 52 clientes PostgreSQL diretos da suíte de integração foram
+ajustados para o helper TLS existente, e a limpeza Redis de persona reutiliza as
+opções verificadas do runtime. Workflow configura TLS e arquivos de CA/keyring/token
+absolutos para clientes host. A descoberta enumerou 44 arquivos de integração sem
+executar global setup; typecheck da API, lint dos testes e 14 testes unitários de
+TLS/Redis/gate anti-SQL passaram. A integração completa não foi executada sobre o
+banco local com dados a preservar.
+
+Limite adicional: o typecheck habitual da API inclui somente `src/`. Ao incluir
+explicitamente os testes de integração em configuração temporária, aparecem erros
+de fixtures anteriores (campos obrigatórios novos ausentes e acesso a arrays sem
+checagem). A descoberta não prova execução nem corrige essa dívida; o CI com banco
+sintético continua necessário antes de declarar a suíte inteira verde.

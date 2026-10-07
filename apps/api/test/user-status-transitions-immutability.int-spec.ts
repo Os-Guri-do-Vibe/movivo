@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /**
  * Teste de integração da imutabilidade de `user_status_transitions` (US-8.3/TASK-8.3.1).
  *
@@ -36,11 +37,12 @@ const RUN = Date.now().toString().slice(-8);
 // --- Cliente de APLICAÇÃO: exatamente o caminho de runtime (movivo_app @ 5433) ---
 const appClient = postgres({
   host: env.DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.DATABASE_HOST ?? 'localhost'),
   port: Number(env.DATABASE_PORT ?? 5433),
   user: env.DATABASE_USER ?? 'movivo_app',
   password: env.DATABASE_PASSWORD,
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 3,
   prepare: false,
   idle_timeout: 5,
@@ -55,11 +57,12 @@ const tenant = new TenantDatabase(db);
 // necessário para observar o trigger isoladamente (ver cabeçalho). ---
 const migratorClient = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.MIGRATION_DATABASE_HOST ?? 'localhost'),
   port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 15432),
   user: env.MIGRATION_DATABASE_USER ?? 'movivo_migrator',
   password: env.MIGRATION_DATABASE_PASSWORD,
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 1,
   prepare: false,
   idle_timeout: 5,

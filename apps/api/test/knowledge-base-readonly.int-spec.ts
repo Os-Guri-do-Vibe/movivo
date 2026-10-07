@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /**
  * Corpus do RAG somente-leitura para o runtime (US-3.3 / Sato §10.4 — anti-envenenamento),
  * reverificado como gate da Sprint 7 (TASK-7.9.5).
@@ -22,11 +23,12 @@ const { env } = loadEnv();
 
 const appClient = postgres({
   host: env.DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.DATABASE_HOST ?? 'localhost'),
   port: Number(env.DATABASE_PORT ?? 5433),
   user: env.DATABASE_USER ?? 'movivo_app',
   password: env.DATABASE_PASSWORD,
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 2,
   prepare: false,
   idle_timeout: 5,

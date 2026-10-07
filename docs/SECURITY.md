@@ -305,3 +305,19 @@ PostgreSQL verificam CA e hostname/IP; Redis verifica master e Sentinel e propag
 mesmas opções ao BullMQ. Vault aceita CA por endpoint, com TLS verificável. Não há
 flag para desligar autenticação de certificados. `HTTP_BIND_HOST=127.0.0.1` deve ser
 usado quando a API estiver atrás de sidecar TLS no mesmo namespace de rede.
+
+### 7.2 Integração e CI com transporte verificado
+
+A suíte `apps/api/test` usa o helper `migrationPostgresTls` nos 52 clientes diretos
+PostgreSQL, incluindo clientes de runtime, migrador, superusuário e bancos
+provisórios. A verificação usa o hostname efetivamente conectado; flags inválidas
+ou CA configurada com TLS desligado falham antes da conexão. O teardown Redis de
+persona reutiliza `buildRedisOptions`, incluindo TLS para Sentinel e master.
+
+O job de integração gera CA/chaves efêmeras via provisionamento local e configura
+TLS obrigatório com caminhos absolutos de CA, token Vault e keyring no runner.
+Vault Transit é um servidor real inicializado/unsealed, com ACL limitada; não existe
+fallback de CI para certificado não verificado. Os clientes host usam localhost,
+que precisa constar nos SANs. Os dados de integração são sintéticos e descartáveis;
+a suíte não deve rodar contra o banco de desenvolvimento com dados a preservar,
+pois o global setup altera o singleton profissional e os testes criam/removem dados.

@@ -54,9 +54,9 @@ check_out() {
 }
 
 psql_su()  { $DC exec -T postgres psql -U postgres -d movivo -tAc "$1"; }
-redis_m()  { $DC exec -T redis-master   sh -c "redis-cli --no-auth-warning -a \"\$(cat /run/secrets/redis_password)\" $1"; }
-redis_r()  { $DC exec -T redis-replica  sh -c "redis-cli --no-auth-warning -a \"\$(cat /run/secrets/redis_password)\" $1"; }
-sentinel() { $DC exec -T redis-sentinel sh -c "redis-cli --no-auth-warning -a \"\$(cat /run/secrets/redis_password)\" -p 26379 $1"; }
+redis_m()  { $DC exec -T redis-master   sh -c "redis-cli --tls --cacert /run/secrets/internal_ca --sni localhost --no-auth-warning -a \"\$(cat /run/secrets/redis_password)\" $1"; }
+redis_r()  { $DC exec -T redis-replica  sh -c "redis-cli --tls --cacert /run/secrets/internal_ca --sni localhost --no-auth-warning -a \"\$(cat /run/secrets/redis_password)\" $1"; }
+sentinel() { $DC exec -T redis-sentinel sh -c "redis-cli --tls --cacert /run/secrets/internal_ca --sni localhost --no-auth-warning -a \"\$(cat /run/secrets/redis_password)\" -p 26379 $1"; }
 
 echo "MOVIVO — verificação do ambiente local (US-0.2)"
 
@@ -80,7 +80,7 @@ check_out "role movivo_migrator existe"        '^1$' psql_su "SELECT count(*) FR
 check_out "role movivo_app existe"             '^1$' psql_su "SELECT count(*) FROM pg_roles WHERE rolname='movivo_app';"
 check_out "movivo_app SEM BYPASSRLS"           '^f$' psql_su "SELECT rolbypassrls FROM pg_roles WHERE rolname='movivo_app';"
 check_out "movivo_app NÃO é superusuário"      '^f$' psql_su "SELECT rolsuper FROM pg_roles WHERE rolname='movivo_app';"
-check_out "movivo_migrator SEM BYPASSRLS"      '^f$' psql_su "SELECT rolbypassrls FROM pg_roles WHERE rolname='movivo_migrator';"
+check_out "movivo_migrator com BYPASSRLS para migração sob FORCE RLS" '^t$' psql_su "SELECT rolbypassrls FROM pg_roles WHERE rolname='movivo_migrator';"
 check_out "movivo_app não é dona de nenhuma tabela" '^0$' \
   psql_su "SELECT count(*) FROM pg_class c JOIN pg_roles r ON r.oid=c.relowner WHERE r.rolname='movivo_app' AND c.relkind IN ('r','p');"
 check_out "schema public pertence a movivo_migrator" '^movivo_migrator$' \
@@ -93,15 +93,15 @@ check_out "movivo_app pode usar o schema public" '^t$' \
 # ---------------------------------------------------------------------------
 section "4. PgBouncer — transaction mode na 5433 (TASK-0.2.2)"
 PGB_ADMIN() {
-  $DC exec -T -e PGPASSWORD="$(cat secrets/postgres_migrator_password)" pgbouncer \
+  $DC exec -T -e PGSSLMODE=verify-full -e PGSSLROOTCERT=/run/secrets/internal_ca -e PGPASSWORD="$(cat secrets/postgres_migrator_password)" pgbouncer \
     psql -h 127.0.0.1 -p 5433 -U movivo_migrator -d pgbouncer -tAc "$1"
 }
 check_out "pool_mode = transaction"   'transaction' PGB_ADMIN "SHOW CONFIG;"
-check_out "default_pool_size = 50"    '(^|\|)50(\||$)' bash -c "$DC exec -T -e PGPASSWORD=\"\$(cat secrets/postgres_migrator_password)\" pgbouncer psql -h 127.0.0.1 -p 5433 -U movivo_migrator -d pgbouncer -tAc 'SHOW CONFIG;' | grep '^default_pool_size'"
-check_out "listen_port = 5433"        '(^|\|)5433(\||$)' bash -c "$DC exec -T -e PGPASSWORD=\"\$(cat secrets/postgres_migrator_password)\" pgbouncer psql -h 127.0.0.1 -p 5433 -U movivo_migrator -d pgbouncer -tAc 'SHOW CONFIG;' | grep '^listen_port'"
-check_out "auth_file aponta para o Docker Secret" '/run/secrets/pgbouncer_userlist' bash -c "$DC exec -T -e PGPASSWORD=\"\$(cat secrets/postgres_migrator_password)\" pgbouncer psql -h 127.0.0.1 -p 5433 -U movivo_migrator -d pgbouncer -tAc 'SHOW CONFIG;' | grep '^auth_file'"
+check_out "default_pool_size = 50"    '(^|\|)50(\||$)' bash -c "$DC exec -T -e PGSSLMODE=verify-full -e PGSSLROOTCERT=/run/secrets/internal_ca -e PGPASSWORD=\"\$(cat secrets/postgres_migrator_password)\" pgbouncer psql -h 127.0.0.1 -p 5433 -U movivo_migrator -d pgbouncer -tAc 'SHOW CONFIG;' | grep '^default_pool_size'"
+check_out "listen_port = 5433"        '(^|\|)5433(\||$)' bash -c "$DC exec -T -e PGSSLMODE=verify-full -e PGSSLROOTCERT=/run/secrets/internal_ca -e PGPASSWORD=\"\$(cat secrets/postgres_migrator_password)\" pgbouncer psql -h 127.0.0.1 -p 5433 -U movivo_migrator -d pgbouncer -tAc 'SHOW CONFIG;' | grep '^listen_port'"
+check_out "auth_file aponta para o Docker Secret" '/run/secrets/pgbouncer_userlist' bash -c "$DC exec -T -e PGSSLMODE=verify-full -e PGSSLROOTCERT=/run/secrets/internal_ca -e PGPASSWORD=\"\$(cat secrets/postgres_migrator_password)\" pgbouncer psql -h 127.0.0.1 -p 5433 -U movivo_migrator -d pgbouncer -tAc 'SHOW CONFIG;' | grep '^auth_file'"
 check_out "movivo_app conecta na 5433 e chega ao Postgres" '^movivo_app$' bash -c \
-  "$DC exec -T -e PGPASSWORD=\"\$(cat secrets/postgres_app_password)\" pgbouncer psql -h 127.0.0.1 -p 5433 -U movivo_app -d movivo -tAc 'SELECT current_user;'"
+  "$DC exec -T -e PGSSLMODE=verify-full -e PGSSLROOTCERT=/run/secrets/internal_ca -e PGPASSWORD=\"\$(cat secrets/postgres_app_password)\" pgbouncer psql -h 127.0.0.1 -p 5433 -U movivo_app -d movivo -tAc 'SELECT current_user;'"
 
 # ---------------------------------------------------------------------------
 section "5. Redis — CVE-2025-49844 (RediShell) e HA (TASK-0.2.3)"
@@ -128,7 +128,7 @@ check_out "master com 1 réplica conectada"    'connected_slaves:1' redis_m "INF
 check_out "réplica com master_link_status:up" 'master_link_status:up' redis_r "INFO replication"
 check_out "Sentinel monitora 'movivo-master'" 'movivo-master' sentinel "SENTINEL master movivo-master"
 check_out "Sentinel enxerga 1 réplica"        '^1$' bash -c \
-  "$DC exec -T redis-sentinel sh -c 'redis-cli --no-auth-warning -a \"\$(cat /run/secrets/redis_password)\" -p 26379 SENTINEL master movivo-master' | grep -A1 '^num-slaves\$' | tail -1 | tr -d '\r'"
+  "$DC exec -T redis-sentinel sh -c 'redis-cli --tls --cacert /run/secrets/internal_ca --sni localhost --no-auth-warning -a \"\$(cat /run/secrets/redis_password)\" -p 26379 SENTINEL master movivo-master' | grep -A1 '^num-slaves\$' | tail -1 | tr -d '\r'"
 check "Redis exige autenticação (NOAUTH sem senha)" bash -c \
   "! $DC exec -T redis-master redis-cli PING 2>&1 | grep -q PONG"
 

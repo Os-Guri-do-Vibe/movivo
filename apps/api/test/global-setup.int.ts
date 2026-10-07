@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /**
  * Global setup da suíte de INTEGRAÇÃO.
  *
@@ -23,6 +24,7 @@ export async function setup() {
   const apiRoot = process.cwd();
   const admin = postgres({
     host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
+    ssl: migrationPostgresTls(env, env.MIGRATION_DATABASE_HOST ?? 'localhost'),
     port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 15432),
     user: 'postgres',
     password: readFileSync(
@@ -30,7 +32,7 @@ export async function setup() {
       'utf8',
     ).trimEnd(),
     database: env.DATABASE_NAME ?? 'movivo',
-    ssl: false,
+
     max: 1,
     idle_timeout: 5,
     onnotice: () => {

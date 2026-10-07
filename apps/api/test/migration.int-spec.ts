@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /**
  * Teste-semente (b) — migração num Postgres LIMPO (US-0.8 / TASK-0.8.3, valida US-0.4).
  *
@@ -131,11 +132,12 @@ const throwawayDb = `movivo_it_${Date.now()}`;
 function connect(database: string, user: string, password: string | undefined) {
   return postgres({
     host,
+    ssl: migrationPostgresTls(env, host),
     port,
     user,
     password,
     database,
-    ssl: false,
+
     max: 1,
     idle_timeout: 5,
     onnotice: () => {

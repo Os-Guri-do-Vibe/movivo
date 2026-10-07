@@ -24,6 +24,7 @@ services:
       - ./infra/security/postgres-tls.sh:/etc/movivo/postgres-tls.sh:ro
       - ./infra/security/pg_hba.conf:/etc/movivo/pg_hba.conf:ro
     secrets:
+      - internal_ca
       - postgres_tls_key
       - postgres_tls_cert
     tmpfs: [/tmp/tls]
@@ -33,6 +34,7 @@ services:
       - ./infra/security/postgres-tls.sh:/etc/movivo/postgres-tls.sh:ro
       - ./infra/security/pg_hba.conf:/etc/movivo/pg_hba.conf:ro
     secrets:
+      - internal_ca
       - source: evolution_postgres_tls_key
         target: postgres_tls_key
       - source: evolution_postgres_tls_cert

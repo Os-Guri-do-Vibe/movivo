@@ -163,6 +163,8 @@ if [ -n "$missing_external" ]; then
   echo "    (cole cada valor no arquivo de mesmo nome — o 'docker compose up' só sobe com todos)"
 fi
 
+python3 scripts/provision-security.py --root "$REPO_ROOT" --environment local
+
 cat <<'EOF'
 
 Pronto. Próximos passos:

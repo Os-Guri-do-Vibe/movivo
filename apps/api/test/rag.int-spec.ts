@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /**
  * Integração — RAG (US-3.3) contra o stack Docker (PGVector). Pré-requisito: `pnpm run infra:up`.
  *
@@ -32,6 +33,7 @@ import { RagService } from '../src/modules/ai-coach/rag/rag.service';
 const { env } = loadEnv();
 const migratorSql = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? env.DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.MIGRATION_DATABASE_HOST ?? env.DATABASE_HOST ?? 'localhost'),
   port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 15432),
   user: env.MIGRATION_DATABASE_USER ?? 'movivo_migrator',
   password: env.MIGRATION_DATABASE_PASSWORD,

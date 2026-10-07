@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /**
  * MFA (TOTP) das contas internas, ponta a ponta contra Postgres + Redis reais, com a
  * exigência ligada (`AUTH_MFA_REQUIRED=true`, como em produção).
@@ -45,6 +46,7 @@ let keys: RedisKeyBuilder;
 
 const adminClient = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.MIGRATION_DATABASE_HOST ?? 'localhost'),
   port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 5432),
   user: 'postgres',
   password: readFileSync(
@@ -52,7 +54,7 @@ const adminClient = postgres({
     'utf8',
   ).trimEnd(),
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 1,
   idle_timeout: 5,
   onnotice: () => undefined,

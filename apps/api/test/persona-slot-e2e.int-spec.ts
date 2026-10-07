@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /**
  * Validação de QA (Mariana, 2026-08-26) da feature "duas personas por slot" (Sprint 11)
  * contra infraestrutura REAL — Postgres via PgBouncer, Redis via Sentinel, Nest completo.
@@ -31,6 +32,8 @@ import { AppModule } from '../src/app.module';
 import { AgentConfigRepository } from '../src/core/agent-config/agent-config.repository';
 import { AgentPersonaService } from '../src/core/agent-config/agent-persona.service';
 import { loadEnv } from '../src/core/config/load-env';
+import { AppConfigService } from '../src/core/config';
+import { buildRedisOptions } from '../src/core/redis/redis.module';
 import { REDACT_PATHS, REDACTED } from '../src/core/logger/redaction.util';
 import { AiConfigService } from '../src/modules/admin/ai-config.service';
 import { PromptResolverService } from '../src/modules/ai-coach/intent/prompt-resolver.service';
@@ -43,11 +46,12 @@ const RUN = Date.now().toString().slice(-8);
 
 const migrator = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.MIGRATION_DATABASE_HOST ?? 'localhost'),
   port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 15432),
   user: env.MIGRATION_DATABASE_USER ?? 'movivo_migrator',
   password: env.MIGRATION_DATABASE_PASSWORD,
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 1,
   prepare: false,
   idle_timeout: 5,
@@ -161,9 +165,7 @@ afterAll(async () => {
   // sendo servido como persona vigente pela próxima instância que subir.
   try {
     const redis = new Redis({
-      host: env.REDIS_HOST ?? 'localhost',
-      port: Number(env.REDIS_PORT ?? 6379),
-      password: env.REDIS_PASSWORD,
+      ...buildRedisOptions(app.get(AppConfigService)),
       lazyConnect: true,
       maxRetriesPerRequest: 1,
     });

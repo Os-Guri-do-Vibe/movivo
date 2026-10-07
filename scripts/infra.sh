@@ -33,7 +33,7 @@ read_secret() {
 case "${1:-help}" in
   # Caminho da APLICAÇÃO: role movivo_app, sempre via PgBouncer na 5433.
   psql)
-    exec docker compose exec -e PGPASSWORD="$(read_secret postgres_app_password)" \
+    exec docker compose exec -e PGSSLMODE=verify-full -e PGSSLROOTCERT=/run/secrets/internal_ca -e PGPASSWORD="$(read_secret postgres_app_password)" \
       pgbouncer psql -h 127.0.0.1 -p 5433 -U movivo_app -d movivo "${@:2}"
     ;;
 
@@ -41,18 +41,18 @@ case "${1:-help}" in
   # Nunca use este atalho para simular o comportamento da aplicação — ele
   # ignora o pooler e tem privilégios que a app não tem.
   psql-admin)
-    exec docker compose exec -e PGPASSWORD="$(read_secret postgres_migrator_password)" \
+    exec docker compose exec -e PGSSLMODE=verify-full -e PGSSLROOTCERT=/run/secrets/internal_ca -e PGPASSWORD="$(read_secret postgres_migrator_password)" \
       postgres psql -h 127.0.0.1 -p 5432 -U movivo_migrator -d movivo "${@:2}"
     ;;
 
   # Console administrativo do PgBouncer — confirma pool_mode/estado dos pools.
   pools)
-    exec docker compose exec -e PGPASSWORD="$(read_secret postgres_migrator_password)" \
+    exec docker compose exec -e PGSSLMODE=verify-full -e PGSSLROOTCERT=/run/secrets/internal_ca -e PGPASSWORD="$(read_secret postgres_migrator_password)" \
       pgbouncer psql -h 127.0.0.1 -p 5433 -U movivo_migrator -d pgbouncer -c 'SHOW POOLS;'
     ;;
 
   stats)
-    exec docker compose exec -e PGPASSWORD="$(read_secret postgres_migrator_password)" \
+    exec docker compose exec -e PGSSLMODE=verify-full -e PGSSLROOTCERT=/run/secrets/internal_ca -e PGPASSWORD="$(read_secret postgres_migrator_password)" \
       pgbouncer psql -h 127.0.0.1 -p 5433 -U movivo_migrator -d pgbouncer -c 'SHOW STATS;'
     ;;
 
@@ -60,12 +60,12 @@ case "${1:-help}" in
   # não transita pelo shell do host.
   redis-cli)
     exec docker compose exec redis-master sh -c \
-      'redis-cli --no-auth-warning -a "$(cat /run/secrets/redis_password)"'
+      'REDISCLI_AUTH="$(cat /run/secrets/redis_password)" redis-cli --tls --cacert /run/secrets/internal_ca --sni localhost'
     ;;
 
   sentinel)
     exec docker compose exec -T redis-sentinel sh -c \
-      'redis-cli --no-auth-warning -a "$(cat /run/secrets/redis_password)" -p 26379 sentinel master movivo-master'
+      'REDISCLI_AUTH="$(cat /run/secrets/redis_password)" redis-cli --tls --cacert /run/secrets/internal_ca --sni localhost -p 26379 sentinel master movivo-master'
     ;;
 
   # Contadores operacionais sem payload, título de documento ou PII. Os nomes das
@@ -81,7 +81,7 @@ case "${1:-help}" in
       -e MOVIVO_DLQ_KEY="$key_prefix:dead-letter" redis-master sh -c '
         set -eu
         redis() {
-          redis-cli --no-auth-warning -a "$(cat /run/secrets/redis_password)" --raw "$@"
+          REDISCLI_AUTH="$(cat /run/secrets/redis_password)" redis-cli --tls --cacert /run/secrets/internal_ca --sni localhost --raw "$@"
         }
         count_key() {
           kind="$(redis TYPE "$1")"

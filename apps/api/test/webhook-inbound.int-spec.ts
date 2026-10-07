@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /**
  * Integração do webhook de ENTRADA (US-3.1) contra o stack Docker (Postgres via PgBouncer,
  * Redis via Sentinel). Segredo do webhook injetado por env (mock — conta AraraHQ não assinada).
@@ -53,6 +54,7 @@ const apiRoot = process.cwd();
 // tem INSERT em consents; o gate de entrada exige consentimento de saúde ativo — US-3.1/Sprint 5).
 const adminClient = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.MIGRATION_DATABASE_HOST ?? 'localhost'),
   port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 15432),
   user: 'postgres',
   password: readFileSync(
@@ -60,7 +62,7 @@ const adminClient = postgres({
     'utf8',
   ).trimEnd(),
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 1,
   idle_timeout: 5,
   onnotice: () => undefined,
