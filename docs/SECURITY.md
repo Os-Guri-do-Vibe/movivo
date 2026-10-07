@@ -321,3 +321,24 @@ fallback de CI para certificado não verificado. Os clientes host usam localhost
 que precisa constar nos SANs. Os dados de integração são sintéticos e descartáveis;
 a suíte não deve rodar contra o banco de desenvolvimento com dados a preservar,
 pois o global setup altera o singleton profissional e os testes criam/removem dados.
+
+
+### 7.3 Estado operacional validado em 2026-10-07
+
+**CONCLUÍDO: Vault Transit real, chaves independentes, transporte TLS verificado,
+recifra e recuperação nos ambientes local e VPS.** Os detalhes e limites são o
+[fechamento operacional](seguranca/dados-sensiveis-2026-10-06.md#fechamento-operacional--2026-10-07).
+
+Checks reais passaram 21/21 por ambiente; recifra local 49/49 e VPS 1/1 MFA, sem
+conflitos. Vault 2.1.1 fixado por digest tem chave versão 2 na VPS, política de API
+limitada a encrypt/decrypt e manutenção de token, rotação automática 2160h e leitura
+de ciphertext anterior preservada. O restore real de 14:20 recuperou os dois bancos,
+uploads e Raft; o checker provou decifra nas versões 1 e 2, usando snapshot fornecido.
+Custódia atual e chaves legadas têm cópia privada fora do repositório e dos volumes.
+
+Raft usa `disable_mlock=true` com swap proibido no container (`memory.swap.max=0`,
+limite memória/swap 512 MiB), conforme orientação HashiCorp. A tentativa inicial
+interrompida por OOM está em quarentena preservada; nenhum dado da API havia sido
+enviado para aquele bootstrap. Esses controles não comprovam cifra dos discos do
+host, conversas, filas ou artefatos vivos listados no inventário. A custódia local
+não equivale a HSM/KMS externo; root do host permanece no modelo de ameaça.

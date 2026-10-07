@@ -1,10 +1,10 @@
 # Relatório — Sato: proteção de dados sensíveis
 
-**Data:** 2026-10-06
+**Data:** 2026-10-06; fechamento operacional em 2026-10-07
 **Ideia analisada:** MOVIVO — treino conversacional supervisionado por profissional CREF
 **Pasta do projeto:** docs/fitness-ia-whatsapp/
-**Status:** TLS e chaves locais concluídos e validados; produção em implantação.
-**Risco residual:** ALTO enquanto armazenamento cifrado e controles de produção não forem comprovados.
+**Status:** CONCLUÍDO — Vault, chaves independentes, TLS e recuperação validados localmente e na VPS.
+**Risco residual:** ALTO para dados estruturados/artefatos sem prova de cifra do armazenamento; transporte e Vault comprovados.
 
 ## 1. Resumo Executivo
 
@@ -16,7 +16,7 @@ sanitizados para impedir vazamento de parâmetros SQL. A rotação agora tem CLI
 verificação/recifra, compare-and-swap e auditoria atômica por escrita.
 
 Esta correção cobre o conteúdo já encaminhado ao `HealthCipherService`. Não equivale
-a cifrar todas as colunas nem a provar que a VPS usa discos criptografados. A recifra local foi executada e validada; o deploy em produção está em andamento.
+a cifrar todas as colunas nem a provar que a VPS usa discos criptografados. A recifra local foi executada e validada; TLS/Vault de produção já passaram os checks reais. Backup, restore conjunto e recifra de produção também foram concluídos e verificados.
 
 ## 2. Escopo Avaliado
 
@@ -30,7 +30,7 @@ aliases, configurações, Compose, proxy e runbooks existentes de backup.
 | Saúde de maior criticidade | `protocol_renewal_sessions.data_block_3` | Mesmo helper |
 | Saúde e texto livre | `checkins.notes_cipher`, `workout_sessions.feedback_cipher`, `protocols.mesocycle_notes_cipher` | Mesmo helper |
 | Saúde, derivação/inferências | `protocols.constraints`, `par_q_flags`, `content`, `mesocycle_summary`; dor/esforço no diário; `checkins.answers`; peso/fadiga/sono na renovação | **Em claro no schema**. Não classificar automaticamente como dado comum. Cifra de armazenamento obrigatória; RLS/minimização; avaliar cifra de aplicação por coluna sem eliminar queries de operação |
-| Saúde potencial e identificadores livres | `conversations.content`, `coaching_sessions.summary`, handoffs; memória/cache e payloads de fila Redis | **Em claro**. TTL/redação/RLS não substituem cifra at-rest. Armazenamento cifrado pendente; TLS interno local comprovado, VPS em implantação; cifra de aplicação deve considerar todos os leitores, dashboards e consumidores de fila |
+| Saúde potencial e identificadores livres | `conversations.content`, `coaching_sessions.summary`, handoffs; memória/cache e payloads de fila Redis | **Em claro**. TTL/redação/RLS não substituem cifra at-rest. Armazenamento cifrado pendente; TLS interno comprovado local e VPS; cifra de aplicação deve considerar todos os leitores, dashboards e consumidores de fila |
 | Identificação pessoal | `users`/`staff` e `anamnesis_sessions.data_block_1/3`: nome, telefone, e-mail, nascimento, dados demográficos e rotina | Em claro para busca/roteamento. Cifra de armazenamento com acesso mínimo; logs redigidos. Contexto de saúde torna ligação destes dados especialmente crítica |
 | Credenciais | TOTP `staff.mfa_secret_cipher`; destinos tokenizados `short_links.target_url` | Mesmo helper; wrapper externo `pgp:v1:` preservado por compatibilidade, pode conter envelope AES/Vault |
 | Credenciais não reversíveis | Senha, recuperação MFA, refresh/access tokens e códigos conforme seus fluxos | Hash/assinatura específicos; não substituir hashing de senha por cifra reversível |
@@ -163,12 +163,13 @@ HEALTH_CIPHER_KEY_ID=health-2026-q4 docker compose -f docker-compose.yml -f dock
 Para produção, primeiro Compose é `infra/vps/docker-compose.prod.yml`; caminhos
 `./secrets` dos overrides resolvem relativos a ele. Usar esse override em cada deploy;
 não basta definir `*_FILE` sem montar o arquivo. `docker compose config --quiet`
-valida sem imprimir ambientes resolvidos. Configuração dos overrides validada com `config --quiet` (local e produção); nenhum foi ativado nesta revisão.
+valida sem imprimir ambientes resolvidos. Configuração dos overrides validada com `config --quiet` (local e produção). O provisionamento e ativação reais foram concluídos em 2026-10-07, conforme as evidências ao final.
 
-TLS/storage pendentes: emitir certificados/CA e configurar Postgres↔PgBouncer, app↔
-PgBouncer e Redis/Sentinel/réplica (incluindo BullMQ); provar verificação de certificado,
-replicação e failover. Evidenciar criptografia dos volumes pelo provedor ou configuração
-de volume antes de mover dados. Rede Docker interna sozinha não cumpre criptografia
+TLS concluído: certificados/CA e clientes verificados para Postgres↔PgBouncer,
+app↔PgBouncer e Redis/Sentinel/réplica (incluindo BullMQ), além de HTTPS interno.
+Os checks positivos e negativos reais estão registrados ao final; um ensaio de
+failover completo não está incluído nessas provas. Continua pendente evidenciar
+criptografia dos volumes pelo provedor ou configuração de volume. Rede Docker interna sozinha não cumpre criptografia
 em trânsito. Backup cifrado existente não prova cifra do volume vivo. Não trocar flags
 para `true` sem infraestrutura correspondente.
 
@@ -181,7 +182,7 @@ revoga uma cópia de dump já extraída com a chave; backups afetados requerem a
 
 ## 14. Plano de Validação
 
-Executado nesta revisão:
+Histórico da validação inicial (2026-10-06; fechamento adicional em 2026-10-07 ao final):
 
 - Suíte unitária completa anterior aos últimos testes adicionais: **189 arquivos,
   2.295 testes passaram**; suíte focada final de cifra/config/secret/shortlinks:
@@ -194,14 +195,16 @@ Executado nesta revisão:
   zero updates/conflitos. Demais alvos cifrados estavam vazios (não representam
   cobertura real de recifra desses tipos).
 
-Não executado: `--apply` em dados reais, Vault real/rotacionado, pentest externo,
-TLS interno/volumes na VPS e restauração final sem chave antiga. Execute e registre
-essas provas antes de concluir implantação do controle.
+Na etapa inicial de 2026-10-06 ainda não haviam sido executados `--apply`, Vault
+real/rotação, TLS interno e restore completo. Esses itens operacionais foram
+concluídos em 2026-10-07 (evidências ao final). Pentest externo e cifra integral
+dos volumes permanecem fora da comprovação; backups legados exigem chave antiga.
 
 ## 15. Próximos Passos
 
-Operação precisa provisionar chave independente/Vault e completar evidências de TLS,
-volumes e restore. Engenharia deve avaliar cifra de aplicação para conversas/resumos
+Vault, chave independente, TLS, recifra e restore foram concluídos nos dois ambientes.
+Continua necessária a comprovação de cifra dos volumes. Engenharia deve avaliar cifra
+de aplicação para conversas/resumos
 livres com migração coordenada de todos os leitores. Relatório não certifica adequação
 integral da implantação atual.
 
@@ -226,9 +229,9 @@ probabilidade real de incidente nem auditoria externa de contas/infraestrutura.
 
 ## Complemento operacional — CA privada e clientes (continuação de 2026-10-06)
 
-O provisionamento operacional local/VPS está sendo executado na continuação desta
-revisão. O suporte abaixo já foi implementado e testado no código; as evidências do
-provisionamento real devem ser anexadas por ambiente antes de declarar conclusão.
+O suporte de clientes abaixo foi implementado e testado no código. Na etapa inicial
+a comprovação operacional ainda estava em andamento; o provisionamento local/VPS e
+as evidências reais foram concluídos e registrados nas seções de fechamento abaixo.
 
 - `DATABASE_SSL_CA_FILE` carrega a CA do PostgreSQL/PgBouncer. Runtime exige
   `rejectUnauthorized=true` e verifica o `DATABASE_HOST`, inclusive IP. Os modos
@@ -296,7 +299,7 @@ fixture sintética cifrada na chave versão 1 → snapshot Raft via HTTPS → in
 e unseal de instância descartável → restore `-force` → unseal com custódia original
 → emissão de novo token limitado pela política restaurada → decifra exata. O teste
 usa a imagem do Vault ativo, `--network none`, filesystem read-only e armazenamento
-tmpfs; não monta dados/custódia do host nem altera o Vault ativo. O container de
+tmpfs, memória limitada a 512 MiB e swap proibido; não monta dados/custódia do host nem altera o Vault ativo. O container de
 UUID único foi removido ao final. Tokens e shares transitam por stdin para arquivos
 0600 em tmpfs e não são argumentos de processos nem saídas do teste.
 
@@ -315,7 +318,7 @@ snapshot anterior a uma rotação, e o token novo é emitido somente na instânc
 descartável para evitar dependência de um token live posterior ao backup. Este teste
 prova recuperação das chaves/política Transit, não integridade de um restore conjunto
 de todos os dados PostgreSQL e anexos. A prova local não certifica VPS: anexar o
-resultado real de produção depois do provisionamento e validação naquele ambiente.
+resultado real de produção registrado na seção de fechamento abaixo.
 
 Fontes complementares consultadas:
 
@@ -344,3 +347,95 @@ explicitamente os testes de integração em configuração temporária, aparecem
 de fixtures anteriores (campos obrigatórios novos ausentes e acesso a arrays sem
 checagem). A descoberta não prova execução nem corrige essa dívida; o CI com banco
 sintético continua necessário antes de declarar a suíte inteira verde.
+
+
+## Evidência operacional de produção — 2026-10-07
+
+A VPS executa a revisão `82d9e41` com **21/21 checks reais** de transporte, ACL,
+Vault Transit e leitura de formatos legados. O dry-run verificou **1 valor existente
+(MFA)**. A recuperação com snapshot fresh de produção passou na instância descartável
+isolada, com custódia original e decifra pelo token limitado da política restaurada.
+O teste de rotação nativa avançou a chave Transit para **versão 2**: um ciphertext
+anterior continuou legível e o período automático de **7.776.000 segundos (2160h)**
+foi conferido. Chaves antigas permanecem retidas para backups.
+
+O checker de recuperação agora prova dois casos: fixture versão 1 e fixture na
+`latest_version` lida **do snapshot restaurado**, usando cifragem sintética live nessa
+versão explícita. Assim, um snapshot antigo não depende da versão atual da instância
+live; a decifra exige que aquele snapshot realmente contenha a chave correspondente.
+A leitura de metadados de chave e emissão de token são feitas somente no scratch com
+root da custódia; a decifra usa token novo de menor privilégio.
+
+O processo Raft usa `disable_mlock=true`, conforme recomendação operacional para
+Integrated Storage; o limite de memória/swap do container é 512 MiB com
+`memory.swap.max=0` verificado na VPS. RSS observado em produção foi aproximadamente
+40 MiB. Esse controle evita swap do processo Vault e não prova cifra dos demais
+volumes, host ou artefatos da aplicação.
+
+Durante o primeiro bootstrap, o kernel confirmou OOM antes da implantação da API
+nova. O material daquele bootstrap ficou em quarentena em
+`/vault/data/bootstrap-failed-20261007`, preservado sem apagar o volume. A API anterior
+à migração ainda não enviava dados para esse Vault; a perda da inicialização ocorreu
+antes desse uso. A recuperação requer a custódia correspondente ao cluster atual,
+não o material da tentativa interrompida.
+
+O operador copiou custódia de unseal, CA, keyring e chaves pgcrypto/backup de produção
+para `~/.local/share/movivo-security/production-recovery` no Mac, com permissões
+privadas (arquivos 0600), fora do repositório e separadas dos volumes da VPS. Essa cópia
+foi confirmada pelo operador; não é custódia em HSM/KMS, não prova recuperação fora
+da máquina e exige retenção/acesso operacional mínimo. O Vault self-hosted protege
+contra acesso somente ao banco/dump; root do host continua no modelo de ameaça.
+
+As evidências finais de backup, restore conjunto PostgreSQL/Vault e recifra 1/1
+de produção estão registradas no fechamento abaixo. Não confundir TLS/Transit com cifra integral
+do armazenamento: os campos estruturados e artefatos identificados no inventário
+continuam exigindo controle at-rest comprovado.
+
+
+## Fechamento operacional — 2026-10-07
+
+**CONCLUÍDO para Vault, chaves independentes e TLS nos ambientes local e VPS.**
+Após a implantação, o checker passou **21/21 na produção** (1 valor cifrado existente
+verificado) e **21/21 no local** (49 valores). As URLs HTTPS local e de produção,
+incluindo a API, responderam HTTP 200; a aplicação local está em
+`https://localhost:3000`. A CA local privada exige confiança explícita do cliente.
+
+A recifra de produção atualizou **1/1 segredo MFA de staff, zero conflitos**, run
+`0c3a52e7-30d1-4f67-bd51-74614350225e`, com ator ADMIN ativo
+`dd9250e8-bb25-45ed-879c-c25550b576df`. O valor permaneceu legível após a recifra e
+passou a usar Vault Transit. Legado/PGCRYPTO e versões Transit anteriores continuam
+preservados para recuperação; não foram removidos após a recifra.
+
+O backup completo de **14:20** incluiu dois bancos, uploads e snapshot Raft Vault,
+cifrados em arquivos `.enc`. O restore descartável terminou **OK em
+2026-10-07T14:20:43-03:00**:
+
+| Artefato recuperado | Evidência |
+|---|---|
+| PostgreSQL MOVIVO | 49 tabelas, 792 linhas e 26 políticas RLS |
+| PostgreSQL Evolution | 37 tabelas e 435 linhas |
+| Uploads | Integridade/listagem do tar verificadas |
+| Vault Raft | Snapshot fresh e snapshot fornecido restaurados; unseal original, ACL limitada e decifra sintética versão 1 e latest_version **2** |
+
+A comparação criptográfica de fixtures na versão 2 prova recuperação da chave usada
+pela implantação, além da compatibilidade versão 1; não é mera leitura de contagens
+ou teste mockado. Snapshots fornecidos não são sobrescritos pelo checker. Os checks
+pós-recifra confirmaram acesso e legibilidade do MFA existente na produção.
+
+Preservação: a execução pré/pós de 14:20 reutilizou nomes de backup com precisão de
+minuto; não constitui dois backups independentes. O backup prévio de 03:38 permaneceu
+preservado. O nome agora inclui segundos e um novo conjunto completo foi criado em
+**20261007-142345** e restaurado em containers descartáveis. Não houve exclusão da
+quarentena de bootstrap nem da custódia legada.
+
+O fechamento não declara segurança integral do produto. Conversas, resumos,
+metadados de saúde, filas e artefatos identificados no inventário ainda dependem de
+cifra at-rest do armazenamento não comprovada nesta execução. O teste recuperou os
+componentes do backup; não simula todos os fluxos de usuário, indisponibilidade total
+da VPS, failover de Sentinel ou um atacante com root do host.
+
+Fontes do controle de memória/Raft:
+
+- https://developer.hashicorp.com/vault/docs/configuration/storage/raft
+- https://developer.hashicorp.com/vault/docs/configuration
+- https://developer.hashicorp.com/vault/docs/concepts/production-hardening
