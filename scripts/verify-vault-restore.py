@@ -81,7 +81,7 @@ def main():
                   'listener "tcp" { address = "127.0.0.1:8200" tls_disable = true }\n')
         # No host mounts, published ports or persistent volumes. HTTP is isolated loopback.
         run(["docker", "run", "-d", "--name", scratch, "--network", "none",
-             "--read-only", "--user", "0:0", "--cap-drop", "ALL", "--memory", "512m",
+             "--read-only", "--user", "0:0", "--cap-drop", "ALL", "--memory", "512m", "--memory-swap", "512m",
              "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
              "--tmpfs", "/vault/data:rw,noexec,nosuid,size=256m",
              "--tmpfs", "/vault/file:rw,noexec,nosuid,size=16m",
@@ -129,6 +129,24 @@ def main():
         if status["sealed"]:
             raise RuntimeError("original quorum insufficient")
         put("operator-token", initialization["root_token"])
+        stage = "snapshot latest Transit key fixture"
+        for attempt in range(30):
+            try:
+                latest_version = json.loads(cli("read", "-format=json", "transit/keys/movivo-health",
+                    authenticated=True))["data"]["latest_version"]
+                break
+            except RuntimeError:
+                if attempt == 29:
+                    raise
+                time.sleep(1)
+        if type(latest_version) is not int or latest_version < 1:
+            raise RuntimeError("snapshot key version invalid")
+        latest_fixture = base64.b64encode(os.urandom(48)).decode()
+        latest_ciphertext = live("transit/encrypt/movivo-health", app_token,
+            {"plaintext": latest_fixture, "key_version": latest_version})["data"]["ciphertext"]
+        if not latest_ciphertext.startswith("vault:v" + str(latest_version) + ":"):
+            raise RuntimeError("live key version mismatch")
+        put("latest-fixture-cipher", latest_ciphertext)
         stage = "restored app policy token"
         for attempt in range(30):
             try:
@@ -153,10 +171,16 @@ def main():
                 time.sleep(1)
         if decrypted != fixture:
             raise RuntimeError("fixture mismatch")
+        stage = "snapshot latest Transit fixture decrypt"
+        latest_decrypted = json.loads(cli("write", "-format=json", "transit/decrypt/movivo-health",
+            "ciphertext=@/tmp/latest-fixture-cipher", authenticated=True))["data"]["plaintext"]
+        if latest_decrypted != latest_fixture:
+            raise RuntimeError("snapshot latest fixture mismatch")
         print(json.dumps({"passed": True, "environment": args.environment,
             "snapshot": "provided" if args.snapshot else "fresh",
             "image": image, "isolated_network": True, "storage": "tmpfs",
-            "original_unseal_and_app_acl": True, "transit_fixture_roundtrip": True}))
+            "original_unseal_and_app_acl": True, "transit_fixture_roundtrip": True,
+            "snapshot_latest_version": latest_version, "snapshot_latest_fixture_roundtrip": True}))
     except Exception as error:
         # Driver responses can contain tokens, ciphertext or operator material.
         print(json.dumps({"passed": False, "stage": stage, "reason": str(error) if isinstance(error, RuntimeError) else type(error).__name__}))

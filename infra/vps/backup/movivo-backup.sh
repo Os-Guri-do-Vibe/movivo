@@ -20,7 +20,7 @@
 # docs/operacoes/deploy-producao.md):
 #   openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
 #     -pass file:/opt/movivo/secrets/backup_encryption_key \
-#     -in movivo-AAAAMMDD-HHMM.dump.enc \
+#     -in movivo-AAAAMMDD-HHMMSS.dump.enc \
 #   | docker exec -i movivo-postgres pg_restore -U postgres -d movivo --clean --if-exists
 # =============================================================================
 set -euo pipefail
@@ -30,7 +30,7 @@ KEY_FILE=/opt/movivo/secrets/backup_encryption_key
 RETENTION_DAYS="${RETENTION_DAYS:-7}"
 WEEKLY_DIR="${BACKUP_DIR}/weekly"
 WEEKLY_RETENTION_DAYS="${WEEKLY_RETENTION_DAYS:-35}"
-stamp="$(date +%Y%m%d-%H%M)"
+stamp="$(date +%Y%m%d-%H%M%S)"
 
 [[ -s "$KEY_FILE" ]] || { echo "ERRO: ${KEY_FILE} ausente" >&2; exit 1; }
 umask 077

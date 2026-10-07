@@ -63,7 +63,7 @@ restore_db() {
   image="$(docker inspect -f '{{.Config.Image}}' "$live")"
   log "${label}: restaurando em ${image} descartável"
 
-  docker run -d --name "$CONTAINER" --network none --memory 1g \
+  docker run -d --name "$CONTAINER" --network none --memory 1g --memory-swap 1g \
     --tmpfs "${tmpfs}:rw,size=1g" \
     -e POSTGRES_USER="$su" -e POSTGRES_DB="$db" -e POSTGRES_PASSWORD=restore-test \
     "$image" >/dev/null
