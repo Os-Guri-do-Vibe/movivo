@@ -317,8 +317,17 @@ await check('api_https_and_bff_web_to_api', async () => {
 });
 await check('api_http_network_not_available', () =>
   rejected(
-    () => fetch('http://api:3001/api/v1/health', { signal: AbortSignal.timeout(3000) }),
-    (error) => error.cause?.code === 'ECONNREFUSED',
+    () =>
+      new Promise((resolve, reject) => {
+        const socket = createConnection({ host: 'api', port: 3001 });
+        socket.setTimeout(3000, () => socket.destroy(new Error('Timeout')));
+        socket.once('connect', () => {
+          socket.destroy();
+          resolve();
+        });
+        socket.once('error', reject);
+      }),
+    (error) => error.code === 'ECONNREFUSED',
   ),
 );
 await check('evolution_https_readonly', async () => {
