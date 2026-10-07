@@ -38,6 +38,17 @@ describe('HealthCipherService', () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it('cifra PDF binário e só admite PDF legado com assinatura válida', async () => {
+    const { svc, execute } = service();
+    const pdf = Buffer.from('%PDF-1.7\n\x00\xff fim', 'binary');
+    const encrypted = await svc.encryptBytes(pdf);
+    expect(encrypted.equals(pdf)).toBe(false);
+    expect((await svc.decryptBytes(encrypted)).equals(pdf)).toBe(true);
+    expect((await svc.decryptBytes(pdf)).equals(pdf)).toBe(true);
+    await expect(svc.decryptBytes(Buffer.from('segredo em claro'))).rejects.toThrow();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it('rotação lê old/new, rollback retém ambas, e remover chave antiga falha fechado', async () => {
     const old = await service('old').svc.encryptHealth('histórico');
     const current = await service().svc.encryptHealth('novo');

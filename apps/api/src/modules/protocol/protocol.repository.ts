@@ -228,7 +228,7 @@ export class ProtocolRepository {
         )
         .limit(1),
     );
-    return rows[0]?.pdfContent ?? null;
+    return rows[0]?.pdfContent ? this.cipher.decryptBytes(rows[0].pdfContent) : null;
   }
 
   /**
@@ -399,8 +399,9 @@ export class ProtocolRepository {
 
   /** PDF gerado depois (fora da transação de liberação) — `signProtocol` grava o mesmo jeito. */
   async setPdfContent(userId: string, protocolId: string, pdf: Buffer | null): Promise<void> {
+    const encrypted = pdf ? await this.cipher.encryptBytes(pdf) : null;
     await this.db.runAsUser(userId, 'USER', (tx) =>
-      tx.update(protocols).set({ pdfContent: pdf }).where(eq(protocols.id, protocolId)),
+      tx.update(protocols).set({ pdfContent: encrypted }).where(eq(protocols.id, protocolId)),
     );
   }
 

@@ -247,6 +247,8 @@ await check('vault_real_transit_and_aes_compatibility_without_sql', async () => 
   const textEnvelope = await cipher.encryptText(plaintext);
   assert(textEnvelope.startsWith('movivo:health:text:v1:'));
   assert.equal(await cipher.decryptText(textEnvelope), plaintext);
+  const pdf = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(350_000, 0x41)]);
+  assert((await cipher.decryptBytes(await cipher.encryptBytes(pdf))).equals(pdf));
   const local = new HealthCipherService(db, {
     pgcryptoKey: cfg.pgcryptoKey,
     healthCipher: { ...cfg.healthCipher, provider: 'LOCAL' },
@@ -296,7 +298,7 @@ await check('legacy_all_cipher_columns_decrypt_readonly', () => {
     .trim()
     .split('\n')
     .map((line) => JSON.parse(line));
-  assert.equal(rows.length, 9);
+  assert.equal(rows.length, 10);
   assert(rows.every((row) => row.mode === 'dry-run' && row.updated === 0 && row.conflicts === 0));
   assert(rows.every((row) => (row.pendingPlaintext ?? 0) === 0));
   return { verifiedValues: rows.reduce((total, row) => total + row.verified, 0) };

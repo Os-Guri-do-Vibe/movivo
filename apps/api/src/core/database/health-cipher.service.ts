@@ -141,6 +141,20 @@ export class HealthCipherService {
     return this.decryptHealth(Buffer.from(encoded, 'base64'));
   }
 
+  /** PDF binário cifrado pelo mesmo Transit, preservando formato antigo durante recifra. */
+  async encryptBytes(value: Buffer): Promise<Buffer> {
+    return this.encryptHealth(value.toString('base64'));
+  }
+
+  async decryptBytes(value: Buffer): Promise<Buffer> {
+    if (value.subarray(0, 5).toString() === '%PDF-') return value;
+    const encoded = await this.decryptHealth(value);
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
+      throw new Error('HealthCipherService: PDF cifrado inválido.');
+    }
+    return Buffer.from(encoded, 'base64');
+  }
+
   async decryptHealth(ciphertext: Buffer): Promise<string> {
     try {
       if (ciphertext.subarray(0, 6).toString() === 'vault:') {

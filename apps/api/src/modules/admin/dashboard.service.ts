@@ -623,8 +623,9 @@ export class DashboardService {
           signedAt: new Date(signed.signedAt),
           student: personal,
         });
+        const encryptedPdf = await this.cipher.encryptBytes(pdf);
         await this.scoped(actor, (tx) =>
-          tx.update(protocols).set({ pdfContent: pdf }).where(eq(protocols.id, id)),
+          tx.update(protocols).set({ pdfContent: encryptedPdf }).where(eq(protocols.id, id)),
         );
         // 2ª bolha da entrega (achado 2026-09-04): só vale a pena gerar quando o PDF saiu —
         // sem PDF, a entrega cai no texto+link de sempre, que não usa este resumo.
@@ -950,8 +951,9 @@ export class DashboardService {
     // prévia) permanece salvo e `WhatsappOutboundWorker.buildDelivery` o trata como truthy,
     // mandando um PDF desatualizado em vez de cair no fallback texto+link (que já reflete o
     // `release.content` correto, com a troca aplicada).
+    const encryptedPdf = pdf ? await this.cipher.encryptBytes(pdf) : null;
     await this.scoped(actor, (tx) =>
-      tx.update(protocols).set({ pdfContent: pdf }).where(eq(protocols.id, release.protocolId)),
+      tx.update(protocols).set({ pdfContent: encryptedPdf }).where(eq(protocols.id, release.protocolId)),
     );
 
     await this.queues.enqueue(
