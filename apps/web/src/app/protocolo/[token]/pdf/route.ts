@@ -9,7 +9,7 @@ import { publicEnv } from '@/lib/env';
  */
 export async function GET(_request: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  const res = await fetch(`${publicEnv.apiUrl}/protocols/by-token/${token}/pdf`, {
+  const res = await fetch(`${(process.env.MOVIVO_API_URL?.trim() || publicEnv.apiUrl).replace(/\/$/, '')}/protocols/by-token/${token}/pdf`, {
     cache: 'no-store',
   });
   if (!res.ok || !res.body) {

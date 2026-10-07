@@ -40,6 +40,7 @@ import type { ConnectionOptions } from 'bullmq';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { and, eq, isNotNull, sql } from 'drizzle-orm';
 import postgres from 'postgres';
+import { migrationPostgresTls } from '../core/database/postgres-tls';
 
 import { AppConfigService, getAppConfig } from '../core/config';
 import { loadEnv } from '../core/config/load-env';
@@ -73,7 +74,7 @@ async function main(): Promise<void> {
     user,
     password,
     database,
-    ssl: false,
+    ssl: migrationPostgresTls(env, host),
     max: 1,
     idle_timeout: 5,
     onnotice: () => {

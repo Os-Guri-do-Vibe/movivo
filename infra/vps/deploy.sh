@@ -55,8 +55,10 @@ if [[ $rollback -eq 1 ]]; then
     [ -n \"\$prev\" ] || { echo 'não há versão anterior registrada' >&2; exit 1; }
     capability=\$(docker image inspect ${REGISTRY}/movivo-api:\$prev --format '{{ index .Config.Labels \"br.com.movivo.security.access-links\" }}' 2>/dev/null || true)
     [ \"\$capability\" = 'revocable-v1' ] || { echo 'rollback recusado: imagem sem acesso opaco revogável' >&2; exit 1; }
-    printf 'MOVIVO_VERSION=%s\nMOVIVO_PREVIOUS_VERSION=%s\n' \"\$prev\" \"\$cur\" > .env
-    docker compose up -d --wait --wait-timeout 180 api web
+    health=\$(docker image inspect ${REGISTRY}/movivo-api:\$prev --format '{{ index .Config.Labels \"br.com.movivo.security.health-cipher\" }}' 2>/dev/null || true)
+    [ \"\$health\" = 'versioned-v1' ] || { echo 'rollback recusado: imagem sem cifra versionada/TLS' >&2; exit 1; }
+    printf 'COMPOSE_PROFILES=app\nMOVIVO_VERSION=%s\nMOVIVO_PREVIOUS_VERSION=%s\n' \"\$prev\" \"\$cur\" > .env
+    docker compose up -d --wait --wait-timeout 180 api web api-tls web-tls nginx
     echo \"api/web: \$cur → \$prev\""
   exit 0
 fi
@@ -74,6 +76,11 @@ stage="$(mktemp -d)"
 trap 'rm -rf "$stage"; ssh -o ControlPath="$ctl" -O exit "$VPS" 2>/dev/null || true' EXIT
 mkdir -p "$stage/nginx/conf.d" "$stage/infra" "$stage/bin"
 cp infra/vps/docker-compose.prod.yml "$stage/compose.yml"
+cp infra/security/docker-compose.secure.yml "$stage/compose.override.yml"
+cp -R infra/security "$stage/infra/"
+cp scripts/provision-security.py scripts/verify-vault-restore.py scripts/renew-security-certificates.sh "$stage/bin/"
+cp scripts/verify-security.mjs "$stage/bin/"
+cp infra/security/movivo-*.service infra/security/movivo-*.timer "$stage/bin/"
 cp infra/vps/api.env "$stage/api.env"
 cp infra/vps/nginx/conf.d/movivo.conf "$stage/nginx/conf.d/"
 cp -R infra/postgres infra/pgbouncer infra/redis infra/nginx "$stage/infra/"
@@ -98,11 +105,11 @@ mac_tar_flags=()
 [[ "$(uname -s)" == Darwin ]] && mac_tar_flags=(--no-mac-metadata)
 
 COPYFILE_DISABLE=1 tar -C "$stage" --no-xattrs "${mac_tar_flags[@]}" -cf - \
-    compose.yml api.env nginx infra bin \
+    compose.yml compose.override.yml api.env nginx infra bin \
   | "${SSH[@]}" "set -e; cd ${APP_DIR}
       before=\$(sha256sum infra/pgbouncer/pgbouncer.ini infra/redis/*.tpl 2>/dev/null || true)
       tar --no-overwrite-dir --warning=no-unknown-keyword -xf -
-      chmod 755 bin/movivo-backup.sh bin/movivo-restore-test.sh
+      chmod 755 bin/*.sh bin/*.py
       after=\$(sha256sum infra/pgbouncer/pgbouncer.ini infra/redis/*.tpl)
       if [ -n \"\$before\" ] && [ \"\$before\" != \"\$after\" ]; then touch .recreate-data; fi"
 
@@ -126,6 +133,8 @@ for key in asaas_api_key deepseek_api_key openai_api_key anthropic_api_key groq_
 done
 
 # -----------------------------------------------------------------------------
+"${SSH[@]}" "cd ${APP_DIR} && python3 bin/provision-security.py --root ${APP_DIR} --environment production"
+
 log "3/8 Certificado da origem"
 "${SSH[@]}" "test -s ${APP_DIR}/nginx/certs/origin.pem && test -s ${APP_DIR}/nginx/certs/origin.key" \
   || die "certificado ausente — rode antes: infra/vps/cloudflare-origin.sh"
@@ -162,22 +171,28 @@ fi
 # Uma imagem legada reabriria o acesso por IDs após a migração. Nenhum caminho
 # (deploy normal ou rollback) pode iniciar API sem a capacidade verificada.
 "${SSH[@]}" "capability=\$(docker image inspect ${api_image} --format '{{ index .Config.Labels \"br.com.movivo.security.access-links\" }}' 2>/dev/null || true)
-  [ \"\$capability\" = 'revocable-v1' ] || { echo 'deploy recusado: imagem sem acesso opaco revogável' >&2; exit 1; }"
+  [ \"\$capability\" = 'revocable-v1' ] || { echo 'deploy recusado: imagem sem acesso opaco revogável' >&2; exit 1; }
+  health=\$(docker image inspect ${api_image} --format '{{ index .Config.Labels \"br.com.movivo.security.health-cipher\" }}' 2>/dev/null || true)
+  [ \"\$health\" = 'versioned-v1' ] || { echo 'deploy recusado: imagem sem cifra versionada/TLS' >&2; exit 1; }"
 
 "${SSH[@]}" "set -e; cd ${APP_DIR}
   cur=\$(sed -n 's/^MOVIVO_VERSION=//p' .env 2>/dev/null || true)
   prev=\$(sed -n 's/^MOVIVO_PREVIOUS_VERSION=//p' .env 2>/dev/null || true)
   [ \"\$cur\" = '${version}' ] || prev=\"\$cur\"
-  printf 'MOVIVO_VERSION=%s\nMOVIVO_PREVIOUS_VERSION=%s\n' '${version}' \"\$prev\" > .env"
+  printf 'COMPOSE_PROFILES=app\nMOVIVO_VERSION=%s\nMOVIVO_PREVIOUS_VERSION=%s\n' '${version}' \"\$prev\" > .env"
 
 # -----------------------------------------------------------------------------
-log "5/8 Camada de dados"
+log "5/8 Vault e camada de dados"
+"${SSH[@]}" "set -e; cd ${APP_DIR}
+  docker compose up -d --no-deps vault
+  python3 bin/provision-security.py --root ${APP_DIR} --environment production --vault
+  docker compose up -d --wait --wait-timeout 120 vault-token-renewer"
 "${SSH[@]}" "set -e; cd ${APP_DIR}
   docker compose up -d --wait --wait-timeout 300 \
     postgres pgbouncer redis-master redis-replica redis-sentinel evolution-postgres evolution-api
   if [ -f .recreate-data ]; then
     docker compose up -d --wait --wait-timeout 180 --force-recreate \
-      pgbouncer redis-master redis-replica redis-sentinel
+      postgres evolution-postgres pgbouncer redis-master redis-replica redis-sentinel evolution-api
     rm -f .recreate-data
   fi"
 
@@ -195,9 +210,11 @@ log "7/8 API, web e Nginx"
 log "8/8 Backup diário, teste de restore semanal e smoke test"
 "${SSH[@]}" "set -e
   sudo install -m 644 ${APP_DIR}/bin/movivo-backup.service ${APP_DIR}/bin/movivo-backup.timer \
-    ${APP_DIR}/bin/movivo-restore-test.service ${APP_DIR}/bin/movivo-restore-test.timer /etc/systemd/system/
+    ${APP_DIR}/bin/movivo-restore-test.service ${APP_DIR}/bin/movivo-restore-test.timer \
+    ${APP_DIR}/bin/movivo-vault-unseal.service ${APP_DIR}/bin/movivo-vault-unseal.timer ${APP_DIR}/bin/movivo-certificate-renewal.service \
+    ${APP_DIR}/bin/movivo-certificate-renewal.timer /etc/systemd/system/
   sudo systemctl daemon-reload
-  sudo systemctl enable --now movivo-backup.timer movivo-restore-test.timer >/dev/null
+  sudo systemctl enable --now movivo-backup.timer movivo-restore-test.timer movivo-vault-unseal.service movivo-vault-unseal.timer movivo-certificate-renewal.timer >/dev/null
   systemctl list-timers movivo-backup.timer movivo-restore-test.timer --no-pager | head -3"
 
 smoke_ok=1

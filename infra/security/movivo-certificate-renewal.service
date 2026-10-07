@@ -1,0 +1,12 @@
+[Unit]
+Description=MOVIVO — renovação de certificados internos TLS
+Requires=docker.service
+After=docker.service movivo-vault-unseal.service
+
+[Service]
+Type=oneshot
+User=deploy
+Group=deploy
+WorkingDirectory=/opt/movivo
+ExecStart=/bin/bash /opt/movivo/bin/renew-security-certificates.sh
+TimeoutStartSec=1200

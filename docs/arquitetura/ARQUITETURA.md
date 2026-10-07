@@ -272,6 +272,13 @@ Extração futura para microservices, quando necessária (Fase C, 15.000+ usuár
 - **SLOs críticos**: disponibilidade API ≥99,9%/mês · latência AI Coach p95 ≤30s (alerta em 25s) · protocolo inicial ≤2h p95 · check-in disparado na janela seg 08–10h BRT · jobs em DLQ <0,5% · respostas bloqueadas por compliance <5%.
 - **Spans OpenTelemetry obrigatórios** em: pipeline de webhook→fila→job, pipeline de AI Coach (context→intent→RAG→LLM→validação→envio), pipeline de protocolo, pipeline de check-in.
 
+**Revisão de dados sensíveis (2026-10-06):** novas escritas do `HealthCipherService`
+usam cifra de aplicação AES-256-GCM com keyring versionado ou Vault Transit via HTTPS.
+`pgcrypto` permanece somente para leitura de ciphertext legado e migração de aliases.
+O ID autenticado permite ler chaves antigas durante rotação; não retirar chaves que
+protegem backups. Proteção de volumes, WAL, AOF/RDB, conversas e inferências em claro
+continua exigindo evidência operacional. Inventário e runbook: `docs/seguranca/dados-sensiveis-2026-10-06.md`.
+
 Detalhamento completo (threat model STRIDE, pentest da anamnese, política de rotação de secrets fase a fase): `docs/fitness-ia-whatsapp/11-relatorio-sato.md`. Este documento define os controles arquiteturais mínimos, não substitui a revisão de segurança dedicada.
 
 ---

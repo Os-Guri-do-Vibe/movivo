@@ -57,6 +57,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 FROM node:${NODE_VERSION}-bookworm-slim AS runtime
 ARG MOVIVO_REVISION=unknown
 LABEL br.com.movivo.security.access-links="revocable-v1" \
+      br.com.movivo.security.health-cipher="versioned-v1" \
       org.opencontainers.image.source="https://github.com/Os-Guri-do-Vibe/movivo" \
       org.opencontainers.image.revision="${MOVIVO_REVISION}"
 # MALLOC_ARENA_MAX: o glibc cria uma arena por thread do libuv; o resvg (card de Story)

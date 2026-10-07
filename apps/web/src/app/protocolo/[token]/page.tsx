@@ -73,7 +73,7 @@ const TECHNIQUE_GLOSSARY: Readonly<Record<AdvancedTechnique, string>> = {
 async function fetchProtocol(token: string): Promise<ProtocolRead | null> {
   let res: Response;
   try {
-    res = await fetch(`${publicEnv.apiUrl}/protocols/by-token/${token}`, {
+    res = await fetch(`${(process.env.MOVIVO_API_URL?.trim() || publicEnv.apiUrl).replace(/\/$/, '')}/protocols/by-token/${token}`, {
       cache: 'no-store',
       headers: { Accept: 'application/json' },
     });

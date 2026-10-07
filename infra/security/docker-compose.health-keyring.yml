@@ -1,0 +1,13 @@
+# Override opt-in. Caminhos relativos ao PRIMEIRO Compose (-f), nunca a este arquivo.
+# Secret existente precisa estar preservado; não gera nem substitui chaves.
+services:
+  api:
+    environment:
+      HEALTH_CIPHER_PROVIDER: LOCAL
+      HEALTH_CIPHER_KEY_ID: ${HEALTH_CIPHER_KEY_ID:?informe o ID ativo do keyring}
+      HEALTH_CIPHER_KEYRING_FILE: /run/secrets/health_cipher_keyring
+    secrets:
+      - health_cipher_keyring
+secrets:
+  health_cipher_keyring:
+    file: ./secrets/health_cipher_keyring

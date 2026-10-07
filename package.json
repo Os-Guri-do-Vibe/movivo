@@ -23,7 +23,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "infra:secrets": "bash scripts/gen-local-secrets.sh",
-    "infra:up": "docker compose up -d --build --wait --wait-timeout 600 && docker compose ps",
+    "infra:up": "bash scripts/start-local.sh",
     "infra:down": "docker compose down --remove-orphans",
     "infra:stop": "docker compose stop",
     "infra:restart": "docker compose stop && pnpm run infra:up",

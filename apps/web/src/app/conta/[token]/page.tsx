@@ -45,7 +45,7 @@ const STATUS_TONE: Record<SubscriptionStatus, 'positive' | 'warning' | 'neutral'
 async function fetchView(token: string): Promise<SubscriptionView | null> {
   let res: Response;
   try {
-    res = await fetch(`${publicEnv.apiUrl}/subscription/${token}`, {
+    res = await fetch(`${(process.env.MOVIVO_API_URL?.trim() || publicEnv.apiUrl).replace(/\/$/, '')}/subscription/${token}`, {
       cache: 'no-store',
       headers: { Accept: 'application/json' },
     });

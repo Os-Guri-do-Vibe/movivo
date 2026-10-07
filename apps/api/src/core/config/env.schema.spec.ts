@@ -139,3 +139,65 @@ it.each(['0s', '1y', '900000', '16m', '10000000000000000000000000d'])(
 it('recusa refresh acima de 30 dias', () => {
   expect(envSchema.safeParse({ ...VALID, JWT_REFRESH_TTL: '31d' }).success).toBe(false);
 });
+
+describe('configuração da cifra de aplicação', () => {
+  it('valida keyring sem expor conteúdo e exige ID ativo existente', () => {
+    const key = Buffer.alloc(32, 7).toString('base64');
+    const valid = {
+      ...VALID,
+      HEALTH_CIPHER_KEY_ID: 'v2',
+      HEALTH_CIPHER_KEYRING: JSON.stringify({ v1: key, v2: key }),
+    };
+    expect(envSchema.safeParse(valid).success).toBe(true);
+    expect(envSchema.safeParse({ ...valid, HEALTH_CIPHER_KEY_ID: 'absent' }).success).toBe(false);
+    for (const ring of ['not-json-secret', '{}', '[]', JSON.stringify({ v2: 'short-secret' })]) {
+      const result = envSchema.safeParse({ ...valid, HEALTH_CIPHER_KEYRING: ring });
+      expect(result.success).toBe(false);
+      if (!result.success) expect(formatEnvError(result.error)).not.toContain(ring);
+    }
+  });
+
+  it('Vault exige HTTPS, token e origem sem credenciais/query/caminho', () => {
+    const vault = {
+      ...VALID,
+      HEALTH_CIPHER_PROVIDER: 'VAULT',
+      VAULT_ADDR: 'https://vault.example/',
+      VAULT_TOKEN: 'secret-token',
+    };
+    expect(envSchema.safeParse(vault).success).toBe(true);
+    expect(envSchema.safeParse({ ...vault, VAULT_TOKEN: undefined }).success).toBe(false);
+    for (const url of [
+      'http://vault.example',
+      'https://user:pass@vault.example',
+      'https://vault.example/path',
+      'https://vault.example/?token=x',
+    ]) {
+      expect(envSchema.safeParse({ ...vault, VAULT_ADDR: url }).success).toBe(false);
+    }
+  });
+});
+
+it('reserva legacy-derived para manter leitura dos envelopes de transição', () => {
+  const key = Buffer.alloc(32, 7).toString('base64');
+  expect(
+    envSchema.safeParse({
+      ...VALID,
+      HEALTH_CIPHER_KEY_ID: 'v2',
+      HEALTH_CIPHER_KEYRING: JSON.stringify({ 'legacy-derived': key, v2: key }),
+    }).success,
+  ).toBe(false);
+});
+
+it('não ignora CA de Postgres/Redis com TLS desligado', () => {
+  expect(envSchema.safeParse({ ...VALID, DATABASE_SSL_CA: 'ca' }).success).toBe(false);
+  expect(envSchema.safeParse({ ...VALID, REDIS_TLS_CA: 'ca' }).success).toBe(false);
+  expect(
+    envSchema.safeParse({
+      ...VALID,
+      DATABASE_SSL: true,
+      DATABASE_SSL_CA: 'ca',
+      REDIS_TLS_ENABLED: true,
+      REDIS_TLS_CA: 'ca',
+    }).success,
+  ).toBe(true);
+});

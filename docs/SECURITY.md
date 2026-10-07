@@ -278,3 +278,30 @@ Responsável pela auditoria: **Sato**. Toda rotação é registrada em `audit_lo
 Contato: os fundadores do repositório. **Não abra issue pública** para vulnerabilidade
 — relate em canal privado, com detalhes de reprodução, e aguarde confirmação antes
 de qualquer divulgação.
+
+## 7. Revisão de dados sensíveis — 2026-10-06 (vigente)
+
+A classificação, controles implementados, gaps de infraestrutura e runbook executável
+estão em [dados-sensiveis-2026-10-06.md](seguranca/dados-sensiveis-2026-10-06.md).
+Esta revisão **substitui a estratégia de cifra/rotação pgcrypto** da §4 para novas
+escritas do `HealthCipherService`. A chave `PGCRYPTO_KEY_FILE` permanece indispensável
+para legado, aliases existentes, migrações SQL e backups antigos. Novas escritas são
+AES-256-GCM **na aplicação**, com ID de chave autenticado, ou Vault Transit via HTTPS.
+
+`HEALTH_CIPHER_KEYRING_FILE` e `VAULT_TOKEN_FILE` são segredos redigidos pelo mesmo
+contrato `*_FILE`. Docker Secrets em Compose são mounts de arquivos: separar o mount
+do banco não equivale a um KMS e não protege contra root do host. Não armazenar esses
+secrets junto ao dump nem incluí-los em imagem, Git ou logs.
+
+A presença de ciphertext em algumas colunas **não comprova** proteção de todo o
+PostgreSQL, Redis, volumes ou backups. Conteúdo de conversa, metadados e inferências
+de saúde também precisam da proteção de armazenamento descrita no inventário.
+
+### 7.1 CA privada dos clientes internos
+
+`DATABASE_SSL_CA_FILE`, `MIGRATION_DATABASE_SSL_CA_FILE`, `REDIS_TLS_CA_FILE` e
+`VAULT_CA_FILE` carregam o certificado público pelo loader `*_FILE`. Clientes
+PostgreSQL verificam CA e hostname/IP; Redis verifica master e Sentinel e propaga as
+mesmas opções ao BullMQ. Vault aceita CA por endpoint, com TLS verificável. Não há
+flag para desligar autenticação de certificados. `HTTP_BIND_HOST=127.0.0.1` deve ser
+usado quando a API estiver atrás de sidecar TLS no mesmo namespace de rede.

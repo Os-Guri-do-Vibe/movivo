@@ -24,6 +24,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { eq } from 'drizzle-orm';
 import argon2 from 'argon2';
 import postgres from 'postgres';
+import { migrationPostgresTls } from './postgres-tls';
 
 import { loadEnv } from '../config/load-env';
 import { professionalAssignments, staff, users } from './schema';
@@ -74,7 +75,7 @@ async function main(): Promise<void> {
     user,
     password,
     database,
-    ssl: false,
+    ssl: migrationPostgresTls(env, host),
     max: 1,
     idle_timeout: 5,
     onnotice: () => {

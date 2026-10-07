@@ -112,7 +112,7 @@ restore_db() {
 }
 
 run() {
-  local movivo_dump evolution_dump uploads_tar
+  local movivo_dump evolution_dump uploads_tar vault_snapshot vault_tmp
   movivo_dump="$(newest movivo dump.enc)"
   evolution_dump="$(newest evolution dump.enc)"
   uploads_tar="$(newest uploads tar.enc)"
@@ -126,6 +126,17 @@ run() {
 
   decrypt "$uploads_tar" | tar -tf - >/dev/null
   log "uploads: arquivo tar íntegro"
+
+  vault_snapshot="$(newest vault snapshot.enc)"
+  assert_fresh "$vault_snapshot"
+  vault_tmp="$(mktemp "${BACKUP_DIR}/.vault-restore.XXXXXX")"
+  if decrypt "$vault_snapshot" > "$vault_tmp" && python3 /opt/movivo/bin/verify-vault-restore.py \
+      --root /opt/movivo --environment production --snapshot "$vault_tmp"; then
+    RESTORE_SUMMARY+=" vault=$(basename "$vault_snapshot"):restore=ok"
+    rm -f "$vault_tmp"
+  else
+    rm -f "$vault_tmp"; return 1
+  fi
 }
 
 run

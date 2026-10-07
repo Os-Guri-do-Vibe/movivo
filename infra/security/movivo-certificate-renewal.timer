@@ -1,0 +1,8 @@
+[Unit]
+Description=MOVIVO — verificar certificados diariamente
+[Timer]
+OnCalendar=*-*-* 05:30:00 America/Sao_Paulo
+Persistent=true
+RandomizedDelaySec=600
+[Install]
+WantedBy=timers.target

@@ -70,6 +70,19 @@ status=0
 dump_db movivo-postgres postgres movivo || status=1
 dump_db movivo-evolution-postgres evolution evolution || status=1
 
+# Vault Raft snapshot is barrier-encrypted; wrap with the separate backup key too.
+# Unseal/root custody stays outside this archive and the application volumes.
+vault_out="${BACKUP_DIR}/vault-${stamp}.snapshot.enc"
+vault_tmp="$(mktemp "${BACKUP_DIR}/.vault-snapshot.XXXXXX")"
+if python3 /opt/movivo/bin/provision-security.py --root /opt/movivo \
+    --environment production --vault --snapshot "$vault_tmp" && encrypt "${vault_out}.tmp" < "$vault_tmp"; then
+  mv "${vault_out}.tmp" "$vault_out"
+  echo "ok  ${vault_out}"
+else
+  rm -f "${vault_out}.tmp"; status=1
+fi
+rm -f "$vault_tmp"
+
 uploads_out="${BACKUP_DIR}/uploads-${stamp}.tar.enc"
 if tar -C /opt/movivo -cf - uploads | encrypt "${uploads_out}.tmp"; then
   mv "${uploads_out}.tmp" "$uploads_out"

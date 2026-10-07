@@ -51,7 +51,13 @@ export function buildRedisOptions(config: AppConfigService): RedisOptions {
     sentinelPassword: redis.sentinelPassword,
     db: redis.db,
     ...(natMap ? { natMap } : {}),
-    ...(redis.tls ? { tls: {} } : {}),
+    ...(redis.tls
+      ? {
+          tls: { ca: redis.tlsCa, rejectUnauthorized: true },
+          sentinelTLS: { ca: redis.tlsCa, rejectUnauthorized: true },
+          enableTLSForSentinelMode: true,
+        }
+      : {}),
     // `keyPrefix` do ioredis NÃO é usado de propósito: ele é invisível no código e
     // some em comandos como EVAL/SCAN, escondendo bugs de isolamento. O prefixo é
     // sempre explícito, via RedisKeyBuilder.

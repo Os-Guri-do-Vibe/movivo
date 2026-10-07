@@ -25,6 +25,7 @@ import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres, { type Sql } from 'postgres';
 
 import { AppConfigService } from '../config';
+import { postgresTls } from './postgres-tls';
 import { DRIZZLE, POSTGRES_CLIENT } from './database.constants';
 import { DatabaseHealthService } from './database-health.service';
 import { HealthCipherService } from './health-cipher.service';
@@ -44,7 +45,7 @@ export function createPostgresClient(config: AppConfigService): Sql {
     database: database.database,
     username: database.user,
     password: database.password,
-    ssl: database.ssl,
+    ssl: postgresTls(database.host, database.ssl, database.sslCa),
     max: database.poolMax,
     connect_timeout: database.connectTimeoutSeconds,
     // NÃO REMOVER. Ver bloco de restrições no topo do arquivo.

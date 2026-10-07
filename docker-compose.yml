@@ -531,8 +531,8 @@ services:
       APP_ENV: local
       LOG_LEVEL: debug
       # Origens do browser em http://localhost (sem Nginx/TLS na frente).
-      API_CORS_ORIGINS: http://localhost:${HOST_WEB_PORT:-3000}
-      PUBLIC_SITE_URL: http://localhost:${HOST_WEB_PORT:-3000}
+      API_CORS_ORIGINS: https://localhost:${HOST_WEB_PORT:-3000}
+      PUBLIC_SITE_URL: https://localhost:${HOST_WEB_PORT:-3000}
       # Base pública DA API: é a URL que a EvolutionAPI (outro container) chama de
       # volta no webhook e de onde baixa o PDF do protocolo — por isso o nome do
       # serviço, e não localhost (que dentro do container é ele mesmo).
@@ -557,7 +557,7 @@ services:
       # enviadas continuam valendo. Dado de runtime: nunca apagar em "limpeza".
       - ./apps/api/uploads:/app/apps/api/uploads
     ports:
-      - '127.0.0.1:${HOST_API_PORT:-3001}:3001'
+      - '127.0.0.1:${HOST_API_PORT:-3001}:3443'
     stop_grace_period: 30s
     deploy:
       resources:
@@ -576,8 +576,8 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         NEXT_PUBLIC_APP_ENV: local
-        NEXT_PUBLIC_SITE_URL: http://localhost:${HOST_WEB_PORT:-3000}
-        NEXT_PUBLIC_API_URL: http://localhost:${HOST_API_PORT:-3001}/api/v1
+        NEXT_PUBLIC_SITE_URL: https://localhost:${HOST_WEB_PORT:-3000}
+        NEXT_PUBLIC_API_URL: https://localhost:${HOST_API_PORT:-3001}/api/v1
         # Vazia em dev: login e dashboard rodam no mesmo host do site.
         NEXT_PUBLIC_ADMIN_URL: ''
         NEXT_PUBLIC_POSTHOG_KEY: ${NEXT_PUBLIC_POSTHOG_KEY:-}
@@ -591,7 +591,7 @@ services:
       # BFF do dashboard fala com a API pela rede interna, como na VPS.
       MOVIVO_API_URL: http://api:3001/api/v1
     ports:
-      - '127.0.0.1:${HOST_WEB_PORT:-3000}:3000'
+      - '127.0.0.1:${HOST_WEB_PORT:-3000}:3444'
     deploy:
       resources:
         limits:

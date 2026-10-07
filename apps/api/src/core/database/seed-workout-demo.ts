@@ -3,6 +3,7 @@ import { CONSENT_TEXTS } from '@movivo/shared';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { and, eq } from 'drizzle-orm';
 import postgres from 'postgres';
+import { migrationPostgresTls } from './postgres-tls';
 
 import { loadEnv } from '../config/load-env';
 import {
@@ -74,7 +75,15 @@ const prescription = {
 };
 
 async function main() {
-  const client = postgres({ host, port, user, password, database, ssl: false, max: 1 });
+  const client = postgres({
+    host,
+    port,
+    user,
+    password,
+    database,
+    ssl: migrationPostgresTls(env, host),
+    max: 1,
+  });
   try {
     const db = drizzle(client);
     const [owner] = await db
