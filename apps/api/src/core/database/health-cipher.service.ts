@@ -117,7 +117,9 @@ export class HealthCipherService {
       const id = this.config.healthCipher?.keyId ?? LEGACY_KEY_ID;
       const header = `${PREFIX}${id}:`;
       const iv = randomBytes(12);
-      const cipher = createCipheriv('aes-256-gcm', this.localKey(id), iv);
+      const cipher = createCipheriv('aes-256-gcm', this.localKey(id), iv, {
+        authTagLength: 16,
+      });
       cipher.setAAD(Buffer.from(header));
       const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
       return Buffer.concat([Buffer.from(header), iv, cipher.getAuthTag(), encrypted]);
@@ -172,6 +174,7 @@ export class HealthCipherService {
           'aes-256-gcm',
           this.localKey(id),
           ciphertext.subarray(offset, offset + 12),
+          { authTagLength: 16 },
         );
         decipher.setAAD(ciphertext.subarray(0, offset));
         decipher.setAuthTag(ciphertext.subarray(offset + 12, offset + 28));
