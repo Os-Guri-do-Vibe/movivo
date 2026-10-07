@@ -24,6 +24,13 @@ export const SECRET_KEYS = [
   'REDIS_SENTINEL_PASSWORD',
   // Sprint 1 — cifra em repouso do dado de saúde (US-1.1 / Sato §7.3).
   'PGCRYPTO_KEY',
+  'HEALTH_CIPHER_KEYRING',
+  'VAULT_TOKEN',
+  // Certificados públicos usam o mesmo contrato de arquivo (não vão para o log).
+  'DATABASE_SSL_CA',
+  'MIGRATION_DATABASE_SSL_CA',
+  'REDIS_TLS_CA',
+  'VAULT_CA',
   // Sprint 1 — par de chaves RS256 do JWT (US-1.4 / Sato §9.1). A pública não é
   // secreta por natureza, mas usa o mesmo contrato `*_FILE` para ser carregada do
   // arquivo do Docker Secret e é redigida no snapshot por uniformidade.

@@ -94,6 +94,35 @@ function repositoryWithSigner(professionalId: string | undefined) {
 
 const SESSION_ID = '33333333-3333-4333-8333-333333333333';
 
+describe('ProtocolRepository PDF cifrado', () => {
+  it('grava envelope em vez dos bytes PDF e decifra na leitura autorizada', async () => {
+    const pdf = Buffer.from('%PDF-1.7\nexemplo');
+    const envelope = Buffer.from('vault:v2:synthetic');
+    const set = vi.fn((values: unknown) => ({ where: vi.fn(async () => values) }));
+    const tx = {
+      update: vi.fn(() => ({ set })),
+      select: vi.fn(() => ({
+        from: () => ({ where: () => ({ limit: async () => [{ pdfContent: envelope }] }) }),
+      })),
+    };
+    const db = {
+      runAsUser: vi.fn((_id, _role, callback: (value: unknown) => Promise<unknown>) =>
+        callback(tx),
+      ),
+    } as unknown as TenantDatabase;
+    const cipher = {
+      encryptBytes: vi.fn(async () => envelope),
+      decryptBytes: vi.fn(async () => pdf),
+    } as unknown as HealthCipherService;
+    const repo = new ProtocolRepository(db, cipher, mockLogger);
+    await repo.setPdfContent(persistInput.userId, 'protocol-1', pdf);
+    expect(set).toHaveBeenCalledWith({ pdfContent: envelope });
+    expect(set).not.toHaveBeenCalledWith({ pdfContent: pdf });
+    expect(await repo.findPdfById(persistInput.userId, 'protocol-1')).toEqual(pdf);
+    expect(cipher.decryptBytes).toHaveBeenCalledWith(envelope);
+  });
+});
+
 const persistInput = {
   userId: '11111111-1111-4111-8111-111111111111',
   content,

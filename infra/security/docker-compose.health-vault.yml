@@ -1,0 +1,14 @@
+# Vault externo provisionado com TLS válido e ACL mínima (encrypt/decrypt).
+# Não inicia Vault em modo dev nem dá token root à aplicação.
+services:
+  api:
+    environment:
+      HEALTH_CIPHER_PROVIDER: VAULT
+      VAULT_ADDR: ${VAULT_ADDR:?informe a origem HTTPS do Vault}
+      VAULT_TRANSIT_KEY: ${VAULT_TRANSIT_KEY:-movivo-health}
+      VAULT_TOKEN_FILE: /run/secrets/vault_token
+    secrets:
+      - vault_token
+secrets:
+  vault_token:
+    file: ./secrets/vault_token

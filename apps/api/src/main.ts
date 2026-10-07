@@ -117,7 +117,7 @@ async function bootstrap(): Promise<void> {
   // que justifique aceitar esse risco em prod. Ver `core/swagger/setup-swagger.ts`.
   const swaggerPath = setupSwagger(app, config);
 
-  await app.listen(config.httpPort, '0.0.0.0');
+  await app.listen(config.httpPort, config.httpBindHost);
 
   const logger = new Logger('Bootstrap');
   logger.log(

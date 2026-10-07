@@ -125,3 +125,15 @@ it('redige mensagem e stack de Error sem perder diagnóstico', () => {
   expect(JSON.stringify(output)).toContain('Error');
   expect(JSON.stringify(output)).toContain('falhou');
 });
+
+it('redige keyring inteiro e token Vault pelo inventário compartilhado de secrets', () => {
+  const result = redactObject({
+    HEALTH_CIPHER_KEYRING: '{"active":"secret-material"}',
+    VAULT_TOKEN: 'secret-token',
+    nested: { HEALTH_CIPHER_KEYRING: { active: 'secret-material' }, VAULT_TOKEN: 'token' },
+  }) as Record<string, unknown>;
+  expect(result.HEALTH_CIPHER_KEYRING).toBe(REDACTED);
+  expect(result.VAULT_TOKEN).toBe(REDACTED);
+  expect(JSON.stringify(result)).not.toContain('secret-material');
+  expect(JSON.stringify(result)).not.toContain('secret-token');
+});

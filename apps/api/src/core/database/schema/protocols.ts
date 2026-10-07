@@ -134,6 +134,7 @@ export const protocols = pgTable(
      * `DashboardService.signProtocol` e enviado como documento pelo WhatsApp. `NULL` até a
      * assinatura CREF — protocolo `AUTO_APPROVED` ainda não gera PDF (Sprint futura).
      */
+    /** PDF assinado cifrado pelo HealthCipherService; legado %PDF- migrado pela rotação. */
     pdfContent: bytea('pdf_content'),
 
     /**

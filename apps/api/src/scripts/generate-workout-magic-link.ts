@@ -16,6 +16,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { eq } from 'drizzle-orm';
 import postgres from 'postgres';
+import { migrationPostgresTls } from '../core/database/postgres-tls';
 
 import { loadEnv } from '../core/config/load-env';
 import { users, workoutAccessTokens } from '../core/database/schema';
@@ -48,7 +49,15 @@ async function main(): Promise<void> {
     throw new Error('Configuração incompleta. Defina MIGRATION_DATABASE_* em apps/api/.env.');
   }
 
-  const client = postgres({ host, port, user, password, database, ssl: false, max: 1 });
+  const client = postgres({
+    host,
+    port,
+    user,
+    password,
+    database,
+    ssl: migrationPostgresTls(env, host),
+    max: 1,
+  });
   try {
     const db = drizzle(client);
     const [row] = await db

@@ -29,6 +29,7 @@ import type { ConnectionOptions } from 'bullmq';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { eq, desc, and } from 'drizzle-orm';
 import postgres from 'postgres';
+import { migrationPostgresTls } from '../core/database/postgres-tls';
 import Redis from 'ioredis';
 
 import { loadEnv } from '../core/config/load-env';
@@ -58,7 +59,15 @@ async function main(): Promise<void> {
   // sabemos ser o master agora (`docker port movivo-redis-master`).
   const redisConnection = { host: '127.0.0.1', port: 6379, password: env.REDIS_PASSWORD };
 
-  const client = postgres({ host, port, user, password, database, ssl: false, max: 1 });
+  const client = postgres({
+    host,
+    port,
+    user,
+    password,
+    database,
+    ssl: migrationPostgresTls(env, host),
+    max: 1,
+  });
   const redis = new Redis(redisConnection);
   const queue = new Queue(QUEUE.whatsappOutbound, {
     connection: redisConnection as ConnectionOptions,

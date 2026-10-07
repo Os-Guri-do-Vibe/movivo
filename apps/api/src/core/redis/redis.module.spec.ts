@@ -53,3 +53,12 @@ describe('buildRedisOptions', () => {
     expect(buildRedisOptions(configWith({})).keyPrefix).toBeUndefined();
   });
 });
+
+it('TLS valida CA no master e nos Sentinels, inclusive no caminho Sentinel de descoberta', () => {
+  const options = buildRedisOptions(
+    configWith({ REDIS_TLS_ENABLED: true, REDIS_TLS_CA: 'private-ca' }),
+  );
+  expect(options.tls).toEqual({ ca: 'private-ca', rejectUnauthorized: true });
+  expect(options.sentinelTLS).toEqual({ ca: 'private-ca', rejectUnauthorized: true });
+  expect(options.enableTLSForSentinelMode).toBe(true);
+});

@@ -31,8 +31,7 @@ secrets:
 
 ## up: constrói e sobe o stack (dados + migração + API + web) e BLOQUEIA até ficar healthy
 up:
-	$(COMPOSE) up -d --build --wait --wait-timeout 600
-	@$(MAKE) --no-print-directory ps
+	@bash scripts/start-local.sh
 
 ## down: derruba os containers e a rede (VOLUMES PRESERVADOS — os dados ficam)
 down:
@@ -63,28 +62,23 @@ health:
 
 ## psql: shell psql como movivo_app, VIA PGBOUNCER (5433) — o caminho da app
 psql:
-	@$(COMPOSE) exec -e PGPASSWORD="$$(cat secrets/postgres_app_password)" \
-		pgbouncer psql -h 127.0.0.1 -p 5433 -U movivo_app -d movivo
+	@bash scripts/infra.sh psql
 
 ## psql-admin: shell psql como movivo_migrator, DIRETO na 5432 (só migração/DDL)
 psql-admin:
-	@$(COMPOSE) exec -e PGPASSWORD="$$(cat secrets/postgres_migrator_password)" \
-		postgres psql -h 127.0.0.1 -p 5432 -U movivo_migrator -d movivo
+	@bash scripts/infra.sh psql-admin
 
 ## pools: SHOW POOLS no console admin do PgBouncer (confirma transaction mode)
 pools:
-	@$(COMPOSE) exec -e PGPASSWORD="$$(cat secrets/postgres_migrator_password)" \
-		pgbouncer psql -h 127.0.0.1 -p 5433 -U movivo_migrator -d pgbouncer -c 'SHOW POOLS;'
+	@bash scripts/infra.sh pools
 
 ## redis-cli: shell redis-cli autenticado no master
 redis-cli:
-	@$(COMPOSE) exec redis-master sh -c \
-		'redis-cli --no-auth-warning -a "$$(cat /run/secrets/redis_password)"'
+	@bash scripts/infra.sh redis-cli
 
 ## sentinel: estado do master conforme o Sentinel
 sentinel:
-	@$(COMPOSE) exec redis-sentinel sh -c \
-		'redis-cli --no-auth-warning -a "$$(cat /run/secrets/redis_password)" -p 26379 sentinel master movivo-master'
+	@bash scripts/infra.sh sentinel
 
 ## verify: roda o checklist de segurança/sanidade do ambiente (US-0.2 DoD)
 verify:

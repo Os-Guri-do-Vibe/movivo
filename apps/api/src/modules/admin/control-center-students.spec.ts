@@ -72,7 +72,10 @@ function build(...results: unknown[][]) {
     { ping: vi.fn() } as unknown as DatabaseHealthService,
     { ping: vi.fn() } as unknown as RedisHealthService,
     audit as unknown as AuditService,
-    { decryptHealth } as unknown as HealthCipherService,
+    {
+      decryptHealth,
+      decryptText: vi.fn(async (value: string) => value),
+    } as unknown as HealthCipherService,
     { mget: vi.fn().mockResolvedValue([]) } as unknown as Redis,
     new RedisKeyBuilder('movivo'),
     { activePayload: vi.fn().mockResolvedValue(null) } as unknown as AgentConfigRepository,

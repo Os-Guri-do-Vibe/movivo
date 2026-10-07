@@ -117,7 +117,7 @@ if [ "$MODE" = "runtime" ]; then
   done
 
   check "Redis mantém noeviction para o BullMQ" docker compose exec -T redis-master sh -c \
-    'test "$(redis-cli --no-auth-warning -a "$(cat /run/secrets/redis_password)" --raw CONFIG GET maxmemory-policy | tail -1)" = noeviction'
+    'test "$(REDISCLI_AUTH="$(cat /run/secrets/redis_password)" redis-cli --tls --cacert /run/secrets/internal_ca --sni localhost --raw CONFIG GET maxmemory-policy | tail -1)" = noeviction'
 
   table_check="$(docker compose exec -T postgres sh -c \
     'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "$1"' _ \

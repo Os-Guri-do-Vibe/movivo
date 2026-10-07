@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /**
  * Trilha de acesso (`audit_logs`) ponta a ponta contra o Postgres real: login, falhas
  * (deduplicadas), logout e troca de senha viram linhas imutáveis com o ator certo.
@@ -34,6 +35,7 @@ let staffId = '';
 
 const adminClient = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.MIGRATION_DATABASE_HOST ?? 'localhost'),
   port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 5432),
   user: 'postgres',
   password: readFileSync(
@@ -41,7 +43,7 @@ const adminClient = postgres({
     'utf8',
   ).trimEnd(),
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 1,
   idle_timeout: 5,
   onnotice: () => undefined,

@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /**
  * Regressão do achado 2026-08-25: `${users.id}` interpolado dentro de um `sql` template,
  * em correlação de subquery, NÃO qualifica com a tabela — vira `"id"` cru no SQL gerado.
@@ -27,11 +28,12 @@ const { env } = loadEnv();
 const RUN = Date.now().toString().slice(-8);
 const migrator = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.MIGRATION_DATABASE_HOST ?? 'localhost'),
   port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 15432),
   user: env.MIGRATION_DATABASE_USER ?? 'movivo_migrator',
   password: env.MIGRATION_DATABASE_PASSWORD,
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 1,
   prepare: false,
   idle_timeout: 5,

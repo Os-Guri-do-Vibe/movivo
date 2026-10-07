@@ -4,6 +4,14 @@
 > pela **ADR-005-R2**. O incidente continua no registro de risco, mas DeepSeek, OpenAI e Anthropic
 > passam pelo mesmo gate contratual, de retenção e transferência, aplicado no runtime antes do envio.
 
+> **Revisão aplicada (2026-10-06):** controles de dados sensíveis, cifra de aplicação,
+> rotação e inventário atualizado em [relatório complementar](../seguranca/dados-sensiveis-2026-10-06.md).
+> Esta revisão supera a estratégia pgcrypto abaixo para novas escritas; legado permanece legível.
+> **Fechamento operacional (2026-10-07): CONCLUÍDO** para Vault, chaves independentes,
+> TLS, recifra e restore local/VPS. Checks reais 21/21 por ambiente e restore versão 1/2.
+> O corpo original abaixo é histórico de planejamento; cifra integral dos volumes, conversas
+> e filas continua sem comprovação, conforme o inventário complementar.
+
 **Data:** 2026-07-22
 **Ideia analisada:** MOVIVO — AI Coach de treino no WhatsApp com supervisão CREF
 **Pasta do projeto:** docs/fitness-ia-whatsapp/

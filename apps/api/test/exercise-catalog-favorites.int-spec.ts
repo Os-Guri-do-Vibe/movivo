@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /**
  * Integração — favoritos do catálogo de exercícios (achado 2026-09-26, validação 2026-09-29).
  *
@@ -76,11 +77,12 @@ const READ_FAILED_EVENT = 'exercise_catalog_favorites_read_failed';
 // Migrador (dono das tabelas, BYPASSRLS): só setup/teardown e leitura de verificação.
 const migrator = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.MIGRATION_DATABASE_HOST ?? 'localhost'),
   port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 15432),
   user: env.MIGRATION_DATABASE_USER ?? 'movivo_migrator',
   password: env.MIGRATION_DATABASE_PASSWORD,
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 1,
   prepare: false,
   idle_timeout: 5,

@@ -32,6 +32,8 @@ const ALLOWED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
       'DDL de migração (GRANT/REVOKE/CREATE EXTENSION): sem parâmetro possível; role validada por sqlIdentifier e extensões são constante',
   },
   'sql.identifier': {
+    'scripts/rotate-health-cipher.ts':
+      'manutenção de cifra: sete alvos constantes; writeRotatedCipher recusa tabela/coluna/id fora da allowlist antes da query; valores continuam parametrizados (revisão Sato 2026-10-06)',
     'modules/anamnesis/anamnesis.service.ts':
       'nome de coluna não é parametrizável; union fechado + allowlist em runtime (JSONB_BLOCK_COLUMNS) + escape do drizzle',
   },

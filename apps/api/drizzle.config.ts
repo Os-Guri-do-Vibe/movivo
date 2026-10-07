@@ -24,6 +24,7 @@
  * próximas sprints (Sato §9).
  */
 import { defineConfig } from 'drizzle-kit';
+import { migrationPostgresTls } from './src/core/database/postgres-tls';
 
 import { loadEnv } from './src/core/config/load-env';
 
@@ -70,7 +71,7 @@ export default defineConfig({
     user: required('MIGRATION_DATABASE_USER', user),
     password: required('MIGRATION_DATABASE_PASSWORD', password),
     database: required('DATABASE_NAME', database),
-    ssl: false,
+    ssl: migrationPostgresTls(env, host),
   },
   verbose: true,
   strict: true,

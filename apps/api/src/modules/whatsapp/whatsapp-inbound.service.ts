@@ -38,6 +38,7 @@ import {
 } from '../../core/audio/audio-transcription.port';
 import { AppConfigService } from '../../core/config';
 import { HealthConsentService } from '../../core/database/health-consent.service';
+import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { conversations, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { WORKOUT_INBOUND_EVENT, type CheckinInboundEvent } from '../../core/event-bus/events';
@@ -124,6 +125,7 @@ export class WhatsappInboundService {
     private readonly events: DomainEventBus,
     private readonly queueEvents: DashboardQueueEventsService,
     private readonly config: AppConfigService,
+    private readonly cipher: HealthCipherService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(WhatsappInboundService.name);
@@ -542,12 +544,13 @@ export class WhatsappInboundService {
     vote: 'UP' | 'DOWN',
     correlationId: string,
   ): Promise<void> {
+    const content = await this.cipher.encryptText(`feedback:${vote}`);
     await this.db.runAsUser(userId, 'USER', async (tx) => {
       await tx.insert(conversations).values({
         userId,
         direction: 'INBOUND',
         messageType: 'SYSTEM',
-        content: `feedback:${vote}`,
+        content,
       });
     });
     this.logger.info(

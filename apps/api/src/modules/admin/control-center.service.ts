@@ -1364,6 +1364,14 @@ export class ControlCenterService {
     // Decifra fora da transação (o `HealthCipherService` usa o cliente do core), e só
     // quando a capability existe: sem ela o ciphertext nem é aberto.
     const declared = canReadHealth ? await this.decryptCheckins(raw.checkinRows) : [];
+    const blockedOccurrences = canReadHealth
+      ? await Promise.all(
+          raw.blockedRows.map(async (row) => ({
+            at: row.createdAt.toISOString(),
+            content: await this.cipher.decryptText(row.content),
+          })),
+        )
+      : [];
     const evolution = declared.map(({ point }) => point);
     const painReports = declared.flatMap(({ point, painReport }) =>
       painReport ? [{ at: point.at, week: point.week, text: painReport }] : [],
@@ -1556,12 +1564,7 @@ export class ControlCenterService {
         validated: raw.quality?.validated ?? 0,
         // Achado 2026-09-08 (decisão do fundador): painel é de uso interno da equipe MOVIVO —
         // sem anonimização do conteúdo real da conversa.
-        occurrences: canReadHealth
-          ? raw.blockedRows.map((occurrence) => ({
-              at: occurrence.createdAt.toISOString(),
-              content: occurrence.content,
-            }))
-          : [],
+        occurrences: blockedOccurrences,
       },
       health: canReadHealth ? { parqState: row.parqState, painReports, evolution } : null,
     };

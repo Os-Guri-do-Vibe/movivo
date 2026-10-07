@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /** Agregacao real por utm_campaign: k-anonimato e formulas com tolerancia zero. */
 import 'reflect-metadata';
 
@@ -18,11 +19,12 @@ const CAMPAIGN = `camp_${RUN}`;
 const SMALL_CAMPAIGN = `small_${RUN}`;
 const migrator = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.MIGRATION_DATABASE_HOST ?? 'localhost'),
   port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 15432),
   user: env.MIGRATION_DATABASE_USER ?? 'movivo_migrator',
   password: env.MIGRATION_DATABASE_PASSWORD,
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 1,
   prepare: false,
   idle_timeout: 5,

@@ -16,6 +16,7 @@ import { eq } from 'drizzle-orm';
 import type { BiologicalSex } from '@movivo/shared';
 
 import { conversations, handoffAlerts, users } from '../../core/database/schema';
+import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import type { ScrubUser } from '../ai-coach/llm/llm.types';
@@ -46,6 +47,7 @@ export class ConversationRepository {
   constructor(
     private readonly db: TenantDatabase,
     private readonly queueEvents: DashboardQueueEventsService,
+    private readonly cipher: HealthCipherService,
   ) {}
 
   /**
@@ -92,11 +94,12 @@ export class ConversationRepository {
   }
 
   async persistTurn(input: PersistTurnInput): Promise<void> {
+    const content = await this.cipher.encryptText(input.content);
     await this.db.runAsUser(input.userId, 'USER', async (tx) => {
       await tx.insert(conversations).values({
         userId: input.userId,
         direction: input.direction,
-        content: input.content,
+        content,
         validationPassed: input.validationPassed ?? null,
         modelUsed: input.modelUsed ?? null,
         latencyMs: input.latencyMs ?? null,

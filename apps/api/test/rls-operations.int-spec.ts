@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /** RLS real: operações SQL sem filtros da aplicação e reconciliação de políticas. */
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -14,11 +15,12 @@ const run = randomUUID();
 const suffix = `${Date.now()}${Math.floor(Math.random() * 100)}`;
 const app = postgres({
   host: env.DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.DATABASE_HOST ?? 'localhost'),
   port: Number(env.DATABASE_PORT ?? 5433),
   user: env.DATABASE_USER ?? 'movivo_app',
   password: env.DATABASE_PASSWORD,
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   prepare: false,
   max: 1,
   onnotice: () => {
@@ -27,6 +29,7 @@ const app = postgres({
 });
 const admin = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.MIGRATION_DATABASE_HOST ?? 'localhost'),
   port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 15432),
   user: 'postgres',
   password: readFileSync(
@@ -34,7 +37,7 @@ const admin = postgres({
     'utf8',
   ).trimEnd(),
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 1,
   onnotice: () => {
     /* Notices SQL não devem registrar valores da fixture. */

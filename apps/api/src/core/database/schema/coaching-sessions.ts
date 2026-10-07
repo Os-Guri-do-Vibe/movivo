@@ -27,7 +27,7 @@ export const coachingSessions = pgTable(
     /** Dia da sessão (America/Sao_Paulo) — mesma chave do `session:{user}:{yyyy-mm-dd}` do Redis. */
     sessionDate: date('session_date').notNull(),
 
-    /** Resumo condensado dos turnos antigos (2-3 frases). `null` até a sessão ficar longa. */
+    /** Resumo cifrado como envelope de texto; `null` até a sessão ficar longa. */
     summary: text('summary'),
 
     ...timestampColumns,

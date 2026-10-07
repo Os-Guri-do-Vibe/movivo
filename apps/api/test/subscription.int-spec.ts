@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 import { AccessLinkService } from '../src/core/database/access-link.service';
 /**
  * Integração do SubscriptionModule (US-4.1) contra o stack Docker.
@@ -53,6 +54,7 @@ let checkoutTokens: CheckoutTokenService;
 
 const adminClient = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.MIGRATION_DATABASE_HOST ?? 'localhost'),
   port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 15432),
   user: 'postgres',
   password: readFileSync(
@@ -60,7 +62,7 @@ const adminClient = postgres({
     'utf8',
   ).trimEnd(),
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 1,
   idle_timeout: 5,
   onnotice: () => undefined,

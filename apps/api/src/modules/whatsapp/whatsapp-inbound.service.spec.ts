@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AudioTranscriptionPort } from '../../core/audio/audio-transcription.port';
 import type { AppConfigService } from '../../core/config';
 import { HealthConsentService } from '../../core/database/health-consent.service';
+import type { HealthCipherService } from '../../core/database/health-cipher.service';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DomainEventBus } from '../../core/event-bus/event-bus.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
@@ -151,6 +152,7 @@ function makeService(
     events,
     { emit: vi.fn() } as unknown as DashboardQueueEventsService,
     config,
+    { encryptText: vi.fn(async (value: string) => value) } as unknown as HealthCipherService,
     logger,
   );
   return {

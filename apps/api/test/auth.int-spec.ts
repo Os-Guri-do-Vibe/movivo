@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /**
  * Integração — AUTH (US-1.4 / valida TASK-1.4.1..1.4.3 — Sato §9.1).
  *
@@ -56,6 +57,7 @@ const userEmail = `user_${RUN}@movivo.test`;
 // Cliente admin (superusuário, BYPASSRLS) só para teardown.
 const adminClient = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.MIGRATION_DATABASE_HOST ?? 'localhost'),
   port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 5432),
   user: 'postgres',
   password: readFileSync(
@@ -63,7 +65,7 @@ const adminClient = postgres({
     'utf8',
   ).trimEnd(),
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 1,
   idle_timeout: 5,
   onnotice: () => {

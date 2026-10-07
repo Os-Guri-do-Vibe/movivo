@@ -20,7 +20,7 @@
 # docs/operacoes/deploy-producao.md):
 #   openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
 #     -pass file:/opt/movivo/secrets/backup_encryption_key \
-#     -in movivo-AAAAMMDD-HHMM.dump.enc \
+#     -in movivo-AAAAMMDD-HHMMSS.dump.enc \
 #   | docker exec -i movivo-postgres pg_restore -U postgres -d movivo --clean --if-exists
 # =============================================================================
 set -euo pipefail
@@ -30,7 +30,7 @@ KEY_FILE=/opt/movivo/secrets/backup_encryption_key
 RETENTION_DAYS="${RETENTION_DAYS:-7}"
 WEEKLY_DIR="${BACKUP_DIR}/weekly"
 WEEKLY_RETENTION_DAYS="${WEEKLY_RETENTION_DAYS:-35}"
-stamp="$(date +%Y%m%d-%H%M)"
+stamp="$(date +%Y%m%d-%H%M%S)"
 
 [[ -s "$KEY_FILE" ]] || { echo "ERRO: ${KEY_FILE} ausente" >&2; exit 1; }
 umask 077
@@ -69,6 +69,19 @@ dump_db() {
 status=0
 dump_db movivo-postgres postgres movivo || status=1
 dump_db movivo-evolution-postgres evolution evolution || status=1
+
+# Vault Raft snapshot is barrier-encrypted; wrap with the separate backup key too.
+# Unseal/root custody stays outside this archive and the application volumes.
+vault_out="${BACKUP_DIR}/vault-${stamp}.snapshot.enc"
+vault_tmp="$(mktemp "${BACKUP_DIR}/.vault-snapshot.XXXXXX")"
+if python3 /opt/movivo/bin/provision-security.py --root /opt/movivo \
+    --environment production --vault --snapshot "$vault_tmp" && encrypt "${vault_out}.tmp" < "$vault_tmp"; then
+  mv "${vault_out}.tmp" "$vault_out"
+  echo "ok  ${vault_out}"
+else
+  rm -f "${vault_out}.tmp"; status=1
+fi
+rm -f "$vault_tmp"
 
 uploads_out="${BACKUP_DIR}/uploads-${stamp}.tar.enc"
 if tar -C /opt/movivo -cf - uploads | encrypt "${uploads_out}.tmp"; then

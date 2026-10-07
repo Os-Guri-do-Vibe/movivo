@@ -99,6 +99,7 @@ export const envSchema = z
 
     // -------------------------------------------------------------------- HTTP
     API_PORT: envPort.default(3001),
+    HTTP_BIND_HOST: z.string().min(1).default('0.0.0.0'),
     API_GLOBAL_PREFIX: z.string().min(1).default('api/v1'),
     /** Origens permitidas em CORS. Nunca `*` — regra de Sato §9. */
     API_CORS_ORIGINS: csv('API_CORS_ORIGINS'),
@@ -124,6 +125,7 @@ export const envSchema = z
     DATABASE_USER: z.string().min(1),
     DATABASE_PASSWORD: z.string().min(1),
     DATABASE_SSL: envBoolean.default(false),
+    DATABASE_SSL_CA: z.string().min(1).optional(),
     DATABASE_PREPARE: envBoolean.default(false),
     DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
     DATABASE_CONNECT_TIMEOUT_SECONDS: z.coerce.number().int().min(1).max(60).default(10),
@@ -133,12 +135,15 @@ export const envSchema = z
     MIGRATION_DATABASE_PORT: envPort.optional(),
     MIGRATION_DATABASE_USER: z.string().min(1).optional(),
     MIGRATION_DATABASE_PASSWORD: z.string().min(1).optional(),
+    MIGRATION_DATABASE_SSL: envBoolean.optional(),
+    MIGRATION_DATABASE_SSL_CA: z.string().min(1).optional(),
 
     // ------------------------------------------------------------------- Redis
     REDIS_SENTINEL_HOSTS: sentinelHosts,
     REDIS_SENTINEL_MASTER_NAME: z.string().min(1),
     REDIS_DB: z.coerce.number().int().min(0).max(15).default(0),
     REDIS_TLS_ENABLED: envBoolean.default(false),
+    REDIS_TLS_CA: z.string().min(1).optional(),
     /** Prefixo raiz de todas as chaves. O isolamento por titular vem do `RedisKeyBuilder`. */
     REDIS_KEY_PREFIX: z.string().min(1).default('movivo'),
     REDIS_PASSWORD: z.string().min(1),
@@ -152,6 +157,66 @@ export const envSchema = z
      * sensível, então o boot **falha rápido** sem ela — não há default nem fallback.
      */
     PGCRYPTO_KEY: z.string().min(1),
+
+    /** Novas escritas usam AES-GCM local ou Vault Transit; pgcrypto só lê legado. */
+    HEALTH_CIPHER_PROVIDER: z.enum(['LOCAL', 'VAULT']).default('LOCAL'),
+    HEALTH_CIPHER_KEY_ID: z
+      .string()
+      .regex(/^[a-zA-Z0-9_-]{1,80}$/)
+      .default('legacy-derived'),
+    /** JSON {kid: base64(32 bytes)} via HEALTH_CIPHER_KEYRING_FILE. */
+    HEALTH_CIPHER_KEYRING: z
+      .string()
+      .optional()
+      .superRefine((value, ctx) => {
+        if (value === undefined) return;
+        try {
+          const keys: unknown = JSON.parse(value);
+          if (
+            !keys ||
+            typeof keys !== 'object' ||
+            Array.isArray(keys) ||
+            !Object.entries(keys).length ||
+            Object.entries(keys).some(
+              ([id, key]) =>
+                id === 'legacy-derived' ||
+                !/^[a-zA-Z0-9_-]{1,80}$/.test(id) ||
+                typeof key !== 'string' ||
+                !/^[A-Za-z0-9+/]{43}=$/.test(key) ||
+                Buffer.from(key, 'base64').length !== 32,
+            )
+          ) {
+            throw new Error();
+          }
+        } catch {
+          ctx.addIssue({
+            code: 'custom',
+            message: 'keyring deve ser JSON de IDs não reservados e chaves base64 de 32 bytes',
+          });
+        }
+      }),
+    VAULT_ADDR: z
+      .string()
+      .url()
+      .refine((url) => {
+        const parsed = new URL(url);
+        return (
+          parsed.protocol === 'https:' &&
+          !parsed.username &&
+          !parsed.password &&
+          parsed.pathname === '/' &&
+          !parsed.search &&
+          !parsed.hash
+        );
+      }, 'Vault exige origem HTTPS sem credenciais ou caminho')
+      .optional(),
+    VAULT_TOKEN: z.string().min(1).optional(),
+    VAULT_CA: z.string().min(1).optional(),
+    VAULT_TRANSIT_KEY: z
+      .string()
+      .regex(/^[a-zA-Z0-9_-]{1,80}$/)
+      .default('movivo-health'),
+    VAULT_TRANSIT_TIMEOUT_MS: z.coerce.number().int().min(100).max(30_000).default(5000),
 
     // ------------------------------------------------ JWT / AUTH (US-1.4)
     /**
@@ -431,6 +496,52 @@ export const envSchema = z
     DEV_PROFESSIONAL_PASSWORD: z.string().min(12).optional(),
   })
   .superRefine((config, ctx) => {
+    if (config.DATABASE_SSL_CA && !config.DATABASE_SSL) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['DATABASE_SSL'],
+        message: 'CA configurada exige DATABASE_SSL=true',
+      });
+    }
+    if (config.REDIS_TLS_CA && !config.REDIS_TLS_ENABLED) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['REDIS_TLS_ENABLED'],
+        message: 'CA configurada exige REDIS_TLS_ENABLED=true',
+      });
+    }
+
+    if (config.HEALTH_CIPHER_PROVIDER === 'VAULT' && (!config.VAULT_ADDR || !config.VAULT_TOKEN)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['VAULT_ADDR'],
+        message: 'Vault exige VAULT_ADDR e VAULT_TOKEN_FILE',
+      });
+    }
+    if (config.HEALTH_CIPHER_KEYRING) {
+      try {
+        const keys = JSON.parse(config.HEALTH_CIPHER_KEYRING) as Record<string, string>;
+        if (!Object.hasOwn(keys, config.HEALTH_CIPHER_KEY_ID)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['HEALTH_CIPHER_KEY_ID'],
+            message: 'ID ativo deve existir no keyring',
+          });
+        }
+      } catch {
+        /* Validação do keyring já reporta erro sem expor valores. */
+      }
+    } else if (
+      config.HEALTH_CIPHER_PROVIDER === 'LOCAL' &&
+      config.HEALTH_CIPHER_KEY_ID !== 'legacy-derived'
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['HEALTH_CIPHER_KEYRING'],
+        message: 'keyring obrigatório para ID não legado',
+      });
+    }
+
     if (config.DATABASE_PORT === POSTGRES_DIRECT_PORT) {
       ctx.addIssue({
         code: 'custom',

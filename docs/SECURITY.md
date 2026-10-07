@@ -278,3 +278,67 @@ Responsável pela auditoria: **Sato**. Toda rotação é registrada em `audit_lo
 Contato: os fundadores do repositório. **Não abra issue pública** para vulnerabilidade
 — relate em canal privado, com detalhes de reprodução, e aguarde confirmação antes
 de qualquer divulgação.
+
+## 7. Revisão de dados sensíveis — 2026-10-06 (vigente)
+
+A classificação, controles implementados, gaps de infraestrutura e runbook executável
+estão em [dados-sensiveis-2026-10-06.md](seguranca/dados-sensiveis-2026-10-06.md).
+Esta revisão **substitui a estratégia de cifra/rotação pgcrypto** da §4 para novas
+escritas do `HealthCipherService`. A chave `PGCRYPTO_KEY_FILE` permanece indispensável
+para legado, aliases existentes, migrações SQL e backups antigos. Novas escritas são
+AES-256-GCM **na aplicação**, com ID de chave autenticado, ou Vault Transit via HTTPS.
+
+`HEALTH_CIPHER_KEYRING_FILE` e `VAULT_TOKEN_FILE` são segredos redigidos pelo mesmo
+contrato `*_FILE`. Docker Secrets em Compose são mounts de arquivos: separar o mount
+do banco não equivale a um KMS e não protege contra root do host. Não armazenar esses
+secrets junto ao dump nem incluí-los em imagem, Git ou logs.
+
+A presença de ciphertext em algumas colunas **não comprova** proteção de todo o
+PostgreSQL, Redis, volumes ou backups. Conteúdo de conversa, metadados e inferências
+de saúde também precisam da proteção de armazenamento descrita no inventário.
+
+### 7.1 CA privada dos clientes internos
+
+`DATABASE_SSL_CA_FILE`, `MIGRATION_DATABASE_SSL_CA_FILE`, `REDIS_TLS_CA_FILE` e
+`VAULT_CA_FILE` carregam o certificado público pelo loader `*_FILE`. Clientes
+PostgreSQL verificam CA e hostname/IP; Redis verifica master e Sentinel e propaga as
+mesmas opções ao BullMQ. Vault aceita CA por endpoint, com TLS verificável. Não há
+flag para desligar autenticação de certificados. `HTTP_BIND_HOST=127.0.0.1` deve ser
+usado quando a API estiver atrás de sidecar TLS no mesmo namespace de rede.
+
+### 7.2 Integração e CI com transporte verificado
+
+A suíte `apps/api/test` usa o helper `migrationPostgresTls` nos 52 clientes diretos
+PostgreSQL, incluindo clientes de runtime, migrador, superusuário e bancos
+provisórios. A verificação usa o hostname efetivamente conectado; flags inválidas
+ou CA configurada com TLS desligado falham antes da conexão. O teardown Redis de
+persona reutiliza `buildRedisOptions`, incluindo TLS para Sentinel e master.
+
+O job de integração gera CA/chaves efêmeras via provisionamento local e configura
+TLS obrigatório com caminhos absolutos de CA, token Vault e keyring no runner.
+Vault Transit é um servidor real inicializado/unsealed, com ACL limitada; não existe
+fallback de CI para certificado não verificado. Os clientes host usam localhost,
+que precisa constar nos SANs. Os dados de integração são sintéticos e descartáveis;
+a suíte não deve rodar contra o banco de desenvolvimento com dados a preservar,
+pois o global setup altera o singleton profissional e os testes criam/removem dados.
+
+
+### 7.3 Estado operacional validado em 2026-10-07
+
+**CONCLUÍDO: Vault Transit real, chaves independentes, transporte TLS verificado,
+recifra e recuperação nos ambientes local e VPS.** Os detalhes e limites são o
+[fechamento operacional](seguranca/dados-sensiveis-2026-10-06.md#fechamento-operacional--2026-10-07).
+
+Checks reais passaram 21/21 por ambiente; recifra local 49/49 e VPS 1/1 MFA, sem
+conflitos. Vault 2.1.1 fixado por digest tem chave versão 2 na VPS, política de API
+limitada a encrypt/decrypt e manutenção de token, rotação automática 2160h e leitura
+de ciphertext anterior preservada. O restore real de 14:20 recuperou os dois bancos,
+uploads e Raft; o checker provou decifra nas versões 1 e 2, usando snapshot fornecido.
+Custódia atual e chaves legadas têm cópia privada fora do repositório e dos volumes.
+
+Raft usa `disable_mlock=true` com swap proibido no container (`memory.swap.max=0`,
+limite memória/swap 512 MiB), conforme orientação HashiCorp. A tentativa inicial
+interrompida por OOM está em quarentena preservada; nenhum dado da API havia sido
+enviado para aquele bootstrap. Esses controles não comprovam cifra dos discos do
+host, conversas, filas ou artefatos vivos listados no inventário. A custódia local
+não equivale a HSM/KMS externo; root do host permanece no modelo de ameaça.

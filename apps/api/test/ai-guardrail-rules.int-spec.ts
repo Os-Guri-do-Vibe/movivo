@@ -1,3 +1,4 @@
+import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /** Integração real: guardrails L1 são append-only e o banco só admite a ação FLAG. */
 import { randomUUID } from 'node:crypto';
 
@@ -15,11 +16,12 @@ const RUN = Date.now().toString().slice(-8);
 const RULE_KEY = randomUUID();
 const appClient = postgres({
   host: env.DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.DATABASE_HOST ?? 'localhost'),
   port: Number(env.DATABASE_PORT ?? 5433),
   user: env.DATABASE_USER ?? 'movivo_app',
   password: env.DATABASE_PASSWORD,
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 3,
   prepare: false,
   idle_timeout: 5,
@@ -30,11 +32,12 @@ const appClient = postgres({
 const tenant = new TenantDatabase(drizzle(appClient) as unknown as DrizzleClient);
 const migratorClient = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
+  ssl: migrationPostgresTls(env, env.MIGRATION_DATABASE_HOST ?? 'localhost'),
   port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 15432),
   user: env.MIGRATION_DATABASE_USER ?? 'movivo_migrator',
   password: env.MIGRATION_DATABASE_PASSWORD,
   database: env.DATABASE_NAME ?? 'movivo',
-  ssl: false,
+
   max: 1,
   prepare: false,
   idle_timeout: 5,

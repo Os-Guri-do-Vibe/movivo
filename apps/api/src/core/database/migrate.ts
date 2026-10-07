@@ -19,6 +19,7 @@ import { resolve } from 'node:path';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
+import { migrationPostgresTls } from './postgres-tls';
 
 import { loadEnv } from '../config/load-env';
 import { sqlIdentifier } from './sql-identifier';
@@ -196,7 +197,7 @@ async function main(): Promise<void> {
     user,
     password,
     database,
-    ssl: false,
+    ssl: migrationPostgresTls(env, host),
     max: 1,
     // Migração é DDL: o runner é single-shot e não deve manter conexão ociosa.
     idle_timeout: 5,

@@ -18,6 +18,7 @@ export interface DatabaseConfig {
   readonly user: string;
   readonly password: string;
   readonly ssl: boolean;
+  readonly sslCa: string | undefined;
   /** Sempre `false`: PgBouncer transaction mode proíbe prepared statements. */
   readonly prepare: false;
   readonly poolMax: number;
@@ -136,6 +137,7 @@ export interface RedisConfig {
   readonly sentinelPassword: string | undefined;
   readonly db: number;
   readonly tls: boolean;
+  readonly tlsCa: string | undefined;
   readonly keyPrefix: string;
   readonly natMap: Readonly<Record<string, { host: string; port: number }>> | undefined;
 }
@@ -172,6 +174,10 @@ export class AppConfigService {
     return this.config.TZ;
   }
 
+  get httpBindHost(): string {
+    return this.config.HTTP_BIND_HOST;
+  }
+
   get httpPort(): number {
     return this.config.API_PORT;
   }
@@ -200,6 +206,7 @@ export class AppConfigService {
       user: this.config.DATABASE_USER,
       password: this.config.DATABASE_PASSWORD,
       ssl: this.config.DATABASE_SSL,
+      sslCa: this.config.DATABASE_SSL_CA,
       prepare: false,
       poolMax: this.config.DATABASE_POOL_MAX,
       connectTimeoutSeconds: this.config.DATABASE_CONNECT_TIMEOUT_SECONDS,
@@ -212,6 +219,21 @@ export class AppConfigService {
    */
   get pgcryptoKey(): string {
     return this.config.PGCRYPTO_KEY;
+  }
+
+  get healthCipher() {
+    return {
+      provider: this.config.HEALTH_CIPHER_PROVIDER,
+      keyId: this.config.HEALTH_CIPHER_KEY_ID,
+      keyring: this.config.HEALTH_CIPHER_KEYRING
+        ? (JSON.parse(this.config.HEALTH_CIPHER_KEYRING) as Record<string, string>)
+        : undefined,
+      vaultAddr: this.config.VAULT_ADDR,
+      vaultToken: this.config.VAULT_TOKEN,
+      vaultCa: this.config.VAULT_CA,
+      vaultKey: this.config.VAULT_TRANSIT_KEY,
+      vaultTimeoutMs: this.config.VAULT_TRANSIT_TIMEOUT_MS,
+    };
   }
 
   /** Config do JWT RS256 (US-1.4 / Sato §9.1). As chaves são segredos redigidos no snapshot. */
@@ -364,6 +386,7 @@ export class AppConfigService {
       sentinelPassword: this.config.REDIS_SENTINEL_PASSWORD ?? this.config.REDIS_PASSWORD,
       db: this.config.REDIS_DB,
       tls: this.config.REDIS_TLS_ENABLED,
+      tlsCa: this.config.REDIS_TLS_CA,
       keyPrefix: this.config.REDIS_KEY_PREFIX,
       natMap: this.config.REDIS_NAT_MAP,
     };

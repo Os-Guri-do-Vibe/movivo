@@ -1,0 +1,7 @@
+[Unit]
+Description=MOVIVO — recuperar Vault selado após reinício
+[Timer]
+OnBootSec=60
+OnUnitInactiveSec=60
+[Install]
+WantedBy=timers.target
