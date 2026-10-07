@@ -1,0 +1,10 @@
+[Unit]
+Description=MOVIVO — agenda do teste de restauração (domingo 04:30 BRT)
+
+[Timer]
+OnCalendar=Sun *-*-* 04:30:00 America/Sao_Paulo
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
