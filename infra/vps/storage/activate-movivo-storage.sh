@@ -33,6 +33,7 @@ mkdir -p /var/lib/containerd /var/lib/docker /opt/movivo
 touch "$secure/.movivo-storage-ready"
 
 install -m 0755 /tmp/movivo-storage-mount.sh /usr/local/sbin/movivo-storage-mount
+install -m 0755 /tmp/verify-movivo-storage.sh /usr/local/sbin/movivo-storage-verify
 install -m 0644 /tmp/movivo-storage-mount.service /etc/systemd/system/movivo-storage-mount.service
 for unit in containerd.service docker.service; do
   install -d -m 0755 "/etc/systemd/system/${unit}.d"
