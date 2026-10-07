@@ -44,6 +44,9 @@ export default defineConfig({
         'src/core/database/schema/**',
         'src/core/database/migrate.ts',
         'src/core/database/seed*.ts',
+        // CLI de manutenção com PostgreSQL/Vault reais: CAS e auditoria têm testes
+        // unitários; o fluxo completo é verificado por dry-run, apply e restore.
+        'src/scripts/rotate-health-cipher.ts',
         // Mesma categoria do item 4 acima: script CLI de uso único (`--dry-run` via
         // `process.argv`, `process.exitCode` no topo, conexão de banco/fila própria,
         // fora do processo da API) — não roda em produção, só uma vez manualmente
