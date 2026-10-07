@@ -42,6 +42,15 @@ incluem sufixos `[... ]` em `findmnt`). `cryptsetup status` deve indicar `LUKS2`
 O restore usa containers descartáveis sem rede, tmpfs e swap proibido; não altera
 os serviços vivos.
 
+Em 2026-10-07, o reboot real da VPS foi testado. O `boot_id` mudou de
+`1ce38952-0082-45ff-9734-dc9f66f40031` para
+`485dcdb3-2589-48c0-bb0a-1448ad262d12`; antes do desbloqueio, o LUKS estava
+fechado e `movivo-storage-mount`, containerd e Docker não subiram. O comando
+`bash scripts/unlock-vps-storage.sh`, executado no Mac, abriu o volume, montou os
+três diretórios e trouxe os 14 serviços de volta. Depois, o verificador de mounts e
+os 21 checks de TLS/Vault passaram; site e API responderam HTTP 200. Esse ensaio
+comprova o procedimento de recuperação nessa VPS, com a estação e a chave atuais.
+
 ## Recuperação
 
 Se o LUKS não abrir, preserve a imagem original e o cabeçalho. O arquivo
