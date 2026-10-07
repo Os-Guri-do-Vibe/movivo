@@ -79,7 +79,8 @@ cp infra/vps/nginx/conf.d/movivo.conf "$stage/nginx/conf.d/"
 cp -R infra/postgres infra/pgbouncer infra/redis infra/nginx "$stage/infra/"
 cp infra/vps/update-provider-secret.sh "$stage/bin/"
 cp infra/vps/backup/movivo-backup.sh infra/vps/backup/movivo-backup.service \
-   infra/vps/backup/movivo-backup.timer "$stage/bin/"
+   infra/vps/backup/movivo-backup.timer infra/vps/backup/movivo-restore-test.sh \
+   infra/vps/backup/movivo-restore-test.service infra/vps/backup/movivo-restore-test.timer "$stage/bin/"
 
 # Faixas do Cloudflare (mesma fonte do hostinger-firewall.sh) → IP real e o
 # filtro de origem do Nginx.
@@ -101,7 +102,7 @@ COPYFILE_DISABLE=1 tar -C "$stage" --no-xattrs "${mac_tar_flags[@]}" -cf - \
   | "${SSH[@]}" "set -e; cd ${APP_DIR}
       before=\$(sha256sum infra/pgbouncer/pgbouncer.ini infra/redis/*.tpl 2>/dev/null || true)
       tar --no-overwrite-dir --warning=no-unknown-keyword -xf -
-      chmod 755 bin/movivo-backup.sh
+      chmod 755 bin/movivo-backup.sh bin/movivo-restore-test.sh
       after=\$(sha256sum infra/pgbouncer/pgbouncer.ini infra/redis/*.tpl)
       if [ -n \"\$before\" ] && [ \"\$before\" != \"\$after\" ]; then touch .recreate-data; fi"
 
@@ -191,12 +192,13 @@ log "7/8 API, web e Nginx"
   docker compose ps --format 'table {{.Service}}\t{{.Image}}\t{{.Status}}'"
 
 # -----------------------------------------------------------------------------
-log "8/8 Backup diário e smoke test"
+log "8/8 Backup diário, teste de restore semanal e smoke test"
 "${SSH[@]}" "set -e
-  sudo install -m 644 ${APP_DIR}/bin/movivo-backup.service ${APP_DIR}/bin/movivo-backup.timer /etc/systemd/system/
+  sudo install -m 644 ${APP_DIR}/bin/movivo-backup.service ${APP_DIR}/bin/movivo-backup.timer \
+    ${APP_DIR}/bin/movivo-restore-test.service ${APP_DIR}/bin/movivo-restore-test.timer /etc/systemd/system/
   sudo systemctl daemon-reload
-  sudo systemctl enable --now movivo-backup.timer >/dev/null
-  systemctl list-timers movivo-backup.timer --no-pager | head -2"
+  sudo systemctl enable --now movivo-backup.timer movivo-restore-test.timer >/dev/null
+  systemctl list-timers movivo-backup.timer movivo-restore-test.timer --no-pager | head -3"
 
 smoke_ok=1
 for url in https://api.movivo.com.br/api/v1/health https://movivo.com.br/; do

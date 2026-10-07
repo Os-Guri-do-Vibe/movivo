@@ -1,0 +1,13 @@
+[Unit]
+Description=MOVIVO — teste de restauração dos backups (Postgres descartável)
+Requires=docker.service
+After=docker.service movivo-backup.service
+
+[Service]
+Type=oneshot
+User=deploy
+Group=deploy
+ExecStart=/opt/movivo/bin/movivo-restore-test.sh
+TimeoutStartSec=15min
+Nice=10
+IOSchedulingClass=idle
