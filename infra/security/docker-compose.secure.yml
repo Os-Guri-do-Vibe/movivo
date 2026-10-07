@@ -110,10 +110,9 @@ services:
     user: '0:0'
     restart: unless-stopped
     networks: [movivo-net]
-    cap_add: [IPC_LOCK]
-    ulimits:
-      memlock: {soft: -1, hard: -1}
+    memswap_limit: 512m
     environment:
+      GOMEMLIMIT: 256MiB
       VAULT_ADDR: https://127.0.0.1:8200
       VAULT_CACERT: /run/secrets/internal_ca
     entrypoint: [sh, /etc/movivo/vault-tls.sh]

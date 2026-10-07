@@ -202,6 +202,7 @@ log "6/8 Migração"
 log "7/8 API, web e Nginx"
 "${SSH[@]}" "set -e; cd ${APP_DIR}
   docker compose up -d --wait --wait-timeout 240 --remove-orphans
+  docker compose up -d --no-deps --force-recreate --wait --wait-timeout 60 api-tls web-tls
   docker compose exec -T nginx nginx -t -q
   docker compose exec -T nginx nginx -s reload
   docker compose ps --format 'table {{.Service}}\t{{.Image}}\t{{.Status}}'"

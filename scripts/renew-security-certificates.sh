@@ -13,3 +13,5 @@ python3 bin/provision-security.py --root "$APP_DIR" --environment production --v
 docker compose up -d --wait --wait-timeout 300 --force-recreate \
   postgres evolution-postgres pgbouncer redis-master redis-replica redis-sentinel evolution-api
 docker compose up -d --wait --wait-timeout 300 --force-recreate api web api-tls web-tls vault-token-renewer nginx
+
+docker compose up -d --no-deps --force-recreate --wait --wait-timeout 60 api-tls web-tls

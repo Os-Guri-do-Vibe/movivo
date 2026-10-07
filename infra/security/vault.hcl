@@ -1,5 +1,6 @@
 ui = false
-disable_mlock = false
+# Raft mmap: follow HashiCorp guidance; the container explicitly has zero swap.
+disable_mlock = true
 api_addr = "https://vault:8200"
 cluster_addr = "https://vault:8201"
 storage "raft" {
