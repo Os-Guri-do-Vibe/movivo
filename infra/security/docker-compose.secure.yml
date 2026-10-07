@@ -107,6 +107,9 @@ services:
   vault:
     image: hashicorp/vault:2.1.1@sha256:47f14a6acb98f48d798a07df7c83f23a6e636e1cf724c5f8ff165cb32667a1e2
     container_name: movivo-vault
+    logging:
+      driver: local
+      options: {max-size: '20m', max-file: '5'}
     user: '0:0'
     restart: unless-stopped
     networks: [movivo-net]

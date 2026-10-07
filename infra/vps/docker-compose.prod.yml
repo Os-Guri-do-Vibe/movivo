@@ -407,7 +407,7 @@ services:
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/certs:/etc/nginx/certs:ro
-      - ./secrets/internal_tls/ca.crt:/etc/nginx/certs/internal-ca.crt:ro
+      - ./secrets/internal_tls/ca.crt:/etc/nginx/internal-ca.crt:ro
       - ./infra/nginx:/opt/movivo-logging:ro
     healthcheck:
       test:

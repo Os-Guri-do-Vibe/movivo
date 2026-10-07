@@ -26,7 +26,9 @@ certificado (`NODE_TLS_REJECT_UNAUTHORIZED=0`, `rejectUnauthorized=false`, `-k`)
 ## Chaves, autorização e limites
 
 Vault Transit gera a chave AES-256-GCM, não exportável, separada do banco. O volume
-Raft é cifrado pela barreira do Vault. O token montado na API permite somente
+Raft é cifrado pela barreira do Vault. Raft usa `disable_mlock=true`, conforme
+orientação oficial; `memswap_limit` igual ao limite de memória impede swap do
+container (`memory.swap.max=0` verificado). O heap Go tem orçamento de 256MiB. O token montado na API permite somente
 `encrypt/decrypt` em `movivo-health`, `lookup-self` e `renew-self`; não administra,
 exporta, remove ou rotaciona chaves. O token é periódico (24h) e renovado a cada hora.
 Auditoria usa stdout com HMAC padrão, nunca `log_raw`; retenção é a rotação de logs
@@ -97,3 +99,5 @@ não conseguem ler os envelopes Vault. Não faça downgrade manual.
 - https://discuss.hashicorp.com/t/hcsec-2026-08-vault-vulnerable-to-denial-of-service-via-unauthenticated-root-token-generation-rekey-operations/77345
 - https://www.pgbouncer.org/config.html
 - https://redis.io/docs/latest/operate/oss_and_stack/management/security/encryption/
+
+- https://developer.hashicorp.com/vault/docs/configuration/storage/raft
