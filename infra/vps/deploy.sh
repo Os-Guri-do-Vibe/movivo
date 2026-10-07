@@ -48,6 +48,10 @@ for arg in "$@"; do
   esac
 done
 
+# Falha antes de copiar configuração/segredos se o armazenamento cifrado não estiver montado.
+"${SSH[@]}" 'sudo -n /usr/local/sbin/movivo-storage-verify' >/dev/null || \
+  die 'armazenamento LUKS da VPS não está montado; desbloqueie antes do deploy'
+
 if [[ $rollback -eq 1 ]]; then
   log "Rollback de api/web"
   "${SSH[@]}" "set -e; cd ${APP_DIR}
