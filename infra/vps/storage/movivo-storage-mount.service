@@ -1,0 +1,11 @@
+[Unit]
+Description=MOVIVO encrypted storage mount
+Before=containerd.service docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/movivo-storage-mount
+
+[Install]
+WantedBy=multi-user.target
