@@ -3,8 +3,8 @@
 **Data:** 2026-10-06; fechamento operacional em 2026-10-07
 **Ideia analisada:** MOVIVO — treino conversacional supervisionado por profissional CREF
 **Pasta do projeto:** docs/fitness-ia-whatsapp/
-**Status:** CONCLUÍDO — Vault, chaves independentes, TLS e recuperação validados localmente e na VPS.
-**Risco residual:** ALTO para dados estruturados/artefatos sem prova de cifra do armazenamento; transporte e Vault comprovados.
+**Status atual (2026-10-07):** CONCLUÍDO — Vault, chaves independentes, TLS, cifra do armazenamento ativo e recuperação validados localmente e na VPS.
+**Risco residual:** root da VPS ativa, memória, snapshots antigos do provedor e blocos históricos do ext4 original não são cobertos pela prova de LUKS. As seções anteriores ao fechamento final preservam o estado histórico da investigação; a atualização vigente está ao final.
 
 ## 1. Resumo Executivo
 
@@ -439,3 +439,45 @@ Fontes do controle de memória/Raft:
 - https://developer.hashicorp.com/vault/docs/configuration/storage/raft
 - https://developer.hashicorp.com/vault/docs/configuration
 - https://developer.hashicorp.com/vault/docs/concepts/production-hardening
+
+## Atualização final — armazenamento e dados livres (2026-10-07)
+
+O fechamento anterior descreve a implantação anterior à migração de armazenamento.
+Agora o Mac local mantém `Docker.raw` no volume Data com FileVault ativo, e o script
+`scripts/start-local.sh` exige FileVault para iniciar os dados locais. Na VPS, a
+imagem `/srv/movivo-data.luks` usa LUKS2 (`aes-xts-plain64`, chave de 512 bits) e é
+aberta com uma chave de 64 bytes custodiada apenas no Mac. O verificador
+`/usr/local/sbin/movivo-storage-verify` confirmou que `/var/lib/containerd`,
+`/var/lib/docker` e `/opt/movivo` são bind mounts de `/dev/mapper/movivo_data`.
+`containerd.service` e `docker.service` exigem o mount; um reboot sem desbloqueio
+manual falha fechado. A chave LUKS e seu cabeçalho de recuperação têm permissões
+0600 fora da VPS e do repositório. O procedimento está em
+[armazenamento-cifrado.md](../operacoes/armazenamento-cifrado.md).
+
+Novas escritas de `conversations.content`, `coaching_sessions.summary` e
+`protocols.pdf_content` usam Vault Transit antes de chegar ao PostgreSQL. Os leitores
+do Coach, dashboard, controle operacional e protocolo aceitam o envelope cifrado;
+o formato legado permanece legível durante a transição. A CLI de recifra cobre esses
+três campos com leitura, round-trip, compare-and-swap e auditoria. Em produção, o
+dry-run final encontrou **zero plaintext pendente** nessas três colunas: não havia
+linhas antigas nelas. O único valor existente entre os alvos era o segredo MFA de
+staff; foi recifrado com Vault sem conflito (run
+`b6a927c8-8fe2-42d5-866b-5611bd93e7a3`). Dados estruturados, filas Redis,
+WAL, logs e uploads não receberam cifra de campo generalizada; são protegidos pelo
+volume LUKS ativo, backup cifrado e controles de acesso. Cifra de campo adicional
+exige análise por fluxo, sem quebrar as consultas operacionais.
+
+A revisão `66da586` foi implantada com 14 serviços saudáveis, migrações aplicadas e
+HTTP 200 no site e na API. O verificador de segurança passou **21/21** checks reais
+na VPS: TLS PostgreSQL/PgBouncer, Redis/Sentinel e Vault, incluindo rejeição de CA,
+hostname e transporte em claro inválidos; ACL mínima, Transit e HTTPS interno.
+O deploy e rollback recusam imagens sem suporte à leitura de conteúdo cifrado.
+O backup pós-migração `20261007-194910` contém MOVIVO, Evolution, uploads e Vault
+em quatro arquivos `.enc`, copiados também para o Mac e comparados por SHA-256. O
+restore descartável passou: **49 tabelas, 793 linhas, 26 políticas RLS** no MOVIVO;
+**37 tabelas, 435 linhas** no Evolution; tar de uploads íntegro; snapshot Vault
+restaurado com ACL limitada e fixtures Transit das versões 1 e 2. As cópias antigas
+em claro foram mantidas até essa validação e então removidas; `fstrim` foi executado
+na raiz. Esses passos não certificam apagamento de snapshots anteriores ou blocos
+históricos do provedor. O desbloqueio manual após reboot continua sendo uma
+dependência operacional explícita; um KMS externo pode futuramente automatizá-lo.
