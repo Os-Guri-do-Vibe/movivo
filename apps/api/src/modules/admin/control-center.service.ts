@@ -1365,10 +1365,12 @@ export class ControlCenterService {
     // quando a capability existe: sem ela o ciphertext nem é aberto.
     const declared = canReadHealth ? await this.decryptCheckins(raw.checkinRows) : [];
     const blockedOccurrences = canReadHealth
-      ? await Promise.all(raw.blockedRows.map(async (row) => ({
-          at: row.createdAt.toISOString(),
-          content: await this.cipher.decryptText(row.content),
-        })))
+      ? await Promise.all(
+          raw.blockedRows.map(async (row) => ({
+            at: row.createdAt.toISOString(),
+            content: await this.cipher.decryptText(row.content),
+          })),
+        )
       : [];
     const evolution = declared.map(({ point }) => point);
     const painReports = declared.flatMap(({ point, painReport }) =>

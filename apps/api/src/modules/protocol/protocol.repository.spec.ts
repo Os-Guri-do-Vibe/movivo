@@ -106,7 +106,9 @@ describe('ProtocolRepository PDF cifrado', () => {
       })),
     };
     const db = {
-      runAsUser: vi.fn((_id, _role, callback: (value: unknown) => Promise<unknown>) => callback(tx)),
+      runAsUser: vi.fn((_id, _role, callback: (value: unknown) => Promise<unknown>) =>
+        callback(tx),
+      ),
     } as unknown as TenantDatabase;
     const cipher = {
       encryptBytes: vi.fn(async () => envelope),

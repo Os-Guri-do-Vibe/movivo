@@ -137,7 +137,9 @@ async function main() {
             : textColumn
               ? await cipher.decryptText(original as string)
               : await cipher.decryptHealth(
-                  typeof original === 'string' ? Buffer.from(original.slice(7), 'base64') : original,
+                  typeof original === 'string'
+                    ? Buffer.from(original.slice(7), 'base64')
+                    : original,
                 );
           verified++;
           if (apply) {

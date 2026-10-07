@@ -398,8 +398,8 @@ services:
     tmpfs:
       - /run/movivo-logs:rw,noexec,nosuid,size=1m,mode=0700
     depends_on:
-      api-tls: {condition: service_healthy}
-      web-tls: {condition: service_healthy}
+      api-tls: { condition: service_healthy }
+      web-tls: { condition: service_healthy }
     ports:
       # Só IPv4: o firewall da Hostinger limita a 443 às faixas IPv4 do
       # Cloudflare; publicar em [::] abriria a origem por IPv6 fora desse filtro.

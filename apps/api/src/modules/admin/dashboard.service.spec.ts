@@ -203,7 +203,10 @@ function makeSequencedService(
   const service = new DashboardService(
     db,
     validation,
-    { decryptHealth, decryptText: vi.fn(async (value: string) => value) } as unknown as HealthCipherService,
+    {
+      decryptHealth,
+      decryptText: vi.fn(async (value: string) => value),
+    } as unknown as HealthCipherService,
     { append } as unknown as AuditService,
     { enqueue } as unknown as QueueManager,
     { emit, stream: vi.fn() } as unknown as DashboardQueueEventsService,

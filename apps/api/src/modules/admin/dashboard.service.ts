@@ -953,7 +953,10 @@ export class DashboardService {
     // `release.content` correto, com a troca aplicada).
     const encryptedPdf = pdf ? await this.cipher.encryptBytes(pdf) : null;
     await this.scoped(actor, (tx) =>
-      tx.update(protocols).set({ pdfContent: encryptedPdf }).where(eq(protocols.id, release.protocolId)),
+      tx
+        .update(protocols)
+        .set({ pdfContent: encryptedPdf })
+        .where(eq(protocols.id, release.protocolId)),
     );
 
     await this.queues.enqueue(
