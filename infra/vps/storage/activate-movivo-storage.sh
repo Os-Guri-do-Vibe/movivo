@@ -16,9 +16,12 @@ done
 
 cd /opt/movivo
 docker compose down --remove-orphans
+systemctl stop movivo-vault-unseal.timer
+systemctl mask --runtime docker.socket docker.service containerd.service
 systemctl stop docker.socket docker.service containerd.service
-if docker ps -q >/dev/null 2>&1; then
-  echo 'Docker ainda responde; não copiar dados ativos.' >&2; exit 1
+if systemctl is-active --quiet docker.socket docker.service containerd.service || \
+  pgrep -x dockerd >/dev/null || pgrep -x containerd >/dev/null; then
+  echo 'Docker ou containerd ainda está ativo; não copiar dados ativos.' >&2; exit 1
 fi
 
 rsync -aHAX --numeric-ids --one-file-system --delete /var/lib/containerd/ "$secure/containerd/"
@@ -43,9 +46,11 @@ done
 systemctl daemon-reload
 /usr/local/sbin/movivo-storage-mount
 systemctl enable --now movivo-storage-mount.service
+systemctl unmask --runtime docker.socket docker.service containerd.service
 systemctl start containerd.service docker.service
 cd /opt/movivo
 docker compose up -d vault
 systemctl start movivo-vault-unseal.service
+systemctl start movivo-vault-unseal.timer
 docker compose up -d --wait
 echo 'Migração ativada. Valide serviços, TLS e restore antes de remover as origens em claro.'
