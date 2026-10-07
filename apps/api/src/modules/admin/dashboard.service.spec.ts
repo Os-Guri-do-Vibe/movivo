@@ -106,7 +106,7 @@ function makeService(row: Record<string, unknown>, verdict: 'PASS' | 'FLAG_HUMAN
   const service = new DashboardService(
     db,
     validation,
-    {} as HealthCipherService,
+    { decryptText: vi.fn(async (value: string) => value) } as unknown as HealthCipherService,
     audit,
     queues,
     { emit: vi.fn(), stream: vi.fn() } as unknown as DashboardQueueEventsService,
@@ -203,7 +203,7 @@ function makeSequencedService(
   const service = new DashboardService(
     db,
     validation,
-    { decryptHealth } as unknown as HealthCipherService,
+    { decryptHealth, decryptText: vi.fn(async (value: string) => value) } as unknown as HealthCipherService,
     { append } as unknown as AuditService,
     { enqueue } as unknown as QueueManager,
     { emit, stream: vi.fn() } as unknown as DashboardQueueEventsService,

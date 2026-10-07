@@ -20,6 +20,8 @@ const targets = [
   ['protocols', 'mesocycle_notes_cipher', 'id'],
   ['staff', 'mfa_secret_cipher', 'id'],
   ['short_links', 'target_url', 'code'],
+  ['conversations', 'content', 'id'],
+  ['coaching_sessions', 'summary', 'id'],
 ] as const;
 
 /** CAS + auditoria na mesma transação. Falha de auditoria aborta a escrita. */
@@ -100,6 +102,7 @@ async function main() {
       if (!rows.length) throw new Error('Operador deve ser ADMIN ativo.');
     }
     for (const [tableName, columnName, idName] of targets) {
+      const textColumn = tableName === 'conversations' || tableName === 'coaching_sessions';
       const table = sql.identifier(tableName);
       const column = sql.identifier(columnName);
       const id = sql.identifier(idName);
@@ -107,6 +110,7 @@ async function main() {
       let verified = 0;
       let updated = 0;
       let conflicts = 0;
+      let pendingPlaintext = 0;
       for (;;) {
         const rows = (await tenant.runAsSystem((tx) =>
           tx.execute(sql`
@@ -117,19 +121,35 @@ async function main() {
         if (!rows.length) break;
         for (const row of rows) {
           const original = row.cipher;
-          if (typeof original === 'string' && !original.startsWith('pgp:v1:')) {
+          if (textColumn && typeof original !== 'string') throw new Error('Texto inválido.');
+          if (textColumn && !(original as string).startsWith('movivo:health:text:v1:'))
+            pendingPlaintext++;
+          if (!textColumn && typeof original === 'string' && !original.startsWith('pgp:v1:')) {
             throw new Error('Alias sem cifra; execute a migração de schema antes da rotação.');
           }
-          const bytes =
-            typeof original === 'string' ? Buffer.from(original.slice(7), 'base64') : original;
-          const plaintext = await cipher.decryptHealth(bytes);
+          const plaintext = textColumn
+            ? await cipher.decryptText(original as string)
+            : await cipher.decryptHealth(
+                typeof original === 'string' ? Buffer.from(original.slice(7), 'base64') : original,
+              );
           verified++;
           if (apply) {
-            const next = await cipher.encryptHealth(plaintext);
-            if ((await cipher.decryptHealth(next)) !== plaintext)
+            const next = textColumn
+              ? await cipher.encryptText(plaintext)
+              : await cipher.encryptHealth(plaintext);
+            const roundtrip = textColumn
+              ? await cipher.decryptText(next as string)
+              : await cipher.decryptHealth(next as Buffer);
+            if (roundtrip !== plaintext)
               throw new Error('Round-trip falhou.');
-            const replacement =
-              typeof original === 'string' ? `pgp:v1:${next.toString('base64')}` : next;
+            const replacement = textColumn
+              ? next
+              : typeof original === 'string'
+                ? `pgp:v1:${(next as Buffer).toString('base64')}`
+                : next;
+            const envelope = textColumn
+              ? Buffer.from((next as string).slice('movivo:health:text:v1:'.length), 'base64')
+              : (next as Buffer);
             const changed = await writeRotatedCipher(tenant, {
               tableName,
               columnName,
@@ -142,7 +162,7 @@ async function main() {
               provider: config.healthCipher.provider,
               keyId: config.healthCipher.keyId,
               vaultKey: config.healthCipher.vaultKey,
-              vaultVersion: /^vault:v(\d+):/.exec(next.toString())?.[1] ?? null,
+              vaultVersion: /^vault:v(\d+):/.exec(envelope.toString())?.[1] ?? null,
             });
             if (changed) updated++;
             else conflicts++;
@@ -158,6 +178,7 @@ async function main() {
           verified,
           updated,
           conflicts,
+          ...(textColumn ? { pendingPlaintext } : {}),
         }) + '\n',
       );
       if (conflicts)

@@ -13,6 +13,7 @@ import { DRIZZLE } from './database.constants';
 import { type DrizzleClient } from './database.module';
 
 const PREFIX = 'movivo:health:v1:';
+const TEXT_PREFIX = 'movivo:health:text:v1:';
 const LEGACY_KEY_ID = 'legacy-derived';
 
 @Injectable()
@@ -123,6 +124,21 @@ export class HealthCipherService {
     } catch {
       throw new Error('HealthCipherService: falha ao cifrar.');
     }
+  }
+
+  /** Envelope ASCII para colunas TEXT existentes, sem mudar contratos ou índices. */
+  async encryptText(plaintext: string): Promise<string> {
+    return TEXT_PREFIX + (await this.encryptHealth(plaintext)).toString('base64');
+  }
+
+  /** Plaintext anterior à migração continua legível até a recifra ser verificada. */
+  async decryptText(value: string): Promise<string> {
+    if (!value.startsWith(TEXT_PREFIX)) return value;
+    const encoded = value.slice(TEXT_PREFIX.length);
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
+      throw new Error('HealthCipherService: envelope de texto inválido.');
+    }
+    return this.decryptHealth(Buffer.from(encoded, 'base64'));
   }
 
   async decryptHealth(ciphertext: Buffer): Promise<string> {

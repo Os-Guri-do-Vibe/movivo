@@ -42,8 +42,8 @@ export const conversations = pgTable(
      * O corpo da mensagem. O usuário relata dor, lesão, medicação e condição
      * clínica em texto livre — não há como classificar previamente o que é ou
      * não sensível, então a coluna inteira recebe o tratamento mais restritivo.
-     * Entra no escopo de cifra em repouso (`pgcrypto`) junto com a anamnese;
-     * não cifrada nesta sprint. Nunca é logada em texto claro.
+     * Envelope de texto do HealthCipherService (Vault Transit em produção).
+     * Linhas antigas em claro são migradas por rotate-health-cipher. Nunca logar conteúdo.
      */
     content: text('content').notNull(),
 

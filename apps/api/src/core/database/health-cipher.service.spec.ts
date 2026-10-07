@@ -27,6 +27,17 @@ describe('HealthCipherService', () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it('cifra texto em coluna legada e preserva leitura de plaintext antigo', async () => {
+    const { svc, execute } = service();
+    const stored = await svc.encryptText('dor no joelho');
+    expect(stored).toMatch(/^movivo:health:text:v1:/);
+    expect(stored).not.toContain('dor no joelho');
+    expect(await svc.decryptText(stored)).toBe('dor no joelho');
+    expect(await svc.decryptText('resumo anterior')).toBe('resumo anterior');
+    await expect(svc.decryptText('movivo:health:text:v1:!')).rejects.toThrow('envelope de texto');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it('rotação lê old/new, rollback retém ambas, e remover chave antiga falha fechado', async () => {
     const old = await service('old').svc.encryptHealth('histórico');
     const current = await service().svc.encryptHealth('novo');

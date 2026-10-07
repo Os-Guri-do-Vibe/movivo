@@ -778,7 +778,7 @@ export class DashboardService {
         reviewUrgency: row.reviewUrgency,
         catalogGap: row.catalogGap,
       },
-      replay: this.groupReplays(replayRows)[0],
+      replay: (await this.groupReplays(replayRows))[0],
     };
   }
 
@@ -1131,7 +1131,7 @@ export class DashboardService {
         await this.auditRead(tx, actor, userId, 'operations_dashboard', userId);
       }
       const firstWorkout = firstWorkoutRow?.firstWorkout ?? 0;
-      const replays = this.groupReplays(replayRows);
+      const replays = await this.groupReplays(replayRows);
       const protocolDeliveryMinutes = this.nullableNumber(protocolSla?.protocolAverageMinutes);
       const coachP95Seconds = this.nullableNumber(coachSla?.coachP95Ms, 1_000);
       // ponytail: polling e logs estruturados cobrem o MVP; SSE/PostHog entram na Fase 6
@@ -1403,7 +1403,7 @@ export class DashboardService {
           ...(insight ?? {}),
         },
         handoff: { reason: alert.reason, level: alert.level, status: alert.status },
-        replay: this.groupReplays(replayRows)[0],
+        replay: (await this.groupReplays(replayRows))[0],
         feedbackCipher: workout?.feedbackCipher ?? null,
       };
     });
@@ -1525,7 +1525,7 @@ export class DashboardService {
     return Number.isFinite(parsed) ? parsed / divisor : null;
   }
 
-  private groupReplays(
+  private async groupReplays(
     rows: Array<{
       id: string;
       userId: string;
@@ -1565,7 +1565,7 @@ export class DashboardService {
       // exercício compostos, ex.: "Caminhada de Mala" → "Caminhada de terceiro").
       current.messages.push({
         role: row.direction === 'INBOUND' ? 'USER' : 'ASSISTANT',
-        content: row.content,
+        content: await this.cipher.decryptText(row.content),
         createdAt: row.createdAt.toISOString(),
       });
       groups.set(conversationId, current);

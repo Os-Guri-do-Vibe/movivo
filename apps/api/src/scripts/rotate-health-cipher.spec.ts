@@ -59,6 +59,25 @@ describe('recifra compare-and-swap', () => {
     expect(metadata).toMatchObject({ vaultKey: 'health', vaultVersion: '3' });
     expect(metadata).not.toHaveProperty('keyId');
   });
+  it('recifra coluna de conversa com CAS sem registrar conteúdo na auditoria', async () => {
+    const textInput = {
+      ...input,
+      tableName: 'conversations',
+      columnName: 'content',
+      original: 'dor no joelho',
+      replacement: 'movivo:health:text:v1:ZXhhbXBsZQ==',
+      provider: 'VAULT' as const,
+      vaultVersion: '2',
+    };
+    const { db, execute } = tenant([[{ id: input.rowId }], []]);
+    expect(await writeRotatedCipher(db as never, textInput)).toBe(1);
+    const update = dialect.sqlToQuery(execute.mock.calls[0]?.[0] as SQL);
+    expect(update.sql).toContain('AND "content" =');
+    expect(update.params).toContain(textInput.original);
+    const audit = dialect.sqlToQuery(execute.mock.calls[1]?.[0] as SQL);
+    expect(audit.params).not.toContain(textInput.original);
+    expect(audit.params).not.toContain(textInput.replacement);
+  });
   it('recusa tabela/coluna fora do inventário', async () => {
     const { db, execute } = tenant([]);
     await expect(writeRotatedCipher(db as never, { ...input, tableName: 'users' })).rejects.toThrow(

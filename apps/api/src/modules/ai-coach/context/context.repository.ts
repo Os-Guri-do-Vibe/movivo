@@ -189,7 +189,7 @@ export class ContextRepository {
           email: user?.email ?? null,
         },
         state,
-        summary: session?.summary ?? null,
+        summary: session?.summary ? await this.cipher.decryptText(session.summary) : null,
       };
     });
   }
@@ -338,13 +338,14 @@ export class ContextRepository {
   }
 
   async upsertSummary(userId: string, sessionDate: string, summary: string): Promise<void> {
+    const encrypted = await this.cipher.encryptText(summary);
     await this.db.runAsUser(userId, 'USER', async (tx) => {
       await tx
         .insert(coachingSessions)
-        .values({ userId, sessionDate, summary })
+        .values({ userId, sessionDate, summary: encrypted })
         .onConflictDoUpdate({
           target: [coachingSessions.userId, coachingSessions.sessionDate],
-          set: { summary, updatedAt: new Date() },
+          set: { summary: encrypted, updatedAt: new Date() },
         });
     });
   }
