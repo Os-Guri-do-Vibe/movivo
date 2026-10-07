@@ -57,6 +57,8 @@ if [[ $rollback -eq 1 ]]; then
     [ \"\$capability\" = 'revocable-v1' ] || { echo 'rollback recusado: imagem sem acesso opaco revogável' >&2; exit 1; }
     health=\$(docker image inspect ${REGISTRY}/movivo-api:\$prev --format '{{ index .Config.Labels \"br.com.movivo.security.health-cipher\" }}' 2>/dev/null || true)
     [ \"\$health\" = 'versioned-v1' ] || { echo 'rollback recusado: imagem sem cifra versionada/TLS' >&2; exit 1; }
+    sensitive=\$(docker image inspect ${REGISTRY}/movivo-api:\$prev --format '{{ index .Config.Labels \"br.com.movivo.security.sensitive-content\" }}' 2>/dev/null || true)
+    [ \"\$sensitive\" = 'encrypted-v1' ] || { echo 'rollback recusado: imagem não lê conversas/PDFs cifrados' >&2; exit 1; }
     printf 'COMPOSE_PROFILES=app\nMOVIVO_VERSION=%s\nMOVIVO_PREVIOUS_VERSION=%s\n' \"\$prev\" \"\$cur\" > .env
     docker compose up -d --wait --wait-timeout 180 api web api-tls web-tls nginx
     echo \"api/web: \$cur → \$prev\""
@@ -173,7 +175,9 @@ fi
 "${SSH[@]}" "capability=\$(docker image inspect ${api_image} --format '{{ index .Config.Labels \"br.com.movivo.security.access-links\" }}' 2>/dev/null || true)
   [ \"\$capability\" = 'revocable-v1' ] || { echo 'deploy recusado: imagem sem acesso opaco revogável' >&2; exit 1; }
   health=\$(docker image inspect ${api_image} --format '{{ index .Config.Labels \"br.com.movivo.security.health-cipher\" }}' 2>/dev/null || true)
-  [ \"\$health\" = 'versioned-v1' ] || { echo 'deploy recusado: imagem sem cifra versionada/TLS' >&2; exit 1; }"
+  [ \"\$health\" = 'versioned-v1' ] || { echo 'deploy recusado: imagem sem cifra versionada/TLS' >&2; exit 1; }
+  sensitive=\$(docker image inspect ${api_image} --format '{{ index .Config.Labels \"br.com.movivo.security.sensitive-content\" }}' 2>/dev/null || true)
+  [ \"\$sensitive\" = 'encrypted-v1' ] || { echo 'deploy recusado: imagem não lê conversas/PDFs cifrados' >&2; exit 1; }"
 
 "${SSH[@]}" "set -e; cd ${APP_DIR}
   cur=\$(sed -n 's/^MOVIVO_VERSION=//p' .env 2>/dev/null || true)
