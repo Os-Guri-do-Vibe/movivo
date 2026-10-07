@@ -91,8 +91,11 @@ Mantenha a fonte fora do Git e com modo `0700`.
   de saúde ilegível — rotação é procedimento próprio (`docs/SECURITY.md`).
 - Trocar chave de API externa: use o helper validado descrito em “Atualizar
   credenciais de fornecedores” abaixo; nunca substitua arquivos manualmente.
-- `backup_encryption_key`: sem ela os dumps são inúteis. Guarde uma cópia no
-  gerenciador de senhas dos fundadores.
+- `backup_encryption_key` e `pgcrypto_key`: sem a primeira os dumps são
+  inúteis; sem a segunda o dado de saúde restaurado fica ilegível. Há cópia de
+  ambas no Keychain do Rodrigo (`movivo-backup-encryption-key`,
+  `movivo-pgcrypto-key`, conta `movivo-prod`) — **mantenha ao menos uma cópia
+  com outro fundador** e atualize se alguma chave for rotacionada.
 
 ### Travas em produção (`api.env`)
 
@@ -120,16 +123,50 @@ Credenciais de terceiros devem ser exclusivas do ambiente de produção. O deplo
 
 ## Backup e restauração
 
-`movivo-backup.timer` roda às 03:30 BRT: `pg_dump` do `movivo` e do `evolution`
-+ tar dos uploads, cifrados com AES-256 (`backup_encryption_key`), 7 dias de
-retenção. Não há cópia fora da Hostinger (decisão de 2026-09-24); a proteção
-contra perda da VPS é o backup semanal/snapshot da Hostinger.
+| Camada | O que | Frequência | Retenção | RPO |
+|---|---|---|---|---|
+| Local (VPS) | `pg_dump` do `movivo` e do `evolution` + tar dos uploads, AES-256 (`backup_encryption_key`), verificado após a escrita | diário 03:30 BRT | 7 dias + 4 cópias de domingo em `backups/weekly/` (≈35 dias) | ≤ 24 h |
+| Teste de restore | restaura o dump mais recente num Postgres descartável (sem rede, tmpfs) e confere tabelas, RLS, extensões e contagem de linhas | semanal, domingo 04:30 BRT | — | — |
+| Fora da VPS (provedor) | backup semanal automático da Hostinger (disco inteiro) | semanal | decide a Hostinger | ≤ 7 dias |
+| Fora da VPS (isolada) | `infra/vps/backup/pull-offsite.sh` no Mac puxa `weekly/` (sem as chaves) | sob demanda/semanal | 35 dias | ≤ 7 dias |
+
+Não há PITR/WAL archiving (decisão de 2026-10-06: sem clientes e sem orçamento;
+revisar no gatilho abaixo). O banco local diário custa ~1 MB por dump — por isso
+fica diário mesmo com o resto em cadência semanal.
+
+**Gatilho para subir o nível** (qualquer um): primeiro assinante pagante, dado
+real de aluno que não se reproduz, ou banco > 1 GB. Aí: WAL archiving com
+`pgBackRest`/`wal-g` para storage externo e cópia diária fora do provedor.
+
+### Rotina
 
 ```bash
-sudo systemctl start movivo-backup.service   # backup agora
-journalctl -u movivo-backup.service -n 20    # resultado do último
+sudo systemctl start movivo-backup.service         # backup agora
+journalctl -u movivo-backup.service -n 20          # resultado do último
+sudo systemctl start movivo-restore-test.service   # teste de restore agora (~15 s)
+cat /opt/movivo/backups/restore-test.status        # última execução: OK ou FALHA
+systemctl list-timers 'movivo-*' --no-pager        # próximos disparos
+systemctl is-failed movivo-backup.service movivo-restore-test.service
+```
 
-# Restaurar o banco principal (PARE a API antes):
+O teste de restore **reprova** (e deixa a unit em `failed`) se: o backup mais
+novo tem > 36 h, a chave não decifra, o dump está truncado/corrompido, o
+`pg_restore` dá qualquer erro, o banco volta sem tabelas/RLS ou faltam as
+extensões `vector`, `pgcrypto`, `uuid-ossp`. **Ainda não há alerta ativo**: quem
+olha é o `is-failed` acima (ver Pendências).
+
+Cópia fora da VPS (rodar no Mac, ex.: toda segunda):
+
+```bash
+infra/vps/backup/pull-offsite.sh        # -n para simular; DEST=... para trocar o destino
+```
+
+### Restaurar (perda de dados no banco principal)
+
+Prefira **não** restaurar por cima da produção: valide primeiro num container
+descartável (`movivo-restore-test.sh` faz isso) e só então aplique.
+
+```bash
 docker compose stop api
 openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
   -pass file:/opt/movivo/secrets/backup_encryption_key \
@@ -137,6 +174,20 @@ openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
 | docker exec -i movivo-postgres pg_restore -U postgres -d movivo --clean --if-exists
 docker compose run --rm migrate && docker compose up -d api
 ```
+
+### Perda total da VPS
+
+1. Recriar a VPS (`bootstrap.sh`), apontar `deploy.sh` — ele sobe a stack com
+   banco vazio e roles novas.
+2. Recolocar `backup_encryption_key` e `pgcrypto_key` **a partir do Keychain** em
+   `/opt/movivo/secrets/` (a `pgcrypto_key` precisa ser a mesma do dado
+   restaurado; `gen-prod-secrets.sh` não sobrescreve segredo existente).
+3. Trazer um `.enc` (backup da Hostinger restaura o disco inteiro, ou o `weekly/`
+   puxado para o Mac) e rodar o `pg_restore` acima.
+
+O restore **de um disco inteiro pela Hostinger nunca foi exercitado** (substitui
+a VM; só faz sentido testar num VPS descartável). O caminho por dump é o que
+está coberto pelo teste semanal.
 
 ## Configurar o deploy automático (uma vez)
 
@@ -155,6 +206,11 @@ docker compose run --rm migrate && docker compose up -d api
 - Deploy automático: secrets do environment `production` (acima).
 - Observabilidade: sem Sentry/uptime externo ainda — hoje o sinal é o
   healthcheck do Docker e o smoke test do deploy.
+- Backup: sem alerta ativo se `movivo-backup`/`movivo-restore-test` falharem ou
+  atrasarem (só `systemctl is-failed` e `restore-test.status`). Ligar a um canal
+  (e-mail/WhatsApp/healthchecks.io) junto com o uptime externo.
+- Backup: definir o `[PRAZO DE BACKUP]` da Política de Privacidade (a retenção
+  efetiva hoje é de até 35 dias) — decisão jurídica de Alexandre.
 - Authenticated Origin Pulls (mTLS Cloudflare → Nginx): recomendado, não ligado.
 
 ## Links revogáveis e logs seguros (auditoria 2026-10-05)
