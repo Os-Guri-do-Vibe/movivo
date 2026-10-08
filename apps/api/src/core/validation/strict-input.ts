@@ -188,20 +188,53 @@ function toIssues(unknown: readonly Path[]): $ZodIssue[] {
   }));
 }
 
+/**
+ * Caminhos de strings (valor ou chave) com byte nulo (`\u0000`). O Postgres não armazena esse
+ * caractere em `text` nem em `jsonb` ("unsupported Unicode escape sequence"): sem esta checagem
+ * ele atravessa o Zod e vira 500 na gravação. Não é injeção — é robustez —, mas barrar na borda
+ * devolve 400 e evita que um corpo hostil derrube a escrita (e os retries) de um worker.
+ */
+export function findNullBytes(value: unknown, path: Path = [], depth = 0): Path[] {
+  if (depth > MAX_DEPTH) return [];
+  if (typeof value === 'string') return value.includes('\u0000') ? [path] : [];
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => findNullBytes(item, join(path, index), depth + 1));
+  }
+  if (isPlainObject(value)) {
+    return Object.entries(value).flatMap(([key, item]) => [
+      ...(key.includes('\u0000') ? [join(path, key)] : []),
+      ...findNullBytes(item, join(path, key), depth + 1),
+    ]);
+  }
+  return [];
+}
+
 export type StrictParseResult<T> =
   { success: true; data: T } | { success: false; error: ZodError<unknown> };
 
 /**
- * `schema.safeParse(data)` que também **rejeita** chave desconhecida em qualquer nível.
+ * `schema.safeParse(data)` que também **rejeita** chave desconhecida em qualquer nível e texto
+ * com byte nulo (`findNullBytes`).
  * Troca direta de `safeParse` — mantém o formato do resultado para o chamador seguir
  * tratando o erro como já fazia.
  */
 export function strictSafeParse<T>(schema: ZodType<T>, data: unknown): StrictParseResult<T> {
   const unknownKeys = findUnknownKeys(schema, data);
+  const nullBytes = findNullBytes(data);
   const result = schema.safeParse(data);
-  if (result.success && unknownKeys.length === 0) return { success: true, data: result.data };
+  if (result.success && unknownKeys.length === 0 && nullBytes.length === 0) {
+    return { success: true, data: result.data };
+  }
   const issues: $ZodIssue[] = result.success ? [] : [...result.error.issues];
   issues.push(...toIssues(unknownKeys));
+  issues.push(
+    ...nullBytes.map((path) => ({
+      code: 'custom' as const,
+      path: [...path],
+      input: undefined,
+      message: 'Texto contém caractere inválido.',
+    })),
+  );
   return { success: false, error: new ZodError(issues) };
 }
 

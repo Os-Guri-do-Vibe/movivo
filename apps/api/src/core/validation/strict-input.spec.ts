@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ZodError, z } from 'zod';
 
-import { findUnknownKeys, parseBody, strictSafeParse } from './strict-input';
+import { findNullBytes, findUnknownKeys, parseBody, strictSafeParse } from './strict-input';
 
 const profile = z.object({
   name: z.string().optional(),
@@ -163,5 +163,38 @@ describe('parseBody', () => {
 
   it('lança ZodError para corpo inválido por tipo', () => {
     expect(() => parseBody(z.object({ n: z.number() }), { n: 'x' })).toThrow(ZodError);
+  });
+});
+
+describe('findNullBytes / rejeição de byte nulo', () => {
+  it('acha byte nulo em valor, em chave, em array e em objeto aninhado', () => {
+    expect(findNullBytes({ a: 'x\u0000y' })).toEqual([['a']]);
+    expect(findNullBytes({ ['k\u0000']: 'ok' })).toEqual([['k\u0000']]);
+    expect(findNullBytes({ list: ['ok', 'a\u0000'], deep: { s: '\u0000' } })).toEqual([
+      ['list', 1],
+      ['deep', 's'],
+    ]);
+  });
+
+  it('texto normal, números, null e ciclos profundos demais não acusam', () => {
+    expect(findNullBytes({ a: 'ok', b: 1, c: null, d: [true] })).toEqual([]);
+    let deep: Record<string, unknown> = { s: '\u0000' };
+    for (let i = 0; i < 100; i += 1) deep = { n: deep };
+    expect(findNullBytes(deep)).toEqual([]); // além da profundidade máxima: ignorado, não explode
+  });
+
+  it('strictSafeParse recusa o corpo (400 via ZodError) mesmo quando o schema aceitaria', () => {
+    const schema = z.object({ note: z.string().max(100) });
+    const result = strictSafeParse(schema, { note: 'dor\u0000no ombro' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(['note']);
+      expect(result.error.issues[0]?.message).toBe('Texto contém caractere inválido.');
+    }
+  });
+
+  it('strictSafeParse segue aceitando texto limpo', () => {
+    const schema = z.object({ note: z.string() });
+    expect(strictSafeParse(schema, { note: "'; DROP TABLE users;--" }).success).toBe(true);
   });
 });
