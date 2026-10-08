@@ -81,7 +81,7 @@ export function wrapUserMessage(text: string): string {
  */
 export function containsPromptLeak(text: string): boolean {
   const views = deobfuscatedViews(text);
-  const asWritten = (views[0] ?? '').toLocaleLowerCase('pt-BR');
+  const asWritten = canonicalizeSecurityText(text).toLocaleLowerCase('pt-BR');
   if (
     SYSTEM_PROMPT_SENTINELS.some((sentinel) =>
       asWritten.includes(canonicalizeSecurityText(sentinel).toLocaleLowerCase('pt-BR')),
