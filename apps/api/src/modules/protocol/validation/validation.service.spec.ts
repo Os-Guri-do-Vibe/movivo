@@ -740,3 +740,54 @@ describe('aggregate — derivação do veredito final', () => {
     });
   });
 });
+
+describe('ValidationService.validateResponse — referências externas (prompt injection → phishing)', () => {
+  it.each([
+    'Acesse https://meu-treino-gratis.example.com para liberar seu plano.',
+    'Entre em www.promo-fit.com.br agora.',
+    'Fale comigo em wa.me/5541999999999.',
+    'Me chama em joao@exemplo.com para ajustar.',
+    'Confira [seu treino](http://exemplo.biz/x).',
+    'Liga no (41) 99999-9999 que eu explico.',
+    'Pague em pagamentos-fit.xyz e libere.',
+  ])('BLOCK: saída gerada que cita destino externo — %s', (text) => {
+    const v = service.validateResponse(text);
+    expect(v.action).toBe('BLOCK_FALLBACK');
+    expect(v.violations.map((x) => x.rule)).toContain('EXTERNAL_REFERENCE');
+  });
+
+  it.each([
+    'Faça 3 séries de 10 a 12 repetições, com descanso de 90s.',
+    'Supino reto com halter, 4 séries de 8 repetições (RIR 2). Boa!',
+    'Seu treino de hoje tem 5 exercícios e dura uns 45 min.',
+    'Carga de 12,5 kg na terceira série; se subir pra 15kg, mantém 8 reps.',
+  ])('PASS: texto de treino comum não é acusado — %s', (text) => {
+    expect(service.validateResponse(text).action).toBe('PASS');
+  });
+
+  it('texto autorado pela equipe (FAQ) pode citar link quando o chamador opta por permitir', () => {
+    const faq = 'Baixe o PDF do seu treino em https://app.movivo.example/treino.';
+    expect(service.validateResponse(faq).action).toBe('BLOCK_FALLBACK');
+    expect(service.validateResponse(faq, { allowExternalReferences: true }).action).toBe('PASS');
+  });
+});
+
+describe('ValidationService.validateResponse — link disfarçado na saída', () => {
+  it.each([
+    'Acesse hxxps://promo-fit.example[.]com/bonus agora',
+    'Entre em promo-fit ponto com agora',
+    'h t t p s : / / p r o m o f i t . c o m / b o n u s',
+    'Fale em contato(at)exemplo.com',
+    'Acesse https://prоmo-fit.com',
+  ])('BLOCK: %s', (text) => {
+    const v = service.validateResponse(text);
+    expect(v.action).toBe('BLOCK_FALLBACK');
+    expect(v.violations.map((x) => x.rule)).toContain('EXTERNAL_REFERENCE');
+  });
+
+  it('PASS: texto de treino com espaçamento e pontuação comuns', () => {
+    expect(
+      service.validateResponse('Treino A B C. Faça 3 x 10, descanso de 60 s. Boa!').action,
+    ).toBe('PASS');
+  });
+});

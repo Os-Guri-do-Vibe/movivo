@@ -19,7 +19,12 @@
 import { Injectable } from '@nestjs/common';
 import type { ProtocolStructure, Weekday } from '@movivo/shared';
 
-import { canonicalizeSecurityText } from '../../../core/agent-config/text-normalize';
+import {
+  canonicalizeSecurityText,
+  despaceSpelledOut,
+  foldText,
+  refang,
+} from '../../../core/agent-config/text-normalize';
 import {
   type CatalogExercise,
   type ContraindicationTag,
@@ -33,6 +38,7 @@ import type { UserConstraints } from '../user-constraints';
 import { containsPromptLeak } from './prompt-injection';
 import {
   ISOLATION_MAJORITY_THRESHOLD,
+  EXTERNAL_REFERENCE_PATTERN,
   LANGUAGE_RULES,
   MAX_TECHNIQUES_PER_SESSION,
   MIN_FREQUENCY_BY_SPLIT,
@@ -108,6 +114,12 @@ export interface ValidateResponseOptions {
    * → BLOCK (a IA saiu do trilho). `undefined` = intenção sem restrição de exercício.
    */
   allowedExercises?: readonly string[];
+  /**
+   * Texto AUTORADO pela equipe (FAQ publicado, copy de passagem) pode citar link/contato.
+   * Padrão `false`: toda saída gerada pelo LLM é barrada se carregar URL, domínio, e-mail
+   * ou telefone (ver `EXTERNAL_REFERENCE_PATTERN`).
+   */
+  allowExternalReferences?: boolean;
 }
 
 /* v8 ignore start -- ramo sintético do `emitDecoratorMetadata` (design:paramtypes), não
@@ -163,6 +175,7 @@ export class ValidationService {
   validateResponse(text: string, opts: ValidateResponseOptions = {}): ValidationVerdict {
     const violations: ValidationViolation[] = [];
     this.checkLanguage(text, violations);
+    if (!opts.allowExternalReferences) this.checkExternalReferences(text, violations);
     this.checkAllowedExercises(text, opts.allowedExercises, violations);
     return aggregate(violations);
   }
@@ -463,6 +476,26 @@ export class ValidationService {
       out.push({
         rule: 'PARQ_VIOLATION',
         detail: 'técnica avançada com flag de PAR-Q presente',
+        action: 'BLOCK',
+      });
+    }
+  }
+
+  private checkExternalReferences(text: string, out: ValidationViolation[]): void {
+    // Além do texto como veio, olha o link "defanged" ("exemplo[.]com", "hxxp", "h t t p s : / /")
+    // e com homóglifos trocados: o aluno clica do mesmo jeito.
+    const canonical = canonicalizeSecurityText(text);
+    const variants = new Set([
+      canonical,
+      refang(canonical),
+      despaceSpelledOut(canonical),
+      refang(despaceSpelledOut(canonical)),
+      refang(foldText(text)),
+    ]);
+    if ([...variants].some((variant) => EXTERNAL_REFERENCE_PATTERN.test(variant))) {
+      out.push({
+        rule: 'EXTERNAL_REFERENCE',
+        detail: 'saída gerada cita link, domínio, e-mail ou telefone',
         action: 'BLOCK',
       });
     }

@@ -28,13 +28,17 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { BiologicalSex, ProtocolExercise, ProtocolStructure } from '@movivo/shared';
 
-import { untrustedDataEnvelope } from '../ai-coach/context/untrusted-context';
+import {
+  UNTRUSTED_CONTEXT_POLICY,
+  untrustedDataEnvelope,
+} from '../ai-coach/context/untrusted-context';
 import { LlmRouter } from '../ai-coach/llm/llm-router.service';
 import type { ScrubUser } from '../ai-coach/llm/llm.types';
 import { handoffAlerts, protocolVersions, protocols } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { signatureHash } from '../protocol/protocol.repository';
 import { ProtocolSubstitutionRepository } from '../protocol/protocol-substitution.repository';
+import { safePromptFact } from '../protocol/validation/prompt-injection';
 import { ValidationService } from '../protocol/validation/validation.service';
 
 function parseJson(text: string): unknown {
@@ -61,8 +65,13 @@ const adjustmentItemSchema = z.object({
 });
 const adjustmentResponseSchema = z.object({
   adjustments: z.array(adjustmentItemSchema).min(1).max(30),
-  /** Resumo curto e factual em PT-BR do que mudou — reusado no comentário da IA ao aluno. */
-  summary: z.string().min(1).max(300),
+  /**
+   * Aceito por compatibilidade com o contrato do prompt, mas IGNORADO: o resumo mostrado ao
+   * aluno (e promovido a texto do system prompt do comentário do check-in) é montado a partir
+   * do que foi de fato alterado (`describeAdjustments`), nunca de texto escrito pelo modelo —
+   * que pode descrever uma mudança que não ocorreu ou carregar instrução.
+   */
+  summary: z.string().max(300).optional(),
 });
 type AdjustmentItem = z.infer<typeof adjustmentItemSchema>;
 
@@ -103,6 +112,98 @@ function increasesVolume(exercise: ProtocolExercise, item: AdjustmentItem): bool
   return false;
 }
 
+/**
+ * Visão MÍNIMA do protocolo enviada ao modelo: só o que o ajuste precisa para decidir o que
+ * encurtar (dia, id, nome, números e estratégia de carga). `notes`, `generalNotes` e `focus`
+ * ficam de fora de propósito: são texto livre escrito por modelo na geração e não ajudam a
+ * reduzir volume — só serviriam de canal para injeção de segunda ordem.
+ */
+function adjustableView(structure: ProtocolStructure): unknown {
+  return {
+    sessions: structure.sessions.map((session) => ({
+      dayLabel: session.dayLabel,
+      exercises: session.exercises.map((exercise) => ({
+        exerciseId: exercise.exerciseId,
+        name: safePromptFact(exercise.name, 80) ?? exercise.exerciseId,
+        sets: exercise.sets,
+        reps: exercise.reps,
+        durationSeconds: exercise.durationSeconds,
+        loadStrategy: exercise.loadStrategy,
+      })),
+    })),
+  };
+}
+
+/**
+ * Fração mínima do volume original que um ajuste pode manter. O pedido do aluno é "um pouco
+ * mais curtos" (pergunta 7 do check-in): reduzir mais da metade de séries, repetições ou
+ * duração de um exercício não é encurtar o treino, é desmontá-lo — e o limite precisa viver
+ * no código porque o modelo é um componente não confiável para decidir quanto cortar.
+ */
+const MIN_RETAINED_FRACTION = 0.5;
+
+const retained = (current: number): number =>
+  Math.max(1, Math.ceil(current * MIN_RETAINED_FRACTION));
+
+/**
+ * Motivo de rejeição de um item, ou `null` se ele é uma redução bem-formada de um exercício
+ * que existe. Tudo é checado contra o protocolo REAL do titular — o que o modelo disse que
+ * o exercício é não conta.
+ */
+function rejectionReason(exercise: ProtocolExercise, item: AdjustmentItem): string | null {
+  if (increasesVolume(exercise, item)) return 'VOLUME_INCREASED';
+  // reps XOR duração, e só o campo que o exercício já usa: o ajuste nunca muda a natureza
+  // da prescrição (repetições viram tempo ou o contrário).
+  if (item.reps !== undefined && item.durationSeconds !== undefined) return 'INVALID_SHAPE';
+  if (item.reps !== undefined && !exercise.reps) return 'INVALID_SHAPE';
+  if (item.durationSeconds !== undefined && exercise.durationSeconds === undefined) {
+    return 'INVALID_SHAPE';
+  }
+  if (item.reps !== undefined && exercise.reps) {
+    if (item.reps.min > item.reps.max || item.reps.min > exercise.reps.min) return 'INVALID_SHAPE';
+    if (item.reps.max < retained(exercise.reps.max)) return 'REDUCTION_TOO_LARGE';
+  }
+  if (item.sets !== undefined && item.sets < retained(exercise.sets)) {
+    return 'REDUCTION_TOO_LARGE';
+  }
+  if (
+    item.durationSeconds !== undefined &&
+    exercise.durationSeconds !== undefined &&
+    item.durationSeconds < retained(exercise.durationSeconds)
+  ) {
+    return 'REDUCTION_TOO_LARGE';
+  }
+  return null;
+}
+
+/** `true` se aplicar o item muda algum número do exercício. */
+function changesSomething(exercise: ProtocolExercise, item: AdjustmentItem): boolean {
+  return (
+    (item.sets !== undefined && item.sets !== exercise.sets) ||
+    (item.reps !== undefined &&
+      (item.reps.min !== exercise.reps?.min || item.reps.max !== exercise.reps?.max)) ||
+    (item.durationSeconds !== undefined && item.durationSeconds !== exercise.durationSeconds)
+  );
+}
+
+/** Resumo factual do que MUDOU, montado do antes/depois — nunca de texto do modelo. */
+function describeAdjustment(before: ProtocolExercise, item: AdjustmentItem): string {
+  const parts: string[] = [];
+  if (item.sets !== undefined && item.sets !== before.sets) {
+    parts.push(`séries ${before.sets} para ${item.sets}`);
+  }
+  if (item.reps !== undefined && before.reps) {
+    parts.push(
+      `repetições ${before.reps.min}-${before.reps.max} para ${item.reps.min}-${item.reps.max}`,
+    );
+  }
+  if (item.durationSeconds !== undefined && before.durationSeconds !== undefined) {
+    parts.push(`duração ${before.durationSeconds}s para ${item.durationSeconds}s`);
+  }
+  const name = safePromptFact(before.name, 60) ?? 'um exercício';
+  return `${name} (${parts.join(', ')})`;
+}
+
 @Injectable()
 export class ProtocolVolumeAdjustmentService {
   constructor(
@@ -138,19 +239,23 @@ export class ProtocolVolumeAdjustmentService {
           'não esteja na lista recebida. Priorize reduzir séries acessórias antes de séries de ' +
           'exercícios compostos/principais. Retorne somente JSON estrito: ' +
           '{"adjustments":[{"dayLabel":"...","exerciseId":"...","sets"?:N,"reps"?:{"min":N,"max":N},' +
-          '"durationSeconds"?:N}],"summary":"frase curta em PT-BR do que mudou, para o aluno"}. ' +
+          '"durationSeconds"?:N}]}. ' +
           'Cada item usa SOMENTE os campos que fazem sentido para aquele exercício (reps XOR ' +
-          'durationSeconds, nunca os dois).',
+          'durationSeconds, nunca os dois). Nunca reduza séries, repetições ou duração para menos ' +
+          'da metade do valor atual, e nunca altere um campo que o exercício não tenha. ' +
+          `${UNTRUSTED_CONTEXT_POLICY}`,
         messages: [
           {
             role: 'user',
-            content: untrustedDataEnvelope('PROTOCOLO_ATIVO', active.content),
+            content: untrustedDataEnvelope('PROTOCOLO_ATIVO', adjustableView(active.content)),
           },
         ],
       });
 
       const parsed = adjustmentResponseSchema.parse(parseJson(result.text));
       const proposed = structuredClone(active.content);
+      const seen = new Set<string>();
+      const described: string[] = [];
       for (const item of parsed.adjustments) {
         const found = findExercise(proposed, item);
         if (!found) {
@@ -160,18 +265,26 @@ export class ProtocolVolumeAdjustmentService {
           );
           return { applied: false, reason: 'UNKNOWN_EXERCISE' };
         }
-        if (increasesVolume(found.exercise, item)) {
+        const key = `${item.dayLabel}\u0000${item.exerciseId}`;
+        if (seen.has(key)) return { applied: false, reason: 'DUPLICATE_ITEM' };
+        seen.add(key);
+
+        const reason = rejectionReason(found.exercise, item);
+        if (reason) {
           this.logger.warn(
-            { userId: params.userId, item },
-            'ajuste de volume rejeitado — IA tentou aumentar volume em vez de reduzir',
+            { userId: params.userId, item, reason },
+            'ajuste de volume rejeitado — fora dos limites determinísticos',
           );
-          return { applied: false, reason: 'VOLUME_INCREASED' };
+          return { applied: false, reason };
         }
+        if (!changesSomething(found.exercise, item)) continue;
+        described.push(describeAdjustment(found.exercise, item));
         if (item.sets !== undefined) found.exercise.sets = item.sets;
         if (item.reps !== undefined) found.exercise.reps = item.reps;
         if (item.durationSeconds !== undefined)
           found.exercise.durationSeconds = item.durationSeconds;
       }
+      if (described.length === 0) return { applied: false, reason: 'NO_CHANGE' };
 
       const verdict = this.validation.validate({
         structure: proposed,
@@ -223,7 +336,7 @@ export class ProtocolVolumeAdjustmentService {
       );
       return {
         applied: true,
-        summary: parsed.summary,
+        summary: `reduziu o volume em ${described.join('; ')}`.slice(0, 400),
         protocolId: active.protocolId,
         version: applied,
       };

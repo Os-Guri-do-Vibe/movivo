@@ -22,7 +22,10 @@ import type { BiologicalSex } from '@movivo/shared';
 import { PinoLogger } from 'nestjs-pino';
 import { z } from 'zod';
 
-import { untrustedDataEnvelope } from '../ai-coach/context/untrusted-context';
+import {
+  UNTRUSTED_CONTEXT_POLICY,
+  untrustedDataEnvelope,
+} from '../ai-coach/context/untrusted-context';
 import { LlmRouter } from '../ai-coach/llm/llm-router.service';
 import type { ScrubUser } from '../ai-coach/llm/llm.types';
 import { MAX_SUBSTITUTION_ITEMS } from '../protocol/protocol-substitution-items';
@@ -111,7 +114,8 @@ export class SubstitutionTargetService {
           'considerando a conversa inteira, não der pra apontar com confiança para nenhum ' +
           'exercício da lista recebida, retorne uma lista vazia — não adivinhe. Retorne ' +
           'somente JSON estrito: {"exerciseIds": ["<id da lista>", ...]}. Cada id retornado ' +
-          'TEM que ser exatamente um dos ids recebidos na lista.',
+          'TEM que ser exatamente um dos ids recebidos na lista. ' +
+          UNTRUSTED_CONTEXT_POLICY,
         messages: [
           {
             role: 'user',

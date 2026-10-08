@@ -42,6 +42,7 @@ import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { BUBBLE_SEPARATOR } from '../whatsapp/message-templates';
+import { detectInjection } from '../protocol/validation/prompt-injection';
 import { ValidationService } from '../protocol/validation/validation.service';
 import type { AiResponseJob } from '../whatsapp/whatsapp-inbound.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
@@ -229,6 +230,16 @@ export class AIResponseWorker implements OnModuleInit {
       };
       const { persona } = personaCtx;
 
+      // Sinal para monitoramento, não bloqueio: a defesa é estrutural (o dado do aluno viaja
+      // isolado no envelope e o modelo não tem tool nem acesso a outro titular), então um
+      // falso positivo não pode custar a resposta. Nunca loga o conteúdo da mensagem.
+      if (detectInjection(message)) {
+        this.logger.warn(
+          { event: 'prompt_injection_suspected', userId, source: 'whatsapp_inbound' },
+          'padrão de prompt injection na mensagem do aluno — segue com o dado isolado',
+        );
+      }
+
       await this.repo.persistTurn({ userId, direction: 'INBOUND', content: message });
       await this.context.recordTurn(userId, 'user', message);
       await this.enqueueTyping(userId);
@@ -312,7 +323,9 @@ export class AIResponseWorker implements OnModuleInit {
         return null;
       });
       if (faq) {
-        const verdict = this.validation.validateResponse(faq.answer);
+        const verdict = this.validation.validateResponse(faq.answer, {
+          allowExternalReferences: true,
+        });
         const blocked = verdict.action !== 'PASS';
         const response = blocked ? STANDARD_BLOCK_RESPONSE : faq.answer;
         const l1Flags = blocked ? [] : await this.l1Guardrails.evaluate(message, response);
@@ -360,7 +373,9 @@ export class AIResponseWorker implements OnModuleInit {
 
       if (intent.intent === 'PEDIDO_HANDOFF') {
         const configured = this.prompts.humanHandoffMessageFor(persona);
-        const handoffVerdict = this.validation.validateResponse(configured);
+        const handoffVerdict = this.validation.validateResponse(configured, {
+          allowExternalReferences: true,
+        });
         const response =
           handoffVerdict.action === 'PASS'
             ? configured

@@ -68,7 +68,9 @@ export function simulatePersonaConfig(candidate: AgentPersona) {
     );
     return verdict.action === testCase.expected ? [] : [testCase.label];
   });
-  const handoffVerdict = validation.validateResponse(buildHumanHandoffMessage(candidate));
+  const handoffVerdict = validation.validateResponse(buildHumanHandoffMessage(candidate), {
+    allowExternalReferences: true,
+  });
   if (handoffVerdict.action !== 'PASS') {
     outputFailures.push(
       ...handoffVerdict.violations.map((violation) => `Passagem: ${violation.rule}`),
@@ -125,7 +127,9 @@ export function simulateFaqConfig(candidate: FaqCandidate) {
   const inputFailures = GUARDRAIL_CASES.flatMap((testCase) =>
     clinicalGuardrail(testCase.message) === testCase.expected ? [] : [testCase.label],
   );
-  const verdict = validation.validateResponse(candidate.answer);
+  const verdict = validation.validateResponse(candidate.answer, {
+    allowExternalReferences: true,
+  });
   const outputFailures = verdict.action === 'PASS' ? [] : verdict.violations.map((v) => v.rule);
   const normalized = normalizeFaqQuestion(candidate.canonicalQuestion);
   const matchFailures =
