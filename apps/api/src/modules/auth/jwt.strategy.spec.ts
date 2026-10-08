@@ -100,7 +100,9 @@ describe('JwtStrategy.validate', () => {
     { exp: undefined },
     { iat: undefined },
     { exp: 0 },
-    { exp: Math.floor(Date.now() / 1000) + 901 },
+    // Margem larga: o valor é calculado ao carregar o módulo e o teto (900 s) é medido na hora
+    // da execução; com +901 um atraso de 1 s no CI fazia o caso virar um token válido.
+    { exp: Math.floor(Date.now() / 1000) + 1_000 },
     { iat: Math.floor(Date.now() / 1000) + 10 },
     { jti: 'arbitrary' },
     { role: 'UNKNOWN' },
