@@ -16,11 +16,15 @@
 import {
   canonicalizeSecurityText,
   deobfuscatedViews,
+  despaceSpelledOut,
   foldText,
   hasSpelledOutRun,
+  refang,
   squashLetters,
 } from '../../../core/agent-config/text-normalize';
 import {
+  EXTERNAL_REFERENCE_PATTERN,
+  INJECTION_ECHO_PATTERNS,
   INJECTION_PATTERNS,
   SQUASHED_INJECTION_PATTERNS,
   SYSTEM_PROMPT_SENTINELS,
@@ -113,4 +117,37 @@ export function safePromptFact(text: string, maxLength = 120): string | null {
     .slice(0, maxLength);
   if (!flat || detectInjection(flat) || containsPromptLeak(flat)) return null;
   return flat;
+}
+
+/**
+ * `true` se o texto GERADO cita link, domínio, e-mail ou telefone — inclusive "defanged"
+ * ("exemplo[.]com", "hxxp", "ponto com", "(at)"), soletrado ou com homóglifos. Uma única
+ * definição para a resposta do chat e para o texto do protocolo.
+ */
+export function containsExternalReference(text: string): boolean {
+  const canonical = canonicalizeSecurityText(text);
+  const despaced = despaceSpelledOut(canonical);
+  const variants = [
+    canonical,
+    refang(canonical),
+    despaced,
+    refang(despaced),
+    refang(foldText(text)),
+  ];
+  return variants.some((variant) => EXTERNAL_REFERENCE_PATTERN.test(variant));
+}
+
+/**
+ * `true` se o texto GERADO repete um padrão inequívoco de injeção (subconjunto sem os
+ * padrões frouxos). Num protocolo isso só acontece se o modelo foi induzido por texto livre
+ * da anamnese ou do formulário.
+ */
+export function detectInjectionEcho(text: string): boolean {
+  if (deobfuscatedViews(text).some((view) => INJECTION_ECHO_PATTERNS.some((re) => re.test(view)))) {
+    return true;
+  }
+  const folded = foldText(text);
+  if (!hasSpelledOutRun(folded)) return false;
+  const squashed = squashLetters(folded);
+  return SQUASHED_INJECTION_PATTERNS.some((re) => re.test(squashed));
 }

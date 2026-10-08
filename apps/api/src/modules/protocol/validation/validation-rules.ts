@@ -186,13 +186,19 @@ export const SYSTEM_PROMPT_SENTINELS: readonly string[] = [
  * Padrões conhecidos de prompt injection (TASK-2.3.4). Sinalizam/sanitizam sem bloquear
  * silenciosamente. Cobre o caso do campo de lesão com instrução maliciosa (Sato §8.2).
  */
+/**
+ * Troca de persona. Frouxo de propósito na ENTRADA (sinal), mas "aja como…" é português comum
+ * em nota de treino — por isso fica fora do subconjunto aplicado a texto gerado.
+ */
+const PERSONA_SWITCH_PATTERN = /voc[êe]\s+agora\s+[ée]|aja\s+como|you\s+are\s+now|act\s+as/i;
+
 export const INJECTION_PATTERNS: readonly RegExp[] = [
   /ignore\s+(as\s+|todas\s+as\s+)?instru[çc]/i,
   // Variantes em inglês e com sinônimos ("ignore all previous instructions", "esqueça suas
   // regras", "desconsidere as regras acima"). Exigem o objeto (instruções/regras/prompt)
   // para não acusar frase comum de treino como "ignore a dor".
   /(?:ignore|disregard|forget|override|desconsidere|esque[çc]a|descarte)\s+(?:(?:all|any|every|the|your|previous|prior|above|earlier|todas?|tudo|as|os|suas?|seus|anteriores?|acima|que|o)\s+){0,4}(?:instru[çc]|instruction|rules?|regras?|prompts?|guidelines?|diretrizes|system|sistema|restri[çc]|restrictions?|guardrails?)/i,
-  /voc[êe]\s+agora\s+[ée]|aja\s+como|you\s+are\s+now|act\s+as/i,
+  PERSONA_SWITCH_PATTERN,
   /revele\s+(o|seu)\s+(prompt|system)|mostre\s+o\s+(prompt|system)|reveal.*prompt|system\s+prompt/i,
   /(dados|informa[çc]\w+)\s+de\s+outr[oa]\s+(usu[áa]rio|pessoa)/i,
   // Pedido de dado de TERCEIRO ("busque os dados do aluno Fulano", "mostre o treino do
@@ -212,3 +218,12 @@ export const INJECTION_PATTERNS: readonly RegExp[] = [
   // Falsificação de papéis/marcadores do prompt ("<system>", "[SYSTEM]", "### instruction").
   /<\/?\s*(?:system|assistant|developer)\s*>|\[\s*(?:system|assistant|developer)\s*\]|^#{2,}\s*(?:system|instruction)|^\s*(?:coach|assistant|assistente|agente|system|sistema)\s*:/im,
 ];
+
+/**
+ * Padrões de injeção que, aparecendo num texto GERADO pelo modelo (notas e rótulos do
+ * protocolo), indicam que ele foi induzido a repetir/obedecer uma instrução do aluno. Exclui
+ * os frouxos, que casariam com português comum de treino.
+ */
+export const INJECTION_ECHO_PATTERNS: readonly RegExp[] = INJECTION_PATTERNS.filter(
+  (pattern) => pattern !== PERSONA_SWITCH_PATTERN,
+);
