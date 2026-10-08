@@ -79,15 +79,26 @@ deploy (senão a próxima execução desfaz a mudança).
 
 O daemon usa o driver de log `local`, limitado a 5 arquivos de 20 MB por
 container. Todo domingo às 05:30 BRT, `movivo-docker-prune.timer` remove cache
-de build sem uso e imagens dangling com mais de sete dias. A rotina não remove
-containers, volumes nem imagens versionadas disponíveis para rollback.
+de build sem uso, imagens dangling com mais de sete dias e as tags antigas de
+`movivo-api`/`movivo-web`. Ficam preservadas `MOVIVO_VERSION` e
+`MOVIVO_PREVIOUS_VERSION` (rollback offline, sem depender do GHCR), qualquer
+imagem referenciada por container (inclusive parado) e imagens construídas há
+menos de duas horas. A rotina falha sem apagar nada se `MOVIVO_VERSION` estiver
+ausente ou a imagem atual não existir localmente. Nunca roda `docker image
+prune -a` e não remove containers, volumes, bancos, uploads nem backups.
 
 ```bash
 docker system df
 systemctl list-timers movivo-docker-prune.timer --no-pager
 journalctl -u movivo-docker-prune.service -n 100 --no-pager
+/opt/movivo/bin/movivo-docker-prune.sh --dry-run  # lista mantidas/removidas sem apagar
 sudo systemctl start movivo-docker-prune.service  # execução manual segura
+bash infra/vps/maintenance/movivo-docker-prune.test.sh  # self-check (no repo)
 ```
+
+Remover tags libera espaço dentro do volume cifrado, mas não encolhe o arquivo
+sparse `/srv/movivo-data.luks`: os blocos já alocados só voltam ao disco raiz
+com TRIM/discard (ver `armazenamento-cifrado.md`).
 
 ## Segredos
 

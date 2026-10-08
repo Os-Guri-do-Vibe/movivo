@@ -99,6 +99,9 @@ jobs:
       - name: Gate de isolamento de secrets no build web
         run: node scripts/build-web.test.mjs
 
+      - name: Self-check da retenção de imagens Docker da VPS
+        run: bash infra/vps/maintenance/movivo-docker-prune.test.sh
+
       - name: Build (api, web, shared)
         run: pnpm run build
 
