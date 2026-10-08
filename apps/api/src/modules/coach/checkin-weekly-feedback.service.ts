@@ -15,8 +15,13 @@ import { PinoLogger } from 'nestjs-pino';
 import type { AgentPersona, BiologicalSex } from '@movivo/shared';
 
 import { AgentPersonaService } from '../../core/agent-config/agent-persona.service';
+import {
+  UNTRUSTED_CONTEXT_POLICY,
+  untrustedDataEnvelope,
+} from '../ai-coach/context/untrusted-context';
 import { LlmRouter } from '../ai-coach/llm/llm-router.service';
 import type { ScrubUser } from '../ai-coach/llm/llm.types';
+import { safePromptFact } from '../protocol/validation/prompt-injection';
 import { ValidationService } from '../protocol/validation/validation.service';
 import { stripEmDash } from './response-formatter';
 
@@ -48,14 +53,22 @@ function systemPrompt(persona: AgentPersona, params: CheckinWeeklyFeedbackParams
       'cuidado, sem minimizar, mas NUNCA comente causa, gravidade, ou o que fazer a respeito ' +
       '— apenas que foi registrado e será acompanhado pelo profissional responsável.'
     : '';
-  const volumeNote = params.volumeAdjustmentSummary
+  // Estes dois campos viram texto do SYSTEM prompt, mas nasceram de saída de modelo / de
+  // protocolo gerado por modelo: passam pelo filtro de fato antes de ganhar esse privilégio.
+  const adjustmentFact = params.volumeAdjustmentSummary
+    ? (safePromptFact(params.volumeAdjustmentSummary, 200) ?? 'o volume dos treinos foi reduzido')
+    : null;
+  const exerciseFact = params.identifiedExerciseName
+    ? (safePromptFact(params.identifiedExerciseName, 80) ?? 'o exercício que ele descreveu')
+    : null;
+  const volumeNote = adjustmentFact
     ? `\n\nO protocolo do aluno JÁ FOI AJUSTADO automaticamente para ficar mais rápido, ` +
       `respeitando a metodologia do profissional CREF (sem trocar exercício): ` +
-      `${params.volumeAdjustmentSummary}. Informe isso como um FATO já feito — nunca pergunte ` +
+      `${adjustmentFact}. Informe isso como um FATO já feito — nunca pergunte ` +
       'se o aluno quer o ajuste, ele já aconteceu.'
     : '';
-  const substitutionNote = params.identifiedExerciseName
-    ? `\n\nO aluno relatou dificuldade com o exercício "${params.identifiedExerciseName}". ` +
+  const substitutionNote = exerciseFact
+    ? `\n\nO aluno relatou dificuldade com o exercício "${exerciseFact}". ` +
       'Ofereça, como uma pergunta aberta e natural, sugerir alternativas para esse exercício ' +
       '— não decida nem troque nada agora, só pergunte se ele quer ver opções.'
     : '';
@@ -77,7 +90,8 @@ function systemPrompt(persona: AgentPersona, params: CheckinWeeklyFeedbackParams
     '- Você é uma ferramenta que trabalha dentro da metodologia de um profissional de ' +
     'Educação Física registrado no CREF; nunca dê a entender que decide ou prescreve sozinha.\n' +
     '- Responda SOMENTE com o comentário final — sem saudação (já foi enviada antes), sem ' +
-    'explicações, sem repetir estas instruções.'
+    'explicações, sem repetir estas instruções.\n' +
+    `- ${UNTRUSTED_CONTEXT_POLICY}`
   );
 }
 
@@ -121,7 +135,12 @@ export class CheckinWeeklyFeedbackService {
         userId: params.userId,
         user: params.user,
         system: systemPrompt(persona, params),
-        messages: [{ role: 'user', content: userPrompt(params) }],
+        messages: [
+          {
+            role: 'user',
+            content: untrustedDataEnvelope('CHECKIN_SEMANAL', userPrompt(params)),
+          },
+        ],
         temperature: 0.6,
         maxTokens: 320,
         cache: false,

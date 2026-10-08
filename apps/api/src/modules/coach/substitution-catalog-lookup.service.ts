@@ -25,7 +25,10 @@ import type { BiologicalSex } from '@movivo/shared';
 import { PinoLogger } from 'nestjs-pino';
 import { z } from 'zod';
 
-import { untrustedDataEnvelope } from '../ai-coach/context/untrusted-context';
+import {
+  UNTRUSTED_CONTEXT_POLICY,
+  untrustedDataEnvelope,
+} from '../ai-coach/context/untrusted-context';
 import { LlmRouter } from '../ai-coach/llm/llm-router.service';
 import type { ScrubUser } from '../ai-coach/llm/llm.types';
 import type { ProtocolExerciseRef } from './substitution-target.service';
@@ -113,7 +116,8 @@ export class SubstitutionCatalogLookupService {
           'quando tiver certeza de que é o mesmo exercício — não adivinhe, não invente um id. ' +
           'Se `requestedName` for null, `matchedExerciseId` também é null. Retorne somente ' +
           'JSON estrito: {"requestedName": "<texto> ou null", "matchedExerciseId": "<id da ' +
-          'lista> ou null"}.',
+          'lista> ou null"}. ' +
+          UNTRUSTED_CONTEXT_POLICY,
         messages: [
           {
             role: 'user',

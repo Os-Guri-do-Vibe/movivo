@@ -16,6 +16,10 @@ import { PinoLogger } from 'nestjs-pino';
 import type { AgentPersona, BiologicalSex } from '@movivo/shared';
 
 import { AgentPersonaService } from '../../core/agent-config/agent-persona.service';
+import {
+  UNTRUSTED_CONTEXT_POLICY,
+  untrustedDataEnvelope,
+} from '../ai-coach/context/untrusted-context';
 import { LlmRouter } from '../ai-coach/llm/llm-router.service';
 import type { ScrubUser } from '../ai-coach/llm/llm.types';
 import { ValidationService } from '../protocol/validation/validation.service';
@@ -81,7 +85,8 @@ function systemPrompt(persona: AgentPersona, dorRelatada: boolean): string {
     '- Você é uma ferramenta que trabalha dentro da metodologia de um profissional de ' +
     'Educação Física registrado no CREF; nunca dê a entender que decide ou prescreve sozinha.\n' +
     '- Responda SOMENTE com o comentário final — sem saudação (já foi enviada antes), sem ' +
-    'explicações, sem repetir estas instruções.'
+    'explicações, sem repetir estas instruções.\n' +
+    `- ${UNTRUSTED_CONTEXT_POLICY}`
   );
 }
 
@@ -136,7 +141,12 @@ export class WorkoutFeedbackService {
         userId: params.userId,
         user: params.user,
         system: systemPrompt(persona, params.dorRelatada),
-        messages: [{ role: 'user', content: userPrompt(params) }],
+        messages: [
+          {
+            role: 'user',
+            content: untrustedDataEnvelope('DIARIO_DE_TREINO', userPrompt(params)),
+          },
+        ],
         temperature: 0.6,
         maxTokens: 300,
         cache: false,

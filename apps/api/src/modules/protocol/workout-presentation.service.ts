@@ -27,10 +27,15 @@ import {
 } from '@movivo/shared';
 
 import { AgentPersonaService } from '../../core/agent-config/agent-persona.service';
+import {
+  UNTRUSTED_CONTEXT_POLICY,
+  untrustedDataEnvelope,
+} from '../ai-coach/context/untrusted-context';
 import { LlmRouter } from '../ai-coach/llm/llm-router.service';
 import type { ScrubUser } from '../ai-coach/llm/llm.types';
 import { stripEmDash } from '../coach/response-formatter';
 import { describeChangesAsk, type SubstitutionChange } from './protocol-substitution-items';
+import { safePromptFact } from './validation/prompt-injection';
 import { ValidationService } from './validation/validation.service';
 
 export interface PresentWorkoutParams {
@@ -56,8 +61,16 @@ export interface PresentWorkoutParams {
 function systemPrompt(
   persona: AgentPersona,
   reason: 'INITIAL' | 'SUBSTITUTION',
-  substitutionChanges?: readonly SubstitutionChange[],
+  rawSubstitutionChanges?: readonly SubstitutionChange[],
 ): string {
+  // O nome do substituto pode ser texto livre do aluno (exercício fora do catálogo, aprovado
+  // pelo profissional): ao entrar no SYSTEM prompt ele ganha privilégio de instrução, então
+  // passa pelo filtro de fato — injeção/vazamento vira uma formulação genérica.
+  const substitutionChanges = rawSubstitutionChanges?.map((change) => ({
+    ...change,
+    from: safePromptFact(change.from, 80) ?? 'o exercício anterior',
+    to: safePromptFact(change.to, 80) ?? 'o novo exercício',
+  }));
   const task =
     reason === 'SUBSTITUTION' && substitutionChanges?.length
       ? `Tarefa: escrever a mensagem de WhatsApp que confirma, de forma simples e resumida, a ` +
@@ -84,7 +97,8 @@ function systemPrompt(
     '- Responda SOMENTE com a mensagem final — sem saudação nem se dirigir ao aluno pelo nome ' +
     '(a bolha anterior já saudou a pessoa pelo nome dela; nunca use o seu próprio nome, ' +
     `${persona.agentName}, como se fosse o nome do aluno), sem explicações, sem repetir estas ` +
-    'instruções.'
+    'instruções.\n' +
+    `- ${UNTRUSTED_CONTEXT_POLICY}`
   );
 }
 
@@ -120,7 +134,10 @@ export class WorkoutPresentationService {
         messages: [
           {
             role: 'user',
-            content: userPrompt(params.content, params.totalWeeks, params.mesocycleName),
+            content: untrustedDataEnvelope(
+              'RESUMO_DO_PROTOCOLO',
+              userPrompt(params.content, params.totalWeeks, params.mesocycleName),
+            ),
           },
         ],
         temperature: 0.6,

@@ -20,7 +20,10 @@ import type { BiologicalSex } from '@movivo/shared';
 import { PinoLogger } from 'nestjs-pino';
 import { z } from 'zod';
 
-import { untrustedDataEnvelope } from '../ai-coach/context/untrusted-context';
+import {
+  UNTRUSTED_CONTEXT_POLICY,
+  untrustedDataEnvelope,
+} from '../ai-coach/context/untrusted-context';
 import { LlmRouter } from '../ai-coach/llm/llm-router.service';
 import type { ScrubUser } from '../ai-coach/llm/llm.types';
 import type { ProtocolExerciseRef } from './substitution-target.service';
@@ -117,7 +120,8 @@ const SYSTEM =
   'Retorne somente JSON estrito: {"topic": "CONTINUE"|"NEW_TOPIC", "pain": true|false, ' +
   '"targets": [{"targetId": "<id do alvo>", "chosenExerciseId": "<id>"|null, "scope": ' +
   '"TODAY"|"PROTOCOL"|null, "rejectedOffered": true|false, "requestedOutsideList": ' +
-  'true|false}]} — uma entrada por alvo recebido.';
+  'true|false}]} — uma entrada por alvo recebido. ' +
+  UNTRUSTED_CONTEXT_POLICY;
 
 @Injectable()
 export class SubstitutionResolutionService {

@@ -110,7 +110,7 @@ describe('IntentClassifier — kNN (Etapa 1) e fallback (Etapa 2)', () => {
     expect(r).toMatchObject({ intent: 'CHECKIN_ANTECIPADO', stage: 'FALLBACK' });
     const call = complete.mock.calls[0]?.[0];
     expect(call.system).toContain('CHECKIN_ANTECIPADO: quer ajustar o PROTOCOLO agora');
-    expect(JSON.stringify(call.messages)).toContain('CONTEXTO RECENTE DA CONVERSA');
+    expect(JSON.stringify(call.messages)).toContain('CONTEXTO_RECENTE_DA_CONVERSA');
     expect(JSON.stringify(call.messages)).toContain('quase morri');
     // A mensagem atual não duplica no bloco de histórico (já foi persistida antes de
     // classificar) — só aparece uma vez, na mensagem "atual" embrulhada.

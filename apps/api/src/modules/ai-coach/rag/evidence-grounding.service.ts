@@ -8,7 +8,7 @@ import type { BiologicalSex } from '@movivo/shared';
 import { PinoLogger } from 'nestjs-pino';
 import { z } from 'zod';
 
-import { untrustedDataEnvelope } from '../context/untrusted-context';
+import { UNTRUSTED_CONTEXT_POLICY, untrustedDataEnvelope } from '../context/untrusted-context';
 import type { RagDoc } from '../context/semantic-memory.port';
 import { LlmRouter } from '../llm/llm-router.service';
 import type { ChatTurn, ScrubUser } from '../llm/llm.types';
@@ -223,7 +223,8 @@ export class EvidenceGroundingService {
           'O ESTADO_AUTORITATIVO do aluno prevalece sobre recomendações genéricas; qualquer ' +
           'incompatibilidade com limitações registradas é conflito. ' +
           'Conflito não resolvido torna sufficient=false. Retorne somente JSON estrito: ' +
-          '{"sufficient":boolean,"relevantEvidenceIds":string[],"missingAspects":string[],"conflicts":string[]}.',
+          '{"sufficient":boolean,"relevantEvidenceIds":string[],"missingAspects":string[],"conflicts":string[]}. ' +
+          UNTRUSTED_CONTEXT_POLICY,
         messages: [
           {
             role: 'user',
@@ -323,7 +324,8 @@ export class EvidenceGroundingService {
           'aluno prevalecem sobre orientações genéricas. Em conflito, use CONTRADICTED. ' +
           'Retorne somente JSON estrito: ' +
           '{"verdicts":[{"claimId":"C1","verdict":"SUPPORTED|CONTRADICTED|INSUFFICIENT",' +
-          '"evidenceIds":["E1"]}]}.',
+          '"evidenceIds":["E1"]}]}. ' +
+          UNTRUSTED_CONTEXT_POLICY,
         messages: [
           {
             role: 'user',
