@@ -1,0 +1,12 @@
+[Unit]
+Description=MOVIVO — limpeza segura de cache e imagens Docker sem referência
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=deploy
+Group=deploy
+ExecStart=/opt/movivo/bin/movivo-docker-prune.sh
+Nice=10
+IOSchedulingClass=idle

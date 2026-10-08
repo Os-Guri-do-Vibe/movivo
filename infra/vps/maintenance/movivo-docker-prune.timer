@@ -1,0 +1,10 @@
+[Unit]
+Description=MOVIVO — limpeza semanal de artefatos Docker antigos
+
+[Timer]
+OnCalendar=Sun *-*-* 05:30:00 America/Sao_Paulo
+RandomizedDelaySec=20m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

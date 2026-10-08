@@ -94,6 +94,9 @@ cp infra/vps/update-provider-secret.sh "$stage/bin/"
 cp infra/vps/backup/movivo-backup.sh infra/vps/backup/movivo-backup.service \
    infra/vps/backup/movivo-backup.timer infra/vps/backup/movivo-restore-test.sh \
    infra/vps/backup/movivo-restore-test.service infra/vps/backup/movivo-restore-test.timer "$stage/bin/"
+cp infra/vps/maintenance/movivo-docker-prune.sh \
+   infra/vps/maintenance/movivo-docker-prune.service \
+   infra/vps/maintenance/movivo-docker-prune.timer "$stage/bin/"
 
 # Faixas do Cloudflare (mesma fonte do hostinger-firewall.sh) → IP real e o
 # filtro de origem do Nginx.
@@ -216,15 +219,16 @@ log "7/8 API, web e Nginx"
   docker compose ps --format 'table {{.Service}}\t{{.Image}}\t{{.Status}}'"
 
 # -----------------------------------------------------------------------------
-log "8/8 Backup diário, teste de restore semanal e smoke test"
+log "8/8 Manutenção, backup, teste de restore e smoke test"
 "${SSH[@]}" "set -e
   sudo install -m 644 ${APP_DIR}/bin/movivo-backup.service ${APP_DIR}/bin/movivo-backup.timer \
     ${APP_DIR}/bin/movivo-restore-test.service ${APP_DIR}/bin/movivo-restore-test.timer \
     ${APP_DIR}/bin/movivo-vault-unseal.service ${APP_DIR}/bin/movivo-vault-unseal.timer ${APP_DIR}/bin/movivo-certificate-renewal.service \
-    ${APP_DIR}/bin/movivo-certificate-renewal.timer /etc/systemd/system/
+    ${APP_DIR}/bin/movivo-certificate-renewal.timer ${APP_DIR}/bin/movivo-docker-prune.service \
+    ${APP_DIR}/bin/movivo-docker-prune.timer /etc/systemd/system/
   sudo systemctl daemon-reload
-  sudo systemctl enable --now movivo-backup.timer movivo-restore-test.timer movivo-vault-unseal.service movivo-vault-unseal.timer movivo-certificate-renewal.timer >/dev/null
-  systemctl list-timers movivo-backup.timer movivo-restore-test.timer --no-pager | head -3"
+  sudo systemctl enable --now movivo-backup.timer movivo-restore-test.timer movivo-vault-unseal.service movivo-vault-unseal.timer movivo-certificate-renewal.timer movivo-docker-prune.timer >/dev/null
+  systemctl list-timers movivo-backup.timer movivo-restore-test.timer movivo-docker-prune.timer --no-pager | head -4"
 
 smoke_ok=1
 for url in https://api.movivo.com.br/api/v1/health https://movivo.com.br/; do
