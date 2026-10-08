@@ -276,6 +276,20 @@ describe('WhatsappInboundService.ingest', () => {
     expect(enqueue).toHaveBeenCalledTimes(1);
   });
 
+  it('remove byte nulo do texto antes de bufferizar (Postgres não grava \\u0000)', async () => {
+    const s = signed(payload({ messageId: 'nul-1', text: 'oi\u0000 tudo\u0000 bem' }));
+    await service.ingest({ ...s, correlationId: 'c-nul' });
+    const [, stored] = rpush.mock.calls[0] as unknown as [string, string];
+    expect(JSON.parse(stored).text).toBe('oi tudo bem');
+  });
+
+  it('mensagem só de bytes nulos é descartada sem enfileirar', async () => {
+    const s = signed(payload({ messageId: 'nul-2', text: '\u0000\u0000' }));
+    await service.ingest({ ...s, correlationId: 'c-nul2' });
+    expect(rpush).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
   it('orçamento por titular estourado: descarta sem enfileirar job de IA', async () => {
     const created = makeService();
     // 30 mensagens/5min é o teto; a 31ª é descartada.
