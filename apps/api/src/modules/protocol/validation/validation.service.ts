@@ -19,12 +19,7 @@
 import { Injectable } from '@nestjs/common';
 import type { ProtocolStructure, Weekday } from '@movivo/shared';
 
-import {
-  canonicalizeSecurityText,
-  despaceSpelledOut,
-  foldText,
-  refang,
-} from '../../../core/agent-config/text-normalize';
+import { canonicalizeSecurityText } from '../../../core/agent-config/text-normalize';
 import {
   type CatalogExercise,
   type ContraindicationTag,
@@ -35,10 +30,13 @@ import {
 import { ExerciseCatalogProvider } from '../exercise-catalog-provider.service';
 import { isPhaseDurationWithinRange, PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import type { UserConstraints } from '../user-constraints';
-import { containsPromptLeak } from './prompt-injection';
+import {
+  containsExternalReference,
+  containsPromptLeak,
+  detectInjectionEcho,
+} from './prompt-injection';
 import {
   ISOLATION_MAJORITY_THRESHOLD,
-  EXTERNAL_REFERENCE_PATTERN,
   LANGUAGE_RULES,
   MAX_TECHNIQUES_PER_SESSION,
   MIN_FREQUENCY_BY_SPLIT,
@@ -162,6 +160,7 @@ export class ValidationService {
     this.checkParq(input.structure, input.parqFlags ?? [], input.constraints.maxPhase, violations);
     this.checkPhaseDuration(input.structure, violations);
     this.checkLanguage(collectText(input.structure), violations);
+    this.checkGeneratedProtocolText(collectText(input.structure), violations);
 
     return aggregate(violations);
   }
@@ -482,20 +481,26 @@ export class ValidationService {
   }
 
   private checkExternalReferences(text: string, out: ValidationViolation[]): void {
-    // Além do texto como veio, olha o link "defanged" ("exemplo[.]com", "hxxp", "h t t p s : / /")
-    // e com homóglifos trocados: o aluno clica do mesmo jeito.
-    const canonical = canonicalizeSecurityText(text);
-    const variants = new Set([
-      canonical,
-      refang(canonical),
-      despaceSpelledOut(canonical),
-      refang(despaceSpelledOut(canonical)),
-      refang(foldText(text)),
-    ]);
-    if ([...variants].some((variant) => EXTERNAL_REFERENCE_PATTERN.test(variant))) {
+    if (containsExternalReference(text)) {
       out.push({
         rule: 'EXTERNAL_REFERENCE',
         detail: 'saída gerada cita link, domínio, e-mail ou telefone',
+        action: 'BLOCK',
+      });
+    }
+  }
+
+  /**
+   * Texto livre do PROTOCOLO (notas, rótulos, nomes): vem do modelo, que leu texto livre do
+   * aluno. Link/contato ou eco de instrução ali é sinal de injeção bem-sucedida — e um
+   * protocolo liberado automaticamente chega ao aluno em PDF sem ninguém ter lido.
+   */
+  private checkGeneratedProtocolText(text: string, out: ValidationViolation[]): void {
+    this.checkExternalReferences(text, out);
+    if (detectInjectionEcho(text)) {
+      out.push({
+        rule: 'INJECTION_ECHO',
+        detail: 'texto do protocolo repete instrução de injeção',
         action: 'BLOCK',
       });
     }

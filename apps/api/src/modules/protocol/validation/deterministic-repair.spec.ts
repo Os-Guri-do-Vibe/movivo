@@ -343,3 +343,19 @@ it('é idempotente: reaplicar sobre a própria saída não muda nada', () => {
   // E não muta a entrada.
   expect(exAt(structure, 0, 0).technique).toBe('SUPERSET');
 });
+
+describe('deterministicRepair — injeção e referência externa não têm reparo mecânico', () => {
+  it.each(['EXTERNAL_REFERENCE', 'INJECTION_ECHO'])(
+    '%s → null (vai para correção/fallback)',
+    (rule) => {
+      const structure = base(standard, { generalNotes: 'Veja https://exemplo.com' });
+      expect(
+        deterministicRepair(structure, [{ rule, detail: 'x', action: 'BLOCK' }], {
+          preferredDays: DAYS,
+          parqFlags: [],
+          catalog,
+        }),
+      ).toBeNull();
+    },
+  );
+});

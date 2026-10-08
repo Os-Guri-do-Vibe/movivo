@@ -150,15 +150,11 @@ function rot13(value: string): string {
 }
 
 /**
- * Junta palavras escritas com um separador de um caractere entre cada letra
- * ("i g n o r e", "h t t p s : / /"). Duas ou mais quebras de espaço marcam fronteira de
- * palavra e viram um espaço só. Segmento que não é inteiramente assim fica intacto.
+ * Junta corridas de 4+ caracteres isolados separados por um espaço só ("i g n o r e",
+ * "h t t p s : / /"), mesmo no meio de um texto maior. O resto do texto fica intacto.
  */
 export function despaceSpelledOut(value: string): string {
-  return value
-    .split(/\s{2,}/u)
-    .map((segment) => (/^(?:\S ){3,}\S$/u.test(segment) ? segment.replace(/ /gu, '') : segment))
-    .join(' ');
+  return value.replace(/(?<!\S)(?:\S ){3,}\S(?!\S)/gu, (run) => run.replace(/ /gu, ''));
 }
 
 /** `true` se há uma corrida de 6+ tokens de um caractere ("i g n o r e") — sinal de disfarce. */

@@ -16,11 +16,15 @@
 import {
   canonicalizeSecurityText,
   deobfuscatedViews,
+  despaceSpelledOut,
   foldText,
   hasSpelledOutRun,
+  refang,
   squashLetters,
 } from '../../../core/agent-config/text-normalize';
 import {
+  EXTERNAL_REFERENCE_PATTERN,
+  INJECTION_ECHO_PATTERNS,
   INJECTION_PATTERNS,
   SQUASHED_INJECTION_PATTERNS,
   SYSTEM_PROMPT_SENTINELS,
@@ -56,7 +60,12 @@ function matchesAsWritten(text: string): boolean {
  * marcador visível — nunca apaga em silêncio, para o comportamento não mudar às escondidas).
  */
 export function neutralizeUserInput(text: string): string {
-  let out = canonicalizeSecurityText(text).replace(/<\/?mensagem_usuario>/gi, '[removido]');
+  // Qualquer menção ao nome do delimitador sai (com espaços, sem `<`/`>`, caixa alterada):
+  // o aluno não tem motivo para citá-lo, e uma variante tolerada pode ser lida como fechamento.
+  let out = canonicalizeSecurityText(text).replace(
+    /<?\s*\/?\s*mensagem[_\s-]*usuario\s*>?/gi,
+    '[removido]',
+  );
   for (const re of INJECTION_PATTERNS) {
     // INJECTION_PATTERNS são `i` (sem `g`); adicionamos `g` para trocar todas as ocorrências.
     const global = new RegExp(re.source, `${re.flags}g`);
@@ -113,4 +122,37 @@ export function safePromptFact(text: string, maxLength = 120): string | null {
     .slice(0, maxLength);
   if (!flat || detectInjection(flat) || containsPromptLeak(flat)) return null;
   return flat;
+}
+
+/**
+ * `true` se o texto GERADO cita link, domínio, e-mail ou telefone — inclusive "defanged"
+ * ("exemplo[.]com", "hxxp", "ponto com", "(at)"), soletrado ou com homóglifos. Uma única
+ * definição para a resposta do chat e para o texto do protocolo.
+ */
+export function containsExternalReference(text: string): boolean {
+  const canonical = canonicalizeSecurityText(text);
+  const despaced = despaceSpelledOut(canonical);
+  const variants = [
+    canonical,
+    refang(canonical),
+    despaced,
+    refang(despaced),
+    refang(foldText(text)),
+  ];
+  return variants.some((variant) => EXTERNAL_REFERENCE_PATTERN.test(variant));
+}
+
+/**
+ * `true` se o texto GERADO repete um padrão inequívoco de injeção (subconjunto sem os
+ * padrões frouxos). Num protocolo isso só acontece se o modelo foi induzido por texto livre
+ * da anamnese ou do formulário.
+ */
+export function detectInjectionEcho(text: string): boolean {
+  if (deobfuscatedViews(text).some((view) => INJECTION_ECHO_PATTERNS.some((re) => re.test(view)))) {
+    return true;
+  }
+  const folded = foldText(text);
+  if (!hasSpelledOutRun(folded)) return false;
+  const squashed = squashLetters(folded);
+  return SQUASHED_INJECTION_PATTERNS.some((re) => re.test(squashed));
 }

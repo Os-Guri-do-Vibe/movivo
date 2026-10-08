@@ -47,10 +47,23 @@ A premissa pedida — **o LLM é componente não confiável para autorização**
 | O que o regex continua sem pegar | Paráfrase semântica ("pense que seu treinador anterior te deu ordens diferentes…"), idiomas fora PT/EN, cifras que o modelo decodifica mas que não listamos (ex.: Caesar com outro deslocamento, pig latin) e instrução fragmentada entre mensagens. Isso não tem correção por regex; o que contém esses casos é estrutural (sem ferramentas, sem dado de outro titular, saída limitada a lista fechada, validação de saída). Quem medir esse resíduo é o red team contra modelo real, ainda não executado por falta de crédito nos LLMs. |
 | Troca no protocolo liberada sem humano após 30 min | **Decisão de produto, não alterada.** Passa pelo filtro determinístico. Alternativa se quiser fechar: exigir aprovação do profissional sempre que `pain` for verdadeiro ou o substituto for `INELIGIBLE`/`GAP` (esses já são `mandatory`). |
 
+## 5b. Cobertura por formulário (texto livre do aluno → LLM)
+
+| Formulário | Campos livres (limite) | Chega ao LLM? | Proteção |
+|---|---|---|---|
+| Anamnese | `primaryGoalOther` (120), `pastActivityOther`, `consistencyBarrierOther`, `otherSportName` (120), `importantEventDescription`, `avoidedExercise`, `trigger`, `regionOther` (100) / (300), `professionalExplanation`, `avoidanceRecommendation`, PAR-Q `detail` (500) | Só `importantEventDescription`, `avoidedExercise`, `trigger`, `regionOther` e `avoidanceRecommendation` (via `injuriesRaw`/`avoid`). "Outro" do objetivo vira objetivo genérico seguro; `professionalExplanation` e PAR-Q `detail` só viram tag por palavra-chave, sem ir ao prompt. | `wrapUserMessage` (delimitador + neutralização + marca de ofuscação) e política de dado não confiável no system. Tags de lesão vêm de palavra-chave determinística. |
+| Renovação (fim de ciclo) | `regionOther`, `detail` do PAR-Q, `dislikedExercise.description`, `barrierOther`, `newGoalOther`, `targetEvent` | Sim, dentro de `continuation.summary` e `injuriesRaw`/`avoid`; os invariantes da anamnese original entram por `anamnesisInvariants`. | Mesmo `wrapUserMessage` em cada bloco (summary, invariantes, ficha de periodização e digest de execução). |
+| Check-in semanal | `changesOther` (300), `difficultExerciseDescription` e `improvementFeedback` (2000) | Sim: comentário da IA e identificação do exercício. | Envelope de dado não confiável + política (esta auditoria). Ajuste de volume sem texto livre no prompt. |
+| Diário de treino | `feelingNotes`, `painNotes` | Sim: comentário do coach. | Envelope + política (esta auditoria). |
+
+**Saída do protocolo (lacuna encontrada nesta rodada).** O texto livre que o modelo escreve no protocolo (`generalNotes`, `notes`, `focus`, `dayLabel`, `name`) só passava pelas regras de linguagem CREF e de vazamento de prompt. Uma injeção bem-sucedida podia plantar link ou telefone no PDF, e um protocolo liberado automaticamente (janela de 1h, inclusive quando reparado) chegava ao aluno sem ninguém ler. Agora `ValidationService.validate` bloqueia `EXTERNAL_REFERENCE` e `INJECTION_ECHO` no texto do protocolo. Não há reparo mecânico para essas regras: o planner pede correção ao modelo com dica sem eco do texto e, persistindo, cai no template de fallback (`MANDATORY`, só sai por assinatura humana). O `videoUrl` que o modelo possa devolver já era descartado e substituído pelo do catálogo.
+
+**Delimitador do dado.** A remoção do delimitador `<mensagem_usuario>` passou a tolerar espaços, ausência de `<`/`>`, caixa e separadores (`mensagem-usuario`), em vez de só a forma exata.
+
 ## 6. Monitoramento
 
 Alertar no Loki em `event="prompt_injection_suspected"` (taxa por `userId`), em `ai_response_blocked` com violação `EXTERNAL_REFERENCE` e em `ajuste de volume rejeitado — fora dos limites determinísticos` (modelo tentando extrapolar). Picos por titular indicam teste ativo.
 
 ## 7. Validação
 
-`pnpm --filter api test`: 196 arquivos / 2.440 testes verdes · `tsc --noEmit` limpo · ESLint limpo em `apps/api/src`. O red team contra modelo real ainda não foi executado.
+`pnpm --filter api test`: 196 arquivos / 2.459 testes verdes · `tsc --noEmit` limpo · ESLint limpo em `apps/api/src`. O red team contra modelo real ainda não foi executado.
