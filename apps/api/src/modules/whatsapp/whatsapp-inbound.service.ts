@@ -235,9 +235,13 @@ export class WhatsappInboundService {
     // depois do nonce/titular/orçamento acima, porque transcrição é custo real de
     // terceiro (nunca pago por uma entrega ainda não autenticada ou fora de orçamento).
     // Qualquer falha já avisou o aluno e descartou dentro de `resolveAudioText`.
-    const text =
+    const resolvedText =
       message.text ?? (await this.resolveAudioText(message, provider, userId, correlationId));
-    if (text === null) return;
+    if (resolvedText === null) return;
+    // Postgres não grava byte nulo em text/jsonb: um `\u0000` no texto (webhook adulterado ou
+    // transcrição) derrubaria a persistência do turno no worker e a retry até a DLQ.
+    const text = resolvedText.replaceAll('\u0000', '');
+    if (!text) return;
 
     const isRevocation =
       message.text !== undefined ? isTextRevocation : this.isHealthConsentRevocation(text);

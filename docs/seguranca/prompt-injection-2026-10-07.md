@@ -60,10 +60,16 @@ A premissa pedida — **o LLM é componente não confiável para autorização**
 
 **Delimitador do dado.** A remoção do delimitador `<mensagem_usuario>` passou a tolerar espaços, ausência de `<`/`>`, caixa e separadores (`mensagem-usuario`), em vez de só a forma exata.
 
+## 5c. SQL injection e byte nulo nos formulários
+
+- **SQLi**: nos módulos de anamnese, check-in, renovação e diário, todo valor do aluno chega ao banco como parâmetro ligado (Drizzle); campos sensíveis são cifrados na aplicação antes de virar `bytea`. O único identificador dinâmico (`writeJsonb`) tem tipo fechado + allowlist + `sql.identifier`. `core/validation/no-raw-sql.spec.ts` trava `sql.raw`, `.unsafe(` e `sql.identifier` fora da lista justificada.
+- **Teste dinâmico**: `test/anamnesis-pentest.int-spec.ts` (anamnese) e `test/forms-sqli.int-spec.ts` (check-in semanal e renovação, blocos cifrado e jsonb) rodam 13 payloads clássicos (aspas, UNION, stacked, `pg_sleep`, `$$`, JSON, aspas unicode) pelas mesmas services dos controllers, contra Postgres via PgBouncer, e afirmam: gravação verbatim, tabelas/titular/consentimento/protocolo inalterados e nenhuma requisição atrasada. Rodam no job `integration` do CI. Não rodei sqlmap/fuzzing contra produção (fora de escopo sem autorização) nem localmente (o stack local exige Vault e segredos reais).
+- **Byte nulo (`\u0000`)**: o Postgres não grava em `text`/`jsonb` e a falha virava 500. `strictSafeParse` (ponto único de todos os formulários) agora recusa com 400 qualquer string, valor ou chave, com byte nulo; na entrada do WhatsApp (Arara e transcrição de áudio) o byte é removido antes de bufferizar (a Evolution já filtrava caracteres de controle).
+
 ## 6. Monitoramento
 
 Alertar no Loki em `event="prompt_injection_suspected"` (taxa por `userId`), em `ai_response_blocked` com violação `EXTERNAL_REFERENCE` e em `ajuste de volume rejeitado — fora dos limites determinísticos` (modelo tentando extrapolar). Picos por titular indicam teste ativo.
 
 ## 7. Validação
 
-`pnpm --filter api test`: 196 arquivos / 2.459 testes verdes · `tsc --noEmit` limpo · ESLint limpo em `apps/api/src`. O red team contra modelo real ainda não foi executado.
+`pnpm --filter api test`: 196 arquivos / 2.465 testes verdes · `tsc --noEmit` limpo · ESLint limpo em `apps/api/src`. O red team contra modelo real ainda não foi executado.
