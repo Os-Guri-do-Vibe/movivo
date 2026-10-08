@@ -47,7 +47,8 @@ infra/vps/deploy.sh <sha>     # usa imagens já publicadas no GHCR
 
 O script: sincroniza a configuração → cria os segredos que faltam → confere o
 certificado → imagens → sobe a camada de dados → `migrate` → API, web e Nginx
-→ timer de backup → smoke test pelo Cloudflare. Ele para no primeiro erro.
+→ timers de backup e higiene do Docker → smoke test pelo Cloudflare. Ele para
+no primeiro erro.
 
 Configuração (compose, `api.env`, Nginx) vem da **árvore de trabalho**; as
 imagens vêm do **commit**. Mudou `api.env`? Basta rodar o deploy de novo.
@@ -73,6 +74,20 @@ curl -s https://api.movivo.com.br/api/v1/health
 
 Não edite `/opt/movivo/compose.yml` nem `api.env` à mão: edite no repo e rode o
 deploy (senão a próxima execução desfaz a mudança).
+
+### Disco, imagens e logs
+
+O daemon usa o driver de log `local`, limitado a 5 arquivos de 20 MB por
+container. Todo domingo às 05:30 BRT, `movivo-docker-prune.timer` remove cache
+de build sem uso e imagens dangling com mais de sete dias. A rotina não remove
+containers, volumes nem imagens versionadas disponíveis para rollback.
+
+```bash
+docker system df
+systemctl list-timers movivo-docker-prune.timer --no-pager
+journalctl -u movivo-docker-prune.service -n 100 --no-pager
+sudo systemctl start movivo-docker-prune.service  # execução manual segura
+```
 
 ## Segredos
 
