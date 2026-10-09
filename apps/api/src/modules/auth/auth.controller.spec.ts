@@ -48,6 +48,7 @@ describe('POST /auth/login', () => {
     auth.login.mockResolvedValue({
       accessToken: 'access',
       refreshCookie: 'sess.secret',
+      refreshExpiresAt: new Date(Date.now() + 2_592_000_000),
       user: { id: 'u1', role: 'PROFESSIONAL' },
     });
 
@@ -84,6 +85,7 @@ describe('POST /auth/refresh', () => {
     auth.refresh.mockResolvedValue({
       accessToken: 'access2',
       refreshCookie: 'sess2.secret2',
+      refreshExpiresAt: new Date(Date.now() + 86_400_000),
       user: { id: 'u1', role: 'ADMIN' },
     });
     const req = { ...REQ, cookies: { movivo_refresh: 'sess.secret' } };
@@ -92,7 +94,14 @@ describe('POST /auth/refresh', () => {
 
     expect(auth.refresh).toHaveBeenCalledWith('sess.secret', META);
     expect(out.accessToken).toBe('access2');
-    expect(res.cookie).toHaveBeenCalledWith('movivo_refresh', 'sess2.secret2', expect.any(Object));
+    expect(res.cookie).toHaveBeenCalledWith(
+      'movivo_refresh',
+      'sess2.secret2',
+      expect.objectContaining({ maxAge: expect.any(Number) }),
+    );
+    const options = res.cookie.mock.calls[0]?.[2] as { maxAge: number };
+    expect(options.maxAge).toBeGreaterThan(86_390_000);
+    expect(options.maxAge).toBeLessThanOrEqual(86_400_000);
   });
 });
 
@@ -160,6 +169,7 @@ describe('POST /auth/mfa/verify', () => {
     auth.completeMfaLogin.mockResolvedValue({
       accessToken: 'access',
       refreshCookie: 'sess.secret',
+      refreshExpiresAt: new Date(Date.now() + 2_592_000_000),
       user: { id: 'u1', role: 'ADMIN' },
     });
 
@@ -207,6 +217,7 @@ describe('POST /auth/mfa/setup e /auth/mfa/enable', () => {
     auth.enableMfa.mockResolvedValue({
       accessToken: 'access',
       refreshCookie: 'sess.secret',
+      refreshExpiresAt: new Date(Date.now() + 2_592_000_000),
       user: { id: 'u1', role: 'ADMIN' },
       recoveryCodes: ['AAAAA-BBBBB'],
     });

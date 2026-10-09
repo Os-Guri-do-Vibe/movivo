@@ -14,6 +14,7 @@ import {
   authenticatedBackendFetch,
   BFF_ACCESS_COOKIE,
   BFF_REFRESH_COOKIE,
+  readBackendSession,
 } from './bff';
 beforeEach(() => {
   vi.clearAllMocks();
@@ -71,6 +72,54 @@ it('cookie inventado não autentica operação protegida', async () => {
   expect(fetch.mock.calls[0]?.[0]).toMatch(/auth\/me$/);
 });
 
+it('duas requisições simultâneas compartilham uma rotação e ambas renovam os cookies', async () => {
+  mocks.get.mockImplementation((name) =>
+    name === BFF_ACCESS_COOKIE
+      ? { value: 'access-expirado' }
+      : name === BFF_REFRESH_COOKIE
+        ? { value: 'sess.secret' }
+        : undefined,
+  );
+  let releaseRefresh!: (response: Response) => void;
+  const refreshResponse = new Promise<Response>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  const fetch = vi.fn((url: string, init: RequestInit) => {
+    if (url.endsWith('/auth/refresh')) return refreshResponse;
+    if (url.endsWith('/auth/me')) {
+      return Promise.resolve(
+        init.headers instanceof Headers &&
+          init.headers.get('Authorization') === 'Bearer access-expirado'
+          ? new Response(null, { status: 401 })
+          : new Response(JSON.stringify({ userId: 'u1', role: 'ADMIN' }), { status: 200 }),
+      );
+    }
+    return Promise.resolve(new Response('{}', { status: 200 }));
+  });
+  vi.stubGlobal('fetch', fetch);
+
+  const first = authenticatedBackendFetch('/account/profile');
+  const second = authenticatedBackendFetch('/account/profile');
+  await vi.waitFor(() =>
+    expect(fetch.mock.calls.filter(([url]) => url.endsWith('/auth/refresh'))).toHaveLength(1),
+  );
+  releaseRefresh(sessionResponse({ accessToken: 'access-novo' }));
+
+  expect((await first).status).toBe(200);
+  expect((await second).status).toBe(200);
+  expect(fetch.mock.calls.filter(([url]) => url.endsWith('/auth/refresh'))).toHaveLength(1);
+  expect(mocks.set.mock.calls.filter(([name]) => name === BFF_REFRESH_COOKIE)).toHaveLength(2);
+});
+
+it('rotação concorrente em outra instância não apaga a sessão do navegador', async () => {
+  mocks.get.mockImplementation((name) =>
+    name === BFF_REFRESH_COOKIE ? { value: 'sess.secret' } : undefined,
+  );
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 409 })));
+  await expect(readBackendSession()).rejects.toMatchObject({ status: 409 });
+  expect(mocks.delete).not.toHaveBeenCalled();
+});
+
 it('login repassa IP e user-agent reais do visitante (rate limit e trilha por origem)', async () => {
   incoming.value = new Map([
     ['x-real-ip', '198.51.100.20'],
@@ -82,7 +131,7 @@ it('login repassa IP e user-agent reais do visitante (rate limit e trilha por or
       status: 200,
       headers: {
         'content-type': 'application/json',
-        'set-cookie': 'movivo_refresh=sess.secret; Path=/',
+        'set-cookie': 'movivo_refresh=sess.secret; Max-Age=2592000; Path=/',
       },
     },
   );
@@ -103,7 +152,10 @@ it('login repassa IP e user-agent reais do visitante (rate limit e trilha por or
 it('login sem cabeçalhos de visitante não inventa IP', async () => {
   const response = new Response(
     JSON.stringify({ accessToken: 'access', user: { id: 'u1', role: 'ADMIN' } }),
-    { status: 200, headers: { 'set-cookie': 'movivo_refresh=sess.secret; Path=/' } },
+    {
+      status: 200,
+      headers: { 'set-cookie': 'movivo_refresh=sess.secret; Max-Age=2592000; Path=/' },
+    },
   );
   const fetch = vi.fn().mockResolvedValue(response);
   vi.stubGlobal('fetch', fetch);
@@ -118,7 +170,7 @@ const sessionResponse = (extra: Record<string, unknown> = {}) =>
     JSON.stringify({ accessToken: 'access', user: { id: 'u1', role: 'ADMIN' }, ...extra }),
     {
       status: 200,
-      headers: { 'set-cookie': 'movivo_refresh=sess.secret; Path=/' },
+      headers: { 'set-cookie': 'movivo_refresh=sess.secret; Max-Age=2592000; Path=/' },
     },
   );
 
@@ -142,6 +194,18 @@ it('login sem MFA segue devolvendo a sessão (cookies gravados)', async () => {
   expect(outcome.kind).toBe('session');
   expect(mocks.set).toHaveBeenCalledWith(BFF_ACCESS_COOKIE, 'access', expect.any(Object));
   expect(mocks.set).toHaveBeenCalledWith(BFF_REFRESH_COOKIE, 'sess.secret', expect.any(Object));
+});
+
+it('copia o prazo restante do refresh da API, sem reiniciar os 30 dias', async () => {
+  const response = sessionResponse();
+  response.headers.set('set-cookie', 'movivo_refresh=sess.secret; Max-Age=86400; Path=/');
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+  await loginBackend({ email: 'a@movivo.app', password: 'x' });
+  expect(mocks.set).toHaveBeenCalledWith(
+    BFF_REFRESH_COOKIE,
+    'sess.secret',
+    expect.objectContaining({ maxAge: 86_400, httpOnly: true, sameSite: 'strict', path: '/' }),
+  );
 });
 
 it('mfa/verify: sucesso grava a sessão; erro repassa status e mensagem da API (429 incluso)', async () => {

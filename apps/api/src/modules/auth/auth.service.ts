@@ -17,7 +17,7 @@
  * de existir contexto de sessão, e a RLS libera essas linhas via `app.current_role='SYSTEM'`
  * (contexto privilegiado e bem delimitado — ver `TenantDatabase`).
  */
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { LoginInput } from '@movivo/shared';
 import { and, eq, gt, isNull, sql } from 'drizzle-orm';
@@ -32,6 +32,11 @@ import { PasswordService } from './password.service';
 import { TokenDenylistService } from './token-denylist.service';
 import { TokenService } from './token.service';
 
+// Duas requisições já enviadas pelo mesmo navegador podem trazer o cookie anterior
+// após uma rotação. Nenhuma recebe credencial nova; replay fora desta janela continua
+// revogando a família. Vale também entre instâncias do BFF.
+const CONCURRENT_REFRESH_WINDOW_MS = 30_000;
+
 /** Senha correta, mas falta o 2º fator: nenhuma sessão é emitida, só um desafio de uso único. */
 export interface MfaChallenge {
   mfa: { step: 'verify' | 'setup'; challengeToken: string };
@@ -45,6 +50,7 @@ export interface LoginResult {
   accessToken: string;
   /** Valor opaco do cookie httpOnly de refresh: `<sessionId>.<segredo>`. */
   refreshCookie: string;
+  refreshExpiresAt: Date;
   user: { id: string; role: TenantRole };
 }
 
@@ -203,6 +209,10 @@ export class AuthService {
       // REUSE: com a linha travada, invalida inclusive qualquer descendente que uma
       // rotação concorrente tenha criado antes de liberar o lock.
       if (session.revokedAt !== null) {
+        const revokedAgo = Date.now() - session.revokedAt.getTime();
+        if (revokedAgo >= 0 && revokedAgo <= CONCURRENT_REFRESH_WINDOW_MS) {
+          throw new ConflictException('Sessão já renovada. Repita a solicitação.');
+        }
         const rows = await tx
           .update(authSessions)
           .set({ revokedAt: new Date() })
@@ -248,6 +258,7 @@ export class AuthService {
         oldJti: session.jti,
         newJti: jti,
         refreshCookie: `${created.id}.${secret}`,
+        refreshExpiresAt: expiresAt,
       };
     });
 
@@ -276,6 +287,7 @@ export class AuthService {
     return {
       accessToken: access.token,
       refreshCookie: rotation.refreshCookie,
+      refreshExpiresAt: rotation.refreshExpiresAt,
       user: { id: rotation.userId, role: rotation.role },
     };
   }
@@ -410,7 +422,11 @@ export class AuthService {
     });
 
     const access = this.tokens.signAccessToken(userId, role, jti);
-    return { accessToken: access.token, refreshCookie: `${sessionId}.${secret}` };
+    return {
+      accessToken: access.token,
+      refreshCookie: `${sessionId}.${secret}`,
+      refreshExpiresAt: expiresAt,
+    };
   }
 
   /** Epoch (s) até quando um `jti` fica na denylist: cobre a janela máxima do access. */

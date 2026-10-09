@@ -8,7 +8,9 @@ import { publicEnv, secureCookies } from '@/lib/env';
 import { trustedOrigins } from '../../_lib/trusted-origins';
 
 const API_BASE = (process.env.MOVIVO_API_URL?.trim() || publicEnv.apiUrl).replace(/\/$/, '');
-const COOKIE = 'movivo_workout_session';
+const COOKIE = 'movivo_workout_session_v2';
+const LEGACY_COOKIE = 'movivo_workout_session';
+const COOKIE_PATH = '/api/workout';
 const PRIVATE_HEADERS = {
   'Cache-Control': 'private, no-store, max-age=0',
   Pragma: 'no-cache',
@@ -22,6 +24,17 @@ export class WorkoutBffError extends Error {
   ) {
     super(message);
   }
+}
+
+function workoutCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: secureCookies,
+    sameSite: 'strict' as const,
+    path: COOKIE_PATH,
+    maxAge: 30 * 24 * 60 * 60,
+    priority: 'high' as const,
+  };
 }
 
 export function assertSameOrigin(request: NextRequest): void {
@@ -50,18 +63,21 @@ export async function exchangeMagicToken(token: string): Promise<void> {
   if (!response.ok || typeof payload?.sessionToken !== 'string') {
     throw new WorkoutBffError(response.status, 'Este link expirou ou ja foi utilizado.');
   }
-  (await cookies()).set(COOKIE, payload.sessionToken, {
-    httpOnly: true,
-    secure: secureCookies,
-    sameSite: 'strict',
-    path: '/',
-    maxAge: 30 * 24 * 60 * 60,
-    priority: 'high',
-  });
+  const store = await cookies();
+  store.set(COOKIE, payload.sessionToken, workoutCookieOptions());
+  store.delete({ name: LEGACY_COOKIE, path: '/' });
 }
 
 export async function workoutBackendFetch(path: string, init: RequestInit = {}) {
-  const token = (await cookies()).get(COOKIE)?.value;
+  const store = await cookies();
+  let token = store.get(COOKIE)?.value;
+  if (!token) {
+    token = store.get(LEGACY_COOKIE)?.value;
+    if (token) {
+      store.set(COOKIE, token, workoutCookieOptions());
+      store.delete({ name: LEGACY_COOKIE, path: '/' });
+    }
+  }
   if (!token) throw new WorkoutBffError(401, 'Abra o link recebido pelo WhatsApp.');
   const headers = new Headers(init.headers);
   headers.set('Authorization', `Bearer ${token}`);
