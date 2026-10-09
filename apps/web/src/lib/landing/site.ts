@@ -61,7 +61,7 @@ export const FOOTER_COLUMNS = [
 ] as const;
 
 export const SOCIAL = {
-  instagram: { handle: '@movivo.br', url: 'https://www.instagram.com/movivo.br/' },
+  instagram: { handle: '@movivo.club', url: 'https://www.instagram.com/movivo.club/' },
 } as const;
 
 /**
