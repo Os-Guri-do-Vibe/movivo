@@ -50,13 +50,13 @@ export const publicEnv = {
 } as const;
 
 /**
- * Flag `Secure` dos cookies de sessão dos BFFs. Ligada em produção — mas não num build de
- * produção servido em http://localhost (Docker local): o Safari/WebKit descarta cookie
- * `Secure` em http, mesmo em localhost, e a sessão não sobreviveria a um reload.
- * NEXT_PUBLIC_SITE_URL é gravado no build; na VPS é https, então nada muda lá.
+ * Flag `Secure` dos cookies de sessão dos BFFs. O ambiente público de produção
+ * nunca desliga Secure por um SITE_URL incorreto. Builds locais com NODE_ENV=production
+ * em http://localhost continuam sem Secure para testes no navegador.
  */
 export const secureCookies =
-  process.env.NODE_ENV === 'production' && !publicEnv.siteUrl.startsWith('http://');
+  publicEnv.appEnv === 'production' ||
+  (process.env.NODE_ENV === 'production' && !publicEnv.siteUrl.startsWith('http://'));
 
 /** `true` quando há uma project key válida — a analytics é opcional, nunca bloqueante. */
 export const isAnalyticsEnabled = publicEnv.posthog.key !== undefined;

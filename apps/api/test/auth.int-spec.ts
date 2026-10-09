@@ -6,7 +6,7 @@ import { migrationPostgresTls } from '../src/core/database/postgres-tls';
  * Sentinel) e prova, por I/O de verdade, o que a US-1.8 exige da auth:
  *   · o app **boota** com as chaves RS256 (o login assina/valida um token real);
  *   · login (Argon2id) emite access + refresh (cookie httpOnly);
- *   · refresh rotaciona e invalida o anterior; reuse do anterior invalida a FAMÍLIA;
+ *   · refresh rotaciona; repetição concorrente não derruba o descendente e replay posterior invalida a FAMÍLIA;
  *   · logout coloca o jti na denylist Redis (o access deixa de valer);
  *   · RBAC barra papel de staff sem privilégio num endpoint `@Roles(PROFESSIONAL, ADMIN)`;
  *   · `alg:none` e `HS256` são recusados;
@@ -200,7 +200,7 @@ describe('alg:none e HS256 são recusados (Sato §9.1)', () => {
 });
 
 describe('refresh rotation + detecção de reuse', () => {
-  it('rotaciona e invalida o anterior; reuse do anterior mata a família', async () => {
+  it('rotação concorrente preserva o descendente; replay posterior mata a família', async () => {
     const loginRes = await login();
     const cookie1 = refreshCookie(loginRes);
 
@@ -211,7 +211,23 @@ describe('refresh rotation + detecção de reuse', () => {
     const cookie2 = refreshCookie(r1);
     expect(cookie2).not.toBe(cookie1);
 
-    // Reuse do cookie1 (já rotacionado) → 401 e invalida a família inteira.
+    // A mesma aba pode ter enviado cookie1 em outra requisição antes de receber cookie2.
+    const concurrent = await base().post(`/${prefix}/auth/refresh`).set('Cookie', cookie1);
+    expect(concurrent.status).toBe(409);
+    expect(
+      (await base().get(`/${prefix}/auth/me`).set('Authorization', `Bearer ${r1.body.accessToken}`))
+        .status,
+    ).toBe(200);
+
+    // Simula a passagem da janela de concorrência sem esperar 30 segundos no teste.
+    const firstId = cookie1.replace(/^movivo_refresh=/, '').split('.')[0];
+    await app
+      .get(TenantDatabase)
+      .runAsSystem((tx) =>
+        tx.execute(
+          sql`UPDATE auth_sessions SET revoked_at=now()-interval '31 seconds' WHERE id=${firstId}`,
+        ),
+      );
     const reuse = await base().post(`/${prefix}/auth/refresh`).set('Cookie', cookie1);
     expect(reuse.status).toBe(401);
 
@@ -356,7 +372,7 @@ describe('autenticação autoritativa no servidor', () => {
     await expect(app.get(AuthService).refresh(second.refreshCookie)).rejects.toThrow(/expirado/);
     expect((await me(second.accessToken)).status).toBe(401);
   });
-  it('duas rotações concorrentes não deixam um descendente válido após reuse', async () => {
+  it('duas rotações concorrentes preservam um único descendente válido', async () => {
     const session = await issue();
     const results = await Promise.allSettled([
       app.get(AuthService).refresh(session.refreshCookie),
@@ -364,10 +380,14 @@ describe('autenticação autoritativa no servidor', () => {
     ]);
     const successful = results.filter((result) => result.status === 'fulfilled');
     expect(successful).toHaveLength(1);
+    const rejected = results.filter((result) => result.status === 'rejected');
+    expect(rejected).toHaveLength(1);
     const rotated = successful[0];
     if (rotated.status !== 'fulfilled') throw new Error('Rotação ausente');
-    expect((await me(rotated.value.accessToken)).status).toBe(401);
-    await expect(app.get(AuthService).refresh(rotated.value.refreshCookie)).rejects.toThrow();
+    expect((await me(rotated.value.accessToken)).status).toBe(200);
+    await expect(app.get(AuthService).refresh(rotated.value.refreshCookie)).resolves.toHaveProperty(
+      'accessToken',
+    );
   });
   it('logout de ancestral concorre com refresh sem deixar descendentes vivos', async () => {
     const first = await issue();

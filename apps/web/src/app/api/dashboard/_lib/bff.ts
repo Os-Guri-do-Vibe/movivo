@@ -21,6 +21,10 @@ export const BFF_REFRESH_COOKIE = 'movivo_bff_refresh';
 const BACKEND_REFRESH_COOKIE = 'movivo_refresh';
 const ACCESS_MAX_AGE_SECONDS = 15 * 60;
 const REFRESH_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+const refreshInFlight = new Map<
+  string,
+  Promise<{ auth: AuthPayload; refresh: string; refreshMaxAge: number }>
+>();
 /** Exportado para rotas que fazem passthrough direto (ex.: `account/avatar/[filename]`). */
 export const API_BASE = (process.env.MOVIVO_API_URL?.trim() || publicEnv.apiUrl).replace(/\/$/, '');
 
@@ -86,6 +90,15 @@ export function extractRefreshCookie(setCookie: string | null): string | null {
   return match?.[1] ?? null;
 }
 
+function extractRefreshMaxAge(setCookie: string | null): number | null {
+  const match = /;\s*Max-Age=(\d+)/i.exec(setCookie ?? '');
+  if (!match) return null;
+  const seconds = Number(match[1]);
+  return Number.isSafeInteger(seconds) && seconds >= 0 && seconds <= REFRESH_MAX_AGE_SECONDS
+    ? seconds
+    : null;
+}
+
 function sessionCookieOptions(maxAge: number) {
   return {
     httpOnly: true,
@@ -97,12 +110,14 @@ function sessionCookieOptions(maxAge: number) {
   };
 }
 
-async function saveSession(accessToken: string, refreshToken?: string | null): Promise<void> {
+async function saveSession(
+  accessToken: string,
+  refreshToken: string,
+  refreshMaxAge: number,
+): Promise<void> {
   const store = await cookies();
   store.set(BFF_ACCESS_COOKIE, accessToken, sessionCookieOptions(ACCESS_MAX_AGE_SECONDS));
-  if (refreshToken) {
-    store.set(BFF_REFRESH_COOKIE, refreshToken, sessionCookieOptions(REFRESH_MAX_AGE_SECONDS));
-  }
+  store.set(BFF_REFRESH_COOKIE, refreshToken, sessionCookieOptions(refreshMaxAge));
 }
 
 export async function clearSession(): Promise<void> {
@@ -160,8 +175,11 @@ function backendMessage(payload: unknown, fallback: string): string {
 /** Valida a resposta de sessão da API, grava os cookies do BFF e devolve a sessão. */
 async function startSession(response: Response, payload: unknown): Promise<DashboardSession> {
   const auth = parseAuthPayload(payload);
-  const refresh = extractRefreshCookie(response.headers.get('set-cookie'));
-  if (!refresh) throw new BffError(502, 'A API não devolveu uma sessão renovável.');
+  const setCookie = response.headers.get('set-cookie');
+  const refresh = extractRefreshCookie(setCookie);
+  const refreshMaxAge = extractRefreshMaxAge(setCookie);
+  if (!refresh || refreshMaxAge === null)
+    throw new BffError(502, 'A API não devolveu uma sessão renovável.');
 
   let session: DashboardSession;
   try {
@@ -170,7 +188,7 @@ async function startSession(response: Response, payload: unknown): Promise<Dashb
     await clearSession();
     throw error;
   }
-  await saveSession(auth.accessToken, refresh);
+  await saveSession(auth.accessToken, refresh, refreshMaxAge);
   return session;
 }
 
@@ -256,11 +274,9 @@ export async function mfaEnableBackend(
   return { session: await startSession(response, payload), recoveryCodes: codes };
 }
 
-async function refreshBackend(): Promise<AuthPayload> {
-  const store = await cookies();
-  const refresh = store.get(BFF_REFRESH_COOKIE)?.value;
-  if (!refresh) throw new BffError(401, 'Sessão ausente.');
-
+async function rotateRefresh(
+  refresh: string,
+): Promise<{ auth: AuthPayload; refresh: string; refreshMaxAge: number }> {
   const response = await fetch(`${API_BASE}/auth/refresh`, {
     method: 'POST',
     headers: { Cookie: `${BACKEND_REFRESH_COOKIE}=${refresh}`, ...(await visitorHeaders()) },
@@ -268,13 +284,20 @@ async function refreshBackend(): Promise<AuthPayload> {
   });
   const payload = await parseJson(response);
   if (!response.ok) {
-    await clearSession();
-    throw new BffError(401, 'Sua sessão expirou. Entre novamente.');
+    // 409: outra instância acabou de rotacionar este cookie. Ela enviará o novo par
+    // ao navegador; apagar os cookies aqui poderia sobrescrever essa resposta.
+    if (response.status === 409) {
+      throw new BffError(409, 'Sessão renovada em outra solicitação. Atualize a página.');
+    }
+    if (response.status === 401) await clearSession();
+    throw new BffError(response.status, 'Não foi possível renovar a sessão.');
   }
 
   const auth = parseAuthPayload(payload);
-  const rotatedRefresh = extractRefreshCookie(response.headers.get('set-cookie'));
-  if (!rotatedRefresh) {
+  const setCookie = response.headers.get('set-cookie');
+  const rotatedRefresh = extractRefreshCookie(setCookie);
+  const refreshMaxAge = extractRefreshMaxAge(setCookie);
+  if (!rotatedRefresh || refreshMaxAge === null) {
     await clearSession();
     throw new BffError(502, 'A API não devolveu a rotação da sessão.');
   }
@@ -284,8 +307,22 @@ async function refreshBackend(): Promise<AuthPayload> {
     await clearSession();
     throw error;
   }
-  await saveSession(auth.accessToken, rotatedRefresh);
-  return auth;
+  return { auth, refresh: rotatedRefresh, refreshMaxAge };
+}
+
+async function refreshBackend(): Promise<AuthPayload> {
+  const refresh = (await cookies()).get(BFF_REFRESH_COOKIE)?.value;
+  if (!refresh) throw new BffError(401, 'Sessão ausente.');
+  let pending = refreshInFlight.get(refresh);
+  if (!pending) {
+    pending = rotateRefresh(refresh);
+    refreshInFlight.set(refresh, pending);
+    void pending.finally(() => refreshInFlight.delete(refresh)).catch(() => undefined);
+  }
+  const rotated = await pending;
+  // Cada resposta concorrente precisa enviar Set-Cookie; o fetch à API é único.
+  await saveSession(rotated.auth.accessToken, rotated.refresh, rotated.refreshMaxAge);
+  return rotated.auth;
 }
 
 async function requestWithAccess(

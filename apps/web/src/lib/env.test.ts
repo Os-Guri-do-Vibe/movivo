@@ -56,4 +56,19 @@ describe('publicEnv', () => {
     const { publicEnv } = await importEnv();
     expect(publicEnv.posthog.host).toBe('https://eu.i.posthog.com');
   });
+
+  it('mantém Secure em produção mesmo com URL pública HTTP configurada por engano', async () => {
+    vi.stubEnv('NEXT_PUBLIC_APP_ENV', 'production');
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'http://movivo.com.br');
+    const { secureCookies } = await importEnv();
+    expect(secureCookies).toBe(true);
+  });
+
+  it('permite cookies locais em HTTP num build de produção para Docker', async () => {
+    vi.stubEnv('NEXT_PUBLIC_APP_ENV', 'local');
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'http://localhost:3000');
+    vi.stubEnv('NODE_ENV', 'production');
+    const { secureCookies } = await importEnv();
+    expect(secureCookies).toBe(false);
+  });
 });

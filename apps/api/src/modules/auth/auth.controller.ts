@@ -95,7 +95,7 @@ export class AuthController {
     const result = await this.auth.login(input, accessMetaFrom(req));
     // Senha certa + 2º fator pendente: devolve só o desafio (sem cookie, sem access token).
     if (isMfaChallenge(result)) return result;
-    this.setRefreshCookie(res, result.refreshCookie);
+    this.setRefreshCookie(res, result.refreshCookie, result.refreshExpiresAt);
     return { accessToken: result.accessToken, user: result.user };
   }
 
@@ -125,7 +125,7 @@ export class AuthController {
       input.code,
       accessMetaFrom(req),
     );
-    this.setRefreshCookie(res, result.refreshCookie);
+    this.setRefreshCookie(res, result.refreshCookie, result.refreshExpiresAt);
     return { accessToken: result.accessToken, user: result.user };
   }
 
@@ -169,7 +169,7 @@ export class AuthController {
   ) {
     const input = parseBody(mfaEnableSchema, body ?? {});
     const result = await this.auth.enableMfa(input.challengeToken, input.code, accessMetaFrom(req));
-    this.setRefreshCookie(res, result.refreshCookie);
+    this.setRefreshCookie(res, result.refreshCookie, result.refreshExpiresAt);
     return {
       accessToken: result.accessToken,
       user: result.user,
@@ -195,10 +195,11 @@ export class AuthController {
     status: 401,
     description: 'Cookie ausente, expirado, ou reuse de refresh detectado.',
   })
+  @ApiResponse({ status: 409, description: 'Cookie rotacionado por requisição concorrente.' })
   async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const cookie = (req.cookies as Record<string, string> | undefined)?.[REFRESH_COOKIE];
     const result = await this.auth.refresh(cookie, accessMetaFrom(req));
-    this.setRefreshCookie(res, result.refreshCookie);
+    this.setRefreshCookie(res, result.refreshCookie, result.refreshExpiresAt);
     return { accessToken: result.accessToken, user: result.user };
   }
 
@@ -279,8 +280,12 @@ export class AuthController {
     return { ok: true, role: user.role };
   }
 
-  private setRefreshCookie(res: Response, value: string): void {
-    res.cookie(REFRESH_COOKIE, value, this.cookieOptions(this.config.jwt.refreshTtlSeconds * 1000));
+  private setRefreshCookie(res: Response, value: string, expiresAt: Date): void {
+    res.cookie(
+      REFRESH_COOKIE,
+      value,
+      this.cookieOptions(Math.max(0, expiresAt.getTime() - Date.now())),
+    );
   }
 
   private cookieOptions(maxAgeMs: number) {
