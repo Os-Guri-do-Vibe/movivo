@@ -13,7 +13,8 @@ Visitante ──HTTPS──▶ Cloudflare (proxy, WAF, SSL Full strict)
                          ▼
               VPS 187.127.40.87 · /opt/movivo · Docker Compose
               nginx ─┬─▶ web  (Next.js)      movivo.com.br
-                     └─▶ api  (NestJS)       api.movivo.com.br
+                     ├─▶ api  (NestJS)       api.movivo.com.br
+                     └─▶ /srv/convite (estático)  convite.movivo.com.br
                            ├─▶ pgbouncer ─▶ postgres (pgvector)
                            ├─▶ redis-sentinel ─▶ redis-master / redis-replica
                            └─▶ evolution-api ─▶ evolution-postgres  (WhatsApp)
@@ -52,6 +53,27 @@ no primeiro erro.
 
 Configuração (compose, `api.env`, Nginx) vem da **árvore de trabalho**; as
 imagens vêm do **commit**. Mudou `api.env`? Basta rodar o deploy de novo.
+
+## Página de convite (convite.movivo.com.br)
+
+Página estática "THE FIRST 100" (pré-lançamento, repo `movivo-the-first-100`).
+Não tem container: o Nginx serve `/opt/movivo/sites/convite` (bind mount
+somente leitura em `/srv/convite`). O cadastro vai do navegador direto para o
+Google Apps Script — nada passa pela API da MOVIVO.
+
+```bash
+infra/vps/deploy-convite.sh [caminho-da-página]   # padrão: ../movivo-the-first-100
+```
+
+O script compila com `NEXT_PUBLIC_SITE_URL=https://convite.movivo.com.br`,
+confere o resultado, sincroniza `out/` (rsync `--delete`) e testa pelo
+Cloudflare. Publicar conteúdo novo não exige deploy do produto nem reload do
+Nginx. O `server_name` e o volume só entram com o deploy do produto (merge no
+`main`). DNS: registro `A convite → 187.127.40.87` com proxy ligado.
+
+Pré-lançamento a página sai com `noindex` (header no Nginx + `robots.txt`).
+Para abrir ao público: `CONVITE_ALLOW_INDEXING=true` no script e remover o
+`X-Robots-Tag` do bloco `convite` em `movivo.conf`.
 
 ## Rollback
 

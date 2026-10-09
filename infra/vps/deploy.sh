@@ -116,6 +116,7 @@ mac_tar_flags=()
 COPYFILE_DISABLE=1 tar -C "$stage" --no-xattrs "${mac_tar_flags[@]}" -cf - \
     compose.yml compose.override.yml api.env nginx infra bin \
   | "${SSH[@]}" "set -e; cd ${APP_DIR}
+      mkdir -p sites/convite
       before=\$(sha256sum infra/pgbouncer/pgbouncer.ini infra/redis/*.tpl 2>/dev/null || true)
       tar --no-overwrite-dir --warning=no-unknown-keyword -xf -
       chmod 755 bin/*.sh bin/*.py
