@@ -408,7 +408,7 @@ createServer(async (request, response) => {
       { accessToken: `access-${role.toLowerCase()}`, user: { id: 'professional-1', role } },
       {
         'Set-Cookie':
-          'movivo_refresh=refresh-initial; HttpOnly; SameSite=Strict; Path=/api/v1/auth',
+          'movivo_refresh=refresh-initial; Max-Age=2592000; HttpOnly; SameSite=Strict; Path=/api/v1/auth',
       },
     );
   }
@@ -422,7 +422,7 @@ createServer(async (request, response) => {
       },
       {
         'Set-Cookie':
-          'movivo_refresh=refresh-rotated; HttpOnly; SameSite=Strict; Path=/api/v1/auth',
+          'movivo_refresh=refresh-rotated; Max-Age=2592000; HttpOnly; SameSite=Strict; Path=/api/v1/auth',
       },
     );
   }
