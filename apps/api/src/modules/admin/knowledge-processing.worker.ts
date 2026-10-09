@@ -72,11 +72,11 @@ export class KnowledgeProcessingWorker implements OnModuleInit {
         return { terminal: 'FAILED_INDEXING', row: null };
       }
       const rows = (await tx.execute(sql`
-        SELECT document.mime_type, document.sha256, blob.payload
+        SELECT document.sha256, blob.payload
         FROM knowledge_documents document
         JOIN knowledge_document_blobs blob ON blob.document_id = document.id
         WHERE document.id = ${input.documentId}::uuid
-      `)) as unknown as Array<{ mime_type: string; sha256: string; payload: Buffer }>;
+      `)) as unknown as Array<{ sha256: string; payload: Buffer }>;
       const row = rows[0];
       if (!row) throw new Error('Original de quarentena indisponível.');
       await appendKnowledgeEvent(tx, {
@@ -108,7 +108,7 @@ export class KnowledgeProcessingWorker implements OnModuleInit {
           document_id, content, content_sha256, parser_version, detected_mime_type
         ) VALUES (
           ${input.documentId}::uuid, ${content}, ${contentSha256}, ${PARSER_VERSION},
-          ${loaded.row.mime_type}
+          'text/plain'
         ) ON CONFLICT (document_id) DO NOTHING
       `);
       for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {

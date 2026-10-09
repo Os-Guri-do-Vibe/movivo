@@ -5,8 +5,7 @@
  *  - `PATCH /account/profile`      — nome e/ou telefone (e-mail é imutável).
  *  - `POST  /account/password`     — troca de senha, exige a senha atual.
  *  - `POST  /account/avatar`       — upload de foto de perfil (JPEG/PNG/WebP).
- *  - `GET   /account/avatar/:file` — leitura pública da foto (ver `AvatarStorageService`
- *    sobre por que o nome do arquivo, e não o `userId`, é o token de acesso).
+ *  - `GET   /account/avatar/:file` — leitura autenticada da foto.
  */
 import {
   BadRequestException,
@@ -147,25 +146,24 @@ export class AccountController {
     if (!this.avatarStorage.allowedMimeTypes.includes(file.mimetype)) {
       throw new BadRequestException('Formato de imagem não suportado (use JPEG, PNG ou WebP).');
     }
+    if (!/\.(jpe?g|png|webp)$/i.test(file.originalname ?? '')) {
+      throw new BadRequestException('Extensão de imagem não suportada (use JPG, PNG ou WebP).');
+    }
     if (file.size > this.avatarStorage.maxUploadBytes) {
       throw new BadRequestException('Arquivo excede o tamanho máximo permitido.');
     }
     return this.account.updateAvatar(user.userId, user.role, {
       buffer: file.buffer,
       mimetype: file.mimetype,
+      originalname: file.originalname,
     });
   }
 
-  /**
-   * Sem `JwtAuthGuard` de propósito: é uma foto de perfil consumida por `<img src>` do
-   * navegador, que não anexa o access token do BFF. O nome do arquivo (UUID) é o único
-   * controle de acesso — ver o cabeçalho do módulo e `AvatarStorageService`.
-   */
   @Get('avatar/:filename')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
   @ApiOperation({
-    summary: 'Serve a imagem do avatar (público)',
-    description:
-      'Sem autenticação de propósito — consumida por `<img src>` no navegador. O nome do arquivo (UUID) é o próprio controle de acesso.',
+    summary: 'Serve a imagem do avatar para o dashboard autenticado',
   })
   @ApiParam({
     name: 'filename',
@@ -173,7 +171,7 @@ export class AccountController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Bytes da imagem, com `Cache-Control` imutável de 1 ano.',
+    description: 'Bytes da imagem, com cache privado.',
   })
   @ApiResponse({ status: 404, description: 'Arquivo inexistente.' })
   async serveAvatar(@Param('filename') filename: string, @Res() res: Response): Promise<void> {
@@ -183,7 +181,8 @@ export class AccountController {
       return;
     }
     res.setHeader('Content-Type', file.mimetype);
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
     res.send(file.buffer);
   }
 }

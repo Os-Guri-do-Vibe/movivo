@@ -458,9 +458,25 @@ export class WhatsappInboundService {
         instanceName,
         audio.mediaKey,
       );
+      const maxAudioBytes = 8 * 1024 * 1024;
+      if (
+        !/^audio\/ogg(?:\s*;\s*codecs=opus)?$/i.test(mimetype) ||
+        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64) ||
+        base64.length > Math.ceil(maxAudioBytes / 3) * 4
+      ) {
+        throw new Error('Formato ou tamanho de áudio inválido.');
+      }
+      const bytes = Buffer.from(base64, 'base64');
+      if (
+        bytes.length === 0 ||
+        bytes.length > maxAudioBytes ||
+        bytes.toString('ascii', 0, 4) !== 'OggS'
+      ) {
+        throw new Error('O conteúdo de áudio não corresponde a Ogg.');
+      }
       const transcript = await this.audioTranscription.transcribe({
-        audio: Buffer.from(base64, 'base64'),
-        mimeType: mimetype,
+        audio: bytes,
+        mimeType: 'audio/ogg; codecs=opus',
       });
       this.logger.info(
         {

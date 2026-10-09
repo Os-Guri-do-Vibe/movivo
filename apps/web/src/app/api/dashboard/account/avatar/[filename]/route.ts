@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { API_BASE } from '../../../_lib/bff';
+import { authenticatedBackendFetch, BffError } from '../../../_lib/bff';
 
 /**
  * Proxy de leitura da foto de perfil — same-origin de propósito.
@@ -10,10 +10,7 @@ import { API_BASE } from '../../../_lib/bff';
  * (+ `blob:`/`data:`) — ver `src/proxy.ts`. Sem este proxy, o navegador bloqueia
  * silenciosamente o carregamento da imagem (foto "some" depois do upload).
  *
- * Sem `authenticatedBackendFetch` de propósito: a rota da API já é pública (o nome do
- * arquivo — um UUID — é o próprio token de acesso, ver `AvatarStorageService` no
- * backend), e todo `<img>` do cabeçalho dispara esta rota a cada navegação — checar a
- * sessão do dashboard aqui dobraria uma chamada a `/auth/me` por imagem à toa.
+ * A API exige JWT. O BFF valida a sessão antes de encaminhar a imagem.
  */
 const AVATAR_FILENAME_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp)$/;
@@ -27,17 +24,26 @@ export async function GET(
     return new NextResponse(null, { status: 404 });
   }
 
-  const upstream = await fetch(`${API_BASE}/account/avatar/${filename}`, { cache: 'no-store' });
+  let upstream: Response;
+  try {
+    upstream = await authenticatedBackendFetch(`/account/avatar/${filename}`, {
+      cache: 'no-store',
+    });
+  } catch (error) {
+    return new NextResponse(null, { status: error instanceof BffError ? error.status : 502 });
+  }
   if (!upstream.ok || !upstream.body) {
-    return new NextResponse(null, { status: upstream.status === 404 ? 404 : 502 });
+    return new NextResponse(null, {
+      status: upstream.status === 404 ? 404 : upstream.status === 401 ? 401 : 502,
+    });
   }
 
   return new NextResponse(upstream.body, {
     status: 200,
     headers: {
       'Content-Type': upstream.headers.get('content-type') ?? 'application/octet-stream',
-      'Cache-Control':
-        upstream.headers.get('cache-control') ?? 'public, max-age=31536000, immutable',
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, no-store',
     },
   });
 }

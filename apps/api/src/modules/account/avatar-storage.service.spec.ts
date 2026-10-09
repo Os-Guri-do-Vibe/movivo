@@ -5,7 +5,7 @@
  * leitura/escrita recusa tipo não suportado, e `read`/`delete` são fail-closed contra
  * nome de arquivo fora do formato esperado (defesa contra path traversal).
  */
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -38,7 +38,12 @@ describe('AvatarStorageService', () => {
   });
 
   it('salva com um nome UUID novo, nunca reaproveitando o nome original', async () => {
-    const filename = await service.save({ buffer: JPEG, mimetype: 'image/jpeg' });
+    const filename = await service.save({
+      buffer: JPEG,
+      mimetype: 'image/jpeg',
+      originalname: 'minha-foto.jpeg',
+    });
+    expect(statSync(join(dir, filename)).mode & 0o777).toBe(0o600);
     expect(filename).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$/);
   });
 
@@ -53,6 +58,15 @@ describe('AvatarStorageService', () => {
     await expect(
       service.save({ buffer: Buffer.from('x'), mimetype: 'application/pdf' }),
     ).rejects.toThrow(/não suportado/);
+  });
+
+  it('recusa extensão executável ou incompatível com o MIME', async () => {
+    await expect(
+      service.save({ buffer: PNG, mimetype: 'image/png', originalname: 'foto.php' }),
+    ).rejects.toThrow(/Extensão/);
+    await expect(
+      service.save({ buffer: PNG, mimetype: 'image/png', originalname: 'foto.jpg' }),
+    ).rejects.toThrow(/Extensão/);
   });
 
   it('lê de volta o conteúdo salvo com o mimetype correto', async () => {
@@ -95,6 +109,8 @@ describe('AvatarStorageService — validação de bytes antes de persistir', () 
     { buffer: JPEG, mimetype: 'image/webp' },
     { buffer: Buffer.from('RIFF0000WEBPVP8 '), mimetype: 'image/webp' },
     { buffer: PNG.subarray(0, 7), mimetype: 'image/png' },
+    { buffer: PNG.subarray(0, 24), mimetype: 'image/png' },
+    { buffer: JPEG.subarray(0, -2), mimetype: 'image/jpeg' },
     { buffer: Buffer.alloc(0), mimetype: 'image/png' },
     { buffer: Buffer.from('html'), mimetype: 'constructor' },
   ])('recusa formato falso ou truncado sem gravar arquivo: $mimetype', async (file) => {

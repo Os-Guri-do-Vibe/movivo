@@ -234,6 +234,21 @@ describe('EvolutionHttpTransport (painel "Sistema → Integração")', () => {
     await expect(t.downloadAudio('minha-empresa', '{}')).rejects.toThrow();
     fetchSpy.mockRestore();
   });
+
+  it('downloadAudio: interrompe resposta acima do limite antes de parsear JSON', async () => {
+    const response = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(12 * 1024 * 1024 + 1));
+          controller.close();
+        },
+      }),
+    );
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response);
+    const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger);
+    await expect(t.downloadAudio('minha-empresa', '{}')).rejects.toThrow(/excede o limite/);
+    fetchSpy.mockRestore();
+  });
 });
 
 function spyOnRandom() {

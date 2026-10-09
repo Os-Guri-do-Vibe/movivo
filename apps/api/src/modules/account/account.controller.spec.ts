@@ -1,7 +1,6 @@
 /**
  * Unit — `AccountController`: validação Zod do corpo, checagem de tipo/tamanho do
- * upload de avatar antes de tocar o storage, e a rota pública de leitura (sem guard —
- * ver `AvatarStorageService` sobre o porquê).
+ * upload de avatar antes de tocar o storage e a leitura autenticada.
  */
 import { BadRequestException } from '@nestjs/common';
 import { ZodError } from 'zod';
@@ -134,11 +133,17 @@ describe('POST /account/avatar', () => {
   });
 
   it('delega ao service quando o arquivo é válido', async () => {
-    const file = { mimetype: 'image/png', size: 100, buffer: Buffer.from('foto') };
+    const file = {
+      originalname: 'foto.png',
+      mimetype: 'image/png',
+      size: 100,
+      buffer: Buffer.from('foto'),
+    };
     await controller.uploadAvatar(USER, file as never);
     expect(account.updateAvatar).toHaveBeenCalledWith('u1', 'ADMIN', {
       buffer: file.buffer,
       mimetype: 'image/png',
+      originalname: 'foto.png',
     });
   });
 });
@@ -159,7 +164,7 @@ describe('GET /account/avatar/:filename', () => {
     expect(res.end).toHaveBeenCalled();
   });
 
-  it('serve o arquivo com content-type e cache imutável', async () => {
+  it('serve o arquivo com content-type e cache privado', async () => {
     avatarStorage.read.mockResolvedValueOnce({
       buffer: Buffer.from('foto'),
       mimetype: 'image/png',
@@ -174,10 +179,8 @@ describe('GET /account/avatar/:filename', () => {
     await controller.serveAvatar('11111111-1111-4111-8111-111111111111.png', res as never);
 
     expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'image/png');
-    expect(res.setHeader).toHaveBeenCalledWith(
-      'Cache-Control',
-      'public, max-age=31536000, immutable',
-    );
+    expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'private, no-store');
+    expect(res.setHeader).toHaveBeenCalledWith('X-Content-Type-Options', 'nosniff');
     expect(res.send).toHaveBeenCalledWith(Buffer.from('foto'));
   });
 });
