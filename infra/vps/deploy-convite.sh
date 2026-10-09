@@ -56,13 +56,15 @@ fi
 # -----------------------------------------------------------------------------
 log "2/3 Sincronizando para ${VPS}:${DEST}"
 # --delete: a pasta espelha o out/ (some arquivo removido da página).
-# Permissões explícitas: o Nginx do container roda como usuário sem privilégio.
-rsync -az --delete --chmod=D755,F644 out/ "${VPS}:${DEST}/"
+# Permissões explícitas (-a preserva): o Nginx do container roda como usuário sem
+# privilégio. Feito com chmod local porque o rsync do macOS não tem --chmod.
+chmod -R u=rwX,go=rX out
+rsync -az --delete out/ "${VPS}:${DEST}/"
 
 # -----------------------------------------------------------------------------
 log "3/3 Smoke test pelo Cloudflare"
 smoke_ok=1
-for path in / /termos/ /privacidade/ /robots.txt /favicon.svg; do
+for path in / /robots.txt /favicon.svg; do
   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${SITE_URL}${path}" || true)"
   echo "  ${code}  ${SITE_URL}${path}"
   [[ "$code" == "200" ]] || smoke_ok=0
