@@ -211,7 +211,20 @@ export class AuthService {
       if (session.revokedAt !== null) {
         const revokedAgo = Date.now() - session.revokedAt.getTime();
         if (revokedAgo >= 0 && revokedAgo <= CONCURRENT_REFRESH_WINDOW_MS) {
-          throw new ConflictException('Sessão já renovada. Repita a solicitação.');
+          const [descendant] = await tx
+            .select({ id: authSessions.id })
+            .from(authSessions)
+            .where(
+              and(
+                eq(authSessions.familyId, session.familyId),
+                isNull(authSessions.revokedAt),
+                gt(authSessions.expiresAt, new Date()),
+              ),
+            )
+            .limit(1);
+          if (descendant) {
+            throw new ConflictException('Sessão já renovada. Repita a solicitação.');
+          }
         }
         const rows = await tx
           .update(authSessions)

@@ -324,13 +324,35 @@ describe('refresh — detecção de reuse', () => {
     tx.select
       .mockReturnValueOnce(q([revoked]))
       .mockReturnValueOnce(q([{ role: 'PROFESSIONAL' }]))
-      .mockReturnValueOnce(q([revoked]));
+      .mockReturnValueOnce(q([revoked]))
+      .mockReturnValueOnce(q([{ id: 'descendant' }]));
 
     await expect(service.refresh(`${SESSION_ID}.${GOOD_SECRET}`, META)).rejects.toThrow(
       /já renovada/i,
     );
     expect(tx.update).not.toHaveBeenCalled();
     expect(denylist.revoke).not.toHaveBeenCalled();
+  });
+
+  it('refresh após logout recente não é confundido com rotação concorrente', async () => {
+    const revoked = {
+      id: SESSION_ID,
+      userId: 'u1',
+      refreshTokenHash: `hash:${GOOD_SECRET}`,
+      jti: 'old-jti',
+      familyId: 'fam-1',
+      expiresAt: new Date(Date.now() + 100_000),
+      revokedAt: new Date(),
+    };
+    tx.select
+      .mockReturnValueOnce(q([revoked]))
+      .mockReturnValueOnce(q([{ role: 'PROFESSIONAL' }]))
+      .mockReturnValueOnce(q([revoked]))
+      .mockReturnValueOnce(q([]));
+    tx.update.mockReturnValueOnce(q([]));
+
+    await expect(service.refresh(`${SESSION_ID}.${GOOD_SECRET}`)).rejects.toThrow(/reutilizado/i);
+    expect(tx.update).toHaveBeenCalledTimes(1);
   });
 
   it('reapresentar um refresh já revogado invalida a família inteira', async () => {
