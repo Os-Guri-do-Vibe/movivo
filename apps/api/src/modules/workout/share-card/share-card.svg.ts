@@ -125,6 +125,6 @@ ${text('TREINO CONCLUÍDO', { x: badgeStart + 45, y: 1371, size: 23, fill: GREEN
 ${text('Tempo de Treino', { x: 798, y: 1489.7, size: 19, fill: GREEN, spacing: 4 })}
 ${text(esc(input.durationLabel), { x: 798, y: 1541.7, size: 46, fill: '#f4f7f5', weight: 700 })}
 ${text('MOVE YOUR POTENTIAL.', { x: 798, y: 1637.8, size: 24, fill: '#ffffff', weight: 700 })}
-<text x="798" y="1693.8" font-size="25" fill="${GREEN}" text-anchor="middle">Siga <tspan font-weight="700">@movivo.br</tspan></text>
+<text x="798" y="1693.8" font-size="25" fill="${GREEN}" text-anchor="middle">Siga <tspan font-weight="700">@movivo.club</tspan></text>
 </svg>`;
 }

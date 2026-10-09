@@ -74,7 +74,7 @@ export const LEGAL_LINKS: { terms: string | null; privacy: string | null } = {
 };
 
 /** Canal de contato público. Direct do Instagram oficial até existir e-mail/WhatsApp público. */
-export const CONTACT_URL: string | null = 'https://ig.me/m/movivo.br';
+export const CONTACT_URL: string | null = 'https://ig.me/m/movivo.club';
 
 export interface Credential {
   /** Área (ex.: "Educação Física"). */

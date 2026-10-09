@@ -127,7 +127,7 @@ describe('texto do card (guardrails de linguagem)', () => {
       'Tempo de Treino',
       '01:05:09',
       'MOVE YOUR POTENTIAL.',
-      'Siga @movivo.br',
+      'Siga @movivo.club',
     ]);
     expect(texts.join(' ')).not.toMatch(/diagn[óo]stico|tratamento|cura|garantid/i);
   });
