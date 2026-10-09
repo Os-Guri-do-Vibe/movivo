@@ -8,8 +8,8 @@ import { migrationPostgresTls } from '../src/core/database/postgres-tls';
  *   · e-mail nunca muda, mesmo enviado no corpo (não existe no schema Zod do endpoint);
  *   · telefone duplicado vira 409, formato fora de E.164 vira 400 (Zod, antes do banco);
  *   · POST /account/password exige a senha atual — sem ela, nada muda;
- *   · POST /account/avatar grava no disco e devolve uma URL; GET nessa URL funciona SEM
- *     Authorization (é `<img src>` de navegador) e um nome de arquivo forjado dá 404.
+ *   · POST /account/avatar grava no disco e devolve uma URL; GET nessa URL exige
+ *     Authorization e um nome de arquivo forjado dá 404 para a conta autenticada.
  *
  * `/auth/login` tem throttle de 10/min por IP (compartilhado, em memória, com
  * `auth.int-spec.ts` — mesmo fork único da suíte de integração). Por isso este arquivo
@@ -225,12 +225,10 @@ describe('POST /account/password', () => {
 });
 
 describe('POST /account/avatar + GET /account/avatar/:filename', () => {
-  it('grava o arquivo, devolve avatarUrl e a URL serve a imagem sem autenticação', async () => {
+  it('grava o arquivo, devolve avatarUrl e a URL serve a imagem só com autenticação', async () => {
     const png = Buffer.from(
-      // Prefixo PNG suficiente para identificação por assinatura; este teste
-      // verifica armazenamento e entrega, sem exigir decodificação de imagem.
-      '89504e470d0a1a0a0000000d49484452',
-      'hex',
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j8V8AAAAASUVORK5CYII=',
+      'base64',
     );
 
     const upload = await base()
@@ -242,13 +240,17 @@ describe('POST /account/avatar + GET /account/avatar/:filename', () => {
     expect(upload.body.avatarUrl).toMatch(/\/account\/avatar\/[0-9a-f-]{36}\.png$/);
 
     const path = new URL(upload.body.avatarUrl).pathname;
-    const served = await base().get(path);
+    expect((await base().get(path)).status).toBe(401);
+    const served = await base().get(path).set('Authorization', `Bearer ${accessA}`);
     expect(served.status).toBe(200);
     expect(served.headers['content-type']).toContain('image/png');
+    expect(served.headers['cache-control']).toBe('private, no-store');
   });
 
   it('devolve 404 para um nome de arquivo forjado', async () => {
-    const res = await base().get(`/${prefix}/account/avatar/nao-existe.png`);
+    const res = await base()
+      .get(`/${prefix}/account/avatar/nao-existe.png`)
+      .set('Authorization', `Bearer ${accessA}`);
     expect(res.status).toBe(404);
   });
 
