@@ -4,13 +4,12 @@
  * Decisão de infra do MVP (2026-09-02, decisão do fundador): sem S3/R2 ainda — a
  * arquitetura de referência do MVP é uma única VPS (`ARQUITETURA.md` — "Infra MVP"),
  * sem object storage decidido. O nome do arquivo salvo é um UUID gerado aqui, nunca o
- * `userId`: evita expor o identificador do titular numa URL pública e funciona como
- * token de acesso opaco — por isso a rota de leitura (`AccountController.serveAvatar`)
- * não exige guard, e a defesa contra path traversal é o regex estrito do nome.
+ * `userId`: evita expor o identificador do titular. A leitura exige autenticação;
+ * o regex estrito do nome também impede path traversal.
  */
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import { AppConfigService } from '../../core/config';
@@ -18,6 +17,7 @@ import { AppConfigService } from '../../core/config';
 export interface UploadedAvatarFile {
   readonly buffer: Buffer;
   readonly mimetype: string;
+  readonly originalname?: string;
 }
 
 export interface StoredAvatarFile {
@@ -34,11 +34,17 @@ const EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
 /** Identificação por assinatura; não é decodificação ou sanitização completa da imagem. */
 function hasImageSignature(buffer: Buffer, mimetype: string): boolean {
   if (mimetype === 'image/jpeg') {
-    return buffer.length > 3 && buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]));
+    return (
+      buffer.length > 5 &&
+      buffer.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])) &&
+      buffer.subarray(-2).equals(Buffer.from([0xff, 0xd9]))
+    );
   }
   if (mimetype === 'image/png') {
     return (
-      buffer.length > 8 && buffer.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))
+      buffer.length > 20 &&
+      buffer.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')) &&
+      buffer.subarray(-12).equals(Buffer.from('0000000049454e44ae426082', 'hex'))
     );
   }
   return (
@@ -92,6 +98,18 @@ export class AvatarStorageService {
     if (!this.allowedMimeTypes.includes(file.mimetype)) {
       throw new BadRequestException('Formato de imagem não suportado (use JPEG, PNG ou WebP).');
     }
+    if (file.originalname) {
+      const extension = file.originalname.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+      if (!extension || !['jpg', 'jpeg', 'png', 'webp'].includes(extension)) {
+        throw new BadRequestException('Extensão de imagem não suportada (use JPG, PNG ou WebP).');
+      }
+      if (
+        extension !== EXTENSION_BY_MIME[file.mimetype] &&
+        !(extension === 'jpeg' && file.mimetype === 'image/jpeg')
+      ) {
+        throw new BadRequestException('Extensão e conteúdo da imagem não correspondem.');
+      }
+    }
     if (file.buffer.length > Math.min(this.maxUploadBytes, AVATAR_UPLOAD_HARD_CEILING_BYTES)) {
       throw new BadRequestException('Arquivo excede o tamanho máximo permitido.');
     }
@@ -99,9 +117,10 @@ export class AvatarStorageService {
       throw new BadRequestException('O conteúdo do arquivo não corresponde ao formato da imagem.');
     }
     const extension = EXTENSION_BY_MIME[file.mimetype];
-    await mkdir(this.dir(), { recursive: true });
+    await mkdir(this.dir(), { recursive: true, mode: 0o700 });
+    await chmod(this.dir(), 0o700);
     const filename = `${randomUUID()}.${extension}`;
-    await writeFile(this.path(filename), file.buffer);
+    await writeFile(this.path(filename), file.buffer, { flag: 'wx', mode: 0o600 });
     return filename;
   }
 

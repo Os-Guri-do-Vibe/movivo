@@ -30,6 +30,7 @@ import {
   currentKnowledgeState,
   lockKnowledgeDocument,
 } from './knowledge-lifecycle';
+import { scanKnowledgeContent } from './knowledge-content-scanner';
 
 export { scanKnowledgeContent } from './knowledge-content-scanner';
 
@@ -211,9 +212,13 @@ export class KnowledgeAdminService {
     }
 
     const payload = Buffer.from(input.content, 'utf8');
+    if (payload.toString('utf8') !== input.content) {
+      throw new BadRequestException('O arquivo não contém UTF-8 válido.');
+    }
     if (payload.byteLength > this.config.knowledge.uploadMaxBytes) {
       throw new BadRequestException('O arquivo excede o limite configurado.');
     }
+    scanKnowledgeContent(input.content);
     const sha256 = createHash('sha256').update(payload).digest('hex');
     const logicalKey = input.logicalKey ?? logicalKeyFor(input.title);
 
@@ -256,7 +261,7 @@ export class KnowledgeAdminService {
           status: 'QUARANTINED',
           stage: 'QUEUE',
           actorId: actor.userId,
-          note: 'Original validado por extensão, MIME e tamanho; aguardando processamento.',
+          note: 'Original validado por extensão, texto UTF-8 e tamanho; aguardando processamento.',
         });
         await this.audit.append(tx, {
           actorId: actor.userId,

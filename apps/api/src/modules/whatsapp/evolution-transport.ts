@@ -511,11 +511,36 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
       `/chat/getBase64FromMediaMessage/${encodeURIComponent(instanceName)}`,
       { method: 'POST', body: JSON.stringify({ message: { key }, convertToMp4: false }) },
     );
-    const body = (await res.json()) as { base64?: string; mimetype?: string };
-    if (!body.base64) {
+    const maxResponseBytes = 12 * 1024 * 1024;
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('EvolutionAPI não devolveu áudio.');
+    const chunks: Buffer[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > maxResponseBytes) throw new Error('Áudio da EvolutionAPI excede o limite.');
+        chunks.push(Buffer.from(value));
+      }
+    } catch (error) {
+      await reader.cancel().catch(() => undefined);
+      throw error;
+    } finally {
+      reader.releaseLock();
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+      base64?: unknown;
+      mimetype?: unknown;
+    };
+    if (typeof body.base64 !== 'string' || !body.base64) {
       throw new Error('EvolutionAPI não devolveu base64 para a mensagem de voz.');
     }
-    return { base64: body.base64, mimetype: body.mimetype ?? 'audio/ogg; codecs=opus' };
+    return {
+      base64: body.base64,
+      mimetype: typeof body.mimetype === 'string' ? body.mimetype : 'audio/ogg; codecs=opus',
+    };
   }
 
   /** Indicador "digitando…" imediato (US-3.5) — best-effort, nunca lança. */

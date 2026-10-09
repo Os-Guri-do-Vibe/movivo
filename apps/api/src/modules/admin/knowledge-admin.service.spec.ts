@@ -223,13 +223,12 @@ describe('KnowledgeAdminService.upload', () => {
     );
   });
 
-  // A varredura de conteúdo (PII, injeção, binário) roda no worker assíncrono
-  // (`KnowledgeProcessingWorker.ingest` chama `scanKnowledgeContent`, coberto acima
-  // em `describe('scanKnowledgeContent', ...)`) — `upload()` só valida o envelope:
-  // contrato do body, extensão/MIME e tamanho do original em quarentena.
+  // A varredura ocorre antes da quarentena e é repetida pelo worker antes de indexar.
   it.each([
     ['corpo fora do contrato', { ...UPLOAD, topic: '' }],
     ['extensão não permitida', { ...UPLOAD, originalFilename: 'protocolo.pdf' }],
+    ['conteúdo ativo', { ...UPLOAD, content: '<script>alert(1)</script>' }],
+    ['UTF-8 inválido', { ...UPLOAD, content: CONTENT + '\ud800' }],
   ])('recusa %s sem gravar nada', async (_label, body) => {
     const { service, inserted } = knowledgeWith();
     await expect(service.upload(ACTOR, body)).rejects.toBeInstanceOf(BadRequestException);

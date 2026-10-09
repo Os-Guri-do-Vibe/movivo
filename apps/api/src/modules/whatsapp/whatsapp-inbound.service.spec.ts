@@ -134,7 +134,10 @@ function makeService(
   const audioTranscription = { transcribe } as unknown as AudioTranscriptionPort;
   const downloadAudio =
     opts.downloadAudio ??
-    vi.fn(async () => ({ base64: 'YWJj', mimetype: 'audio/ogg; codecs=opus' }));
+    vi.fn(async () => ({
+      base64: Buffer.from('OggS-test-audio').toString('base64'),
+      mimetype: 'audio/ogg; codecs=opus',
+    }));
   const evolutionTransport = {
     lastKnownInstanceName: () =>
       'evolutionInstanceName' in opts ? opts.evolutionInstanceName : INSTANCE_NAME,
@@ -436,6 +439,31 @@ describe('WhatsappInboundService.ingest — mensagem de voz (US audio, Evolution
     expect(created.enqueue).toHaveBeenCalledWith(
       'ai-response',
       'coach-response',
+      expect.any(Object),
+      expect.any(Object),
+    );
+  });
+
+  it.each([
+    [
+      'MIME forjado',
+      { base64: Buffer.from('OggS-test').toString('base64'), mimetype: 'audio/mpeg' },
+    ],
+    [
+      'conteúdo forjado',
+      { base64: Buffer.from('<script>').toString('base64'), mimetype: 'audio/ogg' },
+    ],
+    ['base64 inválido', { base64: '####', mimetype: 'audio/ogg' }],
+  ])('descarta %s antes de transcrever', async (_label, downloaded) => {
+    const created = makeService({
+      evolutionEdge: audioEdge({ mediaKey: '{"id":"WA-1"}', durationSeconds: 12 }),
+      downloadAudio: vi.fn(async () => downloaded),
+    });
+    await ingestAudio(created);
+    expect(created.transcribe).not.toHaveBeenCalled();
+    expect(created.enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'audio-transcription-fallback',
       expect.any(Object),
       expect.any(Object),
     );
