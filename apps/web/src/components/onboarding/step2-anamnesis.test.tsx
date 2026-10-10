@@ -546,7 +546,7 @@ describe('Step2Anamnesis', () => {
     const heading = screen.getByRole('heading', { name: 'Suas preferências' });
     const description = screen.getByText('O que você prefere não fazer.');
     const question = screen.getByText(
-      'Existe algum exercício que você não gosta ou não deseja realizar?',
+      'Você tem alguma preferência em relação ao treino e à metodologia? Por exemplo, existe algum exercício de que você não gosta ou que não deseja realizar?',
     );
     const noOption = screen.getByRole('radio', { name: 'Não' });
     const yesOption = screen.getByRole('radio', { name: 'Sim' });

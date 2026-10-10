@@ -33,6 +33,13 @@ const ANTHROPIC_VERSION = '2023-06-01';
 /** Traduz um erro de `fetch`/status em `LLMProviderError` classificado para o router. */
 function classifyStatus(provider: ProviderName, status: number, body: string): LLMProviderError {
   if (status === 429) return new LLMProviderError('RATE_LIMIT', provider, `429 rate limit`);
+  // Credencial inválida/revogada (401), conta sem saldo (402 no DeepSeek) ou sem permissão
+  // (403): o pedido está correto, quem não pode atendê-lo é a conta do provedor. Tratar como
+  // erro do chamador (CLIENT) abortava a cascata inteira e o protocolo caía no template de
+  // fallback mesmo com os outros provedores saudáveis.
+  if (status === 401 || status === 402 || status === 403) {
+    return new LLMProviderError('AUTH', provider, `${status} credencial ou saldo do provedor`);
+  }
   if (status >= 500) return new LLMProviderError('SERVER', provider, `${status} server error`);
   return new LLMProviderError('CLIENT', provider, `${status}: ${body.slice(0, 200)}`);
 }

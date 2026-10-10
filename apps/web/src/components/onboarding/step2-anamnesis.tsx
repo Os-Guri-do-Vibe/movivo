@@ -622,7 +622,7 @@ export function Step2Anamnesis({
           {sectionHeader('Suas preferências', 'O que você prefere não fazer.')}
           <QuestionStack>
             <YesNo
-              legend="Existe algum exercício que você não gosta ou não deseja realizar?"
+              legend="Você tem alguma preferência em relação ao treino e à metodologia? Por exemplo, existe algum exercício de que você não gosta ou que não deseja realizar?"
               value={data.hasAvoidedExercise}
               onChange={(value) => set('hasAvoidedExercise', value)}
               indicatorSide="left"
