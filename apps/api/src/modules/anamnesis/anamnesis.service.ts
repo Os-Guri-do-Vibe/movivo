@@ -5,7 +5,7 @@
  * protege (as mesmas da v1, agora sobre o wizard de 3 etapas):
  *  - **Token é credencial de dado de saúde**: CSPRNG de 256 bits, 72h de validade,
  *    nunca aceita `user_id`/`sessionId` do cliente (IDOR — Sato §8.1, ADR-006).
- *  - **Etapa 1 só fecha com o número provado** (US-6.5) e com os 3 consentimentos
+ *  - **Etapa 1 só fecha com o número provado** (US-6.5) e com os consentimentos
  *    obrigatórios aceitos — o número é o identificador funcional do produto.
  *  - **18+ é regra de negócio validada no SERVIDOR**, com a mensagem exata do fundador.
  *    Validação de cliente é UX, não controle.
@@ -39,7 +39,6 @@ import {
   onboardingStep2Schema,
   onboardingStep3Schema,
   PARQ_DECLARATIONS_VERSION,
-  REQUIRED_CONSENT_TYPES,
   UNDER_AGE_MESSAGE,
   type ConsentTypeWithText,
   type OnboardingOutcome,
@@ -110,8 +109,10 @@ export interface SubmitResult {
   outcome: OnboardingOutcome;
 }
 
-/** Ordem de exibição da Etapa 1 = ordem das chaves de `CONSENT_TEXTS` (Alexandre §5.8). */
-const CONSENT_ORDER = Object.keys(CONSENT_TEXTS) as ConsentTypeWithText[];
+/** O cadastro beta não exige aceite de documentos ainda não publicados. */
+const CONSENT_ORDER = (Object.keys(CONSENT_TEXTS) as ConsentTypeWithText[]).filter(
+  (type) => type !== 'TERMS_OF_SERVICE',
+);
 
 /** Únicas colunas que `writeJsonb` pode escrever (nome de coluna não é parametrizável). */
 type JsonbBlockColumn = 'data_block_1' | 'data_block_3';
@@ -236,7 +237,6 @@ export class AnamnesisService {
     data: unknown,
   ): Promise<{ currentStep: number }> {
     const initial = await this.requireActiveSession(token);
-    this.consents.assertTermsPublished();
     return this.db.runAsTokenScoped(initial.id, async (tx) => {
       const [row] = await tx
         .select()
@@ -337,7 +337,6 @@ export class AnamnesisService {
    */
   async submit(token: string): Promise<SubmitResult> {
     const initial = await this.requireActiveSession(token);
-    this.consents.assertTermsPublished();
     const { row, userId, gate, submittedAt } = await this.db.runAsSystem(async (tx) => {
       const [row] = await tx
         .select()
@@ -501,7 +500,7 @@ export class AnamnesisService {
 
   private async missingRequiredConsents(sessionId: string): Promise<ConsentTypeWithText[]> {
     const accepted = await this.consents.acceptedTypesForSession(sessionId);
-    return REQUIRED_CONSENT_TYPES.filter((type) => !accepted.includes(type));
+    return CONSENT_ORDER.filter((type) => CONSENT_TEXTS[type].required && !accepted.includes(type));
   }
 
   private async writeJsonb(

@@ -20,22 +20,28 @@ const USER = '22222222-2222-4222-8222-222222222222';
  * `tx` falso: cobre o encadeamento do Drizzle usado pelo serviço sem banco.
  * Cada builder devolve `this`, e o `await` final resolve para `rows`.
  */
-function makeTx(rows: unknown[] = []): TenantTransaction {
+function makeTx(rows: unknown[] = [], executed: unknown[] = []): TenantTransaction {
   const chain: Record<string, unknown> = {};
   for (const m of ['select', 'from', 'where', 'limit', 'insert', 'values', 'set', 'update']) {
     chain[m] = vi.fn(() => chain);
   }
   chain.onConflictDoUpdate = vi.fn(() => Promise.resolve(rows));
-  chain.execute = vi.fn(() => Promise.resolve(rows));
+  chain.execute = vi.fn((command: unknown) => {
+    executed.push(command);
+    return Promise.resolve(rows);
+  });
   // `where` encerra os UPDATEs; um thenable resolve tanto encadeado quanto awaited.
   chain.then = (resolve: (v: unknown) => unknown) => resolve(rows);
   return chain as unknown as TenantTransaction;
 }
 
 function makeDb(rows: unknown[] = []) {
-  const run = vi.fn((cb: (tx: TenantTransaction) => Promise<unknown>) => cb(makeTx(rows)));
+  const executed: unknown[] = [];
+  const run = vi.fn((cb: (tx: TenantTransaction) => Promise<unknown>) =>
+    cb(makeTx(rows, executed)),
+  );
   const runScoped = vi.fn((_id: string, cb: (tx: TenantTransaction) => Promise<unknown>) =>
-    cb(makeTx(rows)),
+    cb(makeTx(rows, executed)),
   );
   return {
     db: {
@@ -43,11 +49,12 @@ function makeDb(rows: unknown[] = []) {
       runAsTokenScoped: runScoped,
       runAsSystem: run,
       runAsUser: vi.fn((_u: string, _r: string, cb: (tx: TenantTransaction) => Promise<unknown>) =>
-        cb(makeTx(rows)),
+        cb(makeTx(rows, executed)),
       ),
     } as unknown as TenantDatabase,
     run,
     runScoped,
+    executed,
   };
 }
 
@@ -68,8 +75,8 @@ describe('ConsentService', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it('recusa aceite dos Termos enquanto não há par de documentos publicado', async () => {
-    const { db, run } = makeDb([{ id: SESSION }]);
+  it('ignora aceite de Termos sem documentos publicados e deixa a inscrição seguir', async () => {
+    const { db, run, executed } = makeDb([{ id: SESSION }]);
     const svc = new ConsentService(db);
 
     await expect(
@@ -81,11 +88,13 @@ describe('ConsentService', () => {
             version: CONSENT_TEXTS.TERMS_OF_SERVICE.version,
             accepted: true,
           },
+          { type: 'HEALTH_DATA', version: CONSENT_TEXTS.HEALTH_DATA.version, accepted: true },
         ],
         ORIGIN,
       ),
-    ).rejects.toThrow(/Termos de Uso em revisão/i);
-    expect(run).not.toHaveBeenCalled();
+    ).resolves.toBeUndefined();
+    expect(run).toHaveBeenCalled();
+    expect(executed).toHaveLength(1);
   });
 
   it('preserva o registro independente de marketing e recusa dos Termos', async () => {

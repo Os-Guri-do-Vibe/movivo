@@ -39,14 +39,6 @@ const SESSION: SessionView = {
   primaryGoal: null,
   consents: [
     {
-      type: 'TERMS_OF_SERVICE',
-      version: 'v1',
-      title: null,
-      body: [],
-      label: 'Aceito.',
-      required: true,
-    },
-    {
       type: 'HEALTH_DATA',
       version: 'v1',
       title: 'Saúde',
@@ -93,7 +85,7 @@ async function completeStep1(user: UserEvent) {
   await user.type(screen.getByLabelText(/whatsapp/i), '11999999999');
   await user.click(screen.getByText('simular verificação'));
   await user.type(screen.getByLabelText(/e-mail/i), 'fulano@example.com');
-  for (const label of ['Aceito.', 'Autorizo.', 'Estou ciente.']) {
+  for (const label of ['Autorizo.', 'Estou ciente.']) {
     await user.click(screen.getByLabelText(label));
   }
   await user.click(screen.getByRole('button', { name: 'Continuar' }));
@@ -141,6 +133,7 @@ describe('OnboardingWizard', () => {
     render(<OnboardingWizard sessionRef="tok" initial={SESSION} />);
     expect(screen.getByText('Vamos começar por você')).toBeInTheDocument();
     expect(screen.queryByText(/link fica disponível/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Termos de Uso/i)).not.toBeInTheDocument();
   });
 
   it('preenche a etapa 1 e avança para a primeira subtela da etapa 2', async () => {
@@ -171,7 +164,7 @@ describe('OnboardingWizard', () => {
     expect(screen.getByTestId('otp-phone')).toHaveTextContent('+351912345678');
     await user.click(screen.getByText('simular verificação'));
     await user.type(screen.getByLabelText(/e-mail/i), 'fulano@example.com');
-    for (const label of ['Aceito.', 'Autorizo.', 'Estou ciente.']) {
+    for (const label of ['Autorizo.', 'Estou ciente.']) {
       await user.click(screen.getByLabelText(label));
     }
     await user.click(screen.getByRole('button', { name: 'Continuar' }));

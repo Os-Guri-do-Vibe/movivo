@@ -63,7 +63,7 @@ async function fillStep1(page: Page) {
   });
   await expect(page.getByText('✓ WhatsApp confirmado')).toBeVisible();
 
-  await page.getByLabel(/Li e aceito os Termos/).check();
+  await expect(page.getByLabel(/Li e aceito os Termos/)).toHaveCount(0);
   await page.getByLabel(/dados de saúde/).check();
   await page.getByLabel(/inteligência artificial/).check();
 
