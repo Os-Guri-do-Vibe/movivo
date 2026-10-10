@@ -4,8 +4,9 @@ import type { Redis } from 'ioredis';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AppConfigService } from '../../core/config';
+import type { HealthCipherService } from '../../core/database/health-cipher.service';
 import type { HealthConsentService } from '../../core/database/health-consent.service';
-import { users } from '../../core/database/schema';
+import { conversations, users } from '../../core/database/schema';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
 import { RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import type { WorkerFactory } from '../jobs/worker.factory';
@@ -66,6 +67,10 @@ interface Deps {
    */
   waitingMarkerExists?: boolean;
   consentActive?: boolean;
+  /** Linhas gravadas em `conversations` (histórico da aba "Conversas"). */
+  inserted?: { table: unknown; values: unknown }[];
+  /** Simula falha na gravação do histórico. */
+  insertFails?: boolean;
 }
 
 /**
@@ -98,6 +103,13 @@ function makeTx(deps: Deps) {
     },
     where: () => chain,
     orderBy: () => chain,
+    insert: (t: unknown) => ({
+      values: (values: unknown) => {
+        if (deps.insertFails) return Promise.reject(new Error('db fora do ar'));
+        deps.inserted?.push({ table: t, values });
+        return Promise.resolve();
+      },
+    }),
     limit: () =>
       Promise.resolve(
         table === users
@@ -173,6 +185,9 @@ function makeWorker(deps: Deps = {}) {
     {
       issue: vi.fn(async () => ({ token: 'protocol-access-token', expiresAt: new Date() })),
     } as never,
+    {
+      encryptText: vi.fn(async (text: string) => `enc(${text})`),
+    } as unknown as HealthCipherService,
   );
   return { worker, send, sendTemplate, sendTyping, sendDocument, redis };
 }
@@ -248,6 +263,80 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
     );
     expect(res.status).toBe('SENT');
     expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('confirmação: a mensagem enviada entra no histórico de conversas (aba "Conversas")', async () => {
+    const inserted: NonNullable<Deps['inserted']> = [];
+    const { worker } = makeWorker({ name: 'Ana Beatriz', inserted });
+    await worker.process(job({ type: 'CONFIRMATION' }));
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]?.table).toBe(conversations);
+    expect(inserted[0]?.values).toMatchObject({ userId: USER_ID, direction: 'OUTBOUND' });
+    expect((inserted[0]?.values as { content: string }).content).toMatch(/^enc\(Olá, Ana!/);
+  });
+
+  it('várias bolhas: cada bolha enviada vira uma linha do histórico', async () => {
+    const inserted: NonNullable<Deps['inserted']> = [];
+    const { worker } = makeWorker({ inserted });
+    await worker.process(
+      job({ type: 'CHECKIN_MESSAGE', text: 'Oi!\n---\nComo foi o treino?', dedupeId: 'k1' }),
+    );
+    expect(inserted.map((row) => (row.values as { content: string }).content)).toEqual([
+      'enc(Oi!)',
+      'enc(Como foi o treino?)',
+    ]);
+  });
+
+  it('COACH_MESSAGE não é gravado de novo: o AiResponseWorker já persiste a resposta', async () => {
+    const inserted: NonNullable<Deps['inserted']> = [];
+    const { worker } = makeWorker({ inserted });
+    await worker.process(job({ type: 'COACH_MESSAGE', text: 'Oi!', dedupeId: 'c9' }));
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('PHONE_VERIFICATION e TYPING não geram histórico', async () => {
+    const inserted: NonNullable<Deps['inserted']> = [];
+    const { worker } = makeWorker({ inserted });
+    await worker.process(
+      job({
+        userId: null,
+        type: 'PHONE_VERIFICATION',
+        phoneNumber: '+5541999999999',
+        code: '123456',
+      }),
+    );
+    await worker.process(job({ type: 'TYPING' }));
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('falha ao gravar o histórico não derruba o envio nem impede o marcador de idempotência', async () => {
+    const { worker, send, redis } = makeWorker({ insertFails: true });
+    const res = await worker.process(job({ type: 'CONFIRMATION' }));
+    expect(res.status).toBe('SENT');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(redis.set).toHaveBeenCalled();
+  });
+
+  it('entrega do protocolo: o PDF e a legenda entram no histórico', async () => {
+    const inserted: NonNullable<Deps['inserted']> = [];
+    const { worker } = makeWorker({
+      inserted,
+      waitingMarkerExists: true,
+      name: 'Ana Beatriz',
+      proto: {
+        status: 'ACTIVE',
+        approvalStatus: 'AUTO_APPROVED',
+        signedAt: new Date(),
+        signatureHash: 'a'.repeat(64),
+        professionalId: '00000000-0000-4000-8000-000000000001',
+        pdfContent: Buffer.from('%PDF'),
+      },
+    });
+    await worker.process(job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 }));
+    expect(inserted).toHaveLength(1);
+    expect((inserted[0]?.values as { content: string }).content).toMatch(
+      /^enc\(\[Documento: protocolo-ana-beatriz-movivo\.pdf\]/,
+    );
   });
 
   it('TYPING: dispara o indicador de digitação, sem marcador nem texto (US-3.5)', async () => {

@@ -19,8 +19,9 @@ import { type AgentPersona } from '@movivo/shared';
 
 import { AgentPersonaService } from '../../core/agent-config/agent-persona.service';
 import { AppConfigService } from '../../core/config';
+import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
-import { protocols, users } from '../../core/database/schema';
+import { conversations, protocols, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.util';
@@ -137,6 +138,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     private readonly agentPersona: AgentPersonaService,
     private readonly logger: PinoLogger,
     private readonly accessLinks: AccessLinkService,
+    private readonly cipher: HealthCipherService,
   ) {
     this.logger.setContext(WhatsappOutboundWorker.name);
   }
@@ -236,12 +238,9 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       // (troca só o separador de bolhas por quebra de parágrafo — a legenda não divide em
       // mensagens, então `BUBBLE_SEPARATOR` apareceria como "---" literal nela).
       const caption = delivery.text.split(BUBBLE_SEPARATOR).join('\n\n');
-      await this.transport.sendDocument(
-        phone,
-        delivery.pdfUrl,
-        caption,
-        protocolFileName(delivery.studentName),
-      );
+      const fileName = protocolFileName(delivery.studentName);
+      await this.transport.sendDocument(phone, delivery.pdfUrl, caption, fileName);
+      await this.recordOutbound(userId, `[Documento: ${fileName}]\n${caption}`);
       await this.redis.set(markerKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);
       // ponytail: SLA submit→entrega junta este evento com o `protocol_sent` de enfileiramento
       // da US-2.4 (o job de entrega não carrega submittedAt). Server SDK do PostHog: Sprint futura.
@@ -259,16 +258,22 @@ export class WhatsappOutboundWorker implements OnModuleInit {
 
     const text = await this.buildText(job.data);
     if (!text) return { status: 'SKIPPED' };
-    await this.sendBubbles(text, phone, job.data);
+    // `COACH_MESSAGE` já é gravado em `conversations` por quem gera a resposta
+    // (`AiResponseWorker.deliver`, junto das métricas do modelo) — gravar de novo duplicaria.
+    await this.sendBubbles(text, phone, job.data, type === 'COACH_MESSAGE' ? undefined : userId);
     await this.redis.set(markerKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);
     return { status: 'SENT' };
   }
 
-  /** `\n---\n` → uma mensagem por bolha (Sofia §11). Botões de feedback só na ÚLTIMA bolha. */
+  /**
+   * `\n---\n` → uma mensagem por bolha (Sofia §11). Botões de feedback só na ÚLTIMA bolha.
+   * Com `recordForUserId`, cada bolha enviada também entra no histórico da aba "Conversas".
+   */
   private async sendBubbles(
     text: string,
     phone: string,
     data: Pick<WhatsappOutboundJob, 'buttons' | 'feedback'>,
+    recordForUserId?: string,
   ): Promise<void> {
     const bubbles = text.split(BUBBLE_SEPARATOR).filter((b) => b.trim());
     for (const [i, bubble] of bubbles.entries()) {
@@ -277,6 +282,29 @@ export class WhatsappOutboundWorker implements OnModuleInit {
         ? (data.buttons ?? (data.feedback ? FEEDBACK_BUTTONS : undefined))
         : undefined;
       await this.transport.send({ to: phone, text: bubble, buttons });
+      if (recordForUserId) await this.recordOutbound(recordForUserId, bubble);
+    }
+  }
+
+  /**
+   * Espelha no histórico de conversas (`conversations`) uma mensagem que JÁ saiu pelo
+   * WhatsApp — é o que alimenta a aba "Conversas" do painel. Melhor esforço: o envio é a
+   * fonte de verdade e já aconteceu, então uma falha de gravação só é logada. Lançar aqui
+   * faria o BullMQ repetir o job e reenviar a mensagem ao aluno.
+   * O código de verificação de número não passa por aqui: não há titular ainda e o código
+   * é credencial de uso único.
+   */
+  private async recordOutbound(userId: string, text: string): Promise<void> {
+    try {
+      const content = await this.cipher.encryptText(text);
+      await this.db.runAsUser(userId, 'USER', async (tx) => {
+        await tx.insert(conversations).values({ userId, direction: 'OUTBOUND', content });
+      });
+    } catch (err: unknown) {
+      this.logger.warn(
+        { err, userId, event: 'whatsapp_outbound_history_failed' },
+        'mensagem enviada, mas não foi gravada no histórico de conversas',
+      );
     }
   }
 
@@ -490,7 +518,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
   ): Promise<void> {
     const key = this.waitingMarkerKey(userId);
     if ((await this.redis.exists(key)) === 1) return;
-    await this.sendBubbles(analyzingMessage(persona), phone, data).catch((err: unknown) =>
+    await this.sendBubbles(analyzingMessage(persona), phone, data, userId).catch((err: unknown) =>
       this.logger.warn(
         { err, userId },
         'apresentação antecipada falhou — entrega segue de qualquer forma',
