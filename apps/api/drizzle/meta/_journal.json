@@ -484,6 +484,13 @@
       "when": 1791306711201,
       "tag": "0068_mfa_contas_internas",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1791610923607,
+      "tag": "0069_assinatura_data_contratacao",
+      "breakpoints": true
     }
   ]
 }
