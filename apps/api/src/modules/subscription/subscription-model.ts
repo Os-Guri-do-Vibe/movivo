@@ -53,7 +53,7 @@ export const SUBSCRIPTION_TERMS_VERSION = 'sub-terms-2026-08-v1'; // ≤30 (colu
 
 /**
  * Transições permitidas da máquina de estados. Um estado ausente do array de destino é
- * uma transição inválida (rejeitada). `CANCELED` é terminal; `EXPIRED` permite win-back.
+ * uma transição inválida (rejeitada). `CANCELED` só reabre por recompra; `EXPIRED` permite win-back.
  */
 const ALLOWED_TRANSITIONS: Record<SubscriptionStatus, readonly SubscriptionStatus[]> = {
   TRIALING: ['PENDING_PAYMENT', 'ACTIVE', 'EXPIRED', 'CANCELED'],
@@ -63,7 +63,8 @@ const ALLOWED_TRANSITIONS: Record<SubscriptionStatus, readonly SubscriptionStatu
   PAST_DUE: ['PENDING_PAYMENT', 'ACTIVE', 'CANCELED', 'EXPIRED'],
   PAUSED: ['ACTIVE', 'CANCELED'],
   EXPIRED: ['PENDING_PAYMENT', 'ACTIVE'], // win-back (US-4.4)
-  CANCELED: [], // terminal
+  // Recompra: só depois do fim do acesso pago (o serviço confere); o histórico fica no funil.
+  CANCELED: ['PENDING_PAYMENT'],
 };
 
 /** A transição `from → to` é legítima? (idempotente: `from === to` é sempre permitido no-op). */
@@ -194,6 +195,38 @@ export function paidThroughFor(
     return end;
   }
   return new Date(now.getTime() + PLAN_CATALOG[sub.plan].periodDays * DAY_MS);
+}
+
+/** Prazo de arrependimento do consumidor (CDC art. 49), em dias corridos. */
+export const REFUND_WINDOW_DAYS = 7;
+
+/** Campos que decidem a elegibilidade ao estorno por arrependimento. */
+export interface RefundInput extends Pick<
+  ContractInput,
+  'externalPaymentId' | 'externalInstallmentId'
+> {
+  status: SubscriptionStatus;
+  activatedAt: Date | null;
+  currentPeriodEnd: Date | null;
+}
+
+/**
+ * Até quando o titular pode pedir estorno por arrependimento, ou `null` se já não pode.
+ * Exige contrato pago ainda vigente (nem trial, nem já estornado: estorno encerra o período
+ * na hora) e uma cobrança identificável para devolver.
+ */
+export function refundEligibleUntil(sub: RefundInput, now: Date = new Date()): Date | null {
+  if (sub.status !== 'ACTIVE' && sub.status !== 'CANCELED') return null;
+  if (
+    !sub.activatedAt ||
+    !sub.currentPeriodEnd ||
+    sub.currentPeriodEnd.getTime() <= now.getTime()
+  ) {
+    return null;
+  }
+  if (!sub.externalPaymentId && !sub.externalInstallmentId) return null;
+  const until = new Date(sub.activatedAt.getTime() + REFUND_WINDOW_DAYS * DAY_MS);
+  return until.getTime() > now.getTime() ? until : null;
 }
 
 /** Erro de transição inválida da máquina de estados. */

@@ -6,14 +6,25 @@ const USER = '11111111-1111-4111-8111-111111111111';
 it('checkout delega emissão, validade e revogação ao estado autoritativo, com escopo próprio', async () => {
   const expiresAt = new Date('2026-10-08T12:00:00Z');
   const links = {
-    issue: vi.fn(async () => ({ token: 'opaque', expiresAt })),
+    issue: vi.fn(async (_purpose: string, _userId: string, _resourceId: string) => ({
+      token: 'opaque',
+      expiresAt,
+    })),
     verify: vi.fn(async () => ({ userId: USER, expiresAt })),
     revoke: vi.fn(async () => undefined),
   };
   const service = new CheckoutTokenService(links as never);
   const now = new Date('2026-10-05T12:00:00Z');
   await expect(service.issue(USER, now)).resolves.toEqual({ token: 'opaque', expiresAt });
-  expect(links.issue).toHaveBeenCalledWith('CHECKOUT', USER, USER, 72 * 3600000, now);
+  expect(links.issue).toHaveBeenCalledWith(
+    'CHECKOUT',
+    USER,
+    expect.stringMatching(/^[0-9a-f-]{36}$/),
+    72 * 3600000,
+    now,
+  );
+  await service.issue(USER, now);
+  expect(links.issue.mock.calls[1]?.[2]).not.toBe(links.issue.mock.calls[0]?.[2]);
   await expect(service.verify('opaque', now)).resolves.toEqual({
     userId: USER,
     expiresAt: expiresAt.getTime(),

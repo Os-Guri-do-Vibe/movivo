@@ -1,6 +1,6 @@
 /**
  * Adaptador Asaas. Toda chamada externa de pagamento fica confinada neste arquivo.
- * Em produção, o cartão é preenchido somente no Checkout hospedado pelo Asaas.
+ * O cartão é preenchido somente no Checkout hospedado pelo Asaas (Sandbox e produção).
  */
 import { timingSafeEqual } from 'node:crypto';
 
@@ -34,21 +34,10 @@ export class AsaasGateway implements PaymentGateway {
   }
 
   async startPayment(input: StartPaymentInput): Promise<PaymentStartResult> {
-    if (this.apiUrl === 'https://api.asaas.com/v3' && input.method === 'PIX_AUTOMATIC') {
-      throw new PaymentGatewayError('Meio de pagamento indisponível no Asaas de produção');
-    }
-    if (this.apiUrl === 'https://api.asaas.com/v3' && input.card) {
-      throw new PaymentGatewayError('Dados de cartão não podem trafegar pela MOVIVO em produção');
-    }
-    if (this.apiUrl === 'https://api.asaas.com/v3' && input.method === 'CARD') {
-      return this.startHostedCard(input);
-    }
+    // Cartão só existe no Checkout hospedado do Asaas: número e CVV nunca passam pela MOVIVO.
+    if (input.method === 'CARD') return this.startHostedCard(input);
     const customerId = await this.ensureCustomer(input);
     switch (input.method) {
-      case 'CARD':
-        return input.plan === 'MONTHLY'
-          ? this.startMonthlyCard(input, customerId)
-          : this.startInstallmentCard(input, customerId);
       case 'PIX':
         return this.startPix(input, customerId);
       case 'PIX_AUTOMATIC':
@@ -115,7 +104,16 @@ export class AsaasGateway implements PaymentGateway {
           method: 'POST',
         });
       } catch (error) {
+        // Sessão inexistente (404) ou já encerrada (400 "não está ativo": expirada, cancelada ou
+        // paga): não há mais nada a cancelar, e travar aqui impediria uma nova compra.
         if (error instanceof AsaasHttpError && error.status === 404) return;
+        if (
+          error instanceof AsaasHttpError &&
+          error.status === 400 &&
+          /não está ativo/i.test(error.message)
+        ) {
+          return;
+        }
         throw error;
       }
       return;
@@ -129,6 +127,18 @@ export class AsaasGateway implements PaymentGateway {
       if (error instanceof AsaasHttpError && error.status === 404) return;
       throw error;
     }
+  }
+
+  async refundContract(refs: ExternalContractRefs, reason: string): Promise<void> {
+    // Parcelado é estornado pelo parcelamento; cobrança avulsa (Pix, cartão à vista ou o
+    // primeiro mês da assinatura) pela própria cobrança. Nunca um ID no endpoint do outro.
+    const path = refs.installmentId
+      ? `/installments/${encodeURIComponent(refs.installmentId)}/refund`
+      : refs.paymentId
+        ? `/payments/${encodeURIComponent(refs.paymentId)}/refund`
+        : undefined;
+    if (!path) throw new PaymentGatewayError('ASAAS.refund: contrato sem cobrança para estornar');
+    await this.request(path, { method: 'POST', body: { description: reason.slice(0, 200) } });
   }
 
   async getSubscription(externalSubscriptionId: string): Promise<GatewaySubscription | null> {
@@ -152,21 +162,27 @@ export class AsaasGateway implements PaymentGateway {
     const listed = await this.request(`/customers?${query}`, { method: 'GET' });
     const existing = arrayAt(listed, 'data').map(asRecord).find(Boolean);
     const existingId = existing ? stringAt(existing, 'id') : undefined;
-    if (existingId) return existingId;
+    const fields = {
+      name: payer.name,
+      cpfCnpj: payer.cpfCnpj,
+      email: payer.email,
+      mobilePhone: payer.phone,
+      postalCode: payer.postalCode,
+      addressNumber: payer.addressNumber,
+      addressComplement: payer.addressComplement,
+    };
+    if (existingId) {
+      // Cliente de uma tentativa anterior pode estar sem endereço; o Checkout hospedado exige.
+      await this.request(`/customers/${encodeURIComponent(existingId)}`, {
+        method: 'PUT',
+        body: fields,
+      });
+      return existingId;
+    }
 
     const created = await this.request('/customers', {
       method: 'POST',
-      body: {
-        name: payer.name,
-        cpfCnpj: payer.cpfCnpj,
-        email: payer.email,
-        mobilePhone: payer.phone,
-        postalCode: payer.postalCode,
-        addressNumber: payer.addressNumber,
-        addressComplement: payer.addressComplement,
-        externalReference: input.userId,
-        notificationDisabled: true,
-      },
+      body: { ...fields, externalReference: input.userId, notificationDisabled: true },
     });
     const id = stringAt(created, 'id');
     if (!id) throw new PaymentGatewayError('ASAAS.customer: resposta inválida');
@@ -175,18 +191,23 @@ export class AsaasGateway implements PaymentGateway {
 
   private async startHostedCard(input: StartPaymentInput): Promise<PaymentStartResult> {
     if (!input.returnUrl) throw new PaymentGatewayError('ASAAS.checkout: URL de retorno ausente');
+    // O cliente nasce antes do Checkout: com ele, a página do Asaas já abre com identificação
+    // e endereço completos e pede só os dados do cartão.
+    const customerId = await this.ensureCustomer(input);
     const count = input.installments ?? input.months;
     const response = await this.request('/checkouts', {
       method: 'POST',
       body: {
+        customer: customerId,
         billingTypes: ['CREDIT_CARD'],
         chargeTypes: input.plan === 'MONTHLY' ? ['RECURRENT'] : ['DETACHED', 'INSTALLMENT'],
         minutesToExpire: 60,
         externalReference: externalReference(input),
+        // O retorno só navega: quem confirma o pagamento é o webhook autenticado.
         callback: {
-          successUrl: input.returnUrl,
-          cancelUrl: input.returnUrl,
-          expiredUrl: input.returnUrl,
+          successUrl: callbackUrl(input.returnUrl, 'sucesso'),
+          cancelUrl: callbackUrl(input.returnUrl, 'cancelado'),
+          expiredUrl: callbackUrl(input.returnUrl, 'expirado'),
         },
         items: [
           {
@@ -199,7 +220,9 @@ export class AsaasGateway implements PaymentGateway {
           ? {
               subscription: {
                 cycle: 'MONTHLY',
-                nextDueDate: asaasDateTime(new Date(Date.now() + 65 * 60_000)),
+                // A data da primeira cobrança: hoje, para o cartão ser cobrado na hora do checkout.
+                // Os meses seguintes o próprio Asaas agenda.
+                nextDueDate: isoDate(new Date()),
               },
             }
           : { installment: { maxInstallmentCount: count } }),
@@ -207,89 +230,17 @@ export class AsaasGateway implements PaymentGateway {
     });
     const id = requiredId(response, 'ASAAS.checkout');
     const link = stringAt(response, 'link');
-    const url = new URL(link ?? `https://asaas.com/checkoutSession/show/${encodeURIComponent(id)}`);
-    if (url.protocol !== 'https:' || url.hostname !== 'asaas.com') {
+    if (!link) throw new PaymentGatewayError('ASAAS.checkout: link ausente');
+    const url = new URL(link);
+    const official = url.hostname === 'asaas.com' || url.hostname.endsWith('.asaas.com');
+    if (url.protocol !== 'https:' || !official) {
       throw new PaymentGatewayError('ASAAS.checkout: link inválido');
     }
     return {
       status: 'PENDING',
+      externalCustomerId: customerId,
       externalCheckoutSessionId: id,
       checkoutUrl: url.toString(),
-    };
-  }
-
-  private async startMonthlyCard(
-    input: StartPaymentInput,
-    customerId: string,
-  ): Promise<PaymentStartResult> {
-    const reference = externalReference(input);
-    const existing = await this.first('/subscriptions', { externalReference: reference });
-    const response =
-      existing ??
-      (await this.request('/subscriptions/', {
-        method: 'POST',
-        body: {
-          customer: customerId,
-          billingType: 'CREDIT_CARD',
-          value: brl(input.monthlyCents),
-          nextDueDate: isoDate(new Date()),
-          cycle: 'MONTHLY',
-          description: 'MOVIVO — Plano Mensal',
-          externalReference: reference,
-          creditCard: requiredCard(input),
-          creditCardHolderInfo: requiredPayer(input),
-          remoteIp: input.remoteIp,
-        },
-      }));
-    const id = requiredId(response, 'ASAAS.subscription');
-    return {
-      status: normalizeStartStatus(stringAt(response, 'status')),
-      externalCustomerId: customerId,
-      externalSubscriptionId: id,
-      nextBillingAt: stringAt(response, 'nextDueDate'),
-    };
-  }
-
-  private async startInstallmentCard(
-    input: StartPaymentInput,
-    customerId: string,
-  ): Promise<PaymentStartResult> {
-    const reference = externalReference(input);
-    // Filtra pelo meio: uma cobrança Pix com a mesma referência nunca se passa por parcelamento.
-    const existingPayment = await this.first('/payments', {
-      externalReference: reference,
-      billingType: 'CREDIT_CARD',
-    });
-    if (existingPayment) {
-      return {
-        status: normalizeStartStatus(stringAt(existingPayment, 'status')),
-        externalCustomerId: customerId,
-        externalPaymentId: stringAt(existingPayment, 'id'),
-        externalInstallmentId: stringAt(existingPayment, 'installment'),
-      };
-    }
-
-    const count = input.installments ?? input.months;
-    const response = await this.request('/installments/', {
-      method: 'POST',
-      body: {
-        installmentCount: count,
-        customer: customerId,
-        value: brl(Math.floor(input.totalCents / count)),
-        totalValue: brl(input.totalCents),
-        billingType: 'CREDIT_CARD',
-        dueDate: isoDate(new Date()),
-        description: `MOVIVO — Plano ${planLabel(input.plan)}`,
-        paymentExternalReference: reference,
-        creditCard: requiredCard(input),
-        creditCardHolderInfo: requiredPayer(input),
-        remoteIp: input.remoteIp,
-      },
-    });
-    return {
-      status: normalizeStartStatus(stringAt(response, 'status')),
-      externalCustomerId: customerId,
-      externalInstallmentId: requiredId(response, 'ASAAS.installment'),
     };
   }
 
@@ -298,6 +249,7 @@ export class AsaasGateway implements PaymentGateway {
     customerId: string,
   ): Promise<PaymentStartResult> {
     const reference = externalReference(input);
+    const dueDate = isoDate(addDays(new Date(), 1));
     const payment =
       (await this.first('/payments', { externalReference: reference, billingType: 'PIX' })) ??
       (await this.request('/payments', {
@@ -306,7 +258,7 @@ export class AsaasGateway implements PaymentGateway {
           customer: customerId,
           billingType: 'PIX',
           value: brl(input.totalCents),
-          dueDate: isoDate(addDays(new Date(), 1)),
+          dueDate,
           description: `MOVIVO — Plano ${planLabel(input.plan)}`,
           externalReference: reference,
         },
@@ -319,7 +271,9 @@ export class AsaasGateway implements PaymentGateway {
       status: normalizeStartStatus(stringAt(payment, 'status')),
       externalCustomerId: customerId,
       externalPaymentId: paymentId,
-      qrCode: parseQr(qr),
+      // O Asaas deixa o QR pagável por até um ano, mas a cobrança vence no `dueDate`: é esse o
+      // prazo que o aluno vê (depois dele, "gerar novo QR" cancela esta cobrança).
+      qrCode: clampQrExpiration(parseQr(qr), stringAt(payment, 'dueDate') ?? dueDate),
     };
   }
 
@@ -466,7 +420,7 @@ export class AsaasGateway implements PaymentGateway {
 
   private async request(
     path: string,
-    init: { method: 'GET' | 'POST' | 'DELETE'; body?: Json },
+    init: { method: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: Json },
   ): Promise<Json> {
     if (!this.apiKey) throw new PaymentGatewayError('ASAAS.request: sem credencial');
     const controller = new AbortController();
@@ -510,27 +464,20 @@ class AsaasHttpError extends PaymentGatewayError {
   }
 }
 
-function requiredCard(input: StartPaymentInput) {
-  if (!input.card) throw new PaymentGatewayError('ASAAS.card: dados ausentes');
-  return input.card;
-}
-
 function requiredPayer(input: StartPaymentInput) {
   if (!input.payer) throw new PaymentGatewayError('ASAAS.payer: dados ausentes');
   return input.payer;
 }
 
-function asaasDateTime(date: Date): string {
-  return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: 'America/Sao_Paulo',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  }).format(date);
+/**
+ * URL de retorno do Checkout. O Asaas recusa `localhost` ("successUrl inválido") mas aceita
+ * `127.0.0.1`, então o desenvolvimento local volta pelo IP de loopback; produção não muda.
+ */
+function callbackUrl(returnUrl: string, outcome: 'sucesso' | 'cancelado' | 'expirado'): string {
+  const url = new URL(returnUrl);
+  if (url.hostname === 'localhost') url.hostname = '127.0.0.1';
+  url.searchParams.set('retorno', outcome);
+  return url.toString();
 }
 
 function requiredId(value: Json, source: string): string {
@@ -609,7 +556,17 @@ function parseQr(value: Json): PaymentQrCode {
   if (!encodedImage || !payload || !expirationDate) {
     throw new PaymentGatewayError('ASAAS.pixQrCode: resposta inválida');
   }
-  return { encodedImage, payload, expirationDate };
+  // ISO 8601 em UTC: "2027-10-11 23:59:59" (hora de Brasília, sem fuso) não é lido igual por todo navegador.
+  return { encodedImage, payload, expirationDate: asIso(expirationDate) ?? expirationDate };
+}
+
+/** O QR nunca "vale" além do fim do dia de vencimento (23:59:59 de Brasília). */
+function clampQrExpiration(qr: PaymentQrCode, dueDate: string): PaymentQrCode {
+  const dueEnd = asIso(`${dueDate.slice(0, 10)} 23:59:59`);
+  if (!dueEnd) return qr;
+  return new Date(qr.expirationDate).getTime() > new Date(dueEnd).getTime()
+    ? { ...qr, expirationDate: dueEnd }
+    : qr;
 }
 
 function safeTextEqual(left: string, right: string): boolean {

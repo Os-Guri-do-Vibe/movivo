@@ -8,16 +8,20 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  checkoutLinkMessage,
   dunningMessage,
   paymentConfirmationMessage,
   planEndedMessage,
+  subscriptionAccessMessage,
   trialEndedMessage,
   winbackMessage,
 } from './subscription-messages';
 
 const ALL_MESSAGES = [
+  subscriptionAccessMessage('https://movivo.test/cancelar/abc'),
+  checkoutLinkMessage('https://movivo.test/checkout/abc'),
   dunningMessage('https://pay.example/checkout/abc'),
-  paymentConfirmationMessage(),
+  paymentConfirmationMessage('https://movivo.test/cancelar/abc'),
   trialEndedMessage('Ana', 'https://movivo.test/checkout/abc', 'https://movivo.test/cancelar/abc'),
   planEndedMessage(
     'Ana',
@@ -70,5 +74,24 @@ describe('mensagens de fim de teste e de fim de plano', () => {
 
   it('neutraliza marcadores de formatação no nome', () => {
     expect(trialEndedMessage('A*na_', checkout, cancel)).toMatch(/^\*Ana\*, seus 7 dias/);
+  });
+});
+
+describe('mensagem de fim do teste: texto aprovado pelo fundador', () => {
+  it('permanece exatamente como definido', () => {
+    expect(
+      trialEndedMessage(
+        'Ana',
+        'https://movivo.com.br/checkout/X',
+        'https://movivo.com.br/cancelar/Y',
+      ),
+    ).toBe(
+      '*Ana*, seus 7 dias gratuitos com a MOVIVO chegaram ao fim. 💚\n\n' +
+        'Para continuar com o acompanhamento MOVIVO, é só ativar sua assinatura:\n' +
+        'https://movivo.com.br/checkout/X\n\n' +
+        'Você pode cancelar quando quiser, sem burocracia:\n' +
+        'https://movivo.com.br/cancelar/Y\n\n' +
+        'Continue se movendo. 👊🏼',
+    );
   });
 });

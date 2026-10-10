@@ -9,6 +9,7 @@ import {
   paidThroughFor,
   PLAN_CATALOG,
   referencesContract,
+  refundEligibleUntil,
   resolveAccess,
   TRIAL_DAYS,
 } from './subscription-model';
@@ -180,5 +181,57 @@ describe('subscription-model — contrato vigente e período pago', () => {
     expect(paidThroughFor({ plan: 'QUARTERLY', paymentMethod: 'CARD' }, undefined, at)).toEqual(
       new Date(at.getTime() + 90 * 24 * 3600 * 1000),
     );
+  });
+});
+
+describe('subscription-model — recompra e arrependimento', () => {
+  const NOW = new Date('2026-10-10T12:00:00Z');
+  const day = (n: number) => new Date(NOW.getTime() + n * 86_400_000);
+  const paid = {
+    status: 'ACTIVE' as const,
+    activatedAt: day(-2),
+    currentPeriodEnd: day(300),
+    externalPaymentId: 'pay_1',
+    externalInstallmentId: null,
+  };
+
+  it('cancelado só reabre por recompra (PENDING_PAYMENT), nunca direto para ACTIVE', () => {
+    expect(canTransition('CANCELED', 'PENDING_PAYMENT')).toBe(true);
+    expect(canTransition('CANCELED', 'ACTIVE')).toBe(false);
+    expect(canTransition('CANCELED', 'PAUSED')).toBe(false);
+  });
+
+  it('o prazo de arrependimento é de 7 dias corridos a partir da contratação', () => {
+    expect(refundEligibleUntil(paid, NOW)?.toISOString()).toBe(day(5).toISOString());
+    expect(refundEligibleUntil({ ...paid, activatedAt: day(-7) }, NOW)).toBeNull();
+    expect(
+      refundEligibleUntil({ ...paid, activatedAt: new Date(day(-7).getTime() + 1000) }, NOW),
+    ).not.toBeNull();
+  });
+
+  it('cancelado dentro do prazo ainda pode pedir estorno; estornado (período encerrado) não', () => {
+    expect(refundEligibleUntil({ ...paid, status: 'CANCELED' }, NOW)).not.toBeNull();
+    expect(
+      refundEligibleUntil({ ...paid, status: 'CANCELED', currentPeriodEnd: NOW }, NOW),
+    ).toBeNull();
+  });
+
+  it.each([
+    ['trial', { status: 'TRIALING' as const }],
+    ['pagamento pendente', { status: 'PENDING_PAYMENT' as const }],
+    ['expirado', { status: 'EXPIRED' as const }],
+    ['sem data de contratação', { activatedAt: null }],
+    ['sem cobrança identificável', { externalPaymentId: null }],
+  ])('%s não tem estorno', (_label, patch) => {
+    expect(refundEligibleUntil({ ...paid, ...patch }, NOW)).toBeNull();
+  });
+
+  it('parcelado com o parcelamento identificado é elegível mesmo sem cobrança avulsa', () => {
+    expect(
+      refundEligibleUntil(
+        { ...paid, externalPaymentId: null, externalInstallmentId: 'ins_1' },
+        NOW,
+      ),
+    ).not.toBeNull();
   });
 });

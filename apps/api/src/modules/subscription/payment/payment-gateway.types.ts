@@ -3,9 +3,9 @@
  * ÚNICO ponto autorizado a falar com Asaas (padrão do `LLMRouter`). Nenhum outro
  * módulo importa SDK/HTTP de gateway (teste estrutural garante). Trocar de provedor é config.
  *
- * Dados de cartão só trafegam no Sandbox. A conta real usa Checkout hospedado no Asaas.
+ * Dados de cartão nunca trafegam pela MOVIVO: o cartão é preenchido no Checkout hospedado do Asaas.
  */
-import type { CheckoutCard, CheckoutPayer } from '@movivo/shared';
+import type { CheckoutPayer } from '@movivo/shared';
 import type { SubscriptionPlan } from '../subscription-model';
 
 export type GatewayName = 'MOCK' | 'ASAAS';
@@ -21,7 +21,6 @@ export interface StartPaymentInput {
   months: number;
   method: PaymentMethod;
   payer?: CheckoutPayer;
-  card?: CheckoutCard;
   installments?: number;
   /** IP real do navegador, exigido pelo endpoint de cartão do Asaas. */
   remoteIp: string;
@@ -140,6 +139,12 @@ export interface PaymentGateway {
   ): GatewayEvent | IgnoredWebhookEvent | null;
   /** Cancela a cobrança/contrato pendente. Referência já inexistente no provedor é sucesso. */
   cancelContract(refs: ExternalContractRefs): Promise<void>;
+  /**
+   * Devolve o valor pago do contrato (arrependimento, CDC art. 49). Parcelado devolve o
+   * parcelamento inteiro; cobrança avulsa (Pix ou cartão) devolve a cobrança. Falha do
+   * provedor sobe como `PaymentGatewayError` — quem chama decide o plano B manual.
+   */
+  refundContract(refs: ExternalContractRefs, reason: string): Promise<void>;
   getSubscription(externalSubscriptionId: string): Promise<GatewaySubscription | null>;
 }
 

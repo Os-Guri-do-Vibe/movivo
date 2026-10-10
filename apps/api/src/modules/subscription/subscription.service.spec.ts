@@ -19,14 +19,6 @@ const PAYER = {
   phone: '11999999999',
 };
 
-const CARD = {
-  holderName: 'PESSOA TESTE',
-  number: '4444444444444444',
-  expiryMonth: '12',
-  expiryYear: '2030',
-  ccv: '123',
-};
-
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function row(over: Partial<SubscriptionRow> = {}): SubscriptionRow {
@@ -44,6 +36,7 @@ function row(over: Partial<SubscriptionRow> = {}): SubscriptionRow {
     externalSubscriptionId: null,
     externalCustomerId: null,
     externalCheckoutSessionId: null,
+    checkoutUrl: null,
     externalPriceId: null,
     externalPaymentId: null,
     externalInstallmentId: null,
@@ -52,6 +45,7 @@ function row(over: Partial<SubscriptionRow> = {}): SubscriptionRow {
     installmentCount: null,
     authorizedPaymentCount: null,
     paymentAttempt: 0,
+    activatedAt: null,
     trialStartedAt: new Date(),
     trialEndsAt: new Date(),
     currentPeriodStart: null,
@@ -67,11 +61,7 @@ function row(over: Partial<SubscriptionRow> = {}): SubscriptionRow {
   } as SubscriptionRow;
 }
 
-function make(
-  current: SubscriptionRow | null,
-  gatewayName: PaymentGateway['name'] = 'MOCK',
-  productionAsaas = false,
-) {
+function make(current: SubscriptionRow | null, gatewayName: PaymentGateway['name'] = 'MOCK') {
   const patch = vi.fn(
     (_userId: string, _id: string, _values: Partial<SubscriptionRow>, _transition?: unknown) =>
       Promise.resolve(),
@@ -91,9 +81,11 @@ function make(
       externalSubscriptionId: 'sub_1',
     }),
   );
+  const refundContract = vi.fn((..._args: unknown[]) => Promise.resolve());
   const gateway = {
     name: gatewayName,
     cancelContract,
+    refundContract,
     startPayment,
   } as unknown as PaymentGateway;
   const config = {
@@ -101,12 +93,9 @@ function make(
     payment: {
       pastDueGraceDays: 3,
       provider: gatewayName,
-      asaasApiUrl: productionAsaas
-        ? 'https://api.asaas.com/v3'
-        : 'https://api-sandbox.asaas.com/v3',
     },
   } as unknown as AppConfigService;
-  const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() } as never;
+  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), setContext: vi.fn() } as never;
   const checkoutTokens = {
     issue: vi.fn(() => ({ token: 'opaque-token', expiresAt: new Date() })),
   } as never;
@@ -129,7 +118,7 @@ function make(
       {
         issue: vi.fn(async () => ({
           token: 'portal-token',
-          expiresAt: new Date(Date.now() + 90 * 86400000),
+          expiresAt: new Date(Date.now() + 365 * 86400000),
         })),
       } as never,
     ),
@@ -137,6 +126,7 @@ function make(
     patch,
     insert,
     cancelContract,
+    refundContract,
     startPayment,
     set,
     evalLock,
@@ -471,7 +461,7 @@ describe('SubscriptionService checkout transparente / getAccess (US-4.2)', () =>
     );
   });
 
-  it('gera o cancelamento curto: /cancelar/<código> aponta para o portal do titular, por 90 dias', async () => {
+  it('gera o cancelamento curto: /cancelar/<código> aponta para o portal do titular, por 365 dias', async () => {
     const { svc, createShortLink } = make(row({ status: 'EXPIRED', plan: 'ANNUAL' }));
     await expect(svc.createShortCancelLink(USER)).resolves.toBe(
       'https://movivo.test/cancelar/aB3xK9pQ',
@@ -479,8 +469,8 @@ describe('SubscriptionService checkout transparente / getAccess (US-4.2)', () =>
     const [target, expiresAt] = createShortLink.mock.calls[0] ?? [];
     expect(target).toBe('https://movivo.test/conta/portal-token');
     const days = ((expiresAt as Date).getTime() - Date.now()) / 86_400_000;
-    expect(days).toBeGreaterThan(89);
-    expect(days).toBeLessThanOrEqual(90);
+    expect(days).toBeGreaterThan(364);
+    expect(days).toBeLessThanOrEqual(365);
   });
 
   it('monta o aviso de fim de plano com nome, plano e os dois links curtos', async () => {
@@ -547,29 +537,40 @@ describe('SubscriptionService checkout transparente / getAccess (US-4.2)', () =>
     );
   });
 
-  it('na conta real oferece Pix e cartão hospedado, mas rejeita dados de cartão locais', async () => {
-    const { svc, startPayment, set } = make(row(), 'ASAAS', true);
+  it('oferece Pix e cartão hospedado (Asaas), nunca Pix Automático', async () => {
+    const { svc, startPayment } = make(row(), 'ASAAS');
     const summary = await svc.getCheckoutSummary(USER, Date.now() + DAY_MS);
     expect(summary?.methods).toEqual(['CARD', 'PIX']);
     expect(summary?.hostedCard).toBe(true);
     await expect(
       svc.startCheckoutPayment(
         USER,
-        { method: 'CARD', payer: PAYER, card: CARD, installments: 1, acceptTerms: true },
+        { method: 'PIX_AUTOMATIC', payer: PAYER, acceptTerms: true },
         '127.0.0.1',
       ),
-    ).rejects.toThrow('ambiente seguro do Asaas');
-    expect(set).not.toHaveBeenCalled();
+    ).rejects.toThrow('não está disponível');
     expect(startPayment).not.toHaveBeenCalled();
   });
 
-  it('inicia cartão hospedado e persiste o ID do Checkout para conciliação', async () => {
-    const { svc, startPayment, patch } = make(row(), 'ASAAS', true);
+  it('exige os dados do pagador: o Checkout hospedado abre com o cliente já cadastrado', async () => {
+    const { svc, startPayment } = make(row(), 'ASAAS');
+    await expect(
+      svc.startCheckoutPayment(
+        USER,
+        { method: 'CARD', installments: 1, acceptTerms: true } as never,
+        '127.0.0.1',
+      ),
+    ).rejects.toThrow('Dados do pagador ausentes');
+    expect(startPayment).not.toHaveBeenCalled();
+  });
+
+  it('inicia cartão hospedado e persiste sessão e link do Checkout para conciliação', async () => {
+    const { svc, startPayment, patch } = make(row(), 'ASAAS');
     startPayment.mockResolvedValueOnce({
       status: 'PENDING',
       externalCustomerId: 'cus_1',
       externalCheckoutSessionId: 'chk_1',
-      checkoutUrl: 'https://asaas.com/checkoutSession/show/chk_1',
+      checkoutUrl: 'https://sandbox.asaas.com/000/checkoutSession/show/chk_1',
     });
     const result = await svc.startCheckoutPayment(
       USER,
@@ -579,7 +580,7 @@ describe('SubscriptionService checkout transparente / getAccess (US-4.2)', () =>
     expect(startPayment).toHaveBeenCalledWith(
       expect.objectContaining({
         method: 'CARD',
-        card: undefined,
+        payer: PAYER,
         returnUrl: expect.stringContaining('/assinar/'),
       }),
     );
@@ -588,10 +589,191 @@ describe('SubscriptionService checkout transparente / getAccess (US-4.2)', () =>
       's1',
       expect.objectContaining({
         externalCheckoutSessionId: 'chk_1',
+        checkoutUrl: 'https://sandbox.asaas.com/000/checkoutSession/show/chk_1',
         status: 'PENDING_PAYMENT',
       }),
     );
-    expect(result.checkoutUrl).toBe('https://asaas.com/checkoutSession/show/chk_1');
+    expect(result.checkoutUrl).toBe('https://sandbox.asaas.com/000/checkoutSession/show/chk_1');
+  });
+
+  it('volta ao mesmo Checkout em retentativa, sem abrir uma segunda sessão', async () => {
+    const pending = row({
+      status: 'PENDING_PAYMENT',
+      paymentMethod: 'CARD',
+      externalCheckoutSessionId: 'chk_1',
+      checkoutUrl: 'https://sandbox.asaas.com/000/checkoutSession/show/chk_1',
+    });
+    const { svc, startPayment } = make(pending, 'ASAAS');
+    const result = await svc.startCheckoutPayment(
+      USER,
+      { method: 'CARD', payer: PAYER, installments: 1, acceptTerms: true },
+      '127.0.0.1',
+    );
+    expect(result.checkoutUrl).toBe('https://sandbox.asaas.com/000/checkoutSession/show/chk_1');
+    expect(startPayment).not.toHaveBeenCalled();
+  });
+
+  it('nunca repassa ao navegador um link que não seja https do Asaas', async () => {
+    const pending = row({
+      status: 'PENDING_PAYMENT',
+      paymentMethod: 'CARD',
+      externalCheckoutSessionId: 'chk_1',
+      checkoutUrl: 'https://evil.example/pay',
+    });
+    const { svc } = make(pending, 'ASAAS');
+    const summary = await svc.getCheckoutSummary(USER, Date.now() + DAY_MS);
+    expect(summary?.checkoutUrl).toBeUndefined();
+  });
+
+  describe('recompra depois de cancelar', () => {
+    const PIX_BODY = { method: 'PIX' as const, payer: PAYER, acceptTerms: true as const };
+
+    it('bloqueia enquanto o acesso pago do cancelamento ainda vale', async () => {
+      const end = new Date(Date.now() + 10 * DAY_MS);
+      const { svc, startPayment } = make(
+        row({ status: 'CANCELED', paymentMethod: 'PIX', currentPeriodEnd: end }),
+      );
+      await expect(svc.startCheckoutPayment(USER, PIX_BODY, '127.0.0.1')).rejects.toThrow(
+        /acesso pago vigente/,
+      );
+      expect(startPayment).not.toHaveBeenCalled();
+      const summary = await svc.getCheckoutSummary(USER, Date.now() + DAY_MS);
+      expect(summary?.repurchaseAt).toBe(end.toISOString());
+    });
+
+    it('depois do fim do acesso, abre contrato novo sem herdar o período antigo', async () => {
+      const ended = new Date(Date.now() - 1 * DAY_MS);
+      const { svc, patch, startPayment } = make(
+        row({
+          status: 'CANCELED',
+          paymentMethod: 'PIX',
+          externalPaymentId: 'pay_old',
+          currentPeriodStart: new Date(Date.now() - 31 * DAY_MS),
+          currentPeriodEnd: ended,
+          activatedAt: new Date(Date.now() - 31 * DAY_MS),
+          canceledAt: ended,
+          cancelReason: 'x',
+        }),
+      );
+      await svc.startCheckoutPayment(USER, PIX_BODY, '127.0.0.1');
+      expect(startPayment).toHaveBeenCalledOnce();
+      const reopen = patch.mock.calls.find(([, , values]) => values.status === 'PENDING_PAYMENT');
+      expect(reopen?.[2]).toMatchObject({
+        currentPeriodStart: null,
+        currentPeriodEnd: null,
+        activatedAt: null,
+        canceledAt: null,
+        cancelReason: null,
+      });
+    });
+  });
+
+  describe('arrependimento (CDC art. 49)', () => {
+    const FIRST_PAY = new Date(Date.now() - 2 * DAY_MS);
+    const paid = (over: Partial<SubscriptionRow> = {}) =>
+      row({
+        status: 'ACTIVE',
+        paymentMethod: 'PIX',
+        plan: 'ANNUAL',
+        externalPaymentId: 'pay_1',
+        activatedAt: FIRST_PAY,
+        currentPeriodEnd: new Date(Date.now() + 360 * DAY_MS),
+        ...over,
+      });
+
+    it('estorna dentro de 7 dias, encerra o acesso e registra o motivo', async () => {
+      const { svc, refundContract, patch } = make(paid());
+      await expect(svc.requestRefund(USER)).resolves.toEqual({ status: 'REFUNDED' });
+      expect(refundContract).toHaveBeenCalledWith(
+        { installmentId: null, paymentId: 'pay_1' },
+        expect.stringContaining('art. 49'),
+      );
+      expect(patch).toHaveBeenCalledWith(
+        USER,
+        's1',
+        expect.objectContaining({ status: 'CANCELED', cancelReason: 'ARREPENDIMENTO' }),
+        expect.objectContaining({ actor: 'USER' }),
+      );
+    });
+
+    it('mensal no cartão interrompe a cobrança futura ANTES de estornar', async () => {
+      const order: string[] = [];
+      const { svc, cancelContract, refundContract } = make(
+        paid({ paymentMethod: 'CARD', plan: 'MONTHLY', externalSubscriptionId: 'sub_1' }),
+      );
+      cancelContract.mockImplementation(() => {
+        order.push('cancel');
+        return Promise.resolve();
+      });
+      refundContract.mockImplementation(() => {
+        order.push('refund');
+        return Promise.resolve();
+      });
+      await svc.requestRefund(USER);
+      expect(order).toEqual(['cancel', 'refund']);
+    });
+
+    it('estorno recusado pelo gateway vira pendência manual, sem perder o cancelamento', async () => {
+      const { svc, refundContract, patch } = make(paid());
+      refundContract.mockRejectedValueOnce(new Error('saldo insuficiente'));
+      await expect(svc.requestRefund(USER)).resolves.toEqual({ status: 'PENDING_MANUAL' });
+      expect(patch).toHaveBeenCalledWith(
+        USER,
+        's1',
+        expect.objectContaining({
+          status: 'CANCELED',
+          cancelReason: 'ARREPENDIMENTO_ESTORNO_PENDENTE',
+        }),
+        expect.anything(),
+      );
+    });
+
+    it('não estorna fora do prazo, em trial ou sem pagamento identificável', async () => {
+      const old = new Date(Date.now() - 8 * DAY_MS);
+      for (const sub of [
+        paid({ activatedAt: old }),
+        row({ status: 'TRIALING' }),
+        paid({ externalPaymentId: null, externalInstallmentId: null }),
+        paid({ currentPeriodEnd: new Date(Date.now() - 1000) }),
+      ]) {
+        const { svc, refundContract } = make(sub);
+        await expect(svc.requestRefund(USER)).rejects.toThrow(/prazo de arrependimento/);
+        expect(refundContract).not.toHaveBeenCalled();
+      }
+    });
+
+    it('o webhook de estorno baixa a pendência manual e não mexe no acesso', async () => {
+      const pending = paid({
+        status: 'CANCELED',
+        cancelReason: 'ARREPENDIMENTO_ESTORNO_PENDENTE',
+        currentPeriodEnd: new Date(Date.now() - 1000),
+      });
+      const { svc, patch } = make(pending);
+      const result = await svc.applyGatewayEvent({
+        type: 'REFUNDED',
+        eventId: 'evt_ref',
+        externalSubscriptionId: 'x',
+        externalPaymentId: 'pay_1',
+        userId: USER,
+      });
+      expect(result.status).toBe('IDEMPOTENT');
+      expect(patch).toHaveBeenCalledWith(USER, 's1', { cancelReason: 'ARREPENDIMENTO' });
+    });
+
+    it('o portal informa até quando o estorno é possível', async () => {
+      const { svc } = make(paid());
+      const view = await svc.getView(USER);
+      expect(view?.refundEligibleUntil).toBe(
+        new Date(FIRST_PAY.getTime() + 7 * DAY_MS).toISOString(),
+      );
+    });
+  });
+
+  it('cancelar duas vezes é idempotente e não toca no gateway de novo', async () => {
+    const { svc, cancelContract, patch } = make(row({ status: 'CANCELED' }));
+    await expect(svc.cancel(USER)).resolves.toEqual({ status: 'CANCELED' });
+    expect(cancelContract).not.toHaveBeenCalled();
+    expect(patch).not.toHaveBeenCalled();
   });
 
   describe('troca de plano no checkout', () => {
@@ -655,13 +837,6 @@ describe('SubscriptionService checkout transparente / getAccess (US-4.2)', () =>
           {
             method: 'CARD',
             payer: body.payer,
-            card: {
-              holderName: 'Pessoa Teste',
-              number: '4111111111111111',
-              expiryMonth: '12',
-              expiryYear: '2030',
-              ccv: '123',
-            },
             installments: 12,
             acceptTerms: true,
             plan: 'QUARTERLY',
@@ -753,7 +928,7 @@ describe('SubscriptionService checkout transparente / getAccess (US-4.2)', () =>
     );
     await svc.startCheckoutPayment(
       USER,
-      { method: 'CARD', payer: PAYER, card: CARD, installments: 3, acceptTerms: true },
+      { method: 'CARD', payer: PAYER, installments: 3, acceptTerms: true },
       '127.0.0.1',
     );
     expect(cancelContract).toHaveBeenCalledWith({ paymentId: 'pay_pix' });
@@ -808,7 +983,7 @@ describe('SubscriptionService checkout transparente / getAccess (US-4.2)', () =>
     await expect(
       svc.startCheckoutPayment(
         USER,
-        { method: 'CARD', payer: PAYER, card: CARD, installments: 3, acceptTerms: true },
+        { method: 'CARD', payer: PAYER, installments: 3, acceptTerms: true },
         '127.0.0.1',
       ),
     ).rejects.toThrow(/parcelas/);

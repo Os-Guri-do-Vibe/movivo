@@ -54,7 +54,7 @@ describe('4.7.1 — webhook de pagamento: vetor plantado (T-15) NUNCA ativa', ()
   });
 });
 
-describe('4.7.3 — PCI-boundary: cartão só atravessa o request e nunca volta', () => {
+describe('4.7.3 — PCI-boundary: o cartão nunca atravessa a MOVIVO', () => {
   const FORBIDDEN = [
     'card',
     'cartao',
@@ -68,14 +68,22 @@ describe('4.7.3 — PCI-boundary: cartão só atravessa o request e nunca volta'
 
   it('a view do portal só expõe plano/estado/acesso/período (sem cartão, sem id externo)', () => {
     expect(Object.keys(subscriptionViewSchema.shape).sort()).toEqual(
-      ['access', 'currentPeriodEnd', 'plan', 'status'].sort(),
+      [
+        'access',
+        'canRepurchaseAt',
+        'currentPeriodEnd',
+        'paymentMethod',
+        'plan',
+        'refundEligibleUntil',
+        'status',
+      ].sort(),
     );
     for (const key of Object.keys(subscriptionViewSchema.shape)) {
       expect(FORBIDDEN).not.toContain(key.toLowerCase());
     }
   });
 
-  it('valida cartão no request transparente, mas o contrato de resposta não pode expô-lo', () => {
+  it('o request de checkout descarta qualquer dado de cartão e a resposta não pode expô-lo', () => {
     const parsed = createCheckoutSchema.safeParse({
       method: 'CARD',
       payer: {
@@ -86,17 +94,14 @@ describe('4.7.3 — PCI-boundary: cartão só atravessa o request e nunca volta'
         addressNumber: '100',
         phone: '(11) 99999-9999',
       },
-      card: {
-        holderName: 'PESSOA SANDBOX',
-        number: '4111111111111111',
-        expiryMonth: '12',
-        expiryYear: '2030',
-        ccv: '123',
-      },
+      // Campos que um cliente adulterado poderia tentar enviar: nunca chegam ao serviço.
+      card: { holderName: 'PESSOA', number: '4111111111111111', expiryMonth: '12', ccv: '123' },
       installments: 1,
       acceptTerms: true,
     });
     expect(parsed.success).toBe(true);
+    expect(JSON.stringify(parsed.data)).not.toContain('4111111111111111');
+    expect(parsed.data).not.toHaveProperty('card');
     for (const key of Object.keys(checkoutPaymentResultSchema.shape)) {
       expect(FORBIDDEN).not.toContain(key.toLowerCase());
     }

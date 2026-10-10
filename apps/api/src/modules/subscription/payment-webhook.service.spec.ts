@@ -42,10 +42,12 @@ function make(deps: Deps = {}) {
     Promise.resolve({ id: 's1', plan: 'MONTHLY', termsVersion: 'v1' }),
   );
   const createCheckoutLink = vi.fn(() => Promise.resolve('https://movivo.test/assinar/opaque'));
+  const createShortCancelLink = vi.fn(() => Promise.resolve('https://movivo.test/cancelar/opaque'));
   const subscriptions = {
     applyGatewayEvent,
     getForUser,
     createCheckoutLink,
+    createShortCancelLink,
   } as unknown as SubscriptionService;
 
   const set = vi.fn(() => Promise.resolve(deps.fresh === false ? null : 'OK'));
@@ -101,7 +103,18 @@ describe('PaymentWebhookService.ingest (US-4.2)', () => {
       expect.objectContaining({
         type: 'COACH_MESSAGE',
         dedupeId: expect.stringMatching(/^payment_[0-9a-f]{56}$/),
+        text: expect.stringContaining('https://movivo.test/cancelar/opaque'),
       }),
+    );
+  });
+
+  it('renovação mensal envia um novo link de cancelamento válido', async () => {
+    const { svc, enqueue } = make({ applyResult: { status: 'RENEWED' } });
+    await svc.ingest(input);
+    expect(enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'payment-confirmed',
+      expect.objectContaining({ text: expect.stringContaining('/cancelar/opaque') }),
     );
   });
 

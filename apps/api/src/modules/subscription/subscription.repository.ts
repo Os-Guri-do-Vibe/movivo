@@ -4,7 +4,7 @@
  * provado pela integração contra Postgres real).
  */
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, desc, eq, lte, or, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, lte, or, type SQL } from 'drizzle-orm';
 
 import type { BiologicalSex } from '@movivo/shared';
 
@@ -40,7 +40,12 @@ export class SubscriptionRepository {
     return row ?? null;
   }
 
-  /** Resolve um webhook sem metadata pelos IDs opacos que o próprio Asaas devolveu. */
+  /**
+   * Resolve um webhook sem metadata pelos IDs opacos que o próprio Asaas devolveu. Os IDs do
+   * contrato (assinatura, cobrança, parcelamento, autorização, sessão do Checkout) são o vínculo
+   * forte. Só quando nenhum casa — a primeira cobrança de um Checkout hospedado pode chegar sem a
+   * sessão — cai no cliente do Asaas, que a MOVIVO cria 1:1 por titular.
+   */
   async findForGatewayEvent(event: GatewayEvent): Promise<SubscriptionRow | null> {
     const predicates: SQL[] = [];
     if (event.externalSubscriptionId) {
@@ -58,17 +63,14 @@ export class SubscriptionRepository {
     if (event.externalCheckoutSessionId) {
       predicates.push(eq(subscriptions.externalCheckoutSessionId, event.externalCheckoutSessionId));
     }
-    if (predicates.length === 0 && event.externalCustomerId) {
-      predicates.push(eq(subscriptions.externalCustomerId, event.externalCustomerId));
-    }
-    if (predicates.length === 0) return null;
+    const byContract = predicates.length ? await this.select(or(...predicates) as SQL) : null;
+    if (byContract || !event.externalCustomerId) return byContract;
+    return this.select(eq(subscriptions.externalCustomerId, event.externalCustomerId));
+  }
+
+  private async select(where: SQL): Promise<SubscriptionRow | null> {
     const [row] = await this.db.runAsSystem((tx) =>
-      tx
-        .select()
-        .from(subscriptions)
-        .where(or(...predicates))
-        .orderBy(desc(subscriptions.createdAt))
-        .limit(1),
+      tx.select().from(subscriptions).where(where).orderBy(desc(subscriptions.createdAt)).limit(1),
     );
     return row ?? null;
   }
@@ -112,6 +114,22 @@ export class SubscriptionRepository {
         .limit(1),
     );
     return row?.biologicalSex ?? null;
+  }
+
+  /**
+   * Titular pelo telefone E.164, casamento EXATO (sem heurística de 9º dígito: casar "quase"
+   * é o bug de vazamento entre titulares). Só quem já tem assinatura/trial e não foi anonimizado.
+   */
+  async findSubscriberByPhone(phoneE164: string): Promise<string | null> {
+    const [row] = await this.db.runAsSystem((tx) =>
+      tx
+        .select({ id: users.id })
+        .from(users)
+        .innerJoin(subscriptions, eq(subscriptions.userId, users.id))
+        .where(and(eq(users.phoneNumber, phoneE164), isNull(users.anonymizedAt)))
+        .limit(1),
+    );
+    return row?.id ?? null;
   }
 
   async insert(values: NewSubscriptionRow): Promise<SubscriptionRow> {

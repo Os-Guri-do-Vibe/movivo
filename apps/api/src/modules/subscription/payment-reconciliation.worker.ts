@@ -167,6 +167,11 @@ export class PaymentReconciliationWorker implements OnModuleInit {
         event.externalAuthorizationId
           ? eq(subscriptions.externalAuthorizationId, event.externalAuthorizationId)
           : undefined,
+        // Checkout hospedado: a primeira cobrança só traz a sessão, ainda sem assinatura/cobrança
+        // gravadas na linha — sem isto ela nasceria órfã na fila de exceção.
+        event.externalCheckoutSessionId
+          ? eq(subscriptions.externalCheckoutSessionId, event.externalCheckoutSessionId)
+          : undefined,
       ) as SQL;
       const [linked] = await tx
         .select({ id: subscriptions.id, userId: subscriptions.userId })

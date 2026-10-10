@@ -17,6 +17,7 @@ import {
   type CheckoutSummary,
   type CreateCheckoutBody,
   type SubscriptionStatus,
+  type RefundResult,
   type SubscriptionView,
 } from '@movivo/shared';
 
@@ -32,6 +33,7 @@ import {
   paidThroughFor,
   PLAN_CATALOG,
   referencesContract,
+  refundEligibleUntil,
   resolveAccess,
   SUBSCRIPTION_TERMS_VERSION,
   type SubscriptionPlan,
@@ -50,8 +52,8 @@ import { CheckoutTokenService } from './checkout-token.service';
 import { SubscriptionRepository } from './subscription.repository';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** Validade do alias `/cancelar/<código>`: a página de destino não expira, o alias vive 90 dias. */
-const CANCEL_LINK_TTL_MS = 90 * DAY_MS;
+/** O link enviado após a compra cobre inclusive o plano anual completo. */
+const CANCEL_LINK_TTL_MS = 365 * DAY_MS;
 const PAYMENT_LOCK_TTL_MS = 30_000;
 const RELEASE_LOCK = `if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end`;
 
@@ -71,11 +73,9 @@ export function nextStatusForEvent(type: GatewayEventType): SubscriptionStatus {
 
 @Injectable()
 export class SubscriptionService {
-  private get productionAsaas(): boolean {
-    return (
-      this.config.payment.provider === 'ASAAS' &&
-      this.config.payment.asaasApiUrl === 'https://api.asaas.com/v3'
-    );
+  /** Cartão sempre no Checkout hospedado do Asaas (Sandbox e produção): PAN nunca toca a MOVIVO. */
+  private get hostedCard(): boolean {
+    return this.config.payment.provider === 'ASAAS';
   }
 
   constructor(
@@ -117,14 +117,14 @@ export class SubscriptionService {
   /**
    * Link curto e personalizado do cancelamento (`/cancelar/<código>` → `/conta/<token>`, o
    * portal onde o próprio titular confirma). O portal e o alias expiram juntos; o link
-   * dura bem mais que o do checkout: "cancelar quando quiser" não pode vencer em 3 dias.
+   * dura bem mais que o do checkout e cada emissão preserva os links anteriores até expirarem.
    */
   async createShortCancelLink(userId: string): Promise<string> {
     const site = this.config.whatsapp.publicSiteUrl;
     const { token, expiresAt } = await this.accessLinks.issue(
       'SUBSCRIPTION_PORTAL',
       userId,
-      userId,
+      randomUUID(),
       CANCEL_LINK_TTL_MS,
     );
     const code = await this.shortLinks.create(`${site}/conta/${token}`, expiresAt);
@@ -170,15 +170,13 @@ export class SubscriptionService {
       maxInstallments: plan.months,
       status: sub.status,
       expiresAt: new Date(expiresAt).toISOString(),
-      methods: this.productionAsaas ? ['CARD', 'PIX'] : ['CARD', 'PIX', 'PIX_AUTOMATIC'],
-      hostedCard: this.productionAsaas,
+      methods: ['CARD', 'PIX'],
+      hostedCard: this.hostedCard,
       checkoutUrl:
-        this.productionAsaas &&
-        sub.status === 'PENDING_PAYMENT' &&
-        sub.paymentMethod === 'CARD' &&
-        sub.externalCheckoutSessionId
-          ? `https://asaas.com/checkoutSession/show/${encodeURIComponent(sub.externalCheckoutSessionId)}`
+        sub.status === 'PENDING_PAYMENT' && sub.paymentMethod === 'CARD' && this.hostedCard
+          ? hostedUrlOf(sub)
           : undefined,
+      repurchaseAt: this.repurchaseAt(sub)?.toISOString() ?? null,
     };
   }
 
@@ -188,16 +186,10 @@ export class SubscriptionService {
     body: CreateCheckoutBody,
     remoteIp: string,
   ): Promise<CheckoutPaymentResult> {
-    if (this.productionAsaas && body.method === 'PIX_AUTOMATIC') {
+    if (body.method === 'PIX_AUTOMATIC') {
       throw new BadRequestException('Este meio de pagamento não está disponível nesta conta.');
     }
-    if (body.method === 'CARD' && this.productionAsaas && body.card) {
-      throw new BadRequestException('Informe o cartão somente no ambiente seguro do Asaas.');
-    }
-    if (body.method === 'CARD' && !this.productionAsaas && !body.card) {
-      throw new BadRequestException('Dados do cartão ausentes.');
-    }
-    if (body.method === 'CARD' && !this.productionAsaas && !body.payer) {
+    if (!body.payer) {
       throw new BadRequestException('Dados do pagador ausentes.');
     }
     const lockKey = this.keys.forUser(userId, 'payment', 'start-lock');
@@ -210,8 +202,12 @@ export class SubscriptionService {
       // Releitura depois do lock: uma retentativa vê os IDs persistidos pela primeira chamada.
       let sub = await this.repo.findByUserId(userId);
       if (!sub) throw new Error('assinatura ausente para iniciar pagamento');
-      if (sub.status === 'ACTIVE' || sub.status === 'CANCELED' || sub.status === 'PAUSED') {
+      if (sub.status === 'ACTIVE' || sub.status === 'PAUSED') {
         throw new ConflictException('assinatura não aceita um novo pagamento neste estado');
+      }
+      // Cancelou com período pago em curso: o que já foi pago não se sobrepõe a uma recompra.
+      if (sub.status === 'CANCELED' && this.repurchaseAt(sub)) {
+        throw new ConflictException('assinatura cancelada ainda tem acesso pago vigente');
       }
       // O aluno pode trocar de plano no próprio checkout: o contrato persistido passa a ser o
       // escolhido (preço e meses vêm do catálogo, nunca do cliente) ANTES de abrir a cobrança.
@@ -228,8 +224,7 @@ export class SubscriptionService {
       ) {
         throw new Error('quantidade de parcelas incompatível com o plano');
       }
-      const regenerate =
-        body.regenerate === true && (body.method !== 'CARD' || this.productionAsaas);
+      const regenerate = body.regenerate === true;
       // Retentativa do MESMO contrato pendente reaproveita a referência (idempotência no
       // Asaas). Qualquer outro caso com contrato anterior — Pix regenerado, troca de método,
       // nova compra depois de expirar — abre contrato novo com tentativa nova.
@@ -238,17 +233,10 @@ export class SubscriptionService {
         sub.paymentMethod === body.method &&
         !regenerate &&
         !planChanged;
-      if (
-        retrying &&
-        this.productionAsaas &&
-        body.method === 'CARD' &&
-        sub.externalCheckoutSessionId
-      ) {
-        return {
-          status: 'PENDING',
-          method: 'CARD',
-          checkoutUrl: `https://asaas.com/checkoutSession/show/${encodeURIComponent(sub.externalCheckoutSessionId)}`,
-        };
+      const reusableCheckoutUrl =
+        retrying && body.method === 'CARD' && this.hostedCard ? hostedUrlOf(sub) : undefined;
+      if (reusableCheckoutUrl) {
+        return { status: 'PENDING', method: 'CARD', checkoutUrl: reusableCheckoutUrl };
       }
       const previous = !retrying && contractIdsOf(sub).length > 0 ? sub : null;
       const paymentAttempt = sub.paymentAttempt + (previous || regenerate ? 1 : 0);
@@ -262,23 +250,30 @@ export class SubscriptionService {
         totalCents: sub.totalPriceCents ?? sub.priceCents,
         months,
         method: body.method,
-        payer: this.productionAsaas && body.method === 'CARD' ? undefined : body.payer,
-        card: body.method === 'CARD' ? body.card : undefined,
+        payer: body.payer,
         installments,
         remoteIp,
         termsVersion: SUBSCRIPTION_TERMS_VERSION,
         idempotencyKey: `${sub.id}:${paymentAttempt}`,
-        returnUrl:
-          this.productionAsaas && body.method === 'CARD'
-            ? await this.createCheckoutLink(userId)
-            : undefined,
+        returnUrl: body.method === 'CARD' ? await this.createCheckoutLink(userId) : undefined,
       });
+      // Nova compra depois de EXPIRED/CANCELED: o período antigo não pode vazar para o contrato novo.
+      const reopening = sub.status === 'EXPIRED' || sub.status === 'CANCELED';
       await this.repo.patch(userId, sub.id, {
+        ...(reopening
+          ? {
+              currentPeriodStart: null,
+              currentPeriodEnd: null,
+              activatedAt: null,
+              canceledAt: null,
+              cancelReason: null,
+            }
+          : {}),
         status: 'PENDING_PAYMENT',
         paymentProvider: this.gateway.name === 'MOCK' ? null : this.gateway.name,
         paymentMethod: body.method,
-        installmentCount: installments ?? (body.method === 'PIX_AUTOMATIC' ? months : 1),
-        authorizedPaymentCount: body.method === 'PIX_AUTOMATIC' ? months : null,
+        installmentCount: installments ?? 1,
+        authorizedPaymentCount: null,
         paymentAttempt,
         externalCustomerId: result.externalCustomerId,
         externalSubscriptionId: result.externalSubscriptionId,
@@ -286,6 +281,7 @@ export class SubscriptionService {
         externalInstallmentId: result.externalInstallmentId,
         externalAuthorizationId: result.externalAuthorizationId,
         externalCheckoutSessionId: result.externalCheckoutSessionId,
+        checkoutUrl: result.checkoutUrl ?? null,
         termsVersion: SUBSCRIPTION_TERMS_VERSION,
         termsAcceptedAt: new Date(),
         nextBillingAt: parseOptionalDate(result.nextBillingAt),
@@ -395,9 +391,25 @@ export class SubscriptionService {
       status: sub.status,
       access: resolveAccess(sub, this.config.payment.pastDueGraceDays),
       currentPeriodEnd: sub.currentPeriodEnd ? sub.currentPeriodEnd.toISOString() : null,
+      paymentMethod:
+        sub.paymentMethod === 'CARD' ||
+        sub.paymentMethod === 'PIX' ||
+        sub.paymentMethod === 'PIX_AUTOMATIC'
+          ? sub.paymentMethod
+          : null,
+      refundEligibleUntil: refundEligibleUntil(sub)?.toISOString() ?? null,
+      canRepurchaseAt: this.repurchaseAt(sub)?.toISOString() ?? null,
     };
   }
 
+  /** Cancelado, mas com acesso pago em curso: a recompra só vale depois do fim do período. */
+  private repurchaseAt(sub: SubscriptionRow): Date | null {
+    return sub.status === 'CANCELED' &&
+      resolveAccess(sub, this.config.payment.pastDueGraceDays) === 'FULL' &&
+      sub.currentPeriodEnd
+      ? sub.currentPeriodEnd
+      : null;
+  }
   /**
    * Aplica um evento do gateway à máquina de estados. Idempotente (ativação repetida com o
    * mesmo `externalSubscriptionId` é no-op); transição inválida → `InvalidTransitionError`.
@@ -437,6 +449,16 @@ export class SubscriptionService {
         'evento de contrato substituído — acesso preservado',
       );
       return { status: 'STALE_CONTRACT', userId: current.userId };
+    }
+
+    // O estorno que ficou pendente (manual) foi concluído no painel do Asaas: baixa o marcador.
+    if (event.type === 'REFUNDED' && current.cancelReason === 'ARREPENDIMENTO_ESTORNO_PENDENTE') {
+      await this.repo.patch(current.userId, current.id, { cancelReason: 'ARREPENDIMENTO' });
+      this.logger.info(
+        { event: 'refund_manual_confirmed', userId: current.userId },
+        'estorno manual confirmado pelo Asaas',
+      );
+      return { status: 'IDEMPOTENT', userId: current.userId };
     }
 
     // Primeira cobrança que não liquidou (Pix vencido, QR do Pix Automático expirado, análise
@@ -539,6 +561,7 @@ export class SubscriptionService {
   async cancel(userId: string, reason?: string): Promise<{ status: string }> {
     const current = await this.repo.findByUserId(userId);
     if (!current) return { status: 'NO_SUBSCRIPTION' };
+    if (current.status === 'CANCELED') return { status: 'CANCELED' };
     if (!canTransition(current.status, 'CANCELED')) {
       throw new InvalidTransitionError(current.status, 'CANCELED');
     }
@@ -556,6 +579,61 @@ export class SubscriptionService {
     );
     this.logger.info({ event: 'subscription_cancelled', userId }, 'subscription_cancelled');
     return { status: 'CANCELED' };
+  }
+
+  /**
+   * Arrependimento (CDC art. 49): dentro de 7 dias da contratação, devolve o valor pago e encerra
+   * o acesso na hora. Interrompe a cobrança futura ANTES de estornar (nunca devolver dinheiro
+   * de um contrato que ainda cobra). Se o Asaas recusar o estorno (ex.: Pix sem saldo na conta),
+   * o cancelamento vale e o caso fica marcado para estorno manual — ver `cancelReason`.
+   */
+  async requestRefund(userId: string, now: Date = new Date()): Promise<RefundResult | null> {
+    const current = await this.repo.findByUserId(userId);
+    if (!current) return null;
+    if (!refundEligibleUntil(current, now)) {
+      throw new ConflictException('prazo de arrependimento encerrado ou sem pagamento a estornar');
+    }
+    if (current.status !== 'CANCELED' && mayStillCharge(current) && contractIdsOf(current).length) {
+      await this.gateway.cancelContract(contractRefsOf(current));
+    }
+    let outcome: RefundResult['status'] = 'REFUNDED';
+    try {
+      await this.gateway.refundContract(
+        { installmentId: current.externalInstallmentId, paymentId: current.externalPaymentId },
+        'Arrependimento do consumidor (CDC art. 49)',
+      );
+    } catch (error) {
+      outcome = 'PENDING_MANUAL';
+      this.logger.error(
+        {
+          event: 'refund_manual_required',
+          userId,
+          subscriptionId: current.id,
+          err: error instanceof Error ? error.message : String(error),
+        },
+        'estorno por arrependimento recusado pelo gateway — tratar manualmente',
+      );
+    }
+    await this.repo.patch(
+      userId,
+      current.id,
+      {
+        status: 'CANCELED',
+        canceledAt: current.canceledAt ?? now,
+        cancelReason: outcome === 'REFUNDED' ? 'ARREPENDIMENTO' : 'ARREPENDIMENTO_ESTORNO_PENDENTE',
+        currentPeriodEnd: now,
+      },
+      { actor: 'USER', reason: 'ARREPENDIMENTO' },
+    );
+    this.logger.info({ event: 'subscription_refund_requested', userId, outcome }, 'arrependimento');
+    return { status: outcome };
+  }
+
+  /** Link novo do checkout, pedido pelo portal do próprio titular (recompra após o fim do acesso). */
+  async issueCheckoutLink(userId: string): Promise<string | null> {
+    const sub = await this.repo.findByUserId(userId);
+    if (!sub) return null;
+    return this.createShortCheckoutLink(userId);
   }
 
   /**
@@ -595,13 +673,14 @@ export class SubscriptionService {
       externalInstallmentId: null,
       externalAuthorizationId: null,
       externalCheckoutSessionId: null,
+      checkoutUrl: null,
       paymentAttempt,
     });
     if (!mayStillCharge(sub)) return;
     try {
       await this.gateway.cancelContract(contractRefsOf(sub));
     } catch (error) {
-      if (sub.status === 'EXPIRED') {
+      if (sub.status === 'EXPIRED' || sub.status === 'CANCELED') {
         // Contrato já encerrado: falhar aqui só impediria a recompra.
         this.logger.warn(
           { userId: sub.userId, err: error instanceof Error ? error.message : String(error) },
@@ -617,6 +696,7 @@ export class SubscriptionService {
         externalInstallmentId: sub.externalInstallmentId,
         externalAuthorizationId: sub.externalAuthorizationId,
         externalCheckoutSessionId: sub.externalCheckoutSessionId,
+        checkoutUrl: sub.checkoutUrl,
         paymentAttempt: sub.paymentAttempt,
       });
       throw error;
@@ -684,16 +764,21 @@ export class SubscriptionService {
         totalPriceCents: current.totalPriceCents ?? current.priceCents,
         commitmentMonths: current.commitmentMonths ?? catalog.months,
         externalSubscriptionId: event.externalSubscriptionId,
-        externalCustomerId: event.externalCustomerId ?? null,
+        externalCustomerId: event.externalCustomerId ?? current.externalCustomerId,
         externalPaymentId: event.externalPaymentId,
         externalInstallmentId: event.externalInstallmentId,
         externalAuthorizationId: event.externalAuthorizationId,
         externalCheckoutSessionId: event.externalCheckoutSessionId,
+        checkoutUrl: null,
         externalPriceId: event.externalPriceId,
         termsVersion: event.termsVersion,
         termsAcceptedAt: event.termsVersion ? now : undefined,
         // MOCK (dev) não é um provedor fiscal real → deixa nulo; real grava ASAAS.
         paymentProvider: this.gateway.name === 'MOCK' ? null : this.gateway.name,
+        // PAST_DUE/PAUSED reativam o mesmo contrato; os demais abrem uma contratação nova.
+        ...(current.status === 'PAST_DUE' || current.status === 'PAUSED'
+          ? {}
+          : { activatedAt: now }),
         ...(keepsPeriod
           ? {}
           : {
@@ -752,6 +837,18 @@ function contractRefsOf(sub: SubscriptionRow): ExternalContractRefs {
         authorizationId: sub.externalAuthorizationId,
         checkoutSessionId: sub.externalCheckoutSessionId,
       };
+  }
+}
+
+/** Só repassa ao navegador links https de domínios do Asaas (nunca uma URL arbitrária do banco). */
+function hostedUrlOf(sub: Pick<SubscriptionRow, 'checkoutUrl'>): string | undefined {
+  if (!sub.checkoutUrl) return undefined;
+  try {
+    const url = new URL(sub.checkoutUrl);
+    const official = url.hostname === 'asaas.com' || url.hostname.endsWith('.asaas.com');
+    return url.protocol === 'https:' && official ? url.toString() : undefined;
+  } catch {
+    return undefined;
   }
 }
 

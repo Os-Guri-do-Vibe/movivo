@@ -109,6 +109,14 @@ export class MockGateway implements PaymentGateway {
     return Promise.resolve();
   }
 
+  refundContract(
+    refs: import('./payment-gateway.types').ExternalContractRefs,
+    reason: string,
+  ): Promise<void> {
+    this.logger.info({ refs, reason }, 'estorno MOCK');
+    return Promise.resolve();
+  }
+
   getSubscription(externalSubscriptionId: string): Promise<GatewaySubscription | null> {
     return Promise.resolve({ externalSubscriptionId, status: 'active' });
   }
