@@ -317,14 +317,6 @@ createServer(async (request, response) => {
         primaryGoal: null,
         consents: [
           {
-            type: 'TERMS_OF_SERVICE',
-            version: 'terms-e2e-v1',
-            title: null,
-            body: [],
-            label: 'Li e aceito os Termos de Uso.',
-            required: true,
-          },
-          {
             type: 'HEALTH_DATA',
             version: 'health-e2e-v1',
             title: 'Saúde',

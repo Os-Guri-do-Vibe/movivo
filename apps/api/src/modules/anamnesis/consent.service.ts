@@ -14,12 +14,7 @@
  *  3. **Append-only** — revogar é `UPDATE revoked_at`, nunca DELETE (a policy de
  *     RLS da US-1.1 já não concede DELETE em `consents` a ninguém).
  */
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   CONSENT_TEXTS,
   isRevocableConsent,
@@ -39,9 +34,8 @@ export interface ConsentOrigin {
 
 /**
  * Nenhum texto integral de `terms-2026-08-v2` foi arquivado/publicado. As minutas
- * de setembro ainda não são vigentes. O aceite contratual fica fechado até que
- * Jurídico aprove AMBOS os documentos e a versão do checkbox passe a referir
- * exatamente esse par publicado.
+ * de setembro ainda não são vigentes. O aceite contratual só é registrado após
+ * a publicação dos dois documentos.
  * ponytail: gate estático para a minuta; substituir por manifesto versionado dos
  * dois documentos após aprovação jurídica, mantendo as versões antigas imutáveis.
  */
@@ -68,10 +62,6 @@ export class ConsentService {
     origin: ConsentOrigin,
   ): Promise<void> {
     this.assertVersionsAreCurrent(inputs);
-    if (inputs.some((input) => input.type === 'TERMS_OF_SERVICE' && input.accepted)) {
-      this.assertTermsPublished();
-    }
-
     // Lookup token→sessão escopado pelo token (UUID ainda desconhecido); a escrita roda
     // ESCOPADA à sessão (Sato — achado 1): a RLS só aceita o consentimento preso a
     // esta sessão, nunca a de outro token.
@@ -82,6 +72,9 @@ export class ConsentService {
 
     await this.db.runAsTokenScoped(sessionId, async (tx) => {
       for (const input of inputs) {
+        // Clientes antigos ainda podem enviar este aceite; sem texto publicado,
+        // não há contrato a registrar, mas isso não impede a inscrição beta.
+        if (input.type === 'TERMS_OF_SERVICE' && !this.areTermsPublished()) continue;
         await this.upsert(tx, { anamnesisSessionId: sessionId, userId: null }, input, origin);
       }
     });
@@ -179,15 +172,6 @@ export class ConsentService {
         return text?.version === row.version;
       })
       .map((row) => row.type as ConsentTypeWithText);
-  }
-
-  /** Também chamado no submit para impedir avanço de sessões antigas já na Etapa 2/3. */
-  assertTermsPublished(): void {
-    if (!this.areTermsPublished()) {
-      throw new ServiceUnavailableException(
-        'Termos de Uso em revisão. Cadastro temporariamente indisponível.',
-      );
-    }
   }
 
   protected areTermsPublished(): boolean {
