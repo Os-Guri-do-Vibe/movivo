@@ -10,4 +10,4 @@ services:
       - health_cipher_keyring
 secrets:
   health_cipher_keyring:
-    file: ./secrets/health_cipher_keyring
+    file: ./secrets/desenvolvimento/health_cipher_keyring

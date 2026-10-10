@@ -11,4 +11,4 @@ services:
       - vault_token
 secrets:
   vault_token:
-    file: ./secrets/vault_token
+    file: ./secrets/desenvolvimento/vault_token

@@ -65,7 +65,7 @@ o ambiente local e a Fase B.
 
 5. **Resolução de caminho.** Caminho absoluto é usado como está
    (`/run/secrets/postgres_app_password` dentro do container). Caminho relativo é
-   resolvido contra `process.cwd()` (`../../secrets/postgres_app_password` quando a
+   resolvido contra `process.cwd()` (`../../secrets/desenvolvimento/postgres_app_password` quando a
    API roda no host a partir de `apps/api`).
 
 6. **Normalização do conteúdo.** Ler como UTF-8, remover um BOM inicial se houver,

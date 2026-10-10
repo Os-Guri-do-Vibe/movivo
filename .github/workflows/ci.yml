@@ -151,17 +151,17 @@ jobs:
           # Host clients authenticate the ephemeral CA provisioned by infra:up.
           cat >> apps/api/.env <<EOF
           DATABASE_SSL=true
-          DATABASE_SSL_CA_FILE=${GITHUB_WORKSPACE}/secrets/internal_tls/ca.crt
+          DATABASE_SSL_CA_FILE=${GITHUB_WORKSPACE}/secrets/desenvolvimento/internal_tls/ca.crt
           MIGRATION_DATABASE_SSL=true
-          MIGRATION_DATABASE_SSL_CA_FILE=${GITHUB_WORKSPACE}/secrets/internal_tls/ca.crt
+          MIGRATION_DATABASE_SSL_CA_FILE=${GITHUB_WORKSPACE}/secrets/desenvolvimento/internal_tls/ca.crt
           REDIS_TLS_ENABLED=true
-          REDIS_TLS_CA_FILE=${GITHUB_WORKSPACE}/secrets/internal_tls/ca.crt
+          REDIS_TLS_CA_FILE=${GITHUB_WORKSPACE}/secrets/desenvolvimento/internal_tls/ca.crt
           HEALTH_CIPHER_PROVIDER=VAULT
           HEALTH_CIPHER_KEY_ID=health-2026-q4
-          HEALTH_CIPHER_KEYRING_FILE=${GITHUB_WORKSPACE}/secrets/health_cipher_keyring
+          HEALTH_CIPHER_KEYRING_FILE=${GITHUB_WORKSPACE}/secrets/desenvolvimento/health_cipher_keyring
           VAULT_ADDR=https://localhost:8200
-          VAULT_TOKEN_FILE=${GITHUB_WORKSPACE}/secrets/vault_token
-          VAULT_CA_FILE=${GITHUB_WORKSPACE}/secrets/internal_tls/ca.crt
+          VAULT_TOKEN_FILE=${GITHUB_WORKSPACE}/secrets/desenvolvimento/vault_token
+          VAULT_CA_FILE=${GITHUB_WORKSPACE}/secrets/desenvolvimento/internal_tls/ca.crt
           VAULT_TRANSIT_KEY=movivo-health
           EOF
 

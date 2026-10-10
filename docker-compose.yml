@@ -11,7 +11,7 @@
 # ─── COMO SUBIR ──────────────────────────────────────────────────────────────
 #   1. bash scripts/gen-local-secrets.sh            (ou o .ps1 no Windows)
 #   2. cp .env.example .env
-#   3. colocar em secrets/ as chaves de terceiros (asaas, openai, deepseek,
+#   3. colocar em secrets/desenvolvimento/ as chaves de terceiros (asaas, openai, deepseek,
 #      anthropic, groq — exclusivas de desenvolvimento)
 #   4. pnpm run infra:up          (equivalente: make up)
 #

@@ -55,7 +55,10 @@ const tenant = new TenantDatabase(db);
 const cipher = new HealthCipherService(db, {
   pgcryptoKey:
     env.PGCRYPTO_KEY ??
-    readFileSync(resolve(apiRoot, '..', '..', 'secrets', 'pgcrypto_key'), 'utf8').trimEnd(),
+    readFileSync(
+      resolve(apiRoot, '..', '..', 'secrets', 'desenvolvimento', 'pgcrypto_key'),
+      'utf8',
+    ).trimEnd(),
 } as never);
 
 // --- Cliente ADMIN (superusuário, BYPASSRLS) apenas para teardown do teste ---
@@ -66,7 +69,7 @@ const adminClient = postgres({
   port: adminPort,
   user: 'postgres',
   password: readFileSync(
-    resolve(apiRoot, '..', '..', 'secrets', 'postgres_superuser_password'),
+    resolve(apiRoot, '..', '..', 'secrets', 'desenvolvimento', 'postgres_superuser_password'),
     'utf8',
   ).trimEnd(),
   database: env.DATABASE_NAME ?? 'movivo',

@@ -6,7 +6,7 @@
 .DESCRIPTION
   Dono: Henrique (Platform/SRE) - US-0.6 / TASK-0.6.2
 
-  Gera em ./secrets/ (diretorio 100% ignorado pelo Git):
+  Gera em ./secrets/desenvolvimento/ (100% ignorado pelo Git):
     postgres_superuser_password   senha do superusuario (bootstrap do cluster)
     postgres_app_password         senha da role movivo_app (runtime, sem BYPASSRLS)
     postgres_migrator_password    senha da role movivo_migrator (migracoes)
@@ -50,7 +50,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot   = Split-Path -Parent $PSScriptRoot
-$SecretsDir = Join-Path $RepoRoot 'secrets'
+$SecretsDir = Join-Path (Join-Path $RepoRoot 'secrets') 'desenvolvimento'
 
 # Charset alfanumerico de proposito: a senha entra no userlist.txt do PgBouncer
 # (delimitado por aspas) e em DSNs; aspas, barras e '@' quebrariam o parsing.
@@ -135,7 +135,7 @@ if ((Test-Path -LiteralPath $jwtPriv) -and (Test-Path -LiteralPath $jwtPub) -and
 } else {
   $openssl = Get-Command openssl -ErrorAction SilentlyContinue
   if (-not $openssl) {
-    Write-Output 'ERRO: openssl nao encontrado. Instale o Git for Windows (traz openssl) ou gere o par RS256 manualmente em secrets/jwt_private_key e secrets/jwt_public_key.'
+    Write-Output 'ERRO: openssl nao encontrado. Instale o Git for Windows (traz openssl) ou gere o par RS256 manualmente em secrets/desenvolvimento/jwt_private_key e jwt_public_key.'
     exit 1
   }
   & openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out $jwtPriv 2>$null
@@ -187,7 +187,7 @@ $missingExternal = @('asaas_api_key', 'openai_api_key', 'deepseek_api_key', 'ant
   (-not (Test-Path -LiteralPath $path)) -or ((Get-Item -LiteralPath $path).Length -eq 0)
 }
 if ($missingExternal) {
-  Write-Output ("  ! chaves de terceiros ainda ausentes em secrets/: {0}" -f ($missingExternal -join ' '))
+  Write-Output ("  ! chaves de terceiros ainda ausentes em secrets/desenvolvimento/: {0}" -f ($missingExternal -join ' '))
   Write-Output "    (cole cada valor no arquivo de mesmo nome; o 'docker compose up' so sobe com todos)"
 }
 

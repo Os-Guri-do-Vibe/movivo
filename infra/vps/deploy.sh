@@ -84,6 +84,12 @@ mkdir -p "$stage/nginx/conf.d" "$stage/infra" "$stage/bin"
 cp infra/vps/docker-compose.prod.yml "$stage/compose.yml"
 cp infra/security/docker-compose.secure.yml "$stage/compose.override.yml"
 cp -R infra/security "$stage/infra/"
+# No repo os overlays apontam para secrets/desenvolvimento; na VPS os segredos ficam
+# direto em ${APP_DIR}/secrets (layout plano). Reescreve só a cópia que vai para lá.
+sed -i.bak 's#\./secrets/desenvolvimento/#./secrets/#g' "$stage/compose.override.yml" "$stage"/infra/security/docker-compose.*.yml
+rm -f "$stage/compose.override.yml.bak" "$stage"/infra/security/*.bak
+! grep -rq 'secrets/desenvolvimento' "$stage/compose.override.yml" "$stage/infra/security" \
+  || die "overlay de produção ainda referencia secrets/desenvolvimento"
 cp scripts/provision-security.py scripts/verify-vault-restore.py scripts/renew-security-certificates.sh "$stage/bin/"
 cp scripts/verify-security.mjs "$stage/bin/"
 cp infra/security/movivo-*.service infra/security/movivo-*.timer "$stage/bin/"
@@ -131,20 +137,20 @@ log "2/8 Segredos"
 "${SSH[@]}" 'bash -s' < infra/vps/gen-prod-secrets.sh
 # Remove credenciais antigas que não são mais montadas por nenhum serviço.
 "${SSH[@]}" "rm -f ${APP_DIR}/secrets/ararahq_* ${APP_DIR}/secrets/stripe_*"
-# Chaves de produção devem ser provisionadas na VPS ou fornecidas explicitamente
-# via PRODUCTION_SECRETS_DIR. Nunca copiar automaticamente credenciais de dev.
+# Chaves de produção devem ser provisionadas na VPS ou vir de secrets/producao
+# (ou de outro diretório, via PRODUCTION_SECRETS_DIR). Nunca copiar credenciais de dev.
+PRODUCTION_SECRETS_DIR="${PRODUCTION_SECRETS_DIR:-secrets/producao}"
 for key in asaas_api_key deepseek_api_key openai_api_key anthropic_api_key groq_api_key; do
   if "${SSH[@]}" "test -s ${APP_DIR}/secrets/${key}"; then
     echo "  = ${key} (já na VPS)"
     continue
   fi
-  [[ -n "${PRODUCTION_SECRETS_DIR:-}" ]] || die "${key} ausente na VPS: provisione credencial de produção ou defina PRODUCTION_SECRETS_DIR"
-  [[ -s "${PRODUCTION_SECRETS_DIR}/${key}" ]] || die "credencial de produção ${key} ausente na fonte explícita"
-  if [[ -f "secrets/${key}" ]] && cmp -s "secrets/${key}" "${PRODUCTION_SECRETS_DIR}/${key}"; then
+  [[ -s "${PRODUCTION_SECRETS_DIR}/${key}" ]] || die "${key} ausente na VPS e vazio em ${PRODUCTION_SECRETS_DIR}: preencha a credencial de produção"
+  if [[ -f "secrets/desenvolvimento/${key}" ]] && cmp -s "secrets/desenvolvimento/${key}" "${PRODUCTION_SECRETS_DIR}/${key}"; then
     die "${key} repete a credencial local de desenvolvimento; gere chave exclusiva de produção no fornecedor"
   fi
   "${SSH[@]}" "umask 022; cat > ${APP_DIR}/secrets/${key}; chmod 644 ${APP_DIR}/secrets/${key}" < "${PRODUCTION_SECRETS_DIR}/${key}"
-  echo "  + ${key} (fonte de produção explícita)"
+  echo "  + ${key} (${PRODUCTION_SECRETS_DIR})"
 done
 
 # -----------------------------------------------------------------------------

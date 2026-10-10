@@ -127,12 +127,14 @@ com TRIM/discard (ver `armazenamento-cifrado.md`).
 | Origem | Arquivos |
 |---|---|
 | Gerados **na VPS** por `gen-prod-secrets.sh` | senhas do Postgres/Redis/Evolution, `pgcrypto_key`, par JWT, `evolution_webhook_token`, `asaas_webhook_secret`, `backup_encryption_key` |
-| Provisionados na VPS ou copiados de `PRODUCTION_SECRETS_DIR` explícito (só se faltarem) | `asaas_api_key`, `openai_api_key`, `anthropic_api_key`, `deepseek_api_key`, `groq_api_key` |
+| Provisionados na VPS ou copiados de `secrets/producao/` (ou de `PRODUCTION_SECRETS_DIR`; só se faltarem) | `asaas_api_key`, `openai_api_key`, `anthropic_api_key`, `deepseek_api_key`, `groq_api_key` |
 
-Credenciais de terceiros devem ser exclusivas de produção. O deploy não usa `secrets/`
-de desenvolvimento como fallback. Para arquivos ainda ausentes, execute
-`PRODUCTION_SECRETS_DIR=/caminho/privado/producao infra/vps/deploy.sh <sha>`.
-Mantenha a fonte fora do Git e com modo `0700`.
+Credenciais de terceiros devem ser exclusivas de produção. O deploy não usa
+`secrets/desenvolvimento/` como fallback — e recusa a chave que for idêntica à de
+desenvolvimento. Para arquivos ainda ausentes na VPS, preencha-os em `secrets/producao/`
+(ignorado pelo Git, modo `0700`) e execute `infra/vps/deploy.sh <sha>`; outro diretório
+pode ser indicado com `PRODUCTION_SECRETS_DIR=/caminho/privado infra/vps/deploy.sh <sha>`.
+Na VPS o layout continua plano, em `/opt/movivo/secrets/`.
 
 - O script **nunca sobrescreve** um segredo existente. Trocar a senha do
   Postgres ou o `pgcrypto_key` com o banco criado quebra o acesso ou torna dado
@@ -167,7 +169,7 @@ Mantenha a fonte fora do Git e com modo `0700`.
 - Cloudflare mudou as faixas de IP? Rode `bash infra/vps/hostinger-firewall.sh`
   (firewall da Hostinger) **e** um deploy (listas do Nginx).
 
-Credenciais de terceiros devem ser exclusivas do ambiente de produção. O deploy não usa `secrets/` de desenvolvimento como fallback. Para provisionar arquivos ainda ausentes, execute `PRODUCTION_SECRETS_DIR=/caminho/privado/producao infra/vps/deploy.sh <sha>`; mantenha esse diretório fora do Git e com modo `0700`. Valores existentes na VPS não são sobrescritos: rotação exige substituição coordenada e recriação dos consumidores.
+Credenciais de terceiros devem ser exclusivas do ambiente de produção. O deploy não usa `secrets/desenvolvimento/` como fallback. Para provisionar arquivos ainda ausentes, preencha-os em `secrets/producao/` e execute `infra/vps/deploy.sh <sha>` (ou aponte outra fonte com `PRODUCTION_SECRETS_DIR=/caminho/privado`); mantenha o diretório fora do Git e com modo `0700`. Valores existentes na VPS não são sobrescritos: rotação exige substituição coordenada e recriação dos consumidores.
 
 ## Backup e restauração
 

@@ -23,6 +23,8 @@ def main():
     parser.add_argument("--snapshot", type=Path)
     args = parser.parse_args()
     root = args.root.resolve()
+    # Na VPS os segredos ficam direto em <root>/secrets; no repo local, em secrets/desenvolvimento.
+    secrets_dir = root / ("secrets/desenvolvimento" if args.environment == "local" else "secrets")
     custody = Path.home() / ".local/share/movivo-security" / args.environment / "vault-init.json"
     scratch = "movivo-restore-check-" + uuid.uuid4().hex
     stage = "preflight"
@@ -56,8 +58,8 @@ def main():
         if custody.stat().st_mode & 0o077:
             raise RuntimeError("custody permissions unsafe")
         initialization = json.loads(custody.read_text())
-        app_token = (root / "secrets/vault_token").read_text().strip()
-        context = ssl.create_default_context(cafile=str(root / "secrets/internal_tls/ca.crt"))
+        app_token = (secrets_dir / "vault_token").read_text().strip()
+        context = ssl.create_default_context(cafile=str(secrets_dir / "internal_tls/ca.crt"))
 
         def live(path, token, data=None, binary=False):
             request = urllib.request.Request("https://127.0.0.1:8200/v1/" + path,
