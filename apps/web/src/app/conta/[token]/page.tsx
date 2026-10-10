@@ -17,7 +17,7 @@ import { formatBRL } from '@/lib/subscription-api';
 import styles from './page.module.css';
 
 export const metadata: Metadata = {
-  title: 'Sua assinatura · MOVIVO',
+  title: 'Sua assinatura',
   description: 'Consulte e gerencie sua assinatura MOVIVO.',
   robots: { index: false, follow: false },
 };
@@ -85,6 +85,9 @@ export default async function ContaPage({ params }: { params: Promise<{ token: s
 
   const plan = SUBSCRIPTION_PLANS.find((candidate) => candidate.id === view.plan);
   const inactive = view.status === 'CANCELED' || view.status === 'EXPIRED';
+  const recurringCard = view.paymentMethod === 'CARD' && view.plan === 'MONTHLY';
+  const installmentCard = view.paymentMethod === 'CARD' && view.plan !== 'MONTHLY';
+  const trialEnded = view.status === 'EXPIRED' && view.paymentMethod === null;
 
   return (
     <SubscriptionFrame
@@ -119,11 +122,11 @@ export default async function ContaPage({ params }: { params: Promise<{ token: s
               </div>
               <div>
                 <dt>Situação atual</dt>
-                <dd>{STATUS_LABEL[view.status]}</dd>
+                <dd>{trialEnded ? 'Teste gratuito encerrado' : STATUS_LABEL[view.status]}</dd>
               </div>
               {view.currentPeriodEnd ? (
                 <div>
-                  <dt>{view.status === 'CANCELED' ? 'Acesso até' : 'Próxima cobrança'}</dt>
+                  <dt>Período pago até</dt>
                   <dd>
                     <time dateTime={view.currentPeriodEnd}>
                       {new Date(view.currentPeriodEnd).toLocaleDateString('pt-BR')}
@@ -164,27 +167,46 @@ export default async function ContaPage({ params }: { params: Promise<{ token: s
           <div className={styles.explanation}>
             <h3>{inactive ? 'Sua assinatura não está ativa' : 'Como deseja continuar?'}</h3>
             <p>
-              {inactive
-                ? 'Quando quiser voltar, fale com nosso suporte para receber um novo link seguro de checkout.'
-                : 'Você pode gerenciar sua assinatura sem perder o histórico dos seus treinos.'}
+              {trialEnded
+                ? 'Seu teste gratuito terminou. Não há assinatura paga ativa nem cobrança futura para cancelar.'
+                : view.status === 'EXPIRED'
+                  ? 'Seu período pago terminou e não há cobrança futura. Para continuar com o acompanhamento, é só assinar novamente.'
+                  : view.status === 'PENDING_PAYMENT'
+                    ? 'Seu pagamento ainda não foi confirmado. Se desistir, cancele aqui e nenhuma cobrança será concluída.'
+                    : view.status === 'CANCELED'
+                      ? view.canRepurchaseAt
+                        ? 'A renovação foi cancelada. O acesso pago permanece até o fim do período já pago.'
+                        : 'Sua assinatura foi cancelada e não há novas cobranças. Quando quiser voltar, é só assinar de novo.'
+                      : recurringCard
+                        ? 'O cartão é cobrado mensalmente. Ao cancelar, impedimos novas cobranças e mantemos o acesso até o fim do período pago.'
+                        : installmentCard
+                          ? 'Este plano não renova automaticamente. O cancelamento não desfaz as parcelas da compra já contratada.'
+                          : view.paymentMethod === 'PIX'
+                            ? 'O Pix foi pago à vista. Não há renovação ou cobrança automática.'
+                            : 'Você pode gerenciar sua assinatura sem perder o histórico dos seus treinos.'}
             </p>
           </div>
 
-          {inactive ? (
-            CONTACT_URL ? (
-              <a className={styles.supportButton} href={CONTACT_URL}>
-                Falar com o suporte
-              </a>
-            ) : null
-          ) : (
-            <ManageSubscription token={token} status={view.status} />
-          )}
+          <ManageSubscription
+            token={token}
+            status={view.status}
+            plan={view.plan}
+            paymentMethod={view.paymentMethod}
+            refundEligibleUntil={view.refundEligibleUntil}
+            canRepurchaseAt={view.canRepurchaseAt}
+          />
+
+          {inactive && CONTACT_URL ? (
+            <a className={styles.supportButton} href={CONTACT_URL}>
+              Falar com o suporte
+            </a>
+          ) : null}
 
           <div className={styles.providerNote}>
             <ShieldCheck aria-hidden="true" />
             <p>
-              Cancelamentos de contratos externos são enviados ao provedor antes da atualização do
-              estado na MOVIVO. Valores já liquidados exigem análise de reembolso.
+              O cancelamento impede a renovação futura. Valores já pagos ou parcelas de uma compra
+              parcelada seguem as condições aceitas na contratação.
             </p>
           </div>
         </section>
