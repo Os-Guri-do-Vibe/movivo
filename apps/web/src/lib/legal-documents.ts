@@ -12,11 +12,12 @@ const FILES: Record<LegalDocumentKind, string> = {
 
 export interface LegalDocument {
   version: string;
-  effectiveOn: string;
+  status: 'APPROVED' | 'BETA_VISIBLE';
+  effectiveOn: string | null;
   markdown: string;
 }
 
-export function parseApprovedLegalDocument(
+export function parseLegalDocument(
   source: string,
   releasedVersion: string | null,
 ): LegalDocument | null {
@@ -37,21 +38,23 @@ export function parseApprovedLegalDocument(
       .filter((entry): entry is RegExpMatchArray => entry !== null)
       .map((entry) => [entry[1], entry[2]]),
   );
-  if (
-    metadata.publication_status !== 'APPROVED' ||
-    metadata.document_version !== releasedVersion ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(metadata.effective_on ?? '')
-  ) {
+  if (metadata.document_version !== releasedVersion) return null;
+  const status = metadata.publication_status;
+  if (status !== 'APPROVED' && status !== 'BETA_VISIBLE') return null;
+  const effectiveOn = metadata.effective_on ?? '';
+  if (status === 'APPROVED' && !/^\d{4}-\d{2}-\d{2}$/.test(effectiveOn)) return null;
+  if (status === 'BETA_VISIBLE' && effectiveOn !== 'PENDING') return null;
+
+  const markdown = source.slice(match[0].length).trim();
+  // Texto aprovado não pode conter campos pendentes; a versão beta os identifica na página.
+  if (!markdown || (status === 'APPROVED' && /\[[A-ZÀ-Ú][^\]\n]*\](?!\()/.test(markdown))) {
     return null;
   }
 
-  const markdown = source.slice(match[0].length).trim();
-  // Placeholders editoriais como [CNPJ] e [E-MAIL DO ENCARREGADO] nunca vão ao público.
-  if (!markdown || /\[[A-ZÀ-Ú][^\]\n]*\](?!\()/.test(markdown)) return null;
-
   return {
     version: releasedVersion,
-    effectiveOn: metadata.effective_on,
+    status,
+    effectiveOn: status === 'APPROVED' ? effectiveOn : null,
     markdown,
   };
 }
@@ -62,5 +65,5 @@ export function loadLegalDocument(kind: LegalDocumentKind): LegalDocument | null
 
   const root = process.cwd().endsWith('apps/web') ? '../..' : '.';
   const file = resolve(process.cwd(), root, 'docs/juridico', FILES[kind]);
-  return parseApprovedLegalDocument(readFileSync(file, 'utf8'), releasedVersion);
+  return parseLegalDocument(readFileSync(file, 'utf8'), releasedVersion);
 }

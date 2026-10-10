@@ -1,9 +1,14 @@
 import { CONSENT_VERSIONS } from '@movivo/shared';
 
-/** Liberação única para os links e as rotas. Preencher só após homologação jurídica. */
-export const LEGAL_RELEASE: { terms: string | null; privacy: string | null } = {
-  terms: null,
-  privacy: null,
+/** Versões exibidas no beta; visibilidade não equivale a homologação jurídica. */
+export const LEGAL_RELEASE: {
+  terms: string | null;
+  privacy: string | null;
+  checkoutApproved: boolean;
+} = {
+  terms: 'terms-2026-09-v1',
+  privacy: 'privacy-2026-09-v1',
+  checkoutApproved: false,
 };
 
 export const legalReleaseMatchesConsent =

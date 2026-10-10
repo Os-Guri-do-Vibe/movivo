@@ -16,6 +16,7 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { LEGAL_LINKS } from '@/lib/landing/site';
+import { LEGAL_RELEASE } from '@/lib/legal-release';
 import { formatBRL, getCheckoutSummary, startCheckoutPayment } from '@/lib/subscription-api';
 
 import styles from './plan-selector.module.css';
@@ -100,7 +101,8 @@ function detectCardBrand(value: string): CardBrand | null {
 }
 
 export function PlanSelector({ token }: { token: string }) {
-  const legalDocumentsAvailable = Boolean(LEGAL_LINKS.terms && LEGAL_LINKS.privacy);
+  const legalDocumentsAvailable =
+    LEGAL_RELEASE.checkoutApproved && Boolean(LEGAL_LINKS.terms && LEGAL_LINKS.privacy);
   const [server, setServer] = React.useState<CheckoutSummary>();
   // Plano escolhido na tela: nasce no plano persistido (o da landing) e o aluno pode trocá-lo.
   const [selectedPlan, setSelectedPlan] = React.useState<SubscriptionPlanId>();
@@ -162,7 +164,7 @@ export function PlanSelector({ token }: { token: string }) {
     event.preventDefault();
     if (!summary) return;
     if (!legalDocumentsAvailable) {
-      setError('A contratação está indisponível enquanto os documentos legais são finalizados.');
+      setError('A contratação paga está indisponível durante o teste beta.');
       return;
     }
     setState('SUBMITTING');
@@ -497,7 +499,7 @@ export function PlanSelector({ token }: { token: string }) {
               )}
             </div>
 
-            {LEGAL_LINKS.terms && LEGAL_LINKS.privacy ? (
+            {legalDocumentsAvailable && LEGAL_LINKS.terms && LEGAL_LINKS.privacy ? (
               <div className={styles.terms}>
                 <label>
                   <input name="acceptTerms" type="checkbox" required />
@@ -517,8 +519,7 @@ export function PlanSelector({ token }: { token: string }) {
               </div>
             ) : (
               <p className={styles.error} role="status">
-                A contratação está temporariamente indisponível enquanto os documentos legais são
-                finalizados.
+                A contratação paga está temporariamente indisponível durante o teste beta.
               </p>
             )}
 

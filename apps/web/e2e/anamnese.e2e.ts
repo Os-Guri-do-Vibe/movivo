@@ -63,7 +63,7 @@ async function fillStep1(page: Page) {
   });
   await expect(page.getByText('✓ WhatsApp confirmado')).toBeVisible();
 
-  await expect(page.getByLabel(/Li e aceito os Termos/)).toHaveCount(0);
+  await page.getByLabel(/Li e aceito os Termos/).check();
   await page.getByLabel(/dados de saúde/).check();
   await page.getByLabel(/inteligência artificial/).check();
 
@@ -259,4 +259,20 @@ test('CTA com plano abre /anamnese limpa e "voltar" leva à landing no topo', as
   await heroCta.click();
   await expect(page.locator('#planos')).toBeInViewport();
   await expect(page.getByRole('heading', { name: 'Vamos começar por você' })).toHaveCount(0);
+});
+
+test('Termos e Privacidade beta abrem nas rotas públicas com pendências visíveis', async ({
+  page,
+}) => {
+  for (const [path, title] of [
+    ['/termos', 'Termos de Uso'],
+    ['/privacidade', 'Política de Privacidade'],
+  ] as const) {
+    const response = await page.goto(path);
+    expect(response?.status()).toBe(200);
+    await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', /noindex/);
+    await expect(page.getByRole('note')).toContainText('Versão beta para consulta');
+    await expect(page.getByRole('article', { name: title })).toContainText('[CNPJ]');
+  }
 });

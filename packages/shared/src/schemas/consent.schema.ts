@@ -16,7 +16,7 @@
  * jamais é inferido do aceite dos Termos.
  *
  * ## O que a Sprint 6 mudou (Alexandre §5.8)
- * - `TERMS_OF_SERVICE` → `terms-2026-08-v2` (passa a cobrir a entrega via WhatsApp e
+ * - `TERMS_OF_SERVICE` → versão integral exibida ao titular (cobre a entrega via WhatsApp e
  *   as finalidades de dado pessoal comum sob base contratual — art. 7º, V).
  * - `HEALTH_DATA` → `consent-health-2026-08-v3` (escopo ampliado: dor localizada,
  *   diagnóstico informado, acompanhamento, recomendação de evitação).
@@ -33,7 +33,7 @@ import { z } from 'zod';
 export const CONSENT_VERSIONS = {
   HEALTH_DATA: 'consent-health-2026-08-v3',
   MARKETING: 'consent-marketing-2026-08-v3',
-  TERMS_OF_SERVICE: 'terms-2026-08-v2',
+  TERMS_OF_SERVICE: 'terms-2026-09-v1',
   AI_DISCLOSURE: 'ai-disclosure-2026-08-v1',
 } as const;
 

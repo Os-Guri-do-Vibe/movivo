@@ -155,7 +155,9 @@ function makeService(state: TxState = {}) {
 
   const consents = {
     hasValidHealthConsent: vi.fn(() => Promise.resolve(true)),
-    acceptedTypesForSession: vi.fn(() => Promise.resolve(['HEALTH_DATA', 'AI_DISCLOSURE'])),
+    acceptedTypesForSession: vi.fn(() =>
+      Promise.resolve(['TERMS_OF_SERVICE', 'HEALTH_DATA', 'AI_DISCLOSURE']),
+    ),
     linkSessionToUser: vi.fn(() => Promise.resolve()),
   } as unknown as ConsentService;
 
@@ -233,7 +235,12 @@ describe('AnamnesisService — sessão e retomada', () => {
     // (o texto do consentimento cita "PAR-Q", então a asserção mira o CONTEÚDO: respostas.)
     expect(JSON.stringify(view)).not.toMatch(/questionId|answers|hasPain/);
     // Consentimentos vêm do backend, com texto e versão (Sofia §2.3) e nunca marcados.
-    expect(view.consents.map((c) => c.type)).toEqual(['HEALTH_DATA', 'AI_DISCLOSURE', 'MARKETING']);
+    expect(view.consents.map((c) => c.type)).toEqual([
+      'TERMS_OF_SERVICE',
+      'HEALTH_DATA',
+      'AI_DISCLOSURE',
+      'MARKETING',
+    ]);
     expect(view.consents.every((c) => c.version.length > 0)).toBe(true);
   });
 
@@ -279,6 +286,7 @@ describe('Etapa 1 — gate 18+, consentimentos e posse do número', () => {
     const { svc, consents } = makeService({ select: [sessionRow()] });
     (consents.acceptedTypesForSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
       'HEALTH_DATA',
+      'AI_DISCLOSURE',
     ]);
     await expect(svc.patchStep('t', 1, STEP1)).rejects.toThrow(/obrigatórios pendentes/i);
   });
@@ -416,7 +424,7 @@ describe('Etapa 3 — PAR-Q e declarações', () => {
 });
 
 describe('Submit — gate PAR-Q e outcome', () => {
-  it('conclui o cadastro sem aceite de termos ainda não publicados', async () => {
+  it('conclui o cadastro beta com os consentimentos obrigatórios registrados', async () => {
     const { svc, consents } = makeService({ select: [sessionRow()], insert: [{ id: 'user-1' }] });
     await expect(svc.submit('t')).resolves.toEqual({ status: 'SUBMITTED', outcome: 'READY' });
     expect(consents.linkSessionToUser).toHaveBeenCalledWith('sess-1', 'user-1');

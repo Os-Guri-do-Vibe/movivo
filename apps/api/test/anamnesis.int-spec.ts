@@ -71,14 +71,7 @@ const cipher = new HealthCipherService(db, {
     env.PGCRYPTO_KEY ??
     readFileSync(resolve(apiRoot, '..', '..', 'secrets', 'pgcrypto_key'), 'utf8').trimEnd(),
 } as never);
-// Fixture de integração para testar o registro de aceite contratual publicado,
-// sem habilitar as minutas no serviço real.
-class PublishedFixtureConsentService extends ConsentService {
-  protected override areTermsPublished(): boolean {
-    return true;
-  }
-}
-const consents = new PublishedFixtureConsentService(tenant);
+const consents = new ConsentService(tenant);
 const logger = {
   info: () => undefined,
   warn: () => undefined,

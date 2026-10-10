@@ -75,7 +75,7 @@ describe('ConsentService', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it('ignora aceite de Termos sem documentos publicados e deixa a inscrição seguir', async () => {
+  it('registra o aceite da versão beta exibida sem gate de aprovação jurídica', async () => {
     const { db, run, executed } = makeDb([{ id: SESSION }]);
     const svc = new ConsentService(db);
 
@@ -94,7 +94,7 @@ describe('ConsentService', () => {
       ),
     ).resolves.toBeUndefined();
     expect(run).toHaveBeenCalled();
-    expect(executed).toHaveLength(1);
+    expect(executed).toHaveLength(2);
   });
 
   it('preserva o registro independente de marketing e recusa dos Termos', async () => {
@@ -118,14 +118,18 @@ describe('ConsentService', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('não reconhece como vigente um aceite contratual histórico sem texto publicado', async () => {
+  it('reconhece o aceite da versão exibida e ignora versão antiga', async () => {
     const svc = new ConsentService(
       makeDb([
         { type: 'TERMS_OF_SERVICE', version: CONSENT_TEXTS.TERMS_OF_SERVICE.version },
         { type: 'HEALTH_DATA', version: CONSENT_TEXTS.HEALTH_DATA.version },
+        { type: 'TERMS_OF_SERVICE', version: 'terms-2026-08-v2' },
       ]).db,
     );
-    await expect(svc.acceptedTypesForSession(SESSION)).resolves.toEqual(['HEALTH_DATA']);
+    await expect(svc.acceptedTypesForSession(SESSION)).resolves.toEqual([
+      'TERMS_OF_SERVICE',
+      'HEALTH_DATA',
+    ]);
   });
 
   it('hasValidHealthConsent é false quando não há linha e true quando há', async () => {

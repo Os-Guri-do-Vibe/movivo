@@ -1,5 +1,5 @@
 <!-- MOVIVO_LEGAL_METADATA_START
-publication_status: DRAFT_BLOCKED
+publication_status: BETA_VISIBLE
 document_version: privacy-2026-09-v1
 drafted_on: 2026-09-29
 effective_on: PENDING
