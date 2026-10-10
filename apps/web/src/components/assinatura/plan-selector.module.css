@@ -1,6 +1,6 @@
 .checkoutGrid {
   display: grid;
-  grid-template-columns: minmax(0, 0.92fr) minmax(420px, 1.08fr);
+  grid-template-columns: minmax(0, 0.92fr) minmax(min(420px, 100%), 1.08fr);
   gap: 64px;
   align-items: start;
 }
@@ -547,7 +547,12 @@
   margin: 0 0 20px;
   color: var(--musgo);
 }
+.pixState {
+  min-width: 0;
+}
 .pixState img {
+  max-width: 100%;
+  height: auto;
   border: 10px solid var(--branco);
   border-radius: 18px;
   box-shadow: 0 10px 35px rgba(6, 48, 42, 0.12);
@@ -564,11 +569,13 @@
 .pixCode {
   display: flex;
   width: 100%;
+  min-width: 0;
   gap: 8px;
   margin-top: 20px;
 }
 .pixCode > span {
   overflow: hidden;
+  min-width: 0;
   flex: 1;
   padding: 12px;
   border-radius: 10px;
@@ -633,7 +640,8 @@
 
 @media (max-width: 900px) {
   .checkoutGrid {
-    grid-template-columns: 1fr;
+    /* `1fr` = minmax(auto, 1fr): um texto longo (código Pix) esticaria a página inteira. */
+    grid-template-columns: minmax(0, 1fr);
     gap: 24px;
   }
   .planColumn {
@@ -707,4 +715,47 @@
   .selectLabel select {
     transition: none;
   }
+}
+
+/* Selo de marca do checkout (substitui o subtítulo genérico). */
+.seal {
+  max-width: 520px;
+  margin: 18px 0 32px;
+  color: var(--musgo);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.fieldsTitle {
+  margin: 0 0 4px;
+  color: var(--musgo);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.secondaryActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  justify-content: center;
+  margin-top: 16px;
+}
+.secondaryActions button {
+  padding: 8px 4px;
+  border: 0;
+  color: var(--petroleo-vivo);
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.secondaryActions button:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: 2px;
 }

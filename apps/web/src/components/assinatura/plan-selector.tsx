@@ -16,10 +16,12 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { LEGAL_LINKS } from '@/lib/landing/site';
-import { LEGAL_RELEASE } from '@/lib/legal-release';
 import { formatBRL, getCheckoutSummary, startCheckoutPayment } from '@/lib/subscription-api';
 
 import styles from './plan-selector.module.css';
+
+/** Selo do checkout: a assinatura de marca da MOVIVO, definida pelos fundadores. */
+const SEAL = 'Treinos feitos para você. Tecnologia que potencializa. Ciência que orienta.';
 
 const METHODS: {
   id: PaymentMethodId;
@@ -27,28 +29,16 @@ const METHODS: {
   description: string;
   icon: React.ElementType;
 }[] = [
-  { id: 'CARD', label: 'Cartão', description: 'Crédito seguro', icon: CreditCard },
-  { id: 'PIX', label: 'Pix à vista', description: 'QR Code imediato', icon: QrCode },
-  {
-    id: 'PIX_AUTOMATIC',
-    label: 'Pix Automático',
-    description: 'Autorização no banco',
-    icon: RefreshCw,
-  },
+  { id: 'CARD', label: 'Cartão', description: 'Crédito, no ambiente do Asaas', icon: CreditCard },
+  { id: 'PIX', label: 'Pix à vista', description: 'QR Code na própria página', icon: QrCode },
 ];
 
-type CheckoutState = 'FORM' | 'SUBMITTING' | 'PENDING' | 'SUCCESS' | 'ERROR';
-type CardBrand = 'VISA' | 'MASTERCARD' | 'AMEX' | 'ELO' | 'HIPERCARD' | 'DISCOVER' | 'JCB';
+/** FORM → (Pix) PENDING | (cartão) REDIRECTING → volta do Asaas em CONFIRMING → SUCCESS. */
+type CheckoutState =
+  'FORM' | 'SUBMITTING' | 'PENDING' | 'REDIRECTING' | 'CONFIRMING' | 'SUCCESS' | 'ERROR';
 
-const CARD_BRAND_LABEL: Record<CardBrand, string> = {
-  VISA: 'Visa',
-  MASTERCARD: 'Mastercard',
-  AMEX: 'American Express',
-  ELO: 'Elo',
-  HIPERCARD: 'Hipercard',
-  DISCOVER: 'Discover',
-  JCB: 'JCB',
-};
+/** Quanto tempo a tela espera o webhook antes de avisar que a confirmação pode demorar. */
+const CONFIRMING_SLOW_MS = 90_000;
 
 const onlyDigits = (value: string, limit?: number) => value.replace(/\D/g, '').slice(0, limit);
 
@@ -72,49 +62,34 @@ function maskPostalCode(value: string): string {
   return digits.length <= 5 ? digits : `${digits.slice(0, 5)}-${digits.slice(5)}`;
 }
 
-function maskCardExpiry(value: string): string {
-  const digits = onlyDigits(value, 4);
-  return digits.length <= 2 ? digits : `${digits.slice(0, 2)}/${digits.slice(2)}`;
-}
-
-function detectCardBrand(value: string): CardBrand | null {
-  const digits = onlyDigits(value, 19);
-  if (!digits) return null;
-
-  // Elo compartilha prefixos com Visa e Discover, então precisa ser verificado primeiro.
-  if (
-    /^(401178|401179|431274|438935|451416|457393|457631|457632|504175|5066|5067|509|627780|636297|636368|65003|65004|65005|6504|6505|6507|6509|6516|6550)/.test(
-      digits,
-    )
-  )
-    return 'ELO';
-  if (/^(606282|3841)/.test(digits)) return 'HIPERCARD';
-  if (/^4/.test(digits)) return 'VISA';
-  if (/^3[47]/.test(digits)) return 'AMEX';
-  if (/^5[1-5]/.test(digits)) return 'MASTERCARD';
-
-  const firstFour = Number(digits.slice(0, 4));
-  if (digits.length >= 4 && firstFour >= 2221 && firstFour <= 2720) return 'MASTERCARD';
-  if (/^(6011|64[4-9]|65)/.test(digits)) return 'DISCOVER';
-  if (digits.length >= 4 && firstFour >= 3528 && firstFour <= 3589) return 'JCB';
-  return null;
+/** Lê e remove `?retorno=` (volta do Checkout do Asaas) sem recarregar a página. */
+function consumeReturnParam(): 'sucesso' | 'cancelado' | 'expirado' | null {
+  if (typeof window === 'undefined') return null;
+  const url = new URL(window.location.href);
+  const value = url.searchParams.get('retorno');
+  if (!value) return null;
+  url.searchParams.delete('retorno');
+  window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+  return value === 'sucesso' || value === 'cancelado' || value === 'expirado' ? value : null;
 }
 
 export function PlanSelector({ token }: { token: string }) {
-  const legalDocumentsAvailable =
-    LEGAL_RELEASE.checkoutApproved && Boolean(LEGAL_LINKS.terms && LEGAL_LINKS.privacy);
   const [server, setServer] = React.useState<CheckoutSummary>();
   // Plano escolhido na tela: nasce no plano persistido (o da landing) e o aluno pode trocá-lo.
   const [selectedPlan, setSelectedPlan] = React.useState<SubscriptionPlanId>();
   const [method, setMethod] = React.useState<PaymentMethodId>('CARD');
-  const [installments, setInstallments] = React.useState(1);
   const [state, setState] = React.useState<CheckoutState>('FORM');
   const [result, setResult] = React.useState<CheckoutPaymentResult>();
   const [lastBody, setLastBody] = React.useState<CreateCheckoutBody>();
   const [error, setError] = React.useState('');
+  const [notice, setNotice] = React.useState('');
   const [copied, setCopied] = React.useState(false);
   const [secondsLeft, setSecondsLeft] = React.useState<number>();
+  const [slowConfirmation, setSlowConfirmation] = React.useState(false);
+  // O próximo envio de cartão abre uma sessão nova (a anterior expirou ou foi abandonada).
   const [regenerateCard, setRegenerateCard] = React.useState(false);
+  const redirecting = React.useRef(false);
+  const paymentRef = React.useRef<HTMLElement>(null);
 
   const loadSummary = React.useCallback(
     async (initial = false) => {
@@ -124,10 +99,22 @@ export function PlanSelector({ token }: { token: string }) {
       setMethod((chosen) =>
         current.methods.includes(chosen) ? chosen : (current.methods[0] ?? chosen),
       );
-      if (current.status === 'ACTIVE') setState('SUCCESS');
-      else if (initial && current.status === 'PENDING_PAYMENT' && current.checkoutUrl) {
-        setResult({ status: 'PENDING', method: 'CARD', checkoutUrl: current.checkoutUrl });
-        setState('PENDING');
+      if (current.status === 'ACTIVE') {
+        setState('SUCCESS');
+      } else if (initial) {
+        const back = consumeReturnParam();
+        if (back === 'sucesso') {
+          setState('CONFIRMING');
+        } else if (back === 'expirado') {
+          setRegenerateCard(true);
+          setNotice('O tempo do pagamento seguro acabou. Gere um novo link para continuar.');
+        } else if (current.status === 'PENDING_PAYMENT' && current.checkoutUrl) {
+          setResult({ status: 'PENDING', method: 'CARD', checkoutUrl: current.checkoutUrl });
+          setState('PENDING');
+          if (back === 'cancelado') {
+            setNotice('Você saiu do pagamento seguro. Quando quiser, continue de onde parou.');
+          }
+        }
       }
       return current;
     },
@@ -138,10 +125,8 @@ export function PlanSelector({ token }: { token: string }) {
     () => (server ? summaryFor(server, selectedPlan ?? server.plan) : undefined),
     [server, selectedPlan],
   );
-
-  React.useEffect(() => {
-    if (summary) setInstallments((value) => Math.min(value, summary.maxInstallments));
-  }, [summary]);
+  // Sem os links dos documentos legais não há o que aceitar: o checkout não abre.
+  const checkoutOpen = Boolean(LEGAL_LINKS.terms && LEGAL_LINKS.privacy);
 
   React.useEffect(() => {
     loadSummary(true).catch(() => {
@@ -150,11 +135,25 @@ export function PlanSelector({ token }: { token: string }) {
     });
   }, [loadSummary]);
 
+  // Pix pendente ou volta do Asaas: pergunta ao servidor até o webhook confirmar o pagamento.
   React.useEffect(() => {
-    if (state !== 'PENDING') return;
+    if (state !== 'PENDING' && state !== 'CONFIRMING') return;
     const timer = window.setInterval(() => void loadSummary().catch(() => undefined), 3_000);
     return () => window.clearInterval(timer);
   }, [loadSummary, state]);
+
+  // No celular o pagamento fica abaixo do plano: ao gerar o Pix (ou voltar do Asaas), leva o aluno até ele.
+  React.useEffect(() => {
+    if (state === 'FORM' || state === 'SUBMITTING' || state === 'ERROR') return;
+    paymentRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+  }, [state]);
+
+  React.useEffect(() => {
+    if (state !== 'CONFIRMING') return;
+    setSlowConfirmation(false);
+    const timer = window.setTimeout(() => setSlowConfirmation(true), CONFIRMING_SLOW_MS);
+    return () => window.clearTimeout(timer);
+  }, [state]);
 
   React.useEffect(() => {
     const expiration = result?.qrCode?.expirationDate;
@@ -171,17 +170,24 @@ export function PlanSelector({ token }: { token: string }) {
     return () => window.clearInterval(timer);
   }, [result?.qrCode?.expirationDate]);
 
+  function backToForm() {
+    setResult(undefined);
+    setNotice('');
+    setError('');
+    setState('FORM');
+  }
+
   async function submit(event: React.FormEvent<HTMLFormElement>, regenerate = false) {
     event.preventDefault();
     if (!summary) return;
-    if (!legalDocumentsAvailable) {
-      setError('A contratação paga está indisponível durante o teste beta.');
+    if (!checkoutOpen) {
+      setError('A contratação paga está indisponível no momento.');
       return;
     }
     setState('SUBMITTING');
     setError('');
+    setNotice('');
     const data = new FormData(event.currentTarget);
-    const expiry = onlyDigits(String(data.get('cardExpiry') ?? ''), 4);
     const payer: CheckoutPayer = {
       name: String(data.get('name') ?? ''),
       email: String(data.get('email') ?? ''),
@@ -192,42 +198,46 @@ export function PlanSelector({ token }: { token: string }) {
       phone: onlyDigits(String(data.get('phone') ?? ''), 11),
     };
     try {
-      const body =
+      // O cartão nunca é digitado aqui: só o Asaas o recebe, na página dele.
+      const body: CreateCheckoutBody =
         method === 'CARD'
           ? {
               method,
-              ...(summary.hostedCard ? {} : { payer }),
-              ...(summary.hostedCard
-                ? {}
-                : {
-                    card: {
-                      holderName: String(data.get('holderName') ?? ''),
-                      number: onlyDigits(String(data.get('cardNumber') ?? ''), 19),
-                      expiryMonth: expiry.slice(0, 2),
-                      expiryYear: expiry.length === 4 ? `20${expiry.slice(2)}` : '',
-                      ccv: onlyDigits(String(data.get('ccv') ?? ''), 4),
-                    },
-                  }),
-              installments: summary.hostedCard ? summary.maxInstallments : installments,
-              ...(summary.hostedCard && regenerateCard ? { regenerate: true } : {}),
-              acceptTerms: true as const,
+              payer,
+              installments: summary.maxInstallments,
+              acceptTerms: true,
               plan: summary.plan,
+              ...(regenerateCard ? { regenerate: true } : {}),
             }
-          : { method, payer, acceptTerms: true as const, regenerate, plan: summary.plan };
+          : { method: 'PIX', payer, acceptTerms: true, regenerate, plan: summary.plan };
       setLastBody(body);
       const next = await startCheckoutPayment(token, body);
       setResult(next);
       setRegenerateCard(false);
+      if (next.checkoutUrl) {
+        openHostedCheckout(next.checkoutUrl);
+        return;
+      }
       setState(next.status === 'REFUSED' || next.status === 'EXPIRED' ? 'ERROR' : 'PENDING');
       if (next.status === 'REFUSED') setError('O pagamento não foi aprovado. Revise os dados.');
     } catch (cause) {
       setError(
         cause instanceof Error && cause.message.endsWith('_409')
           ? 'Já existe uma tentativa em processamento. Aguarde alguns segundos.'
-          : 'Não foi possível iniciar o pagamento. Revise os dados e tente novamente.',
+          : cause instanceof Error && cause.message.endsWith('_400')
+            ? 'Revise os dados informados e tente novamente.'
+            : 'Não foi possível iniciar o pagamento. Tente novamente em instantes.',
       );
       setState('ERROR');
     }
+  }
+
+  /** Leva o aluno ao Checkout hospedado do Asaas, na mesma aba (melhor no navegador do WhatsApp). */
+  function openHostedCheckout(url: string) {
+    setState('REDIRECTING');
+    if (redirecting.current) return;
+    redirecting.current = true;
+    window.location.assign(url);
   }
 
   async function copyPix() {
@@ -268,15 +278,20 @@ export function PlanSelector({ token }: { token: string }) {
   }
 
   const expired = secondsLeft === 0;
+  const waitingForAsaas = state === 'REDIRECTING' || state === 'CONFIRMING';
+  const repurchaseAt = server?.repurchaseAt ? new Date(server.repurchaseAt) : null;
 
   return (
     <form className={styles.checkoutGrid} onSubmit={submit} noValidate={false}>
       <section className={styles.planColumn} aria-labelledby="checkout-title">
         <p className={styles.eyebrow}>Seu plano MOVIVO</p>
         <h1 id="checkout-title">Seu próximo passo começa aqui.</h1>
-        <p className={styles.subtitle}>Escolha como deseja continuar sua evolução.</p>
+        <p className={styles.seal}>{SEAL}</p>
 
-        <fieldset className={styles.planPicker} disabled={state === 'SUBMITTING'}>
+        <fieldset
+          className={styles.planPicker}
+          disabled={state === 'SUBMITTING' || waitingForAsaas}
+        >
           <legend>Escolha seu plano</legend>
           {SUBSCRIPTION_PLANS.map((option) => (
             <label
@@ -292,10 +307,8 @@ export function PlanSelector({ token }: { token: string }) {
                 onChange={() => {
                   setSelectedPlan(option.id);
                   setError('');
-                  if (state === 'ERROR' || state === 'PENDING') {
-                    setResult(undefined);
-                    setState('FORM');
-                  }
+                  // Trocou de plano com um pagamento aberto: o valor mudou, então volta ao formulário.
+                  if (state === 'ERROR' || state === 'PENDING') backToForm();
                 }}
               />
               <span className={styles.planOptionText}>
@@ -350,34 +363,47 @@ export function PlanSelector({ token }: { token: string }) {
             <Check aria-hidden="true" /> Acompanhamento pelo WhatsApp
           </li>
           <li>
-            <Check aria-hidden="true" /> Supervisão de profissional CREF
+            <Check aria-hidden="true" /> Cancele quando quiser, sem burocracia
           </li>
         </ul>
       </section>
 
-      <section className={styles.paymentCard} aria-labelledby="payment-title">
+      <section ref={paymentRef} className={styles.paymentCard} aria-labelledby="payment-title">
         {state === 'SUCCESS' ? (
           <Success />
+        ) : waitingForAsaas ? (
+          <Waiting
+            confirming={state === 'CONFIRMING'}
+            slow={slowConfirmation}
+            checkoutUrl={result?.checkoutUrl}
+          />
         ) : result?.checkoutUrl && state === 'PENDING' ? (
           <div className={styles.methodNotice} role="status">
-            <h2 id="payment-title">Finalize no Asaas</h2>
+            <h2 id="payment-title">Finalize o pagamento</h2>
+            {notice ? <p>{notice}</p> : null}
             <p>
-              Os dados do cartão são informados na página segura do Asaas. O acesso será ativado
-              após a confirmação do pagamento.
+              O pagamento com cartão está em andamento no ambiente seguro do Asaas. Seu acesso é
+              liberado assim que ele for confirmado.
             </p>
-            <a href={result.checkoutUrl} rel="noopener noreferrer">
-              Ir para o pagamento seguro
-            </a>
-            <button
-              type="button"
-              onClick={() => {
-                setRegenerateCard(true);
-                setResult(undefined);
-                setState('FORM');
-              }}
-            >
-              Gerar novo link de pagamento
-            </button>
+            <Button asChild size="lg" className={styles.submit}>
+              <a href={result.checkoutUrl} rel="noopener noreferrer">
+                Continuar para o pagamento seguro
+              </a>
+            </Button>
+            <div className={styles.secondaryActions}>
+              <button
+                type="button"
+                onClick={() => {
+                  setRegenerateCard(true);
+                  backToForm();
+                }}
+              >
+                Gerar novo link de pagamento
+              </button>
+              <button type="button" onClick={backToForm}>
+                Escolher outra forma de pagamento
+              </button>
+            </div>
           </div>
         ) : result?.qrCode && state === 'PENDING' ? (
           <PixPending
@@ -386,7 +412,16 @@ export function PlanSelector({ token }: { token: string }) {
             copied={copied}
             onCopy={copyPix}
             onRegenerate={expired ? () => void regeneratePix() : undefined}
+            onChangeMethod={backToForm}
           />
+        ) : repurchaseAt ? (
+          <div className={styles.methodNotice} role="status">
+            <h2 id="payment-title">Sua assinatura foi cancelada</h2>
+            <p>
+              Seu acesso segue até {repurchaseAt.toLocaleDateString('pt-BR')}. Você poderá assinar
+              novamente a partir dessa data.
+            </p>
+          </div>
         ) : (
           <>
             <div className={styles.secureTitle}>
@@ -431,128 +466,82 @@ export function PlanSelector({ token }: { token: string }) {
             </fieldset>
 
             <div className={styles.fields}>
-              {!(method === 'CARD' && summary.hostedCard) ? (
-                <>
-                  <Field name="name" label="Nome completo" autoComplete="name" />
-                  <Field name="email" label="E-mail" type="email" autoComplete="email" />
-                  <div className={styles.twoColumns}>
-                    <Field
-                      name="cpfCnpj"
-                      label="CPF"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      placeholder="000.000.000-00"
-                      pattern="[0-9]{3}[.][0-9]{3}[.][0-9]{3}-[0-9]{2}"
-                      minLength={14}
-                      maxLength={14}
-                      mask={maskCpf}
-                    />
-                    <Field
-                      name="phone"
-                      label="Celular"
-                      inputMode="tel"
-                      autoComplete="tel"
-                      placeholder="(00) 90000-0000"
-                      pattern="[(][0-9]{2}[)] 9[0-9]{4}-[0-9]{4}"
-                      minLength={15}
-                      maxLength={15}
-                      mask={maskPhone}
-                    />
-                  </div>
-                  <div className={styles.addressRow}>
-                    <Field
-                      name="postalCode"
-                      label="CEP"
-                      inputMode="numeric"
-                      autoComplete="postal-code"
-                      placeholder="00000-000"
-                      pattern="[0-9]{5}-[0-9]{3}"
-                      minLength={9}
-                      maxLength={9}
-                      mask={maskPostalCode}
-                    />
-                    <Field name="addressNumber" label="Número" autoComplete="address-line2" />
-                    <Field
-                      name="addressComplement"
-                      label="Complemento"
-                      required={false}
-                      autoComplete="address-line3"
-                    />
-                  </div>
-                </>
-              ) : null}
+              <p className={styles.fieldsTitle}>Seus dados</p>
+              <Field name="name" label="Nome completo" autoComplete="name" />
+              <Field name="email" label="E-mail" type="email" autoComplete="email" />
+              <div className={styles.twoColumns}>
+                <Field
+                  name="cpfCnpj"
+                  label="CPF"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  placeholder="000.000.000-00"
+                  pattern="[0-9]{3}[.][0-9]{3}[.][0-9]{3}-[0-9]{2}"
+                  minLength={14}
+                  maxLength={14}
+                  mask={maskCpf}
+                />
+                <Field
+                  name="phone"
+                  label="Celular"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder="(00) 90000-0000"
+                  pattern="\([0-9]{2}\) 9[0-9]{4}-[0-9]{4}"
+                  minLength={15}
+                  maxLength={15}
+                  mask={maskPhone}
+                />
+              </div>
+              <div className={styles.addressRow}>
+                <Field
+                  name="postalCode"
+                  label="CEP"
+                  inputMode="numeric"
+                  autoComplete="postal-code"
+                  placeholder="00000-000"
+                  pattern="[0-9]{5}-[0-9]{3}"
+                  minLength={9}
+                  maxLength={9}
+                  mask={maskPostalCode}
+                />
+                <Field name="addressNumber" label="Número" autoComplete="address-line2" />
+                <Field
+                  name="addressComplement"
+                  label="Complemento"
+                  required={false}
+                  autoComplete="address-line3"
+                />
+              </div>
 
-              {method === 'CARD' && summary.hostedCard ? (
+              {method === 'CARD' ? (
                 <div className={styles.methodNotice} key="hosted-card">
                   <strong>Cartão no ambiente seguro do Asaas</strong>
                   <p>
                     {summary.months === 1
-                      ? 'Cobrança mensal recorrente, até o cancelamento.'
-                      : `Valor total de ${formatBRL(summary.totalCents)}, parcelável em até ${summary.maxInstallments} vezes no Asaas.`}
-                  </p>
-                </div>
-              ) : method === 'CARD' ? (
-                <div className={styles.contextFields} key="card">
-                  <Field name="holderName" label="Nome impresso no cartão" autoComplete="cc-name" />
-                  <CardNumberField />
-                  <div className={styles.cardRow}>
-                    <Field
-                      name="cardExpiry"
-                      label="Validade"
-                      inputMode="numeric"
-                      autoComplete="cc-exp"
-                      placeholder="MM/AA"
-                      pattern="(0[1-9]|1[0-2])/[0-9]{2}"
-                      minLength={5}
-                      maxLength={5}
-                      mask={maskCardExpiry}
-                    />
-                    <Field
-                      name="ccv"
-                      label="CVV"
-                      inputMode="numeric"
-                      autoComplete="cc-csc"
-                      minLength={3}
-                      maxLength={4}
-                    />
-                  </div>
-                  <label className={styles.selectLabel}>
-                    Parcelas
-                    <select
-                      value={installments}
-                      onChange={(event) => setInstallments(Number(event.target.value))}
-                    >
-                      {Array.from({ length: summary.maxInstallments }, (_, index) => index + 1).map(
-                        (count) => (
-                          <option key={count} value={count}>
-                            {installmentOption(summary.totalCents, count)}
-                          </option>
-                        ),
-                      )}
-                    </select>
-                  </label>
-                </div>
-              ) : method === 'PIX_AUTOMATIC' ? (
-                <div className={styles.methodNotice} key="auto">
-                  <strong>Autorize no app do seu banco</strong>
-                  <p>
-                    {summary.months} {summary.months === 1 ? 'débito mensal' : 'débitos mensais'} de{' '}
-                    {formatBRL(summary.monthlyCents)}. A autorização termina com o período
-                    contratado.
+                      ? 'Cobrança mensal recorrente no cartão, até você cancelar. '
+                      : `Valor total de ${formatBRL(summary.totalCents)}, parcelável em até ${summary.maxInstallments}x. `}
+                    Você digita os dados do cartão na página do Asaas, e a MOVIVO nunca os vê.
                   </p>
                 </div>
               ) : (
                 <div className={styles.methodNotice} key="pix">
                   <strong>Pix à vista</strong>
                   <p>
-                    Você pagará {formatBRL(summary.totalCents)} por QR Code. O acesso só é ativado
-                    após a confirmação bancária.
+                    Você pagará {formatBRL(summary.totalCents)} por QR Code, sem sair desta página.
+                    O acesso é liberado após a confirmação do seu banco.
                   </p>
                 </div>
               )}
             </div>
 
-            {legalDocumentsAvailable && LEGAL_LINKS.terms && LEGAL_LINKS.privacy ? (
+            {notice ? (
+              <p className={styles.error} role="status">
+                {notice}
+              </p>
+            ) : null}
+
+            {checkoutOpen ? (
               <div className={styles.terms}>
                 <label>
                   <input name="acceptTerms" type="checkbox" required />
@@ -560,11 +549,19 @@ export function PlanSelector({ token }: { token: string }) {
                 </label>
                 <p>
                   Consulte os{' '}
-                  <a href={LEGAL_LINKS.terms} target="_blank" rel="noopener noreferrer">
+                  <a
+                    href={LEGAL_LINKS.terms ?? '/termos'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
                     Termos de Uso
                   </a>{' '}
                   e a{' '}
-                  <a href={LEGAL_LINKS.privacy} target="_blank" rel="noopener noreferrer">
+                  <a
+                    href={LEGAL_LINKS.privacy ?? '/privacidade'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
                     Política de Privacidade
                   </a>{' '}
                   antes de confirmar.
@@ -585,7 +582,7 @@ export function PlanSelector({ token }: { token: string }) {
             <Button
               className={styles.submit}
               size="lg"
-              disabled={state === 'SUBMITTING' || !legalDocumentsAvailable}
+              disabled={state === 'SUBMITTING' || !checkoutOpen}
             >
               {state === 'SUBMITTING' ? 'Processando com segurança…' : ctaLabel(method)}
             </Button>
@@ -593,12 +590,8 @@ export function PlanSelector({ token }: { token: string }) {
               {method === 'CARD'
                 ? summary.months === 1
                   ? `${formatBRL(summary.monthlyCents)} por mês, até o cancelamento`
-                  : summary.hostedCard
-                    ? `Até ${summary.maxInstallments}x no Asaas · total ${formatBRL(summary.totalCents)}`
-                    : `${installmentOption(summary.totalCents, installments)} · total exato ${formatBRL(summary.totalCents)}`
-                : method === 'PIX'
-                  ? `Cobrança única de ${formatBRL(summary.totalCents)}`
-                  : `${summary.months} cobrança${summary.months === 1 ? '' : 's'} de ${formatBRL(summary.monthlyCents)}`}
+                  : `Até ${summary.maxInstallments}x no cartão · total ${formatBRL(summary.totalCents)}`
+                : `Cobrança única de ${formatBRL(summary.totalCents)}`}
             </p>
           </>
         )}
@@ -632,77 +625,27 @@ function Field({
   );
 }
 
-function CardNumberField() {
-  const [brand, setBrand] = React.useState<CardBrand | null>(null);
-
-  return (
-    <label className={styles.field}>
-      <span>Número do cartão *</span>
-      <span className={styles.cardNumberControl}>
-        <input
-          name="cardNumber"
-          required
-          inputMode="numeric"
-          autoComplete="cc-number"
-          minLength={13}
-          maxLength={19}
-          onChange={(event) => {
-            event.currentTarget.value = onlyDigits(event.currentTarget.value, 19);
-            setBrand(detectCardBrand(event.currentTarget.value));
-          }}
-        />
-        <CardBrandMark brand={brand} />
-      </span>
-    </label>
-  );
-}
-
-function CardBrandMark({ brand }: { brand: CardBrand | null }) {
-  if (!brand) {
-    return (
-      <span className={`${styles.cardBrand} ${styles.cardBrandGeneric}`} aria-hidden="true">
-        <CreditCard />
-      </span>
-    );
-  }
-
-  return (
-    <span
-      className={`${styles.cardBrand} ${styles[`cardBrand${brand}`]}`}
-      role="status"
-      aria-label={`Bandeira ${CARD_BRAND_LABEL[brand]} detectada`}
-    >
-      {brand === 'MASTERCARD' ? (
-        <span className={styles.mastercardMark} aria-hidden="true">
-          <i />
-          <i />
-        </span>
-      ) : (
-        <span aria-hidden="true">{brand === 'HIPERCARD' ? 'HIPER' : brand}</span>
-      )}
-    </span>
-  );
-}
-
 function PixPending({
   result,
   secondsLeft,
   copied,
   onCopy,
   onRegenerate,
+  onChangeMethod,
 }: {
   result: CheckoutPaymentResult;
   secondsLeft?: number;
   copied: boolean;
   onCopy: () => void;
   onRegenerate?: () => void;
+  onChangeMethod: () => void;
 }) {
   const qr = result.qrCode;
   if (!qr) return null;
   return (
     <div className={styles.pixState} aria-live="polite">
       <span className={styles.pendingPulse} aria-hidden="true" />
-      <h2>{result.method === 'PIX_AUTOMATIC' ? 'Autorize o Pix Automático' : 'Pague com Pix'}</h2>
+      <h2 id="payment-title">Pague com Pix</h2>
       <p>Aguardando confirmação segura do seu banco.</p>
       <Image
         src={`data:image/png;base64,${qr.encodedImage}`}
@@ -727,6 +670,49 @@ function PixPending({
           Gerar novo QR Code
         </Button>
       ) : null}
+      <div className={styles.secondaryActions}>
+        <button type="button" onClick={onChangeMethod}>
+          Pagar com cartão
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Aguardando o Asaas: indo para a página dele (cartão) ou confirmando o pagamento na volta. */
+function Waiting({
+  confirming,
+  slow,
+  checkoutUrl,
+}: {
+  confirming: boolean;
+  slow: boolean;
+  checkoutUrl?: string;
+}) {
+  return (
+    <div className={styles.pixState} role="status" aria-live="polite">
+      <span className={styles.pendingPulse} aria-hidden="true" />
+      <h2 id="payment-title">
+        {confirming ? 'Confirmando seu pagamento…' : 'Abrindo o pagamento seguro…'}
+      </h2>
+      {confirming ? (
+        <p>
+          {slow
+            ? 'A confirmação do banco está demorando um pouco. Pode fechar esta página: você receberá uma mensagem no WhatsApp assim que o pagamento for confirmado.'
+            : 'Estamos aguardando a confirmação do Asaas. Isso costuma levar poucos segundos.'}
+        </p>
+      ) : (
+        <>
+          <p>Você será levado ao ambiente seguro do Asaas para digitar os dados do cartão.</p>
+          {checkoutUrl ? (
+            <Button asChild size="lg" className={styles.submit}>
+              <a href={checkoutUrl} rel="noopener noreferrer">
+                Se nada acontecer, toque aqui
+              </a>
+            </Button>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
@@ -737,16 +723,14 @@ function Success() {
       <span>
         <Check aria-hidden="true" />
       </span>
-      <h2>Pagamento confirmado</h2>
+      <h2 id="payment-title">Pagamento confirmado</h2>
       <p>Seu acesso está ativo. A confirmação também será enviada pelo WhatsApp.</p>
     </div>
   );
 }
 
 function ctaLabel(method: PaymentMethodId) {
-  if (method === 'PIX') return 'Pagar com Pix';
-  if (method === 'PIX_AUTOMATIC') return 'Autorizar Pix Automático';
-  return 'Confirmar assinatura';
+  return method === 'PIX' ? 'Gerar Pix' : 'Continuar para o pagamento seguro';
 }
 
 /**
@@ -769,8 +753,6 @@ function summaryFor(server: CheckoutSummary, plan: SubscriptionPlanId): Checkout
 }
 
 function paymentExplanation(method: PaymentMethodId, summary: CheckoutSummary): string {
-  if (method === 'PIX_AUTOMATIC')
-    return `${summary.months}x mensais de ${formatBRL(summary.monthlyCents)}`;
   if (method === 'PIX') return `${formatBRL(summary.totalCents)} à vista`;
   return summary.months === 1
     ? `${formatBRL(summary.monthlyCents)} mensal recorrente`
@@ -782,16 +764,14 @@ function renewalExplanation(method: PaymentMethodId, summary: CheckoutSummary): 
   return 'Não renova sem nova autorização';
 }
 
-function installmentOption(totalCents: number, count: number): string {
-  const baseCents = Math.floor(totalCents / count);
-  const remainderCents = totalCents - baseCents * count;
-  return remainderCents === 0
-    ? `${count}x de ${formatBRL(baseCents)} sem juros`
-    : `${count}x a partir de ${formatBRL(baseCents)} sem juros (última ajustada)`;
-}
-
 function formatDuration(seconds?: number): string {
   if (seconds === undefined) return '—';
+  // Acima de uma hora, "2673:52" não diz nada: mostra horas e minutos.
+  if (seconds >= 3_600) {
+    const hours = Math.floor(seconds / 3_600);
+    const minutes = Math.floor((seconds % 3_600) / 60);
+    return `${hours} h ${minutes.toString().padStart(2, '0')} min`;
+  }
   const minutes = Math.floor(seconds / 60)
     .toString()
     .padStart(2, '0');

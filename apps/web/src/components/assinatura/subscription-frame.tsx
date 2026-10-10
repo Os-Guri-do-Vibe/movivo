@@ -38,6 +38,7 @@ export function SubscriptionFrame({
       <footer className={styles.footer}>
         <p>{footerLead}</p>
         <nav aria-label="Links legais e suporte">
+          <Link href="/conta">Gerenciar ou cancelar assinatura</Link>
           {CONTACT_URL ? <a href={CONTACT_URL}>Suporte</a> : null}
           {LEGAL_LINKS.terms ? <a href={LEGAL_LINKS.terms}>Termos</a> : null}
           {LEGAL_LINKS.privacy ? <a href={LEGAL_LINKS.privacy}>Privacidade</a> : null}
