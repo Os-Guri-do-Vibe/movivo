@@ -68,15 +68,15 @@ healthy() {
 }
 # O api-tls compartilha a rede da API e o Nginx guarda o endereço do upstream: sem isto a API pública cai em 502.
 resync_proxy() {
-  docker compose --env-file .env -f compose.yml up -d --no-deps --force-recreate --wait --wait-timeout 60 api-tls >/dev/null 2>&1 \
-    && docker compose --env-file .env -f compose.yml exec -T nginx nginx -s reload >/dev/null 2>&1
+  docker compose --env-file .env -f compose.yml -f compose.override.yml up -d --no-deps --force-recreate --wait --wait-timeout 60 api-tls >/dev/null 2>&1 \
+    && docker compose --env-file .env -f compose.yml -f compose.override.yml exec -T nginx nginx -s reload >/dev/null 2>&1
 }
-if docker compose --env-file .env -f compose.yml up -d --no-deps --force-recreate api >/dev/null 2>&1 && healthy && resync_proxy; then
+if docker compose --env-file .env -f compose.yml -f compose.override.yml up -d --no-deps --force-recreate api >/dev/null 2>&1 && healthy && resync_proxy; then
   echo 'Nova credencial validada e API saudável. Revogue a anterior no console do fornecedor.'
 else
   chmod 644 "$previous"
   mv "$previous" "secrets/$key"
-  docker compose --env-file .env -f compose.yml up -d --no-deps --force-recreate api >/dev/null 2>&1 || true
+  docker compose --env-file .env -f compose.yml -f compose.override.yml up -d --no-deps --force-recreate api >/dev/null 2>&1 || true
   resync_proxy || true
   if healthy; then
     echo 'Atualização falhou; credencial anterior restaurada. Não revogue a anterior.' >&2
