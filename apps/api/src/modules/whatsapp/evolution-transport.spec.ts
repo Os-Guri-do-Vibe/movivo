@@ -16,6 +16,50 @@ function mockConnectedSendFlow() {
     .mockResolvedValueOnce(new Response(null, { status: 200 }));
 }
 
+describe('EvolutionHttpTransport.fetchProfilePictureUrl (aba "Conversas")', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('POST /chat/fetchProfilePictureUrl/{instance} com o número sem "+" e devolve a URL', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ name: 'movivo' }]), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ wuid: 'x', profilePictureUrl: 'https://pps.whatsapp.net/a.jpg' }),
+          {
+            status: 200,
+          },
+        ),
+      );
+    const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger);
+    await expect(t.fetchProfilePictureUrl('+5511999999999')).resolves.toBe(
+      'https://pps.whatsapp.net/a.jpg',
+    );
+    const [url, init] = fetchSpy.mock.calls[1] ?? [];
+    expect(url).toBe('http://localhost:8081/chat/fetchProfilePictureUrl/movivo');
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({ number: '5511999999999' });
+  });
+
+  it('sem foto, erro do provedor ou sem credencial: null, sem lançar', async () => {
+    const noKey = new EvolutionHttpTransport('http://localhost:8081', undefined, logger);
+    await expect(noKey.fetchProfilePictureUrl('+5511999999999')).resolves.toBeNull();
+
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ name: 'movivo' }]), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ profilePictureUrl: null }), { status: 200 }),
+      );
+    const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger);
+    await expect(t.fetchProfilePictureUrl('+5511999999999')).resolves.toBeNull();
+
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ name: 'movivo' }]), { status: 200 }))
+      .mockResolvedValueOnce(new Response('nope', { status: 500 }));
+    const t2 = new EvolutionHttpTransport('http://localhost:8081', 'k', logger);
+    await expect(t2.fetchProfilePictureUrl('+5511999999999')).resolves.toBeNull();
+  });
+});
+
 describe('EvolutionHttpTransport (painel "Sistema → Integração")', () => {
   it('sem credencial: hasCredentials=false', () => {
     const t = new EvolutionHttpTransport('http://localhost:8081', undefined, logger);
