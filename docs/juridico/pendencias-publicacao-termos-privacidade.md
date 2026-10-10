@@ -1,13 +1,13 @@
-# Pendências de publicação — Termos de Uso e Política de Privacidade
+# Pendências de homologação — Termos de Uso e Política de Privacidade
 
 **Data da revisão:** 29/09/2026
 
 **Minutas:** `terms-2026-09-v1` e `privacy-2026-09-v1`
-**Status:** `DRAFT_BLOCKED` — conteúdo para revisão, sem vigência e sem aceite novo.
+**Status:** `BETA_VISIBLE` — textos integrais disponíveis para consulta e aceite no cadastro beta, com pendências identificadas e sem vigência comercial definitiva.
 
 ## Resumo executivo e nível de risco
 
-As duas minutas cobrem o Serviço e o checkout atuais, mas nenhum texto contratual torna a MOVIVO imune a reclamações ou fiscalização. O risco de publicar como contrato vigente **antes de identificar a prestadora e validar a operação CREF/LGPD é crítico**. O status das minutas deve continuar `DRAFT_BLOCKED` até todos os itens abaixo terem evidência e aprovação.
+As duas minutas cobrem o Serviço e o checkout atuais, mas nenhum texto contratual torna a MOVIVO imune a reclamações ou fiscalização. O risco de apresentá-las como contrato definitivamente homologado **antes de identificar a prestadora e validar a operação CREF/LGPD é crítico**. Por decisão dos fundadores, as versões beta ficam visíveis com aviso explícito das pendências; o status `APPROVED` continua condicionado às validações abaixo.
 
 ## Identificação e responsabilidade profissional
 
@@ -18,7 +18,7 @@ As duas minutas cobrem o Serviço e o checkout atuais, mas nenhum texto contratu
 
 ## Prova contratual, checkout e cancelamento
 
-- [ ] Arquivar e disponibilizar o texto integral da versão aceita. O sistema aponta hoje para `terms-2026-08-v2`, mas este identificador não corresponde a Termos de Uso integrais existentes. **Não reescrever o passado:** criar `terms-2026-09-v1` após aprovação e registrar nova ciência com a versão exata; vincular a Política `privacy-2026-09-v1` à evidência de exibição.
+- [x] Disponibilizar o texto integral beta `terms-2026-09-v1` e vincular `privacy-2026-09-v1` à tela de aceite. **Não reescrever o passado:** após a revisão final, criar uma nova versão para o texto aprovado e colher novo aceite quando necessário.
 - [ ] O checkout grava `sub-terms-2026-08-v1` e exige aceite de “Termos de Assinatura vigentes” sem documento integral identificado. Antes de receber cobrança real, exibir e versionar as condições comerciais integrais da seção 6–7 destes Termos ou criar documento próprio de assinatura; persistir qual texto foi exibido e aceito. O rótulo existente não é prova suficiente do conteúdo.
 - [ ] Confirmar se o pagamento em produção usa Asaas, quais métodos estão homologados, como cada contrato renova, qual informação aparece antes de pagar e como o cliente recebe comprovante. Conferir preço total, parcelamento, Pix à vista versus Pix Automático, cancelamento e arrependimento em cada método. O catálogo vigente tem mensal, trimestral, semestral e anual; valores derivados de `packages/shared/src/schemas/subscription.schema.ts`.
 - [ ] Validar o fluxo real do link individual `/conta/[token]` de cancelamento, reenvio de link e canal de atendimento; oferecer cancelamento eletrônico simples e comprovante. O caminho genérico `/conta` não existe.
@@ -34,8 +34,8 @@ As duas minutas cobrem o Serviço e o checkout atuais, mas nenhum texto contratu
 ## Publicação
 
 - [ ] Definir data de vigência, substituir todos os campos `[...]` e conferir que não restam informações fictícias ou indeterminadas.
-- [ ] Alterar `publication_status` para `APPROVED` somente após evidência escrita das validações acima; então disponibilizar o conteúdo integral em rotas públicas ligadas à landing page, anamnese, checkout, área de conta e mensagens relevantes.
-- [ ] Testar os links `/termos` e `/privacidade`, acessibilidade, leitura móvel, histórico de versões e que novos aceites registram as versões publicadas. Manter minutas inacessíveis como contrato enquanto `DRAFT_BLOCKED`.
+- [ ] Alterar `publication_status` para `APPROVED` somente após evidência escrita das validações acima; publicar nova versão aprovada nas rotas públicas, checkout, área de conta e mensagens relevantes.
+- [ ] Testar os links `/termos` e `/privacidade`, acessibilidade, leitura móvel, histórico de versões e que novos aceites registram as versões exibidas. Manter o aviso de pendências enquanto `BETA_VISIBLE`.
 
 ## Fundamentação e fontes oficiais
 

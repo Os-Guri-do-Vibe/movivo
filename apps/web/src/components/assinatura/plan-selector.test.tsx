@@ -14,9 +14,13 @@ vi.mock('@/lib/subscription-api', () => ({
 vi.mock('@/lib/landing/site', () => ({
   LEGAL_LINKS: { terms: '/termos', privacy: '/privacidade' },
 }));
+vi.mock('@/lib/legal-release', () => ({
+  LEGAL_RELEASE: { checkoutApproved: true },
+}));
 
 import { PlanSelector } from './plan-selector';
 import { LEGAL_LINKS } from '@/lib/landing/site';
+import { LEGAL_RELEASE } from '@/lib/legal-release';
 
 const SUMMARY = {
   plan: 'ANNUAL',
@@ -43,16 +47,18 @@ async function fillPayer(user: ReturnType<typeof userEvent.setup>) {
 beforeEach(() => {
   LEGAL_LINKS.terms = '/termos';
   LEGAL_LINKS.privacy = '/privacidade';
+  LEGAL_RELEASE.checkoutApproved = true;
   getCheckoutSummary.mockReset().mockResolvedValue(SUMMARY);
   startCheckoutPayment.mockReset().mockResolvedValue({ status: 'PENDING', method: 'PIX' });
 });
 
 describe('checkout MOVIVO', () => {
-  it('bloqueia contratação quando os documentos não estão publicados', async () => {
-    LEGAL_LINKS.terms = null;
-    LEGAL_LINKS.privacy = null;
+  it('bloqueia contratação paga no beta mesmo com documentos visíveis', async () => {
+    LEGAL_RELEASE.checkoutApproved = false;
     render(<PlanSelector token="opaque" />);
-    expect(await screen.findByText(/contratação está temporariamente indisponível/i)).toBeVisible();
+    expect(
+      await screen.findByText(/contratação paga está temporariamente indisponível/i),
+    ).toBeVisible();
     expect(screen.getByRole('button', { name: 'Confirmar assinatura' })).toBeDisabled();
     expect(startCheckoutPayment).not.toHaveBeenCalled();
   });

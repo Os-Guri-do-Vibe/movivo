@@ -65,8 +65,8 @@ export const SOCIAL = {
 } as const;
 
 /**
- * Links institucionais. `null` = página ainda não publicada: o rodapé omite o link em vez
- * de apontar para um 404. Preencha com a rota/URL quando o documento for aprovado.
+ * Links institucionais. `null` = página indisponível: o rodapé omite o link em vez
+ * de apontar para um 404. As minutas beta ficam acessíveis com aviso de pendências.
  */
 export const LEGAL_LINKS: { terms: string | null; privacy: string | null } = {
   terms: legalReleaseMatchesConsent ? '/termos' : null,

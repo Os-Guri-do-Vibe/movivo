@@ -32,18 +32,6 @@ export interface ConsentOrigin {
   readonly userAgent: string | null;
 }
 
-/**
- * Nenhum texto integral de `terms-2026-08-v2` foi arquivado/publicado. As minutas
- * de setembro ainda não são vigentes. O aceite contratual só é registrado após
- * a publicação dos dois documentos.
- * ponytail: gate estático para a minuta; substituir por manifesto versionado dos
- * dois documentos após aprovação jurídica, mantendo as versões antigas imutáveis.
- */
-const PUBLISHED_LEGAL_BUNDLE: Readonly<{
-  termsVersion: string;
-  privacyVersion: string;
-}> | null = null;
-
 @Injectable()
 export class ConsentService {
   constructor(private readonly db: TenantDatabase) {}
@@ -72,9 +60,6 @@ export class ConsentService {
 
     await this.db.runAsTokenScoped(sessionId, async (tx) => {
       for (const input of inputs) {
-        // Clientes antigos ainda podem enviar este aceite; sem texto publicado,
-        // não há contrato a registrar, mas isso não impede a inscrição beta.
-        if (input.type === 'TERMS_OF_SERVICE' && !this.areTermsPublished()) continue;
         await this.upsert(tx, { anamnesisSessionId: sessionId, userId: null }, input, origin);
       }
     });
@@ -166,20 +151,11 @@ export class ConsentService {
 
     return rows
       .filter((row) => {
-        if (row.type === 'TERMS_OF_SERVICE' && !this.areTermsPublished()) return false;
         const text = CONSENT_TEXTS[row.type as ConsentTypeWithText] as
           { version: string } | undefined;
         return text?.version === row.version;
       })
       .map((row) => row.type as ConsentTypeWithText);
-  }
-
-  protected areTermsPublished(): boolean {
-    return (
-      PUBLISHED_LEGAL_BUNDLE !== null &&
-      PUBLISHED_LEGAL_BUNDLE.termsVersion === CONSENT_TEXTS.TERMS_OF_SERVICE.version &&
-      PUBLISHED_LEGAL_BUNDLE.privacyVersion.length > 0
-    );
   }
 
   /**

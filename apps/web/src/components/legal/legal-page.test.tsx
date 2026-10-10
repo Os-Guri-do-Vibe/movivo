@@ -15,6 +15,7 @@ describe('página legal', () => {
         title="Política de Privacidade"
         document={{
           version: 'privacy-2026-09-v1',
+          status: 'APPROVED',
           effectiveOn: '2026-10-01',
           markdown:
             '## Compartilhamento\n\n| Categoria | Finalidade |\n| --- | --- |\n| IA | Treino |\n\n- [LGPD](https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2018/lei/l13709compilado.htm)',
@@ -29,5 +30,22 @@ describe('página legal', () => {
       'href',
       'https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2018/lei/l13709compilado.htm',
     );
+  });
+
+  it('identifica claramente a versão beta com dados pendentes', () => {
+    render(
+      <LegalPage
+        title="Termos de Uso"
+        document={{
+          version: 'terms-2026-09-v1',
+          status: 'BETA_VISIBLE',
+          effectiveOn: null,
+          markdown: 'CNPJ **[CNPJ]** pendente.',
+        }}
+      />,
+    );
+    expect(screen.getByRole('note')).toHaveTextContent('Versão beta para consulta');
+    expect(screen.getByText(/Minuta beta sem data de vigência definida/)).toBeVisible();
+    expect(screen.getByRole('article')).toHaveTextContent('[CNPJ]');
   });
 });

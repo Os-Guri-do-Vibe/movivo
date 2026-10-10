@@ -54,7 +54,6 @@ import { ProtocolGeneratorService } from '../src/modules/protocol/protocol-gener
 import { ProtocolRepository } from '../src/modules/protocol/protocol.repository';
 import { DashboardService } from '../src/modules/admin/dashboard.service';
 import { seedHealthEligibility } from './health-fixtures';
-import { PublishedFixtureConsentService } from './published-consent-fixture';
 
 const { env } = loadEnv();
 const apiRoot = process.cwd();
@@ -314,7 +313,7 @@ beforeAll(async () => {
     .useValue(fakeGenerator)
     .overrideProvider(ConsentService)
     .useFactory({
-      factory: (tenant: TenantDatabase) => new PublishedFixtureConsentService(tenant),
+      factory: (tenant: TenantDatabase) => new ConsentService(tenant),
       inject: [TenantDatabase],
     })
     .compile();

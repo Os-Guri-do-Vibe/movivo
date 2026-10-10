@@ -22,7 +22,7 @@ describe('consentimento versionado (Alexandre §5 — onboarding v2)', () => {
   });
 
   it('publica as versões da Sprint 6 dos demais tipos', () => {
-    expect(CONSENT_TEXTS.TERMS_OF_SERVICE.version).toBe('terms-2026-08-v2');
+    expect(CONSENT_TEXTS.TERMS_OF_SERVICE.version).toBe('terms-2026-09-v1');
     expect(CONSENT_TEXTS.MARKETING.version).toBe('consent-marketing-2026-08-v3');
     expect(CONSENT_TEXTS.AI_DISCLOSURE.version).toBe('ai-disclosure-2026-08-v1');
   });

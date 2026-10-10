@@ -31,13 +31,28 @@ export function LegalPage({ title, document }: { title: string; document: LegalD
         <div className={styles.intro}>
           <p className={styles.eyebrow}>MOVIVO · Transparência</p>
           <h1>{title}</h1>
+          {document.status === 'BETA_VISIBLE' ? (
+            <div className={styles.betaNotice} role="note">
+              <strong>Versão beta para consulta.</strong> CNPJ, registros CREF, canais de contato e
+              outros dados indicados entre colchetes ainda estão pendentes. Este texto será
+              atualizado antes da operação comercial definitiva.
+            </div>
+          ) : null}
           <p className={styles.meta}>
-            Versão {document.version} · Vigência a partir de{' '}
-            <time dateTime={document.effectiveOn}>
-              {new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC' }).format(
-                new Date(`${document.effectiveOn}T00:00:00Z`),
-              )}
-            </time>
+            Versão {document.version}
+            {document.effectiveOn ? (
+              <>
+                {' '}
+                · Vigência a partir de{' '}
+                <time dateTime={document.effectiveOn}>
+                  {new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC' }).format(
+                    new Date(`${document.effectiveOn}T00:00:00Z`),
+                  )}
+                </time>
+              </>
+            ) : (
+              ' · Minuta beta sem data de vigência definida'
+            )}
           </p>
         </div>
 

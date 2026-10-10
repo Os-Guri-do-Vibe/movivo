@@ -109,10 +109,8 @@ export interface SubmitResult {
   outcome: OnboardingOutcome;
 }
 
-/** O cadastro beta não exige aceite de documentos ainda não publicados. */
-const CONSENT_ORDER = (Object.keys(CONSENT_TEXTS) as ConsentTypeWithText[]).filter(
-  (type) => type !== 'TERMS_OF_SERVICE',
-);
+/** Ordem de exibição e dos aceites obrigatórios na Etapa 1. */
+const CONSENT_ORDER = Object.keys(CONSENT_TEXTS) as ConsentTypeWithText[];
 
 /** Únicas colunas que `writeJsonb` pode escrever (nome de coluna não é parametrizável). */
 type JsonbBlockColumn = 'data_block_1' | 'data_block_3';
