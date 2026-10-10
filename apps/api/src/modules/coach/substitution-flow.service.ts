@@ -600,7 +600,8 @@ export class SubstitutionFlowService {
       'Apresente, para cada exercício abaixo, as opções de forma humanizada (não uma lista ' +
       'técnica) e pergunte qual ele prefere, quando ele ainda não escolheu:\n' +
       sections.join('\n') +
-      '\nNÃO sugira nenhum exercício fora dessas listas e NÃO invente carga. NÃO pergunte se ' +
+      '\nEscreva o nome de cada exercício EXATAMENTE como aparece nas listas acima. NÃO ' +
+      'sugira nenhum exercício fora dessas listas e NÃO invente carga. NÃO pergunte se ' +
       'a troca é só para hoje ou para o protocolo: essa pergunta é acrescentada ' +
       'automaticamente ao final da sua mensagem. NÃO diga que registrou, confirmou ou vai ' +
       'confirmar nada com o profissional.';

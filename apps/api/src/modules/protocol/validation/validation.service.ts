@@ -46,6 +46,13 @@ import {
 
 export type ValidationAction = 'PASS' | 'FLAG_HUMAN_REVIEW' | 'BLOCK_FALLBACK';
 
+/**
+ * Nomes de exercício do catálogo que também são vocabulário comum de treino ("trabalha o
+ * abdominal", "região abdominal"): citá-los sozinhos não é indicar um exercício novo. As
+ * variantes ("Abdominal Tradicional", "Abdominal Tesoura"...) continuam sob `allowedExercises`.
+ */
+const GENERIC_TERM_EXERCISE_NAMES: ReadonlySet<string> = new Set(['abdominal']);
+
 /** Piso de Repetições em Reserva sob teto de PAR-Q — nunca treinar perto da falha. */
 const PARQ_MIN_RIR = 2;
 
@@ -209,9 +216,28 @@ export class ValidationService {
       if (name.length === 0) continue;
       masked = masked.split(name).join(' '.repeat(name.length));
     }
+    // Achado 2026-10-09 (produção: "pode substituir o giro russo?" caiu na resposta-padrão de
+    // bloqueio): o catálogo tem "Abdominal", "Abdominal Declinado", "Afundo"... como exercícios
+    // próprios E como prefixo de variantes com qualificador, "Abdominal Declinado (com Peso)".
+    // O modelo naturalmente escreve "abdominal na máquina" ou "afundo com halter" ao verbalizar
+    // uma opção autorizada, e isso bloqueava uma resposta correta. Citar a forma-base (sem o
+    // qualificador entre parênteses) de um exercício AUTORIZADO é citar o autorizado, não um
+    // exercício novo. Só vale para a forma-base exata: "Afundo Reverso" ou "Afundo (Barra)"
+    // continuam sendo exercícios distintos e seguem bloqueados.
+    const authorizedBaseNames = new Set<string>();
+    for (const name of allowedSet) {
+      const base = name
+        .replace(/\s*\([^)]*\)/gu, '')
+        .replace(/\s+/gu, ' ')
+        .trim();
+      if (base.length > 0 && base !== name) authorizedBaseNames.add(base);
+    }
     for (const ex of this.catalog.getAll()) {
       const exerciseName = canonicalizeSecurityText(ex.name).toLocaleLowerCase('pt-BR');
       if (allowedSet.has(exerciseName) || allowedSet.has(ex.id)) continue;
+      if (authorizedBaseNames.has(exerciseName) || GENERIC_TERM_EXERCISE_NAMES.has(exerciseName)) {
+        continue;
+      }
       if (masked.includes(exerciseName)) {
         out.push({
           rule: 'EXERCISE_NOT_ALLOWED',
