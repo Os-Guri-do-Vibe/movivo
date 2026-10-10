@@ -71,8 +71,8 @@ const cipher = new HealthCipherService(db, {
     env.PGCRYPTO_KEY ??
     readFileSync(resolve(apiRoot, '..', '..', 'secrets', 'pgcrypto_key'), 'utf8').trimEnd(),
 } as never);
-// Fixture de integração: mantém a cobertura do fluxo pós-gate sem habilitar minutas
-// no serviço real. O teste abaixo exercita separadamente o bloqueio de publicação.
+// Fixture de integração para testar o registro de aceite contratual publicado,
+// sem habilitar as minutas no serviço real.
 class PublishedFixtureConsentService extends ConsentService {
   protected override areTermsPublished(): boolean {
     return true;

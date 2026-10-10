@@ -154,11 +154,8 @@ function makeService(state: TxState = {}) {
   } as unknown as HealthCipherService;
 
   const consents = {
-    assertTermsPublished: vi.fn(),
     hasValidHealthConsent: vi.fn(() => Promise.resolve(true)),
-    acceptedTypesForSession: vi.fn(() =>
-      Promise.resolve(['TERMS_OF_SERVICE', 'HEALTH_DATA', 'AI_DISCLOSURE']),
-    ),
+    acceptedTypesForSession: vi.fn(() => Promise.resolve(['HEALTH_DATA', 'AI_DISCLOSURE'])),
     linkSessionToUser: vi.fn(() => Promise.resolve()),
   } as unknown as ConsentService;
 
@@ -236,12 +233,7 @@ describe('AnamnesisService — sessão e retomada', () => {
     // (o texto do consentimento cita "PAR-Q", então a asserção mira o CONTEÚDO: respostas.)
     expect(JSON.stringify(view)).not.toMatch(/questionId|answers|hasPain/);
     // Consentimentos vêm do backend, com texto e versão (Sofia §2.3) e nunca marcados.
-    expect(view.consents.map((c) => c.type)).toEqual([
-      'TERMS_OF_SERVICE',
-      'HEALTH_DATA',
-      'AI_DISCLOSURE',
-      'MARKETING',
-    ]);
+    expect(view.consents.map((c) => c.type)).toEqual(['HEALTH_DATA', 'AI_DISCLOSURE', 'MARKETING']);
     expect(view.consents.every((c) => c.version.length > 0)).toBe(true);
   });
 
@@ -286,7 +278,7 @@ describe('Etapa 1 — gate 18+, consentimentos e posse do número', () => {
   it('recusa a etapa 1 sem os consentimentos obrigatórios', async () => {
     const { svc, consents } = makeService({ select: [sessionRow()] });
     (consents.acceptedTypesForSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
-      'TERMS_OF_SERVICE',
+      'HEALTH_DATA',
     ]);
     await expect(svc.patchStep('t', 1, STEP1)).rejects.toThrow(/obrigatórios pendentes/i);
   });
@@ -329,13 +321,11 @@ describe('Etapa 1 — gate 18+, consentimentos e posse do número', () => {
 });
 
 describe('Etapa 2 — seção 4 cifrada e gated por consentimento de saúde', () => {
-  it('bloqueia nova coleta em sessão antiga enquanto os documentos estão em revisão', async () => {
+  it('permite nova coleta em sessão antiga com consentimento de saúde, mesmo sem documentos publicados', async () => {
     const { svc, consents, cipher } = makeService({ select: [sessionRow({ lastStep: 2 })] });
-    (consents.assertTermsPublished as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
-      throw new Error('Termos de Uso em revisão');
-    });
-    await expect(svc.patchStep('t', 2, STEP2)).rejects.toThrow(/Termos de Uso em revisão/i);
-    expect(cipher.encryptHealth).not.toHaveBeenCalled();
+    await expect(svc.patchStep('t', 2, STEP2)).resolves.toEqual({ currentStep: 3 });
+    expect(consents.hasValidHealthConsent).toHaveBeenCalled();
+    expect(cipher.encryptHealth).toHaveBeenCalled();
   });
 
   it('devolve 400 com a mensagem do campo condicional inválido', async () => {
@@ -426,13 +416,10 @@ describe('Etapa 3 — PAR-Q e declarações', () => {
 });
 
 describe('Submit — gate PAR-Q e outcome', () => {
-  it('bloqueia sessões antigas quando o par de documentos jurídicos não está publicado', async () => {
-    const { svc, consents } = makeService({ select: [sessionRow()] });
-    (consents.assertTermsPublished as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
-      throw new Error('Termos de Uso em revisão');
-    });
-    await expect(svc.submit('t')).rejects.toThrow(/Termos de Uso em revisão/i);
-    expect(consents.linkSessionToUser).not.toHaveBeenCalled();
+  it('conclui o cadastro sem aceite de termos ainda não publicados', async () => {
+    const { svc, consents } = makeService({ select: [sessionRow()], insert: [{ id: 'user-1' }] });
+    await expect(svc.submit('t')).resolves.toEqual({ status: 'SUBMITTED', outcome: 'READY' });
+    expect(consents.linkSessionToUser).toHaveBeenCalledWith('sess-1', 'user-1');
   });
 
   it('exige as três etapas preenchidas', async () => {
