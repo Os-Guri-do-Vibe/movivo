@@ -255,7 +255,7 @@ function spyOnRandom() {
   return vi.spyOn(Math, 'random');
 }
 
-describe('EvolutionHttpTransport (WhatsappTransport — WHATSAPP_TRANSPORT_PROVIDER=EVOLUTION)', () => {
+describe('EvolutionHttpTransport (WhatsappTransport)', () => {
   let randomSpy: ReturnType<typeof spyOnRandom>;
 
   beforeEach(() => {
@@ -382,7 +382,7 @@ describe('EvolutionHttpTransport (WhatsappTransport — WHATSAPP_TRANSPORT_PROVI
   });
 
   // Achado 2026-08-22 (US-2.6-PDF): documento do protocolo também sai pela EvolutionAPI,
-  // não só pelo BSP oficial — contrato confirmado em `dist/validate/message.schema.js`
+  // contrato confirmado em `dist/validate/message.schema.js`
   // (`mediaMessageSchema`) do container real, não a doc prosa.
   it('sendDocument: POST /message/sendMedia com mediatype document e fileName (com humanização)', async () => {
     randomSpy.mockReturnValue(0);

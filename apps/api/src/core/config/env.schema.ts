@@ -332,34 +332,12 @@ export const envSchema = z
     /** Câmbio USD→BRL para o cálculo de custo por chamada (Victor §8). */
     LLM_USD_BRL_RATE: z.coerce.number().positive().default(5.5),
 
-    // ------------------------------------------ WhatsApp / AraraHQ (US-2.5)
-    /**
-     * Credencial da AraraHQ (WhatsApp outbound). **Opcional** (como as chaves de LLM):
-     * sem ela o app boota e o envio real vira no-op logado — os testes injetam um fake
-     * transport. Webhook de ENTRADA é Sprint 3.
-     */
-    ARARAHQ_API_KEY: z.string().min(1).optional(),
-    ARARAHQ_BASE_URL: z.string().url().default('https://api.ararahq.com'),
-    /**
-     * Segredo do webhook de ENTRADA da AraraHQ (US-3.1 / Sato §6). **Opcional** no boot
-     * (como `ARARAHQ_API_KEY`): sem ele o app sobe, mas todo inbound é descartado
-     * fail-closed (não há como verificar o HMAC). O formato real de assinatura da AraraHQ
-     * é desconhecido (conta não assinada) — o placeholder de verificação está isolado em
-     * `whatsapp/webhook-signature.ts`, pronto para o formato real plugar. Via secret.
-     */
-    ARARAHQ_WEBHOOK_SECRET: z.string().min(1).optional(),
+    // ------------------------------------------ WhatsApp / EvolutionAPI
     /** Base pública para o deep-link da página read-only do protocolo (US-2.6). */
     PUBLIC_SITE_URL: z.string().url().default('http://localhost:3000'),
-    /**
-     * Nome do Template aprovado pela Meta com `headerType: 'document'`, usado como
-     * fallback do PDF do protocolo (US-2.6-PDF, `AraraHttpTransport.sendDocument`) quando
-     * a janela de 24h está fechada. **Opcional**: sem ele, entrega de PDF fora da janela
-     * falha (loga e o BullMQ reenvia) até o Template existir e ser aprovado pela Meta.
-     */
-    WHATSAPP_PROTOCOL_PDF_TEMPLATE_NAME: z.string().min(1).optional(),
 
     // ------------------------------------------ EvolutionAPI (painel "Sistema →
-    // Integração" — conexão via QR Code/Baileys, protocolo não-oficial). Chave
+    // Integração" — conexão via QR Code/Baileys). Chave
     // **opcional**: sem ela o painel mostra "não configurado" e a criação de
     // instância falha com erro claro.
     EVOLUTION_API_URL: z.string().url().default('http://localhost:8081'),
@@ -380,23 +358,12 @@ export const envSchema = z
      * segredo conhecido publicamente. Via contrato `*_FILE` (docs/SECURITY.md §2).
      */
     EVOLUTION_WEBHOOK_TOKEN: z.string().min(43).optional(),
-    /**
-     * Qual transporte processa o envio real do `whatsapp-outbound` worker. Default
-     * `ARARA` (BSP oficial, produção) — nunca muda sozinho. `EVOLUTION` é só pra testar
-     * o fluxo completo no número de teste (separado do chip oficial) enquanto a
-     * criação de Template está bloqueada na AraraHQ; ativa também o atraso "humano" de
-     * 15-20s anti-ban só nesse transporte (`whatsapp/evolution-transport.ts`). Mesmo
-     * padrão de troca de provedor por env já usado em `PAYMENT_PROVIDER`.
-     */
-    WHATSAPP_TRANSPORT_PROVIDER: z.enum(['ARARA', 'EVOLUTION']).default('ARARA'),
-
     // ------------------------------------------ Transcrição de áudio (AI Coach entende
     // voz — ADR-009, revisão 2026-09-14, decisão do fundador). CASCATA: OpenAI é a perna
     // PRIMÁRIA de produção (`gpt-4o-mini-transcribe`, mesmo fornecedor já em diligência
     // no ADR-005-R2 — reaproveita `OPENAI_API_KEY` acima, não é relação nova), Groq é o
     // FALLBACK automático — em produção E local, não uma troca manual de provedor. Hoje
-    // só a borda da EvolutionAPI produz `audio` (escopo inicial — AraraHQ fica de fora
-    // até o webhook de voz de produção ser confirmado).
+    // a borda da EvolutionAPI produz `audio`.
     /**
      * Atestado SEPARADO de `LLM_OPENAI_HEALTH_DATA_APPROVED`: é a MESMA OpenAI, mas uma
      * superfície de dado diferente (áudio bruto do titular, não texto já escrito por
@@ -476,7 +443,7 @@ export const envSchema = z
       .default(2 * 1024 * 1024),
 
     // -------------------------------------------- Pagamento (US-4.1)
-    /** Stripe saiu da operação. O enum do banco permanece para preservar histórico fiscal. */
+    /** O enum legado do banco permanece para preservar registros históricos. */
     PAYMENT_PROVIDER: z.enum(['MOCK', 'ASAAS']).default('MOCK'),
     /** Integração deliberadamente travada no Sandbox até uma mudança explícita de produção. */
     ASAAS_API_URL: z

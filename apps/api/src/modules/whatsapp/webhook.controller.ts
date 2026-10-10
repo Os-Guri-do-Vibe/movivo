@@ -1,20 +1,12 @@
 /**
  * `WebhookController` — entradas de WhatsApp (US-3.1 / US-3.1-EVO / Sato §6).
  *
- * Duas rotas, uma por provedor, porque autenticação e formato são incompatíveis entre si:
- *  - `POST /api/v1/webhook/whatsapp`          → AraraHQ (BSP oficial, produção).
- *  - `POST /api/v1/webhook/whatsapp/evolution` → EvolutionAPI (Baileys, teste local).
+ * `POST /api/v1/webhook/whatsapp/evolution` recebe entregas da EvolutionAPI.
  *
- * O provedor vem da ROTA, nunca do corpo: um campo de payload dizendo "sou a AraraHQ"
- * escolheria qual verificação de assinatura aplicar — ou seja, o atacante escolheria a
- * porta mais fraca. Com rota fixa, cada entrega só pode ser autenticada de um jeito.
- *
- * Ambas respondem **sempre 200** (nunca vazam QUAL verificação falhou) e **em <1s** — não
+ * Responde **sempre 200** (não vaza QUAL verificação falhou) e **em <1s** — não
  * processam IA na thread do webhook: delegam ao `WhatsappInboundService`, que autentica na
  * borda do provedor, coalesce a rajada por debounce e enfileira em `ai-response`.
  *
- * O corpo BRUTO (`req.rawBody`) é usado no HMAC da AraraHQ — assinar o JSON re-serializado
- * quebraria a verificação. Habilitado por `rawBody: true` no bootstrap (`main.ts`).
  * `ThrottlerGuard` aplica o rate limit do path (TASK-3.1.3).
  */
 import { Body, Controller, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
@@ -24,11 +16,10 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { randomUUID } from 'node:crypto';
 import { type Request } from 'express';
 
-import { AppConfigService } from '../../core/config';
 import { WhatsappInboundService } from './whatsapp-inbound.service';
 
 /**
- * Rajada esperada da EvolutionAPI é maior que a da AraraHQ: o Baileys entrega evento por
+ * O Baileys entrega evento por
  * evento e reemite backlog inteiro após reconexão. 300/min ainda corta um flood real, sem
  * derrubar uma sincronização legítima. O controle que protege o custo de IA não é este —
  * é o orçamento POR TITULAR dentro do serviço.
@@ -39,69 +30,24 @@ const EVOLUTION_THROTTLE = { default: { limit: 300, ttl: 60_000 } };
 @Controller('webhook')
 @UseGuards(ThrottlerGuard)
 export class WebhookController {
-  constructor(
-    private readonly inbound: WhatsappInboundService,
-    private readonly config: AppConfigService,
-  ) {}
+  constructor(private readonly inbound: WhatsappInboundService) {}
 
-  @Post('whatsapp')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Entrada de mensagens do WhatsApp (AraraHQ — produção)',
-    description:
-      'Chamado pelo BSP AraraHQ, nunca pelo app cliente. Autenticado por HMAC sobre o ' +
-      'corpo bruto (`req.rawBody`) dentro do serviço — o controller não decide a ' +
-      'autenticação. Responde **sempre 200** em <1s (nunca vaza qual verificação falhou ' +
-      'nem processa a IA na própria thread do webhook); o processamento real é ' +
-      'enfileirado em `ai-response`.',
-  })
-  @ApiResponse({
-    status: 200,
-    description:
-      'Sempre 200 — entrega forjada/replay/desconhecida é descartada silenciosamente dentro do serviço.',
-  })
-  async whatsapp(
-    @Req() req: RawBodyRequest<Request>,
-    @Body() body: unknown,
-  ): Promise<{ ok: true }> {
-    await this.inbound.ingest({
-      provider: 'ARARA',
-      rawBody: req.rawBody,
-      headers: flattenHeaders(req),
-      body,
-      correlationId: correlationId(req),
-    });
-    // Sempre 200: forjado/replay/desconhecido são descartados dentro do serviço.
-    return { ok: true };
-  }
-
-  /**
-   * Entrada da EvolutionAPI. Só existe de fato quando ela é o transporte ativo: com
-   * `WHATSAPP_TRANSPORT_PROVIDER=ARARA` (o default, e o valor de produção) a rota responde
-   * 200 e não processa nada — mesmo retorno uniforme das outras rejeições, para não
-   * revelar qual camada recusou. Fecha a superfície de ataque em produção sem precisar de
-   * roteamento condicional na borda.
-   */
   @Post('whatsapp/evolution')
   @HttpCode(HttpStatus.OK)
   @Throttle(EVOLUTION_THROTTLE)
   @ApiOperation({
-    summary: 'Entrada de mensagens do WhatsApp (EvolutionAPI — teste interno)',
+    summary: 'Entrada de mensagens do WhatsApp (EvolutionAPI)',
     description:
-      'Só processa algo quando `WHATSAPP_TRANSPORT_PROVIDER=EVOLUTION` (não é o valor de ' +
-      'produção). Com o transporte AraraHQ ativo, responde 200 sem processar nada — ' +
-      'mesmo retorno uniforme das outras rejeições, para não revelar qual camada recusou.',
+      'Autenticado pelo token configurado na EvolutionAPI. Responde 200 sem processar IA na thread do webhook.',
   })
   @ApiResponse({
     status: 200,
-    description: 'Sempre 200 (no-op quando EvolutionAPI não é o transporte ativo).',
+    description: 'Sempre 200; entregas inválidas são descartadas.',
   })
   async whatsappEvolution(
     @Req() req: RawBodyRequest<Request>,
     @Body() body: unknown,
   ): Promise<{ ok: true }> {
-    if (this.config.whatsapp.transportProvider !== 'EVOLUTION') return { ok: true };
-
     await this.inbound.ingest({
       provider: 'EVOLUTION',
       rawBody: req.rawBody,

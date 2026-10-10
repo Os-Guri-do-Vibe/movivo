@@ -5,11 +5,9 @@
  * webhook). O fluxo NUNCA processa IA de forma síncrona — valida, coalesce a rajada e
  * enfileira em `ai-response` para o `AIResponseWorker` (US-3.5). Camadas, em ordem:
  *
- *   1. **Borda do provedor** (`WhatsappInboundEdge`): autentica (HMAC da AraraHQ ou token
- *      compartilhado da EvolutionAPI) e normaliza o envelope. É a ÚNICA parte específica
- *      de provedor de todo o pipeline.
- *   2. Nonce de uso único (`SET NX`), com namespace por provedor — o `messageId` da
- *      AraraHQ e o `key.id` do Baileys vêm de espaços distintos e não podem colidir.
+ *   1. **Borda da EvolutionAPI** (`WhatsappInboundEdge`): autentica pelo token
+ *      compartilhado e normaliza o envelope.
+ *   2. Nonce de uso único (`SET NX`) para cada `key.id` do Baileys.
  *   3. Resolve o titular pelo telefone (contexto SYSTEM — inbound é não autenticado).
  *      Casamento **exato** (`eq(users.phoneNumber, phone)`, UNIQUE), nunca difuso.
  *   4. Orçamento por titular (30 msg / 5 min): protege o custo de inferência do LLM.
@@ -21,9 +19,7 @@
  * informação ao atacante) + log de segurança. Nunca loga telefone/texto em claro (só
  * `userId` UUID e o hash do `messageId`).
  *
- * A partir de `resolveUser()` nada aqui sabe qual provedor entregou a mensagem — é essa
- * indivisibilidade que garante que os dois canais tenham o MESMO gate de consentimento,
- * o mesmo isolamento por titular e a mesma auditoria.
+ * O pipeline preserva o gate de consentimento, o isolamento por titular e a auditoria.
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
@@ -67,23 +63,17 @@ const DEBOUNCE_MS = 7_000;
 /** TTL do buffer de batch: cobre a janela de debounce + o processamento de US-3.5. */
 const BATCH_TTL_SECONDS = 120;
 /**
- * TTL do nonce anti-replay (Sato §6), por provedor.
- *
- * A AraraHQ mantém os 600s de sempre (a janela de timestamp assinado já é ±5min, então o
- * nonce só precisa cobrir essa janela). O Baileys/EvolutionAPI não tem janela assinada e
+ * TTL do nonce anti-replay (Sato §6). O Baileys/EvolutionAPI não tem janela assinada e
  * **reemite mensagens depois de uma reconexão lenta** — com 600s, um reenvio 20 minutos
  * depois passaria pelo nonce e a MOVIVO responderia duas vezes à mesma mensagem. 24h cobre
  * qualquer reconexão plausível.
  */
-const NONCE_TTL_SECONDS: Readonly<Record<InboundProvider, number>> = {
-  ARARA: 600,
-  EVOLUTION: 86_400,
-};
+const NONCE_TTL_SECONDS = 86_400;
 const INBOUND_ROUTE_TTL_SECONDS = 60;
 
 /**
  * Orçamento de mensagens por titular (Sato: "o controle que realmente importa"). Vale para
- * os DOIS provedores e é aplicado depois de `resolveUser()`, porque o recurso protegido é
+ * o transporte e é aplicado depois de `resolveUser()`, porque o recurso protegido é
  * o custo de inferência de LLM do usuário — não a borda HTTP (essa tem throttle de rota).
  */
 const USER_RATE_LIMIT = 30;
@@ -181,8 +171,7 @@ export class WhatsappInboundService {
   }
 
   /**
-   * Pipeline agnóstico de provedor — daqui para baixo nada sabe se a mensagem veio da
-   * AraraHQ ou da EvolutionAPI (o `provider` só entra em namespace de chave e em log).
+   * Pipeline após a autenticação da entrega.
    */
   private async process(
     message: NormalizedInbound,
@@ -194,10 +183,9 @@ export class WhatsappInboundService {
 
     // Nonce de uso único: `SET NX` — se já existe, é replay dentro da janela. O messageId
     // é hasheado para virar um segmento de chave válido (independe do formato do provedor)
-    // e o provedor entra no namespace: `messageId` da AraraHQ e `key.id` do Baileys vêm de
-    // espaços de identificador distintos e não podem se anular por colisão acidental.
+    // O namespace preserva a separação caso outro transporte seja adicionado no futuro.
     const nonceKey = this.keys.global('wa-nonce', provider.toLowerCase(), this.hash(messageId));
-    const fresh = await this.redis.set(nonceKey, '1', 'EX', NONCE_TTL_SECONDS[provider], 'NX');
+    const fresh = await this.redis.set(nonceKey, '1', 'EX', NONCE_TTL_SECONDS, 'NX');
     if (fresh !== 'OK') {
       this.reject('replay', correlationId, provider);
       return;
@@ -378,10 +366,7 @@ export class WhatsappInboundService {
    * `null` = descartado. Toda saída `null` já avisou o aluno por `notifyAudioFallback`
    * antes de retornar — ninguém fica esperando uma resposta que nunca vai chegar.
    *
-   * Escopo inicial (decisão do fundador): só a EvolutionAPI emite `audio` hoje — a AraraHQ
-   * segue descartando áudio na borda (`arara-inbound.edge.ts`) até o webhook de voz de
-   * produção ser confirmado. `provider !== 'EVOLUTION'` abaixo é defensivo, não deveria
-   * disparar na prática.
+   * A EvolutionAPI entrega referências de áudio para transcrição após os gates.
    */
   private async resolveAudioText(
     message: NormalizedInbound,
@@ -422,19 +407,6 @@ export class WhatsappInboundService {
       this.logger.info(
         { event: 'audio_transcription_not_configured', provider, userId, correlationId },
         'áudio descartado: transcrição sem credencial ou sem aprovação de dado de saúde',
-      );
-      return null;
-    }
-
-    if (provider !== 'EVOLUTION') {
-      await this.notifyAudioFallback(
-        userId,
-        message.messageId,
-        'Ainda não consigo ouvir áudio por aqui — pode escrever, por favor?',
-      );
-      this.logger.warn(
-        { event: 'audio_unsupported_provider', provider, userId, correlationId },
-        'áudio recebido de provedor sem download de mídia implementado',
       );
       return null;
     }
@@ -601,7 +573,7 @@ export class WhatsappInboundService {
     return row?.id ?? null;
   }
 
-  /** Hash do messageId → segmento de chave Redis válido, independente do formato AraraHQ. */
+  /** Hash do messageId → segmento de chave Redis válido. */
   private hash(value: string): string {
     return createHash('sha256').update(value).digest('hex');
   }

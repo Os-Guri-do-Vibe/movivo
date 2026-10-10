@@ -1,6 +1,6 @@
 /**
  * Ingestão do webhook de pagamento (US-4.2.2) — o vetor de fraude nº 1 (Sato T-15). Reusa o
- * padrão da US-3.1: verifica assinatura sobre o **corpo bruto** (via `PaymentGateway`), resiste a
+ * padrão da US-3.1: verifica o token do webhook (via `PaymentGateway`), resiste a
  * replay (dedup por `event_id` `SET NX` + `uniqueIndex(externalSubscriptionId)` da ativação) e
  * NUNCA vaza QUAL camada falhou — origem não provada vira 401 uniforme; replay e evento
  * autenticado sem efeito viram 200 sem reprocessar. A transição roda sob RLS via

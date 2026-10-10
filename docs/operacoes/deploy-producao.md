@@ -279,8 +279,8 @@ supressão de erros nem denylist de tokens na solução permanente.
 ## Atualizar credenciais de fornecedores
 
 Os cinco arquivos são `asaas_api_key` (Sandbox), `openai_api_key`,
-`anthropic_api_key`, `deepseek_api_key` e `groq_api_key`. AraraHQ não é dependência
-runtime. Evolution usa suas credenciais próprias, diferentes das dos LLMs.
+`anthropic_api_key`, `deepseek_api_key` e `groq_api_key`. Evolution usa suas
+credenciais próprias, exclusivas desta VPS.
 `api.env` contém apenas ponteiros `*_FILE`, nunca os valores. Segredos não participam
 do build das imagens. Gere chave exclusiva desta instalação no console correto;
 não reutilize a chave de desenvolvimento.

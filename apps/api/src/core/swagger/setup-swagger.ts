@@ -36,9 +36,9 @@ metodologia e supervisão de profissional de Educação Física registrado no CR
 - **Validação:** todo corpo de requisição é validado por um schema Zod de
   \`@movivo/shared\` (a mesma fonte usada para gerar os schemas mostrados aqui — nunca um
   DTO paralelo). Corpo fora do schema retorna \`400\`.
-- **Idempotência de webhooks:** \`POST /whatsapp/webhook\` e
-  \`POST /subscription/payment-webhook\` são chamados por sistemas externos (AraraHQ,
-  Asaas), não pelo app cliente — autenticados pelo mecanismo oficial do provedor, não
+- **Idempotência de webhooks:** \`POST /webhook/whatsapp/evolution\` e
+  \`POST /webhook/payment\` são chamados por sistemas externos (EvolutionAPI,
+  Asaas), não pelo app cliente — autenticados pelo mecanismo configurado, não
   por Bearer JWT.
 - **Guardrails de linguagem:** nenhuma resposta da IA (ver módulo AI Coach) usa
   "diagnóstico", "tratamento", "cura" ou promete resultado garantido — a IA é sempre
@@ -83,10 +83,7 @@ export function setupSwagger(app: INestApplication, config: AppConfigService): s
       'Webhook de Pagamento',
       'Callback autenticado do Asaas — não é chamado pelo app cliente.',
     )
-    .addTag(
-      'WhatsApp',
-      'Webhook inbound assinado (HMAC) do provedor de WhatsApp (AraraHQ/EvolutionAPI).',
-    )
+    .addTag('WhatsApp', 'Webhook inbound autenticado pelo token da EvolutionAPI.')
     .addTag('Link Curto', 'Encurtador interno usado nas mensagens de WhatsApp.')
     .addTag('Health', 'Liveness/readiness da API e das dependências (DB, Redis).')
     .addTag('Admin · Central de Controle', 'Operação diária do profissional CREF sobre os alunos.')

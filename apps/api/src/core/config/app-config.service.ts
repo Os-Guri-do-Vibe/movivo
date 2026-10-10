@@ -76,17 +76,8 @@ export interface LlmConfig {
 }
 
 export interface WhatsappConfig {
-  /** `undefined` em dev/CI sem segredo → envio real vira no-op logado. Segredo redigido. */
-  readonly araraApiKey: string | undefined;
-  readonly araraBaseUrl: string;
   /** Base do deep-link da página read-only do protocolo (US-2.6). */
   readonly publicSiteUrl: string;
-  /** `undefined` sem segredo → inbound descartado fail-closed (US-3.1). Segredo redigido. */
-  readonly webhookSecret: string | undefined;
-  /** Transporte ativo do `whatsapp-outbound` worker. Default `ARARA` — ver env.schema.ts. */
-  readonly transportProvider: 'ARARA' | 'EVOLUTION';
-  /** Template com header de documento p/ fallback do PDF fora da janela de 24h. `undefined` até existir/ser aprovado na Meta. */
-  readonly protocolPdfTemplateName: string | undefined;
 }
 
 export interface EvolutionConfig {
@@ -281,21 +272,15 @@ export class AppConfigService {
     };
   }
 
-  /** Config do WhatsApp outbound (US-2.5). `araraApiKey` é segredo redigido no snapshot. */
+  /** Config pública do WhatsApp. */
   get whatsapp(): WhatsappConfig {
     return {
-      araraApiKey: this.config.ARARAHQ_API_KEY,
-      araraBaseUrl: this.config.ARARAHQ_BASE_URL,
       publicSiteUrl: this.config.PUBLIC_SITE_URL,
-      webhookSecret: this.config.ARARAHQ_WEBHOOK_SECRET,
-      transportProvider: this.config.WHATSAPP_TRANSPORT_PROVIDER,
-      protocolPdfTemplateName: this.config.WHATSAPP_PROTOCOL_PDF_TEMPLATE_NAME,
     };
   }
 
   /**
-   * Config da EvolutionAPI (painel "Sistema → Integração" — ferramenta INTERNA de
-   * teste de WhatsApp, não é o canal de produção). `apiKey` é segredo redigido.
+   * Config da EvolutionAPI. `apiKey` é segredo redigido.
    */
   get evolution(): EvolutionConfig {
     return {

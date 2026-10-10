@@ -587,10 +587,8 @@ export const controlCenterSystemResponseSchema = z.object({
 export type ControlCenterSystemResponse = z.infer<typeof controlCenterSystemResponseSchema>;
 
 /**
- * Painel "Sistema → Integração" — ferramenta INTERNA de teste do fluxo de WhatsApp via
- * EvolutionAPI (QR Code/Baileys), usada enquanto a criação de templates da AraraHQ
- * está bloqueada. Nunca é o canal de produção dos usuários finais (esse é 100%
- * AraraHQ). Reusa `SYSTEM_READ`/`SYSTEM_OPERATE` — não é uma capacidade própria.
+ * Painel "Sistema → Integração" — conexão do canal WhatsApp via EvolutionAPI
+ * (QR Code/Baileys). Reusa `SYSTEM_READ`/`SYSTEM_OPERATE`.
  */
 export const evolutionConnectionStateSchema = z.enum([
   'NOT_CONFIGURED',

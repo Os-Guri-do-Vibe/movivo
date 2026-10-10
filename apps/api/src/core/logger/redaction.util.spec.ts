@@ -52,7 +52,7 @@ describe('redactPii', () => {
   });
 
   it('mascara telefone embutido em texto livre de erro de terceiro', () => {
-    const output = redactPii('AraraHQ recusou o envio para +55 11 98765-4321 (rate limit)');
+    const output = redactPii('EvolutionAPI recusou o envio para +55 11 98765-4321 (rate limit)');
     expect(output).not.toContain('98765');
     expect(output).toContain('rate limit');
   });

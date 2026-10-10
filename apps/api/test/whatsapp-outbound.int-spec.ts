@@ -1,10 +1,10 @@
 import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /**
  * Integração do outbound WhatsApp (US-2.5) contra o stack Docker, com um **fake transport**
- * (sem rede/sem conta AraraHQ) injetado no lugar do `WHATSAPP_TRANSPORT`.
+ * (sem rede/sem conta EvolutionAPI) injetado no lugar do `WHATSAPP_TRANSPORT`.
  *
  * Prova:
- *   (boot)         o AppModule sobe SEM credencial AraraHQ (chave opcional);
+ *   (boot)         o AppModule sobe SEM credencial EvolutionAPI (chave opcional);
  *   (confirmação)  submit da anamnese enfileira e o worker envia a confirmação (liberado);
  *   (cuidado)      PAR-Q de risco recebe a variante de cuidado (sem prometer plano);
  *   (entrega)      um protocolo AUTO_APPROVED/ACTIVE é entregue formatado em bolhas + link;
@@ -279,7 +279,7 @@ afterAll(async () => {
 }, 60_000);
 
 describe('outbound WhatsApp — confirmação no submit (US-2.5)', () => {
-  it('boota sem credencial AraraHQ e envia a confirmação (PAR-Q liberado)', async () => {
+  it('boota sem credencial EvolutionAPI e envia a confirmação (PAR-Q liberado)', async () => {
     const { phone: to } = await submitAnamnesis();
     const msg = await waitFor(() =>
       sent.find((m) => m.to === to && /seu processo na MOVIVO já começou/i.test(m.text)),

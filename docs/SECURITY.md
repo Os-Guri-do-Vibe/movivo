@@ -98,7 +98,7 @@ o ambiente local e a Fase B.
 | `REDIS_PASSWORD`              | `/run/secrets/redis_password`             | `../../secrets/redis_password`             |
 | `REDIS_SENTINEL_PASSWORD`     | `/run/secrets/redis_password`             | `../../secrets/redis_password`             |
 
-Chaves das próximas sprints (`JWT_PRIVATE_KEY`, `PGCRYPTO_KEY`, `ARARAHQ_WEBHOOK_SECRET`,
+Chaves das próximas sprints (`JWT_PRIVATE_KEY`, `PGCRYPTO_KEY`, `EVOLUTION_WEBHOOK_TOKEN`,
 `ASAAS_API_KEY`, `OPENAI_API_KEY`, …) seguem exatamente o mesmo contrato e já
 estão listadas comentadas em `.env.example`.
 
@@ -235,7 +235,7 @@ Responsável pela auditoria: **Sato**. Toda rotação é registrada em `audit_lo
 | Segredo                                    | MVP (Docker Secrets)   | Fase B (Vault/AWS SM)           | Cadência                                 |
 | ------------------------------------------ | ---------------------- | ------------------------------- | ---------------------------------------- |
 | JWT signing key (par RS256)                | Docker secret + `kid`  | Vault PKI / rotação automática  | **Trimestral** (com `kid`, sem downtime) |
-| AraraHQ webhook secret                     | Docker secret          | Vault                           | Semestral ou sob suspeita                |
+| EvolutionAPI webhook token                 | Docker secret          | Vault                           | Semestral ou sob suspeita                |
 | Asaas API key e webhook token               | Docker secret          | Vault                           | No painel do provedor; semestral         |
 | LLM API keys (OpenAI / Anthropic)          | Docker secret          | Vault                           | Trimestral + imediata sob suspeita       |
 | Postgres (`movivo_app`, `movivo_migrator`) | Docker secret          | Vault dynamic secrets           | Trimestral                               |

@@ -141,9 +141,8 @@ function makeWorker(deps: Deps = {}) {
   const sendTemplate = vi.fn((_to: string, _templateName: string, _variables?: readonly string[]) =>
     Promise.resolve(),
   );
-  const sendDocument = vi.fn(
-    (_to: string, _url: string, _caption: string, _fallback?: string, _fileName?: string) =>
-      Promise.resolve(),
+  const sendDocument = vi.fn((_to: string, _url: string, _caption: string, _fileName?: string) =>
+    Promise.resolve(),
   );
   const transport = {
     send,
@@ -153,7 +152,7 @@ function makeWorker(deps: Deps = {}) {
     hasCredentials: () => true,
   } as unknown as WhatsappTransport;
   const config = {
-    whatsapp: { publicSiteUrl: 'https://movivo.test', araraBaseUrl: '', araraApiKey: undefined },
+    whatsapp: { publicSiteUrl: 'https://movivo.test' },
   } as unknown as AppConfigService;
   const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() } as never;
   const worker = new WhatsappOutboundWorker(
@@ -295,7 +294,7 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
     expect(send).not.toHaveBeenCalled();
     expect(sendDocument).toHaveBeenCalledTimes(1);
     expect(redis.set).toHaveBeenCalledTimes(1);
-    const [, url, caption, , fileName] = sendDocument.mock.calls[0] ?? [];
+    const [, url, caption, fileName] = sendDocument.mock.calls[0] ?? [];
     expect(url).toBe('https://movivo.test/protocolo/protocol-access-token/pdf');
     expect(fileName).toBe('protocolo-ana-beatriz-souza-movivo.pdf');
     expect(caption).toMatch(/^Ana, seu treino está pronto\./);
@@ -467,7 +466,7 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
       },
     });
     await worker.process(job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 }));
-    const [, , , , fileName] = sendDocument.mock.calls[0] ?? [];
+    const [, , , fileName] = sendDocument.mock.calls[0] ?? [];
     expect(fileName).toBe('protocolo-movivo.pdf');
   });
 

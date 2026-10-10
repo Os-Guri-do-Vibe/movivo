@@ -3,9 +3,9 @@
  *
  * Cobre os dois sentidos do canal:
  *  - **OUTBOUND** — `WhatsappOutboundWorker` sobre a fila `whatsapp-outbound` (US-1.7/2.5),
- *    com o transporte ativo escolhido por `WHATSAPP_TRANSPORT_PROVIDER`.
- *  - **INBOUND** — `WebhookController` + `WhatsappInboundService` (US-3.1/US-3.1-EVO), com
- *    uma `WhatsappInboundEdge` por provedor fazendo autenticação e normalização na borda.
+ *    com `EvolutionHttpTransport`.
+ *  - **INBOUND** — `WebhookController` + `WhatsappInboundService` (US-3.1-EVO), com
+ *    `EvolutionInboundEdge` fazendo autenticação e normalização na borda.
  *
  * Regras que valem para qualquer mudança aqui:
  *  - Toda entrada é autenticada antes de qualquer parse, e responde 200 mesmo ao rejeitar
@@ -24,9 +24,7 @@ import { PinoLogger } from 'nestjs-pino';
 
 import { AppConfigService } from '../../core/config';
 import { JobsModule } from '../jobs/jobs.module';
-import { AraraHttpTransport } from './arara-transport';
 import { EVOLUTION_TRANSPORT, EvolutionHttpTransport } from './evolution-transport';
-import { AraraInboundEdge } from './inbound/arara-inbound.edge';
 import { EvolutionInboundEdge } from './inbound/evolution-inbound.edge';
 import { WHATSAPP_INBOUND_EDGES, type WhatsappInboundEdges } from './inbound/whatsapp-inbound-edge';
 import { UserJobLock } from './user-job-lock';
@@ -36,19 +34,11 @@ import { WhatsappOutboundWorker } from './whatsapp-outbound.worker';
 import { type WhatsappTransport, WHATSAPP_TRANSPORT } from './whatsapp-transport';
 
 /**
- * `WhatsappModule` (US-2.5) — outbound WhatsApp via AraraHQ (produção) ou EvolutionAPI
- * (teste do número separado, QR Code/Baileys — `WHATSAPP_TRANSPORT_PROVIDER=EVOLUTION`).
- *
- * `EVOLUTION_TRANSPORT` é provido **sempre**, independente do provedor ativo: o painel
- * admin "Sistema → Integração" precisa dele pra criar/conectar a instância mesmo quando
- * o transporte real ainda é a AraraHQ. `WHATSAPP_TRANSPORT` reaproveita essa MESMA
- * instância (não cria um segundo cliente HTTP — quebraria o confinamento) quando o
- * provedor ativo é `EVOLUTION`; do contrário constrói o `AraraHttpTransport` de sempre.
- * Default de `WHATSAPP_TRANSPORT_PROVIDER` é `ARARA` — trocar é decisão explícita de
- * `.env` local, nunca automática.
+ * `WhatsappModule` — outbound e inbound pela EvolutionAPI. O mesmo transporte atende
+ * ao painel de integração e ao worker de envio.
  *
  * `WhatsappOutboundWorker` sobre a fila `whatsapp-outbound` (US-1.7) e o webhook de
- * ENTRADA dos dois provedores (US-3.1/US-3.1-EVO). Importa `JobsModule` (fila é a via
+ * ENTRADA da EvolutionAPI (US-3.1-EVO). Importa `JobsModule` (fila é a via
  * entre domínios — §12.5); o resto (config, banco, Redis, logger) vem do CORE global por DI.
  */
 /**
@@ -83,23 +73,11 @@ function evolutionWebhookUrl(config: AppConfigService): string {
     },
     {
       provide: WHATSAPP_TRANSPORT,
-      inject: [AppConfigService, PinoLogger, EVOLUTION_TRANSPORT],
-      useFactory: (
-        config: AppConfigService,
-        logger: PinoLogger,
-        evolution: EvolutionHttpTransport,
-      ): WhatsappTransport =>
-        config.whatsapp.transportProvider === 'EVOLUTION'
-          ? evolution
-          : new AraraHttpTransport(
-              config.whatsapp.araraBaseUrl,
-              config.whatsapp.araraApiKey,
-              logger,
-            ),
+      inject: [EVOLUTION_TRANSPORT],
+      useFactory: (evolution: EvolutionHttpTransport): WhatsappTransport => evolution,
     },
     WhatsappOutboundWorker,
     WhatsappInboundService,
-    AraraInboundEdge,
     {
       // A borda da EvolutionAPI precisa saber QUAL instância é a nossa para rejeitar
       // entrega de uma segunda conta. O nome é descoberto em runtime (o painel cria a
@@ -114,15 +92,12 @@ function evolutionWebhookUrl(config: AppConfigService): string {
       ) => new EvolutionInboundEdge(config, () => evolution.lastKnownInstanceName(), logger),
     },
     {
-      // Objeto (e não Map) indexado por `InboundProvider`: o `Record` completo é checado
-      // pelo compilador, então acrescentar um provedor sem registrar a borda dele não
-      // compila — melhor que descobrir o buraco com um `undefined` em runtime.
+      // Mapa da única borda de entrada ativa.
       provide: WHATSAPP_INBOUND_EDGES,
-      inject: [AraraInboundEdge, EvolutionInboundEdge],
-      useFactory: (
-        arara: AraraInboundEdge,
-        evolution: EvolutionInboundEdge,
-      ): WhatsappInboundEdges => ({ ARARA: arara, EVOLUTION: evolution }),
+      inject: [EvolutionInboundEdge],
+      useFactory: (evolution: EvolutionInboundEdge): WhatsappInboundEdges => ({
+        EVOLUTION: evolution,
+      }),
     },
     // UserJobLock: provido aqui, consumido pelo AIResponseWorker (US-3.5).
     UserJobLock,

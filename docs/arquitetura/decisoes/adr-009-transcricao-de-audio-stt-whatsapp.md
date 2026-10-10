@@ -2,6 +2,8 @@
 
 **Status:** Aceita
 
+**Atualização (2026-10-09):** As menções à AraraHQ abaixo registram o contexto da decisão original. A integração foi removida; a EvolutionAPI é o canal WhatsApp atual, inclusive para áudio.
+
 **Data:** 2026-09-14 (decisão original) · **revisada no mesmo dia** — item 1 mudou de
 "fornecedor único" para "cascata com fallback automático" a pedido do fundador, depois de a
 chave da OpenAI de dev ficar sem saldo (`credit_balance_exhausted`) durante o teste local.

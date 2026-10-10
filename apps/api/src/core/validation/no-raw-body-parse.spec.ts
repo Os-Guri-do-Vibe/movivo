@@ -32,9 +32,8 @@ const RAW_INPUT_HELPER = /=\s*schema\.safeParse\(input\)/;
 const NOT_A_CLIENT_BODY: Readonly<Record<string, string>> = {
   'modules/admin/ai-config.controller.ts': 'query string `targetSex` (GET), não escreve estado',
   'modules/protocol/protocol-generator.service.ts': 'saída do LLM, não entrada do cliente',
-  'modules/whatsapp/inbound/arara-inbound.edge.ts': 'webhook de provedor (HMAC), já `.strict()`',
   'modules/whatsapp/inbound/evolution-inbound.edge.ts':
-    'webhook de provedor (HMAC); o envelope de terceiro evolui sem aviso',
+    'webhook de provedor autenticado por token; o envelope de terceiro evolui sem aviso',
 };
 
 describe('validação de corpo de request', () => {

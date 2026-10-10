@@ -231,7 +231,7 @@ export const checkinWeeklyStatusEnum = pgEnum('checkin_weekly_status', [
 /** Sentido da mensagem do ponto de vista da plataforma. */
 export const messageDirectionEnum = pgEnum('message_direction', ['INBOUND', 'OUTBOUND']);
 
-/** Tipo de mídia/mensagem da API do WhatsApp Business via AraraHQ. */
+/** Tipo de mídia/mensagem do canal WhatsApp. */
 export const messageTypeEnum = pgEnum('message_type', [
   'TEXT',
   'IMAGE',
