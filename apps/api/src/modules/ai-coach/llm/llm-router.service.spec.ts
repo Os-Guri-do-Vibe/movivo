@@ -210,6 +210,21 @@ describe('LlmRouter.complete', () => {
     );
   });
 
+  it.each([401, 402, 403])(
+    'credencial/saldo do provedor (%i, AUTH) faz failover para o próximo da cascata',
+    async (status) => {
+      const primary = new FakeProvider('OPENAI_GPT41', 'gpt-4.1', () =>
+        Promise.reject(new LLMProviderError('AUTH', 'OPENAI_GPT41', String(status))),
+      );
+      const fallback = new FakeProvider('ANTHROPIC_SONNET45', 'x', ok('x'));
+      const { router } = make([primary, fallback]);
+
+      const result = await router.complete(request());
+      expect(result.provider).toBe('ANTHROPIC_SONNET45');
+      expect(result.attempt).toBe(2);
+    },
+  );
+
   it('todos os provedores falham → LLMUnavailableError + ai_jobs FAILED', async () => {
     const fail = (n: ProviderName) => () =>
       Promise.reject(new LLMProviderError('SERVER', n, '500'));

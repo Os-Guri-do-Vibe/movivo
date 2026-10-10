@@ -6,7 +6,8 @@
  *   2. teto anti-abuso (LLM10) incrementa o counter do dia;
  *   3. cascata DeepSeek V4 Pro → GPT-4.1 → Claude Sonnet 4.5, pulando provedor bloqueado;
  *   4. por provedor: timeout hard (8s), 1 retry só p/ erro de rede transitório, failover
- *      direto em 429/5xx/timeout/sem-chave; erro 4xx (CLIENT) aborta sem failover;
+ *      direto em 429/5xx/timeout/sem-chave e em 401/402/403 (AUTH: chave inválida ou conta
+ *      sem saldo — problema do provedor); erro 4xx do chamador (CLIENT) aborta sem failover;
  *   5. grava um `ai_jobs` completo e pseudonimizado com custo BRL.
  *
  * `dataClass` tem fail-safe `default = HEALTH` (é otimização de custo, nunca autorização

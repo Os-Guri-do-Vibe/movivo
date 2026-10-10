@@ -145,6 +145,9 @@ describe('OpenAiProvider', () => {
   it.each([
     [429, 'RATE_LIMIT'],
     [503, 'SERVER'],
+    [401, 'AUTH'],
+    [402, 'AUTH'],
+    [403, 'AUTH'],
     [400, 'CLIENT'],
   ])('classifica status %i como %s', async (status, kind) => {
     mockFetch(() =>

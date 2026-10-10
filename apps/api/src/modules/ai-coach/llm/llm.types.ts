@@ -109,7 +109,8 @@ export type LLMErrorKind =
   | 'SERVER' // 5xx → failover direto
   | 'TIMEOUT' // estourou o timeout hard → failover
   | 'NO_CREDENTIALS' // chave ausente → failover; se todos, erro claro
-  | 'CLIENT'; // 4xx (não-429) → não faz failover, erro do chamador
+  | 'AUTH' // 401/402/403: chave inválida/revogada ou conta sem saldo → problema DO PROVEDOR, failover
+  | 'CLIENT'; // demais 4xx (não-429) → não faz failover, erro do chamador
 
 /** Erro de provedor classificado, para o router decidir retry vs. failover vs. abortar. */
 export class LLMProviderError extends Error {
