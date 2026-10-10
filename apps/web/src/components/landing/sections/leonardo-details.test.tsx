@@ -24,7 +24,9 @@ describe('LeonardoDetails', () => {
   it('abre com nome completo, posição e respaldo CREF', async () => {
     const drawer = await openDrawer();
     expect(drawer).toHaveTextContent('Sócio e responsável técnico');
-    expect(drawer).toHaveTextContent('Profissional de Educação Física · Regulamentado pelo CREF');
+    expect(drawer).toHaveTextContent(
+      'Profissional de Educação Física · Regulamentado CREF sob o nº 206778-G/SP',
+    );
   });
 
   it('formação em andamento aparece como em andamento, nunca como título', async () => {

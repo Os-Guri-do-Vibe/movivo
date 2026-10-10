@@ -51,7 +51,7 @@ describe('Landing', () => {
   it('respaldo CREF visível e nenhuma credencial inventada', () => {
     const { container } = render(<Landing />);
     const text = container.textContent ?? '';
-    expect(text).toMatch(/Regulamentado pelo CREF/);
+    expect(text).toMatch(/Regulamentado CREF sob o nº 206778-G\/SP/);
     expect(text).toMatch(/registro no CREF/i);
     expect(text).not.toMatch(/\bm[ée]dico\b|nutricionista/i);
   });
