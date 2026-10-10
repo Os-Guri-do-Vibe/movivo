@@ -351,7 +351,7 @@ export const envSchema = z
      * e volta em toda entrega (`x-movivo-webhook-token`).
      *
      * `min(43)` = 32 bytes de entropia em base64url. Gere com `openssl rand -base64 32`
-     * (ou use `scripts/gen-local-secrets.sh`, que cria `secrets/evolution_webhook_token`).
+     * (ou use `scripts/gen-local-secrets.sh`, que cria `secrets/desenvolvimento/evolution_webhook_token`).
      *
      * **Sem `.default()` de propósito**: `undefined` é o que ativa o fail-closed da borda
      * (`EvolutionInboundEdge.verify` → `no_secret`). Um default silencioso viraria um
@@ -625,7 +625,7 @@ export function formatEnvError(error: z.ZodError<unknown>): string {
     '',
     'Como resolver:',
     '  1. cp apps/api/.env.example apps/api/.env',
-    '  2. pnpm run infra:secrets   (gera os arquivos em secrets/, nunca versionados)',
+    '  2. pnpm run infra:secrets   (gera os arquivos em secrets/desenvolvimento/, nunca versionados)',
     '  3. pnpm run infra:up',
     'Contrato completo dos segredos: docs/SECURITY.md §2.',
   ].join('\n');

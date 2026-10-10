@@ -234,26 +234,28 @@ volumes:
     name: movivo-vault-data
 
 secrets:
-  internal_ca: { file: ./secrets/internal_tls/ca.crt }
-  postgres_tls_cert: { file: ./secrets/internal_tls/postgres.crt }
-  postgres_tls_key: { file: ./secrets/internal_tls/postgres.key }
-  evolution_postgres_tls_cert: { file: ./secrets/internal_tls/evolution-postgres.crt }
-  evolution_postgres_tls_key: { file: ./secrets/internal_tls/evolution-postgres.key }
-  pgbouncer_tls_cert: { file: ./secrets/internal_tls/pgbouncer.crt }
-  pgbouncer_tls_key: { file: ./secrets/internal_tls/pgbouncer.key }
-  redis_master_tls_cert: { file: ./secrets/internal_tls/redis-master.crt }
-  redis_master_tls_key: { file: ./secrets/internal_tls/redis-master.key }
-  redis_replica_tls_cert: { file: ./secrets/internal_tls/redis-replica.crt }
-  redis_replica_tls_key: { file: ./secrets/internal_tls/redis-replica.key }
-  redis_sentinel_tls_cert: { file: ./secrets/internal_tls/redis-sentinel.crt }
-  redis_sentinel_tls_key: { file: ./secrets/internal_tls/redis-sentinel.key }
-  vault_tls_cert: { file: ./secrets/internal_tls/vault.crt }
-  vault_tls_key: { file: ./secrets/internal_tls/vault.key }
-  api_tls_cert: { file: ./secrets/internal_tls/api.crt }
-  api_tls_key: { file: ./secrets/internal_tls/api.key }
-  web_tls_cert: { file: ./secrets/internal_tls/web.crt }
-  web_tls_key: { file: ./secrets/internal_tls/web.key }
-  evolution_api_tls_cert: { file: ./secrets/internal_tls/evolution-api.crt }
-  evolution_api_tls_key: { file: ./secrets/internal_tls/evolution-api.key }
-  health_cipher_keyring: { file: ./secrets/health_cipher_keyring }
-  vault_token: { file: ./secrets/vault_token }
+  internal_ca: { file: ./secrets/desenvolvimento/internal_tls/ca.crt }
+  postgres_tls_cert: { file: ./secrets/desenvolvimento/internal_tls/postgres.crt }
+  postgres_tls_key: { file: ./secrets/desenvolvimento/internal_tls/postgres.key }
+  evolution_postgres_tls_cert:
+    { file: ./secrets/desenvolvimento/internal_tls/evolution-postgres.crt }
+  evolution_postgres_tls_key:
+    { file: ./secrets/desenvolvimento/internal_tls/evolution-postgres.key }
+  pgbouncer_tls_cert: { file: ./secrets/desenvolvimento/internal_tls/pgbouncer.crt }
+  pgbouncer_tls_key: { file: ./secrets/desenvolvimento/internal_tls/pgbouncer.key }
+  redis_master_tls_cert: { file: ./secrets/desenvolvimento/internal_tls/redis-master.crt }
+  redis_master_tls_key: { file: ./secrets/desenvolvimento/internal_tls/redis-master.key }
+  redis_replica_tls_cert: { file: ./secrets/desenvolvimento/internal_tls/redis-replica.crt }
+  redis_replica_tls_key: { file: ./secrets/desenvolvimento/internal_tls/redis-replica.key }
+  redis_sentinel_tls_cert: { file: ./secrets/desenvolvimento/internal_tls/redis-sentinel.crt }
+  redis_sentinel_tls_key: { file: ./secrets/desenvolvimento/internal_tls/redis-sentinel.key }
+  vault_tls_cert: { file: ./secrets/desenvolvimento/internal_tls/vault.crt }
+  vault_tls_key: { file: ./secrets/desenvolvimento/internal_tls/vault.key }
+  api_tls_cert: { file: ./secrets/desenvolvimento/internal_tls/api.crt }
+  api_tls_key: { file: ./secrets/desenvolvimento/internal_tls/api.key }
+  web_tls_cert: { file: ./secrets/desenvolvimento/internal_tls/web.crt }
+  web_tls_key: { file: ./secrets/desenvolvimento/internal_tls/web.key }
+  evolution_api_tls_cert: { file: ./secrets/desenvolvimento/internal_tls/evolution-api.crt }
+  evolution_api_tls_key: { file: ./secrets/desenvolvimento/internal_tls/evolution-api.key }
+  health_cipher_keyring: { file: ./secrets/desenvolvimento/health_cipher_keyring }
+  vault_token: { file: ./secrets/desenvolvimento/vault_token }

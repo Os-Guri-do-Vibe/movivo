@@ -123,7 +123,7 @@ const appRole = env.DATABASE_USER ?? 'movivo_app';
 // (U+FEFF) protege contra um secret editado à mão no Windows.
 const superUser = 'postgres';
 const superPassword = readFileSync(
-  resolve(apiRoot, '..', '..', 'secrets', 'postgres_superuser_password'),
+  resolve(apiRoot, '..', '..', 'secrets', 'desenvolvimento', 'postgres_superuser_password'),
   'utf8',
 ).trimEnd();
 

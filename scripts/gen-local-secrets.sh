@@ -12,7 +12,8 @@
 # No Windows use o Git Bash (já instalado com o Git for Windows) ou rode o
 # equivalente nativo: pwsh/powershell scripts/gen-local-secrets.ps1
 #
-# O que gera em ./secrets/ (diretório 100% ignorado pelo Git):
+# O que gera em ./secrets/desenvolvimento/ (100% ignorado pelo Git; produção vive em
+# secrets/producao/ e nunca é gerada aqui):
 #   postgres_superuser_password   senha do superusuário (bootstrap do cluster)
 #   postgres_app_password         senha da role movivo_app  (runtime, sem BYPASSRLS)
 #   postgres_migrator_password    senha da role movivo_migrator (migrações)
@@ -30,7 +31,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SECRETS_DIR="${REPO_ROOT}/secrets"
+SECRETS_DIR="${REPO_ROOT}/secrets/desenvolvimento"
 
 FORCE=0
 for arg in "$@"; do
@@ -97,6 +98,7 @@ write_jwt_keypair() {
 
 # --- Execução -----------------------------------------------------------------
 mkdir -p "$SECRETS_DIR"
+chmod 700 "$(dirname "$SECRETS_DIR")" 2>/dev/null || true
 chmod 700 "$SECRETS_DIR" 2>/dev/null || true
 
 echo "MOVIVO · gerando Docker Secrets locais em: ${SECRETS_DIR}"
@@ -159,7 +161,7 @@ for key in asaas_api_key openai_api_key deepseek_api_key anthropic_api_key groq_
   [ -s "${SECRETS_DIR}/${key}" ] || missing_external="${missing_external} ${key}"
 done
 if [ -n "$missing_external" ]; then
-  echo "  ! chaves de terceiros ainda ausentes em secrets/:${missing_external}"
+  echo "  ! chaves de terceiros ainda ausentes em secrets/desenvolvimento/:${missing_external}"
   echo "    (cole cada valor no arquivo de mesmo nome — o 'docker compose up' só sobe com todos)"
 fi
 

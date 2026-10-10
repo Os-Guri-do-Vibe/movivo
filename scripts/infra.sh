@@ -9,7 +9,7 @@
 #       (ou `pnpm run infra:psql`, `infra:pools`, `infra:redis`, ...)
 #
 # Existe porque `make` não está disponível por padrão no Windows, mas todos
-# estes comandos precisam injetar uma senha lida de `secrets/` — algo que não
+# estes comandos precisam injetar uma senha lida de `secrets/desenvolvimento/` — algo que não
 # cabe num campo "scripts" do package.json de forma portável.
 #
 # A senha é passada por variável de ambiente do `docker compose exec` (processo
@@ -22,7 +22,7 @@ cd "$(dirname "$0")/.."
 export MSYS_NO_PATHCONV=1   # Git Bash: não converter /run/secrets/... em C:\...
 
 read_secret() {
-  local path="secrets/$1"
+  local path="secrets/desenvolvimento/$1"
   if [ ! -s "$path" ]; then
     echo "ERRO: secret '$path' ausente ou vazio. Rode: pnpm run infra:secrets" >&2
     exit 1

@@ -79,7 +79,7 @@ const adminClient = postgres({
   port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 15432),
   user: 'postgres',
   password: readFileSync(
-    resolve(apiRoot, '..', '..', 'secrets', 'postgres_superuser_password'),
+    resolve(apiRoot, '..', '..', 'secrets', 'desenvolvimento', 'postgres_superuser_password'),
     'utf8',
   ).trimEnd(),
   database: env.DATABASE_NAME ?? 'movivo',

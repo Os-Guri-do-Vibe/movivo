@@ -48,7 +48,10 @@ const tenant = new TenantDatabase(db);
 const cipher = new HealthCipherService(db, {
   pgcryptoKey:
     env.PGCRYPTO_KEY ??
-    readFileSync(resolve(apiRoot, '..', '..', 'secrets', 'pgcrypto_key'), 'utf8').trimEnd(),
+    readFileSync(
+      resolve(apiRoot, '..', '..', 'secrets', 'desenvolvimento', 'pgcrypto_key'),
+      'utf8',
+    ).trimEnd(),
 } as never);
 const logger = {
   info: () => undefined,
@@ -63,7 +66,7 @@ const adminClient = postgres({
   port: Number(env.MIGRATION_DATABASE_PORT ?? process.env.HOST_POSTGRES_PORT ?? 15432),
   user: 'postgres',
   password: readFileSync(
-    resolve(apiRoot, '..', '..', 'secrets', 'postgres_superuser_password'),
+    resolve(apiRoot, '..', '..', 'secrets', 'desenvolvimento', 'postgres_superuser_password'),
     'utf8',
   ).trimEnd(),
   database: env.DATABASE_NAME ?? 'movivo',

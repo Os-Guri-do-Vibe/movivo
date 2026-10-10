@@ -128,7 +128,7 @@ pnpm run format:check
 
 ### 1. Gere os segredos locais
 
-Valores aleatórios e descartáveis, gravados em `secrets/` (100% ignorado pelo Git):
+Valores aleatórios e descartáveis, gravados em `secrets/desenvolvimento/` (100% ignorado pelo Git; `secrets/producao/` guarda as chaves de fornecedores de produção):
 
 ```bash
 # Linux, macOS ou Git Bash no Windows
@@ -164,7 +164,7 @@ os lê pelo par `<VAR>_FILE`:
 | 3º          | Ausente → o `ConfigModule` falha rápido no boot (Zod), citando os dois nomes.                                                |
 
 Caminho absoluto vale como está (`/run/secrets/...` no container); caminho relativo
-resolve contra o `cwd` do processo (`../../secrets/...` rodando no host). A
+resolve contra o `cwd` do processo (`../../secrets/desenvolvimento/...` rodando no host). A
 especificação normativa que o `ConfigModule` implementa está em
 [`docs/SECURITY.md` §2](docs/SECURITY.md#2-contrato-de-consumo-de-secrets-_file--normativo).
 
@@ -197,10 +197,10 @@ Dockerfiles da produção (`NODE_ENV=production`, usuário não-root). Web em
 http://localhost:3000 e API em http://localhost:3001/api/v1. A API lê o **mesmo**
 `infra/vps/api.env` da VPS; só as URLs mudam (bloco `environment:` do serviço `api`).
 
-- **Pré-requisito extra:** as chaves de terceiros em `secrets/` (`asaas_api_key`,
+- **Pré-requisito extra:** as chaves de terceiros em `secrets/desenvolvimento/` (`asaas_api_key`,
   `openai_api_key`, `deepseek_api_key`, `anthropic_api_key`, `groq_api_key`)
   são exclusivas de desenvolvimento. O `deploy.sh` só provisiona credenciais de produção
-  a partir de uma fonte explícita. Com
+  a partir de `secrets/producao/` (ou de `PRODUCTION_SECRETS_DIR`). Com
   `NODE_ENV=production` a API recusa subir sem OpenAI e sem Asaas (Sandbox).
 - **Mudou código?** Rode `pnpm run infra:up` de novo (reconstrói só o que mudou).
   `pnpm run infra:rebuild` refaz as imagens sem cache.

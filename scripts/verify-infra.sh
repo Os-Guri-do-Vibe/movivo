@@ -136,8 +136,8 @@ check "Redis exige autenticação (NOAUTH sem senha)" bash -c \
 section "6. Checklist de segurança (Sato) — segredos e exposição"
 # 6.1 Nenhum valor de secret pode aparecer no compose resolvido nem no inspect.
 LEAK=0
-for f in secrets/postgres_app_password secrets/postgres_migrator_password \
-         secrets/postgres_superuser_password secrets/redis_password; do
+for f in secrets/desenvolvimento/postgres_app_password secrets/desenvolvimento/postgres_migrator_password \
+         secrets/desenvolvimento/postgres_superuser_password secrets/desenvolvimento/redis_password; do
   [ -s "$f" ] || continue
   val="$(tr -d '\r\n' < "$f")"
   if $DC config 2>/dev/null | grep -qF "$val"; then

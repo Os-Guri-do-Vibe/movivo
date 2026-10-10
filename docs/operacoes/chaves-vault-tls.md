@@ -4,15 +4,16 @@
 
 O Compose padrão local carrega `docker-compose.override.yml`, que aponta para
 `infra/security/docker-compose.secure.yml`. O deploy copia esse mesmo overlay para
-`/opt/movivo/compose.override.yml`. Não use um Compose sem o overlay com os dados migrados.
+`/opt/movivo/compose.override.yml`, reescrevendo `./secrets/desenvolvimento/` para
+`./secrets/` (na VPS os segredos ficam direto em `/opt/movivo/secrets/`). Não use um Compose sem o overlay com os dados migrados.
 
 ```sh
 pnpm infra:up
-curl --cacert secrets/internal_tls/ca.crt https://localhost:3001/api/v1/health
+curl --cacert secrets/desenvolvimento/internal_tls/ca.crt https://localhost:3001/api/v1/health
 # Aplicação: https://localhost:3000
 ```
 
-A CA privada local está em `secrets/internal_tls/ca.crt`. O navegador precisa confiar
+A CA privada local está em `secrets/desenvolvimento/internal_tls/ca.crt`. O navegador precisa confiar
 nessa CA para abrir HTTPS sem aviso; a automação não altera a confiança global do
 macOS. O acesso antigo `http://localhost:3000` passa a ser HTTPS. As portas HTTP dos
 processos escutam apenas loopback do namespace compartilhado com o sidecar TLS.
@@ -39,7 +40,7 @@ CA e custódia administrativas ficam em `~/.local/share/movivo-security/local` n
 ou `~/.local/share/movivo-security/production` do usuário deploy na VPS (diretório 700,
 arquivos 600). A chave da CA e `vault-init.json` não são montados na API/Vault nem
 entram em dumps ou snapshots. Os certificados públicos podem ter modo644; os
-segredos legíveis pelo usuário não-root da aplicação estão dentro de `secrets/` 700.
+segredos legíveis pelo usuário não-root da aplicação estão dentro de `secrets/desenvolvimento/` (local) ou `secrets/` (VPS), ambos 700.
 
 `ponytail:` este MVP usa um Vault de nó único e custódia operacional de um operador.
 A recuperação automática lê a custódia do host; root da VPS continua dentro da

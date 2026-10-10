@@ -161,7 +161,7 @@ HEALTH_CIPHER_KEY_ID=health-2026-q4 docker compose -f docker-compose.yml -f dock
 ```
 
 Para produção, primeiro Compose é `infra/vps/docker-compose.prod.yml`; caminhos
-`./secrets` dos overrides resolvem relativos a ele. Usar esse override em cada deploy;
+`./secrets` dos overrides resolvem relativos a ele (no repo apontam para `./secrets/desenvolvimento`; o `deploy.sh` reescreve para `./secrets` na cópia enviada à VPS). Usar esse override em cada deploy;
 não basta definir `*_FILE` sem montar o arquivo. `docker compose config --quiet`
 valida sem imprimir ambientes resolvidos. Configuração dos overrides validada com `config --quiet` (local e produção). O provisionamento e ativação reais foram concluídos em 2026-10-07, conforme as evidências ao final.
 

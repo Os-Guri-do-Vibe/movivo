@@ -31,8 +31,8 @@ def openssl(*args):
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def certificates(root, custody):
-    tls = root / "secrets/internal_tls"
+def certificates(secrets_dir, custody):
+    tls = secrets_dir / "internal_tls"
     tls.mkdir(parents=True, exist_ok=True, mode=0o700)
     custody.mkdir(parents=True, exist_ok=True, mode=0o700)
     ca_key = custody / "ca.key"
@@ -71,7 +71,7 @@ def certificates(root, custody):
             private_write(key, (tmp / "key").read_bytes())
             private_write(cert, (tmp / "cert").read_bytes())
             cert.chmod(0o644)
-    keyring = root / "secrets/health_cipher_keyring"
+    keyring = secrets_dir / "health_cipher_keyring"
     if not keyring.exists() and (custody / "health-keyring.json").exists():
         raise RuntimeError("Keyring ausente com custódia existente: restaure, não regenere o mesmo ID.")
     if not keyring.exists():
@@ -84,15 +84,15 @@ def certificates(root, custody):
         raise RuntimeError("Keyring difere da custódia; valide a rotação antes de continuar.")
     if not keyring_custody.exists():
         private_write(keyring_custody, keyring.read_bytes())
-    token = root / "secrets/vault_token"
+    token = secrets_dir / "vault_token"
     if not token.exists():
         private_write(token, b"not-provisioned")
         token.chmod(0o644)
     print("CA, certificados e chave independente provisionados; valores não exibidos.")
 
 
-def provision_vault(root, custody, snapshot=None):
-    context = ssl.create_default_context(cafile=str(root / "secrets/internal_tls/ca.crt"))
+def provision_vault(secrets_dir, custody, snapshot=None):
+    context = ssl.create_default_context(cafile=str(secrets_dir / "internal_tls/ca.crt"))
     address = "https://127.0.0.1:8200"
 
     def request(path, data=None, token=None, binary=False):
@@ -153,7 +153,7 @@ def provision_vault(root, custody, snapshot=None):
               'path "auth/token/renew-self" { capabilities = ["update"] }\n'
               'path "auth/token/lookup-self" { capabilities = ["read"] }\n')
     request("sys/policies/acl/movivo-health", {"policy": policy}, root_token)
-    token_file = root / "secrets/vault_token"
+    token_file = secrets_dir / "vault_token"
     app_token = token_file.read_text().strip()
     try:
         request("auth/token/renew-self", {}, app_token)
@@ -189,12 +189,14 @@ def main():
     parser.add_argument("--snapshot", type=Path)
     args = parser.parse_args()
     root = args.root.resolve()
+    # Na VPS os segredos ficam direto em <root>/secrets; no repo local, em secrets/desenvolvimento.
+    secrets_dir = root / ("secrets/desenvolvimento" if args.environment == "local" else "secrets")
     custody = Path.home() / ".local/share/movivo-security" / args.environment
     os.umask(0o077)
     if args.vault:
-        provision_vault(root, custody, args.snapshot)
+        provision_vault(secrets_dir, custody, args.snapshot)
     else:
-        certificates(root, custody)
+        certificates(secrets_dir, custody)
 
 
 if __name__ == "__main__":
