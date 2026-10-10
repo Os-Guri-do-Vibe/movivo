@@ -27,6 +27,8 @@ import { AuditQueryController } from './audit-query.controller';
 import { AuditQueryService } from './audit-query.service';
 import { ControlCenterController } from './control-center.controller';
 import { ControlCenterService } from './control-center.service';
+import { ConversationsController } from './conversations.controller';
+import { ConversationsService } from './conversations.service';
 import { DashboardController } from './dashboard.controller';
 import { DashboardService } from './dashboard.service';
 import { FinanceController } from './finance.controller';
@@ -54,6 +56,7 @@ import { PartnersService } from './partners.service';
   controllers: [
     DashboardController,
     ControlCenterController,
+    ConversationsController,
     AiConfigController,
     FinanceController,
     MarketingController,
@@ -70,6 +73,7 @@ import { PartnersService } from './partners.service';
     AuditService,
     DashboardService,
     ControlCenterService,
+    ConversationsService,
     AiConfigService,
     FinanceService,
     MarketingService,
