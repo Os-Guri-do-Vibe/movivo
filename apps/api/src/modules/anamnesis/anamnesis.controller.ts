@@ -108,10 +108,6 @@ export class AnamnesisController {
     description: 'Número de etapa inválido (fora de 1..3) ou corpo fora do schema da etapa.',
   })
   @ApiResponse({ status: 404, description: 'Token inexistente ou expirado.' })
-  @ApiResponse({
-    status: 503,
-    description: 'Cadastro indisponível enquanto os documentos jurídicos estão em revisão.',
-  })
   async patchStep(@Param('token') token: string, @Param('n') n: string, @Body() body: unknown) {
     return this.anamnesis.patchStep(token, this.parseStepNumber(n), body);
   }
@@ -172,10 +168,6 @@ export class AnamnesisController {
     description: 'Sessão incompleta (etapa faltante ou telefone não verificado).',
   })
   @ApiResponse({ status: 404, description: 'Token inexistente ou expirado.' })
-  @ApiResponse({
-    status: 503,
-    description: 'Cadastro indisponível enquanto os documentos jurídicos estão em revisão.',
-  })
   async submit(@Param('token') token: string) {
     return this.anamnesis.submit(token);
   }
