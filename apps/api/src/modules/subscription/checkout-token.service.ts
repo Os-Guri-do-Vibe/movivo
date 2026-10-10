@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 
 import { AccessLinkService } from '../../core/database/access-link.service';
 
@@ -10,7 +11,8 @@ export class CheckoutTokenService {
   constructor(private readonly links: AccessLinkService) {}
 
   issue(userId: string, now = new Date()) {
-    return this.links.issue('CHECKOUT', userId, userId, TTL_MS, now);
+    // Cada mensagem mantém seu próprio link válido até expirar; um lembrete não revoga o anterior.
+    return this.links.issue('CHECKOUT', userId, randomUUID(), TTL_MS, now);
   }
 
   async verify(token: string, now = new Date()) {

@@ -230,12 +230,20 @@
   min-height: 52px;
   align-items: center;
   justify-content: center;
+  /* Separado do botão principal logo acima (o contêiner dele é outro). */
+  margin-top: 12px;
+  border: 1.5px solid var(--petroleo-vivo);
   border-radius: 14px;
   color: var(--petroleo-vivo);
-  background: var(--verde-pulso);
+  background: var(--branco);
   font-size: 14px;
   font-weight: 800;
   text-decoration: none;
+  transition: background-color 160ms ease;
+}
+
+.supportButton:hover {
+  background: var(--verde-pulso-tenue);
 }
 
 .supportButton:focus-visible {

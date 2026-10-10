@@ -278,7 +278,7 @@ supressão de erros nem denylist de tokens na solução permanente.
 
 ## Atualizar credenciais de fornecedores
 
-Os cinco arquivos são `asaas_api_key` (Sandbox), `openai_api_key`,
+Os cinco arquivos são `asaas_api_key` (produção após o corte), `openai_api_key`,
 `anthropic_api_key`, `deepseek_api_key` e `groq_api_key`. Evolution usa suas
 credenciais próprias, exclusivas desta VPS.
 `api.env` contém apenas ponteiros `*_FILE`, nunca os valores. Segredos não participam
@@ -288,8 +288,24 @@ não reutilize a chave de desenvolvimento.
 O script instalado em `/opt/movivo/bin/update-provider-secret.sh` recebe a chave
 por stdin, valida uma chamada GET autenticada ao fornecedor sem seguir redirects,
 substitui o arquivo atomicamente e recria apenas a API. Se a API não ficar saudável,
-restaura a anterior. **Revogue a anterior no console apenas após sucesso.** Asaas
-permanece Sandbox até a aprovação do gate PCI; não use chave de produção aqui.
+restaura a anterior. **Revogue a anterior no console apenas após sucesso.** Para
+Asaas, configure `ASAAS_API_URL=https://api.asaas.com/v3` e a chave da mesma
+conta em conjunto. O token `asaas_webhook_secret` da VPS deve corresponder ao
+Auth Token cadastrado no webhook de produção. Cartão em produção passa pelo
+Checkout hospedado; a aplicação não recebe PAN/CVV.
+
+O corte Sandbox → produção usa o workflow manual
+`activate-asaas-production.yml` depois que a versão compatível já estiver
+implantada. Ele lê `ASAAS_PRODUCTION_API_KEY` e
+`ASAAS_PRODUCTION_WEBHOOK_TOKEN` dos secrets do environment `production`,
+valida a chave na API real, troca URL e arquivos na VPS, recria a API e
+restaura os valores anteriores se o healthcheck falhar. Após o sucesso,
+atualize também `API_ENV_PRODUCTION` para a URL real, evitando que o próximo
+deploy volte ao Sandbox. Reative o webhook somente quando o Auth Token
+configurado no Asaas corresponder ao arquivo da VPS.
+
+Lista dos eventos de webhook a ligar no painel do Asaas e o passo a passo do estorno manual em
+[`docs/pagamentos/FLUXO-ASSINATURA-ASAAS.md`](../pagamentos/FLUXO-ASSINATURA-ASAAS.md).
 
 No terminal zsh do Mac (a entrada fica oculta e não vira argumento/histórico):
 

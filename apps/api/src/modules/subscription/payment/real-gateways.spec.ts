@@ -25,13 +25,7 @@ function input(overrides: Partial<StartPaymentInput> = {}): StartPaymentInput {
       addressNumber: '100',
       phone: '11999999999',
     },
-    card: {
-      holderName: 'PESSOA SANDBOX',
-      number: '4111111111111111',
-      expiryMonth: '12',
-      expiryYear: '2030',
-      ccv: '123',
-    },
+    returnUrl: 'https://movivo.test/assinar/opaque',
     remoteIp: '127.0.0.1',
     termsVersion: 'terms-v1',
     ...overrides,
@@ -54,63 +48,132 @@ describe('AsaasGateway — operações Sandbox', () => {
     expect(new AsaasGateway('sandbox-key', undefined, API).hasCredentials()).toBe(false);
   });
 
-  it('cria assinatura mensal no cartão sem devolver PAN/CVV', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(json({ data: [{ id: 'cus_1' }] }))
-      .mockResolvedValueOnce(json({ data: [] }))
-      .mockResolvedValueOnce(json({ id: 'sub_1', status: 'PENDING', nextDueDate: '2026-09-24' }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    const result = await new AsaasGateway('sandbox-key', TOKEN, API).startPayment(input());
-
-    expect(result).toEqual({
-      status: 'PENDING',
-      externalCustomerId: 'cus_1',
-      externalSubscriptionId: 'sub_1',
-      nextBillingAt: '2026-09-24',
-    });
-    const [url, init] = fetchMock.mock.calls[2] as [string, RequestInit];
-    expect(url).toBe(`${API}/subscriptions/`);
-    expect(new Headers(init.headers).get('access_token')).toBe('sandbox-key');
-    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-    expect(body).toMatchObject({ billingType: 'CREDIT_CARD', value: 79.9, cycle: 'MONTHLY' });
-    expect(JSON.stringify(result)).not.toContain('411111');
-  });
-
   it.each([
-    ['QUARTERLY', 7590, 22770, 3],
-    ['SEMIANNUAL', 7190, 43140, 6],
-    ['ANNUAL', 6790, 81480, 12],
+    ['MONTHLY', 7990, 1, 'RECURRENT'],
+    ['QUARTERLY', 22770, 3, 'INSTALLMENT'],
+    ['SEMIANNUAL', 43140, 6, 'INSTALLMENT'],
+    ['ANNUAL', 81480, 12, 'INSTALLMENT'],
   ] as const)(
-    'cria compra %s pelo total do contrato em até %ix',
-    async (plan, monthlyCents, totalCents, installments) => {
+    'cartão %s abre o Checkout hospedado com o cliente já cadastrado, sem PAN/CVV',
+    async (plan, totalCents, months, chargeType) => {
       const fetchMock = vi
         .fn()
-        .mockResolvedValueOnce(json({ data: [{ id: 'cus_1' }] }))
-        .mockResolvedValueOnce(json({ data: [] }))
-        .mockResolvedValueOnce(json({ id: 'ins_1' }));
+        .mockResolvedValueOnce(json({ data: [] })) // cliente ainda não existe
+        .mockResolvedValueOnce(json({ id: 'cus_1' })) // cria o cliente
+        .mockResolvedValueOnce(
+          json({
+            id: 'chk_1',
+            link: 'https://sandbox.asaas.com/000/checkoutSession/show/chk_1',
+          }),
+        );
       vi.stubGlobal('fetch', fetchMock);
 
       const result = await new AsaasGateway('sandbox-key', TOKEN, API).startPayment(
-        input({ plan, monthlyCents, totalCents, months: installments, installments }),
+        input({ plan, months, totalCents, installments: months }),
       );
 
-      expect(result.externalInstallmentId).toBe('ins_1');
-      const body = JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body));
-      expect(body).toMatchObject({
-        installmentCount: installments,
-        value: monthlyCents / 100,
-        totalValue: totalCents / 100,
-        billingType: 'CREDIT_CARD',
+      expect(result).toEqual({
+        status: 'PENDING',
+        externalCustomerId: 'cus_1',
+        externalCheckoutSessionId: 'chk_1',
+        checkoutUrl: 'https://sandbox.asaas.com/000/checkoutSession/show/chk_1',
       });
+      const [url, init] = fetchMock.mock.calls[2] as [string, RequestInit];
+      expect(url).toBe(`${API}/checkouts`);
+      expect(new Headers(init.headers).get('access_token')).toBe('sandbox-key');
+      const body = JSON.parse(String(init.body));
+      expect(body).toMatchObject({
+        customer: 'cus_1',
+        billingTypes: ['CREDIT_CARD'],
+        chargeTypes: chargeType === 'RECURRENT' ? ['RECURRENT'] : ['DETACHED', 'INSTALLMENT'],
+        callback: {
+          successUrl: 'https://movivo.test/assinar/opaque?retorno=sucesso',
+          cancelUrl: 'https://movivo.test/assinar/opaque?retorno=cancelado',
+          expiredUrl: 'https://movivo.test/assinar/opaque?retorno=expirado',
+        },
+        items: [{ quantity: 1, value: (chargeType === 'RECURRENT' ? 7990 : totalCents) / 100 }],
+      });
+      expect(JSON.stringify(body)).not.toContain('creditCard"');
+      expect(JSON.stringify(body)).not.toContain('411111');
+      if (chargeType === 'RECURRENT') {
+        expect(body.subscription.cycle).toBe('MONTHLY');
+        // Primeira cobrança hoje (data civil de Brasília): o cartão é cobrado no checkout.
+        expect(body.subscription.nextDueDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      } else {
+        expect(body.installment.maxInstallmentCount).toBe(months);
+      }
     },
   );
+
+  it('atualiza o cliente existente (endereço) antes de abrir o Checkout', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(json({ data: [{ id: 'cus_existing' }] }))
+      .mockResolvedValueOnce(json({ id: 'cus_existing' }))
+      .mockResolvedValueOnce(
+        json({ id: 'chk_2', link: 'https://asaas.com/checkoutSession/show/chk_2' }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new AsaasGateway('sandbox-key', TOKEN, API).startPayment(input());
+
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe(`${API}/customers/cus_existing`);
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      postalCode: '01310100',
+      addressNumber: '100',
+    });
+  });
+
+  it('desenvolvimento local volta por 127.0.0.1, porque o Asaas recusa localhost', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(json({ data: [{ id: 'cus_1' }] }))
+      .mockResolvedValueOnce(json({ id: 'cus_1' }))
+      .mockResolvedValueOnce(
+        json({ id: 'chk_1', link: 'https://sandbox.asaas.com/000/checkoutSession/show/chk_1' }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new AsaasGateway('sandbox-key', TOKEN, API).startPayment(
+      input({ returnUrl: 'http://localhost:3000/assinar/opaque' }),
+    );
+
+    const body = JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body));
+    expect(body.callback).toEqual({
+      successUrl: 'http://127.0.0.1:3000/assinar/opaque?retorno=sucesso',
+      cancelUrl: 'http://127.0.0.1:3000/assinar/opaque?retorno=cancelado',
+      expiredUrl: 'http://127.0.0.1:3000/assinar/opaque?retorno=expirado',
+    });
+  });
+
+  it('recusa link de Checkout fora do domínio do Asaas', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(json({ data: [{ id: 'cus_1' }] }))
+        .mockResolvedValueOnce(json({ id: 'cus_1' }))
+        .mockResolvedValueOnce(json({ id: 'chk_3', link: 'https://evil.example/pay' })),
+    );
+    await expect(new AsaasGateway('sandbox-key', TOKEN, API).startPayment(input())).rejects.toThrow(
+      'link inválido',
+    );
+  });
+
+  it('exige URL de retorno para o Checkout hospedado', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    await expect(
+      new AsaasGateway('sandbox-key', TOKEN, API).startPayment(input({ returnUrl: undefined })),
+    ).rejects.toThrow('URL de retorno ausente');
+  });
 
   it('cria Pix à vista e devolve somente QR, payload e expiração', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(json({ data: [{ id: 'cus_1' }] }))
+      .mockResolvedValueOnce(json({ id: 'cus_1' }))
       .mockResolvedValueOnce(json({ data: [] }))
       .mockResolvedValueOnce(json({ id: 'pay_1', status: 'PENDING' }))
       .mockResolvedValueOnce(
@@ -123,19 +186,45 @@ describe('AsaasGateway — operações Sandbox', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await new AsaasGateway('sandbox-key', TOKEN, API).startPayment(
-      input({ method: 'PIX', card: undefined, installments: undefined }),
+      input({ method: 'PIX', installments: undefined }),
     );
 
     expect(result.externalPaymentId).toBe('pay_1');
     expect(result.qrCode?.payload).toBe('pix-copia-cola');
-    const body = JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body));
+    // Hora de Brasília do Asaas vira ISO em UTC (todo navegador lê igual).
+    expect(result.qrCode?.expirationDate).toBe('2026-09-24T03:00:00.000Z');
+    const body = JSON.parse(String((fetchMock.mock.calls[3]?.[1] as RequestInit).body));
     expect(body).toMatchObject({ billingType: 'PIX', value: 79.9 });
+  });
+
+  it('o QR que o Asaas deixa valer por um ano é exibido só até o fim do dia de vencimento', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-10T15:00:00Z')); // 10/10 12:00 em Brasília
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(json({ data: [{ id: 'cus_1' }] }))
+      .mockResolvedValueOnce(json({ id: 'cus_1' }))
+      .mockResolvedValueOnce(json({ data: [] }))
+      .mockResolvedValueOnce(json({ id: 'pay_1', status: 'PENDING', dueDate: '2026-10-11' }))
+      .mockResolvedValueOnce(
+        json({ encodedImage: 'img', payload: 'pix', expirationDate: '2027-10-11 23:59:59' }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new AsaasGateway('sandbox-key', TOKEN, API).startPayment(
+      input({ method: 'PIX', installments: undefined }),
+    );
+
+    // Vencimento 11/10 (amanhã): o aluno vê 11/10 23:59:59 de Brasília = 12/10 02:59:59 UTC.
+    expect(result.qrCode?.expirationDate).toBe('2026-10-12T02:59:59.000Z');
+    vi.useRealTimers();
   });
 
   it('cria autorização Pix Automático SUBSCRIPTION com término e mensalidade explícitos', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(json({ data: [{ id: 'cus_1' }] }))
+      .mockResolvedValueOnce(json({ id: 'cus_1' }))
       .mockResolvedValueOnce(json({ data: [] }))
       .mockResolvedValueOnce(
         json({
@@ -155,13 +244,12 @@ describe('AsaasGateway — operações Sandbox', () => {
         totalCents: 22770,
         months: 3,
         method: 'PIX_AUTOMATIC',
-        card: undefined,
         installments: undefined,
       }),
     );
 
     expect(result.externalAuthorizationId).toBe('aut_1');
-    const body = JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body));
+    const body = JSON.parse(String((fetchMock.mock.calls[3]?.[1] as RequestInit).body));
     expect(body).toMatchObject({
       frequency: 'MONTHLY',
       value: 75.9,
@@ -171,17 +259,40 @@ describe('AsaasGateway — operações Sandbox', () => {
     expect(body.finishDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
-  it('reutiliza cliente e contrato pela externalReference em retentativa', async () => {
+  it('reutiliza cliente e cobrança Pix pela externalReference em retentativa', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(json({ data: [{ id: 'cus_existing' }] }))
-      .mockResolvedValueOnce(json({ data: [{ id: 'sub_existing', status: 'PENDING' }] }));
+      .mockResolvedValueOnce(json({ id: 'cus_existing' }))
+      .mockResolvedValueOnce(json({ data: [{ id: 'pay_existing', status: 'PENDING' }] }))
+      .mockResolvedValueOnce(
+        json({ encodedImage: 'qr', payload: 'pix', expirationDate: '2026-10-11' }),
+      );
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await new AsaasGateway('sandbox-key', TOKEN, API).startPayment(input());
+    const result = await new AsaasGateway('sandbox-key', TOKEN, API).startPayment(
+      input({ method: 'PIX', installments: undefined }),
+    );
 
-    expect(result.externalSubscriptionId).toBe('sub_existing');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.externalPaymentId).toBe('pay_existing');
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('estorna parcelamento pelo parcelamento e cobrança avulsa pela cobrança', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({}));
+    vi.stubGlobal('fetch', fetchMock);
+    const gateway = new AsaasGateway('sandbox-key', TOKEN, API);
+
+    await gateway.refundContract({ installmentId: 'ins/1', paymentId: 'pay_1' }, 'Arrependimento');
+    await gateway.refundContract({ paymentId: 'pay_2' }, 'Arrependimento');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`${API}/installments/ins%2F1/refund`);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(`${API}/payments/pay_2/refund`);
+    expect((fetchMock.mock.calls[1]?.[1] as RequestInit).method).toBe('POST');
+    expect(JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body))).toEqual({
+      description: 'Arrependimento',
+    });
+    await expect(gateway.refundContract({}, 'x')).rejects.toThrow('sem cobrança');
   });
 
   it('cancela a referência mais específica e consulta assinatura', async () => {
@@ -226,6 +337,28 @@ describe('AsaasGateway — operações Sandbox', () => {
       /recusado/,
     );
   });
+});
+
+it('Asaas real envia cobrança Pix apenas ao domínio de produção com a chave correspondente', async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(json({ data: [{ id: 'cus_1' }] }))
+    .mockResolvedValueOnce(json({ id: 'cus_1' }))
+    .mockResolvedValueOnce(json({ data: [] }))
+    .mockResolvedValueOnce(json({ id: 'pay_1', status: 'PENDING' }))
+    .mockResolvedValueOnce(
+      json({ encodedImage: 'qr', payload: 'pix', expirationDate: '2026-10-11' }),
+    );
+  vi.stubGlobal('fetch', fetchMock);
+  const gateway = new AsaasGateway('production-key', TOKEN, 'https://api.asaas.com/v3');
+  const result = await gateway.startPayment(input({ method: 'PIX' }));
+  expect(result.externalPaymentId).toBe('pay_1');
+  expect(
+    fetchMock.mock.calls.every(([url]) => String(url).startsWith('https://api.asaas.com/v3/')),
+  ).toBe(true);
+  expect(
+    new Headers((fetchMock.mock.calls[3]?.[1] as RequestInit).headers).get('access_token'),
+  ).toBe('production-key');
 });
 
 describe('AsaasGateway — webhook autenticado', () => {
@@ -291,6 +424,31 @@ describe('AsaasGateway — webhook autenticado', () => {
       externalInstallmentId: 'ins_1',
       amountCents: 22770,
       feeCents: 770,
+    });
+  });
+
+  it('associa pagamento do Checkout hospedado pelo ID da sessão', () => {
+    const event = gateway.parseWebhookEvent(
+      Buffer.from(
+        JSON.stringify({
+          id: 'evt_checkout_1',
+          event: 'PAYMENT_CONFIRMED',
+          payment: {
+            id: 'pay_1',
+            customer: 'cus_1',
+            checkoutSession: 'chk_1',
+            subscription: 'sub_1',
+            value: 79.9,
+          },
+        }),
+      ),
+      TOKEN,
+      undefined,
+    );
+    expect(event).toMatchObject({
+      type: 'CHECKOUT_CONFIRMED',
+      externalCheckoutSessionId: 'chk_1',
+      externalSubscriptionId: 'sub_1',
     });
   });
 
@@ -401,42 +559,43 @@ describe('AsaasGateway — webhook autenticado', () => {
 describe('AsaasGateway — datas civis e buscas idempotentes', () => {
   afterEach(() => vi.useRealTimers());
 
-  it('às 22h de Brasília o vencimento ainda é "hoje" (não o dia seguinte em UTC)', async () => {
+  it('às 22h de Brasília a primeira cobrança do Checkout ainda é "hoje" (não o dia seguinte em UTC)', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-09-24T01:00:00Z')); // 23/09 22:00 em Brasília
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(json({ data: [{ id: 'cus_1' }] }))
-      .mockResolvedValueOnce(json({ data: [] }))
-      .mockResolvedValueOnce(json({ id: 'sub_1', status: 'PENDING' }));
+      .mockResolvedValueOnce(json({ id: 'cus_1' }))
+      .mockResolvedValueOnce(
+        json({ id: 'chk_1', link: 'https://sandbox.asaas.com/000/checkoutSession/show/chk_1' }),
+      );
     vi.stubGlobal('fetch', fetchMock);
 
     await new AsaasGateway('sandbox-key', TOKEN, API).startPayment(input());
 
     const body = JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body));
-    expect(body.nextDueDate).toBe('2026-09-23');
+    expect(body.subscription.nextDueDate).toBe('2026-09-23');
   });
 
-  it('busca a cobrança existente filtrando pelo meio de pagamento', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(json({ data: [{ id: 'cus_1' }] }))
-      .mockResolvedValueOnce(json({ data: [] }))
-      .mockResolvedValueOnce(json({ id: 'ins_1' }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    await new AsaasGateway('sandbox-key', TOKEN, API).startPayment(
-      input({
-        plan: 'QUARTERLY',
-        monthlyCents: 7590,
-        totalCents: 22770,
-        months: 3,
-        installments: 3,
-      }),
+  it('cancelar um Checkout que já não está ativo (400) é sucesso; outro 400 propaga', async () => {
+    const gateway = new AsaasGateway('sandbox-key', TOKEN, API);
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          json({ errors: [{ description: 'O Checkout não está ativo para ser cancelado.' }] }, 400),
+        ),
     );
+    await expect(gateway.cancelContract({ checkoutSessionId: 'chk_1' })).resolves.toBeUndefined();
 
-    // Uma cobrança Pix pendente com a mesma referência nunca se passa pelo parcelamento.
-    expect(String(fetchMock.mock.calls[1]?.[0])).toContain('billingType=CREDIT_CARD');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(json({ errors: [{ description: 'Valor inválido' }] }, 400)),
+    );
+    await expect(gateway.cancelContract({ checkoutSessionId: 'chk_1' })).rejects.toThrow(
+      /Valor inválido/,
+    );
   });
 
   it('cancelamento de referência já removida (404) é sucesso; outro erro propaga', async () => {

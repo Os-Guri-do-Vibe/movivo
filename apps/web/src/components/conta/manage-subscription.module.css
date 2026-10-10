@@ -16,8 +16,13 @@
 }
 
 .primaryAction {
+  border: 1.5px solid var(--petroleo-vivo);
   color: var(--petroleo-vivo);
   background: var(--verde-pulso);
+}
+
+.primaryAction:hover:not(:disabled) {
+  background: #1fcf72;
 }
 
 .secondaryAction {
@@ -116,4 +121,27 @@
   .confirmActions {
     grid-template-columns: 1fr;
   }
+}
+
+.note {
+  margin: 0;
+  color: var(--musgo);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.refundBox {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(6, 48, 42, 0.14);
+  border-radius: 16px;
+  padding: 16px;
+  background: var(--verde-pulso-tenue);
+}
+
+.refundBox p {
+  margin: 0;
+  color: var(--petroleo-vivo);
+  font-size: 14px;
+  line-height: 1.5;
 }

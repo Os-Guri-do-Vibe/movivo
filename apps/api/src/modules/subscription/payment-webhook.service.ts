@@ -175,7 +175,7 @@ export class PaymentWebhookService {
     status: string,
     correlationId: string,
   ): Promise<void> {
-    if (status !== 'ACTIVE' && type === 'CHECKOUT_CONFIRMED') return;
+    if (status !== 'ACTIVE' && status !== 'RENEWED' && type === 'CHECKOUT_CONFIRMED') return;
     if (
       status === 'IDEMPOTENT' ||
       status === 'NO_SUBSCRIPTION' ||
@@ -187,13 +187,17 @@ export class PaymentWebhookService {
 
     if (type === 'CHECKOUT_CONFIRMED' || type === 'AUTHORIZATION_ACTIVE') {
       this.logger.info(
-        { event: 'subscription_created', userId, correlationId },
-        'assinatura ativada',
+        {
+          event: status === 'RENEWED' ? 'subscription_renewed' : 'subscription_created',
+          userId,
+          correlationId,
+        },
+        status === 'RENEWED' ? 'assinatura renovada' : 'assinatura ativada',
       );
       await this.queues.enqueue(QUEUE.whatsappOutbound, 'payment-confirmed', {
         userId,
         type: 'COACH_MESSAGE',
-        text: paymentConfirmationMessage(),
+        text: paymentConfirmationMessage(await this.subscriptions.createShortCancelLink(userId)),
         dedupeId: `payment_${this.hash(eventId).slice(0, 56)}`,
       } satisfies WhatsappOutboundJob);
     } else if (type === 'PAYMENT_FAILED') {

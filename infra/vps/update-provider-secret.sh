@@ -25,7 +25,6 @@ value = pathlib.Path(filename).read_text().rstrip('\r\n')
 if not value or len(value) > 4096 or any(c.isspace() for c in value):
     raise SystemExit('Credencial vazia ou formato inválido.')
 endpoints = {
- 'asaas_api_key': 'https://api-sandbox.asaas.com/v3/customers?limit=1',
  'openai_api_key': 'https://api.openai.com/v1/models',
  'anthropic_api_key': 'https://api.anthropic.com/v1/models?limit=1',
  'deepseek_api_key': 'https://api.deepseek.com/models',
@@ -34,8 +33,10 @@ endpoints = {
 headers = {'User-Agent': 'MOVIVO-secret-validation/1'}
 if name == 'asaas_api_key':
     env = dict(line.split('=', 1) for line in pathlib.Path('api.env').read_text().splitlines() if '=' in line and not line.startswith('#'))
-    if env.get('ASAAS_API_URL', 'https://api-sandbox.asaas.com/v3') != 'https://api-sandbox.asaas.com/v3':
-        raise SystemExit('Asaas precisa permanecer no Sandbox até aprovação do gate PCI.')
+    api_url = env.get('ASAAS_API_URL', 'https://api-sandbox.asaas.com/v3')
+    if api_url not in ('https://api-sandbox.asaas.com/v3', 'https://api.asaas.com/v3'):
+        raise SystemExit('ASAAS_API_URL não é um domínio oficial permitido.')
+    endpoints[name] = api_url + '/customers?limit=1'
     headers['access_token'] = value
 elif name == 'anthropic_api_key':
     headers.update({'x-api-key': value, 'anthropic-version': '2023-06-01'})

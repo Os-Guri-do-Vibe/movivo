@@ -328,13 +328,118 @@ describe('Endpoints US-4.6: checkout e portal (view)', () => {
     expect(view.access).toBe('FULL'); // trial dentro da janela
     expect(SUBSCRIPTION_PLAN_IDS).toContain(view.plan);
     expect(JSON.stringify(view)).not.toContain(userId);
-    expect(Object.keys(view).sort()).toEqual(['access', 'currentPeriodEnd', 'plan', 'status']);
+    expect(Object.keys(view).sort()).toEqual(
+      [
+        'access',
+        'canRepurchaseAt',
+        'currentPeriodEnd',
+        'paymentMethod',
+        'plan',
+        'refundEligibleUntil',
+        'status',
+      ].sort(),
+    );
   });
 
   it('view: token não-UUID → 404; titular sem assinatura → 404 (não vaza)', async () => {
     const userB = await createUser(); // existe, mas sem assinatura
     await expect(controller.view('nao-e-uuid')).rejects.toThrow();
     await expect(controller.view(userB)).rejects.toThrow();
+  });
+});
+
+const PAYER = {
+  name: 'Pessoa Teste',
+  email: 'teste@movivo.test',
+  cpfCnpj: '11144477735',
+  postalCode: '01310100',
+  addressNumber: '100',
+  phone: '11999999999',
+};
+
+describe('Arrependimento, recompra e isolamento (checkout hospedado)', () => {
+  /** Ativa um contrato pago de cobrança única, com a cobrança identificável (estornável). */
+  async function activatePaid(userId: string, plan: 'MONTHLY' | 'QUARTERLY' = 'QUARTERLY') {
+    await svc.startTrial(userId, plan);
+    const event = (gateway as MockGateway).emit('CHECKOUT_CONFIRMED', {
+      userId,
+      externalSubscriptionId: `sub_${RUN}_${(seq += 1)}`,
+      plan,
+      priceCents: 22770,
+    });
+    await svc.applyGatewayEvent({ ...event, externalPaymentId: `pay_${RUN}_${seq}` });
+  }
+
+  it('a ativação registra a data da contratação (âncora dos 7 dias)', async () => {
+    const userId = await createUser();
+    await activatePaid(userId);
+    const row = await svc.getForUser(userId);
+    expect(row?.activatedAt).toBeInstanceOf(Date);
+    const view = await controller.view(await portal(userId));
+    expect(view.refundEligibleUntil).not.toBeNull();
+  });
+
+  it('estorno dentro de 7 dias encerra o acesso na hora; repetir ou pedir fora do prazo é 409', async () => {
+    const userId = await createUser();
+    await activatePaid(userId);
+    await expect(controller.refund(await portal(userId))).resolves.toEqual({ status: 'REFUNDED' });
+    const after = await svc.getForUser(userId);
+    expect(after).toMatchObject({ status: 'CANCELED', cancelReason: 'ARREPENDIMENTO' });
+    expect(await svc.getAccess(userId)).toBe('RESTRICTED');
+    await expect(controller.refund(await portal(userId))).rejects.toThrow(/prazo/);
+
+    const late = await createUser();
+    await activatePaid(late);
+    await adminClient`
+      UPDATE subscriptions SET activated_at = now() - interval '8 days' WHERE user_id = ${late}`;
+    await expect(controller.refund(await portal(late))).rejects.toThrow(/prazo/);
+    expect((await svc.getForUser(late))?.status).toBe('ACTIVE');
+  });
+
+  it('IDOR: o estorno do titular A não toca na assinatura do titular B', async () => {
+    const userA = await createUser();
+    const userB = await createUser();
+    await activatePaid(userA);
+    await activatePaid(userB);
+    await controller.refund(await portal(userA));
+    expect((await svc.getForUser(userA))?.status).toBe('CANCELED');
+    expect((await svc.getForUser(userB))?.status).toBe('ACTIVE');
+    expect(await svc.getAccess(userB)).toBe('FULL');
+  });
+
+  it('cancelado com período pago em curso não recompra; depois do fim, recompra com período novo', async () => {
+    const userId = await createUser();
+    await activatePaid(userId);
+    await svc.cancel(userId, 'teste');
+    const body = { method: 'PIX' as const, payer: PAYER, acceptTerms: true as const };
+    await expect(svc.startCheckoutPayment(userId, body, '127.0.0.1')).rejects.toThrow(
+      /acesso pago vigente/,
+    );
+    const blocked = await controller.view(await portal(userId));
+    expect(blocked.canRepurchaseAt).not.toBeNull();
+
+    // O período pago acabou: a recompra abre contrato novo, sem herdar o período antigo.
+    await adminClient`
+      UPDATE subscriptions SET current_period_end = now() - interval '1 hour' WHERE user_id = ${userId}`;
+    await svc.startCheckoutPayment(userId, body, '127.0.0.1');
+    const pending = await svc.getForUser(userId);
+    expect(pending).toMatchObject({
+      status: 'PENDING_PAYMENT',
+      currentPeriodEnd: null,
+      activatedAt: null,
+      canceledAt: null,
+    });
+    const confirm = (gateway as MockGateway).emit('CHECKOUT_CONFIRMED', {
+      userId,
+      externalSubscriptionId: pending?.externalSubscriptionId ?? `sub_${RUN}_${(seq += 1)}`,
+      plan: 'QUARTERLY',
+      priceCents: 22770,
+    });
+    await svc.applyGatewayEvent({ ...confirm, externalPaymentId: `pay_${RUN}_${(seq += 1)}` });
+    const renewed = await svc.getForUser(userId);
+    expect(renewed?.status).toBe('ACTIVE');
+    const days = ((renewed?.currentPeriodEnd?.getTime() ?? 0) - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(80); // 90 dias novos, não o fim do período antigo
   });
 });
 

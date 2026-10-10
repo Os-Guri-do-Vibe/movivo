@@ -50,6 +50,8 @@ export const subscriptions = pgTable(
     externalSubscriptionId: varchar('external_subscription_id', { length: 255 }),
     externalCustomerId: varchar('external_customer_id', { length: 255 }),
     externalCheckoutSessionId: varchar('external_checkout_session_id', { length: 255 }),
+    /** Link da página hospedada do Asaas (o formato difere entre Sandbox e produção). */
+    checkoutUrl: varchar('checkout_url', { length: 500 }),
     externalPriceId: varchar('external_price_id', { length: 255 }),
     externalPaymentId: varchar('external_payment_id', { length: 255 }),
     externalInstallmentId: varchar('external_installment_id', { length: 255 }),
@@ -61,6 +63,12 @@ export const subscriptions = pgTable(
     authorizedPaymentCount: integer('authorized_payment_count'),
     /** Incrementado somente ao substituir uma cobrança Pix expirada/cancelada. */
     paymentAttempt: integer('payment_attempt').notNull().default(0),
+
+    /**
+     * Quando o contrato pago vigente foi ativado pela primeira vez. Âncora dos 7 dias de
+     * arrependimento (CDC art. 49): renovação mensal não a move, só uma nova contratação.
+     */
+    activatedAt: eventTimestamp('activated_at'),
 
     trialStartedAt: eventTimestamp('trial_started_at'),
     trialEndsAt: eventTimestamp('trial_ends_at'),

@@ -1,5 +1,11 @@
 /** Cliente HTTP do checkout transparente e do portal de assinatura. */
-import type { CheckoutPaymentResult, CheckoutSummary, CreateCheckoutBody } from '@movivo/shared';
+import type {
+  CheckoutLinkResult,
+  CheckoutPaymentResult,
+  CheckoutSummary,
+  CreateCheckoutBody,
+  RefundResult,
+} from '@movivo/shared';
 
 import { publicEnv } from './env';
 
@@ -46,4 +52,24 @@ export function manageSubscription(
   action: ManageAction,
 ): Promise<{ status: string }> {
   return post<{ status: string }>(`/subscription/${encodeURIComponent(token)}/${action}`);
+}
+
+/** Arrependimento (CDC art. 49): estorno integral em até 7 dias da contratação. */
+export function requestRefund(token: string): Promise<RefundResult> {
+  return post<RefundResult>(`/subscription/${encodeURIComponent(token)}/refund`);
+}
+
+/** Link novo do checkout (recompra), a partir do portal do próprio titular. */
+export function getCheckoutLink(token: string): Promise<CheckoutLinkResult> {
+  return post<CheckoutLinkResult>(`/subscription/${encodeURIComponent(token)}/checkout-link`);
+}
+
+/** Página pública: pede um link novo pelo celular. A resposta nunca revela quem é cliente. */
+export function requestAccessLink(phone: string): Promise<{ accepted: true }> {
+  return post<{ accepted: true }>('/subscription/access-link', { phone });
+}
+
+/** Link curto vencido: o botão reenvia um novo ao WhatsApp do dono, sem digitar nada. */
+export function renewExpiredLink(code: string): Promise<{ accepted: true }> {
+  return post<{ accepted: true }>('/subscription/link-renewal', { code });
 }

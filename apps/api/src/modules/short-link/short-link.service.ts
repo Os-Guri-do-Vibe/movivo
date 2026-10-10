@@ -49,11 +49,24 @@ export class ShortLinkService {
 
   /** `null` = código inexistente ou expirado — o controller trata os dois como 410. */
   async resolve(code: string): Promise<string | null> {
+    return this.lookup(code, true);
+  }
+
+  /** Destino do código mesmo vencido: só para reenviar um link novo ao dono (nunca redireciona). */
+  async resolveForRenewal(code: string): Promise<string | null> {
+    return this.lookup(code, false);
+  }
+
+  private async lookup(code: string, onlyValid: boolean): Promise<string | null> {
     const [row] = await this.db.runAsSystem((tx) =>
       tx
         .select({ targetUrl: shortLinks.targetUrl })
         .from(shortLinks)
-        .where(and(eq(shortLinks.code, hashCode(code)), gt(shortLinks.expiresAt, new Date())))
+        .where(
+          onlyValid
+            ? and(eq(shortLinks.code, hashCode(code)), gt(shortLinks.expiresAt, new Date()))
+            : eq(shortLinks.code, hashCode(code)),
+        )
         .limit(1),
     );
     if (!row?.targetUrl.startsWith('pgp:v1:')) return null;

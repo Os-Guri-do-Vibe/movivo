@@ -24,13 +24,6 @@ describe('MockGateway (US-4.1)', () => {
         addressNumber: '100',
         phone: '11999999999',
       },
-      card: {
-        holderName: 'PESSOA TESTE',
-        number: '4111111111111111',
-        expiryMonth: '12',
-        expiryYear: '2030',
-        ccv: '123',
-      },
       installments: 1,
       remoteIp: '127.0.0.1',
       termsVersion: 'v1',

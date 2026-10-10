@@ -5,7 +5,7 @@
  * a validação Zod do checkout, o mapeamento da view (sem assinatura → 404) e que só a
  * `checkoutUrl` volta (nenhum dado de cartão).
  */
-import { NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import type { CheckoutSummary, SubscriptionView } from '@movivo/shared';
 import { ZodError } from 'zod';
 import { describe, expect, it, vi } from 'vitest';
@@ -21,6 +21,9 @@ const view: SubscriptionView = {
   status: 'ACTIVE',
   access: 'FULL',
   currentPeriodEnd: '2026-11-01T00:00:00.000Z',
+  paymentMethod: 'CARD',
+  refundEligibleUntil: null,
+  canRepurchaseAt: null,
 };
 
 const summary: CheckoutSummary = {
@@ -32,10 +35,18 @@ const summary: CheckoutSummary = {
   maxInstallments: 3,
   status: 'TRIALING',
   expiresAt: '2026-09-26T00:00:00.000Z',
-  methods: ['CARD', 'PIX', 'PIX_AUTOMATIC'],
+  methods: ['CARD', 'PIX'],
 };
 
-function make(overrides: Partial<Record<keyof SubscriptionService, unknown>> = {}) {
+function make(
+  overrides: Partial<Record<keyof SubscriptionService, unknown>> = {},
+  access: Record<string, unknown> = {},
+) {
+  const accessService = {
+    requestPortalLinkByPhone: vi.fn(() => Promise.resolve()),
+    renewFromShortCode: vi.fn(() => Promise.resolve()),
+    ...access,
+  };
   const svc = {
     getView: vi.fn(() => Promise.resolve<SubscriptionView | null>(view)),
     getCheckoutSummary: vi.fn(() => Promise.resolve<CheckoutSummary | null>(summary)),
@@ -48,7 +59,8 @@ function make(overrides: Partial<Record<keyof SubscriptionService, unknown>> = {
     ),
   } as never;
   return {
-    controller: new SubscriptionController(svc, tokens, {
+    accessService,
+    controller: new SubscriptionController(svc, accessService as never, tokens, {
       verify: vi.fn(async (token: string) => (token === PORTAL ? { userId: VALID } : null)),
     } as never),
     svc,
@@ -76,27 +88,21 @@ describe('SubscriptionController — view (US-4.6)', () => {
 });
 
 describe('SubscriptionController — checkout (US-4.6)', () => {
-  it('não inicia pagamento sem contrato de assinatura publicado', async () => {
+  const PAYER = {
+    name: 'Aluno Teste',
+    email: 'aluno@example.invalid',
+    cpfCnpj: '12345678901',
+    postalCode: '01234567',
+    addressNumber: '10',
+    phone: '11999999999',
+  };
+
+  it('inicia o pagamento com o titular do token e o IP real da requisição', async () => {
     const { controller, svc } = make();
-    await expect(
-      controller.checkoutPayment(
-        'opaque',
-        {
-          method: 'PIX',
-          acceptTerms: true,
-          payer: {
-            name: 'Aluno Teste',
-            email: 'aluno@example.invalid',
-            cpfCnpj: '12345678901',
-            postalCode: '01234567',
-            addressNumber: '10',
-            phone: '11999999999',
-          },
-        },
-        { ip: '127.0.0.1' } as never,
-      ),
-    ).rejects.toBeInstanceOf(ServiceUnavailableException);
-    expect(svc.startCheckoutPayment).not.toHaveBeenCalled();
+    await controller.checkoutPayment('opaque', { method: 'PIX', acceptTerms: true, payer: PAYER }, {
+      ip: '10.0.0.1',
+    } as never);
+    expect(svc.startCheckoutPayment).toHaveBeenCalledWith(VALID, expect.anything(), '10.0.0.1');
   });
 
   it('token opaco válido devolve o snapshot autoritativo', async () => {
@@ -249,3 +255,54 @@ it.each([{ reason: 42 }, { reason: [] }, { reason: 'x'.repeat(501) }, { userId: 
     expect(cancel).not.toHaveBeenCalled();
   },
 );
+
+describe('SubscriptionController — arrependimento, novo checkout e acesso sem token', () => {
+  it('refund usa o titular do token e devolve o resultado', async () => {
+    const { controller, svc } = make({
+      requestRefund: vi.fn(() => Promise.resolve({ status: 'REFUNDED' })),
+    });
+    await expect(controller.refund(PORTAL)).resolves.toEqual({ status: 'REFUNDED' });
+    expect(svc.requestRefund).toHaveBeenCalledWith(VALID);
+  });
+
+  it('refund com token inválido → 404 sem tocar o serviço', async () => {
+    const { controller, svc } = make({ requestRefund: vi.fn() });
+    await expect(controller.refund('nope')).rejects.toBeInstanceOf(NotFoundException);
+    expect(svc.requestRefund).not.toHaveBeenCalled();
+  });
+
+  it('checkout-link emite um link novo para o titular do portal', async () => {
+    const { controller } = make({
+      issueCheckoutLink: vi.fn(() => Promise.resolve('https://movivo.test/checkout/abc')),
+    });
+    await expect(controller.checkoutLink(PORTAL)).resolves.toEqual({
+      url: 'https://movivo.test/checkout/abc',
+    });
+  });
+
+  it('pedido público de link responde sempre igual e entrega só os dígitos ao serviço', async () => {
+    const { controller, accessService } = make();
+    await expect(controller.accessLink({ phone: '(11) 98765-4321' })).resolves.toEqual({
+      accepted: true,
+    });
+    expect(accessService.requestPortalLinkByPhone).toHaveBeenCalledWith('11987654321');
+  });
+
+  it('pedido público rejeita corpo com campo extra ou telefone curto', async () => {
+    const { controller, accessService } = make();
+    await expect(controller.accessLink({ phone: '123' })).rejects.toBeInstanceOf(ZodError);
+    await expect(
+      controller.accessLink({ phone: '11987654321', userId: VALID }),
+    ).rejects.toBeInstanceOf(ZodError);
+    expect(accessService.requestPortalLinkByPhone).not.toHaveBeenCalled();
+  });
+
+  it('renovação de link vencido só aceita código de 24 caracteres', async () => {
+    const { controller, accessService } = make();
+    await expect(controller.renewLink({ code: 'A'.repeat(24) })).resolves.toEqual({
+      accepted: true,
+    });
+    expect(accessService.renewFromShortCode).toHaveBeenCalledWith('A'.repeat(24));
+    await expect(controller.renewLink({ code: 'curto' })).rejects.toBeInstanceOf(ZodError);
+  });
+});

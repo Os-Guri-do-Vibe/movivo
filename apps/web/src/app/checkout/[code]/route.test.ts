@@ -21,13 +21,15 @@ describe('GET /checkout/[code]', () => {
     expect(response.headers.get('location')).toBe('https://movivo.test/destino');
   });
 
-  it('responde 410 quando o código não existe ou expirou', async () => {
+  it('código vencido ou inexistente vai para a página amigável de novo link (sem enviar nada)', async () => {
     resolveShortLink.mockResolvedValue(null);
     const response = await GET(
       new Request('https://movivo.test/checkout/zzzzzzzz'),
       context('zzzzzzzz'),
     );
-    expect(response.status).toBe(410);
-    await expect(response.json()).resolves.toEqual({ error: 'link_expirado' });
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get('location') ?? '');
+    expect(location.pathname).toBe('/link-expirado');
+    expect(location.searchParams.get('c')).toBe('zzzzzzzz');
   });
 });

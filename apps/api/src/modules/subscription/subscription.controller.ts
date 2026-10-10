@@ -5,22 +5,27 @@ import {
   ConflictException,
   Get,
   Header,
+  HttpCode,
   NotFoundException,
   Param,
   Post,
   Req,
-  ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import {
+  accessLinkRequestSchema,
   createCheckoutSchema,
+  checkoutLinkResultSchema,
   checkoutPaymentResultSchema,
   checkoutSummarySchema,
+  refundResultSchema,
   subscriptionViewSchema,
+  type CheckoutLinkResult,
   type CheckoutPaymentResult,
   type CheckoutSummary,
+  type RefundResult,
   type SubscriptionView,
 } from '@movivo/shared';
 import type { Request } from 'express';
@@ -30,11 +35,10 @@ import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
 import { parseBody } from '../../core/validation/strict-input';
 import { AccessLinkService } from '../../core/database/access-link.service';
 import { CheckoutTokenService } from './checkout-token.service';
-import { InvalidTransitionError, SUBSCRIPTION_TERMS_VERSION } from './subscription-model';
+import { InvalidTransitionError } from './subscription-model';
+import { SubscriptionAccessService } from './subscription-access.service';
 import { SubscriptionService } from './subscription.service';
 
-/** Sem contrato integral publicado, nenhum novo pagamento pode ser iniciado. */
-const PUBLISHED_SUBSCRIPTION_TERMS_VERSION: string | null = null;
 const cancelSchema = z.strictObject({ reason: z.string().trim().max(500).optional() });
 
 const TOKEN_PARAM = {
@@ -48,6 +52,7 @@ const TOKEN_PARAM = {
 export class SubscriptionController {
   constructor(
     private readonly subs: SubscriptionService,
+    private readonly access: SubscriptionAccessService,
     private readonly checkoutTokens: CheckoutTokenService,
     private readonly accessLinks: AccessLinkService,
   ) {}
@@ -92,21 +97,20 @@ export class SubscriptionController {
     return summary;
   }
 
-  /** Inicia a operação transparente no Asaas Sandbox; preço vem do contrato, não do body. */
+  /** Inicia a operação no Asaas; preço vem do contrato, não do body. */
   @Post('checkout/:token/payment')
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Header('Referrer-Policy', 'no-referrer')
   @ApiOperation({
-    summary: 'Inicia pagamento no Asaas Sandbox',
+    summary: 'Inicia pagamento no Asaas',
     description:
-      'Aceita cartão, Pix à vista ou Pix Automático. O backend nunca retorna nem persiste PAN/CVV.',
+      'Pix à vista (QR Code na própria página) e cartão no Checkout hospedado pelo Asaas, que nunca expõe o cartão à MOVIVO. Pix Automático indisponível.',
   })
   @ApiParam({ name: 'token', description: 'Token opaco, autenticado e expirável do checkout.' })
   @ApiBody({ schema: zodSchemaToOpenApi(createCheckoutSchema) })
   @ApiResponse({ status: 200, schema: zodSchemaToOpenApi(checkoutPaymentResultSchema) })
   @ApiResponse({ status: 400, description: 'Dados ou parcelamento inválidos.' })
   @ApiResponse({ status: 404, description: 'Token inválido, adulterado ou expirado.' })
-  @ApiResponse({ status: 503, description: 'Contrato de assinatura ainda não publicado.' })
   async checkoutPayment(
     @Param('token') token: string,
     @Body() body: unknown,
@@ -114,13 +118,6 @@ export class SubscriptionController {
   ): Promise<CheckoutPaymentResult> {
     const { userId } = await this.checkoutToken(token);
     const input = parseBody(createCheckoutSchema, body);
-    // ponytail: após aprovação jurídica, preencher a versão publicada com o texto
-    // integral exibido no checkout e atualizar SUBSCRIPTION_TERMS_VERSION no mesmo PR.
-    if (PUBLISHED_SUBSCRIPTION_TERMS_VERSION !== SUBSCRIPTION_TERMS_VERSION) {
-      throw new ServiceUnavailableException(
-        'Termos de Assinatura em revisão. Pagamento temporariamente indisponível.',
-      );
-    }
     return this.subs.startCheckoutPayment(userId, input, req.ip || '127.0.0.1');
   }
 
@@ -144,6 +141,35 @@ export class SubscriptionController {
     const userId = await this.userId(token);
     const { reason } = parseBody(cancelSchema, body ?? {});
     return this.ensureFound(this.subs.cancel(userId, reason || undefined));
+  }
+
+  @Post(':token/refund')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Header('Referrer-Policy', 'no-referrer')
+  @ApiOperation({
+    summary: 'Arrependimento: estorno integral em até 7 dias da contratação',
+    description:
+      'Interrompe cobranças futuras, devolve o valor pago e encerra o acesso. Fora do prazo, 409.',
+  })
+  @ApiParam(TOKEN_PARAM)
+  @ApiResponse({ status: 200, schema: zodSchemaToOpenApi(refundResultSchema) })
+  @ApiResponse({ status: 409, description: 'Prazo encerrado ou sem pagamento a estornar.' })
+  async refund(@Param('token') token: string): Promise<RefundResult> {
+    const result = await this.subs.requestRefund(await this.userId(token));
+    if (!result) throw new NotFoundException();
+    return result;
+  }
+
+  @Post(':token/checkout-link')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Header('Referrer-Policy', 'no-referrer')
+  @ApiOperation({ summary: 'Novo link de checkout a partir do portal do titular' })
+  @ApiParam(TOKEN_PARAM)
+  @ApiResponse({ status: 200, schema: zodSchemaToOpenApi(checkoutLinkResultSchema) })
+  async checkoutLink(@Param('token') token: string): Promise<CheckoutLinkResult> {
+    const url = await this.subs.issueCheckoutLink(await this.userId(token));
+    if (!url) throw new NotFoundException();
+    return { url };
   }
 
   @Post(':token/pause')
@@ -170,6 +196,35 @@ export class SubscriptionController {
   })
   async resume(@Param('token') token: string): Promise<{ status: string }> {
     return this.ensureFound(this.subs.resume(await this.userId(token)));
+  }
+
+  /** Página pública `/conta`: pede o link pelo celular. Resposta idêntica exista ou não cliente. */
+  @Post('access-link')
+  @HttpCode(202)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Pede um novo link de gerenciamento pelo celular',
+    description:
+      'Sempre 202, sem revelar se o número tem assinatura. O link vai só ao WhatsApp cadastrado.',
+  })
+  async accessLink(@Body() body: unknown): Promise<{ accepted: true }> {
+    const { phone } = parseBody(accessLinkRequestSchema, body);
+    await this.access.requestPortalLinkByPhone(phone);
+    return { accepted: true };
+  }
+
+  /** Link curto vencido: o botão "receber novo link" reenvia ao dono, sem digitar nada. */
+  @Post('link-renewal')
+  @HttpCode(202)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Reenvia um link vencido ao WhatsApp do próprio titular' })
+  async renewLink(@Body() body: unknown): Promise<{ accepted: true }> {
+    const { code } = parseBody(
+      z.strictObject({ code: z.string().regex(/^[A-Za-z0-9]{24}$/) }),
+      body,
+    );
+    await this.access.renewFromShortCode(code);
+    return { accepted: true };
   }
 
   private async userId(token: string): Promise<string> {

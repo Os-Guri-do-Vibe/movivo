@@ -276,6 +276,41 @@ describe('checkout + webhook de pagamento (US-4.2)', () => {
   }, 20_000);
 });
 
+describe('vínculo do webhook do Checkout hospedado (sem ID de contrato conhecido)', () => {
+  it('primeira cobrança só com o cliente do Asaas ativa a assinatura do titular certo', async () => {
+    const { userId } = await createUser();
+    const { userId: other } = await createUser();
+    await subs.startTrial(userId);
+    await subs.startTrial(other);
+    const customer = `cus_${RUN}_${seq}`;
+    await adminClient`
+      UPDATE subscriptions SET status = 'PENDING_PAYMENT', payment_method = 'CARD', external_customer_id = ${customer}
+      WHERE user_id = ${userId}`;
+
+    const result = await subs.applyGatewayEvent({
+      type: 'CHECKOUT_CONFIRMED',
+      eventId: `evt_customer_${RUN}_${seq}`,
+      externalSubscriptionId: `sub_${RUN}_${seq}`,
+      externalPaymentId: `pay_${RUN}_${seq}`,
+      externalCustomerId: customer,
+    });
+
+    expect(result).toMatchObject({ status: 'ACTIVE', userId });
+    expect(await statusOf(userId)).toBe('ACTIVE');
+    expect(await statusOf(other)).toBe('TRIALING'); // o outro titular nunca é tocado
+  }, 20_000);
+
+  it('cliente desconhecido não casa com ninguém', async () => {
+    const result = await subs.applyGatewayEvent({
+      type: 'CHECKOUT_CONFIRMED',
+      eventId: `evt_unknown_${RUN}_${seq}`,
+      externalSubscriptionId: `sub_unknown_${RUN}`,
+      externalCustomerId: `cus_unknown_${RUN}`,
+    });
+    expect(result.status).toBe('NO_SUBSCRIPTION');
+  }, 20_000);
+});
+
 describe('conciliação: uma linha por cobrança (US-8.5)', () => {
   it('captura e repasse da mesma cobrança gravam UMA liquidação', async () => {
     const { userId } = await createUser();
@@ -300,5 +335,33 @@ describe('conciliação: uma linha por cobrança (US-8.5)', () => {
       FROM payments WHERE user_id = ${userId}`;
     expect(count).toBe(1);
     expect(total).toBe(7990);
+  }, 20_000);
+
+  it('primeira cobrança do Checkout hospedado (só traz a sessão, sem userId) liga à assinatura certa', async () => {
+    const { userId } = await createUser();
+    const { userId: other } = await createUser();
+    await subs.startTrial(userId);
+    await subs.startTrial(other);
+    const session = `chk_${RUN}_${seq}`;
+    await adminClient`
+      UPDATE subscriptions SET external_checkout_session_id = ${session} WHERE user_id = ${userId}`;
+    const worker = app.get(PaymentReconciliationWorker);
+    const event: GatewayEvent = {
+      type: 'CHECKOUT_CONFIRMED',
+      eventId: `evt_session_${RUN}_${seq}`,
+      externalSubscriptionId: `pay_${RUN}_${seq}`,
+      externalPaymentId: `pay_${RUN}_${seq}`,
+      externalCheckoutSessionId: session,
+      amountCents: 7990,
+    };
+    await worker.process({
+      data: { gateway: 'MOCK', event, rawPayload: {}, correlationId: 'c' },
+    } as never);
+
+    const rows = await adminClient<Array<{ user_id: string | null }>>`
+      SELECT user_id FROM payments WHERE gateway_event_id LIKE ${`%pay_${RUN}_${seq}`}`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.user_id).toBe(userId); // nunca órfã, nunca do outro titular
+    expect(rows[0]?.user_id).not.toBe(other);
   }, 20_000);
 });

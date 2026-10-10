@@ -65,6 +65,30 @@ export class AccessLinkService {
     return row ?? null;
   }
 
+  /**
+   * Dono de um token, mesmo vencido. Só serve para reenviar um link novo ao PRÓPRIO titular
+   * (nunca concede acesso). Token revogado ou titular anonimizado não tem dono.
+   */
+  async ownerOf(token: string, purpose: AccessLinkPurpose): Promise<string | null> {
+    if (!TOKEN_PATTERN.test(token)) return null;
+    const [row] = await this.db.runAsSystem((tx) =>
+      tx
+        .select({ userId: accessLinkTokens.userId })
+        .from(accessLinkTokens)
+        .innerJoin(users, eq(users.id, accessLinkTokens.userId))
+        .where(
+          and(
+            eq(accessLinkTokens.tokenHash, hash(token)),
+            eq(accessLinkTokens.purpose, purpose),
+            isNull(accessLinkTokens.revokedAt),
+            isNull(users.anonymizedAt),
+          ),
+        )
+        .limit(1),
+    );
+    return row?.userId ?? null;
+  }
+
   async revoke(token: string): Promise<void> {
     if (!TOKEN_PATTERN.test(token)) return;
     await this.db.runAsSystem((tx) =>

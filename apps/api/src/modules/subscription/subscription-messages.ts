@@ -29,11 +29,31 @@ export function firstPaymentFailedMessage(checkoutUrl: string): string {
 }
 
 /** Confirmação pós-webhook: só sai depois que o backend autenticou o evento do provedor. */
-export function paymentConfirmationMessage(): string {
+export function paymentConfirmationMessage(cancelUrl: string): string {
   return (
     'Pagamento confirmado 💚 Sua assinatura MOVIVO está ativa e seu acesso continua liberado. ' +
     'Sua orientação de treino segue supervisionada por profissional de Educação Física ' +
-    'registrado no CREF. Qualquer dúvida, me chama por aqui.'
+    'registrado no CREF. Você pode gerenciar ou cancelar sua assinatura por aqui: ' +
+    cancelUrl +
+    '\nQualquer dúvida, me chama por aqui.'
+  );
+}
+
+/** Resposta ao pedido de cancelamento/gerenciamento (WhatsApp ou página pública `/conta`). */
+export function subscriptionAccessMessage(portalUrl: string): string {
+  return (
+    'Claro! Aqui está o seu link para gerenciar ou cancelar a assinatura MOVIVO, sem burocracia:\n' +
+    `${portalUrl}\n\n` +
+    'Se precisar de ajuda com qualquer coisa, é só me chamar por aqui. 💚'
+  );
+}
+
+/** Link novo do checkout, pedido por quem abriu um link vencido. */
+export function checkoutLinkMessage(checkoutUrl: string): string {
+  return (
+    'Aqui está um novo link para ativar a sua assinatura MOVIVO:\n' +
+    `${checkoutUrl}\n\n` +
+    'Você pode cancelar quando quiser, sem burocracia. Continue se movendo. 👊🏼'
   );
 }
 

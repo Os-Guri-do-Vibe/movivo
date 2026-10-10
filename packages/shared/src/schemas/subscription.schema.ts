@@ -110,22 +110,6 @@ export const checkoutPayerSchema = z.object({
 export type CheckoutPayer = z.infer<typeof checkoutPayerSchema>;
 
 /**
- * Dados de cartão só existem no request em memória e seguem direto ao Asaas. Nunca entram em
- * resposta, banco ou log. A ativação em produção permanece condicionada à validação PCI/QSA.
- */
-export const checkoutCardSchema = z.object({
-  holderName: z.string().trim().min(2).max(255),
-  number: digits(13, 19),
-  expiryMonth: digits(1, 2).refine((value) => {
-    const month = Number(value);
-    return month >= 1 && month <= 12;
-  }, 'Mês inválido'),
-  expiryYear: digits(4),
-  ccv: digits(3, 4),
-});
-export type CheckoutCard = z.infer<typeof checkoutCardSchema>;
-
-/**
  * `plan` é opcional: o checkout vem pré-selecionado com o plano persistido (o da landing) e o
  * aluno pode trocá-lo ali mesmo. Só o ID viaja — preço, meses e parcelas continuam sendo
  * resolvidos pelo backend a partir do catálogo.
@@ -140,9 +124,9 @@ export const createCheckoutSchema = z.discriminatedUnion('method', [
   z.object({
     method: z.literal('CARD'),
     ...payerPaymentFields,
-    card: checkoutCardSchema,
     installments: z.number().int().min(1).max(12),
     acceptTerms: z.literal(true),
+    regenerate: z.boolean().optional(),
   }),
   z.object({
     method: z.literal('PIX'),
@@ -169,6 +153,10 @@ export const checkoutSummarySchema = z.object({
   status: subscriptionStatusSchema,
   expiresAt: z.iso.datetime(),
   methods: z.array(paymentMethodSchema),
+  hostedCard: z.boolean().optional(),
+  checkoutUrl: z.url().optional(),
+  /** Cancelado com período pago em curso: só dá para reassinar a partir desta data. */
+  repurchaseAt: z.iso.datetime().nullable().optional(),
 });
 export type CheckoutSummary = z.infer<typeof checkoutSummarySchema>;
 
@@ -183,19 +171,48 @@ export const checkoutPaymentResultSchema = z.object({
     })
     .optional(),
   nextBillingAt: z.string().optional(),
+  checkoutUrl: z.url().optional(),
   message: z.string().optional(),
 });
 export type CheckoutPaymentResult = z.infer<typeof checkoutPaymentResultSchema>;
 
 /**
  * Estado do portal (`GET /subscription/:token`) — o que `/conta/[token]` renderiza.
- * Sem PII, sem dado de cartão, sem id externo do gateway: só plano, estado, acesso e a
- * próxima cobrança.
+ * Sem PII, dado de cartão ou id externo do gateway: plano, acesso, método e fim do período.
  */
 export const subscriptionViewSchema = z.object({
   plan: subscriptionPlanIdSchema,
   status: subscriptionStatusSchema,
   access: z.enum(['FULL', 'RESTRICTED']),
   currentPeriodEnd: z.iso.datetime().nullable(),
+  paymentMethod: paymentMethodSchema.nullable(),
+  /** Fim do prazo de arrependimento (CDC art. 49), enquanto ainda for possível pedir estorno. */
+  refundEligibleUntil: z.iso.datetime().nullable(),
+  /** Data a partir da qual o aluno pode reassinar (cancelado com período pago em curso). */
+  canRepurchaseAt: z.iso.datetime().nullable(),
 });
 export type SubscriptionView = z.infer<typeof subscriptionViewSchema>;
+
+/** Resultado do pedido de estorno por arrependimento. */
+export const refundResultSchema = z.object({
+  status: z.enum(['REFUNDED', 'PENDING_MANUAL']),
+});
+export type RefundResult = z.infer<typeof refundResultSchema>;
+
+/** Link novo para o checkout, emitido a partir do portal do próprio titular. */
+export const checkoutLinkResultSchema = z.object({ url: z.url() });
+export type CheckoutLinkResult = z.infer<typeof checkoutLinkResultSchema>;
+
+/**
+ * Pedido público de um novo link de gerenciamento. A resposta é sempre a mesma, exista ou não
+ * assinatura para o número: a página nunca revela quem é cliente.
+ */
+export const accessLinkRequestSchema = z.strictObject({
+  phone: z
+    .string()
+    .trim()
+    .max(32)
+    .transform((value) => value.replace(/\D/g, ''))
+    .pipe(z.string().min(10).max(13)),
+});
+export type AccessLinkRequest = z.infer<typeof accessLinkRequestSchema>;

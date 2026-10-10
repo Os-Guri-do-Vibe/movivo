@@ -24,6 +24,12 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
 
   /*
+   * Só afeta `next dev`. O Checkout do Asaas Sandbox recusa `localhost` como URL de retorno e
+   * aceita `127.0.0.1`, então o aluno de teste volta do Asaas por esse endereço.
+   */
+  allowedDevOrigins: ['127.0.0.1'],
+
+  /*
    * Build de produção em container (apps/web/Dockerfile): `standalone` gera um
    * `server.js` com só as dependências rastreadas, sem o node_modules inteiro do
    * monorepo. Ligado apenas pela env do Dockerfile — `next dev`, o `next start`
