@@ -18,6 +18,7 @@ import { HealthConsentService } from '../../core/database/health-consent.service
 import type { HealthCipherService } from '../../core/database/health-cipher.service';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DomainEventBus } from '../../core/event-bus/event-bus.service';
+import { SUBSCRIPTION_INBOUND_EVENT, WORKOUT_INBOUND_EVENT } from '../../core/event-bus/events';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QueueManager } from '../jobs/queue-manager.service';
@@ -73,6 +74,7 @@ function makeService(
     userRows?: Array<{ id: string }>;
     consentActive?: boolean;
     checkinHandled?: boolean;
+    subscriptionHandled?: boolean;
     evolutionEdge?: WhatsappInboundEdge;
     audioHealthDataApproved?: boolean;
     audioApiKey?: string | undefined;
@@ -113,7 +115,11 @@ function makeService(
     revokeForUser,
   } as unknown as HealthConsentService;
   const events = {
-    request: vi.fn(async () => opts.checkinHandled ?? false),
+    request: vi.fn(async (event: string) =>
+      event === SUBSCRIPTION_INBOUND_EVENT
+        ? (opts.subscriptionHandled ?? false)
+        : (opts.checkinHandled ?? false),
+    ),
   } as unknown as DomainEventBus;
   // A borda real da EvolutionAPI é exercitada no spec dela.
   const evolutionEdge: WhatsappInboundEdge = opts.evolutionEdge ?? {
@@ -332,14 +338,41 @@ describe('WhatsappInboundService.ingest', () => {
       expect.any(Object),
     );
     expect(created.rpush).not.toHaveBeenCalled();
-    expect(created.events.request).not.toHaveBeenCalled();
+    // O trilho de treino (saúde) nunca é consultado sem consentimento.
+    expect(created.events.request).not.toHaveBeenCalledWith(
+      WORKOUT_INBOUND_EVENT,
+      expect.anything(),
+    );
+  });
+
+  it('pedido de cancelamento é tratado pela assinatura, antes da IA e até sem consentimento de saúde', async () => {
+    const created = makeService({ consentActive: false, subscriptionHandled: true });
+    const s = delivery(payload({ text: 'quero cancelar minha assinatura' }));
+    await created.service.ingest({ ...s, correlationId: 'cancel-intent' });
+    expect(created.events.request).toHaveBeenCalledWith(
+      SUBSCRIPTION_INBOUND_EVENT,
+      expect.objectContaining({ text: 'quero cancelar minha assinatura' }),
+    );
+    expect(created.rpush).not.toHaveBeenCalled();
+    expect(created.enqueue).not.toHaveBeenCalled(); // nem aviso de consentimento, nem IA
+  });
+
+  it('mensagem comum passa pela assinatura sem ser consumida e segue para a IA', async () => {
+    const created = makeService({ subscriptionHandled: false });
+    const s = delivery(payload({ text: 'qual a técnica do agachamento?' }));
+    await created.service.ingest({ ...s, correlationId: 'regular' });
+    expect(created.events.request).toHaveBeenCalledWith(
+      SUBSCRIPTION_INBOUND_EVENT,
+      expect.anything(),
+    );
+    expect(created.rpush).toHaveBeenCalledOnce();
   });
 
   it('roteia check-in pelo barramento sem importar o dominio e nao chama o Coach', async () => {
     const created = makeService({ checkinHandled: true });
     const s = delivery(payload({ text: 'dor no quadril' }));
     await created.service.ingest({ ...s, correlationId: 'checkin' });
-    expect(created.events.request).toHaveBeenCalledOnce();
+    expect(created.events.request).toHaveBeenCalledWith(WORKOUT_INBOUND_EVENT, expect.anything());
     expect(created.rpush).not.toHaveBeenCalled();
     expect(created.enqueue).not.toHaveBeenCalled();
   });

@@ -37,7 +37,12 @@ import { HealthConsentService } from '../../core/database/health-consent.service
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { conversations, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
-import { WORKOUT_INBOUND_EVENT, type CheckinInboundEvent } from '../../core/event-bus/events';
+import {
+  SUBSCRIPTION_INBOUND_EVENT,
+  WORKOUT_INBOUND_EVENT,
+  type CheckinInboundEvent,
+  type SubscriptionInboundEvent,
+} from '../../core/event-bus/events';
 import { DomainEventBus } from '../../core/event-bus/event-bus.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
@@ -256,6 +261,22 @@ export class WhatsappInboundService {
       this.logger.info(
         { event: 'health_consent_revoked_whatsapp', userId, correlationId },
         'consentimento de dados de saude revogado pelo titular',
+      );
+      return;
+    }
+
+    // Cancelar ou gerenciar a assinatura é assunto de cobrança, não de saúde: responde mesmo sem
+    // consentimento de saúde ativo e nunca chega à IA. O titular já foi autenticado pelo canal.
+    const subscriptionHandled =
+      (await this.events.request<SubscriptionInboundEvent, boolean>(SUBSCRIPTION_INBOUND_EVENT, {
+        userId,
+        text,
+        messageKey: consentCommandId,
+      })) ?? false;
+    if (subscriptionHandled) {
+      this.logger.info(
+        { event: 'subscription_inbound_handled', userId, correlationId },
+        'pedido de gerenciamento de assinatura tratado sem LLM',
       );
       return;
     }

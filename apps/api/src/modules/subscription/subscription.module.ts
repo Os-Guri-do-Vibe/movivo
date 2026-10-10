@@ -22,6 +22,7 @@ import { ConversionSequenceWorker } from './conversion-sequence.worker';
 import { PaymentReconciliationWorker } from './payment-reconciliation.worker';
 import { PaymentWebhookController } from './payment-webhook.controller';
 import { PaymentWebhookService } from './payment-webhook.service';
+import { SubscriptionAccessService } from './subscription-access.service';
 import { SubscriptionController } from './subscription.controller';
 import { SubscriptionPeriodScheduler } from './subscription-period.scheduler';
 import { SubscriptionRepository } from './subscription.repository';
@@ -53,6 +54,7 @@ import { SubscriptionService } from './subscription.service';
     SubscriptionRepository,
     CheckoutTokenService,
     SubscriptionService,
+    SubscriptionAccessService,
     PaymentWebhookService,
     ConversionSequenceWorker,
     // US-8.5: grava a receita recebida a partir do evento já autenticado no webhook.
