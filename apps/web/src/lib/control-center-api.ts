@@ -45,6 +45,10 @@ import {
   controlCenterOverviewResponseSchema,
   controlCenterStudentDetailResponseSchema,
   controlCenterStudentsResponseSchema,
+  controlCenterConversationsResponseSchema,
+  controlCenterConversationMessagesResponseSchema,
+  type ControlCenterConversationsResponse,
+  type ControlCenterConversationMessagesResponse,
   controlCenterSystemResponseSchema,
   type ControlCenterComplianceResponse,
   controlCenterCampaignsResponseSchema,
@@ -346,6 +350,26 @@ export function getStudent(
   return request(
     `students/${encodeURIComponent(id)}`,
     controlCenterStudentDetailResponseSchema,
+    signal,
+  );
+}
+
+export function getConversations(
+  signal?: AbortSignal,
+): Promise<ControlCenterConversationsResponse> {
+  return request('conversations', controlCenterConversationsResponseSchema, signal);
+}
+
+/** Uma página do histórico; `before` (ISO) pede as mensagens anteriores a esse instante. */
+export function getConversationMessages(
+  studentId: string,
+  before?: string,
+  signal?: AbortSignal,
+): Promise<ControlCenterConversationMessagesResponse> {
+  const query = before ? `?before=${encodeURIComponent(before)}` : '';
+  return request(
+    `conversations/${encodeURIComponent(studentId)}/messages${query}`,
+    controlCenterConversationMessagesResponseSchema,
     signal,
   );
 }

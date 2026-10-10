@@ -127,6 +127,14 @@ export interface EvolutionTransport {
     instanceName: string,
     mediaKey: string,
   ): Promise<{ base64: string; mimetype: string }>;
+  /**
+   * URL da foto de perfil do WhatsApp de um número (aba "Conversas" do painel).
+   * `POST /chat/fetchProfilePictureUrl/{instance}` com `{ number }` → `{ wuid, profilePictureUrl }`.
+   * `null` quando o contato não tem foto, a esconde por privacidade ou a instância está
+   * indisponível — nunca lança: foto é enfeite, não pode derrubar a tela. Opcional na
+   * interface para não quebrar fakes que só cobrem o fluxo de conexão.
+   */
+  fetchProfilePictureUrl?(phone: string): Promise<string | null>;
 }
 
 export const EVOLUTION_TRANSPORT = Symbol('MOVIVO_EVOLUTION_TRANSPORT');
@@ -528,6 +536,25 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
       base64: body.base64,
       mimetype: typeof body.mimetype === 'string' ? body.mimetype : 'audio/ogg; codecs=opus',
     };
+  }
+
+  async fetchProfilePictureUrl(phone: string): Promise<string | null> {
+    if (!this.apiKey) return null;
+    try {
+      const instanceName = await this.currentInstanceName();
+      if (!instanceName) return null;
+      const res = await this.request(
+        `/chat/fetchProfilePictureUrl/${encodeURIComponent(instanceName)}`,
+        { method: 'POST', body: JSON.stringify({ number: toEvolutionNumber(phone) }) },
+      );
+      const body = (await res.json()) as { profilePictureUrl?: unknown };
+      return typeof body.profilePictureUrl === 'string' && body.profilePictureUrl
+        ? body.profilePictureUrl
+        : null;
+    } catch {
+      this.logger.info('foto de perfil do WhatsApp indisponível (ignorado)');
+      return null;
+    }
   }
 
   /** Indicador "digitando…" imediato (US-3.5) — best-effort, nunca lança. */

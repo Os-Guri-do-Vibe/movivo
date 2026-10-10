@@ -17,6 +17,7 @@ import {
   LockKeyhole,
   Megaphone,
   Menu,
+  MessageCircle,
   PanelLeftClose,
   PanelLeftOpen,
   ScrollText,
@@ -86,6 +87,14 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         label: 'Base de Alunos',
         icon: UsersRound,
         capabilities: ['control_center.students.read'],
+      },
+      {
+        // Espelho somente-leitura do WhatsApp da MOVIVO. O corpo das mensagens é dado de
+        // saúde — mesma exigência da Fila do Profissional (`students.health.read`).
+        href: '/dashboard/conversas',
+        label: 'Conversas',
+        icon: MessageCircle,
+        capabilities: ['control_center.students.read', 'control_center.students.health.read'],
       },
       {
         // Ex-"Educação Física". Revisão, assinatura, handoff SAFETY e PAR-Q bloqueado

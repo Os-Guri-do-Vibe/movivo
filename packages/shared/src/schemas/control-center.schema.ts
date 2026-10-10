@@ -398,6 +398,69 @@ export const controlCenterStudentsResponseSchema = z.object({
 });
 export type ControlCenterStudentsResponse = z.infer<typeof controlCenterStudentsResponseSchema>;
 
+/**
+ * Aba "Conversas" (Alunos → Conversas): espelho somente-leitura do WhatsApp da MOVIVO.
+ * O corpo da mensagem é dado de saúde (LGPD Art. 11) — por isso a rota exige
+ * `STUDENTS_READ` **e** `STUDENTS_HEALTH_READ` e cada abertura de conversa é auditada.
+ */
+export const controlCenterConversationSummarySchema = z.object({
+  /** UUID do aluno — a conversa do WhatsApp é uma só por titular. */
+  studentId: z.uuid(),
+  /** Nome cadastrado; cai no nome do perfil do WhatsApp quando não há. */
+  name: nullableText,
+  phoneNumber: z.string(),
+  lastMessageAt: z.iso.datetime(),
+});
+export type ControlCenterConversationSummary = z.infer<
+  typeof controlCenterConversationSummarySchema
+>;
+
+export const controlCenterConversationsResponseSchema = z.object({
+  data: z.object({ conversations: z.array(controlCenterConversationSummarySchema) }),
+  meta: controlCenterMetaSchema,
+});
+export type ControlCenterConversationsResponse = z.infer<
+  typeof controlCenterConversationsResponseSchema
+>;
+
+export const controlCenterConversationMessageSchema = z.object({
+  id: z.uuid(),
+  /** `INBOUND` = veio do aluno; `OUTBOUND` = enviada pela MOVIVO. */
+  direction: z.enum(['INBOUND', 'OUTBOUND']),
+  messageType: z.enum(['TEXT', 'IMAGE', 'AUDIO', 'TEMPLATE', 'SYSTEM']),
+  content: z.string(),
+  createdAt: z.iso.datetime(),
+});
+export type ControlCenterConversationMessage = z.infer<
+  typeof controlCenterConversationMessageSchema
+>;
+
+export const controlCenterConversationMessagesResponseSchema = z.object({
+  data: z.object({
+    student: z.object({
+      id: z.uuid(),
+      name: nullableText,
+      phoneNumber: z.string(),
+    }),
+    /** Em ordem cronológica (mais antiga primeiro). */
+    messages: z.array(controlCenterConversationMessageSchema),
+    /** `createdAt` da mensagem mais antiga devolvida; `null` quando não há página anterior. */
+    olderCursor: z.iso.datetime().nullable(),
+  }),
+  meta: controlCenterMetaSchema,
+});
+export type ControlCenterConversationMessagesResponse = z.infer<
+  typeof controlCenterConversationMessagesResponseSchema
+>;
+
+/** URL da foto de perfil do WhatsApp — `null` quando o aluno não tem foto ou ela é privada. */
+export const controlCenterConversationPhotoResponseSchema = z.object({
+  data: z.object({ url: z.url().nullable() }),
+});
+export type ControlCenterConversationPhotoResponse = z.infer<
+  typeof controlCenterConversationPhotoResponseSchema
+>;
+
 /** Item da timeline única do aluno (US-7.4, TASK-7.4.1). */
 export const controlCenterTimelineEventSchema = z.object({
   at: z.iso.datetime(),
