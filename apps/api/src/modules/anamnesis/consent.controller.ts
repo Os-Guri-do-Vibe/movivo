@@ -51,10 +51,6 @@ export class ConsentController {
   @ApiResponse({ status: 204, description: 'Consentimentos registrados — sem corpo de resposta.' })
   @ApiResponse({ status: 400, description: 'Corpo fora do schema.' })
   @ApiResponse({ status: 404, description: 'Token inexistente ou expirado.' })
-  @ApiResponse({
-    status: 503,
-    description: 'Aceite contratual indisponível enquanto os documentos estão em revisão.',
-  })
   async record(
     @Param('token') token: string,
     @Body() body: unknown,
