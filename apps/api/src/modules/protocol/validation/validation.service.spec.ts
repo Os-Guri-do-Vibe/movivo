@@ -737,6 +737,51 @@ describe('ValidationService.validateResponse — texto livre da conversa (US-3.5
     expect(v.violations.map((x) => x.rule)).toContain('EXERCISE_NOT_ALLOWED');
   });
 
+  // Achado 2026-10-09 (produção: "pode substituir o giro russo?" caiu na resposta-padrão de
+  // bloqueio): o modelo cita a forma-base de uma opção autorizada ("abdominal na máquina",
+  // "afundo com halter") e o catálogo tem "Abdominal"/"Afundo" como exercícios próprios.
+  it('substituição: citar a forma-base (sem qualificador) de um exercício autorizado passa', () => {
+    const allowed = [
+      'Giro Russo (Com Peso)',
+      'Abdominal (Máquina)',
+      'Abdominal na Polia (Corda)',
+      'Abdominal Declinado (com Peso)',
+    ];
+    for (const text of [
+      'Posso sim! Prefere abdominal na máquina, abdominal na polia ou abdominal declinado?',
+      'Que tal o Abdominal na Polia? Trabalha bem o core.',
+    ]) {
+      expect(service.validateResponse(text, { allowedExercises: allowed }).action).toBe('PASS');
+    }
+    expect(
+      service.validateResponse('Dá pra fazer Afundo com halter no lugar.', {
+        allowedExercises: ['Afundo (Halter)'],
+      }).action,
+    ).toBe('PASS');
+  });
+
+  it('substituição: o termo genérico "abdominal" sozinho não é indicar exercício', () => {
+    const v = service.validateResponse('Esse movimento trabalha o abdominal e o core.', {
+      allowedExercises: ['Prancha'],
+    });
+    expect(v.action).toBe('PASS');
+  });
+
+  it('substituição: forma-base de um autorizado não libera variante distinta do catálogo', () => {
+    const afundoReverso = service.validateResponse('Vai de Afundo Reverso que é melhor.', {
+      allowedExercises: ['Afundo (Halter)'],
+    });
+    expect(afundoReverso.action).toBe('BLOCK_FALLBACK');
+    const outraVariante = service.validateResponse('Vai de Afundo (Barra) que é melhor.', {
+      allowedExercises: ['Afundo (Halter)'],
+    });
+    expect(outraVariante.action).toBe('BLOCK_FALLBACK');
+    const tradicional = service.validateResponse('Faz Abdominal Tradicional no lugar.', {
+      allowedExercises: ['Abdominal (Máquina)'],
+    });
+    expect(tradicional.action).toBe('BLOCK_FALLBACK');
+  });
+
   // Uma entrada vazia (ou que canonicaliza pra vazio) em `allowedExercises` não pode virar
   // máscara de tamanho zero — `split('').join(...)` inseriria um espaço entre TODO par de
   // caracteres do texto, corrompendo a busca dos nomes não autorizados que vêm depois dela
