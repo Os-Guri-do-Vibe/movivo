@@ -6,7 +6,7 @@
  * NÃO fala com o gateway direto: usa o `PaymentGateway` confinado (US-4.1.2). Preços em
  * centavos inteiros. Tudo sob RLS via o repositório.
  */
-import { ConflictException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
@@ -71,6 +71,13 @@ export function nextStatusForEvent(type: GatewayEventType): SubscriptionStatus {
 
 @Injectable()
 export class SubscriptionService {
+  private get productionAsaas(): boolean {
+    return (
+      this.config.payment.provider === 'ASAAS' &&
+      this.config.payment.asaasApiUrl === 'https://api.asaas.com/v3'
+    );
+  }
+
   constructor(
     private readonly repo: SubscriptionRepository,
     @Inject(PAYMENT_GATEWAY) private readonly gateway: PaymentGateway,
@@ -163,7 +170,15 @@ export class SubscriptionService {
       maxInstallments: plan.months,
       status: sub.status,
       expiresAt: new Date(expiresAt).toISOString(),
-      methods: ['CARD', 'PIX', 'PIX_AUTOMATIC'],
+      methods: this.productionAsaas ? ['CARD', 'PIX'] : ['CARD', 'PIX', 'PIX_AUTOMATIC'],
+      hostedCard: this.productionAsaas,
+      checkoutUrl:
+        this.productionAsaas &&
+        sub.status === 'PENDING_PAYMENT' &&
+        sub.paymentMethod === 'CARD' &&
+        sub.externalCheckoutSessionId
+          ? `https://asaas.com/checkoutSession/show/${encodeURIComponent(sub.externalCheckoutSessionId)}`
+          : undefined,
     };
   }
 
@@ -173,6 +188,18 @@ export class SubscriptionService {
     body: CreateCheckoutBody,
     remoteIp: string,
   ): Promise<CheckoutPaymentResult> {
+    if (this.productionAsaas && body.method === 'PIX_AUTOMATIC') {
+      throw new BadRequestException('Este meio de pagamento não está disponível nesta conta.');
+    }
+    if (body.method === 'CARD' && this.productionAsaas && body.card) {
+      throw new BadRequestException('Informe o cartão somente no ambiente seguro do Asaas.');
+    }
+    if (body.method === 'CARD' && !this.productionAsaas && !body.card) {
+      throw new BadRequestException('Dados do cartão ausentes.');
+    }
+    if (body.method === 'CARD' && !this.productionAsaas && !body.payer) {
+      throw new BadRequestException('Dados do pagador ausentes.');
+    }
     const lockKey = this.keys.forUser(userId, 'payment', 'start-lock');
     const lockToken = randomUUID();
     const acquired = await this.redis.set(lockKey, lockToken, 'PX', PAYMENT_LOCK_TTL_MS, 'NX');
@@ -201,7 +228,8 @@ export class SubscriptionService {
       ) {
         throw new Error('quantidade de parcelas incompatível com o plano');
       }
-      const regenerate = body.method !== 'CARD' && body.regenerate === true;
+      const regenerate =
+        body.regenerate === true && (body.method !== 'CARD' || this.productionAsaas);
       // Retentativa do MESMO contrato pendente reaproveita a referência (idempotência no
       // Asaas). Qualquer outro caso com contrato anterior — Pix regenerado, troca de método,
       // nova compra depois de expirar — abre contrato novo com tentativa nova.
@@ -210,6 +238,18 @@ export class SubscriptionService {
         sub.paymentMethod === body.method &&
         !regenerate &&
         !planChanged;
+      if (
+        retrying &&
+        this.productionAsaas &&
+        body.method === 'CARD' &&
+        sub.externalCheckoutSessionId
+      ) {
+        return {
+          status: 'PENDING',
+          method: 'CARD',
+          checkoutUrl: `https://asaas.com/checkoutSession/show/${encodeURIComponent(sub.externalCheckoutSessionId)}`,
+        };
+      }
       const previous = !retrying && contractIdsOf(sub).length > 0 ? sub : null;
       const paymentAttempt = sub.paymentAttempt + (previous || regenerate ? 1 : 0);
       if (previous) await this.supersede(previous, paymentAttempt);
@@ -222,12 +262,16 @@ export class SubscriptionService {
         totalCents: sub.totalPriceCents ?? sub.priceCents,
         months,
         method: body.method,
-        payer: body.payer,
+        payer: this.productionAsaas && body.method === 'CARD' ? undefined : body.payer,
         card: body.method === 'CARD' ? body.card : undefined,
         installments,
         remoteIp,
         termsVersion: SUBSCRIPTION_TERMS_VERSION,
         idempotencyKey: `${sub.id}:${paymentAttempt}`,
+        returnUrl:
+          this.productionAsaas && body.method === 'CARD'
+            ? await this.createCheckoutLink(userId)
+            : undefined,
       });
       await this.repo.patch(userId, sub.id, {
         status: 'PENDING_PAYMENT',
@@ -241,6 +285,7 @@ export class SubscriptionService {
         externalPaymentId: result.externalPaymentId,
         externalInstallmentId: result.externalInstallmentId,
         externalAuthorizationId: result.externalAuthorizationId,
+        externalCheckoutSessionId: result.externalCheckoutSessionId,
         termsVersion: SUBSCRIPTION_TERMS_VERSION,
         termsAcceptedAt: new Date(),
         nextBillingAt: parseOptionalDate(result.nextBillingAt),
@@ -250,6 +295,7 @@ export class SubscriptionService {
         method: body.method,
         qrCode: result.qrCode,
         nextBillingAt: result.nextBillingAt,
+        checkoutUrl: result.checkoutUrl,
         message:
           result.status === 'PENDING'
             ? 'Aguardando confirmação do Asaas. O acesso será ativado pelo backend.'
@@ -548,6 +594,7 @@ export class SubscriptionService {
       externalPaymentId: null,
       externalInstallmentId: null,
       externalAuthorizationId: null,
+      externalCheckoutSessionId: null,
       paymentAttempt,
     });
     if (!mayStillCharge(sub)) return;
@@ -569,6 +616,7 @@ export class SubscriptionService {
         externalPaymentId: sub.externalPaymentId,
         externalInstallmentId: sub.externalInstallmentId,
         externalAuthorizationId: sub.externalAuthorizationId,
+        externalCheckoutSessionId: sub.externalCheckoutSessionId,
         paymentAttempt: sub.paymentAttempt,
       });
       throw error;
@@ -690,6 +738,9 @@ function contractRefsOf(sub: SubscriptionRow): ExternalContractRefs {
     case 'PIX':
       return { paymentId: sub.externalPaymentId };
     case 'CARD':
+      if (sub.status === 'PENDING_PAYMENT' && sub.externalCheckoutSessionId) {
+        return { checkoutSessionId: sub.externalCheckoutSessionId };
+      }
       return sub.plan === 'MONTHLY'
         ? { subscriptionId: sub.externalSubscriptionId }
         : { installmentId: sub.externalInstallmentId };
@@ -699,6 +750,7 @@ function contractRefsOf(sub: SubscriptionRow): ExternalContractRefs {
         paymentId: sub.externalPaymentId,
         installmentId: sub.externalInstallmentId,
         authorizationId: sub.externalAuthorizationId,
+        checkoutSessionId: sub.externalCheckoutSessionId,
       };
   }
 }

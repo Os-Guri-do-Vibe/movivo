@@ -55,7 +55,10 @@ export class SubscriptionRepository {
     if (event.externalAuthorizationId) {
       predicates.push(eq(subscriptions.externalAuthorizationId, event.externalAuthorizationId));
     }
-    if (event.externalCustomerId) {
+    if (event.externalCheckoutSessionId) {
+      predicates.push(eq(subscriptions.externalCheckoutSessionId, event.externalCheckoutSessionId));
+    }
+    if (predicates.length === 0 && event.externalCustomerId) {
       predicates.push(eq(subscriptions.externalCustomerId, event.externalCustomerId));
     }
     if (predicates.length === 0) return null;

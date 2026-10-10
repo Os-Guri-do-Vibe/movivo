@@ -125,6 +125,7 @@ export interface ContractInput {
   externalPaymentId: string | null;
   externalInstallmentId: string | null;
   externalAuthorizationId: string | null;
+  externalCheckoutSessionId: string | null;
 }
 
 /**
@@ -146,6 +147,7 @@ export function contractIdsOf(sub: ContractInput): string[] {
     sub.externalPaymentId,
     sub.externalInstallmentId,
     sub.externalAuthorizationId,
+    sub.externalCheckoutSessionId,
   ].filter((id): id is string => Boolean(id));
 }
 
@@ -160,6 +162,7 @@ export function referencesContract(
     | 'externalPaymentId'
     | 'externalInstallmentId'
     | 'externalAuthorizationId'
+    | 'externalCheckoutSessionId'
   >,
   sub: ContractInput,
 ): boolean {
@@ -169,6 +172,7 @@ export function referencesContract(
     event.externalPaymentId,
     event.externalInstallmentId,
     event.externalAuthorizationId,
+    event.externalCheckoutSessionId,
   ].some((id) => Boolean(id) && current.has(id as string));
 }
 

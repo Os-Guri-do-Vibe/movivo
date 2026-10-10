@@ -92,14 +92,14 @@ export class SubscriptionController {
     return summary;
   }
 
-  /** Inicia a operação transparente no Asaas Sandbox; preço vem do contrato, não do body. */
+  /** Inicia a operação no Asaas; preço vem do contrato, não do body. */
   @Post('checkout/:token/payment')
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Header('Referrer-Policy', 'no-referrer')
   @ApiOperation({
-    summary: 'Inicia pagamento no Asaas Sandbox',
+    summary: 'Inicia pagamento no Asaas',
     description:
-      'Aceita cartão, Pix à vista ou Pix Automático. O backend nunca retorna nem persiste PAN/CVV.',
+      'Na conta real aceita Pix à vista e cartão no Checkout hospedado pelo Asaas. Pix Automático indisponível.',
   })
   @ApiParam({ name: 'token', description: 'Token opaco, autenticado e expirável do checkout.' })
   @ApiBody({ schema: zodSchemaToOpenApi(createCheckoutSchema) })

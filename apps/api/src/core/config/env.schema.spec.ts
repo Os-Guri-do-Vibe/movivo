@@ -103,7 +103,7 @@ describe('envSchema', () => {
     expect(message).toContain('ASAAS_WEBHOOK_SECRET');
   });
 
-  it('aceita Asaas somente com a URL literal do Sandbox', () => {
+  it('aceita somente os domínios oficiais e reserva o Asaas real ao ambiente de produção', () => {
     const sandbox = envSchema.safeParse({
       ...VALID,
       PAYMENT_PROVIDER: 'ASAAS',
@@ -112,14 +112,26 @@ describe('envSchema', () => {
     });
     expect(sandbox.success).toBe(true);
 
-    const productionUrl = envSchema.safeParse({
+    const production = {
       ...VALID,
       PAYMENT_PROVIDER: 'ASAAS',
-      ASAAS_API_KEY: 'teste',
-      ASAAS_WEBHOOK_SECRET: 'token-webhook-sandbox-com-32-caracteres',
+      ASAAS_API_KEY: '$aact_prod_teste',
+      ASAAS_WEBHOOK_SECRET: 'token-webhook-producao-com-32-caracteres',
       ASAAS_API_URL: 'https://api.asaas.com/v3',
-    });
-    expect(productionUrl.success).toBe(false);
+    };
+    expect(envSchema.safeParse(production).success).toBe(false);
+    expect(envSchema.safeParse({ ...production, NODE_ENV: 'production' }).success).toBe(false);
+    expect(
+      envSchema.safeParse({ ...production, NODE_ENV: 'production', APP_ENV: 'production' }).success,
+    ).toBe(true);
+    expect(
+      envSchema.safeParse({
+        ...production,
+        NODE_ENV: 'production',
+        APP_ENV: 'production',
+        ASAAS_API_URL: 'https://example.com/v3',
+      }).success,
+    ).toBe(false);
   });
 
   it('proíbe o gateway MOCK no processo de produção', () => {

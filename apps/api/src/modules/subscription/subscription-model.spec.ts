@@ -123,6 +123,7 @@ describe('subscription-model — contrato vigente e período pago', () => {
     externalPaymentId: null,
     externalInstallmentId: null,
     externalAuthorizationId: null,
+    externalCheckoutSessionId: null,
     ...over,
   });
 

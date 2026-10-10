@@ -3,8 +3,7 @@
  * ÚNICO ponto autorizado a falar com Asaas (padrão do `LLMRouter`). Nenhum outro
  * módulo importa SDK/HTTP de gateway (teste estrutural garante). Trocar de provedor é config.
  *
- * Dados de cartão ficam somente em memória durante a chamada transparente ao Asaas Sandbox.
- * Nunca são persistidos nem logados. Produção é bloqueada até validação PCI/QSA.
+ * Dados de cartão só trafegam no Sandbox. A conta real usa Checkout hospedado no Asaas.
  */
 import type { CheckoutCard, CheckoutPayer } from '@movivo/shared';
 import type { SubscriptionPlan } from '../subscription-model';
@@ -21,13 +20,15 @@ export interface StartPaymentInput {
   totalCents: number;
   months: number;
   method: PaymentMethod;
-  payer: CheckoutPayer;
+  payer?: CheckoutPayer;
   card?: CheckoutCard;
   installments?: number;
   /** IP real do navegador, exigido pelo endpoint de cartão do Asaas. */
   remoteIp: string;
   termsVersion: string;
   idempotencyKey?: string;
+  /** Retorno do Checkout hospedado para a página individual da MOVIVO. */
+  returnUrl?: string;
 }
 
 export interface PaymentQrCode {
@@ -38,12 +39,14 @@ export interface PaymentQrCode {
 
 export interface PaymentStartResult {
   status: 'PENDING' | 'CONFIRMED' | 'REFUSED' | 'EXPIRED';
-  externalCustomerId: string;
+  externalCustomerId?: string;
   externalSubscriptionId?: string;
   externalPaymentId?: string;
   externalInstallmentId?: string;
   externalAuthorizationId?: string;
+  externalCheckoutSessionId?: string;
   qrCode?: PaymentQrCode;
+  checkoutUrl?: string;
   nextBillingAt?: string;
 }
 
@@ -115,6 +118,7 @@ export interface ExternalContractRefs {
   paymentId?: string | null;
   installmentId?: string | null;
   authorizationId?: string | null;
+  checkoutSessionId?: string | null;
 }
 
 /** Adaptador de um provedor de pagamento. Real (Asaas) ou MOCK (dev/CI). */

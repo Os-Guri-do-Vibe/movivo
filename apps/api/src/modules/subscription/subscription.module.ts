@@ -2,7 +2,7 @@
  * `SubscriptionModule` (US-4.1) — planos por período, máquina de estados e o gateway confinado.
  *
  * O `PAYMENT_GATEWAY` é escolhido por config: `MOCK` em dev/CI ou `ASAAS` com credenciais
- * obrigatórias e URL fixa de Sandbox. O HTTP do gateway fica confinado a `payment/` (teste
+ * obrigatórias e URL oficial do ambiente. O HTTP do gateway fica confinado a `payment/` (teste
  * estrutural). Fila `conversion-sequence` e webhooks são US-4.2/4.3.
  *
  * Fronteira §12.5: depende só do CORE (config/banco/logger) por DI global — sem outro domínio.

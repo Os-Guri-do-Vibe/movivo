@@ -228,6 +228,89 @@ describe('AsaasGateway — operações Sandbox', () => {
   });
 });
 
+it('Asaas real bloqueia Pix Automático e PAN/CVV antes de qualquer chamada externa', async () => {
+  const fetchMock = vi.fn();
+  vi.stubGlobal('fetch', fetchMock);
+  const gateway = new AsaasGateway('production-key', TOKEN, 'https://api.asaas.com/v3');
+  await expect(gateway.startPayment(input({ method: 'PIX_AUTOMATIC' }))).rejects.toThrow(
+    'indisponível',
+  );
+  await expect(gateway.startPayment(input({ method: 'CARD' }))).rejects.toThrow('Dados de cartão');
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['MONTHLY', 7990, 1, 'RECURRENT'],
+  ['QUARTERLY', 22770, 3, 'INSTALLMENT'],
+  ['SEMIANNUAL', 43140, 6, 'INSTALLMENT'],
+  ['ANNUAL', 81480, 12, 'INSTALLMENT'],
+] as const)(
+  'Asaas real cria Checkout hospedado %s sem PAN/CVV',
+  async (plan, totalCents, months, chargeType) => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        json({ id: 'chk_1', link: 'https://asaas.com/checkoutSession/show/chk_1' }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await new AsaasGateway(
+      'production-key',
+      TOKEN,
+      'https://api.asaas.com/v3',
+    ).startPayment(
+      input({
+        plan,
+        months,
+        totalCents,
+        installments: months,
+        card: undefined,
+        payer: undefined,
+        returnUrl: 'https://movivo.test/assinar/opaque',
+      }),
+    );
+    expect(result).toMatchObject({
+      status: 'PENDING',
+      externalCheckoutSessionId: 'chk_1',
+      checkoutUrl: 'https://asaas.com/checkoutSession/show/chk_1',
+    });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.asaas.com/v3/checkouts');
+    const body = JSON.parse(String(init.body));
+    expect(body).toMatchObject({
+      billingTypes: ['CREDIT_CARD'],
+      chargeTypes: chargeType === 'RECURRENT' ? ['RECURRENT'] : ['DETACHED', 'INSTALLMENT'],
+      callback: { successUrl: 'https://movivo.test/assinar/opaque' },
+      items: [{ quantity: 1, value: totalCents / 100 }],
+    });
+    expect(JSON.stringify(body)).not.toContain('creditCard');
+    expect(JSON.stringify(body)).not.toContain('411111');
+    expect(body.customer).toBeUndefined();
+    if (chargeType === 'RECURRENT') expect(body.subscription.cycle).toBe('MONTHLY');
+    else expect(body.installment.maxInstallmentCount).toBe(months);
+  },
+);
+
+it('Asaas real envia cobrança Pix apenas ao domínio de produção com a chave correspondente', async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(json({ data: [{ id: 'cus_1' }] }))
+    .mockResolvedValueOnce(json({ data: [] }))
+    .mockResolvedValueOnce(json({ id: 'pay_1', status: 'PENDING' }))
+    .mockResolvedValueOnce(
+      json({ encodedImage: 'qr', payload: 'pix', expirationDate: '2026-10-11' }),
+    );
+  vi.stubGlobal('fetch', fetchMock);
+  const gateway = new AsaasGateway('production-key', TOKEN, 'https://api.asaas.com/v3');
+  const result = await gateway.startPayment(input({ method: 'PIX', card: undefined }));
+  expect(result.externalPaymentId).toBe('pay_1');
+  expect(
+    fetchMock.mock.calls.every(([url]) => String(url).startsWith('https://api.asaas.com/v3/')),
+  ).toBe(true);
+  expect(
+    new Headers((fetchMock.mock.calls[2]?.[1] as RequestInit).headers).get('access_token'),
+  ).toBe('production-key');
+});
+
 describe('AsaasGateway — webhook autenticado', () => {
   const gateway = new AsaasGateway('sandbox-key', TOKEN, API);
 
@@ -291,6 +374,31 @@ describe('AsaasGateway — webhook autenticado', () => {
       externalInstallmentId: 'ins_1',
       amountCents: 22770,
       feeCents: 770,
+    });
+  });
+
+  it('associa pagamento do Checkout hospedado pelo ID da sessão', () => {
+    const event = gateway.parseWebhookEvent(
+      Buffer.from(
+        JSON.stringify({
+          id: 'evt_checkout_1',
+          event: 'PAYMENT_CONFIRMED',
+          payment: {
+            id: 'pay_1',
+            customer: 'cus_1',
+            checkoutSession: 'chk_1',
+            subscription: 'sub_1',
+            value: 79.9,
+          },
+        }),
+      ),
+      TOKEN,
+      undefined,
+    );
+    expect(event).toMatchObject({
+      type: 'CHECKOUT_CONFIRMED',
+      externalCheckoutSessionId: 'chk_1',
+      externalSubscriptionId: 'sub_1',
     });
   });
 

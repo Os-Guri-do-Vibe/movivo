@@ -445,9 +445,9 @@ export const envSchema = z
     // -------------------------------------------- Pagamento (US-4.1)
     /** O enum legado do banco permanece para preservar registros históricos. */
     PAYMENT_PROVIDER: z.enum(['MOCK', 'ASAAS']).default('MOCK'),
-    /** Integração deliberadamente travada no Sandbox até uma mudança explícita de produção. */
+    /** Domínios oficiais distintos; URL arbitrária nunca recebe a chave de pagamento. */
     ASAAS_API_URL: z
-      .literal('https://api-sandbox.asaas.com/v3')
+      .enum(['https://api-sandbox.asaas.com/v3', 'https://api.asaas.com/v3'])
       .default('https://api-sandbox.asaas.com/v3'),
     ASAAS_API_KEY: z.string().min(1).optional(),
     /** `authToken` do webhook, enviado pelo Asaas no header `asaas-access-token`. */
@@ -578,6 +578,17 @@ export const envSchema = z
         code: 'custom',
         path: ['ASAAS_WEBHOOK_SECRET'],
         message: 'é obrigatório quando PAYMENT_PROVIDER=ASAAS',
+      });
+    }
+    if (
+      config.PAYMENT_PROVIDER === 'ASAAS' &&
+      config.ASAAS_API_URL === 'https://api.asaas.com/v3' &&
+      (config.NODE_ENV !== 'production' || config.APP_ENV !== 'production')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ASAAS_API_URL'],
+        message: 'Asaas real exige NODE_ENV=production e APP_ENV=production',
       });
     }
     if (config.NODE_ENV === 'production' && config.PAYMENT_PROVIDER === 'MOCK') {

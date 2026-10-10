@@ -113,7 +113,7 @@ export interface AudioTranscriptionConfig {
 
 export interface PaymentConfig {
   readonly provider: 'MOCK' | 'ASAAS';
-  readonly asaasApiUrl: 'https://api-sandbox.asaas.com/v3';
+  readonly asaasApiUrl: 'https://api-sandbox.asaas.com/v3' | 'https://api.asaas.com/v3';
   readonly asaasApiKey: string | undefined;
   readonly asaasWebhookSecret: string | undefined;
   readonly timeoutMs: number;

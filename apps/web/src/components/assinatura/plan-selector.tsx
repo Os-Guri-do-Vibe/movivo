@@ -114,14 +114,25 @@ export function PlanSelector({ token }: { token: string }) {
   const [error, setError] = React.useState('');
   const [copied, setCopied] = React.useState(false);
   const [secondsLeft, setSecondsLeft] = React.useState<number>();
+  const [regenerateCard, setRegenerateCard] = React.useState(false);
 
-  const loadSummary = React.useCallback(async () => {
-    const current = await getCheckoutSummary(token);
-    setServer(current);
-    setSelectedPlan((chosen) => chosen ?? current.plan);
-    if (current.status === 'ACTIVE') setState('SUCCESS');
-    return current;
-  }, [token]);
+  const loadSummary = React.useCallback(
+    async (initial = false) => {
+      const current = await getCheckoutSummary(token);
+      setServer(current);
+      setSelectedPlan((chosen) => chosen ?? current.plan);
+      setMethod((chosen) =>
+        current.methods.includes(chosen) ? chosen : (current.methods[0] ?? chosen),
+      );
+      if (current.status === 'ACTIVE') setState('SUCCESS');
+      else if (initial && current.status === 'PENDING_PAYMENT' && current.checkoutUrl) {
+        setResult({ status: 'PENDING', method: 'CARD', checkoutUrl: current.checkoutUrl });
+        setState('PENDING');
+      }
+      return current;
+    },
+    [token],
+  );
 
   const summary = React.useMemo(
     () => (server ? summaryFor(server, selectedPlan ?? server.plan) : undefined),
@@ -133,7 +144,7 @@ export function PlanSelector({ token }: { token: string }) {
   }, [summary]);
 
   React.useEffect(() => {
-    loadSummary().catch(() => {
+    loadSummary(true).catch(() => {
       setError('Este link é inválido ou expirou. Solicite um novo link pelo WhatsApp.');
       setState('ERROR');
     });
@@ -185,15 +196,20 @@ export function PlanSelector({ token }: { token: string }) {
         method === 'CARD'
           ? {
               method,
-              payer,
-              card: {
-                holderName: String(data.get('holderName') ?? ''),
-                number: onlyDigits(String(data.get('cardNumber') ?? ''), 19),
-                expiryMonth: expiry.slice(0, 2),
-                expiryYear: expiry.length === 4 ? `20${expiry.slice(2)}` : '',
-                ccv: onlyDigits(String(data.get('ccv') ?? ''), 4),
-              },
-              installments,
+              ...(summary.hostedCard ? {} : { payer }),
+              ...(summary.hostedCard
+                ? {}
+                : {
+                    card: {
+                      holderName: String(data.get('holderName') ?? ''),
+                      number: onlyDigits(String(data.get('cardNumber') ?? ''), 19),
+                      expiryMonth: expiry.slice(0, 2),
+                      expiryYear: expiry.length === 4 ? `20${expiry.slice(2)}` : '',
+                      ccv: onlyDigits(String(data.get('ccv') ?? ''), 4),
+                    },
+                  }),
+              installments: summary.hostedCard ? summary.maxInstallments : installments,
+              ...(summary.hostedCard && regenerateCard ? { regenerate: true } : {}),
               acceptTerms: true as const,
               plan: summary.plan,
             }
@@ -201,6 +217,7 @@ export function PlanSelector({ token }: { token: string }) {
       setLastBody(body);
       const next = await startCheckoutPayment(token, body);
       setResult(next);
+      setRegenerateCard(false);
       setState(next.status === 'REFUSED' || next.status === 'EXPIRED' ? 'ERROR' : 'PENDING');
       if (next.status === 'REFUSED') setError('O pagamento não foi aprovado. Revise os dados.');
     } catch (cause) {
@@ -275,7 +292,10 @@ export function PlanSelector({ token }: { token: string }) {
                 onChange={() => {
                   setSelectedPlan(option.id);
                   setError('');
-                  if (state === 'ERROR') setState('FORM');
+                  if (state === 'ERROR' || state === 'PENDING') {
+                    setResult(undefined);
+                    setState('FORM');
+                  }
                 }}
               />
               <span className={styles.planOptionText}>
@@ -338,6 +358,27 @@ export function PlanSelector({ token }: { token: string }) {
       <section className={styles.paymentCard} aria-labelledby="payment-title">
         {state === 'SUCCESS' ? (
           <Success />
+        ) : result?.checkoutUrl && state === 'PENDING' ? (
+          <div className={styles.methodNotice} role="status">
+            <h2 id="payment-title">Finalize no Asaas</h2>
+            <p>
+              Os dados do cartão são informados na página segura do Asaas. O acesso será ativado
+              após a confirmação do pagamento.
+            </p>
+            <a href={result.checkoutUrl} rel="noopener noreferrer">
+              Ir para o pagamento seguro
+            </a>
+            <button
+              type="button"
+              onClick={() => {
+                setRegenerateCard(true);
+                setResult(undefined);
+                setState('FORM');
+              }}
+            >
+              Gerar novo link de pagamento
+            </button>
+          </div>
         ) : result?.qrCode && state === 'PENDING' ? (
           <PixPending
             result={result}
@@ -358,7 +399,6 @@ export function PlanSelector({ token }: { token: string }) {
                   <p>Processado pelo Asaas</p>
                 </div>
               </div>
-              <span>Sandbox</span>
             </div>
 
             <fieldset className={styles.methods}>
@@ -391,54 +431,67 @@ export function PlanSelector({ token }: { token: string }) {
             </fieldset>
 
             <div className={styles.fields}>
-              <Field name="name" label="Nome completo" autoComplete="name" />
-              <Field name="email" label="E-mail" type="email" autoComplete="email" />
-              <div className={styles.twoColumns}>
-                <Field
-                  name="cpfCnpj"
-                  label="CPF"
-                  inputMode="numeric"
-                  autoComplete="off"
-                  placeholder="000.000.000-00"
-                  pattern="[0-9]{3}[.][0-9]{3}[.][0-9]{3}-[0-9]{2}"
-                  minLength={14}
-                  maxLength={14}
-                  mask={maskCpf}
-                />
-                <Field
-                  name="phone"
-                  label="Celular"
-                  inputMode="tel"
-                  autoComplete="tel"
-                  placeholder="(00) 90000-0000"
-                  pattern="[(][0-9]{2}[)] 9[0-9]{4}-[0-9]{4}"
-                  minLength={15}
-                  maxLength={15}
-                  mask={maskPhone}
-                />
-              </div>
-              <div className={styles.addressRow}>
-                <Field
-                  name="postalCode"
-                  label="CEP"
-                  inputMode="numeric"
-                  autoComplete="postal-code"
-                  placeholder="00000-000"
-                  pattern="[0-9]{5}-[0-9]{3}"
-                  minLength={9}
-                  maxLength={9}
-                  mask={maskPostalCode}
-                />
-                <Field name="addressNumber" label="Número" autoComplete="address-line2" />
-                <Field
-                  name="addressComplement"
-                  label="Complemento"
-                  required={false}
-                  autoComplete="address-line3"
-                />
-              </div>
+              {!(method === 'CARD' && summary.hostedCard) ? (
+                <>
+                  <Field name="name" label="Nome completo" autoComplete="name" />
+                  <Field name="email" label="E-mail" type="email" autoComplete="email" />
+                  <div className={styles.twoColumns}>
+                    <Field
+                      name="cpfCnpj"
+                      label="CPF"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder="000.000.000-00"
+                      pattern="[0-9]{3}[.][0-9]{3}[.][0-9]{3}-[0-9]{2}"
+                      minLength={14}
+                      maxLength={14}
+                      mask={maskCpf}
+                    />
+                    <Field
+                      name="phone"
+                      label="Celular"
+                      inputMode="tel"
+                      autoComplete="tel"
+                      placeholder="(00) 90000-0000"
+                      pattern="[(][0-9]{2}[)] 9[0-9]{4}-[0-9]{4}"
+                      minLength={15}
+                      maxLength={15}
+                      mask={maskPhone}
+                    />
+                  </div>
+                  <div className={styles.addressRow}>
+                    <Field
+                      name="postalCode"
+                      label="CEP"
+                      inputMode="numeric"
+                      autoComplete="postal-code"
+                      placeholder="00000-000"
+                      pattern="[0-9]{5}-[0-9]{3}"
+                      minLength={9}
+                      maxLength={9}
+                      mask={maskPostalCode}
+                    />
+                    <Field name="addressNumber" label="Número" autoComplete="address-line2" />
+                    <Field
+                      name="addressComplement"
+                      label="Complemento"
+                      required={false}
+                      autoComplete="address-line3"
+                    />
+                  </div>
+                </>
+              ) : null}
 
-              {method === 'CARD' ? (
+              {method === 'CARD' && summary.hostedCard ? (
+                <div className={styles.methodNotice} key="hosted-card">
+                  <strong>Cartão no ambiente seguro do Asaas</strong>
+                  <p>
+                    {summary.months === 1
+                      ? 'Cobrança mensal recorrente, até o cancelamento.'
+                      : `Valor total de ${formatBRL(summary.totalCents)}, parcelável em até ${summary.maxInstallments} vezes no Asaas.`}
+                  </p>
+                </div>
+              ) : method === 'CARD' ? (
                 <div className={styles.contextFields} key="card">
                   <Field name="holderName" label="Nome impresso no cartão" autoComplete="cc-name" />
                   <CardNumberField />
@@ -538,7 +591,11 @@ export function PlanSelector({ token }: { token: string }) {
             </Button>
             <p className={styles.chargeSummary}>
               {method === 'CARD'
-                ? `${installmentOption(summary.totalCents, installments)} · total exato ${formatBRL(summary.totalCents)}`
+                ? summary.months === 1
+                  ? `${formatBRL(summary.monthlyCents)} por mês, até o cancelamento`
+                  : summary.hostedCard
+                    ? `Até ${summary.maxInstallments}x no Asaas · total ${formatBRL(summary.totalCents)}`
+                    : `${installmentOption(summary.totalCents, installments)} · total exato ${formatBRL(summary.totalCents)}`
                 : method === 'PIX'
                   ? `Cobrança única de ${formatBRL(summary.totalCents)}`
                   : `${summary.months} cobrança${summary.months === 1 ? '' : 's'} de ${formatBRL(summary.monthlyCents)}`}

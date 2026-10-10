@@ -50,14 +50,15 @@ def check(name, value, config='', fail=False, expected=None):
                 assert pathlib.Path('candidate').read_text() == value.rstrip('\r\n') + '\n'
                 assert request.call_args.args[0].full_url.startswith('https://')
             if config == 'ASAAS_API_URL=https://api.asaas.com/v3':
-                request.assert_not_called()
+                assert request.call_args.args[0].full_url == 'https://api.asaas.com/v3/customers?limit=1'
         finally:
             os.chdir(previous)
 
 
 for name in ['asaas_api_key', 'openai_api_key', 'anthropic_api_key', 'deepseek_api_key', 'groq_api_key']:
     check(name, canary + '\n')
-check('asaas_api_key', canary, 'ASAAS_API_URL=https://api.asaas.com/v3', expected='Sandbox')
+check('asaas_api_key', canary, 'ASAAS_API_URL=https://api.asaas.com/v3')
+check('asaas_api_key', canary, 'ASAAS_API_URL=https://untrusted.invalid/v3', expected='domínio oficial')
 check('openai_api_key', canary, fail=True, expected='nenhuma substituição')
 check('openai_api_key', canary + ' invalid', expected='formato inválido')
-print('provider secrets: cinco fornecedores, Sandbox e falha antes da substituição validados')
+print('provider secrets: cinco fornecedores, Asaas Sandbox/produção e falha antes da substituição validados')

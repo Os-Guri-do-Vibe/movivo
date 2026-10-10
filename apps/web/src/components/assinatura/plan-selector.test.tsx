@@ -74,6 +74,49 @@ describe('checkout MOVIVO', () => {
     expect(screen.queryByText(/Apple Pay|Google Pay/)).not.toBeInTheDocument();
   });
 
+  it('na conta real mostra Pix e cartão hospedado sem pedir PAN/CVV', async () => {
+    getCheckoutSummary.mockResolvedValueOnce({
+      ...SUMMARY,
+      methods: ['CARD', 'PIX'],
+      hostedCard: true,
+    });
+    render(<PlanSelector token="opaque" />);
+    expect(await screen.findByRole('button', { name: /Cartão/ })).toBeVisible();
+    expect(await screen.findByRole('button', { name: /Pix à vista/ })).toBeVisible();
+    expect(screen.queryByLabelText(/Número do cartão/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Pix Automático/ })).not.toBeInTheDocument();
+  });
+
+  it('envia cartão sem PAN/CVV e apresenta o link do Checkout hospedado', async () => {
+    const user = userEvent.setup();
+    getCheckoutSummary.mockResolvedValueOnce({
+      ...SUMMARY,
+      methods: ['CARD', 'PIX'],
+      hostedCard: true,
+    });
+    startCheckoutPayment.mockResolvedValueOnce({
+      status: 'PENDING',
+      method: 'CARD',
+      checkoutUrl: 'https://asaas.com/checkoutSession/show/chk_1',
+    });
+    render(<PlanSelector token="opaque" />);
+    await screen.findByRole('button', { name: /Cartão/ });
+    expect(screen.queryByLabelText(/Nome completo/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox'));
+    await user.click(screen.getByRole('button', { name: 'Confirmar assinatura' }));
+    await waitFor(() => expect(startCheckoutPayment).toHaveBeenCalledTimes(1));
+    expect(startCheckoutPayment).toHaveBeenCalledWith(
+      'opaque',
+      expect.objectContaining({ method: 'CARD', installments: 12 }),
+    );
+    expect(JSON.stringify(startCheckoutPayment.mock.calls[0]?.[1])).not.toContain('cardNumber');
+    expect(JSON.stringify(startCheckoutPayment.mock.calls[0]?.[1])).not.toContain('ccv');
+    expect(await screen.findByRole('link', { name: 'Ir para o pagamento seguro' })).toHaveAttribute(
+      'href',
+      'https://asaas.com/checkoutSession/show/chk_1',
+    );
+  });
+
   it('envia Pix com o plano persistido e nunca com preço vindo do cliente', async () => {
     const user = userEvent.setup();
     render(<PlanSelector token="opaque" />);

@@ -110,8 +110,8 @@ export const checkoutPayerSchema = z.object({
 export type CheckoutPayer = z.infer<typeof checkoutPayerSchema>;
 
 /**
- * Dados de cartão só existem no request em memória e seguem direto ao Asaas. Nunca entram em
- * resposta, banco ou log. A ativação em produção permanece condicionada à validação PCI/QSA.
+ * Dados de cartão só existem no checkout transparente de Sandbox. Em produção, o pagador
+ * informa cartão exclusivamente na página hospedada pelo Asaas.
  */
 export const checkoutCardSchema = z.object({
   holderName: z.string().trim().min(2).max(255),
@@ -139,10 +139,12 @@ const payerPaymentFields = {
 export const createCheckoutSchema = z.discriminatedUnion('method', [
   z.object({
     method: z.literal('CARD'),
-    ...payerPaymentFields,
-    card: checkoutCardSchema,
+    payer: checkoutPayerSchema.optional(),
+    plan: subscriptionPlanIdSchema.optional(),
+    card: checkoutCardSchema.optional(),
     installments: z.number().int().min(1).max(12),
     acceptTerms: z.literal(true),
+    regenerate: z.boolean().optional(),
   }),
   z.object({
     method: z.literal('PIX'),
@@ -169,6 +171,8 @@ export const checkoutSummarySchema = z.object({
   status: subscriptionStatusSchema,
   expiresAt: z.iso.datetime(),
   methods: z.array(paymentMethodSchema),
+  hostedCard: z.boolean().optional(),
+  checkoutUrl: z.url().optional(),
 });
 export type CheckoutSummary = z.infer<typeof checkoutSummarySchema>;
 
@@ -183,6 +187,7 @@ export const checkoutPaymentResultSchema = z.object({
     })
     .optional(),
   nextBillingAt: z.string().optional(),
+  checkoutUrl: z.url().optional(),
   message: z.string().optional(),
 });
 export type CheckoutPaymentResult = z.infer<typeof checkoutPaymentResultSchema>;

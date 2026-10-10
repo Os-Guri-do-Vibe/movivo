@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { AppConfigService } from '../../core/config';
 import type { SubscriptionRow } from '../../core/database/schema';
-import type { PaymentGateway } from './payment/payment-gateway.types';
+import type { PaymentGateway, PaymentStartResult } from './payment/payment-gateway.types';
 import type { GatewayEvent } from './payment/payment-gateway.types';
 import { InvalidTransitionError } from './subscription-model';
 import { nextStatusForEvent, SubscriptionService } from './subscription.service';
@@ -67,7 +67,11 @@ function row(over: Partial<SubscriptionRow> = {}): SubscriptionRow {
   } as SubscriptionRow;
 }
 
-function make(current: SubscriptionRow | null, gatewayName: PaymentGateway['name'] = 'MOCK') {
+function make(
+  current: SubscriptionRow | null,
+  gatewayName: PaymentGateway['name'] = 'MOCK',
+  productionAsaas = false,
+) {
   const patch = vi.fn(
     (_userId: string, _id: string, _values: Partial<SubscriptionRow>, _transition?: unknown) =>
       Promise.resolve(),
@@ -80,7 +84,7 @@ function make(current: SubscriptionRow | null, gatewayName: PaymentGateway['name
     patch,
   } as unknown as SubscriptionRepository;
   const cancelContract = vi.fn(() => Promise.resolve());
-  const startPayment = vi.fn(() =>
+  const startPayment = vi.fn((): Promise<PaymentStartResult> =>
     Promise.resolve({
       status: 'PENDING' as const,
       externalCustomerId: 'cus_1',
@@ -94,7 +98,13 @@ function make(current: SubscriptionRow | null, gatewayName: PaymentGateway['name
   } as unknown as PaymentGateway;
   const config = {
     whatsapp: { publicSiteUrl: 'https://movivo.test' },
-    payment: { pastDueGraceDays: 3 },
+    payment: {
+      pastDueGraceDays: 3,
+      provider: gatewayName,
+      asaasApiUrl: productionAsaas
+        ? 'https://api.asaas.com/v3'
+        : 'https://api-sandbox.asaas.com/v3',
+    },
   } as unknown as AppConfigService;
   const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() } as never;
   const checkoutTokens = {
@@ -535,6 +545,53 @@ describe('SubscriptionService checkout transparente / getAccess (US-4.2)', () =>
       's1',
       expect.objectContaining({ status: 'PENDING_PAYMENT', paymentMethod: 'PIX' }),
     );
+  });
+
+  it('na conta real oferece Pix e cartão hospedado, mas rejeita dados de cartão locais', async () => {
+    const { svc, startPayment, set } = make(row(), 'ASAAS', true);
+    const summary = await svc.getCheckoutSummary(USER, Date.now() + DAY_MS);
+    expect(summary?.methods).toEqual(['CARD', 'PIX']);
+    expect(summary?.hostedCard).toBe(true);
+    await expect(
+      svc.startCheckoutPayment(
+        USER,
+        { method: 'CARD', payer: PAYER, card: CARD, installments: 1, acceptTerms: true },
+        '127.0.0.1',
+      ),
+    ).rejects.toThrow('ambiente seguro do Asaas');
+    expect(set).not.toHaveBeenCalled();
+    expect(startPayment).not.toHaveBeenCalled();
+  });
+
+  it('inicia cartão hospedado e persiste o ID do Checkout para conciliação', async () => {
+    const { svc, startPayment, patch } = make(row(), 'ASAAS', true);
+    startPayment.mockResolvedValueOnce({
+      status: 'PENDING',
+      externalCustomerId: 'cus_1',
+      externalCheckoutSessionId: 'chk_1',
+      checkoutUrl: 'https://asaas.com/checkoutSession/show/chk_1',
+    });
+    const result = await svc.startCheckoutPayment(
+      USER,
+      { method: 'CARD', payer: PAYER, installments: 1, acceptTerms: true },
+      '127.0.0.1',
+    );
+    expect(startPayment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'CARD',
+        card: undefined,
+        returnUrl: expect.stringContaining('/assinar/'),
+      }),
+    );
+    expect(patch).toHaveBeenCalledWith(
+      USER,
+      's1',
+      expect.objectContaining({
+        externalCheckoutSessionId: 'chk_1',
+        status: 'PENDING_PAYMENT',
+      }),
+    );
+    expect(result.checkoutUrl).toBe('https://asaas.com/checkoutSession/show/chk_1');
   });
 
   describe('troca de plano no checkout', () => {
