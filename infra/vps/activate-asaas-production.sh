@@ -32,14 +32,26 @@ ssh -o BatchMode=yes -T "$VPS" 'bash -se' <<'REMOTE'
 set -Eeuo pipefail
 cd /opt/movivo
 trap 'rm -f secrets/.asaas_api_key.next secrets/.asaas_webhook_secret.next .api.env.asaas.next' EXIT
+# O api-tls compartilha a rede da API: recriar a API sem recriá-lo deixa a API pública em 502.
+# O Nginx guarda o endereço do upstream, então também precisa recarregar (mesmo passo do deploy.sh).
+resync_proxy() {
+  docker compose --env-file .env -f compose.yml -f compose.override.yml up -d --no-deps --force-recreate --wait --wait-timeout 60 api-tls >/dev/null
+  docker compose --env-file .env -f compose.yml -f compose.override.yml exec -T nginx nginx -s reload
+}
 current_url="$(sed -n 's/^ASAAS_API_URL=//p' api.env)"
 case "$current_url" in
   https://api-sandbox.asaas.com/v3|https://api.asaas.com/v3) ;;
   *) echo 'ASAAS_API_URL inesperada; troca cancelada' >&2; exit 1 ;;
 esac
-cmp -s secrets/asaas_api_key secrets/.asaas_api_key.next && {
-  echo 'Chave nova igual à chave atual; troca cancelada' >&2; exit 1;
-}
+if cmp -s secrets/asaas_api_key secrets/.asaas_api_key.next; then
+  if [[ "$current_url" == https://api.asaas.com/v3 ]]; then
+    # Já está na conta real: só garante que o proxy aponta para a API atual (reparo idempotente).
+    resync_proxy
+    echo 'Asaas de produção já ativo; proxy TLS ressincronizado.'
+    exit 0
+  fi
+  echo 'Chave nova igual à chave do Sandbox; troca cancelada' >&2; exit 1
+fi
 cp -p api.env .api.env.asaas.rollback
 cp -p secrets/asaas_api_key secrets/.asaas_api_key.rollback
 cp -p secrets/asaas_webhook_secret secrets/.asaas_webhook_secret.rollback
@@ -50,6 +62,7 @@ restore() {
   mv -f secrets/.asaas_api_key.rollback secrets/asaas_api_key
   mv -f secrets/.asaas_webhook_secret.rollback secrets/asaas_webhook_secret
   docker compose --env-file .env -f compose.yml -f compose.override.yml up -d --no-deps --force-recreate --wait --wait-timeout 180 api >/dev/null || true
+  resync_proxy || true
   echo 'Falha no corte Asaas; configuração e segredos anteriores restaurados.' >&2
   exit "$status"
 }
@@ -61,10 +74,18 @@ mv -f secrets/.asaas_api_key.next secrets/asaas_api_key
 mv -f secrets/.asaas_webhook_secret.next secrets/asaas_webhook_secret
 docker compose --env-file .env -f compose.yml -f compose.override.yml up -d --no-deps --force-recreate --wait --wait-timeout 180 api >/dev/null
 [[ "$(docker inspect movivo-api --format '{{.State.Health.Status}}')" == healthy ]]
+resync_proxy
 trap - ERR
 rm -f .api.env.asaas.rollback secrets/.asaas_api_key.rollback secrets/.asaas_webhook_secret.rollback
 echo 'API saudável com endpoint Asaas de produção.'
 REMOTE
 
-curl -fsS --max-time 20 https://api.movivo.com.br/api/v1/health >/dev/null
-echo 'Saúde pública da API confirmada.'
+for attempt in 1 2 3 4 5 6; do
+  if curl -fsS --max-time 20 https://api.movivo.com.br/api/v1/health >/dev/null; then
+    echo 'Saúde pública da API confirmada.'
+    exit 0
+  fi
+  sleep 10
+done
+echo 'API pública não respondeu depois do corte.' >&2
+exit 1
