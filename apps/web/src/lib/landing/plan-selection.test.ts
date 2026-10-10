@@ -32,7 +32,7 @@ describe('credencial do responsável técnico', () => {
 
   it('com número configurado, exibe o registro', () => {
     expect(crefLabel({ ...RESPONSIBLE_PROFESSIONAL, crefNumber: '000000-G/SP' })).toBe(
-      'CREF 000000-G/SP',
+      'Regulamentado CREF sob o nº 000000-G/SP',
     );
   });
 });

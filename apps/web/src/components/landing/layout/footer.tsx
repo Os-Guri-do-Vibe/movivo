@@ -103,12 +103,13 @@ export function Footer() {
                 <MovivoLogo className={styles.logo} title={null} />
               </a>
               <p className={styles.description}>
-                Ciência que treina com você: treino individualizado no WhatsApp, com método e
-                supervisão de um profissional de Educação Física.
+                Move your potential: A MOVIVO transforma seu potencial em movimento com treinos
+                individualizados, tecnologia inteligente e acompanhamento profissional, tudo pelo
+                WhatsApp.
               </p>
               <p className={styles.professional}>
-                Responsável técnico: {RESPONSIBLE_PROFESSIONAL.name} ·{' '}
-                {RESPONSIBLE_PROFESSIONAL.profession} · {crefLabel(RESPONSIBLE_PROFESSIONAL)}
+                Responsável técnico: {RESPONSIBLE_PROFESSIONAL.fullName} ·{' '}
+                {RESPONSIBLE_PROFESSIONAL.profession} · {crefLabel(RESPONSIBLE_PROFESSIONAL)}.
               </p>
               <div className={styles.actions}>
                 <TrackedLink

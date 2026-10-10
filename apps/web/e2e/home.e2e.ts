@@ -26,7 +26,7 @@ test('a landing carrega com hero, CTA e respaldo CREF', async ({ page }) => {
 
   // Guardrail de linguagem: o respaldo do profissional CREF é visível.
   await expect(page.getByText(/registro no CREF/i).first()).toBeAttached();
-  await expect(page.getByText(/Regulamentado pelo CREF/).first()).toBeAttached();
+  await expect(page.getByText(/Regulamentado CREF sob o nº 206778-G\/SP/).first()).toBeAttached();
 });
 
 test('a landing expõe navegação e seções principais', async ({ page }) => {

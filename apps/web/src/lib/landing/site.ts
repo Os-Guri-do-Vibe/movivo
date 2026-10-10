@@ -94,7 +94,7 @@ export interface ResponsibleProfessional {
   /** Posição na empresa, na página de formação. */
   position: string;
   profession: string;
-  /** Número do registro (ex.: `'000000-G/SP'`). `null` → exibe "Regulamentado pelo CREF". */
+  /** Número do registro (ex.: `'000000-G/SP'`). `null` → exibe "Regulamentado pelo CREF" (sem número). */
   crefNumber: string | null;
   summary: string;
   tagline: string;
@@ -119,7 +119,7 @@ export const RESPONSIBLE_PROFESSIONAL: ResponsibleProfessional = {
   role: 'Responsável técnico',
   position: 'Sócio e responsável técnico',
   profession: 'Profissional de Educação Física',
-  crefNumber: null,
+  crefNumber: '206778-G/SP',
   summary: 'Responsável pela metodologia de treinamento baseada em ciência da MOVIVO.',
   tagline: 'Ciência, prática e experiência aplicadas à saúde e à performance.',
   bio: 'Atuação multidisciplinar em saúde, educação e performance humana, unindo formação acadêmica, experiência como professor e mais de 15 anos de treino na prática.',
@@ -161,5 +161,7 @@ export const RESPONSIBLE_PROFESSIONAL: ResponsibleProfessional = {
 };
 
 export function crefLabel(professional: ResponsibleProfessional): string {
-  return professional.crefNumber ? `CREF ${professional.crefNumber}` : 'Regulamentado pelo CREF';
+  return professional.crefNumber
+    ? `Regulamentado CREF sob o nº ${professional.crefNumber}`
+    : 'Regulamentado pelo CREF';
 }
