@@ -304,6 +304,9 @@ atualize também `API_ENV_PRODUCTION` para a URL real, evitando que o próximo
 deploy volte ao Sandbox. Reative o webhook somente quando o Auth Token
 configurado no Asaas corresponder ao arquivo da VPS.
 
+Lista dos eventos de webhook a ligar no painel do Asaas e o passo a passo do estorno manual em
+[`docs/pagamentos/FLUXO-ASSINATURA-ASAAS.md`](../pagamentos/FLUXO-ASSINATURA-ASAAS.md).
+
 No terminal zsh do Mac (a entrada fica oculta e não vira argumento/histórico):
 
 ```sh

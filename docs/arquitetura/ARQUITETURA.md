@@ -38,7 +38,7 @@ Serverless (Vercel/Lambda) foi rejeitado: cold start de 500–2000ms é incompat
 | Embeddings RAG | **text-embedding-3-small** (OpenAI) | 1536 dimensões |
 | Vector search | **PGVector HNSW** | `m=16`, `ef_construction=64` |
 | WhatsApp | **EvolutionAPI** (QR Code/Baileys) | Instância separada por ambiente; token próprio para o webhook de entrada |
-| Pagamentos | **Asaas Sandbox e produção** | Produção: Pix comum direto e cartão no Checkout hospedado (mensal recorrente; 3/6/12 meses parcelados). Pix Automático indisponível nesta conta. Webhooks idempotentes obrigatórios. |
+| Pagamentos | **Asaas Sandbox e produção** | Pix à vista na própria página e cartão no **Checkout hospedado** (mensal recorrente; 3/6/12 meses parcelados), no Sandbox e em produção. Pix Automático indisponível. Arrependimento com estorno em 7 dias. Webhooks idempotentes obrigatórios. Ver `docs/pagamentos/FLUXO-ASSINATURA-ASAAS.md`. |
 | Observabilidade | **OpenTelemetry + Prometheus + Grafana + Loki + Sentry** | Spans obrigatórios — ver §8 |
 | Analytics de produto | **PostHog** | Eventos de funil obrigatórios (herdados de Lucas) |
 | CDN / WAF | **Cloudflare** | DDoS, bot management, OWASP Top 10 |
@@ -374,7 +374,7 @@ Todos os relatórios de Fase 2–4 (Alexandre, Eduardo, Sofia, Sato, Victor) já
 13. RLS no Postgres exige `SET LOCAL app.current_user_id` por transação e `FORCE ROW LEVEL SECURITY` — nunca confiar em RLS "por padrão" sob PgBouncer transaction mode.
 14. Redis nunca sobe em produção sem o patch para CVE-2025-49844 (RediShell) aplicado.
 15. Webhooks exigem a autenticação definida pelo provedor e idempotência por evento. EvolutionAPI usa token exclusivo, validação da instância e nonce; Asaas usa `asaas-access-token` comparado em tempo constante e deduplicação persistente/Redis.
-16. O checkout transparente Asaas permanece restrito ao Sandbox. Em produção, os dados de cartão são coletados somente no Checkout hospedado pelo Asaas; a MOVIVO persiste o ID da sessão e ativa acesso somente após webhook financeiro autenticado. Alterar para cartão transparente exige avaliação PCI/QSA.
+16. O número do cartão **nunca** passa pela MOVIVO, nem no Sandbox: os dados de cartão são coletados somente no Checkout hospedado pelo Asaas, e a MOVIVO persiste o ID e o link da sessão e ativa o acesso somente após webhook financeiro autenticado. Alterar para cartão transparente exige avaliação PCI/QSA.
 17. **Nunca dar ferramentas (tool/function calling/MCP) ao LLM sem uma camada que revalide a autorização a cada chamada** com o titular vindo da sessão — o modelo é componente não confiável para autorização. Saída do modelo que vira ação só é aceita se for escolha numa lista fechada montada e revalidada pelo servidor (§5).
 
 ---
