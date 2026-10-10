@@ -62,7 +62,7 @@ describe('DashboardShell', () => {
   });
 
   it('admin recebe todos os setores quando possui todas as capabilities necessárias', () => {
-    expect(navigationFor(ADMIN_CAPABILITIES)).toHaveLength(19);
+    expect(navigationFor(ADMIN_CAPABILITIES)).toHaveLength(20);
   });
 
   it('esconde Compliance & Privacidade quando falta uma das capabilities exigidas (AND, como no backend)', () => {
@@ -93,6 +93,21 @@ describe('DashboardShell', () => {
       'Perfil de Clientes',
       'Campanhas & Experimentos',
     ]);
+  });
+
+  it('coloca Conversas entre Base de Alunos e Fila do Profissional, só com leitura de saúde', () => {
+    const alunos = navigationGroupsFor(ADMIN_CAPABILITIES).find(
+      (group) => group.label === 'Alunos',
+    );
+    expect(alunos?.items.map((item) => item.label)).toEqual([
+      'Base de Alunos',
+      'Conversas',
+      'Fila do Profissional',
+    ]);
+    // Suporte lê a base de alunos, mas não o conteúdo das conversas (dado de saúde).
+    expect(navigationFor(['control_center.students.read']).map((item) => item.label)).not.toContain(
+      'Conversas',
+    );
   });
 
   it('marca o setor atual com aria-current e mostra o título no cabeçalho', () => {
