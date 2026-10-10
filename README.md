@@ -198,8 +198,9 @@ http://localhost:3000 e API em http://localhost:3001/api/v1. A API lê o **mesmo
 `infra/vps/api.env` da VPS; só as URLs mudam (bloco `environment:` do serviço `api`).
 
 - **Pré-requisito extra:** as chaves de terceiros em `secrets/` (`asaas_api_key`,
-  `openai_api_key`, `deepseek_api_key`, `anthropic_api_key`, `groq_api_key`,
-  `ararahq_api_key`), as mesmas que o `deploy.sh` copia para a VPS. Com
+  `openai_api_key`, `deepseek_api_key`, `anthropic_api_key`, `groq_api_key`)
+  são exclusivas de desenvolvimento. O `deploy.sh` só provisiona credenciais de produção
+  a partir de uma fonte explícita. Com
   `NODE_ENV=production` a API recusa subir sem OpenAI e sem Asaas (Sandbox).
 - **Mudou código?** Rode `pnpm run infra:up` de novo (reconstrói só o que mudou).
   `pnpm run infra:rebuild` refaz as imagens sem cache.
@@ -648,7 +649,7 @@ responsabilidade por commit e **sem coautor de IA**.
 
 ```
 feat(anamnesis): adiciona salvamento de progresso por bloco no formulário
-fix(whatsapp): corrige validação de HMAC no webhook da AraraHQ
+fix(whatsapp): corrige validação do token no webhook da EvolutionAPI
 chore(monorepo): fixa versao do pnpm no packageManager
 ```
 

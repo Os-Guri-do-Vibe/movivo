@@ -46,7 +46,7 @@ export const users = pgTable(
      */
     avatarPath: varchar('avatar_path', { length: 512 }),
 
-    /** Nome do perfil no WhatsApp, retornado pela AraraHQ. Dado pessoal comum. */
+    /** Nome do perfil no WhatsApp. Dado pessoal comum. */
     whatsappName: varchar('whatsapp_name', { length: 255 }),
 
     /** Preferências do diário de treino. 05:00 é o default do produto, sempre no fuso do titular. */

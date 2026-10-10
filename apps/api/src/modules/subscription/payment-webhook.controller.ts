@@ -5,20 +5,20 @@
  * onde um sistema de fora grava fato financeiro. As três defesas, nesta ordem:
  *
  *  1. **Rate limit** (`ThrottlerGuard`, 30/min por IP) — antes de qualquer trabalho. Um
- *     endpoint público que verifica HMAC em todo request é um amplificador de CPU sem isto.
+ *     endpoint público precisa limitar tentativas de token e volume de corpo.
  *  2. **Limite de corpo** — hoje o `DEFAULT_JSON_BODY_LIMIT` (2mb) do `main.ts`, compartilhado
  *     com toda a API desde que o teto anterior (100kb, só desta rota) virou default global por
  *     engano e passou a rejeitar POST legítimo de outras rotas (achado 2026-09-02, ex.:
  *     metodologia CREF sem teto de caracteres). `PAYMENT_WEBHOOK_BODY_LIMIT` abaixo documenta
  *     o tamanho REAL esperado do payload de gateway (poucos KB) — não é mais o valor imposto
- *     nesta rota especificamente. HMAC em 2mb ainda é CPU trivial (milissegundos), e o rate
- *     limit acima já limita volume — o risco de amplificação que motivou o teto original
+ *     nesta rota especificamente. O rate limit acima limita volume — o risco de
+ *     amplificação que motivou o teto original
  *     continua coberto pelas outras duas camadas.
- *  3. **Assinatura verificada antes de processar** — dentro do `PaymentWebhookService`,
- *     sobre o `req.rawBody` (habilitado por `rawBody: true` no bootstrap, como o webhook
- *     AraraHQ). Nada é persistido nem enfileirado antes dela passar.
+ *  3. **Token verificado antes de processar** — dentro do `PaymentWebhookService`,
+ *     pelo header `asaas-access-token`. Nada é
+ *     persistido nem enfileirado antes dela passar.
  *
- * Status: **401** quando a assinatura não foi provada (uniforme para todo motivo de
+ * Status: **401** quando o token não foi validado (uniforme para todo motivo de
  * rejeição — não vaza QUAL verificação falhou, Sato T-15), **200** no resto. Responder 200 a
  * evento não autenticado faria o gateway legítimo parar de reentregar um evento corrompido.
  *
@@ -77,15 +77,14 @@ export class PaymentWebhookController {
       'no webhook e recebido em `asaas-access-token`. Responde 200 rápido e enfileira a conciliação — nada pesado ' +
       'roda inline. Idempotente por `(gateway, gateway_event_id)`.',
   })
-  @ApiHeader({ name: PAYMENT_SIGNATURE_HEADER, description: 'Assinatura HMAC do corpo bruto.' })
   @ApiHeader({
-    name: PAYMENT_TIMESTAMP_HEADER,
-    description: 'Timestamp assinado, usado para janela anti-replay.',
+    name: PAYMENT_SIGNATURE_HEADER,
+    description: 'Auth Token configurado no webhook Asaas.',
   })
   @ApiResponse({ status: 200, description: 'Evento aceito e enfileirado para conciliação.' })
   @ApiResponse({
     status: 401,
-    description: 'Assinatura não verificada — motivo específico nunca é exposto na resposta.',
+    description: 'Token não validado — motivo específico nunca é exposto na resposta.',
   })
   @ApiResponse({ status: 429, description: 'Rate limit de 30/min por IP excedido.' })
   async payment(
@@ -102,7 +101,7 @@ export class PaymentWebhookController {
       correlationId,
     });
     // Mensagem genérica de propósito: o serviço já registrou o motivo real no log.
-    if (verdict === 'REJECTED') throw new UnauthorizedException('assinatura inválida');
+    if (verdict === 'REJECTED') throw new UnauthorizedException('credencial inválida');
     return { ok: true };
   }
 }

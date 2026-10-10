@@ -48,7 +48,7 @@ export const conversations = pgTable(
     content: text('content').notNull(),
 
     /**
-     * ID da mensagem na API AraraHQ. `UNIQUE` é o que garante **idempotência do
+     * ID da mensagem no provedor WhatsApp. `UNIQUE` é o que garante **idempotência do
      * webhook** (`ARQUITETURA.md` §12.15): reentrega do mesmo evento colide na
      * constraint em vez de duplicar a conversa.
      */

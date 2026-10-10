@@ -1,20 +1,11 @@
 /**
- * Transporte da EvolutionAPI — QR Code/Baileys, protocolo não-oficial do WhatsApp.
+ * Transporte da EvolutionAPI — QR Code/Baileys, canal WhatsApp da MOVIVO.
  * Serve dois papéis:
  *
- *  1. Painel admin "Sistema → Integração" (criar instância, mostrar QR code, checar
- *     status) — sempre disponível, independente do transporte ativo.
- *  2. Se `WHATSAPP_TRANSPORT_PROVIDER=EVOLUTION`, o transporte REAL do worker de
- *     outbound (`WhatsappOutboundWorker`), implementando `WhatsappTransport` (mesma
- *     interface do BSP oficial já integrado no módulo `whatsapp/`, confinado noutro
- *     arquivo). Existe só para destravar teste ponta a ponta do fluxo completo num
- *     número SEPARADO enquanto a criação de Template está bloqueada no BSP oficial
- *     (não exige Template aprovado pela Meta — Baileys manda texto livre a qualquer
- *     momento). **Nunca** é o canal de produção dos usuários finais — o transporte
- *     padrão do worker continua sendo o BSP oficial, troca é opt-in por env local.
+ *  1. Painel admin "Sistema → Integração" (criar instância, mostrar QR code, checar status).
+ *  2. Transporte do worker de outbound (`WhatsappOutboundWorker`).
  *
- * **Único arquivo do backend que fala HTTP com a EvolutionAPI** (mesmo padrão de
- * confinamento do BSP de produção — `evolution-confinement.spec.ts`). `fetch` nativo,
+ * **Único arquivo do backend que fala HTTP com a EvolutionAPI** (`evolution-confinement.spec.ts`). `fetch` nativo,
  * sem SDK.
  *
  * Contrato confirmado contra a doc oficial e o código-fonte real de
@@ -59,19 +50,18 @@
  *    único `await` nesse endpoint já entrega "digitando… → espera → some" pronto, sem
  *    precisar reimplementar sleep nem re-disparar presence no nosso lado.
  *
- * # Comportamento humano (anti-ban do número de teste)
+ * # Comportamento humano
  * O protocolo não-oficial (Baileys) arrisca banimento se o tráfego tiver cara de bot:
  * resposta instantânea, textos longos despejados de uma vez, sem "digitando…". Por isso
  * `send()`/`sendTemplate()` chamam `humanizeBeforeSend()` ANTES de cada envio — presence
  * "composing" com atraso aleatório de 15–20s (`HUMAN_DELAY_MIN_MS`/`_MAX_MS`). O worker
  * já quebra respostas longas em bolhas (`\n---\n`) e chama `send()` por bolha — cada
  * bolha ganha seu próprio "digitando + espera", reforçando o efeito quanto mais bolhas
- * houver. Isso é uma peculiaridade SÓ da EvolutionAPI: o BSP oficial, sob SLA de
- * resposta, não tem — nem deve ganhar — esse atraso deliberado.
+ * houver.
  *
  * Credencial **opcional no boot**: sem `EVOLUTION_API_KEY`, tanto o painel quanto o
  * envio real viram no-op (painel mostra "não configurado"; `send()`/`sendTemplate()`
- * logam e retornam, no mesmo espírito do transporte de produção sem credencial — o
+ * logam e retornam — o
  * worker não pode travar em retry infinito enquanto ninguém escaneou o QR ainda).
  */
 import { PinoLogger } from 'nestjs-pino';
@@ -429,7 +419,7 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
   }
 
   /**
-   * Envio real (`WhatsappTransport`, só ativo com `WHATSAPP_TRANSPORT_PROVIDER=EVOLUTION`).
+   * Envio real pelo contrato `WhatsappTransport`.
    * Sem credencial ou sem instância conectada: no-op logado — nunca lança, pro worker não
    * ficar em retry infinito enquanto ninguém escaneou o QR ainda.
    */
@@ -461,15 +451,12 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
   }
 
   /**
-   * Documento (PDF do protocolo, US-2.6-PDF). A EvolutionAPI não tem conceito de janela de
-   * 24h/Template aprovado pela Meta (Baileys manda qualquer coisa a qualquer momento) —
-   * `fallbackTemplateName` (só relevante pro BSP oficial) é ignorado aqui de propósito.
+   * Documento (PDF do protocolo, US-2.6-PDF).
    */
   async sendDocument(
     to: string,
     documentUrl: string,
     caption: string,
-    _fallbackTemplateName?: string,
     fileName?: string,
   ): Promise<void> {
     if (!this.apiKey) {

@@ -6,7 +6,7 @@
  * `redaction.util.ts` para o porquê (LGPD Art. 11, Sato §9).
  *
  * O correlation id vem do header `x-request-id`/`x-correlation-id` quando o cliente
- * (ou o Cloudflare, ou o webhook da AraraHQ) já mandou um; senão é gerado. Ele volta
+ * (ou o Cloudflare, ou o webhook da EvolutionAPI) já mandou um; senão é gerado. Ele volta
  * no header da resposta para que o suporte consiga cruzar um relato de usuário com o
  * log sem precisar do telefone dele.
  */

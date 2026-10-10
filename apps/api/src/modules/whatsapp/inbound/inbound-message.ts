@@ -1,14 +1,10 @@
 /**
  * Contrato COMUM do lado de ENTRADA do WhatsApp (US-3.1-EVO).
  *
- * Dois provedores entregam mensagem de aluno hoje — AraraHQ (BSP oficial, produção) e
- * EvolutionAPI (QR Code/Baileys, teste local). Eles diferem em TUDO na borda: formato de
- * autenticação, nomes de header, envelope, identificação do remetente. Não diferem em
- * nada depois disso: a partir de `resolveUser()` o pipeline é idêntico e não pode ser
- * duplicado (duplicar é como um provedor ganha, com o tempo, um gate de consentimento
- * mais fraco que o outro).
+ * A EvolutionAPI entrega mensagens via QR Code/Baileys. A borda autentica e normaliza
+ * o envelope antes de entrar no pipeline do titular.
  *
- * Este arquivo define a fronteira entre esses dois mundos:
+ * Este arquivo define a fronteira entre a entrega externa e o pipeline interno:
  *  - `RawDelivery` — a entrega crua, sem nenhum nome de header específico de provedor;
  *  - `NormalizedInbound` — a mensagem já normalizada, o ÚNICO formato que o pipeline
  *    interno consome.
@@ -21,7 +17,7 @@ import { z } from 'zod';
  * controller nem o serviço.
  */
 export interface RawDelivery {
-  /** Corpo BRUTO exatamente como recebido — o HMAC da AraraHQ é sobre ele. */
+  /** Corpo bruto exatamente como recebido. */
   readonly rawBody: Buffer | undefined;
   /** Headers já achatados (valor repetido → primeiro), em minúsculas. */
   readonly headers: Record<string, string | undefined>;
@@ -31,8 +27,7 @@ export interface RawDelivery {
 
 /**
  * Veredito de autenticação de uma entrega. `reason` é `string` (e não uma união fechada)
- * porque cada provedor tem seus próprios modos de falha (`bad_signature` do HMAC da
- * AraraHQ, `bad_token` do header compartilhado da EvolutionAPI). O `reason` NUNCA vai
+ * para permitir os modos de falha do token e do envelope. O `reason` NUNCA vai
  * para a resposta HTTP — só para o log interno.
  */
 export type VerifyResult = { ok: true } | { ok: false; reason: string };

@@ -37,7 +37,7 @@ Serverless (Vercel/Lambda) foi rejeitado: cold start de 500–2000ms é incompat
 | LLM fallback | **OpenAI GPT-4.1 → Anthropic Claude Sonnet 4.5** | Diversidade de provedor; cada endpoint exige aprovação explícita para `HEALTH` |
 | Embeddings RAG | **text-embedding-3-small** (OpenAI) | 1536 dimensões |
 | Vector search | **PGVector HNSW** | `m=16`, `ef_construction=64` |
-| WhatsApp | **AraraHQ** (WhatsApp Business API) | Rate limit: 80 msg/s (Meta), 100K msg/dia (verificado) |
+| WhatsApp | **EvolutionAPI** (QR Code/Baileys) | Instância separada por ambiente; token próprio para o webhook de entrada |
 | Pagamentos | **Asaas Sandbox** (cartão, Pix e Pix Automático) | Checkout transparente; produção bloqueada até aprovação PCI; webhooks idempotentes obrigatórios |
 | Observabilidade | **OpenTelemetry + Prometheus + Grafana + Loki + Sentry** | Spans obrigatórios — ver §8 |
 | Analytics de produto | **PostHog** | Eventos de funil obrigatórios (herdados de Lucas) |
@@ -94,9 +94,8 @@ produção E local (revisão 2026-09-14: a decisão original era fornecedor úni
 chave OpenAI de dev ficar sem saldo durante teste). Cada perna atrás de um gate de HEALTH
 **próprio** (`STT_OPENAI_HEALTH_DATA_APPROVED`/`STT_GROQ_HEALTH_DATA_APPROVED`, sempre separados de
 `LLM_OPENAI_HEALTH_DATA_APPROVED`) — só entra na cascata com chave e aprovação PRÓPRIAS. Só o texto
-transcrito é retido; o áudio bruto nunca é persistido. Escopo inicial só EvolutionAPI
-(`EvolutionInboundEdge` + `EvolutionTransport.downloadAudio`) — a AraraHQ segue descartando áudio
-até o webhook de voz de produção ser confirmado. Transcrição só roda depois do nonce/titular/
+transcrito é retido; o áudio bruto nunca é persistido. A EvolutionAPI entrega a referência de áudio
+(`EvolutionInboundEdge` + `EvolutionTransport.downloadAudio`). Transcrição só roda depois do nonce/titular/
 orçamento de `WhatsappInboundService` passarem (custo real de terceiro, nunca pago por entrega
 não autenticada ou fora de orçamento). Qualquer falha da cascata inteira avisa o aluno a escrever,
 nunca descarta em silêncio. **Pendência para Alexandre:** Groq virou dependência de produção (como
@@ -117,12 +116,12 @@ Detalhamento: `docs/arquitetura/decisoes/adr-009-transcricao-de-audio-stt-whatsa
 │                                                                         │
 │   [Usuário Final]                                                       │
 │   Browser ──────────► Landing Page + Formulário (Next.js 15)           │
-│   WhatsApp ◄────────► AI Coach (via AraraHQ ← NestJS)                 │
+│   WhatsApp ◄────────► AI Coach (via EvolutionAPI ← NestJS)            │
 │                                                                         │
 │   [Profissional CREF]                                                   │
 │   Browser ──────────► Dashboard de Operações (Next.js 15)              │
 │                                                                         │
-│   [Sistema MOVIVO] ◄──► AraraHQ (WhatsApp Business API)               │
+│   [Sistema MOVIVO] ◄──► EvolutionAPI (WhatsApp)                      │
 │   [Sistema MOVIVO] ◄──► Asaas Sandbox (Pagamentos)                    │
 │   [Sistema MOVIVO] ◄──► OpenAI / Anthropic (LLM APIs, ZDR+DPA/SCC)   │
 │   [Sistema MOVIVO] ──── PostHog (Analytics)                            │
@@ -141,7 +140,7 @@ Detalhamento: `docs/arquitetura/decisoes/adr-009-transcricao-de-audio-stt-whatsa
               │                        │                        │
               ▼                        ▼                        ▼
    ┌────────────────────┐  ┌────────────────────┐  ┌──────────────────────┐
-   │  Next.js 15 App    │  │   NestJS Backend   │  │ AraraHQ Webhook      │
+   │  Next.js 15 App    │  │   NestJS Backend   │  │ EvolutionAPI Webhook │
    │  (SSR/SSG)         │  │   (Modular Mono.)  │  │ (entrada WhatsApp)   │
    │  Port: 3000        │  │   Port: 3001       │  └────────┬─────────────┘
    │                    │  │                    │           │
@@ -267,7 +266,7 @@ Extração futura para microservices, quando necessária (Fase C, 15.000+ usuár
 - **Tenant isolation (corrigido por Sato)**: toda chave Redis prefixada por `user_id`; repositórios Drizzle com `UserScopedQuery<T>` forçando `userId` em compile-time. Row-Level Security no Postgres é **obrigatória, não opcional** — e como o PgBouncer roda em *transaction pooling mode* (ADR-003), RLS sozinha vazaria entre tenants: é obrigatório usar `SET LOCAL app.current_user_id` no início de cada transação, políticas com `FORCE ROW LEVEL SECURITY`, e a role da aplicação (`movivo_app`) **nunca** pode ter `BYPASSRLS` nem ser dona das tabelas. Jobs BullMQ nunca compartilham estado entre usuários.
 - **LGPD Art. 11 (dados de saúde)**: bloco de saúde da anamnese criptografado em repouso (`pgcrypto`); telefone nunca logado em texto claro; PAR-Q flags em JSONB criptografado; `audit_logs` **append-only garantido a nível de banco** (GRANT restritivo + RULE/trigger que bloqueia UPDATE/DELETE + hash chain entre registros — não confiar apenas em política de aplicação), retido 5 anos (base legal: CDC art. 27, não apenas LGPD); direito ao esquecimento via anonimização + retenção defensiva mínima, com DROP de partição mensal quando aplicável.
 - **Redis — patch obrigatório**: subir sempre com a versão corrigida contra **CVE-2025-49844 "RediShell" (CVSS 10)** antes de qualquer deploy, bind apenas em rede interna, TLS/mTLS entre app e Redis (defense in depth, não só AOF+Sentinel).
-- **Webhook AraraHQ — replay protection**: validação HMAC (`crypto.timingSafeEqual`) **não é suficiente sozinha** — adicionar timestamp assinado com janela de tolerância ±5min, nonce armazenado no Redis para detectar replay, e idempotência no processamento do evento.
+- **Webhook EvolutionAPI — replay protection**: validar o token em tempo constante, conferir a instância e usar nonce no Redis com TTL de 24h para detectar reentregas.
 - **LLM boundary**: nenhum identificador direto de usuário chega ao prompt (PII Scrubber, ver §3.1/§5); `LLMRouter` é o único ponto autorizado a chamar um provedor de LLM.
 - **Camadas de API security**: Cloudflare WAF → Nginx (rate limit) → NestJS Guards (JWT/RBAC/HMAC) → Drizzle (queries parametrizadas, sempre com `SET LOCAL` de tenant) → Zod (validação de DTOs).
 - **Mass Assignment (OWASP API3 / BOPLA)**: corpo de request só é validado por `parseBody` / `strictSafeParse` (`apps/api/src/core/validation/strict-input.ts`), que **rejeita com 400** qualquer propriedade fora do schema Zod, em qualquer nível. Os controllers recebem `@Body() body: unknown`, então o `ValidationPipe` global (`whitelist`/`forbidNonWhitelisted`) não atua; e `schema.parse(body)` direto só *descarta* o campo extra em silêncio. Nunca espalhar corpo cru em escrita (`{ ...body }`, `.set(body)`), nunca expor campo privilegiado (`role`, `status`, `plan`, `userId`, preço) em schema de entrada. O teste `no-raw-body-parse.spec.ts` trava a regressão.
@@ -313,10 +312,10 @@ SPRINT 1 (2 sem) — Core Usuário / Anamnese
 
 SPRINT 2 (2 sem) — Pipeline de Protocolo
   Motor Determinístico (100% coverage) · LLMRouter + fallbacks + circuit breaker
-  ProtocolGenerationWorker · integração AraraHQ · eventos PostHog de onboarding
+  ProtocolGenerationWorker · integração EvolutionAPI · eventos PostHog de onboarding
 
 SPRINT 3 (2 sem) — AI Coach
-  WebhookController (HMAC+debounce+lock) · AIResponseWorker
+  WebhookController (token+debounce+lock) · AIResponseWorker
   ContextService 3 camadas · ValidationService de compliance
   Indexação PGVector · RAGService
 
@@ -346,8 +345,8 @@ Todos os relatórios de Fase 2–4 (Alexandre, Eduardo, Sofia, Sato, Victor) já
 | Redis como ponto único de falha | AOF + réplica + Sentinel |
 | Exploração de vulnerabilidade crítica do Redis (CVE-2025-49844) | Patch obrigatório antes de deploy + bind interno + TLS/mTLS |
 | Vazamento entre tenants via PgBouncer transaction mode + RLS mal configurada | `SET LOCAL` de tenant por transação + `FORCE ROW LEVEL SECURITY` + role sem `BYPASSRLS` |
-| Replay attack no webhook AraraHQ | HMAC + timestamp assinado (±5min) + nonce Redis + idempotência |
-| Rate limit da AraraHQ | Fila `whatsapp-outbound` com rate limit 80 jobs/s |
+| Replay attack no webhook EvolutionAPI | Token exclusivo, instância vinculada + nonce Redis com TTL de 24h |
+| Excesso de envios WhatsApp | Fila `whatsapp-outbound` com rate limit 80 jobs/s |
 | Explosão de custo de LLM por abuso | Rate limit de 50 mensagens/dia por usuário |
 | Violação de LGPD | RLS forçada + isolamento por namespace + audit log append-only garantido por permissão de banco |
 | Alucinação em prescrição | Validação pós-geração + fallback seguro + safety score como gate bloqueante |
@@ -374,7 +373,7 @@ Todos os relatórios de Fase 2–4 (Alexandre, Eduardo, Sofia, Sato, Victor) já
 12. `LLMRouter` é o único ponto do sistema autorizado a chamar um provedor de LLM; todo prompt passa pelo PII Scrubber antes de sair do backend.
 13. RLS no Postgres exige `SET LOCAL app.current_user_id` por transação e `FORCE ROW LEVEL SECURITY` — nunca confiar em RLS "por padrão" sob PgBouncer transaction mode.
 14. Redis nunca sobe em produção sem o patch para CVE-2025-49844 (RediShell) aplicado.
-15. Webhooks exigem a autenticação definida pelo provedor e idempotência por evento. AraraHQ usa assinatura, timestamp e nonce; Asaas usa `asaas-access-token` comparado em tempo constante e deduplicação persistente/Redis.
+15. Webhooks exigem a autenticação definida pelo provedor e idempotência por evento. EvolutionAPI usa token exclusivo, validação da instância e nonce; Asaas usa `asaas-access-token` comparado em tempo constante e deduplicação persistente/Redis.
 16. O checkout transparente Asaas permanece restrito ao Sandbox até avaliação PCI/QSA ou adoção de um componente homologado que impeça PAN/CVV de atravessar a infraestrutura MOVIVO.
 17. **Nunca dar ferramentas (tool/function calling/MCP) ao LLM sem uma camada que revalide a autorização a cada chamada** com o titular vindo da sessão — o modelo é componente não confiável para autorização. Saída do modelo que vira ação só é aceita se for escolha numa lista fechada montada e revalidada pelo servidor (§5).
 

@@ -160,20 +160,16 @@ export class ControlCenterController {
   }
 
   /**
-   * Painel "Sistema → Integração" — ferramenta INTERNA de teste do fluxo de WhatsApp
-   * via EvolutionAPI (QR Code), usada enquanto a criação de templates da AraraHQ está
-   * bloqueada. Nunca é o canal de produção dos usuários finais. Reusa `SYSTEM_READ`/
-   * `SYSTEM_OPERATE` — não é uma capacidade própria (é literalmente uma operação de
-   * sistema, o mesmo pilar de "Saúde & Disponibilidade").
+   * Painel "Sistema → Integração" — conexão WhatsApp via EvolutionAPI (QR Code).
+   * Reusa `SYSTEM_READ`/`SYSTEM_OPERATE`.
    */
   @Get('integration')
   @RequireCapabilities(Capability.SYSTEM_READ)
   @ApiOperation({
-    summary: 'Painel "Sistema → Integração" (teste interno de WhatsApp)',
-    description:
-      'Ferramenta INTERNA via EvolutionAPI/QR Code, usada enquanto a criação de templates da AraraHQ está bloqueada. Nunca é o canal de produção dos usuários finais.',
+    summary: 'Painel "Sistema → Integração" (WhatsApp)',
+    description: 'Conexão do canal WhatsApp via EvolutionAPI e QR Code.',
   })
-  @ApiResponse({ status: 200, description: 'Estado da instância de teste.' })
+  @ApiResponse({ status: 200, description: 'Estado da instância WhatsApp.' })
   @ApiResponse({ status: 403, description: 'Ator sem a capability SYSTEM_READ.' })
   integration() {
     return this.controlCenter.integration();

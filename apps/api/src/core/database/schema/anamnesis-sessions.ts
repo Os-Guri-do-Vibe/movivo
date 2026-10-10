@@ -65,7 +65,7 @@ export const anamnesisSessions = pgTable(
     // --- Verificação de posse do WhatsApp (US-6.5) --------------------------
     /**
      * Telefone informado na Etapa 1, em E.164. Duplica o que está em `data_block_1`
-     * de propósito: é a chave do rate limit por número (evitar usar o AraraHQ como
+     * de propósito: é a chave do rate limit por número (evitar usar o WhatsApp como
      * canal de abuso) e do reenvio idempotente, e um predicado indexável não pode
      * viver dentro de um jsonb.
      */

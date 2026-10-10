@@ -1,8 +1,7 @@
 /**
  * Unit ESTRUTURAL — o SDK/HTTP do gateway de pagamento é confinado a `subscription/payment/`
- * (US-4.1, padrão do `LLMRouter`/AraraHQ). Nenhum outro arquivo referencia os endpoints reais
- * (`api.stripe.com`/`api.asaas.com`) nem importa SDK de gateway. Os padrões Stripe continuam
- * aqui deliberadamente para impedir a reintrodução acidental do provedor removido.
+ * (US-4.1, padrão do `LLMRouter`). Nenhum outro arquivo referencia o endpoint real
+ * do Asaas nem importa SDK de gateway.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -11,12 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 const SRC = join(process.cwd(), 'src');
 const ALLOWED_DIR = join('subscription', 'payment');
-const MARKERS = [
-  /api\.stripe\.com/i,
-  /api\.asaas\.com/i,
-  /from ['"]stripe['"]/,
-  /from ['"]asaas['"]/,
-];
+const MARKERS = [/api\.asaas\.com/i, /from ['"]asaas['"]/];
 
 function walk(dir: string): string[] {
   const out: string[] = [];

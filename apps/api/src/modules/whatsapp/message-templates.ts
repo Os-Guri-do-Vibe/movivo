@@ -67,9 +67,7 @@ export function confirmationCareMessage(): string {
  * Convite ao formulário de troca de protocolo por fim de mesociclo. Texto livre (não é
  * Template Meta aprovado): diferente do código de verificação da Etapa 1 — que é a
  * PRIMEIRA mensagem de um número novo —, este vai para um titular que já troca mensagem
- * com a MOVIVO ao longo de toda a assinatura (protocolo, check-in semanal, coach), então
- * a janela de 24h da AraraHQ normalmente está aberta; mesmo racional de
- * `REENGAGEMENT`/`CHECKIN_MESSAGE` (`WhatsappOutboundJob.type`).
+ * com a MOVIVO ao longo de toda a assinatura (protocolo, check-in semanal, coach).
  */
 export function mesocycleRenewalMessage(firstName: string | null, link: string): string {
   const greeting = firstName ? `Olá, ${firstName}!` : 'Olá!';
@@ -84,21 +82,15 @@ export function mesocycleRenewalMessage(firstName: string | null, link: string):
 }
 
 /**
- * Nome do Template aprovado pela Meta (categoria UTILITY) que carrega o corpo de
- * `phoneVerificationMessage` com `{{1}}` no lugar do código. É a PRIMEIRA mensagem que o
- * número recebe — fora da janela de 24h, `send()` (texto livre) é rejeitado pela AraraHQ
- * (`422 CONVERSATION_WINDOW_CLOSED`); só um Template pré-aprovado passa. Ver nota em
- * `arara-transport.ts`. Renomear aqui exige recriar o Template do mesmo nome na AraraHQ.
+ * Identificador interno da mensagem de verificação. A EvolutionAPI renderiza o texto
+ * com o código; não depende de cadastro externo de Template.
  */
 export const PHONE_VERIFICATION_TEMPLATE = 'verificacao_numero';
 
 /**
  * Código de verificação de posse do número (US-6.5). Copy nos guardrails: enquadra a
  * fricção como proteção do que o usuário quer (o treino), e avisa para não repassar o
- * código. **Precisa bater com o corpo aprovado do Template `PHONE_VERIFICATION_TEMPLATE`
- * na AraraHQ** — mudou aqui (2026-08-18, a pedido do fundador), precisa mudar lá também
- * quando a criação de Template for desbloqueada (hoje o envio real passa pela
- * EvolutionAPI, que manda este texto literal, sem depender do Template).
+ * código. A EvolutionAPI envia este texto literal.
  */
 export function phoneVerificationMessage(code: string): string {
   return (

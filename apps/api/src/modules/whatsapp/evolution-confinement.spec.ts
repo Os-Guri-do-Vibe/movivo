@@ -1,6 +1,6 @@
 /**
  * Unit ESTRUTURAL — o HTTP da EvolutionAPI é confinado ao transporte, mesmo padrão
- * do confinamento AraraHQ (`whatsapp/arara-confinement.spec.ts`).
+ * da fronteira de transporte WhatsApp.
  *
  * Varre `src/` e prova que só `whatsapp/evolution-transport.ts` faz uma chamada HTTP à
  * EvolutionAPI.

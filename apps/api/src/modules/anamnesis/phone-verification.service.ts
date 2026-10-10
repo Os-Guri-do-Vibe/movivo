@@ -6,7 +6,7 @@
  * treino montado a partir de dados de saúde de outra pessoa.
  *
  * Decisão já tomada com o fundador (D4): o código vai **pelo próprio WhatsApp**,
- * reusando o AraraHQ e a fila `whatsapp-outbound` que já existem. Não é SMS e nenhum
+ * reusando o canal WhatsApp e a fila `whatsapp-outbound` que já existem. Não é SMS e nenhum
  * provedor novo é contratado.
  *
  * ## Decisões de segurança tomadas aqui (documentadas para a revisão de Sato)
@@ -25,7 +25,7 @@
  *    por sessão**. Reenvio dentro do cooldown é **idempotente**: não dispara mensagem
  *    nova, não invalida o código vigente e não é erro — a UI já está mostrando o contador.
  *  - **Teto por NÚMERO: 10 envios/hora**, somando todas as sessões. Sem isso, criar
- *    sessões novas contornaria o teto por sessão e o AraraHQ viraria canal de abuso.
+ *    sessões novas contornaria o teto por sessão e o WhatsApp viraria canal de abuso.
  *  - **Sem enumeração:** o resultado não diz se o número existe no sistema. Sucesso e
  *    falha têm a mesma superfície de resposta.
  *  - **Nunca em claro:** só o SHA-256 de `<sessionId>:<código>` é persistido; o código

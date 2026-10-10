@@ -88,6 +88,9 @@ cp scripts/provision-security.py scripts/verify-vault-restore.py scripts/renew-s
 cp scripts/verify-security.mjs "$stage/bin/"
 cp infra/security/movivo-*.service infra/security/movivo-*.timer "$stage/bin/"
 cp infra/vps/api.env "$stage/api.env"
+# O secret API_ENV_PRODUCTION do Actions pode conter variáveis de integrações retiradas.
+sed -i.bak -E '/^(ARARAHQ_|STRIPE_|WHATSAPP_TRANSPORT_PROVIDER=)/d' "$stage/api.env"
+rm -f "$stage/api.env.bak"
 cp infra/vps/nginx/conf.d/movivo.conf "$stage/nginx/conf.d/"
 cp -R infra/postgres infra/pgbouncer infra/redis infra/nginx "$stage/infra/"
 cp infra/vps/update-provider-secret.sh "$stage/bin/"
@@ -126,6 +129,8 @@ COPYFILE_DISABLE=1 tar -C "$stage" --no-xattrs "${mac_tar_flags[@]}" -cf - \
 # -----------------------------------------------------------------------------
 log "2/8 Segredos"
 "${SSH[@]}" 'bash -s' < infra/vps/gen-prod-secrets.sh
+# Remove credenciais antigas que não são mais montadas por nenhum serviço.
+"${SSH[@]}" "rm -f ${APP_DIR}/secrets/ararahq_* ${APP_DIR}/secrets/stripe_*"
 # Chaves de produção devem ser provisionadas na VPS ou fornecidas explicitamente
 # via PRODUCTION_SECRETS_DIR. Nunca copiar automaticamente credenciais de dev.
 for key in asaas_api_key deepseek_api_key openai_api_key anthropic_api_key groq_api_key; do

@@ -3,7 +3,7 @@
  *
  * Equivalente inbound do que `WhatsappTransport` é no outbound. Só duas
  * responsabilidades, ambas específicas do provedor:
- *   1. **autenticar** a entrega (HMAC da AraraHQ, token compartilhado da EvolutionAPI);
+ *   1. **autenticar** a entrega pelo token compartilhado da EvolutionAPI;
  *   2. **normalizar** o envelope para `NormalizedInbound`.
  *
  * Tudo depois disso (nonce, resolução do titular, gate de consentimento, roteamento,
@@ -12,7 +12,7 @@
  */
 import type { NormalizedInbound, RawDelivery, VerifyResult } from './inbound-message';
 
-export type InboundProvider = 'ARARA' | 'EVOLUTION';
+export type InboundProvider = 'EVOLUTION';
 
 export interface WhatsappInboundEdge {
   readonly provider: InboundProvider;
@@ -39,7 +39,7 @@ export interface WhatsappInboundEdge {
   normalize(body: unknown): NormalizedInbound[] | null;
 }
 
-/** Token de DI do mapa `{ ARARA, EVOLUTION }` de edges. */
+/** Token de DI do mapa da borda Evolution. */
 export const WHATSAPP_INBOUND_EDGES = Symbol('MOVIVO_WHATSAPP_INBOUND_EDGES');
 
 /** Shape resolvido pelo token acima: uma edge por provedor, sem buraco possível. */

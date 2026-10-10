@@ -55,7 +55,7 @@ O acesso interno segue a necessidade da função: profissional de Educação Fí
 | Categoria | Finalidade | Exemplos a confirmar na operação |
 | --- | --- | --- |
 | Infraestrutura e segurança | Hospedagem, banco de dados, armazenamento, logs e monitoramento | **[HOSPEDAGEM E REGIÃO ATIVAS]**, **[MONITORAMENTO ATIVO]** |
-| Mensageria | Receber e enviar mensagens pelo WhatsApp | Meta/WhatsApp e **[INTEGRADOR OFICIAL ATIVO; confirmar AraraHQ]** |
+| Mensageria | Receber e enviar mensagens pelo WhatsApp | Meta/WhatsApp e EvolutionAPI **[CONFIRMAR FORNECEDORES ATIVOS NA OPERAÇÃO]** |
 | Pagamentos | Cobrança, antifraude, estorno e conciliação | **[PRESTADOR ATIVO; confirmar Asaas em produção]** |
 | IA e transcrição de áudio | Apoiar conversas, protocolo e, quando houver áudio, transcrição | **[FORNECEDORES E ENDPOINTS EFETIVAMENTE APROVADOS]** |
 | Análise de uso | Entender navegação e funcionamento do produto, sem eventos de saúde | **[CONFIRMAR SE POSTHOG ESTÁ ATIVO E REGIÃO]** |

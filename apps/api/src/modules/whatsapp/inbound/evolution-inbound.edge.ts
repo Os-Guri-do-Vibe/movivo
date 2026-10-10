@@ -13,7 +13,7 @@
  * (achado de Sato lendo o container real `evoapicloud/evolution-api:v2.3.7`).
  *
  * Sem `EVOLUTION_WEBHOOK_TOKEN` configurado o comportamento é **fail-closed**: toda
- * entrega é descartada (mesmo espírito do `no_secret` da AraraHQ).
+ * entrega é descartada.
  *
  * # Envelope confirmado contra o container real (`dist/` lido, não a doc prosa)
  * `{ ...extra, event, instance, data, destination, date_time, sender, server_url, apikey }`.

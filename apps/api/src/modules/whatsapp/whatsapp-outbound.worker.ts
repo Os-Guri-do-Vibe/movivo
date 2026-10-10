@@ -158,7 +158,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
         this.logger.warn({ type }, 'PHONE_VERIFICATION sem destino ou código — descartado');
         return { status: 'INVALID' };
       }
-      // Texto livre é rejeitado (fora da janela de 24h) — precisa ser Template aprovado.
+      // Mantém o caminho parametrizado da verificação de número.
       await this.transport.sendTemplate(phoneNumber, PHONE_VERIFICATION_TEMPLATE, [code]);
       return { status: 'SENT' };
     }
@@ -240,7 +240,6 @@ export class WhatsappOutboundWorker implements OnModuleInit {
         phone,
         delivery.pdfUrl,
         caption,
-        this.config.whatsapp.protocolPdfTemplateName,
         protocolFileName(delivery.studentName),
       );
       await this.redis.set(markerKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);
