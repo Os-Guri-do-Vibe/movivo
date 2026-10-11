@@ -46,6 +46,18 @@ const COLOR = {
   branco: '#FFFFFF',
 };
 
+/** Responsável Técnico que assina a metodologia; o rodapé do PDF linka cada credencial à fonte pública. */
+const RT_FOOTER = {
+  name: 'Leonardo Rodrigues Brito',
+  instagramUrl: 'https://www.instagram.com/prof.leonardorb/',
+  crefUrl: 'https://cref-sp.implanta.net.br/ServicosOnline/Publico/ConsultaInscritos/',
+  confefUrl: 'https://www.confef.org.br/registrados/',
+};
+
+function footerLink(text: string, url: string) {
+  return { text, link: url, decoration: 'underline' as const, color: COLOR.petroleo };
+}
+
 const PAGE_WIDTH_PT = 595.28; // A4
 const MARGIN = { left: 40, top: 40, right: 40, bottom: 56 };
 
@@ -418,7 +430,15 @@ export async function buildProtocolPdf(input: ProtocolPdfInput): Promise<Buffer>
       },
       { image: 'symbol', width: 26, alignment: 'center', margin: [0, 0, 0, 6] },
       {
-        text: 'Metodologia revisada e assinada por um profissional de Educação Física registrado no CREF',
+        text: [
+          'Metodologia revisada e assinada por ',
+          footerLink(RT_FOOTER.name, RT_FOOTER.instagramUrl),
+          ', profissional certificado e registrado no ',
+          footerLink('CREF', RT_FOOTER.crefUrl),
+          ' / ',
+          footerLink('CONFEF', RT_FOOTER.confefUrl),
+          ' sob o nº 206778-G/SP.',
+        ],
         alignment: 'center',
         fontSize: 8.5,
         font: 'JetBrainsMono',
