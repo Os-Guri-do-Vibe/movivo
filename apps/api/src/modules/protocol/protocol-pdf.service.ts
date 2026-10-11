@@ -10,8 +10,8 @@
  * conversa de WhatsApp daquele aluno específico.
  *
  * `pdfmake` (não headless-browser/Puppeteer): dependência leve, roda em qualquer processo
- * Node sem Chromium, e tabela com `headerRows` repete o cabeçalho sozinha em quebra de
- * página — essencial aqui, já que cada treino é uma tabela que pode crescer.
+ * Node sem Chromium. O documento é uma única página longa (`height: 'auto'`), sem quebras,
+ * porque o PDF é lido na tela do celular e nunca impresso.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -301,7 +301,9 @@ export async function buildProtocolPdf(input: ProtocolPdfInput): Promise<Buffer>
   // Cabeçalho do exercício vem branco/negrito por causa do style('tableHeader'); mas a cor de
   // fundo (petroleo) é pintada pelo `layout.fillColor` acima, não pela célula em si.
   const docDefinition: TDocumentDefinitions = {
-    pageSize: 'A4',
+    // Folha única contínua (largura A4, altura 'auto'): ninguém imprime o protocolo, então
+    // não há quebra de página cortando a tabela de um treino no meio.
+    pageSize: { width: PAGE_WIDTH_PT, height: 'auto' },
     pageMargins: [MARGIN.left, MARGIN.top, MARGIN.right, MARGIN.bottom],
     defaultStyle: { font: 'Hanken', fontSize: 10, color: COLOR.grafite, lineHeight: 1.25 },
     background: (currentPage: number) =>
