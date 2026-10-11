@@ -301,6 +301,15 @@ export function parseOperations(value: unknown): OperationsResponse {
   };
 }
 
+export function violationDetails(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) =>
+    isRecord(entry) && typeof entry.detail === 'string' && entry.detail.trim()
+      ? [entry.detail.trim()]
+      : [],
+  );
+}
+
 async function request(path: string, init?: RequestInit): Promise<unknown> {
   const response = await fetch(`/api/dashboard${path}`, {
     ...init,
@@ -310,10 +319,15 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
   const value = await response.json().catch(() => ({}));
   if (!response.ok) {
     const record = isRecord(value) ? value : {};
+    // Recusa por regra de segurança (ex.: assinatura): a API manda `violations` sem `message`,
+    // e o texto genérico escondia o que precisava ser corrigido.
+    const violations = violationDetails(record.violations);
     throw new DashboardApiError(
       response.status,
-      string(record.message, 'Não foi possível concluir a solicitação.'),
-      record.validation ?? record.issues,
+      violations.length > 0
+        ? `Regras de segurança não atendidas: ${violations.join('; ')}`
+        : string(record.message, 'Não foi possível concluir a solicitação.'),
+      record.validation ?? record.issues ?? (violations.length > 0 ? violations : undefined),
     );
   }
   return value;

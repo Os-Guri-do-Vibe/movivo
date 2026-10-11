@@ -457,6 +457,7 @@ export async function forwardBackendJson(response: Response): Promise<NextRespon
         : 'Não foi possível concluir a solicitação.';
   const safeBody: Record<string, unknown> = { error: `request_failed_${response.status}`, message };
   if (Array.isArray(record.issues)) safeBody.issues = record.issues;
+  if (Array.isArray(record.violations)) safeBody.violations = record.violations;
   if (isRecord(record.validation)) safeBody.validation = record.validation;
   return NextResponse.json(safeBody, {
     status: response.status,

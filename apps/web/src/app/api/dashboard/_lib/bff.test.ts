@@ -12,6 +12,7 @@ import {
   mfaSetupBackend,
   mfaVerifyBackend,
   authenticatedBackendFetch,
+  forwardBackendJson,
   BFF_ACCESS_COOKIE,
   BFF_REFRESH_COOKIE,
   readBackendSession,
@@ -272,4 +273,17 @@ it('mfa/enable devolve sessão + códigos de recuperação; sem códigos é erro
     status: 502,
   });
   expect(mocks.set).not.toHaveBeenCalled();
+});
+
+it('forwardBackendJson repassa as violações de segurança da API (sem message) para a tela', async () => {
+  const violations = [
+    { rule: 'EXERCISE_UNKNOWN', detail: 'exercício fora da base: x', action: 'BLOCK' },
+  ];
+  const forwarded = await forwardBackendJson(
+    new Response(JSON.stringify({ code: 'PROTOCOL_NOT_SAFE_TO_SIGN', violations }), {
+      status: 400,
+    }),
+  );
+  expect(forwarded.status).toBe(400);
+  expect(await forwarded.json()).toMatchObject({ violations });
 });

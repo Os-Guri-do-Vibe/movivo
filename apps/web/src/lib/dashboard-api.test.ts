@@ -356,4 +356,34 @@ describe('cliente BFF same-origin', () => {
       details: ['volume'],
     });
   });
+
+  it('recusa por regra de segurança mostra o que corrigir em vez do texto genérico', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        response(400, {
+          error: 'request_failed_400',
+          message: 'Não foi possível concluir a solicitação.',
+          violations: [
+            {
+              rule: 'EXERCISE_UNKNOWN',
+              detail: 'exercício fora da base: manual-1',
+              action: 'BLOCK',
+            },
+            {
+              rule: 'TECHNIQUE_OVERUSE',
+              detail: 'Treino A: 3 exercícios com técnica',
+              action: 'BLOCK',
+            },
+          ],
+        }),
+      ),
+    );
+    await expect(signProtocol('p1')).rejects.toMatchObject({
+      status: 400,
+      message:
+        'Regras de segurança não atendidas: exercício fora da base: manual-1; Treino A: 3 exercícios com técnica',
+      details: ['exercício fora da base: manual-1', 'Treino A: 3 exercícios com técnica'],
+    });
+  });
 });
