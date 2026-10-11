@@ -559,12 +559,47 @@ export type ControlCenterConversationPhotoResponse = z.infer<
   typeof controlCenterConversationPhotoResponseSchema
 >;
 
+/**
+ * Código do marco da timeline do aluno. O servidor NÃO monta a frase: manda o código e os
+ * parâmetros crus (status, plano, semana…) e a tela escolhe o texto. Assim o idioma e o
+ * vocabulário ficam na camada de apresentação, e um código novo nunca vira frase em inglês
+ * no meio da ficha.
+ */
+export const controlCenterTimelineEventCodeSchema = z.enum([
+  'ANAMNESIS_STARTED',
+  'ANAMNESIS_SUBMITTED',
+  'PROTOCOL_SIGNED',
+  'PROTOCOL_VERSION_GENERATED',
+  'PROTOCOL_VERSION_SIGNED',
+  'CHECKIN_SENT',
+  'CHECKIN_ANSWERED',
+  'SUBSCRIPTION_CREATED',
+  'TRIAL_ENDED',
+  'PAID_PERIOD_STARTED',
+  'SUBSCRIPTION_CANCELED',
+  'HANDOFF_OPENED',
+  'HANDOFF_RESOLVED',
+  'CONVERSATION_DAY',
+]);
+export type ControlCenterTimelineEventCode = z.infer<typeof controlCenterTimelineEventCodeSchema>;
+
+/**
+ * Parâmetros do marco. Valores primitivos: códigos de enum (`status`, `plan`, `level`),
+ * contagens (`week`, `version`, `messages`) ou texto já existente no banco (`reason`).
+ * `null` = o dado existe mas está vazio; chave ausente = não se aplica / sem permissão.
+ */
+export const controlCenterTimelineParamsSchema = z.record(
+  z.string(),
+  z.union([z.string(), z.number(), z.null()]),
+);
+export type ControlCenterTimelineParams = z.infer<typeof controlCenterTimelineParamsSchema>;
+
 /** Item da timeline única do aluno (US-7.4, TASK-7.4.1). */
 export const controlCenterTimelineEventSchema = z.object({
   at: z.iso.datetime(),
   kind: z.enum(['ANAMNESIS', 'PROTOCOL', 'CHECKIN', 'CONVERSATION', 'SUBSCRIPTION', 'HANDOFF']),
-  title: z.string().min(1),
-  detail: nullableText,
+  code: controlCenterTimelineEventCodeSchema,
+  params: controlCenterTimelineParamsSchema,
 });
 export type ControlCenterTimelineEvent = z.infer<typeof controlCenterTimelineEventSchema>;
 

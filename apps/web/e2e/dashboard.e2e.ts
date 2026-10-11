@@ -144,10 +144,10 @@ test('login → rota padrão do papel → pilar Alunos → ficha do aluno', asyn
   await expect(page.getByText('Sem mensagem recebida há 14 dias')).toBeVisible();
   // Timeline única com as 6 origens (US-7.4, TASK-7.4.1).
   for (const label of [
-    'Anamnese concluída',
-    'Protocolo v1 gerado',
-    'Trial iniciado',
-    'Check-in da semana 2',
+    'Formulário de anamnese enviado',
+    'Versão 1 do protocolo gerada',
+    'Assinatura mensal criada',
+    'Check-in da semana 2 enviado',
     '12 mensagens trocadas no dia',
     'Atendimento humano resolvido',
   ]) {

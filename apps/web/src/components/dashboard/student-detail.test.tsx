@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -27,11 +27,82 @@ describe('StudentDetail', () => {
     expect(await screen.findByRole('heading', { name: 'Ana Souza' })).toBeVisible();
     expect(getStudent).toHaveBeenCalledWith(studentId, expect.any(AbortSignal));
     expect(screen.getByText('ana@teste.com')).toBeVisible();
+    expect(screen.getByText('+55 (11) 99999-0001')).toBeVisible();
     expect(screen.getByText('Hipertrofia')).toBeVisible();
-    expect(screen.getByText('SEG, QUA')).toBeVisible();
+    expect(screen.getByText('Seg, Qua')).toBeVisible();
     expect(screen.getByText('Semana 3 de 8')).toBeVisible();
     expect(screen.getByText('01/08/2026, 09:00')).toBeVisible();
     expect(screen.getByText('Sem pendência')).toBeVisible();
+  });
+
+  it('mostra o rótulo em português e nunca o código gravado no banco', async () => {
+    getStudent.mockResolvedValue(studentDetailResponse);
+    const { container } = render(<StudentDetail id={studentId} />);
+    await screen.findByRole('heading', { name: 'Ana Souza' });
+
+    const registration = screen.getByRole('region', { name: 'Cadastro e plano' });
+    expect(within(registration).getByText('Em teste')).toBeVisible();
+
+    const strip = screen.getByRole('list', { name: 'Situação do aluno' });
+    expect(within(strip).getByText('Ativo')).toBeVisible();
+    expect(within(strip).getByText('Em teste')).toBeVisible();
+    expect(within(strip).getByText('Vigente')).toBeVisible();
+
+    const forms = screen.getByRole('region', { name: 'Formulários e segurança' });
+    expect(within(forms).getByText('Enviada')).toBeVisible();
+    expect(within(forms).getByText('Liberado')).toBeVisible();
+
+    const routine = screen.getByRole('region', { name: 'Rotina informada' });
+    expect(within(routine).getByText('Treino regularmente')).toBeVisible();
+    expect(within(routine).getByText('Intermediário')).toBeVisible();
+    expect(within(routine).getByText('4 dias por semana')).toBeVisible();
+    expect(within(routine).getByText('Academia completa')).toBeVisible();
+    expect(within(routine).getByText('Manhã')).toBeVisible();
+
+    const evolution = screen.getByRole('region', { name: 'Adesão declarada' });
+    expect(within(evolution).getByText('Extremamente feliz')).toBeVisible();
+    expect(within(evolution).getByText('Ótima')).toBeVisible();
+
+    expect(container.textContent).not.toMatch(
+      /SUBMITTED|TRIALING|MONTHLY|GAIN_MUSCLE|FULL_GYM|MUITO_FELIZ|OTIMA|LIBERADO|VALIDATOR_FLAG/,
+    );
+  });
+
+  it('monta a frase da linha do tempo a partir do código e dos parâmetros', async () => {
+    getStudent.mockResolvedValue(studentDetailResponse);
+    render(<StudentDetail id={studentId} />);
+    const timeline = await screen.findByRole('region', { name: 'Linha do tempo do aluno' });
+    expect(within(timeline).getByText('Assinatura mensal criada')).toBeVisible();
+    expect(within(timeline).getByText('Atendimento humano aberto (alerta)')).toBeVisible();
+    expect(within(timeline).getByText('Sinalizado pela validação de segurança')).toBeVisible();
+    expect(
+      within(timeline).getByText(/Sono: ótima · Humor: extremamente feliz · Alimentação: 9\/10/),
+    ).toBeVisible();
+  });
+
+  it('recolhe a linha do tempo longa e deixa expandir', async () => {
+    const { timeline } = studentDetailResponse.data.student;
+    const base = timeline[0];
+    if (!base) throw new Error('fixture sem timeline');
+    const long = Array.from({ length: 12 }, (_, index) => ({
+      ...base,
+      at: `2026-08-${String(20 - index).padStart(2, '0')}T12:00:00.000Z`,
+    }));
+    getStudent.mockResolvedValue({
+      data: { student: { ...studentDetailResponse.data.student, timeline: long } },
+      meta: studentDetailResponse.meta,
+    });
+    render(<StudentDetail id={studentId} />);
+    const region = await screen.findByRole('region', { name: 'Linha do tempo do aluno' });
+    expect(within(region).getAllByRole('listitem')).toHaveLength(8);
+    const toggle = within(region).getByRole('button', { name: 'Mostrar mais 4' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(toggle);
+    expect(within(region).getAllByRole('listitem')).toHaveLength(12);
+    expect(within(region).getByRole('button', { name: 'Mostrar menos' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
   });
 
   it('declara o histórico de treinos como indisponível, sem número fabricado', async () => {
@@ -52,7 +123,7 @@ describe('StudentDetail', () => {
         student: {
           ...studentDetailResponse.data.student,
           requiresProfessionalReview: true,
-          health: { ...health, parqState: 'BLOCKED' },
+          health: { ...health, parqState: 'BLOQUEADO_AGUARDANDO_CLEARANCE' },
         },
       },
       meta: studentDetailResponse.meta,
@@ -60,6 +131,7 @@ describe('StudentDetail', () => {
     render(<StudentDetail id={studentId} />);
     expect(await screen.findByText(/requer revisão de um profissional CREF/)).toBeVisible();
     expect(screen.getByText('Necessária')).toBeVisible();
+    expect(screen.getByText('Bloqueado: aguarda CREF')).toBeVisible();
   });
 
   it('trata rotina, protocolo e nome ausentes como não informados', async () => {
@@ -82,7 +154,12 @@ describe('StudentDetail', () => {
     render(<StudentDetail id={studentId} />);
     expect(await screen.findByText('Rotina ainda não preenchida.')).toBeVisible();
     expect(screen.getByText('Nenhum protocolo vigente.')).toBeVisible();
-    expect(screen.getAllByText('Não informado').length).toBeGreaterThan(4);
+    const strip = screen.getByRole('list', { name: 'Situação do aluno' });
+    expect(within(strip).getAllByText('Não informado')).toHaveLength(2);
+    const registration = screen.getByRole('region', { name: 'Cadastro e plano' });
+    expect(within(registration).getByText('Não informado')).toBeVisible();
+    const forms = screen.getByRole('region', { name: 'Formulários e segurança' });
+    expect(within(forms).getByText('Não informado')).toBeVisible();
   });
 
   it('mostra "Não assinado" quando o protocolo ainda não tem assinatura CREF', async () => {
@@ -104,11 +181,9 @@ describe('StudentDetail', () => {
   it('mescla as 6 origens numa timeline única em ordem cronológica decrescente', async () => {
     getStudent.mockResolvedValue(studentDetailResponse);
     render(<StudentDetail id={studentId} />);
-    expect(await screen.findByRole('heading', { name: 'Linha do tempo do aluno' })).toBeVisible();
-    const heading = screen.getByRole('heading', { name: 'Linha do tempo do aluno' });
-    if (!heading.parentElement) throw new Error('heading sem parentElement');
-    const items = heading.parentElement.querySelectorAll('ol > li');
-    const rendered = [...items].map((item) => item.textContent ?? '');
+    const region = await screen.findByRole('region', { name: 'Linha do tempo do aluno' });
+    const items = within(region).getAllByRole('listitem');
+    const rendered = items.map((item) => item.textContent ?? '');
     expect(rendered).toHaveLength(studentDetailResponse.data.student.timeline.length);
     for (const kind of [
       'Anamnese',
@@ -120,7 +195,7 @@ describe('StudentDetail', () => {
     ]) {
       expect(rendered.some((entry) => entry.includes(kind))).toBe(true);
     }
-    const times = [...items].map((item) => {
+    const times = items.map((item) => {
       const time = item.querySelector('time');
       if (!time) throw new Error('item da timeline sem <time>');
       return time.dateTime;
@@ -133,7 +208,7 @@ describe('StudentDetail', () => {
     render(<StudentDetail id={studentId} />);
     expect(await screen.findByRole('heading', { name: 'Adesão declarada' })).toBeVisible();
     expect(screen.getByText(/Declarado via check-in/)).toHaveTextContent('workout_completions');
-    expect(screen.getByText('75.0%')).toBeVisible();
+    expect(screen.getByText('75%')).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Evolução declarada por semana' })).toBeVisible();
   });
 
