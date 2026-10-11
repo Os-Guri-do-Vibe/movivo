@@ -1,5 +1,6 @@
 'use client';
 
+import { MAX_METHODOLOGY_NOTE_LENGTH } from '@movivo/shared';
 import { CheckCircle2, GitCompareArrows, Lock, RotateCcw, Send, XCircle } from 'lucide-react';
 import { useMemo, useState, type FormEvent } from 'react';
 
@@ -303,11 +304,11 @@ export function KnowledgeMethodologyPanel({
           </label>
           <label className="mt-4 block text-label font-semibold">
             Motivo da mudança
-            <input
-              className={INPUT_CLASS}
+            <textarea
+              className={`${INPUT_CLASS} min-h-20`}
               required
               minLength={10}
-              maxLength={500}
+              maxLength={MAX_METHODOLOGY_NOTE_LENGTH}
               value={changeNote}
               onChange={(event) => setChangeNote(event.target.value)}
             />
@@ -459,11 +460,11 @@ export function KnowledgeMethodologyPanel({
           ) : null}
           <label className="text-label font-semibold">
             Justificativa obrigatória
-            <input
+            <textarea
               autoFocus
-              className={INPUT_CLASS}
+              className={`${INPUT_CLASS} min-h-20`}
               minLength={5}
-              maxLength={500}
+              maxLength={MAX_METHODOLOGY_NOTE_LENGTH}
               value={workflowNote}
               onChange={(event) => setWorkflowNote(event.target.value)}
             />

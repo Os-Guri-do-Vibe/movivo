@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -29,6 +29,8 @@ vi.mock('@/lib/control-center-api', async (importOriginal) => ({
   rollbackMethodologyVersion,
   submitMethodologyVersion,
 }));
+
+import { ControlCenterApiError } from '@/lib/control-center-api';
 
 import { KnowledgeMethodologyPanel } from './knowledge-methodology';
 
@@ -158,6 +160,69 @@ describe('KnowledgeMethodologyPanel', () => {
       }),
     );
     expect(await screen.findByRole('status')).toHaveTextContent('ainda não afeta a IA');
+  });
+
+  it('aceita motivo da mudança longo (acima de 500 caracteres) sem truncar', async () => {
+    const user = userEvent.setup();
+    const longReason =
+      `Revisão ampla da metodologia. ${'Detalhe da alteração. '.repeat(60)}`.trim();
+    expect(longReason.length).toBeGreaterThan(1000);
+    render(<KnowledgeMethodologyPanel canEdit />);
+    await user.click(await screen.findByRole('button', { name: 'Criar nova versão' }));
+    fireEvent.change(screen.getByLabelText('Motivo da mudança'), { target: { value: longReason } });
+    await user.click(screen.getByRole('button', { name: 'Salvar rascunho' }));
+    await waitFor(() =>
+      expect(createMethodologyVersion).toHaveBeenCalledWith({
+        content: CONTENT,
+        changeNote: longReason,
+      }),
+    );
+  });
+
+  it('mostra o erro devolvido ao salvar em vez de falhar em silêncio', async () => {
+    const user = userEvent.setup();
+    createMethodologyVersion.mockRejectedValueOnce(
+      new ControlCenterApiError(409, 'Esta metodologia já possui uma versão.'),
+    );
+    render(<KnowledgeMethodologyPanel canEdit />);
+    await user.click(await screen.findByRole('button', { name: 'Criar nova versão' }));
+    await user.type(screen.getByLabelText('Motivo da mudança'), 'Ajuste metodológico auditável.');
+    await user.click(screen.getByRole('button', { name: 'Salvar rascunho' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('já possui uma versão');
+  });
+
+  it('depois de publicar, a versão publicada passa a ser a vigente', async () => {
+    const user = userEvent.setup();
+    const published = {
+      ...response,
+      data: {
+        versions: response.data.versions.map((version) => ({
+          ...version,
+          current: version.version === 4,
+          status:
+            version.version === 4
+              ? ('PUBLISHED' as const)
+              : version.version === 1
+                ? ('ARCHIVED' as const)
+                : version.status,
+        })),
+      },
+    };
+    publishMethodologyVersion.mockResolvedValue(published);
+    getMethodology.mockResolvedValueOnce(response).mockResolvedValue(published);
+    render(<KnowledgeMethodologyPanel canApprove />);
+
+    expect(await screen.findByRole('heading', { name: 'v1', level: 3 })).toBeVisible();
+    await user.click(await screen.findByRole('button', { name: 'Publicar' }));
+    await user.type(
+      screen.getByLabelText('Justificativa obrigatória'),
+      'Publicação autorizada pelo CREF.',
+    );
+    await user.click(screen.getByRole('button', { name: 'Confirmar transição' }));
+
+    expect(await screen.findByRole('heading', { name: 'v4', level: 3 })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'v1', level: 3 })).not.toBeInTheDocument();
+    expect(await screen.findByRole('status')).toHaveTextContent('Versão publicada');
   });
 
   it('mantém aprovação e publicação como confirmações separadas', async () => {
