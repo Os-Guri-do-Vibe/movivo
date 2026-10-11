@@ -198,7 +198,12 @@ export function Step1Registration({
           }
         />
         {phoneComplete && !phoneVerified && (
-          <PhoneOtp sessionRef={sessionRef} phoneNumber={phoneE164} onVerified={onPhoneVerified} />
+          <PhoneOtp
+            sessionRef={sessionRef}
+            phoneNumber={phoneE164}
+            onVerified={onPhoneVerified}
+            anchorId="phone"
+          />
         )}
         {phoneVerified && (
           <p className="text-label font-semibold text-petroleo">✓ WhatsApp confirmado</p>
