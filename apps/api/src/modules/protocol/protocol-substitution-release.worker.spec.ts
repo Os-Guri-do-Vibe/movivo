@@ -57,6 +57,8 @@ function makeWorker(
     aiSummary?: string | undefined;
     changes?: Array<{ from: string; to: string }>;
     failure?: { reason: 'VALIDATION_FAILED'; violations: string[] } | { reason: 'STALE' };
+    held?: boolean;
+    awaiting?: boolean;
   } = {},
 ) {
   const workers = { create: vi.fn() } as unknown as WorkerFactory;
@@ -78,7 +80,16 @@ function makeWorker(
       : { released: false, reason: 'NOT_PENDING' };
   const release = vi.fn(async () => releaseResult);
   const escalateToMandatory = vi.fn(async () => undefined);
-  const repository = { release, escalateToMandatory } as unknown as ProtocolSubstitutionRepository;
+  const isAwaitingAutoRelease = vi.fn(async () => opts.awaiting ?? true);
+  const repository = {
+    release,
+    escalateToMandatory,
+    isAwaitingAutoRelease,
+  } as unknown as ProtocolSubstitutionRepository;
+  const reviewHold = {
+    isHeld: vi.fn(async () => opts.held ?? false),
+    deferRelease: vi.fn(async () => undefined),
+  };
   const findLatestPersonalInfo = vi.fn(opts.findLatestPersonalInfo ?? (async () => personal));
   const setPdfContent = vi.fn(async () => undefined);
   const protocolRepository = {
@@ -99,9 +110,12 @@ function makeWorker(
     protocolRepository,
     queueEvents,
     workoutPresentation,
+    reviewHold as never,
     logger,
   );
   return {
+    reviewHold,
+    isAwaitingAutoRelease,
     worker,
     workers,
     release,
@@ -130,6 +144,34 @@ describe('ProtocolSubstitutionReleaseWorker (janela de cortesia de 30min da subs
       'protocol-substitution-release',
       expect.any(Function),
     );
+  });
+
+  it('prazo venceu com a proposta ABERTA na tela de revisão: não libera, adia e marca o envio como pendente', async () => {
+    const { worker, release, enqueue, reviewHold } = makeWorker(true, 1, { held: true });
+    const res = await worker.process(job());
+    expect(res.status).toBe('HELD');
+    expect(reviewHold.deferRelease).toHaveBeenCalledWith({
+      kind: 'SUBSTITUTION',
+      userId: 'u1',
+      id: 'r1',
+    });
+    expect(release).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled(); // nada foi enviado ao aluno
+  });
+
+  it('tela aberta mas a proposta já foi decidida ou escalada: encerra, sem adiar de novo', async () => {
+    const { worker, release, reviewHold } = makeWorker(true, 1, { held: true, awaiting: false });
+    const res = await worker.process(job());
+    expect(res.status).toBe('SKIPPED');
+    expect(reviewHold.deferRelease).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it('sem tela aberta segue o caminho de sempre (nem consulta se está aguardando)', async () => {
+    const { worker, release, isAwaitingAutoRelease } = makeWorker(true, 1, { held: false });
+    await worker.process(job());
+    expect(release).toHaveBeenCalled();
+    expect(isAwaitingAutoRelease).not.toHaveBeenCalled();
   });
 
   it('profissional não agiu em 30min → libera, entrega o protocolo inteiro e notifica o painel', async () => {

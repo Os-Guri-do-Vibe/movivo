@@ -9,6 +9,7 @@ import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queu
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
+import type { ReviewHoldService } from '../protocol/review-hold.service';
 import type { ProtocolSubstitutionRepository } from '../protocol/protocol-substitution.repository';
 import { ValidationService } from '../protocol/validation/validation.service';
 import type { WorkoutPresentationService } from '../protocol/workout-presentation.service';
@@ -115,6 +116,7 @@ function makeService(row: Record<string, unknown>, verdict: 'PASS' | 'FLAG_HUMAN
     workoutPresentation,
     exerciseCatalogAdmin,
     exerciseCatalog,
+    { hold: vi.fn(), release: vi.fn() } as unknown as ReviewHoldService,
     logger,
   );
   return {
@@ -200,6 +202,7 @@ function makeSequencedService(
     publish: vi.fn(async () => ({ data: { versions: [], totalPublished: 0 }, meta: {} })),
   } as unknown as ExerciseCatalogAdminService;
   const exerciseCatalog = { getById: vi.fn() } as unknown as ExerciseCatalogProvider;
+  const reviewHold = { hold: vi.fn(async () => undefined), release: vi.fn(async () => false) };
   const service = new DashboardService(
     db,
     validation,
@@ -215,9 +218,11 @@ function makeSequencedService(
     workoutPresentation,
     exerciseCatalogAdmin,
     exerciseCatalog,
+    reviewHold as unknown as ReviewHoldService,
     { setContext: vi.fn(), warn: vi.fn(), info: vi.fn(), error: vi.fn() } as unknown as PinoLogger,
   );
   return {
+    reviewHold,
     service,
     append,
     enqueue,
@@ -352,6 +357,117 @@ describe('DashboardService invariantes de mutacao', () => {
       expect.objectContaining({ action: 'PROTOCOL_SIGNED' }),
     );
     expect(enqueue).toHaveBeenCalledOnce();
+  });
+
+  describe('trava da auto-liberação enquanto a tela de revisão está aberta', () => {
+    it('tela aberta (active: true) renova a trava do titular dono do protocolo', async () => {
+      const { service, reviewHold } = makeSequencedService([[pendingProtocol]]);
+      await expect(
+        service.setReviewHold(actor, 'PROTOCOL', RESOURCE_ID, { active: true }),
+      ).resolves.toEqual({
+        active: true,
+        released: false,
+      });
+      expect(reviewHold.hold).toHaveBeenCalledWith({
+        kind: 'PROTOCOL',
+        userId: USER_ID,
+        id: RESOURCE_ID,
+      });
+      expect(reviewHold.release).not.toHaveBeenCalled();
+    });
+
+    it('tela fechada (active: false) solta a trava e informa se disparou um envio vencido', async () => {
+      const { service, reviewHold } = makeSequencedService([[pendingProtocol]]);
+      reviewHold.release.mockResolvedValue(true);
+      await expect(
+        service.setReviewHold(admin, 'PROTOCOL', RESOURCE_ID, { active: false }),
+      ).resolves.toEqual({
+        active: false,
+        released: true,
+      });
+      expect(reviewHold.release).toHaveBeenCalledWith({
+        kind: 'PROTOCOL',
+        userId: USER_ID,
+        id: RESOURCE_ID,
+      });
+      expect(reviewHold.hold).not.toHaveBeenCalled();
+    });
+
+    it('troca de exercício: renova a trava do titular dono da proposta', async () => {
+      const { service, reviewHold, substitutionRepo } = makeSequencedService([]);
+      (substitutionRepo.findById as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: RESOURCE_ID,
+        userId: USER_ID,
+        status: 'PENDING',
+      });
+      await expect(
+        service.setReviewHold(actor, 'SUBSTITUTION', RESOURCE_ID, { active: true }),
+      ).resolves.toEqual({ active: true, released: false });
+      expect(substitutionRepo.findById).toHaveBeenCalledWith(
+        { userId: ACTOR_ID, role: 'PROFESSIONAL' },
+        RESOURCE_ID,
+      );
+      expect(reviewHold.hold).toHaveBeenCalledWith({
+        kind: 'SUBSTITUTION',
+        userId: USER_ID,
+        id: RESOURCE_ID,
+      });
+    });
+
+    it('troca de exercício: ao fechar a tela solta a trava e informa o envio disparado', async () => {
+      const { service, reviewHold, substitutionRepo } = makeSequencedService([]);
+      (substitutionRepo.findById as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: RESOURCE_ID,
+        userId: USER_ID,
+      });
+      reviewHold.release.mockResolvedValue(true);
+      await expect(
+        service.setReviewHold(admin, 'SUBSTITUTION', RESOURCE_ID, { active: false }),
+      ).resolves.toEqual({ active: false, released: true });
+      expect(reviewHold.release).toHaveBeenCalledWith({
+        kind: 'SUBSTITUTION',
+        userId: USER_ID,
+        id: RESOURCE_ID,
+      });
+    });
+
+    it('troca de exercício inexistente ou fora do escopo → 404, sem travar nada', async () => {
+      const { service, reviewHold, substitutionRepo } = makeSequencedService([]);
+      (substitutionRepo.findById as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      await expect(
+        service.setReviewHold(actor, 'SUBSTITUTION', RESOURCE_ID, { active: true }),
+      ).rejects.toThrow(/nao encontrada/i);
+      expect(reviewHold.hold).not.toHaveBeenCalled();
+    });
+
+    it('papel fora de PROFESSIONAL/ADMIN não mexe na trava', async () => {
+      const { service, reviewHold } = makeSequencedService([[pendingProtocol]]);
+      await expect(
+        service.setReviewHold(
+          { ...actor, role: 'SUPPORT' } as AuthenticatedUser,
+          'PROTOCOL',
+          RESOURCE_ID,
+          {
+            active: true,
+          },
+        ),
+      ).rejects.toThrow();
+      expect(reviewHold.hold).not.toHaveBeenCalled();
+    });
+
+    it('protocolo inexistente → 404; corpo inválido ou com campo extra → 400', async () => {
+      const { service, reviewHold } = makeSequencedService([[]]);
+      await expect(
+        service.setReviewHold(actor, 'PROTOCOL', RESOURCE_ID, { active: true }),
+      ).rejects.toThrow(/nao encontrado/i);
+      for (const body of [{}, { active: 'sim' }, { active: true, extra: 1 }]) {
+        await expect(service.setReviewHold(actor, 'PROTOCOL', RESOURCE_ID, body)).rejects.toThrow();
+      }
+      await expect(
+        service.setReviewHold(actor, 'PROTOCOL', 'nao-e-uuid', { active: true }),
+      ).rejects.toThrow();
+      expect(reviewHold.hold).not.toHaveBeenCalled();
+    });
   });
 
   it('conteudo salvo que nao passa mais no schema atual falha com 400 explicito, nunca 500 generico', async () => {

@@ -37,6 +37,13 @@ describe('DashboardController SSE', () => {
       'PROFESSIONAL',
       'ADMIN',
     ]);
+    expect(
+      Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.setSubstitutionReviewHold),
+    ).toEqual(['PROFESSIONAL', 'ADMIN']);
+    expect(Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.setReviewHold)).toEqual([
+      'PROFESSIONAL',
+      'ADMIN',
+    ]);
     expect(Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.resolveHandoff)).toEqual([
       'PROFESSIONAL',
       'ADMIN',

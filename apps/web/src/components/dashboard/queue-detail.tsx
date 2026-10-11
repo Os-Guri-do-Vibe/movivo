@@ -61,6 +61,7 @@ import { WEEKDAY_ITEMS } from '../onboarding/step2-anamnesis';
 import { AnamnesisAnswersModal, BIOLOGICAL_SEX_LABELS } from './protocol-anamnesis-answers';
 import { meaningfulText } from './queue-board';
 import { SubstitutionCatalogGapDialog } from './substitution-catalog-gap-dialog';
+import { useReviewHold } from './use-review-hold';
 import {
   allItemsDiscarded,
   buildItemEdits,
@@ -1304,6 +1305,15 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
+
+  // Protocolo ou troca de exercício com envio automático agendado: enquanto esta tela está
+  // aberta o envio espera, mesmo que o prazo (1h / 30 min) venza; ao sair, o que venceu é
+  // enviado na hora. Silencioso de propósito: a tela do protocolo opcional e a do obrigatório
+  // são idênticas (ver os testes de paridade), então não há faixa nem aviso só para um caso.
+  const holdKind = kind === 'SUBSTITUTION' ? 'SUBSTITUTION' : 'PROTOCOL';
+  const awaitingAutoRelease =
+    (kind === 'PROTOCOL' || kind === 'SUBSTITUTION') && Boolean(detail?.item.autoReleaseAt);
+  useReviewHold(holdKind, id, awaitingAutoRelease);
 
   async function runAction(action: () => Promise<unknown>, event: string, message: string) {
     await action();

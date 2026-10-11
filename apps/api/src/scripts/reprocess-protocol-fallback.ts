@@ -46,7 +46,13 @@ import { anamnesisSessions, protocols, users } from '../core/database/schema';
 import { AiCoachModule } from '../modules/ai-coach/ai-coach.module';
 import { healthBlockSchema } from '../modules/anamnesis/health-block';
 import { evaluateParq, type ParqEvaluation } from '../modules/anamnesis/parq';
+import { QUEUE } from '../modules/jobs/jobs.config';
+import { QueueManager } from '../modules/jobs/queue-manager.service';
 import { ExerciseCatalogProvider } from '../modules/protocol/exercise-catalog-provider.service';
+import {
+  PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS,
+  reviewUrgencyForPlan,
+} from '../modules/protocol/protocol-generation.worker';
 import { MethodologyProvider } from '../modules/protocol/methodology-provider.service';
 import { planProtocol } from '../modules/protocol/protocol-planner';
 import { ProtocolGeneratorService } from '../modules/protocol/protocol-generator.service';
@@ -67,11 +73,14 @@ const INITIAL_MESOCYCLE_NUMBER = 1;
 
 @Module({
   imports: [CoreModule, AiCoachModule],
+  // `QueueManager` só PRODUZ jobs (nenhum Worker é registrado): o `ProtocolAutoReleaseWorker`
+  // do `movivo-api` em execução é quem consome. Mesmo racional de `enqueue-protocol-auto-release.ts`.
   providers: [
     ProtocolGeneratorService,
     MethodologyProvider,
     ExerciseCatalogProvider,
     ValidationService,
+    QueueManager,
   ],
 })
 class ReprocessModule {}
@@ -90,6 +99,7 @@ async function main(): Promise<void> {
     const cipher = app.get(HealthCipherService);
     const generator = app.get(ProtocolGeneratorService);
     const validation = app.get(ValidationService);
+    const queues = app.get(QueueManager);
 
     const { userRow, protocolRow } = await db.runAsSystem(async (tx) => {
       const [userRow] = await tx.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
@@ -185,7 +195,9 @@ async function main(): Promise<void> {
     const totalWeeks = plan.content.phaseDurationWeeks;
     const startDate = new Date();
     const endDate = new Date(startDate.getTime() + totalWeeks * MS_PER_WEEK);
-    const mandatory = constraints.requiresProfessionalReview;
+    // Mesma regra da geração normal (PAR-Q ou fallback → obrigatória; reparo → conforme
+    // `REPAIRED_PROTOCOL_REVIEW_URGENCY`): só o que é OPTIONAL entra na auto-liberação.
+    const reviewUrgency = reviewUrgencyForPlan(plan, constraints.requiresProfessionalReview);
     const mesocycleName = `Mesociclo ${protocolRow.mesocycleNumber}: ${
       TRAINING_PHASE_LABELS[plan.content.phase] ?? plan.content.phase
     }`;
@@ -205,7 +217,11 @@ async function main(): Promise<void> {
           knowledgeSources: plan.knowledgeSources,
           methodologyVersionId: plan.methodologyVersionId,
           methodologySha256: plan.methodologySha256,
-          reviewUrgency: mandatory ? 'MANDATORY' : 'OPTIONAL',
+          reviewUrgency,
+          // O prazo de cortesia que o painel mostra e o job usam `createdAt + 1h`. O conteúdo
+          // acabou de ser (re)gerado e nunca foi revisado por ninguém: a janela recomeça agora,
+          // senão o painel mostraria "Disparando…" para um prazo que venceu horas atrás.
+          createdAt: startDate,
           status: 'PENDING_SIGNATURE',
           approvalStatus: 'PENDING_REVIEW',
           humanReviewRequired: true,
@@ -213,9 +229,27 @@ async function main(): Promise<void> {
         .where(eq(protocols.id, protocolRow.id)),
     );
 
+    // O worker de geração agenda este job em `persist()`; este script não passa por lá, e sem
+    // ele o painel contaria 1h e nada dispararia (achado 2026-10-11). `MANDATORY` nunca agenda.
+    if (reviewUrgency === 'OPTIONAL') {
+      await queues.enqueue(
+        QUEUE.protocolAutoRelease,
+        'auto-release',
+        { userId: userRow.id, protocolId: protocolRow.id },
+        {
+          delay: PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS,
+          // Id único: uma rodada anterior (ou o script avulso) pode ter deixado `auto-release-<id>`.
+          jobId: `auto-release-${protocolRow.id}-reprocess-${Date.now()}`,
+        },
+      );
+    }
+
     console.warn(
       `\nProtocolo ${protocolRow.id} atualizado com conteúdo individualizado real ` +
-        `(${plan.generatedBy}/${plan.modelVersion}). Segue PENDING_REVIEW — precisa de assinatura CREF no painel.`,
+        `(${plan.generatedBy}/${plan.modelVersion}). ` +
+        (reviewUrgency === 'OPTIONAL'
+          ? 'Segue PENDING_REVIEW e dispara sozinho para o WhatsApp em 1h se ninguém agir no painel.'
+          : 'Segue PENDING_REVIEW/OBRIGATÓRIA — precisa de assinatura CREF no painel (nunca sai sozinha).'),
     );
   } finally {
     await app.close();

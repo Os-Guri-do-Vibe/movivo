@@ -31,6 +31,7 @@ import { ProtocolSubstitutionRepository } from './protocol-substitution.reposito
 import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
 import { MethodologyProvider } from './methodology-provider.service';
 import { ProtocolRepository } from './protocol.repository';
+import { ReviewHoldService } from './review-hold.service';
 import { ValidationService } from './validation/validation.service';
 import { WorkoutPresentationService } from './workout-presentation.service';
 
@@ -51,6 +52,7 @@ import { WorkoutPresentationService } from './workout-presentation.service';
     ProtocolRepository,
     ProtocolGenerationWorker,
     ProtocolAutoReleaseWorker,
+    ReviewHoldService,
     ProtocolRenewalScheduler,
     ProtocolRenewalGenerationWorker,
     ProtocolSubstitutionRepository,
@@ -64,6 +66,7 @@ import { WorkoutPresentationService } from './workout-presentation.service';
     ExerciseCatalogProvider,
     ProtocolSubstitutionRepository,
     ProtocolRepository,
+    ReviewHoldService,
     WorkoutPresentationService,
   ],
 })

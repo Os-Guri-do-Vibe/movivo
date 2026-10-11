@@ -344,6 +344,24 @@ export class ProtocolRepository {
    * `MANDATORY`), o estado não bate mais e é `released: false` sem tocar a linha — não há
    * "cancelar o job", o próprio estado decide na hora de rodar.
    */
+  /**
+   * `true` se o protocolo ainda espera a auto-liberação (`PENDING_REVIEW` + `OPTIONAL`). Leitura
+   * barata para o worker decidir se vale seguir adiando enquanto a tela de revisão está aberta.
+   */
+  async isAwaitingAutoRelease(userId: string, protocolId: string): Promise<boolean> {
+    return this.db.runAsUser(userId, 'USER', async (tx) => {
+      const [row] = await tx
+        .select({
+          approvalStatus: protocols.approvalStatus,
+          reviewUrgency: protocols.reviewUrgency,
+        })
+        .from(protocols)
+        .where(eq(protocols.id, protocolId))
+        .limit(1);
+      return row?.approvalStatus === 'PENDING_REVIEW' && row.reviewUrgency === 'OPTIONAL';
+    });
+  }
+
   async autoRelease(userId: string, protocolId: string): Promise<AutoReleaseResult> {
     return this.db.runAsUser(userId, 'USER', async (tx) => {
       const [row] = await tx

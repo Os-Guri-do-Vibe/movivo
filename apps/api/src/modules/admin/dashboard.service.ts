@@ -63,6 +63,7 @@ import type { UserConstraints } from '../protocol/user-constraints';
 import { ValidationService } from '../protocol/validation/validation.service';
 import { WorkoutPresentationService } from '../protocol/workout-presentation.service';
 import { PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS } from '../protocol/protocol-generation.worker';
+import { type ReviewHoldKind, ReviewHoldService } from '../protocol/review-hold.service';
 import { AuditService } from './audit.service';
 
 /**
@@ -105,6 +106,8 @@ const editSchema = z.object({
   reason: z.string().trim().min(5).max(500),
 });
 const signSchema = z.object({ confirmation: z.literal(true) });
+/** `true` = a tela de revisão está aberta (renova a trava); `false` = fechou (solta e dispara o que venceu). */
+const reviewHoldSchema = z.object({ active: z.boolean() });
 const resolveSchema = z.object({
   resolution: z.string().trim().min(3).max(80),
   notes: z.string().trim().min(3).max(1000),
@@ -162,6 +165,7 @@ export class DashboardService {
     private readonly workoutPresentation: WorkoutPresentationService,
     private readonly exerciseCatalogAdmin: ExerciseCatalogAdminService,
     private readonly exerciseCatalog: ExerciseCatalogProvider,
+    private readonly reviewHold: ReviewHoldService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(DashboardService.name);
@@ -444,6 +448,44 @@ export class DashboardService {
    * consegue mais liberar o PAR-Q e esquecer de assinar o treino (nem o inverso), e não há
    * janela entre os dois atos onde o estado fique incoerente.
    */
+  /**
+   * Tela de revisão/edição aberta (`active: true`, renovado de tempos em tempos) ou fechada
+   * (`active: false`), para protocolo (`PROTOCOL`) e troca de exercício proposta pela IA
+   * (`SUBSTITUTION`). Enquanto aberta, a liberação automática que vencer fica esperando; ao
+   * fechar, o que venceu é enviado na hora. Ver `ReviewHoldService`.
+   */
+  async setReviewHold(
+    actor: AuthenticatedUser,
+    kind: ReviewHoldKind,
+    rawId: string,
+    rawBody: unknown,
+  ) {
+    this.assertStaffWrite(actor);
+    const id = this.parse(uuidSchema, rawId);
+    const { active } = this.parse(reviewHoldSchema, rawBody);
+    const userId =
+      kind === 'PROTOCOL'
+        ? await this.scopedRead(actor, async (tx) => (await this.requireProtocol(tx, id)).userId)
+        : await this.substitutionOwner(actor, id);
+    const target = { kind, userId, id } as const;
+    if (active) {
+      await this.reviewHold.hold(target);
+      return { active: true, released: false };
+    }
+    const released = await this.reviewHold.release(target);
+    return { active: false, released };
+  }
+
+  /** Titular dono da proposta de troca, ou 404 se não existir/estiver fora do escopo. */
+  private async substitutionOwner(actor: AuthenticatedUser, id: string): Promise<string> {
+    const request = await this.substitutionRepo.findById(
+      { userId: actor.userId, role: actor.role },
+      id,
+    );
+    if (!request) throw new NotFoundException('Proposta de substituicao nao encontrada.');
+    return request.userId;
+  }
+
   async signProtocol(actor: AuthenticatedUser, rawId: string, rawBody: unknown) {
     const id = this.parse(uuidSchema, rawId);
     this.parse(signSchema, rawBody);

@@ -19,6 +19,7 @@ import {
   protocolDetail,
   PROTOCOL_ID,
   substitutionDetail,
+  substitutionMandatoryItem,
   SUBSTITUTION_ID,
 } from '../../../test/dashboard-fixtures';
 
@@ -48,6 +49,9 @@ vi.mock('@/lib/dashboard-api', () => ({
   },
   ...api,
 }));
+
+const reviewHold = vi.hoisted(() => ({ useReviewHold: vi.fn() }));
+vi.mock('./use-review-hold', () => reviewHold);
 
 const controlCenterApi = vi.hoisted(() => ({ getExerciseCatalog: vi.fn() }));
 vi.mock('@/lib/control-center-api', () => controlCenterApi);
@@ -147,6 +151,7 @@ beforeEach(() => {
   Object.values(api).forEach((mock) => mock.mockReset());
   controlCenterApi.getExerciseCatalog.mockReset();
   navigation.replace.mockReset();
+  reviewHold.useReviewHold.mockReset();
   api.signProtocol.mockResolvedValue({ status: 'SIGNED' });
   api.resolveHandoff.mockResolvedValue({ status: 'RESOLVED' });
   api.getAnamnesisAnswers.mockResolvedValue(anamnesisAnswers);
@@ -414,6 +419,70 @@ describe('QueueDetail — troca em lote (itens da proposta)', () => {
 
     expect(screen.queryByRole('button', { name: 'Aprovar agora' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Recusar' })).toBeVisible();
+  });
+});
+
+describe('QueueDetail — trava do envio automático enquanto a tela está aberta', () => {
+  const optionalDetail = { ...protocolDetail, item: optionalProtocolItem };
+
+  it('protocolo com envio automático agendado: segura o envio enquanto a tela está aberta', async () => {
+    api.getQueueDetail.mockResolvedValue(optionalDetail);
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await screen.findByRole('heading', { name: /Protocolo · versão 1/i });
+
+    expect(reviewHold.useReviewHold).toHaveBeenLastCalledWith('PROTOCOL', PROTOCOL_ID, true);
+    // Silencioso: nenhuma faixa extra (a tela do opcional é idêntica à do obrigatório).
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+
+  it('troca de exercício com liberação automática agendada: segura o envio (recurso substitutions)', async () => {
+    api.getQueueDetail.mockResolvedValue(substitutionDetail); // opcional: tem `autoReleaseAt`
+    render(<QueueDetail kind="SUBSTITUTION" id={SUBSTITUTION_ID} />);
+    await screen.findByText('Troca proposta');
+    expect(reviewHold.useReviewHold).toHaveBeenLastCalledWith(
+      'SUBSTITUTION',
+      SUBSTITUTION_ID,
+      true,
+    );
+  });
+
+  it('troca de exercício obrigatória (sem liberação automática): não segura nada', async () => {
+    api.getQueueDetail.mockResolvedValue({
+      ...substitutionDetail,
+      item: substitutionMandatoryItem,
+    });
+    render(<QueueDetail kind="SUBSTITUTION" id={SUBSTITUTION_ID} />);
+    await screen.findByText('Troca proposta');
+    expect(reviewHold.useReviewHold).toHaveBeenLastCalledWith(
+      'SUBSTITUTION',
+      SUBSTITUTION_ID,
+      false,
+    );
+  });
+
+  it('protocolo obrigatório (sem envio automático): não segura nada', async () => {
+    api.getQueueDetail.mockResolvedValue(parqProtocolDetail);
+    render(<QueueDetail kind="PROTOCOL" id={PARQ_PROTOCOL_ID} />);
+    await screen.findByRole('heading', { name: /Protocolo · versão 1/i });
+
+    expect(reviewHold.useReviewHold).toHaveBeenLastCalledWith('PROTOCOL', PARQ_PROTOCOL_ID, false);
+  });
+
+  it('enquanto o detalhe carrega a trava ainda está desligada', () => {
+    api.getQueueDetail.mockReturnValue(new Promise(() => undefined));
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    expect(reviewHold.useReviewHold).toHaveBeenLastCalledWith('PROTOCOL', PROTOCOL_ID, false);
+  });
+
+  it('outros tipos de caso (check-in) nunca seguram o envio de protocolo', async () => {
+    api.getQueueDetail.mockResolvedValue({ ...optionalDetail, item: { ...checkinItem } });
+    render(<QueueDetail kind="CHECKIN" id={CHECKIN_ID} />);
+    await waitFor(() => expect(api.getQueueDetail).toHaveBeenCalled());
+    expect(reviewHold.useReviewHold).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      true,
+    );
   });
 });
 
