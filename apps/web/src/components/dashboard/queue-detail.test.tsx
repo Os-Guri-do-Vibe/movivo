@@ -546,6 +546,24 @@ describe('QueueDetail', () => {
     expect(screen.getByRole('button', { name: 'Editar Protocolo' })).toBeVisible();
   });
 
+  it('edição com alertas de segurança é gravada e mostra o que corrigir antes de assinar', async () => {
+    api.getQueueDetail.mockResolvedValue(protocolDetail);
+    api.saveProtocol.mockResolvedValue({
+      status: 'PENDING_SIGNATURE',
+      validation: 'BLOCK',
+      violations: [{ rule: 'EXERCISE_UNKNOWN', detail: 'exercício fora da base: manual-1' }],
+    });
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
+    await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Alterações salvas. Antes de assinar, corrija: exercício fora da base: manual-1.',
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Editar Protocolo' })).toBeVisible();
+  });
+
   it('cancela a edição do protocolo sem persistir mudanças', async () => {
     api.getQueueDetail.mockResolvedValue(protocolDetail);
     render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);

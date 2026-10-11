@@ -389,12 +389,12 @@ export class DashboardService {
         >,
         parqFlags: row.parQFlags as UserConstraints['injuryTags'],
       });
-      if (verdict.action !== 'PASS') {
-        throw new BadRequestException({
-          code: 'PROTOCOL_NOT_SAFE_TO_EDIT',
-          violations: verdict.violations,
-        });
-      }
+      // Salvar a edição do RT sempre persiste: as regras do `ValidationService` foram feitas
+      // para a saída da IA e travar o salvamento impedia o profissional de gravar qualquer
+      // alteração (achado 2026-10-11, produção). O veto continua inteiro onde importa: a
+      // edição força `MANDATORY` + `PENDING_SIGNATURE` (nunca sai sozinha) e `signProtocol`
+      // revalida e recusa a assinatura com as mesmas violações. Aqui elas só voltam como
+      // aviso para a tela mostrar o que precisa ser corrigido antes de assinar.
       const beforeHash = this.hashJson(row.content);
       const afterHash = signatureHash(body.content);
       await tx
@@ -422,6 +422,7 @@ export class DashboardService {
           beforeHash,
           afterHash,
           validation: verdict.code,
+          violations: verdict.violations.map((violation) => violation.rule),
         },
       });
       return {

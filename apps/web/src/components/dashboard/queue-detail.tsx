@@ -60,6 +60,7 @@ import {
   signProtocol,
 } from '@/lib/dashboard-api';
 import type {
+  ActionResult,
   AnamnesisAnswers,
   ProtocolDetail,
   QueueDetail as QueueDetailType,
@@ -296,13 +297,22 @@ function preventSummaryToggleKeys(
   onChange(nextValue);
 }
 
+function issueText(entry: unknown): string {
+  if (typeof entry === 'object' && entry !== null) {
+    const { detail, message } = entry as { detail?: unknown; message?: unknown };
+    if (typeof detail === 'string') return detail;
+    if (typeof message === 'string') return message;
+  }
+  return String(entry);
+}
+
 function validationMessages(error: unknown): string[] {
   if (error instanceof DashboardApiError && Array.isArray(error.details)) {
-    return error.details.map((entry) => String(entry)).slice(0, 6);
+    return error.details.map(issueText).slice(0, 6);
   }
   if (error instanceof DashboardApiError && typeof error.details === 'object' && error.details) {
     const issues = (error.details as { issues?: unknown }).issues;
-    if (Array.isArray(issues)) return issues.map((entry) => String(entry)).slice(0, 6);
+    if (Array.isArray(issues)) return issues.map(issueText).slice(0, 6);
   }
   return [error instanceof Error ? error.message : 'Não foi possível salvar o protocolo.'];
 }
@@ -759,7 +769,7 @@ function ProtocolSummary({
   onSaved,
 }: {
   protocol: ProtocolDetail;
-  onSaved: () => Promise<void>;
+  onSaved: (result: ActionResult) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<ProtocolStructure>(() => structuredClone(protocol.content));
@@ -882,11 +892,11 @@ function ProtocolSummary({
     }
     setPending(true);
     try {
-      await saveProtocol(protocol.id, parsed.data);
+      const result = await saveProtocol(protocol.id, parsed.data);
       captureDashboardEvent('cref_protocol_edited');
       setEditing(false);
       setReorderingSession(null);
-      await onSaved();
+      await onSaved(result);
     } catch (error) {
       setIssues(validationMessages(error));
     } finally {
@@ -1553,8 +1563,17 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
         {detail.protocol ? (
           <ProtocolSummary
             protocol={detail.protocol}
-            onSaved={async () => {
-              setSuccess('Edição validada no servidor e registrada para revisão.');
+            onSaved={async (result) => {
+              // A edição sempre é gravada; se o servidor apontou regras de segurança, o RT
+              // vê o que corrigir antes de assinar (a assinatura exige tudo em ordem).
+              const warnings = (result.violations ?? []).flatMap((violation) =>
+                violation.detail ? [violation.detail] : [],
+              );
+              setSuccess(
+                warnings.length > 0
+                  ? `Alterações salvas. Antes de assinar, corrija: ${warnings.join('; ')}.`
+                  : 'Edição validada no servidor e registrada para revisão.',
+              );
               await load();
             }}
           />
