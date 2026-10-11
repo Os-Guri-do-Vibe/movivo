@@ -14,6 +14,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AudioTranscriptionPort } from '../../core/audio/audio-transcription.port';
 import type { AppConfigService } from '../../core/config';
+import { CoachAttendanceService } from '../../core/database/coach-attendance.service';
+import { ConversationEventsService } from '../../core/event-bus/conversation-events.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import type { HealthCipherService } from '../../core/database/health-cipher.service';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
@@ -82,13 +84,19 @@ function makeService(
     transcribe?: ReturnType<typeof vi.fn>;
     evolutionInstanceName?: string | null;
     downloadAudio?: ReturnType<typeof vi.fn>;
+    coachPaused?: boolean;
   } = {},
 ) {
   const { redis, rpush, keys, seed } = fakeRedis();
+  const recorded: unknown[] = [];
+  const emitMessage = vi.fn();
   const enqueue = vi.fn(async () => 'job-1');
   const queues = { enqueue } as unknown as QueueManager;
   const db = {
     runAsSystem: vi.fn(async () => opts.userRows ?? [{ id: USER_ID }]),
+    runAsUser: vi.fn(async (_u: string, _r: string, cb: (tx: unknown) => Promise<unknown>) =>
+      cb({ insert: () => ({ values: async (row: unknown) => void recorded.push(row) }) }),
+    ),
   } as unknown as TenantDatabase;
   const config = {
     // OpenAI aprovada por padrão: a maioria dos testes de áudio quer exercitar o caminho
@@ -160,9 +168,13 @@ function makeService(
     { emit: vi.fn() } as unknown as DashboardQueueEventsService,
     config,
     { encryptText: vi.fn(async (value: string) => value) } as unknown as HealthCipherService,
+    { isPaused: vi.fn(async () => opts.coachPaused ?? false) } as unknown as CoachAttendanceService,
+    { emitMessage } as unknown as ConversationEventsService,
     logger,
   );
   return {
+    emitMessage,
+    recorded,
     service,
     enqueue,
     rpush,
@@ -219,6 +231,30 @@ describe('WhatsappInboundService.ingest', () => {
     expect(job).not.toHaveProperty('text'); // nenhum PII no job
     expect(job.enqueuedAt).toBeGreaterThan(0);
     expect(overrides.delay).toBe(7_000);
+  });
+
+  it('atendimento pausado: registra a mensagem no histórico e NÃO aciona a IA', async () => {
+    const paused = makeService({ coachPaused: true });
+    await paused.service.ingest({
+      ...delivery(payload({ text: 'doeu o joelho' })),
+      correlationId: 'c1',
+    });
+    expect(paused.enqueue).not.toHaveBeenCalled();
+    expect(paused.rpush).not.toHaveBeenCalled();
+    expect(paused.recorded).toEqual([
+      expect.objectContaining({ userId: USER_ID, direction: 'INBOUND', content: 'doeu o joelho' }),
+    ]);
+    // Tempo real: o painel é avisado (só o id) para buscar a mensagem nova.
+    expect(paused.emitMessage).toHaveBeenCalledWith(USER_ID, 'INBOUND');
+  });
+
+  it('atendimento pausado: revogação de consentimento continua valendo', async () => {
+    const paused = makeService({ coachPaused: true });
+    await paused.service.ingest({
+      ...delivery(payload({ text: 'Revogar consentimento de saude' })),
+      correlationId: 'c1',
+    });
+    expect(paused.revokeForUser).toHaveBeenCalled();
   });
 
   it('descarta payload com token inválido (forjado) sem enfileirar', async () => {

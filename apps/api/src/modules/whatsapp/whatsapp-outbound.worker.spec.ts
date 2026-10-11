@@ -4,6 +4,7 @@ import type { Redis } from 'ioredis';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AppConfigService } from '../../core/config';
+import type { ConversationEventsService } from '../../core/event-bus/conversation-events.service';
 import type { HealthCipherService } from '../../core/database/health-cipher.service';
 import type { HealthConsentService } from '../../core/database/health-consent.service';
 import { conversations, users } from '../../core/database/schema';
@@ -167,6 +168,7 @@ function makeWorker(deps: Deps = {}) {
     whatsapp: { publicSiteUrl: 'https://movivo.test' },
   } as unknown as AppConfigService;
   const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() } as never;
+  const emitMessage = vi.fn();
   const worker = new WhatsappOutboundWorker(
     workers,
     db,
@@ -188,8 +190,9 @@ function makeWorker(deps: Deps = {}) {
     {
       encryptText: vi.fn(async (text: string) => `enc(${text})`),
     } as unknown as HealthCipherService,
+    { emitMessage } as unknown as ConversationEventsService,
   );
-  return { worker, send, sendTemplate, sendTyping, sendDocument, redis };
+  return { worker, send, sendTemplate, sendTyping, sendDocument, redis, emitMessage };
 }
 
 function job(data: Partial<WhatsappOutboundJob>): Job<WhatsappOutboundJob> {
@@ -275,6 +278,26 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
     expect((inserted[0]?.values as { content: string }).content).toMatch(/^enc\(Olá, Ana!/);
   });
 
+  it('avisa o painel (tempo real) de cada mensagem gravada no histórico, e só dessas', async () => {
+    const inserted: NonNullable<Deps['inserted']> = [];
+    const { worker, emitMessage } = makeWorker({ inserted });
+    await worker.process(
+      job({ type: 'CHECKIN_MESSAGE', text: 'Oi!\n---\nComo foi?', dedupeId: 'k2' }),
+    );
+    expect(emitMessage).toHaveBeenCalledTimes(2);
+    expect(emitMessage).toHaveBeenCalledWith(USER_ID, 'OUTBOUND');
+
+    emitMessage.mockClear();
+    await worker.process(job({ type: 'COACH_MESSAGE', text: 'Oi!', dedupeId: 'c3' }));
+    expect(emitMessage).not.toHaveBeenCalled();
+  });
+
+  it('não avisa o painel se a gravação do histórico falhou', async () => {
+    const { worker, emitMessage } = makeWorker({ insertFails: true });
+    await worker.process(job({ type: 'CONFIRMATION' }));
+    expect(emitMessage).not.toHaveBeenCalled();
+  });
+
   it('várias bolhas: cada bolha enviada vira uma linha do histórico', async () => {
     const inserted: NonNullable<Deps['inserted']> = [];
     const { worker } = makeWorker({ inserted });
@@ -285,6 +308,26 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
       'enc(Oi!)',
       'enc(Como foi o treino?)',
     ]);
+  });
+
+  it('MANUAL_MESSAGE: envia o texto do profissional e não regrava (a API do painel já gravou)', async () => {
+    const inserted: NonNullable<Deps['inserted']> = [];
+    const { worker, send } = makeWorker({ inserted });
+    const res = await worker.process(
+      job({ type: 'MANUAL_MESSAGE', text: 'Oi, Ana! Como foi o treino?', dedupeId: 'row-1' }),
+    );
+    expect(res.status).toBe('SENT');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0]?.text).toBe('Oi, Ana! Como foi o treino?');
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('MANUAL_MESSAGE é descartada se o consentimento de saúde foi revogado depois de enfileirar', async () => {
+    const { worker, send } = makeWorker({ consentActive: false });
+    await expect(
+      worker.process(job({ type: 'MANUAL_MESSAGE', text: 'oi', dedupeId: 'row-2' })),
+    ).resolves.toEqual({ status: 'CONSENT_REVOKED' });
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('COACH_MESSAGE não é gravado de novo: o AiResponseWorker já persiste a resposta', async () => {

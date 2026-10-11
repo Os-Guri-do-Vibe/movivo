@@ -28,6 +28,7 @@ import { AppConfigService } from '../config';
 import { postgresTls } from './postgres-tls';
 import { DRIZZLE, POSTGRES_CLIENT } from './database.constants';
 import { DatabaseHealthService } from './database-health.service';
+import { CoachAttendanceService } from './coach-attendance.service';
 import { HealthCipherService } from './health-cipher.service';
 import { HealthConsentService } from './health-consent.service';
 import { TenantDatabase } from './tenant-database.service';
@@ -76,6 +77,7 @@ export function createPostgresClient(config: AppConfigService): Sql {
     AccessLinkService,
     HealthCipherService,
     HealthConsentService,
+    CoachAttendanceService,
   ],
   exports: [
     DRIZZLE,
@@ -85,6 +87,7 @@ export function createPostgresClient(config: AppConfigService): Sql {
     AccessLinkService,
     HealthCipherService,
     HealthConsentService,
+    CoachAttendanceService,
   ],
 })
 export class DatabaseModule implements OnApplicationShutdown {

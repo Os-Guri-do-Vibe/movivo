@@ -33,6 +33,7 @@ import {
   type AudioTranscriptionPort,
 } from '../../core/audio/audio-transcription.port';
 import { AppConfigService } from '../../core/config';
+import { CoachAttendanceService } from '../../core/database/coach-attendance.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { conversations, users } from '../../core/database/schema';
@@ -44,6 +45,7 @@ import {
   type SubscriptionInboundEvent,
 } from '../../core/event-bus/events';
 import { DomainEventBus } from '../../core/event-bus/event-bus.service';
+import { ConversationEventsService } from '../../core/event-bus/conversation-events.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.util';
@@ -121,6 +123,8 @@ export class WhatsappInboundService {
     private readonly queueEvents: DashboardQueueEventsService,
     private readonly config: AppConfigService,
     private readonly cipher: HealthCipherService,
+    private readonly coachAttendance: CoachAttendanceService,
+    private readonly conversationEvents: ConversationEventsService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(WhatsappInboundService.name);
@@ -337,6 +341,18 @@ export class WhatsappInboundService {
 
     // US-3.6 — engajamento: 2ª mensagem (real) do usuário no mesmo dia (meta ≥40%, Épico 4).
     await this.trackSecondMessageSameDay(userId, correlationId);
+
+    // Atendimento automático pausado pelo profissional (aba "Conversas"): a mensagem fica no
+    // histórico para ele ler e responder, e a IA não é acionada. Vem DEPOIS de revogação,
+    // consentimento, assinatura e treino de propósito — esses seguem valendo com a pausa.
+    if (await this.coachAttendance.isPaused(userId)) {
+      await this.recordInboundWhilePaused(userId, text);
+      this.logger.info(
+        { event: 'inbound_held_coach_paused', userId, correlationId },
+        'atendimento automático pausado — mensagem registrada, IA não acionada',
+      );
+      return;
+    }
 
     // Debounce: empilha no buffer e enfileira UM job por janela (coalesce via SET NX).
     const batchKey = this.keys.forUser(userId, 'ai-response', 'batch');
@@ -566,10 +582,20 @@ export class WhatsappInboundService {
         content,
       });
     });
+    this.conversationEvents.emitMessage(userId, 'INBOUND');
     this.logger.info(
       { event: 'ai_response_feedback', userId, vote, correlationId },
       'feedback (thumbs) registrado',
     );
+  }
+
+  /** Grava a mensagem do aluno no histórico quando a IA não vai tratá-la (atendimento pausado). */
+  private async recordInboundWhilePaused(userId: string, text: string): Promise<void> {
+    const content = await this.cipher.encryptText(text);
+    await this.db.runAsUser(userId, 'USER', async (tx) => {
+      await tx.insert(conversations).values({ userId, direction: 'INBOUND', content });
+    });
+    this.conversationEvents.emitMessage(userId, 'INBOUND');
   }
 
   /** Conta as mensagens reais do dia; ao chegar na 2ª, emite o evento de engajamento. */

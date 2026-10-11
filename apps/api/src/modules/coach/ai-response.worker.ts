@@ -27,6 +27,7 @@ import {
   ForbiddenTopicsUnavailableError,
 } from '../../core/agent-config/forbidden-topics.service';
 import { L1GuardrailService } from '../../core/agent-config/l1-guardrail.service';
+import { CoachAttendanceService } from '../../core/database/coach-attendance.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { ContextService } from '../ai-coach/context/context.service';
 import { EvidenceGroundingService } from '../ai-coach/rag/evidence-grounding.service';
@@ -147,6 +148,7 @@ export class AIResponseWorker implements OnModuleInit {
     private readonly substitutionFlow: SubstitutionFlowService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
+    private readonly coachAttendance: CoachAttendanceService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(AIResponseWorker.name);
@@ -193,6 +195,19 @@ export class AIResponseWorker implements OnModuleInit {
       }
 
       const message = await this.drainBatch(batchKey);
+
+      // Pausa ligada DEPOIS de o job entrar na fila (janela de debounce): a IA não responde,
+      // mas o texto do aluno já saiu do buffer e precisa ir para o histórico do profissional.
+      if (await this.coachAttendance.isPaused(userId)) {
+        if (message)
+          await this.repo.persistTurn({ userId, direction: 'INBOUND', content: message });
+        this.logger.info(
+          { event: 'ai_response_held_coach_paused', userId },
+          'atendimento automático pausado — job descartado sem chamar a IA',
+        );
+        return { status: 'PAUSED' };
+      }
+
       if (!message) {
         // Achado 2026-09-02 (reproduzido ao vivo, incluindo um bug de off-by-one na 1ª
         // versão deste fix): lote vazio na 1ª tentativa é normal (múltiplos triggers

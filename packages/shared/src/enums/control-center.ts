@@ -64,6 +64,14 @@ export const ControlCenterCapability = {
    * com CREF ativo e ao `ADMIN`, que recebe todas as capacidades do Control Center.
    */
   AI_GUARDRAIL_APPROVE: 'control_center.ai.guardrail.approve',
+
+  /**
+   * Aba "Conversas": pausar/reativar o atendimento automático do AI Coach de um aluno e
+   * escrever para ele pelo painel. É ESCRITA no canal do aluno em nome da MOVIVO, por isso
+   * fica separada da leitura. Sempre exigida junto de `STUDENTS_READ` e
+   * `STUDENTS_HEALTH_READ` (a tela mostra o histórico, que é dado de saúde).
+   */
+  CONVERSATIONS_WRITE: 'control_center.conversations.write',
 } as const;
 
 export type ControlCenterCapability =

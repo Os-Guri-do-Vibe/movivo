@@ -15,6 +15,8 @@ export type WhatsappJobType =
   | 'WORKOUT_INSIGHT'
   | 'REENGAGEMENT'
   | 'CONSENT_STATUS'
+  // Texto escrito à mão pelo profissional na aba "Conversas" (atendimento automático pausado).
+  | 'MANUAL_MESSAGE'
   | 'PHONE_VERIFICATION'
   | 'TYPING';
 

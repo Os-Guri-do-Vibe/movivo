@@ -410,6 +410,10 @@ export const controlCenterConversationSummarySchema = z.object({
   name: nullableText,
   phoneNumber: z.string(),
   lastMessageAt: z.iso.datetime(),
+  /** `true` = atendimento automático do AI Coach pausado; só um humano responde. */
+  aiPaused: z.boolean(),
+  /** Mensagens do aluno ainda não lidas pela equipe (selo verde da lista, como no WhatsApp Web). */
+  unreadCount: z.number().int().min(0),
 });
 export type ControlCenterConversationSummary = z.infer<
   typeof controlCenterConversationSummarySchema
@@ -451,6 +455,100 @@ export const controlCenterConversationMessagesResponseSchema = z.object({
 });
 export type ControlCenterConversationMessagesResponse = z.infer<
   typeof controlCenterConversationMessagesResponseSchema
+>;
+
+/**
+ * Marca a conversa como lida até `upTo` (a última mensagem que o profissional viu). Sem
+ * `upTo`, vale "agora". O ponteiro só avança — nunca volta para trás.
+ */
+export const controlCenterConversationReadInputSchema = z.object({
+  upTo: z.iso.datetime().optional(),
+});
+export type ControlCenterConversationReadInput = z.infer<
+  typeof controlCenterConversationReadInputSchema
+>;
+
+export const controlCenterConversationReadResponseSchema = z.object({
+  /** Contagem DEPOIS de marcar: pode ser > 0 se chegou mensagem nova entre a leitura e a marca. */
+  data: z.object({ studentId: z.uuid(), unreadCount: z.number().int().min(0) }),
+  meta: controlCenterMetaSchema,
+});
+export type ControlCenterConversationReadResponse = z.infer<
+  typeof controlCenterConversationReadResponseSchema
+>;
+
+/** Pausar (`true`) ou reativar (`false`) o atendimento automático do AI Coach de um aluno. */
+export const controlCenterConversationAiAttendanceInputSchema = z.object({
+  paused: z.boolean(),
+});
+export type ControlCenterConversationAiAttendanceInput = z.infer<
+  typeof controlCenterConversationAiAttendanceInputSchema
+>;
+
+export const controlCenterConversationAiAttendanceResponseSchema = z.object({
+  data: z.object({ studentId: z.uuid(), aiPaused: z.boolean() }),
+  meta: controlCenterMetaSchema,
+});
+export type ControlCenterConversationAiAttendanceResponse = z.infer<
+  typeof controlCenterConversationAiAttendanceResponseSchema
+>;
+
+/** Limite do texto manual: cabe folgado numa mensagem de WhatsApp sem virar documento. */
+export const CONTROL_CENTER_MANUAL_MESSAGE_MAX_LENGTH = 2000;
+
+/** Mensagem escrita à mão pelo profissional, enviada ao WhatsApp do aluno. */
+export const controlCenterConversationSendInputSchema = z.object({
+  text: z
+    .string()
+    .trim()
+    .min(1, 'Escreva uma mensagem.')
+    .max(
+      CONTROL_CENTER_MANUAL_MESSAGE_MAX_LENGTH,
+      `A mensagem pode ter no máximo ${CONTROL_CENTER_MANUAL_MESSAGE_MAX_LENGTH} caracteres.`,
+    ),
+});
+export type ControlCenterConversationSendInput = z.infer<
+  typeof controlCenterConversationSendInputSchema
+>;
+
+export const controlCenterConversationSendResponseSchema = z.object({
+  data: z.object({ message: controlCenterConversationMessageSchema }),
+  meta: controlCenterMetaSchema,
+});
+export type ControlCenterConversationSendResponse = z.infer<
+  typeof controlCenterConversationSendResponseSchema
+>;
+
+/**
+ * Eventos SSE da aba "Conversas" (tempo real). Só UUID e metadado — o conteúdo da mensagem
+ * nunca viaja no stream: o painel busca pela rota de mensagens, autorizada e auditada.
+ */
+export const controlCenterConversationMessageEventSchema = z.object({
+  studentId: z.uuid(),
+  direction: z.enum(['INBOUND', 'OUTBOUND']),
+  at: z.iso.datetime(),
+  /** Presente quando a tela que enviou já tem a linha (envio manual): evita buscar de novo. */
+  messageId: z.uuid().optional(),
+});
+export type ControlCenterConversationMessageEvent = z.infer<
+  typeof controlCenterConversationMessageEventSchema
+>;
+
+/** A equipe leu a conversa em alguma tela: as demais zeram o selo (ponteiro compartilhado). */
+export const controlCenterConversationReadEventSchema = z.object({
+  studentId: z.uuid(),
+  unreadCount: z.number().int().min(0),
+});
+export type ControlCenterConversationReadEvent = z.infer<
+  typeof controlCenterConversationReadEventSchema
+>;
+
+export const controlCenterConversationAttendanceEventSchema = z.object({
+  studentId: z.uuid(),
+  aiPaused: z.boolean(),
+});
+export type ControlCenterConversationAttendanceEvent = z.infer<
+  typeof controlCenterConversationAttendanceEventSchema
 >;
 
 /** URL da foto de perfil do WhatsApp — `null` quando o aluno não tem foto ou ela é privada. */
