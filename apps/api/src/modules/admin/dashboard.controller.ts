@@ -133,11 +133,12 @@ export class DashboardController {
       required: ['content'],
     },
   })
-  @ApiResponse({ status: 200, description: 'Protocolo atualizado.' })
   @ApiResponse({
-    status: 400,
-    description: 'Corpo fora do schema, ou conteúdo reprovado pelo ValidationService.',
+    status: 200,
+    description:
+      'Protocolo atualizado e de volta para assinatura. `violations` lista o que o ValidationService apontou (a edição é gravada mesmo assim; a assinatura exige PASS).',
   })
+  @ApiResponse({ status: 400, description: 'Corpo fora do schema.' })
   @ApiResponse({ status: 404, description: 'Protocolo inexistente.' })
   editProtocol(
     @CurrentUser() actor: AuthenticatedUser,

@@ -260,7 +260,7 @@ const pendingProtocol = {
 };
 
 describe('DashboardService invariantes de mutacao', () => {
-  it('rejeita edicao com qualquer veredito diferente de PASS', async () => {
+  it('persiste a edicao mesmo com violacoes e devolve os alertas para a tela', async () => {
     const { service, update, append } = makeService(
       {
         id: RESOURCE_ID,
@@ -271,11 +271,20 @@ describe('DashboardService invariantes de mutacao', () => {
       },
       'FLAG_HUMAN_REVIEW',
     );
-    await expect(service.editProtocol(actor, RESOURCE_ID, { content })).rejects.toBeInstanceOf(
-      BadRequestException,
+    await expect(service.editProtocol(actor, RESOURCE_ID, { content })).resolves.toMatchObject({
+      status: 'PENDING_SIGNATURE',
+      validation: 'FLAG',
+      violations: [{ rule: 'LANGUAGE', detail: 'flag', action: 'FLAG' }],
+    });
+    // Grava e audita (com as regras violadas); a assinatura é que continua exigindo PASS.
+    expect(update).toHaveBeenCalledOnce();
+    expect(append).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'PROTOCOL_EDITED',
+        changes: expect.objectContaining({ validation: 'FLAG', violations: ['LANGUAGE'] }),
+      }),
     );
-    expect(update).not.toHaveBeenCalled();
-    expect(append).not.toHaveBeenCalled();
   });
 
   it('retry de protocolo ja assinado nao cria versao, auditoria ou nova entrega', async () => {

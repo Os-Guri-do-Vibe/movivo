@@ -224,5 +224,7 @@ export interface OperationsResponse {
 export interface ActionResult {
   message?: string;
   status?: string;
-  validation?: { valid?: boolean; issues?: unknown[] };
+  validation?: string | { valid?: boolean; issues?: unknown[] };
+  /** Alertas do `ValidationService` (edição de protocolo): o que corrigir antes de assinar. */
+  violations?: Array<{ rule?: string; detail?: string }>;
 }
