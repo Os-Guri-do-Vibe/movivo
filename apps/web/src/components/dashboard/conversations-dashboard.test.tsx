@@ -477,7 +477,8 @@ describe('ConversationsDashboard — tempo real', () => {
     getConversations.mockResolvedValue(list);
     const { unmount } = render(<ConversationsDashboard />);
     await screen.findByRole('list', { name: 'Conversas' });
-    expect(FakeEventSource.instances).toHaveLength(1);
+    // O stream abre num efeito que roda depois da lista renderizar: espera, não assume.
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
     expect(stream().url).toBe('/api/dashboard/conversations/events');
     unmount();
     expect(stream().closed).toBe(true);
