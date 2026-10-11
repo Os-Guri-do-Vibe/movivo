@@ -491,6 +491,13 @@
       "when": 1791610923607,
       "tag": "0069_assinatura_data_contratacao",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1791683438319,
+      "tag": "0070_conversas_pausa_e_leitura",
+      "breakpoints": true
     }
   ]
 }

@@ -119,6 +119,21 @@ export const users = pgTable(
      */
     requiresProfessionalReview: boolean('requires_professional_review').notNull().default(false),
 
+    /**
+     * Quando o profissional pausou o atendimento automático do AI Coach para este titular
+     * (aba "Conversas" do painel). `NULL` = o Coach responde normalmente. Pausado, o inbound
+     * é só registrado no histórico e quem responde é um humano. Vale até reativar à mão —
+     * não expira sozinho. Quem pausou/reativou fica na trilha de auditoria.
+     */
+    coachPausedAt: eventTimestamp('coach_paused_at'),
+
+    /**
+     * Até quando a equipe já leu a conversa deste titular na aba "Conversas". Mensagem
+     * recebida DEPOIS disso conta como "não lida" (selo verde na lista). Ponteiro único,
+     * compartilhado: se um profissional leu, os demais veem como lida. `NULL` = nunca lida.
+     */
+    conversationReadAt: eventTimestamp('conversation_read_at'),
+
     ...timestampColumns,
   },
   (table) => [
