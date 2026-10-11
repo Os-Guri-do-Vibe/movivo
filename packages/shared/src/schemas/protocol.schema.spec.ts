@@ -65,6 +65,14 @@ describe('protocolStructureSchema', () => {
     expect(protocolStructureSchema.safeParse(structure).success).toBe(true);
   });
 
+  it('não limita a duração máxima de um exercício (ex.: 90 min de esteira)', () => {
+    const structure = {
+      ...validStructure,
+      sessions: [sessionWith({ reps: undefined, durationSeconds: 90 * 60 })],
+    };
+    expect(protocolStructureSchema.safeParse(structure).success).toBe(true);
+  });
+
   it('rejeita exercício sem reps nem durationSeconds', () => {
     const structure = { ...validStructure, sessions: [sessionWith({ reps: undefined })] };
     expect(protocolStructureSchema.safeParse(structure).success).toBe(false);

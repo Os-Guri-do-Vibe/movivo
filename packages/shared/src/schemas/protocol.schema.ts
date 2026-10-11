@@ -128,7 +128,7 @@ export const warmupSetBlockSchema = z
   .object({
     sets: z.number().int().min(1).max(6),
     reps: repsRangeSchema.optional(),
-    durationSeconds: z.number().int().min(5).max(2400).optional(),
+    durationSeconds: z.number().int().min(5).optional(),
     restSeconds: z.number().int().min(0).max(600).optional(),
   })
   .refine((b) => (b.reps !== undefined) !== (b.durationSeconds !== undefined), {
@@ -163,7 +163,7 @@ export const protocolExerciseSchema = z
     sets: z.number().int().min(1).max(12),
     reps: repsRangeSchema.optional(),
     /** Segundos por série/intervalo. Só para exercício de medida DURATION. */
-    durationSeconds: z.number().int().min(5).max(2400).optional(),
+    durationSeconds: z.number().int().min(5).optional(),
     loadStrategy: loadStrategySchema,
     restSeconds: z.number().int().min(0).max(600),
     /** Técnica avançada aplicada nesta prescrição. Ausente = série tradicional. */
