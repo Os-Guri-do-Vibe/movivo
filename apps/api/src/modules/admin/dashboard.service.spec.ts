@@ -271,9 +271,9 @@ describe('DashboardService invariantes de mutacao', () => {
       },
       'FLAG_HUMAN_REVIEW',
     );
-    await expect(
-      service.editProtocol(actor, RESOURCE_ID, { content, reason: 'revisao segura' }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.editProtocol(actor, RESOURCE_ID, { content })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
     expect(update).not.toHaveBeenCalled();
     expect(append).not.toHaveBeenCalled();
   });
@@ -302,9 +302,10 @@ describe('DashboardService invariantes de mutacao', () => {
     const { service, updateSet, updateWhere, append, forUpdate } = makeSequencedService([
       [pendingProtocol],
     ]);
-    await expect(
-      service.editProtocol(actor, RESOURCE_ID, { content, reason: 'ajuste revisado pelo RT' }),
-    ).resolves.toMatchObject({ status: 'PENDING_SIGNATURE', validation: 'PASS' });
+    await expect(service.editProtocol(actor, RESOURCE_ID, { content })).resolves.toMatchObject({
+      status: 'PENDING_SIGNATURE',
+      validation: 'PASS',
+    });
     expect(updateWhere).toHaveBeenCalledOnce();
     // Conteúdo editado por humano nunca sai sozinho: mesmo que o protocolo fosse
     // `OPTIONAL` (fixture `pendingProtocol`), a edição força `MANDATORY`.
@@ -315,7 +316,10 @@ describe('DashboardService invariantes de mutacao', () => {
       expect.objectContaining({
         action: 'PROTOCOL_EDITED',
         userId: USER_ID,
-        changes: expect.objectContaining({ reasonHash: expect.any(String) }),
+        changes: expect.objectContaining({
+          beforeHash: expect.any(String),
+          afterHash: expect.any(String),
+        }),
       }),
     );
     expect(append.mock.calls[0]?.[1].changes).not.toHaveProperty('reason');
@@ -989,9 +993,9 @@ describe('DashboardService leituras operacionais', () => {
   it('papel fora de PROFESSIONAL/ADMIN continua barrado das ações que mutam protocolo/handoff', async () => {
     const outsider: AuthenticatedUser = { userId: ACTOR_ID, role: 'SUPPORT', jti: 'jti' };
     const { service } = makeSequencedService([]);
-    await expect(
-      service.editProtocol(outsider, RESOURCE_ID, { content, reason: 'tentativa indevida' }),
-    ).rejects.toThrow('Acesso exclusivo ao profissional CREF');
+    await expect(service.editProtocol(outsider, RESOURCE_ID, { content })).rejects.toThrow(
+      'Acesso exclusivo ao profissional CREF',
+    );
     await expect(
       service.signProtocol(outsider, RESOURCE_ID, { confirmation: true }),
     ).rejects.toThrow('Acesso exclusivo ao profissional CREF');

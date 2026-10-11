@@ -101,10 +101,7 @@ const itemIndexSchema = z.coerce.number().int().min(0).max(2);
 // `SUBSTITUTION` entrou em 2026-09-02: proposta de substituição de exercício via IA, em
 // staging (`protocol_substitution_requests`) — ver `ProtocolSubstitutionRepository`.
 const kindSchema = z.enum(['PROTOCOL', 'HANDOFF', 'CHECKIN', 'SUBSTITUTION']);
-const editSchema = z.object({
-  content: protocolStructureSchema,
-  reason: z.string().trim().min(5).max(500),
-});
+const editSchema = z.object({ content: protocolStructureSchema });
 const signSchema = z.object({ confirmation: z.literal(true) });
 /** `true` = a tela de revisão está aberta (renova a trava); `false` = fechou (solta e dispara o que venceu). */
 const reviewHoldSchema = z.object({ active: z.boolean() });
@@ -422,7 +419,6 @@ export class DashboardService {
         entityType: 'protocol',
         entityId: id,
         changes: {
-          reasonHash: this.hashJson(body.reason),
           beforeHash,
           afterHash,
           validation: verdict.code,

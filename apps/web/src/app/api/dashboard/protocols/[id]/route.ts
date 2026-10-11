@@ -21,15 +21,12 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
     const body = await request.json().catch(() => null);
     const content = isRecord(body) ? protocolStructureSchema.safeParse(body.content) : null;
-    const reason = isRecord(body) && typeof body.reason === 'string' ? body.reason.trim() : '';
-    if (!content?.success || reason.length < 3 || reason.length > 500) {
-      throw new BffError(400, 'Revise o protocolo e informe o motivo da edição.');
-    }
+    if (!content?.success) throw new BffError(400, 'Revise os campos do protocolo.');
 
     const response = await authenticatedBackendFetch(`/professional/dashboard/protocols/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: content.data, reason }),
+      body: JSON.stringify({ content: content.data }),
     });
     return forwardBackendJson(response);
   } catch (error) {

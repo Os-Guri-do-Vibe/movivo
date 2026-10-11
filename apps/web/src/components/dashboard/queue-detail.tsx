@@ -206,7 +206,10 @@ function formatDate(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? 'horário não informado'
-    : new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(date);
+    : new Intl.DateTimeFormat('pt-BR', {
+        dateStyle: 'short',
+        timeStyle: 'short',
+      }).format(date);
 }
 
 /** Segundos até 60 "40 s", minutos até 60min "1 min 30 s", acima disso em horas "1 h 30 min". */
@@ -404,7 +407,9 @@ function ExerciseEditorCard({
             value={exercise.technique ?? NONE_TECHNIQUE}
             className="[&>span]:sr-only"
             onChange={(technique) =>
-              update({ technique: technique === NONE_TECHNIQUE ? undefined : technique })
+              update({
+                technique: technique === NONE_TECHNIQUE ? undefined : technique,
+              })
             }
           />
         </MiniField>
@@ -452,7 +457,10 @@ function ExerciseEditorCard({
                   aria-label="Repetições mín."
                   onChange={(value) =>
                     update({
-                      reps: { min: Number(value), max: exercise.reps?.max ?? Number(value) },
+                      reps: {
+                        min: Number(value),
+                        max: exercise.reps?.max ?? Number(value),
+                      },
                     })
                   }
                 />
@@ -465,7 +473,10 @@ function ExerciseEditorCard({
                   aria-label="Repetições máx."
                   onChange={(value) =>
                     update({
-                      reps: { min: exercise.reps?.min ?? Number(value), max: Number(value) },
+                      reps: {
+                        min: exercise.reps?.min ?? Number(value),
+                        max: Number(value),
+                      },
                     })
                   }
                 />
@@ -564,7 +575,10 @@ function ExerciseEditorCard({
                         aria-label={`Repetições mín. do bloco de aquecimento ${blockIndex + 1}`}
                         onChange={(value) =>
                           onUpdateWarmupBlock(sessionIndex, exerciseIndex, blockIndex, {
-                            reps: { min: Number(value), max: block.reps?.max ?? Number(value) },
+                            reps: {
+                              min: Number(value),
+                              max: block.reps?.max ?? Number(value),
+                            },
                           })
                         }
                       />
@@ -579,7 +593,10 @@ function ExerciseEditorCard({
                         aria-label={`Repetições máx. do bloco de aquecimento ${blockIndex + 1}`}
                         onChange={(value) =>
                           onUpdateWarmupBlock(sessionIndex, exerciseIndex, blockIndex, {
-                            reps: { min: block.reps?.min ?? Number(value), max: Number(value) },
+                            reps: {
+                              min: block.reps?.min ?? Number(value),
+                              max: Number(value),
+                            },
                           })
                         }
                       />
@@ -635,14 +652,12 @@ function ProtocolSummary({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<ProtocolStructure>(() => structuredClone(protocol.content));
-  const [reason, setReason] = useState('');
   const [issues, setIssues] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
   const [anamnesisOpen, setAnamnesisOpen] = useState(false);
 
   function startEdit() {
     setDraft(structuredClone(protocol.content));
-    setReason('');
     setIssues([]);
     setEditing(true);
   }
@@ -699,7 +714,10 @@ function ProtocolSummary({
       ...current,
       sessions: current.sessions.map((session, position) =>
         position === sessionIndex
-          ? { ...session, exercises: session.exercises.filter((_, i) => i !== exerciseIndex) }
+          ? {
+              ...session,
+              exercises: session.exercises.filter((_, i) => i !== exerciseIndex),
+            }
           : session,
       ),
     }));
@@ -730,7 +748,9 @@ function ProtocolSummary({
   function removeWarmupBlock(sessionIndex: number, exerciseIndex: number, blockIndex: number) {
     const blocks = draft.sessions[sessionIndex]?.exercises[exerciseIndex]?.warmupBlocks ?? [];
     const next = blocks.filter((_, i) => i !== blockIndex);
-    updateExercise(sessionIndex, exerciseIndex, { warmupBlocks: next.length ? next : undefined });
+    updateExercise(sessionIndex, exerciseIndex, {
+      warmupBlocks: next.length ? next : undefined,
+    });
   }
 
   async function save() {
@@ -740,14 +760,9 @@ function ProtocolSummary({
       setIssues(parsed.error.issues.map((issue) => issue.message).slice(0, 6));
       return;
     }
-    if (reason.trim().length < 5) {
-      setIssues(['Informe por que o protocolo foi editado para compor a auditoria.']);
-      return;
-    }
-
     setPending(true);
     try {
-      await saveProtocol(protocol.id, parsed.data, reason.trim());
+      await saveProtocol(protocol.id, parsed.data);
       captureDashboardEvent('cref_protocol_edited');
       setEditing(false);
       await onSaved();
@@ -785,7 +800,10 @@ function ProtocolSummary({
                 items={WEEKLY_FREQUENCY_ITEMS}
                 value={String(draft.weeklyFrequency)}
                 onChange={(value) =>
-                  setDraft((current) => ({ ...current, weeklyFrequency: Number(value) }))
+                  setDraft((current) => ({
+                    ...current,
+                    weeklyFrequency: Number(value),
+                  }))
                 }
               />
             </div>
@@ -1044,33 +1062,21 @@ function ProtocolSummary({
         ))}
       </div>
       {editing ? (
-        <>
-          <label className="mt-5 flex flex-col gap-2 text-label font-semibold">
-            Observações gerais
-            <TextAreaField
-              className="min-h-28 py-2"
-              value={draft.generalNotes ?? ''}
-              maxLength={1000}
-              onChange={(value) =>
-                setDraft((current) => ({ ...current, generalNotes: value || undefined }))
-              }
-            />
-          </label>
-          <label className="mt-5 flex flex-col gap-2 text-label font-semibold">
-            Motivo da edição{' '}
-            <span className="text-xs font-normal text-muted-foreground">
-              Obrigatório para auditoria
-            </span>
-            <TextAreaField
-              className="min-h-24 py-2"
-              value={reason}
-              maxLength={500}
-              required
-              onChange={setReason}
-              aria-describedby={issues.length > 0 ? 'protocol-editor-issues' : undefined}
-            />
-          </label>
-        </>
+        <label className="mt-5 flex flex-col gap-2 text-label font-semibold">
+          Observações gerais
+          <TextAreaField
+            className="min-h-28 py-2"
+            value={draft.generalNotes ?? ''}
+            maxLength={1000}
+            onChange={(value) =>
+              setDraft((current) => ({
+                ...current,
+                generalNotes: value || undefined,
+              }))
+            }
+            aria-describedby={issues.length > 0 ? 'protocol-editor-issues' : undefined}
+          />
+        </label>
       ) : protocol.content.generalNotes ? (
         <div className="mt-5 rounded-lg bg-secondary p-4">
           <h3 className="text-label font-semibold">Observações do protocolo</h3>
@@ -1526,7 +1532,9 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
             onClose={() => setCatalogGapItem(null)}
             onSaved={(message) => {
               setCatalogGapItem(null);
-              captureDashboardEvent('cref_substitution_catalog_gap_added', { kind });
+              captureDashboardEvent('cref_substitution_catalog_gap_added', {
+                kind,
+              });
               setSuccess(message);
               void load();
             }}

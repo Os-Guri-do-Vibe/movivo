@@ -266,7 +266,7 @@ describe('cliente BFF same-origin', () => {
   it('envia apenas o recurso e decisão, nunca user_id', async () => {
     const fetchMock = vi.fn().mockResolvedValue(response(200, { status: 'ok' }));
     vi.stubGlobal('fetch', fetchMock);
-    await saveProtocol('p1', protocolContent, 'Ajuste profissional');
+    await saveProtocol('p1', protocolContent);
     await signProtocol('p1');
     await resolveHandoff('h1', 'Contato realizado', 'Registro');
     for (const call of fetchMock.mock.calls) {
@@ -350,7 +350,7 @@ describe('cliente BFF same-origin', () => {
         .fn()
         .mockResolvedValue(response(422, { message: 'Edição bloqueada.', validation: ['volume'] })),
     );
-    await expect(saveProtocol('p1', protocolContent, 'motivo')).rejects.toMatchObject({
+    await expect(saveProtocol('p1', protocolContent)).rejects.toMatchObject({
       status: 422,
       message: 'Edição bloqueada.',
       details: ['volume'],

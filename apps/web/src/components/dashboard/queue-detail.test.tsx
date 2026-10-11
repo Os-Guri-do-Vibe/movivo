@@ -66,7 +66,10 @@ import { QueueDetail } from './queue-detail';
  * que é exatamente a garantia que o teste de paridade abaixo trava.
  */
 const parqProtocolDetail = { ...protocolDetail, item: parqProtocolItem };
-const optionalProtocolDetail = { ...protocolDetail, item: optionalProtocolItem };
+const optionalProtocolDetail = {
+  ...protocolDetail,
+  item: optionalProtocolItem,
+};
 
 const handoffDetail = {
   item: handoffItem,
@@ -157,7 +160,9 @@ beforeEach(() => {
   api.getAnamnesisAnswers.mockResolvedValue(anamnesisAnswers);
   api.approveSubstitutionNow.mockResolvedValue({ status: 'released' });
   api.discardSubstitution.mockResolvedValue({ status: 'discarded' });
-  api.addCatalogExerciseToSubstitutionItem.mockResolvedValue({ attached: true });
+  api.addCatalogExerciseToSubstitutionItem.mockResolvedValue({
+    attached: true,
+  });
   controlCenterApi.getExerciseCatalog.mockResolvedValue({
     data: { versions: [], totalPublished: 0 },
     meta: {
@@ -236,7 +241,9 @@ describe('QueueDetail — substituição fora do catálogo (catalogGap)', () => 
     expect(screen.getByRole('button', { name: 'Aprovar agora' })).toBeDisabled();
     expect(screen.getByRole('note')).toHaveTextContent('fora do catálogo');
     expect(
-      screen.getByRole('button', { name: /Adicionar ao catálogo: Supino Reto Máquina/ }),
+      screen.getByRole('button', {
+        name: /Adicionar ao catálogo: Supino Reto Máquina/,
+      }),
     ).toBeVisible();
   });
 
@@ -253,7 +260,9 @@ describe('QueueDetail — substituição fora do catálogo (catalogGap)', () => 
     await userEvent.click(scope.getByText('Selecione o(s) músculo(s)'));
     await userEvent.click(scope.getByRole('checkbox', { name: 'peito' }));
     await userEvent.click(scope.getByRole('checkbox', { name: /Academia completa/ }));
-    const adicionar = scope.getByRole('button', { name: 'Adicionar ao catálogo' });
+    const adicionar = scope.getByRole('button', {
+      name: 'Adicionar ao catálogo',
+    });
     // Nível (achado 2026-09-29): mesmo combo do modal da tela Exercícios, obrigatório.
     const nivel = scope.getByRole('group', { name: 'Nível' });
     expect(within(nivel).getAllByRole('checkbox')).toHaveLength(3);
@@ -292,7 +301,9 @@ describe('QueueDetail — substituição fora do catálogo (catalogGap)', () => 
     await userEvent.click(screen.getByRole('button', { name: /Adicionar ao catálogo: Supino/ }));
     const dialog = await screen.findByRole('dialog');
     const scope = within(dialog);
-    const adicionar = scope.getByRole('button', { name: 'Adicionar ao catálogo' });
+    const adicionar = scope.getByRole('button', {
+      name: 'Adicionar ao catálogo',
+    });
     expect(adicionar).toBeDisabled();
 
     // Músculo e local sem nível: continua bloqueado.
@@ -332,7 +343,9 @@ describe('QueueDetail — troca em lote (itens da proposta)', () => {
       'afundo',
     );
     await userEvent.click(
-      screen.getByRole('button', { name: 'Descartar a troca de Cadeira Extensora' }),
+      screen.getByRole('button', {
+        name: 'Descartar a troca de Cadeira Extensora',
+      }),
     );
     expect(screen.getByText('Item descartado')).toBeVisible();
 
@@ -368,7 +381,9 @@ describe('QueueDetail — troca em lote (itens da proposta)', () => {
     );
     expect(screen.getByText('Item descartado')).toBeVisible();
     await userEvent.click(
-      screen.getByRole('button', { name: 'Desfazer o descarte da troca de Mesa Flexora' }),
+      screen.getByRole('button', {
+        name: 'Desfazer o descarte da troca de Mesa Flexora',
+      }),
     );
     expect(screen.queryByText('Item descartado')).not.toBeInTheDocument();
   });
@@ -379,7 +394,9 @@ describe('QueueDetail — troca em lote (itens da proposta)', () => {
     await screen.findByText('Trocas propostas');
 
     await userEvent.click(
-      screen.getByRole('button', { name: /Adicionar ao catálogo: Extensora Unilateral/ }),
+      screen.getByRole('button', {
+        name: /Adicionar ao catálogo: Extensora Unilateral/,
+      }),
     );
     const scope = within(await screen.findByRole('dialog'));
     expect(scope.getByLabelText('Nome do exercício')).toHaveValue('Extensora Unilateral');
@@ -408,10 +425,14 @@ describe('QueueDetail — troca em lote (itens da proposta)', () => {
     await screen.findByText('Trocas propostas');
 
     await userEvent.click(
-      screen.getByRole('button', { name: 'Descartar a troca de Leg Press 45°' }),
+      screen.getByRole('button', {
+        name: 'Descartar a troca de Leg Press 45°',
+      }),
     );
     await userEvent.click(
-      screen.getByRole('button', { name: 'Descartar a troca de Cadeira Extensora' }),
+      screen.getByRole('button', {
+        name: 'Descartar a troca de Cadeira Extensora',
+      }),
     );
     await userEvent.click(
       screen.getByRole('button', { name: 'Descartar a troca de Mesa Flexora' }),
@@ -475,7 +496,10 @@ describe('QueueDetail — trava do envio automático enquanto a tela está abert
   });
 
   it('outros tipos de caso (check-in) nunca seguram o envio de protocolo', async () => {
-    api.getQueueDetail.mockResolvedValue({ ...optionalDetail, item: { ...checkinItem } });
+    api.getQueueDetail.mockResolvedValue({
+      ...optionalDetail,
+      item: { ...checkinItem },
+    });
     render(<QueueDetail kind="CHECKIN" id={CHECKIN_ID} />);
     await waitFor(() => expect(api.getQueueDetail).toHaveBeenCalled());
     expect(reviewHold.useReviewHold).not.toHaveBeenCalledWith(
@@ -516,7 +540,7 @@ describe('QueueDetail', () => {
 
   // Achado 2026-08-19 (a pedido do fundador): editar acontece DENTRO do próprio card
   // "Protocolo · versão N" — o mesmo componente vira formulário, sem trocar de layout.
-  it('edita o protocolo dentro do próprio card e salva com o motivo de auditoria', async () => {
+  it('edita o protocolo dentro do próprio card e salva sem pedir motivo', async () => {
     api.getQueueDetail.mockResolvedValue(protocolDetail);
     api.saveProtocol.mockResolvedValue({ status: 'PENDING_REVIEW' });
     render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
@@ -527,7 +551,6 @@ describe('QueueDetail', () => {
     const nameInput = screen.getByLabelText('Nome');
     await userEvent.clear(nameInput);
     await userEvent.type(nameInput, 'Supino reto');
-    await userEvent.type(screen.getByLabelText(/motivo da edição/i), 'Ajuste de exercício');
     await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
 
     await waitFor(() =>
@@ -540,7 +563,6 @@ describe('QueueDetail', () => {
             }),
           ],
         }),
-        'Ajuste de exercício',
       ),
     );
     expect(await screen.findByRole('status')).toHaveTextContent('Edição validada no servidor');
@@ -560,13 +582,15 @@ describe('QueueDetail', () => {
     expect(api.saveProtocol).not.toHaveBeenCalled();
   });
 
-  it('exige motivo auditável antes de salvar a edição do protocolo', async () => {
+  it('não pede motivo da edição: salvar sem alterar nada persiste direto', async () => {
     api.getQueueDetail.mockResolvedValue(protocolDetail);
+    api.saveProtocol.mockResolvedValue({ status: 'PENDING_REVIEW' });
     render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
+    expect(screen.queryByLabelText(/motivo da edição/i)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('auditoria');
-    expect(api.saveProtocol).not.toHaveBeenCalled();
+    await waitFor(() => expect(api.saveProtocol).toHaveBeenCalledTimes(1));
+    expect(api.saveProtocol).toHaveBeenCalledWith(PROTOCOL_ID, expect.anything());
   });
 
   // Achado 2026-08-18 (decisão do fundador): título da sessão vira
@@ -739,7 +763,10 @@ describe('QueueDetail', () => {
           version: 'parq-2026-07-v1' as const,
           // Fora de ordem de propósito (Q6 antes de Q1) — trava a normalização.
           answers: (['Q6', 'Q2', 'Q3', 'Q4', 'Q5', 'Q1', 'Q7', 'Q8', 'Q9'] as ParqQuestionId[]).map(
-            (questionId) => ({ questionId, answer: questionId === 'Q6' || questionId === 'Q1' }),
+            (questionId) => ({
+              questionId,
+              answer: questionId === 'Q6' || questionId === 'Q1',
+            }),
           ),
         },
       },
@@ -762,7 +789,9 @@ describe('QueueDetail', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Ver respostas da anamnese' }));
 
-    const dialog = await screen.findByRole('dialog', { name: 'Respostas da anamnese' });
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Respostas da anamnese',
+    });
     expect(within(dialog).getByText('Rodrigo de Barros')).toBeVisible();
   });
 
@@ -826,10 +855,6 @@ describe('QueueDetail', () => {
     await userEvent.clear(generalNotes);
     await userEvent.type(generalNotes, 'Nova observação geral');
 
-    await userEvent.type(
-      screen.getByLabelText(/motivo da edição/i),
-      'Ajuste completo do protocolo',
-    );
     await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
 
     await waitFor(() =>
@@ -858,7 +883,6 @@ describe('QueueDetail', () => {
             }),
           ],
         }),
-        'Ajuste completo do protocolo',
       ),
     );
   });
@@ -875,7 +899,9 @@ describe('QueueDetail', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /adicionar exercício/i }));
     expect(screen.getAllByLabelText('Nome')).toHaveLength(2);
-    const removeButtons = screen.getAllByRole('button', { name: /remover exercício/i });
+    const removeButtons = screen.getAllByRole('button', {
+      name: /remover exercício/i,
+    });
     expect(removeButtons).toHaveLength(2);
     removeButtons.forEach((button) => expect(button).not.toBeDisabled());
 
@@ -911,7 +937,6 @@ describe('QueueDetail', () => {
     await userEvent.clear(warmupMax);
     await userEvent.type(warmupMax, '20');
 
-    await userEvent.type(screen.getByLabelText(/motivo da edição/i), 'Adicionei aquecimento');
     await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
 
     await waitFor(() =>
@@ -931,7 +956,6 @@ describe('QueueDetail', () => {
             }),
           ],
         }),
-        'Adicionei aquecimento',
       ),
     );
   });
@@ -951,7 +975,6 @@ describe('QueueDetail', () => {
     expect(screen.queryByLabelText('Repetições mín.')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Duração (s)')).toBeVisible();
 
-    await userEvent.type(screen.getByLabelText(/motivo da edição/i), 'Troquei pra duração');
     await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
 
     await waitFor(() =>
@@ -960,11 +983,15 @@ describe('QueueDetail', () => {
         expect.objectContaining({
           sessions: [
             expect.objectContaining({
-              exercises: [expect.objectContaining({ durationSeconds: 30, reps: undefined })],
+              exercises: [
+                expect.objectContaining({
+                  durationSeconds: 30,
+                  reps: undefined,
+                }),
+              ],
             }),
           ],
         }),
-        'Troquei pra duração',
       ),
     );
   });
@@ -1011,7 +1038,6 @@ describe('QueueDetail', () => {
     await userEvent.clear(duration);
     await userEvent.type(duration, '90');
 
-    await userEvent.type(screen.getByLabelText(/motivo da edição/i), 'Ajuste de duração');
     api.saveProtocol.mockResolvedValue({ status: 'PENDING_REVIEW' });
     await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
 
@@ -1025,7 +1051,6 @@ describe('QueueDetail', () => {
             }),
           ],
         }),
-        'Ajuste de duração',
       ),
     );
   });
@@ -1046,14 +1071,15 @@ describe('QueueDetail', () => {
     api.getQueueDetail.mockResolvedValue(protocolDetail);
     render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
-    await userEvent.type(screen.getByLabelText(/motivo da edição/i), 'Motivo válido');
 
     const arrayError = new DashboardApiError(502, 'mensagem', ['Erro de validação 1']);
     api.saveProtocol.mockRejectedValueOnce(arrayError);
     await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Erro de validação 1');
 
-    const issuesError = new DashboardApiError(502, 'mensagem', { issues: ['Campo obrigatório'] });
+    const issuesError = new DashboardApiError(502, 'mensagem', {
+      issues: ['Campo obrigatório'],
+    });
     api.saveProtocol.mockRejectedValueOnce(issuesError);
     await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Campo obrigatório');
@@ -1089,7 +1115,11 @@ describe('QueueDetail', () => {
     if (!baseProtocol) throw new Error('fixture inválida');
     api.getQueueDetail.mockResolvedValueOnce({
       ...protocolDetail,
-      protocol: { ...baseProtocol, signatureHash: 'abc123', signedAt: '2026-08-10T10:00:00.000Z' },
+      protocol: {
+        ...baseProtocol,
+        signatureHash: 'abc123',
+        signedAt: '2026-08-10T10:00:00.000Z',
+      },
     });
     const { unmount } = render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
     expect(await screen.findByText(/hash/)).toHaveTextContent('abc123');

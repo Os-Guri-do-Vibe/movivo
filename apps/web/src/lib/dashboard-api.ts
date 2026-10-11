@@ -374,14 +374,10 @@ export async function getOperations(signal?: AbortSignal): Promise<OperationsRes
   return parseOperations(await request('/operations', { signal }));
 }
 
-export async function saveProtocol(
-  id: string,
-  content: unknown,
-  reason: string,
-): Promise<ActionResult> {
+export async function saveProtocol(id: string, content: unknown): Promise<ActionResult> {
   return (await request(`/protocols/${encodeURIComponent(id)}`, {
     method: 'PATCH',
-    body: JSON.stringify({ content, reason }),
+    body: JSON.stringify({ content }),
   })) as ActionResult;
 }
 

@@ -129,9 +129,8 @@ export class DashboardController {
       type: 'object',
       properties: {
         content: zodSchemaToOpenApi(protocolStructureSchema),
-        reason: { type: 'string', minLength: 5, maxLength: 500 },
       },
-      required: ['content', 'reason'],
+      required: ['content'],
     },
   })
   @ApiResponse({ status: 200, description: 'Protocolo atualizado.' })
