@@ -1397,114 +1397,99 @@ export class ControlCenterService {
         this.event(
           item.createdAt,
           'ANAMNESIS',
-          'Formulário de anamnese iniciado',
+          'ANAMNESIS_STARTED',
           // Marco de cadastro carrega a origem — inclusive a ausência dela.
-          item === firstSession ? `Origem: ${acquisitionText}` : null,
+          item === firstSession ? { origin: acquisitionText } : {},
         ),
       );
       if (item.submittedAt) {
         events.push(
-          this.event(item.submittedAt, 'ANAMNESIS', 'Formulário de anamnese enviado', item.status),
+          this.event(item.submittedAt, 'ANAMNESIS', 'ANAMNESIS_SUBMITTED', { status: item.status }),
         );
       }
     }
     if (raw.protocol) {
       events.push(
-        this.event(
-          raw.protocol.signedAt,
-          'PROTOCOL',
-          `Protocolo v${raw.protocol.version} assinado pelo responsável técnico`,
-          null,
-        ),
+        this.event(raw.protocol.signedAt, 'PROTOCOL', 'PROTOCOL_SIGNED', {
+          version: raw.protocol.version,
+        }),
       );
     }
     for (const version of raw.versionRows) {
       events.push(
-        this.event(
-          version.createdAt,
-          'PROTOCOL',
-          `Versão ${version.version} do protocolo gerada`,
-          [version.changeReason, version.generatedBy && `modelo ${version.generatedBy}`]
-            .filter(Boolean)
-            .join(' · ') || null,
-        ),
+        this.event(version.createdAt, 'PROTOCOL', 'PROTOCOL_VERSION_GENERATED', {
+          version: version.version,
+          reason: version.changeReason,
+          model: version.generatedBy,
+        }),
       );
       if (version.signedAt) {
         events.push(
-          this.event(version.signedAt, 'PROTOCOL', `Versão ${version.version} assinada`, null),
+          this.event(version.signedAt, 'PROTOCOL', 'PROTOCOL_VERSION_SIGNED', {
+            version: version.version,
+          }),
         );
       }
     }
-    for (const [index, checkin] of raw.checkinRows.entries()) {
+    // Respostas por SEMANA, não por índice: `decryptCheckins` pula linha sem resposta
+    // válida, então as duas listas não têm o mesmo comprimento.
+    const answersByWeek = new Map(declared.map(({ point }) => [point.week, point]));
+    for (const checkin of raw.checkinRows) {
       events.push(
-        this.event(
-          checkin.sentAt,
-          'CHECKIN',
-          `Check-in da semana ${checkin.weekNumber} enviado`,
-          null,
-        ),
+        this.event(checkin.sentAt, 'CHECKIN', 'CHECKIN_SENT', { week: checkin.weekNumber }),
       );
+      const answers = canReadHealth ? answersByWeek.get(checkin.weekNumber) : undefined;
       events.push(
-        this.event(
-          checkin.submittedAt,
-          'CHECKIN',
-          `Check-in da semana ${checkin.weekNumber} respondido`,
-          canReadHealth ? (declared[index]?.summary ?? null) : null,
-        ),
+        this.event(checkin.submittedAt, 'CHECKIN', 'CHECKIN_ANSWERED', {
+          week: checkin.weekNumber,
+          // Resposta de saúde: só com a capability, mesma regra da seção `health`.
+          ...(answers
+            ? {
+                sleepQuality: answers.sleepQuality,
+                mood: answers.mood,
+                nutritionScore: answers.nutritionScore,
+                adherenceScore: answers.adherenceScore,
+                durationFit: answers.durationFit,
+              }
+            : {}),
+        }),
       );
     }
     for (const subscription of raw.subscriptionRows) {
       events.push(
-        this.event(
-          subscription.createdAt,
-          'SUBSCRIPTION',
-          `Assinatura ${subscription.plan} criada`,
-          subscription.status,
-        ),
+        this.event(subscription.createdAt, 'SUBSCRIPTION', 'SUBSCRIPTION_CREATED', {
+          plan: subscription.plan,
+          status: subscription.status,
+        }),
+      );
+      events.push(this.event(subscription.trialEndsAt, 'SUBSCRIPTION', 'TRIAL_ENDED', {}));
+      events.push(
+        this.event(subscription.currentPeriodStart, 'SUBSCRIPTION', 'PAID_PERIOD_STARTED', {}),
       );
       events.push(
-        this.event(subscription.trialEndsAt, 'SUBSCRIPTION', 'Fim do período de teste', null),
-      );
-      events.push(
-        this.event(
-          subscription.currentPeriodStart,
-          'SUBSCRIPTION',
-          'Início do período pago vigente',
-          null,
-        ),
-      );
-      events.push(
-        this.event(
-          subscription.canceledAt,
-          'SUBSCRIPTION',
-          'Assinatura cancelada',
-          subscription.cancelReason,
-        ),
+        this.event(subscription.canceledAt, 'SUBSCRIPTION', 'SUBSCRIPTION_CANCELED', {
+          reason: subscription.cancelReason,
+        }),
       );
     }
     for (const handoff of raw.handoffRows) {
       events.push(
-        this.event(
-          handoff.createdAt,
-          'HANDOFF',
-          `Atendimento humano aberto (${handoff.level})`,
-          handoff.reason,
-        ),
+        this.event(handoff.createdAt, 'HANDOFF', 'HANDOFF_OPENED', {
+          level: handoff.level,
+          reason: handoff.reason,
+        }),
       );
       if (handoff.status === 'RESOLVED') {
         events.push(
-          this.event(handoff.updatedAt, 'HANDOFF', 'Atendimento humano resolvido', handoff.reason),
+          this.event(handoff.updatedAt, 'HANDOFF', 'HANDOFF_RESOLVED', { reason: handoff.reason }),
         );
       }
     }
     for (const day of raw.conversationDays) {
       events.push(
-        this.event(
-          new Date(`${day.day}T12:00:00.000Z`),
-          'CONVERSATION',
-          `${Number(day.total)} mensagens trocadas no dia`,
-          null,
-        ),
+        this.event(new Date(`${day.day}T12:00:00.000Z`), 'CONVERSATION', 'CONVERSATION_DAY', {
+          messages: Number(day.total),
+        }),
       );
     }
     const timeline = events
@@ -1596,7 +1581,6 @@ export class ControlCenterService {
     const declared: Array<{
       point: ControlCenterEvolutionPoint;
       painReport: string | null;
-      summary: string | null;
     }> = [];
     for (const row of rows) {
       const at = row.submittedAt ?? row.sentAt;
@@ -1611,16 +1595,6 @@ export class ControlCenterService {
         notes?.success && notes.data.difficultExerciseDescription
           ? notes.data.difficultExerciseDescription
           : null;
-      const summary =
-        [
-          sleepQuality && `sono ${sleepQuality}`,
-          mood && `humor ${mood}`,
-          nutritionScore !== undefined && `alimentação ${nutritionScore}/10`,
-          adherenceScore !== undefined && `aderência ${adherenceScore}/10`,
-          durationFit && `duração do treino: ${durationFit}`,
-        ]
-          .filter(Boolean)
-          .join(' · ') || null;
       declared.push({
         point: {
           week: row.weekNumber,
@@ -1632,7 +1606,6 @@ export class ControlCenterService {
           durationFit: durationFit ?? null,
         },
         painReport,
-        summary,
       });
     }
     return declared.sort((a, b) => a.point.week - b.point.week);
@@ -1641,10 +1614,10 @@ export class ControlCenterService {
   private event(
     at: Date | null,
     kind: ControlCenterTimelineEvent['kind'],
-    title: string,
-    detail: string | null,
+    code: ControlCenterTimelineEvent['code'],
+    params: ControlCenterTimelineEvent['params'],
   ): ControlCenterTimelineEvent | null {
-    return at ? { at: at.toISOString(), kind, title, detail } : null;
+    return at ? { at: at.toISOString(), kind, code, params } : null;
   }
 
   private blockedRate(blocked: number, validated: number): ControlCenterMetric {

@@ -176,8 +176,26 @@ describe('ControlCenterService.student — ficha unificada (US-7.4)', () => {
     expect(timeline.map((event) => event.at)).toEqual(
       [...timeline.map((event) => event.at)].sort().reverse(),
     );
-    expect(timeline.some((event) => event.title === 'Atendimento humano resolvido')).toBe(true);
-    expect(timeline.some((event) => event.title === '12 mensagens trocadas no dia')).toBe(true);
+    // O servidor manda código + parâmetros crus; a frase é da tela.
+    expect(timeline).toContainEqual(
+      expect.objectContaining({ code: 'HANDOFF_RESOLVED', params: { reason: 'VALIDATOR_FLAG' } }),
+    );
+    expect(timeline).toContainEqual(
+      expect.objectContaining({ code: 'CONVERSATION_DAY', params: { messages: 12 } }),
+    );
+    expect(timeline).toContainEqual(
+      expect.objectContaining({
+        code: 'SUBSCRIPTION_CREATED',
+        params: { plan: 'MONTHLY', status: 'TRIALING' },
+      }),
+    );
+    expect(timeline).toContainEqual(
+      expect.objectContaining({
+        code: 'CHECKIN_ANSWERED',
+        params: expect.objectContaining({ week: 3, sleepQuality: 'BOA', mood: 'FELIZ' }),
+      }),
+    );
+    expect(JSON.stringify(timeline)).not.toMatch(/"title"|"detail"/);
     expect(data.student.adherence).toMatchObject({ checkinsSent: 1, checkinsResponded: 1 });
     expect(data.student.adherence.responseRate).toMatchObject({ value: 100, status: 'PROXY' });
     expect(data.student.adherence.responseRate.definition).toContain('workout_completions');
@@ -217,6 +235,9 @@ describe('ControlCenterService.student — ficha unificada (US-7.4)', () => {
     expect(JSON.stringify(data)).not.toMatch(/parq|dor|desconforto|ADEQUADO|painReport/i);
     // A ficha continua existindo: timeline e adesão são dado operacional.
     expect(data.student.timeline.length).toBeGreaterThan(0);
+    // O marco do check-in existe, mas sem as respostas de saúde.
+    const answered = data.student.timeline.find((event) => event.code === 'CHECKIN_ANSWERED');
+    expect(answered?.params).toEqual({ week: 3 });
   });
 
   /**

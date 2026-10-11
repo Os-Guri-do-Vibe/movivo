@@ -45,7 +45,7 @@ const studentSummary = {
 const studentDetail = {
   ...studentSummary,
   requiresProfessionalReview: false,
-  anamnesisStatus: 'COMPLETED',
+  anamnesisStatus: 'SUBMITTED',
   currentProtocol: {
     id: PROTOCOL_ID,
     version: 1,
@@ -54,14 +54,14 @@ const studentDetail = {
     signedAt: '2026-08-05T12:00:00.000Z',
   },
   routine: {
-    primaryGoal: 'SAUDE',
-    trainingStatus: 'RETOMANDO',
-    experience: 'INICIANTE',
+    primaryGoal: 'HEALTH_ENERGY',
+    trainingStatus: 'STOPPED',
+    experience: 'BEGINNER',
     daysPerWeek: 3,
-    preferredDays: ['SEG', 'QUA', 'SEX'],
-    sessionDuration: '45_60',
-    location: 'ACADEMIA',
-    preferredPeriod: 'MANHA',
+    preferredDays: ['MON', 'WED', 'FRI'],
+    sessionDuration: 'M45_TO_60',
+    location: 'FULL_GYM',
+    preferredPeriod: 'MORNING',
   },
   workoutHistory: { status: 'UNAVAILABLE', reason: 'Depende de workout_completions (Sprint 8).' },
   // US-8.2: cadastro anterior à captura de UTM — origem não capturada, nunca inferida.
@@ -71,33 +71,38 @@ const studentDetail = {
     {
       at: '2026-08-10T12:00:00.000Z',
       kind: 'HANDOFF',
-      title: 'Atendimento humano resolvido',
-      detail: null,
+      code: 'HANDOFF_RESOLVED',
+      params: { reason: 'VALIDATOR_FLAG' },
     },
     {
       at: '2026-08-09T12:00:00.000Z',
       kind: 'CONVERSATION',
-      title: '12 mensagens trocadas no dia',
-      detail: null,
+      code: 'CONVERSATION_DAY',
+      params: { messages: 12 },
     },
     {
       at: '2026-08-08T12:00:00.000Z',
       kind: 'CHECKIN',
-      title: 'Check-in da semana 2',
-      detail: null,
+      code: 'CHECKIN_SENT',
+      params: { week: 2 },
     },
-    { at: '2026-08-05T12:00:00.000Z', kind: 'SUBSCRIPTION', title: 'Trial iniciado', detail: null },
+    {
+      at: '2026-08-05T12:00:00.000Z',
+      kind: 'SUBSCRIPTION',
+      code: 'SUBSCRIPTION_CREATED',
+      params: { plan: 'MONTHLY', status: 'TRIALING' },
+    },
     {
       at: '2026-08-04T12:00:00.000Z',
       kind: 'PROTOCOL',
-      title: 'Protocolo v1 gerado',
-      detail: null,
+      code: 'PROTOCOL_VERSION_GENERATED',
+      params: { version: 1, reason: null, model: null },
     },
     {
       at: '2026-08-03T12:00:00.000Z',
       kind: 'ANAMNESIS',
-      title: 'Anamnese concluída',
-      detail: null,
+      code: 'ANAMNESIS_SUBMITTED',
+      params: { status: 'SUBMITTED' },
     },
   ],
   adherence: {
@@ -111,7 +116,7 @@ const studentDetail = {
     validated: 12,
     occurrences: [],
   },
-  health: { parqState: 'CLEARED', painReports: [], evolution: [] },
+  health: { parqState: 'LIBERADO', painReports: [], evolution: [] },
 };
 
 const capabilitiesByRole = {

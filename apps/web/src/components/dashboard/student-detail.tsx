@@ -1,18 +1,72 @@
 'use client';
 
-import { ArrowLeft, ShieldAlert } from 'lucide-react';
+import type { ControlCenterTimelineEvent } from '@movivo/shared';
+import {
+  Activity,
+  AlertTriangle,
+  ArrowLeft,
+  Bot,
+  ChevronDown,
+  ChevronUp,
+  ClipboardCheck,
+  Dumbbell,
+  History,
+  ShieldAlert,
+  TrendingDown,
+  UserRound,
+  type LucideIcon,
+} from 'lucide-react';
 import Link from 'next/link';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
+import type { ReactNode } from 'react';
 
 import { getStudent } from '@/lib/control-center-api';
+import { cn } from '@/lib/utils';
 
+import { FOCUS_RING, StatusBadge } from './control-center-table';
 import {
   DataQuality,
   ResourceState,
   SectorHeader,
   useControlCenterResource,
 } from './control-center-ui';
-import { ChurnRiskSignals } from './students-dashboard';
+import { formatPhone } from './protocol-anamnesis-answers';
+import {
+  anamnesisStatus,
+  durationFitLabel,
+  durationLabel,
+  experienceLabel,
+  goalLabel,
+  locationLabel,
+  moodLabel,
+  parqStatus,
+  periodLabel,
+  planLabel,
+  protocolStatus,
+  registrationStatus,
+  sleepLabel,
+  subscriptionStatus,
+  trainingStatusLabel,
+  weekdaysLabel,
+} from './student-labels';
+import type { Labelled } from './student-labels';
+import { describeTimelineEvent } from './student-timeline';
+
+/**
+ * Ficha do aluno — padrão de UX/UI (spec de Sofia, 2026-10-11).
+ *
+ *  1. Uma coluna, um container por assunto, na ordem em que a equipe decide: quem é →
+ *     plano → treino → rotina → saúde → adesão → IA → risco → histórico.
+ *  2. Cada container: ícone discreto + título + uma frase de apoio; corpo em lista
+ *     rótulo/valor com divisória fina (nada de bloco cinza dentro de card).
+ *  3. Nunca o código do banco: status vira palavra em PT-BR (`student-labels.ts`) e a
+ *     COR só reforça o texto (WCAG 1.4.1). Coral só em alerta real: PAR-Q bloqueado e
+ *     cobrança em atraso.
+ *  4. Dado ausente é sempre "Não informado" — a linha não some, para a equipe saber
+ *     que o campo existe e está vazio.
+ *  5. Números em destaque com rótulo pequeno; datas em pt-BR, fuso de São Paulo.
+ *  6. Mobile: rótulo acima do valor; alvos de toque de 44px; um `h2` por container.
+ */
 
 /** Rótulo obrigatório da US-7.4 (TASK-7.4.3): adesão é declaração, não execução. */
 const DECLARED_LABEL =
@@ -27,16 +81,12 @@ const TIMELINE_LABELS: Record<string, string> = {
   HANDOFF: 'Atendimento humano',
 };
 
-function text(value: string | null): string {
-  return value?.trim() || 'Não informado';
-}
+/** Acima disso a linha do tempo recolhe: 90 dias de conversa diária empurrariam a página. */
+const TIMELINE_PREVIEW = 8;
 
-function percent(value: number | null): string {
-  return value === null ? 'Sem amostra' : `${value.toFixed(1)}%`;
-}
+const NOT_INFORMED = 'Não informado';
 
-function date(value: string | null): string {
-  if (!value) return 'Não assinado';
+function dateTime(value: string): string {
   return new Intl.DateTimeFormat('pt-BR', {
     dateStyle: 'short',
     timeStyle: 'short',
@@ -44,16 +94,179 @@ function date(value: string | null): string {
   }).format(new Date(value));
 }
 
-function DetailList({ items }: { items: Array<[string, string | number]> }) {
+function day(value: string | null): string | null {
+  if (!value) return null;
+  return new Intl.DateTimeFormat('pt-BR', {
+    dateStyle: 'short',
+    timeZone: 'America/Sao_Paulo',
+  }).format(new Date(value));
+}
+
+function percent(value: number | null): string {
+  if (value === null) return 'Sem amostra';
+  return `${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(value)}%`;
+}
+
+function Empty({ children = NOT_INFORMED }: { children?: ReactNode }) {
+  return <span className="text-muted-foreground">{children}</span>;
+}
+
+/** Texto simples; vazio vira "Não informado". */
+function plain(value: string | number | null | undefined): ReactNode {
+  if (value === null || value === undefined) return <Empty />;
+  const text = String(value).trim();
+  return text ? text : <Empty />;
+}
+
+function Status({ status }: { status: Labelled | null }): ReactNode {
+  if (!status) return <Empty />;
+  return <StatusBadge tone={status.tone}>{status.label}</StatusBadge>;
+}
+
+/**
+ * Container de categoria. O título é o `h2` da região; a frase de apoio fica fora do
+ * corpo para que a lista de dados comece sempre na mesma altura entre containers.
+ */
+function Category({
+  id,
+  icon: Icon,
+  title,
+  description,
+  children,
+}: {
+  id: string;
+  icon: LucideIcon;
+  title: string;
+  description?: ReactNode;
+  children: ReactNode;
+}) {
   return (
-    <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+    <section
+      aria-labelledby={id}
+      className="overflow-hidden rounded-xl border border-border bg-card"
+    >
+      <header className="flex items-start gap-3 px-5 pt-5 pb-4 sm:px-6">
+        <span
+          aria-hidden="true"
+          className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-muted-foreground"
+        >
+          <Icon className="size-4" />
+        </span>
+        <div className="min-w-0">
+          <h2 id={id} className="text-h3 leading-tight font-semibold">
+            {title}
+          </h2>
+          {description ? (
+            <p className="mt-1 text-label text-muted-foreground">{description}</p>
+          ) : null}
+        </div>
+      </header>
+      <div className="border-t border-border px-5 py-1 sm:px-6">{children}</div>
+    </section>
+  );
+}
+
+/** Lista rótulo/valor: `dl` semântico, divisória fina, rótulo acima do valor no mobile. */
+function Rows({ items }: { items: ReadonlyArray<readonly [string, ReactNode]> }) {
+  return (
+    <dl className="divide-y divide-border">
       {items.map(([label, value]) => (
-        <div key={label} className="rounded-lg bg-secondary p-3">
-          <dt className="text-xs font-semibold text-muted-foreground">{label}</dt>
-          <dd className="mt-1 text-label">{value}</dd>
+        <div
+          key={label}
+          className="grid gap-0.5 py-3 sm:grid-cols-[12rem_minmax(0,1fr)] sm:items-center sm:gap-4"
+        >
+          <dt className="text-label text-muted-foreground">{label}</dt>
+          <dd className="min-w-0 text-label font-medium break-words">{value}</dd>
         </div>
       ))}
     </dl>
+  );
+}
+
+function Stats({ items }: { items: ReadonlyArray<readonly [string, ReactNode]> }) {
+  return (
+    <dl className="grid grid-cols-3 gap-4 py-4">
+      {items.map(([label, value]) => (
+        <div key={label} className="min-w-0">
+          <dd className="text-h2 leading-none font-semibold tabular-nums">{value}</dd>
+          <dt className="mt-1.5 text-xs text-muted-foreground">{label}</dt>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** Bloco secundário dentro de um container (evolução, relatos, ocorrências). */
+function SubSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="border-t border-border py-4">
+      <h3 className="text-label font-semibold">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function Note({ children }: { children: ReactNode }) {
+  return <p className="pb-4 text-xs text-muted-foreground">{children}</p>;
+}
+
+function Timeline({ events }: { events: ReadonlyArray<ControlCenterTimelineEvent> }) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? events : events.slice(0, TIMELINE_PREVIEW);
+  const hidden = events.length - visible.length;
+
+  if (events.length === 0) {
+    return <p className="py-4 text-label text-muted-foreground">Nenhum evento neste período.</p>;
+  }
+  return (
+    <>
+      <ol className="divide-y divide-border">
+        {visible.map((event, index) => {
+          const { title, detail } = describeTimelineEvent(event);
+          return (
+            <li
+              key={`${event.at}-${index}`}
+              className="grid gap-1 py-3 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4"
+            >
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground">
+                  {TIMELINE_LABELS[event.kind] ?? event.kind}
+                </p>
+                <time dateTime={event.at} className="font-mono text-xs text-muted-foreground">
+                  {dateTime(event.at)}
+                </time>
+              </div>
+              <div className="min-w-0">
+                <p className="text-label font-medium">{title}</p>
+                {detail ? (
+                  <p className="mt-0.5 text-label text-muted-foreground">{detail}</p>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+      {events.length > TIMELINE_PREVIEW ? (
+        <div className="border-t border-border py-2">
+          <button
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((current) => !current)}
+            className={cn(
+              'inline-flex min-h-11 items-center gap-2 rounded-md px-2 text-label font-semibold hover:bg-secondary',
+              FOCUS_RING,
+            )}
+          >
+            {expanded ? (
+              <ChevronUp aria-hidden="true" className="size-4" />
+            ) : (
+              <ChevronDown aria-hidden="true" className="size-4" />
+            )}
+            {expanded ? 'Mostrar menos' : `Mostrar mais ${hidden}`}
+          </button>
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -73,20 +286,47 @@ export function StudentDetail({ id }: { id: string }) {
   }
 
   const { student } = data.data;
+  const subscription = subscriptionStatus(student.subscriptionStatus);
+  const protocol = protocolStatus(student.protocolStatus);
+  const registration = registrationStatus(student.status);
+
   return (
-    <article>
+    <article className="mx-auto max-w-4xl">
       <Link
         href="/dashboard/alunos"
-        className="mb-5 inline-flex min-h-11 items-center gap-2 text-label font-semibold underline underline-offset-4 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
+        className={cn(
+          'mb-5 inline-flex min-h-11 items-center gap-2 rounded-md text-label font-semibold underline underline-offset-4',
+          FOCUS_RING,
+        )}
       >
         <ArrowLeft aria-hidden="true" className="size-4" /> Voltar aos alunos
       </Link>
       <SectorHeader
-        title={text(student.name)}
+        title={student.name?.trim() || 'Nome não informado'}
         meta={data.meta}
         refreshing={loading}
         onRefresh={() => void refresh()}
       />
+
+      <ul aria-label="Situação do aluno" className="mt-4 flex flex-wrap gap-2">
+        {(
+          [
+            ['Cadastro', registration],
+            ['Assinatura', subscription],
+            ['Protocolo', protocol],
+          ] as const
+        ).map(([label, status]) => (
+          <li
+            key={label}
+            className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs"
+          >
+            <span className="text-muted-foreground">{label}</span>
+            <span className="font-medium">
+              {status ? <StatusBadge tone={status.tone}>{status.label}</StatusBadge> : <Empty />}
+            </span>
+          </li>
+        ))}
+      </ul>
 
       {error ? (
         <p role="alert" className="mt-4 rounded-lg border border-coral bg-card p-3 text-label">
@@ -100,249 +340,261 @@ export function StudentDetail({ id }: { id: string }) {
         </p>
       ) : null}
 
-      <div className="mt-6 grid gap-5 xl:grid-cols-2">
-        <section
-          className="rounded-xl border border-border bg-card p-5"
-          aria-labelledby="student-registration"
+      <div className="mt-6 space-y-5">
+        <Category
+          id="student-registration"
+          icon={UserRound}
+          title="Cadastro e plano"
+          description="Contato e dados da inscrição."
         >
-          <h2 id="student-registration" className="text-h2 font-bold">
-            Cadastro e plano
-          </h2>
-          <DetailList
+          <Rows
             items={[
-              ['E-mail', text(student.email)],
-              ['Telefone', student.phoneNumber],
-              ['Cadastro', student.status],
-              ['Assinatura', text(student.subscriptionStatus)],
-              ['Protocolo', text(student.protocolStatus)],
+              ['WhatsApp', formatPhone(student.phoneNumber)],
+              ['E-mail', plain(student.email)],
+              ['Inscrito em', plain(day(student.enrolledAt))],
+              [
+                'Plano',
+                student.subscriptionStatus === 'TRIALING'
+                  ? 'Em teste'
+                  : plain(planLabel(student.subscriptionPlan)),
+              ],
             ]}
           />
-        </section>
+        </Category>
 
-        <section
-          className="rounded-xl border border-border bg-card p-5"
-          aria-labelledby="student-health-flow"
+        <Category
+          id="student-protocol"
+          icon={Dumbbell}
+          title="Treino vigente"
+          description="Protocolo em uso e assinatura do profissional CREF."
         >
-          <h2 id="student-health-flow" className="text-h2 font-bold">
-            Formulários e segurança
-          </h2>
-          {student.health ? (
-            <p className="mt-2 text-label text-muted-foreground">
-              Informações de saúde decifradas para este acesso e registradas na trilha de auditoria.
-            </p>
-          ) : (
-            <p className="mt-2 text-label text-muted-foreground">
-              Seu acesso não inclui informações de saúde: o servidor não envia PAR-Q, relato de dor
-              nem evolução declarada nesta ficha.
-            </p>
-          )}
-          <DetailList
-            items={[
-              ['Anamnese', text(student.anamnesisStatus)],
-              ...(student.health
-                ? ([['PAR-Q', text(student.health.parqState)]] as Array<[string, string]>)
-                : []),
-              ['Revisão CREF', student.requiresProfessionalReview ? 'Necessária' : 'Sem pendência'],
-            ]}
-          />
-        </section>
-
-        <section
-          className="rounded-xl border border-border bg-card p-5"
-          aria-labelledby="student-routine"
-        >
-          <h2 id="student-routine" className="text-h2 font-bold">
-            Rotina informada
-          </h2>
-          {student.routine ? (
-            <DetailList
-              items={[
-                ['Objetivo', text(student.routine.primaryGoal)],
-                ['Situação atual', text(student.routine.trainingStatus)],
-                ['Experiência', text(student.routine.experience)],
-                ['Dias por semana', student.routine.daysPerWeek ?? 'Não informado'],
-                ['Dias preferidos', student.routine.preferredDays.join(', ') || 'Não informado'],
-                ['Duração', text(student.routine.sessionDuration)],
-                ['Local', text(student.routine.location)],
-                ['Período', text(student.routine.preferredPeriod)],
-              ]}
-            />
-          ) : (
-            <p className="mt-3 text-label text-muted-foreground">Rotina ainda não preenchida.</p>
-          )}
-        </section>
-
-        <section
-          className="rounded-xl border border-border bg-card p-5"
-          aria-labelledby="student-protocol"
-        >
-          <h2 id="student-protocol" className="text-h2 font-bold">
-            Treino vigente
-          </h2>
           {student.currentProtocol ? (
-            <DetailList
+            <Rows
               items={[
-                ['Versão', student.currentProtocol.version],
+                ['Situação', <Status status={protocol} />],
+                ['Versão', `v${student.currentProtocol.version}`],
                 [
                   'Vigência',
                   `Semana ${student.currentProtocol.currentWeek} de ${student.currentProtocol.totalWeeks}`,
                 ],
-                ['Assinatura CREF', date(student.currentProtocol.signedAt)],
+                [
+                  'Assinatura CREF',
+                  student.currentProtocol.signedAt ? (
+                    dateTime(student.currentProtocol.signedAt)
+                  ) : (
+                    <Empty>Não assinado</Empty>
+                  ),
+                ],
               ]}
             />
           ) : (
-            <p className="mt-3 text-label text-muted-foreground">Nenhum protocolo vigente.</p>
+            <p className="py-4 text-label text-muted-foreground">Nenhum protocolo vigente.</p>
           )}
-        </section>
-      </div>
+        </Category>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-2">
-        <section
-          className="rounded-xl border border-border bg-card p-5"
-          aria-labelledby="student-adherence"
+        <Category
+          id="student-routine"
+          icon={Activity}
+          title="Rotina informada"
+          description="O que o aluno declarou na anamnese."
         >
-          <h2 id="student-adherence" className="text-h2 font-bold">
-            Adesão declarada
-          </h2>
-          <p className="mt-2 text-label text-muted-foreground">{DECLARED_LABEL}</p>
-          <DetailList
+          {student.routine ? (
+            <Rows
+              items={[
+                ['Objetivo', plain(goalLabel(student.routine.primaryGoal))],
+                ['Situação atual', plain(trainingStatusLabel(student.routine.trainingStatus))],
+                ['Experiência', plain(experienceLabel(student.routine.experience))],
+                [
+                  'Frequência',
+                  student.routine.daysPerWeek === null
+                    ? plain(null)
+                    : `${student.routine.daysPerWeek} ${student.routine.daysPerWeek === 1 ? 'dia' : 'dias'} por semana`,
+                ],
+                ['Dias preferidos', plain(weekdaysLabel(student.routine.preferredDays))],
+                ['Duração', plain(durationLabel(student.routine.sessionDuration))],
+                ['Local', plain(locationLabel(student.routine.location))],
+                ['Período', plain(periodLabel(student.routine.preferredPeriod))],
+              ]}
+            />
+          ) : (
+            <p className="py-4 text-label text-muted-foreground">Rotina ainda não preenchida.</p>
+          )}
+        </Category>
+
+        <Category
+          id="student-health-flow"
+          icon={ClipboardCheck}
+          title="Formulários e segurança"
+          description={
+            student.health
+              ? 'Informações de saúde decifradas para este acesso e registradas na trilha de auditoria.'
+              : 'Seu acesso não inclui informações de saúde: o servidor não envia PAR-Q, relato de dor nem evolução declarada nesta ficha.'
+          }
+        >
+          <Rows
+            items={[
+              ['Anamnese', <Status status={anamnesisStatus(student.anamnesisStatus)} />],
+              ...(student.health
+                ? ([['PAR-Q', <Status status={parqStatus(student.health.parqState)} />]] as const)
+                : []),
+              [
+                'Revisão CREF',
+                <StatusBadge tone={student.requiresProfessionalReview ? 'attention' : 'positive'}>
+                  {student.requiresProfessionalReview ? 'Necessária' : 'Sem pendência'}
+                </StatusBadge>,
+              ],
+            ]}
+          />
+        </Category>
+
+        <Category
+          id="student-adherence"
+          icon={TrendingDown}
+          title="Adesão declarada"
+          description="Respostas do aluno aos check-ins semanais."
+        >
+          <Stats
             items={[
               ['Check-ins enviados', student.adherence.checkinsSent],
               ['Check-ins respondidos', student.adherence.checkinsResponded],
               ['Taxa de resposta', percent(student.adherence.responseRate.value)],
             ]}
           />
-          {student.health && student.health.evolution.length > 0 ? (
-            <>
-              <h3 className="mt-5 text-h3 font-semibold">Evolução declarada por semana</h3>
-              <ul className="mt-3 space-y-2">
-                {student.health.evolution.map((point) => (
-                  <li key={point.week} className="rounded-lg bg-secondary p-3 text-label">
-                    <span className="font-semibold">Semana {point.week}</span>{' '}
-                    <span className="text-muted-foreground">
-                      sono {text(point.sleepQuality)} · humor {text(point.mood)} · alimentação{' '}
-                      {text(point.nutritionScore)} · aderência {text(point.adherenceScore)} ·
-                      duração do treino: {text(point.durationFit)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : null}
-          {student.health && student.health.painReports.length > 0 ? (
-            <>
-              <h3 className="mt-5 text-h3 font-semibold">Relatos de desconforto</h3>
-              <ul className="mt-3 space-y-2">
-                {student.health.painReports.map((report) => (
-                  <li key={report.at} className="rounded-lg bg-secondary p-3 text-label">
-                    <span className="font-semibold">Semana {report.week}</span>{' '}
-                    <span className="text-muted-foreground">{report.text}</span>
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : null}
-        </section>
+          <Note>{DECLARED_LABEL}</Note>
 
-        <section
-          className="rounded-xl border border-border bg-card p-5"
-          aria-labelledby="student-ai-quality"
+          {student.health && student.health.evolution.length > 0 ? (
+            <SubSection title="Evolução declarada por semana">
+              <ul className="mt-3 divide-y divide-border">
+                {student.health.evolution.map((point) => (
+                  <li key={point.week} className="py-3 first:pt-0 last:pb-0">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <p className="text-label font-semibold">Semana {point.week}</p>
+                      <time dateTime={point.at} className="font-mono text-xs text-muted-foreground">
+                        {dateTime(point.at)}
+                      </time>
+                    </div>
+                    <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-5">
+                      {(
+                        [
+                          ['Sono', plain(sleepLabel(point.sleepQuality))],
+                          ['Humor', plain(moodLabel(point.mood))],
+                          ['Alimentação', plain(point.nutritionScore)],
+                          ['Aderência', plain(point.adherenceScore)],
+                          ['Duração do treino', plain(durationFitLabel(point.durationFit))],
+                        ] as const
+                      ).map(([label, value]) => (
+                        <div key={label} className="min-w-0">
+                          <dt className="text-xs text-muted-foreground">{label}</dt>
+                          <dd className="mt-0.5 text-label font-medium">{value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </li>
+                ))}
+              </ul>
+            </SubSection>
+          ) : null}
+
+          {student.health && student.health.painReports.length > 0 ? (
+            <SubSection title="Relatos de desconforto">
+              <ul className="mt-3 space-y-3">
+                {student.health.painReports.map((report) => (
+                  <li key={report.at} className="border-l-2 border-coral pl-3">
+                    <p className="text-xs font-semibold text-muted-foreground">
+                      Semana {report.week}
+                    </p>
+                    <p className="mt-0.5 text-label">{report.text}</p>
+                  </li>
+                ))}
+              </ul>
+            </SubSection>
+          ) : null}
+        </Category>
+
+        <Category
+          id="student-ai-quality"
+          icon={Bot}
+          title="Qualidade das respostas da IA"
+          description={student.aiQuality.blockedRate.definition}
         >
-          <h2 id="student-ai-quality" className="text-h2 font-bold">
-            Qualidade das respostas da IA
-          </h2>
-          <p className="mt-2 text-label text-muted-foreground">
-            {student.aiQuality.blockedRate.definition}
-          </p>
-          <DetailList
+          <Stats
             items={[
-              ['Respostas bloqueadas', student.aiQuality.blocked],
               ['Respostas validadas', student.aiQuality.validated],
+              ['Respostas bloqueadas', student.aiQuality.blocked],
               ['Taxa de bloqueio', percent(student.aiQuality.blockedRate.value)],
             ]}
           />
           {student.aiQuality.occurrences.length > 0 ? (
-            <>
-              <h3 className="mt-5 text-h3 font-semibold">Ocorrências</h3>
-              <ul className="mt-3 space-y-2">
+            <SubSection title="Ocorrências">
+              <ul className="mt-3 space-y-3">
                 {student.aiQuality.occurrences.map((occurrence) => (
-                  <li key={occurrence.at} className="rounded-lg bg-secondary p-3 text-label">
-                    <time dateTime={occurrence.at} className="font-mono text-xs">
-                      {date(occurrence.at)}
+                  <li key={occurrence.at} className="rounded-lg bg-secondary p-3">
+                    <time
+                      dateTime={occurrence.at}
+                      className="font-mono text-xs text-muted-foreground"
+                    >
+                      {dateTime(occurrence.at)}
                     </time>
-                    <p className="mt-1 whitespace-pre-wrap">{occurrence.content}</p>
+                    <p className="mt-1 text-label whitespace-pre-wrap">{occurrence.content}</p>
                   </li>
                 ))}
               </ul>
-            </>
+            </SubSection>
           ) : null}
-        </section>
-      </div>
+        </Category>
 
-      <section
-        className="mt-5 rounded-xl border border-border bg-card p-5"
-        aria-labelledby="student-risk"
-      >
-        <h2 id="student-risk" className="text-h2 font-bold">
-          Risco de cancelamento
-        </h2>
-        <p className="mt-2 text-label text-muted-foreground">
-          Leitura comercial de retenção, somando sinais nomeados. Não descreve a condição física da
-          pessoa.
-        </p>
-        <ChurnRiskSignals risk={student.churnRisk} />
-      </section>
+        <Category
+          id="student-risk"
+          icon={AlertTriangle}
+          title="Risco de cancelamento"
+          description="Leitura comercial de retenção, somando sinais nomeados. Não descreve a condição física da pessoa."
+        >
+          {student.churnRisk.score === 0 ? (
+            <p className="py-4 text-label text-muted-foreground">
+              Sem sinal de risco de cancelamento no momento.
+            </p>
+          ) : (
+            <div className="py-4">
+              <p className="text-label font-semibold">
+                {student.churnRisk.score} de 3 sinais de risco
+              </p>
+              <ul className="mt-2 space-y-1.5">
+                {student.churnRisk.signals.map((signal) => (
+                  <li
+                    key={signal.code}
+                    className="flex items-start gap-2 text-label text-muted-foreground"
+                  >
+                    <AlertTriangle aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+                    {signal.label}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </Category>
 
-      <section
-        className="mt-5 rounded-xl border border-border bg-card p-5"
-        aria-labelledby="student-timeline"
-      >
-        <h2 id="student-timeline" className="text-h2 font-bold">
-          Linha do tempo do aluno
-        </h2>
-        <p className="mt-2 text-label text-muted-foreground">
-          Anamnese, protocolo e versões, check-ins, conversas, assinatura e atendimentos humanos num
-          único fluxo, do mais recente para o mais antigo.
-        </p>
-        {student.timeline.length === 0 ? (
-          <p className="mt-4 text-label text-muted-foreground">
-            Nenhum evento registrado neste período.
+        <Category
+          id="student-timeline"
+          icon={History}
+          title="Linha do tempo do aluno"
+          description="Anamnese, protocolo, check-ins, conversas, assinatura e atendimentos humanos num único fluxo, do mais recente para o mais antigo."
+        >
+          <Timeline events={student.timeline} />
+        </Category>
+
+        <Category
+          id="workout-history"
+          icon={Dumbbell}
+          title="Histórico de treinos"
+          description={student.workoutHistory.reason}
+        >
+          <p className="py-4">
+            <StatusBadge tone="quiet" variant="solid">
+              Indisponível
+            </StatusBadge>
           </p>
-        ) : (
-          <ol className="mt-4 space-y-3">
-            {student.timeline.map((event, index) => (
-              <li
-                key={`${event.at}-${index}`}
-                className="rounded-lg border border-border bg-secondary p-3"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-label font-semibold">{event.title}</span>
-                  <span className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
-                    {TIMELINE_LABELS[event.kind]}
-                    <time dateTime={event.at}>{date(event.at)}</time>
-                  </span>
-                </div>
-                {event.detail ? (
-                  <p className="mt-1 text-label text-muted-foreground">{event.detail}</p>
-                ) : null}
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
-
-      <section
-        className="mt-5 rounded-xl border border-dashed border-border bg-card p-5"
-        aria-labelledby="workout-history"
-      >
-        <h2 id="workout-history" className="text-h2 font-bold">
-          Histórico de treinos
-        </h2>
-        <p className="mt-2 text-label text-muted-foreground">{student.workoutHistory.reason}</p>
-        <span className="mt-3 inline-flex rounded-full border border-border px-2 py-1 text-xs font-semibold text-muted-foreground">
-          Indisponível
-        </span>
-      </section>
+        </Category>
+      </div>
       <DataQuality notes={data.meta.dataQuality} />
     </article>
   );
