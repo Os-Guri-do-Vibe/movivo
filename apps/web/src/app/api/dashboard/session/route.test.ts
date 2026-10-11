@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 
 const bff = vi.hoisted(() => ({ readBackendSession: vi.fn() }));
 vi.mock('../_lib/bff', async () => {
-  const actual = await vi.importActual<typeof import('../_lib/bff')>('../_lib/bff');
+  const actual = await vi.importActual('../_lib/bff');
   return { ...actual, readBackendSession: bff.readBackendSession };
 });
 
