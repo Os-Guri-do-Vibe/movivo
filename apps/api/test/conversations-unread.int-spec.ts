@@ -106,6 +106,15 @@ describe('selo de não lidas (aba Conversas)', () => {
     expect(await unreadInList()).toBe(3); // m1, m4, m5
   });
 
+  it('a mensagem lida não volta como "não lida" por diferença de precisão (µs no banco, ms no `upTo`)', async () => {
+    // `at[]` vem do driver em milissegundos; `created_at` no banco tem microssegundos.
+    const [exact] = await migrator<{ micros: boolean }[]>`
+      SELECT bool_or(extract(microseconds FROM created_at)::bigint % 1000 <> 0) AS micros
+      FROM conversations WHERE user_id = ${studentId}::uuid
+    `;
+    expect(exact?.micros).toBe(true); // o cenário do defeito realmente existe nos dados semeados
+  });
+
   it('markRead(upTo) avança o ponteiro e devolve o que ficou depois dele', async () => {
     const res = await service.markRead(actor, studentId, { upTo: at[3] }); // até m4
     expect(res.data.unreadCount).toBe(1); // só m5 (m4 == ponteiro não conta)

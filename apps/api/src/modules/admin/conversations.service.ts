@@ -10,7 +10,7 @@ import {
   controlCenterConversationReadInputSchema,
   controlCenterConversationSendInputSchema,
 } from '@movivo/shared';
-import { and, asc, desc, eq, gt, gte, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
 import type { z } from 'zod';
 
@@ -82,7 +82,7 @@ export class ConversationsService {
   async list(actor: AuthenticatedUser) {
     const lastMessageAt = sql<Date | string>`max(${conversations.createdAt})`;
     // Mensagem do aluno (a de feedback 👍/👎 é SYSTEM e não conta) recebida depois do ponteiro de leitura.
-    const unreadCount = sql<number>`count(*) filter (where ${conversations.direction} = 'INBOUND' and ${conversations.messageType} <> 'SYSTEM' and (${users.conversationReadAt} is null or ${conversations.createdAt} > ${users.conversationReadAt}))::int`;
+    const unreadCount = sql<number>`count(*) filter (where ${conversations.direction} = 'INBOUND' and ${conversations.messageType} <> 'SYSTEM' and (${users.conversationReadAt} is null or date_trunc('milliseconds', ${conversations.createdAt}) > ${users.conversationReadAt}))::int`;
     const rows = await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
       const found = await tx
         .select({
@@ -325,7 +325,9 @@ export class ConversationsService {
             ne(conversations.messageType, 'SYSTEM'),
             or(
               isNull(users.conversationReadAt),
-              gt(conversations.createdAt, users.conversationReadAt),
+              // `created_at` tem microssegundos; o `upTo` do navegador chega em milissegundos.
+              // Sem truncar, a última mensagem lida continuaria "não lida" por frações de ms.
+              sql`date_trunc('milliseconds', ${conversations.createdAt}) > ${users.conversationReadAt}`,
             ),
           ),
         ),
