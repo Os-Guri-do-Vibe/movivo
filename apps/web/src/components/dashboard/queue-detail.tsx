@@ -195,7 +195,7 @@ function MeasureToggle({
               : 'text-muted-foreground hover:bg-secondary',
           )}
         >
-          {value === 'reps' ? 'Reps' : 'Seg'}
+          {value === 'reps' ? 'Reps' : 'Min'}
         </button>
       ))}
     </div>
@@ -239,6 +239,15 @@ function sessionTitle(
     : session.dayLabel;
   const phaseLabel = PHASE_LABELS[phase] ?? phase;
   return `${day} | ${session.focus} | ${phaseLabel}`;
+}
+
+/** O protocolo guarda a duração em segundos (`durationSeconds`); o RT digita em minutos. */
+function secondsToMinutes(seconds: number): number {
+  return Math.round((seconds / 60) * 100) / 100;
+}
+
+function minutesToSeconds(minutes: number): number {
+  return Math.round(minutes * 60);
 }
 
 function numberInputValue(value: number): number | '' {
@@ -434,18 +443,19 @@ function ExerciseEditorCard({
               onChange={(mode) =>
                 update({
                   reps: mode === 'reps' ? { min: 8, max: 12 } : undefined,
-                  durationSeconds: mode === 'duration' ? 30 : undefined,
+                  durationSeconds: mode === 'duration' ? 600 : undefined,
                 })
               }
             />
             {isDuration ? (
               <NumberField
                 className="w-28"
-                min={5}
-                max={2400}
-                value={numberInputValue(exercise.durationSeconds ?? 0)}
-                aria-label="Duração (s)"
-                onChange={(value) => update({ durationSeconds: Number(value) })}
+                min={0.1}
+                step={0.5}
+                inputMode="decimal"
+                value={numberInputValue(secondsToMinutes(exercise.durationSeconds ?? 0))}
+                aria-label="Duração (min)"
+                onChange={(value) => update({ durationSeconds: minutesToSeconds(Number(value)) })}
               />
             ) : (
               <div className="flex items-center gap-1">
@@ -548,20 +558,21 @@ function ExerciseEditorCard({
                     onChange={(mode) =>
                       onUpdateWarmupBlock(sessionIndex, exerciseIndex, blockIndex, {
                         reps: mode === 'reps' ? { min: 12, max: 15 } : undefined,
-                        durationSeconds: mode === 'duration' ? 30 : undefined,
+                        durationSeconds: mode === 'duration' ? 300 : undefined,
                       })
                     }
                   />
                   {blockIsDuration ? (
                     <NumberField
                       className="w-20"
-                      min={5}
-                      max={2400}
-                      value={numberInputValue(block.durationSeconds ?? 0)}
-                      aria-label={`Duração do bloco de aquecimento ${blockIndex + 1} (s)`}
+                      min={0.1}
+                      step={0.5}
+                      inputMode="decimal"
+                      value={numberInputValue(secondsToMinutes(block.durationSeconds ?? 0))}
+                      aria-label={`Duração do bloco de aquecimento ${blockIndex + 1} (min)`}
                       onChange={(value) =>
                         onUpdateWarmupBlock(sessionIndex, exerciseIndex, blockIndex, {
-                          durationSeconds: Number(value),
+                          durationSeconds: minutesToSeconds(Number(value)),
                         })
                       }
                     />
