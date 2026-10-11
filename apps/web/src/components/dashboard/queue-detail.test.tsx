@@ -969,11 +969,11 @@ describe('QueueDetail', () => {
 
     // Fixture começa em modo repetições.
     expect(screen.getByLabelText('Repetições mín.')).toBeVisible();
-    expect(screen.queryByLabelText('Duração (s)')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Duração (min)')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('radio', { name: 'Duração' }));
     expect(screen.queryByLabelText('Repetições mín.')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Duração (s)')).toBeVisible();
+    expect(screen.getByLabelText('Duração (min)')).toBeVisible();
 
     await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
 
@@ -985,7 +985,7 @@ describe('QueueDetail', () => {
             expect.objectContaining({
               exercises: [
                 expect.objectContaining({
-                  durationSeconds: 30,
+                  durationSeconds: 600,
                   reps: undefined,
                 }),
               ],
@@ -996,7 +996,7 @@ describe('QueueDetail', () => {
     );
   });
 
-  it('exercício por duração: exibe/edita "Duração (s)" em vez de repetições, e "—" quando RIR/vídeo/notas ausentes', async () => {
+  it('exercício por duração: exibe/edita "Duração (min)" em vez de repetições, e "—" quando RIR/vídeo/notas ausentes', async () => {
     const baseProtocol = protocolDetail.protocol;
     if (!baseProtocol) throw new Error('fixture inválida');
     api.getQueueDetail.mockResolvedValue({
@@ -1034,9 +1034,11 @@ describe('QueueDetail', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Editar Protocolo' }));
     expect(screen.queryByLabelText('Repetições mín.')).not.toBeInTheDocument();
-    const duration = screen.getByLabelText('Duração (s)');
+    // Segundos guardados (45 s = 0,75 min) aparecem em minutos no campo.
+    const duration = screen.getByLabelText('Duração (min)');
+    expect(duration).toHaveValue(0.75);
     await userEvent.clear(duration);
-    await userEvent.type(duration, '90');
+    await userEvent.type(duration, '1.5');
 
     api.saveProtocol.mockResolvedValue({ status: 'PENDING_REVIEW' });
     await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
