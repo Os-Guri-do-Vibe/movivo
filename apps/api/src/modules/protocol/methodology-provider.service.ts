@@ -23,11 +23,14 @@ const CACHE_MS = 5 * 60_000;
 @Injectable()
 export class MethodologyProvider {
   private cached: { value: PublishedMethodology; expiresAt: number } | null = null;
+  /** Sobe a cada `invalidate()`: leitura iniciada antes de uma publicação não repovoa o cache. */
+  private generation = 0;
 
   constructor(private readonly db: TenantDatabase) {}
 
   async current(): Promise<PublishedMethodology> {
     if (this.cached && this.cached.expiresAt > Date.now()) return this.cached.value;
+    const generation = this.generation;
     await this.ensureBootstrap();
     const value = await this.db.runAsSystem(async (tx) => {
       const rows = (await tx.execute(sql`
@@ -60,7 +63,11 @@ export class MethodologyProvider {
         contentSha256: row.content_sha256,
       };
     });
-    this.cached = { value, expiresAt: Date.now() + CACHE_MS };
+    // Se uma publicação invalidou o cache enquanto esta leitura rodava, o valor pode ser a
+    // versão antiga: devolve pra quem pediu, mas não guarda.
+    if (generation === this.generation) {
+      this.cached = { value, expiresAt: Date.now() + CACHE_MS };
+    }
     return value;
   }
 
@@ -92,6 +99,7 @@ export class MethodologyProvider {
   }
 
   invalidate(): void {
+    this.generation += 1;
     this.cached = null;
   }
 }

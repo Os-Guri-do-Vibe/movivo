@@ -64,6 +64,40 @@ describe('MethodologyProvider.current', () => {
   });
 });
 
+describe('MethodologyProvider — publicação durante uma leitura', () => {
+  it('leitura iniciada antes do invalidate() não guarda a versão antiga no cache', async () => {
+    const OLD_ROW = { ...PUBLISHED_ROW, version: 1, version_label: 'methodology-v1' };
+    const NEW_ROW = { ...PUBLISHED_ROW, version: 2, version_label: 'methodology-v2' };
+
+    // A consulta da versão publicada (3ª execução) fica presa até a publicação invalidar.
+    let releaseOldRead: (rows: unknown[]) => void = () => undefined;
+    const rowsByCall: Array<unknown[] | Promise<unknown[]>> = [
+      [],
+      [],
+      new Promise<unknown[]>((resolve) => {
+        releaseOldRead = resolve;
+      }),
+      [],
+      [],
+      [NEW_ROW],
+    ];
+    const execute = vi.fn(async () => rowsByCall.shift() ?? []);
+    const db = {
+      runAsSystem: vi.fn((callback: (value: unknown) => Promise<unknown>) => callback({ execute })),
+    } as unknown as TenantDatabase;
+    const provider = new MethodologyProvider(db);
+
+    const inFlight = provider.current();
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(3));
+    provider.invalidate(); // a publicação da v2 acabou de confirmar
+    releaseOldRead([OLD_ROW]);
+    expect((await inFlight).version).toBe(1); // quem já estava lendo recebe o que leu...
+
+    // ...mas o cache não ficou com a v1: a próxima leitura enxerga a v2 publicada.
+    expect((await provider.current()).version).toBe(2);
+  });
+});
+
 describe('MethodologyProvider.ensureBootstrap', () => {
   it('trava por advisory lock e insere a v1 de forma idempotente (ON CONFLICT DO NOTHING)', async () => {
     const { provider, execute } = providerWith([[], []]);
