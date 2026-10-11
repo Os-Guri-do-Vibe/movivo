@@ -27,6 +27,8 @@ const STATIC_MUTATIONS = new Set([
 const PARAMETERIZED_MUTATIONS = [
   new RegExp(`^ai/knowledge/${UUID_SEGMENT}/(?:retry|archive)$`, 'i'),
   new RegExp(`^ai/methodology/${UUID_SEGMENT}/(?:submit|review|publish|rollback)$`, 'i'),
+  // Aba "Conversas": pausar/reativar o AI Coach, enviar mensagem manual e marcar como lida.
+  new RegExp(`^conversations/${UUID_SEGMENT}/(?:ai-attendance|messages|read)$`, 'i'),
 ];
 
 /** O BFF nunca encaminha POST para um path que não esteja listado aqui. */
