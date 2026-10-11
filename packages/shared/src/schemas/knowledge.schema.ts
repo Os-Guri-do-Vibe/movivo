@@ -4,6 +4,13 @@ import { controlCenterMetaSchema } from './control-center.schema';
 
 export const MAX_KNOWLEDGE_DOCUMENT_BYTES = 512 * 1024;
 
+/**
+ * Teto das notas de uma versão da metodologia (motivo da mudança e justificativa de cada
+ * transição). Era 500 e estourava ao descrever uma revisão grande da metodologia; o texto da
+ * metodologia em si (`content`) segue sem teto de caracteres.
+ */
+export const MAX_METHODOLOGY_NOTE_LENGTH = 5000;
+
 export const knowledgeDocumentCategorySchema = z.enum([
   'METHODOLOGY',
   'SCIENTIFIC_EVIDENCE',
@@ -132,18 +139,18 @@ export const methodologyStatusSchema = z.enum([
  */
 export const createMethodologyVersionSchema = z.object({
   content: z.string().trim().min(200),
-  changeNote: z.string().trim().min(10).max(500),
+  changeNote: z.string().trim().min(10).max(MAX_METHODOLOGY_NOTE_LENGTH),
 });
 export type CreateMethodologyVersionInput = z.infer<typeof createMethodologyVersionSchema>;
 
 export const methodologyActionSchema = z.object({
   versionId: z.uuid(),
-  note: z.string().trim().min(5).max(500),
+  note: z.string().trim().min(5).max(MAX_METHODOLOGY_NOTE_LENGTH),
 });
 export type MethodologyActionInput = z.infer<typeof methodologyActionSchema>;
 
 export const methodologyNoteSchema = z.object({
-  note: z.string().trim().min(5).max(500),
+  note: z.string().trim().min(5).max(MAX_METHODOLOGY_NOTE_LENGTH),
 });
 export const methodologyReviewSchema = methodologyNoteSchema.extend({
   decision: z.enum(['APPROVED', 'REJECTED']),

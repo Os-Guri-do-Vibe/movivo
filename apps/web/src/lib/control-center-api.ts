@@ -538,7 +538,9 @@ async function mutate<T>(
         ? value.message
         : response.status === 403
           ? messages.forbidden
-          : messages.fallback;
+          : response.status === 413
+            ? 'O texto enviado é grande demais para ser salvo de uma vez.'
+            : messages.fallback;
     throw new ControlCenterApiError(response.status, message);
   }
   try {
@@ -719,7 +721,12 @@ export function createMethodologyVersion(input: {
   content: string;
   changeNote: string;
 }): Promise<MethodologyResponse> {
-  return mutate('ai/methodology', input, methodologyResponseSchema);
+  return mutate('ai/methodology', input, methodologyResponseSchema, {
+    forbidden: 'Seu papel não pode criar versões da metodologia.',
+    fallback:
+      'Não foi possível salvar a nova versão. Confira se o conteúdo tem ao menos 200 caracteres e se o motivo da mudança tem ao menos 10.',
+    contract: 'A resposta ao salvar a versão veio fora do contrato esperado.',
+  });
 }
 
 export function submitMethodologyVersion(id: string, note: string): Promise<MethodologyResponse> {
