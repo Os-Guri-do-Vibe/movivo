@@ -22,14 +22,39 @@ import {
 const CODE_LENGTH = 6;
 const RESEND_MAX_ATTEMPTS = 3;
 
+/**
+ * O envio automático termina segundos depois de a pessoa completar o telefone, e quem já
+ * seguiu para o e-mail estaria digitando quando o foco fosse puxado: o resto do texto
+ * cairia no campo do código (que só aceita dígitos) e o e-mail ficaria truncado. Por isso
+ * o foco só vai para o código se não houver OUTRO campo em edição; o campo do telefone
+ * (`anchorId`) conta como "ainda no mesmo passo", então o salto automático continua.
+ * Reenvio é ação explícita (o foco está no botão) e segue o mesmo critério.
+ */
+function focusCodeUnlessTypingElsewhere(code: HTMLInputElement | null, anchorId?: string) {
+  if (!code) return;
+  const active = document.activeElement;
+  const typingElsewhere =
+    active instanceof HTMLElement &&
+    active !== code &&
+    active.id !== anchorId &&
+    (active instanceof HTMLInputElement ||
+      active instanceof HTMLTextAreaElement ||
+      active instanceof HTMLSelectElement ||
+      active.isContentEditable);
+  if (!typingElsewhere) code.focus();
+}
+
 export function PhoneOtp({
   sessionRef,
   phoneNumber,
   onVerified,
+  anchorId,
 }: {
   sessionRef: string;
   phoneNumber: string;
   onVerified: () => void;
+  /** `id` do campo de telefone: o foco pode sair dele para o código sem ser "roubo". */
+  anchorId?: string;
 }) {
   const [sent, setSent] = React.useState(false);
   const [code, setCode] = React.useState('');
@@ -60,7 +85,7 @@ export function PhoneOtp({
       setResendCount((c) => c + 1);
       setCode('');
       setActiveSlot(0);
-      inputRef.current?.focus();
+      focusCodeUnlessTypingElsewhere(inputRef.current, anchorId);
     } catch (err) {
       setError(
         isSessionReplaced(err)
@@ -68,7 +93,7 @@ export function PhoneOtp({
           : 'Não conseguimos enviar o código agora. Tente de novo em instantes.',
       );
     }
-  }, [sessionRef, phoneNumber]);
+  }, [sessionRef, phoneNumber, anchorId]);
 
   React.useEffect(() => {
     if (autoSentForRef.current === phoneNumber) return;

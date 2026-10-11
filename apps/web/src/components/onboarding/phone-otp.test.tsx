@@ -33,6 +33,69 @@ describe('PhoneOtp', () => {
     await waitFor(() => expect(sendPhoneCode).toHaveBeenCalledWith('tok', '+5511999999999'));
   });
 
+  describe('foco após o envio automático', () => {
+    function deferSend() {
+      let resolve: () => void = () => undefined;
+      sendPhoneCode.mockReturnValue(
+        new Promise((done) => {
+          resolve = () => done({ sent: true, resendAvailableAt: FUTURE, expiresAt: FUTURE });
+        }),
+      );
+      return () => resolve();
+    }
+
+    it('não rouba o foco de quem já está digitando em outro campo (e-mail)', async () => {
+      const finishSend = deferSend();
+      render(
+        <>
+          <input id="phone" aria-label="telefone" />
+          <input id="email" aria-label="e-mail" />
+          <PhoneOtp
+            sessionRef="tok"
+            phoneNumber="+5511999999999"
+            onVerified={vi.fn()}
+            anchorId="phone"
+          />
+        </>,
+      );
+      screen.getByLabelText('e-mail').focus();
+
+      finishSend();
+
+      await waitFor(() => expect(screen.getByText(/reenviar|Reenviar/i)).toBeInTheDocument());
+      expect(screen.getByLabelText('e-mail')).toHaveFocus();
+    });
+
+    it('leva o foco ao código quando a pessoa ainda está no campo do telefone', async () => {
+      const finishSend = deferSend();
+      render(
+        <>
+          <input id="phone" aria-label="telefone" />
+          <PhoneOtp
+            sessionRef="tok"
+            phoneNumber="+5511999999999"
+            onVerified={vi.fn()}
+            anchorId="phone"
+          />
+        </>,
+      );
+      screen.getByLabelText('telefone').focus();
+
+      finishSend();
+
+      await waitFor(() => expect(screen.getByLabelText(/código de verificação/i)).toHaveFocus());
+    });
+
+    it('leva o foco ao código quando nenhum campo está em edição', async () => {
+      const finishSend = deferSend();
+      render(<PhoneOtp sessionRef="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
+
+      finishSend();
+
+      await waitFor(() => expect(screen.getByLabelText(/código de verificação/i)).toHaveFocus());
+    });
+  });
+
   it('verifica automaticamente ao completar os 6 dígitos e chama onVerified', async () => {
     const user = userEvent.setup();
     const onVerified = vi.fn();
