@@ -66,10 +66,7 @@ import { QueueDetail } from './queue-detail';
  * que é exatamente a garantia que o teste de paridade abaixo trava.
  */
 const parqProtocolDetail = { ...protocolDetail, item: parqProtocolItem };
-const optionalProtocolDetail = {
-  ...protocolDetail,
-  item: optionalProtocolItem,
-};
+const optionalProtocolDetail = { ...protocolDetail, item: optionalProtocolItem };
 
 const handoffDetail = {
   item: handoffItem,
@@ -160,9 +157,7 @@ beforeEach(() => {
   api.getAnamnesisAnswers.mockResolvedValue(anamnesisAnswers);
   api.approveSubstitutionNow.mockResolvedValue({ status: 'released' });
   api.discardSubstitution.mockResolvedValue({ status: 'discarded' });
-  api.addCatalogExerciseToSubstitutionItem.mockResolvedValue({
-    attached: true,
-  });
+  api.addCatalogExerciseToSubstitutionItem.mockResolvedValue({ attached: true });
   controlCenterApi.getExerciseCatalog.mockResolvedValue({
     data: { versions: [], totalPublished: 0 },
     meta: {
@@ -241,9 +236,7 @@ describe('QueueDetail — substituição fora do catálogo (catalogGap)', () => 
     expect(screen.getByRole('button', { name: 'Aprovar agora' })).toBeDisabled();
     expect(screen.getByRole('note')).toHaveTextContent('fora do catálogo');
     expect(
-      screen.getByRole('button', {
-        name: /Adicionar ao catálogo: Supino Reto Máquina/,
-      }),
+      screen.getByRole('button', { name: /Adicionar ao catálogo: Supino Reto Máquina/ }),
     ).toBeVisible();
   });
 
@@ -260,9 +253,7 @@ describe('QueueDetail — substituição fora do catálogo (catalogGap)', () => 
     await userEvent.click(scope.getByText('Selecione o(s) músculo(s)'));
     await userEvent.click(scope.getByRole('checkbox', { name: 'peito' }));
     await userEvent.click(scope.getByRole('checkbox', { name: /Academia completa/ }));
-    const adicionar = scope.getByRole('button', {
-      name: 'Adicionar ao catálogo',
-    });
+    const adicionar = scope.getByRole('button', { name: 'Adicionar ao catálogo' });
     // Nível (achado 2026-09-29): mesmo combo do modal da tela Exercícios, obrigatório.
     const nivel = scope.getByRole('group', { name: 'Nível' });
     expect(within(nivel).getAllByRole('checkbox')).toHaveLength(3);
@@ -301,9 +292,7 @@ describe('QueueDetail — substituição fora do catálogo (catalogGap)', () => 
     await userEvent.click(screen.getByRole('button', { name: /Adicionar ao catálogo: Supino/ }));
     const dialog = await screen.findByRole('dialog');
     const scope = within(dialog);
-    const adicionar = scope.getByRole('button', {
-      name: 'Adicionar ao catálogo',
-    });
+    const adicionar = scope.getByRole('button', { name: 'Adicionar ao catálogo' });
     expect(adicionar).toBeDisabled();
 
     // Músculo e local sem nível: continua bloqueado.
@@ -343,9 +332,7 @@ describe('QueueDetail — troca em lote (itens da proposta)', () => {
       'afundo',
     );
     await userEvent.click(
-      screen.getByRole('button', {
-        name: 'Descartar a troca de Cadeira Extensora',
-      }),
+      screen.getByRole('button', { name: 'Descartar a troca de Cadeira Extensora' }),
     );
     expect(screen.getByText('Item descartado')).toBeVisible();
 
@@ -381,9 +368,7 @@ describe('QueueDetail — troca em lote (itens da proposta)', () => {
     );
     expect(screen.getByText('Item descartado')).toBeVisible();
     await userEvent.click(
-      screen.getByRole('button', {
-        name: 'Desfazer o descarte da troca de Mesa Flexora',
-      }),
+      screen.getByRole('button', { name: 'Desfazer o descarte da troca de Mesa Flexora' }),
     );
     expect(screen.queryByText('Item descartado')).not.toBeInTheDocument();
   });
@@ -394,9 +379,7 @@ describe('QueueDetail — troca em lote (itens da proposta)', () => {
     await screen.findByText('Trocas propostas');
 
     await userEvent.click(
-      screen.getByRole('button', {
-        name: /Adicionar ao catálogo: Extensora Unilateral/,
-      }),
+      screen.getByRole('button', { name: /Adicionar ao catálogo: Extensora Unilateral/ }),
     );
     const scope = within(await screen.findByRole('dialog'));
     expect(scope.getByLabelText('Nome do exercício')).toHaveValue('Extensora Unilateral');
@@ -425,14 +408,10 @@ describe('QueueDetail — troca em lote (itens da proposta)', () => {
     await screen.findByText('Trocas propostas');
 
     await userEvent.click(
-      screen.getByRole('button', {
-        name: 'Descartar a troca de Leg Press 45°',
-      }),
+      screen.getByRole('button', { name: 'Descartar a troca de Leg Press 45°' }),
     );
     await userEvent.click(
-      screen.getByRole('button', {
-        name: 'Descartar a troca de Cadeira Extensora',
-      }),
+      screen.getByRole('button', { name: 'Descartar a troca de Cadeira Extensora' }),
     );
     await userEvent.click(
       screen.getByRole('button', { name: 'Descartar a troca de Mesa Flexora' }),
@@ -496,10 +475,7 @@ describe('QueueDetail — trava do envio automático enquanto a tela está abert
   });
 
   it('outros tipos de caso (check-in) nunca seguram o envio de protocolo', async () => {
-    api.getQueueDetail.mockResolvedValue({
-      ...optionalDetail,
-      item: { ...checkinItem },
-    });
+    api.getQueueDetail.mockResolvedValue({ ...optionalDetail, item: { ...checkinItem } });
     render(<QueueDetail kind="CHECKIN" id={CHECKIN_ID} />);
     await waitFor(() => expect(api.getQueueDetail).toHaveBeenCalled());
     expect(reviewHold.useReviewHold).not.toHaveBeenCalledWith(
@@ -763,10 +739,7 @@ describe('QueueDetail', () => {
           version: 'parq-2026-07-v1' as const,
           // Fora de ordem de propósito (Q6 antes de Q1) — trava a normalização.
           answers: (['Q6', 'Q2', 'Q3', 'Q4', 'Q5', 'Q1', 'Q7', 'Q8', 'Q9'] as ParqQuestionId[]).map(
-            (questionId) => ({
-              questionId,
-              answer: questionId === 'Q6' || questionId === 'Q1',
-            }),
+            (questionId) => ({ questionId, answer: questionId === 'Q6' || questionId === 'Q1' }),
           ),
         },
       },
@@ -789,9 +762,7 @@ describe('QueueDetail', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Ver respostas da anamnese' }));
 
-    const dialog = await screen.findByRole('dialog', {
-      name: 'Respostas da anamnese',
-    });
+    const dialog = await screen.findByRole('dialog', { name: 'Respostas da anamnese' });
     expect(within(dialog).getByText('Rodrigo de Barros')).toBeVisible();
   });
 
@@ -887,6 +858,165 @@ describe('QueueDetail', () => {
     );
   });
 
+  it('reordenar: o botão fica desabilitado com um exercício só', async () => {
+    api.getQueueDetail.mockResolvedValue(protocolDetail);
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
+    expect(screen.getByRole('button', { name: /reordenar exercícios/i })).toBeDisabled();
+  });
+
+  it('reordenar: mostra a lista com alças de arrastar e preserva a ordem ao concluir', async () => {
+    const baseProtocol = protocolDetail.protocol;
+    if (!baseProtocol) throw new Error('fixture inválida');
+    const baseSession = baseProtocol.content.sessions[0];
+    const first = baseSession?.exercises[0];
+    if (!baseSession || !first) throw new Error('fixture inválida');
+    api.getQueueDetail.mockResolvedValue({
+      ...protocolDetail,
+      protocol: {
+        ...baseProtocol,
+        content: {
+          ...baseProtocol.content,
+          sessions: [
+            {
+              ...baseSession,
+              exercises: [
+                { ...first, exerciseId: 'ex-a', name: 'Exercício A' },
+                { ...first, exerciseId: 'ex-b', name: 'Exercício B' },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    api.saveProtocol.mockResolvedValue({ status: 'PENDING_REVIEW' });
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
+
+    await userEvent.click(screen.getByRole('button', { name: /reordenar exercícios/i }));
+    const list = screen.getByRole('list', { name: /ordem dos exercícios/i });
+    const rows = within(list).getAllByRole('listitem');
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining('Exercício A'),
+      expect.stringContaining('Exercício B'),
+    ]);
+    expect(
+      within(list).getByRole('button', { name: /arrastar "exercício b" \(posição 2\)/i }),
+    ).toBeVisible();
+    // Enquanto reordena, os campos de edição saem da frente.
+    expect(screen.queryByLabelText('Nome')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /concluir ordem/i }));
+    expect(screen.getAllByLabelText('Nome')).toHaveLength(2);
+
+    await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
+    await waitFor(() =>
+      expect(api.saveProtocol).toHaveBeenCalledWith(
+        PROTOCOL_ID,
+        expect.objectContaining({
+          sessions: [
+            expect.objectContaining({
+              exercises: [
+                expect.objectContaining({ exerciseId: 'ex-a' }),
+                expect.objectContaining({ exerciseId: 'ex-b' }),
+              ],
+            }),
+          ],
+        }),
+      ),
+    );
+  });
+
+  it('reordenar: arrastar um exercício (teclado) troca a ordem e salva na nova ordem', async () => {
+    const baseProtocol = protocolDetail.protocol;
+    if (!baseProtocol) throw new Error('fixture inválida');
+    const baseSession = baseProtocol.content.sessions[0];
+    const first = baseSession?.exercises[0];
+    if (!baseSession || !first) throw new Error('fixture inválida');
+    api.getQueueDetail.mockResolvedValue({
+      ...protocolDetail,
+      protocol: {
+        ...baseProtocol,
+        content: {
+          ...baseProtocol.content,
+          sessions: [
+            {
+              ...baseSession,
+              exercises: ['A', 'B', 'C'].map((letter) => ({
+                ...first,
+                exerciseId: `ex-${letter.toLowerCase()}`,
+                name: `Exercício ${letter}`,
+              })),
+            },
+          ],
+        },
+      },
+    });
+    api.saveProtocol.mockResolvedValue({ status: 'PENDING_REVIEW' });
+
+    // jsdom não tem layout: cada linha ganha um retângulo empilhado, senão o sensor de
+    // teclado do dnd-kit não tem pra onde mover.
+    const rect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        const row = this.closest('li');
+        const index = row ? Array.from(row.parentElement?.children ?? []).indexOf(row) : 0;
+        const top = row ? index * 60 : 0;
+        return {
+          x: 0,
+          y: top,
+          top,
+          bottom: top + 50,
+          left: 0,
+          right: 300,
+          width: 300,
+          height: 50,
+          toJSON: () => ({}),
+        };
+      });
+
+    try {
+      render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+      await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
+      await userEvent.click(screen.getByRole('button', { name: /reordenar exercícios/i }));
+
+      const handle = screen.getByRole('button', { name: /arrastar "exercício a"/i });
+      handle.focus();
+      await userEvent.keyboard(' ');
+      await userEvent.keyboard('{ArrowDown}');
+      await userEvent.keyboard(' ');
+
+      await waitFor(() => {
+        const names = within(screen.getByRole('list', { name: /ordem dos exercícios/i }))
+          .getAllByRole('listitem')
+          .map((row) => row.textContent);
+        expect(names[0]).toContain('Exercício B');
+        expect(names[1]).toContain('Exercício A');
+      });
+
+      await userEvent.click(screen.getByRole('button', { name: /concluir ordem/i }));
+      await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
+      await waitFor(() =>
+        expect(api.saveProtocol).toHaveBeenCalledWith(
+          PROTOCOL_ID,
+          expect.objectContaining({
+            sessions: [
+              expect.objectContaining({
+                exercises: [
+                  expect.objectContaining({ exerciseId: 'ex-b' }),
+                  expect.objectContaining({ exerciseId: 'ex-a' }),
+                  expect.objectContaining({ exerciseId: 'ex-c' }),
+                ],
+              }),
+            ],
+          }),
+        ),
+      );
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
   it('adiciona e remove exercício respeitando o mínimo de um por sessão', async () => {
     api.getQueueDetail.mockResolvedValue(protocolDetail);
     render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
@@ -899,9 +1029,7 @@ describe('QueueDetail', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /adicionar exercício/i }));
     expect(screen.getAllByLabelText('Nome')).toHaveLength(2);
-    const removeButtons = screen.getAllByRole('button', {
-      name: /remover exercício/i,
-    });
+    const removeButtons = screen.getAllByRole('button', { name: /remover exercício/i });
     expect(removeButtons).toHaveLength(2);
     removeButtons.forEach((button) => expect(button).not.toBeDisabled());
 
@@ -983,12 +1111,7 @@ describe('QueueDetail', () => {
         expect.objectContaining({
           sessions: [
             expect.objectContaining({
-              exercises: [
-                expect.objectContaining({
-                  durationSeconds: 600,
-                  reps: undefined,
-                }),
-              ],
+              exercises: [expect.objectContaining({ durationSeconds: 600, reps: undefined })],
             }),
           ],
         }),
@@ -1079,9 +1202,7 @@ describe('QueueDetail', () => {
     await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Erro de validação 1');
 
-    const issuesError = new DashboardApiError(502, 'mensagem', {
-      issues: ['Campo obrigatório'],
-    });
+    const issuesError = new DashboardApiError(502, 'mensagem', { issues: ['Campo obrigatório'] });
     api.saveProtocol.mockRejectedValueOnce(issuesError);
     await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Campo obrigatório');
@@ -1117,11 +1238,7 @@ describe('QueueDetail', () => {
     if (!baseProtocol) throw new Error('fixture inválida');
     api.getQueueDetail.mockResolvedValueOnce({
       ...protocolDetail,
-      protocol: {
-        ...baseProtocol,
-        signatureHash: 'abc123',
-        signedAt: '2026-08-10T10:00:00.000Z',
-      },
+      protocol: { ...baseProtocol, signatureHash: 'abc123', signedAt: '2026-08-10T10:00:00.000Z' },
     });
     const { unmount } = render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
     expect(await screen.findByText(/hash/)).toHaveTextContent('abc123');

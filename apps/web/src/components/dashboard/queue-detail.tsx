@@ -12,9 +12,28 @@ import {
   type ProtocolStructure,
 } from '@movivo/shared';
 import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import {
+  ArrowDownUp,
   ArrowLeft,
   CheckCircle2,
   Eye,
+  GripVertical,
   Pencil,
   Plus,
   RefreshCw,
@@ -206,10 +225,7 @@ function formatDate(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? 'horário não informado'
-    : new Intl.DateTimeFormat('pt-BR', {
-        dateStyle: 'short',
-        timeStyle: 'short',
-      }).format(date);
+    : new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(date);
 }
 
 /** Segundos até 60 "40 s", minutos até 60min "1 min 30 s", acima disso em horas "1 h 30 min". */
@@ -416,9 +432,7 @@ function ExerciseEditorCard({
             value={exercise.technique ?? NONE_TECHNIQUE}
             className="[&>span]:sr-only"
             onChange={(technique) =>
-              update({
-                technique: technique === NONE_TECHNIQUE ? undefined : technique,
-              })
+              update({ technique: technique === NONE_TECHNIQUE ? undefined : technique })
             }
           />
         </MiniField>
@@ -467,10 +481,7 @@ function ExerciseEditorCard({
                   aria-label="Repetições mín."
                   onChange={(value) =>
                     update({
-                      reps: {
-                        min: Number(value),
-                        max: exercise.reps?.max ?? Number(value),
-                      },
+                      reps: { min: Number(value), max: exercise.reps?.max ?? Number(value) },
                     })
                   }
                 />
@@ -483,10 +494,7 @@ function ExerciseEditorCard({
                   aria-label="Repetições máx."
                   onChange={(value) =>
                     update({
-                      reps: {
-                        min: exercise.reps?.min ?? Number(value),
-                        max: Number(value),
-                      },
+                      reps: { min: exercise.reps?.min ?? Number(value), max: Number(value) },
                     })
                   }
                 />
@@ -586,10 +594,7 @@ function ExerciseEditorCard({
                         aria-label={`Repetições mín. do bloco de aquecimento ${blockIndex + 1}`}
                         onChange={(value) =>
                           onUpdateWarmupBlock(sessionIndex, exerciseIndex, blockIndex, {
-                            reps: {
-                              min: Number(value),
-                              max: block.reps?.max ?? Number(value),
-                            },
+                            reps: { min: Number(value), max: block.reps?.max ?? Number(value) },
                           })
                         }
                       />
@@ -604,10 +609,7 @@ function ExerciseEditorCard({
                         aria-label={`Repetições máx. do bloco de aquecimento ${blockIndex + 1}`}
                         onChange={(value) =>
                           onUpdateWarmupBlock(sessionIndex, exerciseIndex, blockIndex, {
-                            reps: {
-                              min: block.reps?.min ?? Number(value),
-                              max: Number(value),
-                            },
+                            reps: { min: block.reps?.min ?? Number(value), max: Number(value) },
                           })
                         }
                       />
@@ -649,6 +651,104 @@ function ExerciseEditorCard({
   );
 }
 
+function SortableExerciseRow({
+  exercise,
+  position,
+}: {
+  exercise: ProtocolExercise;
+  position: number;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: exercise.exerciseId });
+  const label = exercise.name || 'Exercício sem nome';
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={{
+        // Só o eixo vertical: a lista é uma coluna, arrastar pro lado não muda nada.
+        transform: CSS.Transform.toString(transform ? { ...transform, x: 0 } : null),
+        transition,
+      }}
+      className={cn(
+        'flex items-center gap-3 rounded-lg border border-border bg-card p-3',
+        isDragging && 'relative z-10 border-ring shadow-lg',
+      )}
+    >
+      <button
+        type="button"
+        ref={setActivatorNodeRef}
+        {...attributes}
+        {...listeners}
+        aria-label={`Arrastar "${label}" (posição ${position})`}
+        title="Arraste, ou use espaço e as setas do teclado"
+        className="flex size-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring active:cursor-grabbing"
+      >
+        <GripVertical aria-hidden="true" className="size-4" />
+      </button>
+      <span className="w-5 shrink-0 font-mono text-xs text-muted-foreground">{position}</span>
+      <span className="min-w-0 flex-1 truncate text-label font-medium">{label}</span>
+    </li>
+  );
+}
+
+/**
+ * Modo "Reordenar": no lugar dos cards (altos demais pra arrastar), uma lista compacta de
+ * uma linha por exercício. Mouse/toque pelo `PointerSensor` e teclado pelo `KeyboardSensor`
+ * (espaço pega, setas movem, espaço solta) — a mesma ordem que o aluno vai ver no treino.
+ */
+function ExerciseReorderList({
+  exercises,
+  sessionNumber,
+  onMove,
+}: {
+  exercises: ProtocolExercise[];
+  sessionNumber: number;
+  onMove: (from: number, to: number) => void;
+}) {
+  const sensors = useSensors(
+    // 4px de tolerância: um clique simples no handle não vira arrasto sem querer.
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleDragEnd({ active, over }: DragEndEvent) {
+    if (!over || active.id === over.id) return;
+    const from = exercises.findIndex((exercise) => exercise.exerciseId === active.id);
+    const to = exercises.findIndex((exercise) => exercise.exerciseId === over.id);
+    if (from !== -1 && to !== -1) onMove(from, to);
+  }
+
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <SortableContext
+        items={exercises.map((exercise) => exercise.exerciseId)}
+        strategy={verticalListSortingStrategy}
+      >
+        <ol
+          aria-label={`Ordem dos exercícios — sessão ${sessionNumber}`}
+          className="flex flex-col gap-2"
+        >
+          {exercises.map((exercise, exerciseIndex) => (
+            <SortableExerciseRow
+              key={exercise.exerciseId}
+              exercise={exercise}
+              position={exerciseIndex + 1}
+            />
+          ))}
+        </ol>
+      </SortableContext>
+    </DndContext>
+  );
+}
+
 /**
  * Card "Protocolo · versão N" — o ícone de lápis no topo edita DENTRO deste mesmo
  * componente (achado 2026-08-19, a pedido do fundador): nada de trocar pra um formulário
@@ -663,18 +763,21 @@ function ProtocolSummary({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<ProtocolStructure>(() => structuredClone(protocol.content));
+  const [reorderingSession, setReorderingSession] = useState<number | null>(null);
   const [issues, setIssues] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
   const [anamnesisOpen, setAnamnesisOpen] = useState(false);
 
   function startEdit() {
     setDraft(structuredClone(protocol.content));
+    setReorderingSession(null);
     setIssues([]);
     setEditing(true);
   }
 
   function cancelEdit() {
     setEditing(false);
+    setReorderingSession(null);
     setIssues([]);
   }
 
@@ -725,10 +828,18 @@ function ProtocolSummary({
       ...current,
       sessions: current.sessions.map((session, position) =>
         position === sessionIndex
-          ? {
-              ...session,
-              exercises: session.exercises.filter((_, i) => i !== exerciseIndex),
-            }
+          ? { ...session, exercises: session.exercises.filter((_, i) => i !== exerciseIndex) }
+          : session,
+      ),
+    }));
+  }
+
+  function moveExercise(sessionIndex: number, from: number, to: number) {
+    setDraft((current) => ({
+      ...current,
+      sessions: current.sessions.map((session, position) =>
+        position === sessionIndex
+          ? { ...session, exercises: arrayMove(session.exercises, from, to) }
           : session,
       ),
     }));
@@ -759,9 +870,7 @@ function ProtocolSummary({
   function removeWarmupBlock(sessionIndex: number, exerciseIndex: number, blockIndex: number) {
     const blocks = draft.sessions[sessionIndex]?.exercises[exerciseIndex]?.warmupBlocks ?? [];
     const next = blocks.filter((_, i) => i !== blockIndex);
-    updateExercise(sessionIndex, exerciseIndex, {
-      warmupBlocks: next.length ? next : undefined,
-    });
+    updateExercise(sessionIndex, exerciseIndex, { warmupBlocks: next.length ? next : undefined });
   }
 
   async function save() {
@@ -776,6 +885,7 @@ function ProtocolSummary({
       await saveProtocol(protocol.id, parsed.data);
       captureDashboardEvent('cref_protocol_edited');
       setEditing(false);
+      setReorderingSession(null);
       await onSaved();
     } catch (error) {
       setIssues(validationMessages(error));
@@ -811,10 +921,7 @@ function ProtocolSummary({
                 items={WEEKLY_FREQUENCY_ITEMS}
                 value={String(draft.weeklyFrequency)}
                 onChange={(value) =>
-                  setDraft((current) => ({
-                    ...current,
-                    weeklyFrequency: Number(value),
-                  }))
+                  setDraft((current) => ({ ...current, weeklyFrequency: Number(value) }))
                 }
               />
             </div>
@@ -938,25 +1045,51 @@ function ProtocolSummary({
             </summary>
             {editing ? (
               <div className="mt-4 flex flex-col gap-3">
-                {session.exercises.map((exercise, exerciseIndex) => (
-                  <ExerciseEditorCard
-                    key={exercise.exerciseId}
-                    exercise={exercise}
-                    sessionIndex={index}
-                    exerciseIndex={exerciseIndex}
-                    canRemove={session.exercises.length > 1}
-                    onUpdate={updateExercise}
-                    onRemove={removeExercise}
-                    onAddWarmupBlock={addWarmupBlock}
-                    onUpdateWarmupBlock={updateWarmupBlock}
-                    onRemoveWarmupBlock={removeWarmupBlock}
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant={reorderingSession === index ? 'default' : 'ghost'}
+                    size="sm"
+                    disabled={session.exercises.length < 2}
+                    aria-pressed={reorderingSession === index}
+                    onClick={() => setReorderingSession(reorderingSession === index ? null : index)}
+                    title={
+                      session.exercises.length < 2
+                        ? 'A sessão precisa de pelo menos dois exercícios para reordenar'
+                        : 'Arraste os exercícios para mudar a ordem'
+                    }
+                  >
+                    <ArrowDownUp aria-hidden="true" className="size-4" />{' '}
+                    {reorderingSession === index ? 'Concluir ordem' : 'Reordenar exercícios'}
+                  </Button>
+                </div>
+                {reorderingSession === index ? (
+                  <ExerciseReorderList
+                    exercises={session.exercises}
+                    sessionNumber={index + 1}
+                    onMove={(from, to) => moveExercise(index, from, to)}
                   />
-                ))}
+                ) : (
+                  session.exercises.map((exercise, exerciseIndex) => (
+                    <ExerciseEditorCard
+                      key={exercise.exerciseId}
+                      exercise={exercise}
+                      sessionIndex={index}
+                      exerciseIndex={exerciseIndex}
+                      canRemove={session.exercises.length > 1}
+                      onUpdate={updateExercise}
+                      onRemove={removeExercise}
+                      onAddWarmupBlock={addWarmupBlock}
+                      onUpdateWarmupBlock={updateWarmupBlock}
+                      onRemoveWarmupBlock={removeWarmupBlock}
+                    />
+                  ))
+                )}
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  disabled={session.exercises.length >= 15}
+                  disabled={session.exercises.length >= 15 || reorderingSession === index}
                   onClick={() => addExercise(index)}
                   title={
                     session.exercises.length >= 15
@@ -1080,10 +1213,7 @@ function ProtocolSummary({
             value={draft.generalNotes ?? ''}
             maxLength={1000}
             onChange={(value) =>
-              setDraft((current) => ({
-                ...current,
-                generalNotes: value || undefined,
-              }))
+              setDraft((current) => ({ ...current, generalNotes: value || undefined }))
             }
             aria-describedby={issues.length > 0 ? 'protocol-editor-issues' : undefined}
           />
@@ -1543,9 +1673,7 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
             onClose={() => setCatalogGapItem(null)}
             onSaved={(message) => {
               setCatalogGapItem(null);
-              captureDashboardEvent('cref_substitution_catalog_gap_added', {
-                kind,
-              });
+              captureDashboardEvent('cref_substitution_catalog_gap_added', { kind });
               setSuccess(message);
               void load();
             }}
