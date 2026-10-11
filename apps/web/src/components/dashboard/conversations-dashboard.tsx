@@ -1,20 +1,71 @@
 'use client';
 
-import type {
-  ControlCenterConversationMessage,
-  ControlCenterConversationSummary,
+import {
+  CONTROL_CENTER_MANUAL_MESSAGE_MAX_LENGTH,
+  controlCenterConversationAttendanceEventSchema,
+  controlCenterConversationMessageEventSchema,
+  controlCenterConversationReadEventSchema,
+  type ControlCenterConversationMessage,
+  type ControlCenterConversationSummary,
 } from '@movivo/shared';
-import { ArrowLeft, RefreshCw, Search } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowLeft, Pause, Play, RefreshCw, Search, SendHorizontal } from 'lucide-react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from 'react';
 
 import { Button } from '@/components/ui/button';
-import { getConversationMessages, getConversations } from '@/lib/control-center-api';
+import {
+  getConversationMessages,
+  getConversations,
+  getNewerConversationMessages,
+  markConversationRead,
+  sendConversationMessage,
+  setConversationAiPaused,
+} from '@/lib/control-center-api';
 import { cn } from '@/lib/utils';
 
 import { EmptyState, ResourceState, useControlCenterResource } from './control-center-ui';
 import { formatPhone } from './protocol-anamnesis-answers';
 
 const TIMEZONE = 'America/Sao_Paulo';
+
+const EVENTS_URL = '/api/dashboard/conversations/events';
+/** Sem o stream (navegador sem SSE ou conexão caída), o chat aberto é consultado neste ritmo. */
+const FALLBACK_POLL_MS = 15_000;
+/** A lista só é recarregada por aluno novo no máximo uma vez por esta janela. */
+const LIST_REFRESH_MIN_GAP_MS = 5_000;
+/** Distância do fim a partir da qual o leitor "saiu do rodapé" e não é puxado para baixo. */
+const STICK_TO_BOTTOM_PX = 120;
+/** Tamanho máximo de uma página de mensagens novas — se vier cheia, ainda pode haver mais. */
+const NEWER_PAGE_SIZE = 100;
+
+type LiveStatus = 'CONNECTED' | 'DEGRADED';
+
+/** Como no WhatsApp Web: o selo para de contar em 99. */
+const unreadLabel = (count: number) => (count > 99 ? '99+' : String(count));
+
+/** `data` do evento SSE como JSON, ou `undefined` se vier malformado (nunca derruba a tela). */
+function eventData(raw: Event): unknown {
+  try {
+    return JSON.parse((raw as MessageEvent<string>).data) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Aviso de mensagem nova para o chat aberto. `seq` distingue avisos repetidos do mesmo aluno. */
+interface LiveMessageEvent {
+  seq: number;
+  studentId: string;
+  messageId?: string;
+}
 
 const dayKeyFormat = new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE });
 const timeFormat = new Intl.DateTimeFormat('pt-BR', {
@@ -156,16 +207,28 @@ function ConversationList({
             const label = displayName(item.name, item.phoneNumber);
             const selected = item.studentId === selectedId;
             return (
-              <li key={item.studentId}>
+              <li key={item.studentId} className="p-1.5">
                 <button
                   type="button"
                   onClick={() => onSelect(item.studentId)}
                   aria-current={selected ? 'true' : undefined}
+                  // Borda = estado do atendimento automático do AI Coach: vermelha pausado,
+                  // verde ativo. O texto para leitor de tela está logo abaixo (a cor sozinha
+                  // não carrega a informação).
                   className={cn(
-                    'flex w-full items-center gap-3 border-b border-border/60 px-3 py-3 text-left transition-colors hover:bg-muted focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset',
+                    'flex w-full items-center gap-3 rounded-lg border-2 px-3 py-2.5 text-left transition-colors hover:bg-muted focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none',
+                    item.aiPaused ? 'border-red-600' : 'border-emerald-600',
                     selected && 'bg-muted',
                   )}
                 >
+                  <span className="sr-only">
+                    {item.aiPaused
+                      ? 'Atendimento automático pausado.'
+                      : 'Atendimento automático ativo.'}
+                    {item.unreadCount > 0
+                      ? ` ${item.unreadCount} ${item.unreadCount === 1 ? 'mensagem não lida' : 'mensagens não lidas'}.`
+                      : ''}
+                  </span>
                   <Avatar studentId={item.studentId} label={label} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-body font-semibold text-foreground">
@@ -175,12 +238,29 @@ function ConversationList({
                       {formatPhone(item.phoneNumber)}
                     </span>
                   </span>
-                  <time
-                    dateTime={item.lastMessageAt}
-                    className="shrink-0 self-start pt-0.5 text-[0.6875rem] text-muted-foreground"
-                  >
-                    {listTimestamp(item.lastMessageAt)}
-                  </time>
+                  {/* Horário no topo; selo de não lidas no fim do retângulo, como no WhatsApp Web
+                      (o horário também fica verde enquanto há mensagem não lida). */}
+                  <span className="flex shrink-0 flex-col items-end justify-between gap-1.5 self-stretch">
+                    <time
+                      dateTime={item.lastMessageAt}
+                      className={cn(
+                        'pt-0.5 text-[0.6875rem]',
+                        item.unreadCount > 0
+                          ? 'font-semibold text-emerald-700'
+                          : 'text-muted-foreground',
+                      )}
+                    >
+                      {listTimestamp(item.lastMessageAt)}
+                    </time>
+                    {item.unreadCount > 0 ? (
+                      <span
+                        aria-hidden="true"
+                        className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-700 px-1.5 text-[0.6875rem] font-semibold text-white"
+                      >
+                        {unreadLabel(item.unreadCount)}
+                      </span>
+                    ) : null}
+                  </span>
                 </button>
               </li>
             );
@@ -235,16 +315,47 @@ type ScrollIntent = { kind: 'bottom' } | { kind: 'keep'; height: number };
 function ChatPanel({
   student,
   onBack,
+  onAiPausedChange,
+  onMessageSent,
+  liveEvent,
+  catchUpTick,
+  liveStatus,
+  onMarkRead,
+  onUnreadGrow,
 }: {
   student: ControlCenterConversationSummary;
   onBack: () => void;
+  onAiPausedChange: (paused: boolean) => void;
+  onMessageSent: (createdAt: string) => void;
+  liveEvent: LiveMessageEvent | null;
+  catchUpTick: number;
+  liveStatus: LiveStatus;
+  /** Zera o selo deste aluno (marca como lido até `upTo`, a última mensagem vista). */
+  onMarkRead: (upTo?: string) => void;
+  /** Chegou mensagem do aluno que o leitor ainda não viu (rolou para cima ou aba em segundo plano). */
+  onUnreadGrow: (count: number) => void;
 }) {
   const [messages, setMessages] = useState<ControlCenterConversationMessage[]>([]);
   const [olderCursor, setOlderCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [error, setError] = useState('');
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const [toggling, setToggling] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const [unseen, setUnseen] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
+  // Espelhos para o tempo real ler o estado atual sem recriar o efeito a cada mensagem.
+  const messagesRef = useRef<ControlCenterConversationMessage[]>([]);
+  const loadingRef = useRef(true);
+  const stickToBottom = useRef(true);
+  const syncing = useRef(false);
+  const resync = useRef(false);
+  // Última marca de leitura enviada: não repete o mesmo `upTo` (evita laço se o servidor ainda
+  // devolver não lidas por causa de uma mensagem que esta tela ainda não buscou).
+  const markedUpTo = useRef<string | null>(null);
+  const paused = student.aiPaused;
   // O que o `useLayoutEffect` faz após renderizar: descer ao fim (abrir/atualizar) ou
   // manter a posição de leitura (ao inserir mensagens antigas no topo).
   const scrollIntent = useRef<ScrollIntent | null>(null);
@@ -253,10 +364,14 @@ function ChatPanel({
   const loadLatest = useCallback(
     async (signal?: AbortSignal) => {
       setLoading(true);
+      loadingRef.current = true;
       setError('');
       try {
         const res = await getConversationMessages(student.studentId, undefined, signal);
         scrollIntent.current = { kind: 'bottom' };
+        stickToBottom.current = true;
+        markedUpTo.current = null;
+        setUnseen(false);
         setMessages(res.data.messages);
         setOlderCursor(res.data.olderCursor);
       } catch (caught) {
@@ -267,7 +382,10 @@ function ChatPanel({
           caught instanceof Error ? caught.message : 'Não foi possível carregar a conversa.',
         );
       } finally {
-        if (!signal?.aborted) setLoading(false);
+        if (!signal?.aborted) {
+          setLoading(false);
+          loadingRef.current = false;
+        }
       }
     },
     [student.studentId],
@@ -280,6 +398,114 @@ function ChatPanel({
     void loadLatest(controller.signal);
     return () => controller.abort();
   }, [loadLatest]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  /** O leitor está de fato vendo o fim da conversa: carregada, aba visível e rolada até o rodapé. */
+  const canMarkRead = useCallback(
+    () => !loadingRef.current && document.visibilityState === 'visible' && stickToBottom.current,
+    [],
+  );
+
+  const markReadNow = useCallback(() => {
+    const upTo = messagesRef.current.at(-1)?.createdAt;
+    const previous = markedUpTo.current;
+    // Sem mensagem carregada só marca uma vez ("agora"); com mensagem, só se avançou.
+    if (
+      upTo === undefined
+        ? previous !== null
+        : previous !== null && previous !== 'now' && upTo <= previous
+    ) {
+      return;
+    }
+    markedUpTo.current = upTo ?? 'now';
+    onMarkRead(upTo);
+  }, [onMarkRead]);
+
+  // Abrir a conversa, voltar para a aba ou descer até o fim lê o que estava pendente.
+  useEffect(() => {
+    if (student.unreadCount > 0 && canMarkRead()) markReadNow();
+  }, [student.unreadCount, loading, unseen, catchUpTick, canMarkRead, markReadNow]);
+
+  /**
+   * Traz só o que chegou depois da última mensagem conhecida e acrescenta ao fim. Falha em
+   * silêncio (o chat já carregado continua intacto) — o próximo aviso ou o botão
+   * "Atualizar conversa" tenta de novo. Chamadas simultâneas viram uma segunda rodada.
+   */
+  const fetchNewer = useCallback(async () => {
+    if (loadingRef.current) return;
+    if (syncing.current) {
+      resync.current = true;
+      return;
+    }
+    syncing.current = true;
+    try {
+      do {
+        resync.current = false;
+        const last = messagesRef.current.at(-1);
+        const res = last
+          ? await getNewerConversationMessages(student.studentId, last.createdAt)
+          : await getConversationMessages(student.studentId);
+        const known = new Set(messagesRef.current.map((message) => message.id));
+        const fresh = res.data.messages.filter((message) => !known.has(message.id));
+        if (fresh.length > 0) {
+          if (stickToBottom.current) scrollIntent.current = { kind: 'bottom' };
+          else setUnseen(true);
+          if (!last) setOlderCursor(res.data.olderCursor);
+          messagesRef.current = [...messagesRef.current, ...fresh];
+          setMessages(messagesRef.current);
+          // Só mensagem do aluno conta (a minha e o 👍/👎 do sistema, não). Se o leitor está
+          // vendo o fim, já leu; senão fica como não lida.
+          const fromStudent = fresh.filter(
+            (message) => message.direction === 'INBOUND' && message.messageType !== 'SYSTEM',
+          ).length;
+          if (fromStudent > 0) {
+            if (canMarkRead()) markReadNow();
+            else onUnreadGrow(fromStudent);
+          }
+        }
+        // Página cheia = pode haver mais; segue até esvaziar.
+        if (last && res.data.messages.length >= NEWER_PAGE_SIZE) resync.current = true;
+      } while (resync.current);
+    } catch {
+      /* silencioso de propósito — ver o comentário acima */
+    } finally {
+      syncing.current = false;
+    }
+  }, [student.studentId, canMarkRead, markReadNow, onUnreadGrow]);
+
+  const lastLiveSeq = useRef(0);
+  useEffect(() => {
+    if (!liveEvent || liveEvent.studentId !== student.studentId) return;
+    if (liveEvent.seq === lastLiveSeq.current) return;
+    lastLiveSeq.current = liveEvent.seq;
+    // O envio manual desta própria tela já tem a linha (veio na resposta do POST).
+    if (liveEvent.messageId && messagesRef.current.some((m) => m.id === liveEvent.messageId))
+      return;
+    void fetchNewer();
+  }, [liveEvent, student.studentId, fetchNewer]);
+
+  const initialCatchUpTick = useRef(catchUpTick);
+  useEffect(() => {
+    if (catchUpTick === initialCatchUpTick.current) return;
+    void fetchNewer();
+  }, [catchUpTick, fetchNewer]);
+
+  function onLogScroll() {
+    const el = scroller.current;
+    if (!el) return;
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_TO_BOTTOM_PX;
+    if (stickToBottom.current) setUnseen(false);
+  }
+
+  function jumpToBottom() {
+    const el = scroller.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    stickToBottom.current = true;
+    setUnseen(false);
+  }
 
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -307,6 +533,54 @@ function ChatPanel({
     }
   }
 
+  async function togglePaused() {
+    if (toggling) return;
+    setToggling(true);
+    setActionError('');
+    try {
+      const res = await setConversationAiPaused(student.studentId, !paused);
+      onAiPausedChange(res.data.aiPaused);
+    } catch (caught) {
+      setActionError(
+        caught instanceof Error ? caught.message : 'Não foi possível alterar o atendimento.',
+      );
+    } finally {
+      setToggling(false);
+    }
+  }
+
+  async function submitMessage(event?: FormEvent) {
+    event?.preventDefault();
+    const text = draft.trim();
+    if (!paused || !text || sending) return;
+    setSending(true);
+    setActionError('');
+    try {
+      const res = await sendConversationMessage(student.studentId, text);
+      scrollIntent.current = { kind: 'bottom' };
+      stickToBottom.current = true;
+      setUnseen(false);
+      messagesRef.current = [...messagesRef.current, res.data.message];
+      setMessages(messagesRef.current);
+      setDraft('');
+      onMessageSent(res.data.message.createdAt);
+    } catch (caught) {
+      setActionError(
+        caught instanceof Error ? caught.message : 'Não foi possível enviar a mensagem.',
+      );
+    } finally {
+      setSending(false);
+    }
+  }
+
+  // Como no WhatsApp Web: Enter envia, Shift+Enter quebra a linha.
+  function onDraftKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      void submitMessage();
+    }
+  }
+
   return (
     <section aria-label={`Conversa com ${label}`} className="flex min-h-0 flex-1 flex-col">
       <header className="flex items-center gap-3 border-b border-border bg-card px-3 py-2.5">
@@ -326,6 +600,23 @@ function ChatPanel({
             {formatPhone(student.phoneNumber)}
           </p>
         </div>
+        <span
+          className="hidden items-center gap-1.5 text-[0.6875rem] text-muted-foreground sm:flex"
+          title={
+            liveStatus === 'CONNECTED'
+              ? 'Mensagens novas aparecem sozinhas.'
+              : 'Sem conexão em tempo real: a conversa é verificada a cada 15 segundos.'
+          }
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              'size-2 rounded-full',
+              liveStatus === 'CONNECTED' ? 'bg-emerald-600' : 'bg-amber-500',
+            )}
+          />
+          {liveStatus === 'CONNECTED' ? 'Ao vivo' : 'Reconectando…'}
+        </span>
         <Button
           variant="ghost"
           size="icon"
@@ -337,56 +628,131 @@ function ChatPanel({
         </Button>
       </header>
 
-      <div
-        ref={scroller}
-        role="log"
-        aria-label="Mensagens"
-        className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-muted/40 px-3 py-4 sm:px-6"
-      >
-        {olderCursor ? (
-          <div className="flex justify-center pb-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void loadOlder()}
-              disabled={loadingOlder}
-            >
-              {loadingOlder ? 'Carregando…' : 'Carregar mensagens anteriores'}
-            </Button>
-          </div>
-        ) : null}
-        {loading && messages.length === 0 ? (
-          <p role="status" className="py-10 text-center text-body text-muted-foreground">
-            Carregando conversa…
-          </p>
-        ) : null}
-        {error ? (
-          <p role="alert" className="rounded-lg border border-coral bg-card p-3 text-body">
-            {error}
-          </p>
-        ) : null}
-        {!loading && !error && messages.length === 0 ? (
-          <p className="py-10 text-center text-body text-muted-foreground">
-            Nenhuma mensagem nesta conversa.
-          </p>
-        ) : null}
-        {messages.map((message, index) => {
-          const previous = messages[index - 1];
-          const newDay = !previous || dayKey(previous.createdAt) !== dayKey(message.createdAt);
-          return (
-            <div key={message.id} className="space-y-2">
-              {newDay ? (
-                <div className="flex justify-center py-1">
-                  <span className="rounded-full bg-card px-3 py-1 text-[0.6875rem] font-medium text-muted-foreground shadow-sm">
-                    {daySeparator(message.createdAt)}
-                  </span>
-                </div>
-              ) : null}
-              <MessageBubble message={message} studentLabel={label} />
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div
+          ref={scroller}
+          role="log"
+          aria-label="Mensagens"
+          onScroll={onLogScroll}
+          className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-muted/40 px-3 py-4 sm:px-6"
+        >
+          {olderCursor ? (
+            <div className="flex justify-center pb-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void loadOlder()}
+                disabled={loadingOlder}
+              >
+                {loadingOlder ? 'Carregando…' : 'Carregar mensagens anteriores'}
+              </Button>
             </div>
-          );
-        })}
+          ) : null}
+          {loading && messages.length === 0 ? (
+            <p role="status" className="py-10 text-center text-body text-muted-foreground">
+              Carregando conversa…
+            </p>
+          ) : null}
+          {error ? (
+            <p role="alert" className="rounded-lg border border-coral bg-card p-3 text-body">
+              {error}
+            </p>
+          ) : null}
+          {!loading && !error && messages.length === 0 ? (
+            <p className="py-10 text-center text-body text-muted-foreground">
+              Nenhuma mensagem nesta conversa.
+            </p>
+          ) : null}
+          {messages.map((message, index) => {
+            const previous = messages[index - 1];
+            const newDay = !previous || dayKey(previous.createdAt) !== dayKey(message.createdAt);
+            return (
+              <div key={message.id} className="space-y-2">
+                {newDay ? (
+                  <div className="flex justify-center py-1">
+                    <span className="rounded-full bg-card px-3 py-1 text-[0.6875rem] font-medium text-muted-foreground shadow-sm">
+                      {daySeparator(message.createdAt)}
+                    </span>
+                  </div>
+                ) : null}
+                <MessageBubble message={message} studentLabel={label} />
+              </div>
+            );
+          })}
+        </div>
+        {unseen ? (
+          <Button
+            type="button"
+            size="sm"
+            onClick={jumpToBottom}
+            className="absolute right-4 bottom-3 rounded-full shadow-md"
+          >
+            <ArrowDown aria-hidden="true" />
+            Novas mensagens
+          </Button>
+        ) : null}
       </div>
+
+      <form
+        onSubmit={(event) => void submitMessage(event)}
+        aria-label="Enviar mensagem ao aluno"
+        className="border-t border-border bg-card p-3"
+      >
+        <div className="flex items-end gap-2">
+          <label className="min-w-0 flex-1">
+            <span className="sr-only">Mensagem para {label}</span>
+            <textarea
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={onDraftKeyDown}
+              disabled={!paused || sending}
+              rows={1}
+              maxLength={CONTROL_CENTER_MANUAL_MESSAGE_MAX_LENGTH}
+              placeholder={
+                paused ? 'Digite uma mensagem' : 'Pause o atendimento automático para escrever'
+              }
+              className="block max-h-32 min-h-11 w-full resize-none rounded-lg border border-border bg-background px-3 py-2.5 text-body placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-70"
+            />
+          </label>
+          <Button
+            type="submit"
+            size="icon"
+            disabled={!paused || sending || draft.trim().length === 0}
+            aria-label="Enviar mensagem"
+          >
+            <SendHorizontal aria-hidden="true" />
+          </Button>
+          {/* Botão único que alterna: mostra a AÇÃO possível — "Pausar" com o AI Coach ativo,
+              "Ativar" com ele pausado. */}
+          <Button
+            type="button"
+            onClick={() => void togglePaused()}
+            disabled={toggling}
+            aria-label={
+              paused
+                ? 'Ativar o atendimento automático do AI Coach'
+                : 'Pausar o atendimento automático do AI Coach'
+            }
+            className={cn(
+              'text-white',
+              paused ? 'bg-emerald-700 hover:bg-emerald-800' : 'bg-red-600 hover:bg-red-700',
+            )}
+          >
+            {paused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
+            {paused ? 'Ativar' : 'Pausar'}
+          </Button>
+        </div>
+        <p className="mt-2 text-label text-muted-foreground">
+          {paused
+            ? 'Atendimento automático pausado: o AI Coach não responde a este aluno. Suas mensagens saem pelo WhatsApp da MOVIVO.'
+            : 'Atendimento automático ativo: o AI Coach responde ao aluno. Pause para escrever manualmente.'}
+        </p>
+        {actionError ? (
+          <p role="alert" className="mt-2 rounded-lg border border-coral bg-card p-2 text-body">
+            {actionError}
+          </p>
+        ) : null}
+      </form>
     </section>
   );
 }
@@ -394,12 +760,145 @@ function ChatPanel({
 /**
  * Aba "Conversas": lista de alunos à esquerda e histórico do WhatsApp à direita, no molde
  * do WhatsApp Web. Em telas estreitas mostra uma coluna por vez (lista → conversa).
- * Somente leitura — a MOVIVO responde pelo fluxo do AI Coach, nunca por esta tela.
+ * A moldura de cada aluno mostra o estado do atendimento automático do AI Coach (vermelha
+ * pausado, verde ativo). Com ele pausado o profissional escreve ao aluno por aqui; com ele
+ * ativo o campo de mensagem fica travado, para a IA e um humano nunca responderem juntos.
  */
 export function ConversationsDashboard() {
   const { data, error, forbidden, loading, refresh } = useControlCenterResource(getConversations);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const conversations = useMemo(() => data?.data.conversations ?? [], [data]);
+  // Alterações feitas nesta tela (pausar/ativar, mensagem enviada) valem de imediato, sem
+  // recarregar a lista; um novo carregamento do servidor passa a ser a fonte de verdade.
+  const [overrides, setOverrides] = useState<
+    Record<string, { aiPaused?: boolean; lastMessageAt?: string; unreadCount?: number }>
+  >({});
+  useEffect(() => setOverrides({}), [data]);
+  const conversations = useMemo(
+    () =>
+      (data?.data.conversations ?? [])
+        .map((item) => ({ ...item, ...overrides[item.studentId] }))
+        // Mensagem nova leva o aluno ao topo, como no WhatsApp.
+        .sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt)),
+    [data, overrides],
+  );
+  const patch = useCallback(
+    (id: string, change: { aiPaused?: boolean; lastMessageAt?: string; unreadCount?: number }) =>
+      setOverrides((current) => ({ ...current, [id]: { ...current[id], ...change } })),
+    [],
+  );
+
+  // --- tempo real -----------------------------------------------------------------------
+  const [liveStatus, setLiveStatus] = useState<LiveStatus>('DEGRADED');
+  const [liveEvent, setLiveEvent] = useState<LiveMessageEvent | null>(null);
+  const [catchUpTick, setCatchUpTick] = useState(0);
+  const liveSeq = useRef(0);
+  const knownIds = useRef<ReadonlySet<string>>(new Set());
+  const serverUnread = useRef<ReadonlyMap<string, number>>(new Map());
+  const selectedRef = useRef<string | null>(null);
+  const refreshRef = useRef(refresh);
+  const lastListRefresh = useRef(0);
+  const ready = data !== null;
+  useEffect(() => {
+    knownIds.current = new Set(conversations.map((item) => item.studentId));
+    refreshRef.current = refresh;
+  }, [conversations, refresh]);
+  useEffect(() => {
+    serverUnread.current = new Map(
+      (data?.data.conversations ?? []).map((item) => [item.studentId, item.unreadCount]),
+    );
+  }, [data]);
+  useEffect(() => {
+    selectedRef.current = selectedId;
+  }, [selectedId]);
+
+  /** Soma `count` ao selo do aluno (parte do valor atual, já com o que mudou nesta tela). */
+  const bumpUnread = useCallback((id: string, count: number) => {
+    setOverrides((current) => ({
+      ...current,
+      [id]: {
+        ...current[id],
+        unreadCount: (current[id]?.unreadCount ?? serverUnread.current.get(id) ?? 0) + count,
+      },
+    }));
+  }, []);
+
+  /** Lê a conversa: zera o selo na hora e confirma com o servidor (que devolve o que sobrou). */
+  const markRead = useCallback(
+    (id: string, upTo?: string) => {
+      patch(id, { unreadCount: 0 });
+      markConversationRead(id, upTo)
+        .then((res) => patch(id, { unreadCount: res.data.unreadCount }))
+        .catch(() => undefined); // melhor esforço: o selo se corrige no próximo carregamento
+    },
+    [patch],
+  );
+
+  useEffect(() => {
+    if (!ready) return;
+    let poll: number | undefined;
+    let everOpened = false;
+    // Pede ao chat aberto que busque o que perdeu (reconexão, aba que voltou, polling).
+    const catchUp = () => {
+      if (document.visibilityState === 'visible') setCatchUpTick((tick) => tick + 1);
+    };
+    const startPoll = () => {
+      setLiveStatus('DEGRADED');
+      poll ??= window.setInterval(catchUp, FALLBACK_POLL_MS);
+    };
+    const stopPoll = () => {
+      if (poll !== undefined) window.clearInterval(poll);
+      poll = undefined;
+    };
+    document.addEventListener('visibilitychange', catchUp);
+
+    if (typeof EventSource === 'undefined') {
+      startPoll();
+      return () => {
+        stopPoll();
+        document.removeEventListener('visibilitychange', catchUp);
+      };
+    }
+
+    const source = new EventSource(EVENTS_URL);
+    source.onopen = () => {
+      stopPoll();
+      setLiveStatus('CONNECTED');
+      // Reconectou: o que chegou no intervalo não gerou aviso — busca por garantia.
+      if (everOpened) catchUp();
+      everOpened = true;
+    };
+    source.onerror = startPoll;
+    source.addEventListener('conversation.message', (raw) => {
+      const parsed = controlCenterConversationMessageEventSchema.safeParse(eventData(raw));
+      if (!parsed.success) return;
+      const { studentId, at, messageId, direction } = parsed.data;
+      liveSeq.current += 1;
+      setLiveEvent({ seq: liveSeq.current, studentId, messageId });
+      if (knownIds.current.has(studentId)) {
+        patch(studentId, { lastMessageAt: at });
+        // Conversa aberta: a própria tela conta o que é não lido (sabe se o leitor está no fim).
+        if (direction === 'INBOUND' && studentId !== selectedRef.current) bumpUnread(studentId, 1);
+      } else if (Date.now() - lastListRefresh.current > LIST_REFRESH_MIN_GAP_MS) {
+        // Aluno que ainda não estava na lista (primeira mensagem): recarrega a lista.
+        lastListRefresh.current = Date.now();
+        void refreshRef.current();
+      }
+    });
+    source.addEventListener('conversation.read', (raw) => {
+      const parsed = controlCenterConversationReadEventSchema.safeParse(eventData(raw));
+      if (parsed.success) patch(parsed.data.studentId, { unreadCount: parsed.data.unreadCount });
+    });
+    source.addEventListener('conversation.attendance', (raw) => {
+      const parsed = controlCenterConversationAttendanceEventSchema.safeParse(eventData(raw));
+      if (parsed.success) patch(parsed.data.studentId, { aiPaused: parsed.data.aiPaused });
+    });
+
+    return () => {
+      source.close();
+      stopPoll();
+      document.removeEventListener('visibilitychange', catchUp);
+    };
+  }, [ready, patch, bumpUnread]);
   const selected = conversations.find((item) => item.studentId === selectedId) ?? null;
 
   if (!data) {
@@ -429,6 +928,13 @@ export function ConversationsDashboard() {
             key={selected.studentId}
             student={selected}
             onBack={() => setSelectedId(null)}
+            onAiPausedChange={(aiPaused) => patch(selected.studentId, { aiPaused })}
+            onMessageSent={(lastMessageAt) => patch(selected.studentId, { lastMessageAt })}
+            liveEvent={liveEvent}
+            catchUpTick={catchUpTick}
+            liveStatus={liveStatus}
+            onMarkRead={(upTo) => markRead(selected.studentId, upTo)}
+            onUnreadGrow={(count) => bumpUnread(selected.studentId, count)}
           />
         ) : (
           <div className="flex flex-1 items-center justify-center p-6">

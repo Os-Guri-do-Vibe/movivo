@@ -22,6 +22,9 @@ describe('allowlist de mutações do Control Center', () => {
     // gravava em produção (bug 2026-09-29).
     'ai/exercise-catalog/favorite',
     'ai/exercise-catalog/unfavorite',
+    `conversations/${ID}/ai-attendance`,
+    `conversations/${ID}/messages`,
+    `conversations/${ID}/read`,
   ])('autoriza somente a mutação conhecida %s', (path) => {
     expect(isAllowedControlMutationPath(path)).toBe(true);
   });
@@ -38,6 +41,15 @@ describe('allowlist de mutações do Control Center', () => {
     'ai/exercise-catalog/favorite/extra',
     'ai/exercise-catalog/unfavorite-all',
     'ai/exercise-catalog/Favorite',
+    // Conversas: só as duas ações conhecidas, e só com UUID.
+    'conversations',
+    `conversations/${ID}`,
+    `conversations/${ID}/photo`,
+    `conversations/${ID}/messages/extra`,
+    `conversations/${ID}/read/extra`,
+    `conversations/${ID}/unread`,
+    `conversations/${ID}/delete`,
+    'conversations/not-a-uuid/messages',
     'ai/exercise-catalog/delete',
   ])('recusa o caminho não autorizado %s', (path) => {
     expect(isAllowedControlMutationPath(path)).toBe(false);

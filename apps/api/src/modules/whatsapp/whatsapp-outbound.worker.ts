@@ -19,6 +19,7 @@ import { type AgentPersona } from '@movivo/shared';
 
 import { AgentPersonaService } from '../../core/agent-config/agent-persona.service';
 import { AppConfigService } from '../../core/config';
+import { ConversationEventsService } from '../../core/event-bus/conversation-events.service';
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { conversations, protocols, users } from '../../core/database/schema';
@@ -56,6 +57,8 @@ export type WhatsappJobType =
   | 'WORKOUT_INSIGHT'
   | 'REENGAGEMENT'
   | 'CONSENT_STATUS'
+  // Texto escrito à mão pelo profissional na aba "Conversas" (atendimento automático pausado).
+  | 'MANUAL_MESSAGE'
   // US-6.5 — código de verificação de posse do número, ANTES de existir `users`.
   | 'PHONE_VERIFICATION'
   | 'TYPING';
@@ -123,6 +126,7 @@ const HEALTH_JOB_TYPES: ReadonlySet<WhatsappJobType> = new Set([
   'WORKOUT_DAILY_LINK',
   'WORKOUT_INSIGHT',
   'REENGAGEMENT',
+  'MANUAL_MESSAGE',
 ]);
 
 @Injectable()
@@ -139,6 +143,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     private readonly logger: PinoLogger,
     private readonly accessLinks: AccessLinkService,
     private readonly cipher: HealthCipherService,
+    private readonly conversationEvents: ConversationEventsService,
   ) {
     this.logger.setContext(WhatsappOutboundWorker.name);
   }
@@ -259,8 +264,10 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     const text = await this.buildText(job.data);
     if (!text) return { status: 'SKIPPED' };
     // `COACH_MESSAGE` já é gravado em `conversations` por quem gera a resposta
-    // (`AiResponseWorker.deliver`, junto das métricas do modelo) — gravar de novo duplicaria.
-    await this.sendBubbles(text, phone, job.data, type === 'COACH_MESSAGE' ? undefined : userId);
+    // (`AiResponseWorker.deliver`, junto das métricas do modelo) e `MANUAL_MESSAGE` pela API
+    // do painel, no momento do envio — gravar de novo duplicaria.
+    const alreadyRecorded = type === 'COACH_MESSAGE' || type === 'MANUAL_MESSAGE';
+    await this.sendBubbles(text, phone, job.data, alreadyRecorded ? undefined : userId);
     await this.redis.set(markerKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);
     return { status: 'SENT' };
   }
@@ -300,6 +307,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       await this.db.runAsUser(userId, 'USER', async (tx) => {
         await tx.insert(conversations).values({ userId, direction: 'OUTBOUND', content });
       });
+      this.conversationEvents.emitMessage(userId, 'OUTBOUND');
     } catch (err: unknown) {
       this.logger.warn(
         { err, userId, event: 'whatsapp_outbound_history_failed' },
@@ -326,6 +334,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       case 'REENGAGEMENT':
       case 'CONSENT_STATUS':
       case 'MESOCYCLE_RENEWAL_INVITE':
+      case 'MANUAL_MESSAGE':
         return data.text ?? null;
       case 'PHONE_VERIFICATION':
       case 'TYPING':

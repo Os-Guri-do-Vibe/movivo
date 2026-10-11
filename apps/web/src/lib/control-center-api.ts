@@ -47,8 +47,14 @@ import {
   controlCenterStudentsResponseSchema,
   controlCenterConversationsResponseSchema,
   controlCenterConversationMessagesResponseSchema,
+  controlCenterConversationAiAttendanceResponseSchema,
+  controlCenterConversationReadResponseSchema,
+  controlCenterConversationSendResponseSchema,
   type ControlCenterConversationsResponse,
   type ControlCenterConversationMessagesResponse,
+  type ControlCenterConversationAiAttendanceResponse,
+  type ControlCenterConversationReadResponse,
+  type ControlCenterConversationSendResponse,
   controlCenterSystemResponseSchema,
   type ControlCenterComplianceResponse,
   controlCenterCampaignsResponseSchema,
@@ -374,6 +380,67 @@ export function getConversationMessages(
   );
 }
 
+/** Só o que chegou desde `after` (ISO, inclusive) — o que o tempo real usa para atualizar o chat. */
+export function getNewerConversationMessages(
+  studentId: string,
+  after: string,
+  signal?: AbortSignal,
+): Promise<ControlCenterConversationMessagesResponse> {
+  return request(
+    `conversations/${encodeURIComponent(studentId)}/messages?after=${encodeURIComponent(after)}`,
+    controlCenterConversationMessagesResponseSchema,
+    signal,
+  );
+}
+
+const CONVERSATION_ACTION_MESSAGES = {
+  forbidden: 'Seu papel não pode pausar o atendimento nem escrever para o aluno.',
+  fallback: 'Não foi possível concluir a operação.',
+  contract: 'A operação devolveu dados fora do contrato esperado.',
+};
+
+/** Pausa (`true`) ou reativa (`false`) o atendimento automático do AI Coach de um aluno. */
+export function setConversationAiPaused(
+  studentId: string,
+  paused: boolean,
+): Promise<ControlCenterConversationAiAttendanceResponse> {
+  return mutate(
+    `conversations/${encodeURIComponent(studentId)}/ai-attendance`,
+    { paused },
+    controlCenterConversationAiAttendanceResponseSchema,
+    CONVERSATION_ACTION_MESSAGES,
+  );
+}
+
+/**
+ * Marca a conversa como lida até `upTo` (a última mensagem vista; sem ele, "agora"). Devolve
+ * a contagem de não lidas DEPOIS da marca — pode ser > 0 se chegou mensagem no meio.
+ */
+export function markConversationRead(
+  studentId: string,
+  upTo?: string,
+): Promise<ControlCenterConversationReadResponse> {
+  return mutate(
+    `conversations/${encodeURIComponent(studentId)}/read`,
+    upTo ? { upTo } : {},
+    controlCenterConversationReadResponseSchema,
+    CONVERSATION_ACTION_MESSAGES,
+  );
+}
+
+/** Envia ao WhatsApp do aluno uma mensagem escrita à mão (só com o atendimento pausado). */
+export function sendConversationMessage(
+  studentId: string,
+  text: string,
+): Promise<ControlCenterConversationSendResponse> {
+  return mutate(
+    `conversations/${encodeURIComponent(studentId)}/messages`,
+    { text },
+    controlCenterConversationSendResponseSchema,
+    CONVERSATION_ACTION_MESSAGES,
+  );
+}
+
 export function getSystemSummary(signal?: AbortSignal): Promise<ControlCenterSystemResponse> {
   return request('system', controlCenterSystemResponseSchema, signal);
 }
@@ -448,7 +515,16 @@ export function getInviolableRules(
  * erro cedo, e a capability `AI_CONFIG_WRITE` é exigida no endpoint — esconder o botão na UI
  * nunca foi o controle de acesso.
  */
-async function mutate<T>(path: string, body: unknown, schema: Parser<T>): Promise<T> {
+async function mutate<T>(
+  path: string,
+  body: unknown,
+  schema: Parser<T>,
+  messages: { forbidden: string; fallback: string; contract: string } = {
+    forbidden: 'Seu papel pode ver a configuração, mas não publicar.',
+    fallback: 'Não foi possível concluir a publicação.',
+    contract: 'A publicação devolveu dados fora do contrato esperado.',
+  },
+): Promise<T> {
   const response = await fetch(`/api/dashboard/control/${path}`, {
     method: 'POST',
     credentials: 'same-origin',
@@ -461,14 +537,14 @@ async function mutate<T>(path: string, body: unknown, schema: Parser<T>): Promis
       isRecord(value) && typeof value.message === 'string'
         ? value.message
         : response.status === 403
-          ? 'Seu papel pode ver a configuração, mas não publicar.'
-          : 'Não foi possível concluir a publicação.';
+          ? messages.forbidden
+          : messages.fallback;
     throw new ControlCenterApiError(response.status, message);
   }
   try {
     return schema.parse(value);
   } catch {
-    throw new ControlCenterApiError(502, 'A publicação devolveu dados fora do contrato esperado.');
+    throw new ControlCenterApiError(502, messages.contract);
   }
 }
 

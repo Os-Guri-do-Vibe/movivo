@@ -49,6 +49,7 @@ interface Deps {
   constraints?: unknown;
   safetyHandoff?: boolean;
   consentActive?: boolean;
+  coachPaused?: boolean;
   faqMatch?: PublishedFaqMatch | null;
   faqUnavailable?: boolean;
   forbiddenHit?: ForbiddenTopicHit | null;
@@ -260,6 +261,7 @@ function makeWorker(deps: Deps = {}) {
     substitutionFlow,
     redis,
     keys as never,
+    { isPaused: vi.fn(async () => deps.coachPaused ?? false) } as never,
     logger,
   );
   return {
@@ -309,6 +311,15 @@ function sentText(enqueue: EnqueueCalls): string | undefined {
 afterEach(() => vi.restoreAllMocks());
 
 describe('AIResponseWorker.process (US-3.5)', () => {
+  it('atendimento pausado: registra a mensagem do aluno e não chama a IA nem responde', async () => {
+    const { worker, persistTurn, complete, enqueue } = makeWorker({ coachPaused: true });
+    await expect(worker.process(job())).resolves.toEqual({ status: 'PAUSED' });
+    expect(persistTurn).toHaveBeenCalledWith(expect.objectContaining({ direction: 'INBOUND' }));
+    expect(persistTurn).toHaveBeenCalledTimes(1);
+    expect(complete).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
   it('descarta o batch sem persistir ou chamar LLM apos revogacao', async () => {
     const { worker, batchDel, persistTurn, complete } = makeWorker({ consentActive: false });
     await expect(worker.process(job())).resolves.toEqual({ status: 'CONSENT_REVOKED' });

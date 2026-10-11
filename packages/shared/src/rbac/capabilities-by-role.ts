@@ -27,6 +27,8 @@ export const CAPABILITIES_BY_ROLE: Readonly<Record<Role, readonly Capability[]>>
     ControlCenterCapability.AI_KNOWLEDGE_APPROVE,
     ControlCenterCapability.AI_METHODOLOGY_APPROVE,
     ControlCenterCapability.AI_GUARDRAIL_APPROVE,
+    // Assume a conversa com o aluno quando o atendimento automático está pausado.
+    ControlCenterCapability.CONVERSATIONS_WRITE,
   ],
   [ControlCenterRole.MARKETING]: [
     ControlCenterCapability.MARKETING_READ,

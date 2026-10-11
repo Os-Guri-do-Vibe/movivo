@@ -18,6 +18,7 @@ import type { BiologicalSex } from '@movivo/shared';
 import { conversations, handoffAlerts, users } from '../../core/database/schema';
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
+import { ConversationEventsService } from '../../core/event-bus/conversation-events.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import type { ScrubUser } from '../ai-coach/llm/llm.types';
 
@@ -48,6 +49,7 @@ export class ConversationRepository {
     private readonly db: TenantDatabase,
     private readonly queueEvents: DashboardQueueEventsService,
     private readonly cipher: HealthCipherService,
+    private readonly conversationEvents: ConversationEventsService,
   ) {}
 
   /**
@@ -106,5 +108,6 @@ export class ConversationRepository {
         ragSources: input.ragSources?.length ? input.ragSources : null,
       });
     });
+    this.conversationEvents.emitMessage(input.userId, input.direction);
   }
 }
