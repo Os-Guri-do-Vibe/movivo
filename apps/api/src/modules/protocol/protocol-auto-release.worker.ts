@@ -25,6 +25,7 @@ import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { buildProtocolPdf } from './protocol-pdf.service';
 import { ProtocolRepository } from './protocol.repository';
+import { ReviewHoldService } from './review-hold.service';
 import { WorkoutPresentationService } from './workout-presentation.service';
 
 export interface ProtocolAutoReleaseJob {
@@ -40,6 +41,7 @@ export class ProtocolAutoReleaseWorker implements OnModuleInit {
     private readonly repository: ProtocolRepository,
     private readonly queueEvents: DashboardQueueEventsService,
     private readonly workoutPresentation: WorkoutPresentationService,
+    private readonly reviewHold: ReviewHoldService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(ProtocolAutoReleaseWorker.name);
@@ -53,6 +55,24 @@ export class ProtocolAutoReleaseWorker implements OnModuleInit {
 
   async process(job: Job<ProtocolAutoReleaseJob>): Promise<{ status: string }> {
     const { userId, protocolId } = job.data;
+
+    // O profissional está com este protocolo aberto na tela de revisão/edição: o prazo venceu,
+    // mas o envio espera ele fechar a tela (`ReviewHoldService.release` dispara na
+    // hora). Se o protocolo nem espera mais a auto-liberação (assinado, editado), não há o
+    // que adiar — encerra a corrente de rechecagens.
+    const target = { kind: 'PROTOCOL', userId, id: protocolId } as const;
+    if (await this.reviewHold.isHeld(target)) {
+      if (!(await this.repository.isAwaitingAutoRelease(userId, protocolId))) {
+        return { status: 'SKIPPED' };
+      }
+      await this.reviewHold.deferRelease(target);
+      this.logger.info(
+        { event: 'protocol_auto_release_held', userId, protocolId },
+        'auto-liberação adiada — protocolo aberto na tela de revisão',
+      );
+      return { status: 'HELD' };
+    }
+
     const release = await this.repository.autoRelease(userId, protocolId);
 
     if (!release.released) {

@@ -22,6 +22,7 @@ import { WorkerFactory } from '../jobs/worker.factory';
 import { buildProtocolPdf } from './protocol-pdf.service';
 import { ProtocolRepository } from './protocol.repository';
 import { ProtocolSubstitutionRepository } from './protocol-substitution.repository';
+import { ReviewHoldService } from './review-hold.service';
 import { WorkoutPresentationService } from './workout-presentation.service';
 
 /** Janela de cortesia da substituição — bem mais curta que a de geração completa (1h),
@@ -42,6 +43,7 @@ export class ProtocolSubstitutionReleaseWorker implements OnModuleInit {
     private readonly protocolRepository: ProtocolRepository,
     private readonly queueEvents: DashboardQueueEventsService,
     private readonly workoutPresentation: WorkoutPresentationService,
+    private readonly reviewHold: ReviewHoldService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(ProtocolSubstitutionReleaseWorker.name);
@@ -55,6 +57,24 @@ export class ProtocolSubstitutionReleaseWorker implements OnModuleInit {
 
   async process(job: Job<ProtocolSubstitutionReleaseJob>): Promise<{ status: string }> {
     const { userId, requestId } = job.data;
+
+    // O profissional está com esta proposta aberta na tela de revisão: o prazo venceu, mas o
+    // envio espera ele fechar a tela (`ReviewHoldService.release` dispara na hora). Se a
+    // proposta nem espera mais a liberação automática (decidida, escalada), não há o que
+    // adiar — encerra a corrente de rechecagens.
+    const target = { kind: 'SUBSTITUTION', userId, id: requestId } as const;
+    if (await this.reviewHold.isHeld(target)) {
+      if (!(await this.repository.isAwaitingAutoRelease(userId, requestId))) {
+        return { status: 'SKIPPED' };
+      }
+      await this.reviewHold.deferRelease(target);
+      this.logger.info(
+        { event: 'substitution_auto_release_held', userId, requestId },
+        'liberação automática da troca adiada — proposta aberta na tela de revisão',
+      );
+      return { status: 'HELD' };
+    }
+
     const release = await this.repository.release({ userId, role: 'USER' }, requestId);
 
     if (!release.released) {

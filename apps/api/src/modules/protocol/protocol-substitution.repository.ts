@@ -657,6 +657,15 @@ export class ProtocolSubstitutionRepository {
   }
 
   /** Leitura por id, sob RLS — usada pelo dashboard (detalhe) e pelo worker de liberação. */
+  /**
+   * `true` se a proposta ainda espera a liberação automática (`PENDING` + `OPTIONAL`). Leitura
+   * barata para o worker decidir se vale seguir adiando enquanto a tela de revisão está aberta.
+   */
+  async isAwaitingAutoRelease(userId: string, requestId: string): Promise<boolean> {
+    const row = await this.findById({ userId, role: 'USER' }, requestId);
+    return row?.status === 'PENDING' && row.reviewUrgency === 'OPTIONAL';
+  }
+
   async findById(actor: SubstitutionActor, requestId: string) {
     const [row] = await this.db.runAsUser(actor.userId, actor.role, (tx) =>
       tx

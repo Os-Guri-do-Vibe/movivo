@@ -51,6 +51,8 @@ function makeWorker(
   opts: {
     findLatestPersonalInfo?: () => Promise<typeof personal | null>;
     aiSummary?: string | undefined;
+    held?: boolean;
+    awaiting?: boolean;
   } = {},
 ) {
   const workers = { create: vi.fn() } as unknown as WorkerFactory;
@@ -70,11 +72,17 @@ function makeWorker(
   const autoRelease = vi.fn(async () => releaseResult);
   const findLatestPersonalInfo = vi.fn(opts.findLatestPersonalInfo ?? (async () => personal));
   const setPdfContent = vi.fn(async () => undefined);
+  const isAwaitingAutoRelease = vi.fn(async () => opts.awaiting ?? true);
   const repository = {
     autoRelease,
     findLatestPersonalInfo,
     setPdfContent,
+    isAwaitingAutoRelease,
   } as unknown as ProtocolRepository;
+  const reviewHold = {
+    isHeld: vi.fn(async () => opts.held ?? false),
+    deferRelease: vi.fn(async () => undefined),
+  };
   const enqueue = vi.fn(async () => 'job');
   const queues = { enqueue } as unknown as QueueManager;
   const emit = vi.fn();
@@ -88,9 +96,12 @@ function makeWorker(
     repository,
     queueEvents,
     workoutPresentation,
+    reviewHold as never,
     logger,
   );
   return {
+    reviewHold,
+    isAwaitingAutoRelease,
     worker,
     workers,
     autoRelease,
@@ -111,6 +122,37 @@ describe('ProtocolAutoReleaseWorker (fila do profissional — "Disponível para 
     const { worker, workers } = makeWorker(true);
     worker.onModuleInit();
     expect(workers.create).toHaveBeenCalledWith('protocol-auto-release', expect.any(Function));
+  });
+
+  it('prazo venceu com a tela de revisão ABERTA: não libera, adia e marca o envio como pendente', async () => {
+    const { worker, autoRelease, enqueue, reviewHold } = makeWorker(true, 1, { held: true });
+    const res = await worker.process(job());
+    expect(res.status).toBe('HELD');
+    expect(reviewHold.deferRelease).toHaveBeenCalledWith({
+      kind: 'PROTOCOL',
+      userId: 'u1',
+      id: 'p1',
+    });
+    expect(autoRelease).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled(); // nada foi enviado ao aluno
+  });
+
+  it('tela aberta mas o protocolo já foi assinado/editado: encerra, sem adiar de novo', async () => {
+    const { worker, autoRelease, reviewHold } = makeWorker(true, 1, {
+      held: true,
+      awaiting: false,
+    });
+    const res = await worker.process(job());
+    expect(res.status).toBe('SKIPPED');
+    expect(reviewHold.deferRelease).not.toHaveBeenCalled();
+    expect(autoRelease).not.toHaveBeenCalled();
+  });
+
+  it('sem tela aberta segue o caminho de sempre (nem consulta se está aguardando)', async () => {
+    const { worker, autoRelease, isAwaitingAutoRelease } = makeWorker(true, 1, { held: false });
+    await worker.process(job());
+    expect(autoRelease).toHaveBeenCalledWith('u1', 'p1');
+    expect(isAwaitingAutoRelease).not.toHaveBeenCalled();
   });
 
   it('CREF não agiu em 1h → libera, entrega e notifica o painel', async () => {

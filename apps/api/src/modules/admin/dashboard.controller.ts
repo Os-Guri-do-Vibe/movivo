@@ -148,6 +148,58 @@ export class DashboardController {
     return this.dashboard.editProtocol(actor, id, body);
   }
 
+  @Post('protocols/:id/review-hold')
+  @Roles('PROFESSIONAL', 'ADMIN')
+  @ApiOperation({
+    summary: 'Avisa que o protocolo está aberto (ou foi fechado) na tela de revisão',
+    description:
+      '`active: true` renova a trava enquanto a tela está aberta: se o prazo da auto-liberação vencer nesse intervalo, o envio espera. `active: false` solta a trava e dispara na hora o envio que venceu. A trava expira sozinha em 2 min sem renovação.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID do protocolo.' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { active: { type: 'boolean' } },
+      required: ['active'],
+    },
+  })
+  @ApiResponse({ status: 201, description: 'Estado da trava e se um envio vencido foi disparado.' })
+  @ApiResponse({ status: 400, description: 'Corpo fora do schema.' })
+  @ApiResponse({ status: 404, description: 'Protocolo inexistente.' })
+  setReviewHold(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    return this.dashboard.setReviewHold(actor, 'PROTOCOL', id, body);
+  }
+
+  @Post('substitutions/:id/review-hold')
+  @Roles('PROFESSIONAL', 'ADMIN')
+  @ApiOperation({
+    summary: 'Avisa que a troca de exercício está aberta (ou foi fechada) na tela de revisão',
+    description:
+      'Mesmo contrato de `protocols/:id/review-hold`: `active: true` renova a trava enquanto a tela está aberta (a liberação automática de 30 min que vencer espera); `active: false` solta e dispara na hora o envio que venceu.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID da proposta de substituição.' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { active: { type: 'boolean' } },
+      required: ['active'],
+    },
+  })
+  @ApiResponse({ status: 201, description: 'Estado da trava e se um envio vencido foi disparado.' })
+  @ApiResponse({ status: 400, description: 'Corpo fora do schema.' })
+  @ApiResponse({ status: 404, description: 'Proposta inexistente.' })
+  setSubstitutionReviewHold(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    return this.dashboard.setReviewHold(actor, 'SUBSTITUTION', id, body);
+  }
+
   @Post('protocols/:id/sign')
   @Roles('PROFESSIONAL', 'ADMIN')
   @ApiOperation({
