@@ -654,21 +654,22 @@ export class AIResponseWorker implements OnModuleInit {
             })
           : ({ status: 'INSUFFICIENT', latencyMs: 0 } as const);
 
-      // Achado 2026-10-12: texto verificado mas barrado pelo validador de linguagem deixou de ir
-      // direto pra resposta-padrão — cai no caminho generativo comum logo abaixo, que tem o
-      // mesmo validador e uma rodada de correção. Só perde a citação da fonte, não a resposta.
-      const groundedVerdict =
-        grounded.status === 'VERIFIED' ? this.validation.validateResponse(grounded.text) : null;
-      if (groundedVerdict?.action === 'BLOCK_FALLBACK') {
-        this.logger.info(
-          {
-            event: 'grounded_answer_blocked_regenerating',
-            violations: groundedVerdict.violations.map((v) => v.rule),
-          },
-          'resposta fundamentada barrada pelo validador; segue pro caminho generativo com correção',
-        );
-      }
-      if (grounded.status === 'VERIFIED' && groundedVerdict?.action !== 'BLOCK_FALLBACK') {
+      if (grounded.status === 'VERIFIED') {
+        const groundedVerdict = this.validation.validateResponse(grounded.text);
+        // Resposta fundamentada barrada (ex.: prescrição vinda do texto de uma fonte) NÃO
+        // ganha nova geração: pergunta de saúde barrada segue direto pra resposta-padrão +
+        // revisão humana. A rodada de correção vale só pro caminho generativo comum.
+        if (groundedVerdict.action === 'BLOCK_FALLBACK') {
+          return {
+            text: STANDARD_BLOCK_RESPONSE,
+            modelUsed: grounded.model,
+            latencyMs: grounded.latencyMs,
+            validationPassed: false,
+            humanReview: true,
+            blocked: true,
+            blockedViolations: groundedVerdict.violations.map((v) => v.rule),
+          };
+        }
         return {
           // Achado 2026-09-02 (correção do fundador): esta era a única saída generativa do
           // worker que devolvia o texto do modelo direto, sem passar por
@@ -680,7 +681,7 @@ export class AIResponseWorker implements OnModuleInit {
           modelUsed: grounded.model,
           latencyMs: grounded.latencyMs,
           validationPassed: true,
-          humanReview: grounded.humanReview || Boolean(groundedVerdict?.humanReviewRequired),
+          humanReview: grounded.humanReview || groundedVerdict.humanReviewRequired,
           blocked: false,
           ragSources: grounded.sources.map((source) => ({
             ...source,
