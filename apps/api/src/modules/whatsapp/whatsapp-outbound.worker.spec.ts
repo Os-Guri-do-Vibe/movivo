@@ -43,6 +43,7 @@ function structure(): ProtocolStructure {
 }
 
 interface Deps {
+  staffPhone?: string;
   phone?: string | null;
   name?: string | null;
   proto?: {
@@ -165,7 +166,7 @@ function makeWorker(deps: Deps = {}) {
     hasCredentials: () => true,
   } as unknown as WhatsappTransport;
   const config = {
-    whatsapp: { publicSiteUrl: 'https://movivo.test' },
+    whatsapp: { publicSiteUrl: 'https://movivo.test', staffQueueAlertPhone: deps.staffPhone },
   } as unknown as AppConfigService;
   const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() } as never;
   const emitMessage = vi.fn();
@@ -220,6 +221,45 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
     const res = await worker.process(job({ userId: null, type: 'PHONE_VERIFICATION' }));
     expect(res.status).toBe('INVALID');
     expect(sendTemplate).not.toHaveBeenCalled();
+  });
+
+  it('STAFF_QUEUE_ALERT: manda ao número do profissional (não ao aluno) com nome e ação de protocolo', async () => {
+    const { worker, send } = makeWorker({ staffPhone: '+5511998767013', phone: '+5541999999999' });
+    const res = await worker.process(
+      job({ type: 'STAFF_QUEUE_ALERT', staffAlertKind: 'PROTOCOL_REVIEW', dedupeId: 'p1' }),
+    );
+    expect(res.status).toBe('SENT');
+    expect(send).toHaveBeenCalledOnce();
+    const sent = send.mock.calls[0]?.[0];
+    expect(sent?.to).toBe('+5511998767013');
+    expect(sent?.text).toContain('Ana Beatriz');
+    expect(sent?.text).toContain('revisão de protocolo');
+  });
+
+  it('STAFF_QUEUE_ALERT: identifica a revisão de substituição de exercício', async () => {
+    const { worker, send } = makeWorker({ staffPhone: '+5511998767013' });
+    await worker.process(
+      job({ type: 'STAFF_QUEUE_ALERT', staffAlertKind: 'SUBSTITUTION_REVIEW', dedupeId: 's1' }),
+    );
+    expect(send.mock.calls[0]?.[0]?.text).toContain('revisão de substituição de exercício');
+  });
+
+  it('STAFF_QUEUE_ALERT: sem número configurado fica desligado e não envia', async () => {
+    const { worker, send } = makeWorker();
+    const res = await worker.process(
+      job({ type: 'STAFF_QUEUE_ALERT', staffAlertKind: 'PROTOCOL_REVIEW', dedupeId: 'p1' }),
+    );
+    expect(res.status).toBe('DISABLED');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('STAFF_QUEUE_ALERT: alerta já enviado não reenvia', async () => {
+    const { worker, send } = makeWorker({ staffPhone: '+5511998767013', markerExists: true });
+    const res = await worker.process(
+      job({ type: 'STAFF_QUEUE_ALERT', staffAlertKind: 'PROTOCOL_REVIEW', dedupeId: 'p1' }),
+    );
+    expect(res.status).toBe('ALREADY_SENT');
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('descarta outbound de saude enfileirado antes da revogacao', async () => {

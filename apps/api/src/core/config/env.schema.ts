@@ -335,6 +335,15 @@ export const envSchema = z
     // ------------------------------------------ WhatsApp / EvolutionAPI
     /** Base pública para o deep-link da página read-only do protocolo (US-2.6). */
     PUBLIC_SITE_URL: z.string().url().default('http://localhost:3000'),
+    /**
+     * Número que recebe o alerta de WhatsApp quando um protocolo ou uma proposta de
+     * substituição entra na fila do profissional (E.164, com ou sem `+`). Opcional:
+     * ausente = alerta desligado, o resto do fluxo não muda.
+     */
+    STAFF_QUEUE_ALERT_PHONE: z
+      .string()
+      .regex(/^\+?[1-9]\d{9,14}$/, 'STAFF_QUEUE_ALERT_PHONE deve estar em formato E.164')
+      .optional(),
 
     // ------------------------------------------ EvolutionAPI (painel "Sistema →
     // Integração" — conexão via QR Code/Baileys). Chave

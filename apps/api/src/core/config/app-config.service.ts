@@ -78,6 +78,8 @@ export interface LlmConfig {
 export interface WhatsappConfig {
   /** Base do deep-link da página read-only do protocolo (US-2.6). */
   readonly publicSiteUrl: string;
+  /** Destino do alerta de fila do profissional; `undefined` = alerta desligado. */
+  readonly staffQueueAlertPhone: string | undefined;
 }
 
 export interface EvolutionConfig {
@@ -276,6 +278,7 @@ export class AppConfigService {
   get whatsapp(): WhatsappConfig {
     return {
       publicSiteUrl: this.config.PUBLIC_SITE_URL,
+      staffQueueAlertPhone: this.config.STAFF_QUEUE_ALERT_PHONE,
     };
   }
 

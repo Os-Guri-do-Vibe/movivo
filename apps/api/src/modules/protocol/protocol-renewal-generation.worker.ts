@@ -50,6 +50,7 @@ import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queu
 import { isFinalFailure } from '../jobs/dlq.handler';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
+import { enqueueStaffQueueAlert } from '../jobs/staff-queue-alert';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { healthBlockSchema } from '../anamnesis/health-block';
 import { evaluateRenewalSafety } from '../protocol-renewal/protocol-renewal-safety';
@@ -233,6 +234,11 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
         : 'renovação PENDING_REVIEW — aguarda painel CREF ou auto-liberação em 1h',
     );
     this.queueEvents.emit('protocol');
+    await enqueueStaffQueueAlert(this.queues, this.logger, {
+      userId,
+      kind: 'PROTOCOL_REVIEW',
+      refId: persisted.protocolId,
+    });
     return { status: 'PENDING_REVIEW' };
   }
 
@@ -710,7 +716,14 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
         promptVersion: FALLBACK_TEMPLATE_VERSION,
         signed: false,
       });
-      if (!persisted.alreadyExisted) this.queueEvents.emit('protocol');
+      if (!persisted.alreadyExisted) {
+        this.queueEvents.emit('protocol');
+        await enqueueStaffQueueAlert(this.queues, this.logger, {
+          userId,
+          kind: 'PROTOCOL_REVIEW',
+          refId: persisted.protocolId,
+        });
+      }
     } catch (persistErr) {
       this.logger.error(
         { userId, renewalSessionId, err: persistErr },
