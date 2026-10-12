@@ -94,7 +94,7 @@ describe('SystemScriptsService.list', () => {
     expect(workout?.lastRun).toEqual({
       state: 'COMPLETED',
       at: new Date(3_000).toISOString(),
-      summary: '10 elegíveis · 4 enviados',
+      summary: '10 elegíveis · 4 na fila de envio',
     });
   });
 

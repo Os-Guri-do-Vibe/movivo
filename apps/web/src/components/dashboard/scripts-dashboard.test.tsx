@@ -71,10 +71,33 @@ describe('ScriptsDashboard', () => {
     expect(screen.getByRole('button', { name: 'Executar Link diário de treino' })).toBeEnabled();
   });
 
-  it('script de terminal aparece com o comando e o botão desabilitado', async () => {
+  it('as categorias são recolhíveis: crons abertos, terminal recolhido até expandir', async () => {
+    const user = userEvent.setup();
     getSystemScripts.mockResolvedValue(response([CRON, TERMINAL]));
     render(<ScriptsDashboard />);
 
+    const crons = await screen.findByRole('button', { name: /Crons agendados/ });
+    const terminal = screen.getByRole('button', { name: /Scripts de terminal/ });
+    expect(crons).toHaveAttribute('aria-expanded', 'true');
+    expect(terminal).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByText('Link diário de treino')).toBeVisible();
+    expect(screen.getByText('Zerar MFA de conta interna')).not.toBeVisible();
+
+    await user.click(terminal);
+    expect(terminal).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Zerar MFA de conta interna')).toBeVisible();
+
+    await user.click(crons);
+    expect(crons).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByText('Link diário de treino')).not.toBeVisible();
+  });
+
+  it('script de terminal aparece com o comando e o botão desabilitado', async () => {
+    const user = userEvent.setup();
+    getSystemScripts.mockResolvedValue(response([CRON, TERMINAL]));
+    render(<ScriptsDashboard />);
+
+    await user.click(await screen.findByRole('button', { name: /Scripts de terminal/ }));
     expect(await screen.findByText('node dist/scripts/reset-staff-mfa.js <email>')).toBeVisible();
     expect(
       screen.getByRole('button', { name: 'Executar Zerar MFA de conta interna' }),

@@ -11,12 +11,13 @@
  * Execução de cron é assíncrona (fila): o painel faz polling enquanto houver uma execução
  * manual em andamento, para mostrar o resultado sem o operador recarregar a página.
  */
-import { Play, CalendarClock, Clock3, Terminal } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { CalendarClock, ChevronDown, Play, Terminal } from 'lucide-react';
+import { useCallback, useEffect, useId, useState, type ReactNode } from 'react';
 import type { ControlCenterScript, ControlCenterScriptRunState } from '@movivo/shared';
 
 import { Button } from '@/components/ui/button';
 import { getSystemScripts, runSystemScript } from '@/lib/control-center-api';
+import { cn } from '@/lib/utils';
 
 import { ConfirmAction } from './confirm-action';
 import { StatusBadge } from './control-center-table';
@@ -29,19 +30,24 @@ const SECTIONS: ReadonlyArray<{
   kind: ControlCenterScript['kind'];
   title: string;
   hint: string;
+  /** A lista de terminal é longa e só de consulta: nasce recolhida. */
+  defaultOpen: boolean;
 }> = [
   {
     kind: 'CRON',
+    defaultOpen: true,
     title: 'Crons agendados',
     hint: 'Varreduras que rodam sozinhas. Executar aqui roda uma vez agora, sem alterar o horário padrão.',
   },
   {
     kind: 'ROUTINE',
+    defaultOpen: true,
     title: 'Rotinas internas',
     hint: 'Rotinas da API que rodam em timer ou sob demanda. Executar aqui roda na hora.',
   },
   {
     kind: 'TERMINAL',
+    defaultOpen: false,
     title: 'Scripts de terminal',
     hint: 'Precisam de argumento, acesso à VPS ou são pontuais. Ficam listados para consulta e rodam só pelo terminal.',
   },
@@ -115,7 +121,7 @@ function ScriptRow({
           <ConfirmAction
             triggerLabel={`Executar ${script.name}`}
             triggerIcon={Play}
-            triggerVariant="outline"
+            triggerVariant="default"
             triggerSize="icon"
             title={`Executar "${script.name}" agora?`}
             description={
@@ -131,7 +137,7 @@ function ScriptRow({
         ) : (
           <Button
             type="button"
-            variant="outline"
+            variant="default"
             size="icon"
             disabled
             aria-label={`Executar ${script.name}`}
@@ -148,6 +154,50 @@ function ScriptRow({
         </p>
       ) : null}
     </li>
+  );
+}
+
+function ScriptSection({
+  title,
+  hint,
+  defaultOpen,
+  count,
+  children,
+}: {
+  title: string;
+  hint: string;
+  defaultOpen: boolean;
+  count: number;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const panelId = useId();
+  return (
+    <section aria-label={title}>
+      <h2 className="text-h2 font-bold">
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={panelId}
+          onClick={() => setOpen((current) => !current)}
+          className="flex w-full items-center gap-2 rounded-md text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
+        >
+          <ChevronDown
+            aria-hidden="true"
+            className={cn(
+              'size-5 shrink-0 text-verde-pulso transition-transform',
+              !open && '-rotate-90',
+            )}
+          />
+          {title}
+          <span className="text-label font-medium text-muted-foreground">({count})</span>
+        </button>
+      </h2>
+      <div id={panelId} hidden={!open}>
+        <p className="mt-1 text-label text-muted-foreground">{hint}</p>
+        <ul className="mt-4 space-y-3">{children}</ul>
+      </div>
+    </section>
   );
 }
 
@@ -196,23 +246,22 @@ export function ScriptsDashboard() {
             const items = scripts.filter((script) => script.kind === section.kind);
             if (!items.length) return null;
             return (
-              <section key={section.kind} aria-label={section.title}>
-                <h2 className="flex items-center gap-2 text-h2 font-bold">
-                  <Clock3 aria-hidden="true" className="size-5 text-verde-pulso" />
-                  {section.title}
-                </h2>
-                <p className="mt-1 text-label text-muted-foreground">{section.hint}</p>
-                <ul className="mt-4 space-y-3">
-                  {items.map((script) => (
-                    <ScriptRow
-                      key={script.id}
-                      script={script}
-                      notice={notices[script.id]}
-                      onRun={handleRun}
-                    />
-                  ))}
-                </ul>
-              </section>
+              <ScriptSection
+                key={section.kind}
+                title={section.title}
+                hint={section.hint}
+                defaultOpen={section.defaultOpen}
+                count={items.length}
+              >
+                {items.map((script) => (
+                  <ScriptRow
+                    key={script.id}
+                    script={script}
+                    notice={notices[script.id]}
+                    onRun={handleRun}
+                  />
+                ))}
+              </ScriptSection>
             );
           })}
         </div>
