@@ -440,10 +440,13 @@ class FakeEventSource {
     );
   }
 }
-const stream = (): FakeEventSource => {
-  const current = FakeEventSource.instances.at(-1);
-  if (!current) throw new Error('nenhum EventSource aberto');
-  return current;
+/**
+ * O stream abre num efeito que roda DEPOIS da lista renderizar (e, sob carga, depois do
+ * `findBy*` que o teste acabou de esperar): quem usa precisa esperar, não assumir.
+ */
+const stream = async (): Promise<FakeEventSource> => {
+  await waitFor(() => expect(FakeEventSource.instances.length).toBeGreaterThan(0));
+  return FakeEventSource.instances.at(-1) as FakeEventSource;
 };
 
 describe('ConversationsDashboard — tempo real', () => {
@@ -479,17 +482,17 @@ describe('ConversationsDashboard — tempo real', () => {
     await screen.findByRole('list', { name: 'Conversas' });
     // O stream abre num efeito que roda depois da lista renderizar: espera, não assume.
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
-    expect(stream().url).toBe('/api/dashboard/conversations/events');
+    expect((await stream()).url).toBe('/api/dashboard/conversations/events');
     unmount();
-    expect(stream().closed).toBe(true);
+    expect((await stream()).closed).toBe(true);
   });
 
   it('mostra "Ao vivo" quando conecta e "Reconectando…" quando cai', async () => {
     await openAna();
     expect(screen.getByText('Reconectando…')).toBeInTheDocument();
-    stream().open();
+    (await stream()).open();
     expect(screen.getByText('Ao vivo')).toBeInTheDocument();
-    stream().fail();
+    (await stream()).fail();
     expect(screen.getByText('Reconectando…')).toBeInTheDocument();
   });
 
@@ -502,7 +505,7 @@ describe('ConversationsDashboard — tempo real', () => {
       ]),
     );
 
-    stream().emit('conversation.message', messageEvent(ANA));
+    (await stream()).emit('conversation.message', messageEvent(ANA));
 
     expect(await within(log).findByText('Tudo bem?')).toBeVisible();
     expect(getNewerConversationMessages).toHaveBeenCalledWith(ANA, '2026-10-09T15:00:00.000Z');
@@ -530,7 +533,7 @@ describe('ConversationsDashboard — tempo real', () => {
     );
     await screen.findByText('Já vou aí', { selector: 'p' });
 
-    stream().emit(
+    (await stream()).emit(
       'conversation.message',
       messageEvent(ANA, { direction: 'OUTBOUND', messageId: 'm9' }),
     );
@@ -545,7 +548,7 @@ describe('ConversationsDashboard — tempo real', () => {
       .map((button) => button.textContent);
     expect(before[0]).toContain('Ana Souza');
 
-    stream().emit('conversation.message', messageEvent(BRUNO));
+    (await stream()).emit('conversation.message', messageEvent(BRUNO));
 
     const after = within(screen.getByRole('list', { name: 'Conversas' })).getAllByRole('button');
     expect(after[0]).toHaveTextContent('+55 (11) 99999-0002');
@@ -555,7 +558,10 @@ describe('ConversationsDashboard — tempo real', () => {
   it('mensagem de aluno que ainda não está na lista: recarrega a lista', async () => {
     await openAna();
     getConversations.mockClear();
-    stream().emit('conversation.message', messageEvent('99999999-9999-4999-8999-999999999999'));
+    (await stream()).emit(
+      'conversation.message',
+      messageEvent('99999999-9999-4999-8999-999999999999'),
+    );
     await waitFor(() => expect(getConversations).toHaveBeenCalledTimes(1));
   });
 
@@ -563,7 +569,7 @@ describe('ConversationsDashboard — tempo real', () => {
     await openAna();
     expect(screen.getByRole('button', { name: /Ana Souza/ })).toHaveClass('border-emerald-600');
 
-    stream().emit('conversation.attendance', { studentId: ANA, aiPaused: true });
+    (await stream()).emit('conversation.attendance', { studentId: ANA, aiPaused: true });
 
     expect(screen.getByRole('button', { name: /Ana Souza/ })).toHaveClass('border-red-600');
     expect(
@@ -574,23 +580,23 @@ describe('ConversationsDashboard — tempo real', () => {
 
   it('ignora evento malformado sem derrubar a tela', async () => {
     await openAna();
-    stream().emit('conversation.message', undefined, '{isso não é json');
-    stream().emit('conversation.message', { studentId: 'não-é-uuid' });
-    stream().emit('conversation.attendance', { studentId: ANA });
+    (await stream()).emit('conversation.message', undefined, '{isso não é json');
+    (await stream()).emit('conversation.message', { studentId: 'não-é-uuid' });
+    (await stream()).emit('conversation.attendance', { studentId: ANA });
     expect(getNewerConversationMessages).not.toHaveBeenCalled();
     expect(screen.getByRole('log', { name: 'Mensagens' })).toBeInTheDocument();
   });
 
   it('ao reconectar, busca o que pode ter chegado durante a queda', async () => {
     await openAna();
-    stream().open(); // 1ª conexão: nada a recuperar
+    (await stream()).open(); // 1ª conexão: nada a recuperar
     expect(getNewerConversationMessages).not.toHaveBeenCalled();
 
     getNewerConversationMessages.mockResolvedValue(
       history([msg('m3', 'INBOUND', 'enquanto você estava fora', '2026-10-10T19:00:00.000Z')]),
     );
-    stream().fail();
-    stream().open(); // reconexão
+    (await stream()).fail();
+    (await stream()).open(); // reconexão
 
     expect(await screen.findByText('enquanto você estava fora')).toBeVisible();
   });
@@ -605,7 +611,7 @@ describe('ConversationsDashboard — tempo real', () => {
     render(<ConversationsDashboard />);
     await user.click(await screen.findByRole('button', { name: /Ana Souza/ }));
     await screen.findByText('Oi!');
-    stream().fail();
+    (await stream()).fail();
     getNewerConversationMessages.mockResolvedValue(
       history([msg('m4', 'INBOUND', 'pelo polling', '2026-10-10T20:00:00.000Z')]),
     );
@@ -627,7 +633,7 @@ describe('ConversationsDashboard — tempo real', () => {
     getNewerConversationMessages.mockResolvedValue(
       history([msg('m5', 'INBOUND', 'olha isso', '2026-10-10T21:00:00.000Z')]),
     );
-    stream().emit('conversation.message', messageEvent(ANA));
+    (await stream()).emit('conversation.message', messageEvent(ANA));
 
     const jump = await screen.findByRole('button', { name: 'Novas mensagens' });
     expect(log.scrollTop).toBe(0);
@@ -641,7 +647,7 @@ describe('ConversationsDashboard — tempo real', () => {
     getNewerConversationMessages.mockResolvedValue(
       history([msg('m6', 'INBOUND', 'no rodapé', '2026-10-10T21:30:00.000Z')]),
     );
-    stream().emit('conversation.message', messageEvent(ANA));
+    (await stream()).emit('conversation.message', messageEvent(ANA));
     await within(log).findByText('no rodapé');
     expect(screen.queryByRole('button', { name: 'Novas mensagens' })).toBeNull();
   });
@@ -735,12 +741,12 @@ describe('ConversationsDashboard — mensagens não lidas', () => {
     await userEvent.click(await screen.findByRole('button', { name: /Ana Souza/ }));
     await screen.findByRole('log', { name: 'Mensagens' });
 
-    stream().emit('conversation.message', {
+    (await stream()).emit('conversation.message', {
       studentId: BRUNO,
       direction: 'INBOUND',
       at: '2026-10-10T18:00:00.000Z',
     });
-    stream().emit('conversation.message', {
+    (await stream()).emit('conversation.message', {
       studentId: BRUNO,
       direction: 'INBOUND',
       at: '2026-10-10T18:01:00.000Z',
@@ -754,7 +760,7 @@ describe('ConversationsDashboard — mensagens não lidas', () => {
     getConversations.mockResolvedValue(withUnread(0, 0));
     render(<ConversationsDashboard />);
     await screen.findByRole('list', { name: 'Conversas' });
-    stream().emit('conversation.message', {
+    (await stream()).emit('conversation.message', {
       studentId: BRUNO,
       direction: 'OUTBOUND',
       at: '2026-10-10T18:00:00.000Z',
@@ -774,7 +780,7 @@ describe('ConversationsDashboard — mensagens não lidas', () => {
       history([msg('m2', 'INBOUND', 'Chegou agora', '2026-10-10T18:00:00.000Z')]),
     );
 
-    stream().emit('conversation.message', {
+    (await stream()).emit('conversation.message', {
       studentId: ANA,
       direction: 'INBOUND',
       at: '2026-10-10T18:00:00.000Z',
@@ -804,7 +810,7 @@ describe('ConversationsDashboard — mensagens não lidas', () => {
       history([msg('m2', 'INBOUND', 'Olha isso', '2026-10-10T18:00:00.000Z')]),
     );
 
-    stream().emit('conversation.message', {
+    (await stream()).emit('conversation.message', {
       studentId: ANA,
       direction: 'INBOUND',
       at: '2026-10-10T18:00:00.000Z',
@@ -833,7 +839,7 @@ describe('ConversationsDashboard — mensagens não lidas', () => {
     getNewerConversationMessages.mockResolvedValue(
       history([msg('m2', 'INBOUND', 'Enquanto você estava fora', '2026-10-10T18:00:00.000Z')]),
     );
-    stream().emit('conversation.message', {
+    (await stream()).emit('conversation.message', {
       studentId: ANA,
       direction: 'INBOUND',
       at: '2026-10-10T18:00:00.000Z',
@@ -857,7 +863,7 @@ describe('ConversationsDashboard — mensagens não lidas', () => {
     await screen.findByRole('list', { name: 'Conversas' });
     expect(badge(row(/Ana Souza/))).toHaveTextContent('4');
 
-    stream().emit('conversation.read', { studentId: ANA, unreadCount: 0 });
+    (await stream()).emit('conversation.read', { studentId: ANA, unreadCount: 0 });
 
     expect(badge(row(/Ana Souza/))).toBeNull();
   });
