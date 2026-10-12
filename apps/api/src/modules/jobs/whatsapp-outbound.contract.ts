@@ -18,7 +18,11 @@ export type WhatsappJobType =
   // Texto escrito à mão pelo profissional na aba "Conversas" (atendimento automático pausado).
   | 'MANUAL_MESSAGE'
   | 'PHONE_VERIFICATION'
+  // Alerta ao profissional (número configurado, não o do aluno) de item novo na fila de revisão.
+  | 'STAFF_QUEUE_ALERT'
   | 'TYPING';
+
+export type StaffQueueAlertKind = 'PROTOCOL_REVIEW' | 'SUBSTITUTION_REVIEW';
 
 /** Contrato de fila compartilhado: produtores nao importam o dominio WhatsApp. */
 export interface WhatsappOutboundJob {
@@ -28,6 +32,8 @@ export interface WhatsappOutboundJob {
    */
   userId: string | null;
   type: WhatsappJobType;
+  /** `STAFF_QUEUE_ALERT` apenas: o que entrou na fila (o aluno é `userId`). */
+  staffAlertKind?: StaffQueueAlertKind;
   protocolId?: string;
   protocolVersion?: number;
   text?: string;

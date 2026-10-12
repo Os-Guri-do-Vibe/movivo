@@ -296,6 +296,17 @@ describe('ProtocolRenewalGenerationWorker.process', () => {
       { userId: 'u1', protocolId: 'p1' },
       { delay: 60 * 60 * 1000, jobId: 'auto-release-p1' },
     );
+    expect(enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'staff-queue-alert',
+      {
+        userId: 'u1',
+        type: 'STAFF_QUEUE_ALERT',
+        staffAlertKind: 'PROTOCOL_REVIEW',
+        dedupeId: 'p1',
+      },
+      { jobId: 'staff-queue-alert-PROTOCOL_REVIEW-p1' },
+    );
   });
 
   it('pergunta 10 (repescagem PAR-Q) "mudou para Sim": MANDATORY, sem auto-liberação, maxPhase ADAPTACAO', async () => {
@@ -313,7 +324,8 @@ describe('ProtocolRenewalGenerationWorker.process', () => {
     expect(repository.persist).toHaveBeenCalledWith(
       expect.objectContaining({ reviewUrgency: 'MANDATORY' }),
     );
-    expect(enqueue).not.toHaveBeenCalled();
+    // Só o alerta ao profissional: MANDATORY nunca agenda auto-liberação.
+    expect((enqueue.mock.calls as unknown[][]).map((c) => c[0])).toEqual(['whatsapp-outbound']);
   });
 
   it('conteúdo cai no fallback (BLOCK persistente): MANDATORY mesmo com PAR-Q liberado', async () => {
@@ -326,6 +338,7 @@ describe('ProtocolRenewalGenerationWorker.process', () => {
     expect(repository.persist).toHaveBeenCalledWith(
       expect.objectContaining({ reviewUrgency: 'MANDATORY' }),
     );
-    expect(enqueue).not.toHaveBeenCalled();
+    // Só o alerta ao profissional: MANDATORY nunca agenda auto-liberação.
+    expect((enqueue.mock.calls as unknown[][]).map((c) => c[0])).toEqual(['whatsapp-outbound']);
   });
 });

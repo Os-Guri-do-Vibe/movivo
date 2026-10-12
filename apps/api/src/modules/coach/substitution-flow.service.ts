@@ -36,6 +36,7 @@ import { ContextService } from '../ai-coach/context/context.service';
 import type { ScrubUser } from '../ai-coach/llm/llm.types';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
+import { enqueueStaffQueueAlert } from '../jobs/staff-queue-alert';
 import type { CatalogExercise } from '../protocol/exercise-catalog';
 import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
 import {
@@ -857,6 +858,11 @@ export class SubstitutionFlowService {
       );
     }
     this.queueEvents.emit('protocol');
+    await enqueueStaffQueueAlert(this.queues, this.logger, {
+      userId,
+      kind: 'SUBSTITUTION_REVIEW',
+      refId: created.id,
+    });
     this.logger.info(
       {
         userId,

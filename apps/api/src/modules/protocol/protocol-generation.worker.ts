@@ -56,6 +56,7 @@ import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queu
 import { isFinalFailure } from '../jobs/dlq.handler';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
+import { enqueueStaffQueueAlert } from '../jobs/staff-queue-alert';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { ProtocolGeneratorService } from './protocol-generator.service';
 import { planProtocol, type PlanResult } from './protocol-planner';
@@ -290,6 +291,11 @@ export class ProtocolGenerationWorker implements OnModuleInit {
         : 'protocolo PENDING_REVIEW — aguarda painel CREF ou auto-liberação em 1h',
     );
     this.queueEvents.emit('protocol');
+    await enqueueStaffQueueAlert(this.queues, this.logger, {
+      userId,
+      kind: 'PROTOCOL_REVIEW',
+      refId: persisted.protocolId,
+    });
     return { status: 'PENDING_REVIEW' };
   }
 
@@ -455,6 +461,11 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       });
       if (!persisted.alreadyExisted) {
         this.queueEvents.emit('protocol');
+        await enqueueStaffQueueAlert(this.queues, this.logger, {
+          userId,
+          kind: 'PROTOCOL_REVIEW',
+          refId: persisted.protocolId,
+        });
       }
     } catch (persistErr) {
       this.logger.error(

@@ -312,6 +312,17 @@ describe('SubstitutionFlowService — pergunta de alcance (só hoje x protocolo)
       { userId: 'u1', requestId: 'req1' },
       { delay: 30 * 60 * 1000, jobId: 'substitution-auto-release-req1' },
     );
+    expect(h.queues.enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'staff-queue-alert',
+      {
+        userId: 'u1',
+        type: 'STAFF_QUEUE_ALERT',
+        staffAlertKind: 'SUBSTITUTION_REVIEW',
+        dedupeId: 'req1',
+      },
+      { jobId: 'staff-queue-alert-SUBSTITUTION_REVIEW-req1' },
+    );
     expect(h.queueEvents.emit).toHaveBeenCalledWith('protocol');
     expect(h.store.has(h.stateKey)).toBe(false);
   });
@@ -587,7 +598,10 @@ describe('SubstitutionFlowService — exercício pedido fora das opções', () =
       diff: null,
     });
     // Nunca auto-libera: não há o que aplicar sozinho ainda.
-    expect(h.queues.enqueue).not.toHaveBeenCalled();
+    // Só o alerta ao profissional: MANDATORY nunca agenda auto-liberação.
+    expect((h.queues.enqueue.mock.calls as unknown[][]).map((c) => c[0])).toEqual([
+      'whatsapp-outbound',
+    ]);
     expect(h.queueEvents.emit).toHaveBeenCalledWith('protocol');
   });
 
@@ -603,7 +617,10 @@ describe('SubstitutionFlowService — exercício pedido fora das opções', () =
     expect(created).toMatchObject({
       items: [{ toExerciseId: ineligible.id, catalogGap: false, mandatory: true }],
     });
-    expect(h.queues.enqueue).not.toHaveBeenCalled();
+    // Só o alerta ao profissional: MANDATORY nunca agenda auto-liberação.
+    expect((h.queues.enqueue.mock.calls as unknown[][]).map((c) => c[0])).toEqual([
+      'whatsapp-outbound',
+    ]);
   });
 
   it('existe mas não tem nexo fisiológico: orienta na hora, sem registrar na fila', async () => {
@@ -675,7 +692,10 @@ describe('SubstitutionFlowService — PAR-Q e validação do protocolo inteiro',
     h.read({ [DIAMANTE.id]: { chosen: D1.id, scope: 'PROTOCOL' } });
     await h.service.handle(h.input());
     expect(h.repo.createPending).toHaveBeenCalledOnce();
-    expect(h.queues.enqueue).not.toHaveBeenCalled();
+    // Só o alerta ao profissional: MANDATORY nunca agenda auto-liberação.
+    expect((h.queues.enqueue.mock.calls as unknown[][]).map((c) => c[0])).toEqual([
+      'whatsapp-outbound',
+    ]);
   });
 
   it('validação reprova só no momento de gravar: mensagem segura + revisão humana, nada persistido', async () => {
@@ -777,7 +797,7 @@ describe('SubstitutionFlowService — troca em lote', () => {
     expect(out.extraSystem).toContain('As trocas foram CONFIRMADAS');
     expect(out.extraSystem).toContain(`"${DIAMANTE.name}" vai virar "${D1.name}"`);
     expect(out.extraSystem).toContain(`"${AFUNDO.name}" vai virar "${A1.name}"`);
-    expect(h.queues.enqueue).toHaveBeenCalledOnce();
+    expect(h.queues.enqueue).toHaveBeenCalledTimes(2);
   });
 
   it('alcance diferente por exercício: um vai pro protocolo, o outro é só recomendação de hoje', async () => {
@@ -814,7 +834,10 @@ describe('SubstitutionFlowService — troca em lote', () => {
       h.repo.createPending.mock.calls[0] as unknown as [{ items: Array<{ catalogGap: boolean }> }]
     )[0];
     expect(created.items.map((i) => i.catalogGap)).toEqual([true, false]);
-    expect(h.queues.enqueue).not.toHaveBeenCalled();
+    // Só o alerta ao profissional: MANDATORY nunca agenda auto-liberação.
+    expect((h.queues.enqueue.mock.calls as unknown[][]).map((c) => c[0])).toEqual([
+      'whatsapp-outbound',
+    ]);
   });
 
   it('um alvo do lote é excluído das opções do outro', async () => {

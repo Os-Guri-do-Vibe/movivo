@@ -27,6 +27,7 @@ import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QUEUE } from '../jobs/jobs.config';
+import { type StaffQueueAlertKind } from '../jobs/whatsapp-outbound.contract';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { FEEDBACK_BUTTONS } from './feedback';
 import {
@@ -36,6 +37,7 @@ import {
   confirmationMessage,
   PHONE_VERIFICATION_TEMPLATE,
   protocolDeliveryPdfText,
+  staffQueueAlertMessage,
 } from './message-templates';
 import {
   type QuickReplyButton,
@@ -61,12 +63,15 @@ export type WhatsappJobType =
   | 'MANUAL_MESSAGE'
   // US-6.5 — código de verificação de posse do número, ANTES de existir `users`.
   | 'PHONE_VERIFICATION'
+  | 'STAFF_QUEUE_ALERT'
   | 'TYPING';
 
 export interface WhatsappOutboundJob {
   /** `null` só em `PHONE_VERIFICATION`: nessa fase o titular ainda não existe. */
   userId: string | null;
   type: WhatsappJobType;
+  /** `STAFF_QUEUE_ALERT`: o que entrou na fila (o aluno é `userId`; o destino vem da config). */
+  staffAlertKind?: StaffQueueAlertKind;
   protocolId?: string;
   protocolVersion?: number;
   /**
@@ -169,6 +174,10 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       await this.transport.sendTemplate(phoneNumber, PHONE_VERIFICATION_TEMPLATE, [code]);
       return { status: 'SENT' };
     }
+
+    // Alerta ao profissional: o destino é o número configurado, nunca o do aluno — por isso
+    // sai antes de `resolvePhone`. Não depende de consentimento de saúde (só nome + tipo).
+    if (type === 'STAFF_QUEUE_ALERT') return this.sendStaffQueueAlert(job.data);
 
     if (!userId) {
       this.logger.warn({ type }, 'job de outbound sem titular — descartado');
@@ -316,6 +325,26 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     }
   }
 
+  private async sendStaffQueueAlert(data: WhatsappOutboundJob): Promise<{ status: string }> {
+    const { userId, staffAlertKind: kind, dedupeId } = data;
+    const to = this.config.whatsapp.staffQueueAlertPhone;
+    if (!to) return { status: 'DISABLED' };
+    if (!userId || !kind || !dedupeId) {
+      this.logger.warn(
+        { type: data.type },
+        'STAFF_QUEUE_ALERT sem aluno, tipo ou chave — descartado',
+      );
+      return { status: 'INVALID' };
+    }
+    const markerKey = this.keys.forUser(userId, 'wa-sent', data.type, `${kind}-${dedupeId}`);
+    if ((await this.redis.exists(markerKey)) === 1) return { status: 'ALREADY_SENT' };
+
+    const text = staffQueueAlertMessage(await this.resolveName(userId), kind);
+    await this.transport.send({ to, text });
+    await this.redis.set(markerKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);
+    return { status: 'SENT' };
+  }
+
   /** Monta o texto por tipo de job. `null` = nada a enviar (ex.: protocolo não aprovado). */
   private async buildText(data: WhatsappOutboundJob): Promise<string | null> {
     switch (data.type) {
@@ -337,6 +366,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       case 'MANUAL_MESSAGE':
         return data.text ?? null;
       case 'PHONE_VERIFICATION':
+      case 'STAFF_QUEUE_ALERT':
       case 'TYPING':
         return null; // tratados antes (código de verificação e presença)
     }
@@ -543,6 +573,13 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       tx.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1),
     );
     return row?.name?.trim().split(/\s+/)[0] ?? null;
+  }
+
+  private async resolveName(userId: string): Promise<string | null> {
+    const [row] = await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1),
+    );
+    return row?.name ?? null;
   }
 
   private async resolvePhone(userId: string): Promise<string | null> {

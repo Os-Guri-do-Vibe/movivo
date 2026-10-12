@@ -269,6 +269,17 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
       { userId: 'u1', protocolId: 'p1' },
       { delay: 60 * 60 * 1000, jobId: 'auto-release-p1' },
     );
+    expect(enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'staff-queue-alert',
+      {
+        userId: 'u1',
+        type: 'STAFF_QUEUE_ALERT',
+        staffAlertKind: 'PROTOCOL_REVIEW',
+        dedupeId: 'p1',
+      },
+      { jobId: 'staff-queue-alert-PROTOCOL_REVIEW-p1' },
+    );
   });
 
   it('loga o uso de favoritos do RT (só contagens) depois de validar e antes de persistir', async () => {
@@ -314,7 +325,8 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
       }),
     );
     // A barreira que importa: MANDATORY nunca agenda `protocol-auto-release`.
-    expect(enqueue).not.toHaveBeenCalled();
+    // Só o alerta ao profissional: MANDATORY nunca agenda auto-liberação.
+    expect((enqueue.mock.calls as unknown[][]).map((c) => c[0])).toEqual(['whatsapp-outbound']);
   });
 
   it('PAR-Q Q1 (coração) vira tag CARDIAC no gerador e em par_q_flags', async () => {

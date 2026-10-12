@@ -8,10 +8,24 @@
  */
 import type { AgentPersona } from '@movivo/shared';
 
+import type { StaffQueueAlertKind } from '../jobs/whatsapp-outbound.contract';
 import {
   describeChangesBecame,
   type SubstitutionChange,
 } from '../protocol/protocol-substitution-items';
+
+/**
+ * Alerta interno ao profissional (não é mensagem ao aluno): só nome e tipo da revisão, sem
+ * nenhum dado de saúde nem motivo — o conteúdo se vê no painel.
+ */
+export function staffQueueAlertMessage(
+  studentName: string | null,
+  kind: StaffQueueAlertKind,
+): string {
+  const action =
+    kind === 'PROTOCOL_REVIEW' ? 'revisão de protocolo' : 'revisão de substituição de exercício';
+  return `Nova revisão na fila MOVIVO\nAluno: ${studentName?.trim() || 'sem nome cadastrado'}\nAção: ${action}`;
+}
 
 /** Separador de bolhas — o worker envia cada trecho como uma mensagem distinta. */
 export const BUBBLE_SEPARATOR = '\n---\n';
