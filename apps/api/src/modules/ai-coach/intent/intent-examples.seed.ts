@@ -112,4 +112,29 @@ export const INTENT_EXAMPLES_SEED: readonly IntentExampleSeed[] = [
   { intent: 'PAPO_CASUAL', text: 'acho que estou com ansiedade, o que faço?' },
   { intent: 'PAPO_CASUAL', text: 'tô sem tempo pra organizar minha rotina, me ajuda?' },
   { intent: 'PAPO_CASUAL', text: 'quero o shape até o natal, dá pra bugar a praia?' },
+  // QUEM_E_VOCE / SOBRE_O_COACH — achado 2026-10-12 (stress test em produção: "você é real?" e
+  // "você consegue me mandar áudio?" recebiam a recusa enlatada de fora de escopo).
+  { intent: 'QUEM_E_VOCE', text: 'você é real?' },
+  { intent: 'QUEM_E_VOCE', text: 'você é um robô ou uma pessoa?' },
+  { intent: 'QUEM_E_VOCE', text: 'tem alguém de verdade aí do outro lado?' },
+  { intent: 'QUEM_E_VOCE', text: 'você é uma inteligência artificial?' },
+  { intent: 'QUEM_E_VOCE', text: 'quem é você?' },
+  { intent: 'QUEM_E_VOCE', text: 'me conta um pouco da sua história' },
+  { intent: 'QUEM_E_VOCE', text: 'qual a sua história?' },
+  { intent: 'SOBRE_O_COACH', text: 'você consegue me mandar áudio?' },
+  { intent: 'SOBRE_O_COACH', text: 'dá pra você me mandar um vídeo da execução?' },
+  { intent: 'SOBRE_O_COACH', text: 'quem monta o meu treino, é você?' },
+  { intent: 'SOBRE_O_COACH', text: 'como funciona esse acompanhamento aqui no whatsapp?' },
+  // ADAPTACAO_NO_TREINO — achado 2026-10-12 (mesmo stress test: "tô na academia, tá meio
+  // cheio, o que eu faço?" foi recusado). Imprevisto na hora do treino SEM nomear o exercício
+  // a trocar; quando o aluno nomeia o exercício/aparelho, é SUBSTITUICAO_EXERCICIO.
+  { intent: 'ADAPTACAO_NO_TREINO', text: 'tô aqui na academia, tá meio cheio, o que eu faço?' },
+  { intent: 'ADAPTACAO_NO_TREINO', text: 'academia lotada hoje, como adapto o treino?' },
+  { intent: 'ADAPTACAO_NO_TREINO', text: 'só tenho 30 minutos hoje, o que priorizo?' },
+  { intent: 'ADAPTACAO_NO_TREINO', text: 'tô sem energia, vale a pena treinar mesmo assim?' },
+  {
+    intent: 'ADAPTACAO_NO_TREINO',
+    text: 'tá tudo ocupado aqui, como faço pra não perder o treino?',
+  },
+  { intent: 'ADAPTACAO_NO_TREINO', text: 'cheguei atrasado na academia, o que corto do treino?' },
 ];

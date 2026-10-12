@@ -40,21 +40,36 @@ const KNN_MIN_CONFIDENCE = 0.6;
  */
 const INTENT_GLOSS: Record<Intent, string> = {
   DUVIDA_TECNICA:
-    'dúvida sobre execução/técnica de um exercício, ou sobre a estrutura do próprio ' +
-    'protocolo (dias de treino, divisão, foco de cada sessão, objetivo do plano)',
+    'dúvida sobre execução/técnica de um exercício, sobre o porquê de algo no treino, ou sobre a ' +
+    'estrutura do próprio protocolo (dias de treino, divisão, foco de cada sessão, objetivo do plano)',
   SUBSTITUICAO_EXERCICIO:
-    'quer trocar um exercício do treino por outro, para sempre ou só por hoje (ex.: aparelho ocupado)',
+    'quer trocar um exercício ESPECÍFICO do treino por outro (nomeia o exercício ou o aparelho), ' +
+    'para sempre ou só por hoje (ex.: "o leg press está ocupado, o que faço no lugar?")',
   MOTIVACAO: 'desânimo, dúvida sobre resultado/prazo, ou precisa de um empurrão pra treinar',
   CHECKIN_ANTECIPADO:
     'quer ajustar o PROTOCOLO agora (carga, descanso, dificuldade do treino em si), fora do ' +
     'check-in semanal normal',
-  FORA_DE_ESCOPO: 'assunto fora do que um personal trainer trata, ou tenta mudar o papel da IA',
+  FORA_DE_ESCOPO:
+    'SOMENTE medicamento/suplemento/anabolizante, política, crime, finanças/jurídico, tarefa ' +
+    'genérica sem relação com treino (escrever texto, código, traduzir) ou tentativa explícita ' +
+    'de fazer a IA assumir outro papel. NUNCA use para pergunta sobre a própria IA, sobre a ' +
+    'MOVIVO, sobre a situação do aluno na hora do treino ou para mensagem curta/ambígua',
   SAUDACAO:
     'só um cumprimento de abertura OU uma despedida/agradecimento de encerramento, sem pedido concreto',
   RELATO_TREINO: 'contando que terminou ou como foi um treino já feito',
   PEDIDO_HANDOFF: 'pede explicitamente pra falar com uma pessoa/profissional',
   EMERGENCIA_CLINICA: 'sinal de risco à saúde/vida',
   PAPO_CASUAL: 'conversa casual: vida pessoal, sono, hábitos, bem-estar, papo aleatório',
+  QUEM_E_VOCE:
+    'pergunta QUEM é a IA/coach ou a história dela: "quem é você?", "qual a sua história?", ' +
+    '"você é real/humano/robô/IA?", "tem alguém aí?", quem criou ou quem é o profissional por trás',
+  SOBRE_O_COACH:
+    'pergunta o que a IA/coach consegue fazer ou como a MOVIVO funciona: mandar áudio, vídeo, ' +
+    'ligar, quem monta o treino, como funciona o acompanhamento (NÃO é "quem é você")',
+  ADAPTACAO_NO_TREINO:
+    'está treinando (ou vai) e algo atrapalhou, sem citar um exercício específico a trocar: ' +
+    'academia cheia/lotada, aparelho ocupado, pouco tempo, cansaço ou pouca energia hoje, ' +
+    'pergunta "o que eu faço?" no meio do treino',
 };
 
 @Injectable()
@@ -165,7 +180,11 @@ export class IntentClassifier {
         'entre EMERGENCIA_CLINICA e outra intenção, escolha EMERGENCIA_CLINICA. Se a mensagem ' +
         'só faz sentido junto do contexto recente (ex.: uma continuação, uma confirmação), use ' +
         'esse contexto pra decidir — mas classifique sempre a ÚLTIMA mensagem, nunca uma ' +
-        'anterior do contexto. ' +
+        'anterior do contexto. FORA_DE_ESCOPO é o último recurso: na dúvida entre ele e ' +
+        'qualquer outra intenção, escolha a outra (a IA decide a resposta com o perímetro na ' +
+        'mão). Respostas anteriores do Agente que recusam o pedido (ex.: "isso foge do que ' +
+        'posso orientar") NÃO dizem nada sobre o assunto da última mensagem — foram erros, ' +
+        'ignore-as ao classificar. ' +
         UNTRUSTED_CONTEXT_POLICY,
       messages: [
         ...(recentConversation

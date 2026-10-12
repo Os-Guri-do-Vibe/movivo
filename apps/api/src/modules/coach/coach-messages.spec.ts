@@ -11,7 +11,9 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { ValidationService } from '../protocol/validation/validation.service';
 import {
+  buildAgentIdentityMessage,
   DAILY_LIMIT_MESSAGE,
   DLQ_FALLBACK_MESSAGE,
   FORBIDDEN_TOPIC_RESPONSE,
@@ -75,5 +77,41 @@ describe('respostas pré-aprovadas do Coach', () => {
   it('sanidade do regex: 💚 (verde) não é sinalizado como coração de outra cor', () => {
     expect('💚').not.toMatch(NON_GREEN_HEART);
     expect('💙').toMatch(NON_GREEN_HEART);
+  });
+});
+
+describe('buildAgentIdentityMessage — apresentação oficial (fundador, 2026-10-12)', () => {
+  it('Leonardo: texto aprovado, com o profissional CREF responsável', () => {
+    expect(buildAgentIdentityMessage('Leonardo')).toBe(
+      'Sou o Leonardo, uma persona de IA da MOVIVO, desenvolvida a partir de conhecimentos ' +
+        'científicos sobre treinamento físico e orientada pelo conhecimento técnico do ' +
+        'profissional de Educação Física Leonardo Rodrigues Brito, registrado no CREF sob o nº ' +
+        '206778-G/SP.\n\n' +
+        'Minha função é ajudar você a evoluir com orientações personalizadas, fundamentadas em ' +
+        'ciência e alinhadas aos seus objetivos, à sua rotina e ao seu plano de treino.',
+    );
+  });
+
+  it('Mariana: mesma origem, missão própria', () => {
+    const text = buildAgentIdentityMessage('Mariana');
+    expect(text).toContain('Sou a Mariana, uma persona de IA da MOVIVO');
+    expect(text).toContain('Leonardo Rodrigues Brito, registrado no CREF sob o nº 206778-G/SP.');
+    expect(text).toContain(
+      'Minha função é acompanhar sua jornada, ajudar você a manter a consistência e oferecer',
+    );
+  });
+
+  it('nome renomeado no painel: sem artigo, missão neutra, nunca quebra', () => {
+    expect(buildAgentIdentityMessage('Marina')).toMatch(/^Sou Marina, uma persona de IA/);
+  });
+
+  it('respeita os guardrails: nada de termo vedado e passa no validador de saída', () => {
+    for (const name of ['Leonardo', 'Mariana']) {
+      const text = buildAgentIdentityMessage(name);
+      for (const term of ['diagnóstico', 'tratamento', 'cura', 'garantido']) {
+        expect(new RegExp(`\\b${term}\\b`, 'i').test(text)).toBe(false);
+      }
+      expect(new ValidationService().validateResponse(text).action).toBe('PASS');
+    }
   });
 });
