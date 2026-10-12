@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -9,6 +10,7 @@ import { and, count, desc, eq, isNotNull, or, sql } from 'drizzle-orm';
 import { type PgColumn } from 'drizzle-orm/pg-core';
 import { PinoLogger } from 'nestjs-pino';
 import {
+  amendActiveProtocolSchema,
   anamnesisStructuredSchema,
   approveSubstitutionSchema,
   ControlCenterCapability,
@@ -92,6 +94,8 @@ type SignProtocolResult =
       endDate: Date;
       totalWeeks: number;
     };
+
+type DeliverableProtocol = Extract<SignProtocolResult, { alreadySigned: false }>;
 
 const uuidSchema = z.uuid();
 // Posição do item numa proposta de troca em lote (0 a MAX_SUBSTITUTION_ITEMS - 1).
@@ -437,6 +441,137 @@ export class DashboardService {
   }
 
   /**
+   * Alteração manual de um protocolo que já está em uso. Diferente da edição pré-assinatura,
+   * ela nunca remove a assinatura vigente: valida, versiona, assina e entrega tudo no mesmo
+   * fluxo. A versão esperada também impede que duas revisões se sobreponham silenciosamente.
+   */
+  async amendActiveProtocol(actor: AuthenticatedUser, rawId: string, rawBody: unknown) {
+    const id = this.parse(uuidSchema, rawId);
+    const body = this.parse(amendActiveProtocolSchema, rawBody);
+    const amended = await this.scoped(actor, async (tx): Promise<DeliverableProtocol> => {
+      const row = await this.requireProtocol(tx, id, true);
+      if (row.status !== 'ACTIVE' || !row.signedAt || !row.signatureHash || !row.professionalId) {
+        throw new BadRequestException('Somente um protocolo ativo e assinado pode ser alterado.');
+      }
+      if (row.version !== body.expectedVersion) {
+        throw new ConflictException({
+          code: 'PROTOCOL_VERSION_CONFLICT',
+          message: 'O protocolo foi atualizado. Recarregue a tela antes de salvar.',
+        });
+      }
+      if (!(await this.healthConsent.hasActiveForUser(row.userId))) {
+        throw new BadRequestException({
+          code: 'HEALTH_CONSENT_REVOKED',
+          message: 'Consentimento de dados de saude revogado — atualizacao indisponivel.',
+        });
+      }
+      await this.assertCrefCredential(tx, actor);
+      const verdict = this.validation.validate({
+        structure: body.content,
+        constraints: row.constraints as Pick<
+          UserConstraints,
+          'goal' | 'injuryTags' | 'preferredDays'
+        >,
+        parqFlags: row.parQFlags as UserConstraints['injuryTags'],
+      });
+      if (verdict.action !== 'PASS') {
+        throw new BadRequestException({
+          code: 'PROTOCOL_NOT_SAFE_TO_SIGN',
+          violations: verdict.violations,
+        });
+      }
+
+      const now = new Date();
+      const nextVersion = row.version + 1;
+      const hash = signatureHash(body.content);
+      await tx
+        .update(protocols)
+        .set({
+          content: body.content,
+          version: nextVersion,
+          professionalId: actor.userId,
+          signedAt: now,
+          signatureHash: hash,
+          approvalStatus: 'HUMAN_APPROVED',
+          humanReviewRequired: false,
+          reviewUrgency: null,
+          // O PDF anterior descreve a versão anterior; a entrega abaixo o substitui.
+          pdfContent: null,
+        })
+        .where(and(eq(protocols.id, id), eq(protocols.version, body.expectedVersion)));
+      // Uma proposta de substituição foi calculada contra a versão anterior. Ela não pode
+      // reaparecer na fila nem ser autoaplicada depois desta emenda manual.
+      const pendingSubstitutions = await tx
+        .select()
+        .from(protocolSubstitutionRequests)
+        .where(
+          and(
+            eq(protocolSubstitutionRequests.protocolId, id),
+            eq(protocolSubstitutionRequests.status, 'PENDING'),
+          ),
+        );
+      for (const request of pendingSubstitutions) {
+        await tx
+          .update(protocolSubstitutionRequests)
+          .set({
+            status: 'DISCARDED',
+            decidedAt: now,
+            decidedBy: actor.userId,
+            items: itemsOf(request).map((item) => ({ ...item, decision: 'DISCARDED' })),
+          })
+          .where(eq(protocolSubstitutionRequests.id, request.id));
+      }
+      await tx.insert(protocolVersions).values({
+        protocolId: id,
+        userId: row.userId,
+        version: nextVersion,
+        status: 'ACTIVE',
+        content: body.content,
+        changeReason: body.reason,
+        generatedBy: 'MANUAL_AMENDMENT',
+        signatureHash: hash,
+        signedAt: now,
+      });
+      await this.audit.append(tx, {
+        actorId: actor.userId,
+        userId: row.userId,
+        action: 'PROTOCOL_AMENDED',
+        entityType: 'protocol',
+        entityId: id,
+        changes: {
+          fromVersion: row.version,
+          toVersion: nextVersion,
+          beforeHash: this.hashJson(row.content),
+          afterHash: hash,
+          reasonHash: this.hashJson(body.reason),
+        },
+      });
+      return {
+        userId: row.userId,
+        version: nextVersion,
+        signatureHash: hash,
+        signedAt: now.toISOString(),
+        alreadySigned: false,
+        content: body.content,
+        mesocycleName: row.mesocycleName,
+        startDate: row.startDate,
+        endDate: row.endDate,
+        totalWeeks: row.totalWeeks,
+      };
+    });
+
+    await this.deliverProtocol(actor, id, amended, 'amended');
+    this.queueEvents.emit('protocol');
+    return {
+      id,
+      version: amended.version,
+      signatureHash: amended.signatureHash,
+      signedAt: amended.signedAt,
+      alreadySigned: false,
+    };
+  }
+
+  /**
    * Assinatura CREF — desde 2026-08-24 é também o ÚNICO caminho de liberação de PAR-Q.
    *
    * A tela e a ação separadas de "liberar PAR-Q" deixaram de existir: o protocolo de um
@@ -514,22 +649,7 @@ export class DashboardService {
       // fundador 2026-08-22: a MOVIVO no início só tem um profissional CREF, também
       // sócio-fundador, e a conta dele já é `ADMIN`. `PROFESSIONAL` continua exigindo
       // CREF ativo e verificado; isso NÃO abre exceção pra esse papel.
-      if (actor.role !== 'ADMIN') {
-        const [professional] = await tx
-          .select({
-            crefActive: staff.crefActive,
-            crefNumber: staff.crefNumber,
-            crefRegion: staff.crefRegion,
-          })
-          .from(staff)
-          .where(eq(staff.id, actor.userId))
-          .limit(1);
-        if (!professional?.crefActive || !professional.crefNumber || !professional.crefRegion) {
-          throw new BadRequestException(
-            'Credencial CREF ativa e verificada e obrigatoria para assinar.',
-          );
-        }
-      }
+      await this.assertCrefCredential(tx, actor);
       const parsedContent = protocolStructureSchema.safeParse(row.content);
       if (!parsedContent.success) {
         // Achado 2026-08-22: este `.parse()` era direto (sem try/catch) — um `ZodError`
@@ -1465,6 +1585,80 @@ export class DashboardService {
     const [row] = forUpdate ? await query.for('update').limit(1) : await query.limit(1);
     if (!row) throw new NotFoundException('Protocolo nao encontrado.');
     return row;
+  }
+
+  /** A conta ADMIN fundadora é a exceção MVP documentada; PROFESSIONAL exige CREF ativo. */
+  private async assertCrefCredential(tx: TenantTransaction, actor: AuthenticatedUser) {
+    if (actor.role === 'ADMIN') return;
+    const [professional] = await tx
+      .select({
+        crefActive: staff.crefActive,
+        crefNumber: staff.crefNumber,
+        crefRegion: staff.crefRegion,
+      })
+      .from(staff)
+      .where(eq(staff.id, actor.userId))
+      .limit(1);
+    if (!professional?.crefActive || !professional.crefNumber || !professional.crefRegion) {
+      throw new BadRequestException(
+        'Credencial CREF ativa e verificada e obrigatoria para assinar.',
+      );
+    }
+  }
+
+  /** Gera a representação atual e agenda a entrega; falha de PDF nunca desfaz a assinatura. */
+  private async deliverProtocol(
+    actor: AuthenticatedUser,
+    id: string,
+    signed: DeliverableProtocol,
+    deliveryKind: 'signed' | 'amended',
+  ) {
+    let aiSummary: string | undefined;
+    try {
+      const { personal } = await this.protocolAnamnesisAnswers(actor, id);
+      const pdf = await buildProtocolPdf({
+        content: signed.content,
+        mesocycleName: signed.mesocycleName,
+        startDate: signed.startDate,
+        endDate: signed.endDate,
+        totalWeeks: signed.totalWeeks,
+        signatureHash: signed.signatureHash,
+        signedAt: new Date(signed.signedAt),
+        student: personal,
+      });
+      const encryptedPdf = await this.cipher.encryptBytes(pdf);
+      await this.scoped(actor, (tx) =>
+        tx.update(protocols).set({ pdfContent: encryptedPdf }).where(eq(protocols.id, id)),
+      );
+      aiSummary = await this.workoutPresentation.present({
+        userId: signed.userId,
+        user: { name: personal.name, phoneNumber: personal.phoneNumber, email: personal.email },
+        biologicalSex: personal.biologicalSex,
+        content: signed.content,
+        totalWeeks: signed.totalWeeks,
+        mesocycleName: signed.mesocycleName,
+        reason: 'INITIAL',
+      });
+    } catch (error) {
+      this.logger.warn(
+        { id, err: error instanceof Error ? error.message : String(error) },
+        'geracao do PDF do protocolo falhou — entrega cai para texto+link',
+      );
+    }
+    const outbound: WhatsappOutboundJob = {
+      userId: signed.userId,
+      type: 'PROTOCOL_DELIVERY',
+      protocolId: id,
+      protocolVersion: signed.version,
+      dedupeId: `${deliveryKind}-${id}-${signed.version}`,
+      text: aiSummary,
+    };
+    await this.queues.enqueue(
+      QUEUE.whatsappOutbound,
+      `${deliveryKind}-protocol-delivery`,
+      outbound,
+      { jobId: `${deliveryKind}-protocol-${id}-${signed.version}` },
+    );
   }
 
   private async auditRead(

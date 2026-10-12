@@ -33,6 +33,10 @@ describe('StudentDetail', () => {
     expect(screen.getByText('Semana 3 de 8')).toBeVisible();
     expect(screen.getByText('01/08/2026, 09:00')).toBeVisible();
     expect(screen.getByText('Sem pendência')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Editar protocolo' })).toHaveAttribute(
+      'href',
+      `/dashboard/fila/protocol/${studentDetailResponse.data.student.currentProtocol?.id}`,
+    );
   });
 
   it('mostra o rótulo em português e nunca o código gravado no banco', async () => {

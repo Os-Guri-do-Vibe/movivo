@@ -32,6 +32,7 @@ const api = vi.hoisted(() => ({
   signProtocol: vi.fn(),
   resolveHandoff: vi.fn(),
   saveProtocol: vi.fn(),
+  amendActiveProtocol: vi.fn(),
   approveSubstitutionNow: vi.fn(),
   discardSubstitution: vi.fn(),
   addCatalogExerciseToSubstitutionItem: vi.fn(),
@@ -544,6 +545,37 @@ describe('QueueDetail', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Edição validada no servidor');
     // Volta pro card de leitura, ainda dentro do mesmo componente.
     expect(screen.getByRole('button', { name: 'Editar Protocolo' })).toBeVisible();
+  });
+
+  it('versiona e publica a alteração de um protocolo ativo com motivo', async () => {
+    if (!protocolDetail.protocol) throw new Error('fixture sem protocolo');
+    api.getQueueDetail.mockResolvedValue({
+      ...protocolDetail,
+      protocol: {
+        ...protocolDetail.protocol,
+        status: 'ACTIVE',
+        approvalStatus: 'HUMAN_APPROVED',
+        signedAt: '2026-10-12T12:00:00.000Z',
+        signatureHash: 'a'.repeat(64),
+      },
+    });
+    api.amendActiveProtocol.mockResolvedValue({ status: 'ACTIVE' });
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
+    await userEvent.type(screen.getByLabelText('Motivo da atualização'), 'Troca manual segura');
+    await userEvent.click(screen.getByRole('button', { name: 'Salvar e publicar atualização' }));
+
+    await waitFor(() =>
+      expect(api.amendActiveProtocol).toHaveBeenCalledWith(
+        PROTOCOL_ID,
+        expect.objectContaining({
+          expectedVersion: 1,
+          reason: 'Troca manual segura',
+          confirmation: true,
+        }),
+      ),
+    );
+    expect(api.saveProtocol).not.toHaveBeenCalled();
   });
 
   it('edição com alertas de segurança é gravada e mostra o que corrigir antes de assinar', async () => {

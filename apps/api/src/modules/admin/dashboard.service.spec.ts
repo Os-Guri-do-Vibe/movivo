@@ -334,6 +334,66 @@ describe('DashboardService invariantes de mutacao', () => {
     expect(append.mock.calls[0]?.[1].changes).not.toHaveProperty('reason');
   });
 
+  it('emenda protocolo ativo com nova versão, assinatura e entrega', async () => {
+    const activeProtocol = {
+      ...pendingProtocol,
+      status: 'ACTIVE' as const,
+      approvalStatus: 'HUMAN_APPROVED' as const,
+      version: 2,
+      signedAt: new Date('2026-10-12T12:00:00.000Z'),
+      signatureHash: 'a'.repeat(64),
+      professionalId: ACTOR_ID,
+      mesocycleName: 'Mesociclo 1',
+      startDate: new Date('2026-10-01T12:00:00.000Z'),
+      endDate: new Date('2026-12-01T12:00:00.000Z'),
+    };
+    const staleSubstitution = {
+      id: '44444444-4444-4444-8444-444444444444',
+      status: 'PENDING' as const,
+      items: null,
+      fromExerciseId: 'goblet_squat',
+      fromExerciseName: 'Agachamento',
+      toExerciseId: 'leg_press',
+      toExerciseName: 'Leg press',
+      catalogGap: false,
+      reviewUrgency: 'OPTIONAL' as const,
+    };
+    const { service, updateSet, insertValues, append, enqueue } = makeSequencedService([
+      [activeProtocol],
+      [staleSubstitution],
+    ]);
+    await expect(
+      service.amendActiveProtocol(admin, RESOURCE_ID, {
+        content,
+        expectedVersion: 2,
+        reason: 'Troca manual segura',
+        confirmation: true,
+      }),
+    ).resolves.toMatchObject({ id: RESOURCE_ID, version: 3, alreadySigned: false });
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ version: 3, pdfContent: null }),
+    );
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'DISCARDED',
+        items: [expect.objectContaining({ decision: 'DISCARDED' })],
+      }),
+    );
+    expect(insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({ version: 3, generatedBy: 'MANUAL_AMENDMENT' }),
+    );
+    expect(append).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: 'PROTOCOL_AMENDED' }),
+    );
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.anything(),
+      'amended-protocol-delivery',
+      expect.objectContaining({ protocolVersion: 3, dedupeId: `amended-${RESOURCE_ID}-3` }),
+      expect.anything(),
+    );
+  });
+
   it('assina com CREF ativo, cria versao imutavel e entrega', async () => {
     const professional = { crefActive: true, crefNumber: '123456', crefRegion: 'SP' };
     const { service, updateWhere, insertValues, append, enqueue } = makeSequencedService([

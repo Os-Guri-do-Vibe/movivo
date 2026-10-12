@@ -50,6 +50,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   approveSubstitutionNow,
+  amendActiveProtocol,
   captureDashboardEvent,
   DashboardApiError,
   discardSubstitution,
@@ -777,11 +778,14 @@ function ProtocolSummary({
   const [issues, setIssues] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
   const [anamnesisOpen, setAnamnesisOpen] = useState(false);
+  const [amendmentReason, setAmendmentReason] = useState('');
+  const isActiveProtocol = protocol.status === 'ACTIVE' && Boolean(protocol.signatureHash);
 
   function startEdit() {
     setDraft(structuredClone(protocol.content));
     setReorderingSession(null);
     setIssues([]);
+    setAmendmentReason('');
     setEditing(true);
   }
 
@@ -789,6 +793,7 @@ function ProtocolSummary({
     setEditing(false);
     setReorderingSession(null);
     setIssues([]);
+    setAmendmentReason('');
   }
 
   function updateSession(index: number, patch: Partial<ProtocolStructure['sessions'][number]>) {
@@ -890,10 +895,21 @@ function ProtocolSummary({
       setIssues(parsed.error.issues.map((issue) => issue.message).slice(0, 6));
       return;
     }
+    if (isActiveProtocol && amendmentReason.trim().length < 3) {
+      setIssues(['Informe o motivo da atualização manual.']);
+      return;
+    }
     setPending(true);
     try {
-      const result = await saveProtocol(protocol.id, parsed.data);
-      captureDashboardEvent('cref_protocol_edited');
+      const result = isActiveProtocol
+        ? await amendActiveProtocol(protocol.id, {
+            content: parsed.data,
+            expectedVersion: protocol.version,
+            reason: amendmentReason.trim(),
+            confirmation: true,
+          })
+        : await saveProtocol(protocol.id, parsed.data);
+      captureDashboardEvent(isActiveProtocol ? 'cref_protocol_amended' : 'cref_protocol_edited');
       setEditing(false);
       setReorderingSession(null);
       await onSaved(result);
@@ -957,7 +973,12 @@ function ProtocolSummary({
           {editing ? (
             <div className="flex gap-2">
               <Button type="button" size="sm" onClick={() => void save()} disabled={pending}>
-                <Save aria-hidden="true" className="size-4" /> {pending ? 'Validando…' : 'Salvar'}
+                <Save aria-hidden="true" className="size-4" />{' '}
+                {pending
+                  ? 'Validando…'
+                  : isActiveProtocol
+                    ? 'Salvar e publicar atualização'
+                    : 'Salvar'}
               </Button>
               <Button
                 type="button"
@@ -991,6 +1012,25 @@ function ProtocolSummary({
         open={anamnesisOpen}
         onOpenChange={setAnamnesisOpen}
       />
+
+      {editing && isActiveProtocol ? (
+        <div className="mt-4 rounded-lg border border-border bg-secondary/30 p-4">
+          <label htmlFor="protocol-amendment-reason" className="text-label font-semibold">
+            Motivo da atualização
+          </label>
+          <TextAreaField
+            id="protocol-amendment-reason"
+            className="mt-2"
+            value={amendmentReason}
+            maxLength={500}
+            onChange={setAmendmentReason}
+          />
+          <p className="mt-2 text-xs text-muted-foreground">
+            A publicação criará a versão {protocol.version + 1}, manterá o histórico e reenviará o
+            protocolo ao aluno.
+          </p>
+        </div>
+      ) : null}
 
       {issues.length > 0 ? (
         <div

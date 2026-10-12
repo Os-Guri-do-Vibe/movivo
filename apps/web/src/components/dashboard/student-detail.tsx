@@ -369,24 +369,37 @@ export function StudentDetail({ id }: { id: string }) {
           description="Protocolo em uso e assinatura do profissional CREF."
         >
           {student.currentProtocol ? (
-            <Rows
-              items={[
-                ['Situação', <Status status={protocol} />],
-                ['Versão', `v${student.currentProtocol.version}`],
-                [
-                  'Vigência',
-                  `Semana ${student.currentProtocol.currentWeek} de ${student.currentProtocol.totalWeeks}`,
-                ],
-                [
-                  'Assinatura CREF',
-                  student.currentProtocol.signedAt ? (
-                    dateTime(student.currentProtocol.signedAt)
-                  ) : (
-                    <Empty>Não assinado</Empty>
-                  ),
-                ],
-              ]}
-            />
+            <>
+              <Rows
+                items={[
+                  ['Situação', <Status status={protocol} />],
+                  ['Versão', `v${student.currentProtocol.version}`],
+                  [
+                    'Vigência',
+                    `Semana ${student.currentProtocol.currentWeek} de ${student.currentProtocol.totalWeeks}`,
+                  ],
+                  [
+                    'Assinatura CREF',
+                    student.currentProtocol.signedAt ? (
+                      dateTime(student.currentProtocol.signedAt)
+                    ) : (
+                      <Empty>Não assinado</Empty>
+                    ),
+                  ],
+                ]}
+              />
+              <div className="border-t border-border py-3">
+                <Link
+                  href={`/dashboard/fila/protocol/${student.currentProtocol.id}`}
+                  className={cn(
+                    'inline-flex min-h-11 items-center rounded-md px-3 text-label font-semibold hover:bg-secondary',
+                    FOCUS_RING,
+                  )}
+                >
+                  Editar protocolo
+                </Link>
+              </div>
+            </>
           ) : (
             <p className="py-4 text-label text-muted-foreground">Nenhum protocolo vigente.</p>
           )}
