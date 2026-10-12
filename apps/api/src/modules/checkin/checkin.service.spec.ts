@@ -146,6 +146,41 @@ describe('CheckinService.createAndSend', () => {
     );
   });
 
+  it('com resendPending:false (execução manual) não reenvia o check-in PENDING que já foi convidado', async () => {
+    const deps = makeDeps();
+    const updateSet = vi.fn();
+    const tx = {
+      insert: () => ({
+        values: () => ({ onConflictDoNothing: () => ({ returning: async () => [] }) }),
+      }),
+      select: () => ({
+        from: () => ({
+          where: () => ({ limit: async () => [{ id: CHECKIN_ID, status: 'PENDING' }] }),
+        }),
+      }),
+      update: () => ({ set: updateSet }),
+    } as never;
+    const db = {
+      runAsSystem: vi.fn((cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
+    } as unknown as TenantDatabase;
+    const service = new CheckinService(
+      db,
+      CONFIG,
+      deps.cipher,
+      deps.healthConsent,
+      deps.queues,
+      deps.queueEvents,
+      deps.shortLinks,
+      deps.logger,
+    );
+
+    await expect(
+      service.createAndSend(USER_ID, PROTOCOL_ID, 3, 'Maria', 'INVITE', { resendPending: false }),
+    ).resolves.toBe('EXISTS');
+    expect(updateSet).not.toHaveBeenCalled();
+    expect(deps.enqueue).not.toHaveBeenCalled();
+  });
+
   it('não reconvida quando PENDING da leitura antiga perdeu a disputa com o envio', async () => {
     const deps = makeDeps();
     const tx = {

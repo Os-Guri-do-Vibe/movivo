@@ -101,6 +101,29 @@ describe('WorkoutScheduler.scan', () => {
     expect(enqueue).not.toHaveBeenCalled();
   });
 
+  it('com force (execução manual) envia fora das 04:00, mantendo o dedupe por titular e dia', async () => {
+    const { scheduler, enqueue } = makeScheduler();
+    // 21:00 UTC == 18:00 em America/Sao_Paulo.
+    const result = await scheduler.scan(new Date('2026-08-10T21:00:00.000Z'), { force: true });
+    expect(result.sent).toBe(1);
+    expect(enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'workout-daily-link',
+      expect.objectContaining({
+        userId: USER_ID,
+        type: 'WORKOUT_DAILY_LINK',
+        dedupeId: 'workout-link-2026-08-10',
+      }),
+      { jobId: `wa-workout-link-${USER_ID}-2026-08-10` },
+    );
+  });
+
+  it('com force continua respeitando o opt-out do aluno', async () => {
+    const { scheduler, enqueue } = makeScheduler(false);
+    await scheduler.scan(new Date('2026-08-10T21:00:00.000Z'), { force: true });
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
   it('nao envia quando o aluno desativou o lembrete', async () => {
     const { scheduler, enqueue } = makeScheduler(false);
     await scheduler.scan(new Date('2026-08-10T07:00:00.000Z'));

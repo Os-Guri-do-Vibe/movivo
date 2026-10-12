@@ -15,7 +15,8 @@ import { MAGIC_TTL_MS, WorkoutAccessService } from './workout-access.service';
 import { WorkoutJournalService } from './workout-journal.service';
 import { dailyWorkoutMessage } from './workout-messages';
 
-type WorkoutJob = { kind: 'SCAN' };
+/** `force`: execução manual pelo painel "Sistema → Scripts" — ignora a janela das 04:00. */
+type WorkoutJob = { kind: 'SCAN'; force?: boolean };
 const SCAN_CRON = '* * * * *';
 
 /**
@@ -65,7 +66,9 @@ export class WorkoutScheduler implements OnModuleInit {
   }
 
   async onModuleInit(): Promise<void> {
-    this.workers.create<WorkoutJob>(QUEUE.workoutDaily, async () => this.scan());
+    this.workers.create<WorkoutJob>(QUEUE.workoutDaily, async (job) =>
+      this.scan(new Date(), { force: job.data.force === true }),
+    );
     await this.queues
       .get(QUEUE.workoutDaily)
       .upsertJobScheduler(
@@ -75,7 +78,14 @@ export class WorkoutScheduler implements OnModuleInit {
       );
   }
 
-  async scan(now = new Date()): Promise<{ status: string; eligible: number; sent: number }> {
+  /**
+   * `force` pula só o portão de horário (04:00 local). A idempotência segue valendo: o
+   * `dedupeId`/`jobId` do envio levam a data local, então quem já recebeu hoje não recebe de novo.
+   */
+  async scan(
+    now = new Date(),
+    options: { force?: boolean } = {},
+  ): Promise<{ status: string; eligible: number; sent: number }> {
     const eligible = await this.db.runAsSystem((tx) =>
       tx
         .selectDistinct({
@@ -109,7 +119,8 @@ export class WorkoutScheduler implements OnModuleInit {
     for (const row of eligible) {
       if (!row.reminderEnabled) continue;
       const local = localParts(now, row.timezone);
-      if (!local || local.time !== FIXED_WORKOUT_REMINDER_TIME) continue;
+      if (!local) continue;
+      if (!options.force && local.time !== FIXED_WORKOUT_REMINDER_TIME) continue;
       const view = await this.journal.journal(row.userId, local.date, now);
       if (!view.workout) continue;
       const magicLink = await this.access.createMagicLink(row.userId, view.workout.id);

@@ -100,6 +100,51 @@ describe('CheckinScheduler.scan', () => {
     await scheduler.scan(new Date('2026-08-10T21:00:00.000Z'));
     expect(createAndSend).not.toHaveBeenCalled();
   });
+
+  it('com force (execução manual) ignora dia e hora, sem reenviar a quem já tem o check-in da semana', async () => {
+    const eligible = [
+      {
+        userId: USER_ID,
+        name: 'Maria Silva',
+        timezone: 'America/Sao_Paulo',
+        protocolId: PROTOCOL_ID,
+        createdAt: new Date('2026-07-01T12:00:00.000Z'),
+        totalWeeks: 8,
+      },
+    ];
+    const { scheduler, createAndSend } = makeScan(eligible);
+    const nudge = vi.spyOn(scheduler, 'enqueueNudgeIfDue').mockResolvedValue();
+
+    // Terça-feira 10:00 local: fora da janela, mas a execução é forçada.
+    const result = await scheduler.scan(new Date('2026-08-11T13:00:00.000Z'), { force: true });
+
+    expect(result).toEqual({ status: 'SCANNED', eligible: 1, sent: 1 });
+    expect(createAndSend).toHaveBeenCalledWith(USER_ID, PROTOCOL_ID, 5, 'Maria', 'INVITE', {
+      resendPending: false,
+    });
+    expect(nudge).toHaveBeenCalledWith(USER_ID);
+  });
+
+  it('com force não abre reengajamento de quem já tinha o check-in da semana', async () => {
+    const eligible = [
+      {
+        userId: USER_ID,
+        name: 'Maria Silva',
+        timezone: 'America/Sao_Paulo',
+        protocolId: PROTOCOL_ID,
+        createdAt: new Date('2026-07-01T12:00:00.000Z'),
+        totalWeeks: 8,
+      },
+    ];
+    const { scheduler, createAndSend } = makeScan(eligible);
+    createAndSend.mockResolvedValue('EXISTS' as never);
+    const nudge = vi.spyOn(scheduler, 'enqueueNudgeIfDue').mockResolvedValue();
+
+    const result = await scheduler.scan(new Date('2026-08-11T13:00:00.000Z'), { force: true });
+
+    expect(result.sent).toBe(0);
+    expect(nudge).not.toHaveBeenCalled();
+  });
 });
 
 describe('CheckinScheduler reengajamento', () => {
@@ -205,6 +250,10 @@ describe('CheckinScheduler.onModuleInit', () => {
     await scheduler.onModuleInit();
     await processor?.({ data: { kind: 'SCAN' } });
     expect(scan).toHaveBeenCalledOnce();
+    expect(scan).toHaveBeenLastCalledWith(expect.any(Date), { force: false });
+
+    await processor?.({ data: { kind: 'SCAN', force: true } });
+    expect(scan).toHaveBeenLastCalledWith(expect.any(Date), { force: true });
   });
 });
 
