@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 
 import { LEGAL_RELEASE, legalReleaseMatchesConsent } from './legal-release';
 
@@ -63,7 +63,10 @@ export function loadLegalDocument(kind: LegalDocumentKind): LegalDocument | null
   if (!legalReleaseMatchesConsent) return null;
   const releasedVersion = LEGAL_RELEASE[kind];
 
-  const root = process.cwd().endsWith('apps/web') ? '../..' : '.';
+  const root =
+    basename(process.cwd()) === 'web' && basename(dirname(process.cwd())) === 'apps'
+      ? '../..'
+      : '.';
   const file = resolve(process.cwd(), root, 'docs/juridico', FILES[kind]);
   return parseLegalDocument(readFileSync(file, 'utf8'), releasedVersion);
 }
