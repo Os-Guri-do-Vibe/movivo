@@ -1066,3 +1066,60 @@ export const destructiveActionDeniedSchema = z.object({
   message: z.string(),
 });
 export type DestructiveActionDenied = z.infer<typeof destructiveActionDeniedSchema>;
+
+/**
+ * Painel "Sistema → Scripts" — catálogo de crons, rotinas e scripts de terminal, com
+ * execução manual forçada dos que podem rodar pelo painel. Execução exige `SYSTEM_OPERATE`.
+ */
+export const controlCenterScriptKindSchema = z.enum(['CRON', 'ROUTINE', 'TERMINAL']);
+export type ControlCenterScriptKind = z.infer<typeof controlCenterScriptKindSchema>;
+
+export const controlCenterScriptRunStateSchema = z.enum([
+  'QUEUED',
+  'RUNNING',
+  'COMPLETED',
+  'FAILED',
+]);
+export type ControlCenterScriptRunState = z.infer<typeof controlCenterScriptRunStateSchema>;
+
+export const controlCenterScriptSchema = z.object({
+  id: z.string().regex(/^[a-z0-9-]+$/),
+  name: z.string(),
+  description: z.string(),
+  kind: controlCenterScriptKindSchema,
+  /** Agendamento padrão em linguagem natural (`null` quando não há agendamento). */
+  schedule: z.string().nullable(),
+  /** O que acontece quando o botão é acionado — vai no diálogo de confirmação. */
+  runEffect: z.string().nullable(),
+  runnable: z.boolean(),
+  /** Para `TERMINAL`: o comando de referência. Para os demais, `null`. */
+  command: z.string().nullable(),
+  /** Para itens não executáveis pelo painel: por quê. */
+  notRunnableReason: z.string().nullable(),
+  /** Última execução manual ainda visível na fila (resultado fica 1h; falha, 7 dias). */
+  lastRun: z
+    .object({
+      state: controlCenterScriptRunStateSchema,
+      at: z.iso.datetime().nullable(),
+      summary: z.string().nullable(),
+    })
+    .nullable(),
+});
+export type ControlCenterScript = z.infer<typeof controlCenterScriptSchema>;
+
+export const controlCenterScriptsResponseSchema = z.object({
+  data: z.object({ scripts: z.array(controlCenterScriptSchema) }),
+  meta: controlCenterMetaSchema,
+});
+export type ControlCenterScriptsResponse = z.infer<typeof controlCenterScriptsResponseSchema>;
+
+export const controlCenterScriptRunResponseSchema = z.object({
+  data: z.object({
+    id: z.string(),
+    /** `ENQUEUED`: a fila executa em segundo plano. `COMPLETED`: rodou durante a chamada. */
+    status: z.enum(['ENQUEUED', 'COMPLETED']),
+    message: z.string(),
+  }),
+  meta: controlCenterMetaSchema,
+});
+export type ControlCenterScriptRunResponse = z.infer<typeof controlCenterScriptRunResponseSchema>;

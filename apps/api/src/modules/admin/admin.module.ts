@@ -50,6 +50,8 @@ import { MethodologyAdminController } from './methodology-admin.controller';
 import { MethodologyAdminService } from './methodology-admin.service';
 import { PartnersController } from './partners.controller';
 import { PartnersService } from './partners.service';
+import { SystemScriptsController } from './system-scripts.controller';
+import { SystemScriptsService } from './system-scripts.service';
 
 @Module({
   imports: [AuthModule, JobsModule, ProtocolModule, WhatsappModule],
@@ -68,6 +70,7 @@ import { PartnersService } from './partners.service';
     AuditQueryController,
     KnowledgeAdminController,
     MethodologyAdminController,
+    SystemScriptsController,
   ],
   providers: [
     AuditService,
@@ -86,6 +89,7 @@ import { PartnersService } from './partners.service';
     KnowledgeAdminService,
     KnowledgeProcessingWorker,
     MethodologyAdminService,
+    SystemScriptsService,
   ],
 })
 export class AdminModule {}
