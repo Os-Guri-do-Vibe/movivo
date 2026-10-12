@@ -38,8 +38,10 @@ import {
 import {
   ISOLATION_MAJORITY_THRESHOLD,
   LANGUAGE_RULES,
+  type LanguageRule,
   MAX_TECHNIQUES_PER_SESSION,
   MIN_FREQUENCY_BY_SPLIT,
+  RESPONSE_LANGUAGE_RULES,
   SPLITS_BY_LEVEL,
   type ValidationActionCode,
 } from './validation-rules';
@@ -180,7 +182,7 @@ export class ValidationService {
    */
   validateResponse(text: string, opts: ValidateResponseOptions = {}): ValidationVerdict {
     const violations: ValidationViolation[] = [];
-    this.checkLanguage(text, violations);
+    this.checkLanguage(text, violations, RESPONSE_LANGUAGE_RULES);
     if (!opts.allowExternalReferences) this.checkExternalReferences(text, violations);
     this.checkAllowedExercises(text, opts.allowedExercises, violations);
     return aggregate(violations);
@@ -532,9 +534,13 @@ export class ValidationService {
     }
   }
 
-  private checkLanguage(text: string, out: ValidationViolation[]): void {
+  private checkLanguage(
+    text: string,
+    out: ValidationViolation[],
+    rules: readonly LanguageRule[] = LANGUAGE_RULES,
+  ): void {
     const canonical = canonicalizeSecurityText(text);
-    for (const rule of LANGUAGE_RULES) {
+    for (const rule of rules) {
       if (rule.pattern.test(canonical)) {
         out.push({
           rule: rule.id,

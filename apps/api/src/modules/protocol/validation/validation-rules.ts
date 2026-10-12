@@ -147,6 +147,50 @@ export const LANGUAGE_RULES: readonly LanguageRule[] = [
 ];
 
 /**
+ * Regras de linguagem para RESPOSTA CONVERSACIONAL (texto livre do coach no WhatsApp).
+ *
+ * Mesmos quatro códigos e mesmos guardrails inegociáveis (nunca "diagnóstico", "tratamento",
+ * "cura", "garantido", medicamento, promessa de prazo), mas com os padrões mais largos do
+ * protocolo trocados por formas precisas. `LANGUAGE_RULES` foi escrita para o JSON de um
+ * protocolo, onde o vocabulário é estreito; aplicada a português falado, bloqueava frases
+ * legítimas e as trocava pela resposta-padrão "prefiro não arriscar" (achado do Victor em
+ * `23-victor-conversa-natural.md`: ~26% de falso positivo em 50 frases de coach corretas; e
+ * reproduzido em produção em 2026-10-11, "Qual me recomenda?" → resposta-padrão):
+ *  - `\btome\b` e `\bdose\b` ("tome água", "dose de esforço") só bloqueiam ao lado de
+ *    remédio/comprimido/suplemento — os nomes de fármaco já têm padrão próprio;
+ *  - `você (está|tem) com` ("você está com uma boa sequência") saiu: os termos de diagnóstico
+ *    de verdade (tendinite, artrose, hérnia, "diagnóstico", "tratamento") seguem bloqueados;
+ *  - `vou|vamos … em|até|agora` (qualquer frase de treinador: "vou te explicar em detalhe")
+ *    só bloqueia quando o verbo é de RETORNO/RESPOSTA ("vou te responder em 1 hora"), que é a
+ *    promessa de prazo que a regra existe para impedir.
+ * Protocolo e injeção continuam usando `LANGUAGE_RULES`, sem mudança.
+ */
+export const RESPONSE_LANGUAGE_RULES: readonly LanguageRule[] = [
+  {
+    id: 'MED_PRESCRIPTION',
+    pattern:
+      /prescrev|prescri[çc][ãa]o|medicament|rem[ée]dio|analg[ée]sic|anti-?inflamat[óo]ri|ibuprofeno|dipirona|paracetamol|nimesulida|diclofenaco|omeprazol|\btome\b(?=.{0,40}\b(?:comprimid|c[áa]psula|gotas|\d\s*(?:ml|mg)\b|rem[ée]dio|medicament|vitamina|suplement))|\bdose\s+(?:di[áa]ria\s+)?(?:de|do|da)\s+(?:rem[ée]dio|medicament|vitamina|suplement|creatina|cafe[íi]na|whey)/i,
+    action: 'BLOCK',
+  },
+  {
+    id: 'PROMISE',
+    pattern: /garantid|garantia de resultado|\bcura\b|\bcurar\b|resultado garantido/i,
+    action: 'BLOCK',
+  },
+  {
+    id: 'DIAGNOSIS',
+    pattern: /diagn[óo]stic|tratament|\bcura\b|\bcurar\b|tendinite|artrose|h[ée]rnia de disco/i,
+    action: 'BLOCK',
+  },
+  {
+    id: 'HANDOFF_SLA_PROMISE',
+    pattern:
+      /\b(?:garanto|prometo|responderei|responderemos|retornarei|retornaremos|entrarei|entraremos)\b|\b(?:vou|vamos|iremos)\s+(?:te\s+|lhe\s+)?(?:responder|retornar|dar\s+(?:um\s+)?retorno|entrar\s+em\s+contato|voltar\s+a\s+falar|avisar)\b.{0,60}\b(?:em|dentro\s+de|at[ée]|imediatamente|agora|na\s+mesma\s+hora)\b/i,
+    action: 'BLOCK',
+  },
+];
+
+/**
  * Variantes dos padrões acima para texto "soletrado" ("i g n o r e  a s  r e g r a s"), onde
  * a fronteira de palavra é irrecuperável. Rodam sobre as letras coladas (sem separador) e só
  * quando o texto tem uma corrida de letras soletradas — colar palavras de texto normal
