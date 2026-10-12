@@ -79,6 +79,26 @@ function makeScheduler(
 }
 
 describe('ProtocolRenewalScheduler.scan', () => {
+  it('gera um dedupeId aceito como segmento de chave Redis (sessão UUID + token de 64 chars)', async () => {
+    const selectChain = makeSelectChain([eligibleRow()]);
+    const { insert } = makeInsertTx({ id: '33333333-3333-4333-8333-333333333333' });
+    const db = {
+      runAsSystem: vi.fn((callback: (tx: unknown) => Promise<unknown>) =>
+        callback({ selectDistinct: () => selectChain, insert } as never),
+      ),
+    } as unknown as TenantDatabase;
+    const enqueue = vi.fn((_q: string, _name: string, _data: unknown, _opts?: unknown) =>
+      Promise.resolve('job'),
+    );
+
+    await makeScheduler(db, enqueue).scan();
+
+    // Regressão (prod 2026-10-12): `renewal-invite-<uuid>-<token 64>` passava de 64 chars e o
+    // worker de saída recusava o job (dead-letter), mesma falha do convite de check-in.
+    const payload = enqueue.mock.calls[0]?.[2] as { dedupeId: string };
+    expect(payload.dedupeId).toMatch(/^[A-Za-z0-9._-]{1,64}$/);
+  });
+
   it('varre protocolos ACTIVE vencidos sem sessão nenhuma, cria a sessão e enfileira o convite', async () => {
     const eligible = [eligibleRow()];
     const selectChain = makeSelectChain(eligible);

@@ -140,7 +140,8 @@ export class CheckinService {
       {
         userId,
         type: 'CHECKIN_MESSAGE',
-        dedupeId: `checkin-invite-${checkinId}-${token}`,
+        // O segmento vira chave Redis (máx. 64 chars): o token inteiro tem 64 e estourava o limite.
+        dedupeId: `checkin-invite-${checkinId}-${token.slice(0, 8)}`,
         text,
       },
       { jobId: `wa-checkin-invite-${checkinId}-${token}` },

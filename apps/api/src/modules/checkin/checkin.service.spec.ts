@@ -69,6 +69,16 @@ describe('CheckinService.createAndSend', () => {
 
     await expect(service.createAndSend(USER_ID, PROTOCOL_ID, 3, 'Maria')).resolves.toBe('SENT');
 
+    // Regressão (prod 2026-10-12): o dedupeId vira segmento de chave Redis, limitado a 64
+    // chars de [A-Za-z0-9._-]. Com o token inteiro (64) o worker recusava o job e ele caía
+    // na dead-letter — nenhum check-in era entregue.
+    const enqueued = deps.enqueue.mock.calls[0] as unknown as [
+      string,
+      string,
+      { dedupeId: string },
+    ];
+    expect(enqueued[2].dedupeId).toMatch(/^[A-Za-z0-9._-]{1,64}$/);
+
     expect(deps.shorten).toHaveBeenCalledWith(
       expect.stringContaining('/checkin-semanal/'),
       expect.any(Date),
