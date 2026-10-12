@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, desc, eq, gt, gte, inArray, lt, lte, or } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, lt, lte, or, sql } from 'drizzle-orm';
 import {
   anamnesisStructuredSchema,
   mapWorkoutMuscles,
@@ -152,6 +152,11 @@ export class WorkoutJournalService {
     const today = localDate(now, owner.timezone);
     const selectedDate = requestedDate ?? today;
     if (selectedDate > today) throw new BadRequestException('Nao e possivel abrir um dia futuro.');
+    // Achado 2026-10-12: o histórico começa no dia em que o PRIMEIRO protocolo do aluno foi
+    // entregue. Dias anteriores nunca tiveram treino prescrito — não são "perdidos" nem
+    // "descanso", e não podem gerar sessão. Usa o primeiro protocolo (qualquer status), não
+    // o ativo, pra um protocolo novo não apagar o histórico já vivido.
+    const firstProtocolDate = localDate(owner.firstStartDate ?? owner.startDate, owner.timezone);
     // Usada só pra classificar PLANNED/REST da semana exibida (achado abaixo não se aplica
     // aqui: o padrão de dias/frequência é metadado do protocolo, não algo que uma
     // substituição de exercício altera).
@@ -166,6 +171,7 @@ export class WorkoutJournalService {
     );
 
     const workout = await this.db.runAsUser(userId, 'USER', async (tx) => {
+      if (selectedDate < firstProtocolDate) return undefined;
       const [existing] = await tx
         .select()
         .from(workoutSessions)
@@ -235,15 +241,17 @@ export class WorkoutJournalService {
       const state =
         date > today
           ? 'FUTURE'
-          : row === 'COMPLETED'
-            ? 'COMPLETED'
-            : row === 'IN_PROGRESS'
-              ? 'IN_PROGRESS'
-              : !planned
-                ? 'REST'
-                : date < today
-                  ? 'MISSED'
-                  : 'PLANNED';
+          : date < firstProtocolDate
+            ? 'BEFORE_START'
+            : row === 'COMPLETED'
+              ? 'COMPLETED'
+              : row === 'IN_PROGRESS'
+                ? 'IN_PROGRESS'
+                : !planned
+                  ? 'REST'
+                  : date < today
+                    ? 'MISSED'
+                    : 'PLANNED';
       return { date, weekday: WEEKDAY[index] ?? 'SUN', state } as const;
     });
 
@@ -346,6 +354,7 @@ export class WorkoutJournalService {
       firstName: owner.name?.trim().split(/\s+/)[0] || 'atleta',
       today,
       selectedDate,
+      firstProtocolDate,
       week,
       workout: workoutView,
     };
@@ -612,6 +621,11 @@ export class WorkoutJournalService {
           protocolId: protocols.id,
           protocolVersion: protocols.version,
           startDate: protocols.startDate,
+          firstStartDate: sql<
+            string | null
+          >`(select to_char(min(p.start_date) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') from protocols p where p.user_id = ${users.id})`.mapWith(
+            (value: string | null) => (value ? new Date(value) : null),
+          ),
           totalWeeks: protocols.totalWeeks,
           content: protocols.content,
         })
