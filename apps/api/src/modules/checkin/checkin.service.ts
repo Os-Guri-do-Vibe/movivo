@@ -73,6 +73,7 @@ export class CheckinService {
     weekNumber: number,
     firstName: string | null,
     reason: 'INVITE' | 'NUDGE' = 'INVITE',
+    options: { resendPending?: boolean } = {},
   ): Promise<'SENT' | 'EXISTS' | 'NO_CONSENT'> {
     if (!(await this.healthConsent.hasActiveForUser(userId))) return 'NO_CONSENT';
     const expiresAt = new Date(Date.now() + CHECKIN_TTL_MS);
@@ -110,6 +111,9 @@ export class CheckinService {
           .limit(1),
       );
       if (!existing || existing.status !== 'PENDING') return 'EXISTS';
+      // `resendPending: false` (execução manual forçada): quem já tem o check-in da semana
+      // não recebe outro convite com token novo.
+      if (options.resendPending === false) return 'EXISTS';
       token = opaqueToken();
       checkinId = existing.id;
       const [refreshed] = await this.db.runAsSystem((tx) =>

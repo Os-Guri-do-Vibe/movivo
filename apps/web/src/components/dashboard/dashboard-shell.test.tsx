@@ -16,6 +16,7 @@ const ADMIN_CAPABILITIES = [
   'control_center.marketing.read',
   'control_center.ai.config.read',
   'control_center.system.read',
+  'control_center.system.operate',
   'control_center.compliance.read',
   'control_center.audit.read',
   'control_center.admin.destructive.request',
@@ -62,7 +63,7 @@ describe('DashboardShell', () => {
   });
 
   it('admin recebe todos os setores quando possui todas as capabilities necessárias', () => {
-    expect(navigationFor(ADMIN_CAPABILITIES)).toHaveLength(20);
+    expect(navigationFor(ADMIN_CAPABILITIES)).toHaveLength(21);
   });
 
   it('esconde Compliance & Privacidade quando falta uma das capabilities exigidas (AND, como no backend)', () => {

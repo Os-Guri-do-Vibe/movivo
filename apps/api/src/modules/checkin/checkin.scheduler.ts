@@ -20,7 +20,9 @@ import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { CheckinService } from './checkin.service';
 
-type CheckinJob = { kind: 'SCAN' } | { kind: 'NUDGE'; userId: string; windowStartedAt: string };
+/** `force`: execução manual pelo painel "Sistema → Scripts" — ignora domingo 18h do aluno. */
+type CheckinJob =
+  { kind: 'SCAN'; force?: boolean } | { kind: 'NUDGE'; userId: string; windowStartedAt: string };
 
 const SCAN_CRON = '* * * * *';
 const FIXED_CHECKIN_TIME = '18:00';
@@ -67,7 +69,8 @@ export class CheckinScheduler implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     this.workers.create<CheckinJob>(QUEUE.checkinWeekly, async (job) => {
-      if (job.data.kind === 'SCAN') return this.scan();
+      if (job.data.kind === 'SCAN')
+        return this.scan(new Date(), { force: job.data.force === true });
       return this.sendNudge(job.data.userId, new Date(job.data.windowStartedAt));
     });
 
@@ -80,7 +83,15 @@ export class CheckinScheduler implements OnModuleInit {
       );
   }
 
-  async scan(now = new Date()): Promise<{ status: string; eligible: number; sent: number }> {
+  /**
+   * `force` pula o portão de dia/hora (domingo 18h local), mas NÃO reenvia a quem já recebeu o
+   * check-in desta semana (mesmo ainda pendente) nem reabre o reengajamento: uma execução
+   * manual cobre só quem ainda não foi convidado, nunca duplica mensagem.
+   */
+  async scan(
+    now = new Date(),
+    options: { force?: boolean } = {},
+  ): Promise<{ status: string; eligible: number; sent: number }> {
     // Roda a cada minuto, então o custo da query importa: o consentimento entra como EXISTS
     // (semi-join) em vez de INNER JOIN + DISTINCT. Protocolo ativo, usuário e assinatura são
     // 1:1 (`uq_subscriptions_user`); só `consents` podia duplicar linhas (um registro por
@@ -117,17 +128,29 @@ export class CheckinScheduler implements OnModuleInit {
     let sent = 0;
     for (const row of eligible) {
       const local = localParts(now, row.timezone);
-      if (!local || local.weekday !== SUNDAY || local.time !== FIXED_CHECKIN_TIME) continue;
+      if (!local) continue;
+      if (!options.force && (local.weekday !== SUNDAY || local.time !== FIXED_CHECKIN_TIME)) {
+        continue;
+      }
       const weekNumber = this.checkinsService.weekNumber(row.createdAt, row.totalWeeks);
       const firstName = row.name?.trim().split(/\s+/)[0] ?? null;
-      const result = await this.checkinsService.createAndSend(
-        row.userId,
-        row.protocolId,
-        weekNumber,
-        firstName,
-      );
+      const result = options.force
+        ? await this.checkinsService.createAndSend(
+            row.userId,
+            row.protocolId,
+            weekNumber,
+            firstName,
+            'INVITE',
+            { resendPending: false },
+          )
+        : await this.checkinsService.createAndSend(
+            row.userId,
+            row.protocolId,
+            weekNumber,
+            firstName,
+          );
       if (result === 'SENT') sent += 1;
-      await this.enqueueNudgeIfDue(row.userId);
+      if (!options.force || result === 'SENT') await this.enqueueNudgeIfDue(row.userId);
     }
     this.logger.info(
       { event: 'checkin_scan_completed', eligible: eligible.length, sent },

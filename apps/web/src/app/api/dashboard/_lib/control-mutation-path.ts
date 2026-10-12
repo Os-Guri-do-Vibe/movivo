@@ -29,6 +29,9 @@ const PARAMETERIZED_MUTATIONS = [
   new RegExp(`^ai/methodology/${UUID_SEGMENT}/(?:submit|review|publish|rollback)$`, 'i'),
   // Aba "Conversas": pausar/reativar o AI Coach, enviar mensagem manual e marcar como lida.
   new RegExp(`^conversations/${UUID_SEGMENT}/(?:ai-attendance|messages|read)$`, 'i'),
+  // Sistema → Scripts: execução manual forçada de um cron/rotina do catálogo (o id é validado
+  // de novo no backend, que só executa o que está no catálogo).
+  /^scripts\/[a-z0-9-]{1,80}\/run$/,
 ];
 
 /** O BFF nunca encaminha POST para um path que não esteja listado aqui. */
