@@ -421,6 +421,22 @@ describe('WorkoutJournalService.journal', () => {
     expect(result.week.some((day) => day.state === 'MISSED')).toBe(true);
   });
 
+  it('nao abre nem cria sessao antes do primeiro protocolo e marca esses dias como BEFORE_START', async () => {
+    // Primeiro protocolo entregue em 2026-08-05 (qua). Semana exibida: 02/08 a 08/08.
+    const owner = { ...OWNER, firstStartDate: new Date('2026-08-05T15:00:00.000Z') };
+    const { service, inserted } = makeService({ selects: [[owner], []] });
+    const result = await service.journal(USER_ID, '2026-08-03', new Date('2026-08-08T12:00:00Z'));
+    expect(result.workout).toBeNull();
+    expect(result.firstProtocolDate).toBe('2026-08-05');
+    expect(inserted).toHaveLength(0);
+    expect(result.week.map((day) => day.state).slice(0, 3)).toEqual([
+      'BEFORE_START',
+      'BEFORE_START',
+      'BEFORE_START',
+    ]);
+    expect(result.week[3]?.state).not.toBe('BEFORE_START');
+  });
+
   it('nao inventa comparativo quando a sessao anterior nao foi concluida', async () => {
     const { service } = makeService({
       selects: [[OWNER], [WORKOUT], [], [], []],

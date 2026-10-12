@@ -700,7 +700,11 @@ export function WorkoutJournalView() {
             <button
               type="button"
               aria-label="Semana anterior"
-              disabled={navigationLocked}
+              disabled={
+                navigationLocked ||
+                (journal.firstProtocolDate !== undefined &&
+                  (journal.week[0]?.date ?? journal.selectedDate) <= journal.firstProtocolDate)
+              }
               onClick={() => void load(addDays(journal.selectedDate, -7))}
               className="grid size-9 shrink-0 place-items-center text-verde-pulso disabled:text-muted-foreground disabled:opacity-40"
             >
@@ -714,7 +718,9 @@ export function WorkoutJournalView() {
                   <button
                     key={day.date}
                     type="button"
-                    disabled={day.state === 'FUTURE' || navigationLocked}
+                    disabled={
+                      day.state === 'FUTURE' || day.state === 'BEFORE_START' || navigationLocked
+                    }
                     onClick={() => void load(day.date)}
                     aria-label={`${DAY_LABELS[day.weekday]}, ${day.date}`}
                     aria-current={selected ? 'date' : undefined}

@@ -108,12 +108,15 @@ export const workoutDayStateSchema = z.enum([
   'IN_PROGRESS',
   'COMPLETED',
   'MISSED',
+  'BEFORE_START',
 ]);
 
 export const workoutJournalSchema = z.object({
   firstName: z.string().trim().min(1).max(80),
   today: workoutDateSchema,
   selectedDate: workoutDateSchema,
+  // Dia local da primeira entrega de protocolo; antes dele não há histórico. Aditivo.
+  firstProtocolDate: workoutDateSchema.optional(),
   week: z.array(
     z.object({ date: workoutDateSchema, weekday: z.string(), state: workoutDayStateSchema }),
   ),
