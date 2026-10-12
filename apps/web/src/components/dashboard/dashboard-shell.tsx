@@ -24,6 +24,7 @@ import {
   ServerCog,
   Settings,
   Target,
+  Terminal,
   UsersRound,
   X,
   type LucideIcon,
@@ -237,6 +238,14 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         label: 'Integração',
         icon: Cable,
         capabilities: ['control_center.system.read'],
+      },
+      {
+        // Execução manual forçada de crons e rotinas: ação operacional, por isso exige
+        // `system.operate` (a leitura sozinha não basta, ao contrário de "Integração").
+        href: '/dashboard/sistema/scripts',
+        label: 'Scripts',
+        icon: Terminal,
+        capabilities: ['control_center.system.operate'],
       },
       {
         href: '/dashboard/administracao',

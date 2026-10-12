@@ -70,6 +70,10 @@ import {
   controlCenterIntegrationResponseSchema,
   type ControlCenterIntegrationResponse,
   type CreateWhatsappInstanceInput,
+  controlCenterScriptsResponseSchema,
+  controlCenterScriptRunResponseSchema,
+  type ControlCenterScriptsResponse,
+  type ControlCenterScriptRunResponse,
 } from '@movivo/shared';
 
 interface Parser<T> {
@@ -780,4 +784,18 @@ export function createWhatsappInstance(
   input: CreateWhatsappInstanceInput,
 ): Promise<ControlCenterIntegrationResponse> {
   return mutate('integration/whatsapp/instance', input, controlCenterIntegrationResponseSchema);
+}
+
+/* --------- Sistema → Scripts (catálogo de crons/rotinas e execução manual forçada) -------- */
+
+export function getSystemScripts(signal?: AbortSignal): Promise<ControlCenterScriptsResponse> {
+  return request('scripts', controlCenterScriptsResponseSchema, signal);
+}
+
+export function runSystemScript(id: string): Promise<ControlCenterScriptRunResponse> {
+  return mutate(`scripts/${id}/run`, {}, controlCenterScriptRunResponseSchema, {
+    forbidden: 'Seu papel não pode executar scripts do sistema.',
+    fallback: 'Não foi possível executar o script.',
+    contract: 'A execução devolveu dados fora do contrato esperado.',
+  });
 }

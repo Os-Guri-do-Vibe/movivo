@@ -25,6 +25,8 @@ describe('allowlist de mutações do Control Center', () => {
     `conversations/${ID}/ai-attendance`,
     `conversations/${ID}/messages`,
     `conversations/${ID}/read`,
+    'scripts/workout-daily-scan/run',
+    'scripts/exercise-catalog-refresh/run',
   ])('autoriza somente a mutação conhecida %s', (path) => {
     expect(isAllowedControlMutationPath(path)).toBe(true);
   });
@@ -51,6 +53,15 @@ describe('allowlist de mutações do Control Center', () => {
     `conversations/${ID}/delete`,
     'conversations/not-a-uuid/messages',
     'ai/exercise-catalog/delete',
+    // Scripts: só `<id>/run`, com id em minúsculas/hífen.
+    'scripts',
+    'scripts/run',
+    'scripts//run',
+    'scripts/workout-daily-scan',
+    'scripts/workout-daily-scan/run/extra',
+    'scripts/Workout/run',
+    'scripts/../run',
+    'scripts/a_b/run',
   ])('recusa o caminho não autorizado %s', (path) => {
     expect(isAllowedControlMutationPath(path)).toBe(false);
   });
