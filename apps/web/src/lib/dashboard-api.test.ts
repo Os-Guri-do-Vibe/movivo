@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  amendActiveProtocol,
   addCatalogExerciseToSubstitutionItem,
   approveSubstitutionNow,
   DashboardApiError,
@@ -267,13 +268,19 @@ describe('cliente BFF same-origin', () => {
     const fetchMock = vi.fn().mockResolvedValue(response(200, { status: 'ok' }));
     vi.stubGlobal('fetch', fetchMock);
     await saveProtocol('p1', protocolContent);
+    await amendActiveProtocol('p1', {
+      content: protocolContent,
+      expectedVersion: 1,
+      reason: 'Troca manual segura',
+      confirmation: true,
+    });
     await signProtocol('p1');
     await resolveHandoff('h1', 'Contato realizado', 'Registro');
     for (const call of fetchMock.mock.calls) {
       const init = call[1] as RequestInit;
       expect(String(init.body ?? '')).not.toContain('user_id');
     }
-    expect(fetchMock.mock.calls[2]?.[1]?.body).toBe(
+    expect(fetchMock.mock.calls[3]?.[1]?.body).toBe(
       JSON.stringify({
         resolution: 'Contato realizado',
         notes: 'Registro',

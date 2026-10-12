@@ -238,6 +238,18 @@ export const protocolStructureSchema = z.object({
 export type ProtocolStructure = z.infer<typeof protocolStructureSchema>;
 
 /**
+ * Emenda manual de um protocolo já ativo. O versionamento e a assinatura renovada são
+ * aplicados no servidor; a versão esperada evita sobrescrever uma alteração concorrente.
+ */
+export const amendActiveProtocolSchema = z.object({
+  content: protocolStructureSchema,
+  expectedVersion: z.number().int().positive(),
+  reason: z.string().trim().min(3).max(500),
+  confirmation: z.literal(true),
+});
+export type AmendActiveProtocolInput = z.infer<typeof amendActiveProtocolSchema>;
+
+/**
  * DTO de LEITURA read-only por token (US-2.6). É o que o endpoint público
  * `GET /protocols/by-token/:token` devolve e o que a página `/protocolo/[token]`
  * renderiza. Nunca inclui `userId`/PII: o token (UUID do protocolo) é o único

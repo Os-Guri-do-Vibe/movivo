@@ -18,7 +18,11 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { protocolStructureSchema, publishExerciseCatalogEntrySchema } from '@movivo/shared';
+import {
+  amendActiveProtocolSchema,
+  protocolStructureSchema,
+  publishExerciseCatalogEntrySchema,
+} from '@movivo/shared';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, Roles } from '../auth/roles.decorator';
@@ -146,6 +150,29 @@ export class DashboardController {
     @Body() body: unknown,
   ) {
     return this.dashboard.editProtocol(actor, id, body);
+  }
+
+  @Post('protocols/:id/amend')
+  @Roles('PROFESSIONAL', 'ADMIN')
+  @ApiOperation({
+    summary: 'Emenda um protocolo ativo e cria uma nova versão assinada',
+    description:
+      'Exige motivo, confirmação explícita e a versão atualmente exibida. A emenda é revalidada, assinada pelo CREF e reenviada ao aluno.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID do protocolo ativo.' })
+  @ApiBody({ schema: zodSchemaToOpenApi(amendActiveProtocolSchema) })
+  @ApiResponse({ status: 201, description: 'Nova versão assinada e enviada ao aluno.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Corpo inválido ou protocolo não está apto para emenda.',
+  })
+  @ApiResponse({ status: 409, description: 'O protocolo foi alterado por outra pessoa.' })
+  amendActiveProtocol(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    return this.dashboard.amendActiveProtocol(actor, id, body);
   }
 
   @Post('protocols/:id/review-hold')

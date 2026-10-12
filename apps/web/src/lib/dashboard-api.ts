@@ -1,4 +1,8 @@
-import { protocolStructureSchema, type ExerciseLevel } from '@movivo/shared';
+import {
+  protocolStructureSchema,
+  type AmendActiveProtocolInput,
+  type ExerciseLevel,
+} from '@movivo/shared';
 
 import type {
   ActionResult,
@@ -392,6 +396,17 @@ export async function saveProtocol(id: string, content: unknown): Promise<Action
   return (await request(`/protocols/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify({ content }),
+  })) as ActionResult;
+}
+
+/** Atualiza um protocolo ativo sem perder seu rastro de versões e assinatura CREF. */
+export async function amendActiveProtocol(
+  id: string,
+  input: AmendActiveProtocolInput,
+): Promise<ActionResult> {
+  return (await request(`/protocols/${encodeURIComponent(id)}/amend`, {
+    method: 'POST',
+    body: JSON.stringify(input),
   })) as ActionResult;
 }
 
