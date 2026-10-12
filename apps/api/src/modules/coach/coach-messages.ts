@@ -143,3 +143,41 @@ export const SUBSTITUTION_DISCARDED_MESSAGE = [
   'Por isso, vamos manter o treino da forma como está atualmente e, posteriormente, ' +
     'estudar possíveis novas substituições que possam se adequar melhor ao seu pedido.',
 ].join(BUBBLE_SEPARATOR);
+
+/**
+ * Apresentação OFICIAL da agente — resposta a "quem é você?" / "qual a sua história?" / "você
+ * é real?". Texto definido pelo fundador em 2026-10-12 e entregue sem LLM: é a única "história"
+ * que a agente tem, e um modelo livre já a trocou por uma biografia inventada ("sou personal
+ * trainer, treino há anos") na conversa de stress test em produção.
+ *
+ * Só a primeira frase muda com o nome (artigo e missão por agente). O nome vem da persona
+ * publicada; nome sem artigo cadastrado usa a missão e a forma neutras (sem artigo).
+ * Não substitui as mensagens de boas-vindas, que seguem como estão.
+ */
+export const AGENT_RT_NAME = 'Leonardo Rodrigues Brito';
+export const AGENT_RT_CREF = '206778-G/SP';
+
+const IDENTITY_MISSION_DEFAULT =
+  'Minha função é ajudar você a evoluir com orientações personalizadas, fundamentadas em ' +
+  'ciência e alinhadas aos seus objetivos, à sua rotina e ao seu plano de treino.';
+
+const IDENTITY_MISSION_MARIANA =
+  'Minha função é acompanhar sua jornada, ajudar você a manter a consistência e oferecer ' +
+  'orientações personalizadas, fundamentadas em ciência e alinhadas aos seus objetivos, à sua ' +
+  'rotina e ao seu plano de treino.';
+
+export function buildAgentIdentityMessage(agentName: string): string {
+  const key = agentName
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+  const article = key === 'leonardo' ? 'o ' : key === 'mariana' ? 'a ' : '';
+  const mission = key === 'mariana' ? IDENTITY_MISSION_MARIANA : IDENTITY_MISSION_DEFAULT;
+  return (
+    `Sou ${article}${agentName}, uma persona de IA da MOVIVO, desenvolvida a partir de ` +
+    'conhecimentos científicos sobre treinamento físico e orientada pelo conhecimento técnico ' +
+    `do profissional de Educação Física ${AGENT_RT_NAME}, registrado no CREF sob o nº ` +
+    `${AGENT_RT_CREF}.\n\n${mission}`
+  );
+}

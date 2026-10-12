@@ -198,7 +198,57 @@ describe('IntentClassifier — default-deny (nenhum caminho vira prompt sem guar
   });
 });
 
+describe('IntentClassifier — fallback não vira dead-end (stress test em produção, 2026-10-12)', () => {
+  it('oferece as intenções novas ao nano, com glosa que tira "você é real?" de FORA_DE_ESCOPO', async () => {
+    const { svc, complete } = make({ knn: null, nano: 'QUEM_E_VOCE' });
+    const r = await svc.classify({ ...input, message: 'Você é real?' });
+    expect(r).toMatchObject({ intent: 'QUEM_E_VOCE', stage: 'FALLBACK' });
+    const system = String(complete.mock.calls[0]?.[0]?.system);
+    expect(system).toContain('QUEM_E_VOCE:');
+    expect(system).toContain('SOBRE_O_COACH:');
+    expect(system).toContain('ADAPTACAO_NO_TREINO:');
+    expect(system).toContain('NUNCA use para pergunta sobre a própria IA');
+  });
+
+  it('instrui o nano a tratar FORA_DE_ESCOPO como último recurso', async () => {
+    const { svc, complete } = make({ knn: null, nano: 'ADAPTACAO_NO_TREINO' });
+    await svc.classify({
+      ...input,
+      message: 'Ô Léo, tô na academia, tá meio cheio. O que eu faço?',
+    });
+    const system = String(complete.mock.calls[0]?.[0]?.system);
+    expect(system).toContain('FORA_DE_ESCOPO é o último recurso');
+  });
+
+  it('recusas anteriores da própria agente no contexto NÃO contaminam a classificação', async () => {
+    const refusal =
+      'Isso foge um pouco do que eu, como Leonardo, posso te orientar com segurança por aqui.';
+    const { svc, complete } = make({
+      knn: null,
+      nano: 'ADAPTACAO_NO_TREINO',
+      recentTurns: [
+        { role: 'user', content: 'Você consegue me mandar áudio?', ts: 1 },
+        { role: 'assistant', content: refusal, ts: 2 },
+        { role: 'user', content: 'Ô Léo, tô na academia, tá meio cheio. O que eu faço?', ts: 3 },
+      ],
+    });
+    const r = await svc.classify({
+      ...input,
+      message: 'Ô Léo, tô na academia, tá meio cheio. O que eu faço?',
+    });
+    expect(r.intent).toBe('ADAPTACAO_NO_TREINO');
+    const system = String(complete.mock.calls[0]?.[0]?.system);
+    expect(system).toContain('recusam o pedido');
+    expect(system).toContain('foram erros');
+  });
+});
+
 describe('parseIntent', () => {
+  it('reconhece as intenções novas', () => {
+    expect(parseIntent('QUEM_E_VOCE')).toBe('QUEM_E_VOCE');
+    expect(parseIntent('SOBRE_O_COACH')).toBe('SOBRE_O_COACH');
+    expect(parseIntent('ADAPTACAO_NO_TREINO')).toBe('ADAPTACAO_NO_TREINO');
+  });
   it('reconhece papo casual classificado pelo modelo', () => {
     expect(parseIntent('PAPO_CASUAL')).toBe('PAPO_CASUAL');
   });

@@ -49,6 +49,7 @@ import type { AiResponseJob } from '../whatsapp/whatsapp-inbound.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { UserJobLock } from '../whatsapp/user-job-lock';
 import {
+  buildAgentIdentityMessage,
   DAILY_LIMIT_MESSAGE,
   DLQ_FALLBACK_MESSAGE,
   FORBIDDEN_TOPIC_RESPONSE,
@@ -57,6 +58,7 @@ import {
   TECHNICAL_NO_EVIDENCE_MESSAGE,
 } from './coach-messages';
 import { ConversationRepository } from './conversation.repository';
+import { buildResponseCorrection } from './response-correction';
 import { applyResponseFormatting } from './response-formatter';
 import { SUBSTITUTION_FLOW_INTENT, SubstitutionFlowService } from './substitution-flow.service';
 import { untrustedDataEnvelope } from '../ai-coach/context/untrusted-context';
@@ -411,6 +413,18 @@ export class AIResponseWorker implements OnModuleInit {
         return { status: 'HANDOFF' };
       }
 
+      // "Quem é você?" / "qual a sua história?" / "você é real?": apresentação OFICIAL, sem LLM
+      // (texto do fundador, 2026-10-12). Mesmo padrão do handoff: copy fixa, nunca prompt — a
+      // agente não tem outra história além desta, e um modelo livre já inventou uma. Não
+      // substitui as mensagens de boas-vindas, que seguem como estão.
+      if (intent.intent === 'QUEM_E_VOCE') {
+        const response = buildAgentIdentityMessage(persona.agentName);
+        await this.deliver(userId, correlationId, response, null, true, enqueuedAt, 0, false);
+        await this.context.recordTurn(userId, 'assistant', response);
+        await this.context.summarizeIfNeeded(userId, persona.agentName);
+        return { status: 'SENT' };
+      }
+
       const draft = await this.buildResponse(
         userId,
         intent.intent,
@@ -495,11 +509,13 @@ export class AIResponseWorker implements OnModuleInit {
       );
       if (flow) return flow;
     }
-    if (intent === 'FORA_DE_ESCOPO') {
-      // Recusa honesta pré-aprovada — sem LLM generativo (US-3.4). O nome da agente vem
-      // da configuração publicada (US-7.6), nunca de literal no código.
-      return draftPass(this.prompts.foraDeEscopoResponseFor(personaCtx.persona), null, 0);
-    }
+    // `FORA_DE_ESCOPO` vindo do classificador (kNN/nano) NÃO é mais recusa enlatada (achado
+    // 2026-10-12, stress test em produção: "você é real?" e "tô na academia, tá cheio, o que eu
+    // faço?" receberam quatro recusas seguidas). O que a regex do guardrail tem certeza de que é
+    // fora de escopo já foi respondido lá em cima (`guardrail === 'SCOPE'`, resposta
+    // pré-aprovada, sem LLM). O que chega aqui é palpite de modelo: vai pra IA reavaliar contra o
+    // perímetro (`PER_INTENT.FORA_DE_ESCOPO`), com o mesmo validador de saída de qualquer
+    // conversa. O alerta ao painel CREF (`handoffReason`) continua, para revisão humana.
     return this.buildGenerative(
       userId,
       intent,
@@ -638,19 +654,21 @@ export class AIResponseWorker implements OnModuleInit {
             })
           : ({ status: 'INSUFFICIENT', latencyMs: 0 } as const);
 
-      if (grounded.status === 'VERIFIED') {
-        const groundedVerdict = this.validation.validateResponse(grounded.text);
-        if (groundedVerdict.action === 'BLOCK_FALLBACK') {
-          return {
-            text: STANDARD_BLOCK_RESPONSE,
-            modelUsed: grounded.model,
-            latencyMs: grounded.latencyMs,
-            validationPassed: false,
-            humanReview: true,
-            blocked: true,
-            blockedViolations: groundedVerdict.violations.map((v) => v.rule),
-          };
-        }
+      // Achado 2026-10-12: texto verificado mas barrado pelo validador de linguagem deixou de ir
+      // direto pra resposta-padrão — cai no caminho generativo comum logo abaixo, que tem o
+      // mesmo validador e uma rodada de correção. Só perde a citação da fonte, não a resposta.
+      const groundedVerdict =
+        grounded.status === 'VERIFIED' ? this.validation.validateResponse(grounded.text) : null;
+      if (groundedVerdict?.action === 'BLOCK_FALLBACK') {
+        this.logger.info(
+          {
+            event: 'grounded_answer_blocked_regenerating',
+            violations: groundedVerdict.violations.map((v) => v.rule),
+          },
+          'resposta fundamentada barrada pelo validador; segue pro caminho generativo com correção',
+        );
+      }
+      if (grounded.status === 'VERIFIED' && groundedVerdict?.action !== 'BLOCK_FALLBACK') {
         return {
           // Achado 2026-09-02 (correção do fundador): esta era a única saída generativa do
           // worker que devolvia o texto do modelo direto, sem passar por
@@ -662,7 +680,7 @@ export class AIResponseWorker implements OnModuleInit {
           modelUsed: grounded.model,
           latencyMs: grounded.latencyMs,
           validationPassed: true,
-          humanReview: grounded.humanReview || groundedVerdict.humanReviewRequired,
+          humanReview: grounded.humanReview || Boolean(groundedVerdict?.humanReviewRequired),
           blocked: false,
           ragSources: grounded.sources.map((source) => ({
             ...source,
@@ -703,75 +721,93 @@ export class AIResponseWorker implements OnModuleInit {
       ].join('\n\n');
     }
 
-    const startedAt = Date.now();
-    const result = await this.llm.complete({
-      purpose: 'AI_RESPONSE',
-      userId,
-      user: scrubUser,
-      dataClass: 'HEALTH',
-      system,
-      messages,
-      maxTokens: GENERATIVE_MAX_TOKENS,
-      cache: true,
-      intent: `coach_${intent}`,
-      personaSlot: personaCtx.slot,
-      operationId,
-    });
-    const latencyMs = Date.now() - startedAt;
+    // Uma rodada de correção por bloqueio do validador (`response-correction.ts`): o modelo é
+    // avisado de QUAL regra cumprir antes de a conversa cair na resposta-padrão.
+    let correction: string | null = null;
+    for (let attempt = 0; ; attempt += 1) {
+      const startedAt = Date.now();
+      const result = await this.llm.complete({
+        purpose: 'AI_RESPONSE',
+        userId,
+        user: scrubUser,
+        dataClass: 'HEALTH',
+        system: correction ? [system, correction].join('\n\n') : system,
+        messages,
+        maxTokens: GENERATIVE_MAX_TOKENS,
+        cache: true,
+        intent: `coach_${intent}`,
+        personaSlot: personaCtx.slot,
+        operationId,
+      });
+      const latencyMs = Date.now() - startedAt;
 
-    const rawVerdict = this.validation.validateResponse(result.text, {
-      allowedExercises: opts?.allowedExercises,
-    });
-    if (rawVerdict.action === 'BLOCK_FALLBACK') {
-      return {
-        text: STANDARD_BLOCK_RESPONSE,
-        modelUsed: result.model,
-        latencyMs,
-        validationPassed: false,
-        humanReview: true,
-        blocked: true,
-        blockedViolations: rawVerdict.violations.map((v) => v.rule),
-      };
+      const rawVerdict = this.validation.validateResponse(result.text, {
+        allowedExercises: opts?.allowedExercises,
+      });
+      const formatted =
+        rawVerdict.action === 'BLOCK_FALLBACK'
+          ? result.text
+          : applyResponseFormatting(result.text, runtime.formatting);
+      const verdict =
+        rawVerdict.action === 'BLOCK_FALLBACK'
+          ? rawVerdict
+          : this.validation.validateResponse(formatted, {
+              allowedExercises: opts?.allowedExercises,
+            });
+
+      if (verdict.action !== 'BLOCK_FALLBACK') {
+        return {
+          text: formatted,
+          modelUsed: result.model,
+          latencyMs,
+          validationPassed: true,
+          // `ungroundedTechnicalFallback`: resposta de DUVIDA_TECNICA sem base na Base de
+          // Conhecimento continua visível pro profissional CREF acompanhar (alerta assíncrono,
+          // não bloqueia a entrega — ver `humanReview` em `deliver()`), mesmo passando limpo
+          // no validador de linguagem. Resposta que só passou na rodada de correção também.
+          humanReview:
+            ungroundedTechnicalFallback ||
+            attempt > 0 ||
+            rawVerdict.humanReviewRequired ||
+            verdict.humanReviewRequired,
+          blocked: false,
+          ragSources: ctx.ragDocs.map((document) => ({
+            chunkId: document.chunkId,
+            documentId: document.documentId,
+            title: document.title,
+            ...(document.sourceUrl ? { sourceUrl: document.sourceUrl } : {}),
+            ...(document.documentVersion ? { documentVersion: document.documentVersion } : {}),
+            ...(document.documentSha256 ? { documentSha256: document.documentSha256 } : {}),
+            ...(document.publicationEventId
+              ? { publicationEventId: document.publicationEventId }
+              : {}),
+          })),
+        };
+      }
+
+      const nextCorrection =
+        attempt === 0 ? buildResponseCorrection(verdict.violations, opts?.allowedExercises) : null;
+      if (!nextCorrection) {
+        return {
+          text: STANDARD_BLOCK_RESPONSE,
+          modelUsed: result.model,
+          latencyMs,
+          validationPassed: false,
+          humanReview: true,
+          blocked: true,
+          blockedViolations: verdict.violations.map((v) => v.rule),
+        };
+      }
+      this.logger.info(
+        {
+          event: 'ai_response_blocked_retrying',
+          intent,
+          violations: verdict.violations.map((v) => v.rule),
+        },
+        'resposta barrada pelo validador; uma rodada de correção antes da resposta-padrão',
+      );
+      correction = nextCorrection;
     }
-    const formatted = applyResponseFormatting(result.text, runtime.formatting);
-    const verdict = this.validation.validateResponse(formatted, {
-      allowedExercises: opts?.allowedExercises,
-    });
-    if (verdict.action === 'BLOCK_FALLBACK') {
-      return {
-        text: STANDARD_BLOCK_RESPONSE,
-        modelUsed: result.model,
-        latencyMs,
-        validationPassed: false,
-        humanReview: true,
-        blocked: true,
-        blockedViolations: verdict.violations.map((v) => v.rule),
-      };
-    }
-    return {
-      text: formatted,
-      modelUsed: result.model,
-      latencyMs,
-      validationPassed: true,
-      // `ungroundedTechnicalFallback`: resposta de DUVIDA_TECNICA sem base na Base de
-      // Conhecimento continua visível pro profissional CREF acompanhar (alerta assíncrono,
-      // não bloqueia a entrega — ver `humanReview` em `deliver()`), mesmo passando limpo
-      // no validador de linguagem.
-      humanReview:
-        ungroundedTechnicalFallback ||
-        rawVerdict.humanReviewRequired ||
-        verdict.humanReviewRequired,
-      blocked: false,
-      ragSources: ctx.ragDocs.map((document) => ({
-        chunkId: document.chunkId,
-        documentId: document.documentId,
-        title: document.title,
-        ...(document.sourceUrl ? { sourceUrl: document.sourceUrl } : {}),
-        ...(document.documentVersion ? { documentVersion: document.documentVersion } : {}),
-        ...(document.documentSha256 ? { documentSha256: document.documentSha256 } : {}),
-        ...(document.publicationEventId ? { publicationEventId: document.publicationEventId } : {}),
-      })),
-    };
   }
 
   // --- envio + persistência + SLA -------------------------------------------

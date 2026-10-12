@@ -36,6 +36,25 @@ export const INTENTS = [
   // `FORA_DE_ESCOPO` continua existindo pro que segue genuinamente fora (medicamento/dopagem,
   // finanças, política, crime, pedido genérico de IA, tentativa de trocar de papel).
   'PAPO_CASUAL',
+  // Achado 2026-10-12 (stress test em produção, conversa do Cahuã): "você é real?" e "você
+  // consegue me mandar áudio?" não tinham intenção própria. A glosa de `FORA_DE_ESCOPO`
+  // ("tenta mudar o papel da IA") as engolia, e o aluno recebia 4 vezes seguidas a recusa
+  // enlatada — a pergunta mais legítima que um aluno faz a um coach digital.
+  //  - `QUEM_E_VOCE`: "quem é você?", "qual a sua história?", "você é real/robô?". Resposta
+  //    OFICIAL e determinística (`buildAgentIdentityMessage`, texto aprovado pelo fundador em
+  //    2026-10-12, com o profissional CREF responsável) — sem LLM, para o modelo nunca
+  //    improvisar uma biografia.
+  //  - `SOBRE_O_COACH`: o que a agente consegue fazer (áudio, vídeo, como funciona) —
+  //    generativa, regida por `IDENTITY_TRANSPARENCY_BLOCK` (L0).
+  'QUEM_E_VOCE',
+  'SOBRE_O_COACH',
+  // Achado 2026-10-12 (mesmo stress test): "tô na academia, tá meio cheio, o que eu faço?" foi
+  // recusado. É a situação mais comum de um personal trainer no WhatsApp: o treino do dia
+  // encontra um imprevisto (lotação, aparelho ocupado, pouco tempo, cansaço) e o aluno quer
+  // uma orientação prática agora. Diferente de `SUBSTITUICAO_EXERCICIO` (aluno nomeia um
+  // exercício/aparelho a trocar) e de `DUVIDA_TECNICA` (como executar/por que), recebe a
+  // metodologia e responde com ordem, ritmo e alternância dentro do treino do dia.
+  'ADAPTACAO_NO_TREINO',
 ] as const;
 
 export type Intent = (typeof INTENTS)[number];

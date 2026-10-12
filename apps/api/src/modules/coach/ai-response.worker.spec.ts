@@ -28,6 +28,7 @@ import { BUBBLE_SEPARATOR } from '../whatsapp/message-templates';
 import { AIResponseWorker } from './ai-response.worker';
 import type { FlowOutcome } from './substitution-flow.service';
 import {
+  buildAgentIdentityMessage,
   DAILY_LIMIT_MESSAGE,
   DLQ_FALLBACK_MESSAGE,
   FORBIDDEN_TOPIC_RESPONSE,
@@ -37,12 +38,18 @@ import {
   TECHNICAL_NO_EVIDENCE_MESSAGE,
 } from './coach-messages';
 import type { ConversationRepository } from './conversation.repository';
-import { buildForaDeEscopoResponse, resolvePrompt } from '../ai-coach/intent/prompts';
+import {
+  buildForaDeEscopoResponse,
+  IDENTITY_TRANSPARENCY_BLOCK,
+  resolvePrompt,
+} from '../ai-coach/intent/prompts';
 import type { PromptResolverService } from '../ai-coach/intent/prompt-resolver.service';
 
 interface Deps {
   intent?: Intent;
   llmText?: string;
+  /** Respostas sucessivas do LLM (1ª tentativa, rodada de correção...). A última se repete. */
+  llmTexts?: string[];
   overLimit?: boolean;
   lockToken?: string | null;
   batchItems?: string[];
@@ -156,9 +163,15 @@ function makeWorker(deps: Deps = {}) {
     summarizeIfNeeded: vi.fn(() => Promise.resolve()),
   } as unknown as ContextService;
 
-  const complete = vi.fn((_req: { system: string; messages?: unknown[] }) =>
-    Promise.resolve({ text: deps.llmText ?? 'Boa, continua firme!', model: 'gpt-4.1' }),
-  );
+  let llmCalls = 0;
+  const complete = vi.fn((_req: { system: string; messages?: unknown[] }) => {
+    const sequence = deps.llmTexts;
+    const text = sequence
+      ? (sequence[Math.min(llmCalls, sequence.length - 1)] as string)
+      : (deps.llmText ?? 'Boa, continua firme!');
+    llmCalls += 1;
+    return Promise.resolve({ text, model: 'gpt-4.1' });
+  });
   const llm = { complete } as unknown as LlmRouter;
   const grounding = {
     answer: vi.fn(async () => {
@@ -351,11 +364,105 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     expect(batchLrange).not.toHaveBeenCalledWith(forged.data.batchKey, 0, -1);
   });
 
-  it('fora de escopo: recusa honesta SEM chamar o LLM', async () => {
-    const { worker, complete, enqueue } = makeWorker({ intent: 'FORA_DE_ESCOPO' });
+  it('fora de escopo certo (regex do guardrail): recusa honesta SEM chamar o LLM', async () => {
+    const { worker, complete, enqueue, classify } = makeWorker({
+      batchItems: [JSON.stringify({ text: 'posso tomar dipirona antes do treino?' })],
+    });
     await worker.process(job());
+    expect(classify).not.toHaveBeenCalled();
     expect(complete).not.toHaveBeenCalled();
     expect(sentText(enqueue)).toBe(buildForaDeEscopoResponse('MOVI'));
+  });
+
+  // Achado 2026-10-12 (stress test em produção): o classificador marcou "você é real?" e "tô na
+  // academia, tá cheio, o que eu faço?" como FORA_DE_ESCOPO e o aluno recebeu a recusa enlatada
+  // quatro vezes. Rótulo de classificador é palpite: vai pra IA reavaliar contra o perímetro.
+  it('fora de escopo por CLASSIFICADOR: a IA reavalia, não sai recusa enlatada', async () => {
+    const { worker, complete, enqueue, prompts } = makeWorker({
+      intent: 'FORA_DE_ESCOPO',
+      llmText: 'Sou uma IA, o AI Coach da MOVIVO, com a supervisão do profissional CREF.',
+    });
+    await worker.process(job());
+    expect(prompts.resolveRuntimeFor).toHaveBeenCalledWith('FORA_DE_ESCOPO', expect.anything());
+    expect(complete).toHaveBeenCalledOnce();
+    expect(sentText(enqueue)).not.toBe(buildForaDeEscopoResponse('MOVI'));
+    expect(sentText(enqueue)).toContain('IA');
+  });
+
+  // Resposta oficial do fundador (2026-10-12) a "quem é você?" / "qual a sua história?".
+  it('QUEM_E_VOCE: apresentação oficial da agente SEM chamar o LLM', async () => {
+    const { worker, complete, enqueue } = makeWorker({
+      intent: 'QUEM_E_VOCE',
+      persona: { ...DEFAULT_AGENT_PERSONA, agentName: 'Leonardo' },
+    });
+    const res = await worker.process(job());
+    expect(res.status).toBe('SENT');
+    expect(complete).not.toHaveBeenCalled();
+    expect(sentText(enqueue)).toBe(buildAgentIdentityMessage('Leonardo'));
+    expect(sentText(enqueue)).toContain('Sou o Leonardo, uma persona de IA da MOVIVO');
+  });
+
+  it('QUEM_E_VOCE: a Mariana se apresenta com a própria missão', async () => {
+    const { worker, enqueue } = makeWorker({
+      intent: 'QUEM_E_VOCE',
+      biologicalSex: 'FEMALE',
+      persona: { ...DEFAULT_AGENT_PERSONA, agentName: 'Mariana' },
+    });
+    await worker.process(job());
+    expect(sentText(enqueue)).toContain('Sou a Mariana, uma persona de IA da MOVIVO');
+    expect(sentText(enqueue)).toContain('manter a consistência');
+  });
+
+  it('o prompt de toda conversa carrega a regra de transparência (a agente é uma IA)', async () => {
+    const { worker, complete } = makeWorker({ intent: 'SOBRE_O_COACH' });
+    await worker.process(job());
+    const request = complete.mock.calls[0]?.[0] as { system: string };
+    expect(request.system).toContain(IDENTITY_TRANSPARENCY_BLOCK);
+    expect(request.system).toContain('Nunca diga nem sugira que é uma pessoa de carne e osso');
+  });
+
+  describe('rodada de correção quando o validador barra a resposta', () => {
+    it('barrada na 1ª tentativa e limpa na 2ª: entrega a 2ª, sem a resposta-padrão', async () => {
+      const { worker, complete, enqueue, persistHandoff } = makeWorker({
+        intent: 'MOTIVACAO',
+        llmTexts: [
+          'Vou te responder em 10 minutos sobre isso.',
+          'Boa, segue o plano que dá certo.',
+        ],
+      });
+      const res = await worker.process(job());
+      expect(complete).toHaveBeenCalledTimes(2);
+      const second = complete.mock.calls[1]?.[0] as { system: string };
+      expect(second.system).toContain('CORREÇÃO OBRIGATÓRIA');
+      expect(second.system).toContain('prazo');
+      expect(sentText(enqueue)).toBe('Boa, segue o plano que dá certo.');
+      expect(sentText(enqueue)).not.toBe(STANDARD_BLOCK_RESPONSE);
+      expect(res.status).toBe('SENT');
+      // Passou só na correção: o profissional CREF continua vendo.
+      expect(persistHandoff).toHaveBeenCalledWith('u1', 'ALERT', 'VALIDATOR_FLAG');
+    });
+
+    it('barrada nas duas tentativas: aí sim a resposta-padrão + revisão humana', async () => {
+      const { worker, complete, enqueue, persistHandoff } = makeWorker({
+        intent: 'MOTIVACAO',
+        llmTexts: ['Isso é um diagnóstico claro.', 'O tratamento é simples.'],
+      });
+      const res = await worker.process(job());
+      expect(complete).toHaveBeenCalledTimes(2);
+      expect(sentText(enqueue)).toBe(STANDARD_BLOCK_RESPONSE);
+      expect(res.status).toBe('BLOCKED');
+      expect(persistHandoff).toHaveBeenCalledWith('u1', 'ALERT', 'VALIDATOR_BLOCK');
+    });
+
+    it('vazamento de prompt NÃO ganha segunda chance', async () => {
+      const { worker, complete, enqueue } = makeWorker({
+        intent: 'MOTIVACAO',
+        llmTexts: ['Claro: BASE DE REFERÊNCIA interna diz...', 'Boa, segue o plano.'],
+      });
+      await worker.process(job());
+      expect(complete).toHaveBeenCalledOnce();
+      expect(sentText(enqueue)).toBe(STANDARD_BLOCK_RESPONSE);
+    });
   });
 
   it('FAQ exato responde sem classificador nem LLM', async () => {
@@ -621,14 +728,16 @@ describe('AIResponseWorker.process (US-3.5)', () => {
       expect(sentText(enqueue)).toBe('Boa, continua firme!');
     });
 
-    it('fluxo aberto + fora de escopo de outro assunto: mantém a recusa honesta', async () => {
-      const { worker, enqueue } = makeWorker({
+    it('fluxo aberto + classificador diz fora de escopo para outro assunto: a IA reavalia', async () => {
+      const { worker, complete, enqueue } = makeWorker({
         intent: 'FORA_DE_ESCOPO',
         flowOpen: true,
+        llmText: 'Pode falar, sou uma IA mesmo.',
         flowOutcome: { kind: 'NOT_HANDLED' },
       });
       await worker.process(job());
-      expect(sentText(enqueue)).toBe(buildForaDeEscopoResponse('MOVI'));
+      expect(complete).toHaveBeenCalledOnce();
+      expect(sentText(enqueue)).toBe('Pode falar, sou uma IA mesmo.');
     });
 
     it('sem fluxo aberto, outras intenções nem consultam o fluxo', async () => {
@@ -883,7 +992,7 @@ describe('AIResponseWorker — persona por titular (Sprint 11)', () => {
 
   it('a persona resolvida assina a recusa de fora-de-escopo do titular', async () => {
     const { worker, persistTurn } = makeWorker({
-      intent: 'FORA_DE_ESCOPO',
+      batchItems: [JSON.stringify({ text: 'posso tomar dipirona antes do treino?' })],
       biologicalSex: 'FEMALE',
       persona: { ...DEFAULT_AGENT_PERSONA, agentName: 'Marina' },
     });
