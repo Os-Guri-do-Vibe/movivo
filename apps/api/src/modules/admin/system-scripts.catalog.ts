@@ -62,8 +62,8 @@ export const CRON_SCRIPTS: readonly CronScript[] = [
     cron: '* * * * * (UTC)',
     schedule: 'Todo dia às 04:00 (fuso de cada aluno)',
     runEffect:
-      'Envia agora o link de treino de hoje aos alunos elegíveis que ainda não o receberam hoje. Quem já recebeu não recebe de novo.',
-    resultLabels: { eligible: 'elegíveis', sent: 'enviados' },
+      'Enfileira agora o envio do link de treino de hoje aos alunos elegíveis que ainda não o receberam hoje. Quem já recebeu não recebe de novo. A entrega em si acontece na fila do WhatsApp.',
+    resultLabels: { eligible: 'elegíveis', sent: 'na fila de envio' },
   },
   {
     id: 'checkin-weekly-scan',
@@ -76,8 +76,8 @@ export const CRON_SCRIPTS: readonly CronScript[] = [
     cron: '* * * * * (UTC)',
     schedule: 'Domingo às 18:00 (fuso de cada aluno)',
     runEffect:
-      'Envia agora o convite de check-in aos alunos elegíveis que ainda não têm o check-in desta semana. Quem já foi convidado não recebe outro.',
-    resultLabels: { eligible: 'elegíveis', sent: 'enviados' },
+      'Enfileira agora o convite de check-in aos alunos elegíveis que ainda não têm o check-in desta semana. Quem já foi convidado não recebe outro. A entrega em si acontece na fila do WhatsApp.',
+    resultLabels: { eligible: 'elegíveis', sent: 'na fila de envio' },
   },
   {
     id: 'protocol-renewal-scan',
@@ -91,7 +91,7 @@ export const CRON_SCRIPTS: readonly CronScript[] = [
     schedule: 'Todo dia às 09:00 (Brasília)',
     runEffect:
       'Varre agora os protocolos vencidos e envia o convite de renovação a quem ainda não tem um convite válido.',
-    resultLabels: { created: 'convites enviados' },
+    resultLabels: { created: 'convites na fila de envio' },
   },
   {
     id: 'subscription-period-scan',

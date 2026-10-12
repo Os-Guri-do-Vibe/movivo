@@ -200,7 +200,8 @@ export class ProtocolRenewalScheduler implements OnModuleInit {
       {
         userId,
         type: 'MESOCYCLE_RENEWAL_INVITE',
-        dedupeId: `renewal-invite-${sessionId}-${token}`,
+        // O segmento vira chave Redis (máx. 64 chars): o token inteiro tem 64 e estourava o limite.
+        dedupeId: `renewal-invite-${sessionId}-${token.slice(0, 8)}`,
         text: mesocycleRenewalMessage(firstName, link),
       },
       { jobId: `wa-renewal-invite-${sessionId}-${token}` },
