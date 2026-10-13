@@ -644,7 +644,7 @@ export function DashboardShell({
   }, [pathname]);
 
   return (
-    <div className="min-h-dvh bg-background">
+    <div className="dashboard-theme min-h-dvh bg-background">
       <a
         href="#conteudo-dashboard"
         className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-md focus:bg-card focus:px-4 focus:py-2 focus:ring-[3px] focus:ring-ring"

@@ -154,6 +154,24 @@
 }
 
 /*
+ * Plataforma interna no modo escuro: fundo preto, não Petróleo. O shell do dashboard
+ * carrega `.dashboard-theme`; `:has` sobe o escopo até o `<html>` para que dialogs e
+ * popovers (portalizados no body) herdem a mesma paleta. Redefinir os tokens BRUTOS
+ * recolore de uma vez tudo o que os usa (background, card, sidebar, bordas) sem tocar
+ * nos componentes, e só vale em `.dark` — o tema claro e o site público ficam como estão.
+ * Verde Pulso e Coral seguem como únicos acentos. Contrastes: `--petroleo-borda` 4,7:1
+ * sobre o fundo (campos de formulário, mínimo 3:1); `--nevoa-suave` 8,6:1.
+ */
+.dark:has(.dashboard-theme) {
+  --petroleo-vivo: #000000;
+  --petroleo-elevado: #0d0d0d;
+  --petroleo-superficie: #1a1a1a;
+  --petroleo-borda: #737373;
+  --nevoa-suave: #a3a3a3;
+  --border: #262626;
+}
+
+/*
  * O onboarding é deliberadamente uma experiência só clara. O escopo redefine os
  * tokens semânticos no próprio shell para continuar branco mesmo quando `.dark`
  * estiver no elemento `<html>` por uma preferência salva em outra rota.
