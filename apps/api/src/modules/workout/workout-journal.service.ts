@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { PinoLogger } from 'nestjs-pino';
 import { and, asc, desc, eq, gt, gte, inArray, lt, lte, or, sql } from 'drizzle-orm';
 import {
   anamnesisStructuredSchema,
@@ -30,6 +31,7 @@ import {
   type TenantTransaction,
 } from '../../core/database/tenant-database.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
+import { FollowupService } from '../followup/followup.service';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
@@ -55,6 +57,8 @@ function withCardioFlag(session: ProtocolSession): ProtocolSession {
 }
 
 const WEEKDAY = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as const;
+/** Quantos dias para trás `recentMissStreak` olha ao contar a sequência (descanso incluso). */
+const MAX_STREAK_SCAN_DAYS = 14;
 const DURATION_CEILING: Readonly<Record<string, number>> = {
   LT_30: 30,
   M30_TO_45: 45,
@@ -136,6 +140,75 @@ function expectedSets(session: ProtocolSession): WorkoutSetInput[] {
   });
 }
 
+interface ProtocolVersionRow {
+  version: number;
+  content: unknown;
+  createdAt: Date;
+}
+
+/** A versão do protocolo vigente no dia local `date` (nunca a vigente agora). */
+function pickVersion(
+  versions: readonly ProtocolVersionRow[],
+  timezone: string,
+  date: string,
+): { structure: ReturnType<typeof protocolStructureSchema.parse>; version: number } {
+  let chosen = versions[0];
+  for (const candidate of versions) {
+    if (localDate(candidate.createdAt, timezone) > date) break;
+    chosen = candidate;
+  }
+  if (!chosen) throw new NotFoundException('Nenhuma versao de protocolo encontrada.');
+  return { structure: protocolStructureSchema.parse(chosen.content), version: chosen.version };
+}
+
+interface ExistingDaySession {
+  id: string;
+  status: 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED';
+  sessionKey: string;
+  prescription: ProtocolSession;
+}
+
+/**
+ * A única regra de "faltou" do sistema. `prescription` é a sessão prevista para o dia pela
+ * estrutura vigente NAQUELA data (já resolvida por quem chama); uma sessão já criada vale mais
+ * que ela, porque guarda o snapshot exato do que foi prescrito.
+ */
+function classifyDay(
+  date: string,
+  existing: ExistingDaySession | undefined,
+  prescription: ProtocolSession | undefined,
+  protocolId: string,
+): WorkoutDayStatus {
+  if (existing?.status === 'COMPLETED') return { kind: 'DONE' };
+  if (existing?.status === 'IN_PROGRESS') return { kind: 'IN_PROGRESS' };
+  const planned = existing?.prescription ?? prescription;
+  if (!planned) return { kind: 'REST' };
+  return {
+    kind: 'MISSED',
+    dayLabel: planned.dayLabel,
+    focus: planned.focus,
+    sessionKey: existing?.sessionKey ?? planned.dayLabel,
+    workoutSessionId: existing?.id ?? null,
+    protocolId,
+    weekdayName: new Intl.DateTimeFormat('pt-BR', { weekday: 'long', timeZone: 'UTC' }).format(
+      dateAtNoon(date),
+    ),
+  };
+}
+
+export type WorkoutDayStatus =
+  | { kind: 'BEFORE_START' | 'REST' | 'DONE' | 'IN_PROGRESS' }
+  | {
+      kind: 'MISSED';
+      dayLabel: string;
+      focus: string;
+      sessionKey: string;
+      workoutSessionId: string | null;
+      protocolId: string;
+      /** Nome do dia da semana em pt-BR ("segunda-feira"), para a copy falar de "segunda". */
+      weekdayName: string;
+    };
+
 @Injectable()
 export class WorkoutJournalService {
   constructor(
@@ -145,7 +218,11 @@ export class WorkoutJournalService {
     private readonly queues: QueueManager,
     private readonly queueEvents: DashboardQueueEventsService,
     private readonly shareCards: ShareCardRenderer,
-  ) {}
+    private readonly followups: FollowupService,
+    private readonly logger: PinoLogger,
+  ) {
+    this.logger.setContext(WorkoutJournalService.name);
+  }
 
   async journal(userId: string, requestedDate?: string, now = new Date()): Promise<WorkoutJournal> {
     const owner = await this.ownerAndProtocol(userId);
@@ -360,6 +437,146 @@ export class WorkoutJournalService {
     };
   }
 
+  /**
+   * Situação de um dia civil do aluno quanto ao treino — a ÚNICA regra de "faltou" do sistema
+   * (pergunta do Coach sobre treino sem registro, retrato do aluno). Só leitura: ao contrário
+   * de `journal()`, não cria a sessão do dia.
+   *
+   * - `BEFORE_START`: até o dia da entrega do 1º protocolo (inclusive). Nesse dia o aluno
+   *   acabou de receber o treino, não há o que cobrar.
+   * - `REST`: o protocolo não prevê treino na data.
+   * - `DONE`: sessão concluída.
+   * - `IN_PROGRESS`: o aluno começou e ainda não finalizou. NÃO é falta: provavelmente está
+   *   treinando, ou treinou e esqueceu de finalizar.
+   * - `MISSED`: treino previsto sem sessão iniciada.
+   *
+   * Para `date` igual a hoje o dia ainda está aberto: quem chama só deve perguntar sobre dias
+   * já encerrados (a pergunta do Coach avalia sempre dias anteriores a hoje).
+   */
+  async dayStatus(userId: string, date: string, now = new Date()): Promise<WorkoutDayStatus> {
+    const owner = await this.ownerAndProtocol(userId);
+    if (date > localDate(now, owner.timezone)) {
+      throw new BadRequestException('Nao e possivel avaliar um dia futuro.');
+    }
+    if (date <= localDate(owner.firstStartDate ?? owner.startDate, owner.timezone)) {
+      return { kind: 'BEFORE_START' };
+    }
+    return this.db.runAsUser(userId, 'USER', async (tx) => {
+      const [existing] = await tx
+        .select({
+          id: workoutSessions.id,
+          status: workoutSessions.status,
+          sessionKey: workoutSessions.sessionKey,
+          prescription: workoutSessions.prescription,
+        })
+        .from(workoutSessions)
+        .where(and(eq(workoutSessions.userId, userId), eq(workoutSessions.scheduledDate, date)))
+        .orderBy(desc(workoutSessions.createdAt))
+        .limit(1);
+      // Só carrega as versões do protocolo quando a sessão ainda não existe e é preciso saber
+      // se havia treino previsto.
+      const prescription = existing
+        ? undefined
+        : prescribedSession(
+            date,
+            (await this.structureAsOf(tx, owner.protocolId, owner.timezone, date)).structure,
+          );
+      return classifyDay(date, existing, prescription, owner.protocolId);
+    });
+  }
+
+  /**
+   * Situação de cada um dos `days` dias fechados anteriores a `before`, do mais antigo ao mais
+   * recente, em poucas consultas (dono, sessões do intervalo, versões do protocolo) em vez de
+   * uma rodada por dia. Base do alerta de frequência para o profissional CREF.
+   */
+  async attendanceWindow(
+    userId: string,
+    before: string,
+    now = new Date(),
+    days = 14,
+  ): Promise<Array<{ date: string; status: WorkoutDayStatus }>> {
+    const owner = await this.ownerAndProtocol(userId);
+    if (before > addDays(localDate(now, owner.timezone), 1)) {
+      throw new BadRequestException('Nao e possivel avaliar um dia futuro.');
+    }
+    const firstProtocolDate = localDate(owner.firstStartDate ?? owner.startDate, owner.timezone);
+    const dates = Array.from({ length: days }, (_, index) => addDays(before, index - days));
+    return this.db.runAsUser(userId, 'USER', async (tx) => {
+      const rows = await tx
+        .select({
+          id: workoutSessions.id,
+          date: workoutSessions.scheduledDate,
+          status: workoutSessions.status,
+          sessionKey: workoutSessions.sessionKey,
+          prescription: workoutSessions.prescription,
+        })
+        .from(workoutSessions)
+        .where(
+          and(
+            eq(workoutSessions.userId, userId),
+            gte(workoutSessions.scheduledDate, dates[0] ?? before),
+            lt(workoutSessions.scheduledDate, before),
+          ),
+        )
+        .orderBy(desc(workoutSessions.createdAt));
+      // Mais recente primeiro: a primeira linha de cada dia é a que vale.
+      const byDate = new Map<string, ExistingDaySession>();
+      for (const row of rows) if (!byDate.has(row.date)) byDate.set(row.date, row);
+      const versions = await this.loadVersions(tx, owner.protocolId);
+      return dates.map((date) => {
+        if (date <= firstProtocolDate) return { date, status: { kind: 'BEFORE_START' as const } };
+        const existing = byDate.get(date);
+        const prescription = existing
+          ? undefined
+          : prescribedSession(date, pickVersion(versions, owner.timezone, date).structure);
+        return { date, status: classifyDay(date, existing, prescription, owner.protocolId) };
+      });
+    });
+  }
+
+  /**
+   * Última sessão PREVISTA antes de `before` (olhando até `lookbackDays` dias, pulando dias de
+   * descanso) e quantas sessões previstas seguidas ficaram sem registro a partir dela.
+   *
+   * Serve a duas decisões do mesmo fato: (1) a pergunta do Coach junto do link de hoje só sai
+   * quando a ÚLTIMA sessão prevista ficou sem registro e foi a primeira da sequência
+   * (`streak === 1`: na 2ª falta seguida vai só o link); (2) o comentário pós-treino reconhece
+   * a volta quando a sessão prevista anterior ficou sem registro. `streak` para em `cap`.
+   * Usa `dayStatus`, a única regra de "faltou" do sistema.
+   */
+  async recentMissStreak(
+    userId: string,
+    before: string,
+    now = new Date(),
+    options: { lookbackDays?: number; cap?: number } = {},
+  ): Promise<{ target: { date: string; status: WorkoutDayStatus } | null; streak: number }> {
+    const { lookbackDays = 3, cap = 3 } = options;
+    let date = addDays(before, -1);
+    let target: { date: string; status: WorkoutDayStatus } | null = null;
+    for (let step = 0; step < lookbackDays; step += 1) {
+      const status = await this.dayStatus(userId, date, now);
+      if (status.kind !== 'REST') {
+        target = { date, status };
+        break;
+      }
+      date = addDays(date, -1);
+    }
+    if (!target) return { target: null, streak: 0 };
+    if (target.status.kind !== 'MISSED') return { target, streak: 0 };
+
+    let streak = 1;
+    let cursor = addDays(target.date, -1);
+    for (let scanned = 0; streak < cap && scanned < MAX_STREAK_SCAN_DAYS; scanned += 1) {
+      const status = await this.dayStatus(userId, cursor, now);
+      cursor = addDays(cursor, -1);
+      if (status.kind === 'REST') continue;
+      if (status.kind !== 'MISSED') break;
+      streak += 1;
+    }
+    return { target, streak };
+  }
+
   async start(userId: string, id: string, now = new Date()): Promise<void> {
     const [owned] = await this.db.runAsUser(userId, 'USER', (tx) =>
       tx
@@ -398,6 +615,21 @@ export class WorkoutJournalService {
       const existing = await this.ownedSession(userId, id);
       if (!existing) throw new NotFoundException();
       if (existing.status !== 'IN_PROGRESS') throw new BadRequestException('Treino ja finalizado.');
+    }
+  }
+
+  /**
+   * Fecha pendências de conversa sem nunca atrapalhar o registro do treino: o aluno já
+   * treinou, e uma falha aqui (pendência é acessório) só deixa a expiração por tempo agir.
+   */
+  private async settleFollowups(userId: string, action: () => Promise<unknown>): Promise<void> {
+    try {
+      await action();
+    } catch (err: unknown) {
+      this.logger.warn(
+        { err, userId, event: 'workout_followup_settle_failed' },
+        'treino registrado, mas a pendência de conversa não foi atualizada',
+      );
     }
   }
 
@@ -514,6 +746,9 @@ export class WorkoutJournalService {
       { exercisesDone: exerciseEntries, perceivedEffort: input.perceivedEffort },
     );
     if (input.painReported) this.queueEvents.emit('handoff');
+    await this.settleFollowups(userId, () =>
+      this.followups.resolveForWorkout(userId, workout.scheduledDate),
+    );
     await this.evaluateDuration(userId, workout.scheduledDate);
 
     // Achado 2026-09-12 (pedido do fundador): o Coach passa a comentar o treino recém
@@ -543,9 +778,6 @@ export class WorkoutJournalService {
         .set({
           ...(input.reminderTime === undefined ? {} : { workoutReminderTime: input.reminderTime }),
           ...(input.timezone === undefined ? {} : { timezone: input.timezone }),
-          ...(input.reminderEnabled === undefined
-            ? {}
-            : { workoutReminderEnabled: input.reminderEnabled }),
         })
         .where(eq(users.id, userId)),
     );
@@ -593,7 +825,12 @@ export class WorkoutJournalService {
     timezone: string,
     selectedDate: string,
   ): Promise<{ structure: ReturnType<typeof protocolStructureSchema.parse>; version: number }> {
-    const versions = await tx
+    return pickVersion(await this.loadVersions(tx, protocolId), timezone, selectedDate);
+  }
+
+  /** Todas as versões do protocolo, da mais antiga à mais recente (uma consulta). */
+  private loadVersions(tx: TenantTransaction, protocolId: string): Promise<ProtocolVersionRow[]> {
+    return tx
       .select({
         version: protocolVersions.version,
         content: protocolVersions.content,
@@ -602,13 +839,6 @@ export class WorkoutJournalService {
       .from(protocolVersions)
       .where(eq(protocolVersions.protocolId, protocolId))
       .orderBy(asc(protocolVersions.version));
-    let chosen = versions[0];
-    for (const candidate of versions) {
-      if (localDate(candidate.createdAt, timezone) > selectedDate) break;
-      chosen = candidate;
-    }
-    if (!chosen) throw new NotFoundException('Nenhuma versao de protocolo encontrada.');
-    return { structure: protocolStructureSchema.parse(chosen.content), version: chosen.version };
   }
 
   private async ownerAndProtocol(userId: string) {

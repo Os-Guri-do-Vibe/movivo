@@ -56,14 +56,19 @@ export const CRON_SCRIPTS: readonly CronScript[] = [
     kind: 'CRON',
     name: 'Link diário de treino',
     description:
-      'Envia por WhatsApp o link do treino do dia a cada aluno com protocolo ativo. A varredura roda a cada minuto e dispara às 04:00 do fuso de cada aluno.',
+      'Envia por WhatsApp o link do treino do dia a cada aluno com protocolo ativo. Quando o último treino previsto ficou sem registro, a mesma mensagem leva uma pergunta curta sobre ele (no máximo 2 por semana, nunca em dias seguidos), em um balão separado. No mesmo horário, abre o alerta para o profissional CREF de quem faltou à 3ª sessão seguida ou a mais de 60% das sessões. A varredura roda a cada minuto e dispara às 04:00 do fuso de cada aluno.',
     queue: QUEUE.workoutDaily,
     schedulerId: 'daily-workout-scan',
     cron: '* * * * * (UTC)',
     schedule: 'Todo dia às 04:00 (fuso de cada aluno)',
     runEffect:
       'Enfileira agora o envio do link de treino de hoje aos alunos elegíveis que ainda não o receberam hoje. Quem já recebeu não recebe de novo. A entrega em si acontece na fila do WhatsApp.',
-    resultLabels: { eligible: 'elegíveis', sent: 'na fila de envio' },
+    resultLabels: {
+      eligible: 'elegíveis',
+      sent: 'na fila de envio',
+      asked: 'com a pergunta sobre o treino sem registro',
+      alerted: 'alertas de frequência abertos',
+    },
   },
   {
     id: 'checkin-weekly-scan',

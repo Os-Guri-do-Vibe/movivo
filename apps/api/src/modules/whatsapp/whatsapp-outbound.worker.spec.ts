@@ -10,6 +10,7 @@ import type { HealthConsentService } from '../../core/database/health-consent.se
 import { conversations, users } from '../../core/database/schema';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
 import { RedisKeyBuilder } from '../../core/redis/redis-key.util';
+import type { FollowupService } from '../followup/followup.service';
 import type { WorkerFactory } from '../jobs/worker.factory';
 import type { OutboundMessage, WhatsappTransport } from './whatsapp-transport';
 import { WhatsappOutboundWorker, type WhatsappOutboundJob } from './whatsapp-outbound.worker';
@@ -73,6 +74,10 @@ interface Deps {
   inserted?: { table: unknown; values: unknown }[];
   /** Simula falha na gravação do histórico. */
   insertFails?: boolean;
+  /** A pendência de conversa do job ainda está `PENDING_SEND` (não foi cancelada). */
+  followupSendable?: boolean;
+  /** `markDelivered` falha (banco indisponível). */
+  followupOpenFails?: boolean;
 }
 
 /**
@@ -170,6 +175,14 @@ function makeWorker(deps: Deps = {}) {
   } as unknown as AppConfigService;
   const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() } as never;
   const emitMessage = vi.fn();
+  const followups = {
+    isSendable: vi.fn(async () => deps.followupSendable ?? true),
+    markDelivered: vi.fn(async () => {
+      if (deps.followupOpenFails) throw new Error('banco indisponível');
+      return true;
+    }),
+    markNotSent: vi.fn(async () => true),
+  };
   const worker = new WhatsappOutboundWorker(
     workers,
     db,
@@ -192,8 +205,9 @@ function makeWorker(deps: Deps = {}) {
       encryptText: vi.fn(async (text: string) => `enc(${text})`),
     } as unknown as HealthCipherService,
     { emitMessage } as unknown as ConversationEventsService,
+    followups as unknown as FollowupService,
   );
-  return { worker, send, sendTemplate, sendTyping, sendDocument, redis, emitMessage };
+  return { worker, send, sendTemplate, sendTyping, sendDocument, redis, emitMessage, followups };
 }
 
 function job(data: Partial<WhatsappOutboundJob>): Job<WhatsappOutboundJob> {
@@ -712,5 +726,103 @@ describe('WhatsappOutboundWorker.process (US-2.5)', () => {
     const res = await worker.process(job({ type: 'PROTOCOL_WAITING' }));
     expect(res.status).toBe('SKIPPED');
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('WhatsappOutboundWorker: link do dia com pergunta sobre treino sem registro', () => {
+  const link = (extra: Partial<WhatsappOutboundJob> = {}) =>
+    job({
+      type: 'WORKOUT_DAILY_LINK',
+      text: 'Bom dia, Ana! Seu treino de hoje é Pernas: [link]. E ontem, tudo bem?',
+      fallbackText: 'Bom dia, Ana! Seu treino de hoje é Pernas: [link]',
+      dedupeId: 'workout-link-2026-10-13',
+      followupId: 'f1',
+      ...extra,
+    });
+  const sentTexts = (send: ReturnType<typeof makeWorker>['send']) =>
+    send.mock.calls.map(([message]) => message.text);
+
+  it('envia a mensagem completa e só então abre a pendência', async () => {
+    const { worker, send, followups } = makeWorker();
+    const res = await worker.process(link());
+    expect(res.status).toBe('SENT');
+    expect(sentTexts(send)).toEqual([
+      'Bom dia, Ana! Seu treino de hoje é Pernas: [link]. E ontem, tudo bem?',
+    ]);
+    expect(followups.markDelivered).toHaveBeenCalledWith(USER_ID, 'f1');
+  });
+
+  it('o link e a pergunta saem como DOIS balões, e a pendência só abre depois do último', async () => {
+    const { worker, send, followups } = makeWorker();
+    await worker.process(
+      link({
+        text: 'Bom dia, Ana! Seu treino de hoje é Pernas: [link]\n---\nE ontem, tudo bem? O treino de Costas ficou sem registro.',
+      }),
+    );
+    expect(sentTexts(send)).toEqual([
+      'Bom dia, Ana! Seu treino de hoje é Pernas: [link]',
+      'E ontem, tudo bem? O treino de Costas ficou sem registro.',
+    ]);
+    const lastSend = send.mock.invocationCallOrder.at(-1) ?? 0;
+    expect(followups.markDelivered.mock.invocationCallOrder[0] ?? 0).toBeGreaterThan(lastSend);
+  });
+
+  it('reserva cancelada antes do envio (aluno já voltou): o LINK sai sem a pergunta e sem abrir pendência', async () => {
+    const { worker, send, followups } = makeWorker({ followupSendable: false });
+    const res = await worker.process(link());
+    expect(res.status).toBe('SENT');
+    expect(sentTexts(send)).toEqual(['Bom dia, Ana! Seu treino de hoje é Pernas: [link]']);
+    expect(followups.markDelivered).not.toHaveBeenCalled();
+  });
+
+  it('reserva cancelada e sem texto de reserva: descarta o envio', async () => {
+    const { worker, send } = makeWorker({ followupSendable: false });
+    const res = await worker.process(link({ fallbackText: undefined }));
+    expect(res.status).toBe('SKIPPED');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('falha ao abrir a pendência não derruba nem repete o envio', async () => {
+    const { worker, send, redis } = makeWorker({ followupOpenFails: true });
+    const res = await worker.process(link());
+    expect(res.status).toBe('SENT');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(redis.set).toHaveBeenCalled();
+  });
+
+  it('retry depois de um envio já concluído não reenvia nem reabre a pendência', async () => {
+    const { worker, send, followups } = makeWorker({ markerExists: true });
+    const res = await worker.process(link());
+    expect(res.status).toBe('ALREADY_SENT');
+    expect(send).not.toHaveBeenCalled();
+    expect(followups.markDelivered).not.toHaveBeenCalled();
+  });
+
+  it('consentimento revogado ou sem telefone: a pendência vira "não enviada"', async () => {
+    const revoked = makeWorker({ consentActive: false });
+    expect((await revoked.worker.process(link())).status).toBe('CONSENT_REVOKED');
+    expect(revoked.followups.markNotSent).toHaveBeenCalledWith(USER_ID, 'f1');
+
+    const noPhone = makeWorker({ phone: null });
+    expect((await noPhone.worker.process(link())).status).toBe('NO_PHONE');
+    expect(noPhone.followups.markNotSent).toHaveBeenCalledWith(USER_ID, 'f1');
+  });
+
+  it('o histórico grava o texto realmente enviado, com origem de sistema e tipo do job', async () => {
+    const inserted: { table: unknown; values: unknown }[] = [];
+    const { worker } = makeWorker({ followupSendable: false, inserted });
+    await worker.process(link());
+    const row = inserted.find((item) => item.table === conversations)?.values as Record<
+      string,
+      unknown
+    >;
+    expect(row).toMatchObject({ origin: 'SYSTEM', sourceType: 'WORKOUT_DAILY_LINK' });
+  });
+
+  it('mensagem sem followupId não toca em pendência alguma', async () => {
+    const { worker, followups } = makeWorker();
+    await worker.process(job({ type: 'CHECKIN_MESSAGE', text: 'oi', dedupeId: 'x' }));
+    expect(followups.isSendable).not.toHaveBeenCalled();
+    expect(followups.markDelivered).not.toHaveBeenCalled();
   });
 });

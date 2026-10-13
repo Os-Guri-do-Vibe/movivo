@@ -23,6 +23,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { PinoLogger } from 'nestjs-pino';
 
 import { AppConfigService } from '../../core/config';
+import { FollowupModule } from '../followup/followup.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { EVOLUTION_TRANSPORT, EvolutionHttpTransport } from './evolution-transport';
 import { EvolutionInboundEdge } from './inbound/evolution-inbound.edge';
@@ -56,6 +57,7 @@ function evolutionWebhookUrl(config: AppConfigService): string {
 @Module({
   imports: [
     JobsModule,
+    FollowupModule,
     // Rate limit do path do webhook (US-3.1.3). ponytail: storage em memória (MVP
     // single-instance); trocar por storage Redis ao escalar horizontalmente — igual anamnese.
     ThrottlerModule.forRoot({ throttlers: [{ ttl: 60_000, limit: 120 }] }),
