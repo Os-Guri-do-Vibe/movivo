@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { and, count, desc, eq, isNotNull, not, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, isNotNull, isNull, not, or, sql } from 'drizzle-orm';
 import { type PgColumn } from 'drizzle-orm/pg-core';
 import { PinoLogger } from 'nestjs-pino';
 import {
@@ -209,8 +209,13 @@ export class DashboardService {
           and(
             or(eq(handoffAlerts.status, 'OPEN'), eq(handoffAlerts.status, 'RESOLVED')),
             // Handoffs de treino já têm fluxo de resolução na Fila do Profissional.
-            not(eq(handoffAlerts.sourceType, 'WORKOUT')),
-            not(eq(handoffAlerts.sourceType, 'WORKOUT_INSIGHT')),
+            or(
+              isNull(handoffAlerts.sourceType),
+              and(
+                not(eq(handoffAlerts.sourceType, 'WORKOUT')),
+                not(eq(handoffAlerts.sourceType, 'WORKOUT_INSIGHT')),
+              ),
+            ),
           ),
         )
         .orderBy(desc(handoffAlerts.createdAt))
@@ -248,8 +253,13 @@ export class DashboardService {
         .where(
           and(
             eq(handoffAlerts.status, 'OPEN'),
-            not(eq(handoffAlerts.sourceType, 'WORKOUT')),
-            not(eq(handoffAlerts.sourceType, 'WORKOUT_INSIGHT')),
+            or(
+              isNull(handoffAlerts.sourceType),
+              and(
+                not(eq(handoffAlerts.sourceType, 'WORKOUT')),
+                not(eq(handoffAlerts.sourceType, 'WORKOUT_INSIGHT')),
+              ),
+            ),
           ),
         );
       return { open: Number(row?.total ?? 0) };
