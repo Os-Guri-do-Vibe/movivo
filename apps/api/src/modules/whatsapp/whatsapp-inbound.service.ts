@@ -578,6 +578,7 @@ export class WhatsappInboundService {
       await tx.insert(conversations).values({
         userId,
         direction: 'INBOUND',
+        origin: 'STUDENT',
         messageType: 'SYSTEM',
         content,
       });
@@ -593,7 +594,9 @@ export class WhatsappInboundService {
   private async recordInboundWhilePaused(userId: string, text: string): Promise<void> {
     const content = await this.cipher.encryptText(text);
     await this.db.runAsUser(userId, 'USER', async (tx) => {
-      await tx.insert(conversations).values({ userId, direction: 'INBOUND', content });
+      await tx
+        .insert(conversations)
+        .values({ userId, direction: 'INBOUND', origin: 'STUDENT', content });
     });
     this.conversationEvents.emitMessage(userId, 'INBOUND');
   }

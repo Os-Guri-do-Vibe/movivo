@@ -84,6 +84,12 @@ interface Deps {
   flowOutcome?: FlowOutcome;
   /** Há fluxo de troca aberto (Redis) — a mensagem é tratada como possível continuação. */
   flowOpen?: boolean;
+  /** Mensagens que chegaram ao buffer DEPOIS da drenagem (durante a geração da resposta). */
+  pendingBatchLength?: number;
+  /** Pergunta do Coach sobre treino sem registro ainda aberta (`conversation_followups`). */
+  openFollowup?: { subjectDate: string; topicLabel: string; deliveredAt: Date } | null;
+  /** `listForContext` falha (banco indisponível). */
+  followupsFail?: boolean;
 }
 
 function makeWorker(deps: Deps = {}) {
@@ -205,6 +211,7 @@ function makeWorker(deps: Deps = {}) {
       Promise.resolve({
         scrubUser: {},
         biologicalSex: deps.biologicalSex === undefined ? 'MALE' : deps.biologicalSex,
+        timezone: 'America/Sao_Paulo',
       }),
     ),
   } as unknown as ConversationRepository;
@@ -240,9 +247,20 @@ function makeWorker(deps: Deps = {}) {
     },
     exec: batchExec,
   };
-  const redis = { multi: vi.fn(() => batchTransaction) } as unknown as Redis;
+  const redis = {
+    multi: vi.fn(() => batchTransaction),
+    llen: vi.fn(async () => deps.pendingBatchLength ?? 0),
+  } as unknown as Redis;
   const keys = { forUser: vi.fn(() => 'bk') };
 
+  const markAnswered = vi.fn(async () => true);
+  const followups = {
+    listForContext: vi.fn(async () => {
+      if (deps.followupsFail) throw new Error('banco indisponível');
+      return deps.openFollowup ? [{ id: 'f1', status: 'OPEN', ...deps.openFollowup }] : [];
+    }),
+    markAnswered,
+  };
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), setContext: vi.fn() } as never;
   const worker = new AIResponseWorker(
     workers,
@@ -275,10 +293,12 @@ function makeWorker(deps: Deps = {}) {
     redis,
     keys as never,
     { isPaused: vi.fn(async () => deps.coachPaused ?? false) } as never,
+    followups as never,
     logger,
   );
   return {
     worker,
+    markAnswered,
     enqueue,
     complete,
     lock,
@@ -907,6 +927,32 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     expect(sentText(enqueue)).toBe(DAILY_LIMIT_MESSAGE);
   });
 
+  it('mensagem que chegou durante a resposta reenfileira um job depois de soltar o lock', async () => {
+    const { worker, lock, enqueue } = makeWorker({ pendingBatchLength: 1 });
+    await worker.process(job());
+    const followUps = enqueue.mock.calls.filter(([queue]) => queue === 'ai-response');
+    expect(followUps).toHaveLength(1);
+    expect(followUps[0]?.[3]).toEqual({ delay: 5_000 });
+    const followUpIndex = enqueue.mock.calls.findIndex(([queue]) => queue === 'ai-response');
+    const followUpOrder = enqueue.mock.invocationCallOrder[followUpIndex] ?? 0;
+    const releaseOrder = vi.mocked(lock.release).mock.invocationCallOrder[0] ?? Infinity;
+    expect(releaseOrder).toBeLessThan(followUpOrder);
+  });
+
+  it('sem mensagem pendente no buffer não reenfileira nada', async () => {
+    const { worker, enqueue } = makeWorker({ pendingBatchLength: 0 });
+    await worker.process(job());
+    expect(enqueue.mock.calls.filter(([queue]) => queue === 'ai-response')).toHaveLength(0);
+  });
+
+  it('falha ao reenfileirar não derruba o job que já respondeu', async () => {
+    const { worker, enqueue } = makeWorker({ pendingBatchLength: 1 });
+    enqueue.mockImplementation((queue: string) =>
+      queue === 'ai-response' ? Promise.reject(new Error('redis fora')) : Promise.resolve('job'),
+    );
+    await expect(worker.process(job())).resolves.toMatchObject({ status: 'SENT' });
+  });
+
   it('lock ocupado → não processa', async () => {
     const { worker, complete } = makeWorker({ lockToken: null });
     const res = await worker.process(job());
@@ -1022,5 +1068,154 @@ describe('AIResponseWorker DLQ (US-3.5)', () => {
     await vi.waitFor(() =>
       expect((enqueue as EnqueueCalls).mock.calls.some((c) => c[1] === 'coach-message')).toBe(true),
     );
+  });
+});
+
+describe('AIResponseWorker: pergunta pendente sobre treino sem registro', () => {
+  const HOURS = 3_600_000;
+  const pendingFrom = (hoursAgo: number) => ({
+    // Dia do treino = 2 dias atrás no calendário de São Paulo; só o rótulo importa aqui.
+    subjectDate: new Date(Date.now() - 2 * 24 * HOURS - 3 * HOURS).toISOString().slice(0, 10),
+    topicLabel: 'Costas e Bíceps',
+    deliveredAt: new Date(Date.now() - hoursAgo * HOURS),
+  });
+  const message = (text: string) => [JSON.stringify({ text })];
+  const lastRequest = (complete: ReturnType<typeof makeWorker>['complete']) =>
+    complete.mock.calls.at(-1)?.[0] as { system: string; messages: Array<{ content: string }> };
+  const joinedMessages = (complete: ReturnType<typeof makeWorker>['complete']) =>
+    lastRequest(complete)
+      .messages.map((m) => m.content)
+      .join('\n');
+
+  it('resposta curta ("trabalhei") 30h depois: o modelo recebe a pendência e a instrução, e ela fecha', async () => {
+    const { worker, complete, markAnswered, faqMatch } = makeWorker({
+      batchItems: message('trabalhei'),
+      openFollowup: pendingFrom(30),
+      intent: 'MOTIVACAO',
+    });
+    const res = await worker.process(job());
+
+    expect(res.status).toBe('SENT');
+    expect(faqMatch).not.toHaveBeenCalled();
+    const text = joinedMessages(complete);
+    expect(text).toContain('PENDENCIAS_DA_CONVERSA');
+    expect(text).toContain('PERGUNTA_PENDENTE');
+    expect(text).toContain('foco Costas e Bíceps');
+    expect(text).toContain('leitura_do_servidor: TALVEZ');
+    expect(lastRequest(complete).system).toContain('A pessoa está respondendo à pergunta da manhã');
+    expect(markAnswered).toHaveBeenCalledWith('u1', 'f1');
+  });
+
+  it('o bloco da pendência vem DEPOIS do estado e da metodologia, antes do histórico (cache)', async () => {
+    const { worker, complete } = makeWorker({
+      batchItems: message('trabalhei'),
+      openFollowup: pendingFrom(30),
+      intent: 'ADAPTACAO_NO_TREINO',
+    });
+    await worker.process(job());
+    const contents = lastRequest(complete).messages.map((m) => m.content);
+    const at = (label: string) => contents.findIndex((content) => content.includes(label));
+    expect(at('ESTADO_E_MEMORIA')).toBeLessThan(at('PENDENCIAS_DA_CONVERSA'));
+    expect(at('METODOLOGIA_MOVIVO_APROVADA')).toBeLessThan(at('PENDENCIAS_DA_CONVERSA'));
+    expect(at('PENDENCIAS_DA_CONVERSA')).toBeLessThan(at('HISTORICO_RECENTE_E_MENSAGEM'));
+  });
+
+  it('mensagem sem relação: o bloco diz SEM_RELACAO_APARENTE e a pendência continua aberta', async () => {
+    const { worker, complete, markAnswered, faqMatch } = makeWorker({
+      batchItems: message('bom dia'),
+      openFollowup: pendingFrom(30),
+      intent: 'SAUDACAO',
+    });
+    await worker.process(job());
+
+    expect(faqMatch).toHaveBeenCalled();
+    expect(joinedMessages(complete)).toContain('leitura_do_servidor: SEM_RELACAO_APARENTE');
+    expect(lastRequest(complete).system).not.toContain(
+      'A pessoa está respondendo à pergunta da manhã',
+    );
+    expect(markAnswered).not.toHaveBeenCalled();
+  });
+
+  it('caso misto (motivo + dúvida técnica) mantém a intenção de tarefa, sem instrução de turno, e fecha', async () => {
+    const { worker, complete, markAnswered } = makeWorker({
+      batchItems: message('não fiz o de costas, trabalhei até tarde. qual a carga da remada hoje?'),
+      openFollowup: pendingFrom(30),
+      intent: 'DUVIDA_TECNICA',
+    });
+    await worker.process(job());
+
+    expect(joinedMessages(complete)).toContain('leitura_do_servidor: PROVAVEL_RESPOSTA');
+    expect(lastRequest(complete).system).not.toContain(
+      'A pessoa está respondendo à pergunta da manhã',
+    );
+    expect(markAnswered).toHaveBeenCalledWith('u1', 'f1');
+  });
+
+  it('motivo solto numa intenção de tarefa não fecha a pendência', async () => {
+    const { worker, markAnswered } = makeWorker({
+      batchItems: message('tava morto de cansaço, e o agachamento, como fica a postura?'),
+      openFollowup: pendingFrom(30),
+      intent: 'DUVIDA_TECNICA',
+    });
+    await worker.process(job());
+    expect(markAnswered).not.toHaveBeenCalled();
+  });
+
+  it('dor como motivo usa a instrução própria (sem "olhar para frente"), fecha a pendência e avisa o CREF', async () => {
+    const { worker, markAnswered, persistHandoff, complete } = makeWorker({
+      batchItems: message('não fui, o joelho tava doendo'),
+      openFollowup: pendingFrom(30),
+      intent: 'MOTIVACAO',
+    });
+    await worker.process(job());
+    const system = lastRequest(complete).system;
+    expect(system).toContain('A pessoa contou que o motivo foi dor ou desconforto');
+    expect(system).not.toContain('A pessoa está respondendo à pergunta da manhã');
+    expect(markAnswered).toHaveBeenCalledWith('u1', 'f1');
+    expect(persistHandoff).toHaveBeenCalledWith('u1', 'ALERT', 'AUSENCIA_DOR');
+  });
+
+  it('resposta barrada pelo validador deixa a pendência aberta', async () => {
+    const { worker, markAnswered } = makeWorker({
+      batchItems: message('não consegui treinar'),
+      openFollowup: pendingFrom(30),
+      intent: 'MOTIVACAO',
+      llmTexts: ['Vamos compensar: fazer os dois treinos juntos amanhã.'],
+    });
+    const res = await worker.process(job());
+    expect(res.status).toBe('BLOCKED');
+    expect(markAnswered).not.toHaveBeenCalled();
+  });
+
+  it('sinal de segurança com pendência aberta: o handoff vence e a pendência fecha', async () => {
+    const { worker, markAnswered, complete } = makeWorker({
+      batchItems: message('não fui treinar, senti uma dor no peito forte'),
+      openFollowup: pendingFrom(30),
+    });
+    const res = await worker.process(job());
+    expect(res.status).toBe('SAFETY_HANDOFF');
+    expect(complete).not.toHaveBeenCalled();
+    expect(markAnswered).toHaveBeenCalledWith('u1', 'f1');
+  });
+
+  it('sem pendência aberta, o fluxo é o de sempre', async () => {
+    const { worker, complete, markAnswered } = makeWorker({
+      batchItems: message('trabalhei'),
+      openFollowup: null,
+      intent: 'MOTIVACAO',
+    });
+    await worker.process(job());
+    expect(joinedMessages(complete)).not.toContain('PENDENCIAS_DA_CONVERSA');
+    expect(markAnswered).not.toHaveBeenCalled();
+  });
+
+  it('falha ao ler a pendência não derruba a resposta', async () => {
+    const { worker, complete } = makeWorker({
+      batchItems: message('trabalhei'),
+      followupsFail: true,
+      intent: 'MOTIVACAO',
+    });
+    await expect(worker.process(job())).resolves.toMatchObject({ status: 'SENT' });
+    expect(joinedMessages(complete)).not.toContain('PENDENCIAS_DA_CONVERSA');
   });
 });

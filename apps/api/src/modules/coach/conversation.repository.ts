@@ -64,6 +64,8 @@ export class ConversationRepository {
   async loadRuntimeUser(userId: string): Promise<{
     scrubUser: ScrubUser;
     biologicalSex: BiologicalSex | null;
+    /** Fuso do aluno: "ontem", "hoje" e a idade da pergunta pendente são locais a ele. */
+    timezone: string;
   }> {
     const [user] = await this.db.runAsUser(userId, 'USER', (tx) =>
       tx
@@ -72,6 +74,7 @@ export class ConversationRepository {
           phoneNumber: users.phoneNumber,
           email: users.email,
           biologicalSex: users.biologicalSex,
+          timezone: users.timezone,
         })
         .from(users)
         .where(eq(users.id, userId))
@@ -84,6 +87,7 @@ export class ConversationRepository {
         email: user?.email ?? null,
       },
       biologicalSex: user?.biologicalSex ?? null,
+      timezone: user?.timezone ?? 'America/Sao_Paulo',
     };
   }
 
@@ -115,6 +119,7 @@ export class ConversationRepository {
       await tx.insert(conversations).values({
         userId: input.userId,
         direction: input.direction,
+        origin: input.direction === 'INBOUND' ? 'STUDENT' : 'COACH',
         content,
         validationPassed: input.validationPassed ?? null,
         modelUsed: input.modelUsed ?? null,

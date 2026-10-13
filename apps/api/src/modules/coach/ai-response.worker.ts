@@ -62,7 +62,19 @@ import { buildResponseCorrection } from './response-correction';
 import { applyResponseFormatting } from './response-formatter';
 import { SUBSTITUTION_FLOW_INTENT, SubstitutionFlowService } from './substitution-flow.service';
 import { untrustedDataEnvelope } from '../ai-coach/context/untrusted-context';
-import { METHODOLOGY_AWARE_INTENTS } from '../ai-coach/intent/prompts';
+import {
+  METHODOLOGY_AWARE_INTENTS,
+  PENDING_PAIN_INSTRUCTION,
+  PENDING_REPLY_INSTRUCTION,
+} from '../ai-coach/intent/prompts';
+import { FollowupService } from '../followup/followup.service';
+import {
+  buildPendingBlock,
+  matchPendingReply,
+  type PendingMatch,
+  type PendingQuestion,
+  type PendingReading,
+} from './pending-question';
 import { MethodologyProvider } from '../protocol/methodology-provider.service';
 
 /** Resultado interno da montagem da resposta, antes de enviar/persistir. */
@@ -101,6 +113,29 @@ interface ResponseDraft {
 }
 
 const MAX_MESSAGE_CHARS = 4000;
+/**
+ * Intenções "leves": a mensagem do aluno não pede uma tarefa (dúvida, troca, adaptação), então,
+ * lida como resposta à pergunta pendente, vira acolhimento + olhar para frente. As de tarefa
+ * mantêm a intenção e acolhem pelas regras gerais de `PERGUNTA PENDENTE`.
+ */
+const LIGHT_INTENTS: ReadonlySet<Intent> = new Set<Intent>([
+  'SAUDACAO',
+  'RELATO_TREINO',
+  'MOTIVACAO',
+  'PAPO_CASUAL',
+  'FORA_DE_ESCOPO',
+]);
+
+/** Pergunta pendente aberta do aluno + a leitura da mensagem atual contra ela. */
+interface PendingContext {
+  id: string;
+  question: PendingQuestion;
+  reading: PendingReading;
+  timezone: string;
+}
+
+/** Espera antes de reprocessar mensagem que chegou durante a resposta anterior. */
+const ORPHAN_BATCH_RETRIGGER_MS = 5_000;
 
 /**
  * Achado 2026-09-08 (bug reproduzido ao vivo pelo fundador): `maxTokens` era derivado de
@@ -151,6 +186,7 @@ export class AIResponseWorker implements OnModuleInit {
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
     private readonly coachAttendance: CoachAttendanceService,
+    private readonly followups: FollowupService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(AIResponseWorker.name);
@@ -240,7 +276,7 @@ export class AIResponseWorker implements OnModuleInit {
       // ocorrida no meio deste job invalidaria o cache entre duas resoluções e a MESMA
       // resposta sairia com duas versões da persona (system prompt de uma, nome na
       // transcrição da outra). A leitura do titular é a mesma de sempre — uma query só.
-      const { scrubUser, biologicalSex } = await this.repo.loadRuntimeUser(userId);
+      const { scrubUser, biologicalSex, timezone } = await this.repo.loadRuntimeUser(userId);
       const personaCtx: PersonaContext = {
         persona: await this.prompts.persona(biologicalSex),
         slot: biologicalSex,
@@ -261,6 +297,10 @@ export class AIResponseWorker implements OnModuleInit {
       await this.context.recordTurn(userId, 'user', message);
       await this.enqueueTyping(userId);
 
+      // Pergunta que o Coach fez e ainda espera resposta (treino sem registro). Lida ANTES
+      // do guardrail e do FAQ: uma resposta curta ("trabalhei") só faz sentido com ela.
+      const pending = await this.readPending(userId, message, timezone);
+
       // O guardrail sempre vence o FAQ. Só mensagens dentro do perímetro seguro chegam ao
       // match exato; assim uma resposta estática nunca mascara um alerta prioritário.
       const guardrail = clinicalGuardrail(message);
@@ -272,6 +312,7 @@ export class AIResponseWorker implements OnModuleInit {
         );
         await this.deliver(userId, correlationId, SAFETY_HANDOFF_MESSAGE, null, false, enqueuedAt);
         await this.context.recordTurn(userId, 'assistant', SAFETY_HANDOFF_MESSAGE);
+        await this.settlePending(userId, pending, pending?.reading.match !== 'NONE', false);
         return { status: 'SAFETY_HANDOFF' };
       }
 
@@ -332,13 +373,17 @@ export class AIResponseWorker implements OnModuleInit {
         return { status: 'SENT' };
       }
 
-      const faq = await this.faq.match(message).catch(() => {
-        this.logger.warn(
-          { event: 'faq_runtime_degraded' },
-          'FAQ indisponível; fluxo seguro segue para classificação',
-        );
-        return null;
-      });
+      // FAQ não acolhe: se a mensagem parece resposta à pergunta pendente, segue para a conversa.
+      const answersPending = pending !== null && pending.reading.match !== 'NONE';
+      const faq = answersPending
+        ? null
+        : await this.faq.match(message).catch(() => {
+            this.logger.warn(
+              { event: 'faq_runtime_degraded' },
+              'FAQ indisponível; fluxo seguro segue para classificação',
+            );
+            return null;
+          });
       if (faq) {
         const verdict = this.validation.validateResponse(faq.answer, {
           allowExternalReferences: true,
@@ -385,6 +430,7 @@ export class AIResponseWorker implements OnModuleInit {
         );
         await this.deliver(userId, correlationId, SAFETY_HANDOFF_MESSAGE, null, false, enqueuedAt);
         await this.context.recordTurn(userId, 'assistant', SAFETY_HANDOFF_MESSAGE);
+        await this.settlePending(userId, pending, pending?.reading.match !== 'NONE', false);
         return { status: 'SAFETY_HANDOFF' };
       }
 
@@ -432,6 +478,7 @@ export class AIResponseWorker implements OnModuleInit {
         scrubUser,
         personaCtx,
         correlationId,
+        pending,
       );
       const l1Flags = draft.blocked ? [] : await this.l1Guardrails.evaluate(message, draft.text);
 
@@ -460,6 +507,16 @@ export class AIResponseWorker implements OnModuleInit {
       await this.context.recordTurn(userId, 'assistant', draft.text);
       await this.context.summarizeIfNeeded(userId, persona.agentName);
 
+      // A pergunta pendente só fecha quando o aluno de fato recebeu uma resposta a ela:
+      // resposta barrada pelo validador ou fluxo de troca de exercício deixam a pendência aberta.
+      if (!draft.blocked && !draft.viaSubstitutionFlow) {
+        const treatedAsAnswer =
+          pending !== null &&
+          (pending.reading.match === 'STRONG' ||
+            (pending.reading.match === 'WEAK' && LIGHT_INTENTS.has(intent.intent)));
+        await this.settlePending(userId, pending, treatedAsAnswer, true);
+      }
+
       // TASK-3.6.1 (a) — Alerta ASSÍNCRONO consultável (não handoff): revisão sem prazo.
       const reason = handoffReason(intent.intent, draft);
       if (reason) {
@@ -479,6 +536,39 @@ export class AIResponseWorker implements OnModuleInit {
       return { status: draft.blocked ? 'BLOCKED' : 'SENT' };
     } finally {
       await this.lock.release(userId, token);
+      await this.requeueOrphanedBatch(userId, batchKey, correlationId);
+    }
+  }
+
+  /**
+   * Achado 2026-10-13: o lote é drenado no INÍCIO do job. Mensagem que o aluno manda enquanto
+   * a resposta anterior ainda está sendo gerada cai no buffer, e o job que o webhook enfileira
+   * para ela encontra o lock ocupado e termina em `LOCKED` sem drenar nada. Sem este
+   * reenfileiramento, o texto ficava preso até o aluno escrever de novo (ou vencia o TTL do
+   * buffer) — justamente o caso de quem responde aos poucos, em mensagens separadas por
+   * pausas. Roda DEPOIS de soltar o lock, para o job novo conseguir adquiri-lo. Um job
+   * redundante (o do debounce normal) só encontra o lote vazio e termina em `EMPTY`.
+   */
+  private async requeueOrphanedBatch(
+    userId: string,
+    batchKey: string,
+    correlationId: string,
+  ): Promise<void> {
+    try {
+      if ((await this.redis.llen(batchKey)) === 0) return;
+      const followUp: AiResponseJob = { userId, batchKey, correlationId, enqueuedAt: Date.now() };
+      await this.queues.enqueue(QUEUE.aiResponse, 'coach-response', followUp, {
+        delay: ORPHAN_BATCH_RETRIGGER_MS,
+      });
+      this.logger.info(
+        { event: 'ai_response_orphan_batch_requeued', userId },
+        'mensagem chegou durante a resposta anterior — novo job enfileirado',
+      );
+    } catch (err: unknown) {
+      this.logger.warn(
+        { event: 'ai_response_orphan_batch_requeue_failed', userId, err },
+        'não foi possível reenfileirar o lote deixado no buffer',
+      );
     }
   }
 
@@ -493,6 +583,7 @@ export class AIResponseWorker implements OnModuleInit {
     scrubUser: ScrubUser,
     personaCtx: PersonaContext,
     operationId: string,
+    pending: PendingContext | null,
   ): Promise<ResponseDraft> {
     // Fluxo de troca aberto (o Coach fez uma pergunta e espera a resposta): a resposta do
     // aluno ("só hoje", "o segundo") pode ter sido classificada como QUALQUER intenção —
@@ -523,8 +614,86 @@ export class AIResponseWorker implements OnModuleInit {
       scrubUser,
       personaCtx,
       operationId,
-      undefined,
+      this.pendingOptions(intent, pending),
     );
+  }
+
+  /**
+   * Lê a pergunta pendente do aluno (se houver) e a mensagem atual contra ela. Melhor esforço:
+   * a pendência é um acessório da conversa, então qualquer falha aqui segue como "sem pendência"
+   * em vez de derrubar a resposta.
+   */
+  private async readPending(
+    userId: string,
+    message: string,
+    timezone: string,
+  ): Promise<PendingContext | null> {
+    try {
+      const [open] = await this.followups.listForContext(userId);
+      if (!open?.deliveredAt) return null;
+      const question: PendingQuestion = {
+        subjectDate: open.subjectDate,
+        topicLabel: open.topicLabel,
+        deliveredAt: open.deliveredAt,
+      };
+      return {
+        id: open.id,
+        question,
+        reading: matchPendingReply(message, question, new Date(), timezone),
+        timezone,
+      };
+    } catch (err: unknown) {
+      this.logger.warn(
+        { event: 'pending_question_unavailable', userId, err },
+        'pergunta pendente indisponível; a resposta segue sem ela',
+      );
+      return null;
+    }
+  }
+
+  /** Bloco de dados (sempre que há pendência) + instrução de turno (só se a leitura bate). */
+  private pendingOptions(
+    intent: Intent,
+    pending: PendingContext | null,
+  ): { extraSystem?: string; pendingBlock: string } | undefined {
+    if (!pending) return undefined;
+    const match: PendingMatch = pending.reading.match;
+    return {
+      pendingBlock: buildPendingBlock(pending.question, match, new Date(), pending.timezone),
+      ...(match !== 'NONE' && LIGHT_INTENTS.has(intent)
+        ? {
+            // Dor como motivo: acolher e avisar o CREF, sem "olhar para frente" nem treino.
+            extraSystem: pending.reading.mentionsPain
+              ? PENDING_PAIN_INSTRUCTION
+              : PENDING_REPLY_INSTRUCTION,
+          }
+        : {}),
+    };
+  }
+
+  /**
+   * Fecha a pendência quando a resposta a ela foi entregue e, se o motivo foi dor ou lesão,
+   * avisa o profissional CREF. Melhor esforço: o aluno já recebeu a resposta, e uma pendência
+   * que não fechou só expira por tempo (72 h) sem nunca ser cobrada de novo.
+   */
+  private async settlePending(
+    userId: string,
+    pending: PendingContext | null,
+    answered: boolean,
+    raisePainAlert: boolean,
+  ): Promise<void> {
+    if (!pending || !answered) return;
+    try {
+      await this.followups.markAnswered(userId, pending.id);
+      if (raisePainAlert && pending.reading.mentionsPain) {
+        await this.repo.persistHandoff(userId, 'ALERT', 'AUSENCIA_DOR');
+      }
+    } catch (err: unknown) {
+      this.logger.warn(
+        { event: 'pending_question_settle_failed', userId, err },
+        'resposta entregue, mas a pendência de conversa não foi fechada',
+      );
+    }
   }
 
   /**
@@ -593,7 +762,7 @@ export class AIResponseWorker implements OnModuleInit {
     scrubUser: ScrubUser,
     personaCtx: PersonaContext,
     operationId: string,
-    opts: { extraSystem?: string; allowedExercises?: string[] } | undefined,
+    opts: { extraSystem?: string; allowedExercises?: string[]; pendingBlock?: string } | undefined,
   ): Promise<ResponseDraft> {
     const ctx = await this.context.build(userId, intent, message, personaCtx.persona.agentName);
     const runtime = await this.prompts.resolveRuntimeFor(intent, personaCtx.persona);
@@ -628,6 +797,16 @@ export class AIResponseWorker implements OnModuleInit {
                 sha256: methodology.contentSha256,
                 content: methodology.content,
               }),
+            },
+          ]
+        : []),
+      // Depois de tudo que é cacheável (estado do aluno e metodologia): os rótulos relativos
+      // da pergunta pendente mudam a cada hora e, antes, invalidariam o prefixo.
+      ...(opts?.pendingBlock
+        ? [
+            {
+              role: 'user' as const,
+              content: untrustedDataEnvelope('PENDENCIAS_DA_CONVERSA', opts.pendingBlock),
             },
           ]
         : []),

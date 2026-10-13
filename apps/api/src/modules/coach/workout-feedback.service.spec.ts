@@ -138,6 +138,39 @@ describe('WorkoutFeedbackService (achado 2026-09-12)', () => {
     expect(userMessage).toContain('Dor/desconforto relatado nesta sessão: sim');
   });
 
+  it('volta após um dia sem registro: instrui UMA frase curta, sem número de faltas', async () => {
+    const { service, complete } = makeService({
+      complete: async () =>
+        llmResult('Voltou, e é isso que constrói constância. Séries completas.'),
+    });
+    await service.comment({ ...baseParams, voltaAposDiaSemRegistro: true });
+    const system = complete.mock.calls[0]?.[0]?.system ?? '';
+    const userMessage = complete.mock.calls[0]?.[0]?.messages[0]?.content ?? '';
+    expect(system).toContain('UMA frase curta');
+    expect(system).toContain('Sem citar quantos dias');
+    expect(userMessage).toContain('Treino anterior previsto ficou sem registro: sim.');
+  });
+
+  it('sem volta, nada sobre sem registro entra no prompt', async () => {
+    const { service, complete } = makeService({
+      complete: async () => llmResult('Comentário qualquer.'),
+    });
+    await service.comment(baseParams);
+    expect(complete.mock.calls[0]?.[0]?.system ?? '').not.toContain('UMA frase curta');
+    expect(complete.mock.calls[0]?.[0]?.messages[0]?.content ?? '').not.toContain('sem registro');
+  });
+
+  it('com dor relatada, o reconhecimento da volta cede lugar ao da dor', async () => {
+    const { service, complete } = makeService({
+      complete: async () => llmResult('Registrei o relato de dor; o profissional já vai olhar.'),
+    });
+    await service.comment({ ...baseParams, dorRelatada: true, voltaAposDiaSemRegistro: true });
+    expect(complete.mock.calls[0]?.[0]?.system ?? '').not.toContain('UMA frase curta');
+    expect(complete.mock.calls[0]?.[0]?.messages[0]?.content ?? '').not.toContain(
+      'Treino anterior previsto',
+    );
+  });
+
   it('inclui o histórico recente quando fornecido', async () => {
     const { service, complete } = makeService({
       complete: async () => llmResult('Comentário qualquer.'),

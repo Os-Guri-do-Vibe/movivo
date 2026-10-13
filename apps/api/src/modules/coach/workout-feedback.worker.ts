@@ -13,6 +13,7 @@
  */
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { type Job } from 'bullmq';
+import { PinoLogger } from 'nestjs-pino';
 import { and, desc, eq, ne } from 'drizzle-orm';
 
 import { HealthCipherService } from '../../core/database/health-cipher.service';
@@ -21,6 +22,7 @@ import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
+import { WorkoutJournalService } from '../workout/workout-journal.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import {
   WorkoutFeedbackService,
@@ -44,7 +46,11 @@ export class WorkoutFeedbackWorker implements OnModuleInit {
     private readonly db: TenantDatabase,
     private readonly cipher: HealthCipherService,
     private readonly feedback: WorkoutFeedbackService,
-  ) {}
+    private readonly journal: WorkoutJournalService,
+    private readonly logger: PinoLogger,
+  ) {
+    this.logger.setContext(WorkoutFeedbackWorker.name);
+  }
 
   onModuleInit(): void {
     this.workers.create<WorkoutFeedbackJob>(QUEUE.workoutFeedback, (job) => this.process(job));
@@ -65,6 +71,9 @@ export class WorkoutFeedbackWorker implements OnModuleInit {
       dorRelatada: loaded.painReported,
       comentarioDoAluno: loaded.feelingNotes,
       historicoRecente: loaded.historicoRecente,
+      voltaAposDiaSemRegistro: loaded.painReported
+        ? false
+        : await this.returnedAfterMiss(userId, loaded.scheduledDate),
     });
     if (!text) return { status: 'SKIPPED' };
 
@@ -80,6 +89,24 @@ export class WorkoutFeedbackWorker implements OnModuleInit {
     return { status: 'SENT' };
   }
 
+  /**
+   * Este treino é uma volta? A sessão prevista imediatamente anterior ficou sem registro.
+   * Calculado aqui (fila assíncrona, fora do caminho HTTP do `finish()`) e estável no retry,
+   * porque dias passados não mudam. Melhor esforço: na dúvida, o comentário não cita a volta.
+   */
+  private async returnedAfterMiss(userId: string, scheduledDate: string): Promise<boolean> {
+    try {
+      const { target } = await this.journal.recentMissStreak(userId, scheduledDate);
+      return target?.status.kind === 'MISSED';
+    } catch (err: unknown) {
+      this.logger.warn(
+        { event: 'workout_feedback_return_check_failed', userId, err },
+        'não foi possível checar se este treino é uma volta; o comentário segue sem citá-la',
+      );
+      return false;
+    }
+  }
+
   private async load(
     userId: string,
     workoutSessionId: string,
@@ -92,6 +119,7 @@ export class WorkoutFeedbackWorker implements OnModuleInit {
     realizado: RealizedExercise[];
     perceivedEffort: number | null;
     painReported: boolean;
+    scheduledDate: string;
     feelingNotes?: string;
     historicoRecente: WorkoutHistoryLine[];
   } | null> {
@@ -211,6 +239,7 @@ export class WorkoutFeedbackWorker implements OnModuleInit {
         realizado,
         perceivedEffort: session.perceivedEffort,
         painReported: session.painReported,
+        scheduledDate: session.scheduledDate,
         feelingNotes,
         historicoRecente,
       };

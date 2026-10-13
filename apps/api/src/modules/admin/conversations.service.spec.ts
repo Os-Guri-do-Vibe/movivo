@@ -380,7 +380,13 @@ describe('ConversationsService.sendMessage', () => {
     });
 
     expect(inserted).toEqual([
-      { userId: STUDENT_ID, direction: 'OUTBOUND', content: 'enc(Oi, Ana! Como foi o treino?)' },
+      {
+        userId: STUDENT_ID,
+        direction: 'OUTBOUND',
+        origin: 'PROFESSIONAL',
+        sourceType: 'MANUAL_MESSAGE',
+        content: 'enc(Oi, Ana! Como foi o treino?)',
+      },
     ]);
     expect(queues.enqueue).toHaveBeenCalledWith(
       'whatsapp-outbound',

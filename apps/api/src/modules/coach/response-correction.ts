@@ -33,6 +33,18 @@ const CORRECTION_HINTS: Readonly<Record<string, string>> = {
     'Não prometa prazo, horário nem retorno (nada de "vou te responder em…", "volto até…"). ' +
     'Diga apenas que o pedido fica registrado para o profissional responsável.',
   EXTERNAL_REFERENCE: 'Não inclua link, site, e-mail nem telefone na resposta.',
+  MAKEUP_PRESCRIPTION:
+    'Não sugira compensar, repor, dobrar nem fazer treino extra, e não mude o dia de nenhum ' +
+    'treino. Diga que não precisa compensar, que o caminho é seguir com o treino previsto e que ' +
+    'um ajuste de rotina quem avalia é o profissional CREF.',
+  RETRO_LOG_CLAIM:
+    'Não diga que registrou, anotou ou marcou um treino: o registro só acontece pelo link do ' +
+    'dia. Se a pessoa disse que treinou e não registrou, acredite e oriente a registrar os ' +
+    'próximos treinos pelo link.',
+  BRAND_LEXICON:
+    'Não use "preguiça", "falhou", "falhei", "perdeu o treino", "você sumiu" nem "sem ' +
+    'desculpa", nem repita essas palavras se a pessoa as usar: reformule (ex.: "dia sem pique"). ' +
+    'Fale de constância: ninguém precisa ser perfeito, o que importa é seguir em movimento.',
 };
 
 /** Violações que uma segunda tentativa pode resolver. Qualquer outra → resposta-padrão. */

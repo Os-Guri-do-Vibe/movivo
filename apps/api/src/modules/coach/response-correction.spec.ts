@@ -9,6 +9,18 @@ describe('buildResponseCorrection', () => {
     expect(correction).toContain('Não prometa prazo');
   });
 
+  it('treino sem registro: instrui a não compensar e a falar de constância, sem ecoar o texto', () => {
+    const makeup = buildResponseCorrection([{ rule: 'MAKEUP_PRESCRIPTION' }]);
+    expect(makeup).toContain(CORRECTION_HEADER);
+    expect(makeup).toContain('não precisa compensar');
+    expect(makeup).toContain('profissional CREF');
+    const brand = buildResponseCorrection([{ rule: 'BRAND_LEXICON' }]);
+    expect(brand).toContain('ninguém precisa ser perfeito');
+    expect(brand).toContain('reformule');
+    const retro = buildResponseCorrection([{ rule: 'RETRO_LOG_CLAIM' }]);
+    expect(retro).toContain('o registro só acontece pelo link');
+  });
+
   it('exercício fora da lista: repete a lista autorizada, pelo nome exato', () => {
     const correction = buildResponseCorrection(
       [{ rule: 'EXERCISE_NOT_ALLOWED' }],
