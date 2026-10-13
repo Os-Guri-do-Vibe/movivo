@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const api = vi.hoisted(() => ({
   getAlerts: vi.fn(),
   getAlertsSummary: vi.fn(),
+  getQueue: vi.fn(),
 }));
 
 vi.mock('@/lib/dashboard-api', () => api);
@@ -37,6 +38,19 @@ describe('AlertsBell', () => {
       ],
       resolved: [],
     });
+    api.getQueue.mockResolvedValue({
+      mandatory: [],
+      optional: [],
+      substitutionMandatory: [],
+      substitutionOptional: [],
+      counts: {
+        mandatory: 0,
+        optional: 0,
+        substitutionMandatory: 0,
+        substitutionOptional: 0,
+        total: 0,
+      },
+    });
   });
 
   afterEach(() => {
@@ -46,7 +60,7 @@ describe('AlertsBell', () => {
   it('abre um popover com a notificação acionável, sem navegar ao clicar no sino', async () => {
     render(<AlertsBell />);
 
-    const bell = await screen.findByRole('button', { name: 'Alertas: 1 pendente' });
+    const bell = await screen.findByRole('button', { name: 'Notificações: 1 pendência' });
     await userEvent.click(bell);
 
     const dialog = await screen.findByRole('dialog', { name: 'Notificações do AI Coach' });
@@ -65,7 +79,48 @@ describe('AlertsBell', () => {
     api.getAlerts.mockResolvedValue({ open: [], resolved: [] });
     render(<AlertsBell />);
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Alertas: nenhum pendente' }));
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Notificações: nenhuma pendente' }),
+    );
     expect(await screen.findByText('Nenhuma notificação pendente.')).toBeVisible();
+  });
+
+  it('agrega os itens pendentes da fila às notificações', async () => {
+    api.getQueue.mockResolvedValue({
+      mandatory: [
+        {
+          id: 'protocol-1',
+          kind: 'PROTOCOL',
+          severity: 'ALERT',
+          createdAt: '2026-10-12T15:00:00.000Z',
+          ageMinutes: 2,
+          title: 'Protocolo para Revisão: Ana',
+          summary: 'PENDING_SIGNATURE',
+          status: 'PENDING_SIGNATURE',
+          autoReleaseAt: null,
+          origin: null,
+        },
+      ],
+      optional: [],
+      substitutionMandatory: [],
+      substitutionOptional: [],
+      counts: {
+        mandatory: 1,
+        optional: 0,
+        substitutionMandatory: 0,
+        substitutionOptional: 0,
+        total: 1,
+      },
+    });
+    render(<AlertsBell />);
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Notificações: 2 pendências' }),
+    );
+    expect(await screen.findByText('Protocolo para Revisão: Ana')).toBeVisible();
+    expect(screen.getByRole('link', { name: /protocolo para revisão: ana/i })).toHaveAttribute(
+      'href',
+      '/dashboard/fila/protocol/protocol-1',
+    );
   });
 });
