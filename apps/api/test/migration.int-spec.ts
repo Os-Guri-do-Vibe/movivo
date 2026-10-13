@@ -104,6 +104,8 @@ const EXPECTED_TABLES = [
   'staff',
   // Estado "lido" das notificações do sino do dashboard, por conta de staff.
   'dashboard_notification_reads',
+  // Pergunta do Coach que espera resposta (treino sem registro): pendência de 72h, sem texto livre.
+  'conversation_followups',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;
