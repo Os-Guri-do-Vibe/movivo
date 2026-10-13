@@ -163,12 +163,12 @@ export interface DashboardAlert {
 }
 
 /** Titulo do item de fila de protocolo, com o nome completo do titular. */
-function protocolTitle(name: string | null | undefined) {
+export function protocolTitle(name: string | null | undefined) {
   return name ? `Protocolo para Revisão: ${name}` : 'Protocolo para Revisão';
 }
 
 /** Título do item de fila de substituição de exercício, com o nome completo do titular. */
-function substitutionTitle(name: string | null | undefined) {
+export function substitutionTitle(name: string | null | undefined) {
   return name ? `Substituição de Exercício: ${name}` : 'Substituição de Exercício';
 }
 
@@ -1858,7 +1858,7 @@ export class DashboardService {
    * Chaves `tipo:id` já lidas pela conta: leitura registrada em ou depois da criação do item.
    * Um item que nasce depois da última leitura volta a ser não lido.
    */
-  private async readKeys(
+  async readKeys(
     tx: TenantTransaction,
     actor: AuthenticatedUser,
     refs: ReadonlyArray<{ type: NotificationType; id: string; createdAt: Date }>,
@@ -1894,7 +1894,7 @@ export class DashboardService {
     );
   }
 
-  private async auditRead(
+  async auditRead(
     tx: TenantTransaction,
     actor: AuthenticatedUser,
     userId: string,

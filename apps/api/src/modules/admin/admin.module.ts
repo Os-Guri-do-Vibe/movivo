@@ -30,6 +30,7 @@ import { ControlCenterService } from './control-center.service';
 import { ConversationsController } from './conversations.controller';
 import { ConversationsService } from './conversations.service';
 import { DashboardController } from './dashboard.controller';
+import { DashboardNotificationHistoryService } from './dashboard-notification-history.service';
 import { DashboardNotificationsController } from './dashboard-notifications.controller';
 import { DashboardNotificationsService } from './dashboard-notifications.service';
 import { DashboardService } from './dashboard.service';
@@ -79,6 +80,7 @@ import { SystemScriptsService } from './system-scripts.service';
     AuditService,
     DashboardService,
     DashboardNotificationsService,
+    DashboardNotificationHistoryService,
     ControlCenterService,
     ConversationsService,
     AiConfigService,
