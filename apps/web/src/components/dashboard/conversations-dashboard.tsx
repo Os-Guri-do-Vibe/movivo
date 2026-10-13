@@ -764,7 +764,7 @@ function ChatPanel({
  * pausado, verde ativo). Com ele pausado o profissional escreve ao aluno por aqui; com ele
  * ativo o campo de mensagem fica travado, para a IA e um humano nunca responderem juntos.
  */
-export function ConversationsDashboard() {
+export function ConversationsDashboard({ preferredStudentId }: { preferredStudentId?: string }) {
   const { data, error, forbidden, loading, refresh } = useControlCenterResource(getConversations);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Alterações feitas nesta tela (pausar/ativar, mensagem enviada) valem de imediato, sem
@@ -781,6 +781,11 @@ export function ConversationsDashboard() {
         .sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt)),
     [data, overrides],
   );
+  useEffect(() => {
+    if (preferredStudentId && conversations.some((item) => item.studentId === preferredStudentId)) {
+      setSelectedId(preferredStudentId);
+    }
+  }, [conversations, preferredStudentId]);
   const patch = useCallback(
     (id: string, change: { aiPaused?: boolean; lastMessageAt?: string; unreadCount?: number }) =>
       setOverrides((current) => ({ ...current, [id]: { ...current[id], ...change } })),

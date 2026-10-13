@@ -234,10 +234,25 @@ export function parseQueueDetail(value: unknown): QueueDetail {
   }
   if (value.replay !== undefined) result.replay = parseReplay(value.replay);
   if (isRecord(value.handoff)) {
+    const trigger: NonNullable<QueueDetail['handoff']>['trigger'] = isRecord(value.handoff.trigger)
+      ? {
+          content: string(value.handoff.trigger.content),
+          createdAt: string(value.handoff.trigger.createdAt),
+          direction:
+            value.handoff.trigger.direction === 'INBOUND' ||
+            value.handoff.trigger.direction === 'OUTBOUND'
+              ? (value.handoff.trigger.direction as 'INBOUND' | 'OUTBOUND')
+              : ('INBOUND' as const),
+        }
+      : null;
     result.handoff = {
       reason: string(value.handoff.reason) || item.summary,
       level: string(value.handoff.level) || item.severity,
       status: string(value.handoff.status) || item.status,
+      ...(typeof value.handoff.studentId === 'string'
+        ? { studentId: value.handoff.studentId }
+        : {}),
+      ...(trigger ? { trigger } : {}),
     };
   }
   if (isRecord(value.substitution))

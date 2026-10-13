@@ -161,7 +161,13 @@ export interface QueueDetail {
   context: Record<string, string | number | boolean | null>;
   protocol?: ProtocolDetail;
   replay?: AnonymizedReplay;
-  handoff?: { reason: string; level: string; status: string };
+  handoff?: {
+    reason: string;
+    level: string;
+    status: string;
+    studentId?: string;
+    trigger?: { content: string; createdAt: string; direction: 'INBOUND' | 'OUTBOUND' } | null;
+  };
   substitution?: SubstitutionDetail;
 }
 
