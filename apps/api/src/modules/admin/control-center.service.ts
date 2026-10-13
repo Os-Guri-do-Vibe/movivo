@@ -29,6 +29,7 @@ import {
   type ControlCenterTrialConversion,
   type ControlCenterNorthStar,
   type ControlCenterOverviewResponse,
+  type ControlCenterPillarSignal,
   type ControlCenterPillarSummary,
   type ControlCenterStudentDetailResponse,
   type ControlCenterStudentsResponse,
@@ -135,6 +136,8 @@ const AI_PRICE_LATERAL = sql`left join lateral (
   order by length(mp.model) desc, mp.valid_from desc
   limit 1
 ) price on true`;
+/** Teto de espera pela EvolutionAPI ao ler a conexão do WhatsApp na Visão Geral. */
+const WHATSAPP_PROBE_TIMEOUT_MS = 3000;
 /** Janela das séries e do mapa de calor da Visão Geral. */
 const INSIGHT_WINDOW_DAYS = 30;
 const DAY_FORMATTER = new Intl.DateTimeFormat('en-CA', {
@@ -235,6 +238,10 @@ export class ControlCenterService {
    */
   async overview(actor: AuthenticatedUser): Promise<ControlCenterOverviewResponse> {
     const pillars: ControlCenterOverviewResponse['data']['pillars'] = [];
+    // IA e Sistema leem o mesmo `system()` (latência do coach, falhas de job, SLOs): uma
+    // consulta só por Visão Geral, feita sob demanda para quem tem ao menos um dos dois.
+    let systemSnapshot: Promise<ControlCenterSystemResponse> | null = null;
+    const system = () => (systemSnapshot ??= this.system());
 
     if (roleHasCapabilities(actor.role, [Capability.STUDENTS_READ])) {
       pillars.push(await this.studentsPillarSummary(actor));
@@ -246,10 +253,10 @@ export class ControlCenterService {
       pillars.push(await this.marketingPillarSummary());
     }
     if (roleHasCapabilities(actor.role, [Capability.AI_CONFIG_READ])) {
-      pillars.push(await this.aiPillarSummary());
+      pillars.push(await this.aiPillarSummary(await system()));
     }
     if (roleHasCapabilities(actor.role, [Capability.SYSTEM_READ])) {
-      pillars.push(await this.systemPillarSummary());
+      pillars.push(await this.systemPillarSummary(await system()));
     }
 
     return this.envelope({ pillars }, [
@@ -262,7 +269,6 @@ export class ControlCenterService {
     actor: AuthenticatedUser,
   ): Promise<ControlCenterPillarSummary> {
     const students = await this.students(actor);
-    const total = students.data.students.length;
     const atRisk = students.data.students.filter((student) => student.churnRisk.score > 0).length;
 
     let criticalAlerts = 0;
@@ -295,24 +301,17 @@ export class ControlCenterService {
       label: 'Alunos',
       state,
       href: '/dashboard/alunos',
+      // US-8.1 — North Star em número real. A taxa de reporte vem junto de propósito: a
+      // média sozinha, sem ela, é lida como medida quando é piso. O total de cadastrados
+      // e a adesão declarada ficam na página de Alunos (não são monitoramento contínuo).
       headline: {
-        label: 'Alunos cadastrados',
-        metric: this.metric(total, 'COUNT', 'AVAILABLE', 'Alunos visíveis no escopo do papel.'),
+        label: `Treinos nos primeiros ${NORTH_STAR_WINDOW_DAYS} dias pagos (meta ≥${NORTH_STAR_TARGET})`,
+        metric: students.data.northStar.averageCompletions,
       },
       details: [
-        // US-8.1 — North Star em número real. As três linhas vêm juntas de propósito:
-        // a média sozinha, sem taxa de reporte, é lida como medida quando é piso.
-        {
-          label: `Treinos nos primeiros ${NORTH_STAR_WINDOW_DAYS} dias pagos (meta ≥${NORTH_STAR_TARGET})`,
-          metric: students.data.northStar.averageCompletions,
-        },
         {
           label: 'Taxa de reporte de treino',
           metric: students.data.northStar.reportingRate,
-        },
-        {
-          label: 'Adesão declarada (resposta a check-in)',
-          metric: students.data.declaredAdherenceRate,
         },
         {
           label: 'Em risco de cancelamento',
@@ -337,6 +336,7 @@ export class ControlCenterService {
             ]
           : []),
       ],
+      signals: [],
       reason,
     };
   }
@@ -344,7 +344,6 @@ export class ControlCenterService {
   private async financePillarSummary(): Promise<ControlCenterPillarSummary> {
     const finance = await this.finance();
     const atRisk = finance.data.revenueAtRisk30d.value ?? 0;
-    const churn90 = finance.data.churnByReason.reduce((sum, row) => sum + row.last90Days, 0);
     // US-8.8: lucro do período entra na linha-resumo. Lucro indisponível (sem despesa
     // lançada) não é atenção — é ausência de dado, e a métrica já diz isso na tela.
     const profit = finance.data.profit;
@@ -359,18 +358,12 @@ export class ControlCenterService {
       href: '/dashboard/financeiro',
       headline: { label: 'MRR contratado', metric: finance.data.contractedMrr },
       details: [
-        { label: 'Receita em risco (30 dias)', metric: finance.data.revenueAtRisk30d },
         { label: 'Lucro do período', metric: profit },
-        {
-          label: 'Cancelamentos (90 dias)',
-          metric: this.metric(
-            churn90,
-            'COUNT',
-            'AVAILABLE',
-            'Assinaturas canceladas nos últimos 90 dias, somando todos os motivos declarados.',
-          ),
-        },
+        { label: 'Receita em risco (30 dias)', metric: finance.data.revenueAtRisk30d },
+        // Sinal precoce de problema de caixa; cancelamentos em 90 dias ficam no Financeiro.
+        { label: 'Inadimplência', metric: finance.data.delinquencyRate },
       ],
+      signals: [],
       reason: profitAttention
         ? 'Lucro do período negativo: a despesa lançada superou a receita.'
         : attention
@@ -384,6 +377,7 @@ export class ControlCenterService {
     const started = marketing.data.funnel.formStarted.value ?? 0;
     const submitted = marketing.data.funnel.formSubmitted.value ?? 0;
     const completionRate = started > 0 ? (submitted / started) * 100 : null;
+    const trial = marketing.data.trialConversion;
     // US-8.8: "canal principal" = o canal publicável com mais cadastros; se ele não tem
     // investimento em mídia, o CAC dele já vem UNAVAILABLE com o motivo (US-8.6) e a linha
     // exibe isso em vez de escolher outro canal só para ter número.
@@ -423,6 +417,22 @@ export class ControlCenterService {
                 ),
         },
         {
+          // A métrica que mais pesa na receita: quem entrou no trial e virou assinante.
+          label: 'Conversão do trial',
+          metric:
+            trial.status === 'AVAILABLE' && trial.conversionRatePercent !== null
+              ? this.metric(
+                  trial.conversionRatePercent,
+                  'PERCENT',
+                  'AVAILABLE',
+                  'Entradas em trial que viraram assinatura ativa, dentro da janela de atribuição.',
+                )
+              : this.unavailable(
+                  'PERCENT',
+                  trial.reason ?? 'Sem entradas em trial suficientes para publicar a taxa.',
+                ),
+        },
+        {
           label:
             mainChannel === null
               ? 'CAC do canal principal'
@@ -436,6 +446,7 @@ export class ControlCenterService {
               : mainChannel.cac,
         },
       ],
+      signals: [],
       reason: cacAttention
         ? `CAC do canal principal acima de R$ ${OVERVIEW_ATTENTION_THRESHOLDS.marketingMaxChannelCacBrl}, o teto que a meta LTV/CAC ≥ ${LTV_TO_CAC_TARGET} admite.`
         : attention
@@ -444,72 +455,117 @@ export class ControlCenterService {
     };
   }
 
-  private async aiPillarSummary(): Promise<ControlCenterPillarSummary> {
+  private async aiPillarSummary(
+    system: ControlCenterSystemResponse,
+  ): Promise<ControlCenterPillarSummary> {
     const since = new Date(Date.now() - INSIGHT_WINDOW_DAYS * 86_400_000);
     const [row] = await this.db.runAsSystem((tx) =>
       tx
         .select({
-          total: sql<number>`count(*) filter (where ${conversations.direction} = 'OUTBOUND')::int`,
           blocked: sql<number>`count(*) filter (where ${conversations.validationPassed} = false)::int`,
           validated: sql<number>`count(*) filter (where ${conversations.validationPassed} is not null)::int`,
         })
         .from(conversations)
         .where(gte(conversations.createdAt, since)),
     );
-    // Sprint 11: duas personas publicáveis (uma por público). O card do panorama deixou de
-    // poder dizer "versão vigente" no singular — passa a contar quantos dos dois slots já
-    // têm persona própria, com as versões no detalhe. Zero slots publicados continua sendo
-    // o único caso `UNAVAILABLE` (aí a IA responde com o default de código).
+    // Sprint 11: duas personas publicáveis (uma por público). Zero slots publicados é o
+    // caso em que a IA responde com o default de código — vira sinal de atenção, não número.
     const [malePersona, femalePersona] = await Promise.all([
       this.agentConfig.activePayload('MALE'),
       this.agentConfig.activePayload('FEMALE'),
     ]);
     const publishedSlots = [malePersona, femalePersona].filter(Boolean).length;
     const blockedRate = this.blockedRate(row?.blocked ?? 0, row?.validated ?? 0);
-    const attention =
+    const blockedAttention =
       blockedRate.value !== null &&
       blockedRate.value > OVERVIEW_ATTENTION_THRESHOLDS.aiMaxBlockedPercent;
+    const personaAttention = publishedSlots === 0;
+
+    // Falha de job e DLQ são a mesma pergunta para quem monitora: "há trabalho de IA que
+    // não terminou e pede ação?". O SLO de cada um continua separado em Sistema.
+    const failedJobs = (system.data.aiFailures.value ?? 0) + (system.data.aiDlq.value ?? 0);
 
     return {
       pillar: 'AI',
       label: 'IA',
-      state: attention ? 'ATTENTION' : 'OK',
+      state: blockedAttention || personaAttention ? 'ATTENTION' : 'OK',
       href: '/dashboard/ia/agente',
-      headline: {
-        label: `Conversas (${INSIGHT_WINDOW_DAYS} dias)`,
-        metric: this.metric(
-          row?.total ?? 0,
-          'COUNT',
-          'AVAILABLE',
-          `Mensagens enviadas pela plataforma nos últimos ${INSIGHT_WINDOW_DAYS} dias.`,
-        ),
-      },
+      headline: { label: 'Resposta bloqueada pela validação', metric: blockedRate },
       details: [
-        { label: 'Taxa de resposta bloqueada pela validação', metric: blockedRate },
+        { label: 'Resposta do coach (p95)', metric: system.data.whatsappLatency.p95 },
         {
-          label: 'Personas publicadas',
+          label: `Trabalhos de IA com falha (${INSIGHT_WINDOW_DAYS} dias)`,
           metric: this.metric(
-            publishedSlots,
+            failedJobs,
             'COUNT',
-            publishedSlots > 0 ? 'AVAILABLE' : 'UNAVAILABLE',
-            publishedSlots > 0
-              ? `Masculina: ${malePersona ? `versão ${malePersona.version}` : 'não publicada'}. ` +
-                  `Feminina: ${femalePersona ? `versão ${femalePersona.version}` : 'não publicada'}. ` +
-                  (publishedSlots === 1
-                    ? 'O público sem persona própria recebe a do outro por enquanto.'
-                    : '')
-              : 'Nenhuma configuração publicada; a IA responde com o default de código.',
+            'AVAILABLE',
+            'Trabalhos de IA que falharam de vez ou esgotaram as tentativas e viraram tarefa manual (DLQ).',
           ),
         },
       ],
-      reason: attention
+      signals: [
+        {
+          label: 'Personas',
+          state: personaAttention ? 'ATTENTION' : 'OK',
+          text: personaAttention
+            ? 'Nenhuma publicada'
+            : `Masculina ${malePersona ? `v${malePersona.version}` : 'sem versão própria'} · Feminina ${femalePersona ? `v${femalePersona.version}` : 'sem versão própria'}`,
+        },
+      ],
+      reason: blockedAttention
         ? `Taxa de resposta bloqueada pela validação acima de ${OVERVIEW_ATTENTION_THRESHOLDS.aiMaxBlockedPercent}%.`
-        : null,
+        : personaAttention
+          ? 'Nenhuma persona publicada: a IA responde com o default de código.'
+          : null,
     };
   }
 
-  private async systemPillarSummary(): Promise<ControlCenterPillarSummary> {
-    const system = await this.system();
+  /**
+   * Estado da conexão do WhatsApp para a Visão Geral. Leitura pura — não chama
+   * `integration()`, que renova QR e reafirma webhook. Limite de tempo próprio porque o
+   * transporte não tem: uma EvolutionAPI pendurada não pode travar a tela inteira.
+   */
+  private async whatsappSignal(): Promise<ControlCenterPillarSignal> {
+    const label = 'WhatsApp';
+    if (!this.evolution.hasCredentials()) {
+      return { label, state: 'ATTENTION', text: 'Não configurado' };
+    }
+    const unreadable: ControlCenterPillarSignal = {
+      label,
+      state: 'ATTENTION',
+      text: 'Não foi possível consultar a conexão',
+    };
+    const withTimeout = <T>(promise: Promise<T>): Promise<T> =>
+      Promise.race([
+        promise,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('timeout')), WHATSAPP_PROBE_TIMEOUT_MS).unref(),
+        ),
+      ]);
+    try {
+      const instanceName = await withTimeout(this.evolution.currentInstanceName());
+      if (!instanceName) return { label, state: 'ATTENTION', text: 'Nenhuma instância criada' };
+      const status = await withTimeout(this.evolution.connectionState(instanceName));
+      if (status === 'CONNECTED') return { label, state: 'OK', text: 'Conectado' };
+      if (status === 'CONNECTING') {
+        return { label, state: 'ATTENTION', text: 'Aguardando leitura do QR Code' };
+      }
+      if (status === 'NOT_CONFIGURED') {
+        return { label, state: 'ATTENTION', text: 'Não configurado' };
+      }
+      return {
+        label,
+        state: 'CRITICAL',
+        text: 'Desconectado — alunos sem mensagens; reconectar por QR Code',
+      };
+    } catch {
+      return unreadable;
+    }
+  }
+
+  private async systemPillarSummary(
+    system: ControlCenterSystemResponse,
+  ): Promise<ControlCenterPillarSummary> {
     const rank: Record<(typeof system.data.slos)[number]['status'], number> = {
       RED: 3,
       YELLOW: 2,
@@ -519,8 +575,13 @@ export class ControlCenterService {
     const worst = system.data.slos.reduce((worstSlo, slo) =>
       rank[slo.status] > rank[worstSlo.status] ? slo : worstSlo,
     );
-    const state: ControlCenterPillarSummary['state'] =
+    const sloState: ControlCenterPillarSummary['state'] =
       worst.status === 'RED' ? 'CRITICAL' : worst.status === 'YELLOW' ? 'ATTENTION' : 'OK';
+    const whatsapp = await this.whatsappSignal();
+    const stateRank = { OK: 0, ATTENTION: 1, CRITICAL: 2 } as const;
+    // O canal WhatsApp é o ponto único de falha do produto: desconectado derruba o pilar
+    // mesmo com todos os SLOs verdes (que só medem o que já chegou a trafegar).
+    const state = stateRank[whatsapp.state] > stateRank[sloState] ? whatsapp.state : sloState;
 
     return {
       pillar: 'SYSTEM',
@@ -550,7 +611,13 @@ export class ControlCenterService {
                 ),
         },
       ],
-      reason: state === 'OK' ? null : `${worst.title}: fora da meta (${worst.objective}).`,
+      signals: [whatsapp],
+      reason:
+        sloState !== 'OK'
+          ? `${worst.title}: fora da meta (${worst.objective}).`
+          : whatsapp.state !== 'OK'
+            ? `WhatsApp: ${whatsapp.text}.`
+            : null,
     };
   }
 

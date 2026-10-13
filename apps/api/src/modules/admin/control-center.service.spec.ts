@@ -67,6 +67,18 @@ function withExecute(...rows: unknown[][]) {
   nextExecuteRows = rows;
 }
 
+/** Transporte da Evolution do próximo `serviceWithSystemResults` (padrão: sem credencial). */
+let nextEvolution: Partial<EvolutionTransport> = { hasCredentials: () => false };
+function withEvolution(evolution: Partial<EvolutionTransport>) {
+  nextEvolution = evolution;
+}
+
+/** Persona ativa devolvida pelo repositório (padrão: nenhuma publicada). */
+let nextPersona: { version: number } | null = null;
+function withPersonas(persona: { version: number } | null) {
+  nextPersona = persona;
+}
+
 function serviceWithSystemResults(...results: unknown[][]) {
   const select = vi.fn();
   for (const rows of results) select.mockImplementationOnce(() => query(rows));
@@ -92,9 +104,11 @@ function serviceWithSystemResults(...results: unknown[][]) {
     { decryptJson: vi.fn().mockReturnValue(null) } as unknown as HealthCipherService,
     { mget: vi.fn().mockResolvedValue([]) } as unknown as Redis,
     new RedisKeyBuilder('movivo'),
-    { activePayload: vi.fn().mockResolvedValue(null) } as unknown as AgentConfigRepository,
-    { hasCredentials: () => false } as unknown as EvolutionTransport,
+    { activePayload: vi.fn().mockResolvedValue(nextPersona) } as unknown as AgentConfigRepository,
+    nextEvolution as unknown as EvolutionTransport,
   );
+  nextEvolution = { hasCredentials: () => false };
+  nextPersona = null;
   return { service, db, audit };
 }
 
@@ -145,7 +159,7 @@ function studentsFixture(churnScores: number[]): ControlCenterStudentsResponse {
       })) as unknown as ControlCenterStudentsResponse['data']['students'],
       aiBlockedRate: metric(0, { unit: 'PERCENT' }),
       northStar: {
-        averageCompletions: metric(0, { unit: 'COUNT' }),
+        averageCompletions: metric(6, { unit: 'COUNT' }),
         target: 8,
         reportingRate: metric(0, { unit: 'PERCENT' }),
         cohortSize: 0,
@@ -167,6 +181,7 @@ function financeFixture(
       contractedMrr: metric(500, { unit: 'BRL' }),
       profit: metric(profitBrl, { unit: 'BRL' }),
       revenueAtRisk30d: metric(revenueAtRisk30d, { unit: 'BRL' }),
+      delinquencyRate: metric(4, { unit: 'PERCENT' }),
       churnByReason: last90Days.map((n, i) => ({ reason: `motivo_${i}`, total: n, last90Days: n })),
     } as unknown as ControlCenterFinanceResponse['data'],
     meta: META,
@@ -183,6 +198,15 @@ function marketingFixture(
       funnel: {
         formStarted: metric(formStarted),
         formSubmitted: metric(formSubmitted),
+      },
+      trialConversion: {
+        status: 'AVAILABLE',
+        trialsStarted: 40,
+        converted: 14,
+        conversionRatePercent: 35,
+        medianDaysToConversion: 6,
+        reconstructedEntries: 0,
+        reason: null,
       },
       channelEconomics: [
         { channel: 'organico', students: 12, cac: metric(null, { unit: 'BRL' }) },
@@ -203,7 +227,12 @@ function systemFixture(
   }>,
 ): ControlCenterSystemResponse {
   return {
-    data: { slos } as unknown as ControlCenterSystemResponse['data'],
+    data: {
+      slos,
+      aiFailures: metric(2),
+      aiDlq: metric(1),
+      whatsappLatency: { samples: 50, p50: metric(4000), p95: metric(9000), p99: metric(20000) },
+    } as unknown as ControlCenterSystemResponse['data'],
     meta: META,
   };
 }
@@ -253,7 +282,8 @@ describe('ControlCenterService overview (US-7.8)', () => {
       'SYSTEM',
     ]);
     const students = response.data.pillars.find((p) => p.pillar === 'STUDENTS');
-    expect(students?.headline.metric.value).toBe(2);
+    // A âncora de Alunos é a North Star, não o total de cadastrados.
+    expect(students?.headline.metric.value).toBe(6);
     const finance = response.data.pillars.find((p) => p.pillar === 'FINANCE');
     expect(finance?.headline.metric.value).toBe(500);
     const marketing = response.data.pillars.find((p) => p.pillar === 'MARKETING');
@@ -318,14 +348,63 @@ describe('ControlCenterService overview (US-7.8)', () => {
     expect(marketing).toMatchObject({ state: 'ATTENTION' });
   });
 
-  it('IA fica ATTENTION quando a taxa de resposta bloqueada passa do limiar', async () => {
-    const { service } = serviceWithSystemResults([{ total: 100, blocked: 6, validated: 100 }]);
+  it('IA ancora na taxa bloqueada e fica ATTENTION quando ela passa do limiar', async () => {
+    withPersonas({ version: 3 });
+    const { service } = serviceWithSystemResults([{ blocked: 6, validated: 100 }]);
     stubPillar(service, 'system', systemFixture([SLO_OK]));
 
     const response = await service.overview({ ...ACTOR, role: 'ENGINEERING' });
 
     const ai = response.data.pillars.find((p) => p.pillar === 'AI');
     expect(ai?.state).toBe('ATTENTION');
+    expect(ai?.headline).toMatchObject({
+      label: 'Resposta bloqueada pela validação',
+      metric: { value: 6 },
+    });
+    expect(ai?.reason).toMatch(/bloqueada/);
+  });
+
+  it('IA traz a latência p95 do coach e as falhas de job (falha + DLQ), e fica OK dentro dos limites', async () => {
+    withPersonas({ version: 3 });
+    const { service } = serviceWithSystemResults([{ blocked: 1, validated: 100 }]);
+    stubPillar(service, 'system', systemFixture([SLO_OK]));
+
+    const response = await service.overview({ ...ACTOR, role: 'ENGINEERING' });
+
+    const ai = response.data.pillars.find((p) => p.pillar === 'AI');
+    expect(ai?.state).toBe('OK');
+    expect(ai?.reason).toBeNull();
+    expect(ai?.details).toEqual([
+      expect.objectContaining({
+        label: 'Resposta do coach (p95)',
+        metric: expect.objectContaining({ value: 9000 }),
+      }),
+      expect.objectContaining({ metric: expect.objectContaining({ value: 3 }) }),
+    ]);
+    expect(ai?.signals).toEqual([
+      { label: 'Personas', state: 'OK', text: 'Masculina v3 · Feminina v3' },
+    ]);
+  });
+
+  it('IA fica ATTENTION sem persona publicada, mesmo com a taxa bloqueada baixa', async () => {
+    const { service } = serviceWithSystemResults([{ blocked: 0, validated: 100 }]);
+    stubPillar(service, 'system', systemFixture([SLO_OK]));
+
+    const response = await service.overview({ ...ACTOR, role: 'ENGINEERING' });
+
+    const ai = response.data.pillars.find((p) => p.pillar === 'AI');
+    expect(ai?.state).toBe('ATTENTION');
+    expect(ai?.signals[0]).toMatchObject({ state: 'ATTENTION', text: 'Nenhuma publicada' });
+    expect(ai?.reason).toMatch(/persona/);
+  });
+
+  it('IA e Sistema compartilham uma única leitura de system() por Visão Geral', async () => {
+    const { service } = serviceWithSystemResults([{ blocked: 0, validated: 0 }]);
+    const systemSpy = stubPillar(service, 'system', systemFixture([SLO_OK]));
+
+    await service.overview({ ...ACTOR, role: 'ENGINEERING' });
+
+    expect(systemSpy).toHaveBeenCalledTimes(1);
   });
 
   it('Sistema herda o pior SLO: um RED vira CRITICAL na linha-resumo', async () => {
@@ -350,6 +429,122 @@ describe('ControlCenterService overview (US-7.8)', () => {
     const system = response.data.pillars.find((p) => p.pillar === 'SYSTEM');
     expect(system?.state).toBe('CRITICAL');
     expect(system?.headline.label).toBe('Trabalhos que não viraram tarefa manual');
+  });
+
+  describe('conexão do WhatsApp no pilar Sistema', () => {
+    const connected = (status: 'CONNECTED' | 'CONNECTING' | 'DISCONNECTED' | 'NOT_CONFIGURED') => ({
+      hasCredentials: () => true,
+      currentInstanceName: vi.fn().mockResolvedValue('movivo'),
+      connectionState: vi.fn().mockResolvedValue(status),
+    });
+
+    async function systemPillar(evolution: Partial<EvolutionTransport>) {
+      withEvolution(evolution);
+      const { service } = serviceWithSystemResults([{ blocked: 0, validated: 0 }]);
+      stubPillar(service, 'system', systemFixture([SLO_OK]));
+      const response = await service.overview({ ...ACTOR, role: 'ENGINEERING' });
+      return response.data.pillars.find((p) => p.pillar === 'SYSTEM');
+    }
+
+    it('conectado mantém o pilar OK', async () => {
+      const system = await systemPillar(connected('CONNECTED'));
+      expect(system?.state).toBe('OK');
+      expect(system?.signals).toEqual([{ label: 'WhatsApp', state: 'OK', text: 'Conectado' }]);
+      expect(system?.reason).toBeNull();
+    });
+
+    it('desconectado derruba o pilar para CRITICAL mesmo com todos os SLOs verdes', async () => {
+      const system = await systemPillar(connected('DISCONNECTED'));
+      expect(system?.state).toBe('CRITICAL');
+      expect(system?.signals[0]).toMatchObject({ label: 'WhatsApp', state: 'CRITICAL' });
+      expect(system?.reason).toMatch(/^WhatsApp: Desconectado/);
+    });
+
+    it('aguardando QR Code é ATTENTION, não CRITICAL', async () => {
+      const system = await systemPillar(connected('CONNECTING'));
+      expect(system?.state).toBe('ATTENTION');
+    });
+
+    it('sem credencial da Evolution aparece como não configurado', async () => {
+      const system = await systemPillar({ hasCredentials: () => false });
+      expect(system?.state).toBe('ATTENTION');
+      expect(system?.signals[0]).toMatchObject({ text: 'Não configurado' });
+    });
+
+    it('Evolution que não responde vira ATTENTION no limite de tempo, sem travar a tela', async () => {
+      vi.useFakeTimers();
+      try {
+        const pending = systemPillar({
+          hasCredentials: () => true,
+          currentInstanceName: () => new Promise<string | null>(() => undefined),
+        });
+        await vi.advanceTimersByTimeAsync(3100);
+        const system = await pending;
+        expect(system?.state).toBe('ATTENTION');
+        expect(system?.signals[0]).toMatchObject({ text: 'Não foi possível consultar a conexão' });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('o pior SLO ainda manda quando é pior que o WhatsApp', async () => {
+      withEvolution(connected('CONNECTING'));
+      const { service } = serviceWithSystemResults([{ blocked: 0, validated: 0 }]);
+      stubPillar(
+        service,
+        'system',
+        systemFixture([{ ...SLO_OK, status: 'RED', errorBudgetConsumedPercent: 150 }]),
+      );
+      const response = await service.overview({ ...ACTOR, role: 'ENGINEERING' });
+      const system = response.data.pillars.find((p) => p.pillar === 'SYSTEM');
+      expect(system?.state).toBe('CRITICAL');
+      expect(system?.reason).toMatch(/fora da meta/);
+    });
+  });
+
+  it('Financeiro resume MRR, lucro, receita em risco e inadimplência — sem cancelamentos', async () => {
+    const { service } = serviceWithSystemResults();
+    stubPillar(service, 'finance', financeFixture(0));
+
+    const response = await service.overview({ ...ACTOR, role: 'FINANCE' });
+
+    expect(response.data.pillars[0]?.details.map((d) => d.label)).toEqual([
+      'Lucro do período',
+      'Receita em risco (30 dias)',
+      'Inadimplência',
+    ]);
+    expect(response.data.pillars[0]?.details[2]?.metric.value).toBe(4);
+  });
+
+  it('Marketing inclui a conversão do trial e a deixa indisponível quando a taxa não é publicável', async () => {
+    const { service } = serviceWithSystemResults();
+    const available = marketingFixture(100, 90);
+    stubPillar(service, 'marketing', available);
+    const first = await service.overview({ ...ACTOR, role: 'MARKETING' });
+    expect(first.data.pillars[0]?.details.map((d) => d.label)).toEqual([
+      'Taxa de conclusão da anamnese',
+      'Conversão do trial',
+      'CAC do canal principal (meta_ads)',
+    ]);
+    expect(first.data.pillars[0]?.details[1]?.metric).toMatchObject({
+      value: 35,
+      status: 'AVAILABLE',
+    });
+
+    const { service: second } = serviceWithSystemResults();
+    const unavailable = marketingFixture(100, 90);
+    unavailable.data.trialConversion = {
+      ...unavailable.data.trialConversion,
+      status: 'UNAVAILABLE',
+      conversionRatePercent: null,
+      reason: 'Menos de 10 entradas em trial registradas.',
+    };
+    stubPillar(second, 'marketing', unavailable);
+    const response = await second.overview({ ...ACTOR, role: 'MARKETING' });
+    expect(response.data.pillars[0]?.details[1]?.metric).toMatchObject({
+      value: null,
+      status: 'UNAVAILABLE',
+    });
   });
 });
 
