@@ -5,64 +5,13 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { alertCopyFor, alertSourceLabel } from '@/lib/alert-copy';
 import { getAlerts } from '@/lib/dashboard-api';
 import type { AlertsResponse, DashboardAlert } from '@/lib/dashboard-types';
 import { cn } from '@/lib/utils';
 
 import { StatusBadge } from './control-center-table';
 import { SectorHeader } from './control-center-ui';
-
-const REASONS: Record<string, { title: string; detail: string }> = {
-  RED_FLAG: {
-    title: 'Sinal de segurança',
-    detail: 'O aluno relatou um sinal que requer atenção prioritária.',
-  },
-  PEDIDO_HANDOFF: {
-    title: 'Acompanhamento solicitado',
-    detail: 'O aluno pediu contato ou acompanhamento humano.',
-  },
-  SUBSTITUTION_PAIN: {
-    title: 'Dor ou limitação em exercício',
-    detail: 'A substituição de exercício precisa de revisão profissional.',
-  },
-  VALIDATOR_BLOCK: {
-    title: 'Resposta bloqueada por segurança',
-    detail: 'O AI Coach não enviou uma resposta sem validação adequada.',
-  },
-  VALIDATOR_FLAG: {
-    title: 'Revisão técnica solicitada',
-    detail: 'O AI Coach sinalizou esta conversa para acompanhamento.',
-  },
-  L1_GUARDRAIL_FLAG: {
-    title: 'Revisão das regras do AI Coach',
-    detail: 'As regras de segurança pediram supervisão humana.',
-  },
-  AGENT_CONFIG_UNAVAILABLE: {
-    title: 'AI Coach indisponível com segurança',
-    detail: 'A configuração necessária para responder não estava disponível.',
-  },
-  FORA_DE_ESCOPO: {
-    title: 'Assunto fora do escopo do AI Coach',
-    detail: 'A conversa foi encaminhada para acompanhamento profissional.',
-  },
-};
-
-const SOURCES: Record<string, string> = {
-  WORKOUT: 'Treino',
-  WORKOUT_INSIGHT: 'Acompanhamento de treino',
-  CHECKIN: 'Check-in semanal',
-  CONVERSATION: 'Conversa',
-};
-
-function copyFor(alert: DashboardAlert) {
-  return (
-    REASONS[alert.reason] ?? {
-      title:
-        alert.level === 'SAFETY' ? 'Sinal de segurança' : 'Acompanhamento solicitado pelo AI Coach',
-      detail: 'O AI Coach encaminhou este caso para supervisão profissional.',
-    }
-  );
-}
 
 function elapsed(createdAt: string): string {
   const minutes = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 60_000));
@@ -74,13 +23,13 @@ function elapsed(createdAt: string): string {
 }
 
 function AlertCard({ alert }: { alert: DashboardAlert }) {
-  const { title, detail } = copyFor(alert);
+  const { title, detail } = alertCopyFor(alert);
   const safety = alert.level === 'SAFETY';
   const Icon = safety ? ShieldAlert : AlertTriangle;
   return (
     <li>
       <Link
-        href={`/dashboard/fila/handoff/${encodeURIComponent(alert.id)}`}
+        href={`/dashboard/alertas/${encodeURIComponent(alert.id)}`}
         className={cn(
           'block rounded-xl border border-l-4 bg-card p-4 transition-colors hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none',
           safety ? 'border-l-coral' : 'border-l-verde-pulso',
@@ -109,7 +58,9 @@ function AlertCard({ alert }: { alert: DashboardAlert }) {
               <p className="mt-1 text-label text-muted-foreground">{detail}</p>
               <p className="mt-2 text-xs font-medium text-foreground">
                 {alert.studentName ?? 'Aluno não identificado'}
-                {alert.sourceType ? ` · ${SOURCES[alert.sourceType] ?? 'Acompanhamento'}` : ''}
+                {alertSourceLabel(alert.sourceType)
+                  ? ` · ${alertSourceLabel(alert.sourceType)}`
+                  : ''}
               </p>
             </div>
           </div>

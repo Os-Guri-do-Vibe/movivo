@@ -140,6 +140,26 @@ describe('parsers do contrato do dashboard', () => {
     });
 
     expect(
+      parseQueueDetail({
+        ...protocolDetail,
+        handoff: {
+          reason: 'FORA_DE_ESCOPO',
+          level: 'ALERT',
+          status: 'OPEN',
+          studentId: '22222222-2222-4222-8222-222222222222',
+          trigger: {
+            content: 'Posso falar sobre outro assunto?',
+            createdAt: '2026-10-12T12:00:00.000Z',
+            direction: 'INBOUND',
+          },
+        },
+      }).handoff,
+    ).toMatchObject({
+      studentId: '22222222-2222-4222-8222-222222222222',
+      trigger: { content: 'Posso falar sobre outro assunto?', direction: 'INBOUND' },
+    });
+
+    expect(
       parseQueueResponse({
         counts: { mandatory: 1, optional: 0, total: 3, ignored: '3' },
         mandatory: [{ ...queueResponse.mandatory[0], ageMinutes: -2, summary: null, status: null }],

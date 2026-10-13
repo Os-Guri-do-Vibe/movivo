@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { and, count, desc, eq, isNotNull, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, isNotNull, not, or, sql } from 'drizzle-orm';
 import { type PgColumn } from 'drizzle-orm/pg-core';
 import { PinoLogger } from 'nestjs-pino';
 import {
@@ -205,7 +205,14 @@ export class DashboardService {
         })
         .from(handoffAlerts)
         .innerJoin(users, eq(users.id, handoffAlerts.userId))
-        .where(or(eq(handoffAlerts.status, 'OPEN'), eq(handoffAlerts.status, 'RESOLVED')))
+        .where(
+          and(
+            or(eq(handoffAlerts.status, 'OPEN'), eq(handoffAlerts.status, 'RESOLVED')),
+            // Handoffs de treino já têm fluxo de resolução na Fila do Profissional.
+            not(eq(handoffAlerts.sourceType, 'WORKOUT')),
+            not(eq(handoffAlerts.sourceType, 'WORKOUT_INSIGHT')),
+          ),
+        )
         .orderBy(desc(handoffAlerts.createdAt))
         .limit(100);
 
@@ -238,7 +245,13 @@ export class DashboardService {
       const [row] = await tx
         .select({ total: count() })
         .from(handoffAlerts)
-        .where(eq(handoffAlerts.status, 'OPEN'));
+        .where(
+          and(
+            eq(handoffAlerts.status, 'OPEN'),
+            not(eq(handoffAlerts.sourceType, 'WORKOUT')),
+            not(eq(handoffAlerts.sourceType, 'WORKOUT_INSIGHT')),
+          ),
+        );
       return { open: Number(row?.total ?? 0) };
     });
   }
@@ -1581,6 +1594,10 @@ export class DashboardService {
         .orderBy(desc(conversations.createdAt))
         .limit(12);
       await this.auditRead(tx, actor, alert.userId, 'handoff_alert', id);
+      const trigger =
+        context.find((message) => message.id === alert.conversationId) ??
+        context.find((message) => message.direction === 'INBOUND') ??
+        null;
       const replayRows = context.reverse().map((message) => ({
         ...message,
         userId: alert.userId,
@@ -1637,7 +1654,19 @@ export class DashboardService {
             : {}),
           ...(insight ?? {}),
         },
-        handoff: { reason: alert.reason, level: alert.level, status: alert.status },
+        handoff: {
+          reason: alert.reason,
+          level: alert.level,
+          status: alert.status,
+          studentId: alert.userId,
+          trigger: trigger
+            ? {
+                content: await this.cipher.decryptText(trigger.content),
+                createdAt: trigger.createdAt.toISOString(),
+                direction: trigger.direction,
+              }
+            : null,
+        },
         replay: (await this.groupReplays(replayRows))[0],
         feedbackCipher: workout?.feedbackCipher ?? null,
       };

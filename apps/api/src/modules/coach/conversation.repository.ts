@@ -12,7 +12,7 @@
  * diretamente, que já lê a mesma linha com tudo junto.
  */
 import { Injectable } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { BiologicalSex } from '@movivo/shared';
 
 import { conversations, handoffAlerts, users } from '../../core/database/schema';
@@ -90,7 +90,21 @@ export class ConversationRepository {
   /** Persiste um alerta de handoff consultável sob RLS (US-3.6). Consumido no painel (Sprint 5). */
   async persistHandoff(userId: string, level: 'ALERT' | 'SAFETY', reason: string): Promise<void> {
     await this.db.runAsUser(userId, 'USER', async (tx) => {
-      await tx.insert(handoffAlerts).values({ userId, level, reason });
+      // O alerta precisa apontar para a pergunta que o causou. O worker mantém um lock por
+      // aluno e persiste a entrada antes de avaliar a mensagem, portanto este é exatamente o
+      // último turno INBOUND do caso — sem repetir o texto sensível em `handoff_alerts`.
+      const [trigger] = await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(and(eq(conversations.userId, userId), eq(conversations.direction, 'INBOUND')))
+        .orderBy(desc(conversations.createdAt))
+        .limit(1);
+      await tx.insert(handoffAlerts).values({
+        userId,
+        level,
+        reason,
+        conversationId: trigger?.id ?? null,
+      });
     });
     this.queueEvents.emit('handoff');
   }

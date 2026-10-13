@@ -730,6 +730,29 @@ describe('QueueDetail', () => {
     expect(navigation.replace).toHaveBeenCalledWith('/dashboard/educacao-fisica');
   });
 
+  it('mostra a mensagem que gerou o alerta e abre a conversa do aluno para intervir', async () => {
+    api.getQueueDetail.mockResolvedValue({
+      ...handoffDetail,
+      handoff: {
+        ...handoffDetail.handoff,
+        studentId: 'student-1',
+        trigger: {
+          content: 'Posso falar de investimentos com o AI Coach?',
+          createdAt: '2026-10-12T14:30:00.000Z',
+          direction: 'INBOUND',
+        },
+      },
+    });
+    render(<QueueDetail kind="HANDOFF" id={HANDOFF_ID} returnHref="/dashboard/alertas" />);
+
+    expect(await screen.findByRole('heading', { name: 'O que gerou este alerta' })).toBeVisible();
+    expect(screen.getByText('Posso falar de investimentos com o AI Coach?')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Abrir conversa para intervir' })).toHaveAttribute(
+      'href',
+      '/dashboard/conversas?aluno=student-1',
+    );
+  });
+
   it('resolve sinalização de CHECKIN SAFETY pelo endpoint de handoff e atualiza a fila', async () => {
     api.getQueueDetail.mockResolvedValue(checkinDetail);
     render(<QueueDetail kind="CHECKIN" id={CHECKIN_ID} />);

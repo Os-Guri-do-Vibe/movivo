@@ -1470,7 +1470,46 @@ function Context({ detail }: { detail: QueueDetailType }) {
   );
 }
 
-export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
+function HandoffTrigger({ detail }: { detail: QueueDetailType }) {
+  const trigger = detail.handoff?.trigger;
+  return (
+    <section
+      className="rounded-xl border border-border bg-card p-5"
+      aria-labelledby="alert-trigger-title"
+    >
+      <h2 id="alert-trigger-title" className="text-h3 font-semibold">
+        O que gerou este alerta
+      </h2>
+      {trigger ? (
+        <>
+          <p className="mt-3 whitespace-pre-wrap rounded-lg bg-secondary p-4 text-body leading-relaxed">
+            {trigger.content}
+          </p>
+          <time dateTime={trigger.createdAt} className="mt-2 block text-xs text-muted-foreground">
+            Mensagem recebida em{' '}
+            {new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(
+              new Date(trigger.createdAt),
+            )}
+          </time>
+        </>
+      ) : (
+        <p className="mt-3 text-label text-muted-foreground">
+          A mensagem de origem não está disponível neste alerta antigo.
+        </p>
+      )}
+    </section>
+  );
+}
+
+export function QueueDetail({
+  kind,
+  id,
+  returnHref = '/dashboard/educacao-fisica',
+}: {
+  kind: QueueKind;
+  id: string;
+  returnHref?: string;
+}) {
   const router = useRouter();
   const [detail, setDetail] = useState<QueueDetailType | null>(null);
   const [error, setError] = useState('');
@@ -1524,7 +1563,7 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
     captureDashboardEvent(kind === 'CHECKIN' ? 'cref_checkin_resolved' : 'cref_handoff_resolved', {
       kind,
     });
-    router.replace('/dashboard/educacao-fisica');
+    router.replace(returnHref);
   }
 
   if (!detail && !error) {
@@ -1551,10 +1590,10 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
   return (
     <article>
       <Link
-        href="/dashboard/educacao-fisica"
+        href={returnHref}
         className="inline-flex min-h-11 items-center gap-2 text-label font-medium underline underline-offset-4 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
       >
-        <ArrowLeft aria-hidden="true" className="size-4" /> Voltar à fila
+        <ArrowLeft aria-hidden="true" className="size-4" /> Voltar
       </Link>
 
       {kind === 'PROTOCOL' && detail.protocol ? (
@@ -1628,7 +1667,93 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
             onAddCatalog={setCatalogGapItem}
           />
         ) : null}
-        {detail.replay ? <ConversationReplay replay={detail.replay} /> : null}
+
+        {kind === 'HANDOFF' ? <HandoffTrigger detail={detail} /> : null}
+
+        {kind === 'HANDOFF' || kind === 'CHECKIN' ? (
+          <section
+            aria-labelledby="handoff-title"
+            className="rounded-xl border border-border bg-card p-5"
+          >
+            <h2 id="handoff-title" className="text-h3 font-semibold">
+              {kind === 'CHECKIN' ? 'Resolver sinalização de check-in' : 'Conduzir intervenção'}
+            </h2>
+            <p className="mt-2 text-label text-muted-foreground">
+              {kind === 'CHECKIN'
+                ? 'Registre a revisão profissional que encerra esta sinalização.'
+                : 'Assuma a conversa se precisar orientar o aluno e registre aqui como o caso foi concluído.'}
+            </p>
+            {kind === 'HANDOFF' && detail.handoff?.studentId ? (
+              <Button asChild className="mt-4" variant="outline">
+                <Link
+                  href={`/dashboard/conversas?aluno=${encodeURIComponent(detail.handoff.studentId)}`}
+                >
+                  Abrir conversa para intervir
+                </Link>
+              </Button>
+            ) : null}
+            {detail.handoff?.status === 'RESOLVED' ? (
+              <p className="mt-4 flex items-center gap-2 text-label font-medium text-muted-foreground">
+                <CheckCircle2 aria-hidden="true" className="size-4 text-verde-pulso" />
+                Alerta já resolvido e registrado na auditoria.
+              </p>
+            ) : (
+              <>
+                <label className="mt-4 flex flex-col gap-2 text-label font-semibold">
+                  Resolução
+                  <input
+                    className={fieldClass}
+                    value={resolution}
+                    maxLength={80}
+                    onChange={(event) => setResolution(event.target.value)}
+                  />
+                </label>
+                <label className="mt-4 flex flex-col gap-2 text-label font-semibold">
+                  Observações
+                  <textarea
+                    className={`${fieldClass} min-h-24 py-2`}
+                    value={resolutionNotes}
+                    maxLength={1000}
+                    required
+                    onChange={(event) => setResolutionNotes(event.target.value)}
+                  />
+                </label>
+                <div className="mt-4">
+                  <ConfirmAction
+                    triggerLabel={
+                      kind === 'CHECKIN' ? 'Resolver sinalização' : 'Marcar como resolvido'
+                    }
+                    title={
+                      kind === 'CHECKIN'
+                        ? 'Confirmar resolução da sinalização?'
+                        : 'Confirmar resolução do alerta?'
+                    }
+                    description="O alerta deixará as notificações pendentes e a resolução ficará registrada na trilha de auditoria."
+                    confirmLabel="Confirmar resolução"
+                    destructive={detail.item.severity === 'SAFETY'}
+                    disabled={resolution.trim().length < 3 || resolutionNotes.trim().length < 3}
+                    onConfirm={resolveQueueItem}
+                  />
+                </div>
+              </>
+            )}
+          </section>
+        ) : null}
+
+        {detail.replay ? (
+          kind === 'HANDOFF' ? (
+            <details className="rounded-xl border border-border bg-card p-5">
+              <summary className="cursor-pointer text-label font-semibold">
+                Ver histórico recente
+              </summary>
+              <div className="mt-4">
+                <ConversationReplay replay={detail.replay} />
+              </div>
+            </details>
+          ) : (
+            <ConversationReplay replay={detail.replay} />
+          )
+        ) : null}
 
         {/* Achado 2026-08-19: pra protocolo, "Contexto autorizado" só repetia a versão
             (já no título) e um `humanReviewRequired` sempre `true` — sem valor pro RT. Mesma
@@ -1737,56 +1862,6 @@ export function QueueDetail({ kind, id }: { kind: QueueKind; id: string }) {
               void load();
             }}
           />
-        ) : null}
-
-        {kind === 'HANDOFF' || kind === 'CHECKIN' ? (
-          <section
-            aria-labelledby="handoff-title"
-            className="rounded-xl border border-border bg-card p-5"
-          >
-            <h2 id="handoff-title" className="text-h3 font-semibold">
-              {kind === 'CHECKIN' ? 'Resolver sinalização de check-in' : 'Resolver handoff'}
-            </h2>
-            <p className="mt-2 text-label text-muted-foreground">
-              {kind === 'CHECKIN'
-                ? 'Registre a revisão profissional que encerra esta sinalização.'
-                : 'Registre como a intervenção profissional foi concluída. Casos de segurança exigem revisão antes do fechamento.'}
-            </p>
-            <label className="mt-4 flex flex-col gap-2 text-label font-semibold">
-              Resolução
-              <input
-                className={fieldClass}
-                value={resolution}
-                maxLength={80}
-                onChange={(event) => setResolution(event.target.value)}
-              />
-            </label>
-            <label className="mt-4 flex flex-col gap-2 text-label font-semibold">
-              Observações
-              <textarea
-                className={`${fieldClass} min-h-24 py-2`}
-                value={resolutionNotes}
-                maxLength={1000}
-                required
-                onChange={(event) => setResolutionNotes(event.target.value)}
-              />
-            </label>
-            <div className="mt-4">
-              <ConfirmAction
-                triggerLabel={kind === 'CHECKIN' ? 'Resolver sinalização' : 'Marcar como resolvido'}
-                title={
-                  kind === 'CHECKIN'
-                    ? 'Confirmar resolução da sinalização?'
-                    : 'Confirmar resolução do handoff?'
-                }
-                description="O item sairá da fila aberta e a resolução ficará registrada na trilha de auditoria."
-                confirmLabel="Confirmar resolução"
-                destructive={detail.item.severity === 'SAFETY'}
-                disabled={resolution.trim().length < 3 || resolutionNotes.trim().length < 3}
-                onConfirm={resolveQueueItem}
-              />
-            </div>
-          </section>
         ) : null}
       </div>
     </article>
