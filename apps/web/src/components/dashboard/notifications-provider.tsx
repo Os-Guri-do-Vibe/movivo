@@ -37,8 +37,11 @@ interface NotificationsContextValue {
   reloadItems: () => Promise<void>;
   /** Otimista: o badge cai na hora; falha tenta de novo uma vez e depois volta ao servidor. */
   markRead: (type: NotificationType, id: string) => Promise<void>;
-  /** `true` quando o servidor confirmou; em erro tudo volta ao estado anterior. */
-  markAllRead: () => Promise<boolean>;
+  /**
+   * `ok` quando o servidor confirmou (em erro tudo volta ao estado anterior); `count` é quantas
+   * estavam não lidas. `until` é o corte (o `snapshotAt` da lista que a pessoa está vendo).
+   */
+  markAllRead: (until?: string) => Promise<{ ok: boolean; count: number }>;
 }
 
 const NOOP: NotificationsContextValue = {
@@ -53,7 +56,7 @@ const NOOP: NotificationsContextValue = {
   markRead: async (type, id) => {
     await markNotificationRead(type, id).catch(() => undefined);
   },
-  markAllRead: async () => false,
+  markAllRead: async () => ({ ok: false, count: 0 }),
 };
 
 const NotificationsContext = createContext<NotificationsContextValue>(NOOP);
@@ -176,23 +179,26 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     [items, syncAfterWrites],
   );
 
-  const markAllRead = useCallback(async () => {
-    const previous = { items, unread };
-    setItems((current) => current.map((item) => ({ ...item, read: true })));
-    setUnread(0);
-    pendingWrites.current += 1;
-    try {
-      await markAllNotificationsRead(snapshotAt.current ?? new Date().toISOString());
-      return true;
-    } catch {
-      setItems(previous.items);
-      setUnread(previous.unread);
-      return false;
-    } finally {
-      pendingWrites.current -= 1;
-      syncAfterWrites();
-    }
-  }, [items, syncAfterWrites, unread]);
+  const markAllRead = useCallback(
+    async (until?: string) => {
+      const previous = { items, unread };
+      setItems((current) => current.map((item) => ({ ...item, read: true })));
+      setUnread(0);
+      pendingWrites.current += 1;
+      try {
+        await markAllNotificationsRead(until ?? snapshotAt.current ?? new Date().toISOString());
+        return { ok: true, count: previous.unread };
+      } catch {
+        setItems(previous.items);
+        setUnread(previous.unread);
+        return { ok: false, count: previous.unread };
+      } finally {
+        pendingWrites.current -= 1;
+        syncAfterWrites();
+      }
+    },
+    [items, syncAfterWrites, unread],
+  );
 
   const value = useMemo<NotificationsContextValue>(
     () => ({

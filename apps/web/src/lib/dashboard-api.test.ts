@@ -12,6 +12,8 @@ import {
   parseOperations,
   parseAlertsResponse,
   parseAlertsSummary,
+  getNotificationHistory,
+  parseNotificationHistory,
   parseNotificationsResponse,
   parseNotificationsSummary,
   parseQueueDetail,
@@ -95,6 +97,45 @@ describe('parsers do contrato do dashboard', () => {
       }),
     ).toThrow(/tipo/i);
     expect(() => parseNotificationsSummary({ unread: -1, openSafety: 0 })).toThrow(/não lidas/i);
+  });
+
+  it('valida o registro de notificações com estado, resultado e cursor', () => {
+    const base = {
+      type: 'substitution',
+      id: 's-1',
+      read: true,
+      createdAt: '2026-10-12T12:00:00.000Z',
+    };
+    const parsed = parseNotificationHistory({
+      snapshotAt: '2026-10-13T12:00:00.000Z',
+      items: [
+        { ...base, status: 'SETTLED', outcome: 'DISCARDED', settledAt: '2026-10-12T13:00:00.000Z' },
+        { ...base, id: 's-2', status: 'PENDING', outcome: 'inválido' },
+      ],
+      nextCursor: 'abc',
+      unread: 1,
+      openSafety: 0,
+    });
+    expect(parsed.nextCursor).toBe('abc');
+    expect(parsed.items[0]).toMatchObject({ status: 'SETTLED', outcome: 'DISCARDED' });
+    expect(parsed.items[1]).toMatchObject({ status: 'PENDING', outcome: null, settledAt: null });
+    expect(parseNotificationHistory({ items: [], unread: 0, openSafety: 0 }).nextCursor).toBeNull();
+    expect(() => parseNotificationHistory({ unread: 0 })).toThrow(/inválida/i);
+  });
+
+  it('pede o registro com filtros e cursor na query', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      response(200, {
+        snapshotAt: '2026-10-13T12:00:00.000Z',
+        items: [],
+        unread: 0,
+        openSafety: 0,
+      }),
+    );
+    await getNotificationHistory({ state: 'unread', type: 'alert', cursor: 'c1' });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/dashboard/notifications/history?state=unread&type=alert&cursor=c1',
+    );
   });
 
   it('valida fila, detalhe e operações', () => {

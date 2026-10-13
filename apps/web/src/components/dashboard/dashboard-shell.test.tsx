@@ -98,6 +98,20 @@ describe('DashboardShell', () => {
     ]);
   });
 
+  it('coloca Notificações logo abaixo de Visão Geral, só com leitura de saúde', () => {
+    const principal = navigationGroupsFor(ADMIN_CAPABILITIES)[0];
+    expect(principal?.label).toBeNull();
+    expect(principal?.items.map((item) => item.label)).toEqual(['Visão Geral', 'Notificações']);
+    expect(principal?.items[1]).toMatchObject({
+      href: '/dashboard/notificacoes',
+      badge: 'notifications',
+    });
+    // Mesmas capabilities do sino: leitura de alunos E de saúde.
+    expect(navigationFor(['control_center.students.read']).map((item) => item.label)).not.toContain(
+      'Notificações',
+    );
+  });
+
   it('coloca Conversas, Fila e Alertas na área de alunos, só com leitura de saúde', () => {
     const alunos = navigationGroupsFor(ADMIN_CAPABILITIES).find(
       (group) => group.label === 'Alunos',

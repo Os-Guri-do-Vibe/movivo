@@ -9,6 +9,7 @@ import {
   Calculator,
   ChevronDown,
   CircleGauge,
+  Inbox,
   ClipboardCheck,
   Coins,
   Dumbbell,
@@ -44,7 +45,7 @@ import {
 import { cn } from '@/lib/utils';
 
 import { AlertsBell } from './alerts-bell';
-import { NotificationsProvider } from './notifications-provider';
+import { NotificationsProvider, useNotifications } from './notifications-provider';
 import { AvatarMenu } from './avatar-menu';
 import { LogoutButton } from './logout-button';
 
@@ -56,6 +57,8 @@ export interface DashboardNavigationItem {
   capabilities?: readonly DashboardCapability[];
   /** Quando a tela chega. Exibido no lugar do link; o fundador vê o roadmap dentro do produto. */
   soon?: string;
+  /** Mostra a contagem de não lidas do sino ao lado do rótulo. */
+  badge?: 'notifications';
 }
 
 export interface DashboardNavigationPillar {
@@ -80,6 +83,15 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         label: 'Visão Geral',
         icon: CircleGauge,
         capabilities: ['control_center.overview.read'],
+      },
+      {
+        // Registro completo das notificações do sino (lidas e não lidas). O popover do sino
+        // mostra só as não lidas; ao ler, o item passa a existir apenas aqui.
+        href: '/dashboard/notificacoes',
+        label: 'Notificações',
+        icon: Inbox,
+        badge: 'notifications',
+        capabilities: ['control_center.students.read', 'control_center.students.health.read'],
       },
     ],
   },
@@ -320,6 +332,7 @@ function DashboardNavigation({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
+  const { unread } = useNotifications();
   const activeGroup = activeGroupFor(pathname);
   // Só a categoria da rota atual começa aberta — evita que a barra precise de
   // scroll com os 5 pilares + Visão Geral abertos ao mesmo tempo.
@@ -371,7 +384,7 @@ function DashboardNavigation({
             ) : null}
             {isOpen ? (
               <ul className={cn('grid gap-1.5', groupLabel && !collapsed && 'mt-1')}>
-                {group.items.map(({ href, label, icon: Icon, soon }) => {
+                {group.items.map(({ href, label, icon: Icon, soon, badge }) => {
                   if (!href) {
                     // Roadmap: item presente, sem link e sem controle desabilitado.
                     return (
@@ -397,12 +410,22 @@ function DashboardNavigation({
                     );
                   }
                   const current = isCurrent(pathname, href);
+                  const unreadCount = badge === 'notifications' ? unread : 0;
+                  const accessibleLabel =
+                    unreadCount > 0
+                      ? `${label}, ${unreadCount} não lida${unreadCount === 1 ? '' : 's'}`
+                      : label;
                   return (
                     <li key={href}>
                       <Link
                         href={href}
                         aria-current={current ? 'page' : undefined}
-                        aria-label={label}
+                        aria-label={accessibleLabel}
+                        title={
+                          collapsed && unreadCount > 0
+                            ? `${label} · ${unreadCount} não lida${unreadCount === 1 ? '' : 's'}`
+                            : undefined
+                        }
                         onClick={onNavigate}
                         className={cn(
                           'flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-label font-medium transition-colors focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none',
@@ -412,9 +435,26 @@ function DashboardNavigation({
                             : 'text-[var(--nevoa-suave)] hover:bg-[var(--petroleo-superficie)] hover:text-nevoa',
                         )}
                       >
-                        <Icon aria-hidden="true" className="size-5 shrink-0" />
+                        <span className="relative shrink-0">
+                          <Icon aria-hidden="true" className="size-5" />
+                          {collapsed && unreadCount > 0 ? (
+                            // Menu recolhido: o ponto é o sinal (presença, não cor).
+                            <span
+                              aria-hidden="true"
+                              className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-nevoa ring-2 ring-petroleo"
+                            />
+                          ) : null}
+                        </span>
                         <span className={collapsed ? 'sr-only' : undefined}>{label}</span>
-                        {soon && !collapsed ? (
+                        {unreadCount > 0 && !collapsed ? (
+                          // Neutra de propósito: o vermelho fica para o sino e para segurança.
+                          <span
+                            aria-hidden="true"
+                            className="ml-auto rounded-full border border-[var(--petroleo-borda)] px-2 py-0.5 text-[0.625rem] font-semibold tabular-nums text-nevoa"
+                          >
+                            {unreadCount > 99 ? '99+' : unreadCount}
+                          </span>
+                        ) : soon && !collapsed ? (
                           // Tela existe, mas só explica o que virá — o roadmap continua visível.
                           <span className="ml-auto rounded-full border border-[var(--petroleo-borda)] px-2 py-0.5 text-[0.625rem] font-semibold whitespace-nowrap">
                             Em breve · {soon}
