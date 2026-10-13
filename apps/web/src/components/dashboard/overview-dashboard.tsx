@@ -479,9 +479,8 @@ function OverviewSections({ data }: { data: ControlCenterOverviewResponse['data'
       ) : null}
       <div className={cn('grid gap-4', system && 'xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]')}>
         {system ? <SystemCard pillar={system} /> : null}
-        <div className="grid gap-4 content-start">
-          <AttentionCard pillars={pillars} />
-        </div>
+        {/* Item direto da grade: estica até a altura do cartão de Sistema ao lado. */}
+        <AttentionCard pillars={pillars} />
       </div>
     </div>
   );
@@ -517,9 +516,6 @@ export function OverviewDashboard() {
         refreshing={state.loading}
         onRefresh={() => void state.refresh()}
       />
-      <p className="mt-2 max-w-3xl text-label text-muted-foreground">
-        O essencial de cada pilar, para olhar de relance. Atualiza sozinha a cada minuto.
-      </p>
       {state.error ? (
         <p
           role="alert"
