@@ -49,12 +49,18 @@ function formatDateTime(value: string | undefined): string {
   return `${day} às ${time}`;
 }
 
-const CONTEXT_FIELDS: Record<string, Array<[key: string, label: string, unit?: string]>> = {
+const CONTEXT_FIELDS: Record<
+  string,
+  Array<[key: string, label: string, unit?: string, optional?: boolean]>
+> = {
   WORKOUT: [
     ['sessionKey', 'Treino'],
     ['scheduledDate', 'Data prevista'],
     ['durationSeconds', 'Duração'],
     ['perceivedEffort', 'Esforço percebido'],
+    ['painExercises', 'Exercícios com dor relatada'],
+    ['painNotes', 'Relato de dor', undefined, true],
+    ['feelingNotes', 'Como o aluno se sentiu', undefined, true],
   ],
   WORKOUT_INSIGHT: [
     ['observedMinutes', 'Duração observada', 'min'],
@@ -136,10 +142,10 @@ function SourceContext({ detail, checkin }: { detail: QueueDetail; checkin: Queu
   const fields = sourceType ? CONTEXT_FIELDS[sourceType] : undefined;
   let rows: Array<[label: string, value: string]> = [];
   if (fields) {
-    rows = fields.map(([key, label, unit]) => [
-      label,
-      contextValue(key, detail.context[key] ?? null, unit),
-    ]);
+    rows = fields
+      // Anotações livres só aparecem quando o aluno escreveu algo.
+      .filter(([key, , , optional]) => !optional || Boolean(detail.context[key]))
+      .map(([key, label, unit]) => [label, contextValue(key, detail.context[key] ?? null, unit)]);
   } else if (sourceType === 'CHECKIN' && checkin) {
     rows = [
       ['Semana', `Semana ${checkin.context.weekNumber ?? '—'}`],

@@ -76,6 +76,7 @@ function build(opts: { readAlerts?: string[] } = {}) {
   } as unknown as DashboardService;
   return {
     service: new DashboardNotificationsService(db, dashboard),
+    dashboard,
     db,
     values,
     onConflictDoUpdate,
@@ -104,6 +105,22 @@ describe('DashboardNotificationsService', () => {
     const result = await service.list(ACTOR);
     const protocol = result.items.find((item) => item.id === ID_C);
     expect(protocol).toMatchObject({ type: 'protocol', section: 'MANDATORY', level: null });
+  });
+
+  it('mostra uma vez só o alerta que está nos Alertas e também na Fila', async () => {
+    const { service, dashboard } = build();
+    vi.mocked(dashboard.queue).mockResolvedValue({
+      mandatory: [
+        queueItem(ID_A, 'HANDOFF', '2026-10-12T10:00:00.000Z'),
+        queueItem(ID_C, 'PROTOCOL', '2026-10-12T09:00:00.000Z'),
+      ],
+      optional: [],
+      substitutionMandatory: [],
+      substitutionOptional: [],
+    } as never);
+    const result = await service.list(ACTOR);
+    expect(result.items.filter((item) => item.id === ID_A)).toHaveLength(1);
+    expect(result.totalPending).toBe(3);
   });
 
   it('registra a leitura do próprio profissional, de forma idempotente', async () => {

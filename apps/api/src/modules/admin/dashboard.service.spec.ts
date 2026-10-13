@@ -1660,6 +1660,56 @@ describe('DashboardService leituras operacionais', () => {
     });
   });
 
+  it('em dor após o treino devolve os nomes dos exercícios e as anotações do aluno', async () => {
+    const createdAt = new Date('2026-08-01T12:00:00.000Z');
+    const { service } = makeSequencedService(
+      [
+        [
+          {
+            userId: USER_ID,
+            level: 'SAFETY',
+            reason: 'DOR_APOS_TREINO',
+            conversationId: null,
+            sourceType: 'WORKOUT',
+            sourceId: RESOURCE_ID,
+            status: 'OPEN',
+            createdAt,
+            updatedAt: createdAt,
+          },
+        ],
+        [{ name: 'Pessoa Teste' }],
+        [],
+        [
+          {
+            sessionKey: 'A',
+            scheduledDate: '2026-08-01',
+            durationSeconds: 2400,
+            perceivedEffort: 8,
+            painExerciseIds: ['ex-2', 'ex-9'],
+            prescription: {
+              exercises: [
+                { exerciseId: 'ex-1', name: 'Supino reto' },
+                { exerciseId: 'ex-2', name: 'Agachamento livre' },
+              ],
+            },
+            feedbackCipher: Buffer.from('x'),
+          },
+        ],
+      ],
+      'PASS',
+      [JSON.stringify({ feelingNotes: 'cansado', painNotes: 'Dor no joelho direito' })],
+    );
+    const result = (await service.detail(actor, 'HANDOFF', RESOURCE_ID)) as {
+      context: Record<string, unknown>;
+    };
+    expect(result.context).toMatchObject({
+      painExercises: 'Agachamento livre',
+      painNotes: 'Dor no joelho direito',
+      feelingNotes: 'cansado',
+      perceivedEffort: 8,
+    });
+  });
+
   it('não atribui mensagem de conversa a alerta de origem não conversacional', async () => {
     const createdAt = new Date('2026-08-01T12:00:00.000Z');
     const workout = makeSequencedService([

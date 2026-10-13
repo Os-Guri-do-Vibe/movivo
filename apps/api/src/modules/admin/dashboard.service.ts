@@ -216,13 +216,11 @@ export class DashboardService {
         .where(
           and(
             or(eq(handoffAlerts.status, 'OPEN'), eq(handoffAlerts.status, 'RESOLVED')),
-            // Handoffs de treino já têm fluxo de resolução na Fila do Profissional.
+            // Dor após o treino (`WORKOUT`) é alerta do AI Coach e aparece aqui, além de seguir
+            // na Fila. Só o ajuste de duração (`WORKOUT_INSIGHT`) fica exclusivo da Fila.
             or(
               isNull(handoffAlerts.sourceType),
-              and(
-                not(eq(handoffAlerts.sourceType, 'WORKOUT')),
-                not(eq(handoffAlerts.sourceType, 'WORKOUT_INSIGHT')),
-              ),
+              not(eq(handoffAlerts.sourceType, 'WORKOUT_INSIGHT')),
             ),
           ),
         )
@@ -269,10 +267,7 @@ export class DashboardService {
             eq(handoffAlerts.status, 'OPEN'),
             or(
               isNull(handoffAlerts.sourceType),
-              and(
-                not(eq(handoffAlerts.sourceType, 'WORKOUT')),
-                not(eq(handoffAlerts.sourceType, 'WORKOUT_INSIGHT')),
-              ),
+              not(eq(handoffAlerts.sourceType, 'WORKOUT_INSIGHT')),
             ),
           ),
         );
@@ -1681,6 +1676,7 @@ export class DashboardService {
                 durationSeconds: workoutSessions.durationSeconds,
                 perceivedEffort: workoutSessions.perceivedEffort,
                 painExerciseIds: workoutSessions.painExerciseIds,
+                prescription: workoutSessions.prescription,
                 feedbackCipher: workoutSessions.feedbackCipher,
               })
               .from(workoutSessions)
@@ -1719,6 +1715,16 @@ export class DashboardService {
                 durationSeconds: workout.durationSeconds,
                 perceivedEffort: workout.perceivedEffort,
                 painExerciseIds: workout.painExerciseIds,
+                // Nomes legíveis para o CREF; o id cru não diz qual exercício doeu.
+                painExercises: workout.painExerciseIds
+                  .map(
+                    (exerciseId) =>
+                      workout.prescription.exercises.find(
+                        (exercise) => exercise.exerciseId === exerciseId,
+                      )?.name ?? null,
+                  )
+                  .filter((name): name is string => name !== null)
+                  .join(', '),
               }
             : {}),
           ...(insight ?? {}),
@@ -1751,7 +1757,20 @@ export class DashboardService {
       string,
       unknown
     >;
-    return { ...safeDetail, context: { ...safeDetail.context, feedback } };
+    // Anotações do aluno como texto simples (o objeto `feedback` não chega ao navegador).
+    const notes = (value: unknown) =>
+      typeof value === 'string' && value.trim() ? { value: value.trim() } : null;
+    return {
+      ...safeDetail,
+      context: {
+        ...safeDetail.context,
+        feedback,
+        ...(notes(feedback.painNotes) ? { painNotes: notes(feedback.painNotes)?.value } : {}),
+        ...(notes(feedback.feelingNotes)
+          ? { feelingNotes: notes(feedback.feelingNotes)?.value }
+          : {}),
+      },
+    };
   }
 
   private async requireProtocol(tx: TenantTransaction, id: string, forUpdate = false) {

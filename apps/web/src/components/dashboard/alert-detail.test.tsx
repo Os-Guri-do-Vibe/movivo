@@ -126,6 +126,8 @@ describe('AlertDetail', () => {
             scheduledDate: '2026-10-12',
             durationSeconds: 2520,
             perceivedEffort: 7,
+            painExercises: 'Agachamento livre, Leg press',
+            painNotes: 'Dor no joelho direito ao descer',
           },
         },
       ),
@@ -137,6 +139,9 @@ describe('AlertDetail', () => {
     ).toBeVisible();
     expect(screen.getByText('42 min')).toBeVisible();
     expect(screen.getByText('7 de 10')).toBeVisible();
+    expect(screen.getByText('Agachamento livre, Leg press')).toBeVisible();
+    expect(screen.getByText('Dor no joelho direito ao descer')).toBeVisible();
+    expect(screen.queryByText('Como o aluno se sentiu')).not.toBeInTheDocument();
     expect(screen.queryByText(/mensagem de origem não está disponível/)).not.toBeInTheDocument();
     expect(screen.getByRole('note')).toHaveTextContent(
       'Prioridade de segurança: fale com o aluno antes de qualquer nova orientação de treino.',

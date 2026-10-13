@@ -119,12 +119,14 @@ export class DashboardNotificationsService {
       this.dashboard.alerts(actor),
       this.dashboard.queue(actor),
     ]);
+    // Dor após o treino aparece nos Alertas e também na Fila: no sino, só uma vez.
+    const alertIds = new Set(alerts.open.map((alert) => alert.id));
     const queueItems = [
       ...queue.mandatory.map((item) => ({ item, section: 'MANDATORY' as const })),
       ...queue.optional.map((item) => ({ item, section: 'OPTIONAL' as const })),
       ...queue.substitutionMandatory.map((item) => ({ item, section: 'MANDATORY' as const })),
       ...queue.substitutionOptional.map((item) => ({ item, section: 'OPTIONAL' as const })),
-    ];
+    ].filter(({ item }) => !(item.kind === 'HANDOFF' && alertIds.has(item.id)));
 
     const items: NotificationItem[] = [
       ...alerts.open.map((alert) => ({
