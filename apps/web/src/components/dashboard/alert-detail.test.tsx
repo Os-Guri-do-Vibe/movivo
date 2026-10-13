@@ -148,6 +148,42 @@ describe('AlertDetail', () => {
     );
   });
 
+  it('em alerta de check-in mostra a semana, o envio e as respostas do aluno', async () => {
+    const checkin = detail(
+      {},
+      {
+        context: {
+          weekNumber: 3,
+          completedAt: '2026-10-12T10:00:00.000Z',
+          responses: JSON.stringify({ sleepQuality: 'BOA', nested: { x: 1 }, skipped: null }),
+        },
+      },
+    );
+    api.getQueueDetail.mockImplementation(async (kind: string) =>
+      kind === 'CHECKIN'
+        ? checkin
+        : detail({ sourceType: 'CHECKIN', trigger: null, reason: 'CHECKIN_DOR_ARTICULAR' }),
+    );
+    render(<AlertDetail id={ALERT_ID} />);
+
+    expect(await screen.findByText('Semana 3')).toBeVisible();
+    expect(screen.getByText('sleep Quality')).toBeVisible();
+    expect(screen.getByText('BOA')).toBeVisible();
+    expect(screen.queryByText('nested')).not.toBeInTheDocument();
+    expect(screen.getByText('Gerado a partir do check-in semanal.')).toBeVisible();
+  });
+
+  it('segue sem o contexto do check-in quando as respostas não carregam', async () => {
+    api.getQueueDetail.mockImplementation(async (kind: string) => {
+      if (kind === 'CHECKIN') throw new Error('indisponível');
+      return detail({ sourceType: 'CHECKIN', trigger: null });
+    });
+    render(<AlertDetail id={ALERT_ID} />);
+
+    expect(await screen.findByText('Gerado a partir do check-in semanal.')).toBeVisible();
+    expect(screen.queryByText('Contexto da origem')).not.toBeInTheDocument();
+  });
+
   it('exige motivo e observações e resolve sem sair da tela', async () => {
     api.getQueueDetail.mockResolvedValue(detail());
     render(<AlertDetail id={ALERT_ID} />);
