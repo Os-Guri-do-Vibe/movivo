@@ -7,6 +7,8 @@ import {
   IDENTITY_TRANSPARENCY_BLOCK,
   intentInstruction,
   METHODOLOGY_AWARE_INTENTS,
+  PENDING_PAIN_INSTRUCTION,
+  PENDING_REPLY_INSTRUCTION,
   PROMPT_BLOCKS,
   resolvePrompt,
 } from './prompts';
@@ -89,5 +91,32 @@ describe('guardrails de copy', () => {
 
   it('a resposta de fora de escopo é honesta e redireciona', () => {
     expect(FORA_DE_ESCOPO_RESPONSE.length).toBeGreaterThan(20);
+  });
+});
+
+// Achado 2026-10-13: um script que trocou as regras 7 a 9 do bloco de memória apagou, sem
+// querer, o parágrafo do RETRATO que vinha logo depois, e isso foi para produção sem nenhum
+// teste acusar. Estas asserções prendem o conteúdo que a conversa depende de ter.
+describe('regras de PERGUNTA PENDENTE e RETRATO no guardrail base', () => {
+  it('traz a introdução e as nove regras da pergunta pendente', () => {
+    expect(BASE_GUARDRAIL).toContain('PERGUNTA PENDENTE');
+    for (let rule = 1; rule <= 9; rule += 1) {
+      expect(BASE_GUARDRAIL).toContain(`\n${rule}. `);
+    }
+    expect(BASE_GUARDRAIL).toContain('PERGUNTA_PENDENTE');
+    expect(BASE_GUARDRAIL).toContain('SEM_RELACAO_APARENTE');
+  });
+
+  it('traz a regra do RETRATO: um dado por resposta, nunca listar dias sem registro', () => {
+    expect(BASE_GUARDRAIL).toContain('RETRATO:');
+    expect(BASE_GUARDRAIL).toContain('semRegistro');
+    expect(BASE_GUARDRAIL).toContain('No máximo um dado por resposta');
+    expect(BASE_GUARDRAIL).toContain('Nunca traga por');
+  });
+
+  it('as instruções de turno existem e não se confundem', () => {
+    expect(PENDING_REPLY_INSTRUCTION).toContain('respondendo à pergunta da manhã');
+    expect(PENDING_PAIN_INSTRUCTION).toContain('dor ou desconforto');
+    expect(PENDING_PAIN_INSTRUCTION).toContain('Não fale do treino de hoje');
   });
 });
