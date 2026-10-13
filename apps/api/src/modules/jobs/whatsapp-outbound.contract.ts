@@ -1,3 +1,10 @@
+/**
+ * Separador de balões: um texto com `\n---\n` vira UMA mensagem do WhatsApp por trecho
+ * (`WhatsappOutboundWorker.sendBubbles`). Vive no contrato porque quem produz o texto
+ * (workout, coach) não importa o domínio WhatsApp.
+ */
+export const WHATSAPP_BUBBLE_SEPARATOR = '\n---\n';
+
 export interface WhatsappQuickReplyButton {
   id: string;
   title: string;
@@ -38,6 +45,17 @@ export interface WhatsappOutboundJob {
   protocolVersion?: number;
   text?: string;
   dedupeId?: string;
+  /**
+   * Pendência de conversa que ESTE envio abre (`conversation_followups`): hoje, a pergunta
+   * sobre o treino sem registro que viaja dentro do link do dia.
+   */
+  followupId?: string;
+  /**
+   * Texto enviado no lugar de `text` quando a pendência deixou de ser enviável entre o
+   * enfileiramento e o envio (o aluno já voltou a treinar). Sem ele o envio seria descartado;
+   * com ele, o link do dia SEMPRE sai, só que sem a pergunta.
+   */
+  fallbackText?: string;
   feedback?: boolean;
   buttons?: readonly WhatsappQuickReplyButton[];
   /** `PHONE_VERIFICATION`: destino e código. Só neste tipo o telefone viaja no payload. */

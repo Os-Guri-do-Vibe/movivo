@@ -1,13 +1,15 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import type { PinoLogger } from 'nestjs-pino';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { HealthCipherService } from '../../core/database/health-cipher.service';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
 import type { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
+import type { FollowupService } from '../followup/followup.service';
 import type { QueueManager } from '../jobs/queue-manager.service';
 import type { ShareCardRenderer } from './share-card/share-card-renderer.service';
 import type { WorkoutCompletionService } from './workout-completion.service';
-import { WorkoutJournalService } from './workout-journal.service';
+import { type WorkoutDayStatus, WorkoutJournalService } from './workout-journal.service';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const WORKOUT_ID = '22222222-2222-4222-8222-222222222222';
@@ -160,8 +162,24 @@ function makeService(
   const shareCards = {
     render: vi.fn(async () => ({ png: Buffer.from('png'), etag: 'etag' })),
   } as unknown as ShareCardRenderer;
+  const followups = {
+    resolveForWorkout: vi.fn(async () => ({ cancelled: 0, resumed: 1 })),
+  };
+  const warn = vi.fn();
   return {
-    service: new WorkoutJournalService(db, cipher, completions, queues, queueEvents, shareCards),
+    service: new WorkoutJournalService(
+      db,
+      cipher,
+      completions,
+      queues,
+      queueEvents,
+      shareCards,
+      followups as unknown as FollowupService,
+      { setContext: vi.fn(), warn } as unknown as PinoLogger,
+    ),
+    followups,
+    warn,
+    db,
     shareCards,
     cipher,
     completions,
@@ -171,6 +189,263 @@ function makeService(
     updated,
   };
 }
+
+describe('WorkoutJournalService.dayStatus', () => {
+  // O protocolo (3x/semana: seg, qua, sex) começou na segunda 2026-08-03; 2026-08-10 também é
+  // segunda e 2026-08-09 é domingo (descanso).
+  const MONDAY = '2026-08-10';
+  const SUNDAY = '2026-08-09';
+  const NOW = new Date('2026-08-10T23:35:00.000Z');
+  const VERSIONS = [{ version: 2, content: STRUCTURE, createdAt: new Date('2026-08-03') }];
+
+  it('MISSED: treino previsto sem sessão, com foco e dia da semana, sem criar a sessão', async () => {
+    const { service, inserted } = makeService({ selects: [[OWNER], [], VERSIONS] });
+    await expect(service.dayStatus(USER_ID, MONDAY, NOW)).resolves.toEqual({
+      kind: 'MISSED',
+      dayLabel: 'A',
+      focus: 'Corpo inteiro',
+      sessionKey: 'A',
+      workoutSessionId: null,
+      protocolId: PROTOCOL_ID,
+      weekdayName: 'segunda-feira',
+    });
+    expect(inserted).toEqual([]);
+  });
+
+  it('MISSED: sessão existente ainda PLANNED devolve o id e a prescrição do dia', async () => {
+    const { service } = makeService({
+      selects: [
+        [OWNER],
+        [{ id: WORKOUT_ID, status: 'PLANNED', sessionKey: 'A', prescription: SESSION_A }],
+      ],
+    });
+    await expect(service.dayStatus(USER_ID, MONDAY, NOW)).resolves.toMatchObject({
+      kind: 'MISSED',
+      workoutSessionId: WORKOUT_ID,
+      focus: 'Corpo inteiro',
+    });
+  });
+
+  it('IN_PROGRESS não é falta', async () => {
+    const { service } = makeService({
+      selects: [
+        [OWNER],
+        [{ id: WORKOUT_ID, status: 'IN_PROGRESS', sessionKey: 'A', prescription: SESSION_A }],
+      ],
+    });
+    await expect(service.dayStatus(USER_ID, MONDAY, NOW)).resolves.toEqual({
+      kind: 'IN_PROGRESS',
+    });
+  });
+
+  it('DONE: treino concluído não é cobrado', async () => {
+    const { service } = makeService({
+      selects: [
+        [OWNER],
+        [{ id: WORKOUT_ID, status: 'COMPLETED', sessionKey: 'A', prescription: SESSION_A }],
+      ],
+    });
+    await expect(service.dayStatus(USER_ID, MONDAY, NOW)).resolves.toEqual({ kind: 'DONE' });
+  });
+
+  it('REST: dia sem treino previsto', async () => {
+    const { service } = makeService({ selects: [[OWNER], [], VERSIONS] });
+    await expect(service.dayStatus(USER_ID, SUNDAY, NOW)).resolves.toEqual({ kind: 'REST' });
+  });
+
+  it('BEFORE_START: o dia da entrega do 1º protocolo e os anteriores não são cobrados', async () => {
+    for (const date of ['2026-08-03', '2026-08-02']) {
+      const { service } = makeService({ selects: [[OWNER]] });
+      await expect(service.dayStatus(USER_ID, date, NOW)).resolves.toEqual({
+        kind: 'BEFORE_START',
+      });
+    }
+  });
+
+  it('rejeita dia futuro', async () => {
+    const { service } = makeService({ selects: [[OWNER]] });
+    await expect(service.dayStatus(USER_ID, '2026-08-11', NOW)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+});
+
+describe('WorkoutJournalService.attendanceWindow', () => {
+  // Protocolo 3x/semana (seg, qua, sex) entregue em 2026-08-03; janela de 14 dias antes de 17/08.
+  const BEFORE = '2026-08-17';
+  const NOW = new Date('2026-08-17T07:00:00Z');
+  const VERSIONS = [{ version: 2, content: STRUCTURE, createdAt: new Date('2026-08-03') }];
+  const kinds = (window: Array<{ date: string; status: { kind: string } }>) =>
+    Object.fromEntries(window.map(({ date, status }) => [date.slice(5), status.kind]));
+
+  it('classifica os 14 dias em UMA passada: dono, sessões do intervalo e versões do protocolo', async () => {
+    const { service, db } = makeService({
+      selects: [
+        [OWNER],
+        [
+          {
+            id: WORKOUT_ID,
+            date: '2026-08-10',
+            status: 'COMPLETED',
+            sessionKey: 'A',
+            prescription: SESSION_A,
+          },
+        ],
+        VERSIONS,
+      ],
+    });
+    const window = await service.attendanceWindow(USER_ID, BEFORE, NOW);
+
+    expect(window).toHaveLength(14);
+    expect(window[0]?.date).toBe('2026-08-03');
+    expect(window.at(-1)?.date).toBe('2026-08-16');
+    expect(kinds(window)).toMatchObject({
+      '08-03': 'BEFORE_START', // dia da entrega
+      '08-04': 'REST',
+      '08-05': 'MISSED',
+      '08-07': 'MISSED',
+      '08-10': 'DONE',
+      '08-12': 'MISSED',
+      '08-14': 'MISSED',
+      '08-16': 'REST',
+    });
+    // Uma única consulta de sessões e uma de versões, não uma rodada por dia.
+    expect(db.runAsUser).toHaveBeenCalledTimes(2); // dono + janela
+  });
+
+  it('sessão iniciada e não finalizada aparece como IN_PROGRESS, não como falta', async () => {
+    const { service } = makeService({
+      selects: [
+        [OWNER],
+        [
+          {
+            id: WORKOUT_ID,
+            date: '2026-08-12',
+            status: 'IN_PROGRESS',
+            sessionKey: 'B',
+            prescription: SESSION_B,
+          },
+        ],
+        VERSIONS,
+      ],
+    });
+    const window = await service.attendanceWindow(USER_ID, BEFORE, NOW);
+    expect(kinds(window)['08-12']).toBe('IN_PROGRESS');
+  });
+
+  it('sessão criada e nunca iniciada (PLANNED) é falta e guarda o id da sessão', async () => {
+    const { service } = makeService({
+      selects: [
+        [OWNER],
+        [
+          {
+            id: WORKOUT_ID,
+            date: '2026-08-10',
+            status: 'PLANNED',
+            sessionKey: 'A',
+            prescription: SESSION_A,
+          },
+        ],
+        VERSIONS,
+      ],
+    });
+    const window = await service.attendanceWindow(USER_ID, BEFORE, NOW);
+    expect(window.find(({ date }) => date === '2026-08-10')?.status).toMatchObject({
+      kind: 'MISSED',
+      workoutSessionId: WORKOUT_ID,
+    });
+  });
+
+  it('rejeita um dia futuro', async () => {
+    const { service } = makeService({ selects: [[OWNER]] });
+    await expect(service.attendanceWindow(USER_ID, '2026-08-25', NOW)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+});
+
+describe('WorkoutJournalService.recentMissStreak', () => {
+  // Resolve o `dayStatus` por data com uma tabela, sem passar pelo banco.
+  function withStatuses(table: Record<string, WorkoutDayStatus>) {
+    const { service } = makeService();
+    const calls: string[] = [];
+    vi.spyOn(service, 'dayStatus').mockImplementation(async (_userId, date) => {
+      calls.push(date);
+      return table[date] ?? { kind: 'REST' };
+    });
+    return { service, calls };
+  }
+  const missed = (focus = 'Costas'): WorkoutDayStatus => ({
+    kind: 'MISSED',
+    dayLabel: 'Dia A',
+    focus,
+    sessionKey: 'Dia A',
+    workoutSessionId: null,
+    protocolId: PROTOCOL_ID,
+    weekdayName: 'segunda-feira',
+  });
+  const NOW = new Date('2026-08-12T07:00:00Z');
+
+  it('ontem previsto e sem registro, anterior concluído: sequência de 1', async () => {
+    const { service } = withStatuses({ '2026-08-11': missed(), '2026-08-10': { kind: 'DONE' } });
+    const result = await service.recentMissStreak(USER_ID, '2026-08-12', NOW);
+    expect(result.target?.date).toBe('2026-08-11');
+    expect(result.streak).toBe(1);
+  });
+
+  it('pula o descanso para achar a última sessão prevista (sexta sem registro, hoje segunda)', async () => {
+    const { service } = withStatuses({
+      '2026-08-09': { kind: 'REST' }, // domingo
+      '2026-08-08': { kind: 'REST' }, // sábado
+      '2026-08-07': missed('Pernas'), // sexta
+      '2026-08-05': { kind: 'DONE' },
+    });
+    const result = await service.recentMissStreak(USER_ID, '2026-08-10', NOW);
+    expect(result.target).toMatchObject({ date: '2026-08-07' });
+    expect(result.streak).toBe(1);
+  });
+
+  it('conta as faltas seguidas pulando descanso e para no teto', async () => {
+    const { service } = withStatuses({
+      '2026-08-11': missed(),
+      '2026-08-10': { kind: 'REST' },
+      '2026-08-09': missed(),
+      '2026-08-08': missed(),
+      '2026-08-07': missed(),
+    });
+    expect((await service.recentMissStreak(USER_ID, '2026-08-12', NOW)).streak).toBe(3);
+    expect((await service.recentMissStreak(USER_ID, '2026-08-12', NOW, { cap: 2 })).streak).toBe(2);
+  });
+
+  it('treino concluído ou em andamento corta a sequência', async () => {
+    const done = withStatuses({
+      '2026-08-11': missed(),
+      '2026-08-10': { kind: 'DONE' },
+      '2026-08-09': missed(),
+    });
+    expect((await done.service.recentMissStreak(USER_ID, '2026-08-12', NOW)).streak).toBe(1);
+
+    const running = withStatuses({ '2026-08-11': { kind: 'IN_PROGRESS' } });
+    expect(await running.service.recentMissStreak(USER_ID, '2026-08-12', NOW)).toMatchObject({
+      streak: 0,
+      target: { status: { kind: 'IN_PROGRESS' } },
+    });
+  });
+
+  it('último dia previsto concluído ou antes do protocolo: nada a perguntar', async () => {
+    const done = withStatuses({ '2026-08-11': { kind: 'DONE' } });
+    expect((await done.service.recentMissStreak(USER_ID, '2026-08-12', NOW)).streak).toBe(0);
+    const start = withStatuses({ '2026-08-11': { kind: 'BEFORE_START' } });
+    expect((await start.service.recentMissStreak(USER_ID, '2026-08-12', NOW)).streak).toBe(0);
+  });
+
+  it('só descanso na janela de 3 dias: sem alvo', async () => {
+    const { service, calls } = withStatuses({ '2026-08-07': missed() });
+    const result = await service.recentMissStreak(USER_ID, '2026-08-12', NOW);
+    expect(result).toEqual({ target: null, streak: 0 });
+    expect(calls).toEqual(['2026-08-11', '2026-08-10', '2026-08-09']);
+  });
+});
 
 describe('WorkoutJournalService.shareCardImage', () => {
   const completed = {
@@ -768,15 +1043,16 @@ describe('WorkoutJournalService mutations', () => {
         practicesOtherSport: false,
         hasAvoidedExercise: false,
       };
-      const { service, cipher, completions, queues, queueEvents, inserted } = makeService({
-        selects: [
-          [workout],
-          [{ exerciseId: 'squat', completed: true }],
-          [{ duration: 5_400 }, { duration: 5_000 }, { duration: null }],
-          [{ data: structured }],
-        ],
-        insertReturns: [[{ id: 'insight-1' }]],
-      });
+      const { service, cipher, completions, queues, queueEvents, inserted, followups } =
+        makeService({
+          selects: [
+            [workout],
+            [{ exerciseId: 'squat', completed: true }],
+            [{ duration: 5_400 }, { duration: 5_000 }, { duration: null }],
+            [{ data: structured }],
+          ],
+          insertReturns: [[{ id: 'insight-1' }]],
+        });
 
       await service.finish(USER_ID, WORKOUT_ID, {
         perceivedEffort: 9,
@@ -810,9 +1086,42 @@ describe('WorkoutJournalService mutations', () => {
         { jobId: 'wa-workout-insight-insight-1' },
       );
       expect(queueEvents.emit).toHaveBeenCalledWith('handoff');
+      // Registrou um treino: pendências de dias até esta data deixam de fazer sentido (voltou).
+      expect(followups.resolveForWorkout).toHaveBeenCalledWith(USER_ID, '2026-08-10');
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('falha ao fechar a pendência de conversa não impede registrar o treino', async () => {
+    const workout = {
+      ...WORKOUT,
+      status: 'IN_PROGRESS',
+      startedAt: new Date(Date.now() - 3_600_000),
+    };
+    const { service, followups, warn, queues } = makeService({
+      selects: [[workout], [], [{ duration: 3600 }], []],
+    });
+    followups.resolveForWorkout.mockRejectedValueOnce(new Error('banco indisponível'));
+    await expect(
+      service.finish(USER_ID, WORKOUT_ID, {
+        perceivedEffort: 6,
+        feelingNotes: '',
+        painReported: false,
+        painExerciseIds: [],
+        painNotes: '',
+      }),
+    ).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'workout_followup_settle_failed' }),
+      expect.any(String),
+    );
+    expect(queues.enqueue).toHaveBeenCalledWith(
+      'workout-feedback',
+      'workout-feedback',
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it('encerra sem insight quando faltam dados ou a media respeita a preferencia', async () => {
@@ -878,13 +1187,11 @@ describe('WorkoutJournalService mutations', () => {
     await service.preferences(USER_ID, {
       reminderTime: '16:00',
       timezone: 'America/Sao_Paulo',
-      reminderEnabled: false,
     });
     await service.preferences(USER_ID, {});
     expect(updated[0]).toMatchObject({
       workoutReminderTime: '16:00',
       timezone: 'America/Sao_Paulo',
-      workoutReminderEnabled: false,
     });
     expect(updated[1]).toEqual({});
   });

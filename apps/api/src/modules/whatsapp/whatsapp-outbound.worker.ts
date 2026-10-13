@@ -26,6 +26,7 @@ import { conversations, protocols, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.util';
+import { FollowupService } from '../followup/followup.service';
 import { QUEUE } from '../jobs/jobs.config';
 import { type StaffQueueAlertKind } from '../jobs/whatsapp-outbound.contract';
 import { WorkerFactory } from '../jobs/worker.factory';
@@ -84,6 +85,10 @@ export interface WhatsappOutboundJob {
   text?: string;
   /** COACH_MESSAGE: chave de idempotência única por resposta (evita colidir no marcador). */
   dedupeId?: string;
+  /** Pendência de conversa que ESTE envio abre (ver `whatsapp-outbound.contract.ts`). */
+  followupId?: string;
+  /** Texto enviado no lugar de `text` quando a pendência deixou de ser enviável. */
+  fallbackText?: string;
   /** COACH_MESSAGE: anexar botões de feedback 👍/👎 à última bolha (US-3.6). */
   feedback?: boolean;
   /** Mensagens de fluxo deterministico (check-in/nudge), sem chamada a LLM. */
@@ -149,6 +154,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     private readonly accessLinks: AccessLinkService,
     private readonly cipher: HealthCipherService,
     private readonly conversationEvents: ConversationEventsService,
+    private readonly followups: FollowupService,
   ) {
     this.logger.setContext(WhatsappOutboundWorker.name);
   }
@@ -189,12 +195,14 @@ export class WhatsappOutboundWorker implements OnModuleInit {
         { event: 'whatsapp_outbound_discarded_no_consent', userId, type },
         'outbound de saude descartado apos revogacao',
       );
+      await this.releaseFollowup(userId, job.data);
       return { status: 'CONSENT_REVOKED' };
     }
 
     const phone = await this.resolvePhone(userId);
     if (!phone) {
       this.logger.warn({ userId }, 'usuário sem telefone — nada a enviar');
+      await this.releaseFollowup(userId, job.data);
       return { status: 'NO_PHONE' };
     }
 
@@ -222,6 +230,25 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     if ((await this.redis.exists(markerKey)) === 1) {
       this.logger.info({ userId, type }, 'mensagem já enviada — job idempotente, nada a fazer');
       return { status: 'ALREADY_SENT' };
+    }
+
+    // Pergunta que esperava na fila enquanto o aluno já voltou a treinar (reserva cancelada):
+    // a pergunta ficou obsoleta, mas o LINK do dia nunca pode se perder por causa dela. Com
+    // `fallbackText` o envio segue sem a pergunta e sem abrir pendência; sem ele é descartado.
+    let data = job.data;
+    if (data.followupId && !(await this.followups.isSendable(userId, data.followupId))) {
+      if (!data.fallbackText) {
+        this.logger.info(
+          { event: 'whatsapp_followup_not_sendable', userId, type },
+          'pergunta cancelada antes do envio — descartada',
+        );
+        return { status: 'SKIPPED' };
+      }
+      this.logger.info(
+        { event: 'whatsapp_followup_dropped_from_message', userId, type },
+        'pergunta cancelada antes do envio — mensagem segue sem ela',
+      );
+      data = { ...data, text: data.fallbackText, followupId: undefined };
     }
 
     // PROTOCOL_DELIVERY exige documento: saudação + resumo da IA vão na LEGENDA do PDF, uma
@@ -254,7 +281,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       const caption = delivery.text.split(BUBBLE_SEPARATOR).join('\n\n');
       const fileName = protocolFileName(delivery.studentName);
       await this.transport.sendDocument(phone, delivery.pdfUrl, caption, fileName);
-      await this.recordOutbound(userId, `[Documento: ${fileName}]\n${caption}`);
+      await this.recordOutbound(userId, `[Documento: ${fileName}]\n${caption}`, type);
       await this.redis.set(markerKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);
       // ponytail: SLA submit→entrega junta este evento com o `protocol_sent` de enfileiramento
       // da US-2.4 (o job de entrega não carrega submittedAt). Server SDK do PostHog: Sprint futura.
@@ -270,15 +297,47 @@ export class WhatsappOutboundWorker implements OnModuleInit {
       return { status: 'SENT' };
     }
 
-    const text = await this.buildText(job.data);
+    const text = await this.buildText(data);
     if (!text) return { status: 'SKIPPED' };
     // `COACH_MESSAGE` já é gravado em `conversations` por quem gera a resposta
     // (`AiResponseWorker.deliver`, junto das métricas do modelo) e `MANUAL_MESSAGE` pela API
     // do painel, no momento do envio — gravar de novo duplicaria.
     const alreadyRecorded = type === 'COACH_MESSAGE' || type === 'MANUAL_MESSAGE';
-    await this.sendBubbles(text, phone, job.data, alreadyRecorded ? undefined : userId);
+    await this.sendBubbles(text, phone, data, alreadyRecorded ? undefined : userId);
+    await this.openFollowup(userId, data);
     await this.redis.set(markerKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);
     return { status: 'SENT' };
+  }
+
+  /**
+   * Envio confirmado: a pergunta que carrega `followupId` passa a valer como pendência
+   * aberta. Melhor esforço, como `recordOutbound`: a mensagem JÁ saiu, então lançar aqui
+   * faria o BullMQ repetir o job e reenviá-la. Se falhar, o retry do marcador `wa-sent`
+   * (ALREADY_SENT) ou o varredor de pendências consertam depois.
+   */
+  private async openFollowup(userId: string, data: WhatsappOutboundJob): Promise<void> {
+    if (!data.followupId) return;
+    try {
+      await this.followups.markDelivered(userId, data.followupId);
+    } catch (err: unknown) {
+      this.logger.warn(
+        { err, userId, event: 'whatsapp_followup_open_failed' },
+        'mensagem enviada, mas a pendência de conversa não foi aberta',
+      );
+    }
+  }
+
+  /** Pergunta que não vai mais sair (consentimento revogado, sem telefone). */
+  private async releaseFollowup(userId: string, data: WhatsappOutboundJob): Promise<void> {
+    if (!data.followupId) return;
+    try {
+      await this.followups.markNotSent(userId, data.followupId);
+    } catch (err: unknown) {
+      this.logger.warn(
+        { err, userId, event: 'whatsapp_followup_release_failed' },
+        'não foi possível marcar a pendência como não enviada',
+      );
+    }
   }
 
   /**
@@ -288,7 +347,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
   private async sendBubbles(
     text: string,
     phone: string,
-    data: Pick<WhatsappOutboundJob, 'buttons' | 'feedback'>,
+    data: Pick<WhatsappOutboundJob, 'buttons' | 'feedback'> & { type?: WhatsappJobType },
     recordForUserId?: string,
   ): Promise<void> {
     const bubbles = text.split(BUBBLE_SEPARATOR).filter((b) => b.trim());
@@ -298,7 +357,7 @@ export class WhatsappOutboundWorker implements OnModuleInit {
         ? (data.buttons ?? (data.feedback ? FEEDBACK_BUTTONS : undefined))
         : undefined;
       await this.transport.send({ to: phone, text: bubble, buttons });
-      if (recordForUserId) await this.recordOutbound(recordForUserId, bubble);
+      if (recordForUserId) await this.recordOutbound(recordForUserId, bubble, data.type);
     }
   }
 
@@ -310,11 +369,21 @@ export class WhatsappOutboundWorker implements OnModuleInit {
    * O código de verificação de número não passa por aqui: não há titular ainda e o código
    * é credencial de uso único.
    */
-  private async recordOutbound(userId: string, text: string): Promise<void> {
+  private async recordOutbound(
+    userId: string,
+    text: string,
+    sourceType?: WhatsappJobType,
+  ): Promise<void> {
     try {
       const content = await this.cipher.encryptText(text);
       await this.db.runAsUser(userId, 'USER', async (tx) => {
-        await tx.insert(conversations).values({ userId, direction: 'OUTBOUND', content });
+        await tx.insert(conversations).values({
+          userId,
+          direction: 'OUTBOUND',
+          origin: 'SYSTEM',
+          sourceType: sourceType ?? null,
+          content,
+        });
       });
       this.conversationEvents.emitMessage(userId, 'OUTBOUND');
     } catch (err: unknown) {

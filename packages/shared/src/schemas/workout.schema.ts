@@ -85,7 +85,6 @@ export const workoutPreferencesSchema = z.object({
     .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
     .optional(),
   timezone: z.string().trim().min(1).max(64).optional(),
-  reminderEnabled: z.boolean().optional(),
 });
 export type WorkoutPreferencesInput = z.infer<typeof workoutPreferencesSchema>;
 

@@ -16,10 +16,58 @@
  * rodar aquele teste.
  */
 import { whatsappBold as bold } from '../../core/text/whatsapp-format';
-import type { WhatsappQuickReplyButton } from '../jobs/whatsapp-outbound.contract';
+import {
+  WHATSAPP_BUBBLE_SEPARATOR,
+  type WhatsappQuickReplyButton,
+} from '../jobs/whatsapp-outbound.contract';
 
-export function dailyWorkoutMessage(firstName: string, workoutTitle: string, link: string): string {
-  return `Bom dia, ${bold(firstName)}! 💚\n\nSeu treino de hoje é ${bold(workoutTitle)}, não esqueça de realizar seu check-in diário quando for treinar:\n${link}\n\nAgora é com você. Bora se mover. 👊🏼`;
+/**
+ * Pergunta sobre o treino que ficou sem registro, logo depois do link do dia (pedido do
+ * fundador, 2026-10-13; desenho da Sofia): vai no MESMO envio das 04:00, mas em um BALÃO
+ * SEPARADO. O balão do link fica exatamente como sempre foi; a pergunta é um segundo balão,
+ * como um treinador que manda o treino e, em seguida, pergunta como foi o dia anterior. Não é
+ * uma segunda mensagem proativa em outro horário (no canal não oficial, isso aumentaria o
+ * risco de bloqueio do número) e, de manhã, o dia anterior já fechou: não há "ainda dá tempo".
+ */
+export interface DailyWorkoutYesterday {
+  /** Foco da sessão sem registro ("Costas e Bíceps"), nunca o rótulo interno "Dia A". */
+  focus: string;
+  /** "ontem" ou o dia da semana curto ("sexta"), sempre verdadeiro no momento do envio. */
+  when: string;
+  /** Escolhe a variação (a data do treino sem registro): o retry reenvia a mesma copy. */
+  seed: string;
+}
+
+type YesterdayVariant = (focus: string, when: string) => string;
+
+/**
+ * Três variações do balão da pergunta (parágrafo + fecho). Tom do manifesto: ninguém precisa
+ * ser perfeito, precisa voltar. Sem cobrança, sem "compensar", sem as palavras que a marca
+ * nunca usa (preguiça, falhou, perdeu, "sem desculpa").
+ */
+const YESTERDAY_VARIANTS: readonly [YesterdayVariant, ...YesterdayVariant[]] = [
+  (focus, when) =>
+    `E ${when}, tudo bem? O treino de ${focus} ficou sem registro. Se quiser, me conta o que rolou, uma palavra já ajuda.\n\nNinguém precisa ser perfeito. Precisa voltar, e hoje é um ótimo dia pra isso. 👊🏼`,
+  (focus, when) =>
+    `O treino de ${when} (${focus}) ficou sem registro. Quer me contar como foi o seu dia? Pode ser curtinho, uma palavra já ajuda.\n\nConstância não é nunca parar, é sempre voltar. O treino de hoje já é esse passo. 💪🏼`,
+  (focus, when) =>
+    `${when.charAt(0).toUpperCase()}${when.slice(1)} o treino de ${focus} ficou sem registro. Como foi por aí? Se quiser me contar, uma palavra já ajuda.\n\nNinguém precisa ser perfeito pra seguir em frente, só precisa voltar. A gente segue junto. 👊🏼`,
+];
+
+/** O balão do link do dia: sempre este texto, com ou sem a pergunta. */
+export function dailyWorkoutMessage(
+  firstName: string,
+  workoutTitle: string,
+  link: string,
+  yesterday?: DailyWorkoutYesterday,
+): string {
+  const linkBubble = `Bom dia, ${bold(firstName)}! 💚\n\nSeu treino de hoje é ${bold(workoutTitle)}, não esqueça de realizar seu check-in diário quando for treinar:\n${link}\n\nAgora é com você. Bora se mover. 👊🏼`;
+  if (!yesterday) return linkBubble;
+  const index = [...yesterday.seed].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const variant = YESTERDAY_VARIANTS[index % YESTERDAY_VARIANTS.length] ?? YESTERDAY_VARIANTS[0];
+  return [linkBubble, variant(bold(yesterday.focus), yesterday.when)].join(
+    WHATSAPP_BUBBLE_SEPARATOR,
+  );
 }
 
 export function durationInsightMessage(observed: number, expected: number): string {

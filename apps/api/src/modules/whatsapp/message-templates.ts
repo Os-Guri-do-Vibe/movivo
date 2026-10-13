@@ -8,7 +8,10 @@
  */
 import type { AgentPersona } from '@movivo/shared';
 
-import type { StaffQueueAlertKind } from '../jobs/whatsapp-outbound.contract';
+import {
+  type StaffQueueAlertKind,
+  WHATSAPP_BUBBLE_SEPARATOR,
+} from '../jobs/whatsapp-outbound.contract';
 import {
   describeChangesBecame,
   type SubstitutionChange,
@@ -28,7 +31,7 @@ export function staffQueueAlertMessage(
 }
 
 /** Separador de bolhas — o worker envia cada trecho como uma mensagem distinta. */
-export const BUBBLE_SEPARATOR = '\n---\n';
+export const BUBBLE_SEPARATOR = WHATSAPP_BUBBLE_SEPARATOR;
 
 /**
  * Atraso da mensagem "estou analisando" — contado do SUBMIT do formulário, não da geração.

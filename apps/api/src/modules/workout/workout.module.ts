@@ -13,6 +13,7 @@
  */
 import { Module } from '@nestjs/common';
 
+import { FollowupModule } from '../followup/followup.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { ShortLinkModule } from '../short-link/short-link.module';
 import { ShareCardRenderer } from './share-card/share-card-renderer.service';
@@ -21,10 +22,12 @@ import { WorkoutCompletionService } from './workout-completion.service';
 import { WorkoutController } from './workout.controller';
 import { WorkoutInboundHandler } from './workout-inbound.handler';
 import { WorkoutJournalService } from './workout-journal.service';
+import { AttendanceAlertService } from './attendance-alert.service';
+import { MissedWorkoutAskPolicy } from './missed-workout-ask.policy';
 import { WorkoutScheduler } from './workout.scheduler';
 
 @Module({
-  imports: [JobsModule, ShortLinkModule],
+  imports: [JobsModule, ShortLinkModule, FollowupModule],
   controllers: [WorkoutController],
   providers: [
     WorkoutAccessService,
@@ -32,6 +35,8 @@ import { WorkoutScheduler } from './workout.scheduler';
     WorkoutJournalService,
     ShareCardRenderer,
     WorkoutScheduler,
+    MissedWorkoutAskPolicy,
+    AttendanceAlertService,
     WorkoutInboundHandler,
   ],
   exports: [WorkoutCompletionService, WorkoutJournalService],
