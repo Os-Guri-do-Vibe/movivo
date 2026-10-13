@@ -62,8 +62,10 @@ describe('DashboardShell', () => {
     }
   });
 
-  it('admin recebe todos os setores quando possui todas as capabilities necessárias', () => {
-    expect(navigationFor(ADMIN_CAPABILITIES)).toHaveLength(21);
+  it('admin recebe todos os setores autorizados, incluindo alertas', () => {
+    expect(navigationFor(ADMIN_CAPABILITIES).map((item) => item.label)).toEqual(
+      expect.arrayContaining(['Visão Geral', 'Base de Alunos', 'Alertas', 'Administração']),
+    );
   });
 
   it('esconde Compliance & Privacidade quando falta uma das capabilities exigidas (AND, como no backend)', () => {
@@ -96,7 +98,7 @@ describe('DashboardShell', () => {
     ]);
   });
 
-  it('coloca Conversas entre Base de Alunos e Fila do Profissional, só com leitura de saúde', () => {
+  it('coloca Conversas, Fila e Alertas na área de alunos, só com leitura de saúde', () => {
     const alunos = navigationGroupsFor(ADMIN_CAPABILITIES).find(
       (group) => group.label === 'Alunos',
     );
@@ -104,10 +106,14 @@ describe('DashboardShell', () => {
       'Base de Alunos',
       'Conversas',
       'Fila do Profissional',
+      'Alertas',
     ]);
     // Suporte lê a base de alunos, mas não o conteúdo das conversas (dado de saúde).
     expect(navigationFor(['control_center.students.read']).map((item) => item.label)).not.toContain(
       'Conversas',
+    );
+    expect(navigationFor(['control_center.students.read']).map((item) => item.label)).not.toContain(
+      'Alertas',
     );
   });
 

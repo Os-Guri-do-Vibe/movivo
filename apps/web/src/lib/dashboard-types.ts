@@ -58,6 +58,26 @@ export interface QueueResponse {
   };
 }
 
+export interface DashboardAlert {
+  id: string;
+  studentName: string | null;
+  level: 'SAFETY' | 'ALERT';
+  reason: string;
+  sourceType: string | null;
+  status: 'OPEN' | 'RESOLVED';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AlertsResponse {
+  open: DashboardAlert[];
+  resolved: DashboardAlert[];
+}
+
+export interface AlertsSummary {
+  open: number;
+}
+
 export interface ReplayMessage {
   role: 'USER' | 'ASSISTANT' | 'PROFESSIONAL' | 'SYSTEM';
   content: string;

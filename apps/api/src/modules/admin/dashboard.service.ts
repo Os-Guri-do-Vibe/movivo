@@ -142,6 +142,18 @@ export interface QueueItem {
   origin: 'PARQ' | 'FALLBACK' | 'EDIT' | 'AI_SUBSTITUTION' | 'CATALOG_GAP' | null;
 }
 
+/** Alerta operacional gerado pelo AI Coach, destinado à supervisão do CREF. */
+export interface DashboardAlert {
+  id: string;
+  studentName: string | null;
+  level: 'SAFETY' | 'ALERT';
+  reason: string;
+  sourceType: string | null;
+  status: 'OPEN' | 'RESOLVED';
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** Titulo do item de fila de protocolo, com o nome completo do titular. */
 function protocolTitle(name: string | null | undefined) {
   return name ? `Protocolo para Revisão: ${name}` : 'Protocolo para Revisão';
@@ -170,6 +182,65 @@ export class DashboardService {
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(DashboardService.name);
+  }
+
+  /**
+   * Alertas que o AI Coach escalou para acompanhamento humano. Protocolos e propostas de
+   * substituição continuam exclusivamente na fila: duplicá-los aqui confundiria a ação
+   * esperada do profissional.
+   */
+  async alerts(actor: AuthenticatedUser) {
+    return this.scopedRead(actor, async (tx) => {
+      const rows = await tx
+        .select({
+          id: handoffAlerts.id,
+          userId: handoffAlerts.userId,
+          studentName: users.name,
+          level: handoffAlerts.level,
+          reason: handoffAlerts.reason,
+          sourceType: handoffAlerts.sourceType,
+          status: handoffAlerts.status,
+          createdAt: handoffAlerts.createdAt,
+          updatedAt: handoffAlerts.updatedAt,
+        })
+        .from(handoffAlerts)
+        .innerJoin(users, eq(users.id, handoffAlerts.userId))
+        .where(or(eq(handoffAlerts.status, 'OPEN'), eq(handoffAlerts.status, 'RESOLVED')))
+        .orderBy(desc(handoffAlerts.createdAt))
+        .limit(100);
+
+      // A lista revela o aluno associado a um evento de saúde. A leitura é auditada por
+      // alerta, como acontece no detalhe, sem expor o id do aluno ao navegador.
+      await Promise.all(
+        rows.map((row) => this.auditRead(tx, actor, row.userId, 'handoff_alert', row.id)),
+      );
+      const present = (row: (typeof rows)[number]): DashboardAlert => ({
+        id: row.id,
+        studentName: row.studentName ?? null,
+        level: row.level,
+        reason: row.reason,
+        sourceType: row.sourceType ?? null,
+        status: row.status,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+      });
+      const alerts = rows.map(present);
+      return {
+        open: alerts.filter((alert) => alert.status === 'OPEN'),
+        resolved: alerts.filter((alert) => alert.status === 'RESOLVED'),
+      };
+    });
+  }
+
+  /** Contagem sem PII para o sino do cabeçalho; a lista detalhada é carregada só na aba. */
+  async alertsSummary(actor: AuthenticatedUser) {
+    return this.scopedRead(actor, async (tx) => {
+      const [row] = await tx
+        .select({ total: count() })
+        .from(handoffAlerts)
+        .where(eq(handoffAlerts.status, 'OPEN'));
+      return { open: Number(row?.total ?? 0) };
+    });
   }
 
   /**
