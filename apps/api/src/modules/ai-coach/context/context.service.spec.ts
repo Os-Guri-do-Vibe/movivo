@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ContextRepository, EpisodicMemory } from './context.repository';
 import { ContextService } from './context.service';
 import type { SemanticMemoryPort } from './semantic-memory.port';
+import type { TranscriptRow } from './transcript';
 import type { WorkingMemory } from './working-memory.service';
 
 const scrubUser = { name: 'João Silva', phoneNumber: '+5511999998888', email: 'joao@ex.com' };
@@ -10,6 +11,8 @@ const scrubUser = { name: 'João Silva', phoneNumber: '+5511999998888', email: '
 function make(overrides?: {
   episodic?: Partial<EpisodicMemory>;
   recent?: { role: 'user' | 'assistant'; content: string; ts: number }[];
+  /** Histórico durável (`conversations`); `null` simula o banco indisponível. */
+  transcript?: TranscriptRow[] | null;
   count?: number;
   ragDocs?: {
     chunkId: string;
@@ -28,7 +31,16 @@ function make(overrides?: {
   const loadEpisodic = vi.fn().mockResolvedValue(episodic);
   const loadScrubUser = vi.fn().mockResolvedValue(scrubUser);
   const upsertSummary = vi.fn().mockResolvedValue(undefined);
-  const repo = { loadEpisodic, loadScrubUser, upsertSummary } as unknown as ContextRepository;
+  const loadTranscript =
+    overrides?.transcript === null
+      ? vi.fn().mockRejectedValue(new Error('banco indisponível'))
+      : vi.fn().mockResolvedValue(overrides?.transcript ?? []);
+  const repo = {
+    loadEpisodic,
+    loadScrubUser,
+    upsertSummary,
+    loadTranscript,
+  } as unknown as ContextRepository;
 
   const recent = vi
     .fn()
@@ -47,12 +59,33 @@ function make(overrides?: {
   // Sprint 11: o nome da agente ENTRA pronto (resolvido uma vez pelo worker), então o
   // `ContextService` não injeta mais o `PromptResolverService`.
   const svc = new ContextService(repo, working, semantic, llm as never, logger as never);
-  return { svc, loadEpisodic, upsertSummary, append, markSummarized, retrieve, complete };
+  return {
+    svc,
+    loadEpisodic,
+    loadTranscript,
+    upsertSummary,
+    append,
+    markSummarized,
+    retrieve,
+    complete,
+    logger,
+  };
 }
 
 describe('ContextService.build', () => {
   it('monta prefixo (estado) + sufixo (janela + mensagem atual)', async () => {
-    const { svc } = make({ recent: [{ role: 'assistant', content: 'Bora treinar!', ts: 1 }] });
+    const { svc } = make({
+      transcript: [
+        {
+          origin: 'COACH',
+          direction: 'OUTBOUND',
+          modelUsed: 'm',
+          sourceType: null,
+          content: 'Bora treinar!',
+          createdAt: new Date(),
+        },
+      ],
+    });
     const ctx = await svc.build('u1', 'MOTIVACAO', 'to sem vontade', 'MOVI');
     expect(ctx.authoritativeState).toContain('HIPERTROFIA');
     expect(ctx.cacheablePrefix).toContain('ESTADO ATUAL DO ALUNO');
@@ -117,15 +150,63 @@ describe('ContextService.build', () => {
     expect(ctx.authoritativeState).not.toContain('dor no ombro');
   });
 
-  it('não duplica a mensagem atual que o worker já gravou na janela', async () => {
+  it('não duplica a mensagem atual que o worker já gravou no histórico', async () => {
+    const at = (minutes: number) => new Date(Date.now() - minutes * 60_000);
     const { svc } = make({
-      recent: [
-        { role: 'assistant', content: 'Como posso ajudar?', ts: 1 },
-        { role: 'user', content: 'quanto descanso?', ts: 2 },
+      transcript: [
+        {
+          origin: 'COACH',
+          direction: 'OUTBOUND',
+          modelUsed: 'm',
+          sourceType: null,
+          content: 'Como posso ajudar?',
+          createdAt: at(2),
+        },
+        {
+          origin: 'STUDENT',
+          direction: 'INBOUND',
+          modelUsed: null,
+          sourceType: null,
+          content: 'quanto descanso?',
+          createdAt: at(0),
+        },
       ],
     });
     const ctx = await svc.build('u1', 'MOTIVACAO', 'quanto descanso?', 'MOVI');
     expect(ctx.volatileSuffix.match(/Aluno: quanto descanso\?/gu)).toHaveLength(1);
+    expect(ctx.volatileSuffix).toContain('MOVI: Como posso ajudar?');
+  });
+
+  it('resposta tardia: o Coach vê a pergunta que fez há 2 dias e o intervalo até agora', async () => {
+    const { svc } = make({
+      transcript: [
+        {
+          origin: 'SYSTEM',
+          direction: 'OUTBOUND',
+          modelUsed: null,
+          sourceType: 'CHECKIN_MESSAGE',
+          content: 'Hoje era dia de Costas e o check-in não apareceu. O que aconteceu?',
+          createdAt: new Date(Date.now() - 50 * 3_600_000),
+        },
+      ],
+    });
+    const ctx = await svc.build('u1', 'MOTIVACAO', 'trabalhei até tarde', 'MOVI');
+    expect(ctx.volatileSuffix).toContain('MOVI: Hoje era dia de Costas');
+    expect(ctx.volatileSuffix).toMatch(/a mensagem abaixo chegou 2 dias depois/);
+    expect(ctx.volatileSuffix).toContain('Aluno: trabalhei até tarde');
+  });
+
+  it('banco indisponível: cai na janela curta do Redis em vez de perder a memória', async () => {
+    const { svc, logger } = make({
+      transcript: null,
+      recent: [{ role: 'assistant', content: 'Bora treinar!', ts: 1 }],
+    });
+    const ctx = await svc.build('u1', 'MOTIVACAO', 'oi', 'MOVI');
+    expect(ctx.volatileSuffix).toContain('MOVI: Bora treinar!');
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'transcript_degraded' }),
+      expect.any(String),
+    );
   });
 });
 

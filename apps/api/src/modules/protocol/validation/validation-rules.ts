@@ -188,6 +188,31 @@ export const RESPONSE_LANGUAGE_RULES: readonly LanguageRule[] = [
       /\b(?:garanto|prometo|responderei|responderemos|retornarei|retornaremos|entrarei|entraremos)\b|\b(?:vou|vamos|iremos)\s+(?:te\s+|lhe\s+)?(?:responder|retornar|dar\s+(?:um\s+)?retorno|entrar\s+em\s+contato|voltar\s+a\s+falar|avisar)\b.{0,60}\b(?:em|dentro\s+de|at[ée]|imediatamente|agora|na\s+mesma\s+hora)\b/i,
     action: 'BLOCK',
   },
+  // Achado 2026-10-13 (pergunta sobre treino sem registro): reagendar, repor ou "compensar" um
+  // treino perdido é decisão de periodização do profissional CREF, nunca do Coach. A frase
+  // NEGADA ("não precisa compensar", "nada de dobrar o treino") é justamente a resposta certa
+  // e passa: o lookbehind ignora a negação imediatamente antes do verbo.
+  {
+    id: 'MAKEUP_PRESCRIPTION',
+    pattern:
+      /(?<!n[ãa]o\s+(?:precisa|preciso|tem\s+que|vale|deve|devo|quero|vamos|[ée]\s+(?:pra|para))\s+(?:de\s+)?|\b(?:sem|nada\s+de)\s+)\b(?:compensar|compense|repor|reponha|dobrar\s+(?:o\s+)?treino|dobre\s+(?:o\s+)?treino|(?:fazer|treinar)\s+(?:os\s+)?dois\s+(?:treinos\s+)?(?:juntos|hoje|amanh[ãa]|no\s+mesmo\s+dia)|treino\s+extra|fazer\s+o\s+(?:treino\s+)?de\s+ontem|mudar\s+o\s+dia\s+do\s+treino|trocar\s+o\s+dia\s+do\s+treino)\b/i,
+    action: 'BLOCK',
+  },
+  // O registro do treino só acontece pelo link do dia (decisão do fundador: não há registro
+  // retroativo). O Coach dizer que "registrou/anotou/marcou" um treino é promessa falsa.
+  {
+    id: 'RETRO_LOG_CLAIM',
+    pattern: /\b(?:registrei|anotei|marquei)\s+(?:aqui\s+)?(?:o\s+)?(?:seu\s+)?treino/i,
+    action: 'BLOCK',
+  },
+  // Palavras que a marca nunca usa (brand code, `r1-gabriel-brand-code.md` §3): cobrança e
+  // culpa contradizem "ninguém precisa ser perfeito, precisa voltar".
+  {
+    id: 'BRAND_LEXICON',
+    pattern:
+      /\bpregui[çc]\w*|\bfalhou\b|\bperdeu\s+(?:o|um|seu)\s+(?:treino|dia)\b|\bsem\s+desculpas?\b|\bbeast\s*mode\b|\bno\s+pain\s+no\s+gain\b|\bfalhei\b|\bvoc[êe]\s+sumiu\b/i,
+    action: 'BLOCK',
+  },
 ];
 
 /**

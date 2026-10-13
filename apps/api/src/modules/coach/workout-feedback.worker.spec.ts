@@ -85,6 +85,9 @@ function makeWorker(opts: {
   priorSessions?: unknown[];
   comment?: string;
   noComment?: boolean;
+  /** Resultado de `recentMissStreak`: o alvo anterior a esta sessão. */
+  previousTarget?: { kind: string } | null;
+  streakFails?: boolean;
 }) {
   const userRow = opts.userRow ?? DEFAULT_USER_ROW;
   const sessionRow = opts.noSession ? undefined : (opts.sessionRow ?? DEFAULT_SESSION_ROW);
@@ -103,8 +106,24 @@ function makeWorker(opts: {
   const enqueue = vi.fn(async () => 'job');
   const queues = { enqueue } as unknown as QueueManager;
   const workers = { create: vi.fn() } as unknown as WorkerFactory;
-  const worker = new WorkoutFeedbackWorker(workers, queues, db, cipher, feedback);
-  return { worker, enqueue, commentFn };
+  const recentMissStreak = vi.fn(async () => {
+    if (opts.streakFails) throw new Error('banco indisponível');
+    return {
+      target: opts.previousTarget ? { date: '2026-09-10', status: opts.previousTarget } : null,
+      streak: opts.previousTarget?.kind === 'MISSED' ? 1 : 0,
+    };
+  });
+  const warn = vi.fn();
+  const worker = new WorkoutFeedbackWorker(
+    workers,
+    queues,
+    db,
+    cipher,
+    feedback,
+    { recentMissStreak } as never,
+    { setContext: vi.fn(), warn } as never,
+  );
+  return { worker, enqueue, commentFn, recentMissStreak, warn };
 }
 
 function job(): Job<WorkoutFeedbackJob> {
@@ -180,5 +199,53 @@ describe('WorkoutFeedbackWorker', () => {
     await expect(worker.process(job())).resolves.toEqual({ status: 'NOT_FOUND' });
     expect(commentFn).not.toHaveBeenCalled();
     expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  describe('reconhecimento da volta', () => {
+    it('sessão prevista anterior sem registro: o serviço recebe voltaAposDiaSemRegistro', async () => {
+      const { worker, commentFn, recentMissStreak } = makeWorker({
+        previousTarget: { kind: 'MISSED' },
+      });
+      await worker.process(job());
+      // Olha os dias ANTERIORES à data da sessão registrada.
+      expect(recentMissStreak).toHaveBeenCalledWith(USER_ID, '2026-09-12');
+      expect(commentFn).toHaveBeenCalledWith(
+        expect.objectContaining({ voltaAposDiaSemRegistro: true }),
+      );
+    });
+
+    it('sessão anterior concluída, sem alvo ou em andamento: não é volta', async () => {
+      for (const previousTarget of [{ kind: 'DONE' }, { kind: 'IN_PROGRESS' }, null]) {
+        const { worker, commentFn } = makeWorker({ previousTarget });
+        await worker.process(job());
+        expect(commentFn).toHaveBeenCalledWith(
+          expect.objectContaining({ voltaAposDiaSemRegistro: false }),
+        );
+      }
+    });
+
+    it('dor relatada tem precedência: nem consulta a volta', async () => {
+      const { worker, commentFn, recentMissStreak } = makeWorker({
+        previousTarget: { kind: 'MISSED' },
+        sessionRow: { ...DEFAULT_SESSION_ROW, painReported: true },
+      });
+      await worker.process(job());
+      expect(recentMissStreak).not.toHaveBeenCalled();
+      expect(commentFn).toHaveBeenCalledWith(
+        expect.objectContaining({ voltaAposDiaSemRegistro: false }),
+      );
+    });
+
+    it('falha ao checar a volta não derruba o comentário', async () => {
+      const { worker, commentFn, warn } = makeWorker({ streakFails: true });
+      await expect(worker.process(job())).resolves.toEqual({ status: 'SENT' });
+      expect(commentFn).toHaveBeenCalledWith(
+        expect.objectContaining({ voltaAposDiaSemRegistro: false }),
+      );
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({ event: 'workout_feedback_return_check_failed' }),
+        expect.any(String),
+      );
+    });
   });
 });

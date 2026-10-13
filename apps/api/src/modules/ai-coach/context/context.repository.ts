@@ -6,7 +6,7 @@
  * integração contra Postgres real — por isso fica fora da cobertura unitária (vitest.config).
  */
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, ne } from 'drizzle-orm';
 import {
   anamnesisStructuredSchema,
   type ProtocolSession,
@@ -20,6 +20,7 @@ import {
   coachingSessions,
   protocols,
   users,
+  conversations,
   workoutCompletions,
   workoutSessions,
   workoutSetEntries,
@@ -31,6 +32,8 @@ import {
 import { healthBlockSchema } from '../../anamnesis/health-block';
 import { dayKey, sessionFor, weekdayCode, WORKOUT_TIMEZONE } from '../../workout/workout-schedule';
 import type { ScrubUser } from '../llm/llm.types';
+import { buildRetrato, RETRATO_WINDOW_DAYS } from './retrato';
+import { TRANSCRIPT_MAX_AGE_DAYS, TRANSCRIPT_MAX_ROWS, type TranscriptRow } from './transcript';
 
 export interface EpisodicMemory {
   scrubUser: ScrubUser;
@@ -49,74 +52,141 @@ export class ContextRepository {
     private readonly cipher: HealthCipherService,
   ) {}
 
+  /**
+   * Últimas mensagens da conversa, do histórico durável e já decifradas (ver `transcript.ts`).
+   * Fica de fora o que não é fala: registro de 👍/👎 (`message_type = 'SYSTEM'`). Cada linha é
+   * decifrada em paralelo; falha em UMA linha a descarta em vez de derrubar a resposta.
+   */
+  async loadTranscript(userId: string, now: Date): Promise<TranscriptRow[]> {
+    const since = new Date(now.getTime() - TRANSCRIPT_MAX_AGE_DAYS * 86_400_000);
+    const rows = await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx
+        .select({
+          origin: conversations.origin,
+          direction: conversations.direction,
+          modelUsed: conversations.modelUsed,
+          sourceType: conversations.sourceType,
+          content: conversations.content,
+          createdAt: conversations.createdAt,
+        })
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.userId, userId),
+            ne(conversations.messageType, 'SYSTEM'),
+            gte(conversations.createdAt, since),
+          ),
+        )
+        .orderBy(desc(conversations.createdAt))
+        .limit(TRANSCRIPT_MAX_ROWS),
+    );
+    const decrypted = await Promise.all(
+      rows.map(async (row) => {
+        try {
+          return { ...row, content: await this.cipher.decryptText(row.content) };
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return decrypted.filter((row): row is TranscriptRow => row !== null);
+  }
+
   /** Lê usuário (para scrub) + protocolo ativo + resumo do dia, tudo sob RLS do titular. */
   async loadEpisodic(userId: string, sessionDate: string): Promise<EpisodicMemory> {
     return this.db.runAsUser(userId, 'USER', async (tx) => {
       // As leituras abaixo são independentes entre si: disparadas juntas, o driver as
       // enfileira (pipelining) na MESMA conexão da transação — uma ida e volta de rede em vez
       // de seis em série por mensagem do Coach. Só a anamnese depende do protocolo.
-      const [[user], [proto], [session], recentWorkouts, recentCheckins, diarioFino] =
-        await Promise.all([
-          tx
-            .select({ name: users.name, phoneNumber: users.phoneNumber, email: users.email })
-            .from(users)
-            .where(eq(users.id, userId))
-            .limit(1),
-          tx
-            .select({
-              currentWeek: protocols.currentWeek,
-              totalWeeks: protocols.totalWeeks,
-              content: protocols.content,
-              constraints: protocols.constraints,
-              anamnesisSessionId: protocols.anamnesisSessionId,
-            })
-            .from(protocols)
-            .where(and(eq(protocols.userId, userId), eq(protocols.status, 'ACTIVE')))
-            .limit(1),
-          tx
-            .select({ summary: coachingSessions.summary })
-            .from(coachingSessions)
-            .where(
-              and(
-                eq(coachingSessions.userId, userId),
-                eq(coachingSessions.sessionDate, sessionDate),
+      const [
+        [user],
+        [proto],
+        [session],
+        recentWorkouts,
+        recentCheckins,
+        diarioFino,
+        [firstProtocol],
+        retratoSessions,
+      ] = await Promise.all([
+        tx
+          .select({ name: users.name, phoneNumber: users.phoneNumber, email: users.email })
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1),
+        tx
+          .select({
+            currentWeek: protocols.currentWeek,
+            totalWeeks: protocols.totalWeeks,
+            mesocycleNumber: protocols.mesocycleNumber,
+            content: protocols.content,
+            constraints: protocols.constraints,
+            anamnesisSessionId: protocols.anamnesisSessionId,
+          })
+          .from(protocols)
+          .where(and(eq(protocols.userId, userId), eq(protocols.status, 'ACTIVE')))
+          .limit(1),
+        tx
+          .select({ summary: coachingSessions.summary })
+          .from(coachingSessions)
+          .where(
+            and(eq(coachingSessions.userId, userId), eq(coachingSessions.sessionDate, sessionDate)),
+          )
+          .limit(1),
+        // Memória factual mínima: eventos imutáveis e campos estruturados. O ciphertext das
+        // respostas do check-in não é aberto aqui; princípio de minimização de dado sensível.
+        tx
+          .select({
+            completedAt: workoutCompletions.completedAt,
+            sessionKey: workoutCompletions.sessionKey,
+            weekNumber: workoutCompletions.weekNumber,
+            perceivedEffort: workoutCompletions.perceivedEffort,
+          })
+          .from(workoutCompletions)
+          .where(eq(workoutCompletions.userId, userId))
+          .orderBy(desc(workoutCompletions.completedAt))
+          .limit(5),
+        tx
+          .select({
+            weekNumber: checkins.weekNumber,
+            submittedAt: checkins.submittedAt,
+            answers: checkins.answers,
+          })
+          .from(checkins)
+          .where(and(eq(checkins.userId, userId), eq(checkins.status, 'SUBMITTED')))
+          .orderBy(desc(checkins.submittedAt))
+          .limit(3),
+        // Achado 2026-09-12 (decisão do fundador): o Coach passava a orientar o aluno sem
+        // NUNCA ver o que de fato aconteceu no treino — carga/repetição/série real, esforço
+        // percebido e dor por sessão (o diário fino, `workout_sessions`/`workout_set_entries`).
+        // Sem isso ele só tinha o AUTORRELATO agregado de `workout_completions`. Aqui entram os
+        // últimos treinos CONCLUÍDOS com planejado (a `prescription` já é o snapshot exato do
+        // que foi prescrito NAQUELE dia — não precisa cruzar com `protocoloCompleto`) vs.
+        // realizado (agregado por exercício a partir de `workout_set_entries`), para o Coach
+        // comparar os dois e falar com base no que realmente aconteceu, não só no que o aluno
+        // lembra ter feito.
+        this.loadWorkoutDiary(tx, userId),
+        // Retrato (camada 0): início do 1º protocolo do aluno e o que foi treinado na janela.
+        tx
+          .select({ startDate: protocols.startDate })
+          .from(protocols)
+          .where(eq(protocols.userId, userId))
+          .orderBy(asc(protocols.startDate))
+          .limit(1),
+        tx
+          .select({ date: workoutSessions.scheduledDate, status: workoutSessions.status })
+          .from(workoutSessions)
+          .where(
+            and(
+              eq(workoutSessions.userId, userId),
+              gte(
+                workoutSessions.scheduledDate,
+                new Date(Date.now() - (RETRATO_WINDOW_DAYS + 1) * 86_400_000)
+                  .toISOString()
+                  .slice(0, 10),
               ),
-            )
-            .limit(1),
-          // Memória factual mínima: eventos imutáveis e campos estruturados. O ciphertext das
-          // respostas do check-in não é aberto aqui; princípio de minimização de dado sensível.
-          tx
-            .select({
-              completedAt: workoutCompletions.completedAt,
-              sessionKey: workoutCompletions.sessionKey,
-              weekNumber: workoutCompletions.weekNumber,
-              perceivedEffort: workoutCompletions.perceivedEffort,
-            })
-            .from(workoutCompletions)
-            .where(eq(workoutCompletions.userId, userId))
-            .orderBy(desc(workoutCompletions.completedAt))
-            .limit(5),
-          tx
-            .select({
-              weekNumber: checkins.weekNumber,
-              submittedAt: checkins.submittedAt,
-              answers: checkins.answers,
-            })
-            .from(checkins)
-            .where(and(eq(checkins.userId, userId), eq(checkins.status, 'SUBMITTED')))
-            .orderBy(desc(checkins.submittedAt))
-            .limit(3),
-          // Achado 2026-09-12 (decisão do fundador): o Coach passava a orientar o aluno sem
-          // NUNCA ver o que de fato aconteceu no treino — carga/repetição/série real, esforço
-          // percebido e dor por sessão (o diário fino, `workout_sessions`/`workout_set_entries`).
-          // Sem isso ele só tinha o AUTORRELATO agregado de `workout_completions`. Aqui entram os
-          // últimos treinos CONCLUÍDOS com planejado (a `prescription` já é o snapshot exato do
-          // que foi prescrito NAQUELE dia — não precisa cruzar com `protocoloCompleto`) vs.
-          // realizado (agregado por exercício a partir de `workout_set_entries`), para o Coach
-          // comparar os dois e falar com base no que realmente aconteceu, não só no que o aluno
-          // lembra ter feito.
-          this.loadWorkoutDiary(tx, userId),
-        ]);
+            ),
+          ),
+      ]);
 
       // `constraints` lido como shape solto de propósito: ai-coach não importa o tipo do
       // domínio de protocolo (fronteira §12.5).
@@ -154,6 +224,38 @@ export class ContextRepository {
         ? (sessionFor(now, content) ?? 'Hoje não é dia de treino previsto no protocolo.')
         : null;
 
+      // As 3 últimas sessões raramente incluem o treino de HOJE (com ABC, a última sessão
+      // do mesmo tipo foi há três treinos). Sem ela o Coach não tem a carga de referência de
+      // quem pergunta "qual a carga de hoje?" depois de uma pausa. Uma consulta a mais, só
+      // quando falta, e marcada para o modelo saber de qual treino se trata.
+      const todaySession = content ? sessionFor(now, content) : null;
+      if (todaySession && !diarioFino.some((entry) => entry.sessionKey === todaySession.dayLabel)) {
+        const sameTraining = await this.loadWorkoutDiary(tx, userId, todaySession.dayLabel);
+        diarioFino.push(...sameTraining.map((entry) => ({ ...entry, mesmoTreinoDeHoje: true })));
+      }
+
+      // Retrato: poucas dezenas de tokens, a última chave do estado (o que muda todo dia fica
+      // depois do que é estável, para não invalidar mais prefixo do que o necessário).
+      const retrato =
+        proto && content && firstProtocol
+          ? buildRetrato({
+              now,
+              firstProtocolStart: firstProtocol.startDate,
+              mesocycleNumber: proto.mesocycleNumber,
+              currentWeek: proto.currentWeek,
+              totalWeeks: proto.totalWeeks,
+              structure: content,
+              completedDates: new Set(
+                retratoSessions.filter((row) => row.status === 'COMPLETED').map((row) => row.date),
+              ),
+              inProgressDates: new Set(
+                retratoSessions
+                  .filter((row) => row.status === 'IN_PROGRESS')
+                  .map((row) => row.date),
+              ),
+            })
+          : null;
+
       const state: Record<string, unknown> = proto
         ? {
             temProtocoloAtivo: true,
@@ -170,6 +272,7 @@ export class ContextRepository {
               checkins: recentCheckins,
               diarioFino,
             },
+            retrato,
           }
         : {
             hoje,
@@ -205,6 +308,8 @@ export class ContextRepository {
   private async loadWorkoutDiary(
     tx: TenantTransaction,
     userId: string,
+    /** Só a sessão MAIS RECENTE deste treino (`session_key`), em vez das últimas N. */
+    onlySessionKey?: string,
   ): Promise<Record<string, unknown>[]> {
     const sessions = await tx
       .select({
@@ -218,9 +323,15 @@ export class ContextRepository {
         painExerciseIds: workoutSessions.painExerciseIds,
       })
       .from(workoutSessions)
-      .where(and(eq(workoutSessions.userId, userId), eq(workoutSessions.status, 'COMPLETED')))
+      .where(
+        and(
+          eq(workoutSessions.userId, userId),
+          eq(workoutSessions.status, 'COMPLETED'),
+          onlySessionKey ? eq(workoutSessions.sessionKey, onlySessionKey) : undefined,
+        ),
+      )
       .orderBy(desc(workoutSessions.scheduledDate))
-      .limit(RECENT_DIARY_SESSIONS);
+      .limit(onlySessionKey ? 1 : RECENT_DIARY_SESSIONS);
     if (sessions.length === 0) return [];
 
     const entries = await tx

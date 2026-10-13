@@ -258,7 +258,13 @@ export class ConversationsService {
     const [row] = await this.db.runAsUser(studentId, 'USER', (tx) =>
       tx
         .insert(conversations)
-        .values({ userId: studentId, direction: 'OUTBOUND', content })
+        .values({
+          userId: studentId,
+          direction: 'OUTBOUND',
+          origin: 'PROFESSIONAL',
+          sourceType: 'MANUAL_MESSAGE',
+          content,
+        })
         .returning({ id: conversations.id, createdAt: conversations.createdAt }),
     );
     if (!row) throw new ConflictException('Não foi possível registrar a mensagem.');

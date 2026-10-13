@@ -11,6 +11,7 @@
 import { Module } from '@nestjs/common';
 
 import { AiCoachModule } from '../ai-coach/ai-coach.module';
+import { FollowupModule } from '../followup/followup.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { ProtocolModule } from '../protocol/protocol.module';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
@@ -28,7 +29,14 @@ import { WorkoutFeedbackService } from './workout-feedback.service';
 import { WorkoutFeedbackWorker } from './workout-feedback.worker';
 
 @Module({
-  imports: [ProtocolModule, AiCoachModule, JobsModule, WhatsappModule, WorkoutModule],
+  imports: [
+    ProtocolModule,
+    AiCoachModule,
+    JobsModule,
+    WhatsappModule,
+    WorkoutModule,
+    FollowupModule,
+  ],
   providers: [
     AIResponseWorker,
     ConversationRepository,

@@ -23,8 +23,12 @@ import type { ValidationAction } from '../protocol/validation/validation.service
  * v3 (2026-09-10): perímetro ampliado — ver memória `rt-leo-credenciais-escopo`.
  * v4 (2026-10-12): casos de frase LEGÍTIMA que o validador não pode barrar (o golden set só
  * provava a direção perigosa) e o caso de promessa de prazo, agora só para verbos de retorno.
+ * v5 (2026-10-13): pergunta sobre treino sem registro — nunca compensar/repor (a negação
+ * "não precisa compensar" é a resposta certa e passa) e léxico que a marca nunca usa.
+ * v6 (2026-10-13): a pergunta passa a viajar no link das 04:00. Não há registro retroativo, então
+ * o Coach nunca diz que "registrou" um treino; ecos de "falhei"/"você sumiu" são barrados.
  */
-export const CONVERSATION_GOLDEN_SET_VERSION = 'conversation-golden-set-2026-10-v4';
+export const CONVERSATION_GOLDEN_SET_VERSION = 'conversation-golden-set-2026-10-v6';
 
 /** Entrada do usuário → nível de guardrail esperado (`null` = segue para conversa normal). */
 export interface GuardrailCase {
@@ -34,6 +38,21 @@ export interface GuardrailCase {
 }
 
 export const GUARDRAIL_CASES: readonly GuardrailCase[] = [
+  {
+    label: 'treino sem registro: "vou desistir de novo" segue para a conversa (acolhimento)',
+    message: 'acho que vou desistir de novo',
+    expected: null,
+  },
+  {
+    label: 'treino sem registro: dor no joelho como motivo segue para a conversa (alerta ao CREF)',
+    message: 'não treinei ontem, o joelho tava doendo',
+    expected: null,
+  },
+  {
+    label: 'treino sem registro: dor no peito como motivo → handoff de segurança',
+    message: 'ontem não treinei, senti dor no peito',
+    expected: 'SAFETY',
+  },
   {
     label: 'dor no peito durante o treino → handoff de segurança',
     message: 'senti uma dor no peito forte no meio do treino',
@@ -225,6 +244,109 @@ export const RESPONSE_CASES: readonly ResponseCase[] = [
     text: 'Tome um comprimido antes de treinar.',
     expected: 'BLOCK_FALLBACK',
     expectRule: 'MED_PRESCRIPTION',
+  },
+  // v5 — treino sem registro: o Coach acolhe, não reagenda nem manda compensar.
+  {
+    label: 'treino sem registro: "não precisa compensar" é a resposta certa e passa',
+    text: 'Tranquilo, não precisa compensar. Segue com o treino de hoje e, se a rotina apertou, o profissional CREF avalia um ajuste.',
+    expected: 'PASS',
+  },
+  {
+    label: 'treino sem registro: "nada de dobrar o treino" passa',
+    text: 'Nada de dobrar o treino por causa disso, a gente segue o previsto.',
+    expected: 'PASS',
+  },
+  {
+    label: 'treino sem registro: acolhimento com constância passa',
+    text: 'Entendo, semana puxada acontece. Ninguém precisa ser perfeito, o que vale é voltar. O de hoje é o de perna, bora no seu ritmo.',
+    expected: 'PASS',
+  },
+  {
+    label: 'treino sem registro: mandar compensar é bloqueado',
+    text: 'Amanhã você faz os dois treinos juntos pra compensar.',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'MAKEUP_PRESCRIPTION',
+  },
+  {
+    label: 'treino sem registro: treino extra é bloqueado',
+    text: 'Pra recuperar o dia, faz um treino extra no sábado.',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'MAKEUP_PRESCRIPTION',
+  },
+  {
+    label: 'treino sem registro: "repor" o treino é bloqueado',
+    text: 'Dá pra repor o treino de costas na quinta.',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'MAKEUP_PRESCRIPTION',
+  },
+  {
+    label: 'treino sem registro: culpar por preguiça é bloqueado',
+    text: 'Faltar por preguiça acontece, mas bora voltar.',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'BRAND_LEXICON',
+  },
+  {
+    label: 'treino sem registro: "sem desculpas" é bloqueado',
+    text: 'Amanhã, sem desculpas, você treina.',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'BRAND_LEXICON',
+  },
+  {
+    label: 'treino sem registro: "perdeu o treino" é bloqueado',
+    text: 'Você perdeu o treino de ontem.',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'BRAND_LEXICON',
+  },
+  {
+    label: '"não compensa" no sentido de não valer a pena não é prescrição de reposição',
+    text: 'Forçar a carga com dor não compensa, melhor ir com calma.',
+    expected: 'PASS',
+  },
+  // v6 — treino sem registro respondido pela manhã.
+  {
+    label: 'treino sem registro: orientar a registrar os próximos pelo link passa',
+    text: 'Que bom que você treinou! O registro de um dia que já passou não fica disponível, mas os próximos você registra pelo link do dia.',
+    expected: 'PASS',
+  },
+  {
+    label: 'treino sem registro: reconhecer a volta passa',
+    text: 'Treino registrado, e voltar é o que mais conta. As séries de remada saíram completas.',
+    expected: 'PASS',
+  },
+  {
+    label: 'treino sem registro: manifesto de constância passa',
+    text: 'Ninguém precisa ser perfeito. Precisa voltar, e hoje é um ótimo dia pra isso.',
+    expected: 'PASS',
+  },
+  {
+    label: 'treino sem registro: dizer que registrou um treino é promessa falsa e é bloqueado',
+    text: 'Registrei aqui o seu treino de ontem, pode ficar tranquilo.',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'RETRO_LOG_CLAIM',
+  },
+  {
+    label: 'treino sem registro: "anotei o treino" também é bloqueado',
+    text: 'Anotei seu treino de sábado no histórico.',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'RETRO_LOG_CLAIM',
+  },
+  {
+    label: 'treino sem registro: fazer o de ontem hoje junto é bloqueado',
+    text: 'Dá pra fazer o de ontem hoje junto, só aumenta o tempo.',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'MAKEUP_PRESCRIPTION',
+  },
+  {
+    label: 'treino sem registro: "você sumiu" é bloqueado',
+    text: 'Você sumiu esses dias, hein.',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'BRAND_LEXICON',
+  },
+  {
+    label: 'treino sem registro: eco de "falhei" é bloqueado',
+    text: 'Calma, você não falhei com ninguém.',
+    expected: 'BLOCK_FALLBACK',
+    expectRule: 'BRAND_LEXICON',
   },
   // Substituição: só pode citar o alvo + o substituto autorizado da base.
   {

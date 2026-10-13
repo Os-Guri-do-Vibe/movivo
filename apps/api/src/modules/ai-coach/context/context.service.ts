@@ -13,6 +13,7 @@ import { PinoLogger } from 'nestjs-pino';
 
 import { ContextRepository } from './context.repository';
 import { type RagDoc, SEMANTIC_MEMORY, type SemanticMemoryPort } from './semantic-memory.port';
+import { buildTranscript } from './transcript';
 import { WorkingMemory } from './working-memory.service';
 import type { ScrubUser } from '../llm/llm.types';
 import { LlmRouter } from '../llm/llm-router.service';
@@ -33,6 +34,11 @@ export interface CoachContext {
   scrubUser: ScrubUser;
 }
 
+/**
+ * Fuso das datas escritas no contexto (`hoje`, mensagens automáticas): o mesmo fixo de
+ * `workout-schedule.ts`. O fuso por aluno (`users.timezone`) ainda não chega ao contexto.
+ */
+const TRANSCRIPT_TIMEZONE = 'America/Sao_Paulo';
 /** Passar de ~15 turnos dispara o resumo de sessão longa. */
 const SUMMARY_THRESHOLD = 15;
 const MAX_SUMMARY_CHARS = 1200;
@@ -72,9 +78,10 @@ export class ContextService {
   ): Promise<CoachContext> {
     const sessionDate = currentSessionDate();
 
-    const [episodic, recent] = await Promise.all([
+    const now = new Date();
+    const [episodic, transcript] = await Promise.all([
       this.repo.loadEpisodic(userId, sessionDate),
-      this.working.recent(userId, sessionDate),
+      this.loadTranscript(userId, message, agentName, now),
     ]);
 
     const { scrubUser } = episodic;
@@ -105,16 +112,13 @@ export class ContextService {
       .filter(Boolean)
       .join('\n');
 
-    const withoutCurrentDuplicate =
-      recent.at(-1)?.role === 'user' && recent.at(-1)?.content === message
-        ? recent.slice(0, -1)
-        : recent;
     const suffix = [
-      ...withoutCurrentDuplicate.map(
-        (t) => `${t.role === 'user' ? 'Aluno' : agentName}: ${t.content}`,
-      ),
+      ...transcript.lines,
+      transcript.trailingGap ? `— a mensagem abaixo chegou ${transcript.trailingGap} depois —` : '',
       `Aluno: ${message}`,
-    ].join('\n');
+    ]
+      .filter(Boolean)
+      .join('\n');
 
     return {
       authoritativeState,
@@ -125,6 +129,34 @@ export class ContextService {
       sessionDate,
       scrubUser,
     };
+  }
+
+  /**
+   * Transcrição da conversa a partir do histórico durável (`conversations`), com o Redis
+   * como rede de segurança: se a leitura falhar, a janela curta de hoje ainda sustenta a
+   * resposta em vez de a conversa ficar sem nenhuma memória.
+   */
+  private async loadTranscript(userId: string, message: string, agentName: string, now: Date) {
+    try {
+      const rows = await this.repo.loadTranscript(userId, now);
+      return buildTranscript(rows, message, { now, agentName, timezone: TRANSCRIPT_TIMEZONE });
+    } catch (err: unknown) {
+      this.logger.warn(
+        { event: 'transcript_degraded', err },
+        'histórico durável indisponível; usando a janela curta do Redis',
+      );
+      const recent = await this.working.recent(userId, currentSessionDate(now));
+      const withoutCurrent =
+        recent.at(-1)?.role === 'user' && recent.at(-1)?.content === message
+          ? recent.slice(0, -1)
+          : recent;
+      return {
+        lines: withoutCurrent.map(
+          (t) => `${t.role === 'user' ? 'Aluno' : agentName}: ${t.content}`,
+        ),
+        trailingGap: null,
+      };
+    }
   }
 
   /** Grava um turno na working memory (chamado pelo worker antes e depois de responder). */

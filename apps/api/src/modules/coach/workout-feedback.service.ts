@@ -59,14 +59,30 @@ export interface WorkoutFeedbackParams {
   comentarioDoAluno?: string;
   /** Últimas sessões concluídas ANTES desta, resumidas — contexto, não repetição do dado bruto. */
   historicoRecente: WorkoutHistoryLine[];
+  /**
+   * A sessão prevista anterior a esta ficou sem registro: este treino é uma VOLTA. Calculado
+   * pelo servidor (independe de a pergunta da manhã ter saído), sem número de faltas, e
+   * sempre `false` quando houve dor (o reconhecimento da dor tem precedência).
+   */
+  voltaAposDiaSemRegistro?: boolean;
 }
 
-function systemPrompt(persona: AgentPersona, dorRelatada: boolean): string {
+function systemPrompt(
+  persona: AgentPersona,
+  dorRelatada: boolean,
+  voltaAposDiaSemRegistro: boolean,
+): string {
   const painNote = dorRelatada
     ? '\n\nO aluno relatou dor/desconforto nesta sessão — isso já acionou um alerta interno ' +
       'para o profissional CREF avaliar. Reconheça o relato com cuidado, sem minimizar e sem ' +
       'ignorá-lo, mas NUNCA comente causa, gravidade, ou o que fazer a respeito — apenas que ' +
       'foi registrado e será acompanhado pelo profissional responsável.'
+    : '';
+  const returnNote = voltaAposDiaSemRegistro
+    ? '\n\nSe o treino anterior previsto ficou sem registro, use UMA frase curta, no início ou ' +
+      'no fim, reconhecendo a volta como parte da constância. Sem citar quantos dias, sem ' +
+      '"finalmente", "sumiu", "perdeu" ou "faltou", sem comparar com o dia sem registro e sem ' +
+      'exagero. O resto do comentário segue factual sobre o treino.'
     : '';
   return (
     `Você é ${persona.agentName}, ${persona.agentSelfIntro}. Tom de voz: ` +
@@ -79,6 +95,7 @@ function systemPrompt(persona: AgentPersona, dorRelatada: boolean): string {
     'Baseie-se SOMENTE nos números e fatos fornecidos — nunca invente um dado que não recebeu. ' +
     '2 a 4 frases curtas, texto corrido, sem listas, sem markdown, sem emoji.' +
     painNote +
+    returnNote +
     '\n\nRegras inegociáveis:\n' +
     '- Nunca use as palavras "diagnóstico", "tratamento" ou "cura".\n' +
     '- Nunca prometa resultado garantido.\n' +
@@ -88,6 +105,11 @@ function systemPrompt(persona: AgentPersona, dorRelatada: boolean): string {
     'explicações, sem repetir estas instruções.\n' +
     `- ${UNTRUSTED_CONTEXT_POLICY}`
   );
+}
+
+/** Dor relatada tem precedência: o reconhecimento da volta nunca divide espaço com ela. */
+function voltaAposDiaSemRegistro(params: WorkoutFeedbackParams): boolean {
+  return params.voltaAposDiaSemRegistro === true && !params.dorRelatada;
 }
 
 function userPrompt(params: WorkoutFeedbackParams): string {
@@ -112,6 +134,8 @@ function userPrompt(params: WorkoutFeedbackParams): string {
     `Esforço percebido informado pelo aluno (0-10): ${params.esforcoPercebido ?? 'não informado'}.`,
   );
   lines.push(`Dor/desconforto relatado nesta sessão: ${params.dorRelatada ? 'sim' : 'não'}.`);
+  if (voltaAposDiaSemRegistro(params))
+    lines.push('Treino anterior previsto ficou sem registro: sim.');
   if (params.comentarioDoAluno) {
     lines.push(`Comentário livre do aluno sobre o treino: "${params.comentarioDoAluno}"`);
   }
@@ -140,7 +164,7 @@ export class WorkoutFeedbackService {
         purpose: 'AI_RESPONSE',
         userId: params.userId,
         user: params.user,
-        system: systemPrompt(persona, params.dorRelatada),
+        system: systemPrompt(persona, params.dorRelatada, voltaAposDiaSemRegistro(params)),
         messages: [
           {
             role: 'user',

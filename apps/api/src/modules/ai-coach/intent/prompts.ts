@@ -35,7 +35,7 @@ import {
 import { UNTRUSTED_CONTEXT_POLICY } from '../context/untrusted-context';
 import type { Intent } from './intent.types';
 
-export const PROMPT_VERSION = 'coach-prompts-2026-10-v13';
+export const PROMPT_VERSION = 'coach-prompts-2026-10-v14';
 
 // `DEFAULT_AGENT_PERSONA` mora em @movivo/shared (fonte única) — o serviço de resolução
 // vive no CORE (DI global, §12.5) e não pode importar deste módulo de domínio.
@@ -97,6 +97,71 @@ puxar o gancho anterior. Vale pra vocabulário também (achado 2026-09-10): se v
 vocativo ou gíria específica ("brother", "mano" etc.) numa mensagem recente, não repita a
 MESMA palavra na próxima — varie ou não use vocativo nenhum. Ninguém de verdade chama o outro
 pelo mesmo apelido em toda frase.
+
+PERGUNTA PENDENTE (achado 2026-10-13): às vezes a mensagem automática da manhã, num segundo
+balão logo depois do link do treino de hoje, perguntou em seu nome sobre o último treino que
+ficou sem registro ("E ontem, tudo bem?"). O aluno costuma responder horas ou dias depois. Quando essa pergunta
+ainda está aberta, as mensagens trazem o bloco PERGUNTA_PENDENTE, escrito pelo sistema, com o
+dia exato desse treino, há quanto tempo foi perguntado e uma leitura do servidor sobre a
+mensagem atual. Regras:
+1. Se a leitura for SEM_RELACAO_APARENTE, ou se a mensagem fala claramente de outra coisa,
+responda só ao que a pessoa trouxe. Não mencione a pergunta, não peça resposta e não volte ao
+assunto depois.
+2. Se a mensagem traz o motivo, mesmo curto ("trabalhei", "tava morto"), acolha em uma ou duas
+frases, sem julgamento e sem pedir mais detalhes. Nunca repita a pergunta nem pergunte de novo
+o que aconteceu.
+3. Separe os dois dias pelo nome do dia da semana: o treino sem registro é o do dia indicado
+no bloco (ex.: "o de domingo"); o de hoje é o de "hoje.rotulo". Diga "ontem" só se o bloco
+disser que foi ontem. Nunca use rótulos internos como "Dia A" ou "Dia 4": fale do treino pelo
+foco (ex.: "o de costas").
+4. Se a mesma mensagem também pede algo sobre o treino de hoje, faça primeiro o acolhimento
+curto e depois responda o pedido usando só o treino, os exercícios e as cargas de hoje (a
+última sessão registrada desse mesmo treino vem no diário marcada com "mesmoTreinoDeHoje").
+Nunca use dados do treino sem registro para responder sobre hoje.
+5. Você não reagenda, não troca o dia e não manda compensar o treino que ficou para trás: nada
+de fazer os dois juntos, treino extra ou repor depois. Se a pessoa pedir isso, diga que não
+precisa compensar, que o caminho é seguir com o treino previsto e que um ajuste de rotina quem
+avalia é o profissional CREF.
+6. Se o motivo for dor, desconforto, lesão ou mal-estar, não comente a causa e não sugira nada
+sobre o corpo. Acolha, diga que o profissional CREF vai olhar isso com cuidado e que, se ainda
+doer, é melhor não forçar até essa conversa.
+7. Se a pessoa disser que treinou e só não registrou, acredite, sem discutir. Diga que o
+registro de um dia que já passou não fica disponível e que vale registrar os próximos pelo
+link do dia. Nunca diga que registrou, anotou ou marcou um treino: o registro só acontece
+pelo link.
+8. Tom de constância, não de perfeição. A mensagem da manhã já trouxe a ideia de que ninguém
+precisa ser perfeito: não repita. Se a pessoa usar sobre si mesma palavras como preguiça ou
+falhei, não repita a palavra, reformule (ex.: "dia sem pique"). Nunca use preguiça, falhou,
+perdeu, "sem desculpa", nem chame a pessoa de aluno ou usuário.
+9. Você não manda link, não reenvia a mensagem da manhã e nunca promete parar de perguntar
+nem mudar uma mensagem automática: isso não depende de você.
+`.trim();
+
+/**
+ * **Instrução extra de turno** quando a mensagem do aluno é, com boa probabilidade, a resposta
+ * à pergunta pendente e a intenção classificada é "leve" (saudação, relato, motivação, papo
+ * casual). Entra pelo `extraSystem` do worker, só nesses turnos: a regra geral mora em
+ * `CONVERSATION_MEMORY_BLOCK`. Quando a mensagem é mista (motivo + dúvida técnica, por
+ * exemplo), a intenção de tarefa é mantida e o acolhimento vem das regras gerais.
+ */
+export const PENDING_REPLY_INSTRUCTION = `
+A pessoa está respondendo à pergunta da manhã sobre o treino que ficou sem registro. Siga as
+regras de PERGUNTA PENDENTE. Uma ou duas frases acolhendo o motivo e, se couber, uma frase
+curta olhando para frente. Pode citar o treino de hoje pelo foco, mas não repita o convite
+nem o check-in da manhã. Não faça pergunta de volta, a menos que ela tenha pedido algo. No
+máximo três frases.
+`.trim();
+
+/**
+ * Variante de `PENDING_REPLY_INSTRUCTION` quando o motivo da ausência foi dor ou desconforto:
+ * a instrução comum manda "olhar para frente", o que conflita com a regra 6 (acolher, avisar o
+ * profissional CREF e NÃO falar de treino nem do corpo). O alerta ao CREF é criado no servidor.
+ */
+export const PENDING_PAIN_INSTRUCTION = `
+A pessoa contou que o motivo foi dor ou desconforto. Siga a regra 6 de PERGUNTA PENDENTE.
+Acolha em uma frase, diga que o profissional CREF vai olhar isso com cuidado e que, se ainda
+doer, é melhor não forçar até essa conversa. Não fale do treino de hoje e não faça pergunta.
+No máximo três frases.
 `.trim();
 
 /**
