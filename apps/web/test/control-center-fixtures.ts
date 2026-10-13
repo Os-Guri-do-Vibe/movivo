@@ -58,7 +58,9 @@ const heatmapCells: ControlCenterMarketingResponse['data']['signupSeasonality'] 
 
 /**
  * Visão Geral (US-7.8): 5 linhas-resumo, uma por pilar. Cada `headline`/`details`
- * reaproveita o formato de métrica dos próprios pilares — é o mesmo contrato.
+ * reaproveita o formato de métrica dos próprios pilares — é o mesmo contrato. O desenho
+ * segue o recorte "mais importante e essencial" por pilar (North Star, MRR, cadastros,
+ * bloqueio da IA e pior SLO como âncoras), com `signals` para o que não é número.
  */
 export const overviewResponse: ControlCenterOverviewResponse = {
   data: {
@@ -68,11 +70,16 @@ export const overviewResponse: ControlCenterOverviewResponse = {
         label: 'Alunos',
         state: 'ATTENTION',
         href: '/dashboard/alunos',
-        headline: { label: 'Alunos cadastrados', metric: metric({ value: 25 }) },
+        headline: {
+          label: 'Treinos nos primeiros 30 dias pagos (meta ≥8)',
+          metric: metric({ value: 5.5 }),
+        },
         details: [
+          { label: 'Taxa de reporte de treino', metric: metric({ value: 72, unit: 'PERCENT' }) },
           { label: 'Em risco de cancelamento', metric: metric({ value: 3 }) },
           { label: 'Alertas de segurança e PAR-Q bloqueado', metric: metric({ value: 0 }) },
         ],
+        signals: [],
         reason: '3 aluno(s) com sinal de risco de cancelamento.',
       },
       {
@@ -82,9 +89,11 @@ export const overviewResponse: ControlCenterOverviewResponse = {
         href: '/dashboard/financeiro',
         headline: { label: 'MRR contratado', metric: metric({ value: 1638, unit: 'BRL' }) },
         details: [
+          { label: 'Lucro do período', metric: metric({ value: 420.5, unit: 'BRL' }) },
           { label: 'Receita em risco (30 dias)', metric: metric({ value: 0, unit: 'BRL' }) },
-          { label: 'Cancelamentos (90 dias)', metric: metric({ value: 1 }) },
+          { label: 'Inadimplência', metric: metric({ value: 4, unit: 'PERCENT' }) },
         ],
+        signals: [],
         reason: null,
       },
       {
@@ -98,7 +107,13 @@ export const overviewResponse: ControlCenterOverviewResponse = {
             label: 'Taxa de conclusão da anamnese',
             metric: metric({ value: 68, unit: 'PERCENT' }),
           },
+          { label: 'Conversão do trial', metric: metric({ value: 35, unit: 'PERCENT' }) },
+          {
+            label: 'CAC do canal principal (meta_ads)',
+            metric: metric({ value: 54, unit: 'BRL' }),
+          },
         ],
+        signals: [],
         reason: null,
       },
       {
@@ -106,14 +121,18 @@ export const overviewResponse: ControlCenterOverviewResponse = {
         label: 'IA',
         state: 'OK',
         href: '/dashboard/ia/agente',
-        headline: { label: 'Conversas (30 dias)', metric: metric({ value: 340 }) },
+        headline: {
+          label: 'Resposta bloqueada pela validação',
+          metric: metric({ value: 1.2, unit: 'PERCENT' }),
+        },
         details: [
           {
-            label: 'Taxa de resposta bloqueada pela validação',
-            metric: metric({ value: 1.2, unit: 'PERCENT' }),
+            label: 'Resposta do coach (p95)',
+            metric: metric({ value: 9000, unit: 'MILLISECONDS' }),
           },
-          { label: 'Persona vigente', metric: metric({ value: 2 }) },
+          { label: 'Trabalhos de IA com falha (30 dias)', metric: metric({ value: 3 }) },
         ],
+        signals: [{ label: 'Personas', state: 'OK', text: 'Masculina v3 · Feminina v2' }],
         reason: null,
       },
       {
@@ -128,6 +147,7 @@ export const overviewResponse: ControlCenterOverviewResponse = {
         details: [
           { label: 'Orçamento de erro consumido', metric: metric({ value: 120, unit: 'PERCENT' }) },
         ],
+        signals: [{ label: 'WhatsApp', state: 'OK', text: 'Conectado' }],
         reason: 'Trabalhos que não viraram tarefa manual: fora da meta (menos de 0,5% em DLQ).',
       },
     ],

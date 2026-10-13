@@ -1,69 +1,28 @@
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type * as ControlCenterApi from '@/lib/control-center-api';
 
-import {
-  financeResponse,
-  overviewResponse,
-  systemResponse,
-} from '../../../test/control-center-fixtures';
+import { financeResponse, systemResponse } from '../../../test/control-center-fixtures';
 
-const { getOverview, getSystemSummary, getFinanceSummary } = vi.hoisted(() => ({
-  getOverview: vi.fn(),
+const { getSystemSummary, getFinanceSummary } = vi.hoisted(() => ({
   getSystemSummary: vi.fn(),
   getFinanceSummary: vi.fn(),
 }));
 vi.mock('@/lib/control-center-api', async (importOriginal) => ({
   ...(await importOriginal<typeof ControlCenterApi>()),
-  getOverview,
   getSystemSummary,
   getFinanceSummary,
 }));
 
-import { ControlCenterApiError } from '@/lib/control-center-api';
-
 import { SummaryDashboard } from './summary-dashboard';
 
 beforeEach(() => {
-  getOverview.mockReset();
   getSystemSummary.mockReset();
   getFinanceSummary.mockReset();
 });
 
 describe('SummaryDashboard', () => {
-  it('na visão geral mostra uma linha-resumo por pilar, sem métrica própria da tela', async () => {
-    getOverview.mockResolvedValue(overviewResponse);
-    render(<SummaryDashboard resource="overview" />);
-    expect(await screen.findByRole('heading', { name: 'Visão Geral' })).toBeVisible();
-    const rows = screen.getByRole('list', { name: 'Resumo por pilar' });
-    expect(within(rows).getByRole('link', { name: /^Alunos/ })).toBeVisible();
-    expect(within(rows).getByLabelText('Alunos cadastrados: 25')).toBeVisible();
-    expect(within(rows).getByLabelText(/^MRR contratado: R\$\s?1\.638,00$/)).toBeVisible();
-    expect(getSystemSummary).not.toHaveBeenCalled();
-  });
-
-  it('cada linha leva ao pilar de destino e sinaliza o estado com semáforo', async () => {
-    getOverview.mockResolvedValue(overviewResponse);
-    render(<SummaryDashboard resource="overview" />);
-    const rows = await screen.findByRole('list', { name: 'Resumo por pilar' });
-
-    const alunos = within(rows).getByRole('link', { name: /^Alunos/ });
-    expect(alunos).toHaveAttribute('href', '/dashboard/alunos');
-    expect(within(alunos).getByText('Atenção')).toBeVisible();
-    expect(
-      within(alunos).getByText('3 aluno(s) com sinal de risco de cancelamento.'),
-    ).toBeVisible();
-
-    const sistema = within(rows).getByRole('link', { name: /^Sistema/ });
-    expect(sistema).toHaveAttribute('href', '/dashboard/sistema');
-    expect(within(sistema).getByText('Crítico')).toBeVisible();
-
-    const financeiro = within(rows).getByRole('link', { name: /^Financeiro/ });
-    expect(within(financeiro).getByText('Tudo certo')).toBeVisible();
-  });
-
   it('não leva os gráficos da visão geral para os outros setores', async () => {
     getSystemSummary.mockResolvedValue(systemResponse);
     render(<SummaryDashboard resource="system" />);
@@ -91,7 +50,6 @@ describe('SummaryDashboard', () => {
     expect(within(board).getByText('Fora do objetivo')).toBeVisible();
     // Sem amostra o semáforo não vira verde nem zero.
     expect(within(board).getByText('Sem dados no período')).toBeVisible();
-    expect(getOverview).not.toHaveBeenCalled();
   });
 
   it('publica p50/p95/p99 medidos e separa tempo de modelo de tempo sentido pelo aluno', async () => {
@@ -149,37 +107,5 @@ describe('SummaryDashboard', () => {
     expect(screen.getByLabelText('CAC: —')).toBeVisible();
     expect(screen.getByLabelText('Distribuição por sócio: —')).toBeVisible();
     expect(screen.getByText(/Nenhuma despesa lançada ainda/)).toBeVisible();
-  });
-
-  it('em 403 mostra o aviso de acesso sem oferecer nova tentativa', async () => {
-    getOverview.mockRejectedValueOnce(
-      new ControlCenterApiError(403, 'Seu papel não pode acessar este setor.'),
-    );
-    render(<SummaryDashboard resource="overview" />);
-    expect(
-      await screen.findByRole('heading', { name: 'Este setor não faz parte do seu acesso' }),
-    ).toBeVisible();
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
-  });
-
-  it('recupera de falha transitória pela nova tentativa', async () => {
-    getOverview
-      .mockRejectedValueOnce(new ControlCenterApiError(500, 'Servidor indisponível.'))
-      .mockResolvedValueOnce(overviewResponse);
-    render(<SummaryDashboard resource="overview" />);
-    await userEvent.click(await screen.findByRole('button', { name: /tentar novamente/i }));
-    expect(await screen.findByLabelText('Alunos cadastrados: 25')).toBeVisible();
-  });
-
-  it('mantém o último dado válido e avisa quando a atualização seguinte falha', async () => {
-    getOverview
-      .mockResolvedValueOnce(overviewResponse)
-      .mockRejectedValueOnce(new ControlCenterApiError(500, 'Servidor indisponível.'));
-    render(<SummaryDashboard resource="overview" />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Atualizar' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'A última atualização falhou: Servidor indisponível.',
-    );
-    expect(screen.getByLabelText('Alunos cadastrados: 25')).toBeVisible();
   });
 });
