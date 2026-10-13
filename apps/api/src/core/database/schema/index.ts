@@ -26,6 +26,9 @@ export * from './auth-sessions';
 // Sprint 3 — handoff/alertas ao painel CREF (US-3.6).
 export * from './handoff-alerts';
 
+// Estado de leitura (por profissional) das notificações do sino do dashboard.
+export * from './dashboard-notification-reads';
+
 // Sprint 3 — memória de longo prazo da conversa (US-3.2).
 export * from './coaching-sessions';
 

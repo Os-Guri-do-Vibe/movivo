@@ -10,6 +10,10 @@ import type {
   AlertsSummary,
   AnamnesisAnswers,
   AnonymizedReplay,
+  NotificationItem,
+  NotificationsResponse,
+  NotificationsSummary,
+  NotificationType,
   OperationsResponse,
   QueueDetail,
   QueueItem,
@@ -95,6 +99,7 @@ export function parseQueueItem(value: unknown): QueueItem {
     status: string(value.status, 'PENDENTE'),
     autoReleaseAt: typeof value.autoReleaseAt === 'string' ? value.autoReleaseAt : null,
     origin: parseOrigin(value.origin),
+    read: value.read === true,
   };
 }
 
@@ -148,6 +153,7 @@ function parseAlert(value: unknown): AlertsResponse['open'][number] {
     status: value.status,
     createdAt,
     updatedAt,
+    read: value.read === true,
   };
 }
 
@@ -163,6 +169,60 @@ export function parseAlertsSummary(value: unknown): AlertsSummary {
     throw new DashboardApiError(502, 'Resumo de alertas inválido.');
   }
   return { open: Math.floor(Number(value.open)) };
+}
+
+function parseNotificationType(value: unknown): NotificationType {
+  if (value === 'alert' || value === 'protocol' || value === 'substitution') return value;
+  throw new DashboardApiError(502, 'Tipo de notificação desconhecido.');
+}
+
+function parseNotificationItem(value: unknown): NotificationItem {
+  if (!isRecord(value)) throw new DashboardApiError(502, 'Notificação inválida.');
+  const id = string(value.id);
+  const createdAt = string(value.createdAt);
+  if (!id || !createdAt) throw new DashboardApiError(502, 'Notificação incompleta.');
+  return {
+    type: parseNotificationType(value.type),
+    id,
+    read: value.read === true,
+    createdAt,
+    level: value.level === 'SAFETY' || value.level === 'ALERT' ? value.level : null,
+    title: typeof value.title === 'string' ? value.title : null,
+    studentName: typeof value.studentName === 'string' ? value.studentName : null,
+    reason: typeof value.reason === 'string' ? value.reason : null,
+    sourceType: typeof value.sourceType === 'string' ? value.sourceType : null,
+    section: value.section === 'MANDATORY' || value.section === 'OPTIONAL' ? value.section : null,
+    origin: parseOrigin(value.origin),
+    autoReleaseAt: typeof value.autoReleaseAt === 'string' ? value.autoReleaseAt : null,
+  };
+}
+
+function count(value: unknown, message: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new DashboardApiError(502, message);
+  }
+  return Math.floor(value);
+}
+
+export function parseNotificationsResponse(value: unknown): NotificationsResponse {
+  if (!isRecord(value) || !Array.isArray(value.items)) {
+    throw new DashboardApiError(502, 'Resposta de notificações inválida.');
+  }
+  return {
+    snapshotAt: string(value.snapshotAt) || new Date().toISOString(),
+    items: value.items.map(parseNotificationItem),
+    totalPending: count(value.totalPending, 'Total de notificações inválido.'),
+    unread: count(value.unread, 'Contagem de não lidas inválida.'),
+    openSafety: count(value.openSafety, 'Contagem de alertas de segurança inválida.'),
+  };
+}
+
+export function parseNotificationsSummary(value: unknown): NotificationsSummary {
+  if (!isRecord(value)) throw new DashboardApiError(502, 'Resumo de notificações inválido.');
+  return {
+    unread: count(value.unread, 'Contagem de não lidas inválida.'),
+    openSafety: count(value.openSafety, 'Contagem de alertas de segurança inválida.'),
+  };
 }
 
 function parseReplayMessage(value: unknown): ReplayMessage {
@@ -251,6 +311,15 @@ export function parseQueueDetail(value: unknown): QueueDetail {
       status: string(value.handoff.status) || item.status,
       ...(typeof value.handoff.studentId === 'string'
         ? { studentId: value.handoff.studentId }
+        : {}),
+      studentName: typeof value.handoff.studentName === 'string' ? value.handoff.studentName : null,
+      sourceType: typeof value.handoff.sourceType === 'string' ? value.handoff.sourceType : null,
+      sourceId: typeof value.handoff.sourceId === 'string' ? value.handoff.sourceId : null,
+      ...(typeof value.handoff.createdAt === 'string'
+        ? { createdAt: value.handoff.createdAt }
+        : {}),
+      ...(typeof value.handoff.updatedAt === 'string'
+        ? { updatedAt: value.handoff.updatedAt }
         : {}),
       ...(trigger ? { trigger } : {}),
     };
@@ -405,6 +474,24 @@ export async function getAlerts(signal?: AbortSignal): Promise<AlertsResponse> {
 
 export async function getAlertsSummary(signal?: AbortSignal): Promise<AlertsSummary> {
   return parseAlertsSummary(await request('/alerts/summary', { signal }));
+}
+
+export async function getNotifications(signal?: AbortSignal): Promise<NotificationsResponse> {
+  return parseNotificationsResponse(await request('/notifications', { signal }));
+}
+
+export async function getNotificationsSummary(signal?: AbortSignal): Promise<NotificationsSummary> {
+  return parseNotificationsSummary(await request('/notifications/summary', { signal }));
+}
+
+/** Idempotente: registra que a conta atual abriu o item. Não resolve nem assina nada. */
+export async function markNotificationRead(type: NotificationType, id: string): Promise<void> {
+  await request('/notifications/read', { method: 'POST', body: JSON.stringify({ type, id }) });
+}
+
+/** Marca como lido tudo o que já existia em `until` (o instante do retrato que a pessoa viu). */
+export async function markAllNotificationsRead(until: string): Promise<void> {
+  await request('/notifications/read-all', { method: 'POST', body: JSON.stringify({ until }) });
 }
 
 export async function getQueueDetail(

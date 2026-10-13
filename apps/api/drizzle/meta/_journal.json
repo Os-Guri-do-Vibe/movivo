@@ -498,6 +498,13 @@
       "when": 1791683438319,
       "tag": "0070_conversas_pausa_e_leitura",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1791859248533,
+      "tag": "0071_notificacoes_lidas",
+      "breakpoints": true
     }
   ]
 }

@@ -1586,6 +1586,7 @@ describe('DashboardService leituras operacionais', () => {
           conversationId: 'c1',
           status: 'OPEN',
           createdAt,
+          updatedAt: createdAt,
         },
       ],
       [{ name: 'Pessoa Teste' }],
@@ -1597,11 +1598,140 @@ describe('DashboardService leituras operacionais', () => {
           createdAt,
         },
       ],
+      [{ direction: 'INBOUND', content: 'mensagem de origem', createdAt }],
     ]);
     await expect(handoff.service.detail(actor, 'HANDOFF', RESOURCE_ID)).resolves.toMatchObject({
       item: { kind: 'HANDOFF' },
       context: { messages: 1 },
+      handoff: { trigger: { content: 'mensagem de origem' } },
       replay: { studentName: 'Pessoa Teste', messages: [{ role: 'USER' }] },
+    });
+  });
+
+  it('marca o alerta como lido só quando a leitura é posterior à criação do alerta', async () => {
+    const createdAt = new Date('2026-08-01T12:00:00.000Z');
+    const row = (id: string) => ({
+      id,
+      userId: USER_ID,
+      studentName: 'Pessoa Teste',
+      level: 'ALERT',
+      reason: 'FORA_DE_ESCOPO',
+      sourceType: null,
+      status: 'OPEN',
+      createdAt,
+      updatedAt: createdAt,
+    });
+    const { service } = makeSequencedService([
+      [row('lido'), row('antigo'), row('sem-leitura')],
+      [
+        { kind: 'alert', refId: 'lido', readAt: new Date('2026-08-01T12:05:00.000Z') },
+        { kind: 'alert', refId: 'antigo', readAt: new Date('2026-08-01T11:00:00.000Z') },
+      ],
+    ]);
+    const { open } = await service.alerts(actor);
+    expect(open.map((alert) => [alert.id, alert.read])).toEqual([
+      ['lido', true],
+      ['antigo', false],
+      ['sem-leitura', false],
+    ]);
+  });
+
+  it('busca a mensagem de origem do handoff fora das 12 mais recentes e em alerta legado', async () => {
+    const createdAt = new Date('2026-08-01T12:00:00.000Z');
+    const legacy = makeSequencedService([
+      [
+        {
+          userId: USER_ID,
+          level: 'ALERT',
+          reason: 'ESCOPO',
+          conversationId: null,
+          sourceType: null,
+          status: 'OPEN',
+          createdAt,
+          updatedAt: createdAt,
+        },
+      ],
+      [{ name: 'Pessoa Teste' }],
+      [{ id: 'recente', direction: 'INBOUND', content: 'mensagem recente', createdAt }],
+      [{ direction: 'INBOUND', content: 'mensagem da época do alerta', createdAt }],
+    ]);
+    await expect(legacy.service.detail(actor, 'HANDOFF', RESOURCE_ID)).resolves.toMatchObject({
+      handoff: { trigger: { content: 'mensagem da época do alerta' } },
+    });
+  });
+
+  it('em dor após o treino devolve os nomes dos exercícios e as anotações do aluno', async () => {
+    const createdAt = new Date('2026-08-01T12:00:00.000Z');
+    const { service } = makeSequencedService(
+      [
+        [
+          {
+            userId: USER_ID,
+            level: 'SAFETY',
+            reason: 'DOR_APOS_TREINO',
+            conversationId: null,
+            sourceType: 'WORKOUT',
+            sourceId: RESOURCE_ID,
+            status: 'OPEN',
+            createdAt,
+            updatedAt: createdAt,
+          },
+        ],
+        [{ name: 'Pessoa Teste' }],
+        [],
+        [
+          {
+            sessionKey: 'A',
+            scheduledDate: '2026-08-01',
+            durationSeconds: 2400,
+            perceivedEffort: 8,
+            painExerciseIds: ['ex-2', 'ex-9'],
+            prescription: {
+              exercises: [
+                { exerciseId: 'ex-1', name: 'Supino reto' },
+                { exerciseId: 'ex-2', name: 'Agachamento livre' },
+              ],
+            },
+            feedbackCipher: Buffer.from('x'),
+          },
+        ],
+      ],
+      'PASS',
+      [JSON.stringify({ feelingNotes: 'cansado', painNotes: 'Dor no joelho direito' })],
+    );
+    const result = (await service.detail(actor, 'HANDOFF', RESOURCE_ID)) as {
+      context: Record<string, unknown>;
+    };
+    expect(result.context).toMatchObject({
+      painExercises: 'Agachamento livre',
+      painNotes: 'Dor no joelho direito',
+      feelingNotes: 'cansado',
+      perceivedEffort: 8,
+    });
+  });
+
+  it('não atribui mensagem de conversa a alerta de origem não conversacional', async () => {
+    const createdAt = new Date('2026-08-01T12:00:00.000Z');
+    const workout = makeSequencedService([
+      [
+        {
+          userId: USER_ID,
+          level: 'SAFETY',
+          reason: 'DOR_APOS_TREINO',
+          conversationId: null,
+          sourceType: 'WORKOUT',
+          sourceId: RESOURCE_ID,
+          status: 'OPEN',
+          createdAt,
+          updatedAt: createdAt,
+        },
+      ],
+      [{ name: 'Pessoa Teste' }],
+      [{ id: 'recente', direction: 'INBOUND', content: 'mensagem recente', createdAt }],
+      [],
+    ]);
+    await expect(workout.service.detail(actor, 'HANDOFF', RESOURCE_ID)).resolves.toMatchObject({
+      handoff: { trigger: null },
     });
   });
 

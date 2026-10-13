@@ -116,6 +116,7 @@ export const protocolItem: QueueItem = {
   status: 'PENDING_REVIEW',
   autoReleaseAt: null,
   origin: null,
+  read: false,
 };
 
 /** Protocolo "Disponível para Revisão" — libera sozinho se o CREF não agir a tempo. */
@@ -130,6 +131,7 @@ export const optionalProtocolItem: QueueItem = {
   status: 'PENDING_REVIEW',
   autoReleaseAt: '2026-08-03T12:30:00.000Z',
   origin: null,
+  read: false,
 };
 
 export const handoffItem: QueueItem = {
@@ -143,6 +145,7 @@ export const handoffItem: QueueItem = {
   status: 'OPEN',
   autoReleaseAt: null,
   origin: null,
+  read: false,
 };
 
 /**
@@ -162,6 +165,7 @@ export const parqProtocolItem: QueueItem = {
   status: 'PENDING_REVIEW',
   autoReleaseAt: null,
   origin: 'PARQ',
+  read: false,
 };
 
 /** A outra origem de `MANDATORY`: edição manual do CREF, sem alerta clínico. */
@@ -176,6 +180,7 @@ export const editProtocolItem: QueueItem = {
   status: 'PENDING_REVIEW',
   autoReleaseAt: null,
   origin: 'EDIT',
+  read: false,
 };
 
 /**
@@ -194,6 +199,7 @@ export const fallbackProtocolItem: QueueItem = {
   status: 'PENDING_REVIEW',
   autoReleaseAt: null,
   origin: 'FALLBACK',
+  read: false,
 };
 
 export const substitutionItem: QueueItem = {
@@ -207,6 +213,7 @@ export const substitutionItem: QueueItem = {
   status: 'PENDING',
   autoReleaseAt: '2026-09-02T12:00:00.000Z',
   origin: 'AI_SUBSTITUTION',
+  read: false,
 };
 
 /**
@@ -225,6 +232,7 @@ export const substitutionMandatoryItem: QueueItem = {
   status: 'PENDING',
   autoReleaseAt: null,
   origin: 'AI_SUBSTITUTION',
+  read: false,
 };
 
 export const substitutionDetail: QueueDetail = {
@@ -276,6 +284,7 @@ export const catalogGapSubstitutionItem: QueueItem = {
   status: 'PENDING',
   autoReleaseAt: null,
   origin: 'CATALOG_GAP',
+  read: false,
 };
 
 export const catalogGapSubstitutionDetail: QueueDetail = {
@@ -379,6 +388,7 @@ export const checkinItem: QueueItem = {
   status: 'OPEN',
   autoReleaseAt: null,
   origin: null,
+  read: false,
 };
 
 // Todo item das duas caixas é protocolo. `mandatory` cobre as duas origens (PAR-Q e

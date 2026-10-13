@@ -102,6 +102,8 @@ const EXPECTED_TABLES = [
   'short_links',
   // Separação da Plataforma Interna (staff) da tabela do titular final (users).
   'staff',
+  // Estado "lido" das notificações do sino do dashboard, por conta de staff.
+  'dashboard_notification_reads',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;

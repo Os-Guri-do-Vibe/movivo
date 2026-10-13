@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { and, count, desc, eq, isNotNull, isNull, not, or, sql } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, isNotNull, isNull, lte, not, or, sql } from 'drizzle-orm';
 import { type PgColumn } from 'drizzle-orm/pg-core';
 import { PinoLogger } from 'nestjs-pino';
 import {
@@ -29,6 +29,7 @@ import {
   anamnesisSessions,
   checkins,
   conversations,
+  dashboardNotificationReads,
   handoffAlerts,
   protocols,
   protocolSubstitutionRequests,
@@ -140,7 +141,12 @@ export interface QueueItem {
    * para os que não são protocolo/substituição — não têm motivo a exibir.
    */
   origin: 'PARQ' | 'FALLBACK' | 'EDIT' | 'AI_SUBSTITUTION' | 'CATALOG_GAP' | null;
+  /** O profissional logado já abriu este item (estado de leitura do sino; não altera a fila). */
+  read: boolean;
 }
+
+/** Tipo de notificação do sino; alvo de `dashboard_notification_reads.kind`. */
+export type NotificationType = 'alert' | 'protocol' | 'substitution';
 
 /** Alerta operacional gerado pelo AI Coach, destinado à supervisão do CREF. */
 export interface DashboardAlert {
@@ -152,6 +158,8 @@ export interface DashboardAlert {
   status: 'OPEN' | 'RESOLVED';
   createdAt: string;
   updatedAt: string;
+  /** O profissional logado já abriu este alerta. Ler não resolve. */
+  read: boolean;
 }
 
 /** Titulo do item de fila de protocolo, com o nome completo do titular. */
@@ -208,13 +216,11 @@ export class DashboardService {
         .where(
           and(
             or(eq(handoffAlerts.status, 'OPEN'), eq(handoffAlerts.status, 'RESOLVED')),
-            // Handoffs de treino já têm fluxo de resolução na Fila do Profissional.
+            // Dor após o treino (`WORKOUT`) é alerta do AI Coach e aparece aqui, além de seguir
+            // na Fila. Só o ajuste de duração (`WORKOUT_INSIGHT`) fica exclusivo da Fila.
             or(
               isNull(handoffAlerts.sourceType),
-              and(
-                not(eq(handoffAlerts.sourceType, 'WORKOUT')),
-                not(eq(handoffAlerts.sourceType, 'WORKOUT_INSIGHT')),
-              ),
+              not(eq(handoffAlerts.sourceType, 'WORKOUT_INSIGHT')),
             ),
           ),
         )
@@ -226,6 +232,11 @@ export class DashboardService {
       await Promise.all(
         rows.map((row) => this.auditRead(tx, actor, row.userId, 'handoff_alert', row.id)),
       );
+      const readKeys = await this.readKeys(
+        tx,
+        actor,
+        rows.map((row) => ({ type: 'alert', id: row.id, createdAt: row.createdAt })),
+      );
       const present = (row: (typeof rows)[number]): DashboardAlert => ({
         id: row.id,
         studentName: row.studentName ?? null,
@@ -235,6 +246,7 @@ export class DashboardService {
         status: row.status,
         createdAt: row.createdAt.toISOString(),
         updatedAt: row.updatedAt.toISOString(),
+        read: readKeys.has(`alert:${row.id}`),
       });
       const alerts = rows.map(present);
       return {
@@ -255,10 +267,7 @@ export class DashboardService {
             eq(handoffAlerts.status, 'OPEN'),
             or(
               isNull(handoffAlerts.sourceType),
-              and(
-                not(eq(handoffAlerts.sourceType, 'WORKOUT')),
-                not(eq(handoffAlerts.sourceType, 'WORKOUT_INSIGHT')),
-              ),
+              not(eq(handoffAlerts.sourceType, 'WORKOUT_INSIGHT')),
             ),
           ),
         );
@@ -423,6 +432,29 @@ export class DashboardService {
       );
 
       const byAge = (a: QueueItem, b: QueueItem) => a.createdAt.localeCompare(b.createdAt);
+      const typeOf = (item: QueueItem): NotificationType =>
+        item.kind === 'HANDOFF'
+          ? 'alert'
+          : item.kind === 'SUBSTITUTION'
+            ? 'substitution'
+            : 'protocol';
+      const everyItem = [
+        ...mandatory,
+        ...optional,
+        ...substitutionMandatory,
+        ...substitutionOptional,
+        ...workoutHandoffs,
+      ];
+      const readKeys = await this.readKeys(
+        tx,
+        actor,
+        everyItem.map((item) => ({
+          type: typeOf(item),
+          id: item.id,
+          createdAt: new Date(item.createdAt),
+        })),
+      );
+      for (const item of everyItem) item.read = readKeys.has(`${typeOf(item)}:${item.id}`);
       return {
         protocolMandatory: mandatory.sort(byAge),
         optional: optional.sort(byAge),
@@ -1582,6 +1614,7 @@ export class DashboardService {
           sourceId: handoffAlerts.sourceId,
           status: handoffAlerts.status,
           createdAt: handoffAlerts.createdAt,
+          updatedAt: handoffAlerts.updatedAt,
         })
         .from(handoffAlerts)
         .where(eq(handoffAlerts.id, id))
@@ -1604,10 +1637,31 @@ export class DashboardService {
         .orderBy(desc(conversations.createdAt))
         .limit(12);
       await this.auditRead(tx, actor, alert.userId, 'handoff_alert', id);
-      const trigger =
-        context.find((message) => message.id === alert.conversationId) ??
-        context.find((message) => message.direction === 'INBOUND') ??
-        null;
+      // Só alertas nascidos de uma conversa (`sourceType` nulo) têm mensagem de origem; check-in,
+      // treino e renovação não — mostrar a última mensagem do aluno ali seria um dado errado.
+      // Alerta antigo sem `conversationId` usa a última entrada ATÉ o instante do alerta, e a
+      // busca é direta (não limitada às 12 mensagens do replay, que já podem ter passado).
+      const triggerWhere = alert.conversationId
+        ? and(eq(conversations.id, alert.conversationId), eq(conversations.userId, alert.userId))
+        : alert.sourceType === null
+          ? and(
+              eq(conversations.userId, alert.userId),
+              eq(conversations.direction, 'INBOUND'),
+              lte(conversations.createdAt, alert.createdAt),
+            )
+          : null;
+      const [trigger = null] = triggerWhere
+        ? await tx
+            .select({
+              content: conversations.content,
+              direction: conversations.direction,
+              createdAt: conversations.createdAt,
+            })
+            .from(conversations)
+            .where(triggerWhere)
+            .orderBy(desc(conversations.createdAt))
+            .limit(1)
+        : [];
       const replayRows = context.reverse().map((message) => ({
         ...message,
         userId: alert.userId,
@@ -1622,6 +1676,7 @@ export class DashboardService {
                 durationSeconds: workoutSessions.durationSeconds,
                 perceivedEffort: workoutSessions.perceivedEffort,
                 painExerciseIds: workoutSessions.painExerciseIds,
+                prescription: workoutSessions.prescription,
                 feedbackCipher: workoutSessions.feedbackCipher,
               })
               .from(workoutSessions)
@@ -1660,6 +1715,16 @@ export class DashboardService {
                 durationSeconds: workout.durationSeconds,
                 perceivedEffort: workout.perceivedEffort,
                 painExerciseIds: workout.painExerciseIds,
+                // Nomes legíveis para o CREF; o id cru não diz qual exercício doeu.
+                painExercises: workout.painExerciseIds
+                  .map(
+                    (exerciseId) =>
+                      workout.prescription.exercises.find(
+                        (exercise) => exercise.exerciseId === exerciseId,
+                      )?.name ?? null,
+                  )
+                  .filter((name): name is string => name !== null)
+                  .join(', '),
               }
             : {}),
           ...(insight ?? {}),
@@ -1669,6 +1734,11 @@ export class DashboardService {
           level: alert.level,
           status: alert.status,
           studentId: alert.userId,
+          studentName: owner?.name ?? null,
+          sourceType: alert.sourceType ?? null,
+          sourceId: alert.sourceId ?? null,
+          createdAt: alert.createdAt.toISOString(),
+          updatedAt: alert.updatedAt.toISOString(),
           trigger: trigger
             ? {
                 content: await this.cipher.decryptText(trigger.content),
@@ -1687,7 +1757,20 @@ export class DashboardService {
       string,
       unknown
     >;
-    return { ...safeDetail, context: { ...safeDetail.context, feedback } };
+    // Anotações do aluno como texto simples (o objeto `feedback` não chega ao navegador).
+    const notes = (value: unknown) =>
+      typeof value === 'string' && value.trim() ? { value: value.trim() } : null;
+    return {
+      ...safeDetail,
+      context: {
+        ...safeDetail.context,
+        feedback,
+        ...(notes(feedback.painNotes) ? { painNotes: notes(feedback.painNotes)?.value } : {}),
+        ...(notes(feedback.feelingNotes)
+          ? { feelingNotes: notes(feedback.feelingNotes)?.value }
+          : {}),
+      },
+    };
   }
 
   private async requireProtocol(tx: TenantTransaction, id: string, forUpdate = false) {
@@ -1768,6 +1851,46 @@ export class DashboardService {
       `${deliveryKind}-protocol-delivery`,
       outbound,
       { jobId: `${deliveryKind}-protocol-${id}-${signed.version}` },
+    );
+  }
+
+  /**
+   * Chaves `tipo:id` já lidas pela conta: leitura registrada em ou depois da criação do item.
+   * Um item que nasce depois da última leitura volta a ser não lido.
+   */
+  private async readKeys(
+    tx: TenantTransaction,
+    actor: AuthenticatedUser,
+    refs: ReadonlyArray<{ type: NotificationType; id: string; createdAt: Date }>,
+  ): Promise<Set<string>> {
+    if (refs.length === 0) return new Set();
+    const rows = await tx
+      .select({
+        kind: dashboardNotificationReads.kind,
+        refId: dashboardNotificationReads.refId,
+        readAt: dashboardNotificationReads.readAt,
+      })
+      .from(dashboardNotificationReads)
+      .where(
+        and(
+          eq(dashboardNotificationReads.userId, actor.userId),
+          inArray(
+            dashboardNotificationReads.refId,
+            refs.map((ref) => ref.id),
+          ),
+        ),
+      );
+    const createdAt = new Map(
+      refs.map((ref) => [`${ref.type}:${ref.id}`, ref.createdAt.getTime()]),
+    );
+    return new Set(
+      rows
+        .map((row) => ({ key: `${row.kind}:${row.refId}`, readAt: row.readAt.getTime() }))
+        .filter(({ key, readAt }) => {
+          const created = createdAt.get(key);
+          return created !== undefined && readAt >= created;
+        })
+        .map(({ key }) => key),
     );
   }
 
@@ -1860,6 +1983,7 @@ export class DashboardService {
       summary,
       status,
       autoReleaseAt,
+      read: false,
     };
   }
 

@@ -43,7 +43,6 @@ import {
   X,
 } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -56,7 +55,6 @@ import {
   discardSubstitution,
   getAnamnesisAnswers,
   getQueueDetail,
-  resolveHandoff,
   saveProtocol,
   signProtocol,
 } from '@/lib/dashboard-api';
@@ -65,11 +63,11 @@ import type {
   AnamnesisAnswers,
   ProtocolDetail,
   QueueDetail as QueueDetailType,
-  QueueKind,
 } from '@/lib/dashboard-types';
 
 import { ConfirmAction } from './confirm-action';
 import { ConversationReplay } from './conversation-replay';
+import { useMarkNotificationRead } from './notifications-provider';
 import {
   ChipGroupField,
   ComboboxField,
@@ -91,9 +89,6 @@ import {
   type ItemDraft,
   type ItemDrafts,
 } from './substitution-items-review';
-
-const fieldClass =
-  'min-h-11 w-full rounded-lg border border-input bg-background px-3 text-label focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring';
 
 /** Reusa os MESMOS rótulos do formulário de anamnese — não duplicar texto. */
 const WEEKDAY_LABELS: Record<string, string> = Object.fromEntries(
@@ -316,20 +311,6 @@ function validationMessages(error: unknown): string[] {
     if (Array.isArray(issues)) return issues.map(issueText).slice(0, 6);
   }
   return [error instanceof Error ? error.message : 'Não foi possível salvar o protocolo.'];
-}
-
-function humanizeKey(key: string): string {
-  const known: Record<string, string> = {
-    goal: 'Objetivo',
-    level: 'Nível',
-    location: 'Local',
-    age: 'Idade',
-    weeklyFrequency: 'Frequência semanal',
-    reason: 'Motivo',
-    checkinEffort: 'Percepção no check-in',
-    workoutsCompleted: 'Treinos concluídos',
-  };
-  return known[key] ?? key.replace(/([a-z])([A-Z])/g, '$1 $2');
 }
 
 /**
@@ -1440,82 +1421,15 @@ function ProtocolStudentHeader({
   );
 }
 
-function Context({ detail }: { detail: QueueDetailType }) {
-  const entries = Object.entries(detail.context);
-  return (
-    <section
-      aria-labelledby="context-title"
-      className="rounded-xl border border-border bg-card p-4 sm:p-5"
-    >
-      <h2 id="context-title" className="text-h3 font-semibold">
-        Contexto autorizado
-      </h2>
-      {entries.length === 0 ? (
-        <p className="mt-3 text-label text-muted-foreground">
-          Nenhum contexto adicional foi disponibilizado.
-        </p>
-      ) : (
-        <dl className="mt-4 grid gap-3 sm:grid-cols-2">
-          {entries.map(([key, value]) => (
-            <div key={key} className="rounded-lg bg-secondary p-3">
-              <dt className="text-xs font-semibold text-muted-foreground">{humanizeKey(key)}</dt>
-              <dd className="mt-1 text-label">
-                {value === null ? 'Não informado' : String(value)}
-              </dd>
-            </div>
-          ))}
-        </dl>
-      )}
-    </section>
-  );
-}
-
-function HandoffTrigger({ detail }: { detail: QueueDetailType }) {
-  const trigger = detail.handoff?.trigger;
-  return (
-    <section
-      className="rounded-xl border border-border bg-card p-5"
-      aria-labelledby="alert-trigger-title"
-    >
-      <h2 id="alert-trigger-title" className="text-h3 font-semibold">
-        O que gerou este alerta
-      </h2>
-      {trigger ? (
-        <>
-          <p className="mt-3 whitespace-pre-wrap rounded-lg bg-secondary p-4 text-body leading-relaxed">
-            {trigger.content}
-          </p>
-          <time dateTime={trigger.createdAt} className="mt-2 block text-xs text-muted-foreground">
-            Mensagem recebida em{' '}
-            {new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(
-              new Date(trigger.createdAt),
-            )}
-          </time>
-        </>
-      ) : (
-        <p className="mt-3 text-label text-muted-foreground">
-          A mensagem de origem não está disponível neste alerta antigo.
-        </p>
-      )}
-    </section>
-  );
-}
-
-export function QueueDetail({
-  kind,
-  id,
-  returnHref = '/dashboard/educacao-fisica',
-}: {
-  kind: QueueKind;
-  id: string;
-  returnHref?: string;
-}) {
-  const router = useRouter();
+/**
+ * Detalhe de um item da Fila do Profissional (protocolo ou substituição). Alertas do AI Coach e
+ * check-ins têm tela própria em `alert-detail.tsx`.
+ */
+export function QueueDetail({ kind, id }: { kind: 'PROTOCOL' | 'SUBSTITUTION'; id: string }) {
+  const returnHref = '/dashboard/educacao-fisica';
   const [detail, setDetail] = useState<QueueDetailType | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [resolution, setResolution] = useState('Contato realizado e orientação registrada.');
-  const [resolutionNotes, setResolutionNotes] = useState('');
   // Item da proposta cujo exercício está sendo adicionado ao catálogo (`null` = diálogo fechado).
   const [catalogGapItem, setCatalogGapItem] = useState<number | null>(null);
   // Rascunho das decisões do profissional por item (troca em lote). Recomeça a cada carga do
@@ -1550,20 +1464,17 @@ export function QueueDetail({
   const awaitingAutoRelease =
     (kind === 'PROTOCOL' || kind === 'SUBSTITUTION') && Boolean(detail?.item.autoReleaseAt);
   useReviewHold(holdKind, id, awaitingAutoRelease);
+  useMarkNotificationRead(
+    kind === 'SUBSTITUTION' ? 'substitution' : 'protocol',
+    id,
+    Boolean(detail),
+  );
 
   async function runAction(action: () => Promise<unknown>, event: string, message: string) {
     await action();
     captureDashboardEvent(event, { kind });
     setSuccess(message);
     await load();
-  }
-
-  async function resolveQueueItem() {
-    await resolveHandoff(id, resolution.trim(), resolutionNotes.trim());
-    captureDashboardEvent(kind === 'CHECKIN' ? 'cref_checkin_resolved' : 'cref_handoff_resolved', {
-      kind,
-    });
-    router.replace(returnHref);
   }
 
   if (!detail && !error) {
@@ -1593,8 +1504,11 @@ export function QueueDetail({
         href={returnHref}
         className="inline-flex min-h-11 items-center gap-2 text-label font-medium underline underline-offset-4 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
       >
-        <ArrowLeft aria-hidden="true" className="size-4" /> Voltar
+        <ArrowLeft aria-hidden="true" className="size-4" /> Voltar para a Fila do Profissional
       </Link>
+      <p className="mt-2 text-xs font-medium text-muted-foreground">
+        Fila do Profissional · Notificação
+      </p>
 
       {kind === 'PROTOCOL' && detail.protocol ? (
         <ProtocolStudentHeader protocolId={detail.protocol.id} protocol={detail.protocol} />
@@ -1668,99 +1582,12 @@ export function QueueDetail({
           />
         ) : null}
 
-        {kind === 'HANDOFF' ? <HandoffTrigger detail={detail} /> : null}
-
-        {kind === 'HANDOFF' || kind === 'CHECKIN' ? (
-          <section
-            aria-labelledby="handoff-title"
-            className="rounded-xl border border-border bg-card p-5"
-          >
-            <h2 id="handoff-title" className="text-h3 font-semibold">
-              {kind === 'CHECKIN' ? 'Resolver sinalização de check-in' : 'Conduzir intervenção'}
-            </h2>
-            <p className="mt-2 text-label text-muted-foreground">
-              {kind === 'CHECKIN'
-                ? 'Registre a revisão profissional que encerra esta sinalização.'
-                : 'Assuma a conversa se precisar orientar o aluno e registre aqui como o caso foi concluído.'}
-            </p>
-            {kind === 'HANDOFF' && detail.handoff?.studentId ? (
-              <Button asChild className="mt-4" variant="outline">
-                <Link
-                  href={`/dashboard/conversas?aluno=${encodeURIComponent(detail.handoff.studentId)}`}
-                >
-                  Abrir conversa para intervir
-                </Link>
-              </Button>
-            ) : null}
-            {detail.handoff?.status === 'RESOLVED' ? (
-              <p className="mt-4 flex items-center gap-2 text-label font-medium text-muted-foreground">
-                <CheckCircle2 aria-hidden="true" className="size-4 text-verde-pulso" />
-                Alerta já resolvido e registrado na auditoria.
-              </p>
-            ) : (
-              <>
-                <label className="mt-4 flex flex-col gap-2 text-label font-semibold">
-                  Resolução
-                  <input
-                    className={fieldClass}
-                    value={resolution}
-                    maxLength={80}
-                    onChange={(event) => setResolution(event.target.value)}
-                  />
-                </label>
-                <label className="mt-4 flex flex-col gap-2 text-label font-semibold">
-                  Observações
-                  <textarea
-                    className={`${fieldClass} min-h-24 py-2`}
-                    value={resolutionNotes}
-                    maxLength={1000}
-                    required
-                    onChange={(event) => setResolutionNotes(event.target.value)}
-                  />
-                </label>
-                <div className="mt-4">
-                  <ConfirmAction
-                    triggerLabel={
-                      kind === 'CHECKIN' ? 'Resolver sinalização' : 'Marcar como resolvido'
-                    }
-                    title={
-                      kind === 'CHECKIN'
-                        ? 'Confirmar resolução da sinalização?'
-                        : 'Confirmar resolução do alerta?'
-                    }
-                    description="O alerta deixará as notificações pendentes e a resolução ficará registrada na trilha de auditoria."
-                    confirmLabel="Confirmar resolução"
-                    destructive={detail.item.severity === 'SAFETY'}
-                    disabled={resolution.trim().length < 3 || resolutionNotes.trim().length < 3}
-                    onConfirm={resolveQueueItem}
-                  />
-                </div>
-              </>
-            )}
-          </section>
-        ) : null}
-
-        {detail.replay ? (
-          kind === 'HANDOFF' ? (
-            <details className="rounded-xl border border-border bg-card p-5">
-              <summary className="cursor-pointer text-label font-semibold">
-                Ver histórico recente
-              </summary>
-              <div className="mt-4">
-                <ConversationReplay replay={detail.replay} />
-              </div>
-            </details>
-          ) : (
-            <ConversationReplay replay={detail.replay} />
-          )
-        ) : null}
+        {detail.replay ? <ConversationReplay replay={detail.replay} /> : null}
 
         {/* Achado 2026-08-19: pra protocolo, "Contexto autorizado" só repetia a versão
             (já no título) e um `humanReviewRequired` sempre `true` — sem valor pro RT. Mesma
             razão pra substituição (2026-09-02): `context` sempre vem vazio, o que importa
             já está em `SubstitutionSummary`. */}
-        {kind !== 'PROTOCOL' && kind !== 'SUBSTITUTION' ? <Context detail={detail} /> : null}
-
         {kind === 'PROTOCOL' && detail.protocol && !detail.protocol.signatureHash ? (
           <div className="flex justify-end">
             <ConfirmAction
