@@ -6,6 +6,8 @@ import {
 
 import type {
   ActionResult,
+  AlertsResponse,
+  AlertsSummary,
   AnamnesisAnswers,
   AnonymizedReplay,
   OperationsResponse,
@@ -120,6 +122,47 @@ export function parseQueueResponse(value: unknown): QueueResponse {
       total: finiteNumber(counts.total),
     },
   };
+}
+
+function parseAlert(value: unknown): AlertsResponse['open'][number] {
+  if (!isRecord(value)) throw new DashboardApiError(502, 'Alerta inválido.');
+  const id = string(value.id);
+  const createdAt = string(value.createdAt);
+  const updatedAt = string(value.updatedAt);
+  const reason = string(value.reason);
+  if (!id || !createdAt || !updatedAt || !reason) {
+    throw new DashboardApiError(502, 'Alerta incompleto.');
+  }
+  if (value.level !== 'SAFETY' && value.level !== 'ALERT') {
+    throw new DashboardApiError(502, 'Prioridade de alerta desconhecida.');
+  }
+  if (value.status !== 'OPEN' && value.status !== 'RESOLVED') {
+    throw new DashboardApiError(502, 'Estado de alerta desconhecido.');
+  }
+  return {
+    id,
+    studentName: typeof value.studentName === 'string' ? value.studentName : null,
+    level: value.level,
+    reason,
+    sourceType: typeof value.sourceType === 'string' ? value.sourceType : null,
+    status: value.status,
+    createdAt,
+    updatedAt,
+  };
+}
+
+export function parseAlertsResponse(value: unknown): AlertsResponse {
+  if (!isRecord(value) || !Array.isArray(value.open) || !Array.isArray(value.resolved)) {
+    throw new DashboardApiError(502, 'Resposta de alertas inválida.');
+  }
+  return { open: value.open.map(parseAlert), resolved: value.resolved.map(parseAlert) };
+}
+
+export function parseAlertsSummary(value: unknown): AlertsSummary {
+  if (!isRecord(value) || !Number.isFinite(value.open) || Number(value.open) < 0) {
+    throw new DashboardApiError(502, 'Resumo de alertas inválido.');
+  }
+  return { open: Math.floor(Number(value.open)) };
 }
 
 function parseReplayMessage(value: unknown): ReplayMessage {
@@ -339,6 +382,14 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
 
 export async function getQueue(signal?: AbortSignal): Promise<QueueResponse> {
   return parseQueueResponse(await request('/queue', { signal }));
+}
+
+export async function getAlerts(signal?: AbortSignal): Promise<AlertsResponse> {
+  return parseAlertsResponse(await request('/alerts', { signal }));
+}
+
+export async function getAlertsSummary(signal?: AbortSignal): Promise<AlertsSummary> {
+  return parseAlertsSummary(await request('/alerts/summary', { signal }));
 }
 
 export async function getQueueDetail(

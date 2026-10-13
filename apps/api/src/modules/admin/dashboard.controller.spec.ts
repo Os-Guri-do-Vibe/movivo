@@ -14,6 +14,26 @@ const professional: AuthenticatedUser = {
 };
 
 describe('DashboardController SSE', () => {
+  it('libera alertas e seu resumo para PROFESSIONAL/ADMIN', async () => {
+    const alerts = vi.fn(async () => ({ open: [], resolved: [] }));
+    const alertsSummary = vi.fn(async () => ({ open: 0 }));
+    const controller = new DashboardController(
+      { alerts, alertsSummary } as unknown as DashboardService,
+      {} as never,
+    );
+
+    expect(Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.alerts)).toEqual([
+      'PROFESSIONAL',
+      'ADMIN',
+    ]);
+    expect(Reflect.getMetadata(ROLES_KEY, DashboardController.prototype.alertsSummary)).toEqual([
+      'PROFESSIONAL',
+      'ADMIN',
+    ]);
+    await expect(controller.alerts(professional)).resolves.toEqual({ open: [], resolved: [] });
+    await expect(controller.alertsSummary(professional)).resolves.toEqual({ open: 0 });
+  });
+
   it('libera leitura da fila e as mutações (assinar/editar/resolver) para PROFESSIONAL/ADMIN', () => {
     const stream = of({ data: { invalidate: true } });
     const events = vi.fn(() => stream);

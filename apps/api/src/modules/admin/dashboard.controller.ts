@@ -43,6 +43,26 @@ export class DashboardController {
     private readonly auth: AuthService,
   ) {}
 
+  @Get('alerts')
+  @Roles('PROFESSIONAL', 'ADMIN')
+  @ApiOperation({
+    summary: 'Alertas do AI Coach para supervisão do profissional CREF',
+    description:
+      'Escalonamentos de segurança e acompanhamento humano. Protocolos e substituições permanecem na fila do profissional.',
+  })
+  @ApiResponse({ status: 200, description: 'Alertas abertos e os resolvidos mais recentes.' })
+  alerts(@CurrentUser() actor: AuthenticatedUser) {
+    return this.dashboard.alerts(actor);
+  }
+
+  @Get('alerts/summary')
+  @Roles('PROFESSIONAL', 'ADMIN')
+  @ApiOperation({ summary: 'Contagem de alertas abertos para o cabeçalho' })
+  @ApiResponse({ status: 200, description: 'Quantidade de alertas abertos, sem dados do aluno.' })
+  alertsSummary(@CurrentUser() actor: AuthenticatedUser) {
+    return this.dashboard.alertsSummary(actor);
+  }
+
   @Get('queue')
   @Roles('PROFESSIONAL', 'ADMIN')
   @ApiOperation({

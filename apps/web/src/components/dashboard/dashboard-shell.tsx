@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  Bell,
   Bot,
   Brain,
   Cable,
@@ -42,6 +43,7 @@ import {
 } from '@/lib/control-center-access';
 import { cn } from '@/lib/utils';
 
+import { AlertsBell } from './alerts-bell';
 import { AvatarMenu } from './avatar-menu';
 import { LogoutButton } from './logout-button';
 
@@ -103,6 +105,12 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         href: '/dashboard/educacao-fisica',
         label: 'Fila do Profissional',
         icon: ClipboardCheck,
+        capabilities: ['control_center.students.read', 'control_center.students.health.read'],
+      },
+      {
+        href: '/dashboard/alertas',
+        label: 'Alertas',
+        icon: Bell,
         capabilities: ['control_center.students.read', 'control_center.students.health.read'],
       },
     ],
@@ -685,6 +693,13 @@ export function DashboardShell({
             </p>
           </div>
           <div className="flex items-center gap-3">
+            {hasAllCapabilities(
+              capabilities,
+              'control_center.students.read',
+              'control_center.students.health.read',
+            ) ? (
+              <AlertsBell />
+            ) : null}
             <AvatarMenu role={role} name={name} avatarUrl={avatarUrl} />
             <LogoutButton />
           </div>

@@ -10,6 +10,8 @@ import {
   getQueue,
   getQueueDetail,
   parseOperations,
+  parseAlertsResponse,
+  parseAlertsSummary,
   parseQueueDetail,
   parseQueueResponse,
   resolveHandoff,
@@ -32,6 +34,28 @@ function response(status: number, body: unknown): Response {
 afterEach(() => vi.restoreAllMocks());
 
 describe('parsers do contrato do dashboard', () => {
+  it('valida alertas do AI Coach e a contagem sem dados do aluno', () => {
+    const alert = {
+      id: '33333333-3333-4333-8333-333333333333',
+      studentName: 'Ana',
+      level: 'SAFETY',
+      reason: 'RED_FLAG',
+      sourceType: 'CONVERSATION',
+      status: 'OPEN',
+      createdAt: '2026-10-12T12:00:00.000Z',
+      updatedAt: '2026-10-12T12:00:00.000Z',
+    };
+    expect(parseAlertsResponse({ open: [alert], resolved: [] })).toEqual({
+      open: [alert],
+      resolved: [],
+    });
+    expect(parseAlertsSummary({ open: 3.8 })).toEqual({ open: 3 });
+    expect(() =>
+      parseAlertsResponse({ open: [{ ...alert, level: 'URGENT' }], resolved: [] }),
+    ).toThrow(/prioridade/i);
+    expect(() => parseAlertsSummary({ open: -1 })).toThrow(/resumo/i);
+  });
+
   it('valida fila, detalhe e operações', () => {
     expect(parseQueueResponse(queueResponse)).toEqual(queueResponse);
     expect(parseQueueDetail(protocolDetail).protocol?.content.phase).toBe('HIPERTROFIA');
