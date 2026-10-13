@@ -37,6 +37,21 @@ const REASONS: Record<string, { title: string; detail: string }> = {
     title: 'Dor relatada após o treino',
     detail: 'O relato precisa de avaliação profissional antes de qualquer orientação.',
   },
+  FALTAS_SEGUIDAS: {
+    title: 'Faltas seguidas nos treinos',
+    detail:
+      'O aluno faltou pela 3ª sessão de treino seguida. Entre em contato para entender o motivo.',
+  },
+  FALTAS_FREQUENTES: {
+    title: 'Muitas faltas nos treinos',
+    detail:
+      'O aluno faltou a mais de 60% das sessões de treino das últimas duas semanas. Entre em contato para entender o motivo.',
+  },
+  AUSENCIA_DOR: {
+    title: 'Dor como motivo de treino sem registro',
+    detail:
+      'O aluno disse que não treinou por dor ou desconforto. O relato precisa de avaliação profissional.',
+  },
   AJUSTE_DURACAO_SOLICITADO: {
     title: 'Ajuste de duração solicitado',
     detail: 'O aluno precisa de uma adaptação que requer avaliação profissional.',
@@ -58,11 +73,31 @@ const SOURCES: Record<string, string> = {
   CHECKIN: 'Check-in semanal',
   CONVERSATION: 'Conversa',
   PROTOCOL_RENEWAL: 'Renovação de protocolo',
+  ATTENDANCE_STREAK: 'Frequência de treino',
+  ATTENDANCE_RATE: 'Frequência de treino',
 };
 
-export function alertCopyFor(alert: Pick<DashboardAlert, 'level' | 'reason'>) {
+/**
+ * Alertas de frequência falam do aluno pelo nome completo: o profissional CREF precisa saber
+ * a quem ligar sem abrir o detalhe. Sem nome, cai no texto genérico de `REASONS`.
+ */
+const WITH_STUDENT_NAME: Record<string, (name: string) => string> = {
+  FALTAS_SEGUIDAS: (name) =>
+    `O aluno ${name} faltou pela 3ª sessão de treino seguida. Entre em contato para entender o motivo.`,
+  FALTAS_FREQUENTES: (name) =>
+    `O aluno ${name} faltou a mais de 60% das sessões de treino das últimas duas semanas. Entre em contato para entender o motivo.`,
+};
+
+export function alertCopyFor(
+  alert: Pick<DashboardAlert, 'level' | 'reason'> & { studentName?: string | null },
+) {
+  const known = REASONS[alert.reason];
+  const personalized = WITH_STUDENT_NAME[alert.reason];
+  if (known && personalized && alert.studentName?.trim()) {
+    return { ...known, detail: personalized(alert.studentName.trim()) };
+  }
   return (
-    REASONS[alert.reason] ?? {
+    known ?? {
       title:
         alert.level === 'SAFETY' ? 'Sinal de segurança' : 'Acompanhamento solicitado pelo AI Coach',
       detail: 'O AI Coach encaminhou este caso para supervisão profissional.',
@@ -80,6 +115,8 @@ const ORIGIN_NOTES: Record<string, string> = {
   WORKOUT_INSIGHT: 'Gerado a partir do acompanhamento da duração dos treinos.',
   CHECKIN: 'Gerado a partir do check-in semanal.',
   PROTOCOL_RENEWAL: 'Gerado durante a renovação do protocolo.',
+  ATTENDANCE_STREAK: 'Gerado a partir da frequência de treinos do aluno.',
+  ATTENDANCE_RATE: 'Gerado a partir da frequência de treinos do aluno.',
 };
 
 export function alertOriginNote(sourceType: string | null): string | null {
