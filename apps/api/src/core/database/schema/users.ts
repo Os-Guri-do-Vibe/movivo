@@ -52,7 +52,6 @@ export const users = pgTable(
     /** Preferências do diário de treino. 05:00 é o default do produto, sempre no fuso do titular. */
     timezone: varchar('timezone', { length: 64 }).notNull().default('America/Sao_Paulo'),
     workoutReminderTime: varchar('workout_reminder_time', { length: 5 }).notNull().default('05:00'),
-    workoutReminderEnabled: boolean('workout_reminder_enabled').notNull().default(true),
 
     /**
      * Sexo biológico informado pelo titular na Etapa 1 da anamnese — denormalizado aqui

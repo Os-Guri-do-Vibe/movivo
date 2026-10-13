@@ -149,6 +149,8 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
     parents: [{ table: 'protocols', column: 'protocol_id' }],
   },
   { table: 'reengagement_nudges', column: 'user_id', professional: 'read' },
+  // Pergunta do Coach que espera resposta (treino sem registro): metadado do tópico, sem texto livre.
+  { table: 'conversation_followups', column: 'user_id', professional: 'read' },
   { table: 'audit_logs', column: 'user_id', professional: 'write' },
   // Sprint 8 (US-8.1): treino concluído do titular. Não há caminho HTTP de aluno para
   // esta tabela (não existe UI de aluno) — a RLS existe para que o painel do
