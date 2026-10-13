@@ -388,7 +388,11 @@ export function AlertDetail({ id }: { id: string }) {
   const safety = level === 'SAFETY';
   const status = resolved ? 'RESOLVED' : (handoff?.status ?? 'OPEN');
   const sourceType = handoff?.sourceType ?? null;
-  const copy = alertCopyFor({ level, reason: handoff?.reason ?? '' });
+  const copy = alertCopyFor({
+    level,
+    reason: handoff?.reason ?? '',
+    studentName: handoff?.studentName,
+  });
   const LevelIcon = safety ? ShieldAlert : AlertTriangle;
   const studentId = handoff?.studentId;
   const conversation = detail.replay;
