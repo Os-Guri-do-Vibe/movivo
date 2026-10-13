@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 
-import { SummaryDashboard } from '@/components/dashboard/summary-dashboard';
+import { OverviewDashboard } from '@/components/dashboard/overview-dashboard';
 import { landingPathForRole } from '@/lib/control-center-access';
 
 import { requireDashboardRole } from './_lib/session';
@@ -14,5 +14,5 @@ export default async function DashboardPage() {
     const target = landingPathForRole(session.role, session.capabilities);
     redirect(target === '/dashboard' ? '/entrar?erro=sem-permissao' : target);
   }
-  return <SummaryDashboard resource="overview" />;
+  return <OverviewDashboard />;
 }

@@ -1,44 +1,38 @@
 'use client';
 
-import { CircleGauge, Landmark, ServerCog } from 'lucide-react';
-import Link from 'next/link';
+import { Landmark, ServerCog } from 'lucide-react';
 import { useCallback } from 'react';
 import type {
   ControlCenterFinanceResponse,
-  ControlCenterOverviewResponse,
   ControlCenterPendingCapability,
   ControlCenterPercentiles,
-  ControlCenterPillarSummary,
   ControlCenterSlo,
   ControlCenterSystemResponse,
 } from '@movivo/shared';
 
-import { getFinanceSummary, getOverview, getSystemSummary } from '@/lib/control-center-api';
+import { getFinanceSummary, getSystemSummary } from '@/lib/control-center-api';
 import { cn } from '@/lib/utils';
 
 import { DailySeriesChart } from './overview-charts';
 
 import {
   DataQuality,
-  formatMetric,
   MetricGrid,
   ResourceState,
   SectorHeader,
   useControlCenterResource,
 } from './control-center-ui';
 
-type Resource = 'overview' | 'system' | 'finance';
-type SummaryResponse =
-  ControlCenterOverviewResponse | ControlCenterSystemResponse | ControlCenterFinanceResponse;
+type Resource = 'system' | 'finance';
+type SummaryResponse = ControlCenterSystemResponse | ControlCenterFinanceResponse;
 
 /** Título e ícone iguais ao item da sidebar de cada rota (achado 2026-09-04). */
-const COPY: Record<Resource, { title: string; icon: typeof CircleGauge }> = {
-  overview: { title: 'Visão Geral', icon: CircleGauge },
+const COPY: Record<Resource, { title: string; icon: typeof Landmark }> = {
   system: { title: 'Saúde & Disponibilidade', icon: ServerCog },
   finance: { title: 'Receita & Assinaturas', icon: Landmark },
 };
 
-function metricsFor(resource: Exclude<Resource, 'overview'>, response: SummaryResponse) {
+function metricsFor(resource: Resource, response: SummaryResponse) {
   if (resource === 'system') {
     const data = (response as ControlCenterSystemResponse).data;
     return [
@@ -63,75 +57,6 @@ function metricsFor(resource: Exclude<Resource, 'overview'>, response: SummaryRe
     { label: 'CAC', metric: data.customerAcquisitionCost },
     { label: 'Distribuição por sócio', metric: data.partnerDistribution },
   ];
-}
-
-const PILLAR_STATE_TONE: Record<
-  ControlCenterPillarSummary['state'],
-  { dot: string; label: string; border: string }
-> = {
-  OK: { dot: 'bg-emerald-500', label: 'Tudo certo', border: 'border-border' },
-  ATTENTION: { dot: 'bg-amber-500', label: 'Atenção', border: 'border-amber-500/40' },
-  CRITICAL: { dot: 'bg-coral', label: 'Crítico', border: 'border-coral' },
-};
-
-/**
- * Linha-resumo de um pilar (US-7.8): nenhum número nasce na Visão Geral — o
- * `headline`/`details` vêm do próprio pilar de destino, e o clique leva pra lá.
- */
-function OverviewPillarRow({ pillar }: { pillar: ControlCenterPillarSummary }) {
-  const tone = PILLAR_STATE_TONE[pillar.state];
-  return (
-    <li>
-      <Link
-        href={pillar.href}
-        className={cn(
-          'block rounded-xl border bg-card p-5 transition-colors hover:border-verde-pulso focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring',
-          tone.border,
-        )}
-      >
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-label font-semibold">{pillar.label}</h2>
-          <span className="flex items-center gap-2 whitespace-nowrap text-xs font-semibold">
-            <span aria-hidden="true" className={cn('size-3 rounded-full', tone.dot)} />
-            {tone.label}
-          </span>
-        </div>
-        <p
-          className="mt-3 font-mono text-h1 font-bold text-foreground"
-          aria-label={`${pillar.headline.label}: ${formatMetric(pillar.headline.metric)}`}
-        >
-          {formatMetric(pillar.headline.metric)}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">{pillar.headline.label}</p>
-        {pillar.details.length > 0 ? (
-          <ul className="mt-3 flex flex-col gap-1 text-xs text-muted-foreground">
-            {pillar.details.map((detail) => (
-              <li key={detail.label}>
-                {detail.label}: {formatMetric(detail.metric)}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        {pillar.reason ? (
-          <p className="mt-2 text-xs font-medium text-coral">{pillar.reason}</p>
-        ) : null}
-      </Link>
-    </li>
-  );
-}
-
-/**
- * Visão Geral (US-7.8): resumo por pilar, não uma sexta tela com métrica própria.
- * Um pilar sem capability não chega aqui — o backend já não o calculou.
- */
-function OverviewSections({ data }: { data: ControlCenterOverviewResponse['data'] }) {
-  return (
-    <ul className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-label="Resumo por pilar">
-      {data.pillars.map((pillar) => (
-        <OverviewPillarRow key={pillar.pillar} pillar={pillar} />
-      ))}
-    </ul>
-  );
 }
 
 const SLO_TONE: Record<ControlCenterSlo['status'], { dot: string; label: string; bar: string }> = {
@@ -632,8 +557,7 @@ export function SummaryDashboard({ resource }: { resource: Resource }) {
   const load = useCallback(
     (signal?: AbortSignal): Promise<SummaryResponse> => {
       if (resource === 'system') return getSystemSummary(signal);
-      if (resource === 'finance') return getFinanceSummary(signal);
-      return getOverview(signal);
+      return getFinanceSummary(signal);
     },
     [resource],
   );
@@ -665,9 +589,7 @@ export function SummaryDashboard({ resource }: { resource: Resource }) {
           A última atualização falhou: {state.error}
         </p>
       ) : null}
-      {resource === 'overview' ? (
-        <OverviewSections data={(state.data as ControlCenterOverviewResponse).data} />
-      ) : resource === 'system' ? (
+      {resource === 'system' ? (
         <SystemSections data={(state.data as ControlCenterSystemResponse).data} />
       ) : (
         <>

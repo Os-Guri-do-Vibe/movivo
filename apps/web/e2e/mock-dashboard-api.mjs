@@ -453,23 +453,107 @@ createServer(async (request, response) => {
           {
             pillar: 'STUDENTS',
             label: 'Alunos',
-            state: 'OK',
+            state: 'ATTENTION',
             href: '/dashboard/alunos',
             headline: {
-              label: 'Alunos cadastrados',
-              metric: metric(12, 'COUNT', 'Alunos cadastrados.'),
+              label: 'Treinos nos primeiros 30 dias pagos (meta ≥8)',
+              metric: metric(5.5, 'COUNT', 'Média de treinos registrados na coorte paga.'),
             },
-            details: [],
-            reason: null,
+            details: [
+              {
+                label: 'Taxa de reporte de treino',
+                metric: metric(72, 'PERCENT', 'Alunos com ao menos 1 treino registrado.'),
+              },
+              {
+                label: 'Em risco de cancelamento',
+                metric: metric(3, 'COUNT', 'Alunos com sinal de risco comercial.'),
+              },
+              {
+                label: 'Alertas de segurança e PAR-Q bloqueado',
+                metric: metric(0, 'COUNT', 'Alertas SAFETY abertos mais PAR-Q bloqueado.'),
+              },
+            ],
+            signals: [],
+            reason: '3 aluno(s) com sinal de risco de cancelamento.',
           },
           {
             pillar: 'FINANCE',
             label: 'Financeiro',
             state: 'OK',
             href: '/dashboard/financeiro',
-            headline: { label: 'MRR contratado', metric: metric(468, 'BRL', 'MRR contratado.') },
-            details: [],
+            headline: { label: 'MRR contratado', metric: metric(1638, 'BRL', 'MRR contratado.') },
+            details: [
+              { label: 'Lucro do período', metric: metric(420.5, 'BRL', 'Receita menos despesa.') },
+              {
+                label: 'Receita em risco (30 dias)',
+                metric: metric(0, 'BRL', 'Renovações em risco.'),
+              },
+              { label: 'Inadimplência', metric: metric(4, 'PERCENT', 'Cobranças que falharam.') },
+            ],
+            signals: [],
             reason: null,
+          },
+          {
+            pillar: 'MARKETING',
+            label: 'Marketing',
+            state: 'OK',
+            href: '/dashboard/analytics',
+            headline: { label: 'Cadastros iniciados', metric: metric(120, 'COUNT', 'Cadastros.') },
+            details: [
+              {
+                label: 'Taxa de conclusão da anamnese',
+                metric: metric(68, 'PERCENT', 'Enviados sobre iniciados.'),
+              },
+              { label: 'Conversão do trial', metric: metric(35, 'PERCENT', 'Trial para pago.') },
+              {
+                label: 'CAC do canal principal (meta_ads)',
+                metric: metric(54, 'BRL', 'Custo de aquisição.'),
+              },
+            ],
+            signals: [],
+            reason: null,
+          },
+          {
+            pillar: 'AI',
+            label: 'IA',
+            state: 'OK',
+            href: '/dashboard/ia/agente',
+            headline: {
+              label: 'Resposta bloqueada pela validação',
+              metric: metric(1.2, 'PERCENT', 'Bloqueadas sobre validadas.'),
+            },
+            details: [
+              {
+                label: 'Resposta do coach (p95)',
+                metric: metric(9000, 'MILLISECONDS', 'Tempo ruim de resposta.'),
+              },
+              {
+                label: 'Trabalhos de IA com falha (30 dias)',
+                metric: metric(3, 'COUNT', 'Falhas e DLQ.'),
+              },
+            ],
+            signals: [{ label: 'Personas', state: 'OK', text: 'Masculina v3 · Feminina v2' }],
+            reason: null,
+          },
+          {
+            pillar: 'SYSTEM',
+            label: 'Sistema',
+            state: 'ATTENTION',
+            href: '/dashboard/sistema',
+            headline: {
+              label: 'Resposta do AI Coach em até 30 segundos',
+              metric: metric(96.4, 'PERCENT', 'Ao menos 95% em até 30s.'),
+            },
+            details: [
+              {
+                label: 'Orçamento de erro consumido',
+                metric: metric(72, 'PERCENT', 'Margem de erro já usada.'),
+              },
+            ],
+            signals: [
+              { label: 'WhatsApp', state: 'ATTENTION', text: 'Aguardando leitura do QR Code' },
+            ],
+            reason: 'WhatsApp: Aguardando leitura do QR Code.',
           },
         ],
       },

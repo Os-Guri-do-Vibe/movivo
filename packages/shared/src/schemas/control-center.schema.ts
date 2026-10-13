@@ -90,6 +90,17 @@ export const controlCenterLabeledMetricSchema = z.object({
 });
 
 /**
+ * Sinal de estado que não é um número (ex.: conexão do WhatsApp). Tem o mesmo semáforo do
+ * pilar e um texto curto já pronto para leitura.
+ */
+export const controlCenterPillarSignalSchema = z.object({
+  label: z.string().min(1),
+  state: controlCenterPillarStateSchema,
+  text: z.string().min(1),
+});
+export type ControlCenterPillarSignal = z.infer<typeof controlCenterPillarSignalSchema>;
+
+/**
  * Linha-resumo de um pilar (US-7.8). **Nenhum número nasce aqui**: todos vêm de uma
  * métrica que já existe no pilar de destino, e `href` é a rota onde se age sobre ela.
  */
@@ -102,6 +113,8 @@ export const controlCenterPillarSummarySchema = z.object({
   /** O número-âncora do pilar naquele momento. */
   headline: controlCenterLabeledMetricSchema,
   details: z.array(controlCenterLabeledMetricSchema),
+  /** Estados não numéricos do pilar. Payload sem o campo (versão anterior) lê como vazio. */
+  signals: z.array(controlCenterPillarSignalSchema).default([]),
   /** Por que a linha não está `OK`. `null` quando está. */
   reason: z.string().nullable(),
 });
