@@ -44,6 +44,7 @@ import {
 import { cn } from '@/lib/utils';
 
 import { AlertsBell } from './alerts-bell';
+import { NotificationsProvider } from './notifications-provider';
 import { AvatarMenu } from './avatar-menu';
 import { LogoutButton } from './logout-button';
 
@@ -643,7 +644,13 @@ export function DashboardShell({
     setDrawerOpen(false);
   }, [pathname]);
 
-  return (
+  const hasNotifications = hasAllCapabilities(
+    capabilities,
+    'control_center.students.read',
+    'control_center.students.health.read',
+  );
+
+  const shell = (
     <div className="dashboard-theme min-h-dvh bg-background">
       <a
         href="#conteudo-dashboard"
@@ -693,13 +700,7 @@ export function DashboardShell({
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {hasAllCapabilities(
-              capabilities,
-              'control_center.students.read',
-              'control_center.students.health.read',
-            ) ? (
-              <AlertsBell />
-            ) : null}
+            {hasNotifications ? <AlertsBell /> : null}
             <AvatarMenu role={role} name={name} avatarUrl={avatarUrl} />
             <LogoutButton />
           </div>
@@ -710,4 +711,5 @@ export function DashboardShell({
       </div>
     </div>
   );
+  return hasNotifications ? <NotificationsProvider>{shell}</NotificationsProvider> : shell;
 }

@@ -35,6 +35,8 @@ export interface QueueItem {
    * catálogo na tela de detalhe (`substitution.catalogGap`). `null` nos demais itens `optional`.
    */
   origin: 'PARQ' | 'FALLBACK' | 'EDIT' | 'AI_SUBSTITUTION' | 'CATALOG_GAP' | null;
+  /** O profissional logado já abriu este item. Ler não tira o item da fila. */
+  read: boolean;
 }
 
 /**
@@ -67,6 +69,8 @@ export interface DashboardAlert {
   status: 'OPEN' | 'RESOLVED';
   createdAt: string;
   updatedAt: string;
+  /** O profissional logado já abriu este alerta. Ler não resolve. */
+  read: boolean;
 }
 
 export interface AlertsResponse {
@@ -166,6 +170,11 @@ export interface QueueDetail {
     level: string;
     status: string;
     studentId?: string;
+    studentName?: string | null;
+    sourceType?: string | null;
+    sourceId?: string | null;
+    createdAt?: string;
+    updatedAt?: string;
     trigger?: { content: string; createdAt: string; direction: 'INBOUND' | 'OUTBOUND' } | null;
   };
   substitution?: SubstitutionDetail;
@@ -253,4 +262,38 @@ export interface ActionResult {
   validation?: string | { valid?: boolean; issues?: unknown[] };
   /** Alertas do `ValidationService` (edição de protocolo): o que corrigir antes de assinar. */
   violations?: Array<{ rule?: string; detail?: string }>;
+}
+
+/** Tipo de notificação do sino; cada um abre a sua própria tela de detalhe. */
+export type NotificationType = 'alert' | 'protocol' | 'substitution';
+
+export interface NotificationItem {
+  type: NotificationType;
+  id: string;
+  read: boolean;
+  createdAt: string;
+  /** Só alertas. A Fila do Profissional não tem nível. */
+  level: 'SAFETY' | 'ALERT' | null;
+  /** Título pronto vindo da fila (protocolo/substituição/treino); alertas usam `reason`. */
+  title: string | null;
+  studentName: string | null;
+  reason: string | null;
+  sourceType: string | null;
+  section: 'MANDATORY' | 'OPTIONAL' | null;
+  origin: QueueItem['origin'];
+  autoReleaseAt: string | null;
+}
+
+export interface NotificationsResponse {
+  /** Hora do servidor em que o retrato foi tirado; é o corte de "marcar todas como lidas". */
+  snapshotAt: string;
+  items: NotificationItem[];
+  totalPending: number;
+  unread: number;
+  openSafety: number;
+}
+
+export interface NotificationsSummary {
+  unread: number;
+  openSafety: number;
 }

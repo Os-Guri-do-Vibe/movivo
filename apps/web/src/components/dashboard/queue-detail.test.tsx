@@ -9,10 +9,6 @@ import {
   batchSubstitutionDetail,
   CATALOG_GAP_SUBSTITUTION_ID,
   catalogGapSubstitutionDetail,
-  CHECKIN_ID,
-  checkinItem,
-  HANDOFF_ID,
-  handoffItem,
   optionalProtocolItem,
   PARQ_PROTOCOL_ID,
   parqProtocolItem,
@@ -23,14 +19,11 @@ import {
   SUBSTITUTION_ID,
 } from '../../../test/dashboard-fixtures';
 
-const navigation = vi.hoisted(() => ({ replace: vi.fn() }));
-vi.mock('next/navigation', () => ({ useRouter: () => navigation }));
-
 const api = vi.hoisted(() => ({
   getQueueDetail: vi.fn(),
   getAnamnesisAnswers: vi.fn(),
   signProtocol: vi.fn(),
-  resolveHandoff: vi.fn(),
+  markNotificationRead: vi.fn(),
   saveProtocol: vi.fn(),
   amendActiveProtocol: vi.fn(),
   approveSubstitutionNow: vi.fn(),
@@ -68,19 +61,6 @@ import { QueueDetail } from './queue-detail';
  */
 const parqProtocolDetail = { ...protocolDetail, item: parqProtocolItem };
 const optionalProtocolDetail = { ...protocolDetail, item: optionalProtocolItem };
-
-const handoffDetail = {
-  item: handoffItem,
-  context: { reason: 'Relato anonimizado que exige revisão.' },
-  handoff: { reason: 'Relato anonimizado', level: 'SAFETY', status: 'OPEN' },
-  replay: protocolDetail.replay,
-};
-
-const checkinDetail = {
-  item: checkinItem,
-  context: { checkinEffort: 'Dor relatada' },
-  handoff: { reason: checkinItem.summary, level: 'SAFETY', status: 'OPEN' },
-};
 
 /**
  * Renderiza a tela de revisão de um protocolo e devolve o que o RT de fato percebe:
@@ -151,10 +131,9 @@ async function renderProtocolScreen(
 beforeEach(() => {
   Object.values(api).forEach((mock) => mock.mockReset());
   controlCenterApi.getExerciseCatalog.mockReset();
-  navigation.replace.mockReset();
   reviewHold.useReviewHold.mockReset();
   api.signProtocol.mockResolvedValue({ status: 'SIGNED' });
-  api.resolveHandoff.mockResolvedValue({ status: 'RESOLVED' });
+  api.markNotificationRead.mockResolvedValue(undefined);
   api.getAnamnesisAnswers.mockResolvedValue(anamnesisAnswers);
   api.approveSubstitutionNow.mockResolvedValue({ status: 'released' });
   api.discardSubstitution.mockResolvedValue({ status: 'discarded' });
@@ -474,17 +453,6 @@ describe('QueueDetail — trava do envio automático enquanto a tela está abert
     render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
     expect(reviewHold.useReviewHold).toHaveBeenLastCalledWith('PROTOCOL', PROTOCOL_ID, false);
   });
-
-  it('outros tipos de caso (check-in) nunca seguram o envio de protocolo', async () => {
-    api.getQueueDetail.mockResolvedValue({ ...optionalDetail, item: { ...checkinItem } });
-    render(<QueueDetail kind="CHECKIN" id={CHECKIN_ID} />);
-    await waitFor(() => expect(api.getQueueDetail).toHaveBeenCalled());
-    expect(reviewHold.useReviewHold).not.toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      true,
-    );
-  });
 });
 
 describe('QueueDetail', () => {
@@ -500,6 +468,26 @@ describe('QueueDetail', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('auditoria registrada');
   });
 
+  it('identifica a tela como notificação da Fila do Profissional e registra a leitura', async () => {
+    api.getQueueDetail.mockResolvedValue(protocolDetail);
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await screen.findByRole('heading', { name: /Protocolo · versão 1/i });
+    expect(screen.getByText('Fila do Profissional · Notificação')).toBeVisible();
+    expect(
+      screen.getByRole('link', { name: /voltar para a fila do profissional/i }),
+    ).toHaveAttribute('href', '/dashboard/educacao-fisica');
+    await waitFor(() =>
+      expect(api.markNotificationRead).toHaveBeenCalledWith('protocol', PROTOCOL_ID),
+    );
+  });
+
+  it('não registra leitura enquanto o detalhe não carregou', async () => {
+    api.getQueueDetail.mockRejectedValue(new Error('Caso indisponível'));
+    render(<QueueDetail kind="SUBSTITUTION" id={SUBSTITUTION_ID} />);
+    await screen.findByRole('alert');
+    expect(api.markNotificationRead).not.toHaveBeenCalled();
+  });
+
   // Achado 2026-08-19 (a pedido do fundador): "Contexto autorizado" só repetia a versão
   // (já no título) e um booleano sempre `true` — sem valor pro RT nesta tela.
   it('não mostra "Contexto autorizado" pra protocolo', async () => {
@@ -507,12 +495,6 @@ describe('QueueDetail', () => {
     render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
     await screen.findByRole('heading', { name: /Protocolo · versão 1/i });
     expect(screen.queryByText('Contexto autorizado')).not.toBeInTheDocument();
-  });
-
-  it('mostra "Contexto autorizado" pras outras telas (ex.: check-in)', async () => {
-    api.getQueueDetail.mockResolvedValue(checkinDetail);
-    render(<QueueDetail kind="CHECKIN" id={CHECKIN_ID} />);
-    expect(await screen.findByText('Contexto autorizado')).toBeVisible();
   });
 
   // Achado 2026-08-19 (a pedido do fundador): editar acontece DENTRO do próprio card
@@ -710,66 +692,6 @@ describe('QueueDetail', () => {
     expect(optional.controls.length).toBeGreaterThan(20);
 
     expect(mandatory).toEqual(optional);
-  });
-
-  it('registra a resolução de handoff SAFETY com confirmação', async () => {
-    api.getQueueDetail.mockResolvedValue(handoffDetail);
-    render(<QueueDetail kind="HANDOFF" id={HANDOFF_ID} />);
-    expect(await screen.findByText('SEGURANÇA · PRIORIDADE')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Marcar como resolvido' })).toBeDisabled();
-    await userEvent.type(screen.getByLabelText('Observações'), 'Registro profissional.');
-    await userEvent.click(screen.getByRole('button', { name: 'Marcar como resolvido' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Confirmar resolução' }));
-    await waitFor(() =>
-      expect(api.resolveHandoff).toHaveBeenCalledWith(
-        HANDOFF_ID,
-        'Contato realizado e orientação registrada.',
-        'Registro profissional.',
-      ),
-    );
-    expect(navigation.replace).toHaveBeenCalledWith('/dashboard/educacao-fisica');
-  });
-
-  it('mostra a mensagem que gerou o alerta e abre a conversa do aluno para intervir', async () => {
-    api.getQueueDetail.mockResolvedValue({
-      ...handoffDetail,
-      handoff: {
-        ...handoffDetail.handoff,
-        studentId: 'student-1',
-        trigger: {
-          content: 'Posso falar de investimentos com o AI Coach?',
-          createdAt: '2026-10-12T14:30:00.000Z',
-          direction: 'INBOUND',
-        },
-      },
-    });
-    render(<QueueDetail kind="HANDOFF" id={HANDOFF_ID} returnHref="/dashboard/alertas" />);
-
-    expect(await screen.findByRole('heading', { name: 'O que gerou este alerta' })).toBeVisible();
-    expect(screen.getByText('Posso falar de investimentos com o AI Coach?')).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Abrir conversa para intervir' })).toHaveAttribute(
-      'href',
-      '/dashboard/conversas?aluno=student-1',
-    );
-  });
-
-  it('resolve sinalização de CHECKIN SAFETY pelo endpoint de handoff e atualiza a fila', async () => {
-    api.getQueueDetail.mockResolvedValue(checkinDetail);
-    render(<QueueDetail kind="CHECKIN" id={CHECKIN_ID} />);
-    expect(await screen.findByText('SEGURANÇA · PRIORIDADE')).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'Resolver sinalização de check-in' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Resolver sinalização' })).toBeDisabled();
-    await userEvent.type(screen.getByLabelText('Observações'), 'Revisão profissional registrada.');
-    await userEvent.click(screen.getByRole('button', { name: 'Resolver sinalização' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Confirmar resolução' }));
-    await waitFor(() =>
-      expect(api.resolveHandoff).toHaveBeenCalledWith(
-        CHECKIN_ID,
-        'Contato realizado e orientação registrada.',
-        'Revisão profissional registrada.',
-      ),
-    );
-    expect(navigation.replace).toHaveBeenCalledWith('/dashboard/educacao-fisica');
   });
 
   it('oferece recuperação quando o detalhe falha', async () => {
@@ -1289,21 +1211,6 @@ describe('QueueDetail', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Não foi possível salvar o protocolo.',
     );
-  });
-
-  it('"Contexto autorizado": mostra aviso vazio quando não há entradas, e trata chave desconhecida e valor nulo', async () => {
-    api.getQueueDetail.mockResolvedValueOnce({ ...handoffDetail, context: {} });
-    const { unmount } = render(<QueueDetail kind="HANDOFF" id={HANDOFF_ID} />);
-    expect(await screen.findByText('Nenhum contexto adicional foi disponibilizado.')).toBeVisible();
-    unmount();
-
-    api.getQueueDetail.mockResolvedValueOnce({
-      ...checkinDetail,
-      context: { unknownField: 'valor', nullField: null },
-    });
-    render(<QueueDetail kind="CHECKIN" id={CHECKIN_ID} />);
-    expect(await screen.findByText('unknown Field')).toBeVisible();
-    expect(screen.getByText('Não informado')).toBeVisible();
   });
 
   it('protocolo assinado mostra o hash e a data (ou "data não informada" quando ausente)', async () => {

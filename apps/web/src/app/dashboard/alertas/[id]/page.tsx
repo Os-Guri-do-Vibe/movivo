@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 
-import { QueueDetail } from '@/components/dashboard/queue-detail';
+import { AlertDetail } from '@/components/dashboard/alert-detail';
 
 import { requireDashboardCapability } from '../../_lib/session';
 
@@ -11,5 +11,5 @@ export default async function AlertDetailPage({ params }: { params: Promise<{ id
   );
   const { id } = await params;
   if (!id) notFound();
-  return <QueueDetail kind="HANDOFF" id={id} returnHref="/dashboard/alertas" />;
+  return <AlertDetail id={id} />;
 }

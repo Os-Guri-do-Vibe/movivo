@@ -8,19 +8,12 @@ import { Button } from '@/components/ui/button';
 import { alertCopyFor, alertSourceLabel } from '@/lib/alert-copy';
 import { getAlerts } from '@/lib/dashboard-api';
 import type { AlertsResponse, DashboardAlert } from '@/lib/dashboard-types';
+import { elapsed } from '@/lib/relative-time';
 import { cn } from '@/lib/utils';
 
 import { StatusBadge } from './control-center-table';
 import { SectorHeader } from './control-center-ui';
-
-function elapsed(createdAt: string): string {
-  const minutes = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 60_000));
-  if (minutes < 1) return 'Agora';
-  if (minutes < 60) return `Há ${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `Há ${hours} h`;
-  return `Há ${Math.floor(hours / 24)} dia${hours >= 48 ? 's' : ''}`;
-}
+import { UnreadIndicator } from './unread-indicator';
 
 function AlertCard({ alert }: { alert: DashboardAlert }) {
   const { title, detail } = alertCopyFor(alert);
@@ -50,7 +43,18 @@ function AlertCard({ alert }: { alert: DashboardAlert }) {
             </span>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-body font-semibold text-foreground">{title}</h2>
+                <UnreadIndicator
+                  read={alert.read || alert.status === 'RESOLVED'}
+                  label="Não lido. "
+                />
+                <h2
+                  className={cn(
+                    'text-body text-foreground',
+                    alert.read || alert.status === 'RESOLVED' ? 'font-medium' : 'font-semibold',
+                  )}
+                >
+                  {title}
+                </h2>
                 <StatusBadge tone={safety ? 'attention' : 'neutral'} variant="solid">
                   {safety ? 'Segurança' : 'Atenção'}
                 </StatusBadge>
@@ -71,6 +75,14 @@ function AlertCard({ alert }: { alert: DashboardAlert }) {
             <Clock3 aria-hidden="true" className="size-3.5" />
             {elapsed(alert.createdAt)}
           </time>
+          {alert.status === 'RESOLVED' ? (
+            <span className="basis-full text-xs text-muted-foreground">
+              Resolvido em{' '}
+              {new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(
+                new Date(alert.updatedAt),
+              )}
+            </span>
+          ) : null}
         </div>
       </Link>
     </li>

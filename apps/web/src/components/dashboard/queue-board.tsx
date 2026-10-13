@@ -28,6 +28,7 @@ import {
   type StatusTone,
 } from './control-center-table';
 import { SectorHeader } from './control-center-ui';
+import { UnreadIndicator } from './unread-indicator';
 
 const FALLBACK_INTERVAL_MS = 30_000;
 
@@ -177,7 +178,10 @@ function QueueCard({ item, section }: { item: QueueItem; section: QueueSectionId
           </span>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-body font-semibold">{item.title}</h3>
+              <UnreadIndicator read={item.read} />
+              <h3 className={cn('text-body', item.read ? 'font-medium' : 'font-semibold')}>
+                {item.title}
+              </h3>
               {item.severity !== 'ROUTINE' && item.severity !== 'SAFETY' ? (
                 /*
                  * Pill curto + frase completa nos dois canais de leitura: `title` para

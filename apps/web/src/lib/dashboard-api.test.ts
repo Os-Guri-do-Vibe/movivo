@@ -12,6 +12,8 @@ import {
   parseOperations,
   parseAlertsResponse,
   parseAlertsSummary,
+  parseNotificationsResponse,
+  parseNotificationsSummary,
   parseQueueDetail,
   parseQueueResponse,
   resolveHandoff,
@@ -46,14 +48,53 @@ describe('parsers do contrato do dashboard', () => {
       updatedAt: '2026-10-12T12:00:00.000Z',
     };
     expect(parseAlertsResponse({ open: [alert], resolved: [] })).toEqual({
-      open: [alert],
+      open: [{ ...alert, read: false }],
       resolved: [],
     });
+    expect(
+      parseAlertsResponse({ open: [{ ...alert, read: true }], resolved: [] }).open[0]?.read,
+    ).toBe(true);
     expect(parseAlertsSummary({ open: 3.8 })).toEqual({ open: 3 });
     expect(() =>
       parseAlertsResponse({ open: [{ ...alert, level: 'URGENT' }], resolved: [] }),
     ).toThrow(/prioridade/i);
     expect(() => parseAlertsSummary({ open: -1 })).toThrow(/resumo/i);
+  });
+
+  it('valida notificações do sino e rejeita tipo ou contagem inválidos', () => {
+    const item = {
+      type: 'protocol',
+      id: 'p-1',
+      read: true,
+      createdAt: '2026-10-12T12:00:00.000Z',
+      level: null,
+      title: 'Protocolo para Revisão: Ana',
+      section: 'MANDATORY',
+      origin: 'PARQ',
+      autoReleaseAt: null,
+    };
+    const parsed = parseNotificationsResponse({
+      snapshotAt: '2026-10-12T13:00:00.000Z',
+      items: [item],
+      totalPending: 3,
+      unread: 2,
+      openSafety: 1,
+    });
+    expect(parsed).toMatchObject({ snapshotAt: '2026-10-12T13:00:00.000Z', totalPending: 3 });
+    expect(parsed.items[0]).toMatchObject({ type: 'protocol', read: true, section: 'MANDATORY' });
+    expect(parseNotificationsSummary({ unread: 4.9, openSafety: 0 })).toEqual({
+      unread: 4,
+      openSafety: 0,
+    });
+    expect(() =>
+      parseNotificationsResponse({
+        items: [{ ...item, type: 'x' }],
+        totalPending: 1,
+        unread: 1,
+        openSafety: 0,
+      }),
+    ).toThrow(/tipo/i);
+    expect(() => parseNotificationsSummary({ unread: -1, openSafety: 0 })).toThrow(/não lidas/i);
   });
 
   it('valida fila, detalhe e operações', () => {
@@ -137,6 +178,9 @@ describe('parsers do contrato do dashboard', () => {
       reason: protocolDetail.item.summary,
       level: protocolDetail.item.severity,
       status: protocolDetail.item.status,
+      studentName: null,
+      sourceType: null,
+      sourceId: null,
     });
 
     expect(

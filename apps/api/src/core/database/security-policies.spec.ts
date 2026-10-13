@@ -48,6 +48,7 @@ describe('buildRlsPoliciesSql', () => {
       'consents',
       'anamnesis_sessions',
       'auth_sessions',
+      'dashboard_notification_reads',
       'ai_jobs',
       'protocols',
       'protocol_versions',

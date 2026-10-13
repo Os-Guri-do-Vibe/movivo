@@ -30,6 +30,8 @@ import { ControlCenterService } from './control-center.service';
 import { ConversationsController } from './conversations.controller';
 import { ConversationsService } from './conversations.service';
 import { DashboardController } from './dashboard.controller';
+import { DashboardNotificationsController } from './dashboard-notifications.controller';
+import { DashboardNotificationsService } from './dashboard-notifications.service';
 import { DashboardService } from './dashboard.service';
 import { FinanceController } from './finance.controller';
 import { FinanceService } from './finance.service';
@@ -57,6 +59,7 @@ import { SystemScriptsService } from './system-scripts.service';
   imports: [AuthModule, JobsModule, ProtocolModule, WhatsappModule],
   controllers: [
     DashboardController,
+    DashboardNotificationsController,
     ControlCenterController,
     ConversationsController,
     AiConfigController,
@@ -75,6 +78,7 @@ import { SystemScriptsService } from './system-scripts.service';
   providers: [
     AuditService,
     DashboardService,
+    DashboardNotificationsService,
     ControlCenterService,
     ConversationsService,
     AiConfigService,
