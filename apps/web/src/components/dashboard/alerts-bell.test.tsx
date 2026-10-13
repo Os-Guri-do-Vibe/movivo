@@ -114,14 +114,21 @@ describe('AlertsBell', () => {
     expect(bell).toHaveFocus();
   });
 
-  it('diferencia alerta de notificação da fila e destaca a leitura sem depender de cor', async () => {
+  it('diferencia alerta de notificação da fila e mostra só as não lidas', async () => {
     setup(response([alertItem, { ...protocolItem, read: true }]));
     await userEvent.click(await screen.findByRole('button', { name: /Notificações: 1 não lida/ }));
 
     expect(await screen.findByText('Alerta · Atenção')).toBeVisible();
-    expect(screen.getByText('Fila · Protocolo para revisão')).toBeVisible();
     expect(screen.getByText('Não lida.')).toBeInTheDocument();
-    expect(screen.getAllByText('Não lida.')).toHaveLength(1);
+    // A notificação já lida sai do popover: fica registrada só na tela Notificações.
+    expect(screen.queryByText('Fila · Protocolo para revisão')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /protocolo para revisão/i })).not.toBeInTheDocument();
+  });
+
+  it('descreve a notificação da fila com urgência e origem', async () => {
+    setup(response([protocolItem]));
+    await userEvent.click(await screen.findByRole('button', { name: /Notificações: 1 não lida/ }));
+    expect(await screen.findByText('Fila · Protocolo para revisão')).toBeVisible();
     expect(screen.getByText(/Revisão obrigatória · Origem: PAR-Q bloqueante/)).toBeVisible();
   });
 
@@ -149,9 +156,12 @@ describe('AlertsBell', () => {
       await screen.findByRole('button', { name: 'Notificações: nenhuma não lida' }),
     ).toBeVisible();
     expect(screen.getByRole('status')).toHaveTextContent(
-      'Todas as notificações foram marcadas como lidas.',
+      'Todas as notificações foram marcadas como lidas. Elas continuam em Notificações.',
     );
     expect(screen.queryByText('Não lida.')).not.toBeInTheDocument();
+    // As lidas somem do popover e ficam só na tela Notificações.
+    expect(screen.queryByText('Assunto fora do escopo do AI Coach')).not.toBeInTheDocument();
+    expect(screen.getByText('Nenhuma notificação não lida')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Marcar todas como lidas' })).toHaveAttribute(
       'aria-disabled',
       'true',
@@ -177,13 +187,13 @@ describe('AlertsBell', () => {
     await userEvent.click(
       await screen.findByRole('button', { name: 'Notificações: nenhuma não lida' }),
     );
-    await screen.findByText('Assunto fora do escopo do AI Coach');
+    await screen.findByText('Nenhuma notificação não lida');
 
     await userEvent.click(screen.getByRole('button', { name: 'Marcar todas como lidas' }));
     expect(api.markAllNotificationsRead).not.toHaveBeenCalled();
   });
 
-  it('mantém visível a faixa de segurança mesmo com o alerta já lido', async () => {
+  it('mantém visível a faixa de segurança aberta mesmo com o alerta já lido', async () => {
     setup(
       response([{ ...alertItem, level: 'SAFETY', reason: 'RED_FLAG', read: true }], {
         openSafety: 1,
@@ -191,22 +201,24 @@ describe('AlertsBell', () => {
     );
     await userEvent.click(
       await screen.findByRole('button', {
-        name: 'Notificações: nenhuma não lida, 1 alerta de segurança pendente',
+        name: 'Notificações: nenhuma não lida, 1 alerta de segurança aberto',
       }),
     );
-    expect(await screen.findByText('1 alerta de segurança pendente')).toBeVisible();
+    expect(await screen.findByText('1 alerta de segurança aberto')).toBeVisible();
     expect(screen.getByRole('link', { name: 'Ver alertas' })).toHaveAttribute(
       'href',
       '/dashboard/alertas',
     );
+    expect(screen.getByText('Nenhuma notificação não lida')).toBeVisible();
   });
 
-  it('mostra o estado vazio "Tudo em dia" quando não há pendências', async () => {
+  it('o estado vazio orienta onde ficam as já lidas', async () => {
     setup(response([]));
     await userEvent.click(
       await screen.findByRole('button', { name: 'Notificações: nenhuma não lida' }),
     );
-    expect(await screen.findByText('Tudo em dia')).toBeVisible();
+    expect(await screen.findByText('Nenhuma notificação não lida')).toBeVisible();
+    expect(screen.getByText(/ficam em Notificações/)).toBeVisible();
   });
 
   it('não confunde erro de carga com lista vazia e permite tentar de novo', async () => {
@@ -222,17 +234,33 @@ describe('AlertsBell', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Notificações: 1 não lida' }));
 
     expect(await screen.findByText('Não foi possível carregar as notificações.')).toBeVisible();
-    expect(screen.queryByText('Tudo em dia')).not.toBeInTheDocument();
+    expect(screen.queryByText('Nenhuma notificação não lida')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
     expect(await screen.findByText('Assunto fora do escopo do AI Coach')).toBeVisible();
   });
 
-  it('informa quando há mais pendências do que as exibidas', async () => {
-    setup(response([alertItem], { totalPending: 14 }));
-    await userEvent.click(await screen.findByRole('button', { name: 'Notificações: 1 não lida' }));
-    expect(await screen.findByText('Mostrando 1 de 14 pendências.')).toBeVisible();
-    expect(
-      screen.getByRole('link', { name: 'Ver todas as notificações na Fila do Profissional' }),
-    ).toHaveAttribute('href', '/dashboard/educacao-fisica');
+  it('informa quando há mais não lidas do que as exibidas e leva ao registro completo', async () => {
+    setup(response([alertItem], { unread: 14 }));
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Notificações: 14 não lidas' }),
+    );
+    expect(await screen.findByText('Mostrando 1 de 14 não lidas')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Ver todas as notificações' })).toHaveAttribute(
+      'href',
+      '/dashboard/notificacoes',
+    );
+  });
+
+  it('usa um único scroll: só a lista rola, com cabeçalho e rodapé fixos', async () => {
+    setup(response([alertItem]));
+    await userEvent.click(await screen.findByRole('button', { name: /Notificações: 1 não lida/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Notificações' });
+
+    const scrollers = [dialog, ...dialog.querySelectorAll<HTMLElement>('*')].filter((node) =>
+      node.className.toString().includes('overflow-y-auto'),
+    );
+    expect(scrollers).toHaveLength(1);
+    expect(dialog.className).toContain('flex-col');
+    expect(scrollers[0]).toContainElement(screen.getByRole('list'));
   });
 });

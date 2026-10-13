@@ -10,6 +10,9 @@ import type {
   AlertsSummary,
   AnamnesisAnswers,
   AnonymizedReplay,
+  NotificationHistoryItem,
+  NotificationHistoryQuery,
+  NotificationHistoryResponse,
   NotificationItem,
   NotificationsResponse,
   NotificationsSummary,
@@ -212,6 +215,33 @@ export function parseNotificationsResponse(value: unknown): NotificationsRespons
     snapshotAt: string(value.snapshotAt) || new Date().toISOString(),
     items: value.items.map(parseNotificationItem),
     totalPending: count(value.totalPending, 'Total de notificações inválido.'),
+    unread: count(value.unread, 'Contagem de não lidas inválida.'),
+    openSafety: count(value.openSafety, 'Contagem de alertas de segurança inválida.'),
+  };
+}
+
+const OUTCOMES = new Set(['RESOLVED', 'SIGNED', 'AUTO_RELEASED', 'RELEASED', 'DISCARDED']);
+
+function parseHistoryItem(value: unknown): NotificationHistoryItem {
+  const item = parseNotificationItem(value);
+  const record = value as Record<string, unknown>;
+  const outcome = typeof record.outcome === 'string' && OUTCOMES.has(record.outcome);
+  return {
+    ...item,
+    status: record.status === 'SETTLED' ? 'SETTLED' : 'PENDING',
+    outcome: outcome ? (record.outcome as NotificationHistoryItem['outcome']) : null,
+    settledAt: typeof record.settledAt === 'string' ? record.settledAt : null,
+  };
+}
+
+export function parseNotificationHistory(value: unknown): NotificationHistoryResponse {
+  if (!isRecord(value) || !Array.isArray(value.items)) {
+    throw new DashboardApiError(502, 'Resposta do registro de notificações inválida.');
+  }
+  return {
+    snapshotAt: string(value.snapshotAt) || new Date().toISOString(),
+    items: value.items.map(parseHistoryItem),
+    nextCursor: typeof value.nextCursor === 'string' ? value.nextCursor : null,
     unread: count(value.unread, 'Contagem de não lidas inválida.'),
     openSafety: count(value.openSafety, 'Contagem de alertas de segurança inválida.'),
   };
@@ -478,6 +508,15 @@ export async function getAlertsSummary(signal?: AbortSignal): Promise<AlertsSumm
 
 export async function getNotifications(signal?: AbortSignal): Promise<NotificationsResponse> {
   return parseNotificationsResponse(await request('/notifications', { signal }));
+}
+
+export async function getNotificationHistory(
+  query: NotificationHistoryQuery,
+  signal?: AbortSignal,
+): Promise<NotificationHistoryResponse> {
+  const params = new URLSearchParams({ state: query.state, type: query.type });
+  if (query.cursor) params.set('cursor', query.cursor);
+  return parseNotificationHistory(await request(`/notifications/history?${params}`, { signal }));
 }
 
 export async function getNotificationsSummary(signal?: AbortSignal): Promise<NotificationsSummary> {

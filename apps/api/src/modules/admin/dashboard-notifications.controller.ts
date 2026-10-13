@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Header, HttpCode, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, HttpCode, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { DashboardNotificationHistoryService } from './dashboard-notification-history.service';
 import { DashboardNotificationsService } from './dashboard-notifications.service';
 
 @ApiTags('Admin · Dashboard')
@@ -13,7 +14,10 @@ import { DashboardNotificationsService } from './dashboard-notifications.service
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('PROFESSIONAL', 'ADMIN')
 export class DashboardNotificationsController {
-  constructor(private readonly notifications: DashboardNotificationsService) {}
+  constructor(
+    private readonly notifications: DashboardNotificationsService,
+    private readonly history: DashboardNotificationHistoryService,
+  ) {}
 
   @Get()
   @Header('Cache-Control', 'private, no-store')
@@ -23,6 +27,18 @@ export class DashboardNotificationsController {
   @ApiResponse({ status: 200, description: 'Itens do popover, total pendente e não lidas.' })
   list(@CurrentUser() actor: AuthenticatedUser) {
     return this.notifications.list(actor);
+  }
+
+  @Get('history')
+  @Header('Cache-Control', 'private, no-store')
+  @ApiOperation({
+    summary: 'Registro de notificações (tela Notificações): pendentes e dos últimos 30 dias',
+    description:
+      'Filtros `state` (all|unread) e `type` (all|alert|queue), paginação por `cursor` opaco e `limit` (1–50, padrão 30).',
+  })
+  @ApiResponse({ status: 200, description: 'Página do registro, com contagens do menu e do sino.' })
+  historyPage(@CurrentUser() actor: AuthenticatedUser, @Query() query: unknown) {
+    return this.history.history(actor, query);
   }
 
   @Get('summary')

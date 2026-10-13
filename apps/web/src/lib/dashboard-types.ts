@@ -297,3 +297,27 @@ export interface NotificationsSummary {
   unread: number;
   openSafety: number;
 }
+
+export type NotificationOutcome =
+  'RESOLVED' | 'SIGNED' | 'AUTO_RELEASED' | 'RELEASED' | 'DISCARDED';
+
+/** Item do registro de notificações: pendente ou já decidido (decidido nunca é "não lido"). */
+export interface NotificationHistoryItem extends NotificationItem {
+  status: 'PENDING' | 'SETTLED';
+  outcome: NotificationOutcome | null;
+  settledAt: string | null;
+}
+
+export interface NotificationHistoryResponse {
+  snapshotAt: string;
+  items: NotificationHistoryItem[];
+  nextCursor: string | null;
+  unread: number;
+  openSafety: number;
+}
+
+export interface NotificationHistoryQuery {
+  state: 'all' | 'unread';
+  type: 'all' | 'alert' | 'queue';
+  cursor?: string | null;
+}
