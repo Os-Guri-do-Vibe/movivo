@@ -1,0 +1,1 @@
+ALTER TABLE "users" DROP COLUMN "workout_reminder_enabled";

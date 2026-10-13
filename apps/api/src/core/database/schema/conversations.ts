@@ -21,6 +21,8 @@ import { messageDirectionEnum, messageTypeEnum } from './enums';
 import { protocols } from './protocols';
 import { users } from './users';
 
+export type ConversationOrigin = 'STUDENT' | 'COACH' | 'SYSTEM' | 'PROFESSIONAL';
+
 export const conversations = pgTable(
   'conversations',
   {
@@ -73,6 +75,18 @@ export const conversations = pgTable(
      * "respostas bloqueadas por compliance < 5%".
      */
     validationPassed: boolean('validation_passed'),
+
+    /**
+     * Quem escreveu a mensagem (achado 2026-10-13): o Coach precisa reler a conversa inteira
+     * (inclusive a pergunta automática que ele próprio mandou e a mensagem do profissional)
+     * quando o aluno responde horas ou dias depois, e `direction` sozinha não distingue o
+     * Coach de um aviso automático nem de uma mensagem manual do CREF. `NULL` nas linhas
+     * anteriores à coluna — a leitura deriva a origem de `direction`/`model_used`.
+     */
+    origin: varchar('origin', { length: 16 }).$type<ConversationOrigin>(),
+
+    /** Tipo do job de WhatsApp que gerou a mensagem automática (`origin = 'SYSTEM'`). */
+    sourceType: varchar('source_type', { length: 40 }),
 
     /** Snapshot das fontes RAG usadas na resposta, rastreavel ate chunk/documento. */
     ragSources: jsonb('rag_sources').$type<
