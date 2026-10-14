@@ -91,6 +91,20 @@ export function substitutionScopeQuestionFor(exerciseNames: readonly string[]): 
   return `E pra ${names}: é só pra hoje ou você quer levar pro seu protocolo? ${SUBSTITUTION_PROTOCOL_REVIEW_NOTE}`;
 }
 
+/**
+ * Achado 2026-10-14 (conversa real): o aluno escolheu o substituto mas ainda não disse o alcance,
+ * e o LLM, escrevendo a confirmação, afirmou "vale pro protocolo inteiro" — a pergunta de alcance
+ * acrescentada em seguida contradizia o texto. Com escolha feita e alcance em aberto, a mensagem
+ * é FIXA: reconhece a escolha sem afirmar alcance, registro nem revisão.
+ */
+export function substitutionChoiceAckFor(
+  pairs: ReadonlyArray<{ from: string; to: string }>,
+): string {
+  const [only] = pairs;
+  if (pairs.length === 1 && only) return `Beleza, ${only.to} no lugar de ${only.from}.`;
+  return `Beleza: ${pairs.map((p) => `${p.to} no lugar de ${p.from}`).join('; ')}.`;
+}
+
 /** Fecha a recomendação de hoje: nada muda no protocolo. */
 export const SUBSTITUTION_TODAY_NOTE =
   'Isso vale só pra hoje: na próxima sessão você volta pro exercício do seu protocolo. Se ' +
