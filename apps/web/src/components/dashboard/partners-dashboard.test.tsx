@@ -25,42 +25,18 @@ import { PartnersDashboard } from './partners-dashboard';
 beforeEach(() => getPartnerDistribution.mockReset());
 
 describe('PartnersDashboard', () => {
-  it('mostra lucro, participação em pontos-base e o total do cap table', async () => {
+  it('mostra participação em pontos-base e o total do cap table', async () => {
     getPartnerDistribution.mockResolvedValue(partnerDistributionResponse);
     render(<PartnersDashboard />);
 
-    expect(await screen.findByRole('heading', { name: 'Sócios & Distribuição' })).toBeVisible();
-    expect(screen.getByText('Lucro apurado · 2026-08')).toBeVisible();
-    expect(screen.getAllByText('R$ 5.000,00').length).toBeGreaterThan(0);
+    expect(await screen.findByRole('heading', { name: 'Sócios' })).toBeVisible();
 
     const rows = within(screen.getByRole('table')).getAllByRole('row');
     const first = rows[1];
     if (!first) throw new Error('tabela sem linha de sócio');
     expect(within(first).getByText('Rodrigo')).toBeVisible();
     expect(within(first).getByText('60,00%')).toBeVisible();
-    expect(within(first).getByText('R$ 3.000,00')).toBeVisible();
     expect(screen.getByText('100,00%')).toBeVisible();
-  });
-
-  it('nunca exibe o número sem as ressalvas de governança que vieram do payload', async () => {
-    getPartnerDistribution.mockResolvedValue(partnerDistributionResponse);
-    render(<PartnersDashboard />);
-    const caveats = within(
-      await screen.findByRole('complementary', { name: 'O que este número não é' }),
-    ).getAllByRole('listitem');
-    expect(caveats).toHaveLength(partnerDistributionResponse.data.caveats.length);
-    expect(caveats[0]).toHaveTextContent('Não considera vesting');
-  });
-
-  it('sem lucro apurado mostra travessão em vez de R$ 0,00', async () => {
-    getPartnerDistribution.mockResolvedValue({
-      ...partnerDistributionResponse,
-      data: { ...partnerDistributionResponse.data, profitAvailable: false, profitCents: 0 },
-    });
-    render(<PartnersDashboard />);
-    await screen.findByRole('table');
-    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(3);
-    expect(screen.queryByText('R$ 0,00')).not.toBeInTheDocument();
   });
 
   it('em 403 não oferece nova tentativa', async () => {

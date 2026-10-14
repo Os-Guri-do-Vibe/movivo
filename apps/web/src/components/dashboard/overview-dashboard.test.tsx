@@ -44,7 +44,6 @@ describe('OverviewDashboard', () => {
     const hero = screen.getByRole('region', { name: 'Financeiro' });
     expect(within(hero).getByLabelText(/^MRR contratado: R\$\s?1\.638,00$/)).toBeVisible();
     // Os três que ameaçam o MRR vêm dentro do destaque.
-    expect(within(hero).getByText('Lucro do período')).toBeVisible();
     expect(within(hero).getByText('Receita em risco (30 dias)')).toBeVisible();
     expect(within(hero).getByText('Inadimplência')).toBeVisible();
     expect(within(hero).getByText('4%')).toBeVisible();

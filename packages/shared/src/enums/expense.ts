@@ -33,8 +33,3 @@ export type ExpenseRecurrencePeriod =
  * (US-8.5, mesma sprint), o lucro usa `contractedMrr` como proxy e o regime exibido é
  * `CONTRATADO_PROXY` — a tela nunca chama de caixa um número que não é.
  */
-export const ProfitBasis = {
-  CAIXA: 'CAIXA',
-  CONTRATADO_PROXY: 'CONTRATADO_PROXY',
-} as const;
-export type ProfitBasis = (typeof ProfitBasis)[keyof typeof ProfitBasis];

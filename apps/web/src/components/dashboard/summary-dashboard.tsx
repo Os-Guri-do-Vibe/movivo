@@ -1,9 +1,12 @@
 'use client';
 
-import { Landmark, ServerCog } from 'lucide-react';
-import { useCallback } from 'react';
+import { CircleHelp, Landmark, ServerCog } from 'lucide-react';
+import { useCallback, type ReactNode } from 'react';
+import { CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts';
 import type {
+  ControlCenterCostDistribution,
   ControlCenterFinanceResponse,
+  ControlCenterMetric,
   ControlCenterPendingCapability,
   ControlCenterPercentiles,
   ControlCenterSlo,
@@ -13,10 +16,12 @@ import type {
 import { getFinanceSummary, getSystemSummary } from '@/lib/control-center-api';
 import { cn } from '@/lib/utils';
 
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
+
 import { DailySeriesChart } from './overview-charts';
 
 import {
-  DataQuality,
+  formatMetric,
   MetricGrid,
   ResourceState,
   SectorHeader,
@@ -48,7 +53,6 @@ function metricsFor(resource: Resource, response: SummaryResponse) {
     { label: 'Assinaturas ativas', metric: data.activeSubscriptions },
     { label: 'MRR contratado', metric: data.contractedMrr },
     { label: 'Receita recebida', metric: data.receivedRevenue },
-    { label: 'Lucro', metric: data.profit },
     { label: 'Custo de IA (30 dias)', metric: data.aiCost },
     { label: 'Custo de IA por assinante', metric: data.aiCostPerActiveUser },
     { label: 'Custo WhatsApp', metric: data.whatsappCost },
@@ -337,10 +341,226 @@ const categoryLabel = (category: string) => EXPENSE_CATEGORY_LABEL[category] ?? 
 const brl = (value: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 
+const number = (value: number) => new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 }).format(value);
+
 const monthLabel = (month: string) => {
   const [year, monthPart] = month.split('-');
   return `${monthPart}/${year}`;
 };
+
+function MetricInfo({
+  label,
+  definition,
+  calculation,
+  decision,
+  align = 'end',
+}: {
+  label: string;
+  definition: string;
+  calculation: string;
+  decision: string;
+  align?: 'start' | 'end';
+}) {
+  return (
+    <details className="relative shrink-0">
+      <summary
+        aria-label={`Como interpretar ${label}`}
+        className="flex size-6 cursor-pointer list-none items-center justify-center rounded-full text-muted-foreground outline-offset-2 hover:bg-secondary hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden"
+      >
+        <CircleHelp aria-hidden="true" className="size-4" />
+      </summary>
+      <div
+        className={cn(
+          'absolute z-10 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-popover p-3 text-xs leading-relaxed text-popover-foreground shadow-lg',
+          align === 'start' ? 'left-0' : 'right-0',
+        )}
+      >
+        <p><span className="font-semibold">O que é: </span>{definition}</p>
+        <p className="mt-2"><span className="font-semibold">Cálculo: </span>{calculation}</p>
+        <p className="mt-2"><span className="font-semibold">Decisão: </span>{decision}</p>
+      </div>
+    </details>
+  );
+}
+
+function DistributionSummary({ distribution, unit }: { distribution: ControlCenterCostDistribution | null; unit: 'BRL' | 'COUNT' }) {
+  if (!distribution) return <p className="mt-3 text-xs text-muted-foreground">Indisponível: há jobs sem preço vigente.</p>;
+  const value = (item: number) => (unit === 'BRL' ? brl(item) : number(item));
+  const confidence = distribution.meanConfidence95;
+  return (
+    <div className="mt-4">
+      <div className="flex items-center gap-1">
+        <p className="text-xs font-semibold text-foreground">Distribuição do uso</p>
+        <MetricInfo
+          label="distribuição do uso"
+          definition="Mostra o caso típico e a cauda de custo, sem identificar nenhum aluno."
+          calculation="P50 é a mediana; P90 e P95 são os valores abaixo dos quais estão 90% e 95% dos titulares."
+          decision="Use a média para orçamento e P90/P95 para definir limites, alertas e uma reserva de margem."
+        />
+      </div>
+      <dl className="mt-2 grid grid-cols-3 gap-2">
+        {[
+          ['Mediana (P50)', distribution.median],
+          ['P90', distribution.p90],
+          ['P95', distribution.p95],
+        ].map(([label, amount]) => (
+          <div key={String(label)} className="rounded-md bg-secondary p-2">
+            <dt className="text-[11px] text-muted-foreground">{label}</dt>
+            <dd className="mt-0.5 font-mono text-sm font-bold text-foreground">{value(Number(amount))}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+        Base: {distribution.samples} titular{distribution.samples === 1 ? '' : 'es'}.
+        {confidence
+          ? ` IC 95% da média: ${value(confidence.lower)}–${value(confidence.upper)} (bootstrap).`
+          : ' IC 95% aparece a partir de 50 titulares.'}
+      </p>
+    </div>
+  );
+}
+
+function CostCdfChart({ distribution }: { distribution: ControlCenterCostDistribution | null }) {
+  if (!distribution) return null;
+  const config = { percentile: { label: 'Titulares acumulados', color: 'var(--color-chart-1)' } } satisfies ChartConfig;
+  return (
+    <section aria-label="Curva acumulada do custo de IA" className="mt-5 rounded-lg border border-border bg-secondary/40 p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h4 className="text-label font-semibold">Curva acumulada de custo</h4>
+          <p className="mt-1 text-xs text-muted-foreground">Quanto da base cabe abaixo de cada custo mensal de IA.</p>
+        </div>
+        <MetricInfo
+          label="curva acumulada de custo"
+          definition="Curva de distribuição acumulada (CDF): cada ponto mostra a proporção de titulares cujo custo é menor ou igual ao valor do eixo horizontal."
+          calculation="Calculada sobre custos agregados por titular nos últimos 30 dias, em marcos de percentil de 5 pontos percentuais."
+          decision="Uma subida tardia e longa indica poucos usuários muito caros; acompanhe P90/P95 e a concentração antes de alterar preço ou limites."
+        />
+      </div>
+      <ChartContainer config={config} className="mt-4 h-48 w-full">
+        <LineChart data={distribution.cdf} margin={{ top: 4, right: 8, bottom: 0, left: -16 }} accessibilityLayer>
+          <CartesianGrid vertical={false} />
+          <XAxis
+            dataKey="value"
+            type="number"
+            domain={['dataMin', 'dataMax']}
+            tickLine={false}
+            axisLine={false}
+            tickMargin={8}
+            tickFormatter={(value: number) => brl(value)}
+          />
+          <YAxis
+            dataKey="percentile"
+            type="number"
+            domain={[0, 100]}
+            width={44}
+            tickLine={false}
+            axisLine={false}
+            tickFormatter={(value: number) => `${value}%`}
+          />
+          <ChartTooltip
+            content={
+              <ChartTooltipContent
+                labelFormatter={(value) => `Custo de IA: ${brl(Number(value))}`}
+                formatter={(value) => `${number(Number(value))}% dos titulares`}
+              />
+            }
+          />
+          <Line dataKey="percentile" type="stepAfter" stroke="var(--color-percentile)" strokeWidth={2} dot={false} />
+        </LineChart>
+      </ChartContainer>
+    </section>
+  );
+}
+
+function CostMethodCard({
+  title,
+  value,
+  question,
+  calculation,
+  decision,
+  children,
+}: {
+  title: string;
+  value: string;
+  question: string;
+  calculation: string;
+  decision: string;
+  children?: ReactNode;
+}) {
+  return (
+    <article className="rounded-xl border border-border bg-card p-5">
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="text-label font-semibold">{title}</h3>
+        <MetricInfo label={title} definition={question} calculation={calculation} decision={decision} />
+      </div>
+      <p className="mt-3 font-mono text-h1 font-bold text-foreground">{value}</p>
+      {children}
+    </article>
+  );
+}
+
+function CostIntelligence({ data }: { data: ControlCenterFinanceResponse['data']['costIntelligence'] }) {
+  const aiMean = data.aiCostPerActiveUser ? brl(data.aiCostPerActiveUser.mean) : '—';
+  const whatsappMean = data.whatsappUnitsPerActiveUser
+    ? number(data.whatsappUnitsPerActiveUser.mean)
+    : '—';
+  return (
+    <section aria-label="Inteligência de custos por usuário" className="mt-6">
+      <div className="flex items-start gap-1">
+        <h2 className="text-h2 font-bold">Unit economics</h2>
+        <MetricInfo
+          label="unit economics"
+          align="start"
+          definition="Leitura da receita e do custo variável associados a cada titular; nesta fase, cobre IA e volume de WhatsApp."
+          calculation={`Recorte dos últimos ${data.windowDays} dias, consolidado antes de sair do servidor.`}
+          decision="Indica se preço, ativação e limites de uso sustentam margem ao aumentar a base."
+        />
+      </div>
+      <p className="mt-1 max-w-3xl text-label text-muted-foreground">
+        Recorte de {data.windowDays} dias. Média estima o gasto total esperado; P50 mostra o
+        uso típico e P90/P95 expõem a cauda que pode comprometer margem.
+      </p>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <CostMethodCard
+          title="Custo de IA por usuário-dia"
+          value={formatMetric(data.aiCostPerUserDay as ControlCenterMetric)}
+          question="Quanto custa sustentar um dia de atividade mensurável?"
+          calculation="Custo calculado de IA dividido por dias distintos em que o titular teve uma conversa registrada ou uma chamada de IA."
+          decision="É a base para projetar custo variável mensal conforme a previsão de usuários ativos."
+        >
+          <p className="mt-3 text-xs text-muted-foreground">Base: {number(data.activeUserDays)} usuário-dias.</p>
+        </CostMethodCard>
+        <CostMethodCard
+          title="Custo de IA por usuário ativo"
+          value={aiMean}
+          question="Qual é o gasto médio esperado por titular ativo no período?"
+          calculation="Custo calculado de IA por titular ativo; a média é adequada para estimar o total agregado."
+          decision="Use a média para orçamento; compare P90/P95 antes de definir limites de uso ou preço."
+        >
+          <DistributionSummary distribution={data.aiCostPerActiveUser} unit="BRL" />
+          <CostCdfChart distribution={data.aiCostPerActiveUser} />
+        </CostMethodCard>
+        <CostMethodCard
+          title="Unidades WhatsApp por usuário ativo"
+          value={whatsappMean}
+          question="Quantas mensagens de saída um titular recebe em média?"
+          calculation="Mensagens outbound efetivamente registradas no histórico, por titular ativo. Evolution não gera cobrança, portanto isto ainda é volume simulado."
+          decision="Multiplique pelas regras da tabela de preço vigente quando a operação migrar para um provedor faturável."
+        >
+          <DistributionSummary distribution={data.whatsappUnitsPerActiveUser} unit="COUNT" />
+        </CostMethodCard>
+        <CostMethodCard
+          title="Cobertura da medição"
+          value={`${number(data.whatsappUnitsTotal)} mensagens`}
+          question="Os números acima têm base suficiente e preços conhecidos?"
+          calculation={`${number(data.whatsappUnitsTotal)} envios observados; ${data.unpricedAiJobs} job(ns) de IA sem preço por vigência.`}
+          decision="Não use custo de IA em projeção enquanto houver jobs sem preço; colete pelo menos 50 titulares antes de interpretar o intervalo de confiança."
+        />
+      </div>
+    </section>
+  );
+}
 
 /**
  * Detalhamento do pilar Financeiro (US-7.2): calendário de renovação, risco de
@@ -473,6 +693,7 @@ function FinanceSections({ data }: { data: ControlCenterFinanceResponse['data'] 
           Despesa lançada (`expenses`) e investimento em mídia (`ad_spend`), líquidos de estorno.
           Categoria com mais estorno que lançamento no recorte aparece negativa.
         </p>
+        <CostIntelligence data={data.costIntelligence} />
         <div className="mt-4 grid gap-6 lg:grid-cols-2">
           <div>
             <h3 className="text-label font-semibold">Por categoria</h3>
@@ -597,7 +818,6 @@ export function SummaryDashboard({ resource }: { resource: Resource }) {
           <FinanceSections data={(state.data as ControlCenterFinanceResponse).data} />
         </>
       )}
-      <DataQuality notes={state.data.meta.dataQuality} />
     </div>
   );
 }

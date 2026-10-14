@@ -27,7 +27,6 @@ import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { strictSafeParse } from '../../core/validation/strict-input';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { AuditService } from './audit.service';
-import { ControlCenterService } from './control-center.service';
 
 const TIMEZONE = 'America/Sao_Paulo' as const;
 
@@ -36,21 +35,10 @@ export class PartnersService {
   constructor(
     private readonly db: TenantDatabase,
     private readonly audit: AuditService,
-    private readonly controlCenter: ControlCenterService,
   ) {}
 
   async distribution(): Promise<PartnerDistributionResponse> {
-    const [rows, finance] = await Promise.all([this.current(), this.controlCenter.finance()]);
-    const { profit } = finance.data;
-
-    // `profit.value` vem em reais; a distribuição é feita em centavos inteiros para que
-    // a soma das partes seja conferível sem erro de ponto flutuante.
-    const profitCents = Math.round((profit.value ?? 0) * 100);
-    const profitAvailable = profit.value !== null;
-
-    const dataQuality = profitAvailable
-      ? []
-      : ['Sem lucro apurado no período: a distribuição por sócio é exibida como R$ 0,00.'];
+    const rows = await this.current();
 
     return {
       data: {
@@ -59,24 +47,11 @@ export class PartnersService {
           year: 'numeric',
           month: '2-digit',
         }).format(new Date()),
-        profitCents,
-        profitAvailable,
-        profitDefinition: profit.definition,
-        partners: rows.map((row) => ({
-          id: row.id,
-          name: row.name,
-          shareBasisPoints: row.shareBasisPoints,
-          validFrom: row.validFrom,
-          validTo: row.validTo,
-          notes: row.notes,
-          // Truncado, nunca arredondado: arredondar cada parte pode somar mais que o
-          // lucro. O resíduo de centavos fica na empresa, que é onde ele já está.
-          amountCents: Math.trunc((profitCents * row.shareBasisPoints) / TOTAL_SHARE_BASIS_POINTS),
-        })),
+        partners: rows,
         totalBasisPoints: rows.reduce((sum, row) => sum + row.shareBasisPoints, 0),
         caveats: [...PARTNER_DISTRIBUTION_CAVEATS],
       },
-      meta: { generatedAt: new Date().toISOString(), timezone: TIMEZONE, dataQuality },
+      meta: { generatedAt: new Date().toISOString(), timezone: TIMEZONE, dataQuality: [] },
     };
   }
 
