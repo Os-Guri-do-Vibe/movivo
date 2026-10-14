@@ -52,6 +52,7 @@ import {
   servesLocation,
 } from './exercise-catalog';
 import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
+import { normalizeModelOutput } from './model-output-normalizer';
 import { METHODOLOGY_VERSION } from './methodology';
 import { MethodologyProvider } from './methodology-provider.service';
 import { PHASE_DURATION_WEEKS_RANGE } from './protocol-timeline';
@@ -528,7 +529,11 @@ export class ProtocolGeneratorService {
     });
   }
 
-  /** Parseia o texto do LLM como `ProtocolStructure`; retorna `null` se malformado. */
+  /**
+   * Parseia o texto do LLM como `ProtocolStructure`; retorna `null` se malformado. Antes do
+   * parse estrito, `normalizeModelOutput` resolve só falhas de FORMA (campo nosso ausente,
+   * texto acima do limite, `sets` de cardio) — ver o cabeçalho do módulo.
+   */
   private tryParse(text: string): ProtocolStructure | null {
     const json = extractJsonObject(text);
     if (!json) return null;
@@ -538,7 +543,7 @@ export class ProtocolGeneratorService {
     } catch {
       return null;
     }
-    const result = protocolStructureSchema.safeParse(raw);
+    const result = protocolStructureSchema.safeParse(normalizeModelOutput(raw));
     return result.success ? result.data : null;
   }
 
@@ -1077,7 +1082,6 @@ export function extractJsonObject(text: string): string | null {
 }
 
 const SCHEMA_HINT = `{
-  "promptVersion": string,
   "goal": "GAIN_MUSCLE" | "GAIN_STRENGTH" | "LOSE_FAT" | "CONDITIONING" | "HEALTH_ENERGY" | "BUILD_ROUTINE" | "RETURN_TO_TRAINING" | "SPORT_EVENT",
   "phase": "ADAPTACAO" | "HIPERTROFIA" | "FORCA" | "DELOAD",
   "phaseDurationWeeks": number — OBRIGATÓRIO, dentro da faixa de "phase" (ver DURAÇÃO DO MESOCICLO acima). É quem define a data de término do protocolo,

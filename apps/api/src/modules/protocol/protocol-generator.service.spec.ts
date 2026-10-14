@@ -530,6 +530,24 @@ describe('prompt de regras verificadas e rodada de correção (2026-09-29)', () 
     });
   });
 
+  // Achado 2026-10-14 (produção, perfil 7 dias/30 min/LOSE_FAT): saída rejeitada por falha de
+  // forma derrubava o protocolo para o FALLBACK_TEMPLATE.
+  describe('tolerância a falhas de forma da saída do modelo', () => {
+    it('aceita saída sem promptVersion e devolve o promptVersion NOSSO', async () => {
+      const { promptVersion: _drop, ...withoutVersion } = JSON.parse(validProtocolJson());
+      const { service, calls } = makeService([JSON.stringify(withoutVersion)]);
+      const result = await service.generate(command);
+      expect(calls).toHaveLength(1);
+      expect(result.structure.promptVersion).toBe(PROMPT_VERSION);
+    });
+
+    it('não pede promptVersion ao modelo no formato de saída', async () => {
+      const { service, calls } = makeService([validProtocolJson()]);
+      await service.generate(command);
+      expect(calls[0]?.system).not.toContain('"promptVersion"');
+    });
+  });
+
   describe('rodada de correção', () => {
     // HINGE contraindicado por KNEE (as `constraints` deste arquivo têm KNEE).
     const vetoed = 'levantamento_terra_romeno_halter';
