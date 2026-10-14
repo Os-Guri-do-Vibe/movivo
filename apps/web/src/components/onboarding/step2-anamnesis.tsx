@@ -650,7 +650,7 @@ export function Step2Anamnesis({
             type="button"
             onClick={() => (section > 0 ? navigate(section - 1) : onBack?.())}
             disabled={saving}
-            className="h-[52px] flex-1 rounded-xl border border-input bg-white px-6 text-body font-semibold text-petroleo transition-colors hover:bg-secondary disabled:opacity-50"
+            className="h-[52px] shrink-0 rounded-xl sm:flex-1 border border-input bg-white px-6 text-body font-semibold text-petroleo transition-colors hover:bg-secondary disabled:opacity-50"
           >
             Voltar
           </button>
@@ -659,7 +659,7 @@ export function Step2Anamnesis({
           type="button"
           disabled={!sectionComplete || saving}
           onClick={() => (section < 4 ? navigate(section + 1) : onContinue())}
-          className="h-[52px] flex-1 rounded-xl bg-primary px-6 text-body font-semibold text-primary-foreground transition-colors hover:bg-primary/85 disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground"
+          className="h-[52px] shrink-0 rounded-xl sm:flex-1 bg-primary px-6 text-body font-semibold text-primary-foreground transition-colors hover:bg-primary/85 disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground"
         >
           {saving ? 'Salvando…' : section === 4 ? 'Continuar para saúde' : 'Continuar'}
         </button>
