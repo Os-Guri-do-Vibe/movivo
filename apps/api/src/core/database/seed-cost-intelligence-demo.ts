@@ -188,6 +188,8 @@ async function main(): Promise<void> {
 
 main().catch((error: unknown) => {
   const cause = error instanceof Error ? error.cause : undefined;
-  console.error(cause instanceof Error ? cause.message : error instanceof Error ? error.message : error);
+  console.error(
+    cause instanceof Error ? cause.message : error instanceof Error ? error.message : error,
+  );
   process.exitCode = 1;
 });

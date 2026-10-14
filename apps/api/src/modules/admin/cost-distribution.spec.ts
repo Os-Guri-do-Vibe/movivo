@@ -6,7 +6,13 @@ describe('summarizeCostDistribution', () => {
   it('separa custo esperado, caso típico e cauda', () => {
     const summary = summarizeCostDistribution([0, 0, 1, 1, 8]);
 
-    expect(summary).toMatchObject({ samples: 5, total: 10, mean: 2, median: 1, meanConfidence95: null });
+    expect(summary).toMatchObject({
+      samples: 5,
+      total: 10,
+      mean: 2,
+      median: 1,
+      meanConfidence95: null,
+    });
     expect(summary?.p90).toBeCloseTo(5.2);
     expect(summary?.p95).toBeCloseTo(6.6);
     expect(summary?.cdf).toHaveLength(21);

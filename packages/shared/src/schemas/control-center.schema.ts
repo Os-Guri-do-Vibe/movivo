@@ -998,7 +998,9 @@ export const controlCenterCostDistributionSchema = z.object({
   p90: z.number().nonnegative(),
   p95: z.number().nonnegative(),
   /** Curva acumulada agregada em marcos de 5 p.p.; nenhum ponto identifica um titular. */
-  cdf: z.array(z.object({ percentile: z.number().min(0).max(100), value: z.number().nonnegative() })),
+  cdf: z.array(
+    z.object({ percentile: z.number().min(0).max(100), value: z.number().nonnegative() }),
+  ),
   meanConfidence95: z
     .object({ lower: z.number().nonnegative(), upper: z.number().nonnegative() })
     .nullable(),

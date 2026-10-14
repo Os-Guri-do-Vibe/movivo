@@ -2437,7 +2437,9 @@ export class ControlCenterService {
         aiCostPerActiveUser:
           unpricedAiJobs > 0
             ? null
-            : summarizeCostDistribution(costIntelligenceRows.map((item) => Number(item.ai_cost_brl))),
+            : summarizeCostDistribution(
+                costIntelligenceRows.map((item) => Number(item.ai_cost_brl)),
+              ),
         aiCostPerUserDay:
           activeUserDays === 0 || unpricedAiJobs > 0
             ? this.unavailable(
@@ -2705,7 +2707,6 @@ export class ControlCenterService {
           occurredAt: (item.occurredAt ?? new Date()).toISOString(),
           receivedAt: (item.receivedAt ?? new Date()).toISOString(),
         })),
-
       };
     });
     return this.envelope(data, [

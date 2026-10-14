@@ -22,7 +22,8 @@ const BOOTSTRAP_RESAMPLES = 1_000;
 const MINIMUM_SAMPLES_FOR_CONFIDENCE_INTERVAL = 50;
 const CDF_PERCENTILES = Array.from({ length: 21 }, (_, index) => index / 20);
 
-const mean = (values: readonly number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
+const mean = (values: readonly number[]) =>
+  values.reduce((sum, value) => sum + value, 0) / values.length;
 
 /** Percentil por interpolação linear, inclusive para amostras pequenas. */
 function percentile(sorted: readonly number[], ratio: number): number {
@@ -44,9 +45,14 @@ function seededRandom(seed: number): () => number {
   };
 }
 
-function bootstrapMeanConfidence95(values: readonly number[]): { lower: number; upper: number } | null {
+function bootstrapMeanConfidence95(
+  values: readonly number[],
+): { lower: number; upper: number } | null {
   if (values.length < MINIMUM_SAMPLES_FOR_CONFIDENCE_INTERVAL) return null;
-  const seed = values.reduce((value, item, index) => value + Math.round(item * 100) * (index + 1), values.length);
+  const seed = values.reduce(
+    (value, item, index) => value + Math.round(item * 100) * (index + 1),
+    values.length,
+  );
   const random = seededRandom(seed);
   const means = Array.from({ length: BOOTSTRAP_RESAMPLES }, () => {
     let sum = 0;
@@ -70,7 +76,10 @@ export function summarizeCostDistribution(values: readonly number[]): CostDistri
     median: percentile(sorted, 0.5),
     p90: percentile(sorted, 0.9),
     p95: percentile(sorted, 0.95),
-    cdf: CDF_PERCENTILES.map((ratio) => ({ percentile: ratio * 100, value: percentile(sorted, ratio) })),
+    cdf: CDF_PERCENTILES.map((ratio) => ({
+      percentile: ratio * 100,
+      value: percentile(sorted, ratio),
+    })),
     meanConfidence95: bootstrapMeanConfidence95(values),
   };
 }

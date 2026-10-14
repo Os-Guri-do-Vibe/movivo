@@ -90,7 +90,6 @@ describe('PartnersService.distribution', () => {
     expect(response.data.caveats.join(' ')).toMatch(/reserva de caixa/i);
     expect(response.data.caveats.join(' ')).toMatch(/dividendo declarado/i);
   });
-
 });
 
 describe('PartnersService.replace', () => {
