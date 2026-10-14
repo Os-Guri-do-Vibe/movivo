@@ -74,6 +74,7 @@ import {
   SUBSTITUTION_SCOPE_QUESTION_SINGLE,
   SUBSTITUTION_TODAY_NOTE,
   SUBSTITUTION_TOO_MANY_MESSAGE,
+  substitutionChoiceAckFor,
   substitutionScopeQuestionFor,
 } from './coach-messages';
 import { SubstitutionCatalogLookupService } from './substitution-catalog-lookup.service';
@@ -604,8 +605,10 @@ export class SubstitutionFlowService {
       '\nEscreva o nome de cada exercício EXATAMENTE como aparece nas listas acima. NÃO ' +
       'sugira nenhum exercício fora dessas listas e NÃO invente carga. NÃO pergunte se ' +
       'a troca é só para hoje ou para o protocolo: essa pergunta é acrescentada ' +
-      'automaticamente ao final da sua mensagem. NÃO diga que registrou, confirmou ou vai ' +
-      'confirmar nada com o profissional.';
+      'automaticamente ao final da sua mensagem. O alcance da troca (só hoje ou no ' +
+      'protocolo) AINDA NÃO FOI DEFINIDO: NÃO afirme nem sugira que ela vale para o ' +
+      'protocolo ou só para hoje. NÃO diga que registrou, confirmou ou vai confirmar ' +
+      'nada com o profissional, nem que a troca passa por revisão.';
 
     const suffixParts: string[] = [];
     const unknownScope = work.filter((w) => w.state.scope === null);
@@ -622,6 +625,17 @@ export class SubstitutionFlowService {
     if (notes.protocolPartDropped) suffixParts.push(SUBSTITUTION_PROTOCOL_PART_PENDING_NOTE);
 
     await this.saveState(input.userId, state);
+
+    // Tudo escolhido (do catálogo) e só falta o alcance: nada a apresentar, então a mensagem é
+    // fixa — o LLM não tem o que dizer aqui além de afirmar um alcance que o aluno não deu.
+    const allChosenFromCatalog = work.every((w) => w.state.chosen && w.state.chosen.kind !== 'GAP');
+    if (allChosenFromCatalog && unknownScope.length > 0) {
+      const ack = substitutionChoiceAckFor(
+        work.map((w) => ({ from: w.exercise.name, to: w.state.chosen?.name ?? '' })),
+      );
+      return { kind: 'FIXED', text: [ack, ...suffixParts].join(BUBBLE_SEPARATOR) };
+    }
+
     this.logger.info(
       {
         userId: input.userId,

@@ -7,6 +7,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ProtocolStructure } from '@movivo/shared';
 
+import { BUBBLE_SEPARATOR } from '../whatsapp/message-templates';
 import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
 import { findSafeCandidates, isPlausibleSubstitution } from '../protocol/exercise-substitution';
 import type { ActiveProtocolForSubstitution } from '../protocol/protocol-substitution.repository';
@@ -349,10 +350,17 @@ describe('SubstitutionFlowService — pergunta de alcance (só hoje x protocolo)
   it('escolha e alcance podem chegar em turnos separados', async () => {
     const h = harness();
     h.read({ [DIAMANTE.id]: { chosen: D1.id } });
-    const first = generate(await h.service.handle(h.input()));
-    // Já escolheu: não reoferece, só pergunta o que falta (o alcance).
-    expect(first.extraSystem).toContain(`já escolheu "${D1.name}"`);
-    expect(first.suffix).toBe(SUBSTITUTION_SCOPE_QUESTION_SINGLE);
+    // Já escolheu: não reoferece nem passa pelo LLM — só reconhece a escolha e pergunta o que
+    // falta (o alcance), sem afirmar alcance nenhum (achado 2026-10-14).
+    const first = fixed(await h.service.handle(h.input()));
+    expect(first.text).toBe(
+      [`Beleza, ${D1.name} no lugar de ${DIAMANTE.name}.`, SUBSTITUTION_SCOPE_QUESTION_SINGLE].join(
+        BUBBLE_SEPARATOR,
+      ),
+    );
+    const [ack] = first.text.split(BUBBLE_SEPARATOR);
+    expect(ack).not.toMatch(/protocolo|hoje|confirmad|revis/i);
+    expect(h.resolveTurn).toHaveBeenCalledOnce();
 
     h.read({ [DIAMANTE.id]: { scope: 'PROTOCOL' } });
     const second = generate(
@@ -375,6 +383,26 @@ describe('SubstitutionFlowService — pergunta de alcance (só hoje x protocolo)
     );
     expect(out.extraSystem).toContain('SÓ PARA HOJE');
     expect(h.repo.createPending).not.toHaveBeenCalled();
+  });
+});
+
+describe('SubstitutionFlowService — alcance ainda em aberto (achado 2026-10-14)', () => {
+  it('o prompt da oferta proíbe afirmar o alcance ou a revisão antes de o aluno responder', async () => {
+    const h = harness();
+    h.read();
+    const out = generate(await h.service.handle(h.input()));
+    expect(out.extraSystem).toContain('AINDA NÃO FOI DEFINIDO');
+    expect(out.extraSystem).toContain('nem que a troca passa por revisão');
+  });
+
+  it('escolha fora do catálogo sem alcance continua pelo LLM (nome livre do aluno não vai em texto fixo)', async () => {
+    const h = harness({
+      lookup: { requestedName: 'Supino Reto Máquina', matchedExerciseId: null },
+    });
+    h.read({ [DIAMANTE.id]: { requestedOutsideList: true } });
+    const out = generate(await h.service.handle(h.input()));
+    expect(out.extraSystem).toContain('já escolheu "Supino Reto Máquina"');
+    expect(out.suffix).toBe(SUBSTITUTION_SCOPE_QUESTION_SINGLE);
   });
 });
 

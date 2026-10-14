@@ -76,10 +76,12 @@ function systemPrompt(
       ? `Tarefa: escrever a mensagem de WhatsApp que confirma, de forma simples e resumida, a ` +
         `ATUALIZAÇÃO do protocolo — o aluno pediu pra trocar ${describeChangesAsk(substitutionChanges)} ` +
         `e ${substitutionChanges.length > 1 ? 'as trocas já foram aplicadas' : 'a troca já foi aplicada'} (o plano completo ATUALIZADO já foi ` +
-        'enviado em PDF; esta mensagem só reforça o que mudou e o que a pessoa vai encontrar ' +
-        'nele). NÃO é a primeira entrega do treino — nunca trate como se fosse ("seu treino ' +
-        'está pronto", "montamos tudo com base nos seus objetivos" etc. não cabem aqui). 2 a 4 ' +
-        'frases curtas, texto corrido, sem listas, sem markdown, sem emoji.\n\n'
+        'enviado em PDF). A bolha anterior JÁ disse qual exercício virou qual: NÃO repita o de/para ' +
+        'nem diga "feito"/"foi substituído". Esta mensagem só diz o que a pessoa encontra no ' +
+        'treino atualizado (o resto do protocolo segue como estava). NÃO é a primeira entrega ' +
+        'do treino — nunca trate como se fosse ("seu treino está pronto", "montamos tudo com ' +
+        'base nos seus objetivos" etc. não cabem aqui). ' +
+        '1 a 3 frases curtas, texto corrido, sem listas, sem markdown, sem emoji.\n\n'
       : 'Tarefa: escrever a mensagem de WhatsApp que apresenta, de forma simples e resumida, o ' +
         'treino que acabou de ser entregue (o plano completo já foi enviado em PDF — esta ' +
         'mensagem só apresenta o que a pessoa vai encontrar nele). 2 a 4 frases curtas, texto ' +
