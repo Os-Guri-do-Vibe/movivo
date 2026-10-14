@@ -157,8 +157,8 @@ export function Step1Registration({
         indicatorSide="left"
       />
 
-      <div className="grid grid-cols-2 gap-3">
-        <QuestionField>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+        <QuestionField className="row-span-2 grid grid-rows-subgrid">
           <FieldLabel htmlFor="heightCm">Qual é a sua altura? (cm)</FieldLabel>
           <TextInput
             id="heightCm"
@@ -171,7 +171,7 @@ export function Step1Registration({
           />
         </QuestionField>
 
-        <QuestionField>
+        <QuestionField className="row-span-2 grid grid-rows-subgrid">
           <FieldLabel htmlFor="weightKg">Qual é o seu peso? (kg)</FieldLabel>
           <TextInput
             id="weightKg"
