@@ -16,7 +16,12 @@ import type {
 import { getFinanceSummary, getSystemSummary } from '@/lib/control-center-api';
 import { cn } from '@/lib/utils';
 
-import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from '@/components/ui/chart';
 
 import { DailySeriesChart } from './overview-charts';
 
@@ -341,7 +346,8 @@ const categoryLabel = (category: string) => EXPENSE_CATEGORY_LABEL[category] ?? 
 const brl = (value: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 
-const number = (value: number) => new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 }).format(value);
+const number = (value: number) =>
+  new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 }).format(value);
 
 const monthLabel = (month: string) => {
   const [year, monthPart] = month.split('-');
@@ -375,16 +381,34 @@ function MetricInfo({
           align === 'start' ? 'left-0' : 'right-0',
         )}
       >
-        <p><span className="font-semibold">O que é: </span>{definition}</p>
-        <p className="mt-2"><span className="font-semibold">Cálculo: </span>{calculation}</p>
-        <p className="mt-2"><span className="font-semibold">Decisão: </span>{decision}</p>
+        <p>
+          <span className="font-semibold">O que é: </span>
+          {definition}
+        </p>
+        <p className="mt-2">
+          <span className="font-semibold">Cálculo: </span>
+          {calculation}
+        </p>
+        <p className="mt-2">
+          <span className="font-semibold">Decisão: </span>
+          {decision}
+        </p>
       </div>
     </details>
   );
 }
 
-function DistributionSummary({ distribution, unit }: { distribution: ControlCenterCostDistribution | null; unit: 'BRL' | 'COUNT' }) {
-  if (!distribution) return <p className="mt-3 text-xs text-muted-foreground">Indisponível: há jobs sem preço vigente.</p>;
+function DistributionSummary({
+  distribution,
+  unit,
+}: {
+  distribution: ControlCenterCostDistribution | null;
+  unit: 'BRL' | 'COUNT';
+}) {
+  if (!distribution)
+    return (
+      <p className="mt-3 text-xs text-muted-foreground">Indisponível: há jobs sem preço vigente.</p>
+    );
   const value = (item: number) => (unit === 'BRL' ? brl(item) : number(item));
   const confidence = distribution.meanConfidence95;
   return (
@@ -406,7 +430,9 @@ function DistributionSummary({ distribution, unit }: { distribution: ControlCent
         ].map(([label, amount]) => (
           <div key={String(label)} className="rounded-md bg-secondary p-2">
             <dt className="text-[11px] text-muted-foreground">{label}</dt>
-            <dd className="mt-0.5 font-mono text-sm font-bold text-foreground">{value(Number(amount))}</dd>
+            <dd className="mt-0.5 font-mono text-sm font-bold text-foreground">
+              {value(Number(amount))}
+            </dd>
           </div>
         ))}
       </dl>
@@ -422,13 +448,20 @@ function DistributionSummary({ distribution, unit }: { distribution: ControlCent
 
 function CostCdfChart({ distribution }: { distribution: ControlCenterCostDistribution | null }) {
   if (!distribution) return null;
-  const config = { percentile: { label: 'Titulares acumulados', color: 'var(--color-chart-1)' } } satisfies ChartConfig;
+  const config = {
+    percentile: { label: 'Titulares acumulados', color: 'var(--color-chart-1)' },
+  } satisfies ChartConfig;
   return (
-    <section aria-label="Curva acumulada do custo de IA" className="mt-5 rounded-lg border border-border bg-secondary/40 p-4">
+    <section
+      aria-label="Curva acumulada do custo de IA"
+      className="mt-5 rounded-lg border border-border bg-secondary/40 p-4"
+    >
       <div className="flex items-start justify-between gap-2">
         <div>
           <h4 className="text-label font-semibold">Curva acumulada de custo</h4>
-          <p className="mt-1 text-xs text-muted-foreground">Quanto da base cabe abaixo de cada custo mensal de IA.</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Quanto da base cabe abaixo de cada custo mensal de IA.
+          </p>
         </div>
         <MetricInfo
           label="curva acumulada de custo"
@@ -438,7 +471,11 @@ function CostCdfChart({ distribution }: { distribution: ControlCenterCostDistrib
         />
       </div>
       <ChartContainer config={config} className="mt-4 h-48 w-full">
-        <LineChart data={distribution.cdf} margin={{ top: 4, right: 8, bottom: 0, left: -16 }} accessibilityLayer>
+        <LineChart
+          data={distribution.cdf}
+          margin={{ top: 4, right: 8, bottom: 0, left: -16 }}
+          accessibilityLayer
+        >
           <CartesianGrid vertical={false} />
           <XAxis
             dataKey="value"
@@ -466,7 +503,13 @@ function CostCdfChart({ distribution }: { distribution: ControlCenterCostDistrib
               />
             }
           />
-          <Line dataKey="percentile" type="stepAfter" stroke="var(--color-percentile)" strokeWidth={2} dot={false} />
+          <Line
+            dataKey="percentile"
+            type="stepAfter"
+            stroke="var(--color-percentile)"
+            strokeWidth={2}
+            dot={false}
+          />
         </LineChart>
       </ChartContainer>
     </section>
@@ -492,7 +535,12 @@ function CostMethodCard({
     <article className="rounded-xl border border-border bg-card p-5">
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-label font-semibold">{title}</h3>
-        <MetricInfo label={title} definition={question} calculation={calculation} decision={decision} />
+        <MetricInfo
+          label={title}
+          definition={question}
+          calculation={calculation}
+          decision={decision}
+        />
       </div>
       <p className="mt-3 font-mono text-h1 font-bold text-foreground">{value}</p>
       {children}
@@ -500,7 +548,11 @@ function CostMethodCard({
   );
 }
 
-function CostIntelligence({ data }: { data: ControlCenterFinanceResponse['data']['costIntelligence'] }) {
+function CostIntelligence({
+  data,
+}: {
+  data: ControlCenterFinanceResponse['data']['costIntelligence'];
+}) {
   const aiMean = data.aiCostPerActiveUser ? brl(data.aiCostPerActiveUser.mean) : '—';
   const whatsappMean = data.whatsappUnitsPerActiveUser
     ? number(data.whatsappUnitsPerActiveUser.mean)
@@ -518,8 +570,8 @@ function CostIntelligence({ data }: { data: ControlCenterFinanceResponse['data']
         />
       </div>
       <p className="mt-1 max-w-3xl text-label text-muted-foreground">
-        Recorte de {data.windowDays} dias. Média estima o gasto total esperado; P50 mostra o
-        uso típico e P90/P95 expõem a cauda que pode comprometer margem.
+        Recorte de {data.windowDays} dias. Média estima o gasto total esperado; P50 mostra o uso
+        típico e P90/P95 expõem a cauda que pode comprometer margem.
       </p>
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <CostMethodCard
@@ -529,7 +581,9 @@ function CostIntelligence({ data }: { data: ControlCenterFinanceResponse['data']
           calculation="Custo calculado de IA dividido por dias distintos em que o titular teve uma conversa registrada ou uma chamada de IA."
           decision="É a base para projetar custo variável mensal conforme a previsão de usuários ativos."
         >
-          <p className="mt-3 text-xs text-muted-foreground">Base: {number(data.activeUserDays)} usuário-dias.</p>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Base: {number(data.activeUserDays)} usuário-dias.
+          </p>
         </CostMethodCard>
         <CostMethodCard
           title="Custo de IA por usuário ativo"

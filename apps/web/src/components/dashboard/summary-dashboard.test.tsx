@@ -109,7 +109,9 @@ describe('SummaryDashboard', () => {
     expect(within(costs).getByText('Custo de IA por usuário ativo')).toBeVisible();
     expect(within(costs).getAllByText('Mediana (P50)')).toHaveLength(2);
     expect(within(costs).getByText('Curva acumulada de custo')).toBeVisible();
-    fireEvent.click(within(costs).getByLabelText('Como interpretar Unidades WhatsApp por usuário ativo'));
+    fireEvent.click(
+      within(costs).getByLabelText('Como interpretar Unidades WhatsApp por usuário ativo'),
+    );
     expect(within(costs).getByText(/Evolution não gera cobrança/)).toBeVisible();
     expect(within(costs).getAllByText(/50 titulares/)).toHaveLength(3);
   });
