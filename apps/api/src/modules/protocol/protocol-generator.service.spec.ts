@@ -546,6 +546,21 @@ describe('prompt de regras verificadas e rodada de correção (2026-09-29)', () 
       await service.generate(command);
       expect(calls[0]?.system).not.toContain('"promptVersion"');
     });
+
+    it('registra o motivo (caminho do schema, sem conteúdo) quando a saída é reprovada', async () => {
+      const broken = JSON.parse(validProtocolJson());
+      broken.sessions[0].exercises[0].reps = { min: 20, max: 8 };
+      const { service, logger } = makeService([JSON.stringify(broken), validProtocolJson()]);
+      await service.generate(command);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'u-1',
+          reason: 'SCHEMA',
+          issues: [expect.stringContaining('sessions.0.exercises.0.reps')],
+        }),
+        'saída reprovada pelo schema do protocolo',
+      );
+    });
   });
 
   describe('rodada de correção', () => {

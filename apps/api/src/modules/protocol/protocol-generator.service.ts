@@ -475,7 +475,7 @@ export class ProtocolGeneratorService {
         intent: 'protocol_generation',
       });
 
-      const parsed = this.tryParse(result.text);
+      const parsed = this.tryParse(result.text, userId);
       if (parsed) {
         const repaired = this.repairHallucinatedExerciseIds(parsed, constraints, userId);
         const withWeekdays = this.backfillWeekdays(
@@ -532,19 +532,41 @@ export class ProtocolGeneratorService {
   /**
    * Parseia o texto do LLM como `ProtocolStructure`; retorna `null` se malformado. Antes do
    * parse estrito, `normalizeModelOutput` resolve só falhas de FORMA (campo nosso ausente,
-   * texto acima do limite, `sets` de cardio) — ver o cabeçalho do módulo.
+   * texto acima do limite, `sets` de cardio) — ver o cabeçalho do módulo. O motivo da
+   * rejeição vai para o log (apenas caminho + regra do schema, nunca o conteúdo do protocolo).
    */
-  private tryParse(text: string): ProtocolStructure | null {
+  private tryParse(text: string, userId: string): ProtocolStructure | null {
     const json = extractJsonObject(text);
-    if (!json) return null;
+    if (!json) {
+      this.logger.warn(
+        { userId, reason: 'SEM_JSON', length: text.length },
+        'saída sem objeto JSON',
+      );
+      return null;
+    }
     let raw: unknown;
     try {
       raw = JSON.parse(json);
     } catch {
+      this.logger.warn({ userId, reason: 'JSON_INVALIDO', length: text.length }, 'JSON inválido');
       return null;
     }
     const result = protocolStructureSchema.safeParse(normalizeModelOutput(raw));
-    return result.success ? result.data : null;
+    if (!result.success) {
+      this.logger.warn(
+        {
+          userId,
+          reason: 'SCHEMA',
+          length: text.length,
+          issues: result.error.issues
+            .slice(0, 10)
+            .map((issue) => `${issue.path.join('.')}: ${issue.message}`),
+        },
+        'saída reprovada pelo schema do protocolo',
+      );
+      return null;
+    }
+    return result.data;
   }
 
   /**
