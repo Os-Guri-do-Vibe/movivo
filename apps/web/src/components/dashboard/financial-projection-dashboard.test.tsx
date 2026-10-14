@@ -17,8 +17,7 @@ beforeEach(() => getFinanceSummary.mockReset().mockResolvedValue(financeResponse
 describe('FinancialProjectionDashboard', () => {
   it('separa realizado, base e os tres cenarios projetados', async () => {
     render(<FinancialProjectionDashboard />);
-    expect(await screen.findByText('Realizado · mês corrente')).toBeVisible();
-    expect(screen.getByText('Base de cálculo')).toBeVisible();
+    expect(await screen.findByText('Base de cálculo')).toBeVisible();
     expect(screen.getByText('Conservador')).toBeVisible();
     expect(screen.getByText('Base')).toBeVisible();
     expect(screen.getByText('Otimista')).toBeVisible();

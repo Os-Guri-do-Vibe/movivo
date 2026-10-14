@@ -62,6 +62,29 @@ describe('DashboardShell', () => {
     }
   });
 
+  it('limpa um fragmento residual ao reabrir o setor atual', async () => {
+    window.history.replaceState(null, '', '/dashboard/financeiro#custos#custos');
+    render(
+      <DashboardShell
+        role="FINANCE"
+        capabilities={['control_center.finance.read']}
+        name="Ana Souza"
+        avatarUrl={null}
+      >
+        <p>Conteúdo</p>
+      </DashboardShell>,
+    );
+    for (const toggle of screen.getAllByRole('button', { name: 'Financeiro' })) {
+      await userEvent.click(toggle);
+    }
+
+    const [financeLink] = screen.getAllByRole('link', { name: 'Receita & Assinaturas' });
+    if (!financeLink) throw new Error('link de Receita & Assinaturas não encontrado');
+    await userEvent.click(financeLink);
+
+    expect(window.location.pathname + window.location.hash).toBe('/dashboard/financeiro');
+  });
+
   it('admin recebe todos os setores autorizados, incluindo alertas', () => {
     expect(navigationFor(ADMIN_CAPABILITIES).map((item) => item.label)).toEqual(
       expect.arrayContaining(['Visão Geral', 'Base de Alunos', 'Alertas', 'Administração']),

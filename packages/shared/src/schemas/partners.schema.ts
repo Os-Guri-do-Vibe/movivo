@@ -43,17 +43,7 @@ export const partnerDistributionResponseSchema = z.object({
   data: z.object({
     /** `YYYY-MM` do período apurado (mês corrente, fuso America/Sao_Paulo). */
     period: z.string(),
-    /** Lucro do período em centavos inteiros. Negativo é prejuízo e é exibido como tal. */
-    profitCents: z.number().int(),
-    /** `false` quando não há despesa lançada: sem custo não existe lucro a distribuir. */
-    profitAvailable: z.boolean(),
-    profitDefinition: z.string(),
-    partners: z.array(
-      partnerShareSchema.extend({
-        /** `profitCents × shareBasisPoints ÷ 10.000`, truncado para centavo inteiro. */
-        amountCents: z.number().int(),
-      }),
-    ),
+    partners: z.array(partnerShareSchema),
     totalBasisPoints: z.number().int(),
     caveats: z.array(z.string()),
   }),

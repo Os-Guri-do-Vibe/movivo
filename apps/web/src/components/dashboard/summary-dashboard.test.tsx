@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type * as ControlCenterApi from '@/lib/control-center-api';
@@ -100,12 +100,24 @@ describe('SummaryDashboard', () => {
     expect(screen.getByText('claude-sonnet-4-5')).toBeVisible();
   });
 
-  it('nunca exibe indicador ausente como zero — lucro e CAC vêm rotulados', async () => {
+  it('explica média, percentis e a limitação de preço nas métricas de custo por usuário', async () => {
     getFinanceSummary.mockResolvedValue(financeResponse);
     render(<SummaryDashboard resource="finance" />);
-    expect(await screen.findByLabelText('Lucro: —')).toBeVisible();
-    expect(screen.getByLabelText('CAC: —')).toBeVisible();
+
+    const costs = await screen.findByRole('region', { name: 'Inteligência de custos por usuário' });
+    expect(within(costs).getByText('Custo de IA por usuário-dia')).toBeVisible();
+    expect(within(costs).getByText('Custo de IA por usuário ativo')).toBeVisible();
+    expect(within(costs).getAllByText('Mediana (P50)')).toHaveLength(2);
+    expect(within(costs).getByText('Curva acumulada de custo')).toBeVisible();
+    fireEvent.click(within(costs).getByLabelText('Como interpretar Unidades WhatsApp por usuário ativo'));
+    expect(within(costs).getByText(/Evolution não gera cobrança/)).toBeVisible();
+    expect(within(costs).getAllByText(/50 titulares/)).toHaveLength(3);
+  });
+
+  it('nunca exibe indicador ausente como zero — CAC e distribuição vêm rotulados', async () => {
+    getFinanceSummary.mockResolvedValue(financeResponse);
+    render(<SummaryDashboard resource="finance" />);
+    expect(await screen.findByLabelText('CAC: —')).toBeVisible();
     expect(screen.getByLabelText('Distribuição por sócio: —')).toBeVisible();
-    expect(screen.getByText(/Nenhuma despesa lançada ainda/)).toBeVisible();
   });
 });

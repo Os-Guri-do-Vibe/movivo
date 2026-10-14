@@ -322,15 +322,13 @@ describe('ControlCenterService overview (US-7.8)', () => {
     expect(response.data.pillars[0]).toMatchObject({ pillar: 'MARKETING', state: 'ATTENTION' });
   });
 
-  it('Financeiro fica ATTENTION com lucro negativo, mesmo sem receita em risco (US-8.8)', async () => {
+  it('Financeiro não cria alerta a partir de um lucro não apurado', async () => {
     const { service } = serviceWithSystemResults();
     stubPillar(service, 'finance', financeFixture(0, [0], -10));
 
     const response = await service.overview({ ...ACTOR, role: 'FINANCE' });
 
-    expect(response.data.pillars[0]).toMatchObject({ pillar: 'FINANCE', state: 'ATTENTION' });
-    expect(response.data.pillars[0]?.details.map((d) => d.label)).toContain('Lucro do período');
-    expect(response.data.pillars[0]?.reason).toMatch(/Lucro do período negativo/);
+    expect(response.data.pillars[0]).toMatchObject({ pillar: 'FINANCE', state: 'OK' });
   });
 
   it('Marketing ancora no CAC do canal principal e alerta acima do teto (US-8.8)', async () => {
@@ -502,18 +500,17 @@ describe('ControlCenterService overview (US-7.8)', () => {
     });
   });
 
-  it('Financeiro resume MRR, lucro, receita em risco e inadimplência — sem cancelamentos', async () => {
+  it('Financeiro resume MRR, receita em risco e inadimplência — sem cancelamentos', async () => {
     const { service } = serviceWithSystemResults();
     stubPillar(service, 'finance', financeFixture(0));
 
     const response = await service.overview({ ...ACTOR, role: 'FINANCE' });
 
     expect(response.data.pillars[0]?.details.map((d) => d.label)).toEqual([
-      'Lucro do período',
       'Receita em risco (30 dias)',
       'Inadimplência',
     ]);
-    expect(response.data.pillars[0]?.details[2]?.metric.value).toBe(4);
+    expect(response.data.pillars[0]?.details[1]?.metric.value).toBe(4);
   });
 
   it('Marketing inclui a conversão do trial e a deixa indisponível quando a taxa não é publicável', async () => {
@@ -972,7 +969,6 @@ describe('ControlCenterService projections', () => {
     expect(response.data.activeSubscriptions.value).toBe(7);
     expect(response.data.contractedMrr.value).toBe(273);
     expect(response.data.receivedRevenue.status).toBe('UNAVAILABLE');
-    expect(response.data.profit.status).toBe('UNAVAILABLE');
     expect(response.data.customerAcquisitionCost.status).toBe('UNAVAILABLE');
     expect(JSON.stringify(response.data)).not.toMatch(/phoneNumber|email|userId/);
   });
@@ -1062,10 +1058,7 @@ describe('ControlCenterService projections', () => {
     // R$180 ÷ 7 assinaturas ativas.
     expect(response.data.expensePerActiveUser.value).toBe(180 / 7);
     // Lucro = MRR contratado R$273 − despesa R$180 = R$93, tolerância 0.
-    expect(response.data.profit.value).toBe(93);
     // Regime declarado: proxy contratado enquanto NÃO houver liquidação em `payments`.
-    expect(response.data.profit.status).toBe('PROXY');
-    expect(response.data.profitBasis).toBe('CONTRATADO_PROXY');
   });
 
   /**
@@ -1120,9 +1113,6 @@ describe('ControlCenterService projections', () => {
     });
 
     // Cálculo manual: recebido R$200 − (despesa R$120 + taxa R$10) = R$70, tolerância 0.
-    expect(response.data.profit.value).toBe(70);
-    expect(response.data.profit.status).toBe('AVAILABLE');
-    expect(response.data.profitBasis).toBe('CAIXA');
 
     // 1 falha em 5 tentativas = 20% de inadimplência no período.
     expect(response.data.delinquencyRate.value).toBe(20);

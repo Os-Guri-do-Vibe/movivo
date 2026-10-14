@@ -7,7 +7,6 @@ import { getFinanceSummary } from '@/lib/control-center-api';
 
 import {
   EmptyState,
-  formatMetric,
   ResourceState,
   SectorHeader,
   useControlCenterResource,
@@ -52,19 +51,6 @@ export function FinancialProjectionDashboard() {
         refreshing={state.loading}
         onRefresh={() => void state.refresh()}
       />
-
-      <section
-        className="mt-6 rounded-xl border border-border bg-card p-5"
-        aria-labelledby="realized-result"
-      >
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Realizado · mês corrente
-        </p>
-        <h2 id="realized-result" className="mt-2 font-mono text-h1 font-bold">
-          {formatMetric(data.profit)}
-        </h2>
-        <p className="mt-2 text-label text-muted-foreground">{data.profit.definition}</p>
-      </section>
 
       {projection.status === 'UNAVAILABLE' ? (
         <div className="mt-6">

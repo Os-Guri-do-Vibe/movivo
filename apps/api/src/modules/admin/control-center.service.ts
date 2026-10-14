@@ -19,7 +19,6 @@ import {
   primaryGoalSchema,
   trainingLocationSchema,
   ControlCenterCapability as Capability,
-  ProfitBasis,
   type ExpenseCategory,
   type ControlCenterEvolutionPoint,
   type ControlCenterEntryCohort,
@@ -80,6 +79,7 @@ import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { EVOLUTION_TRANSPORT, type EvolutionTransport } from '../whatsapp/evolution-transport';
 import { AuditService } from './audit.service';
 import { assessChurnRisk, CHURN_RISK_THRESHOLDS } from './churn-risk';
+import { summarizeCostDistribution } from './cost-distribution';
 import { buildFinancialProjection } from './financial-projection';
 
 const TIMEZONE = 'America/Sao_Paulo' as const;
@@ -171,7 +171,6 @@ const OVERVIEW_ATTENTION_THRESHOLDS = {
    *  - CAC do canal principal acima disto quebra a meta LTV/CAC ≥ 3 de Eduardo para o
    *    plano mensal de R$ 39 (39 × 3 = 117). Vira atenção.
    */
-  financeMinProfitBrl: 0,
   marketingMaxChannelCacBrl: 117,
 } as const;
 
@@ -344,12 +343,7 @@ export class ControlCenterService {
   private async financePillarSummary(): Promise<ControlCenterPillarSummary> {
     const finance = await this.finance();
     const atRisk = finance.data.revenueAtRisk30d.value ?? 0;
-    // US-8.8: lucro do período entra na linha-resumo. Lucro indisponível (sem despesa
-    // lançada) não é atenção — é ausência de dado, e a métrica já diz isso na tela.
-    const profit = finance.data.profit;
-    const profitAttention =
-      profit.value !== null && profit.value < OVERVIEW_ATTENTION_THRESHOLDS.financeMinProfitBrl;
-    const attention = atRisk > OVERVIEW_ATTENTION_THRESHOLDS.financeAtRiskBrl || profitAttention;
+    const attention = atRisk > OVERVIEW_ATTENTION_THRESHOLDS.financeAtRiskBrl;
 
     return {
       pillar: 'FINANCE',
@@ -358,17 +352,14 @@ export class ControlCenterService {
       href: '/dashboard/financeiro',
       headline: { label: 'MRR contratado', metric: finance.data.contractedMrr },
       details: [
-        { label: 'Lucro do período', metric: profit },
         { label: 'Receita em risco (30 dias)', metric: finance.data.revenueAtRisk30d },
         // Sinal precoce de problema de caixa; cancelamentos em 90 dias ficam no Financeiro.
         { label: 'Inadimplência', metric: finance.data.delinquencyRate },
       ],
       signals: [],
-      reason: profitAttention
-        ? 'Lucro do período negativo: a despesa lançada superou a receita.'
-        : attention
-          ? `Receita em risco nos próximos 30 dias acima de R$ ${OVERVIEW_ATTENTION_THRESHOLDS.financeAtRiskBrl}.`
-          : null,
+      reason: attention
+        ? `Receita em risco nos próximos 30 dias acima de R$ ${OVERVIEW_ATTENTION_THRESHOLDS.financeAtRiskBrl}.`
+        : null,
     };
   }
 
@@ -2276,6 +2267,68 @@ export class ControlCenterService {
         cost_usd: number;
       }>;
 
+      /**
+       * Custo e volume por titular, estritamente agregados antes de sair do backend. `ai_jobs`
+       * é a fonte de IA e `conversations` conta cada envio real ao aluno sem ler o conteúdo
+       * cifrado. Enquanto Evolution não fatura, unidades WhatsApp são volume observado, não R$.
+       */
+      const costIntelligenceRows = (await tx.execute(sql`
+        with ai_usage as (
+          select
+            aj.user_id,
+            count(*) filter (where price.input_cents is null)::int as unpriced_ai_jobs,
+            coalesce(sum(
+              (coalesce(aj.tokens_input, 0) / 1000.0) * price.input_cents / 100.0
+              + (coalesce(aj.tokens_output, 0) / 1000.0) * price.output_cents / 100.0
+            ), 0)::float8 * ${USD_TO_BRL} as ai_cost_brl
+          from ai_jobs aj
+          left join lateral (
+            select mp.input_price_per_1k_cents as input_cents, mp.output_price_per_1k_cents as output_cents
+            from model_pricing mp
+            where lower(coalesce(aj.model_used, '')) like mp.model || '%'
+              and mp.valid_from <= (aj.created_at at time zone ${TIMEZONE})::date
+              and (mp.valid_to is null or mp.valid_to > (aj.created_at at time zone ${TIMEZONE})::date)
+            order by length(mp.model) desc, mp.valid_from desc
+            limit 1
+          ) price on true
+          where aj.created_at >= now() - ${this.days(AI_COST_WINDOW_DAYS)}
+          group by aj.user_id
+        ), whatsapp_usage as (
+          select c.user_id, count(*)::int as whatsapp_units
+          from conversations c
+          where c.direction = 'OUTBOUND'
+            and c.created_at >= now() - ${this.days(AI_COST_WINDOW_DAYS)}
+          group by c.user_id
+        ), active_days as (
+          select activity.user_id, count(distinct activity.day)::int as active_user_days
+          from (
+            select aj.user_id, (aj.created_at at time zone ${TIMEZONE})::date as day
+            from ai_jobs aj
+            where aj.created_at >= now() - ${this.days(AI_COST_WINDOW_DAYS)}
+            union
+            select c.user_id, (c.created_at at time zone ${TIMEZONE})::date as day
+            from conversations c
+            where c.created_at >= now() - ${this.days(AI_COST_WINDOW_DAYS)}
+          ) activity
+          group by activity.user_id
+        )
+        select
+          d.user_id,
+          d.active_user_days,
+          coalesce(a.ai_cost_brl, 0)::float8 as ai_cost_brl,
+          coalesce(a.unpriced_ai_jobs, 0)::int as unpriced_ai_jobs,
+          coalesce(w.whatsapp_units, 0)::int as whatsapp_units
+        from active_days d
+        left join ai_usage a on a.user_id = d.user_id
+        left join whatsapp_usage w on w.user_id = d.user_id
+      `)) as unknown as Array<{
+        user_id: string;
+        active_user_days: number;
+        ai_cost_brl: number;
+        unpriced_ai_jobs: number;
+        whatsapp_units: number;
+      }>;
+
       // Despesas lançadas (US-8.4). Estorno é linha negativa: `sum` já devolve o líquido.
       const expenseRows = await tx
         .select({
@@ -2365,6 +2418,48 @@ export class ControlCenterService {
           )
         : this.metric(pricedCost, 'BRL', 'PROXY', aiCostDefinition);
 
+      const unpricedAiJobs = costIntelligenceRows.reduce(
+        (total, item) => total + Number(item.unpriced_ai_jobs),
+        0,
+      );
+      const activeUserDays = costIntelligenceRows.reduce(
+        (total, item) => total + Number(item.active_user_days),
+        0,
+      );
+      const whatsappUnitsTotal = costIntelligenceRows.reduce(
+        (total, item) => total + Number(item.whatsapp_units),
+        0,
+      );
+      const costIntelligence = {
+        windowDays: AI_COST_WINDOW_DAYS,
+        activeUserDays,
+        // Um preço ausente torna o custo por usuário incompleto; zero seria uma afirmação falsa.
+        aiCostPerActiveUser:
+          unpricedAiJobs > 0
+            ? null
+            : summarizeCostDistribution(costIntelligenceRows.map((item) => Number(item.ai_cost_brl))),
+        aiCostPerUserDay:
+          activeUserDays === 0 || unpricedAiJobs > 0
+            ? this.unavailable(
+                'BRL',
+                unpricedAiJobs > 0
+                  ? `${unpricedAiJobs} job(ns) de IA não têm preço vigente; não há custo completo por usuário-dia.`
+                  : 'Não houve atividade mensurável no período para formar o denominador.',
+              )
+            : this.metric(
+                costIntelligenceRows.reduce((total, item) => total + Number(item.ai_cost_brl), 0) /
+                  activeUserDays,
+                'BRL',
+                'PROXY',
+                `Custo calculado de IA ÷ ${activeUserDays} dias de titulares com conversa ou trabalho de IA nos últimos ${AI_COST_WINDOW_DAYS} dias.`,
+              ),
+        whatsappUnitsPerActiveUser: summarizeCostDistribution(
+          costIntelligenceRows.map((item) => Number(item.whatsapp_units)),
+        ),
+        whatsappUnitsTotal,
+        unpricedAiJobs,
+      };
+
       const entryCohorts = await this.entryCohorts(tx);
 
       const atRiskTotal = atRiskRows.reduce((sum, item) => sum + this.number(item.amountBrl), 0);
@@ -2388,7 +2483,6 @@ export class ControlCenterService {
         .map(([month, amountBrl]) => ({ month, amountBrl }))
         .sort((a, b) => a.month.localeCompare(b.month));
       const hasExpenses = expenseRows.length > 0;
-      const contractedMrrBrl = this.number(row?.contractedMrr);
 
       // ---- Receita recebida × contratada (US-8.5) ----
       // As duas séries nascem de fontes distintas e são devolvidas em campos distintos.
@@ -2510,35 +2604,6 @@ export class ControlCenterService {
               'BRL',
               'Nenhuma liquidação registrada ainda — `payments` existe, mas está vazia (nenhum webhook de pagamento chegou).',
             ),
-        /**
-         * Lucro do período = receita recebida − despesa do mês corrente.
-         *
-         * **Regime CAIXA** desde a US-8.5: a receita agora vem de `payments` (liquidação
-         * real), não mais do `contractedMrr` como proxy. Sem nenhuma liquidação registrada
-         * o regime cai de volta para `CONTRATADO_PROXY` e a métrica volta a ser `PROXY` —
-         * a tela jamais chama de caixa um número que não é.
-         *
-         * Usa o BRUTO recebido, não o líquido: a taxa do gateway já está somada em
-         * `monthExpense` (via `costByMonth`), então subtrair o líquido a contaria duas vezes.
-         */
-        profit: !hasExpenses
-          ? this.unavailable(
-              'BRL',
-              'Nenhuma despesa lançada ainda: `expenses` existe, mas exibir lucro sem custo seria inventar.',
-            )
-          : hasPayments
-            ? this.metric(
-                receivedGrossBrl - monthExpense,
-                'BRL',
-                'AVAILABLE',
-                'Lucro do mês corrente em regime de CAIXA = receita recebida (liquidação do gateway) − despesa do mês, incluindo a taxa do gateway como custo.',
-              )
-            : this.metric(
-                contractedMrrBrl - monthExpense,
-                'BRL',
-                'PROXY',
-                'Lucro do mês corrente = MRR contratado − despesa lançada no mês. Regime provisório: receita CONTRATADA (proxy), não recebida — nenhuma liquidação foi registrada em `payments` ainda.',
-              ),
         partnerDistribution: this.unavailable(
           'BRL',
           'Distribuição por sócio passou a existir na US-8.7 e é exibida em Sócios & Distribuição, sob `control_center.partners.read` (somente ADMIN) — fora do alcance do papel financeiro por decisão de governança, não por falta de dado.',
@@ -2581,6 +2646,7 @@ export class ControlCenterService {
         aiCostByModel,
         costByCategory,
         costByMonth,
+        costIntelligence,
 
         // ---- Liquidação recebida (US-8.5) ----
         receivedRevenueByMonth,
@@ -2640,8 +2706,6 @@ export class ControlCenterService {
           receivedAt: (item.receivedAt ?? new Date()).toISOString(),
         })),
 
-        /** Regime declarado na tela. Ver o comentário de `profit`. */
-        profitBasis: hasPayments ? ProfitBasis.CAIXA : ProfitBasis.CONTRATADO_PROXY,
       };
     });
     return this.envelope(data, [
@@ -2649,14 +2713,12 @@ export class ControlCenterService {
       `Calendário de renovação cobre ${RENEWAL_HORIZON_DAYS} dias de receita contratada a vencer — não é projeção de vendas novas.`,
       'MRR = preço do plano ÷ meses do plano; ARR = MRR × 12. Receita contratada, não caixa recebido.',
       'Custo de IA usa o preço de `model_pricing` vigente na data de cada job (não o preço de hoje) e câmbio fixo.',
+      `Inteligência de custos usa ${AI_COST_WINDOW_DAYS} dias: média estima o total esperado; P50/P90/P95 mostram o usuário típico e a cauda. O intervalo de confiança da média só aparece com 50+ titulares ativos.`,
+      'Unidades WhatsApp contam mensagens outbound observadas em `conversations`; com Evolution são volume simulado, não custo faturado. Nenhum texto de conversa ou identificador de aluno é retornado.',
       'Receita CONTRATADA e receita RECEBIDA são grandezas distintas e nunca devem ser somadas: a diferença entre elas é inadimplência, falha de cartão e prazo de liquidação.',
-      'Lucro sai em regime de CAIXA assim que existe liquidação em `payments`; sem nenhuma, volta a exibir o proxy de receita contratada com o regime declarado. O campo `profitBasis` diz qual dos dois está valendo.',
-      'A taxa do gateway vem de `payments` (bruto − líquido) e entra em Custos na categoria GATEWAY_PAGAMENTO; o lucro usa o bruto recebido para não descontar a taxa duas vezes.',
       'Liquidação sem assinatura correspondente não é descartada: fica em `paymentExceptions` até ser conciliada à mão.',
       'Estorno e chargeback são linha nova de sinal contrário em `payments` — a linha da cobrança original nunca é alterada, e por isso as somas já saem líquidas.',
       'Custo por categoria/mês cobre 12 meses por competência (`occurred_on`), líquido de estornos — correção de lançamento é estorno + relançamento, nunca edição.',
-      'Projeção de resultado continua fora de escopo (Sprint 11): esta tela mostra resultado realizado, nunca projetado.',
-      'CAC e distribuição por sócio existem, mas fora desta tela: CAC é por canal em Marketing (US-8.6) e a distribuição fica em Sócios & Distribuição, sob capability restrita ao ADMIN (US-8.7).',
       'Coorte mensal de entrada: mês da primeira entrada em trial; "retido" = assinatura hoje ACTIVE. Coortes com menos de 10 entradas são omitidas.',
       'Coorte marcada como reconstruída vem do backfill de `subscriptions` (actor BACKFILL), não de evento observado — comparar com coorte observada exige essa ressalva.',
     ]);

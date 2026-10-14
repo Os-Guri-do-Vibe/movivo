@@ -10,7 +10,6 @@ import type { TenantDatabase } from '../../core/database/tenant-database.service
 import { CAPABILITIES_KEY } from '../auth/capabilities.decorator';
 import { CapabilitiesGuard } from '../auth/capabilities.guard';
 import type { AuditService } from './audit.service';
-import type { ControlCenterService } from './control-center.service';
 import { PartnersController } from './partners.controller';
 import { PartnersService } from './partners.service';
 
@@ -34,7 +33,7 @@ const SEED = [
   notes: null,
 }));
 
-function partnersWith(profitBrl: number | null, rows: unknown[] = SEED) {
+function partnersWith(rows: unknown[] = SEED) {
   const chain: Record<string, unknown> = {
     from: () => chain,
     where: () => chain,
@@ -76,61 +75,27 @@ function partnersWith(profitBrl: number | null, rows: unknown[] = SEED) {
     runAsSystem: vi.fn((callback: (value: unknown) => Promise<unknown>) => callback(tx)),
   } as unknown as TenantDatabase;
   const audit = { append: vi.fn().mockResolvedValue(undefined) };
-  const controlCenter = {
-    finance: vi.fn().mockResolvedValue({
-      data: {
-        profit: {
-          value: profitBrl,
-          unit: 'BRL',
-          status: profitBrl === null ? 'UNAVAILABLE' : 'AVAILABLE',
-          definition: 'Lucro do mês corrente em regime de CAIXA.',
-        },
-      },
-    }),
-  } as unknown as ControlCenterService;
-  const service = new PartnersService(db, audit as unknown as AuditService, controlCenter);
+  const service = new PartnersService(db, audit as unknown as AuditService);
   return { service, audit, inserted, tx };
 }
 
 describe('PartnersService.distribution', () => {
-  it('distribui o lucro real na participação vigente, com as 3 ressalvas no payload', async () => {
-    const { service } = partnersWith(1234.56);
+  it('retorna a composição vigente do cap table', async () => {
+    const { service } = partnersWith();
     const response = partnerDistributionResponseSchema.parse(await service.distribution());
 
-    expect(response.data.profitCents).toBe(123_456);
-    expect(response.data.profitAvailable).toBe(true);
     expect(response.data.totalBasisPoints).toBe(10_000);
-    // 20% de R$ 1.234,56 = R$ 246,91 (truncado do 246,912).
-    expect(response.data.partners.map((partner) => partner.amountCents)).toEqual([
-      24_691, 24_691, 24_691, 24_691, 24_691,
-    ]);
-    // A soma das partes nunca ultrapassa o lucro (truncamento, não arredondamento).
-    const distributed = response.data.partners.reduce((sum, item) => sum + item.amountCents, 0);
-    expect(distributed).toBeLessThanOrEqual(response.data.profitCents);
     expect(response.data.caveats).toHaveLength(3);
     expect(response.data.caveats.join(' ')).toMatch(/vesting/i);
     expect(response.data.caveats.join(' ')).toMatch(/reserva de caixa/i);
     expect(response.data.caveats.join(' ')).toMatch(/dividendo declarado/i);
   });
 
-  it('não inventa lucro quando a apuração está indisponível', async () => {
-    const { service } = partnersWith(null);
-    const response = await service.distribution();
-    expect(response.data.profitAvailable).toBe(false);
-    expect(response.data.profitCents).toBe(0);
-    expect(response.meta.dataQuality).toHaveLength(1);
-  });
-
-  it('distribui prejuízo como prejuízo, sem piso em zero', async () => {
-    const { service } = partnersWith(-500);
-    const response = await service.distribution();
-    expect(response.data.partners[0]?.amountCents).toBe(-10_000);
-  });
 });
 
 describe('PartnersService.replace', () => {
   it('rejeita composição que não fecha 10.000 bps antes de tocar o banco', async () => {
-    const { service, audit } = partnersWith(100);
+    const { service, audit } = partnersWith();
     await expect(
       service.replace(ACTOR, {
         validFrom: '2026-09-01',
@@ -147,7 +112,7 @@ describe('PartnersService.replace', () => {
   it.each(['2026-07-21', '2026-07-22'])(
     'rejeita vigência %s anterior ou igual sem fechar a composição vigente',
     async (validFrom) => {
-      const { service, audit, inserted, tx } = partnersWith(100);
+      const { service, audit, inserted, tx } = partnersWith();
       await expect(
         service.replace(ACTOR, {
           validFrom,
@@ -165,7 +130,7 @@ describe('PartnersService.replace', () => {
   );
 
   it('fecha a vigência anterior, abre a nova e audita na mesma transação', async () => {
-    const { service, audit, inserted } = partnersWith(100);
+    const { service, audit, inserted } = partnersWith();
     await service.replace(ACTOR, {
       validFrom: '2026-09-01',
       reason: 'Entrada de novo sócio',

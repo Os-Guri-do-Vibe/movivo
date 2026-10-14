@@ -11,7 +11,6 @@ import {
   CircleGauge,
   Inbox,
   ClipboardCheck,
-  Coins,
   Dumbbell,
   FlaskConical,
   Handshake,
@@ -198,14 +197,6 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         capabilities: ['control_center.finance.read'],
       },
       {
-        // US-8.4 entregou costByCategory/costByMonth; a seção vive dentro da
-        // mesma tela de Financeiro, não numa rota própria.
-        href: '/dashboard/financeiro#custos',
-        label: 'Custos',
-        icon: Coins,
-        capabilities: ['control_center.finance.read'],
-      },
-      {
         href: '/dashboard/projecao',
         label: 'Resultado & Projeção',
         icon: Calculator,
@@ -215,7 +206,7 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         // Cap table e distribuição não são do setor financeiro: exigem
         // `partners.read`, exclusiva do ADMIN. Quem é FINANCE não vê o item.
         href: '/dashboard/socios',
-        label: 'Sócios & Distribuição',
+        label: 'Sócios',
         icon: Handshake,
         capabilities: ['control_center.partners.read'],
       },
@@ -426,7 +417,19 @@ function DashboardNavigation({
                             ? `${label} · ${unreadCount} não lida${unreadCount === 1 ? '' : 's'}`
                             : undefined
                         }
-                        onClick={onNavigate}
+                        onClick={() => {
+                          // Ao clicar no setor atual, o App Router pode manter um fragmento
+                          // residual da URL anterior. Um setor sem # sempre volta à rota canônica.
+                          if (
+                            typeof window !== 'undefined' &&
+                            !href.includes('#') &&
+                            window.location.pathname === href &&
+                            window.location.hash
+                          ) {
+                            window.history.replaceState(window.history.state, '', href);
+                          }
+                          onNavigate?.();
+                        }}
                         className={cn(
                           'flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-label font-medium transition-colors focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none',
                           collapsed && 'justify-center px-0',

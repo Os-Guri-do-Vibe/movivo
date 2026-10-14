@@ -89,7 +89,6 @@ export const overviewResponse: ControlCenterOverviewResponse = {
         href: '/dashboard/financeiro',
         headline: { label: 'MRR contratado', metric: metric({ value: 1638, unit: 'BRL' }) },
         details: [
-          { label: 'Lucro do período', metric: metric({ value: 420.5, unit: 'BRL' }) },
           { label: 'Receita em risco (30 dias)', metric: metric({ value: 0, unit: 'BRL' }) },
           { label: 'Inadimplência', metric: metric({ value: 4, unit: 'PERCENT' }) },
         ],
@@ -261,12 +260,6 @@ export const financeResponse: ControlCenterFinanceResponse = {
     whatsappCost: metric({ value: 31.5, unit: 'BRL', status: 'PROXY' }),
     infrastructureCost: unavailableMetric,
     receivedRevenue: unavailableMetric,
-    profit: metric({
-      value: null,
-      unit: 'BRL',
-      status: 'UNAVAILABLE',
-      definition: 'Nenhuma despesa lançada ainda: exibir lucro sem custo seria inventar.',
-    }),
     partnerDistribution: unavailableMetric,
     customerAcquisitionCost: unavailableMetric,
     revenueAtRisk30d: metric({ value: 297, unit: 'BRL', status: 'PROXY' }),
@@ -340,6 +333,45 @@ export const financeResponse: ControlCenterFinanceResponse = {
       { month: '2026-07', amountBrl: 150 },
       { month: '2026-08', amountBrl: 180 },
     ],
+    costIntelligence: {
+      windowDays: 30,
+      activeUserDays: 620,
+      aiCostPerActiveUser: {
+        samples: 42,
+        total: 40.9,
+        mean: 0.97,
+        median: 0.61,
+        p90: 2.18,
+        p95: 2.72,
+        cdf: [
+          { percentile: 0, value: 0.12 },
+          { percentile: 50, value: 0.61 },
+          { percentile: 90, value: 2.18 },
+          { percentile: 95, value: 2.72 },
+          { percentile: 100, value: 3.1 },
+        ],
+        meanConfidence95: null,
+      },
+      aiCostPerUserDay: metric({ value: 0.07, unit: 'BRL', status: 'PROXY' }),
+      whatsappUnitsPerActiveUser: {
+        samples: 42,
+        total: 284,
+        mean: 6.76,
+        median: 5,
+        p90: 14,
+        p95: 18,
+        cdf: [
+          { percentile: 0, value: 1 },
+          { percentile: 50, value: 5 },
+          { percentile: 90, value: 14 },
+          { percentile: 95, value: 18 },
+          { percentile: 100, value: 21 },
+        ],
+        meanConfidence95: null,
+      },
+      whatsappUnitsTotal: 284,
+      unpricedAiJobs: 0,
+    },
     // US-8.5 — receita RECEBIDA. Série separada da contratada (`renewalCalendar`) de
     // propósito: são grandezas diferentes e a tela nunca as soma.
     receivedRevenueByMonth: [
@@ -385,7 +417,6 @@ export const financeResponse: ControlCenterFinanceResponse = {
         receivedAt: '2026-08-10T12:00:05.000Z',
       },
     ],
-    profitBasis: 'CONTRATADO_PROXY',
   },
   meta: { ...controlCenterMeta, dataQuality: [...controlCenterMeta.dataQuality] },
 };
@@ -730,9 +761,6 @@ export const complianceResponse: ControlCenterComplianceResponse = {
 export const partnerDistributionResponse: PartnerDistributionResponse = {
   data: {
     period: '2026-08',
-    profitCents: 500_000,
-    profitAvailable: true,
-    profitDefinition: 'Receita reconhecida menos despesas lançadas no período.',
     partners: [
       {
         id: '33333333-3333-4333-8333-333333333333',
@@ -741,7 +769,6 @@ export const partnerDistributionResponse: PartnerDistributionResponse = {
         validFrom: '2026-01-01',
         validTo: null,
         notes: null,
-        amountCents: 300_000,
       },
       {
         id: '44444444-4444-4444-8444-444444444444',
@@ -750,7 +777,6 @@ export const partnerDistributionResponse: PartnerDistributionResponse = {
         validFrom: '2026-01-01',
         validTo: null,
         notes: null,
-        amountCents: 200_000,
       },
     ],
     totalBasisPoints: 10_000,

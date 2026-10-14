@@ -1,12 +1,7 @@
 import { z } from 'zod';
 
 import { ControlCenterCapability, ControlCenterRole } from '../enums/control-center';
-import { ProfitBasis } from '../enums/expense';
 import { expenseCategorySchema } from './expense.schema';
-
-export const profitBasisSchema = z.enum(
-  Object.values(ProfitBasis) as [ProfitBasis, ...ProfitBasis[]],
-);
 
 const roleValues = Object.values(ControlCenterRole) as [ControlCenterRole, ...ControlCenterRole[]];
 const capabilityValues = Object.values(ControlCenterCapability) as [
@@ -990,6 +985,39 @@ export const controlCenterPaymentExceptionSchema = z.object({
 });
 export type ControlCenterPaymentException = z.infer<typeof controlCenterPaymentExceptionSchema>;
 
+/**
+ * Distribuição de uma medida por titular, sempre no mesmo recorte temporal da tela.
+ * Média estima o custo total esperado; P50/P90/P95 mostram o típico e a cauda. O IC só
+ * existe com 50+ titulares, para não dar uma precisão inexistente a um piloto pequeno.
+ */
+export const controlCenterCostDistributionSchema = z.object({
+  samples: z.number().int().nonnegative(),
+  total: z.number().nonnegative(),
+  mean: z.number().nonnegative(),
+  median: z.number().nonnegative(),
+  p90: z.number().nonnegative(),
+  p95: z.number().nonnegative(),
+  /** Curva acumulada agregada em marcos de 5 p.p.; nenhum ponto identifica um titular. */
+  cdf: z.array(z.object({ percentile: z.number().min(0).max(100), value: z.number().nonnegative() })),
+  meanConfidence95: z
+    .object({ lower: z.number().nonnegative(), upper: z.number().nonnegative() })
+    .nullable(),
+});
+export type ControlCenterCostDistribution = z.infer<typeof controlCenterCostDistributionSchema>;
+
+/** Dados agregados do piloto para estimar custo variável, sem conteúdo ou identidade do aluno. */
+export const controlCenterCostIntelligenceSchema = z.object({
+  windowDays: z.number().int().positive(),
+  activeUserDays: z.number().int().nonnegative(),
+  aiCostPerActiveUser: controlCenterCostDistributionSchema.nullable(),
+  /** Média ponderada: custo total de IA ÷ dias de titulares com atividade mensurável. */
+  aiCostPerUserDay: controlCenterMetricSchema,
+  whatsappUnitsPerActiveUser: controlCenterCostDistributionSchema.nullable(),
+  whatsappUnitsTotal: z.number().int().nonnegative(),
+  unpricedAiJobs: z.number().int().nonnegative(),
+});
+export type ControlCenterCostIntelligence = z.infer<typeof controlCenterCostIntelligenceSchema>;
+
 export const controlCenterFinanceResponseSchema = z.object({
   data: z.object({
     activeSubscriptions: controlCenterMetricSchema,
@@ -999,7 +1027,6 @@ export const controlCenterFinanceResponseSchema = z.object({
     whatsappCost: controlCenterMetricSchema,
     infrastructureCost: controlCenterMetricSchema,
     receivedRevenue: controlCenterMetricSchema,
-    profit: controlCenterMetricSchema,
     partnerDistribution: controlCenterMetricSchema,
     customerAcquisitionCost: controlCenterMetricSchema,
     revenueAtRisk30d: controlCenterMetricSchema,
@@ -1018,6 +1045,8 @@ export const controlCenterFinanceResponseSchema = z.object({
     expensePerActiveUser: controlCenterMetricSchema,
     costByCategory: z.array(controlCenterCostByCategorySchema),
     costByMonth: z.array(controlCenterCostByMonthSchema),
+    /** Métricas de custo por usuário e por uso, calculadas sobre fontes técnicas agregadas. */
+    costIntelligence: controlCenterCostIntelligenceSchema,
 
     // ---- Liquidação recebida (US-8.5) ----
     /**
@@ -1045,7 +1074,6 @@ export const controlCenterFinanceResponseSchema = z.object({
      * (US-8.5) não existir — a tela precisa declarar isso, nunca chamar de caixa o que
      * não é. A **projeção** de resultado segue fora de escopo (Sprint 11).
      */
-    profitBasis: profitBasisSchema,
   }),
   meta: controlCenterMetaSchema,
 });
