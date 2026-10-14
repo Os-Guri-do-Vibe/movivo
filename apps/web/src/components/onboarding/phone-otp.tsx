@@ -145,6 +145,9 @@ export function PhoneOtp({
     const input = inputRef.current;
     if (!input || verifying) return;
 
+    // No mobile, fechar o teclado não tira o foco do input (Android) e `focus()` num input
+    // já focado não reabre o teclado: soltar e retomar o foco é o que o traz de volta.
+    if (document.activeElement === input) input.blur();
     input.focus();
     const selectionStart = Math.min(index, code.length);
     const selectionEnd = index < code.length ? selectionStart + 1 : selectionStart;
@@ -205,10 +208,10 @@ export function PhoneOtp({
               <div
                 key={i}
                 data-testid={`otp-slot-${i}`}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  selectSlot(i);
-                }}
+                // O foco acontece no `click` (gesto do usuário que o iOS exige para abrir o
+                // teclado); o `mousedown` só evita o input perder o foco no desktop.
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => selectSlot(i)}
                 className={cn(
                   'relative flex h-[52px] min-w-0 cursor-text items-center justify-center rounded-xl border bg-white text-h3 font-semibold',
                   code[i] ? 'border-primary' : 'border-input',
