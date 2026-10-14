@@ -16,6 +16,9 @@ import styles from './hero.module.css';
 /** Palavra digitada no H1 (o CSS dá a caixa alta). */
 const TYPED_WORD = 'potential.';
 
+/** Plano padrão do Hero: vai direto à anamnese com o mensal; a troca de plano acontece no checkout. */
+const HERO_DEFAULT_PLAN = 'MONTHLY';
+
 /**
  * Hero cinematográfico. Pilha (tudo dentro da seção, nada `fixed`):
  *   filme (pôster SSR + vídeo) → 4 máscaras independentes → conteúdo → scroll cue.
@@ -86,6 +89,7 @@ export function Hero() {
             <div className={styles.primaryGroup}>
               <TrialCta
                 event={LANDING_EVENTS.heroStartTrial}
+                fallbackPlan={HERO_DEFAULT_PLAN}
                 width="block"
                 magnetic={false}
                 className={styles.primaryCta}

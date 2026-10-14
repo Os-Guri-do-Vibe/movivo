@@ -123,6 +123,11 @@ type TrialCtaProps = SharedProps & {
   event: LandingCtaEvent;
   /** Plano fixo (cartões de preço). Sem ele, vale o plano escolhido nesta visita, se houver. */
   plan?: SubscriptionPlanId;
+  /**
+   * Plano usado quando não há `plan` nem escolha na visita — o CTA vai direto à anamnese em
+   * vez de rolar até os planos (ex.: Hero, que já é a porta de entrada do trial).
+   */
+  fallbackPlan?: SubscriptionPlanId;
   /** Complemento só para leitor de tela (ex.: tradução de um rótulo em inglês). */
   srSuffix?: string;
   /** Rastreamento adicional do chamador (ex.: `pricing_select_*`). */
@@ -131,13 +136,21 @@ type TrialCtaProps = SharedProps & {
 
 /**
  * CTA de início do trial. Preserva o fluxo existente: com plano → `/anamnese?plano=ID`
- * (a anamnese persiste o plano na sessão); sem plano → rola até os planos para a
- * escolha. `form_started` (evento de funil da US-1.5) só dispara quando o clique
+ * (a anamnese persiste o plano na sessão); sem plano nem `fallbackPlan` → rola até os
+ * planos para a escolha. `form_started` (evento de funil da US-1.5) só dispara quando o clique
  * realmente leva à anamnese.
  */
-export function TrialCta({ event, plan, srSuffix, onTrack, children, ...rest }: TrialCtaProps) {
+export function TrialCta({
+  event,
+  plan,
+  fallbackPlan,
+  srSuffix,
+  onTrack,
+  children,
+  ...rest
+}: TrialCtaProps) {
   const selected = useSelectedPlan();
-  const target = plan ?? selected;
+  const target = plan ?? selected ?? fallbackPlan;
 
   function handleClick() {
     onTrack?.();

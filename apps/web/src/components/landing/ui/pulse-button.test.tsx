@@ -32,6 +32,29 @@ describe('TrialCta', () => {
     expect(track).not.toHaveBeenCalledWith('form_started', expect.anything());
   });
 
+  it('com plano de reserva, vai direto à anamnese e marca o início do funil', async () => {
+    const user = userEvent.setup();
+    render(
+      <TrialCta event="hero_start_trial" fallbackPlan="QUARTERLY">
+        Começar 7 dias grátis
+      </TrialCta>,
+    );
+    const link = screen.getByRole('link', { name: /Começar 7 dias grátis/ });
+    expect(link).toHaveAttribute('href', '/anamnese?plano=QUARTERLY');
+    await user.click(link);
+    expect(track).toHaveBeenCalledWith('form_started', { plan: 'QUARTERLY' });
+  });
+
+  it('a escolha da visita prevalece sobre o plano de reserva', () => {
+    render(
+      <TrialCta event="hero_start_trial" fallbackPlan="QUARTERLY">
+        Começar
+      </TrialCta>,
+    );
+    act(() => selectPlan('ANNUAL'));
+    expect(screen.getByRole('link')).toHaveAttribute('href', '/anamnese?plano=ANNUAL');
+  });
+
   it('com plano fixo, preserva o plano até a anamnese e marca o início do funil', async () => {
     const user = userEvent.setup();
     const onTrack = vi.fn();
