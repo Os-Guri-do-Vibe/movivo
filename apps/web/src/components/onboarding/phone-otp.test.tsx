@@ -138,6 +138,24 @@ describe('PhoneOtp', () => {
     expect(screen.getByLabelText(/código de verificação/i)).toHaveFocus();
   });
 
+  it('reabre o teclado ao tocar num quadrado com o input ainda focado (teclado fechado no mobile)', async () => {
+    const user = userEvent.setup();
+    render(<PhoneOtp sessionRef="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
+    await waitFor(() => expect(sendPhoneCode).toHaveBeenCalled());
+    const input = screen.getByLabelText(/código de verificação/i);
+    input.focus();
+    const onBlur = vi.fn();
+    const onFocus = vi.fn();
+    input.addEventListener('blur', onBlur);
+    input.addEventListener('focus', onFocus);
+
+    await user.click(screen.getByTestId('otp-slot-2'));
+
+    expect(onBlur).toHaveBeenCalledTimes(1);
+    expect(onFocus).toHaveBeenCalledTimes(1);
+    expect(input).toHaveFocus();
+  });
+
   it('substitui um dígito ao selecionar seu quadrado', async () => {
     const user = userEvent.setup();
     render(<PhoneOtp sessionRef="tok" phoneNumber="+5511999999999" onVerified={vi.fn()} />);
