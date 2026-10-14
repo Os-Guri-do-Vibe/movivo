@@ -11,6 +11,7 @@ vi.mock('./fonts', () => ({ landingFontVariables: '' }));
 vi.mock('./sections/muscle-map-figures', () => ({ default: () => null }));
 
 import { buildFaq } from '@/lib/landing/faq';
+import { anamnesisHref } from '@/lib/landing/pricing';
 
 import { Landing } from './landing';
 import { loadGsap } from './motion/gsap';
@@ -64,12 +65,12 @@ describe('Landing', () => {
     expect(text).not.toMatch(/first 100|founding/i);
   });
 
-  it('CTA principal leva à escolha de plano e os planos levam à anamnese', () => {
+  it('CTA principal leva direto à anamnese com o plano mensal e os planos também', () => {
     render(<Landing />);
     const hero = screen.getByRole('region', { name: /Move your potential/i });
     expect(hero.querySelector('[data-analytics-event="hero_start_trial"]')).toHaveAttribute(
       'href',
-      '#planos',
+      anamnesisHref('MONTHLY'),
     );
     const planLinks = [...document.querySelectorAll('a[href^="/anamnese?plano="]')].map((link) =>
       link.getAttribute('href'),

@@ -18,10 +18,10 @@ test('a landing carrega com hero, CTA e respaldo CREF', async ({ page }) => {
     page.getByRole('heading', { level: 1, name: /Move your potential\./i }),
   ).toBeVisible();
 
-  // CTA principal sem plano escolhido leva à escolha do plano (fluxo existente).
+  // CTA principal sem plano escolhido vai direto à anamnese com o plano mensal.
   const cta = page.locator('[data-analytics-event="hero_start_trial"]');
   await expect(cta).toBeVisible();
-  await expect(cta).toHaveAttribute('href', '#planos');
+  await expect(cta).toHaveAttribute('href', '/anamnese?plano=MONTHLY');
   await expect(page.getByText('Teste sem cadastrar nenhum cartão')).toBeVisible();
 
   // Guardrail de linguagem: o respaldo do profissional CREF é visível.
