@@ -537,7 +537,7 @@ describe('Step2Anamnesis', () => {
 
   it('condicional de preferências continua disponível na tela correspondente', () => {
     renderStep2({ data: { ...COMPLETE, hasAvoidedExercise: true }, initialSection: 4 });
-    expect(screen.getByLabelText('Qual exercício você prefere evitar?')).toBeInTheDocument();
+    expect(screen.getByLabelText('Conte-nos suas preferências.')).toBeInTheDocument();
   });
 
   it('padroniza as preferências e posiciona o círculo de seleção à esquerda', () => {

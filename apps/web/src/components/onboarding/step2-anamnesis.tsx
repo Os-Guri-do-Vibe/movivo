@@ -630,7 +630,7 @@ export function Step2Anamnesis({
             {data.hasAvoidedExercise && (
               <QuestionField className="border-l-2 border-primary pl-4" aria-live="polite">
                 <FieldLabel htmlFor="avoidedExercise">
-                  Qual exercício você prefere evitar?
+                  Conte-nos suas preferências.
                 </FieldLabel>
                 <TextArea
                   id="avoidedExercise"
