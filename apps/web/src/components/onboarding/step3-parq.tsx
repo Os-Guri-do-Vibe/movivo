@@ -170,7 +170,7 @@ export function Step3Parq({
             type="button"
             onClick={() => (screen === -1 ? onBack?.() : navigate(screen - 1))}
             disabled={submitting}
-            className="h-[52px] flex-1 rounded-xl border border-input bg-white px-6 text-body font-semibold text-petroleo transition-colors hover:bg-secondary disabled:opacity-50"
+            className="h-[52px] shrink-0 rounded-xl sm:flex-1 border border-input bg-white px-6 text-body font-semibold text-petroleo transition-colors hover:bg-secondary disabled:opacity-50"
           >
             Voltar
           </button>
@@ -180,7 +180,7 @@ export function Step3Parq({
             type="button"
             disabled={(screen >= 0 && !questionComplete) || submitting}
             onClick={() => navigate(screen + 1)}
-            className="h-[52px] flex-1 rounded-xl bg-primary px-6 text-body font-semibold text-primary-foreground transition-colors hover:bg-primary/85 disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground"
+            className="h-[52px] shrink-0 rounded-xl sm:flex-1 bg-primary px-6 text-body font-semibold text-primary-foreground transition-colors hover:bg-primary/85 disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground"
           >
             {screen === -1 ? 'Começar' : 'Continuar'}
           </button>
@@ -189,7 +189,7 @@ export function Step3Parq({
             type="button"
             disabled={!allDeclared || submitting}
             onClick={onSubmit}
-            className="h-[52px] flex-1 rounded-xl bg-primary px-6 text-body font-semibold text-primary-foreground transition-colors hover:bg-primary/85 disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground"
+            className="h-[52px] shrink-0 rounded-xl sm:flex-1 bg-primary px-6 text-body font-semibold text-primary-foreground transition-colors hover:bg-primary/85 disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground"
           >
             {submitting ? 'Guardando suas respostas…' : 'Finalizar avaliação'}
           </button>
