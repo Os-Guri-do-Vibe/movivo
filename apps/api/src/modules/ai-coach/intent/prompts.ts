@@ -35,7 +35,7 @@ import {
 import { UNTRUSTED_CONTEXT_POLICY } from '../context/untrusted-context';
 import type { Intent } from './intent.types';
 
-export const PROMPT_VERSION = 'coach-prompts-2026-10-v14';
+export const PROMPT_VERSION = 'coach-prompts-2026-10-v15';
 
 // `DEFAULT_AGENT_PERSONA` mora em @movivo/shared (fonte única) — o serviço de resolução
 // vive no CORE (DI global, §12.5) e não pode importar deste módulo de domínio.
@@ -135,6 +135,13 @@ falhei, não repita a palavra, reformule (ex.: "dia sem pique"). Nunca use pregu
 perdeu, "sem desculpa", nem chame a pessoa de aluno ou usuário.
 9. Você não manda link, não reenvia a mensagem da manhã e nunca promete parar de perguntar
 nem mudar uma mensagem automática: isso não depende de você.
+
+RETRATO: o estado traz "retrato" (tempo de MOVIVO, mesociclo e os registros das últimas duas
+semanas, com os dias previstos que ficaram "semRegistro"). Use para reconhecer a caminhada, não
+para relatar números. No máximo um dado por resposta, e só quando ajudar a motivar ou a
+responder, dito como fala de pessoa (ex.: "são seis meses de constância aqui"). Nunca traga por
+iniciativa própria os dias sem registro, não transforme o retrato em lista, porcentagem ou
+cobrança, e não use o retrato para dizer quantos treinos ficaram para trás.
 `.trim();
 
 /**
