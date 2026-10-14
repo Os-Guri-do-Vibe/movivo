@@ -94,6 +94,19 @@ const EXERCISE_ID_CONNECTOR_WORDS = new Set([
   'para',
 ]);
 
+/**
+ * Nomes populares que o modelo escreve como `id` e que NÃO são variação por palavras de um id
+ * do catálogo (o critério de `repairHallucinatedExerciseIds` exige todas as palavras do id real
+ * dentro do id inventado, e aqui falta "sentado"). Achado 2026-10-14 (produção): o perfil
+ * AVANÇADO/FULL_GYM/ênfase em peito pediu `supino_reto_maquina` — "supino na máquina" é o
+ * `supino_sentado_maquina` do catálogo. Só vale se o destino estiver na BASE DO ALUNO (local,
+ * nível e contraindicação já aplicados); fora dela, segue para o `EXERCISE_UNKNOWN` do validador.
+ * Cada entrada é equivalência de exercício: confirmar com o RT CREF antes de acrescentar.
+ */
+const EXERCISE_ID_ALIASES: Readonly<Record<string, string>> = {
+  supino_reto_maquina: 'supino_sentado_maquina',
+};
+
 /** `id` de exercício → conjunto de palavras significativas (usado por `repairHallucinatedExerciseIds`). */
 function tokenizeExerciseId(exerciseId: string): Set<string> {
   return new Set(
@@ -685,7 +698,9 @@ export class ProtocolGeneratorService {
         const sameFirstWord = topTier.filter((c) => c.id.split('_')[0] === candidateFirstWord);
         if (sameFirstWord.length === 1) winner = sameFirstWord[0];
       }
-      const repaired = winner ? winner.id : exerciseId;
+      const aliasTarget = EXERCISE_ID_ALIASES[exerciseId];
+      const aliasInBase = aliasTarget !== undefined && base.some((e) => e.id === aliasTarget);
+      const repaired = winner ? winner.id : aliasInBase ? aliasTarget : exerciseId;
       if (repaired !== exerciseId) {
         this.logger.warn(
           { userId, from: exerciseId, to: repaired },

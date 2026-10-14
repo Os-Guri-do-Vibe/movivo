@@ -563,6 +563,27 @@ describe('prompt de regras verificadas e rodada de correção (2026-09-29)', () 
     });
   });
 
+  // Achado 2026-10-14: o modelo escreve `supino_reto_maquina` ("supino na máquina") e o
+  // catálogo chama o exercício de `supino_sentado_maquina`.
+  describe('alias de nome popular de exercício', () => {
+    it('supino_reto_maquina vira supino_sentado_maquina quando está na base do aluno', async () => {
+      const { service } = makeService([validProtocolJson('supino_reto_maquina')]);
+      const result = await service.generate(command);
+      expect(result.structure.sessions[0]?.exercises[0]?.exerciseId).toBe('supino_sentado_maquina');
+      expect(result.unknownExerciseIds).toEqual([]);
+    });
+
+    it('com ombro contraindicado, o destino sai da base: não repara e fica EXERCISE_UNKNOWN', async () => {
+      const { service } = makeService([validProtocolJson('supino_reto_maquina')]);
+      const result = await service.generate({
+        ...command,
+        constraints: { ...constraints, injuryTags: ['SHOULDER'] },
+      });
+      expect(result.structure.sessions[0]?.exercises[0]?.exerciseId).toBe('supino_reto_maquina');
+      expect(result.unknownExerciseIds).toEqual(['supino_reto_maquina']);
+    });
+  });
+
   describe('rodada de correção', () => {
     // HINGE contraindicado por KNEE (as `constraints` deste arquivo têm KNEE).
     const vetoed = 'levantamento_terra_romeno_halter';
