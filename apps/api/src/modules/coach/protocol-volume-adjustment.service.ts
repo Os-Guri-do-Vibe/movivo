@@ -5,7 +5,9 @@
  * remove ou adiciona exercício — só ajusta números de exercícios que já existem.
  *
  * Decisão do fundador: aplica DIRETO, sem staging/janela de revisão (diferente da
- * substituição de exercício) — mas com o MESMO rastro de auditoria (`protocol_versions`,
+ * substituição de exercício) — exceto quando o conteúdo vigente é prescrição ajustada pelo
+ * profissional CREF (achado 2026-10-15): aí o pedido vira alerta para ele, nunca alteração
+ * automática. Quando aplica, deixa o MESMO rastro de auditoria (`protocol_versions`,
  * `generatedBy: 'AI_CHECKIN_ADJUSTMENT'`) e um `handoffAlerts` informativo pro profissional
  * CREF ver depois do fato, já que não há gate antes.
  *
@@ -220,6 +222,28 @@ export class ProtocolVolumeAdjustmentService {
     try {
       const active = await this.substitutionRepo.loadActiveProtocol(params.userId);
       if (!active) return { applied: false, reason: 'NO_ACTIVE_PROTOCOL' };
+      // Achado 2026-10-15: prescrição ajustada pelo profissional CREF não é reescrita pela IA
+      // sem revisão. O pedido do aluno vira alerta para o profissional decidir — mesmo motivo
+      // já usado quando um ajuste de duração exige avaliação profissional.
+      if (active.professionalAuthored) {
+        await this.db.runAsUser(params.userId, 'USER', (tx) =>
+          tx
+            .insert(handoffAlerts)
+            .values({
+              userId: params.userId,
+              level: 'ALERT',
+              reason: 'AJUSTE_DURACAO_SOLICITADO',
+              sourceType: 'CHECKIN',
+              sourceId: params.checkinId,
+            })
+            .onConflictDoNothing(),
+        );
+        this.logger.info(
+          { userId: params.userId, protocolId: active.protocolId },
+          'ajuste de volume não aplicado: prescrição do profissional — encaminhado para revisão',
+        );
+        return { applied: false, reason: 'PROFESSIONAL_PRESCRIPTION' };
+      }
 
       const result = await this.llm.complete({
         purpose: 'CHECKIN_ADJUSTMENT',

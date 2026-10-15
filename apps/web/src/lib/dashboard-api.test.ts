@@ -20,6 +20,7 @@ import {
   parseQueueResponse,
   resolveHandoff,
   saveProtocol,
+  searchExerciseCatalog,
   signProtocol,
 } from './dashboard-api';
 import {
@@ -521,5 +522,97 @@ describe('cliente BFF same-origin', () => {
         'Regras de segurança não atendidas: exercício fora da base: manual-1; Treino A: 3 exercícios com técnica',
       details: ['exercício fora da base: manual-1', 'Treino A: 3 exercícios com técnica'],
     });
+  });
+});
+
+describe('prescrição manual do profissional e catálogo (achado 2026-10-15)', () => {
+  it('parseia a situação de revisão calculada no servidor', () => {
+    const detail = parseQueueDetail({
+      ...protocolDetail,
+      protocol: {
+        ...protocolDetail.protocol,
+        review: {
+          origin: 'PROFESSIONAL',
+          availability: { daysPerWeek: 4, preferredDays: ['MON', 'WED', 7] },
+          blocking: [],
+          conflicts: [{ key: 'ISOLATION_AS_BASE:x', rule: 'ISOLATION_AS_BASE', detail: 'x' }, {}],
+        },
+      },
+    });
+    expect(detail.protocol?.review).toEqual({
+      origin: 'PROFESSIONAL',
+      availability: { daysPerWeek: 4, preferredDays: ['MON', 'WED'] },
+      blocking: [],
+      conflicts: [{ key: 'ISOLATION_AS_BASE:x', rule: 'ISOLATION_AS_BASE', detail: 'x' }],
+    });
+  });
+
+  it('resposta antiga sem `review` continua válida', () => {
+    expect(parseQueueDetail(protocolDetail).protocol?.review).toBeUndefined();
+  });
+
+  it('assina enviando as divergências reconhecidas — e nada extra quando não há', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response(200, { status: 'SIGNED' }));
+    vi.stubGlobal('fetch', fetchMock);
+    await signProtocol('p1', ['ISOLATION_AS_BASE:x']);
+    await signProtocol('p1');
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      confirmation: true,
+      acknowledgedConflicts: ['ISOLATION_AS_BASE:x'],
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ confirmation: true });
+  });
+
+  it('recusa por decisão pendente expõe o código e as divergências para a tela', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        response(400, {
+          code: 'PROFESSIONAL_DECISION_REQUIRED',
+          message: 'A prescrição diverge das regras automáticas.',
+          conflicts: [{ key: 'K', rule: 'ISOLATION_AS_BASE', detail: 'x' }],
+        }),
+      ),
+    );
+    await expect(signProtocol('p1')).rejects.toMatchObject({
+      status: 400,
+      code: 'PROFESSIONAL_DECISION_REQUIRED',
+      conflicts: [{ key: 'K', rule: 'ISOLATION_AS_BASE', detail: 'x' }],
+    });
+  });
+
+  it('busca no catálogo pelo BFF, com o protocolo em edição, e descarta itens malformados', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      response(200, {
+        items: [
+          {
+            id: 'prancha',
+            name: 'Prancha',
+            pattern: 'CORE',
+            muscleGroups: ['core'],
+            equipment: [],
+            measurement: 'DURATION',
+            contraindicatedForStudent: ['LOWER_BACK'],
+          },
+          { id: 42 },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const items = await searchExerciseCatalog('abdominal prancha', { protocolId: 'p1' });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/dashboard/exercise-catalog/search?q=abdominal+prancha&protocolId=p1',
+    );
+    expect(items).toEqual([
+      {
+        id: 'prancha',
+        name: 'Prancha',
+        pattern: 'CORE',
+        muscleGroups: ['core'],
+        equipment: [],
+        measurement: 'DURATION',
+        contraindicatedForStudent: ['LOWER_BACK'],
+      },
+    ]);
   });
 });

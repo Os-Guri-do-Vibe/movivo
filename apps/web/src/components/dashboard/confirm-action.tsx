@@ -1,7 +1,7 @@
 'use client';
 
 import { AlertTriangle, X, type LucideIcon } from 'lucide-react';
-import { useId, useRef, useState } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
 
@@ -16,6 +16,8 @@ export function ConfirmAction({
   disabled = false,
   triggerVariant,
   triggerSize = 'lg',
+  children,
+  confirmDisabled = false,
 }: {
   /** Texto do gatilho. Vira `aria-label`/rótulo `sr-only` quando `triggerIcon` é passado. */
   triggerLabel: string;
@@ -38,6 +40,10 @@ export function ConfirmAction({
    */
   triggerVariant?: 'default' | 'outline' | 'destructive' | 'ghost';
   triggerSize?: 'default' | 'sm' | 'lg' | 'icon';
+  /** Conteúdo extra entre a descrição e as ações (ex.: decisão a reconhecer antes de assinar). */
+  children?: ReactNode;
+  /** Mantém o botão de confirmação desabilitado (ex.: enquanto a decisão não foi marcada). */
+  confirmDisabled?: boolean;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -75,7 +81,7 @@ export function ConfirmAction({
         ref={dialogRef}
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
-        className="m-auto w-[min(32rem,calc(100%-2rem))] rounded-xl border border-border bg-card p-0 text-card-foreground shadow-xl backdrop:bg-petroleo/70"
+        className="m-auto max-h-[calc(100dvh-2rem)] w-[min(32rem,calc(100%-2rem))] overflow-y-auto rounded-xl border border-border bg-card p-0 text-card-foreground shadow-xl backdrop:bg-petroleo/70"
         onClose={() => setError('')}
       >
         <div className="p-5 sm:p-6">
@@ -98,6 +104,7 @@ export function ConfirmAction({
           <p id={descriptionId} className="mt-2 text-body text-muted-foreground">
             {description}
           </p>
+          {children}
           {error ? (
             <p
               role="alert"
@@ -122,7 +129,7 @@ export function ConfirmAction({
               type="button"
               size="lg"
               variant={destructive ? 'destructive' : 'default'}
-              disabled={pending}
+              disabled={pending || confirmDisabled}
               onClick={() => void confirm()}
             >
               {pending ? 'Registrando…' : confirmLabel}

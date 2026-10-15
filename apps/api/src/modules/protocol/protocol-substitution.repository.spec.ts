@@ -234,6 +234,29 @@ describe('ProtocolSubstitutionRepository.release', () => {
     expect(requestUpdate?.values).toMatchObject({ status: 'RELEASED' });
   });
 
+  it('conflito já aceito pelo profissional na versão vigente não trava a troca de OUTRO exercício (achado 2026-10-15)', async () => {
+    // Prancha prescrita pelo profissional para aluno com lombar: contraindicação aceita na
+    // assinatura. Trocar a flexão diamante não introduz nada novo — a troca é aplicada.
+    const withPlank: ProtocolStructure = structuredClone(content);
+    withPlank.sessions[0]?.exercises.push({
+      exerciseId: 'prancha',
+      name: 'Prancha',
+      sets: 3,
+      durationSeconds: 30,
+      loadStrategy: 'BODYWEIGHT',
+      restSeconds: 60,
+    });
+    const row = {
+      ...ACTIVE_PROTOCOL_ROW,
+      content: withPlank,
+      constraints: { ...CONSTRAINTS, injuryTags: ['LOWER_BACK'] },
+    };
+    const { repository } = repositoryWith([[PENDING_REQUEST], [row]]);
+    await expect(repository.release(STAFF, 'sub-request-1')).resolves.toMatchObject({
+      released: true,
+    });
+  });
+
   it('proposta legada (sem coluna `items`) é lida como um único item das colunas from/to', async () => {
     const { items: _items, ...legacy } = PENDING_REQUEST;
     void _items;

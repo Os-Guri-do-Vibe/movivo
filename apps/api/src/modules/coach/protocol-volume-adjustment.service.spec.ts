@@ -177,6 +177,35 @@ describe('ProtocolVolumeAdjustmentService.adjust', () => {
     expect(complete).not.toHaveBeenCalled();
   });
 
+  it('prescrição ajustada pelo profissional CREF: não aplica, não chama a IA e encaminha ao profissional (achado 2026-10-15)', async () => {
+    const { service, complete, tx } = makeService({
+      complete: async () => llmResult('{}'),
+      activeProtocol: {
+        protocolId: PROTOCOL_ID,
+        version: 3,
+        content: STRUCTURE,
+        validationConstraints: { level: 'INICIANTE' },
+        parQFlags: [],
+        professionalAuthored: true,
+      },
+    });
+    await expect(service.adjust(PARAMS)).resolves.toEqual({
+      applied: false,
+      reason: 'PROFESSIONAL_PRESCRIPTION',
+    });
+    expect(complete).not.toHaveBeenCalled();
+    expect(tx.updateSet).not.toHaveBeenCalled();
+    expect(tx.versionsInsertValues).not.toHaveBeenCalled();
+    expect(tx.alertInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        level: 'ALERT',
+        reason: 'AJUSTE_DURACAO_SOLICITADO',
+        sourceType: 'CHECKIN',
+        sourceId: CHECKIN_ID,
+      }),
+    );
+  });
+
   it('nunca lança — falha da IA devolve ERROR', async () => {
     const { service } = makeService({
       complete: async () => {

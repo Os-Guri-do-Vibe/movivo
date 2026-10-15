@@ -30,6 +30,7 @@ const api = vi.hoisted(() => ({
   discardSubstitution: vi.fn(),
   addCatalogExerciseToSubstitutionItem: vi.fn(),
   captureDashboardEvent: vi.fn(),
+  searchExerciseCatalog: vi.fn(),
 }));
 vi.mock('@/lib/dashboard-api', () => ({
   DashboardApiError: class DashboardApiError extends Error {
@@ -37,6 +38,8 @@ vi.mock('@/lib/dashboard-api', () => ({
       readonly status: number,
       message: string,
       readonly details?: unknown,
+      readonly code?: string,
+      readonly conflicts: unknown[] = [],
     ) {
       super(message);
     }
@@ -51,6 +54,7 @@ const controlCenterApi = vi.hoisted(() => ({ getExerciseCatalog: vi.fn() }));
 vi.mock('@/lib/control-center-api', () => controlCenterApi);
 
 import { DashboardApiError } from '@/lib/dashboard-api';
+import type { ExerciseCatalogOption } from '@/lib/dashboard-types';
 
 import { QueueDetail } from './queue-detail';
 
@@ -60,6 +64,27 @@ import { QueueDetail } from './queue-detail';
  * que é exatamente a garantia que o teste de paridade abaixo trava.
  */
 const parqProtocolDetail = { ...protocolDetail, item: parqProtocolItem };
+
+/** Opção do catálogo oficial como o autocomplete a recebe do servidor. */
+const SUPINO: ExerciseCatalogOption = {
+  id: 'supino_reto_halter',
+  name: 'Supino Reto (Halter)',
+  pattern: 'HORIZONTAL_PUSH',
+  muscleGroups: ['peito'],
+  equipment: ['halteres'],
+  measurement: 'REPS',
+  contraindicatedForStudent: [],
+};
+
+/** Busca no autocomplete do exercício e seleciona a opção (fluxo real do RT). */
+async function pickFromCatalog(input: HTMLElement, query: string, option = SUPINO) {
+  api.searchExerciseCatalog.mockResolvedValue([option]);
+  await userEvent.clear(input);
+  await userEvent.type(input, query);
+  await userEvent.click(
+    await screen.findByRole('option', { name: new RegExp(option.name.replace(/[()]/g, '\\$&')) }),
+  );
+}
 const optionalProtocolDetail = { ...protocolDetail, item: optionalProtocolItem };
 
 /**
@@ -464,7 +489,7 @@ describe('QueueDetail', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Assinar e liberar' }));
     expect(api.signProtocol).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole('button', { name: 'Confirmar e assinar' }));
-    await waitFor(() => expect(api.signProtocol).toHaveBeenCalledWith(PROTOCOL_ID));
+    await waitFor(() => expect(api.signProtocol).toHaveBeenCalledWith(PROTOCOL_ID, []));
     expect(await screen.findByRole('status')).toHaveTextContent('auditoria registrada');
   });
 
@@ -507,18 +532,26 @@ describe('QueueDetail', () => {
     expect(screen.getByText('Agachamento goblet')).toBeVisible();
 
     await userEvent.click(screen.getByRole('button', { name: 'Editar Protocolo' }));
-    const nameInput = screen.getByLabelText('Nome');
-    await userEvent.clear(nameInput);
-    await userEvent.type(nameInput, 'Supino reto');
+    await pickFromCatalog(screen.getByLabelText('Exercício do catálogo'), 'supino');
+    expect(api.searchExerciseCatalog).toHaveBeenCalledWith(
+      'supino',
+      expect.objectContaining({ protocolId: PROTOCOL_ID }),
+    );
     await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
 
+    // O que vai para o servidor é o id OFICIAL e a grafia do catálogo — nunca o texto digitado.
     await waitFor(() =>
       expect(api.saveProtocol).toHaveBeenCalledWith(
         PROTOCOL_ID,
         expect.objectContaining({
           sessions: [
             expect.objectContaining({
-              exercises: [expect.objectContaining({ name: 'Supino reto' })],
+              exercises: [
+                expect.objectContaining({
+                  exerciseId: 'supino_reto_halter',
+                  name: 'Supino Reto (Halter)',
+                }),
+              ],
             }),
           ],
         }),
@@ -560,19 +593,25 @@ describe('QueueDetail', () => {
     expect(api.saveProtocol).not.toHaveBeenCalled();
   });
 
-  it('edição com alertas de segurança é gravada e mostra o que corrigir antes de assinar', async () => {
+  it('edição com divergência das regras automáticas é gravada e avisa que a confirmação é na assinatura', async () => {
     api.getQueueDetail.mockResolvedValue(protocolDetail);
     api.saveProtocol.mockResolvedValue({
       status: 'PENDING_SIGNATURE',
-      validation: 'BLOCK',
-      violations: [{ rule: 'EXERCISE_UNKNOWN', detail: 'exercício fora da base: manual-1' }],
+      validation: 'PROFESSIONAL_CONFLICTS',
+      conflicts: [
+        {
+          key: 'ISOLATION_AS_BASE:Dia A: 3 isolados de 4 exercícios',
+          rule: 'ISOLATION_AS_BASE',
+          detail: 'Dia A: 3 isolados de 4 exercícios',
+        },
+      ],
     });
     render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
     await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
 
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'Alterações salvas. Antes de assinar, corrija: exercício fora da base: manual-1.',
+      'Alterações salvas. Ao assinar, confirme as divergências das regras automáticas: Isolados como base da sessão: Dia A: 3 isolados de 4 exercícios.',
     );
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Editar Protocolo' })).toBeVisible();
@@ -582,9 +621,7 @@ describe('QueueDetail', () => {
     api.getQueueDetail.mockResolvedValue(protocolDetail);
     render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
-    const nameInput = screen.getByLabelText('Nome');
-    await userEvent.clear(nameInput);
-    await userEvent.type(nameInput, 'Outro nome');
+    await pickFromCatalog(screen.getByLabelText('Exercício do catálogo'), 'supino');
     await userEvent.click(screen.getByRole('button', { name: 'Cancelar edição' }));
     expect(screen.getByText('Agachamento goblet')).toBeVisible();
     expect(api.saveProtocol).not.toHaveBeenCalled();
@@ -786,9 +823,7 @@ describe('QueueDetail', () => {
       target: { value: 'Posterior de coxa' },
     });
 
-    const nameInput = screen.getByLabelText('Nome');
-    await userEvent.clear(nameInput);
-    await userEvent.type(nameInput, 'Supino reto');
+    await pickFromCatalog(screen.getByLabelText('Exercício do catálogo'), 'supino');
     const notes = screen.getByLabelText('Observação');
     await userEvent.clear(notes);
     await userEvent.type(notes, 'Cuidado com a lombar');
@@ -836,7 +871,8 @@ describe('QueueDetail', () => {
               focus: 'Posterior de coxa',
               exercises: [
                 expect.objectContaining({
-                  name: 'Supino reto',
+                  exerciseId: 'supino_reto_halter',
+                  name: 'Supino Reto (Halter)',
                   notes: 'Cuidado com a lombar',
                   sets: 5,
                   reps: { min: 6, max: 9 },
@@ -899,10 +935,10 @@ describe('QueueDetail', () => {
       within(list).getByRole('button', { name: /arrastar "exercício b" \(posição 2\)/i }),
     ).toBeVisible();
     // Enquanto reordena, os campos de edição saem da frente.
-    expect(screen.queryByLabelText('Nome')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Exercício do catálogo')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: /concluir ordem/i }));
-    expect(screen.getAllByLabelText('Nome')).toHaveLength(2);
+    expect(screen.getAllByLabelText('Exercício do catálogo')).toHaveLength(2);
 
     await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
     await waitFor(() =>
@@ -1020,16 +1056,16 @@ describe('QueueDetail', () => {
 
     // Fixture tem 1 exercício só — remover fica desabilitado (schema exige mínimo 1).
     expect(screen.getByRole('button', { name: /remover exercício/i })).toBeDisabled();
-    expect(screen.getAllByLabelText('Nome')).toHaveLength(1);
+    expect(screen.getAllByLabelText('Exercício do catálogo')).toHaveLength(1);
 
     await userEvent.click(screen.getByRole('button', { name: /adicionar exercício/i }));
-    expect(screen.getAllByLabelText('Nome')).toHaveLength(2);
+    expect(screen.getAllByLabelText('Exercício do catálogo')).toHaveLength(2);
     const removeButtons = screen.getAllByRole('button', { name: /remover exercício/i });
     expect(removeButtons).toHaveLength(2);
     removeButtons.forEach((button) => expect(button).not.toBeDisabled());
 
     await userEvent.click(removeButtons[1] as HTMLElement);
-    expect(screen.getAllByLabelText('Nome')).toHaveLength(1);
+    expect(screen.getAllByLabelText('Exercício do catálogo')).toHaveLength(1);
     expect(screen.getByRole('button', { name: /remover exercício/i })).toBeDisabled();
   });
 
@@ -1179,9 +1215,9 @@ describe('QueueDetail', () => {
     api.getQueueDetail.mockResolvedValue(protocolDetail);
     render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
-    // Frequência semanal virou chip (1–7x, sempre um valor válido) — pra deixar o
-    // rascunho inválido agora, esvazia o nome do exercício (`min(1)` do schema).
-    await userEvent.clear(screen.getByLabelText('Nome'));
+    // Apagar o exercício no autocomplete sem escolher outro deixa o item sem seleção do
+    // catálogo — o editor não salva texto que não virou exercício oficial.
+    await userEvent.clear(screen.getByLabelText('Exercício do catálogo'));
     await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent('precisa de revisão');
     expect(api.saveProtocol).not.toHaveBeenCalled();
@@ -1256,5 +1292,283 @@ describe('QueueDetail', () => {
     expect(await screen.findByText('XXX | Membros inferiores | DESCONHECIDA')).toBeVisible();
     expect(await screen.findByText(/ZZZ/)).toBeVisible();
     expect(screen.getAllByText(/DESCONHECIDA/).length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Achado 2026-10-15 (produção): o RT digitou "Abdominal na Prancha" à mão, o item virou
+ * `manual-<uuid>` e a assinatura recusou. Exercício só entra pelo catálogo oficial, e a
+ * prescrição do profissional passa a prevalecer sobre as regras automáticas, com decisão
+ * explícita na assinatura.
+ */
+describe('QueueDetail — prescrição manual do profissional', () => {
+  const base = protocolDetail.protocol;
+  if (!base) throw new Error('fixture sem protocolo');
+  const PLANK_CONFLICT = {
+    key: 'EXERCISE_CONTRAINDICATED:prancha contraindicado por LOWER_BACK',
+    rule: 'EXERCISE_CONTRAINDICATED',
+    detail: 'prancha contraindicado por LOWER_BACK',
+  };
+  const withProtocol = (over: Record<string, unknown>) => ({
+    ...protocolDetail,
+    protocol: { ...base, ...over },
+  });
+
+  it('exercício novo não salva sem seleção do catálogo; selecionado, salva com o id oficial', async () => {
+    api.getQueueDetail.mockResolvedValue(protocolDetail);
+    api.saveProtocol.mockResolvedValue({ status: 'PENDING_SIGNATURE' });
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
+    await userEvent.click(screen.getByRole('button', { name: /adicionar exercício/i }));
+
+    await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Selecione no catálogo');
+    expect(api.saveProtocol).not.toHaveBeenCalled();
+
+    const pickers = screen.getAllByLabelText('Exercício do catálogo');
+    await pickFromCatalog(pickers[1] as HTMLElement, 'supino');
+    await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
+    await waitFor(() => expect(api.saveProtocol).toHaveBeenCalledOnce());
+    const saved = api.saveProtocol.mock.calls[0]?.[1] as {
+      sessions: Array<{ exercises: Array<{ exerciseId: string }> }>;
+    };
+    expect(saved.sessions[0]?.exercises.map((exercise) => exercise.exerciseId)).toEqual([
+      'goblet_squat',
+      'supino_reto_halter',
+    ]);
+  });
+
+  it('item legado fora do catálogo (manual-) é sinalizado e só salva depois de escolher um oficial', async () => {
+    const session = base.content.sessions[0];
+    if (!session) throw new Error('fixture');
+    api.getQueueDetail.mockResolvedValue(
+      withProtocol({
+        content: {
+          ...base.content,
+          sessions: [
+            {
+              ...session,
+              exercises: [
+                {
+                  ...session.exercises[0],
+                  exerciseId: 'manual-c8b975ba-22a7-4f29-933a-ef7d34427983',
+                  name: 'Abdominal na Prancha',
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+    api.saveProtocol.mockResolvedValue({ status: 'PENDING_SIGNATURE' });
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
+    expect(screen.getByText(/Exercício fora do catálogo/)).toBeVisible();
+
+    await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('hoje "Abdominal na Prancha"');
+    expect(api.saveProtocol).not.toHaveBeenCalled();
+
+    await pickFromCatalog(screen.getByLabelText('Exercício do catálogo'), 'prancha', {
+      ...SUPINO,
+      id: 'prancha',
+      name: 'Prancha',
+      pattern: 'CORE',
+      measurement: 'DURATION',
+      contraindicatedForStudent: ['LOWER_BACK'],
+    });
+    await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
+    await waitFor(() =>
+      expect(api.saveProtocol).toHaveBeenCalledWith(
+        PROTOCOL_ID,
+        expect.objectContaining({
+          sessions: [
+            expect.objectContaining({
+              exercises: [
+                // Exercício por tempo no catálogo: a seleção troca repetições por duração.
+                expect.objectContaining({
+                  exerciseId: 'prancha',
+                  name: 'Prancha',
+                  durationSeconds: 30,
+                  reps: undefined,
+                }),
+              ],
+            }),
+          ],
+        }),
+      ),
+    );
+  });
+
+  it('assinatura de prescrição com divergência exige marcar a decisão e envia as chaves reconhecidas', async () => {
+    api.getQueueDetail.mockResolvedValue(
+      withProtocol({
+        review: {
+          origin: 'PROFESSIONAL',
+          availability: { daysPerWeek: 3, preferredDays: [] },
+          blocking: [],
+          conflicts: [PLANK_CONFLICT],
+        },
+      }),
+    );
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    expect(
+      await screen.findByText('Prescrição sua com divergências das regras automáticas'),
+    ).toBeVisible();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Assinar e liberar' }));
+    const confirm = screen.getByRole('button', { name: 'Confirmar e assinar' });
+    expect(confirm).toBeDisabled();
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: /mantenho esta prescrição como decisão profissional/i }),
+    );
+    expect(confirm).not.toBeDisabled();
+    await userEvent.click(confirm);
+    await waitFor(() =>
+      expect(api.signProtocol).toHaveBeenCalledWith(PROTOCOL_ID, [PLANK_CONFLICT.key]),
+    );
+  });
+
+  it('pendência de integridade apontada pelo servidor impede assinar', async () => {
+    api.getQueueDetail.mockResolvedValue(
+      withProtocol({
+        review: {
+          origin: 'AI',
+          availability: { daysPerWeek: 4, preferredDays: ['MON', 'WED', 'THU', 'SAT', 'SUN'] },
+          blocking: [
+            {
+              key: 'WEEKLY_SESSIONS_EXCEED_AVAILABILITY:x',
+              rule: 'WEEKLY_SESSIONS_EXCEED_AVAILABILITY',
+              detail: '5 sessões por semana, acima dos 4 dias disponíveis do aluno',
+            },
+          ],
+          conflicts: [],
+        },
+      }),
+    );
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    expect(await screen.findByText('Corrija antes de assinar ou publicar:')).toBeVisible();
+    expect(
+      screen.getByText(/Mais sessões que os dias disponíveis do aluno: 5 sessões por semana/),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Assinar e liberar' })).toBeDisabled();
+    expect(screen.getByText(/Disponibilidade do aluno:/).closest('p')).toHaveTextContent(
+      '4 dia(s) por semana · prefere Segunda, Quarta, Quinta, Sábado, Domingo',
+    );
+  });
+
+  it('detalhe do aluno (protocolo ativo): divergência devolvida na publicação vira decisão explícita', async () => {
+    api.getQueueDetail.mockResolvedValue(
+      withProtocol({
+        status: 'ACTIVE',
+        approvalStatus: 'HUMAN_APPROVED',
+        signedAt: '2026-10-12T12:00:00.000Z',
+        signatureHash: 'a'.repeat(64),
+      }),
+    );
+    api.amendActiveProtocol
+      .mockRejectedValueOnce(
+        new DashboardApiError(
+          400,
+          'A prescrição diverge das regras automáticas.',
+          undefined,
+          'PROFESSIONAL_DECISION_REQUIRED',
+          [PLANK_CONFLICT],
+        ),
+      )
+      .mockResolvedValueOnce({ status: 'ACTIVE' });
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
+    await userEvent.type(screen.getByLabelText('Motivo da atualização'), 'Core avaliado');
+    const publish = screen.getByRole('button', { name: 'Salvar e publicar atualização' });
+    await userEvent.click(publish);
+
+    expect(await screen.findByText('Divergências das regras automáticas')).toBeVisible();
+    await userEvent.click(publish);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Confirme as divergências');
+    expect(api.amendActiveProtocol).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: /mantenho esta prescrição como decisão profissional/i }),
+    );
+    await userEvent.click(publish);
+    await waitFor(() => expect(api.amendActiveProtocol).toHaveBeenCalledTimes(2));
+    expect(api.amendActiveProtocol).toHaveBeenLastCalledWith(
+      PROTOCOL_ID,
+      expect.objectContaining({ acknowledgedConflicts: [PLANK_CONFLICT.key] }),
+    );
+  });
+
+  it('sessões com dia fixo: frequência acompanha o número de sessões e nunca passa da disponibilidade', async () => {
+    const session = base.content.sessions[0];
+    if (!session) throw new Error('fixture');
+    api.getQueueDetail.mockResolvedValue(
+      withProtocol({
+        content: {
+          ...base.content,
+          weeklyFrequency: 2,
+          sessions: [
+            { ...session, weekday: 'MON' },
+            { ...session, dayLabel: 'Treino B', weekday: 'WED' },
+          ],
+        },
+        review: {
+          origin: 'AI',
+          availability: { daysPerWeek: 2, preferredDays: ['MON', 'WED'] },
+          blocking: [],
+          conflicts: [],
+        },
+      }),
+    );
+    api.saveProtocol.mockResolvedValue({ status: 'PENDING_SIGNATURE' });
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
+
+    // Já há uma sessão por dia disponível: não dá para acrescentar outra.
+    expect(screen.getByRole('button', { name: 'Adicionar sessão' })).toBeDisabled();
+    expect(screen.getByText(/Frequência semanal:/)).toHaveTextContent('2x');
+
+    // Remove a segunda sessão e muda o dia da primeira.
+    await userEvent.click(
+      screen.getAllByRole('button', { name: /remover sessão/i })[1] as HTMLElement,
+    );
+    await userEvent.click(screen.getByRole('combobox', { name: 'Dia da semana' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Sexta' }));
+    await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
+
+    await waitFor(() =>
+      expect(api.saveProtocol).toHaveBeenCalledWith(
+        PROTOCOL_ID,
+        expect.objectContaining({
+          weeklyFrequency: 1,
+          sessions: [expect.objectContaining({ weekday: 'FRI' })],
+        }),
+      ),
+    );
+  });
+
+  it('não salva com dia da semana definido só em parte das sessões', async () => {
+    const session = base.content.sessions[0];
+    if (!session) throw new Error('fixture');
+    api.getQueueDetail.mockResolvedValue(
+      withProtocol({
+        content: {
+          ...base.content,
+          weeklyFrequency: 2,
+          sessions: [session, { ...session, dayLabel: 'Treino B' }],
+        },
+      }),
+    );
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
+    await userEvent.click(
+      screen.getAllByRole('combobox', { name: 'Dia da semana' })[0] as HTMLElement,
+    );
+    await userEvent.click(screen.getByRole('option', { name: 'Segunda' }));
+    await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Defina o dia da semana de todas as sessões.',
+    );
+    expect(api.saveProtocol).not.toHaveBeenCalled();
   });
 });

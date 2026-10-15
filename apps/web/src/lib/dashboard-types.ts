@@ -107,6 +107,39 @@ export interface ProtocolDetail {
   totalWeeks: number;
   createdAt: string;
   validation?: { valid: boolean; issues: string[] };
+  /** Situação de revisão calculada no servidor (ausente em respostas antigas). */
+  review?: ProtocolReview;
+}
+
+/** Divergência apontada pelo validador; `key` é o que o profissional reconhece ao assinar. */
+export interface ProtocolConflict {
+  key: string;
+  rule: string;
+  detail: string;
+}
+
+/**
+ * Situação de revisão do conteúdo atual (achado 2026-10-15). `blocking` impede assinar ou
+ * publicar; `conflicts` (só na prescrição do profissional) são divergências das regras
+ * automáticas que ele reconhece como decisão própria.
+ */
+export interface ProtocolReview {
+  origin: 'AI' | 'PROFESSIONAL';
+  availability: { daysPerWeek: number | null; preferredDays: string[] };
+  blocking: ProtocolConflict[];
+  conflicts: ProtocolConflict[];
+}
+
+/** Item do autocomplete de exercício (catálogo oficial publicado). */
+export interface ExerciseCatalogOption {
+  id: string;
+  name: string;
+  pattern: string;
+  muscleGroups: string[];
+  equipment: string[];
+  measurement: 'REPS' | 'DURATION';
+  /** Contraindicações do catálogo que batem com as restrições deste aluno (informativo). */
+  contraindicatedForStudent: string[];
 }
 
 /**
@@ -262,6 +295,8 @@ export interface ActionResult {
   validation?: string | { valid?: boolean; issues?: unknown[] };
   /** Alertas do `ValidationService` (edição de protocolo): o que corrigir antes de assinar. */
   violations?: Array<{ rule?: string; detail?: string }>;
+  /** Divergências da prescrição do profissional, reconhecidas na assinatura. */
+  conflicts?: ProtocolConflict[];
 }
 
 /** Tipo de notificação do sino; cada um abre a sua própria tela de detalhe. */

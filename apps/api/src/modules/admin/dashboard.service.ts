@@ -17,7 +17,9 @@ import {
   onboardingStep1Schema,
   protocolStructureSchema,
   publishExerciseCatalogEntrySchema,
+  signProtocolSchema,
   type ProtocolStructure,
+  type Weekday,
 } from '@movivo/shared';
 import { z } from 'zod';
 
@@ -55,6 +57,7 @@ import { ExerciseCatalogAdminService } from './exercise-catalog-admin.service';
 import { buildProtocolPdf } from '../protocol/protocol-pdf.service';
 import { signatureHash, supersedePreviousActiveProtocols } from '../protocol/protocol.repository';
 import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
+import { CATALOG_SEARCH_MAX_LIMIT, searchCatalog } from '../protocol/exercise-catalog-search';
 import { findSafeCandidates } from '../protocol/exercise-substitution';
 import {
   ProtocolSubstitutionRepository,
@@ -62,8 +65,20 @@ import {
 } from '../protocol/protocol-substitution.repository';
 import { itemsOf, type SubstitutionChange } from '../protocol/protocol-substitution-items';
 import { AI_SUBSTITUTION_REVIEW_WINDOW_MS } from '../protocol/protocol-substitution-release.worker';
+import {
+  isProfessionalAuthored,
+  MANUAL_AMENDMENT_ORIGIN,
+  PROFESSIONAL_EDIT_ORIGIN,
+} from '../protocol/protocol-origin';
+import { normalizedPreferredDays, validDaysPerWeek } from '../protocol/training-days';
 import type { UserConstraints } from '../protocol/user-constraints';
-import { ValidationService } from '../protocol/validation/validation.service';
+import {
+  type ProfessionalPrescriptionVerdict,
+  type ValidateProtocolInput,
+  type ValidationViolation,
+  ValidationService,
+  violationKey,
+} from '../protocol/validation/validation.service';
 import { WorkoutPresentationService } from '../protocol/workout-presentation.service';
 import { PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS } from '../protocol/protocol-generation.worker';
 import { type ReviewHoldKind, ReviewHoldService } from '../protocol/review-hold.service';
@@ -107,7 +122,11 @@ const itemIndexSchema = z.coerce.number().int().min(0).max(2);
 // staging (`protocol_substitution_requests`) — ver `ProtocolSubstitutionRepository`.
 const kindSchema = z.enum(['PROTOCOL', 'HANDOFF', 'CHECKIN', 'SUBSTITUTION']);
 const editSchema = z.object({ content: protocolStructureSchema });
-const signSchema = z.object({ confirmation: z.literal(true) });
+const catalogSearchQuerySchema = z.object({
+  q: z.string().trim().min(1).max(80),
+  protocolId: uuidSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(CATALOG_SEARCH_MAX_LIMIT).optional(),
+});
 /** `true` = a tela de revisão está aberta (renova a trava); `false` = fechou (solta e dispara o que venceu). */
 const reviewHoldSchema = z.object({ active: z.boolean() });
 const resolveSchema = z.object({
@@ -501,6 +520,42 @@ export class DashboardService {
     return this.handoffDetail(actor, id);
   }
 
+  /**
+   * Autocomplete do exercício no editor de protocolo (achado 2026-10-15, produção): só
+   * exercícios PUBLICADOS do catálogo oficial, por termo (`searchCatalog`). Com `protocolId`,
+   * cada resultado diz o que o catálogo contraindica para AQUELE aluno — informação para a
+   * decisão do profissional, nunca filtro (a decisão é dele; o conflito é reconhecido na
+   * assinatura). Não cria nem altera exercício.
+   */
+  async searchExerciseCatalog(actor: AuthenticatedUser, rawQuery: unknown) {
+    this.assertStaffRead(actor);
+    const query = this.parse(catalogSearchQuerySchema, rawQuery);
+    let studentTags = new Set<string>();
+    if (query.protocolId) {
+      const protocolId = query.protocolId;
+      const row = await this.scopedRead(actor, (tx) => this.requireProtocol(tx, protocolId));
+      const constraints = (row.constraints ?? {}) as { injuryTags?: string[] };
+      studentTags = new Set([
+        ...(constraints.injuryTags ?? []),
+        ...((row.parQFlags as string[] | null) ?? []),
+      ]);
+    }
+    const items = searchCatalog(this.exerciseCatalog.getAll(), query.q, query.limit).map(
+      (exercise) => ({
+        id: exercise.id,
+        name: exercise.name,
+        pattern: exercise.pattern,
+        muscleGroups: exercise.muscleGroups,
+        equipment: exercise.equipment,
+        measurement: exercise.measurement ?? 'REPS',
+        contraindicatedForStudent: exercise.contraindicatedFor.filter((tag) =>
+          studentTags.has(tag),
+        ),
+      }),
+    );
+    return { items };
+  }
+
   async anamnesisAnswers(actor: AuthenticatedUser, rawId: string) {
     const id = this.parse(uuidSchema, rawId);
     return this.protocolAnamnesisAnswers(actor, id);
@@ -511,26 +566,21 @@ export class DashboardService {
     const body = this.parse(editSchema, rawBody);
     const edited = await this.scoped(actor, async (tx) => {
       const row = await this.requireProtocol(tx, id, true);
-      const verdict = this.validation.validate({
-        structure: body.content,
-        constraints: row.constraints as Pick<
-          UserConstraints,
-          'goal' | 'injuryTags' | 'preferredDays'
-        >,
-        parqFlags: row.parQFlags as UserConstraints['injuryTags'],
-      });
-      // Salvar a edição do RT sempre persiste: as regras do `ValidationService` foram feitas
-      // para a saída da IA e travar o salvamento impedia o profissional de gravar qualquer
-      // alteração (achado 2026-10-11, produção). O veto continua inteiro onde importa: a
-      // edição força `MANDATORY` + `PENDING_SIGNATURE` (nunca sai sozinha) e `signProtocol`
-      // revalida e recusa a assinatura com as mesmas violações. Aqui elas só voltam como
-      // aviso para a tela mostrar o que precisa ser corrigido antes de assinar.
+      const content = this.canonicalExerciseNames(body.content);
+      // Achado 2026-10-15 (produção): a edição é PRESCRIÇÃO do profissional, não saída da IA.
+      // Regras de prescrição automática (contraindicação inferida, isolado como base, divisão,
+      // dias...) viram conflito a reconhecer na assinatura — a decisão dele prevalece. O que
+      // continua impedindo até de salvar é integridade/compliance: exercício fora do catálogo
+      // (a referência inválida que travou a assinatura em produção), sessões acima dos dias
+      // disponíveis do aluno, dia repetido, linguagem proibida.
+      const verdict = this.professionalVerdict(row, content);
+      this.assertNoIntegrityViolations(verdict.blocking);
       const beforeHash = this.hashJson(row.content);
-      const afterHash = signatureHash(body.content);
+      const afterHash = signatureHash(content);
       await tx
         .update(protocols)
         .set({
-          content: body.content,
+          content,
           status: 'PENDING_SIGNATURE',
           approvalStatus: 'PENDING_REVIEW',
           professionalId: null,
@@ -540,6 +590,9 @@ export class DashboardService {
           // Conteúdo editado por humano nunca sai sozinho — se já era `OPTIONAL`, o job de
           // auto-liberação (se ainda não disparou) vira no-op ao reconferir o estado.
           reviewUrgency: 'MANDATORY',
+          // Procedência do conteúdo vigente — decidida aqui, pelo endpoint autenticado, nunca
+          // pelo cliente. A versão da IA continua em `protocol_versions`.
+          generatedBy: PROFESSIONAL_EDIT_ORIGIN,
         })
         .where(eq(protocols.id, id));
       await this.audit.append(tx, {
@@ -551,15 +604,19 @@ export class DashboardService {
         changes: {
           beforeHash,
           afterHash,
-          validation: verdict.code,
-          violations: verdict.violations.map((violation) => violation.rule),
+          origin: PROFESSIONAL_EDIT_ORIGIN,
+          validation: verdict.conflicts.length > 0 ? 'PROFESSIONAL_CONFLICTS' : 'PASS',
+          violations: verdict.conflicts.map((violation) => violation.rule),
         },
       });
       return {
         id,
         status: 'PENDING_SIGNATURE',
-        validation: verdict.code,
-        violations: verdict.violations,
+        validation: verdict.conflicts.length > 0 ? 'PROFESSIONAL_CONFLICTS' : 'PASS',
+        // Mantido por compatibilidade com a tela: são avisos, não bloqueio — o profissional
+        // os reconhece na assinatura (`acknowledgedConflicts`).
+        violations: verdict.conflicts,
+        conflicts: this.conflictPayload(verdict.conflicts),
       };
     });
     this.queueEvents.emit('protocol');
@@ -592,29 +649,22 @@ export class DashboardService {
         });
       }
       await this.assertCrefCredential(tx, actor);
-      const verdict = this.validation.validate({
-        structure: body.content,
-        constraints: row.constraints as Pick<
-          UserConstraints,
-          'goal' | 'injuryTags' | 'preferredDays'
-        >,
-        parqFlags: row.parQFlags as UserConstraints['injuryTags'],
-      });
-      if (verdict.action !== 'PASS') {
-        throw new BadRequestException({
-          code: 'PROTOCOL_NOT_SAFE_TO_SIGN',
-          violations: verdict.violations,
-        });
-      }
+      const content = this.canonicalExerciseNames(body.content);
+      // Mesma regra da edição na fila (achado 2026-10-15): integridade bloqueia; divergência
+      // das regras automáticas exige decisão explícita do profissional, que fica registrada.
+      const verdict = this.professionalVerdict(row, content);
+      this.assertNoIntegrityViolations(verdict.blocking);
+      this.assertConflictsAcknowledged(verdict.conflicts, body.acknowledgedConflicts);
 
       const now = new Date();
       const nextVersion = row.version + 1;
-      const hash = signatureHash(body.content);
+      const hash = signatureHash(content);
       await tx
         .update(protocols)
         .set({
-          content: body.content,
+          content,
           version: nextVersion,
+          generatedBy: MANUAL_AMENDMENT_ORIGIN,
           professionalId: actor.userId,
           signedAt: now,
           signatureHash: hash,
@@ -652,9 +702,12 @@ export class DashboardService {
         userId: row.userId,
         version: nextVersion,
         status: 'ACTIVE',
-        content: body.content,
+        content,
+        ...(verdict.conflicts.length > 0
+          ? { diff: this.professionalOverrideDiff(verdict.conflicts) }
+          : {}),
         changeReason: body.reason,
-        generatedBy: 'MANUAL_AMENDMENT',
+        generatedBy: MANUAL_AMENDMENT_ORIGIN,
         signatureHash: hash,
         signedAt: now,
       });
@@ -670,6 +723,8 @@ export class DashboardService {
           beforeHash: this.hashJson(row.content),
           afterHash: hash,
           reasonHash: this.hashJson(body.reason),
+          origin: MANUAL_AMENDMENT_ORIGIN,
+          overriddenRules: verdict.conflicts.map((violation) => violation.rule),
         },
       });
       return {
@@ -678,7 +733,7 @@ export class DashboardService {
         signatureHash: hash,
         signedAt: now.toISOString(),
         alreadySigned: false,
-        content: body.content,
+        content,
         mesocycleName: row.mesocycleName,
         startDate: row.startDate,
         endDate: row.endDate,
@@ -746,7 +801,7 @@ export class DashboardService {
 
   async signProtocol(actor: AuthenticatedUser, rawId: string, rawBody: unknown) {
     const id = this.parse(uuidSchema, rawId);
-    this.parse(signSchema, rawBody);
+    const body = this.parse(signProtocolSchema, rawBody);
     const signed = await this.scoped(actor, async (tx): Promise<SignProtocolResult> => {
       const row = await this.requireProtocol(tx, id, true);
       // Consentimento de saúde revogado → nada de assinar, para QUALQUER protocolo (não só
@@ -795,19 +850,28 @@ export class DashboardService {
         });
       }
       const content = parsedContent.data;
-      const verdict = this.validation.validate({
-        structure: content,
-        constraints: row.constraints as Pick<
-          UserConstraints,
-          'goal' | 'injuryTags' | 'preferredDays'
-        >,
-        parqFlags: row.parQFlags as UserConstraints['injuryTags'],
-      });
-      if (verdict.action !== 'PASS') {
-        throw new BadRequestException({
-          code: 'PROTOCOL_NOT_SAFE_TO_SIGN',
-          violations: verdict.violations,
+      // Achado 2026-10-15 (produção): conteúdo que o PROFISSIONAL editou (origem gravada pelo
+      // `editProtocol`, nunca pelo cliente) não é vetado pelas regras de prescrição automática
+      // — ele reconhece cada conflito de forma explícita e a assinatura registra a decisão.
+      // Conteúdo da IA ainda não revisado continua sob o veto inteiro de sempre.
+      let overrides: ValidationViolation[] = [];
+      if (isProfessionalAuthored(row.generatedBy)) {
+        const verdict = this.professionalVerdict(row, content);
+        this.assertNoIntegrityViolations(verdict.blocking);
+        this.assertConflictsAcknowledged(verdict.conflicts, body.acknowledgedConflicts);
+        overrides = verdict.conflicts;
+      } else {
+        const verdict = this.validation.validate({
+          structure: content,
+          constraints: this.validationConstraints(row),
+          parqFlags: row.parQFlags as UserConstraints['injuryTags'],
         });
+        if (verdict.action !== 'PASS') {
+          throw new BadRequestException({
+            code: 'PROTOCOL_NOT_SAFE_TO_SIGN',
+            violations: verdict.violations,
+          });
+        }
       }
       const now = new Date();
       const nextVersion = row.version + 1;
@@ -833,6 +897,7 @@ export class DashboardService {
         version: nextVersion,
         status: 'ACTIVE',
         content,
+        ...(overrides.length > 0 ? { diff: this.professionalOverrideDiff(overrides) } : {}),
         changeReason: 'revisao e assinatura humana CREF',
         generatedBy: row.generatedBy,
         signatureHash: hash,
@@ -854,7 +919,14 @@ export class DashboardService {
         action: 'PROTOCOL_SIGNED',
         entityType: 'protocol',
         entityId: id,
-        changes: { version: nextVersion, signatureHash: hash, signedAt: now.toISOString() },
+        changes: {
+          version: nextVersion,
+          signatureHash: hash,
+          signedAt: now.toISOString(),
+          ...(overrides.length > 0
+            ? { overriddenRules: overrides.map((violation) => violation.rule) }
+            : {}),
+        },
       });
       // Evento SEPARADO, não um campo dentro do `PROTOCOL_SIGNED`: liberar PAR-Q é o ato
       // jurídico-profissional que a `anamnesis_session` precisa carregar no seu próprio
@@ -1480,6 +1552,7 @@ export class DashboardService {
           // cliente a partir daqui (criação + duração) — não existe coluna própria pra
           // "início real do protocolo", que hoje é a própria criação do registro.
           createdAt: row.createdAt.toISOString(),
+          review: this.protocolReview(row),
         },
       };
     });
@@ -1770,6 +1843,144 @@ export class DashboardService {
           ? { feelingNotes: notes(feedback.feelingNotes)?.value }
           : {}),
       },
+    };
+  }
+
+  /**
+   * Situação de revisão do conteúdo atual, calculada no servidor (achado 2026-10-15): de quem
+   * é a prescrição, o que impede assinar/publicar e o que o profissional precisa reconhecer.
+   * A tela só exibe — quem decide é sempre `signProtocol`/`amendActiveProtocol`.
+   */
+  private protocolReview(row: {
+    content: unknown;
+    constraints: unknown;
+    parQFlags: unknown;
+    generatedBy: string | null;
+  }) {
+    const raw = (row.constraints ?? {}) as { daysPerWeek?: unknown; preferredDays?: unknown };
+    const availability = {
+      daysPerWeek: validDaysPerWeek(raw.daysPerWeek) ?? null,
+      preferredDays: Array.isArray(raw.preferredDays)
+        ? normalizedPreferredDays(raw.preferredDays as Weekday[])
+        : [],
+    };
+    const professional = isProfessionalAuthored(row.generatedBy);
+    const parsed = protocolStructureSchema.safeParse(row.content);
+    if (!parsed.success) {
+      return {
+        origin: professional ? 'PROFESSIONAL' : 'AI',
+        availability,
+        blocking: [],
+        conflicts: [],
+      };
+    }
+    if (professional) {
+      const verdict = this.professionalVerdict(row, parsed.data);
+      return {
+        origin: 'PROFESSIONAL',
+        availability,
+        blocking: this.conflictPayload(verdict.blocking),
+        conflicts: this.conflictPayload(verdict.conflicts),
+      };
+    }
+    const verdict = this.validation.validate({
+      structure: parsed.data,
+      constraints: this.validationConstraints(row),
+      parqFlags: row.parQFlags as UserConstraints['injuryTags'],
+    });
+    return {
+      origin: 'AI',
+      availability,
+      blocking: this.conflictPayload(verdict.violations.filter((v) => v.action === 'BLOCK')),
+      conflicts: [],
+    };
+  }
+
+  /** Constraints persistidas no protocolo, no formato do validador (shape solto do jsonb). */
+  private validationConstraints(row: {
+    constraints: unknown;
+  }): ValidateProtocolInput['constraints'] {
+    return (row.constraints ?? {}) as ValidateProtocolInput['constraints'];
+  }
+
+  private professionalVerdict(
+    row: { constraints: unknown; parQFlags: unknown },
+    content: ProtocolStructure,
+  ): ProfessionalPrescriptionVerdict {
+    return this.validation.validateProfessionalPrescription({
+      structure: content,
+      constraints: this.validationConstraints(row),
+      parqFlags: row.parQFlags as UserConstraints['injuryTags'],
+    });
+  }
+
+  /**
+   * Nome oficial do catálogo para todo exercício com `exerciseId` conhecido: trocar o
+   * exercício no editor não pode deixar o nome dizendo uma coisa e o id outra — o validador,
+   * o PDF e o AI Coach leem o id. Grafia original do catálogo, nunca a digitada. Vídeo: o link
+   * que o profissional informou prevalece; sem link (exercício recém-escolhido — o editor
+   * limpa o vídeo do anterior), entra o vídeo curado do catálogo, como no gerador.
+   */
+  private canonicalExerciseNames(content: ProtocolStructure): ProtocolStructure {
+    return {
+      ...content,
+      sessions: content.sessions.map((session) => ({
+        ...session,
+        exercises: session.exercises.map((exercise) => {
+          const official = this.validation.exerciseById(exercise.exerciseId);
+          if (!official) return exercise;
+          return {
+            ...exercise,
+            name: official.name,
+            ...(!exercise.videoUrl && official.videoUrl ? { videoUrl: official.videoUrl } : {}),
+          };
+        }),
+      })),
+    };
+  }
+
+  /** Integridade/compliance: nenhum profissional supera — não salva, não assina, não publica. */
+  private assertNoIntegrityViolations(blocking: readonly ValidationViolation[]): void {
+    if (blocking.length === 0) return;
+    throw new BadRequestException({
+      code: 'PROTOCOL_INTEGRITY_VIOLATION',
+      message: 'A prescrição tem problemas que precisam ser corrigidos antes de salvar.',
+      violations: blocking,
+    });
+  }
+
+  /**
+   * Conflito com regra automática só passa com reconhecimento explícito de CADA conflito
+   * atual — uma tela desatualizada (conflito novo depois de abrir) não assina no escuro.
+   */
+  private assertConflictsAcknowledged(
+    conflicts: readonly ValidationViolation[],
+    acknowledged: readonly string[] | undefined,
+  ): void {
+    const ack = new Set(acknowledged ?? []);
+    const pending = conflicts.filter((conflict) => !ack.has(violationKey(conflict)));
+    if (pending.length === 0) return;
+    throw new BadRequestException({
+      code: 'PROFESSIONAL_DECISION_REQUIRED',
+      message:
+        'A prescrição diverge das regras automáticas. Confirme que é uma decisão profissional sua para continuar.',
+      conflicts: this.conflictPayload(conflicts),
+    });
+  }
+
+  private conflictPayload(conflicts: readonly ValidationViolation[]) {
+    return conflicts.map((conflict) => ({
+      key: violationKey(conflict),
+      rule: conflict.rule,
+      detail: conflict.detail,
+    }));
+  }
+
+  /** Registro, na própria versão assinada, do que a regra automática apontou e foi superado. */
+  private professionalOverrideDiff(conflicts: readonly ValidationViolation[]) {
+    return {
+      type: 'PROFESSIONAL_OVERRIDE',
+      conflicts: conflicts.map((conflict) => ({ rule: conflict.rule, detail: conflict.detail })),
     };
   }
 

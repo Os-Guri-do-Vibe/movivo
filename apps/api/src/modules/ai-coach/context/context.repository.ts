@@ -21,6 +21,7 @@ import {
   protocols,
   users,
   conversations,
+  protocolVersions,
   workoutCompletions,
   workoutSessions,
   workoutSetEntries,
@@ -30,6 +31,7 @@ import {
   type TenantTransaction,
 } from '../../../core/database/tenant-database.service';
 import { healthBlockSchema } from '../../anamnesis/health-block';
+import { isProfessionalAuthored, MANUAL_AMENDMENT_ORIGIN } from '../../protocol/protocol-origin';
 import { dayKey, sessionFor, weekdayCode, WORKOUT_TIMEZONE } from '../../workout/workout-schedule';
 import type { ScrubUser } from '../llm/llm.types';
 import { buildRetrato, RETRATO_WINDOW_DAYS } from './retrato';
@@ -115,12 +117,17 @@ export class ContextRepository {
           .limit(1),
         tx
           .select({
+            id: protocols.id,
+            version: protocols.version,
             currentWeek: protocols.currentWeek,
             totalWeeks: protocols.totalWeeks,
             mesocycleNumber: protocols.mesocycleNumber,
             content: protocols.content,
             constraints: protocols.constraints,
             anamnesisSessionId: protocols.anamnesisSessionId,
+            generatedBy: protocols.generatedBy,
+            approvalStatus: protocols.approvalStatus,
+            signedAt: protocols.signedAt,
           })
           .from(protocols)
           .where(and(eq(protocols.userId, userId), eq(protocols.status, 'ACTIVE')))
@@ -203,6 +210,22 @@ export class ContextRepository {
         ? await this.loadAnamneseSummary(tx, proto.anamnesisSessionId)
         : null;
 
+      // Achado 2026-10-15: o Coach lia o conteúdo vigente, mas não sabia DE QUEM era a
+      // prescrição — diante de "por que trocaram meu exercício?" ele não tinha dado nenhum e
+      // podia inventar justificativa clínica ou sugerir a versão anterior. Aqui vai só o que
+      // existe de fato: quem prescreveu a versão vigente e, se o profissional ajustou um
+      // protocolo em uso, o motivo que ELE registrou. Sem conflitos de regra nem detalhe
+      // clínico da revisão.
+      const prescricaoVigente = proto
+        ? await this.loadPrescriptionOrigin(tx, {
+            id: proto.id,
+            version: proto.version,
+            generatedBy: proto.generatedBy,
+            approvalStatus: proto.approvalStatus,
+            signedAt: proto.signedAt,
+          })
+        : null;
+
       // Achado 2026-09-09: o Coach respondia "qual treino hoje" tratando o protocolo como
       // um ciclo rotativo a partir do 1º treino do aluno (Dia1→Dia2→Dia3...), contradizendo
       // o calendário real — cada sessão tem `weekday` fixo (dia da semana), e é essa mesma
@@ -264,6 +287,7 @@ export class ContextRepository {
             restricoes: c.injuryTags ?? [],
             equipamentos: c.equipment ?? [],
             protocoloCompleto: content,
+            prescricaoVigente,
             hoje,
             treinoDeHojeSegundoCalendario,
             anamnese,
@@ -295,6 +319,41 @@ export class ContextRepository {
         summary: session?.summary ? await this.cipher.decryptText(session.summary) : null,
       };
     });
+  }
+
+  /** Origem da versão vigente do protocolo (ver o comentário em `loadEpisodic`). */
+  private async loadPrescriptionOrigin(
+    tx: TenantTransaction,
+    proto: {
+      id: string;
+      version: number;
+      generatedBy: string | null;
+      approvalStatus: string;
+      signedAt: Date | null;
+    },
+  ): Promise<Record<string, unknown>> {
+    const adjustedByProfessional = isProfessionalAuthored(proto.generatedBy);
+    let reason: string | null = null;
+    if (proto.generatedBy === MANUAL_AMENDMENT_ORIGIN) {
+      const [version] = await tx
+        .select({ changeReason: protocolVersions.changeReason })
+        .from(protocolVersions)
+        .where(
+          and(
+            eq(protocolVersions.protocolId, proto.id),
+            eq(protocolVersions.version, proto.version),
+          ),
+        )
+        .limit(1);
+      reason = version?.changeReason?.trim().slice(0, 300) || null;
+    }
+    return {
+      versao: proto.version,
+      revisadaPeloProfissionalCref: proto.approvalStatus === 'HUMAN_APPROVED',
+      ajustadaManualmentePeloProfissionalCref: adjustedByProfessional,
+      vigenteDesde: proto.signedAt ? dayKey(proto.signedAt) : null,
+      motivoRegistradoPeloProfissional: reason,
+    };
   }
 
   /**

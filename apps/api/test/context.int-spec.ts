@@ -18,7 +18,13 @@ import { inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { AppModule } from '../src/app.module';
-import { coachingSessions, conversations, protocols, users } from '../src/core/database/schema';
+import {
+  coachingSessions,
+  conversations,
+  protocols,
+  protocolVersions,
+  users,
+} from '../src/core/database/schema';
 import { HealthCipherService } from '../src/core/database/health-cipher.service';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { ContextRepository } from '../src/modules/ai-coach/context/context.repository';
@@ -128,6 +134,7 @@ afterAll(async () => {
     await db.runAsSystem(async (tx) => {
       await tx.delete(conversations).where(inArray(conversations.userId, createdUserIds));
       await tx.delete(coachingSessions).where(inArray(coachingSessions.userId, createdUserIds));
+      await tx.delete(protocolVersions).where(inArray(protocolVersions.userId, createdUserIds));
       await tx.delete(protocols).where(inArray(protocols.userId, createdUserIds));
       await tx.delete(users).where(inArray(users.id, createdUserIds));
       return undefined;
@@ -192,6 +199,89 @@ describe('ContextService — episodic sob RLS', () => {
     const built = await ctx.build(userId, 'MOTIVACAO', 'oi', 'MOVI');
     expect(built.cacheablePrefix).toContain('HIPERTROFIA');
     expect(built.cacheablePrefix).toContain('temProtocoloAtivo');
+  });
+});
+
+/**
+ * Achado 2026-10-15: o profissional CREF ajusta a prescrição (emenda de protocolo ativo). O
+ * Coach do WhatsApp precisa ler a versão VIGENTE — nunca a versão anterior gerada pela IA,
+ * que continua no histórico (`protocol_versions`) — e saber que o ajuste é do profissional.
+ */
+describe('ContextService — prescrição manual vigente do profissional', () => {
+  const session = (exerciseId: string, name: string) => ({
+    dayLabel: 'Treino A',
+    weekday: 'MON',
+    focus: 'Corpo inteiro',
+    exercises: [
+      {
+        exerciseId,
+        name,
+        sets: 3,
+        reps: { min: 8, max: 12 },
+        loadStrategy: 'BODYWEIGHT',
+        restSeconds: 60,
+      },
+    ],
+  });
+  const structure = (exerciseId: string, name: string) => ({
+    promptVersion: 'test-v1',
+    goal: 'HEALTH_ENERGY',
+    phase: 'ADAPTACAO',
+    weeklyFrequency: 1,
+    phaseDurationWeeks: 4,
+    sessions: [session(exerciseId, name)],
+  });
+
+  it('o contexto traz só a versão emendada e a marca como decisão do profissional', async () => {
+    const userId = await createUser('Renata');
+    const aiVersion = structure('supino_reto_halter', 'Supino Reto Versao Antiga Da IA');
+    const amended = structure('leg_press_45_maquina', 'Leg Press Prescrito Pelo Profissional');
+    await db.runAsUser(userId, 'USER', async (tx) => {
+      const [row] = await tx
+        .insert(protocols)
+        .values({
+          userId,
+          status: 'ACTIVE',
+          approvalStatus: 'HUMAN_APPROVED',
+          version: 2,
+          currentWeek: 1,
+          totalWeeks: 4,
+          content: amended,
+          constraints: { injuryTags: [], daysPerWeek: 1, preferredDays: ['MON'] },
+          generatedBy: 'MANUAL_AMENDMENT',
+          signedAt: new Date(),
+          mesocycleName: 'Mesociclo 1: Adaptação',
+          startDate: new Date(),
+          endDate: new Date(Date.now() + 4 * 7 * 24 * 60 * 60 * 1000),
+        })
+        .returning({ id: protocols.id });
+      if (!row) throw new Error('protocolo de teste não criado');
+      await tx.insert(protocolVersions).values([
+        {
+          protocolId: row.id,
+          userId,
+          version: 1,
+          status: 'ACTIVE',
+          content: aiVersion,
+          generatedBy: 'DEEPSEEK_V4_PRO',
+        },
+        {
+          protocolId: row.id,
+          userId,
+          version: 2,
+          status: 'ACTIVE',
+          content: amended,
+          generatedBy: 'MANUAL_AMENDMENT',
+          changeReason: 'Troca avaliada com a aluna por causa do joelho',
+        },
+      ]);
+    });
+
+    const built = await ctx.build(userId, 'DUVIDA_TECNICA', 'por que trocaram meu supino?', 'MOVI');
+    expect(built.cacheablePrefix).toContain('Leg Press Prescrito Pelo Profissional');
+    expect(built.cacheablePrefix).not.toContain('Supino Reto Versao Antiga Da IA');
+    expect(built.cacheablePrefix).toContain('"ajustadaManualmentePeloProfissionalCref":true');
+    expect(built.cacheablePrefix).toContain('Troca avaliada com a aluna por causa do joelho');
   });
 });
 
