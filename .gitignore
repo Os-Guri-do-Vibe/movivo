@@ -86,3 +86,11 @@ pnpm-debug.log*
 .vscode/*
 !.vscode/extensions.json
 Thumbs.db
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Material de produção de conteúdo (vídeos, roteiros, referências, projetos de
+# edição). Não é produto: o repositório remoto leva só o sistema que vai para a
+# VPS. Esses arquivos ficam apenas na máquina de quem produz.
+# ─────────────────────────────────────────────────────────────────────────────
+/VIDEOS-TUTORIAL/
+/docs/operacoes/roteiro-video-*.md

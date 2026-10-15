@@ -47,6 +47,7 @@ apps/api/uploads
 docs
 sprint
 infra/vps
+VIDEOS-TUTORIAL
 **/*.md
 !packages/*/README.md
 # Únicos documentos jurídicos lidos no build do web (apps/web/src/lib/legal-documents.ts);
