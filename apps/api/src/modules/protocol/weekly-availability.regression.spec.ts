@@ -218,6 +218,16 @@ describe('reparo determinístico de dias', () => {
     expect(repaired).toBeNull();
   });
 
+  it('weeklyFrequency inconsistente com sessões fora da meta nunca é "consertado" em silêncio', () => {
+    const structure = { ...realOn(['MON', 'WED', 'FRI']), weeklyFrequency: 5 };
+    const repaired = deterministicRepair(
+      structure,
+      [{ rule: 'WEEKLY_FREQUENCY_INCONSISTENT', detail: 'x', action: 'BLOCK' }],
+      { preferredDays: ['MON', 'WED'], daysPerWeek: 2, parqFlags: [], catalog },
+    );
+    expect(repaired).toBeNull();
+  });
+
   it('weeklyFrequency inconsistente com a contagem certa → alinha ao número de sessões', () => {
     const structure = { ...realOn(['MON', 'WED']), weeklyFrequency: 5 };
     const repaired = deterministicRepair(

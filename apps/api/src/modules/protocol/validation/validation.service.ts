@@ -477,7 +477,7 @@ export class ValidationService {
             ? 'sessão sem dia da semana definido'
             : issue.kind === 'OUTSIDE_PREFERRED'
               ? `sessão em dia fora dos preferidos (${issue.weekdays.join(',')}); preferidos: ${preferred.join(',')}`
-              : `dias preferidos sem sessão (${issue.weekdays.join(',')}) com disponibilidade para ${target ?? preferred.length} sessões`,
+              : `dias preferidos sem sessão (${issue.weekdays.join(',')}) com disponibilidade para ${issue.slots} sessões`,
         action: 'BLOCK',
       });
     }
