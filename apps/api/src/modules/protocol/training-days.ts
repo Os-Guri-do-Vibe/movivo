@@ -124,7 +124,7 @@ export function duplicatedWeekdays(sessionWeekdays: ReadonlyArray<Weekday | unde
 
 export type WeekdayPlanIssue =
   | { kind: 'OUTSIDE_PREFERRED'; weekdays: Weekday[] }
-  | { kind: 'MISSING_PREFERRED'; weekdays: Weekday[] }
+  | { kind: 'MISSING_PREFERRED'; weekdays: Weekday[]; slots: number }
   | { kind: 'MISSING_WEEKDAY' };
 
 /**
@@ -146,7 +146,9 @@ export function weekdayPlanIssues(
     if (outside.length > 0) issues.push({ kind: 'OUTSIDE_PREFERRED', weekdays: outside });
   } else {
     const missing = preferred.filter((day) => !seen.has(day));
-    if (missing.length > 0) issues.push({ kind: 'MISSING_PREFERRED', weekdays: missing });
+    if (missing.length > 0) {
+      issues.push({ kind: 'MISSING_PREFERRED', weekdays: missing, slots: target });
+    }
   }
   return issues;
 }

@@ -458,6 +458,15 @@ describe('buildCorrectionMessage — cada regra traz localização e o que cumpr
     expect(msg).not.toContain('sessions[1] (');
   });
 
+  it('sem disponibilidade nem dias preferidos, a mensagem diz que a sessão e o dia são livres', () => {
+    const msg = direct(
+      structure([ex('supino_reto_halter')], [ex('supino_reto_halter')]),
+      ['WEEKLY_SESSIONS_EXCEED_AVAILABILITY'],
+      { preferredDays: [] },
+    );
+    expect(msg).toContain('Sessões exigidas por semana: livre. Dias preferidos: nenhum.');
+  });
+
   it('SPLIT_LEVEL_NOT_ALLOWED: divisão atual e as permitidas para o nível', () => {
     const s = structure([ex('supino_reto_halter')], [ex('supino_reto_halter')]);
     s.splitType = 'ABCDE';

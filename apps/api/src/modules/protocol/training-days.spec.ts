@@ -98,7 +98,7 @@ describe('weekdayPlanIssues / duplicatedWeekdays', () => {
   it('preferido sem sessão quando há menos preferidos que a disponibilidade', () => {
     expect(
       weekdayPlanIssues(['MON', 'TUE', 'THU'], { daysPerWeek: 3, preferredDays: ['MON', 'WED'] }),
-    ).toEqual([{ kind: 'MISSING_PREFERRED', weekdays: ['WED'] }]);
+    ).toEqual([{ kind: 'MISSING_PREFERRED', weekdays: ['WED'], slots: 3 }]);
   });
 
   it('sessão sem dia definido com preferidos declarados', () => {

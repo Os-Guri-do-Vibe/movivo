@@ -131,6 +131,12 @@ describe('ValidationService — disponibilidade semanal é o teto (achado 2026-1
     ).toEqual(['WEEKLY_SESSIONS_EXCEED_AVAILABILITY']);
   });
 
+  it('sem dias preferidos, sessão sem dia no meio de sessões com dia fixo é WEEKDAY_MISMATCH', () => {
+    expect(rules(structureOn(['MON', undefined]), { daysPerWeek: 2, preferredDays: [] })).toEqual([
+      'WEEKDAY_MISMATCH',
+    ]);
+  });
+
   it('protocolo antigo sem daysPerWeek mantém a contagem por dias preferidos', () => {
     expect(
       rules(structureOn(['MON', 'WED', 'FRI']), { preferredDays: ['MON', 'WED', 'FRI'] }),
