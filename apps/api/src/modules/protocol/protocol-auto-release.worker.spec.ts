@@ -155,7 +155,7 @@ describe('ProtocolAutoReleaseWorker (fila do profissional — "Disponível para 
     expect(isAwaitingAutoRelease).not.toHaveBeenCalled();
   });
 
-  it('CREF não agiu em 1h → libera, entrega e notifica o painel', async () => {
+  it('CREF não agiu em 24h → libera, entrega e notifica o painel', async () => {
     const { worker, autoRelease, enqueue, emit } = makeWorker(true, 3);
     const res = await worker.process(job());
     expect(res.status).toBe('RELEASED');
@@ -198,7 +198,7 @@ describe('ProtocolAutoReleaseWorker (fila do profissional — "Disponível para 
   });
 
   // Achado 2026-08-22 (decisão do fundador): todo protocolo que vira ACTIVE ganha PDF, não
-  // só o assinado manualmente — inclusive o liberado pela janela de cortesia de 1h.
+  // só o assinado manualmente — inclusive o liberado pela janela de cortesia de 24h.
   it('gera e grava o PDF do protocolo ao auto-liberar', async () => {
     const { worker, findLatestPersonalInfo, setPdfContent } = makeWorker(true, 3);
     await worker.process(job());

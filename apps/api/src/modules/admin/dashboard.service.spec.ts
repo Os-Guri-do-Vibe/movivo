@@ -1153,7 +1153,7 @@ describe('DashboardService leituras operacionais', () => {
     ]);
     expect(result.optional[0]?.origin).toBeNull();
     expect(result.optional[0]?.severity).toBe('ROUTINE');
-    expect(result.optional[0]?.autoReleaseAt).toBe('2026-08-02T13:00:00.000Z');
+    expect(result.optional[0]?.autoReleaseAt).toBe('2026-08-03T12:00:00.000Z');
   });
 
   // Achado 2026-09-02, ampliado 2026-09-03 (a pedido do fundador): proposta de

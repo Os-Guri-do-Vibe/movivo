@@ -19,7 +19,7 @@ const holdUrl = (kind: ReviewHoldKind, id: string) =>
 /**
  * Enquanto a tela de revisão/edição de um protocolo ou de uma troca de exercício está aberta,
  * avisa o servidor para NÃO disparar a liberação automática ao WhatsApp, mesmo que o prazo
- * (1h protocolo, 30 min troca) venza. Ao sair da tela (navegar de volta à fila, fechar a
+ * (24h protocolo, 30 min troca) venza. Ao sair da tela (navegar de volta à fila, fechar a
  * aba), solta a trava e o servidor envia na hora o que venceu nesse meio-tempo.
  *
  * Melhor esforço: se o aviso falhar, a trava expira sozinha em 2 min e o envio segue — nunca

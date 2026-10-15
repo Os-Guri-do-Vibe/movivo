@@ -51,7 +51,7 @@ const RELEASE_JOBS: Record<
  * Trava da auto-liberação enquanto o profissional está com o item aberto na tela de
  * revisão/edição (protocolo ou troca de exercício proposta pela IA).
  *
- * A auto-liberação sai depois do prazo (1h protocolo, 30 min troca) se ninguém agir. Se o
+ * A auto-liberação sai depois do prazo (24h protocolo, 30 min troca) se ninguém agir. Se o
  * prazo vence com o item aberto, mandar o treino ao aluno por baixo do profissional — no meio
  * de uma edição — é errado. Então: a tela renova a trava (`hold`) enquanto está aberta; o
  * worker, ao encontrar a trava, adia e marca que há um envio vencido esperando; ao fechar a

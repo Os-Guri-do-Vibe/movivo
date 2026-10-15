@@ -1,6 +1,6 @@
 /**
  * `ProtocolAutoReleaseWorker` — categoria "Revisão Humana Opcional" da fila do
- * profissional. Consome o job com `delay` de 1h que `ProtocolGenerationWorker` agenda pra
+ * profissional. Consome o job com `delay` de 24h que `ProtocolGenerationWorker` agenda pra
  * protocolo que sai da geração com conteúdo limpo (PASS) ou sinalizado pelo validador
  * (`FLAG_HUMAN_REVIEW`) — nasce `PENDING_REVIEW`/`OPTIONAL` (decisão do fundador,
  * 2026-08-18). Dois motivos travam a auto-liberação (`MANDATORY`, sem prazo, sem job nenhum
@@ -11,7 +11,7 @@
  * Idempotente por construção: `ProtocolRepository.autoRelease` só libera se o estado
  * ainda bater (`PENDING_REVIEW` + `OPTIONAL`) na hora em que o job dispara. Se o CREF já
  * assinou (`signProtocol`) ou editou (`editProtocol` força `MANDATORY` — um humano tocou o
- * conteúdo, então precisa de sign-off fresco, independente de PAR-Q) antes da 1h, o job
+ * conteúdo, então precisa de sign-off fresco, independente de PAR-Q) antes das 24h, o job
  * dispara do mesmo jeito e vira no-op — não existe "cancelar" o delay do BullMQ, o próprio
  * estado decide.
  */
@@ -130,7 +130,7 @@ export class ProtocolAutoReleaseWorker implements OnModuleInit {
     this.queueEvents.emit('protocol');
     this.logger.info(
       { userId, protocolId },
-      'protocolo auto-liberado após janela de cortesia de 1h — entrega enfileirada',
+      'protocolo auto-liberado após janela de cortesia de 24h — entrega enfileirada',
     );
     return { status: 'RELEASED' };
   }

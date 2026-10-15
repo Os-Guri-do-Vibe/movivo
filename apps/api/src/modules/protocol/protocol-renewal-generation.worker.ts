@@ -231,7 +231,7 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
       },
       mandatory
         ? 'renovação PENDING_REVIEW/MANDATORY — só sai por assinatura humana CREF'
-        : 'renovação PENDING_REVIEW — aguarda painel CREF ou auto-liberação em 1h',
+        : 'renovação PENDING_REVIEW — aguarda painel CREF ou auto-liberação em 24h',
     );
     this.queueEvents.emit('protocol');
     await enqueueStaffQueueAlert(this.queues, this.logger, {

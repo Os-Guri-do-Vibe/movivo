@@ -294,7 +294,7 @@ describe('ProtocolRenewalGenerationWorker.process', () => {
       'protocol-auto-release',
       'auto-release',
       { userId: 'u1', protocolId: 'p1' },
-      { delay: 60 * 60 * 1000, jobId: 'auto-release-p1' },
+      { delay: 24 * 60 * 60 * 1000, jobId: 'auto-release-p1' },
     );
     expect(enqueue).toHaveBeenCalledWith(
       'whatsapp-outbound',

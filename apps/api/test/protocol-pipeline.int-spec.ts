@@ -364,7 +364,7 @@ afterAll(async () => {
 }, 60_000);
 
 describe('pipeline de protocolo — caminho feliz (US-2.4)', () => {
-  it('submit → PENDING_REVIEW/OPTIONAL sob RLS + auto-liberação de 1h agendada', async () => {
+  it('submit → PENDING_REVIEW/OPTIONAL sob RLS + auto-liberação de 24h agendada', async () => {
     const { userId, sessionId } = await submitAnamnesis([]); // sem lesão → validador limpo
 
     // Decisão do fundador (2026-08-18): PASS limpo NÃO entrega mais sozinho na hora —
@@ -381,19 +381,19 @@ describe('pipeline de protocolo — caminho feliz (US-2.4)', () => {
     expect(proto.promptVersion).toBe('methodology-int+catalog-int');
 
     // Ninguém entrega sozinho na hora: a entrega só existe após o RT assinar ou a janela
-    // de cortesia de 1h (`ProtocolAutoReleaseWorker`) liberar.
+    // de cortesia de 24h (`ProtocolAutoReleaseWorker`) liberar.
     const delivery = await queues
       .get(QUEUE.whatsappOutbound)
       .getJob(`protocol-delivery_${userId}_1`);
     expect(delivery).toBeUndefined();
 
-    // A auto-liberação de 1h foi agendada (delay real, não aguardado aqui — é coberta
+    // A auto-liberação de 24h foi agendada (delay real, não aguardado aqui — é coberta
     // isoladamente pelo spec do `ProtocolAutoReleaseWorker`).
     const autoRelease = await queues
       .get(QUEUE.protocolAutoRelease)
       .getJob(`auto-release-${proto.id}`);
     expect(autoRelease).toBeDefined();
-    expect(autoRelease?.opts.delay).toBe(60 * 60 * 1000);
+    expect(autoRelease?.opts.delay).toBe(24 * 60 * 60 * 1000);
 
     // Idempotência: reprocessar o mesmo job não cria um segundo protocolo.
     await queues.enqueue(QUEUE.protocolGeneration, 'generate-protocol', {
