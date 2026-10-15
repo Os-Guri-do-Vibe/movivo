@@ -140,6 +140,9 @@ export async function planProtocol(
     // gerador recebia, via `command.constraints` inteiro) — a regra de sessão-por-dia
     // nunca disparava de verdade, só nos testes que chamam `validate()` direto.
     preferredDays: command.constraints.preferredDays,
+    // Achado 2026-10-15: meta e TETO de sessões semanais — sem isto a contagem era cobrada
+    // contra os dias preferidos, e 4 disponíveis + 7 preferidos virava 7 sessões.
+    daysPerWeek: command.constraints.daysPerWeek,
     // 2026-08-24: teto de fase do PAR-Q. Presente = nada além de `ADAPTACAO` passa, e o
     // piso de RIR (2) entra junto — os dois vetos vivem no `ValidationService`.
     ...(command.constraints.maxPhase ? { maxPhase: command.constraints.maxPhase } : {}),
@@ -207,6 +210,7 @@ export async function planProtocol(
   if (verdict.action === 'BLOCK_FALLBACK') {
     const repaired = deterministicRepair(gen.structure, verdict.violations, {
       preferredDays: command.constraints.preferredDays,
+      daysPerWeek: command.constraints.daysPerWeek,
       parqFlags,
       // Lookup preguiçoso no MESMO catálogo-gabarito do validador (só o reparo de nome usa).
       catalog: { getById: (id) => validation.exerciseById(id) },
@@ -269,7 +273,11 @@ export async function planProtocol(
     // Persistiu o bloqueio em todas as tentativas (e o reparo não resolveu) → template
     // pré-aprovado pelo RT.
     return {
-      content: buildFallbackProtocol(command.constraints.goal, command.constraints.preferredDays),
+      content: buildFallbackProtocol(
+        command.constraints.goal,
+        command.constraints.preferredDays,
+        command.constraints.daysPerWeek,
+      ),
       generatedBy: 'FALLBACK_TEMPLATE',
       modelVersion: null,
       promptVersion: FALLBACK_TEMPLATE_VERSION,

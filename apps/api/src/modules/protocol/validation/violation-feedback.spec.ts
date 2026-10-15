@@ -451,7 +451,7 @@ describe('buildCorrectionMessage — cada regra traz localização e o que cumpr
     delete second.weekday;
     const msg = realMessage(s, { preferredDays: ['MON', 'WED', 'FRI'] });
     expect(lineOf(msg, 'SESSION_COUNT_MISMATCH')).toContain(
-      'Dias declarados, nesta ordem: MON, WED, FRI (3 sessões). Gerado: 2 sessões (MON, sem weekday).',
+      'Sessões exigidas por semana: 3. Dias preferidos: MON, WED, FRI. Gerado: 2 sessões (MON, sem weekday)',
     );
     expect(lineOf(msg, 'WEEKDAY_MISMATCH')).toContain('Gerado: 2 sessões');
     // Sessão sem weekday é citada só pelo índice nas demais mensagens.

@@ -74,15 +74,33 @@ export function weekdayCode(at: Date): Weekday {
   return PROTOCOL_WEEKDAY[weekday(at)] ?? 'SUN';
 }
 
-export function sessionFor(at: Date, structure: ProtocolStructure) {
-  const explicit = structure.sessions.find(
-    (session) => session.weekday === PROTOCOL_WEEKDAY[weekday(at)],
-  );
+/**
+ * Sessão prevista para o dia da semana `day` (0 = domingo … 6 = sábado).
+ *
+ * Achado 2026-10-15 (produção): quando nenhuma sessão era do dia, o calendário caía no
+ * espaçamento padrão por `weeklyFrequency` MESMO com todas as sessões tendo `weekday`
+ * explícito — um protocolo SEG/TER/QUA/SEX/SÁB virava treino também na quinta (e o link
+ * diário saía num dia que não é de treino, acima da disponibilidade do aluno). Com todas as
+ * sessões em dia fixo, o calendário é exatamente esses dias; o padrão por frequência fica só
+ * para protocolo sem `weekday` (anterior a 2026-08-18) ou misto.
+ */
+export function sessionForWeekday(day: number, structure: ProtocolStructure) {
+  const explicit = structure.sessions.find((session) => session.weekday === PROTOCOL_WEEKDAY[day]);
   if (explicit) return explicit;
+  if (
+    structure.sessions.length > 0 &&
+    structure.sessions.every((session) => session.weekday !== undefined)
+  ) {
+    return null;
+  }
   const days = trainingWeekdays(structure.weeklyFrequency);
-  const position = days.indexOf(weekday(at));
+  const position = days.indexOf(day);
   if (position < 0 || structure.sessions.length === 0) return null;
   return structure.sessions[position % structure.sessions.length] ?? null;
+}
+
+export function sessionFor(at: Date, structure: ProtocolStructure) {
+  return sessionForWeekday(weekday(at), structure);
 }
 
 export function sessionKeyFor(at: Date, structure: ProtocolStructure): string | null {

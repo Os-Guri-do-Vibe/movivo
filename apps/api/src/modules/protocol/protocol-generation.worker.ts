@@ -442,13 +442,20 @@ export class ProtocolGenerationWorker implements OnModuleInit {
     // conteúdo gerado, ou a própria geração nunca saiu do ar) como risco de CONTEÚDO, não
     // de PAR-Q — e por isso vale por igual aqui e no template do `protocol-planner.ts`.
     try {
-      const { goal, preferredDays, requiresProfessionalReview, parqTags } =
+      const { goal, preferredDays, daysPerWeek, requiresProfessionalReview, parqTags } =
         await this.constraintsForFallback(userId, anamnesisSessionId);
-      const content = buildFallbackProtocol(goal, preferredDays);
+      const content = buildFallbackProtocol(goal, preferredDays, daysPerWeek);
       const persisted = await this.repository.persist({
         userId,
         content,
-        constraints: { goal, preferredDays, requiresProfessionalReview, parqTags, fallback: true },
+        constraints: {
+          goal,
+          preferredDays,
+          ...(daysPerWeek !== undefined ? { daysPerWeek } : {}),
+          requiresProfessionalReview,
+          parqTags,
+          fallback: true,
+        },
         parqFlags: parqTags,
         approvalStatus: 'PENDING_REVIEW',
         status: 'PENDING_SIGNATURE',
@@ -495,6 +502,8 @@ export class ProtocolGenerationWorker implements OnModuleInit {
   ): Promise<{
     goal: GenerationGoal;
     preferredDays: Weekday[];
+    /** Ausente quando a anamnese não pôde ser lida — o template cai em `DEFAULT_WEEKDAYS`. */
+    daysPerWeek?: number;
     requiresProfessionalReview: boolean;
     parqTags: ReturnType<typeof parqToConstraints>['tags'];
   }> {
@@ -518,6 +527,7 @@ export class ProtocolGenerationWorker implements OnModuleInit {
         return {
           goal: parsed.success ? toGenerationGoal(parsed.data.primaryGoal) : 'CONDITIONING',
           preferredDays: parsed.success ? parsed.data.preferredDays : [],
+          ...(parsed.success ? { daysPerWeek: parsed.data.daysPerWeek } : {}),
           requiresProfessionalReview: user?.requiresProfessionalReview ?? true,
           parqTags,
         };

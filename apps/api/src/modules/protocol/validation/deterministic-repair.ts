@@ -13,7 +13,9 @@
  *    protocolo inteiro vai para o template, nunca um reparo parcial;
  *  - nunca acrescenta/remove exercício, nunca troca `exerciseId`, séries, repetições,
  *    duração, fase nem divisão — só remove `technique`, sobe `rir` ao piso, faz clamp de
- *    `phaseDurationWeeks`, redistribui `weekday` por posição e remove frase proibida;
+ *    `phaseDurationWeeks`, redistribui `weekday` pela distribuição determinística de
+ *    `training-days.ts` (só com a contagem de sessões certa), alinha `weeklyFrequency` ao
+ *    número real de sessões e remove frase proibida;
  *  - NÃO substitui o validador: quem chama revalida o resultado no `ValidationService`
  *    inteiro e só aceita se não houver mais BLOCK;
  *  - idempotente: reaplicar sobre a própria saída não muda nada.
@@ -28,6 +30,7 @@ import type { ProtocolStructure, Weekday } from '@movivo/shared';
 import type { ContraindicationTag } from '../exercise-catalog';
 import type { ExerciseCatalogProvider } from '../exercise-catalog-provider.service';
 import { PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
+import { planTrainingWeekdays, weeklySessionTarget } from '../training-days';
 import { isLanguageRule, languageRuleMatches, protocolTextFields } from './text-fields';
 import { MAX_TECHNIQUES_PER_SESSION } from './validation-rules';
 import { parqRirFloor, type ValidationViolation } from './validation.service';
@@ -39,6 +42,7 @@ export type DeterministicRepairCode =
   | 'RAISE_RIR_TO_PARQ_FLOOR'
   | 'CLAMP_PHASE_DURATION'
   | 'ASSIGN_WEEKDAYS_BY_POSITION'
+  | 'SYNC_WEEKLY_FREQUENCY'
   | 'DROP_FORBIDDEN_SENTENCES'
   | 'RESTORE_CATALOG_EXERCISE_NAME';
 
@@ -53,6 +57,8 @@ export const REPAIRABLE_RULES: ReadonlySet<string> = new Set([
   'PARQ_RIR_TOO_LOW',
   'PHASE_DURATION_OUT_OF_RANGE',
   'WEEKDAY_MISMATCH',
+  'DUPLICATE_WEEKDAY',
+  'WEEKLY_FREQUENCY_INCONSISTENT',
   'MED_PRESCRIPTION',
   'PROMISE',
   'DIAGNOSIS',
@@ -62,6 +68,8 @@ export const REPAIRABLE_RULES: ReadonlySet<string> = new Set([
 
 export interface DeterministicRepairContext {
   preferredDays: readonly Weekday[];
+  /** Dias disponíveis (meta/teto de sessões). Ausente → regra legada por `preferredDays`. */
+  daysPerWeek?: number;
   /** Flags de PAR-Q (mesmo valor que o planner passa ao validador como `parqFlags`). */
   parqFlags: readonly ContraindicationTag[];
   catalog: Pick<ExerciseCatalogProvider, 'getById'>;
@@ -95,9 +103,21 @@ export function deterministicRepair(
   if (blockRules.has('PARQ_VIOLATION') && ctx.parqFlags.length > 0 && structure.phase === 'FORCA') {
     return null;
   }
+  // Redistribuir dias só é mecânico com a contagem CERTA: sessão a mais ou a menos exige
+  // julgamento (qual juntar/acrescentar), nunca corte silencioso — vai para correção/template.
+  const target = weeklySessionTarget(ctx);
+  const reassignWeekdays =
+    blockRules.has('WEEKDAY_MISMATCH') || blockRules.has('DUPLICATE_WEEKDAY');
   if (
-    blockRules.has('WEEKDAY_MISMATCH') &&
-    (ctx.preferredDays.length === 0 || structure.sessions.length !== ctx.preferredDays.length)
+    reassignWeekdays &&
+    (ctx.preferredDays.length === 0 || structure.sessions.length !== target)
+  ) {
+    return null;
+  }
+  if (
+    blockRules.has('WEEKLY_FREQUENCY_INCONSISTENT') &&
+    target !== undefined &&
+    structure.sessions.length !== target
   ) {
     return null;
   }
@@ -167,11 +187,17 @@ export function deterministicRepair(
     repairs.push('CLAMP_PHASE_DURATION');
   }
 
-  if (blockRules.has('WEEKDAY_MISMATCH')) {
+  if (reassignWeekdays && target !== undefined) {
+    const weekdays = planTrainingWeekdays(target, ctx.preferredDays);
     out.sessions.forEach((session, i) => {
-      session.weekday = ctx.preferredDays[i];
+      session.weekday = weekdays[i];
     });
     repairs.push('ASSIGN_WEEKDAYS_BY_POSITION');
+  }
+
+  if (blockRules.has('WEEKLY_FREQUENCY_INCONSISTENT')) {
+    out.weeklyFrequency = out.sessions.length;
+    repairs.push('SYNC_WEEKLY_FREQUENCY');
   }
 
   if (languageRules.length > 0) {
