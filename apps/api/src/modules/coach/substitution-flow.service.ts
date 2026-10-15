@@ -441,11 +441,14 @@ export class SubstitutionFlowService {
    * antes de qualquer escrita. */
   private validatesAsIs(active: ActiveProtocolForSubstitution): boolean {
     return (
-      this.validation.validate({
-        structure: active.content,
-        constraints: active.validationConstraints,
-        parqFlags: active.parQFlags,
-      }).action === 'PASS'
+      this.validation.validate(
+        {
+          structure: active.content,
+          constraints: active.validationConstraints,
+          parqFlags: active.parQFlags,
+        },
+        { baseline: active.content },
+      ).action === 'PASS'
     );
   }
 
@@ -473,11 +476,14 @@ export class SubstitutionFlowService {
       if (!baselineValid) return true;
       const applied = applySubstitution(active.content, target.id, candidate);
       return (
-        this.validation.validate({
-          structure: applied.content,
-          constraints: active.validationConstraints,
-          parqFlags: active.parQFlags,
-        }).action === 'PASS'
+        this.validation.validate(
+          {
+            structure: applied.content,
+            constraints: active.validationConstraints,
+            parqFlags: active.parQFlags,
+          },
+          { baseline: active.content },
+        ).action === 'PASS'
       );
     });
   }
@@ -816,11 +822,16 @@ export class SubstitutionFlowService {
     }
     const applied = swaps.length > 0 ? applySubstitutions(active.content, swaps) : null;
     if (applied) {
-      const verdict = this.validation.validate({
-        structure: applied.content,
-        constraints: active.validationConstraints,
-        parqFlags: active.parQFlags,
-      });
+      // Só o que a troca INTRODUZ bloqueia — conflito já aceito pelo profissional na versão
+      // vigente não é atribuído a ela (`ValidateProtocolOptions.baseline`).
+      const verdict = this.validation.validate(
+        {
+          structure: applied.content,
+          constraints: active.validationConstraints,
+          parqFlags: active.parQFlags,
+        },
+        { baseline: active.content },
+      );
       if (verdict.action !== 'PASS') {
         this.logger.warn(
           {
@@ -839,6 +850,8 @@ export class SubstitutionFlowService {
       userId,
       protocolId: active.protocolId,
       baseVersion: active.version,
+      // Prescrição do profissional (achado 2026-10-15): troca pedida à IA nunca sai sozinha.
+      ...(active.professionalAuthored ? { reviewUrgency: 'MANDATORY' as const } : {}),
       items,
       proposedContent: applied?.content ?? null,
       diff: applied ? buildSubstitutionDiff(swapped, applied.sessionsAffectedBySwap) : null,
@@ -858,7 +871,10 @@ export class SubstitutionFlowService {
     // Obrigatória por PAR-Q bloqueante (achado 2026-09-03) OU por item fora da curadoria
     // segura padrão (achado 2026-09-09): sem job de auto-liberação — mesma regra de
     // `protocols.reviewUrgency` ("nenhum sai sozinho").
-    const mandatory = active.fromBlockingParq || items.some((item) => item.mandatory);
+    const mandatory =
+      active.fromBlockingParq ||
+      active.professionalAuthored ||
+      items.some((item) => item.mandatory);
     if (!mandatory) {
       const releaseJob: ProtocolSubstitutionReleaseJob = { userId, requestId: created.id };
       await this.queues.enqueue(

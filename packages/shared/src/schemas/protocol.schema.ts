@@ -241,12 +241,27 @@ export type ProtocolStructure = z.infer<typeof protocolStructureSchema>;
  * Emenda manual de um protocolo já ativo. O versionamento e a assinatura renovada são
  * aplicados no servidor; a versão esperada evita sobrescrever uma alteração concorrente.
  */
+/**
+ * Conflitos com as regras de prescrição automática que o profissional CREF reconheceu ao
+ * assinar/publicar a própria prescrição (achado 2026-10-15). Cada item é a chave
+ * `REGRA:detalhe` devolvida pelo servidor — reconhecer é decisão explícita e auditada, e o
+ * servidor só aceita se TODOS os conflitos atuais estiverem na lista.
+ */
+export const acknowledgedConflictsSchema = z.array(z.string().trim().min(1).max(400)).max(60);
+
 export const amendActiveProtocolSchema = z.object({
   content: protocolStructureSchema,
   expectedVersion: z.number().int().positive(),
   reason: z.string().trim().min(3).max(500),
   confirmation: z.literal(true),
+  acknowledgedConflicts: acknowledgedConflictsSchema.optional(),
 });
+
+export const signProtocolSchema = z.object({
+  confirmation: z.literal(true),
+  acknowledgedConflicts: acknowledgedConflictsSchema.optional(),
+});
+export type SignProtocolInput = z.infer<typeof signProtocolSchema>;
 export type AmendActiveProtocolInput = z.infer<typeof amendActiveProtocolSchema>;
 
 /**

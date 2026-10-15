@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Sse,
   UnauthorizedException,
   UseGuards,
@@ -15,6 +16,7 @@ import {
   ApiBody,
   ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -98,6 +100,25 @@ export class DashboardController {
       }),
       takeUntil(timer(remainingMs)),
     );
+  }
+
+  @Get('exercise-catalog/search')
+  @Roles('PROFESSIONAL', 'ADMIN')
+  @ApiOperation({
+    summary: 'Busca exercícios do catálogo oficial (autocomplete do editor de protocolo)',
+    description:
+      'Busca por termo, sem acento e sem diferença de maiúscula: cada palavra casa por parte da palavra e o exercício que casa mais termos vem primeiro. Só exercícios publicados; nunca cria nem altera exercício. Com `protocolId`, cada item traz o que o catálogo contraindica para aquele aluno (informativo).',
+  })
+  @ApiQuery({ name: 'q', description: 'Texto digitado (1 a 80 caracteres).' })
+  @ApiQuery({ name: 'protocolId', required: false, description: 'UUID do protocolo em edição.' })
+  @ApiQuery({ name: 'limit', required: false, description: 'Máximo de itens (1 a 50).' })
+  @ApiResponse({ status: 200, description: '`items` em ordem de relevância.' })
+  @ApiResponse({ status: 400, description: 'Consulta vazia ou parâmetro inválido.' })
+  searchExerciseCatalog(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Query() query: Record<string, unknown>,
+  ) {
+    return this.dashboard.searchExerciseCatalog(actor, query);
   }
 
   @Get('queue/:kind/:id')

@@ -10,6 +10,7 @@ import type {
   AlertsSummary,
   AnamnesisAnswers,
   AnonymizedReplay,
+  ExerciseCatalogOption,
   NotificationHistoryItem,
   NotificationHistoryQuery,
   NotificationHistoryResponse,
@@ -18,6 +19,8 @@ import type {
   NotificationsSummary,
   NotificationType,
   OperationsResponse,
+  ProtocolConflict,
+  ProtocolReview,
   QueueDetail,
   QueueItem,
   QueueKind,
@@ -35,6 +38,10 @@ export class DashboardApiError extends Error {
     readonly status: number,
     message: string,
     readonly details?: unknown,
+    /** Código de negócio do backend (ex.: `PROFESSIONAL_DECISION_REQUIRED`). */
+    readonly code?: string,
+    /** Divergências que o profissional precisa reconhecer para concluir a ação. */
+    readonly conflicts: ProtocolConflict[] = [],
   ) {
     super(message);
   }
@@ -321,6 +328,8 @@ export function parseQueueDetail(value: unknown): QueueDetail {
           : new Date().toISOString(),
       ...(validation ? { validation } : {}),
     };
+    const review = parseProtocolReview(value.protocol.review);
+    if (review) result.protocol.review = review;
   }
   if (value.replay !== undefined) result.replay = parseReplay(value.replay);
   if (isRecord(value.handoff)) {
@@ -462,6 +471,31 @@ export function parseOperations(value: unknown): OperationsResponse {
   };
 }
 
+export function parseConflicts(value: unknown): ProtocolConflict[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) =>
+    isRecord(entry) && typeof entry.key === 'string' && typeof entry.detail === 'string'
+      ? [{ key: entry.key, rule: string(entry.rule), detail: entry.detail }]
+      : [],
+  );
+}
+
+function parseProtocolReview(value: unknown): ProtocolReview | undefined {
+  if (!isRecord(value)) return undefined;
+  const availability = isRecord(value.availability) ? value.availability : {};
+  return {
+    origin: value.origin === 'PROFESSIONAL' ? 'PROFESSIONAL' : 'AI',
+    availability: {
+      daysPerWeek: typeof availability.daysPerWeek === 'number' ? availability.daysPerWeek : null,
+      preferredDays: Array.isArray(availability.preferredDays)
+        ? availability.preferredDays.filter((day): day is string => typeof day === 'string')
+        : [],
+    },
+    blocking: parseConflicts(value.blocking),
+    conflicts: parseConflicts(value.conflicts),
+  };
+}
+
 export function violationDetails(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) =>
@@ -489,6 +523,8 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
         ? `Regras de segurança não atendidas: ${violations.join('; ')}`
         : string(record.message, 'Não foi possível concluir a solicitação.'),
       record.validation ?? record.issues ?? (violations.length > 0 ? violations : undefined),
+      typeof record.code === 'string' ? record.code : undefined,
+      parseConflicts(record.conflicts),
     );
   }
   return value;
@@ -607,11 +643,49 @@ export async function amendActiveProtocol(
  * o protocolo vem de uma sessão bloqueada (`QueueItem.origin === 'PARQ'`), o backend
  * libera o PAR-Q dentro da própria assinatura — não existe mais ação separada.
  */
-export async function signProtocol(id: string): Promise<ActionResult> {
+export async function signProtocol(
+  id: string,
+  acknowledgedConflicts: readonly string[] = [],
+): Promise<ActionResult> {
   return (await request(`/protocols/${encodeURIComponent(id)}/sign`, {
     method: 'POST',
-    body: JSON.stringify({ confirmation: true }),
+    body: JSON.stringify({
+      confirmation: true,
+      ...(acknowledgedConflicts.length > 0 ? { acknowledgedConflicts } : {}),
+    }),
   })) as ActionResult;
+}
+
+/**
+ * Autocomplete do exercício no editor de protocolo: só exercícios publicados do catálogo
+ * oficial. `protocolId` faz cada item trazer o que é contraindicado para aquele aluno.
+ */
+export async function searchExerciseCatalog(
+  query: string,
+  options: { protocolId?: string; signal?: AbortSignal } = {},
+): Promise<ExerciseCatalogOption[]> {
+  const params = new URLSearchParams({ q: query });
+  if (options.protocolId) params.set('protocolId', options.protocolId);
+  const value = await request(`/exercise-catalog/search?${params.toString()}`, {
+    signal: options.signal,
+  });
+  const items = isRecord(value) && Array.isArray(value.items) ? value.items : [];
+  return items.flatMap((item): ExerciseCatalogOption[] => {
+    if (!isRecord(item) || typeof item.id !== 'string' || typeof item.name !== 'string') return [];
+    const strings = (list: unknown) =>
+      Array.isArray(list) ? list.filter((entry): entry is string => typeof entry === 'string') : [];
+    return [
+      {
+        id: item.id,
+        name: item.name,
+        pattern: string(item.pattern),
+        muscleGroups: strings(item.muscleGroups),
+        equipment: strings(item.equipment),
+        measurement: item.measurement === 'DURATION' ? 'DURATION' : 'REPS',
+        contraindicatedForStudent: strings(item.contraindicatedForStudent),
+      },
+    ];
+  });
 }
 
 /**

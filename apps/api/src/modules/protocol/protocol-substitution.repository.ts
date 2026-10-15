@@ -35,6 +35,7 @@ import {
 import type { CatalogExercise, ContraindicationTag, ExerciseLevel } from './exercise-catalog';
 import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
 import { isViable, type SubstitutionConstraints } from './exercise-substitution';
+import { isProfessionalAuthored } from './protocol-origin';
 import { ValidationService, type ValidateProtocolInput } from './validation/validation.service';
 
 /** Mesma extração de `loadActiveProtocol` — reaproveitada por `attachCatalogExerciseAndRelease`,
@@ -48,7 +49,7 @@ function deriveConstraints(
   parQFlags: ContraindicationTag[];
 } {
   const raw = (rawConstraints ?? {}) as Partial<SubstitutionConstraints> &
-    ValidateProtocolInput['constraints'];
+    ValidateProtocolInput['constraints'] & { daysPerWeek?: number };
   const level: ExerciseLevel = raw.level ?? 'INICIANTE';
   return {
     constraints: {
@@ -61,6 +62,8 @@ function deriveConstraints(
       goal: raw.goal,
       injuryTags: raw.injuryTags ?? [],
       preferredDays: raw.preferredDays,
+      // Achado 2026-10-15: sem isto a troca era validada sem o teto de sessões semanais.
+      daysPerWeek: raw.daysPerWeek,
       level,
     },
     parQFlags: (parQFlags ?? []) as ContraindicationTag[],
@@ -102,6 +105,12 @@ export interface ActiveProtocolForSubstitution {
    * segurança de `protocols.reviewUrgency`) ou `OPTIONAL` (auto-libera em 30min).
    */
   fromBlockingParq: boolean;
+  /**
+   * O conteúdo vigente é prescrição do profissional CREF (`protocol-origin.ts`, achado
+   * 2026-10-15)? Então nenhuma troca pedida à IA sai sozinha: a proposta nasce `MANDATORY` e
+   * só o profissional aplica — a IA não reescreve a prescrição dele.
+   */
+  professionalAuthored: boolean;
 }
 
 export interface SubstitutionDiff {
@@ -212,6 +221,7 @@ export class ProtocolSubstitutionRepository {
           content: protocols.content,
           constraints: protocols.constraints,
           parQFlags: protocols.parQFlags,
+          generatedBy: protocols.generatedBy,
           parqState: anamnesisSessions.parqState,
         })
         .from(protocols)
@@ -227,6 +237,7 @@ export class ProtocolSubstitutionRepository {
       content: row.content as ProtocolStructure,
       ...derived,
       fromBlockingParq: row.parqState === 'BLOQUEADO_AGUARDANDO_CLEARANCE',
+      professionalAuthored: isProfessionalAuthored(row.generatedBy),
     };
   }
 
@@ -420,11 +431,16 @@ export class ProtocolSubstitutionRepository {
       }
 
       const applied = applySubstitutions(protocol.content as ProtocolStructure, swaps);
-      const verdict = this.validation.validate({
-        structure: applied.content,
-        constraints: derived.validationConstraints,
-        parqFlags: derived.parQFlags,
-      });
+      // Só o que a TROCA introduz bloqueia: conflito já aceito na versão vigente (assinatura
+      // do profissional) não é atribuído a ela (`ValidateProtocolOptions.baseline`).
+      const verdict = this.validation.validate(
+        {
+          structure: applied.content,
+          constraints: derived.validationConstraints,
+          parqFlags: derived.parQFlags,
+        },
+        { baseline: protocol.content as ProtocolStructure },
+      );
       if (verdict.action !== 'PASS') {
         return {
           released: false,
@@ -509,11 +525,14 @@ export class ProtocolSubstitutionRepository {
       const applied = applySubstitutions(protocol.content as ProtocolStructure, [
         { fromExerciseId: target.fromExerciseId, to: chosen },
       ]);
-      const verdict = this.validation.validate({
-        structure: applied.content,
-        constraints: derived.validationConstraints,
-        parqFlags: derived.parQFlags,
-      });
+      const verdict = this.validation.validate(
+        {
+          structure: applied.content,
+          constraints: derived.validationConstraints,
+          parqFlags: derived.parQFlags,
+        },
+        { baseline: protocol.content as ProtocolStructure },
+      );
       if (verdict.action !== 'PASS') {
         return {
           attached: false,
@@ -692,6 +711,7 @@ export class ProtocolSubstitutionRepository {
           content: protocols.content,
           constraints: protocols.constraints,
           parQFlags: protocols.parQFlags,
+          generatedBy: protocols.generatedBy,
           parqState: anamnesisSessions.parqState,
         })
         .from(protocols)
@@ -707,6 +727,7 @@ export class ProtocolSubstitutionRepository {
       content: row.content as ProtocolStructure,
       ...deriveConstraints(row.constraints, row.parQFlags),
       fromBlockingParq: row.parqState === 'BLOQUEADO_AGUARDANDO_CLEARANCE',
+      professionalAuthored: isProfessionalAuthored(row.generatedBy),
     };
   }
 }

@@ -8,7 +8,7 @@ import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { QueueManager } from '../jobs/queue-manager.service';
-import type { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
+import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
 import type { ReviewHoldService } from '../protocol/review-hold.service';
 import type { ProtocolSubstitutionRepository } from '../protocol/protocol-substitution.repository';
 import { ValidationService } from '../protocol/validation/validation.service';
@@ -48,6 +48,27 @@ const content = {
   ],
 } as const;
 
+/**
+ * Mock do validador para os testes de fluxo (não de regra). `FLAG_HUMAN_REVIEW` simula uma
+ * divergência das regras automáticas — que, na prescrição do profissional, é CONFLITO (não
+ * bloqueio). Regras reais são exercitadas com `new ValidationService()` nos testes de
+ * prescrição profissional abaixo.
+ */
+function mockValidation(verdict: 'PASS' | 'FLAG_HUMAN_REVIEW') {
+  const violations =
+    verdict === 'PASS' ? [] : [{ rule: 'ISOLATION_AS_BASE', detail: 'flag', action: 'BLOCK' }];
+  return {
+    validate: vi.fn(() => ({
+      action: verdict,
+      code: verdict === 'PASS' ? 'PASS' : 'FLAG',
+      humanReviewRequired: verdict !== 'PASS',
+      violations: verdict === 'PASS' ? [] : [{ rule: 'LANGUAGE', detail: 'flag', action: 'FLAG' }],
+    })),
+    validateProfessionalPrescription: vi.fn(() => ({ blocking: [], conflicts: violations })),
+    exerciseById: vi.fn(() => undefined),
+  } as unknown as ValidationService;
+}
+
 /** Consentimento de saúde ativo é pré-condição de QUALQUER assinatura (2026-08-24). */
 function consentService(active = true) {
   return { hasActiveForUser: vi.fn(async () => active) } as unknown as HealthConsentService;
@@ -69,14 +90,7 @@ function makeService(row: Record<string, unknown>, verdict: 'PASS' | 'FLAG_HUMAN
       callback(tx),
     ),
   } as unknown as TenantDatabase;
-  const validation = {
-    validate: vi.fn(() => ({
-      action: verdict,
-      code: verdict === 'PASS' ? 'PASS' : 'FLAG',
-      humanReviewRequired: verdict !== 'PASS',
-      violations: verdict === 'PASS' ? [] : [{ rule: 'LANGUAGE', detail: 'flag', action: 'FLAG' }],
-    })),
-  } as unknown as ValidationService;
+  const validation = mockValidation(verdict);
   const append = vi.fn(async (..._args: Parameters<AuditService['append']>) => undefined);
   const audit = { append } as unknown as AuditService;
   const enqueue = vi.fn(async () => 'job');
@@ -135,7 +149,7 @@ function makeService(row: Record<string, unknown>, verdict: 'PASS' | 'FLAG_HUMAN
 
 function makeSequencedService(
   selections: unknown[][],
-  verdict: 'PASS' | 'FLAG_HUMAN_REVIEW' = 'PASS',
+  verdict: 'PASS' | 'FLAG_HUMAN_REVIEW' | ValidationService = 'PASS',
   decrypted: string[] = [],
   consentActive = true,
 ) {
@@ -175,14 +189,7 @@ function makeSequencedService(
       callback(tx),
     ),
   } as unknown as TenantDatabase;
-  const validation = {
-    validate: vi.fn(() => ({
-      action: verdict,
-      code: verdict === 'PASS' ? 'PASS' : 'FLAG',
-      humanReviewRequired: verdict !== 'PASS',
-      violations: verdict === 'PASS' ? [] : [{ rule: 'LANGUAGE', detail: 'flag', action: 'FLAG' }],
-    })),
-  } as unknown as ValidationService;
+  const validation = verdict instanceof ValidationService ? verdict : mockValidation(verdict);
   const append = vi.fn(async (..._args: Parameters<AuditService['append']>) => undefined);
   const decryptHealth = vi.fn(async () => decrypted.shift() ?? JSON.stringify({}));
   const enqueue = vi.fn(async () => 'job');
@@ -260,7 +267,7 @@ const pendingProtocol = {
 };
 
 describe('DashboardService invariantes de mutacao', () => {
-  it('persiste a edicao mesmo com violacoes e devolve os alertas para a tela', async () => {
+  it('persiste a edicao do profissional com conflito de regra automatica e devolve os conflitos', async () => {
     const { service, update, append } = makeService(
       {
         id: RESOURCE_ID,
@@ -273,16 +280,21 @@ describe('DashboardService invariantes de mutacao', () => {
     );
     await expect(service.editProtocol(actor, RESOURCE_ID, { content })).resolves.toMatchObject({
       status: 'PENDING_SIGNATURE',
-      validation: 'FLAG',
-      violations: [{ rule: 'LANGUAGE', detail: 'flag', action: 'FLAG' }],
+      validation: 'PROFESSIONAL_CONFLICTS',
+      violations: [{ rule: 'ISOLATION_AS_BASE', detail: 'flag', action: 'BLOCK' }],
+      conflicts: [{ key: 'ISOLATION_AS_BASE:flag', rule: 'ISOLATION_AS_BASE', detail: 'flag' }],
     });
-    // Grava e audita (com as regras violadas); a assinatura é que continua exigindo PASS.
+    // Grava e audita (com as regras em conflito); a assinatura é que exige reconhecê-las.
     expect(update).toHaveBeenCalledOnce();
     expect(append).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         action: 'PROTOCOL_EDITED',
-        changes: expect.objectContaining({ validation: 'FLAG', violations: ['LANGUAGE'] }),
+        changes: expect.objectContaining({
+          origin: 'PROFESSIONAL_EDIT',
+          validation: 'PROFESSIONAL_CONFLICTS',
+          violations: ['ISOLATION_AS_BASE'],
+        }),
       }),
     );
   });
@@ -317,8 +329,11 @@ describe('DashboardService invariantes de mutacao', () => {
     });
     expect(updateWhere).toHaveBeenCalledOnce();
     // Conteúdo editado por humano nunca sai sozinho: mesmo que o protocolo fosse
-    // `OPTIONAL` (fixture `pendingProtocol`), a edição força `MANDATORY`.
-    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ reviewUrgency: 'MANDATORY' }));
+    // `OPTIONAL` (fixture `pendingProtocol`), a edição força `MANDATORY` — e a origem do
+    // conteúdo passa a ser do profissional, gravada pelo servidor.
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ reviewUrgency: 'MANDATORY', generatedBy: 'PROFESSIONAL_EDIT' }),
+    );
     expect(forUpdate).toHaveBeenCalledWith('update');
     expect(append).toHaveBeenCalledWith(
       expect.anything(),
@@ -1746,5 +1761,295 @@ describe('DashboardService leituras operacionais', () => {
     await expect(service.detail(actor, 'PROTOCOL', RESOURCE_ID)).rejects.toThrow(
       'Protocolo nao encontrado.',
     );
+  });
+});
+
+/**
+ * Prescrição do profissional CREF (achado 2026-10-15, produção: o RT trocou um exercício
+ * na fila de revisão da Renata, o item virou `manual-<uuid>` e a assinatura recusou). Aqui o
+ * validador é o REAL — as regras de verdade decidem o que é conflito e o que é integridade.
+ */
+describe('DashboardService — prescrição manual do profissional', () => {
+  const realValidation = () => new ValidationService();
+  const plank = {
+    exerciseId: 'prancha',
+    name: 'Abdominal na Prancha',
+    sets: 3,
+    durationSeconds: 30,
+    loadStrategy: 'BODYWEIGHT',
+    restSeconds: 60,
+  };
+  const prescription = (
+    extra: Array<Record<string, unknown>> = [plank],
+    weekdays: string[] = ['MON'],
+  ) => ({
+    promptVersion: 'v1',
+    goal: 'HEALTH_ENERGY',
+    phase: 'ADAPTACAO',
+    phaseDurationWeeks: 3,
+    weeklyFrequency: weekdays.length,
+    sessions: weekdays.map((weekday) => ({
+      dayLabel: 'Treino A',
+      weekday,
+      focus: 'Corpo inteiro',
+      exercises: [
+        {
+          exerciseId: 'agachamento_goblet',
+          name: 'Agachamento Goblet',
+          sets: 3,
+          reps: { min: 8, max: 12 },
+          loadStrategy: 'BODYWEIGHT',
+          restSeconds: 60,
+        },
+        ...extra,
+      ],
+    })),
+  });
+  const studentConstraints = {
+    goal: 'HEALTH_ENERGY',
+    injuryTags: ['LOWER_BACK'],
+    daysPerWeek: 1,
+    preferredDays: ['MON'],
+  };
+  const protocolRow = (over: Record<string, unknown> = {}) => ({
+    ...pendingProtocol,
+    content: prescription(),
+    constraints: studentConstraints,
+    generatedBy: 'DEEPSEEK_V4_PRO',
+    ...over,
+  });
+  const professional = { crefActive: true, crefNumber: '123456', crefRegion: 'SP' };
+  const PLANK_CONFLICT = 'EXERCISE_CONTRAINDICATED:prancha contraindicado por LOWER_BACK';
+
+  async function rejection(promise: Promise<unknown>): Promise<Record<string, unknown>> {
+    try {
+      await promise;
+    } catch (error) {
+      expect(error).toBeInstanceOf(BadRequestException);
+      return (error as BadRequestException).getResponse() as Record<string, unknown>;
+    }
+    throw new Error('era esperada uma recusa');
+  }
+
+  it('salva a prescrição com contraindicação inferida: conflito devolvido, origem do profissional, nome oficial', async () => {
+    const { service, updateSet } = makeSequencedService([[protocolRow()]], realValidation());
+    const result = await service.editProtocol(actor, RESOURCE_ID, { content: prescription() });
+    expect(result).toMatchObject({
+      validation: 'PROFESSIONAL_CONFLICTS',
+      conflicts: [{ key: PLANK_CONFLICT, rule: 'EXERCISE_CONTRAINDICATED' }],
+    });
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        generatedBy: 'PROFESSIONAL_EDIT',
+        reviewUrgency: 'MANDATORY',
+        // "Abdominal na Prancha" digitado com o id oficial → grafia do catálogo.
+        content: expect.objectContaining({
+          sessions: [
+            expect.objectContaining({
+              exercises: expect.arrayContaining([
+                expect.objectContaining({ exerciseId: 'prancha', name: 'Prancha' }),
+              ]),
+            }),
+          ],
+        }),
+      }),
+    );
+  });
+
+  it('recusa salvar referência inexistente no catálogo (manual-<uuid>) sem gravar nada', async () => {
+    const { service, updateSet, append } = makeSequencedService(
+      [[protocolRow()]],
+      realValidation(),
+    );
+    const manual = { ...plank, exerciseId: 'manual-c8b975ba-22a7-4f29-933a-ef7d34427983' };
+    const response = await rejection(
+      service.editProtocol(actor, RESOURCE_ID, { content: prescription([manual]) }),
+    );
+    expect(response.code).toBe('PROTOCOL_INTEGRITY_VIOLATION');
+    expect(response.violations).toEqual([expect.objectContaining({ rule: 'EXERCISE_UNKNOWN' })]);
+    expect(updateSet).not.toHaveBeenCalled();
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it('recusa salvar mais sessões que os dias disponíveis do aluno', async () => {
+    const { service, updateSet } = makeSequencedService([[protocolRow()]], realValidation());
+    const response = await rejection(
+      service.editProtocol(actor, RESOURCE_ID, { content: prescription([], ['MON', 'WED']) }),
+    );
+    expect(response.violations).toEqual([
+      expect.objectContaining({ rule: 'WEEKLY_SESSIONS_EXCEED_AVAILABILITY' }),
+    ]);
+    expect(updateSet).not.toHaveBeenCalled();
+  });
+
+  it('assinatura da prescrição do profissional exige reconhecer o conflito', async () => {
+    const { service, updateWhere, enqueue } = makeSequencedService(
+      [[protocolRow({ generatedBy: 'PROFESSIONAL_EDIT' })], [professional]],
+      realValidation(),
+    );
+    const response = await rejection(
+      service.signProtocol(actor, RESOURCE_ID, { confirmation: true }),
+    );
+    expect(response.code).toBe('PROFESSIONAL_DECISION_REQUIRED');
+    expect(response.conflicts).toEqual([expect.objectContaining({ key: PLANK_CONFLICT })]);
+    expect(updateWhere).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('assina com o conflito reconhecido e registra a decisão na versão e na auditoria', async () => {
+    const { service, insertValues, append, enqueue } = makeSequencedService(
+      [[protocolRow({ generatedBy: 'PROFESSIONAL_EDIT' })], [professional]],
+      realValidation(),
+    );
+    await expect(
+      service.signProtocol(actor, RESOURCE_ID, {
+        confirmation: true,
+        acknowledgedConflicts: [PLANK_CONFLICT],
+      }),
+    ).resolves.toMatchObject({ version: 2, alreadySigned: false });
+    expect(insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        generatedBy: 'PROFESSIONAL_EDIT',
+        diff: {
+          type: 'PROFESSIONAL_OVERRIDE',
+          conflicts: [
+            { rule: 'EXERCISE_CONTRAINDICATED', detail: 'prancha contraindicado por LOWER_BACK' },
+          ],
+        },
+      }),
+    );
+    expect(append).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'PROTOCOL_SIGNED',
+        changes: expect.objectContaining({ overriddenRules: ['EXERCISE_CONTRAINDICATED'] }),
+      }),
+    );
+    expect(enqueue).toHaveBeenCalledOnce();
+  });
+
+  it('conteúdo da IA ainda não revisado continua sob as regras automáticas — o cliente não declara a origem', async () => {
+    const { service, updateWhere } = makeSequencedService(
+      [[protocolRow({ generatedBy: 'DEEPSEEK_V4_PRO' })], [professional]],
+      realValidation(),
+    );
+    const response = await rejection(
+      service.signProtocol(actor, RESOURCE_ID, {
+        confirmation: true,
+        acknowledgedConflicts: [PLANK_CONFLICT],
+      }),
+    );
+    expect(response.code).toBe('PROTOCOL_NOT_SAFE_TO_SIGN');
+    expect(updateWhere).not.toHaveBeenCalled();
+  });
+
+  it('emenda do protocolo ativo pelo detalhe do aluno: exige decisão e grava a origem MANUAL_AMENDMENT', async () => {
+    const active = protocolRow({
+      status: 'ACTIVE',
+      approvalStatus: 'HUMAN_APPROVED',
+      version: 2,
+      signedAt: new Date('2026-10-12T12:00:00.000Z'),
+      signatureHash: 'a'.repeat(64),
+      professionalId: ACTOR_ID,
+      content: prescription([]),
+    });
+    const body = {
+      content: prescription(),
+      expectedVersion: 2,
+      reason: 'Core com prancha, avaliado com a aluna',
+      confirmation: true,
+    };
+    const first = makeSequencedService([[active], [professional]], realValidation());
+    const response = await rejection(first.service.amendActiveProtocol(actor, RESOURCE_ID, body));
+    expect(response.code).toBe('PROFESSIONAL_DECISION_REQUIRED');
+    expect(first.updateSet).not.toHaveBeenCalled();
+
+    const second = makeSequencedService([[active], [professional], []], realValidation());
+    await expect(
+      second.service.amendActiveProtocol(actor, RESOURCE_ID, {
+        ...body,
+        acknowledgedConflicts: [PLANK_CONFLICT],
+      }),
+    ).resolves.toMatchObject({ version: 3, alreadySigned: false });
+    expect(second.updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ version: 3, generatedBy: 'MANUAL_AMENDMENT' }),
+    );
+    expect(second.insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        generatedBy: 'MANUAL_AMENDMENT',
+        changeReason: 'Core com prancha, avaliado com a aluna',
+        diff: expect.objectContaining({ type: 'PROFESSIONAL_OVERRIDE' }),
+      }),
+    );
+  });
+
+  it('emenda acima dos dias disponíveis é recusada mesmo com decisão reconhecida', async () => {
+    const active = protocolRow({
+      status: 'ACTIVE',
+      approvalStatus: 'HUMAN_APPROVED',
+      version: 2,
+      signedAt: new Date('2026-10-12T12:00:00.000Z'),
+      signatureHash: 'a'.repeat(64),
+      professionalId: ACTOR_ID,
+    });
+    const { service, updateSet } = makeSequencedService(
+      [[active], [professional]],
+      realValidation(),
+    );
+    const response = await rejection(
+      service.amendActiveProtocol(actor, RESOURCE_ID, {
+        content: prescription([plank], ['MON', 'WED']),
+        expectedVersion: 2,
+        reason: 'Dois dias',
+        confirmation: true,
+        acknowledgedConflicts: [PLANK_CONFLICT],
+      }),
+    );
+    expect(response.code).toBe('PROTOCOL_INTEGRITY_VIOLATION');
+    expect(updateSet).not.toHaveBeenCalled();
+  });
+
+  it('quem não é profissional nem admin não usa o fluxo de edição profissional', async () => {
+    const student: AuthenticatedUser = { userId: USER_ID, role: 'USER', jti: 'jti' };
+    const { service, updateSet } = makeSequencedService([[protocolRow()]], realValidation());
+    await expect(
+      service.editProtocol(student, RESOURCE_ID, { content: prescription() }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.signProtocol(student, RESOURCE_ID, { confirmation: true }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.searchExerciseCatalog(student, { q: 'prancha' })).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(updateSet).not.toHaveBeenCalled();
+  });
+
+  it('busca no catálogo marca o que é contraindicado para o aluno do protocolo, sem filtrar', async () => {
+    const { service, exerciseCatalog } = makeSequencedService([[protocolRow()]], realValidation());
+    (exerciseCatalog as unknown as { getAll: () => unknown }).getAll = () =>
+      new ExerciseCatalogProvider().getAll();
+    const { items } = await service.searchExerciseCatalog(actor, {
+      q: 'abdominal prancha',
+      protocolId: RESOURCE_ID,
+    });
+    const plankItem = items.find((item) => item.id === 'prancha');
+    expect(plankItem).toMatchObject({ name: 'Prancha', contraindicatedForStudent: ['LOWER_BACK'] });
+    expect(items.some((item) => item.name.startsWith('Abdominal'))).toBe(true);
+  });
+
+  it('detalhe do protocolo traz a origem, os conflitos a reconhecer e a disponibilidade do aluno', async () => {
+    const { service } = makeSequencedService(
+      [[protocolRow({ generatedBy: 'PROFESSIONAL_EDIT' })], [{ name: 'Renata' }]],
+      realValidation(),
+    );
+    const detail = (await service.detail(actor, 'PROTOCOL', RESOURCE_ID)) as {
+      protocol: { review: Record<string, unknown> };
+    };
+    expect(detail.protocol.review).toEqual({
+      origin: 'PROFESSIONAL',
+      availability: { daysPerWeek: 1, preferredDays: ['MON'] },
+      blocking: [],
+      conflicts: [expect.objectContaining({ key: PLANK_CONFLICT })],
+    });
   });
 });

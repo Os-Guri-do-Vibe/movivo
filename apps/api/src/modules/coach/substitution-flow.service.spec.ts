@@ -88,6 +88,7 @@ const ACTIVE: ActiveProtocolForSubstitution = {
   validationConstraints: { goal: 'GAIN_MUSCLE', injuryTags: [], level: 'INICIANTE' },
   parQFlags: [],
   fromBlockingParq: false,
+  professionalAuthored: false,
 };
 
 const DIAMANTE = byId('flexao_diamante');
@@ -281,6 +282,31 @@ describe('SubstitutionFlowService — pergunta de alcance (só hoje x protocolo)
     expect(h.queues.enqueue).not.toHaveBeenCalled();
     expect(h.queueEvents.emit).not.toHaveBeenCalled();
     expect(h.store.has(h.stateKey)).toBe(false);
+  });
+
+  it('prescrição ajustada pelo profissional CREF: a troca pedida no WhatsApp nunca sai sozinha (achado 2026-10-15)', async () => {
+    const h = harness({ active: { ...ACTIVE, professionalAuthored: true } });
+    h.read({ [DIAMANTE.id]: { chosen: D1.id, scope: 'PROTOCOL' } });
+    await h.service.handle(h.input());
+
+    expect(h.repo.createPending).toHaveBeenCalledOnce();
+    const created = (h.repo.createPending.mock.calls[0] as unknown as [Record<string, unknown>])[0];
+    expect(created).toMatchObject({ reviewUrgency: 'MANDATORY' });
+    // Sem job de liberação automática — só o profissional aplica a troca.
+    expect((h.queues.enqueue.mock.calls as unknown[][]).map((c) => c[0])).not.toContain(
+      'protocol-substitution-release',
+    );
+  });
+
+  it('validação da troca usa a versão vigente como linha de base (conflito já aceito não trava a troca)', async () => {
+    const h = harness();
+    h.read({ [DIAMANTE.id]: { chosen: D1.id, scope: 'PROTOCOL' } });
+    await h.service.handle(h.input());
+    const calls = h.validation.validate.mock.calls as unknown as Array<[unknown, unknown]>;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [, options] of calls) {
+      expect(options).toEqual({ baseline: ACTIVE.content });
+    }
   });
 
   it('o aluno já disse "no meu protocolo" e nomeou o substituto: registra a proposta e agenda a liberação', async () => {

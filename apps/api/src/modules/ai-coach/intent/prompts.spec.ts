@@ -9,6 +9,7 @@ import {
   METHODOLOGY_AWARE_INTENTS,
   PENDING_PAIN_INSTRUCTION,
   PENDING_REPLY_INSTRUCTION,
+  PRESCRIPTION_GROUNDING_BLOCK,
   PROMPT_BLOCKS,
   resolvePrompt,
 } from './prompts';
@@ -46,6 +47,28 @@ describe('transparência: a agente é uma IA', () => {
 
   it('não promete o que o produto não faz (áudio, vídeo, ligação)', () => {
     expect(IDENTITY_TRANSPARENCY_BLOCK).toContain('NÃO envia áudio, vídeo, imagem nem faz ligação');
+  });
+
+  it('toda intenção herda a regra da prescrição vigente do profissional (achado 2026-10-15)', () => {
+    for (const intent of INTENTS) {
+      expect(resolvePrompt(intent)).toContain(PRESCRIPTION_GROUNDING_BLOCK);
+    }
+    // Só a versão em vigor, sem recomendar a anterior nem contradizer o ajuste do profissional.
+    expect(PRESCRIPTION_GROUNDING_BLOCK).toContain(
+      'Nunca cite,\nrecupere ou recomende uma versão anterior',
+    );
+    expect(PRESCRIPTION_GROUNDING_BLOCK).toContain('"ajustadaManualmentePeloProfissionalCref"');
+    expect(PRESCRIPTION_GROUNDING_BLOCK).toContain('não a contradiga e não sugira desfazê-la');
+    // Por que prescreveu/trocou: só o que está registrado, nada de justificativa clínica inventada.
+    expect(PRESCRIPTION_GROUNDING_BLOCK).toContain('"motivoRegistradoPeloProfissional"');
+    expect(PRESCRIPTION_GROUNDING_BLOCK).toContain('Nunca invente justificativa clínica');
+    // A IA não altera o protocolo fora da revisão do profissional.
+    expect(PRESCRIPTION_GROUNDING_BLOCK).toContain('Você não altera o protocolo');
+    for (const term of FORBIDDEN) {
+      expect(PRESCRIPTION_GROUNDING_BLOCK.toLowerCase()).not.toContain(term);
+    }
+    const block = PROMPT_BLOCKS.find((b) => b.id === 'PRESCRIPTION_GROUNDING');
+    expect(block).toMatchObject({ layer: 'L0', editable: false });
   });
 
   it('o bloco está travado (L0) e listado para o painel', () => {

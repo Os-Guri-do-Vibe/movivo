@@ -10,6 +10,7 @@ import {
   type AdvancedTechnique,
   type ProtocolExercise,
   type ProtocolStructure,
+  type Weekday,
 } from '@movivo/shared';
 import {
   closestCenter,
@@ -61,12 +62,15 @@ import {
 import type {
   ActionResult,
   AnamnesisAnswers,
+  ExerciseCatalogOption,
+  ProtocolConflict,
   ProtocolDetail,
   QueueDetail as QueueDetailType,
 } from '@/lib/dashboard-types';
 
 import { ConfirmAction } from './confirm-action';
 import { ConversationReplay } from './conversation-replay';
+import { ExerciseCatalogPicker, isUnlinkedExerciseId } from './exercise-catalog-picker';
 import { useMarkNotificationRead } from './notifications-provider';
 import {
   ChipGroupField,
@@ -143,10 +147,14 @@ const WEEKLY_FREQUENCY_ITEMS: readonly FieldOption<string>[] = Array.from(
   (_, i) => ({ value: String(i + 1), label: `${i + 1}x` }),
 );
 
-/** Novo exercício em branco — o RT preenche nome/valores; `id-` marca origem manual (fora do catálogo). */
+/**
+ * Novo exercício em branco. `pending-` marca que ainda não foi escolhido no catálogo: o
+ * editor não salva até o RT selecionar um exercício oficial no autocomplete (achado
+ * 2026-10-15 — o antigo `manual-` ia para o protocolo e travava a assinatura).
+ */
 function blankExercise(): ProtocolStructure['sessions'][number]['exercises'][number] {
   return {
-    exerciseId: `manual-${crypto.randomUUID()}`,
+    exerciseId: `pending-${crypto.randomUUID()}`,
     name: '',
     sets: 3,
     reps: { min: 8, max: 12 },
@@ -314,6 +322,93 @@ function validationMessages(error: unknown): string[] {
 }
 
 /**
+ * Troca o exercício pela opção do catálogo: id e nome oficiais, e a forma de medir do
+ * catálogo (repetições × tempo) quando a do item atual não combina. O vídeo curado é
+ * resolvido no servidor a partir do id.
+ */
+function catalogSelectionPatch(
+  exercise: ProtocolExercise,
+  option: ExerciseCatalogOption,
+): Partial<ProtocolExercise> {
+  const patch: Partial<ProtocolExercise> = {
+    exerciseId: option.id,
+    name: option.name,
+    videoUrl: undefined,
+  };
+  if (option.measurement === 'DURATION' && exercise.durationSeconds === undefined) {
+    return { ...patch, reps: undefined, durationSeconds: option.pattern === 'CARDIO' ? 600 : 30 };
+  }
+  if (option.measurement === 'REPS' && exercise.durationSeconds !== undefined) {
+    return { ...patch, durationSeconds: undefined, reps: { min: 8, max: 12 } };
+  }
+  return patch;
+}
+
+/** Nome legível de cada regra apontada pelo servidor (o `detail` traz o caso concreto). */
+const RULE_LABELS: Record<string, string> = {
+  EXERCISE_UNKNOWN: 'Exercício fora do catálogo',
+  EXERCISE_CONTRAINDICATED: 'Contraindicação do catálogo para este aluno',
+  EXERCISE_LEVEL_TOO_HIGH: 'Exercício acima do nível do aluno',
+  ISOLATION_AS_BASE: 'Isolados como base da sessão',
+  SPLIT_LEVEL_NOT_ALLOWED: 'Divisão acima do nível do aluno',
+  SPLIT_FREQUENCY_MISMATCH: 'Divisão incompatível com a frequência',
+  TECHNIQUE_LEVEL_NOT_ALLOWED: 'Técnica avançada para iniciante',
+  TECHNIQUE_OVERUSE: 'Técnica avançada em excesso',
+  PARQ_PHASE_CAP_EXCEEDED: 'Fase acima do modo conservador (PAR-Q)',
+  PARQ_RIR_TOO_LOW: 'RIR abaixo do piso do modo conservador (PAR-Q)',
+  PARQ_VIOLATION: 'Modo conservador do PAR-Q',
+  PHASE_DURATION_OUT_OF_RANGE: 'Duração do mesociclo fora da faixa da fase',
+  SESSION_COUNT_MISMATCH: 'Menos sessões que os dias disponíveis',
+  WEEKLY_SESSIONS_EXCEED_AVAILABILITY: 'Mais sessões que os dias disponíveis do aluno',
+  WEEKLY_FREQUENCY_INCONSISTENT: 'Frequência semanal diferente do número de sessões',
+  DUPLICATE_WEEKDAY: 'Duas sessões no mesmo dia',
+  WEEKDAY_MISMATCH: 'Dias da semana',
+};
+
+function conflictText(conflict: Pick<ProtocolConflict, 'rule' | 'detail'>): string {
+  const label = RULE_LABELS[conflict.rule];
+  return label ? `${label}: ${conflict.detail}` : conflict.detail;
+}
+
+/** Divergências das regras automáticas que o profissional reconhece como decisão própria. */
+function ProfessionalDecision({
+  conflicts,
+  acknowledged,
+  onAcknowledgedChange,
+  id,
+}: {
+  conflicts: readonly ProtocolConflict[];
+  acknowledged: boolean;
+  onAcknowledgedChange: (value: boolean) => void;
+  id: string;
+}) {
+  return (
+    <div className="mt-4 rounded-lg border border-coral bg-background p-4 text-left">
+      <p className="text-label font-semibold">Divergências das regras automáticas</p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        A prescrição é sua. As regras abaixo foram feitas para a geração automática e não bloqueiam
+        a sua decisão, mas ela fica registrada na auditoria.
+      </p>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-label">
+        {conflicts.map((conflict) => (
+          <li key={conflict.key}>{conflictText(conflict)}</li>
+        ))}
+      </ul>
+      <label htmlFor={id} className="mt-3 flex items-start gap-2 text-label font-medium">
+        <input
+          id={id}
+          type="checkbox"
+          className="mt-1 size-4 shrink-0 accent-primary"
+          checked={acknowledged}
+          onChange={(event) => onAcknowledgedChange(event.target.checked)}
+        />
+        Confirmo que avaliei o caso e mantenho esta prescrição como decisão profissional minha.
+      </label>
+    </div>
+  );
+}
+
+/**
  * Card de exercício em modo edição (achado 2026-08-22, a pedido do fundador — a tabela de
  * 8 colunas apertadas virou cards com grid de campos rotulados, mais compacto e legível).
  * Componente próprio (não inline no `.map` de `ProtocolSummary`) só pra não deixar o JSX
@@ -323,8 +418,11 @@ function ExerciseEditorCard({
   exercise,
   sessionIndex,
   exerciseIndex,
+  protocolId,
   canRemove,
   onUpdate,
+  onSelectCatalog,
+  onPendingChange,
   onRemove,
   onAddWarmupBlock,
   onUpdateWarmupBlock,
@@ -333,8 +431,16 @@ function ExerciseEditorCard({
   exercise: ProtocolExercise;
   sessionIndex: number;
   exerciseIndex: number;
+  protocolId: string;
   canRemove: boolean;
   onUpdate: (sessionIndex: number, exerciseIndex: number, patch: Partial<ProtocolExercise>) => void;
+  onSelectCatalog: (
+    sessionIndex: number,
+    exerciseIndex: number,
+    option: ExerciseCatalogOption,
+  ) => void;
+  /** Texto digitado no autocomplete que ainda não virou seleção (bloqueia o salvar). */
+  onPendingChange: (key: string, pending: boolean) => void;
   onRemove: (sessionIndex: number, exerciseIndex: number) => void;
   onAddWarmupBlock: (sessionIndex: number, exerciseIndex: number) => void;
   onUpdateWarmupBlock: (
@@ -353,13 +459,14 @@ function ExerciseEditorCard({
     <div className="rounded-lg border border-border bg-card p-3">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1 space-y-1.5">
-          <TextField
-            value={exercise.name}
-            maxLength={120}
-            placeholder="Nome do exercício"
-            aria-label="Nome"
-            className="font-medium"
-            onChange={(value) => update({ name: value })}
+          <ExerciseCatalogPicker
+            exerciseId={exercise.exerciseId}
+            name={exercise.name}
+            protocolId={protocolId}
+            onSelect={(option) => onSelectCatalog(sessionIndex, exerciseIndex, option)}
+            onPendingChange={(pending) =>
+              onPendingChange(`${sessionIndex}:${exercise.exerciseId}`, pending)
+            }
           />
           <TextAreaField
             className="min-h-12 py-1.5 text-xs"
@@ -760,21 +867,82 @@ function ProtocolSummary({
   const [pending, setPending] = useState(false);
   const [anamnesisOpen, setAnamnesisOpen] = useState(false);
   const [amendmentReason, setAmendmentReason] = useState('');
+  // Autocomplete com texto digitado que ainda não virou seleção do catálogo (chave por item).
+  const [pendingPicks, setPendingPicks] = useState<ReadonlySet<string>>(() => new Set());
+  // Divergências das regras automáticas devolvidas ao publicar uma atualização: o RT as
+  // reconhece como decisão própria e publica de novo (achado 2026-10-15).
+  const [decisionConflicts, setDecisionConflicts] = useState<ProtocolConflict[]>([]);
+  const [decisionAcknowledged, setDecisionAcknowledged] = useState(false);
   const isActiveProtocol = protocol.status === 'ACTIVE' && Boolean(protocol.signatureHash);
+  const availability = protocol.review?.availability;
 
-  function startEdit() {
-    setDraft(structuredClone(protocol.content));
+  function resetEditorState() {
     setReorderingSession(null);
     setIssues([]);
     setAmendmentReason('');
+    setPendingPicks(new Set());
+    setDecisionConflicts([]);
+    setDecisionAcknowledged(false);
+  }
+
+  function startEdit() {
+    setDraft(structuredClone(protocol.content));
+    resetEditorState();
     setEditing(true);
   }
 
   function cancelEdit() {
     setEditing(false);
-    setReorderingSession(null);
+    resetEditorState();
+  }
+
+  const markPending = useCallback((key: string, pending: boolean) => {
+    setPendingPicks((current) => {
+      if (current.has(key) === pending) return current;
+      const next = new Set(current);
+      if (pending) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
+
+  function selectCatalogExercise(
+    sessionIndex: number,
+    exerciseIndex: number,
+    option: ExerciseCatalogOption,
+  ) {
+    const session = draft.sessions[sessionIndex];
+    const current = session?.exercises[exerciseIndex];
+    if (!session || !current) return;
+    if (session.exercises.some((ex, i) => i !== exerciseIndex && ex.exerciseId === option.id)) {
+      setIssues([`"${option.name}" já está nesta sessão. Escolha outro exercício.`]);
+      return;
+    }
     setIssues([]);
-    setAmendmentReason('');
+    updateExercise(sessionIndex, exerciseIndex, catalogSelectionPatch(current, option));
+  }
+
+  /** `protocolSessionSchema` — até 7 sessões, uma por dia; o RT escolhe os exercícios. */
+  function addSession() {
+    setDraft((current) => ({
+      ...current,
+      sessions: [
+        ...current.sessions,
+        {
+          dayLabel: `Treino ${String.fromCharCode(65 + current.sessions.length)}`,
+          focus: 'Novo treino',
+          exercises: [blankExercise()],
+        },
+      ],
+    }));
+  }
+
+  function removeSession(index: number) {
+    setReorderingSession(null);
+    setDraft((current) => ({
+      ...current,
+      sessions: current.sessions.filter((_, position) => position !== index),
+    }));
   }
 
   function updateSession(index: number, patch: Partial<ProtocolStructure['sessions'][number]>) {
@@ -871,13 +1039,57 @@ function ProtocolSummary({
 
   async function save() {
     setIssues([]);
-    const parsed = protocolStructureSchema.safeParse(draft);
+    // Exercício só entra no protocolo escolhido no catálogo oficial (achado 2026-10-15):
+    // texto digitado sem seleção nunca vira prescrição em silêncio.
+    if (pendingPicks.size > 0) {
+      setIssues([
+        'Há exercício digitado sem seleção: escolha uma opção da lista do catálogo (Esc mantém o exercício atual).',
+      ]);
+      return;
+    }
+    const unlinked = draft.sessions.flatMap((session, index) =>
+      session.exercises
+        .filter((exercise) => isUnlinkedExerciseId(exercise.exerciseId) || !exercise.name.trim())
+        .map(
+          (exercise) =>
+            `Selecione no catálogo o exercício de "${session.dayLabel || `Sessão ${index + 1}`}"${
+              exercise.name.trim() ? ` (hoje "${exercise.name.trim()}")` : ''
+            }.`,
+        ),
+    );
+    if (unlinked.length > 0) {
+      setIssues(unlinked.slice(0, 6));
+      return;
+    }
+    // Dia da semana é tudo ou nada: sessão sem dia no meio de sessões com dia nunca entra no
+    // calendário do aluno do jeito que o profissional espera.
+    const withDay = draft.sessions.filter((session) => session.weekday !== undefined).length;
+    if (withDay > 0 && withDay < draft.sessions.length) {
+      setIssues(['Defina o dia da semana de todas as sessões.']);
+      return;
+    }
+    // Com dia fixo em todas as sessões, a frequência é o número de sessões — nunca um número
+    // solto que esconda treino a mais ou a menos do calendário do aluno.
+    const fixedDays = withDay === draft.sessions.length;
+    const candidate = fixedDays ? { ...draft, weeklyFrequency: draft.sessions.length } : draft;
+    const parsed = protocolStructureSchema.safeParse(candidate);
     if (!parsed.success) {
       setIssues(parsed.error.issues.map((issue) => issue.message).slice(0, 6));
       return;
     }
+    const weeklySessions = fixedDays ? parsed.data.sessions.length : parsed.data.weeklyFrequency;
+    if (availability?.daysPerWeek && weeklySessions > availability.daysPerWeek) {
+      setIssues([
+        `O aluno tem ${availability.daysPerWeek} dia(s) disponível(is) por semana e o protocolo ficaria com ${weeklySessions} sessões. Remova ou junte sessões.`,
+      ]);
+      return;
+    }
     if (isActiveProtocol && amendmentReason.trim().length < 3) {
       setIssues(['Informe o motivo da atualização manual.']);
+      return;
+    }
+    if (decisionConflicts.length > 0 && !decisionAcknowledged) {
+      setIssues(['Confirme as divergências como decisão profissional sua para publicar.']);
       return;
     }
     setPending(true);
@@ -888,13 +1100,25 @@ function ProtocolSummary({
             expectedVersion: protocol.version,
             reason: amendmentReason.trim(),
             confirmation: true,
+            ...(decisionAcknowledged && decisionConflicts.length > 0
+              ? { acknowledgedConflicts: decisionConflicts.map((conflict) => conflict.key) }
+              : {}),
           })
         : await saveProtocol(protocol.id, parsed.data);
       captureDashboardEvent(isActiveProtocol ? 'cref_protocol_amended' : 'cref_protocol_edited');
       setEditing(false);
-      setReorderingSession(null);
+      resetEditorState();
       await onSaved(result);
     } catch (error) {
+      if (
+        error instanceof DashboardApiError &&
+        error.code === 'PROFESSIONAL_DECISION_REQUIRED' &&
+        error.conflicts.length > 0
+      ) {
+        setDecisionConflicts(error.conflicts);
+        setDecisionAcknowledged(false);
+        return;
+      }
       setIssues(validationMessages(error));
     } finally {
       setPending(false);
@@ -923,14 +1147,22 @@ function ProtocolSummary({
                 onChange={(phase) => setDraft((current) => ({ ...current, phase }))}
                 className="w-44"
               />
-              <ChipGroupField
-                label="Frequência semanal"
-                items={WEEKLY_FREQUENCY_ITEMS}
-                value={String(draft.weeklyFrequency)}
-                onChange={(value) =>
-                  setDraft((current) => ({ ...current, weeklyFrequency: Number(value) }))
-                }
-              />
+              {draft.sessions.every((session) => session.weekday !== undefined) ? (
+                <p className="self-end pb-2 text-label text-muted-foreground">
+                  Frequência semanal:{' '}
+                  <span className="font-semibold text-foreground">{draft.sessions.length}x</span>{' '}
+                  (uma sessão por dia definido)
+                </p>
+              ) : (
+                <ChipGroupField
+                  label="Frequência semanal"
+                  items={WEEKLY_FREQUENCY_ITEMS}
+                  value={String(draft.weeklyFrequency)}
+                  onChange={(value) =>
+                    setDraft((current) => ({ ...current, weeklyFrequency: Number(value) }))
+                  }
+                />
+              )}
             </div>
           ) : (
             <p className="mt-1 text-label text-muted-foreground">
@@ -1013,6 +1245,58 @@ function ProtocolSummary({
         </div>
       ) : null}
 
+      {availability?.daysPerWeek ? (
+        <p className="mt-4 rounded-lg bg-secondary p-3 text-label text-secondary-foreground">
+          <span className="font-semibold">Disponibilidade do aluno:</span>{' '}
+          {availability.daysPerWeek} dia(s) por semana
+          {availability.preferredDays.length > 0
+            ? ` · prefere ${availability.preferredDays
+                .map((day) => WEEKDAY_LABELS[day] ?? day)
+                .join(', ')}`
+            : ''}
+          . As sessões nunca passam dessa quantidade.
+        </p>
+      ) : null}
+
+      {!editing && protocol.review && protocol.review.blocking.length > 0 ? (
+        <div
+          role="alert"
+          className="mt-4 rounded-lg bg-destructive p-4 text-destructive-foreground"
+        >
+          <p className="text-label font-semibold">Corrija antes de assinar ou publicar:</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-label">
+            {protocol.review.blocking.map((violation) => (
+              <li key={violation.key}>{conflictText(violation)}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {!editing && protocol.review && protocol.review.conflicts.length > 0 ? (
+        <div className="mt-4 rounded-lg border border-coral p-4">
+          <p className="text-label font-semibold">
+            Prescrição sua com divergências das regras automáticas
+          </p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-label">
+            {protocol.review.conflicts.map((conflict) => (
+              <li key={conflict.key}>{conflictText(conflict)}</li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Elas não bloqueiam a sua decisão: você as confirma ao assinar e o registro fica na
+            auditoria.
+          </p>
+        </div>
+      ) : null}
+
+      {editing && decisionConflicts.length > 0 ? (
+        <ProfessionalDecision
+          id="protocol-amend-decision"
+          conflicts={decisionConflicts}
+          acknowledged={decisionAcknowledged}
+          onAcknowledgedChange={setDecisionAcknowledged}
+        />
+      ) : null}
+
       {issues.length > 0 ? (
         <div
           id="protocol-editor-issues"
@@ -1076,23 +1360,51 @@ function ProtocolSummary({
             </summary>
             {editing ? (
               <div className="mt-4 flex flex-col gap-3">
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    variant={reorderingSession === index ? 'default' : 'ghost'}
-                    size="sm"
-                    disabled={session.exercises.length < 2}
-                    aria-pressed={reorderingSession === index}
-                    onClick={() => setReorderingSession(reorderingSession === index ? null : index)}
-                    title={
-                      session.exercises.length < 2
-                        ? 'A sessão precisa de pelo menos dois exercícios para reordenar'
-                        : 'Arraste os exercícios para mudar a ordem'
-                    }
-                  >
-                    <ArrowDownUp aria-hidden="true" className="size-4" />{' '}
-                    {reorderingSession === index ? 'Concluir ordem' : 'Reordenar exercícios'}
-                  </Button>
+                <div className="flex flex-wrap items-end justify-between gap-2">
+                  <ComboboxField
+                    id={`session-weekday-${index}`}
+                    label="Dia da semana"
+                    items={WEEKDAY_ITEMS}
+                    value={session.weekday as Weekday}
+                    placeholder="Escolha o dia"
+                    className="w-44"
+                    onChange={(weekday) => updateSession(index, { weekday })}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={content.sessions.length < 2}
+                      onClick={() => removeSession(index)}
+                      title={
+                        content.sessions.length < 2
+                          ? 'O protocolo precisa de pelo menos uma sessão'
+                          : 'Remover esta sessão'
+                      }
+                    >
+                      <Trash2 aria-hidden="true" className="size-4 text-destructive" /> Remover
+                      sessão
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={reorderingSession === index ? 'default' : 'ghost'}
+                      size="sm"
+                      disabled={session.exercises.length < 2}
+                      aria-pressed={reorderingSession === index}
+                      onClick={() =>
+                        setReorderingSession(reorderingSession === index ? null : index)
+                      }
+                      title={
+                        session.exercises.length < 2
+                          ? 'A sessão precisa de pelo menos dois exercícios para reordenar'
+                          : 'Arraste os exercícios para mudar a ordem'
+                      }
+                    >
+                      <ArrowDownUp aria-hidden="true" className="size-4" />{' '}
+                      {reorderingSession === index ? 'Concluir ordem' : 'Reordenar exercícios'}
+                    </Button>
+                  </div>
                 </div>
                 {reorderingSession === index ? (
                   <ExerciseReorderList
@@ -1107,8 +1419,11 @@ function ProtocolSummary({
                       exercise={exercise}
                       sessionIndex={index}
                       exerciseIndex={exerciseIndex}
+                      protocolId={protocol.id}
                       canRemove={session.exercises.length > 1}
                       onUpdate={updateExercise}
+                      onSelectCatalog={selectCatalogExercise}
+                      onPendingChange={markPending}
                       onRemove={removeExercise}
                       onAddWarmupBlock={addWarmupBlock}
                       onUpdateWarmupBlock={updateWarmupBlock}
@@ -1235,6 +1550,27 @@ function ProtocolSummary({
             )}
           </details>
         ))}
+        {editing ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={
+              content.sessions.length >= 7 ||
+              (availability?.daysPerWeek
+                ? content.sessions.length >= availability.daysPerWeek
+                : false)
+            }
+            onClick={addSession}
+            title={
+              availability?.daysPerWeek && content.sessions.length >= availability.daysPerWeek
+                ? 'O protocolo já tem uma sessão por dia disponível do aluno'
+                : 'Adicionar sessão'
+            }
+          >
+            <Plus aria-hidden="true" className="size-4" /> Adicionar sessão
+          </Button>
+        ) : null}
       </div>
       {editing ? (
         <label className="mt-5 flex flex-col gap-2 text-label font-semibold">
@@ -1435,6 +1771,9 @@ export function QueueDetail({ kind, id }: { kind: 'PROTOCOL' | 'SUBSTITUTION'; i
   // Rascunho das decisões do profissional por item (troca em lote). Recomeça a cada carga do
   // detalhe: depois de aprovar/adicionar ao catálogo o servidor é a fonte de verdade.
   const [itemDrafts, setItemDrafts] = useState<ItemDrafts>({});
+  // Reconhecimento das divergências da prescrição do profissional na assinatura. Recomeça a
+  // cada carga: uma divergência nova nunca herda a confirmação de outra.
+  const [signAcknowledged, setSignAcknowledged] = useState(false);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -1442,6 +1781,7 @@ export function QueueDetail({ kind, id }: { kind: 'PROTOCOL' | 'SUBSTITUTION'; i
       try {
         setDetail(await getQueueDetail(kind, id, signal));
         setItemDrafts({});
+        setSignAcknowledged(false);
       } catch (caught) {
         if (caught instanceof DOMException && caught.name === 'AbortError') return;
         setError(caught instanceof Error ? caught.message : 'Não foi possível carregar o caso.');
@@ -1497,6 +1837,9 @@ export function QueueDetail({ kind, id }: { kind: 'PROTOCOL' | 'SUBSTITUTION'; i
       </section>
     );
   }
+
+  const signConflicts = detail.protocol?.review?.conflicts ?? [];
+  const signBlocking = detail.protocol?.review?.blocking ?? [];
 
   return (
     <article>
@@ -1557,14 +1900,14 @@ export function QueueDetail({ kind, id }: { kind: 'PROTOCOL' | 'SUBSTITUTION'; i
           <ProtocolSummary
             protocol={detail.protocol}
             onSaved={async (result) => {
-              // A edição sempre é gravada; se o servidor apontou regras de segurança, o RT
-              // vê o que corrigir antes de assinar (a assinatura exige tudo em ordem).
-              const warnings = (result.violations ?? []).flatMap((violation) =>
-                violation.detail ? [violation.detail] : [],
-              );
+              // A prescrição do profissional foi gravada. Divergências das regras automáticas
+              // não bloqueiam: ele as confirma como decisão própria na assinatura.
+              const conflicts = result.conflicts ?? [];
               setSuccess(
-                warnings.length > 0
-                  ? `Alterações salvas. Antes de assinar, corrija: ${warnings.join('; ')}.`
+                conflicts.length > 0
+                  ? `Alterações salvas. Ao assinar, confirme as divergências das regras automáticas: ${conflicts
+                      .map(conflictText)
+                      .join('; ')}.`
                   : 'Edição validada no servidor e registrada para revisão.',
               );
               await load();
@@ -1595,14 +1938,29 @@ export function QueueDetail({ kind, id }: { kind: 'PROTOCOL' | 'SUBSTITUTION'; i
               title="Confirmar assinatura deste conteúdo?"
               description="Revise o protocolo completo. A confirmação registra sua conta, o horário e o hash exato desta versão."
               confirmLabel="Confirmar e assinar"
+              disabled={signBlocking.length > 0}
+              confirmDisabled={signConflicts.length > 0 && !signAcknowledged}
               onConfirm={() =>
                 runAction(
-                  () => signProtocol(detail.protocol?.id ?? id),
+                  () =>
+                    signProtocol(
+                      detail.protocol?.id ?? id,
+                      signAcknowledged ? signConflicts.map((conflict) => conflict.key) : [],
+                    ),
                   'cref_protocol_signed',
                   'Protocolo assinado e auditoria registrada.',
                 )
               }
-            />
+            >
+              {signConflicts.length > 0 ? (
+                <ProfessionalDecision
+                  id="protocol-sign-decision"
+                  conflicts={signConflicts}
+                  acknowledged={signAcknowledged}
+                  onAcknowledgedChange={setSignAcknowledged}
+                />
+              ) : null}
+            </ConfirmAction>
           </div>
         ) : null}
 

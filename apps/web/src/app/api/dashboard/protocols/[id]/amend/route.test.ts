@@ -56,8 +56,18 @@ describe('POST /api/dashboard/protocols/[id]/amend', () => {
     expect(JSON.parse(request.body)).toEqual(body);
   });
 
+  it('repassa as divergências reconhecidas pelo profissional', async () => {
+    await call({ ...body, acknowledgedConflicts: ['ISOLATION_AS_BASE:x'] });
+    const request = bff.authenticatedBackendFetch.mock.calls[0]?.[1] as { body: string };
+    expect(JSON.parse(request.body)).toEqual({
+      ...body,
+      acknowledgedConflicts: ['ISOLATION_AS_BASE:x'],
+    });
+  });
+
   it.each([
     { ...body, confirmation: false },
+    { ...body, acknowledgedConflicts: 'ISOLATION_AS_BASE:x' },
     { ...body, expectedVersion: 0 },
     { ...body, reason: 'ok' },
     { ...body, content: { ...protocolContent, phaseDurationWeeks: 0 } },

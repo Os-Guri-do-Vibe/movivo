@@ -456,8 +456,11 @@ export async function forwardBackendJson(response: Response): Promise<NextRespon
         ? 'Sua sessão expirou. Entre novamente.'
         : 'Não foi possível concluir a solicitação.';
   const safeBody: Record<string, unknown> = { error: `request_failed_${response.status}`, message };
+  if (typeof record.code === 'string') safeBody.code = record.code;
   if (Array.isArray(record.issues)) safeBody.issues = record.issues;
   if (Array.isArray(record.violations)) safeBody.violations = record.violations;
+  // Divergências da prescrição do profissional que ele precisa reconhecer (achado 2026-10-15).
+  if (Array.isArray(record.conflicts)) safeBody.conflicts = record.conflicts;
   if (isRecord(record.validation)) safeBody.validation = record.validation;
   return NextResponse.json(safeBody, {
     status: response.status,

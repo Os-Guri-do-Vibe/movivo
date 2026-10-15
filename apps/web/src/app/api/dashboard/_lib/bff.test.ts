@@ -287,3 +287,21 @@ it('forwardBackendJson repassa as violações de segurança da API (sem message)
   expect(forwarded.status).toBe(400);
   expect(await forwarded.json()).toMatchObject({ violations });
 });
+
+it('forwardBackendJson repassa o código e as divergências da prescrição do profissional', async () => {
+  const conflicts = [{ key: 'K', rule: 'ISOLATION_AS_BASE', detail: 'x' }];
+  const forwarded = await forwardBackendJson(
+    new Response(
+      JSON.stringify({
+        code: 'PROFESSIONAL_DECISION_REQUIRED',
+        message: 'Confirme a decisão.',
+        conflicts,
+        stack: 'nunca repassar',
+      }),
+      { status: 400 },
+    ),
+  );
+  const body = await forwarded.json();
+  expect(body).toMatchObject({ code: 'PROFESSIONAL_DECISION_REQUIRED', conflicts });
+  expect(body).not.toHaveProperty('stack');
+});

@@ -35,7 +35,7 @@ import {
 import { UNTRUSTED_CONTEXT_POLICY } from '../context/untrusted-context';
 import type { Intent } from './intent.types';
 
-export const PROMPT_VERSION = 'coach-prompts-2026-10-v15';
+export const PROMPT_VERSION = 'coach-prompts-2026-10-v16';
 
 // `DEFAULT_AGENT_PERSONA` mora em @movivo/shared (fonte única) — o serviço de resolução
 // vive no CORE (DI global, §12.5) e não pode importar deste módulo de domínio.
@@ -75,6 +75,28 @@ falando, não como pessoa. Achado 2026-09-10 (pedido do fundador): o link diári
 chega sempre às 04:00 (horário local do aluno) para todo mundo, e isso NÃO é configurável —
 se o aluno perguntar se dá pra mudar esse horário, explique que não dá, o envio é no mesmo
 horário fixo pra todos os alunos.
+`.trim();
+
+/**
+ * **L0 — prescrição vigente.** Achado 2026-10-15 (produção): o profissional CREF passou a
+ * poder ajustar a prescrição contra as regras automáticas da IA, e o Coach precisa respeitar
+ * esse ajuste ao conversar — usar só a versão em vigor, não sugerir desfazê-la e, ao explicar
+ * uma escolha, ficar no que está registrado em vez de inventar justificativa clínica.
+ */
+export const PRESCRIPTION_GROUNDING_BLOCK = `
+PRESCRIÇÃO VIGENTE: "protocoloCompleto" é a versão em vigor do protocolo do aluno e a única
+fonte para exercícios, dias da semana, séries, repetições, descanso e observações. Nunca cite,
+recupere ou recomende uma versão anterior, e não monte outro treino por conta própria.
+"prescricaoVigente" diz quem definiu essa versão. Quando "ajustadaManualmentePeloProfissionalCref"
+for true, o profissional CREF ajustou o protocolo pessoalmente: trate cada escolha como decisão
+dele, não a contradiga e não sugira desfazê-la. Você não altera o protocolo; qualquer mudança
+passa pela revisão do profissional CREF (um pedido de troca de exercício segue o fluxo de
+substituição, que vai para ele).
+Se o aluno perguntar por que um exercício foi prescrito ou trocado, responda só com o que está
+nos dados: a observação do próprio exercício e, se existir, "motivoRegistradoPeloProfissional".
+Se isso não explicar, diga que foi uma escolha do profissional CREF para o caso dele e ofereça
+levar a pergunta até ele. Nunca invente justificativa clínica nem use a saúde do aluno como
+motivo.
 `.trim();
 
 /**
@@ -379,6 +401,21 @@ export const PROMPT_BLOCKS = [
       'check-in diário.',
   },
   {
+    id: 'PRESCRIPTION_GROUNDING',
+    layer: PromptLayer.L0,
+    title: 'Prescrição vigente: a decisão do profissional',
+    editable: false,
+    rationale:
+      'Manda a agente usar só a versão em vigor do protocolo, nunca uma anterior, e respeitar ' +
+      'os ajustes que o profissional CREF fez pessoalmente: ela não contradiz nem sugere ' +
+      'desfazer essas escolhas, e mudança no treino sempre passa pela revisão dele. Quando o ' +
+      'aluno pergunta por que um exercício foi prescrito ou trocado, ela responde só com o que ' +
+      'está registrado (observação do exercício e motivo anotado pelo profissional) e, se isso ' +
+      'não bastar, oferece levar a pergunta ao profissional, sem inventar justificativa ' +
+      'clínica. Está travado porque é o guardrail "profissional CREF, usando IA como ' +
+      'ferramenta" aplicado à conversa.',
+  },
+  {
     id: 'CONVERSATION_MEMORY',
     layer: PromptLayer.L0,
     title: 'Não repetir o que já foi dito',
@@ -467,6 +504,7 @@ export function buildBaseGuardrail(
     SCOPE_PERIMETER_BLOCK,
     IDENTITY_TRANSPARENCY_BLOCK,
     SCHEDULE_GROUNDING_BLOCK,
+    PRESCRIPTION_GROUNDING_BLOCK,
     CONVERSATION_MEMORY_BLOCK,
     INVIOLABLE_RULES_BLOCK,
     UNTRUSTED_CONTEXT_POLICY,
