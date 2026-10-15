@@ -38,6 +38,7 @@ import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { EXERCISE_BY_ID } from '../protocol/exercise-catalog';
 import { ShareCardRenderer, type ShareCardImage } from './share-card/share-card-renderer.service';
 import { WorkoutCompletionService } from './workout-completion.service';
+import { sessionForWeekday } from './workout-schedule';
 import { durationInsightButtons, durationInsightMessage } from './workout-messages';
 
 /**
@@ -94,20 +95,9 @@ function prescribedSession(
   date: string,
   structure: ReturnType<typeof protocolStructureSchema.parse>,
 ) {
-  const day = dateAtNoon(date).getUTCDay();
-  const explicit = structure.sessions.find((session) => session.weekday === WEEKDAY[day]);
-  if (explicit) return explicit;
-  const fallbackDays: Readonly<Record<number, readonly number[]>> = {
-    1: [3],
-    2: [2, 5],
-    3: [1, 3, 5],
-    4: [1, 2, 4, 5],
-    5: [1, 2, 3, 4, 5],
-    6: [1, 2, 3, 4, 5, 6],
-    7: [0, 1, 2, 3, 4, 5, 6],
-  };
-  const position = (fallbackDays[structure.weeklyFrequency] ?? []).indexOf(day);
-  return position < 0 ? undefined : structure.sessions[position % structure.sessions.length];
+  // Mesmo calendário do link diário e do Coach (`sessionForWeekday`) — esta função tinha uma
+  // cópia própria da tabela, com o mesmo defeito de virar treino em dia fora do protocolo.
+  return sessionForWeekday(dateAtNoon(date).getUTCDay(), structure) ?? undefined;
 }
 
 function expectedSets(session: ProtocolSession): WorkoutSetInput[] {

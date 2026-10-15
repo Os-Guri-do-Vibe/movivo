@@ -358,8 +358,11 @@ describe('ProtocolGeneratorService', () => {
       const result = await service.generate(command);
       expect(result.structure.sessions.map((s) => s.weekday)).toEqual(['MON', 'WED', 'FRI']);
       expect(logger.warn).toHaveBeenCalledWith(
-        expect.objectContaining({ preferredDays: ['MON', 'WED', 'FRI'] }),
-        expect.stringContaining('preenchendo por posição'),
+        expect.objectContaining({
+          preferredDays: ['MON', 'WED', 'FRI'],
+          weekdays: ['MON', 'WED', 'FRI'],
+        }),
+        expect.stringContaining('distribuição determinística'),
       );
     });
 

@@ -29,18 +29,26 @@ import {
 } from '../exercise-catalog';
 import { ExerciseCatalogProvider } from '../exercise-catalog-provider.service';
 import { isPhaseDurationWithinRange, PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
+import {
+  duplicatedWeekdays,
+  normalizedPreferredDays,
+  weekdayPlanIssues,
+  weeklySessionTarget,
+} from '../training-days';
 import type { UserConstraints } from '../user-constraints';
 import {
   containsExternalReference,
   containsPromptLeak,
   detectInjectionEcho,
 } from './prompt-injection';
+import { isLanguageRule } from './text-fields';
 import {
   ISOLATION_MAJORITY_THRESHOLD,
   LANGUAGE_RULES,
   type LanguageRule,
   MAX_TECHNIQUES_PER_SESSION,
   MIN_FREQUENCY_BY_SPLIT,
+  PROFESSIONAL_OVERRIDABLE_RULES,
   RESPONSE_LANGUAGE_RULES,
   SPLITS_BY_LEVEL,
   type ValidationActionCode,
@@ -100,6 +108,12 @@ export interface ValidateProtocolInput {
      *  sem essa constraint persistida). Presente → BLOCK se não bater 1:1 com as sessões. */
     preferredDays?: Weekday[];
     /**
+     * Dias disponíveis por semana declarados na anamnese (achado 2026-10-15): meta e TETO de
+     * sessões semanais. Ausente (protocolo antigo/fallback antigo) → a contagem volta a ser
+     * cobrada contra `preferredDays`, como antes.
+     */
+    daysPerWeek?: number;
+    /**
      * Teto de periodização vindo do PAR-Q (2026-08-24, `parqToConstraints`). Presente =
      * qualquer fase diferente de `ADAPTACAO` é BLOCK, e todo RIR declarado tem piso 2.
      * Ausente = sem teto (protocolo antigo/edição sem a constraint persistida).
@@ -112,6 +126,38 @@ export interface ValidateProtocolInput {
    * é o veto que garante que o modo conservador foi de fato respeitado.
    */
   parqFlags?: ContraindicationTag[];
+}
+
+/**
+ * Veredito da prescrição feita pelo profissional CREF (achado 2026-10-15). `blocking` impede
+ * salvar/assinar/publicar (integridade e compliance); `conflicts` são divergências das regras
+ * de prescrição automática — a decisão do profissional prevalece, desde que reconhecida.
+ */
+export interface ProfessionalPrescriptionVerdict {
+  blocking: ValidationViolation[];
+  conflicts: ValidationViolation[];
+}
+
+export interface ValidateProtocolOptions {
+  /**
+   * Versão vigente (já aprovada) do protocolo, quando quem valida é uma alteração AUTOMÁTICA
+   * sobre ela (troca de exercício, ajuste de volume do check-in). Violações estruturais que
+   * já existiam nela — conflito aceito pelo profissional na assinatura, regra/catálogo que
+   * mudou depois — não são atribuídas à alteração; só o que a alteração INTRODUZ bloqueia.
+   * Regras de texto (linguagem, vazamento, injeção, link) nunca são toleradas: o `detail`
+   * delas é genérico e esconderia um termo novo.
+   */
+  baseline?: ProtocolStructure;
+}
+
+/** Chave estável de uma violação — é o que o profissional reconhece ao assinar. */
+export function violationKey(violation: Pick<ValidationViolation, 'rule' | 'detail'>): string {
+  return `${violation.rule}:${violation.detail}`;
+}
+
+/** Regras de texto livre: nunca entram na tolerância de linha de base. */
+function isTextRule(rule: string): boolean {
+  return isLanguageRule(rule) || rule === 'INJECTION_ECHO' || rule === 'EXTERNAL_REFERENCE';
 }
 
 export interface ValidateResponseOptions {
@@ -151,7 +197,35 @@ export class ValidationService {
   }
 
   /** Veredito determinístico sobre o protocolo inteiro. Nunca lança — sempre devolve. */
-  validate(input: ValidateProtocolInput): ValidationVerdict {
+  validate(input: ValidateProtocolInput, options: ValidateProtocolOptions = {}): ValidationVerdict {
+    const violations = this.collect(input);
+    if (!options.baseline) return aggregate(violations);
+    const accepted = new Set(
+      this.collect({ ...input, structure: options.baseline })
+        .filter((v) => !isTextRule(v.rule))
+        .map(violationKey),
+    );
+    return aggregate(
+      violations.filter((v) => isTextRule(v.rule) || !accepted.has(violationKey(v))),
+    );
+  }
+
+  /**
+   * Prescrição feita pelo profissional CREF (fila de revisão ou detalhe do aluno). Mesmas
+   * regras de `validate()`, separadas pelo que a decisão profissional pode superar
+   * (`PROFESSIONAL_OVERRIDABLE_RULES`) e pelo que nunca pode (integridade/compliance). Quem
+   * decide que a alteração é do profissional é o endpoint autenticado, nunca o cliente.
+   */
+  validateProfessionalPrescription(input: ValidateProtocolInput): ProfessionalPrescriptionVerdict {
+    const blocking: ValidationViolation[] = [];
+    const conflicts: ValidationViolation[] = [];
+    for (const violation of this.collect(input)) {
+      (PROFESSIONAL_OVERRIDABLE_RULES.has(violation.rule) ? conflicts : blocking).push(violation);
+    }
+    return { blocking, conflicts };
+  }
+
+  private collect(input: ValidateProtocolInput): ValidationViolation[] {
     const violations: ValidationViolation[] = [];
     const excluded = new Set<ContraindicationTag>([
       // `?? []`: protocolos do caminho de fallback (`ProtocolGenerationWorker.
@@ -165,13 +239,18 @@ export class ValidationService {
 
     const level = input.constraints.level ?? 'INICIANTE';
     this.checkStructure(input.structure, level, excluded, violations);
-    this.checkMethodology(input.structure, level, input.constraints.preferredDays, violations);
+    this.checkMethodology(
+      input.structure,
+      level,
+      input.constraints.preferredDays,
+      input.constraints.daysPerWeek,
+      violations,
+    );
     this.checkParq(input.structure, input.parqFlags ?? [], input.constraints.maxPhase, violations);
     this.checkPhaseDuration(input.structure, violations);
     this.checkLanguage(collectText(input.structure), violations);
     this.checkGeneratedProtocolText(collectText(input.structure), violations);
-
-    return aggregate(violations);
+    return violations;
   }
 
   /**
@@ -335,32 +414,72 @@ export class ValidationService {
     structure: ProtocolStructure,
     level: ExerciseLevel,
     preferredDays: Weekday[] | undefined,
+    daysPerWeek: number | undefined,
     out: ValidationViolation[],
   ): void {
-    // Achado 2026-08-18: uma sessão por dia real declarado, nem mais nem menos — sem
-    // isso a IA podia entregar 1 sessão genérica pra um aluno de 4x/semana. Só valida
-    // quando a constraint existe (protocolo antigo/edição sem ela: fail-open).
-    if (preferredDays && preferredDays.length > 0) {
-      if (structure.sessions.length !== preferredDays.length) {
+    // Achado 2026-08-18: sem contagem cobrada, a IA podia entregar 1 sessão genérica pra um
+    // aluno de 4x/semana. Achado 2026-10-15 (produção): a contagem era cobrada contra os dias
+    // PREFERIDOS, não contra a disponibilidade — 4 dias disponíveis + 7 preferidos virava 7
+    // sessões. A meta e o teto agora são `daysPerWeek` (`training-days.ts`); os preferidos só
+    // dizem EM QUE dias. Sem nenhuma das duas constraints (protocolo antigo): fail-open.
+    const availability = { daysPerWeek, preferredDays };
+    const target = weeklySessionTarget(availability);
+    const weekdays = structure.sessions.map((s) => s.weekday);
+    const withWeekday = weekdays.filter((w) => w !== undefined).length;
+    // Com `weekday`, cada sessão é um dia fixo da semana: o calendário (`sessionForWeekday`)
+    // só agenda esses dias. Sem nenhum `weekday` (protocolo sem dias preferidos/antigo), as
+    // sessões revezam em `weeklyFrequency` dias por semana (A/B em 3x = A, B, A).
+    const effective = withWeekday > 0 ? structure.sessions.length : structure.weeklyFrequency;
+    if (target !== undefined) {
+      if (effective > target) {
+        out.push({
+          rule: 'WEEKLY_SESSIONS_EXCEED_AVAILABILITY',
+          detail: `${effective} sessões por semana, acima dos ${target} dias disponíveis do aluno`,
+          action: 'BLOCK',
+        });
+      } else if (effective < target) {
         out.push({
           rule: 'SESSION_COUNT_MISMATCH',
-          detail: `${structure.sessions.length} sessões geradas, ${preferredDays.length} dias declarados (${preferredDays.join(',')})`,
+          detail: `${effective} sessões por semana, ${target} dias disponíveis do aluno`,
           action: 'BLOCK',
         });
       }
-      const declared = new Set(preferredDays);
-      const generated = new Set(
-        structure.sessions.map((s) => s.weekday).filter((w): w is Weekday => w !== undefined),
-      );
-      const sameSet =
-        generated.size === declared.size && [...declared].every((d) => generated.has(d));
-      if (!sameSet) {
-        out.push({
-          rule: 'WEEKDAY_MISMATCH',
-          detail: `dias gerados (${[...generated].join(',') || 'nenhum'}) não batem com os declarados (${preferredDays.join(',')})`,
-          action: 'BLOCK',
-        });
-      }
+    }
+    // `weeklyFrequency` é o número que o aluno lê ("5x por semana"): com dias fixos, declarado
+    // diferente das sessões que existem é treino a mais (ou a menos) fora do calendário real.
+    if (withWeekday > 0 && structure.weeklyFrequency !== structure.sessions.length) {
+      out.push({
+        rule: 'WEEKLY_FREQUENCY_INCONSISTENT',
+        detail: `frequência declarada ${structure.weeklyFrequency}x, mas o protocolo tem ${structure.sessions.length} sessões em dias fixos`,
+        action: 'BLOCK',
+      });
+    }
+    const duplicated = duplicatedWeekdays(weekdays);
+    if (duplicated.length > 0) {
+      out.push({
+        rule: 'DUPLICATE_WEEKDAY',
+        detail: `mais de uma sessão no mesmo dia: ${duplicated.join(',')}`,
+        action: 'BLOCK',
+      });
+    }
+    const preferred = normalizedPreferredDays(preferredDays);
+    const issues = weekdayPlanIssues(weekdays, availability);
+    // Sem dias preferidos, o dia é livre — mas uma sessão sem dia no meio de sessões com dia
+    // nunca seria agendada pelo calendário.
+    if (preferred.length === 0 && withWeekday > 0 && withWeekday < weekdays.length) {
+      issues.push({ kind: 'MISSING_WEEKDAY' });
+    }
+    for (const issue of issues) {
+      out.push({
+        rule: 'WEEKDAY_MISMATCH',
+        detail:
+          issue.kind === 'MISSING_WEEKDAY'
+            ? 'sessão sem dia da semana definido'
+            : issue.kind === 'OUTSIDE_PREFERRED'
+              ? `sessão em dia fora dos preferidos (${issue.weekdays.join(',')}); preferidos: ${preferred.join(',')}`
+              : `dias preferidos sem sessão (${issue.weekdays.join(',')}) com disponibilidade para ${target ?? preferred.length} sessões`,
+        action: 'BLOCK',
+      });
     }
 
     const split = structure.splitType;

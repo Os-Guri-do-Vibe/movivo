@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   dayKey,
   plannedDaysBefore,
+  sessionFor,
   sessionKeyFor,
   trainingWeekdays,
   weekday,
@@ -100,5 +101,46 @@ describe('plannedDaysBefore', () => {
     expect(plannedDaysBefore(new Date('2026-08-10T15:00:00.000Z'), 1, structure(1, ['A']))).toEqual(
       [],
     );
+  });
+});
+
+describe('sessionFor com dias fixos (achado 2026-10-15, produção)', () => {
+  // Protocolo real: SEG/TER/QUA/SEX/SÁB, 5x. Quinta-feira 15/10/2026 virava treino pelo
+  // calendário padrão de 5x (seg–sex), acima da disponibilidade do aluno.
+  const fixed = {
+    weeklyFrequency: 5,
+    sessions: (['MON', 'TUE', 'WED', 'FRI', 'SAT'] as const).map((weekday, i) => ({
+      dayLabel: `Treino ${i + 1}`,
+      weekday,
+    })),
+  } as unknown as ProtocolStructure;
+  const at = (iso: string) => new Date(`${iso}T15:00:00Z`);
+
+  it('dia fora do protocolo não é dia de treino quando todas as sessões têm dia fixo', () => {
+    expect(sessionFor(at('2026-10-15'), fixed)).toBeNull(); // quinta
+    expect(sessionFor(at('2026-10-18'), fixed)).toBeNull(); // domingo
+  });
+
+  it('cada dia fixo continua devolvendo a própria sessão', () => {
+    expect(sessionKeyFor(at('2026-10-16'), fixed)).toBe('Treino 4'); // sexta
+    expect(sessionKeyFor(at('2026-10-17'), fixed)).toBe('Treino 5'); // sábado
+  });
+
+  it('a semana tem exatamente uma sessão por dia fixo, nunca mais', () => {
+    const days = [
+      '2026-10-12',
+      '2026-10-13',
+      '2026-10-14',
+      '2026-10-15',
+      '2026-10-16',
+      '2026-10-17',
+      '2026-10-18',
+    ];
+    const training = days.filter((day) => sessionFor(at(day), fixed) !== null);
+    expect(training).toHaveLength(5);
+  });
+
+  it('protocolo sem dia fixo (anterior a 2026-08-18) continua no calendário por frequência', () => {
+    expect(sessionKeyFor(at('2026-10-14'), structure(3, ['A', 'B']))).toBe('B'); // quarta
   });
 });

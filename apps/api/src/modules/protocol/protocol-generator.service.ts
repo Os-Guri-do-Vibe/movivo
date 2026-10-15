@@ -30,7 +30,6 @@ import {
   type StoppedFor,
   TRAINING_LOCATION_LABELS,
   type TrainingStatus,
-  type Weekday,
 } from '@movivo/shared';
 
 import { AppConfigService } from '../../core/config';
@@ -56,6 +55,11 @@ import { normalizeModelOutput } from './model-output-normalizer';
 import { METHODOLOGY_VERSION } from './methodology';
 import { MethodologyProvider } from './methodology-provider.service';
 import { PHASE_DURATION_WEEKS_RANGE } from './protocol-timeline';
+import {
+  normalizedPreferredDays,
+  planTrainingWeekdays,
+  weeklySessionTarget,
+} from './training-days';
 import type { UserConstraints } from './user-constraints';
 import { wrapUserMessage } from './validation/prompt-injection';
 import {
@@ -396,6 +400,46 @@ export class ProtocolGenerationError extends Error {
   }
 }
 
+/**
+ * Linhas de frequência e dias do prompt (achado 2026-10-15, produção): `daysPerWeek` é a meta
+ * e o TETO de sessões; os dias preferidos dizem só EM QUE dias. Antes, "uma sessão por dia
+ * desta lista" fazia 4 dias disponíveis + 7 preferidos virar 7 sessões. O validador cobra a
+ * mesma regra (`WEEKLY_SESSIONS_EXCEED_AVAILABILITY`/`SESSION_COUNT_MISMATCH`/
+ * `WEEKDAY_MISMATCH`) — o prompt sozinho nunca é a barreira.
+ */
+export function weeklyScheduleLines(
+  constraints: Pick<UserConstraints, 'daysPerWeek' | 'preferredDays'>,
+): string[] {
+  const target = weeklySessionTarget(constraints);
+  const preferred = normalizedPreferredDays(constraints.preferredDays);
+  if (target === undefined) return [];
+  const lines = [
+    `Dias disponíveis por semana: ${target}. É o LIMITE MÁXIMO e a meta de sessões: gere EXATAMENTE ${target} sessão(ões) por semana, com "weeklyFrequency": ${target}. Nunca acrescente sessão extra — nem como treino complementar/opcional, nem duas sessões no mesmo dia.`,
+  ];
+  if (preferred.length === 0) return lines;
+  const plan = planTrainingWeekdays(target, preferred);
+  if (preferred.length > target) {
+    lines.push(
+      `Dias da semana que o aluno prefere: ${preferred.join(', ')}. São mais dias do que a disponibilidade — escolha ${target} DESTES dias para as sessões, nenhum fora da lista.`,
+      `Escolha os ${target} dias pela divisão de treino, pelo objetivo e pela recuperação: espalhe as sessões pela semana e não ponha o mesmo grupo muscular em dias seguidos. Uma distribuição com bom espaçamento seria ${plan.join(', ')} — use outra combinação da lista se a divisão escolhida pedir.`,
+    );
+  } else if (preferred.length === target) {
+    lines.push(
+      `Dias da semana em que o aluno vai treinar (nesta ordem): ${preferred.join(', ')}.`,
+      `Gere EXATAMENTE uma sessão por dia desta lista — nunca menos, nunca mais.`,
+    );
+  } else {
+    lines.push(
+      `Dias da semana que o aluno prefere: ${preferred.join(', ')} — use TODOS eles. As outras ${target - preferred.length} sessão(ões) vão em outros dias da semana, escolhidos pela divisão e pela recuperação (ex.: ${plan.join(', ')}). Não trate esses outros dias como preferência do aluno ao escrever o protocolo.`,
+    );
+  }
+  lines.push(
+    `OBRIGATÓRIO em CADA sessão, sem exceção: o campo "weekday" preenchido com o dia real correspondente (ex.: "weekday": "TUE"), um dia diferente por sessão. Nunca omita este campo.`,
+    `Sessões do mesmo splitType NÃO podem ser idênticas entre si: distribua grupo muscular, volume e intensidade conforme a divisão escolhida e a metodologia acima.`,
+  );
+  return lines;
+}
+
 @Injectable()
 export class ProtocolGeneratorService {
   constructor(
@@ -493,7 +537,7 @@ export class ProtocolGeneratorService {
         const repaired = this.repairHallucinatedExerciseIds(parsed, constraints, userId);
         const withWeekdays = this.backfillWeekdays(
           { ...repaired, promptVersion },
-          constraints.preferredDays,
+          constraints,
           userId,
         );
         const structure = this.attachCuratedVideoLinks(withWeekdays);
@@ -598,24 +642,31 @@ export class ProtocolGeneratorService {
    */
   private backfillWeekdays(
     structure: ProtocolStructure,
-    preferredDays: readonly Weekday[],
+    constraints: Pick<UserConstraints, 'daysPerWeek' | 'preferredDays'>,
     userId: string,
   ): ProtocolStructure {
-    if (preferredDays.length === 0 || structure.sessions.length !== preferredDays.length) {
+    // Sem dias preferidos não há dia a preencher (nada é cobrado); contagem fora da meta
+    // continua caindo no `ValidationService`, sem este atalho mascarar o erro.
+    const target = weeklySessionTarget(constraints);
+    if (constraints.preferredDays.length === 0 || structure.sessions.length !== target) {
       return structure;
     }
     if (structure.sessions.some((s) => s.weekday !== undefined)) {
       return structure;
     }
+    // Achado 2026-10-15: com mais dias preferidos que a disponibilidade, "por posição a partir
+    // dos dias declarados" pegava os N primeiros da lista, colados. A distribuição
+    // determinística espaça as sessões para recuperação (`training-days.ts`).
+    const weekdays = planTrainingWeekdays(target, constraints.preferredDays);
     this.logger.warn(
-      { userId, preferredDays },
-      'IA omitiu "weekday" em todas as sessões — preenchendo por posição a partir dos dias declarados',
+      { userId, preferredDays: constraints.preferredDays, weekdays },
+      'IA omitiu "weekday" em todas as sessões — preenchendo pela distribuição determinística',
     );
     return {
       ...structure,
       sessions: structure.sessions.map((session, i) => ({
         ...session,
-        weekday: preferredDays[i],
+        weekday: weekdays[i],
       })),
     };
   }
@@ -944,21 +995,7 @@ export class ProtocolGeneratorService {
         ? [`Tempo parado: ${STOPPED_FOR_LABEL[constraints.stoppedFor]}.`]
         : []),
       `Divisões permitidas para este nível: ${SPLITS_BY_LEVEL[constraints.level].join(', ')}`,
-      `Dias por semana: ${constraints.daysPerWeek}`,
-      // Achado 2026-08-18: sem os dias REAIS, a IA gerava sessões genéricas ("Dia A") sem
-      // vínculo com a rotina do aluno — inclusive menos sessões do que dias declarados,
-      // como se o mesmo treino servisse pra qualquer frequência. Campo "weekday" numa
-      // frase curta e isolada própria (não emendado com outras instruções) — achado
-      // 2026-08-18 na prática: a IA seguiu contagem/distinção de sessão mas OMITIU
-      // "weekday" quando a instrução vinha junto de outras num parágrafo só.
-      ...(constraints.preferredDays.length
-        ? [
-            `Dias da semana em que o aluno vai treinar (nesta ordem): ${constraints.preferredDays.join(', ')}.`,
-            `Gere EXATAMENTE uma sessão por dia desta lista — nunca menos, nunca mais.`,
-            `OBRIGATÓRIO em CADA sessão, sem exceção: o campo "weekday" preenchido com o dia real correspondente (um dos códigos acima, ex.: "weekday": "TUE"). Nunca omita este campo.`,
-            `Sessões do mesmo splitType NÃO podem ser idênticas entre si: distribua grupo muscular, volume e intensidade conforme a divisão escolhida e a metodologia acima.`,
-          ]
-        : []),
+      ...weeklyScheduleLines(constraints),
       `Local de treino: ${constraints.location}`,
       // Achado 2026-09-02: qual exercício priorizar por local é uma decisão de metodologia
       // (raciocínio de treino), não de formato de saída — por isso NÃO fixamos aqui uma regra

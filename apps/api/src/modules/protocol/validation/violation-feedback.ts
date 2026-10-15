@@ -20,6 +20,7 @@ import type { ProtocolExercise, ProtocolStructure, WorkoutSplit } from '@movivo/
 import { type ContraindicationTag, LEVEL_ORDER, lowestLevel } from '../exercise-catalog';
 import type { ExerciseCatalogProvider } from '../exercise-catalog-provider.service';
 import { PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
+import { normalizedPreferredDays, weeklySessionTarget } from '../training-days';
 import type { UserConstraints } from '../user-constraints';
 import { isLanguageRule, languageRuleMatches, protocolTextFields } from './text-fields';
 import {
@@ -42,7 +43,8 @@ export const MAX_REPLACEMENT_OPTIONS = 10;
 export type CorrectionConstraints = Pick<
   UserConstraints,
   'level' | 'preferredDays' | 'injuryTags' | 'parqTags'
->;
+> &
+  Partial<Pick<UserConstraints, 'daysPerWeek'>>;
 
 type CatalogLookup = Pick<ExerciseCatalogProvider, 'getById'>;
 
@@ -72,9 +74,15 @@ export const VIOLATION_FIX_HINTS: Readonly<Record<string, string>> = {
   PARQ_RIR_TOO_LOW: 'Modo conservador: todo "rir" declarado deve respeitar o piso indicado.',
   PARQ_VIOLATION: 'Modo conservador: nenhum "technique" em nenhum exercício e "phase" nunca FORCA.',
   SESSION_COUNT_MISMATCH:
-    'Gere exatamente uma sessão por dia declarado, na ordem indicada, com "weekday" preenchido em cada uma.',
+    'Gere exatamente uma sessão por dia disponível do aluno, com "weekday" preenchido em cada uma — reorganize a divisão para essa quantidade, sem sessão vazia ou repetida.',
+  WEEKLY_SESSIONS_EXCEED_AVAILABILITY:
+    'O protocolo tem mais sessões do que os dias disponíveis do aluno. Reorganize a divisão para EXATAMENTE essa quantidade de sessões (redistribua grupos musculares e volume entre elas), em vez de só apagar sessões — nenhuma sessão extra, complementar ou opcional.',
+  WEEKLY_FREQUENCY_INCONSISTENT:
+    '"weeklyFrequency" deve ser igual ao número de sessões do array "sessions".',
+  DUPLICATE_WEEKDAY:
+    'Cada sessão deve cair num dia diferente da semana ("weekday" único por sessão).',
   WEEKDAY_MISMATCH:
-    'Cada sessão deve ter "weekday" igual ao dia declarado correspondente, na ordem indicada.',
+    'Use em "weekday" só os dias permitidos para este aluno (os preferidos, quando há preferidos suficientes; todos os preferidos, quando há menos preferidos que dias disponíveis), um por sessão.',
   SPLIT_LEVEL_NOT_ALLOWED: 'Use somente uma das divisões permitidas para o nível deste aluno.',
   SPLIT_FREQUENCY_MISMATCH:
     'Escolha uma divisão cuja frequência mínima caiba no número de sessões da semana.',
@@ -293,10 +301,15 @@ export function buildCorrectionMessage(
         break;
       }
       case 'SESSION_COUNT_MISMATCH':
+      case 'WEEKLY_SESSIONS_EXCEED_AVAILABILITY':
+      case 'WEEKLY_FREQUENCY_INCONSISTENT':
+      case 'DUPLICATE_WEEKDAY':
       case 'WEEKDAY_MISMATCH': {
         const got = structure.sessions.map((s) => s.weekday ?? 'sem weekday').join(', ');
+        const target = weeklySessionTarget(constraints);
+        const preferred = normalizedPreferredDays(constraints.preferredDays);
         items.push(
-          `[${rule}] Dias declarados, nesta ordem: ${constraints.preferredDays.join(', ')} (${constraints.preferredDays.length} sessões). Gerado: ${structure.sessions.length} sessões (${got}). ${hint}`,
+          `[${rule}] Sessões exigidas por semana: ${target ?? 'livre'}. Dias preferidos: ${preferred.join(', ') || 'nenhum'}. Gerado: ${structure.sessions.length} sessões (${got}), "weeklyFrequency": ${structure.weeklyFrequency}. ${hint}`,
         );
         break;
       }

@@ -18,9 +18,41 @@ import type { GenerationGoal, WorkoutSplit } from '@movivo/shared';
 
 import type { ExerciseLevel } from '../exercise-catalog';
 
-export const VALIDATION_RULES_VERSION = 'validation-rules-2026-09-v4';
+export const VALIDATION_RULES_VERSION = 'validation-rules-2026-10-v5';
 
 export type ValidationActionCode = 'PASS' | 'FLAG' | 'BLOCK';
+
+/**
+ * Regras que a decisão do profissional CREF prevalece (achado 2026-10-15, produção).
+ *
+ * Estas regras foram escritas para a saída da IA: elas codificam a metodologia de prescrição
+ * automática (exercício contraindicado pela tag inferida da anamnese, nível, isolado como
+ * base, divisão × nível, técnica, piso/teto do modo conservador do PAR-Q, duração do
+ * mesociclo, contagem e dias). Quando quem prescreve é o profissional habilitado, olhando o
+ * caso individualmente, a regra automática não pode vetar a decisão dele — vira um CONFLITO
+ * que ele precisa reconhecer de forma explícita, e que fica auditado.
+ *
+ * Fica FORA de propósito (nenhum profissional supera): exercício fora do catálogo
+ * (referência inválida), sessões acima dos dias disponíveis do aluno, frequência declarada
+ * diferente das sessões, duas sessões no mesmo dia, linguagem proibida (diagnóstico,
+ * tratamento, cura, resultado garantido), vazamento de prompt, eco de injeção e
+ * link/contato no texto. Essas protegem integridade de dados e compliance, não prescrição.
+ */
+export const PROFESSIONAL_OVERRIDABLE_RULES: ReadonlySet<string> = new Set([
+  'EXERCISE_CONTRAINDICATED',
+  'EXERCISE_LEVEL_TOO_HIGH',
+  'ISOLATION_AS_BASE',
+  'SPLIT_LEVEL_NOT_ALLOWED',
+  'SPLIT_FREQUENCY_MISMATCH',
+  'TECHNIQUE_LEVEL_NOT_ALLOWED',
+  'TECHNIQUE_OVERUSE',
+  'PARQ_PHASE_CAP_EXCEEDED',
+  'PARQ_RIR_TOO_LOW',
+  'PARQ_VIOLATION',
+  'PHASE_DURATION_OUT_OF_RANGE',
+  'SESSION_COUNT_MISMATCH',
+  'WEEKDAY_MISMATCH',
+]);
 
 /**
  * Padrões de movimento priorizados por objetivo — o gerador recebe isto como orientação

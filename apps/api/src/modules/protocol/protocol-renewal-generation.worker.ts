@@ -698,11 +698,19 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
       const preferredDays = constraints?.preferredDays ?? [];
       const requiresProfessionalReview = constraints?.requiresProfessionalReview ?? true;
       const parqTags = constraints?.parqTags ?? [];
-      const content = buildFallbackProtocol(goal, preferredDays);
+      const daysPerWeek = constraints?.daysPerWeek;
+      const content = buildFallbackProtocol(goal, preferredDays, daysPerWeek);
       const persisted = await this.repository.persist({
         userId,
         content,
-        constraints: { goal, preferredDays, requiresProfessionalReview, parqTags, fallback: true },
+        constraints: {
+          goal,
+          preferredDays,
+          ...(daysPerWeek !== undefined ? { daysPerWeek } : {}),
+          requiresProfessionalReview,
+          parqTags,
+          fallback: true,
+        },
         parqFlags: parqTags,
         approvalStatus: 'PENDING_REVIEW',
         status: 'PENDING_SIGNATURE',

@@ -19,8 +19,9 @@
 import type { GenerationGoal, ProtocolStructure, Weekday } from '@movivo/shared';
 
 import { PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
+import { planTrainingWeekdays, validDaysPerWeek } from '../training-days';
 
-export const FALLBACK_TEMPLATE_VERSION = 'fallback-template-2026-09-v3';
+export const FALLBACK_TEMPLATE_VERSION = 'fallback-template-2026-10-v4';
 
 const CREF_RESPALDO =
   'Este é um plano inicial conservador, gerado enquanto um profissional de Educação Física ' +
@@ -116,15 +117,24 @@ function templateB(): { focus: string; exercises: FallbackExercise[] } {
 }
 
 /**
- * Monta um `ProtocolStructure` de fallback válido para o objetivo do usuário, com uma
- * sessão por dia declarado (`preferredDays`), alternando os dois templates conservadores
- * acima. Vazio/ausente → `DEFAULT_WEEKDAYS`.
+ * Monta um `ProtocolStructure` de fallback válido para o objetivo do usuário, alternando os
+ * dois templates conservadores acima. Achado 2026-10-15: com `daysPerWeek`, as sessões são
+ * exatamente essa quantidade, nos dias da distribuição determinística (`training-days.ts`,
+ * dentro dos preferidos quando há preferidos suficientes). Sem `daysPerWeek` (chamadas
+ * antigas), uma sessão por dia declarado; vazio/ausente → `DEFAULT_WEEKDAYS`.
  */
 export function buildFallbackProtocol(
   goal: GenerationGoal,
   preferredDays: readonly Weekday[] = [],
+  daysPerWeek?: number,
 ): ProtocolStructure {
-  const weekdays = preferredDays.length ? preferredDays : DEFAULT_WEEKDAYS;
+  const available = validDaysPerWeek(daysPerWeek);
+  const weekdays =
+    available !== undefined
+      ? planTrainingWeekdays(available, preferredDays)
+      : preferredDays.length
+        ? preferredDays
+        : DEFAULT_WEEKDAYS;
   const dayLabels = ['Treino A', 'Treino B'];
 
   return {
