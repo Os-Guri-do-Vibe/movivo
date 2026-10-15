@@ -34,6 +34,8 @@ export default tseslint.config(
       '**/next-env.d.ts',
       'docs/**',
       'sprint/**',
+      // Gerador do vídeo de apresentação: scripts de estúdio, fora do código do produto.
+      'video_tutorial/**',
     ],
   },
 

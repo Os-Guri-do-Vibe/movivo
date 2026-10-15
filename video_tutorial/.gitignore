@@ -1,0 +1,14 @@
+# Intermediários do gerador (refeitos a cada execução)
+gerador/saida/
+gerador/montagem/intro/
+gerador/montagem/outro/
+gerador/montagem/caps/
+gerador/montagem/*.txt
+gerador/montagem/caption_states.json
+gerador/montagem/frame.png
+gerador/montagem/frame_cap.png
+gerador/studio/takes/*/f/
+gerador/studio/takes/*/list.txt
+gerador/studio/takes/*/take.json
+gerador/studio/takes/dry-*/
+__pycache__/

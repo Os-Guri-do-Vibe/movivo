@@ -1,0 +1,13 @@
+// Gera studio/story-card.png com o renderizador real da API (o mesmo do produto).
+// Uso: copiar para apps/api/src/__studio_tmp/render-card.ts, rodar e apagar a pasta:
+//   cd apps/api && npx tsx src/__studio_tmp/render-card.ts ../../video_tutorial/gerador/studio/story-card.png
+import { writeFileSync } from 'node:fs';
+import { renderAsync } from '@resvg/resvg-js';
+import { formatShareCardDuration } from '@movivo/shared';
+import { SHARE_CARD_FONT_FAMILY, SHARE_CARD_FONT_FILES, loadShareCardAssets } from '../modules/workout/share-card/share-card.assets';
+import { SHARE_CARD_WIDTH, buildShareCardSvg } from '../modules/workout/share-card/share-card.svg';
+
+const groups = new Set(['quads', 'hamstrings', 'glutes', 'calves']) as never;
+const svg = buildShareCardSvg(loadShareCardAssets(), { gender: 'male', groups, durationLabel: formatShareCardDuration(3480) });
+renderAsync(svg, { fitTo: { mode: 'width', value: SHARE_CARD_WIDTH }, font: { fontFiles: SHARE_CARD_FONT_FILES, loadSystemFonts: false, defaultFontFamily: SHARE_CARD_FONT_FAMILY } })
+  .then((r) => { writeFileSync(process.argv[2], r.asPng()); console.log('ok'); });

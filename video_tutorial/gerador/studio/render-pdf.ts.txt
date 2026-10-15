@@ -1,0 +1,39 @@
+// Gera studio/protocolo-rodrigo-de-barros-movivo.pdf com o gerador real da API; depois rode `node raster.cjs`
+// para atualizar studio/pdfpages/p1.png (a imagem que o visualizador do WhatsApp mostra).
+// Uso: copiar para apps/api/src/__studio_tmp/render-pdf.ts, rodar e apagar a pasta:
+//   cd apps/api && npx tsx src/__studio_tmp/render-pdf.ts ../../video_tutorial/gerador/studio/protocolo-rodrigo-de-barros-movivo.pdf
+import { writeFileSync } from 'node:fs';
+import { buildProtocolPdf } from '../modules/protocol/protocol-pdf.service';
+
+const e = (exerciseId: string, name: string, sets: number, min: number, max: number, restSeconds: number, rir = 2) =>
+  ({ exerciseId, name, sets, reps: { min, max }, loadStrategy: 'DOUBLE_PROGRESSION' as const, restSeconds, rir });
+
+const sessions = [
+  { dayLabel: 'Treino A', weekday: 'MON' as const, focus: 'Peito e tríceps', exercises: [
+    e('supino-reto', 'Supino Reto (Barra)', 4, 6, 10, 120), e('supino-inclinado-halter', 'Supino Inclinado (Halteres)', 3, 8, 12, 90),
+    e('crucifixo-maquina', 'Crucifixo (Máquina)', 3, 12, 15, 60), e('triceps-corda', 'Tríceps na Polia (Corda)', 3, 10, 12, 60),
+    e('triceps-frances', 'Tríceps Francês (Halter)', 3, 10, 12, 60) ] },
+  { dayLabel: 'Treino B', weekday: 'TUE' as const, focus: 'Costas e bíceps', exercises: [
+    e('puxada-frente', 'Puxada Frontal (Polia)', 4, 8, 10, 90), e('remada-curvada', 'Remada Curvada (Barra)', 4, 6, 10, 120),
+    e('remada-baixa', 'Remada Baixa (Máquina)', 3, 10, 12, 75), e('rosca-direta', 'Rosca Direta (Barra)', 3, 8, 12, 60),
+    e('rosca-martelo', 'Rosca Martelo (Halteres)', 3, 10, 12, 60) ] },
+  { dayLabel: 'Treino C', weekday: 'WED' as const, focus: 'Pernas', exercises: [
+    e('agachamento-barra', 'Agachamento (Barra)', 4, 6, 10, 120), e('leg-press-45', 'Leg Press 45° (Máquina)', 3, 10, 12, 90),
+    e('cadeira-extensora', 'Cadeira Extensora (Máquina)', 3, 12, 15, 60), e('mesa-flexora', 'Mesa Flexora (Máquina)', 3, 12, 15, 60),
+    e('panturrilha-em-pe', 'Panturrilha em Pé (Máquina)', 4, 15, 20, 45) ] },
+  { dayLabel: 'Treino D', weekday: 'FRI' as const, focus: 'Ombros e abdômen', exercises: [
+    e('desenvolvimento-halter', 'Desenvolvimento (Halteres)', 4, 8, 10, 90), e('elevacao-lateral', 'Elevação Lateral (Halteres)', 4, 12, 15, 60),
+    e('crucifixo-inverso', 'Crucifixo Inverso (Máquina)', 3, 12, 15, 60), e('abdominal-maquina', 'Abdominal (Máquina)', 3, 12, 15, 45) ] },
+  { dayLabel: 'Treino E', weekday: 'SAT' as const, focus: 'Superiores complementar', exercises: [
+    e('supino-maquina', 'Supino (Máquina)', 3, 10, 12, 75), e('puxada-neutra', 'Puxada Neutra (Polia)', 3, 10, 12, 75),
+    e('desenvolvimento-maquina', 'Desenvolvimento (Máquina)', 3, 10, 12, 75), e('rosca-polia', 'Rosca na Polia', 2, 12, 15, 45),
+    e('triceps-barra-polia', 'Tríceps na Polia (Barra)', 2, 12, 15, 45) ] },
+];
+
+buildProtocolPdf({
+  content: { promptVersion: 'demo', goal: 'GAIN_MUSCLE', phase: 'HIPERTROFIA', splitType: 'ABCDE', weeklyFrequency: 5, sessions, phaseDurationWeeks: 6 } as never,
+  mesocycleName: 'Bloco 1 · Hipertrofia',
+  startDate: new Date('2026-10-05T03:00:00Z'), endDate: new Date('2026-11-16T03:00:00Z'), totalWeeks: 6,
+  signatureHash: 'a3f9c2e1b7d84f60', signedAt: new Date('2026-10-05T17:40:00Z'),
+  student: { name: 'Rodrigo de Barros', birthDate: '2001-07-18', biologicalSex: 'MALE', heightCm: 178, weightKg: 78 },
+}).then((b) => { writeFileSync(process.argv[2], b); console.log('ok', b.length); });
