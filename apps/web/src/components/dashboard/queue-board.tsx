@@ -99,7 +99,7 @@ function iconLinkClass(): string {
 }
 
 /**
- * Protocolo gerado pela IA e ainda não assinado dispara sozinho 1h após criado
+ * Protocolo gerado pela IA e ainda não assinado dispara sozinho 24h após criado
  * (`PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS`, `protocol-generation.worker.ts`) — aprovado
  * e enviado ao WhatsApp automaticamente se o CREF não agir antes. Só existe pra
  * protocolos `OPTIONAL` (é o único caso com job de auto-liberação agendado).

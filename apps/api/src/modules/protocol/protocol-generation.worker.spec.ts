@@ -240,7 +240,7 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
 
   it('caminho limpo (PASS) → também entra em PENDING_REVIEW/OPTIONAL, sem entrega imediata', async () => {
     // Decisão do fundador (2026-08-18): nem PASS entrega sozinho na hora — todo protocolo
-    // passa pela Fila do Profissional com janela de cortesia de 1h, PAR-Q à parte.
+    // passa pela Fila do Profissional com janela de cortesia de 24h, PAR-Q à parte.
     const { worker, repository, enqueue, generator } = makeWorker({
       action: 'PASS',
       session: sessionRow({
@@ -267,7 +267,7 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
       'protocol-auto-release',
       'auto-release',
       { userId: 'u1', protocolId: 'p1' },
-      { delay: 60 * 60 * 1000, jobId: 'auto-release-p1' },
+      { delay: 24 * 60 * 60 * 1000, jobId: 'auto-release-p1' },
     );
     expect(enqueue).toHaveBeenCalledWith(
       'whatsapp-outbound',
@@ -435,7 +435,7 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
   });
 
   // Decisão do fundador (2026-09-29): protocolo que só passou depois do reparo determinístico
-  // segue o fluxo normal (OPTIONAL + janela de 1h), com os reparos registrados no rastro.
+  // segue o fluxo normal (OPTIONAL + janela de 24h), com os reparos registrados no rastro.
   it('reparo determinístico → OPTIONAL com auto-liberação, e o rastro (repairs) é persistido', async () => {
     const phaseBlock = verdict('BLOCK_FALLBACK', [
       { rule: 'PHASE_DURATION_OUT_OF_RANGE', detail: 'fase ADAPTACAO: 9 semanas', action: 'BLOCK' },
@@ -464,7 +464,7 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
       'protocol-auto-release',
       'auto-release',
       { userId: 'u1', protocolId: 'p1' },
-      { delay: 60 * 60 * 1000, jobId: 'auto-release-p1' },
+      { delay: 24 * 60 * 60 * 1000, jobId: 'auto-release-p1' },
     );
   });
 
@@ -479,7 +479,7 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
     );
   });
 
-  it('validador flagou (revisão opcional) → PENDING_REVIEW + agenda auto-liberação em 1h', async () => {
+  it('validador flagou (revisão opcional) → PENDING_REVIEW + agenda auto-liberação em 24h', async () => {
     const { worker, enqueue, repository } = makeWorker({ action: 'FLAG_HUMAN_REVIEW' });
     const res = await worker.process(job());
     expect(res.status).toBe('PENDING_REVIEW');
@@ -490,7 +490,7 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
       'protocol-auto-release',
       'auto-release',
       { userId: 'u1', protocolId: 'p1' },
-      { delay: 60 * 60 * 1000, jobId: 'auto-release-p1' },
+      { delay: 24 * 60 * 60 * 1000, jobId: 'auto-release-p1' },
     );
   });
 
@@ -596,7 +596,7 @@ describe('ProtocolGenerationWorker.onModuleInit + DLQ fallback (US-2.4)', () => 
   /**
    * Achado 2026-08-24: este caminho fixava `reviewUrgency: 'OPTIONAL'` no braço — correto
    * só enquanto o gate de PAR-Q travava a geração lá em `process()`. Sem o gate, fixar
-   * significaria auto-liberar em 1h o treino de um titular com alerta clínico aberto,
+   * significaria auto-liberar em 24h o treino de um titular com alerta clínico aberto,
    * justamente quando o LLM caiu e ninguém olhou o conteúdo.
    */
   it('DLQ de titular com PAR-Q bloqueado: MANDATORY, sem auto-liberação', async () => {

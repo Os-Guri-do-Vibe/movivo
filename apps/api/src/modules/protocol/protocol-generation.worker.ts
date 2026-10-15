@@ -3,7 +3,7 @@
  *
  * submit (US-1.3) enfileira → aqui: carrega usuário+anamnese sob RLS, decifra o bloco de
  * saúde, converte o PAR-Q em constraints, gera+valida (planner), persiste
- * `protocols`/`protocol_versions` como `PENDING_REVIEW` e agenda a janela de cortesia de 1h
+ * `protocols`/`protocol_versions` como `PENDING_REVIEW` e agenda a janela de cortesia de 24h
  * (`ProtocolAutoReleaseWorker` entrega se o CREF não agir antes — decisão do fundador,
  * 2026-08-18: nenhum protocolo entrega sozinho na hora, PASS incluso).
  *
@@ -31,7 +31,7 @@
  *
  * **Mudança de 2026-09-29 (decisão do fundador):** protocolo que só passou no validador
  * depois do reparo determinístico do planner NÃO é motivo de `MANDATORY` — segue o fluxo
- * normal (`OPTIONAL`, janela de 1h), com o ajuste registrado no rastro. A política mora em
+ * normal (`OPTIONAL`, janela de 24h), com o ajuste registrado no rastro. A política mora em
  * `REPAIRED_PROTOCOL_REVIEW_URGENCY`/`reviewUrgencyForPlan`, única para geração e renovação.
  */
 import { Injectable, type OnModuleInit } from '@nestjs/common';
@@ -90,13 +90,17 @@ export interface ProtocolGenerationJob {
  * (não só local) porque o `DashboardService.queue()` precisa do mesmo valor para exibir
  * `autoReleaseAt` — uma só fonte de verdade evita o contador da UI dessincronizar do
  * `delay` real do job.
+ *
+ * **Mudança de 2026-10-15 (decisão do fundador):** janela ampliada de 1h para 24h, para o
+ * profissional ter o dia para revisar antes do envio automático. Vale só para protocolo
+ * gerado depois do deploy — job já agendado mantém o `delay` com que nasceu.
  */
-export const PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS = 60 * 60 * 1000;
+export const PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Política de liberação de protocolo AJUSTADO pelo reparo determinístico do planner
  * (`plan.repairs` não vazio). Decisão do fundador (2026-09-29): liberação automática — o
- * mesmo fluxo de um PASS (janela de cortesia de 1h para o RT e depois auto-liberação). O
+ * mesmo fluxo de um PASS (janela de cortesia de 24h para o RT e depois auto-liberação). O
  * conteúdo foi revalidado limpo pelo `ValidationService` inteiro depois do ajuste, e o
  * rastro (`repairs`) fica gravado para o painel exibir o selo "ajustado automaticamente".
  * Trocar para `'MANDATORY'` aqui é a única mudança necessária para exigir assinatura.
@@ -215,7 +219,7 @@ export class ProtocolGenerationWorker implements OnModuleInit {
 
     // Decisão do fundador (2026-08-18): todo protocolo gerado entra na fila como
     // PENDING_REVIEW — nunca entrega sozinho na hora, PASS incluso. `OPTIONAL` ganha a
-    // janela de cortesia de 1h; `MANDATORY` (PAR-Q bloqueado, 2026-08-24) nunca sai sem
+    // janela de cortesia de 24h; `MANDATORY` (PAR-Q bloqueado, 2026-08-24) nunca sai sem
     // assinatura humana. Ver `protocol-planner.ts` para o raciocínio completo.
     //
     // Decisão do fundador (2026-09-03): protocolo que caiu no template de fallback
@@ -288,7 +292,7 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       },
       mandatory
         ? 'protocolo PENDING_REVIEW/MANDATORY — só sai por assinatura humana CREF'
-        : 'protocolo PENDING_REVIEW — aguarda painel CREF ou auto-liberação em 1h',
+        : 'protocolo PENDING_REVIEW — aguarda painel CREF ou auto-liberação em 24h',
     );
     this.queueEvents.emit('protocol');
     await enqueueStaffQueueAlert(this.queues, this.logger, {

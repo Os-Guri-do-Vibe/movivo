@@ -248,7 +248,7 @@ async function main(): Promise<void> {
       `\nProtocolo ${protocolRow.id} atualizado com conteúdo individualizado real ` +
         `(${plan.generatedBy}/${plan.modelVersion}). ` +
         (reviewUrgency === 'OPTIONAL'
-          ? 'Segue PENDING_REVIEW e dispara sozinho para o WhatsApp em 1h se ninguém agir no painel.'
+          ? 'Segue PENDING_REVIEW e dispara sozinho para o WhatsApp em 24h se ninguém agir no painel.'
           : 'Segue PENDING_REVIEW/OBRIGATÓRIA — precisa de assinatura CREF no painel (nunca sai sozinha).'),
     );
   } finally {

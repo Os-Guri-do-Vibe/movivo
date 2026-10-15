@@ -25,7 +25,7 @@ import { ProtocolSubstitutionRepository } from './protocol-substitution.reposito
 import { ReviewHoldService } from './review-hold.service';
 import { WorkoutPresentationService } from './workout-presentation.service';
 
-/** Janela de cortesia da substituição — bem mais curta que a de geração completa (1h),
+/** Janela de cortesia da substituição — bem mais curta que a de geração completa (24h),
  * porque o escopo da mudança é uma troca pontual, não um protocolo inteiro novo. */
 export const AI_SUBSTITUTION_REVIEW_WINDOW_MS = 30 * 60 * 1000;
 
