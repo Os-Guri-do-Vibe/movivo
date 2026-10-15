@@ -1,5 +1,7 @@
 /**
- * Reprocessamento ad-hoc: corrige um protocolo que nasceu `FALLBACK_TEMPLATE` porque a
+ * Reprocessamento ad-hoc (2026-10-15: também regera protocolos PENDENTES de revisão que a IA
+ * gerou sob regras antigas — ver as flags abaixo): corrige um protocolo que nasceu
+ * `FALLBACK_TEMPLATE` porque a
  * geração esgotou os retries do BullMQ (DLQ, `ProtocolGenerationWorker.handleTerminalFailure`)
  * enquanto os três provedores de LLM estavam bloqueados para dado `HEALTH` (ADR-005-R2,
  * flags fechadas de 2026-09-24 até 2026-09-25) — chama a geração real e SUBSTITUI o
@@ -14,20 +16,26 @@
  * `toConstraints()` — não instancia o worker (evitaria registrar um segundo consumer
  * BullMQ na mesma fila, mesmo racional de `diagnose-protocol-fallback.ts`).
  *
- * Só escreve se: (a) o protocolo é `generatedBy = FALLBACK_TEMPLATE`, (b) nunca foi
- * assinado (`status = PENDING_SIGNATURE` / `approvalStatus = PENDING_REVIEW`), e (c) a
- * regeração real NÃO caiu no fallback de novo. Qualquer outra condição aborta sem tocar
- * o banco. Segue `PENDING_REVIEW` depois — precisa de assinatura CREF no painel como
+ * Só escreve se: (a) o protocolo é `generatedBy = FALLBACK_TEMPLATE` — ou, com
+ * `--incluir-protocolos-da-ia`, qualquer protocolo ainda não assinado; um protocolo que o
+ * profissional já editou (`PROFESSIONAL_EDIT`) exige também
+ * `--sobrescrever-edicao-profissional`, porque a regeração descarta a edição dele —,
+ * (b) nunca foi assinado (`status = PENDING_SIGNATURE` / `approvalStatus = PENDING_REVIEW`),
+ * e (c) a regeração real NÃO caiu no fallback de novo. Qualquer outra condição aborta sem
+ * tocar o banco. As `constraints` gravadas passam a ser as COMPLETAS (com `daysPerWeek`),
+ * para a assinatura validar contra a disponibilidade do aluno. Segue `PENDING_REVIEW` depois — precisa de assinatura CREF no painel como
  * qualquer outro protocolo, nunca entrega sozinho.
  *
  * Uso (NÃO rodar com `tsx` — mesmo motivo de `diagnose-protocol-fallback.ts`):
  *   cd apps/api
  *   pnpm run build
- *   node --enable-source-maps dist/scripts/reprocess-protocol-fallback.js <phoneNumberE164>
+ *   node --enable-source-maps dist/scripts/reprocess-protocol-fallback.js <phoneNumberE164> \
+ *     [--incluir-protocolos-da-ia] [--sobrescrever-edicao-profissional]
  *
  * Script descartável — investigação/correção pontual, não é feature permanente.
  */
 import 'reflect-metadata';
+import { createHash } from 'node:crypto';
 import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { eq, desc, and } from 'drizzle-orm';
@@ -54,6 +62,7 @@ import {
   reviewUrgencyForPlan,
 } from '../modules/protocol/protocol-generation.worker';
 import { MethodologyProvider } from '../modules/protocol/methodology-provider.service';
+import { isProfessionalAuthored } from '../modules/protocol/protocol-origin';
 import { planProtocol } from '../modules/protocol/protocol-planner';
 import { ProtocolGeneratorService } from '../modules/protocol/protocol-generator.service';
 import {
@@ -86,9 +95,15 @@ const INITIAL_MESOCYCLE_NUMBER = 1;
 class ReprocessModule {}
 
 async function main(): Promise<void> {
-  const phone = process.argv[2];
+  const args = process.argv.slice(2);
+  const phone = args.find((arg) => !arg.startsWith('--'));
+  const includeAiProtocols = args.includes('--incluir-protocolos-da-ia');
+  const overrideProfessionalEdit = args.includes('--sobrescrever-edicao-profissional');
   if (!phone) {
-    console.error('Uso: node dist/scripts/reprocess-protocol-fallback.js <phoneNumberE164>');
+    console.error(
+      'Uso: node dist/scripts/reprocess-protocol-fallback.js <phoneNumberE164> ' +
+        '[--incluir-protocolos-da-ia] [--sobrescrever-edicao-profissional]',
+    );
     process.exitCode = 1;
     return;
   }
@@ -128,9 +143,18 @@ async function main(): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    if (protocolRow.generatedBy !== 'FALLBACK_TEMPLATE') {
+    if (protocolRow.generatedBy !== 'FALLBACK_TEMPLATE' && !includeAiProtocols) {
       console.error(
-        `Protocolo ${protocolRow.id} não é FALLBACK_TEMPLATE (generatedBy=${protocolRow.generatedBy}) — nada a corrigir, abortando sem tocar o banco.`,
+        `Protocolo ${protocolRow.id} não é FALLBACK_TEMPLATE (generatedBy=${protocolRow.generatedBy}) — nada a corrigir, abortando sem tocar o banco. ` +
+          'Para regerar um protocolo da IA ainda pendente, use --incluir-protocolos-da-ia.',
+      );
+      process.exitCode = 1;
+      return;
+    }
+    if (isProfessionalAuthored(protocolRow.generatedBy) && !overrideProfessionalEdit) {
+      console.error(
+        `Protocolo ${protocolRow.id} foi editado pelo profissional (${protocolRow.generatedBy}): a regeração descartaria a edição dele — abortando sem tocar o banco. ` +
+          'Se for isso mesmo que se quer, use --sobrescrever-edicao-profissional.',
       );
       process.exitCode = 1;
       return;
@@ -156,7 +180,10 @@ async function main(): Promise<void> {
 
     console.warn(
       `[reprocess] titular=${userRow.name ?? userRow.id} protocolo=${protocolRow.id} ` +
-        `mesociclo=${protocolRow.mesocycleNumber} versao=${protocolRow.version}`,
+        `mesociclo=${protocolRow.mesocycleNumber} versao=${protocolRow.version} ` +
+        `origem=${protocolRow.generatedBy} sha256-do-conteudo-atual=${createHash('sha256')
+          .update(JSON.stringify(protocolRow.content))
+          .digest('hex')}`,
     );
 
     const constraints = await loadFullConstraints(
@@ -207,6 +234,9 @@ async function main(): Promise<void> {
         .update(protocols)
         .set({
           content: plan.content,
+          // Constraints COMPLETAS (com `daysPerWeek`): é o que a assinatura revalida. No caminho
+          // de DLQ elas ficaram na forma mínima do fallback.
+          constraints,
           totalWeeks,
           mesocycleName,
           startDate,
