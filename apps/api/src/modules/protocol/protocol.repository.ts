@@ -339,10 +339,8 @@ export class ProtocolRepository {
 
   /**
    * Libera sozinho um protocolo `PENDING_REVIEW`/`OPTIONAL` cuja janela de cortesia de 24h
-   * expirou sem ação do CREF (`ProtocolAutoReleaseWorker`). Idempotente e seguro
-   * reexecutar: se o CREF já assinou (`signProtocol`) ou editou (`editProtocol` já força
-   * `MANDATORY`), o estado não bate mais e é `released: false` sem tocar a linha — não há
-   * "cancelar o job", o próprio estado decide na hora de rodar.
+   * expirou sem ação do CREF (`ProtocolAutoReleaseWorker`). Edições mantêm a urgência e o
+   * job libera o conteúdo persistido atual. Se o CREF assinar antes, o estado torna o job no-op.
    */
   /**
    * `true` se o protocolo ainda espera a auto-liberação (`PENDING_REVIEW` + `OPTIONAL`). Leitura

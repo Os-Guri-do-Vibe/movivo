@@ -154,7 +154,7 @@ export class DashboardController {
   }
 
   /**
-   * `ADMIN` (conta fundador) tem acesso total à fila, inclusive assinatura de protocolo
+   * `ADMIN` (perfil da conta fundadora) tem acesso total à fila, inclusive assinatura de protocolo
    * (achado 2026-08-22, decisão do fundador): a MOVIVO no início só tem um profissional
    * CREF, também sócio-fundador, e a conta dele já usa o papel de fundador. Por isso todo
    * `ADMIN` ganha as mesmas ações de `PROFESSIONAL` aqui — a segunda barreira (crédito
@@ -166,7 +166,7 @@ export class DashboardController {
   @ApiOperation({
     summary: 'Edita o conteúdo de um protocolo antes de assinar',
     description:
-      '`ADMIN` (conta fundadora) tem o mesmo acesso de `PROFESSIONAL` aqui — no MVP o único profissional CREF já é sócio-fundador.',
+      '`ADMIN` (perfil da conta fundadora) tem o mesmo acesso de `PROFESSIONAL` aqui — no MVP o único profissional CREF já é sócio-fundador.',
   })
   @ApiParam({ name: 'id', description: 'UUID do protocolo.' })
   @ApiBody({
@@ -181,7 +181,7 @@ export class DashboardController {
   @ApiResponse({
     status: 200,
     description:
-      'Protocolo atualizado e de volta para assinatura. `violations` lista o que o ValidationService apontou (a edição é gravada mesmo assim; a assinatura exige PASS).',
+      'Protocolo atualizado e de volta à revisão. Alertas automáticos de contraindicação não bloqueiam a edição profissional; integridade do catálogo e demais regras de compliance continuam aplicáveis.',
   })
   @ApiResponse({ status: 400, description: 'Corpo fora do schema.' })
   @ApiResponse({ status: 404, description: 'Protocolo inexistente.' })

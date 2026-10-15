@@ -168,7 +168,7 @@ export const parqProtocolItem: QueueItem = {
   read: false,
 };
 
-/** A outra origem de `MANDATORY`: edição manual do CREF, sem alerta clínico. */
+/** Protocolo editado pelo CREF que já pertencia à fila obrigatória (sem alerta clínico). */
 export const editProtocolItem: QueueItem = {
   id: EDIT_PROTOCOL_ID,
   kind: 'PROTOCOL',

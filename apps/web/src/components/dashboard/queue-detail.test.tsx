@@ -1377,6 +1377,7 @@ describe('QueueDetail — prescrição manual do profissional', () => {
       measurement: 'DURATION',
       contraindicatedForStudent: ['LOWER_BACK'],
     });
+    expect(screen.queryByText(/Catálogo contraindica para este aluno/)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: /salvar/i }));
     await waitFor(() =>
       expect(api.saveProtocol).toHaveBeenCalledWith(

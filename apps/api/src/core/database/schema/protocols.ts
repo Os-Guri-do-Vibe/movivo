@@ -170,10 +170,11 @@ export const protocols = pgTable(
 
     /**
      * Só relevante enquanto `approval_status = PENDING_REVIEW` (fila do profissional).
-     * `MANDATORY` (origem `BLOCK_FALLBACK`) nunca libera sozinho. `OPTIONAL` (origem
-     * `FLAG_HUMAN_REVIEW`) libera sozinho após 1h se o CREF não agir
-     * (`ProtocolAutoReleaseWorker`). `NULL` para protocolos que nunca passaram por
-     * `PENDING_REVIEW` (`AUTO_APPROVED` de origem).
+     * `MANDATORY` (ex.: `BLOCK_FALLBACK`) nunca libera sozinho. `OPTIONAL` (ex.:
+     * `FLAG_HUMAN_REVIEW`) libera sozinho após 24h se o CREF não agir
+     * (`ProtocolAutoReleaseWorker`). Edição manual preserva a urgência e o prazo original;
+     * no vencimento, o worker usa o conteúdo persistido mais recente.
+     * `NULL` para protocolos que nunca passaram por `PENDING_REVIEW` (`AUTO_APPROVED` de origem).
      */
     reviewUrgency: reviewUrgencyEnum('review_urgency'),
 
@@ -250,11 +251,10 @@ export const protocols = pgTable(
     index('idx_protocols_renewal_session').on(table.renewalSessionId),
     /**
      * Defesa em profundidade exigida pela revisão de segurança (2026-08-24): protocolo
-     * `MANDATORY` NUNCA pode terminar `AUTO_APPROVED`. Hoje três camadas já impedem isso
-     * (o worker não agenda auto-liberação para `MANDATORY`, `autoRelease()` reconfere o
-     * estado sob `FOR UPDATE`, e `editProtocol` força `MANDATORY`), mas todas são de
-     * aplicação. Esta é a única que sobrevive a um bug de aplicação, a um script
-     * administrativo e a um `UPDATE` manual em produção.
+     * `MANDATORY` NUNCA pode terminar `AUTO_APPROVED`. O worker não agenda auto-liberação
+     * para esse estado e `autoRelease()` reconfere a urgência sob `FOR UPDATE`, mas ambas são
+     * regras de aplicação. Esta é a única que sobrevive a um bug
+     * de aplicação, a um script administrativo e a um `UPDATE` manual em produção.
      */
     check(
       'protocols_mandatory_never_auto_approved',
