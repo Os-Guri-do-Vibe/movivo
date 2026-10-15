@@ -318,9 +318,9 @@ export class DashboardService {
    *   Nenhum tem job de auto-liberação agendado; nenhum sai sozinho.
    * - `optional` — protocolo `reviewUrgency: OPTIONAL`: **todo** protocolo sem PAR-Q
    *   bloqueado cai aqui, PASS limpo incluso (decisão do fundador, 2026-08-18: nem PASS
-   *   entrega sozinho na hora — ver `protocol-planner.ts`). Todos têm
-   *   `ProtocolAutoReleaseWorker` agendado, por isso é o único grupo onde `autoReleaseAt`
-   *   sempre existe.
+   *   entrega sozinho na hora — ver `protocol-planner.ts`). Edições manuais preservam o prazo
+   *   de auto-liberação e o job libera o conteúdo persistido mais recente; assinatura manual
+   *   antes do prazo torna o job agendado um no-op.
    */
   async queue(actor: AuthenticatedUser) {
     const {
@@ -568,13 +568,13 @@ export class DashboardService {
       const row = await this.requireProtocol(tx, id, true);
       const content = this.canonicalExerciseNames(body.content);
       // Achado 2026-10-15 (produção): a edição é PRESCRIÇÃO do profissional, não saída da IA.
-      // Regras de prescrição automática (contraindicação inferida, isolado como base, divisão,
-      // dias...) viram conflito a reconhecer na assinatura — a decisão dele prevalece. O que
-      // continua impedindo até de salvar é integridade/compliance: exercício fora do catálogo
-      // (a referência inválida que travou a assinatura em produção), sessões acima dos dias
-      // disponíveis do aluno, dia repetido, linguagem proibida.
+      // Regras de prescrição automática viram conflito profissional, exceto a contraindicação
+      // do catálogo: ela é registrada na auditoria sem alerta nem confirmação redundante. O que
+      // continua impedindo salvar é integridade/compliance: exercício fora do catálogo, sessões
+      // acima dos dias disponíveis do aluno, dia repetido e linguagem proibida.
       const verdict = this.professionalVerdict(row, content);
       this.assertNoIntegrityViolations(verdict.blocking);
+      const decisionConflicts = this.conflictsRequiringAcknowledgment(verdict.conflicts);
       const beforeHash = this.hashJson(row.content);
       const afterHash = signatureHash(content);
       await tx
@@ -587,9 +587,6 @@ export class DashboardService {
           signedAt: null,
           signatureHash: null,
           humanReviewRequired: true,
-          // Conteúdo editado por humano nunca sai sozinho — se já era `OPTIONAL`, o job de
-          // auto-liberação (se ainda não disparou) vira no-op ao reconferir o estado.
-          reviewUrgency: 'MANDATORY',
           // Procedência do conteúdo vigente — decidida aqui, pelo endpoint autenticado, nunca
           // pelo cliente. A versão da IA continua em `protocol_versions`.
           generatedBy: PROFESSIONAL_EDIT_ORIGIN,
@@ -605,18 +602,20 @@ export class DashboardService {
           beforeHash,
           afterHash,
           origin: PROFESSIONAL_EDIT_ORIGIN,
-          validation: verdict.conflicts.length > 0 ? 'PROFESSIONAL_CONFLICTS' : 'PASS',
+          validation: decisionConflicts.length > 0 ? 'PROFESSIONAL_CONFLICTS' : 'PASS',
           violations: verdict.conflicts.map((violation) => violation.rule),
         },
       });
       return {
         id,
         status: 'PENDING_SIGNATURE',
-        validation: verdict.conflicts.length > 0 ? 'PROFESSIONAL_CONFLICTS' : 'PASS',
+        validation: decisionConflicts.length > 0 ? 'PROFESSIONAL_CONFLICTS' : 'PASS',
         // Mantido por compatibilidade com a tela: são avisos, não bloqueio — o profissional
-        // os reconhece na assinatura (`acknowledgedConflicts`).
-        violations: verdict.conflicts,
-        conflicts: this.conflictPayload(verdict.conflicts),
+        // reconhece os conflitos relevantes na assinatura (`acknowledgedConflicts`). A
+        // contraindicação do catálogo é registrada na auditoria como decisão do CREF sem
+        // exigir reconhecimento redundante.
+        violations: decisionConflicts,
+        conflicts: this.conflictPayload(decisionConflicts),
       };
     });
     this.queueEvents.emit('protocol');
@@ -650,11 +649,14 @@ export class DashboardService {
       }
       await this.assertCrefCredential(tx, actor);
       const content = this.canonicalExerciseNames(body.content);
-      // Mesma regra da edição na fila (achado 2026-10-15): integridade bloqueia; divergência
-      // das regras automáticas exige decisão explícita do profissional, que fica registrada.
+      // Mesma regra da edição na fila: integridade bloqueia; divergências das regras
+      // automáticas ficam registradas. As demais além da contraindicação exigem confirmação.
       const verdict = this.professionalVerdict(row, content);
       this.assertNoIntegrityViolations(verdict.blocking);
-      this.assertConflictsAcknowledged(verdict.conflicts, body.acknowledgedConflicts);
+      this.assertConflictsAcknowledged(
+        this.conflictsRequiringAcknowledgment(verdict.conflicts),
+        body.acknowledgedConflicts,
+      );
 
       const now = new Date();
       const nextVersion = row.version + 1;
@@ -851,14 +853,17 @@ export class DashboardService {
       }
       const content = parsedContent.data;
       // Achado 2026-10-15 (produção): conteúdo que o PROFISSIONAL editou (origem gravada pelo
-      // `editProtocol`, nunca pelo cliente) não é vetado pelas regras de prescrição automática
-      // — ele reconhece cada conflito de forma explícita e a assinatura registra a decisão.
-      // Conteúdo da IA ainda não revisado continua sob o veto inteiro de sempre.
+      // `editProtocol`, nunca pelo cliente) não é vetado pelas regras de prescrição automática.
+      // A assinatura registra os overrides; conflitos além da contraindicação ainda exigem
+      // reconhecimento explícito. Conteúdo da IA continua sob o veto inteiro de sempre.
       let overrides: ValidationViolation[] = [];
       if (isProfessionalAuthored(row.generatedBy)) {
         const verdict = this.professionalVerdict(row, content);
         this.assertNoIntegrityViolations(verdict.blocking);
-        this.assertConflictsAcknowledged(verdict.conflicts, body.acknowledgedConflicts);
+        this.assertConflictsAcknowledged(
+          this.conflictsRequiringAcknowledgment(verdict.conflicts),
+          body.acknowledgedConflicts,
+        );
         overrides = verdict.conflicts;
       } else {
         const verdict = this.validation.validate({
@@ -1880,7 +1885,7 @@ export class DashboardService {
         origin: 'PROFESSIONAL',
         availability,
         blocking: this.conflictPayload(verdict.blocking),
-        conflicts: this.conflictPayload(verdict.conflicts),
+        conflicts: this.conflictPayload(this.conflictsRequiringAcknowledgment(verdict.conflicts)),
       };
     }
     const verdict = this.validation.validate({
@@ -1912,6 +1917,14 @@ export class DashboardService {
       constraints: this.validationConstraints(row),
       parqFlags: row.parQFlags as UserConstraints['injuryTags'],
     });
+  }
+
+  private conflictsRequiringAcknowledgment(
+    conflicts: readonly ValidationViolation[],
+  ): ValidationViolation[] {
+    // A intervenção autenticada do CREF já é a decisão sobre a contraindicação catalogada;
+    // o conflito completo ainda fica no registro da versão/auditoria.
+    return conflicts.filter((conflict) => conflict.rule !== 'EXERCISE_CONTRAINDICATED');
   }
 
   /**

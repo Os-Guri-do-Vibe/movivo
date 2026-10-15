@@ -158,7 +158,7 @@ function makeSequencedService(
   const updateWhere = vi.fn(() =>
     Object.assign(Promise.resolve([]), { returning: vi.fn(async () => []) }),
   );
-  const updateSet = vi.fn(() => ({ where: updateWhere }));
+  const updateSet = vi.fn((_values: unknown) => ({ where: updateWhere }));
   const insertValues = vi.fn(async () => []);
   const execute = vi.fn(async () => []);
   const forUpdate = vi.fn();
@@ -319,7 +319,7 @@ describe('DashboardService invariantes de mutacao', () => {
     expect(enqueue).not.toHaveBeenCalled();
   });
 
-  it('edita protocolo seguro, invalida assinatura anterior e audita hashes', async () => {
+  it('edita protocolo opcional sem promover a fila e audita hashes', async () => {
     const { service, updateSet, updateWhere, append, forUpdate } = makeSequencedService([
       [pendingProtocol],
     ]);
@@ -328,12 +328,12 @@ describe('DashboardService invariantes de mutacao', () => {
       validation: 'PASS',
     });
     expect(updateWhere).toHaveBeenCalledOnce();
-    // Conteúdo editado por humano nunca sai sozinho: mesmo que o protocolo fosse
-    // `OPTIONAL` (fixture `pendingProtocol`), a edição força `MANDATORY` — e a origem do
-    // conteúdo passa a ser do profissional, gravada pelo servidor.
+    // A origem manual é definida pelo servidor, mas a edição não altera a classificação
+    // preexistente nem o job que já foi agendado.
     expect(updateSet).toHaveBeenCalledWith(
-      expect.objectContaining({ reviewUrgency: 'MANDATORY', generatedBy: 'PROFESSIONAL_EDIT' }),
+      expect.objectContaining({ generatedBy: 'PROFESSIONAL_EDIT' }),
     );
+    expect(updateSet.mock.calls[0]?.[0]).not.toHaveProperty('reviewUrgency');
     expect(forUpdate).toHaveBeenCalledWith('update');
     expect(append).toHaveBeenCalledWith(
       expect.anything(),
@@ -1092,6 +1092,16 @@ describe('DashboardService leituras operacionais', () => {
     ).rejects.toThrow('Acesso exclusivo ao profissional CREF');
   });
 
+  it('ADMIN/FUNDADOR autorizado pode editar manualmente como PROFESSIONAL', async () => {
+    const { service, updateSet } = makeSequencedService([[pendingProtocol]]);
+    await expect(service.editProtocol(admin, RESOURCE_ID, { content })).resolves.toMatchObject({
+      status: 'PENDING_SIGNATURE',
+    });
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ generatedBy: 'PROFESSIONAL_EDIT' }),
+    );
+  });
+
   /**
    * 2026-08-24: a fila é 100% protocolo. O item separado `kind: 'PARQ'` (uma sessão sem
    * protocolo) sumiu; PAR-Q bloqueado agora é um protocolo `MANDATORY` cuja sessão de
@@ -1169,6 +1179,30 @@ describe('DashboardService leituras operacionais', () => {
     expect(result.optional[0]?.origin).toBeNull();
     expect(result.optional[0]?.severity).toBe('ROUTINE');
     expect(result.optional[0]?.autoReleaseAt).toBe('2026-08-03T12:00:00.000Z');
+  });
+
+  it('edição profissional mantém fila e auto-liberação OPTIONAL no prazo original', async () => {
+    const { service } = makeSequencedService([
+      [
+        {
+          id: RESOURCE_ID,
+          createdAt: new Date('2026-08-03T11:30:00.000Z'),
+          status: 'PENDING_SIGNATURE',
+          name: 'Bruno Teste',
+          reviewUrgency: 'OPTIONAL',
+          generatedBy: 'PROFESSIONAL_EDIT',
+          parqState: 'LIBERADO',
+        },
+      ],
+    ]);
+    const result = await service.queue(actor);
+    expect(result.counts).toMatchObject({ mandatory: 0, optional: 1, total: 1 });
+    expect(result.optional[0]).toMatchObject({
+      id: RESOURCE_ID,
+      severity: 'ROUTINE',
+      autoReleaseAt: '2026-08-04T11:30:00.000Z',
+      origin: null,
+    });
   });
 
   // Achado 2026-09-02, ampliado 2026-09-03 (a pedido do fundador): proposta de
@@ -1831,17 +1865,16 @@ describe('DashboardService — prescrição manual do profissional', () => {
     throw new Error('era esperada uma recusa');
   }
 
-  it('salva a prescrição com contraindicação inferida: conflito devolvido, origem do profissional, nome oficial', async () => {
+  it('salva a prescrição com contraindicação sem alerta ou bloqueio manual, mantendo catálogo e fila', async () => {
     const { service, updateSet } = makeSequencedService([[protocolRow()]], realValidation());
     const result = await service.editProtocol(actor, RESOURCE_ID, { content: prescription() });
     expect(result).toMatchObject({
-      validation: 'PROFESSIONAL_CONFLICTS',
-      conflicts: [{ key: PLANK_CONFLICT, rule: 'EXERCISE_CONTRAINDICATED' }],
+      validation: 'PASS',
+      conflicts: [],
     });
     expect(updateSet).toHaveBeenCalledWith(
       expect.objectContaining({
         generatedBy: 'PROFESSIONAL_EDIT',
-        reviewUrgency: 'MANDATORY',
         // "Abdominal na Prancha" digitado com o id oficial → grafia do catálogo.
         content: expect.objectContaining({
           sessions: [
@@ -1854,6 +1887,7 @@ describe('DashboardService — prescrição manual do profissional', () => {
         }),
       }),
     );
+    expect(updateSet.mock.calls[0]?.[0]).not.toHaveProperty('reviewUrgency');
   });
 
   it('recusa salvar referência inexistente no catálogo (manual-<uuid>) sem gravar nada', async () => {
@@ -1882,34 +1916,18 @@ describe('DashboardService — prescrição manual do profissional', () => {
     expect(updateSet).not.toHaveBeenCalled();
   });
 
-  it('assinatura da prescrição do profissional exige reconhecer o conflito', async () => {
-    const { service, updateWhere, enqueue } = makeSequencedService(
-      [[protocolRow({ generatedBy: 'PROFESSIONAL_EDIT' })], [professional]],
-      realValidation(),
-    );
-    const response = await rejection(
-      service.signProtocol(actor, RESOURCE_ID, { confirmation: true }),
-    );
-    expect(response.code).toBe('PROFESSIONAL_DECISION_REQUIRED');
-    expect(response.conflicts).toEqual([expect.objectContaining({ key: PLANK_CONFLICT })]);
-    expect(updateWhere).not.toHaveBeenCalled();
-    expect(enqueue).not.toHaveBeenCalled();
-  });
-
-  it('assina com o conflito reconhecido e registra a decisão na versão e na auditoria', async () => {
-    const { service, insertValues, append, enqueue } = makeSequencedService(
+  it('assina a contraindicação profissional sem alerta e mantém o registro de auditoria', async () => {
+    const { service, updateWhere, enqueue, insertValues, append } = makeSequencedService(
       [[protocolRow({ generatedBy: 'PROFESSIONAL_EDIT' })], [professional]],
       realValidation(),
     );
     await expect(
-      service.signProtocol(actor, RESOURCE_ID, {
-        confirmation: true,
-        acknowledgedConflicts: [PLANK_CONFLICT],
-      }),
+      service.signProtocol(actor, RESOURCE_ID, { confirmation: true }),
     ).resolves.toMatchObject({ version: 2, alreadySigned: false });
+    expect(updateWhere).toHaveBeenCalled();
+    expect(enqueue).toHaveBeenCalledOnce();
     expect(insertValues).toHaveBeenCalledWith(
       expect.objectContaining({
-        generatedBy: 'PROFESSIONAL_EDIT',
         diff: {
           type: 'PROFESSIONAL_OVERRIDE',
           conflicts: [
@@ -1925,7 +1943,21 @@ describe('DashboardService — prescrição manual do profissional', () => {
         changes: expect.objectContaining({ overriddenRules: ['EXERCISE_CONTRAINDICATED'] }),
       }),
     );
-    expect(enqueue).toHaveBeenCalledOnce();
+  });
+
+  it('outros conflitos automáticos ainda exigem reconhecimento profissional', async () => {
+    const validation = mockValidation('FLAG_HUMAN_REVIEW');
+    const { service, updateWhere, enqueue } = makeSequencedService(
+      [[protocolRow({ generatedBy: 'PROFESSIONAL_EDIT' })], [professional]],
+      validation,
+    );
+    const response = await rejection(
+      service.signProtocol(actor, RESOURCE_ID, { confirmation: true }),
+    );
+    expect(response.code).toBe('PROFESSIONAL_DECISION_REQUIRED');
+    expect(response.conflicts).toEqual([expect.objectContaining({ rule: 'ISOLATION_AS_BASE' })]);
+    expect(updateWhere).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
   it('conteúdo da IA ainda não revisado continua sob as regras automáticas — o cliente não declara a origem', async () => {
@@ -1943,7 +1975,7 @@ describe('DashboardService — prescrição manual do profissional', () => {
     expect(updateWhere).not.toHaveBeenCalled();
   });
 
-  it('emenda do protocolo ativo pelo detalhe do aluno: exige decisão e grava a origem MANUAL_AMENDMENT', async () => {
+  it('emenda o protocolo ativo com contraindicação e registra a origem MANUAL_AMENDMENT', async () => {
     const active = protocolRow({
       status: 'ACTIVE',
       approvalStatus: 'HUMAN_APPROVED',
@@ -1959,17 +1991,9 @@ describe('DashboardService — prescrição manual do profissional', () => {
       reason: 'Core com prancha, avaliado com a aluna',
       confirmation: true,
     };
-    const first = makeSequencedService([[active], [professional]], realValidation());
-    const response = await rejection(first.service.amendActiveProtocol(actor, RESOURCE_ID, body));
-    expect(response.code).toBe('PROFESSIONAL_DECISION_REQUIRED');
-    expect(first.updateSet).not.toHaveBeenCalled();
-
     const second = makeSequencedService([[active], [professional], []], realValidation());
     await expect(
-      second.service.amendActiveProtocol(actor, RESOURCE_ID, {
-        ...body,
-        acknowledgedConflicts: [PLANK_CONFLICT],
-      }),
+      second.service.amendActiveProtocol(actor, RESOURCE_ID, body),
     ).resolves.toMatchObject({ version: 3, alreadySigned: false });
     expect(second.updateSet).toHaveBeenCalledWith(
       expect.objectContaining({ version: 3, generatedBy: 'MANUAL_AMENDMENT' }),
@@ -2037,19 +2061,21 @@ describe('DashboardService — prescrição manual do profissional', () => {
     expect(items.some((item) => item.name.startsWith('Abdominal'))).toBe(true);
   });
 
-  it('detalhe do protocolo traz a origem, os conflitos a reconhecer e a disponibilidade do aluno', async () => {
+  it('detalhe do protocolo não alerta contraindicação e mostra o prazo opcional original', async () => {
     const { service } = makeSequencedService(
       [[protocolRow({ generatedBy: 'PROFESSIONAL_EDIT' })], [{ name: 'Renata' }]],
       realValidation(),
     );
     const detail = (await service.detail(actor, 'PROTOCOL', RESOURCE_ID)) as {
+      item: { autoReleaseAt: string | null };
       protocol: { review: Record<string, unknown> };
     };
+    expect(detail.item.autoReleaseAt).toBe('2026-08-02T12:00:00.000Z');
     expect(detail.protocol.review).toEqual({
       origin: 'PROFESSIONAL',
       availability: { daysPerWeek: 1, preferredDays: ['MON'] },
       blocking: [],
-      conflicts: [expect.objectContaining({ key: PLANK_CONFLICT })],
+      conflicts: [],
     });
   });
 });

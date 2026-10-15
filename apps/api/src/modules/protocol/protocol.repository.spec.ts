@@ -320,6 +320,7 @@ function repositoryForAutoRelease(
     version: number;
     approvalStatus: string;
     reviewUrgency: string | null;
+    generatedBy?: string | null;
     mesocycleName?: string;
     startDate?: Date;
     endDate?: Date;
@@ -333,7 +334,10 @@ function repositoryForAutoRelease(
   const tx = {
     select: () => ({
       from: () => ({
-        where: () => ({ for: () => ({ limit: async () => (row ? [row] : []) }) }),
+        where: () => ({
+          for: () => ({ limit: async () => (row ? [row] : []) }),
+          limit: async () => (row ? [row] : []),
+        }),
       }),
     }),
     update: () => ({ set: updateSet }),
@@ -366,6 +370,7 @@ describe('ProtocolRepository.autoRelease (fila do profissional — "Disponível 
       endDate,
       totalWeeks: 12,
     });
+    await expect(repository.isAwaitingAutoRelease('u1', 'p1')).resolves.toBe(true);
     await expect(repository.autoRelease('u1', 'p1')).resolves.toEqual({
       released: true,
       version: 1,
@@ -398,6 +403,30 @@ describe('ProtocolRepository.autoRelease (fila do profissional — "Disponível 
     await expect(repository.autoRelease('u1', 'p1')).resolves.toMatchObject({ released: false });
     expect(updateSet).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('auto-libera a versão manual persistida mantendo a fila OPTIONAL e o prazo já agendado', async () => {
+    const editedContent: ProtocolStructure = {
+      ...content,
+      generalNotes: 'Ajustado manualmente pelo CREF',
+    };
+    const { repository, updateSet, execute } = repositoryForAutoRelease({
+      content: editedContent,
+      version: 2,
+      approvalStatus: 'PENDING_REVIEW',
+      reviewUrgency: 'OPTIONAL',
+      generatedBy: 'PROFESSIONAL_EDIT',
+    });
+    await expect(repository.isAwaitingAutoRelease('u1', 'p1')).resolves.toBe(true);
+    await expect(repository.autoRelease('u1', 'p1')).resolves.toMatchObject({
+      released: true,
+      version: 2,
+      content: editedContent,
+    });
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'ACTIVE', approvalStatus: 'AUTO_APPROVED' }),
+    );
+    expect(execute).toHaveBeenCalledOnce();
   });
 
   it('não libera se o CREF já assinou (approvalStatus mudou) — idempotente', async () => {

@@ -8,12 +8,10 @@
  * qualquer protocolo que caiu no template de fallback (`BLOCK_FALLBACK` persistente ou
  * DLQ), que nunca passou limpo pela geração/validação e por isso nunca agenda este job.
  *
- * Idempotente por construção: `ProtocolRepository.autoRelease` só libera se o estado
- * ainda bater (`PENDING_REVIEW` + `OPTIONAL`) na hora em que o job dispara. Se o CREF já
- * assinou (`signProtocol`) ou editou (`editProtocol` força `MANDATORY` — um humano tocou o
- * conteúdo, então precisa de sign-off fresco, independente de PAR-Q) antes das 24h, o job
- * dispara do mesmo jeito e vira no-op — não existe "cancelar" o delay do BullMQ, o próprio
- * estado decide.
+ * Idempotente por construção: `ProtocolRepository.autoRelease` só libera se o estado ainda
+ * bater (`PENDING_REVIEW` + `OPTIONAL`). Uma edição manual mantém o prazo já agendado e o
+ * worker entrega o conteúdo persistido mais recente. Se o CREF assinar antes, o novo estado
+ * torna o job um no-op. Não existe "cancelar" o delay do BullMQ.
  */
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { type Job } from 'bullmq';

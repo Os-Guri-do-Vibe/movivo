@@ -73,12 +73,13 @@ describe('ExerciseCatalogPicker', () => {
       'abdominal prancha',
       expect.objectContaining({ protocolId: PROTOCOL_ID }),
     );
-    // Detalhes que diferenciam opções parecidas e o alerta do catálogo para este aluno.
+    // Detalhes que diferenciam opções parecidas; contraindicação automática não é exibida
+    // como bloqueio ou alerta no editor manual do profissional.
     expect(screen.getByRole('option', { name: /Abdominal \(Máquina\)/ })).toHaveTextContent(
       'Core · core · máquina',
     );
-    expect(screen.getByRole('option', { name: /Prancha/ })).toHaveTextContent(
-      'Catálogo contraindica para este aluno: Lombar',
+    expect(screen.getByRole('option', { name: /Prancha/ })).not.toHaveTextContent(
+      'Catálogo contraindica para este aluno',
     );
   });
 

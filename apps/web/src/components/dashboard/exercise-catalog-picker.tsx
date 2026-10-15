@@ -13,8 +13,7 @@
  * A busca é por termo no servidor (`searchCatalog`): "abdominal prancha" encontra "Prancha" e
  * os abdominais. Debounce + cancelamento da requisição anterior evitam rajadas.
  */
-import { PAIN_REGION_LABELS } from '@movivo/shared';
-import { AlertTriangle, Loader2, Search } from 'lucide-react';
+import { Loader2, Search } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 
 import { DashboardApiError, searchExerciseCatalog } from '@/lib/dashboard-api';
@@ -35,14 +34,6 @@ const PATTERN_LABELS: Record<string, string> = {
   CORE: 'Core',
   CARDIO: 'Cardio',
   ISOLATION: 'Isolado',
-};
-
-const TAG_LABELS: Record<string, string> = {
-  ...PAIN_REGION_LABELS,
-  ANKLE: 'Tornozelo',
-  CARDIAC: 'Alerta cardíaco',
-  BALANCE_FALL_RISK: 'Risco de queda',
-  PREGNANCY: 'Gestação',
 };
 
 /** Id que nunca foi escolhido no catálogo: item novo do editor ou legado digitado à mão. */
@@ -255,15 +246,6 @@ export function ExerciseCatalogPicker({
               >
                 <span className="text-label font-semibold">{option.name}</span>
                 <span className="text-xs text-muted-foreground">{optionDetails(option)}</span>
-                {option.contraindicatedForStudent.length > 0 ? (
-                  <span className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-coral">
-                    <AlertTriangle aria-hidden="true" className="size-3.5" />
-                    Catálogo contraindica para este aluno:{' '}
-                    {option.contraindicatedForStudent
-                      .map((tag) => TAG_LABELS[tag] ?? tag)
-                      .join(', ')}
-                  </span>
-                ) : null}
               </div>
             ))
           )}
