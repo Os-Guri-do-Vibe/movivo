@@ -90,6 +90,8 @@ interface Deps {
   openFollowup?: { subjectDate: string; topicLabel: string; deliveredAt: Date } | null;
   /** `listForContext` falha (banco indisponível). */
   followupsFail?: boolean;
+  /** A última mensagem enviada ao aluno terminou com uma pergunta. */
+  lastCoachAsked?: boolean;
 }
 
 function makeWorker(deps: Deps = {}) {
@@ -166,6 +168,7 @@ function makeWorker(deps: Deps = {}) {
       }),
     ),
     recordTurn: vi.fn(() => Promise.resolve()),
+    lastCoachMessageAsksQuestion: vi.fn(() => Promise.resolve(deps.lastCoachAsked ?? false)),
     summarizeIfNeeded: vi.fn(() => Promise.resolve()),
   } as unknown as ContextService;
 
@@ -359,6 +362,64 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     expect(batchDel).toHaveBeenCalledWith('bk');
     expect(persistTurn).not.toHaveBeenCalled();
     expect(complete).not.toHaveBeenCalled();
+  });
+
+  describe('confirmações do aluno ("ok", "👌", "🫡🫡")', () => {
+    const batch = (...texts: string[]) => texts.map((text) => JSON.stringify({ text }));
+
+    it('sozinha e sem pergunta em aberto: fica no histórico e o Coach não responde', async () => {
+      const { worker, persistTurn, complete, enqueue, classify } = makeWorker({
+        batchItems: batch('Ok 👌'),
+      });
+      await expect(worker.process(job())).resolves.toEqual({ status: 'ACK_SILENT' });
+      expect(persistTurn).toHaveBeenCalledWith(
+        expect.objectContaining({ direction: 'INBOUND', content: 'Ok 👌' }),
+      );
+      expect(classify).not.toHaveBeenCalled();
+      expect(complete).not.toHaveBeenCalled();
+      expect(enqueue.mock.calls.some((c) => c[1] === 'coach-typing')).toBe(false);
+      expect(sentText(enqueue)).toBeUndefined();
+    });
+
+    it('a última mensagem do Coach fez uma pergunta: o "ok" pode ser a resposta e segue normal', async () => {
+      const { worker, complete } = makeWorker({ batchItems: batch('ok'), lastCoachAsked: true });
+      await expect(worker.process(job())).resolves.toEqual({ status: 'SENT' });
+      expect(complete).toHaveBeenCalledTimes(1);
+    });
+
+    it('pergunta pendente de treino sem registro: segue normal', async () => {
+      const { worker } = makeWorker({
+        batchItems: batch('👍'),
+        openFollowup: { subjectDate: '2026-10-13', topicLabel: 'costas', deliveredAt: new Date() },
+      });
+      await expect(worker.process(job())).resolves.not.toEqual({ status: 'ACK_SILENT' });
+    });
+
+    it('fluxo de troca de exercício aberto: segue normal', async () => {
+      const { worker } = makeWorker({ batchItems: batch('ok'), flowOpen: true });
+      await expect(worker.process(job())).resolves.not.toEqual({ status: 'ACK_SILENT' });
+    });
+
+    it('falha ao checar pendências: na dúvida, responde', async () => {
+      const { worker } = makeWorker({ batchItems: batch('ok'), followupsFail: true });
+      await expect(worker.process(job())).resolves.not.toEqual({ status: 'ACK_SILENT' });
+    });
+
+    it('caso Gabriel: o emoji depois do pedido não vai para a IA nem ganha um fecho', async () => {
+      const { worker, context } = makeWorker({
+        batchItems: batch('Fala Léo , libera o treino pra nois amanh', '🫡🫡'),
+      });
+      await expect(worker.process(job())).resolves.toEqual({ status: 'SENT' });
+      const build = context.build as unknown as { mock: { calls: unknown[][] } };
+      expect(build.mock.calls[0]?.[2]).toBe('Fala Léo , libera o treino pra nois amanh');
+    });
+
+    it('mensagem com conteúdo e confirmação no mesmo texto não é alterada', async () => {
+      const { worker, context } = makeWorker({ batchItems: batch('Bom dia! Amei', 'ok') });
+      await worker.process(job());
+      const build = context.build as unknown as { mock: { calls: unknown[][] } };
+      expect(build.mock.calls[0]?.[2]).toBe('Bom dia! Amei');
+    });
   });
 
   it('motivação: intent→contexto→LLM→validação PASS→envia + "digitando…"', async () => {

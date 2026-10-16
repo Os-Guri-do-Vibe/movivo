@@ -35,8 +35,33 @@ export interface WorkoutFeedbackJob {
   workoutSessionId: string;
 }
 
+/**
+ * Tempo entre o "Finalizar" e a primeira bolha do comentário aparecer para o aluno. Decisão do
+ * fundador (2026-10-16): 5 minutos NO TOTAL, para o comentário chegar como quem de fato
+ * analisou o treino. O texto é gerado logo (o dado já está completo no Finalizar) e o envio é
+ * agendado para fechar a conta: geração e "digitando…" saem do mesmo orçamento, não somam.
+ */
+const FEEDBACK_TOTAL_DELAY_MS = 5 * 60_000;
+/**
+ * O transporte mostra "digitando…" por 15–20 s ANTES de cada bolha sair (anti-ban, ver
+ * `HUMAN_DELAY_*` em `evolution-transport.ts`); o valor médio é descontado do agendamento
+ * para a 1ª bolha chegar perto dos 5 minutos. A 2ª vem ~15–20 s depois, como numa conversa.
+ */
+const OUTBOUND_TYPING_ALLOWANCE_MS = 17_500;
+
 /** Sessões anteriores usadas só como contexto curto — não é a periodização do mesociclo. */
 const HISTORY_WINDOW = 2;
+
+/**
+ * Quanto falta esperar para a 1ª bolha chegar `FEEDBACK_TOTAL_DELAY_MS` depois de o job nascer
+ * (= o Finalizar). Usa o relógio do job, não o da tentativa: um retry não reinicia a contagem.
+ * Geração lenta, ou job sem relógio, manda sem espera extra.
+ */
+export function remainingSendDelayMs(createdAtMs: number | undefined, nowMs: number): number {
+  if (!createdAtMs) return 0;
+  const elapsed = Math.max(0, nowMs - createdAtMs);
+  return Math.max(0, FEEDBACK_TOTAL_DELAY_MS - OUTBOUND_TYPING_ALLOWANCE_MS - elapsed);
+}
 
 @Injectable()
 export class WorkoutFeedbackWorker implements OnModuleInit {
@@ -85,6 +110,7 @@ export class WorkoutFeedbackWorker implements OnModuleInit {
     };
     await this.queues.enqueue(QUEUE.whatsappOutbound, 'workout-feedback', outbound, {
       jobId: `wa-workout-feedback-${workoutSessionId}`,
+      delay: remainingSendDelayMs(job.timestamp, Date.now()),
     });
     return { status: 'SENT' };
   }

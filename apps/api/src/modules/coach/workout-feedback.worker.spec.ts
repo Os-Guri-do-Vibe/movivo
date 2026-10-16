@@ -9,7 +9,11 @@ import type {
 } from '../../core/database/tenant-database.service';
 import type { QueueManager } from '../jobs/queue-manager.service';
 import type { WorkerFactory } from '../jobs/worker.factory';
-import { WorkoutFeedbackWorker, type WorkoutFeedbackJob } from './workout-feedback.worker';
+import {
+  remainingSendDelayMs,
+  WorkoutFeedbackWorker,
+  type WorkoutFeedbackJob,
+} from './workout-feedback.worker';
 import type { WorkoutFeedbackService } from './workout-feedback.service';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
@@ -126,9 +130,10 @@ function makeWorker(opts: {
   return { worker, enqueue, commentFn, recentMissStreak, warn };
 }
 
-function job(): Job<WorkoutFeedbackJob> {
+function job(timestamp?: number): Job<WorkoutFeedbackJob> {
   return {
     data: { userId: USER_ID, workoutSessionId: SESSION_ID },
+    timestamp,
   } as unknown as Job<WorkoutFeedbackJob>;
 }
 
@@ -184,8 +189,27 @@ describe('WorkoutFeedbackWorker', () => {
         dedupeId: `workout-feedback-${SESSION_ID}`,
         text: 'Acabei de analisar os resultados do seu treino de hoje!\n---\nComentário gerado.',
       }),
-      { jobId: `wa-workout-feedback-${SESSION_ID}` },
+      { jobId: `wa-workout-feedback-${SESSION_ID}`, delay: 0 },
     );
+  });
+
+  it('agenda o envio para fechar 5 minutos desde o Finalizar, descontando a geração', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-10-16T12:00:00Z'));
+      const finishedAt = Date.now();
+      const { worker, enqueue } = makeWorker({});
+      vi.setSystemTime(finishedAt + 4_000);
+      await worker.process(job(finishedAt));
+      expect(enqueue).toHaveBeenCalledWith(
+        'whatsapp-outbound',
+        'workout-feedback',
+        expect.anything(),
+        expect.objectContaining({ delay: 300_000 - 17_500 - 4_000 }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('serviço sem comentário (LLM falhou/reprovado): não envia nada', async () => {
@@ -247,5 +271,24 @@ describe('WorkoutFeedbackWorker', () => {
         expect.any(String),
       );
     });
+  });
+});
+
+describe('remainingSendDelayMs', () => {
+  const T0 = 1_000_000;
+
+  it('desconta o tempo já gasto e o "digitando…" do transporte dos 5 minutos', () => {
+    expect(remainingSendDelayMs(T0, T0)).toBe(282_500);
+    expect(remainingSendDelayMs(T0, T0 + 10_000)).toBe(272_500);
+  });
+
+  it('geração lenta ou retry tardio: manda sem espera extra, nunca negativa', () => {
+    expect(remainingSendDelayMs(T0, T0 + 290_000)).toBe(0);
+    expect(remainingSendDelayMs(T0, T0 + 900_000)).toBe(0);
+  });
+
+  it('job sem relógio ou relógio no futuro: não inventa espera além do teto', () => {
+    expect(remainingSendDelayMs(undefined, T0)).toBe(0);
+    expect(remainingSendDelayMs(T0 + 5_000, T0)).toBe(282_500);
   });
 });

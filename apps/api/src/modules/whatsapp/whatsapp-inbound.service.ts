@@ -63,10 +63,12 @@ import {
 /**
  * Janela de debounce. Concatena a rajada do usuário num só job — ex.: "oi" / "tudo bem?" /
  * "bom dia" mandados em bolhas separadas viram um único turno do AI Coach. Rafael §6
- * recomendava 3-5s; aumentado para 7s por decisão do fundador (achado 2026-09-12) para dar
- * mais folga a rajadas mais longas antes da IA responder.
+ * recomendava 3-5s; aumentado para 7s por decisão do fundador (achado 2026-09-12) e para 15s
+ * em 2026-10-16, depois de conversas reais em que o aluno escrevia em pedaços (uma reação, e
+ * só então a explicação) e o Coach respondia ao primeiro pedaço antes de ele terminar. A
+ * janela é fixa, contada da primeira mensagem: não reinicia a cada mensagem nova.
  */
-const DEBOUNCE_MS = 7_000;
+const DEBOUNCE_MS = 15_000;
 /** TTL do buffer de batch: cobre a janela de debounce + o processamento de US-3.5. */
 const BATCH_TTL_SECONDS = 120;
 /**
