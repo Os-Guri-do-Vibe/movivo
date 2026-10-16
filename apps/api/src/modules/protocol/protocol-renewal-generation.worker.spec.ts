@@ -253,7 +253,7 @@ describe('renovação com qualidade contextual pendente', () => {
   it.each(['GAPS', 'UNAVAILABLE'] as const)(
     '%s impede auto-liberação e mantém a origem individualizada',
     async (status) => {
-      const { worker, generator, repository, enqueue } = makeWorker();
+      const { worker, generator, repository, enqueue } = makeWorker({ changedToYes: true });
       vi.mocked(generator.assessQuality).mockResolvedValue(qualityAssessment(status));
       await worker.process(job());
       expect(repository.persist).toHaveBeenCalledWith(
@@ -273,6 +273,25 @@ describe('renovação com qualidade contextual pendente', () => {
       );
     },
   );
+
+  it('sem mudança bloqueante no PAR-Q não avalia qualidade e agenda auto-liberação', async () => {
+    const { worker, generator, repository, enqueue } = makeWorker();
+    vi.mocked(generator.assessQuality).mockResolvedValue(qualityAssessment('UNAVAILABLE'));
+    await worker.process(job());
+    expect(generator.assessQuality).not.toHaveBeenCalled();
+    expect(repository.persist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reviewUrgency: 'OPTIONAL',
+        constraints: expect.objectContaining({ contextualQuality: undefined }),
+      }),
+    );
+    expect(enqueue).toHaveBeenCalledWith(
+      'protocol-auto-release',
+      'auto-release',
+      expect.anything(),
+      expect.anything(),
+    );
+  });
 });
 
 afterEach(() => vi.restoreAllMocks());

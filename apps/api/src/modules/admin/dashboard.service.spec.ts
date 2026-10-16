@@ -1356,25 +1356,32 @@ describe('DashboardService leituras operacionais', () => {
   // Achado 2026-09-03 (a pedido do fundador): protocolo que caiu no template de fallback
   // é MANDATORY mesmo com PAR-Q liberado, e a fila precisa distinguir isso de EDIT — ver
   // `ProtocolGenerationWorker`/`protocol-planner.ts`.
-  it('protocolo gerado pelo template de fallback entra como MANDATORY/FALLBACK, mesmo com PAR-Q liberado', async () => {
-    const { service } = makeSequencedService([
-      [
-        {
-          id: RESOURCE_ID,
-          createdAt: new Date('2026-09-03T12:00:00.000Z'),
-          status: 'PENDING_SIGNATURE',
-          name: 'Fallback Teste',
-          reviewUrgency: 'MANDATORY',
-          generatedBy: 'FALLBACK_TEMPLATE',
-          parqState: 'LIBERADO',
-        },
-      ],
-    ]);
-    const result = await service.queue(actor);
-    expect(result.counts).toMatchObject({ mandatory: 1 });
-    expect(result.mandatory[0]).toMatchObject({ origin: 'FALLBACK', severity: 'ALERT' });
-    expect(result.mandatory[0]?.autoReleaseAt).toBeNull();
-  });
+  it.each(['LIBERADO', 'BLOQUEADO_AGUARDANDO_CLEARANCE'])(
+    'fallback preserva identificação independente da origem PAR-Q %s',
+    async (parqState) => {
+      const { service } = makeSequencedService([
+        [
+          {
+            id: RESOURCE_ID,
+            createdAt: new Date('2026-09-03T12:00:00.000Z'),
+            status: 'PENDING_SIGNATURE',
+            name: 'Fallback Teste',
+            reviewUrgency: 'MANDATORY',
+            generatedBy: 'FALLBACK_TEMPLATE',
+            parqState,
+          },
+        ],
+      ]);
+      const result = await service.queue(actor);
+      expect(result.counts).toMatchObject({ mandatory: 1 });
+      expect(result.mandatory[0]).toMatchObject({
+        origin: parqState === 'LIBERADO' ? 'FALLBACK' : 'PARQ',
+        severity: parqState === 'LIBERADO' ? 'ALERT' : 'SAFETY',
+        isFallback: true,
+      });
+      expect(result.mandatory[0]?.autoReleaseAt).toBeNull();
+    },
+  );
 
   it.each(['GAPS', 'UNAVAILABLE'] as const)(
     'fila distingue qualidade %s de fallback e edição profissional',
@@ -2123,6 +2130,7 @@ describe('DashboardService — prescrição manual do profissional', () => {
         ],
         realValidation(),
       );
+
       const detail = await service.detail(actor, 'PROTOCOL', RESOURCE_ID);
       expect(detail).toMatchObject({
         protocol: {
@@ -2133,6 +2141,19 @@ describe('DashboardService — prescrição manual do profissional', () => {
         },
       });
       if (origin === 'PROFESSIONAL') expect(JSON.stringify(detail)).not.toContain('qualityNotices');
+    },
+  );
+
+  it.each(['FALLBACK_TEMPLATE', 'DEEPSEEK_V4_PRO', 'PROFESSIONAL_EDIT'])(
+    'detalhe identifica fallback pelo conteúdo atual, origem %s',
+    async (generatedBy) => {
+      const { service } = makeSequencedService(
+        [[protocolRow({ generatedBy })], [{ name: 'Aluno sintético' }]],
+        realValidation(),
+      );
+      expect(await service.detail(actor, 'PROTOCOL', RESOURCE_ID)).toMatchObject({
+        protocol: { isFallback: generatedBy === 'FALLBACK_TEMPLATE' },
+      });
     },
   );
 });

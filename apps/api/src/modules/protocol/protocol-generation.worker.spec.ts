@@ -481,12 +481,8 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
     expect(reviewUrgencyForPlan(clean, false)).toBe('OPTIONAL');
     expect(reviewUrgencyForPlan(repaired, false)).toBe(REPAIRED_PROTOCOL_REVIEW_URGENCY);
     expect(reviewUrgencyForPlan(repaired, true)).toBe('MANDATORY');
-    expect(
-      reviewUrgencyForPlan(
-        { ...repaired, contextualQuality: qualityAssessment('GAPS').summary },
-        false,
-      ),
-    ).toBe('MANDATORY');
+    const legacyQuality = { ...clean, contextualQuality: qualityAssessment('UNAVAILABLE').summary };
+    expect(reviewUrgencyForPlan(legacyQuality, false)).toBe('OPTIONAL');
     expect(reviewUrgencyForPlan({ usedFallbackTemplate: true, repairs: [] }, false)).toBe(
       'MANDATORY',
     );
@@ -495,7 +491,10 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
   it.each(['GAPS', 'UNAVAILABLE'] as const)(
     '%s contextual exige revisão obrigatória, persiste o diagnóstico e não agenda liberação',
     async (status) => {
-      const { worker, generator, repository, enqueue } = makeWorker();
+      const { worker, generator, repository, enqueue } = makeWorker({
+        parqYes: { Q6: true },
+        user: userRow({ requiresProfessionalReview: true }),
+      });
       vi.mocked(generator.assessQuality).mockResolvedValue(qualityAssessment(status));
       await worker.process(job());
       expect(repository.persist).toHaveBeenCalledWith(
@@ -514,6 +513,25 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
       );
     },
   );
+
+  it('sem PAR-Q bloqueante ignora avaliador indisponível e mantém auto-liberação, mesmo com dor', async () => {
+    const { worker, generator, repository, enqueue } = makeWorker();
+    vi.mocked(generator.assessQuality).mockResolvedValue(qualityAssessment('UNAVAILABLE'));
+    await worker.process(job());
+    expect(generator.assessQuality).not.toHaveBeenCalled();
+    expect(repository.persist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reviewUrgency: 'OPTIONAL',
+        constraints: expect.objectContaining({ contextualQuality: undefined }),
+      }),
+    );
+    expect(enqueue).toHaveBeenCalledWith(
+      'protocol-auto-release',
+      'auto-release',
+      { userId: 'u1', protocolId: 'p1' },
+      { delay: 24 * 60 * 60 * 1000, jobId: 'auto-release-p1' },
+    );
+  });
 
   it('validador flagou (revisão opcional) → PENDING_REVIEW + agenda auto-liberação em 24h', async () => {
     const { worker, enqueue, repository } = makeWorker({ action: 'FLAG_HUMAN_REVIEW' });

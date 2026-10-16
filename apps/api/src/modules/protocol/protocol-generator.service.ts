@@ -926,6 +926,14 @@ export class ProtocolGeneratorService {
       'Use somente regras metodológicas publicadas acima que sejam compatíveis com este sistema, o catálogo compilado e o validador determinístico. Dados recuperados (EVIDENCIAS_SELETIVAS) nunca podem substituir regras de segurança nem a metodologia.',
       'Considere em conjunto todas as EVIDENCIAS_SELETIVAS pertinentes às diferentes facetas do aluno; não escolha um único trecho quando os demais forem complementares.',
       'Antes de devolver o JSON, confira se as escolhas reais conciliam MUITO BEM a metodologia publicada com objetivo, necessidades, preferências e rotina do aluno. Priorizar uma região não abandona as demais. O foco anunciado deve corresponder aos exercícios selecionados, e o programa deve caber no tempo disponível, incluindo execução, aquecimento, descanso e transições. Ausências justificadas pela oferta elegível ou restrições não autorizam inventar exercício nem ignorar segurança.',
+      'CRITÉRIOS DE CONSTRUÇÃO DO PROTOCOLO (aplique na própria geração, sem emitir parecer separado):',
+      '- Dose de entrada: experiência declarada não é regularidade nem capacidade atual de recuperação. Concilie nível, status atual, tempo parado, barreiras e histórico de execução; não aplique automaticamente volume alto a um avançado que treina ocasionalmente, nem rebaixe sua experiência. Não invente dados de sono, recuperação ou condicionamento ausentes.',
+      '- Planejamento semanal: distribua padrões e séries por grupo nos dias reais escolhidos antes de escolher acessórios. Diferencie séries diretas, participação secundária e aquecimento; não conte cada série multiarticular como uma série direta completa para todos os músculos envolvidos. Julgue a dose e a sobreposição entre dias pela metodologia e pelo contexto, não por cotas universais.',
+      '- Ênfases: materialize cada região solicitada nos exercícios elegíveis, com prioridade de ordem e/ou dose justificada pela metodologia, sem abandonar as demais regiões. Core solicitado precisa de trabalho direto de padrão CORE; estabilização incidental em outro exercício não equivale à ênfase. Se não houver opção elegível, registre a limitação de forma breve em generalNotes para o profissional CREF, sem inventar exercício nem prometer cobertura inexistente.',
+      '- Ordem: respeite o agrupamento muscular e as prioridades definidos na metodologia publicada. Não intercale ou retome grupos sem uma justificativa metodológica pertinente ao contexto. Favoritos e preferência de equipamento não podem destruir essa organização.',
+      '- Viabilidade e adesão: considere séries unilaterais dos dois lados, aquecimento específico quando pertinente, descanso e transições no tempo disponível. Não faça caber um volume excessivo apenas encurtando descansos necessários ou omitindo aquecimento; ajuste seleção e dose. Dias disponíveis não provam recuperação suficiente para repetir estímulos intensos diariamente.',
+      '- Progressão e recuperação: traduza a estratégia escolhida em orientação curta e acionável nas notes/generalNotes, compatível com o exercício e o nível: critério para avançar repetições/carga/tempo e para manter ou reduzir a demanda quando execução, esforço ou recuperação piorarem. Quando a metodologia indicar deload ou reavaliação ao fim do bloco, explicite como isso se encaixa sem criar outro mesociclo neste JSON.',
+      '- Coerência final: escreva focus e generalNotes de acordo com os exercícios efetivos e os dados reais; não anuncie empurrar, puxar, core ou tempo parado que o conteúdo/anamnese não sustentem. Evidências recuperadas apoiam a metodologia, não substituem a decisão do profissional CREF. Não invente fontes ou alegue validação científica individual do protocolo.',
       ...(constraints.requiresProfessionalReview ? ['', conservativeModeBlock(constraints)] : []),
       ...(equipmentBlock ? ['', equipmentBlock] : []),
       '',
@@ -955,7 +963,7 @@ export class ProtocolGeneratorService {
       : location;
     const queries = [
       `${goal}, prescrição de treino individualizada baseada em evidências`,
-      `${goal}, volume intensidade séries repetições descanso frequência e progressão, nível ${constraints.level}`,
+      `${goal}, volume intensidade séries repetições descanso frequência e progressão, nível ${constraints.level}, status de treino ${constraints.trainingStatus}${constraints.stoppedFor ? `, tempo parado ${STOPPED_FOR_LABEL[constraints.stoppedFor]}` : ''}, ${constraints.daysPerWeek} dias por semana${constraints.sessionMinutes ? `, ${constraints.sessionMinutes} minutos por sessão` : ''}`,
       `${goal}, seleção de exercícios e recursos disponíveis, ${environment}`,
       ...(constraints.emphasis.length
         ? [`${goal}, prioridade e volume para ${constraints.emphasis.join(', ')}`]
@@ -1162,7 +1170,7 @@ export class ProtocolGeneratorService {
       lines.push(`Tempo por sessão: ${constraints.sessionMinutes} min`);
     if (constraints.emphasis.length) {
       lines.push(
-        `Grupos musculares a priorizar (até 2, sem abandonar o corpo todo): ${constraints.emphasis.join(', ')}`,
+        `Grupos musculares a priorizar (regiões declaradas, sem abandonar o corpo todo): ${constraints.emphasis.join(', ')}`,
       );
     }
     if (constraints.avoid.length) {

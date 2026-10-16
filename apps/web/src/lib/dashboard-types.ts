@@ -35,6 +35,7 @@ export interface QueueItem {
    * catálogo na tela de detalhe (`substitution.catalogGap`). `null` nos demais itens `optional`.
    */
   origin: 'PARQ' | 'FALLBACK' | 'EDIT' | 'QUALITY' | 'AI_SUBSTITUTION' | 'CATALOG_GAP' | null;
+  isFallback?: boolean;
   /** O profissional logado já abriu este item. Ler não tira o item da fila. */
   read: boolean;
 }
@@ -97,6 +98,7 @@ export interface AnonymizedReplay {
 }
 
 export interface ProtocolDetail {
+  isFallback?: boolean;
   id: string;
   version: number;
   status: string;

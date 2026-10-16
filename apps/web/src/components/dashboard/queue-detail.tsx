@@ -1923,7 +1923,14 @@ function ProtocolStudentHeader({
 
   return (
     <header className="mt-5 rounded-xl border border-border bg-card p-4 sm:p-6">
-      <h1 className="text-h1 font-bold">Protocolo para Revisão</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-h1 font-bold">Protocolo para Revisão</h1>
+        {protocol.isFallback ? (
+          <span className="rounded-full bg-destructive px-2 py-0.5 text-xs font-medium text-destructive-foreground">
+            Protocolo Fallback
+          </span>
+        ) : null}
+      </div>
       {!answers && !error ? (
         <div
           role="status"

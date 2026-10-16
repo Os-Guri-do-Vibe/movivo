@@ -291,7 +291,7 @@ describe('avaliação contextual com a metodologia publicada', () => {
     expect(calls[1]?.system).not.toContain(METHODOLOGY_GUIDELINES);
   });
 
-  it('fluxo real: PASS de segurança sem core é corrigido mesmo se o avaliador disser MET', async () => {
+  it('fluxo PAR-Q: PASS de segurança sem core é corrigido mesmo se o avaliador disser MET', async () => {
     const initial = protocolStructureSchema.parse(
       JSON.parse(
         threeSessionsJson(['MON', 'WED', 'FRI']).replaceAll(
@@ -325,7 +325,13 @@ describe('avaliação contextual com a metodologia publicada', () => {
     ]);
     const input = {
       ...command,
-      constraints: { ...constraints, injuryTags: [], injuriesRaw: [], emphasis: ['core'] },
+      constraints: {
+        ...constraints,
+        requiresProfessionalReview: true,
+        injuryTags: [],
+        injuriesRaw: [],
+        emphasis: ['core'],
+      },
     };
     const validation = new ValidationService();
     expect(validation.validate({ structure: initial, constraints: input.constraints }).code).toBe(
@@ -381,6 +387,87 @@ describe('avaliação contextual com a metodologia publicada', () => {
 });
 
 describe('ProtocolGeneratorService', () => {
+  it.each([
+    {
+      name: 'avançado ocasional com ênfase em braços e pouco tempo',
+      profile: {
+        level: 'AVANCADO',
+        trainingStatus: 'OCCASIONAL',
+        daysPerWeek: 4,
+        sessionMinutes: 30,
+        emphasis: ['bíceps', 'tríceps', 'core'],
+        routineContext: 'Barreiras: LACK_OF_TIME.',
+        injuryTags: [],
+        injuriesRaw: [],
+      },
+      expected: [
+        'AVANCADO',
+        'treina de forma ocasional/irregular',
+        '30 min',
+        'bíceps, tríceps, core',
+        'LACK_OF_TIME',
+      ],
+    },
+    {
+      name: 'intermediário retornando após pausa longa',
+      profile: {
+        level: 'INTERMEDIARIO',
+        trainingStatus: 'STOPPED',
+        stoppedFor: 'Y1_TO_2',
+        daysPerWeek: 3,
+        sessionMinutes: 60,
+        emphasis: ['ombro', 'core'],
+        injuryTags: [],
+        injuriesRaw: [],
+      },
+      expected: ['INTERMEDIARIO', '1 a 2 anos', '60 min', 'ombro, core'],
+    },
+    {
+      name: 'iniciante com dor, sem bloqueio no PAR-Q',
+      profile: {
+        level: 'INICIANTE',
+        trainingStatus: 'NEVER',
+        daysPerWeek: 2,
+        sessionMinutes: 45,
+        emphasis: ['glúteo'],
+      },
+      expected: ['INICIANTE', '45 min', 'glúteo', 'KNEE', 'dor no joelho'],
+    },
+  ] satisfies Array<{
+    name: string;
+    profile: Partial<UserConstraints>;
+    expected: string[];
+  }>)(
+    'contrato de geração contextual sem parecer adicional: $name',
+    async ({ profile, expected }) => {
+      const retrieve = vi.fn().mockResolvedValue([]);
+      const { service, calls } = makeService([validProtocolJson()], retrieve);
+      const input = { ...command, constraints: { ...constraints, ...profile } };
+      await service.generate(input);
+      expect(calls.map((call) => call.intent)).toEqual(['protocol_generation']);
+      const request = calls[0];
+      if (!request) throw new Error('Chamada de geração ausente');
+      const message = request.messages.map((turn) => turn.content).join('\n');
+      for (const value of expected) expect(message).toContain(value);
+      expect(message).not.toContain('até 2');
+      for (const requirement of [
+        'experiência declarada não é regularidade',
+        'séries diretas',
+        'padrão CORE',
+        'agrupamento muscular',
+        'unilaterais dos dois lados',
+        'orientação curta e acionável',
+        'Não invente fontes',
+      ])
+        expect(request.system?.toLowerCase()).toContain(requirement.toLowerCase());
+      const dosageQuery = retrieve.mock.calls[1]?.[0];
+      expect(dosageQuery).toContain(profile.trainingStatus);
+      expect(dosageQuery).toContain(`${profile.daysPerWeek} dias por semana`);
+      expect(dosageQuery).toContain(`${profile.sessionMinutes} minutos por sessão`);
+      expect(dosageQuery).not.toContain('dor no joelho');
+    },
+  );
+
   it('gera um ProtocolStructure válido a partir da saída do LLM', async () => {
     const { service } = makeService([validProtocolJson()]);
     const result = await service.generate(command);

@@ -486,6 +486,36 @@ describe('QueueDetail — trava do envio automático enquanto a tela está abert
 });
 
 describe('QueueDetail', () => {
+  it.each([false, true])(
+    'tag de fallback fica à direita do título, inclusive editando: %s',
+    async (openEditor) => {
+      await renderProtocolScreen(
+        {
+          ...protocolDetail,
+          protocol: { ...protocolDetail.protocol, isFallback: true },
+        },
+        PROTOCOL_ID,
+        {
+          openEditor,
+          assert: () => {
+            const heading = screen.getByRole('heading', { name: 'Protocolo para Revisão' });
+            const header = heading.parentElement;
+            if (!header) throw new Error('Cabeçalho do protocolo ausente');
+            const badge = within(header).getByText('Protocolo Fallback');
+            expect(badge).toHaveClass('bg-destructive');
+            expect(heading.nextElementSibling).toBe(badge);
+          },
+        },
+      );
+    },
+  );
+
+  it('não mostra tag de fallback no rascunho individualizado', async () => {
+    await renderProtocolScreen(protocolDetail, PROTOCOL_ID, {
+      assert: () => expect(screen.queryByText('Protocolo Fallback')).not.toBeInTheDocument(),
+    });
+  });
+
   it('renderiza protocolo e exige confirmação para assinar', async () => {
     api.getQueueDetail.mockResolvedValue(protocolDetail);
     render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);

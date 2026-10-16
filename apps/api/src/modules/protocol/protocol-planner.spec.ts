@@ -117,13 +117,36 @@ function genResult(over: Partial<GenerateProtocolResult> = {}): GenerateProtocol
 }
 
 describe('qualidade contextual no pipeline', () => {
+  const parqCommand = {
+    userId: 'u1',
+    user: {},
+    constraints: { ...constraints, requiresProfessionalReview: true },
+  };
+
+  it.each([{ injuryTags: [] }, { injuryTags: ['SHOULDER'] }] as const)(
+    'sem PAR-Q bloqueante não avalia nem corrige qualidade, mesmo com restrições %j',
+    async ({ injuryTags }) => {
+      const gen = fakeGenerator([]);
+      vi.mocked(gen.assessQuality).mockResolvedValue(qualityAssessment('GAPS'));
+      const plan = await planProtocol(gen, fakeValidation([]), {
+        ...cmd,
+        constraints: { ...constraints, injuryTags: [...injuryTags] },
+      });
+      expect(gen.assessQuality).not.toHaveBeenCalled();
+      expect(gen.generate).toHaveBeenCalledTimes(1);
+      expect(plan.contextualQuality).toBeUndefined();
+      expect(plan.trace.contextualQuality).toBeUndefined();
+      expect(plan.validationAction).toBe('PASS');
+    },
+  );
+
   it('corrige lacuna mesmo com PASS determinístico e reavalia o novo conteúdo', async () => {
     const gen = fakeGenerator([genResult(), genResult({ structure: structure('Corrigido') })]);
     const assess = vi
       .spyOn(gen, 'assessQuality')
       .mockResolvedValueOnce(qualityAssessment('GAPS'))
       .mockResolvedValueOnce(qualityAssessment());
-    const plan = await planProtocol(gen, fakeValidation([]), cmd);
+    const plan = await planProtocol(gen, fakeValidation([]), parqCommand);
     expect(gen.generate).toHaveBeenCalledTimes(2);
     expect(gen.generate.mock.calls[1]?.[0].correction).toMatchObject({
       round: 1,
@@ -141,7 +164,7 @@ describe('qualidade contextual no pipeline', () => {
   it('lacuna persistente usa orçamento existente sem descartar conteúdo individualizado', async () => {
     const gen = fakeGenerator([]);
     vi.spyOn(gen, 'assessQuality').mockResolvedValue(qualityAssessment('GAPS'));
-    const plan = await planProtocol(gen, fakeValidation([]), cmd);
+    const plan = await planProtocol(gen, fakeValidation([]), parqCommand);
     expect(gen.generate).toHaveBeenCalledTimes(1 + MAX_CORRECTION_ROUNDS);
     expect(plan.usedFallbackTemplate).toBe(false);
     expect(plan.generatedBy).toBe('OPENAI_GPT41');
@@ -153,24 +176,32 @@ describe('qualidade contextual no pipeline', () => {
   it('avaliação indisponível nunca é PASS nem provoca regeração ou template', async () => {
     const gen = fakeGenerator([]);
     vi.spyOn(gen, 'assessQuality').mockResolvedValue(qualityAssessment('UNAVAILABLE'));
-    const plan = await planProtocol(gen, fakeValidation([]), cmd);
+    const plan = await planProtocol(gen, fakeValidation([]), parqCommand);
     expect(gen.generate).toHaveBeenCalledTimes(1);
     expect(plan.validationAction).toBe('FLAG');
     expect(plan.usedFallbackTemplate).toBe(false);
     expect(plan.contextualQuality?.status).toBe('UNAVAILABLE');
   });
 
-  it('não gasta avaliação em conteúdo que ainda viola segurança', async () => {
-    const gen = fakeGenerator([]);
-    const assess = vi.spyOn(gen, 'assessQuality');
-    const plan = await planProtocol(
-      gen,
-      fakeValidation([BLOCK_SPLIT, BLOCK_SPLIT, BLOCK_SPLIT]),
-      cmd,
-    );
-    expect(assess).not.toHaveBeenCalled();
-    expect(plan.usedFallbackTemplate).toBe(true);
-  });
+  it.each([false, true])(
+    'fallback com PAR-Q bloqueante %s não recebe avaliação',
+    async (blocked) => {
+      const gen = fakeGenerator([]);
+      const assess = vi.spyOn(gen, 'assessQuality');
+      const plan = await planProtocol(
+        gen,
+        fakeValidation([BLOCK_SPLIT, BLOCK_SPLIT, BLOCK_SPLIT]),
+        {
+          ...parqCommand,
+          constraints: { ...parqCommand.constraints, requiresProfessionalReview: blocked },
+        },
+      );
+      expect(assess).not.toHaveBeenCalled();
+      expect(plan.usedFallbackTemplate).toBe(true);
+      expect(plan.contextualQuality).toBeUndefined();
+      expect(plan.trace.contextualQuality).toBeUndefined();
+    },
+  );
 
   it('correção que introduz bloqueio não elimina o último rascunho válido', async () => {
     const original = genResult({ structure: structure('Individualizado original') });
@@ -179,7 +210,7 @@ describe('qualidade contextual no pipeline', () => {
     const plan = await planProtocol(
       gen,
       fakeValidation([verdictOf('PASS'), BLOCK_SPLIT, BLOCK_SPLIT]),
-      cmd,
+      parqCommand,
     );
     expect(plan.usedFallbackTemplate).toBe(false);
     expect(plan.content).toEqual(original.structure);
@@ -190,11 +221,29 @@ describe('qualidade contextual no pipeline', () => {
   it('saída malformada na correção de qualidade preserva a pendência e o rascunho', async () => {
     const gen = fakeGenerator([genResult(), new ProtocolGenerationError('malformado')]);
     vi.spyOn(gen, 'assessQuality').mockResolvedValue(qualityAssessment('GAPS'));
-    const plan = await planProtocol(gen, fakeValidation([]), cmd);
+    const plan = await planProtocol(gen, fakeValidation([]), parqCommand);
     expect(plan.usedFallbackTemplate).toBe(false);
     expect(plan.validationAction).toBe('FLAG');
     expect(plan.contextualQuality?.status).toBe('GAPS');
     expect(plan.trace.attempts.at(-1)?.outcome).toBe('GENERATION_ERROR');
+  });
+
+  it('avalia o rascunho PAR-Q apenas depois de reparar e revalidar segurança', async () => {
+    const generated = genResult({ structure: { ...structure(), phaseDurationWeeks: 99 } });
+    const gen = fakeGenerator([generated, generated, generated]);
+    const block = verdictOf('BLOCK_FALLBACK', [violation('PHASE_DURATION_OUT_OF_RANGE')]);
+    const plan = await planProtocol(
+      gen,
+      fakeValidation([block, block, block, verdictOf('PASS')]),
+      parqCommand,
+    );
+    expect(plan.usedFallbackTemplate).toBe(false);
+    expect(plan.repairs).toContain('CLAMP_PHASE_DURATION');
+    expect(gen.assessQuality).toHaveBeenCalledTimes(1);
+    expect(gen.assessQuality).toHaveBeenCalledWith(
+      parqCommand,
+      expect.objectContaining({ structure: plan.content }),
+    );
   });
 });
 
@@ -388,11 +437,7 @@ describe('planProtocol (US-2.4)', () => {
       expect(plan.validationAction).toBe('PASS');
       expect(plan.repairs).toContain('STRIP_ALL_TECHNIQUES');
       expect(plan.content).toBe(revalidated);
-      expect(gen.assessQuality).toHaveBeenCalledTimes(1);
-      expect(gen.assessQuality).toHaveBeenCalledWith(
-        cmd,
-        expect.objectContaining({ structure: revalidated }),
-      );
+      expect(gen.assessQuality).not.toHaveBeenCalled();
       expect(plan.trace).toMatchObject({ repairOutcome: 'APPLIED', finalRules: [] });
       expect(plan.attempts.map((a) => a.rules)).toEqual([
         ['TECHNIQUE_LEVEL_NOT_ALLOWED', 'TECHNIQUE_OVERUSE'],

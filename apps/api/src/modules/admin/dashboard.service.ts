@@ -161,6 +161,7 @@ export interface QueueItem {
    * para os que não são protocolo/substituição — não têm motivo a exibir.
    */
   origin: 'PARQ' | 'FALLBACK' | 'EDIT' | 'QUALITY' | 'AI_SUBSTITUTION' | 'CATALOG_GAP' | null;
+  isFallback?: boolean;
   /** O profissional logado já abriu este item (estado de leitura do sino; não altera a fila). */
   read: boolean;
 }
@@ -360,8 +361,8 @@ export class DashboardService {
           qualityNotices(
             (row.constraints as { contextualQuality?: unknown } | null)?.contextualQuality,
           ).length > 0;
-        (isOptional ? optional : mandatory).push(
-          this.item(
+        (isOptional ? optional : mandatory).push({
+          ...this.item(
             row.id,
             'PROTOCOL',
             isOptional ? 'ROUTINE' : fromParq ? 'SAFETY' : 'ALERT',
@@ -382,7 +383,8 @@ export class DashboardService {
                     ? 'QUALITY'
                     : 'EDIT',
           ),
-        );
+          isFallback: fromFallback,
+        });
       }
 
       // Propostas de substituição de exercício via IA, ainda pendentes de decisão. Desde
@@ -1564,6 +1566,7 @@ export class DashboardService {
           version: row.version,
           status: row.status,
           approvalStatus: row.approvalStatus,
+          isFallback: row.generatedBy === 'FALLBACK_TEMPLATE',
           content: row.content,
           signedAt: row.signedAt?.toISOString() ?? null,
           signatureHash: row.signatureHash,
