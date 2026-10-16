@@ -81,6 +81,7 @@ function parseOrigin(value: unknown): QueueItem['origin'] {
   return value === 'PARQ' ||
     value === 'FALLBACK' ||
     value === 'EDIT' ||
+    value === 'QUALITY' ||
     value === 'AI_SUBSTITUTION' ||
     value === 'CATALOG_GAP'
     ? value
@@ -493,6 +494,13 @@ function parseProtocolReview(value: unknown): ProtocolReview | undefined {
     },
     blocking: parseConflicts(value.blocking),
     conflicts: parseConflicts(value.conflicts),
+    ...(Array.isArray(value.qualityNotices)
+      ? {
+          qualityNotices: value.qualityNotices.filter(
+            (notice): notice is string => typeof notice === 'string',
+          ),
+        }
+      : {}),
   };
 }
 

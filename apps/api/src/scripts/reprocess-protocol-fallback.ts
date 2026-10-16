@@ -66,12 +66,12 @@ import { isProfessionalAuthored } from '../modules/protocol/protocol-origin';
 import { planProtocol } from '../modules/protocol/protocol-planner';
 import { ProtocolGeneratorService } from '../modules/protocol/protocol-generator.service';
 import {
-  demoteLevel,
   emphasisToMuscleGroups,
   importantEventForPrompt,
   levelFromExperience,
   mapInjuriesToTags,
   painToConstraints,
+  routineContextForPrompt,
   parqToConstraints,
   type UserConstraints,
 } from '../modules/protocol/user-constraints';
@@ -236,7 +236,7 @@ async function main(): Promise<void> {
           content: plan.content,
           // Constraints COMPLETAS (com `daysPerWeek`): é o que a assinatura revalida. No caminho
           // de DLQ elas ficaram na forma mínima do fallback.
-          constraints,
+          constraints: { ...constraints, contextualQuality: plan.contextualQuality },
           totalWeeks,
           mesocycleName,
           startDate,
@@ -331,9 +331,8 @@ async function loadFullConstraints(
     requiresProfessionalReview,
     parqTags: parq.tags,
     parqTriggered: evaluation.triggeredQuestions,
-    ...(requiresProfessionalReview ? { maxPhase: 'ADAPTACAO' as const } : {}),
     goal: toGenerationGoal(structured.primaryGoal),
-    level: requiresProfessionalReview ? demoteLevel(level) : level,
+    level,
     trainingStatus: structured.trainingStatus,
     ...(structured.stoppedFor ? { stoppedFor: structured.stoppedFor } : {}),
     daysPerWeek: structured.daysPerWeek,
@@ -343,6 +342,7 @@ async function loadFullConstraints(
     equipment: [],
     emphasis: emphasisToMuscleGroups(structured.emphasis),
     avoid: health.freeText?.avoidedExercise ? [health.freeText.avoidedExercise] : [],
+    routineContext: routineContextForPrompt(structured, health.freeText),
     injuryTags: [...new Set([...pain.tags, ...mapInjuriesToTags(injuriesRaw), ...parq.tags])],
     injuriesRaw,
     importantEvent: importantEventForPrompt(structured, health.freeText?.importantEventDescription),

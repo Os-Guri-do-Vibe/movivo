@@ -5,6 +5,7 @@
  */
 import type { ProtocolStructure, Weekday } from '@movivo/shared';
 import { describe, expect, it, vi } from 'vitest';
+import { qualityAssessment } from './contextual-quality.fixture';
 
 import {
   type GenerateProtocolCommand,
@@ -91,7 +92,10 @@ function generatorReturning(...structures: ProtocolStructure[]) {
   const generate = vi.fn(async (_command: GenerateProtocolCommand) =>
     result(queue.shift() ?? (structures.at(-1) as ProtocolStructure)),
   );
-  return { generate } as ProtocolGenerator & { generate: typeof generate };
+  return {
+    generate,
+    assessQuality: vi.fn(async () => qualityAssessment()),
+  } as ProtocolGenerator & { generate: typeof generate };
 }
 
 describe('prompt: a disponibilidade é meta e teto; os preferidos só dizem em que dias', () => {

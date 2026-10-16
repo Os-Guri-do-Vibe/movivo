@@ -5,13 +5,13 @@ import { PARQ_QUESTION_IDS, PARQ_VERSION, ParqState } from '@movivo/shared';
 
 import { evaluateParq } from '../anamnesis/parq';
 import {
-  demoteLevel,
   emphasisToMuscleGroups,
   importantEventForPrompt,
   levelFromExperience,
   mapInjuriesToTags,
   painToConstraints,
   parqToConstraints,
+  routineContextForPrompt,
 } from './user-constraints';
 
 /** Monta o PAR-Q completo marcando "Sim" só nas perguntas passadas (valor = `detail`). */
@@ -55,6 +55,47 @@ describe('mapInjuriesToTags', () => {
 });
 
 describe('anamnese v2 → UserConstraints (US-6.9)', () => {
+  it('preserva rotina, barreiras e outro esporte para criação e avaliação contextual', () => {
+    const text = routineContextForPrompt(
+      {
+        pastActivities: ['WALK_RUN'],
+        consistencyBarriers: ['LACK_OF_TIME', 'TIREDNESS'],
+        preferredPeriod: 'EVENING',
+        practicesOtherSport: true,
+        otherSportDaysPerWeek: 3,
+      },
+      { otherSportName: 'Esporte sintético', consistencyBarrierOther: 'Turnos alternados' },
+    );
+    expect(text).toContain('LACK_OF_TIME, TIREDNESS');
+    expect(text).toContain('Esporte sintético, 3 dia(s)/semana');
+    expect(text).toContain('Turnos alternados');
+    expect(text).toContain('EVENING');
+  });
+
+  it('não inventa atividade, frequência ou dificuldade ausente', () => {
+    const text = routineContextForPrompt({
+      pastActivities: [],
+      consistencyBarriers: [],
+      preferredPeriod: 'VARIES',
+      practicesOtherSport: false,
+    });
+    expect(text).toContain('não informadas');
+    expect(text).toContain('Não declarou prática de outro esporte');
+    const missing = routineContextForPrompt(
+      {
+        pastActivities: [],
+        consistencyBarriers: [],
+        preferredPeriod: 'VARIES',
+        practicesOtherSport: true,
+      },
+      { primaryGoalOther: 'Meta sintética', pastActivityOther: 'Atividade sintética' },
+    );
+    expect(missing).toContain('modalidade não informada');
+    expect(missing).toContain('frequência não informada');
+    expect(missing).toContain('Meta sintética');
+    expect(missing).toContain('Atividade sintética');
+  });
+
   it('experiência declarada vira nível real — fim do default INICIANTE', () => {
     expect(levelFromExperience('BEGINNER')).toBe('INICIANTE');
     expect(levelFromExperience('INTERMEDIATE')).toBe('INTERMEDIARIO');
@@ -144,16 +185,16 @@ describe('parqToConstraints (PAR-Q → contraindicações)', () => {
     expect(mapParq({ Q1: true, Q2: true, Q5: true }).tags).toEqual(['CARDIAC']);
   });
 
-  it('Q4 (tontura/desmaio) → BALANCE_FALL_RISK e trava a fase em ADAPTACAO', () => {
-    const { tags, maxPhase } = mapParq({ Q4: true });
+  it('Q4 gera BALANCE_FALL_RISK sem determinar fase', () => {
+    const { tags } = mapParq({ Q4: true });
     expect(tags).toEqual(['BALANCE_FALL_RISK']);
-    expect(maxPhase).toBe('ADAPTACAO');
+    expect(mapParq({ Q4: true })).not.toHaveProperty('maxPhase');
   });
 
   it('Q7 (gravidez/pós-parto) → PREGNANCY, sem teto de fase', () => {
-    const { tags, maxPhase } = mapParq({ Q7: true });
+    const { tags } = mapParq({ Q7: true });
     expect(tags).toEqual(['PREGNANCY']);
-    expect(maxPhase).toBeUndefined();
+    expect(mapParq({ Q7: true })).not.toHaveProperty('maxPhase');
   });
 
   // Q6/Q8/Q9 não têm tag fixa de propósito: "problema em articulação" sem dizer QUAL
@@ -175,9 +216,9 @@ describe('parqToConstraints (PAR-Q → contraindicações)', () => {
   });
 
   it('combina tag fixa e tag derivada de texto na mesma avaliação', () => {
-    const { tags, maxPhase } = mapParq({ Q4: true, Q6: 'dor no ombro' });
+    const { tags } = mapParq({ Q4: true, Q6: 'dor no ombro' });
     expect(tags).toEqual(expect.arrayContaining(['BALANCE_FALL_RISK', 'SHOULDER']));
-    expect(maxPhase).toBe('ADAPTACAO');
+    expect(mapParq({ Q4: true, Q6: 'dor no ombro' })).not.toHaveProperty('maxPhase');
   });
 
   it('evaluateParq concorda: qualquer "Sim" bloqueia', () => {
@@ -186,14 +227,6 @@ describe('parqToConstraints (PAR-Q → contraindicações)', () => {
     expect(evaluation.requiresProfessionalReview).toBe(true);
     expect(evaluation.parqState).toBe(ParqState.BLOQUEADO_AGUARDANDO_CLEARANCE);
     expect(evaluation.triggeredQuestions).toEqual(['Q7']);
-  });
-});
-
-describe('demoteLevel (PAR-Q bloqueado rebaixa um degrau)', () => {
-  it('desce um nível, com piso em INICIANTE', () => {
-    expect(demoteLevel('AVANCADO')).toBe('INTERMEDIARIO');
-    expect(demoteLevel('INTERMEDIARIO')).toBe('INICIANTE');
-    expect(demoteLevel('INICIANTE')).toBe('INICIANTE');
   });
 });
 

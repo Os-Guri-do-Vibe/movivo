@@ -57,6 +57,7 @@ import { ExerciseCatalogAdminService } from './exercise-catalog-admin.service';
 import { buildProtocolPdf } from '../protocol/protocol-pdf.service';
 import { signatureHash, supersedePreviousActiveProtocols } from '../protocol/protocol.repository';
 import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
+import { qualityNotices } from '../protocol/contextual-quality';
 import { CATALOG_SEARCH_MAX_LIMIT, searchCatalog } from '../protocol/exercise-catalog-search';
 import { findSafeCandidates } from '../protocol/exercise-substitution';
 import {
@@ -159,7 +160,7 @@ export interface QueueItem {
    * ainda calculado (ver `substitution.catalogGap`). `null` para os demais itens `optional` e
    * para os que não são protocolo/substituição — não têm motivo a exibir.
    */
-  origin: 'PARQ' | 'FALLBACK' | 'EDIT' | 'AI_SUBSTITUTION' | 'CATALOG_GAP' | null;
+  origin: 'PARQ' | 'FALLBACK' | 'EDIT' | 'QUALITY' | 'AI_SUBSTITUTION' | 'CATALOG_GAP' | null;
   /** O profissional logado já abriu este item (estado de leitura do sino; não altera a fila). */
   read: boolean;
 }
@@ -341,6 +342,7 @@ export class DashboardService {
           reviewUrgency: protocols.reviewUrgency,
           generatedBy: protocols.generatedBy,
           parqState: anamnesisSessions.parqState,
+          constraints: protocols.constraints,
         })
         .from(protocols)
         .innerJoin(users, eq(users.id, protocols.userId))
@@ -353,6 +355,11 @@ export class DashboardService {
         const isOptional = row.reviewUrgency === 'OPTIONAL';
         const fromParq = row.parqState === 'BLOQUEADO_AGUARDANDO_CLEARANCE';
         const fromFallback = row.generatedBy === 'FALLBACK_TEMPLATE';
+        const fromQuality =
+          !isProfessionalAuthored(row.generatedBy) &&
+          qualityNotices(
+            (row.constraints as { contextualQuality?: unknown } | null)?.contextualQuality,
+          ).length > 0;
         (isOptional ? optional : mandatory).push(
           this.item(
             row.id,
@@ -365,7 +372,15 @@ export class DashboardService {
             isOptional
               ? new Date(row.createdAt.getTime() + PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS).toISOString()
               : null,
-            isOptional ? null : fromParq ? 'PARQ' : fromFallback ? 'FALLBACK' : 'EDIT',
+            isOptional
+              ? null
+              : fromParq
+                ? 'PARQ'
+                : fromFallback
+                  ? 'FALLBACK'
+                  : fromQuality
+                    ? 'QUALITY'
+                    : 'EDIT',
           ),
         );
       }
@@ -1898,6 +1913,9 @@ export class DashboardService {
       availability,
       blocking: this.conflictPayload(verdict.violations.filter((v) => v.action === 'BLOCK')),
       conflicts: [],
+      qualityNotices: qualityNotices(
+        (row.constraints as { contextualQuality?: unknown } | null)?.contextualQuality,
+      ),
     };
   }
 

@@ -14,8 +14,8 @@
  *      se TODAS as violações BLOCK forem mecânicas — e sempre revalidado no validador inteiro;
  *   4. nada disso limpou → template pré-aprovado do RT.
  *
- * Nenhuma regra do validador mudou nesta revisão: todas as violações da linha de base eram
- * verdadeiros positivos ou erro de prompt (Victor, 83 execuções reais).
+ * Qualidade contextual compartilha o orçamento de correções. Pendências não resolvidas
+ * preservam o rascunho válido para revisão obrigatória, sem provocar template por si só.
  *
  * Decisão do fundador (2026-08-18): **todo** protocolo gerado — PASS limpo, FLAG do
  * validador, reparado ou BLOCK persistente caindo no template — entra na Fila do
@@ -26,6 +26,7 @@
  * `repairs`.
  */
 import type { ProtocolStructure } from '@movivo/shared';
+import type { ContextualQualityAssessment, ContextualQualitySummary } from './contextual-quality';
 
 import {
   type GenerateProtocolCommand,
@@ -53,10 +54,14 @@ export const MAX_CORRECTION_ROUNDS = 2;
  * reparo determinístico). Vai no log e no rastro persistido — `promptVersion` só carrega
  * metodologia+catálogo e não muda quando o código do prompt/planner muda.
  */
-export const PROTOCOL_PIPELINE_VERSION = 'protocol-pipeline-2026-09-v2';
+export const PROTOCOL_PIPELINE_VERSION = 'protocol-pipeline-2026-10-v4';
 
 export interface ProtocolGenerator {
   generate(command: GenerateProtocolCommand): Promise<GenerateProtocolResult>;
+  assessQuality(
+    command: GenerateProtocolCommand,
+    generated: GenerateProtocolResult,
+  ): Promise<ContextualQualityAssessment>;
 }
 
 /** Logger mínimo (pino) — opcional para os scripts ad-hoc que chamam o planner sem Nest. */
@@ -64,7 +69,7 @@ export type PlanLogger = { info(obj: object, msg?: string): void };
 
 export type PlanAttemptOutcome = 'PASS' | 'FLAG' | 'BLOCK' | 'GENERATION_ERROR';
 
-/** Uma geração do modelo (1ª ou rodada de correção). Só códigos — nunca `detail`/texto. */
+/** Uma geração (1ª/correção). `outcome` é determinístico; qualidade tem código separado. */
 export interface PlanAttempt {
   attempt: number;
   kind: 'GENERATION' | 'CORRECTION';
@@ -72,6 +77,7 @@ export interface PlanAttempt {
   /** Códigos de regra únicos (BLOCK e FLAG), na ordem em que o validador os emitiu. */
   rules: string[];
   malformedRetries: number;
+  contextualQuality?: ContextualQualitySummary['status'];
 }
 
 export type RepairOutcome = 'NOT_NEEDED' | 'NOT_ELIGIBLE' | 'APPLIED' | 'REJECTED_BY_REVALIDATION';
@@ -95,6 +101,7 @@ export interface ProtocolGenerationTrace {
   finalRules: string[];
   usedFallbackTemplate: boolean;
   durationMs: number;
+  contextualQuality?: ContextualQualitySummary;
 }
 
 export interface PlanResult {
@@ -118,6 +125,7 @@ export interface PlanResult {
   repairs: DeterministicRepairCode[];
   attempts: PlanAttempt[];
   trace: ProtocolGenerationTrace;
+  contextualQuality?: ContextualQualitySummary;
 }
 
 const uniqueRules = (violations: readonly ValidationViolation[]): string[] => [
@@ -143,9 +151,8 @@ export async function planProtocol(
     // Achado 2026-10-15: meta e TETO de sessões semanais — sem isto a contagem era cobrada
     // contra os dias preferidos, e 4 disponíveis + 7 preferidos virava 7 sessões.
     daysPerWeek: command.constraints.daysPerWeek,
-    // 2026-08-24: teto de fase do PAR-Q. Presente = nada além de `ADAPTACAO` passa, e o
-    // piso de RIR (2) entra junto — os dois vetos vivem no `ValidationService`.
-    ...(command.constraints.maxPhase ? { maxPhase: command.constraints.maxPhase } : {}),
+    // Revisão controla esforço e aprovação, não fase nem nível.
+    requiresProfessionalReview: command.constraints.requiresProfessionalReview,
   };
   // Achado 2026-08-24: `parqFlags` nunca chegava ao validador por aqui (só o painel
   // passava, ao reeditar/assinar). Sem isto `checkParq` seria letra morta no caminho
@@ -167,6 +174,9 @@ export async function planProtocol(
       outcome,
       rules: uniqueRules(violations),
       malformedRetries,
+      ...(quality && quality.summary.status !== 'PASS'
+        ? { contextualQuality: quality.summary.status }
+        : {}),
     };
     attempts.push(attempt);
     logger?.info(
@@ -176,19 +186,30 @@ export async function planProtocol(
   };
 
   // 1ª geração: erro aqui continua subindo (retry do job/DLQ, contrato inalterado).
+  let quality: ContextualQualityAssessment | undefined;
   let gen = await generator.generate(command);
   let verdict = validate(gen.structure);
+  if (verdict.action !== 'BLOCK_FALLBACK') quality = await generator.assessQuality(command, gen);
+  let lastValid = verdict.action !== 'BLOCK_FALLBACK' ? { gen, verdict, quality } : undefined;
   const firstVerdict = verdict;
   record('GENERATION', verdict.code, verdict.violations, gen.malformedRetries ?? 0);
 
   let corrections = 0;
-  while (verdict.action === 'BLOCK_FALLBACK' && corrections < MAX_CORRECTION_ROUNDS) {
+  while (
+    (verdict.action === 'BLOCK_FALLBACK' || quality?.summary.status === 'GAPS') &&
+    corrections < MAX_CORRECTION_ROUNDS
+  ) {
     corrections++;
     let next: GenerateProtocolResult;
     try {
       next = await generator.generate({
         ...command,
-        correction: { previous: gen.structure, violations: verdict.violations, round: corrections },
+        correction: {
+          previous: gen.structure,
+          violations: verdict.violations,
+          round: corrections,
+          ...(quality ? { quality } : {}),
+        },
       });
     } catch (error) {
       if (!(error instanceof ProtocolGenerationError)) throw error;
@@ -199,7 +220,16 @@ export async function planProtocol(
     }
     gen = next;
     verdict = validate(gen.structure);
+    quality =
+      verdict.action === 'BLOCK_FALLBACK' ? undefined : await generator.assessQuality(command, gen);
+    if (verdict.action !== 'BLOCK_FALLBACK') lastValid = { gen, verdict, quality };
     record('CORRECTION', verdict.code, verdict.violations, gen.malformedRetries ?? 0);
+  }
+
+  // Uma correção de qualidade pode piorar a segurança. Não descarte o rascunho
+  // individualizado que já passou nas regras para substituí-lo por um template.
+  if (verdict.action === 'BLOCK_FALLBACK' && lastValid) {
+    ({ gen, verdict, quality } = lastValid);
   }
 
   let content = gen.structure;
@@ -226,13 +256,19 @@ export async function planProtocol(
         repairOutcome = 'APPLIED';
         content = repaired.structure;
         repairs = repaired.repairs;
+        quality = await generator.assessQuality(command, { ...gen, structure: content });
       }
     }
   }
 
   const usedFallbackTemplate = finalVerdict.action === 'BLOCK_FALLBACK';
   const promptVersion = usedFallbackTemplate ? FALLBACK_TEMPLATE_VERSION : gen.promptVersion;
-  const validationAction = usedFallbackTemplate ? 'BLOCK' : finalVerdict.code;
+  const qualityPending = quality !== undefined && quality.summary.status !== 'PASS';
+  const validationAction = usedFallbackTemplate
+    ? 'BLOCK'
+    : qualityPending
+      ? 'FLAG'
+      : finalVerdict.code;
   const trace: ProtocolGenerationTrace = {
     type: 'GENERATION_TRACE',
     pipelineVersion: PROTOCOL_PIPELINE_VERSION,
@@ -247,6 +283,7 @@ export async function planProtocol(
     finalRules: uniqueRules(finalVerdict.violations),
     usedFallbackTemplate,
     durationMs: Date.now() - startedAt,
+    ...(quality ? { contextualQuality: quality.summary } : {}),
   };
   logger?.info(
     {
@@ -265,6 +302,7 @@ export async function planProtocol(
       promptVersion,
       pipelineVersion: PROTOCOL_PIPELINE_VERSION,
       validationRulesVersion: VALIDATION_RULES_VERSION,
+      ...(quality ? { contextualQuality: quality.summary } : {}),
     },
     'protocol.plan.summary',
   );
@@ -294,6 +332,7 @@ export async function planProtocol(
       repairs: [],
       attempts,
       trace,
+      ...(quality ? { contextualQuality: quality.summary } : {}),
     };
   }
 
@@ -313,5 +352,6 @@ export async function planProtocol(
     repairs,
     attempts,
     trace,
+    ...(quality ? { contextualQuality: quality.summary } : {}),
   };
 }

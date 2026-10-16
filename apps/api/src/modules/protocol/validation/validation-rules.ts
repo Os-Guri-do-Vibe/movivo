@@ -18,7 +18,7 @@ import type { GenerationGoal, WorkoutSplit } from '@movivo/shared';
 
 import type { ExerciseLevel } from '../exercise-catalog';
 
-export const VALIDATION_RULES_VERSION = 'validation-rules-2026-10-v5';
+export const VALIDATION_RULES_VERSION = 'validation-rules-2026-10-v6';
 
 export type ValidationActionCode = 'PASS' | 'FLAG' | 'BLOCK';
 
@@ -46,7 +46,6 @@ export const PROFESSIONAL_OVERRIDABLE_RULES: ReadonlySet<string> = new Set([
   'SPLIT_FREQUENCY_MISMATCH',
   'TECHNIQUE_LEVEL_NOT_ALLOWED',
   'TECHNIQUE_OVERUSE',
-  'PARQ_PHASE_CAP_EXCEEDED',
   'PARQ_RIR_TOO_LOW',
   'PARQ_VIOLATION',
   'PHASE_DURATION_OUT_OF_RANGE',

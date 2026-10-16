@@ -361,10 +361,9 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     input: baseInput(cleanStructure({ generalNotes: 'Resultado garantido em 30 dias!' })),
   },
   {
-    label: 'violação de PAR-Q: fase FORCA com flag de risco presente',
-    kind: 'adversarial',
-    expected: 'BLOCK_FALLBACK',
-    expectRule: 'PARQ_VIOLATION',
+    label: 'fase FORCA não é vetada somente pela presença de flag PAR-Q',
+    kind: 'clean',
+    expected: 'PASS',
     input: {
       structure: cleanStructure({ phase: 'FORCA' }),
       constraints: { goal: 'GAIN_MUSCLE', injuryTags: [] },
@@ -604,10 +603,9 @@ export const GOLDEN_SET: readonly GoldenCase[] = [
     ),
   },
   {
-    label: 'fase HIPERTROFIA com teto de fase do PAR-Q (maxPhase ADAPTACAO)',
-    kind: 'adversarial',
-    expected: 'BLOCK_FALLBACK',
-    expectRule: 'PARQ_PHASE_CAP_EXCEEDED',
+    label: 'fase HIPERTROFIA preservada mesmo com maxPhase legado',
+    kind: 'clean',
+    expected: 'PASS',
     input: loseFatBeginnerInput(
       cleanStructure({
         ...loseFatBeginner(),

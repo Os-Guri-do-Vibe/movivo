@@ -6,9 +6,8 @@
  *
  *  - **Pergunta 10** (repescagem do PAR-Q original) é quem reaciona a MESMA trava do
  *    PAR-Q inicial: uma resposta que mudou de "Não" para "Sim" bloqueia exatamente como
- *    um "Sim" bloqueava na anamnese — `requiresProfessionalReview: true`, teto de fase
- *    `ADAPTACAO` (aplicado pelo chamador via `UserConstraints.maxPhase`, mesmo mecanismo
- *    de `parqToConstraints`).
+ *    um "Sim" bloqueava na anamnese — `requiresProfessionalReview: true`, sem impor
+ *    fase ou reduzir o nível de experiência.
  *  - **Pergunta 9** (dor NOVA, sem o PAR-Q ter mudado) NÃO força revisão obrigatória por
  *    si só — vira tag de contraindicação (via `painToConstraints`, reaproveitado pelo
  *    chamador) e, quando a intensidade for alta ou a tendência for de piora, um alerta de

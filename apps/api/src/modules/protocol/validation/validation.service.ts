@@ -73,7 +73,7 @@ const PARQ_MIN_RIR = 2;
 const PARQ_CARDIAC_MIN_RIR = 3;
 
 /**
- * Piso de RIR efetivo sob teto de PAR-Q (`maxPhase`) para estas flags. Exportado para o
+ * Piso de RIR sob revisão profissional para estas flags. Exportado para o
  * feedback de correção e o reparo determinístico do planner usarem EXATAMENTE o mesmo piso
  * que `checkParq` cobra — nunca uma cópia do número.
  */
@@ -114,10 +114,10 @@ export interface ValidateProtocolInput {
      */
     daysPerWeek?: number;
     /**
-     * Teto de periodização vindo do PAR-Q (2026-08-24, `parqToConstraints`). Presente =
-     * qualquer fase diferente de `ADAPTACAO` é BLOCK, e todo RIR declarado tem piso 2.
-     * Ausente = sem teto (protocolo antigo/edição sem a constraint persistida).
+     * Ativa limites de esforço sem escolher fase ou rebaixar experiência.
      */
+    requiresProfessionalReview?: boolean;
+    /** Compatibilidade de leitura de protocolos antigos; não determina mais a fase. */
     maxPhase?: 'ADAPTACAO';
   };
   /**
@@ -246,7 +246,12 @@ export class ValidationService {
       input.constraints.daysPerWeek,
       violations,
     );
-    this.checkParq(input.structure, input.parqFlags ?? [], input.constraints.maxPhase, violations);
+    this.checkParq(
+      input.structure,
+      input.parqFlags ?? [],
+      input.constraints.requiresProfessionalReview ?? input.constraints.maxPhase !== undefined,
+      violations,
+    );
     this.checkPhaseDuration(input.structure, violations);
     this.checkLanguage(collectText(input.structure), violations);
     this.checkGeneratedProtocolText(collectText(input.structure), violations);
@@ -559,30 +564,16 @@ export class ValidationService {
   }
 
   /**
-   * Veto por PAR-Q. Duas entradas independentes:
-   *  - `parqFlags` (há gatilho de PAR-Q): sem pico de intensidade e sem técnica avançada;
-   *  - `maxPhase` (2026-08-24): teto duro de periodização + piso de RIR. Nasce de Q4
-   *    (tontura/desmaio) e é o que dá dente ao "modo conservador" pedido no prompt — um
-   *    prompt pode ser ignorado pelo modelo, este veto não pode.
-   *
-   * `maxPhase` é checado **fora** do early-return de `parqFlags`: Q4 mapeia para
-   * `BALANCE_FALL_RISK`, então na prática vêm juntos, mas um teto de fase que só valesse
-   * quando a lista de tags é não-vazia seria um acoplamento silencioso e frágil.
+   * Preserva limites de esforço e técnicas sem determinar fase ou nível.
+   * `maxPhase` legado só ativa os limites de esforço durante a transição.
    */
   private checkParq(
     structure: ProtocolStructure,
     parqFlags: readonly ContraindicationTag[],
-    maxPhase: 'ADAPTACAO' | undefined,
+    requiresProfessionalReview: boolean,
     out: ValidationViolation[],
   ): void {
-    if (maxPhase === 'ADAPTACAO') {
-      if (structure.phase !== 'ADAPTACAO') {
-        out.push({
-          rule: 'PARQ_PHASE_CAP_EXCEEDED',
-          detail: `fase ${structure.phase} acima do teto ADAPTACAO exigido pelo PAR-Q`,
-          action: 'BLOCK',
-        });
-      }
+    if (requiresProfessionalReview) {
       // Piso de RIR: quem tem alerta clínico aberto não treina perto da falha. `rir`
       // é opcional no schema — ausente não é violação (o exercício simplesmente não
       // prescreve proximidade de falha); declarado abaixo do piso é.
@@ -609,14 +600,6 @@ export class ValidationService {
     }
 
     if (parqFlags.length === 0) return;
-    // PAR-Q sinalizado não pode receber pico de intensidade (fase FORCA).
-    if (structure.phase === 'FORCA') {
-      out.push({
-        rule: 'PARQ_VIOLATION',
-        detail: 'fase FORCA com flag de PAR-Q presente',
-        action: 'BLOCK',
-      });
-    }
     // Nem técnica avançada: RT item 12 — alerta clínico tem prioridade sobre o objetivo.
     if (structure.sessions.some((s) => s.exercises.some((ex) => ex.technique))) {
       out.push({

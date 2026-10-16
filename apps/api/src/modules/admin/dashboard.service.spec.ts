@@ -15,6 +15,7 @@ import { ValidationService } from '../protocol/validation/validation.service';
 import type { WorkoutPresentationService } from '../protocol/workout-presentation.service';
 import { AuditService } from './audit.service';
 import { DashboardService } from './dashboard.service';
+import { qualityAssessment } from '../protocol/contextual-quality.fixture';
 import type { ExerciseCatalogAdminService } from './exercise-catalog-admin.service';
 
 const ACTOR_ID = '11111111-1111-4111-8111-111111111111';
@@ -1375,6 +1376,28 @@ describe('DashboardService leituras operacionais', () => {
     expect(result.mandatory[0]?.autoReleaseAt).toBeNull();
   });
 
+  it.each(['GAPS', 'UNAVAILABLE'] as const)(
+    'fila distingue qualidade %s de fallback e edição profissional',
+    async (status) => {
+      const { service } = makeSequencedService([
+        [
+          {
+            id: RESOURCE_ID,
+            createdAt: new Date('2026-10-15T12:00:00Z'),
+            status: 'PENDING_SIGNATURE',
+            name: 'Aluno sintético',
+            reviewUrgency: 'MANDATORY',
+            generatedBy: 'DEEPSEEK_V4_PRO',
+            parqState: 'LIBERADO',
+            constraints: { contextualQuality: qualityAssessment(status).summary },
+          },
+        ],
+      ]);
+      const result = await service.queue(actor);
+      expect(result.mandatory[0]).toMatchObject({ origin: 'QUALITY', autoReleaseAt: null });
+    },
+  );
+
   it('calcula funil/SLA, primeiro treino e replays com o conteúdo real da conversa', async () => {
     const conversationAt = new Date('2026-08-03T12:00:00.000Z');
     const { service, append } = makeSequencedService(
@@ -2078,4 +2101,38 @@ describe('DashboardService — prescrição manual do profissional', () => {
       conflicts: [],
     });
   });
+
+  it.each(['AI', 'PROFESSIONAL'] as const)(
+    'pendência contextual aparece apenas no rascunho IA, origem %s',
+    async (origin) => {
+      const row = protocolRow({
+        generatedBy: origin === 'AI' ? 'DEEPSEEK_V4_PRO' : 'PROFESSIONAL_EDIT',
+      });
+      const { service } = makeSequencedService(
+        [
+          [
+            {
+              ...row,
+              constraints: {
+                ...row.constraints,
+                contextualQuality: qualityAssessment('GAPS').summary,
+              },
+            },
+          ],
+          [{ name: 'Aluno sintético' }],
+        ],
+        realValidation(),
+      );
+      const detail = await service.detail(actor, 'PROTOCOL', RESOURCE_ID);
+      expect(detail).toMatchObject({
+        protocol: {
+          review:
+            origin === 'AI'
+              ? { qualityNotices: [expect.stringContaining('metodologia vigente')] }
+              : { origin: 'PROFESSIONAL' },
+        },
+      });
+      if (origin === 'PROFESSIONAL') expect(JSON.stringify(detail)).not.toContain('qualityNotices');
+    },
+  );
 });

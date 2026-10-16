@@ -11,6 +11,8 @@
  * `injuryTags` + o `ValidationService`, e nada em `avoid` reabilita um exercício vetado.
  */
 import type {
+  AnamnesisFreeText,
+  AnamnesisStructured,
   EmphasisRegion,
   GenerationGoal,
   PainAssessment,
@@ -62,6 +64,8 @@ export interface UserConstraints {
   injuryTags: ContraindicationTag[];
   /** Lesões/dores em texto livre, para contexto do prompt (o scrubber do router pseudonimiza). */
   injuriesRaw: string[];
+  /** Rotina e barreiras de adesão declaradas, como dado do aluno (nunca instrução). */
+  routineContext?: string;
   /**
    * PAR-Q do titular bloqueou (decisão do fundador, 2026-08-24). Deixou de ser TRAVA de
    * geração e virou **modo conservador + revisão humana obrigatória**: o protocolo é
@@ -72,7 +76,7 @@ export interface UserConstraints {
   parqTags: ContraindicationTag[];
   /** Perguntas do PAR-Q que dispararam, para rastreabilidade da geração. */
   parqTriggered: ParqQuestionId[];
-  /** Teto de fase de periodização. Presente = nada além de `ADAPTACAO` é aceitável. */
+  /** @deprecated Campo legado de protocolos persistidos; não determina fase ou nível. */
   maxPhase?: 'ADAPTACAO';
   /**
    * Evento/meta com prazo real declarado na anamnese (Seção 1, "Data-alvo") — achado
@@ -116,9 +120,8 @@ export interface UserConstraints {
    * Decisão do fundador: não existe máquina de estados decidindo a próxima fase
    * (adaptação/hipertrofia/força/deload) em código — a IA decide, como já faz na geração
    * inicial, agora informada por este histórico + pela metodologia publicada (que já
-   * descreve a lógica de transição entre fases). `maxPhase`/`requiresProfessionalReview`
-   * (acima) continuam sendo o único teto determinístico, exatamente como na geração
-   * inicial — nenhuma trava nova para a renovação.
+   * descreve a lógica de transição entre fases). `requiresProfessionalReview`
+   * controla a aprovação humana, não a fase nem o nível.
    */
   continuation?: {
     previousMesocycleNumber: number;
@@ -153,6 +156,36 @@ const LEVEL_BY_EXPERIENCE: Record<TrainingExperience, ExerciseLevel> = {
   ADVANCED: 'AVANCADO',
 };
 
+export function routineContextForPrompt(
+  structured: Pick<
+    AnamnesisStructured,
+    | 'pastActivities'
+    | 'consistencyBarriers'
+    | 'preferredPeriod'
+    | 'practicesOtherSport'
+    | 'otherSportDaysPerWeek'
+  >,
+  freeText?: AnamnesisFreeText,
+): string {
+  return [
+    `Atividades anteriores: ${structured.pastActivities.join(', ') || 'não informadas'}.`,
+    `Barreiras de consistência: ${structured.consistencyBarriers.join(', ') || 'não informadas'}.`,
+    `Período preferido: ${structured.preferredPeriod}.`,
+    structured.practicesOtherSport
+      ? `Pratica outro esporte: ${freeText?.otherSportName ?? 'modalidade não informada'}, ${structured.otherSportDaysPerWeek ?? 'frequência não informada'} dia(s)/semana.`
+      : 'Não declarou prática de outro esporte.',
+    ...(freeText?.consistencyBarrierOther
+      ? [`Outra barreira relatada: ${freeText.consistencyBarrierOther}.`]
+      : []),
+    ...(freeText?.pastActivityOther
+      ? [`Outra atividade anterior: ${freeText.pastActivityOther}.`]
+      : []),
+    ...(freeText?.primaryGoalOther
+      ? [`Objetivo descrito em texto livre: ${freeText.primaryGoalOther}.`]
+      : []),
+  ].join('\n');
+}
+
 export function levelFromExperience(experience: TrainingExperience): ExerciseLevel {
   return LEVEL_BY_EXPERIENCE[experience];
 }
@@ -183,17 +216,6 @@ export function importantEventForPrompt(
     daysUntil,
     ...(description ? { description } : {}),
   };
-}
-
-/** Um degrau abaixo, com piso em `INICIANTE`. Usado quando o PAR-Q bloqueia. */
-const DEMOTED_LEVEL: Record<ExerciseLevel, ExerciseLevel> = {
-  AVANCADO: 'INTERMEDIARIO',
-  INTERMEDIARIO: 'INICIANTE',
-  INICIANTE: 'INICIANTE',
-};
-
-export function demoteLevel(level: ExerciseLevel): ExerciseLevel {
-  return DEMOTED_LEVEL[level];
 }
 
 /** Regiões de ênfase → grupos musculares do catálogo. `FULL_BODY` = sem ênfase. */
@@ -269,7 +291,7 @@ export function mapInjuriesToTags(injuries: readonly string[]): Contraindication
  *  - Q1 (problema no coração/pressão alta) → `CARDIAC`
  *  - Q2 (dor no peito em esforço)          → `CARDIAC`
  *  - Q3 (dor no peito em repouso)          → `CARDIAC`
- *  - Q4 (perdeu equilíbrio/desmaiou)       → `BALANCE_FALL_RISK` + teto de fase `ADAPTACAO`
+ *  - Q4 (perdeu equilíbrio/desmaiou)       → `BALANCE_FALL_RISK`
  *  - Q5 (medicação contínua pressão/coração) → `CARDIAC`
  *  - Q6 (osso/articulação/coluna)          → sem tag fixa; o `detail` passa pela heurística
  *  - Q7 (gravidez/pós-parto)               → `PREGNANCY`
@@ -293,13 +315,10 @@ const PARQ_FIXED_TAGS: Partial<Record<ParqQuestionId, ContraindicationTag>> = {
 /** Perguntas cujo `detail` (texto livre) é a única fonte de tag possível. */
 const PARQ_FREE_TEXT_QUESTIONS: readonly ParqQuestionId[] = ['Q6', 'Q8', 'Q9'];
 
-/** Tontura/desmaio é o único gatilho que, sozinho, trava a periodização em `ADAPTACAO`. */
-const PARQ_PHASE_CAP_QUESTIONS: readonly ParqQuestionId[] = ['Q4'];
-
 export function parqToConstraints(
   evaluation: ParqEvaluation,
   answers: readonly ParqAnswer[],
-): { tags: ContraindicationTag[]; maxPhase?: 'ADAPTACAO' } {
+): { tags: ContraindicationTag[] } {
   const triggered = new Set<ParqQuestionId>(evaluation.triggeredQuestions);
   if (triggered.size === 0) return { tags: [] };
 
@@ -316,8 +335,7 @@ export function parqToConstraints(
   }
   for (const tag of mapInjuriesToTags(freeText)) tags.add(tag);
 
-  const capped = PARQ_PHASE_CAP_QUESTIONS.some((q) => triggered.has(q));
-  return { tags: [...tags], ...(capped ? { maxPhase: 'ADAPTACAO' as const } : {}) };
+  return { tags: [...tags] };
 }
 
 /**

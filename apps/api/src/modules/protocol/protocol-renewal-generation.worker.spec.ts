@@ -1,6 +1,7 @@
 import type { ProtocolStructure } from '@movivo/shared';
 import type { Job } from 'bullmq';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { qualityAssessment } from './contextual-quality.fixture';
 
 import { protocolRenewalSessions, protocols, users } from '../../core/database/schema';
 import type { HealthCipherService } from '../../core/database/health-cipher.service';
@@ -207,6 +208,7 @@ function makeWorker(deps: Deps = {}) {
   } as unknown as HealthCipherService;
 
   const generator = {
+    assessQuality: vi.fn(async () => qualityAssessment()),
     generate: vi.fn(() => Promise.resolve(genResult)),
   } as unknown as ProtocolGeneratorService;
   const validation = {
@@ -246,6 +248,32 @@ function job(over: Partial<ProtocolRenewalGenerationJob> = {}): Job<ProtocolRene
     attemptsMade: 0,
   } as unknown as Job<ProtocolRenewalGenerationJob>;
 }
+
+describe('renovação com qualidade contextual pendente', () => {
+  it.each(['GAPS', 'UNAVAILABLE'] as const)(
+    '%s impede auto-liberação e mantém a origem individualizada',
+    async (status) => {
+      const { worker, generator, repository, enqueue } = makeWorker();
+      vi.mocked(generator.assessQuality).mockResolvedValue(qualityAssessment(status));
+      await worker.process(job());
+      expect(repository.persist).toHaveBeenCalledWith(
+        expect.objectContaining({
+          generatedBy: genResult.provider,
+          reviewUrgency: 'MANDATORY',
+          constraints: expect.objectContaining({
+            contextualQuality: qualityAssessment(status).summary,
+          }),
+        }),
+      );
+      expect(enqueue).not.toHaveBeenCalledWith(
+        'protocol-auto-release',
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      );
+    },
+  );
+});
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -309,7 +337,7 @@ describe('ProtocolRenewalGenerationWorker.process', () => {
     );
   });
 
-  it('pergunta 10 (repescagem PAR-Q) "mudou para Sim": MANDATORY, sem auto-liberação, maxPhase ADAPTACAO', async () => {
+  it('repescagem PAR-Q mantém MANDATORY sem impor fase ou rebaixar nível', async () => {
     const { worker, repository, generator, enqueue } = makeWorker({ changedToYes: true });
     const res = await worker.process(job());
     expect(res.status).toBe('PENDING_REVIEW');
@@ -317,7 +345,8 @@ describe('ProtocolRenewalGenerationWorker.process', () => {
       expect.objectContaining({
         constraints: expect.objectContaining({
           requiresProfessionalReview: true,
-          maxPhase: 'ADAPTACAO',
+          maxPhase: undefined,
+          level: PREVIOUS_CONSTRAINTS.level,
         }),
       }),
     );
@@ -326,6 +355,29 @@ describe('ProtocolRenewalGenerationWorker.process', () => {
     );
     // Só o alerta ao profissional: MANDATORY nunca agenda auto-liberação.
     expect((enqueue.mock.calls as unknown[][]).map((c) => c[0])).toEqual(['whatsapp-outbound']);
+  });
+
+  it('renovação não propaga teto legado nem rebaixa nível avançado com revisão obrigatória', async () => {
+    const { worker, generator } = makeWorker({
+      changedToYes: true,
+      previousProtocol: previousProtocolRow({
+        constraints: {
+          ...PREVIOUS_CONSTRAINTS,
+          level: 'AVANCADO',
+          maxPhase: 'ADAPTACAO',
+        },
+      }),
+    });
+    await worker.process(job());
+    expect(generator.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        constraints: expect.objectContaining({
+          level: 'AVANCADO',
+          maxPhase: undefined,
+          requiresProfessionalReview: true,
+        }),
+      }),
+    );
   });
 
   it('conteúdo cai no fallback (BLOCK persistente): MANDATORY mesmo com PAR-Q liberado', async () => {

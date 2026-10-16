@@ -11,6 +11,44 @@
 
 ## 1. Decisão fundamental
 
+**Revisão obrigatória não determina periodização (decisão do RT, 2026-10-15):** PAR-Q
+positivo mantém o protocolo pendente de aprovação humana e impede auto-liberação, mas
+não força `ADAPTACAO`, não veta uma fase apenas pelo PAR-Q e não rebaixa a experiência
+declarada. Fase e duração do mesociclo seguem a metodologia publicada, a anamnese e,
+nas renovações, a evolução observada. Permanecem os filtros de contraindicação, limites
+de esforço/técnicas, validação do catálogo e decisão final do profissional CREF.
+O campo persistido legado `maxPhase` não impõe mais fase; só mantém compatibilidade
+com os limites de esforço em protocolos antigos. A mudança de código não altera nem
+regera automaticamente protocolos existentes.
+
+**Qualidade contextual dos rascunhos (2026-10-15):** além da validação determinística,
+o planner avalia a aplicação da metodologia publicada em conjunto com objetivo,
+necessidades, preferências, rotina, restrições e evolução do aluno. O avaliador usa o
+mesmo identificador/hash de metodologia da geração, o catálogo elegível e cobertura
+calculada dos exercícios efetivos (não títulos). Todos os sete critérios exigem parecer
+estruturado e trecho literal da metodologia. Isso não certifica segurança individual.
+Ausência de ênfase é detectada independentemente do parecer; não autoriza inserir
+exercício vetado, nem obriga padrões/volumes universais.
+
+Lacunas compartilham as duas rodadas de correção existentes; cada novo conteúdo é
+revalidado e, quando elegível, reavaliado. Lacuna persistente ou avaliação indisponível/
+inválida preserva o rascunho válido com revisão `MANDATORY`, sem job de auto-liberação;
+qualidade insuficiente, sozinha, não provoca template. Se uma correção piorar a segurança,
+preserva-se o último rascunho que passou nas regras. Falhas de segurança sem rascunho
+válido continuam seguindo reparo/fallback. O painel distingue a origem `QUALITY` e
+mostra os critérios pendentes/adaptados ao CREF, sem retirar sua autoridade de editar
+e assinar. Protocolos legados e jobs existentes não são reclassificados.
+
+A avaliação passa pelo `LLMRouter` como `HEALTH`, com os gates e contabilização existentes,
+até uma chamada adicional por candidato válido (máximo de três no ciclo de correção,
+ou uma após reparo determinístico). Indisponibilidade, limite diário, saída malformada
+ou mudança concorrente de metodologia nunca contam como aprovação. Só códigos,
+contagens e versão são persistidos no rastro e no snapshot de constraints; observações
+livres do avaliador ficam apenas em memória para feedback, não são logadas nem enviadas
+ao aluno. A geração e a avaliação também recebem barreiras de adesão e esporte paralelo
+declarados na anamnese como dados não confiáveis; renovações recuperam esse contexto
+original e o combinam com os dados atuais de execução/renovação.
+
 **Monólito Modular com Bounded Contexts explícitos em NestJS — não microservices.**
 
 Motivo: 3 co-fundadores engenheiros, early-stage, SLA de 99,9%, time-to-market agressivo. Microservices adicionariam ~40% de overhead de desenvolvimento e complexidade operacional sem ganho proporcional no volume esperado (< 5.000 usuários ativos no MVP). Módulos NestJS fortemente encapsulados permitem extração cirúrgica para microservices no futuro, um módulo por vez, quando necessário (ver §7).
