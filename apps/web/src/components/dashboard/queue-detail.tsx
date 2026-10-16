@@ -98,6 +98,11 @@ import {
 const WEEKDAY_LABELS: Record<string, string> = Object.fromEntries(
   WEEKDAY_ITEMS.map((item) => [item.value, item.label]),
 );
+const WEEKDAY_ORDER = new Map(WEEKDAY_ITEMS.map((item, index) => [item.value, index]));
+const weekdayOrder = (weekday: Weekday | undefined): number =>
+  weekday === undefined
+    ? Number.MAX_SAFE_INTEGER
+    : (WEEKDAY_ORDER.get(weekday) ?? Number.MAX_SAFE_INTEGER);
 
 /** Únicos 4 valores do enum real de fase (`ProtocolStructure.phase`). */
 const PHASE_LABELS: Record<string, string> = {
@@ -848,6 +853,116 @@ function ExerciseReorderList({
   );
 }
 
+/** Troca os DIAS, não o conteúdo: o treino de quarta passa a ser o de quinta e vice-versa. */
+export function swapSessionWeekdays(
+  sessions: ProtocolStructure['sessions'],
+  from: number,
+  to: number,
+): ProtocolStructure['sessions'] {
+  if (from === to) return sessions;
+  const source = sessions[from];
+  const target = sessions[to];
+  if (!source?.weekday || !target?.weekday) return sessions;
+  return sessions.map((session, index) =>
+    index === from
+      ? { ...session, weekday: target.weekday }
+      : index === to
+        ? { ...session, weekday: source.weekday }
+        : session,
+  );
+}
+
+function SortableSessionDayRow({
+  id,
+  session,
+}: {
+  id: string;
+  session: ProtocolStructure['sessions'][number];
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+  const day = session.weekday ? (WEEKDAY_LABELS[session.weekday] ?? session.weekday) : 'Sem dia';
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform ? { ...transform, x: 0 } : null),
+        transition,
+      }}
+      className={cn(
+        'flex items-center gap-3 rounded-lg border border-border bg-card p-3',
+        isDragging && 'relative z-10 border-ring shadow-lg',
+      )}
+    >
+      <button
+        type="button"
+        ref={setActivatorNodeRef}
+        {...attributes}
+        {...listeners}
+        aria-label={`Arrastar ${session.dayLabel || 'sessão'} de ${day}`}
+        title="Arraste, ou use espaço e as setas do teclado"
+        className="flex size-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring active:cursor-grabbing"
+      >
+        <GripVertical aria-hidden="true" className="size-4" />
+      </button>
+      <span className="min-w-24 font-semibold">{day}</span>
+      <span className="min-w-0 flex-1 truncate text-label font-medium">
+        {session.dayLabel || 'Sessão sem identificação'}
+      </span>
+      <span className="hidden text-xs text-muted-foreground sm:block">{session.focus}</span>
+    </li>
+  );
+}
+
+/** Lista os slots de calendário; soltar um treino sobre outro troca os respectivos weekdays. */
+function SessionDayReorderList({
+  sessions,
+  onSwap,
+}: {
+  sessions: ProtocolStructure['sessions'];
+  onSwap: (from: number, to: number) => void;
+}) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const entries = sessions
+    .map((session, index) => ({ session, index, id: `session-${index}` }))
+    .sort(
+      (left, right) => weekdayOrder(left.session.weekday) - weekdayOrder(right.session.weekday),
+    );
+
+  function handleDragEnd({ active, over }: DragEndEvent) {
+    if (!over || active.id === over.id) return;
+    const from = entries.find((entry) => entry.id === active.id)?.index;
+    const to = entries.find((entry) => entry.id === over.id)?.index;
+    if (from !== undefined && to !== undefined) onSwap(from, to);
+  }
+
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <SortableContext
+        items={entries.map((entry) => entry.id)}
+        strategy={verticalListSortingStrategy}
+      >
+        <ol aria-label="Ordem dos treinos por dia" className="flex flex-col gap-2">
+          {entries.map((entry) => (
+            <SortableSessionDayRow key={entry.id} id={entry.id} session={entry.session} />
+          ))}
+        </ol>
+      </SortableContext>
+    </DndContext>
+  );
+}
+
 /**
  * Card "Protocolo · versão N" — o ícone de lápis no topo edita DENTRO deste mesmo
  * componente (achado 2026-08-19, a pedido do fundador): nada de trocar pra um formulário
@@ -863,6 +978,7 @@ function ProtocolSummary({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<ProtocolStructure>(() => structuredClone(protocol.content));
   const [reorderingSession, setReorderingSession] = useState<number | null>(null);
+  const [reorderingDays, setReorderingDays] = useState(false);
   const [issues, setIssues] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
   const [anamnesisOpen, setAnamnesisOpen] = useState(false);
@@ -878,6 +994,7 @@ function ProtocolSummary({
 
   function resetEditorState() {
     setReorderingSession(null);
+    setReorderingDays(false);
     setIssues([]);
     setAmendmentReason('');
     setPendingPicks(new Set());
@@ -939,6 +1056,7 @@ function ProtocolSummary({
 
   function removeSession(index: number) {
     setReorderingSession(null);
+    setReorderingDays(false);
     setDraft((current) => ({
       ...current,
       sessions: current.sessions.filter((_, position) => position !== index),
@@ -1006,6 +1124,13 @@ function ProtocolSummary({
           ? { ...session, exercises: arrayMove(session.exercises, from, to) }
           : session,
       ),
+    }));
+  }
+
+  function moveSessionToDay(from: number, to: number) {
+    setDraft((current) => ({
+      ...current,
+      sessions: swapSessionWeekdays(current.sessions, from, to),
     }));
   }
 
@@ -1126,6 +1251,10 @@ function ProtocolSummary({
   }
 
   const content = editing ? draft : protocol.content;
+  const canReorderDays =
+    draft.sessions.length > 1 &&
+    draft.sessions.every((session) => session.weekday !== undefined) &&
+    new Set(draft.sessions.map((session) => session.weekday)).size === draft.sessions.length;
 
   return (
     <section
@@ -1326,7 +1455,41 @@ function ProtocolSummary({
         </div>
       ) : null}
 
-      <div className="mt-5 space-y-4">
+      {editing ? (
+        <div className="mt-5 rounded-lg border border-border bg-secondary/20 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-label font-semibold">Dias dos treinos</p>
+              <p className="text-xs text-muted-foreground">
+                Arraste um treino sobre outro para trocar os dias, sem alterar exercícios ou volume.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant={reorderingDays ? 'default' : 'ghost'}
+              size="sm"
+              disabled={!canReorderDays}
+              aria-pressed={reorderingDays}
+              onClick={() => setReorderingDays((current) => !current)}
+              title={
+                canReorderDays
+                  ? 'Trocar os dias dos treinos por arrastar e soltar'
+                  : 'Defina dias diferentes para todas as sessões antes de reordenar'
+              }
+            >
+              <ArrowDownUp aria-hidden="true" className="size-4" />{' '}
+              {reorderingDays ? 'Concluir dias' : 'Reordenar dias'}
+            </Button>
+          </div>
+          {reorderingDays ? (
+            <div className="mt-3">
+              <SessionDayReorderList sessions={draft.sessions} onSwap={moveSessionToDay} />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className={cn('mt-5 space-y-4', editing && reorderingDays && 'hidden')}>
         {content.sessions.map((session, index) => (
           <details
             // Achado 2026-08-22: a chave incluía `session.dayLabel` — como esse é o
