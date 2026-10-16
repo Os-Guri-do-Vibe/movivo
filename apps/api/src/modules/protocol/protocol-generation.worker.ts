@@ -64,12 +64,12 @@ import { ProtocolRepository } from './protocol.repository';
 import { healthBlockSchema, type HealthBlock } from '../anamnesis/health-block';
 import { evaluateParq, type ParqEvaluation } from '../anamnesis/parq';
 import {
-  demoteLevel,
   emphasisToMuscleGroups,
   importantEventForPrompt,
   levelFromExperience,
   mapInjuriesToTags,
   painToConstraints,
+  routineContextForPrompt,
   parqToConstraints,
   type UserConstraints,
 } from './user-constraints';
@@ -109,15 +109,16 @@ export const REPAIRED_PROTOCOL_REVIEW_URGENCY: 'MANDATORY' | 'OPTIONAL' = 'OPTIO
 
 /**
  * ÚNICO ponto de decisão `MANDATORY` × `OPTIONAL` da geração (inicial e renovação). Motivos
- * independentes de `MANDATORY`, qualquer um basta: PAR-Q do titular (2026-08-24) e conteúdo
- * do template de fallback (2026-09-03). Reparo determinístico segue
+ * independentes de `MANDATORY`, qualquer um basta: PAR-Q do titular, template de fallback
+ * ou qualidade contextual pendente/indisponível. Reparo determinístico segue
  * `REPAIRED_PROTOCOL_REVIEW_URGENCY`.
  */
 export function reviewUrgencyForPlan(
-  plan: Pick<PlanResult, 'usedFallbackTemplate' | 'repairs'>,
+  plan: Pick<PlanResult, 'usedFallbackTemplate' | 'repairs' | 'contextualQuality'>,
   requiresProfessionalReview: boolean,
 ): 'MANDATORY' | 'OPTIONAL' {
   if (requiresProfessionalReview || plan.usedFallbackTemplate) return 'MANDATORY';
+  if (plan.contextualQuality && plan.contextualQuality.status !== 'PASS') return 'MANDATORY';
   if (plan.repairs.length > 0) return REPAIRED_PROTOCOL_REVIEW_URGENCY;
   return 'OPTIONAL';
 }
@@ -240,7 +241,7 @@ export class ProtocolGenerationWorker implements OnModuleInit {
     const persisted = await this.repository.persist({
       userId,
       content: plan.content,
-      constraints,
+      constraints: { ...constraints, contextualQuality: plan.contextualQuality },
       // Achado 2026-08-24: aqui gravava `injuryTags` — as tags de DOR/LESÃO — numa coluna
       // que o resto do sistema (validador, painel) lê como "flags de PAR-Q". Agora grava
       // o que a coluna promete: só o que veio do PAR-Q.
@@ -347,8 +348,7 @@ export class ProtocolGenerationWorker implements OnModuleInit {
    * 2026-08-24: o PAR-Q entra aqui como restrição de verdade (`parqToConstraints`) — tag
    * de PAR-Q é mesclada em `injuryTags` para que gerador E validador a tratem com a mesma
    * força de uma lesão, e continua visível separada em `parqTags` (o que vai pra coluna
-   * `par_q_flags`). Quando o PAR-Q bloqueia, o nível cai um degrau (`demoteLevel`): quem
-   * tem alerta clínico aberto não começa por onde o histórico de treino permitiria.
+   * `par_q_flags`). A revisão obrigatória não altera o nível nem determina a fase.
    */
   private toConstraints(ctx: LoadedContext): UserConstraints {
     const { structured, health } = ctx;
@@ -375,21 +375,10 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       requiresProfessionalReview,
       parqTags: parq.tags,
       parqTriggered: evaluation.triggeredQuestions,
-      // Achado 2026-09-02: isto só nascia de `parq.maxPhase`, que só existe quando Q4
-      // (equilíbrio/desmaio) dispara. O teto de fase + piso de RIR do `ValidationService`
-      // (o veto que "um prompt pode ser ignorado pelo modelo, mas este não pode") ficava
-      // então mudo pra qualquer titular travado por OUTRO gatilho de PAR-Q (cardíaco,
-      // gravidez, cirurgia recente...) — o `CONSERVATIVE_MODE_BLOCK` do prompt pedia
-      // ADAPTACAO+RIR>=2, mas nada no validador cobrava isso de verdade fora do caso Q4.
-      // `requiresProfessionalReview` é o sinal autoritativo (`triggeredQuestions.length >
-      // 0`, ver `parq.ts`) — Q4 já está contido nele, então isto substitui `parq.maxPhase`
-      // sem perder nenhum caso que ele cobria.
-      ...(requiresProfessionalReview ? { maxPhase: 'ADAPTACAO' as const } : {}),
       // "Outro" nunca chega ao gerador: `toGenerationGoal` o traduz para o objetivo
       // genérico seguro; o texto bruto do usuário fica na anamnese, para o painel CREF.
       goal: toGenerationGoal(structured.primaryGoal),
-      // Fim do default hardcoded (D6 / TASK-6.9.2). PAR-Q bloqueado rebaixa um degrau.
-      level: requiresProfessionalReview ? demoteLevel(level) : level,
+      level,
       trainingStatus: structured.trainingStatus,
       ...(structured.stoppedFor ? { stoppedFor: structured.stoppedFor } : {}),
       daysPerWeek: structured.daysPerWeek,
@@ -407,6 +396,7 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       // "CARDIAC vindo do PAR-Q" só existiria como etiqueta, sem vetar exercício nenhum.
       injuryTags: [...new Set([...pain.tags, ...mapInjuriesToTags(injuriesRaw), ...parq.tags])],
       injuriesRaw,
+      routineContext: routineContextForPrompt(structured, health.freeText),
       importantEvent: importantEventForPrompt(
         structured,
         health.freeText?.importantEventDescription,

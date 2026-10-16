@@ -34,7 +34,7 @@ export interface QueueItem {
    * que não existe em nenhum lugar do catálogo — mandatory, com a opção de adicionar ao
    * catálogo na tela de detalhe (`substitution.catalogGap`). `null` nos demais itens `optional`.
    */
-  origin: 'PARQ' | 'FALLBACK' | 'EDIT' | 'AI_SUBSTITUTION' | 'CATALOG_GAP' | null;
+  origin: 'PARQ' | 'FALLBACK' | 'EDIT' | 'QUALITY' | 'AI_SUBSTITUTION' | 'CATALOG_GAP' | null;
   /** O profissional logado já abriu este item. Ler não tira o item da fila. */
   read: boolean;
 }
@@ -128,6 +128,7 @@ export interface ProtocolReview {
   availability: { daysPerWeek: number | null; preferredDays: string[] };
   blocking: ProtocolConflict[];
   conflicts: ProtocolConflict[];
+  qualityNotices?: string[];
 }
 
 /** Item do autocomplete de exercício (catálogo oficial publicado). */

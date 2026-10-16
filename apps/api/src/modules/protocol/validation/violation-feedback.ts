@@ -70,9 +70,9 @@ export const VIOLATION_FIX_HINTS: Readonly<Record<string, string>> = {
     'Aluno INICIANTE não pode ter o campo "technique" em nenhum exercício. Remova "technique" de todos esses exercícios; densidade, quando desejada, vem de "restSeconds" menores e da ordem dos exercícios, e cardio vem como exercício separado no fim da sessão.',
   TECHNIQUE_OVERUSE: `No máximo ${MAX_TECHNIQUES_PER_SESSION} exercícios com "technique" por sessão e, havendo 2 ou mais sessões, pelo menos 1 sessão sem nenhum "technique". Um dia "em circuito" fora da divisão CIRCUITO se expressa pela ordem dos exercícios e por "restSeconds" curtos, sem marcar "technique".`,
   ISOLATION_AS_BASE: `Troque isolado(s) por multiarticular(es), core ou cardio da BASE DE REFERÊNCIA até que no máximo ${pct(ISOLATION_MAJORITY_THRESHOLD)} dos exercícios da sessão sejam ISOLATION.`,
-  PARQ_PHASE_CAP_EXCEEDED: `Modo conservador: "phase" DEVE ser "ADAPTACAO" e "phaseDurationWeeks" entre ${PHASE_DURATION_WEEKS_RANGE.ADAPTACAO.minWeeks} e ${PHASE_DURATION_WEEKS_RANGE.ADAPTACAO.maxWeeks}. Ajuste repetições, "rir" e volume para ficarem coerentes com ADAPTACAO.`,
   PARQ_RIR_TOO_LOW: 'Modo conservador: todo "rir" declarado deve respeitar o piso indicado.',
-  PARQ_VIOLATION: 'Modo conservador: nenhum "technique" em nenhum exercício e "phase" nunca FORCA.',
+  PARQ_VIOLATION:
+    'Modo conservador: nenhum "technique" em nenhum exercício; preserve a fase escolhida conforme a metodologia.',
   SESSION_COUNT_MISMATCH:
     'Gere exatamente uma sessão por dia disponível do aluno, com "weekday" preenchido em cada uma — reorganize a divisão para essa quantidade, sem sessão vazia ou repetida.',
   WEEKLY_SESSIONS_EXCEED_AVAILABILITY:
@@ -279,9 +279,6 @@ export function buildCorrectionMessage(
         items.push(`[${rule}] ${where.join('; ') || 'sessão com isolados em excesso'}. ${hint}`);
         break;
       }
-      case 'PARQ_PHASE_CAP_EXCEEDED':
-        items.push(`[${rule}] "phase" atual: ${structure.phase}. ${hint}`);
-        break;
       case 'PARQ_RIR_TOO_LOW': {
         const floor = parqRirFloor(constraints.parqTags);
         const where = locate(structure, (ex) => ex.rir !== undefined && ex.rir < floor).map(
@@ -292,7 +289,6 @@ export function buildCorrectionMessage(
       }
       case 'PARQ_VIOLATION': {
         const parts: string[] = [];
-        if (structure.phase === 'FORCA') parts.push('"phase" é FORCA');
         const withTechnique = locate(structure, (ex) => Boolean(ex.technique)).map((at) =>
           exerciseRef(structure, at),
         );

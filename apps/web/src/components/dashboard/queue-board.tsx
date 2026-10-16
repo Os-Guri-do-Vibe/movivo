@@ -221,6 +221,11 @@ function QueueCard({ item, section }: { item: QueueItem; section: QueueSectionId
                   Origem: template conservador (geração não validou)
                 </span>
               ) : null}
+              {item.origin === 'QUALITY' ? (
+                <span className="text-xs font-medium text-muted-foreground">
+                  Origem: qualidade contextual pendente
+                </span>
+              ) : null}
               {item.origin === 'PARQ' ? (
                 /*
                  * Único sinal LEGÍVEL de que este protocolo obrigatório veio de um PAR-Q

@@ -415,16 +415,16 @@ describe('buildCorrectionMessage — cada regra traz localização e o que cumpr
     expect(msg).toContain('sessão com isolados em excesso');
   });
 
-  it('PARQ_PHASE_CAP_EXCEEDED: fase atual e faixa de ADAPTACAO', () => {
+  it('não emite instrução de ADAPTACAO por teto legado', () => {
     const s = structure([ex('supino_reto_halter')], [ex('supino_reto_halter')]);
     s.phase = 'HIPERTROFIA';
     s.phaseDurationWeeks = 4;
-    const msg = realMessage(s, { maxPhase: 'ADAPTACAO', parqTags: ['BALANCE_FALL_RISK'] });
-    expect(lineOf(msg, 'PARQ_PHASE_CAP_EXCEEDED')).toContain('"phase" atual: HIPERTROFIA.');
-    expect(lineOf(msg, 'PARQ_PHASE_CAP_EXCEEDED')).toContain('"phase" DEVE ser "ADAPTACAO"');
+    const msg = direct(s, ['PARQ_VIOLATION']);
+    expect(msg).not.toContain('"phase" DEVE ser "ADAPTACAO"');
+    expect(msg).not.toContain('"phase" nunca FORCA');
   });
 
-  it('PARQ_VIOLATION: fase FORCA e técnica localizadas', () => {
+  it('PARQ_VIOLATION localiza técnica sem vetar fase FORCA', () => {
     const s = structure(
       [ex('supino_reto_halter', { technique: 'ISOMETRIA' })],
       [ex('supino_reto_halter')],
@@ -433,8 +433,9 @@ describe('buildCorrectionMessage — cada regra traz localização e o que cumpr
     s.phaseDurationWeeks = 4;
     const msg = realMessage(s, { level: 'INTERMEDIARIO', parqTags: ['BALANCE_FALL_RISK'] });
     expect(lineOf(msg, 'PARQ_VIOLATION')).toContain(
-      '"phase" é FORCA; "technique" em sessions[0] (MON).exercises[0] "supino_reto_halter"',
+      '"technique" em sessions[0] (MON).exercises[0] "supino_reto_halter"',
     );
+    expect(msg).not.toContain('"phase" é FORCA');
   });
 
   it('PARQ_VIOLATION sem nada localizável → "modo conservador violado"', () => {

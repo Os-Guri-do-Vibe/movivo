@@ -74,6 +74,15 @@ afterEach(() => {
 });
 
 describe('QueueBoard', () => {
+  it('identifica a revisão contextual sem chamá-la de template ou edição do profissional', async () => {
+    getQueue.mockResolvedValue({
+      ...queueResponse,
+      mandatory: [{ ...protocolItem, origin: 'QUALITY', autoReleaseAt: null }],
+    });
+    render(<QueueBoard />);
+    expect(await screen.findByText('Origem: qualidade contextual pendente')).toBeVisible();
+  });
+
   it('separa em duas categorias — Revisão Humana Obrigatória e Revisão Humana Opcional', async () => {
     getQueue.mockResolvedValue(queueResponse);
     render(<QueueBoard />);

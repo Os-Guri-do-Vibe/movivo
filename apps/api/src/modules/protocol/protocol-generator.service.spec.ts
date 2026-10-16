@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ProtocolStructure } from '@movivo/shared';
+import { protocolStructureSchema, type ProtocolStructure } from '@movivo/shared';
 
 import type { AppConfigService } from '../../core/config';
 import type { LlmRouter } from '../ai-coach/llm/llm-router.service';
@@ -23,6 +23,11 @@ import {
   rtFavoritePreferenceBlock,
 } from './protocol-generator.service';
 import type { UserConstraints } from './user-constraints';
+import { QUALITY_CRITERIA, qualityUnavailable } from './contextual-quality';
+import { LLMUnavailableError } from '../ai-coach/llm/llm.types';
+import { LLMAbuseError } from '../ai-coach/llm/llm-abuse-guard.service';
+import { planProtocol } from './protocol-planner';
+import { ValidationService } from './validation/validation.service';
 
 function llmResult(text: string): LLMResult {
   return {
@@ -142,7 +147,7 @@ function makeService(
     catalog,
     semantic,
   );
-  return { service, calls, logger, retrieve };
+  return { service, calls, logger, retrieve, llm, methodology };
 }
 
 function ragDoc(chunkId: string, documentId: string, snippet = chunkId) {
@@ -160,6 +165,220 @@ function constraintsMessage(req: LLMRequest): string {
 }
 
 const command = { userId: 'u-1', user: { name: 'João' }, constraints };
+
+function reviewJson(
+  status: 'MET' | 'ADAPTED' | 'GAP' = 'MET',
+  excerpt = METHODOLOGY_GUIDELINES.slice(0, 80).trim(),
+) {
+  return JSON.stringify(
+    Object.fromEntries(
+      QUALITY_CRITERIA.map((criterion) => [
+        criterion,
+        {
+          status,
+          methodologyExcerpt: excerpt,
+          observation: 'Distribuição observada no rascunho sintético.',
+          adjustment: status === 'GAP' ? 'Redistribua os exercícios elegíveis.' : null,
+        },
+      ]),
+    ),
+  );
+}
+
+describe('avaliação contextual com a metodologia publicada', () => {
+  it('usa mesmo RT publicado, contexto e cobertura real, pelo router HEALTH', async () => {
+    const { service, calls } = makeService([validProtocolJson(), reviewJson()]);
+    const generated = await service.generate(command);
+    const quality = await service.assessQuality(command, generated);
+    expect(quality.summary.status).toBe('PASS');
+    const request = calls[1];
+    if (!request) throw new Error('esperava chamada do avaliador');
+    expect(request).toMatchObject({
+      purpose: 'PROTOCOL_GENERATION',
+      intent: 'protocol_contextual_quality',
+      dataClass: 'HEALTH',
+      temperature: 0,
+      json: true,
+      user: command.user,
+    });
+    expect(request.system).toContain(METHODOLOGY_GUIDELINES);
+    expect(request.system).toContain('nem imponha fase pelo PAR-Q');
+    expect(request.system).not.toContain('- agachamento_barra |');
+    expect(request.messages[0]?.content).toContain('treina regularmente');
+    expect(request.messages[0]?.content).not.toContain('Monte o protocolo individualizado');
+    expect(request.messages[1]?.content).toContain('RASCUNHO_E_COBERTURA_REAL');
+    expect(request.messages[1]?.content).toContain('SQUAT');
+    expect(request.messages[1]?.content).toContain('DADOS_NÃO_CONFIÁVEIS');
+  });
+
+  it.each(['ADAPTED', 'GAP'] as const)('distingue %s de aprovação genérica', async (status) => {
+    const { service } = makeService([validProtocolJson(), reviewJson(status)]);
+    const result = await service.assessQuality(command, await service.generate(command));
+    expect(result.summary.status).toBe(status === 'GAP' ? 'GAPS' : 'PASS');
+    expect(result.summary.checks.every((check) => check.status === status)).toBe(true);
+    expect(JSON.stringify(result.summary)).not.toContain('Distribuição observada');
+  });
+
+  it.each([
+    'não é JSON',
+    '{invalid}',
+    '{}',
+    '{"METHODOLOGY_FIT":{"status":"MET"}}',
+    reviewJson('MET', 'Regra inventada ausente na metodologia.'),
+  ])('parecer inválido não vira PASS: %s', async (text) => {
+    const { service, logger } = makeService([validProtocolJson(), text]);
+    const quality = await service.assessQuality(command, await service.generate(command));
+    expect(quality).toEqual(qualityUnavailable('INVALID_REVIEW'));
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it('publicação concorrente não avalia o rascunho com outra metodologia', async () => {
+    const { service, calls } = makeService([validProtocolJson()]);
+    const generated = await service.generate(command);
+    const quality = await service.assessQuality(command, {
+      ...generated,
+      methodologySha256: 'diferente',
+    });
+    expect(quality.summary.unavailableReason).toBe('METHODOLOGY_CHANGED');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('indisponibilidade esperada preserva o rascunho com revisão obrigatória explícita', async () => {
+    const { service, llm, logger } = makeService([validProtocolJson()]);
+    const generated = await service.generate(command);
+    vi.mocked(llm.complete).mockRejectedValueOnce(new LLMUnavailableError('offline'));
+    expect(await service.assessQuality(command, generated)).toEqual(
+      qualityUnavailable('LLM_UNAVAILABLE'),
+    );
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it('não oculta erro inesperado do avaliador', async () => {
+    const { service, llm } = makeService([validProtocolJson()]);
+    const generated = await service.generate(command);
+    vi.mocked(llm.complete).mockRejectedValueOnce(new Error('bug inesperado'));
+    await expect(service.assessQuality(command, generated)).rejects.toThrow('bug inesperado');
+  });
+
+  it('limite diário não descarta um rascunho já gerado', async () => {
+    const { service, llm } = makeService([validProtocolJson()]);
+    const generated = await service.generate(command);
+    vi.mocked(llm.complete).mockRejectedValueOnce(new LLMAbuseError('limite'));
+    expect(await service.assessQuality(command, generated)).toEqual(
+      qualityUnavailable('LLM_LIMIT'),
+    );
+  });
+
+  it('usa a metodologia runtime publicada, não uma rubrica fixa presa ao seed', async () => {
+    const content =
+      'Metodologia sintética publicada: concilie o objetivo e as preferências com a recuperação individual.';
+    const { service, calls, methodology } = makeService([
+      validProtocolJson(),
+      reviewJson('ADAPTED', content),
+    ]);
+    vi.mocked(methodology.current).mockResolvedValue({
+      id: 'publicacao-v42',
+      version: 42,
+      versionLabel: 'metodologia-v42',
+      content,
+      contentSha256: 'b'.repeat(64),
+    });
+    const generated = await service.generate(command);
+    const quality = await service.assessQuality(command, generated);
+    expect(quality.summary.status).toBe('PASS');
+    expect(generated.methodologyVersionId).toBe('publicacao-v42');
+    expect(calls[1]?.system).toContain(content);
+    expect(calls[1]?.system).not.toContain(METHODOLOGY_GUIDELINES);
+  });
+
+  it('fluxo real: PASS de segurança sem core é corrigido mesmo se o avaliador disser MET', async () => {
+    const initial = protocolStructureSchema.parse(
+      JSON.parse(
+        threeSessionsJson(['MON', 'WED', 'FRI']).replaceAll(
+          'agachamento_barra',
+          'agachamento_goblet',
+        ),
+      ),
+    );
+    const corrected: ProtocolStructure = {
+      ...initial,
+      sessions: initial.sessions.map((session) => ({
+        ...session,
+        exercises: [
+          ...session.exercises,
+          {
+            exerciseId: 'prancha',
+            name: 'Prancha',
+            sets: 2,
+            durationSeconds: 30,
+            loadStrategy: 'BODYWEIGHT',
+            restSeconds: 60,
+          },
+        ],
+      })),
+    };
+    const { service, calls } = makeService([
+      JSON.stringify(initial),
+      reviewJson(),
+      JSON.stringify(corrected),
+      reviewJson(),
+    ]);
+    const input = {
+      ...command,
+      constraints: { ...constraints, injuryTags: [], injuriesRaw: [], emphasis: ['core'] },
+    };
+    const validation = new ValidationService();
+    expect(validation.validate({ structure: initial, constraints: input.constraints }).code).toBe(
+      'PASS',
+    );
+    const plan = await planProtocol(service, validation, input);
+    expect(plan.usedFallbackTemplate).toBe(false);
+    expect(plan.trace.corrections).toBe(1);
+    expect(plan.contextualQuality).toMatchObject({ status: 'PASS', missingEmphasisCount: 0 });
+    expect(
+      plan.content.sessions.every((session) =>
+        session.exercises.some((exercise) => exercise.exerciseId === 'prancha'),
+      ),
+    ).toBe(true);
+    expect(calls.map((call) => call.intent)).toEqual([
+      'protocol_generation',
+      'protocol_contextual_quality',
+      'protocol_generation',
+      'protocol_contextual_quality',
+    ]);
+    expect(calls[2]?.messages.at(-1)?.content).toContain('ênfase solicitada sem exercício');
+    expect(JSON.stringify(plan.trace)).not.toContain('Distribuição observada');
+    expect(JSON.stringify(plan.contextualQuality)).not.toContain('Distribuição observada');
+  });
+
+  it('leva contexto de rotina e histórico à geração e à avaliação, como dados não confiáveis', async () => {
+    const { service, calls } = makeService([validProtocolJson(), reviewJson()]);
+    const input = {
+      ...command,
+      constraints: {
+        ...constraints,
+        routineContext: 'Barreiras: LACK_OF_TIME, TIREDNESS. Esporte: corrida 3x/semana.',
+        anamnesisInvariants: 'Experiência original intermediária.',
+        continuation: {
+          previousMesocycleNumber: 2,
+          previousPhase: 'HIPERTROFIA' as const,
+          previousPhaseDurationWeeks: 6,
+          summary: 'Fadiga ao final do ciclo.',
+          executionDigest: 'Aderência real: 80%.',
+        },
+      },
+    };
+    const generated = await service.generate(input);
+    await service.assessQuality(input, generated);
+    for (const request of calls) {
+      const messages = request.messages.map((turn) => turn.content).join('\n');
+      expect(messages).toContain('LACK_OF_TIME, TIREDNESS');
+      expect(messages).toContain('Aderência real: 80%');
+      expect(messages).toContain('DADO');
+      expect(request.system).not.toContain('Esporte: corrida 3x/semana');
+    }
+  });
+});
 
 describe('ProtocolGeneratorService', () => {
   it('gera um ProtocolStructure válido a partir da saída do LLM', async () => {
@@ -459,13 +678,23 @@ describe('prompt de regras verificadas e rodada de correção (2026-09-29)', () 
     expect(message).toContain('a divisão CIRCUITO é a única exceção');
   });
 
-  it('maxPhase ADAPTACAO substitui a linha de status (sem o "NÃO force ADAPTACAO")', async () => {
+  it('revisão obrigatória preserva status e delega fase à metodologia mesmo com teto legado', async () => {
     const regular = await userMessageFor(constraints);
     expect(regular).toContain('NÃO force ADAPTACAO');
-    const capped = await userMessageFor({ ...constraints, maxPhase: 'ADAPTACAO' });
-    expect(capped).not.toContain('NÃO force ADAPTACAO');
-    expect(capped).toContain(
-      'Status de treino: fase travada em ADAPTACAO pelo modo conservador — independentemente do status de treino, "phase" DEVE ser ADAPTACAO.',
+    const capped = await userMessageFor({
+      ...constraints,
+      requiresProfessionalReview: true,
+      maxPhase: 'ADAPTACAO',
+    });
+    expect(capped).toContain('NÃO force ADAPTACAO');
+    expect(capped).not.toContain('"phase" DEVE ser exatamente "ADAPTACAO"');
+    const { service, calls } = makeService([validProtocolJson()]);
+    await service.generate({
+      ...command,
+      constraints: { ...constraints, requiresProfessionalReview: true },
+    });
+    expect(calls[0]?.system).toContain(
+      'Revisão obrigatória não impõe ADAPTACAO nem reduz o nível de experiência.',
     );
   });
 

@@ -9,6 +9,7 @@ const ORIGIN_LABEL = {
   PARQ: 'Origem: PAR-Q bloqueante',
   FALLBACK: 'Origem: template conservador',
   EDIT: 'Origem: edição do profissional',
+  QUALITY: 'Origem: qualidade contextual pendente',
   AI_SUBSTITUTION: 'Origem: substituição confirmada pelo aluno',
   CATALOG_GAP: 'Origem: exercício fora do catálogo',
 } as const;

@@ -256,7 +256,6 @@ describe('deterministicRepair — nunca repara segurança nem o que exige julgam
     'EXERCISE_CONTRAINDICATED',
     'EXERCISE_LEVEL_TOO_HIGH',
     'EXERCISE_UNKNOWN',
-    'PARQ_PHASE_CAP_EXCEEDED',
     'SESSION_COUNT_MISMATCH',
     'SPLIT_LEVEL_NOT_ALLOWED',
     'SPLIT_FREQUENCY_MISMATCH',
@@ -268,7 +267,7 @@ describe('deterministicRepair — nunca repara segurança nem o que exige julgam
     expect(deterministicRepair(base(standard), violations(rule), ctx)).toBeNull();
   });
 
-  it('PARQ_VIOLATION da variante fase FORCA → null', () => {
+  it('remove técnica contraindicada sem trocar a fase FORCA', () => {
     const structure = base(standard, { phase: 'FORCA', phaseDurationWeeks: 4 });
     exAt(structure, 0, 0).technique = 'DROP_SET';
     const s: Scenario = { level: 'INTERMEDIARIO', parqFlags: ['BALANCE_FALL_RISK'] };
@@ -279,7 +278,10 @@ describe('deterministicRepair — nunca repara segurança nem o que exige julgam
         ...ctx,
         parqFlags: ['BALANCE_FALL_RISK'],
       }),
-    ).toBeNull();
+    ).toMatchObject({
+      structure: { phase: 'FORCA' },
+      repairs: ['STRIP_ALL_TECHNIQUES'],
+    });
   });
 
   it('WEEKDAY_MISMATCH com nº de sessões ≠ nº de dias → null', () => {

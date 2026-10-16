@@ -1,6 +1,7 @@
 import { PARQ_QUESTION_IDS, PARQ_VERSION, type ProtocolStructure } from '@movivo/shared';
 import type { Job } from 'bullmq';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { qualityAssessment } from './contextual-quality.fixture';
 
 import { users } from '../../core/database/schema';
 import type { HealthCipherService } from '../../core/database/health-cipher.service';
@@ -177,6 +178,7 @@ function makeWorker(deps: Deps = {}) {
   } as unknown as HealthCipherService;
 
   const generator = {
+    assessQuality: vi.fn(async () => qualityAssessment()),
     generate: vi.fn(() => Promise.resolve(genResult)),
     favoriteUsage: vi.fn(() => ({ favoritesInBase: 4, favoritesPrescribed: 2, slots: 9 })),
   } as unknown as ProtocolGeneratorService;
@@ -354,8 +356,8 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
     );
   });
 
-  it('PAR-Q Q4 (tontura/desmaio) trava a fase em ADAPTACAO e rebaixa o nível', async () => {
-    const { worker, generator } = makeWorker({
+  it('PAR-Q Q4 mantém revisão obrigatória sem impor fase ou rebaixar experiência', async () => {
+    const { worker, generator, repository, enqueue } = makeWorker({
       user: userRow({ requiresProfessionalReview: true }),
       parqYes: { Q4: true },
     });
@@ -364,11 +366,16 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
       expect.objectContaining({
         constraints: expect.objectContaining({
           parqTags: ['BALANCE_FALL_RISK'],
-          maxPhase: 'ADAPTACAO',
-          // A fixture declara `experience: 'INTERMEDIATE'` → INTERMEDIARIO, rebaixado.
-          level: 'INICIANTE',
+          level: 'INTERMEDIARIO',
         }),
       }),
+    );
+    expect(vi.mocked(generator.generate).mock.calls[0]?.[0].constraints.maxPhase).toBeUndefined();
+    expect(repository.persist).toHaveBeenCalledWith(
+      expect.objectContaining({ reviewUrgency: 'MANDATORY' }),
+    );
+    expect((enqueue.mock.calls as unknown[][]).map((call) => call[0])).not.toContain(
+      'protocol-auto-release',
     );
   });
 
@@ -474,10 +481,39 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
     expect(reviewUrgencyForPlan(clean, false)).toBe('OPTIONAL');
     expect(reviewUrgencyForPlan(repaired, false)).toBe(REPAIRED_PROTOCOL_REVIEW_URGENCY);
     expect(reviewUrgencyForPlan(repaired, true)).toBe('MANDATORY');
+    expect(
+      reviewUrgencyForPlan(
+        { ...repaired, contextualQuality: qualityAssessment('GAPS').summary },
+        false,
+      ),
+    ).toBe('MANDATORY');
     expect(reviewUrgencyForPlan({ usedFallbackTemplate: true, repairs: [] }, false)).toBe(
       'MANDATORY',
     );
   });
+
+  it.each(['GAPS', 'UNAVAILABLE'] as const)(
+    '%s contextual exige revisão obrigatória, persiste o diagnóstico e não agenda liberação',
+    async (status) => {
+      const { worker, generator, repository, enqueue } = makeWorker();
+      vi.mocked(generator.assessQuality).mockResolvedValue(qualityAssessment(status));
+      await worker.process(job());
+      expect(repository.persist).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reviewUrgency: 'MANDATORY',
+          constraints: expect.objectContaining({
+            contextualQuality: qualityAssessment(status).summary,
+          }),
+        }),
+      );
+      expect(enqueue).not.toHaveBeenCalledWith(
+        'protocol-auto-release',
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      );
+    },
+  );
 
   it('validador flagou (revisão opcional) → PENDING_REVIEW + agenda auto-liberação em 24h', async () => {
     const { worker, enqueue, repository } = makeWorker({ action: 'FLAG_HUMAN_REVIEW' });

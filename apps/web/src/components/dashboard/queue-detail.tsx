@@ -1258,6 +1258,20 @@ function ProtocolSummary({
         </p>
       ) : null}
 
+      {!editing && protocol.review?.origin === 'AI' && protocol.review.qualityNotices?.length ? (
+        <div className="mt-4 rounded-lg border border-coral p-4" role="note">
+          <p className="text-label font-semibold">Qualidade contextual do rascunho</p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Conferência da metodologia vigente em conjunto com o perfil do aluno. A decisão final é
+            do profissional CREF; esta avaliação não comprova segurança individual.
+          </p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-label">
+            {protocol.review.qualityNotices.map((notice) => (
+              <li key={notice}>{notice}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {!editing && protocol.review && protocol.review.blocking.length > 0 ? (
         <div
           role="alert"

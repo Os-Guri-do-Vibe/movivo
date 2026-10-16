@@ -274,6 +274,10 @@ describe('parsers do contrato do dashboard', () => {
       parseQueueResponse({ mandatory: [{ ...base, origin: 'FALLBACK' }], ...empty }).mandatory[0]
         ?.origin,
     ).toBe('FALLBACK');
+    expect(
+      parseQueueResponse({ mandatory: [{ ...base, origin: 'QUALITY' }], ...empty }).mandatory[0]
+        ?.origin,
+    ).toBe('QUALITY');
     for (const origin of ['DESCONHECIDA', undefined, null]) {
       expect(
         parseQueueResponse({ mandatory: [{ ...base, origin }], ...empty }).mandatory[0]?.origin,
@@ -549,6 +553,22 @@ describe('prescrição manual do profissional e catálogo (achado 2026-10-15)', 
 
   it('resposta antiga sem `review` continua válida', () => {
     expect(parseQueueDetail(protocolDetail).protocol?.review).toBeUndefined();
+  });
+
+  it('preserva avisos contextuais válidos sem aceitar valores não textuais', () => {
+    const detail = parseQueueDetail({
+      ...protocolDetail,
+      protocol: {
+        ...protocolDetail.protocol,
+        review: {
+          origin: 'AI',
+          blocking: [],
+          conflicts: [],
+          qualityNotices: ['Revisar cobertura semanal.', 7, null],
+        },
+      },
+    });
+    expect(detail.protocol?.review?.qualityNotices).toEqual(['Revisar cobertura semanal.']);
   });
 
   it('assina enviando as divergências reconhecidas — e nada extra quando não há', async () => {

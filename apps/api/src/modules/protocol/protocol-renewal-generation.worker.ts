@@ -13,7 +13,7 @@
  * sendo decidida pela IA, agora informada pelo histórico do mesociclo anterior + pelo
  * relato do aluno nos Blocos 1/2/4 do formulário (`UserConstraints.continuation`, ver
  * `protocol-generator.service.ts::buildUserMessage`). O único teto determinístico é
- * `maxPhase`/`requiresProfessionalReview`, reaproveitado sem mudança — reacionado pela
+ * `requiresProfessionalReview`, sem impor fase ou rebaixar nível — reacionado pela
  * pergunta 10 (repescagem do PAR-Q), exatamente como o PAR-Q inicial trava a geração.
  */
 import { Injectable, type OnModuleInit } from '@nestjs/common';
@@ -73,10 +73,11 @@ import {
 import { planProtocol } from './protocol-planner';
 import { ProtocolRepository } from './protocol.repository';
 import {
-  demoteLevel,
   importantEventForPrompt,
+  levelFromExperience,
   mapInjuriesToTags,
   painToConstraints,
+  routineContextForPrompt,
   type UserConstraints,
 } from './user-constraints';
 import { buildFallbackProtocol, FALLBACK_TEMPLATE_VERSION } from './validation/fallback-template';
@@ -182,7 +183,7 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
     const persisted = await this.repository.persist({
       userId,
       content: plan.content,
-      constraints,
+      constraints: { ...constraints, contextualQuality: plan.contextualQuality },
       parqFlags: constraints.parqTags,
       approvalStatus: 'PENDING_REVIEW',
       status: 'PENDING_SIGNATURE',
@@ -320,6 +321,7 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
         periodizationLedger,
         executionDigest,
         anamnesisInvariants: anamnesis?.text,
+        anamnesisLevel: anamnesis?.level,
         anamnesisInjuryTags: anamnesis?.injuryTags ?? [],
         block1,
         block2,
@@ -408,7 +410,11 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
   private async loadAnamnesisInvariants(
     tx: TenantTransaction,
     userId: string,
-  ): Promise<{ text?: string; injuryTags: ContraindicationTag[] } | null> {
+  ): Promise<{
+    text?: string;
+    injuryTags: ContraindicationTag[];
+    level: UserConstraints['level'];
+  } | null> {
     const [row] = await tx
       .select({
         dataBlock2: anamnesisSessions.dataBlock2,
@@ -428,6 +434,7 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
 
     const lines: string[] = [
       `Experiência declarada no cadastro original: ${structured.experience}.`,
+      routineContextForPrompt(structured, health.freeText),
     ];
     if (pain.raw.length) {
       lines.push(`Histórico de lesão/dor relatado no cadastro original: ${pain.raw.join('; ')}.`);
@@ -447,7 +454,11 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
     if (freeText?.avoidedExercise) {
       lines.push(`Exercício que pediu para evitar desde o cadastro: ${freeText.avoidedExercise}.`);
     }
-    return { text: lines.join('\n'), injuryTags: pain.tags };
+    return {
+      text: lines.join('\n'),
+      injuryTags: pain.tags,
+      level: levelFromExperience(structured.experience),
+    };
   }
 
   /**
@@ -501,7 +512,7 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
       ? mapInjuriesToTags([block3.parqRecheck.detail])
       : [];
 
-    const level = safety.requiresProfessionalReview ? demoteLevel(base.level) : base.level;
+    const level = ctx.anamnesisLevel ?? base.level;
     const location =
       block5.changes.includes('TRAINING_LOCATION') && block5.location
         ? block5.location
@@ -557,7 +568,8 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
         ? [...new Set([...base.parqTags, ...parqRecheckTags])]
         : [],
       parqTriggered: base.parqTriggered,
-      ...(safety.requiresProfessionalReview ? { maxPhase: 'ADAPTACAO' as const } : {}),
+      // Não herdar o teto legado de protocolos anteriores à separação revisão/periodização.
+      maxPhase: undefined,
       importantEvent,
       ...(ctx.anamnesisInvariants ? { anamnesisInvariants: ctx.anamnesisInvariants } : {}),
       continuation: {
@@ -755,6 +767,8 @@ interface LoadedRenewalContext {
   executionDigest?: string;
   /** ADR-008 Camada 3 — ausente só se não houver anamnese SUBMITTED (não deveria ocorrer). */
   anamnesisInvariants?: string;
+  /** Experiência original, sem herdar o rebaixamento de protocolos legados. */
+  anamnesisLevel?: UserConstraints['level'];
   /** Tags de lesão da anamnese ORIGINAL, para a reconciliação em `toConstraints()`. */
   anamnesisInjuryTags: ContraindicationTag[];
   block1: ProtocolRenewalBlock1;

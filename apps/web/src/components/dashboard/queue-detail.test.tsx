@@ -1458,6 +1458,26 @@ describe('QueueDetail — prescrição manual do profissional', () => {
     );
   });
 
+  it('exibe pendência contextual como apoio ao CREF, sem retirar sua autorização de assinar', async () => {
+    api.getQueueDetail.mockResolvedValue(
+      withProtocol({
+        review: {
+          origin: 'AI',
+          availability: { daysPerWeek: 3, preferredDays: [] },
+          blocking: [],
+          conflicts: [],
+          qualityNotices: ['Revisar: Distribuição semanal e cobertura muscular.'],
+        },
+      }),
+    );
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    expect(await screen.findByText('Qualidade contextual do rascunho')).toBeVisible();
+    expect(screen.getByText('Revisar: Distribuição semanal e cobertura muscular.')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Assinar e liberar' })).not.toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Editar Protocolo' }));
+    expect(screen.queryByText('Qualidade contextual do rascunho')).not.toBeInTheDocument();
+  });
+
   it('detalhe do aluno (protocolo ativo): divergência devolvida na publicação vira decisão explícita', async () => {
     api.getQueueDetail.mockResolvedValue(
       withProtocol({

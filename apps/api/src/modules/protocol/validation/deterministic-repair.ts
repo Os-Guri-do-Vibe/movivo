@@ -47,8 +47,7 @@ export type DeterministicRepairCode =
   | 'RESTORE_CATALOG_EXERCISE_NAME';
 
 /**
- * Regras BLOCK com correção mecânica. `PARQ_VIOLATION` só na variante "técnica com PAR-Q"
- * — a variante "fase FORCA com PAR-Q" é recusada à parte (mudar fase exige juízo).
+ * Regras BLOCK com correção mecânica; nunca muda a fase escolhida pela metodologia.
  */
 export const REPAIRABLE_RULES: ReadonlySet<string> = new Set([
   'TECHNIQUE_LEVEL_NOT_ALLOWED',
@@ -98,11 +97,6 @@ export function deterministicRepair(
   if (blockRules.size === 0) return null;
   for (const rule of blockRules) if (!REPAIRABLE_RULES.has(rule)) return null;
 
-  // Variante "fase FORCA com PAR-Q" do `PARQ_VIOLATION` — recalculada da estrutura (mesma
-  // condição do `checkParq`), nunca inferida do texto do `detail`.
-  if (blockRules.has('PARQ_VIOLATION') && ctx.parqFlags.length > 0 && structure.phase === 'FORCA') {
-    return null;
-  }
   // Redistribuir dias só é mecânico com a contagem CERTA: sessão a mais ou a menos exige
   // julgamento (qual juntar/acrescentar), nunca corte silencioso — vai para correção/template.
   const target = weeklySessionTarget(ctx);

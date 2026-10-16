@@ -165,11 +165,12 @@ describe('ValidationService — bloqueios estruturais', () => {
     expect(longRest.violations.map((x) => x.rule)).not.toContain('REST_OUT_OF_RANGE');
   });
 
-  it('BLOCK PARQ_VIOLATION: fase FORCA com flag de PAR-Q', () => {
+  it('PAR-Q não veta fase FORCA; contraindicação de exercício continua independente', () => {
     const v = service.validate(
       input({ structure: validStructure({ phase: 'FORCA' }), parqFlags: ['SHOULDER'] }),
     );
-    expect(v.violations.map((x) => x.rule)).toContain('PARQ_VIOLATION');
+    expect(v.violations.map((x) => x.rule)).not.toContain('PARQ_VIOLATION');
+    expect(v.violations.map((x) => x.rule)).toContain('EXERCISE_CONTRAINDICATED');
   });
 
   it('não dispara PARQ_VIOLATION em FORCA sem flags', () => {
@@ -189,23 +190,22 @@ describe('ValidationService — bloqueios estruturais', () => {
 });
 
 /**
- * 2026-08-24: com o PAR-Q deixando de travar a geração, "modo conservador" precisou de
- * dente. Um prompt pode ser ignorado pelo modelo; estes dois vetos não podem.
+ * Revisão obrigatória conserva os limites de esforço, não a fase.
  */
-describe('ValidationService — teto de PAR-Q (maxPhase)', () => {
+describe('ValidationService — revisão e periodização independentes', () => {
   function capped(over: Partial<ValidateProtocolInput> = {}): ValidateProtocolInput {
     return {
       structure: validStructure(),
-      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], maxPhase: 'ADAPTACAO' },
+      constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], requiresProfessionalReview: true },
       ...over,
     };
   }
 
-  it('BLOCK quando a fase passa do teto ADAPTACAO', () => {
+  it('não bloqueia fases pela revisão obrigatória', () => {
     for (const phase of ['HIPERTROFIA', 'FORCA', 'DELOAD'] as const) {
       const v = service.validate(capped({ structure: validStructure({ phase }) }));
-      expect(v.action).toBe('BLOCK_FALLBACK');
-      expect(v.violations.map((x) => x.rule)).toContain('PARQ_PHASE_CAP_EXCEEDED');
+      expect(v.violations.map((x) => x.rule)).not.toContain('PARQ_PHASE_CAP_EXCEEDED');
+      expect(v.violations.map((x) => x.rule)).not.toContain('PARQ_VIOLATION');
     }
   });
 
@@ -244,7 +244,7 @@ describe('ValidationService — teto de PAR-Q (maxPhase)', () => {
     );
   });
 
-  it('sem maxPhase, nem o teto de fase nem o piso de RIR se aplicam', () => {
+  it('sem revisão obrigatória, o piso de RIR não se aplica', () => {
     const v = service.validate(
       input({
         structure: withExercise({ rir: 0 }),
@@ -256,13 +256,16 @@ describe('ValidationService — teto de PAR-Q (maxPhase)', () => {
     expect(rules).not.toContain('PARQ_PHASE_CAP_EXCEEDED');
   });
 
-  // O teto é checado FORA do early-return de `parqFlags`: na prática Q4 sempre traz
-  // `BALANCE_FALL_RISK` junto, mas amarrar um ao outro seria acoplamento silencioso.
-  it('teto vale mesmo com parqFlags vazio', () => {
+  it('constraint legada preserva limites de esforço sem impor fase', () => {
     const v = service.validate(
-      capped({ structure: validStructure({ phase: 'HIPERTROFIA' }), parqFlags: [] }),
+      input({
+        structure: { ...withExercise({ rir: 0 }), phase: 'HIPERTROFIA' },
+        constraints: { goal: 'GAIN_MUSCLE', injuryTags: [], maxPhase: 'ADAPTACAO' },
+        parqFlags: [],
+      }),
     );
-    expect(v.violations.map((x) => x.rule)).toContain('PARQ_PHASE_CAP_EXCEEDED');
+    expect(v.violations.map((x) => x.rule)).not.toContain('PARQ_PHASE_CAP_EXCEEDED');
+    expect(v.violations.map((x) => x.rule)).toContain('PARQ_RIR_TOO_LOW');
   });
 });
 

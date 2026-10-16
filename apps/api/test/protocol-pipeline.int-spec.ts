@@ -54,6 +54,7 @@ import { ProtocolGeneratorService } from '../src/modules/protocol/protocol-gener
 import { ProtocolRepository } from '../src/modules/protocol/protocol.repository';
 import { DashboardService } from '../src/modules/admin/dashboard.service';
 import { seedHealthEligibility } from './health-fixtures';
+import { qualityAssessment } from '../src/modules/protocol/contextual-quality.fixture';
 
 const { env } = loadEnv();
 const apiRoot = process.cwd();
@@ -88,7 +89,11 @@ function fakeStructure(goal: ProtocolStructure['goal']): ProtocolStructure {
 }
 
 /** Fake do gerador: throw se `injuriesRaw` pede DLQ; senão devolve o protocolo canônico. */
-const fakeGenerator: Pick<ProtocolGeneratorService, 'generate' | 'favoriteUsage'> = {
+const fakeGenerator: Pick<
+  ProtocolGeneratorService,
+  'generate' | 'favoriteUsage' | 'assessQuality'
+> = {
+  assessQuality: async () => qualityAssessment(),
   // Instrumentação de favoritos (2026-09-29) — o worker loga só as contagens.
   favoriteUsage: () => ({ favoritesInBase: 0, favoritesPrescribed: 0, slots: 0 }),
   async generate(command: GenerateProtocolCommand): Promise<GenerateProtocolResult> {
