@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { WorkoutAccessService } from './workout-access.service';
 import { WorkoutController } from './workout.controller';
 import type { WorkoutJournalService } from './workout-journal.service';
+import type { WorkoutLinkResendService } from './workout-link-resend.service';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const SESSION_ID = '22222222-2222-4222-8222-222222222222';
@@ -21,10 +22,24 @@ function makeController() {
     finish: vi.fn(async () => undefined),
     shareCardImage: vi.fn(async () => ({ png: Buffer.from('png'), etag: 'abc' })),
   } as unknown as WorkoutJournalService;
-  return { controller: new WorkoutController(access, journal), access, journal };
+  const resendService = {
+    resend: vi.fn(async () => 'SENT'),
+  } as unknown as WorkoutLinkResendService;
+  return {
+    controller: new WorkoutController(access, journal, resendService),
+    access,
+    journal,
+    resendService,
+  };
 }
 
 describe('WorkoutController', () => {
+  it('delega o reenvio do link ao serviço', async () => {
+    const { controller, resendService } = makeController();
+    await expect(controller.resend({ token: 'a'.repeat(43) })).resolves.toEqual({ status: 'SENT' });
+    expect(resendService.resend).toHaveBeenCalledWith('a'.repeat(43));
+  });
+
   it('delega troca do magic link', async () => {
     const { controller, access } = makeController();
     await expect(controller.exchange({ token: 'a'.repeat(43) })).resolves.toEqual({

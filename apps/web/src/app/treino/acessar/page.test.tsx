@@ -103,4 +103,36 @@ describe('WorkoutAccessPage', () => {
       await waitFor(() => expect(replace).toHaveBeenCalledWith('/treino'));
     });
   });
+
+  it('link já usado e sem sessão: oferece novo link no WhatsApp', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/workout/access/peek')) return { ok: true, json: async () => ({}) };
+      if (url === '/api/workout/access') {
+        return {
+          ok: false,
+          json: async () => ({ message: 'Este link expirou ou ja foi utilizado.' }),
+        };
+      }
+      if (url === '/api/workout/journal') return { ok: false };
+      if (url === '/api/workout/access/resend') {
+        return { ok: true, json: async () => ({ status: 'SENT' }) };
+      }
+      throw new Error(`fetch inesperado: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<WorkoutAccessPage />);
+    await userEvent.click(await screen.findByRole('button', { name: /abrir meu treino/i }));
+    await userEvent.click(
+      await screen.findByRole('button', { name: /receber novo link no whatsapp/i }),
+    );
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Enviamos um novo link');
+    expect(fetchMock).toHaveBeenCalledWith('/api/workout/access/resend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: 'token-de-teste' }),
+    });
+  });
 });
