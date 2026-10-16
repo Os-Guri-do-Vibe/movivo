@@ -10,6 +10,7 @@ import {
   type ProtocolExercise,
   type ProtocolRead,
   type ProtocolSession,
+  type Weekday,
 } from '@movivo/shared';
 
 import { ProtocolViewed } from '@/components/protocolo/protocol-viewed';
@@ -56,6 +57,17 @@ const WEEKDAY_LABELS: Record<string, string> = {
   SAT: 'Sábado',
   SUN: 'Domingo',
 };
+const WEEKDAY_ORDER: readonly Weekday[] = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+
+/** Mantém a página pública alinhada ao PDF quando um protocolo legado veio fora de ordem. */
+function sessionsInCalendarOrder<T extends { weekday?: Weekday }>(sessions: readonly T[]): T[] {
+  if (sessions.some((session) => session.weekday === undefined)) return [...sessions];
+  return [...sessions].sort(
+    (left, right) =>
+      WEEKDAY_ORDER.indexOf(left.weekday as Weekday) -
+      WEEKDAY_ORDER.indexOf(right.weekday as Weekday),
+  );
+}
 
 const TECHNIQUE_GLOSSARY: Readonly<Record<AdvancedTechnique, string>> = {
   DROP_SET: 'Ao chegar perto da falha, reduz a carga e continua a série sem descansar.',
@@ -272,7 +284,7 @@ export default async function ProtocoloPage({ params }: { params: Promise<{ toke
           <p className="hidden text-label text-muted-foreground max-[700px]:block">
             Arraste a tabela para o lado para ver todas as colunas.
           </p>
-          {content.sessions.map((session: ProtocolSession, i) => (
+          {sessionsInCalendarOrder(content.sessions).map((session: ProtocolSession, i) => (
             <div key={i} className="flex flex-col gap-3">
               <div className="flex flex-col gap-1">
                 <h3 className="text-h3 font-semibold text-card-foreground">

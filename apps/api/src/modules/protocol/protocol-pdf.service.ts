@@ -28,6 +28,7 @@ import {
   type ProtocolExercise,
   type ProtocolSession,
   type ProtocolStructure,
+  type Weekday,
 } from '@movivo/shared';
 
 const FONTS_DIR = join(__dirname, '../../../assets/fonts');
@@ -70,6 +71,19 @@ const WEEKDAY_LABELS: Record<string, string> = {
   SAT: 'Sábado',
   SUN: 'Domingo',
 };
+const WEEKDAY_ORDER: readonly Weekday[] = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+
+/** Defesa de apresentação: conteúdo legado fora de ordem nunca inverte o calendário no PDF. */
+export function sessionsInCalendarOrder<T extends { weekday?: Weekday }>(
+  sessions: readonly T[],
+): T[] {
+  if (sessions.some((session) => session.weekday === undefined)) return [...sessions];
+  return [...sessions].sort(
+    (left, right) =>
+      WEEKDAY_ORDER.indexOf(left.weekday as Weekday) -
+      WEEKDAY_ORDER.indexOf(right.weekday as Weekday),
+  );
+}
 
 const BIOLOGICAL_SEX_LABELS: Record<string, string> = {
   MALE: 'Masculino',
@@ -275,40 +289,42 @@ export async function buildProtocolPdf(input: ProtocolPdfInput): Promise<Buffer>
     `${explanation} Se sentir dor aguda, tontura ou mal-estar, pare o exercício imediatamente e ` +
     `avise seu profissional responsável antes de continuar.`;
 
-  const sessionBlocks: Content[] = content.sessions.flatMap((session, i): Content[] => {
-    return [
-      {
-        text: sessionTitle(session),
-        style: 'h3',
-        margin: [0, i === 0 ? 0 : 14, 0, 1],
-      },
-      { text: session.focus, style: 'muted', margin: [0, 0, 0, 6] },
-      {
-        table: exerciseTableBody(session.exercises),
-        layout: {
-          fillColor: (rowIndex: number) =>
-            rowIndex === 0 ? COLOR.petroleo : rowIndex % 2 === 0 ? COLOR.nevoaElevada : null,
-          hLineWidth: (rowIndex: number, node) =>
-            rowIndex === 0 || rowIndex === node.table.body.length ? 1 : 0.5,
-          // Decisão do fundador: contorno fino verde petróleo no perímetro externo da
-          // tabela (todo exercício ali pertence ao mesmo dia de treino) — só o contorno,
-          // as linhas internas continuam sem divisória vertical e com a horizontal clara
-          // de sempre.
-          vLineWidth: (colIndex: number, node) =>
-            colIndex === 0 || colIndex === node.table.widths?.length ? 1 : 0,
-          hLineColor: (rowIndex: number, node) =>
-            rowIndex === 0 || rowIndex === node.table.body.length
-              ? COLOR.petroleo
-              : COLOR.musgoTenue,
-          vLineColor: () => COLOR.petroleo,
-          paddingLeft: () => 6,
-          paddingRight: () => 6,
-          paddingTop: () => 4,
-          paddingBottom: () => 4,
+  const sessionBlocks: Content[] = sessionsInCalendarOrder(content.sessions).flatMap(
+    (session, i): Content[] => {
+      return [
+        {
+          text: sessionTitle(session),
+          style: 'h3',
+          margin: [0, i === 0 ? 0 : 14, 0, 1],
         },
-      },
-    ];
-  });
+        { text: session.focus, style: 'muted', margin: [0, 0, 0, 6] },
+        {
+          table: exerciseTableBody(session.exercises),
+          layout: {
+            fillColor: (rowIndex: number) =>
+              rowIndex === 0 ? COLOR.petroleo : rowIndex % 2 === 0 ? COLOR.nevoaElevada : null,
+            hLineWidth: (rowIndex: number, node) =>
+              rowIndex === 0 || rowIndex === node.table.body.length ? 1 : 0.5,
+            // Decisão do fundador: contorno fino verde petróleo no perímetro externo da
+            // tabela (todo exercício ali pertence ao mesmo dia de treino) — só o contorno,
+            // as linhas internas continuam sem divisória vertical e com a horizontal clara
+            // de sempre.
+            vLineWidth: (colIndex: number, node) =>
+              colIndex === 0 || colIndex === node.table.widths?.length ? 1 : 0,
+            hLineColor: (rowIndex: number, node) =>
+              rowIndex === 0 || rowIndex === node.table.body.length
+                ? COLOR.petroleo
+                : COLOR.musgoTenue,
+            vLineColor: () => COLOR.petroleo,
+            paddingLeft: () => 6,
+            paddingRight: () => 6,
+            paddingTop: () => 4,
+            paddingBottom: () => 4,
+          },
+        },
+      ];
+    },
+  );
 
   // Cabeçalho do exercício vem branco/negrito por causa do style('tableHeader'); mas a cor de
   // fundo (petroleo) é pintada pelo `layout.fillColor` acima, não pela célula em si.

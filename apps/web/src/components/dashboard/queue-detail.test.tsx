@@ -56,7 +56,12 @@ vi.mock('@/lib/control-center-api', () => controlCenterApi);
 import { DashboardApiError } from '@/lib/dashboard-api';
 import type { ExerciseCatalogOption } from '@/lib/dashboard-types';
 
-import { QueueDetail } from './queue-detail';
+import {
+  QueueDetail,
+  sortSessionsByWeekday,
+  swapSessionWeekdays,
+  syncDayLabelWithWeekday,
+} from './queue-detail';
 
 /**
  * O MESMO detalhe de protocolo, servido pra um item `MANDATORY` de origem PAR-Q. Só o
@@ -1621,5 +1626,123 @@ describe('QueueDetail — prescrição manual do profissional', () => {
       'Defina o dia da semana de todas as sessões.',
     );
     expect(api.saveProtocol).not.toHaveBeenCalled();
+  });
+
+  it('troca somente os dias entre sessões ao reordenar o calendário', () => {
+    const session = base.content.sessions[0];
+    if (!session) throw new Error('fixture');
+    const sessions = [
+      { ...session, dayLabel: 'Treino A', weekday: 'WED' as const },
+      { ...session, dayLabel: 'Treino B', weekday: 'THU' as const },
+    ];
+
+    const reordered = swapSessionWeekdays(sessions, 0, 1);
+
+    expect(reordered).toEqual([
+      expect.objectContaining({ dayLabel: 'Treino A', weekday: 'THU' }),
+      expect.objectContaining({ dayLabel: 'Treino B', weekday: 'WED' }),
+    ]);
+    expect(reordered[0]?.exercises).toEqual(sessions[0]?.exercises);
+    expect(reordered[1]?.exercises).toEqual(sessions[1]?.exercises);
+    expect(sortSessionsByWeekday(reordered).map((entry) => entry.weekday)).toEqual(['WED', 'THU']);
+  });
+
+  it('sincroniza só o prefixo automático do dia, sem renomear título manual', () => {
+    expect(syncDayLabelWithWeekday('Domingo — costas', 'SUN', 'SAT')).toBe('Sábado — costas');
+    expect(syncDayLabelWithWeekday('segunda-feira: superiores', 'MON', 'THU')).toBe(
+      'quinta: superiores',
+    );
+    expect(syncDayLabelWithWeekday('Treino A', 'SUN', 'SAT')).toBe('Treino A');
+  });
+
+  it('oferece arrastar os treinos quando todas as sessões têm dias diferentes', async () => {
+    const session = base.content.sessions[0];
+    if (!session) throw new Error('fixture');
+    api.getQueueDetail.mockResolvedValue(
+      withProtocol({
+        content: {
+          ...base.content,
+          weeklyFrequency: 2,
+          sessions: [
+            { ...session, dayLabel: 'Treino A', weekday: 'WED' },
+            { ...session, dayLabel: 'Treino B', weekday: 'THU' },
+          ],
+        },
+      }),
+    );
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
+
+    const reorderDays = screen.getByRole('button', { name: 'Reordenar dias' });
+    expect(reorderDays).not.toBeDisabled();
+    await userEvent.click(reorderDays);
+
+    expect(screen.getByRole('list', { name: 'Ordem dos treinos por dia' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Arrastar Treino A de Quarta' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Arrastar Treino B de Quinta' })).toBeVisible();
+  });
+
+  it('arrastar domingo sobre sábado troca os campos e salva o calendário na ordem correta', async () => {
+    const session = base.content.sessions[0];
+    if (!session) throw new Error('fixture');
+    api.getQueueDetail.mockResolvedValue(
+      withProtocol({
+        content: {
+          ...base.content,
+          weeklyFrequency: 2,
+          sessions: [
+            { ...session, dayLabel: 'Sábado — treino A', weekday: 'SAT' },
+            { ...session, dayLabel: 'Domingo — treino B', weekday: 'SUN' },
+          ],
+        },
+      }),
+    );
+    api.saveProtocol.mockResolvedValue({ status: 'PENDING_SIGNATURE' });
+    const rect = vi
+      .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(function (this: HTMLElement) {
+        const row = this.closest('li');
+        const index = row ? Array.from(row.parentElement?.children ?? []).indexOf(row) : 0;
+        const top = row ? index * 60 : 0;
+        return {
+          x: 0,
+          y: top,
+          top,
+          bottom: top + 50,
+          left: 0,
+          right: 300,
+          width: 300,
+          height: 50,
+          toJSON: () => ({}),
+        };
+      });
+
+    try {
+      render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+      await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Reordenar dias' }));
+      const handle = screen.getByRole('button', { name: 'Arrastar Domingo — treino B de Domingo' });
+      handle.focus();
+      await userEvent.keyboard(' ');
+      await userEvent.keyboard('{ArrowUp}');
+      await userEvent.keyboard(' ');
+
+      await userEvent.click(screen.getByRole('button', { name: 'Concluir dias' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+
+      await waitFor(() =>
+        expect(api.saveProtocol).toHaveBeenCalledWith(
+          PROTOCOL_ID,
+          expect.objectContaining({
+            sessions: [
+              expect.objectContaining({ weekday: 'SAT', dayLabel: 'Sábado — treino B' }),
+              expect.objectContaining({ weekday: 'SUN', dayLabel: 'Domingo — treino A' }),
+            ],
+          }),
+        ),
+      );
+    } finally {
+      rect.mockRestore();
+    }
   });
 });
