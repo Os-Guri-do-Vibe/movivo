@@ -104,6 +104,42 @@ const weekdayOrder = (weekday: Weekday | undefined): number =>
     ? Number.MAX_SAFE_INTEGER
     : (WEEKDAY_ORDER.get(weekday) ?? Number.MAX_SAFE_INTEGER);
 
+function weekdayLabelWithOriginalCase(previous: string, next: string): string {
+  if (previous === previous.toLocaleUpperCase('pt-BR')) return next.toLocaleUpperCase('pt-BR');
+  if (previous === previous.toLocaleLowerCase('pt-BR')) return next.toLocaleLowerCase('pt-BR');
+  return next;
+}
+
+/** Só atualiza o prefixo automático do dia; títulos dados pelo CREF ficam intocados. */
+export function syncDayLabelWithWeekday(
+  dayLabel: string,
+  previous: Weekday,
+  next: Weekday,
+): string {
+  if (previous === next) return dayLabel;
+  const previousLabel = WEEKDAY_LABELS[previous];
+  const nextLabel = WEEKDAY_LABELS[next];
+  if (!previousLabel || !nextLabel) return dayLabel;
+  const labels = [`${previousLabel}-feira`, previousLabel];
+  const match = labels.find((label) =>
+    dayLabel.toLocaleLowerCase('pt-BR').startsWith(label.toLocaleLowerCase('pt-BR')),
+  );
+  if (!match) return dayLabel;
+  const following = dayLabel.slice(match.length, match.length + 1);
+  if (following && /\p{L}/u.test(following)) return dayLabel;
+  return `${weekdayLabelWithOriginalCase(dayLabel.slice(0, match.length), nextLabel)}${dayLabel.slice(match.length)}`;
+}
+
+/** Com todos os dias definidos, a ordem persistida e exibida acompanha o calendário. */
+export function sortSessionsByWeekday(
+  sessions: ProtocolStructure['sessions'],
+): ProtocolStructure['sessions'] {
+  if (sessions.some((session) => session.weekday === undefined)) return sessions;
+  return [...sessions].sort(
+    (left, right) => weekdayOrder(left.weekday) - weekdayOrder(right.weekday),
+  );
+}
+
 /** Únicos 4 valores do enum real de fase (`ProtocolStructure.phase`). */
 const PHASE_LABELS: Record<string, string> = {
   ADAPTACAO: 'Adaptação',
@@ -863,11 +899,21 @@ export function swapSessionWeekdays(
   const source = sessions[from];
   const target = sessions[to];
   if (!source?.weekday || !target?.weekday) return sessions;
+  const sourceWeekday = source.weekday;
+  const targetWeekday = target.weekday;
   return sessions.map((session, index) =>
     index === from
-      ? { ...session, weekday: target.weekday }
+      ? {
+          ...session,
+          weekday: targetWeekday,
+          dayLabel: syncDayLabelWithWeekday(session.dayLabel, sourceWeekday, targetWeekday),
+        }
       : index === to
-        ? { ...session, weekday: source.weekday }
+        ? {
+            ...session,
+            weekday: sourceWeekday,
+            dayLabel: syncDayLabelWithWeekday(session.dayLabel, targetWeekday, sourceWeekday),
+          }
         : session,
   );
 }
@@ -1067,7 +1113,21 @@ function ProtocolSummary({
     setDraft((current) => ({
       ...current,
       sessions: current.sessions.map((session, position) =>
-        position === index ? { ...session, ...patch } : session,
+        position === index
+          ? {
+              ...session,
+              ...patch,
+              ...(patch.weekday && patch.dayLabel === undefined
+                ? {
+                    dayLabel: syncDayLabelWithWeekday(
+                      session.dayLabel,
+                      session.weekday ?? patch.weekday,
+                      patch.weekday,
+                    ),
+                  }
+                : {}),
+            }
+          : session,
       ),
     }));
   }
@@ -1130,7 +1190,7 @@ function ProtocolSummary({
   function moveSessionToDay(from: number, to: number) {
     setDraft((current) => ({
       ...current,
-      sessions: swapSessionWeekdays(current.sessions, from, to),
+      sessions: sortSessionsByWeekday(swapSessionWeekdays(current.sessions, from, to)),
     }));
   }
 
@@ -1196,7 +1256,13 @@ function ProtocolSummary({
     // Com dia fixo em todas as sessões, a frequência é o número de sessões — nunca um número
     // solto que esconda treino a mais ou a menos do calendário do aluno.
     const fixedDays = withDay === draft.sessions.length;
-    const candidate = fixedDays ? { ...draft, weeklyFrequency: draft.sessions.length } : draft;
+    const candidate = fixedDays
+      ? {
+          ...draft,
+          weeklyFrequency: draft.sessions.length,
+          sessions: sortSessionsByWeekday(draft.sessions),
+        }
+      : draft;
     const parsed = protocolStructureSchema.safeParse(candidate);
     if (!parsed.success) {
       setIssues(parsed.error.issues.map((issue) => issue.message).slice(0, 6));
