@@ -56,7 +56,7 @@ vi.mock('@/lib/control-center-api', () => controlCenterApi);
 import { DashboardApiError } from '@/lib/dashboard-api';
 import type { ExerciseCatalogOption } from '@/lib/dashboard-types';
 
-import { QueueDetail } from './queue-detail';
+import { QueueDetail, swapSessionWeekdays } from './queue-detail';
 
 /**
  * O MESMO detalhe de protocolo, servido pra um item `MANDATORY` de origem PAR-Q. Só o
@@ -1591,5 +1591,50 @@ describe('QueueDetail — prescrição manual do profissional', () => {
       'Defina o dia da semana de todas as sessões.',
     );
     expect(api.saveProtocol).not.toHaveBeenCalled();
+  });
+
+  it('troca somente os dias entre sessões ao reordenar o calendário', () => {
+    const session = base.content.sessions[0];
+    if (!session) throw new Error('fixture');
+    const sessions = [
+      { ...session, dayLabel: 'Treino A', weekday: 'WED' as const },
+      { ...session, dayLabel: 'Treino B', weekday: 'THU' as const },
+    ];
+
+    const reordered = swapSessionWeekdays(sessions, 0, 1);
+
+    expect(reordered).toEqual([
+      expect.objectContaining({ dayLabel: 'Treino A', weekday: 'THU' }),
+      expect.objectContaining({ dayLabel: 'Treino B', weekday: 'WED' }),
+    ]);
+    expect(reordered[0]?.exercises).toEqual(sessions[0]?.exercises);
+    expect(reordered[1]?.exercises).toEqual(sessions[1]?.exercises);
+  });
+
+  it('oferece arrastar os treinos quando todas as sessões têm dias diferentes', async () => {
+    const session = base.content.sessions[0];
+    if (!session) throw new Error('fixture');
+    api.getQueueDetail.mockResolvedValue(
+      withProtocol({
+        content: {
+          ...base.content,
+          weeklyFrequency: 2,
+          sessions: [
+            { ...session, dayLabel: 'Treino A', weekday: 'WED' },
+            { ...session, dayLabel: 'Treino B', weekday: 'THU' },
+          ],
+        },
+      }),
+    );
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
+
+    const reorderDays = screen.getByRole('button', { name: 'Reordenar dias' });
+    expect(reorderDays).not.toBeDisabled();
+    await userEvent.click(reorderDays);
+
+    expect(screen.getByRole('list', { name: 'Ordem dos treinos por dia' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Arrastar Treino A de Quarta' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Arrastar Treino B de Quinta' })).toBeVisible();
   });
 });
