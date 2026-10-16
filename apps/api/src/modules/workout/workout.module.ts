@@ -24,6 +24,7 @@ import { WorkoutInboundHandler } from './workout-inbound.handler';
 import { WorkoutJournalService } from './workout-journal.service';
 import { AttendanceAlertService } from './attendance-alert.service';
 import { MissedWorkoutAskPolicy } from './missed-workout-ask.policy';
+import { WorkoutLinkResendService } from './workout-link-resend.service';
 import { WorkoutScheduler } from './workout.scheduler';
 
 @Module({
@@ -31,6 +32,7 @@ import { WorkoutScheduler } from './workout.scheduler';
   controllers: [WorkoutController],
   providers: [
     WorkoutAccessService,
+    WorkoutLinkResendService,
     WorkoutCompletionService,
     WorkoutJournalService,
     ShareCardRenderer,

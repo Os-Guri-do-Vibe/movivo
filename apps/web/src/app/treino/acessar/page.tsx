@@ -19,6 +19,8 @@ export default function WorkoutAccessPage() {
   const [firstName, setFirstName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [resendNotice, setResendNotice] = useState('');
+  const [resending, setResending] = useState(false);
 
   useEffect(() => {
     const value = new URLSearchParams(window.location.hash.slice(1)).get('token') ?? '';
@@ -72,6 +74,31 @@ export default function WorkoutAccessPage() {
     setBusy(false);
   }
 
+  /** Link já gasto (ex.: aberto em guia anônima): o novo vai só para o WhatsApp do titular. */
+  async function resendLink() {
+    setResending(true);
+    setResendNotice('');
+    try {
+      const response = await fetch('/api/workout/access/resend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+      const data = (await response.json().catch(() => null)) as { status?: string } | null;
+      setResendNotice(
+        response.ok && data?.status === 'SENT'
+          ? 'Enviamos um novo link para o seu WhatsApp. Abra no navegador de sempre, fora da guia anônima.'
+          : response.ok
+            ? 'Você já pediu um novo link há pouco. Confira o seu WhatsApp.'
+            : 'Não foi possível enviar um novo link agora. Tente de novo em instantes.',
+      );
+    } catch {
+      setResendNotice('Não foi possível enviar um novo link agora. Tente de novo em instantes.');
+    } finally {
+      setResending(false);
+    }
+  }
+
   return (
     <div className="onboarding-light flex min-h-dvh w-full flex-col overflow-x-hidden bg-white text-foreground">
       <header className="w-full bg-petroleo" aria-label="MOVIVO">
@@ -104,6 +131,27 @@ export default function WorkoutAccessPage() {
             >
               {error}
             </p>
+          ) : null}
+          {error && token ? (
+            <div className="mt-4 flex flex-col items-center gap-3">
+              <p className="text-label text-muted-foreground">
+                Se você abriu o link em uma guia anônima, ele pode ter sido usado lá. Peça um novo
+                link e abra em uma guia normal.
+              </p>
+              <button
+                type="button"
+                onClick={resendLink}
+                disabled={resending}
+                className="h-11 rounded-xl border border-primary px-5 text-label font-semibold text-primary disabled:opacity-60"
+              >
+                {resending ? 'Enviando...' : 'Receber novo link no WhatsApp'}
+              </button>
+              {resendNotice ? (
+                <p role="status" className="text-label text-petroleo">
+                  {resendNotice}
+                </p>
+              ) : null}
+            </div>
           ) : null}
         </section>
         <button

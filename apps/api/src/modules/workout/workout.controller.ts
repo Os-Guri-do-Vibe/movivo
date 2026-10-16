@@ -4,6 +4,7 @@ import {
   Get,
   Header,
   Headers,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -37,6 +38,7 @@ import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
 import { parseBody } from '../../core/validation/strict-input';
 import { WorkoutAccessService } from './workout-access.service';
 import { WorkoutJournalService } from './workout-journal.service';
+import { WorkoutLinkResendService } from './workout-link-resend.service';
 
 const exchangeSchema = z.object({ token: z.string().min(40).max(100) });
 const peekSchema = z.object({ token: z.string().min(40).max(100) });
@@ -62,6 +64,7 @@ export class WorkoutController {
   constructor(
     private readonly access: WorkoutAccessService,
     private readonly journalService: WorkoutJournalService,
+    private readonly resendService: WorkoutLinkResendService,
   ) {}
 
   @Post('access/exchange')
@@ -78,6 +81,23 @@ export class WorkoutController {
   async exchange(@Body() raw: unknown) {
     const { token } = parseBody(exchangeSchema, raw);
     return { sessionToken: await this.access.exchange(token) };
+  }
+
+  @Post('access/resend')
+  @HttpCode(200)
+  @Header('Cache-Control', 'private, no-store')
+  @Header('Referrer-Policy', 'no-referrer')
+  @ApiOperation({
+    summary: 'Reenvia um novo link de check-in para o WhatsApp do titular',
+    description:
+      'Para o aluno cujo link já foi usado (ex.: guia anônima). O novo link vai só para o WhatsApp do dono, nunca na resposta; no máximo um a cada 10 minutos.',
+  })
+  @ApiBody({ schema: zodSchemaToOpenApi(exchangeSchema) })
+  @ApiResponse({ status: 200, description: '`SENT` ou `THROTTLED` (já enviado há pouco).' })
+  @ApiResponse({ status: 410, description: 'Link desconhecido ou revogado.' })
+  async resend(@Body() raw: unknown) {
+    const { token } = parseBody(exchangeSchema, raw);
+    return { status: await this.resendService.resend(token) };
   }
 
   @Get('access/peek')

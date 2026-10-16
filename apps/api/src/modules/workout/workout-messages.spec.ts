@@ -9,6 +9,7 @@ import {
   dailyWorkoutMessage,
   durationInsightMessage,
   parseDurationInsightButton,
+  resentWorkoutLinkMessage,
 } from './workout-messages';
 
 // Pergunta sobre o treino sem registro, dentro do link do dia: três variações (escolhidas pela
@@ -24,6 +25,7 @@ const QUESTION_COPY = YESTERDAY_SEEDS.flatMap((seed) =>
 const COPY = [
   dailyWorkoutMessage('Ana', 'Treino A', 'https://x/treino/abc'),
   durationInsightMessage(75, 60),
+  resentWorkoutLinkMessage('Ana', 'https://x/check-in/abc'),
   ...QUESTION_COPY,
 ];
 

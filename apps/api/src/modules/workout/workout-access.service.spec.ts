@@ -107,6 +107,18 @@ describe('WorkoutAccessService', () => {
     expect(inserted).toHaveLength(0);
   });
 
+  it('acha o dono do magic link mesmo ja consumido, e ignora token malformado ou desconhecido', async () => {
+    await expect(makeService().service.findMagicOwner('curto')).resolves.toBeNull();
+    await expect(
+      makeService({ selects: [[]] }).service.findMagicOwner(RAW_TOKEN),
+    ).resolves.toBeNull();
+
+    const owner = { userId: USER_ID, workoutSessionId: 's-1', name: 'Ana Souza' };
+    await expect(
+      makeService({ selects: [[owner]] }).service.findMagicOwner(RAW_TOKEN),
+    ).resolves.toEqual(owner);
+  });
+
   it('exige bearer de sessao valido e registra o ultimo uso', async () => {
     await expect(makeService().service.requireUser(undefined)).rejects.toBeInstanceOf(
       UnauthorizedException,

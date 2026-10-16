@@ -70,6 +70,11 @@ export function dailyWorkoutMessage(
   );
 }
 
+/** Novo link pedido pelo aluno quando o anterior já tinha sido aberto (ex.: guia anônima). */
+export function resentWorkoutLinkMessage(firstName: string, link: string): string {
+  return `Oi, ${bold(firstName)}! 💚\n\nAqui está o seu novo link para o check-in de hoje:\n${link}\n\nAbra no navegador de sempre (não em guia anônima) para ele seguir funcionando. 👊🏼`;
+}
+
 export function durationInsightMessage(observed: number, expected: number): string {
   return `Percebemos que seus ultimos treinos duraram em media ${observed} min, acima dos ${expected} min informados. Quer que o profissional CREF avalie um ajuste ou esse tempo esta tranquilo?`;
 }

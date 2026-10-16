@@ -98,6 +98,32 @@ export class WorkoutAccessService {
     return row?.name?.trim().split(/\s+/)[0] || null;
   }
 
+  /** Dono do magic link mesmo já consumido ou expirado (só revogado não conta); serve ao reenvio. */
+  async findMagicOwner(
+    rawToken: string,
+  ): Promise<{ userId: string; workoutSessionId: string | null; name: string | null } | null> {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(rawToken)) return null;
+    const [row] = await this.db.runAsSystem((tx) =>
+      tx
+        .select({
+          userId: workoutAccessTokens.userId,
+          workoutSessionId: workoutAccessTokens.workoutSessionId,
+          name: users.name,
+        })
+        .from(workoutAccessTokens)
+        .innerJoin(users, eq(users.id, workoutAccessTokens.userId))
+        .where(
+          and(
+            eq(workoutAccessTokens.tokenHash, tokenHash(rawToken)),
+            eq(workoutAccessTokens.kind, 'MAGIC'),
+            isNull(workoutAccessTokens.revokedAt),
+          ),
+        )
+        .limit(1),
+    );
+    return row ?? null;
+  }
+
   async requireUser(authorization: string | undefined): Promise<string> {
     const token = authorization?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
     if (!token) throw new UnauthorizedException();
