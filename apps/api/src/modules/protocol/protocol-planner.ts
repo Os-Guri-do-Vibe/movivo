@@ -54,7 +54,7 @@ export const MAX_CORRECTION_ROUNDS = 2;
  * reparo determinístico). Vai no log e no rastro persistido — `promptVersion` só carrega
  * metodologia+catálogo e não muda quando o código do prompt/planner muda.
  */
-export const PROTOCOL_PIPELINE_VERSION = 'protocol-pipeline-2026-10-v4';
+export const PROTOCOL_PIPELINE_VERSION = 'protocol-pipeline-2026-10-v5';
 
 export interface ProtocolGenerator {
   generate(command: GenerateProtocolCommand): Promise<GenerateProtocolResult>;
@@ -187,9 +187,11 @@ export async function planProtocol(
 
   // 1ª geração: erro aqui continua subindo (retry do job/DLQ, contrato inalterado).
   let quality: ContextualQualityAssessment | undefined;
+  const assessContextualQuality = command.constraints.requiresProfessionalReview;
   let gen = await generator.generate(command);
   let verdict = validate(gen.structure);
-  if (verdict.action !== 'BLOCK_FALLBACK') quality = await generator.assessQuality(command, gen);
+  if (assessContextualQuality && verdict.action !== 'BLOCK_FALLBACK')
+    quality = await generator.assessQuality(command, gen);
   let lastValid = verdict.action !== 'BLOCK_FALLBACK' ? { gen, verdict, quality } : undefined;
   const firstVerdict = verdict;
   record('GENERATION', verdict.code, verdict.violations, gen.malformedRetries ?? 0);
@@ -221,7 +223,9 @@ export async function planProtocol(
     gen = next;
     verdict = validate(gen.structure);
     quality =
-      verdict.action === 'BLOCK_FALLBACK' ? undefined : await generator.assessQuality(command, gen);
+      assessContextualQuality && verdict.action !== 'BLOCK_FALLBACK'
+        ? await generator.assessQuality(command, gen)
+        : undefined;
     if (verdict.action !== 'BLOCK_FALLBACK') lastValid = { gen, verdict, quality };
     record('CORRECTION', verdict.code, verdict.violations, gen.malformedRetries ?? 0);
   }
@@ -256,12 +260,14 @@ export async function planProtocol(
         repairOutcome = 'APPLIED';
         content = repaired.structure;
         repairs = repaired.repairs;
-        quality = await generator.assessQuality(command, { ...gen, structure: content });
+        if (assessContextualQuality)
+          quality = await generator.assessQuality(command, { ...gen, structure: content });
       }
     }
   }
 
   const usedFallbackTemplate = finalVerdict.action === 'BLOCK_FALLBACK';
+  if (usedFallbackTemplate) quality = undefined;
   const promptVersion = usedFallbackTemplate ? FALLBACK_TEMPLATE_VERSION : gen.promptVersion;
   const qualityPending = quality !== undefined && quality.summary.status !== 'PASS';
   const validationAction = usedFallbackTemplate

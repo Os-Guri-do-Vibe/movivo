@@ -21,8 +21,12 @@ O campo persistido legado `maxPhase` não impõe mais fase; só mantém compatib
 com os limites de esforço em protocolos antigos. A mudança de código não altera nem
 regera automaticamente protocolos existentes.
 
-**Qualidade contextual dos rascunhos (2026-10-15):** além da validação determinística,
-o planner avalia a aplicação da metodologia publicada em conjunto com objetivo,
+**Qualidade contextual dos rascunhos (2026-10-15):** somente rascunhos individualizados
+com PAR-Q bloqueante passam pela avaliação contextual adicional, além da validação
+determinística. Protocolos sem PAR-Q bloqueante e templates de fallback não passam por
+essa etapa. A geração de todos os protocolos continua conciliando metodologia vigente,
+conhecimento científico, objetivo, ênfases, experiência, duração e contexto integral
+da anamnese, independentemente de avaliação posterior. O planner avalia a aplicação da metodologia publicada em conjunto com objetivo,
 necessidades, preferências, rotina, restrições e evolução do aluno. O avaliador usa o
 mesmo identificador/hash de metodologia da geração, o catálogo elegível e cobertura
 calculada dos exercícios efetivos (não títulos). Todos os sete critérios exigem parecer
@@ -32,12 +36,16 @@ exercício vetado, nem obriga padrões/volumes universais.
 
 Lacunas compartilham as duas rodadas de correção existentes; cada novo conteúdo é
 revalidado e, quando elegível, reavaliado. Lacuna persistente ou avaliação indisponível/
-inválida preserva o rascunho válido com revisão `MANDATORY`, sem job de auto-liberação;
+inválida preserva o rascunho válido na revisão `MANDATORY` já exigida pelo PAR-Q,
+sem job de auto-liberação. Qualidade não cria revisão obrigatória sem PAR-Q bloqueante;
 qualidade insuficiente, sozinha, não provoca template. Se uma correção piorar a segurança,
 preserva-se o último rascunho que passou nas regras. Falhas de segurança sem rascunho
 válido continuam seguindo reparo/fallback. O painel distingue a origem `QUALITY` e
 mostra os critérios pendentes/adaptados ao CREF, sem retirar sua autoridade de editar
-e assinar. Protocolos legados e jobs existentes não são reclassificados.
+e assinar. Fallback continua em revisão obrigatória pela falha de geração/validação,
+sem avaliação contextual, identificado pela tag coral "Protocolo Fallback" na fila
+(inclusive com origem PAR-Q) e no cabeçalho de detalhe/edição.
+Protocolos legados e jobs existentes não são reclassificados.
 
 A avaliação passa pelo `LLMRouter` como `HEALTH`, com os gates e contabilização existentes,
 até uma chamada adicional por candidato válido (máximo de três no ciclo de correção,
@@ -48,6 +56,20 @@ livres do avaliador ficam apenas em memória para feedback, não são logadas ne
 ao aluno. A geração e a avaliação também recebem barreiras de adesão e esporte paralelo
 declarados na anamnese como dados não confiáveis; renovações recuperam esse contexto
 original e o combinam com os dados atuais de execução/renovação.
+
+**Construção contextual na própria geração:** todos os perfis recebem critérios de
+dose de entrada (experiência distinta de regularidade), distribuição semanal com
+séries diretas/indiretas e aquecimento diferenciados, ênfases efetivas pelo catálogo,
+ordem metodológica dos grupos, tempo incluindo unilateralidade e transições,
+progressão acionável e coerência dos textos. Limitações da oferta elegível devem ser
+explicadas, nunca ocultadas por títulos ou compensadas com exercício vetado.
+A busca de evidências de dosagem inclui regularidade, tempo parado, frequência e
+tempo por sessão, sem aumentar o número de buscas. Não há novo parecer/chamada de IA
+para perfis sem PAR-Q bloqueante, nem garantia de qualidade individual por prompt.
+Testes de contrato com respostas simuladas não substituem avaliação de protocolos
+reais pelo RT. Referências técnicas:
+[Prompt engineering](https://developers.openai.com/api/docs/guides/prompt-engineering) e
+[Evaluation best practices](https://developers.openai.com/api/docs/guides/evaluation-best-practices).
 
 **Monólito Modular com Bounded Contexts explícitos em NestJS — não microservices.**
 

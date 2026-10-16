@@ -207,6 +207,11 @@ function QueueCard({ item, section }: { item: QueueItem; section: QueueSectionId
                   {detail ? <span className="sr-only">, {detail}</span> : null}
                 </StatusBadge>
               ) : null}
+              {item.isFallback || item.origin === 'FALLBACK' ? (
+                <StatusBadge tone="attention" variant="solid">
+                  Protocolo Fallback
+                </StatusBadge>
+              ) : null}
               {item.origin === 'FALLBACK' ? (
                 /*
                  * Mesmo raciocínio do sinal de PAR-Q (2026-09-03): sem esta linha, um

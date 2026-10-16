@@ -145,6 +145,20 @@ describe('parsers do contrato do dashboard', () => {
     expect(parseOperations(operationsResponse).sla.protocolBreached).toBe(true);
   });
 
+  it('preserva identificação de fallback na fila PAR-Q e no detalhe', () => {
+    const result = parseQueueResponse({
+      ...queueResponse,
+      mandatory: [{ ...protocolDetail.item, origin: 'PARQ', isFallback: true }],
+    });
+    expect(result.mandatory[0]).toMatchObject({ origin: 'PARQ', isFallback: true });
+    expect(
+      parseQueueDetail({
+        ...protocolDetail,
+        protocol: { ...protocolDetail.protocol, isFallback: true },
+      }).protocol?.isFallback,
+    ).toBe(true);
+  });
+
   it('recusa tipos, prioridades, protocolos e operações fora do contrato', () => {
     expect(() => parseQueueResponse(null)).toThrow(/fila inválida/i);
     expect(() =>

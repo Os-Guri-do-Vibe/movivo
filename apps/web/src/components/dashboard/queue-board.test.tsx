@@ -74,6 +74,15 @@ afterEach(() => {
 });
 
 describe('QueueBoard', () => {
+  it('mostra tag coral de fallback mesmo quando a origem é PAR-Q', async () => {
+    getQueue.mockResolvedValue({
+      ...queueResponse,
+      mandatory: [{ ...parqProtocolItem, isFallback: true }],
+    });
+    render(<QueueBoard />);
+    expect(await screen.findByText('Protocolo Fallback')).toHaveClass('bg-destructive');
+    expect(screen.getByText('Origem: PAR-Q bloqueante')).toBeVisible();
+  });
   it('identifica a revisão contextual sem chamá-la de template ou edição do profissional', async () => {
     getQueue.mockResolvedValue({
       ...queueResponse,
@@ -403,9 +412,11 @@ describe('QueueBoard', () => {
       within(fallbackCard).getByText('Origem: template conservador (geração não validou)'),
     ).toBeVisible();
     expect(fallbackCard.className).not.toContain('border-l-coral');
+    expect(within(fallbackCard).getByText('Protocolo Fallback')).toHaveClass('bg-destructive');
 
     const optionalCard = screen.getByText(optionalProtocolItem.title).closest('li') as HTMLElement;
     expect(within(optionalCard).queryByText(/Origem:/)).not.toBeInTheDocument();
+    expect(within(optionalCard).queryByText('Protocolo Fallback')).not.toBeInTheDocument();
   });
 
   // Achado 2026-09-02, ampliado 2026-09-03: proposta de substituição de exercício via IA

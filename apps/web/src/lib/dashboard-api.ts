@@ -110,6 +110,7 @@ export function parseQueueItem(value: unknown): QueueItem {
     status: string(value.status, 'PENDENTE'),
     autoReleaseAt: typeof value.autoReleaseAt === 'string' ? value.autoReleaseAt : null,
     origin: parseOrigin(value.origin),
+    ...(value.isFallback === true ? { isFallback: true } : {}),
     read: value.read === true,
   };
 }
@@ -323,6 +324,7 @@ export function parseQueueDetail(value: unknown): QueueDetail {
       signatureHash:
         typeof value.protocol.signatureHash === 'string' ? value.protocol.signatureHash : null,
       totalWeeks: finiteNumber(value.protocol.totalWeeks, 12),
+      ...(value.protocol.isFallback === true ? { isFallback: true } : {}),
       createdAt:
         typeof value.protocol.createdAt === 'string'
           ? value.protocol.createdAt

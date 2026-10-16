@@ -110,15 +110,15 @@ export const REPAIRED_PROTOCOL_REVIEW_URGENCY: 'MANDATORY' | 'OPTIONAL' = 'OPTIO
 /**
  * ÚNICO ponto de decisão `MANDATORY` × `OPTIONAL` da geração (inicial e renovação). Motivos
  * independentes de `MANDATORY`, qualquer um basta: PAR-Q do titular, template de fallback
- * ou qualidade contextual pendente/indisponível. Reparo determinístico segue
+ * (sem avaliação contextual em templates). Qualidade só é avaliada com PAR-Q bloqueante.
+ * Reparo determinístico segue
  * `REPAIRED_PROTOCOL_REVIEW_URGENCY`.
  */
 export function reviewUrgencyForPlan(
-  plan: Pick<PlanResult, 'usedFallbackTemplate' | 'repairs' | 'contextualQuality'>,
+  plan: Pick<PlanResult, 'usedFallbackTemplate' | 'repairs'>,
   requiresProfessionalReview: boolean,
 ): 'MANDATORY' | 'OPTIONAL' {
   if (requiresProfessionalReview || plan.usedFallbackTemplate) return 'MANDATORY';
-  if (plan.contextualQuality && plan.contextualQuality.status !== 'PASS') return 'MANDATORY';
   if (plan.repairs.length > 0) return REPAIRED_PROTOCOL_REVIEW_URGENCY;
   return 'OPTIONAL';
 }
