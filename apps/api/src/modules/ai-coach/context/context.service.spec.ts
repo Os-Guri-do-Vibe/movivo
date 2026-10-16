@@ -254,3 +254,53 @@ describe('ContextService.recordTurn', () => {
     );
   });
 });
+
+describe('ContextService.lastCoachMessageAsksQuestion', () => {
+  const row = (direction: 'INBOUND' | 'OUTBOUND', content: string, minutesAgo: number) =>
+    ({
+      origin: direction === 'INBOUND' ? 'STUDENT' : 'COACH',
+      direction,
+      modelUsed: null,
+      sourceType: null,
+      content,
+      createdAt: new Date(Date.now() - minutesAgo * 60_000),
+    }) as TranscriptRow;
+
+  it('a última mensagem enviada ao aluno tem pergunta', async () => {
+    const { svc } = make({
+      transcript: [
+        row('OUTBOUND', 'Quer trocar só hoje ou no protocolo?', 5),
+        row('INBOUND', 'qual a carga?', 10),
+      ],
+    });
+    await expect(svc.lastCoachMessageAsksQuestion('u1')).resolves.toBe(true);
+  });
+
+  it('usa só a mensagem enviada mais recente e ignora as do aluno', async () => {
+    const { svc } = make({
+      transcript: [
+        row('INBOUND', 'posso trocar?', 1),
+        row('OUTBOUND', 'Fechado, seguimos assim.', 2),
+        row('OUTBOUND', 'Quer trocar?', 30),
+      ],
+    });
+    await expect(svc.lastCoachMessageAsksQuestion('u1')).resolves.toBe(false);
+  });
+
+  it('interrogação dentro de um link não conta como pergunta', async () => {
+    const { svc } = make({
+      transcript: [row('OUTBOUND', 'Seu treino: https://movivo.com.br/check-in/abc?x=1', 3)],
+    });
+    await expect(svc.lastCoachMessageAsksQuestion('u1')).resolves.toBe(false);
+  });
+
+  it('histórico vazio: não há pergunta', async () => {
+    const { svc } = make({ transcript: [] });
+    await expect(svc.lastCoachMessageAsksQuestion('u1')).resolves.toBe(false);
+  });
+
+  it('banco indisponível: trata como pergunta aberta (na dúvida, responde)', async () => {
+    const { svc } = make({ transcript: null });
+    await expect(svc.lastCoachMessageAsksQuestion('u1')).resolves.toBe(true);
+  });
+});

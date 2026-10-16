@@ -75,6 +75,7 @@ import {
   type PendingQuestion,
   type PendingReading,
 } from './pending-question';
+import { isOnlyAcknowledgements, withoutAcknowledgements } from './inbound-acknowledgement';
 import { MethodologyProvider } from '../protocol/methodology-provider.service';
 
 /** Resultado interno da montagem da resposta, antes de enviar/persistir. */
@@ -136,6 +137,11 @@ interface PendingContext {
 
 /** Espera antes de reprocessar mensagem que chegou durante a resposta anterior. */
 const ORPHAN_BATCH_RETRIGGER_MS = 5_000;
+
+/** Junta a rajada do aluno num só texto, no limite que a IA aceita. */
+function joinBatch(items: readonly string[]): string {
+  return items.join(' ').slice(0, MAX_MESSAGE_CHARS);
+}
 
 /**
  * Achado 2026-09-08 (bug reproduzido ao vivo pelo fundador): `maxTokens` era derivado de
@@ -224,7 +230,7 @@ export class AIResponseWorker implements OnModuleInit {
 
     try {
       if (!consentActive) {
-        await this.drainBatch(batchKey);
+        await this.drainBatchItems(batchKey);
         this.logger.info(
           { event: 'ai_response_discarded_no_consent', userId },
           'batch descartado sem tratamento apos revogacao',
@@ -232,13 +238,14 @@ export class AIResponseWorker implements OnModuleInit {
         return { status: 'CONSENT_REVOKED' };
       }
 
-      const message = await this.drainBatch(batchKey);
+      const batchItems = await this.drainBatchItems(batchKey);
+      const rawMessage = joinBatch(batchItems);
 
       // Pausa ligada DEPOIS de o job entrar na fila (janela de debounce): a IA não responde,
       // mas o texto do aluno já saiu do buffer e precisa ir para o histórico do profissional.
       if (await this.coachAttendance.isPaused(userId)) {
-        if (message)
-          await this.repo.persistTurn({ userId, direction: 'INBOUND', content: message });
+        if (rawMessage)
+          await this.repo.persistTurn({ userId, direction: 'INBOUND', content: rawMessage });
         this.logger.info(
           { event: 'ai_response_held_coach_paused', userId },
           'atendimento automático pausado — job descartado sem chamar a IA',
@@ -246,7 +253,7 @@ export class AIResponseWorker implements OnModuleInit {
         return { status: 'PAUSED' };
       }
 
-      if (!message) {
+      if (!rawMessage) {
         // Achado 2026-09-02 (reproduzido ao vivo, incluindo um bug de off-by-one na 1ª
         // versão deste fix): lote vazio na 1ª tentativa é normal (múltiplos triggers
         // coalescendo no mesmo lote). Lote vazio numa RETRY é outra coisa — significa que
@@ -269,6 +276,31 @@ export class AIResponseWorker implements OnModuleInit {
           await this.deliver(userId, correlationId, DLQ_FALLBACK_MESSAGE, null, false, enqueuedAt);
         }
         return { status: 'EMPTY' };
+      }
+
+      // Achado 2026-10-16: "ok", "👌" e "🫡🫡" não são um turno novo. Sozinhos (e com o Coach sem
+      // nada a esperar do aluno) ficam só no histórico; junto de uma mensagem com conteúdo,
+      // saem do texto que vai para a IA — senão ela responde ao emoji com um fecho.
+      if (isOnlyAcknowledgements(batchItems) && (await this.canStaySilent(userId))) {
+        await this.repo.persistTurn({ userId, direction: 'INBOUND', content: rawMessage });
+        await this.context.recordTurn(userId, 'user', rawMessage);
+        this.logger.info(
+          { event: 'ai_response_acknowledgement_silenced', userId, correlationId },
+          'mensagem de confirmação sem pergunta em aberto — registrada, sem resposta',
+        );
+        return { status: 'ACK_SILENT' };
+      }
+      const keptItems = withoutAcknowledgements(batchItems);
+      const message = keptItems.length === batchItems.length ? rawMessage : joinBatch(keptItems);
+      if (message !== rawMessage) {
+        this.logger.info(
+          {
+            event: 'ai_response_acknowledgements_dropped',
+            userId,
+            dropped: batchItems.length - keptItems.length,
+          },
+          'confirmação que acompanhava uma mensagem com conteúdo não vai para a IA',
+        );
       }
 
       // ⚠️ Persona resolvida UMA vez por job, e propagada como OBJETO daqui para baixo.
@@ -1035,8 +1067,8 @@ export class AIResponseWorker implements OnModuleInit {
     await this.queues.enqueue(QUEUE.whatsappOutbound, 'coach-typing', job);
   }
 
-  /** Drena e apaga o buffer numa única transação Redis (concatena a rajada). */
-  private async drainBatch(batchKey: string): Promise<string> {
+  /** Drena e apaga o buffer numa única transação Redis, uma entrada por mensagem do aluno. */
+  private async drainBatchItems(batchKey: string): Promise<string[]> {
     const result = await this.redis.multi().lrange(batchKey, 0, -1).del(batchKey).exec();
     const items = (result?.[0]?.[1] ?? []) as string[];
     return items
@@ -1047,9 +1079,27 @@ export class AIResponseWorker implements OnModuleInit {
           return '';
         }
       })
-      .filter(Boolean)
-      .join(' ')
-      .slice(0, MAX_MESSAGE_CHARS);
+      .filter(Boolean);
+  }
+
+  /**
+   * Sem pergunta em aberto, uma confirmação do aluno não pede resposta. Com pergunta pendente,
+   * fluxo de troca aberto ou uma pergunta na última mensagem enviada, o "ok" pode ser a
+   * resposta — e na dúvida o Coach responde.
+   */
+  private async canStaySilent(userId: string): Promise<boolean> {
+    try {
+      const [open] = await this.followups.listForContext(userId);
+      if (open?.deliveredAt) return false;
+      if (await this.substitutionFlow.hasOpenFlow(userId)) return false;
+      return !(await this.context.lastCoachMessageAsksQuestion(userId));
+    } catch (err: unknown) {
+      this.logger.warn(
+        { event: 'acknowledgement_silence_check_failed', userId, err },
+        'não foi possível checar pendências; a confirmação segue para a IA',
+      );
+      return false;
+    }
   }
 
   /** DLQ: falha persistente → fallback "já te respondo" (guardrails), sem travar o usuário. */

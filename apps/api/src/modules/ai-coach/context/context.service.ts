@@ -159,6 +159,27 @@ export class ContextService {
     }
   }
 
+  /**
+   * A última mensagem enviada ao aluno (do Coach, do sistema ou do profissional) fez uma
+   * pergunta? Decide se um "ok" ou um "👍" dele pode ser a resposta e, portanto, precisa
+   * seguir o fluxo normal. Falha de leitura conta como "sim": na dúvida, o Coach responde.
+   */
+  async lastCoachMessageAsksQuestion(userId: string, now: Date = new Date()): Promise<boolean> {
+    try {
+      const rows = await this.repo.loadTranscript(userId, now);
+      const last = rows
+        .filter((row) => row.direction === 'OUTBOUND')
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+      return last ? last.content.replace(/https?:\/\/\S+/g, '').includes('?') : false;
+    } catch (err: unknown) {
+      this.logger.warn(
+        { event: 'last_coach_message_unavailable', err },
+        'última mensagem enviada indisponível; tratando como pergunta aberta',
+      );
+      return true;
+    }
+  }
+
   /** Grava um turno na working memory (chamado pelo worker antes e depois de responder). */
   async recordTurn(userId: string, role: 'user' | 'assistant', content: string): Promise<void> {
     await this.working.append(userId, currentSessionDate(), { role, content, ts: Date.now() });
