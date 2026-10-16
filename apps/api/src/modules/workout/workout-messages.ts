@@ -54,14 +54,22 @@ const YESTERDAY_VARIANTS: readonly [YesterdayVariant, ...YesterdayVariant[]] = [
     `${when.charAt(0).toUpperCase()}${when.slice(1)} o treino de ${focus} ficou sem registro. Como foi por aí? Se quiser me contar, uma palavra já ajuda.\n\nNinguém precisa ser perfeito pra seguir em frente, só precisa voltar. A gente segue junto. 👊🏼`,
 ];
 
+/** Saudação pelo horário local (HH:mm): 04:00-11:59 dia, 12:00-17:59 tarde, 18:00-03:59 noite. */
+export function greetingFor(localTime: string): string {
+  const hour = Number(localTime.slice(0, 2));
+  if (hour >= 18 || hour < 4) return 'Boa noite';
+  return hour >= 12 ? 'Boa tarde' : 'Bom dia';
+}
+
 /** O balão do link do dia: sempre este texto, com ou sem a pergunta. */
 export function dailyWorkoutMessage(
   firstName: string,
   workoutTitle: string,
   link: string,
   yesterday?: DailyWorkoutYesterday,
+  greeting = 'Bom dia',
 ): string {
-  const linkBubble = `Bom dia, ${bold(firstName)}! 💚\n\nSeu treino de hoje é ${bold(workoutTitle)}, não esqueça de realizar seu check-in diário quando for treinar:\n${link}\n\nAgora é com você. Bora se mover. 👊🏼`;
+  const linkBubble = `${greeting}, ${bold(firstName)}! 💚\n\nSeu treino de hoje é ${bold(workoutTitle)}, não esqueça de realizar seu check-in diário quando for treinar:\n${link}\n\nAgora é com você. Bora se mover. 👊🏼`;
   if (!yesterday) return linkBubble;
   const index = [...yesterday.seed].reduce((sum, char) => sum + char.charCodeAt(0), 0);
   const variant = YESTERDAY_VARIANTS[index % YESTERDAY_VARIANTS.length] ?? YESTERDAY_VARIANTS[0];

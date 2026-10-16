@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   dailyWorkoutMessage,
   durationInsightMessage,
+  greetingFor,
   parseDurationInsightButton,
   resentWorkoutLinkMessage,
 } from './workout-messages';
@@ -31,6 +32,24 @@ const COPY = [
 
 const FORBIDDEN =
   /diagn[óo]stic|tratamento|cura\b|garantid|evolu[çc][ãa]o do quadro|progresso cl[íi]nico|resultado garantido/i;
+
+describe('saudacao pelo horario local', () => {
+  it.each([
+    ['04:00', 'Bom dia'],
+    ['11:59', 'Bom dia'],
+    ['12:00', 'Boa tarde'],
+    ['17:59', 'Boa tarde'],
+    ['18:00', 'Boa noite'],
+    ['23:30', 'Boa noite'],
+    ['00:00', 'Boa noite'],
+    ['03:59', 'Boa noite'],
+  ])('%s -> %s', (time, expected) => {
+    expect(greetingFor(time)).toBe(expected);
+    expect(
+      dailyWorkoutMessage('Ana', 'Pernas', 'https://x/c', undefined, greetingFor(time)),
+    ).toMatch(new RegExp(`^${expected}, \\*Ana\\*!`));
+  });
+});
 
 describe('copy do treino diário', () => {
   it('não usa nenhum termo clínico ou promessa de resultado', () => {

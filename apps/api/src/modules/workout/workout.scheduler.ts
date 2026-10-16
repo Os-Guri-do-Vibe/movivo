@@ -21,7 +21,7 @@ import {
   localParts,
 } from './workout-eligibility';
 import { WorkoutJournalService } from './workout-journal.service';
-import { dailyWorkoutMessage } from './workout-messages';
+import { dailyWorkoutMessage, greetingFor } from './workout-messages';
 
 /** `force`: execução manual pelo painel "Sistema → Scripts" — ignora a janela das 04:00. */
 type WorkoutJob = { kind: 'SCAN'; force?: boolean };
@@ -102,7 +102,7 @@ export class WorkoutScheduler implements OnModuleInit {
       // Alerta de frequência para o profissional CREF: independe de hoje haver treino.
       if (await this.checkAttendance(row.userId, local.date, now)) alerted += 1;
       try {
-        const outcome = await this.sendDailyLink(row, local.date, now);
+        const outcome = await this.sendDailyLink(row, local.date, now, local.time);
         if (outcome.sent) sent += 1;
         if (outcome.asked) asked += 1;
       } catch (err: unknown) {
@@ -133,6 +133,7 @@ export class WorkoutScheduler implements OnModuleInit {
     row: EligibleStudent,
     date: string,
     now: Date,
+    localTime: string,
   ): Promise<{ sent: boolean; asked: boolean }> {
     const decidedKey = this.keys.forUser(row.userId, 'workout-daily', 'decided', date);
     if ((await this.redis.exists(decidedKey)) === 1) return { sent: false, asked: false };
@@ -146,7 +147,8 @@ export class WorkoutScheduler implements OnModuleInit {
     const firstName = firstNameOf(row.name);
     // O aluno reconhece o FOCO ("Costas e Bíceps"); `dayLabel` é rótulo interno ("Dia A").
     const focusToday = view.workout.prescription.focus;
-    const plainText = dailyWorkoutMessage(firstName, focusToday, link);
+    const greeting = greetingFor(localTime);
+    const plainText = dailyWorkoutMessage(firstName, focusToday, link, undefined, greeting);
 
     let text = plainText;
     let followupId: string | undefined;
@@ -176,11 +178,17 @@ export class WorkoutScheduler implements OnModuleInit {
       // `PENDING_SEND` também no retry de uma execução que caiu entre a reserva e o envio.
       if (reservation.status === 'PENDING_SEND') {
         followupId = reservation.id;
-        text = dailyWorkoutMessage(firstName, focusToday, link, {
-          focus: subject.focus,
-          when: subject.when,
-          seed: subject.subjectDate,
-        });
+        text = dailyWorkoutMessage(
+          firstName,
+          focusToday,
+          link,
+          {
+            focus: subject.focus,
+            when: subject.when,
+            seed: subject.subjectDate,
+          },
+          greeting,
+        );
       }
     }
 
