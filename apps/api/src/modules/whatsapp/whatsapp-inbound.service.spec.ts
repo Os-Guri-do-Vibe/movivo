@@ -230,7 +230,7 @@ describe('WhatsappInboundService.ingest', () => {
     expect(job.batchKey).toContain(USER_ID.toLowerCase());
     expect(job).not.toHaveProperty('text'); // nenhum PII no job
     expect(job.enqueuedAt).toBeGreaterThan(0);
-    expect(overrides.delay).toBe(7_000);
+    expect(overrides.delay).toBe(15_000);
   });
 
   it('atendimento pausado: registra a mensagem no histórico e NÃO aciona a IA', async () => {
