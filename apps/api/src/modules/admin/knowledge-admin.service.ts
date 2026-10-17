@@ -10,7 +10,7 @@ import {
 import {
   knowledgeDocumentActionSchema,
   reviewKnowledgeDocumentSchema,
-  uploadKnowledgeDocumentSchema,
+  uploadKnowledgeArticleSchema,
   type KnowledgeDocumentsResponse,
 } from '@movivo/shared';
 import { sql } from 'drizzle-orm';
@@ -30,17 +30,26 @@ import {
   currentKnowledgeState,
   lockKnowledgeDocument,
 } from './knowledge-lifecycle';
-import { scanKnowledgeContent } from './knowledge-content-scanner';
-
-export { scanKnowledgeContent } from './knowledge-content-scanner';
+import {
+  ARTICLE_FORMATS,
+  ARTICLE_MIME_TYPES,
+  articleFormatOf,
+  hasValidSignature,
+  mimeMatchesFormat,
+} from './knowledge-text-extractor';
 
 const QUARANTINE_DAYS = 30;
 const APPROVED_ORIGINAL_DAYS = 365;
 
-const EXTENSION_MIME = new Map([
-  ['.txt', 'text/plain'],
-  ['.md', 'text/markdown'],
-]);
+/** Categoria e tópico são fixos: a aba Documentos recebe apenas artigos científicos. */
+const ARTICLE_CATEGORY = 'SCIENTIFIC_EVIDENCE';
+const ARTICLE_TOPIC = 'evidência científica';
+
+export interface UploadedArticleFile {
+  originalname: string;
+  mimetype: string;
+  buffer: Buffer;
+}
 
 interface KnowledgeListRow {
   id: string;
@@ -90,9 +99,21 @@ function logicalKeyFor(title: string): string {
   return key || `documento-${createHash('sha256').update(title).digest('hex').slice(0, 12)}`;
 }
 
-function extensionOf(filename: string): string {
-  const offset = filename.lastIndexOf('.');
-  return offset < 0 ? '' : filename.slice(offset).toLowerCase();
+/** "Revisao_do_estudo-2024.pdf" → "Revisao do estudo 2024" (o usuário não precisa nomear nada). */
+export function titleFromFilename(filename: string): string {
+  const base = filename
+    .replace(/\.[^.]+$/, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const title = base.slice(0, 200).trim();
+  return title.length >= 3 ? title : 'Artigo científico';
+}
+
+/** Nome vindo do multipart chega em latin1; recupera o UTF-8 original quando for o caso. */
+function decodeFilename(raw: string): string {
+  const decoded = Buffer.from(raw, 'latin1').toString('utf8');
+  return decoded.includes('\uFFFD') ? raw : decoded;
 }
 
 @Injectable()
@@ -182,7 +203,8 @@ export class KnowledgeAdminService {
         statusUpdatedAt: new Date(row.status_updated_at).toISOString(),
       })),
       policy: {
-        allowedTypes: [...this.config.knowledge.allowedMimeTypes],
+        allowedTypes: [...ARTICLE_MIME_TYPES],
+        allowedExtensions: [...ARTICLE_FORMATS.keys()],
         maxBytes: this.config.knowledge.uploadMaxBytes,
         quarantineDays: QUARANTINE_DAYS,
         approvedOriginalDays: APPROVED_ORIGINAL_DAYS,
@@ -190,41 +212,85 @@ export class KnowledgeAdminService {
     });
   }
 
-  async upload(actor: AuthenticatedUser, body: unknown): Promise<KnowledgeDocumentsResponse> {
-    const parsed = strictSafeParse(uploadKnowledgeDocumentSchema, body);
+  async upload(
+    actor: AuthenticatedUser,
+    file: UploadedArticleFile | undefined,
+    fields: unknown,
+  ): Promise<KnowledgeDocumentsResponse> {
+    if (!file?.buffer?.byteLength) throw new BadRequestException('Envie um arquivo.');
+    const optional = Object.fromEntries(
+      Object.entries((fields ?? {}) as Record<string, unknown>).filter(
+        ([, value]) => typeof value !== 'string' || value.trim() !== '',
+      ),
+    );
+    const parsed = strictSafeParse(uploadKnowledgeArticleSchema, optional);
     if (!parsed.success) {
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
     }
     const input = parsed.data;
-    if (this.config.knowledge.complexFormatsEnabled) {
-      throw new ServiceUnavailableException('Formatos complexos ainda não foram homologados.');
-    }
-    if (/[/\\]/.test(input.originalFilename)) {
-      throw new BadRequestException('O nome do arquivo não pode conter caminho.');
-    }
-    const extension = extensionOf(input.originalFilename);
-    const expectedMime = EXTENSION_MIME.get(extension);
-    if (!expectedMime || expectedMime !== input.mimeType) {
-      throw new BadRequestException('Extensão e MIME devem corresponder a .txt ou .md.');
-    }
-    if (!this.config.knowledge.allowedMimeTypes.includes(input.mimeType)) {
-      throw new BadRequestException('O MIME informado não está na allowlist ativa.');
-    }
 
-    const payload = Buffer.from(input.content, 'utf8');
-    if (payload.toString('utf8') !== input.content) {
-      throw new BadRequestException('O arquivo não contém UTF-8 válido.');
+    const originalFilename = decodeFilename(file.originalname).trim();
+    if (!originalFilename || originalFilename.length > 255 || /[/\\]/.test(originalFilename)) {
+      throw new BadRequestException('O nome do arquivo é inválido.');
     }
+    const spec = articleFormatOf(originalFilename);
+    if (!spec) {
+      const accepted = [...ARTICLE_FORMATS.keys()].join(', ');
+      throw new BadRequestException(`Formato não aceito. Envie ${accepted}.`);
+    }
+    if (!mimeMatchesFormat(spec, file.mimetype)) {
+      throw new BadRequestException('O tipo do arquivo não corresponde à extensão.');
+    }
+    const payload = file.buffer;
     if (payload.byteLength > this.config.knowledge.uploadMaxBytes) {
-      throw new BadRequestException('O arquivo excede o limite configurado.');
+      throw new BadRequestException('O arquivo excede o tamanho máximo permitido.');
     }
-    scanKnowledgeContent(input.content);
-    const sha256 = createHash('sha256').update(payload).digest('hex');
-    const logicalKey = input.logicalKey ?? logicalKeyFor(input.title);
+    if (!hasValidSignature(payload, spec.format)) {
+      throw new BadRequestException('O conteúdo do arquivo não corresponde ao formato informado.');
+    }
 
-    let documentId: string;
+    const title = input.title ?? titleFromFilename(originalFilename);
+    const sha256 = createHash('sha256').update(payload).digest('hex');
+    const logicalKey = logicalKeyFor(title);
+
+    let documentId: string | null;
     try {
       documentId = await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
+        const duplicate = (await tx.execute(sql`
+          SELECT document.id, latest.status
+          FROM knowledge_documents document
+          JOIN LATERAL (
+            SELECT event.status FROM knowledge_document_events event
+            WHERE event.document_id = document.id
+            ORDER BY event.sequence DESC, event.created_at DESC, event.id DESC LIMIT 1
+          ) latest ON true
+          WHERE document.sha256 = ${sha256}
+        `)) as unknown as Array<{ id: string; status: string }>;
+        const existing = duplicate[0];
+        if (existing) {
+          // Artigo arquivado (fluxo antigo): reenviar o mesmo arquivo o reativa, trechos e vetores já existem.
+          if (existing.status === 'ARCHIVED') {
+            await lockKnowledgeDocument(tx, existing.id);
+            await appendKnowledgeEvent(tx, {
+              documentId: existing.id,
+              status: 'PUBLISHED',
+              stage: 'PUBLISHED',
+              actorId: actor.userId,
+              note: 'Artigo reativado por novo envio do mesmo arquivo.',
+            });
+            await this.audit.append(tx, {
+              actorId: actor.userId,
+              userId: actor.userId,
+              action: 'knowledge.restore',
+              entityType: 'knowledge_document',
+              entityId: existing.id,
+              changes: { sha256 },
+            });
+            return null;
+          }
+          throw new ConflictException('Este artigo já está na base.');
+        }
+
         await tx.execute(
           sql`SELECT pg_advisory_xact_lock(hashtextextended(${`knowledge-version:${logicalKey}`}, 0))`,
         );
@@ -236,16 +302,16 @@ export class KnowledgeAdminService {
         const [document] = await tx
           .insert(knowledgeDocuments)
           .values({
-            title: input.title,
-            topic: input.topic,
-            category: input.category,
+            title,
+            topic: ARTICLE_TOPIC,
+            category: ARTICLE_CATEGORY,
             logicalKey,
             version,
             sourceUrl: input.sourceUrl ?? null,
             author: input.author ?? null,
-            license: input.license ?? null,
-            originalFilename: input.originalFilename,
-            mimeType: input.mimeType,
+            license: null,
+            originalFilename,
+            mimeType: spec.mimeType,
             sizeBytes: payload.byteLength,
             sha256,
             uploadedBy: actor.userId,
@@ -261,7 +327,7 @@ export class KnowledgeAdminService {
           status: 'QUARANTINED',
           stage: 'QUEUE',
           actorId: actor.userId,
-          note: 'Original validado por extensão, texto UTF-8 e tamanho; aguardando processamento.',
+          note: 'Original validado por extensão, assinatura e tamanho; aguardando extração do texto.',
         });
         await this.audit.append(tx, {
           actorId: actor.userId,
@@ -272,8 +338,8 @@ export class KnowledgeAdminService {
           changes: {
             sha256,
             sizeBytes: payload.byteLength,
-            mimeType: input.mimeType,
-            category: input.category,
+            mimeType: spec.mimeType,
+            category: ARTICLE_CATEGORY,
             logicalKey,
             version,
           },
@@ -282,20 +348,49 @@ export class KnowledgeAdminService {
       });
     } catch (error) {
       if (typeof error === 'object' && error && 'code' in error && error.code === '23505') {
-        throw new ConflictException('Este arquivo ou versão já foi enviado.');
+        throw new ConflictException('Este artigo já está na base.');
       }
       throw error;
     }
 
-    try {
-      await this.queues.enqueue(QUEUE.knowledgeProcessing, 'ingest', { documentId });
-    } catch (_error) {
-      await this.recordQueueFailure(documentId, 'INGESTION');
-      throw new ServiceUnavailableException({
-        code: 'KNOWLEDGE_QUEUE_UNAVAILABLE',
-        message: 'Documento salvo em quarentena; use “Tentar novamente” quando a fila voltar.',
-      });
+    if (documentId) {
+      try {
+        await this.queues.enqueue(QUEUE.knowledgeProcessing, 'ingest', { documentId });
+      } catch (_error) {
+        await this.recordQueueFailure(documentId, 'INGESTION');
+        throw new ServiceUnavailableException({
+          code: 'KNOWLEDGE_QUEUE_UNAVAILABLE',
+          message: 'Artigo salvo; use “Tentar novamente” quando a fila voltar.',
+        });
+      }
     }
+    return this.list(actor);
+  }
+
+  /**
+   * Exclui o artigo DE VERDADE: documento, original, texto extraído, trechos e vetores saem
+   * do banco (função `delete_knowledge_document`, a única porta de purga do histórico
+   * imutável). Só a trilha de auditoria permanece, sem título nem conteúdo.
+   */
+  async remove(actor: AuthenticatedUser, id: string): Promise<KnowledgeDocumentsResponse> {
+    const documentId = z.uuid().safeParse(id);
+    if (!documentId.success) throw new BadRequestException('Identificador inválido.');
+    await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
+      await lockKnowledgeDocument(tx, id);
+      const state = await currentKnowledgeState(tx, id);
+      if (!state) throw new NotFoundException('Documento inexistente.');
+      const purged = (await tx.execute(
+        sql`SELECT public.delete_knowledge_document(${id}::uuid) AS chunks`,
+      )) as unknown as Array<{ chunks: number }>;
+      await this.audit.append(tx, {
+        actorId: actor.userId,
+        userId: actor.userId,
+        action: 'knowledge.delete',
+        entityType: 'knowledge_document',
+        entityId: id,
+        changes: { previousStatus: state.status, chunksRemoved: Number(purged[0]?.chunks ?? 0) },
+      });
+    });
     return this.list(actor);
   }
 
@@ -304,15 +399,21 @@ export class KnowledgeAdminService {
     if (!documentId.success) throw new BadRequestException('Identificador inválido.');
     return this.db.runAsUser(actor.userId, actor.role, async (tx) => {
       const rows = (await tx.execute(sql`
-        SELECT extraction.content, blob.payload
+        SELECT extraction.content, blob.payload, document.mime_type
         FROM knowledge_documents document
         LEFT JOIN knowledge_document_extractions extraction ON extraction.document_id = document.id
         LEFT JOIN knowledge_document_blobs blob ON blob.document_id = document.id
         WHERE document.id = ${id}::uuid
-      `)) as unknown as Array<{ content: string | null; payload: Buffer | null }>;
+      `)) as unknown as Array<{
+        content: string | null;
+        payload: Buffer | null;
+        mime_type: string;
+      }>;
       const row = rows[0];
       if (!row) throw new NotFoundException('Documento inexistente.');
-      const content = row.content ?? row.payload?.toString('utf8');
+      // O original só é legível como texto quando é texto; PDF/Word/planilha dependem da extração.
+      const content =
+        row.content ?? (row.mime_type.startsWith('text/') ? row.payload?.toString('utf8') : null);
       if (!content) throw new NotFoundException('O conteúdo não está mais disponível.');
       await this.audit.append(tx, {
         actorId: actor.userId,

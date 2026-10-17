@@ -137,8 +137,6 @@ export interface RedisConfig {
 
 export interface KnowledgeConfig {
   readonly openaiEmbeddingHealthDataApproved: boolean;
-  readonly complexFormatsEnabled: boolean;
-  readonly allowedMimeTypes: readonly string[];
   readonly uploadMaxBytes: number;
 }
 
@@ -329,8 +327,6 @@ export class AppConfigService {
     return {
       openaiEmbeddingHealthDataApproved:
         this.config.KNOWLEDGE_OPENAI_EMBEDDING_HEALTH_DATA_APPROVED,
-      complexFormatsEnabled: this.config.KNOWLEDGE_COMPLEX_FORMATS_ENABLED,
-      allowedMimeTypes: this.config.KNOWLEDGE_ALLOWED_MIME_TYPES,
       uploadMaxBytes: this.config.KNOWLEDGE_UPLOAD_MAX_BYTES,
     };
   }

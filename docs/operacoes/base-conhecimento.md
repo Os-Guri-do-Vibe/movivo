@@ -8,7 +8,7 @@
 
 O MVP reutiliza PostgreSQL/PGVector, Redis Sentinel, BullMQ, DLQ, logs estruturados e o processo da API que já existem. A ingestão roda na fila `knowledge-processing`, é idempotente e mantém o original em quarentena no PostgreSQL. Não foi acrescentado MinIO, ClamAV ou Apache Tika porque nenhum adaptador de aplicação consome esses serviços hoje; subi-los criaria custo e falsa sensação de proteção.
 
-O gate operacional permanece **fail-closed**: somente `text/plain` e `text/markdown`, até 512 KiB. PDF, DOC, DOCX, XLS, XLSX, JPG e PNG continuam bloqueados até todos os controles da seção “Gate para formatos complexos” serem aprovados por Sato, Mariana, Leonardo e Henrique.
+**Decisão do fundador (2026-10-17):** a aba Documentos passou a ser **somente para artigos científicos**, com upload direto: PDF, Word (`.docx`), planilha (`.xlsx`/`.csv`), Markdown e TXT, até 10 MiB, sem revisão humana nem justificativa. Imagens **não** são aceitas. O gate de formatos complexos abaixo (ClamAV, Tika isolado, object storage) **não foi cumprido**; em troca valem os controles compensatórios da seção “Controles do upload de artigos”, e os riscos residuais estão registrados em “Riscos e trade-offs”.
 
 ## Contexto da infraestrutura
 
@@ -18,8 +18,8 @@ O caminho operacional é:
 upload autenticado
   -> original em quarentena no PostgreSQL (SHA-256 + retenção)
   -> BullMQ `knowledge-processing` no Redis/Sentinel
-  -> validação, normalização e chunking idempotentes
-  -> revisão humana CREF
+  -> extração de texto (PDF/Word/planilha/TXT), varredura e chunking idempotentes
+  -> aprovação automática pelo administrador que enviou
   -> embedding/PGVector
   -> publicação ou DLQ
 ```
@@ -56,7 +56,7 @@ O check estático é executável com:
 pnpm run infra:knowledge:verify
 ```
 
-Ele falha se formatos complexos forem habilitados, se a allowlist sair de TXT/Markdown, se o limite ultrapassar 512 KiB, se a fila não estiver registrada ou se o boot não validar a feature flag. Com o stack local no ar, execute também:
+Ele falha se o teto de upload sair de 1 KiB–10 MiB, se o contrato não estiver nos `.env.example`, se a fila não estiver registrada ou se o boot não validar o teto. Com o stack local no ar, execute também:
 
 ```bash
 pnpm run infra:knowledge:verify:runtime
@@ -85,23 +85,26 @@ Contrato de telemetria para produção:
 
 Nunca registrar texto extraído, título, nome do arquivo, URL de origem, payload de job, prompt ou dado pessoal em log, métrica, trace ou alerta. IDs de documento também ficam fora de métricas; use-os apenas em log interno com acesso restrito quando indispensável.
 
-SLO inicial: 99% dos TXT/Markdown válidos chegam a `READY_FOR_REVIEW` em até 5 minutos; zero publicação sem aprovação CREF; zero job terminal silencioso.
+SLO inicial: 99% dos artigos válidos chegam a `PUBLISHED` em até 10 minutos (extração + embeddings); zero job terminal silencioso.
 
 ## Estratégia de segurança operacional
 
-- As três configurações normativas são:
-
-  ```dotenv
-  KNOWLEDGE_COMPLEX_FORMATS_ENABLED=false
-  KNOWLEDGE_ALLOWED_MIME_TYPES=text/plain,text/markdown
-  KNOWLEDGE_UPLOAD_MAX_BYTES=524288
-  ```
-
-- A flag não é mecanismo de autorização. Backend continua validando extensão, MIME, assinatura, tamanho, RBAC e estado do workflow.
+- A configuração normativa é `KNOWLEDGE_UPLOAD_MAX_BYTES=10485760`. A lista de formatos aceitos é código (`ARTICLE_FORMATS`), porque cada formato depende de um parser.
+- Nada disso é mecanismo de autorização. Backend continua validando extensão, MIME, assinatura, tamanho, RBAC e estado do workflow.
 - Original em quarentena nunca é recuperado pelo RAG; somente chunks de versão publicada e ativa entram em recuperação.
 - ClamAV por TCP não oferece proteção de transporte; quando adotado, fica em rede interna dedicada e recebe `INSTREAM` com teto igual ao upload.
 - O parser trata todo arquivo como hostil. Não recebe segredo, credencial de cloud, acesso ao Docker socket, banco ou internet.
-- A habilitação de formatos complexos exige decisão registrada, imagem/digest, SBOM, relatório SCA e aprovação de segurança.
+- Adotar o gate completo de formatos complexos (seção abaixo) continua recomendado antes de abrir o upload a mais perfis ou a conteúdo de terceiros.
+
+### Controles do upload de artigos
+
+- Upload só para `AI_KNOWLEDGE_WRITE` (hoje, apenas ADMIN), autenticado, com CSRF por `Origin` no BFF.
+- Extensão, MIME declarado e _magic bytes_ precisam concordar; o MIME de imagem e executáveis é recusado.
+- `.docx`/`.xlsx` são zips: o diretório central é lido antes de descompactar (entradas, soma descompactada e razão de compressão limitadas).
+- PDF: teto de páginas; texto extraído: teto de caracteres. PDF escaneado (sem camada de texto) é recusado com mensagem clara.
+- O parser roda no worker (fila), fora do request HTTP. Só texto entra no RAG; o arquivo original nunca é renderizado nem executado.
+- A varredura do texto barra conteúdo ativo e _prompt injection_ indireta. A checagem de dado pessoal dos documentos internos **não** se aplica a artigos (e-mails de autores e tabelas numéricas gerariam falso positivo).
+- Excluir um artigo é **definitivo**: a função `delete_knowledge_document` (só ADMIN) apaga do banco o documento, o original, o texto extraído, os trechos e os vetores. É a única porta de purga do histórico imutável: ela desliga os triggers de imutabilidade tabela a tabela e os religa na mesma transação (DDL transacional; erro desfaz tudo), com `lock_timeout` de 10 s. Só permanece o registro de auditoria (`knowledge.delete`), sem título nem conteúdo. Backups anteriores à exclusão ainda contêm o artigo até expirarem.
 
 ## Estratégia de backup e recuperação
 
@@ -127,7 +130,7 @@ Falha de Redis impede novos processamentos, mas não deve retirar conhecimento j
 
 ## Impacto em custos (FinOps)
 
-O caminho atual não cria serviços nem dependências pagas. Armazenar arquivos de até 512 KiB no PostgreSQL é aceitável para o volume do MVP e evita operar três serviços ociosos. Medir mensalmente bytes em blobs, chunks por documento, CPU do worker, chamadas de embedding e custo por documento publicado.
+O caminho atual não cria serviços nem dependências pagas. Armazenar arquivos de até 10 MiB no PostgreSQL é aceitável com poucos artigos para o volume do MVP e evita operar três serviços ociosos. Medir mensalmente bytes em blobs, chunks por documento, CPU do worker, chamadas de embedding e custo por documento publicado.
 
 Migrar para object storage quando blobs superarem 5 GB, backup/restore do banco for materialmente afetado ou arquivos complexos forem aprovados. O gatilho é operacional, não estético.
 
@@ -135,15 +138,16 @@ Migrar para object storage quando blobs superarem 5 GB, backup/restore do banco 
 
 | Risco | Estado | Mitigação |
 |---|---|---|
-| PDF/DOCX/XLSX/imagem não suportado | Aceito no MVP | bloqueio explícito e gate abaixo |
+| Parser de PDF/Word/planilha roda no processo da API, sem AV/CDR | Aceito em 2026-10-17 | upload só ADMIN, controles acima; recomendado migrar para o gate completo |
+| Imagem como artigo | Fora do escopo | recusada no upload; OCR exigiria dependência e CPU adicionais |
 | Worker disputa recurso com HTTP | Monitorado | separar deployment ao romper threshold |
-| Blob aumenta backup PostgreSQL | Baixo com 512 KiB | retenção + gatilho de 5 GB |
+| Blob aumenta backup PostgreSQL | Médio com até 10 MiB por arquivo | retenção + gatilho de 5 GB |
 | DLQ apenas logada | Aberto antes de produção | alerta Sentry e tarefa operacional obrigatórios |
 | Telemetria OTEL ainda não exportada | Aberto antes de produção | implementar contrato de sinais acima |
 
 ## Gate para formatos complexos
 
-`KNOWLEDGE_COMPLEX_FORMATS_ENABLED=true` somente pode chegar a staging depois de todos os itens:
+Esta lista descreve o isolamento completo (ClamAV, Tika/OCR, object storage). **Não** é pré-requisito do upload de artigos atual (decisão de 2026-10-17); segue como alvo antes de aceitar arquivos de terceiros:
 
 - [ ] upload `multipart/form-data` em streaming, com limite aplicado antes de alocar o arquivo inteiro;
 - [ ] extensão, MIME declarado e _magic bytes_ concordam; arquivos cifrados e archives aninhados são recusados;
@@ -155,9 +159,7 @@ Migrar para object storage quando blobs superarem 5 GB, backup/restore do banco 
 - [ ] threat model e imagens/digests aprovados por Sato;
 - [ ] restore, purge e reindexação exercitados em staging;
 - [ ] métricas, traces, alertas e DLQ acionável em produção;
-- [ ] rollback comprovado: voltar a `false` interrompe novos complexos sem afetar os textos publicados.
-
-Até lá, o verificador operacional falha deliberadamente se a flag for ativada.
+- [ ] rollback comprovado: desligar o upload interrompe novos arquivos sem afetar os textos publicados.
 
 ## Checklist operacional
 
@@ -167,12 +169,12 @@ Até lá, o verificador operacional falha deliberadamente se a flag for ativada.
 - [ ] testes unitários, integração, SAST, SCA e secret scan verdes.
 - [ ] migração aplicada com backup prévio.
 - [ ] worker e API usam a mesma versão da imagem/código.
-- [ ] nenhuma mudança na allowlist sem aprovação Sato/Mariana.
+- [ ] nenhuma mudança em `ARTICLE_FORMATS` sem aprovação Sato/Mariana.
 
 ### Depois do deploy
 
 - [ ] `/health` prova PostgreSQL e Redis.
-- [ ] upload canário TXT atravessa fila, revisão, indexação e publicação.
+- [ ] upload canário (TXT e um PDF) atravessa fila, indexação e publicação.
 - [ ] retry do mesmo job não duplica chunks.
 - [ ] `pnpm run infra:knowledge:status` não mostra fila presa nem DLQ.
 - [ ] rollback para a metodologia anterior cria evento/versão auditável.

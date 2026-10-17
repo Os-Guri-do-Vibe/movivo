@@ -10,18 +10,19 @@ import { chunkText } from '../../core/knowledge/corpus-indexer';
 import { EMBEDDING_PORT, type EmbeddingPort } from '../../core/knowledge/embedding.port';
 import { QUEUE } from '../jobs/jobs.config';
 import { WorkerFactory } from '../jobs/worker.factory';
-import { knowledgeProcessingErrorCode, scanKnowledgeContent } from './knowledge-content-scanner';
+import { knowledgeProcessingErrorCode, scanArticleText } from './knowledge-content-scanner';
 import {
   appendKnowledgeEvent,
   currentKnowledgeState,
   lockKnowledgeDocument,
 } from './knowledge-lifecycle';
+import { articleFormatOf, extractArticleText } from './knowledge-text-extractor';
 
 export interface KnowledgeProcessingJob {
   documentId: string;
 }
 
-const PARSER_VERSION = 'plain-text-v1';
+const PARSER_VERSION = 'article-text-v1';
 const EMBEDDING_MODEL = 'embedding-port-v1';
 
 @Injectable()
@@ -72,11 +73,16 @@ export class KnowledgeProcessingWorker implements OnModuleInit {
         return { terminal: 'FAILED_INDEXING', row: null };
       }
       const rows = (await tx.execute(sql`
-        SELECT document.sha256, blob.payload
+        SELECT document.sha256, document.original_filename, document.mime_type, blob.payload
         FROM knowledge_documents document
         JOIN knowledge_document_blobs blob ON blob.document_id = document.id
         WHERE document.id = ${input.documentId}::uuid
-      `)) as unknown as Array<{ sha256: string; payload: Buffer }>;
+      `)) as unknown as Array<{
+        sha256: string;
+        original_filename: string;
+        mime_type: string;
+        payload: Buffer;
+      }>;
       const row = rows[0];
       if (!row) throw new Error('Original de quarentena indisponível.');
       await appendKnowledgeEvent(tx, {
@@ -89,10 +95,14 @@ export class KnowledgeProcessingWorker implements OnModuleInit {
     });
     if (!loaded.row) return { status: loaded.terminal ?? 'ALREADY_PROCESSED' };
 
-    const content = loaded.row.payload.toString('utf8');
-    scanKnowledgeContent(content);
+    // O original é conferido contra o hash gravado no upload; o texto extraído tem hash próprio.
+    const originalSha256 = createHash('sha256').update(loaded.row.payload).digest('hex');
+    if (originalSha256 !== loaded.row.sha256) throw new Error('Hash do original não confere.');
+    const spec = articleFormatOf(loaded.row.original_filename);
+    if (!spec) throw new Error('Formato do original não é suportado.');
+    const content = await extractArticleText(loaded.row.payload, spec.format);
+    scanArticleText(content);
     const contentSha256 = createHash('sha256').update(content).digest('hex');
-    if (contentSha256 !== loaded.row.sha256) throw new Error('Hash do original não confere.');
     const chunks = chunkText(content);
     if (chunks.length === 0) throw new Error('Documento não gerou chunks.');
 
@@ -108,7 +118,7 @@ export class KnowledgeProcessingWorker implements OnModuleInit {
           document_id, content, content_sha256, parser_version, detected_mime_type
         ) VALUES (
           ${input.documentId}::uuid, ${content}, ${contentSha256}, ${PARSER_VERSION},
-          'text/plain'
+          ${loaded.row.mime_type}
         ) ON CONFLICT (document_id) DO NOTHING
       `);
       for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
@@ -137,14 +147,43 @@ export class KnowledgeProcessingWorker implements OnModuleInit {
         documentId: input.documentId,
         status: 'READY_FOR_REVIEW',
         stage: 'REVIEW',
-        note: `${chunks.length} chunks prontos para revisão CREF.`,
+        note: `${chunks.length} trechos extraídos.`,
       });
     });
     this.logger.info(
       { event: 'knowledge_ingestion_ready', documentId: input.documentId, chunks: chunks.length },
-      'documento pronto para revisão',
+      'texto extraído; publicação direta',
     );
-    return { status: 'READY_FOR_REVIEW', chunks: chunks.length };
+    // Artigos científicos não passam por revisão: quem enviou (admin) já responde pela
+    // publicação. A aprovação fica registrada para a função de publicação conferir.
+    await this.approveUploader(input.documentId);
+    return this.index(input);
+  }
+
+  /** Registra a aprovação automática pelo administrador que enviou o artigo. */
+  private async approveUploader(documentId: string): Promise<void> {
+    await this.db.runAsSystem(async (tx) => {
+      await lockKnowledgeDocument(tx, documentId);
+      const state = await currentKnowledgeState(tx, documentId);
+      if (state?.status !== 'READY_FOR_REVIEW') return;
+      const uploaders = (await tx.execute(sql`
+        SELECT uploaded_by FROM knowledge_documents WHERE id = ${documentId}::uuid
+      `)) as unknown as Array<{ uploaded_by: string }>;
+      const uploader = uploaders[0]?.uploaded_by;
+      if (!uploader) throw new Error('Autor do envio indisponível.');
+      await tx.execute(sql`
+        INSERT INTO knowledge_document_reviews (document_id, decision, note, reviewer_id)
+        VALUES (${documentId}::uuid, 'APPROVED'::knowledge_review_decision,
+          'Publicação direta pelo administrador que enviou o artigo.', ${uploader}::uuid)
+      `);
+      await appendKnowledgeEvent(tx, {
+        documentId,
+        status: 'APPROVED',
+        stage: 'INDEXING',
+        actorId: uploader,
+        note: 'Aprovado automaticamente; sem revisão para artigos científicos.',
+      });
+    });
   }
 
   private async index(input: KnowledgeProcessingJob): Promise<{ status: string; chunks?: number }> {
