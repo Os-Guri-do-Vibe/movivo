@@ -723,12 +723,12 @@ export function getMethodology(signal?: AbortSignal): Promise<MethodologyRespons
 
 export function createMethodologyVersion(input: {
   content: string;
-  changeNote: string;
+  changeNote?: string;
 }): Promise<MethodologyResponse> {
   return mutate('ai/methodology', input, methodologyResponseSchema, {
     forbidden: 'Seu papel não pode criar versões da metodologia.',
     fallback:
-      'Não foi possível salvar a nova versão. Confira se o conteúdo tem ao menos 200 caracteres e se o motivo da mudança tem ao menos 10.',
+      'Não foi possível salvar a nova versão. Confira se o conteúdo tem ao menos 200 caracteres.',
     contract: 'A resposta ao salvar a versão veio fora do contrato esperado.',
   });
 }
@@ -752,19 +752,33 @@ export function reviewMethodologyVersion(
   );
 }
 
-export function publishMethodologyVersion(id: string, note: string): Promise<MethodologyResponse> {
+/** A observação é opcional: publicar uma versão não exige justificativa. */
+export function publishMethodologyVersion(id: string, note?: string): Promise<MethodologyResponse> {
   return mutate(
     `ai/methodology/${encodeURIComponent(id)}/publish`,
-    { note },
+    note?.trim() ? { note: note.trim() } : {},
     methodologyResponseSchema,
+    {
+      forbidden: 'Seu papel não pode publicar a metodologia.',
+      fallback: 'Não foi possível publicar esta versão.',
+      contract: 'A resposta ao publicar a versão veio fora do contrato esperado.',
+    },
   );
 }
 
-export function rollbackMethodologyVersion(id: string, note: string): Promise<MethodologyResponse> {
+export function rollbackMethodologyVersion(
+  id: string,
+  note?: string,
+): Promise<MethodologyResponse> {
   return mutate(
     `ai/methodology/${encodeURIComponent(id)}/rollback`,
-    { note },
+    note?.trim() ? { note: note.trim() } : {},
     methodologyResponseSchema,
+    {
+      forbidden: 'Seu papel não pode restaurar versões da metodologia.',
+      fallback: 'Não foi possível restaurar esta versão.',
+      contract: 'A resposta ao restaurar a versão veio fora do contrato esperado.',
+    },
   );
 }
 

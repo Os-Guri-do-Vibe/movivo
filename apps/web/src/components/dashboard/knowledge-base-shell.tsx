@@ -8,6 +8,7 @@ import {
   HelpCircle,
   History,
   ShieldCheck,
+  type LucideIcon,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -22,6 +23,9 @@ import {
 import { cn } from '@/lib/utils';
 
 const BASE = '/dashboard/ia/base-conhecimento';
+
+/** Disparado pelas seções após mudar a base, para o resumo do topo não ficar defasado. */
+export const KNOWLEDGE_CHANGED_EVENT = 'movivo:knowledge-changed';
 const SECTIONS = [
   { href: BASE, label: 'Metodologia', icon: BookOpenText },
   { href: `${BASE}/documentos`, label: 'Documentos', icon: Files },
@@ -36,15 +40,24 @@ function SummaryStrip() {
   const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
-    const controller = new AbortController();
-    void Promise.allSettled([
-      getKnowledgeDocuments(controller.signal).then(setDocuments),
-      getMethodology(controller.signal).then(setMethodology),
-    ]).then((results) => {
-      if (!controller.signal.aborted)
-        setUnavailable(results.some((result) => result.status === 'rejected'));
-    });
-    return () => controller.abort();
+    let controller = new AbortController();
+    const load = () => {
+      controller.abort();
+      controller = new AbortController();
+      const { signal } = controller;
+      void Promise.allSettled([
+        getKnowledgeDocuments(signal).then(setDocuments),
+        getMethodology(signal).then(setMethodology),
+      ]).then((results) => {
+        if (!signal.aborted) setUnavailable(results.some((result) => result.status === 'rejected'));
+      });
+    };
+    load();
+    window.addEventListener(KNOWLEDGE_CHANGED_EVENT, load);
+    return () => {
+      window.removeEventListener(KNOWLEDGE_CHANGED_EVENT, load);
+      controller.abort();
+    };
   }, []);
 
   const corpus = documents?.data.documents ?? [];
@@ -52,39 +65,67 @@ function SummaryStrip() {
   const current =
     versions.find((version) => version.current) ??
     versions.find((version) => version.status === 'PUBLISHED');
-  const cards = [
-    { label: 'Metodologia vigente', value: current ? `v${current.version}` : '—' },
+  const count = (predicate: (status: string) => boolean) =>
+    documents ? corpus.filter((item) => predicate(item.status)).length : null;
+  const waiting = count((status) => status === 'READY_FOR_REVIEW' || status === 'PENDING');
+  const failed = count((status) => status === 'FAILED');
+  const cards: Array<{
+    label: string;
+    value: string;
+    icon: LucideIcon;
+    /** Coral só quando há algo a resolver; zero é um estado calmo. */
+    alert?: boolean;
+  }> = [
+    {
+      label: 'Metodologia vigente',
+      value: current ? `v${current.version}` : '—',
+      icon: BookOpenText,
+    },
     {
       label: 'Fontes ativas',
-      value: documents ? String(corpus.filter((item) => item.status === 'PUBLISHED').length) : '—',
+      value: String(count((status) => status === 'PUBLISHED') ?? '—'),
+      icon: Files,
     },
     {
       label: 'Aguardando revisão',
-      value: documents
-        ? String(
-            corpus.filter((item) => item.status === 'READY_FOR_REVIEW' || item.status === 'PENDING')
-              .length,
-          )
-        : '—',
+      value: String(waiting ?? '—'),
+      icon: History,
+      alert: (waiting ?? 0) > 0,
     },
     {
       label: 'Falhas no processamento',
-      value: documents ? String(corpus.filter((item) => item.status === 'FAILED').length) : '—',
+      value: String(failed ?? '—'),
+      icon: AlertTriangle,
+      alert: (failed ?? 0) > 0,
     },
   ];
 
   return (
     <div className="mt-6">
-      <dl className="grid overflow-hidden rounded-xl border border-border bg-card sm:grid-cols-2 xl:grid-cols-4">
+      <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {cards.map((card) => (
           <div
             key={card.label}
-            className="border-b border-border p-4 last:border-b-0 sm:border-r sm:[&:nth-child(2)]:border-r-0 sm:[&:nth-child(n+3)]:border-b-0 xl:border-b-0 xl:[&:nth-child(2)]:border-r xl:last:border-r-0"
+            className={cn(
+              'flex items-center gap-4 rounded-xl border bg-card p-4',
+              card.alert ? 'border-coral/60' : 'border-border',
+            )}
           >
-            <dt className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-              {card.label}
-            </dt>
-            <dd className="mt-2 font-mono text-h2 font-bold">{card.value}</dd>
+            <span
+              aria-hidden="true"
+              className={cn(
+                'flex size-10 shrink-0 items-center justify-center rounded-lg',
+                card.alert ? 'bg-coral/20' : 'bg-accent text-accent-foreground',
+              )}
+            >
+              <card.icon className="size-5" />
+            </span>
+            <div className="min-w-0">
+              <dt className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                {card.label}
+              </dt>
+              <dd className="mt-0.5 font-mono text-h2 font-bold">{card.value}</dd>
+            </div>
           </div>
         ))}
       </dl>
@@ -108,6 +149,10 @@ export function KnowledgeBaseShell({ children }: { children: React.ReactNode }) 
           <Brain aria-hidden="true" className="size-7 text-verde-pulso" />
           Base de Conhecimento
         </h1>
+        <p className="mt-2 max-w-3xl text-label text-muted-foreground">
+          Tudo o que a IA sabe e segue: a metodologia do profissional CREF, as evidências, as
+          respostas prontas e as regras de segurança.
+        </p>
       </header>
 
       <SummaryStrip />
@@ -125,10 +170,10 @@ export function KnowledgeBaseShell({ children }: { children: React.ReactNode }) 
                   href={href}
                   aria-current={current ? 'page' : undefined}
                   className={cn(
-                    'flex min-h-11 items-center gap-2 border-b-2 px-4 py-2 text-label font-semibold transition-colors focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none',
+                    'flex min-h-11 items-center gap-2 rounded-t-lg border-b-2 px-4 py-2 text-label font-semibold transition-colors focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none',
                     current
-                      ? 'border-verde-pulso text-foreground'
-                      : 'border-transparent text-muted-foreground hover:text-foreground',
+                      ? 'border-verde-pulso bg-accent/60 text-foreground'
+                      : 'border-transparent text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
                   )}
                 >
                   <Icon aria-hidden="true" className="size-4" />

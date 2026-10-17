@@ -1,8 +1,18 @@
 'use client';
 
 import { MAX_METHODOLOGY_NOTE_LENGTH } from '@movivo/shared';
-import { CheckCircle2, GitCompareArrows, Lock, RotateCcw, Send, XCircle } from 'lucide-react';
-import { useMemo, useState, type FormEvent } from 'react';
+import {
+  BookOpenText,
+  CheckCircle2,
+  ChevronDown,
+  GitCompareArrows,
+  Plus,
+  RotateCcw,
+  Rocket,
+  X,
+  XCircle,
+} from 'lucide-react';
+import { useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -19,15 +29,21 @@ import {
   publishMethodologyVersion,
   reviewMethodologyVersion,
   rollbackMethodologyVersion,
-  submitMethodologyVersion,
+  type MethodologyResponse,
   type MethodologyStatus,
   type MethodologyVersionView,
 } from '@/lib/control-center-api';
+import { countWords, diffLines } from '@/lib/text-diff';
+import { cn } from '@/lib/utils';
 
+import { StatusBadge, type StatusTone } from './control-center-table';
+import { KNOWLEDGE_CHANGED_EVENT } from './knowledge-base-shell';
 import { ResourceState, useControlCenterResource } from './control-center-ui';
+import { DiffStat, MethodologyCompareDialog } from './methodology-diff';
+import { MethodologyEditor } from './methodology-editor';
 
 const INPUT_CLASS =
-  'mt-1 w-full rounded-lg border border-border bg-card px-3 py-2 text-body focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none';
+  'mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-body focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none';
 
 const STATUS_LABEL: Record<MethodologyStatus, string> = {
   DRAFT: 'Rascunho',
@@ -38,12 +54,19 @@ const STATUS_LABEL: Record<MethodologyStatus, string> = {
   ARCHIVED: 'Arquivada',
 };
 
-type WorkflowAction =
-  | { kind: 'submit'; version: MethodologyVersionView }
-  | { kind: 'approve'; version: MethodologyVersionView }
-  | { kind: 'reject'; version: MethodologyVersionView }
-  | { kind: 'publish'; version: MethodologyVersionView }
-  | { kind: 'rollback'; version: MethodologyVersionView };
+const STATUS_TONE: Record<MethodologyStatus, StatusTone> = {
+  DRAFT: 'neutral',
+  IN_REVIEW: 'neutral',
+  APPROVED: 'neutral',
+  PUBLISHED: 'positive',
+  REJECTED: 'attention',
+  ARCHIVED: 'quiet',
+};
+
+/** Estados que ainda não valem para a IA e que um administrador pode colocar em vigor. */
+const PENDING: readonly MethodologyStatus[] = ['DRAFT', 'IN_REVIEW', 'APPROVED'];
+
+const numberFormat = new Intl.NumberFormat('pt-BR');
 
 function dateLabel(value: string | null): string {
   if (!value) return '—';
@@ -54,47 +77,59 @@ function dateLabel(value: string | null): string {
   }).format(new Date(value));
 }
 
-function DiffPreview({ current, candidate }: { current: string; candidate: string }) {
-  const currentLines = current.split('\n');
-  const candidateLines = candidate.split('\n');
-  const changed = candidateLines.filter((line, index) => line !== currentLines[index]).length;
+function versionNumber(version: MethodologyVersionView): number {
+  const parsed = Number(version.version);
+  if (Number.isFinite(parsed)) return parsed;
+  const digits = /(\d+)\s*$/.exec(String(version.version));
+  return digits ? Number(digits[1]) : 0;
+}
+
+function errorMessage(caught: unknown, fallback: string): string {
+  return caught instanceof ControlCenterApiError ? caught.message : fallback;
+}
+
+interface Feedback {
+  text: string;
+}
+
+function FeedbackBanner({ feedback, onDismiss }: { feedback: Feedback; onDismiss: () => void }) {
   return (
-    <div className="mt-5 rounded-xl border border-border bg-card p-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 font-semibold">
-          <GitCompareArrows aria-hidden="true" className="size-4" />
-          Comparação com a versão vigente
-        </h3>
-        <span className="font-mono text-xs text-muted-foreground">
-          {changed} linha(s) alterada(s)
-        </span>
-      </div>
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        {[
-          { label: 'Vigente', lines: currentLines, peer: candidateLines },
-          { label: 'Versão selecionada', lines: candidateLines, peer: currentLines },
-        ].map((column) => (
-          <div key={column.label}>
-            <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-              {column.label}
-            </p>
-            <pre className="mt-2 max-h-96 overflow-auto rounded-lg bg-secondary p-4 font-mono text-xs whitespace-pre-wrap">
-              {column.lines.map((line, index) => (
-                <span
-                  key={`${index}-${line.slice(0, 12)}`}
-                  className={line !== column.peer[index] ? 'block bg-coral/10' : 'block'}
-                >
-                  {line || ' '}
-                  {'\n'}
-                </span>
-              ))}
-            </pre>
-          </div>
-        ))}
-      </div>
+    <div
+      role="status"
+      className="mt-5 flex items-start gap-3 rounded-xl border border-verde-pulso/50 bg-verde-pulso/10 p-4 text-label"
+    >
+      <CheckCircle2 aria-hidden="true" className="mt-0.5 size-5 shrink-0" />
+      <p className="flex-1 font-medium">{feedback.text}</p>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="-m-1 flex size-8 items-center justify-center rounded-md opacity-70 hover:opacity-100 focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none"
+      >
+        <X aria-hidden="true" className="size-4" />
+        <span className="sr-only">Dispensar aviso</span>
+      </button>
     </div>
   );
 }
+
+function ContentReader({ content, summary }: { content: string; summary: string }) {
+  return (
+    <details className="group mt-4">
+      <summary className="inline-flex min-h-9 cursor-pointer list-none items-center gap-1.5 text-label font-semibold hover:underline focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none">
+        <ChevronDown
+          aria-hidden="true"
+          className="size-4 transition-transform group-open:rotate-180"
+        />
+        {summary}
+      </summary>
+      <pre className="mt-2 max-h-[28rem] overflow-auto rounded-lg border border-border bg-background p-4 font-mono text-[13px] leading-6 whitespace-pre-wrap">
+        {content}
+      </pre>
+    </details>
+  );
+}
+
+type ReviewAction = { kind: 'approve' | 'reject'; version: MethodologyVersionView };
 
 export function KnowledgeMethodologyPanel({
   canEdit = false,
@@ -103,22 +138,52 @@ export function KnowledgeMethodologyPanel({
   canEdit?: boolean;
   canApprove?: boolean;
 }) {
-  const { data, error, forbidden, loading, refresh } = useControlCenterResource(getMethodology);
-  const [editing, setEditing] = useState(false);
-  const [content, setContent] = useState('');
-  const [changeNote, setChangeNote] = useState('');
-  const [compareId, setCompareId] = useState<string | null>(null);
-  const [workflow, setWorkflow] = useState<WorkflowAction | null>(null);
-  const [workflowNote, setWorkflowNote] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [feedback, setFeedback] = useState('');
+  const { data, error, forbidden, loading, refresh, setData } =
+    useControlCenterResource(getMethodology);
+  const [editing, setEditing] = useState<{ initial: string } | null>(null);
+  const [compare, setCompare] = useState<{
+    open: boolean;
+    baseId: string | null;
+    targetId: string | null;
+  }>({ open: false, baseId: null, targetId: null });
+  const [review, setReview] = useState<ReviewAction | null>(null);
+  const [reviewNote, setReviewNote] = useState('');
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [writeError, setWriteError] = useState('');
+  const [editorError, setEditorError] = useState('');
 
-  const versions = useMemo(() => data?.data.versions ?? [], [data]);
+  const versions = useMemo(
+    () => [...(data?.data.versions ?? [])].sort((a, b) => versionNumber(b) - versionNumber(a)),
+    [data],
+  );
   const current =
     versions.find((version) => version.current) ??
     versions.find((version) => version.status === 'PUBLISHED');
-  const compared = versions.find((version) => version.id === compareId) ?? null;
+  const pending = versions.find(
+    (version) =>
+      version.id !== current?.id &&
+      PENDING.includes(version.status) &&
+      (!current || versionNumber(version) > versionNumber(current)),
+  );
+
+  // O que cada versão mudou em relação à anterior, para o histórico.
+  const deltas = useMemo(() => {
+    const result = new Map<string, { added: number; removed: number }>();
+    versions.forEach((version, index) => {
+      const previous = versions[index + 1];
+      if (!previous) return;
+      const diff = diffLines(previous.content, version.content);
+      result.set(version.id, { added: diff.added, removed: diff.removed });
+    });
+    return result;
+  }, [versions]);
+
+  const pendingDelta = useMemo(() => {
+    if (!pending || !current) return null;
+    const diff = diffLines(current.content, pending.content);
+    return { added: diff.added, removed: diff.removed };
+  }, [pending, current]);
 
   if (!data) {
     return (
@@ -131,77 +196,138 @@ export function KnowledgeMethodologyPanel({
     );
   }
 
-  async function saveDraft(event: FormEvent) {
-    event.preventDefault();
-    if (content.trim().length < 200 || changeNote.trim().length < 10) return;
-    setBusy(true);
+  const nextVersion = (versions[0] ? versionNumber(versions[0]) : 0) + 1;
+  /** ADMIN (escreve + aprova) publica direto do rascunho; quem só aprova publica o que foi aprovado. */
+  const canPublish = (version: MethodologyVersionView) =>
+    version.id !== current?.id &&
+    (version.status === 'APPROVED'
+      ? canApprove
+      : PENDING.includes(version.status) && canEdit && canApprove);
+
+  const previousOf = (version: MethodologyVersionView) =>
+    versions[versions.findIndex((item) => item.id === version.id) + 1] ?? null;
+
+  function openCompare(baseId: string | null, targetId: string | null) {
+    setCompare({ open: true, baseId, targetId });
+  }
+
+  function apply(response: MethodologyResponse) {
+    setData(response);
+    window.dispatchEvent(new Event(KNOWLEDGE_CHANGED_EVENT));
+  }
+
+  async function publish(version: MethodologyVersionView) {
+    setBusyKey(`publish:${version.id}`);
     setWriteError('');
     try {
-      await createMethodologyVersion({
-        content: content.trim(),
-        changeNote: changeNote.trim(),
+      apply(await publishMethodologyVersion(version.id));
+      setFeedback({
+        text: `A v${version.version} foi publicada. A IA já usa este texto nas próximas gerações de protocolo e conversas.`,
       });
-      setEditing(false);
-      setContent('');
-      setChangeNote('');
-      setFeedback('Nova versão salva como rascunho. Ela ainda não afeta a IA.');
-      await refresh();
     } catch (caught) {
-      setWriteError(
-        caught instanceof ControlCenterApiError
-          ? caught.message
-          : 'Não foi possível salvar o rascunho.',
-      );
+      setWriteError(errorMessage(caught, 'Não foi possível publicar esta versão.'));
     } finally {
-      setBusy(false);
+      setBusyKey(null);
     }
   }
 
-  async function runWorkflow() {
-    if (!workflow || workflowNote.trim().length < 5) return;
-    setBusy(true);
+  async function restore(version: MethodologyVersionView) {
+    setBusyKey(`restore:${version.id}`);
     setWriteError('');
     try {
-      if (workflow.kind === 'submit') {
-        await submitMethodologyVersion(workflow.version.id, workflowNote.trim());
-        setFeedback('Versão enviada para revisão do profissional CREF.');
-      } else if (workflow.kind === 'approve') {
-        await reviewMethodologyVersion(workflow.version.id, {
-          decision: 'APPROVED',
-          note: workflowNote.trim(),
+      let response = await rollbackMethodologyVersion(version.id);
+      const copy = [...response.data.versions]
+        .filter((item) => item.status === 'DRAFT' && item.content === version.content)
+        .sort((a, b) => versionNumber(b) - versionNumber(a))[0];
+      apply(response);
+      if (copy && canEdit && canApprove) {
+        response = await publishMethodologyVersion(copy.id);
+        apply(response);
+        setFeedback({
+          text: `O texto da v${version.version} voltou a valer como v${copy.version}.`,
         });
-        setFeedback('Versão aprovada. A publicação ainda exige uma confirmação separada.');
-      } else if (workflow.kind === 'reject') {
-        await reviewMethodologyVersion(workflow.version.id, {
-          decision: 'REJECTED',
-          note: workflowNote.trim(),
-        });
-        setFeedback('Versão rejeitada. O histórico foi preservado.');
-      } else if (workflow.kind === 'publish') {
-        await publishMethodologyVersion(workflow.version.id, workflowNote.trim());
-        setFeedback('Versão publicada e disponível para novas gerações.');
       } else {
-        await rollbackMethodologyVersion(workflow.version.id, workflowNote.trim());
-        setFeedback('Rollback solicitado como uma nova versão auditável.');
+        setFeedback({
+          text: `O texto da v${version.version} foi restaurado como rascunho${copy ? ` v${copy.version}` : ''}. Publique quando quiser colocá-lo em vigor.`,
+        });
       }
-      setWorkflow(null);
-      setWorkflowNote('');
-      await refresh();
     } catch (caught) {
-      setWriteError(
-        caught instanceof ControlCenterApiError
-          ? caught.message
-          : 'Não foi possível concluir a transição.',
-      );
+      setWriteError(errorMessage(caught, 'Não foi possível restaurar esta versão.'));
     } finally {
-      setBusy(false);
+      setBusyKey(null);
     }
   }
 
-  function openWorkflow(action: WorkflowAction) {
+  async function saveVersion(input: { content: string; changeNote: string; publish: boolean }) {
+    setBusyKey('editor');
+    setEditorError('');
     setWriteError('');
-    setWorkflowNote('');
-    setWorkflow(action);
+    let saved: MethodologyResponse;
+    try {
+      saved = await createMethodologyVersion({
+        content: input.content,
+        changeNote: input.changeNote || undefined,
+      });
+    } catch (caught) {
+      setEditorError(errorMessage(caught, 'Não foi possível salvar o rascunho.'));
+      setBusyKey(null);
+      return;
+    }
+    apply(saved);
+    setEditing(null);
+    const draft = [...saved.data.versions]
+      .filter((item) => item.status === 'DRAFT' && item.content.trim() === input.content)
+      .sort((a, b) => versionNumber(b) - versionNumber(a))[0];
+    try {
+      if (input.publish && draft) {
+        apply(await publishMethodologyVersion(draft.id));
+        setFeedback({
+          text: `A v${draft.version} foi salva e publicada. A IA já usa este texto nas próximas gerações.`,
+        });
+      } else {
+        setFeedback({
+          text: `Rascunho${draft ? ` v${draft.version}` : ''} salvo. Ele ainda não afeta a IA; publique quando estiver pronto.`,
+        });
+      }
+    } catch (caught) {
+      setWriteError(
+        `${errorMessage(caught, 'Não foi possível publicar.')} O rascunho foi salvo e pode ser publicado abaixo.`,
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function submitReview() {
+    if (!review || reviewNote.trim().length < 5) return;
+    setBusyKey('review');
+    setWriteError('');
+    try {
+      apply(
+        await reviewMethodologyVersion(review.version.id, {
+          decision: review.kind === 'approve' ? 'APPROVED' : 'REJECTED',
+          note: reviewNote.trim(),
+        }),
+      );
+      setFeedback({
+        text:
+          review.kind === 'approve'
+            ? `A v${review.version.version} foi aprovada e já pode ser publicada.`
+            : `A v${review.version.version} foi rejeitada. O histórico foi preservado.`,
+      });
+      setReview(null);
+      setReviewNote('');
+    } catch (caught) {
+      setWriteError(errorMessage(caught, 'Não foi possível registrar o parecer.'));
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  function startEditing() {
+    setEditorError('');
+    setFeedback(null);
+    setEditing({ initial: current?.content ?? '' });
   }
 
   return (
@@ -212,273 +338,366 @@ export function KnowledgeMethodologyPanel({
             Metodologia oficial
           </h2>
           <p className="mt-2 max-w-3xl text-label text-muted-foreground">
-            Somente a versão publicada orienta a geração. Rascunhos e versões em revisão ficam
-            isolados do runtime.
+            É o texto que orienta a IA ao montar protocolos e conversar com os alunos. Só a versão
+            publicada vale; rascunhos ficam guardados sem afetar ninguém.
           </p>
         </div>
-        {canEdit ? (
-          <Button
-            onClick={() => {
-              setContent(current?.content ?? '');
-              setChangeNote('');
-              setEditing(true);
-            }}
-          >
-            Criar nova versão
+        {canEdit && !editing ? (
+          <Button onClick={startEditing}>
+            <Plus aria-hidden="true" />
+            Nova versão
           </Button>
         ) : null}
       </div>
 
-      {feedback ? (
-        <p
-          role="status"
-          className="mt-4 rounded-lg border border-border bg-secondary p-3 text-label"
-        >
-          {feedback}
-        </p>
-      ) : null}
+      {feedback ? <FeedbackBanner feedback={feedback} onDismiss={() => setFeedback(null)} /> : null}
       {writeError ? (
-        <p role="alert" className="mt-4 rounded-lg border border-coral bg-card p-3 text-label">
+        <p
+          role="alert"
+          className="mt-5 rounded-xl border border-coral bg-coral/10 p-4 text-label font-medium"
+        >
           {writeError}
         </p>
       ) : null}
 
-      {current ? (
-        <article className="mt-6 rounded-xl border border-verde-pulso/50 bg-card p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                Versão vigente
+      {pending && !editing ? (
+        <section
+          aria-label="Versão aguardando publicação"
+          className="mt-6 rounded-xl border-2 border-verde-pulso/60 bg-verde-pulso/10 p-5"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold tracking-wide uppercase">Aguardando publicação</p>
+              <div className="mt-1 flex flex-wrap items-center gap-3">
+                <h3 className="font-mono text-h2 font-bold">v{pending.version}</h3>
+                <StatusBadge tone={STATUS_TONE[pending.status]} variant="solid">
+                  {STATUS_LABEL[pending.status]}
+                </StatusBadge>
+              </div>
+              <p className="mt-2 text-label">{pending.changeNote ?? 'Sem resumo da alteração.'}</p>
+              <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span>
+                  {pending.createdBy ?? 'Autor não informado'} · {dateLabel(pending.createdAt)}
+                </span>
+                {pendingDelta && current ? (
+                  <span className="inline-flex items-center gap-2">
+                    <DiffStat added={pendingDelta.added} removed={pendingDelta.removed} />
+                    em relação à v{current.version}
+                  </span>
+                ) : null}
               </p>
-              <h3 className="mt-1 font-mono text-h2 font-bold">v{current.version}</h3>
             </div>
-            <span className="rounded-full bg-verde-pulso/15 px-3 py-1 text-xs font-semibold text-petroleo">
-              Publicada
-            </span>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                onClick={() => openCompare(current?.id ?? null, pending.id)}
+              >
+                <GitCompareArrows aria-hidden="true" />
+                Ver mudanças
+              </Button>
+              {canPublish(pending) ? (
+                <Button disabled={busyKey !== null} onClick={() => void publish(pending)}>
+                  <Rocket aria-hidden="true" />
+                  {busyKey === `publish:${pending.id}`
+                    ? 'Publicando…'
+                    : `Publicar v${pending.version}`}
+                </Button>
+              ) : null}
+            </div>
           </div>
-          <p className="mt-3 text-label text-muted-foreground">
-            Publicada em {dateLabel(current.publishedAt ?? current.createdAt)} ·{' '}
-            {current.createdBy ?? 'responsável não informado'}
-          </p>
-          {current.sha256 ? (
-            <p className="mt-1 font-mono text-xs text-muted-foreground">
-              SHA-256 {current.sha256.slice(0, 16)}…
+          {!canPublish(pending) ? (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Para publicar esta versão é preciso uma conta com permissão de publicação.
             </p>
           ) : null}
-          <details className="mt-4">
-            <summary className="cursor-pointer text-label font-semibold">
-              Visualizar conteúdo vigente
-            </summary>
-            <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-secondary p-4 font-mono text-xs whitespace-pre-wrap">
-              {current.content}
-            </pre>
-          </details>
-        </article>
-      ) : (
-        <p className="mt-6 rounded-xl border border-coral bg-card p-5 text-label">
-          Nenhuma metodologia publicada. A geração deve permanecer bloqueada até a publicação por um
-          profissional CREF.
-        </p>
-      )}
+        </section>
+      ) : null}
 
       {editing ? (
-        <form
-          className="mt-6 rounded-xl border border-border bg-card p-5"
-          onSubmit={(event) => void saveDraft(event)}
-        >
-          <h3 className="font-semibold">Nova versão</h3>
-          <label className="mt-4 block text-label font-semibold">
-            Conteúdo metodológico
-            <textarea
-              className={`${INPUT_CLASS} min-h-80 font-mono text-xs`}
-              required
-              minLength={200}
-              value={content}
-              onChange={(event) => setContent(event.target.value)}
-            />
-            <span className="mt-1 block text-xs font-normal text-muted-foreground">
-              Sem teto de caracteres — é o texto completo que a IA usa tanto para gerar protocolo
-              quanto para responder o aluno no AI Coach, junto com o contexto individualizado de
-              cada aluno (não um resumo à parte).
-            </span>
-          </label>
-          <label className="mt-4 block text-label font-semibold">
-            Motivo da mudança
-            <textarea
-              className={`${INPUT_CLASS} min-h-20`}
-              required
-              minLength={10}
-              maxLength={MAX_METHODOLOGY_NOTE_LENGTH}
-              value={changeNote}
-              onChange={(event) => setChangeNote(event.target.value)}
-            />
-          </label>
-          <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Lock aria-hidden="true" className="size-3.5" />
-            Salvar cria um rascunho e não altera a versão usada pela IA.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button
-              type="submit"
-              disabled={busy || content.trim().length < 200 || changeNote.trim().length < 10}
-            >
-              Salvar rascunho
-            </Button>
-            <Button type="button" variant="outline" onClick={() => setEditing(false)}>
-              Cancelar
-            </Button>
-          </div>
-        </form>
+        <MethodologyEditor
+          baseContent={current?.content ?? ''}
+          baseLabel={current ? `v${current.version} (vigente)` : null}
+          initialContent={editing.initial}
+          nextVersion={nextVersion}
+          canPublish={canEdit && canApprove}
+          busy={busyKey === 'editor'}
+          error={editorError}
+          onSave={(input) => void saveVersion(input)}
+          onCancel={() => setEditing(null)}
+        />
       ) : null}
 
-      <div className="mt-6 overflow-x-auto rounded-xl border border-border bg-card">
-        <table className="w-full min-w-[760px] text-label">
-          <caption className="p-4 text-left text-xs text-muted-foreground">
-            Versões preservadas para revisão, comparação e rollback auditável.
-          </caption>
-          <thead className="border-t border-border text-xs text-muted-foreground">
-            <tr>
-              <th className="p-3 text-left">Versão</th>
-              <th className="p-3 text-left">Status</th>
-              <th className="p-3 text-left">Responsável</th>
-              <th className="p-3 text-left">Alteração</th>
-              <th className="p-3 text-left">Ações</th>
-            </tr>
-          </thead>
-          <tbody>
-            {versions.map((version) => (
-              <tr key={version.id} className="border-t border-border align-top">
-                <td className="p-3 font-mono">v{version.version}</td>
-                <td className="p-3">
-                  <span className="rounded-full bg-secondary px-2 py-1 text-xs font-semibold">
-                    {STATUS_LABEL[version.status]}
-                  </span>
-                </td>
-                <td className="p-3">
-                  {version.createdBy ?? '—'}
-                  <span className="mt-1 block text-xs text-muted-foreground">
-                    {dateLabel(version.createdAt)}
-                  </span>
-                </td>
-                <td className="max-w-xs p-3 text-muted-foreground">
-                  {version.changeNote ?? 'Sem nota registrada'}
-                </td>
-                <td className="p-3">
-                  <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" onClick={() => setCompareId(version.id)}>
-                      Comparar
-                    </Button>
-                    {canEdit && version.status === 'DRAFT' ? (
-                      <Button size="sm" onClick={() => openWorkflow({ kind: 'submit', version })}>
-                        <Send aria-hidden="true" />
-                        Enviar à revisão
-                      </Button>
-                    ) : null}
-                    {canApprove && version.status === 'IN_REVIEW' ? (
-                      <>
-                        <Button
-                          size="sm"
-                          onClick={() => openWorkflow({ kind: 'approve', version })}
-                        >
-                          <CheckCircle2 aria-hidden="true" />
-                          Aprovar
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => openWorkflow({ kind: 'reject', version })}
-                        >
-                          <XCircle aria-hidden="true" />
-                          Rejeitar
-                        </Button>
-                      </>
-                    ) : null}
-                    {canApprove && version.status === 'APPROVED' ? (
-                      <Button size="sm" onClick={() => openWorkflow({ kind: 'publish', version })}>
-                        <CheckCircle2 aria-hidden="true" />
-                        Publicar
-                      </Button>
-                    ) : null}
-                    {canEdit && version.status === 'ARCHIVED' ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => openWorkflow({ kind: 'rollback', version })}
-                      >
-                        <RotateCcw aria-hidden="true" />
-                        Restaurar
-                      </Button>
-                    ) : null}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {current ? (
+        <article className="mt-6 overflow-hidden rounded-xl border border-border border-l-4 border-l-verde-pulso bg-card p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                <BookOpenText aria-hidden="true" className="size-3.5" />
+                Em vigor agora
+              </p>
+              <h3 className="mt-1 font-mono text-h1 font-bold">v{current.version}</h3>
+            </div>
+            <StatusBadge tone="positive" variant="solid">
+              Publicada
+            </StatusBadge>
+          </div>
+          <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-2 text-label">
+            <div>
+              <dt className="text-xs text-muted-foreground">Publicada em</dt>
+              <dd>{dateLabel(current.publishedAt ?? current.createdAt)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Autor</dt>
+              <dd>{current.createdBy ?? 'Não informado'}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Tamanho</dt>
+              <dd>
+                {numberFormat.format(countWords(current.content))} palavras ·{' '}
+                {numberFormat.format(current.content.length)} caracteres
+              </dd>
+            </div>
+            {current.sha256 ? (
+              <div>
+                <dt className="text-xs text-muted-foreground">Assinatura SHA-256</dt>
+                <dd className="font-mono text-xs">{current.sha256.slice(0, 16)}…</dd>
+              </div>
+            ) : null}
+          </dl>
+          {current.changeNote ? (
+            <p className="mt-3 text-label text-muted-foreground">“{current.changeNote}”</p>
+          ) : null}
+          <ContentReader content={current.content} summary="Ler o texto vigente" />
+        </article>
+      ) : (
+        <div className="mt-6 rounded-xl border border-dashed border-coral bg-card p-8 text-center">
+          <p className="text-h3 font-bold">Nenhuma metodologia em vigor</p>
+          <p className="mx-auto mt-2 max-w-xl text-label text-muted-foreground">
+            Sem uma versão publicada a geração de protocolos fica bloqueada.{' '}
+            {canEdit
+              ? 'Escreva a primeira metodologia e publique.'
+              : 'Peça a um administrador para publicar uma.'}
+          </p>
+          {canEdit && !editing ? (
+            <Button className="mt-4" onClick={startEditing}>
+              <Plus aria-hidden="true" />
+              Escrever metodologia
+            </Button>
+          ) : null}
+        </div>
+      )}
+
+      <section aria-labelledby="methodology-history-title" className="mt-10">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 id="methodology-history-title" className="text-h3 font-bold">
+              Histórico de versões
+            </h3>
+            <p className="mt-1 text-label text-muted-foreground">
+              Nada é apagado: cada versão fica guardada para comparar ou restaurar.
+            </p>
+          </div>
+          {versions.length > 1 ? (
+            <Button
+              variant="outline"
+              onClick={() => openCompare(versions[1]?.id ?? null, versions[0]?.id ?? null)}
+            >
+              <GitCompareArrows aria-hidden="true" />
+              Comparar versões
+            </Button>
+          ) : null}
+        </div>
+
         {versions.length === 0 ? (
-          <p className="border-t border-border p-5 text-label text-muted-foreground">
+          <p className="mt-4 rounded-xl border border-dashed border-border p-6 text-center text-label text-muted-foreground">
             Nenhuma versão cadastrada.
           </p>
-        ) : null}
-      </div>
+        ) : (
+          <ol className="mt-5 ml-2 border-l border-border">
+            {versions.map((version) => {
+              const delta = deltas.get(version.id);
+              const previous = previousOf(version);
+              const isCurrent = version.id === current?.id;
+              const busyHere = busyKey?.endsWith(version.id) ?? false;
+              return (
+                <li key={version.id} className="relative pb-4 pl-6 last:pb-0">
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      'absolute top-6 -left-[6px] size-[11px] rounded-full ring-4 ring-background',
+                      isCurrent ? 'bg-verde-pulso' : 'bg-muted-foreground/60',
+                    )}
+                  />
+                  <article
+                    aria-label={`Versão ${version.version}`}
+                    className={cn(
+                      'rounded-xl border bg-card p-4',
+                      isCurrent ? 'border-verde-pulso/60' : 'border-border',
+                    )}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-h3 font-bold">v{version.version}</span>
+                          <StatusBadge tone={STATUS_TONE[version.status]} variant="solid">
+                            {isCurrent ? 'Vigente' : STATUS_LABEL[version.status]}
+                          </StatusBadge>
+                        </div>
+                        <p className="mt-1 text-label">
+                          {version.changeNote ?? 'Sem resumo da alteração.'}
+                        </p>
+                        <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                          <span>
+                            {version.createdBy ?? 'Autor não informado'} ·{' '}
+                            {dateLabel(version.createdAt)}
+                          </span>
+                          <span>{numberFormat.format(countWords(version.content))} palavras</span>
+                          {delta && previous ? (
+                            delta.added + delta.removed === 0 ? (
+                              <span>Texto idêntico à v{previous.version}</span>
+                            ) : (
+                              <span className="inline-flex items-center gap-2">
+                                <DiffStat added={delta.added} removed={delta.removed} />
+                                vs v{previous.version}
+                              </span>
+                            )
+                          ) : null}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openCompare(previous?.id ?? null, version.id)}
+                        >
+                          <GitCompareArrows aria-hidden="true" />
+                          Comparar
+                        </Button>
+                        {canPublish(version) ? (
+                          <Button
+                            size="sm"
+                            disabled={busyKey !== null}
+                            onClick={() => void publish(version)}
+                          >
+                            <Rocket aria-hidden="true" />
+                            {busyKey === `publish:${version.id}` ? 'Publicando…' : 'Publicar'}
+                          </Button>
+                        ) : null}
+                        {canApprove && !canEdit && version.status === 'IN_REVIEW' ? (
+                          <>
+                            <Button
+                              size="sm"
+                              disabled={busyKey !== null}
+                              onClick={() => {
+                                setWriteError('');
+                                setReviewNote('');
+                                setReview({ kind: 'approve', version });
+                              }}
+                            >
+                              <CheckCircle2 aria-hidden="true" />
+                              Aprovar
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              disabled={busyKey !== null}
+                              onClick={() => {
+                                setWriteError('');
+                                setReviewNote('');
+                                setReview({ kind: 'reject', version });
+                              }}
+                            >
+                              <XCircle aria-hidden="true" />
+                              Rejeitar
+                            </Button>
+                          </>
+                        ) : null}
+                        {canEdit && version.status === 'ARCHIVED' ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busyKey !== null}
+                            onClick={() => void restore(version)}
+                          >
+                            <RotateCcw aria-hidden="true" />
+                            {busyHere && busyKey?.startsWith('restore')
+                              ? 'Restaurando…'
+                              : canApprove
+                                ? 'Restaurar e publicar'
+                                : 'Restaurar'}
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <ContentReader content={version.content} summary="Ler o texto desta versão" />
+                  </article>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </section>
 
-      {compared && current ? (
-        <DiffPreview current={current.content} candidate={compared.content} />
-      ) : null}
+      <MethodologyCompareDialog
+        open={compare.open}
+        onOpenChange={(open) => setCompare((state) => ({ ...state, open }))}
+        versions={versions}
+        initialBaseId={compare.baseId}
+        initialTargetId={compare.targetId}
+      />
 
       <Dialog
-        open={workflow !== null}
+        open={review !== null}
         onOpenChange={(open) => {
-          if (!open && !busy) {
-            setWorkflow(null);
-            setWorkflowNote('');
+          if (!open && busyKey !== 'review') {
+            setReview(null);
+            setReviewNote('');
           }
         }}
       >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {workflow?.kind === 'approve'
-                ? 'Aprovar versão?'
-                : workflow?.kind === 'publish'
-                  ? 'Publicar versão aprovada?'
-                  : workflow?.kind === 'reject'
-                    ? 'Rejeitar versão?'
-                    : workflow?.kind === 'rollback'
-                      ? 'Restaurar esta metodologia?'
-                      : 'Enviar para revisão?'}
+              {review?.kind === 'reject' ? 'Rejeitar versão?' : 'Aprovar versão?'}
             </DialogTitle>
             <DialogDescription>
-              A transição será registrada com seu usuário, data e justificativa. Publicações passam
-              a orientar novas gerações.
+              O parecer fica registrado com seu usuário, data e justificativa.
             </DialogDescription>
           </DialogHeader>
           {writeError ? (
-            <p role="alert" className="rounded-lg border border-coral bg-card p-3 text-label">
+            <p role="alert" className="rounded-lg border border-coral bg-coral/10 p-3 text-label">
               {writeError}
             </p>
           ) : null}
           <label className="text-label font-semibold">
-            Justificativa obrigatória
+            Justificativa do parecer
             <textarea
               autoFocus
               className={`${INPUT_CLASS} min-h-20`}
               minLength={5}
               maxLength={MAX_METHODOLOGY_NOTE_LENGTH}
-              value={workflowNote}
-              onChange={(event) => setWorkflowNote(event.target.value)}
+              value={reviewNote}
+              onChange={(event) => setReviewNote(event.target.value)}
             />
           </label>
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button variant="outline" disabled={busy} onClick={() => setWorkflow(null)}>
-              Voltar e revisar
+            <Button
+              variant="outline"
+              disabled={busyKey === 'review'}
+              onClick={() => setReview(null)}
+            >
+              Voltar
             </Button>
             <Button
-              variant={workflow?.kind === 'reject' ? 'destructive' : 'default'}
-              disabled={busy || workflowNote.trim().length < 5}
-              onClick={() => void runWorkflow()}
+              variant={review?.kind === 'reject' ? 'destructive' : 'default'}
+              disabled={busyKey === 'review' || reviewNote.trim().length < 5}
+              onClick={() => void submitReview()}
             >
-              {busy ? 'Registrando…' : 'Confirmar transição'}
+              {busyKey === 'review'
+                ? 'Registrando…'
+                : review?.kind === 'reject'
+                  ? 'Rejeitar versão'
+                  : 'Aprovar versão'}
             </Button>
           </div>
         </DialogContent>
