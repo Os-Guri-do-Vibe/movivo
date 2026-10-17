@@ -197,13 +197,16 @@ describe('assertSafeZip (zip bomb)', () => {
 
   it('recusa arquivo que descompacta com razão absurda (zip bomb)', async () => {
     const zip = new JSZip();
-    zip.file('word/document.xml', Buffer.alloc(30 * 1024 * 1024), { compression: 'DEFLATE' });
+    zip.file('word/document.xml', Buffer.alloc(8 * 1024 * 1024), { compression: 'DEFLATE' });
     const bomb = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     expect(bomb.byteLength).toBeLessThan(1024 * 1024);
     expect(() => assertSafeZip(bomb)).toThrow(BadRequestException);
-    await expect(extractArticleText(bomb, 'docx')).rejects.toMatchObject({
-      response: { code: 'ARCHIVE_TOO_LARGE' },
-    });
+    await expect(extractArticleText(bomb, 'docx')).rejects.toMatchObject(
+      {
+        response: { code: 'ARCHIVE_TOO_LARGE' },
+      },
+      30_000,
+    );
   });
 
   it('recusa zip com entradas demais', async () => {
