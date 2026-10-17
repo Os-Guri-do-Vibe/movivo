@@ -115,6 +115,9 @@ describe('MethodologyAdminController', () => {
   it('rollback não exige justificativa', async () => {
     const { controller, service } = controllerWith();
     await expect(controller.rollback(ACTOR, VERSION_ID, {})).resolves.toBe('rollback-result');
-    expect(service.rollback).toHaveBeenCalledWith(ACTOR, { versionId: VERSION_ID, note: undefined });
+    expect(service.rollback).toHaveBeenCalledWith(ACTOR, {
+      versionId: VERSION_ID,
+      note: undefined,
+    });
   });
 });
