@@ -180,3 +180,170 @@ describe('documentos RAG no banco', () => {
     ).rejects.toMatchObject({ code: '55000' });
   });
 });
+
+describe('exclusão definitiva de artigo (delete_knowledge_document)', () => {
+  const remaining = async () => {
+    const [counts] = await appClient<
+      {
+        documents: number;
+        events: number;
+        reviews: number;
+        extractions: number;
+        staged: number;
+        embeddings: number;
+        chunks: number;
+        blobs: number;
+      }[]
+    >`
+      SELECT
+        (SELECT count(*) FROM knowledge_documents WHERE id = ${documentId}::uuid)::int AS documents,
+        (SELECT count(*) FROM knowledge_document_events WHERE document_id = ${documentId}::uuid)::int AS events,
+        (SELECT count(*) FROM knowledge_document_reviews WHERE document_id = ${documentId}::uuid)::int AS reviews,
+        (SELECT count(*) FROM knowledge_document_extractions WHERE document_id = ${documentId}::uuid)::int AS extractions,
+        (SELECT count(*) FROM knowledge_staged_chunks WHERE document_id = ${documentId}::uuid)::int AS staged,
+        (SELECT count(*) FROM knowledge_chunk_embeddings e
+           JOIN knowledge_staged_chunks s ON s.id = e.staged_chunk_id
+           WHERE s.document_id = ${documentId}::uuid)::int AS embeddings,
+        (SELECT count(*) FROM knowledge_base WHERE document_id = ${documentId}::uuid)::int AS chunks,
+        (SELECT count(*) FROM knowledge_document_blobs WHERE document_id = ${documentId}::uuid)::int AS blobs
+    `;
+    return counts;
+  };
+
+  it('recusa quem não é ADMIN, mesmo com o documento existindo', async () => {
+    await expect(
+      tenant.runAsUser(professionalId, 'PROFESSIONAL', (tx) =>
+        tx.execute(sql`SELECT public.delete_knowledge_document(${documentId}::uuid)`),
+      ),
+    ).rejects.toMatchObject({ cause: { code: '42501' } });
+    expect((await remaining())?.documents).toBe(1);
+  });
+
+  it('a runtime não consegue apagar o histórico por fora da função', async () => {
+    await expect(
+      appClient`DELETE FROM knowledge_document_events WHERE document_id = ${documentId}::uuid`,
+    ).rejects.toMatchObject({ code: '42501' });
+  });
+
+  it('documento inexistente falha sem alterar nada', async () => {
+    await expect(
+      tenant.runAsUser(uploaderId, 'ADMIN', (tx) =>
+        tx.execute(sql`SELECT public.delete_knowledge_document(${randomUUID()}::uuid)`),
+      ),
+    ).rejects.toMatchObject({ cause: { code: 'P0002' } });
+  });
+
+  it('ADMIN remove documento, original, texto, trechos e vetores do banco', async () => {
+    const before = await remaining();
+    expect(before).toMatchObject({ documents: 1, chunks: 1, staged: 1, embeddings: 1, blobs: 1 });
+
+    const removed = await tenant.runAsUser(
+      uploaderId,
+      'ADMIN',
+      (tx) =>
+        tx.execute(sql`
+        SELECT public.delete_knowledge_document(${documentId}::uuid) AS chunks
+      `) as unknown as Promise<Array<{ chunks: number }>>,
+    );
+    expect(Number(removed[0]?.chunks)).toBe(1);
+
+    expect(await remaining()).toEqual({
+      documents: 0,
+      events: 0,
+      reviews: 0,
+      extractions: 0,
+      staged: 0,
+      embeddings: 0,
+      chunks: 0,
+      blobs: 0,
+    });
+  });
+
+  it('religa os triggers de imutabilidade depois de excluir', async () => {
+    const [state] = await migratorClient<{ disabled: number }[]>`
+      SELECT count(*)::int AS disabled FROM pg_trigger
+      WHERE tgname LIKE 'trg_knowledge_%_immutable' AND tgenabled = 'D'
+    `;
+    expect(state?.disabled).toBe(0);
+    const other = randomUUID();
+    await tenant.runAsUser(uploaderId, 'ADMIN', async (tx) => {
+      await tx.execute(sql`
+        INSERT INTO knowledge_documents (
+          id, title, topic, original_filename, mime_type, size_bytes, sha256, uploaded_by, logical_key
+        ) VALUES (
+          ${other}::uuid, 'Outro', 'descanso', 'outro.md', 'text/markdown',
+          10, ${createHash('sha256').update(other).digest('hex')}, ${uploaderId}::uuid, ${`outro-${RUN}`}
+        )
+      `);
+    });
+    await expect(
+      migratorClient`UPDATE knowledge_documents SET title = 'x' WHERE id = ${other}::uuid`,
+    ).rejects.toMatchObject({ code: '55000' });
+  });
+});
+
+describe('artigo cujo texto extraído difere do arquivo original (PDF/Word)', () => {
+  it('publica pelo hash do próprio texto, aprovado automaticamente pelo ADMIN, e exclui', async () => {
+    const id = randomUUID();
+    const original = Buffer.from('%PDF-1.7 bytes binarios do arquivo original');
+    const originalSha = createHash('sha256').update(original).digest('hex');
+    const text = 'Volume semanal de series modula a hipertrofia em adultos treinados.';
+    const textSha = createHash('sha256').update(text, 'utf8').digest('hex');
+    const chunkSha = createHash('sha256').update(text, 'utf8').digest('hex');
+    expect(originalSha).not.toBe(textSha);
+
+    await tenant.runAsUser(uploaderId, 'ADMIN', async (tx) => {
+      await tx.execute(sql`
+        INSERT INTO knowledge_documents (
+          id, title, topic, category, original_filename, mime_type, size_bytes, sha256, uploaded_by, logical_key
+        ) VALUES (
+          ${id}::uuid, 'Artigo PDF', 'evidência científica', 'SCIENTIFIC_EVIDENCE', 'artigo.pdf',
+          'application/pdf', ${original.byteLength}, ${originalSha}, ${uploaderId}::uuid, ${`artigo-pdf-${RUN}`}
+        )
+      `);
+      await tx.execute(sql`
+        INSERT INTO knowledge_document_blobs (document_id, payload, retained_until)
+        VALUES (${id}::uuid, ${original}, now() + interval '30 days')
+      `);
+    });
+
+    // O que o worker faz: extração, trechos, aprovação do admin que enviou e embedding.
+    const published = await tenant.runAsSystem(async (tx) => {
+      await tx.execute(sql`
+        INSERT INTO knowledge_document_extractions (
+          document_id, content, content_sha256, parser_version, detected_mime_type
+        ) VALUES (${id}::uuid, ${text}, ${textSha}, 'article-text-v1', 'application/pdf')
+      `);
+      const [staged] = (await tx.execute(sql`
+        INSERT INTO knowledge_staged_chunks (
+          document_id, chunk_index, chunk_text, chunk_sha256, extraction_sha256
+        ) VALUES (${id}::uuid, 0, ${text}, ${chunkSha}, ${textSha}) RETURNING id
+      `)) as unknown as Array<{ id: string }>;
+      await tx.execute(sql`
+        INSERT INTO knowledge_chunk_embeddings (staged_chunk_id, chunk_sha256, embedding, model)
+        VALUES (${staged.id}::uuid, ${chunkSha}, ${ZERO_EMBEDDING}::vector, 'test-fake')
+      `);
+      await tx.execute(sql`
+        INSERT INTO knowledge_document_reviews (document_id, decision, note, reviewer_id)
+        VALUES (${id}::uuid, 'APPROVED', 'publicação direta pelo administrador', ${uploaderId}::uuid)
+      `);
+      await tx.execute(sql`
+        INSERT INTO knowledge_document_events (document_id, sequence, status, stage)
+        VALUES (${id}::uuid, 1, 'INDEXING', 'INDEXING')
+      `);
+      return tx.execute(sql`
+        SELECT public.publish_knowledge_document(${id}::uuid) AS count
+      `) as unknown as Promise<Array<{ count: number }>>;
+    });
+    expect(Number(published[0]?.count)).toBe(1);
+
+    await tenant.runAsUser(uploaderId, 'ADMIN', (tx) =>
+      tx.execute(sql`SELECT public.delete_knowledge_document(${id}::uuid)`),
+    );
+    const [left] = await appClient<{ n: number }[]>`
+      SELECT (SELECT count(*) FROM knowledge_documents WHERE id = ${id}::uuid)::int
+           + (SELECT count(*) FROM knowledge_base WHERE document_id = ${id}::uuid)::int AS n
+    `;
+    expect(left?.n).toBe(0);
+  });
+});

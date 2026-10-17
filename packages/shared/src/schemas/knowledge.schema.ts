@@ -2,7 +2,8 @@ import { z } from 'zod';
 
 import { controlCenterMetaSchema } from './control-center.schema';
 
-export const MAX_KNOWLEDGE_DOCUMENT_BYTES = 512 * 1024;
+/** Teto de upload de um artigo (PDF/Word/planilha cabem; o BFF, o nginx e a API usam o mesmo). */
+export const MAX_KNOWLEDGE_DOCUMENT_BYTES = 10 * 1024 * 1024;
 
 /**
  * Teto das notas de uma versão da metodologia (motivo da mudança e justificativa de cada
@@ -31,29 +32,16 @@ export const knowledgeDocumentStatusSchema = z.enum([
   'ARCHIVED',
 ]);
 
-export const uploadKnowledgeDocumentSchema = z.object({
-  title: z.string().trim().min(3).max(200),
-  topic: z
-    .string()
-    .trim()
-    .regex(/^[A-Za-zÀ-ú0-9 _-]{2,60}$/),
-  category: knowledgeDocumentCategorySchema.default('OTHER'),
-  logicalKey: z
-    .string()
-    .trim()
-    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
-    .max(120)
-    .optional(),
-  sourceUrl: z.url().max(500).optional(),
+/**
+ * Metadados opcionais do upload de um artigo científico (o arquivo vai em multipart, campo
+ * `file`). Sem título, o nome do arquivo vira o título; categoria e tópico são fixos.
+ */
+export const uploadKnowledgeArticleSchema = z.object({
+  title: z.string().trim().min(3).max(200).optional(),
   author: z.string().trim().min(2).max(200).optional(),
-  license: z.string().trim().min(2).max(120).optional(),
-  originalFilename: z.string().trim().min(1).max(255),
-  // A API valida a allowlist e devolve um erro operacional específico para formatos
-  // complexos; não escondemos isso num `invalid_enum_value` genérico do Zod.
-  mimeType: z.string().trim().min(1).max(100),
-  content: z.string().min(1).max(MAX_KNOWLEDGE_DOCUMENT_BYTES),
+  sourceUrl: z.url().max(500).optional(),
 });
-export type UploadKnowledgeDocumentInput = z.infer<typeof uploadKnowledgeDocumentSchema>;
+export type UploadKnowledgeArticleInput = z.infer<typeof uploadKnowledgeArticleSchema>;
 
 export const reviewKnowledgeDocumentSchema = z.object({
   documentId: z.uuid(),
@@ -96,6 +84,8 @@ export const knowledgeDocumentsResponseSchema = z.object({
     documents: z.array(knowledgeDocumentSchema),
     policy: z.object({
       allowedTypes: z.array(z.string()),
+      /** Extensões aceitas no upload (ex.: ".pdf"). Ausente em respostas de versões antigas. */
+      allowedExtensions: z.array(z.string()).optional(),
       maxBytes: z.int().positive(),
       quarantineDays: z.int().positive(),
       approvedOriginalDays: z.int().positive(),

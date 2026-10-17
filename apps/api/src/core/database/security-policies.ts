@@ -1087,7 +1087,8 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
         SELECT 1 FROM public.knowledge_document_extractions extraction
         JOIN public.knowledge_documents document ON document.id = extraction.document_id
         WHERE extraction.document_id = target_document
-          AND extraction.content_sha256 = document.sha256
+          -- O hash do ORIGINAL (document.sha256) não é o do texto extraído: PDF/Word/planilha
+          -- passam por um parser. A extração é atestada pelo hash do próprio conteúdo.
           AND encode(digest(convert_to(extraction.content, 'UTF8'), 'sha256'), 'hex') = extraction.content_sha256
       ) OR EXISTS (
         SELECT 1 FROM public.knowledge_staged_chunks staged
@@ -1143,10 +1144,66 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
       RETURN affected;
     END $$;
 
+    /*
+     * Exclusão DEFINITIVA de um artigo (UI "Excluir"). O histórico é imutável para a aplicação
+     * (triggers + sem DELETE), então a purga só existe aqui, numa função estreita:
+     *  - só ADMIN (ou SYSTEM) a chama; remove um documento por vez, com todos os dependentes;
+     *  - os triggers de imutabilidade são desligados POR TABELA e religados na mesma
+     *    transação (o DDL é transacional: ninguém mais enxerga o estado desligado, e um erro
+     *    desfaz tudo, deixando os triggers ativos). Não há flag/GUC que a aplicação possa
+     *    forjar para burlar a imutabilidade fora desta função;
+     *  - lock_timeout curto: prefere falhar a travar escritas do pipeline de ingestão.
+     * Devolve quantos trechos saíram do corpus do RAG.
+     */
+    CREATE OR REPLACE FUNCTION public.delete_knowledge_document(target_document uuid)
+    RETURNS integer LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path = pg_catalog, public, pg_temp SET lock_timeout = '10s' AS $$
+    DECLARE caller_role text; removed integer;
+    BEGIN
+      caller_role := nullif(current_setting('app.current_role', true), '');
+      IF coalesce(caller_role, '') NOT IN ('ADMIN', 'SYSTEM') THEN
+        RAISE EXCEPTION 'knowledge deleter role denied' USING ERRCODE = '42501';
+      END IF;
+      PERFORM pg_advisory_xact_lock(hashtextextended('knowledge:' || target_document::text, 0));
+      IF NOT EXISTS (SELECT 1 FROM public.knowledge_documents WHERE id = target_document) THEN
+        RAISE EXCEPTION 'knowledge document not found' USING ERRCODE = 'P0002';
+      END IF;
+
+      ALTER TABLE public.knowledge_chunk_embeddings DISABLE TRIGGER trg_knowledge_chunk_embeddings_immutable;
+      ALTER TABLE public.knowledge_staged_chunks DISABLE TRIGGER trg_knowledge_staged_chunks_immutable;
+      ALTER TABLE public.knowledge_document_extractions DISABLE TRIGGER trg_knowledge_document_extractions_immutable;
+      ALTER TABLE public.knowledge_document_reviews DISABLE TRIGGER trg_knowledge_document_reviews_immutable;
+      ALTER TABLE public.knowledge_document_events DISABLE TRIGGER trg_knowledge_document_events_immutable;
+      ALTER TABLE public.knowledge_documents DISABLE TRIGGER trg_knowledge_documents_immutable;
+
+      DELETE FROM public.knowledge_chunk_embeddings
+        WHERE staged_chunk_id IN (
+          SELECT id FROM public.knowledge_staged_chunks WHERE document_id = target_document
+        );
+      DELETE FROM public.knowledge_base WHERE document_id = target_document;
+      GET DIAGNOSTICS removed = ROW_COUNT;
+      DELETE FROM public.knowledge_staged_chunks WHERE document_id = target_document;
+      DELETE FROM public.knowledge_document_extractions WHERE document_id = target_document;
+      DELETE FROM public.knowledge_document_reviews WHERE document_id = target_document;
+      DELETE FROM public.knowledge_document_events WHERE document_id = target_document;
+      DELETE FROM public.knowledge_document_blobs WHERE document_id = target_document;
+      DELETE FROM public.knowledge_documents WHERE id = target_document;
+
+      ALTER TABLE public.knowledge_documents ENABLE TRIGGER trg_knowledge_documents_immutable;
+      ALTER TABLE public.knowledge_document_events ENABLE TRIGGER trg_knowledge_document_events_immutable;
+      ALTER TABLE public.knowledge_document_reviews ENABLE TRIGGER trg_knowledge_document_reviews_immutable;
+      ALTER TABLE public.knowledge_document_extractions ENABLE TRIGGER trg_knowledge_document_extractions_immutable;
+      ALTER TABLE public.knowledge_staged_chunks ENABLE TRIGGER trg_knowledge_staged_chunks_immutable;
+      ALTER TABLE public.knowledge_chunk_embeddings ENABLE TRIGGER trg_knowledge_chunk_embeddings_immutable;
+      RETURN removed;
+    END $$;
+
     REVOKE ALL ON FUNCTION public.publish_knowledge_document(uuid) FROM PUBLIC;
     REVOKE ALL ON FUNCTION public.purge_expired_knowledge_blobs() FROM PUBLIC;
+    REVOKE ALL ON FUNCTION public.delete_knowledge_document(uuid) FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.publish_knowledge_document(uuid) TO ${sqlIdentifier(appRole)};
     GRANT EXECUTE ON FUNCTION public.purge_expired_knowledge_blobs() TO ${sqlIdentifier(appRole)};
+    GRANT EXECUTE ON FUNCTION public.delete_knowledge_document(uuid) TO ${sqlIdentifier(appRole)};
     REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_documents FROM ${sqlIdentifier(appRole)};
     REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_document_reviews FROM ${sqlIdentifier(appRole)};
     GRANT SELECT, INSERT ON public.knowledge_documents TO ${sqlIdentifier(appRole)};

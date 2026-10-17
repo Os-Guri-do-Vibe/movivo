@@ -1,7 +1,20 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+// Tipo `Express.Multer.File` de `@types/multer` (o tsconfig restringe `types`).
+import 'multer';
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiConsumes,
   ApiOperation,
   ApiParam,
   ApiResponse,
@@ -12,7 +25,7 @@ import {
   knowledgeDocumentContentResponseSchema,
   knowledgeDocumentsResponseSchema,
   reviewKnowledgeDocumentSchema,
-  uploadKnowledgeDocumentSchema,
+  MAX_KNOWLEDGE_DOCUMENT_BYTES,
 } from '@movivo/shared';
 
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
@@ -49,23 +62,59 @@ export class KnowledgeAdminController {
 
   @Post('upload')
   @RequireCapabilities(Capability.AI_CONFIG_READ, Capability.AI_KNOWLEDGE_WRITE)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_KNOWLEDGE_DOCUMENT_BYTES, files: 1, fields: 10 },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
   @ApiOperation({
-    summary: 'Envia um novo documento-fonte',
+    summary: 'Envia um artigo científico para a base',
     description:
-      'Upload em JSON (não multipart) — `content` carrega o arquivo, respeitando o teto de tamanho e a allowlist de MIME type da política vigente. Entra em `QUARANTINED` até o pipeline de processamento assíncrono.',
+      'Upload `multipart/form-data` (campo `file`): PDF, Word (.docx), planilha (.xlsx/.csv), Markdown ou TXT, até o teto da política. Sem revisão nem justificativa: o artigo é extraído, indexado e publicado automaticamente. Reenviar um arquivo que ficou arquivado (fluxo antigo) o reativa.',
   })
-  @ApiBody({ schema: zodSchemaToOpenApi(uploadKnowledgeDocumentSchema) })
-  @ApiResponse({ status: 200, description: 'Documento aceito e enfileirado para processamento.' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary' },
+        title: { type: 'string', description: 'Opcional; padrão: nome do arquivo.' },
+        author: { type: 'string' },
+        sourceUrl: { type: 'string', format: 'uri' },
+      },
+      required: ['file'],
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Artigo aceito e enfileirado para processamento.' })
   @ApiResponse({
     status: 400,
-    description: 'MIME type fora da allowlist, tamanho acima do teto, ou corpo fora do schema.',
+    description: 'Formato fora da allowlist, assinatura divergente ou tamanho acima do teto.',
   })
+  @ApiResponse({ status: 409, description: 'O mesmo arquivo já está na base.' })
   @ApiResponse({
     status: 403,
     description: 'Ator sem as capabilities AI_CONFIG_READ + AI_KNOWLEDGE_WRITE.',
   })
-  upload(@CurrentUser() actor: AuthenticatedUser, @Body() body: unknown) {
-    return this.knowledge.upload(actor, body);
+  upload(
+    @CurrentUser() actor: AuthenticatedUser,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body() body: unknown,
+  ) {
+    return this.knowledge.upload(actor, file, body);
+  }
+
+  @Post(':id/delete')
+  @RequireCapabilities(Capability.AI_CONFIG_READ, Capability.AI_KNOWLEDGE_WRITE)
+  @ApiOperation({
+    summary: 'Exclui definitivamente um artigo da base',
+    description:
+      'Requer `AI_KNOWLEDGE_WRITE`. Sem justificativa. Remove do banco o documento, o original, o texto extraído, os trechos e os vetores (função `delete_knowledge_document`). Só a trilha de auditoria permanece, sem título nem conteúdo. Não há como desfazer; reenviar o arquivo recria o artigo.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID do documento.' })
+  @ApiResponse({ status: 200, description: 'Artigo excluído.' })
+  @ApiResponse({ status: 404, description: 'Documento inexistente.' })
+  remove(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.knowledge.remove(actor, id);
   }
 
   @Post('review')

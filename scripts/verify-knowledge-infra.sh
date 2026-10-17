@@ -54,54 +54,21 @@ env_value() {
   printf '%s' "$fallback"
 }
 
-contains_only_text_mimes() {
-  local csv="$1" item has_plain=0 has_markdown=0 count=0
-  local old_ifs="$IFS"
-  IFS=','
-  for item in $csv; do
-    item="$(printf '%s' "$item" | tr -d '[:space:]')"
-    case "$item" in
-      text/plain) has_plain=1 ;;
-      text/markdown) has_markdown=1 ;;
-      *) IFS="$old_ifs"; return 1 ;;
-    esac
-    count=$((count + 1))
-  done
-  IFS="$old_ifs"
-  [ "$has_plain" -eq 1 ] && [ "$has_markdown" -eq 1 ] && [ "$count" -eq 2 ]
-}
-
-complex="$(env_value KNOWLEDGE_COMPLEX_FORMATS_ENABLED false)"
-allowed_mimes="$(env_value KNOWLEDGE_ALLOWED_MIME_TYPES text/plain,text/markdown)"
-max_bytes="$(env_value KNOWLEDGE_UPLOAD_MAX_BYTES 524288)"
+max_bytes="$(env_value KNOWLEDGE_UPLOAD_MAX_BYTES 10485760)"
 
 printf 'MOVIVO — readiness da Base de Conhecimento (%s)\n' "$MODE"
 
-case "$complex" in
-  false|0|no|off) pass "formatos complexos estão bloqueados (fail-closed)" ;;
-  true|1|yes|on)
-    fail "formatos complexos não podem ser habilitados antes do gate de docs/operacoes/base-conhecimento.md"
-    ;;
-  *) fail "KNOWLEDGE_COMPLEX_FORMATS_ENABLED tem valor booleano inválido" ;;
-esac
-
-if contains_only_text_mimes "$allowed_mimes"; then
-  pass "allowlist contém somente text/plain e text/markdown"
-else
-  fail "KNOWLEDGE_ALLOWED_MIME_TYPES saiu da allowlist segura do MVP"
-fi
-
 if printf '%s' "$max_bytes" | grep -Eq '^[0-9]+$' &&
-  [ "$max_bytes" -ge 1024 ] && [ "$max_bytes" -le 524288 ]; then
-  pass "teto de upload está entre 1 KiB e 512 KiB"
+  [ "$max_bytes" -ge 1024 ] && [ "$max_bytes" -le 10485760 ]; then
+  pass "teto de upload está entre 1 KiB e 10 MiB"
 else
-  fail "KNOWLEDGE_UPLOAD_MAX_BYTES deve estar entre 1024 e 524288 no MVP"
+  fail "KNOWLEDGE_UPLOAD_MAX_BYTES deve estar entre 1024 e 10485760"
 fi
 
-check "contrato versionado no .env.example da raiz" grep -q '^KNOWLEDGE_COMPLEX_FORMATS_ENABLED=false$' .env.example
-check "contrato versionado no .env.example da API" grep -q '^KNOWLEDGE_COMPLEX_FORMATS_ENABLED=false$' apps/api/.env.example
+check "teto de upload versionado no .env.example da raiz" grep -q '^KNOWLEDGE_UPLOAD_MAX_BYTES=' .env.example
+check "teto de upload versionado no .env.example da API" grep -q '^KNOWLEDGE_UPLOAD_MAX_BYTES=' apps/api/.env.example
 check "fila knowledge-processing registrada no BullMQ" grep -q "knowledge-processing" apps/api/src/modules/jobs/jobs.config.ts
-check "configuração de formatos complexos é validada no boot" grep -q "KNOWLEDGE_COMPLEX_FORMATS_ENABLED" apps/api/src/core/config/env.schema.ts
+check "teto de upload é validado no boot" grep -q "KNOWLEDGE_UPLOAD_MAX_BYTES" apps/api/src/core/config/env.schema.ts
 
 if [ "$MODE" = "runtime" ]; then
   check "Docker Compose é sintaticamente válido" docker compose config --quiet
