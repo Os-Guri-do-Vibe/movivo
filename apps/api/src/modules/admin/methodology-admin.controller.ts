@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import {
   createMethodologyVersionSchema,
   methodologyNoteSchema,
+  methodologyOptionalNoteSchema,
   methodologyReviewSchema,
   methodologyVersionsResponseSchema,
 } from '@movivo/shared';
@@ -26,6 +27,7 @@ import { CurrentUser } from '../auth/roles.decorator';
 import { MethodologyAdminService } from './methodology-admin.service';
 
 const NOTE_BODY = { schema: zodSchemaToOpenApi(methodologyNoteSchema) };
+const OPTIONAL_NOTE_BODY = { schema: zodSchemaToOpenApi(methodologyOptionalNoteSchema) };
 const VERSION_ID_PARAM = { name: 'id', description: 'UUID da versão da metodologia.' } as const;
 
 @ApiTags('Admin · Metodologia')
@@ -123,20 +125,20 @@ export class MethodologyAdminController {
   @Post(':id/publish')
   @RequireCapabilities(Capability.AI_CONFIG_READ, Capability.AI_METHODOLOGY_APPROVE)
   @ApiOperation({
-    summary: 'Publica uma versão aprovada',
+    summary: 'Publica uma versão',
     description:
-      'APPROVED → PUBLISHED. Requer `AI_METHODOLOGY_APPROVE`. A versão publicada anterior é arquivada automaticamente.',
+      'Requer `AI_METHODOLOGY_APPROVE`. ADMIN publica direto de DRAFT, IN_REVIEW ou APPROVED, sem justificativa; os demais papéis só publicam APPROVED. A versão publicada anterior é arquivada automaticamente.',
   })
   @ApiParam(VERSION_ID_PARAM)
-  @ApiBody(NOTE_BODY)
+  @ApiBody(OPTIONAL_NOTE_BODY)
   @ApiResponse({
     status: 200,
     description: 'Versão publicada — passa a valer para geração de protocolo e AI Coach.',
   })
-  @ApiResponse({ status: 400, description: 'Versão fora do estágio APPROVED.' })
+  @ApiResponse({ status: 409, description: 'Versão em estágio que não pode ser publicada.' })
   @ApiResponse({ status: 403, description: 'Ator sem a capability AI_METHODOLOGY_APPROVE.' })
   publish(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string, @Body() body: unknown) {
-    const note = strictSafeParse(methodologyNoteSchema, body);
+    const note = strictSafeParse(methodologyOptionalNoteSchema, body ?? {});
     if (!note.success) throw new BadRequestException({ code: 'INVALID_INPUT' });
     return this.methodology.publish(actor, { versionId: id, note: note.data.note });
   }
@@ -149,7 +151,7 @@ export class MethodologyAdminController {
       'Cria uma NOVA versão `PUBLISHED` com o conteúdo da versão-alvo — o histórico nunca é reescrito.',
   })
   @ApiParam(VERSION_ID_PARAM)
-  @ApiBody(NOTE_BODY)
+  @ApiBody(OPTIONAL_NOTE_BODY)
   @ApiResponse({ status: 200, description: 'Rollback aplicado.' })
   @ApiResponse({ status: 400, description: 'Versão-alvo inexistente ou nunca publicada.' })
   @ApiResponse({
@@ -161,7 +163,7 @@ export class MethodologyAdminController {
     @Param('id') id: string,
     @Body() body: unknown,
   ) {
-    const note = strictSafeParse(methodologyNoteSchema, body);
+    const note = strictSafeParse(methodologyOptionalNoteSchema, body ?? {});
     if (!note.success) throw new BadRequestException({ code: 'INVALID_INPUT' });
     return this.methodology.rollback(actor, { versionId: id, note: note.data.note });
   }

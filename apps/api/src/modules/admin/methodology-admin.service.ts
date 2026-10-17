@@ -9,6 +9,7 @@ import {
 import {
   createMethodologyVersionSchema,
   methodologyActionSchema,
+  methodologyPublishActionSchema,
   type MethodologyVersionsResponse,
 } from '@movivo/shared';
 import { sql } from 'drizzle-orm';
@@ -21,6 +22,11 @@ import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { AuditService } from './audit.service';
 
 type MethodologyStatus = 'DRAFT' | 'IN_REVIEW' | 'REJECTED' | 'APPROVED' | 'PUBLISHED' | 'ARCHIVED';
+
+const DEFAULT_CHANGE_NOTE = 'Sem resumo da alteração.';
+const DEFAULT_PUBLISH_NOTE = 'Publicada sem observação.';
+/** ADMIN publica direto do rascunho; os demais papéis só publicam o que o CREF aprovou. */
+const ADMIN_PUBLISHABLE: readonly MethodologyStatus[] = ['DRAFT', 'IN_REVIEW', 'APPROVED'];
 
 interface MethodologyListRow {
   id: string;
@@ -97,6 +103,7 @@ export class MethodologyAdminService {
     if (!parsed.success)
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
     const input = parsed.data;
+    const changeNote = input.changeNote?.length ? input.changeNote : DEFAULT_CHANGE_NOTE;
     const hash = createHash('sha256').update(input.content).digest('hex');
     await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('movivo.methodology.workflow'))`);
@@ -110,13 +117,13 @@ export class MethodologyAdminService {
         )
         SELECT COALESCE(max(version), 0) + 1,
           'methodology-v' || (COALESCE(max(version), 0) + 1)::text,
-          ${input.content}, ${hash}, ${input.changeNote}, ${actor.userId}::uuid
+          ${input.content}, ${hash}, ${changeNote}, ${actor.userId}::uuid
         FROM methodology_versions
         RETURNING id, version
       `)) as unknown as Array<{ id: string; version: number }>;
       const version = rows[0];
       if (!version) throw new BadRequestException('Não foi possível criar a versão.');
-      await this.appendEvent(tx, version.id, 'DRAFT', actor.userId, input.changeNote);
+      await this.appendEvent(tx, version.id, 'DRAFT', actor.userId, changeNote);
       await this.audit.append(tx, {
         actorId: actor.userId,
         userId: actor.userId,
@@ -167,19 +174,26 @@ export class MethodologyAdminService {
   }
 
   async publish(actor: AuthenticatedUser, body: unknown): Promise<MethodologyVersionsResponse> {
-    const parsed = strictSafeParse(methodologyActionSchema, body);
+    const parsed = strictSafeParse(methodologyPublishActionSchema, body);
     if (!parsed.success)
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
     const input = parsed.data;
+    const note = input.note?.length ? input.note : DEFAULT_PUBLISH_NOTE;
+    const isAdmin = actor.role === 'ADMIN';
     await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('movivo.methodology.workflow'))`);
       await this.assertRegulatedActionActor(tx, actor);
       const current = await this.loadCurrent(tx, input.versionId);
       if (!current) throw new NotFoundException('Versão de metodologia inexistente.');
-      if (current.status !== 'APPROVED') {
-        throw new ConflictException('Somente versão aprovada pode ser publicada.');
+      const publishable: readonly MethodologyStatus[] = isAdmin ? ADMIN_PUBLISHABLE : ['APPROVED'];
+      if (!publishable.includes(current.status)) {
+        throw new ConflictException(
+          isAdmin
+            ? 'Esta versão não pode ser publicada: já está vigente ou foi arquivada. Restaure-a para publicar de novo.'
+            : 'Somente versão aprovada pode ser publicada.',
+        );
       }
-      if (actor.role !== 'ADMIN' && current.created_by === actor.userId) {
+      if (!isAdmin && current.created_by === actor.userId) {
         throw new ConflictException('Maker-checker: o autor não pode publicar a própria versão.');
       }
       const published = (await tx.execute(sql`
@@ -201,14 +215,14 @@ export class MethodologyAdminService {
           `Substituída pela publicação ${input.versionId}.`,
         );
       }
-      await this.appendEvent(tx, input.versionId, 'PUBLISHED', actor.userId, input.note);
+      await this.appendEvent(tx, input.versionId, 'PUBLISHED', actor.userId, note);
       await this.audit.append(tx, {
         actorId: actor.userId,
         userId: actor.userId,
         action: 'methodology.publish',
         entityType: 'methodology_version',
         entityId: input.versionId,
-        changes: { note: input.note, archived: published.map((item) => item.id) },
+        changes: { note, from: current.status, archived: published.map((item) => item.id) },
       });
     });
     this.provider.invalidate();
@@ -216,10 +230,11 @@ export class MethodologyAdminService {
   }
 
   async rollback(actor: AuthenticatedUser, body: unknown): Promise<MethodologyVersionsResponse> {
-    const parsed = strictSafeParse(methodologyActionSchema, body);
+    const parsed = strictSafeParse(methodologyPublishActionSchema, body);
     if (!parsed.success)
       throw new BadRequestException({ code: 'INVALID_INPUT', issues: parsed.error.issues });
     const input = parsed.data;
+    const note = input.note?.length ? input.note : 'Restauração de versão anterior.';
     await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('movivo.methodology.workflow'))`);
       const source = (await tx.execute(sql`
@@ -234,13 +249,13 @@ export class MethodologyAdminService {
         SELECT COALESCE(max(version), 0) + 1,
           'methodology-v' || (COALESCE(max(version), 0) + 1)::text,
           ${source[0].content}, ${hash},
-          ${`Rollback proposto: ${input.note}`}, ${actor.userId}::uuid
+          ${`Rollback proposto: ${note}`}, ${actor.userId}::uuid
         FROM methodology_versions
         RETURNING id, version
       `)) as unknown as Array<{ id: string; version: number }>;
       const copy = rows[0];
       if (!copy) throw new BadRequestException('Não foi possível criar o rollback.');
-      await this.appendEvent(tx, copy.id, 'DRAFT', actor.userId, input.note);
+      await this.appendEvent(tx, copy.id, 'DRAFT', actor.userId, note);
       await this.audit.append(tx, {
         actorId: actor.userId,
         userId: actor.userId,

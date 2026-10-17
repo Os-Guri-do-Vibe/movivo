@@ -5,6 +5,7 @@ import {
   MAX_METHODOLOGY_NOTE_LENGTH,
   methodologyActionSchema,
   methodologyNoteSchema,
+  methodologyPublishActionSchema,
 } from './knowledge.schema';
 
 const VERSION_ID = '11111111-1111-4111-8111-111111111111';
@@ -26,6 +27,19 @@ describe('versão de metodologia', () => {
     expect(
       createMethodologyVersionSchema.safeParse({ content, changeNote: `${longNote}a` }).success,
     ).toBe(false);
+  });
+
+  it('permite salvar sem resumo da alteração', () => {
+    expect(createMethodologyVersionSchema.safeParse({ content: 'x'.repeat(300) }).success).toBe(
+      true,
+    );
+  });
+
+  it('publicar e restaurar não exigem justificativa', () => {
+    expect(methodologyPublishActionSchema.safeParse({ versionId: VERSION_ID }).success).toBe(true);
+    expect(
+      methodologyPublishActionSchema.safeParse({ versionId: VERSION_ID, note: '' }).success,
+    ).toBe(true);
   });
 
   it('aceita justificativa longa nas transições (enviar, revisar, publicar, restaurar)', () => {

@@ -139,7 +139,8 @@ export const methodologyStatusSchema = z.enum([
  */
 export const createMethodologyVersionSchema = z.object({
   content: z.string().trim().min(200),
-  changeNote: z.string().trim().min(10).max(MAX_METHODOLOGY_NOTE_LENGTH),
+  /** Opcional: o histórico mostra o resumo, mas escrever não é pré-requisito para salvar. */
+  changeNote: z.string().trim().max(MAX_METHODOLOGY_NOTE_LENGTH).optional(),
 });
 export type CreateMethodologyVersionInput = z.infer<typeof createMethodologyVersionSchema>;
 
@@ -152,6 +153,15 @@ export type MethodologyActionInput = z.infer<typeof methodologyActionSchema>;
 export const methodologyNoteSchema = z.object({
   note: z.string().trim().min(5).max(MAX_METHODOLOGY_NOTE_LENGTH),
 });
+
+/** Publicação e restauração não exigem justificativa; a observação é opcional. */
+export const methodologyOptionalNoteSchema = z.object({
+  note: z.string().trim().max(MAX_METHODOLOGY_NOTE_LENGTH).optional(),
+});
+export const methodologyPublishActionSchema = methodologyOptionalNoteSchema.extend({
+  versionId: z.uuid(),
+});
+export type MethodologyPublishActionInput = z.infer<typeof methodologyPublishActionSchema>;
 export const methodologyReviewSchema = methodologyNoteSchema.extend({
   decision: z.enum(['APPROVED', 'REJECTED']),
 });

@@ -131,6 +131,19 @@ describe('MethodologyAdminService.create', () => {
     );
   });
 
+  it('aceita salvar sem resumo da alteração', async () => {
+    const { service } = methodologyWith({
+      executes: [
+        [],
+        [],
+        [{ id: VERSION_ID, version: 2 }],
+        [],
+        [versionRow({ version: 2, status: 'DRAFT' })],
+      ],
+    });
+    await expect(service.create(ACTOR, { content: 'x'.repeat(200) })).resolves.toBeDefined();
+  });
+
   it('recusa corpo fora do contrato sem tocar no banco', async () => {
     const { service, execute } = methodologyWith();
     await expect(service.create(ACTOR, { content: 'curto demais' })).rejects.toBeInstanceOf(
@@ -330,11 +343,43 @@ describe('MethodologyAdminService.publish', () => {
     expect(provider.invalidate).not.toHaveBeenCalled();
   });
 
-  it('recusa publicar versão que não está APPROVED', async () => {
+  it('recusa publicar versão que não está APPROVED (papel não-ADMIN)', async () => {
     const { service } = methodologyWith({
-      executes: [[], [{ created_by: OTHER_CREF, status: 'IN_REVIEW' }]],
+      executes: [[], CREF_OK, [{ created_by: OTHER_CREF, status: 'IN_REVIEW' }]],
     });
     await expect(service.publish(CREF_ACTOR, PUBLISH)).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('ADMIN publica direto do rascunho, sem justificativa', async () => {
+    const { service, audit, provider } = methodologyWith({
+      executes: [
+        [],
+        [{ created_by: ACTOR.userId, status: 'DRAFT' }],
+        [{ id: '55555555-5555-4555-8555-555555555555' }],
+        [],
+        [],
+        [versionRow({ status: 'PUBLISHED' })],
+      ],
+    });
+    await service.publish(ACTOR, { versionId: VERSION_ID });
+    expect(provider.invalidate).toHaveBeenCalledOnce();
+    expect(audit.append).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'methodology.publish',
+        changes: expect.objectContaining({ from: 'DRAFT', note: 'Publicada sem observação.' }),
+      }),
+    );
+  });
+
+  it('ADMIN não republica a versão que já está vigente', async () => {
+    const { service, provider } = methodologyWith({
+      executes: [[], [{ created_by: ACTOR.userId, status: 'PUBLISHED' }]],
+    });
+    await expect(service.publish(ACTOR, { versionId: VERSION_ID })).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(provider.invalidate).not.toHaveBeenCalled();
   });
 
   it('recusa publicar sem profissional CREF ativo', async () => {
@@ -371,6 +416,19 @@ describe('MethodologyAdminService.rollback', () => {
   it('404 quando a versão de origem não existe', async () => {
     const { service } = methodologyWith({ executes: [[], []] });
     await expect(service.rollback(ACTOR, ROLLBACK)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('restaura sem justificativa', async () => {
+    const { service } = methodologyWith({
+      executes: [
+        [],
+        [{ content: 'conteúdo histórico assinado pelo CREF' }],
+        [{ id: '66666666-6666-4666-8666-666666666666', version: 3 }],
+        [],
+        [versionRow({ version: 3, status: 'DRAFT' })],
+      ],
+    });
+    await expect(service.rollback(ACTOR, { versionId: VERSION_ID })).resolves.toBeDefined();
   });
 
   it('recusa corpo fora do contrato', async () => {

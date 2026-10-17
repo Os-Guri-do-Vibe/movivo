@@ -87,9 +87,15 @@ describe('MethodologyAdminController', () => {
     });
   });
 
-  it('publish rejeita nota fora do contrato antes de chamar o serviço', async () => {
+  it('publish não exige justificativa', async () => {
     const { controller, service } = controllerWith();
-    expect(() => controller.publish(ACTOR, VERSION_ID, { note: 'oi' })).toThrow(
+    await expect(controller.publish(ACTOR, VERSION_ID, {})).resolves.toBe('publish-result');
+    expect(service.publish).toHaveBeenCalledWith(ACTOR, { versionId: VERSION_ID, note: undefined });
+  });
+
+  it('publish rejeita campo desconhecido antes de chamar o serviço', async () => {
+    const { controller, service } = controllerWith();
+    expect(() => controller.publish(ACTOR, VERSION_ID, { role: 'ADMIN' })).toThrow(
       BadRequestException,
     );
     expect(service.publish).not.toHaveBeenCalled();
@@ -106,11 +112,9 @@ describe('MethodologyAdminController', () => {
     });
   });
 
-  it('rollback rejeita nota fora do contrato antes de chamar o serviço', async () => {
+  it('rollback não exige justificativa', async () => {
     const { controller, service } = controllerWith();
-    expect(() => controller.rollback(ACTOR, VERSION_ID, { note: 'oi' })).toThrow(
-      BadRequestException,
-    );
-    expect(service.rollback).not.toHaveBeenCalled();
+    await expect(controller.rollback(ACTOR, VERSION_ID, {})).resolves.toBe('rollback-result');
+    expect(service.rollback).toHaveBeenCalledWith(ACTOR, { versionId: VERSION_ID, note: undefined });
   });
 });
