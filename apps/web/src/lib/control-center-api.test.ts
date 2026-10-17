@@ -21,7 +21,8 @@ import {
   getKnowledgeDocuments,
   getPartnerDistribution,
   reviewKnowledgeDocument,
-  uploadKnowledgeDocument,
+  uploadKnowledgeArticle,
+  deleteKnowledgeDocument,
   getMarketing,
   getOverview,
   getStudent,
@@ -235,7 +236,7 @@ describe('projeções do Control Center', () => {
   });
 });
 
-/** `getKnowledgeDocuments`/`uploadKnowledgeDocument` normalizam stage/errorCode em processingStage/processingError. */
+/** `getKnowledgeDocuments`/`uploadKnowledgeArticle` normalizam stage/errorCode em processingStage/processingError. */
 const knowledgeDocumentsViewResponse = {
   ...knowledgeDocumentsResponse,
   data: {
@@ -249,28 +250,36 @@ const knowledgeDocumentsViewResponse = {
 };
 
 describe('mutações do pilar IA', () => {
-  const uploadInput = {
-    title: 'Guia de descanso entre séries',
-    topic: 'descanso',
-    category: 'OTHER' as const,
-    originalFilename: 'guia.md',
-    mimeType: 'text/markdown' as const,
-    content: 'a'.repeat(120),
-  };
+  const article = () => new File(['%PDF-1.7 conteudo'], 'guia.pdf', { type: 'application/pdf' });
 
-  it('envia o documento como JSON no POST e devolve o corpus validado', async () => {
+  it('envia o artigo como multipart (sem Content-Type manual) e devolve o corpus validado', async () => {
     fetchMock.mockResolvedValue(jsonResponse(knowledgeDocumentsResponse));
-    await expect(uploadKnowledgeDocument(uploadInput)).resolves.toEqual(
+    await expect(uploadKnowledgeArticle(article())).resolves.toEqual(
       knowledgeDocumentsViewResponse,
     );
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/dashboard/control/ai/knowledge/upload');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.body as FormData).get('file')).toBeInstanceOf(Blob);
+    expect(init.headers).toEqual({ Accept: 'application/json' });
+  });
+
+  it('exclui o artigo por POST sem corpo de justificativa', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(knowledgeDocumentsResponse));
+    await deleteKnowledgeDocument('11111111-1111-4111-8111-111111111111');
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/dashboard/control/ai/knowledge/upload',
-      expect.objectContaining({
-        method: 'POST',
-        credentials: 'same-origin',
-        body: JSON.stringify(uploadInput),
-      }),
+      '/api/dashboard/control/ai/knowledge/11111111-1111-4111-8111-111111111111/delete',
+      expect.objectContaining({ method: 'POST', body: '{}' }),
     );
+  });
+
+  it('mostra a mensagem da API ao recusar o arquivo', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ message: 'Este artigo já está na base.' }, 409));
+    await expect(uploadKnowledgeArticle(article())).rejects.toMatchObject({
+      status: 409,
+      message: 'Este artigo já está na base.',
+    });
   });
 
   it('403 na publicação fala de publicar, não de acessar o setor', async () => {
@@ -295,17 +304,17 @@ describe('mutações do pilar IA', () => {
         throw new Error('corpo vazio');
       },
     });
-    await expect(uploadKnowledgeDocument(uploadInput)).rejects.toMatchObject({
+    await expect(uploadKnowledgeArticle(article())).rejects.toMatchObject({
       status: 500,
-      message: 'Não foi possível concluir a publicação.',
+      message: 'Não foi possível enviar este artigo.',
     });
   });
 
   it('200 fora do contrato na publicação vira 502 em vez de dado inválido na tela', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ data: { documents: 'muitos' } }));
-    await expect(uploadKnowledgeDocument(uploadInput)).rejects.toMatchObject({
+    await expect(uploadKnowledgeArticle(article())).rejects.toMatchObject({
       status: 502,
-      message: 'A publicação devolveu dados fora do contrato esperado.',
+      message: 'A resposta ao enviar o artigo veio fora do contrato esperado.',
     });
   });
 });

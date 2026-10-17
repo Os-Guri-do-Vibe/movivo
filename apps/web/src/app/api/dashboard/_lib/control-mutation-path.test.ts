@@ -6,10 +6,10 @@ const ID = '11111111-1111-4111-8111-111111111111';
 
 describe('allowlist de mutações do Control Center', () => {
   it.each([
-    'ai/knowledge/upload',
     'ai/knowledge/review',
     `ai/knowledge/${ID}/retry`,
     `ai/knowledge/${ID}/archive`,
+    `ai/knowledge/${ID}/delete`,
     'ai/methodology',
     `ai/methodology/${ID}/submit`,
     `ai/methodology/${ID}/review`,
@@ -34,6 +34,7 @@ describe('allowlist de mutações do Control Center', () => {
   it.each([
     'overview',
     'ai/knowledge/delete-all',
+    'ai/knowledge/upload', // multipart: rota própria, nunca o proxy JSON
     'ai/knowledge/not-a-uuid/archive',
     `ai/knowledge/${ID}/content`,
     `ai/methodology/${ID}/delete`,

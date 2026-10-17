@@ -1,4 +1,4 @@
-import { AiKnowledgeDashboard } from '@/components/dashboard/ai-knowledge';
+import { KnowledgeArticlesPanel } from '@/components/dashboard/knowledge-articles';
 import { hasAllCapabilities } from '@/lib/control-center-access';
 
 import { requireDashboardCapability } from '../../../_lib/session';
@@ -9,8 +9,7 @@ export default async function KnowledgeDocumentsPage() {
     '/dashboard/ia/base-conhecimento/documentos',
   );
   return (
-    <AiKnowledgeDashboard
-      showHeader={false}
+    <KnowledgeArticlesPanel
       canUpload={hasAllCapabilities(session.capabilities, 'control_center.ai.knowledge.write')}
       canApprove={hasAllCapabilities(session.capabilities, 'control_center.ai.knowledge.approve')}
     />

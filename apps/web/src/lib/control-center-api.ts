@@ -29,7 +29,6 @@ import {
   type KnowledgeDocumentContentResponse,
   type KnowledgeDocumentsResponse,
   type ReviewKnowledgeDocumentInput,
-  type UploadKnowledgeDocumentInput,
   type PublishAgentConfigInput,
   type PublishFaqEntryInput,
   type PublishL1GuardrailInput,
@@ -529,11 +528,15 @@ async function mutate<T>(
     contract: 'A publicação devolveu dados fora do contrato esperado.',
   },
 ): Promise<T> {
+  // Multipart (upload) deixa o `fetch` montar o Content-Type com o boundary.
+  const isForm = body instanceof FormData;
   const response = await fetch(`/api/dashboard/control/${path}`, {
     method: 'POST',
     credentials: 'same-origin',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    headers: isForm
+      ? { Accept: 'application/json' }
+      : { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: isForm ? body : JSON.stringify(body),
   });
   const value = (await response.json().catch(() => null)) as unknown;
   if (!response.ok) {
@@ -686,10 +689,29 @@ export function getKnowledgeDocumentContent(
   );
 }
 
-export function uploadKnowledgeDocument(
-  input: UploadKnowledgeDocumentInput,
-): Promise<KnowledgeDocumentsViewResponse> {
-  return mutate('ai/knowledge/upload', input, knowledgeDocumentsViewResponseSchema);
+/** Upload de um artigo científico (PDF, Word, planilha, CSV, Markdown ou TXT). */
+export function uploadKnowledgeArticle(file: File): Promise<KnowledgeDocumentsViewResponse> {
+  const form = new FormData();
+  form.set('file', file, file.name);
+  return mutate('ai/knowledge/upload', form, knowledgeDocumentsViewResponseSchema, {
+    forbidden: 'Seu papel não pode enviar artigos.',
+    fallback: 'Não foi possível enviar este artigo.',
+    contract: 'A resposta ao enviar o artigo veio fora do contrato esperado.',
+  });
+}
+
+/** Exclui o artigo da base ativa. Sem justificativa. */
+export function deleteKnowledgeDocument(id: string): Promise<KnowledgeDocumentsViewResponse> {
+  return mutate(
+    `ai/knowledge/${encodeURIComponent(id)}/delete`,
+    {},
+    knowledgeDocumentsViewResponseSchema,
+    {
+      forbidden: 'Seu papel não pode excluir artigos.',
+      fallback: 'Não foi possível excluir este artigo.',
+      contract: 'A resposta ao excluir o artigo veio fora do contrato esperado.',
+    },
+  );
 }
 
 export function reviewKnowledgeDocument(
