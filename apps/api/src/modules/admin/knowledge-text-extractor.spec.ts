@@ -201,13 +201,10 @@ describe('assertSafeZip (zip bomb)', () => {
     const bomb = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     expect(bomb.byteLength).toBeLessThan(1024 * 1024);
     expect(() => assertSafeZip(bomb)).toThrow(BadRequestException);
-    await expect(extractArticleText(bomb, 'docx')).rejects.toMatchObject(
-      {
-        response: { code: 'ARCHIVE_TOO_LARGE' },
-      },
-      30_000,
-    );
-  });
+    await expect(extractArticleText(bomb, 'docx')).rejects.toMatchObject({
+      response: { code: 'ARCHIVE_TOO_LARGE' },
+    });
+  }, 30_000);
 
   it('recusa zip com entradas demais', async () => {
     const zip = new JSZip();
