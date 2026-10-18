@@ -15,10 +15,38 @@ Este repositório tem dois papéis:
 
 A MOVIVO é um **AI Coach de treino individualizado, entregue via WhatsApp**, que combina IA conversacional com metodologia e supervisão de um profissional de Educação Física registrado no CREF. O objetivo é democratizar o acesso a treino de qualidade — hoje restrito a quem paga por personal trainer — usando o canal que as pessoas já usam todos os dias.
 
-- **Categoria criada:** "orientação de treino conversacional" — não é "um app de fitness".
-- **Essência de marca:** *"Ciência que treina com você."*
+- **Categoria do serviço atual:** "orientação de treino conversacional" — não é "um app de fitness". O serviço atual é a porta de entrada da marca, que é mais ampla (ver Direcionamento estratégico de marca).
+- **Essência de marca (vigente, Direcionamento Estratégico v1.0 — out/2026):** a MOVIVO é uma marca de movimento, performance e bem-estar que combina orientação humana, ciência e tecnologia para ajudar pessoas a evoluírem com consistência — de forma acessível, personalizada e contínua. Detalhes na seção "Direcionamento estratégico de marca" abaixo. *(Substitui o antigo "Ciência que treina com você", que não faz parte do documento vigente.)*
 - **Nome:** **MOVIVO** (mo-VÍ-vo — "movimento vivo"). Há risco jurídico de colisão fonética com a marca de alto renome VIVO (Telefônica), ainda não verificado formalmente no INPI — ver `03-relatorio-caio.md`. Nome alternativo de reserva já definido caso necessário: **TRENOVA**.
 - **Selo CREF:** assinatura de credibilidade, não é uma submarca.
+
+### Direcionamento estratégico de marca (vigente — v1.0, out/2026)
+
+Fonte: `Direcionamento_Estrategico_de_Marca_MOVIVO.docx` (raiz do repositório). **Em conflito com os relatórios de Fase 1 (Gabriel, Kimura, Helena) ou com copy antiga, este direcionamento prevalece.** O próprio documento separa *princípios* (vigentes) de *propostas a validar* (não são compromissos operacionais nem devem ser prometidos publicamente).
+
+**Vigente**
+
+- **Marca:** MOVIVO — *move your potential*. Marca de movimento, performance e bem-estar; não se limita a musculação nem a uma modalidade (cabe começar a treinar, correr, performance, recuperação, hábitos).
+- **Propósito:** democratizar o acesso a orientação de qualidade para que mais pessoas cuidem de si, desenvolvam seu potencial e construam uma vida em movimento.
+- **Visão:** marca brasileira reconhecida por tornar movimento e bem-estar mais acessíveis, relevantes e presentes no cotidiano, conectando serviço, experiência, conteúdo e comunidade.
+- **Promessa:** ajudar cada pessoa a avançar a partir do próprio ponto de partida, com orientação adequada, acompanhamento e uma cultura que valoriza a consistência.
+- **Posicionamento:** "uma assessoria de movimento, performance e bem-estar de alto nível ao alcance de todos". Premium = qualidade percebida, clareza e cuidado, **não** inacessibilidade. Fala com quem está começando *e* com quem busca performance; não exclusivamente com atletas.
+- **Papel da IA:** ferramenta de apoio à operação e à experiência (organizar informações, facilitar interações, apoiar personalização). **Não** é substituta do julgamento profissional nem o principal motivo para escolher a MOVIVO. Comunicar com transparência onde a tecnologia entra, o papel do profissional e os limites do serviço. Reforça os guardrails de linguagem abaixo.
+- **Princípio central:** "Somos melhores do que éramos ontem" — evolução medida contra o próprio ponto de partida, sem comparação permanente com os outros.
+- **Inimigo conceitual:** potencial desperdiçado (desistir por falta de orientação; sensação de que cuidar de si é inacessível). Tratar sempre com incentivo, **nunca com culpa, vergonha ou humilhação**.
+- **Frase de ação:** "Sou. Nós fazemos acontecer!"
+- **Valores:** Evolução, Consistência, Acessibilidade, Responsabilidade, Humanidade, Ação, Comunidade.
+- **Personalidade e voz:** premium sem arrogância; aspiracional sem promessas irreais; motivadora sem pressionar; tecnológica sem frieza; científica e responsável, com proximidade; inclusiva; confiante sem ostentação. Falar de evolução, jornada, consistência, movimento e potencial; mensagens claras e humanas, sem jargão nem motivação vazia; celebrar ação e progresso real sem reduzir a pessoa ao corpo ou ao desempenho.
+- **Identidade visual (referência):** direção premium/activewear, fotografia humana, editorial e diversa, composição limpa; verde como acento, sem excesso de neon, clichê de academia ou estética genérica de IA. Paleta: Petróleo Vivo `#06302A`, Verde Pulso `#25E27E`, Coral Vivo `#FF6A3D`, Névoa `#F4F7F3`, Grafite `#14201C`, Musgo `#5B6B63`, Branco `#FFFFFF`.
+- **Reconhecimento:** princípio de reconhecer o cumprimento do **compromisso individual (consistência relativa ao plano)**, não o maior volume de treino.
+- **Filtro de decisão** para campanha, feature, parceria ou iniciativa: ajuda as pessoas a evoluir? entrega valor real? preserva responsabilidade profissional e transparência? é acessível a diferentes pontos de partida? fortalece confiança de longo prazo? é coerente com a personalidade premium/humana? conseguimos cumprir o que prometemos?
+
+**A validar (exploratório — não usar como compromisso em produto, copy ou UI)**
+
+- **MOVIVO CLUB** (comunidade; pode começar no WhatsApp, mas o canal não é a comunidade), **MOVERS** (nome dos membros), **THE FIRST 100 / Founding Members** (critérios, benefícios e duração indefinidos), níveis **ACTIVE / CORE / ELITE / ICON**, e o conceito "You don't move alone". Participação acima de status financeiro: reconhecimento não pode depender de pagar mais.
+- Próximos passos do documento: formalizar a mensagem principal, validar linguagem com membros beta, definir escopo do CLUB, desenhar um ritual recorrente, decidir Founding Members, criar guia de voz aplicado e medir sinais de pertencimento.
+
+**Implicações para código, copy e prompts:** não apresentar a IA como protagonista; manter o respaldo CREF visível; nenhuma promessa de resultado; nada de tom de culpa ou comparação entre usuários; tratar nomes de comunidade/níveis como inexistentes até validação.
 
 ### Como funciona (visão de produto)
 
@@ -26,15 +54,14 @@ Usuário preenche formulário de anamnese + PAR-Q → protocolo de treino é ger
 
 ### Fundadores e papéis
 
-| Pessoa | Papel |
-|---|---|
-| Rodrigo | Desenvolvedor (fundador) |
-| Pedro | Desenvolvedor (fundador) |
-| Joaquim | Desenvolvedor (fundador) |
-| Cahuã | Marca, marketing e vendas — rosto público / endossante (arquitetura de marca "Branded House": Cahuã endossa a MOVIVO, **nunca é a marca**) |
-| Treinador do Cahuã | Responsável Técnico CREF — validação jurídico-profissional dos protocolos, também rosto da marca |
+| Pessoa | Quotas | Papel |
+|---|---|---|
+| Rodrigo | 40% | Desenvolvedor (fundador) |
+| Pedro | 20% | Desenvolvedor (fundador) |
+| Cahuã | 20% | Marca, marketing e vendas — rosto público / endossante (arquitetura de marca "Branded House": Cahuã endossa a MOVIVO, **nunca é a marca**) |
+| Leonardo (Léo) | 20% | Treinador do Cahuã, sócio-fundador e Responsável Técnico CREF — validação jurídico-profissional dos protocolos, também rosto da marca. Não confundir com o agente `13-leonardo-engenheiro-backend` do pipeline, que é só uma persona de IA |
 
-> **Societário (recomendação de Alexandre em `06-relatorio-alexandre.md`):** constituir LTDA com objeto social compatível com atividade CREF (Educação Física como atividade-fim, não só "software house"), Acordo de Sócios com vesting (cliff 12 meses / vesting total 48 meses) e IP de todo o desenvolvimento consolidado na PJ desde o dia 1. Divisão de quotas ainda **não definida** — Alexandre recomenda evitar split igualitário 20%/20%/20%/20%/20% sem mecanismo de desempate societário.
+> **Societário (recomendação de Alexandre em `06-relatorio-alexandre.md`):** constituir LTDA com objeto social compatível com atividade CREF (Educação Física como atividade-fim, não só "software house"), Acordo de Sócios com vesting (cliff 12 meses / vesting total 48 meses) e IP de todo o desenvolvimento consolidado na PJ desde o dia 1. **Quadro societário definido (out/2026): Rodrigo 40%, Pedro 20%, Cahuã 20%, Leonardo 20%** — a formalizar em contrato social e Acordo de Sócios. Nenhum sócio tem maioria sozinho, mas o split deixa de ser igualitário (a preocupação de Alexandre com o desempate). Os relatórios de Fase 1–4 que citam outra divisão ou outro quadro (ex.: `06-relatorio-alexandre.md`) estão desatualizados nesse ponto.
 
 ### Modelo de negócio
 
