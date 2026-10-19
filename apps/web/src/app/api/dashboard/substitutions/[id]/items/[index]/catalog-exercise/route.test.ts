@@ -5,6 +5,7 @@ const bff = vi.hoisted(() => ({
   authenticatedBackendFetch: vi.fn(),
   errorResponse: vi.fn(),
   forwardBackendJson: vi.fn(),
+  validationErrorResponse: vi.fn(),
   BffError: class BffError extends Error {
     constructor(
       readonly status: number,
@@ -69,9 +70,14 @@ describe('POST /api/dashboard/substitutions/[id]/items/[index]/catalog-exercise'
   );
 
   it('recusa exercício fora do schema de publicação sem chamar o backend', async () => {
-    await call('0', { ...EXERCISE, name: '' });
+    const invalid = { ...EXERCISE, name: '' };
+    await call('0', invalid);
     expect(bff.authenticatedBackendFetch).not.toHaveBeenCalled();
-    expect(bff.errorResponse).toHaveBeenCalledWith(expect.any(bff.BffError));
+    expect(bff.validationErrorResponse).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Array),
+      invalid,
+    );
   });
 
   it('recusa id fora do formato UUID sem chamar o backend', async () => {

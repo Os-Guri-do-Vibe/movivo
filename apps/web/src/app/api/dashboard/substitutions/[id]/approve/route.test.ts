@@ -5,6 +5,7 @@ const bff = vi.hoisted(() => ({
   authenticatedBackendFetch: vi.fn(),
   errorResponse: vi.fn(),
   forwardBackendJson: vi.fn(),
+  validationErrorResponse: vi.fn(),
   BffError: class BffError extends Error {
     constructor(
       readonly status: number,
@@ -72,7 +73,11 @@ describe('POST /api/dashboard/substitutions/[id]/approve', () => {
   ])('recusa corpo inválido (%s) sem chamar o backend', async (_label, body) => {
     await POST(post(body), context);
     expect(bff.authenticatedBackendFetch).not.toHaveBeenCalled();
-    expect(bff.errorResponse).toHaveBeenCalledWith(expect.any(bff.BffError));
+    expect(bff.validationErrorResponse).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Array),
+      body,
+    );
   });
 
   it('recusa id fora do formato UUID sem chamar o backend', async () => {

@@ -258,7 +258,7 @@ describe('AlertDetail', () => {
   });
 
   it('trata alerta inexistente sem registrar leitura', async () => {
-    api.getQueueDetail.mockRejectedValue(new DashboardApiError(404, 'Handoff nao encontrado.'));
+    api.getQueueDetail.mockRejectedValue(new DashboardApiError(404, 'Alerta de atendimento não encontrado.'));
     render(<AlertDetail id={ALERT_ID} />);
     expect(await screen.findByRole('heading', { name: 'Alerta não encontrado' })).toBeVisible();
     expect(api.markNotificationRead).not.toHaveBeenCalled();

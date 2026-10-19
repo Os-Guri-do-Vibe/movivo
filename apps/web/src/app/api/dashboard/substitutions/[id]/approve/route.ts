@@ -7,6 +7,7 @@ import {
   BffError,
   errorResponse,
   forwardBackendJson,
+  validationErrorResponse,
 } from '../../../_lib/bff';
 
 /**
@@ -21,7 +22,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
     const rawBody: unknown = await request.json().catch(() => ({}));
     const parsed = approveSubstitutionSchema.safeParse(rawBody ?? {});
-    if (!parsed.success) throw new BffError(400, 'Revise as decisões da troca.');
+    if (!parsed.success) {
+      return validationErrorResponse('Revise as decisões da troca.', parsed.error.issues, rawBody);
+    }
 
     const response = await authenticatedBackendFetch(
       `/professional/dashboard/substitutions/${id}/approve`,

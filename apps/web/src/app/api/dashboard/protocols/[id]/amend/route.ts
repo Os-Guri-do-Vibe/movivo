@@ -7,6 +7,7 @@ import {
   BffError,
   errorResponse,
   forwardBackendJson,
+  validationErrorResponse,
 } from '../../../_lib/bff';
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
@@ -17,7 +18,13 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
 
     const body = await request.json().catch(() => null);
     const parsed = amendActiveProtocolSchema.safeParse(body);
-    if (!parsed.success) throw new BffError(400, 'Revise a atualização do protocolo.');
+    if (!parsed.success) {
+      return validationErrorResponse(
+        'Revise a atualização do protocolo.',
+        parsed.error.issues,
+        body,
+      );
+    }
 
     const response = await authenticatedBackendFetch(
       `/professional/dashboard/protocols/${id}/amend`,

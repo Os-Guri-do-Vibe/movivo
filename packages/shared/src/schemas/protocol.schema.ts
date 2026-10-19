@@ -114,7 +114,9 @@ export const repsRangeSchema = z
     min: z.number().int().min(1).max(100),
     max: z.number().int().min(1).max(100),
   })
-  .refine((r) => r.min <= r.max, { message: 'repsRange.min não pode ser maior que max.' });
+  .refine((r) => r.min <= r.max, {
+    message: 'O mínimo de repetições não pode ser maior que o máximo.',
+  });
 export type RepsRange = z.infer<typeof repsRangeSchema>;
 
 /**
@@ -132,7 +134,7 @@ export const warmupSetBlockSchema = z
     restSeconds: z.number().int().min(0).max(600).optional(),
   })
   .refine((b) => (b.reps !== undefined) !== (b.durationSeconds !== undefined), {
-    message: 'Bloco de aquecimento deve ter "reps" OU "durationSeconds", nunca os dois nem nenhum.',
+    message: 'Informe repetições ou duração no aquecimento, não os dois nem nenhum.',
   });
 export type WarmupSetBlock = z.infer<typeof warmupSetBlockSchema>;
 
@@ -191,7 +193,7 @@ export const protocolExerciseSchema = z
     isCardio: z.boolean().optional(),
   })
   .refine((ex) => (ex.reps !== undefined) !== (ex.durationSeconds !== undefined), {
-    message: 'Exercício deve ter "reps" OU "durationSeconds", nunca os dois nem nenhum.',
+    message: 'Informe repetições ou duração, não os dois nem nenhum.',
   });
 export type ProtocolExercise = z.infer<typeof protocolExerciseSchema>;
 

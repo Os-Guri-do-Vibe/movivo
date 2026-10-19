@@ -7,6 +7,7 @@ import {
   BffError,
   errorResponse,
   forwardBackendJson,
+  validationErrorResponse,
 } from '../../_lib/bff';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -21,7 +22,13 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
     const body = await request.json().catch(() => null);
     const content = isRecord(body) ? protocolStructureSchema.safeParse(body.content) : null;
-    if (!content?.success) throw new BffError(400, 'Revise os campos do protocolo.');
+    if (!content?.success) {
+      return validationErrorResponse(
+        'Revise os campos do protocolo.',
+        content?.error.issues ?? [],
+        body,
+      );
+    }
 
     const response = await authenticatedBackendFetch(`/professional/dashboard/protocols/${id}`, {
       method: 'PATCH',
