@@ -14,6 +14,7 @@ import {
   anamnesisStructuredSchema,
   approveSubstitutionSchema,
   ControlCenterCapability,
+  friendlyIssueMessages,
   onboardingStep1Schema,
   protocolStructureSchema,
   publishExerciseCatalogEntrySchema,
@@ -661,7 +662,7 @@ export class DashboardService {
       if (!(await this.healthConsent.hasActiveForUser(row.userId))) {
         throw new BadRequestException({
           code: 'HEALTH_CONSENT_REVOKED',
-          message: 'Consentimento de dados de saude revogado — atualizacao indisponivel.',
+          message: 'Consentimento de dados de saúde revogado — atualização indisponível.',
         });
       }
       await this.assertCrefCredential(tx, actor);
@@ -814,7 +815,7 @@ export class DashboardService {
       { userId: actor.userId, role: actor.role },
       id,
     );
-    if (!request) throw new NotFoundException('Proposta de substituicao nao encontrada.');
+    if (!request) throw new NotFoundException('Proposta de substituição não encontrada.');
     return request.userId;
   }
 
@@ -830,7 +831,7 @@ export class DashboardService {
       if (!(await this.healthConsent.hasActiveForUser(row.userId))) {
         throw new BadRequestException({
           code: 'HEALTH_CONSENT_REVOKED',
-          message: 'Consentimento de dados de saude revogado — assinatura indisponivel.',
+          message: 'Consentimento de dados de saúde revogado — assinatura indisponível.',
         });
       }
       if (row.status === 'ACTIVE' && row.signedAt && row.signatureHash && row.professionalId) {
@@ -843,7 +844,7 @@ export class DashboardService {
         };
       }
       if (row.status !== 'PENDING_SIGNATURE' || row.approvalStatus !== 'PENDING_REVIEW') {
-        throw new BadRequestException('Protocolo nao esta aguardando assinatura.');
+        throw new BadRequestException('Este protocolo não está aguardando assinatura.');
       }
       // `ADMIN` (conta fundador) pula a checagem de credencial CREF — decisão do
       // fundador 2026-08-22: a MOVIVO no início só tem um profissional CREF, também
@@ -864,8 +865,10 @@ export class DashboardService {
         throw new BadRequestException({
           code: 'PROTOCOL_CONTENT_INVALID',
           message:
-            'O conteudo deste protocolo nao passa na validacao atual. Corrija antes de assinar.',
-          issues: parsedContent.error.issues,
+            'O conteúdo deste protocolo não passa na validação atual. Corrija antes de assinar.',
+          issues: friendlyIssueMessages(parsedContent.error.issues, row.content).map((message) => ({
+            message,
+          })),
         });
       }
       const content = parsedContent.data;
@@ -1060,7 +1063,7 @@ export class DashboardService {
         .from(protocolSubstitutionRequests)
         .where(eq(protocolSubstitutionRequests.id, id))
         .limit(1);
-      if (!row) throw new NotFoundException('Proposta de substituição nao encontrada.');
+      if (!row) throw new NotFoundException('Proposta de substituição não encontrada.');
       const [owner] = await tx
         .select({ name: users.name })
         .from(users)
@@ -1202,7 +1205,7 @@ export class DashboardService {
           throw new BadRequestException(release.detail);
         default:
           throw new BadRequestException(
-            'Proposta ja decidida, ou o protocolo mudou de versao desde a proposta.',
+            'Proposta já decidida, ou o protocolo mudou de versão desde a proposta.',
           );
       }
     }
@@ -1266,7 +1269,7 @@ export class DashboardService {
         );
       }
       throw new BadRequestException(
-        'Proposta ja decidida, item inexistente, ou o protocolo mudou de versao desde a proposta.',
+        'Proposta já decidida, item inexistente, ou o protocolo mudou de versão desde a proposta.',
       );
     }
     this.queueEvents.emit('protocol');
@@ -1367,7 +1370,7 @@ export class DashboardService {
       id,
     );
     if (!result.discarded) {
-      throw new BadRequestException('Proposta ja decidida — nao ha mais o que recusar.');
+      throw new BadRequestException('Proposta já decidida — não há mais o que recusar.');
     }
     await this.notifySubstitutionDiscarded(actor, id, result.userId);
     return { id, discarded: true };
@@ -1415,7 +1418,7 @@ export class DashboardService {
         .where(eq(handoffAlerts.id, id))
         .for('update')
         .limit(1);
-      if (!row) throw new NotFoundException('Handoff nao encontrado.');
+      if (!row) throw new NotFoundException('Alerta de atendimento não encontrado.');
       if (row.status === 'RESOLVED') return { id, status: 'RESOLVED' as const, changed: false };
       await tx.update(handoffAlerts).set({ status: 'RESOLVED' }).where(eq(handoffAlerts.id, id));
       await this.audit.append(tx, {
@@ -1613,7 +1616,7 @@ export class DashboardService {
         )
         .orderBy(desc(anamnesisSessions.submittedAt))
         .limit(1);
-      if (!found) throw new NotFoundException('Anamnese do titular nao encontrada.');
+      if (!found) throw new NotFoundException('Anamnese do aluno não encontrada.');
       await this.auditRead(tx, actor, protocol.userId, 'anamnesis_session', found.id);
       return { userId: protocol.userId, session: found };
     });
@@ -1659,7 +1662,7 @@ export class DashboardService {
         .from(handoffAlerts)
         .where(and(eq(handoffAlerts.id, alertId), eq(handoffAlerts.sourceType, 'CHECKIN')))
         .limit(1);
-      if (!alert?.checkinId) throw new NotFoundException('Check-in nao encontrado.');
+      if (!alert?.checkinId) throw new NotFoundException('Check-in não encontrado.');
       const [checkin] = await tx
         .select({
           answers: checkins.answers,
@@ -1670,7 +1673,7 @@ export class DashboardService {
         .from(checkins)
         .where(eq(checkins.id, alert.checkinId))
         .limit(1);
-      if (!checkin) throw new NotFoundException('Check-in nao encontrado.');
+      if (!checkin) throw new NotFoundException('Check-in não encontrado.');
       await this.auditRead(tx, actor, alert.userId, 'checkin', alert.checkinId);
       return { ...alert, ...checkin };
     });
@@ -1715,7 +1718,7 @@ export class DashboardService {
         .from(handoffAlerts)
         .where(eq(handoffAlerts.id, id))
         .limit(1);
-      if (!alert) throw new NotFoundException('Handoff nao encontrado.');
+      if (!alert) throw new NotFoundException('Alerta de atendimento não encontrado.');
       const [owner] = await tx
         .select({ name: users.name })
         .from(users)
@@ -2021,7 +2024,7 @@ export class DashboardService {
   private async requireProtocol(tx: TenantTransaction, id: string, forUpdate = false) {
     const query = tx.select().from(protocols).where(eq(protocols.id, id));
     const [row] = forUpdate ? await query.for('update').limit(1) : await query.limit(1);
-    if (!row) throw new NotFoundException('Protocolo nao encontrado.');
+    if (!row) throw new NotFoundException('Protocolo não encontrado.');
     return row;
   }
 
@@ -2039,7 +2042,7 @@ export class DashboardService {
       .limit(1);
     if (!professional?.crefActive || !professional.crefNumber || !professional.crefRegion) {
       throw new BadRequestException(
-        'Credencial CREF ativa e verificada e obrigatoria para assinar.',
+        'Para assinar, é preciso ter uma credencial CREF ativa e verificada.',
       );
     }
   }
@@ -2189,14 +2192,21 @@ export class DashboardService {
    */
   private assertStaffWrite(actor: AuthenticatedUser): void {
     if (actor.role !== 'PROFESSIONAL' && actor.role !== 'ADMIN') {
-      throw new ForbiddenException('Acesso exclusivo ao profissional CREF atribuido.');
+      throw new ForbiddenException('Acesso exclusivo ao profissional CREF atribuído.');
     }
   }
 
   private parse<T>(schema: z.ZodType<T>, input: unknown): T {
     const result = strictSafeParse(schema, input);
-    if (!result.success)
-      throw new BadRequestException({ code: 'INVALID_INPUT', issues: result.error.issues });
+    if (!result.success) {
+      // Mensagens em PT-BR que dizem onde corrigir (treino › exercício › campo): o texto cru do
+      // Zod ("Too small: expected number to be >=1") chegava ao profissional na tela.
+      throw new BadRequestException({
+        code: 'INVALID_INPUT',
+        message: 'Revise os campos indicados e tente novamente.',
+        issues: friendlyIssueMessages(result.error.issues, input).map((message) => ({ message })),
+      });
+    }
     return result.data;
   }
 

@@ -3,11 +3,14 @@
 import {
   ADVANCED_TECHNIQUE_LABELS,
   LOAD_STRATEGY_LABELS,
+  friendlyIssueMessage,
+  friendlyIssueMessages,
   PARQ_QUESTION_IDS,
   PARQ_RISK_FACTOR_LABEL,
   PRIMARY_GOAL_LABELS,
   protocolStructureSchema,
   type AdvancedTechnique,
+  type FriendlyIssueInput,
   type ProtocolExercise,
   type ProtocolStructure,
   type Weekday,
@@ -344,7 +347,13 @@ function preventSummaryToggleKeys(
 
 function issueText(entry: unknown): string {
   if (typeof entry === 'object' && entry !== null) {
-    const { detail, message } = entry as { detail?: unknown; message?: unknown };
+    const { detail, message, code } = entry as {
+      detail?: unknown;
+      message?: unknown;
+      code?: unknown;
+    };
+    // Issue crua do Zod (formato antigo da API): traduz em vez de mostrar o texto em inglês.
+    if (typeof code === 'string') return friendlyIssueMessage(entry as FriendlyIssueInput);
     if (typeof detail === 'string') return detail;
     if (typeof message === 'string') return message;
   }
@@ -1265,7 +1274,7 @@ function ProtocolSummary({
       : draft;
     const parsed = protocolStructureSchema.safeParse(candidate);
     if (!parsed.success) {
-      setIssues(parsed.error.issues.map((issue) => issue.message).slice(0, 6));
+      setIssues(friendlyIssueMessages(parsed.error.issues, candidate));
       return;
     }
     const weeklySessions = fixedDays ? parsed.data.sessions.length : parsed.data.weeklyFrequency;

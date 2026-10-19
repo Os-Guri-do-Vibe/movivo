@@ -525,7 +525,7 @@ describe('DashboardService invariantes de mutacao', () => {
       (substitutionRepo.findById as ReturnType<typeof vi.fn>).mockResolvedValue(null);
       await expect(
         service.setReviewHold(actor, 'SUBSTITUTION', RESOURCE_ID, { active: true }),
-      ).rejects.toThrow(/nao encontrada/i);
+      ).rejects.toThrow(/não encontrada/i);
       expect(reviewHold.hold).not.toHaveBeenCalled();
     });
 
@@ -548,7 +548,7 @@ describe('DashboardService invariantes de mutacao', () => {
       const { service, reviewHold } = makeSequencedService([[]]);
       await expect(
         service.setReviewHold(actor, 'PROTOCOL', RESOURCE_ID, { active: true }),
-      ).rejects.toThrow(/nao encontrado/i);
+      ).rejects.toThrow(/não encontrado/i);
       for (const body of [{}, { active: 'sim' }, { active: true, extra: 1 }]) {
         await expect(service.setReviewHold(actor, 'PROTOCOL', RESOURCE_ID, body)).rejects.toThrow();
       }
@@ -704,7 +704,7 @@ describe('DashboardService invariantes de mutacao', () => {
         notes: 'registro valido',
         confirmation: true,
       }),
-    ).rejects.toThrow('Handoff nao encontrado.');
+    ).rejects.toThrow('Alerta de atendimento não encontrado.');
   });
 
   // Achado 2026-09-02 — fluxo de substituição de exercício via IA: aprovação/recusa manual
@@ -1606,14 +1606,14 @@ describe('DashboardService leituras operacionais', () => {
   it('anamnesisAnswers: protocolo inexistente lanca 404, sem consultar anamnese', async () => {
     const { service } = makeSequencedService([[]]);
     await expect(service.anamnesisAnswers(actor, RESOURCE_ID)).rejects.toThrow(
-      'Protocolo nao encontrado.',
+      'Protocolo não encontrado.',
     );
   });
 
   it('anamnesisAnswers: protocolo existe mas sem sessao de anamnese submetida lanca 404', async () => {
     const { service } = makeSequencedService([[pendingProtocol], []]);
     await expect(service.anamnesisAnswers(actor, RESOURCE_ID)).rejects.toThrow(
-      'Anamnese do titular nao encontrada.',
+      'Anamnese do aluno não encontrada.',
     );
   });
 
@@ -1823,7 +1823,7 @@ describe('DashboardService leituras operacionais', () => {
       BadRequestException,
     );
     await expect(service.detail(actor, 'PROTOCOL', RESOURCE_ID)).rejects.toThrow(
-      'Protocolo nao encontrado.',
+      'Protocolo não encontrado.',
     );
   });
 });
@@ -2061,6 +2061,31 @@ describe('DashboardService — prescrição manual do profissional', () => {
     );
     expect(response.code).toBe('PROTOCOL_INTEGRITY_VIOLATION');
     expect(updateSet).not.toHaveBeenCalled();
+  });
+
+  it('corpo inválido da emenda devolve mensagens em PT-BR que apontam treino, exercício e campo', async () => {
+    const { service } = makeSequencedService([], realValidation());
+    const zeroSets = {
+      ...content,
+      sessions: [
+        {
+          ...content.sessions[0],
+          exercises: [{ ...content.sessions[0].exercises[0], sets: 0 }],
+        },
+      ],
+    };
+    const response = await rejection(
+      service.amendActiveProtocol(actor, RESOURCE_ID, {
+        content: zeroSets,
+        expectedVersion: 2,
+        reason: 'Ajuste',
+        confirmation: true,
+      }),
+    );
+    expect(response.code).toBe('INVALID_INPUT');
+    expect(response.issues).toEqual([
+      { message: 'Treino "Dia 1" › Exercício "Agachamento" › Séries: o valor mínimo é 1.' },
+    ]);
   });
 
   it('quem não é profissional nem admin não usa o fluxo de edição profissional', async () => {

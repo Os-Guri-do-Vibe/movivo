@@ -1,6 +1,11 @@
 import 'server-only';
 
-import { mfaChallengeResponseSchema, type MfaStep } from '@movivo/shared';
+import {
+  friendlyIssueMessages,
+  mfaChallengeResponseSchema,
+  type FriendlyIssueInput,
+  type MfaStep,
+} from '@movivo/shared';
 import { cookies, headers } from 'next/headers';
 import QRCode from 'qrcode';
 import { NextResponse, type NextRequest } from 'next/server';
@@ -466,6 +471,26 @@ export async function forwardBackendJson(response: Response): Promise<NextRespon
     status: response.status,
     headers: DASHBOARD_PRIVATE_HEADERS,
   });
+}
+
+/**
+ * 400 de validação com mensagens em PT-BR que apontam o campo (treino › exercício › campo).
+ * `input` é o corpo/conteúdo validado: dele saem os nomes reais no lugar dos índices.
+ */
+export function validationErrorResponse(
+  summary: string,
+  issues: readonly FriendlyIssueInput[],
+  input?: unknown,
+): NextResponse {
+  return NextResponse.json(
+    {
+      error: 'request_failed_400',
+      message: summary,
+      code: 'INVALID_INPUT',
+      issues: friendlyIssueMessages(issues, input).map((message) => ({ message })),
+    },
+    { status: 400, headers: DASHBOARD_PRIVATE_HEADERS },
+  );
 }
 
 export function errorResponse(error: unknown): NextResponse {

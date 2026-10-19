@@ -11,6 +11,7 @@ import {
   BffError,
   errorResponse,
   forwardBackendJson,
+  validationErrorResponse,
 } from '../../../../../_lib/bff';
 
 // Mesma definição de índice de item usada nas decisões de aprovação.
@@ -37,7 +38,9 @@ export async function POST(
 
     const body = await request.json().catch(() => null);
     const parsed = publishExerciseCatalogEntrySchema.safeParse(body);
-    if (!parsed.success) throw new BffError(400, 'Revise os campos do exercício.');
+    if (!parsed.success) {
+      return validationErrorResponse('Revise os campos do exercício.', parsed.error.issues, body);
+    }
 
     const response = await authenticatedBackendFetch(
       `/professional/dashboard/substitutions/${id}/items/${parsedIndex.data}/catalog-exercise`,

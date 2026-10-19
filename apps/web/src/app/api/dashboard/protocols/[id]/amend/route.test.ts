@@ -7,6 +7,7 @@ const bff = vi.hoisted(() => ({
   authenticatedBackendFetch: vi.fn(),
   errorResponse: vi.fn((error: unknown) => new Response(String(error), { status: 400 })),
   forwardBackendJson: vi.fn(),
+  validationErrorResponse: vi.fn(),
   BffError: class BffError extends Error {
     constructor(
       readonly status: number,
@@ -74,6 +75,10 @@ describe('POST /api/dashboard/protocols/[id]/amend', () => {
   ])('recusa corpo inválido sem chamar o backend', async (invalidBody) => {
     await call(invalidBody);
     expect(bff.authenticatedBackendFetch).not.toHaveBeenCalled();
-    expect(bff.errorResponse).toHaveBeenCalledWith(expect.any(bff.BffError));
+    expect(bff.validationErrorResponse).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Array),
+      invalidBody,
+    );
   });
 });

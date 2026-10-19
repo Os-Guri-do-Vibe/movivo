@@ -1555,6 +1555,26 @@ describe('QueueDetail — prescrição manual do profissional', () => {
     );
   });
 
+  it('campo numérico apagado na edição mostra mensagem em PT-BR dizendo qual campo corrigir', async () => {
+    api.getQueueDetail.mockResolvedValue(
+      withProtocol({
+        status: 'ACTIVE',
+        approvalStatus: 'HUMAN_APPROVED',
+        signedAt: '2026-10-12T12:00:00.000Z',
+        signatureHash: 'a'.repeat(64),
+      }),
+    );
+    render(<QueueDetail kind="PROTOCOL" id={PROTOCOL_ID} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar Protocolo' }));
+    await userEvent.clear(screen.getByLabelText('Séries válidas'));
+    await userEvent.click(screen.getByRole('button', { name: 'Salvar e publicar atualização' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/Séries: o valor mínimo é 1\./);
+    expect(alert).not.toHaveTextContent(/too small|expected/i);
+    expect(api.amendActiveProtocol).not.toHaveBeenCalled();
+  });
+
   it('sessões com dia fixo: frequência acompanha o número de sessões e nunca passa da disponibilidade', async () => {
     const session = base.content.sessions[0];
     if (!session) throw new Error('fixture');
