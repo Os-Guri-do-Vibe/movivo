@@ -397,15 +397,31 @@ describe('buildCorrectionMessage — cada regra traz localização e o que cumpr
     );
   });
 
-  it('ISOLATION_AS_BASE: aponta a sessão e a proporção de isolados', () => {
+  it('ISOLATION_AS_BASE: aponta a sessão, a proporção e substituições seguras concretas', () => {
     const msg = realMessage(
       structure(
-        [ex('rosca_direta_barra'), ex('crucifixo_reto_halter')],
+        [
+          ex('rosca_direta_barra'),
+          ex('crucifixo_reto_halter'),
+          ex('rosca_direta_barra'),
+          ex('crucifixo_reto_halter'),
+          ex('rosca_direta_barra'),
+        ],
         [ex('supino_reto_halter')],
       ),
     );
-    expect(lineOf(msg, 'ISOLATION_AS_BASE')).toContain('sessions[0] (MON) (2 de 2 são ISOLATION)');
-    expect(lineOf(msg, 'ISOLATION_AS_BASE')).toContain('no máximo 70%');
+    const line = lineOf(msg, 'ISOLATION_AS_BASE');
+    expect(line).toContain('sessions[0] (MON) (5 de 5 são ISOLATION)');
+    expect(line).toContain('substitua pelo menos 2 isolado(s)');
+    expect(line).toContain('não apenas acrescente exercícios');
+    expect(line).toContain('Isolados a substituir: rosca_direta_barra, crucifixo_reto_halter');
+    expect(line).toContain('no máximo 70%');
+    const options = optionsIn(line);
+    expect(options.length).toBeGreaterThan(0);
+    for (const id of options) {
+      expect(referenceBaseIds).toContain(id);
+      expect(catalog.getById(id)?.pattern).not.toBe('ISOLATION');
+    }
   });
 
   it('ISOLATION_AS_BASE sem sessão localizável → texto genérico', () => {
@@ -413,6 +429,21 @@ describe('buildCorrectionMessage — cada regra traz localização e o que cumpr
       'ISOLATION_AS_BASE',
     ]);
     expect(msg).toContain('sessão com isolados em excesso');
+  });
+
+  it('ISOLATION_AS_BASE sem opção não-isolada na base: pede substituição sem inventar id', () => {
+    const msg = direct(
+      structure(
+        [ex('rosca_direta_barra'), ex('crucifixo_reto_halter')],
+        [ex('supino_reto_halter')],
+      ),
+      ['ISOLATION_AS_BASE'],
+      {},
+      [],
+    );
+    const line = lineOf(msg, 'ISOLATION_AS_BASE');
+    expect(line).toContain('substitua pelo menos 1 isolado(s)');
+    expect(line).not.toContain('Opções válidas:');
   });
 
   it('não emite instrução de ADAPTACAO por teto legado', () => {
