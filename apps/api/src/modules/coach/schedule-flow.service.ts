@@ -284,7 +284,7 @@ export class ScheduleFlowService {
           now,
         );
       case 'REORGANIZAR':
-        if (parsed.placements.length === 0) return this.notUnderstood(input.userId, state);
+        if (parsed.placements.length === 0) return this.unclear(input, state, parsed.action);
         return this.adjust(
           input,
           ctx,
@@ -295,7 +295,7 @@ export class ScheduleFlowService {
         );
       case 'ESCOLHA':
         if (!state?.leaveOut || parsed.leaveOut.length === 0) {
-          return this.notUnderstood(input.userId, state);
+          return this.unclear(input, state, parsed.action);
         }
         return this.adjust(
           input,
@@ -306,8 +306,28 @@ export class ScheduleFlowService {
           now,
         );
       default:
-        return this.notUnderstood(input.userId, state);
+        return this.unclear(input, state, parsed.action);
     }
+  }
+
+  /**
+   * A mensagem não virou um pedido de agenda que o serviço saiba executar. Com uma pergunta do
+   * fluxo em aberto, o aluno está respondendo a ela e a repergunta faz sentido. Sem fluxo aberto,
+   * a intenção (classificada com confiança fixa) pode estar errada, por exemplo um pedido de
+   * informação sobre o treino: o serviço se abstém e a resposta segue o caminho normal da IA, em
+   * vez de devolver "com qual dia você quer mexer?" a quem não pediu para mexer em nada.
+   */
+  private async unclear(
+    input: ScheduleFlowInput,
+    state: FlowState | null,
+    action: string,
+  ): Promise<ScheduleFlowOutcome> {
+    if (state) return this.notUnderstood(input.userId, state);
+    this.logger.info(
+      { event: 'schedule_flow_abstained', userId: input.userId, action, intent: input.intent },
+      'nenhum pedido de agenda executável na mensagem; segue para a resposta da IA',
+    );
+    return { kind: 'NOT_HANDLED' };
   }
 
   // --- ajuste ---------------------------------------------------------------------------------

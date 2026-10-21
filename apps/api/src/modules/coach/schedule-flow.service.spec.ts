@@ -386,12 +386,12 @@ describe('limites físicos', () => {
     expect(text(await service.handle(input()))).toContain('eu só consigo colocar um por dia');
   });
 
-  it('reorganizar sem dizer onde fica nada pede esclarecimento', async () => {
+  it('reorganizar sem dizer onde fica nada: se abstém e deixa a IA responder', async () => {
     const { service, input } = make({
       ctx: context(JOAO, TUE),
       parsed: parsed({ action: 'REORGANIZAR' }),
     });
-    expect(text(await service.handle(input()))).toContain('Me conta com qual dia');
+    expect(await service.handle(input())).toEqual({ kind: 'NOT_HANDLED' });
   });
 
   it('dor aberta, atendimento pausado e quantidade de ajustes não bloqueiam: nenhuma dessas consultas existe', async () => {
@@ -475,12 +475,26 @@ describe('sem protocolo ativo e intenções alheias', () => {
     expect(parse).not.toHaveBeenCalled();
   });
 
-  it('a IA devolveu OUTRO numa intenção de agenda: pede para o aluno dizer o dia', async () => {
+  /**
+   * Regressão (Giovana, 21/10): "você consegue me lembrar disso na semana que vem? Antes do
+   * treino? Quais foram as cargas?" foi classificado como agenda e respondido com "Me conta com
+   * qual dia você quer mexer?". Sem pedido de agenda executável e sem pergunta em aberto, o
+   * serviço se abstém e a resposta segue para a IA.
+   */
+  it('a IA devolveu OUTRO numa intenção de agenda sem fluxo aberto: se abstém', async () => {
     const { service, input } = make({
       ctx: context(GABRIEL, TUE),
       parsed: parsed({ action: 'OUTRO' }),
     });
-    expect(text(await service.handle(input()))).toContain('Me conta com qual dia');
+    expect(await service.handle(input())).toEqual({ kind: 'NOT_HANDLED' });
+  });
+
+  it('escolha de treino sem pergunta de "qual fica de fora" aberta: se abstém', async () => {
+    const { service, input } = make({
+      ctx: context(GABRIEL, TUE),
+      parsed: parsed({ action: 'ESCOLHA', leaveOut: [{ sessionKey: 'T2' }] }),
+    });
+    expect(await service.handle(input())).toEqual({ kind: 'NOT_HANDLED' });
   });
 });
 
