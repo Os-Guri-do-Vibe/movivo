@@ -42,10 +42,7 @@ import { eq } from 'drizzle-orm';
 import { PinoLogger } from 'nestjs-pino';
 import {
   anamnesisStructuredSchema,
-  ParqState,
-  SESSION_DURATION_MINUTES,
   toGenerationGoal,
-  type AnamnesisStructured,
   type GenerationGoal,
   type Weekday,
 } from '@movivo/shared';
@@ -60,21 +57,17 @@ import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { enqueueStaffQueueAlert } from '../jobs/staff-queue-alert';
 import { WorkerFactory } from '../jobs/worker.factory';
+import {
+  constraintsFromAnamnesis,
+  loadGenerationContext,
+  type LoadedContext,
+} from './generation-context';
 import { ProtocolGeneratorService } from './protocol-generator.service';
 import { planProtocol, type PlanResult } from './protocol-planner';
 import { ProtocolRepository } from './protocol.repository';
-import { healthBlockSchema, type HealthBlock } from '../anamnesis/health-block';
-import { evaluateParq, type ParqEvaluation } from '../anamnesis/parq';
-import {
-  emphasisToMuscleGroups,
-  importantEventForPrompt,
-  levelFromExperience,
-  mapInjuriesToTags,
-  painToConstraints,
-  routineContextForPrompt,
-  parqToConstraints,
-  type UserConstraints,
-} from './user-constraints';
+import { healthBlockSchema } from '../anamnesis/health-block';
+import { evaluateParq } from '../anamnesis/parq';
+import { parqToConstraints, type UserConstraints } from './user-constraints';
 import { buildFallbackProtocol, FALLBACK_TEMPLATE_VERSION } from './validation/fallback-template';
 import { ValidationService } from './validation/validation.service';
 
@@ -308,102 +301,13 @@ export class ProtocolGenerationWorker implements OnModuleInit {
 
   // --- carregamento sob RLS -------------------------------------------------
 
-  private async load(userId: string, sessionId: string): Promise<LoadedContext | null> {
-    return this.db.runAsUser(userId, 'USER', async (tx) => {
-      const [user] = await tx.select().from(users).where(eq(users.id, userId)).limit(1);
-      if (!user) return null;
-      const [session] = await tx
-        .select()
-        .from(anamnesisSessions)
-        .where(eq(anamnesisSessions.id, sessionId))
-        .limit(1);
-      if (!session || !session.dataBlock2 || !session.dataBlock3) return null;
-
-      const health = healthBlockSchema.parse(
-        JSON.parse(await this.cipher.decryptHealth(session.dataBlock2)),
-      );
-      const structured = anamnesisStructuredSchema.parse(session.dataBlock3);
-
-      return {
-        requiresProfessionalReview: user.requiresProfessionalReview,
-        name: user.name,
-        phoneNumber: user.phoneNumber,
-        email: user.email,
-        submittedAt: session.submittedAt,
-        structured,
-        health,
-      };
-    });
+  private load(userId: string, sessionId: string): Promise<LoadedContext | null> {
+    return loadGenerationContext(this.db, this.cipher, userId, sessionId);
   }
 
-  /**
-   * Anamnese v2 → constraints do gerador (US-6.9).
-   *
-   * É aqui que a Sprint 6 paga o que prometeu: `level` deixa de ser `INICIANTE`
-   * hardcoded e passa a vir da experiência declarada; ênfase e preferências passam a
-   * existir; a dor localizada vira contraindicação estruturada, não texto solto.
-   *
-   * **Precedência inegociável:** `avoid` é PREFERÊNCIA e só remove exercício; nada nele
-   * reabilita algo que `injuryTags` (segurança) tirou. O veto final continua sendo do
-   * `ValidationService`, que não lê `avoid`.
-   *
-   * 2026-08-24: o PAR-Q entra aqui como restrição de verdade (`parqToConstraints`) — tag
-   * de PAR-Q é mesclada em `injuryTags` para que gerador E validador a tratem com a mesma
-   * força de uma lesão, e continua visível separada em `parqTags` (o que vai pra coluna
-   * `par_q_flags`). A revisão obrigatória não altera o nível nem determina a fase.
-   */
+  /** Anamnese v2 → constraints do gerador (ver `constraintsFromAnamnesis`). */
   private toConstraints(ctx: LoadedContext): UserConstraints {
-    const { structured, health } = ctx;
-    const pain = painToConstraints(health.pain);
-    // Texto livre que é restrição de fato: orientação profissional de evitar movimento.
-    // O "exercício que não gosto" NÃO entra aqui — vai para `avoid`, que é preferência.
-    const injuriesRaw = pain.raw;
-
-    const parqAnswers = health.parq?.answers ?? [];
-    const evaluation: ParqEvaluation = health.parq
-      ? evaluateParq({ parq: health.parq })
-      : {
-          parqState: ParqState.LIBERADO,
-          requiresProfessionalReview: false,
-          triggeredQuestions: [],
-        };
-    const parq = parqToConstraints(evaluation, parqAnswers);
-    // O booleano autoritativo é o do titular (`users.requires_professional_review`, escrito
-    // no submit e zerado na liberação humana); a avaliação local só deriva as TAGS.
-    const requiresProfessionalReview = ctx.requiresProfessionalReview;
-    const level = levelFromExperience(structured.experience);
-
-    return {
-      requiresProfessionalReview,
-      parqTags: parq.tags,
-      parqTriggered: evaluation.triggeredQuestions,
-      // "Outro" nunca chega ao gerador: `toGenerationGoal` o traduz para o objetivo
-      // genérico seguro; o texto bruto do usuário fica na anamnese, para o painel CREF.
-      goal: toGenerationGoal(structured.primaryGoal),
-      level,
-      trainingStatus: structured.trainingStatus,
-      ...(structured.stoppedFor ? { stoppedFor: structured.stoppedFor } : {}),
-      daysPerWeek: structured.daysPerWeek,
-      preferredDays: structured.preferredDays,
-      sessionMinutes: SESSION_DURATION_MINUTES[structured.sessionDuration],
-      location: structured.location,
-      // A anamnese v2 não pergunta equipamento item a item — o LOCAL já determina o que
-      // existe, e o catálogo filtra por local. Perguntar de novo seria pedir ao usuário
-      // uma informação que ele frequentemente não sabe responder.
-      equipment: [],
-      emphasis: emphasisToMuscleGroups(structured.emphasis),
-      avoid: health.freeText?.avoidedExercise ? [health.freeText.avoidedExercise] : [],
-      // Tag de PAR-Q entra em `injuryTags` de propósito: é assim que o gerador (prompt) e
-      // o validador (`checkStructure`) já excluem exercício contraindicado. Sem a mescla,
-      // "CARDIAC vindo do PAR-Q" só existiria como etiqueta, sem vetar exercício nenhum.
-      injuryTags: [...new Set([...pain.tags, ...mapInjuriesToTags(injuriesRaw), ...parq.tags])],
-      injuriesRaw,
-      routineContext: routineContextForPrompt(structured, health.freeText),
-      importantEvent: importantEventForPrompt(
-        structured,
-        health.freeText?.importantEventDescription,
-      ),
-    };
+    return constraintsFromAnamnesis(ctx);
   }
 
   /** TASK-2.4.4 — fallback de DLQ: template conservador persistido como pendente de revisão. */
@@ -553,16 +457,4 @@ export class ProtocolGenerationWorker implements OnModuleInit {
       return [];
     }
   }
-}
-
-interface LoadedContext {
-  requiresProfessionalReview: boolean;
-  name: string | null;
-  phoneNumber: string;
-  email: string | null;
-  submittedAt: Date | null;
-  /** Etapa 2, seções 1/2/3/5 (jsonb em claro). */
-  structured: AnamnesisStructured;
-  /** Bloco cifrado: seção 4, textos livres, PAR-Q e declarações. */
-  health: HealthBlock;
 }
