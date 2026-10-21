@@ -356,6 +356,17 @@ export class ScheduleFlowService {
         return this.askWhichToLeaveOut(input.userId, ctx, nameOf, request, plan, state);
       }
       await this.abandon(input.userId);
+      // Sem isto a recusa era invisível nos logs (o `ai_jobs` guarda só hashes).
+      this.logger.info(
+        {
+          event: 'schedule_flow_refused',
+          userId: input.userId,
+          source: 'PLANNER',
+          reason: plan.reason,
+          kind: request.kind,
+        },
+        'pedido de agenda recusado pelo planejador',
+      );
       return {
         kind: 'FIXED',
         text: scheduleRefusalMessage({
@@ -515,6 +526,16 @@ export class ScheduleFlowService {
     invalidDate: string,
   ): Promise<ScheduleFlowOutcome> {
     await this.abandon(userId);
+    this.logger.info(
+      {
+        event: 'schedule_flow_refused',
+        userId,
+        source: 'PARSER',
+        reason: invalidDate < ctx.today ? 'PAST_DATE' : 'OUT_OF_WEEK',
+        action,
+      },
+      'pedido de agenda recusado: dia fora do que a regra aceita',
+    );
     const text =
       action === 'REGISTRAR'
         ? lateLogOutOfWindowMessage(LATE_LOG_WINDOW_DAYS)

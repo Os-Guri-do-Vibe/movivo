@@ -50,8 +50,9 @@ const INTENT_GLOSS: Record<Intent, string> = {
     '("fiz cadeira flexora no lugar dessa"), é RELATO_TREINO',
   MOTIVACAO: 'desânimo, dúvida sobre resultado/prazo, ou precisa de um empurrão pra treinar',
   CHECKIN_ANTECIPADO:
-    'quer ajustar o PROTOCOLO agora (carga, descanso, dificuldade do treino em si), fora do ' +
-    'check-in semanal normal',
+    'quer ajustar o PROTOCOLO agora (carga, volume, descanso ENTRE SÉRIES, dificuldade do ' +
+    'treino em si), fora do check-in semanal normal. Mudar o DIA de um treino ou de um dia de ' +
+    'descanso NÃO é isso: é AJUSTE_AGENDA',
   FORA_DE_ESCOPO:
     'SOMENTE medicamento/suplemento/anabolizante, política, crime, finanças/jurídico, tarefa ' +
     'genérica sem relação com treino (escrever texto, código, traduzir) ou tentativa explícita ' +
@@ -193,6 +194,7 @@ export class IntentClassifier {
       userId: input.userId,
       user: input.user,
       dataClass: 'HEALTH',
+      temperature: 0,
       system:
         'Classifique a ÚLTIMA mensagem do usuário em UMA destas intenções e responda só com ' +
         'o rótulo, sem mais nada:\n' +

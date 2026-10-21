@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { LlmRouter } from '../ai-coach/llm/llm-router.service';
+import { scrubPII } from '../ai-coach/llm/pii-scrubber';
 import {
   quickScheduleAction,
   ScheduleRequestParserService,
@@ -17,6 +18,8 @@ const WEEK = [
   '2026-10-25',
 ];
 
+const WEEKDAY_NAMES = ['segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado', 'domingo'];
+
 function request(overrides: Partial<ParseScheduleRequest> = {}): ParseScheduleRequest {
   return {
     userId: 'u1',
@@ -24,9 +27,9 @@ function request(overrides: Partial<ParseScheduleRequest> = {}): ParseScheduleRe
     user: {} as never,
     message: 'amanhã quero descansar',
     today: '2026-10-20',
-    week: WEEK.map((date) => ({
+    week: WEEK.map((date, index) => ({
       date,
-      weekday: 'dia',
+      weekday: WEEKDAY_NAMES[index] as string,
       sessionKey: null,
       situation: 'descanso' as const,
     })),
@@ -46,7 +49,7 @@ function make(llmText: string | Error) {
   });
   const service = new ScheduleRequestParserService(
     { complete } as unknown as LlmRouter,
-    { setContext: vi.fn(), warn: vi.fn() } as never,
+    { setContext: vi.fn(), warn: vi.fn(), info: vi.fn() } as never,
   );
   return { service, complete };
 }
@@ -82,7 +85,7 @@ describe('ScheduleRequestParserService.parse', () => {
     const { service, complete } = make(
       JSON.stringify({
         action: 'TREINAR',
-        date: '2026-10-20',
+        date: 'HOJE',
         sessionKey: 'A',
         leaveOut: [],
         placements: [],
@@ -105,7 +108,7 @@ describe('ScheduleRequestParserService.parse', () => {
   });
 
   it('aceita JSON dentro de cerca de código', async () => {
-    const { service } = make('```json\n{"action":"DESCANSAR","date":"2026-10-21"}\n```');
+    const { service } = make('```json\n{"action":"DESCANSAR","date":"AMANHA"}\n```');
     expect((await service.parse(request())).date).toBe('2026-10-21');
   });
 
@@ -113,24 +116,24 @@ describe('ScheduleRequestParserService.parse', () => {
     const { service } = make(
       JSON.stringify({
         action: 'REORGANIZAR',
-        date: '2026-11-30',
+        date: 'FORA_DA_SEMANA',
         sessionKey: 'Z',
         leaveOut: [
-          { date: '2027-01-01', sessionKey: 'Z' },
-          { date: '2026-10-24', sessionKey: null },
+          { date: 'FORA_DA_SEMANA', sessionKey: 'Z' },
+          { date: 'SAB', sessionKey: null },
         ],
         placements: [
-          { sessionKey: 'A', date: '2026-10-22' },
+          { sessionKey: 'A', date: 'QUI' },
           { sessionKey: 'B', date: null },
-          { sessionKey: 'Z', date: '2026-10-23' },
-          { sessionKey: 'A', date: '2030-01-01' },
+          { sessionKey: 'Z', date: 'SEX' },
+          { sessionKey: 'A', date: 'FORA_DA_SEMANA' },
         ],
       }),
     );
     const parsed = await service.parse(request());
     expect(parsed.date).toBeNull();
     // A data pedida fora da semana é guardada à parte: o fluxo a recusa em vez de assumir "hoje".
-    expect(parsed.invalidDate).toBe('2026-11-30');
+    expect(parsed.invalidDate).toBe('2026-10-26');
     expect(parsed.sessionKey).toBeNull();
     expect(parsed.leaveOut).toEqual([{ date: '2026-10-24' }]);
     expect(parsed.placements).toEqual([
@@ -139,44 +142,97 @@ describe('ScheduleRequestParserService.parse', () => {
     ]);
   });
 
+  it('hoje, amanhã, ontem e o dia da semana viram a data certa; a sigla e o nome por extenso valem', async () => {
+    const day = async (value: string) =>
+      (
+        await make(JSON.stringify({ action: 'TREINAR', date: value })).service.parse(
+          request({
+            recentDays: [
+              { date: '2026-10-19', weekday: 'segunda' },
+              { date: '2026-10-18', weekday: 'domingo' },
+            ],
+          }),
+        )
+      ).date;
+    expect(await day('HOJE')).toBe('2026-10-20');
+    expect(await day('amanha')).toBe('2026-10-21');
+    expect(await day('SEX')).toBe('2026-10-23');
+    expect(await day('Sexta')).toBe('2026-10-23');
+    expect(await day('sábado')).toBe('2026-10-24');
+    expect(await day('ONTEM')).toBe('2026-10-19');
+    expect(await day('ANTEONTEM')).toBe('2026-10-18');
+  });
+
+  it('"amanhã" que cai na semana seguinte (hoje é domingo) é recusado como fora da semana', async () => {
+    const { service } = make(JSON.stringify({ action: 'TREINAR', date: 'AMANHA' }));
+    const parsed = await service.parse(request({ today: '2026-10-25' }));
+    expect(parsed.date).toBeNull();
+    expect(parsed.invalidDate).toBe('2026-10-26');
+  });
+
   it('"não disse a data" (null) e "pediu uma data que a regra recusa" são coisas diferentes', async () => {
     const without = make(JSON.stringify({ action: 'TREINAR', date: null, sessionKey: 'A' }));
     expect((await without.service.parse(request())).invalidDate).toBeNull();
 
     const nextWeek = make(
-      JSON.stringify({ action: 'TREINAR', date: '2026-10-29', sessionKey: 'A' }),
+      JSON.stringify({ action: 'TREINAR', date: 'FORA_DA_SEMANA', sessionKey: 'A' }),
     );
     const parsed = await nextWeek.service.parse(request());
     expect(parsed.date).toBeNull();
-    expect(parsed.invalidDate).toBe('2026-10-29');
+    expect(parsed.invalidDate).toBe('2026-10-26');
   });
 
   it('colocação com data fora da semana também marca o pedido como inválido (não some em silêncio)', async () => {
     const { service } = make(
       JSON.stringify({
         action: 'REORGANIZAR',
-        placements: [{ sessionKey: 'A', date: '2026-10-30' }],
+        placements: [{ sessionKey: 'A', date: 'FORA_DA_SEMANA' }],
       }),
     );
     const parsed = await service.parse(request());
     expect(parsed.placements).toEqual([]);
-    expect(parsed.invalidDate).toBe('2026-10-30');
+    expect(parsed.invalidDate).toBe('2026-10-26');
   });
 
-  it('data mal formada (não é AAAA-MM-DD) é só ignorada, sem recusar o pedido', async () => {
+  it('referência desconhecida é só ignorada, sem recusar o pedido', async () => {
     const { service } = make(
-      JSON.stringify({ action: 'TREINAR', date: 'quinta', sessionKey: 'A' }),
+      JSON.stringify({ action: 'TREINAR', date: 'depois de amanhã', sessionKey: 'A' }),
     );
     const parsed = await service.parse(request());
     expect(parsed.date).toBeNull();
     expect(parsed.invalidDate).toBeNull();
   });
 
-  it('o prompt manda devolver a data real mesmo fora da semana (quem recusa é o servidor)', async () => {
+  it('o prompt manda indicar dia fora da semana por FORA_DA_SEMANA (quem recusa é o servidor)', async () => {
     const { service, complete } = make(JSON.stringify({ action: 'OUTRO' }));
     await service.parse(request());
     const call = complete.mock.calls[0]?.[0] as unknown as { system: string };
-    expect(call.system).toContain('FORA desta semana');
+    expect(call.system).toContain('FORA_DA_SEMANA');
+    expect(call.system).toContain('date NUNCA é uma data');
+  });
+
+  /**
+   * Regressão (produção, 21/10): o `LlmRouter` passa todo o conteúdo pelo scrubber, que troca
+   * `AAAA-MM-DD` por `[data]`. O parser via a semana inteira como `[data]`, inventava uma data e
+   * a recusa saía como "esse dia já passou". O que o modelo recebe, DEPOIS do scrubber real,
+   * precisa continuar dizendo qual dia é qual.
+   */
+  it('o que chega ao modelo depois do scrubber ainda identifica hoje e cada dia da semana', async () => {
+    const { service, complete } = make(JSON.stringify({ action: 'OUTRO' }));
+    await service.parse(request({ today: '2026-10-21' }));
+    const call = complete.mock.calls[0]?.[0] as unknown as {
+      messages: Array<{ content: string }>;
+    };
+    const scrubbed = scrubPII(call.messages[0]?.content ?? '', {
+      name: 'Gabriel Teste',
+      email: null,
+      phoneNumber: null,
+      birthDate: null,
+    } as never);
+    expect(scrubbed).not.toContain('[data]');
+    expect(scrubbed).toContain('"hoje":{"dia":"HOJE","weekday":"quarta"}');
+    expect(scrubbed).toContain('"dia":"SEX"');
+    expect(scrubbed).toContain('"ehHoje":true');
   });
 
   it('o texto do aluno e a pergunta em aberto viajam como dado não confiável', async () => {

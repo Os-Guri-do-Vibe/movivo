@@ -96,6 +96,16 @@ describe('recusa é o último recurso', () => {
     expect(p).toContain('Lembretes avulsos você não agenda');
   });
 
+  // Achado 2026-10-21 (produção): a IA dizia "o calendário é fixo e passa pelo check-in semanal"
+  // mesmo com a agenda flexível no ar.
+  it('o guardrail base ensina que a agenda da semana é flexível e nunca diz "calendário fixo"', () => {
+    const base = BASE_GUARDRAIL;
+    expect(base).toContain('AGENDA FLEXÍVEL');
+    expect(base).toContain('NUNCA diga que o calendário é fixo');
+    expect(base).not.toContain('dia fixo da semana');
+    expect(intentInstruction('CHECKIN_ANTECIPADO')).toContain('NÃO vale para mudar o DIA');
+  });
+
   it('CONSULTA_HISTORICO responde com os números do contexto e não inventa', () => {
     const p = intentInstruction('CONSULTA_HISTORICO');
     expect(p).toContain('números reais do contexto');
