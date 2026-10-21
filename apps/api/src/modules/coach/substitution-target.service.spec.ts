@@ -118,4 +118,34 @@ describe('SubstitutionTargetService', () => {
     const result = await service.identify(request('troca esses três'));
     expect(result).toEqual({ identified: true, exerciseIds: ['flexao', 'afundo', 'prancha'] });
   });
+
+  // Caso real do beta (2026-10-21): "fiz cadeira flexora unilateral no lugar dessa" é um RELATO,
+  // não um pedido. Antes virava um novo pedido de troca e repetia a frase pronta.
+  it('relato de troca que o aluno JÁ fez (sem pedir outra): não é alvo, vem marcado como relato', async () => {
+    const { service } = make(JSON.stringify({ exerciseIds: [], alreadyDone: true }));
+    const result = await service.identify(request('fiz a cadeira flexora no lugar dessa'));
+    expect(result).toEqual({ identified: false, tooMany: false, alreadyDone: true });
+  });
+
+  it('relato junto de um pedido novo: o pedido manda, o relato não esconde o alvo', async () => {
+    const { service } = make(JSON.stringify({ exerciseIds: ['afundo'], alreadyDone: true }));
+    const result = await service.identify(request('já troquei o leg 45, e o afundo, o que faço?'));
+    expect(result).toEqual({ identified: true, exerciseIds: ['afundo'] });
+  });
+
+  it('lista vazia sem relato continua sendo "não identificado" simples', async () => {
+    const { service } = make(JSON.stringify({ exerciseIds: [], alreadyDone: false }));
+    expect(await service.identify(request('não gosto desse treino'))).toEqual({
+      identified: false,
+      tooMany: false,
+    });
+  });
+
+  it('o prompt ensina a diferença entre relato (passado) e pedido', async () => {
+    const { service, complete } = make(JSON.stringify({ exerciseIds: [] }));
+    await service.identify(request('fiz X no lugar'));
+    const call = complete.mock.calls[0]?.[0] as { system: string };
+    expect(call.system).toContain('RELATO, não um pedido');
+    expect(call.system).toContain('"alreadyDone": true');
+  });
 });

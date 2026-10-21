@@ -14,6 +14,7 @@ import type { ActiveProtocolForSubstitution } from '../protocol/protocol-substit
 import {
   SUBSTITUTION_ALREADY_PENDING_MESSAGE,
   SUBSTITUTION_CATALOG_GAP_MESSAGE,
+  SUBSTITUTION_CAUTION_REVIEW_MESSAGE,
   SUBSTITUTION_FALLBACK_MESSAGE,
   SUBSTITUTION_FORCED_TODAY_NOTE,
   SUBSTITUTION_GAVE_UP_MESSAGE,
@@ -117,7 +118,8 @@ interface Options {
   active?: ActiveProtocolForSubstitution | null;
   hasPending?: boolean;
   identified?:
-    { identified: true; exerciseIds: string[] } | { identified: false; tooMany: boolean };
+    | { identified: true; exerciseIds: string[] }
+    | { identified: false; tooMany: boolean; alreadyDone?: boolean };
   createResult?: { created: true; id: string } | { created: false; alreadyPending: true };
   /** Estruturas com algum destes exercícios reprovam na validação do protocolo inteiro. */
   failValidationWith?: string[];
@@ -305,7 +307,7 @@ describe('SubstitutionFlowService — pergunta de alcance (só hoje x protocolo)
     const calls = h.validation.validate.mock.calls as unknown as Array<[unknown, unknown]>;
     expect(calls.length).toBeGreaterThan(0);
     for (const [, options] of calls) {
-      expect(options).toEqual({ baseline: ACTIVE.content });
+      expect(options).toMatchObject({ baseline: ACTIVE.content });
     }
   });
 
@@ -537,21 +539,30 @@ describe('SubstitutionFlowService — alvos', () => {
     const out = fixed(await h.service.handle(h.input()));
     expect(out.text).toBe(SUBSTITUTION_FALLBACK_MESSAGE);
     expect(out.humanReview).toBe(true);
+    // Motivo preciso no painel (antes saía como "sinalizado pela validação de segurança").
+    expect(out.handoffReason).toBe('SUBSTITUTION_NO_SAFE_OPTION');
     expect(await h.service.handle(h.input({ entry: 'CONTINUATION' }))).toEqual({
       kind: 'NOT_HANDLED',
     });
   });
 
-  it('alvo sem nenhum substituto seguro na base: fallback, sem LLM generativo', async () => {
+  it('alvo sem nenhuma opção na base: resposta ancorada em fatos (não a frase pronta), alerta com o motivo certo e sem gastar a leitura do turno', async () => {
     // Curadoria vazia: toda troca possível reprova na validação (o protocolo original passa).
     const h = harness({
       identified: { identified: true, exerciseIds: [DIAMANTE.id] },
       failValidationWith: DIAMANTE_OPTIONS.map((c) => c.id),
     });
-    h.read();
-    const out = fixed(await h.service.handle(h.input()));
-    expect(out.text).toBe(SUBSTITUTION_FALLBACK_MESSAGE);
+    const out = generate(await h.service.handle(h.input()));
+    expect(out.extraSystem).toContain(`"${DIAMANTE.name}"`);
+    expect(out.extraSystem).toContain('não tem nenhum exercício que possa substituí-lo');
+    expect(out.extraSystem).toContain('NÃO prometa prazo');
+    expect(out.extraSystem).toContain('NÃO diga que vai avisar');
     expect(out.humanReview).toBe(true);
+    expect(out.handoffReason).toBe('SUBSTITUTION_NO_SAFE_OPTION');
+    // Só o que já está no protocolo pode ser nomeado.
+    expect(out.allowedExercises).toContain(DIAMANTE.name);
+    expect(out.allowedExercises).not.toContain(D1.name);
+    expect(h.resolveTurn).not.toHaveBeenCalled();
     expect(h.store.has(h.stateKey)).toBe(false);
   });
 });
@@ -562,7 +573,7 @@ describe('SubstitutionFlowService — curadoria', () => {
     h.read();
     const out = generate(await h.service.handle(h.input()));
     // `flexao` está na mesma sessão que `flexao_diamante`.
-    expect(out.extraSystem).not.toContain('OPÇÕES SEGURAS DA BASE: Flexão,');
+    expect(out.extraSystem).not.toContain('OPÇÕES DA BASE: Flexão,');
     expect(out.allowedExercises.filter((name) => name === byId('flexao').name)).toHaveLength(0);
   });
 
@@ -586,7 +597,7 @@ describe('SubstitutionFlowService — curadoria', () => {
     h.read({ [DIAMANTE.id]: { chosen: byId('agachamento_goblet').id, scope: 'TODAY' } });
     const out = generate(await h.service.handle(h.input()));
     // Sem escolha válida: reoferece em vez de recomendar algo fora da curadoria.
-    expect(out.extraSystem).toContain('OPÇÕES SEGURAS DA BASE');
+    expect(out.extraSystem).toContain('OPÇÕES DA BASE');
     expect(out.suffix).toBeUndefined();
   });
 
@@ -605,16 +616,17 @@ describe('SubstitutionFlowService — curadoria', () => {
     expect(second.extraSystem).not.toContain(A1.name);
   });
 
-  it('lote rejeitado e curadoria esgotada: fallback honesto com revisão humana', async () => {
+  it('lote rejeitado e curadoria esgotada: resposta ancorada em fatos com revisão humana', async () => {
     const h = harness({ identified: { identified: true, exerciseIds: [AFUNDO.id] } });
     h.read();
     await h.service.handle(h.input());
     h.read({ [AFUNDO.id]: { rejectedOffered: true } });
     await h.service.handle(h.input({ entry: 'CONTINUATION' }));
     h.read({ [AFUNDO.id]: { rejectedOffered: true } });
-    const out = fixed(await h.service.handle(h.input({ entry: 'CONTINUATION' })));
-    expect(out.text).toBe(SUBSTITUTION_FALLBACK_MESSAGE);
+    const out = generate(await h.service.handle(h.input({ entry: 'CONTINUATION' })));
+    expect(out.extraSystem).toContain('não tem nenhum exercício que possa substituí-lo');
     expect(out.humanReview).toBe(true);
+    expect(out.handoffReason).toBe('SUBSTITUTION_NO_SAFE_OPTION');
     expect(h.store.has(h.stateKey)).toBe(false);
   });
 });
@@ -684,7 +696,7 @@ describe('SubstitutionFlowService — exercício pedido fora das opções', () =
 
     expect(out.extraSystem).toContain('grupo muscular/padrão de movimento diferente');
     expect(out.extraSystem).toContain('NÃO diga que vai registrar/confirmar');
-    expect(out.extraSystem).toContain('OPÇÕES SEGURAS DA BASE');
+    expect(out.extraSystem).toContain('OPÇÕES DA BASE');
     expect(h.repo.createPending).not.toHaveBeenCalled();
     expect(h.queueEvents.emit).not.toHaveBeenCalled();
   });
@@ -819,8 +831,8 @@ describe('SubstitutionFlowService — troca em lote', () => {
     h.read();
     const out = generate(await h.service.handle(h.input()));
 
-    expect(out.extraSystem).toContain(`"${DIAMANTE.name}": OPÇÕES SEGURAS DA BASE`);
-    expect(out.extraSystem).toContain(`"${AFUNDO.name}": OPÇÕES SEGURAS DA BASE`);
+    expect(out.extraSystem).toContain(`"${DIAMANTE.name}": OPÇÕES DA BASE`);
+    expect(out.extraSystem).toContain(`"${AFUNDO.name}": OPÇÕES DA BASE`);
     expect(out.suffix).toBe(SUBSTITUTION_SCOPE_QUESTION_MULTI);
   });
 
@@ -938,5 +950,154 @@ describe('SubstitutionFlowService — aluno indeciso', () => {
     h.resolveTurn.mockResolvedValueOnce({ ok: false });
     const out = generate(await h.service.handle(h.input()));
     expect(out.suffix).toBe(SUBSTITUTION_SCOPE_QUESTION_SINGLE);
+  });
+});
+
+// Caso real do beta (Giovana, 2026-10-21): pediu uma alternativa à flexora em pé e recebeu a frase
+// pronta "prefiro confirmar com o profissional". Decisão do fundador e do RT: quem tem restrição
+// articular recebe OPÇÕES de risco igual ou menor, com orientação de cuidado, pelo mesmo fluxo
+// (só hoje x protocolo). Cardiovascular, queda e gestação continuam sem relaxamento.
+describe('SubstitutionFlowService — opções com cautela (restrição articular)', () => {
+  const FLEXORA = byId('flexora_em_pe_maquina');
+  const LEG45 = byId('leg_press_45_maquina');
+  const CADEIRA = byId('cadeira_flexora_maquina');
+  const KNEE = {
+    level: 'INTERMEDIARIO',
+    location: 'FULL_GYM',
+    equipment: [],
+    injuryTags: ['KNEE'],
+  } as const;
+  const KNEE_ACTIVE: ActiveProtocolForSubstitution = {
+    ...ACTIVE,
+    content: {
+      ...CONTENT,
+      sessions: [
+        {
+          dayLabel: 'Dia A',
+          focus: 'Quadríceps',
+          exercises: [prescribed(FLEXORA.id), prescribed(LEG45.id)],
+        },
+      ],
+    } as unknown as ProtocolStructure,
+    constraints: KNEE,
+    validationConstraints: { goal: 'GAIN_MUSCLE', injuryTags: ['KNEE'], level: 'INTERMEDIARIO' },
+  };
+
+  it('a base não tem substituto SEGURO para quem tem joelho sensível (o motivo do caso real)', () => {
+    expect(findSafeCandidates(FLEXORA, KNEE, ALL)).toEqual([]);
+  });
+
+  it('oferece as opções com cautela, com a orientação, e pergunta o alcance (não cai na frase pronta)', async () => {
+    const h = harness({
+      active: KNEE_ACTIVE,
+      identified: { identified: true, exerciseIds: [FLEXORA.id] },
+    });
+    h.read();
+    const out = generate(await h.service.handle(h.input()));
+
+    expect(out.extraSystem).toContain('COM CAUTELA: joelho');
+    expect(out.extraSystem).toContain(CADEIRA.name);
+    expect(out.extraSystem).toContain('SEM recusar e SEM tom de alarme');
+    expect(out.extraSystem).toContain('interromper o exercício e avisar o profissional');
+    expect(out.extraSystem).toContain('NÃO faça avaliação clínica');
+    expect(out.allowedExercises).toContain(CADEIRA.name);
+    expect(out.suffix).toContain(SUBSTITUTION_SCOPE_QUESTION_SINGLE);
+    expect(out.humanReview).toBeFalsy();
+    expect(h.resolveTurn).toHaveBeenCalledOnce();
+  });
+
+  it('só hoje: recomenda com a orientação de cuidado e não persiste nada', async () => {
+    const h = harness({
+      active: KNEE_ACTIVE,
+      identified: { identified: true, exerciseIds: [FLEXORA.id] },
+    });
+    h.read({ [FLEXORA.id]: { chosen: CADEIRA.id, scope: 'TODAY' } });
+    const out = generate(await h.service.handle(h.input()));
+
+    expect(out.extraSystem).toContain(`fazer "${CADEIRA.name}"`);
+    expect(out.extraSystem).toContain('COM CAUTELA');
+    expect(out.extraSystem).toContain('joelho');
+    expect(out.extraSystem).toContain('se sentir dor ou desconforto intenso');
+    expect(out.suffix).toBe(SUBSTITUTION_TODAY_NOTE);
+    expect(h.repo.createPending).not.toHaveBeenCalled();
+  });
+
+  it('no protocolo: a troca com cautela vai para a revisão obrigatória do profissional, com mensagem própria', async () => {
+    const h = harness({
+      active: KNEE_ACTIVE,
+      identified: { identified: true, exerciseIds: [FLEXORA.id] },
+    });
+    h.read({ [FLEXORA.id]: { chosen: CADEIRA.id, scope: 'PROTOCOL' } });
+    const out = fixed(await h.service.handle(h.input()));
+
+    expect(out.text).toBe(SUBSTITUTION_CAUTION_REVIEW_MESSAGE);
+    expect(h.repo.createPending).toHaveBeenCalledOnce();
+    const created = (h.repo.createPending.mock.calls[0] as unknown as [Record<string, unknown>])[0];
+    expect(created).toMatchObject({
+      items: [{ fromExerciseId: FLEXORA.id, toExerciseId: CADEIRA.id, mandatory: true }],
+    });
+    // Sem liberação automática: o profissional decide.
+    const jobs = (h.queues.enqueue.mock.calls as unknown as Array<[string]>).map(
+      ([queue]) => queue,
+    );
+    expect(jobs).not.toContain('protocol-substitution-release');
+    // A validação do protocolo inteiro sabe que é uma troca de risco igual ou menor.
+    const validations = h.validation.validate.mock.calls as unknown as Array<
+      [unknown, { cautionSwaps?: Array<{ from: string; to: string }> }]
+    >;
+    expect(
+      validations.some(([, options]) =>
+        options.cautionSwaps?.some((swap) => swap.from === FLEXORA.id && swap.to === CADEIRA.id),
+      ),
+    ).toBe(true);
+  });
+
+  it('risco de queda no PAR-Q/lesão NÃO é relaxado: sem opção, resposta ancorada em fatos e alerta', async () => {
+    const fall = { ...KNEE, injuryTags: ['BALANCE_FALL_RISK'] } as const;
+    const active: ActiveProtocolForSubstitution = {
+      ...KNEE_ACTIVE,
+      content: {
+        ...CONTENT,
+        sessions: [{ dayLabel: 'Dia A', focus: 'Pernas', exercises: [prescribed(AFUNDO.id)] }],
+      } as unknown as ProtocolStructure,
+      constraints: fall,
+      validationConstraints: {
+        goal: 'GAIN_MUSCLE',
+        injuryTags: ['BALANCE_FALL_RISK'],
+        level: 'INTERMEDIARIO',
+      },
+    };
+    const h = harness({ active, identified: { identified: true, exerciseIds: [AFUNDO.id] } });
+    const out = generate(await h.service.handle(h.input()));
+    expect(out.extraSystem).toContain('não tem nenhum exercício que possa substituí-lo');
+    expect(out.handoffReason).toBe('SUBSTITUTION_NO_SAFE_OPTION');
+    expect(h.resolveTurn).not.toHaveBeenCalled();
+  });
+});
+
+describe('SubstitutionFlowService — relato de troca que o aluno já fez', () => {
+  it('"fiz cadeira flexora no lugar dessa" é acolhido como relato: sem reabrir a troca e com o profissional ciente', async () => {
+    const h = harness({ identified: { identified: false, tooMany: false, alreadyDone: true } });
+    const out = generate(
+      await h.service.handle(h.input({ message: 'fiz a cadeira flexora no lugar' })),
+    );
+
+    expect(out.extraSystem).toContain('já fez uma troca de exercício por conta própria');
+    expect(out.extraSystem).toContain('NÃO sugira exercícios');
+    expect(out.extraSystem).toContain('Pergunte, em UMA frase, como a região respondeu');
+    expect(out.humanReview).toBe(true);
+    expect(out.handoffReason).toBe('SUBSTITUTION_REPORTED');
+    // Nada de oferta, de pergunta de alcance nem de proposta.
+    expect(out.suffix).toBeUndefined();
+    expect(h.resolveTurn).not.toHaveBeenCalled();
+    expect(h.repo.createPending).not.toHaveBeenCalled();
+    expect(h.store.has(h.stateKey)).toBe(false);
+  });
+
+  it('não confunde com um pedido vago: sem alvo e sem relato, continua perguntando qual exercício', async () => {
+    const h = harness({ identified: { identified: false, tooMany: false } });
+    const out = generate(await h.service.handle(h.input()));
+    expect(out.extraSystem).toContain('qual exercício específico');
+    expect(out.humanReview).toBeFalsy();
   });
 });
