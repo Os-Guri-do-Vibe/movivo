@@ -20,7 +20,12 @@
  * `--incluir-protocolos-da-ia`, qualquer protocolo ainda não assinado; um protocolo que o
  * profissional já editou (`PROFESSIONAL_EDIT`) exige também
  * `--sobrescrever-edicao-profissional`, porque a regeração descarta a edição dele —,
- * (b) nunca foi assinado (`status = PENDING_SIGNATURE` / `approvalStatus = PENDING_REVIEW`),
+ * (b) nunca foi assinado (`status = PENDING_SIGNATURE` / `approvalStatus = PENDING_REVIEW`) —
+ * exceto com `--reabrir-protocolo-ativo` (2026-10-21), que também aceita um protocolo ATIVO
+ * liberado SEM assinatura humana (`AUTO_APPROVED`) e que o aluno ainda NÃO usou (zero
+ * sessões/treinos registrados): troca o conteúdo, tira a assinatura de metodologia e volta o
+ * protocolo para `PENDING_SIGNATURE`/`MANDATORY` (nunca auto-libera), e só então ele é enviado
+ * de novo ao aluno, pela assinatura do CREF. Enquanto isso o link anterior fica indisponível,
  * e (c) a regeração real NÃO caiu no fallback de novo. Qualquer outra condição aborta sem
  * tocar o banco. As `constraints` gravadas passam a ser as COMPLETAS (com `daysPerWeek`),
  * para a assinatura validar contra a disponibilidade do aluno. Segue `PENDING_REVIEW` depois — precisa de assinatura CREF no painel como
@@ -38,7 +43,7 @@ import 'reflect-metadata';
 import { createHash } from 'node:crypto';
 import { Module } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { eq, desc, and } from 'drizzle-orm';
+import { eq, desc, and, count } from 'drizzle-orm';
 import {
   anamnesisStructuredSchema,
   ParqState,
@@ -50,7 +55,13 @@ import {
 import { CoreModule } from '../core/core.module';
 import { HealthCipherService } from '../core/database/health-cipher.service';
 import { TenantDatabase } from '../core/database/tenant-database.service';
-import { anamnesisSessions, protocols, users } from '../core/database/schema';
+import {
+  anamnesisSessions,
+  protocols,
+  users,
+  workoutCompletions,
+  workoutSessions,
+} from '../core/database/schema';
 import { AiCoachModule } from '../modules/ai-coach/ai-coach.module';
 import { healthBlockSchema } from '../modules/anamnesis/health-block';
 import { evaluateParq, type ParqEvaluation } from '../modules/anamnesis/parq';
@@ -100,10 +111,11 @@ async function main(): Promise<void> {
   const includeAiProtocols = args.includes('--incluir-protocolos-da-ia');
   const overrideProfessionalEdit = args.includes('--sobrescrever-edicao-profissional');
   const keepCurrentReview = args.includes('--manter-revisao-atual');
+  const reopenActive = args.includes('--reabrir-protocolo-ativo');
   if (!phone) {
     console.error(
       'Uso: node dist/scripts/reprocess-protocol-fallback.js <phoneNumberE164> ' +
-        '[--incluir-protocolos-da-ia] [--sobrescrever-edicao-profissional] [--manter-revisao-atual]',
+        '[--incluir-protocolos-da-ia] [--sobrescrever-edicao-profissional] [--manter-revisao-atual] [--reabrir-protocolo-ativo]',
     );
     process.exitCode = 1;
     return;
@@ -160,10 +172,38 @@ async function main(): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    if (
-      protocolRow.status !== 'PENDING_SIGNATURE' ||
-      protocolRow.approvalStatus !== 'PENDING_REVIEW'
-    ) {
+    const isPending =
+      protocolRow.status === 'PENDING_SIGNATURE' && protocolRow.approvalStatus === 'PENDING_REVIEW';
+    if (!isPending && reopenActive) {
+      // Só o ativo liberado sem humano e ainda não usado: nada que o aluno tenha registrado
+      // (ou que o CREF tenha assinado) se perde com a troca de conteúdo.
+      const usage = await db.runAsSystem(async (tx) => {
+        const [sessions] = await tx
+          .select({ n: count() })
+          .from(workoutSessions)
+          .where(eq(workoutSessions.protocolId, protocolRow.id));
+        const [completions] = await tx
+          .select({ n: count() })
+          .from(workoutCompletions)
+          .where(eq(workoutCompletions.protocolId, protocolRow.id));
+        return { sessions: sessions?.n ?? 0, completions: completions?.n ?? 0 };
+      });
+      if (
+        protocolRow.status !== 'ACTIVE' ||
+        protocolRow.approvalStatus !== 'AUTO_APPROVED' ||
+        usage.sessions > 0 ||
+        usage.completions > 0
+      ) {
+        console.error(
+          `Protocolo ${protocolRow.id} não é reabrível (status=${protocolRow.status}, ` +
+            `approvalStatus=${protocolRow.approvalStatus}, sessoes=${usage.sessions}, ` +
+            `treinos=${usage.completions}) — --reabrir-protocolo-ativo só vale para ATIVO ` +
+            'AUTO_APPROVED sem uso. Abortando sem tocar o banco.',
+        );
+        process.exitCode = 1;
+        return;
+      }
+    } else if (!isPending) {
       console.error(
         `Protocolo ${protocolRow.id} já saiu de PENDING_SIGNATURE/PENDING_REVIEW ` +
           `(status=${protocolRow.status}, approvalStatus=${protocolRow.approvalStatus}) — abortando sem tocar o banco.`,
@@ -226,9 +266,12 @@ async function main(): Promise<void> {
     // Por padrão segue a regra da geração normal (PAR-Q ou fallback → obrigatória; reparo →
     // conforme `REPAIRED_PROTOCOL_REVIEW_URGENCY`). A flag operacional preserva a revisão que
     // já estava em curso: troca somente o conteúdo, não reinicia o relógio nem cria liberação.
-    const reviewUrgency = keepCurrentReview
-      ? protocolRow.reviewUrgency
-      : reviewUrgencyForPlan(plan, constraints.requiresProfessionalReview);
+    const reviewUrgency =
+      reopenActive && !isPending
+        ? 'MANDATORY'
+        : keepCurrentReview
+          ? protocolRow.reviewUrgency
+          : reviewUrgencyForPlan(plan, constraints.requiresProfessionalReview);
     const reviewCreatedAt = keepCurrentReview ? protocolRow.createdAt : startDate;
     const mesocycleName = `Mesociclo ${protocolRow.mesocycleNumber}: ${
       TRAINING_PHASE_LABELS[plan.content.phase] ?? plan.content.phase
@@ -259,6 +302,11 @@ async function main(): Promise<void> {
           status: 'PENDING_SIGNATURE',
           approvalStatus: 'PENDING_REVIEW',
           humanReviewRequired: true,
+          // Protocolo reaberto: some a assinatura de metodologia e o PDF do conteúdo anterior
+          // (mesmo que o worker de regeração faz); a assinatura do CREF cria os novos.
+          ...(reopenActive && !isPending
+            ? { professionalId: null, signedAt: null, signatureHash: null, pdfContent: null }
+            : {}),
         })
         .where(eq(protocols.id, protocolRow.id)),
     );
