@@ -526,6 +526,13 @@
       "when": 1791917266105,
       "tag": "0074_remove_opcao_lembrete",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1792542616653,
+      "tag": "0075_agenda_flexivel",
+      "breakpoints": true
     }
   ]
 }

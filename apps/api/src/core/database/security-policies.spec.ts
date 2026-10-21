@@ -66,6 +66,7 @@ describe('buildRlsPoliciesSql', () => {
       'audit_logs',
       'workout_completions',
       'workout_sessions',
+      'workout_schedule_adjustments',
       'workout_set_entries',
       'workout_access_tokens',
       'access_link_tokens',
@@ -117,6 +118,7 @@ describe('buildRlsPoliciesSql', () => {
       ['checkins', 'protocols', 'protocol_id'],
       ['workout_completions', 'protocols', 'protocol_id'],
       ['workout_sessions', 'protocols', 'protocol_id'],
+      ['workout_schedule_adjustments', 'protocols', 'protocol_id'],
       ['workout_set_entries', 'workout_sessions', 'workout_session_id'],
       ['workout_access_tokens', 'workout_sessions', 'workout_session_id'],
     ]) {
