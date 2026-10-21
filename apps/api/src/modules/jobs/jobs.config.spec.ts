@@ -29,6 +29,8 @@ describe('jobs.config', () => {
         'knowledge-processing',
         'dead-letter',
         'protocol-generation',
+        // Regeração do protocolo pendente, pedida pelo profissional na fila de revisão.
+        'protocol-regeneration',
         // Fila do profissional, categoria "Disponível para Revisão" — liberação automática
         // após a janela de cortesia de 1h.
         'protocol-auto-release',

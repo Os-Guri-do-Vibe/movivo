@@ -24,6 +24,7 @@ import { ProtocolController } from './protocol.controller';
 import { ProtocolAutoReleaseWorker } from './protocol-auto-release.worker';
 import { ProtocolGenerationWorker } from './protocol-generation.worker';
 import { ProtocolGeneratorService } from './protocol-generator.service';
+import { ProtocolRegenerationWorker } from './protocol-regeneration.worker';
 import { ProtocolRenewalGenerationWorker } from './protocol-renewal-generation.worker';
 import { ProtocolRenewalScheduler } from './protocol-renewal.scheduler';
 import { ProtocolSubstitutionReleaseWorker } from './protocol-substitution-release.worker';
@@ -52,6 +53,7 @@ import { WorkoutPresentationService } from './workout-presentation.service';
     ProtocolRepository,
     ProtocolGenerationWorker,
     ProtocolAutoReleaseWorker,
+    ProtocolRegenerationWorker,
     ReviewHoldService,
     ProtocolRenewalScheduler,
     ProtocolRenewalGenerationWorker,

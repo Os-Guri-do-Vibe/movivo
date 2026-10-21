@@ -36,6 +36,15 @@ export interface QueueItem {
    */
   origin: 'PARQ' | 'FALLBACK' | 'EDIT' | 'QUALITY' | 'AI_SUBSTITUTION' | 'CATALOG_GAP' | null;
   isFallback?: boolean;
+  /** Protocolo que pode ser refeito a partir da anamnese ("Gerar protocolo novamente"). */
+  canRegenerate?: boolean;
+  /** O conteúdo vigente é edição do profissional — regerar a descarta (pede confirmação). */
+  editedByProfessional?: boolean;
+  /**
+   * Último pedido de regeração: `RUNNING` (gerando), `NOT_APPLIED` (a nova geração não trocou
+   * o conteúdo) ou `FAILED` (esgotou as tentativas). Ausente quando não há o que dizer.
+   */
+  regeneration?: 'RUNNING' | 'NOT_APPLIED' | 'FAILED';
   /** O profissional logado já abriu este item. Ler não tira o item da fila. */
   read: boolean;
 }

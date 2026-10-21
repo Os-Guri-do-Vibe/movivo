@@ -55,7 +55,7 @@ const MS_PER_WEEK = 7 * 24 * 60 * 60 * 1000;
  * `protocols.mesocycleNumber`) — nunca `protocols.version` (que conta revisões desta
  * MESMA linha, incrementado por `signProtocol` a cada assinatura).
  */
-function mesocycleName(mesocycleNumber: number, phase: ProtocolStructure['phase']): string {
+export function mesocycleName(mesocycleNumber: number, phase: ProtocolStructure['phase']): string {
   return `Mesociclo ${mesocycleNumber}: ${TRAINING_PHASE_LABELS[phase] ?? phase}`;
 }
 
