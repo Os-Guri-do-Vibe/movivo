@@ -186,7 +186,7 @@ describe('buildCorrectionMessage', () => {
       const line = lineFor(
         structure(
           [ex('rosca_direta_barra'), ex('triceps_na_polia_com_corda'), ex(vetoed)],
-          [ex('supino_reto_halter')],
+          [ex('crucifixo_reto_halter')],
         ),
       );
       expect(line).toContain(NO_PATTERN_OPTION_SWAP);
@@ -411,11 +411,12 @@ describe('buildCorrectionMessage — cada regra traz localização e o que cumpr
       ),
     );
     const line = lineOf(msg, 'ISOLATION_AS_BASE');
-    expect(line).toContain('sessions[0] (MON) (5 de 5 são ISOLATION)');
-    expect(line).toContain('substitua pelo menos 2 isolado(s)');
+    expect(line).toContain('semana inteira: 5 de 6 exercícios são ISOLATION');
+    expect(line).toContain('sessions[0] (MON) (5 de 5 são ISOLATION; isolados: rosca_direta_barra');
+    expect(line).toContain('substitua pelo menos 1 isolado(s)');
     expect(line).toContain('não apenas acrescente exercícios');
-    expect(line).toContain('Isolados a substituir: rosca_direta_barra, crucifixo_reto_halter');
     expect(line).toContain('no máximo 70%');
+    expect(line).toContain('da SEMANA');
     const options = optionsIn(line);
     expect(options.length).toBeGreaterThan(0);
     for (const id of options) {
@@ -428,13 +429,13 @@ describe('buildCorrectionMessage — cada regra traz localização e o que cumpr
     const msg = direct(structure([ex('supino_reto_halter')], [ex('supino_reto_halter')]), [
       'ISOLATION_AS_BASE',
     ]);
-    expect(msg).toContain('sessão com isolados em excesso');
+    expect(msg).toContain('semana com isolados em excesso');
   });
 
   it('ISOLATION_AS_BASE sem opção não-isolada na base: pede substituição sem inventar id', () => {
     const msg = direct(
       structure(
-        [ex('rosca_direta_barra'), ex('crucifixo_reto_halter')],
+        [ex('rosca_direta_barra'), ex('crucifixo_reto_halter'), ex('rosca_direta_barra')],
         [ex('supino_reto_halter')],
       ),
       ['ISOLATION_AS_BASE'],

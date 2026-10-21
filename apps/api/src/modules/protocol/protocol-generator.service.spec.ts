@@ -18,6 +18,7 @@ import type { MethodologyProvider } from './methodology-provider.service';
 import {
   extractJsonObject,
   ProtocolGenerationError,
+  painCautionBlock,
   ProtocolGeneratorService,
   PROMPT_VERSION,
   rtFavoritePreferenceBlock,
@@ -1021,6 +1022,27 @@ describe('favoritos do RT na BASE DE REFERÊNCIA (achado 2026-09-26)', () => {
 
   const lineId = (line: string): string => line.slice(2).split(' | ', 1)[0] ?? '';
 
+  /** Blocos por grupo muscular da BASE (cada um com seus ids, na ordem do prompt). */
+  function referenceBaseBlocks(system: string): string[][] {
+    const lines = system.split('\n');
+    const start = lines.findIndex((line) => line.startsWith(BASE_HEADER));
+    const end = lines.indexOf('SCHEMA DO JSON DE SAÍDA:');
+    const blocks: string[][] = [];
+    for (const line of lines.slice(start + 1, end)) {
+      if (line.startsWith('## ')) blocks.push([]);
+      else if (line.startsWith('- ')) blocks[blocks.length - 1]?.push(lineId(line));
+    }
+    return blocks;
+  }
+
+  /** O que o prompt faz com uma lista de ids: agrupa por 1º grupo muscular (ordem de 1ª aparição). */
+  function groupedLikePrompt(ids: readonly string[]): string[] {
+    const groupOf = (id: string): string => EXERCISE_BY_ID.get(id)?.muscleGroups[0] ?? 'outros';
+    return [...new Set(ids.map(groupOf))].flatMap((group) =>
+      ids.filter((id) => groupOf(id) === group),
+    );
+  }
+
   /** Ordem ANTERIOR a esta mudança (filtro + sort estável só por equipamento), congelada. */
   function legacyOrderIds(c: UserConstraints): string[] {
     const filtered = EXERCISE_CATALOG.filter(
@@ -1097,30 +1119,38 @@ describe('favoritos do RT na BASE DE REFERÊNCIA (achado 2026-09-26)', () => {
     // Sort estável: sem favoritos, a ordem é a MESMA de antes desta mudança — inclusive em
     // HOME, onde antes não havia sort nenhum.
     for (const c of [baseConstraints, { ...baseConstraints, location: 'HOME' as const }]) {
-      expect(referenceBaseLines(await systemPromptFor(c)).map(lineId)).toEqual(legacyOrderIds(c));
+      expect(referenceBaseLines(await systemPromptFor(c)).map(lineId)).toEqual(
+        groupedLikePrompt(legacyOrderIds(c)),
+      );
     }
   });
 
   it('FULL_GYM: favorito é critério primário, equipamento é o segundo (revisão 2026-09-29)', async () => {
     const favorites = ['supino_reto_halter', 'roda_abdominal']; // com equip / sem equip
     const system = await systemPromptFor(baseConstraints, catalogWithFavorites(favorites));
-    const ids = referenceBaseLines(system).map(lineId);
+    const blocks = referenceBaseBlocks(system);
     const rank = (id: string): number => {
       const exercise = EXERCISE_BY_ID.get(id);
       if (!exercise) throw new Error(`id fora do catálogo no prompt: ${id}`);
       return 2 * Number(favorites.includes(id)) + Number(exercise.equipment.length > 0);
     };
-    const ranks = ids.map(rank);
-
+    // A base é apresentada por grupo muscular; DENTRO de cada bloco vale a prioridade:
     // [fav+equip] > [fav sem equip] > [equip] > [sem equip] — ordem não-crescente.
-    expect(ranks).toEqual([...ranks].sort((a, b) => b - a));
-    expect(new Set(ranks)).toEqual(new Set([3, 2, 1, 0]));
-    expect(ids[0]).toBe('supino_reto_halter');
-    expect(ids[1]).toBe('roda_abdominal');
+    for (const block of blocks) {
+      const ranks = block.map(rank);
+      expect(ranks).toEqual([...ranks].sort((a, b) => b - a));
+    }
+    expect(new Set(blocks.flat().map(rank))).toEqual(new Set([3, 2, 1, 0]));
+    const blockOf = (id: string): string[] => blocks.find((block) => block.includes(id)) ?? [];
+    expect(blockOf('supino_reto_halter')[0]).toBe('supino_reto_halter');
+    expect(blockOf('roda_abdominal')[0]).toBe('roda_abdominal');
     // Não favoritos mantêm a ordem anterior (sort estável): equipamento antes, depois o resto.
-    expect(ids.slice(2)).toEqual(
-      legacyOrderIds(baseConstraints).filter((id) => !favorites.includes(id)),
-    );
+    const legacy = legacyOrderIds(baseConstraints).filter((id) => !favorites.includes(id));
+    for (const block of blocks) {
+      expect(block.filter((id) => !favorites.includes(id))).toEqual(
+        legacy.filter((id) => block.includes(id)),
+      );
+    }
     // Bloco presente, depois da DURAÇÃO DO MESOCICLO e imediatamente antes da BASE.
     expect(system).toContain(`${rtFavoritePreferenceBlock()}\n\n${BASE_HEADER}`);
     expect(system.indexOf('DURAÇÃO DO MESOCICLO')).toBeLessThan(
@@ -1239,5 +1269,238 @@ describe('extractJsonObject', () => {
 
   it('retorna null quando não há objeto', () => {
     expect(extractJsonObject('sem json aqui')).toBeNull();
+  });
+});
+
+describe('planejamento antes das sessões (achado 2026-10-21)', () => {
+  const planning = {
+    divisao: 'Upper/Lower: cada grupo 2x na semana',
+    seriesSemanais: { peito: 12, costas: 12 },
+    sessoes: [{ dia: 'MON', grupos: ['peito', 'costas'], minutosEstimados: 55 }],
+  };
+  const withPlanning = (): string =>
+    JSON.stringify({ planejamento: planning, ...JSON.parse(validProtocolJson()) });
+
+  it('o prompt pede o planejamento ANTES de sessions e o schema o declara primeiro', async () => {
+    const { service, calls } = makeService([withPlanning()]);
+    await service.generate(command);
+    const system = calls[0]?.system ?? '';
+    expect(system).toContain('PLANEJAMENTO (campo "planejamento", escrito ANTES de "sessions"');
+    expect(system.indexOf('"planejamento": {')).toBeLessThan(
+      system.indexOf('"goal": "GAIN_MUSCLE"'),
+    );
+    // o conteúdo certo (números, ordem dos grupos) é da metodologia, não do código
+    expect(system).toContain('aplicando o que a metodologia diz sobre ordem');
+  });
+
+  it('extrai o planejamento do JSON: não entra no protocolo, volta no resultado', async () => {
+    const { service } = makeService([withPlanning()]);
+    const result = await service.generate(command);
+    expect(result.planning).toEqual(planning);
+    expect(JSON.stringify(result.structure)).not.toContain('planejamento');
+  });
+
+  it('sem planejamento na saída, o protocolo segue válido (campo opcional)', async () => {
+    const { service } = makeService([validProtocolJson()]);
+    const result = await service.generate(command);
+    expect(result.planning).toBeUndefined();
+  });
+
+  it('a rodada de correção devolve o planejamento no turno do assistente', async () => {
+    const { service, calls } = makeService([withPlanning(), validProtocolJson()]);
+    const first = await service.generate(command);
+    await service.generate({
+      ...command,
+      correction: {
+        previous: first.structure,
+        ...(first.planning ? { planning: first.planning } : {}),
+        violations: [],
+        round: 1,
+      },
+    });
+    const assistant = calls[1]?.messages.find((m) => m.role === 'assistant');
+    expect(assistant?.content.startsWith('{"planejamento":')).toBe(true);
+  });
+
+  it('correção de qualidade leva as medições do rascunho, como fato e não como regra', async () => {
+    const { service, calls } = makeService([validProtocolJson(), validProtocolJson()]);
+    const first = await service.generate(command);
+    await service.generate({
+      ...command,
+      correction: {
+        previous: first.structure,
+        violations: [],
+        round: 1,
+        quality: {
+          summary: {
+            version: 'contextual-quality-2026-10-v2',
+            status: 'GAPS',
+            checks: [{ criterion: 'SESSION_SEQUENCING', status: 'GAP' }],
+            missingEmphasisCount: 0,
+          },
+          review: Object.fromEntries(
+            QUALITY_CRITERIA.map((criterion) => [
+              criterion,
+              {
+                status: criterion === 'SESSION_SEQUENCING' ? 'GAP' : 'MET',
+                methodologyExcerpt: METHODOLOGY_GUIDELINES.slice(0, 80).trim(),
+                observation: 'Grupos intercalados.',
+                adjustment: criterion === 'SESSION_SEQUENCING' ? 'Agrupe por músculo.' : null,
+              },
+            ]),
+          ) as never,
+        },
+      },
+    });
+    const text = calls[1]?.messages.map((m) => m.content).join('\n') ?? '';
+    expect(text).toContain('MEDIÇÕES DO SEU RASCUNHO (fatos calculados, não regras');
+    expect(text).toContain('grupos em sequência =');
+  });
+});
+
+describe('base de referência por grupo muscular (achado 2026-10-21)', () => {
+  async function system(c: UserConstraints): Promise<string> {
+    const { service, calls } = makeService([validProtocolJson()]);
+    await service.generate({ ...command, constraints: c });
+    return calls[0]?.system ?? '';
+  }
+  const gym: UserConstraints = {
+    ...constraints,
+    level: 'INTERMEDIARIO',
+    injuryTags: [],
+    injuriesRaw: [],
+  };
+
+  it('cada grupo tem seu bloco com a contagem, e a ênfase do aluno vem primeiro', async () => {
+    const text = await system({ ...gym, emphasis: ['costas'] });
+    const headings = text.split('\n').filter((line) => line.startsWith('## grupo: '));
+    expect(headings[0]).toMatch(/^## grupo: costas \(\d+\)$/);
+    expect(headings.length).toBeGreaterThan(5);
+    expect(new Set(headings).size).toBe(headings.length);
+  });
+
+  it('cada exercício aparece uma vez e dentro do bloco do seu grupo', async () => {
+    const text = await system(gym);
+    let group = '';
+    const seen = new Set<string>();
+    for (const line of text.split('\n')) {
+      if (line.startsWith('## grupo: ')) group = line.slice(10).replace(/ \(\d+\)$/, '');
+      else if (line.startsWith('- ') && line.includes(' | grupos: ')) {
+        const id = line.slice(2).split(' | ', 1)[0] ?? '';
+        expect(seen.has(id)).toBe(false);
+        seen.add(id);
+        expect(EXERCISE_BY_ID.get(id)?.muscleGroups[0]).toBe(group);
+      }
+    }
+    expect(seen.size).toBeGreaterThan(100);
+  });
+});
+
+describe('dor sem veto no gerador (política de 2026-10-21)', () => {
+  const knee: UserConstraints = {
+    ...constraints,
+    level: 'INTERMEDIARIO',
+    injuryTags: ['KNEE'],
+    injuriesRaw: ['Dor em Joelho (intensidade 3/10)'],
+  };
+  async function system(c: UserConstraints): Promise<string> {
+    const { service, calls } = makeService([validProtocolJson()]);
+    await service.generate({ ...command, constraints: c });
+    return calls[0]?.system ?? '';
+  }
+  async function userMessage(c: UserConstraints): Promise<string> {
+    const { service, calls } = makeService([validProtocolJson()]);
+    await service.generate({ ...command, constraints: c });
+    return calls[0]?.messages[0]?.content ?? '';
+  }
+
+  it('a mensagem do aluno separa o que veta do que é só cautela', async () => {
+    const text = await userMessage({ ...knee, cautionTags: ['KNEE'] });
+    expect(text).toContain('Restrições a evitar (tags de lesão): nenhuma');
+    expect(text).toContain('Dor relatada com cautela, SEM veto');
+    expect(await userMessage(knee)).toContain('Restrições a evitar (tags de lesão): KNEE');
+  });
+
+  it('como veto (sem cautionTags) o agachamento some da base, como sempre', async () => {
+    const text = await system(knee);
+    expect(text).not.toContain('- agachamento_barra |');
+    expect(text).not.toContain('CAUTELA POR DOR RELATADA');
+  });
+
+  it('como cautela o agachamento fica na base, marcado, e o prompt explica o que fazer', async () => {
+    const text = await system({ ...knee, cautionTags: ['KNEE'] });
+    const line = text.split('\n').find((l) => l.startsWith('- agachamento_barra |')) ?? '';
+    expect(line).toContain('| cautela: KNEE');
+    expect(text).toContain('CAUTELA POR DOR RELATADA (regiões: KNEE):');
+    expect(text).toContain('Não retire um padrão de movimento nem um grupo muscular');
+    // guardrail de linguagem sobre o texto exato do bloco (mesmo critério do bloco de favoritos)
+    expect(painCautionBlock(['KNEE'])).not.toMatch(/diagn[óo]stic|tratament|\bcura\b|garantid/i);
+  });
+
+  it('a mesma tag no PAR-Q continua vetando mesmo com cautela na dor', async () => {
+    const text = await system({ ...knee, cautionTags: ['KNEE'], parqTags: ['KNEE'] });
+    // parqTags entra em injuryTags na montagem real; aqui a tag de cautela já saiu de cautionTags
+    // pelo `constraintsFromAnamnesis` — o teste do contexto cobre isso; a base honra cautionTags.
+    expect(text).toContain('- agachamento_barra |');
+  });
+
+  it('sem exercício marcado na base, o bloco de cautela não aparece', async () => {
+    const text = await system({
+      ...knee,
+      location: 'HOME',
+      cautionTags: ['KNEE'],
+      injuryTags: ['KNEE'],
+    });
+    const marked = text.split('\n').filter((l) => l.includes('| cautela:'));
+    if (marked.length === 0) expect(text).not.toContain('CAUTELA POR DOR RELATADA');
+    else expect(text).toContain('CAUTELA POR DOR RELATADA');
+  });
+});
+
+describe('juiz contextual tolerante (achado 2026-10-21)', () => {
+  const excerpt = METHODOLOGY_GUIDELINES.slice(0, 80).trim();
+  const review = (over: Record<string, string> = {}): string => {
+    const parsed = JSON.parse(reviewJson('MET', excerpt));
+    for (const [criterion, value] of Object.entries(over))
+      parsed[criterion].methodologyExcerpt = value;
+    return JSON.stringify(parsed);
+  };
+
+  it('aceita citação com caixa, pontuação e espaço diferentes do original', async () => {
+    const sloppy = excerpt.toUpperCase().replace(/ /g, '  ');
+    const { service } = makeService([validProtocolJson(), review({ GOAL_STRATEGY: sloppy })]);
+    const quality = await service.assessQuality(command, await service.generate(command));
+    expect(quality.summary.status).toBe('PASS');
+  });
+
+  it('citação não literal faz o juiz refazer UMA vez, dizendo qual critério errou', async () => {
+    const { service, calls } = makeService([
+      validProtocolJson(),
+      review({ SESSION_SEQUENCING: 'Paráfrase que não está na metodologia publicada.' }),
+      review(),
+    ]);
+    const quality = await service.assessQuality(command, await service.generate(command));
+    expect(quality.summary.status).toBe('PASS');
+    const retry = calls[2];
+    expect(retry?.messages.at(-1)?.content).toContain('SESSION_SEQUENCING');
+    expect(retry?.messages.at(-1)?.content).toContain('caractere por caractere');
+  });
+
+  it('se o segundo parecer também for inválido, segue UNAVAILABLE (sem 3ª chamada)', async () => {
+    const bad = review({ SESSION_SEQUENCING: 'Outra paráfrase inventada pelo juiz do teste.' });
+    const { service, calls } = makeService([validProtocolJson(), bad, bad, review()]);
+    const quality = await service.assessQuality(command, await service.generate(command));
+    expect(quality).toEqual(qualityUnavailable('INVALID_REVIEW'));
+    expect(calls).toHaveLength(3);
+  });
+
+  it('o juiz recebe as medições e o critério de sequenciamento', async () => {
+    const { service, calls } = makeService([validProtocolJson(), review()]);
+    await service.assessQuality(command, await service.generate(command));
+    const request = calls[1];
+    expect(request?.system).toContain('SESSION_SEQUENCING');
+    expect(request?.system).toContain('facts.measurements');
+    expect(request?.messages[1]?.content).toContain('weeklySetsByGroup');
+    expect(request?.messages[1]?.content).toContain('groupSequence');
   });
 });

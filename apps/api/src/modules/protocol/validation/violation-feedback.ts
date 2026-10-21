@@ -21,7 +21,7 @@ import { type ContraindicationTag, LEVEL_ORDER, lowestLevel } from '../exercise-
 import type { ExerciseCatalogProvider } from '../exercise-catalog-provider.service';
 import { PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import { normalizedPreferredDays, weeklySessionTarget } from '../training-days';
-import type { UserConstraints } from '../user-constraints';
+import { hardInjuryTags, type UserConstraints } from '../user-constraints';
 import { isLanguageRule, languageRuleMatches, protocolTextFields } from './text-fields';
 import {
   ISOLATION_MAJORITY_THRESHOLD,
@@ -44,7 +44,7 @@ export type CorrectionConstraints = Pick<
   UserConstraints,
   'level' | 'preferredDays' | 'injuryTags' | 'parqTags'
 > &
-  Partial<Pick<UserConstraints, 'daysPerWeek'>>;
+  Partial<Pick<UserConstraints, 'daysPerWeek' | 'cautionTags'>>;
 
 type CatalogLookup = Pick<ExerciseCatalogProvider, 'getById'>;
 
@@ -69,7 +69,7 @@ export const VIOLATION_FIX_HINTS: Readonly<Record<string, string>> = {
   TECHNIQUE_LEVEL_NOT_ALLOWED:
     'Aluno INICIANTE não pode ter o campo "technique" em nenhum exercício. Remova "technique" de todos esses exercícios; densidade, quando desejada, vem de "restSeconds" menores e da ordem dos exercícios, e cardio vem como exercício separado no fim da sessão.',
   TECHNIQUE_OVERUSE: `No máximo ${MAX_TECHNIQUES_PER_SESSION} exercícios com "technique" por sessão e, havendo 2 ou mais sessões, pelo menos 1 sessão sem nenhum "technique". Um dia "em circuito" fora da divisão CIRCUITO se expressa pela ordem dos exercícios e por "restSeconds" curtos, sem marcar "technique".`,
-  ISOLATION_AS_BASE: `Troque isolado(s) por multiarticular(es), core ou cardio da BASE DE REFERÊNCIA até que no máximo ${pct(ISOLATION_MAJORITY_THRESHOLD)} dos exercícios da sessão sejam ISOLATION.`,
+  ISOLATION_AS_BASE: `Troque isolado(s) por multiarticular(es), core ou cardio da BASE DE REFERÊNCIA até que no máximo ${pct(ISOLATION_MAJORITY_THRESHOLD)} dos exercícios da SEMANA sejam ISOLATION (a conta é do programa inteiro; uma sessão de braços ou ombros isolada por natureza é aceitável se o conjunto da semana fechar). Troque pelo grupo muscular do próprio dia — nunca ponha um composto de outro grupo numa sessão só para fechar a conta.`,
   PARQ_RIR_TOO_LOW: 'Modo conservador: todo "rir" declarado deve respeitar o piso indicado.',
   PARQ_VIOLATION:
     'Modo conservador: nenhum "technique" em nenhum exercício; preserve a fase escolhida conforme a metodologia.',
@@ -149,7 +149,7 @@ export const NO_PATTERN_OPTION_SWAP =
 
 /**
  * Remover todas as ocorrências de `badId` mantém cada sessão afetada válida? O schema exige
- * ao menos 1 exercício por sessão, e `ISOLATION_AS_BASE` veta sessão com mais de
+ * ao menos 1 exercício por sessão, e `ISOLATION_AS_BASE` veta semana com mais de
  * `ISOLATION_MAJORITY_THRESHOLD` de isolados — são as únicas regras que a REMOÇÃO de um
  * exercício pode passar a violar (contagem de sessões/dias não muda).
  */
@@ -158,15 +158,18 @@ function removalIsSafe(
   badId: string,
   catalog: CatalogLookup,
 ): boolean {
-  return structure.sessions.every((session) => {
-    if (!session.exercises.some((e) => e.exerciseId === badId)) return true;
-    const remaining = session.exercises.filter((e) => e.exerciseId !== badId);
-    if (remaining.length === 0) return false;
-    const isolation = remaining.filter(
-      (e) => catalog.getById(e.exerciseId)?.pattern === 'ISOLATION',
-    ).length;
-    return isolation <= remaining.length * ISOLATION_MAJORITY_THRESHOLD;
-  });
+  if (
+    structure.sessions.some((session) => session.exercises.every((e) => e.exerciseId === badId))
+  ) {
+    return false;
+  }
+  const remaining = structure.sessions.flatMap((session) =>
+    session.exercises.filter((e) => e.exerciseId !== badId),
+  );
+  const isolation = remaining.filter(
+    (e) => catalog.getById(e.exerciseId)?.pattern === 'ISOLATION',
+  ).length;
+  return isolation <= remaining.length * ISOLATION_MAJORITY_THRESHOLD;
 }
 
 /**
@@ -230,7 +233,7 @@ export function buildCorrectionMessage(
 ): string {
   const rules = [...new Set(violations.filter((v) => v.action === 'BLOCK').map((v) => v.rule))];
   const excluded = new Set<ContraindicationTag>([
-    ...constraints.injuryTags,
+    ...hardInjuryTags(constraints),
     ...constraints.parqTags,
   ]);
   const items: string[] = [];
@@ -294,25 +297,36 @@ export function buildCorrectionMessage(
         break;
       }
       case 'ISOLATION_AS_BASE': {
-        const where = structure.sessions
-          .map((session, i) => {
-            const isolated = session.exercises.filter(
-              (ex) => catalog.getById(ex.exerciseId)?.pattern === 'ISOLATION',
-            );
-            if (isolated.length <= session.exercises.length * ISOLATION_MAJORITY_THRESHOLD) {
-              return null;
-            }
-            const replacements = isolationReplacementsNeeded(
-              isolated.length,
-              session.exercises.length,
-            );
+        const isolatedBySession = structure.sessions.map((session) =>
+          session.exercises.filter((ex) => catalog.getById(ex.exerciseId)?.pattern === 'ISOLATION'),
+        );
+        const total = structure.sessions.reduce(
+          (sum, session) => sum + session.exercises.length,
+          0,
+        );
+        const isolatedTotal = isolatedBySession.reduce((sum, list) => sum + list.length, 0);
+        const replacements = isolationReplacementsNeeded(isolatedTotal, total);
+        // Sessões com maior fração de isolados primeiro: é onde a troca custa menos ao dia.
+        const where = isolatedBySession
+          .map((isolated, i) => ({ isolated, i, session: structure.sessions[i] }))
+          .filter(({ isolated }) => isolated.length > 0)
+          .sort(
+            (a, b) =>
+              b.isolated.length / (b.session?.exercises.length ?? 1) -
+              a.isolated.length / (a.session?.exercises.length ?? 1),
+          )
+          .slice(0, 4)
+          .map(({ isolated, i, session }) => {
             const options = sessionNonIsolationOptions(isolated, catalog, referenceBaseIds);
-            return `${sessionRef(structure, i)} (${isolated.length} de ${session.exercises.length} são ISOLATION): substitua pelo menos ${replacements} isolado(s) — não apenas acrescente exercícios — por multiarticular, core ou cardio da base. Isolados a substituir: ${isolated.map((exercise) => exercise.exerciseId).join(', ')}.${
-              options.length ? ` Opções válidas: ${options.join(', ')}.` : ''
+            return `${sessionRef(structure, i)} (${isolated.length} de ${session?.exercises.length ?? 0} são ISOLATION; isolados: ${isolated.map((exercise) => exercise.exerciseId).join(', ')})${
+              options.length ? `. Opções válidas: ${options.join(', ')}.` : ''
             }`;
-          })
-          .filter(Boolean);
-        items.push(`[${rule}] ${where.join('; ') || 'sessão com isolados em excesso'}. ${hint}`);
+          });
+        items.push(
+          where.length === 0
+            ? `[${rule}] semana com isolados em excesso. ${hint}`
+            : `[${rule}] semana inteira: ${isolatedTotal} de ${total} exercícios são ISOLATION; substitua pelo menos ${replacements} isolado(s) — não apenas acrescente exercícios — por multiarticular, core ou cardio da base. Sessões com mais isolados: ${where.join('; ')}. ${hint}`,
+        );
         break;
       }
       case 'PARQ_RIR_TOO_LOW': {
