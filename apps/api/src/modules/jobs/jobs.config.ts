@@ -20,6 +20,11 @@ import { buildRedisOptions } from '../../core/redis';
 
 export const QUEUE = {
   protocolGeneration: 'protocol-generation',
+  // Regeração pedida pelo profissional CREF na fila de revisão: refaz o conteúdo do
+  // protocolo PENDENTE a partir da anamnese original. Fila própria porque o payload é o
+  // id do PROTOCOLO existente (`ProtocolGenerationJob` carrega a sessão de anamnese e
+  // cria a linha), e porque o painel consulta o estado do job para mostrar "gerando…".
+  protocolRegeneration: 'protocol-regeneration',
   protocolAutoRelease: 'protocol-auto-release',
   // Achado 2026-09-02: liberação da proposta de substituição de exercício via IA, após a
   // janela de cortesia de 30 min (`AI_SUBSTITUTION_REVIEW_WINDOW_MS`) — fila própria, e não
@@ -82,6 +87,14 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
     attempts: 3,
     backoffMs: [2_000, 8_000, 32_000],
     concurrency: 5,
+    lockMs: 120_000,
+  },
+  // Mesmo pipeline gera-e-valida de `protocolGeneration`, disparado à mão: poucas tentativas
+  // (quem pediu está olhando a fila) e o conteúdo atual só é trocado se a regeração valida.
+  [QUEUE.protocolRegeneration]: {
+    attempts: 2,
+    backoffMs: [5_000],
+    concurrency: 2,
     lockMs: 120_000,
   },
   // Liberação automática após a janela de cortesia de 1h (fila do profissional,
