@@ -297,28 +297,24 @@ export function buildCorrectionMessage(
         break;
       }
       case 'ISOLATION_AS_BASE': {
-        const isolatedBySession = structure.sessions.map((session) =>
-          session.exercises.filter((ex) => catalog.getById(ex.exerciseId)?.pattern === 'ISOLATION'),
-        );
-        const total = structure.sessions.reduce(
-          (sum, session) => sum + session.exercises.length,
-          0,
-        );
-        const isolatedTotal = isolatedBySession.reduce((sum, list) => sum + list.length, 0);
+        const perSession = structure.sessions.map((session, i) => ({
+          i,
+          size: session.exercises.length,
+          isolated: session.exercises.filter(
+            (ex) => catalog.getById(ex.exerciseId)?.pattern === 'ISOLATION',
+          ),
+        }));
+        const total = perSession.reduce((sum, entry) => sum + entry.size, 0);
+        const isolatedTotal = perSession.reduce((sum, entry) => sum + entry.isolated.length, 0);
         const replacements = isolationReplacementsNeeded(isolatedTotal, total);
         // Sessões com maior fração de isolados primeiro: é onde a troca custa menos ao dia.
-        const where = isolatedBySession
-          .map((isolated, i) => ({ isolated, i, session: structure.sessions[i] }))
+        const where = perSession
           .filter(({ isolated }) => isolated.length > 0)
-          .sort(
-            (a, b) =>
-              b.isolated.length / (b.session?.exercises.length ?? 1) -
-              a.isolated.length / (a.session?.exercises.length ?? 1),
-          )
+          .sort((a, b) => b.isolated.length / b.size - a.isolated.length / a.size)
           .slice(0, 4)
-          .map(({ isolated, i, session }) => {
+          .map(({ isolated, i, size }) => {
             const options = sessionNonIsolationOptions(isolated, catalog, referenceBaseIds);
-            return `${sessionRef(structure, i)} (${isolated.length} de ${session?.exercises.length ?? 0} são ISOLATION; isolados: ${isolated.map((exercise) => exercise.exerciseId).join(', ')})${
+            return `${sessionRef(structure, i)} (${isolated.length} de ${size} são ISOLATION; isolados: ${isolated.map((exercise) => exercise.exerciseId).join(', ')})${
               options.length ? `. Opções válidas: ${options.join(', ')}.` : ''
             }`;
           });
