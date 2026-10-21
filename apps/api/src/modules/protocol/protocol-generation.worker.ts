@@ -33,6 +33,8 @@
  * depois do reparo determinístico do planner NÃO é motivo de `MANDATORY` — segue o fluxo
  * normal (`OPTIONAL`, janela de 24h), com o ajuste registrado no rastro. A política mora em
  * `REPAIRED_PROTOCOL_REVIEW_URGENCY`/`reviewUrgencyForPlan`, única para geração e renovação.
+ * Qualidade contextual é avaliada para todos os protocolos; ela não altera a obrigatoriedade
+ * de revisão, que continua sendo decidida por PAR-Q, fallback ou reparo determinístico.
  */
 import { Injectable, type OnModuleInit } from '@nestjs/common';
 import { type Job } from 'bullmq';
@@ -110,8 +112,8 @@ export const REPAIRED_PROTOCOL_REVIEW_URGENCY: 'MANDATORY' | 'OPTIONAL' = 'OPTIO
 /**
  * ÚNICO ponto de decisão `MANDATORY` × `OPTIONAL` da geração (inicial e renovação). Motivos
  * independentes de `MANDATORY`, qualquer um basta: PAR-Q do titular, template de fallback
- * (sem avaliação contextual em templates). Qualidade só é avaliada com PAR-Q bloqueante.
- * Reparo determinístico segue
+ * (sem avaliação contextual em templates). Qualidade contextual é avaliada para qualquer
+ * protocolo individualizado, mas não altera esta política de urgência. Reparo determinístico segue
  * `REPAIRED_PROTOCOL_REVIEW_URGENCY`.
  */
 export function reviewUrgencyForPlan(

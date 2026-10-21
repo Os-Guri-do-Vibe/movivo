@@ -124,18 +124,24 @@ describe('qualidade contextual no pipeline', () => {
   };
 
   it.each([{ injuryTags: [] }, { injuryTags: ['SHOULDER'] }] as const)(
-    'sem PAR-Q bloqueante não avalia nem corrige qualidade, mesmo com restrições %j',
+    'sem PAR-Q bloqueante avalia e corrige qualidade, mesmo com restrições %j',
     async ({ injuryTags }) => {
-      const gen = fakeGenerator([]);
-      vi.mocked(gen.assessQuality).mockResolvedValue(qualityAssessment('GAPS'));
+      const corrected = genResult({ structure: structure('Corrigido sem PAR-Q') });
+      const gen = fakeGenerator([genResult(), corrected]);
+      vi.mocked(gen.assessQuality)
+        .mockResolvedValueOnce(qualityAssessment('GAPS'))
+        .mockResolvedValueOnce(qualityAssessment());
       const plan = await planProtocol(gen, fakeValidation([]), {
         ...cmd,
         constraints: { ...constraints, injuryTags: [...injuryTags] },
       });
-      expect(gen.assessQuality).not.toHaveBeenCalled();
-      expect(gen.generate).toHaveBeenCalledTimes(1);
-      expect(plan.contextualQuality).toBeUndefined();
-      expect(plan.trace.contextualQuality).toBeUndefined();
+      expect(gen.assessQuality).toHaveBeenCalledTimes(2);
+      expect(gen.generate).toHaveBeenCalledTimes(2);
+      expect(gen.generate.mock.calls[1]?.[0].correction).toMatchObject({
+        quality: { summary: { status: 'GAPS' } },
+      });
+      expect(plan.contextualQuality?.status).toBe('PASS');
+      expect(plan.trace.contextualQuality?.status).toBe('PASS');
       expect(plan.validationAction).toBe('PASS');
     },
   );
@@ -437,7 +443,7 @@ describe('planProtocol (US-2.4)', () => {
       expect(plan.validationAction).toBe('PASS');
       expect(plan.repairs).toContain('STRIP_ALL_TECHNIQUES');
       expect(plan.content).toBe(revalidated);
-      expect(gen.assessQuality).not.toHaveBeenCalled();
+      expect(gen.assessQuality).toHaveBeenCalledTimes(1);
       expect(plan.trace).toMatchObject({ repairOutcome: 'APPLIED', finalRules: [] });
       expect(plan.attempts.map((a) => a.rules)).toEqual([
         ['TECHNIQUE_LEVEL_NOT_ALLOWED', 'TECHNIQUE_OVERUSE'],
