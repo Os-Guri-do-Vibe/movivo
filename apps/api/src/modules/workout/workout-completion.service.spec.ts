@@ -50,6 +50,8 @@ function makeService(options: {
     where: () => selectChain,
     orderBy: () => selectChain,
     limit: async () => protocolRows,
+    // A leitura dos ajustes de agenda termina em `orderBy` (sem `limit`) e vem vazia aqui.
+    then: (resolve: (value: unknown[]) => unknown) => resolve([]),
   };
   const tx = {
     select: () => selectChain,
