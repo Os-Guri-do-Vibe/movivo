@@ -96,6 +96,8 @@ const EXPECTED_TABLES = [
   'workout_insights',
   'workout_sessions',
   'workout_set_entries',
+  // Agenda flexível: ajustes de agenda pedidos pelo aluno ao Coach (só inserção).
+  'workout_schedule_adjustments',
   // Renovação de mesociclo: formulário de troca de protocolo por fim de ciclo.
   'protocol_renewal_sessions',
   // Alias curto e público para links longos enviados por WhatsApp.
