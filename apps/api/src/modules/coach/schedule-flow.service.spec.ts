@@ -10,6 +10,7 @@ import type { LateLogResult, WorkoutLateLogService } from '../workout/workout-la
 import type { ScheduleContext, WorkoutScheduleService } from '../workout/workout-schedule.service';
 import {
   answerToOffer,
+  quickConflictAnswer,
   ScheduleFlowService,
   type ScheduleFlowInput,
 } from './schedule-flow.service';
@@ -88,6 +89,7 @@ function parsed(overrides: Partial<ParsedScheduleRequest>): ParsedScheduleReques
     sessionKey: null,
     leaveOut: [],
     placements: [],
+    conflict: null,
     ...overrides,
   };
 }
@@ -344,6 +346,90 @@ describe('João: descansar em um dia', () => {
     const outcome = await service.handle(input());
     expect(text(outcome)).toContain('Me conta com qual dia');
     expect(store.has('schedule-flow:state')).toBe(false);
+  });
+});
+
+describe('o dia pedido já tem outro treino (pular ou empurrar)', () => {
+  const conflictState = {
+    followUps: 1,
+    conflict: { request: { kind: 'TRAIN_ON', date: WED, sessionKey: 'T2' }, displacedKey: 'T3' },
+  };
+  const layoutOf = (plan: unknown) =>
+    Object.fromEntries(
+      (plan as { slots: Array<{ date: string; sessionKey: string | null }> }).slots.map((slot) => [
+        slot.date,
+        slot.sessionKey,
+      ]),
+    );
+
+  it('pergunta antes de mexer: mostra as duas saídas e não grava nada', async () => {
+    const { service, input, apply, store } = make({
+      ctx: context(JOAO, TUE),
+      parsed: parsed({ action: 'TREINAR', date: WED, sessionKey: 'T2' }),
+    });
+    const outcome = await service.handle(input());
+    expect(apply).not.toHaveBeenCalled();
+    const reply = text(outcome);
+    expect(reply).toContain('Pular');
+    expect(reply).toContain('Empurrar');
+    expect(reply).toContain('É só responder 1 ou 2');
+    expect(JSON.parse(store.get('schedule-flow:state') ?? '{}')).toMatchObject({
+      conflict: { displacedKey: 'T3', request: { kind: 'TRAIN_ON', date: WED, sessionKey: 'T2' } },
+    });
+  });
+
+  it('"2": empurra os treinos até o próximo descanso, sem deixar nenhum de fora', async () => {
+    const { service, input, apply, store } = make({
+      ctx: context(JOAO, TUE),
+      state: conflictState,
+    });
+    await service.handle({ ...input(), message: '2' });
+    const plan = apply.mock.calls[0]?.[2] as unknown as { dropped: string[] };
+    expect(plan.dropped).toEqual([]);
+    expect(layoutOf(plan)).toMatchObject({ [TUE]: null, [WED]: 'T2', [THU]: 'T3', [FRI]: 'T4' });
+    expect(store.has('schedule-flow:state')).toBe(false);
+  });
+
+  it('"pula": o treino do dia fica de fora e o resto não muda', async () => {
+    const { service, input, apply } = make({ ctx: context(JOAO, TUE), state: conflictState });
+    const outcome = await service.handle({ ...input(), message: 'pula o de quarta' });
+    const plan = apply.mock.calls[0]?.[2] as unknown as { dropped: string[] };
+    expect(plan.dropped).toEqual(['T3']);
+    expect(layoutOf(plan)).toMatchObject({ [WED]: 'T2', [THU]: 'T4' });
+    expect(text(outcome)).toContain('fica de fora desta semana');
+  });
+
+  it('resposta em linguagem livre: a IA lê a escolha (conflict)', async () => {
+    const { service, input, apply } = make({
+      ctx: context(JOAO, TUE),
+      state: conflictState,
+      parsed: parsed({ action: 'ESCOLHA', conflict: 'SKIP' }),
+    });
+    await service.handle({ ...input(), message: 'o que você achar melhor, deixa o de quarta' });
+    expect(apply).toHaveBeenCalledTimes(1);
+  });
+
+  it('resposta que não escolhe nada: repete a pergunta sem aplicar', async () => {
+    const { service, input, apply } = make({
+      ctx: context(JOAO, TUE),
+      state: conflictState,
+      parsed: parsed({ action: 'ESCOLHA', conflict: null }),
+    });
+    const outcome = await service.handle({ ...input(), message: 'hmm' });
+    expect(apply).not.toHaveBeenCalled();
+    expect(text(outcome)).toContain('Me conta com qual dia');
+  });
+
+  it.each([
+    ['1', 'SKIP'],
+    ['Opção 1', 'SKIP'],
+    ['pula esse', 'SKIP'],
+    ['2', 'PUSH'],
+    ['pode empurrar tudo', 'PUSH'],
+    ['a segunda', 'PUSH'],
+    ['talvez', null],
+  ])('quickConflictAnswer("%s") = %s', (message, expected) => {
+    expect(quickConflictAnswer(message)).toBe(expected);
   });
 });
 

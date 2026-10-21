@@ -153,6 +153,35 @@ export function scheduleChoiceQuestion(input: {
   ].join('\n\n');
 }
 
+/**
+ * O dia pedido já tem outro treino: o aluno escolhe entre pular o que estava lá (o resto da semana
+ * não muda) e empurrar os treinos seguintes até o próximo descanso. A opção 2 mostra o arranjo
+ * que ficaria, calculado pelo planejador, para a escolha ser informada.
+ */
+export function scheduleConflictQuestion(input: {
+  today: string;
+  date: string;
+  /** Treino que já estava no dia pedido. */
+  displacedKey: string;
+  /** Como a semana ficaria se os treinos fossem empurrados (só os dias que mudam). */
+  pushed: ReadonlyArray<{ date: string; sessionKey: string }>;
+  nameOf: NameOf;
+}): string {
+  const { today, date, displacedKey, pushed, nameOf } = input;
+  const day = dayName(date, today);
+  const pushList = pushed
+    .map((slot) => `${sessionName(nameOf(slot.sessionKey))} em ${dayName(slot.date, today)}`)
+    .join(', ');
+  return [
+    `${capitalized(day)} você já tem o ${bold(sessionName(nameOf(displacedKey)))}. Como prefere organizar? 💚`,
+    [
+      `1. ${bold('Pular')} o treino de ${day} e manter o resto da semana como está.`,
+      `2. ${bold('Empurrar')} os treinos, até o próximo descanso: ${pushList}.`,
+    ].join('\n'),
+    'É só responder 1 ou 2.',
+  ].join('\n\n');
+}
+
 export type RefusalReason =
   | 'PAST_DATE'
   | 'OUT_OF_WEEK'
@@ -163,7 +192,8 @@ export type RefusalReason =
   | 'NOTHING_PENDING'
   | 'DATE_TAKEN'
   | 'DUPLICATE_DATE'
-  | 'DUPLICATE_SESSION';
+  | 'DUPLICATE_SESSION'
+  | 'DATE_CONFLICT';
 
 export function scheduleRefusalMessage(input: {
   reason: RefusalReason;
@@ -208,6 +238,8 @@ export function scheduleRefusalMessage(input: {
       const name = sessionKey ? bold(sessionName(nameOf(sessionKey))) : 'Um treino';
       return `${name} apareceu mais de uma vez nesse arranjo, e cada treino entra uma vez só na semana. 💚 Me conta de novo como prefere organizar?`;
     }
+    case 'DATE_CONFLICT':
+      return `${capitalized(dayName(date ?? today, today))} já tem outro treino. 💚 Prefere pular o que já estava nesse dia ou empurrar os treinos da semana?`;
     case 'DATE_TAKEN':
     case 'DUPLICATE_DATE':
       return 'Do jeito que ficou, dois treinos cairiam no mesmo dia, e eu só consigo colocar um por dia. 💚 Me conta de novo como prefere organizar?';

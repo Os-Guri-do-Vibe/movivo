@@ -56,6 +56,7 @@ import {
   scheduleAlreadyThereMessage,
   scheduleAppliedMessage,
   scheduleChoiceQuestion,
+  scheduleConflictQuestion,
   scheduleNotUnderstoodMessage,
   scheduleRefusalMessage,
   scheduleUndoUnavailableMessage,
@@ -95,6 +96,20 @@ export function answerToOffer(message: string): 'YES' | 'NO' | null {
   return null;
 }
 
+/** Resposta curta à pergunta "pular ou empurrar?" ("1", "2", "pula", "empurra tudo"). */
+export function quickConflictAnswer(message: string): 'SKIP' | 'PUSH' | null {
+  const text = message
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (/^(1|um|opcao 1|primeira|a primeira)$|\bpul(a|ar|e)\b/.test(text)) return 'SKIP';
+  if (/^(2|dois|opcao 2|segunda|a segunda)$|\bempurr/.test(text)) return 'PUSH';
+  return null;
+}
+
 /** Ações cujo dia importa: com uma data recusada, nenhuma delas pode seguir como "hoje". */
 const DATED_ACTIONS: ReadonlyArray<ParsedScheduleRequest['action']> = [
   'TREINAR',
@@ -112,6 +127,8 @@ type PendingRequest = Extract<AdjustmentRequest, { kind: 'TRAIN_ON' | 'REST_ON' 
 interface FlowState {
   followUps: number;
   leaveOut?: { request: PendingRequest; candidates: Array<{ date: string; sessionKey: string }> };
+  /** O dia pedido já tem outro treino: espera "pular" ou "empurrar". */
+  conflict?: { request: Extract<PendingRequest, { kind: 'TRAIN_ON' }>; displacedKey: string };
   lateLog?: { date: string; options: LateLogOption[] };
 }
 
@@ -199,6 +216,21 @@ export class ScheduleFlowService {
         : { kind: 'NOT_HANDLED' };
     }
     const nameOf = this.nameOf(ctx);
+
+    // Resposta curta à pergunta "pular ou empurrar?": não precisa da IA.
+    if (state?.conflict) {
+      const quick = quickConflictAnswer(input.message);
+      if (quick) {
+        return this.adjust(
+          input,
+          ctx,
+          nameOf,
+          { ...state.conflict.request, onConflict: quick },
+          state,
+          now,
+        );
+      }
+    }
 
     // Pedido só do link: não precisa da IA.
     if (!state && input.intent === 'PEDIDO_LINK_TREINO') {
@@ -294,6 +326,16 @@ export class ScheduleFlowService {
           now,
         );
       case 'ESCOLHA':
+        if (state?.conflict && parsed.conflict) {
+          return this.adjust(
+            input,
+            ctx,
+            nameOf,
+            { ...state.conflict.request, onConflict: parsed.conflict },
+            state,
+            now,
+          );
+        }
         if (!state?.leaveOut || parsed.leaveOut.length === 0) {
           return this.unclear(input, state, parsed.action);
         }
@@ -350,6 +392,9 @@ export class ScheduleFlowService {
     });
 
     if (!plan.ok) {
+      if (plan.reason === 'DATE_CONFLICT' && request.kind === 'TRAIN_ON') {
+        return this.askConflict(input.userId, ctx, nameOf, request, plan, state);
+      }
       if (plan.reason === 'FULL_WEEK') {
         // `REORGANIZE` já diz onde fica cada treino: nunca devolve semana cheia.
         if (request.kind === 'REORGANIZE') return this.notUnderstood(input.userId, state);
@@ -494,7 +539,12 @@ export class ScheduleFlowService {
     // O pedido volta ao estado SEM o `leaveOut` anterior: a próxima resposta traz o novo.
     const base: PendingRequest =
       request.kind === 'TRAIN_ON'
-        ? { kind: 'TRAIN_ON', date: request.date, sessionKey: request.sessionKey }
+        ? {
+            kind: 'TRAIN_ON',
+            date: request.date,
+            sessionKey: request.sessionKey,
+            ...(request.onConflict ? { onConflict: request.onConflict } : {}),
+          }
         : { kind: 'REST_ON', date: request.date };
     const next: FlowState = {
       followUps,
@@ -512,6 +562,74 @@ export class ScheduleFlowService {
         request: { kind: request.kind, date: request.date },
         today: ctx.today,
         candidates: plan.candidates,
+        nameOf,
+      }),
+      adjusted: false,
+    };
+  }
+
+  /**
+   * O dia pedido já tem outro treino. Em vez de trocar os dois de lugar sem perguntar, o Coach
+   * mostra o que cada saída faz (pular o do dia ou empurrar a semana) e espera 1 ou 2. A opção
+   * "empurrar" vem do próprio planejador: se não há descanso para absorver o empurrão, cai na
+   * pergunta de "qual treino fica de fora".
+   */
+  private async askConflict(
+    userId: string,
+    ctx: ScheduleContext,
+    nameOf: NameOf,
+    request: Extract<PendingRequest, { kind: 'TRAIN_ON' }>,
+    plan: Extract<PlanFailure, { reason: 'DATE_CONFLICT' }>,
+    state: FlowState | null,
+  ): Promise<ScheduleFlowOutcome> {
+    const preview = planScheduleChange({
+      today: ctx.today,
+      slots: ctx.slots,
+      quota: ctx.quota,
+      sessionKeys: ctx.structure.sessions.map((session) => session.dayLabel),
+      request: { ...request, onConflict: 'PUSH' },
+    });
+    if (!preview.ok) {
+      if (preview.reason === 'FULL_WEEK') {
+        return this.askWhichToLeaveOut(
+          userId,
+          ctx,
+          nameOf,
+          { ...request, onConflict: 'PUSH' },
+          preview,
+          state,
+        );
+      }
+      await this.abandon(userId);
+      return { kind: 'FIXED', text: scheduleNotUnderstoodMessage(), adjusted: false };
+    }
+    const followUps = (state?.followUps ?? 0) + 1;
+    if (followUps > MAX_SCHEDULE_FOLLOW_UPS) {
+      await this.abandon(userId);
+      return { kind: 'FIXED', text: scheduleNotUnderstoodMessage(), adjusted: false };
+    }
+    const base: Extract<PendingRequest, { kind: 'TRAIN_ON' }> = {
+      kind: 'TRAIN_ON',
+      date: request.date,
+      sessionKey: request.sessionKey,
+    };
+    const displacedKey = plan.sessionKey as string;
+    const next: FlowState = { followUps, conflict: { request: base, displacedKey } };
+    await this.redis.set(
+      this.stateKey(userId),
+      JSON.stringify(next),
+      'EX',
+      SCHEDULE_FLOW_TTL_SECONDS,
+    );
+    return {
+      kind: 'FIXED',
+      text: scheduleConflictQuestion({
+        today: ctx.today,
+        date: request.date,
+        displacedKey,
+        pushed: preview.changes
+          .filter((change) => change.to !== null)
+          .map((change) => ({ date: change.date, sessionKey: change.to as string })),
         nameOf,
       }),
       adjusted: false,
@@ -705,6 +823,9 @@ export class ScheduleFlowService {
   }
 
   private questionText(state: FlowState, nameOf: NameOf): string {
+    if (state.conflict) {
+      return `O dia pedido já tem o treino ${state.conflict.displacedKey}. Pular o treino que já estava no dia (PULAR) ou empurrar os treinos seguintes (EMPURRAR)?`;
+    }
     if (state.lateLog) {
       const options = state.lateLog.options
         .map((option) => `${option.key} (${option.focus})`)

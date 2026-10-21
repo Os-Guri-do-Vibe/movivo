@@ -99,6 +99,9 @@ function randomRequest(random: () => number, world: Scenario): AdjustmentRequest
       kind: 'TRAIN_ON',
       date,
       ...(withKey ? { sessionKey: random() < 0.95 ? pick(world.keys) : 'X' } : {}),
+      // Metade dos pedidos já traz a escolha de "pular ou empurrar"; a outra metade recebe
+      // `DATE_CONFLICT` quando o dia pedido já tem treino.
+      ...(random() < 0.5 ? { onConflict: pick(['SKIP', 'PUSH'] as const) } : {}),
     };
   }
   return { kind: 'REST_ON', date };
@@ -113,6 +116,7 @@ const ALLOWED_REFUSALS = new Set([
   'QUOTA_REACHED',
   'NOTHING_PENDING',
   'FULL_WEEK',
+  'DATE_CONFLICT',
 ]);
 
 function keysOf(slots: readonly WeekSlot[]): string[] {

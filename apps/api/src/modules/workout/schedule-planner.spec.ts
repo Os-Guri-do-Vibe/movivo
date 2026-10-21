@@ -162,14 +162,75 @@ describe('Gabriel: treinar em dia sem treino', () => {
     expect(layout(result)).toMatchObject({ [TUE]: 'C', [SUN]: null, [THU]: 'A' });
   });
 
-  it('numa quinta (dia do A), pedir o B troca os dois de lugar', () => {
+  it('numa quinta (dia do A), pedir o B pergunta o que fazer com o A (DATE_CONFLICT)', () => {
+    const thu = slotsFor(GABRIEL, THU);
+    expect(plan(GABRIEL, thu, THU, { kind: 'TRAIN_ON', date: THU, sessionKey: 'B' })).toEqual({
+      ok: false,
+      reason: 'DATE_CONFLICT',
+      date: THU,
+      sessionKey: 'A',
+    });
+  });
+
+  it('conflito resolvido com PUSH: o B entra na quinta e o A avança para o descanso seguinte', () => {
     const thu = slotsFor(GABRIEL, THU);
     const result = plan(GABRIEL, thu, THU, {
       kind: 'TRAIN_ON',
       date: THU,
       sessionKey: 'B',
+      onConflict: 'PUSH',
     }) as PlanSuccess;
-    expect(layout(result)).toMatchObject({ [THU]: 'B', [FRI]: 'A' });
+    expect(layout(result)).toMatchObject({ [THU]: 'B', [FRI]: 'A', [SUN]: 'C' });
+    expect(result.dropped).toEqual([]);
+  });
+
+  it('conflito resolvido com SKIP: o A fica de fora da semana e o resto não muda', () => {
+    const thu = slotsFor(GABRIEL, THU);
+    const result = plan(GABRIEL, thu, THU, {
+      kind: 'TRAIN_ON',
+      date: THU,
+      sessionKey: 'B',
+      onConflict: 'SKIP',
+    }) as PlanSuccess;
+    expect(layout(result)).toMatchObject({ [THU]: 'B', [FRI]: null, [SUN]: 'C' });
+    expect(result.dropped).toEqual(['A']);
+  });
+
+  it('PUSH empurra a cadeia inteira até o próximo descanso (João: segunda cheia até quinta)', () => {
+    const mon = slotsFor(JOAO, MON);
+    const result = plan(JOAO, mon, MON, {
+      kind: 'TRAIN_ON',
+      date: TUE,
+      sessionKey: 'T1',
+      onConflict: 'PUSH',
+    }) as PlanSuccess;
+    expect(layout(result)).toMatchObject({
+      [MON]: null,
+      [TUE]: 'T1',
+      [WED]: 'T2',
+      [THU]: 'T3',
+      [FRI]: 'T4',
+      [SAT]: 'T5',
+    });
+  });
+
+  it('PUSH sem nenhum descanso depois do dia pedido cai na semana cheia', () => {
+    const full = slotsFor(
+      JOAO,
+      MON,
+      {},
+      new Map([
+        [FRI, 'T5'],
+        [SUN, 'T5'],
+      ]),
+    );
+    const result = plan(JOAO, full, MON, {
+      kind: 'TRAIN_ON',
+      date: SAT,
+      sessionKey: 'T1',
+      onConflict: 'PUSH',
+    });
+    expect(result).toMatchObject({ ok: false });
   });
 
   it('pedir "treinar hoje" num dia que já tem treino não muda nada', () => {
@@ -224,11 +285,12 @@ describe('Gabriel: treinar em dia sem treino', () => {
 
   it('um sessão pendente de dia passado (sem registro) pode ser feita hoje', () => {
     const fri = slotsFor(GABRIEL, FRI);
-    // A ficou na quinta sem registro; sexta é B. Pedir o A na sexta: B vai para o sábado livre.
+    // A ficou na quinta sem registro; sexta é B. Pedir o A na sexta (PUSH): B vai para o sábado livre.
     const result = plan(GABRIEL, fri, FRI, {
       kind: 'TRAIN_ON',
       date: FRI,
       sessionKey: 'A',
+      onConflict: 'PUSH',
     }) as PlanSuccess;
     expect(layout(result)).toMatchObject({ [THU]: null, [FRI]: 'A', [SAT]: 'B', [SUN]: 'C' });
   });
