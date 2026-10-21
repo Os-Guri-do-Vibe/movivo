@@ -66,6 +66,7 @@ const parsedSchema = z
   .object({
     action: z.enum(ACTIONS),
     date: z.string().nullable().optional(),
+    conflict: z.enum(['PULAR', 'EMPURRAR']).nullable().optional(),
     sessionKey: z.string().max(60).nullable().optional(),
     leaveOut: z
       .array(
@@ -99,6 +100,8 @@ export interface ParsedScheduleRequest {
   sessionKey: string | null;
   leaveOut: SessionSelector[];
   placements: Array<{ sessionKey: string; date: string | null }>;
+  /** Resposta à pergunta "pular o treino do dia ou empurrar os seguintes?". */
+  conflict: 'SKIP' | 'PUSH' | null;
 }
 
 export interface WeekDayForParser {
@@ -135,6 +138,7 @@ const EMPTY = (action: ScheduleRequestAction): ParsedScheduleRequest => ({
   sessionKey: null,
   leaveOut: [],
   placements: [],
+  conflict: null,
 });
 
 function parseJson(text: string): unknown {
@@ -228,6 +232,7 @@ export class ScheduleRequestParserService {
           'decide nada: só extrai o que ele pediu. Receberá o dia de hoje, a semana (segunda a ' +
           'domingo, com o treino previsto em cada dia) e a lista de treinos. Responda somente JSON ' +
           'estrito: {"action": "...", "date": "<DIA>"|null, "sessionKey": "<chave>"|null, ' +
+          '"conflict": "PULAR"|"EMPURRAR"|null, ' +
           '"leaveOut": [{"date": "<DIA>"|null, "sessionKey": "<chave>"|null}], ' +
           '"placements": [{"sessionKey": "<chave>", "date": "<DIA>"|null}]}.\n' +
           'action: TREINAR = quer treinar num dia (hoje se não disser outro) um treino do plano, ' +
@@ -251,7 +256,18 @@ export class ScheduleRequestParserService {
           'com segurança. Cansaço ou sono ruim explicam o pedido, não o mudam: "estou cansado, ' +
           'amanhã descanso" é DESCANSAR AMANHA. O nome com que ele chama o Coach (Léo, ' +
           'Leozinho) e as hesitações não mudam o pedido; pedidos para o profissional rever o ' +
-          'protocolo no futuro não são agenda desta semana, ignore essa parte. ' +
+          'protocolo no futuro não são agenda desta semana, ignore essa parte. Quando ele diz ' +
+          'ONDE o treino vai ficar ("quinta eu descanso e faço sábado"), é TREINAR no dia novo ' +
+          '(date = o dia novo, sessionKey = o treino movido). "Trocar o descanso de sexta pela ' +
+          'quarta" é DESCANSAR na quarta. Se ele mexe em MAIS DE UM treino na mesma mensagem ' +
+          '("o de hoje vai pra amanhã e o de amanhã pra sexta"), é REORGANIZAR com uma posição ' +
+          'para CADA treino citado. Pergunta do tipo "posso treinar domingo?" é um PEDIDO para ' +
+          'treinar naquele dia, inclusive quando o dia é de fora desta semana (date = ' +
+          'FORA_DA_SEMANA). ESCOLHA só existe quando há pergunta em aberto; sem ela, "pode tirar ' +
+          'o treino de quinta" é DESCANSAR na quinta. Quando a pergunta em aberto é "pular o ' +
+          'treino que já estava no dia ou empurrar os seguintes?", ele responde com ESCOLHA e ' +
+          'conflict = PULAR (o treino do dia fica de fora, o resto não muda) ou EMPURRAR (os ' +
+          'treinos seguintes avançam um dia); fora dessa pergunta, conflict é null. ' +
           UNTRUSTED_CONTEXT_POLICY,
         messages: [
           {
@@ -317,6 +333,8 @@ export class ScheduleRequestParserService {
         sessionKey: cleanKey(parsed.sessionKey),
         leaveOut,
         placements,
+        conflict:
+          parsed.conflict === 'PULAR' ? 'SKIP' : parsed.conflict === 'EMPURRAR' ? 'PUSH' : null,
       };
     } catch (error) {
       this.logger.warn(

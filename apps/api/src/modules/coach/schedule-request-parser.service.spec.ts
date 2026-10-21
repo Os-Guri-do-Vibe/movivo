@@ -99,6 +99,7 @@ describe('ScheduleRequestParserService.parse', () => {
       sessionKey: 'A',
       leaveOut: [],
       placements: [],
+      conflict: null,
     });
     expect(complete.mock.calls[0]?.[0]).toMatchObject({
       json: true,
@@ -265,6 +266,16 @@ describe('ScheduleRequestParserService.parse', () => {
       sessionKey: null,
       leaveOut: [],
       placements: [],
+      conflict: null,
     });
+  });
+
+  it('resposta à pergunta "pular ou empurrar?" vira conflict SKIP ou PUSH', async () => {
+    const skip = make(JSON.stringify({ action: 'ESCOLHA', conflict: 'PULAR' }));
+    expect((await skip.service.parse(request())).conflict).toBe('SKIP');
+    const push = make(JSON.stringify({ action: 'ESCOLHA', conflict: 'EMPURRAR' }));
+    expect((await push.service.parse(request())).conflict).toBe('PUSH');
+    const none = make(JSON.stringify({ action: 'ESCOLHA', conflict: null }));
+    expect((await none.service.parse(request())).conflict).toBeNull();
   });
 });
