@@ -16,6 +16,8 @@ import { useEffect, useState } from 'react';
 export default function WorkoutAccessPage() {
   const router = useRouter();
   const [token, setToken] = useState('');
+  // Registro tardio: o link abre o diário no dia do treino (`#token=...&date=AAAA-MM-DD`).
+  const [date, setDate] = useState('');
   const [firstName, setFirstName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -23,7 +25,10 @@ export default function WorkoutAccessPage() {
   const [resending, setResending] = useState(false);
 
   useEffect(() => {
-    const value = new URLSearchParams(window.location.hash.slice(1)).get('token') ?? '';
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const value = hash.get('token') ?? '';
+    const requestedDate = hash.get('date') ?? '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) setDate(requestedDate);
     // React executa Effects duas vezes no Strict Mode de desenvolvimento. Depois da
     // primeira passagem o fragmento já foi removido; não podemos apagar o token em memória.
     if (value) {
@@ -44,9 +49,11 @@ export default function WorkoutAccessPage() {
     return existing.ok;
   }
 
+  const workoutPath = date ? `/treino?date=${date}` : '/treino';
+
   async function openWorkout() {
     if (!token) {
-      if (await hasActiveSession()) return router.replace('/treino');
+      if (await hasActiveSession()) return router.replace(workoutPath);
       setError('Link incompleto. Abra novamente a mensagem recebida no WhatsApp.');
       return;
     }
@@ -58,7 +65,7 @@ export default function WorkoutAccessPage() {
       body: JSON.stringify({ token }),
     });
     if (response.ok) {
-      router.replace('/treino');
+      router.replace(workoutPath);
       return;
     }
     /**
@@ -68,7 +75,7 @@ export default function WorkoutAccessPage() {
      * 30 dias daquela primeira troca. Antes de bloquear o check-in do dia com "link já
      * usado", confere se já existe sessão válida; só mostra erro se não existir.
      */
-    if (await hasActiveSession()) return router.replace('/treino');
+    if (await hasActiveSession()) return router.replace(workoutPath);
     const body = (await response.json().catch(() => null)) as { message?: string } | null;
     setError(body?.message ?? 'Não foi possível abrir este link.');
     setBusy(false);

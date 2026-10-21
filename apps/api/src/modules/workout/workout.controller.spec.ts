@@ -18,6 +18,7 @@ function makeController() {
   const journal = {
     journal: vi.fn(async () => ({ firstName: 'Pedro' })),
     start: vi.fn(async () => undefined),
+    startLate: vi.fn(async () => undefined),
     saveSets: vi.fn(async () => undefined),
     finish: vi.fn(async () => undefined),
     shareCardImage: vi.fn(async () => ({ png: Buffer.from('png'), etag: 'abc' })),
@@ -85,6 +86,8 @@ describe('WorkoutController', () => {
     };
 
     await expect(controller.start('Bearer token', SESSION_ID)).resolves.toEqual({ ok: true });
+    await expect(controller.lateStart('Bearer token', SESSION_ID)).resolves.toEqual({ ok: true });
+    expect(journal.startLate).toHaveBeenCalledWith(USER_ID, SESSION_ID);
     await expect(controller.sets('Bearer token', SESSION_ID, { entries })).resolves.toEqual({
       ok: true,
     });

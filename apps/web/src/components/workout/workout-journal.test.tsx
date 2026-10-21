@@ -163,6 +163,7 @@ interface FetchHandlers {
   journal?: (url: string) => Response;
   saveSets?: (body: { entries: WorkoutSetInput[] }) => Response;
   start?: () => Response;
+  lateStart?: () => Response;
   finish?: (body: unknown) => Response;
 }
 
@@ -183,6 +184,9 @@ function installFetch(handlers: FetchHandlers = {}) {
     }
     if (/\/sessions\/[^/]+\/start$/.test(url) && method === 'POST') {
       return handlers.start?.() ?? ok({});
+    }
+    if (/\/sessions\/[^/]+\/late-start$/.test(url) && method === 'POST') {
+      return handlers.lateStart?.() ?? ok({});
     }
     if (/\/sessions\/[^/]+\/finish$/.test(url) && method === 'POST') {
       const body = init?.body ? JSON.parse(init.body as string) : undefined;
@@ -1006,5 +1010,135 @@ describe('WorkoutJournalView — finalizar treino e feedback', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Enviar e finalizar' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Falha ao concluir treino.');
     expect(screen.getByText('Como foi para você?')).toBeVisible();
+  });
+});
+
+describe('WorkoutJournalView — registro tardio (agenda flexível)', () => {
+  const YESTERDAY = '2026-09-02';
+
+  afterEach(() => {
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('dia recente sem registro mostra "Registrar este treino" em vez de "Dia encerrado"', async () => {
+    installFetch({
+      journal: () =>
+        ok(
+          journalFor(YESTERDAY, {
+            workout: workoutInProgress({ status: 'PLANNED', startedAt: null, canLogLate: true }),
+          }),
+        ),
+    });
+    render(<WorkoutJournalView />);
+    expect(await screen.findByRole('button', { name: 'Registrar este treino' })).toBeVisible();
+    expect(screen.queryByText('Dia encerrado')).not.toBeInTheDocument();
+  });
+
+  it('fora da janela continua só consulta: "Dia encerrado"', async () => {
+    installFetch({
+      journal: () =>
+        ok(
+          journalFor(YESTERDAY, {
+            workout: workoutInProgress({ status: 'PLANNED', startedAt: null, canLogLate: false }),
+          }),
+        ),
+    });
+    render(<WorkoutJournalView />);
+    expect(await screen.findByText('Dia encerrado')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Registrar este treino' })).not.toBeInTheDocument();
+  });
+
+  it('ao registrar, abre o treino do dia sem cronômetro e com o botão de finalizar', async () => {
+    const lateStart = vi.fn(() => ok({}));
+    let opened = false;
+    installFetch({
+      lateStart: () => {
+        opened = true;
+        return lateStart();
+      },
+      journal: () =>
+        ok(
+          journalFor(YESTERDAY, {
+            workout: opened
+              ? workoutInProgress({ startedAt: null, loggedLate: true, canLogLate: false })
+              : workoutInProgress({ status: 'PLANNED', startedAt: null, canLogLate: true }),
+          }),
+        ),
+    });
+    render(<WorkoutJournalView />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Registrar este treino' }));
+
+    expect(await screen.findByText('Registro tardio')).toBeVisible();
+    expect(lateStart).toHaveBeenCalledTimes(1);
+    // Sem cronômetro: nenhum relógio "00:00" no cabeçalho.
+    expect(screen.queryByText('00:00')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Finalizar treino' })).toBeVisible();
+  });
+
+  it('treino concluído por registro tardio não inventa tempo total', async () => {
+    installFetch({
+      journal: () =>
+        ok(
+          journalFor(YESTERDAY, {
+            workout: workoutInProgress({
+              status: 'COMPLETED',
+              startedAt: null,
+              finishedAt: '2026-09-03T12:00:00.000Z',
+              durationSeconds: null,
+              perceivedEffort: 7,
+              loggedLate: true,
+            }),
+          }),
+        ),
+    });
+    render(<WorkoutJournalView />);
+    expect(await screen.findByText(/Registrado depois/)).toBeVisible();
+    expect(screen.queryByText(/Tempo total/)).not.toBeInTheDocument();
+  });
+
+  it('o link do registro tardio abre o diário direto no dia do treino (?date=)', async () => {
+    window.history.replaceState(null, '', `/treino?date=${YESTERDAY}`);
+    const fetchMock = installFetch({ journal: (url) => ok(journalFor(parseDateParam(url))) });
+    render(<WorkoutJournalView />);
+    await screen.findByText('Ana');
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/workout/journal?date=${YESTERDAY}`,
+      expect.anything(),
+    );
+  });
+
+  it('ignora um ?date= inválido e abre hoje', async () => {
+    window.history.replaceState(null, '', '/treino?date=amanha');
+    const fetchMock = installFetch({ journal: () => ok(journalFor(TODAY)) });
+    render(<WorkoutJournalView />);
+    await screen.findByText('Ana');
+    expect(fetchMock).toHaveBeenCalledWith('/api/workout/journal', expect.anything());
+  });
+
+  it('se o treino mudou por baixo da tela (Coach reorganizou), recarrega e explica em vez de erro seco', async () => {
+    let calls = 0;
+    installFetch({
+      start: () => fail(404, { message: 'Not Found' }),
+      journal: () => {
+        calls += 1;
+        return ok(
+          journalFor(TODAY, {
+            workout: workoutInProgress({
+              id: calls === 1 ? 'workout-velho' : 'workout-novo',
+              status: 'PLANNED',
+              startedAt: null,
+            }),
+          }),
+        );
+      },
+    });
+    render(<WorkoutJournalView />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Iniciar' }));
+    expect(
+      await screen.findByText(
+        'O seu treino foi atualizado. Conferi a tela, toque em Iniciar de novo.',
+      ),
+    ).toBeVisible();
   });
 });
