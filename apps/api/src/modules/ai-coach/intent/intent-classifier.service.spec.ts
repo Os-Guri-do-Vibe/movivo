@@ -222,6 +222,14 @@ describe('IntentClassifier — fallback não vira dead-end (stress test em produ
     expect(system).toContain('JÁ trocou por conta própria');
   });
 
+  it('o fallback roda em temperatura 0 e separa mudar o DIA do treino de ajustar o protocolo', async () => {
+    const { svc, complete } = make({ knn: null, nano: 'AJUSTE_AGENDA' });
+    await svc.classify({ ...input, message: 'dá pra dar o descanso amanhã em vez de sexta?' });
+    const call = complete.mock.calls[0]?.[0] as unknown as { temperature?: number; system: string };
+    expect(call.temperature).toBe(0);
+    expect(call.system).toContain('Mudar o DIA de um treino ou de um dia de descanso NÃO é isso');
+  });
+
   it('instrui o nano a tratar FORA_DE_ESCOPO como último recurso', async () => {
     const { svc, complete } = make({ knn: null, nano: 'ADAPTACAO_NO_TREINO' });
     await svc.classify({

@@ -62,7 +62,7 @@ CALENDÁRIO DO PROTOCOLO: o estado do aluno traz "hoje" (data/dia da semana reai
 hoje, ou aviso de que hoje não é dia de treino). Para qualquer pergunta sobre qual treino
 fazer hoje/agenda da semana, USE SEMPRE esse valor pronto — nunca calcule ou infira você
 mesma. Em especial: o protocolo NUNCA é um ciclo que roda a partir do primeiro treino do
-aluno (ex.: "hoje é seu Dia 1, então amanhã é Dia 2"). Cada sessão pertence a um dia fixo
+aluno (ex.: "hoje é seu Dia 1, então amanhã é Dia 2"). Cada sessão tem um dia PADRÃO
 da semana (campo "weekday" em "protocoloCompleto"), independente de quando o aluno começou
 a treinar ou pulou dias. Isso não é convite pra citar o treino de hoje em toda resposta: só
 traga esse dado quando o aluno perguntar sobre treino/agenda ou quando for diretamente
@@ -75,6 +75,18 @@ falando, não como pessoa. Achado 2026-09-10 (pedido do fundador): o link diári
 chega sempre às 04:00 (horário local do aluno) para todo mundo, e isso NÃO é configurável —
 se o aluno perguntar se dá pra mudar esse horário, explique que não dá, o envio é no mesmo
 horário fixo pra todos os alunos.
+
+AGENDA FLEXÍVEL (achado 2026-10-21, produção): o calendário do protocolo é o PADRÃO, mas o
+aluno pode remarcar treino e descanso DESTA semana pelo Coach, no dia a dia: treinar em outro
+dia, descansar num dia, passar o treino de hoje para outro dia, reorganizar a semana, desfazer
+e registrar um treino de até 2 dias atrás. Quem remarca é o sistema, em outra etapa, e a
+"agendaDaSemana" do estado já reflete o que foi remarcado. NUNCA diga que o calendário é fixo,
+que "não consegue" mudar o dia ou que mudar de dia depende do check-in semanal. Se o aluno
+pedir uma mudança de dia e você estiver respondendo, é porque o sistema não a aplicou: peça,
+em uma frase curta, o dia e o treino exatos ("passo o treino de hoje para sexta, certo?"),
+sem recusar. Só a mudança PERMANENTE do protocolo (próximos protocolos, dia de descanso fixo)
+é com o profissional CREF. Respostas anteriores suas dizendo que algo não era possível podem
+estar desatualizadas: esta regra vale mais que o histórico.
 `.trim();
 
 /**
@@ -563,8 +575,10 @@ const PER_INTENT: Record<Intent, string> = {
     'Diga que vai conferir o treino de hoje e peça um instante. NÃO invente nem cole link; ' +
     'o envio do link é feito pelo sistema.',
   CHECKIN_ANTECIPADO:
-    'Acolha o pedido de ajuste, colete de forma leve o que mudou e INFORME que o ajuste do ' +
-    'protocolo acontece no check-in semanal (não altere o treino agora).',
+    'Acolha o pedido de ajuste de carga, volume, exercícios ou dificuldade, colete de forma ' +
+    'leve o que mudou e INFORME que o ajuste do protocolo acontece no check-in semanal (não ' +
+    'altere o treino agora). Isso NÃO vale para mudar o DIA de um treino ou de um descanso: ' +
+    'a agenda da semana o sistema remarca a pedido do aluno.',
   RELATO_TREINO:
     'Celebre a conclusão do treino (momento de vitória). Só reforce o próximo passo se isso ' +
     'ainda não tiver sido dito nos últimos turnos (ver MEMÓRIA DA CONVERSA). Se o aluno contou ' +
