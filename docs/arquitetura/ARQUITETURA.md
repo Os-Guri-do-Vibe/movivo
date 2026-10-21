@@ -21,10 +21,9 @@ O campo persistido legado `maxPhase` não impõe mais fase; só mantém compatib
 com os limites de esforço em protocolos antigos. A mudança de código não altera nem
 regera automaticamente protocolos existentes.
 
-**Qualidade contextual dos rascunhos (2026-10-15):** somente rascunhos individualizados
-com PAR-Q bloqueante passam pela avaliação contextual adicional, além da validação
-determinística. Protocolos sem PAR-Q bloqueante e templates de fallback não passam por
-essa etapa. A geração de todos os protocolos continua conciliando metodologia vigente,
+**Qualidade contextual dos rascunhos (2026-10-15, estendida em 2026-10-21 a todo rascunho
+individualizado; templates de fallback seguem sem a etapa):** passam pela avaliação
+contextual adicional, além da validação determinística. A geração de todos os protocolos continua conciliando metodologia vigente,
 conhecimento científico, objetivo, ênfases, experiência, duração e contexto integral
 da anamnese, independentemente de avaliação posterior. O planner avalia a aplicação da metodologia publicada em conjunto com objetivo,
 necessidades, preferências, rotina, restrições e evolução do aluno. O avaliador usa o
@@ -64,12 +63,47 @@ ordem metodológica dos grupos, tempo incluindo unilateralidade e transições,
 progressão acionável e coerência dos textos. Limitações da oferta elegível devem ser
 explicadas, nunca ocultadas por títulos ou compensadas com exercício vetado.
 A busca de evidências de dosagem inclui regularidade, tempo parado, frequência e
-tempo por sessão, sem aumentar o número de buscas. Não há novo parecer/chamada de IA
-para perfis sem PAR-Q bloqueante, nem garantia de qualidade individual por prompt.
+tempo por sessão, sem aumentar o número de buscas. Nenhum prompt garante qualidade individual.
 Testes de contrato com respostas simuladas não substituem avaliação de protocolos
 reais pelo RT. Referências técnicas:
 [Prompt engineering](https://developers.openai.com/api/docs/guides/prompt-engineering) e
 [Evaluation best practices](https://developers.openai.com/api/docs/guides/evaluation-best-practices).
+
+**Aderência à metodologia na geração (2026-10-21, auditoria de 24 protocolos reais + edições do RT):**
+a metodologia publicada continua sendo a ÚNICA fonte de regra — o código não passa a conhecer
+números, ordem de grupos nem frequências; ele (1) faz o modelo executar as contas que a
+metodologia exige e (2) mede o resultado para o juiz e para a correção. Mudanças:
+
+- **Planejamento antes das sessões:** o DeepSeek roda com `thinking` desligado (três testes
+  com raciocínio ligado nunca fecharam o JSON), então o JSON de saída ganhou o campo
+  `planejamento` (divisão, séries semanais por grupo, ordem dos grupos e minutos por sessão),
+  escrito ANTES de `sessions`. É descartado antes da persistência e volta ao modelo apenas na
+  rodada de correção. A base de referência passa a ser apresentada por grupo muscular
+  (ênfases do aluno primeiro); a ordem de prioridade dentro do grupo não mudou.
+- **Juiz contextual passa a ser confiável e a enxergar números:** a checagem do trecho
+  citado deixou de ser `includes` literal (uma citação com a caixa trocada invalidava o parecer
+  inteiro — 27 de 28 execuções do laboratório ficaram sem avaliação) e tolera caixa, acento e
+  pontuação, com UM refazer quando ainda houver citação inválida. Recebe `facts.measurements`
+  (`protocol-measurements.ts`: séries por grupo na semana, frequência, sequência de grupos por
+  sessão, tempo estimado frente ao declarado) e ganhou o critério `SESSION_SEQUENCING`. Medições
+  descrevem; quem julga é a metodologia. As medições também vão na mensagem de correção.
+- **Dor sem veto vira cautela (`UserConstraints.cautionTags`, decisão do fundador):** dor
+  moderada (< `PAIN_VETO_INTENSITY`), estável/melhorando, sem acompanhamento ativo e sem
+  orientação profissional de evitar deixa de apagar exercícios da base; eles ficam marcados
+  `cautela:` e o prompt manda reduzir carga/volume, preferir máquina/cabo e não tirar o padrão
+  do programa. Continuam VETO: PAR-Q, orientação de evitar, acompanhamento médico ativo, piora,
+  dor forte e tags clínicas (`STRICT_CONTRAINDICATION_TAGS`: cardíaca, queda, gestação —
+  mesma divisão que o RT já adotou na troca de exercício). `injuryTags` segue sendo o conjunto
+  COMPLETO de restrições para coach, troca de exercício e painel. Protocolo que prescreve
+  exercício com cautela segue o fluxo normal (revisão OPCIONAL; só PAR-Q bloqueante exige
+  revisão obrigatória — `CAUTION_PROTOCOL_REVIEW_URGENCY`) e o painel lista, ao CREF, os
+  exercícios do rascunho que carregam a região. Corte de dor forte: 8/10 (RT, 2026-10-21).
+- **`ISOLATION_AS_BASE` passou de por-sessão para semanal** (70%): o teto por sessão empurrava
+  o modelo a pôr composto de outro grupo em dia de braços/ombros/peito, que o RT desfazia à mão.
+- **Palavra-chave de lesão com fronteira de palavra** ("pe" não casa mais com "peso"/"pessoa").
+- **Avaliação offline:** `apps/api/eval/` roda o pipeline real com a metodologia e o catálogo
+  publicados sobre perfis sintéticos e compara variantes (ver README da pasta). Toda mudança de
+  prompt/validador do gerador deve ser medida ali antes de ir a produção.
 
 **Monólito Modular com Bounded Contexts explícitos em NestJS — não microservices.**
 
