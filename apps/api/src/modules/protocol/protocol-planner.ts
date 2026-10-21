@@ -187,7 +187,11 @@ export async function planProtocol(
 
   // 1ª geração: erro aqui continua subindo (retry do job/DLQ, contrato inalterado).
   let quality: ContextualQualityAssessment | undefined;
-  const assessContextualQuality = command.constraints.requiresProfessionalReview;
+  // Segurança clínica (PAR-Q) decide se o CREF precisa assinar; qualidade contextual é uma
+  // etapa diferente e vale para todo titular. Quando encontra lacunas, a própria metodologia
+  // orienta as rodadas de correção abaixo. Sem PAR-Q, uma lacuna que persista continua sendo
+  // sinalizada, mas não muda a política de auto-liberação do worker.
+  const assessContextualQuality = true;
   let gen = await generator.generate(command);
   let verdict = validate(gen.structure);
   if (assessContextualQuality && verdict.action !== 'BLOCK_FALLBACK')

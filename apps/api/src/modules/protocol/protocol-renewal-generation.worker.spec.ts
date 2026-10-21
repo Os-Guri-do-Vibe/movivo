@@ -274,15 +274,17 @@ describe('renovação com qualidade contextual pendente', () => {
     },
   );
 
-  it('sem mudança bloqueante no PAR-Q não avalia qualidade e agenda auto-liberação', async () => {
+  it('sem mudança bloqueante no PAR-Q mantém auto-liberação se a qualidade estiver indisponível', async () => {
     const { worker, generator, repository, enqueue } = makeWorker();
     vi.mocked(generator.assessQuality).mockResolvedValue(qualityAssessment('UNAVAILABLE'));
     await worker.process(job());
-    expect(generator.assessQuality).not.toHaveBeenCalled();
+    expect(generator.assessQuality).toHaveBeenCalledTimes(1);
     expect(repository.persist).toHaveBeenCalledWith(
       expect.objectContaining({
         reviewUrgency: 'OPTIONAL',
-        constraints: expect.objectContaining({ contextualQuality: undefined }),
+        constraints: expect.objectContaining({
+          contextualQuality: qualityAssessment('UNAVAILABLE').summary,
+        }),
       }),
     );
     expect(enqueue).toHaveBeenCalledWith(
