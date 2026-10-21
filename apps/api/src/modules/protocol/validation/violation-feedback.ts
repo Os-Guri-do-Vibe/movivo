@@ -200,8 +200,10 @@ function sessionNonIsolationOptions(
   catalog: CatalogLookup,
   referenceBaseIds: readonly string[],
 ): string[] {
+  // `buildCorrectionMessage` só chama este helper com exercícios que acabou de classificar
+  // como ISOLATION pelo mesmo catálogo; portanto cada id aqui necessariamente existe.
   const groups = new Set(
-    exercises.flatMap((exercise) => catalog.getById(exercise.exerciseId)?.muscleGroups ?? []),
+    exercises.flatMap((exercise) => catalog.getById(exercise.exerciseId)!.muscleGroups),
   );
   const candidates = referenceBaseIds.filter((id) => catalog.getById(id)?.pattern !== 'ISOLATION');
   const sharing = candidates.filter(
