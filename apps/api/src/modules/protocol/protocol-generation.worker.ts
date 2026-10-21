@@ -103,17 +103,30 @@ export const PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const REPAIRED_PROTOCOL_REVIEW_URGENCY: 'MANDATORY' | 'OPTIONAL' = 'OPTIONAL';
 
 /**
+ * Política de liberação de protocolo que PRESCREVE exercício com cautela por dor relatada
+ * (`UserConstraints.cautionTags`, 2026-10-21). Antes da política de cautela, a região doída
+ * apagava o exercício da base e nada com ela chegava ao aluno sem o profissional; agora o
+ * exercício pode entrar (com carga/volume reduzidos). Decisão do fundador e do RT (2026-10-21):
+ * só PAR-Q bloqueante exige revisão obrigatória; dor relatada segue o fluxo normal (fila de
+ * revisão OPCIONAL, janela de 24h) e o painel lista ao CREF os exercícios com cautela. Trocar
+ * para `'MANDATORY'` aqui é a única mudança necessária para exigir assinatura.
+ */
+export const CAUTION_PROTOCOL_REVIEW_URGENCY: 'MANDATORY' | 'OPTIONAL' = 'OPTIONAL';
+
+/**
  * ÚNICO ponto de decisão `MANDATORY` × `OPTIONAL` da geração (inicial e renovação). Motivos
  * independentes de `MANDATORY`, qualquer um basta: PAR-Q do titular, template de fallback
- * (sem avaliação contextual em templates). Qualidade contextual é avaliada para qualquer
+ * (sem avaliação contextual em templates), exercício com cautela por dor
+ * (`CAUTION_PROTOCOL_REVIEW_URGENCY`). Qualidade contextual é avaliada para qualquer
  * protocolo individualizado, mas não altera esta política de urgência. Reparo determinístico segue
  * `REPAIRED_PROTOCOL_REVIEW_URGENCY`.
  */
 export function reviewUrgencyForPlan(
-  plan: Pick<PlanResult, 'usedFallbackTemplate' | 'repairs'>,
+  plan: Pick<PlanResult, 'usedFallbackTemplate' | 'repairs' | 'cautionExercises'>,
   requiresProfessionalReview: boolean,
 ): 'MANDATORY' | 'OPTIONAL' {
   if (requiresProfessionalReview || plan.usedFallbackTemplate) return 'MANDATORY';
+  if ((plan.cautionExercises ?? 0) > 0) return CAUTION_PROTOCOL_REVIEW_URGENCY;
   if (plan.repairs.length > 0) return REPAIRED_PROTOCOL_REVIEW_URGENCY;
   return 'OPTIONAL';
 }
