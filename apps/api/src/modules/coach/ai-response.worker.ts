@@ -466,6 +466,18 @@ export class AIResponseWorker implements OnModuleInit {
       }
 
       const intent = await this.classifier.classify({ userId, user: scrubUser, message });
+      // Sem conteúdo da mensagem: só o que permite auditar erro de roteamento depois (qual
+      // intenção, por qual estágio, com que confiança).
+      this.logger.info(
+        {
+          event: 'intent_classified',
+          userId,
+          intent: intent.intent,
+          stage: intent.stage,
+          confidence: intent.confidence,
+        },
+        'intenção da mensagem classificada',
+      );
 
       // TASK-3.6.1 (b) — Handoff de SEGURANÇA (red flag do guardrail US-3.4): não gera resposta
       // de IA; orienta atendimento presencial imediato + alerta prioritário. Sem promessa de SLA.

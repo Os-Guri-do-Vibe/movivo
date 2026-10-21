@@ -28,6 +28,7 @@ import {
   lowestLevel,
 } from '../exercise-catalog';
 import { ExerciseCatalogProvider } from '../exercise-catalog-provider.service';
+import { isEquivalentOrLowerRisk } from '../exercise-substitution';
 import { isPhaseDurationWithinRange, PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import {
   duplicatedWeekdays,
@@ -148,6 +149,16 @@ export interface ValidateProtocolOptions {
    * delas é genérico e esconderia um termo novo.
    */
   baseline?: ProtocolStructure;
+  /**
+   * Trocas de exercício de risco IGUAL OU MENOR (decisão do fundador e do RT, 2026-10-21): o
+   * exercício que ENTRA pode carregar as mesmas contraindicações articulares/musculares do que
+   * SAI, porque o que sai foi prescrito/aprovado pelo profissional para este aluno. Para esses
+   * pares, a contraindicação do exercício novo não conta como conflito introduzido pela troca.
+   * Tag cardíaca, de queda ou de gestação nunca é relaxada (`isEquivalentOrLowerRisk`); um
+   * candidato de risco MAIOR continua barrado. Só vale com `baseline` (alteração automática
+   * sobre uma versão aprovada).
+   */
+  cautionSwaps?: ReadonlyArray<{ from: string; to: string }>;
 }
 
 /** Chave estável de uma violação — é o que o profissional reconhece ao assinar. */
@@ -205,9 +216,43 @@ export class ValidationService {
         .filter((v) => !isTextRule(v.rule))
         .map(violationKey),
     );
+    const carriedOver = this.cautionSwapTargets(input, options.cautionSwaps ?? []);
     return aggregate(
-      violations.filter((v) => isTextRule(v.rule) || !accepted.has(violationKey(v))),
+      violations.filter(
+        (v) =>
+          isTextRule(v.rule) ||
+          !(accepted.has(violationKey(v)) || this.isCarriedOverContraindication(v, carriedOver)),
+      ),
     );
+  }
+
+  /** Ids que ENTRAM numa troca de risco igual ou menor para este aluno (ver `cautionSwaps`). */
+  private cautionSwapTargets(
+    input: ValidateProtocolInput,
+    swaps: ReadonlyArray<{ from: string; to: string }>,
+  ): ReadonlySet<string> {
+    const restricted = [
+      ...new Set<ContraindicationTag>([
+        ...(input.constraints.injuryTags ?? []),
+        ...(input.parqFlags ?? []),
+      ]),
+    ];
+    const accepted = new Set<string>();
+    for (const swap of swaps) {
+      const from = this.catalog.getById(swap.from);
+      const to = this.catalog.getById(swap.to);
+      if (from && to && isEquivalentOrLowerRisk(from, to, restricted)) accepted.add(to.id);
+    }
+    return accepted;
+  }
+
+  /** A violação é a contraindicação de um exercício que entrou numa troca de risco igual ou menor? */
+  private isCarriedOverContraindication(
+    violation: ValidationViolation,
+    carriedOver: ReadonlySet<string>,
+  ): boolean {
+    if (violation.rule !== 'EXERCISE_CONTRAINDICATED') return false;
+    return carriedOver.has(violation.detail.split(' ')[0] as string);
   }
 
   /**

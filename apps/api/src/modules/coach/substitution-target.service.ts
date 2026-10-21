@@ -33,6 +33,8 @@ import { MAX_SUBSTITUTION_ITEMS } from '../protocol/protocol-substitution-items'
 const targetSchema = z
   .object({
     exerciseIds: z.array(z.string().min(1).max(100)).max(20),
+    /** O aluno só CONTOU uma troca que já fez por conta própria; não pede nenhuma agora. */
+    alreadyDone: z.boolean().optional(),
   })
   .strict();
 
@@ -59,7 +61,8 @@ export interface IdentifyTargetRequest {
  * não é troca, é revisão de treino, e o fluxo pede pra ele priorizar.
  */
 export type IdentifyTargetResult =
-  { identified: true; exerciseIds: string[] } | { identified: false; tooMany: boolean };
+  | { identified: true; exerciseIds: string[] }
+  | { identified: false; tooMany: boolean; alreadyDone?: boolean };
 
 function parseJson(text: string): unknown {
   const trimmed = text
@@ -112,9 +115,13 @@ export class SubstitutionTargetService {
           'exercício ele se refere. O aluno pode pedir a troca de mais de um exercício de uma ' +
           'vez ("troca o leg press e a extensora"): inclua todos os que ele citar. Se, mesmo ' +
           'considerando a conversa inteira, não der pra apontar com confiança para nenhum ' +
-          'exercício da lista recebida, retorne uma lista vazia — não adivinhe. Retorne ' +
-          'somente JSON estrito: {"exerciseIds": ["<id da lista>", ...]}. Cada id retornado ' +
-          'TEM que ser exatamente um dos ids recebidos na lista. ' +
+          'exercício da lista recebida, retorne uma lista vazia — não adivinhe. ATENÇÃO: se o ' +
+          'aluno apenas CONTA que JÁ trocou um exercício por conta própria (no passado: "fiz", ' +
+          '"troquei", "usei", "peguei X no lugar"), sem pedir nenhuma troca agora, isso é um ' +
+          'RELATO, não um pedido: retorne "exerciseIds": [] e "alreadyDone": true. Se ele conta ' +
+          'uma troca que fez E pede outra agora, retorne só o que ele quer trocar agora. Retorne ' +
+          'somente JSON estrito: {"exerciseIds": ["<id da lista>", ...], "alreadyDone": ' +
+          'true|false}. Cada id retornado TEM que ser exatamente um dos ids recebidos na lista. ' +
           UNTRUSTED_CONTEXT_POLICY,
         messages: [
           {
@@ -129,7 +136,12 @@ export class SubstitutionTargetService {
       const parsed = targetSchema.parse(parseJson(result.text));
       // Um id fora da lista (alucinação) é descartado, nunca aceito.
       const ids = [...new Set(parsed.exerciseIds.filter((id) => allowedIds.has(id)))];
-      if (ids.length === 0) return { identified: false, tooMany: false };
+      // Relato de troca já feita (e nenhum pedido novo): não é alvo de troca, é informação.
+      if (ids.length === 0) {
+        return parsed.alreadyDone === true
+          ? { identified: false, tooMany: false, alreadyDone: true }
+          : { identified: false, tooMany: false };
+      }
       if (ids.length > MAX_SUBSTITUTION_ITEMS) return { identified: false, tooMany: true };
       return { identified: true, exerciseIds: ids };
     } catch (error) {

@@ -192,6 +192,8 @@ const HANDOFF_REASON: Record<string, string> = {
   VALIDATOR_FLAG: 'Sinalizado pela validação de segurança',
   SUBSTITUTION_PAIN: 'Dor relatada na troca de exercício',
   SUBSTITUTION_TOO_MANY: 'Excesso de trocas de exercício',
+  SUBSTITUTION_NO_SAFE_OPTION: 'Troca pedida sem opção na base',
+  SUBSTITUTION_REPORTED: 'Troca de exercício feita pelo aluno',
   RENOVACAO_DOR_NOVA: 'Dor nova relatada na renovação',
 };
 

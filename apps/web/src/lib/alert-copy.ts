@@ -17,6 +17,16 @@ const REASONS: Record<string, { title: string; detail: string }> = {
     title: 'Resposta bloqueada por segurança',
     detail: 'O AI Coach não enviou uma resposta sem validação adequada.',
   },
+  SUBSTITUTION_NO_SAFE_OPTION: {
+    title: 'Troca pedida sem opção na base',
+    detail:
+      'O aluno pediu a troca de um exercício e a base não tem substituto para o perfil dele. Avalie o pedido.',
+  },
+  SUBSTITUTION_REPORTED: {
+    title: 'Troca de exercício feita pelo aluno',
+    detail:
+      'O aluno contou que trocou um exercício por conta própria. Acompanhe e, se fizer sentido, atualize o protocolo.',
+  },
   VALIDATOR_FLAG: {
     title: 'Revisão técnica solicitada',
     detail: 'O AI Coach sinalizou esta conversa para acompanhamento.',

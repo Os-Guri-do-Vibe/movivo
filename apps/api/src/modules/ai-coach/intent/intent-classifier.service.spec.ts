@@ -210,6 +210,18 @@ describe('IntentClassifier — fallback não vira dead-end (stress test em produ
     expect(system).toContain('NUNCA use para pergunta sobre a própria IA');
   });
 
+  // Achado 2026-10-21 (conversa da Giovana): consulta de cargas virou pedido de agenda e "fiz X
+  // no lugar dessa" virou pedido de troca. As glosas separam pedido, relato e consulta.
+  it('glosas separam agenda, pedido de troca, relato de troca já feita e consulta de histórico', async () => {
+    const { svc, complete } = make({ knn: null, nano: 'CONSULTA_HISTORICO' });
+    const r = await svc.classify({ ...input, message: 'quais foram as cargas?' });
+    expect(r).toMatchObject({ intent: 'CONSULTA_HISTORICO', stage: 'FALLBACK' });
+    const system = String(complete.mock.calls[0]?.[0]?.system);
+    expect(system).toContain('CONSULTA_HISTORICO:');
+    expect(system).toContain('perguntar ou pedir lembrete sobre cargas');
+    expect(system).toContain('JÁ trocou por conta própria');
+  });
+
   it('instrui o nano a tratar FORA_DE_ESCOPO como último recurso', async () => {
     const { svc, complete } = make({ knn: null, nano: 'ADAPTACAO_NO_TREINO' });
     await svc.classify({

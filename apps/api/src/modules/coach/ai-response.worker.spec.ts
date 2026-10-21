@@ -278,7 +278,7 @@ function makeWorker(deps: Deps = {}) {
     }),
     markAnswered,
   };
-  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), setContext: vi.fn() } as never;
+  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), setContext: vi.fn() };
   const worker = new AIResponseWorker(
     workers,
     queues,
@@ -312,10 +312,11 @@ function makeWorker(deps: Deps = {}) {
     keys as never,
     { isPaused: vi.fn(async () => deps.coachPaused ?? false) } as never,
     followups as never,
-    logger,
+    logger as never,
   );
   return {
     worker,
+    logger,
     markAnswered,
     enqueue,
     complete,
@@ -437,6 +438,16 @@ describe('AIResponseWorker.process (US-3.5)', () => {
       const build = context.build as unknown as { mock: { calls: unknown[][] } };
       expect(build.mock.calls[0]?.[2]).toBe('Bom dia! Amei');
     });
+  });
+
+  it('registra a intenção classificada sem o conteúdo da mensagem (auditoria de roteamento)', async () => {
+    const { worker, logger } = makeWorker({ intent: 'MOTIVACAO' });
+    await worker.process(job());
+    const logged = logger.info.mock.calls.find(
+      (c) => (c[0] as { event?: string }).event === 'intent_classified',
+    );
+    expect(logged?.[0]).toMatchObject({ userId: 'u1', intent: 'MOTIVACAO' });
+    expect(JSON.stringify(logged?.[0])).not.toContain('message');
   });
 
   it('motivação: intent→contexto→LLM→validação PASS→envia + "digitando…"', async () => {

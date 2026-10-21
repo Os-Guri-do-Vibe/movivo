@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { EXERCISE_BY_ID, EXERCISE_CATALOG } from './exercise-catalog';
 import {
+  cautionTagsOf,
+  findCautionCandidates,
   findSafeCandidates,
+  isEquivalentOrLowerRisk,
   isViable,
+  STRICT_CONTRAINDICATION_TAGS,
   type SubstitutionConstraints,
 } from './exercise-substitution';
 
@@ -128,5 +132,86 @@ describe('findSafeCandidates (achado 2026-09-02 — substitui o antigo findSafeS
         candidate.contraindicatedFor.some((t) => ['KNEE', 'HIP', 'LOWER_BACK'].includes(t)),
       ).toBe(false);
     }
+  });
+});
+
+// Troca "com cautela" (decisão do fundador e do RT, 2026-10-21): quem tem restrição articular
+// recebe opções de risco IGUAL OU MENOR ao exercício que já faz, em vez de uma recusa.
+describe('findCautionCandidates / isEquivalentOrLowerRisk', () => {
+  const ex = (id: string) => {
+    const found = EXERCISE_BY_ID.get(id);
+    if (!found) throw new Error(`fixture: ${id}`);
+    return found;
+  };
+  const gymKnee: SubstitutionConstraints = {
+    level: 'INTERMEDIARIO',
+    location: 'FULL_GYM',
+    equipment: [],
+    injuryTags: ['KNEE'],
+  };
+  const FLEXORA = ex('flexora_em_pe_maquina');
+
+  it('o caso real: a flexora em pé não tem nenhum substituto SEGURO com joelho sensível, mas tem opções com cautela', () => {
+    expect(findSafeCandidates(FLEXORA, gymKnee, EXERCISE_CATALOG)).toEqual([]);
+    const names = findCautionCandidates(FLEXORA, gymKnee, EXERCISE_CATALOG).map((e) => e.id);
+    expect(names).toEqual(
+      expect.arrayContaining(['cadeira_flexora_maquina', 'mesa_flexora_maquina']),
+    );
+  });
+
+  it('só oferece o que o alvo já carrega: região de risco MAIOR que a do exercício atual fica de fora', () => {
+    // Alvo só pesa no joelho; um candidato que também pesa no ombro não é "igual ou menor".
+    const target = { ...FLEXORA, contraindicatedFor: ['KNEE' as const] };
+    const heavier = {
+      ...ex('cadeira_flexora_maquina'),
+      contraindicatedFor: ['KNEE' as const, 'SHOULDER' as const],
+    };
+    expect(isEquivalentOrLowerRisk(target, heavier, ['KNEE', 'SHOULDER'])).toBe(false);
+    // Sem restrição de ombro registrada, o ombro não pesa na conta.
+    expect(isEquivalentOrLowerRisk(target, heavier, ['KNEE'])).toBe(true);
+  });
+
+  it.each([...STRICT_CONTRAINDICATION_TAGS])(
+    'tag %s (cardíaca, queda ou gestação) nunca é relaxada, mesmo que o alvo também a tenha',
+    (tag) => {
+      const target = { ...FLEXORA, contraindicatedFor: [tag] };
+      const candidate = { ...ex('cadeira_flexora_maquina'), contraindicatedFor: [tag] };
+      expect(isEquivalentOrLowerRisk(target, candidate, [tag])).toBe(false);
+    },
+  );
+
+  it('restrição estrita vinda do PAR-Q também barra (parqTags entram na conta)', () => {
+    const lunge = ex('afundo');
+    const strictParq = findCautionCandidates(
+      lunge,
+      { ...gymKnee, injuryTags: [] },
+      EXERCISE_CATALOG,
+      ['BALANCE_FALL_RISK'],
+    );
+    expect(strictParq).toEqual([]);
+  });
+
+  it('não repete o que já é seguro, respeita nível e local e nunca devolve o próprio alvo', () => {
+    const none: SubstitutionConstraints = { ...gymKnee, injuryTags: [] };
+    // Sem restrição todos os candidatos já são "seguros": nada sobra para "com cautela".
+    expect(findCautionCandidates(FLEXORA, none, EXERCISE_CATALOG)).toEqual([]);
+    const home = { ...gymKnee, location: 'HOME' as const };
+    const cautious = findCautionCandidates(FLEXORA, home, EXERCISE_CATALOG);
+    expect(cautious.every((c) => c.locations.includes('HOME'))).toBe(true);
+    expect(
+      findCautionCandidates(FLEXORA, gymKnee, EXERCISE_CATALOG).map((c) => c.id),
+    ).not.toContain(FLEXORA.id);
+  });
+
+  it('a ordem põe máquina por máquina antes de agachamento livre (leg press 45 -> máquinas primeiro)', () => {
+    const leg45 = ex('leg_press_45_maquina');
+    const [first] = findCautionCandidates(leg45, gymKnee, EXERCISE_CATALOG);
+    expect(first?.equipment).toContain('máquina');
+  });
+
+  it('explica a cautela pela região: devolve só as restrições do aluno que o candidato carrega', () => {
+    const cadeira = ex('cadeira_flexora_maquina');
+    expect(cautionTagsOf(cadeira, ['KNEE', 'SHOULDER'])).toEqual(['KNEE']);
+    expect(cautionTagsOf(cadeira, ['SHOULDER'])).toEqual([]);
   });
 });
