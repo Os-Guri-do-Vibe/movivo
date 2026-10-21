@@ -18,6 +18,7 @@ import {
   parseNotificationsSummary,
   parseQueueDetail,
   parseQueueResponse,
+  regenerateProtocol,
   resolveHandoff,
   saveProtocol,
   searchExerciseCatalog,
@@ -157,6 +158,28 @@ describe('parsers do contrato do dashboard', () => {
         protocol: { ...protocolDetail.protocol, isFallback: true },
       }).protocol?.isFallback,
     ).toBe(true);
+  });
+
+  it('lê os campos de regeração do item e ignora valores fora do contrato', () => {
+    const result = parseQueueResponse({
+      ...queueResponse,
+      mandatory: [
+        {
+          ...protocolDetail.item,
+          canRegenerate: true,
+          editedByProfessional: true,
+          regeneration: 'RUNNING',
+        },
+        { ...protocolDetail.item, canRegenerate: 'sim', regeneration: 'QUEBRADO' },
+      ],
+    });
+    expect(result.mandatory[0]).toMatchObject({
+      canRegenerate: true,
+      editedByProfessional: true,
+      regeneration: 'RUNNING',
+    });
+    expect(result.mandatory[1]).not.toHaveProperty('canRegenerate');
+    expect(result.mandatory[1]).not.toHaveProperty('regeneration');
   });
 
   it('recusa tipos, prioridades, protocolos e operações fora do contrato', () => {
@@ -393,6 +416,18 @@ describe('cliente BFF same-origin', () => {
     await expect(getOperations()).resolves.toEqual(operationsResponse);
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/dashboard/queue');
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ credentials: 'same-origin' });
+  });
+
+  it('pede a regeração do protocolo, com a confirmação de descarte só quando dada', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response(202, { status: 'QUEUED' }));
+    vi.stubGlobal('fetch', fetchMock);
+    await regenerateProtocol('p-1');
+    await regenerateProtocol('p-1', { confirmOverwriteEdit: true });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/dashboard/protocols/p-1/regenerate');
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST', body: '{}' });
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      body: JSON.stringify({ confirmOverwriteEdit: true }),
+    });
   });
 
   it('lê detalhe e aplica fallback para corpo de erro não JSON', async () => {

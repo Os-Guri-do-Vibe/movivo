@@ -9,14 +9,16 @@ import {
   type LucideIcon,
   Pencil,
   RefreshCw,
+  RotateCw,
   ShieldAlert,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AnamnesisAnswersModal } from '@/components/dashboard/protocol-anamnesis-answers';
+import { ConfirmAction } from '@/components/dashboard/confirm-action';
 import { Button, buttonVariants } from '@/components/ui/button';
-import { captureDashboardEvent, getQueue } from '@/lib/dashboard-api';
+import { captureDashboardEvent, getQueue, regenerateProtocol } from '@/lib/dashboard-api';
 import type { QueueItem, QueueResponse } from '@/lib/dashboard-types';
 import { cn } from '@/lib/utils';
 
@@ -111,12 +113,37 @@ function formatAutoRelease(autoReleaseAt: string): string {
   return `Dispara automaticamente pro WhatsApp em ${when} se ninguém agir antes`;
 }
 
-function QueueCard({ item, section }: { item: QueueItem; section: QueueSectionId }) {
+const REGENERATE_LABEL = 'Gerar protocolo novamente';
+
+/**
+ * Selo do último pedido de "Gerar protocolo novamente" que NÃO trocou o conteúdo. Sem ele o
+ * profissional clicaria, o protocolo seguiria igual e ele não saberia se algo aconteceu.
+ */
+const REGENERATION_NOTICE: Record<'NOT_APPLIED' | 'FAILED', string> = {
+  NOT_APPLIED:
+    'A última geração não alterou o protocolo (a nova versão não passou na validação, ou ele mudou enquanto gerava). Você pode tentar de novo.',
+  FAILED: 'A última geração falhou e o protocolo continua como estava. Você pode tentar de novo.',
+};
+
+function QueueCard({
+  item,
+  section,
+  onChanged,
+}: {
+  item: QueueItem;
+  section: QueueSectionId;
+  /** Recarrega a fila depois de uma ação do card. */
+  onChanged: () => Promise<void>;
+}) {
   const { label, detail, icon: Icon } = LABELS[item.severity];
   const detailHref = `/dashboard/fila/${item.kind.toLowerCase()}/${encodeURIComponent(item.id)}`;
   const status = meaningfulText(item.status);
   const summary = meaningfulText(item.summary);
   const [anamnesisOpen, setAnamnesisOpen] = useState(false);
+  const [requesting, setRequesting] = useState(false);
+  const [regenerateError, setRegenerateError] = useState('');
+  const canRegenerate = item.kind === 'PROTOCOL' && item.canRegenerate === true;
+  const regenerating = requesting || item.regeneration === 'RUNNING';
   // Olho aparece nas duas caixas da fila (achado 2026-08-18) — só não existe pra
   // handoff/check-in, que nem aparecem nesta tela (ver docstring de `queue()` no backend).
   // Desde 2026-08-24 protocolo é o único kind que chega aqui, PAR-Q bloqueante incluso.
@@ -132,6 +159,25 @@ function QueueCard({ item, section }: { item: QueueItem; section: QueueSectionId
       severity: item.severity,
       ...(view ? { view } : {}),
     });
+  }
+
+  /**
+   * Refaz o protocolo a partir da anamnese. A resposta é imediata (a geração roda em fila): o
+   * card passa a `regeneration: 'RUNNING'` na recarga e volta ao normal quando o job termina.
+   * Lança em caso de erro para o `ConfirmAction` exibir no diálogo; o botão direto captura.
+   */
+  async function requestRegeneration(confirmOverwriteEdit = false) {
+    captureDashboardEvent('cref_protocol_regenerate_requested', {
+      origin: item.origin,
+      overwritesEdit: confirmOverwriteEdit,
+    });
+    setRequesting(true);
+    try {
+      await regenerateProtocol(item.id, { confirmOverwriteEdit });
+      await onChanged();
+    } finally {
+      setRequesting(false);
+    }
   }
 
   return (
@@ -265,6 +311,26 @@ function QueueCard({ item, section }: { item: QueueItem; section: QueueSectionId
             {summary ? (
               <p className="mt-1.5 max-w-3xl text-label text-muted-foreground">{summary}</p>
             ) : null}
+            {regenerating ? (
+              <p role="status" className="mt-1.5 text-xs font-medium text-muted-foreground">
+                Gerando o protocolo novamente… o card se atualiza sozinho quando terminar.
+              </p>
+            ) : item.regeneration === 'NOT_APPLIED' || item.regeneration === 'FAILED' ? (
+              <p
+                role="status"
+                className="mt-1.5 max-w-3xl text-xs font-medium text-muted-foreground"
+              >
+                {REGENERATION_NOTICE[item.regeneration]}
+              </p>
+            ) : null}
+            {regenerateError ? (
+              <p
+                role="alert"
+                className="mt-1.5 inline-block rounded-md border border-coral bg-card px-2 py-1 text-xs"
+              >
+                {regenerateError}
+              </p>
+            ) : null}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -296,6 +362,46 @@ function QueueCard({ item, section }: { item: QueueItem; section: QueueSectionId
           >
             <Pencil aria-hidden="true" />
           </Link>
+          {canRegenerate ? (
+            item.editedByProfessional ? (
+              /*
+               * Conteúdo editado pelo profissional: regerar DESCARTA a edição, então pede
+               * confirmação (o backend também recusa sem `confirmOverwriteEdit`).
+               */
+              <ConfirmAction
+                triggerLabel={REGENERATE_LABEL}
+                triggerIcon={RotateCw}
+                triggerSize="icon"
+                triggerVariant="ghost"
+                triggerClassName={ICON_BUTTON}
+                disabled={regenerating}
+                title="Gerar protocolo novamente?"
+                description="Este protocolo foi editado por um profissional. Gerar novamente descarta essa edição e cria um novo treino a partir da anamnese do aluno, com a metodologia vigente."
+                confirmLabel="Gerar novamente"
+                onConfirm={() => requestRegeneration(true)}
+              />
+            ) : (
+              <button
+                type="button"
+                disabled={regenerating}
+                onClick={() => {
+                  setRegenerateError('');
+                  requestRegeneration().catch((caught: unknown) =>
+                    setRegenerateError(
+                      caught instanceof Error
+                        ? caught.message
+                        : 'Não foi possível gerar o protocolo novamente.',
+                    ),
+                  );
+                }}
+                className={iconLinkClass()}
+                aria-label={REGENERATE_LABEL}
+                title={REGENERATE_LABEL}
+              >
+                <RotateCw aria-hidden="true" className={cn(regenerating && 'animate-spin')} />
+              </button>
+            )
+          ) : null}
           {item.autoReleaseAt ? (
             <>
               {/* O relógio não é uma terceira ação: é informação. A hairline separa ele
@@ -419,6 +525,8 @@ export function QueueBoard() {
     };
   }, [load]);
 
+  const reload = useCallback(() => load(), [load]);
+
   const mandatory = data ? sortQueue(data.mandatory) : [];
   const optional = data ? sortQueue(data.optional) : [];
   const substitutionMandatory = data ? sortQueue(data.substitutionMandatory) : [];
@@ -496,17 +604,29 @@ export function QueueBoard() {
         </div>
       ) : (
         <div className="space-y-10">
-          <QueueSection id="mandatory" title="Revisão Humana Obrigatória" items={mandatory} />
+          <QueueSection
+            id="mandatory"
+            title="Revisão Humana Obrigatória"
+            items={mandatory}
+            onChanged={reload}
+          />
           <QueueSection
             id="substitutionMandatory"
             title="Revisão de Substituição de Exercício Obrigatória"
             items={substitutionMandatory}
+            onChanged={reload}
           />
-          <QueueSection id="optional" title="Revisão Humana Opcional" items={optional} />
+          <QueueSection
+            id="optional"
+            title="Revisão Humana Opcional"
+            items={optional}
+            onChanged={reload}
+          />
           <QueueSection
             id="substitutionOptional"
             title="Revisão de Substituição de Exercício Opcional"
             items={substitutionOptional}
+            onChanged={reload}
           />
         </div>
       )}
@@ -518,10 +638,12 @@ function QueueSection({
   id,
   title,
   items,
+  onChanged,
 }: {
   id: QueueSectionId;
   title: string;
   items: QueueItem[];
+  onChanged: () => Promise<void>;
 }) {
   const headingId = `queue-section-${id}`;
   return (
@@ -546,7 +668,12 @@ function QueueSection({
       ) : (
         <ol className="space-y-3" aria-label={title}>
           {items.map((item) => (
-            <QueueCard key={`${item.kind}:${item.id}`} item={item} section={id} />
+            <QueueCard
+              key={`${item.kind}:${item.id}`}
+              item={item}
+              section={id}
+              onChanged={onChanged}
+            />
           ))}
         </ol>
       )}
