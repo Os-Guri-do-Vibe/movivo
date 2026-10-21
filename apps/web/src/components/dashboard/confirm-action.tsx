@@ -16,6 +16,7 @@ export function ConfirmAction({
   disabled = false,
   triggerVariant,
   triggerSize = 'lg',
+  triggerClassName,
   children,
   confirmDisabled = false,
 }: {
@@ -40,6 +41,8 @@ export function ConfirmAction({
    */
   triggerVariant?: 'default' | 'outline' | 'destructive' | 'ghost';
   triggerSize?: 'default' | 'sm' | 'lg' | 'icon';
+  /** Ajuste fino do gatilho (ex.: alinhar o botão só-ícone ao tamanho dos vizinhos da linha). */
+  triggerClassName?: string;
   /** Conteúdo extra entre a descrição e as ações (ex.: decisão a reconhecer antes de assinar). */
   children?: ReactNode;
   /** Mantém o botão de confirmação desabilitado (ex.: enquanto a decisão não foi marcada). */
@@ -70,6 +73,7 @@ export function ConfirmAction({
         type="button"
         size={triggerSize}
         variant={triggerVariant ?? (destructive ? 'destructive' : 'default')}
+        className={triggerClassName}
         disabled={disabled}
         onClick={() => dialogRef.current?.showModal()}
         aria-label={TriggerIcon ? triggerLabel : undefined}

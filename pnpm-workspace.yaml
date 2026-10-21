@@ -2,6 +2,9 @@ packages:
   - 'apps/*'
   - 'packages/*'
 overrides:
+  # vite >=8.3.0 <8.3.3 — bypass de existence check no launch-editor em Windows
+  # (GHSA-587h-7wmj-h5pm). Só entra pela toolchain de teste/build; plugins aceitam Vite 8.x.
+  'vite@>=8.3.0 <8.3.3': '>=8.3.3 <9'
   # Correções de CVE HIGH pegas pelo `pnpm audit` no CI (job `sca`, US-0.7).
   # Os seletores são ESCOPADOS à faixa vulnerável de propósito: um override global
   # de `picomatch` forçaria também os consumidores da linha 2.x (chokidar, micromatch),

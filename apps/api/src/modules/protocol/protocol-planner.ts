@@ -37,6 +37,7 @@ import {
   deterministicRepair,
   type DeterministicRepairCode,
 } from './validation/deterministic-repair';
+import { countCautionExercises } from './protocol-caution';
 import { buildFallbackProtocol, FALLBACK_TEMPLATE_VERSION } from './validation/fallback-template';
 import { VALIDATION_RULES_VERSION } from './validation/validation-rules';
 import type {
@@ -54,7 +55,7 @@ export const MAX_CORRECTION_ROUNDS = 2;
  * reparo determinístico). Vai no log e no rastro persistido — `promptVersion` só carrega
  * metodologia+catálogo e não muda quando o código do prompt/planner muda.
  */
-export const PROTOCOL_PIPELINE_VERSION = 'protocol-pipeline-2026-10-v5';
+export const PROTOCOL_PIPELINE_VERSION = 'protocol-pipeline-2026-10-v6';
 
 export interface ProtocolGenerator {
   generate(command: GenerateProtocolCommand): Promise<GenerateProtocolResult>;
@@ -123,6 +124,11 @@ export interface PlanResult {
   violations: readonly ValidationViolation[];
   /** Reparos determinísticos aplicados ao `content` (vazio quando não houve). */
   repairs: DeterministicRepairCode[];
+  /**
+   * Exercícios do conteúdo que carregam uma região de dor sem veto (`cautionTags`). Ausente/0 =
+   * nenhum. Entra na urgência de revisão (`reviewUrgencyForPlan`).
+   */
+  cautionExercises?: number;
   attempts: PlanAttempt[];
   trace: ProtocolGenerationTrace;
   contextualQuality?: ContextualQualitySummary;
@@ -142,6 +148,7 @@ export async function planProtocol(
   const constraints: ValidateProtocolInput['constraints'] = {
     goal: command.constraints.goal,
     injuryTags: command.constraints.injuryTags,
+    ...(command.constraints.cautionTags ? { cautionTags: command.constraints.cautionTags } : {}),
     // v2: o validador precisa do nível para vetar divisão/técnica acima dele (US-2.3).
     level: command.constraints.level,
     // Achado 2026-08-18: sem isso, o validador NUNCA recebia `preferredDays` (só o
@@ -187,7 +194,11 @@ export async function planProtocol(
 
   // 1ª geração: erro aqui continua subindo (retry do job/DLQ, contrato inalterado).
   let quality: ContextualQualityAssessment | undefined;
-  const assessContextualQuality = command.constraints.requiresProfessionalReview;
+  // Segurança clínica (PAR-Q) decide se o CREF precisa assinar; qualidade contextual é uma
+  // etapa diferente e vale para todo titular. Quando encontra lacunas, a própria metodologia
+  // orienta as rodadas de correção abaixo. Sem PAR-Q, uma lacuna que persista continua sendo
+  // sinalizada, mas não muda a política de auto-liberação do worker.
+  const assessContextualQuality = true;
   let gen = await generator.generate(command);
   let verdict = validate(gen.structure);
   if (assessContextualQuality && verdict.action !== 'BLOCK_FALLBACK')
@@ -208,6 +219,7 @@ export async function planProtocol(
         ...command,
         correction: {
           previous: gen.structure,
+          ...(gen.planning ? { planning: gen.planning } : {}),
           violations: verdict.violations,
           round: corrections,
           ...(quality ? { quality } : {}),
@@ -342,8 +354,12 @@ export async function planProtocol(
     };
   }
 
+  const cautionExercises = countCautionExercises(content, command.constraints.cautionTags, {
+    getById: (id) => validation.exerciseById(id),
+  });
   return {
     content,
+    ...(cautionExercises > 0 ? { cautionExercises } : {}),
     generatedBy: gen.provider,
     modelVersion: gen.model,
     promptVersion: gen.promptVersion,

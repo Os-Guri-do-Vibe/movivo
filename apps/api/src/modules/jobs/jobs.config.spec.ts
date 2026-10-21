@@ -29,6 +29,8 @@ describe('jobs.config', () => {
         'knowledge-processing',
         'dead-letter',
         'protocol-generation',
+        // Regeração do protocolo pendente, pedida pelo profissional na fila de revisão.
+        'protocol-regeneration',
         // Fila do profissional, categoria "Disponível para Revisão" — liberação automática
         // após a janela de cortesia de 1h.
         'protocol-auto-release',
@@ -43,6 +45,8 @@ describe('jobs.config', () => {
         'workout-daily',
         // Comentário do Coach sobre o treino registrado no diário (achado 2026-09-12).
         'workout-feedback',
+        // Versão nova do protocolo: atualiza o treino de hoje e oferece o link novo (2026-10-20).
+        'workout-protocol-changed',
         // Comentário do Coach sobre o check-in semanal (achado 2026-09-13).
         'checkin-weekly-feedback',
       ].sort(),

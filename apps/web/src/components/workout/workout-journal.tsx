@@ -282,12 +282,16 @@ export function WorkoutJournalView() {
           ? exercises.find((exercise) => !confirmed.has(exercise.exerciseId))?.exerciseId
           : undefined;
       setOpenExercises(nextToOpenId ? new Set([nextToOpenId]) : new Set());
+      return value;
     },
     [router],
   );
 
   useEffect(() => {
-    void load().catch((reason: Error) => setError(reason.message));
+    // O link do registro tardio abre o diário direto no dia do treino (`?date=AAAA-MM-DD`).
+    const requested = new URLSearchParams(window.location.search).get('date');
+    const date = requested && /^\d{4}-\d{2}-\d{2}$/.test(requested) ? requested : undefined;
+    void load(date).catch((reason: Error) => setError(reason.message));
   }, [load]);
   useEffect(() => {
     const started = journal?.workout?.startedAt;
@@ -507,6 +511,28 @@ export function WorkoutJournalView() {
       await load(previous?.selectedDate);
     } catch (reason) {
       setJournal(previous);
+      // O treino pode ter mudado por baixo da tela (o Coach reorganizou a semana ou uma troca de
+      // exercício foi aprovada depois de a página abrir): recarrega e explica, em vez de um erro seco.
+      const fresh = await load(previous?.selectedDate).catch(() => undefined);
+      setError(
+        fresh && fresh.workout?.id !== previous?.workout?.id
+          ? 'O seu treino foi atualizado. Conferi a tela, toque em Iniciar de novo.'
+          : (reason as Error).message,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Registro tardio: abre, sem cronômetro, o treino de um dia recente que o aluno não registrou. */
+  async function startLate() {
+    if (!workout || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await request(`/api/workout/sessions/${workout.id}/late-start`, { method: 'POST' });
+      await load(journal?.selectedDate);
+    } catch (reason) {
       setError((reason as Error).message);
     } finally {
       setBusy(false);
@@ -781,8 +807,10 @@ export function WorkoutJournalView() {
             <p className="text-h2">✓</p>
             <h2 className="mt-3 text-h2 font-extrabold">Treino concluído</h2>
             <p className="mt-2 text-muted-foreground">
-              Tempo total: {formatTimer(workout.durationSeconds ?? 0)} · Esforço{' '}
-              {workout.perceivedEffort}/10
+              {workout.loggedLate || workout.durationSeconds === null
+                ? 'Registrado depois'
+                : `Tempo total: ${formatTimer(workout.durationSeconds)}`}{' '}
+              · Esforço {workout.perceivedEffort}/10
             </p>
             {workout.shareCard ? (
               <WorkoutShareCardPanel
@@ -797,7 +825,10 @@ export function WorkoutJournalView() {
             <section className="mt-5 overflow-hidden rounded-3xl bg-card shadow-sm">
               <div className="flex items-center justify-between bg-petroleo px-4 py-4">
                 <h2 className="text-h3 font-bold text-white">{workout.prescription.dayLabel}</h2>
-                {workout.status === 'IN_PROGRESS' ? (
+                {workout.status === 'IN_PROGRESS' && workout.loggedLate ? (
+                  // Registro tardio: o treino já aconteceu, não há cronômetro a mostrar.
+                  <span className="text-label font-semibold text-white/70">Registro tardio</span>
+                ) : workout.status === 'IN_PROGRESS' ? (
                   <div className="flex items-center gap-2 font-mono font-bold text-white">
                     <Clock3 size={18} />
                     {formatTimer(elapsed)}
@@ -810,6 +841,17 @@ export function WorkoutJournalView() {
                     className="min-h-12 rounded-xl bg-primary px-5 font-extrabold text-primary-foreground transition-colors hover:bg-primary/85"
                   >
                     Iniciar
+                  </button>
+                ) : workout.canLogLate ? (
+                  // Agenda flexível: nos últimos dias o aluno ainda pode registrar o treino que
+                  // fez e não registrou. Sem cronômetro (`startLate`); depois da janela, só consulta.
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={startLate}
+                    className="min-h-12 rounded-xl bg-primary px-5 font-extrabold text-primary-foreground transition-colors hover:bg-primary/85"
+                  >
+                    Registrar este treino
                   </button>
                 ) : (
                   // Achado 2026-09-10 (pedido do fundador): dia passado é só consulta —

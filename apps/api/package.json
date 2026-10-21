@@ -14,6 +14,8 @@
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "test:int": "vitest run --config vitest.integration.config.ts",
+    "eval:protocol": "vitest run --config vitest.eval.config.ts",
+    "test:journeys": "vitest run --config test/journeys/vitest.journeys.config.mts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/core/database/migrate.ts",
     "db:seed": "tsx src/core/database/seed.ts",
@@ -58,6 +60,9 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.10",
+    "@electric-sql/pglite-pgvector": "0.0.11",
+    "@electric-sql/pglite-socket": "0.2.13",
     "@nestjs/cli": "12.0.8",
     "@nestjs/schematics": "12.0.6",
     "@nestjs/testing": "12.1.2",

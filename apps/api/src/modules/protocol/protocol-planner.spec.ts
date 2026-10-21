@@ -124,18 +124,24 @@ describe('qualidade contextual no pipeline', () => {
   };
 
   it.each([{ injuryTags: [] }, { injuryTags: ['SHOULDER'] }] as const)(
-    'sem PAR-Q bloqueante não avalia nem corrige qualidade, mesmo com restrições %j',
+    'sem PAR-Q bloqueante avalia e corrige qualidade, mesmo com restrições %j',
     async ({ injuryTags }) => {
-      const gen = fakeGenerator([]);
-      vi.mocked(gen.assessQuality).mockResolvedValue(qualityAssessment('GAPS'));
+      const corrected = genResult({ structure: structure('Corrigido sem PAR-Q') });
+      const gen = fakeGenerator([genResult(), corrected]);
+      vi.mocked(gen.assessQuality)
+        .mockResolvedValueOnce(qualityAssessment('GAPS'))
+        .mockResolvedValueOnce(qualityAssessment());
       const plan = await planProtocol(gen, fakeValidation([]), {
         ...cmd,
         constraints: { ...constraints, injuryTags: [...injuryTags] },
       });
-      expect(gen.assessQuality).not.toHaveBeenCalled();
-      expect(gen.generate).toHaveBeenCalledTimes(1);
-      expect(plan.contextualQuality).toBeUndefined();
-      expect(plan.trace.contextualQuality).toBeUndefined();
+      expect(gen.assessQuality).toHaveBeenCalledTimes(2);
+      expect(gen.generate).toHaveBeenCalledTimes(2);
+      expect(gen.generate.mock.calls[1]?.[0].correction).toMatchObject({
+        quality: { summary: { status: 'GAPS' } },
+      });
+      expect(plan.contextualQuality?.status).toBe('PASS');
+      expect(plan.trace.contextualQuality?.status).toBe('PASS');
       expect(plan.validationAction).toBe('PASS');
     },
   );
@@ -415,6 +421,50 @@ describe('planProtocol (US-2.4)', () => {
     });
   });
 
+  describe('dor sem veto (cautionTags, 2026-10-21)', () => {
+    const validation = new ValidationService();
+    const withCaution = {
+      ...cmd,
+      // supino_reto_halter carrega SHOULDER/ELBOW no catálogo
+      constraints: {
+        ...constraints,
+        injuryTags: ['SHOULDER' as const],
+        cautionTags: ['SHOULDER' as const],
+      },
+    };
+
+    it('o exercício com a região passa na validação e o plano conta quantos há', async () => {
+      const gen = fakeGenerator([genResult({ structure: realStructure() })]);
+      const plan = await planProtocol(gen, validation, withCaution);
+      expect(plan.usedFallbackTemplate).toBe(false);
+      expect(plan.trace.finalRules).toEqual([]);
+      expect(plan.cautionExercises).toBe(3);
+      expect(gen.generate).toHaveBeenCalledTimes(1);
+    });
+
+    it('como veto (sem cautionTags) o mesmo conteúdo é barrado, como sempre foi', async () => {
+      const gen = fakeGenerator([genResult({ structure: realStructure() })]);
+      await planProtocol(gen, validation, {
+        ...cmd,
+        constraints: { ...constraints, injuryTags: ['SHOULDER' as const] },
+      });
+      expect(gen.generate.mock.calls.length).toBeGreaterThan(1);
+    });
+
+    it('sem exercício com a região, o plano não registra cautela', async () => {
+      const gen = fakeGenerator([genResult({ structure: realStructure() })]);
+      const plan = await planProtocol(gen, validation, {
+        ...cmd,
+        constraints: {
+          ...constraints,
+          injuryTags: ['NECK' as const],
+          cautionTags: ['NECK' as const],
+        },
+      });
+      expect(plan.cautionExercises).toBeUndefined();
+    });
+  });
+
   describe('reparo determinístico (2026-09-29)', () => {
     const validation = new ValidationService();
 
@@ -437,7 +487,7 @@ describe('planProtocol (US-2.4)', () => {
       expect(plan.validationAction).toBe('PASS');
       expect(plan.repairs).toContain('STRIP_ALL_TECHNIQUES');
       expect(plan.content).toBe(revalidated);
-      expect(gen.assessQuality).not.toHaveBeenCalled();
+      expect(gen.assessQuality).toHaveBeenCalledTimes(1);
       expect(plan.trace).toMatchObject({ repairOutcome: 'APPLIED', finalRules: [] });
       expect(plan.attempts.map((a) => a.rules)).toEqual([
         ['TECHNIQUE_LEVEL_NOT_ALLOWED', 'TECHNIQUE_OVERUSE'],

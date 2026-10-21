@@ -60,6 +60,7 @@ import {
 import { ConversationRepository } from './conversation.repository';
 import { buildResponseCorrection } from './response-correction';
 import { applyResponseFormatting } from './response-formatter';
+import { ScheduleFlowService } from './schedule-flow.service';
 import { SUBSTITUTION_FLOW_INTENT, SubstitutionFlowService } from './substitution-flow.service';
 import { untrustedDataEnvelope } from '../ai-coach/context/untrusted-context';
 import {
@@ -99,6 +100,9 @@ interface ResponseDraft {
   /** Resposta montada pelo fluxo de troca de exercício — o alerta não herda a intenção que o
    * classificador atribuiu à mensagem (que pode ter sido qualquer uma, numa continuação). */
   viaSubstitutionFlow?: boolean;
+  /** Resposta montada pelo fluxo de agenda (copy fixa); `scheduleAdjusted` = a agenda mudou. */
+  viaScheduleFlow?: boolean;
+  scheduleAdjusted?: boolean;
   ragSources?: Array<{
     chunkId: string;
     documentId: string | null;
@@ -114,6 +118,10 @@ interface ResponseDraft {
 }
 
 const MAX_MESSAGE_CHARS = 4000;
+const SCHEDULE_INTENTS: ReadonlySet<Intent> = new Set<Intent>([
+  'AJUSTE_AGENDA',
+  'PEDIDO_LINK_TREINO',
+]);
 /**
  * Intenções "leves": a mensagem do aluno não pede uma tarefa (dúvida, troca, adaptação), então,
  * lida como resposta à pergunta pendente, vira acolhimento + olhar para frente. As de tarefa
@@ -189,6 +197,7 @@ export class AIResponseWorker implements OnModuleInit {
     private readonly repo: ConversationRepository,
     private readonly healthConsent: HealthConsentService,
     private readonly substitutionFlow: SubstitutionFlowService,
+    private readonly scheduleFlow: ScheduleFlowService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
     private readonly coachAttendance: CoachAttendanceService,
@@ -244,8 +253,14 @@ export class AIResponseWorker implements OnModuleInit {
       // Pausa ligada DEPOIS de o job entrar na fila (janela de debounce): a IA não responde,
       // mas o texto do aluno já saiu do buffer e precisa ir para o histórico do profissional.
       if (await this.coachAttendance.isPaused(userId)) {
-        if (rawMessage)
+        if (rawMessage) {
           await this.repo.persistTurn({ userId, direction: 'INBOUND', content: rawMessage });
+          // Agenda e link do check-in são do SISTEMA, não da conversa que o profissional assumiu:
+          // quem pede para treinar em outro dia ou pede o link é atendido mesmo com a pausa.
+          if (await this.handleScheduleWhilePaused(userId, correlationId, rawMessage, enqueuedAt)) {
+            return { status: 'PAUSED_SCHEDULE' };
+          }
+        }
         this.logger.info(
           { event: 'ai_response_held_coach_paused', userId },
           'atendimento automático pausado — job descartado sem chamar a IA',
@@ -451,6 +466,18 @@ export class AIResponseWorker implements OnModuleInit {
       }
 
       const intent = await this.classifier.classify({ userId, user: scrubUser, message });
+      // Sem conteúdo da mensagem: só o que permite auditar erro de roteamento depois (qual
+      // intenção, por qual estágio, com que confiança).
+      this.logger.info(
+        {
+          event: 'intent_classified',
+          userId,
+          intent: intent.intent,
+          stage: intent.stage,
+          confidence: intent.confidence,
+        },
+        'intenção da mensagem classificada',
+      );
 
       // TASK-3.6.1 (b) — Handoff de SEGURANÇA (red flag do guardrail US-3.4): não gera resposta
       // de IA; orienta atendimento presencial imediato + alerta prioritário. Sem promessa de SLA.
@@ -545,7 +572,9 @@ export class AIResponseWorker implements OnModuleInit {
         const treatedAsAnswer =
           pending !== null &&
           (pending.reading.match === 'STRONG' ||
-            (pending.reading.match === 'WEAK' && LIGHT_INTENTS.has(intent.intent)));
+            (pending.reading.match === 'WEAK' && LIGHT_INTENTS.has(intent.intent)) ||
+            // Remarcar o treino que ficou sem registro responde à pergunta do Coach sobre ele.
+            draft.scheduleAdjusted === true);
         await this.settlePending(userId, pending, treatedAsAnswer, true);
       }
 
@@ -605,6 +634,55 @@ export class AIResponseWorker implements OnModuleInit {
   }
 
   /**
+   * Atendimento pausado pelo profissional: a IA não conversa, mas o pedido de AGENDA (treinar em
+   * outro dia, descansar, desfazer, registrar treino) e o pedido do LINK do check-in continuam
+   * sendo atendidos pelo sistema, com a copy fixa do fluxo (decisão do fundador, 2026-10-20: a
+   * distribuição dos treinos não depende de o profissional ter assumido a conversa).
+   *
+   * Só chega ao fluxo quem é, de fato, pedido de agenda: qualquer outra mensagem segue em
+   * silêncio para o profissional, como antes, e um sinal de segurança também (é dele). Falha em
+   * qualquer ponto mantém o silêncio: pausa nunca vira resposta inesperada.
+   */
+  private async handleScheduleWhilePaused(
+    userId: string,
+    correlationId: string,
+    message: string,
+    enqueuedAt: number,
+  ): Promise<boolean> {
+    try {
+      const { scrubUser, biologicalSex } = await this.repo.loadRuntimeUser(userId);
+      const intent = await this.classifier.classify({ userId, user: scrubUser, message });
+      if (intent.safetyHandoff) return false;
+      if (!SCHEDULE_INTENTS.has(intent.intent) && !(await this.scheduleFlow.hasOpenFlow(userId))) {
+        return false;
+      }
+      const outcome = await this.scheduleFlow.handle({
+        userId,
+        message,
+        intent: intent.intent,
+        scrubUser,
+        operationId: correlationId,
+        personaSlot: biologicalSex,
+      });
+      if (outcome.kind !== 'FIXED') return false;
+      await this.context.recordTurn(userId, 'user', message);
+      await this.deliver(userId, correlationId, outcome.text, null, true, enqueuedAt, 0, false);
+      await this.context.recordTurn(userId, 'assistant', outcome.text);
+      this.logger.info(
+        { event: 'ai_response_schedule_while_paused', userId },
+        'pedido de agenda atendido com o atendimento automático pausado',
+      );
+      return true;
+    } catch (err: unknown) {
+      this.logger.warn(
+        { event: 'ai_response_schedule_while_paused_failed', userId, err },
+        'não foi possível atender o pedido de agenda durante a pausa — segue em silêncio',
+      );
+      return false;
+    }
+  }
+
+  /**
    * Roteia a intenção para a montagem certa (com ou sem LLM). `persona` desce por parâmetro
    * desde o topo do job — ver o comentário em `process()`.
    */
@@ -631,6 +709,26 @@ export class AIResponseWorker implements OnModuleInit {
         intent === 'SUBSTITUICAO_EXERCICIO' ? 'INTENT' : 'CONTINUATION',
       );
       if (flow) return flow;
+    }
+    // Agenda flexível: treinar em outro dia, descansar, reorganizar, desfazer ou pedir o link do
+    // check-in. Copy fixa e arranjo decidido por regra; a pergunta "qual treino fica de fora"
+    // mantém o fluxo aberto, que tem prioridade sobre a classificação (como o de troca acima).
+    if (SCHEDULE_INTENTS.has(intent) || (await this.scheduleFlow.hasOpenFlow(userId))) {
+      const outcome = await this.scheduleFlow.handle({
+        userId,
+        message,
+        intent,
+        scrubUser,
+        operationId,
+        personaSlot: personaCtx.slot,
+      });
+      if (outcome.kind === 'FIXED') {
+        return {
+          ...draftPass(outcome.text, null, 0),
+          viaScheduleFlow: true,
+          scheduleAdjusted: outcome.adjusted,
+        };
+      }
     }
     // `FORA_DE_ESCOPO` vindo do classificador (kNN/nano) NÃO é mais recusa enlatada (achado
     // 2026-10-12, stress test em produção: "você é real?" e "tô na academia, tá cheio, o que eu

@@ -95,7 +95,14 @@ function makeService(row: Record<string, unknown>, verdict: 'PASS' | 'FLAG_HUMAN
   const append = vi.fn(async (..._args: Parameters<AuditService['append']>) => undefined);
   const audit = { append } as unknown as AuditService;
   const enqueue = vi.fn(async () => 'job');
-  const queues = { enqueue } as unknown as QueueManager;
+  // Job de regeração anterior do protocolo (nenhum por padrão) — `regenerateProtocol`.
+  const previousJob = {
+    current: null as null | { getState: () => Promise<string>; remove: () => Promise<void> },
+  };
+  const queues = {
+    enqueue,
+    get: () => ({ getJob: vi.fn(async () => previousJob.current), getJobs: vi.fn(async () => []) }),
+  } as unknown as QueueManager;
   const logger = {
     setContext: vi.fn(),
     warn: vi.fn(),
@@ -141,6 +148,7 @@ function makeService(row: Record<string, unknown>, verdict: 'PASS' | 'FLAG_HUMAN
     update,
     insert,
     execute,
+    previousJob,
     substitutionRepo,
     workoutPresentation,
     exerciseCatalogAdmin,
@@ -1061,6 +1069,106 @@ describe('DashboardService invariantes de mutacao', () => {
   });
 });
 
+describe('DashboardService — gerar protocolo novamente', () => {
+  const pending = {
+    id: RESOURCE_ID,
+    userId: USER_ID,
+    status: 'PENDING_SIGNATURE',
+    approvalStatus: 'PENDING_REVIEW',
+    anamnesisSessionId: SESSION_ID,
+    generatedBy: 'FALLBACK_TEMPLATE',
+    reviewUrgency: 'MANDATORY',
+    content,
+  };
+
+  it('enfileira a regeração, audita o pedido e não toca o conteúdo na requisição', async () => {
+    const { service, enqueue, append, update } = makeService(pending);
+    await expect(service.regenerateProtocol(actor, RESOURCE_ID)).resolves.toEqual({
+      id: RESOURCE_ID,
+      status: 'QUEUED',
+    });
+    expect(enqueue).toHaveBeenCalledWith(
+      'protocol-regeneration',
+      'regenerate',
+      { userId: USER_ID, protocolId: RESOURCE_ID, requestedBy: ACTOR_ID },
+      { jobId: `regenerate-${RESOURCE_ID}` },
+    );
+    expect(append).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'PROTOCOL_REGENERATION_REQUESTED',
+        changes: expect.objectContaining({
+          previousOrigin: 'FALLBACK_TEMPLATE',
+          previousReviewUrgency: 'MANDATORY',
+          discardsProfessionalEdit: false,
+        }),
+      }),
+    );
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('ADMIN (conta fundadora) também pode pedir a regeração', async () => {
+    const { service } = makeService(pending);
+    await expect(service.regenerateProtocol(admin, RESOURCE_ID)).resolves.toMatchObject({
+      status: 'QUEUED',
+    });
+  });
+
+  it.each([
+    ['já assinado', { status: 'ACTIVE', approvalStatus: 'HUMAN_APPROVED' }],
+    ['sem anamnese de origem (renovação)', { anamnesisSessionId: null }],
+  ])('recusa protocolo %s', async (_label, override) => {
+    const { service, enqueue } = makeService({ ...pending, ...override });
+    await expect(service.regenerateProtocol(actor, RESOURCE_ID)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('exige confirmação quando a regeração descarta a edição do profissional', async () => {
+    const edited = { ...pending, generatedBy: 'PROFESSIONAL_EDIT' };
+    const refused = makeService(edited);
+    await expect(refused.service.regenerateProtocol(actor, RESOURCE_ID)).rejects.toMatchObject({
+      response: { code: 'PROFESSIONAL_EDIT_WOULD_BE_LOST' },
+    });
+    expect(refused.enqueue).not.toHaveBeenCalled();
+
+    const confirmed = makeService(edited);
+    await confirmed.service.regenerateProtocol(actor, RESOURCE_ID, { confirmOverwriteEdit: true });
+    expect(confirmed.enqueue).toHaveBeenCalledWith(
+      'protocol-regeneration',
+      'regenerate',
+      expect.objectContaining({ overrideProfessionalEdit: true }),
+      expect.anything(),
+    );
+  });
+
+  it('não enfileira de novo enquanto a regeração anterior roda', async () => {
+    const { service, enqueue, previousJob } = makeService(pending);
+    previousJob.current = { getState: async () => 'active', remove: vi.fn(async () => undefined) };
+    await expect(service.regenerateProtocol(actor, RESOURCE_ID)).rejects.toMatchObject({
+      response: { code: 'PROTOCOL_REGENERATION_IN_PROGRESS' },
+    });
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('libera o id do job anterior já concluído antes de enfileirar o novo pedido', async () => {
+    const { service, enqueue, previousJob } = makeService(pending);
+    const remove = vi.fn(async () => undefined);
+    previousJob.current = { getState: async () => 'failed', remove };
+    await service.regenerateProtocol(actor, RESOURCE_ID);
+    expect(remove).toHaveBeenCalledOnce();
+    expect(enqueue).toHaveBeenCalledOnce();
+  });
+
+  it('só staff pode pedir', async () => {
+    const { service } = makeService(pending);
+    await expect(
+      service.regenerateProtocol({ userId: ACTOR_ID, role: 'USER', jti: 'j' }, RESOURCE_ID),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+});
+
 describe('DashboardService leituras operacionais', () => {
   it('libera leituras globais ao ADMIN (fila, operações, eventos)', async () => {
     const { service } = makeSequencedService([]);
@@ -1382,6 +1490,33 @@ describe('DashboardService leituras operacionais', () => {
       expect(result.mandatory[0]?.autoReleaseAt).toBeNull();
     },
   );
+
+  it('item de protocolo informa se pode ser regerado e se há edição do profissional a perder', async () => {
+    const base = {
+      createdAt: new Date('2026-10-21T12:00:00.000Z'),
+      status: 'PENDING_SIGNATURE',
+      name: 'Aluno sintético',
+      reviewUrgency: 'OPTIONAL',
+      parqState: 'LIBERADO',
+    };
+    const { service } = makeSequencedService([
+      [
+        {
+          ...base,
+          id: RESOURCE_ID,
+          generatedBy: 'DEEPSEEK_V4_PRO',
+          anamnesisSessionId: SESSION_ID,
+        },
+        { ...base, id: USER_ID, generatedBy: 'PROFESSIONAL_EDIT', anamnesisSessionId: SESSION_ID },
+        { ...base, id: ACTOR_ID, generatedBy: 'DEEPSEEK_V4_PRO', anamnesisSessionId: null },
+      ],
+    ]);
+    const { optional } = await service.queue(actor);
+    const byId = (id: string) => optional.find((item) => item.id === id);
+    expect(byId(RESOURCE_ID)).toMatchObject({ canRegenerate: true, editedByProfessional: false });
+    expect(byId(USER_ID)).toMatchObject({ canRegenerate: true, editedByProfessional: true });
+    expect(byId(ACTOR_ID)).toMatchObject({ canRegenerate: false });
+  });
 
   it.each(['GAPS', 'UNAVAILABLE'] as const)(
     'fila distingue qualidade %s de fallback e edição profissional',

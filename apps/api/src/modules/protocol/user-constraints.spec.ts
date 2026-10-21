@@ -5,7 +5,9 @@ import { PARQ_QUESTION_IDS, PARQ_VERSION, ParqState } from '@movivo/shared';
 
 import { evaluateParq } from '../anamnesis/parq';
 import {
+  PAIN_VETO_INTENSITY,
   emphasisToMuscleGroups,
+  hardInjuryTags,
   importantEventForPrompt,
   levelFromExperience,
   mapInjuriesToTags,
@@ -51,6 +53,20 @@ describe('mapInjuriesToTags', () => {
 
   it('retorna vazio para lista vazia', () => {
     expect(mapInjuriesToTags([])).toEqual([]);
+  });
+
+  // Achado 2026-10-21: "pe" (pé) casava como substring em "peso", "pessoa", "esperar".
+  it('palavra curta exige a palavra inteira: "peso" e "pessoa" não são tornozelo', () => {
+    expect(mapInjuriesToTags(['piora quando treino com peso'])).toEqual([]);
+    expect(mapInjuriesToTags(['uma pessoa que espera melhorar'])).toEqual([]);
+    expect(mapInjuriesToTags(['dor no pé ao correr'])).toContain('ANKLE');
+    expect(mapInjuriesToTags(['dor no pe'])).toContain('ANKLE');
+  });
+
+  it('palavra longa aceita flexão e acento: joelhos, hérnias, lombares', () => {
+    expect(mapInjuriesToTags(['dor nos joelhos'])).toContain('KNEE');
+    expect(mapInjuriesToTags(['duas hérnias'])).toContain('LOWER_BACK');
+    expect(mapInjuriesToTags(['dores lombares'])).toContain('LOWER_BACK');
   });
 });
 
@@ -164,8 +180,8 @@ describe('anamnese v2 → UserConstraints (US-6.9)', () => {
         underMedicalFollowUp: false,
         hasAvoidanceRecommendation: false,
       }),
-    ).toEqual({ tags: [], raw: [] });
-    expect(painToConstraints(null)).toEqual({ tags: [], raw: [] });
+    ).toEqual({ tags: [], cautionTags: [], raw: [] });
+    expect(painToConstraints(null)).toEqual({ tags: [], cautionTags: [], raw: [] });
   });
 });
 
@@ -288,6 +304,85 @@ describe('importantEventForPrompt', () => {
       date: '2026-12-25',
       daysUntil: 114,
       description: 'quero emagrecer e chegar a 70kg pro Natal',
+    });
+  });
+
+  describe('dor sem veto vira cautela (política de 2026-10-21)', () => {
+    const base = {
+      hasPain: true,
+      trend: 'STABLE' as const,
+      hasProfessionalExplanation: false,
+      underMedicalFollowUp: false,
+      hasAvoidanceRecommendation: false,
+    };
+
+    it('dor moderada, estável, sem orientação de evitar: tag continua em `tags`, mas é cautela', () => {
+      const r = painToConstraints({ ...base, points: [{ region: 'SHOULDER', intensity: 4 }] });
+      expect(r.tags).toEqual(['SHOULDER']);
+      expect(r.cautionTags).toEqual(['SHOULDER']);
+    });
+
+    it(`dor a partir de ${PAIN_VETO_INTENSITY}/10 é veto`, () => {
+      const r = painToConstraints({
+        ...base,
+        points: [
+          { region: 'KNEE', intensity: PAIN_VETO_INTENSITY },
+          { region: 'ELBOW', intensity: PAIN_VETO_INTENSITY - 1 },
+        ],
+      });
+      expect(r.tags).toEqual(expect.arrayContaining(['KNEE', 'ELBOW']));
+      expect(r.cautionTags).toEqual(['ELBOW']);
+    });
+
+    it.each([
+      ['tendência de piora', { trend: 'WORSENING' as const }],
+      ['acompanhamento médico ativo', { underMedicalFollowUp: true }],
+      [
+        'orientação profissional de evitar',
+        { hasAvoidanceRecommendation: true, avoidanceRecommendation: 'evitar impacto' },
+      ],
+    ])('%s torna toda dor da seção veto', (_label, extra) => {
+      const r = painToConstraints({
+        ...base,
+        ...extra,
+        points: [{ region: 'LOWER_BACK', intensity: 2 }],
+      });
+      expect(r.tags).toEqual(['LOWER_BACK']);
+      expect(r.cautionTags).toEqual([]);
+    });
+
+    it('o texto de "evitar" é veto; o de "o que provoca" só vira cautela', () => {
+      const r = painToConstraints({
+        ...base,
+        points: [{ region: 'KNEE', intensity: 2 }],
+        trigger: 'piora ao subir escada e levantar o ombro',
+        hasAvoidanceRecommendation: false,
+      });
+      expect(r.tags).toEqual(expect.arrayContaining(['KNEE', 'SHOULDER']));
+      expect(r.cautionTags).toEqual(expect.arrayContaining(['KNEE', 'SHOULDER']));
+      const avoid = painToConstraints({
+        ...base,
+        points: [{ region: 'KNEE', intensity: 2 }],
+        hasAvoidanceRecommendation: true,
+        avoidanceRecommendation: 'evitar carga no ombro',
+      });
+      expect(avoid.cautionTags).toEqual([]);
+    });
+
+    it('tag clínica (cardíaca, queda, gestação) nunca vira cautela, mesmo vindo de texto de dor', () => {
+      const r = painToConstraints({
+        ...base,
+        points: [{ region: 'OTHER', intensity: 3, regionOther: 'dor no peito e pressão alta' }],
+      });
+      expect(r.tags).toContain('CARDIAC');
+      expect(r.cautionTags).not.toContain('CARDIAC');
+    });
+
+    it('`hardInjuryTags` tira as de cautela; sem `cautionTags`, tudo veta', () => {
+      expect(
+        hardInjuryTags({ injuryTags: ['KNEE', 'SHOULDER'], cautionTags: ['SHOULDER'] }),
+      ).toEqual(['KNEE']);
+      expect(hardInjuryTags({ injuryTags: ['KNEE', 'SHOULDER'] })).toEqual(['KNEE', 'SHOULDER']);
     });
   });
 });

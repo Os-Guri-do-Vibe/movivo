@@ -29,6 +29,7 @@ import { EMPHASIS_MUSCLE_GROUPS, PAIN_REGION_LABELS } from '@movivo/shared';
 
 import type { ParqEvaluation } from '../anamnesis/parq';
 import type { ContraindicationTag, ExerciseLevel } from './exercise-catalog';
+import { STRICT_CONTRAINDICATION_TAGS } from './exercise-substitution';
 
 export interface UserConstraints {
   /** Objetivo já traduzido por `toGenerationGoal` — "Outro" nunca chega aqui. */
@@ -62,6 +63,17 @@ export interface UserConstraints {
   avoid: string[];
   /** Lesões e dores já normalizadas para tags (via `mapInjuriesToTags`). */
   injuryTags: ContraindicationTag[];
+  /**
+   * SUBCONJUNTO de `injuryTags` que veio de dor relatada SEM veto (achado 2026-10-21): dor de
+   * intensidade moderada, estável ou melhorando, sem orientação profissional de evitar nem
+   * acompanhamento ativo. A metodologia trata isso como modificação prudente — evitar sobrecarga
+   * direta e de alta intensidade na região —, não como exclusão; e o RT já decidiu (2026-10-21)
+   * que restrição articular admite "cautela" na troca de exercício. No GERADOR e no validador
+   * da geração, estas tags deixam de apagar exercícios da base e viram sinalização
+   * ("cautela") ao modelo e ao RT. Para todo o resto do sistema (coach, troca de exercício,
+   * painel) `injuryTags` continua sendo o conjunto COMPLETO de restrições. Ausente = tudo veto.
+   */
+  cautionTags?: ContraindicationTag[];
   /** Lesões/dores em texto livre, para contexto do prompt (o scrubber do router pseudonimiza). */
   injuriesRaw: string[];
   /** Rotina e barreiras de adesão declaradas, como dado do aluno (nunca instrução). */
@@ -266,18 +278,46 @@ const INJURY_KEYWORDS: Record<ContraindicationTag, string[]> = {
   ],
 };
 
+const foldAccents = (value: string): string =>
+  value
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase();
+
+/**
+ * Palavra-chave no texto, começando em fronteira de palavra. Achado 2026-10-21: o `includes`
+ * puro casava "pe" (pé) dentro de "peso", "pessoa", "esperar" — qualquer texto livre de dor
+ * ("piora com peso") virava a tag ANKLE e apagava afundos e agachamentos da base. Palavras de
+ * até 3 letras exigem a palavra inteira; as demais aceitam sufixo ("joelho" → "joelhos").
+ */
+function keywordMatches(foldedText: string, keyword: string): boolean {
+  const folded = foldAccents(keyword);
+  const escaped = folded.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern =
+    folded.length <= 3 ? `(?<![a-z0-9])${escaped}(?![a-z0-9])` : `(?<![a-z0-9])${escaped}`;
+  return new RegExp(pattern).test(foldedText);
+}
+
 export function mapInjuriesToTags(injuries: readonly string[]): ContraindicationTag[] {
   const tags = new Set<ContraindicationTag>();
   for (const injury of injuries) {
-    const normalized = injury.toLowerCase();
+    const folded = foldAccents(injury);
     for (const [tag, keywords] of Object.entries(INJURY_KEYWORDS) as [
       ContraindicationTag,
       string[],
     ][]) {
-      if (keywords.some((kw) => normalized.includes(kw))) tags.add(tag);
+      if (keywords.some((kw) => keywordMatches(folded, kw))) tags.add(tag);
     }
   }
   return [...tags];
+}
+
+/** Tags que vetam exercício na geração (injuryTags menos as de dor sem veto). */
+export function hardInjuryTags(
+  constraints: Pick<UserConstraints, 'injuryTags' | 'cautionTags'>,
+): ContraindicationTag[] {
+  const caution = new Set(constraints.cautionTags ?? []);
+  return constraints.injuryTags.filter((tag) => !caution.has(tag));
 }
 
 /**
@@ -359,34 +399,59 @@ const TAG_BY_PAIN_REGION: Partial<
   ANKLE_FOOT: 'ANKLE',
 };
 
-/** Seção 4 → tags de contraindicação + texto livre para o contexto do prompt. */
+/**
+ * Intensidade (0-10) a partir da qual a dor deixa de ser "cautela" e vira veto da região.
+ * Definido pelo RT e pelo fundador (2026-10-21): 8/10. Política: dor sem veto vira cautela;
+ * veto só para PAR-Q, orientação profissional, acompanhamento ativo, piora ou dor forte.
+ */
+export const PAIN_VETO_INTENSITY = 8;
+
+/**
+ * Seção 4 → tags de contraindicação + texto livre para o contexto do prompt.
+ *
+ * `tags` é o conjunto COMPLETO de regiões com dor/limitação (contrato de sempre). `cautionTags`
+ * é o subconjunto que NÃO é veto (ver `UserConstraints.cautionTags`): a região só entra nele
+ * quando nada indica exclusão rígida. É veto — fica fora de `cautionTags` — quando há
+ * acompanhamento médico/profissional ativo, orientação profissional de evitar, tendência de
+ * piora, intensidade a partir de `PAIN_VETO_INTENSITY`, ou a tag é clínica
+ * (`STRICT_CONTRAINDICATION_TAGS`). Texto livre de "o que provoca" e "o que o profissional
+ * explicou" só vira tag de cautela; o de "o que evitar" é veto.
+ */
 export function painToConstraints(pain: PainAssessment | null | undefined): {
   tags: ContraindicationTag[];
+  cautionTags: ContraindicationTag[];
   raw: string[];
 } {
-  if (!pain?.hasPain) return { tags: [], raw: [] };
+  if (!pain?.hasPain) return { tags: [], cautionTags: [], raw: [] };
 
-  const tags = new Set<ContraindicationTag>();
+  const hard = new Set<ContraindicationTag>();
+  const soft = new Set<ContraindicationTag>();
   const raw: string[] = [];
+  const vetoAll =
+    pain.underMedicalFollowUp || pain.hasAvoidanceRecommendation || pain.trend === 'WORSENING';
 
   for (const point of pain.points) {
     const tag = TAG_BY_PAIN_REGION[point.region];
-    if (tag) tags.add(tag);
+    if (tag) (vetoAll || point.intensity >= PAIN_VETO_INTENSITY ? hard : soft).add(tag);
     const label =
       point.region === 'OTHER'
         ? (point.regionOther ?? 'outra região')
         : PAIN_REGION_LABELS[point.region];
     raw.push(`Dor em ${label} (intensidade ${point.intensity}/10)`);
   }
-  // "Outra região" e a recomendação profissional de evitação são texto livre: passam
-  // pela heurística de keyword para virar tag quando possível, e seguem visíveis ao RT.
-  const freeText = [
-    ...pain.points.filter((p) => p.region === 'OTHER').map((p) => p.regionOther ?? ''),
-    pain.trigger ?? '',
-    pain.professionalExplanation ?? '',
-    pain.avoidanceRecommendation ?? '',
-  ].filter(Boolean);
-  for (const tag of mapInjuriesToTags(freeText)) tags.add(tag);
+  // "Outra região" e o texto do profissional passam pela heurística de keyword.
+  const otherRegionTags = mapInjuriesToTags(
+    pain.points.filter((p) => p.region === 'OTHER').map((p) => p.regionOther ?? ''),
+  );
+  const strongOther = pain.points.some(
+    (p) => p.region === 'OTHER' && p.intensity >= PAIN_VETO_INTENSITY,
+  );
+  for (const tag of otherRegionTags) (vetoAll || strongOther ? hard : soft).add(tag);
+  for (const tag of mapInjuriesToTags([pain.trigger ?? '', pain.professionalExplanation ?? ''])) {
+    (vetoAll ? hard : soft).add(tag);
+  }
+  for (const tag of mapInjuriesToTags([pain.avoidanceRecommendation ?? ''])) hard.add(tag);
+  for (const tag of [...soft]) if (STRICT_CONTRAINDICATION_TAGS.has(tag)) hard.add(tag);
 
   if (pain.trend) raw.push(`Tendência da dor: ${pain.trend}`);
   if (pain.trigger) raw.push(`O que provoca: ${pain.trigger}`);
@@ -394,5 +459,9 @@ export function painToConstraints(pain: PainAssessment | null | undefined): {
     raw.push(`Orientação profissional de evitar: ${pain.avoidanceRecommendation}`);
   }
 
-  return { tags: [...tags], raw };
+  return {
+    tags: [...new Set([...hard, ...soft])],
+    cautionTags: [...soft].filter((tag) => !hard.has(tag)),
+    raw,
+  };
 }

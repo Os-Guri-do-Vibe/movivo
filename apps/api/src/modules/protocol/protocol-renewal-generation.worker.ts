@@ -323,6 +323,7 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
         anamnesisInvariants: anamnesis?.text,
         anamnesisLevel: anamnesis?.level,
         anamnesisInjuryTags: anamnesis?.injuryTags ?? [],
+        anamnesisCautionTags: anamnesis?.cautionTags ?? [],
         block1,
         block2,
         block3,
@@ -413,6 +414,7 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
   ): Promise<{
     text?: string;
     injuryTags: ContraindicationTag[];
+    cautionTags: ContraindicationTag[];
     level: UserConstraints['level'];
   } | null> {
     const [row] = await tx
@@ -457,6 +459,7 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
     return {
       text: lines.join('\n'),
       injuryTags: pain.tags,
+      cautionTags: pain.cautionTags,
       level: levelFromExperience(structured.experience),
     };
   }
@@ -536,6 +539,14 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
         : base.avoid;
 
     const importantEvent = this.resolveImportantEvent(base, block5);
+    const injuryTags = [
+      ...new Set([
+        ...base.injuryTags,
+        ...newPain.tags,
+        ...parqRecheckTags,
+        ...ctx.anamnesisInjuryTags,
+      ]),
+    ];
 
     return {
       ...base,
@@ -554,14 +565,17 @@ export class ProtocolRenewalGenerationWorker implements OnModuleInit {
       // uma tag num fallback no meio do caminho; a união com `anamnesisInjuryTags` (a raiz
       // de verdade) é sempre conservadora — segurança nunca é rebaixada por preferência
       // nem por uma cascata incompleta.
-      injuryTags: [
-        ...new Set([
-          ...base.injuryTags,
-          ...newPain.tags,
-          ...parqRecheckTags,
-          ...ctx.anamnesisInjuryTags,
-        ]),
-      ],
+      injuryTags,
+      cautionTags: renewalCautionTags({
+        injuryTags,
+        baseInjuryTags: base.injuryTags,
+        baseCautionTags: base.cautionTags ?? [],
+        baseParqTags: base.parqTags,
+        parqRecheckTags,
+        newPain,
+        anamnesisInjuryTags: ctx.anamnesisInjuryTags,
+        anamnesisCautionTags: ctx.anamnesisCautionTags,
+      }),
       injuriesRaw: [...base.injuriesRaw, ...newPain.raw],
       requiresProfessionalReview: safety.requiresProfessionalReview,
       parqTags: safety.requiresProfessionalReview
@@ -771,9 +785,45 @@ interface LoadedRenewalContext {
   anamnesisLevel?: UserConstraints['level'];
   /** Tags de lesão da anamnese ORIGINAL, para a reconciliação em `toConstraints()`. */
   anamnesisInjuryTags: ContraindicationTag[];
+  /** Subconjunto de `anamnesisInjuryTags` que é dor sem veto (ver `UserConstraints.cautionTags`). */
+  anamnesisCautionTags: ContraindicationTag[];
   block1: ProtocolRenewalBlock1;
   block2: ProtocolRenewalBlock2;
   block3: ProtocolRenewalBlock3;
   block4: ProtocolRenewalBlock4;
   block5: ProtocolRenewalBlock5;
+}
+
+/**
+ * Tags de dor SEM veto na renovação (ver `UserConstraints.cautionTags`). A cascata do mesociclo
+ * anterior só pode ACRESCENTAR restrição, nunca rebaixá-la: continua veto tudo o que veio de
+ * PAR-Q (anterior ou reavaliado agora), de dor com veto na raiz da anamnese ou na dor nova, e
+ * toda tag da cascata que a raiz da anamnese desconhece (nasceu de renovação anterior) e que o
+ * protocolo anterior já tratava como veto. O que sobra de `injuryTags` é cautela.
+ *
+ * Tag da cascata que a raiz da anamnese conhece como cautela também é cautela — é o caminho dos
+ * alunos cujo protocolo anterior é anterior à política de cautela (sem `cautionTags`).
+ */
+export function renewalCautionTags(input: {
+  injuryTags: readonly ContraindicationTag[];
+  baseInjuryTags: readonly ContraindicationTag[];
+  baseCautionTags: readonly ContraindicationTag[];
+  baseParqTags: readonly ContraindicationTag[];
+  parqRecheckTags: readonly ContraindicationTag[];
+  newPain: { tags: readonly ContraindicationTag[]; cautionTags: readonly ContraindicationTag[] };
+  anamnesisInjuryTags: readonly ContraindicationTag[];
+  anamnesisCautionTags: readonly ContraindicationTag[];
+}): ContraindicationTag[] {
+  const anamnesisKnown = new Set(input.anamnesisInjuryTags);
+  const anamnesisCaution = new Set(input.anamnesisCautionTags);
+  const baseCaution = new Set(input.baseCautionTags);
+  const newPainCaution = new Set(input.newPain.cautionTags);
+  const hard = new Set<ContraindicationTag>([
+    ...input.baseParqTags,
+    ...input.parqRecheckTags,
+    ...input.anamnesisInjuryTags.filter((tag) => !anamnesisCaution.has(tag)),
+    ...input.newPain.tags.filter((tag) => !newPainCaution.has(tag)),
+    ...input.baseInjuryTags.filter((tag) => !anamnesisKnown.has(tag) && !baseCaution.has(tag)),
+  ]);
+  return input.injuryTags.filter((tag) => !hard.has(tag));
 }

@@ -135,4 +135,27 @@ describe('WorkoutAccessPage', () => {
       body: JSON.stringify({ token: 'token-de-teste' }),
     });
   });
+
+  // Registro tardio: o link do WhatsApp leva o dia do treino no fragmento (`&date=`).
+  it('abre o diário no dia do treino quando o link traz a data', async () => {
+    window.history.replaceState(null, '', '/treino/acessar#token=token-de-teste&date=2026-10-19');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+
+    render(<WorkoutAccessPage />);
+    await waitFor(() => expect(window.location.hash).toBe(''));
+    await userEvent.click(screen.getByRole('button', { name: /abrir meu treino/i }));
+
+    expect(replace).toHaveBeenCalledWith('/treino?date=2026-10-19');
+  });
+
+  it('ignora data malformada no link e abre hoje', async () => {
+    window.history.replaceState(null, '', '/treino/acessar#token=token-de-teste&date=ontem');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+
+    render(<WorkoutAccessPage />);
+    await waitFor(() => expect(window.location.hash).toBe(''));
+    await userEvent.click(screen.getByRole('button', { name: /abrir meu treino/i }));
+
+    expect(replace).toHaveBeenCalledWith('/treino');
+  });
 });

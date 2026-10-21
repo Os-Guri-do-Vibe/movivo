@@ -96,7 +96,7 @@ function makeWorker(
     findLatestPersonalInfo,
     setPdfContent,
   } as unknown as ProtocolRepository;
-  const enqueue = vi.fn(async () => 'job');
+  const enqueue = vi.fn(async (_queue: string, ..._rest: unknown[]) => 'job');
   const queues = { enqueue } as unknown as QueueManager;
   const emit = vi.fn();
   const queueEvents = { emit } as unknown as DashboardQueueEventsService;
@@ -286,6 +286,28 @@ describe('ProtocolSubstitutionReleaseWorker (janela de cortesia de 30min da subs
     // com a troca) fica salvo e `WhatsappOutboundWorker.buildDelivery` o trata como válido,
     // mandando um PDF que não reflete o protocolo atual em vez de cair no texto+link.
     expect(setPdfContent).toHaveBeenCalledWith('u1', 'p1', null);
-    expect(enqueue).toHaveBeenCalledOnce();
+    // Entrega do protocolo + aviso ao treino do dia (fila `workout-protocol-changed`).
+    const queues = enqueue.mock.calls.map((call) => call[0]);
+    expect(queues).toEqual(['whatsapp-outbound', 'workout-protocol-changed']);
+  });
+
+  it('avisa o treino do dia da versão nova, por fila, com id que não duplica ao reprocessar', async () => {
+    const { worker, enqueue } = makeWorker(true, 3);
+    await worker.process(job());
+    expect(enqueue).toHaveBeenCalledWith(
+      'workout-protocol-changed',
+      'workout-protocol-changed',
+      { userId: 'u1', reason: 'SUBSTITUTION', protocolVersion: 3 },
+      { jobId: 'workout-protocol-changed_u1_3' },
+    );
+  });
+
+  it('falha ao avisar o treino do dia não derruba a liberação', async () => {
+    const { worker, enqueue } = makeWorker(true, 3);
+    enqueue.mockImplementation(async (queue: string) => {
+      if (queue === 'workout-protocol-changed') throw new Error('redis fora');
+      return 'job';
+    });
+    await expect(worker.process(job())).resolves.toMatchObject({ status: 'RELEASED' });
   });
 });

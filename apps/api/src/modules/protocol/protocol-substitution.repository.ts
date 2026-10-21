@@ -439,7 +439,11 @@ export class ProtocolSubstitutionRepository {
           constraints: derived.validationConstraints,
           parqFlags: derived.parQFlags,
         },
-        { baseline: protocol.content as ProtocolStructure },
+        {
+          baseline: protocol.content as ProtocolStructure,
+          // Troca de risco igual ou menor ao exercício que sai (decisão do RT, 2026-10-21).
+          cautionSwaps: swaps.map((swap) => ({ from: swap.fromExerciseId, to: swap.to.id })),
+        },
       );
       if (verdict.action !== 'PASS') {
         return {

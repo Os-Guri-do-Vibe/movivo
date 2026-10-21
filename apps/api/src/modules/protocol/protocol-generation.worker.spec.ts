@@ -11,6 +11,7 @@ import type { DashboardQueueEventsService } from '../../core/event-bus/dashboard
 import type { QueueManager } from '../jobs/queue-manager.service';
 import type { WorkerFactory } from '../jobs/worker.factory';
 import {
+  CAUTION_PROTOCOL_REVIEW_URGENCY,
   ProtocolGenerationWorker,
   REPAIRED_PROTOCOL_REVIEW_URGENCY,
   reviewUrgencyForPlan,
@@ -488,6 +489,16 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
     );
   });
 
+  it('exercício com cautela por dor, sem PAR-Q, segue a política (hoje: revisão opcional)', () => {
+    const clean = { usedFallbackTemplate: false, repairs: [] };
+    expect(CAUTION_PROTOCOL_REVIEW_URGENCY).toBe('OPTIONAL');
+    expect(reviewUrgencyForPlan({ ...clean, cautionExercises: 2 }, true)).toBe('MANDATORY');
+    expect(reviewUrgencyForPlan({ ...clean, cautionExercises: 2 }, false)).toBe(
+      CAUTION_PROTOCOL_REVIEW_URGENCY,
+    );
+    expect(reviewUrgencyForPlan({ ...clean, cautionExercises: 0 }, false)).toBe('OPTIONAL');
+  });
+
   it.each(['GAPS', 'UNAVAILABLE'] as const)(
     '%s contextual exige revisão obrigatória, persiste o diagnóstico e não agenda liberação',
     async (status) => {
@@ -514,15 +525,41 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
     },
   );
 
-  it('sem PAR-Q bloqueante ignora avaliador indisponível e mantém auto-liberação, mesmo com dor', async () => {
+  it('sem PAR-Q bloqueante mantém auto-liberação se o avaliador estiver indisponível', async () => {
     const { worker, generator, repository, enqueue } = makeWorker();
     vi.mocked(generator.assessQuality).mockResolvedValue(qualityAssessment('UNAVAILABLE'));
     await worker.process(job());
-    expect(generator.assessQuality).not.toHaveBeenCalled();
+    expect(generator.assessQuality).toHaveBeenCalledTimes(1);
     expect(repository.persist).toHaveBeenCalledWith(
       expect.objectContaining({
         reviewUrgency: 'OPTIONAL',
-        constraints: expect.objectContaining({ contextualQuality: undefined }),
+        constraints: expect.objectContaining({
+          contextualQuality: qualityAssessment('UNAVAILABLE').summary,
+        }),
+      }),
+    );
+    expect(enqueue).toHaveBeenCalledWith(
+      'protocol-auto-release',
+      'auto-release',
+      { userId: 'u1', protocolId: 'p1' },
+      { delay: 24 * 60 * 60 * 1000, jobId: 'auto-release-p1' },
+    );
+  });
+
+  it('sem PAR-Q bloqueante corrige lacunas contextuais sem transformar a revisão em obrigatória', async () => {
+    const { worker, generator, repository, enqueue } = makeWorker();
+    vi.mocked(generator.assessQuality).mockResolvedValue(qualityAssessment('GAPS'));
+
+    await worker.process(job());
+
+    // Geração inicial + orçamento de correções contextualizadas pela metodologia.
+    expect(generator.generate).toHaveBeenCalledTimes(3);
+    expect(repository.persist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reviewUrgency: 'OPTIONAL',
+        constraints: expect.objectContaining({
+          contextualQuality: qualityAssessment('GAPS').summary,
+        }),
       }),
     );
     expect(enqueue).toHaveBeenCalledWith(

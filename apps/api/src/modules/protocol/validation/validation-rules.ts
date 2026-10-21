@@ -18,7 +18,7 @@ import type { GenerationGoal, WorkoutSplit } from '@movivo/shared';
 
 import type { ExerciseLevel } from '../exercise-catalog';
 
-export const VALIDATION_RULES_VERSION = 'validation-rules-2026-10-v6';
+export const VALIDATION_RULES_VERSION = 'validation-rules-2026-10-v7';
 
 export type ValidationActionCode = 'PASS' | 'FLAG' | 'BLOCK';
 
@@ -60,7 +60,9 @@ export const PROFESSIONAL_OVERRIDABLE_RULES: ReadonlySet<string> = new Set([
  * para resolver. Vazio = sem prioridade declarada (a metodologia do RT decide).
  */
 export const PRIORITY_PATTERNS_BY_GOAL: Record<GenerationGoal, readonly string[]> = {
-  GAIN_MUSCLE: ['HORIZONTAL_PUSH', 'VERTICAL_PULL', 'SQUAT', 'HINGE', 'ISOLATION'],
+  // Achado 2026-10-21: 'ISOLATION' saiu desta lista — a metodologia diz que isolado é complemento,
+  // nunca base, e listá-lo como "padrão prioritário" empurrava o modelo no sentido oposto.
+  GAIN_MUSCLE: ['HORIZONTAL_PUSH', 'VERTICAL_PULL', 'SQUAT', 'HINGE'],
   GAIN_STRENGTH: ['SQUAT', 'HINGE', 'HORIZONTAL_PUSH', 'VERTICAL_PULL'],
   // Revisão 2026-09-29 (Victor): sem puxada, a lista induzia sessões de emagrecimento sem
   // nenhum padrão de puxar — musculação bem estruturada para recomposição cobre os dois.
@@ -155,7 +157,11 @@ export const LANGUAGE_RULES: readonly LanguageRule[] = [
   {
     id: 'MED_PRESCRIPTION',
     pattern:
-      /prescrev|prescri[çc][ãa]o|medicament|rem[ée]dio|analg[ée]sic|anti-?inflamat[óo]ri|\btome\b|\bdose\b|ibuprofeno|dipirona|paracetamol|nimesulida|diclofenaco|omeprazol/i,
+      // `tome`/`dose` só bloqueiam ao lado de remédio/suplemento (mesma forma de
+      // `RESPONSE_LANGUAGE_RULES`). Achado 2026-10-21: "Segunda dose de costas na semana" no
+      // `focus` (3 de 10 gerações do perfil lombar no laboratório) é vocabulário de treino —
+      // e, por estar no `focus`, o reparo determinístico não corrige: o protocolo ia ao template.
+      /prescrev|prescri[çc][ãa]o|medicament|rem[ée]dio|analg[ée]sic|anti-?inflamat[óo]ri|ibuprofeno|dipirona|paracetamol|nimesulida|diclofenaco|omeprazol|\btome\b(?=.{0,40}\b(?:comprimid|c[áa]psula|gotas|\d\s*(?:ml|mg)\b|rem[ée]dio|medicament|vitamina|suplement))|\bdose\s+(?:di[áa]ria\s+)?(?:de|do|da)\s+(?:rem[ée]dio|medicament|vitamina|suplement|creatina|cafe[íi]na|whey)/i,
     action: 'BLOCK',
   },
   {

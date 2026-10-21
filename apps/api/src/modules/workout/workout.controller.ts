@@ -167,6 +167,32 @@ export class WorkoutController {
     return { ok: true };
   }
 
+  @Post('sessions/:id/late-start')
+  @Header('Cache-Control', 'private, no-store')
+  @ApiHeader(SESSION_TOKEN_HEADER)
+  @ApiOperation({
+    summary: 'Abre o registro de um treino feito em um dia recente',
+    description:
+      'Registro tardio: o aluno treinou e não registrou na hora. Vale para os últimos dias (janela curta); ' +
+      'abre o treino do dia para preenchimento SEM cronômetro. O resto do fluxo (séries, finalizar) é o de sempre.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID da sessão de treino do dia que passou.' })
+  @ApiResponse({ status: 200, description: 'Registro tardio aberto.' })
+  @ApiResponse({
+    status: 400,
+    description: 'Dia fora da janela, de hoje, ou treino já finalizado.',
+  })
+  @ApiResponse({ status: 401, description: 'sessionToken ausente, inválido ou expirado.' })
+  @ApiResponse({ status: 404, description: 'Sessão inexistente ou de outro titular.' })
+  async lateStart(
+    @Headers('authorization') authorization: string | undefined,
+    @Param('id') rawId: string,
+  ) {
+    const userId = await this.access.requireUser(authorization);
+    await this.journalService.startLate(userId, uuidSchema.parse(rawId));
+    return { ok: true };
+  }
+
   @Patch('sessions/:id/sets')
   @Header('Cache-Control', 'private, no-store')
   @ApiHeader(SESSION_TOKEN_HEADER)

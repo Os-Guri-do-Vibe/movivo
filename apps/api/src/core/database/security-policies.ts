@@ -167,6 +167,13 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
     professional: 'read',
     parents: [{ table: 'protocols', column: 'protocol_id' }],
   },
+  // Ajustes de agenda pedidos ao Coach (só inserção). O CREF lê a linha do tempo do aluno.
+  {
+    table: 'workout_schedule_adjustments',
+    column: 'user_id',
+    professional: 'read',
+    parents: [{ table: 'protocols', column: 'protocol_id' }],
+  },
   {
     table: 'workout_set_entries',
     column: 'user_id',

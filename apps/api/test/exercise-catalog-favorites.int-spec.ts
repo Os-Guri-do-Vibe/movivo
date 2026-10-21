@@ -219,6 +219,24 @@ function referenceBase(system: string) {
     }));
 }
 
+/** A mesma base, separada nos blocos por grupo muscular (`## grupo: ...`). */
+function referenceBaseGroups(system: string) {
+  const start = system.indexOf('BASE DE REFERÊNCIA (use SOMENTE');
+  const end = system.indexOf('SCHEMA DO JSON DE SAÍDA:', start);
+  const groups: { id: string; favorite: boolean; equipped: boolean }[][] = [];
+  for (const line of system.slice(start, end).split('\n')) {
+    if (line.startsWith('## grupo: ')) groups.push([]);
+    else if (line.startsWith('- ')) {
+      groups[groups.length - 1]?.push({
+        id: line.slice(2).split(' | ')[0] ?? '',
+        favorite: line.endsWith(` | ${FAVORITE_MARKER}`),
+        equipped: !line.includes(' | equip: nenhum | '),
+      });
+    }
+  }
+  return groups;
+}
+
 beforeAll(async () => {
   // Estado global do banco local: guarda e esvazia os favoritos pré-existentes.
   savedFavorites = await migrator`
@@ -519,15 +537,25 @@ describe('Motor — snapshot do ExerciseCatalogProvider e system prompt da gera�
     // Revisão 2026-09-29: favorito é o critério PRIMÁRIO — favorito com equipamento >
     // favorito sem equipamento > não favorito com equipamento > resto. O favorito sem
     // equipamento vem antes de toda a faixa de não favoritos com equipamento.
-    expect(base[0]).toMatchObject({ id: GYM_ONLY, favorite: true, equipped: true });
-    expect(base[1]).toMatchObject({ id: EVERYWHERE, favorite: true, equipped: false });
-    const rest = base.slice(2);
-    expect(rest.some((l) => l.favorite)).toBe(false);
-    // Entre os não favoritos, equipamento continua sendo o 2º critério.
-    const firstBodyweight = rest.findIndex((l) => !l.equipped);
-    expect(firstBodyweight).toBeGreaterThan(0);
-    expect(rest.slice(0, firstBodyweight).every((l) => l.equipped)).toBe(true);
-    expect(rest.slice(firstBodyweight).every((l) => !l.equipped)).toBe(true);
+    // A base é apresentada por grupo muscular (2026-10-21); a prioridade vale DENTRO de cada
+    // grupo: favoritos antes de todo não favorito, equipamento em 2º critério.
+    for (const group of referenceBaseGroups(system)) {
+      const firstNonFavorite = group.findIndex((l) => !l.favorite);
+      if (firstNonFavorite >= 0) {
+        expect(group.slice(firstNonFavorite).some((l) => l.favorite)).toBe(false);
+      }
+      for (const part of [group.filter((l) => l.favorite), group.filter((l) => !l.favorite)]) {
+        const firstBodyweight = part.findIndex((l) => !l.equipped);
+        if (firstBodyweight >= 0) {
+          expect(part.slice(firstBodyweight).every((l) => !l.equipped)).toBe(true);
+        }
+      }
+    }
+    expect(base.find((l) => l.id === GYM_ONLY)).toMatchObject({ favorite: true, equipped: true });
+    expect(base.find((l) => l.id === EVERYWHERE)).toMatchObject({
+      favorite: true,
+      equipped: false,
+    });
     expect(base.filter((l) => l.id === GYM_ONLY)).toHaveLength(1);
 
     const blockAt = system.indexOf(FAVORITE_BLOCK_HEADER);

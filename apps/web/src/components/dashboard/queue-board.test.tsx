@@ -13,13 +13,15 @@ import {
   substitutionItem,
 } from '../../../test/dashboard-fixtures';
 
-const { getQueue, getAnamnesisAnswers } = vi.hoisted(() => ({
+const { getQueue, getAnamnesisAnswers, regenerateProtocol } = vi.hoisted(() => ({
   getQueue: vi.fn(),
   getAnamnesisAnswers: vi.fn(),
+  regenerateProtocol: vi.fn(),
 }));
 vi.mock('@/lib/dashboard-api', () => ({
   getQueue,
   getAnamnesisAnswers,
+  regenerateProtocol,
   captureDashboardEvent: vi.fn(),
 }));
 
@@ -64,6 +66,7 @@ function iconCircle(card: HTMLElement): HTMLElement {
 beforeEach(() => {
   getQueue.mockReset();
   getAnamnesisAnswers.mockReset();
+  regenerateProtocol.mockReset();
   MockEventSource.instances = [];
   vi.stubGlobal('EventSource', MockEventSource);
 });
@@ -601,5 +604,102 @@ describe('QueueBoard', () => {
     act(() => stream?.onopen?.(new Event('open')));
     await act(async () => vi.advanceTimersByTimeAsync(30_000));
     expect(getQueue).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('QueueBoard — Gerar protocolo novamente', () => {
+  const regenerable = { ...fallbackProtocolItem, canRegenerate: true };
+  const cardOf = (title: string) => screen.getByText(title).closest('li') as HTMLElement;
+
+  it('o botão fica à direita do lápis, com o tooltip "Gerar protocolo novamente"', async () => {
+    getQueue.mockResolvedValue({ ...queueResponse, mandatory: [regenerable] });
+    render(<QueueBoard />);
+    await screen.findByText(regenerable.title);
+    const card = cardOf(regenerable.title);
+    const pencil = within(card).getByRole('link', { name: 'Abrir protocolo' });
+    const regenerate = within(card).getByRole('button', { name: 'Gerar protocolo novamente' });
+    expect(regenerate).toHaveAttribute('title', 'Gerar protocolo novamente');
+    expect(pencil.compareDocumentPosition(regenerate) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it('não aparece para protocolo que não nasceu de anamnese nem para outros tipos de item', async () => {
+    getQueue.mockResolvedValue({
+      ...queueResponse,
+      mandatory: [fallbackProtocolItem, handoffItem],
+      substitutionOptional: [substitutionItem],
+    });
+    render(<QueueBoard />);
+    await screen.findByText(fallbackProtocolItem.title);
+    expect(
+      screen.queryByRole('button', { name: 'Gerar protocolo novamente' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('clique pede a regeração e recarrega a fila', async () => {
+    getQueue.mockResolvedValue({ ...queueResponse, mandatory: [regenerable] });
+    regenerateProtocol.mockResolvedValue({ status: 'QUEUED' });
+    render(<QueueBoard />);
+    await screen.findByText(regenerable.title);
+    await userEvent.click(screen.getByRole('button', { name: 'Gerar protocolo novamente' }));
+    expect(regenerateProtocol).toHaveBeenCalledWith(regenerable.id, {
+      confirmOverwriteEdit: false,
+    });
+    await waitFor(() => expect(getQueue).toHaveBeenCalledTimes(2));
+  });
+
+  it('enquanto gera, o botão fica desabilitado e o card avisa', async () => {
+    getQueue.mockResolvedValue({
+      ...queueResponse,
+      mandatory: [{ ...regenerable, regeneration: 'RUNNING' }],
+    });
+    render(<QueueBoard />);
+    await screen.findByText(regenerable.title);
+    expect(screen.getByRole('button', { name: 'Gerar protocolo novamente' })).toBeDisabled();
+    expect(screen.getByText(/Gerando o protocolo novamente/)).toBeVisible();
+  });
+
+  it.each(['NOT_APPLIED', 'FAILED'] as const)(
+    'regeração %s explica que o protocolo ficou como estava e libera nova tentativa',
+    async (regeneration) => {
+      getQueue.mockResolvedValue({
+        ...queueResponse,
+        mandatory: [{ ...regenerable, regeneration }],
+      });
+      render(<QueueBoard />);
+      await screen.findByText(regenerable.title);
+      expect(screen.getByText(/Você pode tentar de novo/)).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Gerar protocolo novamente' })).toBeEnabled();
+    },
+  );
+
+  it('mostra o erro da API no card e não trava o botão', async () => {
+    getQueue.mockResolvedValue({ ...queueResponse, mandatory: [regenerable] });
+    regenerateProtocol.mockRejectedValue(new Error('Este protocolo já está sendo gerado.'));
+    render(<QueueBoard />);
+    await screen.findByText(regenerable.title);
+    await userEvent.click(screen.getByRole('button', { name: 'Gerar protocolo novamente' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('já está sendo gerado');
+    expect(screen.getByRole('button', { name: 'Gerar protocolo novamente' })).toBeEnabled();
+  });
+
+  it('conteúdo editado pelo profissional só regera depois de confirmar o descarte', async () => {
+    getQueue.mockResolvedValue({
+      ...queueResponse,
+      mandatory: [],
+      optional: [{ ...optionalProtocolItem, canRegenerate: true, editedByProfessional: true }],
+    });
+    regenerateProtocol.mockResolvedValue({ status: 'QUEUED' });
+    render(<QueueBoard />);
+    await screen.findByText(optionalProtocolItem.title);
+    await userEvent.click(screen.getByRole('button', { name: 'Gerar protocolo novamente' }));
+    expect(regenerateProtocol).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Gerar novamente' }));
+    await waitFor(() =>
+      expect(regenerateProtocol).toHaveBeenCalledWith(optionalProtocolItem.id, {
+        confirmOverwriteEdit: true,
+      }),
+    );
   });
 });

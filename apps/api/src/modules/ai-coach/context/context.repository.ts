@@ -32,9 +32,11 @@ import {
 } from '../../../core/database/tenant-database.service';
 import { healthBlockSchema } from '../../anamnesis/health-block';
 import { isProfessionalAuthored, MANUAL_AMENDMENT_ORIGIN } from '../../protocol/protocol-origin';
-import { dayKey, sessionFor, weekdayCode, WORKOUT_TIMEZONE } from '../../workout/workout-schedule';
+import { loadScheduleOverrides } from '../../workout/schedule-overrides';
+import { effectiveSessionForDate } from '../../workout/schedule-planner';
+import { dayKey, dayKeyIn, validTimezone, weekdayCodeIn } from '../../workout/workout-schedule';
 import type { ScrubUser } from '../llm/llm.types';
-import { buildRetrato, RETRATO_WINDOW_DAYS } from './retrato';
+import { buildAgendaDaSemana, buildRetrato, RETRATO_WINDOW_DAYS } from './retrato';
 import { TRANSCRIPT_MAX_AGE_DAYS, TRANSCRIPT_MAX_ROWS, type TranscriptRow } from './transcript';
 
 export interface EpisodicMemory {
@@ -111,7 +113,12 @@ export class ContextRepository {
         retratoSessions,
       ] = await Promise.all([
         tx
-          .select({ name: users.name, phoneNumber: users.phoneNumber, email: users.email })
+          .select({
+            name: users.name,
+            phoneNumber: users.phoneNumber,
+            email: users.email,
+            timezone: users.timezone,
+          })
           .from(users)
           .where(eq(users.id, userId))
           .limit(1),
@@ -234,24 +241,32 @@ export class ContextRepository {
       // calendário real e preenchia a lacuna com uma heurística genérica. Aqui o cálculo é
       // feito em código — o mesmo algoritmo determinístico do check-in — e entregue pronto,
       // para o Coach nunca precisar (nem tentar) recalcular isso sozinho.
+      // "Hoje" é o dia do ALUNO (`users.timezone`), o mesmo que o link, o diário e o fluxo de
+      // agenda usam: com o fuso fixo de São Paulo, uma aluna em Manaus às 23h30 de terça já era
+      // "quarta" para o Coach, e no domingo à noite ele enxergava a semana seguinte.
       const now = new Date();
+      const timezone = validTimezone(user?.timezone);
       const hoje = {
-        data: dayKey(now),
-        diaDaSemana: weekdayCode(now),
+        data: dayKeyIn(now, timezone),
+        diaDaSemana: weekdayCodeIn(now, timezone),
         rotulo: new Intl.DateTimeFormat('pt-BR', {
-          timeZone: WORKOUT_TIMEZONE,
+          timeZone: timezone,
           weekday: 'long',
         }).format(now),
       };
+      // Calendário efetivo: o padrão do protocolo MAIS os ajustes que o aluno pediu ao Coach
+      // (treinar em outro dia, descansar). Sem eles o Coach contradiria o que acabou de aceitar.
+      const overrides = proto ? await loadScheduleOverrides(tx, userId, proto.id, now) : undefined;
       const treinoDeHojeSegundoCalendario = content
-        ? (sessionFor(now, content) ?? 'Hoje não é dia de treino previsto no protocolo.')
+        ? (effectiveSessionForDate(hoje.data, content, overrides) ??
+          'Hoje não é dia de treino previsto no protocolo.')
         : null;
 
       // As 3 últimas sessões raramente incluem o treino de HOJE (com ABC, a última sessão
       // do mesmo tipo foi há três treinos). Sem ela o Coach não tem a carga de referência de
       // quem pergunta "qual a carga de hoje?" depois de uma pausa. Uma consulta a mais, só
       // quando falta, e marcada para o modelo saber de qual treino se trata.
-      const todaySession = content ? sessionFor(now, content) : null;
+      const todaySession = content ? effectiveSessionForDate(hoje.data, content, overrides) : null;
       if (todaySession && !diarioFino.some((entry) => entry.sessionKey === todaySession.dayLabel)) {
         const sameTraining = await this.loadWorkoutDiary(tx, userId, todaySession.dayLabel);
         diarioFino.push(...sameTraining.map((entry) => ({ ...entry, mesmoTreinoDeHoje: true })));
@@ -263,11 +278,30 @@ export class ContextRepository {
         proto && content && firstProtocol
           ? buildRetrato({
               now,
+              timezone,
               firstProtocolStart: firstProtocol.startDate,
               mesocycleNumber: proto.mesocycleNumber,
               currentWeek: proto.currentWeek,
               totalWeeks: proto.totalWeeks,
               structure: content,
+              overrides,
+              completedDates: new Set(
+                retratoSessions.filter((row) => row.status === 'COMPLETED').map((row) => row.date),
+              ),
+              inProgressDates: new Set(
+                retratoSessions
+                  .filter((row) => row.status === 'IN_PROGRESS')
+                  .map((row) => row.date),
+              ),
+            })
+          : null;
+
+      const agendaDaSemana =
+        proto && content
+          ? buildAgendaDaSemana({
+              today: hoje.data,
+              structure: content,
+              overrides,
               completedDates: new Set(
                 retratoSessions.filter((row) => row.status === 'COMPLETED').map((row) => row.date),
               ),
@@ -290,6 +324,7 @@ export class ContextRepository {
             prescricaoVigente,
             hoje,
             treinoDeHojeSegundoCalendario,
+            agendaDaSemana,
             anamnese,
             eventosRecentes: {
               treinosConcluidos: recentWorkouts,

@@ -137,4 +137,48 @@ export const INTENT_EXAMPLES_SEED: readonly IntentExampleSeed[] = [
     text: 'tá tudo ocupado aqui, como faço pra não perder o treino?',
   },
   { intent: 'ADAPTACAO_NO_TREINO', text: 'cheguei atrasado na academia, o que corto do treino?' },
+  // AJUSTE_AGENDA — agenda flexível (2026-10-20). O aluno pede para mudar QUANDO treina.
+  {
+    intent: 'AJUSTE_AGENDA',
+    text: 'hoje meu dia foi tranquilo, vou conseguir treinar, posso fazer o treino A?',
+  },
+  { intent: 'AJUSTE_AGENDA', text: 'hoje não era dia de treino mas tô livre, posso treinar?' },
+  { intent: 'AJUSTE_AGENDA', text: 'posso fazer o treino de pernas hoje em vez de quinta?' },
+  { intent: 'AJUSTE_AGENDA', text: 'amanhã quero descansar, dá pra mudar os treinos?' },
+  {
+    intent: 'AJUSTE_AGENDA',
+    text: 'tô muito cansado, queria adiantar o descanso de sexta pra amanhã',
+  },
+  { intent: 'AJUSTE_AGENDA', text: 'dormi mal, posso treinar amanhã em vez de hoje?' },
+  { intent: 'AJUSTE_AGENDA', text: 'não vou conseguir treinar sábado, posso passar pro domingo?' },
+  { intent: 'AJUSTE_AGENDA', text: 'preciso reorganizar minha semana de treino' },
+  { intent: 'AJUSTE_AGENDA', text: 'pode jogar o treino de hoje pra amanhã?' },
+  { intent: 'AJUSTE_AGENDA', text: 'desfaz a mudança, volta como estava' },
+  { intent: 'AJUSTE_AGENDA', text: 'deixa o treino de sábado de fora e organiza o resto' },
+  { intent: 'AJUSTE_AGENDA', text: 'treinei ontem mas não consegui registrar no check-in' },
+  { intent: 'AJUSTE_AGENDA', text: 'esqueci de registrar o treino de ontem, como faço?' },
+  { intent: 'AJUSTE_AGENDA', text: 'quero registrar o treino que fiz anteontem' },
+  // PEDIDO_LINK_TREINO — o aluno pede o link do check-in diário.
+  { intent: 'PEDIDO_LINK_TREINO', text: 'me manda o link do treino de hoje' },
+  { intent: 'PEDIDO_LINK_TREINO', text: 'perdi o link do check-in, pode reenviar?' },
+  { intent: 'PEDIDO_LINK_TREINO', text: 'cadê o link do meu treino?' },
+  { intent: 'PEDIDO_LINK_TREINO', text: 'o link do check-in não abre, manda de novo' },
+  { intent: 'PEDIDO_LINK_TREINO', text: 'reenvia o check-in diário por favor' },
+  // CONSULTA_HISTORICO — achado 2026-10-21 (conversa da Giovana): perguntar pelo próprio
+  // histórico (cargas, quantidade, última vez) não é pedido de agenda.
+  { intent: 'CONSULTA_HISTORICO', text: 'quais foram as cargas que usei no último treino?' },
+  {
+    intent: 'CONSULTA_HISTORICO',
+    text: 'você me lembra das cargas antes do treino da semana que vem?',
+  },
+  { intent: 'CONSULTA_HISTORICO', text: 'quantos treinos eu já fiz esse mês?' },
+  { intent: 'CONSULTA_HISTORICO', text: 'quando foi meu último treino de pernas?' },
+  { intent: 'CONSULTA_HISTORICO', text: 'qual a carga que eu fiz no supino semana passada?' },
+  // RELATO_TREINO — troca que o aluno JÁ fez por conta própria não é pedido de troca.
+  { intent: 'RELATO_TREINO', text: 'fiz cadeira flexora no lugar dessa' },
+  { intent: 'RELATO_TREINO', text: 'troquei o leg 45 pelo horizontal e deu certo' },
+  { intent: 'RELATO_TREINO', text: 'acabei usando o halter no lugar da barra hoje' },
+  // SUBSTITUICAO_EXERCICIO — o aluno PEDE a troca, inclusive só comentando que não serve.
+  { intent: 'SUBSTITUICAO_EXERCICIO', text: 'a flexora em pé daqui só serve pra gente alta kkkk' },
+  { intent: 'SUBSTITUICAO_EXERCICIO', text: 'esse aparelho não funciona pra mim, tem outro?' },
 ];

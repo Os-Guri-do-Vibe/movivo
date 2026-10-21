@@ -28,6 +28,7 @@ import {
   lowestLevel,
 } from '../exercise-catalog';
 import { ExerciseCatalogProvider } from '../exercise-catalog-provider.service';
+import { isEquivalentOrLowerRisk } from '../exercise-substitution';
 import { isPhaseDurationWithinRange, PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import {
   duplicatedWeekdays,
@@ -35,7 +36,7 @@ import {
   weekdayPlanIssues,
   weeklySessionTarget,
 } from '../training-days';
-import type { UserConstraints } from '../user-constraints';
+import { hardInjuryTags, type UserConstraints } from '../user-constraints';
 import {
   containsExternalReference,
   containsPromptLeak,
@@ -103,6 +104,12 @@ export interface ValidateProtocolInput {
    * Ausente → assume `INICIANTE` (o mais restritivo), nunca o mais permissivo: fail-safe.
    */
   constraints: Pick<UserConstraints, 'goal' | 'injuryTags'> & {
+    /**
+     * Subconjunto de `injuryTags` que é dor SEM veto (`UserConstraints.cautionTags`): não
+     * contraindica exercício aqui — o aviso ao profissional sai por `cautionNotices`. Ausente
+     * (protocolo anterior à política de cautela) = todas as tags vetam, como sempre foi.
+     */
+    cautionTags?: ContraindicationTag[];
     level?: ExerciseLevel;
     /** Achado 2026-08-18: ausente → não valida sessão-por-dia (protocolo antigo/edição
      *  sem essa constraint persistida). Presente → BLOCK se não bater 1:1 com as sessões. */
@@ -148,6 +155,16 @@ export interface ValidateProtocolOptions {
    * delas é genérico e esconderia um termo novo.
    */
   baseline?: ProtocolStructure;
+  /**
+   * Trocas de exercício de risco IGUAL OU MENOR (decisão do fundador e do RT, 2026-10-21): o
+   * exercício que ENTRA pode carregar as mesmas contraindicações articulares/musculares do que
+   * SAI, porque o que sai foi prescrito/aprovado pelo profissional para este aluno. Para esses
+   * pares, a contraindicação do exercício novo não conta como conflito introduzido pela troca.
+   * Tag cardíaca, de queda ou de gestação nunca é relaxada (`isEquivalentOrLowerRisk`); um
+   * candidato de risco MAIOR continua barrado. Só vale com `baseline` (alteração automática
+   * sobre uma versão aprovada).
+   */
+  cautionSwaps?: ReadonlyArray<{ from: string; to: string }>;
 }
 
 /** Chave estável de uma violação — é o que o profissional reconhece ao assinar. */
@@ -205,9 +222,43 @@ export class ValidationService {
         .filter((v) => !isTextRule(v.rule))
         .map(violationKey),
     );
+    const carriedOver = this.cautionSwapTargets(input, options.cautionSwaps ?? []);
     return aggregate(
-      violations.filter((v) => isTextRule(v.rule) || !accepted.has(violationKey(v))),
+      violations.filter(
+        (v) =>
+          isTextRule(v.rule) ||
+          !(accepted.has(violationKey(v)) || this.isCarriedOverContraindication(v, carriedOver)),
+      ),
     );
+  }
+
+  /** Ids que ENTRAM numa troca de risco igual ou menor para este aluno (ver `cautionSwaps`). */
+  private cautionSwapTargets(
+    input: ValidateProtocolInput,
+    swaps: ReadonlyArray<{ from: string; to: string }>,
+  ): ReadonlySet<string> {
+    const restricted = [
+      ...new Set<ContraindicationTag>([
+        ...(input.constraints.injuryTags ?? []),
+        ...(input.parqFlags ?? []),
+      ]),
+    ];
+    const accepted = new Set<string>();
+    for (const swap of swaps) {
+      const from = this.catalog.getById(swap.from);
+      const to = this.catalog.getById(swap.to);
+      if (from && to && isEquivalentOrLowerRisk(from, to, restricted)) accepted.add(to.id);
+    }
+    return accepted;
+  }
+
+  /** A violação é a contraindicação de um exercício que entrou numa troca de risco igual ou menor? */
+  private isCarriedOverContraindication(
+    violation: ValidationViolation,
+    carriedOver: ReadonlySet<string>,
+  ): boolean {
+    if (violation.rule !== 'EXERCISE_CONTRAINDICATED') return false;
+    return carriedOver.has(violation.detail.split(' ')[0] as string);
   }
 
   /**
@@ -233,7 +284,10 @@ export class ValidationService {
       // goal/preferredDays/parqTags. `input.parqFlags` já cobre a parte de segurança
       // do PAR-Q nesse caso; sem este fallback, assinar um protocolo de fallback
       // quebrava com "injuryTags is not iterable" (achado 2026-08-26).
-      ...(input.constraints.injuryTags ?? []),
+      ...hardInjuryTags({
+        injuryTags: input.constraints.injuryTags ?? [],
+        cautionTags: input.constraints.cautionTags,
+      }),
       ...(input.parqFlags ?? []),
     ]);
 
@@ -415,6 +469,32 @@ export class ValidationService {
    * intermediário/avançado. Tudo BLOCK — divisão/intensidade acima
    * do nível é exatamente o erro que machuca aluno novo.
    */
+  /**
+   * RT item 2: isolado é COMPLEMENTO, nunca a base do programa.
+   *
+   * Achado 2026-10-21 (auditoria das 24 gerações de produção): a regra era cobrada SESSÃO a
+   * sessão (teto de 70% de isolados), e é o que mais empurrava o modelo a trapacear — dia de
+   * braços, ombros ou panturrilha é isolado por natureza, e para passar na regra o modelo
+   * enfiava agachamento em dia de peito e supino fechado em dia de braços (o RT desfez isso à
+   * mão nos protocolos bf1f2787 e 5dac7fcb). Nos 93 dias que o RT assinou, só 3 passam de 70%
+   * (todos montados por ele, "Braços" com 5 de 5), e a semana inteira nunca passa de 64%. O
+   * princípio vale para o programa: o teto agora é sobre a SEMANA. Quem avalia se um dia
+   * isolado demais cumpre a metodologia é o juiz contextual, com as medições.
+   */
+  private checkIsolationShare(structure: ProtocolStructure, out: ValidationViolation[]): void {
+    const all = structure.sessions.flatMap((session) => session.exercises);
+    const isolation = all.filter(
+      (ex) => this.catalog.getById(ex.exerciseId)?.pattern === 'ISOLATION',
+    ).length;
+    if (isolation > all.length * ISOLATION_MAJORITY_THRESHOLD) {
+      out.push({
+        rule: 'ISOLATION_AS_BASE',
+        detail: `semana: ${isolation} isolados de ${all.length} exercícios — isolado é complemento, não base`,
+        action: 'BLOCK',
+      });
+    }
+  }
+
   private checkMethodology(
     structure: ProtocolStructure,
     level: ExerciseLevel,
@@ -508,21 +588,11 @@ export class ValidationService {
       }
     }
 
+    this.checkIsolationShare(structure, out);
+
     let sessionsWithTechnique = 0;
     for (const session of structure.sessions) {
-      // RT item 2: isolado é COMPLEMENTO, nunca a base da sessão. Sessão só de isolados passava.
-      // Achado 2026-09-03: o corte é por MAIORIA CLARA (ISOLATION_MAJORITY_THRESHOLD), não
-      // qualquer maioria — ver o comentário da constante em validation-rules.ts.
-      const isolation = session.exercises.filter(
-        (ex) => this.catalog.getById(ex.exerciseId)?.pattern === 'ISOLATION',
-      ).length;
-      if (isolation > session.exercises.length * ISOLATION_MAJORITY_THRESHOLD) {
-        out.push({
-          rule: 'ISOLATION_AS_BASE',
-          detail: `${session.dayLabel}: ${isolation} isolados de ${session.exercises.length} exercícios — isolado é complemento, não base`,
-          action: 'BLOCK',
-        });
-      }
+      // (ISOLATION_AS_BASE deixou de ser cobrada sessão a sessão — ver `checkIsolationShare`.)
 
       // Achado 2026-09-03 (reproduzido ao vivo): as duas regras de técnica abaixo partem
       // do modelo mental de treino tradicional em academia — técnica avançada (drop-set,

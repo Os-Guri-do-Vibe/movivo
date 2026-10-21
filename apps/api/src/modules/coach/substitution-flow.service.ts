@@ -37,9 +37,11 @@ import type { ScrubUser } from '../ai-coach/llm/llm.types';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { enqueueStaffQueueAlert } from '../jobs/staff-queue-alert';
-import type { CatalogExercise } from '../protocol/exercise-catalog';
+import type { CatalogExercise, ContraindicationTag } from '../protocol/exercise-catalog';
 import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
 import {
+  cautionTagsOf,
+  findCautionCandidates,
   findSafeCandidates,
   isPlausibleSubstitution,
   SUBSTITUTION_BATCH_SIZE,
@@ -64,6 +66,7 @@ import { ValidationService } from '../protocol/validation/validation.service';
 import { BUBBLE_SEPARATOR } from '../whatsapp/message-templates';
 import {
   SUBSTITUTION_ALREADY_PENDING_MESSAGE,
+  SUBSTITUTION_CAUTION_REVIEW_MESSAGE,
   SUBSTITUTION_CATALOG_GAP_MESSAGE,
   SUBSTITUTION_FALLBACK_MESSAGE,
   SUBSTITUTION_FORCED_TODAY_NOTE,
@@ -97,8 +100,32 @@ export const MAX_SUBSTITUTION_FOLLOW_UPS = 3;
 /** Intenção usada para montar contexto/prompt de toda saída generativa deste fluxo. */
 export const SUBSTITUTION_FLOW_INTENT = 'SUBSTITUICAO_EXERCICIO' as const;
 
+/**
+ * `SAFE`: sem restrição relevante. `CAUTION`: risco igual ou menor ao exercício atual, mas numa
+ * região que o aluno declarou sensível (decisão do RT, 2026-10-21): recomendada com orientação de
+ * cuidado e, no protocolo, confirmada pelo profissional. `INELIGIBLE`/`GAP`: pedido fora da
+ * curadoria, sempre revisão obrigatória.
+ */
 type FlowChoice =
-  { kind: 'SAFE' | 'INELIGIBLE'; exerciseId: string; name: string } | { kind: 'GAP'; name: string };
+  | { kind: 'SAFE' | 'CAUTION' | 'INELIGIBLE'; exerciseId: string; name: string }
+  | { kind: 'GAP'; name: string };
+
+/** A região do corpo, em palavras simples, para explicar a cautela ao aluno. */
+const REGION_LABEL: Readonly<Partial<Record<ContraindicationTag, string>>> = {
+  SHOULDER: 'ombro',
+  ELBOW: 'cotovelo',
+  WRIST: 'punho',
+  LOWER_BACK: 'lombar',
+  HIP: 'quadril',
+  KNEE: 'joelho',
+  ANKLE: 'tornozelo',
+  NECK: 'pescoço',
+};
+
+function regionsOf(tags: Iterable<ContraindicationTag>): string {
+  const labels = [...new Set([...tags].map((tag) => REGION_LABEL[tag]).filter(Boolean))];
+  return labels.join(', ');
+}
 
 interface FlowTarget {
   exerciseId: string;
@@ -148,8 +175,12 @@ export interface FlowInput {
 interface TargetWork {
   state: FlowTarget;
   exercise: CatalogExercise;
-  /** Substitutos seguros, na ordem de prioridade — sem teto (o lote é só a apresentação). */
+  /**
+   * Substitutos na ordem de prioridade — sem teto (o lote é só a apresentação): primeiro os
+   * seguros, depois os "com cautela" (`caution` diz quais e por qual região).
+   */
   curation: CatalogExercise[];
+  caution: ReadonlyMap<string, readonly ContraindicationTag[]>;
 }
 
 const NOT_HANDLED: FlowOutcome = { kind: 'NOT_HANDLED' };
@@ -158,6 +189,8 @@ const fallbackOutcome = (): FlowOutcome => ({
   kind: 'FIXED',
   text: SUBSTITUTION_FALLBACK_MESSAGE,
   humanReview: true,
+  // Motivo preciso no painel (antes saía como "sinalizado pela validação de segurança").
+  handoffReason: 'SUBSTITUTION_NO_SAFE_OPTION',
 });
 
 /** "3 séries de 8 a 12 repetições, descanso de 60s" — a prescrição do exercício original. */
@@ -270,6 +303,27 @@ export class SubstitutionFlowService {
           };
         }
       } else if (!state) {
+        if (identified.alreadyDone) {
+          // O aluno CONTOU uma troca que já fez por conta própria. Não reabre o fluxo de troca:
+          // acolhe sem julgar e deixa o profissional ciente.
+          this.logger.info(
+            { userId, event: 'substitution_reported_by_student' },
+            'aluno relatou uma troca de exercício que já fez — acolhido, profissional avisado',
+          );
+          return {
+            kind: 'GENERATE',
+            extraSystem:
+              'O aluno CONTOU que já fez uma troca de exercício por conta própria; ele não está ' +
+              'pedindo uma troca agora. Acolha sem julgar e sem aprovar nem desaprovar como se ' +
+              'fosse prescrição. Pergunte, em UMA frase, como a região respondeu (conforto, dor ' +
+              'ou desconforto). Diga que, se ele quiser que a troca passe a valer no protocolo, ' +
+              'é só pedir. Avise que deixou registrado para o profissional acompanhar. NÃO ' +
+              'ofereça outras opções, NÃO sugira exercícios e NÃO faça avaliação clínica.',
+            allowedExercises: protocolExercises.flatMap((ex) => [ex.id, ex.name]),
+            humanReview: true,
+            handoffReason: 'SUBSTITUTION_REPORTED',
+          };
+        }
         if (identified.tooMany) {
           this.logger.info(
             { userId, event: 'substitution_flow_too_many', max: MAX_SUBSTITUTION_ITEMS },
@@ -305,17 +359,22 @@ export class SubstitutionFlowService {
     for (const targetState of state.targets) {
       const exercise = this.exerciseCatalog.getById(targetState.exerciseId);
       if (!exercise) continue; // saiu do catálogo desde o início do fluxo
-      work.push({
-        state: targetState,
-        exercise,
-        curation: this.curate(exercise, active, catalog, siblingIds, baselineValid),
-      });
+      const curated = this.curate(exercise, active, catalog, siblingIds, baselineValid);
+      work.push({ state: targetState, exercise, ...curated });
     }
     if (work.length === 0) {
       await this.clearState(userId);
       return fallbackOutcome();
     }
     state.targets = work.map((w) => w.state);
+
+    // Nenhuma opção (nem segura, nem com cautela) para um alvo: o resultado já é conhecido, então
+    // nem gasta as chamadas de IA de ler o turno. A resposta é ancorada em fatos, não enlatada.
+    const withoutOptions = work.find((w) => !w.state.chosen && w.curation.length === 0);
+    if (withoutOptions) {
+      await this.clearState(userId);
+      return this.noOptionOutcome(active, withoutOptions);
+    }
 
     // ---- leitura do turno: escolha, alcance, recusa, exercício fora da lista, dor ------
     const refs = (list: readonly CatalogExercise[]) =>
@@ -356,10 +415,17 @@ export class SubstitutionFlowService {
         if (read.chosenExerciseId) {
           // Recomputa do zero — defesa em profundidade: a escolha só vale se ainda está no
           // conjunto seguro (a leitura do turno já restringe aos ids recebidos).
-          const fresh = findSafeCandidates(w.exercise, active.constraints, catalog);
+          const fresh = [
+            ...findSafeCandidates(w.exercise, active.constraints, catalog),
+            ...findCautionCandidates(w.exercise, active.constraints, catalog, active.parQFlags),
+          ];
           const chosen = fresh.find((c) => c.id === read.chosenExerciseId);
           if (chosen && w.curation.some((c) => c.id === chosen.id)) {
-            w.state.chosen = { kind: 'SAFE', exerciseId: chosen.id, name: chosen.name };
+            w.state.chosen = {
+              kind: w.caution.has(chosen.id) ? 'CAUTION' : 'SAFE',
+              exerciseId: chosen.id,
+              name: chosen.name,
+            };
             continue;
           }
         }
@@ -378,15 +444,15 @@ export class SubstitutionFlowService {
       }
     }
 
-    // Esgotou a curadoria de algum alvo sem escolha: nada seguro a oferecer.
+    // O aluno recusou tudo o que havia para oferecer a algum alvo: não há mais o que sugerir.
     const emptied = work.find((w) => !w.state.chosen && w.state.offset >= w.curation.length);
     if (emptied) {
       await this.clearState(userId);
       this.logger.info(
         { userId, event: 'substitution_flow_curation_exhausted', exerciseId: emptied.exercise.id },
-        'curadoria de substitutos esgotada — fallback honesto com revisão humana',
+        'opções de substituição esgotadas — resposta ancorada em fatos com aviso ao profissional',
       );
-      return fallbackOutcome();
+      return this.noOptionOutcome(active, emptied);
     }
 
     // ---- proposta pendente: uma por vez ------------------------------------------------
@@ -416,7 +482,14 @@ export class SubstitutionFlowService {
     // catálogo (que só o profissional pode decidir, no protocolo) não pode ser recomendado.
     const unavailableForToday: string[] = [];
     for (const w of work) {
-      if (w.state.scope === 'TODAY' && w.state.chosen && w.state.chosen.kind !== 'SAFE') {
+      // `CAUTION` pode ser recomendada hoje (com a orientação de cuidado); o que está fora da
+      // curadoria (`INELIGIBLE`/`GAP`) só o profissional decide, no protocolo.
+      if (
+        w.state.scope === 'TODAY' &&
+        w.state.chosen &&
+        w.state.chosen.kind !== 'SAFE' &&
+        w.state.chosen.kind !== 'CAUTION'
+      ) {
         unavailableForToday.push(w.state.chosen.name);
         w.state.chosen = null;
       }
@@ -453,10 +526,14 @@ export class SubstitutionFlowService {
   }
 
   /**
-   * Substitutos seguros de um alvo: o filtro determinístico de sempre (`findSafeCandidates`),
-   * mais o que só faz sentido saber com o protocolo na mão — o candidato não pode já estar na
-   * mesma sessão do alvo, nem ser outro alvo do mesmo pedido, e trocar por ele não pode quebrar
-   * a validação do protocolo inteiro (antes isso só era descoberto DEPOIS de o aluno escolher).
+   * Opções de um alvo: primeiro os substitutos SEGUROS (o filtro determinístico de sempre,
+   * `findSafeCandidates`), depois os "COM CAUTELA" (`findCautionCandidates`: risco igual ou menor
+   * ao exercício que o aluno já faz, em região que ele declarou sensível). Para os dois, a
+   * curadoria também sabe o que só faz sentido com o protocolo na mão — o candidato não pode já
+   * estar na mesma sessão do alvo, nem ser outro alvo do mesmo pedido, e trocar por ele não pode
+   * quebrar a validação do protocolo inteiro (antes isso só era descoberto DEPOIS de o aluno
+   * escolher). Na validação, uma troca de risco igual ou menor não conta como conflito novo
+   * (`cautionSwaps`).
    */
   private curate(
     target: CatalogExercise,
@@ -464,14 +541,14 @@ export class SubstitutionFlowService {
     catalog: readonly CatalogExercise[],
     siblingTargetIds: ReadonlySet<string>,
     baselineValid: boolean,
-  ): CatalogExercise[] {
+  ): Pick<TargetWork, 'curation' | 'caution'> {
     const inTargetSessions = new Set<string>();
     for (const session of active.content.sessions) {
       if (session.exercises.some((ex) => ex.exerciseId === target.id)) {
         for (const ex of session.exercises) inTargetSessions.add(ex.exerciseId);
       }
     }
-    return findSafeCandidates(target, active.constraints, catalog).filter((candidate) => {
+    const keeps = (candidate: CatalogExercise): boolean => {
       if (inTargetSessions.has(candidate.id) || siblingTargetIds.has(candidate.id)) return false;
       if (!baselineValid) return true;
       const applied = applySubstitution(active.content, target.id, candidate);
@@ -482,10 +559,52 @@ export class SubstitutionFlowService {
             constraints: active.validationConstraints,
             parqFlags: active.parQFlags,
           },
-          { baseline: active.content },
+          {
+            baseline: active.content,
+            cautionSwaps: [{ from: target.id, to: candidate.id }],
+          },
         ).action === 'PASS'
       );
-    });
+    };
+    const safe = findSafeCandidates(target, active.constraints, catalog).filter(keeps);
+    const cautious = findCautionCandidates(
+      target,
+      active.constraints,
+      catalog,
+      active.parQFlags,
+    ).filter(keeps);
+    const restricted = [...active.constraints.injuryTags, ...active.parQFlags];
+    return {
+      curation: [...safe, ...cautious],
+      caution: new Map(cautious.map((c) => [c.id, cautionTagsOf(c, restricted)])),
+    };
+  }
+
+  /**
+   * Nenhuma opção para o alvo (nem segura, nem com cautela), ou o aluno recusou todas. Em vez de
+   * uma frase pronta: resposta gerada a partir de FATOS (o motivo, o que dá para fazer agora), com
+   * alerta ao profissional com o motivo certo. Sem sugerir exercício novo e sem prometer retorno.
+   */
+  private noOptionOutcome(active: ActiveProtocolForSubstitution, work: TargetWork): FlowOutcome {
+    const regions = regionsOf([...active.constraints.injuryTags, ...active.parQFlags]);
+    return {
+      kind: 'GENERATE',
+      extraSystem:
+        `O aluno pediu para trocar "${work.exercise.name}", mas a base de referência da MOVIVO ` +
+        'não tem nenhum exercício que possa substituí-lo para o perfil dele' +
+        (regions ? ` (restrição registrada: ${regions})` : '') +
+        '. Explique isso de forma simples e acolhedora, sem tom de recusa seca, e SEM sugerir ' +
+        'nenhum exercício novo. Diga o que dá para fazer agora: manter o exercício com a ' +
+        'execução ajustada ao que ficar confortável (regular o aparelho, reduzir carga e ' +
+        'amplitude), ou priorizar os outros exercícios do treino de hoje. Pergunte, em uma ' +
+        'frase, o que na execução está atrapalhando (altura, posição, aparelho), porque isso ' +
+        'ajuda o profissional. Avise que o pedido ficou registrado para o profissional de ' +
+        'Educação Física avaliar. NÃO prometa prazo, NÃO diga que vai avisar e NÃO faça ' +
+        'avaliação clínica.',
+      allowedExercises: collectProtocolExercises(active.content).flatMap((ex) => [ex.id, ex.name]),
+      humanReview: true,
+      handoffReason: 'SUBSTITUTION_NO_SAFE_OPTION',
+    };
   }
 
   /** O aluno nomeou um exercício fora das listas oferecidas: existe no catálogo? é plausível? */
@@ -512,7 +631,13 @@ export class SubstitutionFlowService {
     const matched = this.exerciseCatalog.getById(lookup.matchedExerciseId);
     if (!matched) return { chosen: { kind: 'GAP', name: lookup.requestedName } };
     if (work.curation.some((c) => c.id === matched.id)) {
-      return { chosen: { kind: 'SAFE', exerciseId: matched.id, name: matched.name } };
+      return {
+        chosen: {
+          kind: work.caution.has(matched.id) ? 'CAUTION' : 'SAFE',
+          exerciseId: matched.id,
+          name: matched.name,
+        },
+      };
     }
     if (!isPlausibleSubstitution(work.exercise, matched)) {
       // Achado 2026-09-09 (bug reportado pelo fundador): existe no catálogo, mas treina outro
@@ -559,6 +684,7 @@ export class SubstitutionFlowService {
 
     const used = new Set<string>();
     const sections: string[] = [];
+    const cautionTags = new Set<ContraindicationTag>();
     const allowed = new Set<string>();
     for (const w of work) {
       allowed.add(w.exercise.id).add(w.exercise.name);
@@ -578,9 +704,13 @@ export class SubstitutionFlowService {
         used.add(c.id);
         allowed.add(c.id).add(c.name);
       }
-      sections.push(
-        `- "${w.exercise.name}": OPÇÕES SEGURAS DA BASE: ${batch.map((c) => c.name).join(', ')}.`,
-      );
+      const listed = batch.map((c) => {
+        const tags = w.caution.get(c.id);
+        if (!tags) return c.name;
+        for (const tag of tags) cautionTags.add(tag);
+        return `${c.name} (COM CAUTELA: ${regionsOf(tags)})`;
+      });
+      sections.push(`- "${w.exercise.name}": OPÇÕES DA BASE: ${listed.join(', ')}.`);
     }
     for (const rejected of notes.implausible) {
       allowed.add(rejected.id).add(rejected.name);
@@ -599,16 +729,30 @@ export class SubstitutionFlowService {
         `(${notes.unavailableForToday.map((n) => `"${n}"`).join(', ')}), então NÃO dá pra ` +
         'recomendá-lo agora: diga isso com naturalidade e apresente as opções seguras. '
       : '';
+    // Opções "com cautela" (risco igual ou menor ao exercício atual, região sensível do aluno):
+    // a MOVIVO é aliada no treino, não barreira. A IA apresenta normalmente e educa em vez de
+    // recusar.
+    const cautionNote =
+      cautionTags.size > 0
+        ? 'As opções marcadas COM CAUTELA têm risco igual ou menor ao do exercício que o aluno ' +
+          `já faz, mas envolvem ${regionsOf(cautionTags)}, uma região que ele declarou sensível. ` +
+          'Apresente-as normalmente, SEM recusar e SEM tom de alarme, e acrescente uma ' +
+          'orientação curta e acolhedora: fazer com controle, ajustar carga e amplitude e, se ' +
+          'sentir dor ou desconforto intenso, interromper o exercício e avisar o profissional. ' +
+          'NÃO faça avaliação clínica e NÃO diga que o profissional recomendou. '
+        : '';
     const extraSystem =
       'O aluno quer trocar ' +
       (work.length > 1 ? 'alguns exercícios do treino' : 'um exercício do treino') +
       '. ' +
       rejectionNote +
       unavailableNote +
+      cautionNote +
       'Apresente, para cada exercício abaixo, as opções de forma humanizada (não uma lista ' +
       'técnica) e pergunte qual ele prefere, quando ele ainda não escolheu:\n' +
       sections.join('\n') +
-      '\nEscreva o nome de cada exercício EXATAMENTE como aparece nas listas acima. NÃO ' +
+      '\nEscreva o nome de cada exercício EXATAMENTE como aparece nas listas acima (sem o ' +
+      'texto entre parênteses de COM CAUTELA). NÃO ' +
       'sugira nenhum exercício fora dessas listas e NÃO invente carga. NÃO pergunte se ' +
       'a troca é só para hoje ou para o protocolo: essa pergunta é acrescentada ' +
       'automaticamente ao final da sua mensagem. O alcance da troca (só hoje ou no ' +
@@ -711,6 +855,24 @@ export class SubstitutionFlowService {
               'avaliação clínica.'
             : ''),
       );
+      const cautious = todayWork.filter((w) => w.state.chosen?.kind === 'CAUTION');
+      if (cautious.length > 0) {
+        const regions = regionsOf(
+          cautious.flatMap((w) => [
+            ...(w.state.chosen && 'exerciseId' in w.state.chosen
+              ? (w.caution.get(w.state.chosen.exerciseId) ?? [])
+              : []),
+          ]),
+        );
+        instructions.push(
+          `A troca por ${cautious.map((w) => `"${w.state.chosen?.name ?? ''}"`).join(', ')} é ` +
+            `COM CAUTELA: tem risco igual ou menor ao exercício atual, mas envolve ${regions}, ` +
+            'uma região que o aluno declarou sensível. Acrescente uma orientação curta e ' +
+            'acolhedora: fazer com controle, ajustar carga e amplitude e, se sentir dor ou ' +
+            'desconforto intenso, interromper o exercício e avisar o profissional. NÃO faça ' +
+            'avaliação clínica e NÃO diga que o profissional recomendou.',
+        );
+      }
       suffixes.push(flags.forcedToday ? SUBSTITUTION_FORCED_TODAY_NOTE : SUBSTITUTION_TODAY_NOTE);
       this.logger.info(
         { userId, event: 'substitution_today_recommended', targets: todayWork.length },
@@ -746,6 +908,9 @@ export class SubstitutionFlowService {
           break;
         case 'REVIEW_INELIGIBLE':
           suffixes.push(SUBSTITUTION_NOT_SAFE_TO_APPLY_MESSAGE);
+          break;
+        case 'REVIEW_CAUTION':
+          suffixes.push(SUBSTITUTION_CAUTION_REVIEW_MESSAGE);
           break;
         case 'NOT_SAFE':
           humanReview = true;
@@ -794,7 +959,13 @@ export class SubstitutionFlowService {
     active: ActiveProtocolForSubstitution,
     protocolWork: readonly TargetWork[],
   ): Promise<{
-    kind: 'AUTO' | 'REVIEW_GAP' | 'REVIEW_INELIGIBLE' | 'NOT_SAFE' | 'ALREADY_PENDING';
+    kind:
+      | 'AUTO'
+      | 'REVIEW_GAP'
+      | 'REVIEW_INELIGIBLE'
+      | 'REVIEW_CAUTION'
+      | 'NOT_SAFE'
+      | 'ALREADY_PENDING';
   }> {
     const catalog = this.exerciseCatalog;
     const items: SubstitutionItem[] = protocolWork.map((w) => {
@@ -830,7 +1001,10 @@ export class SubstitutionFlowService {
           constraints: active.validationConstraints,
           parqFlags: active.parQFlags,
         },
-        { baseline: active.content },
+        {
+          baseline: active.content,
+          cautionSwaps: swaps.map((swap) => ({ from: swap.fromExerciseId, to: swap.to.id })),
+        },
       );
       if (verdict.action !== 'PASS') {
         this.logger.warn(
@@ -909,7 +1083,13 @@ export class SubstitutionFlowService {
     if (items.some((item) => item.catalogGap)) return { kind: 'REVIEW_GAP' };
     // Achado 2026-09-09: exercício que NÃO é opção segura padrão da base pra este aluno não
     // pode ouvir "confirmada" antes da revisão real acontecer — resposta FIXA, sem LLM.
-    if (items.some((item) => item.mandatory)) return { kind: 'REVIEW_INELIGIBLE' };
+    if (items.some((item) => item.mandatory)) {
+      // Só opções "com cautela" (nenhuma fora da curadoria): mensagem própria, sem a ideia de
+      // que o treino ficou inseguro.
+      return protocolWork.some((w) => w.state.chosen?.kind === 'INELIGIBLE')
+        ? { kind: 'REVIEW_INELIGIBLE' }
+        : { kind: 'REVIEW_CAUTION' };
+    }
     return { kind: 'AUTO' };
   }
 

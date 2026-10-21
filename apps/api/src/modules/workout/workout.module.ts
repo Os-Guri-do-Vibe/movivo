@@ -24,7 +24,12 @@ import { WorkoutInboundHandler } from './workout-inbound.handler';
 import { WorkoutJournalService } from './workout-journal.service';
 import { AttendanceAlertService } from './attendance-alert.service';
 import { MissedWorkoutAskPolicy } from './missed-workout-ask.policy';
+import { WorkoutLateLogService } from './workout-late-log.service';
+import { WorkoutLinkDispatcherService } from './workout-link-dispatcher.service';
 import { WorkoutLinkResendService } from './workout-link-resend.service';
+import { WorkoutProtocolChangedWorker } from './workout-protocol-changed.worker';
+import { WorkoutRefreshOfferService } from './workout-refresh-offer.service';
+import { WorkoutScheduleService } from './workout-schedule.service';
 import { WorkoutScheduler } from './workout.scheduler';
 
 @Module({
@@ -33,14 +38,27 @@ import { WorkoutScheduler } from './workout.scheduler';
   providers: [
     WorkoutAccessService,
     WorkoutLinkResendService,
+    WorkoutLinkDispatcherService,
+    WorkoutRefreshOfferService,
+    WorkoutLateLogService,
+    WorkoutProtocolChangedWorker,
     WorkoutCompletionService,
     WorkoutJournalService,
+    WorkoutScheduleService,
     ShareCardRenderer,
     WorkoutScheduler,
     MissedWorkoutAskPolicy,
     AttendanceAlertService,
     WorkoutInboundHandler,
   ],
-  exports: [WorkoutCompletionService, WorkoutJournalService],
+  exports: [
+    WorkoutCompletionService,
+    WorkoutJournalService,
+    WorkoutScheduleService,
+    WorkoutAccessService,
+    WorkoutLinkDispatcherService,
+    WorkoutRefreshOfferService,
+    WorkoutLateLogService,
+  ],
 })
 export class WorkoutModule {}

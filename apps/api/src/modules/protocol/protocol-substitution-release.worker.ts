@@ -17,6 +17,7 @@ import { PinoLogger } from 'nestjs-pino';
 
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { QUEUE } from '../jobs/jobs.config';
+import type { WorkoutProtocolChangedJob } from '../jobs/workout-protocol-changed.contract';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { buildProtocolPdf } from './protocol-pdf.service';
@@ -158,11 +159,36 @@ export class ProtocolSubstitutionReleaseWorker implements OnModuleInit {
       },
       { jobId: `substitution-delivery_${userId}_${release.version}` },
     );
+    await this.notifyWorkoutOfChange(userId, release.version);
     this.queueEvents.emit('protocol');
     this.logger.info(
       { userId, requestId },
       'substituição de exercício auto-liberada após janela de cortesia de 30 min — entrega enfileirada',
     );
     return { status: 'RELEASED' };
+  }
+
+  /**
+   * Avisa o domínio de treino (por fila) que há versão nova: o treino de hoje, se ainda não
+   * começou, é atualizado e o aluno é perguntado se quer um link novo. Best-effort.
+   */
+  private async notifyWorkoutOfChange(userId: string, protocolVersion: number): Promise<void> {
+    try {
+      await this.queues.enqueue(
+        QUEUE.workoutProtocolChanged,
+        'workout-protocol-changed',
+        {
+          userId,
+          reason: 'SUBSTITUTION',
+          protocolVersion,
+        } satisfies WorkoutProtocolChangedJob,
+        { jobId: `workout-protocol-changed_${userId}_${protocolVersion}` },
+      );
+    } catch (error) {
+      this.logger.warn(
+        { userId, err: error instanceof Error ? error.message : String(error) },
+        'não foi possível avisar o treino do dia da nova versão do protocolo',
+      );
+    }
   }
 }

@@ -132,6 +132,10 @@ export const workoutJournalSchema = z.object({
       sets: z.array(workoutSetViewSchema),
       // Aditivo para manter compatibilidade com respostas anteriores da API.
       shareCard: workoutShareCardDataSchema.nullable().optional(),
+      /** Registro tardio: o treino foi feito antes e registrado depois, sem cronômetro. */
+      loggedLate: z.boolean().optional(),
+      /** O aluno ainda pode registrar este treino de um dia que passou (janela curta). */
+      canLogLate: z.boolean().optional(),
     })
     .nullable(),
 });

@@ -20,6 +20,11 @@ import { buildRedisOptions } from '../../core/redis';
 
 export const QUEUE = {
   protocolGeneration: 'protocol-generation',
+  // Regeração pedida pelo profissional CREF na fila de revisão: refaz o conteúdo do
+  // protocolo PENDENTE a partir da anamnese original. Fila própria porque o payload é o
+  // id do PROTOCOLO existente (`ProtocolGenerationJob` carrega a sessão de anamnese e
+  // cria a linha), e porque o painel consulta o estado do job para mostrar "gerando…".
+  protocolRegeneration: 'protocol-regeneration',
   protocolAutoRelease: 'protocol-auto-release',
   // Achado 2026-09-02: liberação da proposta de substituição de exercício via IA, após a
   // janela de cortesia de 30 min (`AI_SUBSTITUTION_REVIEW_WINDOW_MS`) — fila própria, e não
@@ -43,6 +48,10 @@ export const QUEUE = {
   // porque quem enfileira (`workout`) não pode falar com `LlmRouter`/`ValidationService`
   // diretamente (fronteira §12.5); o worker que fala com a IA mora no `CoachModule`.
   workoutFeedback: 'workout-feedback',
+  // O protocolo ganhou uma versão nova (troca de exercício, emenda do profissional): o treino de
+  // hoje, se ainda não começou, é atualizado e o aluno é perguntado se quer um link novo. Fila
+  // própria porque quem publica o protocolo (`protocol`, `admin`) não importa o domínio `workout`.
+  workoutProtocolChanged: 'workout-protocol-changed',
   // Comentário do Coach sobre o check-in semanal (achado 2026-09-13) — mesmo racional de
   // `workoutFeedback`: quem enfileira (`checkin`) não pode falar com `LlmRouter`/
   // `ValidationService` diretamente (fronteira §12.5); o worker mora no `CoachModule`.
@@ -78,6 +87,14 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
     attempts: 3,
     backoffMs: [2_000, 8_000, 32_000],
     concurrency: 5,
+    lockMs: 120_000,
+  },
+  // Mesmo pipeline gera-e-valida de `protocolGeneration`, disparado à mão: poucas tentativas
+  // (quem pediu está olhando a fila) e o conteúdo atual só é trocado se a regeração valida.
+  [QUEUE.protocolRegeneration]: {
+    attempts: 2,
+    backoffMs: [5_000],
+    concurrency: 2,
     lockMs: 120_000,
   },
   // Liberação automática após a janela de cortesia de 1h (fila do profissional,
@@ -127,6 +144,8 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
   // Best-effort (mesmo espírito do resumo de entrega do protocolo): poucas tentativas,
   // nunca trava o diário do aluno por causa de um comentário que não saiu.
   [QUEUE.workoutFeedback]: { attempts: 2, backoffMs: [5_000], concurrency: 5 },
+  // Best-effort: a atualização do treino de hoje nunca pode travar a publicação do protocolo.
+  [QUEUE.workoutProtocolChanged]: { attempts: 2, backoffMs: [5_000], concurrency: 5 },
   // Mesmo perfil de `workoutFeedback`: best-effort, poucas tentativas.
   [QUEUE.checkinWeeklyFeedback]: { attempts: 2, backoffMs: [5_000], concurrency: 5 },
   [QUEUE.conversionSequence]: {

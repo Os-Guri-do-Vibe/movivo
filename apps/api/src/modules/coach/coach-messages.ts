@@ -31,10 +31,28 @@ export const TECHNICAL_NO_EVIDENCE_MESSAGE =
   'Não encontrei uma referência suficiente na Base de Conhecimento para responder isso com ' +
   'segurança. Vou registrar a dúvida para o profissional de Educação Física responsável.';
 
-/** Substituição pedida sem substituto seguro na base: honestidade + revisão humana. */
+/**
+ * Troca pedida e o sistema não conseguiu montar nenhuma opção (alvo fora do catálogo, ou nada
+ * que sirva para o perfil do aluno). Raro desde 2026-10-21, quando as opções "com cautela"
+ * passaram a ser oferecidas: o caminho comum é o `GENERATE` ancorado em fatos do fluxo. Sem
+ * promessa de retorno: o pedido vira um alerta para o profissional, mas não há proposta aberta.
+ */
 export const SUBSTITUTION_FALLBACK_MESSAGE =
-  'Quero te sugerir uma troca segura para esse exercício, mas prefiro confirmar com o ' +
-  'profissional responsável antes. Assim que ele revisar, te aviso por aqui. 💪';
+  'Não consegui montar uma sugestão para esse exercício agora, então deixei o seu pedido ' +
+  'registrado para o profissional de Educação Física avaliar. Enquanto isso, siga com o ' +
+  'exercício do seu treino do jeito que ficar confortável e, se sentir dor ou desconforto ' +
+  'intenso, pare e avise por aqui. 💪';
+
+/**
+ * Troca no protocolo escolhida entre as opções "com cautela" (risco igual ou menor ao exercício
+ * atual, região sensível do aluno): o profissional confirma antes de entrar no treino. A troca
+ * só de hoje não passa por aqui. Ao ser revisada, o aluno recebe o protocolo atualizado.
+ */
+export const SUBSTITUTION_CAUTION_REVIEW_MESSAGE =
+  'Registrei o pedido de troca no seu protocolo. Como ela envolve uma região que você me ' +
+  'contou ter sensibilidade, o profissional confirma antes de entrar no seu treino e te ' +
+  'aviso por aqui quando ele revisar. Até lá, o exercício atual segue valendo; se sentir dor ' +
+  'ou desconforto intenso, pare e avise. 💪';
 
 /** Já existe uma troca pendente pra este protocolo (regra de v1: uma por vez). */
 export const SUBSTITUTION_ALREADY_PENDING_MESSAGE =
