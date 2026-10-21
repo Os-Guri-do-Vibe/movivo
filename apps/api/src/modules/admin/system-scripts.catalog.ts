@@ -192,6 +192,16 @@ export const TERMINAL_SCRIPTS: readonly TerminalScript[] = [
     notRunnableReason: 'Consome tokens do provedor e exige chave no ambiente — só no terminal.',
   },
   {
+    id: 'eval-agenda',
+    kind: 'TERMINAL',
+    name: 'Avaliação da agenda flexível',
+    description:
+      'Roda 50 frases de aluno (dados sintéticos) pelo leitor de pedidos de agenda e pelo classificador de intenção, com o modelo real, e mede o acerto. Consome tokens.',
+    file: 'apps/api/src/scripts/eval-agenda.ts',
+    command: 'EVAL_PROVIDER=deepseek pnpm exec tsx src/scripts/eval-agenda.ts',
+    notRunnableReason: 'Consome tokens do provedor e exige chave no ambiente — só no terminal.',
+  },
+  {
     id: 'reenqueue-blocked-parq',
     kind: 'TERMINAL',
     name: 'Reenfileirar PAR-Q bloqueado',
