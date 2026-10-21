@@ -25,7 +25,15 @@ export class WorkoutAccessService {
     private readonly config: AppConfigService,
   ) {}
 
-  async createMagicLink(userId: string, workoutSessionId?: string): Promise<string> {
+  /**
+   * `options.date` faz o link abrir o diário naquele dia (registro tardio); sem ele, abre hoje.
+   * Vai no fragmento, com o token: nunca chega ao servidor nem a log de acesso.
+   */
+  async createMagicLink(
+    userId: string,
+    workoutSessionId?: string,
+    options: { date?: string } = {},
+  ): Promise<string> {
     const token = opaqueToken();
     await this.db.runAsSystem((tx) =>
       tx.insert(workoutAccessTokens).values({
@@ -36,7 +44,31 @@ export class WorkoutAccessService {
         expiresAt: new Date(Date.now() + MAGIC_TTL_MS),
       }),
     );
-    return `${this.config.whatsapp.publicSiteUrl}/treino/acessar#token=${token}`;
+    const date = options.date ? `&date=${options.date}` : '';
+    return `${this.config.whatsapp.publicSiteUrl}/treino/acessar#token=${token}${date}`;
+  }
+
+  /**
+   * Invalida os links ainda não usados do aluno, para que o novo seja o único válido (troca de
+   * exercício no mesmo dia, reenvio a pedido). O acesso de quem já abriu o link (token `SESSION`,
+   * 30 dias) não muda: ele é o login do navegador, não o link.
+   */
+  async revokePendingMagicLinks(userId: string): Promise<number> {
+    const revoked = await this.db.runAsSystem((tx) =>
+      tx
+        .update(workoutAccessTokens)
+        .set({ revokedAt: new Date() })
+        .where(
+          and(
+            eq(workoutAccessTokens.userId, userId),
+            eq(workoutAccessTokens.kind, 'MAGIC'),
+            isNull(workoutAccessTokens.consumedAt),
+            isNull(workoutAccessTokens.revokedAt),
+          ),
+        )
+        .returning({ id: workoutAccessTokens.id }),
+    );
+    return revoked.length;
   }
 
   async exchange(rawToken: string): Promise<string> {
@@ -99,9 +131,12 @@ export class WorkoutAccessService {
   }
 
   /** Dono do magic link mesmo já consumido ou expirado (só revogado não conta); serve ao reenvio. */
-  async findMagicOwner(
-    rawToken: string,
-  ): Promise<{ userId: string; workoutSessionId: string | null; name: string | null } | null> {
+  async findMagicOwner(rawToken: string): Promise<{
+    userId: string;
+    workoutSessionId: string | null;
+    name: string | null;
+    timezone: string | null;
+  } | null> {
     if (!/^[A-Za-z0-9_-]{43}$/.test(rawToken)) return null;
     const [row] = await this.db.runAsSystem((tx) =>
       tx
@@ -109,6 +144,7 @@ export class WorkoutAccessService {
           userId: workoutAccessTokens.userId,
           workoutSessionId: workoutAccessTokens.workoutSessionId,
           name: users.name,
+          timezone: users.timezone,
         })
         .from(workoutAccessTokens)
         .innerJoin(users, eq(users.id, workoutAccessTokens.userId))

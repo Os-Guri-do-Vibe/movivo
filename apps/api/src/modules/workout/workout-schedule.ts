@@ -28,6 +28,27 @@ const WEEKDAY_FORMATTER = new Intl.DateTimeFormat('en-US', {
 });
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+/** Fuso IANA válido ou o do produto: um `users.timezone` inválido nunca derruba o cálculo do dia. */
+export function validTimezone(timezone: string | null | undefined): string {
+  if (!timezone) return WORKOUT_TIMEZONE;
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: timezone });
+    return timezone;
+  } catch {
+    return WORKOUT_TIMEZONE;
+  }
+}
+
+/** Dia civil `YYYY-MM-DD` de `at` no fuso do ALUNO (`users.timezone`); sem fuso, o do produto. */
+export function dayKeyIn(at: Date, timezone: string | null | undefined): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: validTimezone(timezone),
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(at);
+}
+
 /** Dia civil `YYYY-MM-DD` no fuso do produto — o formato de `workout_completions.completed_at`. */
 export function dayKey(at: Date): string {
   return DAY_FORMATTER.format(at);
@@ -72,6 +93,12 @@ const PROTOCOL_WEEKDAY: Readonly<Record<number, Weekday>> = {
 /** Código do dia da semana (`session.weekday`) para a data, no fuso do produto. */
 export function weekdayCode(at: Date): Weekday {
   return PROTOCOL_WEEKDAY[weekday(at)] ?? 'SUN';
+}
+
+/** Código do dia da semana de `at` no fuso do ALUNO. */
+export function weekdayCodeIn(at: Date, timezone: string | null | undefined): Weekday {
+  const day = new Date(`${dayKeyIn(at, timezone)}T12:00:00.000Z`).getUTCDay();
+  return PROTOCOL_WEEKDAY[day] ?? 'SUN';
 }
 
 /**

@@ -57,6 +57,12 @@ export const workoutSessions = pgTable(
      * sessão — substitui a antiga coluna `pain_exercise_id` (um único texto).
      */
     painExerciseIds: jsonb('pain_exercise_ids').$type<string[]>().notNull().default([]),
+    /**
+     * Registro tardio: o aluno treinou e registrou depois, sem cronômetro (`started_at` e
+     * `duration_seconds` ficam vazios). O Coach comenta o treino normalmente, mas não pode
+     * inferir duração dele.
+     */
+    loggedLate: boolean('logged_late').notNull().default(false),
     ...timestampColumns,
   },
   (table) => [

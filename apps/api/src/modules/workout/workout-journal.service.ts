@@ -38,7 +38,12 @@ import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { EXERCISE_BY_ID } from '../protocol/exercise-catalog';
 import { ShareCardRenderer, type ShareCardImage } from './share-card/share-card-renderer.service';
 import { WorkoutCompletionService } from './workout-completion.service';
-import { sessionForWeekday } from './workout-schedule';
+import {
+  effectiveSessionForDate,
+  LATE_LOG_WINDOW_DAYS,
+  type ScheduleOverrides,
+} from './schedule-planner';
+import { WorkoutScheduleService } from './workout-schedule.service';
 import { durationInsightButtons, durationInsightMessage } from './workout-messages';
 
 /**
@@ -68,6 +73,18 @@ const DURATION_CEILING: Readonly<Record<string, number>> = {
   GT_90: 90,
 };
 
+/** JSON com chaves ordenadas: `jsonb` não preserva a ordem, então comparar prescrições exige isto. */
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
 function dateAtNoon(date: string): Date {
   return new Date(`${date}T12:00:00.000Z`);
 }
@@ -94,10 +111,11 @@ function weekStart(date: string): string {
 function prescribedSession(
   date: string,
   structure: ReturnType<typeof protocolStructureSchema.parse>,
+  overrides?: ScheduleOverrides,
 ) {
-  // Mesmo calendário do link diário e do Coach (`sessionForWeekday`) — esta função tinha uma
-  // cópia própria da tabela, com o mesmo defeito de virar treino em dia fora do protocolo.
-  return sessionForWeekday(dateAtNoon(date).getUTCDay(), structure) ?? undefined;
+  // Mesmo calendário do link diário e do Coach: o padrão do protocolo (`sessionForWeekday`) mais
+  // os ajustes que o aluno pediu ao Coach (`workout_schedule_adjustments`).
+  return effectiveSessionForDate(date, structure, overrides) ?? undefined;
 }
 
 function expectedSets(session: ProtocolSession): WorkoutSetInput[] {
@@ -209,6 +227,7 @@ export class WorkoutJournalService {
     private readonly queueEvents: DashboardQueueEventsService,
     private readonly shareCards: ShareCardRenderer,
     private readonly followups: FollowupService,
+    private readonly schedule: WorkoutScheduleService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(WorkoutJournalService.name);
@@ -228,6 +247,9 @@ export class WorkoutJournalService {
     // aqui: o padrão de dias/frequência é metadado do protocolo, não algo que uma
     // substituição de exercício altera).
     const structure = protocolStructureSchema.parse(owner.content);
+    const overrides = await this.db.runAsUser(userId, 'USER', (tx) =>
+      this.schedule.loadOverrides(tx, userId, owner.protocolId, now),
+    );
     const weekNumber = Math.max(
       1,
       Math.min(
@@ -260,7 +282,7 @@ export class WorkoutJournalService {
        */
       const { structure: historicalStructure, version: historicalVersion } =
         await this.structureAsOf(tx, owner.protocolId, owner.timezone, selectedDate);
-      const prescription = prescribedSession(selectedDate, historicalStructure);
+      const prescription = prescribedSession(selectedDate, historicalStructure, overrides);
       if (!prescription) return undefined;
 
       await tx
@@ -304,7 +326,7 @@ export class WorkoutJournalService {
     const week = Array.from({ length: 7 }, (_, index) => {
       const date = addDays(start, index);
       const row = rowByDate.get(date);
-      const planned = Boolean(prescribedSession(date, structure));
+      const planned = Boolean(prescribedSession(date, structure, overrides));
       const state =
         date > today
           ? 'FUTURE'
@@ -344,6 +366,7 @@ export class WorkoutJournalService {
                 loadUnit: workoutSetEntries.loadUnit,
                 durationSeconds: workoutSetEntries.durationSeconds,
                 date: workoutSessions.scheduledDate,
+                sessionKey: workoutSessions.sessionKey,
               })
               .from(workoutSetEntries)
               .innerJoin(
@@ -369,11 +392,17 @@ export class WorkoutJournalService {
       const currentByKey = new Map(
         entries.current.map((entry) => [`${entry.exerciseId}:${entry.setNumber}`, entry]),
       );
-      // Ordenado do mais recente ao mais antigo: o primeiro de cada chave é o último realizado.
+      // Ordenado do mais recente ao mais antigo. Vale a última vez que o aluno fez ESTA sessão
+      // (seja em que dia da semana for: o treino pode ter sido remarcado); sem registro dela, a
+      // última vez que fez o exercício em qualquer sessão.
       const previousByKey = new Map<string, (typeof entries.previous)[number]>();
       for (const entry of entries.previous) {
         const key = `${entry.exerciseId}:${entry.setNumber}`;
-        if (!previousByKey.has(key)) previousByKey.set(key, entry);
+        const current = previousByKey.get(key);
+        const sameSession = entry.sessionKey === workout.sessionKey;
+        if (!current || (sameSession && current.sessionKey !== workout.sessionKey)) {
+          previousByKey.set(key, entry);
+        }
       }
       const sets = expectedSets(workout.prescription).map((expected) => {
         const key = `${expected.exerciseId}:${expected.setNumber}`;
@@ -412,6 +441,12 @@ export class WorkoutJournalService {
         perceivedEffort: workout.perceivedEffort,
         painReported: workout.painReported,
         sets,
+        loggedLate: workout.loggedLate,
+        canLogLate:
+          workout.status === 'PLANNED' &&
+          selectedDate < today &&
+          selectedDate >= addDays(today, -LATE_LOG_WINDOW_DAYS) &&
+          selectedDate >= firstProtocolDate,
       };
       const shareCard = await this.buildShareCard(userId, workout, owner, sets);
       if (shareCard) workoutView.shareCard = shareCard;
@@ -470,6 +505,7 @@ export class WorkoutJournalService {
         : prescribedSession(
             date,
             (await this.structureAsOf(tx, owner.protocolId, owner.timezone, date)).structure,
+            await this.schedule.loadOverrides(tx, userId, owner.protocolId, now),
           );
       return classifyDay(date, existing, prescription, owner.protocolId);
     });
@@ -514,12 +550,17 @@ export class WorkoutJournalService {
       const byDate = new Map<string, ExistingDaySession>();
       for (const row of rows) if (!byDate.has(row.date)) byDate.set(row.date, row);
       const versions = await this.loadVersions(tx, owner.protocolId);
+      const overrides = await this.schedule.loadOverrides(tx, userId, owner.protocolId, now);
       return dates.map((date) => {
         if (date <= firstProtocolDate) return { date, status: { kind: 'BEFORE_START' as const } };
         const existing = byDate.get(date);
         const prescription = existing
           ? undefined
-          : prescribedSession(date, pickVersion(versions, owner.timezone, date).structure);
+          : prescribedSession(
+              date,
+              pickVersion(versions, owner.timezone, date).structure,
+              overrides,
+            );
         return { date, status: classifyDay(date, existing, prescription, owner.protocolId) };
       });
     });
@@ -565,6 +606,105 @@ export class WorkoutJournalService {
       streak += 1;
     }
     return { target, streak };
+  }
+
+  /**
+   * Atualiza, no lugar, o treino de `date` que ainda não começou quando a prescrição vigente já
+   * não é a que ele guarda (troca de exercício aprovada, emenda do profissional depois do link
+   * das 04:00). O snapshot é uma cópia do dia da abertura do link; sem isto o aluno abriria o
+   * exercício antigo. Mantém a linha (e os links que apontam para ela) quando é a mesma sessão;
+   * se a sessão do dia passou a ser outra, apaga a linha e deixa o diário recriá-la.
+   *
+   * Só mexe em treino `PLANNED`: nunca num treino em andamento ou concluído.
+   */
+  async refreshPlannedSession(
+    userId: string,
+    date: string,
+    now = new Date(),
+  ): Promise<'CHANGED' | 'UNCHANGED' | 'NONE'> {
+    const owner = await this.ownerAndProtocol(userId);
+    return this.db.runAsSystem(async (tx) => {
+      const [existing] = await tx
+        .select({
+          id: workoutSessions.id,
+          status: workoutSessions.status,
+          sessionKey: workoutSessions.sessionKey,
+          prescription: workoutSessions.prescription,
+        })
+        .from(workoutSessions)
+        .where(and(eq(workoutSessions.userId, userId), eq(workoutSessions.scheduledDate, date)))
+        .orderBy(desc(workoutSessions.createdAt))
+        .limit(1);
+      if (!existing || existing.status !== 'PLANNED') return 'NONE';
+
+      const { structure, version } = await this.structureAsOf(
+        tx,
+        owner.protocolId,
+        owner.timezone,
+        date,
+      );
+      const overrides = await this.schedule.loadOverrides(tx, userId, owner.protocolId, now);
+      const expected = prescribedSession(date, structure, overrides);
+      if (expected && stableStringify(expected) === stableStringify(existing.prescription)) {
+        return 'UNCHANGED';
+      }
+      if (expected && expected.dayLabel === existing.sessionKey) {
+        await tx
+          .update(workoutSessions)
+          .set({ prescription: expected, protocolVersion: version })
+          .where(eq(workoutSessions.id, existing.id));
+      } else {
+        await this.schedule.discardPlannedSessions(tx, userId, [date]);
+      }
+      return 'CHANGED';
+    });
+  }
+
+  /**
+   * Registro tardio (agenda flexível): o aluno treinou num dos últimos `LATE_LOG_WINDOW_DAYS`
+   * dias e quer registrar agora. Abre o treino daquele dia para preenchimento SEM cronômetro
+   * (`started_at` vazio, `logged_late` ligado); o resto do fluxo (séries, finalizar, comentário
+   * do Coach) é o de sempre. Idempotente: abrir de novo um registro tardio já aberto não muda nada.
+   */
+  async startLate(userId: string, id: string, now = new Date()): Promise<void> {
+    const [owned] = await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx
+        .select({
+          scheduledDate: workoutSessions.scheduledDate,
+          status: workoutSessions.status,
+          loggedLate: workoutSessions.loggedLate,
+          timezone: users.timezone,
+        })
+        .from(workoutSessions)
+        .innerJoin(users, eq(users.id, workoutSessions.userId))
+        .where(and(eq(workoutSessions.id, id), eq(workoutSessions.userId, userId)))
+        .limit(1),
+    );
+    if (!owned) throw new NotFoundException();
+    if (owned.status === 'IN_PROGRESS' && owned.loggedLate) return;
+    if (owned.status !== 'PLANNED') throw new BadRequestException('Treino ja finalizado.');
+
+    const today = localDate(now, owned.timezone);
+    if (owned.scheduledDate >= today) {
+      throw new BadRequestException('Para o treino de hoje, use "Iniciar".');
+    }
+    if (owned.scheduledDate < addDays(today, -LATE_LOG_WINDOW_DAYS)) {
+      throw new BadRequestException(
+        `So e possivel registrar treinos dos ultimos ${LATE_LOG_WINDOW_DAYS} dias.`,
+      );
+    }
+    await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx
+        .update(workoutSessions)
+        .set({ status: 'IN_PROGRESS', loggedLate: true })
+        .where(
+          and(
+            eq(workoutSessions.id, id),
+            eq(workoutSessions.userId, userId),
+            eq(workoutSessions.status, 'PLANNED'),
+          ),
+        ),
+    );
   }
 
   async start(userId: string, id: string, now = new Date()): Promise<void> {
@@ -676,7 +816,8 @@ export class WorkoutJournalService {
       const workout = await this.ownedSession(userId, id, tx);
       if (!workout) throw new NotFoundException();
       if (workout.status === 'COMPLETED') throw new BadRequestException('Treino ja finalizado.');
-      if (workout.status !== 'IN_PROGRESS' || !workout.startedAt)
+      // Registro tardio não tem cronômetro: `started_at` fica vazio e a duração não é inventada.
+      if (workout.status !== 'IN_PROGRESS' || (!workout.startedAt && !workout.loggedLate))
         throw new BadRequestException('Inicie o treino antes de finalizar.');
       if (
         input.painExerciseIds.some(
@@ -689,10 +830,12 @@ export class WorkoutJournalService {
         throw new BadRequestException('Exercicio de dor invalido.');
       }
       const now = new Date();
-      const durationSeconds = Math.min(
-        43_200,
-        Math.max(0, Math.round((now.getTime() - workout.startedAt.getTime()) / 1000)),
-      );
+      const durationSeconds = workout.startedAt
+        ? Math.min(
+            43_200,
+            Math.max(0, Math.round((now.getTime() - workout.startedAt.getTime()) / 1000)),
+          )
+        : null;
       const feedbackCipher = await this.cipher.encryptHealth(
         JSON.stringify({ feelingNotes: input.feelingNotes, painNotes: input.painNotes }),
       );
@@ -882,6 +1025,8 @@ export class WorkoutJournalService {
     }>,
   ): Promise<WorkoutShareCardData | undefined> {
     const finishedAt = workout.finishedAt;
+    // O card mostra o tempo de treino: sem cronômetro (registro tardio) não há o que mostrar.
+    if (workout.loggedLate) return undefined;
     if (workout.status !== 'COMPLETED' || !finishedAt || !owner.biologicalSex) return undefined;
     const completedIds = workout.prescription.exercises
       .filter((exercise) =>

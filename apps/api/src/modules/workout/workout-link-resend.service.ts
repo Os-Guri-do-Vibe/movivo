@@ -9,8 +9,8 @@ import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { ShortLinkService } from '../short-link/short-link.service';
 import { MAGIC_TTL_MS, WorkoutAccessService } from './workout-access.service';
-import { firstNameOf } from './workout-eligibility';
-import { resentWorkoutLinkMessage } from './workout-messages';
+import { firstNameOf, localParts } from './workout-eligibility';
+import { greetingFor, resentWorkoutLinkMessage } from './workout-messages';
 
 const RESEND_COOLDOWN_SECONDS = 10 * 60;
 
@@ -46,11 +46,14 @@ export class WorkoutLinkResendService {
       const code = await this.shortLinks.create(magicLink, new Date(Date.now() + MAGIC_TTL_MS));
       const link = `${this.config.whatsapp.publicSiteUrl}/check-in/${code}`;
       const dedupeId = `workout-link-resend-${randomUUID()}`;
+      // Saudação pelo horário local do aluno; sem fuso conhecido, a neutra de sempre.
+      const local = owner.timezone ? localParts(new Date(), owner.timezone) : null;
+      const greeting = local ? greetingFor(local.time) : 'Oi';
       const outbound: WhatsappOutboundJob = {
         userId: owner.userId,
         type: 'WORKOUT_DAILY_LINK',
         dedupeId,
-        text: resentWorkoutLinkMessage(firstNameOf(owner.name), link),
+        text: resentWorkoutLinkMessage(firstNameOf(owner.name), link, greeting),
       };
       await this.queues.enqueue(QUEUE.whatsappOutbound, 'workout-daily-link', outbound, {
         jobId: `wa-${dedupeId}`,

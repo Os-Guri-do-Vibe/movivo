@@ -52,6 +52,7 @@ import { healthBlockSchema, type HealthBlock } from '../anamnesis/health-block';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { SUBSTITUTION_DISCARDED_MESSAGE } from '../coach/coach-messages';
 import { QUEUE } from '../jobs/jobs.config';
+import type { WorkoutProtocolChangedJob } from '../jobs/workout-protocol-changed.contract';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { ExerciseCatalogAdminService } from './exercise-catalog-admin.service';
@@ -762,6 +763,7 @@ export class DashboardService {
     });
 
     await this.deliverProtocol(actor, id, amended, 'amended');
+    await this.notifyWorkoutOfProtocolChange(amended.userId, 'ADJUSTMENT', amended.version);
     this.queueEvents.emit('protocol');
     return {
       id,
@@ -1210,6 +1212,7 @@ export class DashboardService {
       }
     }
     await this.deliverReleasedSubstitution(actor, id, release);
+    await this.notifyWorkoutOfProtocolChange(release.userId, 'SUBSTITUTION', release.version);
     return { id, protocolId: release.protocolId, version: release.version, released: true };
   }
 
@@ -1358,6 +1361,31 @@ export class DashboardService {
       { jobId: `substitution-delivery_manual_${id}` },
     );
     this.queueEvents.emit('protocol');
+  }
+
+  /**
+   * Avisa o domínio de treino (por fila, fronteira §12.5) que o protocolo ganhou uma versão: o
+   * treino de hoje, se o aluno ainda não começou, é atualizado e ele é perguntado se quer um
+   * link novo. Best-effort: nunca derruba a aprovação do profissional.
+   */
+  private async notifyWorkoutOfProtocolChange(
+    userId: string,
+    reason: WorkoutProtocolChangedJob['reason'],
+    protocolVersion: number,
+  ): Promise<void> {
+    try {
+      await this.queues.enqueue(
+        QUEUE.workoutProtocolChanged,
+        'workout-protocol-changed',
+        { userId, reason, protocolVersion } satisfies WorkoutProtocolChangedJob,
+        { jobId: `workout-protocol-changed_${userId}_${protocolVersion}` },
+      );
+    } catch (error) {
+      this.logger.warn(
+        { userId, err: error instanceof Error ? error.message : String(error) },
+        'não foi possível avisar o treino do dia da nova versão do protocolo',
+      );
+    }
   }
 
   /** Profissional recusa a proposta inteira — mantém os exercícios originais, sem tocar o

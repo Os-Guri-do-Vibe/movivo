@@ -9,6 +9,7 @@ import type { FollowupService } from '../followup/followup.service';
 import type { QueueManager } from '../jobs/queue-manager.service';
 import type { ShareCardRenderer } from './share-card/share-card-renderer.service';
 import type { WorkoutCompletionService } from './workout-completion.service';
+import type { WorkoutScheduleService } from './workout-schedule.service';
 import { type WorkoutDayStatus, WorkoutJournalService } from './workout-journal.service';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
@@ -150,7 +151,9 @@ function makeService(
     runAsUser: vi.fn((_userId: string, _role: string, callback: (value: typeof tx) => unknown) =>
       callback(tx),
     ),
+    runAsSystem: vi.fn((callback: (value: typeof tx) => unknown) => callback(tx)),
   } as unknown as TenantDatabase;
+  const discardPlanned = vi.fn(async () => undefined);
   const cipher = {
     encryptHealth: vi.fn(async () => Buffer.from('cipher')),
   } as unknown as HealthCipherService;
@@ -175,9 +178,14 @@ function makeService(
       queueEvents,
       shareCards,
       followups as unknown as FollowupService,
+      {
+        loadOverrides: vi.fn(async () => new Map()),
+        discardPlannedSessions: discardPlanned,
+      } as unknown as WorkoutScheduleService,
       { setContext: vi.fn(), warn } as unknown as PinoLogger,
     ),
     followups,
+    discardPlanned,
     warn,
     db,
     shareCards,
@@ -682,6 +690,49 @@ describe('WorkoutJournalService.journal', () => {
       date: '2026-08-03',
     });
     expect(result.workout?.sets[1]?.previous?.loadValue).toBe(18.25);
+  });
+
+  it('o placeholder prefere a última vez da MESMA sessão, mesmo que outra sessão com o exercício seja mais recente', async () => {
+    const row = (date: string, sessionKey: string, loadValue: string) => ({
+      exerciseId: 'squat',
+      setNumber: 1,
+      reps: 8,
+      loadValue,
+      loadUnit: 'KG',
+      durationSeconds: null,
+      date,
+      sessionKey,
+    });
+    // Mais recente primeiro: ontem o aluno fez o agachamento na sessão B; a última vez da A
+    // (a sessão de hoje) foi na terça da semana anterior, remarcada de quinta.
+    const previous = [row('2026-08-09', 'B', '50'), row('2026-08-04', 'A', '40')];
+    const { service } = makeService({
+      selects: [[OWNER], [WORKOUT], [], [], previous],
+    });
+
+    const result = await service.journal(USER_ID, '2026-08-10', new Date('2026-08-10T12:00:00Z'));
+
+    expect(result.workout?.sets[0]?.previous).toMatchObject({ loadValue: 40, date: '2026-08-04' });
+  });
+
+  it('sem registro da mesma sessão, o placeholder cai na última vez do exercício em qualquer sessão', async () => {
+    const previous = [
+      {
+        exerciseId: 'squat',
+        setNumber: 1,
+        reps: 8,
+        loadValue: '50',
+        loadUnit: 'KG',
+        durationSeconds: null,
+        date: '2026-08-09',
+        sessionKey: 'B',
+      },
+    ];
+    const { service } = makeService({
+      selects: [[OWNER], [WORKOUT], [], [], previous],
+    });
+    const result = await service.journal(USER_ID, '2026-08-10', new Date('2026-08-10T12:00:00Z'));
+    expect(result.workout?.sets[0]?.previous).toMatchObject({ loadValue: 50, date: '2026-08-09' });
   });
 
   it('usa o dia atual, fallback da frequencia e nome padrao sem criar treino em descanso', async () => {
@@ -1233,5 +1284,196 @@ describe('WorkoutJournalService — estado final não pode ser sobrescrito', () 
     expect(inserted).toHaveLength(0);
     expect(queues.enqueue).not.toHaveBeenCalled();
     expect(completions.record).not.toHaveBeenCalled();
+  });
+});
+
+describe('WorkoutJournalService.refreshPlannedSession', () => {
+  // Segunda 2026-08-10: o calendário padrão desta estrutura põe a sessão A.
+  const NOW = new Date('2026-08-10T15:00:00.000Z');
+  const VERSION = {
+    version: 3,
+    content: STRUCTURE,
+    createdAt: new Date('2026-08-10T12:00:00.000Z'),
+  };
+  const planned = (prescription: unknown, extra: Record<string, unknown> = {}) => ({
+    id: WORKOUT_ID,
+    status: 'PLANNED',
+    sessionKey: 'A',
+    prescription,
+    ...extra,
+  });
+
+  it('prescrição igual à vigente: nada muda', async () => {
+    const { service, updated, discardPlanned } = makeService({
+      selects: [[OWNER], [planned(SESSION_A)], [VERSION]],
+    });
+    await expect(service.refreshPlannedSession(USER_ID, '2026-08-10', NOW)).resolves.toBe(
+      'UNCHANGED',
+    );
+    expect(updated).toEqual([]);
+    expect(discardPlanned).not.toHaveBeenCalled();
+  });
+
+  it('a ordem das chaves do jsonb não conta como mudança', async () => {
+    const reordered = JSON.parse(
+      JSON.stringify({
+        ...SESSION_A,
+        exercises: SESSION_A.exercises.map((e) => Object.fromEntries(Object.entries(e).reverse())),
+      }),
+    );
+    const { service, updated } = makeService({
+      selects: [[OWNER], [planned(reordered)], [VERSION]],
+    });
+    await expect(service.refreshPlannedSession(USER_ID, '2026-08-10', NOW)).resolves.toBe(
+      'UNCHANGED',
+    );
+    expect(updated).toEqual([]);
+  });
+
+  it('exercício trocado depois da abertura do link: atualiza no lugar, mantendo a linha e o link', async () => {
+    const stale = {
+      ...SESSION_A,
+      exercises: [
+        { ...SESSION_A.exercises[0], exerciseId: 'leg_press', name: 'Leg press' },
+        SESSION_A.exercises[1],
+      ],
+    };
+    const { service, updated, discardPlanned } = makeService({
+      selects: [[OWNER], [planned(stale)], [VERSION]],
+    });
+    await expect(service.refreshPlannedSession(USER_ID, '2026-08-10', NOW)).resolves.toBe(
+      'CHANGED',
+    );
+    expect(updated).toEqual([{ prescription: SESSION_A, protocolVersion: 3 }]);
+    expect(discardPlanned).not.toHaveBeenCalled();
+  });
+
+  it('o dia passou a ser de outra sessão: apaga a linha para o diário recriá-la', async () => {
+    const { service, updated, discardPlanned } = makeService({
+      selects: [[OWNER], [planned(SESSION_B, { sessionKey: 'B' })], [VERSION]],
+    });
+    await expect(service.refreshPlannedSession(USER_ID, '2026-08-10', NOW)).resolves.toBe(
+      'CHANGED',
+    );
+    expect(updated).toEqual([]);
+    expect(discardPlanned).toHaveBeenCalledWith(expect.anything(), USER_ID, ['2026-08-10']);
+  });
+
+  it('treino em andamento ou concluído nunca é tocado', async () => {
+    for (const status of ['IN_PROGRESS', 'COMPLETED']) {
+      const { service, updated, discardPlanned } = makeService({
+        selects: [[OWNER], [planned(SESSION_B, { status })]],
+      });
+      await expect(service.refreshPlannedSession(USER_ID, '2026-08-10', NOW)).resolves.toBe('NONE');
+      expect(updated).toEqual([]);
+      expect(discardPlanned).not.toHaveBeenCalled();
+    }
+  });
+
+  it('sem linha do dia: nada a atualizar', async () => {
+    const { service } = makeService({ selects: [[OWNER], []] });
+    await expect(service.refreshPlannedSession(USER_ID, '2026-08-10', NOW)).resolves.toBe('NONE');
+  });
+});
+
+describe('WorkoutJournalService registro tardio', () => {
+  // "Hoje" é 2026-08-12 (quarta); a janela vai até anteontem (2026-08-10).
+  const NOW = new Date('2026-08-12T15:00:00Z');
+  const owned = (scheduledDate: string, extra: Record<string, unknown> = {}) => [
+    { scheduledDate, status: 'PLANNED', loggedLate: false, timezone: 'UTC', ...extra },
+  ];
+
+  it('abre o treino de ontem para preenchimento sem cronômetro', async () => {
+    const { service, updated } = makeService({ selects: [owned('2026-08-11')] });
+    await expect(service.startLate(USER_ID, WORKOUT_ID, NOW)).resolves.toBeUndefined();
+    expect(updated).toEqual([{ status: 'IN_PROGRESS', loggedLate: true }]);
+    // Sem `startedAt`: a duração nunca é inventada.
+    expect(updated[0]).not.toHaveProperty('startedAt');
+  });
+
+  it('aceita anteontem (limite da janela) e recusa um dia mais antigo', async () => {
+    await expect(
+      makeService({ selects: [owned('2026-08-10')] }).service.startLate(USER_ID, WORKOUT_ID, NOW),
+    ).resolves.toBeUndefined();
+    await expect(
+      makeService({ selects: [owned('2026-08-09')] }).service.startLate(USER_ID, WORKOUT_ID, NOW),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('o treino de hoje usa o "Iniciar" de sempre', async () => {
+    await expect(
+      makeService({ selects: [owned('2026-08-12')] }).service.startLate(USER_ID, WORKOUT_ID, NOW),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('é idempotente num registro tardio já aberto e recusa treino já concluído', async () => {
+    const reopened = makeService({
+      selects: [owned('2026-08-11', { status: 'IN_PROGRESS', loggedLate: true })],
+    });
+    await expect(reopened.service.startLate(USER_ID, WORKOUT_ID, NOW)).resolves.toBeUndefined();
+    expect(reopened.updated).toEqual([]);
+    await expect(
+      makeService({
+        selects: [owned('2026-08-11', { status: 'COMPLETED' })],
+      }).service.startLate(USER_ID, WORKOUT_ID, NOW),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejeita sessão alheia', async () => {
+    await expect(
+      makeService({ selects: [[]] }).service.startLate(USER_ID, WORKOUT_ID, NOW),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('finalizar um registro tardio não exige cronômetro e grava a duração vazia', async () => {
+    const { service, updated, completions } = makeService({
+      selects: [
+        [
+          {
+            ...WORKOUT,
+            status: 'IN_PROGRESS',
+            startedAt: null,
+            loggedLate: true,
+            scheduledDate: '2026-08-11',
+          },
+        ],
+        [{ exerciseId: 'squat', completed: true }],
+        [],
+        [],
+      ],
+    });
+    await service.finish(USER_ID, WORKOUT_ID, {
+      perceivedEffort: 7,
+      feelingNotes: '',
+      painReported: false,
+      painExerciseIds: [],
+      painNotes: '',
+    });
+    expect(updated[0]).toMatchObject({ status: 'COMPLETED', durationSeconds: null });
+    // O treino conta no dia em que foi feito, não no dia do registro.
+    expect(completions.record).toHaveBeenCalledWith(
+      USER_ID,
+      PROTOCOL_ID,
+      2,
+      2,
+      'A',
+      '2026-08-11',
+      'WEB_JOURNAL',
+      expect.anything(),
+    );
+  });
+
+  it('treino normal que nunca foi iniciado continua sem poder ser finalizado', async () => {
+    await expect(
+      makeService({
+        selects: [[{ ...WORKOUT, status: 'IN_PROGRESS', startedAt: null }]],
+      }).service.finish(USER_ID, WORKOUT_ID, {
+        perceivedEffort: 7,
+        feelingNotes: '',
+        painReported: false,
+        painExerciseIds: [],
+        painNotes: '',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

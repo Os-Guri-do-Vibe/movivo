@@ -111,3 +111,31 @@ describe('buildRetrato', () => {
     expect(text).not.toMatch(/perdeu|perdido|falt|falhou/i);
   });
 });
+
+describe('retrato no fuso do aluno (D3)', () => {
+  it('"hoje" é o dia local: em Manaus, 23h30 de terça ainda é terça', () => {
+    // 2026-10-21T03:30Z = terça 23:30 em Manaus e quarta 00:30 em São Paulo.
+    const now = new Date('2026-10-21T03:30:00.000Z');
+    const base = {
+      now,
+      firstProtocolStart: new Date('2026-10-05T12:00:00.000Z'),
+      mesocycleNumber: 1,
+      currentWeek: 3,
+      totalWeeks: 4,
+      structure: {
+        weeklyFrequency: 3,
+        sessions: [
+          { dayLabel: 'A', weekday: 'MON', focus: 'Costas' },
+          { dayLabel: 'B', weekday: 'TUE', focus: 'Pernas' },
+        ],
+      } as never,
+      completedDates: new Set<string>(),
+      inProgressDates: new Set<string>(),
+    };
+    // Em Manaus "ontem" é segunda (19/10, treino A); em São Paulo já é terça (20/10, treino B).
+    const manaus = buildRetrato({ ...base, timezone: 'America/Manaus' });
+    const saoPaulo = buildRetrato({ ...base, timezone: 'America/Sao_Paulo' });
+    expect(manaus.ultimasDuasSemanas.semRegistro.at(-1)).toContain('19/10');
+    expect(saoPaulo.ultimasDuasSemanas.semRegistro.at(-1)).toContain('20/10');
+  });
+});

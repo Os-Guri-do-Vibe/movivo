@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   dayKey,
+  dayKeyIn,
+  validTimezone,
+  weekdayCodeIn,
   plannedDaysBefore,
   sessionFor,
   sessionKeyFor,
@@ -142,5 +145,24 @@ describe('sessionFor com dias fixos (achado 2026-10-15, produção)', () => {
 
   it('protocolo sem dia fixo (anterior a 2026-08-18) continua no calendário por frequência', () => {
     expect(sessionKeyFor(at('2026-10-14'), structure(3, ['A', 'B']))).toBe('B'); // quarta
+  });
+});
+
+describe('dia no fuso do ALUNO (D3)', () => {
+  // 2026-10-21T03:30Z = terça 23:30 em Manaus (UTC-4) e quarta 00:30 em São Paulo (UTC-3).
+  const AT = new Date('2026-10-21T03:30:00.000Z');
+
+  it('Manaus ainda está na terça quando São Paulo já virou para a quarta', () => {
+    expect(dayKeyIn(AT, 'America/Manaus')).toBe('2026-10-20');
+    expect(dayKeyIn(AT, 'America/Sao_Paulo')).toBe('2026-10-21');
+    expect(weekdayCodeIn(AT, 'America/Manaus')).toBe('TUE');
+    expect(weekdayCodeIn(AT, 'America/Sao_Paulo')).toBe('WED');
+  });
+
+  it('sem fuso ou com fuso inválido, cai no do produto em vez de quebrar', () => {
+    expect(dayKeyIn(AT, null)).toBe('2026-10-21');
+    expect(dayKeyIn(AT, 'Marte/Olympus')).toBe('2026-10-21');
+    expect(validTimezone('Marte/Olympus')).toBe('America/Sao_Paulo');
+    expect(validTimezone('America/Manaus')).toBe('America/Manaus');
   });
 });

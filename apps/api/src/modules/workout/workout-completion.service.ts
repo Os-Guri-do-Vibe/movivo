@@ -33,7 +33,8 @@ import { protocolStructureSchema, type ProtocolStructure } from '@movivo/shared'
 
 import { protocols, subscriptions, workoutCompletions } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
-import { plannedDaysBefore } from './workout-schedule';
+import { loadScheduleOverrides } from './schedule-overrides';
+import { plannedDaysBeforeEffective } from './schedule-planner';
 
 /** Protocolo vigente do aluno, já com a estrutura validada. */
 export interface ActiveProtocol {
@@ -134,7 +135,16 @@ export class WorkoutCompletionService {
 
     // Os dias mais recentes primeiro: se o aluno fez 1 de 3 treinos previstos, o mais
     // provável é o mais próximo da resposta.
-    const planned = plannedDaysBefore(new Date(), CHECKIN_WINDOW_DAYS, active.structure)
+    // Calendário efetivo: um treino que o aluno remarcou conta no dia em que foi previsto agora.
+    const overrides = await this.db.runAsSystem((tx) =>
+      loadScheduleOverrides(tx, userId, active.id),
+    );
+    const planned = plannedDaysBeforeEffective(
+      new Date(),
+      CHECKIN_WINDOW_DAYS,
+      active.structure,
+      overrides,
+    )
       .slice(-count)
       .reverse();
     let written = 0;

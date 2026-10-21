@@ -43,6 +43,10 @@ export const QUEUE = {
   // porque quem enfileira (`workout`) não pode falar com `LlmRouter`/`ValidationService`
   // diretamente (fronteira §12.5); o worker que fala com a IA mora no `CoachModule`.
   workoutFeedback: 'workout-feedback',
+  // O protocolo ganhou uma versão nova (troca de exercício, emenda do profissional): o treino de
+  // hoje, se ainda não começou, é atualizado e o aluno é perguntado se quer um link novo. Fila
+  // própria porque quem publica o protocolo (`protocol`, `admin`) não importa o domínio `workout`.
+  workoutProtocolChanged: 'workout-protocol-changed',
   // Comentário do Coach sobre o check-in semanal (achado 2026-09-13) — mesmo racional de
   // `workoutFeedback`: quem enfileira (`checkin`) não pode falar com `LlmRouter`/
   // `ValidationService` diretamente (fronteira §12.5); o worker mora no `CoachModule`.
@@ -127,6 +131,8 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
   // Best-effort (mesmo espírito do resumo de entrega do protocolo): poucas tentativas,
   // nunca trava o diário do aluno por causa de um comentário que não saiu.
   [QUEUE.workoutFeedback]: { attempts: 2, backoffMs: [5_000], concurrency: 5 },
+  // Best-effort: a atualização do treino de hoje nunca pode travar a publicação do protocolo.
+  [QUEUE.workoutProtocolChanged]: { attempts: 2, backoffMs: [5_000], concurrency: 5 },
   // Mesmo perfil de `workoutFeedback`: best-effort, poucas tentativas.
   [QUEUE.checkinWeeklyFeedback]: { attempts: 2, backoffMs: [5_000], concurrency: 5 },
   [QUEUE.conversionSequence]: {

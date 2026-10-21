@@ -78,9 +78,84 @@ export function dailyWorkoutMessage(
   );
 }
 
-/** Novo link pedido pelo aluno quando o anterior já tinha sido aberto (ex.: guia anônima). */
-export function resentWorkoutLinkMessage(firstName: string, link: string): string {
-  return `Oi, ${bold(firstName)}! 💚\n\nAqui está o seu novo link para o check-in de hoje:\n${link}\n\nAbra no navegador de sempre (não em guia anônima) para ele seguir funcionando. 👊🏼`;
+/**
+ * Novo link pedido pelo aluno quando o anterior já tinha sido aberto (ex.: guia anônima).
+ * `greeting` segue o horário local do aluno (`greetingFor`); sem ele, a saudação neutra de sempre.
+ */
+export function resentWorkoutLinkMessage(firstName: string, link: string, greeting = 'Oi'): string {
+  return `${greeting}, ${bold(firstName)}! 💚\n\nAqui está o seu novo link para o check-in de hoje:\n${link}\n\nAbra no navegador de sempre (não em guia anônima) para ele seguir funcionando. 👊🏼`;
+}
+
+/**
+ * Balões do link do dia enviados FORA das 04:00, sempre com a saudação do horário local do
+ * aluno (`greetingFor`). O link anterior, se existia, foi revogado quando este foi criado.
+ */
+
+/** O treino de hoje passou a existir por pedido do aluno (ele quis treinar num dia livre). */
+export function onDemandWorkoutMessage(
+  firstName: string,
+  workoutTitle: string,
+  link: string,
+  greeting: string,
+): string {
+  return `${greeting}, ${bold(firstName)}! 💚\n\nSeu treino de hoje é ${bold(workoutTitle)}. Este é o seu check-in diário, para registrar tudo quando for treinar:\n${link}\n\nBora se mover. 👊🏼`;
+}
+
+/** O treino de hoje mudou depois do link das 04:00 (troca de exercício aprovada). */
+export function refreshedWorkoutMessage(
+  firstName: string,
+  workoutTitle: string,
+  link: string,
+  greeting: string,
+): string {
+  return `${greeting}, ${bold(firstName)}! 💚\n\nSeu treino de hoje, ${bold(workoutTitle)}, já está com o exercício atualizado. Este é o seu novo check-in diário, e o anterior deixou de valer:\n${link}\n\nBora se mover. 👊🏼`;
+}
+
+/** O aluno pediu o link do check-in de hoje de novo. */
+export function resentTodayWorkoutMessage(
+  firstName: string,
+  workoutTitle: string,
+  link: string,
+  greeting: string,
+): string {
+  return `${greeting}, ${bold(firstName)}! 💚\n\nAqui está o link do seu check-in diário de hoje, ${bold(workoutTitle)}. O link anterior deixou de valer:\n${link}\n\nBora se mover. 👊🏼`;
+}
+
+/**
+ * Oferta de link novo quando o treino de hoje mudou depois do link das 04:00 e o aluno ainda
+ * não treinou. O treino já foi atualizado no lugar (qualquer link aberto mostra o exercício
+ * novo); o link novo é conveniência, e o anterior deixa de valer quando o novo chega.
+ */
+export function refreshOfferMessage(
+  firstName: string,
+  workoutTitle: string,
+  greeting: string,
+  reason: 'SUBSTITUTION' | 'ADJUSTMENT',
+): string {
+  const what =
+    reason === 'SUBSTITUTION'
+      ? 'A troca de exercício que você pediu já foi aprovada e vale para o seu treino de hoje'
+      : 'O profissional CREF atualizou o seu treino de hoje';
+  return `${greeting}, ${bold(firstName)}! 💚\n\n${what}, ${bold(workoutTitle)}. Como você ainda não treinou, quer que eu te envie um novo check-in diário com o treino atualizado? É só responder ${bold('sim')}. O link anterior deixa de valer quando o novo chegar.`;
+}
+
+/** Link do registro tardio: "ontem", "anteontem" ou o dia da semana (`when`). */
+export function lateLogLinkMessage(
+  firstName: string,
+  when: string,
+  workoutTitle: string,
+  link: string,
+  greeting: string,
+): string {
+  return `${greeting}, ${bold(firstName)}! 💚\n\nAqui está o link para registrar o seu treino de ${when} (${bold(workoutTitle)}). É só preencher as cargas e repetições, sem cronômetro:\n${link}\n\nO treino conta no dia em que você fez. 👊🏼`;
+}
+
+export function refreshDeclinedMessage(): string {
+  return 'Tudo bem! 💚 O seu link continua valendo e o treino de hoje já mostra o exercício atualizado. Se precisar de um link novo, é só me pedir.';
+}
+
+export function refreshAlreadyStartedMessage(): string {
+  return 'Você já está com o treino de hoje em andamento, então a atualização vale a partir do próximo treino. 💪🏼 Bom treino!';
 }
 
 export function durationInsightMessage(observed: number, expected: number): string {

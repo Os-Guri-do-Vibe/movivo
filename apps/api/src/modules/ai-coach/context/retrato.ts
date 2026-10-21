@@ -7,7 +7,8 @@
  * Achado 2026-10-13: o estado só trazia treinos CONCLUÍDOS. Um dia sem registro não existia
  * para o Coach, então ele não tinha como falar de "ontem que não foi feito" nem reconhecer a
  * constância de quem treina com regularidade. A conta é feita em código (nunca pelo modelo):
- * mesmo calendário que decide o treino do link diário (`sessionFor`).
+ * mesmo calendário que decide o treino do link diário (`effectiveSessionForDate`, que já inclui
+ * os ajustes de agenda pedidos pelo aluno).
  *
  * # Guardrail de linguagem
  * As chaves dizem "semRegistro", nunca "perdeu"/"faltou"/"falhou" (vocabulário da marca), e
@@ -15,13 +16,20 @@
  */
 import type { ProtocolStructure } from '@movivo/shared';
 
-import { dayKey, sessionFor } from '../../workout/workout-schedule';
+import {
+  effectiveSessionForDate,
+  type ScheduleOverrides,
+  weekDates,
+} from '../../workout/schedule-planner';
+import { dayKeyIn } from '../../workout/workout-schedule';
 
 /** Janela de dias fechados (a partir de ontem) que o retrato resume. */
 export const RETRATO_WINDOW_DAYS = 14;
 
 export interface RetratoInput {
   now: Date;
+  /** Fuso do aluno (`users.timezone`): "hoje" e a entrega do protocolo são contados nele. */
+  timezone?: string | null;
   /** Início do PRIMEIRO protocolo do aluno (qualquer status). */
   firstProtocolStart: Date;
   mesocycleNumber: number;
@@ -29,6 +37,8 @@ export interface RetratoInput {
   totalWeeks: number;
   /** Protocolo vigente, para saber em que dias da semana há treino previsto. */
   structure: ProtocolStructure;
+  /** Ajustes de agenda pedidos pelo aluno: um dia remarcado não é "sem registro". */
+  overrides?: ScheduleOverrides;
   /** Dias (`YYYY-MM-DD`) com treino concluído / iniciado e não finalizado. */
   completedDates: ReadonlySet<string>;
   inProgressDates: ReadonlySet<string>;
@@ -58,11 +68,6 @@ function tenure(days: number): string {
   return `${months} ${months === 1 ? 'mês' : 'meses'}`;
 }
 
-/** Meio-dia em São Paulo (15:00 UTC) do dia civil: longe o bastante de qualquer virada. */
-function atNoon(day: string): Date {
-  return new Date(`${day}T15:00:00.000Z`);
-}
-
 function previousDays(today: string, count: number): string[] {
   const days: string[] = [];
   const base = Date.parse(`${today}T12:00:00.000Z`);
@@ -81,8 +86,8 @@ function label(day: string): string {
 }
 
 export function buildRetrato(input: RetratoInput): Retrato {
-  const today = dayKey(input.now);
-  const deliveryDay = dayKey(input.firstProtocolStart);
+  const today = dayKeyIn(input.now, input.timezone);
+  const deliveryDay = dayKeyIn(input.firstProtocolStart, input.timezone);
   const tenureDays = Math.floor(
     (input.now.getTime() - input.firstProtocolStart.getTime()) / 86_400_000,
   );
@@ -97,7 +102,7 @@ export function buildRetrato(input: RetratoInput): Retrato {
     // Antes do protocolo e no dia da entrega não há o que cobrar; treino iniciado e não
     // finalizado provavelmente aconteceu, então não conta como previsto nem como sem registro.
     if (day <= deliveryDay || input.inProgressDates.has(day)) continue;
-    if (!sessionFor(atNoon(day), input.structure)) continue;
+    if (!effectiveSessionForDate(day, input.structure, input.overrides)) continue;
     planned += 1;
     if (input.completedDates.has(day)) registered += 1;
     else semRegistro.unshift(label(day));
@@ -114,4 +119,47 @@ export function buildRetrato(input: RetratoInput): Retrato {
     },
     ultimoTreinoRegistrado: lastCompleted,
   };
+}
+
+export interface AgendaDia {
+  /** Ex.: "terça 20/10". */
+  dia: string;
+  /** Rótulo da sessão e foco, ou "descanso". */
+  treino: string;
+  situacao: 'feito' | 'em andamento' | 'previsto' | 'sem registro' | 'descanso';
+  /** O aluno pediu para mudar este dia (o padrão do protocolo era outro). */
+  remarcado: boolean;
+}
+
+/**
+ * A semana do aluno (segunda a domingo) como o Coach deve enxergá-la: o calendário efetivo, com
+ * os dias que o aluno remarcou marcados. Sem isso o Coach responderia "amanhã é descanso" ou
+ * "hoje é o B" com base no calendário padrão, contradizendo o ajuste que acabou de aceitar.
+ */
+export function buildAgendaDaSemana(input: {
+  today: string;
+  structure: ProtocolStructure;
+  overrides?: ScheduleOverrides;
+  completedDates: ReadonlySet<string>;
+  inProgressDates: ReadonlySet<string>;
+}): AgendaDia[] {
+  return weekDates(input.today).map((date) => {
+    const session = effectiveSessionForDate(date, input.structure, input.overrides);
+    const done = input.completedDates.has(date);
+    const situacao: AgendaDia['situacao'] = done
+      ? 'feito'
+      : input.inProgressDates.has(date)
+        ? 'em andamento'
+        : !session
+          ? 'descanso'
+          : date < input.today
+            ? 'sem registro'
+            : 'previsto';
+    return {
+      dia: label(date),
+      treino: session ? `${session.dayLabel} (${session.focus})` : 'descanso',
+      situacao,
+      remarcado: input.overrides?.has(date) ?? false,
+    };
+  });
 }

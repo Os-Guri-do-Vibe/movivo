@@ -38,6 +38,7 @@ import {
   TECHNICAL_NO_EVIDENCE_MESSAGE,
 } from './coach-messages';
 import type { ConversationRepository } from './conversation.repository';
+import type { ScheduleFlowOutcome } from './schedule-flow.service';
 import {
   buildForaDeEscopoResponse,
   IDENTITY_TRANSPARENCY_BLOCK,
@@ -84,6 +85,13 @@ interface Deps {
   flowOutcome?: FlowOutcome;
   /** Há fluxo de troca aberto (Redis) — a mensagem é tratada como possível continuação. */
   flowOpen?: boolean;
+  /**
+   * Fluxo de agenda flexível (2026-10-20): a lógica vive em `ScheduleFlowService` (spec próprio);
+   * aqui só se prova o roteamento. Default: o fluxo não trata nada.
+   */
+  scheduleOutcome?: ScheduleFlowOutcome;
+  /** Há pergunta de agenda aberta ("qual treino fica de fora?"). */
+  scheduleOpen?: boolean;
   /** Mensagens que chegaram ao buffer DEPOIS da drenagem (durante a geração da resposta). */
   pendingBatchLength?: number;
   /** Pergunta do Coach sobre treino sem registro ainda aberta (`conversation_followups`). */
@@ -230,6 +238,12 @@ function makeWorker(deps: Deps = {}) {
     abandon: flowAbandon,
   } as never;
 
+  const scheduleHandle = vi.fn((_input: unknown) =>
+    Promise.resolve<ScheduleFlowOutcome>(deps.scheduleOutcome ?? { kind: 'NOT_HANDLED' }),
+  );
+  const scheduleHasOpen = vi.fn((_userId: string) => Promise.resolve(deps.scheduleOpen ?? false));
+  const scheduleFlow = { handle: scheduleHandle, hasOpenFlow: scheduleHasOpen } as never;
+
   const items = deps.batchItems ?? [JSON.stringify({ text: 'oi' })];
   const batchLrange = vi.fn();
   const batchDel = vi.fn();
@@ -293,6 +307,7 @@ function makeWorker(deps: Deps = {}) {
       hasActiveForUser: vi.fn(async () => deps.consentActive ?? true),
     } as unknown as HealthConsentService,
     substitutionFlow,
+    scheduleFlow,
     redis,
     keys as never,
     { isPaused: vi.fn(async () => deps.coachPaused ?? false) } as never,
@@ -324,6 +339,8 @@ function makeWorker(deps: Deps = {}) {
     flowHandle,
     flowHasOpen,
     flowAbandon,
+    scheduleHandle,
+    scheduleHasOpen,
   };
 }
 
@@ -665,6 +682,70 @@ describe('AIResponseWorker.process (US-3.5)', () => {
     await expect(worker.process(job())).resolves.toEqual({ status: 'HANDOFF' });
     expect(sentText(enqueue)).toBe(buildHumanHandoffMessage(DEFAULT_AGENT_PERSONA));
     expect(complete).not.toHaveBeenCalled();
+  });
+
+  // Agenda flexível: a lógica (planejador, link, copy) vive em `ScheduleFlowService` e nos seus
+  // specs. Aqui se prova que o worker roteia as intenções de agenda para o fluxo, entrega a copy
+  // fixa em balões separados e NÃO chama a IA generativa.
+  describe('fluxo de agenda flexível (delegado a ScheduleFlowService)', () => {
+    it('AJUSTE_AGENDA vai pro fluxo e responde com a copy fixa, sem chamar o LLM', async () => {
+      const { worker, enqueue, complete, scheduleHandle } = makeWorker({
+        intent: 'AJUSTE_AGENDA',
+        batchItems: [JSON.stringify({ text: 'hoje consigo treinar, posso fazer o A?' })],
+        scheduleOutcome: {
+          kind: 'FIXED',
+          text: 'Pode sim! Hoje é dia de Treino A.\n---\nBoa tarde, Ana! link',
+          adjusted: true,
+        },
+      });
+      await expect(worker.process(job())).resolves.toEqual({ status: 'SENT' });
+      expect(scheduleHandle).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'u1', intent: 'AJUSTE_AGENDA' }),
+      );
+      expect(complete).not.toHaveBeenCalled();
+      expect(sentText(enqueue)).toContain('Pode sim! Hoje é dia de Treino A.');
+      expect(sentText(enqueue)).toContain('Boa tarde, Ana! link');
+    });
+
+    it('PEDIDO_LINK_TREINO também usa o fluxo', async () => {
+      const { worker, enqueue, scheduleHandle } = makeWorker({
+        intent: 'PEDIDO_LINK_TREINO',
+        scheduleOutcome: { kind: 'FIXED', text: 'Boa noite, Ana! link', adjusted: false },
+      });
+      await worker.process(job());
+      expect(scheduleHandle).toHaveBeenCalledWith(
+        expect.objectContaining({ intent: 'PEDIDO_LINK_TREINO' }),
+      );
+      expect(sentText(enqueue)).toBe('Boa noite, Ana! link');
+    });
+
+    it('pergunta de agenda aberta tem prioridade sobre a intenção classificada', async () => {
+      const { worker, enqueue, scheduleHandle } = makeWorker({
+        intent: 'PAPO_CASUAL',
+        scheduleOpen: true,
+        batchItems: [JSON.stringify({ text: 'o de sábado' })],
+        scheduleOutcome: { kind: 'FIXED', text: 'Feito! Reorganizei a semana.', adjusted: true },
+      });
+      await worker.process(job());
+      expect(scheduleHandle).toHaveBeenCalled();
+      expect(sentText(enqueue)).toBe('Feito! Reorganizei a semana.');
+    });
+
+    it('fluxo que devolve NOT_HANDLED segue o roteamento normal (IA generativa)', async () => {
+      const { worker, complete } = makeWorker({
+        intent: 'AJUSTE_AGENDA',
+        llmText: 'Me conta qual dia você quer mexer?',
+        scheduleOutcome: { kind: 'NOT_HANDLED' },
+      });
+      await worker.process(job());
+      expect(complete).toHaveBeenCalled();
+    });
+
+    it('mensagens de outras intenções não chamam o fluxo de agenda quando não há pergunta aberta', async () => {
+      const { worker, scheduleHandle } = makeWorker({ intent: 'MOTIVACAO' });
+      await worker.process(job());
+      expect(scheduleHandle).not.toHaveBeenCalled();
+    });
   });
 
   // Achado 2026-09-30: a lógica do fluxo de troca (alcance hoje x protocolo, lote, estado em
