@@ -544,11 +544,21 @@ const PER_INTENT: Record<Intent, string> = {
   // Normalmente atendido por regra, antes da IA (`ScheduleFlowService`); só chega aqui se o fluxo
   // não pôde tratar a mensagem. Nunca confirme uma mudança de agenda ou envio de link que o
   // sistema não confirmou.
+  // Chegar aqui com AJUSTE_AGENDA significa que o fluxo de agenda NÃO achou um pedido executável
+  // (ele se abstém em vez de perguntar "qual dia?"): a mensagem pode ser outra coisa, mal rotulada.
   AJUSTE_AGENDA:
-    'Acolha o pedido com leveza e peça, em uma frase curta, o dia e o treino que o aluno quer ' +
-    'mexer (ex.: "hoje eu treino o A" ou "amanhã eu descanso") ou, se ele já treinou e não ' +
-    'registrou, o dia em que treinou. NÃO diga que já reorganizou a semana ou abriu o registro ' +
-    'e NÃO prometa mudança que você não confirmou.',
+    'Responda ao que o aluno de fato perguntou ou contou, usando só o que está no contexto ' +
+    '(treino de hoje, calendário, últimos treinos e cargas). Só pergunte qual dia e qual treino ' +
+    'ele quer mexer se a mensagem deixar claro que ele quer mudar a agenda. NÃO diga que ' +
+    'reorganizou a semana, registrou um treino ou agendou algo, e NÃO prometa o que você não ' +
+    'confirmou. Lembretes avulsos você não agenda; diga isso com naturalidade e ofereça o que ' +
+    'existe: o link do check-in diário já traz, em cada série, a carga do último treino como referência.',
+  CONSULTA_HISTORICO:
+    'Responda com os números reais do contexto (cargas e repetições da última vez no diário, ' +
+    'treinos feitos, data do último). Se o dado pedido não estiver no contexto, diga que não o ' +
+    'tem em mãos em vez de estimar. Você não agenda lembretes avulsos: informe que o link do ' +
+    'check-in diário já traz, em cada série, a carga do último treino como referência e, se ele ' +
+    'quiser, passe as cargas da última vez agora. NÃO invente carga, data nem quantidade.',
   PEDIDO_LINK_TREINO:
     'Diga que vai conferir o treino de hoje e peça um instante. NÃO invente nem cole link; ' +
     'o envio do link é feito pelo sistema.',
@@ -557,7 +567,10 @@ const PER_INTENT: Record<Intent, string> = {
     'protocolo acontece no check-in semanal (não altere o treino agora).',
   RELATO_TREINO:
     'Celebre a conclusão do treino (momento de vitória). Só reforce o próximo passo se isso ' +
-    'ainda não tiver sido dito nos últimos turnos (ver MEMÓRIA DA CONVERSA).',
+    'ainda não tiver sido dito nos últimos turnos (ver MEMÓRIA DA CONVERSA). Se o aluno contou ' +
+    'que trocou um exercício por conta própria, reconheça sem julgar, pergunte como a região ' +
+    'respondeu e diga que, se ele quiser, a troca pode ser registrada no protocolo; não trate ' +
+    'o relato como um pedido novo.',
   // Achado 2026-09-10 (bug reportado pelo fundador, reproduzido ao vivo): a instrução só
   // cobria ABERTURA de conversa ("oi", "bom dia") e "pergunte como pode ajudar" saía até
   // quando o aluno estava claramente ENCERRANDO ("blz, vlw") — a IA respondia convidando a

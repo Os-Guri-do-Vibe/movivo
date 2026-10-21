@@ -164,4 +164,21 @@ export const INTENT_EXAMPLES_SEED: readonly IntentExampleSeed[] = [
   { intent: 'PEDIDO_LINK_TREINO', text: 'cadê o link do meu treino?' },
   { intent: 'PEDIDO_LINK_TREINO', text: 'o link do check-in não abre, manda de novo' },
   { intent: 'PEDIDO_LINK_TREINO', text: 'reenvia o check-in diário por favor' },
+  // CONSULTA_HISTORICO — achado 2026-10-21 (conversa da Giovana): perguntar pelo próprio
+  // histórico (cargas, quantidade, última vez) não é pedido de agenda.
+  { intent: 'CONSULTA_HISTORICO', text: 'quais foram as cargas que usei no último treino?' },
+  {
+    intent: 'CONSULTA_HISTORICO',
+    text: 'você me lembra das cargas antes do treino da semana que vem?',
+  },
+  { intent: 'CONSULTA_HISTORICO', text: 'quantos treinos eu já fiz esse mês?' },
+  { intent: 'CONSULTA_HISTORICO', text: 'quando foi meu último treino de pernas?' },
+  { intent: 'CONSULTA_HISTORICO', text: 'qual a carga que eu fiz no supino semana passada?' },
+  // RELATO_TREINO — troca que o aluno JÁ fez por conta própria não é pedido de troca.
+  { intent: 'RELATO_TREINO', text: 'fiz cadeira flexora no lugar dessa' },
+  { intent: 'RELATO_TREINO', text: 'troquei o leg 45 pelo horizontal e deu certo' },
+  { intent: 'RELATO_TREINO', text: 'acabei usando o halter no lugar da barra hoje' },
+  // SUBSTITUICAO_EXERCICIO — o aluno PEDE a troca, inclusive só comentando que não serve.
+  { intent: 'SUBSTITUICAO_EXERCICIO', text: 'a flexora em pé daqui só serve pra gente alta kkkk' },
+  { intent: 'SUBSTITUICAO_EXERCICIO', text: 'esse aparelho não funciona pra mim, tem outro?' },
 ];

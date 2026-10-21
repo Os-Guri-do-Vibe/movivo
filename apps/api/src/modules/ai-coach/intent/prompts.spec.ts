@@ -90,6 +90,22 @@ describe('recusa é o último recurso', () => {
     expect(IDENTITY_TRANSPARENCY_BLOCK).toContain('ÚNICA história');
   });
 
+  it('AJUSTE_AGENDA sem pedido executável não força a pergunta "qual dia?" nem promete lembrete', () => {
+    const p = intentInstruction('AJUSTE_AGENDA');
+    expect(p).toContain('Só pergunte qual dia');
+    expect(p).toContain('Lembretes avulsos você não agenda');
+  });
+
+  it('CONSULTA_HISTORICO responde com os números do contexto e não inventa', () => {
+    const p = intentInstruction('CONSULTA_HISTORICO');
+    expect(p).toContain('números reais do contexto');
+    expect(p).toContain('NÃO invente');
+  });
+
+  it('RELATO_TREINO trata troca feita pelo aluno como relato, não como pedido', () => {
+    expect(intentInstruction('RELATO_TREINO')).toContain('por conta própria');
+  });
+
   it('SOBRE_O_COACH responde com a verdade e não encaminha só pela pergunta', () => {
     const p = intentInstruction('SOBRE_O_COACH');
     expect(p).toContain('IDENTIDADE E TRANSPARÊNCIA');

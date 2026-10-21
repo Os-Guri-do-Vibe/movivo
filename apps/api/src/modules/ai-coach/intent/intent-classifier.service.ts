@@ -44,8 +44,10 @@ const INTENT_GLOSS: Record<Intent, string> = {
     'estrutura do próprio protocolo (divisão, foco de cada sessão, objetivo do plano). Pedido para ' +
     'MUDAR o dia de um treino ou descansar num dia NÃO é dúvida: é AJUSTE_AGENDA',
   SUBSTITUICAO_EXERCICIO:
-    'quer trocar um exercício ESPECÍFICO do treino por outro (nomeia o exercício ou o aparelho), ' +
-    'para sempre ou só por hoje (ex.: "o leg press está ocupado, o que faço no lugar?")',
+    'PEDE para trocar um exercício ESPECÍFICO do treino por outro (nomeia o exercício ou o ' +
+    'aparelho), para sempre ou só por hoje (ex.: "o leg press está ocupado, o que faço no ' +
+    'lugar?", "a flexora em pé não serve pra mim"). Se conta que JÁ trocou por conta própria ' +
+    '("fiz cadeira flexora no lugar dessa"), é RELATO_TREINO',
   MOTIVACAO: 'desânimo, dúvida sobre resultado/prazo, ou precisa de um empurrão pra treinar',
   CHECKIN_ANTECIPADO:
     'quer ajustar o PROTOCOLO agora (carga, descanso, dificuldade do treino em si), fora do ' +
@@ -58,7 +60,8 @@ const INTENT_GLOSS: Record<Intent, string> = {
   SAUDACAO:
     'só um cumprimento de abertura OU uma despedida/agradecimento de encerramento, sem pedido concreto',
   RELATO_TREINO:
-    'contando que terminou ou como foi um treino já feito. Se pede para REGISTRAR no sistema um ' +
+    'contando que terminou ou como foi um treino já feito, inclusive o que mudou nele por conta ' +
+    'própria ("fiz a troca do leg 45 pelo horizontal"). Se pede para REGISTRAR no sistema um ' +
     'treino de ontem/anteontem que não registrou, é AJUSTE_AGENDA',
   PEDIDO_HANDOFF: 'pede explicitamente pra falar com uma pessoa/profissional',
   EMERGENCIA_CLINICA: 'sinal de risco à saúde/vida',
@@ -75,7 +78,8 @@ const INTENT_GLOSS: Record<Intent, string> = {
     'pergunta "o que eu faço?" no meio do treino. Se o aluno pede para TREINAR OUTRO DIA ou ' +
     'DESCANSAR num dia, é AJUSTE_AGENDA',
   AJUSTE_AGENDA:
-    'pede para mudar QUANDO treina: treinar hoje/em outro dia um treino do plano ("hoje consigo ' +
+    'pede para mudar QUANDO treina (SÓ isso; perguntar ou pedir lembrete sobre cargas, histórico ' +
+    'ou um treino futuro NÃO é agenda): treinar hoje/em outro dia um treino do plano ("hoje consigo ' +
     'treinar, posso fazer o Treino A?"), adiantar ou adiar um treino, descansar num dia ("amanhã ' +
     'quero descansar", "estou muito cansado, posso trocar o descanso de sexta para quarta?"), ' +
     'reorganizar a semana, escolher qual treino fica de fora, desfazer um ajuste de agenda ' +
@@ -84,6 +88,10 @@ const INTENT_GLOSS: Record<Intent, string> = {
   PEDIDO_LINK_TREINO:
     'pede o link/check-in diário do treino de hoje: "me manda o link", "perdi o link", "cadê meu ' +
     'check-in?", "reenvia o link do treino"',
+  CONSULTA_HISTORICO:
+    'pergunta sobre o PRÓPRIO histórico de treino: quais foram as cargas da última vez, quantos ' +
+    'treinos fez, quando foi o último, como evoluiu; inclui pedir para ser lembrado das cargas ' +
+    'antes de um treino futuro. NÃO muda dia nem descanso (isso é AJUSTE_AGENDA)',
 };
 
 @Injectable()
