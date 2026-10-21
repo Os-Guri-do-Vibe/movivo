@@ -148,6 +148,12 @@ export type AdjustmentRequest =
       /** Ausente: o treino do dia, se houver, senão o próximo pendente da semana. */
       sessionKey?: string;
       leaveOut?: SessionSelector[];
+      /**
+       * O que fazer com o treino que já estava no dia pedido. Ausente: o planejador devolve
+       * `DATE_CONFLICT` e o Coach pergunta. `SKIP` = o treino do dia pedido fica de fora da semana;
+       * `PUSH` = ele e os seguintes avançam um dia, até o próximo descanso.
+       */
+      onConflict?: 'SKIP' | 'PUSH';
     }
   | { kind: 'REST_ON'; date: string; leaveOut?: SessionSelector[] }
   | {
@@ -190,6 +196,14 @@ export type PlanFailure =
       sessionKey?: string;
     }
   | {
+      /** O dia pedido já tem outro treino: o aluno escolhe pular o dele ou empurrar a semana. */
+      ok: false;
+      reason: 'DATE_CONFLICT';
+      date: string;
+      /** O treino que já estava no dia. */
+      sessionKey: string;
+    }
+  | {
       ok: false;
       reason: 'FULL_WEEK';
       /** Treinos que o aluno pode deixar de fora para o pedido caber. */
@@ -209,7 +223,7 @@ export interface PlanSuccess {
 export type PlanResult = PlanSuccess | PlanFailure;
 
 const fail = (
-  reason: Exclude<PlanFailure, { reason: 'FULL_WEEK' }>['reason'],
+  reason: Exclude<PlanFailure['reason'], 'FULL_WEEK' | 'DATE_CONFLICT'>,
   extra: { date?: string; sessionKey?: string } = {},
 ): PlanFailure => ({ ok: false, reason, ...extra });
 
@@ -313,17 +327,35 @@ function trainOn(
   if (source && source.date === request.date) return null;
 
   const displaced = target.sessionKey;
-  if (displaced !== null) {
-    if (source && source.date >= input.today) {
-      source.sessionKey = displaced;
-    } else {
-      const free = freeAfter(state, request.date, input.today);
-      if (!free) return fullWeek(state, input.today);
-      free.sessionKey = displaced;
-      if (source) source.sessionKey = null;
-    }
-  } else if (source) {
-    source.sessionKey = null;
+  if (displaced === null) {
+    if (source) source.sessionKey = null;
+    target.sessionKey = key as string;
+    return null;
+  }
+  if (!request.onConflict)
+    return { ok: false, reason: 'DATE_CONFLICT', date: request.date, sessionKey: displaced };
+
+  if (request.onConflict === 'SKIP') {
+    // O treino que já estava no dia pedido fica de fora; o resto da semana não muda.
+    state.dropped.push(displaced);
+    if (source) source.sessionKey = null;
+    target.sessionKey = key as string;
+    return null;
+  }
+
+  // PUSH: o treino pedido entra no dia, e o que estava ali e os seguintes avançam um dia, até o
+  // primeiro descanso. Se o treino movido vinha de depois do dia pedido, o lugar dele é o descanso.
+  if (source) source.sessionKey = null;
+  const targetIndex = state.slots.indexOf(target);
+  const freeIndex = state.slots.findIndex(
+    (slot, index) => index > targetIndex && slot.sessionKey === null && !slot.locked,
+  );
+  if (freeIndex < 0) {
+    if (source) source.sessionKey = key as string;
+    return fullWeek(state, input.today);
+  }
+  for (let index = freeIndex; index > targetIndex; index -= 1) {
+    (state.slots[index] as WeekSlot).sessionKey = (state.slots[index - 1] as WeekSlot).sessionKey;
   }
   target.sessionKey = key as string;
   return null;
