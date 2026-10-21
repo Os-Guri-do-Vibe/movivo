@@ -541,6 +541,17 @@ const PER_INTENT: Record<Intent, string> = {
     'Só feche com 1 pergunta de baixo atrito se ainda fizer sentido depois de responder — e só ' +
     'se essa pergunta (ou o gancho do treino de hoje) ainda não tiver aparecido nos últimos ' +
     'turnos (ver MEMÓRIA DA CONVERSA). Curto.',
+  // Normalmente atendido por regra, antes da IA (`ScheduleFlowService`); só chega aqui se o fluxo
+  // não pôde tratar a mensagem. Nunca confirme uma mudança de agenda ou envio de link que o
+  // sistema não confirmou.
+  AJUSTE_AGENDA:
+    'Acolha o pedido com leveza e peça, em uma frase curta, o dia e o treino que o aluno quer ' +
+    'mexer (ex.: "hoje eu treino o A" ou "amanhã eu descanso") ou, se ele já treinou e não ' +
+    'registrou, o dia em que treinou. NÃO diga que já reorganizou a semana ou abriu o registro ' +
+    'e NÃO prometa mudança que você não confirmou.',
+  PEDIDO_LINK_TREINO:
+    'Diga que vai conferir o treino de hoje e peça um instante. NÃO invente nem cole link; ' +
+    'o envio do link é feito pelo sistema.',
   CHECKIN_ANTECIPADO:
     'Acolha o pedido de ajuste, colete de forma leve o que mudou e INFORME que o ajuste do ' +
     'protocolo acontece no check-in semanal (não altere o treino agora).',

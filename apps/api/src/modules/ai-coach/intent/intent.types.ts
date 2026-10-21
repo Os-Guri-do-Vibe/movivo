@@ -55,6 +55,13 @@ export const INTENTS = [
   // exercício/aparelho a trocar) e de `DUVIDA_TECNICA` (como executar/por que), recebe a
   // metodologia e responde com ordem, ritmo e alternância dentro do treino do dia.
   'ADAPTACAO_NO_TREINO',
+  // Agenda flexível (2026-10-20): o aluno pede ao Coach para treinar em outro dia, descansar num
+  // dia ou refazer a semana ("hoje consigo treinar o A", "amanhã quero descansar", "desfaz").
+  // Atendido por regra no servidor (`ScheduleFlowService`), sem texto livre da IA; a IA só lê o
+  // pedido. Antes disso, "posso treinar hoje?" caía em `DUVIDA_TECNICA` (estrutura do protocolo).
+  'AJUSTE_AGENDA',
+  // O aluno pede o link do check-in diário ("me manda o link", "perdi o link do treino").
+  'PEDIDO_LINK_TREINO',
 ] as const;
 
 export type Intent = (typeof INTENTS)[number];
