@@ -9,7 +9,10 @@ import {
   dailyWorkoutMessage,
   durationInsightMessage,
   greetingFor,
+  onDemandWorkoutMessage,
   parseDurationInsightButton,
+  refreshedWorkoutMessage,
+  resentTodayWorkoutMessage,
   resentWorkoutLinkMessage,
 } from './workout-messages';
 
@@ -27,6 +30,9 @@ const COPY = [
   dailyWorkoutMessage('Ana', 'Treino A', 'https://x/treino/abc'),
   durationInsightMessage(75, 60),
   resentWorkoutLinkMessage('Ana', 'https://x/check-in/abc'),
+  onDemandWorkoutMessage('Ana', 'Costas e Bíceps', 'https://x/check-in/abc', 'Boa tarde'),
+  refreshedWorkoutMessage('Ana', 'Costas e Bíceps', 'https://x/check-in/abc', 'Bom dia'),
+  resentTodayWorkoutMessage('Ana', 'Costas e Bíceps', 'https://x/check-in/abc', 'Boa noite'),
   ...QUESTION_COPY,
 ];
 
@@ -164,5 +170,34 @@ describe('parse do botão de insight de duração', () => {
   it('ignora botões de outros fluxos', () => {
     expect(parseDurationInsightButton('checkin:anticipated')).toBeNull();
     expect(parseDurationInsightButton(undefined)).toBeNull();
+  });
+});
+
+describe('links enviados fora das 04:00', () => {
+  it.each([
+    ['Bom dia', onDemandWorkoutMessage],
+    ['Boa tarde', refreshedWorkoutMessage],
+    ['Boa noite', resentTodayWorkoutMessage],
+  ])('abre com a saudação do horário local (%s) e o nome em negrito', (greeting, build) => {
+    const text = build('Ana', 'Costas e Bíceps', 'https://x/check-in/abc', greeting);
+    expect(text).toMatch(new RegExp(`^${greeting}, \\*Ana\\*!`));
+    expect(text).toContain('*Costas e Bíceps*');
+    expect(text).toContain('\nhttps://x/check-in/abc\n');
+  });
+
+  it('o link novo avisa que o anterior deixou de valer quando ele foi trocado', () => {
+    expect(refreshedWorkoutMessage('Ana', 'Pernas', 'https://x/c', 'Bom dia')).toContain(
+      'o anterior deixou de valer',
+    );
+    expect(resentTodayWorkoutMessage('Ana', 'Pernas', 'https://x/c', 'Bom dia')).toContain(
+      'O link anterior deixou de valer',
+    );
+  });
+
+  it('o reenvio pela tela de link expirado também usa a saudação do horário', () => {
+    expect(resentWorkoutLinkMessage('Ana', 'https://x/c', 'Boa tarde')).toMatch(
+      /^Boa tarde, \*Ana\*!/,
+    );
+    expect(resentWorkoutLinkMessage('Ana', 'https://x/c')).toMatch(/^Oi, \*Ana\*!/);
   });
 });
