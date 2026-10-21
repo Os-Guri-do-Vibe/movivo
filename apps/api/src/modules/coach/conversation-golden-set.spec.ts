@@ -11,9 +11,15 @@ import { describe, expect, it } from 'vitest';
 
 import { clinicalGuardrail } from '../ai-coach/intent/clinical-guardrail';
 import { EXERCISE_BY_ID, EXERCISE_CATALOG } from '../protocol/exercise-catalog';
-import { findSafeCandidates } from '../protocol/exercise-substitution';
+import {
+  findCautionCandidates,
+  findSafeCandidates,
+  isEquivalentOrLowerRisk,
+  STRICT_CONTRAINDICATION_TAGS,
+} from '../protocol/exercise-substitution';
 import { ValidationService } from '../protocol/validation/validation.service';
 import {
+  CAUTION_CASES,
   GUARDRAIL_CASES,
   RESPONSE_CASES,
   SUBSTITUTION_CASES,
@@ -80,6 +86,24 @@ describe('golden set conversacional — substituição fiel à base (US-3.5)', (
       // Nunca contraindicado pela lesão do usuário.
       for (const tag of c.constraints.injuryTags) {
         expect(candidate.contraindicatedFor).not.toContain(tag);
+      }
+    }
+  });
+});
+
+describe('golden set conversacional — troca com cautela (restrição articular, 2026-10-21)', () => {
+  it.each(CAUTION_CASES.map((c) => [c.label, c] as const))('%s', (_label, c) => {
+    const target = EXERCISE_BY_ID.get(c.targetExerciseId);
+    expect(target).toBeDefined();
+    if (!target) return;
+    const candidates = findCautionCandidates(target, c.constraints, EXERCISE_CATALOG);
+
+    expect(candidates.length > 0).toBe(c.expectCaution);
+    for (const candidate of candidates) {
+      expect(EXERCISE_BY_ID.has(candidate.id)).toBe(true); // sempre da base, nunca inventa
+      expect(isEquivalentOrLowerRisk(target, candidate, c.constraints.injuryTags)).toBe(true);
+      for (const tag of STRICT_CONTRAINDICATION_TAGS) {
+        expect(candidate.contraindicatedFor).not.toContain(tag); // nunca relaxa o que é rígido
       }
     }
   });

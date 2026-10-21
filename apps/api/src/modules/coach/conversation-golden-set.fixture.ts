@@ -403,3 +403,44 @@ export const SUBSTITUTION_CASES: readonly SubstitutionCase[] = [
     expectSubstitute: false,
   },
 ];
+
+/**
+ * Pedido de troca de quem tem restrição articular (caso Giovana, 21/10/2026): sem candidato
+ * "seguro" na base, o fluxo oferece opções de risco igual ou menor, sempre da base e marcadas com
+ * cautela; restrição cardíaca/equilíbrio/gestação nunca é relaxada.
+ */
+export interface CautionCase {
+  label: string;
+  message: string;
+  targetExerciseId: string;
+  constraints: SubstitutionConstraints;
+  /** Há opção com cautela? */
+  expectCaution: boolean;
+}
+
+export const CAUTION_CASES: readonly CautionCase[] = [
+  {
+    label: 'flexora em pé com joelho sensível → opções de risco igual ou menor, com cautela',
+    message: 'A flexora em pé daqui só serve pra pessoas altas kkkk',
+    targetExerciseId: 'flexora_em_pe_maquina',
+    constraints: {
+      level: 'INICIANTE',
+      location: 'FULL_GYM',
+      equipment: ['máquina'],
+      injuryTags: ['KNEE'],
+    },
+    expectCaution: true,
+  },
+  {
+    label: 'leg press 45 com joelho sensível → opções de risco igual ou menor, com cautela',
+    message: 'queria trocar o leg 45 pelo horizontal',
+    targetExerciseId: 'leg_press_45_maquina',
+    constraints: {
+      level: 'INICIANTE',
+      location: 'FULL_GYM',
+      equipment: ['máquina'],
+      injuryTags: ['KNEE'],
+    },
+    expectCaution: true,
+  },
+];
