@@ -136,6 +136,9 @@ export function constraintsFromAnamnesis(ctx: LoadedContext): UserConstraints {
     // o validador (`checkStructure`) já excluem exercício contraindicado. Sem a mescla,
     // "CARDIAC vindo do PAR-Q" só existiria como etiqueta, sem vetar exercício nenhum.
     injuryTags: [...new Set([...pain.tags, ...mapInjuriesToTags(injuriesRaw), ...parq.tags])],
+    // Dor sem veto (ver `UserConstraints.cautionTags`): continua em `injuryTags` para o resto
+    // do sistema, mas o gerador/validador da geração a tratam como cautela. PAR-Q é sempre veto.
+    cautionTags: pain.cautionTags.filter((tag) => !parq.tags.includes(tag)),
     injuriesRaw,
     routineContext: routineContextForPrompt(structured, health.freeText),
     importantEvent: importantEventForPrompt(structured, health.freeText?.importantEventDescription),

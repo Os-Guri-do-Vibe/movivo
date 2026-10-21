@@ -14,6 +14,10 @@
  * achado em `protocol-generator.service.ts::buildSystemPrompt`) — suas diretivas de decisão
  * devem ser seguidas como instrução de sistema, não tratadas como mera evidência de apoio.
  *
+ * 2026-10-21: o texto abaixo foi alinhado à versão PUBLICADA em produção (methodology-v3, que
+ * ganhou o parágrafo de biomecânica/ordem por grupo do RT em 11/10). Em produção quem manda é
+ * sempre o banco; este literal só garante que dev/CI/ambiente novo partam do mesmo texto.
+ *
  * A IA tem autonomia para individualizar DENTRO destes trilhos; a garantia de segurança é do
  * `ValidationService` (US-2.3), não deste texto.
  */
@@ -77,4 +81,6 @@ Dor, lesões e limitações (pressupondo READY) restringem o protocolo mesmo sem
 Preferências e exclusões de exercício levam à substituição por um exercício de padrão de movimento equivalente, preferencialmente extraído do histórico esportivo do aluno.
 
 Sexo biológico e idade geram ajustes finos, não protocolos estruturalmente diferentes: mulheres mostraram resposta um pouco mais pronunciada a frequências mais altas numa meta-análise de força; pessoas mais jovens tendem a responder melhor a frequências altas do que mais velhas — para alunos de meia-idade/mais velhos isso pesa a favor de consistência com frequência moderada, RIR um pouco mais conservador e aquecimento específico reforçado.
+
+Considerar princípios da biomecânica e cinesiologia aplicados a prescrição do exercício, uma vez que existem músculos agonistas e antagonistas no treinamento de musculação. Ex: meu aluno tem o objetivo de evolução no grupo muscular de Dorsal, com treino a,b,c,d e e, aonde o treino A ele começa com dorsal e depois vai para o outro muscusculo secundário, dar enfase sempre no músculo alvo. Outro ponto, leve em consideração primeiro toda a execução do grupo muscular para depois ir para o próximo, exemplo, treino de peito ombro e tríceps, primeiro todos os exercícios do peito, depois ombro e depois tricepes.
 `.trim();

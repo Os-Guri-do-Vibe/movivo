@@ -350,6 +350,8 @@ async function loadFullConstraints(
     avoid: health.freeText?.avoidedExercise ? [health.freeText.avoidedExercise] : [],
     routineContext: routineContextForPrompt(structured, health.freeText),
     injuryTags: [...new Set([...pain.tags, ...mapInjuriesToTags(injuriesRaw), ...parq.tags])],
+    // Mesma política de `constraintsFromAnamnesis`: dor sem veto é cautela; PAR-Q sempre veta.
+    cautionTags: pain.cautionTags.filter((tag) => !parq.tags.includes(tag)),
     injuriesRaw,
     importantEvent: importantEventForPrompt(structured, health.freeText?.importantEventDescription),
   };

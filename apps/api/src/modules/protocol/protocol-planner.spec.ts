@@ -421,6 +421,50 @@ describe('planProtocol (US-2.4)', () => {
     });
   });
 
+  describe('dor sem veto (cautionTags, 2026-10-21)', () => {
+    const validation = new ValidationService();
+    const withCaution = {
+      ...cmd,
+      // supino_reto_halter carrega SHOULDER/ELBOW no catálogo
+      constraints: {
+        ...constraints,
+        injuryTags: ['SHOULDER' as const],
+        cautionTags: ['SHOULDER' as const],
+      },
+    };
+
+    it('o exercício com a região passa na validação e o plano conta quantos há', async () => {
+      const gen = fakeGenerator([genResult({ structure: realStructure() })]);
+      const plan = await planProtocol(gen, validation, withCaution);
+      expect(plan.usedFallbackTemplate).toBe(false);
+      expect(plan.trace.finalRules).toEqual([]);
+      expect(plan.cautionExercises).toBe(3);
+      expect(gen.generate).toHaveBeenCalledTimes(1);
+    });
+
+    it('como veto (sem cautionTags) o mesmo conteúdo é barrado, como sempre foi', async () => {
+      const gen = fakeGenerator([genResult({ structure: realStructure() })]);
+      await planProtocol(gen, validation, {
+        ...cmd,
+        constraints: { ...constraints, injuryTags: ['SHOULDER' as const] },
+      });
+      expect(gen.generate.mock.calls.length).toBeGreaterThan(1);
+    });
+
+    it('sem exercício com a região, o plano não registra cautela', async () => {
+      const gen = fakeGenerator([genResult({ structure: realStructure() })]);
+      const plan = await planProtocol(gen, validation, {
+        ...cmd,
+        constraints: {
+          ...constraints,
+          injuryTags: ['NECK' as const],
+          cautionTags: ['NECK' as const],
+        },
+      });
+      expect(plan.cautionExercises).toBeUndefined();
+    });
+  });
+
   describe('reparo determinístico (2026-09-29)', () => {
     const validation = new ValidationService();
 

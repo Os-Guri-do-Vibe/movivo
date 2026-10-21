@@ -11,6 +11,7 @@ import type { DashboardQueueEventsService } from '../../core/event-bus/dashboard
 import type { QueueManager } from '../jobs/queue-manager.service';
 import type { WorkerFactory } from '../jobs/worker.factory';
 import {
+  CAUTION_PROTOCOL_REVIEW_URGENCY,
   ProtocolGenerationWorker,
   REPAIRED_PROTOCOL_REVIEW_URGENCY,
   reviewUrgencyForPlan,
@@ -486,6 +487,16 @@ describe('ProtocolGenerationWorker.process (US-2.4)', () => {
     expect(reviewUrgencyForPlan({ usedFallbackTemplate: true, repairs: [] }, false)).toBe(
       'MANDATORY',
     );
+  });
+
+  it('exercício com cautela por dor, sem PAR-Q, segue a política (hoje: revisão opcional)', () => {
+    const clean = { usedFallbackTemplate: false, repairs: [] };
+    expect(CAUTION_PROTOCOL_REVIEW_URGENCY).toBe('OPTIONAL');
+    expect(reviewUrgencyForPlan({ ...clean, cautionExercises: 2 }, true)).toBe('MANDATORY');
+    expect(reviewUrgencyForPlan({ ...clean, cautionExercises: 2 }, false)).toBe(
+      CAUTION_PROTOCOL_REVIEW_URGENCY,
+    );
+    expect(reviewUrgencyForPlan({ ...clean, cautionExercises: 0 }, false)).toBe('OPTIONAL');
   });
 
   it.each(['GAPS', 'UNAVAILABLE'] as const)(

@@ -2,9 +2,15 @@ import type { ProtocolStructure } from '@movivo/shared';
 import { z } from 'zod';
 
 import type { CatalogExercise } from './exercise-catalog';
+import { measureProtocol } from './protocol-measurements';
 import type { UserConstraints } from './user-constraints';
 
-export const CONTEXTUAL_QUALITY_VERSION = 'contextual-quality-2026-10-v1';
+export const CONTEXTUAL_QUALITY_VERSION = 'contextual-quality-2026-10-v2';
+/** Versões já gravadas em `constraints.contextualQuality` — continuam legíveis no painel. */
+const KNOWN_QUALITY_VERSIONS = [
+  'contextual-quality-2026-10-v1',
+  CONTEXTUAL_QUALITY_VERSION,
+] as const;
 
 export const QUALITY_CRITERIA = [
   'METHODOLOGY_FIT',
@@ -14,6 +20,7 @@ export const QUALITY_CRITERIA = [
   'FEASIBILITY',
   'PROGRESSION_RECOVERY',
   'CONTENT_COHERENCE',
+  'SESSION_SEQUENCING',
 ] as const;
 
 export const QUALITY_LABELS: Record<(typeof QUALITY_CRITERIA)[number], string> = {
@@ -24,6 +31,7 @@ export const QUALITY_LABELS: Record<(typeof QUALITY_CRITERIA)[number], string> =
   FEASIBILITY: 'Viabilidade no tempo, local e rotina disponíveis',
   PROGRESSION_RECOVERY: 'Progressão e recuperação individualizadas',
   CONTENT_COHERENCE: 'Coerência entre o foco anunciado e os exercícios',
+  SESSION_SEQUENCING: 'Ordem e agrupamento dos exercícios dentro de cada sessão',
 };
 
 const checkSchema = z
@@ -45,6 +53,7 @@ export const qualityReviewSchema = z
     FEASIBILITY: checkSchema,
     PROGRESSION_RECOVERY: checkSchema,
     CONTENT_COHERENCE: checkSchema,
+    SESSION_SEQUENCING: checkSchema,
   })
   .strict();
 
@@ -52,7 +61,7 @@ export type QualityReview = z.infer<typeof qualityReviewSchema>;
 
 /** Persistência/telemetria: só códigos e contagens, nunca o texto livre do avaliador. */
 export const contextualQualitySummarySchema = z.object({
-  version: z.literal(CONTEXTUAL_QUALITY_VERSION),
+  version: z.enum(KNOWN_QUALITY_VERSIONS),
   status: z.enum(['PASS', 'GAPS', 'UNAVAILABLE']),
   checks: z.array(
     z.object({ criterion: z.enum(QUALITY_CRITERIA), status: z.enum(['MET', 'ADAPTED', 'GAP']) }),
@@ -90,6 +99,14 @@ export function qualityFacts(
       ? exercise.pattern === 'CORE'
       : exercise.muscleGroups.some((muscle) => normalized(muscle) === normalized(group));
   return {
+    // Achado 2026-10-21: o juiz só via contagem por PADRÃO e, sem números por grupo, aprovava
+    // "bíceps 3 / tríceps 3 séries na semana" como "equilibrado". Estas são medições (nunca
+    // regras): o critério de bom ou ruim continua sendo a metodologia publicada.
+    measurements: measureProtocol(
+      structure,
+      { getById: (id) => byId.get(id) },
+      { emphasis: constraints.emphasis, sessionMinutes: constraints.sessionMinutes },
+    ),
     patternDistribution: [...new Set(catalog.map((exercise) => exercise.pattern))].map(
       (pattern) => {
         const slots = selected.filter(
@@ -171,7 +188,37 @@ export function assessQualityReview(
   };
 }
 
-export function qualityCorrectionMessage(quality: ContextualQualityAssessment): string {
+/** Forma comparável: sem acento, caixa ou pontuação — o modelo cita a metodologia de memória. */
+const groundingForm = (value: string): string =>
+  value
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+
+/**
+ * O trecho citado pelo juiz está na metodologia publicada? Achado 2026-10-21 (produção e
+ * laboratório): a checagem era `includes` literal, e UMA citação com a maiúscula trocada ("A
+ * progressão…" onde o texto tem "…e a progressão…") invalidava o parecer inteiro — 27 de 28
+ * execuções do laboratório ficaram sem avaliação. Cabe diferença de caixa, acento, espaço e
+ * pontuação, e reticências emendando dois pedaços literais; paráfrase continua reprovando.
+ */
+export function isGroundedInMethodology(excerpt: string, methodology: string): boolean {
+  const haystack = groundingForm(methodology);
+  const needle = groundingForm(excerpt);
+  if (needle.length >= 20 && haystack.includes(needle)) return true;
+  const parts = excerpt
+    .split(/\s*(?:\.\.\.|…|\[\.\.\.\])\s*/)
+    .map(groundingForm)
+    .filter((part) => part.length >= 12);
+  return parts.length > 1 && parts.every((part) => haystack.includes(part));
+}
+
+export function qualityCorrectionMessage(
+  quality: ContextualQualityAssessment,
+  measurementsText?: string,
+): string {
   return [
     'CORREÇÃO DE QUALIDADE CONTEXTUAL: concilie a metodologia publicada com o contexto integral do aluno, sem enfraquecer as restrições.',
     ...quality.summary.checks
@@ -184,6 +231,12 @@ export function qualityCorrectionMessage(quality: ContextualQualityAssessment): 
             : 'Há ênfase solicitada sem exercício correspondente. Confira a cobertura real no catálogo elegível.'
         }`;
       }),
+    ...(measurementsText
+      ? [
+          'MEDIÇÕES DO SEU RASCUNHO (fatos calculados, não regras — a regra é a metodologia publicada):',
+          measurementsText,
+        ]
+      : []),
     'Corrija o conteúdo real, não apenas títulos e justificativas. Preserve escolhas válidas; não acrescente exercício contraindicado nem invente opção fora da base. Não abandone os demais grupos para cumprir uma ênfase.',
     'Se não houver solução elegível, preserve o melhor rascunho possível para decisão do profissional CREF. Retorne somente o protocolo completo no schema original.',
   ].join('\n');

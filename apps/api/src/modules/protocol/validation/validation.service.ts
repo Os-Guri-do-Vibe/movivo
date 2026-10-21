@@ -36,7 +36,7 @@ import {
   weekdayPlanIssues,
   weeklySessionTarget,
 } from '../training-days';
-import type { UserConstraints } from '../user-constraints';
+import { hardInjuryTags, type UserConstraints } from '../user-constraints';
 import {
   containsExternalReference,
   containsPromptLeak,
@@ -104,6 +104,12 @@ export interface ValidateProtocolInput {
    * Ausente → assume `INICIANTE` (o mais restritivo), nunca o mais permissivo: fail-safe.
    */
   constraints: Pick<UserConstraints, 'goal' | 'injuryTags'> & {
+    /**
+     * Subconjunto de `injuryTags` que é dor SEM veto (`UserConstraints.cautionTags`): não
+     * contraindica exercício aqui — o aviso ao profissional sai por `cautionNotices`. Ausente
+     * (protocolo anterior à política de cautela) = todas as tags vetam, como sempre foi.
+     */
+    cautionTags?: ContraindicationTag[];
     level?: ExerciseLevel;
     /** Achado 2026-08-18: ausente → não valida sessão-por-dia (protocolo antigo/edição
      *  sem essa constraint persistida). Presente → BLOCK se não bater 1:1 com as sessões. */
@@ -278,7 +284,10 @@ export class ValidationService {
       // goal/preferredDays/parqTags. `input.parqFlags` já cobre a parte de segurança
       // do PAR-Q nesse caso; sem este fallback, assinar um protocolo de fallback
       // quebrava com "injuryTags is not iterable" (achado 2026-08-26).
-      ...(input.constraints.injuryTags ?? []),
+      ...hardInjuryTags({
+        injuryTags: input.constraints.injuryTags ?? [],
+        cautionTags: input.constraints.cautionTags,
+      }),
       ...(input.parqFlags ?? []),
     ]);
 
@@ -460,6 +469,32 @@ export class ValidationService {
    * intermediário/avançado. Tudo BLOCK — divisão/intensidade acima
    * do nível é exatamente o erro que machuca aluno novo.
    */
+  /**
+   * RT item 2: isolado é COMPLEMENTO, nunca a base do programa.
+   *
+   * Achado 2026-10-21 (auditoria das 24 gerações de produção): a regra era cobrada SESSÃO a
+   * sessão (teto de 70% de isolados), e é o que mais empurrava o modelo a trapacear — dia de
+   * braços, ombros ou panturrilha é isolado por natureza, e para passar na regra o modelo
+   * enfiava agachamento em dia de peito e supino fechado em dia de braços (o RT desfez isso à
+   * mão nos protocolos bf1f2787 e 5dac7fcb). Nos 93 dias que o RT assinou, só 3 passam de 70%
+   * (todos montados por ele, "Braços" com 5 de 5), e a semana inteira nunca passa de 64%. O
+   * princípio vale para o programa: o teto agora é sobre a SEMANA. Quem avalia se um dia
+   * isolado demais cumpre a metodologia é o juiz contextual, com as medições.
+   */
+  private checkIsolationShare(structure: ProtocolStructure, out: ValidationViolation[]): void {
+    const all = structure.sessions.flatMap((session) => session.exercises);
+    const isolation = all.filter(
+      (ex) => this.catalog.getById(ex.exerciseId)?.pattern === 'ISOLATION',
+    ).length;
+    if (isolation > all.length * ISOLATION_MAJORITY_THRESHOLD) {
+      out.push({
+        rule: 'ISOLATION_AS_BASE',
+        detail: `semana: ${isolation} isolados de ${all.length} exercícios — isolado é complemento, não base`,
+        action: 'BLOCK',
+      });
+    }
+  }
+
   private checkMethodology(
     structure: ProtocolStructure,
     level: ExerciseLevel,
@@ -553,21 +588,11 @@ export class ValidationService {
       }
     }
 
+    this.checkIsolationShare(structure, out);
+
     let sessionsWithTechnique = 0;
     for (const session of structure.sessions) {
-      // RT item 2: isolado é COMPLEMENTO, nunca a base da sessão. Sessão só de isolados passava.
-      // Achado 2026-09-03: o corte é por MAIORIA CLARA (ISOLATION_MAJORITY_THRESHOLD), não
-      // qualquer maioria — ver o comentário da constante em validation-rules.ts.
-      const isolation = session.exercises.filter(
-        (ex) => this.catalog.getById(ex.exerciseId)?.pattern === 'ISOLATION',
-      ).length;
-      if (isolation > session.exercises.length * ISOLATION_MAJORITY_THRESHOLD) {
-        out.push({
-          rule: 'ISOLATION_AS_BASE',
-          detail: `${session.dayLabel}: ${isolation} isolados de ${session.exercises.length} exercícios — isolado é complemento, não base`,
-          action: 'BLOCK',
-        });
-      }
+      // (ISOLATION_AS_BASE deixou de ser cobrada sessão a sessão — ver `checkIsolationShare`.)
 
       // Achado 2026-09-03 (reproduzido ao vivo): as duas regras de técnica abaixo partem
       // do modelo mental de treino tradicional em academia — técnica avançada (drop-set,

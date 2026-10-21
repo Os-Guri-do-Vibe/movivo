@@ -437,6 +437,92 @@ describe('ValidationService — metodologia v2 (divisão e técnica avançada)',
     const v = service.validate(input({ structure: isolationSession(1, 1) }));
     expect(v.violations.map((x) => x.rule)).not.toContain('ISOLATION_AS_BASE');
   });
+
+  // Achado 2026-10-21: a regra por sessão empurrava o modelo a pôr composto de outro grupo em
+  // dia de braços/ombros. O teto é da semana — dia isolado por natureza passa se a semana fechar.
+  it('PASS dia de braços 100% isolado quando a semana fecha (isolado é complemento no programa)', () => {
+    const arms = isolationSession(2, 0).sessions[0];
+    const heavy = isolationSession(0, 4).sessions[0];
+    if (!arms || !heavy) throw new Error('fixture inválida');
+    const v = service.validate(
+      input({
+        structure: validStructure({
+          weeklyFrequency: 2,
+          sessions: [heavy, { ...arms, dayLabel: 'Braços' }],
+        }),
+      }),
+    );
+    expect(v.violations.map((x) => x.rule)).not.toContain('ISOLATION_AS_BASE');
+  });
+
+  it('BLOCK semana em que os isolados passam do teto, mesmo com uma sessão composta', () => {
+    const iso = isolationSession(3, 0).sessions[0];
+    const comp = isolationSession(0, 1).sessions[0];
+    if (!iso || !comp) throw new Error('fixture inválida');
+    const v = service.validate(
+      input({ structure: validStructure({ weeklyFrequency: 2, sessions: [iso, comp] }) }),
+    );
+    const rule = v.violations.find((x) => x.rule === 'ISOLATION_AS_BASE');
+    expect(rule?.detail).toContain('semana: 3 isolados de 4 exercícios');
+    expect(v.action).toBe('BLOCK_FALLBACK');
+  });
+});
+
+describe('ValidationService — "dose"/"tome" só bloqueiam como medicação (2026-10-21)', () => {
+  const rulesFor = (generalNotes: string): string[] =>
+    service
+      .validate(input({ structure: validStructure({ generalNotes }) }))
+      .violations.map((x) => x.rule);
+
+  it('vocabulário de treino passa: "segunda dose de costas", "dose mínima eficaz"', () => {
+    expect(rulesFor('Segunda dose de costas na semana.')).not.toContain('MED_PRESCRIPTION');
+    expect(rulesFor('Mantenha a dose mínima eficaz de esforço.')).not.toContain('MED_PRESCRIPTION');
+    expect(rulesFor('Tome cuidado com a execução.')).not.toContain('MED_PRESCRIPTION');
+  });
+
+  it.each([
+    'Tome 2 comprimidos antes do treino.',
+    'Tome o suplemento 30 min antes.',
+    'Use a dose de creatina de 5 g.',
+    'Aumente a dose do remédio.',
+    'Ibuprofeno antes de treinar.',
+  ])('medicação continua bloqueada: %s', (text) => {
+    expect(rulesFor(text)).toContain('MED_PRESCRIPTION');
+  });
+});
+
+describe('ValidationService — dor sem veto (cautionTags)', () => {
+  // `agachamento_barra` carrega KNEE no catálogo (ver testes de contraindicação acima).
+  const squat = (): ProtocolStructure =>
+    withExercise({ exerciseId: 'agachamento_barra', name: 'Agachamento' });
+
+  it('tag de cautela NÃO contraindica o exercício na geração', () => {
+    const v = service.validate(
+      input({
+        structure: squat(),
+        constraints: { goal: 'GAIN_MUSCLE', injuryTags: ['KNEE'], cautionTags: ['KNEE'] },
+      }),
+    );
+    expect(v.violations.map((x) => x.rule)).not.toContain('EXERCISE_CONTRAINDICATED');
+  });
+
+  it('sem cautionTags (protocolo anterior à política) a tag continua vetando', () => {
+    const v = service.validate(
+      input({ structure: squat(), constraints: { goal: 'GAIN_MUSCLE', injuryTags: ['KNEE'] } }),
+    );
+    expect(v.violations.map((x) => x.rule)).toContain('EXERCISE_CONTRAINDICATED');
+  });
+
+  it('a mesma tag vinda do PAR-Q veta, mesmo marcada como cautela na dor', () => {
+    const v = service.validate(
+      input({
+        structure: squat(),
+        constraints: { goal: 'GAIN_MUSCLE', injuryTags: ['KNEE'], cautionTags: ['KNEE'] },
+        parqFlags: ['KNEE'],
+      }),
+    );
+    expect(v.violations.map((x) => x.rule)).toContain('EXERCISE_CONTRAINDICATED');
+  });
 });
 
 // Achado 2026-08-18 (decisão do fundador): 1 sessão por dia REAL declarado na anamnese —

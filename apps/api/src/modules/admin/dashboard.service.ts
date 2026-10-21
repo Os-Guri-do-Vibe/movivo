@@ -60,6 +60,7 @@ import { buildProtocolPdf } from '../protocol/protocol-pdf.service';
 import { signatureHash, supersedePreviousActiveProtocols } from '../protocol/protocol.repository';
 import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
 import { qualityNotices } from '../protocol/contextual-quality';
+import { cautionNotices } from '../protocol/protocol-caution';
 import { CATALOG_SEARCH_MAX_LIMIT, searchCatalog } from '../protocol/exercise-catalog-search';
 import { findSafeCandidates } from '../protocol/exercise-substitution';
 import {
@@ -2103,9 +2104,16 @@ export class DashboardService {
       availability,
       blocking: this.conflictPayload(verdict.violations.filter((v) => v.action === 'BLOCK')),
       conflicts: [],
-      qualityNotices: qualityNotices(
-        (row.constraints as { contextualQuality?: unknown } | null)?.contextualQuality,
-      ),
+      qualityNotices: [
+        ...qualityNotices(
+          (row.constraints as { contextualQuality?: unknown } | null)?.contextualQuality,
+        ),
+        ...cautionNotices(
+          parsed.data,
+          (row.constraints as { cautionTags?: UserConstraints['injuryTags'] } | null)?.cautionTags,
+          this.exerciseCatalog,
+        ),
+      ],
     };
   }
 
