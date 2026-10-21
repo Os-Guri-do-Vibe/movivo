@@ -431,6 +431,21 @@ describe('buildCorrectionMessage — cada regra traz localização e o que cumpr
     expect(msg).toContain('sessão com isolados em excesso');
   });
 
+  it('ISOLATION_AS_BASE sem opção não-isolada na base: pede substituição sem inventar id', () => {
+    const msg = direct(
+      structure(
+        [ex('rosca_direta_barra'), ex('crucifixo_reto_halter')],
+        [ex('supino_reto_halter')],
+      ),
+      ['ISOLATION_AS_BASE'],
+      {},
+      [],
+    );
+    const line = lineOf(msg, 'ISOLATION_AS_BASE');
+    expect(line).toContain('substitua pelo menos 1 isolado(s)');
+    expect(line).not.toContain('Opções válidas:');
+  });
+
   it('não emite instrução de ADAPTACAO por teto legado', () => {
     const s = structure([ex('supino_reto_halter')], [ex('supino_reto_halter')]);
     s.phase = 'HIPERTROFIA';
