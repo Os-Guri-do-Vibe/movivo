@@ -30,7 +30,7 @@
  *   cd apps/api
  *   pnpm run build
  *   node --enable-source-maps dist/scripts/reprocess-protocol-fallback.js <phoneNumberE164> \
- *     [--incluir-protocolos-da-ia] [--sobrescrever-edicao-profissional]
+ *     [--incluir-protocolos-da-ia] [--sobrescrever-edicao-profissional] [--manter-revisao-atual]
  *
  * Script descartável — investigação/correção pontual, não é feature permanente.
  */
@@ -99,10 +99,11 @@ async function main(): Promise<void> {
   const phone = args.find((arg) => !arg.startsWith('--'));
   const includeAiProtocols = args.includes('--incluir-protocolos-da-ia');
   const overrideProfessionalEdit = args.includes('--sobrescrever-edicao-profissional');
+  const keepCurrentReview = args.includes('--manter-revisao-atual');
   if (!phone) {
     console.error(
       'Uso: node dist/scripts/reprocess-protocol-fallback.js <phoneNumberE164> ' +
-        '[--incluir-protocolos-da-ia] [--sobrescrever-edicao-profissional]',
+        '[--incluir-protocolos-da-ia] [--sobrescrever-edicao-profissional] [--manter-revisao-atual]',
     );
     process.exitCode = 1;
     return;
@@ -222,9 +223,13 @@ async function main(): Promise<void> {
     const totalWeeks = plan.content.phaseDurationWeeks;
     const startDate = new Date();
     const endDate = new Date(startDate.getTime() + totalWeeks * MS_PER_WEEK);
-    // Mesma regra da geração normal (PAR-Q ou fallback → obrigatória; reparo → conforme
-    // `REPAIRED_PROTOCOL_REVIEW_URGENCY`): só o que é OPTIONAL entra na auto-liberação.
-    const reviewUrgency = reviewUrgencyForPlan(plan, constraints.requiresProfessionalReview);
+    // Por padrão segue a regra da geração normal (PAR-Q ou fallback → obrigatória; reparo →
+    // conforme `REPAIRED_PROTOCOL_REVIEW_URGENCY`). A flag operacional preserva a revisão que
+    // já estava em curso: troca somente o conteúdo, não reinicia o relógio nem cria liberação.
+    const reviewUrgency = keepCurrentReview
+      ? protocolRow.reviewUrgency
+      : reviewUrgencyForPlan(plan, constraints.requiresProfessionalReview);
+    const reviewCreatedAt = keepCurrentReview ? protocolRow.createdAt : startDate;
     const mesocycleName = `Mesociclo ${protocolRow.mesocycleNumber}: ${
       TRAINING_PHASE_LABELS[plan.content.phase] ?? plan.content.phase
     }`;
@@ -248,10 +253,9 @@ async function main(): Promise<void> {
           methodologyVersionId: plan.methodologyVersionId,
           methodologySha256: plan.methodologySha256,
           reviewUrgency,
-          // O prazo de cortesia que o painel mostra e o job usam `createdAt + 1h`. O conteúdo
-          // acabou de ser (re)gerado e nunca foi revisado por ninguém: a janela recomeça agora,
-          // senão o painel mostraria "Disparando…" para um prazo que venceu horas atrás.
-          createdAt: startDate,
+          // `--manter-revisao-atual` conserva o marco que o painel já exibe. Sem a flag, o
+          // conteúdo acabou de ser (re)gerado e a janela começa agora.
+          createdAt: reviewCreatedAt,
           status: 'PENDING_SIGNATURE',
           approvalStatus: 'PENDING_REVIEW',
           humanReviewRequired: true,
@@ -261,7 +265,7 @@ async function main(): Promise<void> {
 
     // O worker de geração agenda este job em `persist()`; este script não passa por lá, e sem
     // ele o painel contaria 1h e nada dispararia (achado 2026-10-11). `MANDATORY` nunca agenda.
-    if (reviewUrgency === 'OPTIONAL') {
+    if (!keepCurrentReview && reviewUrgency === 'OPTIONAL') {
       await queues.enqueue(
         QUEUE.protocolAutoRelease,
         'auto-release',
@@ -277,9 +281,11 @@ async function main(): Promise<void> {
     console.warn(
       `\nProtocolo ${protocolRow.id} atualizado com conteúdo individualizado real ` +
         `(${plan.generatedBy}/${plan.modelVersion}). ` +
-        (reviewUrgency === 'OPTIONAL'
-          ? 'Segue PENDING_REVIEW e dispara sozinho para o WhatsApp em 24h se ninguém agir no painel.'
-          : 'Segue PENDING_REVIEW/OBRIGATÓRIA — precisa de assinatura CREF no painel (nunca sai sozinha).'),
+        (keepCurrentReview
+          ? `Mantém a revisão existente (${reviewUrgency}) e o prazo iniciado em ${reviewCreatedAt.toISOString()}; nenhuma auto-liberação foi agendada.`
+          : reviewUrgency === 'OPTIONAL'
+            ? 'Segue PENDING_REVIEW e dispara sozinho para o WhatsApp em 24h se ninguém agir no painel.'
+            : 'Segue PENDING_REVIEW/OBRIGATÓRIA — precisa de assinatura CREF no painel (nunca sai sozinha).'),
     );
   } finally {
     await app.close();
