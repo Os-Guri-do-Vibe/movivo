@@ -190,6 +190,31 @@ function nearestMuscleGroupOptions(
 }
 
 /**
+ * Opções não-isoladas para corrigir uma sessão inteira. A união dos grupos dos isolados evita
+ * trocar, por exemplo, acessórios de peito por um movimento aleatório de perna quando a base
+ * segura do aluno ainda oferece um composto para peito. Se não houver grupo em comum, mantém o
+ * mesmo fallback seguro de `nearestMuscleGroupOptions`: qualquer não-isolado da base filtrada.
+ */
+function sessionNonIsolationOptions(
+  exercises: readonly ProtocolExercise[],
+  catalog: CatalogLookup,
+  referenceBaseIds: readonly string[],
+): string[] {
+  const groups = new Set(
+    exercises.flatMap((exercise) => catalog.getById(exercise.exerciseId)?.muscleGroups ?? []),
+  );
+  const candidates = referenceBaseIds.filter((id) => catalog.getById(id)?.pattern !== 'ISOLATION');
+  const sharing = candidates.filter(
+    (id) => catalog.getById(id)?.muscleGroups.some((group) => groups.has(group)) === true,
+  );
+  return (sharing.length > 0 ? sharing : candidates).slice(0, MAX_REPLACEMENT_OPTIONS);
+}
+
+function isolationReplacementsNeeded(isolation: number, total: number): number {
+  return Math.max(0, isolation - Math.floor(total * ISOLATION_MAJORITY_THRESHOLD));
+}
+
+/**
  * Monta a mensagem `user` de correção. `referenceBaseIds` DEVE ser a base filtrada deste
  * aluno (`ProtocolGeneratorService.referenceBase`) — é daí, e só daí, que saem as opções.
  */
@@ -268,12 +293,20 @@ export function buildCorrectionMessage(
       case 'ISOLATION_AS_BASE': {
         const where = structure.sessions
           .map((session, i) => {
-            const isolation = session.exercises.filter(
+            const isolated = session.exercises.filter(
               (ex) => catalog.getById(ex.exerciseId)?.pattern === 'ISOLATION',
-            ).length;
-            return isolation > session.exercises.length * ISOLATION_MAJORITY_THRESHOLD
-              ? `${sessionRef(structure, i)} (${isolation} de ${session.exercises.length} são ISOLATION)`
-              : null;
+            );
+            if (isolated.length <= session.exercises.length * ISOLATION_MAJORITY_THRESHOLD) {
+              return null;
+            }
+            const replacements = isolationReplacementsNeeded(
+              isolated.length,
+              session.exercises.length,
+            );
+            const options = sessionNonIsolationOptions(isolated, catalog, referenceBaseIds);
+            return `${sessionRef(structure, i)} (${isolated.length} de ${session.exercises.length} são ISOLATION): substitua pelo menos ${replacements} isolado(s) — não apenas acrescente exercícios — por multiarticular, core ou cardio da base. Isolados a substituir: ${isolated.map((exercise) => exercise.exerciseId).join(', ')}.${
+              options.length ? ` Opções válidas: ${options.join(', ')}.` : ''
+            }`;
           })
           .filter(Boolean);
         items.push(`[${rule}] ${where.join('; ') || 'sessão com isolados em excesso'}. ${hint}`);

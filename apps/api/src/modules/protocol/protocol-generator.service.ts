@@ -266,7 +266,7 @@ export function verifiedRulesBlock(constraints: Pick<UserConstraints, 'level'>):
   lines.push(
     `- Isolados (padrão ISOLATION na base) são complemento: em cada sessão, no máximo ${Math.round(
       ISOLATION_MAJORITY_THRESHOLD * 100,
-    )}% dos exercícios podem ser ISOLATION — o restante são multiarticulares, core ou cardio.`,
+    )}% dos exercícios podem ser ISOLATION — o restante são multiarticulares, core ou cardio. Antes de devolver o JSON, conte os ISOLATION de cada sessão; se passar do teto, SUBSTITUA isolados por opções não-isoladas da base, não apenas acrescente exercícios.`,
     '- Todo "exerciseId" deve ser copiado EXATAMENTE de um "id" da BASE DE REFERÊNCIA deste prompt. Se o nome que você pensou não existe como id, use o id da base que corresponde a ele.',
     '- Textos livres ("generalNotes", "notes", "focus", "dayLabel") falam só de execução do treino: nunca cite nome de doença, lesão ou condição de saúde (nem a que o aluno relatou), nunca use as palavras "diagnóstico", "tratamento", "cura", "garantido", "prescrição", "remédio", "dose", nem "tome" (use "tenha cuidado"), e nunca prometa prazo de resposta.',
   );
