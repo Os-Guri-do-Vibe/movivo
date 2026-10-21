@@ -115,3 +115,95 @@ export function findSafeCandidates(
   }
   return candidates;
 }
+
+/**
+ * Tags que NUNCA são relaxadas numa troca com cautela: o risco que elas representam não é de
+ * "região sensível", é clínico (cardiovascular), de queda ou de gestação. Decisão do RT
+ * (Léo, 2026-10-21): só a restrição articular/muscular admite sugestão com cautela; o que for
+ * cardiovascular ou respiratório continua exigindo o filtro máximo. Queda e gestação ficam no
+ * lado conservador até o RT decidir o contrário.
+ */
+export const STRICT_CONTRAINDICATION_TAGS: ReadonlySet<ContraindicationTag> = new Set([
+  'CARDIAC',
+  'BALANCE_FALL_RISK',
+  'PREGNANCY',
+]);
+
+/**
+ * O candidato tem risco IGUAL OU MENOR que o exercício que o aluno já faz, para as restrições
+ * dele? "Já faz" importa: o alvo foi prescrito/aprovado pelo profissional CREF, então o risco
+ * dele é o teto aceito. Para cada restrição do aluno:
+ *  - tag estrita (cardíaca, queda, gestação) no candidato => reprova, sempre;
+ *  - tag articular/muscular no candidato => só passa se o ALVO também a carrega.
+ * Um candidato com uma região de risco que o alvo NÃO tem (ex.: ombro, quando o alvo só pesa no
+ * joelho) é risco maior e fica de fora.
+ */
+export function isEquivalentOrLowerRisk(
+  target: CatalogExercise,
+  candidate: CatalogExercise,
+  restrictedTags: readonly ContraindicationTag[],
+): boolean {
+  for (const tag of candidate.contraindicatedFor) {
+    if (!restrictedTags.includes(tag)) continue;
+    if (STRICT_CONTRAINDICATION_TAGS.has(tag)) return false;
+    if (!target.contraindicatedFor.includes(tag)) return false;
+  }
+  return true;
+}
+
+/** As restrições do aluno que o candidato carrega (para explicar a cautela com palavras simples). */
+export function cautionTagsOf(
+  candidate: CatalogExercise,
+  restrictedTags: readonly ContraindicationTag[],
+): ContraindicationTag[] {
+  return candidate.contraindicatedFor.filter((tag) => restrictedTags.includes(tag));
+}
+
+/**
+ * Candidatos "com cautela": no mesmo padrão de movimento, do nível/local do aluno, de risco igual
+ * ou menor que o exercício atual (`isEquivalentOrLowerRisk`) e que `findSafeCandidates` NÃO
+ * devolveu (esses já são seguros sem ressalva). Decisão do fundador e do RT (2026-10-21): a
+ * MOVIVO existe para ser aliada no treino, não uma barreira; quem tem uma restrição articular
+ * recebe opções, com orientação de cuidado, em vez de uma recusa. Mesma ordem de prioridade da
+ * curadoria segura (lista `substitutes` do exercício primeiro).
+ *
+ * `parqTags` são as contraindicações derivadas do PAR-Q: entram na checagem de risco além das
+ * lesões (`injuryTags`).
+ */
+export function findCautionCandidates(
+  target: CatalogExercise,
+  c: SubstitutionConstraints,
+  catalog: readonly CatalogExercise[],
+  parqTags: readonly ContraindicationTag[] = [],
+): CatalogExercise[] {
+  const restricted = [...new Set([...c.injuryTags, ...parqTags])];
+  const safeIds = new Set(findSafeCandidates(target, c, catalog).map((e) => e.id));
+  const byId = (id: string) => catalog.find((e) => e.id === id);
+  const curated = target.substitutes.map(byId).filter((e): e is CatalogExercise => Boolean(e));
+  const samePattern = catalog.filter(
+    (e) => e.id !== target.id && isPlausibleSubstitution(target, e),
+  );
+  const seen = new Set<string>();
+  const candidates: CatalogExercise[] = [];
+  for (const candidate of [...curated, ...samePattern]) {
+    if (candidate.id === target.id || seen.has(candidate.id) || safeIds.has(candidate.id)) continue;
+    seen.add(candidate.id);
+    if (!offeredToLevel(candidate, c.level) || !servesLocation(candidate, c.location)) continue;
+    if (!isEquivalentOrLowerRisk(target, candidate, restricted)) continue;
+    candidates.push(candidate);
+  }
+  // Com cautela, a ORDEM faz parte do cuidado: a lista curada do catálogo vem primeiro entre
+  // iguais, mas o que usa o mesmo tipo de equipamento do exercício atual (troca máquina por
+  // máquina) e carrega menos contraindicações no total vai antes de um agachamento livre.
+  const sharesEquipment = (e: CatalogExercise) =>
+    e.equipment.some((item) => target.equipment.includes(item)) ? 0 : 1;
+  return candidates
+    .map((candidate, order) => ({ candidate, order }))
+    .sort(
+      (a, b) =>
+        sharesEquipment(a.candidate) - sharesEquipment(b.candidate) ||
+        a.candidate.contraindicatedFor.length - b.candidate.contraindicatedFor.length ||
+        a.order - b.order,
+    )
+    .map(({ candidate }) => candidate);
+}

@@ -799,6 +799,93 @@ describe('ValidationService.validateResponse — texto livre da conversa (US-3.5
   });
 });
 
+describe('ValidationService — troca de risco igual ou menor (cautionSwaps)', () => {
+  const KNEE = { goal: 'GAIN_MUSCLE' as const, injuryTags: ['KNEE' as const] };
+  const baseline = withExercise({ exerciseId: 'flexora_em_pe_maquina', name: 'Flexora em Pé' });
+  const candidate = withExercise({
+    exerciseId: 'cadeira_flexora_maquina',
+    name: 'Cadeira Flexora',
+  });
+  const options = (swaps: ReadonlyArray<{ from: string; to: string }>) => ({
+    baseline,
+    cautionSwaps: swaps,
+  });
+
+  it('sem cautionSwaps, o candidato com a mesma restrição do atual continua barrado', () => {
+    const v = service.validate(input({ structure: candidate, constraints: KNEE }), { baseline });
+    expect(v.violations.map((x) => x.rule)).toContain('EXERCISE_CONTRAINDICATED');
+  });
+
+  it('com a troca declarada, a restrição que o exercício atual já tinha não bloqueia', () => {
+    const v = service.validate(
+      input({ structure: candidate, constraints: KNEE }),
+      options([{ from: 'flexora_em_pe_maquina', to: 'cadeira_flexora_maquina' }]),
+    );
+    expect(v.violations.map((x) => x.rule)).not.toContain('EXERCISE_CONTRAINDICATED');
+  });
+
+  it('troca declarada para um exercício de risco maior segue barrada', () => {
+    // O exercício que SAI (flexao) não carrega KNEE; o que entra, sim → risco maior.
+    const v = service.validate(
+      input({ structure: candidate, constraints: KNEE }),
+      options([{ from: 'flexao', to: 'cadeira_flexora_maquina' }]),
+    );
+    expect(v.violations.map((x) => x.rule)).toContain('EXERCISE_CONTRAINDICATED');
+  });
+
+  it('troca declarada com id desconhecido não relaxa nada', () => {
+    const v = service.validate(
+      input({ structure: candidate, constraints: KNEE }),
+      options([{ from: 'nao_existe', to: 'cadeira_flexora_maquina' }]),
+    );
+    expect(v.violations.map((x) => x.rule)).toContain('EXERCISE_CONTRAINDICATED');
+  });
+
+  it('a restrição pode vir só do PAR-Q (constraints sem injuryTags) e a troca ainda vale', () => {
+    const v = service.validate(
+      input({
+        structure: candidate,
+        constraints: { goal: 'GAIN_MUSCLE' } as ValidateProtocolInput['constraints'],
+        parqFlags: ['KNEE'],
+      }),
+      options([{ from: 'flexora_em_pe_maquina', to: 'cadeira_flexora_maquina' }]),
+    );
+    expect(v.violations.map((x) => x.rule)).not.toContain('EXERCISE_CONTRAINDICATED');
+  });
+
+  it('sem PAR-Q nem injuryTags a troca declarada não muda o veredito', () => {
+    const v = service.validate(
+      input({
+        structure: candidate,
+        constraints: { goal: 'GAIN_MUSCLE' } as ValidateProtocolInput['constraints'],
+      }),
+      options([{ from: 'flexora_em_pe_maquina', to: 'cadeira_flexora_maquina' }]),
+    );
+    expect(v.action).toBe('PASS');
+  });
+
+  it('o relaxamento vale só para o exercício que entrou na troca', () => {
+    const s = candidate;
+    const session = s.sessions[0];
+    if (!session) throw new Error('fixture inválida');
+    session.exercises.push({
+      exerciseId: 'leg_press_45_maquina',
+      name: 'Leg Press 45º (Máquina)',
+      sets: 3,
+      reps: { min: 8, max: 12 },
+      loadStrategy: 'DOUBLE_PROGRESSION',
+      restSeconds: 90,
+    });
+    const v = service.validate(
+      input({ structure: s, constraints: KNEE }),
+      options([{ from: 'flexora_em_pe_maquina', to: 'cadeira_flexora_maquina' }]),
+    );
+    const details = v.violations.map((x) => x.detail);
+    expect(details.some((d) => d.startsWith('leg_press_45_maquina'))).toBe(true);
+    expect(details.some((d) => d.startsWith('cadeira_flexora_maquina'))).toBe(false);
+  });
+});
+
 describe('aggregate — derivação do veredito final', () => {
   // Nenhuma regra do catálogo atual produz FLAG isolado (a última, DIAGNOSIS, virou BLOCK),
   // mas FLAG_HUMAN_REVIEW segue um veredito real consumido fora deste serviço
