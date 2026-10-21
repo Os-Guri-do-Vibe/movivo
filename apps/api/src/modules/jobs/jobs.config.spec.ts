@@ -43,6 +43,8 @@ describe('jobs.config', () => {
         'workout-daily',
         // Comentário do Coach sobre o treino registrado no diário (achado 2026-09-12).
         'workout-feedback',
+        // Versão nova do protocolo: atualiza o treino de hoje e oferece o link novo (2026-10-20).
+        'workout-protocol-changed',
         // Comentário do Coach sobre o check-in semanal (achado 2026-09-13).
         'checkin-weekly-feedback',
       ].sort(),
