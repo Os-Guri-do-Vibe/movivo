@@ -265,3 +265,68 @@ describe('WorkoutFeedbackService (achado 2026-09-12)', () => {
     await expect(service.comment(baseParams)).resolves.toBeUndefined();
   });
 });
+
+describe('comparação com a última vez do mesmo treino', () => {
+  const previous = {
+    quando: 'terça-feira, 13/10 (há 9 dias)',
+    esforcoPercebido: 8,
+    exercicios: [
+      {
+        exercicio: 'Agachamento goblet',
+        series: [
+          {
+            serie: 1,
+            reps: 10,
+            carga: 10,
+            unidade: 'KG',
+            duracaoSegundos: null,
+            concluida: true,
+            pulada: false,
+          },
+        ],
+      },
+    ],
+  };
+
+  it('manda ao modelo a vez anterior do MESMO treino, com data, dia da semana e cargas', async () => {
+    const { service, complete } = makeService({
+      complete: async () => llmResult('Você subiu a carga em relação à terça passada.'),
+    });
+    await service.comment({ ...baseParams, ultimaExecucaoDoMesmoTreino: previous });
+
+    const request = complete.mock.calls[0]?.[0] as LLMRequest;
+    const content = request.messages[0]?.content ?? '';
+    expect(content).toContain(
+      'ÚLTIMA VEZ que o aluno fez este mesmo treino (terça-feira, 13/10 (há 9 dias))',
+    );
+    expect(content).toContain('série 1: 10kg, 10 reps');
+    expect(request.system).toContain('ÚLTIMA VEZ que o aluno fez este mesmo treino');
+    expect(request.system).toContain('Não compare com o treino do dia anterior');
+  });
+
+  it('sem registro anterior, o prompt não traz o bloco (e proíbe inventar comparação)', async () => {
+    const { service, complete } = makeService({ complete: async () => llmResult('Bom treino.') });
+    await service.comment(baseParams);
+
+    const request = complete.mock.calls[0]?.[0] as LLMRequest;
+    expect(request.messages[0]?.content).not.toContain('ÚLTIMA VEZ');
+    expect(request.system).toContain('Sem esse registro, não invente comparação');
+  });
+});
+
+describe('treino registrado depois', () => {
+  it('o prompt fala do dia real do treino em vez de "hoje"', async () => {
+    const { service, complete } = makeService({ complete: async () => llmResult('Boa evolução.') });
+    await service.comment({ ...baseParams, treinoDe: 'ontem' });
+    const request = complete.mock.calls[0]?.[0] as LLMRequest;
+    expect(request.system).toContain('registrar o treino de ontem no diário');
+    expect(request.messages[0]?.content).toContain('Treino planejado para ontem');
+  });
+
+  it('sem treinoDe, segue "hoje"', async () => {
+    const { service, complete } = makeService({ complete: async () => llmResult('Bom treino.') });
+    await service.comment(baseParams);
+    const request = complete.mock.calls[0]?.[0] as LLMRequest;
+    expect(request.system).toContain('registrar o treino de hoje no diário');
+  });
+});
