@@ -176,7 +176,7 @@ describe('DashboardShell', () => {
     it('Conversas ocupa exatamente a janela: sem rolagem da página, só a do chat', () => {
       route.pathname = '/dashboard/conversas';
       const { container } = shell();
-      expect(container.firstElementChild).toHaveClass('h-dvh', 'overflow-hidden');
+      expect(container.firstElementChild).toHaveClass('relative', 'h-dvh', 'overflow-hidden');
       expect(container.firstElementChild).not.toHaveClass('min-h-dvh');
       expect(document.getElementById('conteudo-dashboard')).toHaveClass('min-h-0', 'flex-col');
     });

@@ -175,6 +175,14 @@ test.describe('aba Conversas — o "WhatsApp dentro da plataforma"', () => {
       await page.setViewportSize(viewport);
       await login(page);
       await page.goto('/dashboard/conversas');
+      // A lista de conversas (40 alunos) rola só por dentro e não estica a página.
+      const conversations = page.getByRole('list', { name: 'Conversas' });
+      await expect(conversations).toBeVisible();
+      expect(await conversations.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(
+        viewport.height,
+      );
+
       await page.getByRole('button', { name: /Ana Souza/ }).click();
       const log = page.getByRole('log', { name: 'Mensagens' });
       await expect(log.getByText('Mensagem de teste 1', { exact: true })).toBeAttached();
