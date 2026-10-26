@@ -120,6 +120,9 @@ export class ConversationRepository {
         userId: input.userId,
         direction: input.direction,
         origin: input.direction === 'INBOUND' ? 'STUDENT' : 'COACH',
+        // O turno agregado do aluno é contexto da IA: o painel mostra cada mensagem dele pela
+        // linha-espelho do webhook (sem isso a fala apareceria duas vezes).
+        hiddenInPanel: input.direction === 'INBOUND',
         content,
         validationPassed: input.validationPassed ?? null,
         modelUsed: input.modelUsed ?? null,
@@ -127,6 +130,8 @@ export class ConversationRepository {
         ragSources: input.ragSources?.length ? input.ragSources : null,
       });
     });
-    this.conversationEvents.emitMessage(input.userId, input.direction);
+    // O aviso do turno do aluno já saiu quando o espelho gravou a mensagem.
+    if (input.direction === 'OUTBOUND')
+      this.conversationEvents.emitMessage(input.userId, 'OUTBOUND');
   }
 }

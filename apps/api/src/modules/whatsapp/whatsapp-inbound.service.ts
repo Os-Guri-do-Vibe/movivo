@@ -51,6 +51,7 @@ import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
+import { WhatsappMirrorService } from './whatsapp-mirror.service';
 import { EVOLUTION_TRANSPORT, type EvolutionTransport } from './evolution-transport';
 import { parseFeedback } from './feedback';
 import { type NormalizedInbound, type RawDelivery } from './inbound/inbound-message';
@@ -127,6 +128,7 @@ export class WhatsappInboundService {
     private readonly cipher: HealthCipherService,
     private readonly coachAttendance: CoachAttendanceService,
     private readonly conversationEvents: ConversationEventsService,
+    private readonly mirror: WhatsappMirrorService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(WhatsappInboundService.name);
@@ -155,6 +157,11 @@ export class WhatsappInboundService {
       this.reject(verdict.reason, input.correlationId, input.provider);
       return;
     }
+
+    // Espelho da aba "Conversas": registra a mensagem ANTES de qualquer filtro do pipeline
+    // (consentimento, orçamento, assinatura, IA). Não lança e não altera o fluxo abaixo.
+    const captured = edge.capture(input.body);
+    if (captured) await this.mirror.capture(captured);
 
     const messages = edge.normalize(input.body);
     if (messages === null) {
@@ -489,6 +496,7 @@ export class WhatsappInboundService {
         audio: bytes,
         mimeType: 'audio/ogg; codecs=opus',
       });
+      await this.mirror.attachTranscript(userId, message.messageId, transcript);
       this.logger.info(
         {
           event: 'audio_transcribed',
@@ -592,15 +600,17 @@ export class WhatsappInboundService {
     );
   }
 
-  /** Grava a mensagem do aluno no histórico quando a IA não vai tratá-la (atendimento pausado). */
+  /**
+   * Grava a mensagem do aluno no histórico quando a IA não vai tratá-la (atendimento pausado).
+   * Fica fora do painel: a linha-espelho já mostra a mensagem (e já avisou o painel).
+   */
   private async recordInboundWhilePaused(userId: string, text: string): Promise<void> {
     const content = await this.cipher.encryptText(text);
     await this.db.runAsUser(userId, 'USER', async (tx) => {
       await tx
         .insert(conversations)
-        .values({ userId, direction: 'INBOUND', origin: 'STUDENT', content });
+        .values({ userId, direction: 'INBOUND', origin: 'STUDENT', content, hiddenInPanel: true });
     });
-    this.conversationEvents.emitMessage(userId, 'INBOUND');
   }
 
   /** Conta as mensagens reais do dia; ao chegar na 2ª, emite o evento de engajamento. */

@@ -46,8 +46,10 @@ import { PinoLogger } from 'nestjs-pino';
 import { z } from 'zod';
 
 import { AppConfigService } from '../../../core/config';
+import { parseFeedback } from '../feedback';
 import {
   MAX_INBOUND_TEXT_LENGTH,
+  type MirrorCapture,
   type NormalizedInbound,
   normalizedInboundSchema,
   type RawDelivery,
@@ -93,6 +95,11 @@ const keySchema = z.object({
  * o allowlist é a AUSÊNCIA de campo, não uma lista negra de `messageType` (cujo
  * vocabulário completo do Baileys não está confirmado contra o container).
  */
+const imageMessageSchema = z.object({
+  caption: z.string().optional(),
+  mimetype: z.string().optional(),
+});
+
 const messageSchema = z.object({
   conversation: z.string().optional(),
   extendedTextMessage: z.object({ text: z.string().optional() }).optional(),
@@ -121,6 +128,8 @@ const messageSchema = z.object({
       ptt: z.boolean().optional(),
     })
     .optional(),
+  /** Só o espelho da aba "Conversas" lê imagem; o pipeline da IA continua ignorando-a. */
+  imageMessage: imageMessageSchema.optional(),
 });
 
 const upsertDataSchema = z.object({
@@ -267,6 +276,71 @@ export class EvolutionInboundEdge implements WhatsappInboundEdge {
     // legítimo. `null` para cair no caminho de payload inválido (que loga rejeição).
     if (!normalized.success) return null;
     return [normalized.data];
+  }
+
+  /**
+   * Espelho da aba "Conversas": mesma autenticação de instância e mesmos descartes de grupo e
+   * backlog do `normalize`, mas aceita `fromMe` (o que a MOVIVO enviou — pela API ou digitado
+   * no celular) e imagem. O quanto isso vira registro é decidido por `WhatsappMirrorService`.
+   */
+  capture(body: unknown): MirrorCapture | null {
+    const envelope = envelopeSchema.safeParse(body);
+    if (!envelope.success || envelope.data.event !== SUPPORTED_EVENT) return null;
+    const expectedInstance = this.expectedInstanceName();
+    if (!expectedInstance || envelope.data.instance?.trim() !== expectedInstance.trim()) {
+      return null;
+    }
+    const parsed = upsertDataSchema.safeParse(envelope.data.data);
+    if (!parsed.success) return null;
+    const { key, message, messageTimestamp } = parsed.data;
+    if (typeof key.participant === 'string' && key.participant.trim().length > 0) return null;
+    if (this.isStaleBacklog(messageTimestamp)) return null;
+    const phone = resolveSenderPhone(key);
+    if (!phone) return null;
+
+    const base = { messageId: key.id, phone, fromMe: key.fromMe === true };
+    const buttonId = firstNonEmpty(
+      message?.buttonsResponseMessage?.selectedButtonId,
+      message?.templateButtonReplyMessage?.selectedId,
+      message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    );
+    // O toque em 👍/👎 já vira a linha SYSTEM de feedback — espelhar de novo duplicaria.
+    if (parseFeedback(buttonId)) return null;
+    const rawText = firstNonEmpty(
+      message?.conversation,
+      message?.extendedTextMessage?.text,
+      message?.buttonsResponseMessage?.selectedDisplayText,
+      message?.templateButtonReplyMessage?.selectedDisplayText,
+      message?.listResponseMessage?.title,
+      buttonId,
+    );
+    if (rawText) {
+      const text = sanitizeText(rawText);
+      return text ? { ...base, kind: 'TEXT', text } : null;
+    }
+    const mediaKey = JSON.stringify(key);
+    if (message?.audioMessage) {
+      const { seconds, mimetype } = message.audioMessage;
+      return {
+        ...base,
+        kind: 'AUDIO',
+        text: '',
+        mediaKey,
+        ...(mimetype ? { mimetype } : {}),
+        ...(seconds !== undefined ? { seconds: Math.ceil(seconds) } : {}),
+      };
+    }
+    if (message?.imageMessage) {
+      const { caption, mimetype } = message.imageMessage;
+      return {
+        ...base,
+        kind: 'IMAGE',
+        text: caption ? sanitizeText(caption) : '',
+        mediaKey,
+        ...(mimetype ? { mimetype } : {}),
+      };
+    }
+    return null;
   }
 
   /** Descarte legítimo: `[]` + log sem PII (só a razão). */

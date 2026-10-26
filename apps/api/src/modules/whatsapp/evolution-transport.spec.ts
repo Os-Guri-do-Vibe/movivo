@@ -270,6 +270,23 @@ describe('EvolutionHttpTransport (painel "Sistema → Integração")', () => {
     fetchSpy.mockRestore();
   });
 
+  it('downloadMedia: mesma rota de downloadAudio, serve também a imagem', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ base64: 'YWJj', mimetype: 'image/jpeg' }), { status: 200 }),
+      );
+    const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger);
+    await expect(t.downloadMedia('minha-empresa', '{"id":"WA-1"}')).resolves.toEqual({
+      base64: 'YWJj',
+      mimetype: 'image/jpeg',
+    });
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+      'http://localhost:8081/chat/getBase64FromMediaMessage/minha-empresa',
+    );
+    fetchSpy.mockRestore();
+  });
+
   it('downloadAudio: sem base64 na resposta → lança (nunca segue com áudio vazio)', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
@@ -348,6 +365,48 @@ describe('EvolutionHttpTransport (WhatsappTransport)', () => {
       number: '5541999999999',
       text: 'oi, tudo bem?',
     });
+  });
+
+  it('send: informa o id da mensagem enviada (o espelho distingue o eco do que foi digitado no celular)', async () => {
+    randomSpy.mockReturnValue(0);
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ name: 'minha-empresa' }]), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ key: { id: 'WA-SENT-1' } })));
+    const onSent = vi.fn();
+    const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger, undefined, onSent);
+
+    await t.send({ to: '+5541999999999', text: 'oi' });
+
+    expect(onSent).toHaveBeenCalledWith('WA-SENT-1');
+  });
+
+  it('send: resposta sem id (ou onSent que falha) nunca derruba um envio que já saiu', async () => {
+    randomSpy.mockReturnValue(0);
+    mockConnectedSendFlow(); // resposta de envio sem corpo
+    const onSent = vi.fn();
+    const t = new EvolutionHttpTransport('http://localhost:8081', 'k', logger, undefined, onSent);
+    await expect(t.send({ to: '+5541999999999', text: 'oi' })).resolves.toBeUndefined();
+    expect(onSent).not.toHaveBeenCalled();
+
+    vi.restoreAllMocks();
+    randomSpy = spyOnRandom().mockReturnValue(0);
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ name: 'minha-empresa' }]), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ key: { id: 'WA-2' } })));
+    const failing = new EvolutionHttpTransport(
+      'http://localhost:8081',
+      'k',
+      logger,
+      undefined,
+      () => Promise.reject(new Error('redis fora')),
+    );
+    await expect(failing.send({ to: '+5541999999999', text: 'oi' })).resolves.toBeUndefined();
   });
 
   it('send: atraso "humano" nunca passa de 20s (extremo superior de Math.random)', async () => {

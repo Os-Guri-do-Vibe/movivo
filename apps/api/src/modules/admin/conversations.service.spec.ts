@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, NotFoundException } from '@nest
 import { describe, expect, it, vi } from 'vitest';
 
 import type { CoachAttendanceService } from '../../core/database/coach-attendance.service';
+import type { ConversationMediaStorage } from '../../core/database/conversation-media-storage.service';
 import type { ConversationEventsService } from '../../core/event-bus/conversation-events.service';
 import type { HealthCipherService } from '../../core/database/health-cipher.service';
 import type { HealthConsentService } from '../../core/database/health-consent.service';
@@ -37,6 +38,7 @@ function build(
     paused?: boolean;
     consent?: boolean;
     insertedRow?: { id: string; createdAt: Date };
+    mediaBytes?: Buffer | null;
   } = {},
 ) {
   const selects = [...(opts.selects ?? [])];
@@ -89,6 +91,11 @@ function build(
   const consent = { hasActiveForUser: vi.fn(async () => opts.consent ?? true) };
   const queues = { enqueue: vi.fn(async () => 'job-1') };
   const events = { emitMessage: vi.fn(), emitAttendance: vi.fn(), emitRead: vi.fn() };
+  const mediaStorage = {
+    read: vi.fn(async () =>
+      opts.mediaBytes === undefined ? Buffer.from('bytes') : opts.mediaBytes,
+    ),
+  };
   const service = new ConversationsService(
     db,
     audit as unknown as AuditService,
@@ -100,6 +107,7 @@ function build(
     consent as unknown as HealthConsentService,
     queues as unknown as QueueManager,
     events as unknown as ConversationEventsService,
+    mediaStorage as unknown as ConversationMediaStorage,
   );
   return {
     service,
@@ -113,6 +121,7 @@ function build(
     inserted,
     events,
     updates,
+    mediaStorage,
   };
 }
 
@@ -245,6 +254,36 @@ describe('ConversationsService.messages', () => {
         changes: expect.objectContaining({ page: 'newer' }),
       }),
     );
+  });
+
+  it('expõe a origem e os metadados da mídia — nunca o arquivo', async () => {
+    const { service } = build({
+      selects: [
+        [student],
+        [
+          {
+            ...row('a', 'INBOUND', '2026-10-09T10:00:00Z', 'v:t'),
+            messageType: 'AUDIO',
+            origin: 'STUDENT',
+            mediaStatus: 'READY',
+            mediaMime: 'audio/ogg',
+            mediaSeconds: 7,
+          },
+          {
+            ...row('b', 'OUTBOUND', '2026-10-09T10:01:00Z'),
+            origin: 'PROFESSIONAL',
+            mediaStatus: null,
+            mediaMime: null,
+            mediaSeconds: null,
+          },
+        ],
+      ],
+    });
+    const res = await service.messages(ACTOR, STUDENT_ID);
+    expect(res.data.messages.map((m) => [m.origin, m.media])).toEqual([
+      ['PROFESSIONAL', null],
+      ['STUDENT', { kind: 'AUDIO', status: 'READY', mimeType: 'audio/ogg', seconds: 7 }],
+    ]);
   });
 
   it('uma mensagem ilegível não derruba a conversa', async () => {
@@ -502,4 +541,49 @@ describe('ConversationsService.markRead', () => {
       expect(updates).toHaveLength(0);
     },
   );
+});
+
+describe('ConversationsService.media', () => {
+  const ready = { mediaPath: 'x.bin', mediaMime: 'image/jpeg', mediaStatus: 'READY' };
+
+  it('devolve os bytes decifrados com o tipo validado no servidor e audita a abertura', async () => {
+    const { service, audit, mediaStorage } = build({ selects: [[ready]] });
+    const res = await service.media(ACTOR, STUDENT_ID, MESSAGE_ID);
+    expect(res.mimeType).toBe('image/jpeg');
+    expect(res.bytes.toString()).toBe('bytes');
+    expect(mediaStorage.read).toHaveBeenCalledWith('x.bin');
+    expect(audit.append).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'HEALTH_DATA_VIEWED',
+        userId: STUDENT_ID,
+        entityType: 'student_conversation_media',
+        entityId: MESSAGE_ID,
+      }),
+    );
+  });
+
+  it('404 fora do escopo (RLS) — e não audita', async () => {
+    const { service, audit } = build({ selects: [[]] });
+    await expect(service.media(ACTOR, STUDENT_ID, MESSAGE_ID)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(audit.append).not.toHaveBeenCalled();
+  });
+
+  it('404 enquanto a mídia ainda está sendo baixada ou falhou', async () => {
+    for (const mediaStatus of ['PENDING', 'FAILED']) {
+      const { service } = build({ selects: [[{ ...ready, mediaStatus }]] });
+      await expect(service.media(ACTOR, STUDENT_ID, MESSAGE_ID)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    }
+  });
+
+  it('404 quando o arquivo sumiu do disco ou não decifra', async () => {
+    const { service } = build({ selects: [[ready]], mediaBytes: null });
+    await expect(service.media(ACTOR, STUDENT_ID, MESSAGE_ID)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
 });

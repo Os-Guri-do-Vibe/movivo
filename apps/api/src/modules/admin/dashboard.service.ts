@@ -1240,7 +1240,7 @@ export class DashboardService {
             createdAt: conversations.createdAt,
           })
           .from(conversations)
-          .where(eq(conversations.userId, row.userId))
+          .where(and(eq(conversations.userId, row.userId), eq(conversations.hiddenInPanel, false)))
           .orderBy(desc(conversations.createdAt))
           .limit(20)
       ).map((r) => ({ ...r, studentName: owner?.name ?? null }));
@@ -1676,6 +1676,7 @@ export class DashboardService {
         })
         .from(conversations)
         .innerJoin(users, eq(users.id, conversations.userId))
+        .where(eq(conversations.hiddenInPanel, false))
         .orderBy(desc(conversations.createdAt))
         .limit(100);
       // Antes: baixava TODO check-in enviado (com o `answers` inteiro) só para contar, em JS,
@@ -1917,7 +1918,7 @@ export class DashboardService {
           createdAt: conversations.createdAt,
         })
         .from(conversations)
-        .where(eq(conversations.userId, alert.userId))
+        .where(and(eq(conversations.userId, alert.userId), eq(conversations.hiddenInPanel, false)))
         .orderBy(desc(conversations.createdAt))
         .limit(12);
       await this.auditRead(tx, actor, alert.userId, 'handoff_alert', id);

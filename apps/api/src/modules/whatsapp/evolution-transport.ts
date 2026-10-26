@@ -128,6 +128,14 @@ export interface EvolutionTransport {
     mediaKey: string,
   ): Promise<{ base64: string; mimetype: string }>;
   /**
+   * Mesma rota de `downloadAudio`, para qualquer mídia (áudio ou imagem) — usada pelo espelho
+   * da aba "Conversas" para guardar o arquivo original.
+   */
+  downloadMedia(
+    instanceName: string,
+    mediaKey: string,
+  ): Promise<{ base64: string; mimetype: string }>;
+  /**
    * URL da foto de perfil do WhatsApp de um número (aba "Conversas" do painel).
    * `POST /chat/fetchProfilePictureUrl/{instance}` com `{ number }` → `{ wuid, profilePictureUrl }`.
    * `null` quando o contato não tem foto, a esconde por privacidade ou a instância está
@@ -244,6 +252,11 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
     private readonly apiKey: string | undefined,
     private readonly logger: PinoLogger,
     private readonly inboundWebhook?: EvolutionInboundWebhookConfig,
+    /**
+     * Chamado com o id de cada mensagem que ESTA API acabou de enviar. O espelho da aba
+     * "Conversas" usa para distinguir o eco do nosso envio do que foi digitado no celular.
+     */
+    private readonly onSent?: (messageId: string) => void | Promise<void>,
   ) {
     this.logger.setContext('EvolutionHttpTransport');
     if (!this.apiKey) {
@@ -477,7 +490,7 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
       return;
     }
     await this.humanizeBeforeSend(to, instanceName);
-    await this.request(`/message/sendMedia/${encodeURIComponent(instanceName)}`, {
+    const res = await this.request(`/message/sendMedia/${encodeURIComponent(instanceName)}`, {
       method: 'POST',
       body: JSON.stringify({
         number: toEvolutionNumber(to),
@@ -488,6 +501,7 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
         caption,
       }),
     });
+    await this.registerSent(res);
   }
 
   /**
@@ -497,7 +511,14 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
    * `base64` — melhor falhar claro (o chamador já tem fallback de UX pra isso) do que
    * seguir com áudio vazio.
    */
-  async downloadAudio(
+  downloadAudio(
+    instanceName: string,
+    mediaKey: string,
+  ): Promise<{ base64: string; mimetype: string }> {
+    return this.downloadMedia(instanceName, mediaKey);
+  }
+
+  async downloadMedia(
     instanceName: string,
     mediaKey: string,
   ): Promise<{ base64: string; mimetype: string }> {
@@ -516,7 +537,7 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
         const { done, value } = await reader.read();
         if (done) break;
         size += value.byteLength;
-        if (size > maxResponseBytes) throw new Error('Áudio da EvolutionAPI excede o limite.');
+        if (size > maxResponseBytes) throw new Error('Mídia da EvolutionAPI excede o limite.');
         chunks.push(Buffer.from(value));
       }
     } catch (error) {
@@ -590,10 +611,22 @@ export class EvolutionHttpTransport implements EvolutionTransport, WhatsappTrans
   }
 
   private async sendText(instanceName: string, to: string, text: string): Promise<void> {
-    await this.request(`/message/sendText/${encodeURIComponent(instanceName)}`, {
+    const res = await this.request(`/message/sendText/${encodeURIComponent(instanceName)}`, {
       method: 'POST',
       body: JSON.stringify({ number: toEvolutionNumber(to), text }),
     });
+    await this.registerSent(res);
+  }
+
+  /** Melhor esforço: falhar aqui não pode virar reenvio de uma mensagem que JÁ saiu. */
+  private async registerSent(res: Response): Promise<void> {
+    if (!this.onSent) return;
+    try {
+      const body = (await res.json()) as { key?: { id?: unknown } };
+      if (typeof body.key?.id === 'string' && body.key.id) await this.onSent(body.key.id);
+    } catch {
+      this.logger.info('id da mensagem enviada indisponível (ignorado)');
+    }
   }
 
   private async request(path: string, init: RequestInit): Promise<Response> {

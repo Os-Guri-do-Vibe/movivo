@@ -22,6 +22,7 @@ import { protocols } from './protocols';
 import { users } from './users';
 
 export type ConversationOrigin = 'STUDENT' | 'COACH' | 'SYSTEM' | 'PROFESSIONAL';
+export type ConversationMediaStatus = 'PENDING' | 'READY' | 'FAILED';
 
 export const conversations = pgTable(
   'conversations',
@@ -103,6 +104,29 @@ export const conversations = pgTable(
         verifierModel?: string;
       }>
     >(),
+
+    /**
+     * Linha gravada pelo ESPELHO do webhook (uma por mensagem do WhatsApp, antes de qualquer
+     * filtro da IA). Fica fora da transcrição do Coach — a IA continua lendo o turno que ela
+     * mesma persistiu — exceto o que o profissional digitou no celular.
+     */
+    mirror: boolean('mirror').notNull().default(false),
+
+    /**
+     * Fora do painel "Conversas". Duas situações: o turno agregado que a IA persiste (o painel
+     * já mostra cada mensagem do aluno pela linha-espelho) e a mensagem digitada no celular
+     * enquanto ainda não se sabe se não foi o próprio envio da API.
+     */
+    hiddenInPanel: boolean('hidden_in_panel').notNull().default(false),
+
+    /** Mídia (áudio/imagem) guardada cifrada em disco. `null` em mensagem de texto. */
+    mediaPath: varchar('media_path', { length: 80 }),
+    mediaMime: varchar('media_mime', { length: 100 }),
+    mediaBytes: integer('media_bytes'),
+    /** Duração do áudio informada pelo WhatsApp. */
+    mediaSeconds: integer('media_seconds'),
+    /** `PENDING` (baixando) → `READY` | `FAILED`. */
+    mediaStatus: varchar('media_status', { length: 8 }).$type<ConversationMediaStatus>(),
 
     ...timestampColumns,
   },

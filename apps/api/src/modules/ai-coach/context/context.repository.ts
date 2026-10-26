@@ -6,7 +6,7 @@
  * integração contra Postgres real — por isso fica fora da cobertura unitária (vitest.config).
  */
 import { Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, gte, inArray, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, ne, or } from 'drizzle-orm';
 import {
   anamnesisStructuredSchema,
   type ProtocolSession,
@@ -79,6 +79,17 @@ export class ContextRepository {
             eq(conversations.userId, userId),
             ne(conversations.messageType, 'SYSTEM'),
             gte(conversations.createdAt, since),
+            // O espelho do webhook (cada mensagem, imagem, áudio…) é do painel: o Coach lê o
+            // turno que ele mesmo persistiu. Única exceção: o que o profissional digitou no
+            // celular, que é fala dele na conversa.
+            or(
+              eq(conversations.mirror, false),
+              and(
+                eq(conversations.origin, 'PROFESSIONAL'),
+                eq(conversations.messageType, 'TEXT'),
+                eq(conversations.hiddenInPanel, false),
+              ),
+            ),
           ),
         )
         .orderBy(desc(conversations.createdAt))

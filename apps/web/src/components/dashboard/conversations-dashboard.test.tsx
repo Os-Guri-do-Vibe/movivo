@@ -2,7 +2,10 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ControlCenterConversationMessagesResponse } from '@movivo/shared';
+import type {
+  ControlCenterConversationMessage,
+  ControlCenterConversationMessagesResponse,
+} from '@movivo/shared';
 
 import type * as ControlCenterApi from '@/lib/control-center-api';
 
@@ -72,8 +75,19 @@ const msg = (
   direction: 'INBOUND' | 'OUTBOUND',
   content: string,
   createdAt: string,
-  messageType: 'TEXT' | 'AUDIO' = 'TEXT',
-) => ({ id, direction, content, createdAt, messageType });
+  messageType: 'TEXT' | 'AUDIO' | 'IMAGE' = 'TEXT',
+  extra: Partial<Pick<ControlCenterConversationMessage, 'origin' | 'media'>> = {},
+): ControlCenterConversationMessage => ({
+  id,
+  direction,
+  content,
+  createdAt,
+  messageType,
+  // Sem origem registrada nas linhas de saída (o rótulo cai em "MOVIVO"); o aluno é o aluno.
+  origin: direction === 'INBOUND' ? 'STUDENT' : null,
+  media: null,
+  ...extra,
+});
 
 function history(
   messages: ControlCenterConversationMessagesResponse['data']['messages'],
@@ -148,16 +162,125 @@ describe('ConversationsDashboard', () => {
     expect(within(outbound).getByText('MOVIVO')).toBeInTheDocument();
   });
 
-  it('identifica o tipo de mídia e mostra separador de dia', async () => {
+  it('mostra separador de dia', async () => {
     getConversations.mockResolvedValue(list);
     getConversationMessages.mockResolvedValue(
-      history([msg('m1', 'INBOUND', 'transcrição do áudio', '2026-09-01T15:00:00.000Z', 'AUDIO')]),
+      history([msg('m1', 'INBOUND', 'oi', '2026-09-01T15:00:00.000Z')]),
     );
     render(<ConversationsDashboard />);
     await userEvent.click(await screen.findByRole('button', { name: /Ana Souza/ }));
     const log = await screen.findByRole('log', { name: 'Mensagens' });
-    await within(log).findByText('Áudio');
-    expect(within(log).getByText('1 de setembro de 2026')).toBeInTheDocument();
+    expect(await within(log).findByText('1 de setembro de 2026')).toBeInTheDocument();
+  });
+
+  it('uma resposta com vários balões no WhatsApp aparece como um balão por trecho', async () => {
+    getConversations.mockResolvedValue(list);
+    const at = '2026-10-09T15:00:00.000Z';
+    getConversationMessages.mockResolvedValue(
+      history([
+        msg('m1', 'OUTBOUND', 'Boa, Ana!\n---\nHoje é treino de perna.\n---\nBora?', at, 'TEXT', {
+          origin: 'COACH',
+        }),
+      ]),
+    );
+    render(<ConversationsDashboard />);
+    await userEvent.click(await screen.findByRole('button', { name: /Ana Souza/ }));
+    const log = await screen.findByRole('log', { name: 'Mensagens' });
+    const first = await within(log).findByText('Boa, Ana!');
+    const second = within(log).getByText('Hoje é treino de perna.');
+    const third = within(log).getByText('Bora?');
+    // Cada trecho é o seu próprio balão, todos do mesmo remetente (um rótulo só).
+    const bubble = (el: HTMLElement) => el.closest('div') as HTMLElement;
+    expect(new Set([bubble(first), bubble(second), bubble(third)]).size).toBe(3);
+    expect(bubble(first).parentElement).toBe(bubble(third).parentElement);
+    expect(within(log).getAllByText('AI Coach')).toHaveLength(1);
+    expect(within(log).queryByText(/---/)).toBeNull();
+  });
+
+  it('rotula quem escreveu: aluno, AI Coach, aviso automático e profissional', async () => {
+    getConversations.mockResolvedValue(list);
+    const at = '2026-10-09T15:00:00.000Z';
+    getConversationMessages.mockResolvedValue(
+      history([
+        msg('m1', 'INBOUND', 'oi', at),
+        msg('m2', 'OUTBOUND', 'resposta da IA', at, 'TEXT', { origin: 'COACH' }),
+        msg('m3', 'OUTBOUND', 'lembrete', at, 'TEXT', { origin: 'SYSTEM' }),
+        msg('m4', 'OUTBOUND', 'escrevi no celular', at, 'TEXT', { origin: 'PROFESSIONAL' }),
+      ]),
+    );
+    render(<ConversationsDashboard />);
+    await userEvent.click(await screen.findByRole('button', { name: /Ana Souza/ }));
+    const log = await screen.findByRole('log', { name: 'Mensagens' });
+    expect(await within(log).findByText('AI Coach')).toBeInTheDocument();
+    expect(within(log).getByText('MOVIVO · aviso automático')).toBeInTheDocument();
+    expect(within(log).getByText('Profissional CREF')).toBeInTheDocument();
+    expect(within(log).getByText('Ana Souza')).toBeInTheDocument();
+  });
+
+  describe('mídia', () => {
+    const at = '2026-10-09T15:00:00.000Z';
+    const audio = (status: 'PENDING' | 'READY' | 'FAILED') =>
+      msg('aud1', 'INBOUND', 'dor no joelho ao agachar', at, 'AUDIO', {
+        media: { kind: 'AUDIO', status, mimeType: 'audio/ogg', seconds: 65 },
+      });
+    const image = (status: 'PENDING' | 'READY' | 'FAILED') =>
+      msg('img1', 'INBOUND', 'minha postura', at, 'IMAGE', {
+        media: { kind: 'IMAGE', status, mimeType: 'image/jpeg', seconds: null },
+      });
+
+    async function open(messages: ControlCenterConversationMessage[]) {
+      getConversations.mockResolvedValue(list);
+      getConversationMessages.mockResolvedValue(history(messages));
+      const view = render(<ConversationsDashboard />);
+      await userEvent.click(await screen.findByRole('button', { name: /Ana Souza/ }));
+      const log = await screen.findByRole('log', { name: 'Mensagens' });
+      return { log, view };
+    }
+
+    it('áudio pronto: player da rota autorizada, duração e transcrição', async () => {
+      const { log, view } = await open([audio('READY')]);
+      await within(log).findByText('Transcrição');
+      const player = view.container.querySelector('audio');
+      expect(player).toHaveAttribute(
+        'src',
+        `/api/dashboard/conversations/${ANA}/messages/aud1/media`,
+      );
+      // Não baixa o arquivo (acesso auditado) antes do play.
+      expect(player).toHaveAttribute('preload', 'none');
+      expect(within(log).getByText('Duração 1:05')).toBeInTheDocument();
+      expect(within(log).getByText('dor no joelho ao agachar')).toBeInTheDocument();
+    });
+
+    it('imagem pronta: exibe a foto da rota autorizada com legenda', async () => {
+      const { log, view } = await open([image('READY')]);
+      await within(log).findByText('minha postura');
+      const photo = view.container.querySelector(
+        `img[src="/api/dashboard/conversations/${ANA}/messages/img1/media"]`,
+      );
+      expect(photo).not.toBeNull();
+      expect(photo).toHaveAttribute('alt', 'Imagem enviada por Ana Souza: minha postura');
+    });
+
+    it('baixando: avisa "carregando", sem player nem foto', async () => {
+      const { log, view } = await open([audio('PENDING'), image('PENDING')]);
+      expect(await within(log).findByText('Carregando áudio…')).toBeInTheDocument();
+      expect(within(log).getByText('Carregando imagem…')).toBeInTheDocument();
+      expect(view.container.querySelector('audio')).toBeNull();
+      expect(view.container.querySelector('img[src*="/media"]')).toBeNull();
+    });
+
+    it('falha ao baixar: diz que está indisponível', async () => {
+      const { log } = await open([audio('FAILED'), image('FAILED')]);
+      expect(await within(log).findByText(/Áudio indisponível/)).toBeInTheDocument();
+      expect(within(log).getByText(/Imagem indisponível/)).toBeInTheDocument();
+    });
+
+    it('arquivo que não abre no navegador vira "indisponível"', async () => {
+      const { log, view } = await open([image('READY')]);
+      await within(log).findByText('minha postura');
+      fireEvent.error(view.container.querySelector('img[src*="/media"]') as HTMLElement);
+      expect(await within(log).findByText(/Imagem indisponível/)).toBeInTheDocument();
+    });
   });
 
   it('carrega mensagens anteriores pelo cursor e as insere antes das atuais', async () => {
@@ -511,6 +634,36 @@ describe('ConversationsDashboard — tempo real', () => {
     expect(getNewerConversationMessages).toHaveBeenCalledWith(ANA, '2026-10-09T15:00:00.000Z');
     // A mensagem já exibida (m1) não duplica e o histórico não foi recarregado do zero.
     expect(within(log).getAllByText('Oi!')).toHaveLength(1);
+    expect(getConversationMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('áudio que estava baixando vira player quando o servidor avisa de novo (mesmo id)', async () => {
+    const at = '2026-10-10T18:00:00.000Z';
+    const AUDIO_ID = '33333333-3333-4333-8333-333333333333'; // o evento exige UUID
+    const pending = msg(AUDIO_ID, 'INBOUND', '', at, 'AUDIO', {
+      media: { kind: 'AUDIO', status: 'PENDING', mimeType: null, seconds: 8 },
+    });
+    getConversations.mockResolvedValue(list);
+    getConversationMessages.mockResolvedValue(history([pending]));
+    const { container } = render(<ConversationsDashboard />);
+    await userEvent.click(await screen.findByRole('button', { name: /Ana Souza/ }));
+    const log = await screen.findByRole('log', { name: 'Mensagens' });
+    await within(log).findByText('Carregando áudio…');
+
+    getNewerConversationMessages.mockResolvedValue(
+      history([
+        msg(AUDIO_ID, 'INBOUND', 'transcrito', at, 'AUDIO', {
+          media: { kind: 'AUDIO', status: 'READY', mimeType: 'audio/ogg', seconds: 8 },
+        }),
+      ]),
+    );
+    (await stream()).emit('conversation.message', messageEvent(ANA, { messageId: AUDIO_ID }));
+
+    await waitFor(() => expect(container.querySelector('audio')).not.toBeNull());
+    expect(within(log).queryByText('Carregando áudio…')).toBeNull();
+    expect(within(log).getByText('transcrito')).toBeVisible();
+    // Releu só aquela mensagem, a partir dela mesma — não recarregou a conversa.
+    expect(getNewerConversationMessages).toHaveBeenCalledWith(ANA, at);
     expect(getConversationMessages).toHaveBeenCalledTimes(1);
   });
 

@@ -24,6 +24,7 @@ export * from './validation/friendly-issues';
 
 export * from './attribution';
 export * from './workout-share-card';
+export * from './whatsapp-bubbles';
 
 export * from './prompts/persona-block';
 

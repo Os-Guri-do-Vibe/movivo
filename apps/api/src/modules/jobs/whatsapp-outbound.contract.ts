@@ -1,9 +1,9 @@
 /**
  * Separador de balões: um texto com `\n---\n` vira UMA mensagem do WhatsApp por trecho
  * (`WhatsappOutboundWorker.sendBubbles`). Vive no contrato porque quem produz o texto
- * (workout, coach) não importa o domínio WhatsApp.
+ * (workout, coach) não importa o domínio WhatsApp; a definição é compartilhada com o painel.
  */
-export const WHATSAPP_BUBBLE_SEPARATOR = '\n---\n';
+export { WHATSAPP_BUBBLE_SEPARATOR } from '@movivo/shared';
 
 export interface WhatsappQuickReplyButton {
   id: string;
