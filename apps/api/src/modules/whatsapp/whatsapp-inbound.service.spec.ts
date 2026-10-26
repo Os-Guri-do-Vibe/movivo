@@ -28,6 +28,7 @@ import type { EvolutionTransport } from './evolution-transport';
 import { EVOLUTION_WEBHOOK_TOKEN_HEADER } from './inbound/evolution-inbound.edge';
 import type { WhatsappInboundEdge, WhatsappInboundEdges } from './inbound/whatsapp-inbound-edge';
 import { type AiResponseJob, WhatsappInboundService } from './whatsapp-inbound.service';
+import type { WhatsappMirrorService } from './whatsapp-mirror.service';
 
 const SECRET = 'unit-webhook-secret';
 const USER_ID = '33333333-3333-4333-8333-333333333333';
@@ -138,6 +139,7 @@ function makeService(
         ? { ok: true }
         : { ok: false, reason: 'bad_token' },
     normalize: (body: unknown) => [body as never],
+    capture: () => null,
   };
   const edges: WhatsappInboundEdges = {
     EVOLUTION: evolutionEdge,
@@ -155,6 +157,7 @@ function makeService(
       'evolutionInstanceName' in opts ? opts.evolutionInstanceName : INSTANCE_NAME,
     downloadAudio,
   } as unknown as EvolutionTransport;
+  const mirror = { capture: vi.fn(), attachTranscript: vi.fn() };
   const service = new WhatsappInboundService(
     redis,
     new RedisKeyBuilder('movivo'),
@@ -170,6 +173,7 @@ function makeService(
     { encryptText: vi.fn(async (value: string) => value) } as unknown as HealthCipherService,
     { isPaused: vi.fn(async () => opts.coachPaused ?? false) } as unknown as CoachAttendanceService,
     { emitMessage } as unknown as ConversationEventsService,
+    mirror as unknown as WhatsappMirrorService,
     logger,
   );
   return {
@@ -186,6 +190,7 @@ function makeService(
     logger,
     transcribe,
     downloadAudio,
+    mirror,
   };
 }
 
@@ -241,11 +246,17 @@ describe('WhatsappInboundService.ingest', () => {
     });
     expect(paused.enqueue).not.toHaveBeenCalled();
     expect(paused.rpush).not.toHaveBeenCalled();
+    // Contexto da IA: fica fora do painel, que já mostra a linha-espelho dessa mensagem
+    // (e já foi avisado por ela — esta linha não emite um segundo aviso).
     expect(paused.recorded).toEqual([
-      expect.objectContaining({ userId: USER_ID, direction: 'INBOUND', content: 'doeu o joelho' }),
+      expect.objectContaining({
+        userId: USER_ID,
+        direction: 'INBOUND',
+        content: 'doeu o joelho',
+        hiddenInPanel: true,
+      }),
     ]);
-    // Tempo real: o painel é avisado (só o id) para buscar a mensagem nova.
-    expect(paused.emitMessage).toHaveBeenCalledWith(USER_ID, 'INBOUND');
+    expect(paused.emitMessage).not.toHaveBeenCalled();
   });
 
   it('atendimento pausado: revogação de consentimento continua valendo', async () => {
@@ -419,6 +430,7 @@ describe('WhatsappInboundService.ingest', () => {
         provider: 'EVOLUTION',
         verify: () => ({ ok: false, reason: 'bad_token' }),
         normalize: () => [],
+        capture: () => null,
       },
     });
     await created.service.ingest({
@@ -437,6 +449,7 @@ describe('WhatsappInboundService.ingest', () => {
         provider: 'EVOLUTION',
         verify: () => ({ ok: true }),
         normalize: () => [],
+        capture: () => null,
       },
     });
     await created.service.ingest({
@@ -455,6 +468,48 @@ describe('WhatsappInboundService.ingest', () => {
   });
 });
 
+describe('WhatsappInboundService.ingest — espelho da aba Conversas', () => {
+  const captured = {
+    messageId: 'mir-1',
+    phone: PHONE,
+    fromMe: false,
+    kind: 'TEXT' as const,
+    text: 'oi',
+  };
+  const edgeWith = (capture: WhatsappInboundEdge['capture']): WhatsappInboundEdge => ({
+    provider: 'EVOLUTION',
+    verify: () => ({ ok: true }),
+    normalize: () => [],
+    capture,
+  });
+
+  it('espelha a mensagem mesmo quando o pipeline a descarta (sem texto processável)', async () => {
+    const created = makeService({ evolutionEdge: edgeWith(() => captured) });
+    await created.service.ingest({ ...delivery(payload({ text: 'x' })), correlationId: 'm1' });
+    expect(created.mirror.capture).toHaveBeenCalledWith(captured);
+    expect(created.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('entrega rejeitada na autenticação nunca chega ao espelho', async () => {
+    const created = makeService({
+      evolutionEdge: {
+        provider: 'EVOLUTION',
+        verify: () => ({ ok: false, reason: 'bad_token' }),
+        normalize: () => [],
+        capture: () => captured,
+      },
+    });
+    await created.service.ingest({ ...delivery(payload({ text: 'x' })), correlationId: 'm2' });
+    expect(created.mirror.capture).not.toHaveBeenCalled();
+  });
+
+  it('nada a espelhar (capture devolve null) → o espelho não é chamado', async () => {
+    const created = makeService({ evolutionEdge: edgeWith(() => null) });
+    await created.service.ingest({ ...delivery(payload({ text: 'x' })), correlationId: 'm3' });
+    expect(created.mirror.capture).not.toHaveBeenCalled();
+  });
+});
+
 describe('WhatsappInboundService.ingest — mensagem de voz (US audio, EvolutionAPI)', () => {
   /** Borda fake que devolve direto uma mensagem de voz — a EvolutionInboundEdge real (que
    * monta `audio.mediaKey` a partir do `key` do Baileys) é testada no spec dela. */
@@ -463,6 +518,7 @@ describe('WhatsappInboundService.ingest — mensagem de voz (US audio, Evolution
       provider: 'EVOLUTION',
       verify: () => ({ ok: true }),
       normalize: () => [{ messageId: 'aud-1', from: PHONE, audio } as never],
+      capture: () => null,
     };
   }
 

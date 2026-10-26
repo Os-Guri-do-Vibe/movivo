@@ -8,3 +8,4 @@ export type { TenantRole, TenantTransaction } from './tenant-database.service';
 export { HealthCipherService } from './health-cipher.service';
 export { HealthConsentService } from './health-consent.service';
 export { RLS_TENANT_TABLES, buildRlsPoliciesSql } from './security-policies';
+export { ConversationMediaStorage } from './conversation-media-storage.service';

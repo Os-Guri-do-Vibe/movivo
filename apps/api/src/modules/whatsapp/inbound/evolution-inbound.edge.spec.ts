@@ -220,3 +220,67 @@ describe('EvolutionInboundEdge.normalize', () => {
     expect(text.length).toBe(4096);
   });
 });
+
+describe('EvolutionInboundEdge.capture (espelho da aba Conversas)', () => {
+  it('texto do aluno → mensagem de entrada', () => {
+    expect(makeEdge().capture(upsert())).toEqual({
+      messageId: 'WA-MSG-1',
+      phone: '+5541999998888',
+      fromMe: false,
+      kind: 'TEXT',
+      text: 'oi movi',
+    });
+  });
+
+  it('mensagem do próprio número (fromMe) é capturada — o telefone é o do aluno', () => {
+    const out = makeEdge().capture(upsert({ key: { fromMe: true } }));
+    expect(out).toMatchObject({ fromMe: true, phone: '+5541999998888', kind: 'TEXT' });
+  });
+
+  it('áudio → referência da mídia e duração, sem texto', () => {
+    const out = makeEdge().capture(
+      upsert({ message: { audioMessage: { seconds: 6.2, mimetype: 'audio/ogg; codecs=opus' } } }),
+    );
+    expect(out).toMatchObject({ kind: 'AUDIO', text: '', seconds: 7 });
+    expect(JSON.parse(out?.mediaKey ?? '{}')).toMatchObject({ remoteJid: JID, id: 'WA-MSG-1' });
+  });
+
+  it('imagem → legenda como texto e referência da mídia (a IA segue ignorando imagem)', () => {
+    const message = { imageMessage: { caption: ' meu agachamento ', mimetype: 'image/jpeg' } };
+    expect(makeEdge().capture(upsert({ message }))).toMatchObject({
+      kind: 'IMAGE',
+      text: 'meu agachamento',
+      mimetype: 'image/jpeg',
+    });
+    expect(makeEdge().normalize(upsert({ message }))).toEqual([]);
+  });
+
+  it('imagem sem legenda → texto vazio', () => {
+    const out = makeEdge().capture(upsert({ message: { imageMessage: {} } }));
+    expect(out).toMatchObject({ kind: 'IMAGE', text: '' });
+  });
+
+  it('grupo, instância divergente, backlog antigo, remetente LID e tipo não suportado → null', () => {
+    const edge = makeEdge();
+    expect(edge.capture(upsert({ key: { participant: '5511@s.whatsapp.net' } }))).toBeNull();
+    expect(
+      edge.capture({ ...upsert(), instance: 'outra-instancia' } as ReturnType<typeof upsert>),
+    ).toBeNull();
+    expect(edge.capture(upsert({ timestamp: 1 }))).toBeNull();
+    expect(edge.capture(upsert({ key: { remoteJid: '123@lid' } }))).toBeNull();
+    expect(edge.capture(upsert({ message: { stickerMessage: {} } }))).toBeNull();
+    expect(makeEdge({ instanceName: null }).capture(upsert())).toBeNull();
+  });
+
+  it('toque no 👍/👎 não é espelhado (já vira a linha de feedback)', () => {
+    const message = { buttonsResponseMessage: { selectedButtonId: 'fb_up' } };
+    expect(makeEdge().capture(upsert({ message }))).toBeNull();
+  });
+
+  it('envelope fora do contrato ou de outro evento → null, sem lançar', () => {
+    const edge = makeEdge();
+    expect(edge.capture('lixo')).toBeNull();
+    expect(edge.capture({ ...upsert(), event: 'connection.update' })).toBeNull();
+    expect(edge.capture({ ...upsert(), data: { key: { remoteJid: JID } } })).toBeNull();
+  });
+});

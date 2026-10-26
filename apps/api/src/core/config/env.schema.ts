@@ -452,6 +452,13 @@ export const envSchema = z
       .max(5 * 1024 * 1024)
       .default(2 * 1024 * 1024),
 
+    // ------------------------------- Mídia das conversas do WhatsApp (aba "Conversas")
+    /**
+     * Diretório persistente onde áudios e imagens trocados no WhatsApp são gravados CIFRADOS
+     * (mesma cifra dos textos — podem conter dado de saúde). Mesmo volume dos avatares.
+     */
+    CONVERSATION_MEDIA_DIR: z.string().min(1).default('./uploads/conversation-media'),
+
     // -------------------------------------------- Pagamento (US-4.1)
     /** O enum legado do banco permanece para preservar registros históricos. */
     PAYMENT_PROVIDER: z.enum(['MOCK', 'ASAAS']).default('MOCK'),

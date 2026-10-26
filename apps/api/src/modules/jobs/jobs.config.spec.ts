@@ -41,6 +41,8 @@ describe('jobs.config', () => {
         'protocol-renewal-scan',
         'protocol-renewal-generation',
         'sanity',
+        // Espelho da aba "Conversas": baixa a mídia e confirma a mensagem digitada no celular.
+        'whatsapp-mirror',
         'whatsapp-outbound',
         'workout-daily',
         // Comentário do Coach sobre o treino registrado no diário (achado 2026-09-12).

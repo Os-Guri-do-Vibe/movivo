@@ -76,3 +76,24 @@ export type ResolvedInbound = NormalizedInbound & { text: string };
 
 /** Limite de texto do schema acima — usado pelas edges ao truncar. */
 export const MAX_INBOUND_TEXT_LENGTH = 4096;
+
+/**
+ * Uma mensagem do WhatsApp vista pelo ESPELHO da aba "Conversas": qualquer mensagem 1:1 que
+ * a EvolutionAPI entrega, de qualquer lado e de qualquer tipo suportado, ANTES de o pipeline
+ * da IA decidir o que fazer com ela. É independente de `NormalizedInbound` de propósito: a
+ * IA só trata o que o aluno escreve; o painel precisa ver tudo.
+ */
+export interface MirrorCapture {
+  readonly messageId: string;
+  /** Telefone E.164 do aluno (o outro lado da conversa), mesmo quando a mensagem é nossa. */
+  readonly phone: string;
+  /** `true` = saiu do número da MOVIVO (API ou digitada no celular/WhatsApp Web). */
+  readonly fromMe: boolean;
+  readonly kind: 'TEXT' | 'AUDIO' | 'IMAGE';
+  /** Texto, ou legenda da imagem. Vazio quando não há. */
+  readonly text: string;
+  readonly mimetype?: string;
+  readonly seconds?: number;
+  /** `key` do Baileys serializado — a referência que a EvolutionAPI aceita para baixar a mídia. */
+  readonly mediaKey?: string;
+}
