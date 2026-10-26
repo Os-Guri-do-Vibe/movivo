@@ -1,8 +1,9 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('next/navigation', () => ({ usePathname: () => '/dashboard/analytics' }));
+const route = vi.hoisted(() => ({ pathname: '/dashboard/analytics' }));
+vi.mock('next/navigation', () => ({ usePathname: () => route.pathname }));
 vi.mock('./logout-button', () => ({ LogoutButton: () => <button>Sair</button> }));
 
 import { DashboardShell, navigationFor, navigationGroupsFor } from './dashboard-shell';
@@ -152,6 +153,39 @@ describe('DashboardShell', () => {
     expect(navigationFor(['control_center.students.read']).map((item) => item.label)).not.toContain(
       'Alertas',
     );
+  });
+
+  describe('altura da tela', () => {
+    afterEach(() => {
+      route.pathname = '/dashboard/analytics';
+    });
+
+    // Sem leitura de saúde não há provider de notificações (que abre um EventSource).
+    const shell = () =>
+      render(
+        <DashboardShell
+          role="FINANCE"
+          capabilities={['control_center.finance.read']}
+          name="Ana Souza"
+          avatarUrl={null}
+        >
+          <p>Conteúdo</p>
+        </DashboardShell>,
+      );
+
+    it('Conversas ocupa exatamente a janela: sem rolagem da página, só a do chat', () => {
+      route.pathname = '/dashboard/conversas';
+      const { container } = shell();
+      expect(container.firstElementChild).toHaveClass('h-dvh', 'overflow-hidden');
+      expect(container.firstElementChild).not.toHaveClass('min-h-dvh');
+      expect(document.getElementById('conteudo-dashboard')).toHaveClass('min-h-0', 'flex-col');
+    });
+
+    it('as demais telas seguem rolando normalmente', () => {
+      const { container } = shell();
+      expect(container.firstElementChild).toHaveClass('min-h-dvh');
+      expect(container.firstElementChild).not.toHaveClass('h-dvh');
+    });
   });
 
   it('marca o setor atual com aria-current e mostra o título no cabeçalho', () => {

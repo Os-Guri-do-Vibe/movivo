@@ -1081,7 +1081,7 @@ export function ConversationsDashboard({ preferredStudentId }: { preferredStuden
   }
 
   return (
-    <div className="flex h-[calc(100dvh-11rem)] min-h-[28rem] overflow-hidden rounded-xl border border-border bg-card md:h-[calc(100dvh-8.5rem)]">
+    <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card">
       <aside
         aria-label="Lista de conversas"
         className={cn(
