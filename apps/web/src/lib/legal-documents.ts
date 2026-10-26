@@ -64,8 +64,7 @@ export function loadLegalDocument(kind: LegalDocumentKind): LegalDocument | null
   const releasedVersion = LEGAL_RELEASE[kind];
 
   // Em dev/teste o processo roda em apps/web; na imagem de produção (standalone) roda na raiz.
-  const inWebApp =
-    basename(process.cwd()) === 'web' && basename(dirname(process.cwd())) === 'apps';
+  const inWebApp = basename(process.cwd()) === 'web' && basename(dirname(process.cwd())) === 'apps';
   const file = resolve(process.cwd(), inWebApp ? '.' : 'apps/web', 'content/legal', FILES[kind]);
   return parseLegalDocument(readFileSync(file, 'utf8'), releasedVersion);
 }
