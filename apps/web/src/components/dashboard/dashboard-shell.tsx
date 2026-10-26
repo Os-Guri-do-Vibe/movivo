@@ -677,6 +677,10 @@ export function DashboardShell({
   const menuButton = useRef<HTMLButtonElement>(null);
   const active = activeItemFor(pathname);
   const ActiveIcon = active?.icon;
+  // Conversas é um "WhatsApp dentro da plataforma": a tela ocupa exatamente a altura da janela e
+  // só a lista e as mensagens rolam. Sem isto a página ganha uma barra de rolagem externa, sem
+  // nada abaixo do chat.
+  const fixedViewport = pathname === '/dashboard/conversas';
 
   const closeDrawer = useCallback(() => {
     setDrawerOpen(false);
@@ -694,7 +698,12 @@ export function DashboardShell({
   );
 
   const shell = (
-    <div className="dashboard-theme min-h-dvh bg-background">
+    <div
+      className={cn(
+        'dashboard-theme bg-background',
+        fixedViewport ? 'flex h-dvh flex-col overflow-hidden' : 'min-h-dvh',
+      )}
+    >
       <a
         href="#conteudo-dashboard"
         className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-md focus:bg-card focus:px-4 focus:py-2 focus:ring-[3px] focus:ring-ring"
@@ -702,7 +711,7 @@ export function DashboardShell({
         Pular para o conteúdo
       </a>
 
-      <div className="sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b border-[var(--petroleo-borda)]/40 bg-petroleo px-3 md:hidden">
+      <div className="sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between gap-2 border-b border-[var(--petroleo-borda)]/40 bg-petroleo px-3 md:hidden">
         <button
           type="button"
           ref={menuButton}
@@ -730,10 +739,11 @@ export function DashboardShell({
       <div
         className={cn(
           'flex min-w-0 flex-col transition-[margin] duration-200',
+          fixedViewport && 'min-h-0 flex-1',
           collapsed ? 'md:ml-18' : 'md:ml-68',
         )}
       >
-        <header className="sticky top-14 z-20 flex h-16 items-center justify-between gap-3 border-b border-border bg-background/80 px-4 backdrop-blur md:top-0 lg:px-8">
+        <header className="sticky top-14 z-20 flex h-16 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/80 px-4 backdrop-blur md:top-0 lg:px-8">
           <div className="flex min-w-0 items-center gap-2">
             {ActiveIcon ? (
               <ActiveIcon aria-hidden="true" className="size-5 text-verde-pulso" />
@@ -748,7 +758,14 @@ export function DashboardShell({
             <LogoutButton />
           </div>
         </header>
-        <main id="conteudo-dashboard" className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8">
+        <main
+          id="conteudo-dashboard"
+          className={cn(
+            'min-w-0 flex-1 px-4 sm:px-6 lg:px-8',
+            // Altura fixa: o filho (o chat) preenche o que sobra; nada rola aqui.
+            fixedViewport ? 'flex min-h-0 flex-col overflow-y-auto py-4' : 'py-6',
+          )}
+        >
           {children}
         </main>
       </div>

@@ -560,6 +560,49 @@ createServer(async (request, response) => {
       meta: controlCenterMeta,
     });
   }
+  // Aba "Conversas": uma conversa longa (força a rolagem interna do chat) com formatação do WhatsApp.
+  if (request.method === 'GET' && url.pathname === '/api/v1/control-center/conversations') {
+    return json(response, 200, {
+      data: {
+        conversations: [
+          {
+            studentId: STUDENT_ID,
+            name: 'Ana Souza',
+            phoneNumber: '+5511999990001',
+            lastMessageAt: '2026-10-09T15:00:00.000Z',
+            aiPaused: false,
+            unreadCount: 0,
+          },
+        ],
+      },
+      meta: controlCenterMeta,
+    });
+  }
+  if (
+    request.method === 'GET' &&
+    url.pathname === `/api/v1/control-center/conversations/${STUDENT_ID}/messages`
+  ) {
+    const messages = Array.from({ length: 60 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+      direction: index % 2 === 0 ? 'INBOUND' : 'OUTBOUND',
+      messageType: 'TEXT',
+      content:
+        index === 59
+          ? '*Treino de hoje* _com calma_\n- agachamento\n- supino'
+          : `Mensagem de teste ${index + 1}`,
+      createdAt: new Date(Date.UTC(2026, 9, 9, 12, index)).toISOString(),
+      origin: index % 2 === 0 ? 'STUDENT' : 'COACH',
+      media: null,
+    }));
+    return json(response, 200, {
+      data: {
+        student: { id: STUDENT_ID, name: 'Ana Souza', phoneNumber: '+5511999990001' },
+        messages,
+        olderCursor: null,
+      },
+      meta: controlCenterMeta,
+    });
+  }
   if (request.method === 'GET' && url.pathname === '/api/v1/control-center/students') {
     return json(response, 200, {
       data: {

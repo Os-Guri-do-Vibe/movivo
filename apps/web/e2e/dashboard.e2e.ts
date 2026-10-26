@@ -162,3 +162,55 @@ test('envia CSP com nonce e bloqueia enquadramento do dashboard', async ({ page 
   expect(csp).toContain("frame-ancestors 'none'");
   expect(response?.headers()['x-frame-options']).toBe('DENY');
 });
+
+test.describe('aba Conversas — o "WhatsApp dentro da plataforma"', () => {
+  for (const [name, viewport] of [
+    ['desktop', { width: 1280, height: 720 }],
+    ['celular', { width: 390, height: 700 }],
+    // Janela baixa (ex.: DevTools aberto embaixo): o chat tinha altura mínima e empurrava a
+    // página para uma rolagem externa, sem nada abaixo dele.
+    ['janela baixa', { width: 1100, height: 420 }],
+  ] as const) {
+    test(`sem rolagem da página: só a lista e as mensagens rolam (${name})`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await login(page);
+      await page.goto('/dashboard/conversas');
+      await page.getByRole('button', { name: /Ana Souza/ }).click();
+      const log = page.getByRole('log', { name: 'Mensagens' });
+      await expect(log.getByText('Mensagem de teste 1', { exact: true })).toBeAttached();
+
+      // A página inteira cabe na janela: não existe barra de rolagem externa.
+      const page_ = await page.evaluate(() => ({
+        scrollHeight: document.documentElement.scrollHeight,
+        innerHeight: window.innerHeight,
+        bodyScrollHeight: document.body.scrollHeight,
+      }));
+      expect(page_.scrollHeight).toBeLessThanOrEqual(page_.innerHeight);
+      expect(page_.bodyScrollHeight).toBeLessThanOrEqual(page_.innerHeight);
+
+      // Já a conversa é longa e rola por dentro, terminando na última mensagem.
+      const inner = await log.evaluate((el) => ({
+        scrollable: el.scrollHeight > el.clientHeight,
+        atBottom: el.scrollHeight - el.scrollTop - el.clientHeight < 4,
+      }));
+      expect(inner.scrollable).toBe(true);
+      expect(inner.atBottom).toBe(true);
+
+      // Rolar a roda do mouse sobre o chat não move a página.
+      await log.hover();
+      await page.mouse.wheel(0, -2000);
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    });
+  }
+
+  test('mostra negrito, itálico e lista como o WhatsApp', async ({ page }) => {
+    await login(page);
+    await page.goto('/dashboard/conversas');
+    await page.getByRole('button', { name: /Ana Souza/ }).click();
+    const log = page.getByRole('log', { name: 'Mensagens' });
+    await expect(log.locator('strong', { hasText: 'Treino de hoje' })).toBeVisible();
+    await expect(log.locator('em', { hasText: 'com calma' })).toBeVisible();
+    await expect(log.getByRole('listitem')).toHaveCount(2);
+    await expect(log).not.toContainText('*Treino');
+  });
+});
