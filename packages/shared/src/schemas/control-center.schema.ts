@@ -435,13 +435,33 @@ export type ControlCenterConversationsResponse = z.infer<
   typeof controlCenterConversationsResponseSchema
 >;
 
+/**
+ * Áudio ou imagem da mensagem. O arquivo NÃO viaja aqui: o painel o busca pela rota de mídia
+ * (autorizada e auditada). `PENDING` = ainda sendo baixado do WhatsApp; `FAILED` = indisponível.
+ */
+export const controlCenterConversationMediaSchema = z.object({
+  kind: z.enum(['AUDIO', 'IMAGE']),
+  status: z.enum(['PENDING', 'READY', 'FAILED']),
+  mimeType: z.string().nullable(),
+  /** Duração do áudio em segundos, quando o WhatsApp a informou. */
+  seconds: z.number().int().min(0).nullable(),
+});
+export type ControlCenterConversationMedia = z.infer<typeof controlCenterConversationMediaSchema>;
+
 export const controlCenterConversationMessageSchema = z.object({
   id: z.uuid(),
   /** `INBOUND` = veio do aluno; `OUTBOUND` = enviada pela MOVIVO. */
   direction: z.enum(['INBOUND', 'OUTBOUND']),
   messageType: z.enum(['TEXT', 'IMAGE', 'AUDIO', 'TEMPLATE', 'SYSTEM']),
+  /** Texto, legenda da imagem ou transcrição do áudio (vazio se não houver). */
   content: z.string(),
   createdAt: z.iso.datetime(),
+  /**
+   * Quem escreveu: o aluno, o AI Coach, um aviso automático ou o profissional (pelo painel ou
+   * direto no celular). `null` nas linhas anteriores ao registro de origem.
+   */
+  origin: z.enum(['STUDENT', 'COACH', 'SYSTEM', 'PROFESSIONAL']).nullable(),
+  media: controlCenterConversationMediaSchema.nullable(),
 });
 export type ControlCenterConversationMessage = z.infer<
   typeof controlCenterConversationMessageSchema

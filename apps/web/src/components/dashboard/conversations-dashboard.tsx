@@ -5,6 +5,7 @@ import {
   controlCenterConversationAttendanceEventSchema,
   controlCenterConversationMessageEventSchema,
   controlCenterConversationReadEventSchema,
+  splitWhatsappBubbles,
   type ControlCenterConversationMessage,
   type ControlCenterConversationSummary,
 } from '@movivo/shared';
@@ -126,13 +127,36 @@ function initials(label: string): string {
   return (first + last).toUpperCase();
 }
 
+/** Áudio e imagem aparecem como mídia no próprio balão; os demais tipos levam um rótulo. */
 const MESSAGE_TYPE_LABEL: Partial<Record<ControlCenterConversationMessage['messageType'], string>> =
   {
-    IMAGE: 'Imagem',
-    AUDIO: 'Áudio',
     TEMPLATE: 'Modelo',
     SYSTEM: 'Sistema',
   };
+
+/** Quem escreveu, para o profissional distinguir o Coach, o aviso automático e uma pessoa. */
+function senderLabel(message: ControlCenterConversationMessage, studentLabel: string): string {
+  switch (message.origin) {
+    case 'STUDENT':
+      return studentLabel;
+    case 'COACH':
+      return 'AI Coach';
+    case 'SYSTEM':
+      return 'MOVIVO · aviso automático';
+    case 'PROFESSIONAL':
+      return 'Profissional CREF';
+    default:
+      return message.direction === 'OUTBOUND' ? 'MOVIVO' : studentLabel;
+  }
+}
+
+const mediaUrl = (studentId: string, messageId: string) =>
+  `/api/dashboard/conversations/${studentId}/messages/${messageId}/media`;
+
+/** "0:07" / "1:05" — a duração que o WhatsApp informa do áudio. */
+function clock(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
 
 /** Foto do WhatsApp (via BFF same-origin); se não houver ou falhar, iniciais. */
 function Avatar({ studentId, label }: { studentId: string; label: string }) {
@@ -271,41 +295,144 @@ function ConversationList({
   );
 }
 
+/** Áudio ou imagem do balão. O arquivo vem da rota autorizada e auditada, nunca embutido na lista. */
+function MessageMedia({
+  media,
+  message,
+  studentId,
+  studentLabel,
+}: {
+  media: NonNullable<ControlCenterConversationMessage['media']>;
+  message: ControlCenterConversationMessage;
+  studentId: string;
+  studentLabel: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const isAudio = media.kind === 'AUDIO';
+  const noun = isAudio ? 'Áudio' : 'Imagem';
+  if (media.status === 'PENDING') {
+    return (
+      <p role="status" className="text-label text-muted-foreground">
+        {noun === 'Áudio' ? 'Carregando áudio…' : 'Carregando imagem…'}
+      </p>
+    );
+  }
+  if (media.status === 'FAILED' || failed) {
+    return (
+      <p className="text-label text-muted-foreground">
+        {isAudio ? 'Áudio indisponível' : 'Imagem indisponível'} — não foi possível baixá-lo do
+        WhatsApp.
+      </p>
+    );
+  }
+  const src = mediaUrl(studentId, message.id);
+  if (isAudio) {
+    return (
+      <div className="space-y-1">
+        {/* `preload="none"`: cada abertura do arquivo é um acesso auditado a dado de saúde —
+            só acontece quando o profissional dá play. */}
+        <audio
+          controls
+          preload="none"
+          src={src}
+          onError={() => setFailed(true)}
+          aria-label={`Áudio de ${senderLabel(message, studentLabel)}${
+            media.seconds ? `, ${clock(media.seconds)}` : ''
+          }`}
+          className="h-10 w-64 max-w-full"
+        />
+        {media.seconds ? (
+          <span className="block text-[0.6875rem] text-muted-foreground">
+            Duração {clock(media.seconds)}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+  return (
+    <a href={src} target="_blank" rel="noopener noreferrer" className="block">
+      {/* eslint-disable-next-line @next/next/no-img-element -- rota BFF same-origin com bytes decifrados; sem otimização de imagem. */}
+      <img
+        src={src}
+        alt={`Imagem enviada por ${senderLabel(message, studentLabel)}${
+          message.content ? `: ${message.content}` : ''
+        }`}
+        loading="lazy"
+        decoding="async"
+        onError={() => setFailed(true)}
+        className="max-h-80 w-auto max-w-full rounded-lg object-contain"
+      />
+    </a>
+  );
+}
+
 function MessageBubble({
   message,
+  studentId,
   studentLabel,
 }: {
   message: ControlCenterConversationMessage;
+  studentId: string;
   studentLabel: string;
 }) {
   const outbound = message.direction === 'OUTBOUND';
   const typeLabel = MESSAGE_TYPE_LABEL[message.messageType];
+  // Texto, legenda da imagem ou transcrição do áudio.
+  const text = message.content.trim();
+  // Uma resposta com `---` sai no WhatsApp como vários balões, gravada como uma linha só:
+  // o painel mostra um balão por trecho. Legenda e transcrição são de UMA mensagem.
+  const parts = message.media ? (text ? [text] : []) : splitWhatsappBubbles(text);
+  // Mídia sem texto ainda precisa de um balão (e do horário).
+  const bubbles = parts.length > 0 ? parts : [''];
+  const time = timeFormat.format(new Date(message.createdAt));
   return (
-    <div className={cn('flex flex-col', outbound ? 'items-end' : 'items-start')}>
+    <div className={cn('flex flex-col gap-1', outbound ? 'items-end' : 'items-start')}>
       <span className="mb-0.5 max-w-[80%] truncate px-1 text-[0.6875rem] text-muted-foreground">
-        {outbound ? 'MOVIVO' : studentLabel}
+        {senderLabel(message, studentLabel)}
       </span>
-      <div
-        className={cn(
-          'max-w-[85%] rounded-2xl border px-3 py-2 text-body sm:max-w-[75%]',
-          outbound
-            ? 'rounded-tr-sm border-verde-pulso/30 bg-verde-pulso/15'
-            : 'rounded-tl-sm border-border bg-card',
-        )}
-      >
-        {typeLabel ? (
-          <span className="mb-1 block text-[0.6875rem] font-semibold tracking-wide text-muted-foreground uppercase">
-            {typeLabel}
-          </span>
-        ) : null}
-        <p className="break-words whitespace-pre-wrap text-foreground">{message.content}</p>
-        <time
-          dateTime={message.createdAt}
-          className="mt-1 block text-right text-[0.625rem] text-muted-foreground"
+      {bubbles.map((part, index) => (
+        <div
+          key={index}
+          className={cn(
+            'max-w-[85%] rounded-2xl border px-3 py-2 text-body sm:max-w-[75%]',
+            outbound ? 'border-verde-pulso/30 bg-verde-pulso/15' : 'border-border bg-card',
+            // Só o primeiro balão tem a "ponta" do remetente, como no WhatsApp.
+            index === 0 && (outbound ? 'rounded-tr-sm' : 'rounded-tl-sm'),
+          )}
         >
-          {timeFormat.format(new Date(message.createdAt))}
-        </time>
-      </div>
+          {index === 0 && typeLabel ? (
+            <span className="mb-1 block text-[0.6875rem] font-semibold tracking-wide text-muted-foreground uppercase">
+              {typeLabel}
+            </span>
+          ) : null}
+          {index === 0 && message.media ? (
+            <div className="mb-1">
+              <MessageMedia
+                media={message.media}
+                message={message}
+                studentId={studentId}
+                studentLabel={studentLabel}
+              />
+            </div>
+          ) : null}
+          {part ? (
+            <p className="break-words whitespace-pre-wrap text-foreground">
+              {message.media?.kind === 'AUDIO' ? (
+                <span className="mb-0.5 block text-[0.6875rem] font-semibold tracking-wide text-muted-foreground uppercase">
+                  Transcrição
+                </span>
+              ) : null}
+              {part}
+            </p>
+          ) : null}
+          <time
+            dateTime={message.createdAt}
+            className="mt-1 block text-right text-[0.625rem] text-muted-foreground"
+          >
+            {time}
+          </time>
+        </div>
+      ))}
     </div>
   );
 }
@@ -430,6 +557,29 @@ function ChatPanel({
   }, [student.unreadCount, loading, unseen, catchUpTick, canMarkRead, markReadNow]);
 
   /**
+   * Relê UMA mensagem já exibida e troca a linha pela nova. É como o áudio/imagem que estava
+   * "carregando" vira player/foto: o servidor avisa de novo (mesmo id) quando o arquivo chega.
+   */
+  const refreshMessage = useCallback(
+    async (id: string) => {
+      const target = messagesRef.current.find((message) => message.id === id);
+      if (!target) return;
+      try {
+        const res = await getNewerConversationMessages(student.studentId, target.createdAt);
+        const updated = res.data.messages.find((message) => message.id === id);
+        if (!updated) return;
+        messagesRef.current = messagesRef.current.map((message) =>
+          message.id === id ? updated : message,
+        );
+        setMessages(messagesRef.current);
+      } catch {
+        /* silencioso: o próximo aviso, a sondagem ou "Atualizar conversa" tenta de novo */
+      }
+    },
+    [student.studentId],
+  );
+
+  /**
    * Traz só o que chegou depois da última mensagem conhecida e acrescenta ao fim. Falha em
    * silêncio (o chat já carregado continua intacto) — o próximo aviso ou o botão
    * "Atualizar conversa" tenta de novo. Chamadas simultâneas viram uma segunda rodada.
@@ -469,23 +619,33 @@ function ChatPanel({
         // Página cheia = pode haver mais; segue até esvaziar.
         if (last && res.data.messages.length >= NEWER_PAGE_SIZE) resync.current = true;
       } while (resync.current);
+      // Mídia que ainda aparecia como "carregando" (aviso perdido): relê.
+      for (const pending of messagesRef.current.filter((m) => m.media?.status === 'PENDING')) {
+        void refreshMessage(pending.id);
+      }
     } catch {
       /* silencioso de propósito — ver o comentário acima */
     } finally {
       syncing.current = false;
     }
-  }, [student.studentId, canMarkRead, markReadNow, onUnreadGrow]);
+  }, [student.studentId, canMarkRead, markReadNow, onUnreadGrow, refreshMessage]);
 
   const lastLiveSeq = useRef(0);
   useEffect(() => {
     if (!liveEvent || liveEvent.studentId !== student.studentId) return;
     if (liveEvent.seq === lastLiveSeq.current) return;
     lastLiveSeq.current = liveEvent.seq;
-    // O envio manual desta própria tela já tem a linha (veio na resposta do POST).
-    if (liveEvent.messageId && messagesRef.current.some((m) => m.id === liveEvent.messageId))
+    const known = liveEvent.messageId
+      ? messagesRef.current.find((m) => m.id === liveEvent.messageId)
+      : undefined;
+    if (known) {
+      // O envio manual desta própria tela já tem a linha (veio na resposta do POST); mídia
+      // que estava baixando precisa ser relida agora que chegou.
+      if (known.media?.status === 'PENDING') void refreshMessage(known.id);
       return;
+    }
     void fetchNewer();
-  }, [liveEvent, student.studentId, fetchNewer]);
+  }, [liveEvent, student.studentId, fetchNewer, refreshMessage]);
 
   const initialCatchUpTick = useRef(catchUpTick);
   useEffect(() => {
@@ -675,7 +835,11 @@ function ChatPanel({
                     </span>
                   </div>
                 ) : null}
-                <MessageBubble message={message} studentLabel={label} />
+                <MessageBubble
+                  message={message}
+                  studentId={student.studentId}
+                  studentLabel={label}
+                />
               </div>
             );
           })}

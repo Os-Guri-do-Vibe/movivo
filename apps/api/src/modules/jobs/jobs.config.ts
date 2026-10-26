@@ -41,6 +41,9 @@ export const QUEUE = {
   protocolRenewalGeneration: 'protocol-renewal-generation',
   aiResponse: 'ai-response',
   whatsappOutbound: 'whatsapp-outbound',
+  // Espelho da aba "Conversas": baixa a mídia (áudio/imagem) de cada mensagem e confirma a que
+  // foi digitada no celular. Fila própria — nunca atrasa nem derruba o pipeline da IA.
+  whatsappMirror: 'whatsapp-mirror',
   checkinWeekly: 'checkin-weekly',
   workoutDaily: 'workout-daily',
   // Comentário do Coach sobre o treino que o aluno acabou de registrar no diário
@@ -137,6 +140,8 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
     lockMs: 30_000,
     rateLimit: { max: 80, durationMs: 1_000 },
   },
+  // Best-effort: a mensagem já está no histórico; a mídia que não baixa vira "indisponível".
+  [QUEUE.whatsappMirror]: { attempts: 3, backoffMs: [3_000, 9_000, 27_000], concurrency: 5 },
   [QUEUE.checkinWeekly]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
   // Quick reply diário de treino (US-8.1). Mesmo perfil do check-in: um scan por dia,
   // sem urgência de latência, retry curto — o envio real acontece em `whatsappOutbound`.

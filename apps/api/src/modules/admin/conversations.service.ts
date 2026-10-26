@@ -15,6 +15,7 @@ import type { Redis } from 'ioredis';
 import type { z } from 'zod';
 
 import { CoachAttendanceService } from '../../core/database/coach-attendance.service';
+import { ConversationMediaStorage } from '../../core/database/conversation-media-storage.service';
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { conversations, users } from '../../core/database/schema';
@@ -55,6 +56,22 @@ export function isWhatsappPhotoUrl(value: string): boolean {
   }
 }
 
+/** `media` da mensagem para o painel; `null` quando a mensagem é só texto. */
+function mediaOf(row: {
+  messageType: string;
+  mediaStatus: 'PENDING' | 'READY' | 'FAILED' | null;
+  mediaMime: string | null;
+  mediaSeconds: number | null;
+}) {
+  if ((row.messageType !== 'AUDIO' && row.messageType !== 'IMAGE') || !row.mediaStatus) return null;
+  return {
+    kind: row.messageType,
+    status: row.mediaStatus,
+    mimeType: row.mediaMime,
+    seconds: row.mediaSeconds,
+  };
+}
+
 /**
  * Aba "Conversas" do Control Center: histórico de WhatsApp (`conversations`) e, quando o
  * profissional pausa o atendimento automático do AI Coach, a conversa manual com o aluno.
@@ -76,6 +93,7 @@ export class ConversationsService {
     private readonly healthConsent: HealthConsentService,
     private readonly queues: QueueManager,
     private readonly conversationEvents: ConversationEventsService,
+    private readonly mediaStorage: ConversationMediaStorage,
   ) {}
 
   /** Alunos com ao menos uma mensagem, da conversa mais recente para a mais antiga. */
@@ -96,7 +114,13 @@ export class ConversationsService {
         })
         .from(conversations)
         .innerJoin(users, eq(users.id, conversations.userId))
-        .where(and(eq(users.role, 'USER'), isNull(users.anonymizedAt)))
+        .where(
+          and(
+            eq(users.role, 'USER'),
+            isNull(users.anonymizedAt),
+            eq(conversations.hiddenInPanel, false),
+          ),
+        )
         .groupBy(users.id)
         .orderBy(desc(lastMessageAt))
         .limit(CONVERSATIONS_LIST_LIMIT);
@@ -155,11 +179,16 @@ export class ConversationsService {
           messageType: conversations.messageType,
           content: conversations.content,
           createdAt: conversations.createdAt,
+          origin: conversations.origin,
+          mediaStatus: conversations.mediaStatus,
+          mediaMime: conversations.mediaMime,
+          mediaSeconds: conversations.mediaSeconds,
         })
         .from(conversations)
         .where(
           and(
             eq(conversations.userId, studentId),
+            eq(conversations.hiddenInPanel, false),
             before ? lt(conversations.createdAt, before) : undefined,
             after ? gte(conversations.createdAt, after) : undefined,
           ),
@@ -198,6 +227,8 @@ export class ConversationsService {
         messageType: row.messageType,
         content: await this.cipher.decryptText(row.content).catch(() => '[mensagem indisponível]'),
         createdAt: row.createdAt.toISOString(),
+        origin: row.origin,
+        media: mediaOf(row),
       })),
     );
     return this.envelope({
@@ -296,6 +327,8 @@ export class ConversationsService {
         messageType: 'TEXT' as const,
         content: text,
         createdAt: row.createdAt.toISOString(),
+        origin: 'PROFESSIONAL' as const,
+        media: null,
       },
     });
   }
@@ -327,6 +360,7 @@ export class ConversationsService {
         .where(
           and(
             eq(conversations.userId, studentId),
+            eq(conversations.hiddenInPanel, false),
             eq(conversations.direction, 'INBOUND'),
             ne(conversations.messageType, 'SYSTEM'),
             or(
@@ -362,6 +396,48 @@ export class ConversationsService {
       throw new BadRequestException(result.error.issues[0]?.message ?? 'Corpo inválido.');
     }
     return result.data;
+  }
+
+  /**
+   * O arquivo (áudio/imagem) de uma mensagem, decifrado. Mesma autorização do texto (RLS do
+   * ator + consentimento de saúde vigente do titular) e cada abertura vai para a auditoria.
+   * O tipo vem do que o servidor validou ao guardar, nunca do cliente.
+   */
+  async media(actor: AuthenticatedUser, studentId: string, messageId: string) {
+    const row = await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
+      const [found] = await tx
+        .select({
+          mediaPath: conversations.mediaPath,
+          mediaMime: conversations.mediaMime,
+          mediaStatus: conversations.mediaStatus,
+        })
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.id, messageId),
+            eq(conversations.userId, studentId),
+            eq(conversations.hiddenInPanel, false),
+          ),
+        )
+        .limit(1);
+      if (found?.mediaPath) {
+        await this.audit.append(tx, {
+          actorId: actor.userId,
+          userId: studentId,
+          action: 'HEALTH_DATA_VIEWED',
+          entityType: 'student_conversation_media',
+          entityId: messageId,
+          changes: { purpose: 'conversation_media_review', role: actor.role },
+        });
+      }
+      return found;
+    });
+    if (!row?.mediaPath || row.mediaStatus !== 'READY' || !row.mediaMime) {
+      throw new NotFoundException('Mídia não encontrada.');
+    }
+    const bytes = await this.mediaStorage.read(row.mediaPath);
+    if (!bytes) throw new NotFoundException('Mídia não encontrada.');
+    return { bytes, mimeType: row.mediaMime };
   }
 
   /** Foto de perfil do WhatsApp do aluno, ou `null`. Cacheada: a lista pede uma por linha. */

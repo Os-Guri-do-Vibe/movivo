@@ -10,7 +10,12 @@
  * debounce, fila de IA) é agnóstico de provedor e vive uma única vez em
  * `WhatsappInboundService` — nunca duplicado por provedor.
  */
-import type { NormalizedInbound, RawDelivery, VerifyResult } from './inbound-message';
+import type {
+  MirrorCapture,
+  NormalizedInbound,
+  RawDelivery,
+  VerifyResult,
+} from './inbound-message';
 
 export type InboundProvider = 'EVOLUTION';
 
@@ -37,6 +42,13 @@ export interface WhatsappInboundEdge {
    * sempre 0 ou 1 elemento na prática.
    */
   normalize(body: unknown): NormalizedInbound[] | null;
+
+  /**
+   * Lê o MESMO corpo já autenticado para o espelho da aba "Conversas": inclui o que `normalize`
+   * descarta de propósito (mensagem do próprio número, imagem). `null` = nada a espelhar
+   * (grupo, tipo não suportado, instância errada…). Nunca lança.
+   */
+  capture(body: unknown): MirrorCapture | null;
 }
 
 /** Token de DI do mapa da borda Evolution. */

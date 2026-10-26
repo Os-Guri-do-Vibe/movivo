@@ -8,11 +8,14 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  Res,
   Sse,
+  StreamableFile,
   UnauthorizedException,
   UseGuards,
   Header,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { concatMap, takeUntil, timer } from 'rxjs';
 import {
   ApiBearerAuth,
@@ -135,6 +138,33 @@ export class ConversationsController {
       limit,
       parseInstant(after, 'after'),
     );
+  }
+
+  @Get(':studentId/messages/:messageId/media')
+  @ApiOperation({
+    summary: 'Áudio ou imagem de uma mensagem do WhatsApp',
+    description:
+      'Bytes do arquivo original, decifrados. Mesma autorização do histórico (STUDENTS_READ + STUDENTS_HEALTH_READ, RLS do ator) e cada abertura é auditada como leitura de dado de saúde.',
+  })
+  @ApiParam({ name: 'studentId', description: 'UUID do aluno.' })
+  @ApiParam({ name: 'messageId', description: 'UUID da mensagem.' })
+  @ApiResponse({ status: 200, description: 'Arquivo (audio/* ou image/*).' })
+  @ApiResponse({ status: 404, description: 'Sem mídia, ainda baixando ou fora do escopo.' })
+  async media(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('studentId', new ParseUUIDPipe({ version: '4' })) studentId: string,
+    @Param('messageId', new ParseUUIDPipe({ version: '4' })) messageId: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { bytes, mimeType } = await this.conversations.media(actor, studentId, messageId);
+    res.set({
+      'Content-Type': mimeType,
+      'Content-Length': String(bytes.length),
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Disposition': 'inline',
+    });
+    return new StreamableFile(bytes);
   }
 
   @Get(':studentId/photo')

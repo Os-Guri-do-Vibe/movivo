@@ -1377,7 +1377,13 @@ export class ControlCenterService {
       const conversationDays = await tx
         .select({ day: this.localDay(conversations.createdAt), total: count() })
         .from(conversations)
-        .where(and(eq(conversations.userId, studentId), gte(conversations.createdAt, since)))
+        .where(
+          and(
+            eq(conversations.userId, studentId),
+            eq(conversations.hiddenInPanel, false),
+            gte(conversations.createdAt, since),
+          ),
+        )
         .groupBy(sql`1`);
       const blockedRows = await tx
         .select({

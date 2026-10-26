@@ -58,6 +58,16 @@ overrides:
   # mantinha as duas versões na árvore e o `pnpm audit` seguia acusando a
   # transitiva. Mesmo major (2.x) — correção segura. Datado: 2026-09-11.
   'multer@<2.3.0': '>=2.3.0'
+  # multer >=2.0.0 <2.5.0 — DoS por fileFilter assíncrono pendente após o fim da requisição
+  # (GHSA-q7qp-rjg7-q26m). Mesma origem do override acima. Mesmo major (2.x). Datado: 2026-10-26.
+  'multer@>=2.0.0 <2.5.0': '>=2.5.0 <3'
+  # body-parser >=2.0.0 <2.4.0 — DoS por bytes após o corpo (GHSA-27r3-jxmh-p828). Origem:
+  # @nestjs/platform-express>express (runtime de apps/api). Mesmo major (2.x). Datado: 2026-10-26.
+  'body-parser@>=2.0.0 <2.4.0': '>=2.4.0 <3'
+  # zod <4.6.6 — consumo de memória validando coleções restritas enormes. Origem:
+  # eslint-plugin-react-hooks>zod (devDependency de lint); os zod diretos já estão em 4.6.7.
+  # Mesmo major (4.x). Datado: 2026-10-26.
+  'zod@>=4.0.0 <4.6.6': '>=4.6.6 <5'
   # source-map-js <1.2.2 — DoS no processamento de sourcemaps indexados
   # (GHSA-68fv-2mgg-jv7q). @tailwindcss/node fixa 1.2.1; aplicar o patch da mesma linha.
   'source-map-js@>=1.0.0 <1.2.2': '1.2.2'

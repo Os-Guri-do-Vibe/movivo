@@ -331,6 +331,11 @@ export class AppConfigService {
     };
   }
 
+  /** Diretório da mídia (áudio/imagem) das conversas do WhatsApp — cifrada, disco da VPS (MVP). */
+  get conversationMediaDir(): string {
+    return this.config.CONVERSATION_MEDIA_DIR;
+  }
+
   /** Foto de perfil das contas internas do dashboard — disco persistente da VPS (MVP). */
   get avatarStorage(): AvatarStorageConfig {
     return {

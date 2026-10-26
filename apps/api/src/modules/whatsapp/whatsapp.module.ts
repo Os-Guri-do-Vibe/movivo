@@ -22,7 +22,10 @@ import { Module } from '@nestjs/common';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { PinoLogger } from 'nestjs-pino';
 
+import type { Redis } from 'ioredis';
+
 import { AppConfigService } from '../../core/config';
+import { REDIS_CLIENT, REDIS_KEY_BUILDER, type RedisKeyBuilder } from '../../core/redis';
 import { FollowupModule } from '../followup/followup.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { EVOLUTION_TRANSPORT, EvolutionHttpTransport } from './evolution-transport';
@@ -31,6 +34,8 @@ import { WHATSAPP_INBOUND_EDGES, type WhatsappInboundEdges } from './inbound/wha
 import { UserJobLock } from './user-job-lock';
 import { WebhookController } from './webhook.controller';
 import { WhatsappInboundService } from './whatsapp-inbound.service';
+import { apiSentKey, WhatsappMirrorService } from './whatsapp-mirror.service';
+import { WhatsappMirrorWorker } from './whatsapp-mirror.worker';
 import { WhatsappOutboundWorker } from './whatsapp-outbound.worker';
 import { type WhatsappTransport, WHATSAPP_TRANSPORT } from './whatsapp-transport';
 
@@ -66,12 +71,24 @@ function evolutionWebhookUrl(config: AppConfigService): string {
   providers: [
     {
       provide: EVOLUTION_TRANSPORT,
-      inject: [AppConfigService, PinoLogger],
-      useFactory: (config: AppConfigService, logger: PinoLogger) =>
-        new EvolutionHttpTransport(config.evolution.baseUrl, config.evolution.apiKey, logger, {
-          url: evolutionWebhookUrl(config),
-          token: config.evolution.webhookToken,
-        }),
+      inject: [AppConfigService, PinoLogger, REDIS_CLIENT, REDIS_KEY_BUILDER],
+      useFactory: (
+        config: AppConfigService,
+        logger: PinoLogger,
+        redis: Redis,
+        keys: RedisKeyBuilder,
+      ) =>
+        new EvolutionHttpTransport(
+          config.evolution.baseUrl,
+          config.evolution.apiKey,
+          logger,
+          { url: evolutionWebhookUrl(config), token: config.evolution.webhookToken },
+          // O eco deste envio chegará pelo webhook como `fromMe`: o espelho precisa saber
+          // que não foi digitado no celular.
+          async (messageId) => {
+            await redis.set(apiSentKey(keys, messageId), '1', 'EX', 3_600);
+          },
+        ),
     },
     {
       provide: WHATSAPP_TRANSPORT,
@@ -80,6 +97,8 @@ function evolutionWebhookUrl(config: AppConfigService): string {
     },
     WhatsappOutboundWorker,
     WhatsappInboundService,
+    WhatsappMirrorService,
+    WhatsappMirrorWorker,
     {
       // A borda da EvolutionAPI precisa saber QUAL instância é a nossa para rejeitar
       // entrega de uma segunda conta. O nome é descoberto em runtime (o painel cria a
