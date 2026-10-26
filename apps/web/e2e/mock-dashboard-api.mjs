@@ -564,16 +564,17 @@ createServer(async (request, response) => {
   if (request.method === 'GET' && url.pathname === '/api/v1/control-center/conversations') {
     return json(response, 200, {
       data: {
-        conversations: [
-          {
-            studentId: STUDENT_ID,
-            name: 'Ana Souza',
-            phoneNumber: '+5511999990001',
-            lastMessageAt: '2026-10-09T15:00:00.000Z',
-            aiPaused: false,
-            unreadCount: 0,
-          },
-        ],
+        // Lista longa como a de produção: cada conversa leva um `sr-only` (texto para leitor de
+        // tela posicionado em absoluto) e foi isso que esticou a página além da janela.
+        conversations: Array.from({ length: 40 }, (_, index) => ({
+          studentId:
+            index === 0 ? STUDENT_ID : `77777777-7777-4777-8777-${String(index).padStart(12, '0')}`,
+          name: index === 0 ? 'Ana Souza' : `Aluno ${index}`,
+          phoneNumber: `+55119999${String(index).padStart(5, '0')}`,
+          lastMessageAt: new Date(Date.UTC(2026, 9, 9, 15, 0) - index * 60_000).toISOString(),
+          aiPaused: index % 3 === 0,
+          unreadCount: index % 4,
+        })),
       },
       meta: controlCenterMeta,
     });

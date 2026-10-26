@@ -701,7 +701,10 @@ export function DashboardShell({
     <div
       className={cn(
         'dashboard-theme bg-background',
-        fixedViewport ? 'flex h-dvh flex-col overflow-hidden' : 'min-h-dvh',
+        // `relative` é o que prende o `sr-only` (position: absolute) de cada conversa da lista:
+        // sem um ancestral posicionado ele se ancora na página, escapa do overflow-hidden e
+        // estica o documento até o fim da lista — a barra de rolagem externa sem nada abaixo.
+        fixedViewport ? 'relative flex h-dvh flex-col overflow-hidden' : 'min-h-dvh',
       )}
     >
       <a
