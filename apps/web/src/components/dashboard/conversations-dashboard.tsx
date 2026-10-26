@@ -34,6 +34,7 @@ import { cn } from '@/lib/utils';
 
 import { EmptyState, ResourceState, useControlCenterResource } from './control-center-ui';
 import { formatPhone } from './protocol-anamnesis-answers';
+import { WhatsappText } from './whatsapp-text';
 
 const TIMEZONE = 'America/Sao_Paulo';
 
@@ -416,14 +417,17 @@ function MessageBubble({
             </div>
           ) : null}
           {part ? (
-            <p className="break-words whitespace-pre-wrap text-foreground">
-              {message.media?.kind === 'AUDIO' ? (
+            message.media?.kind === 'AUDIO' ? (
+              // Transcrição é fala convertida em texto: nunca tem marcação do WhatsApp.
+              <>
                 <span className="mb-0.5 block text-[0.6875rem] font-semibold tracking-wide text-muted-foreground uppercase">
                   Transcrição
                 </span>
-              ) : null}
-              {part}
-            </p>
+                <p className="break-words whitespace-pre-wrap text-foreground">{part}</p>
+              </>
+            ) : (
+              <WhatsappText text={part} />
+            )
           ) : null}
           <time
             dateTime={message.createdAt}

@@ -197,6 +197,47 @@ describe('ConversationsDashboard', () => {
     expect(within(log).queryByText(/---/)).toBeNull();
   });
 
+  it('mostra a formatação do WhatsApp (negrito, itálico, riscado, mono, lista, citação)', async () => {
+    getConversations.mockResolvedValue(list);
+    const at = '2026-10-09T15:00:00.000Z';
+    getConversationMessages.mockResolvedValue(
+      history([
+        msg(
+          'm1',
+          'OUTBOUND',
+          '*Treino de hoje* _com calma_ ~antigo~ `3x10`\n- agachamento\n- supino',
+          at,
+        ),
+      ]),
+    );
+    render(<ConversationsDashboard />);
+    await userEvent.click(await screen.findByRole('button', { name: /Ana Souza/ }));
+    const log = await screen.findByRole('log', { name: 'Mensagens' });
+    expect((await within(log).findByText('Treino de hoje')).tagName).toBe('STRONG');
+    expect(within(log).getByText('com calma').tagName).toBe('EM');
+    expect(within(log).getByText('antigo').tagName).toBe('S');
+    expect(within(log).getByText('3x10').tagName).toBe('CODE');
+    expect(within(log).getAllByRole('listitem')).toHaveLength(2);
+    // Os marcadores não aparecem como texto.
+    expect(log.textContent).not.toMatch(/[*~`]/);
+  });
+
+  it('transcrição de áudio é texto puro: asteriscos de uma fala não viram negrito', async () => {
+    getConversations.mockResolvedValue(list);
+    getConversationMessages.mockResolvedValue(
+      history([
+        msg('m1', 'INBOUND', '*isso*', '2026-10-09T15:00:00.000Z', 'AUDIO', {
+          media: { kind: 'AUDIO', status: 'READY', mimeType: 'audio/ogg', seconds: 3 },
+        }),
+      ]),
+    );
+    const { container } = render(<ConversationsDashboard />);
+    await userEvent.click(await screen.findByRole('button', { name: /Ana Souza/ }));
+    await screen.findByText('Transcrição');
+    expect(container.querySelector('strong')).toBeNull();
+    expect(screen.getByText('*isso*')).toBeInTheDocument();
+  });
+
   it('rotula quem escreveu: aluno, AI Coach, aviso automático e profissional', async () => {
     getConversations.mockResolvedValue(list);
     const at = '2026-10-09T15:00:00.000Z';
