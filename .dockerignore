@@ -50,8 +50,7 @@ infra/vps
 VIDEOS-TUTORIAL
 **/*.md
 !packages/*/README.md
-# Únicos documentos jurídicos lidos no build do web (apps/web/src/lib/legal-documents.ts);
-# os demais arquivos de docs/juridico (pendências, validações) ficam fora da imagem.
-!docs/juridico/termos-de-uso.md
-!docs/juridico/politica-de-privacidade.md
+# Únicos documentos jurídicos lidos pelo web (apps/web/src/lib/legal-documents.ts).
+!apps/web/content/legal/termos-de-uso.md
+!apps/web/content/legal/politica-de-privacidade.md
 .DS_Store

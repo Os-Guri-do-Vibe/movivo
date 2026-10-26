@@ -51,7 +51,7 @@ describe('visibilidade dos documentos legais', () => {
     ['termos-de-uso.md', LEGAL_RELEASE.terms],
     ['politica-de-privacidade.md', LEGAL_RELEASE.privacy],
   ])('exibe a versão beta real %s com campos pendentes identificados', (file, version) => {
-    const source = readFileSync(resolve(process.cwd(), '../../docs/juridico', file), 'utf8');
+    const source = readFileSync(resolve(process.cwd(), 'content/legal', file), 'utf8');
     const document = parseLegalDocument(source, version);
     expect(document).toMatchObject({ version, status: 'BETA_VISIBLE', effectiveOn: null });
     expect(document?.markdown).toContain('[CNPJ]');
