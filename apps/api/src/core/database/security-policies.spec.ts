@@ -61,7 +61,6 @@ describe('buildRlsPoliciesSql', () => {
       'subscriptions',
       'conversations',
       'checkins',
-      'reengagement_nudges',
       'conversation_followups',
       'audit_logs',
       'workout_completions',

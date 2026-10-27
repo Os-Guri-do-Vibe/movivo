@@ -148,7 +148,6 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
     professional: 'read',
     parents: [{ table: 'protocols', column: 'protocol_id' }],
   },
-  { table: 'reengagement_nudges', column: 'user_id', professional: 'read' },
   // Pergunta do Coach que espera resposta (treino sem registro): metadado do tópico, sem texto livre.
   { table: 'conversation_followups', column: 'user_id', professional: 'read' },
   { table: 'audit_logs', column: 'user_id', professional: 'write' },

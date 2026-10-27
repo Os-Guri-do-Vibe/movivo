@@ -55,7 +55,6 @@ const EXPECTED_TABLES = [
   // Sprint 5: escopo profissional explicito, auditoria e reengajamento duravel.
   'professional_assignments',
   'audit_logs',
-  'reengagement_nudges',
   // Sprint 7 (US-7.6): persona do agente, append-only.
   'agent_config',
   // Sprint 8: treino concluido (US-8.1), historico de estado (US-8.3), despesa e

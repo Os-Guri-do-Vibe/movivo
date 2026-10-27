@@ -44,7 +44,6 @@ export * from './intent-examples';
 // Sprint 5 - escopo profissional, check-in duravel e auditoria imutavel.
 export * from './professional-assignments';
 export * from './audit-logs';
-export * from './reengagement-nudges';
 
 // Sprint 7 - configuracao publicada da agente de IA (US-7.6). Global, append-only.
 export * from './agent-config';
