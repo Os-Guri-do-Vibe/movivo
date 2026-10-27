@@ -25,3 +25,17 @@ export * from './substitution.schema';
 export * from './workout.schema';
 export * from './workout-share-card.schema';
 export * from './checkin-weekly.schema';
+
+// Treino multimodal, Estado do Aluno, nutrição, corpo, check-in, decisões e eventos.
+export * from './training/modality.schema';
+export * from './training/strength.schema';
+export * from './training/endurance.schema';
+export * from './training/plan.schema';
+export * from './training/execution.schema';
+export * from './student/goal.schema';
+export * from './student/student-state.schema';
+export * from './nutrition/nutrition.schema';
+export * from './body/body.schema';
+export * from './check-in/check-in.schema';
+export * from './coaching/coaching.schema';
+export * from './events/domain-events.schema';
