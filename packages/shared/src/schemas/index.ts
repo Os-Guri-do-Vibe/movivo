@@ -39,3 +39,6 @@ export * from './body/body.schema';
 export * from './check-in/check-in.schema';
 export * from './coaching/coaching.schema';
 export * from './events/domain-events.schema';
+export * from './methodology/fields';
+export * from './methodology/domains';
+export * from './methodology/studio.schema';
