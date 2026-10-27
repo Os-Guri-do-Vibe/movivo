@@ -73,6 +73,37 @@ describe('buildRlsPoliciesSql', () => {
       'user_status_transitions',
       // US-8.5 — liquidacao recebida do gateway, dado financeiro do titular.
       'payments',
+      // Estado do Aluno.
+      'student_profiles',
+      'student_health_records',
+      'student_goals',
+      'goal_milestones',
+      'goal_tasks',
+      'student_constraints',
+      'student_preferences',
+      'student_observations',
+      'student_state_snapshots',
+      // Treino integrado.
+      'training_plans',
+      'plan_sessions',
+      'scheduled_sessions',
+      'session_executions',
+      'execution_sets',
+      'execution_metrics',
+      // Nutrição, corpo e check-ins.
+      'nutrition_plans',
+      'food_logs',
+      'body_measurements',
+      'body_photos',
+      'body_assessments',
+      'check_ins',
+      // Trilha de decisões, fila por exceção e outbox.
+      'coaching_proposals',
+      'coaching_decisions',
+      'decision_executions',
+      'safety_events',
+      'exception_cases',
+      'domain_events',
       'professional_assignments',
     ]);
   });

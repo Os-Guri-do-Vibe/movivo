@@ -547,6 +547,13 @@
       "when": 1793133237505,
       "tag": "0077_remove_lembretes_reengajamento",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1793134287398,
+      "tag": "0078_estado_do_aluno_treino_nutricao_decisoes",
+      "breakpoints": true
     }
   ]
 }

@@ -107,6 +107,39 @@ const EXPECTED_TABLES = [
   'dashboard_notification_reads',
   // Pergunta do Coach que espera resposta (treino sem registro): pendência de 72h, sem texto livre.
   'conversation_followups',
+  // Estado do Aluno.
+  'student_profiles',
+  'student_health_records',
+  'student_goals',
+  'goal_milestones',
+  'goal_tasks',
+  'student_constraints',
+  'student_preferences',
+  'student_observations',
+  'student_state_snapshots',
+  // Treino integrado (plano × sessão × agenda × execução).
+  'training_plans',
+  'plan_sessions',
+  'scheduled_sessions',
+  'session_executions',
+  'execution_sets',
+  'execution_metrics',
+  // Nutrição (food_items é a base global de alimentos), corpo e check-ins adaptativos.
+  'nutrition_plans',
+  'food_items',
+  'food_logs',
+  'body_measurements',
+  'body_photos',
+  'body_assessments',
+  'check_ins',
+  // Trilha de decisões, fila por exceção e outbox de eventos de domínio.
+  'coaching_proposals',
+  'coaching_decisions',
+  'decision_executions',
+  'safety_events',
+  'exception_cases',
+  'domain_events',
+  'domain_event_receipts',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;

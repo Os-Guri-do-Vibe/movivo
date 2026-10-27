@@ -95,3 +95,10 @@ export * from './access-link-tokens';
 
 // Separação da Plataforma Interna (staff) da tabela do titular final (users).
 export * from './staff';
+export * from './student-state';
+export * from './training';
+export * from './nutrition';
+export * from './body';
+export * from './check-ins';
+export * from './coaching';
+export * from './domain-events';

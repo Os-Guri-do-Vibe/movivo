@@ -199,6 +199,81 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
     professional: 'read',
     parents: [{ table: 'subscriptions', column: 'subscription_id' }],
   },
+  // --- Estado do Aluno. Plano/objetivo são `write`: a equipe ajusta ao resolver uma exceção.
+  { table: 'student_profiles', column: 'user_id', professional: 'read' },
+  { table: 'student_health_records', column: 'user_id', professional: 'read' },
+  { table: 'student_goals', column: 'user_id', professional: 'write' },
+  {
+    table: 'goal_milestones',
+    column: 'user_id',
+    professional: 'read',
+    parents: [{ table: 'student_goals', column: 'goal_id' }],
+  },
+  {
+    table: 'goal_tasks',
+    column: 'user_id',
+    professional: 'read',
+    parents: [{ table: 'student_goals', column: 'goal_id' }],
+  },
+  { table: 'student_constraints', column: 'user_id', professional: 'read' },
+  { table: 'student_preferences', column: 'user_id', professional: 'read' },
+  { table: 'student_observations', column: 'user_id', professional: 'read' },
+  { table: 'student_state_snapshots', column: 'user_id', professional: 'read' },
+  // --- Treino integrado.
+  { table: 'training_plans', column: 'user_id', professional: 'write' },
+  {
+    table: 'plan_sessions',
+    column: 'user_id',
+    professional: 'write',
+    parents: [{ table: 'training_plans', column: 'plan_id' }],
+  },
+  {
+    table: 'scheduled_sessions',
+    column: 'user_id',
+    professional: 'write',
+    parents: [
+      { table: 'training_plans', column: 'plan_id' },
+      { table: 'plan_sessions', column: 'plan_session_id' },
+    ],
+  },
+  { table: 'session_executions', column: 'user_id', professional: 'read' },
+  {
+    table: 'execution_sets',
+    column: 'user_id',
+    professional: 'read',
+    parents: [{ table: 'session_executions', column: 'execution_id' }],
+  },
+  {
+    table: 'execution_metrics',
+    column: 'user_id',
+    professional: 'read',
+    parents: [{ table: 'session_executions', column: 'execution_id' }],
+  },
+  // --- Nutrição, corpo e check-ins.
+  { table: 'nutrition_plans', column: 'user_id', professional: 'write' },
+  { table: 'food_logs', column: 'user_id', professional: 'read' },
+  { table: 'body_measurements', column: 'user_id', professional: 'read' },
+  { table: 'body_photos', column: 'user_id', professional: 'read' },
+  { table: 'body_assessments', column: 'user_id', professional: 'read' },
+  { table: 'check_ins', column: 'user_id', professional: 'read' },
+  // --- Trilha de decisões e fila por exceção. A equipe decide (`write`) e resolve sinais/casos.
+  { table: 'coaching_proposals', column: 'user_id', professional: 'read' },
+  {
+    table: 'coaching_decisions',
+    column: 'user_id',
+    professional: 'write',
+    parents: [{ table: 'coaching_proposals', column: 'proposal_id' }],
+  },
+  {
+    table: 'decision_executions',
+    column: 'user_id',
+    professional: 'read',
+    parents: [{ table: 'coaching_decisions', column: 'decision_id' }],
+  },
+  { table: 'safety_events', column: 'user_id', professional: 'write' },
+  { table: 'exception_cases', column: 'user_id', professional: 'write' },
+  // Outbox: só o sistema lê e publica (sem acesso profissional).
+  { table: 'domain_events', column: 'user_id' },
 ];
 
 // `nullif(..., '')` é OBRIGATÓRIO, não cosmético: sob PgBouncer transaction mode,
