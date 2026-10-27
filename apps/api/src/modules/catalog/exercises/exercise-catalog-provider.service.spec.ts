@@ -1,8 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { exerciseCatalogFavorites } from '../../core/database/schema';
-import type { TenantDatabase } from '../../core/database/tenant-database.service';
+import { exerciseCatalogFavorites } from '../../../core/database/schema';
+import type { TenantDatabase } from '../../../core/database/tenant-database.service';
 import { EXERCISE_CATALOG } from './exercise-catalog';
 import { ExerciseCatalogProvider, levelsOfRow } from './exercise-catalog-provider.service';
 

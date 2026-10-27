@@ -24,7 +24,7 @@ import { CoreModule } from '../core/core.module';
 import { TenantDatabase } from '../core/database/tenant-database.service';
 import { protocols, users } from '../core/database/schema';
 import { AiCoachModule } from '../modules/ai-coach/ai-coach.module';
-import { ExerciseCatalogProvider } from '../modules/protocol/exercise-catalog-provider.service';
+import { ExerciseCatalogProvider } from '../modules/catalog/exercises/exercise-catalog-provider.service';
 import { MethodologyProvider } from '../modules/protocol/methodology-provider.service';
 import { planProtocol } from '../modules/protocol/protocol-planner';
 import { ProtocolGeneratorService } from '../modules/protocol/protocol-generator.service';

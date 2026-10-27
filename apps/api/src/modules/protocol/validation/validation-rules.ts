@@ -16,7 +16,7 @@
  */
 import type { GenerationGoal, WorkoutSplit } from '@movivo/shared';
 
-import type { ExerciseLevel } from '../exercise-catalog';
+import type { ExerciseLevel } from '../../catalog/exercises/exercise-catalog';
 
 export const VALIDATION_RULES_VERSION = 'validation-rules-2026-10-v7';
 

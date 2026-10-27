@@ -7,8 +7,8 @@ import {
   protocols,
   protocolVersions,
 } from '../../core/database/schema';
-import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
-import { findSafeCandidates } from './exercise-substitution';
+import { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
+import { findSafeCandidates } from '../catalog/exercises/exercise-substitution';
 import { applySubstitution } from './protocol-substitution-apply';
 import { ProtocolSubstitutionRepository } from './protocol-substitution.repository';
 import type { SubstitutionItem } from './protocol-substitution-items';

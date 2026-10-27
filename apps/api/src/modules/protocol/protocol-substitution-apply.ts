@@ -8,7 +8,7 @@
  */
 import type { ProtocolExercise, ProtocolStructure } from '@movivo/shared';
 
-import type { CatalogExercise } from './exercise-catalog';
+import type { CatalogExercise } from '../catalog/exercises/exercise-catalog';
 
 /** Exercícios distintos do protocolo (por `exerciseId`), na ordem em que aparecem. */
 export interface ProtocolExerciseRef {

@@ -29,7 +29,7 @@ import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { roleHasCapabilities } from '../auth/capabilities';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { QueueManager } from '../jobs/queue-manager.service';
-import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
+import { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
 import { AuditService } from './audit.service';
 import { FinanceService } from './finance.service';
 import {

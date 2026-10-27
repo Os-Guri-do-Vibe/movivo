@@ -14,7 +14,7 @@
  */
 import type { ProtocolStructure } from '@movivo/shared';
 
-import type { CatalogExercise } from './exercise-catalog';
+import type { CatalogExercise } from '../catalog/exercises/exercise-catalog';
 
 type Session = ProtocolStructure['sessions'][number];
 type CatalogLookup = Pick<{ getById(id: string): CatalogExercise | undefined }, 'getById'>;

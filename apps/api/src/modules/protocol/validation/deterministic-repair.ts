@@ -27,8 +27,8 @@
  */
 import type { ProtocolStructure, Weekday } from '@movivo/shared';
 
-import type { ContraindicationTag } from '../exercise-catalog';
-import type { ExerciseCatalogProvider } from '../exercise-catalog-provider.service';
+import type { ContraindicationTag } from '../../catalog/exercises/exercise-catalog';
+import type { ExerciseCatalogProvider } from '../../catalog/exercises/exercise-catalog-provider.service';
 import { PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import { planTrainingWeekdays, weeklySessionTarget } from '../training-days';
 import { isLanguageRule, languageRuleMatches, protocolTextFields } from './text-fields';

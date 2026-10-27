@@ -5,8 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ProtocolExercise, ProtocolStructure } from '@movivo/shared';
 
-import { EXERCISE_BY_ID, type ExerciseLevel } from '../exercise-catalog';
-import { ExerciseCatalogProvider } from '../exercise-catalog-provider.service';
+import { EXERCISE_BY_ID, type ExerciseLevel } from '../../catalog/exercises/exercise-catalog';
+import { ExerciseCatalogProvider } from '../../catalog/exercises/exercise-catalog-provider.service';
 import { PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import { aggregate, ValidationService, type ValidateProtocolInput } from './validation.service';
 

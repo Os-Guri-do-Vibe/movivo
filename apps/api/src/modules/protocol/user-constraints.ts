@@ -28,8 +28,8 @@ import type {
 import { EMPHASIS_MUSCLE_GROUPS, PAIN_REGION_LABELS } from '@movivo/shared';
 
 import type { ParqEvaluation } from '../anamnesis/parq';
-import type { ContraindicationTag, ExerciseLevel } from './exercise-catalog';
-import { STRICT_CONTRAINDICATION_TAGS } from './exercise-substitution';
+import type { ContraindicationTag, ExerciseLevel } from '../catalog/exercises/exercise-catalog';
+import { STRICT_CONTRAINDICATION_TAGS } from '../catalog/exercises/exercise-substitution';
 
 export interface UserConstraints {
   /** Objetivo já traduzido por `toGenerationGoal` — "Outro" nunca chega aqui. */

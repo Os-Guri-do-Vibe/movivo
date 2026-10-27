@@ -8,8 +8,8 @@
 import type { ProtocolStructure, Weekday } from '@movivo/shared';
 import { describe, expect, it } from 'vitest';
 
-import type { ContraindicationTag } from '../exercise-catalog';
-import { ExerciseCatalogProvider } from '../exercise-catalog-provider.service';
+import type { ContraindicationTag } from '../../catalog/exercises/exercise-catalog';
+import { ExerciseCatalogProvider } from '../../catalog/exercises/exercise-catalog-provider.service';
 import { PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import { deterministicRepair, REPAIRABLE_RULES } from './deterministic-repair';
 import { MAX_TECHNIQUES_PER_SESSION } from './validation-rules';

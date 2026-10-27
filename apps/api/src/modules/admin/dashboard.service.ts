@@ -58,11 +58,14 @@ import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { ExerciseCatalogAdminService } from './exercise-catalog-admin.service';
 import { buildProtocolPdf } from '../protocol/protocol-pdf.service';
 import { signatureHash, supersedePreviousActiveProtocols } from '../protocol/protocol.repository';
-import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
+import { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
 import { qualityNotices } from '../protocol/contextual-quality';
 import { cautionNotices } from '../protocol/protocol-caution';
-import { CATALOG_SEARCH_MAX_LIMIT, searchCatalog } from '../protocol/exercise-catalog-search';
-import { findSafeCandidates } from '../protocol/exercise-substitution';
+import {
+  CATALOG_SEARCH_MAX_LIMIT,
+  searchCatalog,
+} from '../catalog/exercises/exercise-catalog-search';
+import { findSafeCandidates } from '../catalog/exercises/exercise-substitution';
 import {
   ProtocolSubstitutionRepository,
   type SubstitutionItemEdit,

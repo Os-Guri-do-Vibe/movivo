@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { EXERCISE_BY_ID } from '../exercise-catalog';
+import { EXERCISE_BY_ID } from '../../catalog/exercises/exercise-catalog';
 import { GOLDEN_SET } from './golden-set.fixture';
 import { ValidationService } from './validation.service';
 

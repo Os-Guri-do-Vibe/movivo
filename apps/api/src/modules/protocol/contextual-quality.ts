@@ -1,7 +1,7 @@
 import type { ProtocolStructure } from '@movivo/shared';
 import { z } from 'zod';
 
-import type { CatalogExercise } from './exercise-catalog';
+import type { CatalogExercise } from '../catalog/exercises/exercise-catalog';
 import { measureProtocol } from './protocol-measurements';
 import type { UserConstraints } from './user-constraints';
 

@@ -35,7 +35,7 @@ import { FollowupService } from '../followup/followup.service';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
-import { EXERCISE_BY_ID } from '../protocol/exercise-catalog';
+import { EXERCISE_BY_ID } from '../catalog/exercises/exercise-catalog';
 import { ShareCardRenderer, type ShareCardImage } from './share-card/share-card-renderer.service';
 import { WorkoutCompletionService } from './workout-completion.service';
 import {

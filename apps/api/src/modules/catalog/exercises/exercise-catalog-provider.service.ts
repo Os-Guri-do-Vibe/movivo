@@ -19,8 +19,8 @@
 import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { desc, sql } from 'drizzle-orm';
 
-import { TenantDatabase } from '../../core/database/tenant-database.service';
-import { exerciseCatalogEntries, exerciseCatalogFavorites } from '../../core/database/schema';
+import { TenantDatabase } from '../../../core/database/tenant-database.service';
+import { exerciseCatalogEntries, exerciseCatalogFavorites } from '../../../core/database/schema';
 import {
   CATALOG_VERSION,
   EXERCISE_CATALOG as BOOTSTRAP_EXERCISE_CATALOG,

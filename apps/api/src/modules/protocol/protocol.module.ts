@@ -29,7 +29,7 @@ import { ProtocolRenewalGenerationWorker } from './protocol-renewal-generation.w
 import { ProtocolRenewalScheduler } from './protocol-renewal.scheduler';
 import { ProtocolSubstitutionReleaseWorker } from './protocol-substitution-release.worker';
 import { ProtocolSubstitutionRepository } from './protocol-substitution.repository';
-import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
+import { CatalogModule } from '../catalog/catalog.module';
 import { MethodologyProvider } from './methodology-provider.service';
 import { ProtocolRepository } from './protocol.repository';
 import { ReviewHoldService } from './review-hold.service';
@@ -43,12 +43,11 @@ import { WorkoutPresentationService } from './workout-presentation.service';
  * (US-2.4) orquestra gera-e-valida→persiste→auto-aprova→entrega.
  */
 @Module({
-  imports: [AiCoachModule, JobsModule, ShortLinkModule],
+  imports: [AiCoachModule, JobsModule, ShortLinkModule, CatalogModule],
   controllers: [ProtocolController],
   providers: [
     ProtocolGeneratorService,
     MethodologyProvider,
-    ExerciseCatalogProvider,
     ValidationService,
     ProtocolRepository,
     ProtocolGenerationWorker,
@@ -65,7 +64,8 @@ import { WorkoutPresentationService } from './workout-presentation.service';
     ProtocolGeneratorService,
     ValidationService,
     MethodologyProvider,
-    ExerciseCatalogProvider,
+    // O catálogo de exercícios mora no CatalogModule; reexportado até este módulo ser apagado.
+    CatalogModule,
     ProtocolSubstitutionRepository,
     ProtocolRepository,
     ReviewHoldService,

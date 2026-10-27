@@ -11,8 +11,8 @@ import {
   LEVEL_ORDER,
   lowestLevel,
   servesLocation,
-} from './exercise-catalog';
-import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
+} from '../catalog/exercises/exercise-catalog';
+import { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
 import { METHODOLOGY_GUIDELINES, METHODOLOGY_VERSION } from './methodology';
 import type { MethodologyProvider } from './methodology-provider.service';
 import {

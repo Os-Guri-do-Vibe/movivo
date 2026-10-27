@@ -10,7 +10,7 @@ import {
   type Weekday,
 } from '@movivo/shared';
 
-import { EXERCISE_BY_ID } from '../exercise-catalog';
+import { EXERCISE_BY_ID } from '../../catalog/exercises/exercise-catalog';
 import { buildFallbackProtocol } from './fallback-template';
 import { ValidationService } from './validation.service';
 

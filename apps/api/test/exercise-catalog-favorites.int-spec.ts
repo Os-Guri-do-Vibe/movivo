@@ -50,7 +50,7 @@ import type { LLMRequest } from '../src/modules/ai-coach/llm/llm.types';
 import { LlmRouter } from '../src/modules/ai-coach/llm/llm-router.service';
 import { ExerciseCatalogAdminService } from '../src/modules/admin/exercise-catalog-admin.service';
 import { PasswordService } from '../src/modules/auth/password.service';
-import { ExerciseCatalogProvider } from '../src/modules/protocol/exercise-catalog-provider.service';
+import { ExerciseCatalogProvider } from '../src/modules/catalog/exercises/exercise-catalog-provider.service';
 import { ProtocolGeneratorService } from '../src/modules/protocol/protocol-generator.service';
 import type { UserConstraints } from '../src/modules/protocol/user-constraints';
 

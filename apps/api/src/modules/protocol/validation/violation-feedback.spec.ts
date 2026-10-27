@@ -7,8 +7,8 @@
 import type { ProtocolStructure } from '@movivo/shared';
 import { describe, expect, it } from 'vitest';
 
-import { EXERCISE_CATALOG } from '../exercise-catalog';
-import { ExerciseCatalogProvider } from '../exercise-catalog-provider.service';
+import { EXERCISE_CATALOG } from '../../catalog/exercises/exercise-catalog';
+import { ExerciseCatalogProvider } from '../../catalog/exercises/exercise-catalog-provider.service';
 import type { UserConstraints } from '../user-constraints';
 import {
   buildCorrectionMessage,

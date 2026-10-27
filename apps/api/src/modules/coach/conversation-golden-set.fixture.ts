@@ -15,8 +15,8 @@
  * guarda de chave e `skip` no CI — este runner é o gate que morde em todo PR.
  */
 import type { GuardrailLevel } from '../ai-coach/intent/clinical-guardrail';
-import type { ContraindicationTag } from '../protocol/exercise-catalog';
-import type { SubstitutionConstraints } from '../protocol/exercise-substitution';
+import type { ContraindicationTag } from '../catalog/exercises/exercise-catalog';
+import type { SubstitutionConstraints } from '../catalog/exercises/exercise-substitution';
 import type { ValidationAction } from '../protocol/validation/validation.service';
 
 /** Entrada do usuário → nível de guardrail esperado (`null` = segue para conversa normal). */

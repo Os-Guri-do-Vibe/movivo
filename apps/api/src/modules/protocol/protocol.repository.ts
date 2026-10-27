@@ -29,7 +29,7 @@ import {
 } from '../../core/database/tenant-database.service';
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { anamnesisSessions, protocols, protocolVersions } from '../../core/database/schema';
-import type { ContraindicationTag } from './exercise-catalog';
+import type { ContraindicationTag } from '../catalog/exercises/exercise-catalog';
 import { computeMesocycleSummary, persistMesocycleSummary } from './mesocycle-summary';
 import type { ProtocolGenerationTrace } from './protocol-planner';
 

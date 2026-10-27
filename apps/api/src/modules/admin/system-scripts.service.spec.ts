@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import type { QueueManager } from '../jobs/queue-manager.service';
-import type { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
+import type { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
 import type { AuditService } from './audit.service';
 import type { FinanceService } from './finance.service';
 import { SystemScriptsService } from './system-scripts.service';

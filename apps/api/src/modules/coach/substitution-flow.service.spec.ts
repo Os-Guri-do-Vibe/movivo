@@ -8,8 +8,11 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ProtocolStructure } from '@movivo/shared';
 
 import { BUBBLE_SEPARATOR } from '../whatsapp/message-templates';
-import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
-import { findSafeCandidates, isPlausibleSubstitution } from '../protocol/exercise-substitution';
+import { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
+import {
+  findSafeCandidates,
+  isPlausibleSubstitution,
+} from '../catalog/exercises/exercise-substitution';
 import type { ActiveProtocolForSubstitution } from '../protocol/protocol-substitution.repository';
 import {
   SUBSTITUTION_ALREADY_PENDING_MESSAGE,

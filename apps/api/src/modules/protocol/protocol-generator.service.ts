@@ -51,8 +51,8 @@ import {
   type CatalogExercise,
   offeredToLevel,
   servesLocation,
-} from './exercise-catalog';
-import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
+} from '../catalog/exercises/exercise-catalog';
+import { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
 import { normalizeModelOutput } from './model-output-normalizer';
 import { METHODOLOGY_VERSION } from './methodology';
 import { MethodologyProvider } from './methodology-provider.service';

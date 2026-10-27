@@ -8,7 +8,7 @@ import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { QueueManager } from '../jobs/queue-manager.service';
-import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
+import { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
 import type { ReviewHoldService } from '../protocol/review-hold.service';
 import type { ProtocolSubstitutionRepository } from '../protocol/protocol-substitution.repository';
 import { ValidationService } from '../protocol/validation/validation.service';

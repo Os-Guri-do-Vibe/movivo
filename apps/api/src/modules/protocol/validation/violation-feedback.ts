@@ -17,8 +17,12 @@
  */
 import type { ProtocolExercise, ProtocolStructure, WorkoutSplit } from '@movivo/shared';
 
-import { type ContraindicationTag, LEVEL_ORDER, lowestLevel } from '../exercise-catalog';
-import type { ExerciseCatalogProvider } from '../exercise-catalog-provider.service';
+import {
+  type ContraindicationTag,
+  LEVEL_ORDER,
+  lowestLevel,
+} from '../../catalog/exercises/exercise-catalog';
+import type { ExerciseCatalogProvider } from '../../catalog/exercises/exercise-catalog-provider.service';
 import { PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import { normalizedPreferredDays, weeklySessionTarget } from '../training-days';
 import { hardInjuryTags, type UserConstraints } from '../user-constraints';

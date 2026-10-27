@@ -37,15 +37,15 @@ import type { ScrubUser } from '../ai-coach/llm/llm.types';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import { enqueueStaffQueueAlert } from '../jobs/staff-queue-alert';
-import type { CatalogExercise, ContraindicationTag } from '../protocol/exercise-catalog';
-import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
+import type { CatalogExercise, ContraindicationTag } from '../catalog/exercises/exercise-catalog';
+import { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
 import {
   cautionTagsOf,
   findCautionCandidates,
   findSafeCandidates,
   isPlausibleSubstitution,
   SUBSTITUTION_BATCH_SIZE,
-} from '../protocol/exercise-substitution';
+} from '../catalog/exercises/exercise-substitution';
 import {
   applySubstitution,
   applySubstitutions,

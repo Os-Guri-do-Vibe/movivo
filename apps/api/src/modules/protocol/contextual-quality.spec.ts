@@ -11,7 +11,7 @@ import {
   qualityReviewSchema,
   qualityUnavailable,
 } from './contextual-quality';
-import type { CatalogExercise } from './exercise-catalog';
+import type { CatalogExercise } from '../catalog/exercises/exercise-catalog';
 import type { UserConstraints } from './user-constraints';
 
 const catalog: CatalogExercise[] = [

@@ -9,7 +9,7 @@
  */
 import type { ProtocolStructure } from '@movivo/shared';
 
-import type { CatalogExercise, ContraindicationTag } from './exercise-catalog';
+import type { CatalogExercise, ContraindicationTag } from '../catalog/exercises/exercise-catalog';
 
 const REGION_LABEL: Partial<Record<ContraindicationTag, string>> = {
   NECK: 'pescoço',

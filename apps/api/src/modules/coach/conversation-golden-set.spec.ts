@@ -10,13 +10,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { clinicalGuardrail } from '../ai-coach/intent/clinical-guardrail';
-import { EXERCISE_BY_ID, EXERCISE_CATALOG } from '../protocol/exercise-catalog';
+import { EXERCISE_BY_ID, EXERCISE_CATALOG } from '../catalog/exercises/exercise-catalog';
 import {
   findCautionCandidates,
   findSafeCandidates,
   isEquivalentOrLowerRisk,
   STRICT_CONTRAINDICATION_TAGS,
-} from '../protocol/exercise-substitution';
+} from '../catalog/exercises/exercise-substitution';
 import { ValidationService } from '../protocol/validation/validation.service';
 import {
   CAUTION_CASES,

@@ -26,9 +26,9 @@ import {
   type ExerciseLevel,
   LEVEL_ORDER,
   lowestLevel,
-} from '../exercise-catalog';
-import { ExerciseCatalogProvider } from '../exercise-catalog-provider.service';
-import { isEquivalentOrLowerRisk } from '../exercise-substitution';
+} from '../../catalog/exercises/exercise-catalog';
+import { ExerciseCatalogProvider } from '../../catalog/exercises/exercise-catalog-provider.service';
+import { isEquivalentOrLowerRisk } from '../../catalog/exercises/exercise-substitution';
 import { isPhaseDurationWithinRange, PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import {
   duplicatedWeekdays,

@@ -32,9 +32,13 @@ import {
   type SubstitutionChange,
   type SubstitutionItem,
 } from './protocol-substitution-items';
-import type { CatalogExercise, ContraindicationTag, ExerciseLevel } from './exercise-catalog';
-import { ExerciseCatalogProvider } from './exercise-catalog-provider.service';
-import { isViable, type SubstitutionConstraints } from './exercise-substitution';
+import type {
+  CatalogExercise,
+  ContraindicationTag,
+  ExerciseLevel,
+} from '../catalog/exercises/exercise-catalog';
+import { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
+import { isViable, type SubstitutionConstraints } from '../catalog/exercises/exercise-substitution';
 import { isProfessionalAuthored } from './protocol-origin';
 import { ValidationService, type ValidateProtocolInput } from './validation/validation.service';
 

@@ -20,7 +20,7 @@ import type {
   ExerciseLocation,
   ExerciseMeasurement,
   MovementPattern,
-} from '../../../modules/protocol/exercise-catalog';
+} from '../../../modules/catalog/exercises/exercise-catalog';
 import { eventTimestamp, primaryKeyColumn } from './_shared';
 import { staff } from './staff';
 

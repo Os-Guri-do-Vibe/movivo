@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ProtocolStructure } from '@movivo/shared';
 
-import { EXERCISE_BY_ID } from './exercise-catalog';
+import { EXERCISE_BY_ID } from '../catalog/exercises/exercise-catalog';
 import { applySubstitution, collectProtocolExercises } from './protocol-substitution-apply';
 
 function structure(over: Partial<ProtocolStructure> = {}): ProtocolStructure {

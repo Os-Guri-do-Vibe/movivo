@@ -54,7 +54,7 @@ import { enqueueStaffQueueAlert } from '../jobs/staff-queue-alert';
 import { WorkerFactory } from '../jobs/worker.factory';
 import { healthBlockSchema } from '../anamnesis/health-block';
 import { evaluateRenewalSafety } from '../protocol-renewal/protocol-renewal-safety';
-import type { ContraindicationTag } from './exercise-catalog';
+import type { ContraindicationTag } from '../catalog/exercises/exercise-catalog';
 import {
   buildCareerDigestLine,
   computeMesocycleSummary,

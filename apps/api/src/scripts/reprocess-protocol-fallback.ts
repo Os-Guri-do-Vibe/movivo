@@ -56,7 +56,7 @@ import { healthBlockSchema } from '../modules/anamnesis/health-block';
 import { evaluateParq, type ParqEvaluation } from '../modules/anamnesis/parq';
 import { QUEUE } from '../modules/jobs/jobs.config';
 import { QueueManager } from '../modules/jobs/queue-manager.service';
-import { ExerciseCatalogProvider } from '../modules/protocol/exercise-catalog-provider.service';
+import { ExerciseCatalogProvider } from '../modules/catalog/exercises/exercise-catalog-provider.service';
 import {
   PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS,
   reviewUrgencyForPlan,

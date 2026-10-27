@@ -13,7 +13,7 @@
  */
 import type { ProtocolStructure } from '@movivo/shared';
 
-import type { ContraindicationTag } from '../exercise-catalog';
+import type { ContraindicationTag } from '../../catalog/exercises/exercise-catalog';
 import { PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import type { ValidateProtocolInput, ValidationAction } from './validation.service';
 

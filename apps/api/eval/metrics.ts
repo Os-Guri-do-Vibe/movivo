@@ -6,7 +6,7 @@
  */
 import type { ProtocolStructure } from '@movivo/shared';
 
-import type { CatalogExercise } from '../src/modules/protocol/exercise-catalog';
+import type { CatalogExercise } from '../src/modules/catalog/exercises/exercise-catalog';
 
 const norm = (s: string): string =>
   s
