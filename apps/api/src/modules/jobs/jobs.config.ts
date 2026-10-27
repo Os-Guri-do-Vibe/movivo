@@ -64,6 +64,10 @@ export const QUEUE = {
   // Fim do período pago: cron horário que leva ACTIVE → EXPIRED quando não houve renovação
   // (parcelado no cartão e Pix à vista não renovam sozinhos).
   subscriptionPeriodScan: 'subscription-period-scan',
+  // Outbox de eventos de domínio: o relé publica eventos gravados em `domain_events` e o
+  // dispatcher entrega cada evento aos consumidores registrados (idempotentes por recibo).
+  outboxRelay: 'outbox-relay',
+  domainEvents: 'domain-events',
   knowledgeProcessing: 'knowledge-processing',
   sanity: 'sanity',
   deadLetter: 'dead-letter',
@@ -180,6 +184,15 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
     backoffMs: [2_000, 10_000, 30_000, 120_000],
     concurrency: 2,
     lockMs: 120_000,
+  },
+  // Relé: uma execução por vez basta (o SELECT usa SKIP LOCKED); retry rápido.
+  [QUEUE.outboxRelay]: { attempts: 3, backoffMs: [1_000, 5_000, 15_000], concurrency: 1 },
+  // Dispatcher: consumidores podem chamar IA, por isso lock longo e retry espaçado.
+  [QUEUE.domainEvents]: {
+    attempts: 5,
+    backoffMs: [2_000, 10_000, 30_000, 120_000, 600_000],
+    concurrency: 10,
+    lockMs: 180_000,
   },
   [QUEUE.sanity]: { attempts: 3, backoffMs: [50, 100, 200], concurrency: 2 },
   // DLQ é destino final: não retenta, não é reprocessada automaticamente.

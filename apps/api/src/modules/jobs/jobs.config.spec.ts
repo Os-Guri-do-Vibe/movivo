@@ -51,6 +51,9 @@ describe('jobs.config', () => {
         'workout-protocol-changed',
         // Comentário do Coach sobre o check-in semanal (achado 2026-09-13).
         'checkin-weekly-feedback',
+        // Outbox de eventos de domínio: relé + despacho aos consumidores.
+        'outbox-relay',
+        'domain-events',
       ].sort(),
     );
   });

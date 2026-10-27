@@ -110,6 +110,20 @@ export const CRON_SCRIPTS: readonly CronScript[] = [
       'Varre agora as assinaturas com período vencido, encerra o acesso de quem não renovou e envia o aviso de fim de plano.',
     resultLabels: { expired: 'encerradas' },
   },
+  {
+    id: 'outbox-relay-scan',
+    kind: 'CRON',
+    name: 'Publicação de eventos de domínio',
+    description:
+      'Publica na fila os eventos de domínio gravados pelas mudanças de estado (plano publicado, treino registrado, sinal de segurança…), para que os consumidores reajam. Cada mudança já pede publicação imediata; esta varredura recolhe o que ficou para trás.',
+    queue: QUEUE.outboxRelay,
+    schedulerId: 'outbox-relay-scan',
+    cron: 'a cada 10 s',
+    schedule: 'A cada 10 segundos',
+    runEffect:
+      'Publica agora os eventos ainda não publicados. Evento já publicado não sai de novo.',
+    resultLabels: { published: 'eventos publicados' },
+  },
 ];
 
 export const ROUTINE_SCRIPTS: readonly RoutineScript[] = [

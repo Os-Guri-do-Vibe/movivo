@@ -63,6 +63,7 @@ describe('SystemScriptsService.list', () => {
       'checkin-weekly-scan',
       'protocol-renewal-scan',
       'subscription-period-scan',
+      'outbox-relay-scan',
     ]);
     expect(byKind('ROUTINE')).toHaveLength(2);
     expect(byKind('TERMINAL').length).toBeGreaterThan(0);

@@ -31,6 +31,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { CheckinModule } from './modules/checkin/checkin.module';
 import { WorkoutModule } from './modules/workout/workout.module';
 import { CoachModule } from './modules/coach/coach.module';
+import { DomainEventsModule } from './modules/domain-events/domain-events.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { ProtocolModule } from './modules/protocol/protocol.module';
 import { ProtocolRenewalModule } from './modules/protocol-renewal/protocol-renewal.module';
@@ -56,6 +57,7 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
     CheckinModule,
     WorkoutModule,
     JobsModule,
+    DomainEventsModule,
     AdminModule,
   ],
 })
