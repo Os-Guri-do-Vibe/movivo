@@ -13,8 +13,6 @@
  */
 import { QUEUE, type QueueName } from '../jobs/jobs.config';
 
-export type ScriptKind = 'CRON' | 'ROUTINE' | 'TERMINAL';
-
 interface ScriptBase {
   id: string;
   name: string;

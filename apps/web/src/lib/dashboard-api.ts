@@ -555,10 +555,6 @@ export async function getAlerts(signal?: AbortSignal): Promise<AlertsResponse> {
   return parseAlertsResponse(await request('/alerts', { signal }));
 }
 
-export async function getAlertsSummary(signal?: AbortSignal): Promise<AlertsSummary> {
-  return parseAlertsSummary(await request('/alerts/summary', { signal }));
-}
-
 export async function getNotifications(signal?: AbortSignal): Promise<NotificationsResponse> {
   return parseNotificationsResponse(await request('/notifications', { signal }));
 }

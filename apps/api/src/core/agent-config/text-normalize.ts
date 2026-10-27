@@ -55,9 +55,6 @@ export function matchesTerm(normalizedText: string, term: string): boolean {
   return ` ${normalizedText} `.includes(` ${needle} `);
 }
 
-/** Comprimento mínimo de um termo normalizado aceito como gatilho de bloqueio (Sato). */
-export const MIN_NORMALIZED_TERM_LENGTH = 4;
-
 /**
  * Forma canônica preservando pontuação e acentos para detectores baseados em regex.
  * Compatibilidade e caracteres invisíveis são normalizados num ponto compartilhado.

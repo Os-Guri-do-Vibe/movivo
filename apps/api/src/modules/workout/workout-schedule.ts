@@ -90,11 +90,6 @@ const PROTOCOL_WEEKDAY: Readonly<Record<number, Weekday>> = {
   6: 'SAT',
 };
 
-/** Código do dia da semana (`session.weekday`) para a data, no fuso do produto. */
-export function weekdayCode(at: Date): Weekday {
-  return PROTOCOL_WEEKDAY[weekday(at)] ?? 'SUN';
-}
-
 /** Código do dia da semana de `at` no fuso do ALUNO. */
 export function weekdayCodeIn(at: Date, timezone: string | null | undefined): Weekday {
   const day = new Date(`${dayKeyIn(at, timezone)}T12:00:00.000Z`).getUTCDay();

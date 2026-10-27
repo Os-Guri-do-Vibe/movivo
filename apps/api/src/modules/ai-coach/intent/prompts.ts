@@ -35,8 +35,6 @@ import {
 import { UNTRUSTED_CONTEXT_POLICY } from '../context/untrusted-context';
 import type { Intent } from './intent.types';
 
-export const PROMPT_VERSION = 'coach-prompts-2026-10-v16';
-
 // `DEFAULT_AGENT_PERSONA` mora em @movivo/shared (fonte única) — o serviço de resolução
 // vive no CORE (DI global, §12.5) e não pode importar deste módulo de domínio.
 export { DEFAULT_AGENT_PERSONA };

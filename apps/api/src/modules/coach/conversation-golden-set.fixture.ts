@@ -19,17 +19,6 @@ import type { ContraindicationTag } from '../protocol/exercise-catalog';
 import type { SubstitutionConstraints } from '../protocol/exercise-substitution';
 import type { ValidationAction } from '../protocol/validation/validation.service';
 
-/**
- * v3 (2026-09-10): perímetro ampliado — ver memória `rt-leo-credenciais-escopo`.
- * v4 (2026-10-12): casos de frase LEGÍTIMA que o validador não pode barrar (o golden set só
- * provava a direção perigosa) e o caso de promessa de prazo, agora só para verbos de retorno.
- * v5 (2026-10-13): pergunta sobre treino sem registro — nunca compensar/repor (a negação
- * "não precisa compensar" é a resposta certa e passa) e léxico que a marca nunca usa.
- * v6 (2026-10-13): a pergunta passa a viajar no link das 04:00. Não há registro retroativo, então
- * o Coach nunca diz que "registrou" um treino; ecos de "falhei"/"você sumiu" são barrados.
- */
-export const CONVERSATION_GOLDEN_SET_VERSION = 'conversation-golden-set-2026-10-v6';
-
 /** Entrada do usuário → nível de guardrail esperado (`null` = segue para conversa normal). */
 export interface GuardrailCase {
   label: string;

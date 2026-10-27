@@ -1,7 +1,7 @@
 'use client';
 
-import type { ChurnRisk, ControlCenterStudentSummary } from '@movivo/shared';
-import { AlertTriangle, Search, UsersRound } from 'lucide-react';
+import type { ControlCenterStudentSummary } from '@movivo/shared';
+import { Search, UsersRound } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
@@ -117,34 +117,6 @@ function formatEnrolledAt(value: string | null): string {
 function formatDay(value: string): string {
   const [year, month, day] = value.split('-');
   return `${day}/${month}/${year}`;
-}
-
-/**
- * Risco **comercial** de cancelamento com os sinais nomeados (US-7.4, TASK-7.4.5).
- * Um número sozinho não gera ação; os sinais que dispararam, sim. Não é leitura sobre
- * a saúde da pessoa.
- */
-export function ChurnRiskSignals({ risk }: { risk: ChurnRisk }) {
-  if (risk.score === 0) {
-    return (
-      <p className="mt-4 text-xs text-muted-foreground">
-        Sem sinal de risco de cancelamento no momento.
-      </p>
-    );
-  }
-  return (
-    <div className="mt-4">
-      <p className="text-label font-semibold">Risco de cancelamento: {risk.score} de 3 sinais</p>
-      <ul className="mt-2 space-y-1">
-        {risk.signals.map((signal) => (
-          <li key={signal.code} className="flex items-start gap-2 text-xs text-muted-foreground">
-            <AlertTriangle aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
-            {signal.label}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
 }
 
 type SortKey = 'name' | 'status' | 'plan' | 'phone' | 'email' | 'enrolledAt';

@@ -17,8 +17,6 @@ import type { ContraindicationTag } from '../exercise-catalog';
 import { PHASE_DURATION_WEEKS_RANGE } from '../protocol-timeline';
 import type { ValidateProtocolInput, ValidationAction } from './validation.service';
 
-export const GOLDEN_SET_VERSION = 'golden-set-2026-09-v4';
-
 export interface GoldenCase {
   label: string;
   /** `clean` = a IA planejou dentro dos trilhos; `adversarial` = saiu deles. */

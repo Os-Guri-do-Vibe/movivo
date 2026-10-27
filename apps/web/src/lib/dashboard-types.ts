@@ -1,6 +1,5 @@
 import type { ProtocolStructure } from '@movivo/shared';
 
-export type { DashboardCapability, DashboardRole } from './control-center-access';
 /**
  * `PARQ` saiu do enum em 2026-08-24 (espelha `kindSchema` do backend): PAR-Q bloqueante
  * não é mais um item de fila próprio — o protocolo é sempre gerado e o PAR-Q vive dentro

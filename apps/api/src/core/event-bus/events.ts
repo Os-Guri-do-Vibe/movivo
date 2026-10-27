@@ -11,8 +11,6 @@ export interface CheckinInboundEvent {
   routeKey: string;
 }
 
-export type { DashboardQueueReason } from './dashboard-queue-events.service';
-
 /** Mensagem recebida no WhatsApp que pode ser um pedido de cancelamento/gerenciamento de assinatura. */
 export const SUBSCRIPTION_INBOUND_EVENT = 'subscription.inbound.received';
 
