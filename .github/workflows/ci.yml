@@ -86,6 +86,11 @@ jobs:
       - name: Format check
         run: pnpm run format:check
 
+      # Arquivo, export ou dependência sem uso falha o build: o refactor da v2 não pode
+      # deixar código morto para trás (configuração e exceções em knip.jsonc).
+      - name: Código sem uso (knip)
+        run: pnpm run knip
+
       - name: Gate operacional — Base de Conhecimento
         run: pnpm run infra:knowledge:verify
 

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://unpkg.com/knip@6.41.0/schema.json",
+  "ignoreExportsUsedInFile": true,
+  // Tabelas e enums do Drizzle precisam ficar exportados: o drizzle-kit gera as migrações a
+  // partir dos exports do schema, e tirar um export faria a próxima migração apagar a tabela.
+  "ignoreIssues": {
+    "apps/api/src/core/database/schema/**": ["exports", "types", "enumMembers"],
+  },
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/**/*.{mjs,js,ts}"],
+      // Os scripts da raiz carregam esses pacotes da árvore de apps/api ou apps/web via
+      // `createRequire` (ex.: scripts/verify-access-links.mjs) — o knip não segue esse caminho.
+      "ignoreDependencies": ["next", "reflect-metadata", "postgres", "drizzle-orm", "ioredis"],
+    },
+    "apps/api": {
+      "entry": [
+        "src/scripts/**/*.ts",
+        "scripts/**/*.{ts,mjs,js}",
+        "eval/**/*.ts",
+        "test/**/*.ts",
+        "src/core/database/schema/index.ts",
+      ],
+      "project": ["src/**/*.ts", "scripts/**/*.{ts,mjs,js}", "eval/**/*.ts", "test/**/*.ts"],
+      // O plugin do Drizzle carrega drizzle.config.ts, que lê secrets de /run/secrets.
+      "drizzle": false,
+      // Carregado por string como transport do pino em dev (core/logger/logger.module.ts).
+      "ignoreDependencies": ["pino-pretty"],
+    },
+    "apps/web": {
+      "entry": ["e2e/**/*.ts", "test/**/*.{ts,tsx}"],
+      "project": ["src/**/*.{ts,tsx}", "e2e/**/*.ts", "test/**/*.{ts,tsx}"],
+      // tailwindcss e tw-animate-css entram por `@import` no globals.css; postcss-load-config
+      // só aparece no JSDoc de tipo do postcss.config.mjs.
+      "ignoreDependencies": ["tailwindcss", "tw-animate-css", "postcss-load-config"],
+    },
+    "packages/shared": {
+      "project": ["src/**/*.ts"],
+    },
+  },
+}
