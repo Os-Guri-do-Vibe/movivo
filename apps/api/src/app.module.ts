@@ -32,6 +32,7 @@ import { CheckinModule } from './modules/checkin/checkin.module';
 import { WorkoutModule } from './modules/workout/workout.module';
 import { CoachModule } from './modules/coach/coach.module';
 import { AgentsModule } from './core/agents/agents.module';
+import { MethodologyModule } from './modules/methodology/methodology.module';
 import { StudentStateModule } from './modules/student-state/student-state.module';
 import { DomainEventsModule } from './modules/domain-events/domain-events.module';
 import { JobsModule } from './modules/jobs/jobs.module';
@@ -62,6 +63,7 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
     DomainEventsModule,
     AgentsModule,
     StudentStateModule,
+    MethodologyModule,
     AdminModule,
   ],
 })

@@ -2,23 +2,11 @@ import { createHash } from 'node:crypto';
 
 import { z, type ZodType } from 'zod';
 
+import type { MethodologyDomain } from '@movivo/shared';
+
 import type { ModelTier } from '../ai/ai.types';
 
-/**
- * Domínios de metodologia publicados pelos profissionais. A tarefa declara quais entram no
- * prompt; o conteúdo vem do estúdio de metodologia (versão publicada).
- */
-export type MethodologyDomain =
-  | 'STRENGTH'
-  | 'RUNNING'
-  | 'HYROX'
-  | 'HYBRID'
-  | 'NUTRITION'
-  | 'RECOVERY'
-  | 'ADHERENCE'
-  | 'SAFETY'
-  | 'AUTONOMY'
-  | 'COMMUNICATION';
+export type { MethodologyDomain };
 
 /** Fatias nomeadas do Estado do Aluno que uma tarefa pode ler. */
 export type StateSlice =

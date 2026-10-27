@@ -53,6 +53,11 @@ const NO_CONTEXT: AgentContextSources = {
 
 export interface EvaluateOptions {
   caseIds?: readonly string[];
+  /**
+   * Metodologia em teste (rascunho), por domínio, no lugar da publicada. O texto do próprio caso
+   * continua tendo precedência — ele existe justamente para fixar o cenário.
+   */
+  methodologyOverride?: Partial<Record<MethodologyDomain, { text: string; version: number }>>;
   routeOverride?: TierRoute;
   requestedBy?: string | null;
 }
@@ -87,7 +92,7 @@ export class EvaluationService {
     const results: EvalCaseResult[] = [];
     let methodologyVersions: Partial<Record<MethodologyDomain, number>> = {};
     for (const evalCase of selected) {
-      const sources = this.sourcesFor(evalCase);
+      const sources = this.sourcesFor(evalCase, options.methodologyOverride ?? {});
       try {
         const run = await this.runner.run(task, evalCase.input, {
           userId: null,
@@ -183,7 +188,10 @@ export class EvaluationService {
   }
 
   /** O caso fixa o estado; a metodologia vem do caso ou, na falta, da versão publicada. */
-  private sourcesFor(evalCase: EvalCase): AgentContextSources {
+  private sourcesFor(
+    evalCase: EvalCase,
+    override: NonNullable<EvaluateOptions['methodologyOverride']>,
+  ): AgentContextSources {
     return {
       state: async (slices: readonly StateSlice[]) => ({
         slices: Object.fromEntries(
@@ -193,7 +201,12 @@ export class EvaluationService {
       }),
       methodology: async (domains: readonly MethodologyDomain[]) => {
         const fromCase = domains.filter((d) => evalCase.methodology?.[d] !== undefined);
-        const missing = domains.filter((d) => evalCase.methodology?.[d] === undefined);
+        const fromOverride = domains.filter(
+          (d) => evalCase.methodology?.[d] === undefined && override[d] !== undefined,
+        );
+        const missing = domains.filter(
+          (d) => evalCase.methodology?.[d] === undefined && override[d] === undefined,
+        );
         const published =
           missing.length > 0 && this.published
             ? await this.published.render(missing)
@@ -201,9 +214,13 @@ export class EvaluationService {
         const caseText = fromCase
           .map((d) => `## ${d}\n${evalCase.methodology?.[d] ?? ''}`)
           .join('\n\n');
+        const overrideText = fromOverride.map((d) => override[d]?.text ?? '').join('\n\n');
+        const overrideVersions = Object.fromEntries(
+          fromOverride.map((d) => [d, override[d]?.version ?? 0]),
+        );
         return {
-          text: [caseText, published.text].filter(Boolean).join('\n\n'),
-          versions: published.versions,
+          text: [caseText, overrideText, published.text].filter(Boolean).join('\n\n'),
+          versions: { ...published.versions, ...overrideVersions },
         };
       },
     };

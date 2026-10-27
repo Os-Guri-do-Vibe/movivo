@@ -42,6 +42,13 @@ export class AgentTaskRegistry {
     return registered;
   }
 
+  /** Tarefas cujo prompt usa o domínio de metodologia (são as testadas ao publicá-lo). */
+  tasksUsing(domain: string): string[] {
+    return [...this.tasks.values()]
+      .filter(({ task }) => (task.methodology as readonly string[]).includes(domain))
+      .map(({ task }) => task.id);
+  }
+
   list(): { id: string; tier: string; promptVersion: string; cases: number }[] {
     return [...this.tasks.values()].map(({ task, cases }) => ({
       id: task.id,

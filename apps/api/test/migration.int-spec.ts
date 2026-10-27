@@ -145,6 +145,8 @@ const EXPECTED_TABLES = [
   'model_runs',
   // Execuções da avaliação das tarefas de agente (global).
   'eval_runs',
+  // Estúdio de metodologia: documentos por domínio, versionados (global).
+  'methodology_documents',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;

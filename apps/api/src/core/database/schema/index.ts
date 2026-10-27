@@ -104,3 +104,4 @@ export * from './coaching';
 export * from './domain-events';
 export * from './model-runs';
 export * from './eval-runs';
+export * from './methodology-documents';

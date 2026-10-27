@@ -568,6 +568,13 @@
       "when": 1793135748439,
       "tag": "0080_avaliacao_de_agentes",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1793136570751,
+      "tag": "0081_estudio_de_metodologia",
+      "breakpoints": true
     }
   ]
 }
