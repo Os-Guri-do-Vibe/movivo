@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { LlmRouter } from '../ai-coach/llm/llm-router.service';
-import { scrubPII } from '../ai-coach/llm/pii-scrubber';
+import { scrubPII } from '../../core/ai/pii-scrubber';
 import {
   quickScheduleAction,
   ScheduleRequestParserService,

@@ -18,7 +18,17 @@
  * anonimização, e nenhum benefício reaproveitando a heurística compensava o risco de dado
  * corrompido chegar ao modelo ou ao profissional decidindo sobre a saúde do aluno.
  */
-import type { ScrubUser } from './llm.types';
+
+/**
+ * Fontes de PII conhecidas do titular, para pseudonimização precisa (PII Scrubber).
+ * Nunca guardadas fora deste boundary; usadas só para substituir o valor exato.
+ */
+export interface ScrubUser {
+  name?: string | null;
+  phoneNumber?: string | null;
+  email?: string | null;
+  birthDate?: string | null;
+}
 
 const EMAIL = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
 // E.164 e formatos BR comuns (com/sem +55, DDD, hífen, parênteses).

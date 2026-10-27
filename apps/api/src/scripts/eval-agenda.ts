@@ -26,7 +26,7 @@ import { PinoLogger } from 'nestjs-pino';
 import { IntentClassifier } from '../modules/ai-coach/intent/intent-classifier.service';
 import type { LlmRouter } from '../modules/ai-coach/llm/llm-router.service';
 import type { LLMProvider, LLMRequest } from '../modules/ai-coach/llm/llm.types';
-import { scrubPII } from '../modules/ai-coach/llm/pii-scrubber';
+import { scrubPII } from '../core/ai/pii-scrubber';
 import {
   AnthropicProvider,
   DeepSeekProvider,

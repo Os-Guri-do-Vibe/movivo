@@ -554,6 +554,13 @@
       "when": 1793134287398,
       "tag": "0078_estado_do_aluno_treino_nutricao_decisoes",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1793135065970,
+      "tag": "0079_gateway_de_modelos",
+      "breakpoints": true
     }
   ]
 }

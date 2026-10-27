@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { costBrl } from './llm-router.service';
+import { costBrl } from '../../../core/ai/pricing';
 
 /** BRL/USD representativo (jul/2026, Victor §8). Margem do teto absorve variação cambial. */
 const USD_BRL = 6.0;

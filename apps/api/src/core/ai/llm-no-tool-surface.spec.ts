@@ -51,6 +51,9 @@ describe('superfície de ferramentas do LLM', () => {
       join(SRC, 'modules', 'ai-coach', 'llm', 'providers.ts'),
       join(SRC, 'modules', 'ai-coach', 'llm', 'llm.types.ts'),
       join(SRC, 'modules', 'ai-coach', 'llm', 'llm-router.service.ts'),
+      join(SRC, 'core', 'ai', 'vendors.ts'),
+      join(SRC, 'core', 'ai', 'ai.types.ts'),
+      join(SRC, 'core', 'ai', 'model-gateway.ts'),
     ];
     const offenders = files.filter((file) => {
       const code = stripComments(readFileSync(file, 'utf8'));

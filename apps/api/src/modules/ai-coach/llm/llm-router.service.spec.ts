@@ -9,7 +9,8 @@ import type { AppConfigService } from '../../../core/config';
 import type { PinoLogger } from 'nestjs-pino';
 import type { AiJobRepository } from './ai-job.repository';
 import type { LlmAbuseGuard } from './llm-abuse-guard.service';
-import { costBrl, LlmRouter } from './llm-router.service';
+import { costBrl } from '../../../core/ai/pricing';
+import { LlmRouter } from './llm-router.service';
 import {
   type LLMProvider,
   LLMProviderError,

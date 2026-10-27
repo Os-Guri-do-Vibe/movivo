@@ -17,7 +17,7 @@ import { buildTranscript } from './transcript';
 import { WorkingMemory } from './working-memory.service';
 import type { ScrubUser } from '../llm/llm.types';
 import { LlmRouter } from '../llm/llm-router.service';
-import { scrubPII } from '../llm/pii-scrubber';
+import { scrubPII } from '../../../core/ai/pii-scrubber';
 import { containsPromptLeak, detectInjection } from '../../protocol/validation/prompt-injection';
 import { untrustedDataEnvelope } from './untrusted-context';
 

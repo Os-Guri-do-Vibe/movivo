@@ -13,7 +13,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { scrubPII } from '../ai-coach/llm/pii-scrubber';
+import { scrubPII } from '../../core/ai/pii-scrubber';
 import {
   detectInjection,
   neutralizeUserInput,

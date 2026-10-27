@@ -15,11 +15,13 @@ import { describe, expect, it } from 'vitest';
 const SRC = join(process.cwd(), 'src');
 const ALLOWED = [
   join('llm', 'providers.ts'),
+  join('core', 'ai', 'vendors.ts'),
   join('core', 'knowledge', 'openai-embedding.ts'),
   join('core', 'audio', 'openai-transcription.ts'),
   join('core', 'audio', 'groq-transcription.ts'),
 ];
 const PROVIDER_MARKERS = [
+  /api\.deepseek\.com/,
   /api\.openai\.com/,
   /api\.anthropic\.com/,
   /api\.groq\.com/,
@@ -38,7 +40,7 @@ function walk(dir: string): string[] {
 }
 
 describe('confinamento do provedor de LLM', () => {
-  it('nenhum arquivo fora de llm/providers.ts referencia um provedor de LLM', () => {
+  it('só os adaptadores de fornecedor referenciam um provedor de modelo', () => {
     const offenders: string[] = [];
     for (const file of walk(SRC)) {
       if (ALLOWED.some((allowed) => file.endsWith(allowed))) continue;

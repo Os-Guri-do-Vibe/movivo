@@ -274,6 +274,8 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   { table: 'exception_cases', column: 'user_id', professional: 'write' },
   // Outbox: só o sistema lê e publica (sem acesso profissional).
   { table: 'domain_events', column: 'user_id' },
+  // Registro de cada chamada de modelo (custo e auditoria por aluno; sem conteúdo do prompt).
+  { table: 'model_runs', column: 'user_id', professional: 'read' },
 ];
 
 // `nullif(..., '')` é OBRIGATÓRIO, não cosmético: sob PgBouncer transaction mode,

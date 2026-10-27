@@ -140,6 +140,9 @@ const EXPECTED_TABLES = [
   'exception_cases',
   'domain_events',
   'domain_event_receipts',
+  // Gateway de modelos: rotas por tier (global) e registro de cada chamada.
+  'model_tiers',
+  'model_runs',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;

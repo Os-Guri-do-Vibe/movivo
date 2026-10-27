@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ProtocolStructure } from '@movivo/shared';
 
-import { scrubPII } from '../../ai-coach/llm/pii-scrubber';
+import { scrubPII } from '../../../core/ai/pii-scrubber';
 import { detectInjection, neutralizeUserInput, wrapUserMessage } from './prompt-injection';
 import { ValidationService } from './validation.service';
 

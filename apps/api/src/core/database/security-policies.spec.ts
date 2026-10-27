@@ -104,6 +104,7 @@ describe('buildRlsPoliciesSql', () => {
       'safety_events',
       'exception_cases',
       'domain_events',
+      'model_runs',
       'professional_assignments',
     ]);
   });

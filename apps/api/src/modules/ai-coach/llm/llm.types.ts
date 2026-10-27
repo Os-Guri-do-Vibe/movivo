@@ -7,6 +7,10 @@
  */
 import type { BiologicalSex } from '@movivo/shared';
 
+import type { ScrubUser } from '../../../core/ai/pii-scrubber';
+
+export type { ScrubUser };
+
 /** Classe de dado que roteia a chamada. Fail-safe: ausente ⇒ `HEALTH` (Victor §1.1). */
 export type DataClass = 'HEALTH' | 'NON_HEALTH';
 
@@ -19,17 +23,6 @@ export type LLMPurpose = 'PROTOCOL_GENERATION' | 'AI_RESPONSE' | 'CHECKIN_ADJUST
 export interface ChatTurn {
   role: 'user' | 'assistant';
   content: string;
-}
-
-/**
- * Fontes de PII conhecidas do titular, para pseudonimização precisa (PII Scrubber).
- * Nunca guardadas fora deste boundary; usadas só para substituir o valor exato.
- */
-export interface ScrubUser {
-  name?: string | null;
-  phoneNumber?: string | null;
-  email?: string | null;
-  birthDate?: string | null;
 }
 
 export interface LLMRequest {

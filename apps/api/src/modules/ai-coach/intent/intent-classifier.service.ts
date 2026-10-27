@@ -14,7 +14,7 @@ import { UNTRUSTED_CONTEXT_POLICY, untrustedDataEnvelope } from '../context/untr
 import { WorkingMemory } from '../context/working-memory.service';
 import { LlmRouter } from '../llm/llm-router.service';
 import type { ScrubUser } from '../llm/llm.types';
-import { scrubPII } from '../llm/pii-scrubber';
+import { scrubPII } from '../../../core/ai/pii-scrubber';
 import { EMBEDDING_PORT, type EmbeddingPort } from '../rag/embedding.port';
 import { clinicalGuardrail } from './clinical-guardrail';
 import { IntentRepository } from './intent.repository';
