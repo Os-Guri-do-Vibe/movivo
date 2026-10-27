@@ -164,6 +164,16 @@ export const TERMINAL_SCRIPTS: readonly TerminalScript[] = [
     notRunnableReason: ARGUMENT_REQUIRED,
   },
   {
+    id: 'import-taco',
+    kind: 'TERMINAL',
+    name: 'Importar a tabela TACO',
+    description:
+      'Importa (ou atualiza) a Tabela Brasileira de Composição de Alimentos a partir do CSV exportado da planilha oficial. É a base de cálculo de calorias, macros e micronutrientes dos registros alimentares.',
+    file: 'apps/api/src/scripts/import-taco.ts',
+    command: 'node --enable-source-maps dist/scripts/import-taco.js <arquivo.csv>',
+    notRunnableReason: ARGUMENT_REQUIRED,
+  },
+  {
     id: 'check-protocol-queue-state',
     kind: 'TERMINAL',
     name: 'Estado do protocolo na fila',
