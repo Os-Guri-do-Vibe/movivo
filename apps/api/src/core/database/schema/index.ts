@@ -103,3 +103,4 @@ export * from './check-ins';
 export * from './coaching';
 export * from './domain-events';
 export * from './model-runs';
+export * from './eval-runs';

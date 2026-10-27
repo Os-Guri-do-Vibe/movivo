@@ -154,6 +154,16 @@ const ARGUMENT_REQUIRED = 'Exige um argumento (telefone, e-mail ou ID) — só n
 
 export const TERMINAL_SCRIPTS: readonly TerminalScript[] = [
   {
+    id: 'eval',
+    kind: 'TERMINAL',
+    name: 'Avaliação das tarefas de agente',
+    description:
+      'Roda os casos de referência de uma tarefa de agente com o modelo real, grava o resultado em eval_runs e mostra caso a caso o que reprovou. É o teste exigido antes de publicar metodologia, trocar o modelo de um nível ou mudar um prompt.',
+    file: 'apps/api/src/scripts/eval.ts',
+    command: 'pnpm --filter @movivo/api run eval --task <id-da-tarefa>',
+    notRunnableReason: ARGUMENT_REQUIRED,
+  },
+  {
     id: 'check-protocol-queue-state',
     kind: 'TERMINAL',
     name: 'Estado do protocolo na fila',

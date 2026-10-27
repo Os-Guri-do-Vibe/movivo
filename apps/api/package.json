@@ -15,6 +15,7 @@
     "test:cov": "vitest run --coverage",
     "test:int": "vitest run --config vitest.integration.config.ts",
     "eval:protocol": "vitest run --config vitest.eval.config.ts",
+    "eval": "nest build && node --enable-source-maps dist/scripts/eval.js",
     "test:journeys": "vitest run --config test/journeys/vitest.journeys.config.mts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/core/database/migrate.ts",

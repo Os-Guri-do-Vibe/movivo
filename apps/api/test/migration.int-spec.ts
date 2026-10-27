@@ -143,6 +143,8 @@ const EXPECTED_TABLES = [
   // Gateway de modelos: rotas por tier (global) e registro de cada chamada.
   'model_tiers',
   'model_runs',
+  // Execuções da avaliação das tarefas de agente (global).
+  'eval_runs',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;

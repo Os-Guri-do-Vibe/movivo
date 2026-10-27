@@ -561,6 +561,13 @@
       "when": 1793135065970,
       "tag": "0079_gateway_de_modelos",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1793135748439,
+      "tag": "0080_avaliacao_de_agentes",
+      "breakpoints": true
     }
   ]
 }
