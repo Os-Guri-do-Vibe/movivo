@@ -9,11 +9,12 @@ import {
   Calculator,
   ChevronDown,
   CircleGauge,
-  Inbox,
   ClipboardCheck,
+  ClipboardList,
   Dumbbell,
   FlaskConical,
   Handshake,
+  Inbox,
   Landmark,
   LockKeyhole,
   Megaphone,
@@ -137,6 +138,13 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         href: '/dashboard/ia/exercicios',
         label: 'Exercícios',
         icon: Dumbbell,
+        capabilities: ['control_center.ai.config.read'],
+      },
+      {
+        // Estúdio de metodologia: o que os agentes seguem, escrito pelos profissionais.
+        href: '/dashboard/ia/metodologia',
+        label: 'Metodologia',
+        icon: ClipboardList,
         capabilities: ['control_center.ai.config.read'],
       },
       {

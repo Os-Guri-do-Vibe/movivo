@@ -32,6 +32,9 @@ const PARAMETERIZED_MUTATIONS = [
   // Sistema → Scripts: execução manual forçada de um cron/rotina do catálogo (o id é validado
   // de novo no backend, que só executa o que está no catálogo).
   /^scripts\/[a-z0-9-]{1,80}\/run$/,
+  // Estúdio de metodologia: abrir rascunho de um domínio e editar/testar/publicar/descartar.
+  /^methodology\/domains\/[A-Z]{3,16}\/drafts$/,
+  new RegExp(`^methodology/documents/${UUID_SEGMENT}/(?:update|test|publish|discard)$`, 'i'),
 ];
 
 /** O BFF nunca encaminha POST para um path que não esteja listado aqui. */
