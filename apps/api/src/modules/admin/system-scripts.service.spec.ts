@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import type { QueueManager } from '../jobs/queue-manager.service';
+import type { ComplementaryCampaignService } from '../anamnesis/complementary-campaign.service';
 import type { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
 import type { AuditService } from './audit.service';
 import type { FinanceService } from './finance.service';
@@ -48,8 +49,10 @@ function setup(jobs: unknown[] = []) {
   const finance = { materializeRecurring } as unknown as FinanceService;
   const refresh = vi.fn(async () => undefined);
   const catalog = { refresh } as unknown as ExerciseCatalogProvider;
-  const service = new SystemScriptsService(queues, db, audit, finance, catalog);
-  return { service, enqueue, getJobs, append, materializeRecurring, refresh };
+  const campaignRun = vi.fn(async () => ({ invited: 3, failed: 0 }));
+  const campaign = { run: campaignRun } as unknown as ComplementaryCampaignService;
+  const service = new SystemScriptsService(queues, db, audit, finance, catalog, campaign);
+  return { service, enqueue, getJobs, append, materializeRecurring, refresh, campaignRun };
 }
 
 describe('SystemScriptsService.list', () => {
@@ -65,7 +68,7 @@ describe('SystemScriptsService.list', () => {
       'subscription-period-scan',
       'outbox-relay-scan',
     ]);
-    expect(byKind('ROUTINE')).toHaveLength(2);
+    expect(byKind('ROUTINE')).toHaveLength(3);
     expect(byKind('TERMINAL').length).toBeGreaterThan(0);
     for (const script of byKind('TERMINAL')) {
       expect(script.runnable).toBe(false);
@@ -164,6 +167,15 @@ describe('SystemScriptsService.run', () => {
     const { data } = await service.run(ADMIN, 'exercise-catalog-refresh');
     expect(refresh).toHaveBeenCalledOnce();
     expect(data.status).toBe('COMPLETED');
+    expect(append).toHaveBeenCalledOnce();
+  });
+
+  it('dispara a campanha da anamnese complementar e informa quantos convites saíram', async () => {
+    const { service, campaignRun, append } = setup();
+    const { data } = await service.run(ADMIN, 'complementary-anamnesis-campaign');
+    expect(campaignRun).toHaveBeenCalledOnce();
+    expect(data.status).toBe('COMPLETED');
+    expect(data.message).toMatch(/3 convite/);
     expect(append).toHaveBeenCalledOnce();
   });
 

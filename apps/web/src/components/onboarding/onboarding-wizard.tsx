@@ -32,6 +32,7 @@ import {
   type BodyDraft,
 } from './onboarding-drafts';
 import { ProgressBar } from './progress-bar';
+import { ComplementaryConsents } from './complementary-consents';
 import { Step1Registration, type Step1Data } from './step1-registration';
 import { StepBody } from './step-body';
 import { StepGoals } from './step-goals';
@@ -194,6 +195,22 @@ export function OnboardingWizard({
     );
   }
 
+  async function handleComplementaryConsents(accepted: SessionView['consents']) {
+    setSaving(true);
+    setError(null);
+    try {
+      await recordConsents(
+        sessionRef,
+        accepted.map((c) => ({ type: c.type, version: c.version, accepted: true })),
+      );
+      setSession((prev) => ({ ...prev, consentsPending: false }));
+    } catch (err) {
+      setError(describeError(err, 'Não conseguimos registrar os aceites. Tente de novo.'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleParq() {
     await save(
       6,
@@ -292,7 +309,15 @@ export function OnboardingWizard({
         />
       )}
 
-      {step === 2 && (
+      {complementary && session.consentsPending && (
+        <ComplementaryConsents
+          consents={session.consents}
+          saving={saving}
+          onAccept={(accepted) => void handleComplementaryConsents(accepted)}
+        />
+      )}
+
+      {step === 2 && !(complementary && session.consentsPending) && (
         <StepGoals
           data={goals}
           onChange={setGoals}

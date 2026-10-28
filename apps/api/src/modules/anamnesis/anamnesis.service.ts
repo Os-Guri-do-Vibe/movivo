@@ -125,6 +125,11 @@ export interface SessionView {
   primaryGoal: string | null;
   /** Consentimentos a exibir, na ordem definida pelo jurídico. Nunca pré-marcados. */
   consents: ConsentItemView[];
+  /**
+   * Só na anamnese complementar: os textos vigentes ainda não foram aceitos nesta sessão. O
+   * aluno que já existia aceitou versões anteriores; a v2 do serviço exige novo aceite.
+   */
+  consentsPending: boolean;
   /** Parte COMUM de cada etapa salva (ou pré-preenchida). Nunca a parte sensível. */
   blocks: Record<string, unknown>;
   outcome: OnboardingOutcome | null;
@@ -262,7 +267,21 @@ export class AnamnesisService {
       await this.expire(row);
       throw new GoneException('Sessão de anamnese expirada. Recomece o formulário.');
     }
-    return this.toView(row);
+    return this.toView(row, await this.consentsPending(row));
+  }
+
+  /** Complementar: faltam aceites obrigatórios, na versão vigente, nesta sessão. */
+  private async consentsPending(row: SessionRow): Promise<boolean> {
+    if (row.flow !== 'COMPLEMENTARY') return false;
+    return (await this.missingRequiredConsents(row)).length > 0;
+  }
+
+  private async missingRequiredConsents(row: SessionRow): Promise<ConsentTypeWithText[]> {
+    const accepted = [
+      ...(await this.consents.acceptedTypesForSession(row.id)),
+      ...(row.userId ? await this.consents.acceptedTypesForUser(row.userId) : []),
+    ];
+    return CONSENT_ORDER.filter((type) => CONSENT_TEXTS[type].required && !accepted.includes(type));
   }
 
   // --- Verificação do número (cadastro novo) ------------------------------------------------
@@ -288,9 +307,10 @@ export class AnamnesisService {
     if (step === 1 && initial.flow === 'COMPLEMENTARY') {
       throw new BadRequestException('O cadastro já existe: comece pela etapa de objetivos.');
     }
+    // Consentimento primeiro: sem base legal nem o formato da resposta é avaliado.
+    if (step !== 1) await this.assertHealthConsent(initial);
     const payload = parseStep(step, data);
     if (step === 1) await this.assertRegistration(initial, payload);
-    else await this.assertHealthConsent(initial);
 
     return this.inSession(initial, async (tx) => {
       const [row] = await tx
@@ -341,10 +361,7 @@ export class AnamnesisService {
     if (ageInYears(registration.birthDate) < MIN_AGE_YEARS) {
       throw new UnprocessableEntityException(UNDER_AGE_MESSAGE);
     }
-    const accepted = await this.consents.acceptedTypesForSession(row.id);
-    const missing = CONSENT_ORDER.filter(
-      (type) => CONSENT_TEXTS[type].required && !accepted.includes(type),
-    );
+    const missing = await this.missingRequiredConsents(row);
     if (missing.length > 0) {
       throw new ForbiddenException(`Consentimentos obrigatórios pendentes: ${missing.join(', ')}.`);
     }
@@ -361,6 +378,14 @@ export class AnamnesisService {
     const initial = await this.requireActiveSession(token);
     await this.assertHealthConsent(initial);
     const flow = initial.flow as OnboardingFlow;
+    if (flow === 'COMPLEMENTARY') {
+      const missing = await this.missingRequiredConsents(initial);
+      if (missing.length > 0) {
+        throw new ForbiddenException(
+          `Consentimentos obrigatórios pendentes: ${missing.join(', ')}.`,
+        );
+      }
+    }
 
     const { userId, gate } = await this.db.runAsSystem(async (tx) => {
       const [row] = await tx
@@ -413,8 +438,8 @@ export class AnamnesisService {
       return { userId, gate };
     });
 
+    await this.consents.linkSessionToUser(initial.id, userId);
     if (flow === 'INITIAL') {
-      await this.consents.linkSessionToUser(initial.id, userId);
       await this.queues.enqueue(
         QUEUE.whatsappOutbound,
         'confirmation',
@@ -502,10 +527,12 @@ export class AnamnesisService {
 
   /** Consentimento de saúde reavaliado no momento da coleta (cobre revogação no meio). */
   private async assertHealthConsent(row: SessionRow): Promise<void> {
+    // Complementar: vale o aceite vigente do titular ou o que acabou de ser dado nesta sessão.
     const valid =
-      row.flow === 'COMPLEMENTARY' && row.userId
-        ? await this.healthConsent.hasActiveForUser(row.userId)
-        : await this.consents.hasValidHealthConsent(row.id);
+      (row.flow === 'COMPLEMENTARY' &&
+        row.userId !== null &&
+        (await this.healthConsent.hasActiveForUser(row.userId))) ||
+      (await this.consents.hasValidHealthConsent(row.id));
     if (!valid) {
       throw new ForbiddenException('Consentimento de saúde é obrigatório antes desta etapa.');
     }
@@ -599,7 +626,7 @@ export class AnamnesisService {
     }
   }
 
-  private toView(row: SessionRow): SessionView {
+  private toView(row: SessionRow, consentsPending = false): SessionView {
     return {
       status: row.status,
       flow: row.flow as OnboardingFlow,
@@ -615,6 +642,7 @@ export class AnamnesisService {
         label: CONSENT_TEXTS[type].label,
         required: CONSENT_TEXTS[type].required,
       })),
+      consentsPending,
       blocks: row.blocks,
       outcome: row.parqState ? this.toOutcome(row.parqState as ParqStateType) : null,
       expiresAt: row.expiresAt,

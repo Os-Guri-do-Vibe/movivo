@@ -39,10 +39,11 @@ const SESSION: SessionView = {
   completedSteps: [],
   phoneVerified: false,
   primaryGoal: null,
+  consentsPending: false,
   consents: [
     {
       type: 'TERMS_OF_SERVICE',
-      version: 'terms-2026-09-v1',
+      version: 'terms-2026-10-v2',
       title: null,
       body: [],
       label: 'Aceito.',
@@ -256,6 +257,28 @@ describe('OnboardingWizard — retomada', () => {
 });
 
 describe('OnboardingWizard — anamnese complementar', () => {
+  it('pede o novo aceite dos textos vigentes antes de abrir os objetivos', async () => {
+    const user = userEvent.setup();
+    render(
+      <OnboardingWizard
+        sessionRef="tok"
+        initial={{ ...complementary([]), consentsPending: true }}
+      />,
+    );
+    expect(screen.getByRole('heading', { name: 'Antes de continuar' })).toBeInTheDocument();
+    expect(screen.queryByText('Qual é o seu objetivo?')).not.toBeInTheDocument();
+    const continuar = screen.getByRole('button', { name: 'Continuar' });
+    expect(continuar).toBeDisabled();
+
+    for (const box of screen.getAllByRole('checkbox')) {
+      if (box.hasAttribute('required')) await user.click(box);
+    }
+    await user.click(continuar);
+
+    await waitFor(() => expect(recordConsents).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('Qual é o seu objetivo?')).toBeInTheDocument();
+  });
+
   it('pula o cadastro: abre nos objetivos, conta 7 etapas e não oferece voltar', () => {
     render(<OnboardingWizard sessionRef="tok" initial={complementary([])} />);
     expect(screen.getByText('Qual é o seu objetivo?')).toBeInTheDocument();

@@ -30,6 +30,7 @@ import { StudentStateModule } from '../student-state/student-state.module';
 import { AnamnesisController } from './anamnesis.controller';
 import { AnamnesisService } from './anamnesis.service';
 import { ShortLinkModule } from '../short-link/short-link.module';
+import { ComplementaryCampaignService } from './complementary-campaign.service';
 import { ComplementaryInviteService } from './complementary-invite.service';
 import { ConsentController } from './consent.controller';
 import { ConsentService } from './consent.service';
@@ -61,7 +62,13 @@ import { PhoneVerificationService } from './phone-verification.service';
     AnamnesisService,
     PhoneVerificationService,
     ComplementaryInviteService,
+    ComplementaryCampaignService,
   ],
-  exports: [ConsentService, AnamnesisService, ComplementaryInviteService],
+  exports: [
+    ConsentService,
+    AnamnesisService,
+    ComplementaryInviteService,
+    ComplementaryCampaignService,
+  ],
 })
 export class AnamnesisModule {}

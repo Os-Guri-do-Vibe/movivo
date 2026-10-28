@@ -43,6 +43,8 @@ export interface SessionView {
   phoneVerified: boolean;
   primaryGoal: string | null;
   consents: ConsentItemView[];
+  /** Anamnese complementar: os textos vigentes ainda precisam ser aceitos nesta sessão. */
+  consentsPending: boolean;
   /** Parte COMUM de cada etapa (a sensível nunca volta). Chaves: registration, goals… */
   blocks: Record<string, unknown>;
   outcome: OnboardingOutcome | null;

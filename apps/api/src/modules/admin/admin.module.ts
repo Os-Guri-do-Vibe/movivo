@@ -18,6 +18,7 @@ import { AuthModule } from '../auth/auth.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
+import { AnamnesisModule } from '../anamnesis/anamnesis.module';
 import { AuditService } from './audit.service';
 import { AuditQueryController } from './audit-query.controller';
 import { AuditQueryService } from './audit-query.service';
@@ -47,7 +48,7 @@ import { SystemScriptsController } from './system-scripts.controller';
 import { SystemScriptsService } from './system-scripts.service';
 
 @Module({
-  imports: [AuthModule, CatalogModule, JobsModule, WhatsappModule],
+  imports: [AnamnesisModule, AuthModule, CatalogModule, JobsModule, WhatsappModule],
   controllers: [
     ControlCenterController,
     ConfigGateController,

@@ -137,11 +137,21 @@ export const ROUTINE_SCRIPTS: readonly RoutineScript[] = [
       'Cria no livro-caixa as despesas recorrentes que ainda não foram lançadas. É idempotente: rodar de novo não duplica lançamento.',
   },
   {
+    id: 'complementary-anamnesis-campaign',
+    kind: 'ROUTINE',
+    name: 'Campanha da anamnese complementar',
+    description:
+      'Convida os alunos ativos que ainda não aceitaram os textos vigentes a revisar o aceite e responder as perguntas novas (plano de treino e de alimentação). Quem revogou o consentimento de saúde e quem já tem um convite válido ficam de fora.',
+    schedule: null,
+    runEffect:
+      'Envia agora, pelo WhatsApp, um link individual para cada aluno elegível. Rodar de novo só alcança quem ainda não recebeu um convite válido.',
+  },
+  {
     id: 'exercise-catalog-refresh',
     kind: 'ROUTINE',
     name: 'Atualização do catálogo de exercícios',
     description:
-      'Recarrega do banco o catálogo de exercícios usado pela geração e pela validação de protocolos.',
+      'Recarrega do banco o catálogo de exercícios usado no planejamento e na validação das sessões.',
     schedule: 'A cada 5 minutos (timer interno da API)',
     runEffect: 'Recarrega agora o catálogo de exercícios em memória. Não envia mensagem a ninguém.',
   },

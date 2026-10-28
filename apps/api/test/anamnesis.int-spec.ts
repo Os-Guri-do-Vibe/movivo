@@ -404,6 +404,63 @@ describe('ANAMNESE — RLS anônima isolada por sessão', () => {
 });
 
 describe('ANAMNESE COMPLEMENTAR — aluno que já existia', () => {
+  it('aluno com aceite de texto antigo só avança depois de aceitar os textos vigentes, e o aceite vira dele no envio', async () => {
+    const { token: first } = await service.start({});
+    const b1 = await completeStep1(first);
+    await completeSteps(service, first);
+    await service.submit(first);
+    const [user] = await adminClient<Array<{ id: string }>>`
+      SELECT id FROM users WHERE phone_number = ${b1.phoneNumber}`;
+    // Volta o aluno ao estado de quem aceitou só o texto de saúde antigo.
+    await adminClient`DELETE FROM consents WHERE user_id = ${user.id}::uuid`;
+    await adminClient`
+      INSERT INTO consents (user_id, consent_type, version, accepted)
+      VALUES (${user.id}::uuid, 'HEALTH_DATA', 'consent-health-2026-08-v3', true)`;
+    await adminClient`
+      INSERT INTO anamnesis_sessions (token, user_id, status, expires_at, submitted_at, data_block_1, data_block_3)
+      VALUES (${`legado-${RUN}-${user.id.slice(0, 8)}`}, ${user.id}, 'SUBMITTED', now(), now() - interval '1 day',
+        ${adminClient.json({ ...b1 })},
+        ${adminClient.json({
+          primaryGoal: 'LOSE_FAT',
+          emphasis: [],
+          hasImportantEvent: false,
+          trainingStatus: 'REGULAR',
+          experience: 'BEGINNER',
+          pastActivities: [],
+          consistencyBarriers: [],
+          daysPerWeek: 3,
+          preferredDays: ['TUE', 'THU', 'SAT'],
+          sessionDuration: 'M45_TO_60',
+          location: 'HOME',
+          preferredPeriod: 'MORNING',
+          practicesOtherSport: false,
+          hasAvoidedExercise: false,
+        })})`;
+
+    const { token } = await service.startComplementary(user.id);
+    expect((await service.getByToken(token)).consentsPending).toBe(true);
+    await expect(service.patchStep(token, 2, {})).rejects.toThrow(/Consentimento de saúde/);
+
+    await consents.recordForSessionToken(
+      token,
+      REQUIRED_CONSENT_TYPES.map((type) => ({
+        type,
+        version: CONSENT_TEXTS[type].version,
+        accepted: true,
+      })),
+      ORIGIN,
+    );
+    expect((await service.getByToken(token)).consentsPending).toBe(false);
+
+    await completeSteps(service, token, [], false);
+    await service.submit(token);
+    const current = await adminClient<Array<{ consent_type: string }>>`
+      SELECT consent_type FROM consents
+      WHERE user_id = ${user.id}::uuid AND version = ${CONSENT_TEXTS.HEALTH_DATA.version}
+        AND accepted = true AND revoked_at IS NULL`;
+    expect(current.map((row) => row.consent_type)).toContain('HEALTH_DATA');
+  });
+
   it('pré-preenche a parte comum da anamnese antiga e, no envio, cria a versão 2 do objetivo', async () => {
     const { token } = await service.start({});
     const b1 = await completeStep1(token);
