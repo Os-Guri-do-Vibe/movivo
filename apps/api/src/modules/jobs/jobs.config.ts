@@ -36,6 +36,8 @@ export const QUEUE = {
   workoutDaily: 'workout-daily',
   // Link diário e fechamento do dia no modelo v2 (qualquer modalidade); `workoutDaily` é o legado.
   trainingDaily: 'training-daily',
+  // Check-in adaptativo semanal (v2); `checkinWeekly` é o legado.
+  checkIn: 'check-in',
   // Comentário do Coach sobre o treino que o aluno acabou de registrar no diário
   // (`WorkoutJournalService.finish()`) — fila própria (não um branch de `whatsappOutbound`)
   // porque quem enfileira (`workout`) não pode falar com `LlmRouter`/`ValidationService`
@@ -116,6 +118,7 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
   // sem urgência de latência, retry curto — o envio real acontece em `whatsappOutbound`.
   [QUEUE.workoutDaily]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
   [QUEUE.trainingDaily]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
+  [QUEUE.checkIn]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
   // Best-effort (mesmo espírito do resumo de entrega do protocolo): poucas tentativas,
   // nunca trava o diário do aluno por causa de um comentário que não saiu.
   [QUEUE.workoutFeedback]: { attempts: 2, backoffMs: [5_000], concurrency: 5 },

@@ -18,11 +18,16 @@ import { AgentRunner } from '../src/core/agents/agent-runner';
 import {
   accessLinkTokens,
   domainEvents,
+  bodyMeasurements,
+  checkIns,
   foodLogs,
+  safetyEvents,
   scheduledSessions,
   users,
 } from '../src/core/database/schema';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
+import { CheckInService } from '../src/modules/checkin-v2/check-in.service';
+import { EvolutionService } from '../src/modules/checkin-v2/evolution.service';
 import { FoodLogService } from '../src/modules/nutrition/food-log.service';
 import { PlanGenerationService } from '../src/modules/planning/plan-generation.service';
 import { ExecutionService } from '../src/modules/training/execution.service';
@@ -32,8 +37,11 @@ let app: INestApplication;
 let db: TenantDatabase;
 let executions: ExecutionService;
 let foods: FoodLogService;
+let checkInService: CheckInService;
+let evolution: EvolutionService;
 const created: string[] = [];
 const NOW = new Date('2026-11-04T15:00:00.000Z');
+const LATER = new Date(NOW.getTime() + 20 * 86_400_000);
 
 async function studentWithPlan(): Promise<string> {
   const userId = await createStudent(db, created);
@@ -53,6 +61,8 @@ beforeAll(async () => {
   db = app.get(TenantDatabase);
   executions = app.get(ExecutionService);
   foods = app.get(FoodLogService);
+  checkInService = app.get(CheckInService);
+  evolution = app.get(EvolutionService);
 });
 
 afterAll(async () => {
@@ -231,5 +241,77 @@ describe('registro alimentar', () => {
         NOW,
       ),
     ).rejects.toThrow(/futura/);
+  });
+});
+
+describe('check-in adaptativo', () => {
+  // 20 dias depois: a medida de peso do cadastro já ficou antiga e a pergunta entra.
+  it('abre um check-in só (idempotente), com a pergunta de segurança, e grava as respostas', async () => {
+    const userId = await studentWithPlan();
+    const first = await checkInService.open(userId, LATER);
+    const again = await checkInService.open(userId, LATER);
+    expect(again.id).toBe(first.id);
+    const keys = first.questions.map((q) => q.key);
+    expect(keys[0]).toBe('pain');
+    expect(keys).toContain('weight_kg');
+
+    await expect(checkInService.answer(userId, first.id, { pain: false }, LATER)).rejects.toThrow(
+      /falta responder/,
+    );
+    await checkInService.answer(
+      userId,
+      first.id,
+      { pain: true, energy: 4, sleep: 3, food_difficulty: 'Dá trabalho', weight_kg: 81.5 },
+      LATER,
+    );
+
+    const [row] = await db.runAsSystem((tx) =>
+      tx.select().from(checkIns).where(eq(checkIns.id, first.id)),
+    );
+    expect(row?.status).toBe('ANSWERED');
+    const weights = await db.runAsSystem((tx) =>
+      tx
+        .select()
+        .from(bodyMeasurements)
+        .where(and(eq(bodyMeasurements.userId, userId), eq(bodyMeasurements.value, 81.5))),
+    );
+    expect(weights).toHaveLength(1);
+    const signals = await db.runAsSystem((tx) =>
+      tx.select().from(safetyEvents).where(eq(safetyEvents.userId, userId)),
+    );
+    expect(signals.map((s) => s.kind)).toContain('PERSISTENT_PAIN');
+    await expect(
+      checkInService.answer(userId, first.id, { pain: false, energy: 4, sleep: 3 }, LATER),
+    ).rejects.toThrow(/já foi respondido/);
+    expect(await checkInService.current(userId, LATER)).toBeNull();
+  });
+
+  it('check-in vencido não pode ser respondido e outro aluno não alcança o check-in', async () => {
+    const owner = await studentWithPlan();
+    const stranger = await studentWithPlan();
+    const opened = await checkInService.open(owner, NOW);
+    await expect(
+      checkInService.answer(stranger, opened.id, { pain: false, energy: 3, sleep: 3 }, NOW),
+    ).rejects.toThrow();
+    const later = new Date(NOW.getTime() + 10 * 86_400_000);
+    await expect(
+      checkInService.answer(owner, opened.id, { pain: false, energy: 3, sleep: 3 }, later),
+    ).rejects.toThrow(/expirou/);
+  });
+});
+
+describe('evolução', () => {
+  it('traz metas, medidas e as últimas semanas; medidas fora da faixa são recusadas', async () => {
+    const userId = await studentWithPlan();
+    const saved = await evolution.addMeasurements(userId, [
+      { kind: 'WAIST', value: 83, method: 'SELF_TAPE', measuredOn: '2026-11-04' },
+    ]);
+    expect(saved).toBe(1);
+    const view = await evolution.read(userId, NOW);
+    expect(view.strategyTitle).toBeTruthy();
+    expect(view.milestones.length).toBeGreaterThan(0);
+    expect(view.measurements.WAIST?.map((m) => m.value)).toEqual([84, 83]);
+    expect(view.weeks).toHaveLength(8);
+    expect(view.firstName).toBe('Aluno');
   });
 });
