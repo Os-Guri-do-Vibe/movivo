@@ -4,7 +4,7 @@ import { char, check, pgTable, uniqueIndex, uuid, varchar } from 'drizzle-orm/pg
 import { eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
 import { users } from './users';
 
-export type AccessLinkPurpose = 'PROTOCOL' | 'CHECKOUT' | 'SUBSCRIPTION_PORTAL';
+export type AccessLinkPurpose = 'PROTOCOL' | 'PLAN' | 'CHECKOUT' | 'SUBSCRIPTION_PORTAL';
 
 /** Credenciais independentes dos IDs: um hash ativo por titular, finalidade e recurso. */
 export const accessLinkTokens = pgTable(
@@ -26,7 +26,7 @@ export const accessLinkTokens = pgTable(
     uniqueIndex('uq_access_link_tokens_resource').on(table.userId, table.purpose, table.resourceId),
     check(
       'ck_access_link_tokens_purpose',
-      sql`${table.purpose} in ('PROTOCOL', 'CHECKOUT', 'SUBSCRIPTION_PORTAL')`,
+      sql`${table.purpose} in ('PROTOCOL', 'PLAN', 'CHECKOUT', 'SUBSCRIPTION_PORTAL')`,
     ),
   ],
 );

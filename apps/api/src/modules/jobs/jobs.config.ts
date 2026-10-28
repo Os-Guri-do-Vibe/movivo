@@ -68,6 +68,8 @@ export const QUEUE = {
   // dispatcher entrega cada evento aos consumidores registrados (idempotentes por recibo).
   outboxRelay: 'outbox-relay',
   domainEvents: 'domain-events',
+  // Geração do plano integrado (estratégia + treino + nutrição) depois do onboarding.
+  planGeneration: 'plan-generation',
   knowledgeProcessing: 'knowledge-processing',
   sanity: 'sanity',
   deadLetter: 'dead-letter',
@@ -193,6 +195,14 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
     backoffMs: [2_000, 10_000, 30_000, 120_000, 600_000],
     concurrency: 10,
     lockMs: 180_000,
+  },
+  // Vários agentes em sequência (estratégia, blocos, reconciliação, nutrição): lock longo e poucas
+  // tentativas — falha de validação abre caso para a equipe em vez de repetir indefinidamente.
+  [QUEUE.planGeneration]: {
+    attempts: 3,
+    backoffMs: [10_000, 60_000, 300_000],
+    concurrency: 3,
+    lockMs: 600_000,
   },
   [QUEUE.sanity]: { attempts: 3, backoffMs: [50, 100, 200], concurrency: 2 },
   // DLQ é destino final: não retenta, não é reprocessada automaticamente.

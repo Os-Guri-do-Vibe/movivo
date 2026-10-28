@@ -93,6 +93,8 @@ export const goalStrategySchema = z.object({
   reviewAfterWeeks: z.number().int().min(2).max(16),
   /** O que ainda falta saber para refinar a estratégia. */
   openQuestions: z.array(z.string().trim().min(1).max(200)).max(5),
+  /** Explicação para o aluno, em linguagem clara (aparece em `/plano`). */
+  studentMessage: z.string().trim().min(1).max(800).optional(),
 });
 export type GoalStrategy = z.infer<typeof goalStrategySchema>;
 

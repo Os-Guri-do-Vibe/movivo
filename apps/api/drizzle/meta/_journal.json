@@ -589,6 +589,13 @@
       "when": 1793152720941,
       "tag": "0083_recibo_de_evento_reivindicado",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1793154795081,
+      "tag": "0084_link_de_acesso_do_plano",
+      "breakpoints": true
     }
   ]
 }

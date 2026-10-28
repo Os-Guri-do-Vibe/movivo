@@ -54,6 +54,8 @@ describe('jobs.config', () => {
         // Outbox de eventos de domínio: relé + despacho aos consumidores.
         'outbox-relay',
         'domain-events',
+        // Geração do plano integrado depois do onboarding.
+        'plan-generation',
       ].sort(),
     );
   });
