@@ -2,13 +2,10 @@
 import {
   foodDaySchema,
   foodLogDraftSchema,
-  foodSearchResultSchema,
   type ConfirmFoodLogRequest,
   type FoodDay,
   type FoodLogDraft,
-  type FoodSearchResult,
   type InterpretFoodTextRequest,
-  type ManualFoodLogRequest,
   type MealSlot,
 } from '@movivo/shared';
 import { TrainingApiError } from './training-api';
@@ -60,16 +57,6 @@ export async function confirmFoodLog(logId: string, body: ConfirmFoodLogRequest)
   });
 }
 
-export async function addFoodLog(body: ManualFoodLogRequest): Promise<void> {
-  await request('/logs', { method: 'POST', body: JSON.stringify(body) });
-}
-
 export async function removeFoodLog(logId: string): Promise<void> {
   await request(`/logs/${encodeURIComponent(logId)}`, { method: 'DELETE' });
-}
-
-export async function searchFoods(query: string): Promise<FoodSearchResult[]> {
-  return foodSearchResultSchema
-    .array()
-    .parse(await request(`/foods?q=${encodeURIComponent(query)}`));
 }

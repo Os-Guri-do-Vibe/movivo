@@ -32,7 +32,8 @@ export default function TrainingAccessPage() {
     const requestedDate = hash.get('date') ?? '';
     if (/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) setDate(requestedDate);
     const requestedNext = hash.get('next') ?? '';
-    if (['/hoje', '/alimentacao', '/evolucao'].includes(requestedNext)) setNext(requestedNext);
+    if (['/hoje', '/alimentacao', '/evolucao', '/check-in'].includes(requestedNext))
+      setNext(requestedNext);
     // React executa Effects duas vezes no Strict Mode de desenvolvimento. Depois da
     // primeira passagem o fragmento já foi removido; não podemos apagar o token em memória.
     if (value) {

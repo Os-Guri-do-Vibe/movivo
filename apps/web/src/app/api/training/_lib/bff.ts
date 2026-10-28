@@ -78,6 +78,9 @@ export async function trainingBackendFetch(path: string, init: RequestInit = {})
 }
 
 export async function forward(response: Response): Promise<NextResponse> {
+  // 204 não tem corpo: `NextResponse.json` com esse status é inválido.
+  if (response.status === 204)
+    return new NextResponse(null, { status: 204, headers: PRIVATE_HEADERS });
   const payload = await body(response);
   return NextResponse.json(payload ?? {}, { status: response.status, headers: PRIVATE_HEADERS });
 }

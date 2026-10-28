@@ -6,7 +6,7 @@ export async function POST(request: NextRequest) {
   try {
     assertSameOrigin(request);
     return forward(
-      await trainingBackendFetch('/nutrition/logs', {
+      await trainingBackendFetch('/evolution/measurements', {
         method: 'POST',
         body: await request.text(),
       }),
