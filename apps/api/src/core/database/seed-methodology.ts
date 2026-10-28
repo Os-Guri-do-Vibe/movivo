@@ -145,6 +145,13 @@ function merge(base: MethodologyParameters, overrides: MethodologyParameters | u
   return merged;
 }
 
+/** Parâmetros da semente de desenvolvimento por domínio (reuso em testes e avaliação). */
+export function devMethodologyParameters(domain: string): MethodologyParameters {
+  const spec = METHODOLOGY_DOMAIN_SPECS.find((s) => s.domain === domain);
+  if (!spec) throw new Error(`domínio de metodologia desconhecido: ${domain}`);
+  return merge(exampleParameters(spec), OVERRIDES[domain]);
+}
+
 export async function seedDevMethodology(db: PostgresJsDatabase): Promise<number> {
   let created = 0;
   for (const spec of METHODOLOGY_DOMAIN_SPECS) {
@@ -158,7 +165,7 @@ export async function seedDevMethodology(db: PostgresJsDatabase): Promise<number
       domain: spec.domain,
       version: 1,
       status: 'PUBLISHED',
-      parameters: merge(exampleParameters(spec), OVERRIDES[spec.domain]),
+      parameters: devMethodologyParameters(spec.domain),
       guidance: Object.fromEntries(spec.guidance.map((g) => [g.key, DEV_NOTE])),
       changeNote: DEV_NOTE,
       publishedAt: new Date(),

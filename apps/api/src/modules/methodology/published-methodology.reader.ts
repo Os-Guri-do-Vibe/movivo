@@ -27,6 +27,7 @@ export class PublishedMethodologyReader implements PublishedMethodology {
     const published = await this.published();
     const parts: string[] = [];
     const versions: MethodologyContext['versions'] = {};
+    const parameters: NonNullable<MethodologyContext['parameters']> = {};
     for (const domain of domains) {
       const doc = published.get(domain);
       if (!doc) continue;
@@ -34,8 +35,9 @@ export class PublishedMethodologyReader implements PublishedMethodology {
         renderMethodology(methodologyDomainSpec(domain), doc.version, doc.parameters, doc.guidance),
       );
       versions[domain] = doc.version;
+      parameters[domain] = doc.parameters;
     }
-    return { text: parts.join('\n\n'), versions };
+    return { text: parts.join('\n\n'), versions, parameters };
   }
 
   async publishedOf(domain: MethodologyDomain): Promise<PublishedDocument | null> {

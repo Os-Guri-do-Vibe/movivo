@@ -210,6 +210,7 @@ export class MethodologyService {
       [domain]: {
         text: renderMethodology(spec, doc.version, doc.parameters, doc.guidance),
         version: doc.version,
+        parameters: doc.parameters,
       },
     };
     const evaluations: EvalRunSummary[] = [];

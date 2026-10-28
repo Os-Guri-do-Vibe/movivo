@@ -125,7 +125,13 @@ export class AgentRunner {
       modelRunIds.push(result.modelRunId);
       costBrl += result.costBrl;
 
-      violations = await this.validate(task, input, result.text, state.slices);
+      violations = await this.validate(
+        task,
+        input,
+        result.text,
+        state.slices,
+        methodology.parameters ?? {},
+      );
       if (violations.length === 0) {
         return {
           output: task.output.parse(extractJson(result.text)),
@@ -147,6 +153,7 @@ export class AgentRunner {
     input: I,
     text: string,
     state: Record<string, unknown>,
+    methodology: NonNullable<MethodologyContext['parameters']>,
   ): Promise<Violation[]> {
     let raw: unknown;
     try {
@@ -158,7 +165,7 @@ export class AgentRunner {
     if (!parsed.success) return zodViolations(parsed.error);
     const found: Violation[] = [];
     for (const validator of task.validators) {
-      found.push(...(await validator(input, parsed.data, { state })));
+      found.push(...(await validator(input, parsed.data, { state, methodology })));
     }
     return found;
   }

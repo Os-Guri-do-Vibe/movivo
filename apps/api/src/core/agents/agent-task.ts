@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { z, type ZodType } from 'zod';
 
-import type { MethodologyDomain } from '@movivo/shared';
+import type { MethodologyDomain, MethodologyParameters } from '@movivo/shared';
 
 import type { ModelTier } from '../ai/ai.types';
 
@@ -33,6 +33,8 @@ export interface Violation {
 export interface ValidationContext {
   /** Estado do Aluno serializado (mesmas fatias que o modelo viu). */
   state: Record<string, unknown>;
+  /** Parâmetros da metodologia que o modelo viu, por domínio. */
+  methodology: Partial<Record<MethodologyDomain, MethodologyParameters>>;
 }
 
 export type Validator<I, O> = (

@@ -9,9 +9,12 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { z } from 'zod';
 
+import type { MethodologyParameters } from '@movivo/shared';
+
 import type { TierRoute } from '../../core/ai/ai.types';
 import {
   type AgentContextSources,
+  type MethodologyContext,
   PUBLISHED_METHODOLOGY,
   type PublishedMethodology,
 } from '../../core/agents/agent-context';
@@ -57,7 +60,9 @@ export interface EvaluateOptions {
    * Metodologia em teste (rascunho), por domínio, no lugar da publicada. O texto do próprio caso
    * continua tendo precedência — ele existe justamente para fixar o cenário.
    */
-  methodologyOverride?: Partial<Record<MethodologyDomain, { text: string; version: number }>>;
+  methodologyOverride?: Partial<
+    Record<MethodologyDomain, { text: string; version: number; parameters?: MethodologyParameters }>
+  >;
   routeOverride?: TierRoute;
   requestedBy?: string | null;
 }
@@ -207,7 +212,7 @@ export class EvaluationService {
         const missing = domains.filter(
           (d) => evalCase.methodology?.[d] === undefined && override[d] === undefined,
         );
-        const published =
+        const published: MethodologyContext =
           missing.length > 0 && this.published
             ? await this.published.render(missing)
             : { text: '', versions: {} };
@@ -218,9 +223,16 @@ export class EvaluationService {
         const overrideVersions = Object.fromEntries(
           fromOverride.map((d) => [d, override[d]?.version ?? 0]),
         );
+        const overrideParameters = Object.fromEntries(
+          fromOverride.flatMap((d) => {
+            const parameters = override[d]?.parameters;
+            return parameters ? [[d, parameters]] : [];
+          }),
+        );
         return {
           text: [caseText, overrideText, published.text].filter(Boolean).join('\n\n'),
           versions: { ...published.versions, ...overrideVersions },
+          parameters: { ...published.parameters, ...overrideParameters },
         };
       },
     };

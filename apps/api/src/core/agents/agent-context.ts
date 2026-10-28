@@ -1,9 +1,13 @@
+import type { MethodologyParameters } from '@movivo/shared';
+
 import type { MethodologyDomain, StateSlice } from './agent-task';
 
 /** Metodologia renderizada para o prompt, com as versões usadas (vão para a auditoria). */
 export interface MethodologyContext {
   text: string;
   versions: Partial<Record<MethodologyDomain, number>>;
+  /** Parâmetros estruturados por domínio: os validadores checam a saída contra os mesmos números. */
+  parameters?: Partial<Record<MethodologyDomain, MethodologyParameters>>;
 }
 
 /** Fatias do Estado do Aluno serializadas, com a versão lida (controle otimista). */
