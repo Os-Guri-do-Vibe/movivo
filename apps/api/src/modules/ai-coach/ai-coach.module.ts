@@ -18,11 +18,7 @@
 import { Module } from '@nestjs/common';
 
 import { AppConfigService } from '../../core/config';
-import { ContextRepository } from './context/context.repository';
-import { ContextService } from './context/context.service';
 import { SEMANTIC_MEMORY } from './context/semantic-memory.port';
-import { WorkingMemory } from './context/working-memory.service';
-import { IntentClassifier } from './intent/intent-classifier.service';
 import { PromptResolverService } from './intent/prompt-resolver.service';
 import { IntentRepository } from './intent/intent.repository';
 import { RagService } from './rag/rag.service';
@@ -89,18 +85,14 @@ import type { LLMProvider } from './llm/llm.types';
     LlmAbuseGuard,
     LlmRouter,
     // Sprint 3 — memória da conversa (US-3.2) + RAG (US-3.3).
-    WorkingMemory,
-    ContextRepository,
     // O runtime preserva o score semântico real do pgvector; o fake lexical só é instanciado
     // diretamente por testes. O cross-encoder self-hosted pode substituir esta porta depois.
     { provide: RERANKER_PORT, useClass: HybridReranker },
     // US-3.3 substitui o no-op da US-3.2: a camada semantic agora é o RAG real (PGVector).
     { provide: SEMANTIC_MEMORY, useClass: RagService },
-    ContextService,
     EvidenceGroundingService,
     // US-3.4 — classificação de intenção (guardrail clínico + kNN + fallback nano).
     IntentRepository,
-    IntentClassifier,
     // US-7.6 — combina a persona vigente (AgentPersonaService, CORE global) com os
     // templates de intenção. A resolução/cache/fail-safe da persona mora no CORE (§12.5).
     PromptResolverService,
@@ -109,8 +101,6 @@ import type { LLMProvider } from './llm/llm.types';
   exports: [
     LlmRouter,
     AiJobRepository,
-    ContextService,
-    IntentClassifier,
     LlmAbuseGuard,
     PromptResolverService,
     SEMANTIC_MEMORY,

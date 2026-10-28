@@ -28,9 +28,7 @@ import { AdminModule } from './modules/admin/admin.module';
 import { AiCoachModule } from './modules/ai-coach/ai-coach.module';
 import { AnamnesisModule } from './modules/anamnesis/anamnesis.module';
 import { AuthModule } from './modules/auth/auth.module';
-import { CheckinModule } from './modules/checkin/checkin.module';
-import { WorkoutModule } from './modules/workout/workout.module';
-import { CoachModule } from './modules/coach/coach.module';
+import { ConversationModule } from './modules/conversation/conversation.module';
 import { AgentsModule } from './core/agents/agents.module';
 import { CoachingModule } from './modules/coaching/coaching.module';
 import { MethodologyModule } from './modules/methodology/methodology.module';
@@ -58,10 +56,8 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
     ProtocolModule,
     WhatsappModule,
     AiCoachModule,
-    CoachModule,
+    ConversationModule,
     SubscriptionModule,
-    CheckinModule,
-    WorkoutModule,
     JobsModule,
     DomainEventsModule,
     AgentsModule,

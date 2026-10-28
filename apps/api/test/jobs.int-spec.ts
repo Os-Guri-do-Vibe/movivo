@@ -53,7 +53,6 @@ describe('BullMQ — fundação de filas', () => {
         QUEUE.planGeneration,
         QUEUE.aiResponse,
         QUEUE.whatsappOutbound,
-        QUEUE.checkinWeekly,
         QUEUE.conversionSequence,
         QUEUE.sanity,
         QUEUE.deadLetter,

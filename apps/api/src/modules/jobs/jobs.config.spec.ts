@@ -20,7 +20,6 @@ describe('jobs.config', () => {
     expect(Object.keys(QUEUE_REGISTRY).sort()).toEqual(
       [
         'ai-response',
-        'checkin-weekly',
         'conversion-sequence',
         // US-8.5 — conciliacao da liquidacao do gateway.
         'payment-reconciliation',
@@ -38,17 +37,14 @@ describe('jobs.config', () => {
         // Espelho da aba "Conversas": baixa a mídia e confirma a mensagem digitada no celular.
         'whatsapp-mirror',
         'whatsapp-outbound',
-        'workout-daily',
         // Link diário v2 (qualquer modalidade).
         'training-daily',
         // Check-in adaptativo semanal (v2).
         'check-in',
         // Comentário do Coach sobre o treino registrado no diário (achado 2026-09-12).
-        'workout-feedback',
         // Versão nova do protocolo: atualiza o treino de hoje e oferece o link novo (2026-10-20).
         'workout-protocol-changed',
         // Comentário do Coach sobre o check-in semanal (achado 2026-09-13).
-        'checkin-weekly-feedback',
         // Outbox de eventos de domínio: relé + despacho aos consumidores.
         'outbox-relay',
         'domain-events',

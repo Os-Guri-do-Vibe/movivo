@@ -50,25 +50,6 @@ export type ScriptDefinition = CronScript | RoutineScript | TerminalScript;
 
 export const CRON_SCRIPTS: readonly CronScript[] = [
   {
-    id: 'workout-daily-scan',
-    kind: 'CRON',
-    name: 'Link diário de treino',
-    description:
-      'Envia por WhatsApp o link do treino do dia a cada aluno com protocolo ativo. Quando o último treino previsto ficou sem registro, a mesma mensagem leva uma pergunta curta sobre ele (no máximo 2 por semana, nunca em dias seguidos), em um balão separado. No mesmo horário, abre o alerta para o profissional CREF de quem faltou à 3ª sessão seguida ou a mais de 60% das sessões. A varredura roda a cada minuto e dispara às 04:00 do fuso de cada aluno.',
-    queue: QUEUE.workoutDaily,
-    schedulerId: 'daily-workout-scan',
-    cron: '* * * * * (UTC)',
-    schedule: 'Todo dia às 04:00 (fuso de cada aluno)',
-    runEffect:
-      'Enfileira agora o envio do link de treino de hoje aos alunos elegíveis que ainda não o receberam hoje. Quem já recebeu não recebe de novo. A entrega em si acontece na fila do WhatsApp.',
-    resultLabels: {
-      eligible: 'elegíveis',
-      sent: 'na fila de envio',
-      asked: 'com a pergunta sobre o treino sem registro',
-      alerted: 'alertas de frequência abertos',
-    },
-  },
-  {
     id: 'training-daily-scan',
     kind: 'CRON',
     name: 'Link diário do plano (v2)',
@@ -98,20 +79,6 @@ export const CRON_SCRIPTS: readonly CronScript[] = [
     schedule: 'Domingo às 18:00 (fuso de cada aluno)',
     runEffect:
       'Abre agora o check-in da semana dos alunos elegíveis que ainda não têm um e envia o convite. Quem já recebeu nesta semana não recebe outro.',
-    resultLabels: { eligible: 'elegíveis', sent: 'na fila de envio' },
-  },
-  {
-    id: 'checkin-weekly-scan',
-    kind: 'CRON',
-    name: 'Check-in semanal',
-    description:
-      'Convida o aluno por WhatsApp a responder o check-in da semana, que ajusta o protocolo. A varredura roda a cada minuto e dispara no domingo, no horário do fuso de cada aluno.',
-    queue: QUEUE.checkinWeekly,
-    schedulerId: 'weekly-checkin-scan',
-    cron: '* * * * * (UTC)',
-    schedule: 'Domingo às 18:00 (fuso de cada aluno)',
-    runEffect:
-      'Enfileira agora o convite de check-in aos alunos elegíveis que ainda não têm o check-in desta semana. Quem já foi convidado não recebe outro. A entrega em si acontece na fila do WhatsApp.',
     resultLabels: { eligible: 'elegíveis', sent: 'na fila de envio' },
   },
   {
@@ -219,16 +186,6 @@ export const TERMINAL_SCRIPTS: readonly TerminalScript[] = [
       'Ataca o modelo real com casos de injeção de prompt (dados sintéticos) e mede a taxa de aprovação. Consome tokens.',
     file: 'apps/api/src/scripts/redteam-prompt-injection.ts',
     command: 'REDTEAM_PROVIDER=openai pnpm exec tsx src/scripts/redteam-prompt-injection.ts',
-    notRunnableReason: 'Consome tokens do provedor e exige chave no ambiente — só no terminal.',
-  },
-  {
-    id: 'eval-agenda',
-    kind: 'TERMINAL',
-    name: 'Avaliação da agenda flexível',
-    description:
-      'Roda 50 frases de aluno (dados sintéticos) pelo leitor de pedidos de agenda e pelo classificador de intenção, com o modelo real, e mede o acerto. Consome tokens.',
-    file: 'apps/api/src/scripts/eval-agenda.ts',
-    command: 'EVAL_PROVIDER=deepseek pnpm exec tsx src/scripts/eval-agenda.ts',
     notRunnableReason: 'Consome tokens do provedor e exige chave no ambiente — só no terminal.',
   },
   {

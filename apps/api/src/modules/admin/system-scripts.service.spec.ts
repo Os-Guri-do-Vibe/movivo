@@ -59,10 +59,8 @@ describe('SystemScriptsService.list', () => {
     const byKind = (kind: string) => data.scripts.filter((script) => script.kind === kind);
 
     expect(byKind('CRON').map((script) => script.id)).toEqual([
-      'workout-daily-scan',
       'training-daily-scan',
       'weekly-check-in-scan',
-      'checkin-weekly-scan',
       'subscription-period-scan',
       'outbox-relay-scan',
     ]);
@@ -77,7 +75,7 @@ describe('SystemScriptsService.list', () => {
   it('mostra a última execução manual com o resumo do resultado', async () => {
     const { service } = setup([
       fakeJob(
-        { kind: 'SCAN', manual: true, scriptId: 'workout-daily-scan' },
+        { kind: 'SCAN', manual: true, scriptId: 'training-daily-scan' },
         {
           processedOn: 2_000,
           finishedOn: 3_000,
@@ -91,7 +89,7 @@ describe('SystemScriptsService.list', () => {
       ),
     ]);
     const { data } = await service.list(ADMIN);
-    const workout = data.scripts.find((script) => script.id === 'workout-daily-scan');
+    const workout = data.scripts.find((script) => script.id === 'training-daily-scan');
 
     expect(workout?.lastRun).toEqual({
       state: 'COMPLETED',
@@ -112,26 +110,26 @@ describe('SystemScriptsService.list', () => {
 describe('SystemScriptsService.run', () => {
   it('enfileira o cron na própria fila com force, sem tocar no agendamento, e audita', async () => {
     const { service, enqueue, append } = setup();
-    const { data } = await service.run(ADMIN, 'workout-daily-scan');
+    const { data } = await service.run(ADMIN, 'training-daily-scan');
 
     expect(data.status).toBe('ENQUEUED');
     expect(enqueue).toHaveBeenCalledWith(
-      'workout-daily',
-      'manual-daily-workout-scan',
+      'training-daily',
+      'manual-daily-training-scan',
       expect.objectContaining({
         kind: 'SCAN',
         force: true,
         manual: true,
         requestedBy: ADMIN.userId,
       }),
-      { jobId: expect.stringMatching(/^manual-workout-daily-scan-/) },
+      { jobId: expect.stringMatching(/^manual-training-daily-scan-/) },
     );
     expect(append).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         actorId: ADMIN.userId,
         action: 'system.script.run',
-        changes: { script: 'workout-daily-scan', kind: 'CRON', status: 'ENQUEUED' },
+        changes: { script: 'training-daily-scan', kind: 'CRON', status: 'ENQUEUED' },
       }),
     );
   });
