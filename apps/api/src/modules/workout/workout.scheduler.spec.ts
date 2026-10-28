@@ -10,7 +10,7 @@ import { WorkerFactory } from '../jobs/worker.factory';
 import type { ShortLinkService } from '../short-link/short-link.service';
 import type { AttendanceAlertService } from './attendance-alert.service';
 import type { AskDecision, MissedWorkoutAskPolicy } from './missed-workout-ask.policy';
-import type { WorkoutAccessService } from './workout-access.service';
+import type { TrainingAccessService } from '../training/training-access.service';
 import type { WorkoutJournalService } from './workout-journal.service';
 import { WorkoutScheduler } from './workout.scheduler';
 
@@ -119,7 +119,7 @@ function makeScheduler(options: Options = {}) {
     db,
     {
       createMagicLink: vi.fn(async () => 'https://movivo.test/treino/acessar#token=secret'),
-    } as unknown as WorkoutAccessService,
+    } as unknown as TrainingAccessService,
     { journal } as unknown as WorkoutJournalService,
     { create } as unknown as ShortLinkService,
     CONFIG,

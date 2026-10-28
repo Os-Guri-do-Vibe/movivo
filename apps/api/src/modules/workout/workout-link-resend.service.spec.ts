@@ -5,7 +5,7 @@ import type { AppConfigService } from '../../core/config';
 import type { RedisKeyBuilder } from '../../core/redis';
 import type { QueueManager } from '../jobs/queue-manager.service';
 import type { ShortLinkService } from '../short-link/short-link.service';
-import type { WorkoutAccessService } from './workout-access.service';
+import type { TrainingAccessService } from '../training/training-access.service';
 import { WorkoutLinkResendService } from './workout-link-resend.service';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
@@ -29,7 +29,7 @@ function make(options: { owner?: boolean; cooldown?: boolean; enqueueFails?: boo
     {
       findMagicOwner: vi.fn(async () => owner),
       createMagicLink,
-    } as unknown as WorkoutAccessService,
+    } as unknown as TrainingAccessService,
     { create: vi.fn(async () => 'aB3xK9pQ') } as unknown as ShortLinkService,
     { enqueue } as unknown as QueueManager,
     { whatsapp: { publicSiteUrl: 'https://movivo.test' } } as unknown as AppConfigService,

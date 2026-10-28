@@ -27,7 +27,7 @@ import {
   type TenantTransaction,
 } from '../src/core/database/tenant-database.service';
 import { QueueManager } from '../src/modules/jobs/queue-manager.service';
-import { WorkoutAccessService } from '../src/modules/workout/workout-access.service';
+import { TrainingAccessService } from '../src/modules/training/training-access.service';
 import { RolesGuard } from '../src/modules/auth/roles.guard';
 import { ROLES_KEY } from '../src/modules/auth/roles.decorator';
 
@@ -100,7 +100,7 @@ beforeAll(async () => {
     });
     fixtures.push(fixture);
   }
-  const workouts = app.get(WorkoutAccessService);
+  const workouts = app.get(TrainingAccessService);
   const link = await workouts.createMagicLink(fixtures[0].userId);
   bearer = `Bearer ${await workouts.exchange(link.split('#token=')[1])}`;
 });

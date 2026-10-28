@@ -17,7 +17,7 @@ import { FollowupModule } from '../followup/followup.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { ShortLinkModule } from '../short-link/short-link.module';
 import { ShareCardRenderer } from './share-card/share-card-renderer.service';
-import { WorkoutAccessService } from './workout-access.service';
+import { TrainingAccessService } from '../training/training-access.service';
 import { WorkoutCompletionService } from './workout-completion.service';
 import { WorkoutController } from './workout.controller';
 import { WorkoutInboundHandler } from './workout-inbound.handler';
@@ -36,7 +36,7 @@ import { WorkoutScheduler } from './workout.scheduler';
   imports: [JobsModule, ShortLinkModule, FollowupModule],
   controllers: [WorkoutController],
   providers: [
-    WorkoutAccessService,
+    TrainingAccessService,
     WorkoutLinkResendService,
     WorkoutLinkDispatcherService,
     WorkoutRefreshOfferService,
@@ -55,7 +55,7 @@ import { WorkoutScheduler } from './workout.scheduler';
     WorkoutCompletionService,
     WorkoutJournalService,
     WorkoutScheduleService,
-    WorkoutAccessService,
+    TrainingAccessService,
     WorkoutLinkDispatcherService,
     WorkoutRefreshOfferService,
     WorkoutLateLogService,

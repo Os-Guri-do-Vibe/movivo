@@ -85,3 +85,54 @@ export type ExecutionSummary = z.infer<typeof executionSummarySchema>;
 export function sessionLoad(rpe: number, minutes: number): number {
   return Math.round(rpe * minutes);
 }
+
+// --- Contratos da página de treino do aluno ----------------------------------------------
+
+/** Séries gravadas de uma vez (a página envia o que mudou). */
+export const saveSetsRequestSchema = z.object({
+  sets: z.array(executionSetSchema).min(1).max(120),
+});
+export type SaveSetsRequest = z.infer<typeof saveSetsRequestSchema>;
+
+/** Fechamento: o aluno só informa o que a modalidade pede (esforço, tempo, dor, gosto). */
+export const finishExecutionRequestSchema = z.object({
+  status: executionStatusSchema.exclude(['IN_PROGRESS']),
+  rpe: rpeSchema.nullable(),
+  durationMinutes: z.number().int().min(1).max(600).nullable(),
+  painReports: z.array(painReportSchema).max(6),
+  enjoyment: z.number().int().min(1).max(5).nullable(),
+});
+export type FinishExecutionRequest = z.infer<typeof finishExecutionRequestSchema>;
+
+/** Treino fora do plano (esporte externo, sessão avulsa) registrado direto. */
+export const logExternalRequestSchema = z.object({
+  modality: sessionModalitySchema,
+  performedOn: z.iso.date(),
+  rpe: rpeSchema,
+  durationMinutes: z.number().int().min(1).max(600),
+  painReports: z.array(painReportSchema).max(6).default([]),
+  metrics: enduranceMetricsSchema.optional(),
+  /** Vincula à sessão agendada do dia, quando for o caso. */
+  scheduledSessionId: z.uuid().optional(),
+});
+export type LogExternalRequest = z.infer<typeof logExternalRequestSchema>;
+
+/** Métricas informadas à mão ou extraídas de arquivo/print, que o aluno confirma. */
+export const saveMetricsRequestSchema = z.object({
+  metrics: enduranceMetricsSchema,
+  confirmed: z.boolean(),
+});
+export type SaveMetricsRequest = z.infer<typeof saveMetricsRequestSchema>;
+
+export const executionViewSchema = z.object({
+  id: z.uuid(),
+  status: executionStatusSchema,
+  source: executionSourceSchema,
+  sets: z.array(executionSetSchema),
+  metrics: enduranceMetricsSchema.nullable(),
+  metricsConfirmed: z.boolean(),
+  rpe: z.number().nullable(),
+  durationMinutes: z.number().int().nullable(),
+  enjoyment: z.number().int().nullable(),
+});
+export type ExecutionView = z.infer<typeof executionViewSchema>;

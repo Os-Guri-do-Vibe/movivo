@@ -34,6 +34,8 @@ export const QUEUE = {
   whatsappMirror: 'whatsapp-mirror',
   checkinWeekly: 'checkin-weekly',
   workoutDaily: 'workout-daily',
+  // Link diário e fechamento do dia no modelo v2 (qualquer modalidade); `workoutDaily` é o legado.
+  trainingDaily: 'training-daily',
   // Comentário do Coach sobre o treino que o aluno acabou de registrar no diário
   // (`WorkoutJournalService.finish()`) — fila própria (não um branch de `whatsappOutbound`)
   // porque quem enfileira (`workout`) não pode falar com `LlmRouter`/`ValidationService`
@@ -113,6 +115,7 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
   // Quick reply diário de treino (US-8.1). Mesmo perfil do check-in: um scan por dia,
   // sem urgência de latência, retry curto — o envio real acontece em `whatsappOutbound`.
   [QUEUE.workoutDaily]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
+  [QUEUE.trainingDaily]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
   // Best-effort (mesmo espírito do resumo de entrega do protocolo): poucas tentativas,
   // nunca trava o diário do aluno por causa de um comentário que não saiu.
   [QUEUE.workoutFeedback]: { attempts: 2, backoffMs: [5_000], concurrency: 5 },

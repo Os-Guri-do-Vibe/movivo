@@ -39,6 +39,8 @@ describe('jobs.config', () => {
         'whatsapp-mirror',
         'whatsapp-outbound',
         'workout-daily',
+        // Link diário v2 (qualquer modalidade).
+        'training-daily',
         // Comentário do Coach sobre o treino registrado no diário (achado 2026-09-12).
         'workout-feedback',
         // Versão nova do protocolo: atualiza o treino de hoje e oferece o link novo (2026-10-20).

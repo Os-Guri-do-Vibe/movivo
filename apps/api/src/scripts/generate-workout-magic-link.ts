@@ -3,7 +3,7 @@
  * uso: teste manual local do fluxo `/treino/acessar` (achado 2026-09-10).
  *
  * Não sobe Nest/DI (mesmo motivo de `resend-protocol-delivery.ts`): replica exatamente a
- * lógica de `WorkoutAccessService.createMagicLink` (token opaco de 32 bytes, hash SHA-256
+ * lógica de `TrainingAccessService.createMagicLink` (token opaco de 32 bytes, hash SHA-256
  * guardado, TTL de 48h) falando direto com Postgres.
  *
  * Uso:

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { AppConfigService } from '../../core/config';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
-import { WorkoutAccessService } from './workout-access.service';
+import { TrainingAccessService } from './training-access.service';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 const RAW_TOKEN = 'a'.repeat(43);
@@ -59,10 +59,10 @@ function makeService(options: { updates?: unknown[][]; selects?: unknown[][] } =
   const config = {
     whatsapp: { publicSiteUrl: 'https://app.movivo.test' },
   } as unknown as AppConfigService;
-  return { service: new WorkoutAccessService(db, config), inserted, updated };
+  return { service: new TrainingAccessService(db, config), inserted, updated };
 }
 
-describe('WorkoutAccessService', () => {
+describe('TrainingAccessService', () => {
   it('cria magic link sem expor o hash persistido na URL', async () => {
     const { service, inserted } = makeService();
     const link = await service.createMagicLink(USER_ID, 'session-1');

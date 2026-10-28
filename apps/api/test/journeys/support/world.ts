@@ -45,7 +45,7 @@ import { ValidationService } from '../../../src/modules/protocol/validation/vali
 import { ShortLinkService } from '../../../src/modules/short-link/short-link.service';
 import { AttendanceAlertService } from '../../../src/modules/workout/attendance-alert.service';
 import { MissedWorkoutAskPolicy } from '../../../src/modules/workout/missed-workout-ask.policy';
-import { WorkoutAccessService } from '../../../src/modules/workout/workout-access.service';
+import { TrainingAccessService } from '../../../src/modules/training/training-access.service';
 import { WorkoutCompletionService } from '../../../src/modules/workout/workout-completion.service';
 import { localParts } from '../../../src/modules/workout/workout-eligibility';
 import { WorkoutJournalService } from '../../../src/modules/workout/workout-journal.service';
@@ -151,7 +151,7 @@ export interface World {
   schedule: WorkoutScheduleService;
   journal: WorkoutJournalService;
   completion: WorkoutCompletionService;
-  access: WorkoutAccessService;
+  access: TrainingAccessService;
   shortLinks: ShortLinkService;
   dispatcher: WorkoutLinkDispatcherService;
   refreshOffer: WorkoutRefreshOfferService;
@@ -191,7 +191,7 @@ export async function startWorld(): Promise<World> {
     schedule,
     asAny(fakeLogger()),
   );
-  const access = new WorkoutAccessService(tenant, asAny(config));
+  const access = new TrainingAccessService(tenant, asAny(config));
   const shortLinks = new ShortLinkService(tenant, asAny(fakeCipher));
   const dispatcher = new WorkoutLinkDispatcherService(
     tenant,

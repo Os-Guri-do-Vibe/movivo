@@ -19,7 +19,7 @@ function tokenHash(token: string): string {
 }
 
 @Injectable()
-export class WorkoutAccessService {
+export class TrainingAccessService {
   constructor(
     private readonly db: TenantDatabase,
     private readonly config: AppConfigService,

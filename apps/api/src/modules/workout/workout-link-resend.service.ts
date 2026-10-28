@@ -8,7 +8,7 @@ import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { ShortLinkService } from '../short-link/short-link.service';
-import { MAGIC_TTL_MS, WorkoutAccessService } from './workout-access.service';
+import { MAGIC_TTL_MS, TrainingAccessService } from '../training/training-access.service';
 import { firstNameOf, localParts } from './workout-eligibility';
 import { greetingFor, resentWorkoutLinkMessage } from './workout-messages';
 
@@ -22,7 +22,7 @@ const RESEND_COOLDOWN_SECONDS = 10 * 60;
 @Injectable()
 export class WorkoutLinkResendService {
   constructor(
-    private readonly access: WorkoutAccessService,
+    private readonly access: TrainingAccessService,
     private readonly shortLinks: ShortLinkService,
     private readonly queues: QueueManager,
     private readonly config: AppConfigService,

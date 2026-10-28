@@ -13,7 +13,7 @@ import { WorkerFactory } from '../jobs/worker.factory';
 import { ShortLinkService } from '../short-link/short-link.service';
 import { AttendanceAlertService } from './attendance-alert.service';
 import { MissedWorkoutAskPolicy } from './missed-workout-ask.policy';
-import { MAGIC_TTL_MS, WorkoutAccessService } from './workout-access.service';
+import { MAGIC_TTL_MS, TrainingAccessService } from '../training/training-access.service';
 import {
   type EligibleStudent,
   firstNameOf,
@@ -51,7 +51,7 @@ export class WorkoutScheduler implements OnModuleInit {
     private readonly workers: WorkerFactory,
     private readonly queues: QueueManager,
     private readonly db: TenantDatabase,
-    private readonly access: WorkoutAccessService,
+    private readonly access: TrainingAccessService,
     private readonly journal: WorkoutJournalService,
     private readonly shortLinks: ShortLinkService,
     private readonly config: AppConfigService,

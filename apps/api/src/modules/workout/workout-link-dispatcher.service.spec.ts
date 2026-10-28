@@ -6,7 +6,7 @@ import type { TenantDatabase } from '../../core/database/tenant-database.service
 import type { RedisKeyBuilder } from '../../core/redis';
 import type { QueueManager } from '../jobs/queue-manager.service';
 import type { ShortLinkService } from '../short-link/short-link.service';
-import type { WorkoutAccessService } from './workout-access.service';
+import type { TrainingAccessService } from '../training/training-access.service';
 import { WorkoutLinkDispatcherService } from './workout-link-dispatcher.service';
 import type { WorkoutJournalService } from './workout-journal.service';
 
@@ -55,7 +55,7 @@ function make(options: {
       order.push('create');
       return 'https://movivo.test/treino/acessar#token=secret';
     }),
-  } as unknown as WorkoutAccessService;
+  } as unknown as TrainingAccessService;
   const redis = {
     set: vi.fn(async (...args: unknown[]) =>
       args.includes('NX') && options.throttled ? null : 'OK',

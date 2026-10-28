@@ -1,7 +1,7 @@
 import type { Response } from 'express';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { WorkoutAccessService } from './workout-access.service';
+import type { TrainingAccessService } from '../training/training-access.service';
 import { WorkoutController } from './workout.controller';
 import type { WorkoutJournalService } from './workout-journal.service';
 import type { WorkoutLinkResendService } from './workout-link-resend.service';
@@ -14,7 +14,7 @@ function makeController() {
     exchange: vi.fn(async () => 'session-token'),
     peekFirstName: vi.fn(async () => 'Pedro'),
     requireUser: vi.fn(async () => USER_ID),
-  } as unknown as WorkoutAccessService;
+  } as unknown as TrainingAccessService;
   const journal = {
     journal: vi.fn(async () => ({ firstName: 'Pedro' })),
     start: vi.fn(async () => undefined),

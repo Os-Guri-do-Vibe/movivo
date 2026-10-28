@@ -36,7 +36,7 @@ import { z } from 'zod';
 
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
 import { parseBody } from '../../core/validation/strict-input';
-import { WorkoutAccessService } from './workout-access.service';
+import { TrainingAccessService } from '../training/training-access.service';
 import { WorkoutJournalService } from './workout-journal.service';
 import { WorkoutLinkResendService } from './workout-link-resend.service';
 
@@ -62,7 +62,7 @@ export class WorkoutController {
   private readonly logger = new Logger(WorkoutController.name);
 
   constructor(
-    private readonly access: WorkoutAccessService,
+    private readonly access: TrainingAccessService,
     private readonly journalService: WorkoutJournalService,
     private readonly resendService: WorkoutLinkResendService,
   ) {}

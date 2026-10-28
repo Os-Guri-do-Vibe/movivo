@@ -30,7 +30,7 @@ import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
 import { ShortLinkService } from '../short-link/short-link.service';
-import { MAGIC_TTL_MS, WorkoutAccessService } from './workout-access.service';
+import { MAGIC_TTL_MS, TrainingAccessService } from '../training/training-access.service';
 import { firstNameOf, localParts, previousDay, shortWeekdayName } from './workout-eligibility';
 import { WorkoutJournalService } from './workout-journal.service';
 import {
@@ -73,7 +73,7 @@ export class WorkoutLinkDispatcherService {
   constructor(
     private readonly db: TenantDatabase,
     private readonly journal: WorkoutJournalService,
-    private readonly access: WorkoutAccessService,
+    private readonly access: TrainingAccessService,
     private readonly shortLinks: ShortLinkService,
     private readonly queues: QueueManager,
     private readonly config: AppConfigService,
