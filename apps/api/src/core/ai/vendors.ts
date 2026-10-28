@@ -29,6 +29,11 @@ export function classifyStatus(vendor: ModelVendor, status: number, body: string
   if (status === 401 || status === 402 || status === 403) {
     return new VendorError('AUTH', vendor, `${status} credencial ou saldo do fornecedor`);
   }
+  // A Anthropic devolve conta sem saldo como 400 ("credit balance is too low"): é a conta, não
+  // o pedido — failover para o próximo fornecedor.
+  if (status === 400 && /credit balance|billing|quota|insufficient/i.test(body)) {
+    return new VendorError('AUTH', vendor, `${status} saldo ou cota do fornecedor`);
+  }
   if (status >= 500) return new VendorError('SERVER', vendor, `${status} erro do servidor`);
   return new VendorError('CLIENT', vendor, `${status}: ${body.slice(0, 200)}`);
 }
