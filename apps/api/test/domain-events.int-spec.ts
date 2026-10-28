@@ -4,17 +4,23 @@
  * Prova as três garantias do outbox com Postgres real:
  *  1. o evento vive e morre com a transação que mudou o estado (rollback = sem evento);
  *  2. o relé publica cada evento uma vez (marca `published_at`);
- *  3. o dispatcher entrega a cada consumidor uma vez — um reenvio do mesmo evento é pulado.
+ *  3. o dispatcher entrega a cada consumidor uma vez — entregas concorrentes e reenvios são
+ *     pulados, e a falha de um consumidor libera a reivindicação para o retry.
  */
 import 'reflect-metadata';
 
 import { type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { eq, inArray } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { AppModule } from '../src/app.module';
-import { domainEvents, studentProfiles, users } from '../src/core/database/schema';
+import {
+  domainEventReceipts,
+  domainEvents,
+  studentProfiles,
+  users,
+} from '../src/core/database/schema';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { DomainEventDispatcher } from '../src/modules/domain-events/domain-event-dispatcher';
 import {
@@ -98,12 +104,49 @@ describe('outbox de eventos de domínio', () => {
     expect(published?.publishedAt).not.toBeNull();
     expect(await relay.relay()).toBe(0);
 
-    const first = await dispatcher.dispatch(eventId);
-    expect(first.delivered).toContain('teste.consumidor-de-perfil');
-    const second = await dispatcher.dispatch(eventId);
-    expect(second.delivered).toHaveLength(0);
-    expect(second.skipped).toContain('teste.consumidor-de-perfil');
+    // O relé também enfileira o evento para o worker da própria aplicação: o despacho manual
+    // concorre com ele. A reivindicação garante que o consumidor roda uma vez, quem quer que ganhe.
+    const attempts = await Promise.all([
+      dispatcher.dispatch(eventId),
+      dispatcher.dispatch(eventId),
+      dispatcher.dispatch(eventId),
+    ]);
+    expect(attempts.flatMap((a) => a.delivered).length).toBeLessThanOrEqual(1);
+
+    await vi.waitFor(async () => {
+      const [receipt] = await db.runAsSystem((tx) =>
+        tx
+          .select({ status: domainEventReceipts.status })
+          .from(domainEventReceipts)
+          .where(eq(domainEventReceipts.eventId, eventId)),
+      );
+      expect(receipt?.status).toBe('DONE');
+    });
+
+    const again = await dispatcher.dispatch(eventId);
+    expect(again.delivered).toHaveLength(0);
+    expect(again.skipped).toContain('teste.consumidor-de-perfil');
     expect(received.filter((event) => event.id === eventId)).toHaveLength(1);
+  });
+
+  it('falha do consumidor libera a reivindicação para o retry', async () => {
+    const handlers = app.get(DomainEventHandlers);
+    let calls = 0;
+    handlers.register({
+      name: 'teste.consumidor-instavel',
+      eventTypes: ['PreferenceObserved'],
+      handle: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('falha transitória');
+      },
+    });
+    const eventId = await db.runAsSystem((tx) =>
+      recorder.record(tx, { userId, type: 'PreferenceObserved', payload: { goalVersion: 1 } }),
+    );
+    await expect(dispatcher.dispatch(eventId)).rejects.toThrow('falha transitória');
+    const retry = await dispatcher.dispatch(eventId);
+    expect(retry.delivered).toContain('teste.consumidor-instavel');
+    expect(calls).toBe(2);
   });
 
   it('payload fora do contrato não é gravado', async () => {

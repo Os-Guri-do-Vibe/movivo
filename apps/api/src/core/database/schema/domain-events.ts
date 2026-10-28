@@ -35,9 +35,11 @@ export const domainEvents = pgTable(
 );
 
 /**
- * Recibo de processamento: (evento, consumidor). O dispatcher grava o recibo na mesma
- * transação do efeito do consumidor sempre que pode; num retry, consumidor com recibo é pulado.
- * Sem dado de titular (só ids), por isso fora da RLS.
+ * Recibo de processamento: (evento, consumidor). O dispatcher REIVINDICA o recibo antes de
+ * chamar o consumidor (`PROCESSING`) e o conclui depois (`DONE`): duas entregas simultâneas do
+ * mesmo evento ao mesmo consumidor nunca executam em paralelo. Reivindicação que ficou para trás
+ * (processo caiu no meio) pode ser retomada depois do prazo. Falha do consumidor libera a
+ * reivindicação para o retry. Sem dado de titular (só ids), por isso fora da RLS.
  */
 export const domainEventReceipts = pgTable(
   'domain_event_receipts',
@@ -46,7 +48,12 @@ export const domainEventReceipts = pgTable(
       .notNull()
       .references(() => domainEvents.id, { onDelete: 'cascade' }),
     consumer: varchar('consumer', { length: 60 }).notNull(),
-    processedAt: eventTimestamp('processed_at').notNull().defaultNow(),
+    status: varchar('status', { length: 12 }).notNull().default('PROCESSING'),
+    claimedAt: eventTimestamp('claimed_at').notNull().defaultNow(),
+    processedAt: eventTimestamp('processed_at'),
   },
-  (t) => [primaryKey({ columns: [t.eventId, t.consumer] })],
+  (t) => [
+    primaryKey({ columns: [t.eventId, t.consumer] }),
+    checkOneOf('ck_domain_event_receipts_status', t.status, ['PROCESSING', 'DONE']),
+  ],
 );
