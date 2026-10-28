@@ -1,6 +1,6 @@
 /** HTTP real: credencial do aluno A nunca autoriza UUID do aluno B. Sem fornecedores externos. */
 import 'reflect-metadata';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { ModulesContainer } from '@nestjs/core';
 import { GUARDS_METADATA, PATH_METADATA } from '@nestjs/common/constants';
