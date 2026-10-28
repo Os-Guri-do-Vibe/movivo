@@ -111,13 +111,7 @@ export function parseQueueItem(value: unknown): QueueItem {
     autoReleaseAt: typeof value.autoReleaseAt === 'string' ? value.autoReleaseAt : null,
     origin: parseOrigin(value.origin),
     ...(value.isFallback === true ? { isFallback: true } : {}),
-    ...(value.canRegenerate === true ? { canRegenerate: true } : {}),
     ...(value.editedByProfessional === true ? { editedByProfessional: true } : {}),
-    ...(value.regeneration === 'RUNNING' ||
-    value.regeneration === 'NOT_APPLIED' ||
-    value.regeneration === 'FAILED'
-      ? { regeneration: value.regeneration }
-      : {}),
     read: value.read === true,
   };
 }
@@ -637,21 +631,6 @@ export async function saveProtocol(id: string, content: unknown): Promise<Action
   return (await request(`/protocols/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify({ content }),
-  })) as ActionResult;
-}
-
-/**
- * "Gerar protocolo novamente": enfileira a regeração do protocolo pendente a partir da
- * anamnese do aluno. Resposta imediata — a fila mostra o andamento. `confirmOverwriteEdit`
- * só é enviado depois que o profissional aceitou perder a edição manual.
- */
-export async function regenerateProtocol(
-  id: string,
-  options: { confirmOverwriteEdit?: boolean } = {},
-): Promise<ActionResult> {
-  return (await request(`/protocols/${encodeURIComponent(id)}/regenerate`, {
-    method: 'POST',
-    body: JSON.stringify(options.confirmOverwriteEdit ? { confirmOverwriteEdit: true } : {}),
   })) as ActionResult;
 }
 

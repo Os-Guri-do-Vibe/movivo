@@ -11,7 +11,7 @@ import type {
 } from '@movivo/shared';
 
 import { ChoiceGroup, FieldLabel, QuestionField, TextArea } from '@/components/onboarding/fields';
-import { BlockFooter, QuestionHeader } from '@/components/protocol-renewal/block-shell';
+import { BlockFooter, QuestionHeader } from '@/components/checkin-weekly/block-shell';
 
 /** Estado local do formulário — mesmas opções/labels da pergunta de sono da renovação de mesociclo. */
 export interface WeeklyCheckinState {
