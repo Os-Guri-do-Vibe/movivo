@@ -596,6 +596,13 @@
       "when": 1793154795081,
       "tag": "0084_link_de_acesso_do_plano",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1793198540393,
+      "tag": "0085_ajuste_pontual_da_sessao",
+      "breakpoints": true
     }
   ]
 }

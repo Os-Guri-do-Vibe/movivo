@@ -41,6 +41,7 @@ import { OutboxRelay } from '../domain-events/outbox-relay';
 import { addDays, mondayOf } from '../planning/calc/week-planner';
 import { todayIn } from '../planning/plan-generation.service';
 import { FitParseError, parseFit } from './import/fit-parser';
+import { applyAdjustment } from './session-adjustment';
 import { GpxParseError, parseGpx } from './import/gpx-parser';
 import { workoutScreenshotTask } from '../vision/vision-tasks';
 
@@ -137,7 +138,7 @@ export class ExecutionService {
             scheduledOn: r.scheduled.scheduledOn,
             slot: r.scheduled.slot as TrainingDay['selected'][number]['slot'],
             status: r.scheduled.status as TrainingDay['selected'][number]['status'],
-            content: r.plan.content,
+            content: applyAdjustment(r.plan.content, r.scheduled.adjustment),
             execution: execution ? (views.get(execution.id) ?? null) : null,
           };
         });

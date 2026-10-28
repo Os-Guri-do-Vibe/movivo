@@ -36,6 +36,7 @@ import {
   sessionPrioritySchema,
   type EnduranceMetrics,
   type PainReport,
+  type SessionAdjustment,
   type SessionContent,
   type TrainingPlanStructure,
 } from '@movivo/shared';
@@ -135,6 +136,11 @@ export const scheduledSessions = pgTable(
     slot: varchar('slot', { length: 16 }).notNull().default('ANY'),
     status: varchar('status', { length: 16 }).notNull().default('PLANNED'),
     changeSource: varchar('change_source', { length: 16 }).notNull().default('PLANNER'),
+    /**
+     * Ajuste PONTUAL desta ocorrência (hoje só tenho 20 min; troca de exercício só nesta
+     * sessão). O plano não muda: a página aplica o ajuste sobre o conteúdo do plano.
+     */
+    adjustment: jsonb('adjustment').$type<SessionAdjustment>(),
     /** Decisão que causou a última mudança (nula para o agendamento inicial do planejador). */
     decisionId: uuid('decision_id').references(() => coachingDecisions.id, {
       onDelete: 'set null',

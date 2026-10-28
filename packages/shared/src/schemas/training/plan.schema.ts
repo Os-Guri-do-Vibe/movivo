@@ -143,3 +143,29 @@ export const scheduledSessionSchema = z.object({
   status: scheduledSessionStatusSchema,
 });
 export type ScheduledSession = z.infer<typeof scheduledSessionSchema>;
+
+/**
+ * Ajuste pontual de UMA ocorrência agendada (o plano não muda): encurtar a sessão e/ou trocar
+ * exercícios só desta vez. Aplicado sobre o conteúdo do plano na hora de mostrar e executar.
+ */
+export const sessionAdjustmentSchema = z.object({
+  /** Duração-alvo e fração do conteúdo mantida (0–1). */
+  shorten: z
+    .object({
+      targetMinutes: z.number().int().min(10).max(240),
+      factor: z.number().min(0.2).max(1),
+    })
+    .optional(),
+  /** Trocas de exercício só nesta ocorrência (catálogo). */
+  substitutions: z
+    .array(
+      z.object({
+        fromExerciseId: z.string().min(1).max(80),
+        toExerciseId: z.string().min(1).max(80),
+        toName: z.string().min(1).max(120),
+      }),
+    )
+    .max(10)
+    .optional(),
+});
+export type SessionAdjustment = z.infer<typeof sessionAdjustmentSchema>;
