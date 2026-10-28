@@ -4,12 +4,13 @@
  * Nenhum agente chama isto direto — só o orquestrador, com a decisão `EXECUTE` em mãos.
  */
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, gte, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lt } from 'drizzle-orm';
 
 import type {
   AvailabilityWindow,
   CoachingAction,
   NutritionPlanStructure,
+  StudentPreference,
   TrainingPlanStructure,
 } from '@movivo/shared';
 
@@ -18,20 +19,17 @@ import {
   planSessions,
   scheduledSessions,
   studentConstraints,
+  studentPreferences,
   trainingPlans,
 } from '../../core/database/schema';
 import type { TenantTransaction } from '../../core/database/tenant-database.service';
 import { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
+import type { CommandResult } from '../coaching/decision/decision-executor.service';
 import { DomainEventRecorder } from '../domain-events/domain-event-recorder';
 import { sessionLoad } from '../planning/calc/load';
 import { ScheduleService } from '../training/schedule.service';
 
 type Action<T extends CoachingAction['type']> = Extract<CoachingAction, { type: T }>;
-
-export interface CommandResult {
-  command: string;
-  result: Record<string, unknown>;
-}
 
 @Injectable()
 export class DomainCommands {
@@ -263,6 +261,182 @@ export class DomainCommands {
     return {
       command: 'nutrition.adjust_meal_guidance',
       result: { applied: true, planId: created?.id ?? null },
+    };
+  }
+
+  /**
+   * Reduz o volume das próximas semanas de uma modalidade. Só para baixo: aumento de volume
+   * entra na troca de bloco, não aqui. Aplica o mesmo ajuste pontual do "pouco tempo hoje",
+   * sem tocar no plano.
+   */
+  async adjustWeeklyVolume(
+    tx: TenantTransaction,
+    userId: string,
+    action: Action<'ADJUST_WEEKLY_VOLUME'>,
+    decisionId: string,
+    today: string,
+  ): Promise<CommandResult> {
+    if (action.percentChange >= 0) {
+      throw new Error('a redução de volume exige variação negativa');
+    }
+    const factor = Math.max(0.2, 1 + action.percentChange / 100);
+    const until = addDays(today, action.weeks * 7);
+    const rows = await tx
+      .select({
+        id: scheduledSessions.id,
+        content: planSessions.content,
+        minutes: planSessions.estimatedMinutes,
+        adjustment: scheduledSessions.adjustment,
+      })
+      .from(scheduledSessions)
+      .innerJoin(planSessions, eq(planSessions.id, scheduledSessions.planSessionId))
+      .where(
+        and(
+          eq(scheduledSessions.userId, userId),
+          eq(scheduledSessions.status, 'PLANNED'),
+          gte(scheduledSessions.scheduledOn, today),
+          lt(scheduledSessions.scheduledOn, until),
+        ),
+      );
+    const targets = rows.filter((row) => row.content.modality === action.modality);
+    for (const row of targets) {
+      // Se já há um corte maior (ex.: "pouco tempo hoje"), vale o maior.
+      const current = row.adjustment?.shorten?.factor ?? 1;
+      const applied = Math.min(current, factor);
+      await tx
+        .update(scheduledSessions)
+        .set({
+          adjustment: {
+            ...row.adjustment,
+            shorten: {
+              targetMinutes: Math.max(10, Math.round(row.minutes * applied)),
+              factor: applied,
+            },
+          },
+          changeSource: 'COACHING',
+          decisionId,
+        })
+        .where(eq(scheduledSessions.id, row.id));
+    }
+    return {
+      command: 'training.adjust_weekly_volume',
+      result: { sessions: targets.length, percentChange: action.percentChange },
+    };
+  }
+
+  /**
+   * Soma `deltaKcal` às duas faixas de energia do plano alimentar (nova versão). A variação
+   * entra nos carboidratos (proteína e gordura mínimas não se mexem). Não desce abaixo do piso
+   * de 1.200 kcal.
+   */
+  async adjustEnergyTarget(
+    tx: TenantTransaction,
+    userId: string,
+    action: Action<'ADJUST_ENERGY_TARGET'>,
+  ): Promise<CommandResult> {
+    const [current] = await tx
+      .select()
+      .from(nutritionPlans)
+      .where(and(eq(nutritionPlans.userId, userId), eq(nutritionPlans.status, 'ACTIVE')));
+    if (!current) return { command: 'nutrition.adjust_energy', result: { applied: false } };
+    const shift = (targets: NutritionPlanStructure['trainingDay']) => ({
+      ...targets,
+      energyKcal: {
+        min: targets.energyKcal.min + action.deltaKcal,
+        max: targets.energyKcal.max + action.deltaKcal,
+      },
+      carbsG: Math.max(20, targets.carbsG + Math.round(action.deltaKcal / 4)),
+    });
+    const structure: NutritionPlanStructure = {
+      ...current.structure,
+      trainingDay: shift(current.structure.trainingDay),
+      restDay: shift(current.structure.restDay),
+    };
+    if (Math.min(structure.trainingDay.energyKcal.min, structure.restDay.energyKcal.min) < 1_200) {
+      return {
+        command: 'nutrition.adjust_energy',
+        result: { applied: false, reason: 'abaixo do piso de energia' },
+      };
+    }
+    await tx
+      .update(nutritionPlans)
+      .set({ status: 'SUPERSEDED' })
+      .where(eq(nutritionPlans.id, current.id));
+    const [created] = await tx
+      .insert(nutritionPlans)
+      .values({
+        userId,
+        version: current.version + 1,
+        status: 'ACTIVE',
+        goalId: current.goalId,
+        structure,
+        startsOn: current.startsOn,
+        methodologyVersions: current.methodologyVersions,
+        publishedAt: new Date(),
+      })
+      .returning({ id: nutritionPlans.id, version: nutritionPlans.version });
+    await this.events.record(tx, {
+      userId,
+      type: 'NutritionPlanPublished',
+      payload: { planId: created?.id ?? null, version: created?.version ?? null },
+    });
+    return {
+      command: 'nutrition.adjust_energy',
+      result: { applied: true, planId: created?.id ?? null, deltaKcal: action.deltaKcal },
+    };
+  }
+
+  /**
+   * Grava uma preferência. O que o aluno declarou nunca é sobrescrito por observação ou
+   * inferência: o comportamento só vira hipótese ao lado do que ele disse.
+   */
+  async recordPreference(
+    tx: TenantTransaction,
+    userId: string,
+    preference: StudentPreference,
+    evidence: readonly string[],
+  ): Promise<CommandResult> {
+    const active = await tx
+      .select()
+      .from(studentPreferences)
+      .where(
+        and(
+          eq(studentPreferences.userId, userId),
+          eq(studentPreferences.domain, preference.domain),
+          eq(studentPreferences.key, preference.key),
+          isNull(studentPreferences.supersededAt),
+        ),
+      );
+    if (active.some((row) => row.origin === 'DECLARED' && preference.origin !== 'DECLARED')) {
+      return {
+        command: 'state.record_preference',
+        result: { applied: false, reason: 'o aluno já declarou esta preferência' },
+      };
+    }
+    if (active.length > 0) {
+      await tx
+        .update(studentPreferences)
+        .set({ supersededAt: new Date() })
+        .where(
+          inArray(
+            studentPreferences.id,
+            active.map((row) => row.id),
+          ),
+        );
+    }
+    await tx.insert(studentPreferences).values({
+      userId,
+      domain: preference.domain,
+      key: preference.key,
+      value: preference.value,
+      strength: preference.strength,
+      origin: preference.origin,
+      confidence: preference.confidence,
+      evidence: [...evidence],
+    });
+    return {
+      command: 'state.record_preference',
+      result: { applied: true, key: preference.key, strength: preference.strength },
     };
   }
 

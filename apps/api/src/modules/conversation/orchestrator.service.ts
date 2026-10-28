@@ -23,6 +23,7 @@ import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { REDIS_CLIENT, REDIS_KEY_BUILDER, type RedisKeyBuilder } from '../../core/redis';
 import { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
 import { rankEquivalents } from '../catalog/exercises/exercise-equivalence';
+import { DecisionExecutor } from '../coaching/decision/decision-executor.service';
 import {
   DecisionPipeline,
   type DecisionOutcome,
@@ -42,7 +43,7 @@ import { StudentStateReader } from '../student-state/student-state.reader';
 import { ScheduleService } from '../training/schedule.service';
 import { shortenFactor } from '../training/session-adjustment';
 import { TrainingLinkService } from '../training/training-link.service';
-import { windowsFor, DomainCommands, type CommandResult } from './domain-commands.service';
+import { windowsFor, DomainCommands } from './domain-commands.service';
 import * as msg from './messages';
 import { textSignals } from './safety-text-rules';
 import { answerTask, classifyTask, riskTask, substituteTask, type ClassifyOutput } from './tasks';
@@ -98,6 +99,7 @@ export class ConversationOrchestrator {
     private readonly state: StudentStateReader,
     private readonly methodology: PublishedMethodologyReader,
     private readonly pipeline: DecisionPipeline,
+    private readonly executor: DecisionExecutor,
     private readonly safety: SafetyService,
     private readonly policies: PublishedPolicies,
     private readonly schedule: ScheduleService,
@@ -231,7 +233,7 @@ export class ConversationOrchestrator {
     const windows = windowsFor(intent.availableWeekdays, view.availability?.windows ?? []);
 
     // 1) registra a exceção da semana (estado, AUTO)…
-    const recorded = await this.decideAndRun(
+    const recorded = await this.executor.decideAndRun(
       userId,
       'conversation.unavailability',
       proposalOf(
@@ -259,7 +261,7 @@ export class ConversationOrchestrator {
     const action = await this.schedule.proposeWeek(userId, now);
     if (!action)
       return { status: 'EXECUTED', reply: msg.NOTHING_TO_MOVE_MESSAGE, intent: intent.intent };
-    const moved = await this.decideAndRun(
+    const moved = await this.executor.decideAndRun(
       userId,
       'conversation.reschedule_week',
       proposalOf(
@@ -327,7 +329,7 @@ export class ConversationOrchestrator {
       targetMinutes: Math.max(10, minutes, Math.ceil(session.minutes * (1 - limit / 100))),
     };
     const factor = shortenFactor(session.minutes, action.targetMinutes);
-    const outcome = await this.decideAndRun(
+    const outcome = await this.executor.decideAndRun(
       userId,
       'conversation.shorten_session',
       proposalOf(
@@ -426,7 +428,7 @@ export class ConversationOrchestrator {
       reason,
       scope,
     };
-    const outcome = await this.decideAndRun(
+    const outcome = await this.executor.decideAndRun(
       userId,
       'strength.choose_substitute',
       proposalOf(
@@ -523,43 +525,6 @@ export class ConversationOrchestrator {
       }
     }
     return built;
-  }
-
-  /** Proposta → decisão → (executa) na mesma transação. */
-  private async decideAndRun(
-    userId: string,
-    taskId: string,
-    proposal: CoachingProposal,
-    run: (
-      tx: Parameters<Parameters<TenantDatabase['runAsSystem']>[0]>[0],
-      decisionId: string,
-    ) => Promise<CommandResult>,
-    options: { sessionPlannedMinutes?: number } = {},
-  ): Promise<DecisionOutcome> {
-    const outcome = await this.db.runAsSystem(async (tx) => {
-      const decision = await this.pipeline.decide(tx, {
-        userId,
-        taskId,
-        triggerEventId: null,
-        stateVersion: 0,
-        modelRunId: null,
-        proposal,
-        sessionPlannedMinutes: options.sessionPlannedMinutes,
-      });
-      if (decision.verdict === 'EXECUTE') {
-        const result = await run(tx, decision.decisionId);
-        await this.pipeline.recordExecution(tx, {
-          userId,
-          decisionId: decision.decisionId,
-          command: result.command,
-          status: 'SUCCEEDED',
-          result: result.result,
-        });
-      }
-      return decision;
-    });
-    await this.outbox.flushSoon();
-    return outcome;
   }
 
   private notExecuted(outcome: DecisionOutcome, intent: string): HandleResult {

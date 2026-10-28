@@ -31,6 +31,6 @@ import { ConversationOrchestrator } from './orchestrator.service';
     WhatsappModule,
   ],
   providers: [ConversationStore, DomainCommands, ConversationOrchestrator, ConversationWorker],
-  exports: [ConversationOrchestrator],
+  exports: [ConversationOrchestrator, ConversationStore, DomainCommands],
 })
 export class ConversationModule {}
