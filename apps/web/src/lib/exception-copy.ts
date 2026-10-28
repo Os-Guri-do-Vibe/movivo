@@ -1,8 +1,6 @@
 /** Textos do painel para a fila de exceções: nada aqui decide, só descreve em português claro. */
 import {
-  COUNCIL_LABELS,
   DECLARED_GOAL_LABELS,
-  type Council,
   type DeclaredGoalKind,
   type ExceptionDomain,
   type ExceptionListItem,
@@ -31,10 +29,6 @@ export const PRIORITY_LABEL: Record<ExceptionListItem['priority'], string> = {
 };
 
 export const UNCERTAINTY_LABEL = { LOW: 'baixa', MEDIUM: 'média', HIGH: 'alta' } as const;
-
-export function councilLabel(council: Council): string {
-  return COUNCIL_LABELS[council];
-}
 
 export function goalLabel(primary: unknown): string | null {
   return typeof primary === 'string' && primary in DECLARED_GOAL_LABELS

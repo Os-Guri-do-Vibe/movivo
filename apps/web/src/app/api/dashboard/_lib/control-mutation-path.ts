@@ -2,8 +2,6 @@ const UUID_SEGMENT = '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}
 
 /** `ai/knowledge/upload` é multipart e tem rota própria (`control/ai/knowledge/upload/route.ts`). */
 const STATIC_MUTATIONS = new Set([
-  'ai/persona',
-  'ai/persona/rollback',
   'ai/simulate',
   'ai/faq',
   'ai/faq/rollback',
@@ -20,13 +18,11 @@ const STATIC_MUTATIONS = new Set([
   'ai/forbidden-topics/approve',
   'ai/forbidden-topics/retire',
   'ai/knowledge/review',
-  'ai/methodology',
   'integration/whatsapp/instance',
 ]);
 
 const PARAMETERIZED_MUTATIONS = [
   new RegExp(`^ai/knowledge/${UUID_SEGMENT}/(?:retry|archive|delete)$`, 'i'),
-  new RegExp(`^ai/methodology/${UUID_SEGMENT}/(?:submit|review|publish|rollback)$`, 'i'),
   // Aba "Conversas": pausar/reativar o AI Coach, enviar mensagem manual e marcar como lida.
   new RegExp(`^conversations/${UUID_SEGMENT}/(?:ai-attendance|messages|read)$`, 'i'),
   // Sistema → Scripts: execução manual forçada de um cron/rotina do catálogo (o id é validado

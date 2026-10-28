@@ -33,7 +33,7 @@ import {
 import { cn } from '@/lib/utils';
 
 import { EmptyState, ResourceState, useControlCenterResource } from './control-center-ui';
-import { formatPhone } from './protocol-anamnesis-answers';
+import { formatPhone } from '@/lib/phone-mask';
 import { WhatsappText } from './whatsapp-text';
 
 const TIMEZONE = 'America/Sao_Paulo';

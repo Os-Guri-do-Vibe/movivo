@@ -160,7 +160,6 @@ export const systemResponse: ControlCenterSystemResponse = {
     redisLatency: metric({ value: 3, unit: 'MILLISECONDS' }),
     aiJobs: metric({ value: 120 }),
     aiFailures: metric({ value: 2 }),
-    aiDlq: metric({ value: 0 }),
     aiLatency: {
       samples: 120,
       p50: metric({ value: 1200, unit: 'MILLISECONDS' }),
@@ -184,13 +183,10 @@ export const systemResponse: ControlCenterSystemResponse = {
       { date: '2026-08-11', value: 24000 },
       { date: '2026-08-12', value: 25000 },
     ],
-    ragQueries: metric({ value: 340 }),
-    ragUsefulRetrievalRate: metric({ value: 62.5, unit: 'PERCENT' }),
-    ragCorpusChunks: metric({ value: 48 }),
     slos: [
       {
-        key: 'PROTOCOL_DELIVERY',
-        title: 'Protocolo entregue em até 2 horas',
+        key: 'PLAN_DELIVERY',
+        title: 'Plano entregue em até 2 horas',
         objective: 'De cada 100 protocolos gerados, ao menos 95 ficam prontos em até 2 horas.',
         explanation: 'Mede o tempo entre o pedido do protocolo e a conclusão da geração.',
         targetPercent: 95,
@@ -426,7 +422,7 @@ export const marketingResponse: ControlCenterMarketingResponse = {
     funnel: {
       formStarted: metric({ value: 310 }),
       formSubmitted: metric({ value: 188 }),
-      protocolActive: metric({ value: 96 }),
+      planActive: metric({ value: 96 }),
       subscriptionActive: unavailableMetric,
     },
     trialConversion: {
@@ -540,7 +536,7 @@ export const studentsResponse: ControlCenterStudentsResponse = {
         status: 'ACTIVE',
         subscriptionStatus: 'TRIALING',
         subscriptionPlan: 'MONTHLY',
-        protocolStatus: 'ACTIVE',
+        planStatus: 'ACTIVE',
         enrolledAt: '2026-08-01T09:00:00.000Z',
         churnRisk: {
           score: 2,
@@ -558,7 +554,7 @@ export const studentsResponse: ControlCenterStudentsResponse = {
         status: 'PENDING',
         subscriptionStatus: null,
         subscriptionPlan: null,
-        protocolStatus: null,
+        planStatus: null,
         enrolledAt: null,
         churnRisk: { score: 0, signals: [] },
       },
@@ -570,9 +566,9 @@ export const studentsResponse: ControlCenterStudentsResponse = {
       reportingRate: metric({ value: 72.5, unit: 'PERCENT' }),
       cohortSize: 40,
       bySource: [
-        { source: 'WHATSAPP_QUICK_REPLY', completions: 210 },
-        { source: 'CHECKIN', completions: 46 },
-        { source: 'CONVERSATION', completions: 0 },
+        { source: 'LINK', completions: 210 },
+        { source: 'FIT_FILE', completions: 46 },
+        { source: 'WHATSAPP_SCREENSHOT', completions: 0 },
       ],
     },
     declaredAdherenceRate: metric({ value: 81.3, unit: 'PERCENT' }),
@@ -590,9 +586,8 @@ export const studentDetailResponse: ControlCenterStudentDetailResponse = {
       status: 'ACTIVE',
       subscriptionStatus: 'TRIALING',
       subscriptionPlan: 'MONTHLY',
-      protocolStatus: 'ACTIVE',
+      planStatus: 'ACTIVE',
       enrolledAt: '2026-08-01T09:00:00.000Z',
-      requiresProfessionalReview: false,
       anamnesisStatus: 'SUBMITTED',
       acquisition: {
         channel: 'instagram',
@@ -612,35 +607,20 @@ export const studentDetailResponse: ControlCenterStudentDetailResponse = {
           },
         ],
       },
-      currentProtocol: {
-        id: '33333333-3333-4333-8333-333333333333',
-        version: 2,
-        currentWeek: 3,
-        totalWeeks: 8,
-        signedAt: '2026-08-01T12:00:00.000Z',
+      plan: {
+        training: { version: 2, publishedAt: '2026-08-01T12:00:00.000Z' },
+        nutrition: { version: 1, publishedAt: '2026-08-01T12:00:00.000Z' },
+        strategy: 'Hipertrofia com consistência',
+        goal: 'HYPERTROPHY',
       },
-      routine: {
-        primaryGoal: 'GAIN_MUSCLE',
-        trainingStatus: 'REGULAR',
-        experience: 'INTERMEDIATE',
-        daysPerWeek: 4,
-        preferredDays: ['WED', 'MON'],
-        sessionDuration: 'M45_TO_60',
-        location: 'FULL_GYM',
-        preferredPeriod: 'MORNING',
-      },
-      workoutHistory: {
-        status: 'UNAVAILABLE',
-        reason: 'A execução dos treinos ainda não é registrada pelo produto.',
-      },
-      // Timeline com as 6 origens fora de ordem de origem, mas já ordenada por tempo:
+      // Timeline com as origens fora de ordem de origem, mas já ordenada por tempo:
       // é exatamente o que o backend entrega.
       timeline: [
         {
           at: '2026-08-10T13:00:00.000Z',
-          kind: 'HANDOFF',
-          code: 'HANDOFF_OPENED',
-          params: { level: 'ALERT', reason: 'VALIDATOR_FLAG' },
+          kind: 'EXCEPTION',
+          code: 'EXCEPTION_OPENED',
+          params: { kind: 'SAFETY', summary: 'Sinal de segurança: SEVERE_PAIN (URGENT).' },
         },
         {
           at: '2026-08-09T15:00:00.000Z',
@@ -652,26 +632,13 @@ export const studentDetailResponse: ControlCenterStudentDetailResponse = {
           at: '2026-08-08T11:00:00.000Z',
           kind: 'CHECKIN',
           code: 'CHECKIN_ANSWERED',
-          params: {
-            week: 3,
-            sleepQuality: 'OTIMA',
-            mood: 'MUITO_FELIZ',
-            nutritionScore: '9/10',
-            adherenceScore: '9/10',
-            durationFit: 'MAIS_LONGOS',
-          },
-        },
-        {
-          at: '2026-08-05T11:00:00.000Z',
-          kind: 'CHECKIN',
-          code: 'CHECKIN_SENT',
-          params: { week: 3 },
+          params: {},
         },
         {
           at: '2026-08-02T12:00:00.000Z',
-          kind: 'PROTOCOL',
-          code: 'PROTOCOL_VERSION_GENERATED',
-          params: { version: 2, reason: 'ajuste pós check-in', model: 'gpt-4.1' },
+          kind: 'PLAN',
+          code: 'PLAN_PUBLISHED',
+          params: { version: 2 },
         },
         {
           at: '2026-07-20T09:00:00.000Z',
@@ -687,46 +654,52 @@ export const studentDetailResponse: ControlCenterStudentDetailResponse = {
         },
       ],
       adherence: {
-        checkinsSent: 4,
-        checkinsResponded: 3,
-        responseRate: metric({ value: 75, unit: 'PERCENT', status: 'PROXY' }),
+        windowDays: 28,
+        planned: 10,
+        done: 7,
+        rate: metric({ value: 70, unit: 'PERCENT' }),
       },
+      checkins: {
+        sent: 4,
+        answered: 3,
+        responseRate: metric({ value: 75, unit: 'PERCENT' }),
+      },
+      executions: [
+        {
+          id: '55555555-5555-4555-8555-555555555555',
+          performedOn: '2026-08-08',
+          modality: 'STRENGTH',
+          status: 'COMPLETED',
+          rpe: 7,
+          durationMinutes: 45,
+        },
+      ],
+      exceptions: [
+        {
+          id: '66666666-6666-4666-8666-666666666666',
+          kind: 'SAFETY',
+          priority: 'HIGH',
+          domain: 'TRAINING',
+          summary: 'Sinal de segurança: SEVERE_PAIN (URGENT).',
+          createdAt: '2026-08-10T13:00:00.000Z',
+        },
+      ],
+      decisions: [
+        {
+          action: 'ADJUST_WEEKLY_VOLUME',
+          verdict: 'EXECUTE',
+          decidedBy: 'POLICY_ENGINE',
+          createdAt: '2026-08-09T10:00:00.000Z',
+        },
+      ],
       aiQuality: {
         blockedRate: metric({ value: 5, unit: 'PERCENT' }),
         blocked: 1,
         validated: 20,
-        occurrences: [
-          {
-            at: '2026-08-07T10:00:00.000Z',
-            content: 'Resposta bloqueada para [nome], contato [telefone].',
-          },
-        ],
       },
       health: {
         parqState: 'LIBERADO',
-        painReports: [
-          { at: '2026-08-08T11:00:00.000Z', week: 3, text: 'desconforto leve no ombro' },
-        ],
-        evolution: [
-          {
-            week: 2,
-            at: '2026-08-01T11:00:00.000Z',
-            sleepQuality: 'BOA',
-            mood: 'FELIZ',
-            nutritionScore: '7/10',
-            adherenceScore: '6/10',
-            durationFit: 'ADEQUADA',
-          },
-          {
-            week: 3,
-            at: '2026-08-08T11:00:00.000Z',
-            sleepQuality: 'OTIMA',
-            mood: 'MUITO_FELIZ',
-            nutritionScore: '9/10',
-            adherenceScore: '9/10',
-            durationFit: 'MAIS_LONGOS',
-          },
-        ],
+        painReports: [{ at: '2026-08-08T11:00:00.000Z', text: 'KNEE: 4/10' }],
       },
     },
   },

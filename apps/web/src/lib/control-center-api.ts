@@ -5,6 +5,8 @@ import {
   exceptionDecisionsResponseSchema,
   exceptionDetailSchema,
   exceptionListResponseSchema,
+  exceptionsSummarySchema,
+  type ExceptionsSummary,
   type AgentCosts,
   type AgentsOverview,
   type ExceptionDecision,
@@ -12,9 +14,7 @@ import {
   type ExceptionListItem,
   type ModelTierName,
   type SaveTierRoutesRequest,
-  agentConfigHistoryResponseSchema,
   auditSearchResponseSchema,
-  agentPersonaResponseSchema,
   configSimulationResponseSchema,
   exerciseCatalogResponseSchema,
   type ExerciseCatalogResponse,
@@ -23,29 +23,22 @@ import {
   type RetireExerciseCatalogEntryInput,
   faqEntriesResponseSchema,
   forbiddenTopicsResponseSchema,
-  inviolableRulesResponseSchema,
   type CreateForbiddenTopicInput,
   type ForbiddenTopicActionInput,
   type ForbiddenTopicsResponse,
   l1GuardrailsResponseSchema,
-  type AgentConfigHistoryResponse,
   type AuditSearchQuery,
   type AuditSearchResponse,
-  type BiologicalSex,
-  type AgentPersonaResponse,
   type ConfigSimulationResponse,
   type FaqEntriesResponse,
-  type InviolableRulesResponse,
   type L1GuardrailsResponse,
   knowledgeDocumentsResponseSchema,
   knowledgeDocumentContentResponseSchema,
   type KnowledgeDocumentContentResponse,
   type KnowledgeDocumentsResponse,
   type ReviewKnowledgeDocumentInput,
-  type PublishAgentConfigInput,
   type PublishFaqEntryInput,
   type PublishL1GuardrailInput,
-  type RollbackAgentConfigInput,
   type RollbackFaqEntryInput,
   type RetireFaqEntryInput,
   type RetireL1GuardrailInput,
@@ -145,29 +138,6 @@ export interface KnowledgeDocumentsViewResponse extends Omit<KnowledgeDocumentsR
 export type MethodologyStatus =
   'DRAFT' | 'IN_REVIEW' | 'APPROVED' | 'PUBLISHED' | 'REJECTED' | 'ARCHIVED';
 
-export interface MethodologyVersionView {
-  id: string;
-  version: number | string;
-  status: MethodologyStatus;
-  content: string;
-  sha256: string | null;
-  changeNote: string | null;
-  createdBy: string | null;
-  reviewedBy: string | null;
-  createdAt: string;
-  reviewedAt: string | null;
-  publishedAt: string | null;
-  statusChangedAt: string | null;
-  current: boolean;
-}
-
-export interface MethodologyResponse {
-  data: {
-    versions: MethodologyVersionView[];
-  };
-  meta: KnowledgeDocumentsResponse['meta'];
-}
-
 export class ControlCenterApiError extends Error {
   constructor(
     readonly status: number,
@@ -194,15 +164,6 @@ const KNOWLEDGE_STATUSES = new Set<KnowledgeDocumentStatus>([
   'ARCHIVED',
   'PENDING',
 ]);
-const METHODOLOGY_STATUSES = new Set<MethodologyStatus>([
-  'DRAFT',
-  'IN_REVIEW',
-  'APPROVED',
-  'PUBLISHED',
-  'REJECTED',
-  'ARCHIVED',
-]);
-
 function optionalString(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
@@ -253,61 +214,6 @@ const knowledgeDocumentsViewResponseSchema: Parser<KnowledgeDocumentsViewRespons
     });
     const base = value as unknown as KnowledgeDocumentsViewResponse;
     return { ...base, data: { ...base.data, documents } };
-  },
-};
-
-const methodologyResponseSchema: Parser<MethodologyResponse> = {
-  parse(value) {
-    if (
-      !isRecord(value) ||
-      !isRecord(value.data) ||
-      !Array.isArray(value.data.versions) ||
-      !isRecord(value.meta)
-    ) {
-      throw new Error('Resposta de metodologia inválida.');
-    }
-    const currentId = optionalString(value.data.currentVersionId);
-    const versions = value.data.versions.map((entry) => {
-      if (
-        !isRecord(entry) ||
-        typeof entry.id !== 'string' ||
-        (typeof (entry.version ?? entry.versionLabel) !== 'number' &&
-          typeof (entry.version ?? entry.versionLabel) !== 'string') ||
-        typeof entry.status !== 'string' ||
-        !METHODOLOGY_STATUSES.has(entry.status as MethodologyStatus) ||
-        typeof entry.content !== 'string' ||
-        typeof (entry.createdAt ?? entry.statusChangedAt) !== 'string'
-      ) {
-        throw new Error('Versão de metodologia inválida.');
-      }
-      const status = entry.status as MethodologyStatus;
-      const statusChangedAt = optionalString(entry.statusChangedAt);
-      return {
-        id: entry.id,
-        version: (entry.version ?? entry.versionLabel) as number | string,
-        status,
-        content: entry.content,
-        sha256: optionalString(entry.sha256 ?? entry.contentHash ?? entry.contentSha256),
-        changeNote: optionalString(entry.changeNote),
-        createdBy: optionalString(entry.createdBy ?? entry.createdByName),
-        reviewedBy: optionalString(entry.reviewedBy ?? entry.reviewedByName ?? entry.lastActor),
-        createdAt: (entry.createdAt ?? entry.statusChangedAt) as string,
-        reviewedAt:
-          optionalString(entry.reviewedAt) ??
-          (status === 'APPROVED' || status === 'REJECTED' ? statusChangedAt : null),
-        publishedAt:
-          optionalString(entry.publishedAt) ?? (status === 'PUBLISHED' ? statusChangedAt : null),
-        statusChangedAt,
-        current:
-          entry.current === true ||
-          entry.isCurrent === true ||
-          (currentId !== null && entry.id === currentId),
-      };
-    });
-    return {
-      data: { versions },
-      meta: value.meta as unknown as MethodologyResponse['meta'],
-    };
   },
 };
 
@@ -485,47 +391,6 @@ export function getAuditEvents(
   return request(`audit?${params.toString()}`, auditSearchResponseSchema, signal);
 }
 
-/* --------------------------------- Pilar IA (US-7.7) --------------------------------- */
-
-/**
- * Leituras do pilar IA. Todas são escopadas a um slot de persona (`targetSex`): existem duas
- * personas publicadas ao mesmo tempo, uma por público, cada uma com histórico e numeração de
- * versão próprios. O slot vai em **query param** porque a API o exige assim — `persona/:sex`
- * colidiria com a rota `persona/history` no roteador do Nest.
- */
-function slotQuery(targetSex: BiologicalSex): string {
-  return `?${new URLSearchParams({ targetSex }).toString()}`;
-}
-
-export function getAgentPersona(
-  targetSex: BiologicalSex,
-  signal?: AbortSignal,
-): Promise<AgentPersonaResponse> {
-  return request(`ai/persona${slotQuery(targetSex)}`, agentPersonaResponseSchema, signal);
-}
-
-export function getAgentConfigHistory(
-  targetSex: BiologicalSex,
-  signal?: AbortSignal,
-): Promise<AgentConfigHistoryResponse> {
-  return request(
-    `ai/persona/history${slotQuery(targetSex)}`,
-    agentConfigHistoryResponseSchema,
-    signal,
-  );
-}
-
-export function getInviolableRules(
-  targetSex: BiologicalSex,
-  signal?: AbortSignal,
-): Promise<InviolableRulesResponse> {
-  return request(
-    `ai/inviolable-rules${slotQuery(targetSex)}`,
-    inviolableRulesResponseSchema,
-    signal,
-  );
-}
-
 /**
  * Mutações do pilar IA. O servidor é a autoridade: a validação client-side existe para dar
  * erro cedo, e a capability `AI_CONFIG_WRITE` é exigida no endpoint — esconder o botão na UI
@@ -568,16 +433,6 @@ async function mutate<T>(
   } catch {
     throw new ControlCenterApiError(502, messages.contract);
   }
-}
-
-export function publishAgentPersona(input: PublishAgentConfigInput): Promise<AgentPersonaResponse> {
-  return mutate('ai/persona', input, agentPersonaResponseSchema);
-}
-
-export function rollbackAgentPersona(
-  input: RollbackAgentConfigInput,
-): Promise<AgentPersonaResponse> {
-  return mutate('ai/persona/rollback', input, agentPersonaResponseSchema);
 }
 
 export function simulateAgentConfig(
@@ -752,71 +607,6 @@ export function archiveKnowledgeDocument(
   );
 }
 
-export function getMethodology(signal?: AbortSignal): Promise<MethodologyResponse> {
-  return request('ai/methodology', methodologyResponseSchema, signal);
-}
-
-export function createMethodologyVersion(input: {
-  content: string;
-  changeNote?: string;
-}): Promise<MethodologyResponse> {
-  return mutate('ai/methodology', input, methodologyResponseSchema, {
-    forbidden: 'Seu papel não pode criar versões da metodologia.',
-    fallback:
-      'Não foi possível salvar a nova versão. Confira se o conteúdo tem ao menos 200 caracteres.',
-    contract: 'A resposta ao salvar a versão veio fora do contrato esperado.',
-  });
-}
-
-export function submitMethodologyVersion(id: string, note: string): Promise<MethodologyResponse> {
-  return mutate(
-    `ai/methodology/${encodeURIComponent(id)}/submit`,
-    { note },
-    methodologyResponseSchema,
-  );
-}
-
-export function reviewMethodologyVersion(
-  id: string,
-  input: { decision: 'APPROVED' | 'REJECTED'; note: string },
-): Promise<MethodologyResponse> {
-  return mutate(
-    `ai/methodology/${encodeURIComponent(id)}/review`,
-    input,
-    methodologyResponseSchema,
-  );
-}
-
-/** A observação é opcional: publicar uma versão não exige justificativa. */
-export function publishMethodologyVersion(id: string, note?: string): Promise<MethodologyResponse> {
-  return mutate(
-    `ai/methodology/${encodeURIComponent(id)}/publish`,
-    note?.trim() ? { note: note.trim() } : {},
-    methodologyResponseSchema,
-    {
-      forbidden: 'Seu papel não pode publicar a metodologia.',
-      fallback: 'Não foi possível publicar esta versão.',
-      contract: 'A resposta ao publicar a versão veio fora do contrato esperado.',
-    },
-  );
-}
-
-export function rollbackMethodologyVersion(
-  id: string,
-  note?: string,
-): Promise<MethodologyResponse> {
-  return mutate(
-    `ai/methodology/${encodeURIComponent(id)}/rollback`,
-    note?.trim() ? { note: note.trim() } : {},
-    methodologyResponseSchema,
-    {
-      forbidden: 'Seu papel não pode restaurar versões da metodologia.',
-      fallback: 'Não foi possível restaurar esta versão.',
-      contract: 'A resposta ao restaurar a versão veio fora do contrato esperado.',
-    },
-  );
-}
-
 /* ------------------------- Sócios & Distribuição (US-8.7) ------------------------- */
 
 export function getPartnerDistribution(signal?: AbortSignal): Promise<PartnerDistributionResponse> {
@@ -860,6 +650,10 @@ export function getExceptions(
     exceptionListResponseSchema,
     signal,
   );
+}
+
+export function getExceptionsSummary(signal?: AbortSignal): Promise<ExceptionsSummary> {
+  return request('exceptions/summary', exceptionsSummarySchema, signal);
 }
 
 export function getException(id: string, signal?: AbortSignal): Promise<ExceptionDetail> {

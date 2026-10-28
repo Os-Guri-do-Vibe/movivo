@@ -1,8 +1,6 @@
 'use client';
 
 import {
-  Activity,
-  Bell,
   Bot,
   Brain,
   Cable,
@@ -14,7 +12,6 @@ import {
   Dumbbell,
   FlaskConical,
   Handshake,
-  Inbox,
   Landmark,
   LockKeyhole,
   Megaphone,
@@ -44,8 +41,11 @@ import {
 } from '@/lib/control-center-access';
 import { cn } from '@/lib/utils';
 
-import { AlertsBell } from './alerts-bell';
-import { NotificationsProvider, useNotifications } from './notifications-provider';
+import {
+  ExceptionsBell,
+  ExceptionsSummaryProvider,
+  useExceptionsSummary,
+} from './exceptions-summary';
 import { AvatarMenu } from './avatar-menu';
 import { LogoutButton } from './logout-button';
 
@@ -57,8 +57,8 @@ export interface DashboardNavigationItem {
   capabilities?: readonly DashboardCapability[];
   /** Quando a tela chega. Exibido no lugar do link; o fundador vê o roadmap dentro do produto. */
   soon?: string;
-  /** Mostra a contagem de não lidas do sino ao lado do rótulo. */
-  badge?: 'notifications';
+  /** Mostra a contagem de casos abertos da fila ao lado do rótulo. */
+  badge?: 'exceptions';
 }
 
 export interface DashboardNavigationPillar {
@@ -84,15 +84,6 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         icon: CircleGauge,
         capabilities: ['control_center.overview.read'],
       },
-      {
-        // Registro completo das notificações do sino (lidas e não lidas). O popover do sino
-        // mostra só as não lidas; ao ler, o item passa a existir apenas aqui.
-        href: '/dashboard/notificacoes',
-        label: 'Notificações',
-        icon: Inbox,
-        badge: 'notifications',
-        capabilities: ['control_center.students.read', 'control_center.students.health.read'],
-      },
     ],
   },
   {
@@ -113,18 +104,12 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         capabilities: ['control_center.students.read', 'control_center.students.health.read'],
       },
       {
-        // Ex-"Educação Física". Revisão, assinatura, handoff SAFETY e PAR-Q bloqueado
-        // são leitura de saúde — por isso exige também `students.health.read`.
-        href: '/dashboard/educacao-fisica',
-        label: 'Fila do Profissional',
+        // O que o sistema não resolveu sozinho, só do domínio do conselho do profissional.
+        href: '/dashboard/fila',
+        label: 'Fila de exceções',
         icon: ClipboardCheck,
-        capabilities: ['control_center.students.read', 'control_center.students.health.read'],
-      },
-      {
-        href: '/dashboard/alertas',
-        label: 'Alertas',
-        icon: Bell,
-        capabilities: ['control_center.students.read', 'control_center.students.health.read'],
+        badge: 'exceptions',
+        capabilities: ['control_center.exceptions.read'],
       },
     ],
   },
@@ -154,13 +139,11 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         capabilities: ['control_center.ai.config.read'],
       },
       {
-        // Persona e Regras invioláveis viraram etapas de um único painel — cada etapa
-        // continua publicando e auditando sua própria configuração, só a navegação foi
-        // unificada. FAQ mora em Base de Conhecimento (achado 2026-09-04).
-        href: '/dashboard/ia/agente',
-        label: 'Agente',
+        // Tarefas dos agentes e resultado dos testes, modelo de cada nível e custo de IA.
+        href: '/dashboard/ia/agentes',
+        label: 'Agentes',
         icon: Bot,
-        capabilities: ['control_center.ai.config.read'],
+        capabilities: ['control_center.agents.read'],
       },
     ],
   },
@@ -230,14 +213,6 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         capabilities: ['control_center.system.read'],
       },
       {
-        // A tela de operações inclui replay de conversa do aluno, então continua sob
-        // `students.read` até a US-7.5 separar a visão puramente de fila/job.
-        href: '/dashboard/operacoes',
-        label: 'Filas & Jobs',
-        icon: Activity,
-        capabilities: ['control_center.students.read'],
-      },
-      {
         href: '/dashboard/compliance',
         label: 'Compliance & Privacidade',
         icon: LockKeyhole,
@@ -305,7 +280,7 @@ function isCurrent(pathname: string, href: string): boolean {
 }
 
 function activeItemFor(pathname: string): DashboardNavigationItem | undefined {
-  // O item mais específico vence: /dashboard/operacoes antes de /dashboard.
+  // O item mais específico vence: /dashboard/sistema/auditoria antes de /dashboard/sistema.
   return NAVIGATION.filter(
     (item): item is DashboardNavigationItem & { href: string } => item.href !== undefined,
   )
@@ -331,7 +306,7 @@ function DashboardNavigation({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
-  const { unread } = useNotifications();
+  const { open } = useExceptionsSummary();
   const activeGroup = activeGroupFor(pathname);
   // Só a categoria da rota atual começa aberta — evita que a barra precise de
   // scroll com os 5 pilares + Visão Geral abertos ao mesmo tempo.
@@ -409,10 +384,10 @@ function DashboardNavigation({
                     );
                   }
                   const current = isCurrent(pathname, href);
-                  const unreadCount = badge === 'notifications' ? unread : 0;
+                  const unreadCount = badge === 'exceptions' ? open : 0;
                   const accessibleLabel =
                     unreadCount > 0
-                      ? `${label}, ${unreadCount} não lida${unreadCount === 1 ? '' : 's'}`
+                      ? `${label}, ${unreadCount} caso${unreadCount === 1 ? '' : 's'}`
                       : label;
                   return (
                     <li key={href}>
@@ -422,7 +397,7 @@ function DashboardNavigation({
                         aria-label={accessibleLabel}
                         title={
                           collapsed && unreadCount > 0
-                            ? `${label} · ${unreadCount} não lida${unreadCount === 1 ? '' : 's'}`
+                            ? `${label} · ${unreadCount} caso${unreadCount === 1 ? '' : 's'}`
                             : undefined
                         }
                         onClick={() => {
@@ -699,11 +674,7 @@ export function DashboardShell({
     setDrawerOpen(false);
   }, [pathname]);
 
-  const hasNotifications = hasAllCapabilities(
-    capabilities,
-    'control_center.students.read',
-    'control_center.students.health.read',
-  );
+  const hasExceptions = hasAllCapabilities(capabilities, 'control_center.exceptions.read');
 
   const shell = (
     <div
@@ -764,7 +735,7 @@ export function DashboardShell({
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {hasNotifications ? <AlertsBell /> : null}
+            {hasExceptions ? <ExceptionsBell /> : null}
             <AvatarMenu role={role} name={name} avatarUrl={avatarUrl} />
             <LogoutButton />
           </div>
@@ -782,5 +753,5 @@ export function DashboardShell({
       </div>
     </div>
   );
-  return hasNotifications ? <NotificationsProvider>{shell}</NotificationsProvider> : shell;
+  return hasExceptions ? <ExceptionsSummaryProvider>{shell}</ExceptionsSummaryProvider> : shell;
 }

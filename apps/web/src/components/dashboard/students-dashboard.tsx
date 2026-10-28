@@ -40,7 +40,7 @@ import {
   SectorHeader,
   useControlCenterResource,
 } from './control-center-ui';
-import { formatPhone } from './protocol-anamnesis-answers';
+import { formatPhone } from '@/lib/phone-mask';
 
 const PAGE_SIZE = 50;
 

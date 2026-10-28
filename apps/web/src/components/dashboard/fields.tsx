@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, ChevronUp } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 
@@ -539,5 +539,19 @@ export function ChipGroupField<T extends string>({
         })}
       </div>
     </fieldset>
+  );
+}
+
+/** Erro que impede publicar. `role="alert"` porque aparece em resposta à digitação. */
+export function FieldError({ id, children }: { id?: string; children: React.ReactNode }) {
+  return (
+    <p
+      id={id}
+      role="alert"
+      className="mt-2 flex items-start gap-2 rounded-lg border border-coral bg-card px-3 py-2 text-label text-foreground"
+    >
+      <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-coral" />
+      <span>{children}</span>
+    </p>
   );
 }

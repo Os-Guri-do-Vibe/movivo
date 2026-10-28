@@ -2,16 +2,9 @@ import { createServer } from 'node:http';
 import { URL } from 'node:url';
 
 const PORT = 3101;
-const PROTOCOL_ID = '11111111-1111-4111-8111-111111111111';
-const HANDOFF_ID = '22222222-2222-4222-8222-222222222222';
-/** Protocolo `MANDATORY` gerado a partir de uma sessão com PAR-Q bloqueado. */
-const PARQ_PROTOCOL_ID = '33333333-3333-4333-8333-333333333333';
-const CHECKIN_ID = '44444444-4444-4444-8444-444444444444';
+const CASE_ID = '11111111-1111-4111-8111-111111111111';
 const createdAt = '2026-08-03T12:00:00.000Z';
-const resolvedIds = new Set();
-const eventStreams = new Set();
 const anamnesisSessions = new Map();
-let realtimeVisible = false;
 
 const controlCenterMeta = {
   generatedAt: '2026-08-11T15:00:00.000Z',
@@ -34,7 +27,7 @@ const studentSummary = {
   status: 'ACTIVE',
   subscriptionStatus: 'TRIALING',
   subscriptionPlan: null,
-  protocolStatus: 'PENDING_REVIEW',
+  planStatus: 'ACTIVE',
   enrolledAt: '2026-08-01T12:00:00.000Z',
   churnRisk: {
     score: 1,
@@ -44,47 +37,42 @@ const studentSummary = {
 
 const studentDetail = {
   ...studentSummary,
-  requiresProfessionalReview: false,
   anamnesisStatus: 'SUBMITTED',
-  currentProtocol: {
-    id: PROTOCOL_ID,
-    version: 1,
-    currentWeek: 2,
-    totalWeeks: 8,
-    signedAt: '2026-08-05T12:00:00.000Z',
-  },
-  routine: {
-    primaryGoal: 'HEALTH_ENERGY',
-    trainingStatus: 'STOPPED',
-    experience: 'BEGINNER',
-    daysPerWeek: 3,
-    preferredDays: ['MON', 'WED', 'FRI'],
-    sessionDuration: 'M45_TO_60',
-    location: 'FULL_GYM',
-    preferredPeriod: 'MORNING',
-  },
-  workoutHistory: { status: 'UNAVAILABLE', reason: 'Depende de workout_completions (Sprint 8).' },
-  // US-8.2: cadastro anterior à captura de UTM — origem não capturada, nunca inferida.
+  // Cadastro anterior à captura de UTM: origem não capturada, nunca inferida.
   acquisition: null,
-  // As 6 origens da timeline, do evento mais recente para o mais antigo.
+  plan: {
+    training: { version: 1, publishedAt: '2026-08-04T12:00:00.000Z' },
+    nutrition: { version: 1, publishedAt: '2026-08-04T12:00:00.000Z' },
+    strategy: 'Energia e consistência',
+    goal: 'HEALTH',
+  },
+  adherence: {
+    windowDays: 28,
+    planned: 8,
+    done: 5,
+    rate: metric(62.5, 'PERCENT', 'Sessões concluídas sobre as agendadas e vencidas.'),
+  },
+  checkins: {
+    sent: 2,
+    answered: 1,
+    responseRate: metric(50, 'PERCENT', 'Adesão declarada via check-in.'),
+  },
+  executions: [],
+  exceptions: [],
+  decisions: [],
+  // Do evento mais recente para o mais antigo.
   timeline: [
     {
       at: '2026-08-10T12:00:00.000Z',
-      kind: 'HANDOFF',
-      code: 'HANDOFF_RESOLVED',
-      params: { reason: 'VALIDATOR_FLAG' },
+      kind: 'EXCEPTION',
+      code: 'EXCEPTION_RESOLVED',
+      params: { kind: 'SAFETY' },
     },
     {
       at: '2026-08-09T12:00:00.000Z',
       kind: 'CONVERSATION',
       code: 'CONVERSATION_DAY',
       params: { messages: 12 },
-    },
-    {
-      at: '2026-08-08T12:00:00.000Z',
-      kind: 'CHECKIN',
-      code: 'CHECKIN_SENT',
-      params: { week: 2 },
     },
     {
       at: '2026-08-05T12:00:00.000Z',
@@ -94,9 +82,9 @@ const studentDetail = {
     },
     {
       at: '2026-08-04T12:00:00.000Z',
-      kind: 'PROTOCOL',
-      code: 'PROTOCOL_VERSION_GENERATED',
-      params: { version: 1, reason: null, model: null },
+      kind: 'PLAN',
+      code: 'PLAN_PUBLISHED',
+      params: { version: 1 },
     },
     {
       at: '2026-08-03T12:00:00.000Z',
@@ -105,18 +93,12 @@ const studentDetail = {
       params: { status: 'SUBMITTED' },
     },
   ],
-  adherence: {
-    checkinsSent: 2,
-    checkinsResponded: 1,
-    responseRate: metric(50, 'PERCENT', 'Adesão declarada via check-in.'),
-  },
   aiQuality: {
-    blockedRate: metric(0, 'PERCENT', 'Respostas bloqueadas neste aluno.'),
+    blockedRate: metric(0, 'PERCENT', 'Respostas retidas neste aluno.'),
     blocked: 0,
     validated: 12,
-    occurrences: [],
   },
-  health: { parqState: 'LIBERADO', painReports: [], evolution: [] },
+  health: { parqState: 'LIBERADO', painReports: [] },
 };
 
 const capabilitiesByRole = {
@@ -136,111 +118,32 @@ const capabilitiesByRole = {
     'control_center.ai.config.read',
     'control_center.ai.config.write',
     'control_center.admin.destructive.request',
+    'control_center.exceptions.read',
+    'control_center.exceptions.resolve',
+    'control_center.agents.read',
   ],
-  // US-7.1: o RT CREF cai na Fila do Profissional (`landingPathForRole`), que exige
-  // students.read + students.health.read — as duas precisam estar aqui.
-  PROFESSIONAL: ['control_center.students.read', 'control_center.students.health.read'],
+  // O profissional cai na Fila de exceções (`landingPathForRole`), que exige exceptions.read.
+  PROFESSIONAL: [
+    'control_center.students.read',
+    'control_center.students.health.read',
+    'control_center.exceptions.read',
+    'control_center.exceptions.resolve',
+  ],
   USER: [],
 };
 
-const protocolContent = {
-  promptVersion: 'methodology-2026-07',
-  goal: 'GAIN_MUSCLE',
-  phase: 'HIPERTROFIA',
-  weeklyFrequency: 3,
-  // Achado 2026-09-03: `protocolStructureSchema` (shared) ganhou este campo obrigatório
-  // (duração real do mesociclo, antes um padrão estático de 12 semanas) — sem ele o Zod do
-  // frontend rejeita a resposta inteira e a tela cai em "O caso não carregou".
-  phaseDurationWeeks: 4,
-  sessions: [
-    {
-      dayLabel: 'Treino A',
-      focus: 'Membros inferiores',
-      exercises: [
-        {
-          exerciseId: 'agachamento_goblet',
-          name: 'Agachamento goblet',
-          sets: 3,
-          reps: { min: 8, max: 10 },
-          loadStrategy: 'DOUBLE_PROGRESSION',
-          restSeconds: 90,
-          notes: 'Movimento controlado.',
-        },
-      ],
-    },
-  ],
-  generalNotes: 'Manter retorno semanal com o profissional responsável.',
-};
-
-const items = [
-  {
-    id: CHECKIN_ID,
-    kind: 'CHECKIN',
-    severity: 'SAFETY',
-    createdAt,
-    ageMinutes: 190,
-    title: 'Check-in exige revisão profissional',
-    summary: 'Sinalização de segurança registrada no check-in.',
-    status: 'OPEN',
-    origin: null,
-  },
-  {
-    id: HANDOFF_ID,
-    kind: 'HANDOFF',
-    severity: 'SAFETY',
-    createdAt,
-    ageMinutes: 130,
-    title: 'Relato exige atenção profissional',
-    summary: 'Conteúdo anonimizado para supervisão.',
-    status: 'OPEN',
-    origin: null,
-  },
-  {
-    // PAR-Q bloqueante (2026-08-24): não é mais um item `kind: 'PARQ'` sem protocolo —
-    // é um protocolo normal, `MANDATORY`/`SAFETY`, com `origin: 'PARQ'`. A liberação do
-    // PAR-Q acontece dentro da assinatura, no backend.
-    id: PARQ_PROTOCOL_ID,
-    kind: 'PROTOCOL',
-    severity: 'SAFETY',
-    createdAt,
-    ageMinutes: 70,
-    title: 'Protocolo para Revisão: Carla Teste',
-    summary: 'PENDING_REVIEW',
-    status: 'PENDING_REVIEW',
-    origin: 'PARQ',
-  },
-  {
-    id: PROTOCOL_ID,
-    kind: 'PROTOCOL',
-    severity: 'ROUTINE',
-    createdAt,
-    ageMinutes: 10,
-    title: 'Protocolo para Revisão: Maria Teste',
-    summary: 'Hipertrofia · 3x por semana',
-    status: 'PENDING_REVIEW',
-    origin: null,
-  },
-];
-
-const realtimeItem = {
-  id: '55555555-5555-4555-8555-555555555555',
-  kind: 'PROTOCOL',
-  severity: 'ROUTINE',
+const exceptionCase = {
+  id: CASE_ID,
+  kind: 'SAFETY',
+  priority: 'URGENT',
+  status: 'OPEN',
+  domain: 'TRAINING',
+  summary: 'Relato de dor durante o treino pede avaliação profissional.',
   createdAt,
-  ageMinutes: 0,
-  title: 'Novo protocolo recebido em tempo real',
-  summary: 'Evento sem dados pessoais invalidou a fila.',
-  status: 'PENDING_REVIEW',
-  origin: null,
-};
-
-const replay = {
-  conversationId: 'anonymous-conversation',
-  startedAt: createdAt,
-  messages: [
-    { role: 'USER', content: '[PESSOA] relatou dificuldade.', createdAt },
-    { role: 'ASSISTANT', content: 'Retorno acolhido e encaminhado.', createdAt },
-  ],
+  assignedStaffId: null,
+  studentId: STUDENT_ID,
+  studentName: 'Maria Teste',
+  canResolve: true,
 };
 
 // CORS permissivo: o onboarding v2 chama esta API direto do browser (cross-origin
@@ -281,18 +184,6 @@ createServer(async (request, response) => {
     return response.end();
   }
   if (url.pathname === '/api/v1/health') return json(response, 200, { status: 'ok' });
-  if (request.method === 'POST' && url.pathname === '/__reset') {
-    resolvedIds.clear();
-    realtimeVisible = false;
-    return json(response, 200, { status: 'ok' });
-  }
-  if (request.method === 'POST' && url.pathname === '/__emit') {
-    realtimeVisible = true;
-    const event = 'event: queue.updated\ndata: {"invalidate":true}\n\n';
-    for (const stream of eventStreams) stream.write(event);
-    return json(response, 200, { status: 'emitted' });
-  }
-
   // --- Onboarding v2 (Sprint 6) — sessão em memória, um smoke por processo ---
   if (request.method === 'POST' && url.pathname === '/api/v1/anamnesis/start') {
     const token = 'e2e-onboarding-token';
@@ -517,7 +408,7 @@ createServer(async (request, response) => {
             pillar: 'AI',
             label: 'IA',
             state: 'OK',
-            href: '/dashboard/ia/agente',
+            href: '/dashboard/ia/agentes',
             headline: {
               label: 'Resposta bloqueada pela validação',
               metric: metric(1.2, 'PERCENT', 'Bloqueadas sobre validadas.'),
@@ -642,115 +533,11 @@ createServer(async (request, response) => {
   ) {
     return json(response, 200, { data: { student: studentDetail }, meta: controlCenterMeta });
   }
-  if (request.method === 'GET' && url.pathname === '/api/v1/professional/dashboard/queue/events') {
-    response.writeHead(200, {
-      'Cache-Control': 'private, no-store, no-transform',
-      Connection: 'keep-alive',
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'X-Accel-Buffering': 'no',
-    });
-    response.write(': heartbeat\n\n');
-    eventStreams.add(response);
-    request.on('close', () => eventStreams.delete(response));
-    return;
+  if (request.method === 'GET' && url.pathname === '/api/v1/control-center/exceptions/summary') {
+    return json(response, 200, { open: 1, urgent: 1 });
   }
-  if (request.method === 'GET' && url.pathname === '/api/v1/professional/dashboard/queue') {
-    // Espelha `DashboardService.queue()` (2026-08-24): a Fila de supervisão só lista
-    // PROTOCOLO — handoff/check-in ficam fora desta tela. A categoria vem da urgência de
-    // revisão, hoje representada aqui pela presença de `origin` (PARQ/EDIT = obrigatório).
-    const openItems = [...items, ...(realtimeVisible ? [realtimeItem] : [])].filter(
-      (item) => !resolvedIds.has(item.id) && item.kind === 'PROTOCOL',
-    );
-    const mandatory = openItems.filter((item) => item.origin !== null);
-    const optional = openItems.filter((item) => item.origin === null);
-    // Achado 2026-09-03: `QueueResponse` ganhou a dupla de substituição de exercício
-    // (Obrigatória/Opcional, ao lado da de protocolo) — sem os campos aqui, o Zod do
-    // frontend rejeita a resposta inteira e a tela cai em "A fila não carregou". Nenhum
-    // teste de e2e hoje exercita substituição, então as listas ficam vazias de propósito.
-    return json(response, 200, {
-      mandatory,
-      optional,
-      substitutionMandatory: [],
-      substitutionOptional: [],
-      counts: {
-        mandatory: mandatory.length,
-        optional: optional.length,
-        substitutionMandatory: 0,
-        substitutionOptional: 0,
-        total: openItems.length,
-      },
-    });
-  }
-  if (request.method === 'GET' && url.pathname === '/api/v1/professional/dashboard/operations') {
-    return json(response, 200, {
-      funnel: { formStarted: 100, protocolSent: 80, firstWorkout: null, converted: 22 },
-      sla: {
-        protocolDeliveryMinutes: 132,
-        coachP95Seconds: null,
-        protocolBreached: true,
-        coachBreached: false,
-      },
-      replays: [replay],
-    });
-  }
-
-  // `parq` saiu do enum de kinds em 2026-08-24 junto com a tela separada de PAR-Q.
-  const detail =
-    /^\/api\/v1\/professional\/dashboard\/queue\/(protocol|handoff|checkin)\/([^/]+)$/i.exec(
-      url.pathname,
-    );
-  if (request.method === 'GET' && detail) {
-    const kind = detail[1].toUpperCase();
-    // Por id, não por kind: há mais de um protocolo na fila (o opcional e o de origem
-    // PAR-Q), e os dois precisam devolver o SEU próprio item.
-    const item = items.find((entry) => entry.id === detail[2] && entry.kind === kind);
-    if (!item) return json(response, 404, { message: 'Not found' });
-    const body = { item, context: { goal: 'Hipertrofia', level: 'Intermediário' }, replay };
-    if (kind === 'PROTOCOL') {
-      body.protocol = {
-        id: item.id,
-        version: 1,
-        status: 'DRAFT',
-        approvalStatus: 'PENDING_REVIEW',
-        content: protocolContent,
-        signedAt: null,
-        signatureHash: null,
-      };
-    }
-    if (kind === 'HANDOFF' || kind === 'CHECKIN')
-      body.handoff = { reason: item.summary, level: 'SAFETY', status: 'OPEN' };
-    return json(response, 200, body);
-  }
-
-  const resolution =
-    request.method === 'POST' &&
-    /^\/api\/v1\/professional\/dashboard\/handoffs\/([^/]+)\/resolve$/.exec(url.pathname);
-  if (resolution) {
-    const body = await readBody(request);
-    if (
-      body.confirmation !== true ||
-      typeof body.resolution !== 'string' ||
-      typeof body.notes !== 'string'
-    ) {
-      return json(response, 400, { message: 'Invalid resolution' });
-    }
-    resolvedIds.add(resolution[1]);
-    return json(response, 200, { status: 'RESOLVED' });
-  }
-
-  // Assinar é também a liberação do PAR-Q desde 2026-08-24 — a rota
-  // `/parq/{id}/release` foi removida do backend, e daqui junto.
-  if (
-    request.method === 'POST' &&
-    /\/professional\/dashboard\/protocols\/[^/]+\/sign$/.test(url.pathname)
-  ) {
-    return json(response, 200, { status: 'ok' });
-  }
-  if (
-    request.method === 'PATCH' &&
-    /\/professional\/dashboard\/protocols\/[^/]+$/.test(url.pathname)
-  ) {
-    return json(response, 200, { status: 'PENDING_REVIEW' });
+  if (request.method === 'GET' && url.pathname === '/api/v1/control-center/exceptions') {
+    return json(response, 200, [exceptionCase]);
   }
   return json(response, 404, { message: 'Not found' });
 }).listen(PORT, '127.0.0.1');

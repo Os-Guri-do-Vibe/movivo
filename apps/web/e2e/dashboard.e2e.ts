@@ -2,25 +2,14 @@ import { expect, test, type Page } from '@playwright/test';
 
 test.describe.configure({ mode: 'serial' });
 
-test.beforeEach(async ({ request }) => {
-  const response = await request.post('http://127.0.0.1:3101/__reset');
-  expect(response.ok()).toBe(true);
-});
-
 async function login(page: Page) {
   await page.goto('/entrar');
   await page.getByLabel('E-mail corporativo').fill('profissional@movivo.test');
   await page.getByLabel('Senha').fill('senha-segura');
   await page.getByRole('button', { name: 'Acessar' }).click();
-  // Rota padrão por papel (US-7.1): PROFESSIONAL cai na Fila do Profissional.
-  await expect(page).toHaveURL(/\/dashboard\/educacao-fisica$/);
-  await expect(page.getByRole('heading', { name: 'Fila do Profissional' })).toBeVisible();
-}
-
-async function openQueue(page: Page) {
-  await page.getByRole('link', { name: 'Fila do Profissional' }).first().click();
-  await expect(page).toHaveURL(/\/dashboard\/educacao-fisica$/);
-  await expect(page.getByRole('heading', { name: 'Fila do Profissional' })).toBeVisible();
+  // Rota padrão por papel: o profissional cai na Fila de exceções do seu conselho.
+  await expect(page).toHaveURL(/\/dashboard\/fila$/);
+  await expect(page.getByRole('heading', { name: 'Fila de exceções' })).toBeVisible();
 }
 
 test('protege a rota e cria sessão somente em cookies httpOnly', async ({
@@ -28,9 +17,9 @@ test('protege a rota e cria sessão somente em cookies httpOnly', async ({
   page,
   request,
 }) => {
-  const deniedStream = await request.get('/api/dashboard/queue/events');
-  expect(deniedStream.status()).toBe(401);
-  expect(deniedStream.headers()['cache-control']).toContain('no-store');
+  const denied = await request.get('/api/dashboard/control/exceptions');
+  expect(denied.status()).toBe(401);
+  expect(denied.headers()['cache-control']).toContain('no-store');
 
   await page.goto('/dashboard');
   await expect(page).toHaveURL(/\/entrar$/);
@@ -47,23 +36,11 @@ test('protege a rota e cria sessão somente em cookies httpOnly', async ({
   expect(await page.evaluate(() => document.cookie)).not.toContain('movivo_bff_');
 });
 
-test('invalida e recarrega a fila ao receber queue.updated por SSE', async ({ page, request }) => {
+test('lista os casos da fila de exceções do conselho', async ({ page }) => {
   await login(page);
-  await openQueue(page);
-  // Fila de supervisão (2026-08-24): só protocolo — o obrigatório é o de origem PAR-Q,
-  // o opcional é o resto. Handoff/check-in ficam fora desta tela.
-  const mandatory = page.getByRole('list', { name: 'Revisão Humana Obrigatória' });
-  const optional = page.getByRole('list', { name: 'Revisão Humana Opcional' });
-  await expect(mandatory.getByRole('listitem')).toHaveCount(1);
-  await expect(optional.getByRole('listitem')).toHaveCount(1);
-  await expect(page.getByRole('status')).toContainText('Atualização em tempo real ativa');
-
-  const emitted = await request.post('http://127.0.0.1:3101/__emit');
-  expect(emitted.ok()).toBe(true);
-
-  await expect(mandatory.getByRole('listitem')).toHaveCount(1);
-  await expect(optional.getByRole('listitem')).toHaveCount(2);
-  await expect(page.getByText('Novo protocolo recebido em tempo real')).toBeVisible();
+  const list = page.getByRole('list').filter({ hasText: 'Maria Teste' });
+  await expect(list.getByRole('listitem')).toHaveCount(1);
+  await expect(list).toContainText('Sinal de segurança');
 });
 
 test('aceita ADMIN e mostra o overview executivo', async ({ context, page }) => {
@@ -79,51 +56,12 @@ test('aceita ADMIN e mostra o overview executivo', async ({ context, page }) => 
 });
 
 /**
- * 2026-08-24: PAR-Q bloqueante deixou de ter tela e ação próprias. Ele é um protocolo
- * `MANDATORY` na fila, marcado só pela severidade e pela legenda de origem, e a
- * liberação acontece dentro do "Assinar e liberar" — o MESMO fluxo do protocolo
- * opcional. O teste percorre exatamente esse caminho.
- */
-test('PAR-Q bloqueante é revisado e liberado pelo fluxo normal de assinatura', async ({ page }) => {
-  await login(page);
-  await openQueue(page);
-  const mandatory = page.getByRole('list', { name: 'Revisão Humana Obrigatória' });
-  const card = mandatory.getByRole('listitem').first();
-  await expect(card).toContainText('Origem: PAR-Q bloqueante');
-
-  await card.getByRole('link', { name: 'Abrir protocolo' }).click();
-  await expect(page).toHaveURL(/\/dashboard\/fila\/protocol\/[0-9a-f-]+$/);
-  // Nenhuma ação de liberação separada sobrou: só a tela padrão de revisão.
-  await expect(page.getByRole('button', { name: 'Registrar liberação' })).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: /Protocolo · versão 1/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Editar Protocolo' })).toBeVisible();
-
-  await page.getByRole('button', { name: 'Assinar e liberar' }).click();
-  await page.getByRole('button', { name: 'Confirmar e assinar' }).click();
-  await expect(page.getByRole('status')).toContainText('auditoria registrada');
-});
-
-test('exibe ausência de amostra sem transformar dado desconhecido em zero', async ({ page }) => {
-  await login(page);
-  await openQueue(page);
-  // A categoria "Sistema" começa recolhida (a rota atual é de Alunos) — abre antes de clicar.
-  await page.getByRole('button', { name: 'Sistema' }).first().click();
-  await page.getByRole('link', { name: 'Filas & Jobs', exact: true }).first().click();
-  await expect(page).toHaveURL(/\/dashboard\/operacoes$/);
-  await expect(page.getByText('Sem amostra suficiente')).toBeVisible();
-  await expect(
-    page.getByLabel('Primeiro treino reportado: métrica ainda indisponível'),
-  ).toBeVisible();
-  await expect(page.getByText('[PESSOA] relatou dificuldade.')).toBeVisible();
-});
-
-/**
  * TASK-7.9.4 — o fluxo de integração completo num teste só: login → rota padrão do papel
  * → pilar → drill-down no item. É o caminho que o fundador percorre para responder "esse
  * aluno vai cancelar?"; quebrar qualquer elo dele quebra o produto, não só uma tela.
  */
 test('login → rota padrão do papel → pilar Alunos → ficha do aluno', async ({ page }) => {
-  // `login()` já assere a rota padrão do PROFESSIONAL (/dashboard/educacao-fisica).
+  // `login()` já assere a rota padrão do PROFESSIONAL (/dashboard/fila).
   await login(page);
 
   await page.getByRole('link', { name: 'Base de Alunos', exact: true }).first().click();
@@ -142,14 +80,13 @@ test('login → rota padrão do papel → pilar Alunos → ficha do aluno', asyn
   // O risco de cancelamento vem nomeado — número sozinho não gera ação (US-7.4).
   // Na tabela não cabe o motivo do risco; ele mora na ficha do aluno.
   await expect(page.getByText('Sem mensagem recebida há 14 dias')).toBeVisible();
-  // Timeline única com as 6 origens (US-7.4, TASK-7.4.1).
+  // Timeline única com as origens do Estado do Aluno.
   for (const label of [
-    'Formulário de anamnese enviado',
-    'Versão 1 do protocolo gerada',
+    'Anamnese enviada',
+    'Plano de treino v1 publicado',
     'Assinatura mensal criada',
-    'Check-in da semana 2 enviado',
     '12 mensagens trocadas no dia',
-    'Atendimento humano resolvido',
+    'Caso da fila resolvido',
   ]) {
     await expect(page.getByText(label)).toBeVisible();
   }

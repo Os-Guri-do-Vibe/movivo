@@ -29,9 +29,9 @@ import {
   simulateAgentConfig,
 } from '@/lib/control-center-api';
 
-import { FieldError } from './ai-persona-fields';
 import { ConfirmAction } from './confirm-action';
 import { ResourceState, SectorHeader, useControlCenterResource } from './control-center-ui';
+import { FieldError } from './fields';
 
 const INPUT_CLASS =
   'mt-1 w-full rounded-lg border border-border bg-card px-3 py-2 text-body focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none';
