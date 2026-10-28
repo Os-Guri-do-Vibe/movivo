@@ -8,6 +8,7 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 
+import { safetyDomainOf } from '@movivo/shared';
 import type { SafetyScope, SafetySeverity, SafetySignal } from '@movivo/shared';
 
 import { exceptionCases, safetyEvents } from '../../../core/database/schema';
@@ -113,12 +114,7 @@ export class SafetyService {
             userId,
             kind: 'SAFETY',
             priority: PRIORITY[signal.severity],
-            domain:
-              signal.scope === 'NUTRITION'
-                ? 'NUTRITION'
-                : signal.scope === 'TRAINING'
-                  ? 'TRAINING'
-                  : 'GENERAL',
+            domain: safetyDomainOf(signal.kind, signal.scope),
             subject: { safetyEventId: row.id },
             summary: `Sinal de segurança: ${signal.kind} (${signal.severity}). ${signal.evidence}`,
           })

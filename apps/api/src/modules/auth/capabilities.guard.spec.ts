@@ -50,6 +50,9 @@ describe('capabilities deny-by-default', () => {
         Capability.AI_METHODOLOGY_APPROVE,
         Capability.AI_GUARDRAIL_APPROVE,
         Capability.CONVERSATIONS_WRITE,
+        Capability.EXCEPTIONS_READ,
+        Capability.EXCEPTIONS_RESOLVE,
+        Capability.AGENTS_READ,
       ],
     },
     {
@@ -71,6 +74,8 @@ describe('capabilities deny-by-default', () => {
         Capability.SYSTEM_OPERATE,
         Capability.AI_CONFIG_READ,
         Capability.AI_CONFIG_WRITE,
+        Capability.AGENTS_READ,
+        Capability.MODEL_TIERS_WRITE,
       ],
     },
     {

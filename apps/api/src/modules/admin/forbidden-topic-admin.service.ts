@@ -259,7 +259,7 @@ export class ForbiddenTopicAdminService {
     if (actor.role === 'ADMIN') return;
     const rows = (await tx.execute(sql`
       SELECT id FROM staff
-      WHERE id = ${actor.userId}::uuid AND role = 'PROFESSIONAL' AND cref_active = true
+      WHERE id = ${actor.userId}::uuid AND role = 'PROFESSIONAL' AND council_active = true
       LIMIT 1
     `)) as unknown as Array<{ id: string }>;
     if (!rows.length) throw new ConflictException('A ação exige Responsável Técnico CREF ativo.');

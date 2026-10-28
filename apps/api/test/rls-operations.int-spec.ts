@@ -81,7 +81,7 @@ beforeAll(async () => {
   `;
   [messageA, messageB] = messages.map((row) => row.id);
   const [staff] = await admin<{ id: string }[]>`
-    INSERT INTO staff (phone_number, email, name, role, password_hash, cref_active)
+    INSERT INTO staff (phone_number, email, name, role, password_hash, council_active)
     VALUES (${`+551${suffix}3`}, ${`${run}@example.invalid`}, 'RLS CREF', 'PROFESSIONAL', 'fixture', true)
     RETURNING id
   `;

@@ -419,7 +419,7 @@ describe('DashboardService invariantes de mutacao', () => {
   });
 
   it('assina com CREF ativo, cria versao imutavel e entrega', async () => {
-    const professional = { crefActive: true, crefNumber: '123456', crefRegion: 'SP' };
+    const professional = { councilActive: true, councilNumber: '123456', councilRegion: 'SP' };
     const { service, updateWhere, insertValues, append, enqueue } = makeSequencedService([
       [pendingProtocol],
       [professional],
@@ -588,7 +588,7 @@ describe('DashboardService invariantes de mutacao', () => {
       first.signProtocol(actor, RESOURCE_ID, { confirmation: true }),
     ).rejects.toBeInstanceOf(BadRequestException);
 
-    const second = makeSequencedService([[pendingProtocol], [{ crefActive: false }]]).service;
+    const second = makeSequencedService([[pendingProtocol], [{ councilActive: false }]]).service;
     await expect(
       second.signProtocol(actor, RESOURCE_ID, { confirmation: true }),
     ).rejects.toBeInstanceOf(BadRequestException);
@@ -596,7 +596,7 @@ describe('DashboardService invariantes de mutacao', () => {
 
   it('bloqueia assinatura quando a revalidacao nao retorna PASS', async () => {
     const { service } = makeSequencedService(
-      [[pendingProtocol], [{ crefActive: true, crefNumber: '1', crefRegion: 'SP' }]],
+      [[pendingProtocol], [{ councilActive: true, councilNumber: '1', councilRegion: 'SP' }]],
       'FLAG_HUMAN_REVIEW',
     );
     await expect(
@@ -1916,7 +1916,7 @@ describe('DashboardService — prescrição manual do profissional', () => {
     generatedBy: 'DEEPSEEK_V4_PRO',
     ...over,
   });
-  const professional = { crefActive: true, crefNumber: '123456', crefRegion: 'SP' };
+  const professional = { councilActive: true, councilNumber: '123456', councilRegion: 'SP' };
   const PLANK_CONFLICT = 'EXERCISE_CONTRAINDICATED:prancha contraindicado por LOWER_BACK';
 
   async function rejection(promise: Promise<unknown>): Promise<Record<string, unknown>> {

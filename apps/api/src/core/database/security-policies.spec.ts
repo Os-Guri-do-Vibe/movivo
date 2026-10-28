@@ -33,7 +33,7 @@ describe('buildKnowledgeDocumentsSecuritySql', () => {
 
   it('aceita revisão aprovada por ADMIN ou profissional CREF ativo', () => {
     expect(sql).toContain("reviewer.role = 'ADMIN'");
-    expect(sql).toContain("reviewer.role = 'PROFESSIONAL' AND reviewer.cref_active = true");
+    expect(sql).toContain("reviewer.role = 'PROFESSIONAL' AND reviewer.council_active = true");
   });
 });
 

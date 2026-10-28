@@ -576,7 +576,7 @@ export class KnowledgeAdminService {
     if (actor.role === 'ADMIN') return;
     const rows = (await tx.execute(sql`
       SELECT 1 FROM staff
-      WHERE id = ${actor.userId}::uuid AND role = 'PROFESSIONAL' AND cref_active = true
+      WHERE id = ${actor.userId}::uuid AND role = 'PROFESSIONAL' AND council_active = true
     `)) as unknown as unknown[];
     if (!rows.length) throw new ConflictException('A ação exige profissional CREF ativo.');
   }

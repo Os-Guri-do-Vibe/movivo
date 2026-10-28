@@ -610,6 +610,13 @@
       "when": 1793206324418,
       "tag": "0086_revisao_semanal_do_progresso",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1793211994097,
+      "tag": "0087_conselho_do_profissional",
+      "breakpoints": true
     }
   ]
 }

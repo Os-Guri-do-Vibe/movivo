@@ -13,6 +13,7 @@ import { index, jsonb, pgTable, smallint, text, uuid, varchar } from 'drizzle-or
 import {
   coachingActionTypeSchema,
   decisionVerdictSchema,
+  exceptionDomainSchema,
   exceptionKindSchema,
   exceptionPrioritySchema,
   exceptionStatusSchema,
@@ -177,6 +178,6 @@ export const exceptionCases = pgTable(
     checkOneOf('ck_exception_cases_kind', t.kind, exceptionKindSchema.options),
     checkOneOf('ck_exception_cases_priority', t.priority, exceptionPrioritySchema.options),
     checkOneOf('ck_exception_cases_status', t.status, exceptionStatusSchema.options),
-    checkOneOf('ck_exception_cases_domain', t.domain, ['TRAINING', 'NUTRITION', 'GENERAL']),
+    checkOneOf('ck_exception_cases_domain', t.domain, exceptionDomainSchema.options),
   ],
 );

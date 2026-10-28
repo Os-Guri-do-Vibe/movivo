@@ -70,7 +70,7 @@ describe('controles de banco da Sprint 5', () => {
     // só deixou de ser uma comparação única.
     expect(sql).toContain("actor_role = 'PROFESSIONAL'");
     expect(sql).toContain("professional.role = 'PROFESSIONAL'");
-    expect(sql).toContain('professional.cref_active = true');
+    expect(sql).toContain('professional.council_active = true');
     const releaseFn = sql
       .split('CREATE OR REPLACE FUNCTION')
       .find((chunk) => chunk.includes('public.release_parq_on_signature'));

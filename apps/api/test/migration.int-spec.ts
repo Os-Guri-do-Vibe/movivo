@@ -254,9 +254,9 @@ describe('migração versionada num Postgres limpo', () => {
 
   // Removido (separação staff/users): este teste reexecutava a SQL BRUTA e histórica da
   // migração 0015_calm_sage.sql — que hardcoda `users."role" = 'PROFESSIONAL'` e
-  // `users."cref_active"` — para provar, isoladamente, o backfill que ela fazia na época.
-  // A migração 0059 (separação da Plataforma Interna) remove `cref_number`/`cref_region`/
-  // `cref_active`/`password_hash` de `users` para sempre (viram exclusivos de `staff`).
+  // `users."council_active"` — para provar, isoladamente, o backfill que ela fazia na época.
+  // A migração 0059 (separação da Plataforma Interna) remove `council_number`/`council_region`/
+  // `council_active`/`password_hash` de `users` para sempre (viram exclusivos de `staff`).
   // Não há como "consertar" o teste sem reescrever uma migração histórica já aplicada em
   // produção — e reescrevê-la quebraria o hash que o `drizzle-orm` usa para saber quais
   // migrações já rodaram. O comportamento ATUAL de atribuição/reatribuição de profissional
@@ -276,7 +276,7 @@ describe('migração versionada num Postgres limpo', () => {
         VALUES (${holder}::uuid, '+5555700000001', 'migration-holder-70@example.invalid', 'USER')
       `;
       await client`
-        INSERT INTO staff (id, phone_number, email, role, password_hash, cref_number, cref_region, cref_active)
+        INSERT INTO staff (id, phone_number, email, role, password_hash, council_number, council_region, council_active)
         VALUES (${professional}::uuid, '+5555700000002', 'migration-professional-70@movivo.test',
                 'PROFESSIONAL', 'x', '700001', 'SP', true)
       `;

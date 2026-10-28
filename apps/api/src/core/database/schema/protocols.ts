@@ -104,7 +104,7 @@ export const protocols = pgTable(
 
     /**
      * Profissional CREF responsável. A FK impede assinaturas órfãs; a atribuição
-     * ativa e o `cref_active` são validados transacionalmente antes da persistência.
+     * ativa e o `council_active` são validados transacionalmente antes da persistência.
      */
     professionalId: uuid('professional_id').references(() => staff.id, {
       onDelete: 'restrict',

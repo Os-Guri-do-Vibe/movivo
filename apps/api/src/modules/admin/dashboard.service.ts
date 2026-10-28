@@ -2080,14 +2080,18 @@ export class DashboardService {
     if (actor.role === 'ADMIN') return;
     const [professional] = await tx
       .select({
-        crefActive: staff.crefActive,
-        crefNumber: staff.crefNumber,
-        crefRegion: staff.crefRegion,
+        councilActive: staff.councilActive,
+        councilNumber: staff.councilNumber,
+        councilRegion: staff.councilRegion,
       })
       .from(staff)
       .where(eq(staff.id, actor.userId))
       .limit(1);
-    if (!professional?.crefActive || !professional.crefNumber || !professional.crefRegion) {
+    if (
+      !professional?.councilActive ||
+      !professional.councilNumber ||
+      !professional.councilRegion
+    ) {
       throw new BadRequestException(
         'Para assinar, é preciso ter uma credencial CREF ativa e verificada.',
       );

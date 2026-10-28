@@ -673,7 +673,7 @@ export function buildProfessionalAccessSql(appRole: string): string {
         OR (actor_role = 'PROFESSIONAL' AND EXISTS (
           SELECT 1 FROM public.staff professional
           WHERE professional.id = actor AND professional.role = 'PROFESSIONAL'
-            AND professional.cref_active = true
+            AND professional.council_active = true
         ))
       ) IS NOT TRUE THEN
         RETURN false;
@@ -836,7 +836,7 @@ export function buildProfessionalAccessSql(appRole: string): string {
       -- explícito quando existe (menor id, estável); cai para o ADMIN mais antigo só
       -- quando não há nenhum CREF ativo cadastrado ainda.
       SELECT id INTO professional FROM public.staff
-      WHERE role = 'PROFESSIONAL' AND cref_active = true
+      WHERE role = 'PROFESSIONAL' AND council_active = true
       ORDER BY id LIMIT 1;
       IF professional IS NULL THEN
         SELECT id INTO professional FROM public.staff WHERE role = 'ADMIN' ORDER BY id LIMIT 1;
@@ -887,7 +887,7 @@ export function buildProfessionalAccessSql(appRole: string): string {
       ELSIF actor_role = 'PROFESSIONAL' THEN
         IF NOT EXISTS (
           SELECT 1 FROM public.staff p
-          WHERE p.id = actor AND p.role = 'PROFESSIONAL' AND p.cref_active = true
+          WHERE p.id = actor AND p.role = 'PROFESSIONAL' AND p.council_active = true
         ) THEN
           RAISE EXCEPTION 'active CREF professional required' USING ERRCODE = '42501';
         END IF;
@@ -949,7 +949,7 @@ export function buildProfessionalAccessSql(appRole: string): string {
       WHERE pa.user_id = target_user
         AND pa.active = true AND pa.revoked_at IS NULL
         AND (
-          (professional.role = 'PROFESSIONAL' AND professional.cref_active = true)
+          (professional.role = 'PROFESSIONAL' AND professional.council_active = true)
           OR professional.role = 'ADMIN'
         );
       IF assigned_professional IS NULL THEN
@@ -1137,7 +1137,7 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
       IF caller_role = 'PROFESSIONAL' AND (actor IS NULL OR NOT EXISTS (
         SELECT 1 FROM public.staff professional
         WHERE professional.id = actor AND professional.role = 'PROFESSIONAL'
-          AND professional.cref_active = true
+          AND professional.council_active = true
       )) THEN
         RAISE EXCEPTION 'active CREF professional required' USING ERRCODE = '42501';
       END IF;
@@ -1147,7 +1147,7 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
         WHERE review.document_id = target_document
           AND review.decision = 'APPROVED'::public.knowledge_review_decision
           AND (
-            (reviewer.role = 'PROFESSIONAL' AND reviewer.cref_active = true)
+            (reviewer.role = 'PROFESSIONAL' AND reviewer.council_active = true)
             OR reviewer.role = 'ADMIN'
           )
           AND review.id = (

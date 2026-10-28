@@ -111,7 +111,7 @@ beforeAll(async () => {
       (${userB}::uuid, 'HEALTH_DATA', ${CONSENT_TEXTS.HEALTH_DATA.version}, true)
   `;
   const [professional] = await adminClient<{ id: string }[]>`
-    INSERT INTO staff (phone_number, email, name, role, password_hash, cref_number, cref_region, cref_active)
+    INSERT INTO staff (phone_number, email, name, role, password_hash, council_number, council_region, council_active)
     VALUES (${phone(3)}, ${`cref-sprint5-${RUN}@movivo.test`}, 'CREF (teste Sprint 5)', 'PROFESSIONAL', 'x',
             '900001', 'SP', true)
     RETURNING id
@@ -327,7 +327,7 @@ describe('Autorização do banco — deny by default e CREF ativo', () => {
   });
 
   it('CREF inativo não lê alunos nem protocolos, mesmo com consentimento vigente', async () => {
-    await adminClient`UPDATE staff SET cref_active = false WHERE id = ${professionalId}::uuid`;
+    await adminClient`UPDATE staff SET council_active = false WHERE id = ${professionalId}::uuid`;
     try {
       const rows = await tenant.runAsUser(professionalId, 'PROFESSIONAL', async (tx) =>
         tx.execute(sql`SELECT id FROM users WHERE id IN (${userA}, ${userB})`),
@@ -338,7 +338,7 @@ describe('Autorização do banco — deny by default e CREF ativo', () => {
       )) as unknown as Array<{ permitted: boolean }>;
       expect(result.permitted).toBe(false);
     } finally {
-      await adminClient`UPDATE staff SET cref_active = true WHERE id = ${professionalId}::uuid`;
+      await adminClient`UPDATE staff SET council_active = true WHERE id = ${professionalId}::uuid`;
     }
   });
 });

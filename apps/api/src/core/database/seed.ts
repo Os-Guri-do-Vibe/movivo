@@ -119,9 +119,9 @@ async function main(): Promise<void> {
           status: 'ACTIVE',
           role: 'PROFESSIONAL',
           passwordHash,
-          crefNumber: '000000-G',
-          crefRegion: 'ZZ',
-          crefActive: true,
+          councilNumber: '000000-G',
+          councilRegion: 'ZZ',
+          councilActive: true,
         })
         .onConflictDoNothing({ target: staff.email });
       const [professional] = await db

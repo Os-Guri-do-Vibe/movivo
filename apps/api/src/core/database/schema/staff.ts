@@ -9,65 +9,76 @@
  * (`protocols`, `professional_assignments`) apontam para `staff.id` — só o `user_id`
  * (o titular) continua em `users.id`.
  */
-import { bigint, boolean, pgTable, text, timestamp, varchar } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { bigint, boolean, check, pgTable, text, timestamp, varchar } from 'drizzle-orm/pg-core';
 
 import { bytea, primaryKeyColumn, timestampColumns } from './_shared';
 import { staffRoleEnum, staffStatusEnum } from './enums';
 
-export const staff = pgTable('staff', {
-  id: primaryKeyColumn(),
+export const staff = pgTable(
+  'staff',
+  {
+    id: primaryKeyColumn(),
 
-  /** Identificador de login — sempre exigido (ao contrário de `users.email`, opcional). */
-  email: varchar('email', { length: 255 }).notNull().unique(),
+    /** Identificador de login — sempre exigido (ao contrário de `users.email`, opcional). */
+    email: varchar('email', { length: 255 }).notNull().unique(),
 
-  /**
-   * Telefone em E.164 — contato da própria conta, editável na tela "Minha Conta"
-   * (`PATCH /account/profile`). Mesma obrigatoriedade de `users.phoneNumber` antes
-   * da separação: preservar o contrato atual de `AccountProfileView.phoneNumber`
-   * (sempre presente, nunca `null`).
-   */
-  phoneNumber: varchar('phone_number', { length: 20 }).notNull().unique(),
+    /**
+     * Telefone em E.164 — contato da própria conta, editável na tela "Minha Conta"
+     * (`PATCH /account/profile`). Mesma obrigatoriedade de `users.phoneNumber` antes
+     * da separação: preservar o contrato atual de `AccountProfileView.phoneNumber`
+     * (sempre presente, nunca `null`).
+     */
+    phoneNumber: varchar('phone_number', { length: 20 }).notNull().unique(),
 
-  /** Nome exibido no dashboard (cabeçalho, trilhas de auditoria). */
-  name: varchar('name', { length: 255 }),
+    /** Nome exibido no dashboard (cabeçalho, trilhas de auditoria). */
+    name: varchar('name', { length: 255 }),
 
-  /**
-   * Caminho relativo do arquivo de foto de perfil no disco persistente da VPS —
-   * mesma semântica de `users.avatarPath` antes da separação.
-   */
-  avatarPath: varchar('avatar_path', { length: 512 }),
+    /**
+     * Caminho relativo do arquivo de foto de perfil no disco persistente da VPS —
+     * mesma semântica de `users.avatarPath` antes da separação.
+     */
+    avatarPath: varchar('avatar_path', { length: 512 }),
 
-  /** Hash Argon2id — sempre exigido (staff sempre loga por senha). */
-  passwordHash: text('password_hash').notNull(),
+    /** Hash Argon2id — sempre exigido (staff sempre loga por senha). */
+    passwordHash: text('password_hash').notNull(),
 
-  /**
-   * MFA (TOTP, RFC 6238). Segredo **cifrado** (`pgp_sym_encrypt`, mesma chave do dado de
-   * saúde) — nunca em claro no banco nem em backup. `NULL` = conta sem MFA ativo.
-   */
-  mfaSecretCipher: bytea('mfa_secret_cipher'),
-  /** Quando o segundo fator foi confirmado. `NULL` = não inscrito (ou resetado). */
-  mfaEnabledAt: timestamp('mfa_enabled_at', { withTimezone: true }),
-  /**
-   * Último passo de 30 s (`floor(epoch/30)`) aceito. Um código só vale se o seu passo for
-   * MAIOR que este: o mesmo código (ou um interceptado) não autentica duas vezes.
-   */
-  mfaLastStep: bigint('mfa_last_step', { mode: 'number' }),
-  /**
-   * SHA-256 dos códigos de recuperação ainda não usados (o código em claro só é mostrado
-   * uma vez, na inscrição). Cada uso consome o hash.
-   */
-  mfaRecoveryHashes: text('mfa_recovery_hashes').array(),
+    /**
+     * MFA (TOTP, RFC 6238). Segredo **cifrado** (`pgp_sym_encrypt`, mesma chave do dado de
+     * saúde) — nunca em claro no banco nem em backup. `NULL` = conta sem MFA ativo.
+     */
+    mfaSecretCipher: bytea('mfa_secret_cipher'),
+    /** Quando o segundo fator foi confirmado. `NULL` = não inscrito (ou resetado). */
+    mfaEnabledAt: timestamp('mfa_enabled_at', { withTimezone: true }),
+    /**
+     * Último passo de 30 s (`floor(epoch/30)`) aceito. Um código só vale se o seu passo for
+     * MAIOR que este: o mesmo código (ou um interceptado) não autentica duas vezes.
+     */
+    mfaLastStep: bigint('mfa_last_step', { mode: 'number' }),
+    /**
+     * SHA-256 dos códigos de recuperação ainda não usados (o código em claro só é mostrado
+     * uma vez, na inscrição). Cada uso consome o hash.
+     */
+    mfaRecoveryHashes: text('mfa_recovery_hashes').array(),
 
-  role: staffRoleEnum('role').notNull(),
-  status: staffStatusEnum('status').notNull().default('ACTIVE'),
+    role: staffRoleEnum('role').notNull(),
+    status: staffStatusEnum('status').notNull().default('ACTIVE'),
 
-  /** Credencial profissional verificada — só relevante quando `role = 'PROFESSIONAL'`. */
-  crefNumber: varchar('cref_number', { length: 30 }),
-  crefRegion: varchar('cref_region', { length: 2 }),
-  crefActive: boolean('cref_active').notNull().default(false),
+    /**
+     * Conselho do profissional (`role = 'PROFESSIONAL'`): CREF (treino), CRN (nutrição) ou CRM
+     * (medicina). Decide em que domínio ele responde na fila de exceções.
+     */
+    council: varchar('council', { length: 4 }).notNull().default('CREF'),
 
-  ...timestampColumns,
-});
+    /** Registro no conselho, verificado — só relevante quando `role = 'PROFESSIONAL'`. */
+    councilNumber: varchar('council_number', { length: 30 }),
+    councilRegion: varchar('council_region', { length: 2 }),
+    councilActive: boolean('council_active').notNull().default(false),
+
+    ...timestampColumns,
+  },
+  (t) => [check('ck_staff_council', sql`${t.council} in ('CREF', 'CRN', 'CRM')`)],
+);
 
 export type StaffRow = typeof staff.$inferSelect;
 export type NewStaffRow = typeof staff.$inferInsert;
