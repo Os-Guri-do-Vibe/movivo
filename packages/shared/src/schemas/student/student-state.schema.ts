@@ -73,6 +73,10 @@ export const studentProfileSchema = z.object({
 export type StudentProfile = z.infer<typeof studentProfileSchema>;
 
 // --- Restrições --------------------------------------------------------------------------
+//
+// Só restrições que NÃO são dado de saúde ficam aqui, em JSON comum. Restrição de movimento
+// por dor/lesão e alergia alimentar são dado de saúde: vivem só cifradas em
+// `student_health_records` (`PAIN`/`INJURY` com `movementTags`, `FOOD_ALLERGY`).
 
 /** Janela de treino num dia da semana. */
 export const availabilityWindowSchema = z.object({
@@ -98,12 +102,6 @@ export const constraintSchema = z.discriminatedUnion('kind', [
     windows: z.array(availabilityWindowSchema).max(21),
   }),
   z.object({
-    kind: z.literal('MOVEMENT_RESTRICTION'),
-    /** Tag de contraindicação do catálogo (ex.: `SHOULDER_OVERHEAD`). */
-    tag: z.string().trim().min(1).max(40),
-    description: z.string().trim().min(1).max(200),
-  }),
-  z.object({
     kind: z.literal('EQUIPMENT'),
     available: z.array(z.string().trim().min(1).max(40)).max(60),
   }),
@@ -120,21 +118,14 @@ export const constraintSchema = z.discriminatedUnion('kind', [
     ]),
     description: z.string().trim().max(200).optional(),
   }),
-  z.object({
-    kind: z.literal('FOOD_ALLERGY'),
-    allergen: z.string().trim().min(1).max(60),
-    severity: z.enum(['INTOLERANCE', 'ALLERGY', 'SEVERE_ALLERGY']),
-  }),
 ]);
 export type StudentConstraint = z.infer<typeof constraintSchema>;
 export type ConstraintKind = StudentConstraint['kind'];
 export const constraintKindSchema = z.enum([
   'AVAILABILITY',
   'AVAILABILITY_OVERRIDE',
-  'MOVEMENT_RESTRICTION',
   'EQUIPMENT',
   'DIETARY_RESTRICTION',
-  'FOOD_ALLERGY',
 ]);
 
 // --- Preferências ------------------------------------------------------------------------
@@ -201,6 +192,9 @@ export const healthRecordKindSchema = z.enum([
   'PREGNANCY',
   'EATING_DISORDER_HISTORY',
   'PROFESSIONAL_GUIDANCE',
+  'FOOD_ALLERGY',
+  /** Textos livres do aluno (motivação, gostos, aversões): cifrados como todo texto livre. */
+  'NOTES',
 ]);
 export type HealthRecordKind = z.infer<typeof healthRecordKindSchema>;
 
