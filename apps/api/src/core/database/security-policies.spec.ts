@@ -97,6 +97,7 @@ describe('buildRlsPoliciesSql', () => {
       'body_photos',
       'body_assessments',
       'check_ins',
+      'weekly_reviews',
       // Trilha de decisões, fila por exceção e outbox.
       'coaching_proposals',
       'coaching_decisions',

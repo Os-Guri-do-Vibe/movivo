@@ -52,7 +52,7 @@ export const CRON_SCRIPTS: readonly CronScript[] = [
   {
     id: 'training-daily-scan',
     kind: 'CRON',
-    name: 'Link diário do plano (v2)',
+    name: 'Link diário do treino',
     description:
       'Envia por WhatsApp o link do treino do dia a cada aluno com plano ativo e marca como perdidas as sessões que ficaram para trás. A varredura roda a cada minuto e dispara às 04:00 do fuso de cada aluno.',
     queue: QUEUE.trainingDaily,
@@ -70,7 +70,7 @@ export const CRON_SCRIPTS: readonly CronScript[] = [
   {
     id: 'weekly-check-in-scan',
     kind: 'CRON',
-    name: 'Check-in adaptativo semanal (v2)',
+    name: 'Check-in adaptativo semanal',
     description:
       'Abre o check-in da semana (perguntas escolhidas pelos sinais do aluno) e envia o link por WhatsApp. A varredura roda a cada minuto e dispara no domingo, às 18:00 do fuso de cada aluno.',
     queue: QUEUE.checkIn,
@@ -80,6 +80,20 @@ export const CRON_SCRIPTS: readonly CronScript[] = [
     runEffect:
       'Abre agora o check-in da semana dos alunos elegíveis que ainda não têm um e envia o convite. Quem já recebeu nesta semana não recebe outro.',
     resultLabels: { eligible: 'elegíveis', sent: 'na fila de envio' },
+  },
+  {
+    id: 'weekly-review-scan',
+    kind: 'CRON',
+    name: 'Revisão semanal do progresso',
+    description:
+      'Revisa a semana que fechou de cada aluno: mede adesão, esforço, carga, peso e registro alimentar, e só chama o modelo quando há sinal de atenção. Explicações entram como hipótese; as ações passam pelo motor de políticas. A varredura roda a cada minuto e dispara na segunda-feira, às 06:00 do fuso de cada aluno.',
+    queue: QUEUE.weeklyReview,
+    schedulerId: 'weekly-review-scan',
+    cron: '* * * * * (UTC)',
+    schedule: 'Segunda-feira às 06:00 (fuso de cada aluno)',
+    runEffect:
+      'Enfileira agora a revisão da semana anterior de todos os alunos elegíveis que ainda não foram revisados. Quem já foi revisado nesta semana não é revisado de novo.',
+    resultLabels: { eligible: 'elegíveis', queued: 'revisões na fila' },
   },
   {
     id: 'subscription-period-scan',

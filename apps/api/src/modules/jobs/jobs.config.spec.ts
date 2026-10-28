@@ -41,6 +41,7 @@ describe('jobs.config', () => {
         'training-daily',
         // Check-in adaptativo semanal (v2).
         'check-in',
+        'weekly-review',
         // Comentário do Coach sobre o treino registrado no diário (achado 2026-09-12).
         // Versão nova do protocolo: atualiza o treino de hoje e oferece o link novo (2026-10-20).
         'workout-protocol-changed',

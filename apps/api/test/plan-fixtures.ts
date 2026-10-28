@@ -71,6 +71,114 @@ function classifyFake(message: string) {
   return out;
 }
 
+interface ReviewFakeInput {
+  modalities: string[];
+  signals: { key: string }[];
+  allowed: string[];
+  energyBounds: { min: number; max: number } | null;
+  volumeBounds: { min: number; max: number };
+}
+
+/** Revisão falsa: hipótese cautelosa e a ação mais conservadora que os sinais autorizam. */
+function reviewFake(input: ReviewFakeInput) {
+  const keys = input.signals.map((s) => s.key);
+  const interventions: unknown[] = [];
+  if (input.allowed.includes('ADJUST_ENERGY_TARGET') && input.energyBounds) {
+    interventions.push({
+      action: {
+        type: 'ADJUST_ENERGY_TARGET',
+        deltaKcal: input.energyBounds.max > 0 ? input.energyBounds.max : input.energyBounds.min,
+      },
+      rationale: 'Pequeno ajuste de energia na direção do objetivo.',
+      basedOn: keys,
+      uncertainty: 'MEDIUM',
+      expectedOutcome: 'O peso volta a se mover nas próximas semanas.',
+    });
+  } else if (input.allowed.includes('ADJUST_WEEKLY_VOLUME')) {
+    interventions.push({
+      action: {
+        type: 'ADJUST_WEEKLY_VOLUME',
+        modality: input.modalities[0] ?? 'STRENGTH',
+        percentChange: Math.max(-10, input.volumeBounds.min),
+        weeks: 1,
+      },
+      rationale: 'Reduzir o volume por uma semana para facilitar a retomada.',
+      basedOn: keys,
+      uncertainty: 'MEDIUM',
+      expectedOutcome: 'A adesão volta a subir na semana seguinte.',
+    });
+    if (input.allowed.includes('SEND_MESSAGE')) {
+      interventions.push({
+        action: {
+          type: 'SEND_MESSAGE',
+          purpose: 'INVESTIGATION',
+          text: 'Vi que a rotina apertou nas últimas semanas. Deixei o treino desta semana um pouco mais leve. Como posso te ajudar a encaixar?',
+        },
+        rationale: 'Abrir espaço para o aluno contar o que está acontecendo.',
+        basedOn: keys,
+        uncertainty: 'MEDIUM',
+        expectedOutcome: 'O aluno responde e a próxima decisão usa a resposta.',
+      });
+    }
+  } else {
+    interventions.push({
+      action: {
+        type: 'ASK_STUDENT',
+        question: 'Como tem sido a sua semana de treino e de alimentação?',
+      },
+      rationale: 'Confirmar antes de mudar o plano.',
+      basedOn: keys,
+      uncertainty: 'MEDIUM',
+      expectedOutcome: 'A resposta orienta o ajuste da semana seguinte.',
+    });
+  }
+  return {
+    status: 'ATTENTION',
+    summary: 'Os números das últimas semanas pedem acompanhamento.',
+    hypotheses: [
+      {
+        text: 'Pode ser que a rotina do aluno tenha mudado nas últimas semanas.',
+        confidence: 'LOW',
+        basedOn: keys.slice(0, 1),
+      },
+    ],
+    interventions,
+  };
+}
+
+interface PreferencesFakeInput {
+  evidence: { id: string; kind: string; label: string; detail: string }[];
+}
+
+/** Preferências falsas: o turno em que mais perde vira hipótese de aversão (precisa de 2 evidências). */
+function preferencesFake(input: PreferencesFakeInput) {
+  const slotOf = (label: string) =>
+    label.includes('manhã') ? 'MORNING' : label.includes('tarde') ? 'AFTERNOON' : 'EVENING';
+  const missed = input.evidence
+    .filter((e) => e.kind === 'MISSED_SLOT')
+    .map((e) => {
+      const [, lost, total] = /Perdeu (\d+) de (\d+)/.exec(e.detail) ?? [];
+      return { e, ratio: Number(lost) / Number(total) };
+    })
+    .filter((x) => x.ratio >= 0.5);
+  const worst = missed[0];
+  const other = input.evidence.find((e) => e.id !== worst?.e.id);
+  if (!worst || !other) return { preferences: [] };
+  return {
+    preferences: [
+      {
+        domain: 'SCHEDULE',
+        key: `slot:${slotOf(worst.e.label)}`,
+        value: 'DISLIKES',
+        strength: 'HYPOTHESIS',
+        origin: 'OBSERVED',
+        confidence: 35,
+        evidenceIds: [worst.e.id, other.id],
+      },
+    ],
+  };
+}
+
 export const fakeRunner = {
   async run(
     task: { id: string },
@@ -278,6 +386,12 @@ export const fakeRunner = {
     }
     if (task.id === 'safety.detect_risk_signals') {
       return { ...base, output: { signals: [] } };
+    }
+    if (task.id === 'progress.weekly_review') {
+      return { ...base, output: reviewFake(input as ReviewFakeInput) };
+    }
+    if (task.id === 'preferences.extract_preferences') {
+      return { ...base, output: preferencesFake(input as PreferencesFakeInput) };
     }
     throw new Error(`tarefa inesperada no teste: ${task.id}`);
   },

@@ -603,6 +603,13 @@
       "when": 1793198540393,
       "tag": "0085_ajuste_pontual_da_sessao",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1793206324418,
+      "tag": "0086_revisao_semanal_do_progresso",
+      "breakpoints": true
     }
   ]
 }

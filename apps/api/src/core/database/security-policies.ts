@@ -256,6 +256,7 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   { table: 'body_photos', column: 'user_id', professional: 'read' },
   { table: 'body_assessments', column: 'user_id', professional: 'read' },
   { table: 'check_ins', column: 'user_id', professional: 'read' },
+  { table: 'weekly_reviews', column: 'user_id', professional: 'read' },
   // --- Trilha de decisões e fila por exceção. A equipe decide (`write`) e resolve sinais/casos.
   { table: 'coaching_proposals', column: 'user_id', professional: 'read' },
   {

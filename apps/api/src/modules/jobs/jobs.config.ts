@@ -36,6 +36,8 @@ export const QUEUE = {
   trainingDaily: 'training-daily',
   // Check-in adaptativo semanal.
   checkIn: 'check-in',
+  // Revisão semanal do progresso (uma por aluno) e extração de preferências.
+  weeklyReview: 'weekly-review',
   // O protocolo ganhou uma versão nova (troca de exercício, emenda do profissional): o treino de
   // hoje, se ainda não começou, é atualizado e o aluno é perguntado se quer um link novo. Fila
   // própria porque quem publica o protocolo (`protocol`, `admin`) não importa o domínio `workout`.
@@ -106,6 +108,7 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
   // sem urgência de latência, retry curto — o envio real acontece em `whatsappOutbound`.
   [QUEUE.trainingDaily]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
   [QUEUE.checkIn]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
+  [QUEUE.weeklyReview]: { attempts: 2, backoffMs: [15_000], concurrency: 4 },
   // Best-effort (mesmo espírito do resumo de entrega do protocolo): poucas tentativas,
   // nunca trava o diário do aluno por causa de um comentário que não saiu.
   // Best-effort: a atualização do treino de hoje nunca pode travar a publicação do protocolo.

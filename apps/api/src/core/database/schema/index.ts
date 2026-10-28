@@ -100,6 +100,7 @@ export * from './training';
 export * from './nutrition';
 export * from './body';
 export * from './check-ins';
+export * from './weekly-reviews';
 export * from './coaching';
 export * from './domain-events';
 export * from './model-runs';

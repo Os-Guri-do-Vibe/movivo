@@ -132,6 +132,7 @@ const EXPECTED_TABLES = [
   'body_photos',
   'body_assessments',
   'check_ins',
+  'weekly_reviews',
   // Trilha de decisões, fila por exceção e outbox de eventos de domínio.
   'coaching_proposals',
   'coaching_decisions',

@@ -29,6 +29,7 @@ import { AiCoachModule } from './modules/ai-coach/ai-coach.module';
 import { AnamnesisModule } from './modules/anamnesis/anamnesis.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ConversationModule } from './modules/conversation/conversation.module';
+import { ProgressModule } from './modules/progress/progress.module';
 import { AgentsModule } from './core/agents/agents.module';
 import { CoachingModule } from './modules/coaching/coaching.module';
 import { MethodologyModule } from './modules/methodology/methodology.module';
@@ -57,6 +58,7 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
     WhatsappModule,
     AiCoachModule,
     ConversationModule,
+    ProgressModule,
     SubscriptionModule,
     JobsModule,
     DomainEventsModule,
