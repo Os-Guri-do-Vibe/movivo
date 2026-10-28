@@ -1,7 +1,7 @@
 /**
  * Separador de balões: um texto com `\n---\n` vira UMA mensagem do WhatsApp por trecho
  * (`WhatsappOutboundWorker.sendBubbles`). Vive no contrato porque quem produz o texto
- * (workout, coach) não importa o domínio WhatsApp; a definição é compartilhada com o painel.
+ * (treino, conversa) não importa o domínio WhatsApp; a definição é compartilhada com o painel.
  */
 export { WHATSAPP_BUBBLE_SEPARATOR } from '@movivo/shared';
 
@@ -13,9 +13,9 @@ export interface WhatsappQuickReplyButton {
 export type WhatsappJobType =
   | 'CONFIRMATION'
   | 'CONFIRMATION_CARE'
-  | 'COACH_MESSAGE'
+  | 'CONVERSATION_MESSAGE'
   | 'CHECKIN_MESSAGE'
-  | 'WORKOUT_DAILY_LINK'
+  | 'TRAINING_LINK'
   | 'CONSENT_STATUS'
   // Texto escrito à mão pelo profissional na aba "Conversas" (atendimento automático pausado).
   | 'MANUAL_MESSAGE'

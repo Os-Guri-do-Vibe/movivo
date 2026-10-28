@@ -426,7 +426,7 @@ export const controlCenterConversationSummarySchema = z.object({
   name: nullableText,
   phoneNumber: z.string(),
   lastMessageAt: z.iso.datetime(),
-  /** `true` = atendimento automático do AI Coach pausado; só um humano responde. */
+  /** `true` = atendimento automático pausado; só um humano responde. */
   aiPaused: z.boolean(),
   /** Mensagens do aluno ainda não lidas pela equipe (selo verde da lista, como no WhatsApp Web). */
   unreadCount: z.number().int().min(0),
@@ -465,10 +465,10 @@ export const controlCenterConversationMessageSchema = z.object({
   content: z.string(),
   createdAt: z.iso.datetime(),
   /**
-   * Quem escreveu: o aluno, o AI Coach, um aviso automático ou o profissional (pelo painel ou
+   * Quem escreveu: o aluno, a IA, um aviso automático ou o profissional (pelo painel ou
    * direto no celular). `null` nas linhas anteriores ao registro de origem.
    */
-  origin: z.enum(['STUDENT', 'COACH', 'SYSTEM', 'PROFESSIONAL']).nullable(),
+  origin: z.enum(['STUDENT', 'AGENT', 'SYSTEM', 'PROFESSIONAL']).nullable(),
   media: controlCenterConversationMediaSchema.nullable(),
 });
 export type ControlCenterConversationMessage = z.infer<
@@ -513,7 +513,7 @@ export type ControlCenterConversationReadResponse = z.infer<
   typeof controlCenterConversationReadResponseSchema
 >;
 
-/** Pausar (`true`) ou reativar (`false`) o atendimento automático do AI Coach de um aluno. */
+/** Pausar (`true`) ou reativar (`false`) o atendimento automático de um aluno. */
 export const controlCenterConversationAiAttendanceInputSchema = z.object({
   paused: z.boolean(),
 });

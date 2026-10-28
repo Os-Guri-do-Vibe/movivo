@@ -144,7 +144,7 @@ export class SubscriptionAccessService implements OnModuleInit, OnModuleDestroy 
     await this.queues.enqueue(
       QUEUE.whatsappOutbound,
       'subscription-access-link',
-      { userId, type: 'COACH_MESSAGE', text, dedupeId } satisfies WhatsappOutboundJob,
+      { userId, type: 'CONVERSATION_MESSAGE', text, dedupeId } satisfies WhatsappOutboundJob,
       { jobId: `wa-${dedupeId}` },
     );
   }

@@ -2,14 +2,14 @@
  * Espelho da aba "Conversas" — grava CADA mensagem 1:1 do WhatsApp, antes e fora do pipeline
  * da IA.
  *
- * Por que existe: o histórico nasceu como subproduto do Coach (ele persiste o turno que
+ * Por que existe: o histórico nasceu como subproduto da IA (ele persiste o turno que
  * respondeu). Tudo que o pipeline não responde — consentimento ausente, assinatura, botão do
  * treino, orçamento estourado, áudio que falhou, imagem — nunca chegava ao painel, e o que o
  * profissional digitava direto no celular era descartado como "eco". Aqui toda mensagem vira
  * uma linha (`mirror = true`), idempotente pelo id do WhatsApp (`whatsapp_msg_id` UNIQUE).
  *
  * O que NÃO muda: a IA continua lendo o turno que ela mesma persiste. As linhas-espelho ficam
- * fora da transcrição do Coach (menos a mensagem do profissional) e o turno agregado da IA
+ * fora da transcrição da IA (menos a mensagem do profissional) e o turno agregado da IA
  * sai do painel (`hidden_in_panel`) para a mesma fala não aparecer duas vezes.
  */
 import { Injectable } from '@nestjs/common';

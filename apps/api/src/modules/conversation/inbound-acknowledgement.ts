@@ -4,7 +4,7 @@
  * Achado 2026-10-16 (conversas reais de alunos): o aluno mandava a pergunta e, em seguida, um
  * emoji de "beleza" — o lote juntava os dois e a IA respondia ao emoji com um fecho
  * ("Tudo certo então. Quando o profissional liberar…"), em bolha separada. Um "ok" sozinho
- * recebia "Fechado então. Qualquer coisa é só chamar". Para o aluno, o Coach parecia
+ * recebia "Fechado então. Qualquer coisa é só chamar". Para o aluno, a IA parecia
  * responder a algo que ele não disse.
  *
  * A detecção é deliberadamente conservadora: só vale texto curto, sem pergunta, feito de

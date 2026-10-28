@@ -8,7 +8,7 @@ import { type Job } from 'bullmq';
 import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 
-import { CoachAttendanceService } from '../../core/database/coach-attendance.service';
+import { AttendanceService } from '../../core/database/attendance.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { REDIS_CLIENT, REDIS_KEY_BUILDER, type RedisKeyBuilder } from '../../core/redis';
 import { isFinalFailure } from '../jobs/dlq.handler';
@@ -39,7 +39,7 @@ export class ConversationWorker implements OnModuleInit {
     private readonly queues: QueueManager,
     private readonly lock: UserJobLock,
     private readonly consent: HealthConsentService,
-    private readonly attendance: CoachAttendanceService,
+    private readonly attendance: AttendanceService,
     private readonly store: ConversationStore,
     private readonly orchestrator: ConversationOrchestrator,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
@@ -103,7 +103,7 @@ export class ConversationWorker implements OnModuleInit {
       const message = kept.join(' ').slice(0, MAX_MESSAGE_CHARS);
 
       await this.store.persistTurn({ userId, direction: 'INBOUND', content: message });
-      await this.queues.enqueue(QUEUE.whatsappOutbound, 'coach-typing', {
+      await this.queues.enqueue(QUEUE.whatsappOutbound, 'agent-typing', {
         userId,
         type: 'TYPING',
       } satisfies WhatsappOutboundJob);
@@ -133,12 +133,12 @@ export class ConversationWorker implements OnModuleInit {
   private async deliver(userId: string, correlationId: string, text: string): Promise<void> {
     const job: WhatsappOutboundJob = {
       userId,
-      type: 'COACH_MESSAGE',
+      type: 'CONVERSATION_MESSAGE',
       text,
       dedupeId: correlationId,
     };
-    await this.queues.enqueue(QUEUE.whatsappOutbound, 'coach-message', job, {
-      jobId: `coach-message_${correlationId}`,
+    await this.queues.enqueue(QUEUE.whatsappOutbound, 'agent-message', job, {
+      jobId: `agent-message_${correlationId}`,
     });
   }
 
@@ -165,7 +165,7 @@ export class ConversationWorker implements OnModuleInit {
     try {
       if ((await this.redis.llen(batchKey)) === 0) return;
       const followUp: AiResponseJob = { userId, batchKey, correlationId, enqueuedAt: Date.now() };
-      await this.queues.enqueue(QUEUE.aiResponse, 'coach-response', followUp, {
+      await this.queues.enqueue(QUEUE.aiResponse, 'agent-response', followUp, {
         delay: ORPHAN_BATCH_RETRIGGER_MS,
       });
     } catch (err: unknown) {
@@ -185,12 +185,12 @@ export class ConversationWorker implements OnModuleInit {
     );
     const fallback: WhatsappOutboundJob = {
       userId,
-      type: 'COACH_MESSAGE',
+      type: 'CONVERSATION_MESSAGE',
       text: FALLBACK_MESSAGE,
       dedupeId: `dlq_${correlationId}`,
     };
-    await this.queues.enqueue(QUEUE.whatsappOutbound, 'coach-message', fallback, {
-      jobId: `coach-message_dlq_${correlationId}`,
+    await this.queues.enqueue(QUEUE.whatsappOutbound, 'agent-message', fallback, {
+      jobId: `agent-message_dlq_${correlationId}`,
     });
   }
 }

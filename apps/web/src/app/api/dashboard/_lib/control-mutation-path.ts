@@ -23,7 +23,7 @@ const STATIC_MUTATIONS = new Set([
 
 const PARAMETERIZED_MUTATIONS = [
   new RegExp(`^ai/knowledge/${UUID_SEGMENT}/(?:retry|archive|delete)$`, 'i'),
-  // Aba "Conversas": pausar/reativar o AI Coach, enviar mensagem manual e marcar como lida.
+  // Aba "Conversas": pausar/reativar a IA, enviar mensagem manual e marcar como lida.
   new RegExp(`^conversations/${UUID_SEGMENT}/(?:ai-attendance|messages|read)$`, 'i'),
   // Sistema → Scripts: execução manual forçada de um cron/rotina do catálogo (o id é validado
   // de novo no backend, que só executa o que está no catálogo).

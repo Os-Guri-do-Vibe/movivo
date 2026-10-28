@@ -66,7 +66,7 @@ export const ControlCenterCapability = {
   AI_GUARDRAIL_APPROVE: 'control_center.ai.guardrail.approve',
 
   /**
-   * Aba "Conversas": pausar/reativar o atendimento automático do AI Coach de um aluno e
+   * Aba "Conversas": pausar/reativar o atendimento automático de um aluno e
    * escrever para ele pelo painel. É ESCRITA no canal do aluno em nome da MOVIVO, por isso
    * fica separada da leitura. Sempre exigida junto de `STUDENTS_READ` e
    * `STUDENTS_HEALTH_READ` (a tela mostra o histórico, que é dado de saúde).

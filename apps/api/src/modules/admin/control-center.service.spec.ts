@@ -223,7 +223,7 @@ function systemFixture(
 
 const SLO_OK = {
   status: 'GREEN' as const,
-  title: 'Resposta do AI Coach em até 30 segundos',
+  title: 'Resposta da IA em até 30 segundos',
   currentPercent: 99,
   errorBudgetConsumedPercent: 10,
   objective: 'Ao menos 95% em até 30s.',

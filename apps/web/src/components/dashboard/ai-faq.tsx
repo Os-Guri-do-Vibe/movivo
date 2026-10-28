@@ -176,8 +176,7 @@ export function AiFaqDashboard({
           <div>
             <h2 className="text-h2 font-bold">FAQ</h2>
             <p className="mt-2 max-w-3xl text-label text-muted-foreground">
-              Respostas publicadas para o AI Coach, com simulador obrigatório antes de qualquer
-              alteração.
+              Respostas publicadas para a IA, com simulador obrigatório antes de qualquer alteração.
             </p>
           </div>
           <Button variant="outline" onClick={() => void refresh()} disabled={loading}>

@@ -183,7 +183,7 @@ export class ControlCenterService {
    */
   async overview(actor: AuthenticatedUser): Promise<ControlCenterOverviewResponse> {
     const pillars: ControlCenterOverviewResponse['data']['pillars'] = [];
-    // IA e Sistema leem o mesmo `system()` (latência do coach, falhas de job, SLOs): uma
+    // IA e Sistema leem o mesmo `system()` (latência da IA, falhas de job, SLOs): uma
     // consulta só por Visão Geral, feita sob demanda para quem tem ao menos um dos dois.
     let systemSnapshot: Promise<ControlCenterSystemResponse> | null = null;
     const system = () => (systemSnapshot ??= this.system());
@@ -1593,7 +1593,7 @@ export class ControlCenterService {
       (blocked / validated) * 100,
       'PERCENT',
       'AVAILABLE',
-      'Respostas bloqueadas pela validação de compliance sobre o total validado. Concentração num aluno indica que o AI Coach está falhando com aquele perfil.',
+      'Respostas bloqueadas pela validação de compliance sobre o total validado. Concentração num aluno indica que a IA está falhando com aquele perfil.',
     );
   }
 

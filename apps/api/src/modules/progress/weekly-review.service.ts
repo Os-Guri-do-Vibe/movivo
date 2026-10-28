@@ -265,12 +265,12 @@ export class WeeklyReviewService {
     });
     const job: WhatsappOutboundJob = {
       userId,
-      type: 'COACH_MESSAGE',
+      type: 'CONVERSATION_MESSAGE',
       text,
       dedupeId: `review_${decisionId}`,
     };
-    await this.queues.enqueue(QUEUE.whatsappOutbound, 'coach-message', job, {
-      jobId: `coach-message_review_${decisionId}`,
+    await this.queues.enqueue(QUEUE.whatsappOutbound, 'agent-message', job, {
+      jobId: `agent-message_review_${decisionId}`,
     });
   }
 

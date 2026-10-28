@@ -47,7 +47,7 @@ export class TrainingLinkService {
     const link = await this.shortUrl(input.userId);
     const outbound: WhatsappOutboundJob = {
       userId: input.userId,
-      type: 'WORKOUT_DAILY_LINK',
+      type: 'TRAINING_LINK',
       dedupeId: `training-link-${input.date}`,
       text: dailyLinkMessage(input.firstName, input.titles, link, greetingFor(input.localTime)),
     };
@@ -70,7 +70,7 @@ export class TrainingLinkService {
     const link = await this.shortUrl(owner.userId);
     const outbound: WhatsappOutboundJob = {
       userId: owner.userId,
-      type: 'WORKOUT_DAILY_LINK',
+      type: 'TRAINING_LINK',
       dedupeId: `training-link-resend-${Date.now()}`,
       text: `Aqui está o seu novo link: ${link}`,
     };

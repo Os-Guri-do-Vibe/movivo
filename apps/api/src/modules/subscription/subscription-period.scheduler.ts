@@ -89,7 +89,7 @@ export class SubscriptionPeriodScheduler implements OnModuleInit {
       if (!notice) return;
       const job: WhatsappOutboundJob = {
         userId,
-        type: 'COACH_MESSAGE',
+        type: 'CONVERSATION_MESSAGE',
         text: planEndedMessage(
           notice.firstName,
           notice.planLabel,

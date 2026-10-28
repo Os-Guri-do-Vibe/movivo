@@ -163,7 +163,7 @@ const HEAT_STEPS = [
 
 export function ActivityHeatmap({
   cells,
-  title = 'Mensagens do AI Coach por dia e hora',
+  title = 'Mensagens da IA por dia e hora',
   description = 'Quando a operação conversa. Concentração de mensagens enviadas nas últimas semanas, no fuso de São Paulo.',
   unitLabel = 'mensagens',
 }: {

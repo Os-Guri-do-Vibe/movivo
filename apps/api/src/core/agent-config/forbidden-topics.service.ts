@@ -2,7 +2,7 @@
  * `ForbiddenTopicsService` — avaliação determinística dos **temas proibidos** aprovados.
  *
  * Mora no CORE (DI global, §12.5) pelo mesmo motivo de `L1GuardrailService` e
- * `AgentPersonaService`: o worker do Coach e o painel de admin precisam da mesma lista sem
+ * `AgentPersonaService`: o worker da IA e o painel de admin precisam da mesma lista sem
  * importar módulo de domínio um do outro.
  *
  * ## Fail-safe: last-known-good e cold start fechado

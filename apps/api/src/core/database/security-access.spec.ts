@@ -1,3 +1,4 @@
+import { CONSENT_TEXTS } from '@movivo/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -51,7 +52,7 @@ describe('controles de acesso e trilha no banco', () => {
     expect(sql).toContain(
       "actor_role IS DISTINCT FROM 'USER' OR actor IS DISTINCT FROM target_user",
     );
-    expect(sql).toContain("consent.version = 'consent-health-2026-08-v3'");
+    expect(sql).toContain(`consent.version = '${CONSENT_TEXTS.HEALTH_DATA.version}'`);
     expect(sql).not.toContain('professional_assignments');
     expect(sql).toContain("'HEALTH_CONSENT_REVOKED'");
     expect(sql).toContain('jsonb_build_object(');

@@ -622,7 +622,7 @@ export class PlanGenerationService {
       'plan-ready',
       {
         userId,
-        type: 'COACH_MESSAGE',
+        type: 'CONVERSATION_MESSAGE',
         dedupeId: `plan-ready_${userId}_${Date.now()}`,
         text: `Seu plano de treino e alimentação está pronto. Ele foi montado a partir do que você contou e segue a metodologia dos profissionais de Educação Física e Nutrição da MOVIVO.\n---\nVeja aqui: ${url}\n---\nSe algo não combinar com a sua rotina, é só responder por aqui que a gente ajusta.`,
       },

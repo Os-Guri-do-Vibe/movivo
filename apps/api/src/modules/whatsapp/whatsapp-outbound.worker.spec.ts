@@ -175,7 +175,7 @@ describe('WhatsappOutboundWorker.process', () => {
   it('descarta outbound de saúde enfileirado antes da revogação', async () => {
     const { worker, send } = makeWorker({ consentActive: false });
 
-    const result = await worker.process(job({ type: 'COACH_MESSAGE', text: 'oi' }));
+    const result = await worker.process(job({ type: 'CONVERSATION_MESSAGE', text: 'oi' }));
 
     expect(result).toEqual({ status: 'CONSENT_REVOKED' });
     expect(send).not.toHaveBeenCalled();
@@ -215,11 +215,11 @@ describe('WhatsappOutboundWorker.process', () => {
     expect(send.mock.calls[0]?.[0].text).toMatch(/CREF/);
   });
 
-  it('COACH_MESSAGE: envia o texto em bolhas, com botões de feedback só na última', async () => {
+  it('CONVERSATION_MESSAGE: envia o texto em bolhas, com botões de feedback só na última', async () => {
     const { worker, send } = makeWorker();
 
     await worker.process(
-      job({ type: 'COACH_MESSAGE', text: 'Primeira\n---\nSegunda', feedback: true }),
+      job({ type: 'CONVERSATION_MESSAGE', text: 'Primeira\n---\nSegunda', feedback: true }),
     );
 
     expect(send).toHaveBeenCalledTimes(2);
@@ -253,12 +253,12 @@ describe('WhatsappOutboundWorker.process', () => {
     expect(inserted).toHaveLength(3);
   });
 
-  it('MANUAL_MESSAGE e COACH_MESSAGE não são regravados (quem os criou já gravou)', async () => {
+  it('MANUAL_MESSAGE e CONVERSATION_MESSAGE não são regravados (quem os criou já gravou)', async () => {
     const inserted: NonNullable<Deps['inserted']> = [];
     const { worker, send } = makeWorker({ inserted });
 
     await worker.process(job({ type: 'MANUAL_MESSAGE', text: 'Oi, aqui é o profissional.' }));
-    await worker.process(job({ type: 'COACH_MESSAGE', text: 'Resposta.', dedupeId: 'x' }));
+    await worker.process(job({ type: 'CONVERSATION_MESSAGE', text: 'Resposta.', dedupeId: 'x' }));
 
     expect(send).toHaveBeenCalledTimes(2);
     expect(inserted).toHaveLength(0);
@@ -307,7 +307,9 @@ describe('WhatsappOutboundWorker.process', () => {
   it('job sem titular (fora da verificação e do alerta) é descartado', async () => {
     const { worker, send } = makeWorker();
 
-    expect(await worker.process(job({ userId: null, type: 'COACH_MESSAGE', text: 'x' }))).toEqual({
+    expect(
+      await worker.process(job({ userId: null, type: 'CONVERSATION_MESSAGE', text: 'x' })),
+    ).toEqual({
       status: 'INVALID',
     });
     expect(send).not.toHaveBeenCalled();

@@ -27,12 +27,6 @@ describe('jobs.config', () => {
         'subscription-period-scan',
         'knowledge-processing',
         'dead-letter',
-        // Fila do profissional, categoria "Disponível para Revisão" — liberação automática
-        // após a janela de cortesia de 1h.
-        'protocol-auto-release',
-        // Liberação automática da proposta de substituição de exercício via IA, após a
-        // janela de cortesia de 30 min (achado 2026-09-02).
-        'protocol-substitution-release',
         'sanity',
         // Espelho da aba "Conversas": baixa a mídia e confirma a mensagem digitada no celular.
         'whatsapp-mirror',
@@ -42,10 +36,6 @@ describe('jobs.config', () => {
         // Check-in adaptativo semanal (v2).
         'check-in',
         'weekly-review',
-        // Comentário do Coach sobre o treino registrado no diário (achado 2026-09-12).
-        // Versão nova do protocolo: atualiza o treino de hoje e oferece o link novo (2026-10-20).
-        'workout-protocol-changed',
-        // Comentário do Coach sobre o check-in semanal (achado 2026-09-13).
         // Outbox de eventos de domínio: relé + despacho aos consumidores.
         'outbox-relay',
         'domain-events',

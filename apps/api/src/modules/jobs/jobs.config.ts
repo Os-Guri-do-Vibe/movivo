@@ -3,9 +3,8 @@
  *
  * Ponto ÚNICO de defaults e parâmetros de fila — nenhuma opção de retry/backoff ou
  * limpeza de job é definida dentro de um processor. Aqui vive:
- *   · o registro das 5 filas de negócio com os parâmetros fixos de §6 (definições, sem
- *     processadores — estes nascem nas Sprints 2-5);
- *   · a fila `sanity`, que prova o pipeline enqueue→process→retry→DLQ nesta sprint;
+ *   · o registro das filas de negócio com os parâmetros fixos de §6;
+ *   · a fila `sanity`, que prova o pipeline enqueue→process→retry→DLQ;
  *   · a fila `dead-letter`, destino de jobs que estouram os retries.
  *
  * A conexão é derivada de `buildRedisOptions` do RedisModule (ADR-004: descoberta de
@@ -19,14 +18,7 @@ import { type AppConfigService } from '../../core/config';
 import { buildRedisOptions } from '../../core/redis';
 
 export const QUEUE = {
-  // Liberação automática de protocolo LEGADO fora da revisão (some junto do painel antigo, M10).
-  protocolAutoRelease: 'protocol-auto-release',
-  // Achado 2026-09-02: liberação da proposta de substituição de exercício via IA, após a
-  // janela de cortesia de 30 min (`AI_SUBSTITUTION_REVIEW_WINDOW_MS`) — fila própria, e não
-  // um branch dentro de `protocolAutoRelease`, porque o job carrega o id da PROPOSTA
-  // (`protocol_substitution_requests.id`), não o do protocolo — o mesmo protocolo pode ter
-  // várias propostas ao longo do tempo, cada uma com seu próprio job/estado.
-  protocolSubstitutionRelease: 'protocol-substitution-release',
+  // Entrada do orquestrador de conversa (debounce de mensagens do aluno).
   aiResponse: 'ai-response',
   whatsappOutbound: 'whatsapp-outbound',
   // Espelho da aba "Conversas": baixa a mídia (áudio/imagem) de cada mensagem e confirma a que
@@ -38,10 +30,6 @@ export const QUEUE = {
   checkIn: 'check-in',
   // Revisão semanal do progresso (uma por aluno) e extração de preferências.
   weeklyReview: 'weekly-review',
-  // O protocolo ganhou uma versão nova (troca de exercício, emenda do profissional): o treino de
-  // hoje, se ainda não começou, é atualizado e o aluno é perguntado se quer um link novo. Fila
-  // própria porque quem publica o protocolo (`protocol`, `admin`) não importa o domínio `workout`.
-  workoutProtocolChanged: 'workout-protocol-changed',
   conversionSequence: 'conversion-sequence',
   paymentReconciliation: 'payment-reconciliation',
   // Fim do período pago: cron horário que leva ACTIVE → EXPIRED quando não houve renovação
@@ -75,19 +63,6 @@ export interface QueueSpec {
 }
 
 export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
-  // Liberação automática após a janela de cortesia de 1h (fila do profissional,
-  // categoria "Disponível para Revisão"). Baixo volume, sem urgência de latência.
-  [QUEUE.protocolAutoRelease]: {
-    attempts: 3,
-    backoffMs: [5_000, 15_000, 45_000],
-    concurrency: 3,
-  },
-  // Mesmo perfil de `protocolAutoRelease`: baixo volume, sem urgência de latência.
-  [QUEUE.protocolSubstitutionRelease]: {
-    attempts: 3,
-    backoffMs: [5_000, 15_000, 45_000],
-    concurrency: 3,
-  },
   [QUEUE.aiResponse]: {
     attempts: 2,
     backoffMs: [3_000, 9_000],
@@ -109,10 +84,6 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
   [QUEUE.trainingDaily]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
   [QUEUE.checkIn]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
   [QUEUE.weeklyReview]: { attempts: 2, backoffMs: [15_000], concurrency: 4 },
-  // Best-effort (mesmo espírito do resumo de entrega do protocolo): poucas tentativas,
-  // nunca trava o diário do aluno por causa de um comentário que não saiu.
-  // Best-effort: a atualização do treino de hoje nunca pode travar a publicação do protocolo.
-  [QUEUE.workoutProtocolChanged]: { attempts: 2, backoffMs: [5_000], concurrency: 5 },
   [QUEUE.conversionSequence]: {
     attempts: 3,
     backoffMs: [5_000, 30_000],
@@ -128,7 +99,7 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
     concurrency: 5,
     lockMs: 30_000,
   },
-  // Mesmo perfil de `protocolRenewalScan`: varredura idempotente, sem urgência de latência.
+  // Varredura idempotente, sem urgência de latência.
   [QUEUE.subscriptionPeriodScan]: {
     attempts: 3,
     backoffMs: [5_000, 15_000, 45_000],

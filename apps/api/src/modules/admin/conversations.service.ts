@@ -14,7 +14,7 @@ import { and, asc, desc, eq, gte, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { Redis } from 'ioredis';
 import type { z } from 'zod';
 
-import { CoachAttendanceService } from '../../core/database/coach-attendance.service';
+import { AttendanceService } from '../../core/database/attendance.service';
 import { ConversationMediaStorage } from '../../core/database/conversation-media-storage.service';
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
@@ -74,7 +74,7 @@ function mediaOf(row: {
 
 /**
  * Aba "Conversas" do Control Center: histórico de WhatsApp (`conversations`) e, quando o
- * profissional pausa o atendimento automático do AI Coach, a conversa manual com o aluno.
+ * profissional pausa o atendimento automático, a conversa manual com o aluno.
  * O corpo da mensagem é dado de saúde (LGPD Art. 11), então o corte é no servidor — o
  * controller exige `STUDENTS_READ` + `STUDENTS_HEALTH_READ` (e `CONVERSATIONS_WRITE` para
  * pausar/escrever), a leitura roda sob a RLS do ator (profissional só enxerga titular com
@@ -89,7 +89,7 @@ export class ConversationsService {
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly redisKeys: RedisKeyBuilder,
     @Inject(EVOLUTION_TRANSPORT) private readonly evolution: EvolutionTransport,
-    private readonly coachAttendance: CoachAttendanceService,
+    private readonly attendance: AttendanceService,
     private readonly healthConsent: HealthConsentService,
     private readonly queues: QueueManager,
     private readonly conversationEvents: ConversationEventsService,
@@ -108,7 +108,7 @@ export class ConversationsService {
           name: users.name,
           whatsappName: users.whatsappName,
           phoneNumber: users.phoneNumber,
-          coachPausedAt: users.coachPausedAt,
+          attendancePausedAt: users.attendancePausedAt,
           unreadCount,
           lastMessageAt,
         })
@@ -136,11 +136,11 @@ export class ConversationsService {
     });
     return this.envelope({
       conversations: rows.map(
-        ({ whatsappName, lastMessageAt: last, name, coachPausedAt, ...row }) => ({
+        ({ whatsappName, lastMessageAt: last, name, attendancePausedAt, ...row }) => ({
           ...row,
           name: name ?? whatsappName ?? null,
           lastMessageAt: new Date(last).toISOString(),
-          aiPaused: coachPausedAt !== null,
+          aiPaused: attendancePausedAt !== null,
         }),
       ),
     });
@@ -243,13 +243,13 @@ export class ConversationsService {
   }
 
   /**
-   * Pausa (`paused: true`) ou reativa o atendimento automático do AI Coach de um aluno.
+   * Pausa (`paused: true`) ou reativa o atendimento automático de um aluno.
    * Idempotente. Pausado, a mensagem do aluno só é registrada e o profissional responde.
    */
   async setAiAttendance(actor: AuthenticatedUser, studentId: string, input: unknown) {
     const { paused } = this.parse(controlCenterConversationAiAttendanceInputSchema, input);
     await this.requireStudent(actor, studentId);
-    const changed = await this.coachAttendance.setPaused(studentId, paused);
+    const changed = await this.attendance.setPaused(studentId, paused);
     // Avisa as outras telas abertas (e outros profissionais) para refletirem o estado novo.
     if (changed) this.conversationEvents.emitAttendance(studentId, paused);
     await this.db.runAsUser(actor.userId, actor.role, (tx) =>
@@ -274,10 +274,8 @@ export class ConversationsService {
   async sendMessage(actor: AuthenticatedUser, studentId: string, input: unknown) {
     const { text } = this.parse(controlCenterConversationSendInputSchema, input);
     await this.requireStudent(actor, studentId);
-    if (!(await this.coachAttendance.isPaused(studentId))) {
-      throw new ConflictException(
-        'Pause o atendimento automático do AI Coach antes de escrever para o aluno.',
-      );
+    if (!(await this.attendance.isPaused(studentId))) {
+      throw new ConflictException('Pause o atendimento automático antes de escrever para o aluno.');
     }
     if (!(await this.healthConsent.hasActiveForUser(studentId))) {
       throw new ConflictException(

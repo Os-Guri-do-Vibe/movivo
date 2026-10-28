@@ -53,7 +53,7 @@
  * Exclusões deliberadas do documento-fonte (achado ao vivo, decisão de segurança): a
  * família de levantamento olímpico técnico (Clean, Snatch, Clean and Jerk, Power
  * Clean/Snatch, Hang Clean/Snatch, Split Jerk, Press Under) exige correção de técnica
- * presencial — um AI Coach por WhatsApp não tem como fazer isso com segurança, o risco de
+ * presencial — uma IA por WhatsApp não tem como fazer isso com segurança, o risco de
  * lesão sem coach corrigindo pegada/trajetória ao vivo é real. E "Alongamento",
  * "Aquecimento", "Pilates", "Yoga" (seção Mobilidade/Recuperação) são categorias de
  * sessão, não exercícios prescritíveis neste modelo de dado (não existe "3x12 Yoga").

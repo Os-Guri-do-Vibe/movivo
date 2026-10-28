@@ -1,17 +1,12 @@
 /**
- * Substituição segura de exercício (US-3.5 / TASK-3.5.2).
+ * Substituição segura de exercício.
  *
- * MOVI **nunca inventa** um exercício: o substituto sai SEMPRE da base de referência (US-2.1),
- * no mesmo padrão de movimento, dentro do nível/equipamento do usuário e **nunca contraindicado**
- * por lesão/PAR-Q. A IA só verbaliza a troca; o `ValidationService.validateResponse` confirma.
- *
- * Achado 2026-09-02 (pedido do fundador): o motor determinístico de ESCOLHA deixou de existir
- * — `findExerciseByMention` (match por substring) e `findSafeSubstitute` (pega o 1º viável)
- * foram removidos. A IA agora tem autonomia para IDENTIFICAR o exercício-alvo e para conversar
- * sobre as opções (ver `SubstitutionTargetService`/`SubstitutionResolutionService`,
- * `apps/api/src/modules/coach/`). O que **continua** determinístico, sem exceção, é o filtro
- * de SEGURANÇA (`isViable` abaixo) — tanto antes de qualquer opção ser mostrada ao aluno
- * (`findSafeCandidates`) quanto na recomputação final antes de persistir qualquer troca.
+ * A MOVIVO **nunca inventa** um exercício: o substituto sai SEMPRE do catálogo, no mesmo padrão
+ * de movimento, dentro do nível/equipamento do aluno e **nunca contraindicado** por lesão/PAR-Q.
+ * A IA só identifica o exercício-alvo e conversa sobre as opções; o que **continua**
+ * determinístico, sem exceção, é o filtro de SEGURANÇA (`isViable` abaixo) — tanto antes de
+ * qualquer opção ser mostrada ao aluno (`findSafeCandidates`) quanto na recomputação final
+ * antes de persistir qualquer troca.
  */
 import {
   type CatalogExercise,

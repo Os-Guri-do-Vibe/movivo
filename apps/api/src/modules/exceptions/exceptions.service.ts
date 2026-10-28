@@ -483,12 +483,12 @@ export class ExceptionsService {
     });
     const job: WhatsappOutboundJob = {
       userId,
-      type: 'COACH_MESSAGE',
+      type: 'CONVERSATION_MESSAGE',
       text,
       dedupeId: `exception_${exceptionId}`,
     };
-    await this.queues.enqueue(QUEUE.whatsappOutbound, 'coach-message', job, {
-      jobId: `coach-message_exception_${exceptionId}`,
+    await this.queues.enqueue(QUEUE.whatsappOutbound, 'agent-message', job, {
+      jobId: `agent-message_exception_${exceptionId}`,
     });
   }
 }

@@ -18,6 +18,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import { CONSENT_TEXTS } from '@movivo/shared';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
@@ -252,7 +253,7 @@ describe('migração versionada num Postgres limpo', () => {
       `;
       await client`
         INSERT INTO consents (user_id, consent_type, version, cycle, accepted)
-        VALUES (${holder}::uuid, 'HEALTH_DATA', 'consent-health-2026-08-v3', 1, true)
+        VALUES (${holder}::uuid, 'HEALTH_DATA', ${CONSENT_TEXTS.HEALTH_DATA.version}, 1, true)
       `;
 
       await client.begin(async (tx) => {
@@ -270,7 +271,7 @@ describe('migração versionada num Postgres limpo', () => {
         await tx`SELECT set_config('app.current_anamnesis_session_id', ${session}, true)`;
         await tx`SELECT public.record_session_consent(
           ${session}::uuid, 'HEALTH_DATA'::consent_type,
-          'consent-health-2026-08-v3', true, '203.0.113.10'::inet, 'migration-int-spec'
+          ${CONSENT_TEXTS.HEALTH_DATA.version}, true, '203.0.113.10'::inet, 'migration-int-spec'
         )`;
       });
       await client.begin(async (tx) => {
@@ -283,7 +284,7 @@ describe('migração versionada num Postgres limpo', () => {
       >`
         SELECT cycle, revoked_at AS "revokedAt", accepted FROM consents
         WHERE user_id = ${holder}::uuid AND consent_type = 'HEALTH_DATA'
-          AND version = 'consent-health-2026-08-v3'
+          AND version = ${CONSENT_TEXTS.HEALTH_DATA.version}
         ORDER BY cycle
       `;
       expect(consentCycles).toHaveLength(2);

@@ -62,7 +62,7 @@ export class WhatsappMirrorWorker implements OnModuleInit {
   async process(job: Job<WhatsappMirrorJob>): Promise<{ status: string }> {
     const { conversationId, userId, messageId, fromMe, mediaKey } = job.data;
 
-    // Eco do que ESTA API enviou: o histórico já tem a linha do envio (Coach, aviso, manual).
+    // Eco do que ESTA API enviou: o histórico já tem a linha do envio (IA, aviso, manual).
     if (fromMe && (await this.redis.exists(apiSentKey(this.keys, messageId))) === 1) {
       await this.db.runAsSystem((tx) =>
         tx.delete(conversations).where(eq(conversations.id, conversationId)),

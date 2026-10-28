@@ -1,8 +1,7 @@
 /**
  * Adaptadores HTTP dos fornecedores de modelo para o `ModelGateway`.
  *
- * Diferença para os adaptadores legados (`ai-coach/llm/providers.ts`): o MODELO vem em cada
- * pedido (o tier decide), e as mensagens podem trazer IMAGEM. Usa `fetch` nativo, sem SDK —
+ * O MODELO vem em cada pedido (o tier decide), e as mensagens podem trazer IMAGEM. Usa `fetch` nativo, sem SDK —
  * o confinamento é verificado por `llm-sdk-confinement.spec.ts`. Nenhum adaptador envia
  * `tools`: o modelo nunca recebe ferramenta (ver `llm-no-tool-surface.spec.ts`).
  */
@@ -171,7 +170,7 @@ export class DeepSeekVendor extends BaseVendor {
         max_tokens: request.maxOutputTokens,
         temperature: request.temperature,
         // O modo de raciocínio do DeepSeek não converge para JSON fechado nos prompts longos
-        // da MOVIVO (ver achados em `ai-coach/llm/providers.ts`): fica desligado.
+        // da MOVIVO: fica desligado.
         thinking: { type: 'disabled' },
         ...(request.json ? { response_format: { type: 'json_object' } } : {}),
         messages: chatCompletionsMessages(request.system, request.messages),

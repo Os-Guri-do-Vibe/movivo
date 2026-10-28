@@ -321,7 +321,7 @@ const CONVERSATION_ACTION_MESSAGES = {
   contract: 'A operação devolveu dados fora do contrato esperado.',
 };
 
-/** Pausa (`true`) ou reativa (`false`) o atendimento automático do AI Coach de um aluno. */
+/** Pausa (`true`) ou reativa (`false`) o atendimento automático de um aluno. */
 export function setConversationAiPaused(
   studentId: string,
   paused: boolean,

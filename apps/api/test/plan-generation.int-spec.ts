@@ -157,7 +157,7 @@ describe('geração do plano', () => {
     const links = app.get(AccessLinkService);
     const issued = await links.issue('PLAN', userId, userId, 60_000);
     expect(await links.verify(issued.token, 'PLAN')).toMatchObject({ userId });
-    expect(await links.verify(issued.token, 'PROTOCOL')).toBeNull();
+    expect(await links.verify(issued.token, 'CHECKOUT')).toBeNull();
   });
 
   it('é idempotente: um segundo disparo para o mesmo objetivo não duplica o plano', async () => {

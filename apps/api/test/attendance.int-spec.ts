@@ -1,8 +1,8 @@
 /**
- * Integração — pausa do atendimento automático do AI Coach (aba "Conversas"), com RLS real.
+ * Integração — pausa do atendimento automático (aba "Conversas"), com RLS real.
  * Pré-requisito: `pnpm run infra:up`.
  *
- * Prova: a pausa grava `users.coach_paused_at` (UPDATE em `users` pelo contexto SYSTEM), é
+ * Prova: a pausa grava `users.attendance_paused_at` (UPDATE em `users` pelo contexto SYSTEM), é
  * lida sob a RLS do próprio titular, é idempotente, não vaza para outro titular e a
  * reativação limpa o estado.
  */
@@ -14,13 +14,13 @@ import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { AppModule } from '../src/app.module';
-import { CoachAttendanceService } from '../src/core/database/coach-attendance.service';
+import { AttendanceService } from '../src/core/database/attendance.service';
 import { users } from '../src/core/database/schema';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
 
 let app: INestApplication;
 let db: TenantDatabase;
-let attendance: CoachAttendanceService;
+let attendance: AttendanceService;
 const createdUserIds: string[] = [];
 
 async function createUser(): Promise<string> {
@@ -40,7 +40,7 @@ async function createUser(): Promise<string> {
 const pausedAt = (userId: string) =>
   db.runAsSystem(async (tx) => {
     const [row] = await tx
-      .select({ at: users.coachPausedAt })
+      .select({ at: users.attendancePausedAt })
       .from(users)
       .where(eq(users.id, userId));
     return row?.at ?? null;
@@ -50,7 +50,7 @@ beforeAll(async () => {
   app = await NestFactory.create(AppModule, { logger: false });
   await app.init();
   db = app.get(TenantDatabase);
-  attendance = app.get(CoachAttendanceService);
+  attendance = app.get(AttendanceService);
 });
 
 afterAll(async () => {
@@ -63,7 +63,7 @@ afterAll(async () => {
   await app?.close();
 });
 
-describe('CoachAttendanceService sob RLS', () => {
+describe('AttendanceService sob RLS', () => {
   it('nasce ativo (o Coach responde) para um titular novo', async () => {
     const id = await createUser();
     expect(await attendance.isPaused(id)).toBe(false);

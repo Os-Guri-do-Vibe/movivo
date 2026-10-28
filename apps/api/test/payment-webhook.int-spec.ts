@@ -96,7 +96,7 @@ async function createUser(): Promise<{ userId: string; to: string }> {
     if (!u) throw new Error('seed user');
     return u.id;
   });
-  // O dunning do PAST_DUE é um COACH_MESSAGE (health-gated) — precisa de consentimento ativo.
+  // O dunning do PAST_DUE é um CONVERSATION_MESSAGE (health-gated) — precisa de consentimento ativo.
   await seedHealthEligibility(adminClient, userId);
   return { userId, to };
 }

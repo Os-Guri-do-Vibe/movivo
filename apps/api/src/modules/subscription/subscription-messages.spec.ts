@@ -1,6 +1,6 @@
 /**
  * Guardrail de regra de produto (achado 2026-09-09, correção do fundador): o Agente IA
- * Coach do WhatsApp nunca usa travessão "—" em nenhuma mensagem, nem nas fixas/
+ * IA do WhatsApp nunca usa travessão "—" em nenhuma mensagem, nem nas fixas/
  * determinísticas de dunning e conversão de trial como estas. Mesmo achado, segunda regra:
  * a cor de marca é verde (Verde Pulso) — todo coração usado tem que ser 💚 (achado ao vivo:
  * `dunningMessage`/`winbackMessage` saíam com 💛).
@@ -32,7 +32,7 @@ const ALL_MESSAGES = [
   winbackMessage('https://pay.example/checkout/abc'),
 ];
 
-/** Ver `coach-messages.spec.ts` para a explicação de por que é uma lista, não um range. */
+/** Ver `agent-messages.spec.ts` para a explicação de por que é uma lista, não um range. */
 const NON_GREEN_HEART =
   /[\u{2764}\u{1F493}\u{1F495}\u{1F496}\u{1F497}\u{1F498}\u{1F499}\u{1F49B}\u{1F49C}\u{1F49D}\u{1F49E}\u{1F49F}\u{1F5A4}\u{1F90D}\u{1F90E}\u{1F9E1}]/u;
 

@@ -41,9 +41,9 @@ export type { WhatsappJobType, WhatsappOutboundJob };
 const SENT_MARKER_TTL_SECONDS = 7 * 24 * 3600;
 const HEALTH_JOB_TYPES: ReadonlySet<WhatsappJobType> = new Set([
   'CONFIRMATION_CARE',
-  'COACH_MESSAGE',
+  'CONVERSATION_MESSAGE',
   'CHECKIN_MESSAGE',
-  'WORKOUT_DAILY_LINK',
+  'TRAINING_LINK',
   'MANUAL_MESSAGE',
 ]);
 
@@ -125,9 +125,9 @@ export class WhatsappOutboundWorker implements OnModuleInit {
 
     const text = await this.buildText(job.data);
     if (!text) return { status: 'SKIPPED' };
-    // `COACH_MESSAGE` e `MANUAL_MESSAGE` já são gravados em `conversations` por quem os cria
+    // `CONVERSATION_MESSAGE` e `MANUAL_MESSAGE` já são gravados em `conversations` por quem os cria
     // (o worker da conversa e a API do painel); gravar de novo duplicaria.
-    const alreadyRecorded = type === 'COACH_MESSAGE' || type === 'MANUAL_MESSAGE';
+    const alreadyRecorded = type === 'CONVERSATION_MESSAGE' || type === 'MANUAL_MESSAGE';
     await this.sendBubbles(text, phone, job.data, alreadyRecorded ? undefined : userId);
     await this.redis.set(markerKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);
     return { status: 'SENT' };
@@ -205,9 +205,9 @@ export class WhatsappOutboundWorker implements OnModuleInit {
         return confirmationMessage(await this.resolveFirstName(data.userId));
       case 'CONFIRMATION_CARE':
         return confirmationCareMessage();
-      case 'COACH_MESSAGE':
+      case 'CONVERSATION_MESSAGE':
       case 'CHECKIN_MESSAGE':
-      case 'WORKOUT_DAILY_LINK':
+      case 'TRAINING_LINK':
       case 'CONSENT_STATUS':
       case 'MANUAL_MESSAGE':
         return data.text ?? null;

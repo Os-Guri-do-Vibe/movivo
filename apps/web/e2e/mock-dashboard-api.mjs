@@ -214,7 +214,7 @@ createServer(async (request, response) => {
         consents: [
           {
             type: 'TERMS_OF_SERVICE',
-            version: 'terms-2026-09-v1',
+            version: 'terms-2026-10-v2',
             title: null,
             body: [],
             label: 'Li e aceito os Termos de Uso.',
@@ -483,7 +483,7 @@ createServer(async (request, response) => {
           ? '*Treino de hoje* _com calma_\n- agachamento\n- supino'
           : `Mensagem de teste ${index + 1}`,
       createdAt: new Date(Date.UTC(2026, 9, 9, 12, index)).toISOString(),
-      origin: index % 2 === 0 ? 'STUDENT' : 'COACH',
+      origin: index % 2 === 0 ? 'STUDENT' : 'AGENT',
       media: null,
     }));
     return json(response, 200, {

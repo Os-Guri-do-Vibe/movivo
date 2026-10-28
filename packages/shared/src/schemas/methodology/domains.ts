@@ -1074,7 +1074,7 @@ const ADHERENCE: DomainSpec = {
         lowAdherenceRate: {
           kind: 'number',
           label: 'Adesão de 4 semanas considerada baixa',
-          hint: 'Sessões feitas ÷ planejadas. Abaixo disso, o coach de adesão investiga barreiras.',
+          hint: 'Sessões feitas ÷ planejadas. Abaixo disso, o agente de adesão investiga barreiras.',
           unit: '%',
           min: 10,
           max: 90,

@@ -106,7 +106,7 @@ const GRANTS_SQL = (role: string) => `
 /**
  * Extensões exigidas pelo schema lógico (TASK-0.4.2).
  *
- * `vector` — PGVector, base do RAG (sprint do AI Coach).
+ * `vector` — PGVector, base do RAG (sprint da IA).
  * `uuid-ossp` — referenciada pelo schema lógico de Lucas; mantida por
  *   compatibilidade, embora as PKs usem `gen_random_uuid()` do core (ver `_shared.ts`).
  * `pgcrypto` — cifra em repouso das colunas de saúde marcadas `LGPD Art. 11`

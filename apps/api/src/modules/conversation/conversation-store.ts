@@ -27,7 +27,7 @@ export class ConversationStore {
       tx.insert(conversations).values({
         userId: input.userId,
         direction: input.direction,
-        origin: input.direction === 'INBOUND' ? 'STUDENT' : 'COACH',
+        origin: input.direction === 'INBOUND' ? 'STUDENT' : 'AGENT',
         // O turno agregado do aluno é contexto: o painel mostra cada mensagem pelo espelho do webhook.
         hiddenInPanel: input.direction === 'INBOUND',
         content,

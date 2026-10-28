@@ -46,7 +46,7 @@ import { ConversationsService } from './conversations.service';
 /**
  * Conteúdo de conversa é dado de saúde: as rotas de leitura exigem `STUDENTS_READ` **e**
  * `STUDENTS_HEALTH_READ` (semântica AND). Sem a segunda, nem a lista é devolvida. As de
- * escrita (pausar o AI Coach e enviar mensagem) exigem também `CONVERSATIONS_WRITE` — o
+ * escrita (pausar o atendimento automático e enviar mensagem) exigem também `CONVERSATIONS_WRITE` — o
  * decorator do método SUBSTITUI o da classe, por isso as três são repetidas.
  */
 @ApiTags('Admin · Central de Controle')
@@ -208,7 +208,7 @@ export class ConversationsController {
     Capability.CONVERSATIONS_WRITE,
   )
   @ApiOperation({
-    summary: 'Pausa ou reativa o atendimento automático do AI Coach de um aluno',
+    summary: 'Pausa ou reativa o atendimento automático de um aluno',
     description:
       'Pausado, a IA não responde e a mensagem do aluno só é registrada no histórico. Vale até reativar à mão. Idempotente e auditado.',
   })
@@ -235,7 +235,7 @@ export class ConversationsController {
   @ApiOperation({
     summary: 'Envia ao WhatsApp do aluno uma mensagem escrita à mão',
     description:
-      'Só com o atendimento automático do AI Coach pausado e com consentimento de saúde vigente. A mensagem entra no histórico e sai pelo worker de WhatsApp. Auditado (guarda só o tamanho do texto).',
+      'Só com o atendimento automático pausado e com consentimento de saúde vigente. A mensagem entra no histórico e sai pelo worker de WhatsApp. Auditado (guarda só o tamanho do texto).',
   })
   @ApiParam({ name: 'studentId', description: 'UUID do aluno.' })
   @ApiBody({ schema: zodSchemaToOpenApi(controlCenterConversationSendInputSchema) })
