@@ -2,7 +2,7 @@
  * `exercise_catalog_entries` — base de referência de exercícios, parametrizada (achado
  * 2026-09-02). Substitui o array `const` de `exercise-catalog.ts` como fonte de runtime:
  * aquele arquivo passa a alimentar só o `ensureBootstrap()` do `ExerciseCatalogProvider`,
- * no mesmo papel que `METHODOLOGY_GUIDELINES` tem para `methodology_versions`.
+ * no mesmo papel que `METHODOLOGY_GUIDELINES` tem para os documentos de metodologia.
  *
  * Mesmo molde de `faq_entries`: append-only, `PUBLISHED`/`RETIRED` (sem estágio de
  * aprovação separado — o `ValidationService` continua sendo o veto de segurança de
@@ -10,7 +10,7 @@
  * cada chave é o estado atual.
  *
  * Sem RLS por titular — catálogo é configuração global do produto, mesmo raciocínio de
- * `agent_config`/`ai_forbidden_topics`.
+ * `ai_forbidden_topics`.
  */
 import { index, integer, jsonb, pgEnum, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';
 

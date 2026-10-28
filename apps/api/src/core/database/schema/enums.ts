@@ -7,7 +7,7 @@
  *  1. o valor inválido é rejeitado no *parse* do literal, antes do plano de
  *     execução — a mensagem de erro nomeia o tipo e os valores válidos;
  *  2. ocupa 4 bytes, não o texto inteiro, em tabelas que vão a milhões de linhas
- *     (`conversations`, `ai_jobs`);
+ *     (`conversations`, `model_runs`);
  *  3. o `drizzle-kit` gera `ALTER TYPE ... ADD VALUE` ao evoluir, em vez de um
  *     `ALTER TABLE ... DROP CONSTRAINT / ADD CONSTRAINT` que exige varredura completa.
  * O custo conhecido é a remoção de valor, que exige recriar o tipo. Nenhum dos
@@ -42,11 +42,8 @@ function valuesOf<T extends Record<string, string>>(source: T): [T[keyof T], ...
  * Sexo biológico — parâmetro técnico de prescrição (Alexandre §5.7: **não** é dado
  * sensível de saúde do Art. 11, é dado pessoal comum).
  *
- * Até a Sprint 11 o valor vivia só dentro do jsonb da anamnese (`data_block_1`). Virou
- * coluna própria em duas tabelas porque duas leituras de caminho quente passaram a
- * depender dele: `users.biological_sex` (qual persona atende o titular) e
- * `agent_config.target_sex` (qual público aquela persona atende). Ler o jsonb da anamnese
- * a cada mensagem do WhatsApp para descobrir a persona seria um JOIN + parse por turno.
+ * Vive como coluna própria em `users.biological_sex` porque o planejamento (energia e
+ * referências) o lê a cada geração de plano, e ler o jsonb da anamnese seria um JOIN + parse.
  *
  * O nome dos valores é o do enum compartilhado (`biologicalSexSchema`); o `satisfies`
  * abaixo quebra a compilação se o pacote compartilhado ganhar um valor novo que o banco

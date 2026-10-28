@@ -55,7 +55,7 @@ export const conversations = pgTable(
 
     /**
      * Job de IA que produziu a mensagem (quando `OUTBOUND` gerada por IA).
-     * Sem FK de propósito: `ai_jobs` é escrita de forma assíncrona pelo worker e
+     * Sem FK de propósito: `model_runs` é escrita de forma assíncrona pelo worker e
      * uma FK criaria acoplamento de ordem de escrita entre fila e persistência.
      */
     aiJobId: uuid('ai_job_id'),

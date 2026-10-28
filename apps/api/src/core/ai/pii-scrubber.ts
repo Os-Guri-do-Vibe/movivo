@@ -3,7 +3,7 @@
  *
  * Roda **antes** de qualquer chamada ao LLM e é a única porta do `LLMRouter`. Nenhum
  * identificador direto (nome, telefone, e-mail, CPF, nascimento) chega ao provedor; o
- * snapshot logado em `ai_jobs.input_snapshot` é sempre a versão pseudonimizada.
+ * snapshot logado em `model_runs.input_snapshot` é sempre a versão pseudonimizada.
  *
  * Determinístico e <10ms: substituição precisa a partir do `users` + regex. Pseudonimizar
  * também corta tokens (bônus de custo — Eduardo). Defense-in-depth: isto **e** o provedor

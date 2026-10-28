@@ -15,7 +15,7 @@ import { migrationPostgresTls } from '../src/core/database/postgres-tls';
  *       erro é 55000 com o UPDATE de fato nunca aplicado.
  *
  * Sem teardown de DELETE: a própria garantia provada aqui (append-only) torna a linha
- * impossível de apagar por SQL comum — mesmo padrão já aceito em `audit_logs` e `agent_config`.
+ * impossível de apagar por SQL comum — mesmo padrão já aceito em `audit_logs`.
  * O titular é sintético (`+5555…`, ver `seed.ts`) e nunca entra em funil/coorte real de dev
  * além de somar 1 em `TRIAL_STARTED`.
  *

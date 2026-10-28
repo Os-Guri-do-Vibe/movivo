@@ -1,5 +1,5 @@
 /**
- * Preço dos modelos para o custo registrado em cada chamada (`model_runs`, `ai_jobs`).
+ * Preço dos modelos para o custo registrado em cada chamada (`model_runs`).
  *
  * Modelo fora da tabela usa `DEFAULT_PRICING`, que é deliberadamente alto: custo
  * superestimado é um alerta falso; subestimado esconde prejuízo por aluno.

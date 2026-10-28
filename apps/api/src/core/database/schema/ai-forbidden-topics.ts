@@ -20,7 +20,7 @@
  * todas as transições, inclusive sobre proposta própria, mantendo os dois atores auditados.
  *
  * ## Sem RLS por titular
- * Configuração global do produto, não dado de aluno — mesmo raciocínio de `agent_config`.
+ * Configuração global do produto, não dado de aluno — mesmo raciocínio de `ai_guardrail_rules`.
  */
 import { sql } from 'drizzle-orm';
 import { check, jsonb, integer, pgEnum, pgTable, text, unique, uuid } from 'drizzle-orm/pg-core';

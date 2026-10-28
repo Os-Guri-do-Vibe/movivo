@@ -1053,7 +1053,7 @@ export class ControlCenterService {
   }
 
   /**
-   * North Star (US-8.1 / TASK-8.1.5): média de `workout_completions` na janela de 30
+   * North Star (US-8.1 / TASK-8.1.5): média de `session_executions` na janela de 30
    * dias a partir do início da assinatura **paga**, contra a meta ≥8.
    *
    * `paid_start` é o `current_period_start` mais antigo de status pago — trial não conta

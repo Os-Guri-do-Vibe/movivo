@@ -6,7 +6,7 @@
  * `staff` é quem opera a MOVIVO (o profissional CREF incluído), com e-mail+senha e
  * JWT via `POST /auth/login`. Toda coluna de auditoria (`created_by`, `actor_id`,
  * `approved_by`, `reviewed_by`, `uploaded_by`, `decided_by`) e `professional_id`
- * (`protocols`, `professional_assignments`) apontam para `staff.id` — só o `user_id`
+ * (decisões, execuções e auditoria) apontam para `staff.id` — só o `user_id`
  * (o titular) continua em `users.id`.
  */
 import { sql } from 'drizzle-orm';
