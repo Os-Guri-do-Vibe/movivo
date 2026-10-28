@@ -22,6 +22,55 @@ import type { StrengthInput } from '../src/modules/planning/tasks/strength';
 /** Base64 da "imagem" que o treinador falso trata como tela que não é de treino. */
 export const NOT_A_WORKOUT_IMAGE = 'bm90LXdvcmtvdXQ=';
 
+const WEEKDAY_WORDS: [string, string][] = [
+  ['segunda', 'MON'],
+  ['terça', 'TUE'],
+  ['terca', 'TUE'],
+  ['quarta', 'WED'],
+  ['quinta', 'THU'],
+  ['sexta', 'FRI'],
+  ['sábado', 'SAT'],
+  ['sabado', 'SAT'],
+  ['domingo', 'SUN'],
+];
+
+/** Classificador falso: palavras-chave das mensagens usadas nos testes de conversa. */
+function classifyFake(message: string) {
+  const text = message.toLowerCase();
+  const out = {
+    intent: 'OUT_OF_SCOPE',
+    availableWeekdays: null as string[] | null,
+    scope: 'UNSPECIFIED',
+    minutesAvailable: null as number | null,
+    exerciseMention: null as string | null,
+    swapReason: null as string | null,
+    confidence: 'HIGH',
+  };
+  if (text.includes('só posso') || text.includes('so posso')) {
+    out.intent = 'UNAVAILABILITY';
+    out.scope = 'THIS_WEEK';
+    out.availableWeekdays = [
+      ...new Set(WEEKDAY_WORDS.filter(([w]) => text.includes(w)).map(([, d]) => d)),
+    ];
+  } else if (/só tenho (\d+) minutos/.test(text)) {
+    out.intent = 'SHORT_ON_TIME';
+    out.scope = 'TODAY';
+    out.minutesAvailable = Number(/só tenho (\d+) minutos/.exec(text)?.[1]);
+  } else if (text.startsWith('troca')) {
+    out.intent = 'EXERCISE_SWAP';
+    out.exerciseMention = text
+      .replace(/^troca( o| a)?/, '')
+      .replace(/[.!?,].*$/, '')
+      .trim();
+    out.swapReason = text.includes('não tenho') ? 'EQUIPMENT' : 'PREFERENCE';
+  } else if (text.includes('almocei')) out.intent = 'FOOD_LOG';
+  else if (text.includes('link')) out.intent = 'LINK_REQUEST';
+  else if (text.includes('humano')) out.intent = 'HUMAN_REVIEW';
+  else if (text.includes('proteína')) out.intent = 'NUTRITION_QUESTION';
+  else if (text.startsWith('oi')) out.intent = 'GREETING';
+  return out;
+}
+
 export const fakeRunner = {
   async run(
     task: { id: string },
@@ -204,6 +253,31 @@ export const fakeRunner = {
           note: null,
         },
       };
+    }
+    if (task.id === 'conversation.classify_inbound') {
+      return { ...base, output: classifyFake((input as { message: string }).message) };
+    }
+    if (task.id === 'conversation.answer_question') {
+      return {
+        ...base,
+        output: {
+          reply: 'Distribua a proteína ao longo do dia, em três ou quatro refeições.',
+          needsProfessional: false,
+        },
+      };
+    }
+    if (task.id === 'strength.choose_substitute') {
+      const i = input as { candidates: { id: string }[] };
+      return {
+        ...base,
+        output: {
+          toExerciseId: i.candidates[0]?.id,
+          why: 'Trabalha os mesmos músculos com o que você tem.',
+        },
+      };
+    }
+    if (task.id === 'safety.detect_risk_signals') {
+      return { ...base, output: { signals: [] } };
     }
     throw new Error(`tarefa inesperada no teste: ${task.id}`);
   },

@@ -161,6 +161,17 @@ const LEVEL_TO_CATALOG: Record<RulesLevel, ExerciseLevel> = {
   ADVANCED: 'AVANCADO',
 };
 
+/** Local e nível do aluno no vocabulário do catálogo (para equivalentes seguros). */
+export function catalogProfileOf(view: StateView): {
+  location: ExerciseLocation;
+  level: ExerciseLevel;
+} {
+  return {
+    location: VENUE_TO_LOCATION[view.training.venues[0] ?? 'FULL_GYM'],
+    level: LEVEL_TO_CATALOG[levelOf(view, 'STRENGTH')],
+  };
+}
+
 /** Tags de contraindicação do aluno: dor/lesão registradas e sinais de segurança ativos. */
 export function contraindicationsOf(view: StateView): Set<ContraindicationTag> {
   const tags = new Set<ContraindicationTag>();
@@ -176,7 +187,7 @@ export function contraindicationsOf(view: StateView): Set<ContraindicationTag> {
   return tags;
 }
 
-function exercisePreference(view: StateView, kind: 'LIKES' | 'DISLIKES'): Set<string> {
+export function exercisePreference(view: StateView, kind: 'LIKES' | 'DISLIKES'): Set<string> {
   return new Set(
     view.preferences
       .filter((p) => p.domain === 'EXERCISE' && p.value === kind)
