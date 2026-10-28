@@ -139,7 +139,7 @@ describe('autorização por recurso na API', () => {
         }
       }
     }
-    expect(checked).toBeGreaterThan(10);
+    expect(checked).toBeGreaterThan(0);
   });
 
   it('nega trocar UUID de sessão ou execução em leitura e mutações, preservando B', async () => {

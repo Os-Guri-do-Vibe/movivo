@@ -1,4 +1,17 @@
 import {
+  agentCostsSchema,
+  agentsOverviewSchema,
+  exceptionActionResponseSchema,
+  exceptionDecisionsResponseSchema,
+  exceptionDetailSchema,
+  exceptionListResponseSchema,
+  type AgentCosts,
+  type AgentsOverview,
+  type ExceptionDecision,
+  type ExceptionDetail,
+  type ExceptionListItem,
+  type ModelTierName,
+  type SaveTierRoutesRequest,
   agentConfigHistoryResponseSchema,
   auditSearchResponseSchema,
   agentPersonaResponseSchema,
@@ -834,4 +847,101 @@ export function runSystemScript(id: string): Promise<ControlCenterScriptRunRespo
     fallback: 'Não foi possível executar o script.',
     contract: 'A execução devolveu dados fora do contrato esperado.',
   });
+}
+
+/* --------- Fila de exceções (por conselho profissional) -------- */
+
+export function getExceptions(
+  status?: 'OPEN' | 'IN_REVIEW' | 'RESOLVED',
+  signal?: AbortSignal,
+): Promise<ExceptionListItem[]> {
+  return request(
+    `exceptions${status ? `?status=${status}` : ''}`,
+    exceptionListResponseSchema,
+    signal,
+  );
+}
+
+export function getException(id: string, signal?: AbortSignal): Promise<ExceptionDetail> {
+  return request(`exceptions/${id}`, exceptionDetailSchema, signal);
+}
+
+export function getExceptionDecisions(
+  id: string,
+  signal?: AbortSignal,
+): Promise<ExceptionDecision[]> {
+  return request(`exceptions/${id}/decisions`, exceptionDecisionsResponseSchema, signal);
+}
+
+const EXCEPTION_MESSAGES = {
+  forbidden: 'Este caso é de outro domínio profissional.',
+  fallback: 'Não foi possível concluir a ação neste caso.',
+  contract: 'A resposta veio fora do contrato esperado.',
+};
+
+export function claimException(id: string) {
+  return mutate(`exceptions/${id}/claim`, {}, exceptionActionResponseSchema, EXCEPTION_MESSAGES);
+}
+
+export function approveException(id: string, note?: string) {
+  return mutate(
+    `exceptions/${id}/approve`,
+    note ? { note } : {},
+    exceptionActionResponseSchema,
+    EXCEPTION_MESSAGES,
+  );
+}
+
+export function rejectException(id: string, note: string) {
+  return mutate(
+    `exceptions/${id}/reject`,
+    { note },
+    exceptionActionResponseSchema,
+    EXCEPTION_MESSAGES,
+  );
+}
+
+export function resolveException(id: string, note: string) {
+  return mutate(
+    `exceptions/${id}/resolve`,
+    { note },
+    exceptionActionResponseSchema,
+    EXCEPTION_MESSAGES,
+  );
+}
+
+/* --------- Agentes de IA: tarefas, níveis de modelo e custo -------- */
+
+export function getAgents(signal?: AbortSignal): Promise<AgentsOverview> {
+  return request('agents', agentsOverviewSchema, signal);
+}
+
+export function getAgentCosts(days: number, signal?: AbortSignal): Promise<AgentCosts> {
+  return request(`agents/costs?days=${days}`, agentCostsSchema, signal);
+}
+
+export async function saveTierRoutes(
+  tier: ModelTierName,
+  input: SaveTierRoutesRequest,
+): Promise<AgentsOverview['tiers']> {
+  const response = await fetch(`/api/dashboard/control/agents/tiers/${tier}`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const value = (await response.json().catch(() => null)) as unknown;
+  if (!response.ok) {
+    const message =
+      isRecord(value) && typeof value.message === 'string'
+        ? value.message
+        : response.status === 403
+          ? 'Seu papel não pode trocar o modelo de um nível.'
+          : 'Não foi possível salvar as rotas.';
+    throw new ControlCenterApiError(response.status, message);
+  }
+  const parsed = agentsOverviewSchema.shape.tiers.safeParse(value);
+  if (!parsed.success)
+    throw new ControlCenterApiError(502, 'A resposta veio fora do contrato esperado.');
+  return parsed.data;
 }

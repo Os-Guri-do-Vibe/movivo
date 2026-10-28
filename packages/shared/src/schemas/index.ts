@@ -40,6 +40,7 @@ export * from './check-in/check-in.schema';
 export * from './coaching/coaching.schema';
 export * from './coaching/council';
 export * from './coaching/model-tier.schema';
+export * from './coaching/panel-views.schema';
 export * from './coaching/exception-actions.schema';
 export * from './progress/review.schema';
 export * from './events/domain-events.schema';

@@ -26,7 +26,7 @@ import {
 import { strictSafeParse } from '../../core/validation/strict-input';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { AuditService } from './audit.service';
-import { simulateForbiddenTopicConfig } from './config-simulator';
+import { simulateForbiddenTopicConfig } from './config-gate';
 
 const TIMEZONE = 'America/Sao_Paulo' as const;
 

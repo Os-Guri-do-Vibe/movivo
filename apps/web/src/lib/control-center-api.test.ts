@@ -162,7 +162,7 @@ describe('projeções do Control Center', () => {
           funnel: {
             formStarted: metric,
             formSubmitted: metric,
-            protocolActive: metric,
+            planActive: metric,
             subscriptionActive: metric,
           },
           acquisition: metric,

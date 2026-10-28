@@ -193,16 +193,6 @@ export const TERMINAL_SCRIPTS: readonly TerminalScript[] = [
     notRunnableReason: ARGUMENT_REQUIRED,
   },
   {
-    id: 'redteam-prompt-injection',
-    kind: 'TERMINAL',
-    name: 'Red team de prompt injection',
-    description:
-      'Ataca o modelo real com casos de injeção de prompt (dados sintéticos) e mede a taxa de aprovação. Consome tokens.',
-    file: 'apps/api/src/scripts/redteam-prompt-injection.ts',
-    command: 'REDTEAM_PROVIDER=openai pnpm exec tsx src/scripts/redteam-prompt-injection.ts',
-    notRunnableReason: 'Consome tokens do provedor e exige chave no ambiente — só no terminal.',
-  },
-  {
     id: 'reset-staff-mfa',
     kind: 'TERMINAL',
     name: 'Zerar MFA de conta interna',
@@ -250,16 +240,6 @@ export const TERMINAL_SCRIPTS: readonly TerminalScript[] = [
     file: 'apps/api/src/core/database/backfill-status-transitions.ts',
     command: 'pnpm --filter @movivo/api db:backfill-transitions',
     notRunnableReason: OPERATOR_ONLY,
-  },
-  {
-    id: 'build-share-card-assets',
-    kind: 'TERMINAL',
-    name: 'Regerar assets do card de compartilhamento',
-    description:
-      'Regera as máscaras e ilustrações musculares do card de treino quando a biblioteca de origem muda.',
-    file: 'apps/api/scripts/build-share-card-assets.mjs',
-    command: 'node apps/api/scripts/build-share-card-assets.mjs',
-    notRunnableReason: 'Grava arquivos no repositório — só no terminal.',
   },
   {
     id: 'build-web',

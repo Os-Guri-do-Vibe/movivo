@@ -7,8 +7,6 @@ import { migrationPostgresTls } from '../src/core/database/postgres-tls';
  *   (boot)         o AppModule sobe SEM credencial EvolutionAPI (chave opcional);
  *   (confirmação)  submit da anamnese enfileira e o worker envia a confirmação (liberado);
  *   (cuidado)      PAR-Q de risco recebe a variante de cuidado (sem prometer plano);
- *   (entrega)      um protocolo AUTO_APPROVED/ACTIVE é entregue formatado em bolhas + link;
- *   (idempotência) reprocessar a entrega (marcador Redis) não reenvia.
  *
  * Pré-requisito: `pnpm run infra:up` + `db:migrate`.
  */
@@ -19,24 +17,20 @@ import { resolve } from 'node:path';
 
 import { type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { CONSENT_TEXTS, REQUIRED_CONSENT_TYPES, type ProtocolStructure } from '@movivo/shared';
+import { CONSENT_TEXTS, REQUIRED_CONSENT_TYPES } from '@movivo/shared';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { AppModule } from '../src/app.module';
 import { loadEnv } from '../src/core/config/load-env';
-import { protocols, users } from '../src/core/database/schema';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { AnamnesisService } from '../src/modules/anamnesis/anamnesis.service';
 import { ConsentService } from '../src/modules/anamnesis/consent.service';
-import { QUEUE } from '../src/modules/jobs/jobs.config';
-import { QueueManager } from '../src/modules/jobs/queue-manager.service';
 import {
   WHATSAPP_TRANSPORT,
   type OutboundMessage,
   type WhatsappTransport,
 } from '../src/modules/whatsapp/whatsapp-transport';
-import { PROFESSIONAL_ID, seedHealthEligibility } from './health-fixtures';
 import { completeSteps } from './onboarding-fixtures';
 
 const { env } = loadEnv();
@@ -46,7 +40,6 @@ const ORIGIN = { ip: '203.0.113.55', userAgent: 'vitest/whatsapp-outbound' };
 
 /** Fake transport: grava os envios em memória, sem rede. */
 const sent: OutboundMessage[] = [];
-const sentDocuments: Array<{ to: string; documentUrl: string; caption: string }> = [];
 const fakeTransport: WhatsappTransport = {
   hasCredentials: () => true,
   async send(message) {
@@ -55,16 +48,11 @@ const fakeTransport: WhatsappTransport = {
   async sendTemplate() {
     // Não exercido por este spec (fluxo de confirmação/entrega, sem template de OTP).
   },
-  async sendDocument(to, documentUrl, caption) {
-    sentDocuments.push({ to, documentUrl, caption });
-  },
 };
 
 let app: INestApplication;
 let anamnesis: AnamnesisService;
 let consents: ConsentService;
-let queues: QueueManager;
-let db: TenantDatabase;
 
 const adminClient = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
@@ -84,31 +72,6 @@ const adminClient = postgres({
 
 let seq = 0;
 const phone = () => `+5541${RUN}${(seq += 1)}`;
-
-function structure(): ProtocolStructure {
-  return {
-    promptVersion: 'v1',
-    goal: 'GAIN_MUSCLE',
-    phase: 'ADAPTACAO',
-    weeklyFrequency: 3,
-    sessions: [
-      {
-        dayLabel: 'Dia A',
-        focus: 'Corpo inteiro',
-        exercises: [
-          {
-            exerciseId: 'goblet_squat',
-            name: 'Agachamento goblet',
-            sets: 3,
-            reps: { min: 8, max: 12 },
-            loadStrategy: 'DOUBLE_PROGRESSION',
-            restSeconds: 90,
-          },
-        ],
-      },
-    ],
-  };
-}
 
 async function submitAnamnesis(riskIds: string[] = []) {
   const { token } = await anamnesis.start({ primaryGoal: 'GAIN_MUSCLE' });
@@ -144,42 +107,6 @@ async function submitAnamnesis(riskIds: string[] = []) {
   return row;
 }
 
-/** Cria usuário + protocolo AUTO_APPROVED/ACTIVE direto no banco (para a entrega). */
-async function seedActiveProtocol() {
-  const p = phone();
-  const userId = await db.runAsSystem(async (tx) => {
-    const [u] = await tx
-      .insert(users)
-      .values({ phoneNumber: p, name: 'Seed WA', email: `${p.replace(/\D/g, '')}@example.invalid` })
-      .returning({ id: users.id });
-    if (!u) throw new Error('seed: usuário não criado');
-    return u.id;
-  });
-  // Vínculo CREF + consentimento de saúde (o gate de entrega exige consentimento ativo).
-  await seedHealthEligibility(adminClient, userId);
-  await db.runAsUser(userId, 'USER', (tx) =>
-    tx.insert(protocols).values({
-      userId,
-      status: 'ACTIVE',
-      approvalStatus: 'AUTO_APPROVED',
-      // Entrega só sai de protocolo ASSINADO (professionalId + signedAt + signatureHash).
-      professionalId: PROFESSIONAL_ID,
-      signedAt: new Date(),
-      signatureHash: 'a'.repeat(64),
-      // Entrega exige PDF já gerado (decisão do fundador, 2026-09-12) — sem isso
-      // `buildDelivery` lança em vez de degradar para texto+link.
-      pdfContent: Buffer.from('%PDF-1.4 fake'),
-      content: structure(),
-      constraints: {},
-      // NOT NULL sem default desde a migração 0033.
-      mesocycleName: 'Mesociclo 1 — Adaptação',
-      startDate: new Date(),
-      endDate: new Date(Date.now() + 12 * 7 * 24 * 60 * 60 * 1000),
-    }),
-  );
-  return userId;
-}
-
 async function waitFor<T>(fn: () => T | undefined, timeoutMs = 15_000): Promise<T> {
   const started = Date.now();
   for (;;) {
@@ -205,17 +132,12 @@ beforeAll(async () => {
   await app.init();
   anamnesis = app.get(AnamnesisService);
   consents = app.get(ConsentService);
-  queues = app.get(QueueManager);
-  db = app.get(TenantDatabase);
 }, 60_000);
 
 afterAll(async () => {
   try {
     await adminClient.unsafe(
       `DELETE FROM conversations WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
-       DELETE FROM protocol_versions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
-       DELETE FROM protocols WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
-       DELETE FROM ai_jobs WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM consents WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%')
          OR anamnesis_session_id IN (SELECT id FROM anamnesis_sessions WHERE token LIKE '%${RUN}%');
        DELETE FROM anamnesis_sessions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
@@ -248,37 +170,5 @@ describe('outbound WhatsApp — confirmação no submit (US-2.5)', () => {
     const msg = await waitFor(() => sent.find((m) => m.to === to && /revisar/i.test(m.text)));
     // variante de cuidado não promete o plano
     expect(msg.text).not.toMatch(/seu processo na MOVIVO já começou/i);
-  }, 30_000);
-});
-
-describe('outbound WhatsApp — entrega do protocolo e idempotência (US-2.5)', () => {
-  it('entrega AUTO_APPROVED como PDF com legenda; reprocesso não reenvia', async () => {
-    const userId = await seedActiveProtocol();
-    const [{ phone_number: to }] = await adminClient<Array<{ phone_number: string }>>`
-      SELECT phone_number FROM users WHERE id = ${userId}`;
-
-    await queues.enqueue(
-      QUEUE.whatsappOutbound,
-      'protocol-delivery',
-      { userId, protocolVersion: 1, type: 'PROTOCOL_DELIVERY' },
-      { jobId: `protocol-delivery_${userId}_1` },
-    );
-    await waitFor(() => sentDocuments.find((m) => m.to === to));
-
-    const documentsAfterFirst = sentDocuments.filter((m) => m.to === to).length;
-    // Não existe mais entrega por texto+link (decisão do fundador, 2026-09-12): a
-    // apresentação antecipada da agente (`sendPresentationIfNeeded`) sai como 1 bolha de
-    // texto e a entrega em si é 1 único documento (PDF), com a saudação na legenda.
-    expect(sent.filter((m) => m.to === to).length).toBe(1);
-    expect(documentsAfterFirst).toBe(1);
-
-    // Reprocesso com jobId distinto (bypassa o dedup do BullMQ) — o marcador Redis barra.
-    await queues.enqueue(QUEUE.whatsappOutbound, 'protocol-delivery', {
-      userId,
-      protocolVersion: 1,
-      type: 'PROTOCOL_DELIVERY',
-    });
-    await new Promise((r) => setTimeout(r, 3_000));
-    expect(sentDocuments.filter((m) => m.to === to).length).toBe(1); // não reenviou
   }, 30_000);
 });

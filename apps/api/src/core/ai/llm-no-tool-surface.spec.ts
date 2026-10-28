@@ -3,7 +3,7 @@
  *
  * Prompt injection não se resolve sanitizando entrada: o modelo é um componente NÃO confiável
  * para autorização. Hoje isso é garantido pela estrutura — o contrato do provedor
- * (`ProviderCompleteRequest`) só carrega texto, nenhum adaptador envia `tools`, e toda saída
+ * (`GatewayRequest`) só carrega texto e imagem, nenhum adaptador envia `tools`, e toda saída
  * do modelo que vira ação (troca de exercício, ajuste de volume) é uma escolha numa lista
  * FECHADA de ids que o servidor montou para aquele titular e revalida antes de gravar. O
  * `userId` de qualquer operação vem do job/sessão autenticada, nunca de texto do modelo.
@@ -46,11 +46,8 @@ function stripComments(source: string): string {
 }
 
 describe('superfície de ferramentas do LLM', () => {
-  it('nenhum adaptador de provedor nem o contrato do router declara tools/function calling', () => {
+  it('nenhum adaptador de provedor nem o contrato do gateway declara tools/function calling', () => {
     const files = [
-      join(SRC, 'modules', 'ai-coach', 'llm', 'providers.ts'),
-      join(SRC, 'modules', 'ai-coach', 'llm', 'llm.types.ts'),
-      join(SRC, 'modules', 'ai-coach', 'llm', 'llm-router.service.ts'),
       join(SRC, 'core', 'ai', 'vendors.ts'),
       join(SRC, 'core', 'ai', 'ai.types.ts'),
       join(SRC, 'core', 'ai', 'model-gateway.ts'),

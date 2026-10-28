@@ -1,115 +1,38 @@
-import { DEFAULT_AGENT_PERSONA, type ProtocolStructure } from '@movivo/shared';
 import type { Job } from 'bullmq';
 import type { Redis } from 'ioredis';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AppConfigService } from '../../core/config';
-import type { ConversationEventsService } from '../../core/event-bus/conversation-events.service';
 import type { HealthCipherService } from '../../core/database/health-cipher.service';
 import type { HealthConsentService } from '../../core/database/health-consent.service';
-import { conversations, users } from '../../core/database/schema';
+import { conversations } from '../../core/database/schema';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
+import type { ConversationEventsService } from '../../core/event-bus/conversation-events.service';
 import { RedisKeyBuilder } from '../../core/redis/redis-key.util';
-import type { FollowupService } from '../followup/followup.service';
 import type { WorkerFactory } from '../jobs/worker.factory';
 import type { OutboundMessage, WhatsappTransport } from './whatsapp-transport';
 import { WhatsappOutboundWorker, type WhatsappOutboundJob } from './whatsapp-outbound.worker';
 
 const USER_ID = '11111111-1111-4111-8111-111111111111';
 
-function structure(): ProtocolStructure {
-  return {
-    promptVersion: 'v1',
-    goal: 'GAIN_MUSCLE',
-    phase: 'ADAPTACAO',
-    phaseDurationWeeks: 3,
-    weeklyFrequency: 3,
-    sessions: [
-      {
-        dayLabel: 'A',
-        focus: 'Full',
-        exercises: [
-          {
-            exerciseId: 'goblet_squat',
-            name: 'Agachamento',
-            sets: 3,
-            reps: { min: 8, max: 12 },
-            loadStrategy: 'DOUBLE_PROGRESSION',
-            restSeconds: 90,
-          },
-        ],
-      },
-    ],
-  };
-}
-
 interface Deps {
   staffPhone?: string;
   phone?: string | null;
   name?: string | null;
-  proto?: {
-    id?: string;
-    content?: ProtocolStructure;
-    status: string;
-    approvalStatus: string;
-    signedAt?: Date;
-    signatureHash?: string;
-    professionalId?: string;
-    pdfContent?: Buffer;
-    totalWeeks?: number;
-    mesocycleName?: string;
-    reviewUrgency?: string | null;
-  } | null;
   markerExists?: boolean;
-  /**
-   * Marker de `wa-sent:PROTOCOL_WAITING:na` — separado de `markerExists` (o marker do job
-   * corrente) porque a entrega adiantada (achado 2026-09-04) checa essa chave ANTES de
-   * mandar o protocolo, pra decidir se manda a apresentação primeiro. Default `undefined`
-   * (não existe ainda): testes de entrega que não se importam com a apresentação passam
-   * `true` pra isolar o que estão testando.
-   */
-  waitingMarkerExists?: boolean;
   consentActive?: boolean;
   /** Linhas gravadas em `conversations` (histórico da aba "Conversas"). */
   inserted?: { table: unknown; values: unknown }[];
   /** Simula falha na gravação do histórico. */
   insertFails?: boolean;
-  /** A pendência de conversa do job ainda está `PENDING_SEND` (não foi cancelada). */
-  followupSendable?: boolean;
-  /** `markDelivered` falha (banco indisponível). */
-  followupOpenFails?: boolean;
 }
 
-/**
- * tx falso: distingue users/protocols pela tabela passada em `.from()`. A linha de
- * `users` carrega telefone E nome juntos — o fake não sabe distinguir a projeção pedida
- * (`resolvePhone` só lê `.phoneNumber`, `buildDelivery` só lê `.name`), então a mesma
- * linha serve as duas.
- */
+/** tx falso: a linha de `users` carrega telefone e nome juntos (cada leitura projeta o que quer). */
 function makeTx(deps: Deps) {
-  let table: unknown;
-  const defaults = { totalWeeks: 12, mesocycleName: 'Mesociclo 1: Adaptação' };
-  const proto =
-    deps.proto === undefined
-      ? {
-          ...defaults,
-          id: 'p1',
-          content: structure(),
-          status: 'ACTIVE',
-          approvalStatus: 'AUTO_APPROVED',
-          signedAt: new Date(),
-          signatureHash: 'a'.repeat(64),
-          professionalId: '00000000-0000-4000-8000-000000000001',
-        }
-      : deps.proto && { ...defaults, ...deps.proto };
   const chain = {
     select: () => chain,
-    from: (t: unknown) => {
-      table = t;
-      return chain;
-    },
+    from: () => chain,
     where: () => chain,
-    orderBy: () => chain,
     insert: (t: unknown) => ({
       values: (values: unknown) => {
         if (deps.insertFails) return Promise.reject(new Error('db fora do ar'));
@@ -119,18 +42,14 @@ function makeTx(deps: Deps) {
     }),
     limit: () =>
       Promise.resolve(
-        table === users
-          ? deps.phone === null
-            ? []
-            : [
-                {
-                  phoneNumber: deps.phone ?? '+5541999999999',
-                  name: deps.name === undefined ? 'Ana Beatriz' : deps.name,
-                },
-              ]
-          : proto
-            ? [proto]
-            : [],
+        deps.phone === null
+          ? []
+          : [
+              {
+                phoneNumber: deps.phone ?? '+5541999999999',
+                name: deps.name === undefined ? 'Ana Beatriz' : deps.name,
+              },
+            ],
       ),
   };
   return chain;
@@ -143,16 +62,8 @@ function makeWorker(deps: Deps = {}) {
       cb(makeTx(deps)),
     ),
   } as unknown as TenantDatabase;
-  const keys = new RedisKeyBuilder('movivo');
-  // Mesma chave que `PROTOCOL_WAITING` usa como marker principal E que a entrega adiantada
-  // (achado 2026-09-04) checa como marker SECUNDÁRIO — por isso o fake distingue pela
-  // chave, não por um único booleano: um job `PROTOCOL_DELIVERY` consulta as DUAS chaves
-  // (a sua própria e esta), um job `PROTOCOL_WAITING` só consulta esta.
-  const waitingKey = keys.forUser(USER_ID, 'wa-sent', 'PROTOCOL_WAITING', 'na');
   const redis = {
-    exists: vi.fn((key: string) =>
-      Promise.resolve((key === waitingKey ? deps.waitingMarkerExists : deps.markerExists) ? 1 : 0),
-    ),
+    exists: vi.fn(() => Promise.resolve(deps.markerExists ? 1 : 0)),
     set: vi.fn(() => Promise.resolve('OK')),
   } as unknown as Redis;
   const send = vi.fn((_m: OutboundMessage) => Promise.resolve());
@@ -160,14 +71,10 @@ function makeWorker(deps: Deps = {}) {
   const sendTemplate = vi.fn((_to: string, _templateName: string, _variables?: readonly string[]) =>
     Promise.resolve(),
   );
-  const sendDocument = vi.fn((_to: string, _url: string, _caption: string, _fileName?: string) =>
-    Promise.resolve(),
-  );
   const transport = {
     send,
     sendTemplate,
     sendTyping,
-    sendDocument,
     hasCredentials: () => true,
   } as unknown as WhatsappTransport;
   const config = {
@@ -175,654 +82,234 @@ function makeWorker(deps: Deps = {}) {
   } as unknown as AppConfigService;
   const logger = { info: vi.fn(), warn: vi.fn(), setContext: vi.fn() } as never;
   const emitMessage = vi.fn();
-  const followups = {
-    isSendable: vi.fn(async () => deps.followupSendable ?? true),
-    markDelivered: vi.fn(async () => {
-      if (deps.followupOpenFails) throw new Error('banco indisponível');
-      return true;
-    }),
-    markNotSent: vi.fn(async () => true),
-  };
   const worker = new WhatsappOutboundWorker(
     workers,
     db,
     redis,
-    keys,
+    new RedisKeyBuilder('movivo'),
     transport,
     {
       hasActiveForUser: vi.fn(async () => deps.consentActive ?? true),
     } as unknown as HealthConsentService,
     config,
-    {
-      agentName: vi.fn(async () => DEFAULT_AGENT_PERSONA.agentName),
-      persona: vi.fn(async () => DEFAULT_AGENT_PERSONA),
-    } as never,
     logger,
-    {
-      issue: vi.fn(async () => ({ token: 'protocol-access-token', expiresAt: new Date() })),
-    } as never,
     {
       encryptText: vi.fn(async (text: string) => `enc(${text})`),
     } as unknown as HealthCipherService,
     { emitMessage } as unknown as ConversationEventsService,
-    followups as unknown as FollowupService,
   );
-  return { worker, send, sendTemplate, sendTyping, sendDocument, redis, emitMessage, followups };
+  return { worker, send, sendTemplate, sendTyping, redis, emitMessage };
 }
 
 function job(data: Partial<WhatsappOutboundJob>): Job<WhatsappOutboundJob> {
   return { data: { userId: USER_ID, type: 'CONFIRMATION', ...data } } as Job<WhatsappOutboundJob>;
 }
 
-describe('WhatsappOutboundWorker.process (US-2.5)', () => {
+describe('WhatsappOutboundWorker.process', () => {
   it('PHONE_VERIFICATION: usa Template (fora da janela de 24h), não texto livre', async () => {
     const { worker, send, sendTemplate } = makeWorker();
-    const res = await worker.process(
+
+    const result = await worker.process(
       job({
         userId: null,
         type: 'PHONE_VERIFICATION',
-        phoneNumber: '+5541999999999',
-        code: '123456',
+        phoneNumber: '+5541988887777',
+        code: '482915',
       }),
     );
-    expect(res.status).toBe('SENT');
-    expect(sendTemplate).toHaveBeenCalledWith('+5541999999999', 'verificacao_numero', ['123456']);
+
+    expect(result).toEqual({ status: 'SENT' });
+    expect(sendTemplate).toHaveBeenCalledWith('+5541988887777', 'verificacao_numero', ['482915']);
     expect(send).not.toHaveBeenCalled();
   });
 
   it('PHONE_VERIFICATION sem telefone ou código: descarta sem enviar', async () => {
-    const { worker, sendTemplate } = makeWorker();
-    const res = await worker.process(job({ userId: null, type: 'PHONE_VERIFICATION' }));
-    expect(res.status).toBe('INVALID');
+    const { worker, send, sendTemplate } = makeWorker();
+
+    expect(await worker.process(job({ userId: null, type: 'PHONE_VERIFICATION' }))).toEqual({
+      status: 'INVALID',
+    });
+    expect(send).not.toHaveBeenCalled();
     expect(sendTemplate).not.toHaveBeenCalled();
   });
 
-  it('STAFF_QUEUE_ALERT: manda ao número do profissional (não ao aluno) com nome e ação de protocolo', async () => {
-    const { worker, send } = makeWorker({ staffPhone: '+5511998767013', phone: '+5541999999999' });
-    const res = await worker.process(
-      job({ type: 'STAFF_QUEUE_ALERT', staffAlertKind: 'PROTOCOL_REVIEW', dedupeId: 'p1' }),
-    );
-    expect(res.status).toBe('SENT');
-    expect(send).toHaveBeenCalledOnce();
-    const sent = send.mock.calls[0]?.[0];
-    expect(sent?.to).toBe('+5511998767013');
-    expect(sent?.text).toContain('Ana Beatriz');
-    expect(sent?.text).toContain('revisão de protocolo');
-  });
+  it('STAFF_QUEUE_ALERT: manda o texto ao número da equipe (não ao aluno) e marca como enviado', async () => {
+    const { worker, send, redis } = makeWorker({ staffPhone: '+5511900000000' });
 
-  it('STAFF_QUEUE_ALERT: identifica a revisão de substituição de exercício', async () => {
-    const { worker, send } = makeWorker({ staffPhone: '+5511998767013' });
-    await worker.process(
-      job({ type: 'STAFF_QUEUE_ALERT', staffAlertKind: 'SUBSTITUTION_REVIEW', dedupeId: 's1' }),
+    const result = await worker.process(
+      job({
+        userId: null,
+        type: 'STAFF_QUEUE_ALERT',
+        text: 'Novo caso na fila MOVIVO',
+        dedupeId: 'c1',
+      }),
     );
-    expect(send.mock.calls[0]?.[0]?.text).toContain('revisão de substituição de exercício');
+
+    expect(result).toEqual({ status: 'SENT' });
+    expect(send).toHaveBeenCalledWith({ to: '+5511900000000', text: 'Novo caso na fila MOVIVO' });
+    expect(redis.set).toHaveBeenCalled();
   });
 
   it('STAFF_QUEUE_ALERT: sem número configurado fica desligado e não envia', async () => {
     const { worker, send } = makeWorker();
-    const res = await worker.process(
-      job({ type: 'STAFF_QUEUE_ALERT', staffAlertKind: 'PROTOCOL_REVIEW', dedupeId: 'p1' }),
+
+    const result = await worker.process(
+      job({ userId: null, type: 'STAFF_QUEUE_ALERT', text: 'x', dedupeId: 'c1' }),
     );
-    expect(res.status).toBe('DISABLED');
+
+    expect(result).toEqual({ status: 'DISABLED' });
     expect(send).not.toHaveBeenCalled();
   });
 
   it('STAFF_QUEUE_ALERT: alerta já enviado não reenvia', async () => {
-    const { worker, send } = makeWorker({ staffPhone: '+5511998767013', markerExists: true });
-    const res = await worker.process(
-      job({ type: 'STAFF_QUEUE_ALERT', staffAlertKind: 'PROTOCOL_REVIEW', dedupeId: 'p1' }),
+    const { worker, send } = makeWorker({ staffPhone: '+5511900000000', markerExists: true });
+
+    const result = await worker.process(
+      job({ userId: null, type: 'STAFF_QUEUE_ALERT', text: 'x', dedupeId: 'c1' }),
     );
-    expect(res.status).toBe('ALREADY_SENT');
+
+    expect(result).toEqual({ status: 'ALREADY_SENT' });
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('descarta outbound de saude enfileirado antes da revogacao', async () => {
+  it('descarta outbound de saúde enfileirado antes da revogação', async () => {
     const { worker, send } = makeWorker({ consentActive: false });
-    await expect(
-      worker.process(job({ type: 'CHECKIN_MESSAGE', text: 'check-in' })),
-    ).resolves.toEqual({ status: 'CONSENT_REVOKED' });
+
+    const result = await worker.process(job({ type: 'COACH_MESSAGE', text: 'oi' }));
+
+    expect(result).toEqual({ status: 'CONSENT_REVOKED' });
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('permite confirmacao de revogacao mesmo sem consentimento ativo', async () => {
+  it('permite a confirmação de revogação mesmo sem consentimento ativo', async () => {
     const { worker, send } = makeWorker({ consentActive: false });
-    await expect(
-      worker.process(job({ type: 'CONSENT_STATUS', text: 'consentimento revogado' })),
-    ).resolves.toEqual({ status: 'SENT' });
+
+    const result = await worker.process(
+      job({ type: 'CONSENT_STATUS', text: 'Consentimento revogado.' }),
+    );
+
+    expect(result).toEqual({ status: 'SENT' });
     expect(send).toHaveBeenCalledOnce();
   });
 
   it('confirmação: envia uma bolha saudando pelo primeiro nome e marca como enviado', async () => {
-    const { worker, send, redis } = makeWorker({ name: 'Ana Beatriz' });
-    const res = await worker.process(job({ type: 'CONFIRMATION' }));
-    expect(res.status).toBe('SENT');
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0]?.[0]?.text).toMatch(/^Olá, Ana!/);
+    const { worker, send, redis } = makeWorker();
+
+    const result = await worker.process(job({ type: 'CONFIRMATION' }));
+
+    expect(result).toEqual({ status: 'SENT' });
+    expect(send).toHaveBeenCalledOnce();
+    expect(send.mock.calls[0]?.[0].text).toMatch(/^Olá, Ana! 💚/);
     expect(redis.set).toHaveBeenCalled();
   });
 
   it('confirmação sem nome salvo: saúda genericamente', async () => {
     const { worker, send } = makeWorker({ name: null });
     await worker.process(job({ type: 'CONFIRMATION' }));
-    expect(send.mock.calls[0]?.[0]?.text).toMatch(/^Olá!/);
+    expect(send.mock.calls[0]?.[0].text).toMatch(/^Olá! 💚/);
   });
 
   it('variante de cuidado é enviada para PAR-Q de risco', async () => {
     const { worker, send } = makeWorker();
     await worker.process(job({ type: 'CONFIRMATION_CARE' }));
-    expect(send.mock.calls[0]?.[0]?.text).toMatch(/revisar/i);
+    expect(send.mock.calls[0]?.[0].text).toMatch(/CREF/);
   });
 
-  it('COACH_MESSAGE: envia o texto dinâmico em bolhas (US-3.5)', async () => {
+  it('COACH_MESSAGE: envia o texto em bolhas, com botões de feedback só na última', async () => {
     const { worker, send } = makeWorker();
-    const res = await worker.process(
-      job({ type: 'COACH_MESSAGE', text: 'Oi!\n---\nComo foi o treino?', dedupeId: 'c1' }),
+
+    await worker.process(
+      job({ type: 'COACH_MESSAGE', text: 'Primeira\n---\nSegunda', feedback: true }),
     );
-    expect(res.status).toBe('SENT');
+
     expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[0]?.[0].buttons).toBeUndefined();
+    expect(send.mock.calls[1]?.[0].buttons).toBeDefined();
   });
 
-  it('confirmação: a mensagem enviada entra no histórico de conversas (aba "Conversas")', async () => {
-    const inserted: NonNullable<Deps['inserted']> = [];
-    const { worker } = makeWorker({ name: 'Ana Beatriz', inserted });
-    await worker.process(job({ type: 'CONFIRMATION' }));
-    expect(inserted).toHaveLength(1);
-    expect(inserted[0]?.table).toBe(conversations);
-    expect(inserted[0]?.values).toMatchObject({ userId: USER_ID, direction: 'OUTBOUND' });
-    expect((inserted[0]?.values as { content: string }).content).toMatch(/^enc\(Olá, Ana!/);
-  });
-
-  it('avisa o painel (tempo real) de cada mensagem gravada no histórico, e só dessas', async () => {
+  it('a mensagem enviada entra no histórico de conversas e o painel é avisado', async () => {
     const inserted: NonNullable<Deps['inserted']> = [];
     const { worker, emitMessage } = makeWorker({ inserted });
-    await worker.process(
-      job({ type: 'CHECKIN_MESSAGE', text: 'Oi!\n---\nComo foi?', dedupeId: 'k2' }),
-    );
-    expect(emitMessage).toHaveBeenCalledTimes(2);
-    expect(emitMessage).toHaveBeenCalledWith(USER_ID, 'OUTBOUND');
 
-    emitMessage.mockClear();
-    await worker.process(job({ type: 'COACH_MESSAGE', text: 'Oi!', dedupeId: 'c3' }));
-    expect(emitMessage).not.toHaveBeenCalled();
-  });
-
-  it('não avisa o painel se a gravação do histórico falhou', async () => {
-    const { worker, emitMessage } = makeWorker({ insertFails: true });
     await worker.process(job({ type: 'CONFIRMATION' }));
-    expect(emitMessage).not.toHaveBeenCalled();
+
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]?.table).toBe(conversations);
+    expect(inserted[0]?.values).toMatchObject({
+      userId: USER_ID,
+      direction: 'OUTBOUND',
+      origin: 'SYSTEM',
+      sourceType: 'CONFIRMATION',
+    });
+    expect(emitMessage).toHaveBeenCalledWith(USER_ID, 'OUTBOUND');
   });
 
   it('várias bolhas: cada bolha enviada vira uma linha do histórico', async () => {
     const inserted: NonNullable<Deps['inserted']> = [];
     const { worker } = makeWorker({ inserted });
-    await worker.process(
-      job({ type: 'CHECKIN_MESSAGE', text: 'Oi!\n---\nComo foi o treino?', dedupeId: 'k1' }),
-    );
-    expect(inserted.map((row) => (row.values as { content: string }).content)).toEqual([
-      'enc(Oi!)',
-      'enc(Como foi o treino?)',
-    ]);
+
+    await worker.process(job({ type: 'CHECKIN_MESSAGE', text: 'A\n---\nB\n---\nC' }));
+
+    expect(inserted).toHaveLength(3);
   });
 
-  it('MANUAL_MESSAGE: envia o texto do profissional e não regrava (a API do painel já gravou)', async () => {
+  it('MANUAL_MESSAGE e COACH_MESSAGE não são regravados (quem os criou já gravou)', async () => {
     const inserted: NonNullable<Deps['inserted']> = [];
     const { worker, send } = makeWorker({ inserted });
-    const res = await worker.process(
-      job({ type: 'MANUAL_MESSAGE', text: 'Oi, Ana! Como foi o treino?', dedupeId: 'row-1' }),
-    );
-    expect(res.status).toBe('SENT');
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0]?.[0]?.text).toBe('Oi, Ana! Como foi o treino?');
+
+    await worker.process(job({ type: 'MANUAL_MESSAGE', text: 'Oi, aqui é o profissional.' }));
+    await worker.process(job({ type: 'COACH_MESSAGE', text: 'Resposta.', dedupeId: 'x' }));
+
+    expect(send).toHaveBeenCalledTimes(2);
     expect(inserted).toHaveLength(0);
   });
 
-  it('MANUAL_MESSAGE é descartada se o consentimento de saúde foi revogado depois de enfileirar', async () => {
-    const { worker, send } = makeWorker({ consentActive: false });
-    await expect(
-      worker.process(job({ type: 'MANUAL_MESSAGE', text: 'oi', dedupeId: 'row-2' })),
-    ).resolves.toEqual({ status: 'CONSENT_REVOKED' });
-    expect(send).not.toHaveBeenCalled();
-  });
+  it('falha ao gravar o histórico não derruba o envio nem o marcador de idempotência', async () => {
+    const { worker, send, redis, emitMessage } = makeWorker({ insertFails: true });
 
-  it('COACH_MESSAGE não é gravado de novo: o AiResponseWorker já persiste a resposta', async () => {
-    const inserted: NonNullable<Deps['inserted']> = [];
-    const { worker } = makeWorker({ inserted });
-    await worker.process(job({ type: 'COACH_MESSAGE', text: 'Oi!', dedupeId: 'c9' }));
-    expect(inserted).toHaveLength(0);
-  });
+    const result = await worker.process(job({ type: 'CONFIRMATION' }));
 
-  it('PHONE_VERIFICATION e TYPING não geram histórico', async () => {
-    const inserted: NonNullable<Deps['inserted']> = [];
-    const { worker } = makeWorker({ inserted });
-    await worker.process(
-      job({
-        userId: null,
-        type: 'PHONE_VERIFICATION',
-        phoneNumber: '+5541999999999',
-        code: '123456',
-      }),
-    );
-    await worker.process(job({ type: 'TYPING' }));
-    expect(inserted).toHaveLength(0);
-  });
-
-  it('falha ao gravar o histórico não derruba o envio nem impede o marcador de idempotência', async () => {
-    const { worker, send, redis } = makeWorker({ insertFails: true });
-    const res = await worker.process(job({ type: 'CONFIRMATION' }));
-    expect(res.status).toBe('SENT');
-    expect(send).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ status: 'SENT' });
+    expect(send).toHaveBeenCalledOnce();
     expect(redis.set).toHaveBeenCalled();
+    expect(emitMessage).not.toHaveBeenCalled();
   });
 
-  it('entrega do protocolo: o PDF e a legenda entram no histórico', async () => {
-    const inserted: NonNullable<Deps['inserted']> = [];
-    const { worker } = makeWorker({
-      inserted,
-      waitingMarkerExists: true,
-      name: 'Ana Beatriz',
-      proto: {
-        status: 'ACTIVE',
-        approvalStatus: 'AUTO_APPROVED',
-        signedAt: new Date(),
-        signatureHash: 'a'.repeat(64),
-        professionalId: '00000000-0000-4000-8000-000000000001',
-        pdfContent: Buffer.from('%PDF'),
-      },
-    });
-    await worker.process(job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 }));
-    expect(inserted).toHaveLength(1);
-    expect((inserted[0]?.values as { content: string }).content).toMatch(
-      /^enc\(\[Documento: protocolo-ana-beatriz-movivo\.pdf\]/,
-    );
-  });
+  it('TYPING: dispara o indicador de digitação, sem marcador nem texto', async () => {
+    const { worker, send, sendTyping, redis } = makeWorker();
 
-  it('TYPING: dispara o indicador de digitação, sem marcador nem texto (US-3.5)', async () => {
-    const { worker, send, sendTyping } = makeWorker();
-    const res = await worker.process(job({ type: 'TYPING' }));
-    expect(res.status).toBe('TYPING');
-    expect(sendTyping).toHaveBeenCalledTimes(1);
+    const result = await worker.process(job({ type: 'TYPING' }));
+
+    expect(result).toEqual({ status: 'TYPING' });
+    expect(sendTyping).toHaveBeenCalledWith('+5541999999999');
     expect(send).not.toHaveBeenCalled();
-  });
-
-  // Decisão do fundador (2026-09-12): entrega por texto+link (protocolo sem PDF) foi
-  // REMOVIDA — nunca mais degrada silenciosamente. Falha e usa o retry/DLQ genéricos.
-  it('protocolo aprovado/assinado sem PDF: falha (retry automático + DLQ), nunca degrada para texto+link', async () => {
-    const { worker, send, sendDocument } = makeWorker({ waitingMarkerExists: true });
-    await expect(
-      worker.process(job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 })),
-    ).rejects.toThrow(/sem PDF gerado/);
-    expect(send).not.toHaveBeenCalled();
-    expect(sendDocument).not.toHaveBeenCalled();
-  });
-
-  it('entrega com PDF, sem resumo de IA: a saudação vai só na legenda do documento, nenhuma bolha antes', async () => {
-    const { worker, send, sendDocument, redis } = makeWorker({
-      waitingMarkerExists: true,
-      name: 'Ana Beatriz Souza',
-      proto: {
-        id: 'p1',
-        content: structure(),
-        status: 'ACTIVE',
-        approvalStatus: 'HUMAN_APPROVED',
-        signedAt: new Date(),
-        signatureHash: 'a'.repeat(64),
-        professionalId: '00000000-0000-4000-8000-000000000001',
-        pdfContent: Buffer.from('%PDF-1.4'),
-      },
-    });
-    const res = await worker.process(
-      job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 }),
-    );
-    expect(res.status).toBe('SENT');
-    // Achado 2026-09-04 (reproduzido ao vivo, print real de WhatsApp): a saudação saía como
-    // bolha ANTES do documento E de novo como legenda dele — duplicada. Agora é uma mensagem
-    // só: a legenda do documento.
-    expect(send).not.toHaveBeenCalled();
-    expect(sendDocument).toHaveBeenCalledTimes(1);
-    expect(redis.set).toHaveBeenCalledTimes(1);
-    const [, url, caption, fileName] = sendDocument.mock.calls[0] ?? [];
-    expect(url).toBe('https://movivo.test/protocolo/protocol-access-token/pdf');
-    expect(fileName).toBe('protocolo-ana-beatriz-souza-movivo.pdf');
-    expect(caption).toMatch(/^Ana, seu treino está pronto\./);
-  });
-
-  // Achado 2026-09-08 (bug reproduzido ao vivo pelo fundador): a reentrega pós-substituição
-  // usava a MESMA saudação de "seu treino está pronto! Montamos tudo com base nos seus
-  // objetivos..." da 1ª entrega, como se fosse a primeira vez — sem nunca dizer que era uma
-  // ATUALIZAÇÃO por causa da troca de exercício que o aluno pediu.
-  it('entrega pós-substituição (`deliveryReason: SUBSTITUTION`): saudação nomeia a troca, não repete a de 1ª entrega', async () => {
-    const { worker, sendDocument } = makeWorker({
-      waitingMarkerExists: true,
-      name: 'Ana Beatriz Souza',
-      proto: {
-        id: 'p1',
-        content: structure(),
-        status: 'ACTIVE',
-        approvalStatus: 'HUMAN_APPROVED',
-        signedAt: new Date(),
-        signatureHash: 'a'.repeat(64),
-        professionalId: '00000000-0000-4000-8000-000000000001',
-        pdfContent: Buffer.from('%PDF-1.4'),
-      },
-    });
-    const res = await worker.process(
-      job({
-        type: 'PROTOCOL_DELIVERY',
-        protocolId: 'p1',
-        protocolVersion: 1,
-        deliveryReason: 'SUBSTITUTION',
-        substitutionFromExercise: 'Caminhada de Mala (Halter)',
-        substitutionToExercise: 'Esteira',
-      }),
-    );
-    expect(res.status).toBe('SENT');
-    const caption = sendDocument.mock.calls[0]?.[2] as string;
-    expect(caption).toMatch(/^Ana, a troca do seu exercício já foi feita!/);
-    expect(caption).toContain('"Caminhada de Mala (Halter)" virou "Esteira"');
-    expect(caption).not.toContain('seu treino está pronto');
-  });
-
-  it('entrega com PDF e resumo de IA (`data.text`): saudação + resumo viram UMA legenda só, nenhuma bolha antes', async () => {
-    const { worker, send, sendDocument } = makeWorker({
-      waitingMarkerExists: true,
-      name: 'Ana Beatriz Souza',
-      proto: {
-        id: 'p1',
-        content: structure(),
-        status: 'ACTIVE',
-        approvalStatus: 'HUMAN_APPROVED',
-        signedAt: new Date(),
-        signatureHash: 'a'.repeat(64),
-        professionalId: '00000000-0000-4000-8000-000000000001',
-        pdfContent: Buffer.from('%PDF-1.4'),
-      },
-    });
-    const res = await worker.process(
-      job({
-        type: 'PROTOCOL_DELIVERY',
-        protocolId: 'p1',
-        protocolVersion: 1,
-        text: 'Seu treino trabalha corpo inteiro 3x por semana, com foco em técnica.',
-      }),
-    );
-    expect(res.status).toBe('SENT');
-    // Achado 2026-09-04: o resumo da IA não sai mais como 3ª bolha à parte (chegava a se
-    // reapresentar como "Leonardo" de novo e a afirmar "o PDF já foi enviado" antes de sair)
-    // — entra junto na MESMA legenda do documento, separado por parágrafo.
-    expect(send).not.toHaveBeenCalled();
-    expect(sendDocument).toHaveBeenCalledTimes(1);
-    const caption = sendDocument.mock.calls[0]?.[2];
-    expect(caption).toMatch(/^Ana, seu treino está pronto\./);
-    expect(caption).toContain(
-      'Seu treino trabalha corpo inteiro 3x por semana, com foco em técnica.',
-    );
-    expect(caption).not.toContain('---');
-  });
-
-  it('achado 2026-09-04: aprovação antes dos 30min manda a apresentação ANTES da entrega, e marca PROTOCOL_WAITING como enviado', async () => {
-    const { worker, send, sendDocument, redis } = makeWorker({
-      // Sem `waitingMarkerExists`: simula o caso que motivou a mudança — o profissional
-      // assinou antes do job de 30min disparar, então a apresentação nunca saiu ainda.
-      name: 'Ana Beatriz Souza',
-      proto: {
-        id: 'p1',
-        content: structure(),
-        status: 'ACTIVE',
-        approvalStatus: 'HUMAN_APPROVED',
-        signedAt: new Date(),
-        signatureHash: 'a'.repeat(64),
-        professionalId: '00000000-0000-4000-8000-000000000001',
-        pdfContent: Buffer.from('%PDF-1.4'),
-      },
-    });
-    const res = await worker.process(
-      job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 }),
-    );
-    expect(res.status).toBe('SENT');
-    // Única bolha: apresentação da agente (`agentSelfIntro`, via `analyzingMessage`) — a
-    // saudação da entrega não sai mais como bolha própria, só como legenda do documento
-    // (achado 2026-09-04, ver testes acima). A ORDEM apresentação→entrega continua sendo
-    // o ponto desta mudança: a apresentação sai ANTES do documento.
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0]?.[0]?.text).toBe(DEFAULT_AGENT_PERSONA.agentSelfIntro);
-    expect(sendDocument).toHaveBeenCalledTimes(1);
-    expect(sendDocument.mock.calls[0]?.[2]).toMatch(/^Ana, seu treino está pronto\./);
-    // Marca o MESMO marker que um job `PROTOCOL_WAITING` real usaria — quando ele disparar
-    // depois (o delay do BullMQ não é cancelável), vira `ALREADY_SENT` sem duplicar.
-    const waitingKey = new RedisKeyBuilder('movivo').forUser(
-      USER_ID,
-      'wa-sent',
-      'PROTOCOL_WAITING',
-      'na',
-    );
-    expect(redis.set).toHaveBeenCalledWith(waitingKey, '1', 'EX', expect.any(Number));
-  });
-
-  it('achado 2026-09-04: se a apresentação já saiu (30min normais), a entrega não repete', async () => {
-    const { worker, send, sendDocument } = makeWorker({
-      waitingMarkerExists: true,
-      proto: {
-        id: 'p1',
-        content: structure(),
-        status: 'ACTIVE',
-        approvalStatus: 'AUTO_APPROVED',
-        signedAt: new Date(),
-        signatureHash: 'a'.repeat(64),
-        professionalId: '00000000-0000-4000-8000-000000000001',
-        pdfContent: Buffer.from('%PDF-1.4'),
-      },
-    });
-    await worker.process(job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 }));
-    // `waitingMarkerExists: true` já cobre a apresentação — a entrega manda só o documento,
-    // nenhuma bolha extra de apresentação antes.
-    expect(send).not.toHaveBeenCalled();
-    expect(sendDocument).toHaveBeenCalledTimes(1);
-  });
-
-  it('entrega com PDF auto-liberado: a legenda é a mesma saudação, independente de revisão humana', async () => {
-    const { worker, sendDocument } = makeWorker({
-      proto: {
-        id: 'p1',
-        content: structure(),
-        status: 'ACTIVE',
-        approvalStatus: 'AUTO_APPROVED',
-        signedAt: new Date(),
-        signatureHash: 'a'.repeat(64),
-        professionalId: '00000000-0000-4000-8000-000000000001',
-        pdfContent: Buffer.from('%PDF-1.4'),
-      },
-    });
-    await worker.process(job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 }));
-    const caption = sendDocument.mock.calls[0]?.[2];
-    expect(caption).toMatch(/^Ana, seu treino está pronto\./);
-  });
-
-  it('entrega com PDF, sem nome cadastrado: cai no nome de arquivo genérico', async () => {
-    const { worker, sendDocument } = makeWorker({
-      name: null,
-      proto: {
-        id: 'p1',
-        content: structure(),
-        status: 'ACTIVE',
-        approvalStatus: 'AUTO_APPROVED',
-        signedAt: new Date(),
-        signatureHash: 'a'.repeat(64),
-        professionalId: '00000000-0000-4000-8000-000000000001',
-        pdfContent: Buffer.from('%PDF-1.4'),
-      },
-    });
-    await worker.process(job({ type: 'PROTOCOL_DELIVERY', protocolId: 'p1', protocolVersion: 1 }));
-    const [, , , fileName] = sendDocument.mock.calls[0] ?? [];
-    expect(fileName).toBe('protocolo-movivo.pdf');
-  });
-
-  it('entrega bloqueada: protocolo não aprovado não envia nada', async () => {
-    const { worker, send } = makeWorker({
-      proto: { status: 'PENDING_SIGNATURE', approvalStatus: 'PENDING_REVIEW' },
-    });
-    const res = await worker.process(job({ type: 'PROTOCOL_DELIVERY', protocolVersion: 1 }));
-    expect(res.status).toBe('SKIPPED');
-    expect(send).not.toHaveBeenCalled();
+    expect(redis.set).not.toHaveBeenCalled();
   });
 
   it('idempotência: marcador presente → não reenvia', async () => {
     const { worker, send } = makeWorker({ markerExists: true });
-    const res = await worker.process(job({ type: 'PROTOCOL_DELIVERY', protocolVersion: 1 }));
-    expect(res.status).toBe('ALREADY_SENT');
+
+    const result = await worker.process(job({ type: 'CONFIRMATION' }));
+
+    expect(result).toEqual({ status: 'ALREADY_SENT' });
     expect(send).not.toHaveBeenCalled();
   });
 
   it('sem telefone → não envia', async () => {
     const { worker, send } = makeWorker({ phone: null });
-    const res = await worker.process(job({ type: 'PROTOCOL_WAITING' }));
-    expect(res.status).toBe('NO_PHONE');
+
+    const result = await worker.process(job({ type: 'CONFIRMATION' }));
+
+    expect(result).toEqual({ status: 'NO_PHONE' });
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('espera (30min do submit): sem protocolo ainda, é só a apresentação do agente (exceção deliberada)', async () => {
-    const { worker, send } = makeWorker({ proto: null });
-    const res = await worker.process(job({ type: 'PROTOCOL_WAITING' }));
-    expect(res.status).toBe('SENT');
-    expect(send).toHaveBeenCalledTimes(1);
-    const text = send.mock.calls[0]?.[0]?.text ?? '';
-    expect(text).toContain(DEFAULT_AGENT_PERSONA.agentName);
-    expect(text).not.toMatch(/analisando as informações|intelig[êe]ncia artificial/i);
-  });
+  it('job sem titular (fora da verificação e do alerta) é descartado', async () => {
+    const { worker, send } = makeWorker();
 
-  it('espera (30min do submit): MANDATORY (PAR-Q bloqueado) e OPTIONAL mandam o MESMO texto', async () => {
-    // Achado 2026-09-04 (a pedido do fundador, reproduzido ao vivo): a variante MANDATORY
-    // chegou a sair pro fundador em teste quando o esperado era a apresentação normal do
-    // agente — unificado, `reviewUrgency` não decide mais o texto desta mensagem.
-    const mandatory = makeWorker({
-      proto: {
-        status: 'PENDING_SIGNATURE',
-        approvalStatus: 'PENDING_REVIEW',
-        reviewUrgency: 'MANDATORY',
-      },
+    expect(await worker.process(job({ userId: null, type: 'COACH_MESSAGE', text: 'x' }))).toEqual({
+      status: 'INVALID',
     });
-    const res = await mandatory.worker.process(job({ type: 'PROTOCOL_WAITING' }));
-    expect(res.status).toBe('SENT');
-    const mandatoryText = mandatory.send.mock.calls[0]?.[0]?.text ?? '';
-    expect(mandatoryText).toContain(DEFAULT_AGENT_PERSONA.agentName);
-    expect(mandatoryText).not.toMatch(/analisando as informações|intelig[êe]ncia artificial/i);
-
-    const optional = makeWorker({
-      proto: {
-        status: 'PENDING_SIGNATURE',
-        approvalStatus: 'PENDING_REVIEW',
-        reviewUrgency: 'OPTIONAL',
-      },
-    });
-    await optional.worker.process(job({ type: 'PROTOCOL_WAITING' }));
-    const optionalText = optional.send.mock.calls[0]?.[0]?.text ?? '';
-    expect(optionalText).toBe(mandatoryText);
-  });
-
-  it('espera (30min do submit): entrega já saiu nesse meio tempo → não manda nada', async () => {
-    // Default de `makeTx` já é um protocolo ACTIVE/AUTO_APPROVED — reconfirmado na hora
-    // do envio (não só no enqueue), então a apresentação "já estou analisando" não sai
-    // depois que a entrega real já resolveu.
-    const { worker, send } = makeWorker({});
-    const res = await worker.process(job({ type: 'PROTOCOL_WAITING' }));
-    expect(res.status).toBe('SKIPPED');
     expect(send).not.toHaveBeenCalled();
-  });
-});
-
-describe('WhatsappOutboundWorker: link do dia com pergunta sobre treino sem registro', () => {
-  const link = (extra: Partial<WhatsappOutboundJob> = {}) =>
-    job({
-      type: 'WORKOUT_DAILY_LINK',
-      text: 'Bom dia, Ana! Seu treino de hoje é Pernas: [link]. E ontem, tudo bem?',
-      fallbackText: 'Bom dia, Ana! Seu treino de hoje é Pernas: [link]',
-      dedupeId: 'workout-link-2026-10-13',
-      followupId: 'f1',
-      ...extra,
-    });
-  const sentTexts = (send: ReturnType<typeof makeWorker>['send']) =>
-    send.mock.calls.map(([message]) => message.text);
-
-  it('envia a mensagem completa e só então abre a pendência', async () => {
-    const { worker, send, followups } = makeWorker();
-    const res = await worker.process(link());
-    expect(res.status).toBe('SENT');
-    expect(sentTexts(send)).toEqual([
-      'Bom dia, Ana! Seu treino de hoje é Pernas: [link]. E ontem, tudo bem?',
-    ]);
-    expect(followups.markDelivered).toHaveBeenCalledWith(USER_ID, 'f1');
-  });
-
-  it('o link e a pergunta saem como DOIS balões, e a pendência só abre depois do último', async () => {
-    const { worker, send, followups } = makeWorker();
-    await worker.process(
-      link({
-        text: 'Bom dia, Ana! Seu treino de hoje é Pernas: [link]\n---\nE ontem, tudo bem? O treino de Costas ficou sem registro.',
-      }),
-    );
-    expect(sentTexts(send)).toEqual([
-      'Bom dia, Ana! Seu treino de hoje é Pernas: [link]',
-      'E ontem, tudo bem? O treino de Costas ficou sem registro.',
-    ]);
-    const lastSend = send.mock.invocationCallOrder.at(-1) ?? 0;
-    expect(followups.markDelivered.mock.invocationCallOrder[0] ?? 0).toBeGreaterThan(lastSend);
-  });
-
-  it('reserva cancelada antes do envio (aluno já voltou): o LINK sai sem a pergunta e sem abrir pendência', async () => {
-    const { worker, send, followups } = makeWorker({ followupSendable: false });
-    const res = await worker.process(link());
-    expect(res.status).toBe('SENT');
-    expect(sentTexts(send)).toEqual(['Bom dia, Ana! Seu treino de hoje é Pernas: [link]']);
-    expect(followups.markDelivered).not.toHaveBeenCalled();
-  });
-
-  it('reserva cancelada e sem texto de reserva: descarta o envio', async () => {
-    const { worker, send } = makeWorker({ followupSendable: false });
-    const res = await worker.process(link({ fallbackText: undefined }));
-    expect(res.status).toBe('SKIPPED');
-    expect(send).not.toHaveBeenCalled();
-  });
-
-  it('falha ao abrir a pendência não derruba nem repete o envio', async () => {
-    const { worker, send, redis } = makeWorker({ followupOpenFails: true });
-    const res = await worker.process(link());
-    expect(res.status).toBe('SENT');
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(redis.set).toHaveBeenCalled();
-  });
-
-  it('retry depois de um envio já concluído não reenvia nem reabre a pendência', async () => {
-    const { worker, send, followups } = makeWorker({ markerExists: true });
-    const res = await worker.process(link());
-    expect(res.status).toBe('ALREADY_SENT');
-    expect(send).not.toHaveBeenCalled();
-    expect(followups.markDelivered).not.toHaveBeenCalled();
-  });
-
-  it('consentimento revogado ou sem telefone: a pendência vira "não enviada"', async () => {
-    const revoked = makeWorker({ consentActive: false });
-    expect((await revoked.worker.process(link())).status).toBe('CONSENT_REVOKED');
-    expect(revoked.followups.markNotSent).toHaveBeenCalledWith(USER_ID, 'f1');
-
-    const noPhone = makeWorker({ phone: null });
-    expect((await noPhone.worker.process(link())).status).toBe('NO_PHONE');
-    expect(noPhone.followups.markNotSent).toHaveBeenCalledWith(USER_ID, 'f1');
-  });
-
-  it('o histórico grava o texto realmente enviado, com origem de sistema e tipo do job', async () => {
-    const inserted: { table: unknown; values: unknown }[] = [];
-    const { worker } = makeWorker({ followupSendable: false, inserted });
-    await worker.process(link());
-    const row = inserted.find((item) => item.table === conversations)?.values as Record<
-      string,
-      unknown
-    >;
-    expect(row).toMatchObject({ origin: 'SYSTEM', sourceType: 'WORKOUT_DAILY_LINK' });
-  });
-
-  it('mensagem sem followupId não toca em pendência alguma', async () => {
-    const { worker, followups } = makeWorker();
-    await worker.process(job({ type: 'CHECKIN_MESSAGE', text: 'oi', dedupeId: 'x' }));
-    expect(followups.isSendable).not.toHaveBeenCalled();
-    expect(followups.markDelivered).not.toHaveBeenCalled();
   });
 });

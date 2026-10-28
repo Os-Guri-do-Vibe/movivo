@@ -49,10 +49,9 @@ let professionalId = '';
  * mais os chunks prontos por parâmetro: exige extração + staged chunks + embeddings já
  * gravados, cada hash conferido contra o conteúdo real (nunca um placeholder arbitrário).
  */
-const DOCUMENT_CONTENT =
-  'Descanso entre séries conforme protocolo: 60 a 90 segundos para hipertrofia.';
+const DOCUMENT_CONTENT = `Descanso entre séries conforme protocolo: 60 a 90 segundos para hipertrofia. (${RUN})`;
 const DOCUMENT_SHA256 = createHash('sha256').update(DOCUMENT_CONTENT, 'utf8').digest('hex');
-const CHUNK_TEXT = 'descanso entre series conforme protocolo';
+const CHUNK_TEXT = `descanso entre series conforme protocolo ${RUN}`;
 const CHUNK_SHA256 = createHash('sha256').update(CHUNK_TEXT, 'utf8').digest('hex');
 const ZERO_EMBEDDING = `[${new Array(1536).fill(0).join(',')}]`;
 
@@ -72,7 +71,7 @@ beforeAll(async () => {
         id, title, topic, original_filename, mime_type, size_bytes, sha256, uploaded_by, logical_key
       ) VALUES (
         ${documentId}::uuid, 'Fonte RAG integrada', 'descanso', 'fonte.md', 'text/markdown',
-        80, ${DOCUMENT_SHA256}, ${uploaderId}::uuid, 'fonte-rag-integrada'
+        80, ${DOCUMENT_SHA256}, ${uploaderId}::uuid, ${`fonte-rag-${RUN}`}
       )
     `);
     await tx.execute(sql`

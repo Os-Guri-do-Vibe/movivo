@@ -41,7 +41,6 @@ import { AppModule } from '../src/app.module';
 import { AppConfigService } from '../src/core/config';
 import { loadEnv } from '../src/core/config/load-env';
 import { TenantDatabase } from '../src/core/database';
-import { SEMANTIC_MEMORY } from '../src/modules/ai-coach/context/semantic-memory.port';
 import { ExerciseCatalogAdminService } from '../src/modules/admin/exercise-catalog-admin.service';
 import { PasswordService } from '../src/modules/auth/password.service';
 import { ExerciseCatalogProvider } from '../src/modules/catalog/exercises/exercise-catalog-provider.service';
@@ -186,11 +185,7 @@ beforeAll(async () => {
               'fixture de integração dos favoritos')`;
   }
 
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-    // RAG sem rede: a evidência não é o objeto deste teste (e o embedding local não tem saldo).
-    .overrideProvider(SEMANTIC_MEMORY)
-    .useValue({ retrieve: async () => [] })
-    .compile();
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   app = moduleRef.createNestApplication({ logger: false });
   app.use(cookieParser());
   prefix = app.get(AppConfigService).globalPrefix;

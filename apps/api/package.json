@@ -33,7 +33,6 @@
     "@nestjs/swagger": "^12.0.3",
     "@nestjs/terminus": "12.1.0",
     "@nestjs/throttler": "^6.7.1",
-    "@resvg/resvg-js": "2.6.2",
     "argon2": "^0.45.1",
     "bullmq": "6.4.0",
     "class-transformer": "0.5.1",
@@ -59,9 +58,6 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.11",
-    "@electric-sql/pglite-pgvector": "0.0.12",
-    "@electric-sql/pglite-socket": "0.2.14",
     "@nestjs/cli": "12.0.10",
     "@nestjs/schematics": "12.0.10",
     "@nestjs/testing": "12.2.0",
