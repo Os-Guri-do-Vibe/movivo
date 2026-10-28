@@ -108,12 +108,7 @@ export class StudentStateReader {
       case 'availability':
         return this.constraintsOf(tx, userId, ['AVAILABILITY', 'AVAILABILITY_OVERRIDE'], today);
       case 'restrictions':
-        return this.constraintsOf(
-          tx,
-          userId,
-          ['MOVEMENT_RESTRICTION', 'EQUIPMENT', 'DIETARY_RESTRICTION', 'FOOD_ALLERGY'],
-          today,
-        );
+        return this.constraintsOf(tx, userId, ['EQUIPMENT', 'DIETARY_RESTRICTION'], today);
       case 'preferences':
         return this.preferences(tx, userId);
       case 'training':

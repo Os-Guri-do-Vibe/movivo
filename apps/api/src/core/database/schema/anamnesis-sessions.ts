@@ -5,9 +5,19 @@
  * lesões, medicação em uso e as respostas do PAR-Q. Tudo ali é **dado pessoal
  * sensível** na acepção do Art. 11 da LGPD.
  */
+import { sql } from 'drizzle-orm';
 import { index, integer, jsonb, pgTable, smallint, varchar } from 'drizzle-orm/pg-core';
 
-import { bytea, eventTimestamp, primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
+import { onboardingFlowSchema } from '@movivo/shared';
+
+import {
+  bytea,
+  checkOneOf,
+  eventTimestamp,
+  primaryKeyColumn,
+  timestampColumns,
+  userIdColumn,
+} from './_shared';
 import { anamnesisStatusEnum, parqStateEnum, subscriptionPlanEnum } from './enums';
 import { users } from './users';
 
@@ -128,6 +138,26 @@ export const anamnesisSessions = pgTable(
 
     submittedAt: eventTimestamp('submitted_at'),
 
+    // --- Anamnese em 8 etapas -------------------------------------------------
+    /** `INITIAL` (cadastro novo) ou `COMPLEMENTARY` (aluno existente completa o que falta). */
+    flow: varchar('flow', { length: 16 }).notNull().default('INITIAL'),
+    /** Parte COMUM de cada etapa, por chave de bloco (`registration`, `goals`, …). */
+    blocks: jsonb('blocks')
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    /**
+     * -- LGPD Art. 11 — DADO SENSÍVEL. Parte sensível de todas as etapas (dor, condições,
+     * medicamentos, PAR-Q, alergias e todo texto livre), cifrada com `pgp_sym_encrypt`
+     * (`HealthCipherService`). Descartada quando a sessão expira sem envio.
+     */
+    sensitive: bytea('sensitive'),
+    /** Etapas já salvas (o aluno pode pular a opcional e voltar a qualquer uma). */
+    completedSteps: jsonb('completed_steps')
+      .$type<number[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+
     ...timestampColumns,
   },
   (table) => [
@@ -140,6 +170,7 @@ export const anamnesisSessions = pgTable(
     // Rate limit de envio de código POR NÚMERO (US-6.5): sem este índice, o teto por
     // número viraria seq scan na tabela mais quente do onboarding.
     index('idx_anamnesis_sessions_phone_code').on(table.phoneE164, table.phoneCodeSentAt),
+    checkOneOf('ck_anamnesis_sessions_flow', table.flow, onboardingFlowSchema.options),
   ],
 );
 

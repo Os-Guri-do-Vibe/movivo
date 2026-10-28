@@ -37,8 +37,3 @@ export const healthBlockSchema = z.object({
 });
 
 export type HealthBlock = z.infer<typeof healthBlockSchema>;
-
-/** O bloco está completo para o submit? (seção 4 respondida + PAR-Q + declarações). */
-export function isHealthBlockComplete(block: HealthBlock): boolean {
-  return block.pain !== undefined && block.parq !== undefined && block.declarations !== undefined;
-}

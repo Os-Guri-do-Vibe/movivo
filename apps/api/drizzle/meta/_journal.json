@@ -575,6 +575,20 @@
       "when": 1793136570751,
       "tag": "0081_estudio_de_metodologia",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1793137483079,
+      "tag": "0082_anamnese_em_oito_etapas",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1793152720941,
+      "tag": "0083_recibo_de_evento_reivindicado",
+      "breakpoints": true
     }
   ]
 }

@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
 
+import { OnboardingProjection } from './onboarding-projection';
 import { StudentStateReader } from './student-state.reader';
 
-/** Estado do Aluno: leitura em fatias para os agentes (escritas vêm dos módulos de domínio). */
+/** Estado do Aluno: leitura em fatias para os agentes e projeção da anamnese. */
 @Module({
-  providers: [StudentStateReader],
-  exports: [StudentStateReader],
+  providers: [StudentStateReader, OnboardingProjection],
+  exports: [StudentStateReader, OnboardingProjection],
 })
 export class StudentStateModule {}

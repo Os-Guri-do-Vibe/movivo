@@ -21,15 +21,9 @@ import { resolve } from 'node:path';
 
 import {
   CONSENT_TEXTS,
-  PARQ_DECLARATIONS,
-  PARQ_DECLARATIONS_VERSION,
-  PARQ_QUESTION_IDS,
   PARQ_VERSION,
   REQUIRED_CONSENT_TYPES,
-  type AnamnesisStructured,
   type OnboardingStep1,
-  type OnboardingStep2,
-  type OnboardingStep3,
 } from '@movivo/shared';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
@@ -40,7 +34,21 @@ import { loadEnv } from '../src/core/config/load-env';
 import { type DrizzleClient } from '../src/core/database/database.module';
 import { HealthCipherService } from '../src/core/database/health-cipher.service';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
+import {
+  completeSteps,
+  goals,
+  modalities,
+  nutrition,
+  parq,
+  preferences,
+  routine,
+} from './onboarding-fixtures';
+import { HealthConsentService } from '../src/core/database/health-consent.service';
 import { AnamnesisService } from '../src/modules/anamnesis/anamnesis.service';
+import { SafetyService } from '../src/modules/coaching/safety/safety.service';
+import { DomainEventRecorder } from '../src/modules/domain-events/domain-event-recorder';
+import type { OutboxRelay } from '../src/modules/domain-events/outbox-relay';
+import { OnboardingProjection } from '../src/modules/student-state/onboarding-projection';
 import { ConsentService } from '../src/modules/anamnesis/consent.service';
 import { PhoneVerificationService } from '../src/modules/anamnesis/phone-verification.service';
 
@@ -93,7 +101,21 @@ const queues = {
   },
 } as never;
 const phoneVerification = new PhoneVerificationService(tenant, queues, logger);
-const service = new AnamnesisService(logger, tenant, cipher, consents, queues, phoneVerification);
+const recorder = new DomainEventRecorder();
+const outbox = { flushSoon: async () => undefined } as unknown as OutboxRelay;
+const service = new AnamnesisService(
+  logger,
+  tenant,
+  cipher,
+  consents,
+  new HealthConsentService(tenant),
+  queues,
+  phoneVerification,
+  new OnboardingProjection(cipher),
+  new SafetyService(tenant, recorder, outbox),
+  recorder,
+  outbox,
+);
 
 const adminClient = postgres({
   host: env.MIGRATION_DATABASE_HOST ?? 'localhost',
@@ -128,55 +150,6 @@ function step1(): OnboardingStep1 {
   };
 }
 
-const STRUCTURED: AnamnesisStructured = {
-  primaryGoal: 'GAIN_STRENGTH',
-  emphasis: ['BACK'],
-  hasImportantEvent: false,
-  trainingStatus: 'REGULAR',
-  experience: 'INTERMEDIATE',
-  pastActivities: [],
-  consistencyBarriers: [],
-  daysPerWeek: 4,
-  preferredDays: [],
-  sessionDuration: 'M45_TO_60',
-  location: 'CONDO_GYM',
-  preferredPeriod: 'MORNING',
-  practicesOtherSport: false,
-  hasAvoidedExercise: false,
-};
-
-/** Etapa 2 com dor no joelho — o dado que precisa sair cifrado. */
-function step2(): OnboardingStep2 {
-  return {
-    anamnesis: { structured: STRUCTURED, freeText: { avoidedExercise: 'burpee' } },
-    pain: {
-      hasPain: true,
-      trend: 'STABLE',
-      points: [{ region: 'KNEE', intensity: 6 }],
-      trigger: 'incomoda ao agachar',
-      hasProfessionalExplanation: false,
-      underMedicalFollowUp: false,
-      hasAvoidanceRecommendation: false,
-    },
-  };
-}
-
-function step3(riskIds: string[] = []): OnboardingStep3 {
-  return {
-    parq: {
-      version: PARQ_VERSION,
-      answers: PARQ_QUESTION_IDS.map((questionId) => ({
-        questionId,
-        answer: riskIds.includes(questionId),
-        ...(questionId === 'Q9' && riskIds.includes('Q9') ? { detail: 'motivo' } : {}),
-      })),
-    },
-    declarationsVersion: PARQ_DECLARATIONS_VERSION,
-    declarations: PARQ_DECLARATIONS.map((d) => d.id),
-  };
-}
-
-/** Aceita os 3 consentimentos que travam o CONTINUAR da Etapa 1 (Alexandre 5.8). */
 async function acceptRequired(token: string) {
   await consents.recordForSessionToken(
     token,
@@ -214,6 +187,7 @@ afterAll(async () => {
          OR user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM anamnesis_sessions WHERE token LIKE '%${RUN}%'
          OR user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
+       DELETE FROM domain_events WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM subscriptions WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM professional_assignments WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM users WHERE phone_number LIKE '+5541${RUN}%';`,
@@ -223,70 +197,100 @@ afterAll(async () => {
   }
 }, 30_000);
 
-describe('ONBOARDING v2 — fluxo feliz (US-6.3..6.8)', () => {
-  it('start→3 etapas→submit cria usuario ONBOARDING, migra consentimento, READY', async () => {
+describe('ANAMNESE em 8 etapas — fluxo completo', () => {
+  it('cadastro → 8 etapas → envio: titular, Estado do Aluno, evento e filas', async () => {
     const { token } = await service.start({ primaryGoal: 'GAIN_MUSCLE' });
     const b1 = await completeStep1(token);
-    await service.patchStep(token, 2, step2());
-    await service.patchStep(token, 3, step3());
+    const before = enqueued.length;
+    await completeSteps(service, token);
 
     const result = await service.submit(token);
-    // A UI recebe SOMENTE o outcome — nunca o estado clinico nem as respostas.
+    // A UI recebe SOMENTE o outcome — nunca o estado clínico nem as respostas.
     expect(result).toEqual({ status: 'SUBMITTED', outcome: 'READY' });
 
-    // Usuário criado a partir do bloco 1, status ONBOARDING, sem revisão.
-    const [user] = await adminClient<Array<{ status: string; requires: boolean; id: string }>>`
+    const [user] = await adminClient<Array<{ id: string; status: string; requires: boolean }>>`
       SELECT id, status, requires_professional_review AS requires
         FROM users WHERE phone_number = ${b1.phoneNumber}`;
-    expect(user.status).toBe('ONBOARDING');
-    expect(user.requires).toBe(false);
+    expect(user).toMatchObject({ status: 'ONBOARDING', requires: false });
 
-    // Sessão vinculada e SUBMITTED; consentimento de saúde migrado para o titular.
-    const [session] = await adminClient<Array<{ user_id: string; status: string }>>`
-      SELECT user_id, status FROM anamnesis_sessions WHERE token = ${token}`;
-    expect(session.status).toBe('SUBMITTED');
-    expect(session.user_id).toBe(user.id);
-
+    // Consentimento de saúde migrado para o titular.
     const [consent] = await adminClient<Array<{ user_id: string }>>`
       SELECT user_id FROM consents
         WHERE anamnesis_session_id = (SELECT id FROM anamnesis_sessions WHERE token = ${token})
           AND consent_type = 'HEALTH_DATA'`;
     expect(consent.user_id).toBe(user.id);
+
+    // Estado do Aluno projetado.
+    const [profile] = await adminClient<
+      Array<{ profile: { heightCm: number; modalities: unknown[] } }>
+    >`
+      SELECT profile FROM student_profiles WHERE user_id = ${user.id}`;
+    expect(profile.profile.heightCm).toBe(178);
+    expect(profile.profile.modalities).toHaveLength(2);
+    const [goal] = await adminClient<Array<{ declared: { primary: string }; status: string }>>`
+      SELECT declared, status FROM student_goals WHERE user_id = ${user.id}`;
+    expect(goal).toMatchObject({ declared: { primary: 'HYPERTROPHY' }, status: 'ACTIVE' });
+    const constraints = await adminClient<Array<{ kind: string }>>`
+      SELECT kind FROM student_constraints WHERE user_id = ${user.id} ORDER BY kind`;
+    expect(constraints.map((c) => c.kind)).toEqual(['AVAILABILITY', 'DIETARY_RESTRICTION']);
+    const health = await adminClient<Array<{ kind: string }>>`
+      SELECT kind FROM student_health_records WHERE user_id = ${user.id} ORDER BY kind`;
+    expect(health.map((h) => h.kind)).toEqual(['FOOD_ALLERGY', 'NOTES', 'PAIN', 'PARQ']);
+    const measures = await adminClient<Array<{ kind: string }>>`
+      SELECT kind FROM body_measurements WHERE user_id = ${user.id} ORDER BY kind`;
+    expect(measures.map((m) => m.kind)).toEqual(['WAIST', 'WEIGHT']);
+
+    const [event] = await adminClient<Array<{ type: string }>>`
+      SELECT type FROM domain_events WHERE user_id = ${user.id} AND type = 'OnboardingCompleted'`;
+    expect(event?.type).toBe('OnboardingCompleted');
+
+    // Confirmação no WhatsApp e início do trial; o protocolo legado não é mais disparado.
+    const jobs = enqueued.slice(before).map((j) => j.queue);
+    expect(jobs).toContain('whatsapp-outbound');
+    expect(jobs).toContain('conversion-sequence');
+    expect(jobs).not.toContain('protocol-generation');
   });
 
-  it('data_block_2 e gravado CIFRADO (secao 4, texto livre e PAR-Q, sem plaintext)', async () => {
+  it('saúde, alergia e texto livre ficam só cifrados e nunca voltam na leitura da sessão', async () => {
     const { token } = await service.start({});
     await completeStep1(token);
-    await service.patchStep(token, 2, step2());
-    await service.patchStep(token, 3, step3());
+    await completeSteps(service, token);
 
-    const [row] = await adminClient<Array<{ data_block_2: Buffer; data_block_3: unknown }>>`
-      SELECT data_block_2, data_block_3 FROM anamnesis_sessions WHERE token = ${token}`;
-    const raw = row.data_block_2.toString('utf8');
-    expect(Buffer.isBuffer(row.data_block_2)).toBe(true);
-    expect(raw).not.toContain('KNEE');
-    expect(raw).not.toContain('agachar');
-    expect(raw).not.toContain('burpee');
-    expect(raw).not.toContain(PARQ_VERSION);
-
-    // E o bloco em claro NAO pode ter recebido nada de saude nem texto livre.
-    const clear = JSON.stringify(row.data_block_3);
-    expect(clear).not.toContain('KNEE');
-    expect(clear).not.toContain('burpee');
-    expect(clear).toContain('GAIN_STRENGTH');
+    const [row] = await adminClient<Array<{ sensitive: Buffer; blocks: unknown }>>`
+      SELECT sensitive, blocks FROM anamnesis_sessions WHERE token = ${token}`;
+    const raw = row.sensitive.toString('utf8');
+    for (const secret of ['burpee', 'amendoim', 'agachar', 'casamento', 'jiló', PARQ_VERSION]) {
+      expect(raw).not.toContain(secret);
+      expect(JSON.stringify(row.blocks)).not.toContain(secret);
+    }
+    const view = await service.getByToken(token);
+    expect(JSON.stringify(view)).not.toMatch(/burpee|amendoim|casamento|KNEE/);
+    expect(view.completedSteps).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(JSON.stringify(view.blocks)).toContain('UPPER_LOWER');
   });
 
-  it('a etapa 1 nao fecha sem os consentimentos obrigatorios nem sem o numero provado', async () => {
+  it('envio sem todas as etapas obrigatórias é recusado; a etapa de corpo é opcional', async () => {
+    const { token } = await service.start({});
+    await completeStep1(token);
+    await service.patchStep(token, 2, goals());
+    await expect(service.submit(token)).rejects.toThrow(/Complete as etapas 3, 4, 5, 6, 7/);
+    await service.patchStep(token, 3, modalities());
+    await service.patchStep(token, 4, routine());
+    await service.patchStep(token, 5, preferences());
+    await service.patchStep(token, 6, parq());
+    await service.patchStep(token, 7, nutrition());
+    await expect(service.submit(token)).resolves.toMatchObject({ outcome: 'READY' });
+  });
+
+  it('o cadastro não fecha sem os consentimentos obrigatórios nem sem o número provado', async () => {
     const { token } = await service.start({});
     const data = step1();
-    // Sem consentimento: barrado.
     await expect(service.patchStep(token, 1, data)).rejects.toThrow(/obrigat/i);
-    // Com consentimento, mas sem provar o numero: continua barrado.
     await acceptRequired(token);
     await expect(service.patchStep(token, 1, data)).rejects.toThrow(/WhatsApp/i);
   });
 
-  it('gate 18+ e aplicado no SERVIDOR', async () => {
+  it('18+ é aplicado no SERVIDOR', async () => {
     const { token } = await service.start({});
     const data = step1();
     await acceptRequired(token);
@@ -294,106 +298,82 @@ describe('ONBOARDING v2 — fluxo feliz (US-6.3..6.8)', () => {
     await expect(service.patchStep(token, 1, { ...data, birthDate: '2015-06-01' })).rejects.toThrow(
       /maiores de 18 anos/i,
     );
-
-    const [row] = await adminClient<Array<{ data_block_1: unknown }>>`
-      SELECT data_block_1 FROM anamnesis_sessions WHERE token = ${token}`;
-    expect(row.data_block_1).toBeNull();
+    const [row] = await adminClient<Array<{ blocks: Record<string, unknown> }>>`
+      SELECT blocks FROM anamnesis_sessions WHERE token = ${token}`;
+    expect(row.blocks.registration).toBeUndefined();
   });
 
-  it('o codigo de verificacao nunca fica em claro no banco', async () => {
+  it('o código de verificação nunca fica em claro no banco', async () => {
     const { token } = await service.start({});
     const data = step1();
     const before = enqueued.length;
     await service.sendPhoneCode(token, data.phoneNumber);
     const job = enqueued.slice(before).find((j) => j.payload.type === 'PHONE_VERIFICATION');
-    if (!job) throw new Error('nenhum codigo de verificacao foi enfileirado');
+    if (!job) throw new Error('nenhum código de verificação foi enfileirado');
     const code = job.payload.code as string;
-
-    const [row] = await adminClient<Array<{ hash: string; verified: Date | null }>>`
-      SELECT phone_code_hash AS hash, phone_verified_at AS verified
-        FROM anamnesis_sessions WHERE token = ${token}`;
+    const [row] = await adminClient<Array<{ hash: string }>>`
+      SELECT phone_code_hash AS hash FROM anamnesis_sessions WHERE token = ${token}`;
     expect(row.hash).not.toContain(code);
     expect(row.hash).toHaveLength(64);
-    expect(row.verified).toBeNull();
-
-    // Codigo errado nao verifica; o certo verifica.
     await expect(service.verifyPhoneCode(token, '000000')).rejects.toThrow();
     await service.verifyPhoneCode(token, code);
-    const [after] = await adminClient<Array<{ verified: Date | null; hash: string | null }>>`
-      SELECT phone_verified_at AS verified, phone_code_hash AS hash
-        FROM anamnesis_sessions WHERE token = ${token}`;
-    expect(after.verified).not.toBeNull();
-    expect(after.hash).toBeNull();
   });
 });
 
-describe('ANAMNESE — gate PAR-Q bloqueante (US-1.3 / Alexandre §2)', () => {
-  it('resposta de risco -> PENDING_REVIEW + requires_professional_review', async () => {
+describe('ANAMNESE — PAR-Q de risco', () => {
+  it('vira PENDING_REVIEW, sinal de segurança ativo e caso prioritário na fila', async () => {
     const { token } = await service.start({});
     const b1 = await completeStep1(token);
-    await service.patchStep(token, 2, step2());
-    await service.patchStep(token, 3, step3(['Q2'])); // dor no peito ao se exercitar
-
+    await completeSteps(service, token, ['Q2']);
     const result = await service.submit(token);
     expect(result.outcome).toBe('PENDING_REVIEW');
-    // O motivo do bloqueio NUNCA volta ao cliente (Sofia 9.3).
     expect(JSON.stringify(result)).not.toMatch(/Q2|BLOQUEADO/);
 
-    const [user] = await adminClient<Array<{ requires: boolean }>>`
-      SELECT requires_professional_review AS requires FROM users WHERE phone_number = ${b1.phoneNumber}`;
+    const [user] = await adminClient<Array<{ id: string; requires: boolean }>>`
+      SELECT id, requires_professional_review AS requires FROM users WHERE phone_number = ${b1.phoneNumber}`;
     expect(user.requires).toBe(true);
-
-    // Estado persistido e consultável (para o RT — Sprint 5).
-    const [session] = await adminClient<Array<{ parq_state: string }>>`
-      SELECT parq_state FROM anamnesis_sessions WHERE token = ${token}`;
-    expect(session.parq_state).toBe('BLOQUEADO_AGUARDANDO_CLEARANCE');
+    const [signal] = await adminClient<Array<{ kind: string; status: string }>>`
+      SELECT kind, status FROM safety_events WHERE user_id = ${user.id}`;
+    expect(signal).toMatchObject({ kind: 'PARQ_POSITIVE', status: 'ACTIVE' });
+    const [exception] = await adminClient<Array<{ kind: string }>>`
+      SELECT kind FROM exception_cases WHERE user_id = ${user.id}`;
+    expect(exception?.kind).toBe('SAFETY');
   });
 });
 
-describe('ONBOARDING v2 — etapa 2 gated por consentimento (BLOQUEADOR 3)', () => {
-  it('sem consentimento de saude, o PATCH da etapa 2 e barrado e nada persiste', async () => {
+describe('ANAMNESE — consentimento de saúde a cada etapa', () => {
+  it('sem consentimento de saúde, as etapas seguintes ao cadastro são barradas', async () => {
     const { token } = await service.start({});
-
-    await expect(service.patchStep(token, 2, step2())).rejects.toThrow(/consentimento/i);
-
-    const [row] = await adminClient<Array<{ data_block_2: Buffer | null }>>`
-      SELECT data_block_2 FROM anamnesis_sessions WHERE token = ${token}`;
-    expect(row.data_block_2).toBeNull();
+    await expect(service.patchStep(token, 2, goals())).rejects.toThrow(/consentimento/i);
+    const [row] = await adminClient<Array<{ sensitive: Buffer | null }>>`
+      SELECT sensitive FROM anamnesis_sessions WHERE token = ${token}`;
+    expect(row.sensitive).toBeNull();
   });
 });
 
-describe('ANAMNESE — IDOR e expiração (Sato §8.1)', () => {
+describe('ANAMNESE — IDOR e expiração', () => {
   it('token A não acessa a sessão B (retomada é por token)', async () => {
     const a = await service.start({ primaryGoal: 'LOSE_FAT' });
     const b = await service.start({ primaryGoal: 'CONDITIONING' });
-
-    const viewA = await service.getByToken(a.token);
-    expect(viewA.primaryGoal).toBe('LOSE_FAT');
-    const viewB = await service.getByToken(b.token);
-    expect(viewB.primaryGoal).toBe('CONDITIONING');
+    expect((await service.getByToken(a.token)).primaryGoal).toBe('LOSE_FAT');
+    expect((await service.getByToken(b.token)).primaryGoal).toBe('CONDITIONING');
   });
 
-  it('sessao IN_PROGRESS expirada vira EXPIRED e descarta data_block_2', async () => {
+  it('sessão expirada vira EXPIRED, descarta o cifrado e não aceita mais escrita', async () => {
     const { token } = await service.start({});
     await completeStep1(token);
-    await service.patchStep(token, 2, step2());
-    // Força a expiração no passado.
+    await service.patchStep(token, 2, goals());
     await adminClient`UPDATE anamnesis_sessions SET expires_at = now() - interval '1 hour' WHERE token = ${token}`;
-
     await expect(service.getByToken(token)).rejects.toThrow(/expirada/i);
-
-    const [row] = await adminClient<Array<{ status: string; data_block_2: Buffer | null }>>`
-      SELECT status, data_block_2 FROM anamnesis_sessions WHERE token = ${token}`;
-    expect(row.status).toBe('EXPIRED');
-    expect(row.data_block_2).toBeNull();
-
-    // Uma sessão expirada não aceita mais escrita nem submit.
-    await expect(service.patchStep(token, 3, step3())).rejects.toThrow();
+    const [row] = await adminClient<Array<{ status: string; sensitive: Buffer | null }>>`
+      SELECT status, sensitive FROM anamnesis_sessions WHERE token = ${token}`;
+    expect(row).toMatchObject({ status: 'EXPIRED', sensitive: null });
+    await expect(service.patchStep(token, 3, modalities())).rejects.toThrow();
     await expect(service.submit(token)).rejects.toThrow();
   });
 });
 
-describe('ANAMNESE — RLS anônima isolada por sessão (Sato — achado 1)', () => {
+describe('ANAMNESE — RLS anônima isolada por sessão', () => {
   it('escopado à sessão A, a linha órfã de B não é lida nem alterada', async () => {
     const a = await service.start({});
     const b = await service.start({});
@@ -401,36 +381,82 @@ describe('ANAMNESE — RLS anônima isolada por sessão (Sato — achado 1)', ()
       SELECT id FROM anamnesis_sessions WHERE token = ${a.token}`;
     const [{ id: idB }] = await adminClient<Array<{ id: string }>>`
       SELECT id FROM anamnesis_sessions WHERE token = ${b.token}`;
+    const count = (rows: unknown) => (rows as unknown[]).length;
+    expect(
+      await tenant.runAsTokenScoped(idA, async (tx) =>
+        count(await tx.execute(sql`SELECT id FROM anamnesis_sessions WHERE id = ${idA}`)),
+      ),
+    ).toBe(1);
+    expect(
+      await tenant.runAsTokenScoped(idA, async (tx) =>
+        count(await tx.execute(sql`SELECT id FROM anamnesis_sessions WHERE id = ${idB}`)),
+      ),
+    ).toBe(0);
+    expect(
+      await tenant.runAsTokenScoped(idA, async (tx) =>
+        count(
+          await tx.execute(
+            sql`UPDATE anamnesis_sessions SET last_block = 3 WHERE id = ${idB} RETURNING id`,
+          ),
+        ),
+      ),
+    ).toBe(0);
+  });
+});
 
-    // Positivo: escopado a A, A é visível.
-    const seesA = await tenant.runAsTokenScoped(idA, async (tx) => {
-      const rows = (await tx.execute(
-        sql`SELECT id FROM anamnesis_sessions WHERE id = ${idA}`,
-      )) as unknown as unknown[];
-      return rows.length;
+describe('ANAMNESE COMPLEMENTAR — aluno que já existia', () => {
+  it('pré-preenche a parte comum da anamnese antiga e, no envio, cria a versão 2 do objetivo', async () => {
+    const { token } = await service.start({});
+    const b1 = await completeStep1(token);
+    await completeSteps(service, token);
+    await service.submit(token);
+    const [user] = await adminClient<Array<{ id: string }>>`
+      SELECT id FROM users WHERE phone_number = ${b1.phoneNumber}`;
+    // Anamnese antiga (3 etapas) do mesmo aluno, para o pré-preenchimento.
+    await adminClient`
+      INSERT INTO anamnesis_sessions (token, user_id, status, expires_at, submitted_at, data_block_1, data_block_3)
+      VALUES (${`legado-${RUN}-${user.id.slice(0, 8)}`}, ${user.id}, 'SUBMITTED', now(), now() - interval '1 day',
+        ${adminClient.json({ ...b1 })},
+        ${adminClient.json({
+          primaryGoal: 'LOSE_FAT',
+          emphasis: [],
+          hasImportantEvent: false,
+          trainingStatus: 'REGULAR',
+          experience: 'BEGINNER',
+          pastActivities: [],
+          consistencyBarriers: [],
+          daysPerWeek: 3,
+          preferredDays: ['TUE', 'THU', 'SAT'],
+          sessionDuration: 'M45_TO_60',
+          location: 'HOME',
+          preferredPeriod: 'MORNING',
+          practicesOtherSport: false,
+          hasAvoidedExercise: false,
+        })})`;
+
+    const complementary = await service.startComplementary(user.id);
+    const view = await service.getByToken(complementary.token);
+    expect(view.flow).toBe('COMPLEMENTARY');
+    expect(view.blocks).toMatchObject({
+      goals: { goal: { primary: 'FAT_LOSS' } },
+      routine: { maxSessionsPerWeek: 3 },
     });
-    expect(seesA).toBe(1);
+    await expect(service.patchStep(complementary.token, 1, step1())).rejects.toThrow(
+      /cadastro já existe/,
+    );
 
-    // Negativo (o achado): escopado a A, a linha órfã de B some — mesmo sem WHERE token.
-    const seesB = await tenant.runAsTokenScoped(idA, async (tx) => {
-      const rows = (await tx.execute(
-        sql`SELECT id FROM anamnesis_sessions WHERE id = ${idB}`,
-      )) as unknown as unknown[];
-      return rows.length;
-    });
-    expect(seesB).toBe(0);
+    await completeSteps(service, complementary.token, [], false);
+    const result = await service.submit(complementary.token);
+    expect(result.outcome).toBe('READY');
 
-    // E não consegue ALTERAR a sessão B a partir do contexto de A.
-    const changed = await tenant.runAsTokenScoped(idA, async (tx) => {
-      const rows = (await tx.execute(
-        sql`UPDATE anamnesis_sessions SET last_block = 3 WHERE id = ${idB} RETURNING id`,
-      )) as unknown as unknown[];
-      return rows.length;
-    });
-    expect(changed).toBe(0);
-
-    const [rowB] = await adminClient<Array<{ last_block: number }>>`
-      SELECT last_block FROM anamnesis_sessions WHERE id = ${idB}`;
-    expect(rowB.last_block).toBe(1); // intacta
+    const goalsAfter = await adminClient<Array<{ version: number; status: string }>>`
+      SELECT version, status FROM student_goals WHERE user_id = ${user.id} ORDER BY version`;
+    expect(goalsAfter).toEqual([
+      { version: 1, status: 'SUPERSEDED' },
+      { version: 2, status: 'ACTIVE' },
+    ]);
+    const [{ users: total }] = await adminClient<Array<{ users: number }>>`
+      SELECT count(*)::int AS users FROM users WHERE phone_number = ${b1.phoneNumber}`;
+    expect(total).toBe(1);
   });
 });

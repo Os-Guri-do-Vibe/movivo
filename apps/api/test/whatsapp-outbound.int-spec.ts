@@ -19,15 +19,7 @@ import { resolve } from 'node:path';
 
 import { type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import {
-  CONSENT_TEXTS,
-  PARQ_DECLARATIONS,
-  PARQ_DECLARATIONS_VERSION,
-  PARQ_QUESTION_IDS,
-  PARQ_VERSION,
-  REQUIRED_CONSENT_TYPES,
-  type ProtocolStructure,
-} from '@movivo/shared';
+import { CONSENT_TEXTS, REQUIRED_CONSENT_TYPES, type ProtocolStructure } from '@movivo/shared';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -45,6 +37,7 @@ import {
   type WhatsappTransport,
 } from '../src/modules/whatsapp/whatsapp-transport';
 import { PROFESSIONAL_ID, seedHealthEligibility } from './health-fixtures';
+import { completeSteps } from './onboarding-fixtures';
 
 const { env } = loadEnv();
 const apiRoot = process.cwd();
@@ -117,38 +110,6 @@ function structure(): ProtocolStructure {
   };
 }
 
-function parq(riskIds: string[] = []) {
-  return {
-    version: PARQ_VERSION,
-    answers: PARQ_QUESTION_IDS.map((questionId) => ({
-      questionId,
-      answer: riskIds.includes(questionId),
-      ...(questionId === 'Q9' && riskIds.includes('Q9') ? { detail: 'motivo' } : {}),
-    })),
-  };
-}
-
-/** Secoes 1/2/3/5 da anamnese v2 (jsonb em claro). */
-function structured(over: Record<string, unknown> = {}) {
-  return {
-    primaryGoal: 'GAIN_MUSCLE',
-    emphasis: [],
-    hasImportantEvent: false,
-    trainingStatus: 'REGULAR',
-    experience: 'BEGINNER',
-    pastActivities: [],
-    consistencyBarriers: [],
-    daysPerWeek: 3,
-    preferredDays: [],
-    sessionDuration: 'M45_TO_60',
-    location: 'HOME',
-    preferredPeriod: 'MORNING',
-    practicesOtherSport: false,
-    hasAvoidedExercise: false,
-    ...over,
-  };
-}
-
 async function submitAnamnesis(riskIds: string[] = []) {
   const { token } = await anamnesis.start({ primaryGoal: 'GAIN_MUSCLE' });
   const phoneNumber = phone();
@@ -175,15 +136,7 @@ async function submitAnamnesis(riskIds: string[] = []) {
     phoneNumber,
     email: `${phoneNumber.replace(/\D/g, '')}@example.invalid`,
   });
-  await anamnesis.patchStep(token, 2, {
-    anamnesis: { structured: structured(), freeText: {} },
-    pain: { hasPain: false, points: [] },
-  });
-  await anamnesis.patchStep(token, 3, {
-    parq: parq(riskIds),
-    declarationsVersion: PARQ_DECLARATIONS_VERSION,
-    declarations: PARQ_DECLARATIONS.map((d) => d.id),
-  });
+  await completeSteps(anamnesis, token, riskIds, false);
   await anamnesis.submit(token);
   const [row] = await adminClient<Array<{ user_id: string; phone: string }>>`
     SELECT s.user_id, u.phone_number AS phone

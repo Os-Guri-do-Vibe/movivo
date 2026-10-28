@@ -23,9 +23,14 @@
 import { Module } from '@nestjs/common';
 import { ThrottlerModule } from '@nestjs/throttler';
 
+import { CoachingModule } from '../coaching/coaching.module';
+import { DomainEventsModule } from '../domain-events/domain-events.module';
 import { JobsModule } from '../jobs/jobs.module';
+import { StudentStateModule } from '../student-state/student-state.module';
 import { AnamnesisController } from './anamnesis.controller';
 import { AnamnesisService } from './anamnesis.service';
+import { ShortLinkModule } from '../short-link/short-link.module';
+import { ComplementaryInviteService } from './complementary-invite.service';
 import { ConsentController } from './consent.controller';
 import { ConsentService } from './consent.service';
 import { PhoneVerificationService } from './phone-verification.service';
@@ -42,11 +47,21 @@ import { PhoneVerificationService } from './phone-verification.service';
 @Module({
   imports: [
     ThrottlerModule.forRoot({ throttlers: [{ ttl: 60_000, limit: 60 }] }),
-    // Fila `protocol-generation` (US-2.4): o submit é o gatilho do pipeline de protocolo.
+    // Filas de confirmação no WhatsApp e de início do trial.
     JobsModule,
+    // O envio projeta no Estado do Aluno, grava sinal de segurança e o evento de conclusão.
+    StudentStateModule,
+    CoachingModule,
+    DomainEventsModule,
+    ShortLinkModule,
   ],
   controllers: [ConsentController, AnamnesisController],
-  providers: [ConsentService, AnamnesisService, PhoneVerificationService],
-  exports: [ConsentService, AnamnesisService],
+  providers: [
+    ConsentService,
+    AnamnesisService,
+    PhoneVerificationService,
+    ComplementaryInviteService,
+  ],
+  exports: [ConsentService, AnamnesisService, ComplementaryInviteService],
 })
 export class AnamnesisModule {}

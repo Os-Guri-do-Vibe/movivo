@@ -273,7 +273,7 @@ describe('autorização por recurso na API', () => {
           anamnesisTokens.map((token, index) => ({
             token,
             expiresAt: new Date(Date.now() + 60000),
-            dataBlock1: { name: index ? 'B privado' : 'A privado' },
+            blocks: { registration: { name: index ? 'B privado' : 'A privado' } },
           })),
         )
         .returning({ id: anamnesisSessions.id }),
@@ -282,7 +282,7 @@ describe('autorização por recurso na API', () => {
       .get(`${prefix}/anamnesis/session/${anamnesisTokens[0]}`)
       .query({ sessionId: ids[1].id, userId: fixtures[1].userId })
       .expect(200);
-    expect(own.body.step1.name).toBe('A privado');
+    expect(own.body.blocks.registration.name).toBe('A privado');
     await http().get(`${prefix}/anamnesis/session/${ids[1].id}`).expect(404);
     await http().get(`${prefix}/checkin/session/${anamnesisTokens[0]}`).expect(404);
     await http().get(`${prefix}/protocol-renewal/session/${anamnesisTokens[0]}`).expect(404);

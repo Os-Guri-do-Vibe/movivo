@@ -25,12 +25,10 @@ import { resolve } from 'node:path';
 import { type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import {
-  CONSENT_TEXTS,
   PARQ_DECLARATIONS,
   PARQ_DECLARATIONS_VERSION,
   PARQ_QUESTION_IDS,
   PARQ_VERSION,
-  REQUIRED_CONSENT_TYPES,
   type ProtocolStructure,
 } from '@movivo/shared';
 import { eq } from 'drizzle-orm';
@@ -42,8 +40,9 @@ import { loadEnv } from '../src/core/config/load-env';
 import { HealthCipherService } from '../src/core/database/health-cipher.service';
 import { anamnesisSessions, protocols, users } from '../src/core/database/schema';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
-import { AnamnesisService } from '../src/modules/anamnesis/anamnesis.service';
+import { evaluateParq } from '../src/modules/anamnesis/parq';
 import { ConsentService } from '../src/modules/anamnesis/consent.service';
+import { PROTOCOL_WAITING_DELAY_MS } from '../src/modules/whatsapp/message-templates';
 import { QUEUE } from '../src/modules/jobs/jobs.config';
 import { QueueManager } from '../src/modules/jobs/queue-manager.service';
 import type {
@@ -59,7 +58,6 @@ import { qualityAssessment } from '../src/modules/protocol/contextual-quality.fi
 const { env } = loadEnv();
 const apiRoot = process.cwd();
 const RUN = Date.now().toString().slice(-8);
-const ORIGIN = { ip: '203.0.113.40', userAgent: 'vitest/protocol-pipeline' };
 
 /** Protocolo canônico do fake: usa `agachamento_goblet` (contraindicado p/ KNEE — útil no bloqueio). */
 function fakeStructure(goal: ProtocolStructure['goal']): ProtocolStructure {
@@ -113,8 +111,6 @@ const fakeGenerator: Pick<
 };
 
 let app: INestApplication;
-let anamnesis: AnamnesisService;
-let consents: ConsentService;
 let queues: QueueManager;
 let db: TenantDatabase;
 let cipher: HealthCipherService;
@@ -197,56 +193,77 @@ function structured(over: Record<string, unknown> = {}) {
   };
 }
 
-/** Roda a anamnese completa pelo serviço real e submete (o submit enfileira o job). */
+/**
+ * Reproduz o envio da anamnese LEGADA (3 etapas), que era o gatilho do pipeline de protocolo:
+ * titular + sessão no formato antigo (blocos 1/2/3, PAR-Q avaliado) e os mesmos jobs que o envio
+ * enfileirava (geração, confirmação, "estou analisando", trial). O envio novo (8 etapas) não
+ * dispara mais este pipeline; este fixture sai junto com o módulo `protocol` no M6.
+ */
 async function submitAnamnesis(painRegions: string[], riskIds: string[] = []) {
-  const { token } = await anamnesis.start({ primaryGoal: 'GAIN_MUSCLE' });
-  const phoneNumber = phone();
-  await consents.recordForSessionToken(
-    token,
-    REQUIRED_CONSENT_TYPES.map((type) => ({
-      type,
-      version: CONSENT_TEXTS[type].version,
-      accepted: true,
-    })),
-    ORIGIN,
+  const gate = evaluateParq({ parq: healthBlock([], riskIds).parq });
+  const submittedAt = new Date();
+  const p = phone();
+  const userId = await db.runAsSystem(async (tx) => {
+    const [u] = await tx
+      .insert(users)
+      .values({
+        phoneNumber: p,
+        name: 'Fulano Pipeline',
+        email: `p${RUN}${seq}@example.com`,
+        biologicalSex: 'MALE',
+        status: 'ONBOARDING',
+        requiresProfessionalReview: gate.requiresProfessionalReview,
+      })
+      .returning({ id: users.id });
+    if (!u) throw new Error('fixture: usuário não criado');
+    return u.id;
+  });
+  const sessionId = await db.runAsUser(userId, 'USER', async (tx) => {
+    const [row] = await tx
+      .insert(anamnesisSessions)
+      .values({
+        userId,
+        token: randomBytes(32).toString('hex'),
+        status: 'SUBMITTED',
+        parqState: gate.parqState,
+        submittedAt,
+        expiresAt: new Date(Date.now() + 72 * 3600 * 1000),
+        dataBlock1: {
+          name: 'Fulano Pipeline',
+          birthDate: '1996-04-02',
+          biologicalSex: 'MALE',
+          heightCm: 178,
+          weightKg: 80,
+          phoneNumber: p,
+        },
+        dataBlock2: await cipher.encryptHealth(JSON.stringify(healthBlock(painRegions, riskIds))),
+        dataBlock3: structured(),
+      })
+      .returning({ id: anamnesisSessions.id });
+    if (!row) throw new Error('fixture: sessão não criada');
+    return row.id;
+  });
+  await seedHealthEligibility(adminClient, userId);
+
+  await queues.enqueue(QUEUE.protocolGeneration, 'generate-protocol', {
+    userId,
+    anamnesisSessionId: sessionId,
+    submittedAt: submittedAt.toISOString(),
+    correlationId: sessionId,
+  });
+  await queues.enqueue(
+    QUEUE.whatsappOutbound,
+    'confirmation',
+    { userId, type: gate.requiresProfessionalReview ? 'CONFIRMATION_CARE' : 'CONFIRMATION' },
+    { jobId: `confirmation_${userId}` },
   );
-  // Este teste e do PIPELINE DE PROTOCOLO, nao do OTP: a posse do numero e carimbada
-  // direto (o fluxo do codigo tem cobertura propria em anamnesis.int-spec.ts).
-  await adminClient`
-    UPDATE anamnesis_sessions SET phone_e164 = ${phoneNumber}, phone_verified_at = now()
-      WHERE token = ${token}`;
-  await anamnesis.patchStep(token, 1, {
-    name: 'Fulano Pipeline',
-    birthDate: '1996-04-02',
-    biologicalSex: 'MALE',
-    heightCm: 178,
-    weightKg: 80,
-    phoneNumber,
-    email: `p${RUN}${seq}@example.com`,
-  });
-  await anamnesis.patchStep(token, 2, {
-    anamnesis: { structured: structured(), freeText: {} },
-    pain:
-      painRegions.length > 0
-        ? {
-            hasPain: true,
-            trend: 'STABLE',
-            points: painRegions.map((region) => ({ region, intensity: 6 })),
-            hasProfessionalExplanation: false,
-            underMedicalFollowUp: false,
-            hasAvoidanceRecommendation: false,
-          }
-        : { hasPain: false, points: [] },
-  });
-  await anamnesis.patchStep(token, 3, {
-    parq: healthBlock([], riskIds).parq,
-    declarationsVersion: PARQ_DECLARATIONS_VERSION,
-    declarations: PARQ_DECLARATIONS.map((d) => d.id),
-  });
-  await anamnesis.submit(token);
-  const [row] = await adminClient<Array<{ user_id: string; id: string }>>`
-    SELECT user_id, id FROM anamnesis_sessions WHERE token = ${token}`;
-  return { userId: row.user_id, sessionId: row.id };
+  await queues.enqueue(
+    QUEUE.whatsappOutbound,
+    'protocol-waiting',
+    { userId, type: 'PROTOCOL_WAITING' },
+    { jobId: `protocol-waiting_${userId}`, delay: PROTOCOL_WAITING_DELAY_MS },
+  );
+  return { userId, sessionId };
 }
 
 /** Cria usuário + sessão SUBMITTED direto no banco (sem auto-enqueue) — para DLQ/idempotência. */
@@ -326,8 +343,6 @@ beforeAll(async () => {
   app.enableShutdownHooks();
   await app.init();
 
-  anamnesis = app.get(AnamnesisService);
-  consents = app.get(ConsentService);
   queues = app.get(QueueManager);
   db = app.get(TenantDatabase);
   cipher = app.get(HealthCipherService);
