@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { and, eq, gt, isNull } from 'drizzle-orm';
 
 import { AppConfigService } from '../../core/config';
-import { users, workoutAccessTokens } from '../../core/database/schema';
+import { users, trainingAccessTokens } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 
 /** Exportado para quem encurta o link (`ShortLinkService`) casar o TTL do alias com o token. */
@@ -31,14 +31,12 @@ export class TrainingAccessService {
    */
   async createMagicLink(
     userId: string,
-    workoutSessionId?: string,
     options: { date?: string; path?: string; next?: string } = {},
   ): Promise<string> {
     const token = opaqueToken();
     await this.db.runAsSystem((tx) =>
-      tx.insert(workoutAccessTokens).values({
+      tx.insert(trainingAccessTokens).values({
         userId,
-        workoutSessionId,
         kind: 'MAGIC',
         tokenHash: tokenHash(token),
         expiresAt: new Date(Date.now() + MAGIC_TTL_MS),
@@ -57,17 +55,17 @@ export class TrainingAccessService {
   async revokePendingMagicLinks(userId: string): Promise<number> {
     const revoked = await this.db.runAsSystem((tx) =>
       tx
-        .update(workoutAccessTokens)
+        .update(trainingAccessTokens)
         .set({ revokedAt: new Date() })
         .where(
           and(
-            eq(workoutAccessTokens.userId, userId),
-            eq(workoutAccessTokens.kind, 'MAGIC'),
-            isNull(workoutAccessTokens.consumedAt),
-            isNull(workoutAccessTokens.revokedAt),
+            eq(trainingAccessTokens.userId, userId),
+            eq(trainingAccessTokens.kind, 'MAGIC'),
+            isNull(trainingAccessTokens.consumedAt),
+            isNull(trainingAccessTokens.revokedAt),
           ),
         )
-        .returning({ id: workoutAccessTokens.id }),
+        .returning({ id: trainingAccessTokens.id }),
     );
     return revoked.length;
   }
@@ -78,20 +76,20 @@ export class TrainingAccessService {
     const sessionToken = opaqueToken();
     const consumed = await this.db.runAsSystem(async (tx) => {
       const [magic] = await tx
-        .update(workoutAccessTokens)
+        .update(trainingAccessTokens)
         .set({ consumedAt: new Date() })
         .where(
           and(
-            eq(workoutAccessTokens.tokenHash, hash),
-            eq(workoutAccessTokens.kind, 'MAGIC'),
-            gt(workoutAccessTokens.expiresAt, new Date()),
-            isNull(workoutAccessTokens.consumedAt),
-            isNull(workoutAccessTokens.revokedAt),
+            eq(trainingAccessTokens.tokenHash, hash),
+            eq(trainingAccessTokens.kind, 'MAGIC'),
+            gt(trainingAccessTokens.expiresAt, new Date()),
+            isNull(trainingAccessTokens.consumedAt),
+            isNull(trainingAccessTokens.revokedAt),
           ),
         )
-        .returning({ userId: workoutAccessTokens.userId });
+        .returning({ userId: trainingAccessTokens.userId });
       if (!magic) return false;
-      await tx.insert(workoutAccessTokens).values({
+      await tx.insert(trainingAccessTokens).values({
         userId: magic.userId,
         kind: 'SESSION',
         tokenHash: tokenHash(sessionToken),
@@ -115,15 +113,15 @@ export class TrainingAccessService {
     const [row] = await this.db.runAsSystem((tx) =>
       tx
         .select({ name: users.name })
-        .from(workoutAccessTokens)
-        .innerJoin(users, eq(users.id, workoutAccessTokens.userId))
+        .from(trainingAccessTokens)
+        .innerJoin(users, eq(users.id, trainingAccessTokens.userId))
         .where(
           and(
-            eq(workoutAccessTokens.tokenHash, hash),
-            eq(workoutAccessTokens.kind, 'MAGIC'),
-            gt(workoutAccessTokens.expiresAt, new Date()),
-            isNull(workoutAccessTokens.consumedAt),
-            isNull(workoutAccessTokens.revokedAt),
+            eq(trainingAccessTokens.tokenHash, hash),
+            eq(trainingAccessTokens.kind, 'MAGIC'),
+            gt(trainingAccessTokens.expiresAt, new Date()),
+            isNull(trainingAccessTokens.consumedAt),
+            isNull(trainingAccessTokens.revokedAt),
           ),
         )
         .limit(1),
@@ -134,7 +132,6 @@ export class TrainingAccessService {
   /** Dono do magic link mesmo já consumido ou expirado (só revogado não conta); serve ao reenvio. */
   async findMagicOwner(rawToken: string): Promise<{
     userId: string;
-    workoutSessionId: string | null;
     name: string | null;
     timezone: string | null;
   } | null> {
@@ -142,18 +139,17 @@ export class TrainingAccessService {
     const [row] = await this.db.runAsSystem((tx) =>
       tx
         .select({
-          userId: workoutAccessTokens.userId,
-          workoutSessionId: workoutAccessTokens.workoutSessionId,
+          userId: trainingAccessTokens.userId,
           name: users.name,
           timezone: users.timezone,
         })
-        .from(workoutAccessTokens)
-        .innerJoin(users, eq(users.id, workoutAccessTokens.userId))
+        .from(trainingAccessTokens)
+        .innerJoin(users, eq(users.id, trainingAccessTokens.userId))
         .where(
           and(
-            eq(workoutAccessTokens.tokenHash, tokenHash(rawToken)),
-            eq(workoutAccessTokens.kind, 'MAGIC'),
-            isNull(workoutAccessTokens.revokedAt),
+            eq(trainingAccessTokens.tokenHash, tokenHash(rawToken)),
+            eq(trainingAccessTokens.kind, 'MAGIC'),
+            isNull(trainingAccessTokens.revokedAt),
           ),
         )
         .limit(1),
@@ -166,14 +162,14 @@ export class TrainingAccessService {
     if (!token) throw new UnauthorizedException();
     const [row] = await this.db.runAsSystem((tx) =>
       tx
-        .select({ id: workoutAccessTokens.id, userId: workoutAccessTokens.userId })
-        .from(workoutAccessTokens)
+        .select({ id: trainingAccessTokens.id, userId: trainingAccessTokens.userId })
+        .from(trainingAccessTokens)
         .where(
           and(
-            eq(workoutAccessTokens.tokenHash, tokenHash(token)),
-            eq(workoutAccessTokens.kind, 'SESSION'),
-            gt(workoutAccessTokens.expiresAt, new Date()),
-            isNull(workoutAccessTokens.revokedAt),
+            eq(trainingAccessTokens.tokenHash, tokenHash(token)),
+            eq(trainingAccessTokens.kind, 'SESSION'),
+            gt(trainingAccessTokens.expiresAt, new Date()),
+            isNull(trainingAccessTokens.revokedAt),
           ),
         )
         .limit(1),
@@ -181,9 +177,9 @@ export class TrainingAccessService {
     if (!row) throw new UnauthorizedException();
     await this.db.runAsSystem((tx) =>
       tx
-        .update(workoutAccessTokens)
+        .update(trainingAccessTokens)
         .set({ lastUsedAt: new Date() })
-        .where(eq(workoutAccessTokens.id, row.id)),
+        .where(eq(trainingAccessTokens.id, row.id)),
     );
     return row.userId;
   }

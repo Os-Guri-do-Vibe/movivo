@@ -18,7 +18,6 @@ import { boolean, index, integer, jsonb, pgTable, text, uuid, varchar } from 'dr
 
 import { primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
 import { messageDirectionEnum, messageTypeEnum } from './enums';
-import { protocols } from './protocols';
 import { users } from './users';
 
 export type ConversationOrigin = 'STUDENT' | 'COACH' | 'SYSTEM' | 'PROFESSIONAL';
@@ -33,9 +32,6 @@ export const conversations = pgTable(
     userId: userIdColumn()
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
-
-    /** Protocolo vigente no momento da mensagem. Nulo antes do primeiro protocolo. */
-    protocolId: uuid('protocol_id').references(() => protocols.id, { onDelete: 'set null' }),
 
     direction: messageDirectionEnum('direction').notNull(),
     messageType: messageTypeEnum('message_type').notNull().default('TEXT'),
@@ -134,7 +130,6 @@ export const conversations = pgTable(
     // Query mais frequente do produto (janela de contexto do AI Coach) e futura
     // chave de particionamento. `user_id` líder por causa da RLS (Sato §4.5).
     index('idx_conversations_user_created_at').on(table.userId, table.createdAt),
-    index('idx_conversations_protocol').on(table.protocolId),
     // Painel de operações/SLA: janelas globais `created_at >= :since` (volume, latência do
     // WhatsApp, qualidade da IA) varriam a tabela inteira — a maior do produto — porque o
     // índice acima tem `user_id` líder e não serve a consulta sem titular.

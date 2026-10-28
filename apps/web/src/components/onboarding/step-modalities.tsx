@@ -9,7 +9,7 @@ import {
 } from '@movivo/shared';
 
 import { ChoiceGroup, TextInput, YesNo } from './fields';
-import { WEEKDAY_ITEMS } from './legacy-anamnesis-items';
+import { WEEKDAY_ITEMS } from './weekday-items';
 import {
   modalitiesComplete,
   newExternalSport,

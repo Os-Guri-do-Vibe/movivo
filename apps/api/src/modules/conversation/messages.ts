@@ -30,8 +30,6 @@ export const GREETING_MESSAGE =
 
 export const FALLBACK_MESSAGE = 'Recebi sua mensagem e já te respondo.';
 
-export const PAUSED_NOTE = '';
-
 const WEEKDAY_NAMES: Record<string, string> = {
   MON: 'segunda',
   TUE: 'terça',
@@ -116,8 +114,6 @@ export const NO_SESSION_TODAY_MESSAGE =
 export function linkMessage(link: string): string {
   return `Aqui está o seu link: ${link}`;
 }
-
-export const WORKOUT_REPORT_MESSAGE_PREFIX = 'Que bom que você contou! ';
 
 export function workoutReportMessage(link: string): string {
   return `Que bom que você contou! Para o treino contar de verdade no seu acompanhamento, registre aqui (leva um minuto): ${link}`;

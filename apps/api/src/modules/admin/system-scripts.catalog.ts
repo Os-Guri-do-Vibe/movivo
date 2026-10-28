@@ -183,13 +183,13 @@ export const TERMINAL_SCRIPTS: readonly TerminalScript[] = [
     notRunnableReason: ARGUMENT_REQUIRED,
   },
   {
-    id: 'generate-workout-magic-link',
+    id: 'generate-training-magic-link',
     kind: 'TERMINAL',
     name: 'Gerar link mágico de treino',
     description:
       'Gera o link de acesso ao treino de um aluno sem esperar o envio diário (teste manual).',
-    file: 'apps/api/src/scripts/generate-workout-magic-link.ts',
-    command: 'pnpm exec tsx src/scripts/generate-workout-magic-link.ts <telefone>',
+    file: 'apps/api/src/scripts/generate-training-magic-link.ts',
+    command: 'pnpm exec tsx src/scripts/generate-training-magic-link.ts <telefone>',
     notRunnableReason: ARGUMENT_REQUIRED,
   },
   {

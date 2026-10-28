@@ -47,38 +47,12 @@ export default defineConfig({
         // CLI de manutenção com PostgreSQL/Vault reais: CAS e auditoria têm testes
         // unitários; o fluxo completo é verificado por dry-run, apply e restore.
         'src/scripts/rotate-health-cipher.ts',
-        // Mesma categoria do item 4 acima: script CLI de uso único (`--dry-run` via
-        // `process.argv`, `process.exitCode` no topo, conexão de banco/fila própria,
-        // fora do processo da API) — não roda em produção, só uma vez manualmente
-        // após o deploy da Sprint 11. Mockar `postgres`/`Queue`/`drizzle` só para
-        // exercitar os `if` de um script de missão única não prova nada que a leitura
-        // do código já não prove.
-        'src/scripts/reenqueue-blocked-parq.ts',
-        // Mesma categoria: scripts descartáveis de operação/diagnóstico manual (US-8.1/8.2),
-        // nunca chamados pela API em execução — ver cabeçalho de cada um.
-        'src/scripts/diagnose-protocol-fallback.ts',
-        'src/scripts/generate-workout-magic-link.ts',
-        'src/scripts/render-sample-pdf.ts',
-        'src/scripts/resend-protocol-delivery.ts',
-        'src/scripts/check-protocol-queue-state.ts',
-        'src/scripts/enqueue-protocol-auto-release.ts',
-        'src/scripts/reprocess-protocol-fallback.ts',
+        // Script descartável de operação manual, nunca chamado pela API em execução.
+        'src/scripts/generate-training-magic-link.ts',
         'src/core/database/database-health.service.ts',
         'src/core/redis/redis-health.service.ts',
-        // I/O de banco sob RLS (US-2.2): mapeamento Drizzle sem ramo, provado pelo
-        // teste de integração (llm.int-spec) contra um Postgres real — mesma categoria
-        // dos *-health.service.ts acima.
-        'src/modules/ai-coach/llm/ai-job.repository.ts',
-        // Mesma categoria (US-3.2): I/O de banco sob RLS da episodic memory, provado pela
-        // integração (context.int-spec) contra Postgres real.
-        'src/modules/ai-coach/context/context.repository.ts',
-        // Idem (US-3.4): kNN em `intent_examples`, provado por integração (intent.int-spec).
-        'src/modules/ai-coach/intent/intent.repository.ts',
-        // Idem (US-3.5): I/O de banco sob RLS da conversa, provado por integração
-        // (coach-response.int-spec) contra Postgres real.
-        'src/modules/coach/conversation.repository.ts',
-        // Idem (US-4.1): I/O de banco sob RLS da assinatura, provado por integração
-        // (subscription.int-spec) contra Postgres real.
+        // I/O de banco sob RLS da assinatura: mapeamento Drizzle sem ramo, provado por
+        // integração (subscription.int-spec) contra Postgres real.
         'src/modules/subscription/subscription.repository.ts',
         'src/health/**',
         'src/**/*.spec.ts',
@@ -94,10 +68,9 @@ export default defineConfig({
         branches: 80,
         functions: 80,
         lines: 80,
-        // Gate migrado do motor determinístico (US-2.3): o ValidationService é a pedra
-        // angular de segurança — 100% de linha/branch, bloqueante. Um PR que reduza a
-        // cobertura deste módulo reprova o CI.
-        'src/modules/protocol/validation/**': {
+        // O motor de políticas decide o que a IA pode fazer sozinha: 100% de linha/branch,
+        // bloqueante. Um PR que reduza a cobertura deste módulo reprova o CI.
+        'src/modules/coaching/policy/**': {
           statements: 100,
           branches: 100,
           functions: 100,

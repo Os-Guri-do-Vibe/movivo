@@ -34,7 +34,7 @@ import {
   studentPreferences,
   users,
   weeklyReviews,
-  workoutAccessTokens,
+  trainingAccessTokens,
 } from '../src/core/database/schema';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { QueueManager } from '../src/modules/jobs/queue-manager.service';
@@ -130,7 +130,7 @@ afterAll(async () => {
       await tx.delete(conversations).where(inArray(conversations.userId, created));
       await tx.delete(domainEvents).where(inArray(domainEvents.userId, created));
       await tx.delete(accessLinkTokens).where(inArray(accessLinkTokens.userId, created));
-      await tx.delete(workoutAccessTokens).where(inArray(workoutAccessTokens.userId, created));
+      await tx.delete(trainingAccessTokens).where(inArray(trainingAccessTokens.userId, created));
       await tx.delete(users).where(inArray(users.id, created));
     });
   }

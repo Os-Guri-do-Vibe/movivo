@@ -8,7 +8,7 @@
  *
  * Uso:
  *   cd apps/api
- *   pnpm exec tsx src/scripts/generate-workout-magic-link.ts <phoneNumberE164>
+ *   pnpm exec tsx src/scripts/generate-training-magic-link.ts <phoneNumberE164>
  *
  * Script descartável — não faz parte do pipeline de nenhuma sprint, é só operação manual.
  */
@@ -19,7 +19,7 @@ import postgres from 'postgres';
 import { migrationPostgresTls } from '../core/database/postgres-tls';
 
 import { loadEnv } from '../core/config/load-env';
-import { users, workoutAccessTokens } from '../core/database/schema';
+import { users, trainingAccessTokens } from '../core/database/schema';
 
 const MAGIC_TTL_MS = 48 * 60 * 60 * 1000;
 
@@ -34,7 +34,7 @@ function tokenHash(token: string): string {
 async function main(): Promise<void> {
   const phone = process.argv[2];
   if (!phone) {
-    console.error('Uso: tsx src/scripts/generate-workout-magic-link.ts <phoneNumberE164>');
+    console.error('Uso: tsx src/scripts/generate-training-magic-link.ts <phoneNumberE164>');
     process.exitCode = 1;
     return;
   }
@@ -72,7 +72,7 @@ async function main(): Promise<void> {
     }
 
     const token = opaqueToken();
-    await db.insert(workoutAccessTokens).values({
+    await db.insert(trainingAccessTokens).values({
       userId: row.id,
       kind: 'MAGIC',
       tokenHash: tokenHash(token),
@@ -87,6 +87,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error('[generate-workout-magic-link] falhou:', error);
+  console.error('[generate-training-magic-link] falhou:', error);
   process.exitCode = 1;
 });

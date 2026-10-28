@@ -21,13 +21,12 @@
  * `db:migrate`, não o caminho de runtime da aplicação.
  */
 import { drizzle } from 'drizzle-orm/postgres-js';
-import { eq } from 'drizzle-orm';
 import argon2 from 'argon2';
 import postgres from 'postgres';
 import { migrationPostgresTls } from './postgres-tls';
 
 import { loadEnv } from '../config/load-env';
-import { professionalAssignments, staff, users } from './schema';
+import { staff, users } from './schema';
 import { seedDevFoods } from './seed-foods';
 import { seedDevMethodology } from './seed-methodology';
 
@@ -124,21 +123,7 @@ async function main(): Promise<void> {
           councilActive: true,
         })
         .onConflictDoNothing({ target: staff.email });
-      const [professional] = await db
-        .select({ id: staff.id })
-        .from(staff)
-        .where(eq(staff.email, 'cref-dev@example.invalid'))
-        .limit(1);
-      const titulars = await db.select({ id: users.id }).from(users).where(eq(users.role, 'USER'));
-      if (professional) {
-        await db
-          .insert(professionalAssignments)
-          .values(
-            titulars.map((titular) => ({ professionalId: professional.id, userId: titular.id })),
-          )
-          .onConflictDoNothing();
-      }
-      console.log('[db:seed] Conta CREF sintetica provisionada com vinculos explicitos.');
+      console.log('[db:seed] Conta CREF sintetica provisionada.');
     } else {
       console.warn('[db:seed] DEV_PROFESSIONAL_PASSWORD_FILE ausente; conta CREF dev ignorada.');
     }

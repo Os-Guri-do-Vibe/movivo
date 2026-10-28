@@ -29,7 +29,7 @@ export class TrainingLinkService {
     userId: string,
     options: { date?: string; next?: '/hoje' | '/alimentacao' | '/evolucao' | '/check-in' } = {},
   ): Promise<string> {
-    const magic = await this.access.createMagicLink(userId, undefined, {
+    const magic = await this.access.createMagicLink(userId, {
       ...options,
       path: '/hoje/acessar',
     });

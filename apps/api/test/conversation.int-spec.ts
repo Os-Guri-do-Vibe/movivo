@@ -30,7 +30,7 @@ import {
   scheduledSessions,
   studentConstraints,
   users,
-  workoutAccessTokens,
+  trainingAccessTokens,
 } from '../src/core/database/schema';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { ConversationOrchestrator } from '../src/modules/conversation/orchestrator.service';
@@ -77,7 +77,7 @@ afterAll(async () => {
     await db.runAsSystem(async (tx) => {
       await tx.delete(domainEvents).where(inArray(domainEvents.userId, created));
       await tx.delete(accessLinkTokens).where(inArray(accessLinkTokens.userId, created));
-      await tx.delete(workoutAccessTokens).where(inArray(workoutAccessTokens.userId, created));
+      await tx.delete(trainingAccessTokens).where(inArray(trainingAccessTokens.userId, created));
       await tx.delete(users).where(inArray(users.id, created));
     });
   }

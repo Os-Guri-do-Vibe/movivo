@@ -117,19 +117,13 @@ beforeAll(async () => {
     RETURNING id
   `;
   professionalId = professional.id;
-  await adminClient`
-    INSERT INTO professional_assignments (professional_id, user_id)
-    VALUES (${professionalId}::uuid, ${userA}::uuid)
-  `;
 }, 60_000);
 
 afterAll(async () => {
   try {
     // Superusuário bypassa RLS (inclusive o append-only por RLS de consents) só p/ limpar.
     await adminClient.unsafe(
-      `DELETE FROM professional_assignments
-         WHERE professional_id = '${professionalId}' OR user_id IN ('${userA}','${userB}');
-       DELETE FROM consents WHERE user_id IN ('${userA}','${userB}');
+      `DELETE FROM consents WHERE user_id IN ('${userA}','${userB}');
        -- \`audit_logs\` é append-only por trigger (imutável até para o superusuário). O titular
        -- que ficou com trilha de revogação é preservado — apagá-lo destruiria a prova.
        DELETE FROM users WHERE id IN ('${userA}','${userB}')
@@ -144,11 +138,9 @@ afterAll(async () => {
 });
 
 describe('RLS FORCE + SET LOCAL — isolamento entre titulares', () => {
-  // Achado 2026-08-19 (decisão do fundador): a fila de revisão é do CARGO, não da
-  // pessoa — qualquer CREF ativo vê qualquer titular com consentimento de saúde
-  // vigente, sem depender de `professional_assignments`. `userB` NÃO está atribuído
-  // a `professionalId` (só `userA` está, no setup acima) e mesmo assim aparece.
-  it('PROFESSIONAL enxerga qualquer titular com consentimento ativo, atribuído ou não', async () => {
+  // A fila é do CARGO, não da pessoa: qualquer profissional ativo vê qualquer titular com
+  // consentimento de saúde vigente.
+  it('PROFESSIONAL enxerga qualquer titular com consentimento ativo', async () => {
     const rows = await tenant.runAsUser(professionalId, 'PROFESSIONAL', async (tx) => {
       return (await tx.execute(
         sql`SELECT id FROM users WHERE id IN (${userA}, ${userB}) ORDER BY id`,
@@ -184,10 +176,10 @@ describe('RLS FORCE + SET LOCAL — isolamento entre titulares', () => {
         await tx`SELECT set_config('app.current_role', 'ADMIN', true)`;
         const adminVisible = await tx`SELECT id FROM users WHERE id = ${userA}::uuid`;
         expect(adminVisible).toHaveLength(1);
-        const [adminProtocols] = await tx<{ count: number }[]>`
-          SELECT count(*)::int AS count FROM protocols
+        const [adminPlans] = await tx<{ count: number }[]>`
+          SELECT count(*)::int AS count FROM training_plans
         `;
-        expect(adminProtocols?.count).toBeGreaterThanOrEqual(0);
+        expect(adminPlans?.count).toBeGreaterThanOrEqual(0);
         throw rollback;
       }),
     ).rejects.toBe(rollback);
@@ -218,7 +210,7 @@ describe('RLS FORCE + SET LOCAL — isolamento entre titulares', () => {
         expect(staff).toHaveLength(0);
         // Nenhum dado de saúde: sem policy para SUPPORT nessas tabelas, fail-closed.
         expect(await tx`SELECT id FROM anamnesis_sessions`).toHaveLength(0);
-        expect(await tx`SELECT id FROM protocols`).toHaveLength(0);
+        expect(await tx`SELECT id FROM training_plans`).toHaveLength(0);
         expect(await tx`SELECT id FROM consents`).toHaveLength(0);
 
         // A3: consegue registrar a própria trilha de acesso em massa…
@@ -300,12 +292,10 @@ describe('Autorização do banco — deny by default e CREF ativo', () => {
 
   it.each([
     'SELECT public.link_session_consents_to_user($1::uuid, $2::uuid)',
-    'SELECT public.assign_unique_active_professional($2::uuid)',
     'SELECT public.publish_knowledge_document($1::uuid)',
     'SELECT public.purge_expired_knowledge_blobs()',
     'SELECT public.revoke_health_data_consent($2::uuid)',
     "SELECT public.revoke_non_health_consent($2::uuid, 'MARKETING'::public.consent_type)",
-    'SELECT public.assigned_active_professional($2::uuid)',
     "SELECT public.record_session_consent($1::uuid, 'HEALTH_DATA'::public.consent_type, 'invalid', true, NULL, NULL)",
   ])('função privilegiada nega contexto sem papel: %s', async (query) => {
     await expect(
@@ -326,7 +316,7 @@ describe('Autorização do banco — deny by default e CREF ativo', () => {
     ).rejects.toMatchObject({ code: '42501' });
   });
 
-  it('CREF inativo não lê alunos nem protocolos, mesmo com consentimento vigente', async () => {
+  it('profissional inativo não lê alunos, mesmo com consentimento vigente', async () => {
     await adminClient`UPDATE staff SET council_active = false WHERE id = ${professionalId}::uuid`;
     try {
       const rows = await tenant.runAsUser(professionalId, 'PROFESSIONAL', async (tx) =>

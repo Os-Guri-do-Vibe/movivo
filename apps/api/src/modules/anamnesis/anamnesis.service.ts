@@ -390,9 +390,6 @@ export class AnamnesisService {
         flow === 'INITIAL'
           ? await this.createUser(tx, answers, gate.requiresProfessionalReview)
           : (row.userId as string);
-      if (flow === 'INITIAL') {
-        await tx.execute(sql`SELECT assign_unique_active_professional(${userId}::uuid)`);
-      }
       const submittedAt = new Date();
       await tx
         .update(anamnesisSessions)

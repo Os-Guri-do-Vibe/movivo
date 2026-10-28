@@ -47,13 +47,9 @@ interface TenantTable {
    */
   anon?: { scope: string; scopeAtInsert: boolean };
   /**
-   * Acesso a QUALQUER profissional CREF ativo, com consentimento de saúde do titular
-   * ativo — não mais restrito a `professional_assignments` (decisão do fundador,
-   * 2026-08-19): a fila de revisão é do cargo, não da pessoa. Hoje só existe um RT
-   * (Leonardo), mas o modelo já precisa suportar vários CREFs revisando/editando a
-   * mesma fila quando a MOVIVO contratar mais profissionais. `professional_assignments`
-   * continua existindo (ex.: atribuição nominal em `protocols.professionalId`), só
-   * deixou de ser o portão de RLS.
+   * Acesso a QUALQUER profissional ativo (de qualquer conselho), com consentimento de
+   * saúde do titular ativo: a fila de exceções é do cargo, não da pessoa. O recorte por
+   * domínio (treino, nutrição, médico) é feito pela API a partir do conselho do staff.
    */
   professional?: 'read' | 'write';
   /**
@@ -90,102 +86,12 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
     professional: 'read',
   },
   { table: 'auth_sessions', column: 'user_id' },
-  // Estado "lido" das notificações do sino: preferência por conta de staff, não dado de titular.
-  { table: 'dashboard_notification_reads', column: 'user_id' },
-  // Sprint 2 (US-2.2): a trilha de invocações de LLM carrega snapshot pseudonimizado
-  // de dado de saúde — entra sob a mesma FORCE RLS das tabelas de titular.
-  { table: 'ai_jobs', column: 'user_id', professional: 'read' },
-  // Sprint 2 (US-2.4): o protocolo é dado de saúde derivado (personalizado a partir de
-  // condição/limitação física) — sob a mesma FORCE RLS por titular. `protocol_versions`
-  // tem `user_id` denormalizado justamente para ancorar a RLS sem JOIN (Sato §4.5).
-  {
-    table: 'protocols',
-    column: 'user_id',
-    professional: 'write',
-    parents: [
-      { table: 'anamnesis_sessions', column: 'anamnesis_session_id' },
-      { table: 'protocol_renewal_sessions', column: 'renewal_session_id' },
-    ],
-  },
-  {
-    table: 'protocol_versions',
-    column: 'user_id',
-    professional: 'write',
-    parents: [{ table: 'protocols', column: 'protocol_id' }],
-  },
-  // Renovação de protocolo por fim de mesociclo: titular já existe desde a criação da
-  // linha (sem fase anônima, diferente de `anamnesis_sessions`) — sem `anon` aqui. CREF
-  // lê as respostas ao revisar o protocolo gerado a partir delas, mas não edita.
-  {
-    table: 'protocol_renewal_sessions',
-    column: 'user_id',
-    professional: 'read',
-    parents: [{ table: 'protocols', column: 'previous_protocol_id' }],
-  },
-  // Achado 2026-09-02: proposta de substituição de exercício via IA, em staging até
-  // aprovação/janela de cortesia — mesma FORCE RLS por titular de `protocols`.
-  {
-    table: 'protocol_substitution_requests',
-    column: 'user_id',
-    professional: 'write',
-    parents: [{ table: 'protocols', column: 'protocol_id' }],
-  },
-  // Sprint 3 (US-3.2): resumo de longo prazo da conversa de saúde — mesma FORCE RLS por titular.
-  { table: 'coaching_sessions', column: 'user_id', professional: 'read' },
-  // Sprint 3 (US-3.6): alerta/handoff ao painel CREF — dado de titular, isolado por RLS FORCE.
-  { table: 'handoff_alerts', column: 'user_id', professional: 'write' },
   // Sprint 4 (US-4.1): assinatura/dado financeiro do titular — sob a mesma FORCE RLS.
   { table: 'subscriptions', column: 'user_id', professional: 'read', support: true },
-  {
-    table: 'conversations',
-    column: 'user_id',
-    professional: 'read',
-    parents: [{ table: 'protocols', column: 'protocol_id' }],
-  },
-  {
-    table: 'checkins',
-    column: 'user_id',
-    professional: 'read',
-    parents: [{ table: 'protocols', column: 'protocol_id' }],
-  },
-  // Pergunta do Coach que espera resposta (treino sem registro): metadado do tópico, sem texto livre.
-  { table: 'conversation_followups', column: 'user_id', professional: 'read' },
+  { table: 'conversations', column: 'user_id', professional: 'read' },
   { table: 'audit_logs', column: 'user_id', professional: 'write' },
-  // Sprint 8 (US-8.1): treino concluído do titular. Não há caminho HTTP de aluno para
-  // esta tabela (não existe UI de aluno) — a RLS existe para que o painel do
-  // profissional e os jobs de sistema sejam a única porta, e ela seja escopada.
-  {
-    table: 'workout_completions',
-    column: 'user_id',
-    professional: 'read',
-    parents: [{ table: 'protocols', column: 'protocol_id' }],
-  },
-  {
-    table: 'workout_sessions',
-    column: 'user_id',
-    professional: 'read',
-    parents: [{ table: 'protocols', column: 'protocol_id' }],
-  },
-  // Ajustes de agenda pedidos ao Coach (só inserção). O CREF lê a linha do tempo do aluno.
-  {
-    table: 'workout_schedule_adjustments',
-    column: 'user_id',
-    professional: 'read',
-    parents: [{ table: 'protocols', column: 'protocol_id' }],
-  },
-  {
-    table: 'workout_set_entries',
-    column: 'user_id',
-    professional: 'read',
-    parents: [{ table: 'workout_sessions', column: 'workout_session_id' }],
-  },
-  {
-    table: 'workout_access_tokens',
-    column: 'user_id',
-    parents: [{ table: 'workout_sessions', column: 'workout_session_id' }],
-  },
   { table: 'access_link_tokens', column: 'user_id' },
-  { table: 'workout_insights', column: 'user_id', professional: 'read' },
+  { table: 'training_access_tokens', column: 'user_id' },
   // Sprint 8 (US-8.3): sequência de marcos do ciclo de vida do titular. Append-only
   // (ver `buildStatusTransitionsImmutabilitySql`) e sob a mesma FORCE RLS por titular.
   { table: 'user_status_transitions', column: 'user_id', professional: 'read' },
@@ -338,11 +244,8 @@ export function buildRlsPoliciesSql(): string {
     const system = `(${ROLE} = 'SYSTEM')`;
     const admin = `(${ROLE} = 'ADMIN')`;
     const base = `${self} OR ${system} OR ${admin}`;
-    // Decisão do fundador (2026-08-19): a fila de revisão é do CARGO (qualquer CREF
-    // ativo), não da PESSOA — antes disso, um profissional só via titulares com
-    // `professional_assignments` ativo apontando pra ele, o que escondia protocolo/
-    // PAR-Q/etc. de outro CREF sem essa atribuição específica. Sem EXISTS sobre
-    // `professional_assignments`: só checa role + consentimento de saúde do titular.
+    // A fila é do CARGO (qualquer profissional ativo), não da PESSOA: só checa role +
+    // consentimento de saúde do titular.
     const linkedProfessional = `(${ROLE} = 'PROFESSIONAL' AND public.has_active_health_consent("${table}"."${column}"))`;
 
     // Fase anônima escopada por sessão (Sato — achado 1):
@@ -421,29 +324,14 @@ export function buildRlsPoliciesSql(): string {
     }
   }
 
-  // O vinculo em si nao herda a policy por titular: o profissional enxerga apenas
-  // suas atribuicoes; somente SYSTEM/ADMIN cria, revoga ou remove uma atribuicao.
-  const assignment = policyNames('professional_assignments');
   statements.push(
-    'ALTER TABLE "professional_assignments" ENABLE ROW LEVEL SECURITY',
-    'ALTER TABLE "professional_assignments" FORCE ROW LEVEL SECURITY',
-    `DROP POLICY IF EXISTS "${assignment.select}" ON "professional_assignments"`,
-    `DROP POLICY IF EXISTS "${assignment.insert}" ON "professional_assignments"`,
-    `DROP POLICY IF EXISTS "${assignment.update}" ON "professional_assignments"`,
-    `DROP POLICY IF EXISTS "${assignment.delete}" ON "professional_assignments"`,
-    `CREATE POLICY "${assignment.select}" ON "professional_assignments" FOR SELECT USING ((professional_id::text = ${UID} AND ${ROLE} = 'PROFESSIONAL') OR ${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
-    `CREATE POLICY "${assignment.insert}" ON "professional_assignments" FOR INSERT WITH CHECK (${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
-    `CREATE POLICY "${assignment.update}" ON "professional_assignments" FOR UPDATE USING (${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN') WITH CHECK (${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
-    `CREATE POLICY "${assignment.delete}" ON "professional_assignments" FOR DELETE USING (${ROLE} = 'SYSTEM' OR ${ROLE} = 'ADMIN')`,
     // Mesmo com acesso a audit_logs, o ator nao pode forjar a identidade de auditoria.
     // O terceiro disjunto cobre o evento de acesso EM MASSA (listagens do Control Center):
     // nao existe um titular unico a apontar, entao o ator registra o evento SOBRE SI MESMO
     // (`actor_id = user_id = contexto atual`). Continua impossivel forjar outro ator ou
-    // atribuir o evento a outro titular. Primeiro disjunto acompanha a mesma decisão do
-    // fundador (2026-08-19) do `linkedProfessional` acima: sem o EXISTS de
-    // `professional_assignments` — senão um CREF sem atribuição específica conseguiria
-    // editar/assinar o protocolo (RLS de `protocols` já liberado) mas a gravação da
-    // própria trilha de auditoria dessa ação falharia.
+    // atribuir o evento a outro titular. O primeiro disjunto acompanha o `linkedProfessional`
+    // acima: a fila é do cargo, então qualquer profissional ativo com consentimento grava a
+    // trilha da própria ação.
     `DROP POLICY IF EXISTS "audit_logs_rls_insert" ON "audit_logs"`,
     `CREATE POLICY "audit_logs_rls_insert" ON "audit_logs" FOR INSERT WITH CHECK ((actor_id::text = ${UID} AND ${ROLE} = 'PROFESSIONAL' AND public.has_active_health_consent(audit_logs.user_id)) OR (actor_id::text = ${UID} AND user_id::text = ${UID} AND ${AUTHENTICATED_ROLE}) OR ${ROLE} = 'SYSTEM' OR (actor_id::text = ${UID} AND ${ROLE} = 'ADMIN'))`,
   );
@@ -454,7 +342,7 @@ export function buildRlsPoliciesSql(): string {
 }
 
 /** Tabelas cobertas — reutilizado pelo teste de integração de isolamento (US-1.8). */
-export const RLS_TENANT_TABLES = [...TENANT_TABLES.map((t) => t.table), 'professional_assignments'];
+export const RLS_TENANT_TABLES = TENANT_TABLES.map((t) => t.table);
 
 /** Integridade criptografica e imutabilidade da trilha, impostas no banco. */
 export function buildAuditIntegritySql(appRole: string): string {
@@ -493,48 +381,6 @@ export function buildAuditIntegritySql(appRole: string): string {
 
     REVOKE UPDATE, DELETE, TRUNCATE ON public.audit_logs FROM ${sqlIdentifier(appRole)};
     GRANT SELECT, INSERT ON public.audit_logs TO ${sqlIdentifier(appRole)};
-  `;
-}
-
-/**
- * `agent_config` append-only, imposto no banco (US-7.6 / TASK-7.6.2).
- *
- * Mesma defesa em profundidade de `audit_logs`, pelo mesmo motivo elevado ao quadrado: uma
- * configuracao alterada em silencio muda o que a IA diz para TODOS os alunos ao mesmo tempo.
- * Duas barreiras independentes:
- *  1. trigger que levanta excecao em UPDATE/DELETE/TRUNCATE (vale ate para quem tem grant);
- *  2. REVOKE do privilegio na role de runtime (vale ate se a trigger for derrubada).
- * A tabela nao entra na RLS por titular: e configuracao global, nao dado de aluno. O controle
- * de quem publica e por capability na API (`AI_CONFIG_WRITE`).
- */
-export function buildAgentConfigImmutabilitySql(appRole: string): string {
-  return `
-    CREATE OR REPLACE FUNCTION public.agent_config_reject_mutation()
-    RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
-    BEGIN
-      RAISE EXCEPTION 'agent_config is append-only' USING ERRCODE = '55000';
-    END $$;
-
-    REVOKE ALL ON FUNCTION public.agent_config_reject_mutation() FROM PUBLIC;
-
-    DROP TRIGGER IF EXISTS trg_agent_config_immutable ON public.agent_config;
-    CREATE TRIGGER trg_agent_config_immutable BEFORE UPDATE OR DELETE ON public.agent_config
-      FOR EACH ROW EXECUTE FUNCTION public.agent_config_reject_mutation();
-    DROP TRIGGER IF EXISTS trg_agent_config_no_truncate ON public.agent_config;
-    CREATE TRIGGER trg_agent_config_no_truncate BEFORE TRUNCATE ON public.agent_config
-      FOR EACH STATEMENT EXECUTE FUNCTION public.agent_config_reject_mutation();
-
-    REVOKE UPDATE, DELETE, TRUNCATE ON public.agent_config FROM ${sqlIdentifier(appRole)};
-    GRANT SELECT, INSERT ON public.agent_config TO ${sqlIdentifier(appRole)};
-
-    -- Sprint 11 — resolução da persona por slot. A leitura de caminho quente é sempre
-    -- "maior version PUBLISHED DESTE target_sex", executada a cada expiração de cache em
-    -- cada instância da API. A ordem das colunas é a da query: igualdade (target_sex,
-    -- status) primeiro, ordenação (version DESC) depois — assim o índice serve o
-    -- ORDER BY ... LIMIT 1 sem sort. Fica aqui, e não no schema Drizzle, pelo mesmo motivo
-    -- do HNSW do RAG: é índice de reconciliação, idempotente a cada migração.
-    CREATE INDEX IF NOT EXISTS idx_agent_config_active
-      ON public.agent_config (target_sex, status, version DESC);
   `;
 }
 
@@ -622,12 +468,12 @@ export function buildAiForbiddenTopicsImmutabilitySql(appRole: string): string {
 /**
  * `user_status_transitions` append-only, imposto no banco (US-8.3 / TASK-8.3.1).
  *
- * Molde idêntico ao de `agent_config` (Sprint 7), pelo mesmo motivo: uma transição editada
+ * Mesmo molde de `audit_logs`, pelo mesmo motivo: uma transição editada
  * depois do fato reescreve a coorte e a taxa de conversão retroativamente, sem deixar rastro
  * — o painel do fundador e a planilha do CFO passariam a divergir em silêncio. Duas barreiras:
  *  1. trigger que levanta exceção em UPDATE/DELETE/TRUNCATE (vale até para quem tem grant);
  *  2. REVOKE do privilégio na role de runtime (vale até se a trigger for derrubada).
- * Diferente de `agent_config`, esta tabela **também** entra na RLS por titular (é dado de aluno).
+ * Diferente de `audit_logs`, esta tabela **também** entra na RLS por titular (é dado de aluno).
  */
 export function buildStatusTransitionsImmutabilitySql(appRole: string): string {
   return `
@@ -700,9 +546,6 @@ export function buildProfessionalAccessSql(appRole: string): string {
       WHERE user_id = target_user AND consent_type = 'HEALTH_DATA'
         AND accepted = true AND revoked_at IS NULL;
       GET DIAGNOSTICS affected = ROW_COUNT;
-      UPDATE public.professional_assignments
-      SET active = false, revoked_at = now(), updated_at = now()
-      WHERE user_id = target_user AND active = true AND revoked_at IS NULL;
       IF affected > 0 THEN
         INSERT INTO public.audit_logs (
           actor_id, user_id, action, entity_type, entity_id, changes
@@ -823,160 +666,16 @@ export function buildProfessionalAccessSql(appRole: string): string {
           updated_at = now();
     END $$;
 
-    CREATE OR REPLACE FUNCTION public.assign_unique_active_professional(target_user uuid)
-    RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
-    DECLARE professional uuid;
-    BEGIN
-      IF coalesce(nullif(current_setting('app.current_role', true), ''), '') NOT IN ('SYSTEM', 'ADMIN') THEN
-        RAISE EXCEPTION 'assignment requires system context' USING ERRCODE = '42501';
-      END IF;
-      -- Decisão do fundador (2026-08-25): no início da MOVIVO todo ADMIN é também
-      -- sócio-fundador com liberdade de aprovar/editar protocolo — mesma regra que já
-      -- valia para signProtocol()/release_parq_on_signature(). Prefere o RT CREF
-      -- explícito quando existe (menor id, estável); cai para o ADMIN mais antigo só
-      -- quando não há nenhum CREF ativo cadastrado ainda.
-      SELECT id INTO professional FROM public.staff
-      WHERE role = 'PROFESSIONAL' AND council_active = true
-      ORDER BY id LIMIT 1;
-      IF professional IS NULL THEN
-        SELECT id INTO professional FROM public.staff WHERE role = 'ADMIN' ORDER BY id LIMIT 1;
-      END IF;
-      IF professional IS NULL THEN
-        RAISE EXCEPTION 'no active CREF professional or admin available for assignment'
-          USING ERRCODE = '55000';
-      END IF;
-      INSERT INTO public.professional_assignments (professional_id, user_id)
-      VALUES (professional, target_user)
-      ON CONFLICT (professional_id, user_id) DO UPDATE
-      SET active = true, revoked_at = NULL, assigned_at = now(), updated_at = now();
-    END $$;
-
-    /*
-     * Liberação de PAR-Q pela ASSINATURA do protocolo (2026-08-24). Substitui
-     * release_parq_clearance(session, state), que a tela própria de PAR-Q chamava.
-     *
-     * A assinatura é por PROTOCOLO, não por sessão, e isso é a correção de segurança
-     * central: com target_session vindo do cliente, um profissional podia passar o id da
-     * sessão de QUALQUER titular (confused deputy) — a função só conferia o cargo dele, não
-     * o vínculo entre o que ele está assinando e o que está liberando. Agora a sessão é
-     * DERIVADA do protocolo, e a função ainda reconfere que sessão e protocolo pertencem
-     * ao mesmo titular.
-     *
-     * Ordem das checagens é deliberada: autorização ANTES de qualquer RETURN NULL. Um
-     * no-op silencioso avaliado cedo (protocolo sem sessão, PAR-Q já liberado) viraria um
-     * oráculo de existência para quem não tem sequer papel para chamar a função.
-     *
-     * ADMIN entra junto de PROFESSIONAL porque DashboardService.signProtocol já o aceita
-     * (decisão do fundador 2026-08-22: o único RT CREF da MOVIVO é sócio-fundador e usa
-     * conta ADMIN). Sem isso, a assinatura de ADMIN estouraria aqui.
-     */
-    CREATE OR REPLACE FUNCTION public.release_parq_on_signature(target_protocol uuid)
-    RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
-    DECLARE
-      target_user uuid; target_session uuid; session_owner uuid;
-      current_state public.parq_state; actor uuid; actor_role text;
-    BEGIN
-      actor_role := nullif(current_setting('app.current_role', true), '');
-      actor := nullif(current_setting('app.current_user_id', true), '')::uuid;
-
-      -- 1) AUTORIZAÇÃO PRIMEIRO — nunca RETURN NULL antes de confirmar quem está chamando.
-      IF actor_role = 'ADMIN' THEN
-        IF NOT EXISTS (SELECT 1 FROM public.staff u WHERE u.id = actor AND u.role = 'ADMIN') THEN
-          RAISE EXCEPTION 'admin role required' USING ERRCODE = '42501';
-        END IF;
-      ELSIF actor_role = 'PROFESSIONAL' THEN
-        IF NOT EXISTS (
-          SELECT 1 FROM public.staff p
-          WHERE p.id = actor AND p.role = 'PROFESSIONAL' AND p.council_active = true
-        ) THEN
-          RAISE EXCEPTION 'active CREF professional required' USING ERRCODE = '42501';
-        END IF;
-      ELSE
-        RAISE EXCEPTION 'professional or admin role required' USING ERRCODE = '42501';
-      END IF;
-
-      -- 2) protocolo -> titular -> sessão, confirmando que a sessão é DO MESMO titular.
-      SELECT p.user_id, p.anamnesis_session_id INTO target_user, target_session
-      FROM public.protocols p WHERE p.id = target_protocol;
-      IF target_user IS NULL THEN
-        RAISE EXCEPTION 'protocol not found' USING ERRCODE = 'P0002';
-      END IF;
-      IF target_session IS NULL THEN
-        -- Linha anterior à migração 0035: sem vínculo de sessão, nada a liberar. Não é erro.
-        RETURN NULL;
-      END IF;
-      SELECT s.user_id, s.parq_state INTO session_owner, current_state
-      FROM public.anamnesis_sessions s WHERE s.id = target_session;
-      IF session_owner IS DISTINCT FROM target_user THEN
-        RAISE EXCEPTION 'session does not belong to protocol owner' USING ERRCODE = '42501';
-      END IF;
-
-      IF NOT public.has_active_health_consent(target_user) THEN
-        RAISE EXCEPTION 'active health consent required' USING ERRCODE = '42501';
-      END IF;
-
-      -- 3) SÓ AQUI, com toda a autorização confirmada, o no-op de ESTADO é seguro.
-      IF current_state IS DISTINCT FROM 'BLOQUEADO_AGUARDANDO_CLEARANCE'::public.parq_state THEN
-        -- Assinatura de protocolo comum, ou PAR-Q já liberado antes — nada a fazer.
-        RETURN NULL;
-      END IF;
-
-      UPDATE public.anamnesis_sessions
-      SET parq_state = 'LIBERADO_COM_RESSALVA_RT', updated_at = now()
-      WHERE id = target_session;
-      UPDATE public.users SET requires_professional_review = false, updated_at = now()
-      WHERE id = target_user;
-      RETURN target_user;
-    END $$;
-
-    DROP FUNCTION IF EXISTS public.release_parq_clearance(uuid, public.parq_state);
-
-    CREATE OR REPLACE FUNCTION public.assigned_active_professional(target_user uuid)
-    RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
-    DECLARE actor uuid; actor_role text; assigned_professional uuid;
-    BEGIN
-      actor_role := nullif(current_setting('app.current_role', true), '');
-      actor := nullif(current_setting('app.current_user_id', true), '')::uuid;
-      IF actor_role IS DISTINCT FROM 'USER' OR actor IS DISTINCT FROM target_user THEN
-        RAISE EXCEPTION 'holder context required' USING ERRCODE = '42501';
-      END IF;
-      -- ADMIN conta como profissional elegível pelo mesmo motivo de
-      -- assign_unique_active_professional() acima — precisa aceitar de volta quem
-      -- aquela função pode ter atribuído.
-      SELECT pa.professional_id INTO assigned_professional
-      FROM public.professional_assignments pa
-      INNER JOIN public.staff professional ON professional.id = pa.professional_id
-      WHERE pa.user_id = target_user
-        AND pa.active = true AND pa.revoked_at IS NULL
-        AND (
-          (professional.role = 'PROFESSIONAL' AND professional.council_active = true)
-          OR professional.role = 'ADMIN'
-        );
-      IF assigned_professional IS NULL THEN
-        RAISE EXCEPTION 'no active assigned CREF professional' USING ERRCODE = '55000';
-      END IF;
-      IF NOT public.has_active_health_consent(target_user) THEN
-        RAISE EXCEPTION 'active health consent required' USING ERRCODE = '42501';
-      END IF;
-      RETURN assigned_professional;
-    END $$;
-
     REVOKE ALL ON FUNCTION public.has_active_health_consent(uuid) FROM PUBLIC;
     REVOKE ALL ON FUNCTION public.revoke_health_data_consent(uuid) FROM PUBLIC;
     REVOKE ALL ON FUNCTION public.revoke_non_health_consent(uuid, public.consent_type) FROM PUBLIC;
     REVOKE ALL ON FUNCTION public.link_session_consents_to_user(uuid, uuid) FROM PUBLIC;
     REVOKE ALL ON FUNCTION public.record_session_consent(uuid, public.consent_type, varchar, boolean, inet, text) FROM PUBLIC;
-    REVOKE ALL ON FUNCTION public.assign_unique_active_professional(uuid) FROM PUBLIC;
-    REVOKE ALL ON FUNCTION public.release_parq_on_signature(uuid) FROM PUBLIC;
-    REVOKE ALL ON FUNCTION public.assigned_active_professional(uuid) FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.has_active_health_consent(uuid) TO ${sqlIdentifier(appRole)};
     GRANT EXECUTE ON FUNCTION public.revoke_health_data_consent(uuid) TO ${sqlIdentifier(appRole)};
     GRANT EXECUTE ON FUNCTION public.revoke_non_health_consent(uuid, public.consent_type) TO ${sqlIdentifier(appRole)};
     GRANT EXECUTE ON FUNCTION public.link_session_consents_to_user(uuid, uuid) TO ${sqlIdentifier(appRole)};
     GRANT EXECUTE ON FUNCTION public.record_session_consent(uuid, public.consent_type, varchar, boolean, inet, text) TO ${sqlIdentifier(appRole)};
-    GRANT EXECUTE ON FUNCTION public.assign_unique_active_professional(uuid) TO ${sqlIdentifier(appRole)};
-    GRANT EXECUTE ON FUNCTION public.release_parq_on_signature(uuid) TO ${sqlIdentifier(appRole)};
-    GRANT EXECUTE ON FUNCTION public.assigned_active_professional(uuid) TO ${sqlIdentifier(appRole)};
     REVOKE INSERT, UPDATE, DELETE ON public.consents FROM ${sqlIdentifier(appRole)};
   `;
 }
@@ -984,7 +683,7 @@ export function buildProfessionalAccessSql(appRole: string): string {
 /**
  * `expenses` append-only, imposto no banco (US-8.4 / TASK-8.4.2).
  *
- * Mesma dupla barreira de `audit_logs` e `agent_config`, pelo motivo do livro-caixa:
+ * Mesma dupla barreira de `audit_logs`, pelo motivo do livro-caixa:
  * **correcao e estorno, nunca edicao**. Um valor de despesa alterado em silencio muda o
  * lucro apurado de um periodo ja fechado sem deixar rastro conferivel contra o extrato.
  *  1. trigger que levanta excecao em UPDATE/DELETE/TRUNCATE (vale ate para quem tem grant);
@@ -1022,7 +721,7 @@ export function buildExpensesImmutabilitySql(appRole: string): string {
 /**
  * `payments` append-only, imposto no banco (US-8.5 / TASK-8.5.1).
  *
- * Quarta aplicacao do mesmo molde (`audit_logs`, `agent_config`, `user_status_transitions`,
+ * Quarta aplicacao do mesmo molde (`audit_logs`, `user_status_transitions`,
  * `expenses`) e a mais sensivel: `payments` e escrita a partir de um evento **externo**.
  * Um valor de liquidacao alterado depois muda a receita apurada de um periodo fechado e,
  * pela US-8.7, muda a base de distribuicao de lucro entre os socios.
@@ -1100,8 +799,6 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
     'knowledge_document_extractions',
     'knowledge_staged_chunks',
     'knowledge_chunk_embeddings',
-    'methodology_versions',
-    'methodology_events',
   ];
   const immutableTriggers = histories
     .map(
@@ -1296,47 +993,9 @@ export function buildKnowledgeDocumentsSecuritySql(appRole: string): string {
     GRANT SELECT, INSERT ON public.knowledge_document_blobs TO ${sqlIdentifier(appRole)};
     REVOKE UPDATE, DELETE, TRUNCATE ON public.knowledge_document_events,
       public.knowledge_document_extractions, public.knowledge_staged_chunks,
-      public.knowledge_chunk_embeddings, public.methodology_versions,
-      public.methodology_events FROM ${sqlIdentifier(appRole)};
+      public.knowledge_chunk_embeddings FROM ${sqlIdentifier(appRole)};
     GRANT SELECT, INSERT ON public.knowledge_document_events,
       public.knowledge_document_extractions, public.knowledge_staged_chunks,
-      public.knowledge_chunk_embeddings, public.methodology_versions,
-      public.methodology_events TO ${sqlIdentifier(appRole)};
+      public.knowledge_chunk_embeddings TO ${sqlIdentifier(appRole)};
   `;
 }
-
-/**
- * Backfill de `users.biological_sex` (Sprint 11 — persona por slot).
- *
- * A origem do dado continua sendo a anamnese (`data_block_1.biologicalSex`); a coluna em
- * `users` é denormalização de leitura, porque a resolução da persona roda a cada mensagem
- * do WhatsApp. Sem o backfill, todo titular anterior à coluna ficaria `NULL` e cairia no
- * empréstimo entre slots até refazer a anamnese.
- *
- * Roda aqui, e não como migração Drizzle, pelo mesmo motivo dos demais passos de
- * reconciliação: é **idempotente** (`u.biological_sex IS NULL` no WHERE) e precisa poder
- * reexecutar sem efeito em bancos já convergidos.
- *
- * `DISTINCT ON` fixa a escolha quando o titular tem mais de uma sessão submetida: vale a
- * mais recente. Sem isso o resultado dependeria do plano de execução.
- *
- * `->> 'biologicalSex' IS NOT NULL` no lugar do operador `?` de jsonb: `?` é caractere de
- * placeholder em vários drivers/poolers e não há ganho em depender dele aqui — a checagem
- * de valor na lista fechada logo abaixo é mais forte do que "a chave existe".
- */
-export const USERS_BIOLOGICAL_SEX_BACKFILL_SQL = `
-  UPDATE users u
-  SET biological_sex = latest.value::biological_sex
-  FROM (
-    SELECT DISTINCT ON (s.user_id)
-      s.user_id,
-      s.data_block_1 ->> 'biologicalSex' AS value
-    FROM anamnesis_sessions s
-    WHERE s.user_id IS NOT NULL
-      AND s.status IN ('SUBMITTED', 'PROCESSED')
-      AND s.data_block_1 ->> 'biologicalSex' IN ('MALE', 'FEMALE')
-    ORDER BY s.user_id, s.submitted_at DESC NULLS LAST, s.created_at DESC
-  ) AS latest
-  WHERE latest.user_id = u.id
-    AND u.biological_sex IS NULL;
-`;

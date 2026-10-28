@@ -88,9 +88,8 @@ describe('findSafeCandidates (achado 2026-09-02 — substitui o antigo findSafeS
     }
   });
 
-  // Achado 2026-09-09 (pedido do fundador): a curadoria deixou de ter teto — `findSafeCandidates`
-  // devolve TODOS os elegíveis. Quem particiona em lotes de apresentação é o worker
-  // (`SUBSTITUTION_BATCH_SIZE`, em `ai-response.worker.ts`), não esta função.
+  // A curadoria não tem teto: `findSafeCandidates` devolve TODOS os elegíveis; quem apresenta
+  // ao aluno decide o lote.
   it('curadoria ilimitada: devolve TODOS os candidatos elegíveis, sem teto embutido', () => {
     const target = EXERCISE_BY_ID.get('supino_reto_barra');
     if (!target) throw new Error('fixture');

@@ -34,7 +34,6 @@ export const INTENTS = [
   'OUT_OF_SCOPE',
 ] as const;
 export const intentSchema = z.enum(INTENTS);
-export type Intent = z.infer<typeof intentSchema>;
 
 export const classifyInputSchema = z.object({
   message: z.string().trim().min(1).max(4_000),

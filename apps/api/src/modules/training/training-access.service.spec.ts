@@ -65,12 +65,11 @@ function makeService(options: { updates?: unknown[][]; selects?: unknown[][] } =
 describe('TrainingAccessService', () => {
   it('cria magic link sem expor o hash persistido na URL', async () => {
     const { service, inserted } = makeService();
-    const link = await service.createMagicLink(USER_ID, 'session-1');
+    const link = await service.createMagicLink(USER_ID);
 
     expect(link).toMatch(/^https:\/\/app\.movivo\.test\/hoje\/acessar#token=[\w-]{43}$/);
     expect(inserted[0]).toMatchObject({
       userId: USER_ID,
-      workoutSessionId: 'session-1',
       kind: 'MAGIC',
     });
     expect(link).not.toContain(String(inserted[0]?.tokenHash));
@@ -113,7 +112,7 @@ describe('TrainingAccessService', () => {
       makeService({ selects: [[]] }).service.findMagicOwner(RAW_TOKEN),
     ).resolves.toBeNull();
 
-    const owner = { userId: USER_ID, workoutSessionId: 's-1', name: 'Ana Souza' };
+    const owner = { userId: USER_ID, name: 'Ana Souza' };
     await expect(
       makeService({ selects: [[owner]] }).service.findMagicOwner(RAW_TOKEN),
     ).resolves.toEqual(owner);

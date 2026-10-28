@@ -78,19 +78,8 @@ export function isPlausibleSubstitution(
 }
 
 /**
- * Tamanho do LOTE de apresentação ao aluno numa troca — humanizado, não uma lista exaustiva
- * de uma vez. Achado 2026-09-09 (pedido do fundador): isto NÃO é mais o teto da curadoria —
- * `findSafeCandidates` abaixo devolve TODOS os elegíveis, sem limite. O worker
- * (`ai-response.worker.ts::buildSubstitution`) é quem fatia a curadoria em lotes deste
- * tamanho, oferecendo o próximo lote quando o aluno rejeita o atual (ver o offset em Redis
- * por `userId`+exercício-alvo).
- */
-export const SUBSTITUTION_BATCH_SIZE = 3;
-
-/**
  * Candidatos seguros no mesmo padrão de movimento, para a IA oferecer humanizadamente — TODOS
- * os elegíveis, sem teto (achado 2026-09-09, pedido do fundador: a curadoria é ilimitada, só a
- * APRESENTAÇÃO ao aluno é feita em lotes — ver `SUBSTITUTION_BATCH_SIZE`). Ordem de
+ * os elegíveis, sem teto (a curadoria é ilimitada; quem apresenta ao aluno decide o lote). Ordem de
  * prioridade de sempre: lista `substitutes` curada do exercício primeiro (é clinicamente
  * curada, não arbitrária — não reordenar), depois qualquer outro do mesmo padrão. `[]` =
  * nada seguro disponível na base para este aluno.

@@ -617,6 +617,13 @@
       "when": 1793211994097,
       "tag": "0087_conselho_do_profissional",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1793217032364,
+      "tag": "0088_arquivo_e_corte_do_legado",
+      "breakpoints": true
     }
   ]
 }

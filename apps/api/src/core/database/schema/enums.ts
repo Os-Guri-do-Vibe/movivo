@@ -14,18 +14,11 @@
  * enums abaixo tem valor previsto para remoção.
  *
  * ## Fonte de verdade dos valores
- * Onde `@movivo/shared` já declara o enum (`ProtocolStatus`, `SubscriptionStatus`),
+ * Onde `@movivo/shared` já declara o enum (`SubscriptionStatus`, `ParqState`),
  * o tipo do banco é derivado **do pacote compartilhado**, não recopiado. Assim
  * backend, frontend e banco não podem divergir sem quebrar a compilação.
  */
-import {
-  type BiologicalSex,
-  ParqState,
-  ProtocolApprovalStatus,
-  ProtocolReviewUrgency,
-  ProtocolStatus,
-  SubscriptionStatus,
-} from '@movivo/shared';
+import { type BiologicalSex, ParqState, SubscriptionStatus } from '@movivo/shared';
 import { pgEnum } from 'drizzle-orm/pg-core';
 
 /**
@@ -168,63 +161,6 @@ export const consentTypeEnum = pgEnum('consent_type', [
 ]);
 
 // ---------------------------------------------------------------------------
-// PROTOCOLO
-// ---------------------------------------------------------------------------
-
-/**
- * Estados do protocolo, derivados de `@movivo/shared`.
- *
- * Divergência consciente do DDL de Rafael: ele lista também `ARCHIVED`, que o
- * enum compartilhado (US-0.1) não tem. Mantemos a paridade com `@movivo/shared`
- * — ter no banco um estado que o backend e o frontend não sabem representar é
- * pior que não tê-lo. Se `ARCHIVED` voltar a ser necessário, entra primeiro no
- * pacote compartilhado e o `db:generate` propaga o `ALTER TYPE` sozinho.
- */
-export const protocolStatusEnum = pgEnum('protocol_status', valuesOf(ProtocolStatus));
-
-/**
- * Estado de aprovação/roteamento ao painel do RT CREF (US-2.4), derivado de
- * `@movivo/shared`. Distinto de `protocol_status` (ciclo de vida do treino): este é o
- * eixo de supervisão. Sem risco → `AUTO_APPROVED`; validador barrou → `PENDING_REVIEW`.
- */
-export const protocolApprovalStatusEnum = pgEnum(
-  'protocol_approval_status',
-  valuesOf(ProtocolApprovalStatus),
-);
-
-/**
- * Urgência de revisão humana enquanto `approval_status = PENDING_REVIEW` (fila do
- * profissional), derivado de `@movivo/shared`. `MANDATORY` nunca libera sozinho;
- * `OPTIONAL` libera sozinho após a janela de cortesia (`ProtocolAutoReleaseWorker`).
- */
-export const reviewUrgencyEnum = pgEnum('review_urgency', valuesOf(ProtocolReviewUrgency));
-
-/**
- * Estado da sessão do formulário de troca de protocolo por fim de mesociclo. Mesmos 4
- * valores de `anamnesis_status` e mesmo motivo de não derivar de `@movivo/shared`: é
- * ciclo de vida de sessão de formulário, não um conceito que o frontend precisa tipar
- * fora do que a própria resposta da API já devolve.
- */
-export const protocolRenewalStatusEnum = pgEnum('protocol_renewal_status', [
-  'IN_PROGRESS',
-  'SUBMITTED',
-  'EXPIRED',
-  'PROCESSED',
-]);
-
-/**
- * Estado do formulário web de check-in semanal (achado 2026-09-13: substitui o fluxo de
- * botão do WhatsApp). Só 3 estados — diferente da renovação de mesociclo, não há um
- * "PROCESSED" separado: o comentário da IA é best-effort e assíncrono, mas a experiência
- * do aluno termina em `SUBMITTED` (tela de sucesso já aparece antes da IA responder).
- */
-export const checkinWeeklyStatusEnum = pgEnum('checkin_weekly_status', [
-  'PENDING',
-  'SUBMITTED',
-  'EXPIRED',
-]);
-
-// ---------------------------------------------------------------------------
 // CONVERSA (WhatsApp)
 // ---------------------------------------------------------------------------
 
@@ -269,66 +205,6 @@ export const subscriptionStatusEnum = pgEnum('subscription_status', valuesOf(Sub
 export const paymentProviderEnum = pgEnum('payment_provider', ['STRIPE', 'ASAAS']);
 
 // ---------------------------------------------------------------------------
-// JOBS DE IA
-// ---------------------------------------------------------------------------
-
-/** Naturezas de job de IA rastreadas para auditoria e custo (Rafael §7.1/§8.1). */
-export const aiJobTypeEnum = pgEnum('ai_job_type', [
-  'PROTOCOL_GENERATION',
-  'AI_RESPONSE',
-  'CHECKIN_ADJUSTMENT',
-]);
-
-/**
- * Ciclo de vida do job. `DLQ` é estado terminal explícito, e não um `FAILED` com
- * contador alto, porque o SLO de `<0,5% em DLQ` (`ARQUITETURA.md` §8) precisa ser
- * consultável com um predicado simples e indexável.
- */
-export const aiJobStatusEnum = pgEnum('ai_job_status', [
-  'QUEUED',
-  'PROCESSING',
-  'COMPLETED',
-  'FAILED',
-  'DLQ',
-]);
-
-// ---------------------------------------------------------------------------
-// TREINO CONCLUÍDO (US-8.1)
-// ---------------------------------------------------------------------------
-
-/**
- * Canal por onde o treino concluído chegou (US-8.1, regra 2: `source` sempre gravado).
- * Sem isso, em três meses ninguém saberia se a North Star subiu porque o aluno treinou
- * mais ou porque o canal de captura melhorou.
- *
- * **A ordem de declaração é a ordem de precedência do dedupe** — enum nativo compara
- * pelo ordinal, então `'WHATSAPP_QUICK_REPLY' < 'CHECKIN' < 'CONVERSATION'` no operador
- * `<` do Postgres, e o upsert de `workout_completions` resolve a colisão com um simples
- * `where source > excluded.source`. Não reordenar sem reler `workout-completions.ts`.
- */
-export const workoutCompletionSourceEnum = pgEnum('workout_completion_source', [
-  'WEB_JOURNAL',
-  'WHATSAPP_QUICK_REPLY',
-  'CHECKIN',
-  'CONVERSATION',
-]);
-
-// ---------------------------------------------------------------------------
-// HANDOFF CREF (US-3.6)
-// ---------------------------------------------------------------------------
-
-/**
- * Nível do alerta ao painel do profissional CREF (decisão do fundador, 2026-07-30):
- * `ALERT` = revisão assíncrona (pedido de handoff / FLAG do validador / fora de escopo),
- * SEM promessa de retorno humano; `SAFETY` = red flag clínica (dor grave) — prioritário,
- * o usuário é orientado a procurar atendimento presencial. A tela é Sprint 5.
- */
-export const handoffLevelEnum = pgEnum('handoff_level', ['ALERT', 'SAFETY']);
-
-/** Ciclo do alerta: nasce `OPEN`; o profissional resolve no painel (Sprint 5). */
-export const handoffStatusEnum = pgEnum('handoff_status', ['OPEN', 'RESOLVED']);
-
-// ---------------------------------------------------------------------------
 // CICLO DE VIDA DO ALUNO (US-8.3)
 // ---------------------------------------------------------------------------
 
@@ -360,23 +236,4 @@ export const statusTransitionActorEnum = pgEnum('status_transition_actor', [
   'USER',
   'PROFESSIONAL',
   'BACKFILL',
-]);
-
-// ---------------------------------------------------------------------------
-// SUBSTITUIÇÃO DE EXERCÍCIO VIA IA
-// ---------------------------------------------------------------------------
-
-/**
- * Ciclo de vida de uma proposta de substituição de exercício (achado 2026-09-02).
- *
- * Nasce `PENDING` sem tocar o protocolo `ACTIVE` do aluno — ver comentário de topo de
- * `protocol-substitution-requests.ts` para o porquê de a mudança ficar em staging em vez
- * de mutar `protocols` direto. Vira `RELEASED` quando efetivamente aplicada (aprovação do
- * profissional ou fim da janela de cortesia de 30 min) ou `DISCARDED` quando o profissional
- * recusa a troca, mantendo o exercício original.
- */
-export const substitutionRequestStatusEnum = pgEnum('substitution_request_status', [
-  'PENDING',
-  'RELEASED',
-  'DISCARDED',
 ]);

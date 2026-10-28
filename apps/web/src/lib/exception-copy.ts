@@ -36,16 +36,6 @@ export function goalLabel(primary: unknown): string | null {
     : null;
 }
 
-const WEEKDAYS: Record<string, string> = {
-  MON: 'segunda',
-  TUE: 'terça',
-  WED: 'quarta',
-  THU: 'quinta',
-  FRI: 'sexta',
-  SAT: 'sábado',
-  SUN: 'domingo',
-};
-
 /** A mudança proposta, em uma frase que o profissional entende sem abrir o JSON. */
 export function describeAction(action: Record<string, unknown>): string {
   switch (action.type) {
@@ -81,10 +71,6 @@ export function describeAction(action: Record<string, unknown>): string {
     default:
       return String(action.type ?? 'Ação desconhecida');
   }
-}
-
-export function weekdayList(days: unknown): string {
-  return Array.isArray(days) ? days.map((d) => WEEKDAYS[String(d)] ?? String(d)).join(', ') : '';
 }
 
 /** Idade do caso em linguagem curta (“há 3 h”, “há 2 dias”). */

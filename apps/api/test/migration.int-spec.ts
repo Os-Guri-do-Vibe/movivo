@@ -30,83 +30,45 @@ import {
 } from '../src/core/database/security-policies';
 
 /**
- * As 9 tabelas-base do schema lógico de Lucas (§9, US-0.4) + `auth_sessions`,
- * adicionada na US-1.1/TASK-1.1.5 (schema de refresh token para o AUTH).
+ * Tabelas esperadas no schema `public` depois de todas as migrações: o schema v2 inteiro mais
+ * os arquivos somente leitura do legado (`legacy_*_archive`, retidos por 5 anos).
  */
 const EXPECTED_TABLES = [
+  // Cadastro, consentimento e acesso.
   'users',
+  'staff',
   'anamnesis_sessions',
   'consents',
-  'protocols',
-  'protocol_versions',
-  'conversations',
-  'checkins',
-  'subscriptions',
-  'ai_jobs',
   'auth_sessions',
-  // Sprint 3 (US-3.2): memória de longo prazo da conversa.
-  'coaching_sessions',
-  // Sprint 3 (US-3.3): corpus curado do RAG (global, read-only).
-  'knowledge_base',
-  // Sprint 3 (US-3.4): exemplos rotulados do kNN de intenção (global, read-only).
-  'intent_examples',
-  // Sprint 3 (US-3.6): alertas/handoff ao painel CREF (dado de titular).
-  'handoff_alerts',
-  // Sprint 5: escopo profissional explicito, auditoria e reengajamento duravel.
-  'professional_assignments',
   'audit_logs',
-  // Sprint 7 (US-7.6): persona do agente, append-only.
-  'agent_config',
-  // Sprint 8: treino concluido (US-8.1), historico de estado (US-8.3), despesa e
-  // preco de modelo versionado (US-8.4), pagamento liquidado (US-8.5), investimento
-  // por canal (US-8.6) e cap table (US-8.7).
-  'workout_completions',
   'user_status_transitions',
+  'access_link_tokens',
+  'training_access_tokens',
+  'short_links',
+  // Conversa e assinatura.
+  'conversations',
+  'subscriptions',
+  'payments',
+  // Financeiro e parceiros.
   'expenses',
   'model_pricing',
-  'payments',
   'ad_spend',
   'partners',
-  // Sprint 9: configuracao segura da IA e pipeline de curadoria do RAG.
+  // Configuração segura da IA e Base de Conhecimento.
   'faq_entries',
   'ai_guardrail_rules',
+  'ai_forbidden_topics',
+  'knowledge_base',
   'knowledge_documents',
   'knowledge_document_blobs',
   'knowledge_document_reviews',
-  // Sprint 10: temas proibidos append-only, versionamento de metodologia CREF e o
-  // pipeline completo de ingestao/staging/embeddings da Base de Conhecimento.
-  'ai_forbidden_topics',
   'knowledge_document_events',
   'knowledge_document_extractions',
   'knowledge_staged_chunks',
   'knowledge_chunk_embeddings',
-  'methodology_versions',
-  'methodology_events',
-  // Achado 2026-09-02/03: substituição de exercício via IA (fila de revisão) e o
-  // catálogo de exercícios agora servido do banco (`ExerciseCatalogProvider`), não
-  // mais só do array estático em `exercise-catalog.ts`.
-  'protocol_substitution_requests',
+  // Catálogo de exercícios (global).
   'exercise_catalog_entries',
-  // Achado 2026-09-26: favoritos do RT CREF, global e separado do versionamento acima.
   'exercise_catalog_favorites',
-  // Acompanhamento diario: acesso publico revogavel, sessoes, series e insights.
-  'workout_access_tokens',
-  'access_link_tokens',
-  'workout_insights',
-  'workout_sessions',
-  'workout_set_entries',
-  // Agenda flexível: ajustes de agenda pedidos pelo aluno ao Coach (só inserção).
-  'workout_schedule_adjustments',
-  // Renovação de mesociclo: formulário de troca de protocolo por fim de ciclo.
-  'protocol_renewal_sessions',
-  // Alias curto e público para links longos enviados por WhatsApp.
-  'short_links',
-  // Separação da Plataforma Interna (staff) da tabela do titular final (users).
-  'staff',
-  // Estado "lido" das notificações do sino do dashboard, por conta de staff.
-  'dashboard_notification_reads',
-  // Pergunta do Coach que espera resposta (treino sem registro): pendência de 72h, sem texto livre.
-  'conversation_followups',
   // Estado do Aluno.
   'student_profiles',
   'student_health_records',
@@ -148,6 +110,25 @@ const EXPECTED_TABLES = [
   'eval_runs',
   // Estúdio de metodologia: documentos por domínio, versionados (global).
   'methodology_documents',
+  // Arquivo somente leitura do legado, gerado pela migração de corte.
+  'legacy_protocols_archive',
+  'legacy_protocol_versions_archive',
+  'legacy_protocol_renewal_sessions_archive',
+  'legacy_protocol_substitution_requests_archive',
+  'legacy_checkins_archive',
+  'legacy_handoff_alerts_archive',
+  'legacy_conversation_followups_archive',
+  'legacy_coaching_sessions_archive',
+  'legacy_workout_sessions_archive',
+  'legacy_workout_set_entries_archive',
+  'legacy_workout_completions_archive',
+  'legacy_workout_insights_archive',
+  'legacy_workout_schedule_adjustments_archive',
+  'legacy_professional_assignments_archive',
+  'legacy_agent_config_archive',
+  'legacy_methodology_versions_archive',
+  'legacy_methodology_events_archive',
+  'legacy_conversation_protocol_links_archive',
 ] as const;
 
 const REQUIRED_EXTENSIONS = ['vector', 'uuid-ossp', 'pgcrypto'] as const;
@@ -252,18 +233,7 @@ describe('migração versionada num Postgres limpo', () => {
     }
   });
 
-  // Removido (separação staff/users): este teste reexecutava a SQL BRUTA e histórica da
-  // migração 0015_calm_sage.sql — que hardcoda `users."role" = 'PROFESSIONAL'` e
-  // `users."council_active"` — para provar, isoladamente, o backfill que ela fazia na época.
-  // A migração 0059 (separação da Plataforma Interna) remove `council_number`/`council_region`/
-  // `council_active`/`password_hash` de `users` para sempre (viram exclusivos de `staff`).
-  // Não há como "consertar" o teste sem reescrever uma migração histórica já aplicada em
-  // produção — e reescrevê-la quebraria o hash que o `drizzle-orm` usa para saber quais
-  // migrações já rodaram. O comportamento ATUAL de atribuição/reatribuição de profissional
-  // (não mais uma migração pontual de dado legado) continua coberto pelo teste seguinte,
-  // que exercita `assign_unique_active_professional` ao vivo contra `staff`.
-
-  it('preserva ciclos revogado e reaceito e reativa o vinculo CREF explicitamente', async () => {
+  it('preserva os ciclos de consentimento revogado e reaceito', async () => {
     const client = connect(throwawayDb, migratorUser, migratorPassword);
     const holder = '70000000-0000-4000-8000-000000000001';
     const professional = '70000000-0000-4000-8000-000000000002';
@@ -281,10 +251,6 @@ describe('migração versionada num Postgres limpo', () => {
                 'PROFESSIONAL', 'x', '700001', 'SP', true)
       `;
       await client`
-        INSERT INTO professional_assignments (professional_id, user_id)
-        VALUES (${professional}::uuid, ${holder}::uuid)
-      `;
-      await client`
         INSERT INTO consents (user_id, consent_type, version, cycle, accepted)
         VALUES (${holder}::uuid, 'HEALTH_DATA', 'consent-health-2026-08-v3', 1, true)
       `;
@@ -294,13 +260,6 @@ describe('migração versionada num Postgres limpo', () => {
         await tx`SELECT set_config('app.current_user_id', ${holder}, true)`;
         await tx`SELECT public.revoke_health_data_consent(${holder}::uuid)`;
       });
-
-      const [revokedAssignment] = await client<{ active: boolean; revokedAt: Date | null }[]>`
-        SELECT active, revoked_at AS "revokedAt" FROM professional_assignments
-        WHERE professional_id = ${professional}::uuid AND user_id = ${holder}::uuid
-      `;
-      expect(revokedAssignment).toMatchObject({ active: false });
-      expect(revokedAssignment?.revokedAt).toBeInstanceOf(Date);
 
       await client`
         INSERT INTO anamnesis_sessions (id, token, status, expires_at)
@@ -317,7 +276,6 @@ describe('migração versionada num Postgres limpo', () => {
       await client.begin(async (tx) => {
         await tx`SELECT set_config('app.current_role', 'SYSTEM', true)`;
         await tx`SELECT public.link_session_consents_to_user(${session}::uuid, ${holder}::uuid)`;
-        await tx`SELECT public.assign_unique_active_professional(${holder}::uuid)`;
       });
 
       const consentCycles = await client<
@@ -332,12 +290,6 @@ describe('migração versionada num Postgres limpo', () => {
       expect(consentCycles[0]).toMatchObject({ cycle: 1, accepted: true });
       expect(consentCycles[0]?.revokedAt).toBeInstanceOf(Date);
       expect(consentCycles[1]).toMatchObject({ cycle: 2, accepted: true, revokedAt: null });
-
-      const [reactivatedAssignment] = await client<{ active: boolean; revokedAt: Date | null }[]>`
-        SELECT active, revoked_at AS "revokedAt" FROM professional_assignments
-        WHERE professional_id = ${professional}::uuid AND user_id = ${holder}::uuid
-      `;
-      expect(reactivatedAssignment).toEqual({ active: true, revokedAt: null });
 
       const [audit] = await client<{ action: string; changes: Record<string, unknown> }[]>`
         SELECT action, changes FROM audit_logs

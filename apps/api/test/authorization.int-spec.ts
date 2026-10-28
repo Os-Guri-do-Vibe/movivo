@@ -20,7 +20,7 @@ import {
   sessionExecutions,
   subscriptions,
   users,
-  workoutAccessTokens,
+  trainingAccessTokens,
 } from '../src/core/database/schema';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { QueueManager } from '../src/modules/jobs/queue-manager.service';
@@ -101,7 +101,7 @@ afterAll(async () => {
     if (db && holders.length)
       await db.runAsSystem(async (tx) => {
         await tx.delete(domainEvents).where(inArray(domainEvents.userId, holders));
-        await tx.delete(workoutAccessTokens).where(inArray(workoutAccessTokens.userId, holders));
+        await tx.delete(trainingAccessTokens).where(inArray(trainingAccessTokens.userId, holders));
         await tx.delete(accessLinkTokens).where(inArray(accessLinkTokens.userId, holders));
         await tx.delete(subscriptions).where(inArray(subscriptions.userId, holders));
         await tx.delete(anamnesisSessions).where(inArray(anamnesisSessions.token, anamnesisTokens));

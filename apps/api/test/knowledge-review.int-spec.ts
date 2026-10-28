@@ -82,12 +82,7 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
-  // Achado 2026-08-18: sem isto, o "Revisor RAG" fica com `council_active = true` pra
-  // sempre — `assign_unique_active_professional` (chamado no submit real da anamnese)
-  // exige EXATAMENTE um profissional ativo e passa a falhar com 500 pra qualquer
-  // submissão feita depois desta suíte rodar contra um Postgres persistente (o de dev,
-  // não o efêmero do CI). Os documentos/reviews continuam intactos — são histórico
-  // imutável por design, não resíduo de teste.
+  // Desativa o revisor criado pela suíte: os documentos e revisões ficam, são histórico imutável.
   await tenant.runAsSystem((tx) =>
     tx.execute(sql`UPDATE staff SET council_active = false WHERE id = ${professionalId}::uuid`),
   );

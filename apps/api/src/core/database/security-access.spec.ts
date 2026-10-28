@@ -6,11 +6,9 @@ import {
   buildRlsPoliciesSql,
 } from './security-policies';
 
-describe('controles de banco da Sprint 5', () => {
-  // Achado 2026-08-19 (decisão do fundador): a fila de revisão é do CARGO, não da
-  // pessoa — qualquer CREF ativo lê/edita titular com consentimento de saúde ativo,
-  // sem depender de `professional_assignments` (que continua existindo só pra
-  // atribuição nominal, ex.: `protocols.professionalId`).
+describe('controles de acesso e trilha no banco', () => {
+  // A fila é do CARGO, não da pessoa: qualquer profissional ativo lê titular com
+  // consentimento de saúde ativo.
   it('qualquer profissional le users/anamnese com consentimento ativo, mas nao recebe UPDATE amplo', () => {
     const sql = buildRlsPoliciesSql();
     expect(sql).toContain("= 'PROFESSIONAL' AND public.has_active_health_consent");
@@ -47,85 +45,6 @@ describe('controles de banco da Sprint 5', () => {
     expect(sql).toContain('REVOKE UPDATE, DELETE, TRUNCATE ON public.audit_logs FROM movivo_app');
   });
 
-  // Achado 2026-08-19: liberar PAR-Q não exige mais professional_assignments
-  // específico pro titular — qualquer CREF ativo pode liberar (mesma decisão do
-  // fundador do teste de RLS acima). `assign_unique_active_professional` (bootstrap)
-  // não muda: continua gravando a atribuição nominal.
-  it('bootstrap grava vinculo nominal; liberacao PAR-Q so verifica CREF ativo', () => {
-    const sql = buildProfessionalAccessSql('movivo_app');
-    // Achado 2026-08-25 (decisão do fundador): no início todo ADMIN é também
-    // sócio-fundador com liberdade de aprovar/editar protocolo — a atribuição
-    // deixou de exigir EXATAMENTE um CREF ativo (isso quebraria assim que existisse
-    // mais de um ADMIN) e passou a preferir o CREF explícito, caindo pro ADMIN mais
-    // antigo só na ausência de um.
-    expect(sql).toContain('no active CREF professional or admin available for assignment');
-    expect(sql).toContain('professional_assignments');
-    expect(sql).toContain('ON CONFLICT (professional_id, user_id) DO UPDATE');
-    expect(sql).toContain(
-      'SET active = true, revoked_at = NULL, assigned_at = now(), updated_at = now()',
-    );
-    // O assert antigo era `actor_role <> 'PROFESSIONAL'`, forma da função removida. A
-    // nova aceita PROFESSIONAL **ou** ADMIN (conta fundador, decisão de 2026-08-22, a
-    // mesma que `signProtocol` já aplicava) — a checagem de cargo continua existindo,
-    // só deixou de ser uma comparação única.
-    expect(sql).toContain("actor_role = 'PROFESSIONAL'");
-    expect(sql).toContain("professional.role = 'PROFESSIONAL'");
-    expect(sql).toContain('professional.council_active = true');
-    const releaseFn = sql
-      .split('CREATE OR REPLACE FUNCTION')
-      .find((chunk) => chunk.includes('public.release_parq_on_signature'));
-    expect(releaseFn).toBeDefined();
-    expect(releaseFn).not.toContain('professional_assignments');
-    expect(releaseFn).toContain('active CREF professional required');
-    expect(sql).not.toContain("actor_role NOT IN ('PROFESSIONAL', 'ADMIN')");
-    expect(sql).toContain('GRANT EXECUTE ON FUNCTION public.release_parq_on_signature');
-    // A função por SESSÃO some de vez: era o vetor de confused deputy (o profissional
-    // passava o id da sessão de qualquer titular). Sobreviver a um deploy parcial com
-    // as duas versões no banco seria pior que não ter migrado.
-    expect(sql).toContain('DROP FUNCTION IF EXISTS public.release_parq_clearance');
-    expect(sql).not.toContain('CREATE OR REPLACE FUNCTION public.release_parq_clearance');
-  });
-
-  /**
-   * A liberação de PAR-Q passou a ser por PROTOCOLO (2026-08-24). Estes asserts fixam as
-   * três garantias que a revisão de segurança exigiu, todas frágeis a uma reescrita
-   * descuidada da função.
-   */
-  it('liberacao de PAR-Q por assinatura: autoriza antes de qualquer no-op e amarra sessao ao titular', () => {
-    const releaseFn = buildProfessionalAccessSql('movivo_app')
-      .split('CREATE OR REPLACE FUNCTION')
-      .find((chunk) => chunk.includes('public.release_parq_on_signature'));
-    expect(releaseFn).toBeDefined();
-    const fn = releaseFn as string;
-
-    // 1. A sessão é DERIVADA do protocolo — nunca recebida do cliente.
-    expect(fn).toContain(
-      'SELECT p.user_id, p.anamnesis_session_id INTO target_user, target_session',
-    );
-    // 2. Sessão e protocolo têm que ser do mesmo titular.
-    expect(fn).toContain('session does not belong to protocol owner');
-    // 3. Ordem: toda `RAISE EXCEPTION` de papel vem ANTES do primeiro `RETURN NULL`,
-    //    senão o no-op silencioso vira oráculo de existência para quem não tem papel.
-    expect(fn.indexOf('professional or admin role required')).toBeLessThan(
-      fn.indexOf('RETURN NULL;'),
-    );
-    expect(fn).toContain('active health consent required');
-    expect(fn).toContain("'LIBERADO_COM_RESSALVA_RT'");
-    expect(fn).toContain('SET search_path = pg_catalog, public, pg_temp');
-  });
-
-  it('lookup do autoaprovado exige o proprio titular e CREF atribuido ativo', () => {
-    const sql = buildProfessionalAccessSql('movivo_app');
-    expect(sql).toContain('FUNCTION public.assigned_active_professional(target_user uuid)');
-    expect(sql).toContain(
-      "actor_role IS DISTINCT FROM 'USER' OR actor IS DISTINCT FROM target_user",
-    );
-    expect(sql).toContain('no active assigned CREF professional');
-    expect(sql).toContain(
-      'REVOKE ALL ON FUNCTION public.assigned_active_professional(uuid) FROM PUBLIC',
-    );
-  });
-
   it('revogacao e acesso operacional de saude usam funcoes estreitas e fail-closed', () => {
     const sql = buildProfessionalAccessSql('movivo_app');
     expect(sql).toContain('FUNCTION public.revoke_health_data_consent(target_user uuid)');
@@ -133,8 +52,7 @@ describe('controles de banco da Sprint 5', () => {
       "actor_role IS DISTINCT FROM 'USER' OR actor IS DISTINCT FROM target_user",
     );
     expect(sql).toContain("consent.version = 'consent-health-2026-08-v3'");
-    expect(sql).toContain('UPDATE public.professional_assignments');
-    expect(sql).toContain('SET active = false, revoked_at = now(), updated_at = now()');
+    expect(sql).not.toContain('professional_assignments');
     expect(sql).toContain("'HEALTH_CONSENT_REVOKED'");
     expect(sql).toContain('jsonb_build_object(');
     expect(sql).toContain('FUNCTION public.link_session_consents_to_user');
@@ -153,6 +71,5 @@ describe('controles de banco da Sprint 5', () => {
     expect(sql).toContain(
       'REVOKE ALL ON FUNCTION public.revoke_health_data_consent(uuid) FROM PUBLIC',
     );
-    expect(sql).toContain('active health consent required');
   });
 });

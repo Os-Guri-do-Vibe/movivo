@@ -7,7 +7,6 @@
 import { createHash } from 'node:crypto';
 
 import {
-  buildForbiddenTopicsBlock,
   faqCandidateSchema,
   forbiddenTopicCandidateSchema,
   FORBIDDEN_TOPIC_TERM_DENYLIST,
@@ -145,7 +144,8 @@ export function simulateForbiddenTopicConfig(candidate: ForbiddenTopicCandidate)
   ) {
     inputFailures.push('Um termo essencial do domínio MOVIVO não pode ser bloqueado.');
   }
-  const prompt = parsed.success ? buildForbiddenTopicsBlock([parsed.data.label]) : '';
+  // Só o rótulo pode aparecer em texto de instrução; os termos-gatilho ficam fora.
+  const prompt = parsed.success ? parsed.data.label : '';
   const promptFailures =
     parsed.success &&
     prompt.length > 0 &&
