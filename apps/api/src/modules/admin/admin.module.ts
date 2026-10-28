@@ -21,6 +21,7 @@ import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { AuditService } from './audit.service';
 import { AuditQueryController } from './audit-query.controller';
 import { AuditQueryService } from './audit-query.service';
+import { ConfigGateController } from './config-gate.controller';
 import { ControlCenterController } from './control-center.controller';
 import { ControlCenterService } from './control-center.service';
 import { ConversationsController } from './conversations.controller';
@@ -49,6 +50,7 @@ import { SystemScriptsService } from './system-scripts.service';
   imports: [AuthModule, CatalogModule, JobsModule, WhatsappModule],
   controllers: [
     ControlCenterController,
+    ConfigGateController,
     ConversationsController,
     FinanceController,
     MarketingController,

@@ -354,7 +354,6 @@ export type InviolableRulesResponse = z.infer<typeof inviolableRulesResponseSche
  * ------------------------------------------------------------------------- */
 
 export const simulateAgentConfigSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('PERSONA'), candidate: agentPersonaSchema }),
   z.object({ kind: z.literal('FAQ'), candidate: faqCandidateSchema }),
   z.object({ kind: z.literal('GUARDRAIL'), candidate: l1GuardrailCandidateSchema }),
   z.object({ kind: z.literal('FORBIDDEN_TOPIC'), candidate: forbiddenTopicCandidateSchema }),
@@ -372,7 +371,7 @@ export type ConfigSimulationCheck = z.infer<typeof configSimulationCheckSchema>;
 
 export const configSimulationResponseSchema = z.object({
   data: z.object({
-    kind: z.enum(['PERSONA', 'FAQ', 'GUARDRAIL', 'FORBIDDEN_TOPIC']),
+    kind: z.enum(['FAQ', 'GUARDRAIL', 'FORBIDDEN_TOPIC']),
     passed: z.boolean(),
     candidateHash: z.string().regex(/^[a-f0-9]{64}$/),
     checks: z.array(configSimulationCheckSchema).length(4),

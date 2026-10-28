@@ -148,3 +148,9 @@ export const agentCostsSchema = z.object({
   ),
 });
 export type AgentCosts = z.infer<typeof agentCostsSchema>;
+
+export const exceptionsSummarySchema = z.object({
+  open: z.number().int().nonnegative(),
+  urgent: z.number().int().nonnegative(),
+});
+export type ExceptionsSummary = z.infer<typeof exceptionsSummarySchema>;
