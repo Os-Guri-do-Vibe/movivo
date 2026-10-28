@@ -28,6 +28,12 @@ import {
   DecisionPipeline,
   type DecisionOutcome,
 } from '../coaching/decision/decision-pipeline.service';
+import { FaqService } from '../../core/agent-config/faq.service';
+import {
+  ForbiddenTopicsService,
+  ForbiddenTopicsUnavailableError,
+} from '../../core/agent-config/forbidden-topics.service';
+import { L1GuardrailService } from '../../core/agent-config/l1-guardrail.service';
 import { PublishedPolicies } from '../coaching/policy/published-policies';
 import { SafetyService } from '../coaching/safety/safety.service';
 import { signalOf } from '../coaching/safety/sentinel-rules';
@@ -110,6 +116,9 @@ export class ConversationOrchestrator {
     private readonly outbox: OutboxRelay,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
+    private readonly faq: FaqService,
+    private readonly forbiddenTopics: ForbiddenTopicsService,
+    private readonly guardrails: L1GuardrailService,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext(ConversationOrchestrator.name);
@@ -143,6 +152,10 @@ export class ConversationOrchestrator {
     if (raised.some((s) => s.severity === 'EMERGENCY')) {
       return { status: 'EMERGENCY', reply: msg.EMERGENCY_MESSAGE };
     }
+
+    // 1b. Governança dos profissionais: tema proibido encerra; FAQ publicado responde sem modelo.
+    const governed = await this.governance(userId, text);
+    if (governed) return governed;
 
     // 2. Classificação.
     const classified = await this.runner.run(
@@ -458,7 +471,22 @@ export class ConversationOrchestrator {
         : intent.intent === 'NUTRITION_QUESTION' || intent.intent === 'FOOD_DIFFICULTY'
           ? 'NUTRITION'
           : 'MOTIVATION';
-    const run = await this.runner.run(answerTask, { message: text, topic }, { userId, sources });
+    // Guardrail L1 de entrada: pergunta que cai numa regra dos profissionais nem chega ao modelo.
+    const inputFlags = await this.guardrails.evaluate(text, '');
+    const run = inputFlags.length
+      ? null
+      : await this.runner.run(answerTask, { message: text, topic }, { userId, sources });
+    const outputFlags = run ? await this.guardrails.evaluate('', run.output.reply) : [];
+    if (!run || outputFlags.length > 0) {
+      await this.openCase(
+        userId,
+        'NO_APPLICABLE_POLICY',
+        topic === 'NUTRITION' ? 'NUTRITION' : 'TRAINING',
+        `Resposta retida por regra de segurança dos profissionais (${[...inputFlags, ...outputFlags].map((f) => f.label).join(', ')}).`,
+        'NORMAL',
+      );
+      return { status: 'ESCALATED', reply: msg.ESCALATED_MESSAGE, intent: intent.intent };
+    }
     if (run.output.needsProfessional) {
       await this.openCase(
         userId,
@@ -470,6 +498,29 @@ export class ConversationOrchestrator {
       return { status: 'ESCALATED', reply: run.output.reply, intent: intent.intent };
     }
     return { status: 'ANSWERED', reply: run.output.reply, intent: intent.intent };
+  }
+
+  /** Tema proibido e FAQ: regras determinísticas que os profissionais publicam no painel. */
+  private async governance(userId: string, text: string): Promise<HandleResult | null> {
+    try {
+      const hit = await this.forbiddenTopics.evaluate(text);
+      if (hit) {
+        await this.openCase(
+          userId,
+          'NO_APPLICABLE_POLICY',
+          'GENERAL',
+          `Mensagem sobre tema marcado como fora do atendimento automático (${hit.label}).`,
+          'NORMAL',
+        );
+        return { status: 'ESCALATED', reply: msg.FORBIDDEN_TOPIC_MESSAGE };
+      }
+    } catch (err: unknown) {
+      if (!(err instanceof ForbiddenTopicsUnavailableError)) throw err;
+      // Sem a lista de temas não dá para garantir o limite: resposta segura, sem gerar nada.
+      return { status: 'ESCALATED', reply: msg.FALLBACK_MESSAGE };
+    }
+    const faq = await this.faq.match(text);
+    return faq ? { status: 'ANSWERED', reply: faq.answer, intent: 'FAQ' } : null;
   }
 
   // --- Apoio ------------------------------------------------------------------------------

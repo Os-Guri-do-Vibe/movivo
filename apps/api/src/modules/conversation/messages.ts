@@ -9,6 +9,10 @@ import { WHATSAPP_BUBBLE_SEPARATOR } from '../jobs/whatsapp-outbound.contract';
 export const EMERGENCY_MESSAGE =
   'O que você descreveu pode ser sério. Pare qualquer atividade agora e procure atendimento médico imediatamente (SAMU 192 ou o pronto-socorro mais próximo). Já avisei a equipe de profissionais da MOVIVO e vamos falar com você assim que possível.';
 
+/** Tema que o profissional responsável marcou como fora do que o atendimento automático trata. */
+export const FORBIDDEN_TOPIC_MESSAGE =
+  'Esse assunto eu prefiro não tratar por aqui. Vou pedir para um profissional da equipe te orientar.';
+
 export const ESCALATED_MESSAGE =
   'Isso eu prefiro deixar com a equipe de profissionais da MOVIVO. Já encaminhei o seu caso com tudo que você contou, e eles retornam por aqui. Enquanto isso, vá com calma e priorize como você se sente.';
 
