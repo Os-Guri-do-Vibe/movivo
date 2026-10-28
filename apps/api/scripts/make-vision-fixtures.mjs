@@ -6,6 +6,8 @@
  *   node scripts/make-vision-fixtures.mjs
  */
 import { writeFileSync } from 'node:fs';
+import process from 'node:process';
+import { URL } from 'node:url';
 import { Resvg } from '@resvg/resvg-js';
 
 const W = 390;
@@ -65,7 +67,12 @@ for (const [name, content] of Object.entries(screens)) {
   const png = new Resvg(content, { font: { loadSystemFonts: true }, fitTo: { mode: 'original' } })
     .render()
     .asPng();
-  lines.push(`export const ${name.replace(/([A-Z])/g, '_$1').toUpperCase()} = '${png.toString('base64')}';`);
-  console.log(`${name}: ${(png.length / 1024).toFixed(1)} KB`);
+  lines.push(
+    `export const ${name.replace(/([A-Z])/g, '_$1').toUpperCase()} = '${png.toString('base64')}';`,
+  );
+  process.stdout.write(`${name}: ${(png.length / 1024).toFixed(1)} KB\n`);
 }
-writeFileSync(new URL('../src/modules/vision/fixtures.generated.ts', import.meta.url), lines.join('\n') + '\n');
+writeFileSync(
+  new URL('../src/modules/vision/fixtures.generated.ts', import.meta.url),
+  lines.join('\n') + '\n',
+);
