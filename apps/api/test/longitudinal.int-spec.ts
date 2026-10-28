@@ -24,6 +24,9 @@ import {
   accessLinkTokens,
   coachingProposals,
   conversations,
+  goalMilestones,
+  goalTasks,
+  sessionExecutions,
   domainEvents,
   modelRuns,
   nutritionPlans,
@@ -36,6 +39,7 @@ import {
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { QueueManager } from '../src/modules/jobs/queue-manager.service';
 import { PlanGenerationService } from '../src/modules/planning/plan-generation.service';
+import { GoalProgressService } from '../src/modules/progress/goal-progress.service';
 import { PreferenceExtractionService } from '../src/modules/progress/preference-extraction.service';
 import { WeeklyReviewService } from '../src/modules/progress/weekly-review.service';
 import { createStudent, fakeRunner } from './plan-fixtures';
@@ -55,6 +59,7 @@ let app: INestApplication;
 let db: TenantDatabase;
 let reviews: WeeklyReviewService;
 let preferences: PreferenceExtractionService;
+let goals: GoalProgressService;
 let enqueue: ReturnType<typeof vi.fn>;
 const created: string[] = [];
 const calls: string[] = [];
@@ -115,6 +120,7 @@ beforeAll(async () => {
   db = app.get(TenantDatabase);
   reviews = app.get(WeeklyReviewService);
   preferences = app.get(PreferenceExtractionService);
+  goals = app.get(GoalProgressService);
   enqueue = vi.spyOn(app.get(QueueManager), 'enqueue').mockResolvedValue('job') as never;
 });
 
@@ -276,6 +282,76 @@ describe.skipIf(REAL)('aluno que se afasta', () => {
     expect(row).toMatchObject({ key: 'slot:EVENING', strength: 'HYPOTHESIS', origin: 'OBSERVED' });
     expect(row?.confidence).toBeLessThanOrEqual(40);
     expect(row?.evidence.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe.skipIf(REAL)('metas e microtarefas', () => {
+  const execution = (userId: string, performedOn: string) => ({
+    userId,
+    modality: 'STRENGTH' as const,
+    performedOn,
+    status: 'COMPLETED' as const,
+    source: 'LINK' as const,
+    rpe: 6,
+    durationMinutes: 40,
+    load: 240,
+  });
+
+  it('conclui a microtarefa e o marco por evento, nunca por declaração', async () => {
+    const userId = await createStudent(db, created);
+    await app.get(PlanGenerationService).generate(userId, { now: PLAN_DAY });
+    // Sem treino feito, nada avança.
+    expect((await goals.sync(userId, '2026-11-04')).tasks).toBe(0);
+
+    await db.runAsSystem((tx) =>
+      tx
+        .insert(sessionExecutions)
+        .values(['2026-11-02', '2026-11-03', '2026-11-04'].map((day) => execution(userId, day))),
+    );
+    const first = await goals.sync(userId, '2026-11-04');
+    expect(first.tasks).toBe(1);
+    const [task] = await db.runAsSystem((tx) =>
+      tx.select().from(goalTasks).where(eq(goalTasks.userId, userId)),
+    );
+    expect(task).toMatchObject({ kind: 'COMPLETE_SESSIONS', progress: 3, status: 'DONE' });
+
+    // O marco "9 sessões" só é atingido com 9 sessões feitas depois do início da meta.
+    const milestone = () =>
+      db.runAsSystem((tx) =>
+        tx.select().from(goalMilestones).where(eq(goalMilestones.userId, userId)),
+      );
+    expect((await milestone())[0]?.status).toBe('PENDING');
+    await db.runAsSystem((tx) =>
+      tx
+        .insert(sessionExecutions)
+        .values(Array.from({ length: 9 }, () => execution(userId, '2026-11-05'))),
+    );
+    await goals.sync(userId, '2026-11-05');
+    expect((await milestone())[0]).toMatchObject({ status: 'ACHIEVED' });
+  });
+
+  it('tarefa semanal que fechou sem bater o alvo vira perdida e a semana nova abre sozinha', async () => {
+    const userId = await createStudent(db, created);
+    await app.get(PlanGenerationService).generate(userId, { now: PLAN_DAY });
+    await db.runAsSystem((tx) =>
+      tx
+        .update(goalTasks)
+        .set({ windowStart: '2026-10-19', windowEnd: '2026-10-25' })
+        .where(eq(goalTasks.userId, userId)),
+    );
+    const result = await goals.sync(userId, '2026-11-04');
+    expect(result.rolled).toBe(1);
+    const rows = await db.runAsSystem((tx) =>
+      tx
+        .select()
+        .from(goalTasks)
+        .where(eq(goalTasks.userId, userId))
+        .orderBy(goalTasks.windowStart),
+    );
+    expect(rows.map((r) => [r.windowStart, r.status])).toEqual([
+      ['2026-10-19', 'MISSED'],
+      ['2026-11-02', 'OPEN'],
+    ]);
   });
 });
 

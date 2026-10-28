@@ -14,6 +14,7 @@ import { WorkerFactory } from '../jobs/worker.factory';
 import { mondayOf } from '../planning/calc/week-planner';
 import { todayIn } from '../planning/plan-generation.service';
 import { loadEligibleStudents, localParts } from '../training/eligibility';
+import { GoalProgressService } from './goal-progress.service';
 import { PreferenceExtractionService } from './preference-extraction.service';
 import { WeeklyReviewService } from './weekly-review.service';
 
@@ -29,6 +30,7 @@ export class WeeklyReviewScheduler implements OnModuleInit {
     private readonly db: TenantDatabase,
     private readonly reviews: WeeklyReviewService,
     private readonly preferences: PreferenceExtractionService,
+    private readonly goals: GoalProgressService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
     private readonly logger: PinoLogger,
@@ -77,12 +79,21 @@ export class WeeklyReviewScheduler implements OnModuleInit {
     return { eligible: eligible.length, queued };
   }
 
-  /** Revisão da semana + extração de preferências (cada uma falha sem derrubar a outra). */
+  /** Metas + revisão da semana + preferências (cada etapa falha sem derrubar as outras). */
   async reviewStudent(userId: string, now = new Date()) {
+    const today = todayIn(null, now);
+    try {
+      await this.goals.sync(userId, today);
+    } catch (err: unknown) {
+      this.logger.warn(
+        { userId, err, event: 'goal_progress_failed' },
+        'progresso das metas falhou',
+      );
+    }
     const review = await this.reviews.review(userId, { now });
     let preferences = 0;
     try {
-      preferences = await this.preferences.extract(userId, todayIn(null, now), now);
+      preferences = await this.preferences.extract(userId, today, now);
     } catch (err: unknown) {
       this.logger.warn(
         { userId, err, event: 'preference_extraction_failed' },
