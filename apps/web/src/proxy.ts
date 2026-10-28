@@ -70,9 +70,7 @@ export const config = {
   matcher: [
     '/entrar',
     '/dashboard/:path*',
-    '/treino/:path*',
-    '/api/workout/:path*',
-    // Treino do dia (v2): mesma proteção do legado.
+    // Treino do dia.
     '/hoje/:path*',
     '/alimentacao',
     '/evolucao',

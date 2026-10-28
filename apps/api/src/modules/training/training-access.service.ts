@@ -46,7 +46,7 @@ export class TrainingAccessService {
     );
     const date = options.date ? `&date=${options.date}` : '';
     const next = options.next ? `&next=${encodeURIComponent(options.next)}` : '';
-    return `${this.config.whatsapp.publicSiteUrl}${options.path ?? '/treino/acessar'}#token=${token}${date}${next}`;
+    return `${this.config.whatsapp.publicSiteUrl}${options.path ?? '/hoje/acessar'}#token=${token}${date}${next}`;
   }
 
   /**
