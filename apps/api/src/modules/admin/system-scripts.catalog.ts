@@ -69,6 +69,38 @@ export const CRON_SCRIPTS: readonly CronScript[] = [
     },
   },
   {
+    id: 'training-daily-scan',
+    kind: 'CRON',
+    name: 'Link diário do plano (v2)',
+    description:
+      'Envia por WhatsApp o link do treino do dia a cada aluno com plano ativo e marca como perdidas as sessões que ficaram para trás. A varredura roda a cada minuto e dispara às 04:00 do fuso de cada aluno.',
+    queue: QUEUE.trainingDaily,
+    schedulerId: 'daily-training-scan',
+    cron: '* * * * * (UTC)',
+    schedule: 'Todo dia às 04:00 (fuso de cada aluno)',
+    runEffect:
+      'Fecha agora as sessões vencidas e envia o link de hoje aos alunos elegíveis que ainda não o receberam. Quem já recebeu não recebe de novo.',
+    resultLabels: {
+      eligible: 'elegíveis',
+      sent: 'na fila de envio',
+      missed: 'sessões marcadas como perdidas',
+    },
+  },
+  {
+    id: 'weekly-check-in-scan',
+    kind: 'CRON',
+    name: 'Check-in adaptativo semanal (v2)',
+    description:
+      'Abre o check-in da semana (perguntas escolhidas pelos sinais do aluno) e envia o link por WhatsApp. A varredura roda a cada minuto e dispara no domingo, às 18:00 do fuso de cada aluno.',
+    queue: QUEUE.checkIn,
+    schedulerId: 'weekly-check-in-scan',
+    cron: '* * * * * (UTC)',
+    schedule: 'Domingo às 18:00 (fuso de cada aluno)',
+    runEffect:
+      'Abre agora o check-in da semana dos alunos elegíveis que ainda não têm um e envia o convite. Quem já recebeu nesta semana não recebe outro.',
+    resultLabels: { eligible: 'elegíveis', sent: 'na fila de envio' },
+  },
+  {
     id: 'checkin-weekly-scan',
     kind: 'CRON',
     name: 'Check-in semanal',
@@ -148,6 +180,16 @@ export const TERMINAL_SCRIPTS: readonly TerminalScript[] = [
     file: 'apps/api/src/scripts/eval.ts',
     command: 'pnpm --filter @movivo/api run eval --task <id-da-tarefa>',
     notRunnableReason: ARGUMENT_REQUIRED,
+  },
+  {
+    id: 'make-vision-fixtures',
+    kind: 'TERMINAL',
+    name: 'Gerar imagens sintéticas de avaliação da visão',
+    description:
+      'Redesenha as telas sintéticas (prints de relógio e uma tela que não é treino) usadas nos casos de avaliação da leitura de imagem e regrava o arquivo de fixtures. Só é preciso rodar se os valores esperados mudarem.',
+    file: 'apps/api/scripts/make-vision-fixtures.mjs',
+    command: 'node apps/api/scripts/make-vision-fixtures.mjs',
+    notRunnableReason: 'Reescreve um arquivo do repositório — só no terminal.',
   },
   {
     id: 'import-taco',
