@@ -103,6 +103,7 @@ export class EvaluationService {
           userId: null,
           sources,
           routeOverride: options.routeOverride,
+          images: evalCase.images?.map((image) => ({ type: 'image' as const, ...image })),
         });
         methodologyVersions = { ...methodologyVersions, ...run.methodologyVersions };
         const assertions: AssertionResult[] = [];

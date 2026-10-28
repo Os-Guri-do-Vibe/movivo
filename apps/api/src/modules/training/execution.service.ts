@@ -32,6 +32,7 @@ import {
   TenantDatabase,
   type TenantTransaction,
 } from '../../core/database/tenant-database.service';
+import { AgentRunner } from '../../core/agents/agent-runner';
 import { PublishedPolicies } from '../coaching/policy/published-policies';
 import { painSignals } from '../coaching/safety/sentinel-rules';
 import { SafetyService } from '../coaching/safety/safety.service';
@@ -41,6 +42,7 @@ import { addDays, mondayOf } from '../planning/calc/week-planner';
 import { todayIn } from '../planning/plan-generation.service';
 import { FitParseError, parseFit } from './import/fit-parser';
 import { GpxParseError, parseGpx } from './import/gpx-parser';
+import { workoutScreenshotTask } from '../vision/vision-tasks';
 
 const PAIN_HISTORY_DAYS = 21;
 
@@ -54,6 +56,7 @@ export class ExecutionService {
     private readonly outbox: OutboxRelay,
     private readonly safety: SafetyService,
     private readonly policies: PublishedPolicies,
+    private readonly runner: AgentRunner,
   ) {}
 
   // --- Leitura ---------------------------------------------------------------------------
@@ -267,6 +270,54 @@ export class ExecutionService {
         .set({ source })
         .where(eq(sessionExecutions.id, execution.id));
       return this.viewOf(tx, { ...execution, source });
+    });
+  }
+
+  /**
+   * Print do relógio/app → métricas lidas pela visão, SEM confirmação: o aluno confere os números
+   * antes de concluir. Imagem que não é treino é recusada, e a imagem não é guardada.
+   */
+  async importScreenshot(
+    userId: string,
+    executionId: string,
+    image: { mediaType: 'image/jpeg' | 'image/png' | 'image/webp'; base64: string },
+  ) {
+    const modality = await this.db.runAsUser(userId, 'USER', async (tx) => {
+      const execution = await this.open(tx, userId, executionId);
+      return execution.modality;
+    });
+    const expected = ['RUNNING', 'HYROX', 'STRENGTH', 'EXTERNAL_SPORT'].includes(modality)
+      ? (modality as 'RUNNING' | 'HYROX' | 'STRENGTH' | 'EXTERNAL_SPORT')
+      : null;
+    const run = await this.runner.run(
+      workoutScreenshotTask,
+      { expectedModality: expected },
+      {
+        userId,
+        sources: {
+          methodology: async () => ({ text: '', versions: {} }),
+          state: async () => ({ slices: {}, version: 0 }),
+        },
+        images: [{ type: 'image', ...image }],
+      },
+    );
+    const { kind, metrics, confidence } = run.output;
+    if (kind === 'NOT_A_WORKOUT' || Object.keys(metrics).length === 0) {
+      throw new BadRequestException(
+        'Não encontramos os números de um treino nessa imagem. Tente outro print ou digite os números.',
+      );
+    }
+    return this.db.runAsUser(userId, 'USER', async (tx) => {
+      const execution = await this.open(tx, userId, executionId);
+      await this.upsertMetrics(tx, userId, execution.id, metrics, false);
+      await tx
+        .update(sessionExecutions)
+        .set({ source: 'WHATSAPP_SCREENSHOT' })
+        .where(eq(sessionExecutions.id, execution.id));
+      return {
+        view: await this.viewOf(tx, { ...execution, source: 'WHATSAPP_SCREENSHOT' }),
+        confidence,
+      };
     });
   }
 

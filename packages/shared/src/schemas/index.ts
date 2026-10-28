@@ -45,3 +45,4 @@ export * from './methodology/studio.schema';
 export * from './onboarding/onboarding.schema';
 export * from './plan/plan-read.schema';
 export * from './training/training-day.schema';
+export * from './nutrition/food-log.schema';

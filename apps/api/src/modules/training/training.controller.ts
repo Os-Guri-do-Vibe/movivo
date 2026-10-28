@@ -31,6 +31,7 @@ import {
 
 import { parseBody } from '../../core/validation/strict-input';
 import { ExecutionService } from './execution.service';
+import { imageForVision } from '../nutrition/image-guard';
 import { TrainingLinkService } from './training-link.service';
 import { TrainingAccessService } from './training-access.service';
 
@@ -147,6 +148,21 @@ export class TrainingController {
       file.originalname,
       new Uint8Array(file.buffer),
     );
+  }
+
+  @Post('executions/:id/screenshot')
+  @HttpCode(200)
+  @Header('Cache-Control', 'private, no-store')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 6 * 1024 * 1024, files: 1 } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Lê um print de relógio/app e propõe as métricas (aluno confirma)' })
+  async screenshot(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Headers('authorization') authorization?: string,
+  ) {
+    const userId = await this.access.requireUser(authorization);
+    return this.executions.importScreenshot(userId, uuidSchema.parse(id), imageForVision(file));
   }
 
   @Post('executions/:id/finish')

@@ -23,6 +23,13 @@ const ANTHROPIC_VERSION = '2023-06-01';
 
 /** Traduz status HTTP em erro classificado (decide retry × failover × abortar). */
 export function classifyStatus(vendor: ModelVendor, status: number, body: string): VendorError {
+  // Saldo esgotado também chega como 429 (`insufficient_quota`): é a conta, não o ritmo de chamadas.
+  if (
+    status === 429 &&
+    /insufficient_quota|credit_balance|exceeded your current quota/i.test(body)
+  ) {
+    return new VendorError('AUTH', vendor, '429 saldo ou cota do fornecedor');
+  }
   if (status === 429) return new VendorError('RATE_LIMIT', vendor, '429 rate limit');
   // Credencial inválida, conta sem saldo (402 no DeepSeek) ou sem permissão: o pedido está
   // certo, quem não atende é a conta do fornecedor — failover, não abortar.

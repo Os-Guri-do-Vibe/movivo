@@ -22,13 +22,16 @@ import { AgentTaskRegistry } from '../core/agents/agent-task-registry';
 import { CoreModule } from '../core/core.module';
 import { EvaluationModule } from '../modules/evaluation/evaluation.module';
 import { EvaluationService } from '../modules/evaluation/evaluation.service';
+import { ExecutionTasksModule } from '../modules/execution-tasks/execution-tasks.module';
 import { PlanningTasksModule } from '../modules/planning/planning-tasks.module';
 
 /**
  * Só núcleo, agentes e avaliação — nunca o `AppModule`: ele liga os workers das filas, e uma
  * avaliação local não pode consumir jobs (ex.: enviar WhatsApp).
  */
-@Module({ imports: [CoreModule, AgentsModule, EvaluationModule, PlanningTasksModule] })
+@Module({
+  imports: [CoreModule, AgentsModule, EvaluationModule, PlanningTasksModule, ExecutionTasksModule],
+})
 class EvalCliModule {}
 
 function routeOverride(vendor?: string, model?: string): TierRoute | undefined {

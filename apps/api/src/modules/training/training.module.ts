@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { CoachingModule } from '../coaching/coaching.module';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
+import { ExecutionTasksModule } from '../execution-tasks/execution-tasks.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { PublishedMethodologyModule } from '../methodology/published-methodology.module';
 import { ShortLinkModule } from '../short-link/short-link.module';
@@ -18,6 +19,7 @@ import { TrainingLinkService } from './training-link.service';
   imports: [
     CoachingModule,
     DomainEventsModule,
+    ExecutionTasksModule,
     JobsModule,
     PublishedMethodologyModule,
     ShortLinkModule,

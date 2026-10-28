@@ -51,6 +51,8 @@ export interface EvalCase {
   /** Texto de metodologia por domínio; ausente = versão publicada no momento da avaliação. */
   methodology?: Partial<Record<MethodologyDomain, string>>;
   input: unknown;
+  /** Imagens (base64) das tarefas de visão. */
+  images?: readonly { mediaType: 'image/jpeg' | 'image/png' | 'image/webp'; base64: string }[];
   assertions: readonly Assertion[];
 }
 

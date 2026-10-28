@@ -35,6 +35,7 @@ import { AgentsModule } from './core/agents/agents.module';
 import { CoachingModule } from './modules/coaching/coaching.module';
 import { MethodologyModule } from './modules/methodology/methodology.module';
 import { PlanningModule } from './modules/planning/planning.module';
+import { NutritionModule } from './modules/nutrition/nutrition.module';
 import { TrainingModule } from './modules/training/training.module';
 import { StudentStateModule } from './modules/student-state/student-state.module';
 import { DomainEventsModule } from './modules/domain-events/domain-events.module';
@@ -68,6 +69,7 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
     CoachingModule,
     PlanningModule,
     TrainingModule,
+    NutritionModule,
     AdminModule,
   ],
 })

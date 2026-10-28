@@ -19,8 +19,15 @@ import type { StrategyInput } from '../src/modules/planning/tasks/strategy';
 import type { StrengthInput } from '../src/modules/planning/tasks/strength';
 
 /** Treinador falso: saídas válidas por construção, a partir das entradas que o código montou. */
+/** Base64 da "imagem" que o treinador falso trata como tela que não é de treino. */
+export const NOT_A_WORKOUT_IMAGE = 'bm90LXdvcmtvdXQ=';
+
 export const fakeRunner = {
-  async run(task: { id: string }, input: unknown) {
+  async run(
+    task: { id: string },
+    input: unknown,
+    options?: { images?: readonly { base64: string }[] },
+  ) {
     const base = {
       modelRunIds: [] as string[],
       correctionRounds: 0,
@@ -136,6 +143,65 @@ export const fakeRunner = {
           })),
           guidelines: ['Beba água ao longo do dia.'],
           supplements: [],
+        },
+      };
+    }
+    if (task.id === 'vision.extract_workout_screenshot') {
+      const notWorkout = options?.images?.[0]?.base64 === NOT_A_WORKOUT_IMAGE;
+      return {
+        ...base,
+        output: notWorkout
+          ? { kind: 'NOT_A_WORKOUT', metrics: {}, confidence: 'HIGH', visibleText: [], note: null }
+          : {
+              kind: 'RUNNING',
+              metrics: { distanceMeters: 5_020, movingSeconds: 1_694, avgHeartRate: 152 },
+              confidence: 'HIGH',
+              visibleText: ['5,02 km', '28:14', 'FC média 152 bpm'],
+              note: null,
+            },
+      };
+    }
+    if (task.id === 'nutrition.interpret_food_log') {
+      const text = (input as { text: string }).text.toLowerCase();
+      const items = [
+        text.includes('arroz') && {
+          label: 'arroz branco cozido',
+          grams: 150,
+          portionSource: 'ESTIMATED',
+        },
+        text.includes('feij') && {
+          label: 'feijão carioca cozido',
+          grams: 90,
+          portionSource: 'HOUSEHOLD_MEASURE',
+        },
+        text.includes('frango') && {
+          label: 'peito de frango grelhado',
+          grams: 120,
+          portionSource: 'DECLARED',
+        },
+        text.includes('unicórnio') && {
+          label: 'unicórnio assado',
+          grams: 100,
+          portionSource: 'ESTIMATED',
+        },
+      ].filter(Boolean);
+      return {
+        ...base,
+        output: {
+          meal: 'LUNCH',
+          items,
+          needsClarification: items.length ? null : 'O que você comeu?',
+        },
+      };
+    }
+    if (task.id === 'vision.identify_meal') {
+      return {
+        ...base,
+        output: {
+          notFood: false,
+          mealSlotGuess: 'DINNER',
+          items: [{ label: 'salmão grelhado', estimatedGrams: 130, confidence: 'MEDIUM' }],
+          note: null,
         },
       };
     }

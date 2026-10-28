@@ -12,7 +12,7 @@
 import { Injectable } from '@nestjs/common';
 import { z } from 'zod';
 
-import type { GatewayMessage, TierRoute } from '../ai/ai.types';
+import type { GatewayMessage, MessagePart, TierRoute } from '../ai/ai.types';
 import { ModelGateway } from '../ai/model-gateway';
 import type { ScrubUser } from '../ai/pii-scrubber';
 import type { AgentContextSources, MethodologyContext } from './agent-context';
@@ -26,6 +26,8 @@ export interface AgentRunOptions {
   sources: AgentContextSources;
   /** Só avaliação: força o modelo (comparação antes de trocar a configuração do tier). */
   routeOverride?: TierRoute;
+  /** Imagens da tarefa de visão (base64): vão junto do texto, nunca dentro do JSON de dados. */
+  images?: readonly Extract<MessagePart, { type: 'image' }>[];
 }
 
 export interface AgentRunResult<O> {
@@ -100,10 +102,13 @@ export class AgentRunner {
       options.sources.state(task.state),
     ]);
     const system = composeSystem(task as AgentTask<unknown, unknown>, methodology.text);
+    const dataText = `<dados>\n${JSON.stringify({ estadoDoAluno: state.slices, entrada: input })}\n</dados>`;
     const messages: GatewayMessage[] = [
       {
         role: 'user',
-        content: `<dados>\n${JSON.stringify({ estadoDoAluno: state.slices, entrada: input })}\n</dados>`,
+        content: options.images?.length
+          ? [{ type: 'text', text: dataText }, ...options.images]
+          : dataText,
       },
     ];
 
