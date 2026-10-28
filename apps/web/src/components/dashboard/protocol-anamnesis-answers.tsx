@@ -23,7 +23,7 @@ import {
   STATUS_ITEMS,
   STOPPED_FOR_ITEMS,
   WEEKDAY_ITEMS,
-} from '../onboarding/step2-anamnesis';
+} from '../onboarding/legacy-anamnesis-items';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,

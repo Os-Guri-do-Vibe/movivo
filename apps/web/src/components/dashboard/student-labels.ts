@@ -6,7 +6,7 @@ import {
   PERIOD_ITEMS,
   STATUS_ITEMS,
   WEEKDAY_ITEMS,
-} from '../onboarding/step2-anamnesis';
+} from '../onboarding/legacy-anamnesis-items';
 import type { StatusTone } from './control-center-table';
 
 /**

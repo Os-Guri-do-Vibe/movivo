@@ -83,7 +83,7 @@ import {
   TextField,
   type FieldOption,
 } from './fields';
-import { WEEKDAY_ITEMS } from '../onboarding/step2-anamnesis';
+import { WEEKDAY_ITEMS } from '../onboarding/legacy-anamnesis-items';
 import { AnamnesisAnswersModal, BIOLOGICAL_SEX_LABELS } from './protocol-anamnesis-answers';
 import { meaningfulText } from './queue-board';
 import { SubstitutionCatalogGapDialog } from './substitution-catalog-gap-dialog';
