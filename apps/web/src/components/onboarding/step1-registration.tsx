@@ -260,7 +260,7 @@ export function Step1Registration({
 }
 
 /** Renderiza o `label` do consentimento com o link de Termos, sem alterar o texto do backend. */
-function ConsentLabel({ consent }: { consent: ConsentItemView }) {
+export function ConsentLabel({ consent }: { consent: ConsentItemView }) {
   const parts = consent.label.split(/(\[[^\]]+\]\([^)]+\))/g);
   return (
     <>

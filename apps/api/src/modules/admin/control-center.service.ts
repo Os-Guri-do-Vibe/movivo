@@ -1,6 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
-  anamnesisStructuredSchema,
   createWhatsappInstanceSchema,
   type ControlCenterIntegrationResponse,
   attributionLabel,
@@ -20,7 +19,6 @@ import {
   trainingLocationSchema,
   ControlCenterCapability as Capability,
   type ExpenseCategory,
-  type ControlCenterEvolutionPoint,
   type ControlCenterEntryCohort,
   type ControlCenterFinanceResponse,
   type ControlCenterMarketingResponse,
@@ -36,44 +34,49 @@ import {
   type ControlCenterTimelineEvent,
   type ControlCenterComplianceResponse,
 } from '@movivo/shared';
-import { and, count, desc, eq, gte, isNotNull, isNull, sql, type SQLWrapper } from 'drizzle-orm';
-import type { Redis } from 'ioredis';
-import { z } from 'zod';
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  sql,
+  type SQLWrapper,
+} from 'drizzle-orm';
 
-import { AgentConfigRepository } from '../../core/agent-config/agent-config.repository';
 import { DatabaseHealthService } from '../../core/database';
-import { HealthCipherService } from '../../core/database/health-cipher.service';
 import {
   adSpend,
-  aiJobs,
+  modelRuns,
   anamnesisSessions,
   auditLogs,
-  checkins,
+  checkIns,
+  coachingDecisions,
+  coachingProposals,
   consents,
   conversations,
+  exceptionCases,
   expenses,
-  handoffAlerts,
-  knowledgeBase,
+  nutritionPlans,
   payments,
-  protocols,
-  protocolVersions,
+  scheduledSessions,
+  sessionExecutions,
+  studentGoals,
+  trainingPlans,
   subscriptions,
   users,
   userStatusTransitions,
-  workoutCompletions,
 } from '../../core/database/schema';
 import {
   TenantDatabase,
   type TenantTransaction,
 } from '../../core/database/tenant-database.service';
-import {
-  REDIS_CLIENT,
-  REDIS_KEY_BUILDER,
-  RedisHealthService,
-  type RedisKeyBuilder,
-} from '../../core/redis';
+import { RedisHealthService } from '../../core/redis';
 import { strictSafeParse } from '../../core/validation/strict-input';
-import { ragUsageDay, ragUsageKeys } from '../ai-coach/rag/rag-usage.keys';
 import { roleHasCapabilities } from '../auth/capabilities';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { EVOLUTION_TRANSPORT, type EvolutionTransport } from '../whatsapp/evolution-transport';
@@ -111,31 +114,6 @@ const PLAN_MONTHS: Record<string, number> = {
   ANNUAL: 12,
 };
 
-/**
- * Câmbio USD→BRL. Continua constante em código: `model_pricing` guarda preço em moeda
- * do provedor (USD), não taxa de câmbio — cotação diária é problema de outra sprint.
- * // TODO: confirmar câmbio com Eduardo/Henrique.
- */
-const USD_TO_BRL = 5.4;
-
-/**
- * Preço de LLM — **origem trocada na US-8.4 / TASK-8.4.3**: era a constante versionada em
- * código da TASK-7.2.3, agora vem da tabela `model_pricing`, versionada por vigência.
- *
- * O casamento por prefixo (`gpt-4.1` casa `gpt-4.1-2025-04-14`, e `gpt-4.1-mini` ganha de
- * `gpt-4.1` por ser o prefixo mais longo) era feito em TS e agora é o `order by length`
- * do LATERAL. A vigência é comparada com a **data do job**, não com hoje: mudar o preço
- * hoje não altera o custo apurado de mês passado.
- */
-const AI_PRICE_LATERAL = sql`left join lateral (
-  select mp.input_price_per_1k_cents as input_cents, mp.output_price_per_1k_cents as output_cents
-  from model_pricing mp
-  where lower(coalesce(${aiJobs.modelUsed}, '')) like mp.model || '%'
-    and mp.valid_from <= (${aiJobs.createdAt} at time zone ${TIMEZONE})::date
-    and (mp.valid_to is null or mp.valid_to > (${aiJobs.createdAt} at time zone ${TIMEZONE})::date)
-  order by length(mp.model) desc, mp.valid_from desc
-  limit 1
-) price on true`;
 /** Teto de espera pela EvolutionAPI ao ler a conexão do WhatsApp na Visão Geral. */
 const WHATSAPP_PROBE_TIMEOUT_MS = 3000;
 /** Janela das séries e do mapa de calor da Visão Geral. */
@@ -174,34 +152,6 @@ const OVERVIEW_ATTENTION_THRESHOLDS = {
   marketingMaxChannelCacBrl: 117,
 } as const;
 
-/**
- * Rótulo obrigatório da adesão (US-7.4, TASK-7.4.3): o que existe hoje é o aluno
- * **declarando** no check-in, não o treino concluído verificado — que depende de
- * `workout_completions` — que passou a existir na US-8.1 e sai na North Star, em campo
- * próprio. O rótulo continua porque as duas grandezas seguem diferentes (US-8.8).
- */
-const DECLARED_ADHERENCE_NOTICE =
-  'Adesão declarada via check-in: mede resposta ao check-in, não execução. Treino concluído verificado é medido à parte, na North Star (`workout_completions`).';
-
-/**
- * Forma persistida das respostas estruturadas de check-in (`checkins.answers`, plaintext —
- * achado 2026-09-13, mesmo tratamento que os blocos comuns da renovação de mesociclo dão a
- * pergunta equivalente).
- */
-const checkinAnswersSchema = z.object({
-  sleepQuality: z.string().optional(),
-  mood: z.string().optional(),
-  nutritionScore: z.number().optional(),
-  adherenceScore: z.number().optional(),
-  durationFit: z.string().optional(),
-});
-
-/** Forma persistida do bloco cifrado (`checkins.notes_cipher`) — só os dois textos livres. */
-const checkinNotesSchema = z.object({
-  difficultExerciseDescription: z.string().optional(),
-  improvementFeedback: z.string().optional(),
-});
-
 type MetricUnit = ControlCenterMetric['unit'];
 
 @Injectable()
@@ -211,10 +161,6 @@ export class ControlCenterService {
     private readonly databaseHealth: DatabaseHealthService,
     private readonly redisHealth: RedisHealthService,
     private readonly audit: AuditService,
-    private readonly cipher: HealthCipherService,
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
-    @Inject(REDIS_KEY_BUILDER) private readonly redisKeys: RedisKeyBuilder,
-    private readonly agentConfig: AgentConfigRepository,
     @Inject(EVOLUTION_TRANSPORT) private readonly evolution: EvolutionTransport,
   ) {}
 
@@ -237,7 +183,7 @@ export class ControlCenterService {
    */
   async overview(actor: AuthenticatedUser): Promise<ControlCenterOverviewResponse> {
     const pillars: ControlCenterOverviewResponse['data']['pillars'] = [];
-    // IA e Sistema leem o mesmo `system()` (latência do coach, falhas de job, SLOs): uma
+    // IA e Sistema leem o mesmo `system()` (latência da IA, falhas de job, SLOs): uma
     // consulta só por Visão Geral, feita sob demanda para quem tem ao menos um dos dois.
     let systemSnapshot: Promise<ControlCenterSystemResponse> | null = null;
     const system = () => (systemSnapshot ??= this.system());
@@ -276,12 +222,12 @@ export class ControlCenterService {
         tx
           .select({
             total: sql<number>`(
-            count(*) filter (where ${handoffAlerts.status} = 'OPEN' and ${handoffAlerts.level} = 'SAFETY')
+            count(*) filter (where ${exceptionCases.status} <> 'RESOLVED' and ${exceptionCases.kind} = 'SAFETY')
             + (select count(*) from ${anamnesisSessions}
                where ${anamnesisSessions.parqState} = 'BLOQUEADO_AGUARDANDO_CLEARANCE')
           )::int`,
           })
-          .from(handoffAlerts),
+          .from(exceptionCases),
       );
       criticalAlerts = alerts?.total ?? 0;
     }
@@ -329,7 +275,7 @@ export class ControlCenterService {
                   criticalAlerts,
                   'COUNT',
                   'AVAILABLE' as const,
-                  'Alertas SAFETY abertos mais PAR-Q bloqueado aguardando liberação humana.',
+                  'Casos de segurança abertos na fila de exceções mais PAR-Q bloqueado aguardando liberação humana.',
                 ),
               },
             ]
@@ -459,54 +405,37 @@ export class ControlCenterService {
         .from(conversations)
         .where(gte(conversations.createdAt, since)),
     );
-    // Sprint 11: duas personas publicáveis (uma por público). Zero slots publicados é o
-    // caso em que a IA responde com o default de código — vira sinal de atenção, não número.
-    const [malePersona, femalePersona] = await Promise.all([
-      this.agentConfig.activePayload('MALE'),
-      this.agentConfig.activePayload('FEMALE'),
-    ]);
-    const publishedSlots = [malePersona, femalePersona].filter(Boolean).length;
     const blockedRate = this.blockedRate(row?.blocked ?? 0, row?.validated ?? 0);
     const blockedAttention =
       blockedRate.value !== null &&
       blockedRate.value > OVERVIEW_ATTENTION_THRESHOLDS.aiMaxBlockedPercent;
-    const personaAttention = publishedSlots === 0;
 
-    // Falha de job e DLQ são a mesma pergunta para quem monitora: "há trabalho de IA que
-    // não terminou e pede ação?". O SLO de cada um continua separado em Sistema.
-    const failedJobs = (system.data.aiFailures.value ?? 0) + (system.data.aiDlq.value ?? 0);
+    // Chamadas de modelo que falharam em todas as rotas do nível: pede ação (crédito, chave, fornecedor).
+    const failedCalls = system.data.aiFailures.value ?? 0;
 
     return {
       pillar: 'AI',
       label: 'IA',
-      state: blockedAttention || personaAttention ? 'ATTENTION' : 'OK',
-      href: '/dashboard/ia/agente',
-      headline: { label: 'Resposta bloqueada pela validação', metric: blockedRate },
+      state: blockedAttention || failedCalls > 0 ? 'ATTENTION' : 'OK',
+      href: '/dashboard/ia/agentes',
+      headline: { label: 'Resposta retida pela validação', metric: blockedRate },
       details: [
-        { label: 'Resposta do coach (p95)', metric: system.data.whatsappLatency.p95 },
+        { label: 'Resposta no WhatsApp (p95)', metric: system.data.whatsappLatency.p95 },
         {
-          label: `Trabalhos de IA com falha (${INSIGHT_WINDOW_DAYS} dias)`,
+          label: `Chamadas de IA com falha (${INSIGHT_WINDOW_DAYS} dias)`,
           metric: this.metric(
-            failedJobs,
+            failedCalls,
             'COUNT',
             'AVAILABLE',
-            'Trabalhos de IA que falharam de vez ou esgotaram as tentativas e viraram tarefa manual (DLQ).',
+            'Chamadas de modelo em que todas as rotas do nível falharam.',
           ),
         },
       ],
-      signals: [
-        {
-          label: 'Personas',
-          state: personaAttention ? 'ATTENTION' : 'OK',
-          text: personaAttention
-            ? 'Nenhuma publicada'
-            : `Masculina ${malePersona ? `v${malePersona.version}` : 'sem versão própria'} · Feminina ${femalePersona ? `v${femalePersona.version}` : 'sem versão própria'}`,
-        },
-      ],
+      signals: [],
       reason: blockedAttention
-        ? `Taxa de resposta bloqueada pela validação acima de ${OVERVIEW_ATTENTION_THRESHOLDS.aiMaxBlockedPercent}%.`
-        : personaAttention
-          ? 'Nenhuma persona publicada: a IA responde com o default de código.'
+        ? `Taxa de resposta retida pela validação acima de ${OVERVIEW_ATTENTION_THRESHOLDS.aiMaxBlockedPercent}%.`
+        : failedCalls > 0
+          ? `${failedCalls} chamada(s) de IA falharam em todas as rotas: confira créditos e chaves dos fornecedores.`
           : null,
     };
   }
@@ -618,11 +547,11 @@ export class ControlCenterService {
         .select({
           formStarted: sql<number>`count(distinct ${anamnesisSessions.id})::int`,
           formSubmitted: sql<number>`count(distinct ${anamnesisSessions.id}) filter (where ${anamnesisSessions.submittedAt} is not null)::int`,
-          protocolActive: sql<number>`count(distinct ${protocols.userId}) filter (where ${protocols.status} = 'ACTIVE')::int`,
+          planActive: sql<number>`count(distinct ${trainingPlans.userId}) filter (where ${trainingPlans.status} = 'ACTIVE')::int`,
           subscriptionActive: sql<number>`count(distinct ${subscriptions.userId}) filter (where ${subscriptions.status} = 'ACTIVE')::int`,
         })
         .from(anamnesisSessions)
-        .leftJoin(protocols, eq(protocols.userId, anamnesisSessions.userId))
+        .leftJoin(trainingPlans, eq(trainingPlans.userId, anamnesisSessions.userId))
         .leftJoin(subscriptions, eq(subscriptions.userId, anamnesisSessions.userId));
 
       const anamnesisFunnel = await this.anamnesisFunnel(tx);
@@ -763,8 +692,8 @@ export class ControlCenterService {
             funnel?.formSubmitted ?? 0,
             'Sessões de formulário enviadas.',
           ),
-          protocolActive: this.marketingMetric(
-            funnel?.protocolActive ?? 0,
+          planActive: this.marketingMetric(
+            funnel?.planActive ?? 0,
             'Titulares distintos com protocolo ativo.',
           ),
           subscriptionActive: this.marketingMetric(
@@ -1060,7 +989,7 @@ export class ControlCenterService {
           status: users.status,
           subscriptionStatus: this.latestSubscriptionStatus(),
           subscriptionPlan: this.latestSubscriptionPlan(),
-          protocolStatus: this.latestProtocolStatus(),
+          planStatus: this.latestPlanStatus(),
           // "Data de inscrição" = quando a MATRÍCULA foi concluída — a primeira anamnese
           // enviada, não a última (uma re-anamnese não deve mudar quando o aluno entrou).
           enrolledAt: sql<Date | null>`(
@@ -1072,8 +1001,8 @@ export class ControlCenterService {
             where c.user_id = users.id and c.direction = 'INBOUND'
           )`,
           unansweredCheckinSentAt: sql<Date | null>`(
-            select min(k.sent_at) from ${checkins} k
-            where k.user_id = users.id and k.sent_at is not null and k.submitted_at is null
+            select min(k.created_at) from ${checkIns} k
+            where k.user_id = users.id and k.status = 'SENT'
           )`,
           renewalAt: sql<Date | null>`(
             select coalesce(s.trial_ends_at, s.current_period_end) from ${subscriptions} s
@@ -1124,7 +1053,7 @@ export class ControlCenterService {
   }
 
   /**
-   * North Star (US-8.1 / TASK-8.1.5): média de `workout_completions` na janela de 30
+   * North Star (US-8.1 / TASK-8.1.5): média de `session_executions` na janela de 30
    * dias a partir do início da assinatura **paga**, contra a meta ≥8.
    *
    * `paid_start` é o `current_period_start` mais antigo de status pago — trial não conta
@@ -1142,9 +1071,6 @@ export class ControlCenterService {
         cohort_size: number;
         total_completions: number;
         reporting: number;
-        quick_reply: number;
-        checkin: number;
-        conversation: number;
       }>(sql`
         with cohort as (
           select user_id, min(current_period_start) as paid_start
@@ -1154,30 +1080,24 @@ export class ControlCenterService {
           group by user_id
         ),
         cohort_window as (
-          select
-            cohort.user_id,
-            count(w.id)::int as total,
-            count(w.id) filter (where w.source = 'WHATSAPP_QUICK_REPLY')::int as quick_reply,
-            count(w.id) filter (where w.source = 'CHECKIN')::int as checkin,
-            count(w.id) filter (where w.source = 'CONVERSATION')::int as conversation
+          select cohort.user_id, count(e.id)::int as total
           from cohort
-          left join ${workoutCompletions} w
-            on w.user_id = cohort.user_id
-           and w.completed_at >= cohort.paid_start::date
-           and w.completed_at < (cohort.paid_start + make_interval(days => ${NORTH_STAR_WINDOW_DAYS}))::date
+          left join ${sessionExecutions} e
+            on e.user_id = cohort.user_id
+           and e.status in ('COMPLETED', 'PARTIAL')
+           and e.performed_on >= cohort.paid_start::date
+           and e.performed_on < (cohort.paid_start + make_interval(days => ${NORTH_STAR_WINDOW_DAYS}))::date
           group by cohort.user_id
         )
         select
           count(*)::int as cohort_size,
           coalesce(sum(total), 0)::int as total_completions,
-          count(*) filter (where total > 0)::int as reporting,
-          coalesce(sum(quick_reply), 0)::int as quick_reply,
-          coalesce(sum(checkin), 0)::int as checkin,
-          coalesce(sum(conversation), 0)::int as conversation
+          count(*) filter (where total > 0)::int as reporting
         from cohort_window
       `),
     );
     const cohortSize = this.number(row?.cohort_size);
+    const bySource = await this.northStarBySource();
     const definition = `Média de treinos registrados nos primeiros ${NORTH_STAR_WINDOW_DAYS} dias de assinatura paga (meta ≥${NORTH_STAR_TARGET}). Treino verificado, não declarado.`;
     const reportingDefinition = `Percentual da coorte paga com ao menos 1 treino registrado na janela. Abaixo de 100%, a North Star é um piso.`;
     if (cohortSize === 0) {
@@ -1209,23 +1129,48 @@ export class ControlCenterService {
         reportingDefinition,
       ),
       cohortSize,
-      bySource: [
-        { source: 'WHATSAPP_QUICK_REPLY' as const, completions: this.number(row?.quick_reply) },
-        { source: 'CHECKIN' as const, completions: this.number(row?.checkin) },
-        { source: 'CONVERSATION' as const, completions: this.number(row?.conversation) },
-      ],
+      bySource,
     };
   }
 
-  /** Adesão **declarada** da Sprint 7: check-ins respondidos / enviados. Proxy, não treino. */
+  /** Treinos da janela da North Star por origem do registro (link, print, arquivo, texto, equipe). */
+  private async northStarBySource() {
+    const rows = await this.db.runAsSystem((tx) =>
+      tx.execute<{ source: string; completions: number }>(sql`
+        with cohort as (
+          select user_id, min(current_period_start) as paid_start
+          from ${subscriptions}
+          where current_period_start is not null
+            and status in ('ACTIVE', 'PAST_DUE', 'CANCELED', 'EXPIRED')
+          group by user_id
+        )
+        select e.source, count(*)::int as completions
+        from cohort
+        join ${sessionExecutions} e
+          on e.user_id = cohort.user_id
+         and e.status in ('COMPLETED', 'PARTIAL')
+         and e.performed_on >= cohort.paid_start::date
+         and e.performed_on < (cohort.paid_start + make_interval(days => ${NORTH_STAR_WINDOW_DAYS}))::date
+        group by e.source
+      `),
+    );
+    return (
+      ['LINK', 'WHATSAPP_TEXT', 'WHATSAPP_SCREENSHOT', 'FIT_FILE', 'GPX_FILE', 'STAFF'] as const
+    ).map((source) => ({
+      source,
+      completions: this.number(rows.find((row) => row.source === source)?.completions),
+    }));
+  }
+
+  /** Adesão **declarada**: check-ins respondidos / enviados. Proxy de engajamento, não de treino. */
   private async declaredAdherenceRate(): Promise<ControlCenterMetric> {
     const [row] = await this.db.runAsSystem((tx) =>
       tx
         .select({
-          sent: sql<number>`count(*) filter (where ${checkins.sentAt} is not null)::int`,
-          responded: sql<number>`count(*) filter (where ${checkins.submittedAt} is not null)::int`,
+          sent: sql<number>`count(*)::int`,
+          responded: sql<number>`count(*) filter (where ${checkIns.status} = 'ANSWERED')::int`,
         })
-        .from(checkins),
+        .from(checkIns),
     );
     const sent = this.number(row?.sent);
     const definition =
@@ -1236,12 +1181,12 @@ export class ControlCenterService {
   }
 
   /**
-   * Ficha unificada (US-7.4). Uma tela substitui as quatro que o RT abria: cadastro,
-   * protocolo, check-ins e conversas viram uma timeline cronológica única.
+   * Ficha unificada do aluno: cadastro, plano, adesão, decisões, exceções e conversa numa
+   * timeline só.
    *
-   * O corte de saúde é **no servidor**: sem `STUDENTS_HEALTH_READ`, `health` é `null`,
-   * a evolução declarada não é decifrada, e nenhum detalhe de check-in, PAR-Q ou
-   * conteúdo de conversa entra no payload. A UI não é a barreira.
+   * O corte de saúde é **no servidor**: sem `STUDENTS_HEALTH_READ`, `health` é `null`, a fila
+   * de exceções e as decisões vêm vazias e nenhum conteúdo de PAR-Q, dor ou conversa entra
+   * no payload. A UI não é a barreira.
    */
   async student(
     actor: AuthenticatedUser,
@@ -1250,6 +1195,7 @@ export class ControlCenterService {
   ): Promise<ControlCenterStudentDetailResponse> {
     const canReadHealth = roleHasCapabilities(actor.role, [Capability.STUDENTS_HEALTH_READ]);
     const since = new Date(Date.now() - periodDays * 86_400_000);
+    const adherenceSince = new Date(Date.now() - 28 * 86_400_000).toISOString().slice(0, 10);
     const raw = await this.db.runAsUser(actor.userId, actor.role, async (tx) => {
       const [row] = await tx
         .select({
@@ -1258,10 +1204,9 @@ export class ControlCenterService {
           email: users.email,
           phoneNumber: users.phoneNumber,
           status: users.status,
-          requiresProfessionalReview: users.requiresProfessionalReview,
           subscriptionStatus: this.latestSubscriptionStatus(),
           subscriptionPlan: this.latestSubscriptionPlan(),
-          protocolStatus: this.latestProtocolStatus(),
+          planStatus: this.latestPlanStatus(),
           anamnesisStatus: sql<string | null>`(
             select a.status::text from ${anamnesisSessions} a
             where a.user_id = users.id order by a.created_at desc limit 1
@@ -1270,17 +1215,13 @@ export class ControlCenterService {
             select a.parq_state::text from ${anamnesisSessions} a
             where a.user_id = users.id order by a.created_at desc limit 1
           )`,
-          routine: sql<unknown>`(
-            select a.data_block_3 from ${anamnesisSessions} a
-            where a.user_id = users.id order by a.created_at desc limit 1
-          )`,
           lastInboundAt: sql<Date | null>`(
             select max(c.created_at) from ${conversations} c
             where c.user_id = users.id and c.direction = 'INBOUND'
           )`,
           unansweredCheckinSentAt: sql<Date | null>`(
-            select min(k.sent_at) from ${checkins} k
-            where k.user_id = users.id and k.sent_at is not null and k.submitted_at is null
+            select min(k.created_at) from ${checkIns} k
+            where k.user_id = users.id and k.status = 'SENT'
           )`,
           renewalAt: sql<Date | null>`(
             select coalesce(s.trial_ends_at, s.current_period_end) from ${subscriptions} s
@@ -1288,24 +1229,9 @@ export class ControlCenterService {
           )`,
         })
         .from(users)
-        .where(and(eq(users.id, studentId), eq(users.role, 'USER')))
-        .limit(1);
-      if (!row) throw new NotFoundException('Aluno não encontrado.');
-      const [protocol] = await tx
-        .select({
-          id: protocols.id,
-          version: protocols.version,
-          currentWeek: protocols.currentWeek,
-          totalWeeks: protocols.totalWeeks,
-          signedAt: protocols.signedAt,
-        })
-        .from(protocols)
-        .where(eq(protocols.userId, studentId))
-        .orderBy(desc(protocols.createdAt))
-        .limit(1);
+        .where(and(eq(users.id, studentId), eq(users.role, 'USER')));
+      if (!row) return null;
 
-      // --- Origens da timeline (6). Mescladas e ordenadas em memória: são recortes
-      // pequenos por aluno, e um UNION em SQL só trocaria clareza por nada.
       const anamnesisRows = await tx
         .select({
           createdAt: anamnesisSessions.createdAt,
@@ -1322,78 +1248,108 @@ export class ControlCenterService {
         .where(eq(anamnesisSessions.userId, studentId))
         .orderBy(desc(anamnesisSessions.createdAt))
         .limit(10);
-      const versionRows = await tx
+      const [trainingPlan] = await tx
+        .select({ version: trainingPlans.version, publishedAt: trainingPlans.publishedAt })
+        .from(trainingPlans)
+        .where(and(eq(trainingPlans.userId, studentId), eq(trainingPlans.status, 'ACTIVE')));
+      const [nutritionPlan] = await tx
+        .select({ version: nutritionPlans.version, publishedAt: nutritionPlans.publishedAt })
+        .from(nutritionPlans)
+        .where(and(eq(nutritionPlans.userId, studentId), eq(nutritionPlans.status, 'ACTIVE')));
+      const [goal] = await tx
+        .select({ declared: studentGoals.declared, strategy: studentGoals.strategy })
+        .from(studentGoals)
+        .where(and(eq(studentGoals.userId, studentId), eq(studentGoals.status, 'ACTIVE')))
+        .orderBy(desc(studentGoals.version))
+        .limit(1);
+      const [adherence] = await tx
         .select({
-          createdAt: protocolVersions.createdAt,
-          version: protocolVersions.version,
-          changeReason: protocolVersions.changeReason,
-          generatedBy: protocolVersions.generatedBy,
-          signedAt: protocolVersions.signedAt,
+          planned: sql<number>`count(*)::int`,
+          done: sql<number>`count(*) filter (where ${scheduledSessions.status} in ('DONE', 'PARTIAL'))::int`,
         })
-        .from(protocolVersions)
-        .where(and(eq(protocolVersions.userId, studentId), gte(protocolVersions.createdAt, since)))
-        .orderBy(desc(protocolVersions.createdAt))
-        .limit(60);
-      const checkinRows = await tx
+        .from(scheduledSessions)
+        .where(
+          and(
+            eq(scheduledSessions.userId, studentId),
+            gte(scheduledSessions.scheduledOn, adherenceSince),
+            lte(scheduledSessions.scheduledOn, new Date().toISOString().slice(0, 10)),
+            inArray(scheduledSessions.status, ['DONE', 'PARTIAL', 'MISSED']),
+          ),
+        );
+      const [checkinStats] = await tx
         .select({
-          weekNumber: checkins.weekNumber,
-          sentAt: checkins.sentAt,
-          submittedAt: checkins.submittedAt,
-          answers: checkins.answers,
-          notesCipher: checkins.notesCipher,
+          sent: sql<number>`count(*)::int`,
+          answered: sql<number>`count(*) filter (where ${checkIns.status} = 'ANSWERED')::int`,
         })
-        .from(checkins)
-        .where(eq(checkins.userId, studentId))
-        .orderBy(desc(checkins.weekNumber))
-        .limit(60);
+        .from(checkIns)
+        .where(eq(checkIns.userId, studentId));
+      const executions = await tx
+        .select({
+          id: sessionExecutions.id,
+          performedOn: sessionExecutions.performedOn,
+          modality: sessionExecutions.modality,
+          status: sessionExecutions.status,
+          rpe: sessionExecutions.rpe,
+          durationMinutes: sessionExecutions.durationMinutes,
+          painReports: sessionExecutions.painReports,
+          finishedAt: sessionExecutions.finishedAt,
+        })
+        .from(sessionExecutions)
+        .where(
+          and(eq(sessionExecutions.userId, studentId), gte(sessionExecutions.createdAt, since)),
+        )
+        .orderBy(desc(sessionExecutions.performedOn))
+        .limit(30);
+      const cases = canReadHealth
+        ? await tx
+            .select({
+              id: exceptionCases.id,
+              kind: exceptionCases.kind,
+              priority: exceptionCases.priority,
+              domain: exceptionCases.domain,
+              status: exceptionCases.status,
+              summary: exceptionCases.summary,
+              createdAt: exceptionCases.createdAt,
+              resolvedAt: exceptionCases.resolvedAt,
+            })
+            .from(exceptionCases)
+            .where(and(eq(exceptionCases.userId, studentId), gte(exceptionCases.createdAt, since)))
+            .orderBy(desc(exceptionCases.createdAt))
+            .limit(50)
+        : [];
+      const decisions = canReadHealth
+        ? await tx
+            .select({
+              action: coachingProposals.actionType,
+              verdict: coachingDecisions.verdict,
+              decidedBy: coachingDecisions.decidedBy,
+              createdAt: coachingProposals.createdAt,
+            })
+            .from(coachingProposals)
+            .leftJoin(coachingDecisions, eq(coachingDecisions.proposalId, coachingProposals.id))
+            .where(eq(coachingProposals.userId, studentId))
+            .orderBy(desc(coachingProposals.createdAt))
+            .limit(15)
+        : [];
+      const checkInEvents = await tx
+        .select({ answeredAt: checkIns.answeredAt })
+        .from(checkIns)
+        .where(and(eq(checkIns.userId, studentId), eq(checkIns.status, 'ANSWERED')))
+        .orderBy(desc(checkIns.answeredAt))
+        .limit(30);
       const subscriptionRows = await tx
         .select({
           createdAt: subscriptions.createdAt,
-          plan: subscriptions.plan,
           status: subscriptions.status,
+          plan: subscriptions.plan,
           trialEndsAt: subscriptions.trialEndsAt,
           currentPeriodStart: subscriptions.currentPeriodStart,
           canceledAt: subscriptions.canceledAt,
-          cancelReason: subscriptions.cancelReason,
         })
         .from(subscriptions)
         .where(eq(subscriptions.userId, studentId))
         .orderBy(desc(subscriptions.createdAt))
-        .limit(20);
-      const handoffRows = await tx
-        .select({
-          createdAt: handoffAlerts.createdAt,
-          updatedAt: handoffAlerts.updatedAt,
-          level: handoffAlerts.level,
-          reason: handoffAlerts.reason,
-          status: handoffAlerts.status,
-        })
-        .from(handoffAlerts)
-        .where(and(eq(handoffAlerts.userId, studentId), gte(handoffAlerts.createdAt, since)))
-        .orderBy(desc(handoffAlerts.createdAt))
-        .limit(40);
-      // Marco de conversa, não transcrição: um item por dia com o volume trocado.
-      // `group by 1` pela posição — a mesma expressão reemitida colide no GROUP BY.
-      const conversationDays = await tx
-        .select({ day: this.localDay(conversations.createdAt), total: count() })
-        .from(conversations)
-        .where(
-          and(
-            eq(conversations.userId, studentId),
-            eq(conversations.hiddenInPanel, false),
-            gte(conversations.createdAt, since),
-          ),
-        )
-        .groupBy(sql`1`);
-      const blockedRows = await tx
-        .select({
-          createdAt: conversations.createdAt,
-          content: conversations.content,
-        })
-        .from(conversations)
-        .where(and(eq(conversations.userId, studentId), eq(conversations.validationPassed, false)))
-        .orderBy(desc(conversations.createdAt))
-        .limit(10);
+        .limit(5);
       const [quality] = await tx
         .select({
           blocked: sql<number>`count(*) filter (where ${conversations.validationPassed} = false)::int`,
@@ -1401,47 +1357,47 @@ export class ControlCenterService {
         })
         .from(conversations)
         .where(eq(conversations.userId, studentId));
-
+      // Mensagens por dia, sem o conteúdo: só o ritmo da conversa entra na linha do tempo.
+      const conversationDays = canReadHealth
+        ? await tx
+            .select({
+              day: this.localDay(conversations.createdAt),
+              messages: sql<number>`count(*)::int`,
+              at: sql<Date>`max(${conversations.createdAt})`,
+            })
+            .from(conversations)
+            .where(and(eq(conversations.userId, studentId), gte(conversations.createdAt, since)))
+            .groupBy(sql`1`)
+        : [];
       await this.audit.append(tx, {
         actorId: actor.userId,
         userId: studentId,
-        action: 'HEALTH_DATA_VIEWED',
-        entityType: 'student_control_center',
+        action: canReadHealth ? 'STUDENT_DETAIL_VIEWED_WITH_HEALTH' : 'STUDENT_DETAIL_VIEWED',
+        entityType: 'student',
         entityId: studentId,
-        changes: { purpose: 'student_monitoring', role: actor.role, health: canReadHealth },
+        changes: { periodDays },
       });
       return {
         row,
-        protocol,
         anamnesisRows,
-        versionRows,
-        checkinRows,
+        trainingPlan,
+        nutritionPlan,
+        goal,
+        adherence,
+        checkinStats,
+        executions,
+        cases,
+        decisions,
+        checkInEvents,
         subscriptionRows,
-        handoffRows,
-        conversationDays,
-        blockedRows,
         quality,
+        conversationDays,
       };
     });
-
+    if (!raw) throw new NotFoundException('Aluno não encontrado.');
     const { row } = raw;
-    // Decifra fora da transação (o `HealthCipherService` usa o cliente do core), e só
-    // quando a capability existe: sem ela o ciphertext nem é aberto.
-    const declared = canReadHealth ? await this.decryptCheckins(raw.checkinRows) : [];
-    const blockedOccurrences = canReadHealth
-      ? await Promise.all(
-          raw.blockedRows.map(async (row) => ({
-            at: row.createdAt.toISOString(),
-            content: await this.cipher.decryptText(row.content),
-          })),
-        )
-      : [];
-    const evolution = declared.map(({ point }) => point);
-    const painReports = declared.flatMap(({ point, painReport }) =>
-      painReport ? [{ at: point.at, week: point.week, text: painReport }] : [],
-    );
 
-    // Origem do primeiro toque: a sessão mais antiga é a que traz o cadastro (US-8.2).
+    // Origem do primeiro toque: a sessão mais antiga é a que traz o cadastro.
     const firstSession = raw.anamnesisRows.at(-1) ?? null;
     const acquisition =
       firstSession?.firstTouchAt != null
@@ -1453,235 +1409,177 @@ export class ControlCenterService {
             capturedAt: firstSession.firstTouchAt.toISOString(),
           }
         : null;
-    const acquisitionText = attributionLabel(acquisition);
 
-    const events: Array<ControlCenterTimelineEvent | null> = [];
-    for (const item of raw.anamnesisRows) {
-      events.push(
-        this.event(
-          item.createdAt,
-          'ANAMNESIS',
-          'ANAMNESIS_STARTED',
-          // Marco de cadastro carrega a origem — inclusive a ausência dela.
-          item === firstSession ? { origin: acquisitionText } : {},
-        ),
-      );
-      if (item.submittedAt) {
-        events.push(
-          this.event(item.submittedAt, 'ANAMNESIS', 'ANAMNESIS_SUBMITTED', { status: item.status }),
-        );
-      }
-    }
-    if (raw.protocol) {
-      events.push(
-        this.event(raw.protocol.signedAt, 'PROTOCOL', 'PROTOCOL_SIGNED', {
-          version: raw.protocol.version,
-        }),
-      );
-    }
-    for (const version of raw.versionRows) {
-      events.push(
-        this.event(version.createdAt, 'PROTOCOL', 'PROTOCOL_VERSION_GENERATED', {
-          version: version.version,
-          reason: version.changeReason,
-          model: version.generatedBy,
-        }),
-      );
-      if (version.signedAt) {
-        events.push(
-          this.event(version.signedAt, 'PROTOCOL', 'PROTOCOL_VERSION_SIGNED', {
-            version: version.version,
-          }),
-        );
-      }
-    }
-    // Respostas por SEMANA, não por índice: `decryptCheckins` pula linha sem resposta
-    // válida, então as duas listas não têm o mesmo comprimento.
-    const answersByWeek = new Map(declared.map(({ point }) => [point.week, point]));
-    for (const checkin of raw.checkinRows) {
-      events.push(
-        this.event(checkin.sentAt, 'CHECKIN', 'CHECKIN_SENT', { week: checkin.weekNumber }),
-      );
-      const answers = canReadHealth ? answersByWeek.get(checkin.weekNumber) : undefined;
-      events.push(
-        this.event(checkin.submittedAt, 'CHECKIN', 'CHECKIN_ANSWERED', {
-          week: checkin.weekNumber,
-          // Resposta de saúde: só com a capability, mesma regra da seção `health`.
-          ...(answers
-            ? {
-                sleepQuality: answers.sleepQuality,
-                mood: answers.mood,
-                nutritionScore: answers.nutritionScore,
-                adherenceScore: answers.adherenceScore,
-                durationFit: answers.durationFit,
-              }
-            : {}),
-        }),
-      );
-    }
-    for (const subscription of raw.subscriptionRows) {
-      events.push(
-        this.event(subscription.createdAt, 'SUBSCRIPTION', 'SUBSCRIPTION_CREATED', {
-          plan: subscription.plan,
-          status: subscription.status,
-        }),
-      );
-      events.push(this.event(subscription.trialEndsAt, 'SUBSCRIPTION', 'TRIAL_ENDED', {}));
-      events.push(
-        this.event(subscription.currentPeriodStart, 'SUBSCRIPTION', 'PAID_PERIOD_STARTED', {}),
-      );
-      events.push(
-        this.event(subscription.canceledAt, 'SUBSCRIPTION', 'SUBSCRIPTION_CANCELED', {
-          reason: subscription.cancelReason,
-        }),
-      );
-    }
-    for (const handoff of raw.handoffRows) {
-      events.push(
-        this.event(handoff.createdAt, 'HANDOFF', 'HANDOFF_OPENED', {
-          level: handoff.level,
-          reason: handoff.reason,
-        }),
-      );
-      if (handoff.status === 'RESOLVED') {
-        events.push(
-          this.event(handoff.updatedAt, 'HANDOFF', 'HANDOFF_RESOLVED', { reason: handoff.reason }),
-        );
-      }
-    }
-    for (const day of raw.conversationDays) {
-      events.push(
-        this.event(new Date(`${day.day}T12:00:00.000Z`), 'CONVERSATION', 'CONVERSATION_DAY', {
-          messages: Number(day.total),
-        }),
-      );
-    }
-    const timeline = events
-      .filter((event): event is ControlCenterTimelineEvent => event !== null)
-      .filter((event) => event.at >= since.toISOString())
-      .sort((a, b) => b.at.localeCompare(a.at));
-
-    const checkinsSent = raw.checkinRows.filter((checkin) => checkin.sentAt).length;
-    const checkinsResponded = raw.checkinRows.filter((checkin) => checkin.submittedAt).length;
-    const student = {
-      id: row.id,
-      name: row.name,
-      email: row.email,
-      phoneNumber: row.phoneNumber,
-      status: row.status,
-      subscriptionStatus: row.subscriptionStatus,
-      subscriptionPlan: row.subscriptionPlan,
-      // Mesma semântica de `students()`: a matrícula é a PRIMEIRA anamnese enviada.
-      enrolledAt: firstSession?.submittedAt?.toISOString() ?? null,
-      protocolStatus: row.protocolStatus,
-      requiresProfessionalReview: row.requiresProfessionalReview,
-      anamnesisStatus: row.anamnesisStatus,
-      churnRisk: assessChurnRisk({
-        lastInboundAt: this.date(row.lastInboundAt),
-        unansweredCheckinSentAt: this.date(row.unansweredCheckinSentAt),
-        renewalAt: this.date(row.renewalAt),
-      }),
-      currentProtocol: raw.protocol
-        ? { ...raw.protocol, signedAt: raw.protocol.signedAt?.toISOString() ?? null }
-        : null,
-      acquisition,
-      routine: this.projectRoutine(row.routine),
-      workoutHistory: {
-        status: 'UNAVAILABLE' as const,
-        reason: 'A plataforma ainda não registra cada treino e sua progressão de carga.',
-      },
-      timeline,
-      adherence: {
-        checkinsSent,
-        checkinsResponded,
-        responseRate:
-          checkinsSent === 0
-            ? this.unavailable(
-                'PERCENT',
-                'Nenhum check-in enviado ainda; não há denominador para a taxa de resposta.',
-              )
-            : this.metric(
-                (checkinsResponded / checkinsSent) * 100,
-                'PERCENT',
-                'PROXY',
-                DECLARED_ADHERENCE_NOTICE,
-              ),
-      },
-      aiQuality: {
-        blockedRate: this.blockedRate(raw.quality?.blocked ?? 0, raw.quality?.validated ?? 0),
-        blocked: raw.quality?.blocked ?? 0,
-        validated: raw.quality?.validated ?? 0,
-        // Achado 2026-09-08 (decisão do fundador): painel é de uso interno da equipe MOVIVO —
-        // sem anonimização do conteúdo real da conversa.
-        occurrences: blockedOccurrences,
-      },
-      health: canReadHealth ? { parqState: row.parqState, painReports, evolution } : null,
+    const at = (value: Date | string | null) => this.date(value);
+    const events: ControlCenterTimelineEvent[] = [];
+    const push = (
+      when: Date | null,
+      kind: ControlCenterTimelineEvent['kind'],
+      code: ControlCenterTimelineEvent['code'],
+      params: ControlCenterTimelineEvent['params'] = {},
+    ) => {
+      if (when) events.push({ at: when.toISOString(), kind, code, params });
     };
-
-    return this.envelope({ student }, [
-      'Histórico granular de treino indisponível até existir instrumentação de workout.',
-      DECLARED_ADHERENCE_NOTICE,
-      canReadHealth
-        ? 'Dados de saúde decifrados sob RLS e registrados na trilha de auditoria.'
-        : 'Seção de saúde ausente deste payload: o acesso não inclui a capacidade de leitura de dado de saúde.',
-      `Timeline cobre os últimos ${periodDays} dias.`,
-    ]);
-  }
-
-  /**
-   * Monta a evolução declarada por semana. `answers` já vem em claro (achado 2026-09-13,
-   * mesmo tratamento dos blocos comuns da renovação de mesociclo); só o texto livre em
-   * `notesCipher` precisa ser decifrado — é onde um relato de dor/desconforto pode aparecer.
-   */
-  private async decryptCheckins(
-    rows: Array<{
-      weekNumber: number;
-      submittedAt: Date | null;
-      sentAt: Date | null;
-      answers: unknown;
-      notesCipher: Buffer | null;
-    }>,
-  ) {
-    const declared: Array<{
-      point: ControlCenterEvolutionPoint;
-      painReport: string | null;
-    }> = [];
-    for (const row of rows) {
-      const at = row.submittedAt ?? row.sentAt;
-      const parsedAnswers = checkinAnswersSchema.safeParse(row.answers ?? {});
-      if (!at || !parsedAnswers.success) continue;
-      const { sleepQuality, mood, nutritionScore, adherenceScore, durationFit } =
-        parsedAnswers.data;
-      const notes = row.notesCipher
-        ? checkinNotesSchema.safeParse(JSON.parse(await this.cipher.decryptHealth(row.notesCipher)))
-        : undefined;
-      const painReport =
-        notes?.success && notes.data.difficultExerciseDescription
-          ? notes.data.difficultExerciseDescription
-          : null;
-      declared.push({
-        point: {
-          week: row.weekNumber,
-          at: at.toISOString(),
-          sleepQuality: sleepQuality ?? null,
-          mood: mood ?? null,
-          nutritionScore: nutritionScore !== undefined ? `${nutritionScore}/10` : null,
-          adherenceScore: adherenceScore !== undefined ? `${adherenceScore}/10` : null,
-          durationFit: durationFit ?? null,
-        },
-        painReport,
+    for (const item of raw.anamnesisRows) {
+      push(
+        item.createdAt,
+        'ANAMNESIS',
+        'ANAMNESIS_STARTED',
+        item === firstSession ? { origin: attributionLabel(acquisition) } : {},
+      );
+      push(item.submittedAt, 'ANAMNESIS', 'ANAMNESIS_SUBMITTED', { status: item.status });
+    }
+    if (raw.trainingPlan) {
+      push(at(raw.trainingPlan.publishedAt), 'PLAN', 'PLAN_PUBLISHED', {
+        version: raw.trainingPlan.version,
       });
     }
-    return declared.sort((a, b) => a.point.week - b.point.week);
-  }
+    for (const execution of raw.executions) {
+      if (execution.status === 'COMPLETED' || execution.status === 'PARTIAL') {
+        push(at(execution.finishedAt), 'TRAINING', 'SESSION_COMPLETED', {
+          modality: execution.modality,
+          status: execution.status,
+        });
+      }
+    }
+    for (const item of raw.checkInEvents) push(at(item.answeredAt), 'CHECKIN', 'CHECKIN_ANSWERED');
+    for (const item of raw.subscriptionRows) {
+      push(item.createdAt, 'SUBSCRIPTION', 'SUBSCRIPTION_CREATED', {
+        status: item.status,
+        plan: item.plan,
+      });
+      push(at(item.trialEndsAt), 'SUBSCRIPTION', 'TRIAL_ENDED');
+      push(at(item.currentPeriodStart), 'SUBSCRIPTION', 'PAID_PERIOD_STARTED', { plan: item.plan });
+      push(at(item.canceledAt), 'SUBSCRIPTION', 'SUBSCRIPTION_CANCELED');
+    }
+    for (const item of raw.cases) {
+      push(item.createdAt, 'EXCEPTION', 'EXCEPTION_OPENED', {
+        kind: item.kind,
+        summary: item.summary,
+      });
+      push(at(item.resolvedAt), 'EXCEPTION', 'EXCEPTION_RESOLVED', { kind: item.kind });
+    }
+    for (const item of raw.conversationDays) {
+      push(at(item.at), 'CONVERSATION', 'CONVERSATION_DAY', { messages: item.messages });
+    }
+    events.sort((a, b) => b.at.localeCompare(a.at));
 
-  private event(
-    at: Date | null,
-    kind: ControlCenterTimelineEvent['kind'],
-    code: ControlCenterTimelineEvent['code'],
-    params: ControlCenterTimelineEvent['params'],
-  ): ControlCenterTimelineEvent | null {
-    return at ? { at: at.toISOString(), kind, code, params } : null;
+    const adherence = raw.adherence ?? { planned: 0, done: 0 };
+    const sent = raw.checkinStats?.sent ?? 0;
+    const answered = raw.checkinStats?.answered ?? 0;
+    const strategy = raw.goal?.strategy?.title ?? null;
+    const declaredGoal = raw.goal?.declared?.primary ?? null;
+    const painReports = raw.executions.flatMap((execution) =>
+      execution.painReports.map((pain) => ({
+        at: (at(execution.finishedAt) ?? new Date()).toISOString(),
+        text: `${pain.region}: ${pain.intensity}/10`,
+      })),
+    );
+
+    return this.envelope(
+      {
+        student: {
+          id: row.id,
+          name: row.name,
+          email: row.email,
+          phoneNumber: row.phoneNumber,
+          status: row.status,
+          subscriptionStatus: row.subscriptionStatus,
+          subscriptionPlan: row.subscriptionPlan,
+          planStatus: row.planStatus,
+          enrolledAt:
+            (raw.anamnesisRows.find((a) => a.submittedAt) ?? null)?.submittedAt?.toISOString() ??
+            null,
+          churnRisk: assessChurnRisk({
+            lastInboundAt: this.date(row.lastInboundAt),
+            unansweredCheckinSentAt: this.date(row.unansweredCheckinSentAt),
+            renewalAt: this.date(row.renewalAt),
+          }),
+          anamnesisStatus: row.anamnesisStatus,
+          acquisition,
+          plan: {
+            training: raw.trainingPlan
+              ? {
+                  version: raw.trainingPlan.version,
+                  publishedAt: at(raw.trainingPlan.publishedAt)?.toISOString() ?? null,
+                }
+              : null,
+            nutrition: raw.nutritionPlan
+              ? {
+                  version: raw.nutritionPlan.version,
+                  publishedAt: at(raw.nutritionPlan.publishedAt)?.toISOString() ?? null,
+                }
+              : null,
+            strategy,
+            goal: declaredGoal,
+          },
+          adherence: {
+            windowDays: 28,
+            planned: adherence.planned,
+            done: adherence.done,
+            rate:
+              adherence.planned === 0
+                ? this.unavailable('PERCENT', 'Nenhuma sessão agendada nos últimos 28 dias.')
+                : this.metric(
+                    Math.round((adherence.done / adherence.planned) * 1000) / 10,
+                    'PERCENT',
+                    'AVAILABLE',
+                    'Sessões concluídas sobre as agendadas e já vencidas nos últimos 28 dias.',
+                  ),
+          },
+          checkins: {
+            sent,
+            answered,
+            responseRate:
+              sent === 0
+                ? this.unavailable('PERCENT', 'Nenhum check-in enviado.')
+                : this.metric(
+                    Math.round((answered / sent) * 1000) / 10,
+                    'PERCENT',
+                    'AVAILABLE',
+                    'Adesão declarada: check-ins respondidos sobre os enviados.',
+                  ),
+          },
+          executions: raw.executions.slice(0, 10).map((execution) => ({
+            id: execution.id,
+            performedOn: execution.performedOn,
+            modality: execution.modality,
+            status: execution.status,
+            rpe: execution.rpe,
+            durationMinutes: execution.durationMinutes,
+          })),
+          exceptions: raw.cases
+            .filter((item) => item.status !== 'RESOLVED')
+            .map((item) => ({
+              id: item.id,
+              kind: item.kind,
+              priority: item.priority,
+              domain: item.domain,
+              summary: item.summary,
+              createdAt: item.createdAt.toISOString(),
+            })),
+          decisions: raw.decisions.map((item) => ({
+            action: item.action,
+            verdict: item.verdict,
+            decidedBy: item.decidedBy,
+            createdAt: item.createdAt.toISOString(),
+          })),
+          timeline: events,
+          aiQuality: {
+            blockedRate: this.blockedRate(raw.quality?.blocked ?? 0, raw.quality?.validated ?? 0),
+            blocked: raw.quality?.blocked ?? 0,
+            validated: raw.quality?.validated ?? 0,
+          },
+          health: canReadHealth ? { parqState: row.parqState, painReports } : null,
+        },
+      },
+      [
+        'A ficha lê o Estado do Aluno: plano e estratégia vigentes, adesão verificada (sessões), adesão declarada (check-ins), decisões automáticas e humanas e casos da fila.',
+        canReadHealth
+          ? 'Esta leitura de saúde foi registrada na trilha de auditoria.'
+          : 'Seu papel não lê dados de saúde: dor, PAR-Q, decisões e casos da fila não são enviados.',
+      ],
+    );
   }
 
   private blockedRate(blocked: number, validated: number): ControlCenterMetric {
@@ -1695,7 +1593,7 @@ export class ControlCenterService {
       (blocked / validated) * 100,
       'PERCENT',
       'AVAILABLE',
-      'Respostas bloqueadas pela validação de compliance sobre o total validado. Concentração num aluno indica que o AI Coach está falhando com aquele perfil.',
+      'Respostas bloqueadas pela validação de compliance sobre o total validado. Concentração num aluno indica que a IA está falhando com aquele perfil.',
     );
   }
 
@@ -1710,63 +1608,69 @@ export class ControlCenterService {
    * "está tudo bem?" a quem não é engenheiro, e os percentis por modelo respondem
    * "onde exatamente" a quem é.
    *
-   * Nada aqui depende de OpenTelemetry: `ai_jobs.latency_ms` e
+   * Nada aqui depende de OpenTelemetry: `model_runs.latency_ms` e
    * `conversations.latency_ms` já são persistidos, e p50/p95/p99 é um
    * `percentile_cont` — OTel continua necessário para **tracing distribuído**, que é
    * outro problema e aparece em `pendingCapabilities`, não como um indicador vazio.
    */
   async system(): Promise<ControlCenterSystemResponse> {
     const since = new Date(Date.now() - INSIGHT_WINDOW_DAYS * 86_400_000);
-    const [database, redis, db, rag] = await Promise.all([
+    const [database, redis, db] = await Promise.all([
       this.databaseHealth.ping().catch(() => null),
       this.redisHealth.ping().catch(() => null),
       this.db.runAsSystem(async (tx) => {
         const [ai] = await tx
           .select({
             total: sql<number>`count(*)::int`,
-            completed: sql<number>`count(*) filter (where ${aiJobs.status} = 'COMPLETED')::int`,
-            failed: sql<number>`count(*) filter (where ${aiJobs.status} = 'FAILED')::int`,
-            dlq: sql<number>`count(*) filter (where ${aiJobs.status} = 'DLQ')::int`,
-            samples: sql<number>`count(${aiJobs.latencyMs})::int`,
-            p50: this.percentile(0.5, aiJobs.latencyMs),
-            p95: this.percentile(0.95, aiJobs.latencyMs),
-            p99: this.percentile(0.99, aiJobs.latencyMs),
-            // SLO de entrega: protocolo gerado do enfileiramento à conclusão.
-            protocolsDelivered: sql<number>`count(*) filter (
-              where ${aiJobs.jobType} = 'PROTOCOL_GENERATION'
-                and ${aiJobs.status} = 'COMPLETED'
-                and ${aiJobs.completedAt} is not null)::int`,
-            protocolsWithinSla: sql<number>`count(*) filter (
-              where ${aiJobs.jobType} = 'PROTOCOL_GENERATION'
-                and ${aiJobs.status} = 'COMPLETED'
-                and ${aiJobs.completedAt} is not null
-                and ${aiJobs.completedAt} - ${aiJobs.createdAt} <= interval '2 hours')::int`,
+            completed: sql<number>`count(*) filter (where ${modelRuns.status} = 'COMPLETED')::int`,
+            failed: sql<number>`count(*) filter (where ${modelRuns.status} = 'FAILED')::int`,
+            // Respondeu na rota preferida do nível (sem precisar de failover).
+            primaryRoute: sql<number>`count(*) filter (where ${modelRuns.status} = 'COMPLETED' and ${modelRuns.attempt} = 1)::int`,
+            samples: sql<number>`count(${modelRuns.latencyMs})::int`,
+            p50: this.percentile(0.5, modelRuns.latencyMs),
+            p95: this.percentile(0.95, modelRuns.latencyMs),
+            p99: this.percentile(0.99, modelRuns.latencyMs),
           })
-          .from(aiJobs)
-          .where(gte(aiJobs.createdAt, since));
+          .from(modelRuns)
+          .where(gte(modelRuns.createdAt, since));
+
+        // Plano publicado em até 2 horas depois de a anamnese ser enviada.
+        const planRows = (await tx.execute(sql`
+          select
+            count(*)::int as delivered,
+            count(*) filter (where plan.created_at - a.submitted_at <= interval '2 hours')::int as within_sla
+          from anamnesis_sessions a
+          join lateral (
+            select tp.created_at from training_plans tp
+            where tp.user_id = a.user_id and tp.created_at >= a.submitted_at
+            order by tp.created_at asc limit 1
+          ) plan on true
+          where a.submitted_at >= ${since}
+        `)) as unknown as Array<{ delivered: number; within_sla: number }>;
+        const plans = planRows[0] ?? { delivered: 0, within_sla: 0 };
 
         const byModel = await tx
           .select({
-            model: sql<string | null>`${aiJobs.modelUsed}`,
-            jobType: sql<string>`${aiJobs.jobType}`,
-            samples: sql<number>`count(${aiJobs.latencyMs})::int`,
-            p50: this.percentile(0.5, aiJobs.latencyMs),
-            p95: this.percentile(0.95, aiJobs.latencyMs),
-            p99: this.percentile(0.99, aiJobs.latencyMs),
+            model: sql<string | null>`${modelRuns.model}`,
+            jobType: sql<string>`${modelRuns.taskId}`,
+            samples: sql<number>`count(${modelRuns.latencyMs})::int`,
+            p50: this.percentile(0.5, modelRuns.latencyMs),
+            p95: this.percentile(0.95, modelRuns.latencyMs),
+            p99: this.percentile(0.99, modelRuns.latencyMs),
           })
-          .from(aiJobs)
-          .where(and(gte(aiJobs.createdAt, since), isNotNull(aiJobs.latencyMs)))
-          .groupBy(aiJobs.modelUsed, aiJobs.jobType);
+          .from(modelRuns)
+          .where(and(gte(modelRuns.createdAt, since), isNotNull(modelRuns.latencyMs)))
+          .groupBy(modelRuns.model, modelRuns.taskId);
 
         // group by ordinal: ver comentário em `overview()` — `localDay` reemite
         // seus próprios parâmetros e repetir a expressão no GROUP BY quebra.
         const aiDaily = await tx
           .select({
-            day: this.localDay(aiJobs.createdAt),
-            total: this.percentile(0.95, aiJobs.latencyMs),
+            day: this.localDay(modelRuns.createdAt),
+            total: this.percentile(0.95, modelRuns.latencyMs),
           })
-          .from(aiJobs)
-          .where(and(gte(aiJobs.createdAt, since), isNotNull(aiJobs.latencyMs)))
+          .from(modelRuns)
+          .where(and(gte(modelRuns.createdAt, since), isNotNull(modelRuns.latencyMs)))
           .groupBy(sql`1`);
 
         const [whatsapp] = await tx
@@ -1801,15 +1705,12 @@ export class ControlCenterService {
           )
           .groupBy(sql`1`);
 
-        const [corpus] = await tx.select({ total: sql<number>`count(*)::int` }).from(knowledgeBase);
-
-        return { ai, byModel, aiDaily, whatsapp, whatsappDaily, corpus };
+        return { ai, plans, byModel, aiDaily, whatsapp, whatsappDaily };
       }),
-      this.ragUsage(),
     ]);
 
     const ai = db.ai;
-    const jobsWithOutcome = (ai?.completed ?? 0) + (ai?.failed ?? 0) + (ai?.dlq ?? 0);
+    const callsWithOutcome = (ai?.completed ?? 0) + (ai?.failed ?? 0);
     return this.envelope(
       {
         databaseLatency: database
@@ -1832,24 +1733,18 @@ export class ControlCenterService {
           ai?.total ?? 0,
           'COUNT',
           'AVAILABLE',
-          `Jobs de IA criados nos últimos ${INSIGHT_WINDOW_DAYS} dias.`,
+          `Chamadas de modelo registradas nos últimos ${INSIGHT_WINDOW_DAYS} dias.`,
         ),
         aiFailures: this.metric(
           ai?.failed ?? 0,
           'COUNT',
           'AVAILABLE',
-          'Jobs de IA em estado FAILED na janela.',
-        ),
-        aiDlq: this.metric(
-          ai?.dlq ?? 0,
-          'COUNT',
-          'AVAILABLE',
-          'Jobs de IA que esgotaram o retry e viraram tarefa humana (DLQ) na janela.',
+          'Chamadas em que todas as rotas do nível falharam.',
         ),
         aiLatency: this.percentiles(
           ai,
           'Tempo que o modelo levou para responder — só a chamada de IA, sem fila nem WhatsApp.',
-          'Nenhum job de IA registrou latência na janela.',
+          'Nenhuma chamada de modelo registrou latência na janela.',
         ),
         aiLatencyByModel: db.byModel.map((row) => ({
           model: row.model ?? 'não registrado',
@@ -1866,49 +1761,20 @@ export class ControlCenterService {
           'Nenhuma mensagem enviada registrou latência ponta-a-ponta na janela.',
         ),
         whatsappLatencyP95Daily: this.fillDays(this.roundSeries(db.whatsappDaily)),
-        ragQueries: rag
-          ? this.metric(
-              rag.queries,
-              'COUNT',
-              'AVAILABLE',
-              `Consultas do AI Coach à base de conhecimento nos últimos ${INSIGHT_WINDOW_DAYS} dias.`,
-            )
-          : this.unavailable(
-              'COUNT',
-              'Os contadores de uso do RAG vivem no Redis e não puderam ser lidos agora.',
-            ),
-        ragUsefulRetrievalRate:
-          rag && rag.queries > 0
-            ? this.metric(
-                (rag.useful / rag.queries) * 100,
-                'PERCENT',
-                'AVAILABLE',
-                'De cada 100 consultas, quantas encontraram um trecho relevante o bastante para ser usado na resposta. O resto é respondido sem material de apoio.',
-              )
-            : this.unavailable(
-                'PERCENT',
-                'Sem consultas ao RAG na janela (ou contadores indisponíveis); não há denominador.',
-              ),
-        ragCorpusChunks: this.metric(
-          db.corpus?.total ?? 0,
-          'COUNT',
-          'AVAILABLE',
-          'Trechos de conhecimento indexados e disponíveis para consulta.',
-        ),
         slos: [
           this.slo({
-            key: 'PROTOCOL_DELIVERY',
-            title: 'Protocolo entregue em até 2 horas',
-            objective: 'De cada 100 protocolos gerados, ao menos 95 ficam prontos em até 2 horas.',
+            key: 'PLAN_DELIVERY',
+            title: 'Plano entregue em até 2 horas',
+            objective: 'De cada 100 planos gerados, ao menos 95 ficam prontos em até 2 horas.',
             explanation:
-              'Mede o tempo entre o pedido do protocolo e a conclusão da geração. É a promessa feita ao aluno no cadastro.',
+              'Mede o tempo entre o envio da anamnese e a publicação do plano. É a promessa feita ao aluno no cadastro.',
             targetPercent: 95,
-            good: ai?.protocolsWithinSla ?? 0,
-            total: ai?.protocolsDelivered ?? 0,
+            good: db.plans.within_sla,
+            total: db.plans.delivered,
           }),
           this.slo({
             key: 'COACH_RESPONSE',
-            title: 'Resposta do AI Coach em até 30 segundos',
+            title: 'Resposta no WhatsApp em até 30 segundos',
             objective:
               'De cada 100 respostas enviadas no WhatsApp, ao menos 95 chegam em até 30 segundos.',
             explanation:
@@ -1918,25 +1784,24 @@ export class ControlCenterService {
             total: db.whatsapp?.samples ?? 0,
           }),
           this.slo({
-            key: 'AI_JOB_SUCCESS',
-            title: 'Trabalhos de IA que terminam bem',
-            objective: 'Ao menos 99 de cada 100 trabalhos de IA terminam sem erro.',
+            key: 'MODEL_SUCCESS',
+            title: 'Chamadas de IA que terminam bem',
+            objective: 'Ao menos 99 de cada 100 chamadas de modelo terminam sem erro.',
             explanation:
-              'Cada geração de protocolo, resposta ou ajuste de check-in é um trabalho. Aqui entram os que falharam de vez.',
+              'Cada tarefa dos agentes (plano, conversa, leitura de imagem, revisão) é uma chamada. Aqui entram as que falharam em todas as rotas do nível.',
             targetPercent: 99,
             good: ai?.completed ?? 0,
-            total: jobsWithOutcome,
+            total: callsWithOutcome,
           }),
           this.slo({
-            key: 'AI_JOB_NO_DLQ',
-            title: 'Trabalhos que não viraram tarefa manual',
-            objective:
-              'Menos de 1 em cada 200 trabalhos (0,5%) esgota as tentativas e precisa de alguém para resolver.',
+            key: 'MODEL_PRIMARY_ROUTE',
+            title: 'Chamadas atendidas pela rota preferida',
+            objective: 'Ao menos 95 de cada 100 chamadas respondem na primeira rota do nível.',
             explanation:
-              'Trabalho em DLQ é o que o sistema tentou várias vezes e desistiu: alguém da equipe precisa agir. É o custo operacional escondido.',
-            targetPercent: 99.5,
-            good: jobsWithOutcome - (ai?.dlq ?? 0),
-            total: jobsWithOutcome,
+              'Quando a rota preferida cai, o sistema usa a seguinte (failover). Muito failover é sinal de fornecedor instável ou sem crédito.',
+            targetPercent: 95,
+            good: ai?.primaryRoute ?? 0,
+            total: callsWithOutcome,
           }),
         ],
         pendingCapabilities: [
@@ -1960,10 +1825,9 @@ export class ControlCenterService {
         ],
       },
       [
-        `Percentis, SLOs e uso do RAG cobrem os últimos ${INSIGHT_WINDOW_DAYS} dias em ${TIMEZONE}.`,
+        `Percentis e SLOs cobrem os últimos ${INSIGHT_WINDOW_DAYS} dias em ${TIMEZONE}.`,
         'Latência de IA é o tempo do modelo; latência de WhatsApp é o tempo que o aluno espera. São coisas diferentes e aparecem separadas.',
-        'Percentis saem de `percentile_cont` sobre a latência já persistida em cada job e em cada mensagem — não dependem de OpenTelemetry.',
-        'Uso do RAG vem de contadores agregados no Redis: nenhuma pergunta de aluno é armazenada para esta métrica.',
+        'Percentis saem de `percentile_cont` sobre a latência já persistida em cada chamada de modelo e em cada mensagem — não dependem de OpenTelemetry.',
         'Orçamento de erro acima de 100% significa meta estourada no período: é sinal de parar de entregar novidade e consertar.',
       ],
     );
@@ -2123,32 +1987,6 @@ export class ControlCenterService {
     };
   }
 
-  /**
-   * Contadores diários de RAG no Redis. Falha de leitura devolve `null` — o painel
-   * mostra "indisponível", nunca zero (zero seria lido como "o RAG não é usado").
-   */
-  private async ragUsage(): Promise<{ queries: number; useful: number } | null> {
-    try {
-      const days: string[] = [];
-      for (let offset = INSIGHT_WINDOW_DAYS - 1; offset >= 0; offset -= 1) {
-        days.push(ragUsageDay(new Date(Date.now() - offset * 86_400_000)));
-      }
-      const keys = days.map((day) => ragUsageKeys(this.redisKeys, day));
-      const values = await this.redis.mget([
-        ...keys.map((key) => key.queries),
-        ...keys.map((key) => key.useful),
-      ]);
-      const sum = (slice: Array<string | null>) =>
-        slice.reduce((total, value) => total + this.number(value), 0);
-      return {
-        queries: sum(values.slice(0, days.length)),
-        useful: sum(values.slice(days.length)),
-      };
-    } catch {
-      return null;
-    }
-  }
-
   /** Percentil é fracionário; a série do contrato é de inteiros não negativos. */
   private roundSeries(rows: Array<{ day: string; total: unknown }>) {
     return rows.map((row) => ({
@@ -2246,23 +2084,18 @@ export class ControlCenterService {
         .groupBy(sql`1`)
         .orderBy(sql`2 desc`);
 
-      // Custo de IA por modelo com preço vigente **na data de cada job** (ver
-      // `AI_PRICE_LATERAL`). Sai do query builder porque LATERAL não é expresso por ele;
-      // o custo é somado linha a linha, então dois preços no mesmo mês somam certo.
+      // Custo de IA por modelo: `model_runs.cost_brl` já foi calculado, na hora da chamada, com o
+      // preço vigente da época (tabela `model_pricing`); mudar o preço hoje não altera o passado.
       const aiRows = (await tx.execute(sql`
         select
-          coalesce(${aiJobs.modelUsed}, 'DESCONHECIDO') as model,
+          coalesce(model, 'DESCONHECIDO') as model,
           count(*)::int as jobs,
-          coalesce(sum(${aiJobs.tokensInput}), 0)::int as tokens_input,
-          coalesce(sum(${aiJobs.tokensOutput}), 0)::int as tokens_output,
-          count(price.input_cents)::int as priced_jobs,
-          coalesce(sum(
-            (coalesce(${aiJobs.tokensInput}, 0) / 1000.0) * price.input_cents / 100.0
-            + (coalesce(${aiJobs.tokensOutput}, 0) / 1000.0) * price.output_cents / 100.0
-          ), 0)::float8 as cost_usd
-        from ${aiJobs}
-        ${AI_PRICE_LATERAL}
-        where ${aiJobs.createdAt} >= now() - ${this.days(AI_COST_WINDOW_DAYS)}
+          coalesce(sum(tokens_input), 0)::int as tokens_input,
+          coalesce(sum(tokens_output), 0)::int as tokens_output,
+          count(*) filter (where cost_brl > 0)::int as priced_jobs,
+          coalesce(sum(cost_brl), 0)::float8 as cost_brl
+        from model_runs
+        where created_at >= now() - ${this.days(AI_COST_WINDOW_DAYS)}
         group by 1
       `)) as unknown as Array<{
         model: string;
@@ -2270,35 +2103,24 @@ export class ControlCenterService {
         tokens_input: number;
         tokens_output: number;
         priced_jobs: number;
-        cost_usd: number;
+        cost_brl: number;
       }>;
 
       /**
-       * Custo e volume por titular, estritamente agregados antes de sair do backend. `ai_jobs`
+       * Custo e volume por titular, estritamente agregados antes de sair do backend. `model_runs`
        * é a fonte de IA e `conversations` conta cada envio real ao aluno sem ler o conteúdo
        * cifrado. Enquanto Evolution não fatura, unidades WhatsApp são volume observado, não R$.
        */
       const costIntelligenceRows = (await tx.execute(sql`
         with ai_usage as (
           select
-            aj.user_id,
-            count(*) filter (where price.input_cents is null)::int as unpriced_ai_jobs,
-            coalesce(sum(
-              (coalesce(aj.tokens_input, 0) / 1000.0) * price.input_cents / 100.0
-              + (coalesce(aj.tokens_output, 0) / 1000.0) * price.output_cents / 100.0
-            ), 0)::float8 * ${USD_TO_BRL} as ai_cost_brl
-          from ai_jobs aj
-          left join lateral (
-            select mp.input_price_per_1k_cents as input_cents, mp.output_price_per_1k_cents as output_cents
-            from model_pricing mp
-            where lower(coalesce(aj.model_used, '')) like mp.model || '%'
-              and mp.valid_from <= (aj.created_at at time zone ${TIMEZONE})::date
-              and (mp.valid_to is null or mp.valid_to > (aj.created_at at time zone ${TIMEZONE})::date)
-            order by length(mp.model) desc, mp.valid_from desc
-            limit 1
-          ) price on true
-          where aj.created_at >= now() - ${this.days(AI_COST_WINDOW_DAYS)}
-          group by aj.user_id
+            mr.user_id,
+            count(*) filter (where mr.cost_brl = 0 and mr.status = 'COMPLETED')::int as unpriced_ai_jobs,
+            coalesce(sum(mr.cost_brl), 0)::float8 as ai_cost_brl
+          from model_runs mr
+          where mr.user_id is not null
+            and mr.created_at >= now() - ${this.days(AI_COST_WINDOW_DAYS)}
+          group by mr.user_id
         ), whatsapp_usage as (
           select c.user_id, count(*)::int as whatsapp_units
           from conversations c
@@ -2308,9 +2130,10 @@ export class ControlCenterService {
         ), active_days as (
           select activity.user_id, count(distinct activity.day)::int as active_user_days
           from (
-            select aj.user_id, (aj.created_at at time zone ${TIMEZONE})::date as day
-            from ai_jobs aj
-            where aj.created_at >= now() - ${this.days(AI_COST_WINDOW_DAYS)}
+            select mr.user_id, (mr.created_at at time zone ${TIMEZONE})::date as day
+            from model_runs mr
+            where mr.user_id is not null
+              and mr.created_at >= now() - ${this.days(AI_COST_WINDOW_DAYS)}
             union
             select c.user_id, (c.created_at at time zone ${TIMEZONE})::date as day
             from conversations c
@@ -2410,17 +2233,17 @@ export class ControlCenterService {
         tokensInput: Number(model.tokens_input),
         tokensOutput: Number(model.tokens_output),
         // Sem nenhum job precificado o custo é `null` (indisponível), nunca zero.
-        costBrl: Number(model.priced_jobs) > 0 ? Number(model.cost_usd) * USD_TO_BRL : null,
+        costBrl: Number(model.priced_jobs) > 0 ? Number(model.cost_brl) : null,
       }));
       const unpricedModels = aiCostByModel.filter((model) => model.costBrl === null);
       const pricedCost = aiCostByModel.reduce((sum, model) => sum + (model.costBrl ?? 0), 0);
       const aiCostUnavailable =
         aiCostByModel.length > 0 && unpricedModels.length === aiCostByModel.length;
-      const aiCostDefinition = `Custo calculado dos últimos ${AI_COST_WINDOW_DAYS} dias: tokens de ai_jobs × preço por 1k tokens vigente na data de cada job (tabela \`model_pricing\`), convertido a R$ pelo câmbio fixo de ${USD_TO_BRL}.`;
+      const aiCostDefinition = `Custo calculado dos últimos ${AI_COST_WINDOW_DAYS} dias: soma de \`model_runs.cost_brl\`, já calculado com o preço vigente (tabela \`model_pricing\`) no momento de cada chamada.`;
       const aiCost = aiCostUnavailable
         ? this.unavailable(
             'BRL',
-            `Nenhum modelo com job no período tem preço vigente em \`model_pricing\` (${unpricedModels.map((model) => model.model).join(', ')}).`,
+            `Nenhum modelo com chamada no período tem preço vigente em \`model_pricing\` (${unpricedModels.map((model) => model.model).join(', ')}).`,
           )
         : this.metric(pricedCost, 'BRL', 'PROXY', aiCostDefinition);
 
@@ -2839,33 +2662,13 @@ export class ControlCenterService {
     )`;
   }
 
-  private latestProtocolStatus() {
+  private latestPlanStatus() {
     return sql<string | null>`(
-      select p.status::text from ${protocols} p
+      select p.status::text from ${trainingPlans} p
       where p.user_id = users.id order by p.created_at desc limit 1
     )`;
   }
 
-  private projectRoutine(value: unknown) {
-    const parsed = anamnesisStructuredSchema.safeParse(value);
-    if (!parsed.success) return null;
-    const routine = parsed.data;
-    return {
-      primaryGoal: routine.primaryGoal,
-      trainingStatus: routine.trainingStatus,
-      experience: routine.experience,
-      daysPerWeek: routine.daysPerWeek,
-      preferredDays: routine.preferredDays,
-      sessionDuration: routine.sessionDuration,
-      location: routine.location,
-      preferredPeriod: routine.preferredPeriod,
-    };
-  }
-
-  /**
-   * Dia civil em `America/Sao_Paulo`. O agrupamento precisa ser no fuso do
-   * envelope, senão a virada do dia sai deslocada em 3h no gráfico.
-   */
   private localDay(column: SQLWrapper) {
     return sql<string>`to_char(${column} at time zone ${TIMEZONE}, 'YYYY-MM-DD')`;
   }

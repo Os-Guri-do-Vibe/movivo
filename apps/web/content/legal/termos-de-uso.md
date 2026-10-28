@@ -1,19 +1,19 @@
 <!-- MOVIVO_LEGAL_METADATA_START
 publication_status: BETA_VISIBLE
-document_version: terms-2026-09-v1
-drafted_on: 2026-09-29
+document_version: terms-2026-10-v2
+drafted_on: 2026-10-28
 effective_on: PENDING
 MOVIVO_LEGAL_METADATA_END -->
 
 # Termos de Uso da MOVIVO
 
-**Versão:** terms-2026-09-v1
+**Versão:** terms-2026-10-v2
 
 **Vigência:** [DATA DE VIGÊNCIA A CONFIRMAR]
 
 ## 1. Quem presta o serviço e como falar conosco
 
-Estes Termos regulam o acesso ao site, ao formulário de anamnese, aos canais de WhatsApp, aos protocolos de treino e aos demais recursos da MOVIVO (em conjunto, “Serviço”). A prestadora é **[RAZÃO SOCIAL COMPLETA]**, inscrita no CNPJ sob nº **[CNPJ]**, sediada em **[ENDEREÇO COMPLETO, CEP, CIDADE E UF]**, registrada no CREF sob nº **[REGISTRO CREF-PJ E REGIONAL]** (“MOVIVO”). O responsável técnico é **[NOME COMPLETO DO PROFISSIONAL]**, Profissional de Educação Física, CREF nº **[NÚMERO E REGIONAL]**.
+Estes Termos regulam o acesso ao site, ao formulário de anamnese, aos canais de WhatsApp, aos planos de treino e de alimentação e aos demais recursos da MOVIVO (em conjunto, “Serviço”). A prestadora é **[RAZÃO SOCIAL COMPLETA]**, inscrita no CNPJ sob nº **[CNPJ]**, sediada em **[ENDEREÇO COMPLETO, CEP, CIDADE E UF]**, registrada no CREF sob nº **[REGISTRO CREF-PJ E REGIONAL]** (“MOVIVO”). O responsável técnico é **[NOME COMPLETO DO PROFISSIONAL]**, Profissional de Educação Física, CREF nº **[NÚMERO E REGIONAL]**.
 
 Atendimento, solicitações sobre a assinatura e reclamações: **[E-MAIL DE ATENDIMENTO]** e **[CANAL OFICIAL DE WHATSAPP]**. Solicitações sobre dados pessoais: **[E-MAIL DO ENCARREGADO]**, conforme a [Política de Privacidade](/privacidade).
 
@@ -21,11 +21,11 @@ Leia estes Termos antes de se cadastrar. O aceite é registrado com a versão do
 
 ## 2. O Serviço e seus limites
 
-A MOVIVO oferece orientação de treino individualizada, acompanhada por Profissional de Educação Física registrado no CREF, que utiliza inteligência artificial como ferramenta de apoio. O Serviço pode incluir anamnese e questionário de prontidão para atividade física (PAR-Q), protocolo de treino, orientações por WhatsApp, respostas a dúvidas sobre o treino, registro de treinos, check-ins e revisão do protocolo. O escopo efetivamente contratado, período, preço e recursos disponíveis são aqueles informados antes da contratação e confirmados no checkout.
+A MOVIVO oferece orientação individualizada de treino (musculação, corrida, HYROX ou combinação delas) e de hábitos alimentares, com profissionais registrados nos respectivos conselhos (CREF para treino; CRN e CRM, por profissionais parceiros, para nutrição e saúde), que definem as regras e entram nos casos sensíveis, e inteligência artificial como ferramenta de apoio. O Serviço pode incluir anamnese e questionário de prontidão para atividade física (PAR-Q), plano de treino e de alimentação, links das sessões do dia, orientações por WhatsApp, respostas a dúvidas, registro de treinos e refeições, medidas e fotos corporais opcionais, check-ins e ajustes do plano. O escopo efetivamente contratado, período, preço e recursos disponíveis são aqueles informados antes da contratação e confirmados no checkout.
 
-A inteligência artificial pode ajudar a organizar informações, aplicar a metodologia do profissional responsável e conversar com você dentro de limites definidos. Ela não atua como profissional autônoma nem substitui a supervisão humana. Respostas e sugestões geradas com apoio de IA podem conter erros ou ficar desatualizadas; comunique inconsistências e peça análise humana pelos canais de atendimento. Situações fora do escopo seguro são encaminhadas ao profissional responsável. Você pode contestar uma orientação automatizada e pedir revisão humana.
+A inteligência artificial pode organizar informações, aplicar a metodologia escrita pelos profissionais e ajustar o seu plano dentro de regras publicadas e versionadas por eles. Casos com sinal de segurança ou fora dessas regras não são decididos pela IA e seguem para um profissional. Ela não atua como profissional autônoma nem substitui a supervisão humana. Respostas e sugestões geradas com apoio de IA podem conter erros ou ficar desatualizadas; comunique inconsistências e peça análise humana pelos canais de atendimento. Situações fora do escopo seguro são encaminhadas ao profissional responsável. Você pode contestar uma orientação automatizada e pedir revisão humana.
 
-O Serviço não substitui avaliação médica ou atendimento de urgência, não avalia condições clínicas e não prescreve medicamentos ou suplementos. Em caso de dor no peito, falta de ar intensa, desmaio, sintomas súbitos ou outra situação de urgência, interrompa a atividade e procure atendimento de emergência. Não espere uma resposta pelo WhatsApp da MOVIVO para lidar com uma urgência.
+O Serviço não substitui avaliação médica ou atendimento de urgência, não avalia condições clínicas e não prescreve medicamentos ou suplementos. A orientação alimentar é de hábitos e porções e não substitui acompanhamento nutricional individual nem dieta para tratamento de doença. Em caso de dor no peito, falta de ar intensa, desmaio, sintomas súbitos ou outra situação de urgência, interrompa a atividade e procure atendimento de emergência. Não espere uma resposta pelo WhatsApp da MOVIVO para lidar com uma urgência.
 
 ## 3. Quem pode utilizar
 
@@ -37,13 +37,13 @@ Seu acesso é pessoal. Mantenha o controle de seu número de WhatsApp, links e c
 
 Responda à anamnese, ao PAR-Q e aos check-ins com sinceridade, inclusive sobre condições de saúde, lesões, cirurgias, gestação, medicamentos e recomendações recebidas de profissionais. Atualize a MOVIVO se essas informações mudarem. Informações incompletas podem comprometer a adequação do treino; isso não afasta os deveres legais e profissionais da MOVIVO.
 
-Uma resposta de risco no PAR-Q impede a liberação automática do protocolo até análise do profissional responsável e, quando necessário, apresentação de liberação ou orientação médica. O profissional pode pedir mais informações, adaptar o plano, adiar a orientação ou recomendar avaliação presencial. Não inicie ou continue atividade que lhe cause mal-estar relevante; informe o ocorrido e busque cuidado apropriado.
+Uma resposta de risco no PAR-Q impede a liberação automática do plano até análise do profissional responsável e, quando necessário, apresentação de liberação ou orientação médica. O profissional pode pedir mais informações, adaptar o plano, adiar a orientação ou recomendar avaliação presencial. Não inicie ou continue atividade que lhe cause mal-estar relevante; informe o ocorrido e busque cuidado apropriado.
 
 A orientação pressupõe que você execute os exercícios conforme as instruções e dentro de suas condições e ambiente. É sua escolha iniciar, interromper ou pedir esclarecimento sobre uma atividade. O reconhecimento de seus deveres de colaboração **não exclui nem reduz** a responsabilidade da MOVIVO por falhas do Serviço, nos termos da legislação aplicável.
 
 ## 5. WhatsApp e comunicações
 
-O WhatsApp é o canal principal de entrega do Serviço. Ao informar seu número e contratar ou iniciar o período de teste, você receberá mensagens necessárias à operação, como confirmação, protocolo, respostas, check-ins, avisos de segurança, contatos do profissional e informações da assinatura. Essas mensagens são distintas de publicidade. Conteúdos promocionais dependem de escolha separada, opcional e revogável.
+O WhatsApp é o canal principal de entrega do Serviço. Ao informar seu número e contratar ou iniciar o período de teste, você receberá mensagens necessárias à operação, como confirmação, plano, links das sessões, respostas, check-ins, avisos de segurança, contatos dos profissionais e informações da assinatura. Essas mensagens são distintas de publicidade. Conteúdos promocionais dependem de escolha separada, opcional e revogável.
 
 Para usar o Serviço, você precisa de acesso à internet e de uma conta de WhatsApp ativa. As condições e a disponibilidade do WhatsApp são estabelecidas também por seu fornecedor. Se o canal ficar indisponível, a MOVIVO buscará informar um meio alternativo razoável de atendimento. Evite enviar dados de saúde que não tenham relação com seu treino ou mensagens de terceiros sem autorização.
 
@@ -65,7 +65,7 @@ Na contratação fora de estabelecimento comercial, você pode exercer o **direi
 
 ## 8. Uso permitido e proteção do Serviço
 
-Você recebe licença pessoal, limitada, não exclusiva e intransferível para acessar o Serviço durante o período em que tiver direito de uso. A marca, o conteúdo, os protocolos, o software e a metodologia pertencem à MOVIVO ou a seus licenciantes, sem prejuízo de seus direitos sobre seus próprios dados e das limitações legais. Você pode guardar seu protocolo para uso pessoal, mas não comercializar, reproduzir sistematicamente, extrair bases de dados, explorar falhas de segurança, automatizar acessos não autorizados ou usar o Serviço para fraude ou assédio.
+Você recebe licença pessoal, limitada, não exclusiva e intransferível para acessar o Serviço durante o período em que tiver direito de uso. A marca, o conteúdo, os planos, o software e a metodologia pertencem à MOVIVO ou a seus licenciantes, sem prejuízo de seus direitos sobre seus próprios dados e das limitações legais. Você pode guardar seu plano para uso pessoal, mas não comercializar, reproduzir sistematicamente, extrair bases de dados, explorar falhas de segurança, automatizar acessos não autorizados ou usar o Serviço para fraude ou assédio.
 
 Podemos suspender acesso necessário à proteção de pessoas, dados ou sistemas diante de indícios concretos de fraude, violação grave destes Termos ou ordem de autoridade. Sempre que possível e seguro, informaremos o motivo e ofereceremos canal para contestação. A medida será proporcional e não prejudicará reembolsos ou outros direitos previstos em lei.
 
@@ -77,11 +77,11 @@ Respeitamos os deveres de qualidade, informação, segurança e reparação prev
 
 Podemos atualizar funcionalidades e estes Termos por razões legais, técnicas ou de produto. Mudanças materiais serão comunicadas antes de produzirem efeito sobre relações em curso, com apresentação da nova versão para ciência ou novo aceite quando necessário. A versão aceita na contratação continua disponível para consulta e prova. Alterações não retiram direitos já adquiridos nem modificam unilateralmente preço ou obrigação essencial de período já contratado.
 
-## 10. Dados pessoais e revisão de decisões
+## 10. Dados pessoais, fotos corporais e revisão de decisões
 
-O uso de dados segue a [Política de Privacidade](/privacidade). Dados de saúde dependem de consentimento específico e destacado, separado do aceite destes Termos. Você pode revogar esse consentimento pelos canais informados na Política; a revogação interrompe novos usos desses dados para elaborar e adaptar treinos e pode inviabilizar a continuidade da parte individualizada do Serviço, sem multa por esse motivo. Conservação residual pode ocorrer nas hipóteses legais descritas na Política.
+O uso de dados segue a [Política de Privacidade](/privacidade). Dados de saúde dependem de consentimento específico e destacado, separado do aceite destes Termos. Fotos corporais são opcionais, nunca condicionam o uso do Serviço e só são tratadas com consentimento específico próprio. Você pode revogar esse consentimento pelos canais informados na Política; a revogação interrompe novos usos desses dados para elaborar e adaptar planos e pode inviabilizar a continuidade da parte individualizada do Serviço, sem multa por esse motivo. Conservação residual pode ocorrer nas hipóteses legais descritas na Política.
 
-Se entender que uma decisão automatizada afetou seus interesses, pode pedir informações e revisão nos limites do art. 20 da LGPD. A MOVIVO disponibilizará encaminhamento humano para situações de segurança e orientação de treino. Os canais da seção 1 também recebem reclamações sobre o Serviço.
+Se entender que uma decisão automatizada afetou seus interesses, pode pedir informações e revisão nos limites do art. 20 da LGPD. A MOVIVO disponibiliza revisão humana a pedido e encaminhamento a profissional nas situações de segurança, de treino e de alimentação. Os canais da seção 1 também recebem reclamações sobre o Serviço.
 
 ## 11. Lei aplicável e solução de conflitos
 

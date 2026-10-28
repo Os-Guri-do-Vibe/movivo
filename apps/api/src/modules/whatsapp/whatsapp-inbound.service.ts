@@ -33,20 +33,17 @@ import {
   type AudioTranscriptionPort,
 } from '../../core/audio/audio-transcription.port';
 import { AppConfigService } from '../../core/config';
-import { CoachAttendanceService } from '../../core/database/coach-attendance.service';
+import { AttendanceService } from '../../core/database/attendance.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { conversations, users } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import {
   SUBSCRIPTION_INBOUND_EVENT,
-  WORKOUT_INBOUND_EVENT,
-  type CheckinInboundEvent,
   type SubscriptionInboundEvent,
 } from '../../core/event-bus/events';
 import { DomainEventBus } from '../../core/event-bus/event-bus.service';
 import { ConversationEventsService } from '../../core/event-bus/conversation-events.service';
-import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
 import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { REDIS_KEY_BUILDER, RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QUEUE } from '../jobs/jobs.config';
@@ -63,10 +60,10 @@ import {
 
 /**
  * Janela de debounce. Concatena a rajada do usuário num só job — ex.: "oi" / "tudo bem?" /
- * "bom dia" mandados em bolhas separadas viram um único turno do AI Coach. Rafael §6
+ * "bom dia" mandados em bolhas separadas viram um único turno da IA. Rafael §6
  * recomendava 3-5s; aumentado para 7s por decisão do fundador (achado 2026-09-12) e para 15s
  * em 2026-10-16, depois de conversas reais em que o aluno escrevia em pedaços (uma reação, e
- * só então a explicação) e o Coach respondia ao primeiro pedaço antes de ele terminar. A
+ * só então a explicação) e a IA respondia ao primeiro pedaço antes de ele terminar. A
  * janela é fixa, contada da primeira mensagem: não reinicia a cada mensagem nova.
  */
 const DEBOUNCE_MS = 15_000;
@@ -79,7 +76,6 @@ const BATCH_TTL_SECONDS = 120;
  * qualquer reconexão plausível.
  */
 const NONCE_TTL_SECONDS = 86_400;
-const INBOUND_ROUTE_TTL_SECONDS = 60;
 
 /**
  * Orçamento de mensagens por titular (Sato: "o controle que realmente importa"). Vale para
@@ -123,10 +119,9 @@ export class WhatsappInboundService {
     private readonly queues: QueueManager,
     private readonly healthConsent: HealthConsentService,
     private readonly events: DomainEventBus,
-    private readonly queueEvents: DashboardQueueEventsService,
     private readonly config: AppConfigService,
     private readonly cipher: HealthCipherService,
-    private readonly coachAttendance: CoachAttendanceService,
+    private readonly attendance: AttendanceService,
     private readonly conversationEvents: ConversationEventsService,
     private readonly mirror: WhatsappMirrorService,
     private readonly logger: PinoLogger,
@@ -259,7 +254,6 @@ export class WhatsappInboundService {
 
     if (isRevocation) {
       await this.healthConsent.revokeForUser(userId);
-      this.queueEvents.emit('consent');
       await this.queues.enqueue(
         QUEUE.whatsappOutbound,
         'health-consent-revoked',
@@ -302,7 +296,7 @@ export class WhatsappInboundService {
           userId,
           type: 'CONSENT_STATUS',
           dedupeId: `health-consent-inactive-${consentCommandId}`,
-          text: 'Seu consentimento para uso de dados de saude nao esta ativo. Esta mensagem nao foi processada. Para exercer seus direitos ou solicitar orientacao, contate o Encarregado de Dados indicado na Politica de Privacidade.',
+          text: 'Seu consentimento para uso de dados de saude nao esta ativo. Esta mensagem nao foi processada. Se voce recebeu o convite para atualizar seu cadastro, conclua o formulario do link para voltar a receber seu plano. Para exercer seus direitos, contate o Encarregado de Dados indicado na Politica de Privacidade.',
         },
         { jobId: `health-consent-inactive-${consentCommandId}` },
       );
@@ -325,39 +319,16 @@ export class WhatsappInboundService {
       return;
     }
 
-    const routeKey = this.keys.forUser(userId, 'inbound-route', this.hash(messageId));
-    await this.redis.set(
-      routeKey,
-      JSON.stringify({ text, buttonId: message.buttonId }),
-      'EX',
-      INBOUND_ROUTE_TTL_SECONDS,
-    );
-    // Cadeia determinística (US-8.1): só o treino intercepta botão determinístico hoje — o
-    // check-in semanal virou formulário web (achado 2026-09-13), sem botão pra rotear aqui.
-    const handled =
-      (await this.events.request<CheckinInboundEvent, boolean>(WORKOUT_INBOUND_EVENT, {
-        userId,
-        routeKey,
-      })) ?? false;
-    if (handled) {
-      this.logger.info(
-        { event: 'workout_inbound_handled', userId, correlationId },
-        'resposta determinística tratada sem LLM',
-      );
-      return;
-    }
-    await this.redis.del(routeKey);
-
     // US-3.6 — engajamento: 2ª mensagem (real) do usuário no mesmo dia (meta ≥40%, Épico 4).
     await this.trackSecondMessageSameDay(userId, correlationId);
 
     // Atendimento automático pausado pelo profissional (aba "Conversas"): a mensagem fica no
     // histórico para ele ler e responder, e a IA não é acionada. Vem DEPOIS de revogação,
     // consentimento, assinatura e treino de propósito — esses seguem valendo com a pausa.
-    if (await this.coachAttendance.isPaused(userId)) {
+    if (await this.attendance.isPaused(userId)) {
       await this.recordInboundWhilePaused(userId, text);
       this.logger.info(
-        { event: 'inbound_held_coach_paused', userId, correlationId },
+        { event: 'inbound_held_attendance_paused', userId, correlationId },
         'atendimento automático pausado — mensagem registrada, IA não acionada',
       );
       return;
@@ -383,7 +354,7 @@ export class WhatsappInboundService {
         correlationId,
         enqueuedAt: startedAt,
       };
-      await this.queues.enqueue(QUEUE.aiResponse, 'coach-response', job, { delay: DEBOUNCE_MS });
+      await this.queues.enqueue(QUEUE.aiResponse, 'agent-response', job, { delay: DEBOUNCE_MS });
       this.logger.info(
         {
           event: 'webhook_enqueued',
@@ -529,7 +500,7 @@ export class WhatsappInboundService {
   }
 
   /**
-   * Avisa o aluno quando um áudio não pôde virar resposta — reusa `COACH_MESSAGE` (texto
+   * Avisa o aluno quando um áudio não pôde virar resposta — reusa `CONVERSATION_MESSAGE` (texto
    * livre, sem cabeçalho especial, ver `whatsapp-outbound.worker.ts::buildText`).
    * `dedupeId` a partir do `messageId` evita duplicar o aviso se o BullMQ reentregar o job.
    */
@@ -544,7 +515,7 @@ export class WhatsappInboundService {
     await this.queues.enqueue(
       QUEUE.whatsappOutbound,
       'audio-transcription-fallback',
-      { userId, type: 'COACH_MESSAGE', dedupeId, text },
+      { userId, type: 'CONVERSATION_MESSAGE', dedupeId, text },
       { jobId: dedupeId },
     );
   }

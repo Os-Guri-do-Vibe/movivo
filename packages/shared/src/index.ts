@@ -20,12 +20,8 @@ export const API_VERSION_PREFIX = 'api/v1';
 export * from './enums';
 export * from './schemas';
 export * from './types';
-export * from './validation/friendly-issues';
 
 export * from './attribution';
-export * from './workout-share-card';
 export * from './whatsapp-bubbles';
-
-export * from './prompts/persona-block';
 
 export * from './rbac/capabilities-by-role';

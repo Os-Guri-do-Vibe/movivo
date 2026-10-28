@@ -2,8 +2,6 @@ const UUID_SEGMENT = '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}
 
 /** `ai/knowledge/upload` é multipart e tem rota própria (`control/ai/knowledge/upload/route.ts`). */
 const STATIC_MUTATIONS = new Set([
-  'ai/persona',
-  'ai/persona/rollback',
   'ai/simulate',
   'ai/faq',
   'ai/faq/rollback',
@@ -20,19 +18,27 @@ const STATIC_MUTATIONS = new Set([
   'ai/forbidden-topics/approve',
   'ai/forbidden-topics/retire',
   'ai/knowledge/review',
-  'ai/methodology',
   'integration/whatsapp/instance',
 ]);
 
 const PARAMETERIZED_MUTATIONS = [
   new RegExp(`^ai/knowledge/${UUID_SEGMENT}/(?:retry|archive|delete)$`, 'i'),
-  new RegExp(`^ai/methodology/${UUID_SEGMENT}/(?:submit|review|publish|rollback)$`, 'i'),
-  // Aba "Conversas": pausar/reativar o AI Coach, enviar mensagem manual e marcar como lida.
+  // Aba "Conversas": pausar/reativar a IA, enviar mensagem manual e marcar como lida.
   new RegExp(`^conversations/${UUID_SEGMENT}/(?:ai-attendance|messages|read)$`, 'i'),
   // Sistema → Scripts: execução manual forçada de um cron/rotina do catálogo (o id é validado
   // de novo no backend, que só executa o que está no catálogo).
   /^scripts\/[a-z0-9-]{1,80}\/run$/,
+  // Fila de exceções: assumir, aprovar, recusar e encerrar (a autorização por domínio é do backend).
+  new RegExp(`^exceptions/${UUID_SEGMENT}/(?:claim|approve|reject|resolve)$`, 'i'),
+  // Estúdio de metodologia: abrir rascunho de um domínio e editar/testar/publicar/descartar.
+  /^methodology\/domains\/[A-Z]{3,16}\/drafts$/,
+  new RegExp(`^methodology/documents/${UUID_SEGMENT}/(?:update|test|publish|discard)$`, 'i'),
 ];
+
+/** Rotas de nível de modelo: a única escrita por PUT do Control Center. */
+export function isAllowedControlPutPath(path: string): boolean {
+  return /^agents\/tiers\/(?:FAST|STANDARD|REASONING|VISION)$/.test(path);
+}
 
 /** O BFF nunca encaminha POST para um path que não esteja listado aqui. */
 export function isAllowedControlMutationPath(path: string): boolean {

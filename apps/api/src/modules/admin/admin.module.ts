@@ -2,38 +2,31 @@
  * `AdminModule` — módulo ADMIN / CREF do C4 nível 3 (`ARQUITETURA.md` §4).
  *
  * Regras que valem para quem mexer aqui:
- *  - Dashboard de operações do profissional CREF: fila de exceções, assinatura de protocolos, flags de risco.
+ *  - Painel interno: finanças, marketing, sócios, alunos, conversas, governança do atendimento (FAQ, temas proibidos, guardrails), catálogo de exercícios, base de conhecimento, auditoria e scripts do sistema. A fila de exceções e o painel de agentes vivem nos próprios módulos.
  *  - Acesso restrito por RBAC e **toda** ação é registrada em `audit_logs` append-only (Alexandre/Sato) — inclusive leitura de dado de saúde de um titular.
  *  - Acesso administrativo a dado de saúde é o cenário de maior risco de IDOR do produto: autorização por titular, sempre, nunca só por papel.
  *
  * # Fronteira do módulo (regra §12.5 — sem imports circulares)
  * Este módulo pode depender do **CORE** (config, banco, Redis, logger) por DI, já que
- * todos os providers do CORE são globais. Exceção deliberada já em uso (`ProtocolModule`,
- * pra assinatura/edição de protocolo pelo profissional CREF): o ADMIN é um módulo de
- * operação/gestão que legitimamente aciona ações de outros domínios, então importa
- * `WhatsappModule` também — só pra reusar `EVOLUTION_TRANSPORT` (painel "Sistema →
- * Integração"), sem duplicar o cliente HTTP confinado da EvolutionAPI.
+ * todos os providers do CORE são globais. Importa `WhatsappModule` só para reusar
+ * `EVOLUTION_TRANSPORT` (painel "Sistema → Integração"), sem duplicar o cliente HTTP
+ * confinado da EvolutionAPI.
  */
 import { Module } from '@nestjs/common';
 
 import { AuthModule } from '../auth/auth.module';
+import { CatalogModule } from '../catalog/catalog.module';
 import { JobsModule } from '../jobs/jobs.module';
-import { ProtocolModule } from '../protocol/protocol.module';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
-import { AiConfigController } from './ai-config.controller';
-import { AiConfigService } from './ai-config.service';
+import { AnamnesisModule } from '../anamnesis/anamnesis.module';
 import { AuditService } from './audit.service';
 import { AuditQueryController } from './audit-query.controller';
 import { AuditQueryService } from './audit-query.service';
+import { ConfigGateController } from './config-gate.controller';
 import { ControlCenterController } from './control-center.controller';
 import { ControlCenterService } from './control-center.service';
 import { ConversationsController } from './conversations.controller';
 import { ConversationsService } from './conversations.service';
-import { DashboardController } from './dashboard.controller';
-import { DashboardNotificationHistoryService } from './dashboard-notification-history.service';
-import { DashboardNotificationsController } from './dashboard-notifications.controller';
-import { DashboardNotificationsService } from './dashboard-notifications.service';
-import { DashboardService } from './dashboard.service';
 import { FinanceController } from './finance.controller';
 import { FinanceService } from './finance.service';
 import { FaqAdminController } from './faq-admin.controller';
@@ -49,21 +42,17 @@ import { L1GuardrailAdminService } from './l1-guardrail-admin.service';
 import { KnowledgeAdminController } from './knowledge-admin.controller';
 import { KnowledgeAdminService } from './knowledge-admin.service';
 import { KnowledgeProcessingWorker } from './knowledge-processing.worker';
-import { MethodologyAdminController } from './methodology-admin.controller';
-import { MethodologyAdminService } from './methodology-admin.service';
 import { PartnersController } from './partners.controller';
 import { PartnersService } from './partners.service';
 import { SystemScriptsController } from './system-scripts.controller';
 import { SystemScriptsService } from './system-scripts.service';
 
 @Module({
-  imports: [AuthModule, JobsModule, ProtocolModule, WhatsappModule],
+  imports: [AnamnesisModule, AuthModule, CatalogModule, JobsModule, WhatsappModule],
   controllers: [
-    DashboardController,
-    DashboardNotificationsController,
     ControlCenterController,
+    ConfigGateController,
     ConversationsController,
-    AiConfigController,
     FinanceController,
     MarketingController,
     PartnersController,
@@ -73,17 +62,12 @@ import { SystemScriptsService } from './system-scripts.service';
     L1GuardrailAdminController,
     AuditQueryController,
     KnowledgeAdminController,
-    MethodologyAdminController,
     SystemScriptsController,
   ],
   providers: [
     AuditService,
-    DashboardService,
-    DashboardNotificationsService,
-    DashboardNotificationHistoryService,
     ControlCenterService,
     ConversationsService,
-    AiConfigService,
     FinanceService,
     MarketingService,
     PartnersService,
@@ -94,7 +78,6 @@ import { SystemScriptsService } from './system-scripts.service';
     AuditQueryService,
     KnowledgeAdminService,
     KnowledgeProcessingWorker,
-    MethodologyAdminService,
     SystemScriptsService,
   ],
 })

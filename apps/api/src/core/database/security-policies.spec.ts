@@ -33,14 +33,14 @@ describe('buildKnowledgeDocumentsSecuritySql', () => {
 
   it('aceita revisão aprovada por ADMIN ou profissional CREF ativo', () => {
     expect(sql).toContain("reviewer.role = 'ADMIN'");
-    expect(sql).toContain("reviewer.role = 'PROFESSIONAL' AND reviewer.cref_active = true");
+    expect(sql).toContain("reviewer.role = 'PROFESSIONAL' AND reviewer.council_active = true");
   });
 });
 
 describe('buildRlsPoliciesSql', () => {
   const sql = buildRlsPoliciesSql();
 
-  it('cobre exatamente as tabelas de titular (Sprint 1 + ai_jobs/protocols da US-2.x)', () => {
+  it('cobre exatamente as tabelas de titular', () => {
     expect(RLS_TENANT_TABLES).toEqual([
       'users',
       // Conta da Plataforma Interna (login, dashboard) — não é dado de titular.
@@ -48,33 +48,47 @@ describe('buildRlsPoliciesSql', () => {
       'consents',
       'anamnesis_sessions',
       'auth_sessions',
-      'dashboard_notification_reads',
-      'ai_jobs',
-      'protocols',
-      'protocol_versions',
-      // Renovação de protocolo por fim de mesociclo — formulário de transição.
-      'protocol_renewal_sessions',
-      // Achado 2026-09-02 — proposta de substituição de exercício via IA, em staging.
-      'protocol_substitution_requests',
-      'coaching_sessions',
-      'handoff_alerts',
       'subscriptions',
       'conversations',
-      'checkins',
-      'reengagement_nudges',
-      'conversation_followups',
       'audit_logs',
-      'workout_completions',
-      'workout_sessions',
-      'workout_schedule_adjustments',
-      'workout_set_entries',
-      'workout_access_tokens',
       'access_link_tokens',
-      'workout_insights',
+      'training_access_tokens',
       'user_status_transitions',
       // US-8.5 — liquidacao recebida do gateway, dado financeiro do titular.
       'payments',
-      'professional_assignments',
+      // Estado do Aluno.
+      'student_profiles',
+      'student_health_records',
+      'student_goals',
+      'goal_milestones',
+      'goal_tasks',
+      'student_constraints',
+      'student_preferences',
+      'student_observations',
+      'student_state_snapshots',
+      // Treino integrado.
+      'training_plans',
+      'plan_sessions',
+      'scheduled_sessions',
+      'session_executions',
+      'execution_sets',
+      'execution_metrics',
+      // Nutrição, corpo e check-ins.
+      'nutrition_plans',
+      'food_logs',
+      'body_measurements',
+      'body_photos',
+      'body_assessments',
+      'check_ins',
+      'weekly_reviews',
+      // Trilha de decisões, fila por exceção e outbox.
+      'coaching_proposals',
+      'coaching_decisions',
+      'decision_executions',
+      'safety_events',
+      'exception_cases',
+      'domain_events',
+      'model_runs',
     ]);
   });
 
@@ -108,19 +122,16 @@ describe('buildRlsPoliciesSql', () => {
 
   it('escrita de registros filhos exige o mesmo titular do recurso-pai', () => {
     for (const [table, parent, column] of [
-      ['protocols', 'anamnesis_sessions', 'anamnesis_session_id'],
-      ['protocols', 'protocol_renewal_sessions', 'renewal_session_id'],
-      ['protocol_renewal_sessions', 'protocols', 'previous_protocol_id'],
       ['payments', 'subscriptions', 'subscription_id'],
-      ['conversations', 'protocols', 'protocol_id'],
-      ['protocol_versions', 'protocols', 'protocol_id'],
-      ['protocol_substitution_requests', 'protocols', 'protocol_id'],
-      ['checkins', 'protocols', 'protocol_id'],
-      ['workout_completions', 'protocols', 'protocol_id'],
-      ['workout_sessions', 'protocols', 'protocol_id'],
-      ['workout_schedule_adjustments', 'protocols', 'protocol_id'],
-      ['workout_set_entries', 'workout_sessions', 'workout_session_id'],
-      ['workout_access_tokens', 'workout_sessions', 'workout_session_id'],
+      ['goal_milestones', 'student_goals', 'goal_id'],
+      ['goal_tasks', 'student_goals', 'goal_id'],
+      ['plan_sessions', 'training_plans', 'plan_id'],
+      ['scheduled_sessions', 'training_plans', 'plan_id'],
+      ['scheduled_sessions', 'plan_sessions', 'plan_session_id'],
+      ['execution_sets', 'session_executions', 'execution_id'],
+      ['execution_metrics', 'session_executions', 'execution_id'],
+      ['coaching_decisions', 'coaching_proposals', 'proposal_id'],
+      ['decision_executions', 'coaching_decisions', 'decision_id'],
     ]) {
       for (const operation of ['insert', 'update']) {
         const policy = sql
@@ -150,26 +161,20 @@ describe('buildRlsPoliciesSql', () => {
       .split(';')
       .find((statement) => statement.includes('CREATE POLICY "users_rls_select"'));
     expect(usersSelect).toContain('public.has_active_health_consent("users"."id")');
-    const protocolsUpdate = sql
+    const plansUpdate = sql
       .split(';')
-      .find((statement) => statement.includes('CREATE POLICY "protocols_rls_update"'));
-    expect(protocolsUpdate).toContain('public.has_active_health_consent("protocols"."user_id")');
+      .find((statement) => statement.includes('CREATE POLICY "training_plans_rls_update"'));
+    expect(plansUpdate).toContain('public.has_active_health_consent("training_plans"."user_id")');
   });
 
-  // Achado 2026-08-19 (decisão do fundador): a fila de revisão é do CARGO, não da
-  // pessoa — qualquer profissional CREF ativo acessa todo titular com consentimento
-  // de saúde vigente, sem depender de `professional_assignments` (que permanece só
-  // como atribuição nominal, ex.: `protocols.professionalId`).
-  it('acesso profissional não depende mais de professional_assignments específico', () => {
-    const protocolsSelect = sql
+  // A fila é do CARGO, não da pessoa: qualquer profissional ativo acessa todo titular com
+  // consentimento de saúde vigente.
+  it('acesso profissional depende só do papel e do consentimento de saúde', () => {
+    const plansSelect = sql
       .split(';')
-      .find((statement) => statement.includes('CREATE POLICY "protocols_rls_select"'));
-    const protocolsUpdate = sql
-      .split(';')
-      .find((statement) => statement.includes('CREATE POLICY "protocols_rls_update"'));
-    expect(protocolsSelect).toContain("= 'PROFESSIONAL' AND public.has_active_health_consent");
-    expect(protocolsSelect).not.toContain('professional_assignments');
-    expect(protocolsUpdate).not.toContain('professional_assignments');
+      .find((statement) => statement.includes('CREATE POLICY "training_plans_rls_select"'));
+    expect(plansSelect).toContain("= 'PROFESSIONAL' AND public.has_active_health_consent");
+    expect(sql).not.toContain('professional_assignments');
   });
 
   it('lookup anônimo exige token e consentimentos exigem sessão conhecida', () => {

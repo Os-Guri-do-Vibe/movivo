@@ -540,6 +540,104 @@
       "when": 1792700000000,
       "tag": "0076_conversas_espelho_midia",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1793133237505,
+      "tag": "0077_remove_lembretes_reengajamento",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1793134287398,
+      "tag": "0078_estado_do_aluno_treino_nutricao_decisoes",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1793135065970,
+      "tag": "0079_gateway_de_modelos",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1793135748439,
+      "tag": "0080_avaliacao_de_agentes",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1793136570751,
+      "tag": "0081_estudio_de_metodologia",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1793137483079,
+      "tag": "0082_anamnese_em_oito_etapas",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1793152720941,
+      "tag": "0083_recibo_de_evento_reivindicado",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1793154795081,
+      "tag": "0084_link_de_acesso_do_plano",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1793198540393,
+      "tag": "0085_ajuste_pontual_da_sessao",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1793206324418,
+      "tag": "0086_revisao_semanal_do_progresso",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1793211994097,
+      "tag": "0087_conselho_do_profissional",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1793217032364,
+      "tag": "0088_arquivo_e_corte_do_legado",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1793217547050,
+      "tag": "0089_limpeza_de_colunas_do_legado",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1793218144055,
+      "tag": "0090_atendimento_automatico_e_origem_da_mensagem",
+      "breakpoints": true
     }
   ]
 }

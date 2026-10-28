@@ -13,19 +13,19 @@ import styles from './how-it-works.module.css';
 const ACTS = [
   {
     title: 'Primeiro, entendemos você.',
-    text: 'Objetivo, rotina, experiência, disponibilidade, limitações e contexto de treino entram na construção do protocolo.',
+    text: 'Objetivo, rotina, experiência, disponibilidade, limitações e contexto entram na construção do seu plano.',
   },
   {
     title: 'Depois, construímos o plano.',
-    text: 'A inteligência da MOVIVO organiza essas informações, dentro da metodologia profissional, para criar um protocolo coerente com a sua realidade.',
+    text: 'A MOVIVO organiza essas informações, dentro da metodologia escrita pelos profissionais, para criar um plano de treino e de alimentação coerente com a sua realidade.',
   },
   {
     title: 'Tecnologia com responsabilidade humana.',
-    text: 'O protocolo passa por supervisão profissional antes de chegar até você.',
+    text: 'A IA trabalha dentro de regras definidas por profissionais registrados, que entram nos casos sensíveis.',
   },
   {
     title: 'O treino chega onde você já está.',
-    text: 'Tudo pelo WhatsApp: treino, orientação, feedbacks e ajustes.',
+    text: 'Tudo pelo WhatsApp: a sessão do dia, orientação, registros e ajustes.',
   },
 ] as const;
 
@@ -87,7 +87,7 @@ export function HowItWorks() {
 
         <div className={styles.cta}>
           <TrialCta event={LANDING_EVENTS.howItWorksStart} width="block">
-            Começar meu protocolo
+            Começar meu plano
           </TrialCta>
           <p className={cn(landing.secondaryText, styles.ctaNote)}>
             7 dias grátis · sem cobrança durante o teste

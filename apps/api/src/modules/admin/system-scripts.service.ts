@@ -29,7 +29,8 @@ import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { roleHasCapabilities } from '../auth/capabilities';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { QueueManager } from '../jobs/queue-manager.service';
-import { ExerciseCatalogProvider } from '../protocol/exercise-catalog-provider.service';
+import { ComplementaryCampaignService } from '../anamnesis/complementary-campaign.service';
+import { ExerciseCatalogProvider } from '../catalog/exercises/exercise-catalog-provider.service';
 import { AuditService } from './audit.service';
 import { FinanceService } from './finance.service';
 import {
@@ -82,6 +83,7 @@ export class SystemScriptsService {
     private readonly audit: AuditService,
     private readonly finance: FinanceService,
     private readonly exerciseCatalog: ExerciseCatalogProvider,
+    private readonly complementaryCampaign: ComplementaryCampaignService,
   ) {}
 
   async list(actor: AuthenticatedUser): Promise<ControlCenterScriptsResponse> {
@@ -143,6 +145,16 @@ export class SystemScriptsService {
     if (script.id === 'exercise-catalog-refresh') {
       await this.exerciseCatalog.refresh();
       return { id: script.id, status: 'COMPLETED', message: 'Catálogo de exercícios recarregado.' };
+    }
+    if (script.id === 'complementary-anamnesis-campaign') {
+      const { invited, failed } = await this.complementaryCampaign.run();
+      return {
+        id: script.id,
+        status: 'COMPLETED',
+        message: invited
+          ? `${invited} convite(s) enviado(s)${failed ? `; ${failed} falharam e podem ser reenviados` : ''}.`
+          : 'Nenhum aluno elegível sem convite válido.',
+      };
     }
     if (script.id === 'finance-recurring-expenses') {
       this.assertFinanceAccess(actor);

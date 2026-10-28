@@ -2,7 +2,6 @@
 
 import {
   AlertTriangle,
-  BookOpenText,
   Brain,
   Files,
   HelpCircle,
@@ -16,9 +15,7 @@ import { useEffect, useState } from 'react';
 
 import {
   getKnowledgeDocuments,
-  getMethodology,
   type KnowledgeDocumentsViewResponse,
-  type MethodologyResponse,
 } from '@/lib/control-center-api';
 import { cn } from '@/lib/utils';
 
@@ -27,7 +24,6 @@ const BASE = '/dashboard/ia/base-conhecimento';
 /** Disparado pelas seções após mudar a base, para o resumo do topo não ficar defasado. */
 export const KNOWLEDGE_CHANGED_EVENT = 'movivo:knowledge-changed';
 const SECTIONS = [
-  { href: BASE, label: 'Metodologia', icon: BookOpenText },
   { href: `${BASE}/documentos`, label: 'Documentos', icon: Files },
   { href: `${BASE}/faq`, label: 'FAQ', icon: HelpCircle },
   { href: `${BASE}/seguranca`, label: 'Segurança', icon: ShieldCheck },
@@ -36,7 +32,6 @@ const SECTIONS = [
 
 function SummaryStrip() {
   const [documents, setDocuments] = useState<KnowledgeDocumentsViewResponse | null>(null);
-  const [methodology, setMethodology] = useState<MethodologyResponse | null>(null);
   const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
@@ -45,12 +40,12 @@ function SummaryStrip() {
       controller.abort();
       controller = new AbortController();
       const { signal } = controller;
-      void Promise.allSettled([
-        getKnowledgeDocuments(signal).then(setDocuments),
-        getMethodology(signal).then(setMethodology),
-      ]).then((results) => {
-        if (!signal.aborted) setUnavailable(results.some((result) => result.status === 'rejected'));
-      });
+      void Promise.allSettled([getKnowledgeDocuments(signal).then(setDocuments)]).then(
+        (results) => {
+          if (!signal.aborted)
+            setUnavailable(results.some((result) => result.status === 'rejected'));
+        },
+      );
     };
     load();
     window.addEventListener(KNOWLEDGE_CHANGED_EVENT, load);
@@ -61,10 +56,6 @@ function SummaryStrip() {
   }, []);
 
   const corpus = documents?.data.documents ?? [];
-  const versions = methodology?.data.versions ?? [];
-  const current =
-    versions.find((version) => version.current) ??
-    versions.find((version) => version.status === 'PUBLISHED');
   const count = (predicate: (status: string) => boolean) =>
     documents ? corpus.filter((item) => predicate(item.status)).length : null;
   const waiting = count((status) => status === 'READY_FOR_REVIEW' || status === 'PENDING');
@@ -76,11 +67,6 @@ function SummaryStrip() {
     /** Coral só quando há algo a resolver; zero é um estado calmo. */
     alert?: boolean;
   }> = [
-    {
-      label: 'Metodologia vigente',
-      value: current ? `v${current.version}` : '—',
-      icon: BookOpenText,
-    },
     {
       label: 'Fontes ativas',
       value: String(count((status) => status === 'PUBLISHED') ?? '—'),
@@ -150,8 +136,8 @@ export function KnowledgeBaseShell({ children }: { children: React.ReactNode }) 
           Base de Conhecimento
         </h1>
         <p className="mt-2 max-w-3xl text-label text-muted-foreground">
-          Tudo o que a IA sabe e segue: a metodologia do profissional CREF, as evidências, as
-          respostas prontas e as regras de segurança.
+          As evidências, as respostas prontas e as regras de segurança do atendimento. A metodologia
+          que os agentes seguem mora no estúdio de metodologia.
         </p>
       </header>
 
@@ -163,7 +149,7 @@ export function KnowledgeBaseShell({ children }: { children: React.ReactNode }) 
       >
         <ul className="flex min-w-max gap-1">
           {SECTIONS.map(({ href, label, icon: Icon }) => {
-            const current = href === BASE ? pathname === BASE : pathname.startsWith(href);
+            const current = pathname.startsWith(href);
             return (
               <li key={href}>
                 <Link

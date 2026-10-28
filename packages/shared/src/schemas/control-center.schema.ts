@@ -296,7 +296,7 @@ export const controlCenterMarketingResponseSchema = z.object({
     funnel: z.object({
       formStarted: controlCenterMetricSchema,
       formSubmitted: controlCenterMetricSchema,
-      protocolActive: controlCenterMetricSchema,
+      planActive: controlCenterMetricSchema,
       subscriptionActive: controlCenterMetricSchema,
     }),
     anamnesisFunnel: anamnesisFunnelSchema,
@@ -356,7 +356,8 @@ export const controlCenterStudentSummarySchema = z.object({
   subscriptionStatus: nullableText,
   /** Plano por período (`07-relatorio-eduardo.md`) — `null` durante o trial ou sem assinatura. */
   subscriptionPlan: nullableText,
-  protocolStatus: nullableText,
+  /** Situação do plano de treino mais recente (`ACTIVE`, `SUPERSEDED`…); `null` sem plano. */
+  planStatus: nullableText,
   /** Data que finalizou a matrícula: quando a primeira anamnese foi enviada. */
   enrolledAt: z.iso.datetime().nullable(),
   churnRisk: churnRiskSchema,
@@ -381,7 +382,14 @@ export const controlCenterNorthStarSchema = z.object({
   cohortSize: z.number().int().nonnegative(),
   bySource: z.array(
     z.object({
-      source: z.enum(['WHATSAPP_QUICK_REPLY', 'CHECKIN', 'CONVERSATION']),
+      source: z.enum([
+        'LINK',
+        'WHATSAPP_TEXT',
+        'WHATSAPP_SCREENSHOT',
+        'FIT_FILE',
+        'GPX_FILE',
+        'STAFF',
+      ]),
       completions: z.number().int().nonnegative(),
     }),
   ),
@@ -418,7 +426,7 @@ export const controlCenterConversationSummarySchema = z.object({
   name: nullableText,
   phoneNumber: z.string(),
   lastMessageAt: z.iso.datetime(),
-  /** `true` = atendimento automático do AI Coach pausado; só um humano responde. */
+  /** `true` = atendimento automático pausado; só um humano responde. */
   aiPaused: z.boolean(),
   /** Mensagens do aluno ainda não lidas pela equipe (selo verde da lista, como no WhatsApp Web). */
   unreadCount: z.number().int().min(0),
@@ -457,10 +465,10 @@ export const controlCenterConversationMessageSchema = z.object({
   content: z.string(),
   createdAt: z.iso.datetime(),
   /**
-   * Quem escreveu: o aluno, o AI Coach, um aviso automático ou o profissional (pelo painel ou
+   * Quem escreveu: o aluno, a IA, um aviso automático ou o profissional (pelo painel ou
    * direto no celular). `null` nas linhas anteriores ao registro de origem.
    */
-  origin: z.enum(['STUDENT', 'COACH', 'SYSTEM', 'PROFESSIONAL']).nullable(),
+  origin: z.enum(['STUDENT', 'AGENT', 'SYSTEM', 'PROFESSIONAL']).nullable(),
   media: controlCenterConversationMediaSchema.nullable(),
 });
 export type ControlCenterConversationMessage = z.infer<
@@ -505,7 +513,7 @@ export type ControlCenterConversationReadResponse = z.infer<
   typeof controlCenterConversationReadResponseSchema
 >;
 
-/** Pausar (`true`) ou reativar (`false`) o atendimento automático do AI Coach de um aluno. */
+/** Pausar (`true`) ou reativar (`false`) o atendimento automático de um aluno. */
 export const controlCenterConversationAiAttendanceInputSchema = z.object({
   paused: z.boolean(),
 });
@@ -596,24 +604,22 @@ export type ControlCenterConversationPhotoResponse = z.infer<
 export const controlCenterTimelineEventCodeSchema = z.enum([
   'ANAMNESIS_STARTED',
   'ANAMNESIS_SUBMITTED',
-  'PROTOCOL_SIGNED',
-  'PROTOCOL_VERSION_GENERATED',
-  'PROTOCOL_VERSION_SIGNED',
-  'CHECKIN_SENT',
+  'PLAN_PUBLISHED',
+  'SESSION_COMPLETED',
   'CHECKIN_ANSWERED',
   'SUBSCRIPTION_CREATED',
   'TRIAL_ENDED',
   'PAID_PERIOD_STARTED',
   'SUBSCRIPTION_CANCELED',
-  'HANDOFF_OPENED',
-  'HANDOFF_RESOLVED',
+  'EXCEPTION_OPENED',
+  'EXCEPTION_RESOLVED',
   'CONVERSATION_DAY',
 ]);
 export type ControlCenterTimelineEventCode = z.infer<typeof controlCenterTimelineEventCodeSchema>;
 
 /**
- * Parâmetros do marco. Valores primitivos: códigos de enum (`status`, `plan`, `level`),
- * contagens (`week`, `version`, `messages`) ou texto já existente no banco (`reason`).
+ * Parâmetros do marco. Valores primitivos: códigos de enum (`status`, `plan`, `kind`),
+ * contagens (`version`, `messages`) ou texto já existente no banco (`summary`).
  * `null` = o dado existe mas está vazio; chave ausente = não se aplica / sem permissão.
  */
 export const controlCenterTimelineParamsSchema = z.record(
@@ -622,50 +628,30 @@ export const controlCenterTimelineParamsSchema = z.record(
 );
 export type ControlCenterTimelineParams = z.infer<typeof controlCenterTimelineParamsSchema>;
 
-/** Item da timeline única do aluno (US-7.4, TASK-7.4.1). */
+/** Item da timeline única do aluno. */
 export const controlCenterTimelineEventSchema = z.object({
   at: z.iso.datetime(),
-  kind: z.enum(['ANAMNESIS', 'PROTOCOL', 'CHECKIN', 'CONVERSATION', 'SUBSCRIPTION', 'HANDOFF']),
+  kind: z.enum([
+    'ANAMNESIS',
+    'PLAN',
+    'TRAINING',
+    'CHECKIN',
+    'CONVERSATION',
+    'SUBSCRIPTION',
+    'EXCEPTION',
+  ]),
   code: controlCenterTimelineEventCodeSchema,
   params: controlCenterTimelineParamsSchema,
 });
 export type ControlCenterTimelineEvent = z.infer<typeof controlCenterTimelineEventSchema>;
 
-/**
- * Ponto da evolução **declarada** pelo aluno no check-in semanal. Dado de saúde.
- * Achado 2026-09-13: substitui `fatigue`/`workouts`/`adjustment` (fluxo antigo de botão de
- * WhatsApp) pelas respostas do formulário web.
- */
-export const controlCenterEvolutionPointSchema = z.object({
-  week: z.number().int().positive(),
-  at: z.iso.datetime(),
-  sleepQuality: nullableText,
-  mood: nullableText,
-  /** "N/10" — alimentação e aderência ao protocolo, ambas em escala 0-10. */
-  nutritionScore: nullableText,
-  adherenceScore: nullableText,
-  /** Adequação percebida da duração do treino. */
-  durationFit: nullableText,
-});
-export type ControlCenterEvolutionPoint = z.infer<typeof controlCenterEvolutionPointSchema>;
-
 export const controlCenterStudentDetailResponseSchema = z.object({
   data: z.object({
     student: controlCenterStudentSummarySchema.extend({
-      requiresProfessionalReview: z.boolean(),
       anamnesisStatus: nullableText,
-      currentProtocol: z
-        .object({
-          id: z.uuid(),
-          version: z.number().int().positive(),
-          currentWeek: z.number().int().positive(),
-          totalWeeks: z.number().int().positive(),
-          signedAt: z.iso.datetime().nullable(),
-        })
-        .nullable(),
       /**
-       * Origem do primeiro toque (US-8.2). `null` para cadastro anterior à Sprint 8 —
-       * a UI rotula como "não capturada", nunca como orgânico (seria inferência falsa).
+       * Origem do primeiro toque. `null` para cadastro sem captura — a UI rotula como "não
+       * capturada", nunca como orgânico (seria inferência falsa).
        */
       acquisition: z
         .object({
@@ -678,42 +664,74 @@ export const controlCenterStudentDetailResponseSchema = z.object({
           capturedAt: z.iso.datetime(),
         })
         .nullable(),
-      routine: z
-        .object({
-          primaryGoal: nullableText,
-          trainingStatus: nullableText,
-          experience: nullableText,
-          daysPerWeek: z.number().int().nullable(),
-          preferredDays: z.array(z.string()),
-          sessionDuration: nullableText,
-          location: nullableText,
-          preferredPeriod: nullableText,
-        })
-        .nullable(),
-      workoutHistory: z.object({
-        status: z.literal('UNAVAILABLE'),
-        reason: z.string(),
+      /** Plano, estratégia e metas vigentes. */
+      plan: z.object({
+        training: z
+          .object({
+            version: z.number().int().positive(),
+            publishedAt: z.iso.datetime().nullable(),
+          })
+          .nullable(),
+        nutrition: z
+          .object({
+            version: z.number().int().positive(),
+            publishedAt: z.iso.datetime().nullable(),
+          })
+          .nullable(),
+        strategy: nullableText,
+        goal: nullableText,
       }),
-
-      /** Timeline única, do evento mais recente para o mais antigo. */
-      timeline: z.array(controlCenterTimelineEventSchema),
-
-      /** Adesão **declarada**: responder ao check-in, não treino verificado. */
+      /** Adesão **verificada** (sessões concluídas / agendadas, 28 dias). */
       adherence: z.object({
-        checkinsSent: z.number().int().nonnegative(),
-        checkinsResponded: z.number().int().nonnegative(),
+        windowDays: z.number().int().positive(),
+        planned: z.number().int().nonnegative(),
+        done: z.number().int().nonnegative(),
+        rate: controlCenterMetricSchema,
+      }),
+      /** Adesão **declarada**: responder ao check-in. */
+      checkins: z.object({
+        sent: z.number().int().nonnegative(),
+        answered: z.number().int().nonnegative(),
         responseRate: controlCenterMetricSchema,
       }),
-
-      /** Respostas bloqueadas pela validação de compliance neste aluno. */
+      executions: z.array(
+        z.object({
+          id: z.uuid(),
+          performedOn: z.string(),
+          modality: z.string(),
+          status: z.string(),
+          rpe: z.number().nullable(),
+          durationMinutes: z.number().int().nullable(),
+        }),
+      ),
+      /** Casos da fila de exceções ainda abertos. Vazio sem `STUDENTS_HEALTH_READ`. */
+      exceptions: z.array(
+        z.object({
+          id: z.uuid(),
+          kind: z.string(),
+          priority: z.string(),
+          domain: z.string(),
+          summary: z.string(),
+          createdAt: z.iso.datetime(),
+        }),
+      ),
+      /** Últimas decisões automáticas e humanas. Vazio sem `STUDENTS_HEALTH_READ`. */
+      decisions: z.array(
+        z.object({
+          action: z.string(),
+          verdict: nullableText,
+          decidedBy: nullableText,
+          createdAt: z.iso.datetime(),
+        }),
+      ),
+      /** Timeline única, do evento mais recente para o mais antigo. */
+      timeline: z.array(controlCenterTimelineEventSchema),
+      /** Respostas retidas pela validação de linguagem neste aluno. */
       aiQuality: z.object({
         blockedRate: controlCenterMetricSchema,
         blocked: z.number().int().nonnegative(),
         validated: z.number().int().nonnegative(),
-        /** Ocorrências anonimizadas pelo PII Scrubber. Vazio sem `STUDENTS_HEALTH_READ`. */
-        occurrences: z.array(z.object({ at: z.iso.datetime(), content: z.string() })),
       }),
-
       /**
        * Seção de saúde (LGPD Art. 11). **`null` — e nenhum campo dela no payload —**
        * para quem não tem `control_center.students.health.read`.
@@ -721,10 +739,7 @@ export const controlCenterStudentDetailResponseSchema = z.object({
       health: z
         .object({
           parqState: nullableText,
-          painReports: z.array(
-            z.object({ at: z.iso.datetime(), week: z.number().int(), text: z.string() }),
-          ),
-          evolution: z.array(controlCenterEvolutionPointSchema),
+          painReports: z.array(z.object({ at: z.iso.datetime(), text: z.string() })),
         })
         .nullable(),
     }),
@@ -791,17 +806,13 @@ export const controlCenterSystemResponseSchema = z.object({
     redisLatency: controlCenterMetricSchema,
     aiJobs: controlCenterMetricSchema,
     aiFailures: controlCenterMetricSchema,
-    aiDlq: controlCenterMetricSchema,
-    /** Tempo de modelo: só a chamada de LLM, medida em `ai_jobs.latency_ms`. */
+    /** Tempo de modelo: só a chamada de LLM, medida em `model_runs.latency_ms`. */
     aiLatency: controlCenterPercentilesSchema,
     aiLatencyByModel: z.array(controlCenterAiLatencySliceSchema),
     aiLatencyP95Daily: z.array(controlCenterTimeSeriesPointSchema),
     /** Tempo sentido pelo aluno no WhatsApp: `conversations.latency_ms`. */
     whatsappLatency: controlCenterPercentilesSchema,
     whatsappLatencyP95Daily: z.array(controlCenterTimeSeriesPointSchema),
-    ragQueries: controlCenterMetricSchema,
-    ragUsefulRetrievalRate: controlCenterMetricSchema,
-    ragCorpusChunks: controlCenterMetricSchema,
     /** Entre 3 e 5 semáforos — o board só é legível enquanto for curto. */
     slos: z.array(controlCenterSloSchema).min(3).max(5),
     pendingCapabilities: z.array(controlCenterPendingCapabilitySchema),

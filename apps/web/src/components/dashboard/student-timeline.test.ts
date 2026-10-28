@@ -1,91 +1,60 @@
-import type { ControlCenterTimelineEvent } from '@movivo/shared';
 import { describe, expect, it } from 'vitest';
+
+import type { ControlCenterTimelineEvent } from '@movivo/shared';
 
 import { describeTimelineEvent } from './student-timeline';
 
-function event(
+const event = (
   code: ControlCenterTimelineEvent['code'],
   params: ControlCenterTimelineEvent['params'] = {},
-): ControlCenterTimelineEvent {
-  return { at: '2026-08-10T12:00:00.000Z', kind: 'CHECKIN', code, params };
-}
+): ControlCenterTimelineEvent => ({
+  at: '2026-08-10T13:00:00.000Z',
+  kind: 'PLAN',
+  code,
+  params,
+});
 
 describe('describeTimelineEvent', () => {
-  it('monta a frase a partir do código e dos parâmetros', () => {
-    expect(describeTimelineEvent(event('CHECKIN_SENT', { week: 3 }))).toEqual({
-      title: 'Check-in da semana 3 enviado',
-      detail: null,
-    });
-    expect(
-      describeTimelineEvent(event('SUBSCRIPTION_CREATED', { plan: 'MONTHLY', status: 'TRIALING' })),
-    ).toEqual({ title: 'Assinatura mensal criada', detail: 'Em teste' });
-    expect(
-      describeTimelineEvent(event('HANDOFF_OPENED', { level: 'SAFETY', reason: 'VALIDATOR_FLAG' })),
-    ).toEqual({
-      title: 'Atendimento humano aberto (segurança)',
-      detail: 'Sinalizado pela validação de segurança',
-    });
-  });
-
-  it('traduz as respostas do check-in e omite o que não veio', () => {
-    expect(
-      describeTimelineEvent(
-        event('CHECKIN_ANSWERED', {
-          week: 2,
-          sleepQuality: 'BOA',
-          mood: 'MUITO_FELIZ',
-          nutritionScore: '8/10',
-          adherenceScore: '9/10',
-          durationFit: 'MAIS_CURTOS',
-        }),
-      ).detail,
-    ).toBe(
-      'Sono: boa · Humor: extremamente feliz · Alimentação: 8/10 · Aderência: 9/10 · Duração do treino: mais curta',
-    );
-    // Sem a capability de saúde o servidor manda só a semana.
-    expect(describeTimelineEvent(event('CHECKIN_ANSWERED', { week: 2 }))).toEqual({
-      title: 'Check-in da semana 2 respondido',
-      detail: null,
-    });
-  });
-
-  it('não escreve "undefined" quando falta parâmetro', () => {
-    for (const code of [
-      'PROTOCOL_SIGNED',
-      'PROTOCOL_VERSION_GENERATED',
-      'CHECKIN_SENT',
-      'SUBSCRIPTION_CREATED',
-      'HANDOFF_OPENED',
-    ] as const) {
-      const { title, detail } = describeTimelineEvent(event(code));
-      expect(`${title} ${detail ?? ''}`).not.toMatch(/undefined|null|NaN/);
-    }
-  });
-
-  it('concorda singular e plural nas mensagens do dia', () => {
-    expect(describeTimelineEvent(event('CONVERSATION_DAY', { messages: 1 })).title).toBe(
-      '1 mensagem trocada no dia',
-    );
-    expect(describeTimelineEvent(event('CONVERSATION_DAY', { messages: 12 })).title).toBe(
-      '12 mensagens trocadas no dia',
-    );
-  });
-
-  it('mantém texto livre do banco (motivo de cancelamento, razão da versão) como veio', () => {
-    expect(
-      describeTimelineEvent(event('SUBSCRIPTION_CANCELED', { reason: 'Achei caro' })).detail,
-    ).toBe('Achei caro');
-    expect(
-      describeTimelineEvent(
-        event('PROTOCOL_VERSION_GENERATED', {
-          version: 2,
-          reason: 'ajuste pós check-in',
-          model: 'gpt-4.1',
-        }),
-      ),
-    ).toEqual({
-      title: 'Versão 2 do protocolo gerada',
-      detail: 'ajuste pós check-in · modelo gpt-4.1',
-    });
+  it.each<[ControlCenterTimelineEvent, string, string | null]>([
+    [event('ANAMNESIS_STARTED', { origin: 'instagram' }), 'Anamnese iniciada', 'Origem: instagram'],
+    [event('ANAMNESIS_STARTED'), 'Anamnese iniciada', null],
+    [event('ANAMNESIS_SUBMITTED', { status: 'SUBMITTED' }), 'Anamnese enviada', 'Enviada'],
+    [event('PLAN_PUBLISHED', { version: 3 }), 'Plano de treino v3 publicado', null],
+    [event('PLAN_PUBLISHED'), 'Plano de treino publicado', null],
+    [event('SESSION_COMPLETED', { modality: 'RUNNING' }), 'Sessão de treino registrada', 'Corrida'],
+    [event('CHECKIN_ANSWERED'), 'Check-in respondido', null],
+    [
+      event('SUBSCRIPTION_CREATED', { plan: 'MONTHLY', status: 'TRIALING' }),
+      'Assinatura mensal criada',
+      'Em teste',
+    ],
+    [event('SUBSCRIPTION_CREATED'), 'Assinatura criada', null],
+    [event('TRIAL_ENDED'), 'Fim do período de teste', null],
+    [event('PAID_PERIOD_STARTED'), 'Início do período pago vigente', null],
+    [event('SUBSCRIPTION_CANCELED'), 'Assinatura cancelada', null],
+    [
+      event('EXCEPTION_OPENED', { kind: 'SAFETY' }),
+      'Caso aberto na fila de exceções',
+      'Sinal de segurança',
+    ],
+    [
+      event('EXCEPTION_OPENED', { summary: 'Pedido do aluno' }),
+      'Caso aberto na fila de exceções',
+      'Pedido do aluno',
+    ],
+    [
+      event('EXCEPTION_RESOLVED', { kind: 'SAFETY' }),
+      'Caso da fila resolvido',
+      'Sinal de segurança',
+    ],
+    [event('EXCEPTION_RESOLVED'), 'Caso da fila resolvido', null],
+    [event('CONVERSATION_DAY', { messages: 1 }), '1 mensagem trocada no dia', null],
+    [event('CONVERSATION_DAY', { messages: 12 }), '12 mensagens trocadas no dia', null],
+    [event('CONVERSATION_DAY'), '0 mensagens trocadas no dia', null],
+  ])('%#: escreve o marco em português, sem "undefined"', (input, title, detail) => {
+    const text = describeTimelineEvent(input);
+    expect(text.title).toBe(title);
+    expect(text.detail).toBe(detail);
+    expect(`${text.title} ${text.detail}`).not.toContain('undefined');
   });
 });

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { ProtocolStatus, SubscriptionStatus } from '../enums';
+import { SubscriptionStatus } from '../enums';
 
 /**
  * Schemas Zod primitivos compartilhados entre backend e frontend.
@@ -9,8 +9,7 @@ import { ProtocolStatus, SubscriptionStatus } from '../enums';
  * O mesmo schema serve de validação no `ValidationPipe` do NestJS e no formulário
  * do Next.js — fonte única de verdade do contrato, sem divergência entre as pontas.
  *
- * Esta US (0.1) entrega apenas os primitivos e a fundação; os DTOs de domínio
- * (anamnese, PAR-Q, protocolo, check-in) nascem nas sprints correspondentes.
+ * Aqui ficam só os primitivos; os DTOs de cada domínio moram no seu próprio arquivo.
  */
 
 /** UUID (PK padrão do schema). */
@@ -21,9 +20,6 @@ export const isoDateTimeSchema = z.iso.datetime();
 
 /** Status de assinatura, derivado do enum de domínio — nunca duplicar os literais. */
 export const subscriptionStatusSchema = z.enum(SubscriptionStatus);
-
-/** Status de protocolo, derivado do enum de domínio. */
-export const protocolStatusSchema = z.enum(ProtocolStatus);
 
 /** Query de paginação por cursor (padrão de todas as listagens da API v1). */
 export const paginationQuerySchema = z.object({

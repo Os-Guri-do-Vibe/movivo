@@ -16,7 +16,7 @@
  */
 import { z } from 'zod';
 
-import { ForbiddenTopicStatus } from '../enums/agent-config';
+import { ForbiddenTopicStatus } from '../enums/forbidden-topic-status';
 import { controlCenterMetaSchema } from './control-center.schema';
 
 /** Rótulo exibido no painel e no bloco de reforço do prompt. Mesmo espírito do L1, 3-40. */

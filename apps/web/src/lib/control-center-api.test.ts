@@ -162,7 +162,7 @@ describe('projeções do Control Center', () => {
           funnel: {
             formStarted: metric,
             formSubmitted: metric,
-            protocolActive: metric,
+            planActive: metric,
             subscriptionActive: metric,
           },
           acquisition: metric,
@@ -209,7 +209,7 @@ describe('projeções do Control Center', () => {
             status: 'ACTIVE',
             subscriptionStatus: 'ACTIVE',
             subscriptionPlan: 'MONTHLY',
-            protocolStatus: null,
+            planStatus: null,
             enrolledAt: '2026-08-01T09:00:00.000Z',
             churnRisk: { score: 0, signals: [] },
             parqState: 'BLOQUEADO',

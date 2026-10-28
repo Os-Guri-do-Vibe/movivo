@@ -67,5 +67,17 @@ export const config = {
   // Nonces exigem renderização dinâmica. A superfície CREF e a anamnese (dado de saúde)
   // são dinâmicas; a landing permanece estática e não recebe uma política incompatível
   // com seu HTML.
-  matcher: ['/entrar', '/dashboard/:path*', '/treino/:path*', '/api/workout/:path*', '/anamnese'],
+  matcher: [
+    '/entrar',
+    '/dashboard/:path*',
+    // Treino do dia.
+    '/hoje/:path*',
+    '/alimentacao',
+    '/evolucao',
+    '/check-in',
+    '/api/training/:path*',
+    '/anamnese',
+    // Anamnese complementar (dado de saúde): também precisa do nonce da CSP.
+    '/anamnese/complementar',
+  ],
 };

@@ -129,6 +129,22 @@ export async function startSession(request: NextRequest): Promise<NextResponse> 
   return sessionView(request, payload.token);
 }
 
+/**
+ * Retomada da anamnese complementar: o token chega do link (fragmento da URL → corpo desta
+ * chamada), é conferido na API — token inválido não deixa cookie — e passa a viver só no cookie.
+ */
+export async function resumeSession(request: NextRequest): Promise<NextResponse> {
+  assertSameOrigin(request);
+  const body = (await readJson(new Response(await request.text()))) as { token?: unknown } | null;
+  const token = body?.token;
+  if (typeof token !== 'string' || !/^[0-9a-f]{64}$/.test(token)) {
+    throw new AnamnesisBffError(400, 'Link inválido.');
+  }
+  const view = await sessionView(request, token);
+  if (view.ok) await storeToken(token);
+  return view;
+}
+
 export async function currentSession(request: NextRequest): Promise<NextResponse> {
   return sessionView(request, await readToken());
 }

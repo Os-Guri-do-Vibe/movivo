@@ -45,7 +45,7 @@ export class FaqAdminController {
   @ApiOperation({
     summary: 'Publica uma entrada de FAQ (nova ou nova versão)',
     description:
-      'Servida pelo AI Coach ao responder perguntas frequentes. `changeNote` é obrigatória (rastreabilidade de por que o conteúdo mudou).',
+      'Servida pela IA ao responder perguntas frequentes. `changeNote` é obrigatória (rastreabilidade de por que o conteúdo mudou).',
   })
   @ApiBody({ schema: zodSchemaToOpenApi(publishFaqEntrySchema) })
   @ApiResponse({ status: 200, description: 'Entrada publicada — nova versão criada.' })
@@ -87,7 +87,7 @@ export class FaqAdminController {
   @ApiOperation({
     summary: 'Aposenta um `faqKey`',
     description:
-      'Marca a entrada como `RETIRED` — deixa de ser servida ao AI Coach, histórico preservado.',
+      'Marca a entrada como `RETIRED` — deixa de ser servida à IA, histórico preservado.',
   })
   @ApiBody({ schema: zodSchemaToOpenApi(retireFaqEntrySchema) })
   @ApiResponse({ status: 200, description: 'Entrada aposentada.' })

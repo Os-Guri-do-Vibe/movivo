@@ -14,13 +14,10 @@
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "test:int": "vitest run --config vitest.integration.config.ts",
-    "eval:protocol": "vitest run --config vitest.eval.config.ts",
-    "test:journeys": "vitest run --config test/journeys/vitest.journeys.config.mts",
+    "eval": "nest build && node --enable-source-maps dist/scripts/eval.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/core/database/migrate.ts",
     "db:seed": "tsx src/core/database/seed.ts",
-    "db:seed:workout": "tsx src/core/database/seed-workout-demo.ts",
-    "db:seed:cost-intelligence": "tsx src/core/database/seed-cost-intelligence-demo.ts",
     "db:backfill-transitions": "tsx src/core/database/backfill-status-transitions.ts",
     "db:studio": "drizzle-kit studio",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true});require('node:fs').rmSync('tsconfig.tsbuildinfo',{force:true})\""
@@ -34,7 +31,6 @@
     "@nestjs/swagger": "^12.0.3",
     "@nestjs/terminus": "12.1.0",
     "@nestjs/throttler": "^6.7.1",
-    "@resvg/resvg-js": "2.6.2",
     "argon2": "^0.45.1",
     "bullmq": "6.4.0",
     "class-transformer": "0.5.1",
@@ -60,9 +56,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.11",
-    "@electric-sql/pglite-pgvector": "0.0.12",
-    "@electric-sql/pglite-socket": "0.2.14",
+    "@resvg/resvg-js": "2.6.2",
     "@nestjs/cli": "12.0.10",
     "@nestjs/schematics": "12.0.10",
     "@nestjs/testing": "12.2.0",

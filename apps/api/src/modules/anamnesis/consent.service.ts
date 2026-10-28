@@ -53,10 +53,9 @@ export class ConsentService {
     // Lookup token→sessão escopado pelo token (UUID ainda desconhecido); a escrita roda
     // ESCOPADA à sessão (Sato — achado 1): a RLS só aceita o consentimento preso a
     // esta sessão, nunca a de outro token.
-    const sessionId = await this.db.runAsToken(
-      (tx) => this.resolveActiveSessionId(tx, token),
-      token,
-    );
+    // Sistema, não token: a sessão complementar já pertence a um titular e não é visível ao
+    // contexto anônimo. O token de 256 bits continua sendo a credencial do lookup.
+    const sessionId = await this.db.runAsSystem((tx) => this.resolveActiveSessionId(tx, token));
 
     await this.db.runAsTokenScoped(sessionId, async (tx) => {
       for (const input of inputs) {
@@ -135,6 +134,25 @@ export class ConsentService {
    * É o que a Etapa 1 usa para decidir se o `CONTINUAR` passa (US-6.4). Compara a
    * versão porque um aceite de texto antigo não prova consentimento ao texto novo.
    */
+  /** Tipos aceitos pelo titular na versão vigente (vale na anamnese complementar). */
+  async acceptedTypesForUser(userId: string): Promise<ConsentTypeWithText[]> {
+    const rows = await this.db.runAsUser(userId, 'USER', (tx) =>
+      tx
+        .select({ type: consents.consentType, version: consents.version })
+        .from(consents)
+        .where(
+          and(eq(consents.userId, userId), eq(consents.accepted, true), isNull(consents.revokedAt)),
+        ),
+    );
+    return rows
+      .filter((row) => {
+        const text = CONSENT_TEXTS[row.type as ConsentTypeWithText] as
+          { version: string } | undefined;
+        return text?.version === row.version;
+      })
+      .map((row) => row.type as ConsentTypeWithText);
+  }
+
   async acceptedTypesForSession(sessionId: string): Promise<ConsentTypeWithText[]> {
     const rows = await this.db.runAsTokenScoped(sessionId, (tx) =>
       tx

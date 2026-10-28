@@ -1,14 +1,16 @@
 # MOVIVO
 
-> **Ciência que treina com você.**
+> **Move your potential.**
 
-**MOVIVO** é um AI Coach de treino individualizado entregue via **WhatsApp**, que combina IA
-conversacional com metodologia e supervisão de um profissional de Educação Física registrado
-no **CREF**. A IA nunca prescreve sozinha: o protocolo é calculado por um **Motor Determinístico**
-e assinado/supervisionado por um profissional CREF — o LLM apenas gera linguagem natural a
-partir do estado já decidido.
+**MOVIVO** é uma assessoria de movimento, performance e bem-estar entregue via **WhatsApp**.
+Agentes de IA montam e ajustam o plano de cada pessoa (musculação, corrida, HYROX ou híbrido, mais
+alimentação) **dentro de políticas versionadas escritas por profissionais** registrados nos
+conselhos (CREF, CRN e CRM). O profissional entra por exceção: sinal de segurança, situação sem
+política aplicável ou pedido de revisão. O modelo de linguagem nunca escreve nada diretamente: ele
+devolve uma proposta tipada, e o código valida, decide e executa.
 
-Este repositório é um **monorepo** (pnpm workspaces + Turborepo).
+Este repositório é um **monorepo** (pnpm workspaces + Turborepo). O contexto de produto, a
+arquitetura e as regras de trabalho estão em [`CLAUDE.md`](CLAUDE.md).
 
 ---
 
@@ -18,15 +20,15 @@ Este repositório é um **monorepo** (pnpm workspaces + Turborepo).
 - [Estrutura do monorepo](#estrutura-do-monorepo)
 - [Setup rápido](#setup-rápido)
 - [Ambiente e segredos](#ambiente-e-segredos)
-- [Ambiente local de dados (Docker Compose)](#ambiente-local-de-dados-docker-compose)
+- [Ambiente local (Docker Compose)](#ambiente-local-docker-compose--dados--aplicação-espelho-da-produção)
 - [Scripts da raiz](#scripts-da-raiz)
 - [Backend (`apps/api`)](#backend-appsapi)
-- [Banco de dados (schema, migrações e seed)](#banco-de-dados-schema-migrações-e-seed)
+- [Banco de dados](#banco-de-dados-schema-migrações-e-seed)
 - [Frontend (`apps/web`)](#frontend-appsweb)
 - [O pacote `@movivo/shared`](#o-pacote-movivoshared)
+- [Testes](#testes)
 - [Padrões de código](#padrões-de-código)
 - [Regras inegociáveis](#regras-inegociáveis)
-- [Documentação de referência](#documentação-de-referência)
 - [Convenção de commits](#convenção-de-commits)
 
 ---
@@ -39,7 +41,7 @@ Este repositório é um **monorepo** (pnpm workspaces + Turborepo).
 | pnpm       | `11.15.1`           | `packageManager` no `package.json` da raiz |
 | TypeScript | `5.9.3`             | devDependency da raiz e de cada workspace  |
 | Turborepo  | `2.10.6`            | devDependency da raiz                      |
-| Docker     | 29+ com Compose v2+ | necessário a partir da US-0.2              |
+| Docker     | 29+ com Compose v2+ | necessário para o ambiente local           |
 
 Ative o pnpm via Corepack:
 
@@ -57,45 +59,24 @@ corepack prepare pnpm@11.15.1 --activate
 
 ## Estrutura do monorepo
 
-Estrutura **fixa**, definida em [`docs/arquitetura/ARQUITETURA.md`](docs/arquitetura/ARQUITETURA.md) §2.
-Não criar novos `apps/` ou `packages/` sem ADR formal.
-
 ```
 /
 ├─ apps/
-│  ├─ api/                 # Backend — monólito modular NestJS (porta 3001)
-│  │  ├─ src/
-│  │  ├─ package.json
-│  │  └─ tsconfig.json
-│  └─ web/                 # Frontend — Next.js 15 App Router (porta 3000)
-│     ├─ src/
-│     ├─ package.json
-│     └─ tsconfig.json
+│  ├─ api/                 # Backend, monólito modular NestJS (porta 3001)
+│  │  ├─ src/core/         # infraestrutura: config, database, ai, agents, redis, logger…
+│  │  ├─ src/modules/      # domínios: anamnesis, planning, training, nutrition, coaching…
+│  │  ├─ drizzle/          # migrações versionadas
+│  │  └─ test/             # testes de integração (Postgres e Redis reais)
+│  └─ web/                 # Frontend, Next.js App Router (porta 3000)
+│     ├─ src/app/          # páginas do aluno (links mágicos) e do painel interno (/dashboard)
+│     └─ e2e/              # Playwright (painel e anamnese) com mock da API
 ├─ packages/
-│  └─ shared/              # @movivo/shared — tipos, schemas Zod e enums de domínio
-│     ├─ src/
-│     │  ├─ enums/         # enums de domínio (const objects, nunca `enum` do TS)
-│     │  ├─ schemas/       # schemas Zod (DTOs de contrato back ↔ front)
-│     │  ├─ types/         # tipos TypeScript compartilhados
-│     │  └─ index.ts       # barrel — único ponto de entrada público
-│     ├─ package.json
-│     └─ tsconfig.json     # composite + declaration (project references)
-├─ docs/                   # relatórios do pipeline de agentes + ARQUITETURA.md
-├─ sprint/                 # planejamento operacional das sprints
-├─ eslint.config.mjs       # ESLint flat config — única, compartilhada
-├─ .prettierrc.json        # Prettier — regra única
-├─ .editorconfig
-├─ tsconfig.base.json      # TypeScript base (strict) + paths de @movivo/shared
-├─ turbo.json              # orquestração e cache de tasks
-├─ pnpm-workspace.yaml
-├─ package.json            # scripts da raiz
-├─ .nvmrc / .node-version
-└─ README.md
+│  └─ shared/              # @movivo/shared: enums, schemas Zod e contratos back ↔ front
+├─ infra/                  # Postgres, PgBouncer, Redis, nginx e deploy da VPS
+├─ scripts/                # segredos locais, subir/verificar o ambiente
+├─ eslint.config.mjs · tsconfig.base.json · turbo.json · knip.jsonc
+└─ CLAUDE.md · AGENTS.md · README.md
 ```
-
-> **Status atual:** `apps/api` é o **NestJS real** (US-0.3 — ver
-> [Backend (`apps/api`)](#backend-appsapi)) e `apps/web` é o **Next.js 15 real**
-> (US-0.5 — ver [Frontend (`apps/web`)](#frontend-appsweb)).
 
 ---
 
@@ -123,7 +104,6 @@ pnpm run format:check
 
 ## Ambiente e segredos
 
-> Política completa: **[`docs/SECURITY.md`](docs/SECURITY.md)**. Dono: Henrique (US-0.6).
 > **Nenhum segredo real entra no Git — nunca.** Só `*.env.example` com placeholders.
 
 ### 1. Gere os segredos locais
@@ -164,9 +144,7 @@ os lê pelo par `<VAR>_FILE`:
 | 3º          | Ausente → o `ConfigModule` falha rápido no boot (Zod), citando os dois nomes.                                                |
 
 Caminho absoluto vale como está (`/run/secrets/...` no container); caminho relativo
-resolve contra o `cwd` do processo (`../../secrets/desenvolvimento/...` rodando no host). A
-especificação normativa que o `ConfigModule` implementa está em
-[`docs/SECURITY.md` §2](docs/SECURITY.md#2-contrato-de-consumo-de-secrets-_file--normativo).
+resolve contra o `cwd` do processo (`../../secrets/desenvolvimento/...` rodando no host).
 
 ### 4. Regras que valem para qualquer variável
 
@@ -179,7 +157,7 @@ especificação normativa que o `ConfigModule` implementa está em
 
 ## Ambiente local (Docker Compose) — dados + aplicação, espelho da produção
 
-> Dono: Henrique (US-0.2). Definido em [`docker-compose.yml`](docker-compose.yml) +
+> Definido em [`docker-compose.yml`](docker-compose.yml) +
 > [`docker-compose.secrets.yml`](docker-compose.secrets.yml) (puxado por `include:`)
 > e nas configs de [`infra/`](infra). **Pré-requisito: os segredos da seção
 > anterior já gerados** — os containers falham no boot sem eles, de propósito.
@@ -239,7 +217,7 @@ escreve suas regras de iptables antes das do firewall.
 A aplicação **nunca** abre conexão na 5432 (regra §12.3). A exceção da migração
 existe porque `drizzle-kit` usa DDL e _advisory locks de sessão_, que não
 sobrevivem ao transaction pooling. Consequências do transaction mode para quem
-escreve código (US-0.3/US-0.4):
+escreve código:
 
 - `prepare: false` no driver (`DATABASE_PREPARE=false`).
 - `LISTEN/NOTIFY` proibidos — use Redis Pub/Sub.
@@ -304,8 +282,7 @@ devolve o endereço anunciado, que é o hostname do serviço (`redis-master:6379
 | `pnpm run infra:sentinel`   | `make sentinel`    | Estado do master conforme o Sentinel                              |
 
 `infra:down` **preserva os dados**; use `infra:reset` quando quiser um banco limpo
-ou depois de rotacionar segredos (a senha de uma role já criada não muda sozinha —
-ver [`docs/SECURITY.md` §4.1](docs/SECURITY.md)).
+ou depois de rotacionar segredos (a senha de uma role já criada não muda sozinha).
 
 ---
 
@@ -342,25 +319,8 @@ pnpm --filter @movivo/shared run build
 
 ## Backend (`apps/api`)
 
-Monólito modular NestJS 11. A árvore de módulos espelha o **C4 nível 3** do
-[`ARQUITETURA.md` §4](docs/arquitetura/ARQUITETURA.md).
-
-```
-src/
-├─ main.ts                  prefixo api/v1 · ValidationPipe global · CORS por env
-│                           graceful shutdown · porta 3001
-├─ app.module.ts            raiz — CORE + Health + 9 módulos de domínio
-├─ core/                    BLOCO CORE (infraestrutura compartilhada)
-│  ├─ config/               Zod + contrato *_FILE (docs/SECURITY.md §2) · fail-fast no boot
-│  ├─ database/             Drizzle + postgres.js via PgBouncer 5433 · prepare: false
-│  ├─ redis/                ioredis via Sentinel · RedisKeyBuilder (isolamento por titular)
-│  ├─ logger/               pino JSON · correlation id · redação de PII
-│  ├─ telemetry/            stub (Sprint 6)
-│  └─ event-bus/            stub (CQRS)
-├─ health/                  GET /api/v1/health (@nestjs/terminus)
-└─ modules/                 auth · anamnesis · protocol · whatsapp · ai-coach
-                            subscription · checkin · jobs · admin  (cascas vazias)
-```
+Monólito modular NestJS. Os módulos de domínio ficam em `src/modules` e a infraestrutura
+compartilhada em `src/core` (lista completa em [`CLAUDE.md`](CLAUDE.md)).
 
 ### Rodar localmente
 
@@ -378,32 +338,19 @@ pnpm --filter @movivo/api run dev      # http://localhost:3001/api/v1
 
 ### `GET /api/v1/health`
 
-Sem autenticação (consumido por healthcheck de container, load balancer e smoke test).
-Retorna **200** quando as duas dependências respondem e **503** quando qualquer uma cai.
-Não expõe segredo nem string de conexão.
-
-```jsonc
-{
-  "status": "ok",
-  "info": {
-    "db": { "status": "up", "port": 5433, "via": "pgbouncer", "preparedStatements": false },
-    "redis": { "status": "up", "via": "sentinel", "masterName": "movivo-master" },
-  },
-}
-```
+Sem autenticação (healthcheck de container, load balancer e smoke test). Retorna **200**
+quando banco e Redis respondem e **503** quando qualquer um cai. Não expõe segredo nem string
+de conexão.
 
 ### Regras de quem escreve backend aqui
 
-1. **Config só pelo `AppConfigService`.** Nunca ler `process.env` direto: os segredos
-   deliberadamente **não** são injetados em `process.env` (docs/SECURITY.md §2.1.8).
-2. **Chave de Redis só pelo `RedisKeyBuilder`.** `forUser(userId, …)` para dado de
-   titular, `global(…)` para o resto. Telefone nunca entra em nome de chave.
-3. **Nunca logar PII.** Use `redactPii`/`redactObject` de `core/logger` para qualquer
-   texto de origem externa. Corpo de request não é logado por padrão — mantenha assim.
-4. **`SET LOCAL`, nunca `SET`.** O PgBouncer em transaction mode recicla a conexão de
-   servidor a cada transação; um `SET` vazaria contexto de um titular para o próximo.
-5. **Módulo de domínio nunca importa módulo de domínio** — evento ou fila. Zero
-   `forwardRef()` no repositório.
+1. **Config só pelo `AppConfigService`.** Nunca ler `process.env` direto.
+2. **Chave de Redis só pelo `RedisKeyBuilder`.** `forUser(userId, …)` para dado de titular.
+3. **Nunca logar PII.** Use `redactPii`/`redactObject` de `core/logger`.
+4. **`SET LOCAL`, nunca `SET`.** O PgBouncer em transaction mode recicla a conexão a cada transação.
+5. **Módulo de domínio nunca importa módulo de domínio:** evento ou fila. Zero `forwardRef()`.
+6. **O modelo nunca escreve.** Agentes devolvem propostas tipadas; quem muda estado é o motor de
+   políticas e o executor de decisões.
 
 ---
 
@@ -458,49 +405,26 @@ migração apontar para 5433.
 | `movivo_app`      | Runtime da aplicação                    | `SELECT/INSERT/UPDATE/DELETE` apenas                     |
 
 `movivo_app` **não é dona de nenhuma tabela** e **não tem `BYPASSRLS`** — as duas
-condições que fazem as políticas `FORCE ROW LEVEL SECURITY` das próximas sprints
+condições que fazem as políticas `FORCE ROW LEVEL SECURITY` de toda tabela de titular
 serem inescapáveis. O `db:migrate` **verifica isso a cada execução** e falha se
 alguém tiver afrouxado o modelo. Os grants são reconciliados automaticamente a cada
 migração, então tabela nova já nasce acessível ao runtime sem passo manual.
 
-### O que ficou para sprints futuras (deliberado)
+### RLS, arquivo do legado e squash
 
-Índices HNSW (RAG), particionamento mensal de `conversations`, triggers de auditoria
-append-only e as políticas RLS propriamente ditas. O terreno está preparado —
-`user_id` é coluna líder dos índices por usuário e as colunas de saúde já estão
-marcadas com `-- LGPD Art. 11` para a cifra `pgcrypto` da sprint de anamnese.
+- As políticas de RLS (FORCE) das tabelas de titular são geradas por
+  `src/core/database/security-policies.ts` e reconciliadas a cada `db:migrate`.
+- As tabelas `legacy_*_archive` guardam, somente leitura e por 5 anos, o que o serviço anterior
+  produziu. Nenhum fluxo as lê; o acesso é só de ADMIN/SISTEMA.
+- A cadeia de migrações só deve ser condensada numa base única depois que a produção aplicar todas
+  as migrações; o procedimento está no relatório de entrega M11 (`movivo-docs/v2/entregas/`).
 
 ---
 
 ## Frontend (`apps/web`)
 
-Next.js 15 (App Router, React 19) com Tailwind CSS v4 + shadcn/ui carregados com os
-tokens do design system **"O Pulso"** (`docs/fitness-ia-whatsapp/04-relatorio-kimura.md`,
-nomes de token conforme `09-relatorio-sofia.md` §15).
-
-```
-apps/web/
-├─ next.config.ts            headers de segurança · outputFileTracingRoot do monorepo
-├─ postcss.config.mjs        Tailwind v4 (não existe tailwind.config.*)
-├─ components.json           registry do shadcn/ui (style new-york, RSC, alias @/*)
-├─ instrumentation-client.ts PostHog — import dinâmico, opt-in por env
-└─ src/
-   ├─ app/
-   │  ├─ layout.tsx          lang="pt-BR" · next/font · metadata/SEO · ThemeProvider
-   │  ├─ page.tsx            home — Server Component, consome @movivo/shared
-   │  ├─ not-found.tsx       404
-   │  ├─ icon.svg            favicon — símbolo "O Pulso"
-   │  └─ globals.css         ►► FONTE DA VERDADE DOS TOKENS ◄◄
-   ├─ components/
-   │  ├─ ui/button.tsx       shadcn/ui
-   │  ├─ theme-provider.tsx  next-themes (client)
-   │  └─ theme-toggle.tsx    alternador claro/escuro (client)
-   └─ lib/
-      ├─ env.ts              config PÚBLICA (NEXT_PUBLIC_*) — nunca segredo
-      └─ utils.ts            cn()
-```
-
-### Rodar localmente
+Next.js (App Router, React 19) com Tailwind CSS v4 e shadcn/ui, carregados com os tokens do
+design system "O Pulso" (todo o tema vive em `src/app/globals.css`).
 
 ```bash
 cp apps/web/.env.example apps/web/.env.local
@@ -508,59 +432,28 @@ pnpm --filter @movivo/web run dev        # http://localhost:3000
 ```
 
 > ⚠️ **Rode `pnpm run build` na raiz pelo menos uma vez antes de usar `pnpm --filter`.**
-> `@movivo/shared` é consumido pelo seu `dist/`; com o pacote não-buildado, qualquer
-> task escopada por `--filter` falha com `TS2307: Cannot find module '@movivo/shared'`.
-> Só o Turborepo, a partir da raiz, garante a ordem via `dependsOn: ["^build"]`.
+> `@movivo/shared` é consumido pelo seu `dist/`; sem o build, qualquer task escopada falha com
+> `TS2307: Cannot find module '@movivo/shared'`.
 
-### Os tokens de Kimura no código
+Duas superfícies:
 
-Tailwind v4 é configurado em CSS, não em JS: **todo** o tema vive em
-`src/app/globals.css`, em três camadas — tokens brutos da marca, tokens semânticos por
-tema, e o bloco `@theme inline` que os expõe como utilitários.
-
-| Token de marca (Kimura) | CSS variable      | Utilitário Tailwind |
-| ----------------------- | ----------------- | ------------------- |
-| Petróleo Vivo `#06302A` | `--petroleo-vivo` | `bg-petroleo`       |
-| Verde Pulso `#25E27E`   | `--verde-pulso`   | `bg-verde-pulso`    |
-| Coral Vivo `#FF6A3D`    | `--coral-vivo`    | `bg-coral`          |
-| Névoa `#F4F7F3`         | `--nevoa`         | `bg-nevoa`          |
-| Grafite `#14201C`       | `--grafite`       | `text-grafite`      |
-| Musgo `#5B6B63`         | `--musgo`         | `text-musgo`        |
-
-No dia a dia, porém, **use os tokens semânticos** (`bg-background`, `text-foreground`,
-`bg-primary`, `border-input`, `text-muted-foreground`…): eles já trocam sozinhos entre
-tema claro e escuro. Os tokens de marca ficam para quando a cor é a marca em si.
-
-Tipografia (`next/font`, auto-hospedada — zero requisição a domínio de terceiro):
-**Hanken Grotesk** em `font-sans` e **JetBrains Mono** em `font-mono`. Mono só para
-**dado** (carga, séries, semana, nº do CREF), em dose cirúrgica. A escala de Kimura
-está nos utilitários `text-display`, `text-h1`, `text-h2`, `text-h3`, `text-body` e
-`text-label`.
+- **Aluno:** sem login, por links mágicos enviados no WhatsApp (`/hoje`, `/check-in`, `/alimentacao`,
+  `/evolucao`, `/plano/[token]`, `/conta`, `/assinar`) e a anamnese (`/anamnese`,
+  `/anamnese/complementar`).
+- **Painel interno:** `/dashboard`, protegido por sessão em cookies httpOnly (BFF em
+  `src/app/api/dashboard`). A landing pública e as páginas legais ficam em `/`, `/termos` e `/privacidade`.
 
 ### Regras de quem escreve frontend aqui
 
-1. **Component é Server Component até prova em contrário.** `'use client'` só quando
-   houver estado, efeito ou handler de evento — e o mais fundo possível na árvore.
-2. **`NEXT_PUBLIC_*` é público.** O valor é inlined no bundle e visível a qualquer um.
-   Segredo de servidor segue o contrato `*_FILE` de [`docs/SECURITY.md`](docs/SECURITY.md) §2 e
-   nunca é lido por `src/lib/env.ts`.
-3. **Regra cromática de Kimura, inegociável:** Verde Pulso e Coral **nunca** são cor de
-   texto pequeno sobre fundo claro (reprovam em AA). Texto sobre claro é Grafite ou
-   Petróleo; o verde fica para preenchimento, ícone grande e realce.
-4. **Toda cor nova entra em `globals.css`**, nas duas camadas (claro e escuro), com a
-   razão de contraste anotada. Nada de hex solto em `className`.
-5. **Acessibilidade é requisito de merge, não polimento:** WCAG 2.2 AA, HTML semântico,
-   nome acessível em todo controle, `prefers-reduced-motion` respeitado (já global).
-6. **Guardrails de linguagem valem para a UI** (regra §12.10): nunca "diagnóstico",
-   "tratamento", "cura" ou "resultado garantido"; a IA nunca aparece decidindo sozinha.
-
-### Analytics (PostHog)
-
-`instrumentation-client.ts` inicializa o SDK **por import dinâmico**: sem
-`NEXT_PUBLIC_POSTHOG_KEY` válida (o placeholder do `.env.example` conta como ausente),
-nada é baixado e a analytics simplesmente não existe — custo zero para o usuário e
-nenhuma quebra. Nesta sprint é só o stub: a taxonomia de eventos de funil é de Lucas §8
-e Sofia §16.2, e será instrumentada junto das telas reais.
+1. **Server Component até prova em contrário.** `'use client'` só com estado, efeito ou handler.
+2. **`NEXT_PUBLIC_*` é público.** Nunca segredo.
+3. **Regra cromática:** Verde Pulso e Coral nunca são cor de texto pequeno sobre fundo claro (AA).
+4. **Toda cor nova entra em `globals.css`**, nas duas camadas (claro e escuro).
+5. **Acessibilidade é requisito de merge:** WCAG 2.2 AA, HTML semântico, nome acessível.
+6. **Guardrails de linguagem valem para a UI:** nunca "diagnóstico", "tratamento", "cura" ou
+   "resultado garantido"; a IA nunca aparece decidindo sozinha.
+7. O Next.js usado aqui tem mudanças incompatíveis: confira `node_modules/next/dist/docs/` antes
+   de escrever código novo.
 
 ---
 
@@ -569,83 +462,69 @@ e Sofia §16.2, e será instrumentada junto das telas reais.
 Fonte única de verdade dos contratos entre backend e frontend.
 
 ```ts
-import { APP_VERSION, ProtocolStatus, paginationQuerySchema } from '@movivo/shared';
+import { APP_VERSION, SubscriptionStatus, paginationQuerySchema } from '@movivo/shared';
 ```
 
 Regras do pacote:
 
-1. **Isomórfico.** Nunca importar APIs de Node (`fs`, `path`, `crypto`, `node:*`) nem do
-   browser. Há uma regra de ESLint (`no-restricted-imports`) que bloqueia isso.
-2. **Sem lógica de negócio.** Enums são apenas constantes; máquinas de estado e regras
-   vivem nos módulos de domínio do backend.
-3. **Sem `enum` do TypeScript.** Usar objeto `as const` + type derivado — apagável,
-   serializável e compatível com `z.enum()`.
-4. **Import só pelo barrel.** Nada de caminho profundo (`@movivo/shared/src/...`).
-5. **Zod é obrigatório** para todo DTO de contrato (`ARQUITETURA.md` §2).
+1. **Isomórfico:** nada de APIs de Node nem do browser.
+2. **Sem lógica de negócio:** enums são constantes; regras vivem nos módulos de domínio.
+3. **Sem `enum` do TypeScript:** objeto `as const` + type derivado.
+4. **Import só pelo barrel.**
+5. **Zod é obrigatório** para todo DTO de contrato.
 
-O pacote é `composite: true` e é consumido pelos apps via **project references** +
-alias `@movivo/shared` no `tsconfig.base.json`. Como o `tsconfig.base.json` define
-`disableSourceOfProjectReferenceRedirect: true`, o `packages/shared` precisa estar
-**buildado** antes do typecheck dos apps — o Turborepo garante isso via `dependsOn: ["^build"]`.
-Se for rodar `tsc` na mão dentro de um app, rode antes:
+O pacote é consumido pelo seu `dist/`: rode `pnpm --filter @movivo/shared run build` após alterá-lo
+e antes de testar a API ou o web isoladamente.
 
-```bash
-pnpm --filter @movivo/shared run build
-```
+---
+
+## Testes
+
+| Camada                       | Comando                                                                                                                                   | Observação                                       |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Unitários (API, web, shared) | `pnpm run test`                                                                                                                           | sem I/O                                          |
+| Integração da API            | `HOST_POSTGRES_PORT=5432 DEV_PROFESSIONAL_PASSWORD_FILE= pnpm --filter @movivo/api exec vitest run --config vitest.integration.config.ts` | Postgres e Redis reais; pare `movivo-api` antes  |
+| E2E do painel                | `pnpm --filter @movivo/web exec playwright test`                                                                                          | usa a porta 3000: pare o container `movivo-web`  |
+| Avaliação de agentes         | `pnpm --filter @movivo/api run eval --task <id>`                                                                                          | chama o modelo real e grava em `eval_runs`       |
+| Código sem uso               | `pnpm run knip`                                                                                                                           | falha com arquivo, export ou dependência sem uso |
 
 ---
 
 ## Padrões de código
 
-- **TypeScript `strict: true`** + `noUncheckedIndexedAccess`, `noUnusedLocals`,
-  `noUnusedParameters`, `noImplicitReturns`, `noImplicitOverride`. Sem exceções.
+- **TypeScript `strict: true`** + `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`,
+  `noImplicitReturns`, `noImplicitOverride`. Sem exceções.
 - **`any` é erro de lint**, assim como non-null assertion (`!`).
-- **Formatação é 100% do Prettier.** O ESLint não formata (`eslint-config-prettier`
-  é sempre a última camada do flat config).
-- Imports de tipo devem usar `import type` / `type` inline (`consistent-type-imports`).
-- `console.log` é warning bloqueante (`--max-warnings=0`); use o logger estruturado
-  do backend (`LoggerModule`, US-0.3) — e **nunca** logue telefone ou PII em texto claro.
-- `docs/` e `sprint/` são ignorados por ESLint e Prettier: são relatórios editoriais
-  do pipeline de agentes, não código.
+- **Formatação é 100% do Prettier**; o ESLint não formata.
+- Imports de tipo com `import type` / `type` inline.
+- `console.log` é bloqueante (`--max-warnings=0`); use o logger estruturado e **nunca** logue PII.
+- Sem resíduo: ao substituir algo, apague código, testes, schemas, filas, rotas, permissões,
+  variáveis e documentação na mesma mudança.
 
 ---
 
 ## Regras inegociáveis
 
-Resumo executável de [`docs/arquitetura/ARQUITETURA.md`](docs/arquitetura/ARQUITETURA.md) §12 —
-leia o documento completo antes de escrever código:
-
-1. **Nunca versionar segredos** (`.env`, chaves, credenciais). Apenas `.env.example` com placeholders.
+1. **Nunca versionar segredos.** Apenas `.env.example` com placeholders.
 2. **Drizzle é o ORM.** Nunca Prisma nem TypeORM.
-3. **PgBouncer sempre no caminho do Postgres** — a aplicação conecta na porta **5433**, nunca na 5432.
-4. **Redis nunca sobe sem o patch da CVE-2025-49844 (RediShell).**
-5. **A IA nunca decide o protocolo** — sempre o Motor Determinístico (100% de cobertura de teste).
-6. **`LLMRouter` é o único ponto autorizado a chamar um LLM**, e todo prompt passa pelo PII Scrubber.
-7. **Nunca enviar `HEALTH` a provedor não aprovado** (ADR-005-R2). Cascata candidata: DeepSeek V4 Pro → GPT-4.1 → Claude Sonnet 4.5, com gate explícito por endpoint.
-8. **Stateless** — nenhum estado em memória local do container.
-9. **Toda API é versionada** (`api/v1`), com dual-support de 90 dias em breaking changes.
-10. **Guardrails de linguagem:** nunca escrever "diagnóstico", "tratamento", "cura" ou
-    "resultado garantido" em código, copy, prompt de IA ou UI. A formulação correta é sempre
-    "profissional CREF, usando IA como ferramenta".
-
----
-
-## Documentação de referência
-
-| Documento                                                                                | Conteúdo                                                                                                                    |
-| ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| [`docs/arquitetura/ARQUITETURA.md`](docs/arquitetura/ARQUITETURA.md)                     | Stack obrigatória, ADRs, C4, segurança, roadmap, regras inegociáveis                                                        |
-| [`docs/SECURITY.md`](docs/SECURITY.md)                                                   | Política de segredos: contrato `*_FILE`, Docker Secrets, segredos de CI, inventário e cadência de rotação                   |
-| [`docs/pagamentos/MIGRACAO-ASAAS-SANDBOX.md`](docs/pagamentos/MIGRACAO-ASAAS-SANDBOX.md) | Fluxos Asaas, configuração Sandbox, webhooks, homologação, rollback e gates de produção                                     |
-| [`sprint/sprint-0-fundacao.md`](sprint/sprint-0-fundacao.md)                             | Planejamento operacional da Sprint 0 (Épico 0)                                                                              |
-| `docs/fitness-ia-whatsapp/`                                                              | Relatórios completos do pipeline de agentes (negócio, marca, jurídico, financeiro, produto, UX, arquitetura, segurança, IA) |
+3. **PgBouncer sempre no caminho do Postgres:** a aplicação conecta na **5433**, nunca na 5432.
+4. **O modelo nunca escreve e nunca recebe ferramenta.** Agentes devolvem propostas; o motor de
+   políticas decide; o executor grava com versão da política e motivos.
+5. **Segurança sem tolerância:** os casos de avaliação de segurança não admitem falha.
+6. **`ModelGateway` é o único ponto autorizado a chamar um LLM**, e todo prompt passa pelo
+   scrubber de PII. Nunca enviar dado de saúde a fornecedor sem aprovação (ADR-005-R2).
+7. **RLS FORCE em toda tabela com dado de aluno**, com teste de isolamento.
+8. **Stateless:** nenhum estado em memória local do container.
+9. **Toda API é versionada** (`api/v1`).
+10. **Guardrails de linguagem:** nunca "diagnóstico", "tratamento", "cura" ou "resultado garantido"
+    em código, copy, prompt ou UI; a IA é sempre ferramenta de apoio, com o profissional visível.
 
 ---
 
 ## Convenção de commits
 
 **Conventional Commits** com tipo em inglês e descrição em **PT-BR**, uma única
-responsabilidade por commit e **sem coautor de IA**.
+responsabilidade por commit. Regras completas em [`CLAUDE.md`](CLAUDE.md).
 
 ```
 feat(anamnesis): adiciona salvamento de progresso por bloco no formulário

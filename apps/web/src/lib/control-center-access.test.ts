@@ -40,7 +40,7 @@ describe('controle de acesso do Control Center', () => {
     );
     expect(landing).toEqual({
       ADMIN: '/dashboard',
-      PROFESSIONAL: '/dashboard/educacao-fisica',
+      PROFESSIONAL: '/dashboard/fila',
       FINANCE: '/dashboard/financeiro',
       MARKETING: '/dashboard/analytics',
       ENGINEERING: '/dashboard/sistema',

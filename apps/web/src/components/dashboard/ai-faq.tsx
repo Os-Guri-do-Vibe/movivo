@@ -29,9 +29,9 @@ import {
   simulateAgentConfig,
 } from '@/lib/control-center-api';
 
-import { FieldError } from './ai-persona-fields';
 import { ConfirmAction } from './confirm-action';
 import { ResourceState, SectorHeader, useControlCenterResource } from './control-center-ui';
+import { FieldError } from './fields';
 
 const INPUT_CLASS =
   'mt-1 w-full rounded-lg border border-border bg-card px-3 py-2 text-body focus-visible:ring-[3px] focus-visible:ring-verde-pulso focus-visible:outline-none';
@@ -176,8 +176,7 @@ export function AiFaqDashboard({
           <div>
             <h2 className="text-h2 font-bold">FAQ</h2>
             <p className="mt-2 max-w-3xl text-label text-muted-foreground">
-              Respostas publicadas para o AI Coach, com simulador obrigatório antes de qualquer
-              alteração.
+              Respostas publicadas para a IA, com simulador obrigatório antes de qualquer alteração.
             </p>
           </div>
           <Button variant="outline" onClick={() => void refresh()} disabled={loading}>

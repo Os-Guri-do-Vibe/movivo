@@ -106,7 +106,7 @@ export interface EvolutionTransport {
    */
   fetchQrCode(instanceName: string): Promise<string | null>;
   /**
-   * Baixa uma mensagem de voz (US audio — AI Coach por áudio). `mediaKey` é o `key`
+   * Baixa uma mensagem de voz (US audio — IA por áudio). `mediaKey` é o `key`
    * (`{ remoteJid, fromMe, id, participant? }`) que `EvolutionInboundEdge` serializou em
    * `audio.mediaKey` — a única coisa que este endpoint da EvolutionAPI aceita pra
    * localizar a mídia (ela não embute o áudio no webhook: `base64: false` em

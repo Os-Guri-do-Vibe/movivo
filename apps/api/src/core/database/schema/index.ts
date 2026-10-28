@@ -13,47 +13,31 @@ export * from './enums';
 export * from './users';
 export * from './anamnesis-sessions';
 export * from './consents';
-export * from './protocols';
-export * from './protocol-versions';
 export * from './conversations';
-export * from './checkins';
 export * from './subscriptions';
-export * from './ai-jobs';
 
 // Sprint 1 — schema de autenticação (US-1.1 / TASK-1.1.5).
 export * from './auth-sessions';
 
 // Sprint 3 — handoff/alertas ao painel CREF (US-3.6).
-export * from './handoff-alerts';
 
 // Estado de leitura (por profissional) das notificações do sino do dashboard.
-export * from './dashboard-notification-reads';
 
 // Sprint 3 — memória de longo prazo da conversa (US-3.2).
-export * from './coaching-sessions';
 
 // Sprint 3 — corpus curado do RAG (US-3.3). Global, read-only, fora da RLS por titular.
 export * from './knowledge-base';
 export * from './knowledge-documents';
 export * from './vector';
-export * from './methodology-versions';
 
 // Sprint 3 — exemplos rotulados do IntentClassifier (US-3.4). Global, read-only.
-export * from './intent-examples';
 
 // Sprint 5 - escopo profissional, check-in duravel e auditoria imutavel.
-export * from './professional-assignments';
 export * from './audit-logs';
-export * from './reengagement-nudges';
 
 // Sprint 7 - configuracao publicada da agente de IA (US-7.6). Global, append-only.
-export * from './agent-config';
 
 // Sprint 8 - treino concluido verificado, base da North Star (US-8.1).
-export * from './workout-completions';
-export * from './workout-journal';
-export * from './workout-schedule-adjustments';
-export * from './conversation-followups';
 
 // Sprint 8 - sequencia de mudancas de estado do aluno, append-only (US-8.3).
 export * from './user-status-transitions';
@@ -85,14 +69,24 @@ export * from './exercise-catalog-entries';
 export * from './exercise-catalog-favorites';
 
 // Achado 2026-09-02 - proposta de substituição de exercício via IA, em staging.
-export * from './protocol-substitution-requests';
 
 // Renovação de protocolo por fim de mesociclo - formulário de transição.
-export * from './protocol-renewal-sessions';
 
 // Achado 2026-09-12 - alias curto e público para links longos enviados por WhatsApp.
 export * from './short-links';
 export * from './access-link-tokens';
+export * from './training-access-tokens';
 
 // Separação da Plataforma Interna (staff) da tabela do titular final (users).
 export * from './staff';
+export * from './student-state';
+export * from './training';
+export * from './nutrition';
+export * from './body';
+export * from './check-ins';
+export * from './weekly-reviews';
+export * from './coaching';
+export * from './domain-events';
+export * from './model-runs';
+export * from './eval-runs';
+export * from './methodology-documents';

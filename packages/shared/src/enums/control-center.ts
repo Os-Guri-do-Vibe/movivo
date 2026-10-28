@@ -66,12 +66,21 @@ export const ControlCenterCapability = {
   AI_GUARDRAIL_APPROVE: 'control_center.ai.guardrail.approve',
 
   /**
-   * Aba "Conversas": pausar/reativar o atendimento automático do AI Coach de um aluno e
+   * Aba "Conversas": pausar/reativar o atendimento automático de um aluno e
    * escrever para ele pelo painel. É ESCRITA no canal do aluno em nome da MOVIVO, por isso
    * fica separada da leitura. Sempre exigida junto de `STUDENTS_READ` e
    * `STUDENTS_HEALTH_READ` (a tela mostra o histórico, que é dado de saúde).
    */
   CONVERSATIONS_WRITE: 'control_center.conversations.write',
+
+  /** Fila de exceções: ler os casos do seu domínio (treino, nutrição, médico) e o Estado do Aluno. */
+  EXCEPTIONS_READ: 'control_center.exceptions.read',
+  /** Aprovar, recusar ou encerrar casos. O domínio do conselho limita o que cada um resolve. */
+  EXCEPTIONS_RESOLVE: 'control_center.exceptions.resolve',
+  /** Catálogo de agentes, níveis de modelo, resultado das avaliações e custo de IA por aluno. */
+  AGENTS_READ: 'control_center.agents.read',
+  /** Trocar a rota de um nível de modelo (provedor/modelo). */
+  MODEL_TIERS_WRITE: 'control_center.agents.tiers.write',
 } as const;
 
 export type ControlCenterCapability =

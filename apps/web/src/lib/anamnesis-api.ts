@@ -36,14 +36,17 @@ export interface ConsentItemView {
 
 export interface SessionView {
   status: string;
+  /** `INITIAL` = cadastro novo; `COMPLEMENTARY` = aluno que já existia completa o que falta. */
+  flow: 'INITIAL' | 'COMPLEMENTARY';
   currentStep: number;
+  completedSteps: number[];
   phoneVerified: boolean;
   primaryGoal: string | null;
   consents: ConsentItemView[];
-  step1: Record<string, unknown> | null;
-  step2: Record<string, unknown> | null;
-  healthCompleted: boolean;
-  parqCompleted: boolean;
+  /** Anamnese complementar: os textos vigentes ainda precisam ser aceitos nesta sessão. */
+  consentsPending: boolean;
+  /** Parte COMUM de cada etapa (a sensível nunca volta). Chaves: registration, goals… */
+  blocks: Record<string, unknown>;
   outcome: OnboardingOutcome | null;
   expiresAt: string;
 }
@@ -122,14 +125,24 @@ export function startAnamnesis(
   });
 }
 
+/**
+ * Abre a anamnese complementar a partir do token do link (vem no fragmento da URL, nunca na
+ * query): o BFF o guarda em cookie httpOnly e devolve a sessão.
+ */
+export function resumeComplementary(token: string): Promise<SessionEntry> {
+  return request<SessionEntry>('/resume', { method: 'POST', body: JSON.stringify({ token }) });
+}
+
 /** Sessão do cookie, para retomar no F5. 404 = nenhum cadastro em andamento. */
 export function getSession(): Promise<SessionEntry> {
   return request<SessionEntry>('/session', { cache: 'no-store' });
 }
 
+export type OnboardingStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+
 export function patchStep(
   ref: string,
-  step: 1 | 2 | 3,
+  step: OnboardingStep,
   data: unknown,
 ): Promise<{ currentStep: number }> {
   return write('PATCH', `/session/step/${step}`, ref, data);

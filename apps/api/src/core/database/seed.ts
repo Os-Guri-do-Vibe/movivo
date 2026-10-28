@@ -21,13 +21,14 @@
  * `db:migrate`, não o caminho de runtime da aplicação.
  */
 import { drizzle } from 'drizzle-orm/postgres-js';
-import { eq } from 'drizzle-orm';
 import argon2 from 'argon2';
 import postgres from 'postgres';
 import { migrationPostgresTls } from './postgres-tls';
 
 import { loadEnv } from '../config/load-env';
-import { professionalAssignments, staff, users } from './schema';
+import { staff, users } from './schema';
+import { seedDevFoods } from './seed-foods';
+import { seedDevMethodology } from './seed-methodology';
 
 const { env } = loadEnv();
 
@@ -117,26 +118,12 @@ async function main(): Promise<void> {
           status: 'ACTIVE',
           role: 'PROFESSIONAL',
           passwordHash,
-          crefNumber: '000000-G',
-          crefRegion: 'ZZ',
-          crefActive: true,
+          councilNumber: '000000-G',
+          councilRegion: 'ZZ',
+          councilActive: true,
         })
         .onConflictDoNothing({ target: staff.email });
-      const [professional] = await db
-        .select({ id: staff.id })
-        .from(staff)
-        .where(eq(staff.email, 'cref-dev@example.invalid'))
-        .limit(1);
-      const titulars = await db.select({ id: users.id }).from(users).where(eq(users.role, 'USER'));
-      if (professional) {
-        await db
-          .insert(professionalAssignments)
-          .values(
-            titulars.map((titular) => ({ professionalId: professional.id, userId: titular.id })),
-          )
-          .onConflictDoNothing();
-      }
-      console.log('[db:seed] Conta CREF sintetica provisionada com vinculos explicitos.');
+      console.log('[db:seed] Conta CREF sintetica provisionada.');
     } else {
       console.warn('[db:seed] DEV_PROFESSIONAL_PASSWORD_FILE ausente; conta CREF dev ignorada.');
     }
@@ -161,6 +148,14 @@ async function main(): Promise<void> {
       `[db:seed] ${inserted.length} usuário(s) inserido(s) nesta execução; ` +
         `${total} no total (idempotente: reexecutar não duplica).`,
     );
+
+    const methodologyDomains = await seedDevMethodology(db);
+    console.log(
+      `[db:seed] Metodologia de desenvolvimento (fictícia): ${methodologyDomains} domínio(s) publicados.`,
+    );
+
+    const foods = await seedDevFoods(db);
+    console.log(`[db:seed] Alimentos de desenvolvimento (aproximados): ${foods} inserido(s).`);
 
     if (total !== SEED_USERS.length) {
       console.warn(

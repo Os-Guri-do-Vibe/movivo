@@ -5,13 +5,6 @@ import { controlCenterMetaSchema } from './control-center.schema';
 /** Teto de upload de um artigo (PDF/Word/planilha cabem; o BFF, o nginx e a API usam o mesmo). */
 export const MAX_KNOWLEDGE_DOCUMENT_BYTES = 10 * 1024 * 1024;
 
-/**
- * Teto das notas de uma versão da metodologia (motivo da mudança e justificativa de cada
- * transição). Era 500 e estourava ao descrever uma revisão grande da metodologia; o texto da
- * metodologia em si (`content`) segue sem teto de caracteres.
- */
-export const MAX_METHODOLOGY_NOTE_LENGTH = 5000;
-
 export const knowledgeDocumentCategorySchema = z.enum([
   'METHODOLOGY',
   'SCIENTIFIC_EVIDENCE',
@@ -108,74 +101,3 @@ export const knowledgeDocumentActionSchema = z.object({
   note: z.string().trim().min(5).max(500),
 });
 export type KnowledgeDocumentActionInput = z.infer<typeof knowledgeDocumentActionSchema>;
-
-export const methodologyStatusSchema = z.enum([
-  'DRAFT',
-  'IN_REVIEW',
-  'REJECTED',
-  'APPROVED',
-  'PUBLISHED',
-  'ARCHIVED',
-]);
-
-/**
- * Achado 2026-09-02 (decisão do fundador): removido o campo `summary` ("Resumo para o
- * Coach") que existia aqui. O AI Coach não deve raciocinar sobre um resumo comprimido da
- * metodologia — ele recebe o `content` completo (mesmo texto que o gerador de protocolo
- * usa), mais o contexto individualizado do aluno (anamnese, protocolo completo). Sem
- * resumo, "a metodologia dele" É a metodologia da MOVIVO, não uma versão editada à parte.
- * `content` também deixou de ter teto de caracteres: o profissional CREF decide o quanto a
- * metodologia precisa, sem um limite arbitrário de produto.
- */
-export const createMethodologyVersionSchema = z.object({
-  content: z.string().trim().min(200),
-  /** Opcional: o histórico mostra o resumo, mas escrever não é pré-requisito para salvar. */
-  changeNote: z.string().trim().max(MAX_METHODOLOGY_NOTE_LENGTH).optional(),
-});
-export type CreateMethodologyVersionInput = z.infer<typeof createMethodologyVersionSchema>;
-
-export const methodologyActionSchema = z.object({
-  versionId: z.uuid(),
-  note: z.string().trim().min(5).max(MAX_METHODOLOGY_NOTE_LENGTH),
-});
-export type MethodologyActionInput = z.infer<typeof methodologyActionSchema>;
-
-export const methodologyNoteSchema = z.object({
-  note: z.string().trim().min(5).max(MAX_METHODOLOGY_NOTE_LENGTH),
-});
-
-/** Publicação e restauração não exigem justificativa; a observação é opcional. */
-export const methodologyOptionalNoteSchema = z.object({
-  note: z.string().trim().max(MAX_METHODOLOGY_NOTE_LENGTH).optional(),
-});
-export const methodologyPublishActionSchema = methodologyOptionalNoteSchema.extend({
-  versionId: z.uuid(),
-});
-export type MethodologyPublishActionInput = z.infer<typeof methodologyPublishActionSchema>;
-export const methodologyReviewSchema = methodologyNoteSchema.extend({
-  decision: z.enum(['APPROVED', 'REJECTED']),
-});
-
-export const methodologyVersionSchema = z.object({
-  id: z.uuid(),
-  version: z.int().positive(),
-  versionLabel: z.string(),
-  content: z.string(),
-  contentSha256: z.string().length(64),
-  changeNote: z.string(),
-  status: methodologyStatusSchema,
-  createdBy: z.string().nullable(),
-  lastActor: z.string().nullable(),
-  createdAt: z.iso.datetime(),
-  statusChangedAt: z.iso.datetime(),
-});
-export type MethodologyVersion = z.infer<typeof methodologyVersionSchema>;
-
-export const methodologyVersionsResponseSchema = z.object({
-  data: z.object({
-    versions: z.array(methodologyVersionSchema),
-    currentVersionId: z.uuid().nullable(),
-  }),
-  meta: controlCenterMetaSchema,
-});
-export type MethodologyVersionsResponse = z.infer<typeof methodologyVersionsResponseSchema>;

@@ -17,7 +17,7 @@ import { desc, eq, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { z } from 'zod';
 
-import { ForbiddenTopicsService } from '../../core/agent-config/forbidden-topics.service';
+import { ForbiddenTopicsService } from '../../core/attendance-rules/forbidden-topics.service';
 import { aiForbiddenTopics, staff } from '../../core/database/schema';
 import {
   TenantDatabase,
@@ -26,7 +26,7 @@ import {
 import { strictSafeParse } from '../../core/validation/strict-input';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { AuditService } from './audit.service';
-import { simulateForbiddenTopicConfig } from './config-simulator';
+import { simulateForbiddenTopicConfig } from './config-gate';
 
 const TIMEZONE = 'America/Sao_Paulo' as const;
 
@@ -259,7 +259,7 @@ export class ForbiddenTopicAdminService {
     if (actor.role === 'ADMIN') return;
     const rows = (await tx.execute(sql`
       SELECT id FROM staff
-      WHERE id = ${actor.userId}::uuid AND role = 'PROFESSIONAL' AND cref_active = true
+      WHERE id = ${actor.userId}::uuid AND role = 'PROFESSIONAL' AND council_active = true
       LIMIT 1
     `)) as unknown as Array<{ id: string }>;
     if (!rows.length) throw new ConflictException('A ação exige Responsável Técnico CREF ativo.');

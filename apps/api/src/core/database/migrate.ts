@@ -24,7 +24,6 @@ import { migrationPostgresTls } from './postgres-tls';
 import { loadEnv } from '../config/load-env';
 import { sqlIdentifier } from './sql-identifier';
 import {
-  buildAgentConfigImmutabilitySql,
   buildAiForbiddenTopicsImmutabilitySql,
   buildAiGuardrailRulesImmutabilitySql,
   buildAuditIntegritySql,
@@ -37,7 +36,6 @@ import {
   buildRlsPoliciesSql,
   buildStatusTransitionsImmutabilitySql,
   RLS_TENANT_TABLES,
-  USERS_BIOLOGICAL_SEX_BACKFILL_SQL,
 } from './security-policies';
 
 /**
@@ -108,7 +106,7 @@ const GRANTS_SQL = (role: string) => `
 /**
  * Extensões exigidas pelo schema lógico (TASK-0.4.2).
  *
- * `vector` — PGVector, base do RAG (sprint do AI Coach).
+ * `vector` — PGVector, base do RAG (sprint da IA).
  * `uuid-ossp` — referenciada pelo schema lógico de Lucas; mantida por
  *   compatibilidade, embora as PKs usem `gen_random_uuid()` do core (ver `_shared.ts`).
  * `pgcrypto` — cifra em repouso das colunas de saúde marcadas `LGPD Art. 11`
@@ -137,38 +135,7 @@ const KNOWLEDGE_BASE_SQL = (role: string) => `
   CREATE INDEX IF NOT EXISTS idx_knowledge_base_fts_pt
     ON knowledge_base USING gin (to_tsvector('portuguese', chunk_text));
   REVOKE INSERT, UPDATE, DELETE ON knowledge_base FROM ${sqlIdentifier(role)};
-
-  CREATE INDEX IF NOT EXISTS idx_intent_examples_embedding
-    ON intent_examples USING hnsw (embedding vector_cosine_ops)
-    WITH (m = 16, ef_construction = 64);
-  REVOKE INSERT, UPDATE, DELETE ON intent_examples FROM ${sqlIdentifier(role)};
 `;
-
-/**
- * Aviso de reconciliação do slot da persona (Sprint 11).
- *
- * A migração `0036` moveu a persona já publicada para o slot MASCULINO por decisão
- * determinística — não existe dado que revele o público pretendido de uma configuração
- * criada quando só havia uma persona. Enquanto o slot feminino não tiver publicação
- * própria, ele é atendido por empréstimo da masculina, e o aviso continua aparecendo a cada
- * migração. Publicar a persona feminina encerra o aviso sozinho.
- */
-async function warnAgentConfigSlotDefault(sql: postgres.Sql): Promise<void> {
-  const [row] = await sql<{ male: number; female: number }[]>`
-    SELECT
-      count(*) FILTER (WHERE target_sex = 'MALE' AND status = 'PUBLISHED')::int AS male,
-      count(*) FILTER (WHERE target_sex = 'FEMALE' AND status = 'PUBLISHED')::int AS female
-    FROM agent_config
-  `;
-  if (!row || row.male === 0 || row.female > 0) return;
-  console.warn(
-    '[db:migrate] WARN agent_config_slot_migration_default — a(s) persona(s) já publicada(s) ' +
-      'foram migradas para o slot MASCULINO por decisão determinística da migração 0036 ' +
-      '(não havia dado para inferir o público). Enquanto não existir persona publicada para ' +
-      'o slot FEMININO, as titulares recebem a persona masculina por empréstimo. ' +
-      'Revise manualmente no painel de Agentes se a atribuição estiver errada.',
-  );
-}
 
 async function ensureExtensions(sql: postgres.Sql): Promise<void> {
   const present = await sql<{ extname: string }[]>`SELECT extname FROM pg_extension`;
@@ -240,7 +207,7 @@ async function main(): Promise<void> {
     // As policies profissionais chamam funcoes SECURITY DEFINER estreitas; elas
     // precisam existir antes da primeira criacao das policies.
     await sql.unsafe(buildProfessionalAccessSql(appRole));
-    console.log('[db:migrate] Vinculos, consentimento e liberacao PAR-Q reconciliados.');
+    console.log('[db:migrate] Funcoes de consentimento reconciliadas.');
 
     // Row-Level Security (US-1.1 / Sato §4): ENABLE+FORCE + políticas por tenant.
     // Idempotente e reaplicada a cada migração — mesma disciplina dos grants.
@@ -251,21 +218,6 @@ async function main(): Promise<void> {
     // Sprint 5: hash chain serializada + bloqueio de UPDATE/DELETE/TRUNCATE no banco.
     await sql.unsafe(buildAuditIntegritySql(appRole));
     console.log('[db:migrate] audit_logs append-only e hash chain reconciliados.');
-
-    // Sprint 7 (US-7.6): agent_config append-only — trigger + REVOKE, mesma dupla barreira.
-    // Sprint 11: também cria o índice de resolução por slot (target_sex, status, version).
-    await sql.unsafe(buildAgentConfigImmutabilitySql(appRole));
-    console.log('[db:migrate] agent_config append-only reconciliado.');
-
-    // Sprint 11: persona por slot. O aviso é o registro operacional de que a atribuição de
-    // slot da persona pré-existente foi arbitrada pela migração, não escolhida por alguém.
-    await warnAgentConfigSlotDefault(sql);
-
-    // Sprint 11: `users.biological_sex` a partir da anamnese já submetida (idempotente).
-    const backfilled = await sql.unsafe(USERS_BIOLOGICAL_SEX_BACKFILL_SQL);
-    console.log(
-      `[db:migrate] users.biological_sex reconciliado a partir da anamnese (${backfilled.count} titular(es)).`,
-    );
 
     // Sprint 9: FAQ global append-only — rollback/remoção lógica também são novas versões.
     await sql.unsafe(buildFaqEntriesImmutabilitySql(appRole));

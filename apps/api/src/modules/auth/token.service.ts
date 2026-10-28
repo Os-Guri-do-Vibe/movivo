@@ -19,12 +19,6 @@ import jwt from 'jsonwebtoken';
 import { AppConfigService } from '../../core/config';
 import type { TenantRole } from '../../core/database';
 
-export interface AccessTokenClaims {
-  sub: string;
-  role: TenantRole;
-  jti: string;
-}
-
 export interface IssuedAccessToken {
   token: string;
   jti: string;

@@ -15,6 +15,13 @@
  * As finalidades são INDEPENDENTES: um aceite jamais implica o outro, e o de saúde
  * jamais é inferido do aceite dos Termos.
  *
+ * ## Versões da MOVIVO 2.0 (rascunho sujeito a revisão jurídica antes da publicação)
+ * `HEALTH_DATA` v4, `AI_DISCLOSURE` v2 e `TERMS_OF_SERVICE` v2 descrevem o serviço novo:
+ * plano integrado de treino e alimentação, profissionais de vários conselhos e IA que age
+ * dentro de políticas por eles publicadas, com revisão humana a pedido e nos casos sensíveis.
+ * O texto de saúde v3 deixa de ser vigente: quem aceitou a v3 precisa aceitar a v4 (a
+ * anamnese complementar coleta o novo aceite).
+ *
  * ## O que a Sprint 6 mudou (Alexandre §5.8)
  * - `TERMS_OF_SERVICE` → versão integral exibida ao titular (cobre a entrega via WhatsApp e
  *   as finalidades de dado pessoal comum sob base contratual — art. 7º, V).
@@ -31,10 +38,10 @@ import { z } from 'zod';
 
 /** Identificadores de versão imutáveis (o que vai para `consents.version`). */
 export const CONSENT_VERSIONS = {
-  HEALTH_DATA: 'consent-health-2026-08-v3',
+  HEALTH_DATA: 'consent-health-2026-10-v4',
   MARKETING: 'consent-marketing-2026-08-v3',
-  TERMS_OF_SERVICE: 'terms-2026-09-v1',
-  AI_DISCLOSURE: 'ai-disclosure-2026-08-v1',
+  TERMS_OF_SERVICE: 'terms-2026-10-v2',
+  AI_DISCLOSURE: 'ai-disclosure-2026-10-v2',
 } as const;
 
 export type ConsentTypeWithText = keyof typeof CONSENT_VERSIONS;
@@ -82,10 +89,10 @@ export const HEALTH_DATA_CONSENT_V1 = {
  */
 export const WHATSAPP_OPERATIONAL_NOTICE = {
   id: 'WHATSAPP_OPERATIONAL_NOTICE',
-  version: 'aviso-whatsapp-operacional-2026-08-v2',
+  version: 'aviso-whatsapp-operacional-2026-10-v3',
   title: 'Como a MOVIVO fala com você',
   body: [
-    'Seu treino, os check-ins e a conversa com o Coach acontecem no WhatsApp. É assim que a MOVIVO funciona. Ao continuar, você passa a receber neste número as mensagens necessárias para o serviço funcionar: seu protocolo de treino, respostas do Coach, check-ins, avisos de segurança, recados do profissional de Educação Física responsável e informações da sua assinatura.',
+    'Seu plano, os links das sessões, os check-ins e a conversa com a MOVIVO acontecem no WhatsApp. É assim que a MOVIVO funciona. Ao continuar, você passa a receber neste número as mensagens necessárias para o serviço funcionar: seu plano de treino e de alimentação, respostas da conversa, check-ins, avisos de segurança, recados dos profissionais responsáveis e informações da sua assinatura.',
     'Essas mensagens não são propaganda e não podem ser desligadas separadamente, porque são necessárias para o serviço funcionar. Novidades e ofertas são diferentes. Na última opção abaixo, você decide se quer recebê-las.',
   ],
 } as const;
@@ -110,28 +117,28 @@ export const CONSENT_TEXTS = {
     version: CONSENT_VERSIONS.HEALTH_DATA,
     title: 'Sobre a sua saúde',
     body: [
-      'Para montar um treino seguro e adaptado a você, precisamos de informações de saúde: dores atuais (região, intensidade e se estão melhorando ou piorando), lesões e cirurgias, diagnósticos que você já tenha recebido, se você faz acompanhamento com médico ou fisioterapeuta, orientações profissionais de evitar algum movimento, medicações de uso contínuo e as respostas ao questionário de prontidão para atividade física (PAR-Q).',
-      '**Para que usamos:** exclusivamente para elaborar, adaptar e acompanhar o seu protocolo de treino individualizado, e para identificar quando o seu caso precisa ser analisado por uma pessoa antes de qualquer treino ser gerado.',
-      `**Quem acessa:** você e o profissional de Educação Física responsável, registrado no ${RT_CREF_PLACEHOLDER}, que usa inteligência artificial apenas como ferramenta de apoio — **a decisão e a supervisão são sempre do profissional**.`,
+      'Para montar um plano seguro e adaptado a você, precisamos de informações de saúde: dores atuais (região, intensidade e se estão melhorando ou piorando), lesões e cirurgias, diagnósticos que você já tenha recebido, se você faz acompanhamento com médico ou fisioterapeuta, orientações profissionais de evitar algum movimento ou alimento, alergias e restrições alimentares, medicações de uso contínuo, medidas corporais e as respostas ao questionário de prontidão para atividade física (PAR-Q).',
+      '**Para que usamos:** exclusivamente para elaborar, adaptar e acompanhar o seu plano de treino e de alimentação, e para identificar quando o seu caso precisa ser analisado por uma pessoa antes de qualquer ajuste.',
+      '**Quem acessa:** você, os profissionais da MOVIVO registrados nos seus conselhos (CREF para treino, CRN para nutrição e CRM para saúde) conforme a área de cada caso, e a equipe técnica estritamente necessária à operação. A inteligência artificial é uma ferramenta de apoio: ela trabalha dentro de regras definidas e publicadas por esses profissionais e pode ajustar o seu plano automaticamente dentro desses limites. **Casos com sinal de segurança, ou fora dessas regras, são sempre analisados por uma pessoa, e você pode pedir revisão humana a qualquer momento.**',
       '**Como protegemos:** seus dados de saúde são criptografados e isolados; ninguém fora da equipe responsável tem acesso.',
       '**Por quanto tempo:** mantemos seus dados de saúde enquanto você for cliente e, após o encerramento, pelo prazo necessário para cumprir obrigações legais e para defesa em eventual reclamação (até 5 anos). Depois disso, eles são anonimizados ou eliminados.',
-      '**Você no controle:** pode revogar esta autorização quando quiser, sem custo. No WhatsApp da MOVIVO, envie exatamente “REVOGAR CONSENTIMENTO DE SAÚDE”; ou contate o e-mail do nosso Encarregado de Dados (informado na Política de Privacidade). A revogação interrompe novos tratamentos daqui pra frente — e, como o treino individualizado depende desses dados, ela também interrompe a geração de novos treinos.',
+      '**Você no controle:** pode revogar esta autorização quando quiser, sem custo. No WhatsApp da MOVIVO, envie exatamente “REVOGAR CONSENTIMENTO DE SAÚDE”; ou contate o e-mail do nosso Encarregado de Dados (informado na Política de Privacidade). A revogação interrompe novos tratamentos daqui pra frente e, como o plano individualizado depende desses dados, também interrompe novos ajustes do seu plano.',
     ],
     label:
-      'Autorizo a MOVIVO a tratar os meus dados de saúde para elaborar, adaptar e acompanhar o meu treino, conforme descrito acima e na Política de Privacidade.',
+      'Autorizo a MOVIVO a tratar os meus dados de saúde para elaborar, adaptar e acompanhar o meu plano de treino e de alimentação, conforme descrito acima e na Política de Privacidade.',
     /** Trava o `CONTINUAR` da Etapa 1 **e** a coleta da seção 4 + Etapa 3 (PAR-Q). */
     required: true,
   },
   AI_DISCLOSURE: {
     version: CONSENT_VERSIONS.AI_DISCLOSURE,
-    title: 'Como o seu treino é feito',
+    title: 'Como o seu plano é feito',
     body: [
-      `Seu treino é montado a partir da metodologia de um profissional de Educação Física registrado no ${RT_CREF_PLACEHOLDER}, que é o responsável técnico pela MOVIVO. A inteligência artificial é a ferramenta que aplica essa metodologia ao seu caso e conversa com você no dia a dia — ela nunca decide sozinha e nunca substitui o profissional.`,
-      'Sempre que as suas respostas indicarem que o seu caso precisa de um olhar humano, nenhum treino é gerado automaticamente: o profissional analisa antes. A MOVIVO não faz diagnóstico e não substitui avaliação médica.',
+      'Seu plano é montado a partir da metodologia escrita por profissionais registrados nos seus conselhos (CREF, CRN e CRM). A inteligência artificial é a ferramenta que aplica essa metodologia ao seu caso, ajusta o plano dentro das regras publicadas por esses profissionais e conversa com você no dia a dia, mas nunca substitui o profissional.',
+      'Sempre que as suas respostas indicarem que o seu caso precisa de um olhar humano, ou quando algo estiver fora das regras publicadas, nenhum ajuste é feito automaticamente: um profissional analisa antes. Você pode pedir revisão humana de qualquer orientação. A MOVIVO não faz diagnóstico e não substitui avaliação médica.',
     ],
     /** "Estou ciente", nunca "Autorizo" — o verbo é o que mantém a natureza jurídica (§5.4). */
     label:
-      'Estou ciente de que a MOVIVO usa inteligência artificial como ferramenta, com metodologia e supervisão de um profissional de Educação Física registrado no CREF.',
+      'Estou ciente de que a MOVIVO usa inteligência artificial como ferramenta, dentro de regras definidas por profissionais registrados, e de que posso pedir revisão humana.',
     required: true,
   },
   MARKETING: {

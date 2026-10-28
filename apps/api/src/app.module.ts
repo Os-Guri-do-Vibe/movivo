@@ -25,15 +25,22 @@ import { CoreModule } from './core/core.module';
 import { HealthModule } from './health/health.module';
 import { AccountModule } from './modules/account/account.module';
 import { AdminModule } from './modules/admin/admin.module';
-import { AiCoachModule } from './modules/ai-coach/ai-coach.module';
 import { AnamnesisModule } from './modules/anamnesis/anamnesis.module';
 import { AuthModule } from './modules/auth/auth.module';
-import { CheckinModule } from './modules/checkin/checkin.module';
-import { WorkoutModule } from './modules/workout/workout.module';
-import { CoachModule } from './modules/coach/coach.module';
+import { ConversationModule } from './modules/conversation/conversation.module';
+import { AgentsPanelModule } from './modules/agents-panel/agents-panel.module';
+import { ExceptionsModule } from './modules/exceptions/exceptions.module';
+import { ProgressModule } from './modules/progress/progress.module';
+import { AgentsModule } from './core/agents/agents.module';
+import { CoachingModule } from './modules/coaching/coaching.module';
+import { MethodologyModule } from './modules/methodology/methodology.module';
+import { PlanningModule } from './modules/planning/planning.module';
+import { CheckInModule } from './modules/checkin-v2/check-in.module';
+import { NutritionModule } from './modules/nutrition/nutrition.module';
+import { TrainingModule } from './modules/training/training.module';
+import { StudentStateModule } from './modules/student-state/student-state.module';
+import { DomainEventsModule } from './modules/domain-events/domain-events.module';
 import { JobsModule } from './modules/jobs/jobs.module';
-import { ProtocolModule } from './modules/protocol/protocol.module';
-import { ProtocolRenewalModule } from './modules/protocol-renewal/protocol-renewal.module';
 import { SubscriptionModule } from './modules/subscription/subscription.module';
 import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 
@@ -47,15 +54,22 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
     AuthModule,
     AccountModule,
     AnamnesisModule,
-    ProtocolModule,
-    ProtocolRenewalModule,
     WhatsappModule,
-    AiCoachModule,
-    CoachModule,
+    ConversationModule,
+    ProgressModule,
+    ExceptionsModule,
+    AgentsPanelModule,
     SubscriptionModule,
-    CheckinModule,
-    WorkoutModule,
     JobsModule,
+    DomainEventsModule,
+    AgentsModule,
+    StudentStateModule,
+    MethodologyModule,
+    CoachingModule,
+    PlanningModule,
+    TrainingModule,
+    NutritionModule,
+    CheckInModule,
     AdminModule,
   ],
 })

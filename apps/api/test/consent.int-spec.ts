@@ -99,7 +99,6 @@ afterAll(async () => {
       `DELETE FROM consents WHERE anamnesis_session_id IN
          (SELECT id FROM anamnesis_sessions WHERE token LIKE 'tok-${RUN}-%')
          OR user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5555${RUN}%');
-       DELETE FROM professional_assignments WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5555${RUN}%');
        DELETE FROM anamnesis_sessions WHERE token LIKE 'tok-${RUN}-%';
        -- \`audit_logs\` é append-only por trigger (imutável até para o superusuário): a revogação
        -- deste teste deixa trilha permanente. O titular auditado não pode ser apagado (LGPD:

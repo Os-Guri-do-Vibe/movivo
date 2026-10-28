@@ -71,9 +71,6 @@ export const normalizedInboundSchema = z
 
 export type NormalizedInbound = z.infer<typeof normalizedInboundSchema>;
 
-/** Mensagem já com `text` resolvido — texto normal, ou transcrição de um áudio. */
-export type ResolvedInbound = NormalizedInbound & { text: string };
-
 /** Limite de texto do schema acima — usado pelas edges ao truncar. */
 export const MAX_INBOUND_TEXT_LENGTH = 4096;
 

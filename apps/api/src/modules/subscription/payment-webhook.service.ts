@@ -196,7 +196,7 @@ export class PaymentWebhookService {
       );
       await this.queues.enqueue(QUEUE.whatsappOutbound, 'payment-confirmed', {
         userId,
-        type: 'COACH_MESSAGE',
+        type: 'CONVERSATION_MESSAGE',
         text: paymentConfirmationMessage(await this.subscriptions.createShortCancelLink(userId)),
         dedupeId: `payment_${this.hash(eventId).slice(0, 56)}`,
       } satisfies WhatsappOutboundJob);
@@ -219,7 +219,7 @@ export class PaymentWebhookService {
     const checkoutUrl = await this.subscriptions.createCheckoutLink(userId);
     const job: WhatsappOutboundJob = {
       userId,
-      type: 'COACH_MESSAGE',
+      type: 'CONVERSATION_MESSAGE',
       text: firstPayment ? firstPaymentFailedMessage(checkoutUrl) : dunningMessage(checkoutUrl),
       dedupeId: `dunning_${sub.id}_${Date.now()}`,
     };

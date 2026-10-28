@@ -28,7 +28,7 @@ import { AppConfigService } from '../config';
 import { postgresTls } from './postgres-tls';
 import { DRIZZLE, POSTGRES_CLIENT } from './database.constants';
 import { DatabaseHealthService } from './database-health.service';
-import { CoachAttendanceService } from './coach-attendance.service';
+import { AttendanceService } from './attendance.service';
 import { ConversationMediaStorage } from './conversation-media-storage.service';
 import { HealthCipherService } from './health-cipher.service';
 import { HealthConsentService } from './health-consent.service';
@@ -78,7 +78,7 @@ export function createPostgresClient(config: AppConfigService): Sql {
     AccessLinkService,
     HealthCipherService,
     HealthConsentService,
-    CoachAttendanceService,
+    AttendanceService,
     ConversationMediaStorage,
   ],
   exports: [
@@ -89,7 +89,7 @@ export function createPostgresClient(config: AppConfigService): Sql {
     AccessLinkService,
     HealthCipherService,
     HealthConsentService,
-    CoachAttendanceService,
+    AttendanceService,
     ConversationMediaStorage,
   ],
 })

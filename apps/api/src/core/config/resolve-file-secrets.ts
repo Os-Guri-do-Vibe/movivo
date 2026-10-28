@@ -62,8 +62,6 @@ export const SECRET_KEYS = [
   'GROQ_API_KEY',
 ] as const;
 
-export type SecretKey = (typeof SECRET_KEYS)[number];
-
 export type RawEnv = Record<string, string | undefined>;
 
 /** Aviso emitido quando `K` e `K_FILE` coexistem (§2.1.7). Só o **nome** é citado. */

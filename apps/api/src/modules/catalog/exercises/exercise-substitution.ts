@@ -1,0 +1,193 @@
+/**
+ * Substituição segura de exercício.
+ *
+ * A MOVIVO **nunca inventa** um exercício: o substituto sai SEMPRE do catálogo, no mesmo padrão
+ * de movimento, dentro do nível/equipamento do aluno e **nunca contraindicado** por lesão/PAR-Q.
+ * A IA só identifica o exercício-alvo e conversa sobre as opções; o que **continua**
+ * determinístico, sem exceção, é o filtro de SEGURANÇA (`isViable` abaixo) — tanto antes de
+ * qualquer opção ser mostrada ao aluno (`findSafeCandidates`) quanto na recomputação final
+ * antes de persistir qualquer troca.
+ */
+import {
+  type CatalogExercise,
+  type ContraindicationTag,
+  type ExerciseLevel,
+  type ExerciseLocation,
+  offeredToLevel,
+  servesLocation,
+} from './exercise-catalog';
+
+/** Restrições do usuário que filtram um substituto seguro. */
+export interface SubstitutionConstraints {
+  level: ExerciseLevel;
+  location: ExerciseLocation;
+  equipment: readonly string[];
+  injuryTags: readonly ContraindicationTag[];
+}
+
+/**
+ * O exercício é seguro e viável para este usuário?
+ *
+ * Achado 2026-09-02: existiu aqui um `equipmentAvailable()` que exigia
+ * `ex.equipment.every((e) => c.equipment.includes(e))` — mas `c.equipment` é SEMPRE `[]`
+ * (a anamnese não pergunta equipamento item a item; é o LOCAL que determina o que existe,
+ * de propósito — ver comentário em `protocol-generation.worker.ts`). Na prática isso vetava
+ * TODO substituto que precisasse de halteres/barra/máquina, em qualquer local, sempre —
+ * quem pedia pra trocar um exercício em academia completa só recebia opção de peso do
+ * corpo. `servesLocation` abaixo já é a fonte de verdade de equipamento (mesmo critério do
+ * catálogo do gerador); não duplicar com um segundo filtro que nunca reflete a realidade.
+ */
+export function isViable(ex: CatalogExercise, c: SubstitutionConstraints): boolean {
+  return (
+    // 2026-09-29 (decisão do fundador): só os níveis MARCADOS — mesmo critério da base de
+    // referência do gerador. Um exercício só "Iniciante" não é oferecido a aluno avançado.
+    offeredToLevel(ex, c.level) &&
+    servesLocation(ex, c.location) &&
+    !ex.contraindicatedFor.some((t) => c.injuryTags.includes(t))
+  );
+}
+
+/**
+ * O candidato treina o mesmo padrão de movimento E pelo menos um grupo muscular em comum com
+ * o alvo? (achado 2026-09-09, bug reportado pelo fundador via conversa real: "Supino Reto"
+ * recebeu "Tríceps Testa" como opção "segura"). `pattern` sozinho não basta — é uma
+ * classificação automática, mais grosseira que grupo muscular real (ver comentário de topo do
+ * arquivo): existem entradas do catálogo com o MESMO `pattern` de um exercício mas
+ * `muscleGroups` completamente diferente (ex.: `supino_fechado_barra`, `pattern:
+ * HORIZONTAL_PUSH`, `muscleGroups: ['tríceps']`, colide de padrão com `supino_reto_*`, peito).
+ * Sem checar `muscleGroups` também, essas colisões passavam como candidato "seguro".
+ *
+ * Exceção: `CARDIO`. Ali `muscleGroups` não descreve um alvo muscular específico — é só um
+ * rótulo de catálogo que varia sem diferença clínica real (`'corpo todo'` numas entradas,
+ * `'sistema cardiovascular'` noutras, para exercícios igualmente intercambiáveis, ex.:
+ * "Esteira" ↔ "Caminhada de Mala (Halter)"); exigir sobreposição aqui rejeitaria trocas
+ * cardio legítimas por causa só do rótulo. Mesmo `pattern` já basta pra esse grupo.
+ */
+export function isPlausibleSubstitution(
+  target: CatalogExercise,
+  candidate: CatalogExercise,
+): boolean {
+  if (candidate.pattern !== target.pattern) return false;
+  if (target.pattern === 'CARDIO') return true;
+  return candidate.muscleGroups.some((group) => target.muscleGroups.includes(group));
+}
+
+/**
+ * Candidatos seguros no mesmo padrão de movimento, para a IA oferecer humanizadamente — TODOS
+ * os elegíveis, sem teto (a curadoria é ilimitada; quem apresenta ao aluno decide o lote). Ordem de
+ * prioridade de sempre: lista `substitutes` curada do exercício primeiro (é clinicamente
+ * curada, não arbitrária — não reordenar), depois qualquer outro do mesmo padrão. `[]` =
+ * nada seguro disponível na base para este aluno.
+ */
+export function findSafeCandidates(
+  target: CatalogExercise,
+  c: SubstitutionConstraints,
+  catalog: readonly CatalogExercise[],
+): CatalogExercise[] {
+  const byId = (id: string) => catalog.find((e) => e.id === id);
+  const curated = target.substitutes.map(byId).filter((e): e is CatalogExercise => Boolean(e));
+  const samePattern = catalog.filter(
+    (e) => e.id !== target.id && isPlausibleSubstitution(target, e),
+  );
+  const seen = new Set<string>();
+  const candidates: CatalogExercise[] = [];
+  for (const candidate of [...curated, ...samePattern]) {
+    if (candidate.id === target.id || seen.has(candidate.id)) continue;
+    if (!isViable(candidate, c)) continue;
+    seen.add(candidate.id);
+    candidates.push(candidate);
+  }
+  return candidates;
+}
+
+/**
+ * Tags que NUNCA são relaxadas numa troca com cautela: o risco que elas representam não é de
+ * "região sensível", é clínico (cardiovascular), de queda ou de gestação. Decisão do RT
+ * (Léo, 2026-10-21): só a restrição articular/muscular admite sugestão com cautela; o que for
+ * cardiovascular ou respiratório continua exigindo o filtro máximo. Queda e gestação ficam no
+ * lado conservador até o RT decidir o contrário.
+ */
+export const STRICT_CONTRAINDICATION_TAGS: ReadonlySet<ContraindicationTag> = new Set([
+  'CARDIAC',
+  'BALANCE_FALL_RISK',
+  'PREGNANCY',
+]);
+
+/**
+ * O candidato tem risco IGUAL OU MENOR que o exercício que o aluno já faz, para as restrições
+ * dele? "Já faz" importa: o alvo foi prescrito/aprovado pelo profissional CREF, então o risco
+ * dele é o teto aceito. Para cada restrição do aluno:
+ *  - tag estrita (cardíaca, queda, gestação) no candidato => reprova, sempre;
+ *  - tag articular/muscular no candidato => só passa se o ALVO também a carrega.
+ * Um candidato com uma região de risco que o alvo NÃO tem (ex.: ombro, quando o alvo só pesa no
+ * joelho) é risco maior e fica de fora.
+ */
+export function isEquivalentOrLowerRisk(
+  target: CatalogExercise,
+  candidate: CatalogExercise,
+  restrictedTags: readonly ContraindicationTag[],
+): boolean {
+  for (const tag of candidate.contraindicatedFor) {
+    if (!restrictedTags.includes(tag)) continue;
+    if (STRICT_CONTRAINDICATION_TAGS.has(tag)) return false;
+    if (!target.contraindicatedFor.includes(tag)) return false;
+  }
+  return true;
+}
+
+/** As restrições do aluno que o candidato carrega (para explicar a cautela com palavras simples). */
+export function cautionTagsOf(
+  candidate: CatalogExercise,
+  restrictedTags: readonly ContraindicationTag[],
+): ContraindicationTag[] {
+  return candidate.contraindicatedFor.filter((tag) => restrictedTags.includes(tag));
+}
+
+/**
+ * Candidatos "com cautela": no mesmo padrão de movimento, do nível/local do aluno, de risco igual
+ * ou menor que o exercício atual (`isEquivalentOrLowerRisk`) e que `findSafeCandidates` NÃO
+ * devolveu (esses já são seguros sem ressalva). Decisão do fundador e do RT (2026-10-21): a
+ * MOVIVO existe para ser aliada no treino, não uma barreira; quem tem uma restrição articular
+ * recebe opções, com orientação de cuidado, em vez de uma recusa. Mesma ordem de prioridade da
+ * curadoria segura (lista `substitutes` do exercício primeiro).
+ *
+ * `parqTags` são as contraindicações derivadas do PAR-Q: entram na checagem de risco além das
+ * lesões (`injuryTags`).
+ */
+export function findCautionCandidates(
+  target: CatalogExercise,
+  c: SubstitutionConstraints,
+  catalog: readonly CatalogExercise[],
+  parqTags: readonly ContraindicationTag[] = [],
+): CatalogExercise[] {
+  const restricted = [...new Set([...c.injuryTags, ...parqTags])];
+  const safeIds = new Set(findSafeCandidates(target, c, catalog).map((e) => e.id));
+  const byId = (id: string) => catalog.find((e) => e.id === id);
+  const curated = target.substitutes.map(byId).filter((e): e is CatalogExercise => Boolean(e));
+  const samePattern = catalog.filter(
+    (e) => e.id !== target.id && isPlausibleSubstitution(target, e),
+  );
+  const seen = new Set<string>();
+  const candidates: CatalogExercise[] = [];
+  for (const candidate of [...curated, ...samePattern]) {
+    if (candidate.id === target.id || seen.has(candidate.id) || safeIds.has(candidate.id)) continue;
+    seen.add(candidate.id);
+    if (!offeredToLevel(candidate, c.level) || !servesLocation(candidate, c.location)) continue;
+    if (!isEquivalentOrLowerRisk(target, candidate, restricted)) continue;
+    candidates.push(candidate);
+  }
+  // Com cautela, a ORDEM faz parte do cuidado: a lista curada do catálogo vem primeiro entre
+  // iguais, mas o que usa o mesmo tipo de equipamento do exercício atual (troca máquina por
+  // máquina) e carrega menos contraindicações no total vai antes de um agachamento livre.
+  const sharesEquipment = (e: CatalogExercise) =>
+    e.equipment.some((item) => target.equipment.includes(item)) ? 0 : 1;
+  return candidates
+    .map((candidate, order) => ({ candidate, order }))
+    .sort(
+      (a, b) =>
+        sharesEquipment(a.candidate) - sharesEquipment(b.candidate) ||
+        a.candidate.contraindicatedFor.length - b.candidate.contraindicatedFor.length ||
+        a.order - b.order,
+    )
+    .map(({ candidate }) => candidate);
+}

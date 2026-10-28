@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 
 import { AnamnesisBffError, failure, forwardSessionAction } from '../../../_lib/bff';
 
-const STEPS = new Set(['1', '2', '3']);
+const STEPS = new Set(['1', '2', '3', '4', '5', '6', '7', '8']);
 
 export async function PATCH(request: NextRequest, context: { params: Promise<{ n: string }> }) {
   try {

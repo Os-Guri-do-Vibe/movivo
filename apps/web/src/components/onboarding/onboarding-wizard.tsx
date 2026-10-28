@@ -13,15 +13,37 @@ import {
   SESSION_REPLACED_MESSAGE,
   submitAnamnesis,
   toE164,
+  type OnboardingStep,
   type SessionView,
 } from '@/lib/anamnesis-api';
+
+import {
+  bodyPayload,
+  goalsFromBlock,
+  goalsPayload,
+  modalitiesFromBlock,
+  modalitiesPayload,
+  nutritionFromBlock,
+  nutritionPayload,
+  preferencesFromBlock,
+  preferencesPayload,
+  routineFromBlock,
+  routinePayload,
+  type BodyDraft,
+} from './onboarding-drafts';
 import { ProgressBar } from './progress-bar';
+import { ComplementaryConsents } from './complementary-consents';
 import { Step1Registration, type Step1Data } from './step1-registration';
-import { Step2Anamnesis, EMPTY_STEP2, type Step2State } from './step2-anamnesis';
+import { StepBody } from './step-body';
+import { StepGoals } from './step-goals';
+import { StepModalities } from './step-modalities';
+import { StepNutrition } from './step-nutrition';
+import { StepPreferences } from './step-preferences';
+import { StepRoutine } from './step-routine';
 import { Step3Parq, EMPTY_PARQ, type ParqState } from './step3-parq';
 import { SuccessScreen } from './success-screen';
 
-/** `unknown` de `SessionView.step1` → `Step1Data` (retomada no F5). */
+/** Registro da sessão (bloco `registration`) → rascunho do cadastro. */
 function step1FromServer(raw: unknown): Partial<Step1Data> {
   if (!raw || typeof raw !== 'object') return {};
   const r = raw as Record<string, unknown>;
@@ -38,6 +60,23 @@ function step1FromServer(raw: unknown): Partial<Step1Data> {
   };
 }
 
+/** Hoje no calendário do aluno (data das medidas). */
+function todayIso(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+/** Primeira etapa que ainda não foi salva (a retomada abre nela). */
+function firstPendingStep(session: SessionView): OnboardingStep {
+  const first = session.flow === 'COMPLEMENTARY' ? 2 : 1;
+  for (let step = first; step <= 7; step += 1) {
+    if (!session.completedSteps.includes(step)) return step as OnboardingStep;
+  }
+  return 8;
+}
+
 export function OnboardingWizard({
   sessionRef,
   initial,
@@ -45,18 +84,18 @@ export function OnboardingWizard({
   sessionRef: string;
   initial: SessionView;
 }) {
+  const complementary = initial.flow === 'COMPLEMENTARY';
+  const firstStep: OnboardingStep = complementary ? 2 : 1;
   const [session, setSession] = React.useState(initial);
-  const [step, setStep] = React.useState<1 | 2 | 3>(
-    (initial.currentStep >= 1 && initial.currentStep <= 3 ? initial.currentStep : 1) as 1 | 2 | 3,
-  );
+  const [step, setStep] = React.useState<OnboardingStep>(firstPendingStep(initial));
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [step2Section, setStep2Section] = React.useState(0);
-  const [step3Screen, setStep3Screen] = React.useState(-1);
-  const [completedStep1Here, setCompletedStep1Here] = React.useState(false);
-  const [completedStep2Here, setCompletedStep2Here] = React.useState(false);
+  const [parqScreen, setParqScreen] = React.useState(-1);
+  const [outcome, setOutcome] = React.useState(initial.outcome);
+  // Etapas respondidas NESTA aba: as sensíveis não voltam do servidor ao retomar.
+  const [answeredHere, setAnsweredHere] = React.useState<Set<number>>(new Set());
 
-  const s1 = step1FromServer(initial.step1);
+  const s1 = step1FromServer(initial.blocks.registration);
   const [step1, setStep1] = React.useState<Step1Data>({
     name: s1.name ?? '',
     birthDate: s1.birthDate ?? '',
@@ -68,13 +107,64 @@ export function OnboardingWizard({
     email: s1.email ?? '',
   });
   const [acceptedConsents, setAcceptedConsents] = React.useState<Set<string>>(new Set());
-
-  const [step2, setStep2] = React.useState<Step2State>(EMPTY_STEP2);
+  const [goals, setGoals] = React.useState(() => goalsFromBlock(initial.blocks.goals));
+  const [modalities, setModalities] = React.useState(() =>
+    modalitiesFromBlock(initial.blocks.modalities),
+  );
+  const [routine, setRoutine] = React.useState(() => routineFromBlock(initial.blocks.routine));
+  const [preferences, setPreferences] = React.useState(() =>
+    preferencesFromBlock(initial.blocks.preferences),
+  );
   const [parqAnswers, setParqAnswers] = React.useState<ParqState>(EMPTY_PARQ);
   const [declarations, setDeclarations] = React.useState<Set<string>>(new Set());
-  const [outcome, setOutcome] = React.useState(session.outcome);
+  const [nutrition, setNutrition] = React.useState(() =>
+    nutritionFromBlock(initial.blocks.nutrition),
+  );
+  const [body, setBody] = React.useState<BodyDraft>({});
 
-  async function handleStep1Continue() {
+  const resumed = (n: number) => session.completedSteps.includes(n) && !answeredHere.has(n);
+
+  function describeError(err: unknown, fallback: string): string {
+    if (isSessionReplaced(err)) return SESSION_REPLACED_MESSAGE;
+    if (err instanceof AnamnesisApiError) {
+      if (err.status === 409)
+        return (
+          err.issues[0] ??
+          'Este telefone ou e-mail já está cadastrado. Fale com a gente se precisar de ajuda.'
+        );
+      if (err.status === 410)
+        return 'Sua sessão expirou. Recarregue a página para recomeçar o formulário.';
+    }
+    return fallback;
+  }
+
+  /** Salva uma etapa e vai para a seguinte (ou fica, se `advance` for falso). */
+  async function save(target: OnboardingStep, payload: unknown, next: OnboardingStep | null) {
+    setSaving(true);
+    setError(null);
+    try {
+      await patchStep(sessionRef, target, payload);
+      setAnsweredHere((prev) => new Set(prev).add(target));
+      setSession((prev) => ({
+        ...prev,
+        completedSteps: [...new Set([...prev.completedSteps, target])].sort((a, b) => a - b),
+      }));
+      if (next) setStep(next);
+      return true;
+    } catch (err) {
+      setError(
+        describeError(
+          err,
+          'Não conseguimos salvar suas respostas. Confira os campos e tente de novo.',
+        ),
+      );
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRegistration() {
     setSaving(true);
     setError(null);
     try {
@@ -84,7 +174,15 @@ export function OnboardingWizard({
           .filter((c) => acceptedConsents.has(c.type))
           .map((c) => ({ type: c.type, version: c.version, accepted: true })),
       );
-      await patchStep(sessionRef, 1, {
+    } catch (err) {
+      setError(describeError(err, 'Não conseguimos registrar os aceites. Tente de novo.'));
+      setSaving(false);
+      return;
+    }
+    setSaving(false);
+    await save(
+      1,
+      {
         name: step1.name.trim(),
         birthDate: step1.birthDate,
         biologicalSex: step1.biologicalSex,
@@ -92,88 +190,31 @@ export function OnboardingWizard({
         weightKg: Number(step1.weightKg.replace(',', '.')),
         phoneNumber: toE164(step1.phoneCountryIso, step1.phoneMasked),
         email: step1.email.trim(),
-      });
-      setCompletedStep1Here(true);
-      setStep(2);
-    } catch (err) {
-      setError(
-        isSessionReplaced(err)
-          ? SESSION_REPLACED_MESSAGE
-          : 'Não conseguimos salvar suas informações. Confira os campos e tente de novo.',
+      },
+      2,
+    );
+  }
+
+  async function handleComplementaryConsents(accepted: SessionView['consents']) {
+    setSaving(true);
+    setError(null);
+    try {
+      await recordConsents(
+        sessionRef,
+        accepted.map((c) => ({ type: c.type, version: c.version, accepted: true })),
       );
+      setSession((prev) => ({ ...prev, consentsPending: false }));
+    } catch (err) {
+      setError(describeError(err, 'Não conseguimos registrar os aceites. Tente de novo.'));
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleStep2Continue() {
-    setSaving(true);
-    setError(null);
-    try {
-      await patchStep(sessionRef, 2, {
-        anamnesis: {
-          structured: {
-            primaryGoal: step2.primaryGoal,
-            emphasis: step2.emphasis,
-            hasImportantEvent: step2.hasImportantEvent,
-            importantEventDate: step2.importantEventDate || undefined,
-            trainingStatus: step2.trainingStatus,
-            stoppedFor: step2.stoppedFor ?? undefined,
-            experience: step2.experience,
-            pastActivities: step2.pastActivities,
-            consistencyBarriers: step2.consistencyBarriers,
-            daysPerWeek: step2.daysPerWeek,
-            preferredDays: step2.preferredDays,
-            sessionDuration: step2.sessionDuration,
-            location: step2.location,
-            preferredPeriod: step2.preferredPeriod,
-            practicesOtherSport: false,
-            hasAvoidedExercise: step2.hasAvoidedExercise,
-          },
-          freeText: {
-            primaryGoalOther: step2.primaryGoalOther || undefined,
-            importantEventDescription: step2.importantEventDescription || undefined,
-            pastActivityOther: step2.pastActivityOther || undefined,
-            consistencyBarrierOther: step2.consistencyBarrierOther || undefined,
-            avoidedExercise: step2.avoidedExercise || undefined,
-          },
-        },
-        pain: step2.pain.hasPain
-          ? {
-              hasPain: true,
-              points: step2.pain.points.map((p) => ({
-                region: p.region,
-                intensity: p.intensity,
-                regionOther: p.regionOther || undefined,
-              })),
-              trend: step2.pain.trend,
-              trigger: step2.pain.trigger || undefined,
-              hasProfessionalExplanation: step2.pain.hasProfessionalExplanation,
-              professionalExplanation: step2.pain.professionalExplanation || undefined,
-              underMedicalFollowUp: step2.pain.underMedicalFollowUp,
-              hasAvoidanceRecommendation: step2.pain.hasAvoidanceRecommendation,
-              avoidanceRecommendation: step2.pain.avoidanceRecommendation || undefined,
-            }
-          : { hasPain: false, points: [] },
-      });
-      setCompletedStep2Here(true);
-      setStep(3);
-    } catch (err) {
-      setError(
-        isSessionReplaced(err)
-          ? SESSION_REPLACED_MESSAGE
-          : 'Não conseguimos salvar suas respostas. Confira os campos e tente de novo.',
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleSubmit() {
-    setSaving(true);
-    setError(null);
-    try {
-      await patchStep(sessionRef, 3, {
+  async function handleParq() {
+    await save(
+      6,
+      {
         parq: {
           version: PARQ_VERSION,
           answers: Object.entries(parqAnswers).map(([questionId, a]) => ({
@@ -184,25 +225,21 @@ export function OnboardingWizard({
         },
         declarationsVersion: PARQ_DECLARATIONS_VERSION,
         declarations: [...declarations],
-      });
-      const result = await submitAnamnesis(sessionRef);
-      setOutcome(result.outcome);
+      },
+      7,
+    );
+  }
+
+  async function handleFinish(withMeasurements: boolean) {
+    if (withMeasurements && !(await save(8, bodyPayload(body, todayIso()), null))) return;
+    setSaving(true);
+    setError(null);
+    try {
+      setOutcome((await submitAnamnesis(sessionRef)).outcome);
     } catch (err) {
-      if (isSessionReplaced(err)) {
-        setError(SESSION_REPLACED_MESSAGE);
-      } else if (err instanceof AnamnesisApiError && err.status === 409) {
-        // Telefone/e-mail já cadastrado (conta anterior) — "tente de novo" seria
-        // conselho errado aqui: reenviar com os mesmos dados falha sempre do mesmo
-        // jeito. O backend já manda o motivo certo em `issues`.
-        setError(
-          err.issues[0] ??
-            'Este telefone ou e-mail já está cadastrado. Fale com a gente se precisar de ajuda.',
-        );
-      } else if (err instanceof AnamnesisApiError && err.status === 410) {
-        setError('Sua sessão expirou. Recarregue a página para recomeçar o formulário.');
-      } else {
-        setError('Não conseguimos enviar sua avaliação. Tente de novo em instantes.');
-      }
+      setError(
+        describeError(err, 'Não conseguimos enviar suas respostas. Tente de novo em instantes.'),
+      );
     } finally {
       setSaving(false);
     }
@@ -212,17 +249,22 @@ export function OnboardingWizard({
     return <SuccessScreen outcome={outcome} name={step1.name.trim().split(' ')[0] || 'você'} />;
   }
 
+  const back = (target: OnboardingStep) => (step > firstStep ? () => setStep(target) : undefined);
+
   return (
     <div className="flex flex-col gap-6">
       <ProgressBar
         currentStep={step}
-        step2Section={step2Section}
-        step3Context={
-          step3Screen < 0
-            ? 'Introdução'
-            : step3Screen < 9
-              ? `Pergunta ${step3Screen + 1} de 9`
-              : 'Confirmações finais'
+        completedSteps={session.completedSteps}
+        firstStep={firstStep}
+        context={
+          step === 6
+            ? parqScreen < 0
+              ? 'Introdução'
+              : parqScreen < 9
+                ? `Pergunta ${parqScreen + 1} de 9`
+                : 'Confirmações finais'
+            : undefined
         }
       />
 
@@ -262,24 +304,62 @@ export function OnboardingWizard({
           phoneVerified={session.phoneVerified}
           onPhoneVerified={() => setSession((prev) => ({ ...prev, phoneVerified: true }))}
           sessionRef={sessionRef}
-          onContinue={() => void handleStep1Continue()}
+          onContinue={() => void handleRegistration()}
           saving={saving}
         />
       )}
 
-      {step === 2 && (
-        <Step2Anamnesis
-          data={step2}
-          onChange={setStep2}
-          onContinue={() => void handleStep2Continue()}
-          onBack={completedStep1Here ? () => setStep(1) : undefined}
-          initialSection={step2Section}
-          onSectionChange={setStep2Section}
+      {complementary && session.consentsPending && (
+        <ComplementaryConsents
+          consents={session.consents}
           saving={saving}
+          onAccept={(accepted) => void handleComplementaryConsents(accepted)}
+        />
+      )}
+
+      {step === 2 && !(complementary && session.consentsPending) && (
+        <StepGoals
+          data={goals}
+          onChange={setGoals}
+          onContinue={() => void save(2, goalsPayload(goals), 3)}
+          onBack={back(1)}
+          saving={saving}
+          resumed={resumed(2)}
         />
       )}
 
       {step === 3 && (
+        <StepModalities
+          data={modalities}
+          onChange={setModalities}
+          onContinue={() => void save(3, modalitiesPayload(modalities), 4)}
+          onBack={back(2)}
+          saving={saving}
+        />
+      )}
+
+      {step === 4 && (
+        <StepRoutine
+          data={routine}
+          onChange={setRoutine}
+          onContinue={() => void save(4, routinePayload(routine), 5)}
+          onBack={back(3)}
+          saving={saving}
+        />
+      )}
+
+      {step === 5 && (
+        <StepPreferences
+          data={preferences}
+          onChange={setPreferences}
+          onContinue={() => void save(5, preferencesPayload(preferences), 6)}
+          onBack={back(4)}
+          saving={saving}
+          resumed={resumed(5)}
+        />
+      )}
+
+      {step === 6 && (
         <Step3Parq
           answers={parqAnswers}
           onChange={(id, value) => setParqAnswers((prev) => ({ ...prev, [id]: value }))}
@@ -292,18 +372,32 @@ export function OnboardingWizard({
               return next;
             })
           }
-          onSubmit={() => void handleSubmit()}
-          onBack={
-            completedStep2Here
-              ? () => {
-                  setStep2Section(4);
-                  setStep(2);
-                }
-              : undefined
-          }
-          initialScreen={step3Screen}
-          onScreenChange={setStep3Screen}
+          onSubmit={() => void handleParq()}
+          onBack={back(5)}
+          initialScreen={parqScreen}
+          onScreenChange={setParqScreen}
           submitting={saving}
+        />
+      )}
+
+      {step === 7 && (
+        <StepNutrition
+          data={nutrition}
+          onChange={setNutrition}
+          onContinue={() => void save(7, nutritionPayload(nutrition), 8)}
+          onBack={() => setStep(6)}
+          saving={saving}
+          resumed={resumed(7)}
+        />
+      )}
+
+      {step === 8 && (
+        <StepBody
+          data={body}
+          onChange={setBody}
+          onFinish={(withMeasurements) => void handleFinish(withMeasurements)}
+          onBack={() => setStep(7)}
+          saving={saving}
         />
       )}
     </div>

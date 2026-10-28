@@ -6,14 +6,10 @@ import type * as ControlCenterApi from '@/lib/control-center-api';
 let pathname = '/dashboard/ia/base-conhecimento/documentos';
 vi.mock('next/navigation', () => ({ usePathname: () => pathname }));
 
-const { getKnowledgeDocuments, getMethodology } = vi.hoisted(() => ({
-  getKnowledgeDocuments: vi.fn(),
-  getMethodology: vi.fn(),
-}));
+const { getKnowledgeDocuments } = vi.hoisted(() => ({ getKnowledgeDocuments: vi.fn() }));
 vi.mock('@/lib/control-center-api', async (importOriginal) => ({
   ...(await importOriginal<typeof ControlCenterApi>()),
   getKnowledgeDocuments,
-  getMethodology,
 }));
 
 import { KnowledgeBaseShell } from './knowledge-base-shell';
@@ -38,12 +34,6 @@ beforeEach(() => {
     },
     meta,
   });
-  getMethodology.mockReset().mockResolvedValue({
-    data: {
-      versions: [{ id: 'methodology', version: 7, status: 'PUBLISHED', current: true }],
-    },
-    meta,
-  });
 });
 
 describe('KnowledgeBaseShell', () => {
@@ -60,20 +50,17 @@ describe('KnowledgeBaseShell', () => {
       'aria-current',
       'page',
     );
-    expect(screen.getByRole('link', { name: 'Metodologia' })).toHaveAttribute(
-      'href',
-      '/dashboard/ia/base-conhecimento',
-    );
+    expect(screen.queryByRole('link', { name: 'Metodologia' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Segurança' })).toHaveAttribute(
       'href',
       '/dashboard/ia/base-conhecimento/seguranca',
     );
-    expect(await screen.findByText('v7')).toBeVisible();
+    expect(await screen.findByText('Falhas no processamento')).toBeVisible();
     expect(screen.getByText('Falhas no processamento').nextElementSibling).toHaveTextContent('1');
   });
 
   it('expõe degradação parcial sem esconder o conteúdo da seção', async () => {
-    getMethodology.mockRejectedValueOnce(new Error('endpoint em implantação'));
+    getKnowledgeDocuments.mockReset().mockRejectedValue(new Error('endpoint em implantação'));
     render(
       <KnowledgeBaseShell>
         <h2>Conteúdo preservado</h2>

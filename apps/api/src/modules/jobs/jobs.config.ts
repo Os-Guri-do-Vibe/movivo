@@ -3,9 +3,8 @@
  *
  * Ponto ÚNICO de defaults e parâmetros de fila — nenhuma opção de retry/backoff ou
  * limpeza de job é definida dentro de um processor. Aqui vive:
- *   · o registro das 5 filas de negócio com os parâmetros fixos de §6 (definições, sem
- *     processadores — estes nascem nas Sprints 2-5);
- *   · a fila `sanity`, que prova o pipeline enqueue→process→retry→DLQ nesta sprint;
+ *   · o registro das filas de negócio com os parâmetros fixos de §6;
+ *   · a fila `sanity`, que prova o pipeline enqueue→process→retry→DLQ;
  *   · a fila `dead-letter`, destino de jobs que estouram os retries.
  *
  * A conexão é derivada de `buildRedisOptions` do RedisModule (ADR-004: descoberta de
@@ -19,51 +18,29 @@ import { type AppConfigService } from '../../core/config';
 import { buildRedisOptions } from '../../core/redis';
 
 export const QUEUE = {
-  protocolGeneration: 'protocol-generation',
-  // Regeração pedida pelo profissional CREF na fila de revisão: refaz o conteúdo do
-  // protocolo PENDENTE a partir da anamnese original. Fila própria porque o payload é o
-  // id do PROTOCOLO existente (`ProtocolGenerationJob` carrega a sessão de anamnese e
-  // cria a linha), e porque o painel consulta o estado do job para mostrar "gerando…".
-  protocolRegeneration: 'protocol-regeneration',
-  protocolAutoRelease: 'protocol-auto-release',
-  // Achado 2026-09-02: liberação da proposta de substituição de exercício via IA, após a
-  // janela de cortesia de 30 min (`AI_SUBSTITUTION_REVIEW_WINDOW_MS`) — fila própria, e não
-  // um branch dentro de `protocolAutoRelease`, porque o job carrega o id da PROPOSTA
-  // (`protocol_substitution_requests.id`), não o do protocolo — o mesmo protocolo pode ter
-  // várias propostas ao longo do tempo, cada uma com seu próprio job/estado.
-  protocolSubstitutionRelease: 'protocol-substitution-release',
-  // Renovação de protocolo por fim de mesociclo: `protocolRenewalScan` é o cron diário
-  // que detecta vencimento e cria a sessão do formulário (mesmo papel de
-  // `checkinWeekly`/SCAN); `protocolRenewalGeneration` consome o submit do formulário e
-  // gera o próximo mesociclo — fila própria, não um branch de `protocolGeneration`,
-  // porque o payload carrega `renewalSessionId`, não `anamnesisSessionId`.
-  protocolRenewalScan: 'protocol-renewal-scan',
-  protocolRenewalGeneration: 'protocol-renewal-generation',
+  // Entrada do orquestrador de conversa (debounce de mensagens do aluno).
   aiResponse: 'ai-response',
   whatsappOutbound: 'whatsapp-outbound',
   // Espelho da aba "Conversas": baixa a mídia (áudio/imagem) de cada mensagem e confirma a que
   // foi digitada no celular. Fila própria — nunca atrasa nem derruba o pipeline da IA.
   whatsappMirror: 'whatsapp-mirror',
-  checkinWeekly: 'checkin-weekly',
-  workoutDaily: 'workout-daily',
-  // Comentário do Coach sobre o treino que o aluno acabou de registrar no diário
-  // (`WorkoutJournalService.finish()`) — fila própria (não um branch de `whatsappOutbound`)
-  // porque quem enfileira (`workout`) não pode falar com `LlmRouter`/`ValidationService`
-  // diretamente (fronteira §12.5); o worker que fala com a IA mora no `CoachModule`.
-  workoutFeedback: 'workout-feedback',
-  // O protocolo ganhou uma versão nova (troca de exercício, emenda do profissional): o treino de
-  // hoje, se ainda não começou, é atualizado e o aluno é perguntado se quer um link novo. Fila
-  // própria porque quem publica o protocolo (`protocol`, `admin`) não importa o domínio `workout`.
-  workoutProtocolChanged: 'workout-protocol-changed',
-  // Comentário do Coach sobre o check-in semanal (achado 2026-09-13) — mesmo racional de
-  // `workoutFeedback`: quem enfileira (`checkin`) não pode falar com `LlmRouter`/
-  // `ValidationService` diretamente (fronteira §12.5); o worker mora no `CoachModule`.
-  checkinWeeklyFeedback: 'checkin-weekly-feedback',
+  // Link diário e fechamento do dia (qualquer modalidade).
+  trainingDaily: 'training-daily',
+  // Check-in adaptativo semanal.
+  checkIn: 'check-in',
+  // Revisão semanal do progresso (uma por aluno) e extração de preferências.
+  weeklyReview: 'weekly-review',
   conversionSequence: 'conversion-sequence',
   paymentReconciliation: 'payment-reconciliation',
   // Fim do período pago: cron horário que leva ACTIVE → EXPIRED quando não houve renovação
   // (parcelado no cartão e Pix à vista não renovam sozinhos).
   subscriptionPeriodScan: 'subscription-period-scan',
+  // Outbox de eventos de domínio: o relé publica eventos gravados em `domain_events` e o
+  // dispatcher entrega cada evento aos consumidores registrados (idempotentes por recibo).
+  outboxRelay: 'outbox-relay',
+  domainEvents: 'domain-events',
+  // Geração do plano integrado (estratégia + treino + nutrição) depois do onboarding.
+  planGeneration: 'plan-generation',
   knowledgeProcessing: 'knowledge-processing',
   sanity: 'sanity',
   deadLetter: 'dead-letter',
@@ -86,46 +63,6 @@ export interface QueueSpec {
 }
 
 export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
-  [QUEUE.protocolGeneration]: {
-    attempts: 3,
-    backoffMs: [2_000, 8_000, 32_000],
-    concurrency: 5,
-    lockMs: 120_000,
-  },
-  // Mesmo pipeline gera-e-valida de `protocolGeneration`, disparado à mão: poucas tentativas
-  // (quem pediu está olhando a fila) e o conteúdo atual só é trocado se a regeração valida.
-  [QUEUE.protocolRegeneration]: {
-    attempts: 2,
-    backoffMs: [5_000],
-    concurrency: 2,
-    lockMs: 120_000,
-  },
-  // Liberação automática após a janela de cortesia de 1h (fila do profissional,
-  // categoria "Disponível para Revisão"). Baixo volume, sem urgência de latência.
-  [QUEUE.protocolAutoRelease]: {
-    attempts: 3,
-    backoffMs: [5_000, 15_000, 45_000],
-    concurrency: 3,
-  },
-  // Mesmo perfil de `protocolAutoRelease`: baixo volume, sem urgência de latência.
-  [QUEUE.protocolSubstitutionRelease]: {
-    attempts: 3,
-    backoffMs: [5_000, 15_000, 45_000],
-    concurrency: 3,
-  },
-  // Um scan por dia, sem urgência de latência — mesmo perfil de `checkinWeekly`.
-  [QUEUE.protocolRenewalScan]: {
-    attempts: 3,
-    backoffMs: [5_000, 15_000, 45_000],
-    concurrency: 3,
-  },
-  // Mesmo perfil de `protocolGeneration` (chama o mesmo pipeline gera-e-valida).
-  [QUEUE.protocolRenewalGeneration]: {
-    attempts: 3,
-    backoffMs: [2_000, 8_000, 32_000],
-    concurrency: 5,
-    lockMs: 120_000,
-  },
   [QUEUE.aiResponse]: {
     attempts: 2,
     backoffMs: [3_000, 9_000],
@@ -142,17 +79,11 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
   },
   // Best-effort: a mensagem já está no histórico; a mídia que não baixa vira "indisponível".
   [QUEUE.whatsappMirror]: { attempts: 3, backoffMs: [3_000, 9_000, 27_000], concurrency: 5 },
-  [QUEUE.checkinWeekly]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
   // Quick reply diário de treino (US-8.1). Mesmo perfil do check-in: um scan por dia,
   // sem urgência de latência, retry curto — o envio real acontece em `whatsappOutbound`.
-  [QUEUE.workoutDaily]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
-  // Best-effort (mesmo espírito do resumo de entrega do protocolo): poucas tentativas,
-  // nunca trava o diário do aluno por causa de um comentário que não saiu.
-  [QUEUE.workoutFeedback]: { attempts: 2, backoffMs: [5_000], concurrency: 5 },
-  // Best-effort: a atualização do treino de hoje nunca pode travar a publicação do protocolo.
-  [QUEUE.workoutProtocolChanged]: { attempts: 2, backoffMs: [5_000], concurrency: 5 },
-  // Mesmo perfil de `workoutFeedback`: best-effort, poucas tentativas.
-  [QUEUE.checkinWeeklyFeedback]: { attempts: 2, backoffMs: [5_000], concurrency: 5 },
+  [QUEUE.trainingDaily]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
+  [QUEUE.checkIn]: { attempts: 3, backoffMs: [5_000, 15_000, 45_000], concurrency: 10 },
+  [QUEUE.weeklyReview]: { attempts: 2, backoffMs: [15_000], concurrency: 4 },
   [QUEUE.conversionSequence]: {
     attempts: 3,
     backoffMs: [5_000, 30_000],
@@ -168,7 +99,7 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
     concurrency: 5,
     lockMs: 30_000,
   },
-  // Mesmo perfil de `protocolRenewalScan`: varredura idempotente, sem urgência de latência.
+  // Varredura idempotente, sem urgência de latência.
   [QUEUE.subscriptionPeriodScan]: {
     attempts: 3,
     backoffMs: [5_000, 15_000, 45_000],
@@ -180,6 +111,23 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
     backoffMs: [2_000, 10_000, 30_000, 120_000],
     concurrency: 2,
     lockMs: 120_000,
+  },
+  // Relé: uma execução por vez basta (o SELECT usa SKIP LOCKED); retry rápido.
+  [QUEUE.outboxRelay]: { attempts: 3, backoffMs: [1_000, 5_000, 15_000], concurrency: 1 },
+  // Dispatcher: consumidores podem chamar IA, por isso lock longo e retry espaçado.
+  [QUEUE.domainEvents]: {
+    attempts: 5,
+    backoffMs: [2_000, 10_000, 30_000, 120_000, 600_000],
+    concurrency: 10,
+    lockMs: 180_000,
+  },
+  // Vários agentes em sequência (estratégia, blocos, reconciliação, nutrição): lock longo e poucas
+  // tentativas — falha de validação abre caso para a equipe em vez de repetir indefinidamente.
+  [QUEUE.planGeneration]: {
+    attempts: 3,
+    backoffMs: [10_000, 60_000, 300_000],
+    concurrency: 3,
+    lockMs: 600_000,
   },
   [QUEUE.sanity]: { attempts: 3, backoffMs: [50, 100, 200], concurrency: 2 },
   // DLQ é destino final: não retenta, não é reprocessada automaticamente.

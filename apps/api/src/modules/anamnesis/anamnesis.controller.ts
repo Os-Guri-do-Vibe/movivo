@@ -29,9 +29,9 @@ import {
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import {
-  onboardingStep1Schema,
-  onboardingStep2Schema,
-  onboardingStep3Schema,
+  ONBOARDING_STEP_SCHEMAS,
+  onboardingStepNumberSchema,
+  type OnboardingStepNumber,
   sendPhoneCodeSchema,
   startAnamnesisSchema,
   verifyPhoneCodeSchema,
@@ -39,7 +39,7 @@ import {
 
 import { zodSchemaToOpenApi } from '../../core/swagger/zod-openapi.util';
 import { parseBody } from '../../core/validation/strict-input';
-import { AnamnesisService, type StepNumber } from './anamnesis.service';
+import { AnamnesisService } from './anamnesis.service';
 
 const TOKEN_PARAM = {
   name: 'token',
@@ -81,33 +81,30 @@ export class AnamnesisController {
     return this.anamnesis.getByToken(token);
   }
 
-  /** Salvamento de progresso por ETAPA (1..3). O schema de cada etapa é aplicado no serviço. */
+  /** Salvamento de progresso por ETAPA (1..8). O schema de cada etapa é aplicado no serviço. */
   @Patch('session/:token/step/:n')
   @Header('Referrer-Policy', 'no-referrer')
   @ApiOperation({
-    summary: 'Salva o progresso de uma etapa (1, 2 ou 3)',
+    summary: 'Salva uma etapa da anamnese (1 a 8)',
     description:
-      'Etapa 1: dados pessoais e objetivo. Etapa 2: rotina, histórico de treino e dor. ' +
-      'Etapa 3: PAR-Q (`parq-2026-07-v1`) e declarações. O corpo aceito varia por etapa ' +
-      '— o schema abaixo documenta as três variações possíveis (`oneOf`).',
+      '1 Cadastro · 2 Objetivos · 3 Modalidades · 4 Rotina · 5 Preferências e saúde · 6 PAR-Q · ' +
+      '7 Alimentação · 8 Corpo (opcional). Saúde, alergias e todo texto livre são guardados só ' +
+      'cifrados e nunca voltam na leitura da sessão.',
   })
   @ApiParam(TOKEN_PARAM)
-  @ApiParam({ name: 'n', enum: ['1', '2', '3'], description: 'Número da etapa do formulário.' })
+  @ApiParam({
+    name: 'n',
+    enum: ['1', '2', '3', '4', '5', '6', '7', '8'],
+    description: 'Número da etapa.',
+  })
   @ApiBody({
     schema: {
-      oneOf: [
-        zodSchemaToOpenApi(onboardingStep1Schema),
-        zodSchemaToOpenApi(onboardingStep2Schema),
-        zodSchemaToOpenApi(onboardingStep3Schema),
-      ],
+      oneOf: Object.values(ONBOARDING_STEP_SCHEMAS).map((schema) => zodSchemaToOpenApi(schema)),
     },
   })
-  @ApiResponse({ status: 200, description: 'Progresso da etapa salvo.' })
-  @ApiResponse({
-    status: 400,
-    description: 'Número de etapa inválido (fora de 1..3) ou corpo fora do schema da etapa.',
-  })
-  @ApiResponse({ status: 404, description: 'Token inexistente ou expirado.' })
+  @ApiResponse({ status: 200, description: 'Etapa salva.' })
+  @ApiResponse({ status: 400, description: 'Etapa fora de 1..8 ou corpo fora do schema da etapa.' })
+  @ApiResponse({ status: 404, description: 'Token inexistente.' })
   async patchStep(@Param('token') token: string, @Param('n') n: string, @Body() body: unknown) {
     return this.anamnesis.patchStep(token, this.parseStepNumber(n), body);
   }
@@ -172,8 +169,11 @@ export class AnamnesisController {
     return this.anamnesis.submit(token);
   }
 
-  private parseStepNumber(raw: string): StepNumber {
-    if (raw === '1' || raw === '2' || raw === '3') return Number(raw) as StepNumber;
-    throw new BadRequestException('Etapa inválida: use 1, 2 ou 3.');
+  private parseStepNumber(raw: string): OnboardingStepNumber {
+    const parsed = onboardingStepNumberSchema.safeParse(Number(raw));
+    if (!/^[1-8]$/.test(raw) || !parsed.success) {
+      throw new BadRequestException('Etapa inválida: use de 1 a 8.');
+    }
+    return parsed.data as OnboardingStepNumber;
   }
 }

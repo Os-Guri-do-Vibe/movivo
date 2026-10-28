@@ -14,14 +14,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AudioTranscriptionPort } from '../../core/audio/audio-transcription.port';
 import type { AppConfigService } from '../../core/config';
-import { CoachAttendanceService } from '../../core/database/coach-attendance.service';
+import { AttendanceService } from '../../core/database/attendance.service';
 import { ConversationEventsService } from '../../core/event-bus/conversation-events.service';
 import { HealthConsentService } from '../../core/database/health-consent.service';
 import type { HealthCipherService } from '../../core/database/health-cipher.service';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DomainEventBus } from '../../core/event-bus/event-bus.service';
-import { SUBSCRIPTION_INBOUND_EVENT, WORKOUT_INBOUND_EVENT } from '../../core/event-bus/events';
-import { DashboardQueueEventsService } from '../../core/event-bus/dashboard-queue-events.service';
+import { SUBSCRIPTION_INBOUND_EVENT } from '../../core/event-bus/events';
 import { RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { EvolutionTransport } from './evolution-transport';
@@ -76,7 +75,6 @@ function makeService(
     secret?: string;
     userRows?: Array<{ id: string }>;
     consentActive?: boolean;
-    checkinHandled?: boolean;
     subscriptionHandled?: boolean;
     evolutionEdge?: WhatsappInboundEdge;
     audioHealthDataApproved?: boolean;
@@ -85,7 +83,7 @@ function makeService(
     transcribe?: ReturnType<typeof vi.fn>;
     evolutionInstanceName?: string | null;
     downloadAudio?: ReturnType<typeof vi.fn>;
-    coachPaused?: boolean;
+    attendancePaused?: boolean;
   } = {},
 ) {
   const { redis, rpush, keys, seed } = fakeRedis();
@@ -125,9 +123,7 @@ function makeService(
   } as unknown as HealthConsentService;
   const events = {
     request: vi.fn(async (event: string) =>
-      event === SUBSCRIPTION_INBOUND_EVENT
-        ? (opts.subscriptionHandled ?? false)
-        : (opts.checkinHandled ?? false),
+      event === SUBSCRIPTION_INBOUND_EVENT ? (opts.subscriptionHandled ?? false) : false,
     ),
   } as unknown as DomainEventBus;
   // A borda real da EvolutionAPI é exercitada no spec dela.
@@ -168,10 +164,9 @@ function makeService(
     queues,
     healthConsent,
     events,
-    { emit: vi.fn() } as unknown as DashboardQueueEventsService,
     config,
     { encryptText: vi.fn(async (value: string) => value) } as unknown as HealthCipherService,
-    { isPaused: vi.fn(async () => opts.coachPaused ?? false) } as unknown as CoachAttendanceService,
+    { isPaused: vi.fn(async () => opts.attendancePaused ?? false) } as unknown as AttendanceService,
     { emitMessage } as unknown as ConversationEventsService,
     mirror as unknown as WhatsappMirrorService,
     logger,
@@ -230,7 +225,7 @@ describe('WhatsappInboundService.ingest', () => {
       AiResponseJob,
       { delay: number },
     ];
-    expect(jobName).toBe('coach-response');
+    expect(jobName).toBe('agent-response');
     expect(job.userId).toBe(USER_ID);
     expect(job.batchKey).toContain(USER_ID.toLowerCase());
     expect(job).not.toHaveProperty('text'); // nenhum PII no job
@@ -239,7 +234,7 @@ describe('WhatsappInboundService.ingest', () => {
   });
 
   it('atendimento pausado: registra a mensagem no histórico e NÃO aciona a IA', async () => {
-    const paused = makeService({ coachPaused: true });
+    const paused = makeService({ attendancePaused: true });
     await paused.service.ingest({
       ...delivery(payload({ text: 'doeu o joelho' })),
       correlationId: 'c1',
@@ -260,7 +255,7 @@ describe('WhatsappInboundService.ingest', () => {
   });
 
   it('atendimento pausado: revogação de consentimento continua valendo', async () => {
-    const paused = makeService({ coachPaused: true });
+    const paused = makeService({ attendancePaused: true });
     await paused.service.ingest({
       ...delivery(payload({ text: 'Revogar consentimento de saude' })),
       correlationId: 'c1',
@@ -385,11 +380,6 @@ describe('WhatsappInboundService.ingest', () => {
       expect.any(Object),
     );
     expect(created.rpush).not.toHaveBeenCalled();
-    // O trilho de treino (saúde) nunca é consultado sem consentimento.
-    expect(created.events.request).not.toHaveBeenCalledWith(
-      WORKOUT_INBOUND_EVENT,
-      expect.anything(),
-    );
   });
 
   it('pedido de cancelamento é tratado pela assinatura, antes da IA e até sem consentimento de saúde', async () => {
@@ -413,15 +403,6 @@ describe('WhatsappInboundService.ingest', () => {
       expect.anything(),
     );
     expect(created.rpush).toHaveBeenCalledOnce();
-  });
-
-  it('roteia check-in pelo barramento sem importar o dominio e nao chama o Coach', async () => {
-    const created = makeService({ checkinHandled: true });
-    const s = delivery(payload({ text: 'dor no quadril' }));
-    await created.service.ingest({ ...s, correlationId: 'checkin' });
-    expect(created.events.request).toHaveBeenCalledWith(WORKOUT_INBOUND_EVENT, expect.anything());
-    expect(created.rpush).not.toHaveBeenCalled();
-    expect(created.enqueue).not.toHaveBeenCalled();
   });
 
   it('borda rejeita (verify falso) → nada é processado', async () => {
@@ -550,7 +531,7 @@ describe('WhatsappInboundService.ingest — mensagem de voz (US audio, Evolution
     expect(created.enqueue).toHaveBeenCalledTimes(1);
     expect(created.enqueue).toHaveBeenCalledWith(
       'ai-response',
-      'coach-response',
+      'agent-response',
       expect.any(Object),
       expect.any(Object),
     );
@@ -593,7 +574,7 @@ describe('WhatsappInboundService.ingest — mensagem de voz (US audio, Evolution
     expect(created.enqueue).toHaveBeenCalledWith(
       'whatsapp-outbound',
       'audio-transcription-fallback',
-      expect.objectContaining({ type: 'COACH_MESSAGE' }),
+      expect.objectContaining({ type: 'CONVERSATION_MESSAGE' }),
       expect.any(Object),
     );
   });
@@ -608,7 +589,7 @@ describe('WhatsappInboundService.ingest — mensagem de voz (US audio, Evolution
     expect(created.enqueue).toHaveBeenCalledWith(
       'whatsapp-outbound',
       'audio-transcription-fallback',
-      expect.objectContaining({ type: 'COACH_MESSAGE' }),
+      expect.objectContaining({ type: 'CONVERSATION_MESSAGE' }),
       expect.any(Object),
     );
   });
@@ -625,7 +606,7 @@ describe('WhatsappInboundService.ingest — mensagem de voz (US audio, Evolution
     expect(created.enqueue).toHaveBeenCalledWith(
       'whatsapp-outbound',
       'audio-transcription-fallback',
-      expect.objectContaining({ type: 'COACH_MESSAGE' }),
+      expect.objectContaining({ type: 'CONVERSATION_MESSAGE' }),
       expect.any(Object),
     );
   });
@@ -640,7 +621,7 @@ describe('WhatsappInboundService.ingest — mensagem de voz (US audio, Evolution
     expect(created.enqueue).toHaveBeenCalledWith(
       'whatsapp-outbound',
       'audio-transcription-fallback',
-      expect.objectContaining({ type: 'COACH_MESSAGE' }),
+      expect.objectContaining({ type: 'CONVERSATION_MESSAGE' }),
       expect.any(Object),
     );
   });

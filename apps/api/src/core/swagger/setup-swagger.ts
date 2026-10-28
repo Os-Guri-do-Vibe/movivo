@@ -19,8 +19,9 @@ import { APP_VERSION } from '@movivo/shared';
 import type { AppConfigService } from '../config';
 
 const DESCRICAO = `
-API do **MOVIVO** — AI Coach de treino individualizado entregue via WhatsApp, com
-metodologia e supervisão de profissional de Educação Física registrado no CREF.
+API da **MOVIVO** — assessoria de movimento, performance e bem-estar entregue via WhatsApp,
+com agentes de IA que operam dentro de políticas versionadas pelos profissionais (CREF, CRN e
+CRM), que entram por exceção.
 
 ### Convenções gerais
 
@@ -30,9 +31,9 @@ metodologia e supervisão de profissional de Educação Física registrado no CR
   \`POST /auth/login\` e renovado em \`POST /auth/refresh\` (o refresh token em si viaja
   só por cookie \`httpOnly\`, nunca no corpo/JSON). Rotas marcadas com o cadeado exigem
   token de acesso válido.
-- **Papéis (RBAC):** \`USER\` (aluno), \`PROFESSIONAL\` (responsável técnico CREF) e
-  \`ADMIN\`. Endpoints sob a tag **Admin** exigem \`PROFESSIONAL\` ou \`ADMIN\`, salvo
-  exceção indicada na própria operação.
+- **Papéis (RBAC):** \`USER\` (aluno), \`PROFESSIONAL\` (profissional de um conselho: CREF,
+  CRN ou CRM, que define o domínio de atuação) e \`ADMIN\`. Endpoints sob a tag **Admin**
+  exigem \`PROFESSIONAL\` ou \`ADMIN\`, salvo exceção indicada na própria operação.
 - **Validação:** todo corpo de requisição é validado por um schema Zod de
   \`@movivo/shared\` (a mesma fonte usada para gerar os schemas mostrados aqui — nunca um
   DTO paralelo). Corpo fora do schema retorna \`400\`.
@@ -40,9 +41,9 @@ metodologia e supervisão de profissional de Educação Física registrado no CR
   \`POST /webhook/payment\` são chamados por sistemas externos (EvolutionAPI,
   Asaas), não pelo app cliente — autenticados pelo mecanismo configurado, não
   por Bearer JWT.
-- **Guardrails de linguagem:** nenhuma resposta da IA (ver módulo AI Coach) usa
-  "diagnóstico", "tratamento", "cura" ou promete resultado garantido — a IA é sempre
-  apresentada como ferramenta do profissional CREF, nunca como quem decide sozinha.
+- **Guardrails de linguagem:** nenhuma resposta da IA usa "diagnóstico", "tratamento",
+  "cura" ou promete resultado garantido — a IA é sempre apresentada como ferramenta de
+  apoio, com o respaldo do profissional visível, nunca como quem prescreve sozinha.
 
 Documentação gerada a partir do código-fonte (\`@nestjs/swagger\`) — reflete exatamente as
 rotas e schemas de validação em produção, sem edição manual de exemplos desatualizados.
@@ -74,10 +75,10 @@ export function setupSwagger(app: INestApplication, config: AppConfigService): s
     .addTag('Conta', 'Perfil do usuário autenticado e avatar.')
     .addTag('Anamnese', 'Formulário de anamnese + PAR-Q em blocos, com salvamento de progresso.')
     .addTag('Consentimento', 'Registro de consentimento LGPD da anamnese.')
-    .addTag('Protocolo', 'Geração e consulta do protocolo de treino vigente do aluno.')
-    .addTag('Renovação de Protocolo', 'Renovação de mesociclo e catálogo de substituição.')
-    .addTag('Check-in', 'Check-in semanal automático que ajusta o protocolo.')
-    .addTag('Treino', 'Acompanhamento diário de execução dos treinos do protocolo.')
+    .addTag('Plano', 'Plano integrado vigente (treino e nutrição) lido pelo link do aluno.')
+    .addTag('Treino', 'Sessões agendadas e registro de execução de qualquer modalidade.')
+    .addTag('Alimentação', 'Registro e confirmação das refeições do aluno.')
+    .addTag('Check-in', 'Check-ins adaptativos respondidos pelo link do aluno.')
     .addTag('Assinatura', 'Plano, trial e ciclo de cobrança da assinatura do aluno.')
     .addTag(
       'Webhook de Pagamento',
@@ -86,36 +87,25 @@ export function setupSwagger(app: INestApplication, config: AppConfigService): s
     .addTag('WhatsApp', 'Webhook inbound autenticado pelo token da EvolutionAPI.')
     .addTag('Link Curto', 'Encurtador interno usado nas mensagens de WhatsApp.')
     .addTag('Health', 'Liveness/readiness da API e das dependências (DB, Redis).')
-    .addTag('Admin · Central de Controle', 'Operação diária do profissional CREF sobre os alunos.')
-    .addTag('Admin · Dashboard', 'Métricas agregadas de produto, IA e negócio.')
-    .addTag(
-      'Admin · Config de IA',
-      'Seleção de provedor/modelo de LLM e gate de dados de saúde (ADR-005-R2).',
-    )
+    .addTag('Admin · Central de Controle', 'Visões operacionais da equipe sobre alunos e sistema.')
+    .addTag('Admin · Fila de exceções', 'Casos que as políticas não resolveram, por conselho.')
+    .addTag('Admin · Agentes de IA', 'Tarefas, níveis de modelo, avaliações e custo dos agentes.')
+    .addTag('Admin · Governança do atendimento', 'Simulação das regras de atendimento da IA.')
+    .addTag('Estúdio de metodologia', 'Documentos de metodologia por domínio, versionados.')
     .addTag('Admin · Auditoria', 'Consulta ao log de auditoria imutável.')
-    .addTag(
-      'Admin · Catálogo de Exercícios',
-      'CRUD do catálogo de exercícios usado na geração de protocolo.',
-    )
-    .addTag('Admin · FAQ', 'Base de perguntas frequentes servida pelo AI Coach.')
+    .addTag('Admin · Catálogo de Exercícios', 'Catálogo de exercícios usado no planejamento.')
+    .addTag('Admin · FAQ', 'Base de perguntas frequentes servida pela IA.')
     .addTag('Admin · Financeiro', 'Despesas, custo de IA e indicadores financeiros internos.')
     .addTag(
       'Admin · Tópicos Proibidos',
       'Lista de tópicos fora do escopo seguro da IA (fallback para humano).',
     )
-    .addTag(
-      'Admin · Base de Conhecimento',
-      'Upload e indexação de material-fonte do RAG do AI Coach.',
-    )
+    .addTag('Admin · Base de Conhecimento', 'Upload e indexação de material-fonte para os agentes.')
     .addTag(
       'Admin · Guardrail L1',
       'Regras determinísticas de bloqueio antes de qualquer chamada de LLM.',
     )
     .addTag('Admin · Marketing', 'Atribuição de campanha e custo de mídia paga.')
-    .addTag(
-      'Admin · Metodologia',
-      'Regras de metodologia de treino usadas pelo motor determinístico.',
-    )
     .addTag('Admin · Parceiros', 'Cadastro de parceiros/academias (canal comercial B2B).')
     .build();
 

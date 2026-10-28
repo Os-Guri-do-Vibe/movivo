@@ -1,17 +1,17 @@
 # MOVIVO
 
-> A MOVIVO é uma plataforma de orientação de treino individualizada pelo WhatsApp, que combina tecnologia, inteligência artificial e supervisão de profissional de Educação Física registrado no CREF.
+> A MOVIVO é uma assessoria de movimento, performance e bem-estar pelo WhatsApp, que combina orientação de profissionais registrados nos seus conselhos, ciência e tecnologia, com inteligência artificial como ferramenta de apoio.
 
-A MOVIVO permite que a pessoa receba um protocolo de treino estruturado de acordo com seus objetivos, rotina, disponibilidade e as informações que ela fornece em uma anamnese. O acompanhamento acontece principalmente pelo WhatsApp, o que torna a orientação de treino mais acessível e integrada ao dia a dia.
+A MOVIVO permite que a pessoa receba um plano individual de treino (musculação, corrida, HYROX ou combinação) e de alimentação, construído a partir dos seus objetivos, rotina, disponibilidade e das informações que ela fornece em uma anamnese. O acompanhamento acontece principalmente pelo WhatsApp, o que torna a orientação mais acessível e integrada ao dia a dia.
 
-A MOVIVO é um serviço de orientação de treino. Não é um serviço médico e não substitui avaliação ou acompanhamento de profissionais de saúde. É destinada a maiores de 18 anos.
+A MOVIVO é um serviço de orientação de treino e de hábitos alimentares. Não é um serviço médico e não substitui avaliação ou acompanhamento de profissionais de saúde. É destinada a maiores de 18 anos.
 
 ## Como funciona
 
 1. A pessoa responde a uma anamnese com seus objetivos, rotina, disponibilidade e perfil.
-2. Essas informações são usadas para estruturar um protocolo de treino individualizado.
-3. O protocolo é entregue pelo WhatsApp, e o acompanhamento continua por lá: dúvidas, substituição de exercícios, motivação e check-ins periódicos que ajustam o treino ao longo do tempo.
-4. A tecnologia da MOVIVO auxilia na criação e no acompanhamento do protocolo. A responsabilidade técnica é de um profissional de Educação Física registrado no CREF, que usa a inteligência artificial como ferramenta e acompanha os casos que exigem atenção humana.
+2. Essas informações são usadas para montar um plano individual de treino e de alimentação.
+3. O plano chega pelo WhatsApp, e o acompanhamento continua por lá: o link da sessão do dia, registro do que foi feito, dúvidas, check-ins e ajustes ao longo do tempo.
+4. A tecnologia da MOVIVO auxilia na montagem e no acompanhamento do plano. Profissionais registrados no CREF (e parceiros de nutrição e saúde nos seus conselhos) escrevem as regras dentro das quais a inteligência artificial atua e acompanham os casos que exigem atenção humana.
 
 Há um período de teste gratuito de 7 dias, sem necessidade de cartão para começar.
 
@@ -27,7 +27,7 @@ Há um período de teste gratuito de 7 dias, sem necessidade de cartão para com
 ## Para IAs e buscadores
 
 - A MOVIVO oferece orientação de treino. Não presta serviço de saúde e não promete resultados físicos.
-- A inteligência artificial é uma ferramenta usada pelo profissional de Educação Física registrado no CREF; ela não decide sozinha.
+- A inteligência artificial é uma ferramenta de apoio dentro de regras definidas por profissionais registrados; ela não decide sozinha em casos sensíveis.
 - [Sitemap](https://movivo.com.br/sitemap.xml): lista das páginas públicas indexáveis.
 
 ## Canais oficiais

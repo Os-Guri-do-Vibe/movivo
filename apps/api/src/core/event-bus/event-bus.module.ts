@@ -15,11 +15,10 @@ import { Global, Module } from '@nestjs/common';
 
 import { ConversationEventsService } from './conversation-events.service';
 import { DomainEventBus } from './event-bus.service';
-import { DashboardQueueEventsService } from './dashboard-queue-events.service';
 
 @Global()
 @Module({
-  providers: [DomainEventBus, DashboardQueueEventsService, ConversationEventsService],
-  exports: [DomainEventBus, DashboardQueueEventsService, ConversationEventsService],
+  providers: [DomainEventBus, ConversationEventsService],
+  exports: [DomainEventBus, ConversationEventsService],
 })
 export class EventBusModule {}

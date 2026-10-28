@@ -33,10 +33,9 @@ import {
 } from '@nestjs/swagger';
 import {
   loginSchema,
-  mfaEnableSchema,
   mfaSetupResponseSchema,
   mfaSetupSchema,
-  mfaVerifySchema,
+  mfaChallengeCodeSchema,
 } from '@movivo/shared';
 import type { Request, Response } from 'express';
 
@@ -110,7 +109,7 @@ export class AuthController {
       'autenticador (ou um código de recuperação). Cada código TOTP vale uma única vez. 5 ' +
       'erros destroem o desafio; 10 erros em 15 min travam a conta para novos códigos (429).',
   })
-  @ApiBody({ schema: zodSchemaToOpenApi(mfaVerifySchema) })
+  @ApiBody({ schema: zodSchemaToOpenApi(mfaChallengeCodeSchema) })
   @ApiResponse({ status: 200, description: 'Sessão emitida (access no corpo, refresh no cookie).' })
   @ApiResponse({ status: 401, description: 'Código inválido ou desafio expirado.' })
   @ApiResponse({ status: 429, description: 'Conta travada por excesso de tentativas.' })
@@ -119,7 +118,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const input = parseBody(mfaVerifySchema, body ?? {});
+    const input = parseBody(mfaChallengeCodeSchema, body ?? {});
     const result = await this.auth.completeMfaLogin(
       input.challengeToken,
       input.code,
@@ -158,7 +157,7 @@ export class AuthController {
       'Valida o 1º código do app, ativa o MFA, emite a sessão e devolve os códigos de ' +
       'recuperação — **a única vez em que aparecem em claro**.',
   })
-  @ApiBody({ schema: zodSchemaToOpenApi(mfaEnableSchema) })
+  @ApiBody({ schema: zodSchemaToOpenApi(mfaChallengeCodeSchema) })
   @ApiResponse({ status: 200, description: 'MFA ativo; sessão emitida + `recoveryCodes`.' })
   @ApiResponse({ status: 401, description: 'Código inválido ou desafio expirado.' })
   @ApiResponse({ status: 429, description: 'Conta travada por excesso de tentativas.' })
@@ -167,7 +166,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const input = parseBody(mfaEnableSchema, body ?? {});
+    const input = parseBody(mfaChallengeCodeSchema, body ?? {});
     const result = await this.auth.enableMfa(input.challengeToken, input.code, accessMetaFrom(req));
     this.setRefreshCookie(res, result.refreshCookie, result.refreshExpiresAt);
     return {

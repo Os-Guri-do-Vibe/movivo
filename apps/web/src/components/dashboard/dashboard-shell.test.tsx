@@ -21,6 +21,8 @@ const ADMIN_CAPABILITIES = [
   'control_center.compliance.read',
   'control_center.audit.read',
   'control_center.admin.destructive.request',
+  'control_center.exceptions.read',
+  'control_center.agents.read',
 ] as const;
 
 describe('DashboardShell', () => {
@@ -88,7 +90,13 @@ describe('DashboardShell', () => {
 
   it('admin recebe todos os setores autorizados, incluindo alertas', () => {
     expect(navigationFor(ADMIN_CAPABILITIES).map((item) => item.label)).toEqual(
-      expect.arrayContaining(['Visão Geral', 'Base de Alunos', 'Alertas', 'Administração']),
+      expect.arrayContaining([
+        'Visão Geral',
+        'Base de Alunos',
+        'Fila de exceções',
+        'Agentes',
+        'Administração',
+      ]),
     );
   });
 
@@ -122,37 +130,29 @@ describe('DashboardShell', () => {
     ]);
   });
 
-  it('coloca Notificações logo abaixo de Visão Geral, só com leitura de saúde', () => {
-    const principal = navigationGroupsFor(ADMIN_CAPABILITIES)[0];
-    expect(principal?.label).toBeNull();
-    expect(principal?.items.map((item) => item.label)).toEqual(['Visão Geral', 'Notificações']);
-    expect(principal?.items[1]).toMatchObject({
-      href: '/dashboard/notificacoes',
-      badge: 'notifications',
-    });
-    // Mesmas capabilities do sino: leitura de alunos E de saúde.
-    expect(navigationFor(['control_center.students.read']).map((item) => item.label)).not.toContain(
-      'Notificações',
-    );
-  });
-
-  it('coloca Conversas, Fila e Alertas na área de alunos, só com leitura de saúde', () => {
+  it('coloca Conversas e a Fila de exceções na área de alunos, cada uma com a sua capability', () => {
     const alunos = navigationGroupsFor(ADMIN_CAPABILITIES).find(
       (group) => group.label === 'Alunos',
     );
     expect(alunos?.items.map((item) => item.label)).toEqual([
       'Base de Alunos',
       'Conversas',
-      'Fila do Profissional',
-      'Alertas',
+      'Fila de exceções',
     ]);
-    // Suporte lê a base de alunos, mas não o conteúdo das conversas (dado de saúde).
-    expect(navigationFor(['control_center.students.read']).map((item) => item.label)).not.toContain(
-      'Conversas',
+    expect(alunos?.items[2]).toMatchObject({ href: '/dashboard/fila', badge: 'exceptions' });
+    // Suporte lê a base de alunos, mas não o conteúdo das conversas (dado de saúde) nem a fila.
+    const suporte = navigationFor(['control_center.students.read']).map((item) => item.label);
+    expect(suporte).not.toContain('Conversas');
+    expect(suporte).not.toContain('Fila de exceções');
+  });
+
+  it('Agentes exige a capability própria', () => {
+    expect(navigationFor(['control_center.agents.read']).map((item) => item.label)).toContain(
+      'Agentes',
     );
-    expect(navigationFor(['control_center.students.read']).map((item) => item.label)).not.toContain(
-      'Alertas',
-    );
+    expect(
+      navigationFor(['control_center.ai.config.read']).map((item) => item.label),
+    ).not.toContain('Agentes');
   });
 
   describe('altura da tela', () => {
@@ -160,7 +160,7 @@ describe('DashboardShell', () => {
       route.pathname = '/dashboard/analytics';
     });
 
-    // Sem leitura de saúde não há provider de notificações (que abre um EventSource).
+    // Sem a capability da fila não há provider de contagem (que faz polling).
     const shell = () =>
       render(
         <DashboardShell

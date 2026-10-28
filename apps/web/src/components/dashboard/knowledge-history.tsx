@@ -4,7 +4,7 @@ import { ExternalLink, History } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback } from 'react';
 
-import { getKnowledgeDocuments, getMethodology } from '@/lib/control-center-api';
+import { getKnowledgeDocuments } from '@/lib/control-center-api';
 
 import { ResourceState, useControlCenterResource } from './control-center-ui';
 
@@ -17,13 +17,7 @@ function dateLabel(value: string): string {
 }
 
 export function KnowledgeHistoryPanel({ canReadAudit = false }: { canReadAudit?: boolean }) {
-  const load = useCallback(async (signal?: AbortSignal) => {
-    const [knowledge, methodology] = await Promise.all([
-      getKnowledgeDocuments(signal),
-      getMethodology(signal),
-    ]);
-    return { knowledge, methodology };
-  }, []);
+  const load = useCallback((signal?: AbortSignal) => getKnowledgeDocuments(signal), []);
   const { data, error, forbidden, loading, refresh } = useControlCenterResource(load);
 
   if (!data) {
@@ -38,17 +32,7 @@ export function KnowledgeHistoryPanel({ canReadAudit = false }: { canReadAudit?:
   }
 
   const events = [
-    ...data.methodology.data.versions.map((version) => ({
-      id: `methodology-${version.id}`,
-      date:
-        version.statusChangedAt ?? version.publishedAt ?? version.reviewedAt ?? version.createdAt,
-      type: 'Metodologia',
-      title: `Versão ${version.version} · ${version.status}`,
-      actor: version.reviewedBy ?? version.createdBy ?? 'Responsável não informado',
-      note: version.changeNote ?? 'Sem nota registrada',
-      technicalId: version.id,
-    })),
-    ...data.knowledge.data.documents.map((document) => ({
+    ...data.data.documents.map((document) => ({
       id: `document-${document.id}`,
       date: document.statusUpdatedAt ?? document.reviewedAt ?? document.createdAt,
       type: 'Documento',
@@ -68,8 +52,8 @@ export function KnowledgeHistoryPanel({ canReadAudit = false }: { canReadAudit?:
             Versões e auditoria
           </h2>
           <p className="mt-2 max-w-3xl text-label text-muted-foreground">
-            Linha do tempo consolidada de metodologia e documentos. IDs e hashes permanecem
-            disponíveis para investigação técnica.
+            Linha do tempo consolidada de documentos. IDs e hashes permanecem disponíveis para
+            investigação técnica.
           </p>
         </div>
         {canReadAudit ? (

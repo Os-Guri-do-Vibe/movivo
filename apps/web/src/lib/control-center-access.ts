@@ -84,8 +84,8 @@ const LANDING_BY_ROLE: Partial<
   Record<DashboardRole, { path: string; requires: readonly DashboardCapability[] }>
 > = {
   PROFESSIONAL: {
-    path: '/dashboard/educacao-fisica',
-    requires: [Capability.STUDENTS_READ, Capability.STUDENTS_HEALTH_READ],
+    path: '/dashboard/fila',
+    requires: [Capability.EXCEPTIONS_READ],
   },
   FINANCE: { path: '/dashboard/financeiro', requires: [Capability.FINANCE_READ] },
   MARKETING: { path: '/dashboard/analytics', requires: [Capability.MARKETING_READ] },
