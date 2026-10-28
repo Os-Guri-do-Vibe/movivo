@@ -23,6 +23,7 @@ import { ExternalLogForm } from './external-log-form';
 import { FinishForm } from './finish-form';
 import { dateLabel } from './format';
 import { StrengthSession } from './strength-session';
+import { StudentNav } from './student-nav';
 
 const STATUS_LABELS: Record<TrainingDaySession['status'], string> = {
   PLANNED: 'Planejado',
@@ -172,6 +173,7 @@ export function TrainingDayView({ date }: { date?: string }) {
 
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-8 px-6 py-8">
+      <StudentNav current="/hoje" />
       <section className="flex flex-col gap-2">
         <h1 className="text-h2 font-semibold">
           {day.firstName ? `${day.firstName}, seu treino` : 'Seu treino'}

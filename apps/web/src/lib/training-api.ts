@@ -82,6 +82,17 @@ export async function uploadActivityFile(executionId: string, file: File): Promi
   return executionViewSchema.parse(payload);
 }
 
+/** Print do relógio/app: a visão propõe as métricas e o aluno confirma. */
+export async function uploadScreenshot(executionId: string, file: File): Promise<ExecutionView> {
+  const form = new FormData();
+  form.set('file', file, file.name);
+  const payload = (await request(`/executions/${encodeURIComponent(executionId)}/screenshot`, {
+    method: 'POST',
+    body: form,
+  })) as { view?: unknown } | null;
+  return executionViewSchema.parse(payload?.view);
+}
+
 export async function finishExecution(
   executionId: string,
   body: FinishExecutionRequest,

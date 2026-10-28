@@ -5,7 +5,7 @@ import { useRef, useState } from 'react';
 import type { EnduranceMetrics, ExecutionView, SessionContent } from '@movivo/shared';
 
 import { Button } from '@/components/ui/button';
-import { saveMetrics, uploadActivityFile } from '@/lib/training-api';
+import { saveMetrics, uploadActivityFile, uploadScreenshot } from '@/lib/training-api';
 
 import { durationLabel, enduranceLines, paceLabel } from './format';
 
@@ -67,6 +67,7 @@ export function EnduranceSession({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const imageInput = useRef<HTMLInputElement>(null);
 
   async function run(action: () => Promise<ExecutionView>) {
     setBusy(true);
@@ -151,6 +152,15 @@ export function EnduranceSession({
             >
               Enviar arquivo .fit ou .gpx
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="ml-2"
+              disabled={busy}
+              onClick={() => imageInput.current?.click()}
+            >
+              Enviar print do relógio
+            </Button>
           </div>
           <div className="flex flex-wrap items-end gap-3">
             <label className="flex flex-col gap-1 text-label">
@@ -195,6 +205,18 @@ export function EnduranceSession({
         onChange={(event) => {
           const file = event.target.files?.[0];
           if (file) void run(() => uploadActivityFile(executionId, file));
+          event.target.value = '';
+        }}
+      />
+      <input
+        ref={imageInput}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="sr-only"
+        aria-label="Print do relógio ou do aplicativo"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void run(() => uploadScreenshot(executionId, file));
           event.target.value = '';
         }}
       />

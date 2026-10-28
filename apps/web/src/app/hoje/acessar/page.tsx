@@ -18,6 +18,8 @@ export default function TrainingAccessPage() {
   const [token, setToken] = useState('');
   // Registro tardio: o link abre o diário no dia do treino (`#token=...&date=AAAA-MM-DD`).
   const [date, setDate] = useState('');
+  // Destino depois do acesso (só páginas do aluno; nunca um endereço vindo do link).
+  const [next, setNext] = useState('/hoje');
   const [firstName, setFirstName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -29,6 +31,8 @@ export default function TrainingAccessPage() {
     const value = hash.get('token') ?? '';
     const requestedDate = hash.get('date') ?? '';
     if (/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) setDate(requestedDate);
+    const requestedNext = hash.get('next') ?? '';
+    if (['/hoje', '/alimentacao', '/evolucao'].includes(requestedNext)) setNext(requestedNext);
     // React executa Effects duas vezes no Strict Mode de desenvolvimento. Depois da
     // primeira passagem o fragmento já foi removido; não podemos apagar o token em memória.
     if (value) {
@@ -49,7 +53,7 @@ export default function TrainingAccessPage() {
     return existing.ok;
   }
 
-  const workoutPath = date ? `/hoje?date=${date}` : '/hoje';
+  const workoutPath = date ? `${next}?date=${date}` : next;
 
   async function openWorkout() {
     if (!token) {

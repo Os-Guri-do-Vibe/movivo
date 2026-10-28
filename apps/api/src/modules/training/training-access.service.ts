@@ -32,7 +32,7 @@ export class TrainingAccessService {
   async createMagicLink(
     userId: string,
     workoutSessionId?: string,
-    options: { date?: string; path?: string } = {},
+    options: { date?: string; path?: string; next?: string } = {},
   ): Promise<string> {
     const token = opaqueToken();
     await this.db.runAsSystem((tx) =>
@@ -45,7 +45,8 @@ export class TrainingAccessService {
       }),
     );
     const date = options.date ? `&date=${options.date}` : '';
-    return `${this.config.whatsapp.publicSiteUrl}${options.path ?? '/treino/acessar'}#token=${token}${date}`;
+    const next = options.next ? `&next=${encodeURIComponent(options.next)}` : '';
+    return `${this.config.whatsapp.publicSiteUrl}${options.path ?? '/treino/acessar'}#token=${token}${date}${next}`;
   }
 
   /**
