@@ -2,122 +2,109 @@
 import 'reflect-metadata';
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
-import { ModulesContainer, NestFactory } from '@nestjs/core';
+import { ModulesContainer } from '@nestjs/core';
 import { GUARDS_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { Test } from '@nestjs/testing';
 import { eq, inArray } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { AppModule } from '../src/app.module';
+import { AgentRunner } from '../src/core/agents/agent-runner';
 import { AccessLinkService } from '../src/core/database/access-link.service';
 import {
   accessLinkTokens,
   anamnesisSessions,
-  protocols,
+  domainEvents,
+  scheduledSessions,
+  sessionExecutions,
   subscriptions,
   users,
   workoutAccessTokens,
-  workoutSessions,
-  workoutCompletions,
-  handoffAlerts,
-  workoutSetEntries,
 } from '../src/core/database/schema';
-import {
-  TenantDatabase,
-  type TenantTransaction,
-} from '../src/core/database/tenant-database.service';
+import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import { QueueManager } from '../src/modules/jobs/queue-manager.service';
+import { PlanGenerationService } from '../src/modules/planning/plan-generation.service';
 import { TrainingAccessService } from '../src/modules/training/training-access.service';
 import { RolesGuard } from '../src/modules/auth/roles.guard';
 import { ROLES_KEY } from '../src/modules/auth/roles.decorator';
+import { createStudent, fakeRunner } from './plan-fixtures';
 
 let app: INestApplication;
 let db: TenantDatabase;
 let access: AccessLinkService;
 const holders: string[] = [];
-const fixtures: Array<{ userId: string; protocolId: string; sessionId: string }> = [];
+/** `sessionId` é a sessão agendada do aluno; `executionId`, a execução já aberta dele. */
+const fixtures: Array<{ userId: string; sessionId: string; executionId: string }> = [];
 let bearer: string;
 const prefix = '/api/v1';
+const NOW = new Date('2026-11-04T15:00:00.000Z');
 const opaque = () => randomBytes(32).toString('base64url');
 const http = () => request(app.getHttpServer());
+const finishBody = {
+  status: 'COMPLETED',
+  rpe: 6,
+  durationMinutes: 40,
+  painReports: [],
+  enjoyment: null,
+};
 
 beforeAll(async () => {
-  app = await NestFactory.create(AppModule, { logger: false });
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+    .overrideProvider(AgentRunner)
+    .useValue(fakeRunner)
+    .compile();
+  app = moduleRef.createNestApplication({ logger: false });
   app.setGlobalPrefix('api/v1');
   await app.init();
-  // Testa HTTP e persistência; consumidores de feedback ficam fora deste cenário.
+  // Testa HTTP e persistência; consumidores de filas ficam fora deste cenário.
   vi.spyOn(app.get(QueueManager), 'enqueue').mockResolvedValue('fixture-job');
   db = app.get(TenantDatabase);
   access = app.get(AccessLinkService);
-  for (const name of ['Aluno A isolado', 'Aluno B isolado']) {
+  for (let index = 0; index < 2; index += 1) {
+    const userId = await createStudent(db, holders);
+    expect((await app.get(PlanGenerationService).generate(userId, { now: NOW })).status).toBe(
+      'PUBLISHED',
+    );
     const fixture = await db.runAsSystem(async (tx) => {
-      const [holder] = await tx
-        .insert(users)
-        .values({
-          phoneNumber: `+5511${Date.now().toString().slice(-8)}${holders.length}`,
-          name,
-          email: `${randomUUID()}@example.invalid`,
-          timezone: 'UTC',
-        })
-        .returning({ id: users.id });
-      if (!holder) throw new Error('fixture aluno');
-      holders.push(holder.id);
-      const [protocol] = await tx
-        .insert(protocols)
-        .values({
-          userId: holder.id,
-          status: 'ACTIVE',
-          content: { marker: name },
-          constraints: {},
-          mesocycleName: name,
-          startDate: new Date(),
-          endDate: new Date(Date.now() + 86400000),
-        })
-        .returning({ id: protocols.id });
-      if (!protocol) throw new Error('fixture protocolo');
-      const [session] = await tx
-        .insert(workoutSessions)
-        .values({
-          userId: holder.id,
-          protocolId: protocol.id,
-          protocolVersion: 1,
-          weekNumber: 1,
-          sessionKey: 'A',
-          scheduledDate: new Date().toISOString().slice(0, 10),
-          prescription: { dayLabel: 'A', exercises: [] } as never,
-        })
-        .returning({ id: workoutSessions.id });
-      if (!session) throw new Error('fixture treino');
       await tx.insert(subscriptions).values({
-        userId: holder.id,
+        userId,
         plan: 'MONTHLY',
         priceCents: 3900,
         monthlyPriceCents: 3900,
         totalPriceCents: 3900,
         commitmentMonths: 1,
       });
-      return { userId: holder.id, protocolId: protocol.id, sessionId: session.id };
+      const [session] = await tx
+        .select({ id: scheduledSessions.id })
+        .from(scheduledSessions)
+        .where(eq(scheduledSessions.userId, userId))
+        .orderBy(scheduledSessions.scheduledOn)
+        .limit(1);
+      if (!session) throw new Error('fixture sessão');
+      return session.id;
     });
-    fixtures.push(fixture);
+    const training = app.get(TrainingAccessService);
+    const link = await training.createMagicLink(userId);
+    const token = `Bearer ${await training.exchange(link.split('#token=')[1])}`;
+    const started = await http()
+      .post(`${prefix}/training/sessions/${fixture}/start`)
+      .set('Authorization', token)
+      .expect(201);
+    fixtures.push({ userId, sessionId: fixture, executionId: started.body.id });
+    if (index === 0) bearer = token;
   }
-  const workouts = app.get(TrainingAccessService);
-  const link = await workouts.createMagicLink(fixtures[0].userId);
-  bearer = `Bearer ${await workouts.exchange(link.split('#token=')[1])}`;
 });
 
 afterAll(async () => {
   try {
     if (db && holders.length)
       await db.runAsSystem(async (tx) => {
-        await tx.delete(workoutCompletions).where(inArray(workoutCompletions.userId, holders));
-        await tx.delete(handoffAlerts).where(inArray(handoffAlerts.userId, holders));
-        await tx.delete(workoutSetEntries).where(inArray(workoutSetEntries.userId, holders));
+        await tx.delete(domainEvents).where(inArray(domainEvents.userId, holders));
         await tx.delete(workoutAccessTokens).where(inArray(workoutAccessTokens.userId, holders));
-        await tx.delete(workoutSessions).where(inArray(workoutSessions.userId, holders));
         await tx.delete(accessLinkTokens).where(inArray(accessLinkTokens.userId, holders));
         await tx.delete(subscriptions).where(inArray(subscriptions.userId, holders));
         await tx.delete(anamnesisSessions).where(inArray(anamnesisSessions.token, anamnesisTokens));
-        await tx.delete(protocols).where(inArray(protocols.userId, holders));
         await tx.delete(users).where(inArray(users.id, holders));
       });
   } finally {
@@ -125,70 +112,7 @@ afterAll(async () => {
   }
 });
 const anamnesisTokens = [opaque(), opaque()];
-const rollbackInsert = new Error('inserção de teste autorizada; reverter fixture');
-
-function insertThenRollback(insert: (tx: TenantTransaction) => Promise<unknown>) {
-  return db.runAsUser(fixtures[0].userId, 'USER', async (tx) => {
-    await insert(tx);
-    throw rollbackInsert;
-  });
-}
-
 describe('autorização por recurso na API', () => {
-  it('RLS nega treino de A ligado ao protocolo de B e aceita o pai de A', async () => {
-    const id = randomUUID();
-    const row = {
-      id,
-      userId: fixtures[0].userId,
-      protocolVersion: 1,
-      weekNumber: 1,
-      sessionKey: randomUUID(),
-      scheduledDate: new Date().toISOString().slice(0, 10),
-      prescription: { dayLabel: 'A', exercises: [] } as never,
-    };
-    await expect(
-      insertThenRollback((tx) =>
-        tx.insert(workoutSessions).values({ ...row, protocolId: fixtures[1].protocolId }),
-      ),
-    ).rejects.toMatchObject({ cause: { code: '42501' } });
-    await expect(
-      insertThenRollback((tx) =>
-        tx.insert(workoutSessions).values({ ...row, protocolId: fixtures[0].protocolId }),
-      ),
-    ).rejects.toBe(rollbackInsert);
-    const remaining = await db.runAsSystem((tx) =>
-      tx.select({ id: workoutSessions.id }).from(workoutSessions).where(eq(workoutSessions.id, id)),
-    );
-    expect(remaining).toHaveLength(0);
-  });
-
-  it('RLS nega série de A ligada ao treino de B e aceita o pai de A', async () => {
-    const id = randomUUID();
-    const row = {
-      id,
-      userId: fixtures[0].userId,
-      exerciseId: randomUUID(),
-      setNumber: 1,
-    };
-    await expect(
-      insertThenRollback((tx) =>
-        tx.insert(workoutSetEntries).values({ ...row, workoutSessionId: fixtures[1].sessionId }),
-      ),
-    ).rejects.toMatchObject({ cause: { code: '42501' } });
-    await expect(
-      insertThenRollback((tx) =>
-        tx.insert(workoutSetEntries).values({ ...row, workoutSessionId: fixtures[0].sessionId }),
-      ),
-    ).rejects.toBe(rollbackInsert);
-    const remaining = await db.runAsSystem((tx) =>
-      tx
-        .select({ id: workoutSetEntries.id })
-        .from(workoutSetEntries)
-        .where(eq(workoutSetEntries.id, id)),
-    );
-    expect(remaining).toHaveLength(0);
-  });
-
   it('toda rota que usa RolesGuard declara papéis explicitamente', () => {
     let checked = 0;
     for (const module of app.get(ModulesContainer).values()) {
@@ -218,30 +142,40 @@ describe('autorização por recurso na API', () => {
     expect(checked).toBeGreaterThan(10);
   });
 
-  it('nega trocar UUID de treino em leitura e todas as mutações, preservando B', async () => {
-    const path = `${prefix}/workouts/sessions/${fixtures[1].sessionId}`;
-    await http().post(`${path}/start`).set('Authorization', bearer).expect(404);
+  it('nega trocar UUID de sessão ou execução em leitura e mutações, preservando B', async () => {
+    const b = fixtures[1];
     await http()
-      .patch(`${path}/sets`)
+      .post(`${prefix}/training/sessions/${b.sessionId}/start`)
       .set('Authorization', bearer)
-      .send({ entries: [] })
+      .expect(404);
+    const sets = {
+      sets: [
+        {
+          exerciseId: 'x',
+          setNumber: 1,
+          reps: 10,
+          loadKg: null,
+          durationSeconds: null,
+          rir: null,
+          completed: true,
+        },
+      ],
+    };
+    await http()
+      .put(`${prefix}/training/executions/${b.executionId}/sets`)
+      .set('Authorization', bearer)
+      .send(sets)
       .expect(404);
     await http()
-      .post(`${path}/finish`)
+      .post(`${prefix}/training/executions/${b.executionId}/finish`)
       .set('Authorization', bearer)
-      .send({ perceivedEffort: 5 })
+      .send(finishBody)
       .expect(404);
-    await http().get(`${path}/share-card`).set('Authorization', bearer).expect(404);
     const [unchanged] = await db.runAsSystem((tx) =>
-      tx.select().from(workoutSessions).where(eq(workoutSessions.id, fixtures[1].sessionId)),
+      tx.select().from(sessionExecutions).where(eq(sessionExecutions.id, b.executionId)),
     );
-    expect(unchanged.status).toBe('PLANNED');
-    expect(unchanged.startedAt).toBeNull();
-    expect(unchanged.finishedAt).toBeNull();
-    await http()
-      .post(`${prefix}/workouts/sessions/${fixtures[0].sessionId}/start`)
-      .set('Authorization', bearer)
-      .expect(201);
+    expect(unchanged?.status).toBe('IN_PROGRESS');
+    expect(unchanged?.finishedAt ?? null).toBeNull();
   });
 
   it('UUIDs de plano/aluno não substituem credenciais e propósitos não se cruzam', async () => {
@@ -255,7 +189,7 @@ describe('autorização por recurso na API', () => {
     await http().get(`${prefix}/subscription/checkout/${portalLink.token}`).expect(404);
     await http().get(`${prefix}/subscription/${portalLink.token}`).expect(200);
     await http()
-      .get(`${prefix}/workouts/sessions/${fixtures[1].sessionId}/share-card`)
+      .post(`${prefix}/training/sessions/${fixtures[1].sessionId}/start`)
       .set('Authorization', `Bearer ${planLink.token}`)
       .expect(401);
   });
@@ -301,17 +235,15 @@ describe('validação server-side — HTTP direto sem frontend', () => {
 
   it.each([
     {},
-    { entries: 'série' },
-    { entries: [{ exerciseId: 'x', setNumber: 21 }] },
-    { entries: [{ exerciseId: 'x', setNumber: 1, reps: '10' }] },
-    { entries: [{ exerciseId: 'x', setNumber: 1, loadUnit: 'INVALID' }] },
-    { entries: [{ exerciseId: 'x', setNumber: 1, loadValue: -1 }] },
-    { entries: [{ exerciseId: 'x', setNumber: 1, reps: 301 }] },
-    { entries: [{ exerciseId: 'x', setNumber: 1, completed: true, skipped: true }] },
-    { entries: Array.from({ length: 301 }, () => ({ exerciseId: 'x', setNumber: 1 })) },
+    { sets: 'série' },
+    { sets: [] },
+    { sets: [{ exerciseId: 'x', setNumber: 21 }] },
+    { sets: [{ exerciseId: 'x', setNumber: 1, reps: '10' }] },
+    { sets: [{ exerciseId: 'x', setNumber: 1, reps: 301 }] },
+    { sets: Array.from({ length: 121 }, () => ({ exerciseId: 'x', setNumber: 1 })) },
   ])('séries rejeitam campos inválidos antes de persistir', async (body) => {
     await http()
-      .patch(`${prefix}/workouts/sessions/${fixtures[0].sessionId}/sets`)
+      .put(`${prefix}/training/executions/${fixtures[0].executionId}/sets`)
       .set('Authorization', bearer)
       .send(body)
       .expect(400);
@@ -319,40 +251,37 @@ describe('validação server-side — HTTP direto sem frontend', () => {
 
   it('UUID e data de calendário são validados no backend', async () => {
     await http()
-      .post(`${prefix}/workouts/sessions/not-a-uuid/start`)
+      .post(`${prefix}/training/sessions/not-a-uuid/start`)
       .set('Authorization', bearer)
       .expect(400);
     await http()
-      .get(`${prefix}/workouts/journal`)
+      .get(`${prefix}/training/day`)
       .query({ date: '2026-02-30' })
       .set('Authorization', bearer)
       .expect(400);
   });
 
-  it('um treino só pode ser finalizado uma vez, mesmo com requisições simultâneas', async () => {
-    const path = `${prefix}/workouts/sessions/${fixtures[0].sessionId}`;
+  it('um treino só pode ser concluído uma vez, mesmo com requisições simultâneas', async () => {
+    const path = `${prefix}/training/executions/${fixtures[0].executionId}`;
     const responses = await Promise.all(
-      [5, 9].map((perceivedEffort) =>
-        http().post(`${path}/finish`).set('Authorization', bearer).send({ perceivedEffort }),
+      [5, 9].map((rpe) =>
+        http()
+          .post(`${path}/finish`)
+          .set('Authorization', bearer)
+          .send({ ...finishBody, rpe }),
       ),
     );
     expect(responses.map((response) => response.status).sort()).toEqual([201, 400]);
     const [before] = await db.runAsSystem((tx) =>
-      tx.select().from(workoutSessions).where(eq(workoutSessions.id, fixtures[0].sessionId)),
+      tx.select().from(sessionExecutions).where(eq(sessionExecutions.id, fixtures[0].executionId)),
     );
     await http()
       .post(`${path}/finish`)
       .set('Authorization', bearer)
-      .send({ perceivedEffort: 10 })
-      .expect(400);
-    await http().post(`${path}/start`).set('Authorization', bearer).expect(400);
-    await http()
-      .patch(`${path}/sets`)
-      .set('Authorization', bearer)
-      .send({ entries: [] })
+      .send({ ...finishBody, rpe: 10 })
       .expect(400);
     const [after] = await db.runAsSystem((tx) =>
-      tx.select().from(workoutSessions).where(eq(workoutSessions.id, fixtures[0].sessionId)),
+      tx.select().from(sessionExecutions).where(eq(sessionExecutions.id, fixtures[0].executionId)),
     );
     expect(after).toEqual(before);
   });

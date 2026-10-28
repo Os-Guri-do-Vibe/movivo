@@ -476,11 +476,13 @@ export class ExecutionService {
     if (signals.length > 0) await this.safety.raiseIn(tx, userId, signals, 'RULE');
   }
 
+  /** Abre a execução para escrita; a trava de linha serializa conclusões simultâneas. */
   private async open(tx: TenantTransaction, userId: string, executionId: string) {
     const [execution] = await tx
       .select()
       .from(sessionExecutions)
-      .where(and(eq(sessionExecutions.id, executionId), eq(sessionExecutions.userId, userId)));
+      .where(and(eq(sessionExecutions.id, executionId), eq(sessionExecutions.userId, userId)))
+      .for('update');
     if (!execution) throw new NotFoundException();
     if (execution.status !== 'IN_PROGRESS') {
       throw new BadRequestException('Este treino já foi concluído.');
