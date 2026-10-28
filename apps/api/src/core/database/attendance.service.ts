@@ -5,15 +5,15 @@ import { users } from './schema';
 import { TenantDatabase } from './tenant-database.service';
 
 /**
- * Pausa do atendimento automático do AI Coach, por titular (aba "Conversas" do painel).
+ * Pausa do atendimento automático, por titular (aba "Conversas" do painel).
  *
  * Fica no CORE porque três domínios precisam do mesmo estado e nenhum pode importar o outro
- * (`ARQUITETURA.md` §12.5): o inbound do WhatsApp (não enfileira a IA), o worker do Coach
+ * (`ARQUITETURA.md` §12.5): o inbound do WhatsApp (não enfileira a IA), o worker da IA
  * (descarta um job já enfileirado) e o painel (liga/desliga). Pausado, a mensagem do aluno é
  * só registrada no histórico e quem responde é um humano.
  */
 @Injectable()
-export class CoachAttendanceService {
+export class AttendanceService {
   constructor(private readonly db: TenantDatabase) {}
 
   async isPaused(userId: string): Promise<boolean> {
@@ -21,7 +21,7 @@ export class CoachAttendanceService {
       tx
         .select({ id: users.id })
         .from(users)
-        .where(and(eq(users.id, userId), isNotNull(users.coachPausedAt)))
+        .where(and(eq(users.id, userId), isNotNull(users.attendancePausedAt)))
         .limit(1),
     );
     return rows.length > 0;
@@ -37,14 +37,14 @@ export class CoachAttendanceService {
         .update(users)
         .set(
           paused
-            ? { coachPausedAt: new Date(), updatedAt: new Date() }
-            : { coachPausedAt: null, updatedAt: new Date() },
+            ? { attendancePausedAt: new Date(), updatedAt: new Date() }
+            : { attendancePausedAt: null, updatedAt: new Date() },
         )
         .where(
           and(
             eq(users.id, userId),
             eq(users.role, 'USER'),
-            paused ? isNull(users.coachPausedAt) : isNotNull(users.coachPausedAt),
+            paused ? isNull(users.attendancePausedAt) : isNotNull(users.attendancePausedAt),
           ),
         )
         .returning({ id: users.id }),

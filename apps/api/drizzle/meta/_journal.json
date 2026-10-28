@@ -624,6 +624,20 @@
       "when": 1793217032364,
       "tag": "0088_arquivo_e_corte_do_legado",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1793217547050,
+      "tag": "0089_limpeza_de_colunas_do_legado",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1793218144055,
+      "tag": "0090_atendimento_automatico_e_origem_da_mensagem",
+      "breakpoints": true
     }
   ]
 }

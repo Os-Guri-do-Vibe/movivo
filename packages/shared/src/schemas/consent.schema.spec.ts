@@ -10,10 +10,10 @@ import {
 } from './consent.schema';
 
 describe('consentimento versionado (Alexandre §5 — onboarding v2)', () => {
-  it('preserva a v1 histórica e publica a v3 de saúde com escopo ampliado', () => {
+  it('preserva a v1 histórica e publica a v4 de saúde para o plano integrado', () => {
     expect(HEALTH_DATA_CONSENT_V1.version).toBe('consent-health-2026-07-v1');
     expect(HEALTH_DATA_CONSENT_V1.body.join(' ')).not.toContain('REVOGAR CONSENTIMENTO DE SAÚDE');
-    expect(CONSENT_TEXTS.HEALTH_DATA.version).toBe('consent-health-2026-08-v3');
+    expect(CONSENT_TEXTS.HEALTH_DATA.version).toBe('consent-health-2026-10-v4');
     const body = CONSENT_TEXTS.HEALTH_DATA.body.join(' ');
     expect(body).toContain('REVOGAR CONSENTIMENTO DE SAÚDE');
     // Escopo novo da v2 da anamnese: sem estes termos, o consentimento não cobre o que se coleta.
@@ -22,9 +22,9 @@ describe('consentimento versionado (Alexandre §5 — onboarding v2)', () => {
   });
 
   it('publica as versões da Sprint 6 dos demais tipos', () => {
-    expect(CONSENT_TEXTS.TERMS_OF_SERVICE.version).toBe('terms-2026-09-v1');
+    expect(CONSENT_TEXTS.TERMS_OF_SERVICE.version).toBe('terms-2026-10-v2');
     expect(CONSENT_TEXTS.MARKETING.version).toBe('consent-marketing-2026-08-v3');
-    expect(CONSENT_TEXTS.AI_DISCLOSURE.version).toBe('ai-disclosure-2026-08-v1');
+    expect(CONSENT_TEXTS.AI_DISCLOSURE.version).toBe('ai-disclosure-2026-10-v2');
   });
 
   it('mantém AI_DISCLOSURE como ciência (nunca "Autorizo") e não revogável', () => {
@@ -45,12 +45,18 @@ describe('consentimento versionado (Alexandre §5 — onboarding v2)', () => {
     ].join(' ');
 
     expect(visibleCopy).not.toMatch(/[—–]/u);
-    expect(CONSENT_TEXTS.HEALTH_DATA.body.join(' ')).toContain(
-      'a decisão e a supervisão são sempre do profissional',
-    );
+    const health = CONSENT_TEXTS.HEALTH_DATA.body.join(' ');
+    expect(health).toContain('ferramenta de apoio');
+    expect(health).toContain('analisados por uma pessoa');
+    expect(health).toContain('pedir revisão humana');
     expect(CONSENT_TEXTS.AI_DISCLOSURE.body.join(' ')).toContain(
-      'ela nunca decide sozinha e nunca substitui o profissional',
+      'ela nunca substitui o profissional',
     );
+    expect(
+      Object.values(CONSENT_TEXTS)
+        .flatMap((text) => text.body)
+        .join(' '),
+    ).not.toMatch(/[—–]|diagnóstico clínico|resultado garantido/u);
   });
 
   it('tem 3 obrigatórios e marketing opcional', () => {
@@ -63,7 +69,7 @@ describe('consentimento versionado (Alexandre §5 — onboarding v2)', () => {
   });
 
   it('mantém o aviso de WhatsApp fora do enum de consentimento', () => {
-    expect(WHATSAPP_OPERATIONAL_NOTICE.version).toBe('aviso-whatsapp-operacional-2026-08-v2');
+    expect(WHATSAPP_OPERATIONAL_NOTICE.version).toBe('aviso-whatsapp-operacional-2026-10-v3');
     expect(Object.keys(CONSENT_TEXTS)).not.toContain('WHATSAPP_OPERATIONAL_NOTICE');
     const parsed = recordConsentsSchema.safeParse({
       consents: [{ type: 'WHATSAPP_OPERATIONAL_NOTICE', version: 'x', accepted: true }],

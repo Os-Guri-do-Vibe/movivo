@@ -7,7 +7,7 @@
  * ## O que NÃO está aqui, de propósito (fora do escopo da US-0.4)
  *  - **Particionamento mensal por `created_at`** (Rafael §7.3). O `drizzle-kit`
  *    não gera `PARTITION BY` a partir do schema; a partição entra por migração
- *    SQL manual na sprint do AI Coach, junto com o job que cria a partição do
+ *    SQL manual na sprint da IA, junto com o job que cria a partição do
  *    mês seguinte. Por isso `created_at` já nasce `NOT NULL` e é coluna de
  *    índice — quando a partição chegar, ela é a chave, e nada aqui precisa mudar.
  *  - **Índice HNSW / coluna de embedding**: pertence à tabela `knowledge_base`
@@ -20,7 +20,7 @@ import { primaryKeyColumn, timestampColumns, userIdColumn } from './_shared';
 import { messageDirectionEnum, messageTypeEnum } from './enums';
 import { users } from './users';
 
-export type ConversationOrigin = 'STUDENT' | 'COACH' | 'SYSTEM' | 'PROFESSIONAL';
+export type ConversationOrigin = 'STUDENT' | 'AGENT' | 'SYSTEM' | 'PROFESSIONAL';
 export type ConversationMediaStatus = 'PENDING' | 'READY' | 'FAILED';
 
 export const conversations = pgTable(
@@ -63,7 +63,7 @@ export const conversations = pgTable(
     /** Modelo usado, após o gate neutro da ADR-005-R2. */
     modelUsed: varchar('model_used', { length: 50 }),
 
-    /** Latência de geração; alimenta o SLO de p95 ≤ 30s do AI Coach (§8). */
+    /** Latência de geração; alimenta o SLO de p95 ≤ 30s da IA (§8). */
     latencyMs: integer('latency_ms'),
 
     /**
@@ -74,7 +74,7 @@ export const conversations = pgTable(
     validationPassed: boolean('validation_passed'),
 
     /**
-     * Quem escreveu a mensagem (achado 2026-10-13): o Coach precisa reler a conversa inteira
+     * Quem escreveu a mensagem (achado 2026-10-13): a IA precisa reler a conversa inteira
      * (inclusive a pergunta automática que ele próprio mandou e a mensagem do profissional)
      * quando o aluno responde horas ou dias depois, e `direction` sozinha não distingue o
      * Coach de um aviso automático nem de uma mensagem manual do CREF. `NULL` nas linhas
@@ -103,7 +103,7 @@ export const conversations = pgTable(
 
     /**
      * Linha gravada pelo ESPELHO do webhook (uma por mensagem do WhatsApp, antes de qualquer
-     * filtro da IA). Fica fora da transcrição do Coach — a IA continua lendo o turno que ela
+     * filtro da IA). Fica fora da transcrição da IA — a IA continua lendo o turno que ela
      * mesma persistiu — exceto o que o profissional digitou no celular.
      */
     mirror: boolean('mirror').notNull().default(false),
@@ -127,7 +127,7 @@ export const conversations = pgTable(
     ...timestampColumns,
   },
   (table) => [
-    // Query mais frequente do produto (janela de contexto do AI Coach) e futura
+    // Query mais frequente do produto (janela de contexto da IA) e futura
     // chave de particionamento. `user_id` líder por causa da RLS (Sato §4.5).
     index('idx_conversations_user_created_at').on(table.userId, table.createdAt),
     // Painel de operações/SLA: janelas globais `created_at >= :since` (volume, latência do
