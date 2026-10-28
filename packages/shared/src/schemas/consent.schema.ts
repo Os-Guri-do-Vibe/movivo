@@ -133,7 +133,7 @@ export const CONSENT_TEXTS = {
     version: CONSENT_VERSIONS.AI_DISCLOSURE,
     title: 'Como o seu plano é feito',
     body: [
-      'Seu plano é montado a partir da metodologia escrita por profissionais registrados nos seus conselhos (CREF, CRN e CRM). A inteligência artificial é a ferramenta que aplica essa metodologia ao seu caso, ajusta o plano dentro das regras publicadas por esses profissionais e conversa com você no dia a dia — ela nunca substitui o profissional.',
+      'Seu plano é montado a partir da metodologia escrita por profissionais registrados nos seus conselhos (CREF, CRN e CRM). A inteligência artificial é a ferramenta que aplica essa metodologia ao seu caso, ajusta o plano dentro das regras publicadas por esses profissionais e conversa com você no dia a dia, mas nunca substitui o profissional.',
       'Sempre que as suas respostas indicarem que o seu caso precisa de um olhar humano, ou quando algo estiver fora das regras publicadas, nenhum ajuste é feito automaticamente: um profissional analisa antes. Você pode pedir revisão humana de qualquer orientação. A MOVIVO não faz diagnóstico e não substitui avaliação médica.',
     ],
     /** "Estou ciente", nunca "Autorizo" — o verbo é o que mantém a natureza jurídica (§5.4). */

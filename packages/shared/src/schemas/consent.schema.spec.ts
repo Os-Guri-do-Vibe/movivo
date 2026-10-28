@@ -49,9 +49,7 @@ describe('consentimento versionado (Alexandre §5 — onboarding v2)', () => {
     expect(health).toContain('ferramenta de apoio');
     expect(health).toContain('analisados por uma pessoa');
     expect(health).toContain('pedir revisão humana');
-    expect(CONSENT_TEXTS.AI_DISCLOSURE.body.join(' ')).toContain(
-      'ela nunca substitui o profissional',
-    );
+    expect(CONSENT_TEXTS.AI_DISCLOSURE.body.join(' ')).toContain('nunca substitui o profissional');
     expect(
       Object.values(CONSENT_TEXTS)
         .flatMap((text) => text.body)

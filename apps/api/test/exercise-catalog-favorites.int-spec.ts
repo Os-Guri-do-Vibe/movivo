@@ -171,6 +171,15 @@ beforeAll(async () => {
     SELECT exercise_key, favorited_by, favorited_at FROM exercise_catalog_favorites`;
   await migrator`DELETE FROM exercise_catalog_favorites`;
 
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  app = moduleRef.createNestApplication({ logger: false });
+  app.use(cookieParser());
+  prefix = app.get(AppConfigService).globalPrefix;
+  app.setGlobalPrefix(prefix);
+  await app.init();
+
+  // Depois do boot: o catálogo de partida só é semeado com a tabela vazia, e este fixture a
+  // deixaria não vazia num banco novo (CI).
   // Exercício retirado real (v1 PUBLISHED → v2 RETIRED), mesmo formato do admin.
   for (const [version, status] of [
     [1, 'PUBLISHED'],
@@ -184,13 +193,7 @@ beforeAll(async () => {
               '["HOME"]'::jsonb, 'INICIANTE', '[]'::jsonb, '[]'::jsonb, ${version}, ${status},
               'fixture de integração dos favoritos')`;
   }
-
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  app = moduleRef.createNestApplication({ logger: false });
-  app.use(cookieParser());
-  prefix = app.get(AppConfigService).globalPrefix;
-  app.setGlobalPrefix(prefix);
-  await app.init();
+  await app.get(ExerciseCatalogProvider).invalidate();
 
   const hash = await app.get(PasswordService).hash(PASSWORD);
   [adminId, proId] = await app.get(TenantDatabase).runAsSystem(async (tx) => {
