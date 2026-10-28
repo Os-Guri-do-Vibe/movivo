@@ -128,6 +128,7 @@ export class DecisionPipeline {
         userId,
         proposalId: row.id,
         verdict: verdict.verdict,
+        policyVersionId: policy?.documentId ?? null,
         reasons: verdict.reasons,
         decidedBy: 'POLICY_ENGINE',
       })
@@ -217,22 +218,27 @@ export class DecisionPipeline {
     return exception.id;
   }
 
-  /** Abre um caso para falha de geração (o agente não produziu saída válida, dado faltando). */
-  async openFailureCase(
+  /** Abre um caso na fila da equipe (revisão a pedido, dúvida que exige profissional, falha). */
+  async openCase(
     tx: TenantTransaction,
     input: {
       userId: string;
+      kind:
+        | 'DECISION_FAILURE'
+        | 'STUDENT_REVIEW_REQUEST'
+        | 'NO_APPLICABLE_POLICY'
+        | 'CONVERSATION_TAKEOVER';
       domain: 'TRAINING' | 'NUTRITION' | 'GENERAL';
       summary: string;
       subject: Record<string, string>;
-      priority?: 'LOW' | 'NORMAL' | 'HIGH';
+      priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
     },
   ): Promise<string> {
     const [exception] = await tx
       .insert(exceptionCases)
       .values({
         userId: input.userId,
-        kind: 'DECISION_FAILURE',
+        kind: input.kind,
         priority: input.priority ?? 'NORMAL',
         domain: input.domain,
         subject: input.subject,
@@ -243,8 +249,22 @@ export class DecisionPipeline {
     await this.events.record(tx, {
       userId: input.userId,
       type: 'ExceptionOpened',
-      payload: { exceptionCaseId: exception.id, kind: 'DECISION_FAILURE' },
+      payload: { exceptionCaseId: exception.id, kind: input.kind },
     });
     return exception.id;
+  }
+
+  /** Abre um caso para falha de geração (o agente não produziu saída válida, dado faltando). */
+  openFailureCase(
+    tx: TenantTransaction,
+    input: {
+      userId: string;
+      domain: 'TRAINING' | 'NUTRITION' | 'GENERAL';
+      summary: string;
+      subject: Record<string, string>;
+      priority?: 'LOW' | 'NORMAL' | 'HIGH';
+    },
+  ): Promise<string> {
+    return this.openCase(tx, { ...input, kind: 'DECISION_FAILURE' });
   }
 }

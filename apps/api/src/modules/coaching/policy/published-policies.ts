@@ -14,7 +14,7 @@ export class PublishedPolicies {
 
   async autonomy(): Promise<AutonomyPolicy | null> {
     const doc = await this.methodology.publishedOf('AUTONOMY');
-    return doc ? autonomyPolicyFrom(doc.version, doc.parameters) : null;
+    return doc ? autonomyPolicyFrom(doc.version, doc.id, doc.parameters) : null;
   }
 
   async sentinel(): Promise<SentinelParams | null> {

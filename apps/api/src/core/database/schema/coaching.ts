@@ -79,7 +79,7 @@ export const coachingDecisions = pgTable(
       .notNull()
       .references(() => coachingProposals.id, { onDelete: 'cascade' }),
     verdict: varchar('verdict', { length: 16 }).notNull(),
-    /** Versão publicada do documento de autonomia (`methodology_versions.id`) aplicada. */
+    /** Documento de autonomia publicado (`methodology_documents.id`) aplicado à decisão. */
     policyVersionId: uuid('policy_version_id'),
     /** Regras que levaram ao veredito, em linguagem legível (para o painel e para o aluno). */
     reasons: jsonb('reasons').$type<string[]>().notNull(),

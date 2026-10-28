@@ -25,6 +25,8 @@ import {
 
 export interface AutonomyPolicy {
   version: number;
+  /** Documento publicado (`methodology_documents.id`) que originou esta política. */
+  documentId: string;
   byAction: Partial<Record<CoachingAction['type'], { level: AutonomyLevel; limit: number }>>;
   highUncertainty: 'ASK' | 'ESCALATE';
   onLimitExceeded: 'ASK' | 'ESCALATE';
@@ -174,11 +176,13 @@ export function evaluateAction(
 /** Converte os parâmetros publicados do documento AUTONOMY na política tipada. */
 export function autonomyPolicyFrom(
   version: number,
+  documentId: string,
   parameters: Record<string, Record<string, unknown>>,
 ): AutonomyPolicy {
   const actions = parameters.actions ?? {};
   return {
     version,
+    documentId,
     byAction: (actions.byAction ?? {}) as AutonomyPolicy['byAction'],
     highUncertainty: (actions.highUncertainty as AutonomyPolicy['highUncertainty']) ?? 'ASK',
     onLimitExceeded: (actions.onLimitExceeded as AutonomyPolicy['onLimitExceeded']) ?? 'ESCALATE',

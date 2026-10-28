@@ -8,6 +8,7 @@ const calm: PolicyContext = { activeSignals: [], uncertainty: 'LOW', reviewReque
 
 const policy: AutonomyPolicy = {
   version: 4,
+  documentId: '00000000-0000-4000-8000-000000000004',
   byAction: {
     RESCHEDULE_WEEK: { level: 'AUTO_WITH_LIMITS', limit: 1 },
     SUBSTITUTE_EXERCISE: { level: 'AUTO', limit: 0 },
