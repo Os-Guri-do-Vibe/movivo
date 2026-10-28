@@ -228,15 +228,6 @@ export const TERMINAL_SCRIPTS: readonly TerminalScript[] = [
     notRunnableReason: OPERATOR_ONLY,
   },
   {
-    id: 'db-seed-workout-demo',
-    kind: 'TERMINAL',
-    name: 'Seed de treino de demonstração',
-    description: 'Cria um aluno e um treino de demonstração para testar o diário de treino.',
-    file: 'apps/api/src/core/database/seed-workout-demo.ts',
-    command: 'pnpm --filter @movivo/api db:seed:workout',
-    notRunnableReason: 'Cria dados de demonstração — só em ambiente local.',
-  },
-  {
     id: 'db-backfill-transitions',
     kind: 'TERMINAL',
     name: 'Backfill de transições de status',

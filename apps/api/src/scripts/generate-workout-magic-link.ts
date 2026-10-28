@@ -1,6 +1,6 @@
 /**
  * Gera um magic link de check-in diário pra um titular, sem esperar o scheduler das 4h —
- * uso: teste manual local do fluxo `/treino/acessar` (achado 2026-09-10).
+ * uso: teste manual local do fluxo `/hoje/acessar` (achado 2026-09-10).
  *
  * Não sobe Nest/DI (mesmo motivo de `resend-protocol-delivery.ts`): replica exatamente a
  * lógica de `TrainingAccessService.createMagicLink` (token opaco de 32 bytes, hash SHA-256
@@ -80,7 +80,7 @@ async function main(): Promise<void> {
     });
 
     console.warn(`[link] titular: ${row.name} (${row.id})`);
-    console.warn(`[link] ${env.PUBLIC_SITE_URL}/treino/acessar#token=${token}`);
+    console.warn(`[link] ${env.PUBLIC_SITE_URL}/hoje/acessar#token=${token}`);
   } finally {
     await client.end({ timeout: 5 });
   }

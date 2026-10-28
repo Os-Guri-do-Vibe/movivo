@@ -67,7 +67,7 @@ describe('TrainingAccessService', () => {
     const { service, inserted } = makeService();
     const link = await service.createMagicLink(USER_ID, 'session-1');
 
-    expect(link).toMatch(/^https:\/\/app\.movivo\.test\/treino\/acessar#token=[\w-]{43}$/);
+    expect(link).toMatch(/^https:\/\/app\.movivo\.test\/hoje\/acessar#token=[\w-]{43}$/);
     expect(inserted[0]).toMatchObject({
       userId: USER_ID,
       workoutSessionId: 'session-1',
