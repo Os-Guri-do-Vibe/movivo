@@ -12,7 +12,7 @@ import {
 import { desc, eq, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 
-import { FaqService, normalizeFaqQuestion } from '../../core/agent-config/faq.service';
+import { FaqService, normalizeFaqQuestion } from '../../core/attendance-rules/faq.service';
 import { faqEntries, staff } from '../../core/database/schema';
 import {
   TenantDatabase,

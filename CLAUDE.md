@@ -1,24 +1,22 @@
-# MOVIVO — Produto, Empresa e Pipeline de Criação
+# MOVIVO — Assessoria de movimento por WhatsApp (v2)
 
-Este repositório tem dois papéis:
+Este repositório é o produto **MOVIVO 2.0**: monorepo `apps/api` (NestJS), `apps/web` (Next.js) e `packages/shared` (contratos Zod). Branch de trabalho da v2: `movivo-app-v2`; o deploy de produção acontece apenas no push para `main`.
 
-1. **É o repositório da MOVIVO**, a startup que está sendo construída (contexto abaixo).
-2. **Contém a "agência de criação de startups"**, o pipeline de agentes especializados que validou e planejou a MOVIVO do zero, documentado a partir da seção "Pipeline de Agentes" mais abaixo. Esse pipeline continua existindo e pode ser reutilizado (ex: para novas linhas de produto, ou para revisões pontuais de qualquer fase).
+Documentos de planejamento e de entrega da v2 (inventário, especificação, plano de entregas M0–M11 e relatórios) ficam **fora do repositório**, em `movivo-docs/v2/`. O pipeline de agentes de criação de startups que originou a MOVIVO continua disponível em `.claude/agents/` (ver seção final).
 
 ---
 
-## 🎯 Contexto Ativo — O que é a MOVIVO
+## O produto
 
-**Status:** Ideia validada por Clóvis (`VALIDADO COM RESSALVAS`). Pipeline completo até a Fase 4 — Fase 1 (Clóvis, Gabriel, Caio, Kimura, Helena), Fase 2 (Alexandre, Eduardo), Fase 3 (Lucas, Sofia) e Fase 4 (Rafael, Sato, Victor) concluídas. **Fase atual: início da implementação do MVP (Fase 5 — Desenvolvimento).**
+Assessoria de movimento, performance e bem-estar entregue pelo **WhatsApp**, com **agentes de IA muito capazes** que operam dentro de **políticas versionadas escritas por profissionais** (CREF para treino, CRN para nutrição, CRM para saúde). O profissional entra **por exceção**: sinal de segurança, situação sem política aplicável ou pedido de revisão do aluno.
 
-### O produto
-
-A MOVIVO é um **AI Coach de treino individualizado, entregue via WhatsApp**, que combina IA conversacional com metodologia e supervisão de um profissional de Educação Física registrado no CREF. O objetivo é democratizar o acesso a treino de qualidade — hoje restrito a quem paga por personal trainer — usando o canal que as pessoas já usam todos os dias.
-
-- **Categoria do serviço atual:** "orientação de treino conversacional" — não é "um app de fitness". O serviço atual é a porta de entrada da marca, que é mais ampla (ver Direcionamento estratégico de marca).
-- **Essência de marca (vigente, Direcionamento Estratégico v1.0 — out/2026):** a MOVIVO é uma marca de movimento, performance e bem-estar que combina orientação humana, ciência e tecnologia para ajudar pessoas a evoluírem com consistência — de forma acessível, personalizada e contínua. Detalhes na seção "Direcionamento estratégico de marca" abaixo. *(Substitui o antigo "Ciência que treina com você", que não faz parte do documento vigente.)*
-- **Nome:** **MOVIVO** (mo-VÍ-vo — "movimento vivo"). Há risco jurídico de colisão fonética com a marca de alto renome VIVO (Telefônica), ainda não verificado formalmente no INPI — ver `03-relatorio-caio.md`. Nome alternativo de reserva já definido caso necessário: **TRENOVA**.
-- **Selo CREF:** assinatura de credibilidade, não é uma submarca.
+- **Modalidades:** musculação, corrida, HYROX e híbrido (o planejador reorganiza a semana), mais **nutrição contínua** e avaliação corporal opcional (medidas e fotos, com consentimento próprio).
+- **Plano único com tudo incluso**, em quatro períodos (mensal, trimestral, semestral e anual). Preços e descontos vivem em `packages/shared/src/schemas/subscription.schema.ts`; trial de 7 dias sem cartão.
+- **Aluno sem login e sem PWA:** links mágicos de uso único enviados por WhatsApp (sessão do dia, check-in, alimentação, evolução, plano, conta).
+- **Corrida/HYROX sem integração obrigatória:** registro por print do relógio/app no WhatsApp (visão + confirmação do aluno), upload `.fit`/`.gpx` ou digitação manual.
+- **Alunos da versão anterior:** anamnese complementar (campos novos, dados antigos pré-preenchidos, novo aceite dos textos vigentes) e planos novos; o plano antigo não é migrado. Campanha pelo painel: *Sistema → Scripts → Campanha da anamnese complementar*.
+- **Fundadores:** Rodrigo 40% (dev), Pedro 20% (dev), Cahuã 20% (marca/vendas, rosto público; a marca é a MOVIVO, nunca o Cahuã) e Leonardo (Léo) 20% (treinador, Responsável Técnico CREF). Quadro a formalizar em contrato social e Acordo de Sócios.
+- **LLM:** gate neutro por fornecedor (ADR-005-R2). Nenhum endpoint recebe dado de saúde sem DPA, transferência internacional, retenção/no-training, suboperadores e segurança aprovados; o gate fecha antes do envio no `ModelGateway`.
 
 ### Direcionamento estratégico de marca (vigente — v1.0, out/2026)
 
@@ -48,30 +46,7 @@ Fonte: `Direcionamento_Estrategico_de_Marca_MOVIVO.docx` (raiz do repositório).
 
 **Implicações para código, copy e prompts:** não apresentar a IA como protagonista; manter o respaldo CREF visível; nenhuma promessa de resultado; nada de tom de culpa ou comparação entre usuários; tratar nomes de comunidade/níveis como inexistentes até validação.
 
-### Como funciona (visão de produto)
-
-Usuário preenche formulário de anamnese + PAR-Q → protocolo de treino é gerado (Motor Determinístico + LLM, nunca LLM puro) → entregue via WhatsApp em até 2h → usuário conversa com o AI Coach para dúvidas, motivação e substituição de exercícios → check-in semanal automático ajusta o protocolo → profissional CREF assina/supervisiona e entra em qualquer exceção fora do escopo seguro da IA.
-
-### Fundadores e papéis
-
-| Pessoa | Quotas | Papel |
-|---|---|---|
-| Rodrigo | 40% | Desenvolvedor (fundador) |
-| Pedro | 20% | Desenvolvedor (fundador) |
-| Cahuã | 20% | Marca, marketing e vendas — rosto público / endossante (arquitetura de marca "Branded House": Cahuã endossa a MOVIVO, **nunca é a marca**) |
-| Leonardo (Léo) | 20% | Treinador do Cahuã, sócio-fundador e Responsável Técnico CREF — validação jurídico-profissional dos protocolos, também rosto da marca. Não confundir com o agente `13-leonardo-engenheiro-backend` do pipeline, que é só uma persona de IA |
-
-> **Societário (recomendação de Alexandre em `06-relatorio-alexandre.md`):** constituir LTDA com objeto social compatível com atividade CREF (Educação Física como atividade-fim, não só "software house"), Acordo de Sócios com vesting (cliff 12 meses / vesting total 48 meses) e IP de todo o desenvolvimento consolidado na PJ desde o dia 1. **Quadro societário definido (out/2026): Rodrigo 40%, Pedro 20%, Cahuã 20%, Leonardo 20%** — a formalizar em contrato social e Acordo de Sócios. Nenhum sócio tem maioria sozinho, mas o split deixa de ser igualitário (a preocupação de Alexandre com o desempate). Os relatórios de Fase 1–4 que citam outra divisão ou outro quadro (ex.: `06-relatorio-alexandre.md`) estão desatualizados nesse ponto.
-
-### Modelo de negócio
-
-- **B2C por assinatura, plano único por período (validado por Eduardo em `07-relatorio-eduardo.md`):** Mensal R$39 / Trimestral R$99 / Anual R$349. Rejeitado o tiering "Básico/Pro" cogitado inicialmente por Rafael — retenção via compromisso de período, não via gate de features.
-- Trial de **7 dias sem cartão** (ajustado de 14 para 7 dias por Eduardo/Sofia).
-- Regime tributário recomendado: **Simples Nacional, Anexo III (6%) via Fator R ≥ 28%** — evita o Anexo V, mais caro.
-- Bootstrapável: necessidade de capital estimada em R$20–30 mil (setup jurídico + 6 meses de runway), sem necessidade de aporte externo para o MVP.
-- Meta LTV/CAC ≥ 3; payback de CAC pago recomendado em **≤3 meses** (Eduardo relaxou a meta original de ≤2 meses de Helena, apertada demais para tráfego pago via Meta).
-- ICP: 18–30 anos, digital-native, sensível a preço, treina em casa/academia, vive no WhatsApp.
-- **North Star Metric:** Treinos Concluídos por Usuário Pago nos Primeiros 30 Dias (meta ≥ 8/30 dias).
+**Implicações para código, copy e prompts:** não apresentar a IA como protagonista; manter o respaldo profissional visível; nenhuma promessa de resultado; nada de tom de culpa ou comparação entre usuários; tratar nomes de comunidade e níveis como inexistentes até validação.
 
 ### Guardrails de linguagem — inegociáveis em todo código, copy, prompt de IA e UI
 
@@ -82,33 +57,69 @@ Herdados de Clóvis e Gabriel, valem para **qualquer texto gerado pelo sistema o
 - A IA **nunca** é apresentada como quem decide ou prescreve sozinha — a formulação correta é sempre "profissional CREF, usando IA como ferramenta".
 - A presença/respaldo do profissional CREF deve ser sempre visível ao usuário.
 
-### Escopo do MVP (definido por Lucas em `08-relatorio-lucas.md`)
+---
 
-**Dentro do MVP (P0):** Landing page → formulário de anamnese + PAR-Q conversacional em 3 blocos com salvamento de progresso → confirmação síncrona no WhatsApp → geração e entrega do protocolo inicial → conversa com AI Coach (escopo definido, memória, fallback) → check-in semanal → sequência de conversão do trial (dias 7, 10, 13, 14) → pagamento (Asaas Sandbox; produção condicionada ao gate PCI) → dashboard mínimo de operações para o profissional CREF → isolamento de contexto por usuário.
+## Arquitetura
 
-**Fora do MVP (Fase 2):** app mobile, dashboard dedicado ao usuário final, planos anuais, wearables, gamificação, referral automatizado, nutrition coaching, PIX recorrente automático, multi-idioma, API para parceiros B2B.
+### Fluxo central: proposta → política → decisão → execução
 
-### Arquitetura e stack técnica
+1. Um **agente de tarefa** (`core/agents`: `defineAgentTask` + `AgentRunner`) recebe contexto montado **pelo código** e devolve uma **proposta tipada** (Zod). O modelo **nunca escreve nada** nem recebe ferramenta (`llm-no-tool-surface.spec.ts` trava isso).
+2. O **motor de políticas** (`modules/coaching/policy`) decide, de forma determinística e versionada, se a proposta é executada, perguntada ao aluno ou vira **caso de exceção**.
+3. A **decisão** e a **execução** são gravadas na mesma transação (`DecisionExecutor.decideAndRun`), com a versão da política, os motivos e as evidências.
+4. Eventos de domínio saem pelo **outbox** (`domain_events` + relé) e acionam consumidores idempotentes.
 
-A arquitetura de referência completa foi definida por Rafael (Distinguished Software Architect) em `docs/fitness-ia-whatsapp/10-relatorio-rafael.md`. As regras obrigatórias de desenvolvimento, stack e diagramas estão condensadas e operacionalizadas em **[docs/arquitetura/ARQUITETURA.md](docs/arquitetura/ARQUITETURA.md)** — todo agente de engenharia (Sato, Victor, Leonardo, Felipe, Mariana, Henrique) e toda sessão de código neste repositório deve seguir esse documento.
+A **sentinela de segurança** (`coaching/safety`) lê texto e sinais antes e depois do modelo e abre casos de exceção. Segurança tem 0% de tolerância nos casos de avaliação.
 
-### Revisão vigente do LLM principal — ADR-005-R2
+### Módulos da API (`apps/api/src/modules`)
 
-A proibição categórica do DeepSeek foi substituída por um **gate neutro por fornecedor**. Histórico
-de incidente e jurisdição entram na diligência, mas não produzem banimento automático; OpenAI,
-Anthropic e DeepSeek precisam comprovar os mesmos controles para processar dados de saúde.
+`anamnesis` (8 etapas, PAR-Q determinístico, fluxo complementar) · `student-state` (Estado do Aluno: objetivos, restrições, preferências, observações) · `planning` (estratégia, treino por modalidade, nutrição, planejador híbrido) · `training` (sessões, execução, links) · `nutrition` · `vision` (prints e fotos com confirmação) · `checkin-v2` · `progress` (metas, microtarefas, revisão semanal) · `conversation` (orquestrador do WhatsApp) · `coaching` (políticas, decisões, sentinela) · `exceptions` (fila por conselho) · `agents-panel` · `methodology` (estúdio) · `evaluation` (casos de referência e CLI de avaliação) · `subscription` (Asaas) · `whatsapp` (Evolution) · `admin` · `auth` · `account` · `catalog` · `jobs` · `short-link` · `domain-events` · `execution-tasks`.
 
-**Decisão vigente:** **DeepSeek V4 Pro como candidato principal**, GPT-4.1 como primeiro fallback e
-Claude Sonnet 4.5 como segundo fallback. Nenhum endpoint recebe `HEALTH` até aprovação explícita
-de DPA, transferência internacional, retenção/no-training, suboperadores e segurança. O gate é
-executável no `LLMRouter` e fecha antes do envio. Detalhes em `docs/arquitetura/ARQUITETURA.md`
-§3.1 e `docs/arquitetura/decisoes/adr-005-r2-selecao-neutra-de-provedor-llm.md`.
+Núcleo (`src/core`): `config`, `database` (RLS, cifra de saúde, TLS, migrate), `redis`, `logger`, `ai` (`ModelGateway` por **nível de capacidade** FAST/STANDARD/REASONING/VISION, com failover e custo em `model_runs`), `agents`, `attendance-rules` (FAQ, temas proibidos, guardrail L1), `knowledge`, `audio`, `event-bus`, `validation`, `swagger`, `telemetry`.
 
-### Pipeline de validação — completo
+### RBAC por conselho
 
-Todos os relatórios de Fase 1 a 4 existem em `docs/fitness-ia-whatsapp/`: `01-relatorio-clovis.md`, `02-relatorio-gabriel.md`, `03-relatorio-caio.md`, `04-relatorio-kimura.md`, `05-relatorio-helena.md`, `06-relatorio-alexandre.md`, `07-relatorio-eduardo.md`, `08-relatorio-lucas.md`, `09-relatorio-sofia.md`, `10-relatorio-rafael.md`, `11-relatorio-sato.md`, `12-relatorio-victor.md`. Não há mais bloqueador de pipeline para o início da Fase 5 (Desenvolvimento).
+O papel no banco continua `PROFESSIONAL`; `staff.council` ∈ CREF/CRN/CRM define o **domínio** do caso (treino, nutrição, médico, geral). O profissional vê e decide só o domínio do seu conselho; `ADMIN` lê tudo e decide apenas o domínio geral.
+
+### Dados e segurança
+
+- Postgres 17 com **RLS FORCE** em toda tabela de titular (`core/database/security-policies.ts` é a fonte; `RLS_TENANT_TABLES`). Aplicação conecta pelo PgBouncer (5433); só a migração usa a 5432 como `movivo_migrator`. `movivo_app` não é dona de tabela e não tem `BYPASSRLS`.
+- Dado de saúde cifrado (`HealthCipherService`); consentimentos versionados em `packages/shared/src/schemas/consent.schema.ts` (texto novo ⇒ versão nova).
+- Tabelas `legacy_*_archive` guardam, somente leitura, o que o serviço anterior produziu (retenção de 5 anos); não são lidas por nenhum fluxo.
+- **Migrações:** `apps/api/drizzle/` (Drizzle Kit). Squash em base única só **depois** de produção aplicar a cadeia até a última migração (procedimento em `movivo-docs/v2/entregas/M11.md`).
+
+### Painel interno (`apps/web/src/app/dashboard`)
+
+Fila de exceções por conselho, ficha do aluno (Estado do Aluno), conversas (espelho do WhatsApp com "assumir conversa"), agentes (tarefas, níveis, custo, avaliações), estúdio de metodologia, base de conhecimento, finanças, marketing, sócios, compliance, auditoria e sistema.
 
 ---
+
+## Comandos
+
+```bash
+pnpm install && pnpm run build                 # shared é consumido pelo dist: rode antes de --filter
+pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run format:check
+pnpm run knip                                  # arquivo, export ou dependência sem uso falha o CI
+pnpm run infra:up                              # sobe dados + API + web em Docker e migra o banco
+pnpm --filter @movivo/api exec vitest run      # testes unitários da API
+HOST_POSTGRES_PORT=5432 DEV_PROFESSIONAL_PASSWORD_FILE= \
+  pnpm --filter @movivo/api exec vitest run --config vitest.integration.config.ts   # integração (pare movivo-api antes)
+pnpm --filter @movivo/api db:generate          # gera migração a partir do schema (prompt interativo para renomes)
+pnpm --filter @movivo/api db:migrate           # aplica migrações + reconcilia grants e RLS
+pnpm --filter @movivo/api run eval --task <id> # avaliação de uma tarefa de agente com o modelo real
+pnpm --filter @movivo/web exec playwright test # e2e do painel (pare o container movivo-web: porta 3000)
+```
+
+README.md tem o passo a passo de ambiente, segredos (`*_FILE`) e Docker.
+
+## Regras de código
+
+- TypeScript `strict`; `any` é erro de lint; Prettier formata; `console.log` proibido (use o logger, nunca PII).
+- Config só pelo `AppConfigService`; chave de Redis só pelo `RedisKeyBuilder`; `SET LOCAL`, nunca `SET`.
+- Módulo de domínio não importa módulo de domínio: evento ou fila. Zero `forwardRef()`.
+- Todo DTO de entrada é validado por schema Zod de `@movivo/shared`.
+- Sem resíduo: ao substituir algo, apague código, testes, schemas, enums, prompts, filas, rotas, permissões, variáveis e documentação na mesma mudança. `knip` precisa sair limpo.
+- Texto legal e de consentimento é artefato versionado e sujeito a revisão jurídica antes de ir ao ar.
+- `apps/web/AGENTS.md` avisa que o Next.js usado aqui tem mudanças incompatíveis: consulte `node_modules/next/dist/docs/` antes de escrever código novo.
 
 ## Versionamento e Git
 
@@ -139,359 +150,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 ---
 
-# Agência de Criação de Startups — Pipeline de Agentes
-
-Este projeto orquestra um pipeline sequencial e estruturado de agentes especializados para levar uma ideia de negócio da validação estratégica até o lançamento e operação. Cada agente é especialista em uma fase e **depende do trabalho dos agentes anteriores**.
-
 ---
 
-## Visão geral do pipeline completo
+## Pipeline de agentes de criação (reutilizável)
 
-```
-FASE 1 — ESTRATÉGIA DE NEGÓCIO E MARCA
-  01 · Clóvis   →  02 · Gabriel  →  03 · Caio  →  04 · Kimura  →  05 · Helena
-  [GATE: Clóvis valida antes de qualquer avanço]
-
-FASE 2 — FUNDAÇÃO LEGAL E FINANCEIRA        ← começa após Helena
-  06 · Alexandre  ║  07 · Eduardo            (paralelo entre si)
-
-FASE 3 — PRODUTO E DESIGN                   ← começa após Fase 2 completa
-  08 · Lucas  →  09 · Sofia
-
-FASE 4 — ARQUITETURA, SEGURANÇA E IA        ← começa após Fase 3 completa
-  10 · Rafael  →  11 · Sato  ║  12 · Victor  (Sato e Victor em paralelo após Rafael)
-
-FASE 5 — DESENVOLVIMENTO                    ← começa após Fase 4 completa
-  13 · Leonardo  ║  14 · Felipe  →  15 · Mariana
-
-FASE 6 — INFRAESTRUTURA                     ← começa após Fase 5 completa
-  16 · Henrique
-
-FASE 7 — CONTEÚDO E COMUNICAÇÃO             ← começa após Fase 6 completa
-  17 · Redator  ║  18 · Social Media         (paralelo entre si)
-
-FASE 8 — RECEITA E CRESCIMENTO              ← começa após Fase 7 completa
-  19 · Comercial  ║  20 · CS  →  21 · Growth
-```
-
----
-
-## Ordem obrigatória do pipeline
-
-O pipeline é dividido em **8 fases**. A ordem entre fases é fixa e não pode ser alterada ou pulada. Dentro de algumas fases, agentes podem atuar em paralelo (indicado abaixo).
-
-### Fase 1 — Estratégia de Negócio e Marca
-
-> **Gate obrigatório:** Clóvis valida a ideia antes de qualquer avanço. Se não validar, o pipeline encerra aqui.
-
-| # | Agente | Arquivo | Relatório | Especialidade |
-|---|---|---|---|---|
-| 1 | **Clóvis** | `01-clovis-estrategista-de-negocio` | `01-relatorio-clovis.md` | Validação de negócio, TAM/SAM/SOM, ICP, JTBD, MVP |
-| 2 | **Gabriel** | `02-gabriel-estrategista-de-marca` | `02-relatorio-gabriel.md` | Propósito, missão, visão, posicionamento de marca |
-| 3 | **Caio** | `03-caio-especialista-de-naming` | `03-relatorio-caio.md` | Naming, domínio, registro de marca, risco fonético |
-| 4 | **Kimura** | `04-kimura-designer-de-marca` | `04-relatorio-kimura.md` | Logotipo, paleta, tipografia, design system, brand book |
-| 5 | **Helena** | `05-helena-estrategista-de-marketing` | `05-relatorio-helena.md` | GTM, canais, funil, campanhas, KPIs de marketing |
-
----
-
-### Fase 2 — Fundação Legal e Financeira
-**Inicia após:** Helena (agente 5) concluir.
-> Alexandre e Eduardo recebem o mesmo contexto e podem atuar **em paralelo**. Ambos devem concluir antes da Fase 3.
-
-| # | Agente | Arquivo | Relatório | Especialidade |
-|---|---|---|---|---|
-| 6 | **Alexandre** | `06-alexandre-head-juridico` | `06-relatorio-alexandre.md` | CLO — LGPD, contratos, compliance, societário, CREF, AI Act |
-| 7 | **Eduardo** | `07-eduardo-head-financeiro` | `07-relatorio-eduardo.md` | CFO — finanças, tributação, unit economics, FinOps, captação |
-
----
-
-### Fase 3 — Produto e Design
-**Inicia após:** Alexandre e Eduardo (agentes 6 e 7) concluírem.
-> Lucas define o escopo do produto antes de Sofia. Sofia deve concluir antes da Fase 4.
-
-| # | Agente | Arquivo | Relatório | Especialidade |
-|---|---|---|---|---|
-| 8 | **Lucas** | `08-lucas-gerente-de-produto` | `08-relatorio-lucas.md` | PM/PO — discovery, PRD, roadmap, backlog, métricas, AI spec |
-| 9 | **Sofia** | `09-sofia-designer-ux-ui` | `09-relatorio-sofia.md` | UX/UI — wireframes, protótipos, design system, AI UX |
-
----
-
-### Fase 4 — Arquitetura, Segurança e IA
-**Inicia após:** Sofia (agente 9) concluir.
-> Rafael define a arquitetura primeiro. Sato e Victor podem atuar **em paralelo** após Rafael. Todos devem concluir antes da Fase 5.
-
-| # | Agente | Arquivo | Relatório | Especialidade |
-|---|---|---|---|---|
-| 10 | **Rafael** | `10-rafael-arquiteto-de-software` | `10-relatorio-rafael.md` | Arquitetura — Clean Arch, DDD, APIs, cloud, ADRs, IA systems |
-| 11 | **Sato** | `11-sato-engenheiro-de-seguranca` | `11-relatorio-sato.md` | Segurança — AppSec, Zero Trust, DevSecOps, AI Security, LGPD |
-| 12 | **Victor** | `12-victor-engenheiro-de-ia` | `12-relatorio-victor.md` | IA — LLMs, RAG, agentes, MCP, prompt eng, LLMOps, avaliação |
-
----
-
-### Fase 5 — Desenvolvimento
-**Inicia após:** Rafael, Sato e Victor (agentes 10, 11 e 12) concluírem.
-> Leonardo e Felipe podem atuar **em paralelo** entre si. Mariana atua somente após ambos concluírem.
-
-| # | Agente | Arquivo | Relatório | Especialidade |
-|---|---|---|---|---|
-| 13 | **Leonardo** | `13-leonardo-engenheiro-backend` | `13-relatorio-leonardo.md` | Backend — NestJS, TypeScript, PostgreSQL, Redis, BullMQ, APIs |
-| 14 | **Felipe** | `14-felipe-engenheiro-frontend` | `14-relatorio-felipe.md` | Frontend — Next.js 15, React 19, Tailwind, shadcn/ui, AI UI |
-| 15 | **Mariana** | `15-mariana-analista-de-qualidade` | `15-relatorio-mariana.md` | QA — automação, performance, AI evaluation, quality gates |
-
----
-
-### Fase 6 — Infraestrutura
-**Inicia após:** Mariana (agente 15) concluir.
-
-| # | Agente | Arquivo | Relatório | Especialidade |
-|---|---|---|---|---|
-| 16 | **Henrique** | `16-henrique-engenheiro-de-plataforma` | `16-relatorio-henrique.md` | DevOps/SRE — Docker, CI/CD, Kubernetes, cloud, observabilidade |
-
----
-
-### Fase 7 — Conteúdo e Comunicação
-**Inicia após:** Henrique (agente 16) concluir.
-> *(Agentes ainda não criados — podem atuar em paralelo entre si)*
-
-| # | Agente | Arquivo | Relatório | Especialidade |
-|---|---|---|---|---|
-| 17 | **Redator** | `17-bruno-redator-copywriter` | `17-relatorio-bruno.md` | Copywriting, UX writing, conteúdo editorial |
-| 18 | **Social Media** | `18-camila-gestora-social-media` | `18-relatorio-camila.md` | Gestão de redes, comunidade, engajamento |
-
----
-
-### Fase 8 — Receita e Crescimento
-**Inicia após:** Fase 7 completa.
-> *(Agentes ainda não criados — Comercial e CS em paralelo; Growth após ambos)*
-
-| # | Agente | Arquivo | Relatório | Especialidade |
-|---|---|---|---|---|
-| 19 | **Comercial** | `19-diego-executivo-comercial` | `19-relatorio-diego.md` | Vendas, B2B, parcerias, propostas comerciais |
-| 20 | **CS** | `20-renata-customer-success` | `20-relatorio-renata.md` | Onboarding, retenção, suporte, NPS |
-| 21 | **Growth** | `21-igor-analista-de-growth` | `21-relatorio-igor.md` | Analytics, growth loops, KPIs, experimentação |
-
----
-
-## Gate de validação (regra crítica)
-
-**Clóvis é o gatekeeper de todo o pipeline.**
-
-- Se Clóvis **validar** a ideia → o pipeline segue normalmente para Gabriel, e assim por diante na ordem definida.
-- Se Clóvis **NÃO validar** a ideia → o pipeline **para imediatamente**. Nenhum outro agente deve ser acionado. A ideia não terá continuidade até que o usuário forneça uma ideia revisada ou uma nova ideia, reiniciando o processo a partir de Clóvis.
-
-O relatório de Clóvis deve declarar explicitamente o veredito (`VALIDADO` ou `NÃO VALIDADO`) logo no início do documento.
-
----
-
-## Fluxo de input entre agentes
-
-Cada agente recebe como contexto de trabalho a **combinação cumulativa** de:
-
-1. O input original do usuário (a ideia de negócio/startup).
-2. Os relatórios de **todos** os agentes anteriores no pipeline (nessa ordem).
-
-Exemplo completo para uma ideia com slug `<slug-da-ideia>`:
-
-**Fase 1:**
-- **Clóvis** recebe: input do usuário → define `<slug-da-ideia>` → gera `docs/<slug-da-ideia>/01-relatorio-clovis.md`.
-- **Gabriel** recebe: input + `01-relatorio-clovis.md` → gera `02-relatorio-gabriel.md`.
-- **Caio** recebe: input + relatórios de Clóvis e Gabriel → gera `03-relatorio-caio.md`.
-- **Kimura** recebe: input + relatórios de Clóvis, Gabriel e Caio → gera `04-relatorio-kimura.md`.
-- **Helena** recebe: input + relatórios de Clóvis, Gabriel, Caio e Kimura → gera `05-relatorio-helena.md`.
-
-**Fase 2:**
-- **Alexandre** recebe: input + todos os relatórios da Fase 1 → gera `06-relatorio-alexandre.md`.
-- **Eduardo** recebe: input + todos os relatórios da Fase 1 → gera `07-relatorio-eduardo.md`.
-*(Alexandre e Eduardo recebem o mesmo contexto e podem ser acionados em paralelo)*
-
-**Fase 3:**
-- **Lucas** recebe: input + relatórios das Fases 1 e 2 → gera `08-relatorio-lucas.md`.
-- **Sofia** recebe: input + relatórios das Fases 1, 2 e relatório de Lucas → gera `09-relatorio-sofia.md`.
-
-**Fase 4:**
-- **Rafael** recebe: input + relatórios das Fases 1, 2 e 3 → gera `10-relatorio-rafael.md`.
-- **Sato** recebe: input + relatórios das Fases 1, 2, 3 e relatório de Rafael → gera `11-relatorio-sato.md`.
-- **Victor** recebe: input + relatórios das Fases 1, 2, 3 e relatório de Rafael → gera `12-relatorio-victor.md`.
-*(Sato e Victor recebem o mesmo contexto após Rafael e podem ser acionados em paralelo)*
-
-**Fase 5:**
-- **Leonardo** recebe: input + relatórios das Fases 1–4 → gera `13-relatorio-leonardo.md`.
-- **Felipe** recebe: input + relatórios das Fases 1–4 → gera `14-relatorio-felipe.md`.
-*(Leonardo e Felipe podem ser acionados em paralelo)*
-- **Mariana** recebe: input + relatórios das Fases 1–4 e relatórios de Leonardo e Felipe → gera `15-relatorio-mariana.md`.
-
-**Fase 6:**
-- **Henrique** recebe: input + relatórios de todas as fases anteriores → gera `16-relatorio-henrique.md`.
-
-**Fases 7 e 8** seguem o mesmo padrão cumulativo à medida que os agentes forem criados.
-
-Nenhum agente deve ignorar os relatórios anteriores nem contradizê-los sem justificativa explícita no seu próprio relatório.
-
----
-
-## Relatórios em `docs/` (uma pasta por ideia)
-
-Este projeto pode ser usado para validar **múltiplas ideias de negócio distintas ao longo do tempo**. Para nunca misturar ou sobrescrever o histórico de uma ideia com o de outra, todo relatório é salvo dentro de uma **subpasta exclusiva daquela ideia**, nunca direto em `docs/`.
-
-### Convenção de nomes
-
-```
-docs/<slug-da-ideia>/<NN>-relatorio-<identificador-do-agente>.md
-```
-
-Onde `<NN>` é o número de dois dígitos do agente no pipeline (mesmo número usado no arquivo do agente em `.claude/agents/`, ex: `06-alexandre-head-juridico`), o que faz os relatórios ordenarem no filesystem na mesma ordem em que foram executados. `<identificador-do-agente>` é o primeiro nome em minúsculas, sem acentos:
-
-| Agente | Identificador |
-|---|---|
-| Clóvis | `clovis` |
-| Gabriel (Brand) | `gabriel` |
-| Caio | `caio` |
-| Kimura | `kimura` |
-| Helena | `helena` |
-| Alexandre | `alexandre` |
-| Eduardo | `eduardo` |
-| Lucas | `lucas` |
-| Sofia | `sofia` |
-| Rafael | `rafael` |
-| Sato | `sato` |
-| Victor | `victor` |
-| Leonardo | `leonardo` |
-| Felipe | `felipe` |
-| Mariana | `mariana` |
-| Henrique | `henrique` |
-
-Exemplo de estrutura completa para a ideia `fitness-ia-whatsapp`:
-
-```
-docs/fitness-ia-whatsapp/01-relatorio-clovis.md
-docs/fitness-ia-whatsapp/02-relatorio-gabriel.md
-docs/fitness-ia-whatsapp/03-relatorio-caio.md
-docs/fitness-ia-whatsapp/04-relatorio-kimura.md
-docs/fitness-ia-whatsapp/05-relatorio-helena.md
-docs/fitness-ia-whatsapp/06-relatorio-alexandre.md
-docs/fitness-ia-whatsapp/07-relatorio-eduardo.md
-docs/fitness-ia-whatsapp/08-relatorio-lucas.md
-docs/fitness-ia-whatsapp/09-relatorio-sofia.md
-docs/fitness-ia-whatsapp/10-relatorio-rafael.md
-docs/fitness-ia-whatsapp/11-relatorio-sato.md
-docs/fitness-ia-whatsapp/12-relatorio-victor.md
-docs/fitness-ia-whatsapp/13-relatorio-leonardo.md
-docs/fitness-ia-whatsapp/14-relatorio-felipe.md
-docs/fitness-ia-whatsapp/15-relatorio-mariana.md
-docs/fitness-ia-whatsapp/16-relatorio-henrique.md
-```
-
-### Como determinar o slug da ideia
-
-- **Clóvis** é quem **define o slug** ao receber uma nova ideia, a partir do nome/conceito central do negócio. O slug deve ser declarado de forma explícita no início do relatório de Clóvis (ex: `**Pasta do projeto:** docs/fitness-ia-whatsapp/`), para que todos os agentes seguintes o reutilizem sem ambiguidade.
-- Os demais agentes **reutilizam o mesmo slug/pasta** — nunca criam uma pasta nova para a mesma ideia.
-- Se o usuário voltar a falar sobre uma ideia já existente, reconhecer a pasta `docs/<slug-da-ideia>/` e continuar ali, sem criar pasta duplicada.
-- Se houver dúvida real sobre se é uma ideia nova ou revisão de uma existente, perguntar ao usuário antes de criar a pasta.
-
-### Revisão de uma ideia já existente
-
-Se o pipeline for executado mais de uma vez para a **mesma ideia**, sobrescrever o relatório existente dentro da pasta é aceitável — ele deve sempre representar o estado mais atual daquele agente para aquela ideia.
-
-### Propósito duplo do relatório
-
-Cada relatório serve a **dois leitores**:
-
-1. **O próximo agente do pipeline** — precisa entender rapidamente as decisões e justificativas para construir em cima delas.
-2. **O usuário** — vai ler os relatórios para acompanhar e entender cada etapa.
-
-Por isso, o relatório deve ser:
-
-- **Completo**: cobrir todo o raciocínio e as entregas do agente.
-- **Estruturado**: usar headings claros.
-- **Autocontido**: alguém lendo só aquele relatório (mais o input original) deve entender o que foi decidido e por quê.
-- **Explícito sobre dependências**: citar quando uma decisão se baseia em algo dito por um agente anterior.
-
-### Estrutura mínima sugerida de cada relatório
-
-```markdown
-# Relatório — <Nome do Agente> (<Role>)
-
-**Data:** <data>
-**Ideia analisada:** <resumo curto da ideia do usuário>
-**Pasta do projeto:** docs/<slug-da-ideia>/
-**Status do pipeline:** <ex: Validado por Clóvis / Fase X em andamento>
-
-## Resumo executivo
-(2-4 frases com a conclusão principal deste agente)
-
-## Contexto recebido
-(o que veio do input do usuário e dos relatórios anteriores, resumido)
-
-## Análise e desenvolvimento
-(o corpo do trabalho deste agente — específico da sua especialidade)
-
-## Decisões e entregáveis
-(o que foi decidido/criado)
-
-## Recomendações para o próximo agente
-(o que o próximo agente do pipeline deve levar em conta)
-
-## Fontes Consultadas
-(URLs utilizadas na pesquisa web)
-```
-
-Agentes podem adaptar a estrutura à sua especialidade, mas devem manter o veredito/status visível no topo (especialmente Clóvis) e a seção de fontes consultadas ao final.
-
----
-
-## Responsabilidades por agente (resumo)
-
-| F | # | Agente | Arquivo do agente | Foco principal | Não faz |
-|---|---|---|---|---|---|
-| 1 | 01 | Clóvis | `01-clovis-estrategista-de-negocio` | Validação de negócio, TAM/SAM/SOM, ICP, JTBD, MVP | Branding, naming, design, marketing, tecnologia |
-| 1 | 02 | Gabriel | `02-gabriel-estrategista-de-marca` | Propósito, missão, visão, posicionamento, arquitetura de marca | Logotipo, identidade visual, naming, tecnologia |
-| 1 | 03 | Caio | `03-caio-especialista-de-naming` | Naming, domínio, registro de marca, risco jurídico/fonético | Identidade visual, estratégia de marca, tecnologia |
-| 1 | 04 | Kimura | `04-kimura-designer-de-marca` | Logotipo, paleta, tipografia, ícones, design system, brand book | Posicionamento, naming, tecnologia |
-| 1 | 05 | Helena | `05-helena-estrategista-de-marketing` | GTM, canais, funil, campanhas, KPIs de marketing | Identidade visual, naming, tecnologia |
-| 2 | 06 | Alexandre | `06-alexandre-head-juridico` | LGPD, contratos, compliance, societário, PI, CREF, AI Act | Branding, tecnologia, finanças operacionais |
-| 2 | 07 | Eduardo | `07-eduardo-head-financeiro` | Finanças, contabilidade, tributação, unit economics, FinOps, captação | Jurídico, tecnologia, marketing |
-| 3 | 08 | Lucas | `08-lucas-gerente-de-produto` | PRD, roadmap, backlog, discovery, métricas, AI product spec | Código, identidade visual, finanças |
-| 3 | 09 | Sofia | `09-sofia-designer-ux-ui` | UX research, wireframes, protótipos, design system de produto, AI UX | Código, brand identity de marketing |
-| 4 | 10 | Rafael | `10-rafael-arquiteto-de-software` | Arquitetura, ADRs, stack, APIs, DDD, cloud, IA systems arch | Código de aplicação, UX, marketing |
-| 4 | 11 | Sato | `11-sato-engenheiro-de-seguranca` | Threat modeling, AppSec, Cloud Security, DevSecOps, AI Security | Código de aplicação, infraestrutura operacional |
-| 4 | 12 | Victor | `12-victor-engenheiro-de-ia` | LLMs, RAG, agentes, MCP, prompt eng, context eng, LLMOps, AI eval | Backend/frontend, infraestrutura, UX |
-| 5 | 13 | Leonardo | `13-leonardo-engenheiro-backend` | Backend (NestJS, TypeScript, PostgreSQL, Redis, BullMQ), APIs | Frontend, arquitetura, IA pura, DevOps |
-| 5 | 14 | Felipe | `14-felipe-engenheiro-frontend` | Frontend (Next.js 15, React 19, Tailwind, shadcn/ui), AI UI | Backend, arquitetura, IA pura, DevOps |
-| 5 | 15 | Mariana | `15-mariana-analista-de-qualidade` | QA, automação, performance testing, AI evaluation, quality gates | Código de aplicação, arquitetura, DevOps |
-| 6 | 16 | Henrique | `16-henrique-engenheiro-de-plataforma` | Docker, CI/CD, Kubernetes, cloud, observabilidade, SRE, FinOps | Código de aplicação, UX, estratégia de negócio |
-| 7 | 17 | Redator | `17-bruno-redator-copywriter` | Copywriting, UX writing, conteúdo editorial | Identidade visual, redes sociais, funil pago, posicionamento, naming |
-| 7 | 18 | Social Media | `18-camila-gestora-social-media` | Gestão de redes, comunidade, engajamento | Copywriting isolado, funil pago/CAC, identidade visual, posicionamento |
-| 8 | 19 | Comercial | `19-diego-executivo-comercial` | Vendas, B2B, parcerias, propostas | Aquisição B2C self-service, suporte pós-venda, pricing do plano B2C |
-| 8 | 20 | CS | `20-renata-customer-success` | Onboarding, retenção, suporte, NPS | Aquisição de novos usuários, vendas B2B, desenvolvimento de produto |
-| 8 | 21 | Growth | `21-igor-analista-de-growth` | Analytics, growth loops, KPIs, experimentação | Execução de campanhas, gestão de redes sociais, vendas, suporte |
-
----
-
-## Pesquisa web obrigatória em todo o pipeline
-
-Todos os 16 agentes ativos têm permissão total de ferramentas, incluindo `WebSearch` e `WebFetch`.
-
-Cada agente foi instruído a **usar ativamente** essas ferramentas antes de finalizar seu relatório. Em especial:
-
-- **Clóvis**: dados reais de mercado, concorrentes e evidências de demanda.
-- **Caio**: disponibilidade real de domínio, colisão de marcas e handles de redes sociais.
-- **Alexandre**: legislação atualizada, jurisprudência, resoluções ANPD/CREF/INPI.
-- **Eduardo**: benchmarks financeiros de SaaS, tributação atualizada, programas de fomento vigentes.
-- **Victor**: benchmarks de modelos (LMSYS, pricing de APIs), papers recentes de RAG e agentes.
-- **Sato**: CVEs recentes, advisories de segurança, incidentes públicos do setor.
-- **Rafael, Leonardo, Felipe, Henrique**: documentação oficial, changelogs e benchmarks das tecnologias recomendadas.
-- **Mariana**: metodologias atuais de avaliação de LLMs e frameworks de quality engineering.
-
-Todo relatório em `docs/` deve incluir uma seção **"Fontes Consultadas"** listando as URLs usadas. Quando a busca não retornar dados suficientes, o agente deve declarar essa limitação explicitamente.
-
----
-
-## Regras gerais de execução
-
-- Nunca pular a ordem das fases do pipeline.
-- Nunca acionar um agente sem que os relatórios dos agentes anteriores **obrigatórios** existam em `docs/<slug-da-ideia>/`.
-- Agentes que podem atuar em paralelo dentro de uma fase são indicados explicitamente na tabela acima.
-- Se Clóvis não validar a ideia, informar claramente ao usuário e não prosseguir — aguardar nova ideia ou revisão.
-- Sempre salvar o relatório em `docs/<slug-da-ideia>/` antes de considerar a etapa daquele agente concluída.
-- Ao receber uma nova ideia, sempre verificar primeiro se já existe uma pasta equivalente em `docs/` para não duplicar histórico.
-- O slug da ideia é sempre definido por Clóvis e reutilizado por todos os demais agentes sem alteração.
+`.claude/agents/` contém o pipeline de 21 agentes especializados que validou e planejou a MOVIVO (Clóvis, Gabriel, Caio, Kimura, Helena, Alexandre, Eduardo, Lucas, Sofia, Rafael, Sato, Victor, Leonardo, Felipe, Mariana, Henrique e os de conteúdo e receita). As fases 1 a 4 foram concluídas e geraram os relatórios que embasam a v2. Para novas linhas de produto, a ordem é fixa (estratégia e marca → jurídico e financeiro → produto e design → arquitetura, segurança e IA → desenvolvimento → infraestrutura → conteúdo → receita), cada agente recebe o input do usuário mais os relatórios anteriores, e Clóvis é o gate: sem `VALIDADO`, nada avança. Relatórios são salvos fora do repositório, por ideia, e terminam com a seção "Fontes Consultadas".

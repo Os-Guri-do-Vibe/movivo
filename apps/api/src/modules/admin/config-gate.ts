@@ -17,8 +17,8 @@ import {
   type L1GuardrailCandidate,
 } from '@movivo/shared';
 
-import { matchesTerm, normalizeForMatch } from '../../core/agent-config/text-normalize';
-import { normalizeFaqQuestion } from '../../core/agent-config/faq.service';
+import { matchesTerm, normalizeForMatch } from '../../core/attendance-rules/text-normalize';
+import { normalizeFaqQuestion } from '../../core/attendance-rules/faq.service';
 import { detectInjection } from '../../core/validation/prompt-injection';
 import { textSignals } from '../conversation/safety-text-rules';
 import { languageViolations } from '../planning/tasks/common';

@@ -1,7 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { L1GuardrailService } from '../../core/agent-config/l1-guardrail.service';
+import type { L1GuardrailService } from '../../core/attendance-rules/l1-guardrail.service';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import type { AuditService } from './audit.service';

@@ -17,7 +17,7 @@ import { desc, eq, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { z } from 'zod';
 
-import { ForbiddenTopicsService } from '../../core/agent-config/forbidden-topics.service';
+import { ForbiddenTopicsService } from '../../core/attendance-rules/forbidden-topics.service';
 import { aiForbiddenTopics, staff } from '../../core/database/schema';
 import {
   TenantDatabase,

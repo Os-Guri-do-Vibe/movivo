@@ -2,7 +2,7 @@ import { migrationPostgresTls } from '../src/core/database/postgres-tls';
 /**
  * Teste de integração da imutabilidade de `user_status_transitions` (US-8.3/TASK-8.3.1).
  *
- * Espelha literalmente `agent-config-immutability.int-spec.ts` — o padrão foi provado contra
+ * Espelha literalmente o spec de imutabilidade de `audit_logs` — o padrão foi provado contra
  * Postgres real na Sprint 7 e não há razão para inventar um mecanismo novo. Prova as duas
  * barreiras de `buildStatusTransitionsImmutabilitySql` **separadamente, contra a role certa**:
  *

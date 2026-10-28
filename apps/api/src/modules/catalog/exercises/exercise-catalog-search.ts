@@ -12,7 +12,7 @@
  * Função pura sobre o snapshot publicado (`ExerciseCatalogProvider.getAll()`): nunca cria nem
  * altera exercício.
  */
-import { normalizeForMatch } from '../../../core/agent-config/text-normalize';
+import { normalizeForMatch } from '../../../core/attendance-rules/text-normalize';
 import type { CatalogExercise } from './exercise-catalog';
 
 export const CATALOG_SEARCH_DEFAULT_LIMIT = 20;

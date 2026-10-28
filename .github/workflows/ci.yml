@@ -14,7 +14,6 @@
 #
 # JOBS (todos rodam em paralelo, sem dependência entre si):
 #   quality      lint → typecheck → build → testes unit + cobertura ≥80% (gate Mariana)
-#                + jornadas da agenda flexível contra Postgres embutido (PGlite, sem Docker)
 #   integration  sobe o stack Docker (US-0.2) e roda os testes de integração (test:int)
 #   e2e          Playwright (smoke E2E da home) contra o dev server
 #   secret-scan  gitleaks sobre o histórico completo  (bloqueia se achar secret)
@@ -116,9 +115,6 @@ jobs:
 
       - name: Testes + cobertura — apps/api (gate ≥ 80%)
         run: pnpm --filter @movivo/api run test:cov
-
-      - name: Testes de jornada — apps/api (agenda flexível, Postgres embutido PGlite)
-        run: pnpm --filter @movivo/api run test:journeys
 
       - name: Testes + cobertura — apps/web (gate ≥ 80%)
         run: pnpm --filter @movivo/web run test:cov

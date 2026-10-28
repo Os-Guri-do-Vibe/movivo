@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { ForbiddenTopicsUnavailableError } from '../../core/agent-config/forbidden-topics.service';
+import { ForbiddenTopicsUnavailableError } from '../../core/attendance-rules/forbidden-topics.service';
 import * as msg from './messages';
 import { ConversationOrchestrator } from './orchestrator.service';
 

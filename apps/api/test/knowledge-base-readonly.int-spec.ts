@@ -7,7 +7,7 @@ import { migrationPostgresTls } from '../src/core/database/postgres-tls';
  * teste prova que essa superfície nova **não** trouxe junto escrita no corpus: a role de
  * runtime (`movivo_app`) continua sem INSERT/UPDATE/DELETE em `knowledge_base` — a mesma
  * asserção sobre `information_schema.role_table_grants` usada em
- * `agent-config-immutability.int-spec.ts`, mais a tentativa real de escrita (42501).
+ * o spec de imutabilidade de `audit_logs`, mais a tentativa real de escrita (42501).
  *
  * O `REVOKE` vem de `KNOWLEDGE_BASE_SQL` em `core/database/migrate.ts`, aplicado DEPOIS do
  * grant genérico — se alguém inverter essa ordem, ou remover o REVOKE, este teste falha.

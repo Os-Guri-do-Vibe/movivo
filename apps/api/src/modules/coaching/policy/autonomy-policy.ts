@@ -157,11 +157,11 @@ export function evaluateAction(
   ];
   let result = fromLevel(level);
 
-  if (level === 'AUTO_WITH_LIMITS' && configured) {
+  if (level === 'AUTO_WITH_LIMITS' && policy && configured) {
     const check = withinLimit(action, configured.limit, context);
     if (check) {
       reasons.push(check.detail);
-      if (!check.ok) result = policy?.onLimitExceeded ?? 'ESCALATE';
+      if (!check.ok) result = policy.onLimitExceeded;
     }
   }
 

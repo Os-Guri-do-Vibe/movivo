@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ForbiddenTopicsService } from '../../core/agent-config/forbidden-topics.service';
+import type { ForbiddenTopicsService } from '../../core/attendance-rules/forbidden-topics.service';
 import type { TenantDatabase } from '../../core/database/tenant-database.service';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import type { AuditService } from './audit.service';

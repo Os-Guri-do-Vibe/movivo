@@ -189,6 +189,7 @@ createServer(async (request, response) => {
     const token = 'e2e-onboarding-token';
     anamnesisSessions.set(token, {
       currentStep: 1,
+      completedSteps: [],
       phoneVerified: false,
       code: null,
       parqBlocked: false,
@@ -208,9 +209,13 @@ createServer(async (request, response) => {
     if (!rest && request.method === 'GET') {
       return json(response, 200, {
         status: 'IN_PROGRESS',
+        flow: 'INITIAL',
         currentStep: session.currentStep,
+        completedSteps: session.completedSteps,
         phoneVerified: session.phoneVerified,
         primaryGoal: null,
+        consentsPending: false,
+        blocks: {},
         consents: [
           {
             type: 'TERMS_OF_SERVICE',
@@ -245,10 +250,6 @@ createServer(async (request, response) => {
             required: false,
           },
         ],
-        step1: null,
-        step2: null,
-        healthCompleted: false,
-        parqCompleted: false,
         outcome: null,
         expiresAt: '2099-01-01T00:00:00.000Z',
       });
@@ -270,15 +271,17 @@ createServer(async (request, response) => {
     if (rest === '/consents' && request.method === 'POST') {
       return json(response, 200, {});
     }
-    const stepMatch = /^\/step\/([123])$/.exec(rest ?? '');
+    const stepMatch = /^\/step\/([1-8])$/.exec(rest ?? '');
     if (stepMatch && request.method === 'PATCH') {
       const body = await readBody(request);
       // O gate PAR-Q é do SERVIDOR: o mock guarda as respostas e decide o `outcome` no
       // submit, como a API real. Sem isso o E2E não conseguiria provar que a variante da
       // tela de sucesso segue o servidor, e não um cálculo do cliente (TASK-6.12.1).
-      if (stepMatch[1] === '3')
+      if (stepMatch[1] === '6')
         session.parqBlocked = (body.parq?.answers ?? []).some((a) => a.answer === true);
-      session.currentStep = Number(stepMatch[1]) + 1;
+      const done = Number(stepMatch[1]);
+      session.completedSteps = [...new Set([...session.completedSteps, done])].sort();
+      session.currentStep = Math.min(done + 1, 8);
       return json(response, 200, { currentStep: session.currentStep });
     }
     if (rest === '/submit' && request.method === 'POST') {

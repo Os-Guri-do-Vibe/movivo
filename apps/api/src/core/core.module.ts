@@ -11,7 +11,7 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 
-import { AgentConfigModule } from './agent-config/agent-config.module';
+import { AttendanceRulesModule } from './attendance-rules/attendance-rules.module';
 import { AudioModule } from './audio/audio.module';
 import { ConfigModule } from './config';
 import { DatabaseModule } from './database';
@@ -31,7 +31,7 @@ import { ZodExceptionFilter } from './validation/zod-exception.filter';
     RedisModule,
     TelemetryModule,
     EventBusModule,
-    AgentConfigModule,
+    AttendanceRulesModule,
     KnowledgeModule,
     AudioModule,
   ],
@@ -42,7 +42,7 @@ import { ZodExceptionFilter } from './validation/zod-exception.filter';
     RedisModule,
     TelemetryModule,
     EventBusModule,
-    AgentConfigModule,
+    AttendanceRulesModule,
     KnowledgeModule,
     AudioModule,
   ],

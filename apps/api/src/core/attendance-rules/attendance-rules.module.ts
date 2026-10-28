@@ -1,5 +1,5 @@
 /**
- * `AgentConfigModule` — bloco CORE. `@Global()` via `CoreModule`: a conversa e o painel
+ * `AttendanceRulesModule` — bloco CORE. `@Global()` via `CoreModule`: a conversa e o painel
  * consomem as regras publicadas pelos profissionais (FAQ, temas proibidos e guardrails L1) por
  * DI, sem importar módulo de domínio um do outro (§12.5).
  */
@@ -16,4 +16,4 @@ const PROVIDERS = [FaqService, ForbiddenTopicsService, L1GuardrailService];
   providers: PROVIDERS,
   exports: PROVIDERS,
 })
-export class AgentConfigModule {}
+export class AttendanceRulesModule {}

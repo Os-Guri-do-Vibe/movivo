@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { CoachingAction } from '@movivo/shared';
 
-import { type AutonomyPolicy, evaluateAction, type PolicyContext } from './autonomy-policy';
+import {
+  type AutonomyPolicy,
+  autonomyPolicyFrom,
+  evaluateAction,
+  type PolicyContext,
+} from './autonomy-policy';
 
 const calm: PolicyContext = { activeSignals: [], uncertainty: 'LOW', reviewRequested: false };
 
@@ -151,8 +156,56 @@ describe('motor de políticas de autonomia', () => {
     expect(evaluateAction(volume(-5), calm, null).reasons[0]).toContain('padrão conservador');
   });
 
+  it('incerteza alta sem política publicada pergunta ao aluno', () => {
+    const verdict = evaluateAction(safetyMessage, { ...calm, uncertainty: 'HIGH' }, null);
+    expect(verdict.verdict).toBe('ASK');
+  });
+
   it('o veredito registra a versão da política aplicada', () => {
     expect(evaluateAction(volume(-5), calm, policy).policyVersion).toBe(4);
     expect(evaluateAction(volume(-5), calm, null).policyVersion).toBeNull();
+  });
+
+  it('ajuste de energia dentro e fora do limite em kcal', () => {
+    const energy = (deltaKcal: number): CoachingAction => ({
+      type: 'ADJUST_ENERGY_TARGET',
+      deltaKcal,
+    });
+    expect(evaluateAction(energy(-150), calm, policy).verdict).toBe('EXECUTE');
+    expect(evaluateAction(energy(250), calm, policy).verdict).toBe('ESCALATE');
+  });
+
+  it('ação com limite que não é numérico (mensagem) não é barrada por limite', () => {
+    const limited: AutonomyPolicy = {
+      ...policy,
+      byAction: { ...policy.byAction, SEND_MESSAGE: { level: 'AUTO_WITH_LIMITS', limit: 1 } },
+    };
+    expect(evaluateAction(safetyMessage, calm, limited).verdict).toBe('EXECUTE');
+  });
+});
+
+describe('autonomyPolicyFrom', () => {
+  it('converte os parâmetros publicados e guarda o documento de origem', () => {
+    const parsed = autonomyPolicyFrom(7, 'doc-1', {
+      actions: {
+        byAction: { SEND_MESSAGE: { level: 'AUTO', limit: 0 } },
+        highUncertainty: 'ESCALATE',
+        onLimitExceeded: 'ASK',
+      },
+    });
+    expect(parsed).toMatchObject({
+      version: 7,
+      documentId: 'doc-1',
+      highUncertainty: 'ESCALATE',
+      onLimitExceeded: 'ASK',
+    });
+  });
+
+  it('sem parâmetros usa os padrões conservadores: perguntar na incerteza, escalar no limite', () => {
+    expect(autonomyPolicyFrom(1, 'doc-2', {})).toMatchObject({
+      byAction: {},
+      highUncertainty: 'ASK',
+      onLimitExceeded: 'ESCALATE',
+    });
   });
 });

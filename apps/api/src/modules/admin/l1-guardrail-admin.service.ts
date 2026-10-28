@@ -12,7 +12,7 @@ import {
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 
-import { L1GuardrailService } from '../../core/agent-config/l1-guardrail.service';
+import { L1GuardrailService } from '../../core/attendance-rules/l1-guardrail.service';
 import { aiGuardrailRules, staff } from '../../core/database/schema';
 import {
   TenantDatabase,

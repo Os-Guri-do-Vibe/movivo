@@ -28,12 +28,12 @@ import {
   DecisionPipeline,
   type DecisionOutcome,
 } from '../coaching/decision/decision-pipeline.service';
-import { FaqService } from '../../core/agent-config/faq.service';
+import { FaqService } from '../../core/attendance-rules/faq.service';
 import {
   ForbiddenTopicsService,
   ForbiddenTopicsUnavailableError,
-} from '../../core/agent-config/forbidden-topics.service';
-import { L1GuardrailService } from '../../core/agent-config/l1-guardrail.service';
+} from '../../core/attendance-rules/forbidden-topics.service';
+import { L1GuardrailService } from '../../core/attendance-rules/l1-guardrail.service';
 import { PublishedPolicies } from '../coaching/policy/published-policies';
 import { SafetyService } from '../coaching/safety/safety.service';
 import { signalOf } from '../coaching/safety/sentinel-rules';

@@ -21,7 +21,7 @@ import {
   hasSpelledOutRun,
   refang,
   squashLetters,
-} from '../agent-config/text-normalize';
+} from '../attendance-rules/text-normalize';
 import {
   EXTERNAL_REFERENCE_PATTERN,
   INJECTION_ECHO_PATTERNS,
