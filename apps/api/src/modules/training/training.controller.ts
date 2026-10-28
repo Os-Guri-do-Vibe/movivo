@@ -5,6 +5,7 @@ import {
   Get,
   Header,
   Headers,
+  HttpCode,
   Param,
   Post,
   Put,
@@ -30,6 +31,7 @@ import {
 
 import { parseBody } from '../../core/validation/strict-input';
 import { ExecutionService } from './execution.service';
+import { TrainingLinkService } from './training-link.service';
 import { TrainingAccessService } from './training-access.service';
 
 const tokenSchema = z.object({ token: z.string().min(40).max(100) });
@@ -48,6 +50,7 @@ export class TrainingController {
   constructor(
     private readonly access: TrainingAccessService,
     private readonly executions: ExecutionService,
+    private readonly links: TrainingLinkService,
   ) {}
 
   @Post('access/exchange')
@@ -57,6 +60,16 @@ export class TrainingController {
   async exchange(@Body() raw: unknown) {
     const { token } = parseBody(tokenSchema, raw);
     return { sessionToken: await this.access.exchange(token) };
+  }
+
+  @Post('access/resend')
+  @HttpCode(200)
+  @Header('Cache-Control', 'private, no-store')
+  @Header('Referrer-Policy', 'no-referrer')
+  @ApiOperation({ summary: 'Reenvia um link novo ao WhatsApp do dono de um link já usado' })
+  async resend(@Body() raw: unknown) {
+    const { token } = parseBody(tokenSchema, raw);
+    return { status: await this.links.resend(token) };
   }
 
   @Get('access/peek')

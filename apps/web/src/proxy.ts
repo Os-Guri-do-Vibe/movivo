@@ -72,6 +72,9 @@ export const config = {
     '/dashboard/:path*',
     '/treino/:path*',
     '/api/workout/:path*',
+    // Treino do dia (v2): mesma proteção do legado.
+    '/hoje/:path*',
+    '/api/training/:path*',
     '/anamnese',
     // Anamnese complementar (dado de saúde): também precisa do nonce da CSP.
     '/anamnese/complementar',
