@@ -31,7 +31,6 @@ import { HealthCipherService } from '../../core/database/health-cipher.service';
 import { anamnesisSessions, protocols, protocolVersions } from '../../core/database/schema';
 import type { ContraindicationTag } from '../catalog/exercises/exercise-catalog';
 import { computeMesocycleSummary, persistMesocycleSummary } from './mesocycle-summary';
-import type { ProtocolGenerationTrace } from './protocol-planner';
 
 /**
  * Id da assinatura da metodologia do RT CREF. ponytail: constante fixa — a tabela
@@ -96,7 +95,7 @@ export interface PersistProtocolInput {
    * aqui e sem leitor), com discriminante `type: 'GENERATION_TRACE'` — mesmo padrão tipado de
    * `VOLUME_ADJUSTMENT`. Ausente (DLQ/scripts) → `diff` continua nulo.
    */
-  generationTrace?: ProtocolGenerationTrace | null;
+  generationTrace?: Record<string, unknown> | null;
   /** `AUTO_APPROVED` assina em nível de metodologia (RT); demais nascem sem assinatura. */
   signed: boolean;
 }

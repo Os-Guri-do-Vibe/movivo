@@ -28,18 +28,12 @@ describe('jobs.config', () => {
         'subscription-period-scan',
         'knowledge-processing',
         'dead-letter',
-        'protocol-generation',
-        // Regeração do protocolo pendente, pedida pelo profissional na fila de revisão.
-        'protocol-regeneration',
         // Fila do profissional, categoria "Disponível para Revisão" — liberação automática
         // após a janela de cortesia de 1h.
         'protocol-auto-release',
         // Liberação automática da proposta de substituição de exercício via IA, após a
         // janela de cortesia de 30 min (achado 2026-09-02).
         'protocol-substitution-release',
-        // Renovação de protocolo por fim de mesociclo: scan diário + geração do próximo mesociclo.
-        'protocol-renewal-scan',
-        'protocol-renewal-generation',
         'sanity',
         // Espelho da aba "Conversas": baixa a mídia e confirma a mensagem digitada no celular.
         'whatsapp-mirror',
@@ -61,18 +55,18 @@ describe('jobs.config', () => {
   });
 
   it('mantém os parâmetros fixos de §6 (concorrência, lock, retries, backoff, rate)', () => {
-    expect(QUEUE_REGISTRY[QUEUE.protocolGeneration]).toMatchObject({
+    expect(QUEUE_REGISTRY[QUEUE.planGeneration]).toMatchObject({
       attempts: 3,
-      backoffMs: [2_000, 8_000, 32_000],
-      concurrency: 5,
-      lockMs: 120_000,
+      backoffMs: [10_000, 60_000, 300_000],
+      concurrency: 3,
+      lockMs: 600_000,
     });
     expect(QUEUE_REGISTRY[QUEUE.aiResponse].rateLimit).toEqual({ max: 80, durationMs: 1_000 });
     expect(QUEUE_REGISTRY[QUEUE.whatsappOutbound]).toMatchObject({ attempts: 5, concurrency: 10 });
   });
 
   it('resolveJobOptions aplica attempts da fila e limpeza central', () => {
-    const opts = resolveJobOptions(QUEUE.protocolGeneration);
+    const opts = resolveJobOptions(QUEUE.planGeneration);
     expect(opts.attempts).toBe(3);
     expect(opts.backoff).toEqual({ type: 'custom' });
     expect(opts.removeOnComplete.count).toBeGreaterThan(0);
@@ -80,9 +74,9 @@ describe('jobs.config', () => {
   });
 
   it('backoffDelay devolve o atraso da tentativa e satura no último', () => {
-    expect(backoffDelay(QUEUE.protocolGeneration, 1)).toBe(2_000);
-    expect(backoffDelay(QUEUE.protocolGeneration, 2)).toBe(8_000);
-    expect(backoffDelay(QUEUE.protocolGeneration, 9)).toBe(32_000); // satura
+    expect(backoffDelay(QUEUE.planGeneration, 1)).toBe(10_000);
+    expect(backoffDelay(QUEUE.planGeneration, 2)).toBe(60_000);
+    expect(backoffDelay(QUEUE.planGeneration, 9)).toBe(300_000); // satura
     expect(backoffDelay(QUEUE.conversionSequence, 1)).toBe(5_000);
   });
 

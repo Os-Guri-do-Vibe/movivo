@@ -87,13 +87,11 @@ import {
   violationKey,
 } from '../protocol/validation/validation.service';
 import { WorkoutPresentationService } from '../protocol/workout-presentation.service';
-import { PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS } from '../protocol/protocol-generation.worker';
 import {
-  regenerationJobId,
-  type ProtocolRegenerationJob,
-  type ProtocolRegenerationStatus,
-} from '../protocol/protocol-regeneration.worker';
-import { type ReviewHoldKind, ReviewHoldService } from '../protocol/review-hold.service';
+  PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS,
+  type ReviewHoldKind,
+  ReviewHoldService,
+} from '../protocol/review-hold.service';
 import { AuditService } from './audit.service';
 
 /**
@@ -141,8 +139,6 @@ const catalogSearchQuerySchema = z.object({
 });
 /** `true` = a tela de revisão está aberta (renova a trava); `false` = fechou (solta e dispara o que venceu). */
 const reviewHoldSchema = z.object({ active: z.boolean() });
-/** `true` = o profissional confirmou que a regeração descarta a edição manual dele. */
-const regenerateSchema = z.object({ confirmOverwriteEdit: z.boolean().optional() }).default({});
 const resolveSchema = z.object({
   resolution: z.string().trim().min(3).max(80),
   notes: z.string().trim().min(3).max(1000),
@@ -175,28 +171,11 @@ export interface QueueItem {
    */
   origin: 'PARQ' | 'FALLBACK' | 'EDIT' | 'QUALITY' | 'AI_SUBSTITUTION' | 'CATALOG_GAP' | null;
   isFallback?: boolean;
-  /**
-   * Só protocolo: dá para refazer o conteúdo a partir da anamnese (`anamnesis_session_id`).
-   * Protocolo de renovação (mesociclo 2+) não tem esse vínculo, e o botão "Gerar protocolo
-   * novamente" não aparece para ele.
-   */
-  canRegenerate?: boolean;
   /** Só protocolo: o conteúdo vigente é edição do profissional — regerar a descarta. */
   editedByProfessional?: boolean;
-  /**
-   * Só protocolo, e só enquanto há algo a dizer sobre o último pedido de regeração:
-   * `RUNNING` (gerando), `NOT_APPLIED` (a regeração não trocou o conteúdo — caiu no fallback
-   * de novo, ou o protocolo mudou no meio) ou `FAILED` (esgotou as tentativas).
-   */
-  regeneration?: RegenerationState;
   /** O profissional logado já abriu este item (estado de leitura do sino; não altera a fila). */
   read: boolean;
 }
-
-export type RegenerationState = 'RUNNING' | 'NOT_APPLIED' | 'FAILED';
-
-/** Falha de regeração antiga deixa de ser notícia: some do card depois de um dia. */
-const REGENERATION_FAILURE_VISIBLE_MS = 24 * 60 * 60 * 1000;
 
 /** Tipo de notificação do sino; alvo de `dashboard_notification_reads.kind`. */
 export type NotificationType = 'alert' | 'protocol' | 'substitution';
@@ -417,7 +396,6 @@ export class DashboardService {
                     : 'EDIT',
           ),
           isFallback: fromFallback,
-          canRegenerate: Boolean(row.anamnesisSessionId),
           editedByProfessional: isProfessionalAuthored(row.generatedBy),
         });
       }
@@ -534,12 +512,6 @@ export class DashboardService {
         workoutHandoffs: workoutHandoffs.sort(byAge),
       };
     });
-
-    const regenerations = await this.regenerationStates();
-    for (const item of [...protocolMandatory, ...optional]) {
-      const state = regenerations.get(item.id);
-      if (state) item.regeneration = state;
-    }
 
     const mandatory = [...workoutHandoffs, ...protocolMandatory].sort((a, b) =>
       a.createdAt.localeCompare(b.createdAt),
@@ -678,127 +650,6 @@ export class DashboardService {
     });
     this.queueEvents.emit('protocol');
     return edited;
-  }
-
-  /**
-   * "Gerar protocolo novamente": enfileira a regeração do conteúdo de um protocolo que ainda
-   * espera revisão (`ProtocolRegenerationWorker`). Responde na hora — a geração leva minutos
-   * e o painel acompanha pelo estado do job (`QueueItem.regeneration`) e pelo SSE da fila.
-   *
-   * Recusa o que a regeração não pode refazer: protocolo que já saiu da revisão (assinado ou
-   * liberado), protocolo de renovação (sem anamnese de origem) e consentimento de saúde
-   * revogado. Edição manual do profissional só é descartada com `confirmOverwriteEdit`.
-   */
-  async regenerateProtocol(actor: AuthenticatedUser, rawId: string, rawBody?: unknown) {
-    const id = this.parse(uuidSchema, rawId);
-    const body = this.parse(regenerateSchema, rawBody ?? {});
-    const queued = await this.scoped(actor, async (tx) => {
-      const row = await this.requireProtocol(tx, id, true);
-      if (row.status !== 'PENDING_SIGNATURE' || row.approvalStatus !== 'PENDING_REVIEW') {
-        throw new BadRequestException(
-          'Somente um protocolo aguardando revisão pode ser gerado novamente.',
-        );
-      }
-      if (!row.anamnesisSessionId) {
-        throw new BadRequestException({
-          code: 'PROTOCOL_REGENERATION_UNSUPPORTED',
-          message: 'Este protocolo não nasceu de uma anamnese e não pode ser gerado novamente.',
-        });
-      }
-      if (!(await this.healthConsent.hasActiveForUser(row.userId))) {
-        throw new BadRequestException({
-          code: 'HEALTH_CONSENT_REVOKED',
-          message: 'Consentimento de dados de saude revogado — geração indisponivel.',
-        });
-      }
-      const editedByProfessional = isProfessionalAuthored(row.generatedBy);
-      if (editedByProfessional && !body.confirmOverwriteEdit) {
-        throw new ConflictException({
-          code: 'PROFESSIONAL_EDIT_WOULD_BE_LOST',
-          message: 'Gerar novamente descarta a edição feita no protocolo. Confirme para continuar.',
-        });
-      }
-
-      const queue = this.queues.get(QUEUE.protocolRegeneration);
-      const previous = await queue.getJob(regenerationJobId(id));
-      if (previous) {
-        const state = await previous.getState();
-        if (state === 'waiting' || state === 'active' || state === 'delayed') {
-          throw new ConflictException({
-            code: 'PROTOCOL_REGENERATION_IN_PROGRESS',
-            message: 'Este protocolo já está sendo gerado novamente.',
-          });
-        }
-        // Concluído/falho de um pedido anterior: libera o id para o novo pedido.
-        await previous.remove();
-      }
-
-      const job: ProtocolRegenerationJob = {
-        userId: row.userId,
-        protocolId: id,
-        requestedBy: actor.userId,
-        ...(editedByProfessional ? { overrideProfessionalEdit: true } : {}),
-      };
-      await this.queues.enqueue(QUEUE.protocolRegeneration, 'regenerate', job, {
-        jobId: regenerationJobId(id),
-      });
-      await this.audit.append(tx, {
-        actorId: actor.userId,
-        userId: row.userId,
-        action: 'PROTOCOL_REGENERATION_REQUESTED',
-        entityType: 'protocol',
-        entityId: id,
-        changes: {
-          beforeHash: this.hashJson(row.content),
-          previousOrigin: row.generatedBy,
-          previousReviewUrgency: row.reviewUrgency,
-          discardsProfessionalEdit: editedByProfessional,
-        },
-      });
-      return { id, status: 'QUEUED' as const };
-    });
-    // O card passa a mostrar "gerando…" sem esperar o próximo polling.
-    this.queueEvents.emit('protocol');
-    return queued;
-  }
-
-  /**
-   * Estado do último pedido de regeração por protocolo, lido dos jobs da fila. Melhor
-   * esforço: se o Redis falhar, a fila do profissional continua carregando, só sem o selo.
-   */
-  private async regenerationStates(): Promise<Map<string, RegenerationState>> {
-    const states = new Map<string, RegenerationState>();
-    try {
-      const queue = this.queues.get(QUEUE.protocolRegeneration);
-      const [running, failed, completed] = await Promise.all([
-        queue.getJobs(['waiting', 'active', 'delayed'], 0, 199),
-        queue.getJobs(['failed'], 0, 199),
-        queue.getJobs(['completed'], 0, 199),
-      ]);
-      const protocolOf = (job: { data: unknown }) =>
-        (job.data as Partial<ProtocolRegenerationJob>).protocolId;
-      const recent = (job: { finishedOn?: number }) =>
-        Date.now() - (job.finishedOn ?? 0) < REGENERATION_FAILURE_VISIBLE_MS;
-      for (const job of failed) {
-        const protocolId = protocolOf(job);
-        if (protocolId && recent(job)) states.set(protocolId, 'FAILED');
-      }
-      for (const job of completed) {
-        const protocolId = protocolOf(job);
-        const result = job.returnvalue as { status?: ProtocolRegenerationStatus } | null;
-        if (protocolId && result?.status !== 'REGENERATED') states.set(protocolId, 'NOT_APPLIED');
-      }
-      for (const job of running) {
-        const protocolId = protocolOf(job);
-        if (protocolId) states.set(protocolId, 'RUNNING');
-      }
-    } catch (err) {
-      this.logger.warn(
-        { err: err instanceof Error ? err.message : String(err) },
-        'não foi possível ler o estado das regerações de protocolo',
-      );
-    }
-    return states;
   }
 
   /**

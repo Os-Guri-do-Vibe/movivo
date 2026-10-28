@@ -14,11 +14,9 @@
  *
  * Determinístico, sem I/O. É o gabarito de segurança do produto (a segurança mora aqui).
  */
-import type { GenerationGoal, WorkoutSplit } from '@movivo/shared';
+import type { WorkoutSplit } from '@movivo/shared';
 
 import type { ExerciseLevel } from '../../catalog/exercises/exercise-catalog';
-
-export const VALIDATION_RULES_VERSION = 'validation-rules-2026-10-v7';
 
 export type ValidationActionCode = 'PASS' | 'FLAG' | 'BLOCK';
 
@@ -52,27 +50,6 @@ export const PROFESSIONAL_OVERRIDABLE_RULES: ReadonlySet<string> = new Set([
   'SESSION_COUNT_MISMATCH',
   'WEEKDAY_MISMATCH',
 ]);
-
-/**
- * Padrões de movimento priorizados por objetivo — o gerador recebe isto como orientação
- * explícita no prompt. Sem ele, "Ganhar força" e "Melhorar o condicionamento físico"
- * produziriam o mesmo treino, que é o problema que a ampliação dos 9 objetivos existe
- * para resolver. Vazio = sem prioridade declarada (a metodologia do RT decide).
- */
-export const PRIORITY_PATTERNS_BY_GOAL: Record<GenerationGoal, readonly string[]> = {
-  // Achado 2026-10-21: 'ISOLATION' saiu desta lista — a metodologia diz que isolado é complemento,
-  // nunca base, e listá-lo como "padrão prioritário" empurrava o modelo no sentido oposto.
-  GAIN_MUSCLE: ['HORIZONTAL_PUSH', 'VERTICAL_PULL', 'SQUAT', 'HINGE'],
-  GAIN_STRENGTH: ['SQUAT', 'HINGE', 'HORIZONTAL_PUSH', 'VERTICAL_PULL'],
-  // Revisão 2026-09-29 (Victor): sem puxada, a lista induzia sessões de emagrecimento sem
-  // nenhum padrão de puxar — musculação bem estruturada para recomposição cobre os dois.
-  LOSE_FAT: ['SQUAT', 'HINGE', 'HORIZONTAL_PUSH', 'HORIZONTAL_PULL', 'LUNGE', 'CARDIO'],
-  CONDITIONING: ['CARDIO', 'SQUAT', 'LUNGE', 'CORE'],
-  HEALTH_ENERGY: ['CARDIO', 'CORE', 'SQUAT', 'HORIZONTAL_PULL'],
-  BUILD_ROUTINE: ['SQUAT', 'HORIZONTAL_PUSH', 'HORIZONTAL_PULL', 'CORE'],
-  RETURN_TO_TRAINING: ['SQUAT', 'HORIZONTAL_PUSH', 'HORIZONTAL_PULL', 'CORE'],
-  SPORT_EVENT: ['SQUAT', 'HINGE', 'LUNGE', 'CORE', 'CARDIO'],
-};
 
 /**
  * Divisões permitidas por nível (metodologia v2 do RT, item 1).

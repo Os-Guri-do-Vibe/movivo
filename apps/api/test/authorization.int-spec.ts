@@ -244,24 +244,19 @@ describe('autorização por recurso na API', () => {
       .expect(201);
   });
 
-  it('UUIDs de protocolo/aluno não substituem credenciais e propósitos não se cruzam', async () => {
+  it('UUIDs de plano/aluno não substituem credenciais e propósitos não se cruzam', async () => {
     const a = fixtures[0];
-    const protocolLink = await access.issue('PROTOCOL', a.userId, a.protocolId, 60000);
+    const planLink = await access.issue('PLAN', a.userId, a.userId, 60000);
     const portalLink = await access.issue('SUBSCRIPTION_PORTAL', a.userId, a.userId, 60000);
-    const own = await http()
-      .get(`${prefix}/protocols/by-token/${protocolLink.token}`)
-      .query({ userId: fixtures[1].userId, protocolId: fixtures[1].protocolId })
-      .expect(200);
-    expect(own.body.mesocycleName).toBe('Aluno A isolado');
-    await http().get(`${prefix}/protocols/by-token/${fixtures[1].protocolId}`).expect(404);
+    await http().get(`${prefix}/plans/by-token/${fixtures[1].userId}`).expect(404);
     await http().get(`${prefix}/subscription/${fixtures[1].userId}`).expect(404);
-    await http().get(`${prefix}/protocols/by-token/${portalLink.token}`).expect(404);
-    await http().get(`${prefix}/subscription/${protocolLink.token}`).expect(404);
+    await http().get(`${prefix}/plans/by-token/${portalLink.token}`).expect(404);
+    await http().get(`${prefix}/subscription/${planLink.token}`).expect(404);
     await http().get(`${prefix}/subscription/checkout/${portalLink.token}`).expect(404);
     await http().get(`${prefix}/subscription/${portalLink.token}`).expect(200);
     await http()
       .get(`${prefix}/workouts/sessions/${fixtures[1].sessionId}/share-card`)
-      .set('Authorization', `Bearer ${protocolLink.token}`)
+      .set('Authorization', `Bearer ${planLink.token}`)
       .expect(401);
   });
 
@@ -285,7 +280,6 @@ describe('autorização por recurso na API', () => {
     expect(own.body.blocks.registration.name).toBe('A privado');
     await http().get(`${prefix}/anamnesis/session/${ids[1].id}`).expect(404);
     await http().get(`${prefix}/checkin/session/${anamnesisTokens[0]}`).expect(404);
-    await http().get(`${prefix}/protocol-renewal/session/${anamnesisTokens[0]}`).expect(404);
   });
 });
 

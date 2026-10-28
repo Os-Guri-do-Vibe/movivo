@@ -39,7 +39,6 @@ import { StudentStateModule } from './modules/student-state/student-state.module
 import { DomainEventsModule } from './modules/domain-events/domain-events.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { ProtocolModule } from './modules/protocol/protocol.module';
-import { ProtocolRenewalModule } from './modules/protocol-renewal/protocol-renewal.module';
 import { SubscriptionModule } from './modules/subscription/subscription.module';
 import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 
@@ -54,7 +53,6 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
     AccountModule,
     AnamnesisModule,
     ProtocolModule,
-    ProtocolRenewalModule,
     WhatsappModule,
     AiCoachModule,
     CoachModule,

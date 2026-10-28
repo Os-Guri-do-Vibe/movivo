@@ -83,20 +83,6 @@ export const CRON_SCRIPTS: readonly CronScript[] = [
     resultLabels: { eligible: 'elegíveis', sent: 'na fila de envio' },
   },
   {
-    id: 'protocol-renewal-scan',
-    kind: 'CRON',
-    name: 'Renovação de mesociclo',
-    description:
-      'Detecta protocolos com mesociclo vencido e envia o convite para o formulário de renovação. Reenvia o convite quando o anterior expirou.',
-    queue: QUEUE.protocolRenewalScan,
-    schedulerId: 'protocol-renewal-scan',
-    cron: '0 9 * * * (America/Sao_Paulo)',
-    schedule: 'Todo dia às 09:00 (Brasília)',
-    runEffect:
-      'Varre agora os protocolos vencidos e envia o convite de renovação a quem ainda não tem um convite válido.',
-    resultLabels: { created: 'convites na fila de envio' },
-  },
-  {
     id: 'subscription-period-scan',
     kind: 'CRON',
     name: 'Encerramento de período pago',
@@ -174,36 +160,6 @@ export const TERMINAL_SCRIPTS: readonly TerminalScript[] = [
     notRunnableReason: ARGUMENT_REQUIRED,
   },
   {
-    id: 'check-protocol-queue-state',
-    kind: 'TERMINAL',
-    name: 'Estado do protocolo na fila',
-    description:
-      'Leitura pontual: mostra status, aprovação e urgência de revisão do protocolo de um aluno.',
-    file: 'apps/api/src/scripts/check-protocol-queue-state.ts',
-    command: 'node --enable-source-maps dist/scripts/check-protocol-queue-state.js <telefone>',
-    notRunnableReason: ARGUMENT_REQUIRED,
-  },
-  {
-    id: 'diagnose-protocol-fallback',
-    kind: 'TERMINAL',
-    name: 'Investigar protocolo em fallback',
-    description:
-      'Reexecuta a geração de protocolo de um aluno, sem gravar, para explicar por que caiu no template de fallback.',
-    file: 'apps/api/src/scripts/diagnose-protocol-fallback.ts',
-    command: 'node --enable-source-maps dist/scripts/diagnose-protocol-fallback.js <telefone>',
-    notRunnableReason: ARGUMENT_REQUIRED,
-  },
-  {
-    id: 'enqueue-protocol-auto-release',
-    kind: 'TERMINAL',
-    name: 'Reenfileirar liberação automática',
-    description:
-      'Enfileira o job de liberação automática que faltou para um protocolo de revisão opcional.',
-    file: 'apps/api/src/scripts/enqueue-protocol-auto-release.ts',
-    command: 'node --enable-source-maps dist/scripts/enqueue-protocol-auto-release.js <telefone>',
-    notRunnableReason: ARGUMENT_REQUIRED,
-  },
-  {
     id: 'generate-workout-magic-link',
     kind: 'TERMINAL',
     name: 'Gerar link mágico de treino',
@@ -232,44 +188,6 @@ export const TERMINAL_SCRIPTS: readonly TerminalScript[] = [
     file: 'apps/api/src/scripts/eval-agenda.ts',
     command: 'EVAL_PROVIDER=deepseek pnpm exec tsx src/scripts/eval-agenda.ts',
     notRunnableReason: 'Consome tokens do provedor e exige chave no ambiente — só no terminal.',
-  },
-  {
-    id: 'reenqueue-blocked-parq',
-    kind: 'TERMINAL',
-    name: 'Reenfileirar PAR-Q bloqueado',
-    description:
-      'Migração única: reenfileira a geração de protocolo dos alunos presos no antigo gate de PAR-Q. Aceita --dry-run.',
-    file: 'apps/api/src/scripts/reenqueue-blocked-parq.ts',
-    command: 'pnpm exec tsx src/scripts/reenqueue-blocked-parq.ts --dry-run',
-    notRunnableReason: OPERATOR_ONLY,
-  },
-  {
-    id: 'render-sample-pdf',
-    kind: 'TERMINAL',
-    name: 'PDF de amostra do protocolo',
-    description: 'Gera um PDF de protocolo de exemplo para conferir mudanças visuais.',
-    file: 'apps/api/src/scripts/render-sample-pdf.ts',
-    command: 'pnpm exec tsx src/scripts/render-sample-pdf.ts <saida.pdf>',
-    notRunnableReason: 'Grava um arquivo local — só no terminal.',
-  },
-  {
-    id: 'reprocess-protocol-fallback',
-    kind: 'TERMINAL',
-    name: 'Reprocessar protocolo em fallback',
-    description:
-      'Regera o conteúdo de um protocolo que nasceu como fallback e ainda não foi assinado. Segue pendente de assinatura CREF.',
-    file: 'apps/api/src/scripts/reprocess-protocol-fallback.ts',
-    command: 'node --enable-source-maps dist/scripts/reprocess-protocol-fallback.js <telefone>',
-    notRunnableReason: ARGUMENT_REQUIRED,
-  },
-  {
-    id: 'resend-protocol-delivery',
-    kind: 'TERMINAL',
-    name: 'Reenviar entrega do protocolo',
-    description: 'Reenvia por WhatsApp a entrega do protocolo ativo de um aluno.',
-    file: 'apps/api/src/scripts/resend-protocol-delivery.ts',
-    command: 'pnpm exec tsx src/scripts/resend-protocol-delivery.ts <telefone>',
-    notRunnableReason: ARGUMENT_REQUIRED,
   },
   {
     id: 'reset-staff-mfa',

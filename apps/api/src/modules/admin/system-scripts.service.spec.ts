@@ -61,7 +61,6 @@ describe('SystemScriptsService.list', () => {
     expect(byKind('CRON').map((script) => script.id)).toEqual([
       'workout-daily-scan',
       'checkin-weekly-scan',
-      'protocol-renewal-scan',
       'subscription-period-scan',
       'outbox-relay-scan',
     ]);
@@ -138,11 +137,11 @@ describe('SystemScriptsService.run', () => {
   it('recusa uma segunda execução enquanto a manual anterior está em andamento', async () => {
     const { service, enqueue } = setup([
       fakeJob(
-        { kind: 'SCAN', manual: true, scriptId: 'protocol-renewal-scan' },
+        { kind: 'SCAN', manual: true, scriptId: 'subscription-period-scan' },
         { processedOn: 2_000 },
       ),
     ]);
-    await expect(service.run(ADMIN, 'protocol-renewal-scan')).rejects.toBeInstanceOf(
+    await expect(service.run(ADMIN, 'subscription-period-scan')).rejects.toBeInstanceOf(
       ConflictException,
     );
     expect(enqueue).not.toHaveBeenCalled();
@@ -151,11 +150,11 @@ describe('SystemScriptsService.run', () => {
   it('permite nova execução depois que a anterior terminou', async () => {
     const { service, enqueue } = setup([
       fakeJob(
-        { kind: 'SCAN', manual: true, scriptId: 'protocol-renewal-scan' },
+        { kind: 'SCAN', manual: true, scriptId: 'subscription-period-scan' },
         { processedOn: 2_000, finishedOn: 3_000, returnvalue: { created: 0 } },
       ),
     ]);
-    await service.run(ADMIN, 'protocol-renewal-scan');
+    await service.run(ADMIN, 'subscription-period-scan');
     expect(enqueue).toHaveBeenCalledOnce();
   });
 

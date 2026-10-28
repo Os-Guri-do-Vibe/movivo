@@ -58,6 +58,9 @@ const RELEASE_JOBS: Record<
  * tela (`release`) esse envio é disparado na hora. Estado todo em Redis (efêmero de
  * propósito): se a tela morrer sem avisar, a trava expira sozinha e o próprio worker retoma.
  */
+/** Janela em que um protocolo legado opcional ainda aguarda revisão no painel (legado até o M10). */
+export const PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 @Injectable()
 export class ReviewHoldService {
   constructor(

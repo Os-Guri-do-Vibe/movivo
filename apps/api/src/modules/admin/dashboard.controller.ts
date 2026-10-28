@@ -3,7 +3,6 @@ import {
   Controller,
   Get,
   Header,
-  HttpCode,
   Param,
   Patch,
   Post,
@@ -192,37 +191,6 @@ export class DashboardController {
     @Body() body: unknown,
   ) {
     return this.dashboard.editProtocol(actor, id, body);
-  }
-
-  @Post('protocols/:id/regenerate')
-  @HttpCode(202)
-  @Roles('PROFESSIONAL', 'ADMIN')
-  @ApiOperation({
-    summary: 'Gera o protocolo novamente (refaz o conteúdo pendente de revisão)',
-    description:
-      'Reprocessa o protocolo a partir da anamnese original, pelo mesmo pipeline da geração inicial (metodologia vigente, base científica e contexto do aluno). Responde 202 e roda em fila; o conteúdo atual só é trocado se a nova geração passar na validação. Protocolo de aluno sem PAR-Q bloqueante volta para a Revisão Humana Opcional. Se o conteúdo é edição do profissional, exige `confirmOverwriteEdit: true`.',
-  })
-  @ApiParam({ name: 'id', description: 'UUID do protocolo aguardando revisão.' })
-  @ApiBody({
-    required: false,
-    schema: { type: 'object', properties: { confirmOverwriteEdit: { type: 'boolean' } } },
-  })
-  @ApiResponse({ status: 202, description: 'Regeração enfileirada.' })
-  @ApiResponse({
-    status: 400,
-    description: 'Protocolo fora da revisão, sem anamnese de origem ou sem consentimento de saúde.',
-  })
-  @ApiResponse({ status: 404, description: 'Protocolo inexistente.' })
-  @ApiResponse({
-    status: 409,
-    description: 'Regeração já em andamento ou edição do profissional sem confirmação.',
-  })
-  regenerateProtocol(
-    @CurrentUser() actor: AuthenticatedUser,
-    @Param('id') id: string,
-    @Body() body: unknown,
-  ) {
-    return this.dashboard.regenerateProtocol(actor, id, body);
   }
 
   @Post('protocols/:id/amend')

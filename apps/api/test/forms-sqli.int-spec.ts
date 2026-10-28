@@ -34,7 +34,6 @@ import { AppModule } from '../src/app.module';
 import { loadEnv } from '../src/core/config/load-env';
 import { HealthCipherService } from '../src/core/database/health-cipher.service';
 import { CheckinService } from '../src/modules/checkin/checkin.service';
-import { ProtocolRenewalService } from '../src/modules/protocol-renewal/protocol-renewal.service';
 import { ProtocolRepository } from '../src/modules/protocol/protocol.repository';
 import { seedHealthEligibility } from './health-fixtures';
 
@@ -100,7 +99,6 @@ const content: ProtocolStructure = {
 
 let app: INestApplication;
 let checkins: CheckinService;
-let renewals: ProtocolRenewalService;
 let protocols: ProtocolRepository;
 let cipher: HealthCipherService;
 
@@ -150,7 +148,6 @@ beforeAll(async () => {
   app = await NestFactory.create(AppModule, { logger: false });
   await app.init();
   checkins = app.get(CheckinService, { strict: false });
-  renewals = app.get(ProtocolRenewalService, { strict: false });
   protocols = app.get(ProtocolRepository, { strict: false });
   cipher = app.get(HealthCipherService, { strict: false });
 }, 60_000);
@@ -250,88 +247,5 @@ describe('SQLi dinâmico — check-in semanal', () => {
     const [row] = await adminClient<Array<{ status: string }>>`
       SELECT status::text AS status FROM checkins WHERE token = ${sessionToken}`;
     expect(row?.status).toBe('PENDING');
-  });
-});
-
-describe('SQLi dinâmico — renovação de protocolo (fim de ciclo)', () => {
-  async function seedRenewalSession(seq: number) {
-    const { userId, protocolId } = await seedUserWithProtocol(seq);
-    const sessionToken = token();
-    await adminClient`
-      INSERT INTO protocol_renewal_sessions (user_id, previous_protocol_id, token, status, expires_at)
-      VALUES (${userId}::uuid, ${protocolId}::uuid, ${sessionToken}, 'IN_PROGRESS',
-              now() + interval '14 days')`;
-    return { userId, sessionToken };
-  }
-
-  it('texto livre dos blocos 3 (cifrado) e 5 (jsonb) é gravado verbatim, sem efeito colateral', async () => {
-    const { userId, sessionToken } = await seedRenewalSession(3);
-    const before = await integritySnapshot(userId);
-
-    for (const payload of SQLI_PAYLOADS) {
-      const startedAt = Date.now();
-      await renewals.patchStep(sessionToken, 5, {
-        changes: ['NONE'],
-        preferredDays: [],
-        dislikedExercise: { has: true, description: payload },
-        barriers: ['OTHER'],
-        barrierOther: payload,
-        goalChange: { changed: true, newGoal: 'OTHER', newGoalOther: payload },
-      });
-      await renewals.patchStep(sessionToken, 3, {
-        newPain: {
-          hasNewPain: true,
-          region: 'OTHER',
-          regionOther: payload,
-          intensity: 3,
-          trend: 'STABLE',
-          soughtCare: false,
-        },
-        parqRecheck: { changedToYes: true, detail: payload },
-      });
-      expect(Date.now() - startedAt).toBeLessThan(5_000);
-
-      const [row] = await adminClient<
-        Array<{
-          description: string;
-          barrier_other: string;
-          goal_other: string;
-          block3: Buffer;
-        }>
-      >`
-        SELECT data_block_5 -> 'dislikedExercise' ->> 'description' AS description,
-               data_block_5 ->> 'barrierOther' AS barrier_other,
-               data_block_5 -> 'goalChange' ->> 'newGoalOther' AS goal_other,
-               data_block_3 AS block3
-          FROM protocol_renewal_sessions WHERE token = ${sessionToken}`;
-      expect(row?.description).toBe(payload);
-      expect(row?.barrier_other).toBe(payload);
-      expect(row?.goal_other).toBe(payload);
-      const block3 = JSON.parse(await cipher.decryptHealth(row?.block3 as Buffer)) as {
-        newPain: { regionOther?: string };
-        parqRecheck: { detail?: string };
-      };
-      expect(block3.newPain.regionOther).toBe(payload);
-      expect(block3.parqRecheck.detail).toBe(payload);
-
-      expect(await integritySnapshot(userId)).toEqual(before);
-    }
-  }, 120_000);
-
-  it('byte nulo é recusado com 400 e o bloco não é alterado', async () => {
-    const { sessionToken } = await seedRenewalSession(4);
-    await expect(
-      renewals.patchStep(sessionToken, 5, {
-        changes: ['NONE'],
-        preferredDays: [],
-        dislikedExercise: { has: true, description: 'leg press\u0000' },
-        barriers: [],
-        goalChange: { changed: false },
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-
-    const [row] = await adminClient<Array<{ block5: unknown }>>`
-      SELECT data_block_5 AS block5 FROM protocol_renewal_sessions WHERE token = ${sessionToken}`;
-    expect(row?.block5).toBeNull();
   });
 });

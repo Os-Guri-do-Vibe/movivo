@@ -23,7 +23,7 @@ import {
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { strictSafeParse } from '../../core/validation/strict-input';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
-import { PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS } from '../protocol/protocol-generation.worker';
+import { PROTOCOL_OPTIONAL_REVIEW_WINDOW_MS } from '../protocol/review-hold.service';
 import { AI_SUBSTITUTION_REVIEW_WINDOW_MS } from '../protocol/protocol-substitution-release.worker';
 import {
   DashboardNotificationsService,

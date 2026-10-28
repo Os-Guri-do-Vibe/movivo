@@ -20,13 +20,6 @@ import { Module } from '@nestjs/common';
 import { AiCoachModule } from '../ai-coach/ai-coach.module';
 import { JobsModule } from '../jobs/jobs.module';
 import { ShortLinkModule } from '../short-link/short-link.module';
-import { ProtocolController } from './protocol.controller';
-import { ProtocolAutoReleaseWorker } from './protocol-auto-release.worker';
-import { ProtocolGenerationWorker } from './protocol-generation.worker';
-import { ProtocolGeneratorService } from './protocol-generator.service';
-import { ProtocolRegenerationWorker } from './protocol-regeneration.worker';
-import { ProtocolRenewalGenerationWorker } from './protocol-renewal-generation.worker';
-import { ProtocolRenewalScheduler } from './protocol-renewal.scheduler';
 import { ProtocolSubstitutionReleaseWorker } from './protocol-substitution-release.worker';
 import { ProtocolSubstitutionRepository } from './protocol-substitution.repository';
 import { CatalogModule } from '../catalog/catalog.module';
@@ -44,24 +37,16 @@ import { WorkoutPresentationService } from './workout-presentation.service';
  */
 @Module({
   imports: [AiCoachModule, JobsModule, ShortLinkModule, CatalogModule],
-  controllers: [ProtocolController],
   providers: [
-    ProtocolGeneratorService,
     MethodologyProvider,
     ValidationService,
     ProtocolRepository,
-    ProtocolGenerationWorker,
-    ProtocolAutoReleaseWorker,
-    ProtocolRegenerationWorker,
     ReviewHoldService,
-    ProtocolRenewalScheduler,
-    ProtocolRenewalGenerationWorker,
     ProtocolSubstitutionRepository,
     ProtocolSubstitutionReleaseWorker,
     WorkoutPresentationService,
   ],
   exports: [
-    ProtocolGeneratorService,
     ValidationService,
     MethodologyProvider,
     // O catálogo de exercícios mora no CatalogModule; reexportado até este módulo ser apagado.

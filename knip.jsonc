@@ -17,11 +17,10 @@
       "entry": [
         "src/scripts/**/*.ts",
         "scripts/**/*.{ts,mjs,js}",
-        "eval/**/*.ts",
         "test/**/*.ts",
         "src/core/database/schema/index.ts",
       ],
-      "project": ["src/**/*.ts", "scripts/**/*.{ts,mjs,js}", "eval/**/*.ts", "test/**/*.ts"],
+      "project": ["src/**/*.ts", "scripts/**/*.{ts,mjs,js}", "test/**/*.ts"],
       // O plugin do Drizzle carrega drizzle.config.ts, que lê secrets de /run/secrets.
       "drizzle": false,
       // Carregado por string como transport do pino em dev (core/logger/logger.module.ts).

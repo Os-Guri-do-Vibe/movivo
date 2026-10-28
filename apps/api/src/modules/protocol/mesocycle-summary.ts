@@ -37,8 +37,6 @@ const HIGH_RPE_THRESHOLD = 9;
 const MAX_DISTILLED_NOTES = 5;
 /** Exercícios cobertos no digest, ordenados por volume (nº de séries registradas). */
 const MAX_EXERCISES_IN_DIGEST = 10;
-/** Últimos N mesociclos em linha completa na ficha de periodização (Victor, ADR-008 §Camada 1). */
-export const PERIODIZATION_LEDGER_WINDOW = 6;
 
 export interface MesocycleExerciseDigest {
   exerciseId: string;
@@ -368,89 +366,4 @@ export async function persistMesocycleSummary(
     .update(protocols)
     .set({ mesocycleSummary: computed.summary, mesocycleNotesCipher: computed.notesCipher })
     .where(and(eq(protocols.id, protocolId), isNull(protocols.mesocycleSummary)));
-}
-
-/**
- * Decifra os comentários destilados de um mesociclo (`mesocycleNotesCipher`), se houver.
- * Mesmo racional de `decryptHealth` em qualquer outro ponto de leitura: fora da
- * transação, na conexão própria do `HealthCipherService`.
- */
-export async function readMesocycleNotes(
-  cipher: HealthCipherService,
-  notesCipher: Buffer | null,
-): Promise<string[]> {
-  if (!notesCipher) return [];
-  const parsed = JSON.parse(await cipher.decryptHealth(notesCipher)) as unknown;
-  return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
-}
-
-/**
- * ADR-008 Camada 2 — renderiza o digest de execução de UM mesociclo (o que acabou de
- * fechar) para o prompt. Só números/categorias determinísticas + os comentários já
- * destilados — nunca decide nada aqui, só formata (Victor: "resumo é computado, nunca
- * gerado").
- */
-export function formatExecutionDigest(summary: MesocycleSummary, notes: string[]): string {
-  const lines: string[] = [
-    `Aderência real: ${summary.adherence.completedSessions}/${summary.adherence.plannedSessions} sessões concluídas (${Math.round(summary.adherence.ratio * 100)}%).`,
-  ];
-  if (summary.rpe.avg !== null) {
-    lines.push(
-      `RPE real ao longo do ciclo: ${summary.rpe.first ?? 'n/d'} → ${summary.rpe.last ?? 'n/d'} (média ${summary.rpe.avg.toFixed(1)}).`,
-    );
-  }
-  lines.push(`Sessões com dor relatada: ${summary.painSessionCount}.`);
-  lines.push(`Check-ins semanais respondidos: ${summary.checkinsCompleted}.`);
-  for (const ex of summary.exercises) {
-    const loadPart =
-      ex.firstLoad !== null && ex.lastLoad !== null
-        ? `${ex.firstLoad}→${ex.lastLoad}${(ex.loadUnit ?? '').toLowerCase()}`
-        : 'sem carga registrada';
-    const repsPart =
-      ex.repMin !== null && ex.repMax !== null ? `, ${ex.repMin}-${ex.repMax} reps` : '';
-    lines.push(
-      `${ex.exerciseId}: ${loadPart}${repsPart}, ${ex.sessionsCompleted}/${ex.sessionsPrescribed} sessões concluídas.`,
-    );
-  }
-  if (notes.length) {
-    lines.push('Comentários do aluno em sessões com dor relatada ou esforço quase máximo:');
-    for (const note of notes) lines.push(`- ${note}`);
-  }
-  return lines.join('\n');
-}
-
-/**
- * ADR-008 Camada 1 — junta a janela recente (linhas completas) com a linha agregada de
- * carreira. Tamanho fixo no prompt: sempre no máximo `PERIODIZATION_LEDGER_WINDOW` linhas
- * completas + 1 linha de carreira, não importa quantos mesociclos o titular tenha.
- */
-export function formatPeriodizationLedger(
-  recentLedgerLines: string[],
-  careerDigestLine: string | null,
-): string {
-  const lines = careerDigestLine ? [careerDigestLine, ...recentLedgerLines] : recentLedgerLines;
-  return lines.join('\n');
-}
-
-/**
- * Agrega os mesociclos que ficaram FORA da janela recente numa única linha de tamanho
- * fixo — total de ciclos, fases já cumpridas e aderência média. `null` quando não há
- * mesociclo além da janela (titular ainda recente).
- */
-export function buildCareerDigestLine(olderSummaries: MesocycleSummary[]): string | null {
-  if (olderSummaries.length === 0) return null;
-  const phaseCounts = new Map<string, number>();
-  let totalPainSessions = 0;
-  for (const s of olderSummaries) {
-    phaseCounts.set(s.phase, (phaseCounts.get(s.phase) ?? 0) + 1);
-    totalPainSessions += s.painSessionCount;
-  }
-  const phaseSummary = [...phaseCounts.entries()]
-    .map(([phase, count]) => `${count}x ${phase}`)
-    .join(', ');
-  const avgAdherence = average(olderSummaries.map((s) => s.adherence.ratio)) ?? 0;
-  return (
-    `Carreira (${olderSummaries.length} mesociclo(s) mais antigos, resumidos): fases ${phaseSummary} | ` +
-    `aderência média ${Math.round(avgAdherence * 100)}% | sessões com dor no total: ${totalPainSessions}.`
-  );
 }

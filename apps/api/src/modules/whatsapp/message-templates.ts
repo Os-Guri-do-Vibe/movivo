@@ -81,24 +81,6 @@ export function confirmationCareMessage(): string {
 }
 
 /**
- * Convite ao formulário de troca de protocolo por fim de mesociclo. Texto livre (não é
- * Template Meta aprovado): diferente do código de verificação da Etapa 1 — que é a
- * PRIMEIRA mensagem de um número novo —, este vai para um titular que já troca mensagem
- * com a MOVIVO ao longo de toda a assinatura (protocolo, check-in semanal, coach).
- */
-export function mesocycleRenewalMessage(firstName: string | null, link: string): string {
-  const greeting = firstName ? `Olá, ${firstName}!` : 'Olá!';
-  return (
-    `${greeting}\n\n` +
-    'Seu mesociclo atual chegou ao fim! Para preparar seu novo protocolo, precisamos ' +
-    'saber como foram estas últimas semanas. Leva poucos minutos.\n\n' +
-    `Responda por aqui: ${link}\n\n` +
-    'O seu treinador irá revisar ' +
-    'suas respostas antes de liberar o próximo mesociclo.'
-  );
-}
-
-/**
  * Identificador interno da mensagem de verificação. A EvolutionAPI renderiza o texto
  * com o código; não depende de cadastro externo de Template.
  */

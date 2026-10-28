@@ -145,39 +145,3 @@ export function measureProtocol(
       minutes.length > 0 ? minutes.reduce((a, b) => a + b, 0) / minutes.length : 0,
   };
 }
-
-/**
- * Texto das medições para o prompt de correção. Só descreve ("o que o rascunho contém") — a
- * instrução de quando isso é um problema vem da metodologia publicada, citada por quem usa.
- */
-export function describeMeasurements(measurements: ProtocolMeasurements): string {
-  const sets = Object.entries(measurements.weeklySetsByGroup)
-    .sort(([, a], [, b]) => b - a)
-    .map(
-      ([group, count]) =>
-        `${group}: ${count} séries em ${measurements.weeklyFrequencyByGroup[group] ?? 0} sessão(ões)`,
-    )
-    .join('; ');
-  const lines = [
-    `Séries por grupo muscular na semana (sem aquecimento nem cardio): ${sets || 'nenhuma'}.`,
-    ...measurements.emphasis.map(
-      (e) =>
-        `Ênfase "${e.group}": ${e.weeklySets} séries na semana, em ${e.frequency} sessão(ões)` +
-        (measurements.nonEmphasisAverageSets === null
-          ? '.'
-          : ` (média dos demais grupos principais: ${measurements.nonEmphasisAverageSets.toFixed(1)}).`),
-    ),
-    ...measurements.sessions.map(
-      (s) =>
-        `Sessão ${s.index + 1}${s.weekday ? ` (${s.weekday})` : ''}: ${s.exerciseCount} exercícios, grupos em sequência = ${s.groupSequence.join(' → ')}` +
-        (s.revisitedGroups.length > 0 ? ` (volta a: ${s.revisitedGroups.join(', ')})` : '') +
-        `; tempo estimado ≈ ${s.estimatedMinutes} min.`,
-    ),
-  ];
-  if (measurements.declaredSessionMinutes) {
-    lines.push(
-      `Tempo declarado pelo aluno: ${measurements.declaredSessionMinutes} min por sessão; estimativa média do rascunho ≈ ${Math.round(measurements.averageEstimatedMinutes)} min.`,
-    );
-  }
-  return lines.join('\n');
-}

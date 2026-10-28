@@ -188,33 +188,6 @@ export function assessQualityReview(
   };
 }
 
-/** Forma comparável: sem acento, caixa ou pontuação — o modelo cita a metodologia de memória. */
-const groundingForm = (value: string): string =>
-  value
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
-
-/**
- * O trecho citado pelo juiz está na metodologia publicada? Achado 2026-10-21 (produção e
- * laboratório): a checagem era `includes` literal, e UMA citação com a maiúscula trocada ("A
- * progressão…" onde o texto tem "…e a progressão…") invalidava o parecer inteiro — 27 de 28
- * execuções do laboratório ficaram sem avaliação. Cabe diferença de caixa, acento, espaço e
- * pontuação, e reticências emendando dois pedaços literais; paráfrase continua reprovando.
- */
-export function isGroundedInMethodology(excerpt: string, methodology: string): boolean {
-  const haystack = groundingForm(methodology);
-  const needle = groundingForm(excerpt);
-  if (needle.length >= 20 && haystack.includes(needle)) return true;
-  const parts = excerpt
-    .split(/\s*(?:\.\.\.|…|\[\.\.\.\])\s*/)
-    .map(groundingForm)
-    .filter((part) => part.length >= 12);
-  return parts.length > 1 && parts.every((part) => haystack.includes(part));
-}
-
 export function qualityCorrectionMessage(
   quality: ContextualQualityAssessment,
   measurementsText?: string,
