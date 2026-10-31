@@ -6,7 +6,7 @@
  * externo. Relato de dor passa pela sentinela de segurança na mesma transação do fechamento.
  */
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, eq, gte, inArray, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, lte } from 'drizzle-orm';
 
 import type {
   EnduranceMetrics,
@@ -435,6 +435,90 @@ export class ExecutionService {
     });
     await this.outbox.flushSoon();
     return view;
+  }
+
+  /**
+   * Atividade de plataforma externa (Strava): entra concluída, com métricas confirmadas (vêm do
+   * relógio, não da visão) e cumpre a sessão do plano daquele dia e modalidade, se houver uma em
+   * aberto. A mesma atividade (`externalId`) entra uma vez só: repetição devolve `null`.
+   */
+  async importActivity(
+    userId: string,
+    activity: {
+      externalId: string;
+      modality: ExecutionRow['modality'];
+      performedOn: string;
+      startedAt: Date;
+      durationMinutes: number;
+      metrics: EnduranceMetrics;
+      rpe: number | null;
+    },
+    now: Date = new Date(),
+  ): Promise<{ executionId: string; planned: boolean } | null> {
+    const result = await this.db.runAsUser(userId, 'USER', async (tx) => {
+      const [duplicate] = await tx
+        .select({ id: sessionExecutions.id })
+        .from(sessionExecutions)
+        .where(
+          and(
+            eq(sessionExecutions.userId, userId),
+            eq(sessionExecutions.externalId, activity.externalId),
+          ),
+        );
+      if (duplicate) return null;
+      const [scheduled] = await tx
+        .select({ id: scheduledSessions.id, planSessionId: scheduledSessions.planSessionId })
+        .from(scheduledSessions)
+        .innerJoin(planSessions, eq(planSessions.id, scheduledSessions.planSessionId))
+        .leftJoin(sessionExecutions, eq(sessionExecutions.scheduledSessionId, scheduledSessions.id))
+        .where(
+          and(
+            eq(scheduledSessions.userId, userId),
+            eq(scheduledSessions.scheduledOn, activity.performedOn),
+            eq(scheduledSessions.status, 'PLANNED'),
+            eq(planSessions.modality, activity.modality),
+            isNull(sessionExecutions.id),
+          ),
+        )
+        .limit(1);
+      const [user] = await tx
+        .select({ timezone: users.timezone })
+        .from(users)
+        .where(eq(users.id, userId));
+      const load =
+        activity.rpe !== null ? sessionLoad(activity.rpe, activity.durationMinutes) : null;
+      const [created] = await tx
+        .insert(sessionExecutions)
+        .values({
+          userId,
+          scheduledSessionId: scheduled?.id ?? null,
+          planSessionId: scheduled?.planSessionId ?? null,
+          modality: activity.modality,
+          performedOn: activity.performedOn,
+          status: 'COMPLETED',
+          source: 'STRAVA',
+          externalId: activity.externalId,
+          startedAt: activity.startedAt,
+          finishedAt: now,
+          rpe: activity.rpe,
+          durationMinutes: activity.durationMinutes,
+          load,
+          loggedLate: activity.performedOn < todayIn(user?.timezone ?? null, now),
+        })
+        .returning();
+      if (!created) throw new Error('falha ao registrar a atividade');
+      await this.upsertMetrics(tx, userId, created.id, activity.metrics, true);
+      if (scheduled) {
+        await tx
+          .update(scheduledSessions)
+          .set({ status: 'DONE' })
+          .where(eq(scheduledSessions.id, scheduled.id));
+      }
+      await this.afterClose(tx, userId, created, { status: 'COMPLETED', painReports: [] });
+      return { executionId: created.id, planned: Boolean(scheduled) };
+    });
+    await this.outbox.flushSoon();
+    return result;
   }
 
   // --- Internos ---------------------------------------------------------------------------

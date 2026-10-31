@@ -38,6 +38,7 @@ const EXPECTED_TABLES = [
   // Cadastro, consentimento e acesso.
   'users',
   'staff',
+  'anamnesis_session_photos',
   'anamnesis_sessions',
   'consents',
   'auth_sessions',
@@ -96,6 +97,8 @@ const EXPECTED_TABLES = [
   'body_assessments',
   'check_ins',
   'weekly_reviews',
+  'medical_exams',
+  'wearable_connections',
   // Trilha de decisões, fila por exceção e outbox de eventos de domínio.
   'coaching_proposals',
   'coaching_decisions',
@@ -111,6 +114,8 @@ const EXPECTED_TABLES = [
   'eval_runs',
   // Estúdio de metodologia: documentos por domínio, versionados (global).
   'methodology_documents',
+  // Fichas dos agentes de IA, versionadas (global).
+  'agent_profiles',
   // Arquivo somente leitura do legado, gerado pela migração de corte.
   'legacy_protocols_archive',
   'legacy_protocol_versions_archive',

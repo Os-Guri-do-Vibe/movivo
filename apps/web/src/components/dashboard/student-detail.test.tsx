@@ -27,6 +27,16 @@ function withStudent(patch: Record<string, unknown>) {
 }
 
 describe('StudentDetail — ficha do Estado do Aluno', () => {
+  it('mostra a leitura dos analistas do acompanhamento como hipótese', async () => {
+    getStudent.mockResolvedValue(studentDetailResponse);
+    render(<StudentDetail id={ID} />);
+    const section = (await screen.findByRole('region', { name: 'Acompanhamento' })) as HTMLElement;
+    expect(within(section).getByText(/hipóteses, não fatos/)).toBeVisible();
+    expect(within(section).getByText('Hábitos')).toBeVisible();
+    expect(within(section).queryByText('Recuperação')).toBeNull();
+    expect(within(section).getByText(/Priorizar a sessão-chave/)).toBeVisible();
+  });
+
   it('mostra quem é, plano, adesão, saúde e a linha do tempo do mais recente ao mais antigo', async () => {
     getStudent.mockResolvedValue(studentDetailResponse);
     render(<StudentDetail id={ID} />);

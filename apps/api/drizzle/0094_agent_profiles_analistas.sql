@@ -1,0 +1,2 @@
+ALTER TABLE "agent_profiles" DROP CONSTRAINT "ck_agent_profiles_agent";--> statement-breakpoint
+ALTER TABLE "agent_profiles" ADD CONSTRAINT "ck_agent_profiles_agent" CHECK ("agent_profiles"."agent" in ('COORDINATOR', 'STRATEGY', 'STRENGTH', 'RUNNING', 'HYROX', 'HYBRID', 'NUTRITION', 'COMMUNICATION', 'RECOVERY', 'HABITS'));

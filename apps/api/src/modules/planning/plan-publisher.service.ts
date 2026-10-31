@@ -8,10 +8,12 @@
  * removidas da agenda (as feitas, perdidas e puladas ficam como histórico).
  */
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, gte, ne } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, ne } from 'drizzle-orm';
 
 import type {
+  GoalStrategy,
   NutritionPlanStructure,
+  PlanSession,
   TrainingPlanStructure,
   Weekday,
   AvailabilityWindow,
@@ -31,7 +33,7 @@ import { DomainEventRecorder } from '../domain-events/domain-event-recorder';
 import { occurrencesOf, windowsByWeekday } from './calc/plan-check';
 import { sessionLoad } from './calc/load';
 import type { HybridRules } from './calc/params';
-import { addDays, mondayOf, planWeek } from './calc/week-planner';
+import { addDays, mondayOf, planWeek, type WeekPlan } from './calc/week-planner';
 import type { StrategyOutput } from './tasks/strategy';
 
 /** Quantas semanas já nascem agendadas (a corrente a partir de hoje e a seguinte). */
@@ -42,6 +44,75 @@ export interface ScheduleContext {
   rules: HybridRules;
   minEasyDaysBetweenIntense: number;
   externalFixedDays: Readonly<Record<string, readonly Weekday[]>>;
+}
+
+/** Semana agendada pelo planejador (a ativação e a prévia da revisão usam a mesma conta). */
+export function scheduleWeek(
+  sessions: readonly PlanSession[],
+  schedule: ScheduleContext,
+  weekStart: string,
+  notBefore: string,
+): WeekPlan {
+  return planWeek({
+    weekStart,
+    notBefore,
+    windows: windowsByWeekday(schedule.windows),
+    occurrences: occurrencesOf(sessions, schedule.externalFixedDays, weekStart),
+    rules: schedule.rules,
+    minEasyDaysBetweenIntense: schedule.minEasyDaysBetweenIntense,
+  });
+}
+
+/** Sessões-modelo de um rascunho (cópia normalizada de `structure.sessions`). */
+export async function insertPlanSessions(
+  tx: TenantTransaction,
+  userId: string,
+  planId: string,
+  sessions: readonly PlanSession[],
+): Promise<void> {
+  await tx.insert(planSessions).values(
+    sessions.map((session) => ({
+      userId,
+      planId,
+      key: session.key,
+      modality: session.content.modality,
+      title: session.title,
+      priority: session.priority,
+      weeklyFrequency: session.weeklyFrequency,
+      estimatedMinutes: session.estimatedMinutes,
+      estimatedLoad: sessionLoad(session),
+      content: session.content,
+    })),
+  );
+}
+
+/** Estratégia salva do objetivo; `null` enquanto não foi definida. */
+export async function goalStrategyOf(
+  tx: TenantTransaction,
+  userId: string,
+  goalId: string,
+): Promise<GoalStrategy | null> {
+  const [goal] = await tx
+    .select({ strategy: studentGoals.strategy })
+    .from(studentGoals)
+    .where(and(eq(studentGoals.id, goalId), eq(studentGoals.userId, userId)));
+  return goal?.strategy ?? null;
+}
+
+/** Sessões do plano de treino mais recente (ativo ou em revisão): base do plano alimentar. */
+export async function latestTrainingSessions(
+  tx: TenantTransaction,
+  userId: string,
+): Promise<PlanSession[]> {
+  const [plan] = await tx
+    .select({ structure: trainingPlans.structure })
+    .from(trainingPlans)
+    .where(
+      and(eq(trainingPlans.userId, userId), inArray(trainingPlans.status, ['ACTIVE', 'DRAFT'])),
+    )
+    .orderBy(desc(trainingPlans.version))
+    .limit(1);
+  return plan?.structure.sessions ?? [];
 }
 
 @Injectable()
@@ -143,20 +214,7 @@ export class PlanPublisher {
       })
       .returning({ id: trainingPlans.id });
     if (!plan) throw new Error('falha ao gravar o plano de treino');
-    await tx.insert(planSessions).values(
-      input.structure.sessions.map((session) => ({
-        userId: input.userId,
-        planId: plan.id,
-        key: session.key,
-        modality: session.content.modality,
-        title: session.title,
-        priority: session.priority,
-        weeklyFrequency: session.weeklyFrequency,
-        estimatedMinutes: session.estimatedMinutes,
-        estimatedLoad: sessionLoad(session),
-        content: session.content,
-      })),
-    );
+    await insertPlanSessions(tx, input.userId, plan.id, input.structure.sessions);
     return { planId: plan.id, version };
   }
 
@@ -213,18 +271,12 @@ export class PlanPublisher {
     const firstMonday = mondayOf(startsOn);
     for (let week = 0; week < WEEKS_TO_SCHEDULE; week += 1) {
       const weekStart = addDays(firstMonday, week * 7);
-      const result = planWeek({
+      const result = scheduleWeek(
+        input.structure.sessions,
+        input.schedule,
         weekStart,
-        notBefore: week === 0 ? startsOn : weekStart,
-        windows: windowsByWeekday(input.schedule.windows),
-        occurrences: occurrencesOf(
-          input.structure.sessions,
-          input.schedule.externalFixedDays,
-          weekStart,
-        ),
-        rules: input.schedule.rules,
-        minEasyDaysBetweenIntense: input.schedule.minEasyDaysBetweenIntense,
-      });
+        week === 0 ? startsOn : weekStart,
+      );
       dropped += result.dropped.length;
       if (result.assignments.length > 0) {
         await tx.insert(scheduledSessions).values(

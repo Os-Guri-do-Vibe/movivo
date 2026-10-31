@@ -1,4 +1,4 @@
-import type { OnboardingOutcome } from '@movivo/shared';
+import { MOVIVO_CLUB_URL, type OnboardingOutcome } from '@movivo/shared';
 
 /**
  * Tela de sucesso (Sofia §9): duas configurações do MESMO componente. A variante vem
@@ -6,8 +6,6 @@ import type { OnboardingOutcome } from '@movivo/shared';
  * por query string (Sofia §9.2/9.3). Visualmente idênticas (mesmo Pulso, sem Coral,
  * sem ícone de alerta): no instante em que parecem diferentes, a V2 vira rejeição.
  */
-const MOVIVO_CLUB_URL = 'https://chat.whatsapp.com/J3xNcNWE0UcH4qd9I2uMgR';
-
 const CLUB_PERKS = [
   '🏋🏼‍♂️ Estar perto de pessoas que também buscam evolução',
   '🚀 Receber novidades e conteúdos em primeira mão',
@@ -19,9 +17,9 @@ const CLUB_PERKS = [
 
 const READY_STEPS = [
   'Seu perfil será processado pela MOVIVO.',
-  'Seu treino será preparado com base na nossa metodologia.',
+  'Seu treino e seu plano alimentar serão preparados com base na nossa metodologia e revisados pelos profissionais da MOVIVO.',
   'Você receberá tudo diretamente pelo WhatsApp.',
-  'A partir daí, seu personal MOVIVO acompanhará sua evolução e fará os ajustes necessários.',
+  'A partir daí, seu Treinador MOVIVO acompanhará sua evolução e fará os ajustes necessários.',
 ];
 
 const PENDING_STEPS = [
@@ -35,7 +33,7 @@ export function SuccessScreen({ outcome, name }: { outcome: OnboardingOutcome; n
   const ready = outcome === 'READY';
   return (
     <div className="flex flex-col gap-8">
-      <div>
+      <div className="text-center">
         <h1 className="text-h1 font-bold">
           {ready ? `Tudo pronto, ${name}!` : `Recebemos suas informações, ${name}!`}
         </h1>

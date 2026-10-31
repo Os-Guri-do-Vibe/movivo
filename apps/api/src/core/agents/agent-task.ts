@@ -20,7 +20,11 @@ export type StateSlice =
   | 'body'
   | 'adherence'
   | 'safety'
-  | 'recentDecisions';
+  | 'recentDecisions'
+  /** Última revisão semanal com a leitura dos analistas de recuperação e hábitos. */
+  | 'followUp'
+  /** Dia e fase estimada do ciclo menstrual (só com consentimento de saúde e do ciclo). */
+  | 'cycle';
 
 /** Uma violação encontrada por um validador determinístico. */
 export interface Violation {

@@ -33,6 +33,48 @@ describe('computeSignals', () => {
     expect(kinds([week(0), week(1), week(2)])).toEqual([]);
   });
 
+  it('check-in com sono, energia ou corpo ruins vira sinal de recuperação', () => {
+    const answered = (over: Partial<NonNullable<WeekMetrics['checkIn']>>) => ({
+      energy: 4,
+      sleep: 4,
+      soreness: 4,
+      intensityFeel: null,
+      barrier: null,
+      foodDifficulty: null,
+      ...over,
+    });
+    expect(kinds([week(0), week(1, { checkIn: answered({}) })])).toEqual([]);
+    const low = computeSignals([week(0), week(1, { checkIn: answered({ sleep: 2 }) })], ctx);
+    expect(low.map((s) => s.kind)).toEqual(['RECOVERY_LOW']);
+    expect(low[0]?.detail).toContain('sono 2/5');
+    expect(
+      kinds([week(0), week(1, { checkIn: answered({ intensityFeel: 'Pesado demais' }) })]),
+    ).toEqual(['RECOVERY_LOW']);
+    // Check-in antigo não conta: só o da semana revisada.
+    expect(kinds([week(0, { checkIn: answered({ energy: 1 }) }), week(1)])).toEqual([]);
+  });
+
+  it('barreira contada no check-in vira sinal de hábitos e libera mensagem', () => {
+    const signals = computeSignals(
+      [
+        week(0),
+        week(1, {
+          checkIn: {
+            energy: 4,
+            sleep: 4,
+            soreness: null,
+            intensityFeel: null,
+            barrier: 'Falta de tempo',
+            foodDifficulty: null,
+          },
+        }),
+      ],
+      ctx,
+    );
+    expect(signals.map((s) => s.kind)).toEqual(['BARRIER_REPORTED']);
+    expect(allowedActions(signals)).toEqual(['ASK_STUDENT', 'SEND_MESSAGE']);
+  });
+
   it('adesão baixa só dispara com duas semanas seguidas', () => {
     expect(kinds([week(0), week(1, { done: 1 })])).toEqual([]);
     expect(kinds([week(0), week(1, { done: 1 }), week(2, { done: 1 })])).toContain('ADHERENCE_LOW');

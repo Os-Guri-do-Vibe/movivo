@@ -39,12 +39,14 @@ import {
   goals,
   modalities,
   nutrition,
+  pain,
   parq,
   preferences,
   routine,
 } from './onboarding-fixtures';
 import { HealthConsentService } from '../src/core/database/health-consent.service';
 import { AnamnesisService } from '../src/modules/anamnesis/anamnesis.service';
+import { BodyPhotoService } from '../src/modules/anamnesis/body-photo.service';
 import { SafetyService } from '../src/modules/coaching/safety/safety.service';
 import { DomainEventRecorder } from '../src/modules/domain-events/domain-event-recorder';
 import type { OutboxRelay } from '../src/modules/domain-events/outbox-relay';
@@ -103,6 +105,7 @@ const queues = {
 const phoneVerification = new PhoneVerificationService(tenant, queues, logger);
 const recorder = new DomainEventRecorder();
 const outbox = { flushSoon: async () => undefined } as unknown as OutboxRelay;
+const photos = new BodyPhotoService(tenant, cipher, consents, new HealthConsentService(tenant));
 const service = new AnamnesisService(
   logger,
   tenant,
@@ -115,6 +118,7 @@ const service = new AnamnesisService(
   new SafetyService(tenant, recorder, outbox),
   recorder,
   outbox,
+  photos,
 );
 
 const adminClient = postgres({
@@ -182,7 +186,8 @@ async function completeStep1(token: string, data = step1()) {
 afterAll(async () => {
   try {
     await adminClient.unsafe(
-      `DELETE FROM consents WHERE anamnesis_session_id IN
+      `DELETE FROM body_photos WHERE user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
+       DELETE FROM consents WHERE anamnesis_session_id IN
          (SELECT id FROM anamnesis_sessions WHERE token LIKE '%${RUN}%')
          OR user_id IN (SELECT id FROM users WHERE phone_number LIKE '+5541${RUN}%');
        DELETE FROM anamnesis_sessions WHERE token LIKE '%${RUN}%'
@@ -196,7 +201,7 @@ afterAll(async () => {
   }
 }, 30_000);
 
-describe('ANAMNESE em 8 etapas — fluxo completo', () => {
+describe('ANAMNESE em 9 etapas — fluxo completo', () => {
   it('cadastro → 8 etapas → envio: titular, Estado do Aluno, evento e filas', async () => {
     const { token } = await service.start({ primaryGoal: 'GAIN_MUSCLE' });
     const b1 = await completeStep1(token);
@@ -250,6 +255,104 @@ describe('ANAMNESE em 8 etapas — fluxo completo', () => {
     expect(jobs).not.toContain('protocol-generation');
   });
 
+  it('fotos do corpo: exigem consentimento próprio, ficam cifradas e viram do titular no envio', async () => {
+    const jpeg = Buffer.concat([
+      Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+      Buffer.from('foto-secreta-xyz'),
+    ]);
+    const { token } = await service.start({});
+    await completeStep1(token);
+
+    // Sem o consentimento próprio, nada é gravado.
+    await expect(photos.put(token, 'FRONT', jpeg)).rejects.toThrow(/Autorize/);
+
+    await consents.recordForSessionToken(
+      token,
+      [
+        {
+          type: 'BODY_PHOTOS',
+          version: CONSENT_TEXTS.BODY_PHOTOS.version,
+          accepted: true,
+        },
+      ],
+      ORIGIN,
+    );
+    await photos.put(token, 'FRONT', jpeg);
+    await photos.put(token, 'LEFT', jpeg);
+    await photos.put(token, 'LEFT', jpeg); // substitui, não duplica
+    await photos.remove(token, 'LEFT');
+
+    const view = await service.getByToken(token);
+    expect(view.photos).toEqual(['FRONT']);
+    expect(view.bodyPhotosConsentAccepted).toBe(true);
+    expect(view.consents.map((c) => c.type)).not.toContain('BODY_PHOTOS');
+    expect(JSON.stringify(view)).not.toContain('foto-secreta');
+
+    const [stored] = await adminClient<Array<{ content: Buffer; format: string }>>`
+      SELECT content, format FROM anamnesis_session_photos
+        WHERE anamnesis_session_id = (SELECT id FROM anamnesis_sessions WHERE token = ${token})`;
+    expect(stored.format).toBe('jpeg');
+    expect(stored.content.toString('utf8')).not.toContain('foto-secreta');
+    expect(await cipher.decryptHealth(stored.content)).toBe(jpeg.toString('base64'));
+
+    await completeSteps(service, token);
+    await service.submit(token);
+    const [owned] = await adminClient<Array<{ user_id: string | null; n: number }>>`
+      SELECT p.user_id, (SELECT count(*)::int FROM body_photos b WHERE b.user_id = p.user_id) AS n
+        FROM anamnesis_session_photos p
+        WHERE p.anamnesis_session_id = (SELECT id FROM anamnesis_sessions WHERE token = ${token})`;
+    expect(owned.user_id).not.toBeNull();
+    expect(owned.n).toBe(1);
+    const [gallery] = await adminClient<Array<{ angle: string; storage_path: string }>>`
+      SELECT angle, storage_path FROM body_photos WHERE user_id = ${owned.user_id}`;
+    expect(gallery.angle).toBe('FRONT');
+    expect(gallery.storage_path).toMatch(/^anamnesis-photo:/);
+  });
+
+  it('retirar o aceite das fotos na sessão apaga as já enviadas e fecha novos envios', async () => {
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('foto-x')]);
+    const { token } = await service.start({});
+    await completeStep1(token);
+    const consent = { type: 'BODY_PHOTOS' as const, version: CONSENT_TEXTS.BODY_PHOTOS.version };
+    await consents.recordForSessionToken(token, [{ ...consent, accepted: true }], ORIGIN);
+    await photos.put(token, 'FRONT', jpeg);
+    expect((await service.getByToken(token)).photos).toEqual(['FRONT']);
+
+    await consents.recordForSessionToken(token, [{ ...consent, accepted: false }], ORIGIN);
+    const view = await service.getByToken(token);
+    expect(view.photos).toEqual([]);
+    expect(view.bodyPhotosConsentAccepted).toBe(false);
+    await expect(photos.put(token, 'FRONT', jpeg)).rejects.toThrow(/Autorize/);
+
+    await consents.recordForSessionToken(token, [{ ...consent, accepted: true }], ORIGIN);
+    await photos.put(token, 'BACK', jpeg);
+    expect((await service.getByToken(token)).photos).toEqual(['BACK']);
+  });
+
+  it('revogar o consentimento das fotos apaga as já enviadas', async () => {
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('outra-foto')]);
+    const { token } = await service.start({});
+    await completeStep1(token);
+    await consents.recordForSessionToken(
+      token,
+      [{ type: 'BODY_PHOTOS', version: CONSENT_TEXTS.BODY_PHOTOS.version, accepted: true }],
+      ORIGIN,
+    );
+    await photos.put(token, 'BACK', jpeg);
+    await completeSteps(service, token);
+    await service.submit(token);
+    const [{ id: userId }] = await adminClient<Array<{ id: string }>>`
+      SELECT user_id AS id FROM anamnesis_sessions WHERE token = ${token}`;
+
+    await consents.revoke(userId, 'BODY_PHOTOS');
+    const rows = await adminClient<Array<{ n: number }>>`
+      SELECT count(*)::int AS n FROM anamnesis_session_photos WHERE user_id = ${userId}`;
+    expect(rows[0]?.n).toBe(0);
+    const [gallery] = await adminClient<Array<{ deleted_at: Date | null }>>`
+      SELECT deleted_at FROM body_photos WHERE user_id = ${userId}`;
+    expect(gallery.deleted_at).not.toBeNull();
+  });
+
   it('saúde, alergia e texto livre ficam só cifrados e nunca voltam na leitura da sessão', async () => {
     const { token } = await service.start({});
     await completeStep1(token);
@@ -264,20 +367,21 @@ describe('ANAMNESE em 8 etapas — fluxo completo', () => {
     }
     const view = await service.getByToken(token);
     expect(JSON.stringify(view)).not.toMatch(/burpee|amendoim|casamento|KNEE/);
-    expect(view.completedSteps).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
-    expect(JSON.stringify(view.blocks)).toContain('UPPER_LOWER');
+    expect(view.completedSteps).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(JSON.stringify(view.blocks)).toContain('CHEST');
   });
 
   it('envio sem todas as etapas obrigatórias é recusado; a etapa de corpo é opcional', async () => {
     const { token } = await service.start({});
     await completeStep1(token);
     await service.patchStep(token, 2, goals());
-    await expect(service.submit(token)).rejects.toThrow(/Complete as etapas 3, 4, 5, 6, 7/);
+    await expect(service.submit(token)).rejects.toThrow(/Complete as etapas 3, 4, 5, 6, 7, 9/);
     await service.patchStep(token, 3, modalities());
     await service.patchStep(token, 4, routine());
     await service.patchStep(token, 5, preferences());
-    await service.patchStep(token, 6, parq());
+    await service.patchStep(token, 6, pain());
     await service.patchStep(token, 7, nutrition());
+    await service.patchStep(token, 9, parq());
     await expect(service.submit(token)).resolves.toMatchObject({ outcome: 'READY' });
   });
 
@@ -495,6 +599,7 @@ describe('ANAMNESE COMPLEMENTAR — aluno que já existia', () => {
     expect(view.flow).toBe('COMPLEMENTARY');
     expect(view.blocks).toMatchObject({
       goals: { goal: { primary: 'FAT_LOSS' } },
+      modalities: { modalities: [{ modality: 'STRENGTH', venue: 'HOME' }] },
       routine: { maxSessionsPerWeek: 3 },
     });
     await expect(service.patchStep(complementary.token, 1, step1())).rejects.toThrow(

@@ -2,7 +2,15 @@
  * Peças comuns às tarefas de planejamento: guardrails de linguagem, normalização de texto e
  * leitura segura das fatias do Estado do Aluno que os validadores precisam.
  */
+import { z } from 'zod';
+
 import type { Violation } from '../../../core/agents/agent-task';
+
+/** Orientação do profissional que revisou o protocolo e pediu ajuste (só no refazer pela fila). */
+export const professionalInstructionSchema = z.string().trim().min(1).max(1_000).optional();
+
+export const PROFESSIONAL_INSTRUCTION_RULE =
+  'Se "professionalInstruction" vier preenchida, é a orientação do profissional responsável que revisou este protocolo: siga-a com prioridade sobre preferências e escolhas de estilo, mas NUNCA acima da segurança, das limitações do aluno ou dos limites da metodologia.';
 
 /** Remove acentos e baixa a caixa — comparação de texto livre em português. */
 export function fold(text: string): string {

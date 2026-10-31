@@ -4,20 +4,20 @@ import { describe, expect, it } from 'vitest';
 import { ProgressBar } from './progress-bar';
 
 describe('ProgressBar', () => {
-  it('mostra a etapa atual de 8 e o nome dela', () => {
+  it('mostra a etapa atual de 9 e o nome dela', () => {
     render(<ProgressBar currentStep={3} completedSteps={[1, 2]} />);
     expect(screen.getByRole('progressbar')).toHaveAttribute(
       'aria-valuetext',
-      'Etapa 3 de 8: Modalidades',
+      'Etapa 3 de 9: Modalidades',
     );
-    expect(screen.getByText('Etapa 3 de 8 · Modalidades')).toBeInTheDocument();
+    expect(screen.getByText('Etapa 3 de 9 · Modalidades')).toBeInTheDocument();
   });
 
   it('marca concluídas as etapas salvas e a atual como atual', () => {
     render(<ProgressBar currentStep={4} completedSteps={[1, 2, 3]} />);
     expect(screen.getByLabelText('Etapa 2: Objetivo, concluída')).toBeInTheDocument();
     expect(screen.getByLabelText('Etapa 4: Rotina, atual')).toHaveAttribute('aria-current', 'step');
-    expect(screen.getByLabelText('Etapa 6: Saúde')).toBeInTheDocument();
+    expect(screen.getByLabelText('Etapa 6: Dores')).toBeInTheDocument();
   });
 
   it('etapa salva mas revisitada aparece como atual, não como concluída', () => {
@@ -25,17 +25,22 @@ describe('ProgressBar', () => {
     expect(screen.getByLabelText('Etapa 2: Objetivo, atual')).toBeInTheDocument();
   });
 
-  it('na anamnese complementar o cadastro não conta: são 7 etapas', () => {
+  it('na anamnese complementar o cadastro não conta: são 8 etapas', () => {
     render(<ProgressBar currentStep={2} completedSteps={[]} firstStep={2} />);
     expect(screen.getByRole('progressbar')).toHaveAttribute(
       'aria-valuetext',
-      'Etapa 1 de 7: Objetivo',
+      'Etapa 1 de 8: Objetivo',
     );
     expect(screen.queryByLabelText(/^Etapa 1:/)).not.toBeInTheDocument();
   });
 
+  it('a última etapa é a de segurança (PAR-Q)', () => {
+    render(<ProgressBar currentStep={9} completedSteps={[1, 2, 3, 4, 5, 6, 7, 8]} />);
+    expect(screen.getByText('Etapa 9 de 9 · Segurança')).toBeInTheDocument();
+  });
+
   it('mostra o contexto da etapa quando há', () => {
-    render(<ProgressBar currentStep={6} completedSteps={[]} context="Pergunta 2 de 9" />);
+    render(<ProgressBar currentStep={9} completedSteps={[]} context="Pergunta 2 de 9" />);
     expect(screen.getByText('Pergunta 2 de 9')).toBeInTheDocument();
   });
 });

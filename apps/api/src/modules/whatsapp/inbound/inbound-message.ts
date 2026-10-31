@@ -63,10 +63,18 @@ export const normalizedInboundSchema = z
         durationSeconds: z.number().int().positive().max(3600).optional(),
       })
       .optional(),
+    /** Foto ou PDF ainda não baixado (exame): só a referência, como o áudio. */
+    media: z
+      .object({
+        mediaKey: z.string().min(1).max(2000),
+        mimetype: z.string().min(1).max(100),
+        fileLength: z.number().int().nonnegative().optional(),
+      })
+      .optional(),
   })
   .strict()
-  .refine((value) => Boolean(value.text) || Boolean(value.audio), {
-    message: 'normalizedInbound precisa de text ou audio',
+  .refine((value) => Boolean(value.text) || Boolean(value.audio) || Boolean(value.media), {
+    message: 'normalizedInbound precisa de text, audio ou media',
   });
 
 export type NormalizedInbound = z.infer<typeof normalizedInboundSchema>;

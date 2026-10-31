@@ -13,12 +13,14 @@ import { PinoLogger } from 'nestjs-pino';
 import type {
   CoachingProposal,
   DeclaredGoalKind,
+  FollowUpAnalysis,
   ReviewSignal,
+  ReviewSignalKind,
   WeeklyReviewRecord,
 } from '@movivo/shared';
 
 import type { AgentContextSources } from '../../core/agents/agent-context';
-import { AgentRunner } from '../../core/agents/agent-runner';
+import { AgentRunner, AgentTaskError } from '../../core/agents/agent-runner';
 import { nutritionPlans, weeklyReviews } from '../../core/database/schema';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DecisionExecutor } from '../coaching/decision/decision-executor.service';
@@ -38,9 +40,12 @@ import {
   computeSignals,
   energyDeltaBounds,
   type GoalDirection,
+  HABITS_SIGNALS,
   MIN_VOLUME_STEP,
+  RECOVERY_SIGNALS,
 } from './review-signals';
-import { reviewTask, type ReviewOutput } from './tasks';
+import { habitsTask, recoveryTask, type AnalystInput } from './analyst-tasks';
+import { reviewTask, type ReviewInput, type ReviewOutput } from './tasks';
 
 const HISTORY_WEEKS = 6;
 
@@ -122,6 +127,7 @@ export class WeeklyReviewService {
 
     let output: ReviewOutput;
     let modelRunId: string | null = null;
+    let analyses: ReviewInput['analyses'];
     if (signals.length === 0) {
       output = {
         status: 'ON_TRACK',
@@ -130,17 +136,22 @@ export class WeeklyReviewService {
         interventions: [],
       };
     } else {
+      const analystInput: AnalystInput = {
+        weekStart,
+        goal: { direction: goal, primary: declared?.primary ?? null },
+        modalities: await this.modalitiesOf(userId, now),
+        weeks,
+        signals,
+      };
+      analyses = await this.analyze(userId, analystInput, now);
       const run = await this.runner.run(
         reviewTask,
         {
-          weekStart,
-          goal: { direction: goal, primary: declared?.primary ?? null },
-          modalities: await this.modalitiesOf(userId, now),
-          weeks,
-          signals,
+          ...analystInput,
           allowed: allowedActions(signals),
           energyBounds: energyDeltaBounds(goal),
           volumeBounds: { min: -(await this.volumeLimit()), max: MIN_VOLUME_STEP },
+          analyses,
         },
         { userId, sources: this.sources(userId, now) },
       );
@@ -157,6 +168,7 @@ export class WeeklyReviewService {
         actionType: item.action.type,
         rationale: item.rationale,
       })),
+      ...(analyses ? { analyses } : {}),
     };
     const [saved] = await this.db.runAsSystem((tx) =>
       tx
@@ -202,6 +214,37 @@ export class WeeklyReviewService {
       proposals: outcome.proposalIds.length,
       executed: outcome.executed,
     };
+  }
+
+  /**
+   * Analistas do acompanhamento, só os da área dos sinais. Sem leitura válida, a revisão segue
+   * sem ela: a leitura enriquece a revisão, não a bloqueia.
+   */
+  private async analyze(
+    userId: string,
+    input: AnalystInput,
+    now: Date,
+  ): Promise<NonNullable<ReviewInput['analyses']>> {
+    const kinds = input.signals.map((s) => s.kind);
+    const read = async (
+      task: typeof recoveryTask,
+      area: ReadonlySet<ReviewSignalKind>,
+    ): Promise<FollowUpAnalysis | null> => {
+      if (!kinds.some((kind) => area.has(kind))) return null;
+      try {
+        return (await this.runner.run(task, input, { userId, sources: this.sources(userId, now) }))
+          .output;
+      } catch (error) {
+        if (!(error instanceof AgentTaskError)) throw error;
+        this.logger.warn({ userId, taskId: task.id }, 'analista sem leitura válida; revisão segue');
+        return null;
+      }
+    };
+    const [recovery, habits] = await Promise.all([
+      read(recoveryTask, RECOVERY_SIGNALS),
+      read(habitsTask, HABITS_SIGNALS),
+    ]);
+    return { recovery, habits };
   }
 
   private async applyInterventions(

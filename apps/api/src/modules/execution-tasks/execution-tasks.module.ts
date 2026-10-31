@@ -11,6 +11,8 @@ import {
   substituteTask,
 } from '../conversation/tasks';
 import { foodLogCases, foodLogChecks, foodLogTask } from '../nutrition/food-log-task';
+import { commentExamCases, commentExamTask, readExamTask } from '../medical/exam-tasks';
+import { habitsCases, habitsTask, recoveryCases, recoveryTask } from '../progress/analyst-tasks';
 import { preferencesCases, preferencesTask, reviewCases, reviewTask } from '../progress/tasks';
 import { screenshotCases } from '../vision/vision-cases';
 import { mealPhotoTask, workoutScreenshotTask } from '../vision/vision-tasks';
@@ -34,5 +36,9 @@ export class ExecutionTasksModule implements OnModuleInit {
     this.registry.register(riskTask, riskCases);
     this.registry.register(reviewTask, reviewCases);
     this.registry.register(preferencesTask, preferencesCases);
+    this.registry.register(recoveryTask, recoveryCases);
+    this.registry.register(habitsTask, habitsCases);
+    this.registry.register(readExamTask, []);
+    this.registry.register(commentExamTask, commentExamCases);
   }
 }

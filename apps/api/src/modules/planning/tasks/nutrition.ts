@@ -18,7 +18,13 @@ import {
 
 import { defineAgentTask, type Validator, type Violation } from '../../../core/agents/agent-task';
 import { macroKcal, weeklyLossPct } from '../calc/energy';
-import { fold, healthRecords, outputLanguageViolations } from './common';
+import {
+  fold,
+  healthRecords,
+  outputLanguageViolations,
+  PROFESSIONAL_INSTRUCTION_RULE,
+  professionalInstructionSchema,
+} from './common';
 
 const dayBoundsSchema = z.object({
   energyKcal: z.object({ min: z.number(), max: z.number() }),
@@ -43,8 +49,10 @@ export const nutritionInputSchema = z.object({
   proteinPerMealMinG: z.number().nullable(),
   maxWeeklyWeightLossPct: z.number().nullable(),
   cookingCapacity: z.enum(['NONE', 'BASIC', 'GOOD']),
-  foodBudget: z.enum(['TIGHT', 'MODERATE', 'COMFORTABLE']),
+  /** Orçamento mensal de alimentação, em reais; `null` = o aluno não informou. */
+  foodBudgetMonthlyBrl: z.number().min(0).nullable(),
   mealsOutsideHomePerWeek: z.number().int().min(0).max(21),
+  professionalInstruction: professionalInstructionSchema,
 });
 export type NutritionInput = z.infer<typeof nutritionInputSchema>;
 
@@ -329,10 +337,11 @@ export const nutritionTask = defineAgentTask<NutritionInput, NutritionOutput>({
 Regras:
 1. A "strategy" do plano é exatamente a recebida. Escolha as metas de cada tipo de dia (treino e descanso) DENTRO dos limites em "bounds": energia (faixa), proteína, gordura mínima, fibra mínima e água mínima. Os macronutrientes precisam fechar com a energia (proteína 4 kcal/g, carboidrato 4 kcal/g, gordura 9 kcal/g). Dia de treino costuma ter mais carboidrato.
 2. Refeições: use as que o aluno já faz ("usualMeals"; pré e pós-treino são extras opcionais). A distribuição de energia soma 100% e a proteína das refeições fecha a meta do dia, com o mínimo por refeição principal da metodologia.
-3. Exemplos: combinações práticas e baratas, compatíveis com orçamento, capacidade de cozinhar e refeições fora de casa. NUNCA contrariar restrição alimentar nem alergia/intolerância registrada, e respeitar os alimentos que o aluno gosta ou evita (no Estado do Aluno).
+3. Exemplos: combinações práticas e baratas, compatíveis com o orçamento mensal (foodBudgetMonthlyBrl, em reais; null = não informado), capacidade de cozinhar e refeições fora de casa. NUNCA contrariar restrição alimentar nem alergia/intolerância registrada, e respeitar os alimentos que o aluno gosta ou evita (no Estado do Aluno).
 4. Suplementos: apenas os da lista permitida; se a lista estiver vazia, devolva lista vazia. Nunca sugira medicamento.
 5. guidelines: orientações curtas e acionáveis (hidratação, dia de treino longo, refeição fora de casa, o que fazer quando a rotina quebra). Em estratégia de restrição energética, nada de linguagem de culpa ou proibição.
-6. summary: 2 a 3 frases claras sobre a lógica do plano. Sem prometer resultado, sem diagnosticar.`,
+6. summary: 2 a 3 frases claras sobre a lógica do plano. Sem prometer resultado, sem diagnosticar.
+7. ${PROFESSIONAL_INSTRUCTION_RULE}`,
   tier: 'REASONING',
   methodology: ['NUTRITION'],
   state: ['identity', 'goals', 'restrictions', 'preferences', 'body', 'safety', 'training'],

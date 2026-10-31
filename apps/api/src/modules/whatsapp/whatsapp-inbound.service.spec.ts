@@ -20,7 +20,7 @@ import { HealthConsentService } from '../../core/database/health-consent.service
 import type { HealthCipherService } from '../../core/database/health-cipher.service';
 import { TenantDatabase } from '../../core/database/tenant-database.service';
 import { DomainEventBus } from '../../core/event-bus/event-bus.service';
-import { SUBSCRIPTION_INBOUND_EVENT } from '../../core/event-bus/events';
+import { MEDIA_INBOUND_EVENT, SUBSCRIPTION_INBOUND_EVENT } from '../../core/event-bus/events';
 import { RedisKeyBuilder } from '../../core/redis/redis-key.util';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { EvolutionTransport } from './evolution-transport';
@@ -83,6 +83,7 @@ function makeService(
     transcribe?: ReturnType<typeof vi.fn>;
     evolutionInstanceName?: string | null;
     downloadAudio?: ReturnType<typeof vi.fn>;
+    downloadMedia?: ReturnType<typeof vi.fn>;
     attendancePaused?: boolean;
   } = {},
 ) {
@@ -123,7 +124,9 @@ function makeService(
   } as unknown as HealthConsentService;
   const events = {
     request: vi.fn(async (event: string) =>
-      event === SUBSCRIPTION_INBOUND_EVENT ? (opts.subscriptionHandled ?? false) : false,
+      event === SUBSCRIPTION_INBOUND_EVENT
+        ? (opts.subscriptionHandled ?? false)
+        : event === MEDIA_INBOUND_EVENT,
     ),
   } as unknown as DomainEventBus;
   // A borda real da EvolutionAPI é exercitada no spec dela.
@@ -148,10 +151,17 @@ function makeService(
       base64: Buffer.from('OggS-test-audio').toString('base64'),
       mimetype: 'audio/ogg; codecs=opus',
     }));
+  const downloadMedia =
+    opts.downloadMedia ??
+    vi.fn(async () => ({
+      base64: Buffer.from('%PDF-1.7 exame').toString('base64'),
+      mimetype: 'application/pdf',
+    }));
   const evolutionTransport = {
     lastKnownInstanceName: () =>
       'evolutionInstanceName' in opts ? opts.evolutionInstanceName : INSTANCE_NAME,
     downloadAudio,
+    downloadMedia,
   } as unknown as EvolutionTransport;
   const mirror = { capture: vi.fn(), attachTranscript: vi.fn() };
   const service = new WhatsappInboundService(
@@ -185,6 +195,7 @@ function makeService(
     logger,
     transcribe,
     downloadAudio,
+    downloadMedia,
     mirror,
   };
 }
@@ -642,5 +653,82 @@ describe('WhatsappInboundService.ingest — mensagem de voz (US audio, Evolution
     expect(created.downloadAudio).not.toHaveBeenCalled();
     expect(created.transcribe).not.toHaveBeenCalled();
     expect(created.enqueue).not.toHaveBeenCalled();
+  });
+});
+
+describe('WhatsappInboundService.ingest — foto ou PDF (exame)', () => {
+  function mediaEdge(media: { mediaKey: string; mimetype: string; fileLength?: number }) {
+    return {
+      provider: 'EVOLUTION' as const,
+      verify: () => ({ ok: true as const }),
+      normalize: () => [{ messageId: 'doc-1', from: PHONE, media } as never],
+      capture: () => null,
+    };
+  }
+  const ingest = (created: ReturnType<typeof makeService>) =>
+    created.service.ingest({
+      provider: 'EVOLUTION',
+      rawBody: undefined,
+      headers: {},
+      body: {},
+      correlationId: 'media',
+    });
+
+  it('PDF conferido pelos bytes vai ao consumidor de exames, sem passar pela IA de conversa', async () => {
+    const created = makeService({
+      evolutionEdge: mediaEdge({ mediaKey: '{"id":"WA-2"}', mimetype: 'application/pdf' }),
+    });
+    await ingest(created);
+    expect(created.downloadMedia).toHaveBeenCalledWith(INSTANCE_NAME, '{"id":"WA-2"}');
+    expect(created.events.request).toHaveBeenCalledWith(
+      MEDIA_INBOUND_EVENT,
+      expect.objectContaining({ userId: USER_ID, mediaType: 'application/pdf' }),
+    );
+    expect(created.rpush).not.toHaveBeenCalled();
+    expect(created.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('conteúdo que não confere com o tipo: avisa e não entrega', async () => {
+    const created = makeService({
+      evolutionEdge: mediaEdge({ mediaKey: '{"id":"WA-2"}', mimetype: 'application/pdf' }),
+      downloadMedia: vi.fn(async () => ({
+        base64: Buffer.from('<script>').toString('base64'),
+        mimetype: 'application/pdf',
+      })),
+    });
+    await ingest(created);
+    expect(created.events.request).not.toHaveBeenCalledWith(MEDIA_INBOUND_EVENT, expect.anything());
+    expect(created.enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'audio-transcription-fallback',
+      expect.objectContaining({ type: 'CONVERSATION_MESSAGE' }),
+      expect.any(Object),
+    );
+  });
+
+  it('tipo fora da lista ou grande demais: nem baixa', async () => {
+    for (const media of [
+      { mediaKey: '{"id":"WA-3"}', mimetype: 'image/gif' },
+      { mediaKey: '{"id":"WA-4"}', mimetype: 'application/pdf', fileLength: 20 * 1024 * 1024 },
+    ]) {
+      const created = makeService({ evolutionEdge: mediaEdge(media) });
+      await ingest(created);
+      expect(created.downloadMedia).not.toHaveBeenCalled();
+    }
+  });
+
+  it('sem consentimento de saúde: recusa antes de baixar', async () => {
+    const created = makeService({
+      consentActive: false,
+      evolutionEdge: mediaEdge({ mediaKey: '{"id":"WA-2"}', mimetype: 'image/jpeg' }),
+    });
+    await ingest(created);
+    expect(created.downloadMedia).not.toHaveBeenCalled();
+    expect(created.enqueue).toHaveBeenCalledWith(
+      'whatsapp-outbound',
+      'health-consent-inactive',
+      expect.any(Object),
+      expect.any(Object),
+    );
   });
 });

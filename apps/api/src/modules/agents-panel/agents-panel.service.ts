@@ -8,6 +8,7 @@ import { desc, eq, gte, sql } from 'drizzle-orm';
 
 import type { SaveTierRoutesRequest } from '@movivo/shared';
 
+import { promptVersionWith, PublishedAgentProfiles } from '../../core/agents/agent-profile.reader';
 import { AgentTaskRegistry } from '../../core/agents/agent-task-registry';
 import { ModelTierConfig } from '../../core/ai/model-tier-config';
 import { MODEL_TIERS, type ModelTier } from '../../core/ai/ai.types';
@@ -24,6 +25,7 @@ export class AgentsPanelService {
     private readonly tiers: ModelTierConfig,
     private readonly db: TenantDatabase,
     private readonly audit: AuditService,
+    private readonly profiles: PublishedAgentProfiles,
   ) {}
 
   /** Tarefas com o resultado da avaliação mais recente e se ela vale para o prompt atual. */
@@ -33,23 +35,30 @@ export class AgentsPanelService {
     );
     const latest = new Map<string, (typeof runs)[number]>();
     for (const run of runs) if (!latest.has(run.taskId)) latest.set(run.taskId, run);
-    return this.registry.list().map((task) => {
-      const run = latest.get(task.id);
-      return {
-        ...task,
-        lastEval: run
-          ? {
-              passed: run.passed,
-              casesPassed: run.casesPassed,
-              casesTotal: run.casesTotal,
-              finishedAt: run.finishedAt,
-              costBrl: run.costBrl,
-              // Prompt mudou depois do último teste: o resultado não vale mais.
-              current: run.promptVersion === task.promptVersion,
-            }
-          : null,
-      };
-    });
+    return Promise.all(
+      this.registry.list().map(async (task) => {
+        const run = latest.get(task.id);
+        const promptVersion = promptVersionWith(
+          task.promptVersion,
+          await this.profiles.forTask(task.id),
+        );
+        return {
+          ...task,
+          promptVersion,
+          lastEval: run
+            ? {
+                passed: run.passed,
+                casesPassed: run.casesPassed,
+                casesTotal: run.casesTotal,
+                finishedAt: run.finishedAt,
+                costBrl: run.costBrl,
+                // Prompt ou ficha mudou depois do último teste: o resultado não vale mais.
+                current: run.promptVersion === promptVersion,
+              }
+            : null,
+        };
+      }),
+    );
   }
 
   /** Rotas efetivas de cada nível e se vêm do banco (painel) ou do padrão do código. */

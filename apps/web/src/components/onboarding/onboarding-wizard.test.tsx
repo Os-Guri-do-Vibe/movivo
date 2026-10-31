@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -40,6 +40,16 @@ const SESSION: SessionView = {
   phoneVerified: false,
   primaryGoal: null,
   consentsPending: false,
+  bodyPhotosConsent: {
+    type: 'BODY_PHOTOS',
+    version: 'consent-body-photos-2026-10-v1',
+    title: 'Sobre as fotos do seu corpo',
+    body: [],
+    label: 'Autorizo as fotos.',
+    required: false,
+  },
+  bodyPhotosConsentAccepted: false,
+  photos: [],
   consents: [
     {
       type: 'TERMS_OF_SERVICE',
@@ -125,10 +135,10 @@ beforeEach(() => {
 });
 
 describe('OnboardingWizard — cadastro', () => {
-  it('começa na etapa 1 de 8 sem exibir a validade do link', () => {
+  it('começa na etapa 1 de 9 sem exibir a validade do link', () => {
     render(<OnboardingWizard sessionRef="tok" initial={SESSION} />);
     expect(screen.getByText('Vamos começar por você')).toBeInTheDocument();
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuetext', 'Etapa 1 de 8: Você');
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuetext', 'Etapa 1 de 9: Você');
     expect(screen.queryByText(/link fica disponível/i)).not.toBeInTheDocument();
     expect(screen.getByLabelText('Aceito.')).toBeRequired();
   });
@@ -139,10 +149,10 @@ describe('OnboardingWizard — cadastro', () => {
     await completeStep1(user);
     await waitFor(() => expect(recordConsents).toHaveBeenCalled());
     await waitFor(() => expect(patchStep).toHaveBeenCalledWith('tok', 1, expect.any(Object)));
-    expect(await screen.findByText('Qual é o seu objetivo?')).toBeInTheDocument();
+    expect(await screen.findByText('Seus objetivos')).toBeInTheDocument();
     expect(screen.getByRole('progressbar')).toHaveAttribute(
       'aria-valuetext',
-      'Etapa 2 de 8: Objetivo',
+      'Etapa 2 de 9: Objetivo',
     );
   });
 
@@ -238,7 +248,7 @@ describe('OnboardingWizard — retomada', () => {
     expect(screen.getByText('Como é a sua semana?')).toBeInTheDocument();
     expect(screen.getByRole('progressbar')).toHaveAttribute(
       'aria-valuetext',
-      'Etapa 4 de 8: Rotina',
+      'Etapa 4 de 9: Rotina',
     );
   });
 
@@ -252,7 +262,31 @@ describe('OnboardingWizard — retomada', () => {
         }}
       />,
     );
-    expect(screen.getByRole('radio', { name: 'Perder gordura' })).toBeChecked();
+    expect(screen.getByRole('combobox', { name: 'Qual seu objetivo?' })).toHaveTextContent(
+      'Emagrecimento',
+    );
+  });
+
+  it('texto sigiloso em branco: mantém o salvo ao retomar e só apaga o que foi visto nesta aba', async () => {
+    const user = userEvent.setup();
+    render(
+      <OnboardingWizard
+        sessionRef="tok"
+        initial={{
+          ...complementary([2]),
+          blocks: { goals: { goal: { primary: 'FAT_LOSS', secondary: [], emphasis: 'HEALTH' } } },
+        }}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Voltar' }));
+    await user.click(screen.getByRole('button', { name: 'Continuar' }));
+    await waitFor(() => expect(patchStep).toHaveBeenCalledTimes(1));
+    expect(patchStep.mock.calls[0]?.[2]).not.toHaveProperty('motivation');
+
+    await user.click(await screen.findByRole('button', { name: 'Voltar' }));
+    await user.click(screen.getByRole('button', { name: 'Continuar' }));
+    await waitFor(() => expect(patchStep).toHaveBeenCalledTimes(2));
+    expect(patchStep.mock.calls[1]?.[2]).toMatchObject({ motivation: '' });
   });
 });
 
@@ -266,7 +300,7 @@ describe('OnboardingWizard — anamnese complementar', () => {
       />,
     );
     expect(screen.getByRole('heading', { name: 'Antes de continuar' })).toBeInTheDocument();
-    expect(screen.queryByText('Qual é o seu objetivo?')).not.toBeInTheDocument();
+    expect(screen.queryByText('Seus objetivos')).not.toBeInTheDocument();
     const continuar = screen.getByRole('button', { name: 'Continuar' });
     expect(continuar).toBeDisabled();
 
@@ -276,64 +310,164 @@ describe('OnboardingWizard — anamnese complementar', () => {
     await user.click(continuar);
 
     await waitFor(() => expect(recordConsents).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText('Qual é o seu objetivo?')).toBeInTheDocument();
+    expect(await screen.findByText('Seus objetivos')).toBeInTheDocument();
   });
 
-  it('pula o cadastro: abre nos objetivos, conta 7 etapas e não oferece voltar', () => {
+  it('retomada em etapa adiantada também fica atrás do novo aceite', () => {
+    render(
+      <OnboardingWizard
+        sessionRef="tok"
+        initial={{ ...complementary([2, 3]), consentsPending: true }}
+      />,
+    );
+    expect(screen.getByRole('heading', { name: 'Antes de continuar' })).toBeInTheDocument();
+    expect(screen.queryByText('Como é a sua semana?')).not.toBeInTheDocument();
+  });
+
+  it('rotina usa as modalidades e o esporte externo da etapa 3 e salva o que a API aceita', async () => {
+    const user = userEvent.setup();
+    render(
+      <OnboardingWizard
+        sessionRef="tok"
+        initial={{
+          ...complementary([2, 3]),
+          blocks: {
+            modalities: {
+              modalities: [
+                {
+                  modality: 'RUNNING',
+                  level: 'NONE',
+                  sessionsPerWeek: 0,
+                  wantsToStart: true,
+                  venue: 'OUTDOOR',
+                },
+              ],
+              externalSports: [
+                {
+                  sport: 'SWIMMING',
+                  label: 'Natação',
+                  sessionsPerWeek: 2,
+                  minutesPerSession: 60,
+                  typicalRpe: 5,
+                  fixedDays: [],
+                },
+              ],
+            },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText(/A MOVIVO distribui corrida nesses dias/)).toBeInTheDocument();
+    await user.click(screen.getByRole('combobox', { name: 'Em quais dias você pode treinar?' }));
+    await user.click(screen.getByRole('option', { name: 'Segunda-feira' }));
+    await user.click(screen.getByRole('option', { name: 'Quinta-feira' }));
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('radio', { name: 'Manhã' }));
+    await user.click(screen.getByRole('radio', { name: 'Aproximadamente 45 minutos' }));
+    const sessions = screen.getByRole('combobox', {
+      name: 'Quantos treinos da MOVIVO por semana você quer fazer?',
+    });
+    expect(sessions).toHaveAccessibleDescription(/^Sem contar natação:/);
+    await user.click(sessions);
+    await user.click(screen.getByRole('option', { name: '2 treinos' }));
+    await user.click(
+      within(
+        screen.getByRole('group', { name: 'Sua rotina muda de uma semana para outra?' }),
+      ).getByRole('radio', { name: 'Não' }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Continuar' }));
+    await waitFor(() =>
+      expect(patchStep).toHaveBeenCalledWith('tok', 4, {
+        windows: [
+          { weekday: 'MON', slot: 'MORNING', maxMinutes: 45 },
+          { weekday: 'THU', slot: 'MORNING', maxMinutes: 45 },
+        ],
+        variesWeekly: false,
+        maxSessionsPerWeek: 2,
+        lifeContext: {},
+      }),
+    );
+  });
+
+  it('pula o cadastro: abre nos objetivos, conta 8 etapas e não oferece voltar', () => {
     render(<OnboardingWizard sessionRef="tok" initial={complementary([])} />);
-    expect(screen.getByText('Qual é o seu objetivo?')).toBeInTheDocument();
+    expect(screen.getByText('Seus objetivos')).toBeInTheDocument();
     expect(screen.getByRole('progressbar')).toHaveAttribute(
       'aria-valuetext',
-      'Etapa 1 de 7: Objetivo',
+      'Etapa 1 de 8: Objetivo',
     );
     expect(screen.queryByRole('button', { name: 'Voltar' })).not.toBeInTheDocument();
   });
 
-  it('PAR-Q: salva a etapa 6 e segue para a alimentação', async () => {
+  it('dores: tela própria; "Não" salva a etapa 6 e segue para a alimentação', async () => {
     const user = userEvent.setup();
     render(<OnboardingWizard sessionRef="tok" initial={complementary([2, 3, 4, 5])} />);
-    await completeParq(user);
+    expect(await screen.findByText('Dores e limitações')).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'Não' }));
+    await user.click(screen.getByRole('button', { name: 'Continuar' }));
     await waitFor(() =>
-      expect(patchStep).toHaveBeenCalledWith(
-        'tok',
-        6,
-        expect.objectContaining({ declarationsVersion: expect.any(String) }),
-      ),
+      expect(patchStep).toHaveBeenCalledWith('tok', 6, { pain: { hasPain: false, points: [] } }),
     );
     expect(await screen.findByText('Como é a sua alimentação?')).toBeInTheDocument();
-  }, 15_000);
+  });
 
-  it('alimentação → corpo (pulado) → envio com a resposta do servidor', async () => {
+  it('alimentação → corpo (pulado) → PAR-Q por último → envio com a resposta do servidor', async () => {
     const user = userEvent.setup();
     submitAnamnesis.mockResolvedValue({ status: 'SUBMITTED', outcome: 'READY' });
     render(<OnboardingWizard sessionRef="tok" initial={complementary([2, 3, 4, 5, 6])} />);
 
+    await user.click(screen.getByRole('radio', { name: 'Cozinho o básico' }));
+    await user.type(screen.getByLabelText(/refeições por semana você faz fora/i), '3');
+    await user.type(screen.getByLabelText(/orçamento mensal para alimentação/i), '120000');
     await user.type(screen.getByLabelText(/quantas refeições você faz por dia/i), '4');
     await user.click(screen.getByRole('button', { name: 'Almoço' }));
+    const allergy = screen.getByRole('group', {
+      name: 'Você tem alguma alergia ou intolerância alimentar?',
+    });
+    await user.click(within(allergy).getByRole('radio', { name: 'Não' }));
     await user.click(screen.getByRole('radio', { name: 'Normal' }));
     await user.click(screen.getByRole('button', { name: 'Continuar' }));
     await waitFor(() =>
       expect(patchStep).toHaveBeenCalledWith(
         'tok',
         7,
-        expect.objectContaining({ mealsPerDay: 4, usualMeals: ['LUNCH'], hunger: 'NORMAL' }),
+        expect.objectContaining({
+          mealsPerDay: 4,
+          usualMeals: ['LUNCH'],
+          hunger: 'NORMAL',
+          cookingCapacity: 'BASIC',
+          mealsOutsideHomePerWeek: 3,
+          foodBudgetMonthlyBrl: 1200,
+        }),
       ),
     );
 
     expect(await screen.findByText('Quer acompanhar suas medidas?')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Pular esta etapa' }));
-    await waitFor(() => expect(submitAnamnesis).toHaveBeenCalledWith('tok'));
+    // Etapa opcional: "Continuar" já vem habilitado e, sem medidas, só segue (nada é salvo).
+    expect(screen.queryByRole('button', { name: 'Pular esta etapa' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Continuar' }));
     expect(patchStep).not.toHaveBeenCalledWith('tok', 8, expect.anything());
+    // O PAR-Q é a última parte: só depois dele a anamnese é enviada.
+    expect(await screen.findByText('Última parte: sua segurança')).toBeInTheDocument();
+    expect(submitAnamnesis).not.toHaveBeenCalled();
+    await completeParq(user);
+    await waitFor(() =>
+      expect(patchStep).toHaveBeenCalledWith(
+        'tok',
+        9,
+        expect.objectContaining({ declarationsVersion: expect.any(String) }),
+      ),
+    );
+    await waitFor(() => expect(submitAnamnesis).toHaveBeenCalledWith('tok'));
     expect(await screen.findByText(/Tudo pronto/)).toBeInTheDocument();
-  });
+  }, 20_000);
 
-  it('medidas preenchidas são salvas antes do envio', async () => {
+  it('medidas preenchidas são salvas antes do PAR-Q', async () => {
     const user = userEvent.setup();
-    submitAnamnesis.mockResolvedValue({ status: 'SUBMITTED', outcome: 'READY' });
     render(<OnboardingWizard sessionRef="tok" initial={complementary([2, 3, 4, 5, 6, 7])} />);
     await screen.findByText('Quer acompanhar suas medidas?');
-    await user.type(screen.getByLabelText('Cintura (cm)'), '92');
-    await user.click(screen.getByRole('button', { name: 'Salvar e finalizar' }));
+    await user.type(screen.getByLabelText('Cintura'), '92');
+    await user.click(screen.getByRole('button', { name: 'Continuar' }));
     await waitFor(() =>
       expect(patchStep).toHaveBeenCalledWith(
         'tok',
@@ -345,38 +479,36 @@ describe('OnboardingWizard — anamnese complementar', () => {
         }),
       ),
     );
-    await waitFor(() => expect(submitAnamnesis).toHaveBeenCalledWith('tok'));
+    expect(await screen.findByText('Última parte: sua segurança')).toBeInTheDocument();
+    expect(submitAnamnesis).not.toHaveBeenCalled();
   });
 
   it('usa PENDING_REVIEW do servidor sem tentar decidir no cliente', async () => {
     const user = userEvent.setup();
     submitAnamnesis.mockResolvedValue({ status: 'SUBMITTED', outcome: 'PENDING_REVIEW' });
-    render(<OnboardingWizard sessionRef="tok" initial={complementary([2, 3, 4, 5, 6, 7])} />);
-    await screen.findByText('Quer acompanhar suas medidas?');
-    await user.click(screen.getByRole('button', { name: 'Pular esta etapa' }));
+    render(<OnboardingWizard sessionRef="tok" initial={complementary([2, 3, 4, 5, 6, 7, 8])} />);
+    await completeParq(user);
     expect(await screen.findByText(/Recebemos suas informações/)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/Q[1-9]\b|BLOQUEADO/);
-  });
+  }, 20_000);
 
   it('409 no envio mostra o motivo real, não "tente de novo"', async () => {
     const user = userEvent.setup();
     submitAnamnesis.mockRejectedValue(
       new AnamnesisApiError(409, ['Já existe um cadastro com este telefone ou e-mail.']),
     );
-    render(<OnboardingWizard sessionRef="tok" initial={complementary([2, 3, 4, 5, 6, 7])} />);
-    await screen.findByText('Quer acompanhar suas medidas?');
-    await user.click(screen.getByRole('button', { name: 'Pular esta etapa' }));
+    render(<OnboardingWizard sessionRef="tok" initial={complementary([2, 3, 4, 5, 6, 7, 8])} />);
+    await completeParq(user);
     expect(
       await screen.findByText('Já existe um cadastro com este telefone ou e-mail.'),
     ).toBeInTheDocument();
-  });
+  }, 20_000);
 
   it('410 no envio (sessão expirada) orienta a recarregar', async () => {
     const user = userEvent.setup();
     submitAnamnesis.mockRejectedValue(new AnamnesisApiError(410, []));
-    render(<OnboardingWizard sessionRef="tok" initial={complementary([2, 3, 4, 5, 6, 7])} />);
-    await screen.findByText('Quer acompanhar suas medidas?');
-    await user.click(screen.getByRole('button', { name: 'Pular esta etapa' }));
+    render(<OnboardingWizard sessionRef="tok" initial={complementary([2, 3, 4, 5, 6, 7, 8])} />);
+    await completeParq(user);
     expect(await screen.findByText(/sessão expirou/i)).toBeInTheDocument();
-  });
+  }, 20_000);
 });

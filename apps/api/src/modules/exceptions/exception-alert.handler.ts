@@ -24,6 +24,7 @@ const KIND_LABEL: Readonly<Record<string, string>> = {
   STUDENT_REVIEW_REQUEST: 'aluno pediu revisão',
   DECISION_FAILURE: 'falha ao executar uma decisão',
   CONVERSATION_TAKEOVER: 'conversa assumida',
+  MEDICAL_EXAM: 'exame enviado',
 };
 const PRIORITY_LABEL: Readonly<Record<string, string>> = { URGENT: 'urgente', HIGH: 'alta' };
 

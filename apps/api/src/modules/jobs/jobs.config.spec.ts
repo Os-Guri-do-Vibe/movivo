@@ -41,6 +41,10 @@ describe('jobs.config', () => {
         'domain-events',
         // Geração do plano integrado depois do onboarding.
         'plan-generation',
+        // Exame recebido no WhatsApp (leitura + comentário).
+        'medical-exam',
+        // Atividades do Strava (webhook).
+        'wearable-sync',
       ].sort(),
     );
   });

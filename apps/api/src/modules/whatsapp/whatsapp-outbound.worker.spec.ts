@@ -68,6 +68,9 @@ function makeWorker(deps: Deps = {}) {
   } as unknown as Redis;
   const send = vi.fn((_m: OutboundMessage) => Promise.resolve());
   const sendTyping = vi.fn((_to: string) => Promise.resolve());
+  const sendDocument = vi.fn((_to: string, _url: string, _caption: string, _fileName?: string) =>
+    Promise.resolve(),
+  );
   const sendTemplate = vi.fn((_to: string, _templateName: string, _variables?: readonly string[]) =>
     Promise.resolve(),
   );
@@ -75,6 +78,7 @@ function makeWorker(deps: Deps = {}) {
     send,
     sendTemplate,
     sendTyping,
+    sendDocument,
     hasCredentials: () => true,
   } as unknown as WhatsappTransport;
   const config = {
@@ -98,7 +102,7 @@ function makeWorker(deps: Deps = {}) {
     } as unknown as HealthCipherService,
     { emitMessage } as unknown as ConversationEventsService,
   );
-  return { worker, send, sendTemplate, sendTyping, redis, emitMessage };
+  return { worker, send, sendTemplate, sendTyping, sendDocument, redis, emitMessage };
 }
 
 function job(data: Partial<WhatsappOutboundJob>): Job<WhatsappOutboundJob> {
@@ -225,6 +229,36 @@ describe('WhatsappOutboundWorker.process', () => {
     expect(send).toHaveBeenCalledTimes(2);
     expect(send.mock.calls[0]?.[0].buttons).toBeUndefined();
     expect(send.mock.calls[1]?.[0].buttons).toBeDefined();
+  });
+
+  it('PDFs do protocolo saem depois do texto, na ordem, e entram no histórico', async () => {
+    const inserted: NonNullable<Deps['inserted']> = [];
+    const { worker, send, sendDocument } = makeWorker({ inserted });
+    const order: string[] = [];
+    send.mockImplementation(async () => void order.push('texto'));
+    sendDocument.mockImplementation(async (_to, _url, _caption, fileName) => {
+      order.push(fileName ?? '');
+    });
+
+    await worker.process(
+      job({
+        type: 'CONVERSATION_MESSAGE',
+        text: 'Seu protocolo está pronto.',
+        documents: [
+          { url: 'https://api.test/t.pdf', fileName: 'treino.pdf', caption: 'Treino' },
+          { url: 'https://api.test/n.pdf', fileName: 'alimentar.pdf', caption: 'Alimentação' },
+        ],
+      }),
+    );
+
+    expect(order).toEqual(['texto', 'treino.pdf', 'alimentar.pdf']);
+    expect(sendDocument).toHaveBeenCalledWith(
+      expect.any(String),
+      'https://api.test/t.pdf',
+      'Treino',
+      'treino.pdf',
+    );
+    expect(inserted).toHaveLength(2);
   });
 
   it('a mensagem enviada entra no histórico de conversas e o painel é avisado', async () => {

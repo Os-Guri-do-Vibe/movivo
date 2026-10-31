@@ -40,6 +40,7 @@ export interface StateView {
   availability: {
     windows: AvailabilityWindow[];
     variesWeekly: boolean;
+    /** Sessões próprias (da MOVIVO) por semana, sem o esporte externo. */
     maxSessionsPerWeek: number;
   } | null;
   dietaryRestrictions: string[];

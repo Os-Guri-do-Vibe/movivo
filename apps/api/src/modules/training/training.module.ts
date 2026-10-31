@@ -9,6 +9,8 @@ import { ShortLinkModule } from '../short-link/short-link.module';
 import { StudentStateModule } from '../student-state/student-state.module';
 import { ExecutionService } from './execution.service';
 import { ScheduleService } from './schedule.service';
+import { StravaController } from './strava/strava.controller';
+import { StravaService } from './strava/strava.service';
 import { TrainingAccessService } from './training-access.service';
 import { TrainingController } from './training.controller';
 import { TrainingDailyScheduler } from './training-daily.scheduler';
@@ -25,13 +27,14 @@ import { TrainingLinkService } from './training-link.service';
     ShortLinkModule,
     StudentStateModule,
   ],
-  controllers: [TrainingController],
+  controllers: [TrainingController, StravaController],
   providers: [
     TrainingAccessService,
     ExecutionService,
     ScheduleService,
     TrainingLinkService,
     TrainingDailyScheduler,
+    StravaService,
   ],
   exports: [ExecutionService, ScheduleService, TrainingAccessService, TrainingLinkService],
 })

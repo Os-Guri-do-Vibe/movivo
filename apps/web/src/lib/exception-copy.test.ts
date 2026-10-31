@@ -37,7 +37,7 @@ describe('describeAction', () => {
 
 describe('goalLabel', () => {
   it('traduz o objetivo declarado e ignora o que não conhece', () => {
-    expect(goalLabel('FAT_LOSS')).toBe('Perder gordura');
+    expect(goalLabel('FAT_LOSS')).toBe('Emagrecimento');
     expect(goalLabel('INEXISTENTE')).toBeNull();
     expect(goalLabel(undefined)).toBeNull();
   });

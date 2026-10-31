@@ -71,10 +71,10 @@ function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function hasImage(messages: GatewayMessage[]): boolean {
+function hasMedia(messages: GatewayMessage[]): boolean {
   return messages.some(
     (message) =>
-      typeof message.content !== 'string' && message.content.some((p) => p.type === 'image'),
+      typeof message.content !== 'string' && message.content.some((p) => p.type !== 'text'),
   );
 }
 
@@ -97,7 +97,7 @@ function snapshotOf(system: string, messages: GatewayMessage[]): Record<string, 
     messages.map((m) =>
       typeof m.content === 'string'
         ? m.content
-        : m.content.map((p) => (p.type === 'text' ? p.text : `[imagem:${p.base64.length}]`)),
+        : m.content.map((p) => (p.type === 'text' ? p.text : `[${p.type}:${p.base64.length}]`)),
     ),
   );
   return {
@@ -131,7 +131,7 @@ export class ModelGateway {
 
   async complete(request: GatewayRequest): Promise<GatewayResult> {
     const dataClass: DataClass = request.dataClass ?? 'HEALTH';
-    const needsVision = hasImage(request.messages);
+    const needsVision = hasMedia(request.messages);
     const messages = scrubMessages(request);
     const snapshot = snapshotOf(request.system, messages);
     const routes = request.routeOverride

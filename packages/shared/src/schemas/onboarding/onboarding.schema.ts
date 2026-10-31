@@ -1,8 +1,8 @@
 /**
- * Anamnese da v2: 8 etapas, salvas uma a uma (o aluno pode sair e voltar).
+ * Anamnese da v2: 9 etapas, salvas uma a uma (o aluno pode sair e voltar).
  *
- *   1 Cadastro · 2 Objetivos · 3 Modalidades · 4 Rotina · 5 Preferências e saúde · 6 PAR-Q ·
- *   7 Alimentação · 8 Corpo (opcional)
+ *   1 Cadastro · 2 Objetivos · 3 Modalidades · 4 Rotina · 5 Preferências de treino ·
+ *   6 Dores e limitações · 7 Alimentação · 8 Corpo (opcional) · 9 PAR-Q (sempre a última)
  *
  * O servidor separa cada etapa em parte comum (JSON) e parte sensível (cifrada): dado de saúde,
  * alergias, medicamentos e TODO texto livre vão só para o bloco cifrado. A anamnese
@@ -17,20 +17,21 @@ import {
 } from '../anamnesis.schema';
 import { measurementInputSchema } from '../body/body.schema';
 import { mealSlotSchema } from '../nutrition/nutrition.schema';
-import { declaredGoalSchema } from '../student/goal.schema';
+import { declaredGoalSchema, muscleEmphasisRegionSchema } from '../student/goal.schema';
 import {
   availabilityWindowSchema,
   externalSportPracticeSchema,
   lifeContextSchema,
   modalityExperienceSchema,
   trainingVenueSchema,
+  VENUES_BY_MODALITY,
 } from '../student/student-state.schema';
 
 const freeText = (max: number) => z.string().trim().max(max).optional();
 
-export const ONBOARDING_STEPS = 8;
+export const ONBOARDING_STEPS = 9;
 export const onboardingStepNumberSchema = z.number().int().min(1).max(ONBOARDING_STEPS);
-export type OnboardingStepNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+export type OnboardingStepNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 /** Fluxo da sessão: cadastro novo ou complemento de quem já é aluno. */
 export const onboardingFlowSchema = z.enum(['INITIAL', 'COMPLEMENTARY']);
@@ -49,9 +50,18 @@ export type OnboardingGoalsStep = z.infer<typeof onboardingGoalsStepSchema>;
 
 export const onboardingModalitiesStepSchema = z
   .object({
-    modalities: z.array(modalityExperienceSchema).min(1).max(3),
+    modalities: z
+      .array(
+        modalityExperienceSchema
+          .extend({ venue: trainingVenueSchema })
+          .refine((m) => VENUES_BY_MODALITY[m.modality].includes(m.venue), {
+            message: 'Escolha um local que sirva para essa modalidade.',
+            path: ['venue'],
+          }),
+      )
+      .min(1)
+      .max(3),
     externalSports: z.array(externalSportPracticeSchema).max(3),
-    venues: z.array(trainingVenueSchema).min(1).max(7),
   })
   .refine((v) => new Set(v.modalities.map((m) => m.modality)).size === v.modalities.length, {
     message: 'Cada modalidade aparece uma vez só.',
@@ -61,76 +71,90 @@ export type OnboardingModalitiesStep = z.infer<typeof onboardingModalitiesStepSc
 
 // --- 4. Rotina ----------------------------------------------------------------------------
 
-export const onboardingRoutineStepSchema = z.object({
-  windows: z.array(availabilityWindowSchema).min(1).max(21),
-  variesWeekly: z.boolean(),
-  maxSessionsPerWeek: z.number().int().min(1).max(14),
-  lifeContext: lifeContextSchema,
-});
+const distinctDays = (windows: readonly { weekday: string }[]) =>
+  new Set(windows.map((w) => w.weekday)).size;
+
+export const onboardingRoutineStepSchema = z
+  .object({
+    windows: z.array(availabilityWindowSchema).min(1).max(21),
+    variesWeekly: z.boolean(),
+    /** Treinos da MOVIVO por semana, sem contar o esporte externo. */
+    maxSessionsPerWeek: z.number().int().min(1).max(7),
+    /** Sono e estresse; o resto do contexto de vida vem da etapa de alimentação. */
+    lifeContext: lifeContextSchema.pick({ sleepHoursTypical: true, stressLevel: true }),
+  })
+  .refine((v) => distinctDays(v.windows) === v.windows.length, {
+    message: 'Cada dia aparece uma vez só.',
+    path: ['windows'],
+  })
+  .refine((v) => v.maxSessionsPerWeek <= distinctDays(v.windows), {
+    message: 'Você escolheu mais treinos do que dias disponíveis.',
+    path: ['maxSessionsPerWeek'],
+  });
 export type OnboardingRoutineStep = z.infer<typeof onboardingRoutineStepSchema>;
 
-// --- 5. Preferências e saúde --------------------------------------------------------------
+// --- 5. Preferências de treino e saúde geral -----------------------------------------------
 
-export const trainingSplitPreferenceSchema = z.enum([
-  'FULL_BODY',
-  'UPPER_LOWER',
-  'PUSH_PULL_LEGS',
-  'BODY_PART',
-  'NO_PREFERENCE',
-]);
-export const effortPreferenceSchema = z.enum(['NEAR_FAILURE', 'AVOID_FAILURE', 'UNSURE']);
 export const priorityPreferenceSchema = z.enum(['MAX_RESULT', 'BALANCED', 'ENJOYMENT']);
 
 export const onboardingPreferencesStepSchema = z.object({
   preferences: z.object({
-    split: trainingSplitPreferenceSchema,
-    effort: effortPreferenceSchema,
     priority: priorityPreferenceSchema,
-    /** Duração de sessão que o aluno prefere, em minutos. */
-    preferredSessionMinutes: z.number().int().min(15).max(180),
+    /** Musculação: regiões em que o aluno quer mais ênfase (até 2). */
+    muscleEmphasis: z.array(muscleEmphasisRegionSchema).max(2).default([]),
   }),
   /** Textos livres: bloco cifrado. */
-  likedTraining: freeText(300),
-  dislikedExercises: freeText(300),
-  pain: painAssessmentSchema,
+  trainingPreferences: freeText(500),
+  dislikedExercises: freeText(500),
   conditions: freeText(500),
   medications: freeText(500),
   professionalGuidance: freeText(500),
 });
 export type OnboardingPreferencesStep = z.infer<typeof onboardingPreferencesStepSchema>;
 
-// --- 6. PAR-Q (mesmo contrato da v1: questionário + declarações) -------------------------
+// --- 6. Dores e limitações (tela própria) -------------------------------------------------
 
-export const onboardingParqStepSchema = onboardingStep3Schema;
-export type OnboardingParqStep = z.infer<typeof onboardingParqStepSchema>;
+export const onboardingPainStepSchema = z.object({ pain: painAssessmentSchema });
+export type OnboardingPainStep = z.infer<typeof onboardingPainStepSchema>;
 
 // --- 7. Alimentação -----------------------------------------------------------------------
 
-export const onboardingNutritionStepSchema = z.object({
-  mealsPerDay: z.number().int().min(1).max(8),
-  usualMeals: z.array(mealSlotSchema).min(1).max(8),
-  dietaryRestrictions: z
-    .array(z.enum(['VEGETARIAN', 'VEGAN', 'LACTOSE_FREE', 'GLUTEN_FREE', 'HALAL', 'KOSHER']))
-    .max(6),
-  /** Alergia é dado de saúde: bloco cifrado. */
-  allergies: z
-    .array(
-      z.object({
-        allergen: z.string().trim().min(1).max(60),
-        severity: z.enum(['INTOLERANCE', 'ALLERGY', 'SEVERE_ALLERGY']),
-      }),
-    )
-    .max(10),
-  supplements: z
-    .array(
-      z.enum(['CREATINE', 'WHEY', 'CAFFEINE', 'VITAMIN_D', 'OMEGA_3', 'MULTIVITAMIN', 'OTHER']),
-    )
-    .max(7),
-  hunger: z.enum(['LOW', 'NORMAL', 'HIGH', 'VARIES']),
-  /** Textos livres: bloco cifrado. */
-  likedFoods: freeText(300),
-  dislikedFoods: freeText(300),
-});
+export const onboardingNutritionStepSchema = z
+  .object({
+    /** Contexto de vida que o planejador de alimentação usa (vai para o perfil do aluno). */
+    cookingCapacity: lifeContextSchema.shape.cookingCapacity,
+    mealsOutsideHomePerWeek: lifeContextSchema.shape.mealsOutsideHomePerWeek,
+    foodBudgetMonthlyBrl: z.number().gt(0).max(1_000_000),
+    mealsPerDay: z.number().int().min(1).max(8),
+    usualMeals: z.array(mealSlotSchema).min(1).max(8),
+    dietaryRestrictions: z
+      .array(z.enum(['VEGETARIAN', 'VEGAN', 'LACTOSE_FREE', 'GLUTEN_FREE', 'HALAL', 'KOSHER']))
+      .max(6),
+    /** Alergia é dado de saúde: bloco cifrado. */
+    allergies: z
+      .array(
+        z.object({
+          allergen: z.string().trim().min(1).max(60),
+          severity: z.enum(['INTOLERANCE', 'ALLERGY', 'SEVERE_ALLERGY']),
+        }),
+      )
+      .max(10),
+    supplements: z
+      .array(
+        z.enum(['CREATINE', 'WHEY', 'CAFFEINE', 'VITAMIN_D', 'OMEGA_3', 'MULTIVITAMIN', 'OTHER']),
+      )
+      .max(7),
+    /** Qual suplemento, quando o aluno marca "Outro". Texto livre: bloco cifrado. */
+    supplementOther: freeText(80),
+    hunger: z.enum(['LOW', 'NORMAL', 'HIGH', 'VARIES']),
+    /** Textos livres: bloco cifrado. */
+    likedFoods: freeText(300),
+    dislikedFoods: freeText(300),
+  })
+  .refine((v) => !v.supplements.includes('OTHER') || Boolean(v.supplementOther), {
+    message: 'Diga qual é o outro suplemento.',
+    path: ['supplementOther'],
+  });
 export type OnboardingNutritionStep = z.infer<typeof onboardingNutritionStepSchema>;
 
 // --- 8. Corpo (opcional) ------------------------------------------------------------------
@@ -140,6 +164,11 @@ export const onboardingBodyStepSchema = z.object({
 });
 export type OnboardingBodyStep = z.infer<typeof onboardingBodyStepSchema>;
 
+// --- 9. PAR-Q (última parte; mesmo contrato da v1: questionário + declarações) ------------
+
+export const onboardingParqStepSchema = onboardingStep3Schema;
+export type OnboardingParqStep = z.infer<typeof onboardingParqStepSchema>;
+
 /** Schema de cada etapa, pelo número. */
 export const ONBOARDING_STEP_SCHEMAS = {
   1: onboardingStep1Schema,
@@ -147,15 +176,16 @@ export const ONBOARDING_STEP_SCHEMAS = {
   3: onboardingModalitiesStepSchema,
   4: onboardingRoutineStepSchema,
   5: onboardingPreferencesStepSchema,
-  6: onboardingParqStepSchema,
+  6: onboardingPainStepSchema,
   7: onboardingNutritionStepSchema,
   8: onboardingBodyStepSchema,
+  9: onboardingParqStepSchema,
 } as const satisfies Record<OnboardingStepNumber, z.ZodType>;
 
 /** Etapas obrigatórias para enviar (a 8, corpo, é opcional). */
 export const REQUIRED_ONBOARDING_STEPS: Readonly<
   Record<OnboardingFlow, readonly OnboardingStepNumber[]>
 > = {
-  INITIAL: [1, 2, 3, 4, 5, 6, 7],
-  COMPLEMENTARY: [2, 3, 4, 5, 6, 7],
+  INITIAL: [1, 2, 3, 4, 5, 6, 7, 9],
+  COMPLEMENTARY: [2, 3, 4, 5, 6, 7, 9],
 };

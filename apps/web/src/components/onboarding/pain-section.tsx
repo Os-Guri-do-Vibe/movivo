@@ -7,6 +7,7 @@ import { PAIN_REGION_LABELS, type PainRegion, type PainTrend } from '@movivo/sha
 import {
   ChoiceGroup,
   FieldLabel,
+  FieldValidation,
   QuestionField,
   QuestionStack,
   TextArea,
@@ -21,26 +22,27 @@ export interface PainPointData {
 }
 
 export interface PainData {
-  hasPain: boolean;
+  /** `undefined` = ainda não respondeu. */
+  hasPain: boolean | undefined;
   points: PainPointData[];
   trend: PainTrend | null;
   trigger: string;
-  hasProfessionalExplanation: boolean;
+  hasProfessionalExplanation: boolean | undefined;
   professionalExplanation: string;
-  underMedicalFollowUp: boolean;
-  hasAvoidanceRecommendation: boolean;
+  underMedicalFollowUp: boolean | undefined;
+  hasAvoidanceRecommendation: boolean | undefined;
   avoidanceRecommendation: string;
 }
 
 export const EMPTY_PAIN: PainData = {
-  hasPain: false,
+  hasPain: undefined,
   points: [],
   trend: null,
   trigger: '',
-  hasProfessionalExplanation: false,
+  hasProfessionalExplanation: undefined,
   professionalExplanation: '',
-  underMedicalFollowUp: false,
-  hasAvoidanceRecommendation: false,
+  underMedicalFollowUp: undefined,
+  hasAvoidanceRecommendation: undefined,
   avoidanceRecommendation: '',
 };
 
@@ -102,7 +104,6 @@ export function PainSection({
         legend="Você sente alguma dor hoje que atrapalha ou preocupa na hora de treinar?"
         value={data.hasPain}
         onChange={(hasPain) => onChange({ ...EMPTY_PAIN, hasPain })}
-        indicatorSide="left"
       />
 
       {data.hasPain && (
@@ -116,18 +117,26 @@ export function PainSection({
             selected={regionValues}
             onToggle={toggleRegion}
             multi
-            indicatorSide="left"
           />
 
           {data.points.some((point) => point.region === 'OTHER') && (
             <QuestionField className="border-l-2 border-primary pl-4" aria-live="polite">
               <FieldLabel htmlFor="painRegionOther">Qual é a outra região?</FieldLabel>
-              <TextInput
-                id="painRegionOther"
-                value={data.points.find((point) => point.region === 'OTHER')?.regionOther ?? ''}
-                onChange={setOtherRegion}
-                placeholder="Ex.: cotovelo esquerdo"
-              />
+              <FieldValidation
+                error={
+                  data.points.find((point) => point.region === 'OTHER')?.regionOther.trim()
+                    ? undefined
+                    : 'Informe qual é a outra região.'
+                }
+              >
+                <TextInput
+                  id="painRegionOther"
+                  value={data.points.find((point) => point.region === 'OTHER')?.regionOther ?? ''}
+                  onChange={setOtherRegion}
+                  placeholder="Ex.: cotovelo esquerdo"
+                  maxLength={100}
+                />
+              </FieldValidation>
             </QuestionField>
           )}
 
@@ -136,7 +145,7 @@ export function PainSection({
               key={point.region}
               className="rounded-xl border border-border bg-secondary p-4"
             >
-              <FieldLabel htmlFor={`intensity-${point.region}`}>
+              <FieldLabel htmlFor={`intensity-${point.region}`} hint="Deslize de 0 a 10">
                 Intensidade do desconforto em{' '}
                 {point.region === 'OTHER' && point.regionOther.trim()
                   ? point.regionOther.trim()
@@ -171,11 +180,10 @@ export function PainSection({
             items={TREND_ITEMS}
             selected={data.trend ? [data.trend] : []}
             onToggle={(trend) => onChange({ ...data, trend })}
-            indicatorSide="left"
           />
 
           <QuestionField>
-            <FieldLabel htmlFor="trigger">
+            <FieldLabel htmlFor="trigger" optional>
               Quais movimentos ou situações provocam o desconforto?
             </FieldLabel>
             <TextArea
@@ -192,7 +200,6 @@ export function PainSection({
             onChange={(hasProfessionalExplanation) =>
               onChange({ ...data, hasProfessionalExplanation })
             }
-            indicatorSide="left"
           />
           {data.hasProfessionalExplanation && (
             <QuestionField className="border-l-2 border-primary pl-4">
@@ -214,7 +221,6 @@ export function PainSection({
             legend="Você está fazendo acompanhamento médico ou fisioterapêutico?"
             value={data.underMedicalFollowUp}
             onChange={(underMedicalFollowUp) => onChange({ ...data, underMedicalFollowUp })}
-            indicatorSide="left"
           />
 
           <YesNo
@@ -223,7 +229,6 @@ export function PainSection({
             onChange={(hasAvoidanceRecommendation) =>
               onChange({ ...data, hasAvoidanceRecommendation })
             }
-            indicatorSide="left"
           />
           {data.hasAvoidanceRecommendation && (
             <QuestionField className="border-l-2 border-primary pl-4">

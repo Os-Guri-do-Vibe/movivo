@@ -138,7 +138,7 @@ export const anamnesisSessions = pgTable(
 
     submittedAt: eventTimestamp('submitted_at'),
 
-    // --- Anamnese em 8 etapas -------------------------------------------------
+    // --- Anamnese em 9 etapas -------------------------------------------------
     /** `INITIAL` (cadastro novo) ou `COMPLEMENTARY` (aluno existente completa o que falta). */
     flow: varchar('flow', { length: 16 }).notNull().default('INITIAL'),
     /** Parte COMUM de cada etapa, por chave de bloco (`registration`, `goals`, …). */

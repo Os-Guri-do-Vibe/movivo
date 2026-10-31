@@ -23,6 +23,8 @@ import { setupSwagger } from './core/swagger/setup-swagger';
  * implícito do Express — ver rationale completo no bootstrap, junto de `useBodyParser`.
  */
 export const DEFAULT_JSON_BODY_LIMIT = '2mb';
+/** Corpo bruto de uma foto: um pouco acima do teto do serviço, que dá a mensagem de erro. */
+export const PHOTO_BODY_LIMIT = '6mb';
 
 async function bootstrap(): Promise<void> {
   /*
@@ -60,6 +62,8 @@ async function bootstrap(): Promise<void> {
    * a ver com o resto da API.
    */
   app.useBodyParser('json', { limit: DEFAULT_JSON_BODY_LIMIT });
+  // Fotos do corpo na anamnese chegam como bytes da imagem (teto de 5 MB por foto no serviço).
+  app.useBodyParser('raw', { type: 'image/*', limit: PHOTO_BODY_LIMIT });
   const config = app.get(AppConfigService);
 
   // Versionamento de API na URL — regra §12.10. Todo endpoint vive sob /api/v1.

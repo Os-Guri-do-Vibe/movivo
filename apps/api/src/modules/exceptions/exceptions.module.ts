@@ -5,6 +5,7 @@ import { CoachingModule } from '../coaching/coaching.module';
 import { ConversationModule } from '../conversation/conversation.module';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
 import { JobsModule } from '../jobs/jobs.module';
+import { PlanningModule } from '../planning/planning.module';
 import { StudentStateModule } from '../student-state/student-state.module';
 import { AuditService } from '../admin/audit.service';
 import { ExceptionAlertHandler } from './exception-alert.handler';
@@ -20,6 +21,8 @@ import { ProposalRunner } from './proposal-runner.service';
     ConversationModule,
     DomainEventsModule,
     JobsModule,
+    // Revisão do protocolo (ver, editar) antes da aprovação: o planejamento valida e grava.
+    PlanningModule,
     StudentStateModule,
   ],
   controllers: [ExceptionsController],

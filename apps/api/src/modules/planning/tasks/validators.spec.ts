@@ -670,7 +670,7 @@ const nutritionInput = (over: Partial<NutritionInput> = {}): NutritionInput => (
   proteinPerMealMinG: 25,
   maxWeeklyWeightLossPct: 1,
   cookingCapacity: 'BASIC',
-  foodBudget: 'MODERATE',
+  foodBudgetMonthlyBrl: 1200,
   mealsOutsideHomePerWeek: 3,
   ...over,
 });

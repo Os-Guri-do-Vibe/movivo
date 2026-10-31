@@ -70,6 +70,7 @@ import {
   subscriptions,
   users,
   userStatusTransitions,
+  weeklyReviews,
 } from '../../core/database/schema';
 import {
   TenantDatabase,
@@ -1337,6 +1338,23 @@ export class ControlCenterService {
         .where(and(eq(checkIns.userId, studentId), eq(checkIns.status, 'ANSWERED')))
         .orderBy(desc(checkIns.answeredAt))
         .limit(30);
+      const [followUp] = canReadHealth
+        ? await tx
+            .select({
+              weekStart: weeklyReviews.weekStart,
+              status: weeklyReviews.status,
+              record: weeklyReviews.record,
+            })
+            .from(weeklyReviews)
+            .where(
+              and(
+                eq(weeklyReviews.userId, studentId),
+                gte(weeklyReviews.createdAt, new Date(Date.now() - 14 * 86_400_000)),
+              ),
+            )
+            .orderBy(desc(weeklyReviews.weekStart))
+            .limit(1)
+        : [];
       const subscriptionRows = await tx
         .select({
           createdAt: subscriptions.createdAt,
@@ -1392,6 +1410,7 @@ export class ControlCenterService {
         subscriptionRows,
         quality,
         conversationDays,
+        followUp,
       };
     });
     if (!raw) throw new NotFoundException('Aluno não encontrado.');
@@ -1571,6 +1590,15 @@ export class ControlCenterService {
             validated: raw.quality?.validated ?? 0,
           },
           health: canReadHealth ? { parqState: row.parqState, painReports } : null,
+          followUp: raw.followUp
+            ? {
+                weekStart: raw.followUp.weekStart,
+                status: raw.followUp.record.status,
+                summary: raw.followUp.record.summary,
+                recovery: raw.followUp.record.analyses?.recovery ?? null,
+                habits: raw.followUp.record.analyses?.habits ?? null,
+              }
+            : null,
         },
       },
       [
@@ -1635,6 +1663,7 @@ export class ControlCenterService {
           .where(gte(modelRuns.createdAt, since));
 
         // Plano publicado em até 2 horas depois de a anamnese ser enviada.
+        // SQL cru: o driver só serializa `Date` em parâmetro ligado a coluna, então vai como ISO.
         const planRows = (await tx.execute(sql`
           select
             count(*)::int as delivered,
@@ -1645,7 +1674,7 @@ export class ControlCenterService {
             where tp.user_id = a.user_id and tp.created_at >= a.submitted_at
             order by tp.created_at asc limit 1
           ) plan on true
-          where a.submitted_at >= ${since}
+          where a.submitted_at >= ${since.toISOString()}::timestamptz
         `)) as unknown as Array<{ delivered: number; within_sla: number }>;
         const plans = planRows[0] ?? { delivered: 0, within_sla: 0 };
 

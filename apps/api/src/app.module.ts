@@ -31,6 +31,7 @@ import { ConversationModule } from './modules/conversation/conversation.module';
 import { AgentsPanelModule } from './modules/agents-panel/agents-panel.module';
 import { ExceptionsModule } from './modules/exceptions/exceptions.module';
 import { ProgressModule } from './modules/progress/progress.module';
+import { MedicalModule } from './modules/medical/medical.module';
 import { AgentsModule } from './core/agents/agents.module';
 import { CoachingModule } from './modules/coaching/coaching.module';
 import { MethodologyModule } from './modules/methodology/methodology.module';
@@ -57,6 +58,7 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
     WhatsappModule,
     ConversationModule,
     ProgressModule,
+    MedicalModule,
     ExceptionsModule,
     AgentsPanelModule,
     SubscriptionModule,

@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { ControlCenterCapability, ControlCenterRole } from '../enums/control-center';
 import { expenseCategorySchema } from './expense.schema';
+import { followUpAnalysisSchema } from './progress/review.schema';
 
 const roleValues = Object.values(ControlCenterRole) as [ControlCenterRole, ...ControlCenterRole[]];
 const capabilityValues = Object.values(ControlCenterCapability) as [
@@ -740,6 +741,19 @@ export const controlCenterStudentDetailResponseSchema = z.object({
         .object({
           parqState: nullableText,
           painReports: z.array(z.object({ at: z.iso.datetime(), text: z.string() })),
+        })
+        .nullable(),
+      /**
+       * Última revisão semanal (até 14 dias) com a leitura dos analistas de recuperação e hábitos.
+       * `null` sem `control_center.students.health.read` ou sem revisão recente.
+       */
+      followUp: z
+        .object({
+          weekStart: z.string(),
+          status: z.enum(['ON_TRACK', 'ATTENTION', 'OFF_TRACK']),
+          summary: z.string(),
+          recovery: followUpAnalysisSchema.nullable(),
+          habits: followUpAnalysisSchema.nullable(),
         })
         .nullable(),
     }),

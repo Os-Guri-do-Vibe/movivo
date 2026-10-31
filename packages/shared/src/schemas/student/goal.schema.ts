@@ -5,36 +5,80 @@ import { coachedModalitySchema } from '../training/modality.schema';
 /** O que o aluno DECLARA querer. Não é a estratégia: o Motor de Objetivos decide como chegar lá. */
 export const declaredGoalKindSchema = z.enum([
   'HYPERTROPHY',
+  'STRENGTH',
   'FAT_LOSS',
   'BODY_DEFINITION',
-  'STRENGTH',
+  'CONDITIONING',
+  'HEALTH',
+  'START_TRAINING',
+  'RETURN_TO_TRAINING',
+  'BODYBUILDING_COMPETITION',
   'RUNNING_PERFORMANCE',
   'RACE_PREPARATION',
   'HYROX_PREPARATION',
-  'CONDITIONING',
   'SPORT_PERFORMANCE',
-  'HEALTH',
-  'START_TRAINING',
 ]);
 export type DeclaredGoalKind = z.infer<typeof declaredGoalKindSchema>;
 
+/** Na ordem em que a anamnese lista os objetivos (os de sempre primeiro, depois os de corrida e HYROX). */
 export const DECLARED_GOAL_LABELS: Readonly<Record<DeclaredGoalKind, string>> = {
-  HYPERTROPHY: 'Ganhar massa muscular',
-  FAT_LOSS: 'Perder gordura',
+  HYPERTROPHY: 'Hipertrofia',
+  STRENGTH: 'Força',
+  FAT_LOSS: 'Emagrecimento',
   BODY_DEFINITION: 'Definição corporal',
-  STRENGTH: 'Ficar mais forte',
+  CONDITIONING: 'Condicionamento físico',
+  HEALTH: 'Saúde e bem estar',
+  START_TRAINING: 'Criar uma rotina de treino',
+  RETURN_TO_TRAINING: 'Voltar a treinar',
+  BODYBUILDING_COMPETITION: 'Competir em fisiculturismo',
   RUNNING_PERFORMANCE: 'Correr melhor',
   RACE_PREPARATION: 'Me preparar para uma prova de corrida',
   HYROX_PREPARATION: 'Me preparar para o HYROX',
-  CONDITIONING: 'Melhorar o condicionamento',
   SPORT_PERFORMANCE: 'Render mais no meu esporte',
-  HEALTH: 'Saúde e qualidade de vida',
-  START_TRAINING: 'Começar a treinar com consistência',
 };
 
-/** Evento-alvo (prova, competição, data pessoal). */
+/** Regiões em que o aluno de musculação gostaria de dar mais ênfase (até 2). */
+export const muscleEmphasisRegionSchema = z.enum([
+  'CHEST',
+  'BACK',
+  'SHOULDERS',
+  'ARMS',
+  'ABS_CORE',
+  'QUADS',
+  'HAMSTRINGS',
+  'GLUTES',
+  'CALVES',
+]);
+export type MuscleEmphasisRegion = z.infer<typeof muscleEmphasisRegionSchema>;
+
+export const MUSCLE_EMPHASIS_LABELS: Readonly<Record<MuscleEmphasisRegion, string>> = {
+  CHEST: 'Peitoral',
+  BACK: 'Costas',
+  SHOULDERS: 'Ombros',
+  ARMS: 'Braço',
+  ABS_CORE: 'Abdômen e core',
+  QUADS: 'Quadríceps',
+  HAMSTRINGS: 'Posterior de coxa',
+  GLUTES: 'Glúteos',
+  CALVES: 'Panturrilhas',
+};
+
+/** Grupos musculares do catálogo de exercícios por região de ênfase. */
+export const MUSCLE_EMPHASIS_GROUPS: Readonly<Record<MuscleEmphasisRegion, readonly string[]>> = {
+  CHEST: ['peito'],
+  BACK: ['costas'],
+  SHOULDERS: ['ombro'],
+  ARMS: ['bíceps', 'tríceps'],
+  ABS_CORE: ['core'],
+  QUADS: ['quadríceps'],
+  HAMSTRINGS: ['posterior de coxa'],
+  GLUTES: ['glúteo'],
+  CALVES: ['panturrilha'],
+};
+
+/** Evento-alvo: a modalidade da prova ou data importante. */
 export const targetEventSchema = z.object({
-  kind: z.enum(['RUNNING_RACE', 'HYROX_RACE', 'COMPETITION', 'PERSONAL_DATE']),
+  kind: z.enum(['RUNNING_RACE', 'HYROX_RACE', 'STRENGTH_EVENT', 'OTHER_EVENT']),
   name: z.string().trim().min(1).max(120),
   date: z.iso.date(),
   /** Distância da prova de corrida, quando houver. */

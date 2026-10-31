@@ -84,10 +84,18 @@ function chatCompletionsMessages(system: string, messages: GatewayMessage[]) {
           : message.content.map((part) =>
               part.type === 'text'
                 ? { type: 'text', text: part.text }
-                : {
-                    type: 'image_url',
-                    image_url: { url: `data:${part.mediaType};base64,${part.base64}` },
-                  },
+                : part.type === 'document'
+                  ? {
+                      type: 'file',
+                      file: {
+                        filename: part.fileName,
+                        file_data: `data:${part.mediaType};base64,${part.base64}`,
+                      },
+                    }
+                  : {
+                      type: 'image_url',
+                      image_url: { url: `data:${part.mediaType};base64,${part.base64}` },
+                    },
             ),
     })),
   ];
@@ -225,7 +233,7 @@ export class AnthropicVendor extends BaseVendor {
                   part.type === 'text'
                     ? { type: 'text', text: part.text }
                     : {
-                        type: 'image',
+                        type: part.type,
                         source: { type: 'base64', media_type: part.mediaType, data: part.base64 },
                       },
                 ),

@@ -47,6 +47,7 @@ describe('buildRlsPoliciesSql', () => {
       'staff',
       'consents',
       'anamnesis_sessions',
+      'anamnesis_session_photos',
       'auth_sessions',
       'subscriptions',
       'conversations',
@@ -81,6 +82,8 @@ describe('buildRlsPoliciesSql', () => {
       'body_assessments',
       'check_ins',
       'weekly_reviews',
+      'medical_exams',
+      'wearable_connections',
       // Trilha de decisões, fila por exceção e outbox.
       'coaching_proposals',
       'coaching_decisions',

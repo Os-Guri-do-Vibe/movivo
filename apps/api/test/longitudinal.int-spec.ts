@@ -42,6 +42,7 @@ import { PlanGenerationService } from '../src/modules/planning/plan-generation.s
 import { GoalProgressService } from '../src/modules/progress/goal-progress.service';
 import { PreferenceExtractionService } from '../src/modules/progress/preference-extraction.service';
 import { WeeklyReviewService } from '../src/modules/progress/weekly-review.service';
+import { StudentStateReader } from '../src/modules/student-state/student-state.reader';
 import { createStudent, fakeRunner } from './plan-fixtures';
 import {
   SIM_FIRST_WEEK,
@@ -220,6 +221,14 @@ describe.skipIf(REAL)('aluno que se afasta', () => {
     expect(
       flagged.every((row) => row.record.hypotheses.every((h) => h.status === 'HYPOTHESIS')),
     ).toBe(true);
+
+    // O analista de hábitos lê a semana; a leitura fica na revisão e volta como contexto.
+    expect(calls).toContain('habits.analyze_week');
+    expect(flagged.every((row) => row.record.analyses?.habits?.focus)).toBe(true);
+    const followUp = await app
+      .get(StudentStateReader)
+      .read(userId, ['followUp'], monday(SIM_WEEKS - 1));
+    expect(followUp.slices.followUp).toMatchObject({ habits: { focus: expect.any(String) } });
 
     // Volume reduzido só nas sessões planejadas que vêm, sem tocar no plano.
     const upcoming = await db.runAsSystem((tx) =>

@@ -8,10 +8,17 @@
  */
 import 'reflect-metadata';
 
-import { ForbiddenException, NotFoundException, type INestApplication } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  type INestApplication,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { MOVIVO_CLUB_URL } from '@movivo/shared';
 
 import { AppModule } from '../src/app.module';
 import { AgentRunner } from '../src/core/agents/agent-runner';
@@ -23,17 +30,22 @@ import {
   domainEvents,
   exceptionCases,
   nutritionPlans,
+  planSessions,
   safetyEvents,
+  scheduledSessions,
   staff,
+  trainingPlans,
   users,
   trainingAccessTokens,
 } from '../src/core/database/schema';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
 import type { AuthenticatedUser } from '../src/modules/auth/jwt.strategy';
 import { DecisionExecutor } from '../src/modules/coaching/decision/decision-executor.service';
+import { PublishedPolicies } from '../src/modules/coaching/policy/published-policies';
 import { SafetyService } from '../src/modules/coaching/safety/safety.service';
 import { ExceptionsService } from '../src/modules/exceptions/exceptions.service';
 import { QueueManager } from '../src/modules/jobs/queue-manager.service';
+import { PlanApprovalHandler } from '../src/modules/planning/plan-approval.handler';
 import { PlanGenerationService } from '../src/modules/planning/plan-generation.service';
 import { createStudent, fakeRunner } from './plan-fixtures';
 import { vi } from 'vitest';
@@ -158,6 +170,211 @@ afterAll(async () => {
 });
 
 describe('domínio por conselho', () => {
+  it('protocolo em revisão: CREF aprova o treino, CRN a alimentação; o plano é ativado e enviado uma vez', async () => {
+    const userId = await createStudent(db, created);
+    const policies = app.get(PublishedPolicies);
+    const spy = vi.spyOn(policies, 'autonomy').mockResolvedValue({
+      version: 99,
+      byAction: {
+        DEFINE_STRATEGY: { level: 'AUTO', limit: 0 },
+        PUBLISH_TRAINING_PLAN: { level: 'ESCALATE', limit: 0 },
+        PUBLISH_NUTRITION_PLAN: { level: 'ESCALATE', limit: 0 },
+      },
+      highUncertainty: 'ASK',
+      onLimitExceeded: 'ESCALATE',
+    });
+    const result = await app.get(PlanGenerationService).generate(userId, { now: NOW });
+    spy.mockRestore();
+    expect(result.status).toBe('PENDING_REVIEW');
+
+    const cases = await db.runAsSystem((tx) =>
+      tx.select().from(exceptionCases).where(eq(exceptionCases.userId, userId)),
+    );
+    const trainingCase = cases.find((c) => c.domain === 'TRAINING');
+    const nutritionCaseRow = cases.find((c) => c.domain === 'NUTRITION');
+    if (!trainingCase || !nutritionCaseRow) throw new Error('casos de revisão não abertos');
+
+    const enqueue = vi.mocked(app.get(QueueManager).enqueue);
+    const handler = app.get(PlanApprovalHandler);
+    const deliverApproval = async (proposalId: string) => {
+      const [decision] = await db.runAsSystem((tx) =>
+        tx
+          .select()
+          .from(coachingDecisions)
+          .where(
+            and(
+              eq(coachingDecisions.proposalId, proposalId),
+              eq(coachingDecisions.decidedBy, 'STAFF'),
+            ),
+          ),
+      );
+      await handler.handle({
+        id: `evt-${decision?.id}`,
+        userId,
+        type: 'DecisionMade',
+        payload: { decisionId: decision?.id ?? '', proposalId, verdict: 'EXECUTE' },
+        occurredAt: new Date(),
+      });
+    };
+    const planReady = () => enqueue.mock.calls.filter((call) => call[1] === 'plan-ready').length;
+    const readyBefore = planReady();
+
+    await exceptions.approve(actors.CREF, trainingCase.id, 'Treino coerente com a anamnese.');
+    await deliverApproval(trainingCase.subject.proposalId ?? '');
+    await deliverApproval(trainingCase.subject.proposalId ?? ''); // reentrega: nada muda
+    const [training] = await db.runAsSystem((tx) =>
+      tx.select().from(trainingPlans).where(eq(trainingPlans.userId, userId)),
+    );
+    expect(training?.status).toBe('ACTIVE');
+    const scheduled = await db.runAsSystem((tx) =>
+      tx.select().from(scheduledSessions).where(eq(scheduledSessions.userId, userId)),
+    );
+    expect(scheduled.length).toBeGreaterThan(0);
+    // Alimentação ainda em revisão: o aluno não recebe nada pela metade.
+    expect(planReady()).toBe(readyBefore);
+
+    await exceptions.approve(actors.CRN, nutritionCaseRow.id, undefined);
+    await deliverApproval(nutritionCaseRow.subject.proposalId ?? '');
+    const [nutrition] = await db.runAsSystem((tx) =>
+      tx.select().from(nutritionPlans).where(eq(nutritionPlans.userId, userId)),
+    );
+    expect(nutrition?.status).toBe('ACTIVE');
+    expect(planReady()).toBe(readyBefore + 1);
+    // Primeira entrega: protocolo, PDFs e o convite do CLUB.
+    const job = enqueue.mock.calls.filter((call) => call[1] === 'plan-ready').at(-1)?.[2] as {
+      text: string;
+      documents: unknown[];
+    };
+    expect(job.text).toContain(MOVIVO_CLUB_URL);
+    expect(job.documents).toHaveLength(2);
+  });
+
+  it('revisão do protocolo: ver com a prévia da semana, editar com conferência e pedir ajuste aos agentes', async () => {
+    const userId = await createStudent(db, created);
+    const policies = app.get(PublishedPolicies);
+    const escalate = () =>
+      vi.spyOn(policies, 'autonomy').mockResolvedValue({
+        version: 99,
+        byAction: {
+          DEFINE_STRATEGY: { level: 'AUTO', limit: 0 },
+          PUBLISH_TRAINING_PLAN: { level: 'ESCALATE', limit: 0 },
+          PUBLISH_NUTRITION_PLAN: { level: 'ESCALATE', limit: 0 },
+        },
+        highUncertainty: 'ASK',
+        onLimitExceeded: 'ESCALATE',
+      });
+    let spy = escalate();
+    expect((await app.get(PlanGenerationService).generate(userId, { now: NOW })).status).toBe(
+      'PENDING_REVIEW',
+    );
+    spy.mockRestore();
+    const cases = await db.runAsSystem((tx) =>
+      tx.select().from(exceptionCases).where(eq(exceptionCases.userId, userId)),
+    );
+    const trainingCase = cases.find((c) => c.domain === 'TRAINING');
+    const nutritionCaseRow = cases.find((c) => c.domain === 'NUTRITION');
+    if (!trainingCase || !nutritionCaseRow) throw new Error('casos de revisão não abertos');
+
+    // Ver: o CREF vê o treino com a semana simulada; a nutricionista nem enxerga o caso.
+    const review = await exceptions.protocol(actors.CREF, trainingCase.id, NOW);
+    if (review.kind !== 'TRAINING') throw new Error('protocolo de treino esperado');
+    expect(review.editable).toBe(true);
+    expect(review.weekPreview.sessions.length).toBeGreaterThan(0);
+    await expect(exceptions.protocol(actors.CRN, trainingCase.id, NOW)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+
+    // Editar: exercício fora do universo seguro do aluno é recusado com o motivo em PT-BR.
+    const [first, ...rest] = review.structure.sessions;
+    if (!first || first.content.modality !== 'STRENGTH')
+      throw new Error('sessão de força esperada');
+    const [exercise, ...otherExercises] = first.content.exercises;
+    if (!exercise) throw new Error('exercício esperado');
+    const invalid = {
+      ...review.structure,
+      sessions: [
+        {
+          ...first,
+          content: {
+            ...first.content,
+            exercises: [{ ...exercise, exerciseId: 'nao-existe' }, ...otherExercises],
+          },
+        },
+        ...rest,
+      ],
+    };
+    await expect(
+      exceptions.editProtocol(
+        actors.CREF,
+        trainingCase.id,
+        { kind: 'TRAINING', structure: invalid },
+        NOW,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      exceptions.editProtocol(
+        actors.CRN,
+        trainingCase.id,
+        { kind: 'TRAINING', structure: review.structure },
+        NOW,
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    const edited = await exceptions.editProtocol(
+      actors.CREF,
+      trainingCase.id,
+      {
+        kind: 'TRAINING',
+        structure: {
+          ...review.structure,
+          sessions: [{ ...first, title: 'Força A revisada' }, ...rest],
+        },
+      },
+      NOW,
+    );
+    expect(edited.structure.sessions[0]?.title).toBe('Força A revisada');
+    const sessionsOfPlan = await db.runAsSystem((tx) =>
+      tx.select().from(planSessions).where(eq(planSessions.planId, review.planId)),
+    );
+    expect(sessionsOfPlan.map((s) => s.title)).toContain('Força A revisada');
+    expect((await caseRow(trainingCase.id))?.status).toBe('IN_REVIEW');
+
+    // Pedir ajuste: o caso fecha, o rascunho é descartado e os agentes refazem com a orientação.
+    const instruction = 'Incluir opções de café da manhã sem lactose.';
+    const adjusted = await exceptions.requestAdjustment(
+      actors.CRN,
+      nutritionCaseRow.id,
+      instruction,
+      NOW,
+    );
+    expect(adjusted.outcome).toBe('ADJUSTMENT_REQUESTED');
+    const run = vi.spyOn(fakeRunner, 'run');
+    spy = escalate();
+    const redo = await app
+      .get(PlanGenerationService)
+      .adjustFromCase(userId, nutritionCaseRow.id, { now: NOW });
+    spy.mockRestore();
+    expect(redo.status).toBe('PENDING_REVIEW');
+    const nutritionInput = run.mock.calls.find((call) => call[0].id === 'nutrition.build_plan');
+    run.mockRestore();
+    expect(nutritionInput?.[1]).toMatchObject({ professionalInstruction: instruction });
+    const plans = await db.runAsSystem((tx) =>
+      tx.select().from(nutritionPlans).where(eq(nutritionPlans.userId, userId)),
+    );
+    expect(plans.map((p) => p.status).sort()).toEqual(['DRAFT', 'SUPERSEDED']);
+    const reopened = await db.runAsSystem((tx) =>
+      tx
+        .select()
+        .from(exceptionCases)
+        .where(and(eq(exceptionCases.userId, userId), eq(exceptionCases.domain, 'NUTRITION'))),
+    );
+    expect(reopened.filter((c) => c.status !== 'RESOLVED')).toHaveLength(1);
+    // A orientação não vira um segundo ajuste.
+    expect(
+      (await app.get(PlanGenerationService).adjustFromCase(userId, trainingCase.id, { now: NOW }))
+        .status,
+    ).toBe('SKIPPED');
+  });
   it('a nutricionista vê e aprova o caso de nutrição; o profissional de Educação Física nem o enxerga', async () => {
     const userId = await studentWithPlan();
     const id = await nutritionCase(userId);

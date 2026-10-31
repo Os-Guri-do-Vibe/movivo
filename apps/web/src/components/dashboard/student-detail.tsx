@@ -5,8 +5,20 @@
  * casos da fila, saúde (só para quem pode) e a linha do tempo. Uma coluna, um container por
  * assunto; dado ausente é sempre "Não informado" para a equipe saber que o campo existe.
  */
-import type { ControlCenterMetric, ControlCenterTimelineEvent } from '@movivo/shared';
-import { ArrowLeft, ClipboardCheck, Dumbbell, History, ShieldAlert, UserRound } from 'lucide-react';
+import type {
+  ControlCenterMetric,
+  ControlCenterTimelineEvent,
+  FollowUpAnalysis,
+} from '@movivo/shared';
+import {
+  Activity,
+  ArrowLeft,
+  ClipboardCheck,
+  Dumbbell,
+  History,
+  ShieldAlert,
+  UserRound,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useCallback } from 'react';
 import type { ReactNode } from 'react';
@@ -81,6 +93,38 @@ function metricText(metric: ControlCenterMetric): string {
   return metric.value === null
     ? NOT_INFORMED
     : `${metric.value}${metric.unit === 'PERCENT' ? '%' : ''}`;
+}
+
+const REVIEW_STATUS = {
+  ON_TRACK: 'No caminho',
+  ATTENTION: 'Atenção',
+  OFF_TRACK: 'Fora do caminho',
+} as const;
+
+function FollowUpReading({
+  title,
+  analysis,
+}: {
+  title: string;
+  analysis: FollowUpAnalysis | null;
+}) {
+  if (!analysis) return null;
+  return (
+    <div className="mt-3 rounded-lg border border-border p-3 text-xs">
+      <p className="text-label font-semibold">{title}</p>
+      {analysis.findings.length > 0 ? (
+        <ul className="mt-1 list-disc space-y-0.5 pl-5">
+          {analysis.findings.map((f) => (
+            <li key={f.kind}>{f.statement}</li>
+          ))}
+        </ul>
+      ) : null}
+      {analysis.strengths.length > 0 ? (
+        <p className="mt-1 text-muted-foreground">Fez bem: {analysis.strengths.join(' · ')}</p>
+      ) : null}
+      <p className="mt-1">Foco sugerido: {analysis.focus}</p>
+    </div>
+  );
 }
 
 export function StudentDetail({ id: studentId }: { id: string }) {
@@ -289,6 +333,23 @@ export function StudentDetail({ id: studentId }: { id: string }) {
               ))}
             </ul>
           )}
+        </Section>
+      ) : null}
+
+      {student.followUp ? (
+        <Section
+          title="Acompanhamento"
+          hint={`Revisão da semana de ${dateOnly.format(new Date(`${student.followUp.weekStart}T12:00:00Z`))}. Leituras dos analistas são hipóteses, não fatos.`}
+          icon={Activity}
+        >
+          <p className="text-label">
+            <StatusBadge tone={student.followUp.status === 'ON_TRACK' ? 'neutral' : 'attention'}>
+              {REVIEW_STATUS[student.followUp.status]}
+            </StatusBadge>{' '}
+            {student.followUp.summary}
+          </p>
+          <FollowUpReading title="Recuperação" analysis={student.followUp.recovery} />
+          <FollowUpReading title="Hábitos" analysis={student.followUp.habits} />
         </Section>
       ) : null}
 

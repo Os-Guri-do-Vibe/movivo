@@ -302,6 +302,22 @@ export class AppConfigService {
     return this.config.API_PUBLIC_URL;
   }
 
+  /** Strava: `null` quando não configurado (integração desligada). Segredos redigidos. */
+  get strava(): {
+    readonly clientId: string;
+    readonly clientSecret: string;
+    readonly webhookVerifyToken: string;
+  } | null {
+    const { STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET, STRAVA_WEBHOOK_VERIFY_TOKEN } = this.config;
+    return STRAVA_CLIENT_ID && STRAVA_CLIENT_SECRET && STRAVA_WEBHOOK_VERIFY_TOKEN
+      ? {
+          clientId: STRAVA_CLIENT_ID,
+          clientSecret: STRAVA_CLIENT_SECRET,
+          webhookVerifyToken: STRAVA_WEBHOOK_VERIFY_TOKEN,
+        }
+      : null;
+  }
+
   /** Config do RAG (US-3.3). Thresholds/top-K do retrieval + rerank. */
   get rag(): {
     readonly minCosine: number;

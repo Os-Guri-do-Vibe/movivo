@@ -5,6 +5,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -15,7 +16,9 @@ import {
   approveExceptionRequestSchema,
   closeExceptionRequestSchema,
   ControlCenterCapability as Capability,
+  editProtocolRequestSchema,
   exceptionStatusSchema,
+  protocolAdjustmentRequestSchema,
 } from '@movivo/shared';
 
 import { parseBody } from '../../core/validation/strict-input';
@@ -62,6 +65,43 @@ export class ExceptionsController {
   async decisions(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
     const detail = await this.exceptions.detail(user, id);
     return this.exceptions.decisionsOf(detail.case.userId);
+  }
+
+  @Get(':id/protocol')
+  @RequireCapabilities(Capability.EXCEPTIONS_READ, Capability.STUDENTS_READ)
+  @ApiOperation({ summary: 'Protocolo em revisão (plano completo e prévia da primeira semana)' })
+  protocol(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.exceptions.protocol(user, id);
+  }
+
+  @Get(':id/exam-file')
+  @RequireCapabilities(Capability.EXCEPTIONS_READ, Capability.STUDENTS_HEALTH_READ)
+  @ApiOperation({ summary: 'Arquivo original do exame enviado pelo aluno (PDF ou foto)' })
+  examFile(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.exceptions.examFile(user, id);
+  }
+
+  @Put(':id/protocol')
+  @RequireCapabilities(Capability.EXCEPTIONS_RESOLVE)
+  @ApiOperation({ summary: 'Edita à mão o protocolo em revisão (conferido antes de gravar)' })
+  editProtocol(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() raw: unknown,
+  ) {
+    return this.exceptions.editProtocol(user, id, parseBody(editProtocolRequestSchema, raw));
+  }
+
+  @Post(':id/request-adjustment')
+  @RequireCapabilities(Capability.EXCEPTIONS_RESOLVE)
+  @ApiOperation({ summary: 'Pede aos agentes um novo protocolo com a orientação do profissional' })
+  requestAdjustment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() raw: unknown,
+  ) {
+    const { instruction } = parseBody(protocolAdjustmentRequestSchema, raw);
+    return this.exceptions.requestAdjustment(user, id, instruction);
   }
 
   @Post(':id/claim')

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { AgentTaskRegistry } from '../../../core/agents/agent-task-registry';
 import type { StrengthInput } from '../tasks/strength';
+import { coordinatorTask } from '../tasks/coordinator';
 import { hybridTask } from '../tasks/hybrid';
 import { hyroxTask } from '../tasks/hyrox';
 import { nutritionTask } from '../tasks/nutrition';
@@ -11,7 +12,15 @@ import { strategyTask } from '../tasks/strategy';
 import { strengthTask } from '../tasks/strength';
 import { PLANNING_CASES } from './index';
 
-const TASKS = [strategyTask, strengthTask, runningTask, hyroxTask, hybridTask, nutritionTask];
+const TASKS = [
+  strategyTask,
+  strengthTask,
+  runningTask,
+  hyroxTask,
+  hybridTask,
+  nutritionTask,
+  coordinatorTask,
+];
 
 describe('casos de avaliação do planejamento', () => {
   it('registra todas as tarefas com seus casos e checagens', () => {

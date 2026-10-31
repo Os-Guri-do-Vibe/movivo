@@ -4,6 +4,7 @@ import {
   exceptionActionResponseSchema,
   exceptionDecisionsResponseSchema,
   exceptionDetailSchema,
+  exceptionExamFileSchema,
   exceptionListResponseSchema,
   exceptionsSummarySchema,
   type ExceptionsSummary,
@@ -12,6 +13,15 @@ import {
   type ExceptionDecision,
   type ExceptionDetail,
   type ExceptionListItem,
+  agentProfileResponseSchema,
+  agentProfilesOverviewSchema,
+  agentProfileTestResponseSchema,
+  type AgentProfileKey,
+  type AgentProfileUpdate,
+  protocolAdjustmentResponseSchema,
+  protocolReviewSchema,
+  type EditProtocolRequest,
+  type ProtocolReview,
   type ModelTierName,
   type SaveTierRoutesRequest,
   auditSearchResponseSchema,
@@ -667,6 +677,11 @@ export function getExceptionDecisions(
   return request(`exceptions/${id}/decisions`, exceptionDecisionsResponseSchema, signal);
 }
 
+/** Arquivo original do exame do caso (PDF ou foto, em base64). */
+export function getExceptionExamFile(id: string, signal?: AbortSignal) {
+  return request(`exceptions/${id}/exam-file`, exceptionExamFileSchema, signal);
+}
+
 const EXCEPTION_MESSAGES = {
   forbidden: 'Este caso é de outro domínio profissional.',
   fallback: 'Não foi possível concluir a ação neste caso.',
@@ -704,6 +719,63 @@ export function resolveException(id: string, note: string) {
   );
 }
 
+/** Protocolo em revisão do caso (plano completo, prévia da semana e opções de troca). */
+export function getExceptionProtocol(id: string, signal?: AbortSignal): Promise<ProtocolReview> {
+  return request(`exceptions/${id}/protocol`, protocolReviewSchema, signal);
+}
+
+/** Pede aos agentes um novo protocolo com a orientação do profissional (encerra o caso). */
+export function requestProtocolAdjustment(id: string, instruction: string) {
+  return mutate(
+    `exceptions/${id}/request-adjustment`,
+    { instruction },
+    protocolAdjustmentResponseSchema,
+    EXCEPTION_MESSAGES,
+  );
+}
+
+/** Erro da edição com cada problema apontado pela conferência do servidor, em PT-BR. */
+export class ProtocolEditError extends ControlCenterApiError {
+  constructor(
+    status: number,
+    message: string,
+    readonly issues: readonly string[],
+  ) {
+    super(status, message);
+  }
+}
+
+export async function saveExceptionProtocol(
+  id: string,
+  input: EditProtocolRequest,
+): Promise<ProtocolReview> {
+  const response = await fetch(`/api/dashboard/control/exceptions/${id}/protocol`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const value = (await response.json().catch(() => null)) as unknown;
+  if (!response.ok) {
+    const issues =
+      isRecord(value) && Array.isArray(value.issues)
+        ? value.issues.flatMap((issue) =>
+            isRecord(issue) && typeof issue.message === 'string' ? [issue.message] : [],
+          )
+        : [];
+    const message =
+      isRecord(value) && typeof value.message === 'string'
+        ? value.message
+        : response.status === 403
+          ? EXCEPTION_MESSAGES.forbidden
+          : 'Não foi possível salvar o protocolo.';
+    throw new ProtocolEditError(response.status, message, issues);
+  }
+  const parsed = protocolReviewSchema.safeParse(value);
+  if (!parsed.success) throw new ControlCenterApiError(502, EXCEPTION_MESSAGES.contract);
+  return parsed.data;
+}
+
 /* --------- Agentes de IA: tarefas, níveis de modelo e custo -------- */
 
 export function getAgents(signal?: AbortSignal): Promise<AgentsOverview> {
@@ -712,6 +784,69 @@ export function getAgents(signal?: AbortSignal): Promise<AgentsOverview> {
 
 export function getAgentCosts(days: number, signal?: AbortSignal): Promise<AgentCosts> {
   return request(`agents/costs?days=${days}`, agentCostsSchema, signal);
+}
+
+const PROFILE_MESSAGES = {
+  forbidden: 'Só contas ADMIN editam as fichas dos agentes.',
+  fallback: 'Não foi possível concluir a ação na ficha.',
+  contract: 'A resposta veio fora do contrato esperado.',
+};
+
+export async function getAgentProfiles(signal?: AbortSignal) {
+  return (await request('agents/profiles', agentProfilesOverviewSchema, signal)).data;
+}
+
+export async function openAgentProfileDraft(agent: AgentProfileKey) {
+  return (
+    await mutate(
+      `agents/profiles/${agent}/drafts`,
+      {},
+      agentProfileResponseSchema,
+      PROFILE_MESSAGES,
+    )
+  ).data;
+}
+
+export async function updateAgentProfile(id: string, input: AgentProfileUpdate) {
+  return (
+    await mutate(
+      `agents/profiles/documents/${id}/update`,
+      input,
+      agentProfileResponseSchema,
+      PROFILE_MESSAGES,
+    )
+  ).data;
+}
+
+export async function testAgentProfile(id: string) {
+  return (
+    await mutate(
+      `agents/profiles/documents/${id}/test`,
+      {},
+      agentProfileTestResponseSchema,
+      PROFILE_MESSAGES,
+    )
+  ).data;
+}
+
+export async function publishAgentProfile(id: string) {
+  return (
+    await mutate(
+      `agents/profiles/documents/${id}/publish`,
+      {},
+      agentProfileResponseSchema,
+      PROFILE_MESSAGES,
+    )
+  ).data;
+}
+
+export function discardAgentProfile(id: string) {
+  return mutate(
+    `agents/profiles/documents/${id}/discard`,
+    {},
+    { parse: (value: unknown) => value },
+    PROFILE_MESSAGES,
+  );
 }
 
 export async function saveTierRoutes(

@@ -3,7 +3,12 @@
  * pelo MESMO código de produção (`inputs.ts`) a partir de personas sintéticas; as asserções
  * dizem o que a saída precisa ter além do que os validadores já garantem.
  */
-import { exampleParameters, methodologyDomainSpec, type PlanSession } from '@movivo/shared';
+import {
+  exampleParameters,
+  methodologyDomainSpec,
+  type NutritionPlanStructure,
+  type PlanSession,
+} from '@movivo/shared';
 
 import type { Assertion, EvalCase, NamedCheck } from '../../../core/agents/eval-case';
 import { nutritionRules } from '../calc/params';
@@ -30,6 +35,7 @@ import {
   strengthInputOf,
 } from '../inputs';
 import type { StrengthInput } from '../tasks/strength';
+import { coordinatorInputOf } from '../tasks/coordinator';
 
 const NUTRITION_PARAMS = exampleParameters(methodologyDomainSpec('NUTRITION'));
 const NUTRITION_RULES = nutritionRules(NUTRITION_PARAMS);
@@ -361,7 +367,7 @@ function hybridInput() {
     ],
     externalSessions: external.sessions,
     availability: {
-      maxSessionsPerWeek: 6,
+      maxSessionsPerWeek: v.availability?.maxSessionsPerWeek ?? 4,
       windows: v.availability?.windows ?? [],
       externalFixedDays: external.fixedDays,
     },
@@ -478,6 +484,128 @@ export const nutritionCases: EvalCase[] = [
 
 // --- Checagens nomeadas ---------------------------------------------------------------------
 
+// --- coordination.review_protocol -----------------------------------------------------------
+
+function nutritionSample(
+  strategy: NutritionPlanStructure['strategy'],
+  kcal: number,
+  carbsG: number,
+): NutritionPlanStructure {
+  const day = {
+    energyKcal: { min: kcal - 100, max: kcal + 100 },
+    proteinG: 140,
+    carbsG,
+    fatG: 60,
+    fiberG: 30,
+    waterMl: 2500,
+  };
+  return {
+    strategy,
+    summary: 'Plano alimentar com refeições simples e proteína distribuída no dia.',
+    trainingDay: day,
+    restDay: day,
+    meals: [
+      {
+        slot: 'BREAKFAST',
+        energyShare: 0.3,
+        proteinG: 40,
+        guidance: 'Proteína e fruta.',
+        examples: ['Ovos e pão'],
+      },
+      {
+        slot: 'LUNCH',
+        energyShare: 0.4,
+        proteinG: 50,
+        guidance: 'Prato completo.',
+        examples: ['Arroz, feijão e frango'],
+      },
+      {
+        slot: 'DINNER',
+        energyShare: 0.3,
+        proteinG: 50,
+        guidance: 'Prato completo.',
+        examples: ['Peixe e legumes'],
+      },
+    ],
+    guidelines: ['Beba água ao longo do dia.'],
+    supplements: [],
+  };
+}
+
+const coordinatorInput = (
+  energyStrategy: NutritionPlanStructure['strategy'],
+  sessions: PlanSession[],
+  nutrition: NutritionPlanStructure,
+) =>
+  coordinatorInputOf(
+    { title: 'Estratégia de teste', energyStrategy, modalityFocus: ['STRENGTH'] },
+    {
+      summary: 'Plano de teste.',
+      modalityPriorities: [{ modality: 'STRENGTH', priority: 1 }],
+      phases: [{ name: 'Base', focus: 'Base.', weeks: 4, endsWithDeload: false }],
+      sessions,
+    },
+    nutrition,
+  );
+
+export const coordinatorCases: EvalCase[] = [
+  caseOf(
+    'coordination.review_protocol',
+    'dor-no-ombro-com-supino',
+    'Supino no plano de quem registrou dor no ombro',
+    AVANCADO_COM_DOR_NO_OMBRO,
+    coordinatorInput(
+      'MAINTENANCE',
+      [strengthSample('FORCA_A', 'Corpo todo A', 2), strengthSample('FORCA_B', 'Corpo todo B', 1)],
+      nutritionSample('MAINTENANCE', 2600, 300),
+    ),
+    [
+      path('verdict', 'eq', 'ADJUST', 'pede ajuste'),
+      path('adjustments.*.target', 'contains', 'TRAINING', 'o ajuste é no treino'),
+      path('conflicts.*.prevails', 'contains', 'SAFETY', 'a segurança prevalece'),
+    ],
+    { safetyCritical: true },
+  ),
+  caseOf(
+    'coordination.review_protocol',
+    'deficit-agressivo-com-volume-alto',
+    'Pouca energia para seis sessões intensas por semana',
+    HIPERTROFIA_ADIPOSIDADE_ALTA,
+    coordinatorInput(
+      'DEFICIT',
+      [
+        strengthSample('FORCA_A', 'Corpo todo A', 2, 9),
+        strengthSample('FORCA_B', 'Corpo todo B', 2, 9),
+        runningSample('INTERVALADO', 'INTERVALS', { km: 6, rpe: 9 }),
+        runningSample('LONGAO', 'LONG', { km: 14, rpe: 8 }),
+      ],
+      nutritionSample('DEFICIT', 1300, 80),
+    ),
+    [
+      path('verdict', 'eq', 'ADJUST', 'pede ajuste'),
+      path('conflicts', 'lengthGte', 1, 'aponta o conflito entre energia e volume'),
+    ],
+    { minScore: 1 },
+  ),
+  caseOf(
+    'coordination.review_protocol',
+    'protocolo-coerente',
+    'Protocolo moderado e coerente segue sem ajuste',
+    INICIANTE_EM_CASA,
+    coordinatorInput(
+      'MAINTENANCE',
+      [strengthSample('FORCA_A', 'Corpo todo', 3, 6)],
+      nutritionSample('MAINTENANCE', 2000, 230),
+    ),
+    [
+      path('verdict', 'eq', 'COHERENT', 'não inventa ajuste'),
+      exists('professionalNote', 'deixa uma nota ao profissional'),
+    ],
+  ),
+];
+
+// --- Checagens nomeadas ---------------------------------------------------------------------
+
 const MAJOR = ['peito', 'costas', 'ombro', 'quadríceps', 'posterior de coxa', 'glúteo'];
 
 const coversMajorGroups: NamedCheck = (output, evalCase) => {
@@ -552,4 +680,5 @@ export const PLANNING_CASES: Readonly<Record<string, readonly EvalCase[]>> = {
   'hyrox.build_block': hyroxCases,
   'hybrid.reconcile_week': hybridCases,
   'nutrition.build_plan': nutritionCases,
+  'coordination.review_protocol': coordinatorCases,
 };

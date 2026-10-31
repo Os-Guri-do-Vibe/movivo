@@ -5,6 +5,8 @@ import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-rea
 
 import { cn } from '@/lib/utils';
 
+import { FieldError } from './fields';
+
 const MONTHS = [
   'Janeiro',
   'Fevereiro',
@@ -246,6 +248,7 @@ export function DatePicker({
   minDate,
   maxDate,
   autoComplete = 'off',
+  invalidMessage = 'Informe uma data válida, no formato dd/mm/aaaa.',
 }: {
   id: string;
   value: string;
@@ -254,6 +257,8 @@ export function DatePicker({
   minDate?: Date;
   maxDate?: Date | null;
   autoComplete?: string;
+  /** Exibida quando a data foi digitada por inteiro, mas não existe ou está fora do intervalo. */
+  invalidMessage?: string;
 }) {
   const [today] = React.useState(() => new Date());
   const lowerDate = minDate ?? new Date(FIRST_YEAR, 0, 1);
@@ -270,6 +275,8 @@ export function DatePicker({
   const suppressOpenOnFocusRef = React.useRef(false);
   const selectedDate = parseIsoDate(value);
   const upperDate = maxDate === undefined ? today : maxDate;
+  const typedInvalid =
+    inputValue.length === 10 && !parseDisplayDate(inputValue, lowerDate, upperDate);
   const firstYear = lowerDate.getFullYear();
   const lastYear = upperDate?.getFullYear() ?? Math.max(today.getFullYear() + 100, view.year);
   const years = React.useMemo(
@@ -375,7 +382,7 @@ export function DatePicker({
         className={cn(
           'flex h-[52px] w-full overflow-hidden rounded-xl border border-input bg-white transition-colors',
           'focus-within:border-ring focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-white',
-          error && 'border-destructive',
+          (error || typedInvalid) && 'border-destructive',
         )}
       >
         <input
@@ -389,7 +396,7 @@ export function DatePicker({
           value={inputValue}
           aria-haspopup="dialog"
           aria-expanded={open}
-          aria-invalid={error || undefined}
+          aria-invalid={error || typedInvalid || undefined}
           aria-controls={`${id}-calendar`}
           onFocus={() => {
             if (suppressOpenOnFocusRef.current) {
@@ -515,6 +522,11 @@ export function DatePicker({
               );
             })}
           </div>
+        </div>
+      )}
+      {typedInvalid && (
+        <div className="mt-2">
+          <FieldError message={invalidMessage} />
         </div>
       )}
     </div>

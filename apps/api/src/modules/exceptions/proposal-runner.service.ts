@@ -60,9 +60,11 @@ export class ProposalRunner {
         return { command: 'communication.send_message', result: { text: action.text } };
       case 'PUBLISH_TRAINING_PLAN':
       case 'PUBLISH_NUTRITION_PLAN':
+        // O planejamento ativa o rascunho ao receber a decisão (`DecisionMade`) da equipe.
+        return { command: 'planning.publish_plan', result: { planId: action.planId } };
       case 'DEFINE_STRATEGY':
         throw new BadRequestException(
-          'Planos e estratégia são publicados pelo fluxo de planejamento, não pela fila.',
+          'A estratégia é definida pelo fluxo de planejamento, não pela fila.',
         );
     }
   }

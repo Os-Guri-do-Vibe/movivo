@@ -7,11 +7,12 @@
  * entram decifrados com consentimento de saúde ATIVO no momento da leitura.
  */
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, gte, isNull, lte } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, lte, ne } from 'drizzle-orm';
 
 import {
   healthRecordPayloadSchema,
   type DailyTargets,
+  type FollowUpAnalysis,
   type StudentConstraint,
 } from '@movivo/shared';
 
@@ -39,13 +40,18 @@ import {
   studentStateSnapshots,
   trainingPlans,
   users,
+  weeklyReviews,
 } from '../../core/database/schema';
 import {
   TenantDatabase,
   type TenantTransaction,
 } from '../../core/database/tenant-database.service';
+import { cycleView } from './menstrual-cycle';
+import { hasCycleConsent, loadCycleStarts } from './menstrual-cycle.service';
 
 const DAY_MS = 86_400_000;
+/** Até quando a revisão semanal ainda vale como contexto (semana revisada + a corrente). */
+const FOLLOW_UP_DAYS = 21;
 
 function isoDay(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -75,9 +81,10 @@ export class StudentStateReader {
     now: Date = new Date(),
   ): Promise<StateContext> {
     const wanted = new Set(slices);
-    const healthAllowed = wanted.has('safety')
-      ? await this.consent.hasActiveForUser(userId)
-      : false;
+    const healthAllowed =
+      wanted.has('safety') || wanted.has('cycle')
+        ? await this.consent.hasActiveForUser(userId)
+        : false;
     return this.db.runAsUser(userId, 'USER', async (tx) => {
       const out: StateContext['slices'] = {};
       const today = isoDay(now);
@@ -123,6 +130,10 @@ export class StudentStateReader {
         return this.safety(tx, userId, healthAllowed);
       case 'recentDecisions':
         return this.recentDecisions(tx, userId);
+      case 'followUp':
+        return this.followUp(tx, userId, now);
+      case 'cycle':
+        return this.cycle(tx, userId, today, healthAllowed);
     }
   }
 
@@ -398,7 +409,12 @@ export class StudentStateReader {
       .select({ kind: studentHealthRecords.kind, payload: studentHealthRecords.payload })
       .from(studentHealthRecords)
       .where(
-        and(eq(studentHealthRecords.userId, userId), eq(studentHealthRecords.status, 'ACTIVE')),
+        and(
+          eq(studentHealthRecords.userId, userId),
+          eq(studentHealthRecords.status, 'ACTIVE'),
+          // O ciclo tem fatia própria e consentimento próprio.
+          ne(studentHealthRecords.kind, 'MENSTRUAL_CYCLE'),
+        ),
       );
     const healthRecords = [];
     for (const record of records) {
@@ -423,5 +439,52 @@ export class StudentStateReader {
       .where(eq(coachingDecisions.userId, userId))
       .orderBy(desc(coachingDecisions.createdAt))
       .limit(10);
+  }
+
+  /** Última revisão semanal recente: o que os analistas leram e o foco sugerido (hipóteses). */
+  private async followUp(tx: TenantTransaction, userId: string, now: Date) {
+    const [review] = await tx
+      .select({
+        weekStart: weeklyReviews.weekStart,
+        status: weeklyReviews.status,
+        record: weeklyReviews.record,
+      })
+      .from(weeklyReviews)
+      .where(
+        and(
+          eq(weeklyReviews.userId, userId),
+          gte(weeklyReviews.weekStart, isoDay(new Date(now.getTime() - FOLLOW_UP_DAYS * DAY_MS))),
+        ),
+      )
+      .orderBy(desc(weeklyReviews.weekStart))
+      .limit(1);
+    if (!review) return null;
+    const brief = (analysis: FollowUpAnalysis | null | undefined) =>
+      analysis
+        ? {
+            status: analysis.status,
+            readings: analysis.findings.map((f) => f.statement),
+            strengths: analysis.strengths,
+            focus: analysis.focus,
+          }
+        : null;
+    return {
+      weekStart: review.weekStart,
+      status: review.status,
+      summary: review.record.summary,
+      recovery: brief(review.record.analyses?.recovery),
+      habits: brief(review.record.analyses?.habits),
+    };
+  }
+
+  /** Estimativa por calendário; `null` sem consentimento ou sem registro. */
+  private async cycle(
+    tx: TenantTransaction,
+    userId: string,
+    today: string,
+    healthAllowed: boolean,
+  ) {
+    if (!healthAllowed || !(await hasCycleConsent(tx, userId))) return null;
+    return cycleView(await loadCycleStarts(tx, this.cipher, userId), today);
   }
 }

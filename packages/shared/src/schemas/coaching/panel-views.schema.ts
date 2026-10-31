@@ -1,6 +1,7 @@
 /** Contratos de leitura do painel (fila de exceções, agentes e custo de IA). */
 import { z } from 'zod';
 
+import { medicalExamViewSchema } from '../medical/exam.schema';
 import { exceptionDomainSchema } from './council';
 import {
   exceptionKindSchema,
@@ -71,6 +72,8 @@ export const exceptionDetailSchema = z.object({
     .nullable(),
   /** Fatias do Estado do Aluno (objetivo, treino, nutrição, adesão, decisões recentes…). */
   state: z.record(z.string(), z.unknown()),
+  /** Exame enviado pelo aluno (casos `MEDICAL_EXAM`): leitura e comentário da IA. */
+  exam: medicalExamViewSchema.nullish(),
 });
 export type ExceptionDetail = z.infer<typeof exceptionDetailSchema>;
 
@@ -93,6 +96,12 @@ export type ExceptionDecision = z.infer<typeof exceptionDecisionsResponseSchema>
 export const exceptionActionResponseSchema = z.object({
   id: z.uuid(),
   status: z.string(),
+});
+
+/** Arquivo original do exame (PDF ou foto), para o médico conferir a leitura. */
+export const exceptionExamFileSchema = z.object({
+  mediaType: z.string(),
+  base64: z.string(),
 });
 
 export const agentsOverviewSchema = z.object({

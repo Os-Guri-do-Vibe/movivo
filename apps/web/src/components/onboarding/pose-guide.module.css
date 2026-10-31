@@ -1,0 +1,22 @@
+/* Guia da posição da foto: uma linha de leitura percorre o corpo, da cabeça aos pés. */
+.scan {
+  animation: scan 4s ease-in-out infinite;
+}
+
+@keyframes scan {
+  0% {
+    top: 4%;
+  }
+  50% {
+    top: 94%;
+  }
+  100% {
+    top: 4%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scan {
+    animation: none;
+  }
+}

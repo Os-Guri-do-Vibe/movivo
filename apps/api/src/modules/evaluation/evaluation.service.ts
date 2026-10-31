@@ -18,6 +18,7 @@ import {
   PUBLISHED_METHODOLOGY,
   type PublishedMethodology,
 } from '../../core/agents/agent-context';
+import { promptVersionWith, type AgentProfileText } from '../../core/agents/agent-profile.reader';
 import { AgentRunner, AgentTaskError } from '../../core/agents/agent-runner';
 import {
   defineAgentTask,
@@ -64,6 +65,8 @@ export interface EvaluateOptions {
     Record<MethodologyDomain, { text: string; version: number; parameters?: MethodologyParameters }>
   >;
   routeOverride?: TierRoute;
+  /** Ficha do agente em teste (rascunho) no lugar da publicada. */
+  profileOverride?: AgentProfileText;
   requestedBy?: string | null;
 }
 
@@ -96,6 +99,7 @@ export class EvaluationService {
     const startedAt = new Date();
     const results: EvalCaseResult[] = [];
     let methodologyVersions: Partial<Record<MethodologyDomain, number>> = {};
+    let promptVersion = promptVersionWith(task.promptVersion, options.profileOverride ?? null);
     for (const evalCase of selected) {
       const sources = this.sourcesFor(evalCase, options.methodologyOverride ?? {});
       try {
@@ -103,9 +107,11 @@ export class EvaluationService {
           userId: null,
           sources,
           routeOverride: options.routeOverride,
+          profileOverride: options.profileOverride,
           images: evalCase.images?.map((image) => ({ type: 'image' as const, ...image })),
         });
         methodologyVersions = { ...methodologyVersions, ...run.methodologyVersions };
+        promptVersion = run.promptVersion;
         const assertions: AssertionResult[] = [];
         let judgeCost = 0;
         for (const assertion of evalCase.assertions) {
@@ -166,7 +172,7 @@ export class EvaluationService {
         .insert(evalRuns)
         .values({
           taskId,
-          promptVersion: task.promptVersion,
+          promptVersion,
           methodologyVersions,
           vendor: options.routeOverride?.vendor ?? null,
           model: options.routeOverride?.model ?? null,

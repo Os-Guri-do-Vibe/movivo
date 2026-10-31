@@ -131,6 +131,9 @@ importers:
       passport-jwt:
         specifier: ^4.0.1
         version: 4.0.1
+      pdfkit:
+        specifier: ^0.20.2
+        version: 0.20.2
       pdfmake:
         specifier: ^0.3.12
         version: 0.3.12
@@ -189,6 +192,9 @@ importers:
       '@types/passport-jwt':
         specifier: ^4.0.1
         version: 4.0.1
+      '@types/pdfkit':
+        specifier: ^0.17.7
+        version: 0.17.7
       '@types/pdfmake':
         specifier: ^0.3.3
         version: 0.3.3
@@ -2941,8 +2947,8 @@ packages:
   '@types/passport@1.0.17':
     resolution: {integrity: sha512-aciLyx+wDwT2t2/kJGJR2AEeBz0nJU4WuRX04Wu9Dqc5lSUtwu0WERPHYsLhF9PtseiAMPBGNUOtFjxZ56prsg==}
 
-  '@types/pdfkit@0.17.6':
-    resolution: {integrity: sha512-tIwzxk2uWKp0Cq9JIluQXJid77lYhF52EsIOwhsMF4iWLA6YneoBR1xVKYYdAysHuepUB0OX4tdwMiUDdGKmig==}
+  '@types/pdfkit@0.17.7':
+    resolution: {integrity: sha512-VMOZDWw7HtNtLbjIuHIhVArm9PlV0gxpz32jAl1IuXWlIgbr1lKFoTsrtvEzY8a9BIpQJEE5DwNPKD50otTs6g==}
 
   '@types/pdfmake@0.3.3':
     resolution: {integrity: sha512-ufbceB4Q3dKpmFUMKEbZvJcfLi8+C5b1+rTFVG6urtkS3FHwaTQH6NCh/iEEDINlApCxH/W3/rsq99pP5E9/JA==}
@@ -7941,14 +7947,14 @@ snapshots:
     dependencies:
       '@types/express': 5.0.6
 
-  '@types/pdfkit@0.17.6':
+  '@types/pdfkit@0.17.7':
     dependencies:
       '@types/node': 22.20.5
 
   '@types/pdfmake@0.3.3':
     dependencies:
       '@types/node': 22.20.5
-      '@types/pdfkit': 0.17.6
+      '@types/pdfkit': 0.17.7
 
   '@types/qrcode@1.5.6':
     dependencies:

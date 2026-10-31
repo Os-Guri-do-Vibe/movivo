@@ -191,6 +191,7 @@ export const fakeRunner = {
       stateVersion: 0,
       methodologyVersions: {},
       costBrl: 0,
+      promptVersion: 'fake',
     };
     if (task.id === 'goals.define_strategy') {
       const i = input as StrategyInput;
@@ -393,6 +394,24 @@ export const fakeRunner = {
     if (task.id === 'preferences.extract_preferences') {
       return { ...base, output: preferencesFake(input as PreferencesFakeInput) };
     }
+    if (task.id === 'recovery.analyze_week' || task.id === 'habits.analyze_week') {
+      return {
+        ...base,
+        output: { status: 'OK', findings: [], strengths: [], focus: 'Manter a rotina da semana.' },
+      };
+    }
+    if (task.id === 'coordination.review_protocol') {
+      return {
+        ...base,
+        output: {
+          verdict: 'COHERENT',
+          opinions: [],
+          conflicts: [],
+          adjustments: [],
+          professionalNote: 'Treino e alimentação coerentes entre si.',
+        },
+      };
+    }
     throw new Error(`tarefa inesperada no teste: ${task.id}`);
   },
 };
@@ -435,7 +454,7 @@ export async function createStudent(
           occupationRhythm: 'REGULAR',
           cookingCapacity: 'BASIC',
           mealsOutsideHomePerWeek: 4,
-          foodBudget: 'MODERATE',
+          foodBudgetMonthlyBrl: 1200,
         },
       },
     });

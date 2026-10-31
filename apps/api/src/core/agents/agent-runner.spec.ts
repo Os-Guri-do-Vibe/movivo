@@ -3,7 +3,9 @@ import { z } from 'zod';
 
 import type { GatewayRequest, GatewayResult } from '../ai/ai.types';
 import type { ModelGateway } from '../ai/model-gateway';
+import type { TenantDatabase } from '../database/tenant-database.service';
 import type { AgentContextSources } from './agent-context';
+import { PublishedAgentProfiles } from './agent-profile.reader';
 import { AgentRunner, AgentTaskError, extractJson } from './agent-runner';
 import { defineAgentTask } from './agent-task';
 
@@ -109,6 +111,47 @@ describe('AgentRunner', () => {
   it('a versão do prompt muda quando a instrução muda', () => {
     const other = defineAgentTask({ ...task, instructions: `${task.instructions} Seja breve.` });
     expect(other.promptVersion).not.toBe(task.promptVersion);
+  });
+
+  it('a ficha do agente entra antes do papel e marca a versão do prompt', async () => {
+    const { gateway, requests } = gatewayReplying('{"sessoes":3,"motivo":"3 dias livres"}');
+    const result = await new AgentRunner(gateway).run(
+      task,
+      { diasDisponiveis: 3 },
+      {
+        userId: null,
+        sources,
+        profileOverride: { agent: 'STRENGTH', version: 4, content: 'Técnica antes de carga.' },
+      },
+    );
+    const system = requests[0]?.system ?? '';
+    expect(system.indexOf('# Ficha do agente\nTécnica antes de carga.')).toBeGreaterThan(-1);
+    expect(system.indexOf('# Ficha do agente')).toBeLessThan(system.indexOf('# Seu papel'));
+    expect(result.promptVersion).toBe(`${task.promptVersion}.STRENGTH.v4`);
+    expect(requests[0]?.promptVersion).toBe(result.promptVersion);
+  });
+
+  it('persona: a publicada do sexo do aluno, a outra por empréstimo, ou o texto do código', async () => {
+    const run = async (published: { agent: string; version: number; content: string }[]) => {
+      const { gateway, requests } = gatewayReplying('{"sessoes":3,"motivo":"3 dias livres"}');
+      const db = { runAsSystem: async () => published } as unknown as TenantDatabase;
+      const result = await new AgentRunner(gateway, new PublishedAgentProfiles(db)).run(
+        task,
+        { diasDisponiveis: 3 },
+        { userId: null, sources, persona: 'PERSONA_MALE' },
+      );
+      return { system: requests[0]?.system ?? '', version: result.promptVersion };
+    };
+    const male = { agent: 'PERSONA_MALE', version: 2, content: 'Sou o Leo.' };
+    const female = { agent: 'PERSONA_FEMALE', version: 1, content: 'Sou a Mari.' };
+    expect(await run([male, female])).toMatchObject({
+      version: `${task.promptVersion}.PERSONA_MALE.v2`,
+    });
+    expect((await run([male])).system).toContain('# Persona (quem fala com o aluno)\nSou o Leo.');
+    expect((await run([female])).system).toContain('Sou a Mari.');
+    const fallback = await run([]);
+    expect(fallback.system).toContain('Sou o Leonardo, persona de inteligência artificial');
+    expect(fallback.version).toBe(`${task.promptVersion}.PERSONA_MALE.v0`);
   });
 });
 

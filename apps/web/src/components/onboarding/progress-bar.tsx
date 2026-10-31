@@ -6,13 +6,14 @@ export const STEP_LABELS = [
   'Modalidades',
   'Rotina',
   'Preferências',
-  'Saúde',
+  'Dores',
   'Alimentação',
   'Corpo',
+  'Segurança',
 ] as const;
 
 /**
- * Progresso das 8 etapas: uma faixa segmentada (cada segmento é uma etapa) e o nome da etapa
+ * Progresso das 9 etapas: uma faixa segmentada (cada segmento é uma etapa) e o nome da etapa
  * atual. Etapas já salvas ficam cheias, inclusive as que o aluno pulou e voltou.
  */
 export function ProgressBar({

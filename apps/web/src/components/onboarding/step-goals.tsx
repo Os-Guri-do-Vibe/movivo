@@ -2,9 +2,24 @@
 
 import { DECLARED_GOAL_LABELS, type DeclaredGoalKind } from '@movivo/shared';
 
-import { ChoiceGroup, TextArea, TextInput, YesNo } from './fields';
+import { DatePicker } from './date-picker';
 import {
+  ChoiceGroup,
+  Combobox,
+  FieldError,
+  FieldLabel,
+  FieldValidation,
+  QuestionField,
+  TextArea,
+  TextInput,
+  UnitInput,
+  YesNo,
+} from './fields';
+import {
+  eventDateError,
+  eventDistanceError,
   goalsComplete,
+  lastEventDate,
   type EventKind,
   type GoalEmphasis,
   type GoalsDraft,
@@ -24,11 +39,17 @@ const EMPHASIS_ITEMS: { value: GoalEmphasis; label: string }[] = [
 ];
 
 const EVENT_ITEMS: { value: EventKind; label: string }[] = [
-  { value: 'RUNNING_RACE', label: 'Prova de corrida' },
-  { value: 'HYROX_RACE', label: 'Prova de HYROX' },
-  { value: 'COMPETITION', label: 'Competição' },
-  { value: 'PERSONAL_DATE', label: 'Data pessoal' },
+  { value: 'RUNNING_RACE', label: 'Corrida' },
+  { value: 'HYROX_RACE', label: 'HYROX' },
+  { value: 'STRENGTH_EVENT', label: 'Musculação' },
+  { value: 'OTHER_EVENT', label: 'Outra modalidade' },
 ];
+
+/** Hoje, no calendário do aluno: um evento futuro não pode ser anterior a isso. */
+function todayDate(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
 
 export function StepGoals({
   data,
@@ -48,11 +69,11 @@ export function StepGoals({
   const secondaryItems = GOAL_ITEMS.filter((item) => item.value !== data.primary);
   return (
     <StepFrame
-      title="Qual é o seu objetivo?"
+      title="Seus objetivos"
       description="A MOVIVO usa isso para montar a estratégia, não para te encaixar num treino pronto."
       notice={
         resumed
-          ? 'O que você escreveu em texto livre fica guardado em sigilo e não é exibido de novo. Se voltar aqui, escreva outra vez para atualizar.'
+          ? 'O que você escreveu em texto livre fica guardado em sigilo e não aparece de novo. Deixe em branco para manter, ou escreva outra vez para substituir.'
           : undefined
       }
       canContinue={goalsComplete(data)}
@@ -60,38 +81,40 @@ export function StepGoals({
       onContinue={onContinue}
       onBack={onBack}
     >
-      <ChoiceGroup
-        legend="O que você mais quer agora?"
+      <Combobox
+        id="goal-primary"
+        legend="Qual seu objetivo?"
         items={GOAL_ITEMS}
-        selected={data.primary ? [data.primary] : []}
-        onToggle={(primary) =>
+        value={data.primary}
+        onChange={(primary) =>
           onChange({ ...data, primary, secondary: data.secondary.filter((g) => g !== primary) })
         }
-        stack
+        placeholder="Selecione o seu objetivo"
       />
-      <ChoiceGroup
-        legend="Mais algum objetivo? (até 3)"
+      <Combobox
+        id="goal-secondary"
+        legend="Você tem mais algum objetivo?"
         items={secondaryItems}
-        selected={data.secondary}
-        multi
-        onToggle={(goal) =>
+        multiple
+        max={3}
+        value={data.secondary}
+        onChange={(goal) =>
           onChange({
             ...data,
             secondary: data.secondary.includes(goal)
               ? data.secondary.filter((g) => g !== goal)
-              : data.secondary.length < 3
-                ? [...data.secondary, goal]
-                : data.secondary,
+              : [...data.secondary, goal],
           })
         }
-        stack
+        placeholder="Nenhum outro objetivo"
+        optional
       />
       <ChoiceGroup
-        legend="O que pesa mais para você?"
+        legend="Nos resultados, o que você quer priorizar agora?"
         items={EMPHASIS_ITEMS}
         selected={data.emphasis ? [data.emphasis] : []}
         onToggle={(emphasis) => onChange({ ...data, emphasis })}
-        stack
+        layout="stack"
       />
       <YesNo
         legend="Você tem uma prova, competição ou data importante pela frente?"
@@ -99,45 +122,58 @@ export function StepGoals({
         onChange={(hasEvent) => onChange({ ...data, hasEvent })}
       />
       {data.hasEvent && (
-        <>
+        <div className="flex flex-col gap-6 border-l-2 border-primary pl-4">
           <ChoiceGroup
-            legend="Que tipo de data?"
+            legend="Qual a modalidade?"
             items={EVENT_ITEMS}
-            selected={[data.eventKind]}
+            selected={data.eventKind ? [data.eventKind] : []}
             onToggle={(eventKind) => onChange({ ...data, eventKind })}
           />
           <Labeled id="event-name" label="Nome do evento">
-            <TextInput
-              id="event-name"
-              value={data.eventName}
-              onChange={(eventName) => onChange({ ...data, eventName })}
-              maxLength={120}
-            />
+            <FieldValidation
+              error={data.eventName.trim() === '' ? 'Informe o nome do evento.' : undefined}
+            >
+              <TextInput
+                id="event-name"
+                value={data.eventName}
+                onChange={(eventName) => onChange({ ...data, eventName })}
+                maxLength={120}
+              />
+            </FieldValidation>
           </Labeled>
-          <Labeled id="event-date" label="Data">
-            <TextInput
+          <QuestionField>
+            <FieldLabel htmlFor="event-date">Qual é a data?</FieldLabel>
+            <DatePicker
               id="event-date"
-              type="date"
               value={data.eventDate}
               onChange={(eventDate) => onChange({ ...data, eventDate })}
+              minDate={todayDate()}
+              maxDate={lastEventDate()}
+              invalidMessage="Escolha uma data a partir de hoje e até 3 anos à frente."
             />
-          </Labeled>
+            <FieldError message={eventDateError(data.eventDate)} />
+          </QuestionField>
           {data.eventKind === 'RUNNING_RACE' && (
-            <Labeled id="event-distance" label="Distância da prova (km)">
-              <TextInput
-                id="event-distance"
-                inputMode="decimal"
-                value={data.eventDistanceKm}
-                onChange={(eventDistanceKm) => onChange({ ...data, eventDistanceKm })}
-              />
+            <Labeled id="event-distance" label="Qual a distância da prova?" optional>
+              <FieldValidation error={eventDistanceError(data.eventDistanceKm)}>
+                <UnitInput
+                  id="event-distance"
+                  unit="km"
+                  maxInteger={3}
+                  decimals={1}
+                  value={data.eventDistanceKm}
+                  onChange={(eventDistanceKm) => onChange({ ...data, eventDistanceKm })}
+                />
+              </FieldValidation>
             </Labeled>
           )}
-        </>
+        </div>
       )}
       <Labeled
         id="motivation"
         label="O que fez você procurar acompanhamento agora?"
-        help="Opcional. Ajuda a gente a falar a sua língua."
+        help="Ajuda a gente a falar a sua língua."
+        optional
       >
         <TextArea
           id="motivation"

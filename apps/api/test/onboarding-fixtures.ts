@@ -1,5 +1,5 @@
 /**
- * Payloads das 8 etapas da anamnese e atalho para preenchê-las — compartilhado pelos testes
+ * Payloads das 9 etapas da anamnese e atalho para preenchê-las — compartilhado pelos testes
  * de integração que precisam de um aluno cadastrado pelo fluxo real.
  */
 import {
@@ -20,20 +20,19 @@ export const modalities = () => ({
     {
       modality: 'STRENGTH',
       level: 'INTERMEDIATE',
-      monthsPracticing: 24,
       sessionsPerWeek: 3,
       wantsToStart: false,
+      venue: 'FULL_GYM',
     },
     {
       modality: 'RUNNING',
       level: 'BEGINNER',
-      monthsPracticing: 0,
       sessionsPerWeek: 0,
       wantsToStart: true,
+      venue: 'OUTDOOR',
     },
   ],
   externalSports: [],
-  venues: ['FULL_GYM'],
 });
 export const routine = () => ({
   windows: [
@@ -42,22 +41,17 @@ export const routine = () => ({
     { weekday: 'SAT', slot: 'MORNING', maxMinutes: 90 },
   ],
   variesWeekly: true,
-  maxSessionsPerWeek: 4,
-  lifeContext: {
-    occupationRhythm: 'REGULAR',
-    cookingCapacity: 'BASIC',
-    mealsOutsideHomePerWeek: 5,
-    foodBudget: 'MODERATE',
-  },
+  maxSessionsPerWeek: 3,
+  lifeContext: { sleepHoursTypical: 7.5, stressLevel: 'MODERATE' },
 });
 export const preferences = () => ({
   preferences: {
-    split: 'UPPER_LOWER',
-    effort: 'UNSURE',
     priority: 'BALANCED',
-    preferredSessionMinutes: 50,
+    muscleEmphasis: ['CHEST', 'BACK'],
   },
   dislikedExercises: 'burpee',
+});
+export const pain = () => ({
   pain: {
     hasPain: true,
     trend: 'STABLE',
@@ -83,6 +77,9 @@ export function parq(riskIds: string[] = []) {
   };
 }
 export const nutrition = () => ({
+  cookingCapacity: 'BASIC',
+  mealsOutsideHomePerWeek: 5,
+  foodBudgetMonthlyBrl: 1200,
   mealsPerDay: 4,
   usualMeals: ['BREAKFAST', 'LUNCH', 'AFTERNOON_SNACK', 'DINNER'],
   dietaryRestrictions: ['LACTOSE_FREE'],
@@ -95,7 +92,7 @@ export const body = () => ({
   measurements: [{ kind: 'WAIST', value: 98, method: 'SELF_TAPE', measuredOn: '2026-10-27' }],
 });
 
-/** Etapas 2..8 (todas depois do cadastro). */
+/** Etapas 2..9 (todas depois do cadastro). */
 export async function completeSteps(
   service: AnamnesisService,
   token: string,
@@ -106,7 +103,8 @@ export async function completeSteps(
   await service.patchStep(token, 3, modalities());
   await service.patchStep(token, 4, routine());
   await service.patchStep(token, 5, preferences());
-  await service.patchStep(token, 6, parq(risk));
+  await service.patchStep(token, 6, pain());
   await service.patchStep(token, 7, nutrition());
   if (withBody) await service.patchStep(token, 8, body());
+  await service.patchStep(token, 9, parq(risk));
 }

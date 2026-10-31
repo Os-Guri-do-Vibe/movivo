@@ -2,12 +2,28 @@
 
 import * as React from 'react';
 
-import { resumeComplementary, type SessionEntry } from '@/lib/anamnesis-api';
+import {
+  AnamnesisApiError,
+  describeAnamnesisError,
+  resumeComplementary,
+  type SessionEntry,
+} from '@/lib/anamnesis-api';
 
 import { OnboardingShell } from './onboarding-shell';
 import { OnboardingWizard } from './onboarding-wizard';
 
-type State = SessionEntry | 'error' | 'invalid' | null;
+type State = SessionEntry | { error: string } | 'invalid' | null;
+
+const LINK_EXPIRED_MESSAGE =
+  'O link pode ter expirado. Peça um novo pelo WhatsApp da MOVIVO e tente de novo.';
+
+/** Só rede, limite e instabilidade têm mensagem própria; o resto é link vencido ou inválido. */
+function resumeFailure(error: unknown): string {
+  const transient =
+    error instanceof AnamnesisApiError &&
+    (error.status === 0 || error.status === 429 || error.status >= 500);
+  return transient ? describeAnamnesisError(error, LINK_EXPIRED_MESSAGE) : LINK_EXPIRED_MESSAGE;
+}
 
 /**
  * Entrada da anamnese complementar (aluno que já existia). O token chega no FRAGMENTO da URL
@@ -34,15 +50,15 @@ export function ComplementaryEntry() {
       .then((entry) => {
         if (!cancelled) setState(entry);
       })
-      .catch(() => {
-        if (!cancelled) setState('error');
+      .catch((error: unknown) => {
+        if (!cancelled) setState({ error: resumeFailure(error) });
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  if (state && state !== 'error' && state !== 'invalid') {
+  if (state && state !== 'invalid' && 'session' in state) {
     return (
       <OnboardingShell>
         <OnboardingWizard sessionRef={state.ref} initial={state.session} />
@@ -67,7 +83,7 @@ export function ComplementaryEntry() {
             <p className="text-body text-muted-foreground">
               {state === 'invalid'
                 ? 'Abra o link pelo WhatsApp, do jeito que enviamos, ou peça um novo por lá.'
-                : 'O link pode ter expirado. Peça um novo pelo WhatsApp da MOVIVO e tente de novo.'}
+                : state.error}
             </p>
           </>
         )}

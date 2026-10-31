@@ -5,6 +5,7 @@ import {
   coachedModalitySchema,
   experienceLevelSchema,
   externalSportSchema,
+  type CoachedModality,
 } from '../training/modality.schema';
 import { daySlotSchema } from '../training/plan.schema';
 
@@ -12,7 +13,6 @@ import { daySlotSchema } from '../training/plan.schema';
 
 export const trainingVenueSchema = z.enum([
   'FULL_GYM',
-  'BASIC_GYM',
   'CONDO_GYM',
   'HOME',
   'OUTDOOR',
@@ -21,12 +21,33 @@ export const trainingVenueSchema = z.enum([
 ]);
 export type TrainingVenue = z.infer<typeof trainingVenueSchema>;
 
+/** Locais que servem a cada modalidade, do mais completo para o menos (academia, na corrida, é esteira). */
+export const VENUES_BY_MODALITY: Readonly<
+  Record<CoachedModality, readonly [TrainingVenue, ...TrainingVenue[]]>
+> = {
+  STRENGTH: ['FULL_GYM', 'CONDO_GYM', 'HOME', 'OUTDOOR'],
+  RUNNING: ['OUTDOOR', 'TRACK', 'FULL_GYM', 'CONDO_GYM'],
+  HYROX: ['HYROX_GYM', 'FULL_GYM', 'CONDO_GYM', 'HOME'],
+};
+
+/** Local de uma modalidade sem local próprio: o mais completo entre `venues`, senão o padrão dela. */
+export function defaultVenueOf(
+  modality: CoachedModality,
+  venues: readonly TrainingVenue[],
+): TrainingVenue {
+  const options = VENUES_BY_MODALITY[modality];
+  return options.find((venue) => venues.includes(venue)) ?? options[0];
+}
+
 /** Experiência atual por modalidade, com números de referência quando o aluno sabe. */
 export const modalityExperienceSchema = z.object({
   modality: coachedModalitySchema,
   level: experienceLevelSchema,
-  /** Há quantos meses pratica (0 = nunca). */
-  monthsPracticing: z.number().int().min(0).max(600),
+  /** Local principal da modalidade (perfis anteriores à escolha por modalidade não têm). */
+  venue: trainingVenueSchema.optional(),
+  /** Há quantos meses pratica, quando se sabe (a anamnese não pergunta mais). */
+  monthsPracticing: z.number().int().min(0).max(600).optional(),
+  /** Dias por semana em que pratica a modalidade. */
   sessionsPerWeek: z.number().int().min(0).max(14),
   /** Corrida: km por semana hoje. */
   weeklyKm: z.number().min(0).max(300).optional(),
@@ -53,10 +74,12 @@ export type ExternalSportPractice = z.infer<typeof externalSportPracticeSchema>;
 
 /** Contexto de vida que muda o planejamento (não é saúde). */
 export const lifeContextSchema = z.object({
-  occupationRhythm: z.enum(['REGULAR', 'SHIFTS', 'TRAVELS_OFTEN', 'IRREGULAR']),
+  /** Ritmo de trabalho: não é mais perguntado na anamnese (vem das conversas). */
+  occupationRhythm: z.enum(['REGULAR', 'SHIFTS', 'TRAVELS_OFTEN', 'IRREGULAR']).optional(),
   cookingCapacity: z.enum(['NONE', 'BASIC', 'GOOD']),
   mealsOutsideHomePerWeek: z.number().int().min(0).max(21),
-  foodBudget: z.enum(['TIGHT', 'MODERATE', 'COMFORTABLE']),
+  /** Orçamento mensal para alimentação, em reais (centavos incluídos). */
+  foodBudgetMonthlyBrl: z.number().min(0).max(1_000_000).optional(),
   sleepHoursTypical: z.number().min(3).max(12).optional(),
   stressLevel: z.enum(['LOW', 'MODERATE', 'HIGH']).optional(),
 });
@@ -92,7 +115,7 @@ export const constraintSchema = z.discriminatedUnion('kind', [
     windows: z.array(availabilityWindowSchema).min(1).max(21),
     /** A rotina muda de uma semana para outra. */
     variesWeekly: z.boolean(),
-    /** Teto de sessões por semana que o aluno sustenta. */
+    /** Treinos da MOVIVO por semana que o aluno sustenta, sem contar o esporte externo. */
     maxSessionsPerWeek: z.number().int().min(1).max(14),
   }),
   /** Exceção pontual de agenda (ex.: "essa semana só terça, quinta e sábado"). */
@@ -195,6 +218,10 @@ export const healthRecordKindSchema = z.enum([
   'FOOD_ALLERGY',
   /** Textos livres do aluno (motivação, gostos, aversões): cifrados como todo texto livre. */
   'NOTES',
+  /** Início da menstruação relatado no WhatsApp (consentimento próprio `MENSTRUAL_CYCLE`). */
+  'MENSTRUAL_CYCLE',
+  /** Resumo de exame enviado pelo aluno (pontos de atenção, sem conclusão clínica). */
+  'EXAM',
 ]);
 export type HealthRecordKind = z.infer<typeof healthRecordKindSchema>;
 
@@ -207,5 +234,7 @@ export const healthRecordPayloadSchema = z.object({
   movementTags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
   /** Orientação de profissional externo que o aluno relatou seguir. */
   guidance: z.string().trim().max(500).optional(),
+  /** Data do fato (ex.: início da menstruação). */
+  onDate: z.iso.date().optional(),
 });
 export type HealthRecordPayload = z.infer<typeof healthRecordPayloadSchema>;

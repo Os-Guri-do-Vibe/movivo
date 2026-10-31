@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 
 import { AiModule } from '../ai/ai.module';
+import { PublishedAgentProfiles } from './agent-profile.reader';
 import { AgentRunner } from './agent-runner';
 import { AgentTaskRegistry } from './agent-task-registry';
 
@@ -13,7 +14,7 @@ import { AgentTaskRegistry } from './agent-task-registry';
 @Global()
 @Module({
   imports: [AiModule],
-  providers: [AgentRunner, AgentTaskRegistry],
-  exports: [AgentRunner, AgentTaskRegistry],
+  providers: [AgentRunner, AgentTaskRegistry, PublishedAgentProfiles],
+  exports: [AgentRunner, AgentTaskRegistry, PublishedAgentProfiles],
 })
 export class AgentsModule {}

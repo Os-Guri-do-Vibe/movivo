@@ -9,7 +9,15 @@ import {
   type ParqQuestionId,
 } from '@movivo/shared';
 
-import { Checkbox, FieldLabel, QuestionField, QuestionStack, TextArea, YesNo } from './fields';
+import {
+  Checkbox,
+  FieldLabel,
+  FieldValidation,
+  QuestionField,
+  QuestionStack,
+  TextArea,
+  YesNo,
+} from './fields';
 
 export interface ParqAnswerState {
   answer: boolean | undefined;
@@ -69,8 +77,7 @@ export function Step3Parq({
     <div className="flex flex-col gap-6 pb-4">
       {screen === -1 && (
         <section className="flex flex-col gap-6" aria-labelledby="parq-title">
-          <div className="flex flex-col gap-2">
-            <p className="font-mono text-label text-muted-foreground">Etapa 3 de 3</p>
+          <div className="flex flex-col gap-2 text-center">
             <h1
               ref={titleRef}
               id="parq-title"
@@ -93,7 +100,7 @@ export function Step3Parq({
 
       {questionId && currentAnswer && (
         <section className="flex flex-col gap-6" aria-labelledby="parq-title">
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 text-center">
             <p className="font-mono text-label text-muted-foreground">
               Pergunta {screen + 1} de {PARQ_QUESTION_IDS.length}
             </p>
@@ -110,22 +117,29 @@ export function Step3Parq({
             legend="Selecione uma resposta"
             value={currentAnswer.answer}
             onChange={(answer) => onChange(questionId, { ...currentAnswer, answer })}
-            indicatorSide="left"
           />
           {currentAnswer.answer === true && (
             <QuestionStack aria-live="polite">
               <p className="text-body text-muted-foreground">Anotado. Obrigado por contar.</p>
               <QuestionField className="border-l-2 border-primary pl-4">
-                <FieldLabel htmlFor={`detail-${questionId}`}>
-                  {questionId === 'Q9'
-                    ? 'Qual motivo? (obrigatório)'
-                    : 'Quer contar um pouco mais? (opcional)'}
+                <FieldLabel htmlFor={`detail-${questionId}`} optional={questionId !== 'Q9'}>
+                  {questionId === 'Q9' ? 'Qual motivo?' : 'Quer contar um pouco mais?'}
                 </FieldLabel>
-                <TextArea
-                  id={`detail-${questionId}`}
-                  value={currentAnswer.detail}
-                  onChange={(detail) => onChange(questionId, { ...currentAnswer, detail })}
-                />
+                <FieldValidation
+                  key={questionId}
+                  error={
+                    questionId === 'Q9' && currentAnswer.detail.trim() === ''
+                      ? 'Conte qual é o motivo para continuar.'
+                      : undefined
+                  }
+                >
+                  <TextArea
+                    id={`detail-${questionId}`}
+                    value={currentAnswer.detail}
+                    onChange={(detail) => onChange(questionId, { ...currentAnswer, detail })}
+                    maxLength={500}
+                  />
+                </FieldValidation>
               </QuestionField>
             </QuestionStack>
           )}
@@ -134,7 +148,7 @@ export function Step3Parq({
 
       {screen === 9 && (
         <section className="flex flex-col gap-6" aria-labelledby="parq-title">
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 text-center">
             <p className="font-mono text-label text-muted-foreground">Confirmações finais</p>
             <h1
               ref={titleRef}

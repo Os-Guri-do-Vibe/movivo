@@ -1,7 +1,28 @@
 import { describe, expect, it } from 'vitest';
 
 import { goalStrategySchema } from './goal.schema';
-import { constraintKindSchema, constraintSchema, preferenceSchema } from './student-state.schema';
+import {
+  constraintKindSchema,
+  constraintSchema,
+  defaultVenueOf,
+  modalityExperienceSchema,
+  preferenceSchema,
+} from './student-state.schema';
+
+describe('local por modalidade', () => {
+  it('sem local próprio, usa o mais completo da lista, não a ordem dos cliques', () => {
+    expect(defaultVenueOf('STRENGTH', ['OUTDOOR', 'FULL_GYM'])).toBe('FULL_GYM');
+    expect(defaultVenueOf('RUNNING', ['FULL_GYM', 'OUTDOOR'])).toBe('OUTDOOR');
+    expect(defaultVenueOf('HYROX', ['TRACK'])).toBe('HYROX_GYM');
+  });
+
+  it('perfil antigo, sem local por modalidade, continua válido', () => {
+    const strength = { modality: 'STRENGTH', level: 'BEGINNER', sessionsPerWeek: 2 };
+    expect(modalityExperienceSchema.safeParse({ ...strength, wantsToStart: false }).success).toBe(
+      true,
+    );
+  });
+});
 
 describe('preferências do aluno', () => {
   const base = {

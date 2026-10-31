@@ -16,10 +16,11 @@ export const MODEL_VENDORS: readonly ModelVendor[] = ['DEEPSEEK', 'OPENAI', 'ANT
 /** Classe do dado enviado. Ausente ⇒ `HEALTH` (fail-safe). */
 export type DataClass = 'HEALTH' | 'NON_HEALTH';
 
-/** Parte de uma mensagem: texto ou imagem (base64, nunca URL pública). */
+/** Parte de uma mensagem: texto, imagem ou PDF (base64, nunca URL pública). */
 export type MessagePart =
   | { type: 'text'; text: string }
-  | { type: 'image'; mediaType: 'image/jpeg' | 'image/png' | 'image/webp'; base64: string };
+  | { type: 'image'; mediaType: 'image/jpeg' | 'image/png' | 'image/webp'; base64: string }
+  | { type: 'document'; mediaType: 'application/pdf'; base64: string; fileName: string };
 
 export interface GatewayMessage {
   role: 'user' | 'assistant';
@@ -33,7 +34,7 @@ export interface TierRoute {
   maxOutputTokens: number;
   timeoutMs: number;
   temperature: number;
-  /** Modelo aceita imagem (obrigatório para o tier VISION). */
+  /** Modelo aceita imagem e PDF (obrigatório para o tier VISION). */
   vision: boolean;
 }
 

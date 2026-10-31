@@ -4,7 +4,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { EMPTY_PAIN, PainSection } from './pain-section';
+import { EMPTY_PAIN, PainSection, type PainData } from './pain-section';
 
 describe('PainSection', () => {
   it('"Não" encerra a seção — nenhum outro campo aparece', () => {
@@ -39,7 +39,7 @@ describe('PainSection', () => {
     const user = userEvent.setup();
 
     function ControlledPainSection() {
-      const [data, setData] = React.useState({
+      const [data, setData] = React.useState<PainData>({
         ...EMPTY_PAIN,
         hasPain: true,
       });

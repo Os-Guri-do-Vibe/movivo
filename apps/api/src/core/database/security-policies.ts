@@ -85,6 +85,13 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
     anon: { scope: 'id', scopeAtInsert: false },
     professional: 'read',
   },
+  // Fotos do corpo enviadas na anamnese: dado de saúde cifrado, preso à sessão enquanto
+  // anônimo. Sem acesso de profissional: quem lê é o fluxo do próprio titular.
+  {
+    table: 'anamnesis_session_photos',
+    column: 'user_id',
+    anon: { scope: 'anamnesis_session_id', scopeAtInsert: true },
+  },
   { table: 'auth_sessions', column: 'user_id' },
   // Sprint 4 (US-4.1): assinatura/dado financeiro do titular — sob a mesma FORCE RLS.
   { table: 'subscriptions', column: 'user_id', professional: 'read', support: true },
@@ -163,6 +170,10 @@ const TENANT_TABLES: ReadonlyArray<TenantTable> = [
   { table: 'body_assessments', column: 'user_id', professional: 'read' },
   { table: 'check_ins', column: 'user_id', professional: 'read' },
   { table: 'weekly_reviews', column: 'user_id', professional: 'read' },
+  // Exames enviados pelo aluno (cifrados); o médico da equipe lê.
+  { table: 'medical_exams', column: 'user_id', professional: 'read' },
+  // Tokens OAuth do Strava (cifrados): só o titular e o sistema.
+  { table: 'wearable_connections', column: 'user_id' },
   // --- Trilha de decisões e fila por exceção. A equipe decide (`write`) e resolve sinais/casos.
   { table: 'coaching_proposals', column: 'user_id', professional: 'read' },
   {
@@ -204,6 +215,8 @@ const MARKETING_CONSENT_VERSION = CONSENT_TEXTS.MARKETING.version.replaceAll("'"
 const TERMS_CONSENT_VERSION = CONSENT_TEXTS.TERMS_OF_SERVICE.version.replaceAll("'", "''");
 /** Sprint 6 (Alexandre §5.4): ciência do uso de IA — mesmo mecanismo de prova, não revogável. */
 const AI_DISCLOSURE_VERSION = CONSENT_TEXTS.AI_DISCLOSURE.version.replaceAll("'", "''");
+const BODY_PHOTOS_VERSION = CONSENT_TEXTS.BODY_PHOTOS.version.replaceAll("'", "''");
+const MENSTRUAL_CYCLE_VERSION = CONSENT_TEXTS.MENSTRUAL_CYCLE.version.replaceAll("'", "''");
 
 /** Nomes de política determinísticos por tabela (permite DROP idempotente). */
 function policyNames(table: string) {
@@ -646,6 +659,7 @@ export function buildProfessionalAccessSql(appRole: string): string {
         WHEN 'MARKETING'::public.consent_type THEN '${MARKETING_CONSENT_VERSION}'
         WHEN 'TERMS_OF_SERVICE'::public.consent_type THEN '${TERMS_CONSENT_VERSION}'
         WHEN 'AI_DISCLOSURE'::public.consent_type THEN '${AI_DISCLOSURE_VERSION}'
+        WHEN 'BODY_PHOTOS'::public.consent_type THEN '${BODY_PHOTOS_VERSION}'
       END;
       IF target_version IS DISTINCT FROM expected_version THEN
         RAISE EXCEPTION 'current consent version required' USING ERRCODE = '22023';
@@ -666,16 +680,53 @@ export function buildProfessionalAccessSql(appRole: string): string {
           updated_at = now();
     END $$;
 
+    -- Aceite do proprio titular fora da anamnese (hoje so o ciclo menstrual, pelo WhatsApp).
+    -- Estreito de proposito: os demais tipos continuam nascendo na sessao de anamnese.
+    CREATE OR REPLACE FUNCTION public.record_user_consent(
+      target_user uuid,
+      target_type public.consent_type,
+      target_version varchar,
+      source_agent text
+    ) RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
+    DECLARE actor uuid; actor_role text; next_cycle smallint;
+    BEGIN
+      actor_role := nullif(current_setting('app.current_role', true), '');
+      actor := nullif(current_setting('app.current_user_id', true), '')::uuid;
+      IF actor_role IS DISTINCT FROM 'USER' OR actor IS DISTINCT FROM target_user THEN
+        RAISE EXCEPTION 'holder context required' USING ERRCODE = '42501';
+      END IF;
+      IF target_type::text IS DISTINCT FROM 'MENSTRUAL_CYCLE'
+        OR target_version IS DISTINCT FROM '${MENSTRUAL_CYCLE_VERSION}' THEN
+        RAISE EXCEPTION 'current consent version required' USING ERRCODE = '22023';
+      END IF;
+      PERFORM pg_advisory_xact_lock(hashtext('movivo.consent-cycle:' || target_user::text));
+      IF EXISTS (
+        SELECT 1 FROM public.consents
+        WHERE user_id = target_user AND consent_type = target_type AND version = target_version
+          AND accepted = true AND revoked_at IS NULL
+      ) THEN
+        RETURN false;
+      END IF;
+      SELECT coalesce(max(cycle), 0) + 1 INTO next_cycle FROM public.consents
+      WHERE user_id = target_user AND consent_type = target_type AND version = target_version;
+      INSERT INTO public.consents (
+        user_id, consent_type, version, cycle, accepted, user_agent, accepted_at
+      ) VALUES (target_user, target_type, target_version, next_cycle, true, source_agent, now());
+      RETURN true;
+    END $$;
+
     REVOKE ALL ON FUNCTION public.has_active_health_consent(uuid) FROM PUBLIC;
     REVOKE ALL ON FUNCTION public.revoke_health_data_consent(uuid) FROM PUBLIC;
     REVOKE ALL ON FUNCTION public.revoke_non_health_consent(uuid, public.consent_type) FROM PUBLIC;
     REVOKE ALL ON FUNCTION public.link_session_consents_to_user(uuid, uuid) FROM PUBLIC;
     REVOKE ALL ON FUNCTION public.record_session_consent(uuid, public.consent_type, varchar, boolean, inet, text) FROM PUBLIC;
+    REVOKE ALL ON FUNCTION public.record_user_consent(uuid, public.consent_type, varchar, text) FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.has_active_health_consent(uuid) TO ${sqlIdentifier(appRole)};
     GRANT EXECUTE ON FUNCTION public.revoke_health_data_consent(uuid) TO ${sqlIdentifier(appRole)};
     GRANT EXECUTE ON FUNCTION public.revoke_non_health_consent(uuid, public.consent_type) TO ${sqlIdentifier(appRole)};
     GRANT EXECUTE ON FUNCTION public.link_session_consents_to_user(uuid, uuid) TO ${sqlIdentifier(appRole)};
     GRANT EXECUTE ON FUNCTION public.record_session_consent(uuid, public.consent_type, varchar, boolean, inet, text) TO ${sqlIdentifier(appRole)};
+    GRANT EXECUTE ON FUNCTION public.record_user_consent(uuid, public.consent_type, varchar, text) TO ${sqlIdentifier(appRole)};
     REVOKE INSERT, UPDATE, DELETE ON public.consents FROM ${sqlIdentifier(appRole)};
   `;
 }

@@ -6,13 +6,17 @@
  * determinística e testável. É também aqui que a segurança entra antes do modelo — exercício
  * contraindicado nem chega à lista de candidatos.
  */
-import type {
-  CoachedModality,
-  DeclaredGoalKind,
-  ExperienceLevel,
-  PlanSession,
-  TrainingVenue,
-  Weekday,
+import {
+  defaultVenueOf,
+  MUSCLE_EMPHASIS_GROUPS,
+  type CoachedModality,
+  type DeclaredGoalKind,
+  type ExperienceLevel,
+  type MethodologyParameters,
+  type MuscleEmphasisRegion,
+  type PlanSession,
+  type TrainingVenue,
+  type Weekday,
 } from '@movivo/shared';
 
 import {
@@ -26,13 +30,17 @@ import {
 } from '../catalog/exercises/exercise-catalog';
 import { bodyIndicators } from './calc/body';
 import { dayBounds, estimateExpenditure, type BodyInputs } from './calc/energy';
+import type { PlanCheckContext } from './calc/plan-check';
 import {
+  hybridRules,
   nutritionRules,
   rulesLevel,
+  runningRules,
   strengthRules,
   type NutritionRules,
   type RulesLevel,
 } from './calc/params';
+import type { ScheduleContext } from './plan-publisher.service';
 import { preferenceOf, usualMealsOf, type StateView } from './state-view';
 import type { HyroxInput } from './tasks/hyrox';
 import type { NutritionInput } from './tasks/nutrition';
@@ -61,20 +69,16 @@ export function distinctAvailableDays(view: StateView): number {
   return new Set(view.availability?.windows.map((w) => w.weekday)).size;
 }
 
-/** Sessões por semana que o aluno sustenta no total (inclui o esporte externo). */
+/** Sessões próprias (da MOVIVO) por semana que o aluno sustenta, limitadas aos dias disponíveis. */
 export function sessionsPerWeekAvailable(view: StateView): number {
   const max = view.availability?.maxSessionsPerWeek ?? 3;
   const days = distinctAvailableDays(view);
   return Math.max(1, days > 0 ? Math.min(max, days) : max);
 }
 
-export function externalSessionsPerWeek(view: StateView): number {
-  return view.training.externalSports.reduce((sum, s) => sum + s.sessionsPerWeek, 0);
-}
-
-/** Orçamento de sessões PRÓPRIAS (sem o esporte externo), no mínimo uma por modalidade em foco. */
+/** Orçamento de sessões próprias, no mínimo uma por modalidade em foco. */
 export function coachedBudget(view: StateView, focusCount: number): number {
-  return Math.max(focusCount, sessionsPerWeekAvailable(view) - externalSessionsPerWeek(view));
+  return Math.max(focusCount, sessionsPerWeekAvailable(view));
 }
 
 /**
@@ -100,7 +104,7 @@ export function allocateSessions(
   return result;
 }
 
-/** Duração típica de uma sessão: a janela mediana do aluno, limitada pela preferência dele. */
+/** Duração típica de uma sessão: a janela mediana do aluno, limitada pela preferência dele (inferida das conversas). */
 export function minutesPerSession(view: StateView, min: number, max: number): number {
   const windows = view.availability?.windows.map((w) => w.maxMinutes) ?? [];
   const typical = windows.length > 0 ? median(windows) : 60;
@@ -114,6 +118,14 @@ export function minutesPerSession(view: StateView, min: number, max: number): nu
 export function levelOf(view: StateView, modality: CoachedModality): RulesLevel {
   return rulesLevel(
     view.training.modalities.find((m) => m.modality === modality)?.level as ExperienceLevel,
+  );
+}
+
+/** Local da modalidade: o escolhido na anamnese ou, em perfil antigo, o mais completo entre os locais. */
+export function venueOf(view: StateView, modality: CoachedModality): TrainingVenue {
+  return (
+    view.training.modalities.find((m) => m.modality === modality)?.venue ??
+    defaultVenueOf(modality, view.training.venues)
   );
 }
 
@@ -148,7 +160,6 @@ export function strategyInputOf(
 const VENUE_TO_LOCATION: Record<TrainingVenue, ExerciseLocation> = {
   FULL_GYM: 'FULL_GYM',
   HYROX_GYM: 'FULL_GYM',
-  BASIC_GYM: 'CONDO_GYM',
   CONDO_GYM: 'CONDO_GYM',
   HOME: 'HOME',
   OUTDOOR: 'OUTDOOR',
@@ -167,7 +178,7 @@ export function catalogProfileOf(view: StateView): {
   level: ExerciseLevel;
 } {
   return {
-    location: VENUE_TO_LOCATION[view.training.venues[0] ?? 'FULL_GYM'],
+    location: VENUE_TO_LOCATION[venueOf(view, 'STRENGTH')],
     level: LEVEL_TO_CATALOG[levelOf(view, 'STRENGTH')],
   };
 }
@@ -207,6 +218,26 @@ const PER_MAJOR_GROUP = 14;
 const PER_OTHER_GROUP = 6;
 const CANDIDATE_CAP = 160;
 
+/** Exercícios de força seguros e viáveis: local e nível do aluno, sem contraindicação nem rejeição. */
+export function viableStrengthExercises(
+  view: StateView,
+  level: RulesLevel,
+  catalog: readonly CatalogExercise[] = EXERCISE_CATALOG,
+): CatalogExercise[] {
+  const location = VENUE_TO_LOCATION[venueOf(view, 'STRENGTH')];
+  const catalogLevel = LEVEL_TO_CATALOG[level];
+  const blocked = contraindicationsOf(view);
+  const disliked = exercisePreference(view, 'DISLIKES');
+  return catalog.filter(
+    (e) =>
+      e.pattern !== 'CARDIO' &&
+      offeredToLevel(e, catalogLevel) &&
+      servesLocation(e, location) &&
+      !disliked.has(e.id) &&
+      !e.contraindicatedFor.some((tag) => blocked.has(tag)),
+  );
+}
+
 /**
  * Universo de exercícios permitido: viável no local e no nível do aluno, sem contraindicação
  * registrada, sem o que ele rejeitou. Equilibrado por grupo muscular para o modelo ter opção
@@ -217,20 +248,8 @@ export function selectStrengthCandidates(
   level: RulesLevel,
   catalog: readonly CatalogExercise[] = EXERCISE_CATALOG,
 ): { candidates: StrengthCandidate[]; preferredExerciseIds: string[] } {
-  const location = VENUE_TO_LOCATION[view.training.venues[0] ?? 'FULL_GYM'];
-  const catalogLevel = LEVEL_TO_CATALOG[level];
-  const blocked = contraindicationsOf(view);
-  const disliked = exercisePreference(view, 'DISLIKES');
   const liked = exercisePreference(view, 'LIKES');
-
-  const viable = catalog.filter(
-    (e) =>
-      e.pattern !== 'CARDIO' &&
-      offeredToLevel(e, catalogLevel) &&
-      servesLocation(e, location) &&
-      !disliked.has(e.id) &&
-      !e.contraindicatedFor.some((tag) => blocked.has(tag)),
-  );
+  const viable = viableStrengthExercises(view, level, catalog);
   const byGroup = new Map<string, CatalogExercise[]>();
   for (const exercise of viable) {
     const group = exercise.muscleGroups[0] ?? 'outros';
@@ -282,7 +301,8 @@ export function strengthInputOf(
   const rules = strengthRules(params, level);
   const experience = view.training.modalities.find((m) => m.modality === 'STRENGTH');
   const goal = strengthGoalOf(view.goal.declared.primary, options.strengthIsPrimary);
-  const beginner = level === 'BEGINNER' || (experience?.monthsPracticing ?? 0) < 3;
+  const months = experience?.monthsPracticing;
+  const beginner = level === 'BEGINNER' || (months !== undefined && months < 3);
   const preferredSplit = preferenceOf(view, 'TRAINING_STRUCTURE', 'split');
   const split =
     typeof preferredSplit === 'string' && (SPLITS as readonly string[]).includes(preferredSplit)
@@ -305,7 +325,17 @@ export function strengthInputOf(
     modalityPriority: options.priority,
     candidates,
     preferredExerciseIds,
+    emphasisMuscleGroups: emphasisGroupsOf(view),
   };
+}
+
+/** Grupos musculares da ênfase declarada na anamnese (`muscle_emphasis`, regiões separadas por vírgula). */
+function emphasisGroupsOf(view: StateView): string[] {
+  const raw = preferenceOf(view, 'TRAINING_STRUCTURE', 'muscle_emphasis');
+  if (typeof raw !== 'string' || raw === '') return [];
+  return raw
+    .split(',')
+    .flatMap((region) => MUSCLE_EMPHASIS_GROUPS[region as MuscleEmphasisRegion] ?? []);
 }
 
 // --- Corrida e HYROX ------------------------------------------------------------------------
@@ -371,7 +401,6 @@ const STATIONS_BY_VENUE: Record<TrainingVenue, HyroxInput['stationsWithEquipment
     'WALL_BALLS',
   ],
   FULL_GYM: ['SKIERG', 'SLED_PUSH', 'SLED_PULL', 'ROWING', 'FARMERS_CARRY', 'WALL_BALLS'],
-  BASIC_GYM: ['ROWING', 'FARMERS_CARRY', 'WALL_BALLS'],
   CONDO_GYM: ['FARMERS_CARRY'],
   HOME: [],
   OUTDOOR: [],
@@ -389,7 +418,7 @@ export function hyroxInputOf(
     event && event.kind === 'HYROX_RACE' ? weeksBetween(options.today, event.date) : null;
   const experience = view.training.modalities.find((m) => m.modality === 'HYROX');
   const sex = view.identity.biologicalSex === 'FEMALE' ? 'openFemale' : 'openMale';
-  const venue = view.training.venues[0] ?? 'FULL_GYM';
+  const venue = venueOf(view, 'HYROX');
   const phase = racePhase(weeksToRace, params.taperWeeks ?? 1);
   return {
     level: levelOf(view, 'HYROX'),
@@ -441,11 +470,67 @@ export function externalSessionsOf(view: StateView): {
   return { sessions, fixedDays };
 }
 
+/** Contexto da agenda: janelas do aluno, regras do híbrido e o espaçamento entre treinos intensos. */
+export function scheduleContextOf(
+  view: StateView,
+  hybridParameters: MethodologyParameters | undefined,
+  runningParameters: MethodologyParameters | undefined,
+): ScheduleContext {
+  return {
+    windows: view.availability?.windows ?? [],
+    rules: hybridRules(hybridParameters),
+    minEasyDaysBetweenIntense: Math.max(
+      0,
+      runningRules(runningParameters, levelOf(view, 'RUNNING')).minEasyDaysBetweenQuality ?? 1,
+    ),
+    externalFixedDays: externalSessionsOf(view).fixedDays,
+  };
+}
+
 /** Carga semanal média (sRPE) das últimas três semanas; `null` sem histórico confiável. */
 export function recentWeeklyLoad(view: StateView): number | null {
   const done = view.training.executions.filter((e) => e.load !== null);
   if (done.length < 4) return null;
   return Math.round(done.reduce((sum, e) => sum + (e.load ?? 0), 0) / 3);
+}
+
+/** Contexto da verificação final do plano (`checkTrainingPlan`) a partir do Estado do Aluno. */
+export function planCheckContextOf(
+  view: StateView,
+  focus: readonly CoachedModality[],
+  hybridParameters: MethodologyParameters | undefined,
+  runningParameters: MethodologyParameters | undefined,
+  startsOn: string,
+): PlanCheckContext {
+  return {
+    ...scheduleContextOf(view, hybridParameters, runningParameters),
+    maxSessionsPerWeek: Math.max(1, view.availability?.maxSessionsPerWeek ?? 1),
+    focus,
+    recentWeeklyLoad: recentWeeklyLoad(view),
+    startsOn,
+  };
+}
+
+/** O nome exibido do exercício vem SEMPRE do catálogo, não do que o modelo (ou a edição) escreveu. */
+export function withCatalogNames(
+  sessions: readonly PlanSession[],
+  catalog: readonly Pick<CatalogExercise, 'id' | 'name'>[],
+): PlanSession[] {
+  const byId = new Map(catalog.map((e) => [e.id, e.name]));
+  return sessions.map((session) =>
+    session.content.modality === 'STRENGTH'
+      ? {
+          ...session,
+          content: {
+            ...session.content,
+            exercises: session.content.exercises.map((e) => ({
+              ...e,
+              name: byId.get(e.exerciseId) ?? e.name,
+            })),
+          },
+        }
+      : session,
+  );
 }
 
 // --- Nutrição -------------------------------------------------------------------------------
@@ -502,7 +587,7 @@ export function nutritionInputOf(
     proteinPerMealMinG: rules.proteinPerMealMinG,
     maxWeeklyWeightLossPct: rules.maxWeeklyWeightLossPct,
     cookingCapacity: life?.cookingCapacity ?? 'BASIC',
-    foodBudget: life?.foodBudget ?? 'MODERATE',
+    foodBudgetMonthlyBrl: life?.foodBudgetMonthlyBrl ?? null,
     mealsOutsideHomePerWeek: life?.mealsOutsideHomePerWeek ?? 0,
   };
 }

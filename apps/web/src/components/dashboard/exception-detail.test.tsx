@@ -91,7 +91,7 @@ describe('ExceptionDetail', () => {
     ).toBeGreaterThan(0);
     expect(screen.getByText('Hipóteses (não confirmadas)')).toBeVisible();
     expect(screen.getByText(/Pode ser que a ingestão tenha subido/)).toBeVisible();
-    expect(screen.getByText(/Perder gordura/)).toBeVisible();
+    expect(screen.getByText(/Emagrecimento/)).toBeVisible();
     expect(screen.getByText(/80% \(8 de 10 sessões\)/)).toBeVisible();
     expect(screen.getByText(/Por que veio para a fila: Acima do limite\./)).toBeVisible();
   });

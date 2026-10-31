@@ -48,7 +48,7 @@ const LIFE: LifeContext = {
   occupationRhythm: 'REGULAR',
   cookingCapacity: 'BASIC',
   mealsOutsideHomePerWeek: 4,
-  foodBudget: 'MODERATE',
+  foodBudgetMonthlyBrl: 1200,
   sleepHoursTypical: 7,
   stressLevel: 'MODERATE',
 };
@@ -182,7 +182,7 @@ export const INICIANTE_EM_CASA = persona({
   venues: ['HOME'],
   windows: [morning('TUE', 40), morning('THU', 40), morning('SAT', 45)],
   maxSessionsPerWeek: 3,
-  life: { cookingCapacity: 'GOOD', foodBudget: 'TIGHT' },
+  life: { cookingCapacity: 'GOOD', foodBudgetMonthlyBrl: 600 },
   restrictions: ['VEGETARIAN'],
   preferences: [
     { domain: 'FOOD', key: 'meals_per_day', value: 4 },
@@ -283,7 +283,7 @@ export const HIBRIDO_COM_LUTA = persona({
     evening('FRI', 90),
     morning('SAT', 90),
   ],
-  maxSessionsPerWeek: 6,
+  maxSessionsPerWeek: 4,
   preferences: [
     { domain: 'FOOD', key: 'meals_per_day', value: 4 },
     { domain: 'FOOD', key: 'usual_meals', value: 'BREAKFAST,LUNCH,AFTERNOON_SNACK,DINNER' },
@@ -300,7 +300,7 @@ export const SINAIS_DE_TRANSTORNO_ALIMENTAR = persona({
   waistCm: 66,
   goal: { primary: 'FAT_LOSS', secondary: [], emphasis: 'AESTHETICS' },
   modalities: [strengthExp('BEGINNER', 5)],
-  venues: ['BASIC_GYM'],
+  venues: ['CONDO_GYM'],
   windows: [evening('MON', 60), evening('WED', 60), evening('FRI', 60)],
   maxSessionsPerWeek: 3,
   signals: [{ kind: 'EATING_DISORDER_SIGNS', severity: 'URGENT', scope: 'NUTRITION' }],

@@ -4,7 +4,6 @@ export const measurementKindSchema = z.enum([
   'WEIGHT',
   'WAIST',
   'HIP',
-  'NECK',
   'CHEST',
   'ARM',
   'THIGH',
@@ -16,8 +15,7 @@ export type MeasurementKind = z.infer<typeof measurementKindSchema>;
 export const MEASUREMENT_LABELS: Readonly<Record<MeasurementKind, string>> = {
   WEIGHT: 'Peso',
   WAIST: 'Cintura',
-  HIP: 'Quadril',
-  NECK: 'Pescoço',
+  HIP: 'Glúteos',
   CHEST: 'Peitoral',
   ARM: 'Braço',
   THIGH: 'Coxa',
@@ -30,7 +28,6 @@ export const MEASUREMENT_UNITS: Readonly<Record<MeasurementKind, 'kg' | 'cm' | '
   WEIGHT: 'kg',
   WAIST: 'cm',
   HIP: 'cm',
-  NECK: 'cm',
   CHEST: 'cm',
   ARM: 'cm',
   THIGH: 'cm',
@@ -49,11 +46,11 @@ export const measurementMethodSchema = z.enum([
 ]);
 export type MeasurementMethod = z.infer<typeof measurementMethodSchema>;
 
-const MEASUREMENT_BOUNDS: Readonly<Record<MeasurementKind, [number, number]>> = {
+/** Faixa plausível de cada medida (a mesma que a API aplica e o formulário mostra). */
+export const MEASUREMENT_BOUNDS: Readonly<Record<MeasurementKind, readonly [number, number]>> = {
   WEIGHT: [30, 300],
   WAIST: [40, 250],
   HIP: [50, 250],
-  NECK: [20, 70],
   CHEST: [50, 200],
   ARM: [15, 70],
   THIGH: [30, 110],
@@ -77,7 +74,8 @@ export const measurementInputSchema = z
   );
 export type MeasurementInput = z.infer<typeof measurementInputSchema>;
 
-export const photoAngleSchema = z.enum(['FRONT', 'SIDE', 'BACK']);
+/** As quatro posições da avaliação corporal: frontal, lado direito, costas e lado esquerdo. */
+export const photoAngleSchema = z.enum(['FRONT', 'RIGHT', 'BACK', 'LEFT']);
 export type PhotoAngle = z.infer<typeof photoAngleSchema>;
 
 /** Verificação de padronização da foto (feita pela visão antes de qualquer análise). */

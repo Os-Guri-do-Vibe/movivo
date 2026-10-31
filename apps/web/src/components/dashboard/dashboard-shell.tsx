@@ -12,6 +12,7 @@ import {
   Dumbbell,
   FlaskConical,
   Handshake,
+  IdCard,
   Landmark,
   LockKeyhole,
   Megaphone,
@@ -143,6 +144,13 @@ const PILLARS: readonly DashboardNavigationPillar[] = [
         href: '/dashboard/ia/agentes',
         label: 'Agentes',
         icon: Bot,
+        capabilities: ['control_center.agents.read'],
+      },
+      {
+        // Quem é cada agente e como trabalha (markdown versionado); só ADMIN edita.
+        href: '/dashboard/ia/fichas',
+        label: 'Fichas dos agentes',
+        icon: IdCard,
         capabilities: ['control_center.agents.read'],
       },
     ],

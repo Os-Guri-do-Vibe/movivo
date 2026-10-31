@@ -30,7 +30,7 @@ export function ComplementaryConsents({
 
   return (
     <QuestionStack>
-      <div>
+      <div className="text-center">
         <h1 ref={titleRef} tabIndex={-1} className="text-h2 font-bold outline-none">
           Antes de continuar
         </h1>

@@ -24,7 +24,12 @@ import {
 import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 
 import { TenantDatabase, type TenantTransaction } from '../../core/database';
-import { anamnesisSessions, consents } from '../../core/database/schema';
+import {
+  anamnesisSessionPhotos,
+  anamnesisSessions,
+  bodyPhotos,
+  consents,
+} from '../../core/database/schema';
 
 /** Origem da requisição — a prova de onde o aceite partiu. Nunca vem do cliente. */
 export interface ConsentOrigin {
@@ -62,6 +67,15 @@ export class ConsentService {
         await this.upsert(tx, { anamnesisSessionId: sessionId, userId: null }, input, origin);
       }
     });
+    // Retirar o aceite das fotos apaga as já enviadas nesta sessão (o contexto anônimo não
+    // apaga: a RLS reserva o DELETE ao sistema, e a sessão já foi resolvida pelo token).
+    if (inputs.some((input) => input.type === 'BODY_PHOTOS' && !input.accepted)) {
+      await this.db.runAsSystem((tx) =>
+        tx
+          .delete(anamnesisSessionPhotos)
+          .where(eq(anamnesisSessionPhotos.anamnesisSessionId, sessionId)),
+      );
+    }
   }
 
   /**
@@ -109,6 +123,11 @@ export class ConsentService {
    * trava real: sem ela, dado de saúde entraria no banco sem base legal.
    */
   async hasValidHealthConsent(sessionId: string): Promise<boolean> {
+    return this.hasValidSessionConsent(sessionId, 'HEALTH_DATA');
+  }
+
+  /** Consentimento aceito, não revogado e na versão vigente desta sessão, para a finalidade. */
+  async hasValidSessionConsent(sessionId: string, type: ConsentTypeWithText): Promise<boolean> {
     const rows = await this.db.runAsTokenScoped(sessionId, (tx) =>
       tx
         .select({ id: consents.id })
@@ -116,8 +135,8 @@ export class ConsentService {
         .where(
           and(
             eq(consents.anamnesisSessionId, sessionId),
-            eq(consents.consentType, 'HEALTH_DATA'),
-            eq(consents.version, CONSENT_TEXTS.HEALTH_DATA.version),
+            eq(consents.consentType, type),
+            eq(consents.version, CONSENT_TEXTS[type].version),
             eq(consents.accepted, true),
             isNull(consents.revokedAt),
           ),
@@ -198,6 +217,18 @@ export class ConsentService {
       await tx.execute(
         sql`SELECT public.revoke_non_health_consent(${userId}::uuid, ${type}::consent_type)`,
       );
+    });
+    // Revogar as fotos apaga as já enviadas: o conteúdo cifrado sai e a galeria as marca apagadas.
+    if (type === 'BODY_PHOTOS') await this.erasePhotos(userId);
+  }
+
+  private async erasePhotos(userId: string): Promise<void> {
+    await this.db.runAsSystem(async (tx) => {
+      await tx
+        .update(bodyPhotos)
+        .set({ deletedAt: new Date() })
+        .where(and(eq(bodyPhotos.userId, userId), isNull(bodyPhotos.deletedAt)));
+      await tx.delete(anamnesisSessionPhotos).where(eq(anamnesisSessionPhotos.userId, userId));
     });
   }
 

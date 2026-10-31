@@ -19,7 +19,11 @@ import { defineAgentTask, type Validator, type Violation } from '../../../core/a
 import { checkTrainingPlan, type PlanCheckContext } from '../calc/plan-check';
 import { hybridRules, runningRules } from '../calc/params';
 import { blockOutputSchema } from './blocks';
-import { outputLanguageViolations } from './common';
+import {
+  outputLanguageViolations,
+  PROFESSIONAL_INSTRUCTION_RULE,
+  professionalInstructionSchema,
+} from './common';
 
 export const hybridInputSchema = z.object({
   blocks: z
@@ -54,6 +58,7 @@ export const hybridInputSchema = z.object({
   recentWeeklyLoad: z.number().nullable(),
   startsOn: z.iso.date(),
   runningLevel: z.enum(['BEGINNER', 'INTERMEDIATE', 'ADVANCED']),
+  professionalInstruction: professionalInstructionSchema,
 });
 export type HybridInput = z.infer<typeof hybridInputSchema>;
 
@@ -151,7 +156,8 @@ Regras:
 3. Respeite as regras de interferência da metodologia HYBRID: espaço entre inferiores pesados e corrida intensa, teto de sessões intensas na semana (contando o esporte externo), dias de descanso, no máximo uma sessão por dia (salvo se a metodologia permitir). Quando algo precisar sair, corte primeiro as complementares, depois as importantes; sessão-chave só sai em último caso.
 4. Não passe de "maxSessionsPerWeek" sessões próprias por semana e garanta que cada modalidade em foco mantém ao menos uma sessão.
 5. modalityPriorities: reflita a prioridade recebida de cada modalidade (1 = principal). phases: organize o plano em fases coerentes, com semanas de recuperação quando a metodologia pedir. summary: 3 a 4 frases claras que expliquem como as modalidades convivem na semana, sem prometer resultado.
-6. Nunca "compense" sessão perdida empilhando treinos; a semana é o que cabe.`,
+6. Nunca "compense" sessão perdida empilhando treinos; a semana é o que cabe.
+7. ${PROFESSIONAL_INSTRUCTION_RULE}`,
   tier: 'REASONING',
   methodology: ['HYBRID', 'RUNNING'],
   state: ['goals', 'availability', 'training'],

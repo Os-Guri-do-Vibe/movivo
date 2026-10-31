@@ -7,7 +7,7 @@
  * nunca apagado: o histórico do aluno fica.
  */
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 
 import type {
   HealthRecordKind,
@@ -16,6 +16,7 @@ import type {
   OnboardingGoalsStep,
   OnboardingModalitiesStep,
   OnboardingNutritionStep,
+  OnboardingPainStep,
   OnboardingParqStep,
   OnboardingPreferencesStep,
   OnboardingRoutineStep,
@@ -41,6 +42,7 @@ export interface OnboardingAnswers {
   modalities: OnboardingModalitiesStep;
   routine: OnboardingRoutineStep;
   preferences: OnboardingPreferencesStep;
+  pain: OnboardingPainStep;
   parq: OnboardingParqStep;
   nutrition: OnboardingNutritionStep;
   body: OnboardingBodyStep | null;
@@ -79,8 +81,13 @@ export class OnboardingProjection {
       heightCm: answers.registration.heightCm,
       modalities: answers.modalities.modalities,
       externalSports: answers.modalities.externalSports,
-      venues: answers.modalities.venues,
-      lifeContext: answers.routine.lifeContext,
+      venues: [...new Set(answers.modalities.modalities.map((m) => m.venue))],
+      lifeContext: {
+        ...answers.routine.lifeContext,
+        cookingCapacity: answers.nutrition.cookingCapacity,
+        mealsOutsideHomePerWeek: answers.nutrition.mealsOutsideHomePerWeek,
+        foodBudgetMonthlyBrl: answers.nutrition.foodBudgetMonthlyBrl,
+      },
     };
     await tx
       .insert(studentProfiles)
@@ -157,18 +164,18 @@ export class OnboardingProjection {
   private async preferences(tx: TenantTransaction, userId: string, answers: OnboardingAnswers) {
     const { preferences } = answers.preferences;
     const declared: { domain: string; key: string; value: string | number }[] = [
-      { domain: 'TRAINING_STRUCTURE', key: 'split', value: preferences.split },
       { domain: 'TRAINING_STRUCTURE', key: 'priority', value: preferences.priority },
-      { domain: 'EFFORT', key: 'proximity_to_failure', value: preferences.effort },
-      {
-        domain: 'SESSION_LENGTH',
-        key: 'session_minutes',
-        value: preferences.preferredSessionMinutes,
-      },
       { domain: 'FOOD', key: 'meals_per_day', value: answers.nutrition.mealsPerDay },
       { domain: 'FOOD', key: 'usual_meals', value: answers.nutrition.usualMeals.join(',') },
       { domain: 'FOOD', key: 'hunger', value: answers.nutrition.hunger },
     ];
+    if (preferences.muscleEmphasis.length > 0) {
+      declared.push({
+        domain: 'TRAINING_STRUCTURE',
+        key: 'muscle_emphasis',
+        value: preferences.muscleEmphasis.join(','),
+      });
+    }
     if (answers.nutrition.supplements.length > 0) {
       declared.push({
         domain: 'FOOD',
@@ -201,7 +208,7 @@ export class OnboardingProjection {
 
   /** Tudo que é saúde ou texto livre — só cifrado. */
   private async health(tx: TenantTransaction, userId: string, answers: OnboardingAnswers) {
-    const { preferences: health, parq, nutrition, goals } = answers;
+    const { preferences: health, pain, parq, nutrition, goals } = answers;
     const records: { kind: HealthRecordKind; payload: HealthRecordPayload }[] = [];
 
     const positive = parq.parq.answers.filter((a) => a.answer).map((a) => a.questionId);
@@ -214,16 +221,16 @@ export class OnboardingProjection {
             : 'PAR-Q sem respostas de risco',
       },
     });
-    if (health.pain.hasPain) {
-      for (const point of health.pain.points) {
+    if (pain.pain.hasPain) {
+      for (const point of pain.pain.points) {
         const tag = PAIN_TO_TAG[point.region];
         records.push({
           kind: 'PAIN',
           payload: {
-            summary: `Dor ${point.intensity}/10${point.regionOther ? ` (${point.regionOther})` : ''}; tendência ${health.pain.trend ?? 'não informada'}${health.pain.trigger ? `; piora com: ${health.pain.trigger}` : ''}`,
+            summary: `Dor ${point.intensity}/10${point.regionOther ? ` (${point.regionOther})` : ''}; tendência ${pain.pain.trend ?? 'não informada'}${pain.pain.trigger ? `; piora com: ${pain.pain.trigger}` : ''}`,
             region: point.region,
             movementTags: tag ? [tag] : [],
-            guidance: health.pain.avoidanceRecommendation,
+            guidance: pain.pain.avoidanceRecommendation,
           },
         });
       }
@@ -246,8 +253,9 @@ export class OnboardingProjection {
     }
     const notes = [
       goals.motivation && `Motivação: ${goals.motivation}`,
-      health.likedTraining && `Gosta de treinar: ${health.likedTraining}`,
+      health.trainingPreferences && `Preferências de treino: ${health.trainingPreferences}`,
       health.dislikedExercises && `Prefere evitar: ${health.dislikedExercises}`,
+      nutrition.supplementOther && `Outro suplemento: ${nutrition.supplementOther}`,
       nutrition.likedFoods && `Alimentos que gosta: ${nutrition.likedFoods}`,
       nutrition.dislikedFoods && `Alimentos que evita: ${nutrition.dislikedFoods}`,
     ].filter((note): note is string => Boolean(note));
@@ -262,6 +270,8 @@ export class OnboardingProjection {
           eq(studentHealthRecords.userId, userId),
           eq(studentHealthRecords.status, 'ACTIVE'),
           eq(studentHealthRecords.origin, 'DECLARED'),
+          // O ciclo vem do WhatsApp, não da anamnese.
+          ne(studentHealthRecords.kind, 'MENSTRUAL_CYCLE'),
         ),
       );
     for (const record of records) {

@@ -701,6 +701,24 @@ export const studentDetailResponse: ControlCenterStudentDetailResponse = {
         parqState: 'LIBERADO',
         painReports: [{ at: '2026-08-08T11:00:00.000Z', text: 'KNEE: 4/10' }],
       },
+      followUp: {
+        weekStart: '2026-08-03',
+        status: 'ATTENTION',
+        summary: 'Adesão caiu nas duas últimas semanas.',
+        recovery: null,
+        habits: {
+          status: 'ATTENTION',
+          findings: [
+            {
+              kind: 'falta_de_tempo',
+              statement: 'Pode ser que a rotina nova esteja apertando os treinos da semana.',
+              basedOn: ['barrier'],
+            },
+          ],
+          strengths: ['Manteve o registro da alimentação.'],
+          focus: 'Priorizar a sessão-chave em dias corridos.',
+        },
+      },
     },
   },
   meta: { ...controlCenterMeta, dataQuality: [...controlCenterMeta.dataQuality] },

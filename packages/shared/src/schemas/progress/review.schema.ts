@@ -15,6 +15,18 @@ export const weekMetricsSchema = z.object({
   /** Dias da semana com alimentação confirmada. */
   foodLogDays: z.number().int().min(0).max(7),
   weightKg: z.number().nullable(),
+  /** Respostas do check-in respondido na semana (escalas 1 = pior, 5 = melhor). */
+  checkIn: z
+    .object({
+      energy: z.number().int().min(1).max(5).nullable(),
+      sleep: z.number().int().min(1).max(5).nullable(),
+      soreness: z.number().int().min(1).max(5).nullable(),
+      intensityFeel: z.string().max(80).nullable(),
+      barrier: z.string().max(80).nullable(),
+      foodDifficulty: z.string().max(80).nullable(),
+    })
+    .nullable()
+    .optional(),
 });
 export type WeekMetrics = z.infer<typeof weekMetricsSchema>;
 
@@ -28,6 +40,8 @@ export const reviewSignalKindSchema = z.enum([
   'WEIGHT_RAPID_CHANGE',
   'NUTRITION_UNDERLOGGED',
   'PAIN_REPORTED',
+  'RECOVERY_LOW',
+  'BARRIER_REPORTED',
 ]);
 export type ReviewSignalKind = z.infer<typeof reviewSignalKindSchema>;
 
@@ -51,6 +65,27 @@ export const reviewHypothesisSchema = z.object({
 });
 export type ReviewHypothesis = z.infer<typeof reviewHypothesisSchema>;
 
+/**
+ * Leitura de um analista do acompanhamento (recuperação ou hábitos): hipóteses sobre o que os
+ * dados mostram, o que o aluno fez bem e o foco sugerido para a semana. Nunca é fato confirmado.
+ */
+export const followUpAnalysisSchema = z.object({
+  status: z.enum(['OK', 'ATTENTION']),
+  findings: z
+    .array(
+      z.object({
+        kind: z.string().regex(/^[a-z][a-z0-9_]{2,39}$/),
+        statement: z.string().trim().min(1).max(240),
+        /** Sinais (chave) ou dados (`sleep`, `energy`, `barrier`...) que sustentam a leitura. */
+        basedOn: z.array(z.string().min(1).max(40)).min(1).max(4),
+      }),
+    )
+    .max(3),
+  strengths: z.array(z.string().trim().min(1).max(200)).max(2),
+  focus: z.string().trim().min(1).max(240),
+});
+export type FollowUpAnalysis = z.infer<typeof followUpAnalysisSchema>;
+
 /** Registro da revisão semanal, como fica gravado e como o painel lê. */
 export const weeklyReviewRecordSchema = z.object({
   status: reviewStatusSchema,
@@ -61,5 +96,12 @@ export const weeklyReviewRecordSchema = z.object({
   interventions: z
     .array(z.object({ actionType: z.string().min(1).max(40), rationale: z.string().max(400) }))
     .max(2),
+  /** Leituras dos analistas de recuperação e de hábitos, quando rodaram nesta semana. */
+  analyses: z
+    .object({
+      recovery: followUpAnalysisSchema.nullable(),
+      habits: followUpAnalysisSchema.nullable(),
+    })
+    .optional(),
 });
 export type WeeklyReviewRecord = z.infer<typeof weeklyReviewRecordSchema>;

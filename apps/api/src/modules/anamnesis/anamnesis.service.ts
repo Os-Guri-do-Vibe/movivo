@@ -1,5 +1,5 @@
 /**
- * `AnamnesisService` — anamnese em 8 etapas (cadastro novo) e anamnese complementar (aluno que
+ * `AnamnesisService` — anamnese em 9 etapas (cadastro novo) e anamnese complementar (aluno que
  * já existia completa o que falta), salvas etapa a etapa.
  *
  * Invariantes:
@@ -45,12 +45,19 @@ import {
   type StartAnamnesisInput,
 } from '@movivo/shared';
 import { PinoLogger } from 'nestjs-pino';
-import { and, desc, eq, isNotNull, isNull, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 import type { ZodType } from 'zod';
 
 import { HealthCipherService, TenantDatabase, type TenantTransaction } from '../../core/database';
 import { HealthConsentService } from '../../core/database/health-consent.service';
-import { anamnesisSessions, users } from '../../core/database/schema';
+import {
+  ANAMNESIS_PHOTO_PATH_PREFIX,
+  anamnesisSessionPhotos,
+  anamnesisSessions,
+  bodyPhotos,
+  consents,
+  users,
+} from '../../core/database/schema';
 import { strictSafeParse } from '../../core/validation/strict-input';
 import { SafetyService } from '../coaching/safety/safety.service';
 import { signalOf } from '../coaching/safety/sentinel-rules';
@@ -62,8 +69,9 @@ import {
   OnboardingProjection,
   type OnboardingAnswers,
 } from '../student-state/onboarding-projection';
+import { BodyPhotoService } from './body-photo.service';
 import { ConsentService } from './consent.service';
-import { legacyPrefill } from './legacy-prefill';
+import { legacyPrefill, withModalityVenues, withSessionsWithinDays } from './legacy-prefill';
 import { evaluateParq } from './parq';
 import { PhoneVerificationService, type SendCodeResult } from './phone-verification.service';
 
@@ -79,9 +87,10 @@ const BLOCK_KEY: Readonly<Record<OnboardingStepNumber, string>> = {
   3: 'modalities',
   4: 'routine',
   5: 'preferences',
-  6: 'parq',
+  6: 'pain',
   7: 'nutrition',
   8: 'body',
+  9: 'parq',
 };
 
 /** Campos de cada etapa que são sensíveis (saúde ou texto livre) — vão só para o cifrado. */
@@ -89,16 +98,38 @@ const SENSITIVE_FIELDS: Readonly<Partial<Record<OnboardingStepNumber, readonly s
   {
     2: ['motivation'],
     5: [
-      'likedTraining',
+      'trainingPreferences',
       'dislikedExercises',
-      'pain',
       'conditions',
       'medications',
       'professionalGuidance',
     ],
     6: 'ALL',
-    7: ['allergies', 'likedFoods', 'dislikedFoods'],
+    7: ['allergies', 'supplementOther', 'likedFoods', 'dislikedFoods'],
+    9: 'ALL',
   };
+
+/**
+ * Textos opcionais sem pergunta-porta. A parte sensível nunca volta ao navegador, então ao
+ * reenviar uma etapa retomada o campo vem vazio: omitido mantém o salvo, `""` apaga.
+ */
+const KEPT_WHEN_OMITTED: Readonly<Partial<Record<OnboardingStepNumber, readonly string[]>>> = {
+  2: ['motivation'],
+  7: ['likedFoods', 'dislikedFoods'],
+};
+
+export function mergeSensitive(
+  step: OnboardingStepNumber,
+  previous: Record<string, unknown> | undefined,
+  next: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = { ...next };
+  for (const field of KEPT_WHEN_OMITTED[step] ?? []) {
+    if (!(field in merged) && previous?.[field] !== undefined) merged[field] = previous[field];
+    if (merged[field] === '') delete merged[field];
+  }
+  return merged;
+}
 
 export interface StartResult {
   token: string;
@@ -130,6 +161,12 @@ export interface SessionView {
    * aluno que já existia aceitou versões anteriores; a v2 do serviço exige novo aceite.
    */
   consentsPending: boolean;
+  /** Consentimento próprio das fotos do corpo (mostrado só a quem decide enviar fotos). */
+  bodyPhotosConsent: ConsentItemView;
+  /** O aluno já aceitou o texto vigente do consentimento das fotos nesta sessão. */
+  bodyPhotosConsentAccepted: boolean;
+  /** Posições que já têm foto enviada (o conteúdo nunca volta ao cliente). */
+  photos: string[];
   /** Parte COMUM de cada etapa salva (ou pré-preenchida). Nunca a parte sensível. */
   blocks: Record<string, unknown>;
   outcome: OnboardingOutcome | null;
@@ -142,7 +179,10 @@ export interface SubmitResult {
   outcome: OnboardingOutcome;
 }
 
-const CONSENT_ORDER = Object.keys(CONSENT_TEXTS) as ConsentTypeWithText[];
+/** Fotos do corpo (etapa do corpo) e ciclo menstrual (WhatsApp) têm consentimento próprio, fora do cadastro. */
+const CONSENT_ORDER = (Object.keys(CONSENT_TEXTS) as ConsentTypeWithText[]).filter(
+  (type) => type !== 'BODY_PHOTOS' && type !== 'MENSTRUAL_CYCLE',
+);
 
 function parseStep(step: OnboardingStepNumber, data: unknown): Record<string, unknown> {
   const schema = ONBOARDING_STEP_SCHEMAS[step] as unknown as ZodType<Record<string, unknown>>;
@@ -182,6 +222,7 @@ export class AnamnesisService {
     private readonly safety: SafetyService,
     private readonly events: DomainEventRecorder,
     private readonly outbox: OutboxRelay,
+    private readonly photos: BodyPhotoService,
   ) {
     this.logger.setContext(AnamnesisService.name);
   }
@@ -225,7 +266,7 @@ export class AnamnesisService {
           and(
             eq(anamnesisSessions.userId, userId),
             eq(anamnesisSessions.status, 'SUBMITTED'),
-            // Só a anamnese antiga (3 etapas) tem os blocos legados; uma sessão de 8 etapas
+            // Só a anamnese antiga (3 etapas) tem os blocos legados; uma sessão de 9 etapas
             // enviada depois não serve de base ao pré-preenchimento.
             isNotNull(anamnesisSessions.dataBlock3),
           ),
@@ -267,7 +308,11 @@ export class AnamnesisService {
       await this.expire(row);
       throw new GoneException('Sessão de anamnese expirada. Recomece o formulário.');
     }
-    return this.toView(row, await this.consentsPending(row));
+    return this.toView(row, {
+      consentsPending: await this.consentsPending(row),
+      bodyPhotosConsentAccepted: await this.consents.hasValidSessionConsent(row.id, 'BODY_PHOTOS'),
+      photos: await this.photos.anglesOf(row.id),
+    });
   }
 
   /** Complementar: faltam aceites obrigatórios, na versão vigente, nesta sessão. */
@@ -328,9 +373,15 @@ export class AnamnesisService {
       if (common) blocks[key] = common;
       else delete blocks[key];
       const secret = await this.readSensitive(row.sensitive);
-      if (sensitive) secret[key] = sensitive;
+      if (sensitive) {
+        secret[key] = mergeSensitive(
+          step,
+          secret[key] as Record<string, unknown> | undefined,
+          sensitive,
+        );
+      }
       const completedSteps = [...new Set([...row.completedSteps, step])].sort((a, b) => a - b);
-      const currentStep = Math.min(Math.max(row.lastStep, step + 1), 8);
+      const currentStep = Math.min(Math.max(row.lastStep, step + 1), 9);
 
       const [updated] = await tx
         .update(anamnesisSessions)
@@ -421,7 +472,9 @@ export class AnamnesisService {
         .set({ userId, status: 'SUBMITTED', parqState: gate.parqState, submittedAt })
         .where(eq(anamnesisSessions.id, row.id));
 
-      await this.projection.project(tx, userId, answers, submittedAt.toISOString().slice(0, 10));
+      const today = submittedAt.toISOString().slice(0, 10);
+      await this.projection.project(tx, userId, answers, today);
+      await this.adoptPhotos(tx, row.id, userId, today);
       if (gate.requiresProfessionalReview) {
         await this.safety.raiseIn(
           tx,
@@ -461,6 +514,55 @@ export class AnamnesisService {
     return { status: 'SUBMITTED', outcome: this.toOutcome(gate.parqState) };
   }
 
+  /**
+   * As fotos do corpo enviadas na anamnese passam a ser do titular: a linha ganha o `user_id`
+   * e entra na galeria de evolução (`body_photos`), presa ao consentimento próprio das fotos.
+   */
+  private async adoptPhotos(
+    tx: TenantTransaction,
+    sessionId: string,
+    userId: string,
+    takenOn: string,
+  ): Promise<void> {
+    const photos = await tx
+      .select({ id: anamnesisSessionPhotos.id, angle: anamnesisSessionPhotos.angle })
+      .from(anamnesisSessionPhotos)
+      .where(eq(anamnesisSessionPhotos.anamnesisSessionId, sessionId));
+    if (photos.length === 0) return;
+    const [consent] = await tx
+      .select({ id: consents.id })
+      .from(consents)
+      .where(
+        and(
+          eq(consents.anamnesisSessionId, sessionId),
+          eq(consents.consentType, 'BODY_PHOTOS'),
+          eq(consents.accepted, true),
+          isNull(consents.revokedAt),
+        ),
+      )
+      .limit(1);
+    if (!consent) {
+      // Sem consentimento vigente a foto não pode ficar: nunca deveria chegar aqui.
+      await tx
+        .delete(anamnesisSessionPhotos)
+        .where(eq(anamnesisSessionPhotos.anamnesisSessionId, sessionId));
+      return;
+    }
+    await tx
+      .update(anamnesisSessionPhotos)
+      .set({ userId })
+      .where(eq(anamnesisSessionPhotos.anamnesisSessionId, sessionId));
+    await tx.insert(bodyPhotos).values(
+      photos.map((photo) => ({
+        userId,
+        angle: photo.angle,
+        takenOn,
+        storagePath: `${ANAMNESIS_PHOTO_PATH_PREFIX}${photo.id}`,
+        consentId: consent.id,
+      })),
+    );
+  }
+
   /** Expurgo de sessões vencidas sem envio: a parte sensível é descartada. */
   async purgeExpiredSessions(): Promise<number> {
     return this.db.runAsSystem(async (tx) => {
@@ -474,6 +576,14 @@ export class AnamnesisService {
           ),
         )
         .returning({ id: anamnesisSessions.id })) as Array<{ id: string }>;
+      if (purged.length > 0) {
+        await tx.delete(anamnesisSessionPhotos).where(
+          inArray(
+            anamnesisSessionPhotos.anamnesisSessionId,
+            purged.map((session) => session.id),
+          ),
+        );
+      }
       return purged.length;
     });
   }
@@ -556,12 +666,13 @@ export class AnamnesisService {
     return {
       registration: ONBOARDING_STEP_SCHEMAS[1].parse(merged(1)),
       goals: ONBOARDING_STEP_SCHEMAS[2].parse(merged(2)),
-      modalities: ONBOARDING_STEP_SCHEMAS[3].parse(merged(3)),
-      routine: ONBOARDING_STEP_SCHEMAS[4].parse(merged(4)),
+      modalities: ONBOARDING_STEP_SCHEMAS[3].parse(withModalityVenues(merged(3))),
+      routine: ONBOARDING_STEP_SCHEMAS[4].parse(withSessionsWithinDays(merged(4))),
       preferences: ONBOARDING_STEP_SCHEMAS[5].parse(merged(5)),
-      parq: ONBOARDING_STEP_SCHEMAS[6].parse(merged(6)),
+      pain: ONBOARDING_STEP_SCHEMAS[6].parse(merged(6)),
       nutrition: ONBOARDING_STEP_SCHEMAS[7].parse(merged(7)),
       body: row.completedSteps.includes(8) ? ONBOARDING_STEP_SCHEMAS[8].parse(merged(8)) : null,
+      parq: ONBOARDING_STEP_SCHEMAS[9].parse(merged(9)),
     };
   }
 
@@ -583,6 +694,12 @@ export class AnamnesisService {
   }
 
   private async expire(row: SessionRow): Promise<void> {
+    // As fotos do corpo vão junto com a sessão vencida (o contexto anônimo não apaga).
+    await this.db.runAsSystem((tx) =>
+      tx
+        .delete(anamnesisSessionPhotos)
+        .where(eq(anamnesisSessionPhotos.anamnesisSessionId, row.id)),
+    );
     await this.inSession(row, async (tx) => {
       await tx
         .update(anamnesisSessions)
@@ -626,7 +743,22 @@ export class AnamnesisService {
     }
   }
 
-  private toView(row: SessionRow, consentsPending = false): SessionView {
+  private toView(
+    row: SessionRow,
+    extra: { consentsPending: boolean; bodyPhotosConsentAccepted: boolean; photos: string[] } = {
+      consentsPending: false,
+      bodyPhotosConsentAccepted: false,
+      photos: [],
+    },
+  ): SessionView {
+    const consentItem = (type: ConsentTypeWithText): ConsentItemView => ({
+      type,
+      version: CONSENT_TEXTS[type].version,
+      title: CONSENT_TEXTS[type].title,
+      body: CONSENT_TEXTS[type].body,
+      label: CONSENT_TEXTS[type].label,
+      required: CONSENT_TEXTS[type].required,
+    });
     return {
       status: row.status,
       flow: row.flow as OnboardingFlow,
@@ -634,15 +766,11 @@ export class AnamnesisService {
       completedSteps: row.completedSteps,
       phoneVerified: row.phoneVerifiedAt != null,
       primaryGoal: row.primaryGoal,
-      consents: CONSENT_ORDER.map((type) => ({
-        type,
-        version: CONSENT_TEXTS[type].version,
-        title: CONSENT_TEXTS[type].title,
-        body: CONSENT_TEXTS[type].body,
-        label: CONSENT_TEXTS[type].label,
-        required: CONSENT_TEXTS[type].required,
-      })),
-      consentsPending,
+      consents: CONSENT_ORDER.map(consentItem),
+      consentsPending: extra.consentsPending,
+      bodyPhotosConsent: consentItem('BODY_PHOTOS'),
+      bodyPhotosConsentAccepted: extra.bodyPhotosConsentAccepted,
+      photos: extra.photos,
       blocks: row.blocks,
       outcome: row.parqState ? this.toOutcome(row.parqState as ParqStateType) : null,
       expiresAt: row.expiresAt,

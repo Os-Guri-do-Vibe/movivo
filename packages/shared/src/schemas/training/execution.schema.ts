@@ -11,6 +11,8 @@ export const executionSourceSchema = z.enum([
   'FIT_FILE',
   'GPX_FILE',
   'STAFF',
+  /** Atividade importada do Strava (webhook), já concluída. */
+  'STRAVA',
 ]);
 export type ExecutionSource = z.infer<typeof executionSourceSchema>;
 

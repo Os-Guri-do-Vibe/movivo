@@ -189,6 +189,8 @@ export const sessionExecutions = pgTable(
       .default(sql`'[]'::jsonb`),
     /** Registro feito depois do dia (não conta como treino "no dia" para adesão). */
     loggedLate: boolean('logged_late').notNull().default(false),
+    /** Id da atividade na origem externa (ex.: `strava:123`): a mesma atividade entra uma vez. */
+    externalId: varchar('external_id', { length: 64 }),
     ...timestampColumns,
   },
   (t) => [
@@ -196,6 +198,9 @@ export const sessionExecutions = pgTable(
     uniqueIndex('uq_session_executions_scheduled')
       .on(t.scheduledSessionId)
       .where(sql`${t.scheduledSessionId} is not null`),
+    uniqueIndex('uq_session_executions_external')
+      .on(t.userId, t.externalId)
+      .where(sql`${t.externalId} is not null`),
     index('idx_session_executions_user_day').on(t.userId, t.performedOn),
     checkOneOf('ck_session_executions_modality', t.modality, sessionModalitySchema.options),
     checkOneOf('ck_session_executions_status', t.status, executionStatusSchema.options),

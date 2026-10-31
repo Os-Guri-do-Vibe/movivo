@@ -39,6 +39,7 @@ export const strategyInputSchema = z.object({
     bmi: z.number().nullable(),
     weeksToEvent: z.number().int().min(0).nullable(),
     hasExternalSport: z.boolean(),
+    /** Sessões próprias (da MOVIVO) por semana, sem o esporte externo. */
     sessionsPerWeekAvailable: z.number().int().min(1).max(14),
   }),
 });

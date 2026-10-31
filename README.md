@@ -9,8 +9,8 @@ conselhos (CREF, CRN e CRM). O profissional entra por exceção: sinal de segura
 política aplicável ou pedido de revisão. O modelo de linguagem nunca escreve nada diretamente: ele
 devolve uma proposta tipada, e o código valida, decide e executa.
 
-Este repositório é um **monorepo** (pnpm workspaces + Turborepo). O contexto de produto, a
-arquitetura e as regras de trabalho estão em [`CLAUDE.md`](CLAUDE.md).
+Este repositório é um **monorepo** (pnpm workspaces + Turborepo). O que é a MOVIVO 2.0, o que já foi
+feito, como e por quê, e o que está pendente: [`MOVIVO-V2.md`](MOVIVO-V2.md).
 
 ---
 

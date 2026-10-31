@@ -25,8 +25,9 @@ export const PAIN_MESSAGE =
 export const OUT_OF_SCOPE_MESSAGE =
   'Esse assunto foge do que eu consigo ajudar por aqui: treino, alimentação e o seu plano. Se quiser, me conta como estão os treinos ou o que precisa ajustar na semana.';
 
-export const GREETING_MESSAGE =
-  'Oi! Tudo bem? Posso ajustar o seu treino, a semana ou a alimentação, ou tirar uma dúvida. Como posso ajudar?';
+/** Apresenta a persona como IA (transparência): nunca como pessoa. */
+export const greetingMessage = ({ name, article }: { name: string; article: 'a' | 'o' }) =>
+  `Oi! Aqui é ${article} ${name}, assistente de IA da MOVIVO, com a equipe de profissionais por trás. Posso ajustar o seu treino, a semana ou a alimentação, ou tirar uma dúvida. Como posso ajudar?`;
 
 export const FALLBACK_MESSAGE = 'Recebi sua mensagem e já te respondo.';
 

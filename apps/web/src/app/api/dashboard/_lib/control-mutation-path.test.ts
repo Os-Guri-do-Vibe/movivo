@@ -15,6 +15,12 @@ describe('allowlist de mutações do Control Center', () => {
     `exceptions/${ID}/approve`,
     `exceptions/${ID}/reject`,
     `exceptions/${ID}/resolve`,
+    `exceptions/${ID}/request-adjustment`,
+    'agents/profiles/HYROX/drafts',
+    `agents/profiles/documents/${ID}/update`,
+    `agents/profiles/documents/${ID}/test`,
+    `agents/profiles/documents/${ID}/publish`,
+    `agents/profiles/documents/${ID}/discard`,
     'ai/simulate',
     'ai/guardrails',
     'ai/exercise-catalog',
@@ -45,6 +51,9 @@ describe('allowlist de mutações do Control Center', () => {
     `exceptions/${ID}`,
     `exceptions/${ID}/delete`,
     `exceptions/${ID}/approve/extra`,
+    'agents/profiles/hyrox/drafts',
+    'agents/profiles/documents/not-a-uuid/publish',
+    `agents/profiles/documents/${ID}/delete`,
     'exceptions/not-a-uuid/approve',
     // Parecidos com os de favorito, mas não listados: a allowlist é por igualdade exata.
     'ai/exercise-catalog/favorites',
@@ -83,6 +92,10 @@ describe('allowlist de PUT do Control Center', () => {
     },
   );
 
+  it('autoriza editar o protocolo em revisão de um caso (só com UUID)', () => {
+    expect(isAllowedControlPutPath(`exceptions/${ID}/protocol`)).toBe(true);
+  });
+
   it.each([
     'agents/tiers',
     'agents/tiers/fast',
@@ -90,6 +103,9 @@ describe('allowlist de PUT do Control Center', () => {
     'agents/tiers/FAST/extra',
     'agents/costs',
     'exceptions/abc/approve',
+    'exceptions/not-a-uuid/protocol',
+    `exceptions/${ID}/protocol/extra`,
+    `exceptions/${ID}/approve`,
   ])('recusa o caminho %s', (path) => {
     expect(isAllowedControlPutPath(path)).toBe(false);
   });

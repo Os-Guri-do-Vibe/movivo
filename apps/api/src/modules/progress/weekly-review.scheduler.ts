@@ -15,6 +15,8 @@ import { mondayOf } from '../planning/calc/week-planner';
 import { todayIn } from '../planning/plan-generation.service';
 import { loadEligibleStudents, localParts } from '../training/eligibility';
 import { GoalProgressService } from './goal-progress.service';
+import { previousMonth } from './monthly-report';
+import { MonthlyReportService } from './monthly-report.service';
 import { PreferenceExtractionService } from './preference-extraction.service';
 import { WeeklyReviewService } from './weekly-review.service';
 
@@ -31,6 +33,7 @@ export class WeeklyReviewScheduler implements OnModuleInit {
     private readonly reviews: WeeklyReviewService,
     private readonly preferences: PreferenceExtractionService,
     private readonly goals: GoalProgressService,
+    private readonly monthly: MonthlyReportService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REDIS_KEY_BUILDER) private readonly keys: RedisKeyBuilder,
     private readonly logger: PinoLogger,
@@ -100,6 +103,18 @@ export class WeeklyReviewScheduler implements OnModuleInit {
         'extração de preferências falhou',
       );
     }
-    return { review: review.status, preferences };
+    // Primeira segunda-feira do mês: também vai o relatório do mês que fechou.
+    let monthlyReport = false;
+    if (Number(today.slice(8, 10)) <= 7) {
+      try {
+        monthlyReport = await this.monthly.send(userId, previousMonth(today));
+      } catch (err: unknown) {
+        this.logger.warn(
+          { userId, err, event: 'monthly_report_failed' },
+          'relatório mensal falhou',
+        );
+      }
+    }
+    return { review: review.status, preferences, monthlyReport };
   }
 }

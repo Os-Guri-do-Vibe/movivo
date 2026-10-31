@@ -12,6 +12,7 @@ export const KIND_LABEL: Record<ExceptionListItem['kind'], string> = {
   STUDENT_REVIEW_REQUEST: 'Aluno pediu revisão',
   DECISION_FAILURE: 'Falha ao executar',
   CONVERSATION_TAKEOVER: 'Conversa assumida',
+  MEDICAL_EXAM: 'Exame enviado',
 };
 
 export const DOMAIN_LABEL: Record<ExceptionDomain, string> = {
@@ -29,6 +30,19 @@ export const PRIORITY_LABEL: Record<ExceptionListItem['priority'], string> = {
 };
 
 export const UNCERTAINTY_LABEL = { LOW: 'baixa', MEDIUM: 'média', HIGH: 'alta' } as const;
+
+/** Como o caso foi encerrado. */
+export const OUTCOME_LABEL: Record<string, string> = {
+  APPROVED: 'Aprovado',
+  REJECTED: 'Recusado',
+  RESOLVED: 'Encerrado',
+  ADJUSTMENT_REQUESTED: 'Ajuste pedido aos agentes (um novo protocolo volta para a fila)',
+};
+
+/** Ações cuja proposta é um protocolo inteiro, revisado na própria tela do caso. */
+export function isProtocolAction(action: Record<string, unknown>): boolean {
+  return action.type === 'PUBLISH_TRAINING_PLAN' || action.type === 'PUBLISH_NUTRITION_PLAN';
+}
 
 export function goalLabel(primary: unknown): string | null {
   return typeof primary === 'string' && primary in DECLARED_GOAL_LABELS
@@ -68,6 +82,12 @@ export function describeAction(action: Record<string, unknown>): string {
       return `Enviar ao aluno: “${String(action.text)}”`;
     case 'ASK_STUDENT':
       return `Perguntar ao aluno: “${String(action.question)}”`;
+    case 'PUBLISH_TRAINING_PLAN':
+      return 'Publicar o protocolo de treino abaixo e enviá-lo ao aluno.';
+    case 'PUBLISH_NUTRITION_PLAN':
+      return 'Publicar o protocolo alimentar abaixo e enviá-lo ao aluno.';
+    case 'DEFINE_STRATEGY':
+      return 'Definir a estratégia do objetivo do aluno.';
     default:
       return String(action.type ?? 'Ação desconhecida');
   }

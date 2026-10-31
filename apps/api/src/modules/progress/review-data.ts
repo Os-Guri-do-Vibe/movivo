@@ -1,10 +1,11 @@
 /** Números das semanas fechadas de um aluno, lidos do banco (leitura sob RLS do titular). */
 import { and, eq, gte, inArray, lte } from 'drizzle-orm';
 
-import type { WeekMetrics } from '@movivo/shared';
+import type { CheckInAnswers, WeekMetrics } from '@movivo/shared';
 
 import {
   bodyMeasurements,
+  checkIns as checkInsTable,
   foodLogs,
   planSessions,
   scheduledSessions,
@@ -25,6 +26,7 @@ const empty = (weekStart: string): WeekMetrics => ({
   painReports: 0,
   foodLogDays: 0,
   weightKg: null,
+  checkIn: null,
 });
 
 /**
@@ -142,5 +144,41 @@ export async function collectWeeks(
     const week = of(row.on);
     if (week) week.weightKg = row.value;
   }
+
+  const checkIns = await tx
+    .select({ answers: checkInsTable.answers, answeredAt: checkInsTable.answeredAt })
+    .from(checkInsTable)
+    .where(
+      and(
+        eq(checkInsTable.userId, userId),
+        eq(checkInsTable.status, 'ANSWERED'),
+        gte(checkInsTable.answeredAt, new Date(`${from}T00:00:00Z`)),
+        lte(checkInsTable.answeredAt, new Date(`${to}T23:59:59Z`)),
+      ),
+    )
+    .orderBy(checkInsTable.answeredAt);
+  for (const row of checkIns) {
+    const week = row.answeredAt && of(row.answeredAt.toISOString().slice(0, 10));
+    if (week && row.answers) week.checkIn = checkInOf(row.answers);
+  }
   return starts.map((start) => weeks.get(start) ?? empty(start));
+}
+
+function checkInOf(answers: CheckInAnswers): NonNullable<WeekMetrics['checkIn']> {
+  const scale = (key: string) => {
+    const value = answers[key];
+    return typeof value === 'number' && value >= 1 && value <= 5 ? Math.round(value) : null;
+  };
+  const choice = (key: string) => {
+    const value = answers[key];
+    return typeof value === 'string' && value.trim() ? value.trim().slice(0, 80) : null;
+  };
+  return {
+    energy: scale('energy'),
+    sleep: scale('sleep'),
+    soreness: scale('soreness'),
+    intensityFeel: choice('intensity_feel'),
+    barrier: choice('barrier'),
+    foodDifficulty: choice('food_difficulty'),
+  };
 }

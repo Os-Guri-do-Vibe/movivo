@@ -81,6 +81,8 @@ export const ControlCenterCapability = {
   AGENTS_READ: 'control_center.agents.read',
   /** Trocar a rota de um nível de modelo (provedor/modelo). */
   MODEL_TIERS_WRITE: 'control_center.agents.tiers.write',
+  /** Editar, testar e publicar a ficha dos agentes. Só `ADMIN` (via `ALL_CAPABILITIES`). */
+  AGENT_PROFILES_WRITE: 'control_center.agents.profiles.write',
 } as const;
 
 export type ControlCenterCapability =

@@ -129,6 +129,10 @@ export class WhatsappOutboundWorker implements OnModuleInit {
     // (o worker da conversa e a API do painel); gravar de novo duplicaria.
     const alreadyRecorded = type === 'CONVERSATION_MESSAGE' || type === 'MANUAL_MESSAGE';
     await this.sendBubbles(text, phone, job.data, alreadyRecorded ? undefined : userId);
+    for (const document of job.data.documents ?? []) {
+      await this.transport.sendDocument?.(phone, document.url, document.caption, document.fileName);
+      await this.recordOutbound(userId, `[PDF] ${document.caption}`, type);
+    }
     await this.redis.set(markerKey, '1', 'EX', SENT_MARKER_TTL_SECONDS);
     return { status: 'SENT' };
   }

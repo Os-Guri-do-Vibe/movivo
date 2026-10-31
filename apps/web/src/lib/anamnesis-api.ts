@@ -26,7 +26,7 @@ import { getFirstTouch } from './first-touch';
 const BASE = '/api/anamnesis';
 
 export interface ConsentItemView {
-  type: 'TERMS_OF_SERVICE' | 'HEALTH_DATA' | 'AI_DISCLOSURE' | 'MARKETING';
+  type: 'TERMS_OF_SERVICE' | 'HEALTH_DATA' | 'AI_DISCLOSURE' | 'MARKETING' | 'BODY_PHOTOS';
   version: string;
   title: string | null;
   body: readonly string[];
@@ -45,6 +45,12 @@ export interface SessionView {
   consents: ConsentItemView[];
   /** Anamnese complementar: os textos vigentes ainda precisam ser aceitos nesta sessão. */
   consentsPending: boolean;
+  /** Consentimento próprio das fotos do corpo (pedido só a quem decide enviar fotos). */
+  bodyPhotosConsent: ConsentItemView;
+  /** O texto vigente do consentimento das fotos já foi aceito nesta sessão. */
+  bodyPhotosConsentAccepted: boolean;
+  /** Posições que já têm foto enviada (FRONT, RIGHT, BACK, LEFT). */
+  photos: string[];
   /** Parte COMUM de cada etapa (a sensível nunca volta). Chaves: registration, goals… */
   blocks: Record<string, unknown>;
   outcome: OnboardingOutcome | null;
@@ -68,6 +74,7 @@ export interface SubmitResult {
   outcome: OnboardingOutcome;
 }
 
+/** `status` 0 = a requisição nem chegou ao servidor (sem rede ou tempo esgotado). */
 class AnamnesisApiError extends Error {
   constructor(
     public readonly status: number,
@@ -84,16 +91,84 @@ export function isSessionReplaced(error: unknown): boolean {
 
 export const SESSION_REPLACED_MESSAGE =
   'Um novo cadastro foi aberto em outra aba. Recarregue a página para continuar por ele.';
+const SESSION_EXPIRED_MESSAGE =
+  'Sua sessão expirou. Recarregue a página para recomeçar o formulário.';
+const NETWORK_MESSAGE =
+  'Não conseguimos falar com a MOVIVO. Confira sua conexão com a internet e tente de novo.';
+const RATE_LIMIT_MESSAGE =
+  'Muitas tentativas em pouco tempo. Por segurança, espere alguns minutos e tente de novo.';
+const SERVER_MESSAGE =
+  'Estamos com uma instabilidade agora. O que você já salvou não se perde: tente de novo em instantes.';
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-  });
+/**
+ * Mensagem em PT-BR para o aluno a partir de uma falha da API. Só os textos que a API escreve
+ * à mão (conflito, idade, limites de tentativa) são repassados; erro de schema (400) usa o
+ * `fallback` da tela, a não ser que `trustBadRequest` diga que o 400 daquela rota é redigido.
+ */
+export function describeAnamnesisError(
+  error: unknown,
+  fallback: string,
+  { trustBadRequest = false }: { trustBadRequest?: boolean } = {},
+): string {
+  if (!(error instanceof AnamnesisApiError)) return fallback;
+  const serverText = error.issues[0];
+  switch (error.status) {
+    case 0:
+      return NETWORK_MESSAGE;
+    case 400:
+      return (trustBadRequest && serverText) || fallback;
+    case 403:
+    case 409:
+    case 422:
+      return serverText ?? fallback;
+    case 404:
+    case 410:
+      return SESSION_EXPIRED_MESSAGE;
+    case SESSION_REPLACED_STATUS:
+      return SESSION_REPLACED_MESSAGE;
+    case 413:
+      return 'A imagem passa de 5 MB. Escolha uma foto menor.';
+    case 415:
+      return 'Use uma imagem JPG, PNG ou WebP.';
+    case 429:
+      return RATE_LIMIT_MESSAGE;
+    default:
+      return error.status >= 500 ? SERVER_MESSAGE : fallback;
+  }
+}
+
+/** Tempo máximo de uma chamada antes de o aluno ver a mensagem de conexão. */
+const REQUEST_TIMEOUT_MS = 30_000;
+const UPLOAD_TIMEOUT_MS = 90_000;
+const MAX_ISSUE_LENGTH = 300;
+
+/** Só texto, curto e em quantidade limitada: a resposta de erro nunca vira HTML nem log. */
+function readIssues(body: unknown): string[] {
+  const message = (body as { message?: unknown } | null)?.message;
+  return [message]
+    .flat()
+    .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    .slice(0, 5)
+    .map((item) => item.trim().slice(0, MAX_ISSUE_LENGTH));
+}
+
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', ...init?.headers },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch {
+    throw new AnamnesisApiError(0, []);
+  }
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { message?: string | string[] } | null;
-    const issues = body?.message ? [body.message].flat() : [];
-    throw new AnamnesisApiError(res.status, issues);
+    throw new AnamnesisApiError(res.status, readIssues(await res.json().catch(() => null)));
   }
   return (await res.json().catch(() => ({}))) as T;
 }
@@ -138,7 +213,7 @@ export function getSession(): Promise<SessionEntry> {
   return request<SessionEntry>('/session', { cache: 'no-store' });
 }
 
-export type OnboardingStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+export type OnboardingStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 export function patchStep(
   ref: string,
@@ -161,6 +236,28 @@ export function recordConsents(
   consents: { type: string; version: string; accepted: boolean }[],
 ): Promise<void> {
   return write('POST', '/session/consents', ref, { consents });
+}
+
+export type PhotoAngleKey = 'FRONT' | 'RIGHT' | 'BACK' | 'LEFT';
+
+/** Envia (ou substitui) a foto da posição; os bytes seguem como imagem, não como JSON. */
+export function uploadBodyPhoto(ref: string, angle: PhotoAngleKey, file: File): Promise<void> {
+  return request<void>(
+    `/session/photo/${angle}`,
+    {
+      method: 'PUT',
+      headers: { [ANAMNESIS_REF_HEADER]: ref, 'Content-Type': file.type },
+      body: file,
+    },
+    UPLOAD_TIMEOUT_MS,
+  );
+}
+
+export function deleteBodyPhoto(ref: string, angle: PhotoAngleKey): Promise<void> {
+  return request<void>(`/session/photo/${angle}`, {
+    method: 'DELETE',
+    headers: { [ANAMNESIS_REF_HEADER]: ref },
+  });
 }
 
 export function submitAnamnesis(ref: string): Promise<SubmitResult> {
@@ -248,6 +345,16 @@ export function isPhoneComplete(iso: PhoneCountryIso, masked: string): boolean {
   const expected = mobileDigitLength(iso);
   if (expected !== undefined && digits.length < expected) return false;
   return isPossiblePhoneNumber(digits, iso) && isValidPhoneNumber(digits, iso);
+}
+
+/** Já tem dígitos suficientes para um celular do país e, mesmo assim, não é um número válido. */
+export function isPhoneInvalid(iso: PhoneCountryIso, masked: string): boolean {
+  const digits = masked.replace(/\D/g, '');
+  if (digits.length === 0 || isPhoneComplete(iso, masked)) return false;
+  const expected = mobileDigitLength(iso);
+  return expected !== undefined
+    ? digits.length >= expected
+    : validatePhoneNumberLength(digits, iso) === undefined;
 }
 
 /** DDI selecionado + dígitos nacionais → E.164. */

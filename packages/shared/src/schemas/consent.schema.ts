@@ -42,12 +42,19 @@ export const CONSENT_VERSIONS = {
   MARKETING: 'consent-marketing-2026-08-v3',
   TERMS_OF_SERVICE: 'terms-2026-10-v2',
   AI_DISCLOSURE: 'ai-disclosure-2026-10-v2',
+  BODY_PHOTOS: 'consent-body-photos-2026-10-v1',
+  MENSTRUAL_CYCLE: 'consent-menstrual-cycle-2026-10-v1',
 } as const;
 
 export type ConsentTypeWithText = keyof typeof CONSENT_VERSIONS;
 
 /** Tipos que aceitam revogação. `AI_DISCLOSURE` fica de fora por natureza jurídica (§5.4). */
-export const REVOCABLE_CONSENT_TYPES = ['HEALTH_DATA', 'MARKETING'] as const;
+export const REVOCABLE_CONSENT_TYPES = [
+  'HEALTH_DATA',
+  'MARKETING',
+  'BODY_PHOTOS',
+  'MENSTRUAL_CYCLE',
+] as const;
 export type RevocableConsentType = (typeof REVOCABLE_CONSENT_TYPES)[number];
 
 export function isRevocableConsent(type: ConsentTypeWithText): type is RevocableConsentType {
@@ -101,7 +108,8 @@ export const WHATSAPP_OPERATIONAL_NOTICE = {
  * Corpo + label de cada consentimento, na versão correspondente acima.
  *
  * A ordem das chaves é a ordem de exibição na Etapa 1 (§5.8): Termos → Saúde →
- * Ciência de IA → Marketing (opcional, visualmente separado).
+ * Ciência de IA → Marketing (opcional, visualmente separado). As fotos do corpo ficam por último e
+ * NÃO aparecem na etapa 1: são pedidas só a quem decide enviar fotos.
  */
 export const CONSENT_TEXTS = {
   TERMS_OF_SERVICE: {
@@ -150,6 +158,45 @@ export const CONSENT_TEXTS = {
     /** Opcional: jamais condiciona o avanço do formulário (art. 9º, §3º). */
     required: false,
   },
+  /**
+   * Fotos do corpo (avaliação corporal opcional). Consentimento PRÓPRIO e destacado, pedido
+   * só quando o aluno decide enviar fotos: nunca condiciona o avanço do formulário e não é
+   * mostrado na etapa de cadastro. Rascunho sujeito a revisão jurídica antes de ir ao ar.
+   */
+  BODY_PHOTOS: {
+    version: CONSENT_VERSIONS.BODY_PHOTOS,
+    title: 'Sobre as fotos do seu corpo',
+    body: [
+      'As fotos do corpo (frontal, lados e costas) são opcionais. Elas servem para acompanhar a sua evolução ao longo do tempo e, quando você pedir ou aceitar, para uma estimativa visual de composição corporal, sempre em faixa e com margem de erro, nunca como diagnóstico.',
+      '**Quem acessa:** você e os profissionais da MOVIVO responsáveis pelo seu acompanhamento, conforme a área de cada caso. As fotos são armazenadas criptografadas e nunca são usadas em divulgação, nem compartilhadas com terceiros.',
+      '**Por quanto tempo:** enquanto você for cliente e, depois, pelo prazo legal necessário (até 5 anos). Você pode apagar as suas fotos quando quiser.',
+      '**Você no controle:** pode revogar esta autorização a qualquer momento, sem custo, pelo WhatsApp da MOVIVO ou pelo e-mail do nosso Encarregado de Dados. A revogação apaga as fotos já enviadas e impede novos envios.',
+    ],
+    label:
+      'Autorizo a MOVIVO a armazenar e tratar as fotos do meu corpo para acompanhar a minha evolução, conforme descrito acima e na Política de Privacidade.',
+    /** Opcional: só é pedido a quem envia fotos. */
+    required: false,
+  },
+  /**
+   * Registro do ciclo menstrual. Consentimento PRÓPRIO, pedido e aceito só pelo WhatsApp
+   * (frase `AUTORIZO CICLO`), nunca no cadastro. Rascunho sujeito a revisão jurídica antes de
+   * ir ao ar.
+   */
+  MENSTRUAL_CYCLE: {
+    version: CONSENT_VERSIONS.MENSTRUAL_CYCLE,
+    title: 'Sobre o registro do seu ciclo menstrual',
+    body: [
+      'O registro do ciclo menstrual é opcional. Quando você conta pelo WhatsApp que a sua menstruação começou, guardamos a data para entender como você se sente ao longo do ciclo e adaptar intensidade, recuperação e alimentação ao que você relatar.',
+      '**Quem acessa:** você e os profissionais da MOVIVO responsáveis pelo seu acompanhamento. A inteligência artificial usa essa informação como ferramenta de apoio, dentro das regras publicadas pelos profissionais. A fase do ciclo é uma estimativa pelo calendário, não uma avaliação médica.',
+      '**Como protegemos:** as datas são criptografadas e nunca são compartilhadas com terceiros nem usadas em divulgação.',
+      '**Por quanto tempo:** enquanto você for cliente e mantiver esta autorização.',
+      '**Você no controle:** pode revogar quando quiser, sem custo. No WhatsApp da MOVIVO, envie exatamente “REVOGAR CICLO”. A revogação apaga as datas registradas e interrompe novos registros.',
+    ],
+    label:
+      'Autorizo a MOVIVO a registrar as datas do meu ciclo menstrual para adaptar o meu acompanhamento, conforme descrito acima e na Política de Privacidade.',
+    /** Opcional: só existe para quem decide registrar o ciclo. */
+    required: false,
+  },
 } as const;
 
 /** Tipos obrigatórios para o `CONTINUAR` da Etapa 1 (§5.8). */
@@ -164,7 +211,7 @@ export const REQUIRED_CONSENT_TYPES = (Object.keys(CONSENT_TEXTS) as ConsentType
  * no servidor. Aceitá-los do cliente permitiria forjar a origem da prova.
  */
 export const recordConsentSchema = z.object({
-  type: z.enum(['HEALTH_DATA', 'MARKETING', 'TERMS_OF_SERVICE', 'AI_DISCLOSURE']),
+  type: z.enum(['HEALTH_DATA', 'MARKETING', 'TERMS_OF_SERVICE', 'AI_DISCLOSURE', 'BODY_PHOTOS']),
   /** A versão que a UI exibiu. O servidor recusa se divergir da vigente. */
   version: z.string().min(1).max(40),
   accepted: z.boolean(),
@@ -172,9 +219,9 @@ export const recordConsentSchema = z.object({
 
 export type RecordConsentInput = z.infer<typeof recordConsentSchema>;
 
-/** Aceita o lote da Etapa 1 — até 4 itens (§5.8, regra nova 3). */
+/** Aceita o lote da Etapa 1 — até 5 itens (§5.8, regra nova 3; as fotos entram depois, sozinhas). */
 export const recordConsentsSchema = z.object({
-  consents: z.array(recordConsentSchema).min(1).max(4),
+  consents: z.array(recordConsentSchema).min(1).max(5),
 });
 
 export type RecordConsentsInput = z.infer<typeof recordConsentsSchema>;

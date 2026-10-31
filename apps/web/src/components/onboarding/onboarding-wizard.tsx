@@ -2,34 +2,45 @@
 
 import * as React from 'react';
 
-import { PARQ_DECLARATIONS_VERSION, PARQ_VERSION, type BiologicalSex } from '@movivo/shared';
+import {
+  biologicalSexSchema,
+  ONBOARDING_STEP_SCHEMAS,
+  PARQ_DECLARATIONS_VERSION,
+  PARQ_QUESTION_IDS,
+  PARQ_VERSION,
+} from '@movivo/shared';
 
 import {
-  AnamnesisApiError,
-  isSessionReplaced,
+  deleteBodyPhoto,
+  describeAnamnesisError,
   parsePhoneE164,
   patchStep,
   recordConsents,
-  SESSION_REPLACED_MESSAGE,
   submitAnamnesis,
   toE164,
+  uploadBodyPhoto,
   type OnboardingStep,
   type SessionView,
 } from '@/lib/anamnesis-api';
 
+import type { BodyPhotos } from './body-photos';
+import type { PoseAngle } from './pose-guide';
 import {
   bodyPayload,
+  EMPTY_PAIN,
   goalsFromBlock,
   goalsPayload,
   modalitiesFromBlock,
   modalitiesPayload,
   nutritionFromBlock,
   nutritionPayload,
+  painPayload,
   preferencesFromBlock,
   preferencesPayload,
   routineFromBlock,
   routinePayload,
   type BodyDraft,
+  type CoachedModalityKey,
 } from './onboarding-drafts';
 import { ProgressBar } from './progress-bar';
 import { ComplementaryConsents } from './complementary-consents';
@@ -38,6 +49,7 @@ import { StepBody } from './step-body';
 import { StepGoals } from './step-goals';
 import { StepModalities } from './step-modalities';
 import { StepNutrition } from './step-nutrition';
+import { StepPain } from './step-pain';
 import { StepPreferences } from './step-preferences';
 import { StepRoutine } from './step-routine';
 import { Step3Parq, EMPTY_PARQ, type ParqState } from './step3-parq';
@@ -51,7 +63,7 @@ function step1FromServer(raw: unknown): Partial<Step1Data> {
   return {
     name: typeof r.name === 'string' ? r.name : undefined,
     birthDate: typeof r.birthDate === 'string' ? r.birthDate : undefined,
-    biologicalSex: (r.biologicalSex as BiologicalSex | undefined) ?? undefined,
+    biologicalSex: biologicalSexSchema.safeParse(r.biologicalSex).data,
     heightCm: typeof r.heightCm === 'number' ? String(r.heightCm) : undefined,
     weightKg: typeof r.weightKg === 'number' ? String(r.weightKg) : undefined,
     phoneCountryIso: parsedPhone?.countryIso,
@@ -68,13 +80,16 @@ function todayIso(): string {
   return `${now.getFullYear()}-${month}-${day}`;
 }
 
+const INVALID_PAYLOAD_MESSAGE =
+  'Algumas respostas estão incompletas ou fora do formato esperado. Confira os campos desta etapa e tente de novo.';
+
 /** Primeira etapa que ainda não foi salva (a retomada abre nela). */
 function firstPendingStep(session: SessionView): OnboardingStep {
   const first = session.flow === 'COMPLEMENTARY' ? 2 : 1;
-  for (let step = first; step <= 7; step += 1) {
+  for (let step = first; step <= 8; step += 1) {
     if (!session.completedSteps.includes(step)) return step as OnboardingStep;
   }
-  return 8;
+  return 9;
 }
 
 export function OnboardingWizard({
@@ -115,33 +130,47 @@ export function OnboardingWizard({
   const [preferences, setPreferences] = React.useState(() =>
     preferencesFromBlock(initial.blocks.preferences),
   );
-  const [parqAnswers, setParqAnswers] = React.useState<ParqState>(EMPTY_PARQ);
-  const [declarations, setDeclarations] = React.useState<Set<string>>(new Set());
+  const [pain, setPain] = React.useState(EMPTY_PAIN);
   const [nutrition, setNutrition] = React.useState(() =>
     nutritionFromBlock(initial.blocks.nutrition),
   );
   const [body, setBody] = React.useState<BodyDraft>({});
+  const [bodyPhotos, setBodyPhotos] = React.useState<BodyPhotos>({});
+  const [sentPhotos, setSentPhotos] = React.useState<PoseAngle[]>(
+    () => initial.photos as PoseAngle[],
+  );
+  const [photosConsentAccepted, setPhotosConsentAccepted] = React.useState(
+    initial.bodyPhotosConsentAccepted,
+  );
+  const [parqAnswers, setParqAnswers] = React.useState<ParqState>(EMPTY_PARQ);
+  const [declarations, setDeclarations] = React.useState<Set<string>>(new Set());
 
   const resumed = (n: number) => session.completedSteps.includes(n) && !answeredHere.has(n);
+  // Trava síncrona contra clique duplo: o `saving` do estado só vale no próximo render.
+  const inFlight = React.useRef(false);
 
-  function describeError(err: unknown, fallback: string): string {
-    if (isSessionReplaced(err)) return SESSION_REPLACED_MESSAGE;
-    if (err instanceof AnamnesisApiError) {
-      if (err.status === 409)
-        return (
-          err.issues[0] ??
-          'Este telefone ou e-mail já está cadastrado. Fale com a gente se precisar de ajuda.'
-        );
-      if (err.status === 410)
-        return 'Sua sessão expirou. Recarregue a página para recomeçar o formulário.';
-    }
-    return fallback;
+  /**
+   * Texto opcional em branco: se foi salvo nesta aba, o aluno o apagou (`""` apaga no servidor);
+   * numa etapa retomada ele nunca foi exibido, então fica omitido e o servidor mantém o salvo.
+   */
+  function withClearedTexts<T extends object>(step: number, payload: T, fields: string[]): T {
+    if (!answeredHere.has(step)) return payload;
+    const out: Record<string, unknown> = { ...(payload as Record<string, unknown>) };
+    for (const field of fields) if (out[field] === undefined) out[field] = '';
+    return out as T;
   }
 
   /** Salva uma etapa e vai para a seguinte (ou fica, se `advance` for falso). */
   async function save(target: OnboardingStep, payload: unknown, next: OnboardingStep | null) {
-    setSaving(true);
+    if (inFlight.current) return false;
     setError(null);
+    // O servidor é a autoridade; aqui só se evita mandar o que ele recusaria com erro genérico.
+    if (!ONBOARDING_STEP_SCHEMAS[target].safeParse(payload).success) {
+      setError(INVALID_PAYLOAD_MESSAGE);
+      return false;
+    }
+    inFlight.current = true;
+    setSaving(true);
     try {
       await patchStep(sessionRef, target, payload);
       setAnsweredHere((prev) => new Set(prev).add(target));
@@ -153,18 +182,20 @@ export function OnboardingWizard({
       return true;
     } catch (err) {
       setError(
-        describeError(
+        describeAnamnesisError(
           err,
           'Não conseguimos salvar suas respostas. Confira os campos e tente de novo.',
         ),
       );
       return false;
     } finally {
+      inFlight.current = false;
       setSaving(false);
     }
   }
 
   async function handleRegistration() {
+    if (inFlight.current) return;
     setSaving(true);
     setError(null);
     try {
@@ -175,7 +206,7 @@ export function OnboardingWizard({
           .map((c) => ({ type: c.type, version: c.version, accepted: true })),
       );
     } catch (err) {
-      setError(describeError(err, 'Não conseguimos registrar os aceites. Tente de novo.'));
+      setError(describeAnamnesisError(err, 'Não conseguimos registrar os aceites. Tente de novo.'));
       setSaving(false);
       return;
     }
@@ -183,13 +214,13 @@ export function OnboardingWizard({
     await save(
       1,
       {
-        name: step1.name.trim(),
+        name: step1.name.trim().replace(/\s+/g, ' '),
         birthDate: step1.birthDate,
         biologicalSex: step1.biologicalSex,
         heightCm: Number(step1.heightCm),
         weightKg: Number(step1.weightKg.replace(',', '.')),
         phoneNumber: toE164(step1.phoneCountryIso, step1.phoneMasked),
-        email: step1.email.trim(),
+        email: step1.email.trim().toLowerCase(),
       },
       2,
     );
@@ -205,42 +236,91 @@ export function OnboardingWizard({
       );
       setSession((prev) => ({ ...prev, consentsPending: false }));
     } catch (err) {
-      setError(describeError(err, 'Não conseguimos registrar os aceites. Tente de novo.'));
+      setError(describeAnamnesisError(err, 'Não conseguimos registrar os aceites. Tente de novo.'));
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleParq() {
-    await save(
-      6,
+  /** Consentimento próprio das fotos: aceitar ou retirar é registrado na hora. */
+  async function setPhotosConsent(accepted: boolean) {
+    const consent = session.bodyPhotosConsent;
+    await recordConsents(sessionRef, [{ type: consent.type, version: consent.version, accepted }]);
+    setPhotosConsentAccepted(accepted);
+    if (!accepted) {
+      // Retirar o aceite apaga as fotos já enviadas (o servidor faz o mesmo).
+      setBodyPhotos({});
+      setSentPhotos([]);
+    }
+  }
+
+  async function uploadPhoto(angle: PoseAngle, file: File) {
+    await uploadBodyPhoto(sessionRef, angle, file);
+    setBodyPhotos((prev) => ({ ...prev, [angle]: file }));
+    setSentPhotos((prev) => (prev.includes(angle) ? prev : [...prev, angle]));
+  }
+
+  async function removePhoto(angle: PoseAngle) {
+    await deleteBodyPhoto(sessionRef, angle);
+    setBodyPhotos((prev) => {
+      const next = { ...prev };
+      delete next[angle];
+      return next;
+    });
+    setSentPhotos((prev) => prev.filter((a) => a !== angle));
+  }
+
+  /** Medidas e fotos (opcionais): salva e segue para o PAR-Q, que é sempre a última parte. */
+  async function handleBody(withMeasurements: boolean) {
+    if (!withMeasurements) {
+      setStep(9);
+      return;
+    }
+    await save(8, bodyPayload(body, todayIso()), 9);
+  }
+
+  /** PAR-Q: salva a última etapa e envia a anamnese inteira. */
+  async function handleParqAndFinish() {
+    const pending = PARQ_QUESTION_IDS.findIndex((id) => parqAnswers[id].answer === undefined);
+    if (pending >= 0) {
+      setError(`Responda a pergunta ${pending + 1} do questionário antes de finalizar.`);
+      return;
+    }
+    const saved = await save(
+      9,
       {
         parq: {
           version: PARQ_VERSION,
-          answers: Object.entries(parqAnswers).map(([questionId, a]) => ({
-            questionId,
-            answer: a.answer === true,
-            detail: a.detail.trim() || undefined,
-          })),
+          answers: PARQ_QUESTION_IDS.map((questionId) => {
+            const a = parqAnswers[questionId];
+            return {
+              questionId,
+              answer: a.answer === true,
+              // O detalhe só acompanha um "Sim": trocar para "Não" descarta o que foi escrito.
+              detail: (a.answer === true && a.detail.trim()) || undefined,
+            };
+          }),
         },
         declarationsVersion: PARQ_DECLARATIONS_VERSION,
         declarations: [...declarations],
       },
-      7,
+      null,
     );
-  }
-
-  async function handleFinish(withMeasurements: boolean) {
-    if (withMeasurements && !(await save(8, bodyPayload(body, todayIso()), null))) return;
+    if (!saved || inFlight.current) return;
+    inFlight.current = true;
     setSaving(true);
     setError(null);
     try {
       setOutcome((await submitAnamnesis(sessionRef)).outcome);
     } catch (err) {
       setError(
-        describeError(err, 'Não conseguimos enviar suas respostas. Tente de novo em instantes.'),
+        describeAnamnesisError(
+          err,
+          'Não conseguimos enviar suas respostas. Tente de novo em instantes.',
+        ),
       );
     } finally {
+      inFlight.current = false;
       setSaving(false);
     }
   }
@@ -250,6 +330,9 @@ export function OnboardingWizard({
   }
 
   const back = (target: OnboardingStep) => (step > firstStep ? () => setStep(target) : undefined);
+  // Anamnese complementar: nenhuma etapa abre antes do novo aceite dos textos vigentes.
+  const blockedByConsents = complementary && session.consentsPending;
+  const strengthSelected = modalities.modalities.STRENGTH.selected;
 
   return (
     <div className="flex flex-col gap-6">
@@ -258,7 +341,7 @@ export function OnboardingWizard({
         completedSteps={session.completedSteps}
         firstStep={firstStep}
         context={
-          step === 6
+          step === 9
             ? parqScreen < 0
               ? 'Introdução'
               : parqScreen < 9
@@ -309,7 +392,7 @@ export function OnboardingWizard({
         />
       )}
 
-      {complementary && session.consentsPending && (
+      {blockedByConsents && (
         <ComplementaryConsents
           consents={session.consents}
           saving={saving}
@@ -317,18 +400,20 @@ export function OnboardingWizard({
         />
       )}
 
-      {step === 2 && !(complementary && session.consentsPending) && (
+      {!blockedByConsents && step === 2 && (
         <StepGoals
           data={goals}
           onChange={setGoals}
-          onContinue={() => void save(2, goalsPayload(goals), 3)}
+          onContinue={() =>
+            void save(2, withClearedTexts(2, goalsPayload(goals), ['motivation']), 3)
+          }
           onBack={back(1)}
           saving={saving}
           resumed={resumed(2)}
         />
       )}
 
-      {step === 3 && (
+      {!blockedByConsents && step === 3 && (
         <StepModalities
           data={modalities}
           onChange={setModalities}
@@ -338,9 +423,13 @@ export function OnboardingWizard({
         />
       )}
 
-      {step === 4 && (
+      {!blockedByConsents && step === 4 && (
         <StepRoutine
           data={routine}
+          modalities={(Object.keys(modalities.modalities) as CoachedModalityKey[]).filter(
+            (key) => modalities.modalities[key].selected,
+          )}
+          externalSports={modalities.externalSports.flatMap((s) => (s.sport ? [s.sport] : []))}
           onChange={setRoutine}
           onContinue={() => void save(4, routinePayload(routine), 5)}
           onBack={back(3)}
@@ -348,18 +437,73 @@ export function OnboardingWizard({
         />
       )}
 
-      {step === 5 && (
+      {!blockedByConsents && step === 5 && (
         <StepPreferences
           data={preferences}
           onChange={setPreferences}
-          onContinue={() => void save(5, preferencesPayload(preferences), 6)}
+          onContinue={() =>
+            void save(
+              5,
+              preferencesPayload(
+                strengthSelected ? preferences : { ...preferences, muscleEmphasis: [] },
+              ),
+              6,
+            )
+          }
           onBack={back(4)}
           saving={saving}
           resumed={resumed(5)}
+          strengthSelected={strengthSelected}
         />
       )}
 
-      {step === 6 && (
+      {!blockedByConsents && step === 6 && (
+        <StepPain
+          data={pain}
+          onChange={setPain}
+          onContinue={() => void save(6, painPayload(pain), 7)}
+          onBack={back(5)}
+          saving={saving}
+          resumed={resumed(6)}
+        />
+      )}
+
+      {!blockedByConsents && step === 7 && (
+        <StepNutrition
+          data={nutrition}
+          onChange={setNutrition}
+          onContinue={() =>
+            void save(
+              7,
+              withClearedTexts(7, nutritionPayload(nutrition), ['likedFoods', 'dislikedFoods']),
+              8,
+            )
+          }
+          onBack={back(6)}
+          saving={saving}
+          resumed={resumed(7)}
+        />
+      )}
+
+      {!blockedByConsents && step === 8 && (
+        <StepBody
+          data={body}
+          photos={bodyPhotos}
+          sentAngles={sentPhotos}
+          photosConsent={session.bodyPhotosConsent}
+          photosConsentAccepted={photosConsentAccepted}
+          onChange={setBody}
+          sex={step1.biologicalSex}
+          onSetPhotosConsent={setPhotosConsent}
+          onUploadPhoto={uploadPhoto}
+          onRemovePhoto={removePhoto}
+          onFinish={(withMeasurements) => void handleBody(withMeasurements)}
+          onBack={back(7)}
+          saving={saving}
+        />
+      )}
+
+      {!blockedByConsents && step === 9 && (
         <Step3Parq
           answers={parqAnswers}
           onChange={(id, value) => setParqAnswers((prev) => ({ ...prev, [id]: value }))}
@@ -372,32 +516,11 @@ export function OnboardingWizard({
               return next;
             })
           }
-          onSubmit={() => void handleParq()}
-          onBack={back(5)}
+          onSubmit={() => void handleParqAndFinish()}
+          onBack={back(8)}
           initialScreen={parqScreen}
           onScreenChange={setParqScreen}
           submitting={saving}
-        />
-      )}
-
-      {step === 7 && (
-        <StepNutrition
-          data={nutrition}
-          onChange={setNutrition}
-          onContinue={() => void save(7, nutritionPayload(nutrition), 8)}
-          onBack={() => setStep(6)}
-          saving={saving}
-          resumed={resumed(7)}
-        />
-      )}
-
-      {step === 8 && (
-        <StepBody
-          data={body}
-          onChange={setBody}
-          onFinish={(withMeasurements) => void handleFinish(withMeasurements)}
-          onBack={() => setStep(7)}
-          saving={saving}
         />
       )}
     </div>

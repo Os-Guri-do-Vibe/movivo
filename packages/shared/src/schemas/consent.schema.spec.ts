@@ -76,11 +76,13 @@ describe('consentimento versionado (Alexandre §5 — onboarding v2)', () => {
   });
 
   it('aceita o lote de até 4 itens da Etapa 1', () => {
-    const consents = (Object.keys(CONSENT_TEXTS) as (keyof typeof CONSENT_TEXTS)[]).map((type) => ({
-      type,
-      version: CONSENT_TEXTS[type].version,
-      accepted: true,
-    }));
+    const consents = (Object.keys(CONSENT_TEXTS) as (keyof typeof CONSENT_TEXTS)[])
+      .filter((type) => type !== 'MENSTRUAL_CYCLE')
+      .map((type) => ({
+        type,
+        version: CONSENT_TEXTS[type].version,
+        accepted: true,
+      }));
     expect(recordConsentsSchema.safeParse({ consents }).success).toBe(true);
   });
 });

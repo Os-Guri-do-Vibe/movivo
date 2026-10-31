@@ -218,6 +218,8 @@ export const exceptionKindSchema = z.enum([
   'STUDENT_REVIEW_REQUEST',
   'DECISION_FAILURE',
   'CONVERSATION_TAKEOVER',
+  /** Exame enviado pelo aluno com ponto de atenção: o médico (CRM) lê a análise. */
+  'MEDICAL_EXAM',
 ]);
 export type ExceptionKind = z.infer<typeof exceptionKindSchema>;
 

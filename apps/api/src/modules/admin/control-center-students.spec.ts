@@ -140,6 +140,32 @@ function studentResults(withHealth: boolean) {
     : [];
   const rest = [
     [{ answeredAt: day(-3) }],
+    // Última revisão semanal com a leitura dos analistas: só para quem lê saúde.
+    ...(withHealth
+      ? [
+          [
+            {
+              weekStart: '2026-08-03',
+              status: 'ATTENTION',
+              record: {
+                status: 'ATTENTION',
+                summary: 'Adesão caiu nas duas últimas semanas.',
+                hypotheses: [],
+                interventions: [],
+                analyses: {
+                  recovery: null,
+                  habits: {
+                    status: 'ATTENTION',
+                    findings: [],
+                    strengths: [],
+                    focus: 'Priorizar a sessão-chave.',
+                  },
+                },
+              },
+            },
+          ],
+        ]
+      : []),
     [
       {
         createdAt: day(-22),
@@ -206,6 +232,11 @@ describe('ControlCenterService.student — ficha unificada', () => {
     const { data } = await service.student({ ...ACTOR, role: 'PROFESSIONAL' }, STUDENT_ID);
 
     expect(data.student.health?.parqState).toBe('CLEARED');
+    expect(data.student.followUp).toMatchObject({
+      status: 'ATTENTION',
+      recovery: null,
+      habits: { focus: 'Priorizar a sessão-chave.' },
+    });
     expect(data.student.health?.painReports).toEqual([
       expect.objectContaining({ text: 'KNEE: 4/10' }),
     ]);
@@ -226,6 +257,7 @@ describe('ControlCenterService.student — ficha unificada', () => {
     const { data } = await service.student({ ...ACTOR, role: 'SUPPORT' }, STUDENT_ID);
 
     expect(data.student.health).toBeNull();
+    expect(data.student.followUp).toBeNull();
     expect(data.student.exceptions).toEqual([]);
     expect(data.student.decisions).toEqual([]);
     expect(data.student.timeline.some((event) => event.code === 'EXCEPTION_OPENED')).toBe(false);

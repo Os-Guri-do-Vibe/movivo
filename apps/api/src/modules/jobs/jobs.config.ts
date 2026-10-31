@@ -41,6 +41,10 @@ export const QUEUE = {
   domainEvents: 'domain-events',
   // Geração do plano integrado (estratégia + treino + nutrição) depois do onboarding.
   planGeneration: 'plan-generation',
+  // Exame recebido no WhatsApp: leitura (visão) + comentário, fora do webhook.
+  medicalExam: 'medical-exam',
+  // Webhook do Strava: busca a atividade e registra o treino, fora da requisição.
+  wearableSync: 'wearable-sync',
   knowledgeProcessing: 'knowledge-processing',
   sanity: 'sanity',
   deadLetter: 'dead-letter',
@@ -130,6 +134,9 @@ export const QUEUE_REGISTRY: Readonly<Record<QueueName, QueueSpec>> = {
     lockMs: 600_000,
   },
   [QUEUE.sanity]: { attempts: 3, backoffMs: [50, 100, 200], concurrency: 2 },
+  // Duas chamadas de modelo (visão + raciocínio); a segunda tentativa cobre falha passageira.
+  [QUEUE.medicalExam]: { attempts: 2, backoffMs: [30_000], concurrency: 2, lockMs: 300_000 },
+  [QUEUE.wearableSync]: { attempts: 3, backoffMs: [10_000, 60_000, 300_000], concurrency: 3 },
   // DLQ é destino final: não retenta, não é reprocessada automaticamente.
   [QUEUE.deadLetter]: { attempts: 1, backoffMs: [], concurrency: 1 },
 } as const;

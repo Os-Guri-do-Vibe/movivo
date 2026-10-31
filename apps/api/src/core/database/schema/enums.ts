@@ -155,6 +155,10 @@ export const consentTypeEnum = pgEnum('consent_type', [
   // prova — versão + IP/UA + carimbo. **Não é revogável**: ver `ConsentService.revoke`.
   // `WHATSAPP_OPERATIONAL_NOTICE` NÃO entra aqui: é aviso, não aceite (§5.2).
   'AI_DISCLOSURE',
+  // Fotos do corpo (avaliação corporal opcional): consentimento próprio, pedido só a quem envia fotos.
+  'BODY_PHOTOS',
+  // Registro do ciclo menstrual: consentimento próprio, aceito só pelo WhatsApp (`record_user_consent`).
+  'MENSTRUAL_CYCLE',
 ]);
 
 // ---------------------------------------------------------------------------

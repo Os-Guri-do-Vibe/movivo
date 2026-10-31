@@ -13,7 +13,15 @@ import { and, asc, eq, gte, inArray } from 'drizzle-orm';
 import { Redis } from 'ioredis';
 import { PinoLogger } from 'nestjs-pino';
 
-import type { CoachingProposal, SafetySignal, SafetySignalKind, Weekday } from '@movivo/shared';
+import {
+  PERSONAS,
+  personaOf,
+  type CoachingProposal,
+  type PersonaKey,
+  type SafetySignal,
+  type SafetySignalKind,
+  type Weekday,
+} from '@movivo/shared';
 
 import type { AgentContextSources } from '../../core/agents/agent-context';
 import type { StateSlice } from '../../core/agents/agent-task';
@@ -141,8 +149,10 @@ export class ConversationOrchestrator {
     const sources = this.sources(userId, now);
     const stateRead = await this.state.read(userId, ALL_SLICES, now);
     const view = parseStateView(stateRead.slices as Record<string, unknown>);
-    const timezone = (stateRead.slices.identity as { timezone?: string | null } | undefined)
-      ?.timezone;
+    const identity = stateRead.slices.identity as
+      { timezone?: string | null; biologicalSex?: string | null } | undefined;
+    const timezone = identity?.timezone;
+    const persona = personaOf(identity?.biologicalSex);
     const today = todayIn(timezone ?? null, now);
     const weekday = WEEKDAYS[new Date(`${today}T00:00:00Z`).getUTCDay()] ?? 'MON';
 
@@ -219,14 +229,18 @@ export class ConversationOrchestrator {
         );
         return { status: 'ESCALATED', reply: msg.HUMAN_REVIEW_MESSAGE, intent: intent.intent };
       case 'GREETING':
-        return { status: 'INFORMED', reply: msg.GREETING_MESSAGE, intent: intent.intent };
+        return {
+          status: 'INFORMED',
+          reply: msg.greetingMessage(PERSONAS[persona]),
+          intent: intent.intent,
+        };
       case 'OUT_OF_SCOPE':
         return { status: 'INFORMED', reply: msg.OUT_OF_SCOPE_MESSAGE, intent: intent.intent };
       case 'TRAINING_QUESTION':
       case 'NUTRITION_QUESTION':
       case 'FOOD_DIFFICULTY':
       case 'MOTIVATION':
-        return this.answer(userId, text, intent, sources);
+        return this.answer(userId, text, intent, sources, persona);
     }
   }
 
@@ -464,6 +478,7 @@ export class ConversationOrchestrator {
     text: string,
     intent: ClassifyOutput,
     sources: AgentContextSources,
+    persona: PersonaKey,
   ): Promise<HandleResult> {
     const topic: 'TRAINING' | 'NUTRITION' | 'MOTIVATION' =
       intent.intent === 'TRAINING_QUESTION'
@@ -475,7 +490,7 @@ export class ConversationOrchestrator {
     const inputFlags = await this.guardrails.evaluate(text, '');
     const run = inputFlags.length
       ? null
-      : await this.runner.run(answerTask, { message: text, topic }, { userId, sources });
+      : await this.runner.run(answerTask, { message: text, topic }, { userId, sources, persona });
     const outputFlags = run ? await this.guardrails.evaluate('', run.output.reply) : [];
     if (!run || outputFlags.length > 0) {
       await this.openCase(

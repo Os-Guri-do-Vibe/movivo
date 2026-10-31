@@ -227,8 +227,9 @@ export class DecisionPipeline {
         | 'DECISION_FAILURE'
         | 'STUDENT_REVIEW_REQUEST'
         | 'NO_APPLICABLE_POLICY'
-        | 'CONVERSATION_TAKEOVER';
-      domain: 'TRAINING' | 'NUTRITION' | 'GENERAL';
+        | 'CONVERSATION_TAKEOVER'
+        | 'MEDICAL_EXAM';
+      domain: 'TRAINING' | 'NUTRITION' | 'MEDICAL' | 'GENERAL';
       summary: string;
       subject: Record<string, string>;
       priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';

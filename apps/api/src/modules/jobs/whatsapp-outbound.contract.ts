@@ -42,4 +42,6 @@ export interface WhatsappOutboundJob {
   /** `PHONE_VERIFICATION`: destino e código. Só neste tipo o telefone viaja no payload. */
   phoneNumber?: string;
   code?: string;
+  /** PDFs enviados depois do texto, na ordem (a EvolutionAPI baixa cada um pela URL). */
+  documents?: readonly { url: string; fileName: string; caption: string }[];
 }

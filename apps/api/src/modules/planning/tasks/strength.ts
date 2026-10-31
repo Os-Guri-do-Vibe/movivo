@@ -10,7 +10,11 @@ import { z } from 'zod';
 import { defineAgentTask, type Validator, type Violation } from '../../../core/agents/agent-task';
 import { strengthRules } from '../calc/params';
 import { blockOutputSchema, totalFrequency, type BlockOutput } from './blocks';
-import { outputLanguageViolations } from './common';
+import {
+  outputLanguageViolations,
+  PROFESSIONAL_INSTRUCTION_RULE,
+  professionalInstructionSchema,
+} from './common';
 
 export const strengthCandidateSchema = z.object({
   id: z.string().min(1).max(80),
@@ -38,6 +42,9 @@ export const strengthInputSchema = z.object({
   candidates: z.array(strengthCandidateSchema).min(8).max(160),
   /** Exercícios que o aluno gosta: preferir quando equivalentes. */
   preferredExerciseIds: z.array(z.string()).max(40),
+  /** Grupos musculares em que o aluno pediu mais ênfase (até 2 regiões). */
+  emphasisMuscleGroups: z.array(z.string().max(40)).max(6).optional(),
+  professionalInstruction: professionalInstructionSchema,
 });
 export type StrengthInput = z.infer<typeof strengthInputSchema>;
 
@@ -295,7 +302,9 @@ Regras de montagem:
 4. Cada sessão tem de caber em "minutesPerSession": séries × (execução + descanso) + aquecimento. Estime estimatedMinutes honestamente; estimatedRpe (CR-10) coerente com o esforço.
 5. Ordem: multiarticulares primeiro, isolados depois. Ofereça progressão clara em "notes" (como e quando subir carga) em linguagem simples.
 6. priority: marque como KEY as sessões que não podem faltar na semana (as de maior volume do foco principal). Exercício por tempo usa durationSeconds, nunca reps.
-7. phases descrevem o bloco (nome, foco, semanas; endsWithDeload quando a metodologia pedir recuperação). summary: 2 a 3 frases claras para o aluno, sem prometer resultado.`,
+7. Se "emphasisMuscleGroups" vier preenchida, dê a esses grupos mais volume e frequência, sempre DENTRO das faixas da metodologia e sem sacrificar os demais grupos principais.
+8. phases descrevem o bloco (nome, foco, semanas; endsWithDeload quando a metodologia pedir recuperação). summary: 2 a 3 frases claras para o aluno, sem prometer resultado.
+9. ${PROFESSIONAL_INSTRUCTION_RULE}`,
   tier: 'REASONING',
   methodology: ['STRENGTH'],
   state: ['identity', 'goals', 'preferences', 'training'],

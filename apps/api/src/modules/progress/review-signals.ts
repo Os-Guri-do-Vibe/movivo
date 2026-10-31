@@ -26,6 +26,9 @@ const PLATEAU_KG_PER_WEEK = 0.1;
 const WRONG_WAY_KG_PER_WEEK = 0.15;
 const RAPID_KG_PER_WEEK = 1;
 const MIN_WEIGHT_POINTS = 4;
+/** Escala do check-in em que a resposta já é sinal (1 = péssimo, 5 = ótimo). */
+const LOW_SCALE = 2;
+const HEAVY = 'Pesado demais';
 
 const rate = (done: number, planned: number): number | null =>
   planned > 0 ? done / planned : null;
@@ -142,6 +145,28 @@ export function computeSignals(
       signal('PAIN_REPORTED', 'Relatou dor em mais de um treino nas duas últimas semanas.'),
     );
   }
+
+  const checkIn = last.checkIn;
+  if (checkIn) {
+    const low = (
+      [
+        ['sono', checkIn.sleep],
+        ['energia', checkIn.energy],
+        ['corpo após a força', checkIn.soreness],
+      ] as const
+    ).filter(([, value]) => value !== null && value <= LOW_SCALE);
+    if (low.length > 0 || checkIn.intensityFeel === HEAVY) {
+      const parts = low.map(([label, value]) => `${label} ${value}/5`);
+      if (checkIn.intensityFeel === HEAVY) parts.push('treinos sentidos como pesados demais');
+      found.push(signal('RECOVERY_LOW', `No check-in da semana: ${parts.join(', ')}.`));
+    }
+    const barriers = [checkIn.barrier, checkIn.foodDifficulty].filter(Boolean);
+    if (barriers.length > 0) {
+      found.push(
+        signal('BARRIER_REPORTED', `No check-in, o aluno apontou: ${barriers.join('; ')}.`),
+      );
+    }
+  }
   return found;
 }
 
@@ -155,11 +180,17 @@ export function allowedActions(signals: readonly ReviewSignal[]): CoachingAction
   if (
     kinds.has('ADHERENCE_LOW') ||
     kinds.has('KEY_SESSIONS_SKIPPED') ||
-    kinds.has('NUTRITION_UNDERLOGGED')
+    kinds.has('NUTRITION_UNDERLOGGED') ||
+    kinds.has('BARRIER_REPORTED')
   ) {
     allowed.add('SEND_MESSAGE');
   }
-  if (kinds.has('ADHERENCE_LOW') || kinds.has('EFFORT_HIGH') || kinds.has('LOAD_SPIKE')) {
+  if (
+    kinds.has('ADHERENCE_LOW') ||
+    kinds.has('EFFORT_HIGH') ||
+    kinds.has('LOAD_SPIKE') ||
+    kinds.has('RECOVERY_LOW')
+  ) {
     allowed.add('ADJUST_WEEKLY_VOLUME');
   }
   // Mexer na energia exige peso confiável: sem adesão ao registro e ao treino, só perguntar.
@@ -169,6 +200,20 @@ export function allowedActions(signals: readonly ReviewSignal[]): CoachingAction
   }
   return [...allowed];
 }
+
+/** Sinais que pedem a leitura de cada analista do acompanhamento. */
+export const RECOVERY_SIGNALS: ReadonlySet<ReviewSignalKind> = new Set([
+  'EFFORT_HIGH',
+  'LOAD_SPIKE',
+  'RECOVERY_LOW',
+  'PAIN_REPORTED',
+]);
+export const HABITS_SIGNALS: ReadonlySet<ReviewSignalKind> = new Set([
+  'ADHERENCE_LOW',
+  'KEY_SESSIONS_SKIPPED',
+  'NUTRITION_UNDERLOGGED',
+  'BARRIER_REPORTED',
+]);
 
 /** Faixa permitida para o ajuste de energia (kcal/dia), na direção do objetivo. */
 export function energyDeltaBounds(goal: GoalDirection): { min: number; max: number } | null {

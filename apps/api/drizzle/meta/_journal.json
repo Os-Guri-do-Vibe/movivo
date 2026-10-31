@@ -638,6 +638,62 @@
       "when": 1793218144055,
       "tag": "0090_atendimento_automatico_e_origem_da_mensagem",
       "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1793246753341,
+      "tag": "0091_fotos_do_corpo_na_anamnese",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1793252013905,
+      "tag": "0092_remove_medida_de_pescoco",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1793474183069,
+      "tag": "0093_agent_profiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1793475980670,
+      "tag": "0094_agent_profiles_analistas",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1793482088629,
+      "tag": "0095_menstrual_cycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1793483702938,
+      "tag": "0096_medical_exams",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1793484605446,
+      "tag": "0097_strava",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1793489540939,
+      "tag": "0098_personas",
+      "breakpoints": true
     }
   ]
 }

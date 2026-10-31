@@ -13,7 +13,11 @@ import type { PlanSession, RunningSegment } from '@movivo/shared';
 import { defineAgentTask, type Validator, type Violation } from '../../../core/agents/agent-task';
 import { runningRules } from '../calc/params';
 import { blockOutputSchema, totalFrequency, type BlockOutput } from './blocks';
-import { outputLanguageViolations } from './common';
+import {
+  outputLanguageViolations,
+  PROFESSIONAL_INSTRUCTION_RULE,
+  professionalInstructionSchema,
+} from './common';
 
 export const runningInputSchema = z.object({
   level: z.enum(['BEGINNER', 'INTERMEDIATE', 'ADVANCED']),
@@ -34,6 +38,7 @@ export const runningInputSchema = z.object({
     })
     .nullable(),
   modalityPriority: z.number().int().min(1).max(3),
+  professionalInstruction: professionalInstructionSchema,
 });
 export type RunningInput = z.infer<typeof runningInputSchema>;
 
@@ -231,7 +236,8 @@ Regras de montagem:
 3. A maior parte do tempo é em intensidade leve (conforme a metodologia). Poucas sessões de qualidade (tempo, limiar, intervalado, subidas), com aquecimento e desaquecimento. Longão dentro do limite de tempo e de participação no volume.
 4. Cada trecho tem distância OU duração e UM alvo: zona, ritmo, frequência cardíaca ou PSE. Para quem não tem relógio ou referência, prefira PSE/zona. Ritmos só quando "recent5kSeconds" existir, sempre sustentáveis.
 5. Com prova ("race"), respeite a fase (BASE, BUILD, PEAK, TAPER) e coloque a sessão que simula o esforço da prova como KEY quando fizer sentido. Sem prova, foque em consistência.
-6. notes: como progredir de uma semana para a outra e sinais para reduzir (cansaço fora do normal, dor que muda a passada). summary: 2 a 3 frases claras, sem prometer tempo nem resultado.`,
+6. notes: como progredir de uma semana para a outra e sinais para reduzir (cansaço fora do normal, dor que muda a passada). summary: 2 a 3 frases claras, sem prometer tempo nem resultado.
+7. ${PROFESSIONAL_INSTRUCTION_RULE}`,
   tier: 'REASONING',
   methodology: ['RUNNING'],
   state: ['identity', 'goals', 'preferences', 'training'],

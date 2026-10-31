@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 
-import { QuestionStack } from './fields';
+import { FieldLabel, QuestionStack } from './fields';
 
 /**
  * Quadro comum das etapas 2–8: título, texto de apoio aqui em cima e a barra de ações embaixo
@@ -17,7 +17,6 @@ export function StepFrame({
   continueLabel = 'Continuar',
   onContinue,
   onBack,
-  onSkip,
   children,
 }: {
   title: string;
@@ -29,7 +28,6 @@ export function StepFrame({
   continueLabel?: string;
   onContinue: () => void;
   onBack?: () => void;
-  onSkip?: () => void;
   children: React.ReactNode;
 }) {
   const titleRef = React.useRef<HTMLHeadingElement>(null);
@@ -39,7 +37,7 @@ export function StepFrame({
 
   return (
     <QuestionStack>
-      <div>
+      <div className="text-center">
         <h1 ref={titleRef} tabIndex={-1} className="text-h2 font-bold outline-none">
           {title}
         </h1>
@@ -52,36 +50,25 @@ export function StepFrame({
       )}
       {children}
       <div className="sticky bottom-0 z-10 -mx-5 mt-1 flex flex-col gap-2 border-t border-border bg-white/95 px-5 py-4 backdrop-blur-sm sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-none">
-        <button
-          type="button"
-          disabled={!canContinue || saving}
-          onClick={onContinue}
-          className="h-[52px] w-full rounded-xl bg-primary px-6 text-body font-semibold text-primary-foreground transition-colors hover:bg-primary/85 disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground"
-        >
-          {saving ? 'Salvando…' : continueLabel}
-        </button>
-        <div className="flex justify-between gap-3">
-          {onBack ? (
+        <div className="flex flex-col-reverse gap-3 sm:flex-row">
+          {onBack && (
             <button
               type="button"
               onClick={onBack}
-              className="h-11 px-2 text-label font-semibold underline underline-offset-4"
+              disabled={saving}
+              className="h-[52px] shrink-0 rounded-xl border border-input bg-white px-6 text-body font-semibold text-petroleo transition-colors hover:bg-secondary disabled:opacity-50 sm:flex-1"
             >
               Voltar
             </button>
-          ) : (
-            <span />
           )}
-          {onSkip && (
-            <button
-              type="button"
-              onClick={onSkip}
-              disabled={saving}
-              className="h-11 px-2 text-label font-semibold text-muted-foreground underline underline-offset-4"
-            >
-              Pular esta etapa
-            </button>
-          )}
+          <button
+            type="button"
+            disabled={!canContinue || saving}
+            onClick={onContinue}
+            className="h-[52px] shrink-0 rounded-xl bg-primary px-6 text-body font-semibold text-primary-foreground transition-colors hover:bg-primary/85 disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground sm:flex-1"
+          >
+            {saving ? 'Salvando…' : continueLabel}
+          </button>
         </div>
       </div>
     </QuestionStack>
@@ -93,18 +80,21 @@ export function Labeled({
   id,
   label,
   help,
+  optional,
   children,
 }: {
   id: string;
   label: string;
   help?: string;
+  /** Resposta opcional; sem isto a pergunta é marcada como obrigatória. */
+  optional?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <label htmlFor={id} className="text-body font-semibold">
+      <FieldLabel htmlFor={id} optional={optional}>
         {label}
-      </label>
+      </FieldLabel>
       {help && <p className="text-label text-muted-foreground">{help}</p>}
       {children}
     </div>

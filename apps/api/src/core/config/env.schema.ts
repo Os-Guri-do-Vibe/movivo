@@ -335,6 +335,16 @@ export const envSchema = z
      * segredo conhecido publicamente. Via contrato `*_FILE` (docs/SECURITY.md §2).
      */
     EVOLUTION_WEBHOOK_TOKEN: z.string().min(43).optional(),
+    // ------------------------------------------ Strava (OAuth do atleta + webhook de
+    // atividades). Tudo opcional: sem as três, "conectar Strava" segue para a conversa normal.
+    STRAVA_CLIENT_ID: z
+      .string()
+      .regex(/^\d{1,12}$/)
+      .optional(),
+    /** Segredo do app no Strava (contrato `*_FILE`). */
+    STRAVA_CLIENT_SECRET: z.string().min(20).optional(),
+    /** Token que o Strava devolve na verificação da assinatura do webhook (`hub.verify_token`). */
+    STRAVA_WEBHOOK_VERIFY_TOKEN: z.string().min(32).optional(),
     // ------------------------------------------ Transcrição de áudio (IA entende
     // voz — ADR-009, revisão 2026-09-14, decisão do fundador). CASCATA: OpenAI é a perna
     // PRIMÁRIA de produção (`gpt-4o-mini-transcribe`, mesmo fornecedor já em diligência

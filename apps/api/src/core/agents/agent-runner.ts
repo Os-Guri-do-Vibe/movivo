@@ -9,13 +9,20 @@
  * `maxCorrectionRounds`. A saída aprovada é sempre uma PROPOSTA: quem executa é o motor de
  * políticas, fora daqui.
  */
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { z } from 'zod';
+
+import type { PersonaKey } from '@movivo/shared';
 
 import type { GatewayMessage, MessagePart, TierRoute } from '../ai/ai.types';
 import { ModelGateway } from '../ai/model-gateway';
 import type { ScrubUser } from '../ai/pii-scrubber';
 import type { AgentContextSources, MethodologyContext } from './agent-context';
+import {
+  PublishedAgentProfiles,
+  promptVersionWith,
+  type AgentProfileText,
+} from './agent-profile.reader';
 import type { AgentTask, Violation } from './agent-task';
 import { CONSTITUTION } from './constitution';
 
@@ -26,8 +33,12 @@ export interface AgentRunOptions {
   sources: AgentContextSources;
   /** Só avaliação: força o modelo (comparação antes de trocar a configuração do tier). */
   routeOverride?: TierRoute;
-  /** Imagens da tarefa de visão (base64): vão junto do texto, nunca dentro do JSON de dados. */
-  images?: readonly Extract<MessagePart, { type: 'image' }>[];
+  /** Imagens ou PDFs da tarefa de visão (base64): vão junto do texto, nunca dentro do JSON de dados. */
+  images?: readonly Extract<MessagePart, { type: 'image' | 'document' }>[];
+  /** Só avaliação: a ficha do agente em teste (rascunho) no lugar da publicada. */
+  profileOverride?: AgentProfileText;
+  /** Quem fala com o aluno: a ficha da persona (pelo sexo do aluno) entra depois da do agente. */
+  persona?: PersonaKey;
 }
 
 export interface AgentRunResult<O> {
@@ -38,6 +49,8 @@ export interface AgentRunResult<O> {
   stateVersion: number;
   methodologyVersions: MethodologyContext['versions'];
   costBrl: number;
+  /** Código da tarefa + versão da ficha do agente usada. */
+  promptVersion: string;
 }
 
 /** A tarefa não produziu saída válida dentro das rodadas de correção. */
@@ -69,10 +82,17 @@ function zodViolations(error: z.ZodError): Violation[] {
   }));
 }
 
-export function composeSystem(task: AgentTask<unknown, unknown>, methodology: string): string {
+export function composeSystem(
+  task: AgentTask<unknown, unknown>,
+  methodology: string,
+  profile: string | null = null,
+  persona: string | null = null,
+): string {
   const schema = JSON.stringify(z.toJSONSchema(task.output, { unrepresentable: 'any' }));
   return [
     CONSTITUTION,
+    profile ? `# Ficha do agente\n${profile}` : '',
+    persona ? `# Persona (quem fala com o aluno)\n${persona}` : '',
     `# Seu papel\n${task.role}`,
     `# Tarefa\n${task.instructions}`,
     methodology ? `# Metodologia MOVIVO (publicada)\n${methodology}` : '',
@@ -89,7 +109,10 @@ function correctionMessage(violations: Violation[]): string {
 
 @Injectable()
 export class AgentRunner {
-  constructor(private readonly gateway: ModelGateway) {}
+  constructor(
+    private readonly gateway: ModelGateway,
+    @Optional() private readonly profiles: PublishedAgentProfiles | null = null,
+  ) {}
 
   async run<I, O>(
     task: AgentTask<I, O>,
@@ -97,11 +120,19 @@ export class AgentRunner {
     options: AgentRunOptions,
   ): Promise<AgentRunResult<O>> {
     const input = task.input.parse(rawInput);
-    const [methodology, state] = await Promise.all([
+    const [methodology, state, profile, persona] = await Promise.all([
       options.sources.methodology(task.methodology),
       options.sources.state(task.state),
+      options.profileOverride ?? this.profiles?.forTask(task.id) ?? null,
+      options.persona ? (this.profiles?.persona(options.persona) ?? null) : null,
     ]);
-    const system = composeSystem(task as AgentTask<unknown, unknown>, methodology.text);
+    const promptVersion = promptVersionWith(task.promptVersion, profile, persona);
+    const system = composeSystem(
+      task as AgentTask<unknown, unknown>,
+      methodology.text,
+      profile?.content ?? null,
+      persona?.content ?? null,
+    );
     const dataText = `<dados>\n${JSON.stringify({ estadoDoAluno: state.slices, entrada: input })}\n</dados>`;
     const messages: GatewayMessage[] = [
       {
@@ -119,7 +150,7 @@ export class AgentRunner {
       const result = await this.gateway.complete({
         tier: task.tier,
         taskId: task.id,
-        promptVersion: task.promptVersion,
+        promptVersion,
         userId: options.userId,
         scrubUser: options.scrubUser,
         system,
@@ -145,6 +176,7 @@ export class AgentRunner {
           stateVersion: state.version,
           methodologyVersions: methodology.versions,
           costBrl,
+          promptVersion,
         };
       }
       messages.push({ role: 'assistant', content: result.text });

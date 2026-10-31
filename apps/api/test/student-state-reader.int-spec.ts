@@ -11,7 +11,7 @@ import { resolve } from 'node:path';
 
 import { type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { inArray } from 'drizzle-orm';
+import { inArray, sql } from 'drizzle-orm';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -32,6 +32,7 @@ import {
   users,
 } from '../src/core/database/schema';
 import { TenantDatabase } from '../src/core/database/tenant-database.service';
+import { MenstrualCycleService } from '../src/modules/student-state/menstrual-cycle.service';
 import { StudentStateModule } from '../src/modules/student-state/student-state.module';
 import { StudentStateReader } from '../src/modules/student-state/student-state.reader';
 
@@ -99,7 +100,7 @@ async function createStudent(name: string): Promise<string> {
           occupationRhythm: 'REGULAR',
           cookingCapacity: 'BASIC',
           mealsOutsideHomePerWeek: 5,
-          foodBudget: 'MODERATE',
+          foodBudgetMonthlyBrl: 1200,
         },
       },
     });
@@ -210,5 +211,52 @@ describe('StudentStateReader', () => {
       healthConsent: true,
       healthRecords: [{ kind: 'INJURY', region: 'joelho', movementTags: ['KNEE_DEEP_FLEXION'] }],
     });
+  });
+
+  it('ciclo: autorização própria pelo WhatsApp, registro cifrado e revogação que apaga', async () => {
+    const userId = await createStudent('Beltrana Teste');
+    const cycle = app.get(MenstrualCycleService);
+    await admin`
+      INSERT INTO consents (user_id, consent_type, version, accepted)
+      VALUES (${userId}::uuid, 'HEALTH_DATA', ${CONSENT_TEXTS.HEALTH_DATA.version}, true)`;
+    const records = async () =>
+      (
+        await admin`SELECT count(*)::int AS n FROM student_health_records
+          WHERE user_id = ${userId}::uuid AND kind = 'MENSTRUAL_CYCLE'`
+      )[0]?.n as number;
+
+    // Sem autorização: pede o aceite e guarda só a data pendente (nada no banco).
+    expect(await cycle.handleInbound(userId, 'menstruei dia 1', 'k1', NOW)).toBe(true);
+    expect(await records()).toBe(0);
+    expect((await reader.read(userId, ['cycle'], NOW)).slices.cycle).toBeNull();
+
+    // Só o próprio titular grava o aceite.
+    await expect(
+      db.runAsSystem((tx) =>
+        tx.execute(
+          sql`SELECT public.record_user_consent(${userId}::uuid, 'MENSTRUAL_CYCLE'::consent_type, ${CONSENT_TEXTS.MENSTRUAL_CYCLE.version}, 'x')`,
+        ),
+      ),
+    ).rejects.toThrow();
+
+    expect(await cycle.handleInbound(userId, 'Autorizo ciclo', 'k2', NOW)).toBe(true);
+    expect(await cycle.handleInbound(userId, 'AUTORIZO CICLO', 'k3', NOW)).toBe(true);
+    expect(await records()).toBe(1);
+    const read = await reader.read(userId, ['cycle', 'safety'], NOW);
+    expect(read.slices.cycle).toEqual({
+      lastStart: '2026-11-01',
+      cycleDay: 4,
+      typicalLength: 28,
+      phase: 'MENSTRUAL',
+    });
+    expect(JSON.stringify(read.slices.safety)).not.toContain('MENSTRUAL_CYCLE');
+
+    // Mesma menstruação não duplica.
+    expect(await cycle.handleInbound(userId, 'menstruei ontem', 'k4', NOW)).toBe(true);
+    expect(await records()).toBe(1);
+
+    expect(await cycle.handleInbound(userId, 'REVOGAR CICLO', 'k5', NOW)).toBe(true);
+    expect(await records()).toBe(0);
+    expect((await reader.read(userId, ['cycle'], NOW)).slices.cycle).toBeNull();
   });
 });

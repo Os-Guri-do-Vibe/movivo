@@ -65,7 +65,7 @@ async function fillStep1(page: Page) {
   await page.getByLabel(/inteligência artificial/).check();
 
   await page.getByRole('button', { name: 'Continuar' }).click();
-  await expect(page.getByRole('heading', { name: 'Qual é o seu objetivo?' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Seus objetivos' })).toBeVisible();
 }
 
 test('retomada: F5 volta na etapa salva, não do zero, e o token não vai para a URL', async ({
@@ -74,7 +74,7 @@ test('retomada: F5 volta na etapa salva, não do zero, e o token não vai para a
   await fillStep1(page);
 
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Qual é o seu objetivo?' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Seus objetivos' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Vamos começar por você' })).toHaveCount(0);
   await expect(page).toHaveURL(/\/anamnese$/);
   expect(page.url()).not.toContain('e2e-onboarding-token');

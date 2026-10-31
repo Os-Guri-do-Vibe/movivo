@@ -17,12 +17,14 @@ import {
   canResolveSafety,
   domainsForCouncil,
   type Council,
+  type EditProtocolRequest,
   type ExceptionDomain,
   type SafetyScope,
   type SafetySignalKind,
 } from '@movivo/shared';
 
 import type { StateSlice } from '../../core/agents/agent-task';
+import { HealthCipherService } from '../../core/database/health-cipher.service';
 import {
   coachingDecisions,
   coachingProposals,
@@ -32,7 +34,10 @@ import {
   staff,
   users,
 } from '../../core/database/schema';
-import { TenantDatabase } from '../../core/database/tenant-database.service';
+import {
+  TenantDatabase,
+  type TenantTransaction,
+} from '../../core/database/tenant-database.service';
 import { AuditService } from '../admin/audit.service';
 import type { AuthenticatedUser } from '../auth/jwt.strategy';
 import { DecisionPipeline } from '../coaching/decision/decision-pipeline.service';
@@ -42,7 +47,9 @@ import { OutboxRelay } from '../domain-events/outbox-relay';
 import { QUEUE } from '../jobs/jobs.config';
 import { QueueManager } from '../jobs/queue-manager.service';
 import type { WhatsappOutboundJob } from '../jobs/whatsapp-outbound.contract';
+import { examFileOf, examViewOf } from '../medical/medical-exam.service';
 import { todayIn } from '../planning/plan-generation.service';
+import { isPublishPlanAction, ProtocolReviewService } from '../planning/protocol-review.service';
 import { StudentStateReader } from '../student-state/student-state.reader';
 import { ProposalRunner } from './proposal-runner.service';
 
@@ -78,6 +85,8 @@ export class ExceptionsService {
     private readonly audit: AuditService,
     private readonly queues: QueueManager,
     private readonly store: ConversationStore,
+    private readonly protocols: ProtocolReviewService,
+    private readonly cipher: HealthCipherService,
   ) {}
 
   async actorOf(user: AuthenticatedUser): Promise<Actor> {
@@ -177,7 +186,9 @@ export class ExceptionsService {
     const proposalId = row.subject.proposalId;
     const decisionId = row.subject.decisionId;
     const safetyEventId = row.subject.safetyEventId;
-    const { proposal, decision, safety, student } = await this.db.runAsSystem(async (tx) => ({
+    const examId = row.subject.examId;
+    const { proposal, decision, safety, student, exam } = await this.db.runAsSystem(async (tx) => ({
+      exam: examId ? await examViewOf(tx, this.cipher, examId) : null,
       proposal: proposalId
         ? ((
             await tx.select().from(coachingProposals).where(eq(coachingProposals.id, proposalId))
@@ -212,7 +223,28 @@ export class ExceptionsService {
       decision,
       safety: safety ? { ...safety, canResolve: canResolveSafetyEvent } : null,
       state: stateRead.slices,
+      exam,
     };
+  }
+
+  /** Arquivo original do exame do caso (só quem vê o caso; o acesso fica na auditoria). */
+  async examFile(user: AuthenticatedUser, id: string) {
+    const { actor, row } = await this.load(user, id);
+    const examId = row.subject.examId;
+    if (!examId) throw new NotFoundException('Este caso não tem exame.');
+    const file = await this.db.runAsSystem(async (tx) => {
+      await this.audit.append(tx, {
+        actorId: actor.staffId,
+        userId: row.userId,
+        action: 'exception.exam_file_viewed',
+        entityType: 'exception_case',
+        entityId: id,
+        changes: { examId },
+      });
+      return examFileOf(tx, this.cipher, examId);
+    });
+    if (!file) throw new NotFoundException('Exame não encontrado.');
+    return file;
   }
 
   async claim(user: AuthenticatedUser, id: string) {
@@ -315,6 +347,7 @@ export class ExceptionsService {
           resolution: { outcome: 'APPROVED', note: note ?? null, decisionId: decision.id },
         })
         .where(eq(exceptionCases.id, id));
+      await this.recordResolved(tx, row.userId, id, row.kind, 'APPROVED');
       await this.audit.append(tx, {
         actorId: actor.staffId,
         userId: row.userId,
@@ -358,6 +391,7 @@ export class ExceptionsService {
           resolution: { outcome: 'REJECTED', note },
         })
         .where(eq(exceptionCases.id, id));
+      await this.recordResolved(tx, row.userId, id, row.kind, 'REJECTED');
       await this.audit.append(tx, {
         actorId: actor.staffId,
         userId: row.userId,
@@ -367,6 +401,7 @@ export class ExceptionsService {
         changes: { proposalId },
       });
     });
+    await this.outbox.flushSoon();
     return { id, status: 'RESOLVED' as const };
   }
 
@@ -428,6 +463,7 @@ export class ExceptionsService {
           resolution: { outcome: 'RESOLVED', note },
         })
         .where(eq(exceptionCases.id, id));
+      await this.recordResolved(tx, row.userId, id, row.kind, 'RESOLVED');
       await this.audit.append(tx, {
         actorId: actor.staffId,
         userId: row.userId,
@@ -437,7 +473,125 @@ export class ExceptionsService {
         changes: { kind: row.kind, safetyEventId: safetyEventId ?? null },
       });
     });
+    await this.outbox.flushSoon();
     return { id, status: 'RESOLVED' as const };
+  }
+
+  /** Protocolo (plano de treino ou alimentar) que o caso pede para aprovar, com a prévia da semana. */
+  async protocol(user: AuthenticatedUser, id: string, now: Date = new Date()) {
+    const { actor, row } = await this.load(user, id);
+    const { action, pending } = await this.publishProposalOf(row);
+    const canEdit =
+      pending && row.status !== 'RESOLVED' && this.canAct(actor, row.domain as ExceptionDomain);
+    return this.protocols.view(row.userId, action, canEdit, now);
+  }
+
+  /** Edição manual do rascunho pelo profissional do domínio; a aprovação continua separada. */
+  async editProtocol(
+    user: AuthenticatedUser,
+    id: string,
+    request: EditProtocolRequest,
+    now: Date = new Date(),
+  ) {
+    const { actor, row } = await this.load(user, id);
+    this.assertCanAct(actor, row.domain as ExceptionDomain);
+    if (row.status === 'RESOLVED') throw new ConflictException('Caso já resolvido.');
+    const { action, pending } = await this.publishProposalOf(row);
+    if (!pending) throw new ConflictException('A proposta não está mais pendente.');
+    const edited = await this.protocols.validate(row.userId, action, request, now);
+    await this.db.runAsSystem(async (tx) => {
+      const [locked] = await tx
+        .select({ status: exceptionCases.status })
+        .from(exceptionCases)
+        .where(eq(exceptionCases.id, id))
+        .for('update');
+      if (!locked || locked.status === 'RESOLVED')
+        throw new ConflictException('Caso já resolvido.');
+      await this.protocols.replaceDraft(tx, row.userId, action, edited);
+      await tx
+        .update(exceptionCases)
+        .set({ status: 'IN_REVIEW', assignedStaffId: actor.staffId })
+        .where(eq(exceptionCases.id, id));
+      await this.audit.append(tx, {
+        actorId: actor.staffId,
+        userId: row.userId,
+        action: 'exception.protocol_edit',
+        entityType: 'exception_case',
+        entityId: id,
+        changes: { planId: action.planId, kind: edited.kind },
+      });
+    });
+    return this.protocols.view(row.userId, action, true, now);
+  }
+
+  /**
+   * Pede aos agentes um novo protocolo com a orientação do profissional: o caso fecha, o rascunho
+   * é descartado pelo planejamento e o novo volta para a fila pela mesma política.
+   */
+  async requestAdjustment(
+    user: AuthenticatedUser,
+    id: string,
+    instruction: string,
+    now: Date = new Date(),
+  ) {
+    const { actor, row } = await this.load(user, id);
+    this.assertCanAct(actor, row.domain as ExceptionDomain);
+    const { action, pending } = await this.publishProposalOf(row);
+    if (!pending) throw new ConflictException('A proposta não está mais pendente.');
+    await this.db.runAsSystem(async (tx) => {
+      const [locked] = await tx
+        .select({ status: exceptionCases.status })
+        .from(exceptionCases)
+        .where(eq(exceptionCases.id, id))
+        .for('update');
+      if (!locked || locked.status === 'RESOLVED')
+        throw new ConflictException('Caso já resolvido.');
+      await tx
+        .update(coachingProposals)
+        .set({ status: 'REJECTED' })
+        .where(
+          and(
+            eq(coachingProposals.id, row.subject.proposalId as string),
+            eq(coachingProposals.status, 'PENDING'),
+          ),
+        );
+      await tx
+        .update(exceptionCases)
+        .set({
+          status: 'RESOLVED',
+          resolvedAt: now,
+          assignedStaffId: actor.staffId,
+          resolution: { outcome: 'ADJUSTMENT_REQUESTED', note: instruction },
+        })
+        .where(eq(exceptionCases.id, id));
+      await this.recordResolved(tx, row.userId, id, row.kind, 'ADJUSTMENT_REQUESTED');
+      await this.audit.append(tx, {
+        actorId: actor.staffId,
+        userId: row.userId,
+        action: 'exception.protocol_adjust',
+        entityType: 'exception_case',
+        entityId: id,
+        changes: { planId: action.planId, proposalId: row.subject.proposalId ?? null },
+      });
+    });
+    await this.outbox.flushSoon();
+    return { id, status: 'RESOLVED' as const, outcome: 'ADJUSTMENT_REQUESTED' as const };
+  }
+
+  private async publishProposalOf(row: { subject: Record<string, string> }) {
+    const proposalId = row.subject.proposalId;
+    const [proposal] = proposalId
+      ? await this.db.runAsSystem((tx) =>
+          tx
+            .select({ action: coachingProposals.action, status: coachingProposals.status })
+            .from(coachingProposals)
+            .where(eq(coachingProposals.id, proposalId)),
+        )
+      : [];
+    if (!proposal || !isPublishPlanAction(proposal.action)) {
+      throw new NotFoundException('Este caso não tem protocolo para revisar.');
+    }
+    return { action: proposal.action, pending: proposal.status === 'PENDING' };
   }
 
   /** Trilha de decisões de um aluno (proposta, veredito, quem decidiu, execução). */
@@ -472,6 +626,20 @@ export class ExceptionsService {
     if (!this.canAct(actor, domain)) {
       throw new ForbiddenException('Este caso é de outro domínio profissional.');
     }
+  }
+
+  private recordResolved(
+    tx: TenantTransaction,
+    userId: string,
+    exceptionCaseId: string,
+    kind: string,
+    outcome: 'APPROVED' | 'REJECTED' | 'RESOLVED' | 'ADJUSTMENT_REQUESTED',
+  ) {
+    return this.events.record(tx, {
+      userId,
+      type: 'ExceptionResolved',
+      payload: { exceptionCaseId, kind, outcome },
+    });
   }
 
   private async sendToStudent(userId: string, text: string, exceptionId: string): Promise<void> {

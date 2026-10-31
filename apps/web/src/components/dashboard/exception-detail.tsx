@@ -19,7 +19,9 @@ import {
   describeAction,
   DOMAIN_LABEL,
   goalLabel,
+  isProtocolAction,
   KIND_LABEL,
+  OUTCOME_LABEL,
   PRIORITY_LABEL,
   UNCERTAINTY_LABEL,
 } from '@/lib/exception-copy';
@@ -27,6 +29,8 @@ import {
 import { ConfirmAction } from './confirm-action';
 import { StatusBadge } from './control-center-table';
 import { ResourceState, useControlCenterResource } from './control-center-ui';
+import { ExamReview } from './exam-review';
+import { ProtocolReview } from './protocol-review';
 
 const dateTime = new Intl.DateTimeFormat('pt-BR', {
   dateStyle: 'short',
@@ -144,6 +148,8 @@ export function ExceptionDetail({ id }: { id: string }) {
         </section>
       ) : null}
 
+      {data.exam ? <ExamReview caseId={item.id} exam={data.exam} /> : null}
+
       {proposal ? (
         <section
           className="rounded-xl border border-border bg-card p-4 sm:p-5"
@@ -178,6 +184,16 @@ export function ExceptionDetail({ id }: { id: string }) {
         </section>
       ) : null}
 
+      {proposal && isProtocolAction(proposal.action) ? (
+        <ProtocolReview
+          caseId={item.id}
+          canAct={canAct && proposal.status === 'PENDING'}
+          onChanged={async () => {
+            await Promise.all([refresh(), decisions.refresh()]);
+          }}
+        />
+      ) : null}
+
       <section
         className="rounded-xl border border-border bg-card p-4 sm:p-5"
         aria-label="Estado do aluno"
@@ -206,7 +222,7 @@ export function ExceptionDetail({ id }: { id: string }) {
         >
           <h2 className="text-h3 font-semibold">Como foi resolvido</h2>
           <p className="mt-1 text-label">
-            {String(item.resolution.outcome)}
+            {OUTCOME_LABEL[String(item.resolution.outcome)] ?? String(item.resolution.outcome)}
             {item.resolution.note ? ` — ${String(item.resolution.note)}` : ''}
           </p>
         </section>

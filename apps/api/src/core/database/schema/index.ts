@@ -11,6 +11,7 @@ export * from './enums';
 
 // As 9 tabelas-base da Sprint 0.
 export * from './users';
+export * from './anamnesis-session-photos';
 export * from './anamnesis-sessions';
 export * from './consents';
 export * from './conversations';
@@ -90,3 +91,6 @@ export * from './domain-events';
 export * from './model-runs';
 export * from './eval-runs';
 export * from './methodology-documents';
+export * from './agent-profiles';
+export * from './medical';
+export * from './wearables';

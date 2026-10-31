@@ -215,6 +215,16 @@ createServer(async (request, response) => {
         phoneVerified: session.phoneVerified,
         primaryGoal: null,
         consentsPending: false,
+        bodyPhotosConsent: {
+          type: 'BODY_PHOTOS',
+          version: 'body-photos-e2e-v1',
+          title: 'Sobre as fotos do seu corpo',
+          body: [],
+          label: 'Autorizo as fotos do meu corpo.',
+          required: false,
+        },
+        bodyPhotosConsentAccepted: false,
+        photos: [],
         blocks: {},
         consents: [
           {
@@ -271,17 +281,17 @@ createServer(async (request, response) => {
     if (rest === '/consents' && request.method === 'POST') {
       return json(response, 200, {});
     }
-    const stepMatch = /^\/step\/([1-8])$/.exec(rest ?? '');
+    const stepMatch = /^\/step\/([1-9])$/.exec(rest ?? '');
     if (stepMatch && request.method === 'PATCH') {
       const body = await readBody(request);
       // O gate PAR-Q é do SERVIDOR: o mock guarda as respostas e decide o `outcome` no
       // submit, como a API real. Sem isso o E2E não conseguiria provar que a variante da
       // tela de sucesso segue o servidor, e não um cálculo do cliente (TASK-6.12.1).
-      if (stepMatch[1] === '6')
+      if (stepMatch[1] === '9')
         session.parqBlocked = (body.parq?.answers ?? []).some((a) => a.answer === true);
       const done = Number(stepMatch[1]);
       session.completedSteps = [...new Set([...session.completedSteps, done])].sort();
-      session.currentStep = Math.min(done + 1, 8);
+      session.currentStep = Math.min(done + 1, 9);
       return json(response, 200, { currentStep: session.currentStep });
     }
     if (rest === '/submit' && request.method === 'POST') {

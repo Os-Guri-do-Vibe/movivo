@@ -4,11 +4,18 @@
  * cliente, e refazê-los atualiza a triagem). Transitório: sai junto com as colunas antigas da
  * sessão, depois da campanha de corte.
  */
+import { z } from 'zod';
+
 import {
   anamnesisStructuredSchema,
+  coachedModalitySchema,
+  defaultVenueOf,
   onboardingStep1Schema,
+  trainingVenueSchema,
+  weekdaySchema,
   type AnamnesisStructured,
   type DeclaredGoalKind,
+  type MuscleEmphasisRegion,
   type PrimaryGoal,
   type SessionDuration,
 } from '@movivo/shared';
@@ -20,8 +27,8 @@ const GOAL: Readonly<Record<PrimaryGoal, DeclaredGoalKind>> = {
   CONDITIONING: 'CONDITIONING',
   HEALTH_ENERGY: 'HEALTH',
   BUILD_ROUTINE: 'START_TRAINING',
-  RETURN_TO_TRAINING: 'START_TRAINING',
-  SPORT_EVENT: 'SPORT_PERFORMANCE',
+  RETURN_TO_TRAINING: 'RETURN_TO_TRAINING',
+  SPORT_EVENT: 'BODYBUILDING_COMPETITION',
   OTHER: 'HEALTH',
 };
 
@@ -41,24 +48,33 @@ const SLOT = {
   VARIES: 'ANY',
 } as const;
 
+/** Ênfase da anamnese antiga → regiões atuais (bíceps e tríceps viraram "Braço"). */
+function muscleEmphasisFrom(s: AnamnesisStructured): MuscleEmphasisRegion[] {
+  const regions = s.emphasis.flatMap((region): MuscleEmphasisRegion[] => {
+    if (region === 'FULL_BODY') return [];
+    return region === 'BICEPS' || region === 'TRICEPS' ? ['ARMS'] : [region];
+  });
+  return [...new Set(regions)].slice(0, 2);
+}
+
 function modalitiesFrom(s: AnamnesisStructured) {
   return {
     modalities: [
       {
         modality: 'STRENGTH',
         level: s.trainingStatus === 'NEVER' ? 'NONE' : s.experience,
-        monthsPracticing: 0,
         sessionsPerWeek: s.daysPerWeek,
         wantsToStart: s.trainingStatus === 'NEVER',
+        venue: s.location,
       },
     ],
     externalSports: [],
-    venues: [s.location],
   };
 }
 
 function routineFrom(s: AnamnesisStructured) {
-  const days = s.preferredDays.length > 0 ? s.preferredDays : (['MON', 'WED', 'FRI'] as const);
+  const days =
+    s.preferredDays.length > 0 ? [...new Set(s.preferredDays)] : (['MON', 'WED', 'FRI'] as const);
   return {
     windows: days.map((weekday) => ({
       weekday,
@@ -66,7 +82,7 @@ function routineFrom(s: AnamnesisStructured) {
       maxMinutes: MINUTES[s.sessionDuration],
     })),
     variesWeekly: s.preferredPeriod === 'VARIES',
-    maxSessionsPerWeek: s.daysPerWeek,
+    maxSessionsPerWeek: Math.min(s.daysPerWeek, days.length, 7),
   };
 }
 
@@ -92,12 +108,46 @@ export function legacyPrefill(dataBlock1: unknown, dataBlock3: unknown): Record<
     blocks.routine = routineFrom(s);
     blocks.preferences = {
       preferences: {
-        split: 'NO_PREFERENCE',
-        effort: 'UNSURE',
         priority: 'BALANCED',
-        preferredSessionMinutes: MINUTES[s.sessionDuration],
+        muscleEmphasis: muscleEmphasisFrom(s),
       },
     };
   }
   return blocks;
+}
+
+// --- Etapas salvas antes do local por modalidade e do teto por dias ------------------------
+
+const savedModalitiesSchema = z.object({
+  modalities: z.array(
+    z.looseObject({ modality: coachedModalitySchema, venue: trainingVenueSchema.optional() }),
+  ),
+  venues: z.array(trainingVenueSchema),
+});
+
+/** Etapa 3 antiga (lista global `venues`): cada modalidade herda o local mais completo da lista. */
+export function withModalityVenues(block: Record<string, unknown>): Record<string, unknown> {
+  const saved = savedModalitiesSchema.safeParse(block);
+  if (!saved.success) return block;
+  const { modalities, venues } = saved.data;
+  return {
+    ...block,
+    modalities: modalities.map((m) => ({
+      ...m,
+      venue: m.venue ?? defaultVenueOf(m.modality, venues),
+    })),
+  };
+}
+
+const savedRoutineSchema = z.object({
+  windows: z.array(z.object({ weekday: weekdaySchema })),
+  maxSessionsPerWeek: z.number(),
+});
+
+/** Etapa 4 antiga: os treinos por semana passam a caber nos dias marcados. */
+export function withSessionsWithinDays(block: Record<string, unknown>): Record<string, unknown> {
+  const saved = savedRoutineSchema.safeParse(block);
+  if (!saved.success) return block;
+  const days = new Set(saved.data.windows.map((w) => w.weekday)).size;
+  return { ...block, maxSessionsPerWeek: Math.min(saved.data.maxSessionsPerWeek, days, 7) };
 }

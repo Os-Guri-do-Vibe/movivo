@@ -23,6 +23,16 @@ const SESSION: SessionView = {
   primaryGoal: null,
   consents: [],
   consentsPending: false,
+  bodyPhotosConsent: {
+    type: 'BODY_PHOTOS',
+    version: 'consent-body-photos-2026-10-v1',
+    title: 'Sobre as fotos do seu corpo',
+    body: [],
+    label: 'Autorizo as fotos.',
+    required: false,
+  },
+  bodyPhotosConsentAccepted: false,
+  photos: [],
   blocks: {},
   outcome: null,
   expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
@@ -38,7 +48,7 @@ describe('ComplementaryEntry', () => {
     resumeComplementary.mockResolvedValue({ ref: 'ref', session: SESSION });
     window.history.replaceState(null, '', `/anamnese/complementar#token=${TOKEN}`);
     render(<ComplementaryEntry />);
-    expect(await screen.findByText('Qual é o seu objetivo?')).toBeInTheDocument();
+    expect(await screen.findByText('Seus objetivos')).toBeInTheDocument();
     expect(resumeComplementary).toHaveBeenCalledWith(TOKEN);
     expect(window.location.hash).toBe('');
   });
