@@ -139,7 +139,8 @@ export class OpenAiVendor extends BaseVendor {
       {
         model: request.model,
         max_completion_tokens: request.maxOutputTokens,
-        temperature: request.temperature,
+        // GPT-6.1 Sol usa raciocínio; a OpenAI rejeita temperature quando ele está ativo.
+        ...(!/^gpt-6\.1-sol$/i.test(request.model) ? { temperature: request.temperature } : {}),
         ...(request.json ? { response_format: { type: 'json_object' } } : {}),
         messages: chatCompletionsMessages(request.system, request.messages),
       },
@@ -222,7 +223,9 @@ export class AnthropicVendor extends BaseVendor {
       {
         model: request.model,
         max_tokens: request.maxOutputTokens,
-        temperature: request.temperature,
+        ...(!/^claude-sonnet-5-5$/i.test(request.model)
+          ? { temperature: request.temperature }
+          : {}),
         system: [{ type: 'text', text: request.system, cache_control: { type: 'ephemeral' } }],
         messages: request.messages.map((message) => ({
           role: message.role,

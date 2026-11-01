@@ -38,31 +38,47 @@ describe('PDF no corpo do pedido', () => {
     base64: 'JVBERi0=',
     fileName: 'exame.pdf',
   };
-  const request = {
-    model: 'm',
+  const request = (model: string) => ({
+    model,
     system: 's',
     messages: [{ role: 'user' as const, content: [{ type: 'text' as const, text: 't' }, pdf] }],
     maxOutputTokens: 10,
     temperature: 0,
     json: true,
-  };
+  });
 
-  async function bodyOf(vendor: OpenAiVendor | AnthropicVendor): Promise<string> {
+  async function bodyOf(
+    vendor: OpenAiVendor | AnthropicVendor,
+    model: string,
+  ): Promise<Record<string, unknown>> {
     const fetchMock = vi.fn(
       async () => new Response(JSON.stringify({ choices: [], content: [] }), { status: 200 }),
     );
     vi.stubGlobal('fetch', fetchMock);
-    await vendor.complete(request, new AbortController().signal);
+    await vendor.complete(request(model), new AbortController().signal);
+    const body = JSON.parse(
+      String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body),
+    ) as { messages?: unknown[]; temperature?: number };
     vi.unstubAllGlobals();
-    return String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body);
+    return body;
   }
 
-  it('OpenAI recebe parte file com data URL; Anthropic recebe bloco document', async () => {
-    expect(await bodyOf(new OpenAiVendor('k', true))).toContain(
+  it('envia PDF nos formatos de cada fornecedor e omite temperature nos modelos de raciocínio', async () => {
+    const openAi = await bodyOf(new OpenAiVendor('k', true), 'gpt-6.1-sol');
+    expect(openAi.temperature).toBeUndefined();
+    expect(JSON.stringify(openAi.messages)).toContain(
       '"type":"file","file":{"filename":"exame.pdf","file_data":"data:application/pdf;base64,JVBERi0="}',
     );
-    expect(await bodyOf(new AnthropicVendor('k', true))).toContain(
+
+    const anthropic = await bodyOf(new AnthropicVendor('k', true), 'claude-sonnet-5-5');
+    expect(anthropic.temperature).toBeUndefined();
+    expect(JSON.stringify(anthropic.messages)).toContain(
       '"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0="}',
     );
+  });
+
+  it('mantém temperature nos modelos que aceitam esse parâmetro', async () => {
+    expect((await bodyOf(new OpenAiVendor('k', true), 'gpt-4.1')).temperature).toBe(0);
+    expect((await bodyOf(new AnthropicVendor('k', true), 'claude-sonnet-4-5')).temperature).toBe(0);
   });
 });

@@ -142,7 +142,8 @@ Regras:
 3. adjustments: só quando há problema concreto. No máximo um por parte (TRAINING ou NUTRITION), com uma instrução curta, específica e acionável para o especialista refazer aquela parte. Nada de pedir ajuste por gosto ou estilo.
 4. verdict: ADJUST se houver ajuste; COHERENT se não houver.
 5. professionalNote: 1 a 3 frases para o profissional que vai revisar, com o que merece atenção.
-6. Sem diagnosticar, sem prometer resultado; você não prescreve, aponta.`,
+6. Sem diagnosticar, sem prometer resultado; você não prescreve, aponta.
+7. COHERENT é o padrão quando não há conflito concreto nos dados fornecidos. Uma alternativa de otimização, preferência ou estilo não é motivo para ADJUST. Só peça ajuste se apontar o campo específico que viola uma restrição do aluno, a hierarquia ou a própria coerência entre estratégia, treino e alimentação.`,
   tier: 'REASONING',
   methodology: ['HYBRID', 'NUTRITION'],
   state: ['identity', 'goals', 'restrictions', 'preferences', 'body', 'safety'],
