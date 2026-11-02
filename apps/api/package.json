@@ -56,7 +56,7 @@
     "read-excel-file": "^9.3.12",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
-    "unpdf": "^1.9.1",
+    "unpdf": "^2.1.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
